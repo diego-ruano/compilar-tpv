@@ -1443,6 +1443,74 @@ tras un fallo parcial).
 
 ---
 
+## 10-bis. Interruptores remotos de emergencia (PROD-06)
+
+Si una tarea automática se pone a hacer daño en los equipos de los clientes —la remisión manda XML
+roto, la reparación por estado pisa filas buenas, el volcado satura Turso—, antes sólo se paraba
+publicando una versión y esperando a que cada TPV se actualizara. Ahora se apaga desde la nube, en
+minutos, con una fila en la tabla `interruptores` de la base central.
+
+```bash
+pnpm interruptor:apagar   -- --nombre reparacion_nube --horas 2 --motivo "…" [--tenant <id>] [--desde 1.4.0] [--hasta 1.4.2]
+pnpm interruptor:encender -- --id <interruptorId>
+pnpm interruptor:lista    -- [--historial]
+```
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| La lista cerrada | `crates/tpv-contracts/src/interruptores.rs` | `Interruptor`, exportado a TS; el worker lo espeja con drift-guard |
+| En la base central | tabla `interruptores` (`docs/sql/control-plane/esquema-actual.sql`) | Una fila por apagado: global (`'*'`) o de un tenant, con rango de versiones opcional |
+| Lectura en el worker | `apps/cloud-worker-licensing/src/lib/interruptores.ts` | Filtra, reduce y cachea 60 s por isolate |
+| Administración | `domains/admin/admin.routes.ts` (`/v1/admin/interruptores`) + `scripts/tpv-license.mjs` | Apagar, encender, listar; todo queda en `admin_audit` |
+| Lo que pregunta el TPV | `domains/interruptores/interruptores.routes.ts` (`POST /v1/interruptores`) | Por `tenantAuth`; el tenant sale del token |
+| Decisión en el TPV | `tpv-application/src/use_cases/interruptores.rs` | Qué vale y cuánto (aquí están los tests) |
+| Estado en el TPV | `src-tauri/src/interruptores.rs` + job `interruptores` (cada 5 min) | Memoria + `AppData/interruptores.json` |
+| Pantalla | `features/configuracion/sections/AvisoInterruptores.tsx` | «Pausado por soporte» en Conectividad y en Fiscal |
+
+**Qué se puede apagar**, y dónde se mira:
+
+| Interruptor | Dónde | Qué deja de pasar |
+|---|---|---|
+| `verifactu_remitir` | motor de jobs | Remitir a la AEAT. Los registros siguen `PENDIENTE`. **Máx. 24 h** |
+| `reparacion_nube` | `verificar_nube` → `contrastar_*_con(…, reparar)` | Encolar reparaciones y borrados. Se sigue comparando e informando (`reparacion_apagada` en Axiom) |
+| `volcado_atraso` | `socketMain.ts::subirLoPendiente` | El volcado a la cola del DO: se sube por el camino en vivo |
+| `cola_do` | `tenantHub.cola.ts::drenarCola` (worker) | Drenar la cola de entrada; se vuelve a mirar cada 5 min. Las Handy siguen esperando |
+| `backfill_historico` | motor de jobs | Bajar el histórico tras una recuperación |
+| `cifrado_pii` | motor de jobs | Convertir la PII del personal a cifrado |
+| `imagenes` | `lib.rs::drenar_imagenes` | Subir imágenes a R2 (también las que dispara un evento) |
+
+### Reglas
+
+- **Para entrar en la lista, las tres a la vez:** es **automática** (un job o el sistema, no alguien
+  en el mostrador); puede dañar **a muchos a la vez o fuera del equipo** (escribe en la nube o en la
+  AEAT, o cuesta dinero); y **pausarla no pierde nada** (lo pendiente espera en su cola). Queda
+  fuera siempre lo que protege (copias, licencia) y el outbox y el WebSocket en vivo: apagarlos a
+  todos congela todas las Handy, y para un solo equipo ya está `connectivity: "off"`.
+- ⚠️ **Nada del cobro, nunca.** Ni cobrar, ni emitir el registro fiscal, ni imprimir, ni el cajón.
+  La forma de romperlo no es añadir un interruptor «cobrar»: es consultar uno existente dentro de
+  ese camino. Lo vigila `tests_exenciones_del_gate::ningun_interruptor_toca_el_camino_del_cobro`,
+  que lee el fuente.
+- **Si no se sabe, está encendido.** El worker devuelve lista vacía si la base central no contesta;
+  el TPV olvida lo que dijo la nube a la **hora** de no poder confirmarlo
+  (`VIGENCIA_CONSULTA_MS`), y un fichero roto o ausente es todo encendido. Es un freno de mano, no
+  una dependencia: una caída de Turso no puede convertirse en «el TPV deja de remitir».
+- **Todo apagado caduca.** `expires_at_ms` es obligatorio; el tope es 7 días (24 h la AEAT). Encender
+  antes adelanta la caducidad a ahora y **no borra la fila**: el rastro de qué se apagó, cuándo y por
+  qué es lo primero que se pregunta después de un incidente.
+- **Apagado no es fallo.** En el motor de jobs un job apagado se trata como un `requiere` no
+  cumplido: no corre, no entra en backoff, no sale en rojo y `Last_Ok_Ms` no se toca, así que al
+  encenderse corre en cuanto se mire.
+- **La tabla no lleva `CHECK` sobre el nombre**, a propósito: añadir un interruptor no puede obligar
+  a rehacerla en Turso. Lo valida el zod del worker, y un nombre que un binario viejo no conoce se
+  **salta** al leer la respuesta (elemento a elemento), en vez de tirarla entera.
+- **Para añadir uno:** la variante en `Interruptor` (Rust), el nombre en `INTERRUPTORES`
+  (`lib/interruptores.ts`, que no compila hasta coincidir), su etiqueta en `AvisoInterruptores.tsx`
+  (tampoco compila sin ella) y el sitio donde se mira. Y que cumpla las tres condiciones.
+- **Retrasos asumidos:** el TPV pregunta cada 5 min y el worker cachea 60 s por isolate, así que
+  apagar tarda unos 5 minutos en llegar a todos. La cola del DO lo nota en su siguiente vuelta.
+
+---
+
 ## 11. Tickets e impresión (ESC/POS)
 
 El ticket se genera **en Rust** (`apps/tpv-main/src-tauri/src/printing.rs`) y se envía en crudo a la
@@ -1580,6 +1648,10 @@ no dejar de hacerlo.
   la aplicación se vería perfectamente sana. Cumplir la regla consiste en **no añadir nada** a ese
   job; se escribe porque la forma de romperla es que a alguien le parezca razonable «respetar el
   modo de conexión» dentro de seis meses.
+  - **El interruptor remoto `verifactu_remitir` (§10-bis) no contradice esto.** No es una
+    preferencia del equipo ni de la red: es una pausa que decide **soporte** desde la nube cuando una
+    versión manda registros rotos, caduca sola a las **24 h** como mucho (lo impone el worker) y se
+    ve en Configuración → Fiscal. Sigue sin existir forma de que el cliente deje de remitir.
 - **Los errores se clasifican por RANGO, no por lista.** `2000–2999` = **admisible** (el registro se
   acepta y hay que **subsanarlo**); `3000` = **duplicado**, que se trata como aceptado y es la
   idempotencia de todo el sistema; cualquier otro = rechazado. Una lista cerrada de códigos se queda

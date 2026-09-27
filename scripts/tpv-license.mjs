@@ -10,6 +10,13 @@
 //   pnpm license:shorten  -- --id <licenseId> --months 24   (puede dejarla CADUCADA)
 //   pnpm license:resend -- --id <licenseId>          (reenvía/recupera la clave por email)
 //
+// Y los interruptores remotos de emergencia (PROD-06), que van por el mismo token:
+//
+//   pnpm interruptor:apagar   -- --nombre reparacion_nube --horas 2 --motivo "…"
+//                                [--tenant <tenantId>] [--desde 1.4.0] [--hasta 1.4.2]
+//   pnpm interruptor:encender -- --id <interruptorId>
+//   pnpm interruptor:lista    -- [--historial]
+//
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
 //   2. Un fichero `.env` en la raíz del repo (gitignoreado) con la línea:
@@ -92,7 +99,7 @@ async function api(method, path, body) {
 	if (!r.ok || data.ok === false) {
 		if (r.status === 401) fail("Token rechazado. ¿ADMIN_API_TOKEN es el correcto?");
 		if (r.status === 503) fail("El worker no tiene ADMIN_API_TOKEN configurado (wrangler secret put).");
-		fail(`${r.status}: ${data.error || text}`);
+		fail(`${r.status}: ${data.error || text}${data.message ? ` — ${data.message}` : ""}`);
 	}
 
 	return data;
@@ -221,6 +228,60 @@ async function extend(args) {
 	console.log(`\n  ✔ Licencia extendida. Ahora caduca el ${res.expiresAt.slice(0, 10)}.\n`);
 }
 
+/* ── Interruptores (PROD-06) ─────────────────────────────────────────────── */
+
+async function interruptorApagar(args) {
+	const interruptor = String(args.nombre || "").trim();
+	if (!interruptor) fail("--nombre <interruptor> requerido (p. ej. reparacion_nube)");
+	const horas = Number(args.horas);
+	if (!Number.isFinite(horas) || horas <= 0) fail("--horas debe ser un número mayor que 0");
+	const motivo = String(args.motivo || "").trim();
+	if (motivo.length < 3) fail('--motivo "…" requerido: es lo que se ve en la pantalla del bar');
+
+	const res = await api("POST", "/v1/admin/interruptores", {
+		interruptor,
+		horas,
+		motivo,
+		...(args.tenant ? { tenantId: String(args.tenant) } : {}),
+		...(args.desde ? { versionDesde: String(args.desde) } : {}),
+		...(args.hasta ? { versionHasta: String(args.hasta) } : {}),
+	});
+	console.log(`
+  ✔ ${res.interruptor} apagado para ${res.tenantId === "*" ? "TODOS los negocios" : res.tenantId}
+    hasta ${res.expiresAt} (se enciende solo).
+
+    Id  ${res.interruptorId}   (pnpm interruptor:encender -- --id ${res.interruptorId})
+
+  Los TPV lo obedecen en unos 5 minutos; la cola del DO, en menos de uno.
+`);
+}
+
+async function interruptorEncender(args) {
+	const id = String(args.id || "").trim();
+	if (!id) fail("--id <interruptorId> requerido (sácalo de `pnpm interruptor:lista`)");
+	await api("POST", `/v1/admin/interruptores/${id}/encender`);
+	console.log(`\n  ✔ Encendido. Los TPV lo notan en unos 5 minutos.\n`);
+}
+
+async function interruptorLista(args) {
+	const res = await api("GET", `/v1/admin/interruptores${args.historial ? "?historial=1" : ""}`);
+	if (!res.interruptores.length) {
+		console.log(args.historial ? "\n  (no hay historial)\n" : "\n  (todo encendido)\n");
+		return;
+	}
+	console.table(
+		res.interruptores.map((i) => ({
+			interruptor: i.interruptor,
+			negocio: i.tenantId,
+			versiones: i.versionDesde || i.versionHasta ? `${i.versionDesde ?? "…"} – ${i.versionHasta ?? "…"}` : "todas",
+			vigente: i.vigente ? "sí" : "no",
+			hasta: i.expiresAt,
+			motivo: i.motivo,
+			id: i.interruptorId,
+		})),
+	);
+}
+
 /* ── Entrada ─────────────────────────────────────────────────────────────── */
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -234,7 +295,18 @@ if (!TOKEN) {
 	);
 }
 
-const comandos = { issue, list, revoke, unrevoke, extend, shorten, resend };
+const comandos = {
+	issue,
+	list,
+	revoke,
+	unrevoke,
+	extend,
+	shorten,
+	resend,
+	"interruptor-apagar": interruptorApagar,
+	"interruptor-encender": interruptorEncender,
+	"interruptor-lista": interruptorLista,
+};
 
 if (!comandos[cmd]) {
 	console.error(`
@@ -247,6 +319,11 @@ if (!comandos[cmd]) {
     extend   --id <licenseId> --months 1|3|12
     shorten  --id <licenseId> --months <1-120>   (puede dejarla CADUCADA)
     resend  --id <licenseId>
+
+  Interruptores (pnpm interruptor:<comando>):
+    apagar    --nombre <interruptor> --horas <n> --motivo "…" [--tenant <id>] [--desde x.y.z] [--hasta x.y.z]
+    encender  --id <interruptorId>
+    lista     [--historial]
 `);
 	process.exit(1);
 }
