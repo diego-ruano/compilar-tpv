@@ -65,7 +65,7 @@ pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
 ///
 /// Rotarla invalida a todos los clientes con esta versión: para rotar sin cortar, pinear dos
 /// claves a la vez durante una ventana (§5.7 del plan). Generada con `pnpm license:keypair`.
-pub const LICENSE_SIGNING_PUBLIC_KEY_B64: &str = "WKG8YsOKSGSDhzauiqeMih0zCwNhwYRVQOE4Ywcvm1I=";
+pub const LICENSE_SIGNING_PUBLIC_KEY_B64: &str = "9/GH9g7BSTP2wu2lq6I99LZgsIHZFMPcrdU3IIKyZ6s=";
 
 const HTTP_TIMEOUT_SECS: u64 = 20;
 
