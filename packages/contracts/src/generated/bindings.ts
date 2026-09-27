@@ -611,6 +611,25 @@ esperado_antes: Dinero, esperado_despues: Dinero, descuadre_antes: Dinero, descu
 
 export type IndexRow = { ID_Comanda: string, Productos: string | null, NumLineas: number, Unidades: number, };
 
+/**
+ * Catálogo cerrado de lo que se puede apagar desde la nube.
+ */
+export type Interruptor = "verifactu_remitir" | "reparacion_nube" | "volcado_atraso" | "cola_do" | "backfill_historico" | "cifrado_pii" | "imagenes";
+
+/**
+ * Un interruptor apagado ahora mismo para este equipo, tal como lo devuelve el worker.
+ */
+export type InterruptorApagado = { interruptor: Interruptor, 
+/**
+ * Por qué se apagó. Se enseña en pantalla: lo escribe soporte, no es un identificador.
+ */
+motivo: string, 
+/**
+ * Hasta cuándo (epoch ms). Pasada esta hora vuelve a estar encendido aunque no se sepa nada
+ * más de la nube: todo interruptor se enciende solo.
+ */
+hasta_ms: number, };
+
 export type InventarioResumenResponse = { proximosCaducar: Array<ProductoResumenDto>, menosCantidad: Array<ProductoResumenDto>, };
 
 /**

@@ -1331,7 +1331,17 @@ export async function markWebhookProcessed(
 
 export async function auditAdmin(
 	db: Sql,
-	action: "issue" | "revoke" | "extend" | "resend" | "refund" | "dispute" | "reactivate" | "shorten",
+	action:
+		| "issue"
+		| "revoke"
+		| "extend"
+		| "resend"
+		| "refund"
+		| "dispute"
+		| "reactivate"
+		| "shorten"
+		| "interruptor_apagar"
+		| "interruptor_encender",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

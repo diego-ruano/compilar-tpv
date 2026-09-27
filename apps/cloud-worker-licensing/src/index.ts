@@ -61,6 +61,7 @@ import { licenseRoutes } from "./domains/licensing/licensing.routes";
 import { adminRoutes } from "./domains/admin/admin.routes";
 import { stripeRoutes } from "./domains/stripe/stripe.routes";
 import { telemetryRoutes } from "./domains/telemetry/telemetry.routes";
+import { interruptoresRoutes } from "./domains/interruptores/interruptores.routes";
 import { completarErrores } from "./middleware/completarErrores";
 
 // El Durable Object vive ahora en este worker (antes en `tpv-server`). Se instrumenta con Sentry
@@ -184,6 +185,10 @@ app.route("/v1/tareas", tareasRoutes);
 app.route("/v1/trabajadores", trabajadoresRoutes);
 app.route("/v1/venta-rapida", ventaRapidaRoutes);
 app.route("/v1/email", emailRoutes);
+
+// ---------------- Interruptores remotos de emergencia (PROD-06) ----------------
+// Lo que el TPV tiene apagado ahora. Se apagan y encienden por `/v1/admin/interruptores`.
+app.route("/v1/interruptores", interruptoresRoutes);
 
 // ---------------- Telemetría (logs de dispositivo → Axiom) ----------------
 // Los dispositivos suben aquí sus lotes de logs; el worker los retransmite a Axiom con el token

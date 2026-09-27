@@ -1,5 +1,7 @@
 import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
+import { getDb } from "../server/db";
+import { estaApagado } from "../lib/interruptores";
 import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
 import { ingestToAxiom } from "../observability/axiom";
 
@@ -678,11 +680,21 @@ export class TenantHub {
 			applyBatchIdempotent: (db, ops) => this.applyBatchIdempotent(db, ops),
 			withTenantDbRetry: (tenantId, run) => this.withTenantDbRetry(tenantId, run),
 			maybePurgeSyncLog: (tenantId) => this.maybePurgeSyncLog(tenantId),
+			colaPausada: (tenantId) => this.colaPausada(tenantId),
 			isMainRecovering: () => this.isMainRecovering(),
 			broadcastAuthed: (obj, except) => this.broadcastAuthed(obj, except),
 			broadcastRol: (rol, obj) => this.broadcastRol(rol, obj),
 			emitSyncEvent: (name, fields) => this.emitSyncEvent(name, fields),
 		};
+	}
+
+	/**
+	 * PROD-06: el interruptor `cola_do` de este tenant. Método y no lambda para que los tests
+	 * puedan sustituirlo, como hacen con la base del tenant. No lanza: si la base central no
+	 * contesta, la cola sigue drenando.
+	 */
+	private colaPausada(tenantId: string): Promise<{ hasta_ms: number } | null> {
+		return estaApagado(() => getDb(this.env), tenantId, "cola_do");
 	}
 
 	private asegurarCola(): void {

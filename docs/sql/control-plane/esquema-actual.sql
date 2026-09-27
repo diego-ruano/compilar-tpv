@@ -308,3 +308,23 @@ CREATE TABLE app_releases (
   created_at_ms INTEGER NOT NULL DEFAULT (unixepoch()*1000),
   PRIMARY KEY (version, target, arch, channel)
 );
+
+
+-- ── Interruptores remotos de emergencia (PROD-06) ───────────────────────────────────────────
+-- Una fila apaga un interruptor (lista cerrada en `tpv-contracts::interruptores`) para todos los
+-- negocios (`tenant_id = '*'`) o para uno, opcionalmente sólo en un rango de versiones. Todas
+-- caducan: encender antes de tiempo adelanta `expires_at_ms` a ahora, no borra la fila. Sin CHECK
+-- sobre el nombre a propósito: añadir un interruptor no obliga a rehacer la tabla.
+
+CREATE TABLE interruptores (
+  interruptor_id  TEXT PRIMARY KEY,
+  interruptor     TEXT NOT NULL,
+  tenant_id       TEXT NOT NULL DEFAULT '*',
+  version_desde   TEXT,
+  version_hasta   TEXT,
+  motivo          TEXT NOT NULL,
+  expires_at_ms   INTEGER NOT NULL,
+  created_at_ms   INTEGER NOT NULL DEFAULT (unixepoch()*1000)
+);
+
+CREATE INDEX idx_interruptores_vigentes ON interruptores(expires_at_ms, tenant_id);

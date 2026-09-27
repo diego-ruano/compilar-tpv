@@ -249,6 +249,7 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"internal_error",
 	// Internos: sólo salen si hay un bug, un cliente manipulado o una configuración rota.
 	"admin_disabled",
+	"interruptor_not_found",
 	"unauthorized",
 	"key_unavailable",
 	"license_not_activated",

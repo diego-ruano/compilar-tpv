@@ -36,6 +36,9 @@ const COLA_MUERTA_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // Presupuesto de un `alarm`. El runtime corta a los 15 min; se sale mucho antes y se reprograma,
 // para no acercarse al límite y para que un despliegue no pille un drenado enorme a medias.
 const COLA_PRESUPUESTO_MS = 60_000;
+// PROD-06: con la cola apagada desde la nube, cada cuánto se vuelve a mirar si ya se encendió.
+// Encender no avisa al DO, así que esto es lo que tarda en reanudarse como mucho.
+const COLA_REVISAR_PAUSA_MS = 5 * 60_000;
 
 /**
  * Lo que la cola necesita del hub, escrito. No es ceremonia: es la lista de todo aquello con lo
@@ -58,6 +61,12 @@ export interface ContextoDeCola {
 	): Promise<{ aplicadas: string[]; yaEstaban: string[] }>;
 	withTenantDbRetry<T>(tenantId: string, run: (db: Client) => Promise<T>): Promise<T>;
 	maybePurgeSyncLog(tenantId: string): Promise<void>;
+
+	/**
+	 * PROD-06: ¿está apagado el interruptor `cola_do` para este tenant? Devuelve hasta cuándo, o
+	 * `null`. Tiene que fallar hacia «encendido» (no lanzar): lo garantiza `lib/interruptores.ts`.
+	 */
+	colaPausada(tenantId: string): Promise<{ hasta_ms: number } | null>;
 
 	isMainRecovering(): boolean;
 	broadcastAuthed(obj: any, exceptDeviceId?: string): void;
@@ -450,8 +459,25 @@ export async function drenarCola(ctx: ContextoDeCola): Promise<void> {
 		}
 		const antes = filas.length === COLA_LOTE ? cuantasEnCola(ctx) : filas.length;
 
-		huboTrabajo = true;
 		const tenantId = String((filas[0] as any).Tenant_Id);
+
+		// PROD-06: apagada desde la nube, no se toca nada. La cola es durable, así que esperar no
+		// cuesta ningún dato, y las Handy siguen esperando (`main_volcando`) porque la cola no está
+		// vacía: es lo correcto, la nube sigue a medio construir. Se vuelve a mirar cada pocos
+		// minutos, o al caducar el apagado si llega antes.
+		const pausa = await ctx.colaPausada(tenantId);
+		if (pausa) {
+			ctx.emitSyncEvent("cola_pausada", {
+				pendientes: cuantasEnCola(ctx),
+				hasta_ms: pausa.hasta_ms,
+			});
+			await ctx.storage.setAlarm(
+				Math.min(pausa.hasta_ms, nowMs() + COLA_REVISAR_PAUSA_MS),
+			);
+			return;
+		}
+
+		huboTrabajo = true;
 		// Un lote no mezcla tenants (el DO es de uno solo, pero la cola guarda el tenant por si
 		// acaso: si apareciera otro, se drena en la vuelta siguiente).
 		const delTenant = filas.filter((f: any) => String(f.Tenant_Id) === tenantId);

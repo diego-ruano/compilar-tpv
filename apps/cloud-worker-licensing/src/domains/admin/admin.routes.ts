@@ -10,6 +10,7 @@
 //   POST /v1/admin/licenses/:id/unrevoke → deshace la anulación
 //   POST /v1/admin/licenses/:id/extend   → suma meses
 //   POST /v1/admin/licenses/:id/shorten  → resta meses (puede dejarla caducada)
+//   /v1/admin/interruptores               → interruptores remotos de emergencia (PROD-06, abajo)
 //
 // La clave en claro se devuelve UNA sola vez, en la respuesta del issue: después ya solo existe
 // cifrada. Si el cliente la pierde, se reemite.
@@ -36,6 +37,13 @@ import {
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import { cuerpo } from "../../lib/validacion";
+import {
+	maxHoras,
+	olvidarInterruptoresCacheados,
+	TODOS,
+	zInterruptor,
+	type FilaInterruptor,
+} from "../../lib/interruptores";
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();
 
@@ -290,5 +298,135 @@ adminRoutes.post("/licenses/:id/shorten", cuerpo(shortenSchema), async (c) => {
 		licenseId,
 		expiresAt: new Date(expiresAtMs).toISOString(),
 		caducada: expiresAtMs < Date.now(),
+	});
+});
+
+/* ── PROD-06 · Interruptores remotos de emergencia ───────────────────────────────────────────
+ *
+ *   GET  /v1/admin/interruptores               → los vigentes (y con ?historial=1, los últimos)
+ *   POST /v1/admin/interruptores               → apaga uno (global o de un tenant, con caducidad)
+ *   POST /v1/admin/interruptores/:id/encender  → lo vuelve a encender antes de su caducidad
+ *
+ * Encender no borra la fila: le adelanta la caducidad a ahora. Así queda el rastro de qué se
+ * apagó, cuándo y por qué, que es lo primero que se pregunta después de un incidente.
+ */
+
+const apagarSchema = z.object({
+	interruptor: zInterruptor,
+	/** Sin tenant = todos los negocios. */
+	tenantId: z.string().trim().min(1).max(100).optional(),
+	versionDesde: z.string().trim().min(1).max(40).optional(),
+	versionHasta: z.string().trim().min(1).max(40).optional(),
+	/** Se enseña en la pantalla del TPV: tiene que poder leerlo el dueño del bar. */
+	motivo: z.string().trim().min(3).max(300),
+	horas: z.number().positive(),
+});
+
+adminRoutes.post("/interruptores", cuerpo(apagarSchema), async (c) => {
+	const db = getDb(c.env);
+	const b = c.req.valid("json");
+
+	const tope = maxHoras(b.interruptor);
+	if (b.horas > tope) {
+		return c.json(
+			{
+				ok: false,
+				error: "validation_error",
+				message: `«${b.interruptor}» se puede apagar como mucho ${tope} h seguidas`,
+			},
+			400,
+		);
+	}
+
+	const ahora = Date.now();
+	const id = crypto.randomUUID();
+	const expiresAtMs = ahora + Math.round(b.horas * 3_600_000);
+	const tenantId = b.tenantId ?? TODOS;
+
+	await db.execute({
+		sql: `INSERT INTO interruptores
+		        (interruptor_id, interruptor, tenant_id, version_desde, version_hasta, motivo,
+		         expires_at_ms, created_at_ms)
+		      VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+		args: [
+			id,
+			b.interruptor,
+			tenantId,
+			b.versionDesde ?? null,
+			b.versionHasta ?? null,
+			b.motivo,
+			expiresAtMs,
+			ahora,
+		],
+	});
+	await auditAdmin(db, "interruptor_apagar", null, {
+		interruptorId: id,
+		interruptor: b.interruptor,
+		tenantId,
+		versionDesde: b.versionDesde ?? null,
+		versionHasta: b.versionHasta ?? null,
+		motivo: b.motivo,
+		expiresAtMs,
+	});
+	olvidarInterruptoresCacheados();
+
+	return c.json({
+		ok: true,
+		interruptorId: id,
+		interruptor: b.interruptor,
+		tenantId,
+		expiresAt: new Date(expiresAtMs).toISOString(),
+	});
+});
+
+adminRoutes.post("/interruptores/:id/encender", async (c) => {
+	const db = getDb(c.env);
+	const id = c.req.param("id");
+	const ahora = Date.now();
+
+	const rs = await db.execute({
+		sql: `UPDATE interruptores SET expires_at_ms = ?
+		       WHERE interruptor_id = ? AND expires_at_ms > ?
+		   RETURNING interruptor, tenant_id;`,
+		args: [ahora, id, ahora],
+	});
+	const fila = rs.rows?.[0] as any | undefined;
+	if (!fila) return c.json({ ok: false, error: "interruptor_not_found" }, 404);
+
+	await auditAdmin(db, "interruptor_encender", null, {
+		interruptorId: id,
+		interruptor: String(fila.interruptor),
+		tenantId: String(fila.tenant_id),
+	});
+	olvidarInterruptoresCacheados();
+
+	return c.json({ ok: true, interruptorId: id });
+});
+
+adminRoutes.get("/interruptores", async (c) => {
+	const db = getDb(c.env);
+	const ahora = Date.now();
+	const historial = c.req.query("historial") === "1";
+
+	const rs = await db.execute({
+		sql: historial
+			? `SELECT * FROM interruptores ORDER BY created_at_ms DESC LIMIT 50;`
+			: `SELECT * FROM interruptores WHERE expires_at_ms > ? ORDER BY created_at_ms DESC;`,
+		args: historial ? [] : [ahora],
+	});
+
+	return c.json({
+		ok: true,
+		interruptores: ((rs.rows ?? []) as unknown as FilaInterruptor[]).map((f) => ({
+			interruptorId: f.interruptor_id,
+			interruptor: f.interruptor,
+			tenantId: f.tenant_id,
+			versionDesde: f.version_desde,
+			versionHasta: f.version_hasta,
+			motivo: f.motivo,
+			vigente: Number(f.expires_at_ms) > ahora,
+			expiresAt: new Date(Number(f.expires_at_ms)).toISOString(),
+			createdAt: new Date(Number(f.created_at_ms)).toISOString(),
+		})),
 	});
 });
