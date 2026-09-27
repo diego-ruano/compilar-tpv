@@ -206,9 +206,13 @@ pub async fn inicializar_tenant_vacio(
 ///
 /// Se informa SIEMPRE, también cuando todo cuadra: un silencio no distingue "va bien" de "este
 /// equipo lleva tres semanas sin comprobarse". Lo que se vigila es la serie, no el evento suelto.
+///
+/// `reparar = false` es el interruptor `reparacion_nube` apagado (PROD-06): se compara y se
+/// informa igual —es lo que permite ver si el problema sigue ahí—, pero no se escribe nada.
 pub async fn verificar_contra_la_nube(
     nube: &dyn PairingService,
     repo: &dyn SyncRepository,
+    reparar: bool,
 ) -> AppResult<ResultadoVerificacion> {
     let bruto = nube
         .tpv_server_post_json("tpv", "/v1/sync/verificar", json!({}))
@@ -219,7 +223,7 @@ pub async fn verificar_contra_la_nube(
 
     // Se guarda ANTES de ceder la foto: es lo que decide si se puede borrar arriba.
     let hasta_seq = foto.hasta_seq;
-    let mut resultado = repo.contrastar_con_la_nube(foto).await?;
+    let mut resultado = repo.contrastar_con_la_nube(foto, reparar).await?;
 
     // SYNC-25 · segunda fase, y **sólo si hace falta**: un contador que no cuadra dice que algo
     // baila, no qué. Las claves lo dicen exactamente, pero pesan, así que se piden únicamente de
@@ -237,7 +241,7 @@ pub async fn verificar_contra_la_nube(
         })?;
 
         let (mas_descuadres, reparadas, borradas, aplazado) =
-            repo.contrastar_claves(claves, hasta_seq).await?;
+            repo.contrastar_claves(claves, hasta_seq, reparar).await?;
 
         // La segunda fase sabe CUÁLES, así que su cuenta manda sobre la estimación por contadores
         // de la primera. Dejar las dos sumaría el mismo descuadre dos veces.
@@ -262,6 +266,7 @@ pub async fn verificar_contra_la_nube(
         "borradas": resultado.borradas,
         "aplazado": resultado.aplazado,
         "ventana_omitida": resultado.ventana_omitida,
+        "reparacion_apagada": !reparar,
     });
     // Best-effort, y el error se descarta A SABIENDAS. Dos razones: que el informe no salga no
     // puede deshacer la reparación que ya está encolada, y sobre todo que no se pierde información
@@ -313,6 +318,7 @@ mod tests {
         async fn contrastar_con_la_nube(
             &self,
             _: VerificacionNube,
+            _: bool,
         ) -> AppResult<ResultadoVerificacion> {
             Ok(ResultadoVerificacion::default())
         }
@@ -320,6 +326,7 @@ mod tests {
             &self,
             _: VerificacionClaves,
             _: i64,
+            _: bool,
         ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)> {
             Ok((Vec::new(), 0, 0, false))
         }

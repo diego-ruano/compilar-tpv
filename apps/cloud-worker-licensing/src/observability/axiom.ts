@@ -142,6 +142,7 @@ export function reportarSaludDeSync(
 		apartadas: number;
 		reparadas: number;
 		ventana_omitida: boolean;
+		reparacion_apagada: boolean;
 	},
 ): Promise<unknown> {
 	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;

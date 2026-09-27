@@ -68,6 +68,9 @@ describe("schemas totales de sync", () => {
 		expect(parsed.apartadas).toBe(3);
 		expect(parsed.reparadas).toBe(0);
 		expect(parsed.ventana_omitida).toBe(true);
+		// PROD-06: ausente es «encendida», que es lo que manda un cliente anterior.
+		expect(parsed.reparacion_apagada).toBe(false);
+		expect(saludSyncSchema.parse({ reparacion_apagada: true }).reparacion_apagada).toBe(true);
 	});
 });
 

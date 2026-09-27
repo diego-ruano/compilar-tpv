@@ -75,5 +75,8 @@ export const saludSyncSchema = z.unknown().transform((entrada) => {
 		apartadas: Number(body.apartadas ?? 0),
 		reparadas: Number(body.reparadas ?? 0),
 		ventana_omitida: Boolean(body.ventana_omitida),
+		// PROD-06: el interruptor `reparacion_nube` estaba apagado y no se reparó nada. Sin esto,
+		// un «0 reparadas» se leería igual que «no había nada que reparar».
+		reparacion_apagada: Boolean(body.reparacion_apagada),
 	};
 });

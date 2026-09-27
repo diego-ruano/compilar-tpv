@@ -597,6 +597,7 @@ syncRoutes.post("/salud", cuerpoTolerante(saludSyncSchema), async (c) => {
 			apartadas: datos.apartadas,
 			reparadas: datos.reparadas,
 			ventana_omitida: datos.ventana_omitida,
+			reparacion_apagada: datos.reparacion_apagada,
 		}),
 	);
 

@@ -46,6 +46,7 @@ use tauri::{AppHandle, Manager};
 
 use tpv_application::ports::jobs::{EstadoJob, JobsStateRepository};
 use tpv_application::use_cases::jobs as uc;
+use tpv_contracts::interruptores::Interruptor;
 use tpv_contracts::jobs::JobStatus;
 
 use crate::AppState;
@@ -106,6 +107,9 @@ pub(crate) struct Job {
     pub retardo_inicial: Duration,
     /// Condición previa (ver [`Requiere`]).
     pub requiere: Requiere,
+    /// PROD-06: el interruptor remoto que lo apaga, si tiene. Apagado se comporta como un
+    /// `requiere` no cumplido: no se ejecuta, no cuenta como fallo y se vuelve a mirar al rato.
+    pub interruptor: Option<Interruptor>,
     /// Qué hace el job. Devolver `Err` cuenta como fallo (backoff + queda en el panel).
     pub ejecutar: Ejecutar,
 }
@@ -178,6 +182,19 @@ async fn correr(app: AppHandle, job: Job) {
         tokio::time::sleep(espera).await;
 
         if !job.requiere.cumplido(&app).await {
+            tokio::time::sleep(ESPERA_GATE).await;
+            continue;
+        }
+
+        // PROD-06: apagado desde la nube. No es un fallo —no hay backoff ni rojo en el panel, y
+        // `Last_Ok_Ms` no se toca, así que al encenderse corre en cuanto se mire—: es una pausa.
+        if let Some(a) = job.interruptor.and_then(|i| crate::interruptores::apagado(&app, i)) {
+            tracing::debug!(
+                target: "tpv::jobs",
+                job = job.nombre,
+                hasta_ms = a.hasta_ms,
+                "apagado desde la nube"
+            );
             tokio::time::sleep(ESPERA_GATE).await;
             continue;
         }

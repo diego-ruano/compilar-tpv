@@ -759,18 +759,20 @@ impl SyncRepository for SqliteSyncRepository {
     async fn contrastar_con_la_nube(
         &self,
         foto: VerificacionNube,
+        reparar: bool,
     ) -> AppResult<ResultadoVerificacion> {
         // El cuerpo vive en un `impl` propio (más abajo) para no engordar el del trait: es lo más
         // largo de este fichero y no comparte nada con el resto de la interfaz.
-        SqliteSyncRepository::contrastar_con_la_nube(self, foto).await
+        SqliteSyncRepository::contrastar_con_la_nube_con(self, foto, reparar).await
     }
 
     async fn contrastar_claves(
         &self,
         respuesta: VerificacionClaves,
         hasta_seq: i64,
+        reparar: bool,
     ) -> AppResult<(Vec<DescuadreTabla>, i64, i64, bool)> {
-        SqliteSyncRepository::contrastar_claves(self, respuesta, hasta_seq).await
+        SqliteSyncRepository::contrastar_claves_con(self, respuesta, hasta_seq, reparar).await
     }
 
     async fn outbox_mark_encolada(&self, op_ids: &[String]) -> AppResult<()> {
@@ -2792,6 +2794,17 @@ impl SqliteSyncRepository {
         &self,
         foto: VerificacionNube,
     ) -> AppResult<ResultadoVerificacion> {
+        self.contrastar_con_la_nube_con(foto, true).await
+    }
+
+    /// Igual, pero con `reparar = false` sólo compara (PROD-06, interruptor `reparacion_nube`):
+    /// cuenta lo que no cuadra y no encola nada. Lo que habría reparado sale como `aplazado`,
+    /// que es exactamente lo que es: se reparará en la pasada en que vuelva a estar encendido.
+    pub async fn contrastar_con_la_nube_con(
+        &self,
+        foto: VerificacionNube,
+        reparar: bool,
+    ) -> AppResult<ResultadoVerificacion> {
         use crate::sync_reparacion as rep;
 
         let mut descuadres: Vec<DescuadreTabla> = Vec::new();
@@ -2803,7 +2816,7 @@ impl SqliteSyncRepository {
         // porque la Handy acaba de escribirla y aquí todavía no ha llegado: repararla entonces
         // pisaría lo nuevo con lo viejo. Y esto no es un caso raro — el job va por REST, así que
         // corre igual con el WebSocket caído, que es justo cuando la Main está más atrasada.
-        let seguro = self.puede_borrar_arriba(foto.hasta_seq).await?;
+        let seguro = reparar && self.puede_borrar_arriba(foto.hasta_seq).await?;
         let mut aplazado = false;
 
         {
@@ -3240,9 +3253,20 @@ impl SqliteSyncRepository {
         respuesta: VerificacionClaves,
         hasta_seq: i64,
     ) -> AppResult<(Vec<DescuadreTabla>, i64, i64, bool)> {
+        self.contrastar_claves_con(respuesta, hasta_seq, true).await
+    }
+
+    /// Igual, pero con `reparar = false` sólo cuenta (PROD-06): ni repara lo que falta arriba ni
+    /// borra lo que sobra.
+    pub async fn contrastar_claves_con(
+        &self,
+        respuesta: VerificacionClaves,
+        hasta_seq: i64,
+        reparar: bool,
+    ) -> AppResult<(Vec<DescuadreTabla>, i64, i64, bool)> {
         use crate::sync_reparacion as rep;
 
-        let seguro = self.puede_borrar_arriba(hasta_seq).await?;
+        let seguro = reparar && self.puede_borrar_arriba(hasta_seq).await?;
         let mut descuadres: Vec<DescuadreTabla> = Vec::new();
         let mut a_reparar: Vec<rep::FilaAfectada> = Vec::new();
         let mut a_borrar: Vec<rep::FilaAfectada> = Vec::new();
@@ -3293,12 +3317,16 @@ impl SqliteSyncRepository {
                     continue;
                 }
 
-                for c in &faltan {
-                    if let Some(valores) = locales.get(*c) {
-                        if let Some(f) = fila_de(&t.nombre, &t.columnas, valores) {
-                            a_reparar.push(f);
+                if reparar {
+                    for c in &faltan {
+                        if let Some(valores) = locales.get(*c) {
+                            if let Some(f) = fila_de(&t.nombre, &t.columnas, valores) {
+                                a_reparar.push(f);
+                            }
                         }
                     }
+                } else if !faltan.is_empty() {
+                    aplazado = true;
                 }
 
                 if !sobran.is_empty() {
@@ -3599,6 +3627,26 @@ mod tests_claves {
         let sql = &rep.statements[0].sql;
         assert!(sql.contains("ON CONFLICT"), "sql: {sql}");
         assert!(!sql.contains("OR REPLACE"), "sql: {sql}");
+    }
+
+    #[tokio::test]
+    async fn con_la_reparacion_APAGADA_ni_repara_ni_borra_arriba() {
+        // PROD-06: al día (se podría borrar y reparar), pero con `reparacion_nube` apagado.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','A'),('z2','B');").await;
+        checkpoint_en(&db, 100).await;
+
+        // Arriba falta z2 y sobra z-vieja.
+        let (desc, reparadas, borradas, aplazado) = repo
+            .contrastar_claves_con(claves_zonas(&["z1", "z-vieja"]), 100, false)
+            .await
+            .unwrap();
+
+        let d = desc.iter().find(|d| d.tabla == "Zonas").expect("descuadre en Zonas");
+        assert_eq!((d.faltan, d.sobran), (1, 1), "se cuenta igual");
+        assert_eq!((reparadas, borradas), (0, 0));
+        assert!(aplazado);
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -4080,5 +4128,25 @@ mod tests_main_atrasada {
             repo.outbox_pending(100).await.unwrap().is_empty(),
             "no puede salir nada hacia la nube",
         );
+    }
+
+    #[tokio::test]
+    async fn con_la_reparacion_APAGADA_ve_la_diferencia_y_no_la_toca() {
+        // PROD-06: el mismo escenario que `al_dia_SI_repara`, al día y todo, con el interruptor
+        // `reparacion_nube` apagado. Se compara igual —es lo que permite ver si el problema sigue
+        // ahí— pero no sale nada hacia la nube.
+        let (repo, db, _dir) = repo_temporal().await;
+        preparar(&db, 500).await;
+
+        let r = repo.contrastar_con_la_nube_con(foto(500), false).await.unwrap();
+
+        assert_eq!(r.descuadres.iter().map(|d| d.distintas).sum::<i64>(), 1);
+        assert_eq!(r.reparadas, 0);
+        assert!(r.aplazado);
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+
+        // Y al encenderse, la pasada siguiente repara lo que quedó pendiente.
+        let r = repo.contrastar_con_la_nube_con(foto(500), true).await.unwrap();
+        assert_eq!(r.reparadas, 1);
     }
 }

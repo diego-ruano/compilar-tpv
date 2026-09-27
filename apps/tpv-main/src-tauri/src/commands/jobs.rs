@@ -3,6 +3,7 @@
 
 use tauri::AppHandle;
 
+use tpv_contracts::interruptores::InterruptorApagado;
 use tpv_contracts::jobs::JobStatus;
 use tpv_contracts::errors::AppErrorDto;
 
@@ -11,4 +12,14 @@ use tpv_contracts::errors::AppErrorDto;
 #[tauri::command]
 pub async fn jobs_status(app: AppHandle) -> Result<Vec<JobStatus>, AppErrorDto> {
     crate::jobs::estado_actual(&app).await.map_err(AppErrorDto::from)
+}
+
+/// PROD-06: lo que la nube tiene apagado en este equipo ahora mismo. Lo leen Conectividad y Fiscal
+/// para decir por qué una cola crece, y `socketMain.ts` para decidir si puede volcar el atraso.
+///
+/// Sin sesión a propósito: no revela nada que el equipo no esté haciendo ya, y el socket lo
+/// pregunta antes del login.
+#[tauri::command]
+pub async fn interruptores_apagados(app: AppHandle) -> Result<Vec<InterruptorApagado>, AppErrorDto> {
+    Ok(crate::interruptores::vigentes(&app))
 }

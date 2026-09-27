@@ -26,11 +26,16 @@ use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
 use tpv_application::use_cases::sync as uc_sync;
 use tpv_infra_licensing::PairingAdapter;
 
+use tpv_contracts::interruptores::Interruptor;
+
 use super::{tarea, Job, Requiere};
 use crate::AppState;
 
 /// Cada cuánto se revalida la licencia contra el worker mientras la app está abierta.
 const LICENCIA_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
+/// PROD-06: cada cuánto se pregunta a la nube qué interruptores tiene apagados este equipo.
+const INTERRUPTORES_INTERVAL_SECS: u64 = 5 * 60;
 
 /// Cada cuánto se mira si hay registros de facturación que remitir a la AEAT (FISCAL-01).
 ///
@@ -122,7 +127,21 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // El gate de arranque ya valida la licencia. Durante una recuperación no se ejecuta
             // este job porque sus avisos podrían escribir en una BD vacía antes del bootstrap.
             requiere: Requiere::MainOperativa,
+            interruptor: None,
             ejecutar: tarea(licencia),
+        },
+        Job {
+            // PROD-06: pregunta a la nube qué tiene apagado este equipo. Cinco minutos es lo que
+            // tarda, como mucho, en obedecer un apagado; lo que dijo la nube vale una hora
+            // (`VIGENCIA_CONSULTA_MS`), así que un par de fallos seguidos no enciende nada.
+            nombre: "interruptores",
+            cada: Duration::from_secs(INTERRUPTORES_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(20),
+            requiere: Requiere::MainOperativa,
+            // Él mismo, nunca: un interruptor que apagase la consulta de interruptores no se
+            // podría volver a encender.
+            interruptor: None,
+            ejecutar: tarea(interruptores),
         },
         Job {
             // FISCAL-01. Remitir es un job y no una llamada dentro del cobro por una razón de la
@@ -140,12 +159,19 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // Cumplir esa regla consiste en NO AÑADIR NADA aquí. Se escribe porque la forma de
             // romperla es que a alguien le parezca razonable, dentro de seis meses, «respetar el
             // modo de conexión» en este job.
+            //
+            // El `interruptor` de abajo (PROD-06) NO contradice esto, y conviene saber por qué: no
+            // es una preferencia del equipo sino una pausa que decide SOPORTE desde la nube cuando
+            // una versión manda registros rotos, caduca sola a las 24 h como mucho (lo impone el
+            // worker) y se ve en Configuración → Fiscal. Sigue sin haber ninguna forma de que el
+            // cliente, o una red mala, dejen de remitir.
             nombre: "verifactu_remitir",
             cada: Duration::from_secs(VERIFACTU_INTERVAL_SECS),
             // Un minuto de margen: el arranque (BD, licencia, WebSocket) va primero, y lo que haya
             // en la cola lleva ahí desde antes de encender el equipo.
             retardo_inicial: Duration::from_secs(60),
             requiere: Requiere::MainOperativa,
+            interruptor: Some(Interruptor::VerifactuRemitir),
             ejecutar: tarea(verifactu_remitir),
         },
         Job {
@@ -153,6 +179,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             cada: Duration::from_secs(AVISOS_INTERVAL_SECS),
             retardo_inicial: Duration::from_secs(60),
             requiere: Requiere::MainOperativa,
+            interruptor: None,
             ejecutar: tarea(avisos),
         },
         Job {
@@ -162,6 +189,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // estar ahí cuando abran, no una hora después.
             retardo_inicial: Duration::from_secs(120),
             requiere: Requiere::MainOperativa,
+            interruptor: None,
             ejecutar: tarea(caja_sin_cerrar),
         },
         Job {
@@ -169,6 +197,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             cada: Duration::from_secs(STOCK_NEGATIVO_INTERVAL_SECS),
             retardo_inicial: Duration::from_secs(90),
             requiere: Requiere::MainOperativa,
+            interruptor: None,
             ejecutar: tarea(stock_negativo),
         },
         Job {
@@ -178,6 +207,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // No pide BD ni modo Main: la cola es un fichero de AppData y una Handy también sube
             // fotos. Sin modo elegido el propio cuerpo devuelve "sin_modo" y no hace nada.
             requiere: Requiere::Siempre,
+            interruptor: None,
             ejecutar: tarea(imagenes),
         },
         Job {
@@ -185,6 +215,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             cada: Duration::from_secs(PURGA_SYNC_INTERVAL_SECS),
             retardo_inicial: Duration::from_secs(5 * 60),
             requiere: Requiere::MainOperativa,
+            interruptor: None,
             ejecutar: tarea(purga_sync),
         },
         Job {
@@ -195,6 +226,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // reloj de pared, así que un TPV apagado 12 h lo ejecuta al encender).
             retardo_inicial: Duration::from_secs(10 * 60),
             requiere: Requiere::MainOperativa,
+            interruptor: None,
             ejecutar: tarea(reconciliacion),
         },
         Job {
@@ -203,6 +235,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // La primera copia se hace pronto, pero fuera del camino crítico del arranque.
             retardo_inicial: Duration::from_secs(5 * 60),
             requiere: Requiere::MainOperativa,
+            interruptor: None,
             ejecutar: tarea(backup_local),
         },
         Job {
@@ -216,6 +249,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // reconciliación de la recuperación está pendiente este job NO corre, así que no compite
             // con la fase 1 ni retrasa el desbloqueo del login.
             requiere: Requiere::MainOperativa,
+            interruptor: Some(Interruptor::BackfillHistorico),
             ejecutar: tarea(backfill_historico),
         },
         Job {
@@ -229,6 +263,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // `MainOperativa` excluye una reconciliación en curso, que es cuando la base local
             // está por definición incompleta.
             requiere: Requiere::MainOperativa,
+            interruptor: None,
             ejecutar: tarea(verificar_nube),
         },
         Job {
@@ -238,6 +273,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // sin retrasar la conversión hasta el siguiente ciclo de 6 h.
             retardo_inicial: Duration::from_secs(60),
             requiere: Requiere::MainOperativa,
+            interruptor: Some(Interruptor::CifradoPii),
             ejecutar: tarea(cifrado_pii),
         },
     ];
@@ -250,6 +286,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
         retardo_inicial: Duration::from_secs(UPDATE_CHECK_DELAY_SECS),
         // No depende del modo ni de la BD: comprobar el feed es útil se haya elegido modo o no.
         requiere: Requiere::Siempre,
+        interruptor: None,
         ejecutar: tarea(updater),
     });
 
@@ -547,6 +584,11 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
 /// lo que da inmediatez. Este job cubre lo que aquel no puede: una imagen creada sin red cuyo
 /// dispositivo no vuelve a guardar ninguna, o una Main con internet pero sin WebSocket. Antes esto
 /// lo hacía un `setInterval` de 3 s colgado del socket, que dependía de la condición equivocada.
+/// PROD-06: ver `crate::interruptores`.
+async fn interruptores(app: AppHandle) -> Result<(), String> {
+    crate::interruptores::refrescar(&app).await
+}
+
 async fn imagenes(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     crate::drenar_imagenes(&app, &state).await.map(|_| ())
@@ -614,7 +656,10 @@ async fn verificar_nube(app: AppHandle) -> Result<(), String> {
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
 
-    let r = uc_sync::verificar_contra_la_nube(&PairingAdapter::new(dir), repo.as_ref()).await?;
+    // PROD-06: con `reparacion_nube` apagado se compara e informa igual, pero no se escribe nada.
+    let reparar = crate::interruptores::apagado(&app, Interruptor::ReparacionNube).is_none();
+    let r = uc_sync::verificar_contra_la_nube(&PairingAdapter::new(dir), repo.as_ref(), reparar)
+        .await?;
 
     if r.descuadres.is_empty() {
         tracing::debug!(target: "tpv::jobs", "verificación: la nube y la base local coinciden");

@@ -30,6 +30,7 @@
                 { "path": "$APPDATA/device_config.json" },
                 { "path": "$APPDATA/license_state.json" },
                 { "path": "$APPDATA/traslado-pendiente" },
+                { "path": "$APPDATA/interruptores.json" },
                 { "path": "$APPDATA/backups/**" }
             ]
         }

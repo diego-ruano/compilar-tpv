@@ -70,9 +70,12 @@ pub trait SyncRepository: Send + Sync {
     /// así que ante una diferencia su versión es la buena — pero "la nube tiene una fila que aquí
     /// no está" NO se resuelve borrándola: podría ser una fila recién creada por la Handy que esta
     /// Main todavía no ha recibido.
+    ///
+    /// Con `reparar = false` (interruptor `reparacion_nube`, PROD-06) sólo compara: no encola nada.
     async fn contrastar_con_la_nube(
         &self,
         foto: VerificacionNube,
+        reparar: bool,
     ) -> AppResult<ResultadoVerificacion>;
 
     /// SYNC-25 · segunda fase: con las claves de la nube delante, resta los dos conjuntos.
@@ -81,10 +84,13 @@ pub trait SyncRepository: Send + Sync {
     /// repara por estado; lo que sobra se borra **sólo** si esta Main puede afirmar que está al
     /// día — si no, se informa y se espera al ciclo siguiente, que es lo que impide que un dato
     /// recién creado en la Handy se borre por llegar tarde.
+    ///
+    /// Con `reparar = false` ni repara ni borra: sólo cuenta.
     async fn contrastar_claves(
         &self,
         respuesta: VerificacionClaves,
         hasta_seq: i64,
+        reparar: bool,
     ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)>;
 
     async fn purge_applied_ops(&self) -> AppResult<()>;

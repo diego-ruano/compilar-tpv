@@ -3,6 +3,7 @@
 //! cdylib `libtpv_lib.so` arranca por el `#[tauri::mobile_entry_point]` de este mismo `run()`.
 
 mod commands;
+mod interruptores;
 mod jobs;
 mod printing;
 
@@ -1142,6 +1143,12 @@ pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result
     let Some(mode_str) = signing_mode(*state.mode.lock().await) else {
         return Ok("sin_modo".into());
     };
+
+    // PROD-06: apagado desde la nube. Aquí y no en el job porque la cola también la drenan el
+    // evento de guardar una imagen y la reconexión del WebSocket. Lo pendiente sigue en su fichero.
+    if interruptores::apagado(app, tpv_contracts::interruptores::Interruptor::Imagenes).is_some() {
+        return Ok("apagado".into());
+    }
 
     let pending = read_image_queue(&app_data_dir);
     if pending.is_empty() {
@@ -2304,6 +2311,7 @@ pub fn run() {
             commands::sync::sync_inicializar_tenant_vacio,
             // tareas periódicas de fondo (runner de jobs)
             commands::jobs::jobs_status,
+            commands::jobs::interruptores_apagados,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,
@@ -2816,6 +2824,7 @@ mod tests_exenciones_del_gate {
             "$APPDATA/device_config.json",
             "$APPDATA/license_state.json",
             "$APPDATA/traslado-pendiente",
+            "$APPDATA/interruptores.json",
             "$APPDATA/backups/**",
         ];
 
@@ -2887,6 +2896,39 @@ mod tests_exenciones_del_gate {
             "se esperaban 2 comandos de cobro (cobrar_detalles, vr_cobrar_fraccionado); si has \
              añadido o quitado uno, actualiza el número"
         );
+    }
+
+    /// PROD-06: ningún interruptor remoto puede impedir cobrar ni emitir el registro fiscal de un
+    /// cobro. La lista cerrada ya no tiene nada de eso, pero la forma de romperlo no es añadir un
+    /// interruptor «cobrar»: es que alguien consulte uno existente dentro de este camino («si la
+    /// remisión está apagada, mejor no emitir»). Por eso se vigila el fuente del camino entero.
+    #[test]
+    fn ningun_interruptor_toca_el_camino_del_cobro() {
+        const FUENTES: &[(&str, &str)] = &[
+            ("commands/mesas.rs", include_str!("commands/mesas.rs")),
+            ("commands/venta_rapida.rs", include_str!("commands/venta_rapida.rs")),
+            ("commands/cuentas.rs", include_str!("commands/cuentas.rs")),
+            ("printing.rs", include_str!("printing.rs")),
+            (
+                "tpv-infra-sqlite/src/mesas.rs",
+                include_str!("../../../../crates/tpv-infra-sqlite/src/mesas.rs"),
+            ),
+            (
+                "tpv-infra-sqlite/src/venta_rapida.rs",
+                include_str!("../../../../crates/tpv-infra-sqlite/src/venta_rapida.rs"),
+            ),
+            (
+                "tpv-infra-sqlite/src/verifactu.rs",
+                include_str!("../../../../crates/tpv-infra-sqlite/src/verifactu.rs"),
+            ),
+        ];
+        for (fichero, fuente) in FUENTES {
+            assert!(
+                !fuente.to_lowercase().contains("interruptor"),
+                "{fichero} consulta un interruptor remoto (PROD-06). Nada de lo que rodea al cobro \
+                 puede depender de uno: la regla más firme del producto es que nada impide cobrar."
+            );
+        }
     }
 
     /// Y al revés: `login_user` tiene que dejar la sesión puesta, o todos los comandos gateados
