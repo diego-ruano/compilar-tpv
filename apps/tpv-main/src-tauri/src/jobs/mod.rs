@@ -10,6 +10,9 @@
 //! - **Vencimiento en reloj de pared.** El ciclo se mide contra `Last_Ok_Ms` persistido en
 //!   `_Jobs_State`, no contra el tiempo de proceso. Un job de 6 h se ejecuta igual en un equipo que
 //!   se apaga cada noche, y uno vencido durante una suspensión larga se dispara al despertar.
+//!   Esto último no lo da un `sleep` de horas: tokio cuenta con el reloj monótono, y si ese reloj
+//!   avanza o no durante una suspensión depende de la plataforma. Por eso se duerme a tramos de
+//!   [`TRAMO_MAX`] contra una hora de pared fijada al empezar ([`dormir`]).
 //! - **Jitter.** Los ticks se desincronizan entre dispositivos para no pegarle al mismo endpoint
 //!   en el mismo segundo.
 //! - **Backoff.** Un job que falla reintenta con espera creciente acotada en vez de esperar el
@@ -62,6 +65,10 @@ const ESPERA_GATE: Duration = Duration::from_secs(60);
 
 /// Tope absoluto del jitter, para que un job de intervalo largo no se retrase de más.
 const JITTER_TECHO: Duration = Duration::from_secs(5 * 60);
+
+/// Lo más que se duerme seguido antes de volver a mirar el reloj de pared (RI-43). Es también lo
+/// más que un job vencido durante una suspensión tarda en salir tras despertar.
+const TRAMO_MAX: Duration = Duration::from_secs(5 * 60);
 
 /// Cuerpo de un job ya empaquetado. Se construye con [`tarea`].
 type Ejecutar = Box<
@@ -179,7 +186,7 @@ async fn correr(app: AppHandle, job: Job) {
             ahora_ms(),
             jitter(job.cada),
         );
-        tokio::time::sleep(espera).await;
+        dormir(espera).await;
 
         if !job.requiere.cumplido(&app).await {
             tokio::time::sleep(ESPERA_GATE).await;
@@ -227,6 +234,43 @@ async fn correr(app: AppHandle, job: Job) {
             }
         }
     }
+}
+
+/// Duerme `espera`, contando también el tiempo que el equipo pase suspendido (RI-43).
+///
+/// Un único `sleep(6 h)` va contra el reloj monótono, y si ese reloj avanza durante una suspensión
+/// depende de la plataforma: donde no lo haga, un job vencido de madrugada con el portátil cerrado
+/// saldría horas después de abrirlo. Aquí la hora de destino se fija UNA vez en reloj de pared y se
+/// duerme a tramos cortos hasta alcanzarla.
+///
+/// No se recalcula `proxima_espera` en cada tramo, que es lo intuitivo: sin historial devuelve el
+/// `retardo_inicial` entero cada vez, y un job con un retardo de más de un tramo no llegaría a
+/// correr nunca.
+async fn dormir(espera: Duration) {
+    let objetivo_ms = ahora_ms().saturating_add(espera.as_millis() as i64);
+    let inicio = std::time::Instant::now();
+    while let Some(tramo) = siguiente_tramo(espera, inicio.elapsed(), objetivo_ms, ahora_ms()) {
+        tokio::time::sleep(tramo).await;
+    }
+}
+
+/// Cuánto dormir en el siguiente tramo, o `None` si ya toca. Pura, para probarla sin reloj.
+///
+/// Se acaba en cuanto se cumpla CUALQUIERA de los dos relojes: el de pared cubre la suspensión, y
+/// el monótono cubre un reloj de pared que salta hacia atrás (NTP, alguien que cambia la hora), que
+/// si no alargaría la espera sin límite.
+fn siguiente_tramo(
+    espera: Duration,
+    transcurrido: Duration,
+    objetivo_ms: i64,
+    ahora_ms: i64,
+) -> Option<Duration> {
+    if transcurrido >= espera || ahora_ms >= objetivo_ms {
+        return None;
+    }
+    let por_pared = Duration::from_millis((objetivo_ms - ahora_ms) as u64);
+    let por_monotono = espera - transcurrido;
+    Some(por_pared.min(por_monotono).min(TRAMO_MAX))
 }
 
 /// Cuánto esperar antes del siguiente intento. Pura a propósito (el jitter entra por parámetro):
@@ -387,6 +431,53 @@ mod tests {
             proxima_espera(&e, CADA, INICIAL, ahora, SIN_JITTER),
             BACKOFF_BASE * 4
         );
+    }
+
+    const H: i64 = 60 * 60 * 1000;
+
+    #[test]
+    fn duerme_a_tramos_y_no_de_un_tiron() {
+        let t = siguiente_tramo(CADA, Duration::ZERO, 6 * H, 0);
+        assert_eq!(t, Some(TRAMO_MAX));
+    }
+
+    #[test]
+    fn el_ultimo_tramo_es_solo_lo_que_falta() {
+        let t = siguiente_tramo(CADA, CADA - Duration::from_secs(10), 6 * H, 6 * H - 10_000);
+        assert_eq!(t, Some(Duration::from_secs(10)));
+    }
+
+    /// El caso de RI-43: el portátil estuvo cerrado 8 h. El reloj monótono puede no haberlas
+    /// contado (aquí, 1 h), pero la pared sí, y el job sale al despertar.
+    #[test]
+    fn una_suspension_larga_lo_da_por_vencido_al_despertar() {
+        let t = siguiente_tramo(CADA, Duration::from_secs(60 * 60), 6 * H, 9 * H);
+        assert_eq!(t, None);
+    }
+
+    /// Alguien atrasa la hora del equipo un día: la pared no llegaría al objetivo hasta mañana,
+    /// pero el monótono ya ha contado la espera entera.
+    #[test]
+    fn un_reloj_de_pared_hacia_atras_no_alarga_la_espera() {
+        let t = siguiente_tramo(CADA, CADA, 6 * H, -24 * H);
+        assert_eq!(t, None);
+        // Y a mitad de espera, el tramo no pasa de lo que le queda al monótono.
+        let t = siguiente_tramo(CADA, CADA - Duration::from_secs(30), 6 * H, -24 * H);
+        assert_eq!(t, Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn un_retardo_inicial_mas_largo_que_un_tramo_se_cumple() {
+        // Lo que rompería recalcular `proxima_espera` en cada vuelta: 10 min de retardo inicial,
+        // dos tramos, y el segundo acaba en su sitio en vez de volver a empezar.
+        let diez = Duration::from_secs(10 * 60);
+        let obj = 10 * 60 * 1000;
+        assert_eq!(siguiente_tramo(diez, Duration::ZERO, obj, 0), Some(TRAMO_MAX));
+        assert_eq!(
+            siguiente_tramo(diez, TRAMO_MAX, obj, 5 * 60 * 1000),
+            Some(TRAMO_MAX)
+        );
+        assert_eq!(siguiente_tramo(diez, diez, obj, obj), None);
     }
 
     #[test]
