@@ -79,9 +79,13 @@ pub async fn license_activate(
     // equipo recién instalado `setup()` corrió antes de que existiera. Sin esto, todo lo facturado
     // hasta el siguiente reinicio salía con `NumeroInstalacion` vacío. Los que ya salieran así los
     // rellena el job de remisión antes de enviarlos (`asegurar_sistema_reparado`).
+    //
+    // Y la etiqueta de Sentry, por lo mismo: `setup()` la lee del mismo fichero, así que en un
+    // equipo recién estrenado los errores salían sin negocio hasta el siguiente reinicio.
     if let Ok(Some(st)) = uc::get_state(&service) {
         if !st.tenant_id.is_empty() {
             tpv_infra_sqlite::verifactu::set_numero_instalacion(&st.tenant_id);
+            tpv_telemetry::set_tenant(st.tenant_id);
         }
     }
 

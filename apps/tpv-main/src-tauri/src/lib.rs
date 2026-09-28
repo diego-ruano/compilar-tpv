@@ -1971,11 +1971,28 @@ pub fn run() {
                     device_id,
                     mode.and_then(|m| signing_mode(Some(m))).unwrap_or("unset"),
                 );
-                // Tenant (restaurante): en Handy se conoce desde el token; en Main el endpoint de
-                // telemetría ya inyecta el tenant autenticado en la nube, así que aquí es best-effort.
-                if let Ok(Some(tenant)) =
-                    uc_pairing::handy_get_tenant(&PairingAdapter::new(app_data_dir.clone()))
-                {
+                // Tenant (restaurante): en Handy sale del token; en Main, de `license_state.json`.
+                // A Axiom el endpoint de telemetría le pone el del JWT de todos modos (y descarta
+                // el que mande el cliente), pero Sentry sólo tiene esta etiqueta: sin ella, un error
+                // de una Main no decía de qué negocio era. Un equipo sin licencia activada no tiene
+                // tenant todavía; la activación lo fija (`commands/licensing.rs`).
+                let tenant = match mode {
+                    Some(DeviceMode::Handy) => {
+                        uc_pairing::handy_get_tenant(&PairingAdapter::new(app_data_dir.clone()))
+                            .ok()
+                            .flatten()
+                    }
+                    Some(DeviceMode::Tpv) => {
+                        use tpv_application::ports::licensing::LicensingService;
+                        tpv_infra_licensing::LicensingAdapter::new(app_data_dir.clone())
+                            .load_state()
+                            .ok()
+                            .flatten()
+                            .map(|st| st.tenant_id)
+                    }
+                    None => None,
+                };
+                if let Some(tenant) = tenant.filter(|t| !t.is_empty()) {
                     tpv_telemetry::set_tenant(tenant);
                 }
                 tracing::info!(
