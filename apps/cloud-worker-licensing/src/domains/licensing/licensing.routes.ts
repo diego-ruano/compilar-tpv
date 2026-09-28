@@ -15,7 +15,7 @@ import { Hono } from "hono";
 
 import type { Env } from "../../env";
 import type { ActivateResponse, ApiError, TenantInfo } from "../../shared";
-import { getDb } from "../../server/db";
+import { enTransaccion, getDb } from "../../server/db";
 import { timingSafeEqualHex } from "../../server/utils/crypto";
 import {
 	activateLicenseFirstTime,
@@ -181,15 +181,35 @@ licenseRoutes.post("/activate", async (c) => {
 				throw e;
 			}
 
-			// Gastar la clave y sumar sus meses, en este orden: si el canje no gana la carrera, no
-			// se ha sumado nada.
-			if (!(await canjearLicencia(db, lic.license_id, actual.license_id))) {
+			const tenantId = actual.tenant_id || "";
+
+			// Lo que la respuesta necesita y puede fallar sin escribir nada va ANTES de gastar la
+			// clave. Iba después, y un fallo aquí —la DEK guardada que no se deja descifrar porque
+			// `LICENSE_STORE_KEY` ya no es la que la cifró— dejaba la clave gastada y los meses
+			// sumados sin que el equipo recibiera su token: el reintento contestaba
+			// `license_already_used` y el TPV se quedaba sin poder entrar con ninguna de las dos.
+			const fieldDek = await getOrCreateTenantFieldDek(db, env.LICENSE_STORE_KEY, tenantId);
+			// El token lleva el hash de la licencia que SIGUE viva, no el de la clave gastada: es
+			// con lo que `/status` la reconoce a partir de ahora.
+			const token = await firmarSesion(env, {
+				tenantId,
+				deviceId,
+				licHash: actual.license_key_hash,
+			});
+
+			// Gastar la clave, sumar sus meses y mudar su cobro van juntos o no van (REV-01): con
+			// sentencias sueltas, un corte a mitad dejaba la clave gastada sin haber sumado nada. Y
+			// en este orden: si el canje no gana la carrera, no se ha sumado nada.
+			const expiresAtMs = await enTransaccion(db, async (tx) => {
+				if (!(await canjearLicencia(tx, lic.license_id, actual.license_id))) return null;
+				const hasta = await extendLicense(tx, actual.license_id, lic.term_months);
+				// LIC-07: el cobro se muda con el tiempo, o un reembolso no tendría de dónde restar.
+				await reasignarCobrosDeLaClave(tx, lic.license_id, actual.license_id);
+				return hasta;
+			});
+			if (expiresAtMs === null) {
 				return c.json({ ok: false, error: "license_already_used" } satisfies ApiError, 409);
 			}
-
-			const expiresAtMs = await extendLicense(db, actual.license_id, lic.term_months);
-			// LIC-07: el cobro se muda con el tiempo, o un reembolso no tendría de dónde restar.
-			await reasignarCobrosDeLaClave(db, lic.license_id, actual.license_id);
 
 			// Recibo. No bloquea nada —quien ha canjeado está delante del TPV y ya lo ve en
 			// pantalla—, pero deja constancia en su correo de cuánto se sumó y hasta cuándo.
@@ -202,21 +222,14 @@ licenseRoutes.post("/activate", async (c) => {
 				}),
 			);
 
-			const tenantId = actual.tenant_id || "";
 			const out: ActivateResponse = {
 				ok: true,
 				tenantId,
 				deviceId,
-				// El token lleva el hash de la licencia que SIGUE viva, no el de la clave gastada:
-				// es con lo que `/status` la reconoce a partir de ahora.
-				token: await firmarSesion(env, {
-					tenantId,
-					deviceId,
-					licHash: actual.license_key_hash,
-				}),
+				token,
 				status: "active",
 				expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
-				fieldDek: await getOrCreateTenantFieldDek(db, env.LICENSE_STORE_KEY, tenantId),
+				fieldDek,
 				cambioDeEquipo: false,
 				tiempoSumado: true,
 			};

@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteSobre, conFalloSimulado } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 
@@ -41,6 +41,7 @@ const { generateLicenseKey, licenseKeyHash } = await import(
 	"../src/domains/licensing/licenseKey"
 );
 const { getLicenseById } = await import("../src/server/licenseStore");
+const { aesGcmEncrypt } = await import("../src/server/crypto");
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ENV = {
@@ -133,7 +134,9 @@ async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): P
 					// El recibo del canje sale por `waitUntil`, así que hace falta un contexto.
 					{ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} } as any,
 				);
-				return { status: res.status, body: await res.json() };
+				// Un fallo sin capturar sale como el texto de Hono, no como JSON: lo que se mira
+				// entonces es el código.
+				return { status: res.status, body: await res.json().catch(() => null) };
 			},
 			async leer(id) {
 				return (await getLicenseById(db, id))!;
@@ -342,5 +345,73 @@ describe("REV-13 · una licencia ya activada no canjea", () => {
 		// Y no se ha sumado nada a ninguna de las dos.
 		expect(r.final.expires_at_ms).toBe(r.antes.expires_at_ms);
 		expect(r.ajena.status).toBe("active");
+	});
+});
+
+describe("REV-13 · un canje que falla no gasta la clave", () => {
+	it("si la DEK no se deja descifrar, la clave sigue sin gastar y vale al arreglarlo", async () => {
+		// El caso real: se cambió `LICENSE_STORE_KEY` y la DEK del tenant, cifrada con la anterior,
+		// ya no se descifraba. El canje gastaba la clave y sumaba los meses ANTES de leerla, así que
+		// el equipo se llevaba un 500 y el reintento, `license_already_used`: sin token con
+		// ninguna de las dos claves.
+		const OTRA_CLAVE = btoa(String.fromCharCode(...new Uint8Array(32).fill(9)));
+		const r = await escenario("dek-ilegible", async (e) => {
+			const viejaId = await e.licenciaDelEquipo();
+			const antes = await e.leer(viejaId);
+			const nueva = await e.emitir(12);
+
+			const dek = btoa(String.fromCharCode(...new Uint8Array(32).fill(5)));
+			e.sql.exec(
+				`UPDATE tenants SET field_dek=? WHERE tenant_id='tenant-del-bar';`,
+				await aesGcmEncrypt(OTRA_CLAVE, dek),
+			);
+			const fallo = await e.activar(nueva.clave);
+			const tras = { vieja: await e.leer(viejaId), clave: await e.leer(nueva.id) };
+
+			// Con la variable arreglada —aquí, la DEK cifrada con la clave que tiene el worker—, el
+			// MISMO código entra a la primera.
+			e.sql.exec(
+				`UPDATE tenants SET field_dek=? WHERE tenant_id='tenant-del-bar';`,
+				await aesGcmEncrypt(STORE_KEY, dek),
+			);
+			const bien = await e.activar(nueva.clave);
+			return { antes, fallo, tras, bien, dek, final: await e.leer(viejaId) };
+		});
+
+		expect(r.fallo.status).toBe(500);
+		expect(r.tras.clave.status).toBe("issued");
+		expect(r.tras.vieja.expires_at_ms).toBe(r.antes.expires_at_ms);
+
+		expect(r.bien.status).toBe(200);
+		expect(r.bien.body.tiempoSumado).toBe(true);
+		expect(r.bien.body.fieldDek).toBe(r.dek);
+		expect(r.final.expires_at_ms).toBeGreaterThan(r.antes.expires_at_ms + 350 * DIA);
+	});
+
+	it("un corte a mitad de las escrituras no deja la clave gastada sin sumar", async () => {
+		// Gastar, sumar y mudar el cobro eran tres sentencias sueltas: si caía la tercera, las dos
+		// primeras se quedaban, y el reintento ya no podía canjear.
+		const r = await escenario("corte", async (e) => {
+			const viejaId = await e.licenciaDelEquipo();
+			const antes = await e.leer(viejaId);
+			const nueva = await e.emitir(12);
+
+			clienteActual = conFalloSimulado(e.db, /UPDATE license_payments/);
+			const fallo = await e.activar(nueva.clave);
+			const tras = { vieja: await e.leer(viejaId), clave: await e.leer(nueva.id) };
+
+			clienteActual = e.db;
+			const bien = await e.activar(nueva.clave);
+			return { antes, fallo, tras, bien, final: await e.leer(viejaId) };
+		});
+
+		expect(r.fallo.status).toBe(500);
+		expect(r.tras.clave.status).toBe("issued");
+		expect(r.tras.vieja.expires_at_ms).toBe(r.antes.expires_at_ms);
+
+		// Y el reintento suma una sola vez.
+		expect(r.bien.status).toBe(200);
+		expect(r.final.expires_at_ms).toBeGreaterThan(r.antes.expires_at_ms + 350 * DIA);
+		expect(r.final.expires_at_ms).toBeLessThan(r.antes.expires_at_ms + 380 * DIA);
 	});
 });
