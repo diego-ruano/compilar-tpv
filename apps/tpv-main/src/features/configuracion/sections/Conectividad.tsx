@@ -277,6 +277,7 @@ const JOB_ETIQUETA: Record<string, string> = {
 	reconciliacion: "Reconciliación con la nube",
 	cifrado_pii: "Cifrado de los datos del personal",
 	caja_sin_cerrar: "Aviso de caja sin cerrar",
+	stock_negativo: "Aviso de stock negativo",
 	fichajes_colgados: "Cierre de jornadas sin fichar la salida",
 	backfill_historico: "Descarga del histórico pendiente",
 	interruptores: "Pausas de emergencia de soporte",
