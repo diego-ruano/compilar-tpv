@@ -66,10 +66,35 @@ fn now_iso() -> String {
 /// `Cerrado_Automatico=1` + `Cierre_Motivo` + `Incidencia` (para revisión manual) y **sin inventar
 /// hora de salida** (`Hora_Salida` queda NULL). Solo afecta a `Fecha < hoy`, así que la jornada en
 /// curso del día no se toca. Es idempotente (los ya cerrados no vuelven a entrar) y va por el
-/// `Writer`, de modo que el cambio se captura en el outbox y se replica a la nube. Se ejecuta al
-/// arrancar el modo Main (ver `init_main`).
+/// `Writer`, de modo que el cambio se captura en el outbox y se replica a la nube.
+///
+/// La ejecuta el job `fichajes_colgados` (RI-01): antes era un paso de `init_main`, que en un
+/// arranque normal no llega a ejecutarse, y además un TPV que no se reinicia en días no cerraría
+/// nunca nada. Por eso pregunta antes de escribir: `execute()` sube al outbox toda escritura, toque
+/// filas o no, y un `UPDATE` a ciegas cada hora sería una operación vacía por hora en la nube.
 pub async fn auto_close_stale_punches(db: &Db) -> AppResult<u64> {
+    const COLGADO: &str = "Estado = 'ABIERTO' \
+              AND Hora_Salida IS NULL \
+              AND Fecha < date('now','localtime')";
+
     let conn = db.write().await;
+    let hay = {
+        let mut rows = conn
+            .query(
+                &format!("SELECT EXISTS (SELECT 1 FROM Fichajes WHERE {COLGADO});"),
+                Vec::<Value>::new(),
+            )
+            .await
+            .map_err(db_err)?;
+        match rows.next().await.map_err(db_err)? {
+            Some(row) => v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0) != 0,
+            None => false,
+        }
+    };
+    if !hay {
+        return Ok(0);
+    }
+
     let affected = conn
         .execute(
             r#"
@@ -820,6 +845,100 @@ impl LoginRepository for SqliteLoginRepository {
         .map_err(db_err)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_fichajes_colgados {
+    //! TRAB-01 / RI-01: el cierre automático de las jornadas que quedaron abiertas.
+
+    use super::*;
+
+    async fn db_con_usuario() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("fichajes_colgados");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado)
+                     VALUES ('u1', (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Administrador'),
+                             'u1@bar.test', 'h', 'Ana', 'Activo');",
+                    Vec::<Value>::new(),
+                )
+                .await
+                .unwrap();
+        }
+        (db, dir)
+    }
+
+    async fn fichaje(db: &Db, id: &str, fecha: &str) {
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Estado)
+                 VALUES (?1, 'u1', ?2, 1, ?2 || ' 09:00:00', 'ABIERTO');",
+                vec![Value::Text(id.into()), Value::Text(fecha.into())],
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn estado(db: &Db, id: &str) -> (String, i64) {
+        let g = db.read().await;
+        let mut rows = g
+            .query(
+                "SELECT Estado, Cerrado_Automatico FROM Fichajes WHERE ID_Fichaje = ?1;",
+                vec![Value::Text(id.into())],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        (
+            crate::mapping::v_string(row.get_value(0).unwrap()).unwrap_or_default(),
+            v_i64(row.get_value(1).unwrap()).unwrap_or(0),
+        )
+    }
+
+    async fn outbox(db: &Db) -> i64 {
+        let g = db.read().await;
+        let mut rows = g
+            .query("SELECT COUNT(*) FROM _Sync_Outbox;", Vec::<Value>::new())
+            .await
+            .unwrap();
+        v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    fn dia(delta: i64) -> String {
+        (Local::now().date_naive() + chrono::Duration::days(delta))
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn cierra_la_de_ayer_y_deja_la_de_hoy() {
+        let (db, _dir) = db_con_usuario().await;
+        fichaje(&db, "ayer", &dia(-1)).await;
+        fichaje(&db, "hoy", &dia(0)).await;
+
+        assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 1);
+        assert_eq!(estado(&db, "ayer").await, ("CERRADO".into(), 1));
+        assert_eq!(estado(&db, "hoy").await, ("ABIERTO".into(), 0));
+
+        // El cierre replica: la nube tiene que ver la misma jornada cerrada.
+        assert_eq!(outbox(&db).await, 1);
+    }
+
+    #[tokio::test]
+    async fn sin_nada_colgado_no_sube_nada_a_la_nube() {
+        // Corre cada hora: un `UPDATE` a ciegas serían veinticuatro operaciones vacías al día.
+        let (db, _dir) = db_con_usuario().await;
+        fichaje(&db, "hoy", &dia(0)).await;
+
+        assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 0);
+        assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 0);
+        assert_eq!(outbox(&db).await, 0);
     }
 }
 

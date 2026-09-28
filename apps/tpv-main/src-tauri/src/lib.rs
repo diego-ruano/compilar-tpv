@@ -989,19 +989,9 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
     // WS (useMainSocket) lo escucha y drena la nube al instante (sin esperar al poll de seguridad).
     configure_outbox_notifier(&app, &db);
 
-    // TRAB-01: al arrancar el modo Main, cerrar automáticamente las jornadas que quedaron abiertas
-    // de días anteriores (alguien fichó entrada y olvidó la salida). Best-effort: no debe impedir el
-    // arranque si falla. Se marcan como incidencia para revisión, sin inventar hora de salida.
-    match tpv_infra_sqlite::login::auto_close_stale_punches(&db).await {
-        Ok(n) if n > 0 => {
-            tracing::info!(target: "tpv::fichajes", cerradas = n, "jornadas colgadas auto-cerradas al arrancar")
-        }
-        Ok(_) => {}
-        Err(e) => {
-            tracing::warn!(target: "tpv::fichajes", error = %e, "auto_close_stale_punches falló")
-        }
-    }
-
+    // Aquí no va ningún trabajo de mantenimiento (RI-01). Este comando sólo abre la base la primera
+    // vez que se elige «TPV»: en un arranque normal ya la abrió `setup()` y sale arriba. Lo que haya
+    // que hacer con la base abierta es un job (`jobs/registro.rs`) o la precondición de uno.
     *guard = Some(db);
 
     Ok("OK".into())

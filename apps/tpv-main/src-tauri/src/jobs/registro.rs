@@ -56,6 +56,11 @@ const CAJA_ABIERTA_INTERVAL_SECS: u64 = 60 * 60;
 /// a las 09:00 y cierra a las 03:00 sigue dentro— y salta cuando de verdad se ha saltado un cierre.
 const CAJA_ABIERTA_HORAS: i64 = 20;
 
+/// Cada cuánto se cierran las jornadas que quedaron sin fichar la salida (TRAB-01). Una hora: un
+/// TPV que no se apaga cierra las de ayer como mucho una hora después de medianoche, y en el 99 %
+/// de las vueltas es una lectura que no encuentra nada.
+const FICHAJES_COLGADOS_INTERVAL_SECS: u64 = 60 * 60;
+
 /// Cada cuánto se buscan tareas vencidas y reservas próximas.
 const AVISOS_INTERVAL_SECS: u64 = 10 * 60;
 
@@ -181,6 +186,19 @@ pub(crate) fn catalogo() -> Vec<Job> {
             requiere: Requiere::MainOperativa,
             interruptor: None,
             ejecutar: tarea(avisos),
+        },
+        Job {
+            // TRAB-01 / RI-01. Era un paso de `init_main`, que en un arranque normal no se llega a
+            // ejecutar (la base ya la abrió `setup()`), y un paso de arranque tampoco serviría: un
+            // TPV que no se reinicia en días no cerraría nunca nada.
+            nombre: "fichajes_colgados",
+            cada: Duration::from_secs(FICHAJES_COLGADOS_INTERVAL_SECS),
+            // Tras un apagado nocturno ya está vencido y sale sin esperar; esto sólo cuenta en un
+            // equipo recién estrenado, donde no hay nada que cerrar.
+            retardo_inicial: Duration::from_secs(30),
+            requiere: Requiere::MainOperativa,
+            interruptor: None,
+            ejecutar: tarea(fichajes_colgados),
         },
         Job {
             nombre: "caja_sin_cerrar",
@@ -413,6 +431,25 @@ async fn caja_sin_cerrar(app: AppHandle) -> Result<(), String> {
         CAJA_ABIERTA_HORAS,
     )
     .await?;
+    Ok(())
+}
+
+/// Cierra las jornadas de días anteriores que quedaron sin fichar la salida (TRAB-01). Las marca
+/// como incidencia para revisarlas, sin inventar la hora de salida.
+async fn fichajes_colgados(app: AppHandle) -> Result<(), String> {
+    let db = app
+        .state::<AppState>()
+        .db
+        .lock()
+        .await
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "DB no inicializada".to_string())?;
+
+    let n = tpv_infra_sqlite::login::auto_close_stale_punches(&db).await?;
+    if n > 0 {
+        tracing::info!(target: "tpv::fichajes", cerradas = n, "jornadas colgadas cerradas");
+    }
     Ok(())
 }
 
