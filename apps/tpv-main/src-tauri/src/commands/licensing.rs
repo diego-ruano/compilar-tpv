@@ -72,7 +72,18 @@ pub async fn license_activate(
     app: AppHandle,
     args: LicenseActivateInput,
 ) -> Result<LicenseActivateOutcome, AppErrorDto> {
-    let outcome = uc::activate(&svc(&app)?, args).await?;
+    let service = svc(&app)?;
+    let outcome = uc::activate(&service, args).await?;
+
+    // RI-56: el `tenant_id` es el número de instalación de cada registro de facturación, y en un
+    // equipo recién instalado `setup()` corrió antes de que existiera. Sin esto, todo lo facturado
+    // hasta el siguiente reinicio salía con `NumeroInstalacion` vacío. Los que ya salieran así los
+    // rellena el job de remisión antes de enviarlos (`asegurar_sistema_reparado`).
+    if let Ok(Some(st)) = uc::get_state(&service) {
+        if !st.tenant_id.is_empty() {
+            tpv_infra_sqlite::verifactu::set_numero_instalacion(&st.tenant_id);
+        }
+    }
 
     if outcome.cambio_de_equipo {
         tpv_infra_sqlite::recovery::marcar_traslado(&app_data_dir(&app)?)?;

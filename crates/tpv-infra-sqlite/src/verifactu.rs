@@ -18,7 +18,8 @@
 //! cobro aunque se quisiera.
 
 use tpv_domain::dinero::Dinero;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 
 use libsql::Value;
 
@@ -86,11 +87,35 @@ impl SistemaInformatico {
     }
 }
 
-static SISTEMA: OnceLock<SistemaInformatico> = OnceLock::new();
+/// No es un `OnceLock` porque el número de instalación puede llegar con la aplicación ya abierta
+/// (RI-56): en un equipo recién instalado `setup()` corre antes de que exista la licencia, y todo lo
+/// facturado hasta el siguiente reinicio salía con `NumeroInstalacion` vacío.
+static SISTEMA: RwLock<Option<SistemaInformatico>> = RwLock::new(None);
 
-/// Lo llama el shell al arrancar. Idempotente: la segunda llamada se ignora.
+/// Cuántas veces ha cambiado el bloque. Es lo que dice a [`asegurar_sistema_reparado`] si le queda
+/// algo por reparar: cada cambio puede traer un dato que antes faltaba.
+static GENERACION: AtomicU64 = AtomicU64::new(0);
+
+/// La generación del bloque que ya se aplicó a la base con éxito. `u64::MAX` = ninguna todavía.
+static REPARADO_EN: AtomicU64 = AtomicU64::new(u64::MAX);
+
+/// Lo llama el shell al arrancar. Sustituye el bloque entero.
 pub fn set_sistema_informatico(s: SistemaInformatico) {
-    let _ = SISTEMA.set(s);
+    *SISTEMA.write().unwrap_or_else(|e| e.into_inner()) = Some(s);
+    GENERACION.fetch_add(1, Ordering::SeqCst);
+}
+
+/// RI-56: fija el número de instalación sin tocar el resto del bloque. Lo llama la activación de la
+/// licencia, que es cuando se conoce el `tenant_id`. Sin bloque inyectado no hace nada: eso sólo
+/// pasa en los tests y en los ejemplos, que inyectan el suyo.
+pub fn set_numero_instalacion(numero: &str) {
+    let mut g = SISTEMA.write().unwrap_or_else(|e| e.into_inner());
+    if let Some(s) = g.as_mut() {
+        if s.numero_instalacion != numero {
+            s.numero_instalacion = numero.to_string();
+            GENERACION.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 }
 
 /// El bloque configurado, o un defecto que **no oculta que falta**.
@@ -100,8 +125,9 @@ pub fn set_sistema_informatico(s: SistemaInformatico) {
 /// sistema informático incompleto —que la AEAT marcará— en vez de no salir.
 fn sistema() -> SistemaInformatico {
     SISTEMA
-        .get()
-        .cloned()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
         .unwrap_or_else(|| SistemaInformatico {
             nombre_razon: String::new(),
             nif: String::new(),
@@ -153,41 +179,139 @@ pub fn productor_configurado() -> bool {
 /// Va por `execute()` y no por `raw()`: `Registros_Facturacion` es esquema compartido y la copia de
 /// la nube tiene que quedar igual de corregida que la local.
 ///
-/// Se llama al arrancar, después de inyectar el bloque. Es idempotente —la segunda vuelta no
-/// encuentra nada— y best-effort: si la base está bloqueada para escrituras de negocio (una
-/// recuperación en curso), no pasa nada y se reintenta en el arranque siguiente.
+/// ## Qué se repara, y qué no
+///
+/// Dos huecos, cada uno cuando ya hay con qué rellenarlo:
+///
+/// - `"NIF":""` (con su `NombreRazon`, que va con él), en cuanto la versión trae `PRODUCTOR_NIF`.
+/// - `"NumeroInstalacion":""` (RI-56), en cuanto se conoce el `tenant_id`: los registros emitidos
+///   entre la activación y el siguiente reinicio.
+///
+/// Se rellena **sólo el campo que falta** (`json_set`), no el bloque entero: la `Version` del
+/// registro tiene que seguir diciendo con qué versión del TPV se generó, y sustituir el JSON le
+/// ponía la de hoy.
+///
+/// Antes de escribir se pregunta si hay algo que reparar. No es una optimización: `execute()` sube
+/// al outbox toda escritura aunque no toque ninguna fila, así que un `UPDATE` a ciegas mandaría a
+/// la nube una operación vacía cada vez.
+///
+/// Idempotente —la segunda vuelta no encuentra nada—. Quien la llama de verdad es
+/// [`asegurar_sistema_reparado`], antes de remitir.
 pub async fn reparar_sistema_informatico(db: &Db) -> AppResult<usize> {
-    if !productor_configurado() {
-        // Todavía no hay con qué reparar. No es un error: es el estado en el que nace el proyecto.
+    let sis = sistema();
+    let mut total = 0usize;
+
+    // Los dos casos comparten guardia: nunca un registro que la AEAT ya tiene.
+    const NO_ACEPTADO: &str = "NOT EXISTS ( \
+           SELECT 1 FROM _Verifactu_Envios e \
+           WHERE e.ID_Registro = Registros_Facturacion.ID_Registro \
+             AND e.Estado IN ('ACEPTADO', 'ACEPTADO_CON_ERRORES') \
+         )";
+
+    // Sin identidad del productor todavía no hay con qué reparar el NIF. No es un error: es el
+    // estado en el que nace el proyecto.
+    if productor_configurado() {
+        let donde = format!("Sistema_Json LIKE '%\"NIF\":\"\"%' AND {NO_ACEPTADO}");
+        let n = reparar_donde(
+            db,
+            &donde,
+            "json_set(Sistema_Json, '$.NIF', ?1, '$.NombreRazon', ?2)",
+            vec![
+                Value::Text(sis.nif.trim().to_string()),
+                Value::Text(vf::sanear_texto(&sis.nombre_razon, 120)),
+            ],
+        )
+        .await?;
+        if n > 0 {
+            tracing::warn!(
+                target: "tpv::verifactu",
+                registros = n,
+                "{n} registro(s) se emitieron sin identidad del productor y se han corregido: \
+                 ya se pueden remitir"
+            );
+        }
+        total += n;
+    }
+
+    let numero = vf::sanear_texto(&sis.numero_instalacion, 100);
+    if !numero.is_empty() {
+        let donde =
+            format!("Sistema_Json LIKE '%\"NumeroInstalacion\":\"\"%' AND {NO_ACEPTADO}");
+        let n = reparar_donde(
+            db,
+            &donde,
+            "json_set(Sistema_Json, '$.NumeroInstalacion', ?1)",
+            vec![Value::Text(numero)],
+        )
+        .await?;
+        if n > 0 {
+            tracing::warn!(
+                target: "tpv::verifactu",
+                registros = n,
+                "{n} registro(s) se emitieron sin número de instalación y se han corregido"
+            );
+        }
+        total += n;
+    }
+
+    Ok(total)
+}
+
+/// Un `UPDATE` de `Sistema_Json` que sólo se escribe si hay filas que lo necesiten.
+async fn reparar_donde(
+    db: &Db,
+    donde: &str,
+    nuevo: &str,
+    params: Vec<Value>,
+) -> AppResult<usize> {
+    let g = db.write().await;
+
+    let hay = {
+        let mut rows = g
+            .query(
+                &format!("SELECT EXISTS (SELECT 1 FROM Registros_Facturacion WHERE {donde});"),
+                Vec::<Value>::new(),
+            )
+            .await
+            .map_err(db_err)?;
+        match rows.next().await.map_err(db_err)? {
+            Some(row) => v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0) != 0,
+            None => false,
+        }
+    };
+    if !hay {
         return Ok(0);
     }
 
-    let json = sistema().to_json();
-    let g = db.write().await;
-
-    let afectadas = g
+    let n = g
         .execute(
-            "UPDATE Registros_Facturacion SET Sistema_Json = ?1 \
-             WHERE Sistema_Json LIKE '%\"NIF\":\"\"%' \
-               AND NOT EXISTS ( \
-                 SELECT 1 FROM _Verifactu_Envios e \
-                 WHERE e.ID_Registro = Registros_Facturacion.ID_Registro \
-                   AND e.Estado IN ('ACEPTADO', 'ACEPTADO_CON_ERRORES') \
-               );",
-            vec![Value::Text(json)],
+            &format!("UPDATE Registros_Facturacion SET Sistema_Json = {nuevo} WHERE {donde};"),
+            params,
         )
         .await
         .map_err(db_err)?;
+    Ok(n as usize)
+}
 
-    if afectadas > 0 {
-        tracing::warn!(
-            target: "tpv::verifactu",
-            registros = afectadas,
-            "{afectadas} registro(s) se emitieron sin identidad del productor y se han corregido: \
-             ya se pueden remitir"
-        );
+/// RI-01: repara el bloque `SistemaInformatico` **si ha cambiado desde la última reparación**.
+///
+/// Es la precondición de remitir: el job `verifactu_remitir` la llama antes de cada ciclo, y si
+/// falla no se remite. Antes vivía en `init_main`, que en un arranque normal no llega a esa línea
+/// (la base ya la abrió `setup()`), así que el día que la versión trajera `PRODUCTOR_NIF` el job
+/// habría mandado los registros viejos con el NIF vacío — y ese rechazo de la AEAT es definitivo.
+/// Colgada del propio envío, no puede haber un envío que la adelante.
+///
+/// Cuesta una comparación de enteros por vuelta: sólo toca la base la primera vez tras arrancar y
+/// cada vez que el bloque cambia (la activación trae el número de instalación, RI-56). Si falla, la
+/// marca no avanza y se reintenta en la vuelta siguiente.
+pub async fn asegurar_sistema_reparado(db: &Db) -> AppResult<usize> {
+    let generacion = GENERACION.load(Ordering::SeqCst);
+    if REPARADO_EN.load(Ordering::SeqCst) == generacion {
+        return Ok(0);
     }
-    Ok(afectadas as usize)
+    let n = reparar_sistema_informatico(db).await?;
+    REPARADO_EN.store(generacion, Ordering::SeqCst);
+    Ok(n)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2612,8 +2736,8 @@ mod tests_identidad_del_productor {
     //! rellenar la constante en una versión posterior no toca las filas ya escritas.
     //!
     //! ⚠️ Estos tests **dependen de `cargo nextest`**, que ya es lo que manda CLAUDE.md §6. El bloque
-    //! del productor vive en un `OnceLock` (se inyecta una vez, al arrancar), así que un test que lo
-    //! inyecta y otro que lo quiere vacío no pueden convivir en el mismo proceso. Con nextest cada
+    //! del productor es un estático del proceso (lo inyecta el shell al arrancar), así que un test que
+    //! lo inyecta y otro que lo quiere vacío no pueden convivir en el mismo proceso. Con nextest cada
     //! test tiene el suyo; con `cargo test` se pisarían y el que fallara dependería del orden.
 
     use super::*;
@@ -2804,6 +2928,108 @@ mod tests_identidad_del_productor {
             .unwrap();
         let row = rows.next().await.unwrap().unwrap();
         assert!(v_i64(row.get_value(0).unwrap()).unwrap_or(0) > 0);
+    }
+
+    async fn operaciones_en_el_outbox(db: &Arc<Db>) -> i64 {
+        let r = db.read().await;
+        let mut rows = r
+            .query("SELECT COUNT(*) FROM _Sync_Outbox;", Vec::<Value>::new())
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        v_i64(row.get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    fn con_identidad(numero_instalacion: &str) -> SistemaInformatico {
+        SistemaInformatico {
+            nombre_razon: "Altaria Lights SL".into(),
+            nif: "B12345674".into(),
+            nombre_sistema: "TPV Altaria".into(),
+            id_sistema: "01".into(),
+            version: "1.0.0".into(),
+            numero_instalacion: numero_instalacion.into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn la_reparacion_NO_cambia_la_version_con_la_que_se_genero() {
+        // Antes se sustituía el JSON entero por el de hoy, y con él la versión: el registro dejaba
+        // de decir con qué TPV se había emitido. Sólo se rellena lo que falta.
+        let (db, _dir) = db_temporal().await;
+        registro(
+            &db,
+            1,
+            r#"{"NombreRazon":"Altaria Lights","NIF":"","Version":"0.9.0","NumeroInstalacion":"t-1"}"#,
+        )
+        .await;
+        set_sistema_informatico(con_identidad("t-1"));
+
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 1);
+        let json = sistema_json_de(&db, "r1").await;
+        assert!(json.contains(r#""NIF":"B12345674""#), "{json}");
+        assert!(json.contains(r#""NombreRazon":"Altaria Lights SL""#), "{json}");
+        assert!(json.contains(r#""Version":"0.9.0""#), "{json}");
+    }
+
+    #[tokio::test]
+    async fn RI_56_rellena_el_numero_de_instalacion_que_falto() {
+        // Un equipo recién instalado arranca sin licencia; lo que factura hasta reiniciar salía
+        // con `NumeroInstalacion` vacío. Se rellena en cuanto se conoce, aunque el productor
+        // todavía no tenga NIF: son dos huecos independientes.
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, r#"{"NIF":"","NumeroInstalacion":"","Version":"0.9.0"}"#).await;
+        set_sistema_informatico(SistemaInformatico {
+            nif: String::new(),
+            ..con_identidad("")
+        });
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 0, "aún no se sabe");
+
+        set_numero_instalacion("tenant-abc");
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 1);
+        let json = sistema_json_de(&db, "r1").await;
+        assert!(json.contains(r#""NumeroInstalacion":"tenant-abc""#), "{json}");
+        assert!(json.contains(r#""NIF":"""#), "sin identidad del productor, el NIF se queda");
+        assert!(json.contains(r#""Version":"0.9.0""#), "{json}");
+    }
+
+    #[test]
+    fn RI_56_los_registros_nuevos_llevan_el_numero_tras_activar() {
+        set_sistema_informatico(con_identidad(""));
+        set_numero_instalacion("tenant-abc");
+        assert_eq!(sistema().numero_instalacion, "tenant-abc");
+        assert_eq!(sistema().version, "1.0.0", "el resto del bloque no se toca");
+    }
+
+    #[tokio::test]
+    async fn sin_nada_que_reparar_no_se_sube_nada_a_la_nube() {
+        // `execute()` sube al outbox toda escritura, toque filas o no. Repararlo a ciegas antes de
+        // cada envío mandaría a Turso una operación vacía por vuelta.
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, r#"{"NIF":"B12345674","NumeroInstalacion":"t-1"}"#).await;
+        set_sistema_informatico(con_identidad("t-1"));
+
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 0);
+        assert_eq!(operaciones_en_el_outbox(&db).await, 0);
+    }
+
+    #[tokio::test]
+    async fn RI_01_asegurar_repara_una_vez_por_cambio_del_bloque() {
+        // Es la precondición del envío: corre en cada vuelta del job, pero sólo toca la base cuando
+        // el bloque ha cambiado desde la última reparación buena.
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, SIN_IDENTIDAD).await;
+        set_sistema_informatico(con_identidad(""));
+
+        assert_eq!(asegurar_sistema_reparado(&db).await.unwrap(), 1);
+
+        // Un registro roto que apareciera ahora no se buscaría: nada ha cambiado.
+        registro(&db, 2, r#"{"NIF":"","NumeroInstalacion":""}"#).await;
+        assert_eq!(asegurar_sistema_reparado(&db).await.unwrap(), 0);
+
+        // La activación trae el número de instalación: eso sí es un cambio, y se vuelve a mirar.
+        set_numero_instalacion("tenant-abc");
+        assert_eq!(asegurar_sistema_reparado(&db).await.unwrap(), 2);
+        assert!(sistema_json_de(&db, "r2").await.contains(r#""NIF":"B12345674""#));
     }
 }
 

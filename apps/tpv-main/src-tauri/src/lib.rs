@@ -234,9 +234,9 @@ struct SetPrinterArgs {
        carencia: mandar un registro con `"NIF":""` sería que la AEAT lo rechazara por formato, y ese
        rechazo es DEFINITIVO porque `Sistema_Json` se congela en la fila y no se recompone al
        remitir. Quedándose `PENDIENTE` se sale; «rechazado» no.
-     · Al arrancar con la constante puesta, los registros emitidos sin ella se corrigen solos
-       (`verifactu::reparar_sistema_informatico`). Es legítimo porque `SistemaInformatico` NO entra
-       en la cadena de huella.
+     · Con la constante puesta, los registros emitidos sin ella se corrigen solos antes del primer
+       envío (`verifactu::asegurar_sistema_reparado`, precondición del job). Es legítimo porque
+       `SistemaInformatico` NO entra en la cadena de huella.
      · El panel y el aviso dicen que la culpa es del programa, no del bar.
 
    Lo que falta y por qué, en docs/VERIFACTU_PENDIENTES.md §1. Va junto con la declaración
@@ -999,22 +999,6 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
         Ok(_) => {}
         Err(e) => {
             tracing::warn!(target: "tpv::fichajes", error = %e, "auto_close_stale_punches falló")
-        }
-    }
-
-    // FISCAL-01: corrige el bloque `SistemaInformatico` de los registros que se emitieron antes de
-    // que el productor del software tuviera identidad. Va aquí porque `setup()` ya inyectó el bloque
-    // y aquí es donde hay base. Best-effort y por lo mismo que el auto-cierre de jornadas: nada del
-    // arranque puede impedir que el TPV abra. Si falla (base bloqueada por una recuperación en
-    // curso), se reintenta en el arranque siguiente — y mientras tanto el job no remite esos
-    // registros, así que no se pierde nada.
-    match tpv_infra_sqlite::verifactu::reparar_sistema_informatico(&db).await {
-        Ok(n) if n > 0 => {
-            tracing::warn!(target: "tpv::verifactu", registros = n, "registros corregidos: ya tienen identidad del productor")
-        }
-        Ok(_) => {}
-        Err(e) => {
-            tracing::warn!(target: "tpv::verifactu", error = %e, "reparar_sistema_informatico falló")
         }
     }
 

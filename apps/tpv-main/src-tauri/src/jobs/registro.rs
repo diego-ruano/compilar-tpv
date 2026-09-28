@@ -463,7 +463,7 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
     // productor vacío lo lleva vacío para siempre. Mandarlo sería que la AEAT lo rechazara por
     // formato y que ese rechazo fuese definitivo: la fila ya está escrita y no se recompone al
     // remitir. Callándonos ahora, esos registros esperan a que una versión posterior traiga la
-    // constante — y al arrancar con ella se corrigen solos (`reparar_sistema_informatico`) y salen.
+    // constante — y antes del primer envío con ella se corrigen solos (ver más abajo) y salen.
     //
     // Es un bug NUESTRO, no del bar, así que se registra como error y no como aviso: el panel dirá
     // `sin_datos_del_productor` y la escalera de avisos mandará a soporte en vez de a mirar el
@@ -522,6 +522,22 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
         );
         return Ok(());
     }
+
+    // RI-01: reparar el bloque `SistemaInformatico` es la PRECONDICIÓN del envío, no una tarea de
+    // arranque aparte. Vivía en `init_main`, que en un arranque normal no llega a ejecutarla, y un
+    // job propio tampoco serviría: los jobs no tienen orden entre sí y éste, vencido tras una
+    // actualización, sale el primero. Si la reparación falla, no se remite: un solo envío con el
+    // NIF vacío es un rechazo que ya no tiene arreglo. Sólo toca la base cuando el bloque cambia.
+    let db = state
+        .db
+        .lock()
+        .await
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "DB no inicializada".to_string())?;
+    tpv_infra_sqlite::verifactu::asegurar_sistema_reparado(&db)
+        .await
+        .map_err(|e| format!("no se pudo reparar el bloque SistemaInformatico: {e}"))?;
 
     let ahora_ms = chrono::Local::now().timestamp_millis();
     let cliente = tpv_infra_aeat::AeatAdapter::new();

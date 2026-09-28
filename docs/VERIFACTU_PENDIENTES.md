@@ -63,11 +63,13 @@ Tres piezas, y hacen falta las tres:
    las facturas están guardadas y se enviarán solas al actualizar»*. Mandar a un bar a revisar su
    router por un fallo nuestro le hace perder una tarde y le enseña a ignorar el único aviso que no
    puede ignorar.
-3. **Al arrancar con la constante puesta, se corrigen solos** (`reparar_sistema_informatico`). Es la
-   única escritura que toca una tabla append-only, y es legítima porque cumple las tres condiciones:
-   `SistemaInformatico` **no entra en la cadena de huella** (son emisor, número, fecha, tipo, cuota,
-   importe, huella anterior y fecha-hora), no toca ningún dato de la factura, y sólo alcanza a
-   registros que la AEAT no tiene.
+3. **Con la constante puesta, se corrigen solos antes del primer envío**
+   (`asegurar_sistema_reparado`, que el job llama antes de cada ciclo y que, si falla, impide
+   remitir). Es la única escritura que toca una tabla append-only, y es legítima porque cumple las
+   tres condiciones: `SistemaInformatico` **no entra en la cadena de huella** (son emisor, número,
+   fecha, tipo, cuota, importe, huella anterior y fecha-hora), no toca ningún dato de la factura, y
+   sólo alcanza a registros que la AEAT no tiene. Rellena sólo el campo que falta: la `Version` con
+   la que se generó el registro no se toca.
 
 O sea que hoy se puede vender, emitir y encadenar; lo único que no se puede es remitir, y eso se
 desbloquea solo el día que se rellene la constante.
