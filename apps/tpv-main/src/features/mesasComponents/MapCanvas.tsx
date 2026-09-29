@@ -1,7 +1,8 @@
 // components/mesasComponents/MapCanvas.tsx
 import React from "react";
 import { Stage, Layer, Rect, Line, Group } from "react-konva";
-import type { Salon, MesaMeta } from "./types";
+import type { MesaMetaOut } from "@tpv/contracts";
+import type { Salon } from "./types";
 import TableNode from "./TableNode";
 import { useTheme } from "../../shared/stores/useTheme";
 
@@ -19,7 +20,7 @@ export default function MapCanvas({
     mapBoxRef: React.RefObject<HTMLDivElement | null>;
     mapSize: { width: number; height: number };
     view: { x: number; y: number; scale: number };
-    mesaMetaById: Record<number, MesaMeta>;
+    mesaMetaById: Record<number, MesaMetaOut>;
     onOpenMesa: (mesaId: string, mesaNombre: string) => void;
 }) {
     const dark = useTheme((s) => s.theme === "dark");

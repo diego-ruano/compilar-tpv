@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import MapCanvas from "../mesasComponents/MapCanvas";
 import SalonTabs from "../mesasComponents/SalonTabs";
-import type { Salon, MesaMeta } from "../mesasComponents/types";
+import type { MesaMetaOut } from "@tpv/contracts";
+import type { Salon } from "../mesasComponents/types";
 
 type Props = {
     open: boolean;
@@ -13,7 +14,7 @@ type Props = {
     activeSalonId: string;
     onChangeSalon: (id: string) => void;
 
-    mesaMetaById: Record<number, MesaMeta>;
+    mesaMetaById: Record<number, MesaMetaOut>;
 
     onSelectMesa: (idMesa: string, nombreMesa: string) => void;
 

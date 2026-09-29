@@ -31,7 +31,8 @@ import { useToast } from "../../shared/toast";
 
 // ✅ Modal + tipos del layout (MapCanvas)
 import ReservaMesaMapModal from "../../features/reservas/ReservaMesaMapModal";
-import type { Salon, MesaMeta } from "../../features/mesasComponents/types";
+import type { MesaMetaOut } from "@tpv/contracts";
+import type { Salon } from "../../features/mesasComponents/types";
 import { conAviso } from "../../shared/lib/conAviso";
 
 /* =========================
@@ -435,7 +436,7 @@ export default function Reservas() {
   ========================================================= */
   const [mostrarMapaMesas, setMostrarMapaMesas] = useState(false);
   const [salonsLayout, setSalonsLayout] = useState<Salon[]>([]);
-  const emptyMesaMetaById = useMemo(() => ({} as Record<number, MesaMeta>), []);
+  const emptyMesaMetaById = useMemo(() => ({} as Record<number, MesaMetaOut>), []);
 
   useEffect(() => {
     let cancelado = false;

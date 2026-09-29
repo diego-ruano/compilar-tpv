@@ -24,8 +24,8 @@ import { cn } from "../../shared/lib/cn";
 
 import {
   clientesGetClienteForm,
+  type ClienteOverview,
   type FiltroRanking,
-  type ClienteRow,
 } from "../../features/ClientsComponents/clientesApis";
 import {
   useClientesOverview,
@@ -35,7 +35,7 @@ import {
 } from "../../features/ClientsComponents/clientesQueries";
 import { conAviso } from "../../shared/lib/conAviso";
 import type { Dinero } from "@tpv/contracts";
-import { deCentimos, eur } from "../../shared/lib/dinero";
+import { eur } from "../../shared/lib/dinero";
 
 type Vista = "list" | "detail";
 
@@ -53,10 +53,6 @@ type ClienteUI = {
   TotalReservas: number;
   ReservasPendientes: number;
 };
-
-// El formateador del dinero vive en un solo sitio (ARQ-01): tenerlo aqui otra vez era la
-// duodecima copia, y no todas protegian igual contra un importe ilegible.
-const euro = eur;
 
 const RANKINGS: { key: FiltroRanking; label: string }[] = [
   { key: "todos", label: "Todos" },
@@ -118,29 +114,25 @@ export default function Clientes() {
   const [fTelefono, setFTelefono] = useState("");
   const [fNotas, setFNotas] = useState("");
 
-  function mapRowToUI(r: ClienteRow): ClienteUI {
-    const fecha = r.Ultima_Reserva_Fecha;
-    const hora = r.Ultima_Reserva_Hora;
+  function mapRowToUI(r: ClienteOverview): ClienteUI {
+    const fecha = r.ultima_reserva_fecha;
+    const hora = r.ultima_reserva_hora;
     const ultimaReserva = fecha ? `${fecha}${hora ? ` ${hora}` : ""}` : "-";
 
-    const totalGastado = deCentimos(Number(r.Total_Gastado_Stored || 0));
-
     return {
-      ID_Cliente: String(r.ID_Cliente ?? ""),
-      Nombre: String(r.Nombre ?? ""),
-      Email: String(r.Email ?? ""),
-      Telefono: String(r.Telefono ?? ""),
+      ID_Cliente: r.id_cliente,
+      Nombre: r.nombre,
+      Email: r.email ?? "",
+      Telefono: r.telefono ?? "",
 
       UltimaReservaTexto: ultimaReserva,
-      Mesa: r.Ultima_Reserva_Mesa ? String(r.Ultima_Reserva_Mesa) : "-",
+      Mesa: r.ultima_reserva_mesa ?? "-",
       Comensales:
-        r.Ultima_Reserva_NumPersonas != null
-          ? String(r.Ultima_Reserva_NumPersonas)
-          : "-",
+        r.ultima_reserva_num_personas != null ? String(r.ultima_reserva_num_personas) : "-",
 
-      TotalGastado: totalGastado,
-      TotalReservas: Number(r.Total_Reservas || 0),
-      ReservasPendientes: Number(r.Reservas_Pendientes || 0),
+      TotalGastado: r.total_gastado_stored,
+      TotalReservas: r.total_reservas,
+      ReservasPendientes: r.reservas_pendientes,
     };
   }
 
@@ -253,15 +245,13 @@ export default function Clientes() {
     if (!clienteActivo) return;
 
     try {
-      const r0 = await clientesGetClienteForm({
-        idCliente: clienteActivo.ID_Cliente,
-      });
+      const r0 = await clientesGetClienteForm(clienteActivo.ID_Cliente);
 
       setModalClienteModo("editar");
-      setFNombre(String(r0?.Nombre ?? clienteActivo.Nombre ?? ""));
-      setFEmail(String(r0?.Email ?? clienteActivo.Email ?? ""));
-      setFTelefono(String(r0?.Telefono ?? clienteActivo.Telefono ?? ""));
-      setFNotas(String(r0?.Notas ?? ""));
+      setFNombre(r0?.nombre ?? clienteActivo.Nombre);
+      setFEmail(r0?.email ?? clienteActivo.Email);
+      setFTelefono(r0?.telefono ?? clienteActivo.Telefono);
+      setFNotas(r0?.notas ?? "");
       setModalClienteOpen(true);
     } catch (e) {
       console.error(e);
@@ -284,9 +274,9 @@ export default function Clientes() {
       if (modalClienteModo === "nuevo") {
         const ok = await createCliente.mutateAsync({
           nombre,
-          email: email || null,
-          telefono: telefono || null,
-          notas: notas || null,
+          email: email || undefined,
+          telefono: telefono || undefined,
+          notas: notas || undefined,
         });
 
         if (!ok) {
@@ -301,11 +291,11 @@ export default function Clientes() {
       if (!clienteActivo) return;
 
       const ok = await updateCliente.mutateAsync({
-        idCliente: clienteActivo.ID_Cliente,
+        id_cliente: clienteActivo.ID_Cliente,
         nombre,
-        email: email || null,
-        telefono: telefono || null,
-        notas: notas || null,
+        email: email || undefined,
+        telefono: telefono || undefined,
+        notas: notas || undefined,
       });
 
       if (!ok) {
@@ -467,7 +457,7 @@ export default function Clientes() {
                             <span className="text-[11px] font-medium">Gastado</span>
                           </div>
                           <p className="mt-0.5 truncate text-base font-bold text-fg">
-                            {euro(c.TotalGastado)}
+                            {eur(c.TotalGastado)}
                           </p>
                         </div>
                       </div>
@@ -601,7 +591,7 @@ export default function Clientes() {
                   <Wallet className="size-4 text-accent" aria-hidden />
                   <span className="text-xs font-medium">Total gastado</span>
                 </div>
-                <p className="mt-1 text-2xl font-bold text-fg">{euro(clienteActivo.TotalGastado)}</p>
+                <p className="mt-1 text-2xl font-bold text-fg">{eur(clienteActivo.TotalGastado)}</p>
 
                 {/*
                   DB-14: el gasto es una suma que se guarda aparte, así que puede quedarse vieja

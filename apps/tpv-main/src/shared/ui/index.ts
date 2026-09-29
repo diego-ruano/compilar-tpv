@@ -16,6 +16,9 @@ export type { CardProps } from "./Card";
 export { default as Input } from "./Input";
 export type { InputProps } from "./Input";
 
+export { CampoDinero, useImporte } from "./CampoDinero";
+export type { CampoDineroProps } from "./CampoDinero";
+
 export { default as SearchInput } from "./SearchInput";
 export type { SearchInputProps } from "./SearchInput";
 

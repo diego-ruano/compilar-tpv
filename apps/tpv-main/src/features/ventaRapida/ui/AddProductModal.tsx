@@ -3,9 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useToast } from "../../../shared/toast";
 import Modal from "../ui/Modal";
 import { cn } from "../utils";
-import {
-  type ProveedorMiniRow,
-} from "../../InventaryComponents/api/inventarioAPI";
+import { CampoDinero, useImporte } from "../../../shared/ui/CampoDinero";
 import {
   useCategorias,
   useCreateLote,
@@ -15,12 +13,6 @@ import {
 import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 import { conAviso } from "../../../shared/lib/conAviso";
 
-type CategoriaMini = { ID_Categoria: string; Nombre: string };
-type ProveedorMini = {
-  ID_Proveedor: string;
-  Nombre_Empresa: string;
-  Email: string | null;
-};
 
 const convertirABase64 = (file: File): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -30,21 +22,21 @@ const convertirABase64 = (file: File): Promise<string> =>
     reader.onerror = (error) => reject(error);
   });
 
-function parseNullableNumber(value: string): number | null {
+/** Una cantidad escrita a mano; vacío o ilegible = sin informar. */
+function numeroOpcional(value: string): number | undefined {
   const raw = String(value ?? "").trim().replace(",", ".");
-  if (!raw) return null;
+  if (!raw) return undefined;
   const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? n : undefined;
 }
 
-function trimOrNull(value: string): string | null {
-  const t = String(value ?? "").trim();
-  return t ? t : null;
+function textoOpcional(value: string): string | undefined {
+  return String(value ?? "").trim() || undefined;
 }
 
-function toSqlDateTimeOrNull(value: string): string | null {
+function fechaHoraOpcional(value: string): string | undefined {
   const t = String(value ?? "").trim();
-  return t ? `${t} 00:00:00` : null;
+  return t ? `${t} 00:00:00` : undefined;
 }
 
 function buildInitialLoteCode(productId: string): string {
@@ -72,29 +64,15 @@ export default function AddProductModal({
   const upsertProducto = useUpsertProducto();
   const createLote = useCreateLote();
 
-  const categorias: CategoriaMini[] = useMemo(
-    () =>
-      (categoriasQuery.data ?? []).map((c) => ({
-        ID_Categoria: String(c.ID_Categoria ?? ""),
-        Nombre: String(c.Nombre ?? ""),
-      })),
-    [categoriasQuery.data],
-  );
-  const proveedores: ProveedorMini[] = useMemo(
-    () =>
-      (proveedoresQuery.data ?? []).map((p: ProveedorMiniRow) => ({
-        ID_Proveedor: String(p.ID_Proveedor ?? ""),
-        Nombre_Empresa: String(p.Nombre_Empresa ?? ""),
-        Email: p.Email ?? null,
-      })),
-    [proveedoresQuery.data],
-  );
+  const categorias = categoriasQuery.data ?? [];
+  const proveedores = proveedoresQuery.data ?? [];
 
   const [idCategoria, setIdCategoria] = useState<string>("");
   const [idProveedor, setIdProveedor] = useState<string>("");
 
   const [nombre, setNombre] = useState("");
-  const [precioVenta, setPrecioVenta] = useState("");
+  const precio = useImporte();
+  const ponerPrecio = precio.poner;
   const [stockActual, setStockActual] = useState("");
   const [stockMinimo, setStockMinimo] = useState("");
   const [unidadMedida, setUnidadMedida] = useState("");
@@ -143,7 +121,7 @@ export default function AddProductModal({
     setLoading(false);
     setImage(null);
     setNombre("");
-    setPrecioVenta("");
+    ponerPrecio(null);
     setStockActual("");
     setStockMinimo("");
     setUnidadMedida("");
@@ -154,7 +132,7 @@ export default function AddProductModal({
 
     if (categoriaPreseleccionadaId) setIdCategoria(categoriaPreseleccionadaId);
     else setIdCategoria("");
-  }, [open, categoriaPreseleccionadaId]);
+  }, [open, categoriaPreseleccionadaId, ponerPrecio]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -162,6 +140,10 @@ export default function AddProductModal({
     // La imagen es obligatoria (ahora se sube a R2 también desde Handy).
     if (!nombre.trim() || idCategoria === "" || !image) {
       toast.info("Validación", "Nombre, categoría e imagen son obligatorios.");
+      return;
+    }
+    if (!precio.legible) {
+      toast.info("Validación", "El precio de venta no se entiende como importe.");
       return;
     }
 
@@ -192,14 +174,14 @@ export default function AddProductModal({
 
       const nuevoProductoId = await upsertProducto.mutateAsync({
         id_categoria: idCategoria,
-        id_proveedor: idProveedor === "" ? null : idProveedor,
+        id_proveedor: idProveedor || undefined,
         nombre: nombre.trim(),
-        precio_venta: parseNullableNumber(precioVenta),
-        stock_minimo: parseNullableNumber(stockMinimo),
-        unidad_medida: trimOrNull(unidadMedida),
+        precio_venta: precio.valor ?? undefined,
+        stock_minimo: numeroOpcional(stockMinimo),
+        unidad_medida: textoOpcional(unidadMedida),
         nombre_imagen: nombreArchivo,
         ruta_imagen: rutaParaBD,
-        cantidad_pedido_esperada: parseNullableNumber(cantidadPedidoEsperada),
+        cantidad_pedido_esperada: numeroOpcional(cantidadPedidoEsperada),
         ids_alergenos: [],
       });
 
@@ -209,16 +191,16 @@ export default function AddProductModal({
 
       if (image) triggerImageUploadDrain();
 
-      const stockInicial = parseNullableNumber(stockActual) ?? 0;
+      const stockInicial = numeroOpcional(stockActual) ?? 0;
 
       if (stockInicial > 0) {
         await createLote.mutateAsync({
           id_producto: nuevoProductoId,
           codigo_lote: buildInitialLoteCode(nuevoProductoId),
-          caducidad: trimOrNull(caducidadProxima),
+          caducidad: textoOpcional(caducidadProxima),
           stock_disponible: stockInicial,
-          fecha_entrada: toSqlDateTimeOrNull(ultimaEntrada),
-          id_proveedor: idProveedor === "" ? null : idProveedor,
+          fecha_entrada: fechaHoraOpcional(ultimaEntrada),
+          id_proveedor: idProveedor || undefined,
           notas: "Lote inicial creado desde venta rápida",
         });
       }
@@ -301,13 +283,11 @@ export default function AddProductModal({
           </select>
         </div>
 
-        <input
-          type="number"
-          step="0.01"
+        <CampoDinero
+          {...precio.campo}
           placeholder="Precio venta"
-          value={precioVenta}
-          onChange={(e) => setPrecioVenta(e.target.value)}
-          className="border border-negro/20 rounded-xl px-3 py-2 sm:py-2.5 text-sm sm:text-base"
+          aria-label="Precio venta"
+          className="w-full border border-negro/20 rounded-xl px-3 py-2 sm:py-2.5 text-sm sm:text-base"
           disabled={loading}
         />
 

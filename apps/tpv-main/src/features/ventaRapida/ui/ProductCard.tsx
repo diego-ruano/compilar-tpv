@@ -4,8 +4,7 @@ import { Info, Minus, Plus, ImageOff } from "lucide-react";
 import { ProductoDisplay } from "../types";
 import { cn } from "../utils";
 import ImageWithFallback from "../../../shared/ui/ImageWithFallback";
-import type { Dinero } from "@tpv/contracts";
-import { deCentimos } from "../../../shared/lib/dinero";
+import { eur } from "../../../shared/lib/dinero";
 
 export type ProductCardProps = {
   p: ProductoDisplay;
@@ -13,10 +12,9 @@ export type ProductCardProps = {
   onAdd: (p: ProductoDisplay) => void;
   onRemove: (productoId: string) => void;
   onInfo: (productId: string) => void;
-  formatPrice: (d: Dinero) => string;
 };
 
-function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCardProps) {
+function ProductCard({ p, qty, onAdd, onRemove, onInfo }: ProductCardProps) {
   const handleAdd = useCallback(() => onAdd(p), [onAdd, p]);
   const handleRemove = useCallback(() => onRemove(p.ID_Producto), [onRemove, p.ID_Producto]);
   const handleInfo = useCallback(() => onInfo(p.ID_Producto), [onInfo, p.ID_Producto]);
@@ -80,7 +78,7 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
             {p.Nombre}
           </p>
           <span className="whitespace-nowrap text-xs font-bold text-fg sm:text-sm">
-            {formatPrice(deCentimos(Number(p.Precio_Venta || 0)))}
+            {eur(p.Precio_Venta)}
           </span>
         </div>
       </div>
@@ -128,11 +126,10 @@ export default React.memo(ProductCard, (prev, next) => {
     prev.qty === next.qty &&
     prev.p.ID_Producto === next.p.ID_Producto &&
     prev.p.Nombre === next.p.Nombre &&
-    Number(prev.p.Precio_Venta || 0) === Number(next.p.Precio_Venta || 0) &&
+    prev.p.Precio_Venta === next.p.Precio_Venta &&
     prev.p.urlImagen === next.p.urlImagen &&
     prev.onAdd === next.onAdd &&
     prev.onRemove === next.onRemove &&
-    prev.onInfo === next.onInfo &&
-    prev.formatPrice === next.formatPrice
+    prev.onInfo === next.onInfo
   );
 });

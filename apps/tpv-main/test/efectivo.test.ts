@@ -29,7 +29,6 @@ import {
     cambioDelCobro,
     DENOMS_COBRO,
     exigeMotivo,
-    leerImporte,
     sumaImportes,
     totalRecuento,
     validarCierre,
@@ -363,87 +362,5 @@ describe("validarCierre (igual que `validar` de Rust)", () => {
 
     it("dejar exactamente lo contado sí se puede", () => {
         expect(validarCierre(arqueo(10_000, 20_000, 30_000, 30_000), null, UMBRAL)).toBeNull();
-    });
-});
-
-describe("leerImporte: el fondo que se escribe en el primer cierre", () => {
-    // Antes se leía con `Number(texto.replace(",", "."))` y lo ilegible valía 0 sin avisar. Ese
-    // fondo encabeza la cadena de cierres, así que un error ahí se arrastra a todos los siguientes.
-
-    it.each([
-        ["", 0],
-        ["   ", 0],
-        ["0", 0],
-        ["150", 15_000],
-        ["0150", 15_000],
-        [" 150 ", 15_000],
-        ["150,50", 15_050],
-        ["150,5", 15_050],
-        ["0,05", 5],
-        ["150.50", 15_050],
-        ["150.5", 15_050],
-        // Un punto con tres cifras detrás agrupa miles, como se escribe en España.
-        ["1.500", 150_000],
-        ["12.000", 1_200_000],
-        ["150.555", 15_055_500],
-        // Antes, estos tres valían 0.
-        ["1.234,56", 123_456],
-        ["150 €", 15_000],
-        ["1 500", 150_000],
-        ["1.234.567,89", 123_456_789],
-        ["1,234.56", 123_456],
-        ["1 500,50", 150_050],
-        ["150€", 15_000],
-        ["€150", 15_000],
-        ["€ 150", 15_000],
-        ["1.500,00 €", 150_000],
-    ])("«%s» → %s céntimos", (texto, esperado) => {
-        expect(leerImporte(texto)).toBe(esperado);
-    });
-
-    it.each([
-        // Dos lecturas posibles: no se adivina.
-        ["1,500"],
-        ["0.500"],
-        // Más de dos decimales.
-        ["150,555"],
-        ["1.5000"],
-        // Separadores que no agrupan de tres en tres, o repetidos donde va el decimal.
-        ["1..5"],
-        ["1.2,5"],
-        ["12.34,5"],
-        ["1,2,3"],
-        ["1,234,56"],
-        ["150 50"],
-        // Media cifra.
-        ["150,"],
-        ["150."],
-        [",50"],
-        [".50"],
-        // Lo que no es un importe de un cajón.
-        ["-50"],
-        ["+50"],
-        ["abc"],
-        ["150€50"],
-        ["1e3"],
-        ["99999999999999999"],
-    ])("«%s» no se entiende, y no vale cero", (texto) => {
-        expect(leerImporte(texto)).toBeNull();
-    });
-
-    it("barrido: cualquier importe escrito como lo pinta la pantalla, o a mano, se lee exacto", () => {
-        for (let cent = 0; cent <= 2_000_000; cent += 137) {
-            const [euros, decimales] = [Math.floor(cent / 100), String(cent % 100).padStart(2, "0")];
-            for (const escrito of [
-                pantalla(c(cent)),
-                `${euros},${decimales}`,
-                `${euros}.${decimales}`,
-                `${euros}`,
-            ]) {
-                const esperado = escrito === `${euros}` ? euros * 100 : cent;
-                const leido = leerImporte(escrito);
-                if (leido !== esperado) throw new Error(`«${escrito}» se lee ${leido}, no ${esperado}`);
-            }
-        }
     });
 });

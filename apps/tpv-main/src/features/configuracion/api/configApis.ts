@@ -1,11 +1,17 @@
 // src/features/configuracion/api/configApis.ts
 //
-// API de configuración — Local-First puro (invokeClient, sin dualCall/op_id/afterRemoteOk).
-// Tipos UI (camelCase) y mappers intactos; sólo cambia el transporte.
+// API de configuración. Lo que llega de Rust son los DTO generados por ts-rs; aquí se traducen a
+// la forma de los stores de Zustand (camelCase), que es estado de la aplicación y no un contrato:
+// la configuración se carga una vez y la leen muchas pantallas. Pasar esos stores a los nombres
+// del DTO queda para RI-87.
 
 import { invokeClient } from "@tpv/client";
-import { deCentimos } from "../../../shared/lib/dinero";
-import type { Dinero } from "@tpv/contracts";
+import type {
+    BusinessSettings as BusinessSettingsDto,
+    ContactSettings as ContactSettingsDto,
+    Dinero,
+    TicketSettings as TicketSettingsDto,
+} from "@tpv/contracts";
 
 /* ── Types frontend ── */
 
@@ -70,18 +76,6 @@ export type TicketSettingsPatch = Partial<TicketSettings>;
 
 /* ── Helpers ── */
 
-function pick(obj: any, keys: string[], fallback?: any): any {
-    for (const k of keys) {
-        if (obj && obj[k] !== undefined) return obj[k];
-    }
-    return fallback;
-}
-
-function num(v: any, fallback: number): number {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-}
-
 function clampPaperWidthMm(n: number): number {
     return n === 58 || n === 80 || n === 112 ? n : 80;
 }
@@ -99,26 +93,19 @@ function clampFontScale(n: number): number {
     return Math.min(2, Math.max(0.5, n));
 }
 
-function mapBizFromRust(x: any): BusinessSettings {
+function mapBizFromRust(x: BusinessSettingsDto): BusinessSettings {
     return {
-        businessName: String(pick(x, ["business_name", "businessName"], "TPV")),
-        logoDataUrl: pick(x, ["logo_data_url", "logoDataUrl"], null) ?? null,
-        direccion: String(pick(x, ["direccion"], "")),
-        telefono: String(pick(x, ["telefono"], "")),
-        cif: String(pick(x, ["cif"], "")),
-        mensajeFooter: String(
-            pick(x, ["mensaje_footer", "mensajeFooter"], "¡Gracias por su visita!"),
-        ),
-        ivaPercent: num(pick(x, ["iva_percent", "ivaPercent"]), 10),
-        razonSocial: String(pick(x, ["razon_social", "razonSocial"], "")),
-        descripcionOp: String(
-            pick(x, ["descripcion_op", "descripcionOp"], "Servicios de hosteleria y restauracion"),
-        ),
-        limiteSimplif: deCentimos(num(pick(x, ["limite_simplif", "limiteSimplif"]), 300_000)),
-        verifactuEntorno:
-            String(pick(x, ["verifactu_entorno", "verifactuEntorno"], "produccion")) === "pruebas"
-                ? "pruebas"
-                : "produccion",
+        businessName: x.business_name,
+        logoDataUrl: x.logo_data_url,
+        direccion: x.direccion,
+        telefono: x.telefono,
+        cif: x.cif,
+        mensajeFooter: x.mensaje_footer,
+        ivaPercent: x.iva_percent,
+        razonSocial: x.razon_social,
+        descripcionOp: x.descripcion_op,
+        limiteSimplif: x.limite_simplif,
+        verifactuEntorno: x.verifactu_entorno === "pruebas" ? "pruebas" : "produccion",
     };
 }
 
@@ -138,26 +125,26 @@ function mapBizPatchToRust(patch: BusinessSettingsPatch): Record<string, any> {
     return out;
 }
 
-function mapTicketFromRust(x: any): TicketSettings {
+function mapTicketFromRust(x: TicketSettingsDto): TicketSettings {
     return {
-        showLogo: !!pick(x, ["show_logo", "showLogo"], true),
-        showBusinessName: !!pick(x, ["show_business_name", "showBusinessName"], true),
-        showAddress: !!pick(x, ["show_address", "showAddress"], true),
-        showPhone: !!pick(x, ["show_phone", "showPhone"], true),
-        showCif: !!pick(x, ["show_cif", "showCif"], true),
-        showDateTime: !!pick(x, ["show_date_time", "showDateTime"], true),
-        showLineItems: !!pick(x, ["show_line_items", "showLineItems"], true),
-        showBaseAndIva: !!pick(x, ["show_base_and_iva", "showBaseAndIva"], true),
-        showTotal: !!pick(x, ["show_total", "showTotal"], true),
-        showFooterMessage: !!pick(x, ["show_footer_message", "showFooterMessage"], true),
-        paperWidthMm: clampPaperWidthMm(num(pick(x, ["paper_width_mm", "paperWidthMm"]), 80)),
-        paperDpi: clampPaperDpi(num(pick(x, ["paper_dpi", "paperDpi"]), 203)),
-        charsPerLine: clampCharsPerLine(num(pick(x, ["chars_per_line", "charsPerLine"]), 42)),
-        marginTopMm: clampMarginMm(num(pick(x, ["margin_top_mm", "marginTopMm"]), 0)),
-        marginBottomMm: clampMarginMm(num(pick(x, ["margin_bottom_mm", "marginBottomMm"]), 0)),
-        marginLeftMm: clampMarginMm(num(pick(x, ["margin_left_mm", "marginLeftMm"]), 0)),
-        marginRightMm: clampMarginMm(num(pick(x, ["margin_right_mm", "marginRightMm"]), 0)),
-        fontScale: clampFontScale(num(pick(x, ["font_scale", "fontScale"]), 1)),
+        showLogo: x.show_logo,
+        showBusinessName: x.show_business_name,
+        showAddress: x.show_address,
+        showPhone: x.show_phone,
+        showCif: x.show_cif,
+        showDateTime: x.show_date_time,
+        showLineItems: x.show_line_items,
+        showBaseAndIva: x.show_base_and_iva,
+        showTotal: x.show_total,
+        showFooterMessage: x.show_footer_message,
+        paperWidthMm: clampPaperWidthMm(x.paper_width_mm),
+        paperDpi: clampPaperDpi(x.paper_dpi),
+        charsPerLine: clampCharsPerLine(x.chars_per_line),
+        marginTopMm: clampMarginMm(x.margin_top_mm),
+        marginBottomMm: clampMarginMm(x.margin_bottom_mm),
+        marginLeftMm: clampMarginMm(x.margin_left_mm),
+        marginRightMm: clampMarginMm(x.margin_right_mm),
+        fontScale: clampFontScale(x.font_scale),
     };
 }
 
@@ -186,11 +173,8 @@ function mapTicketPatchToRust(patch: TicketSettingsPatch): Record<string, any> {
     return out;
 }
 
-function mapContactFromRust(x: any): ContactSettings {
-    return {
-        contactEmail: String(pick(x, ["contact_email", "contactEmail"], "")),
-        contactPhone: String(pick(x, ["contact_phone", "contactPhone"], "")),
-    };
+function mapContactFromRust(x: ContactSettingsDto): ContactSettings {
+    return { contactEmail: x.contact_email, contactPhone: x.contact_phone };
 }
 
 function mapContactPatchToRust(patch: Partial<ContactSettings>): Record<string, any> {
@@ -203,7 +187,7 @@ function mapContactPatchToRust(patch: Partial<ContactSettings>): Record<string, 
 /* ── API (Local-First) ── */
 
 export async function configGetContactSettings(): Promise<ContactSettings> {
-    const raw = await invokeClient<any>("config_get_contact_settings");
+    const raw = await invokeClient<ContactSettingsDto>("config_get_contact_settings");
     return mapContactFromRust(raw);
 }
 
@@ -219,7 +203,7 @@ export async function configPatchContactSettings(
 }
 
 export async function configGetBusinessSettings(): Promise<BusinessSettings> {
-    const raw = await invokeClient<any>("config_get_business_settings");
+    const raw = await invokeClient<BusinessSettingsDto>("config_get_business_settings");
     return mapBizFromRust(raw);
 }
 
@@ -235,7 +219,7 @@ export async function configPatchBusinessSettings(
 }
 
 export async function configGetTicketSettings(): Promise<TicketSettings> {
-    const raw = await invokeClient<any>("config_get_ticket_settings");
+    const raw = await invokeClient<TicketSettingsDto>("config_get_ticket_settings");
     return mapTicketFromRust(raw);
 }
 

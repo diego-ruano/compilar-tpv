@@ -8,7 +8,7 @@ import {
   type StatsRange,
 } from "./statsApis";
 import { useProveedoresStats } from "./statsQueries";
-import { CERO, deCentimos, entre, eur as formatEur } from "../../shared/lib/dinero";
+import { CERO, deCentimos, entre, eur } from "../../shared/lib/dinero";
 
 /* =========================
    Helpers
@@ -149,11 +149,11 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
           style: { fontSize: "12px" },
         },
       },
-      yaxis: { labels: { formatter: (v: number) => formatEur(deCentimos(v)) } },
+      yaxis: { labels: { formatter: (v: number) => eur(deCentimos(v)) } },
       tooltip: {
         shared: true,
         fillSeriesColor: false,
-        y: { formatter: (v: number) => formatEur(deCentimos(v)), title: { formatter: () => "Gasto" } },
+        y: { formatter: (v: number) => eur(deCentimos(v)), title: { formatter: () => "Gasto" } },
       },
       legend: {
         show: true,
@@ -199,7 +199,7 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
         shared: false,
         fillSeriesColor: false,
         marker: { show: true },
-        y: { formatter: (v: number) => formatEur(deCentimos(v)), title: { formatter: () => "Total" } },
+        y: { formatter: (v: number) => eur(deCentimos(v)), title: { formatter: () => "Total" } },
       },
       legend: {
         show: true,
@@ -245,14 +245,14 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
       ) : null}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 min-w-0">
-        <KPICard label="Gasto total a proveedores" value={formatEur(total)} />
+        <KPICard label="Gasto total a proveedores" value={eur(total)} />
 
         <KPICard
           label="Proveedor top"
           value={topProvName}
           sub={
             <span className="truncate block">
-              {formatEur(topProvTotal)} · {pctTop}% del total
+              {eur(topProvTotal)} · {pctTop}% del total
             </span>
           }
         />
@@ -265,7 +265,7 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
 
         <KPICard
           label="Gasto medio / gasto"
-          value={formatEur(gastoMedio)}
+          value={eur(gastoMedio)}
           sub={<span className="truncate block">total / nº gastos</span>}
         />
       </div>
@@ -339,7 +339,7 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
                         <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-fg">{g.proveedor}</td>
                         <td className="px-3 py-2.5 text-fg-muted">{g.concepto}</td>
                         <td className="whitespace-nowrap px-3 py-2.5 text-right font-bold text-fg">
-                          {formatEur(g.importe)}
+                          {eur(g.importe)}
                         </td>
                       </tr>
                     ))}

@@ -15,7 +15,9 @@ import {
   Layers,
   ImageOff,
 } from "lucide-react";
-import { type ProductoDetalle, type LoteRow } from "./api/inventarioAPI";
+import type { LoteDto, ProductoDetalleDto } from "@tpv/contracts";
+
+import { eur } from "../../shared/lib/dinero";
 import { resolveImageUrl } from "../../shared/lib/imageUrl";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 import AddLoteModal from "./ui/AddLoteModal";
@@ -74,7 +76,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   // ✅ lotes
   const [lotesOpen, setLotesOpen] = useState(false);
   const [addLoteOpen, setAddLoteOpen] = useState(false);
-  const [editingLote, setEditingLote] = useState<LoteRow | null>(null);
+  const [editingLote, setEditingLote] = useState<LoteDto | null>(null);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -84,8 +86,8 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   const detalleQuery = useProductoDetalle(activeId);
   const lotesQuery = useLotesByProducto(activeId);
 
-  const p: ProductoDetalle | null = detalleQuery.data ?? null;
-  const lotes: LoteRow[] = lotesQuery.data ?? [];
+  const p: ProductoDetalleDto | null = detalleQuery.data ?? null;
+  const lotes: LoteDto[] = lotesQuery.data ?? [];
   const loading = detalleQuery.isFetching || lotesQuery.isFetching;
 
   // Resuelve URLs de imagen (producto + alérgenos) cuando llega el detalle cacheado.
@@ -100,12 +102,12 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
     }
 
     void (async () => {
-      const url = (p as any)?.Ruta_Imagen ? await toImageUrlMaybe((p as any).Ruta_Imagen) : "";
+      const url = p?.Ruta_Imagen ? await toImageUrlMaybe(p.Ruta_Imagen) : "";
 
       const map: Record<string, string> = {};
-      if ((p as any)?.alergs?.length) {
+      if (p?.alergs?.length) {
         await Promise.all(
-          (p as any).alergs.map(async (a: any) => {
+          p.alergs.map(async (a) => {
             const id = String(a.ID_Alergeno ?? "").trim();
             if (!id) return;
             const u = await toImageUrlMaybe(a.Ruta_Imagen);
@@ -172,7 +174,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
     return arr[0] ?? null;
   }, [lotes]);
 
-  const minimo = Number((p as any)?.Stock_Minimo);
+  const minimo = Number(p?.Stock_Minimo);
   const bajoStock = Number.isFinite(minimo) && minimo > 0 && stockTotal <= minimo;
 
   if (!open) return null;
@@ -210,7 +212,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface-2 sm:size-20">
                   <ImageWithFallback
                     src={imgUrl}
-                    alt={(p as any).Nombre}
+                    alt={p.Nombre}
                     className="h-full w-full object-cover"
                     fallback={
                       <div className="flex h-full w-full items-center justify-center">
@@ -222,7 +224,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                 <div className="min-w-0">
                   <p className="text-xs font-extrabold uppercase tracking-wide text-fg-subtle">Producto</p>
-                  <p className="truncate text-xl font-extrabold text-fg sm:text-2xl">{(p as any).Nombre || "—"}</p>
+                  <p className="truncate text-xl font-extrabold text-fg sm:text-2xl">{p.Nombre || "—"}</p>
 
                   <span
                     className={
@@ -261,7 +263,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     <TriangleAlert className="size-4 text-accent" aria-hidden />
                     Mínimo
                   </p>
-                  <p className="mt-1 text-xl font-extrabold text-fg">{numOrDash((p as any).Stock_Minimo)}</p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">{numOrDash(p.Stock_Minimo)}</p>
                 </div>
 
                 <div className="rounded-2xl border border-border bg-surface-2 p-4">
@@ -270,7 +272,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     Precio
                   </p>
                   <p className="mt-1 text-xl font-extrabold text-fg">
-                    {(p as any).Precio_Venta == null ? "—" : String((p as any).Precio_Venta)}
+                    {p.Precio_Venta == null ? "—" : eur(p.Precio_Venta)}
                   </p>
                 </div>
 
@@ -280,7 +282,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     Pedido esp.
                   </p>
                   <p className="mt-1 text-xl font-extrabold text-fg">
-                    {(p as any).Cantidad_Pedido_Esperada == null ? "—" : String((p as any).Cantidad_Pedido_Esperada)}
+                    {p.Cantidad_Pedido_Esperada == null ? "—" : String(p.Cantidad_Pedido_Esperada)}
                   </p>
                 </div>
 
@@ -289,9 +291,9 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     <CalendarClock className="size-4 text-accent" aria-hidden />
                     FEFO (caducidad)
                   </p>
-                  <p className="mt-1 text-xl font-extrabold text-fg">{formatDateES((fefo as any)?.Caducidad ?? null)}</p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">{formatDateES(fefo?.Caducidad ?? null)}</p>
                   <p className="mt-1 text-xs text-fg-muted">
-                    Lote: {(fefo as any)?.Codigo_Lote ?? "—"}
+                    Lote: {fefo?.Codigo_Lote ?? "—"}
                   </p>
                 </div>
 
@@ -300,7 +302,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     <Clock className="size-4 text-accent" aria-hidden />
                     Última entrada
                   </p>
-                  <p className="mt-1 text-xl font-extrabold text-fg">{formatDateTimeES((ultimaEntrada as any)?.Fecha_Entrada ?? null)}</p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">{formatDateTimeES(ultimaEntrada?.Fecha_Entrada ?? null)}</p>
                 </div>
               </div>
 
@@ -316,7 +318,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     Alérgenos
                   </span>
                   <span className="flex items-center gap-2 text-sm font-semibold text-fg-muted">
-                    {(p as any).alergs?.length ? `${(p as any).alergs.length}` : "—"}
+                    {p.alergs?.length ? `${p.alergs.length}` : "—"}
                     <ChevronDown
                       className={"size-4 transition-transform " + (alergOpen ? "rotate-180" : "")}
                       aria-hidden
@@ -326,11 +328,11 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                 <div className={["overflow-hidden transition-all duration-300", alergOpen ? "max-h-[420px] opacity-100 mt-3" : "max-h-0 opacity-0 mt-0"].join(" ")}>
                   <div className="rounded-2xl border border-border bg-surface-2 p-4">
-                    {!(p as any).alergs?.length ? (
+                    {!p.alergs?.length ? (
                       <p className="text-sm text-fg-muted">Este producto no tiene alérgenos marcados.</p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        {(p as any).alergs.map((a: any) => {
+                        {p.alergs.map((a) => {
                           const id = String(a.ID_Alergeno ?? "").trim();
                           const url = alergImgUrl[id] ?? "";
                           return (
@@ -407,7 +409,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                         <div className="max-h-[320px] overflow-auto">
                           {lotes.map((l: any) => {
-                            const isFefo = (fefo as any)?.ID_Lote === l.ID_Lote;
+                            const isFefo = fefo?.ID_Lote === l.ID_Lote;
                             return (
                               <div key={l.ID_Lote} className={`grid grid-cols-12 gap-2 px-4 py-3 border-t border-border text-sm items-center ${isFefo ? "bg-accent-soft" : ""}`}>
                                 <div className="col-span-3 font-extrabold text-fg truncate">
@@ -444,7 +446,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
               <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
                 <button
                   type="button"
-                  onClick={() => onEdit?.((p as any).ID_Producto)}
+                  onClick={() => onEdit?.(p.ID_Producto)}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-accent py-3 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                 >
                   <Pencil className="size-4" aria-hidden />
@@ -525,7 +527,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                       if (!p) return;
                       setDeleting(true);
                       try {
-                        await onDeleted?.((p as any).ID_Producto);
+                        await onDeleted?.(p.ID_Producto);
                         setConfirmDelete(false);
                         onClose();
                       } finally {

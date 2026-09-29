@@ -3,7 +3,7 @@
 // Hooks TanStack Query co-locados para la feature "cuentas" (caja). Envuelven las
 // funciones de cuentasApis: lecturas (entradas/salidas por rango de fechas, proveedores
 // mini) como useQuery y escrituras (CRUD de gastos y pagos) como useMutation que
-// invalidan la clave de la feature. No se cambia la firma de ninguna función de Apis.
+// invalidan la clave de la feature.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -22,6 +22,10 @@ import {
 
 type Rango = { del?: string | null; al?: string | null; q?: string | null };
 type ListParams = Rango & { page?: number };
+
+function rangoArgs(r: Rango): CuentasListParams {
+    return { del: r.del ?? undefined, al: r.al ?? undefined, q: r.q ?? undefined };
+}
 
 export const cuentasKeys = {
     all: ["cuentas"] as const,
@@ -57,13 +61,7 @@ export function useCuentasEntradas(params: ListParams, enabled = true) {
     return useQuery({
         queryKey: cuentasKeys.entradas(params),
         queryFn: () =>
-            cuentasGetEntradas({
-                del: params.del,
-                al: params.al,
-                q: params.q,
-                page,
-                pageSize: CUENTAS_PAGE_SIZE,
-            } satisfies CuentasListParams),
+            cuentasGetEntradas({ ...rangoArgs(params), page, page_size: CUENTAS_PAGE_SIZE }),
         enabled,
     });
 }
@@ -73,13 +71,7 @@ export function useCuentasSalidas(params: ListParams, enabled = true) {
     return useQuery({
         queryKey: cuentasKeys.salidas(params),
         queryFn: () =>
-            cuentasGetSalidas({
-                del: params.del,
-                al: params.al,
-                q: params.q,
-                page,
-                pageSize: CUENTAS_PAGE_SIZE,
-            } satisfies CuentasListParams),
+            cuentasGetSalidas({ ...rangoArgs(params), page, page_size: CUENTAS_PAGE_SIZE }),
         enabled,
     });
 }
@@ -87,7 +79,7 @@ export function useCuentasSalidas(params: ListParams, enabled = true) {
 export function useCuentasResumen(rango: Rango, enabled = true) {
     return useQuery({
         queryKey: cuentasKeys.resumen(rango),
-        queryFn: () => cuentasGetResumen(rango),
+        queryFn: () => cuentasGetResumen(rangoArgs(rango)),
         enabled,
     });
 }

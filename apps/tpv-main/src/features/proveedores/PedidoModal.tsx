@@ -2,17 +2,18 @@ import { useEffect, useState } from "react";
 import { Trash2, Plus, Send, XCircle, Mail } from "lucide-react";
 import Modal from "./Modal";
 import { cn } from "../../shared/lib/cn";
-import type { PedidoRow, LineaPedido, PedidoEstado } from "./pedidosApis";
-import type { ProveedorRow } from "./proveedoresApis";
+import type { Dinero, LineaPedidoDto, PedidoProveedorDto, ProveedorDto } from "@tpv/contracts";
+import { estadoDelPedido, type PedidoEstado } from "./pedidosApis";
+import { CampoDinero } from "../../shared/ui/CampoDinero";
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  pedido: PedidoRow | null;
-  proveedores: ProveedorRow[];
-  onSave: (pedido: PedidoRow) => void;
+  pedido: PedidoProveedorDto | null;
+  proveedores: ProveedorDto[];
+  onSave: (pedido: PedidoProveedorDto) => void;
   onCancelarPedido: (pedidoId: string) => void;
-  onMandarPedido: (pedido: PedidoRow) => void;
+  onMandarPedido: (pedido: PedidoProveedorDto) => void;
   isBusy?: boolean;
 };
 
@@ -41,50 +42,71 @@ export default function PedidoModal({
   const [idProveedor, setIdProveedor] = useState("");
   const [emailDestino, setEmailDestino] = useState("");
   const [notas, setNotas] = useState("");
-  const [lineas, setLineas] = useState<LineaPedido[]>([]);
+  const [lineas, setLineas] = useState<LineaPedidoDto[]>([]);
+  // Líneas cuyo precio escrito no se entiende como importe: mientras haya alguna no se guarda ni
+  // se manda, porque el precio llegaría vacío sin que nadie lo viera.
+  const [preciosIlegibles, setPreciosIlegibles] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     if (!pedido) return;
-    setIdProveedor(pedido.idProveedor ?? "");
-    setEmailDestino(pedido.emailDestino ?? "");
+    setIdProveedor(pedido.id_proveedor ?? "");
+    setEmailDestino(pedido.email_destino ?? "");
     setNotas(pedido.notas ?? "");
     setLineas(pedido.lineas ?? []);
+    setPreciosIlegibles(new Set());
   }, [pedido]);
 
   if (!pedido) return null;
 
-  const esEditable = pedido.estado === "borrador";
-  const proveedorActual = proveedores.find((p) => p.ID_Proveedor === idProveedor);
+  const estado = estadoDelPedido(pedido);
+  const esEditable = estado === "borrador";
+  const puedeGuardar = preciosIlegibles.size === 0;
+  const proveedorActual = proveedores.find((p) => p.id_proveedor === idProveedor);
 
   function handleProveedorChange(newId: string) {
     setIdProveedor(newId);
-    const prov = proveedores.find((p) => p.ID_Proveedor === newId);
-    if (prov?.Email) setEmailDestino(prov.Email);
+    const prov = proveedores.find((p) => p.id_proveedor === newId);
+    if (prov?.email) setEmailDestino(prov.email);
     else if (!newId) setEmailDestino("");
   }
 
   function addLinea() {
     setLineas((prev) => [
       ...prev,
-      { id: crypto.randomUUID(), nombreProducto: "", cantidad: 1, precioUnitario: null, unidad: null },
+      { id_linea: crypto.randomUUID(), nombre_producto: "", cantidad: 1, precio_unitario: null, unidad: null },
     ]);
   }
 
-  function updateLinea(id: string, field: keyof LineaPedido, value: unknown) {
-    setLineas((prev) => prev.map((l) => (l.id === id ? { ...l, [field]: value } : l)));
+  function updateLinea<K extends keyof LineaPedidoDto>(id: string, field: K, value: LineaPedidoDto[K]) {
+    setLineas((prev) => prev.map((l) => (l.id_linea === id ? { ...l, [field]: value } : l)));
+  }
+
+  function cambiarPrecio(id: string, valor: Dinero | null, legible: boolean) {
+    updateLinea(id, "precio_unitario", valor);
+    setPreciosIlegibles((prev) => {
+      const next = new Set(prev);
+      if (legible) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   function removeLinea(id: string) {
-    setLineas((prev) => prev.filter((l) => l.id !== id));
+    setLineas((prev) => prev.filter((l) => l.id_linea !== id));
+    setPreciosIlegibles((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }
 
-  function buildPedido(): PedidoRow {
-    const prov = proveedores.find((p) => p.ID_Proveedor === idProveedor);
+  function buildPedido(): PedidoProveedorDto {
+    const prov = proveedores.find((p) => p.id_proveedor === idProveedor);
     return {
       ...pedido!,
-      idProveedor: idProveedor || null,
-      nombreProveedor: prov?.Nombre_Empresa ?? null,
-      emailDestino: emailDestino || null,
+      id_proveedor: idProveedor || null,
+      nombre_proveedor: prov?.nombre_empresa ?? null,
+      email_destino: emailDestino || null,
       notas: notas || null,
       lineas,
     };
@@ -94,7 +116,7 @@ export default function PedidoModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={`Pedido · ${pedido.fechaCreacion}`}
+      title={`Pedido · ${pedido.fecha_creacion}`}
       zIndex={70}
       widthClass="max-w-[860px]"
     >
@@ -103,13 +125,13 @@ export default function PedidoModal({
         <span
           className={cn(
             "inline-flex items-center rounded-lg px-3 py-1 text-sm font-semibold",
-            ESTADO_CLASS[pedido.estado],
+            ESTADO_CLASS[estado],
           )}
         >
-          {ESTADO_LABEL[pedido.estado]}
+          {ESTADO_LABEL[estado]}
         </span>
-        {pedido.estado === "enviado" && pedido.fechaEnvio && (
-          <span className="text-sm text-fg-muted">Enviado el {pedido.fechaEnvio}</span>
+        {estado === "enviado" && pedido.fecha_envio && (
+          <span className="text-sm text-fg-muted">Enviado el {pedido.fecha_envio}</span>
         )}
       </div>
 
@@ -125,8 +147,8 @@ export default function PedidoModal({
           >
             <option value="">Sin proveedor</option>
             {proveedores.map((p) => (
-              <option key={p.ID_Proveedor} value={p.ID_Proveedor}>
-                {p.Nombre_Empresa}
+              <option key={p.id_proveedor} value={p.id_proveedor}>
+                {p.nombre_empresa}
               </option>
             ))}
           </select>
@@ -142,7 +164,7 @@ export default function PedidoModal({
             value={emailDestino}
             onChange={(e) => setEmailDestino(e.target.value)}
             disabled={!esEditable}
-            placeholder={proveedorActual?.Email ?? "correo@proveedor.com"}
+            placeholder={proveedorActual?.email ?? "correo@proveedor.com"}
             className="mt-1 h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg placeholder:text-fg-subtle outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
           />
         </div>
@@ -192,7 +214,7 @@ export default function PedidoModal({
 
             {lineas.map((l, i) => (
               <div
-                key={l.id}
+                key={l.id_linea}
                 className={cn(
                   "grid min-w-[620px] grid-cols-[1fr_80px_96px_72px_32px] items-center gap-2 px-3 py-2",
                   i < lineas.length - 1 && "border-b border-border",
@@ -200,8 +222,8 @@ export default function PedidoModal({
               >
                 <input
                   type="text"
-                  value={l.nombreProducto}
-                  onChange={(e) => updateLinea(l.id, "nombreProducto", e.target.value)}
+                  value={l.nombre_producto}
+                  onChange={(e) => updateLinea(l.id_linea, "nombre_producto", e.target.value)}
                   disabled={!esEditable}
                   placeholder="Nombre producto"
                   className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-sm text-fg placeholder:text-fg-subtle outline-none focus-visible:border-accent disabled:opacity-60"
@@ -210,33 +232,25 @@ export default function PedidoModal({
                   type="number"
                   value={l.cantidad}
                   onChange={(e) =>
-                    updateLinea(l.id, "cantidad", Number(e.target.value) || 0)
+                    updateLinea(l.id_linea, "cantidad", Number(e.target.value) || 0)
                   }
                   disabled={!esEditable}
                   min={0}
                   className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-sm text-fg outline-none focus-visible:border-accent disabled:opacity-60"
                 />
-                <input
-                  type="number"
-                  value={l.precioUnitario ?? ""}
-                  onChange={(e) =>
-                    updateLinea(
-                      l.id,
-                      "precioUnitario",
-                      e.target.value ? Number(e.target.value) : null,
-                    )
-                  }
+                <CampoDinero
+                  valor={l.precio_unitario}
+                  onCambio={(v, legible) => cambiarPrecio(l.id_linea, v, legible)}
                   disabled={!esEditable}
                   placeholder="—"
-                  min={0}
-                  step="0.01"
+                  aria-label="Precio unitario"
                   className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-sm text-fg placeholder:text-fg-subtle outline-none focus-visible:border-accent disabled:opacity-60"
                 />
                 <input
                   type="text"
                   value={l.unidad ?? ""}
                   onChange={(e) =>
-                    updateLinea(l.id, "unidad", e.target.value || null)
+                    updateLinea(l.id_linea, "unidad", e.target.value || null)
                   }
                   disabled={!esEditable}
                   placeholder="ud"
@@ -245,7 +259,7 @@ export default function PedidoModal({
                 {esEditable ? (
                   <button
                     type="button"
-                    onClick={() => removeLinea(l.id)}
+                    onClick={() => removeLinea(l.id_linea)}
                     className="grid size-7 cursor-pointer place-items-center rounded-lg text-danger/60 transition hover:bg-danger-soft hover:text-danger"
                   >
                     <Trash2 className="size-3.5" />
@@ -262,10 +276,10 @@ export default function PedidoModal({
       {/* Acciones */}
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="w-full sm:w-auto">
-          {pedido.estado === "borrador" && (
+          {estado === "borrador" && (
             <button
               type="button"
-              onClick={() => onCancelarPedido(pedido.id)}
+              onClick={() => onCancelarPedido(pedido.id_pedido)}
               disabled={isBusy}
               className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger transition hover:opacity-90 disabled:opacity-50 sm:w-auto"
             >
@@ -289,7 +303,7 @@ export default function PedidoModal({
               <button
                 type="button"
                 onClick={() => onSave(buildPedido())}
-                disabled={isBusy}
+                disabled={isBusy || !puedeGuardar}
                 className="min-w-0 cursor-pointer whitespace-normal break-words rounded-xl border border-border bg-surface-2 px-3 py-2 text-center font-semibold leading-tight text-fg transition hover:bg-surface-2 disabled:opacity-50 sm:px-4"
               >
                 {isBusy ? "Guardando…" : "Guardar"}
@@ -298,7 +312,7 @@ export default function PedidoModal({
               <button
                 type="button"
                 onClick={() => onMandarPedido(buildPedido())}
-                disabled={isBusy}
+                disabled={isBusy || !puedeGuardar}
                 className="col-span-2 inline-flex min-w-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:opacity-50 sm:col-span-1 sm:px-4"
               >
                 <Send className="size-4" />

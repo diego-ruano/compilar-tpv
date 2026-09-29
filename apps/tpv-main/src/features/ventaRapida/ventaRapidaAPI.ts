@@ -1,87 +1,30 @@
 // src/features/ventaRapida/ventaRapidaAPI.ts
 //
-// API de venta rápida (barra) — Local-First puro. Sustituye el antiguo dualCall
-// (remoto + local + outbox + op_id + afterRemoteOk) por invocación directa del comando
-// Tauri vía @tpv/client. Las firmas exportadas y los tipos de retorno NO cambian, así que
-// los componentes que la consumen (VentaRapida.tsx, VerTicketsModal.tsx) siguen igual.
+// API de venta rápida (barra): una función por comando Tauri, con los tipos que genera ts-rs desde
+// Rust. Aquí no se redeclaran tipos ni se normaliza lo que vuelve (RI-53): cada comando devuelve una
+// forma fija, y el dinero llega y sale como `Dinero` (céntimos).
 //
 // El antiguo "get-or-create" se codificaba en el op_id; ahora se expresa con un flag
 // explícito `get_or_create` en el comando `vr_create_comanda_barra`.
 
 import { invokeClient } from "@tpv/client";
+import type {
+    CategoriaRow,
+    ComandaBarraRow,
+    DestinatarioInput,
+    Dinero,
+    IndexRow,
+    LineaComandaRow,
+    ProductoRow,
+    VerTicketsDetalleRow,
+    VrAddLineaComandaInput,
+    VrCobrarFraccionadoInput,
+    VrCreateComandaBarraInput,
+} from "@tpv/contracts";
 
 /* =========================================================
-  Tipos
+  Resultados
 ========================================================= */
-
-export type CategoriaRow = {
-    ID_Categoria: string;
-    Nombre: string;
-    Nombre_Imagen: string | null;
-    Ruta_Imagen: string | null;
-    Vendible?: number | null;
-};
-
-export type ProductoRow = {
-    ID_Producto: string;
-    ID_Categoria: string;
-    Nombre: string;
-
-    Precio_Venta: number | null;
-    Stock_Actual: number | null;
-    Stock_Minimo: number | null;
-
-    Unidad_Medida: string | null;
-    Nombre_Imagen: string | null;
-    Ruta_Imagen: string | null;
-};
-
-export type ComandaBarraRow = {
-    ID_Comanda: string;
-    Fecha_Hora_Apertura: string;
-    Estado: string;
-
-    Total_Pendiente: number;
-    Total_Comanda: number;
-
-    Pendientes_Cocina: number;
-    Pendientes_Pago: number;
-};
-
-export type LineaComandaRow = {
-    ID_Detalle: string;
-    ID_Comanda: string;
-    ID_Producto: string;
-    Cantidad: number;
-    Precio_Unitario: number;
-    Notas: string | null;
-    Estado_Cocina?: string | null;
-    Pagado?: 0 | 1;
-    Nombre: string;
-};
-
-export type VerTicketsDetalleRow = {
-    ID_Detalle: string;
-    ID_Producto: string;
-    Nombre: string;
-    Cantidad: number;
-    Precio_Unitario: number;
-    Estado_Cocina: string;
-    Pagado: 0 | 1;
-    Notas: string | null;
-};
-
-export type IndexRow = {
-    ID_Comanda: string;
-    Productos: string | null;
-    NumLineas: number;
-    Unidades: number;
-};
-
-export type StockItem = {
-    productoId: string;
-    cantidad: number;
-};
 
 export type VrAddLineaComandaResult = {
     ok: boolean;
@@ -90,7 +33,6 @@ export type VrAddLineaComandaResult = {
 
 export type VrCobrarFraccionadoResult = {
     ok: boolean;
-    idPago: string | null;
     /** Número de ticket que reservó el cobro; es lo que se imprime a continuación. */
     numeroTicket?: string | null;
 
@@ -107,20 +49,9 @@ export type VrCobrarFraccionadoResult = {
 
 export type VrBootstrapResult = {
     idComanda: string;
-    id_comanda: string;
     categorias: CategoriaRow[];
     lineas: LineaComandaRow[];
 };
-
-/* =========================================================
-  Helpers
-========================================================= */
-
-function normalizePositiveIds(values: string[]): string[] {
-    return (values ?? [])
-        .map((v) => String(v ?? "").trim())
-        .filter((s) => s.length > 0);
-}
 
 /*
   Detecta el error de stock insuficiente que devuelve el backend local (Rust),
@@ -152,158 +83,103 @@ function parseInsufficientStock(
 export async function vrBootstrap(
     idTrabajador: string | null,
 ): Promise<VrBootstrapResult> {
-    const idComanda = await invokeClient<string>("vr_create_comanda_barra", {
-        args: {
-            id_trabajador: idTrabajador == null ? null : idTrabajador,
-            get_or_create: false,
-        },
-    });
-
-    if (!idComanda) {
-        throw new Error("bootstrap_id_comanda_missing");
-    }
+    const idComanda = await crearComandaBarra(idTrabajador, false);
 
     const [categorias, lineas] = await Promise.all([
-        invokeClient<CategoriaRow[]>("vr_list_categorias_vendibles"),
-        invokeClient<LineaComandaRow[]>("vr_get_lineas_comanda", {
-            args: { id_comanda: idComanda },
-        }),
+        vrListCategoriasVendibles(),
+        vrGetLineasComanda(idComanda),
     ]);
 
-    return {
-        idComanda,
-        id_comanda: idComanda,
-        categorias: categorias ?? [],
-        lineas: lineas ?? [],
-    };
+    return { idComanda, categorias, lineas };
 }
 
 /* =========================================================
   READS
 ========================================================= */
 
-export async function vrListCategoriasVendibles(): Promise<CategoriaRow[]> {
-    const rows = await invokeClient<CategoriaRow[]>("vr_list_categorias_vendibles");
-    return rows ?? [];
+export function vrListCategoriasVendibles(): Promise<CategoriaRow[]> {
+    return invokeClient<CategoriaRow[]>("vr_list_categorias_vendibles");
 }
 
-export async function vrListProductosByCategoria(
-    idCategoria: string,
-): Promise<ProductoRow[]> {
-    const rows = await invokeClient<ProductoRow[]>(
-        "vr_list_productos_by_categoria",
-        { args: { id_categoria: idCategoria } },
-    );
-    return rows ?? [];
+export function vrListProductosByCategoria(idCategoria: string): Promise<ProductoRow[]> {
+    return invokeClient<ProductoRow[]>("vr_list_productos_by_categoria", {
+        args: { id_categoria: idCategoria },
+    });
 }
 
-export async function vrSearchProductos(
-    q: string,
-    limit = 60,
-): Promise<ProductoRow[]> {
-    const query = String(q ?? "").trim();
+export async function vrSearchProductos(q: string, limit = 60): Promise<ProductoRow[]> {
+    const query = q.trim();
     if (!query) return [];
 
-    const rows = await invokeClient<ProductoRow[]>("vr_search_productos", {
-        args: { query, limit: Number(limit) },
-    });
-    return rows ?? [];
+    return invokeClient<ProductoRow[]>("vr_search_productos", { args: { query, limit } });
 }
 
-export async function vrListComandasBarra(opts: {
+export function vrListComandasBarra(opts: {
     includePagadas: boolean;
     limit?: number;
 }): Promise<ComandaBarraRow[]> {
-    const rows = await invokeClient<ComandaBarraRow[]>("vr_list_comandas_barra", {
-        args: {
-            include_pagadas: Boolean(opts.includePagadas),
-            limit: opts.limit == null ? null : Number(opts.limit),
-        },
+    return invokeClient<ComandaBarraRow[]>("vr_list_comandas_barra", {
+        args: { include_pagadas: opts.includePagadas, limit: opts.limit },
     });
-    return rows ?? [];
 }
 
-export async function vrGetLineasComanda(
-    idComanda: string,
-): Promise<LineaComandaRow[]> {
-    const rows = await invokeClient<LineaComandaRow[]>("vr_get_lineas_comanda", {
+export function vrGetLineasComanda(idComanda: string): Promise<LineaComandaRow[]> {
+    return invokeClient<LineaComandaRow[]>("vr_get_lineas_comanda", {
         args: { id_comanda: idComanda },
     });
-    return rows ?? [];
 }
 
 export async function vrGetIndexRows(idsHoy: string[]): Promise<IndexRow[]> {
-    const ids = normalizePositiveIds(idsHoy);
+    const ids = idsHoy.map((v) => v.trim()).filter((s) => s.length > 0);
     if (ids.length === 0) return [];
 
-    const rows = await invokeClient<IndexRow[]>("vr_get_index_rows", {
-        args: { ids },
-    });
-    return rows ?? [];
+    return invokeClient<IndexRow[]>("vr_get_index_rows", { args: { ids } });
 }
 
-export async function vrGetDetallesVerTicket(
-    idComanda: string,
-): Promise<VerTicketsDetalleRow[]> {
-    const rows = await invokeClient<VerTicketsDetalleRow[]>(
-        "vr_get_detalles_ver_ticket",
-        { args: { id_comanda: idComanda } },
-    );
-    return rows ?? [];
+export function vrGetDetallesVerTicket(idComanda: string): Promise<VerTicketsDetalleRow[]> {
+    return invokeClient<VerTicketsDetalleRow[]>("vr_get_detalles_ver_ticket", {
+        args: { id_comanda: idComanda },
+    });
 }
 
 /* =========================================================
   WRITES
 ========================================================= */
 
-export async function vrGetOrCreateComandaBarra(
+async function crearComandaBarra(
     idTrabajador: string | null,
+    getOrCreate: boolean,
 ): Promise<string> {
-    const id = await invokeClient<string>("vr_create_comanda_barra", {
-        args: {
-            id_trabajador: idTrabajador == null ? null : idTrabajador,
-            get_or_create: true,
-        },
-    });
-
-    if (!id) {
-        throw new Error("id_comanda_missing");
-    }
-
+    const args: VrCreateComandaBarraInput = {
+        id_trabajador: idTrabajador ?? undefined,
+        get_or_create: getOrCreate,
+    };
+    const id = await invokeClient<string>("vr_create_comanda_barra", { args });
+    if (!id) throw new Error("id_comanda_missing");
     return id;
 }
 
-export async function vrCreateComandaBarra(
-    idTrabajador: string | null,
-): Promise<string> {
-    const id = await invokeClient<string>("vr_create_comanda_barra", {
-        args: {
-            id_trabajador: idTrabajador == null ? null : idTrabajador,
-            get_or_create: false,
-        },
-    });
+export function vrGetOrCreateComandaBarra(idTrabajador: string | null): Promise<string> {
+    return crearComandaBarra(idTrabajador, true);
+}
 
-    if (!id) {
-        throw new Error("id_comanda_missing");
-    }
-
-    return id;
+export function vrCreateComandaBarra(idTrabajador: string | null): Promise<string> {
+    return crearComandaBarra(idTrabajador, false);
 }
 
 export async function vrAddLineaComanda(
     idComanda: string,
     idProducto: string,
     cantidad: number,
-    precioUnitario: number,
+    precioUnitario: Dinero,
 ): Promise<VrAddLineaComandaResult> {
-    const idDetalle = await invokeClient<string>("vr_add_linea_comanda", {
-        args: {
-            id_comanda: idComanda,
-            id_producto: idProducto,
-            cantidad: Number(cantidad),
-            precio_unitario: Number(precioUnitario),
-        },
-    });
+    const args: VrAddLineaComandaInput = {
+        id_comanda: idComanda,
+        id_producto: idProducto,
+        cantidad,
+        precio_unitario: precioUnitario,
+    };
+    const idDetalle = await invokeClient<string>("vr_add_linea_comanda", { args });
 
     return {
         ok: true,
@@ -342,7 +218,7 @@ export async function vrUpdateNotaDetalle(
     return await invokeClient<boolean>("vr_update_nota_detalle", {
         args: {
             id_detalle: idDetalle,
-            nota: String(nota ?? ""),
+            nota,
         },
     });
 }
@@ -350,7 +226,7 @@ export async function vrUpdateNotaDetalle(
 export async function vrCobrarFraccionado(argsInput: {
     idComanda: string;
     metodo: "Tarjeta" | "Efectivo";
-    importeTotal: number;
+    importeTotal: Dinero;
     detalles: string[];
     /** El id del cobro, generado al encolarlo: repetir la llamada con él no cobra dos veces. */
     idPago: string;
@@ -361,29 +237,23 @@ export async function vrCobrarFraccionado(argsInput: {
      * Ausente = ticket normal (`F2`). Si el importe pasa del límite y no va, el backend rechaza el
      * cobro con `factura_completa_requerida` y la pantalla abre `DatosFiscalesModal`.
      */
-    destinatario?: {
-        nombre_razon: string;
-        nif: string;
-        domicilio?: string | null;
-    } | null;
+    destinatario?: DestinatarioInput;
 }): Promise<VrCobrarFraccionadoResult> {
     try {
-        const numeroTicket = await invokeClient<string>("vr_cobrar_fraccionado", {
-            args: {
-                id_pago: argsInput.idPago,
-                id_comanda: argsInput.idComanda,
-                metodo: argsInput.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo",
-                importe_total: Number(argsInput.importeTotal),
-                // REV-17: quién cobra ya no viaja aquí. Lo pone el backend desde la sesión, como
-                // quién anula, quién cierra la caja y quién abre el cajón (SEC-01).
-                detalles: normalizePositiveIds(argsInput.detalles ?? []),
-                destinatario: argsInput.destinatario ?? null,
-            },
-        });
+        const args: VrCobrarFraccionadoInput = {
+            id_pago: argsInput.idPago,
+            id_comanda: argsInput.idComanda,
+            metodo: argsInput.metodo,
+            importe_total: argsInput.importeTotal,
+            // REV-17: quién cobra ya no viaja aquí. Lo pone el backend desde la sesión, como
+            // quién anula, quién cierra la caja y quién abre el cajón (SEC-01).
+            detalles: argsInput.detalles.map((v) => v.trim()).filter((s) => s.length > 0),
+            destinatario: argsInput.destinatario,
+        };
+        const numeroTicket = await invokeClient<string>("vr_cobrar_fraccionado", { args });
 
         return {
             ok: true,
-            idPago: null,
             numeroTicket: numeroTicket || null,
         };
     } catch (e) {
@@ -397,7 +267,6 @@ export async function vrCobrarFraccionado(argsInput: {
         if (stock) {
             return {
                 ok: false,
-                idPago: null,
                 error: "insufficient_stock",
                 productoId: stock.productoId,
                 requested: stock.requested,
@@ -407,31 +276,6 @@ export async function vrCobrarFraccionado(argsInput: {
 
         throw e;
     }
-}
-
-export async function vrRestarStock(
-    items: StockItem[],
-    _opId?: string,
-): Promise<boolean> {
-    const lineas = (items ?? [])
-        .map((it) => ({
-            producto_id: String(it.productoId ?? "").trim(),
-            cantidad: Number(it.cantidad),
-        }))
-        .filter(
-            (it) =>
-                it.producto_id.length > 0 &&
-                Number.isFinite(it.cantidad) &&
-                it.cantidad > 0,
-        );
-
-    if (lineas.length === 0) {
-        return true;
-    }
-
-    return await invokeClient<boolean>("vr_restar_stock", {
-        args: { lineas },
-    });
 }
 
 export async function vrDeleteComandaIfSafe(

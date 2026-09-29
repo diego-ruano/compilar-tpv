@@ -14,11 +14,11 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Coins, Wallet, X } from "lucide-react";
 
 import { ModalShell } from "../../shared/ui";
+import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
 import { cn } from "../../shared/lib/cn";
 import { toAppError } from "@tpv/client";
 
 import DenomsGrid from "./DenomsGrid";
-import { euro } from "./formato";
 import {
     aDenominaciones,
     cierreConfirmar,
@@ -34,11 +34,10 @@ import {
     type CashCount,
 } from "./cuentasApis";
 import { conAviso } from "../../shared/lib/conAviso";
-import { CERO, abs, deCentimos } from "../../shared/lib/dinero";
+import { CERO, abs, deCentimos, eur } from "../../shared/lib/dinero";
 import {
     calcularArqueo,
     exigeMotivo as descuadreExigeMotivo,
-    leerImporte,
     totalRecuento,
     validarCierre,
 } from "../../shared/lib/efectivo";
@@ -62,7 +61,8 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
     const [dejado, setDejado] = useState<CashCount>({});
     const [motivo, setMotivo] = useState("");
     // Sólo se usa en el primer cierre: después lo manda el `dejado` del anterior.
-    const [fondoInicial, setFondoInicial] = useState("");
+    const fondoInicial = useImporte();
+    const ponerFondo = fondoInicial.poner;
 
     useEffect(() => {
         if (!open) return;
@@ -72,7 +72,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         setContado({});
         setDejado({});
         setMotivo("");
-        setFondoInicial("");
+        ponerFondo(null);
         cierrePreparar()
             .then((p) => {
                 if (vivo) setPrep(p);
@@ -86,21 +86,21 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         return () => {
             vivo = false;
         };
-    }, [open]);
+    }, [open, ponerFondo]);
 
     const totalContado = useMemo(() => totalRecuento(denoms, contado), [denoms, contado]);
     const totalDejado = useMemo(() => totalRecuento(denoms, dejado), [denoms, dejado]);
 
-    // Sólo cuenta en el primer cierre. `null` es que lo escrito no se entiende como importe: antes eso
-    // valía 0 sin avisar y se guardaba como fondo, el primer eslabón de todos los cierres.
-    const fondoEscrito = useMemo(() => leerImporte(fondoInicial), [fondoInicial]);
-    const fondoIlegible = !!prep?.es_primer_cierre && fondoEscrito === null;
+    // Sólo cuenta en el primer cierre. Lo que no se entiende como importe bloquea el cierre: antes
+    // valía 0 sin avisar y se guardaba como fondo, el primer eslabón de todos los cierres. No
+    // escribir nada, en cambio, es no haber empezado con nada.
+    const fondoIlegible = !!prep?.es_primer_cierre && !fondoInicial.legible;
 
     const fondo = useMemo(() => {
         if (!prep) return CERO;
         if (!prep.es_primer_cierre) return prep.fondo_inicial;
-        return fondoEscrito ?? CERO;
-    }, [prep, fondoEscrito]);
+        return fondoInicial.valor ?? CERO;
+    }, [prep, fondoInicial.valor]);
 
     // La misma cuenta que hará Rust al confirmar (`tpv_domain::cierre_caja::calcular`): lo que se
     // enseña aquí es lo que se va a guardar.
@@ -187,20 +187,20 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                         <>
                             {/* 1 · Qué debería haber */}
                             <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                                <Tarjeta titulo="Fondo de partida" valor={fondoIlegible ? "—" : euro(fondo)}>
+                                <Tarjeta titulo="Fondo de partida" valor={fondoIlegible ? "—" : eur(fondo)}>
                                     {prep.es_primer_cierre
                                         ? "Es el primer cierre: dinos con cuánto empezaste."
                                         : "Lo que dejaste en el último cierre."}
                                 </Tarjeta>
-                                <Tarjeta titulo="Cobrado en efectivo" valor={euro(prep.ventas_efectivo)}>
+                                <Tarjeta titulo="Cobrado en efectivo" valor={eur(prep.ventas_efectivo)}>
                                     Desde el cierre anterior. La tarjeta la cuadra el banco.
                                 </Tarjeta>
-                                <Tarjeta titulo="Gastos pagados con caja" valor={euro(prep.gastos_caja)}>
+                                <Tarjeta titulo="Gastos pagados con caja" valor={eur(prep.gastos_caja)}>
                                     Los gastos marcados como pagados con dinero del cajón.
                                 </Tarjeta>
                                 <Tarjeta
                                     titulo="Debería haber"
-                                    valor={fondoIlegible ? "—" : euro(esperado)}
+                                    valor={fondoIlegible ? "—" : eur(esperado)}
                                     destacada
                                 >
                                     Fondo más lo cobrado en efectivo, menos los gastos pagados con caja.
@@ -212,23 +212,11 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                     <span className="text-xs font-semibold text-fg-muted">
                                         ¿Con cuánto empezaste? (sólo se pregunta esta vez)
                                     </span>
-                                    <input
-                                        inputMode="decimal"
-                                        value={fondoInicial}
-                                        onChange={(e) => setFondoInicial(e.target.value)}
+                                    <CampoDinero
+                                        {...fondoInicial.campo}
                                         placeholder="150"
-                                        aria-invalid={fondoIlegible}
-                                        className={cn(
-                                            "h-10 rounded-xl border bg-surface px-3 text-sm text-fg outline-none focus:border-accent",
-                                            fondoIlegible ? "border-danger" : "border-border",
-                                        )}
+                                        className="h-10 rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
                                     />
-                                    {fondoIlegible ? (
-                                        <span className="text-xs text-danger">
-                                            No se entiende «{fondoInicial.trim()}» como importe. Escríbelo
-                                            como 150, 150,50 o 1.500.
-                                        </span>
-                                    ) : null}
                                 </label>
                             ) : null}
 
@@ -238,7 +226,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                     <strong>
                                         {prep.anulaciones}{" "}
                                         {prep.anulaciones === 1 ? "cobro" : "cobros"} por{" "}
-                                        {euro(prep.anulaciones_importe)}
+                                        {eur(prep.anulaciones_importe)}
                                     </strong>{" "}
                                     en este periodo. No están contados arriba —un cobro anulado no es una
                                     venta—, así que si ese dinero salió del cajón, el recuento lo dirá.
@@ -305,17 +293,17 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                             : descuadre === 0
                                               ? "Cuadra"
                                               : descuadre < 0
-                                                ? `Faltan ${euro(abs(descuadre))}`
-                                                : `Sobran ${euro(descuadre)}`}
+                                                ? `Faltan ${eur(abs(descuadre))}`
+                                                : `Sobran ${eur(descuadre)}`}
                                     </p>
                                     <p className="mt-2 text-xs text-fg-muted">
                                         {fondoIlegible
                                             ? "Falta saber con cuánto empezaste."
-                                            : `Contado ${euro(totalContado)} frente a ${euro(esperado)} esperados.`}
+                                            : `Contado ${eur(totalContado)} frente a ${eur(esperado)} esperados.`}
                                     </p>
                                 </div>
 
-                                <Tarjeta titulo="Te llevas" valor={euro(retirado)}>
+                                <Tarjeta titulo="Te llevas" valor={eur(retirado)}>
                                     Lo contado menos lo que dejas en el cajón.
                                 </Tarjeta>
                             </div>
@@ -328,7 +316,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
 
                             <label className="mt-4 flex flex-col gap-1">
                                 <span className="text-xs font-semibold text-fg-muted">
-                                    Motivo {exigeMotivo ? "(obligatorio: la diferencia pasa de " + euro(umbral) + ")" : "(opcional)"}
+                                    Motivo {exigeMotivo ? "(obligatorio: la diferencia pasa de " + eur(umbral) + ")" : "(opcional)"}
                                 </span>
                                 <textarea
                                     rows={2}

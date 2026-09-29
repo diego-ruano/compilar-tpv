@@ -18,21 +18,18 @@ import VerTicketsModal from "../../features/ventaRapida/ui/VerTicketsModal";
 
 import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
 import DatosFiscalesModal, {
-  type DatosFiscales,
 } from "../../shared/ticket/DatosFiscalesModal";
 import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { esError, toAppError } from "@tpv/client";
 
 import {
-  Categoria,
   CategoriaDisplay,
-  Producto,
   ProductoDisplay,
   Paso,
   TicketItem,
 } from "../../features/ventaRapida/types";
-import { cn, eur } from "../../features/ventaRapida/utils";
+import { cn } from "../../features/ventaRapida/utils";
 
 import {
   vrBootstrap,
@@ -49,12 +46,16 @@ import {
   vrUpdateNotaDetalle,
   vrCobrarFraccionado,
   vrDeleteComandaIfSafe,
-  type ComandaBarraRow as ApiComandaBarraRow,
-  type LineaComandaRow as ApiLineaComandaRow,
 } from "../../features/ventaRapida/ventaRapidaAPI";
 import { conAviso } from "../../shared/lib/conAviso";
-import type { Dinero } from "@tpv/contracts";
-import { CERO, deCentimos, redondear } from "../../shared/lib/dinero";
+import type {
+  CategoriaRow,
+  ComandaBarraRow,
+  DestinatarioInput,
+  Dinero,
+  LineaComandaRow,
+} from "@tpv/contracts";
+import { CERO, deCentimos, escalar } from "../../shared/lib/dinero";
 import {
   cambioDelCobro,
   DENOMS_COBRO,
@@ -69,8 +70,6 @@ const emitVrChanged = () => {
   window.dispatchEvent(new CustomEvent("vr:changed"));
 };
 
-type ComandaBarraRow = ApiComandaBarraRow;
-type LineaComandaRow = ApiLineaComandaRow;
 
 type LoadTicketOpts = {
   keepSelection?: boolean;
@@ -102,33 +101,10 @@ type PendingCobroIntent = {
    * factura y se fue con un ticket es un error que nadie descubre hasta su trimestre. El dato, por
    * lo demás, acaba en el SQLite de este mismo equipo de todas formas.
    */
-  destinatario?: {
-    nombre_razon: string;
-    nif: string;
-    domicilio?: string | null;
-  } | null;
+  destinatario?: DestinatarioInput | null;
 };
 
 const PENDING_COBROS_STORAGE_PREFIX = "tpv:ventaRapida:pendingCobros:v1";
-
-function asArray<T>(value: unknown): T[] {
-  if (Array.isArray(value)) return value as T[];
-
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-
-    if (Array.isArray(obj.data)) return obj.data as T[];
-    if (Array.isArray(obj.rows)) return obj.rows as T[];
-    if (Array.isArray(obj.result)) return obj.result as T[];
-    if (Array.isArray(obj.items)) return obj.items as T[];
-    if (Array.isArray(obj.lineas)) return obj.lineas as T[];
-    if (Array.isArray(obj.comandas)) return obj.comandas as T[];
-    if (Array.isArray(obj.categorias)) return obj.categorias as T[];
-    if (Array.isArray(obj.productos)) return obj.productos as T[];
-  }
-
-  return [];
-}
 
 function makeTempTicketId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -178,7 +154,7 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
     const nif = String(d.nif ?? "").trim().toUpperCase();
     const domicilio = String(d.domicilio ?? "").trim();
     if (nombre && nif) {
-      destinatario = { nombre_razon: nombre, nif, domicilio: domicilio || null };
+      destinatario = { nombre_razon: nombre, nif, domicilio: domicilio || undefined };
     }
   }
 
@@ -507,8 +483,7 @@ export default function VentaRapida() {
   }, [setPendingCobrosLocal, setSeleccionadosLocal]);
 
   const applyLineasToTicketPanel = useCallback(
-    (lineasInput: unknown, opts?: LoadTicketOpts): TicketItem[] => {
-      const lineas = asArray<LineaComandaRow>(lineasInput);
+    (lineas: LineaComandaRow[], opts?: LoadTicketOpts): TicketItem[] => {
       const map: Record<string, string> = {};
 
       const ui: TicketItem[] = lineas.map((l) => {
@@ -520,16 +495,15 @@ export default function VentaRapida() {
         return {
           id,
           detalleId: idDetalle,
-          productoId: String(l.ID_Producto ?? ""),
-          nombre: String((l as any).Nombre ?? "Producto"),
-          precio: redondear(Number(l.Precio_Unitario || 0) * Number(l.Cantidad || 1)),
-          pagado: Number((l as any).Pagado ?? 0) === 1,
+          productoId: l.ID_Producto,
+          nombre: l.Nombre || "Producto",
+          precio: escalar(l.Precio_Unitario, l.Cantidad || 1),
+          pagado: l.Pagado === 1,
           seleccionado: false,
           categoriaNombre: getCategoriaNombreParaProducto(String(l.ID_Producto ?? "")),
           notas: l.Notas ?? null,
           // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
-          ivaPercent:
-            (l as any).IVA_Percent == null ? null : Number((l as any).IVA_Percent),
+          ivaPercent: l.IVA_Percent ?? null,
         };
       });
 
@@ -683,8 +657,7 @@ export default function VentaRapida() {
 
   const cargarCategorias = useCallback(async () => {
     try {
-      const raw = await vrListCategoriasVendibles();
-      const rows = asArray<Categoria>(raw);
+      const rows = await vrListCategoriasVendibles();
 
       const procesadas: CategoriaDisplay[] = await Promise.all(
         rows.map(async (cat) => ({
@@ -707,8 +680,7 @@ export default function VentaRapida() {
 
     try {
       const idCat = cat.ID_Categoria;
-      const raw = await vrListProductosByCategoria(idCat);
-      const rows = asArray<Producto>(raw);
+      const rows = await vrListProductosByCategoria(idCat);
 
       const procesados: ProductoDisplay[] = await Promise.all(
         rows.map(async (p) => ({
@@ -737,8 +709,7 @@ export default function VentaRapida() {
     setLoadingBusqueda(true);
 
     try {
-      const raw = await vrSearchProductos(safeQ, 60);
-      const rows = asArray<Producto>(raw);
+      const rows = await vrSearchProductos(safeQ, 60);
 
       const procesados: ProductoDisplay[] = await Promise.all(
         rows.map(async (p) => ({
@@ -767,12 +738,10 @@ export default function VentaRapida() {
       try {
         const includePagadas = Boolean(opts?.includePagadas);
 
-        const raw = await vrListComandasBarra({
+        const rows = await vrListComandasBarra({
           includePagadas,
           limit: includePagadas ? 200 : 60,
         });
-
-        const rows = asArray<ComandaBarraRow>(raw);
         setComandasBarra(rows);
       } catch (e) {
         console.error("Error vrListComandasBarra:", e);
@@ -792,8 +761,8 @@ export default function VentaRapida() {
   const cargarComandaEnTicketPanel = useCallback(
     async (idComanda: string, opts?: LoadTicketOpts): Promise<TicketItem[]> => {
       try {
-        const raw = await vrGetLineasComanda(idComanda);
-        return applyLineasToTicketPanel(raw, opts);
+        const lineas = await vrGetLineasComanda(idComanda);
+        return applyLineasToTicketPanel(lineas, opts);
       } catch (e) {
         console.error("Error cargarComandaEnTicketPanel:", e);
 
@@ -915,13 +884,13 @@ export default function VentaRapida() {
       const boot = await vrBootstrap(idTrabajadorAuth ?? null);
 
       const categoriasProcesadas: CategoriaDisplay[] = await Promise.all(
-        asArray<Categoria>(boot.categorias).map(async (cat) => ({
+        boot.categorias.map(async (cat: CategoriaRow) => ({
           ...cat,
           urlImagen: await resolveImageUrl(cat.Ruta_Imagen),
         })),
       );
 
-      const idComanda = String(boot.idComanda || boot.id_comanda || "").trim();
+      const idComanda = boot.idComanda.trim();
 
       if (!idComanda) {
         throw new Error("bootstrap_id_comanda_missing");
@@ -1049,11 +1018,11 @@ export default function VentaRapida() {
           */
           const pago = await vrCobrarFraccionado({
             idComanda: intent.idComanda,
-            metodo: metodoDb as any,
+            metodo: metodoDb,
             importeTotal: intent.importeTotal,
             detalles: detallesUsados,
             idPago: intent.idPago,
-            destinatario: intent.destinatario ?? null,
+            destinatario: intent.destinatario ?? undefined,
           });
 
           if (pago?.numeroTicket) {
@@ -1346,7 +1315,7 @@ export default function VentaRapida() {
   const addProductoToTicket = useCallback(
     async (p: ProductoDisplay) => {
       const idProducto = p.ID_Producto;
-      const precio = deCentimos(Number(p.Precio_Venta || 0));
+      const precio = p.Precio_Venta;
       const tempId = makeTempTicketId();
       const categoriaNombre =
         getCategoriaNombreParaProducto(idProducto) ||
@@ -1563,7 +1532,7 @@ export default function VentaRapida() {
   const cobrar = useCallback(
     async (
       _metodo: "tarjeta" | "efectivo",
-      destinatario?: DatosFiscales | null,
+      destinatario?: DestinatarioInput | null,
     ) => {
       if (hasPendingTicketWrites()) {
         warnPendingTicketWrites();
@@ -1689,7 +1658,7 @@ export default function VentaRapida() {
    *     por ahí: reencolar crearía un segundo intent para el mismo cobro.
    */
   const confirmarFactura = useCallback(
-    async (d: DatosFiscales) => {
+    async (d: DestinatarioInput) => {
       const p = pideFactura;
       if (!p) return;
 
@@ -1703,11 +1672,7 @@ export default function VentaRapida() {
           x.id === p.intentId
             ? {
                   ...x,
-                  destinatario: {
-                      nombre_razon: d.nombre_razon,
-                      nif: d.nif,
-                      domicilio: d.domicilio ?? null,
-                  },
+                  destinatario: d,
               }
             : x,
         ),
@@ -2104,7 +2069,6 @@ export default function VentaRapida() {
                 totalACobrar={totalACobrar}
                 totalEfectivo={totalEfectivo}
                 diferencia={diferencia}
-                formatMoney={eur}
                 onAddCash={addCash}
                 onRemoveCash={removeCash}
                 onReset={resetCash}
@@ -2127,7 +2091,6 @@ export default function VentaRapida() {
                 onRemoveProducto={onRemoveProductoCb}
                 onOpenProductDetail={onOpenProductDetailCb}
                 onOpenAddProduct={onOpenAddProductCb}
-                formatPrice={eur}
               />
             )}
           </div>
@@ -2141,7 +2104,6 @@ export default function VentaRapida() {
             totalPendiente={totalPendiente}
             totalSeleccionado={totalSeleccionado}
             haySeleccion={haySeleccion}
-            formatMoney={eur}
             onCobrarTodo={() => {
               seleccionaTodoPendiente();
               setPaso("metodo");

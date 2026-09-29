@@ -11,96 +11,13 @@
 // esta máquina, así que se persiste en `device_config.json` por el backend.
 
 import { invokeClient } from "@tpv/client";
+import type { PrinterInfo, PrintTicketPayload } from "@tpv/contracts";
 
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../../shared/stores/useTicketSettings";
-import type { Dinero } from "@tpv/contracts";
+import { agruparLineas, type LineaEntrada } from "../../../shared/ticket/ticketMath";
 
-/* ── Tipos ── */
-
-export type PrinterInfo = {
-    name: string;
-    is_default: boolean;
-};
-
-/** Línea agrupada del ticket (snake_case = lo que espera el struct Rust). */
-export type PrintTicketLine = {
-    nombre: string;
-    cantidad: number;
-    precio_unitario: number;
-    /** Tipo de IVA de la línea; `null` = el general del negocio. */
-    iva_percent: number | null;
-    /**
-     * FISCAL-01: la línea se vendió EXENTA de IVA. No es lo mismo que un 0 %, y por eso no se
-     * representa con `iva_percent: 0`.
-     */
-    exento?: boolean;
-    /** `E1`..`E6`. Sólo se mira si `exento`. */
-    causa_exencion?: string | null;
-};
-
-/** Payload de impresión (snake_case para que serde lo deserialice directamente). */
-export type PrintTicketPayload = {
-    printer_name: string | null;
-
-    business_name: string;
-    direccion: string;
-    telefono: string;
-    cif: string;
-    mensaje_footer: string;
-    iva_percent: number;
-
-    show_logo: boolean;
-    /** Ruta del logo en AppData (o data URL heredado). Lo lee Rust al imprimir. */
-    logo_path: string | null;
-    show_business_name: boolean;
-    show_address: boolean;
-    show_phone: boolean;
-    show_cif: boolean;
-    show_date_time: boolean;
-    show_line_items: boolean;
-    show_base_and_iva: boolean;
-    show_total: boolean;
-    show_footer_message: boolean;
-
-    paper_width_mm: number;
-
-    paper_dpi: number;
-    chars_per_line: number;
-    margin_top_mm: number;
-    margin_bottom_mm: number;
-    margin_left_mm: number;
-    margin_right_mm: number;
-    font_scale: number;
-
-    /** Número correlativo. Ausente/null = precuenta (se marca "no es un ticket de venta"). */
-    numero_ticket?: string | null;
-    /** Cómo se cobró. Ausente en una precuenta. */
-    metodo_pago?: string | null;
-    /** De dónde sale la venta: `Mesa 5`, `Barra`… */
-    origen?: string | null;
-    /** Reimpresión: mismo número, marcado como COPIA. */
-    es_copia?: boolean;
-    /** El cobro está anulado (CUENTA-07): el papel lo dice. */
-    es_anulado?: boolean;
-
-    /**
-     * FISCAL-01: la URL exacta que va dentro del código QR tributario.
-     *
-     * **No se compone aquí.** Sale de la fila de `Registros_Facturacion` que se escribió al
-     * cobrar, y llega por `verifactuBloqueTicket()`. Es la misma cadena que se cotejará en la sede
-     * de la AEAT, así que un carácter de más la convierte en una factura que «no consta» — y una
-     * reimpresión tiene que sacar exactamente la misma.
-     *
-     * `null` = este papel no lleva QR: la precuenta (que no es una factura) o un ticket emitido
-     * antes de que el negocio completara sus datos fiscales.
-     */
-    qr_url?: string | null;
-    /** El registro se emitió contra el entorno de PRUEBAS. El papel tiene que gritarlo. */
-    qr_pruebas?: boolean;
-
-    items: PrintTicketLine[];
-};
+export type { PrinterInfo };
 
 /** Lo que distingue un ticket de venta de una precuenta, de una copia o de un cobro anulado. */
 export type DatosDelTicket = {
@@ -113,24 +30,6 @@ export type DatosDelTicket = {
     qrUrl?: string | null;
     /** El registro se emitió en el entorno de pruebas. */
     qrPruebas?: boolean;
-};
-
-/** Item simple (por defecto una unidad); `buildTicketPayload` agrupa los iguales. */
-export type SimpleTicketItem = {
-    nombre: string;
-    precio: Dinero;
-    /** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
-    ivaPercent?: number | null;
-    /**
-     * Unidades de esta línea. Ausente = 1, que es como el POS manda la comanda (una entrada por
-     * pulsación). Lo usa la reimpresión, que lee del cobro una línea ya con su cantidad y no
-     * puede desdoblarla sin inventarse el precio unitario.
-     */
-    cantidad?: number;
-    /** FISCAL-01: la línea se vendió exenta de IVA (congelado en `Detalle_Comanda`). */
-    exento?: boolean;
-    /** `E1`..`E6`. Sólo se mira si `exento`. */
-    causaExencion?: string | null;
 };
 
 /* ── API ── */
@@ -192,49 +91,23 @@ export async function printerPrintTicket(payload: PrintTicketPayload): Promise<v
 
 /**
  * Construye el `PrintTicketPayload` a partir de los items (cada unidad por separado) y de la
- * personalización actual (business + ticket settings de los stores Zustand). Agrupa las unidades
- * idénticas (mismo nombre + precio) en líneas con su cantidad, igual que la previsualización.
+ * personalización actual (business + ticket settings de los stores Zustand).
+ *
+ * Las líneas las agrupa `agruparLineas`, **la misma función que pinta la vista previa**. Había aquí
+ * una segunda copia y se habían separado: la previa redondeaba al céntimo el importe de un producto
+ * al peso y ésta no, así que 12,34 € × 0,333 viajaba como 410,92 céntimos, Rust no podía leerlo
+ * como `Dinero` y el ticket no salía (RI-53).
  */
 export function buildTicketPayload(
-    items: SimpleTicketItem[],
+    items: LineaEntrada[],
     printerName?: string,
     datos?: DatosDelTicket,
 ): PrintTicketPayload {
     const biz = useBusinessSettings.getState();
     const t = useTicketSettings.getState().settings;
 
-    // Se agrupa por nombre + precio + TIPO: dos unidades del mismo producto vendidas a tipos
-    // distintos (porque alguien lo cambió entre medias) son dos líneas, no una.
-    const map = new Map<string, PrintTicketLine>();
-    for (const it of items) {
-        const iva = it.ivaPercent ?? null;
-        // El ticket cuenta unidades enteras. Una cantidad fraccionada (un producto al peso) no se
-        // puede representar, así que se pliega a una unidad por el importe de la línea: el total
-        // sigue siendo el cobrado, que es lo que no se puede perder.
-        const unidades = Number.isInteger(it.cantidad) ? (it.cantidad as number) : 1;
-        const precio = Number.isInteger(it.cantidad) ? it.precio : it.precio * (it.cantidad ?? 1);
-        // La exención entra en la clave: dos unidades del mismo producto, una exenta y otra no,
-        // son dos líneas del papel porque son dos tramos del desglose (FISCAL-01).
-        const exento = it.exento === true;
-        const causa = exento ? (it.causaExencion || "E1") : null;
-        const key = `${it.nombre}__${precio}__${iva ?? "neg"}__${causa ?? ""}`;
-        const cur = map.get(key);
-        if (cur) {
-            cur.cantidad += unidades;
-        } else {
-            map.set(key, {
-                nombre: it.nombre,
-                precio_unitario: precio,
-                cantidad: unidades,
-                iva_percent: iva,
-                exento,
-                causa_exencion: causa,
-            });
-        }
-    }
-
     return {
-        printer_name: printerName ?? null,
+        printer_name: printerName,
 
         business_name: biz.businessName,
         direccion: biz.direccion,
@@ -244,7 +117,7 @@ export function buildTicketPayload(
         iva_percent: biz.ivaPercent,
 
         show_logo: t.showLogo,
-        logo_path: biz.logoDataUrl ?? null,
+        logo_path: biz.logoDataUrl ?? undefined,
         show_business_name: t.showBusinessName,
         show_address: t.showAddress,
         show_phone: t.showPhone,
@@ -265,15 +138,22 @@ export function buildTicketPayload(
         margin_right_mm: t.marginRightMm,
         font_scale: t.fontScale,
 
-        numero_ticket: datos?.numeroTicket ?? null,
-        metodo_pago: datos?.metodoPago ?? null,
-        origen: datos?.origen ?? null,
+        numero_ticket: datos?.numeroTicket ?? undefined,
+        metodo_pago: datos?.metodoPago ?? undefined,
+        origen: datos?.origen ?? undefined,
         es_copia: datos?.esCopia ?? false,
         es_anulado: datos?.esAnulado ?? false,
 
-        qr_url: datos?.qrUrl ?? null,
+        qr_url: datos?.qrUrl ?? undefined,
         qr_pruebas: datos?.qrPruebas ?? false,
 
-        items: Array.from(map.values()),
+        items: agruparLineas(items).map((g) => ({
+            nombre: g.nombre,
+            cantidad: g.qty,
+            precio_unitario: g.precio,
+            iva_percent: g.ivaPercent ?? undefined,
+            exento: g.exento,
+            causa_exencion: g.causaExencion ?? undefined,
+        })),
     };
 }

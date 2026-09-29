@@ -2,7 +2,9 @@
 import React from "react";
 import ListProducts from "../ListProducts";
 import ItemListProduct from "../ItemListProduct";
-import type { ProductoResumen } from "../api/inventarioAPI";
+import type { ProductoResumenDto } from "@tpv/contracts";
+
+import { eur } from "../../../shared/lib/dinero";
 import { formatCantidad, formatDateES } from "../utils/inventarioFormat";
 
 function SummaryList({
@@ -12,9 +14,9 @@ function SummaryList({
     keyFn,
 }: {
     title: string;
-    rows: ProductoResumen[];
+    rows: ProductoResumenDto[];
     emptyText: string;
-    keyFn: (p: ProductoResumen, idx: number) => string;
+    keyFn: (p: ProductoResumenDto, idx: number) => string;
 }) {
     return (
         <ListProducts title={title}>
@@ -42,7 +44,7 @@ function SummaryList({
                                     nombre={p.Nombre}
                                     caducidad={formatDateES(p.Caducidad_Proxima)}
                                     lote={p.Lote ?? "—"}
-                                    precio={p.Precio_Venta != null ? String(p.Precio_Venta) : "—"}
+                                    precio={p.Precio_Venta != null ? eur(p.Precio_Venta) : "—"}
                                 />
                             </div>
                         ))
@@ -58,8 +60,8 @@ export default function SummarySection({
     proximosCaducar,
     menosCantidad,
 }: {
-    proximosCaducar: ProductoResumen[];
-    menosCantidad: ProductoResumen[];
+    proximosCaducar: ProductoResumenDto[];
+    menosCantidad: ProductoResumenDto[];
 }) {
     return (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">

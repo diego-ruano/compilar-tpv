@@ -13,7 +13,11 @@ import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import type {
     CierreDto,
     CierreResumenDto,
+    ConfirmarCierreInput,
+    DenominacionInput,
+    Dinero,
     PreparacionCierreDto,
+    PrintArqueoPayload,
 } from "@tpv/contracts";
 
 import type { CashCount, Denom } from "./cuentasApis";
@@ -24,23 +28,10 @@ export type { CierreDto, CierreResumenDto, PreparacionCierreDto };
 export function aDenominaciones(
     denoms: Denom[],
     count: CashCount,
-): Array<{ valor: number; unidades: number }> {
+): DenominacionInput[] {
     return denoms
         .map((d) => ({ valor: d.value, unidades: Number(count?.[d.label] ?? 0) }))
         .filter((d) => Number.isFinite(d.unidades) && d.unidades > 0);
-}
-
-/** Lo contrario: el desglose guardado vuelve a la forma que pinta el contador. */
-export function aCashCount(
-    denoms: Denom[],
-    guardadas: Array<{ valor: number; unidades: number }>,
-): CashCount {
-    const out: CashCount = {};
-    for (const g of guardadas ?? []) {
-        const d = denoms.find((x) => Math.abs(x.value - g.valor) < 1e-9);
-        if (d) out[d.label] = g.unidades;
-    }
-    return out;
 }
 
 /** Lo que hace falta saber antes de contar: desde cuándo, cuánto se espera y qué avisar. */
@@ -56,19 +47,18 @@ export function cierrePreparar(): Promise<PreparacionCierreDto> {
  * mismo vale para `cierreReabrir`.
  */
 export function cierreConfirmar(payload: {
-    fondoInicial?: number | null;
-    contado: Array<{ valor: number; unidades: number }>;
-    dejado: Array<{ valor: number; unidades: number }>;
+    fondoInicial?: Dinero | null;
+    contado: DenominacionInput[];
+    dejado: DenominacionInput[];
     motivo?: string | null;
 }): Promise<CierreDto> {
-    return invokeClient<CierreDto>("cierre_confirmar", {
-        args: {
-            fondo_inicial: payload.fondoInicial ?? null,
-            contado: payload.contado,
-            dejado: payload.dejado,
-            motivo: payload.motivo?.trim() ? payload.motivo.trim() : null,
-        },
-    });
+    const args: ConfirmarCierreInput = {
+        fondo_inicial: payload.fondoInicial ?? undefined,
+        contado: payload.contado,
+        dejado: payload.dejado,
+        motivo: payload.motivo?.trim() || undefined,
+    };
+    return invokeClient<CierreDto>("cierre_confirmar", { args });
 }
 
 export function cierreListar(limite = 50): Promise<CierreResumenDto[]> {
@@ -104,36 +94,35 @@ export function cierreReabrir(idCierre: string): Promise<boolean> {
 export function cierreImprimir(c: CierreDto): Promise<string> {
     const t = useTicketSettings.getState().settings;
     const b = useBusinessSettings.getState();
-    return invokeClient<string>("printer_print_arqueo", {
-        payload: {
-            business_name: b.businessName ?? "",
-            fecha_hora: c.fecha_hora,
-            desde: c.periodo_desde ?? null,
-            usuario: c.usuario_nombre ?? null,
-            fondo_inicial: c.fondo_inicial,
-            ventas_efectivo: c.ventas_efectivo,
-            gastos_caja: c.gastos_caja ?? 0,
-            esperado: c.esperado,
-            contado: c.contado,
-            descuadre: c.descuadre,
-            dejado: c.dejado,
-            retirado: c.retirado,
-            motivo: c.motivo ?? null,
-            contado_denoms: (c.contado_denoms ?? []).map((d) => [d.valor, d.unidades]),
-            rect_esperado: c.rect_esperado ?? null,
-            rect_descuadre: c.rect_descuadre ?? null,
-            rectificaciones: (c.rectificaciones ?? []).map((r) => ({
-                fecha_hora: r.fecha_hora,
-                descripcion: r.descripcion,
-                motivo: r.motivo ?? null,
-            })),
-            paper_width_mm: t.paperWidthMm,
-            paper_dpi: t.paperDpi,
-            chars_per_line: t.charsPerLine,
-            margin_top_mm: t.marginTopMm,
-            margin_bottom_mm: t.marginBottomMm,
-            margin_left_mm: t.marginLeftMm,
-            margin_right_mm: t.marginRightMm,
-        },
-    });
+    const payload: PrintArqueoPayload = {
+        business_name: b.businessName ?? "",
+        fecha_hora: c.fecha_hora,
+        desde: c.periodo_desde,
+        usuario: c.usuario_nombre,
+        fondo_inicial: c.fondo_inicial,
+        ventas_efectivo: c.ventas_efectivo,
+        gastos_caja: c.gastos_caja,
+        esperado: c.esperado,
+        contado: c.contado,
+        descuadre: c.descuadre,
+        dejado: c.dejado,
+        retirado: c.retirado,
+        motivo: c.motivo,
+        contado_denoms: c.contado_denoms.map((d) => [d.valor, d.unidades]),
+        rect_esperado: c.rect_esperado,
+        rect_descuadre: c.rect_descuadre,
+        rectificaciones: (c.rectificaciones ?? []).map((r) => ({
+            fecha_hora: r.fecha_hora,
+            descripcion: r.descripcion,
+            motivo: r.motivo,
+        })),
+        paper_width_mm: t.paperWidthMm,
+        paper_dpi: t.paperDpi,
+        chars_per_line: t.charsPerLine,
+        margin_top_mm: t.marginTopMm,
+        margin_bottom_mm: t.marginBottomMm,
+        margin_left_mm: t.marginLeftMm,
+        margin_right_mm: t.marginRightMm,
+    };
+    return invokeClient<string>("printer_print_arqueo", { payload });
 }

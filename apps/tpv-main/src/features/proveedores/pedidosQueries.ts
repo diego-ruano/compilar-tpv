@@ -8,10 +8,12 @@ import {
   pedidosActualizar,
   pedidosCrear,
   pedidosGetPage,
-  PedidoCrearInput,
-  PedidoActualizarInput,
-  PedidoCambiarEstadoInput,
 } from "./pedidosApis";
+import type {
+  PedidosActualizarInput,
+  PedidosCambiarEstadoInput,
+  PedidosCrearInput,
+} from "@tpv/contracts";
 
 const PAGE_SIZE = 50;
 
@@ -40,7 +42,7 @@ export function usePedidosPage(search: string) {
 export function useCrearPedido() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: PedidoCrearInput) => pedidosCrear(input),
+    mutationFn: (input: PedidosCrearInput) => pedidosCrear(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: pedidosKeys.all }),
   });
 }
@@ -48,7 +50,7 @@ export function useCrearPedido() {
 export function useActualizarPedido() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: PedidoActualizarInput) => pedidosActualizar(input),
+    mutationFn: (input: PedidosActualizarInput) => pedidosActualizar(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: pedidosKeys.all }),
   });
 }
@@ -57,7 +59,7 @@ export function useCancelarPedido() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (idPedido: string) =>
-      pedidosCambiarEstado({ idPedido, estado: "cancelado" }),
+      pedidosCambiarEstado({ id_pedido: idPedido, estado: "cancelado" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: pedidosKeys.all }),
   });
 }
@@ -65,7 +67,7 @@ export function useCancelarPedido() {
 export function useEnviarPedido() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: PedidoCambiarEstadoInput) => pedidosCambiarEstado(input),
+    mutationFn: (input: PedidosCambiarEstadoInput) => pedidosCambiarEstado(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: pedidosKeys.all }),
   });
 }

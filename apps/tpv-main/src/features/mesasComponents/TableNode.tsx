@@ -1,15 +1,11 @@
 // components/mesasComponents/TableNode.tsx
 import React, { useMemo } from "react";
 import { Group, Text, Rect, Circle } from "react-konva";
-import type { MesaMeta, Table } from "./types";
+import type { MesaMetaOut } from "@tpv/contracts";
+import type { Table } from "./types";
 import { parseMesaId } from "./ParseMesaId";
 
-type MesaMetaMap = Record<number, MesaMeta> & Record<string, MesaMeta>;
-
-function asNumber(v: any) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-}
+type MesaMetaMap = Record<number, MesaMetaOut> & Record<string, MesaMetaOut>;
 
 export default function TableNode({
     table,
@@ -26,38 +22,17 @@ export default function TableNode({
 
     // `parseMesaId` devuelve el UUID puro, que es la clave con la que `mesasLoadMesaMeta`
     // indexa el mapa. Un único lookup directo.
-    const meta: MesaMeta | undefined = idMesa ? mesaMetaById[idMesa] : undefined;
+    const meta: MesaMetaOut | undefined = idMesa ? mesaMetaById[idMesa] : undefined;
 
     const reserva = meta?.reserva ?? null;
     const isReservaActiva = reserva?.estado === "ACTIVA";
     const isReservaProxima = reserva?.estado === "PROXIMA";
 
-    // ✅ PENDIENTE REAL
-    // - si viene meta.estado => manda
-    // - fallback por compat si te llega meta antigua con contadores
+    // Pendiente: lo dice el estado, y si no, que quede algo por cobrar o por preparar.
     const isPendiente = useMemo(() => {
         if (!meta) return false;
-
         if (meta.estado === "PENDIENTE") return true;
-
-        // fallback por si por compatibilidad llega meta antigua
-        const m: any = meta as any;
-        const pendientesPago =
-            asNumber(m.pendientesPago) ||
-            asNumber(m.pendientes_pago) ||
-            asNumber(m.Pendientes_Pago);
-
-        const totalPendiente =
-            asNumber(m.totalPendiente) ||
-            asNumber(m.total_pendiente) ||
-            asNumber(m.Total_Pendiente);
-
-        const pendientesCocina =
-            asNumber(m.pendientesCocina) ||
-            asNumber(m.pendientes_cocina) ||
-            asNumber(m.Pendientes_Cocina);
-
-        return pendientesPago > 0 || totalPendiente > 0 || pendientesCocina > 0;
+        return meta.pendientesPago > 0 || meta.totalPendiente > 0 || meta.pendientesCocina > 0;
     }, [meta]);
 
     // ===== Colores =====

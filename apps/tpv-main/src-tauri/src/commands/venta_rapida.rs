@@ -7,7 +7,7 @@ use tpv_contracts::venta_rapida::{
     CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow, VerTicketsDetalleRow,
     VrAddLineaComandaInput, VrCobrarFraccionadoInput, VrCreateComandaBarraInput,
     VrDeleteComandaIfSafeInput, VrDeleteLineaIfUnpaidInput, VrIdCategoriaArgs, VrIdComandaArgs,
-    VrIdsArgs, VrListComandasArgs, VrRemoveLastUnpaidLineaInput, VrRestarStockInput,
+    VrIdsArgs, VrListComandasArgs, VrRemoveLastUnpaidLineaInput,
     VrSearchProductosArgs, VrUpdateNotaDetalleInput,
 };
 use crate::AppState;
@@ -146,15 +146,6 @@ pub async fn vr_cobrar_fraccionado(
         args,
     )
     .await?)
-}
-
-#[tauri::command]
-pub async fn vr_restar_stock(
-    state: State<'_, AppState>,
-    args: VrRestarStockInput,
-) -> Result<bool, AppErrorDto> {
-    let repo = state.venta_rapida_repo().await?;
-    Ok(uc::restar_stock(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]

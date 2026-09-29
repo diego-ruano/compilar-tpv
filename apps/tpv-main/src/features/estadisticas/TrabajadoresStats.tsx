@@ -12,7 +12,7 @@ import {
     type TrabajadorCardStats,
 } from "./statsApis";
 import { useTrabajadoresStats } from "./statsQueries";
-import { CERO, deCentimos, eur as formatEur } from "../../shared/lib/dinero";
+import { CERO, deCentimos, eur } from "../../shared/lib/dinero";
 
 /**
  * ✅ NUEVO (frontend):
@@ -311,7 +311,7 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
             tooltip: {
                 fillSeriesColor: false, // ✅ sin “bloque” de color
                 y: {
-                    formatter: (val: number) => formatEur(deCentimos(val)),
+                    formatter: (val: number) => eur(deCentimos(val)),
                     title: { formatter: () => "Ventas" },
                 },
             },
@@ -434,7 +434,7 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
                                                             <span className="font-semibold text-fg">
                                                                 Ticket medio:
                                                             </span>{" "}
-                                                            {formatEur(w.ticket_medio_eur ?? CERO)}
+                                                            {eur(w.ticket_medio ?? CERO)}
                                                         </p>
 
                                                         <TareasLine

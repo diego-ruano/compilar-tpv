@@ -21,29 +21,3 @@ export type Salon = {
     room: RoomPoly;
     tables: Table[];
 };
-
-// ──────────────────────────────────────────────────────────────
-// Metas de mesa + reservas (para mapa y MesaComandaModal)
-// ──────────────────────────────────────────────────────────────
-
-export type MesaEstado = "LIBRE" | "PENDIENTE";
-
-export type ReservaEstado = "PROXIMA" | "ACTIVA";
-export type ReservaMesaMeta = {
-    estado: ReservaEstado;
-    idReserva: string;
-    clienteNombre: string;
-    diaYMD: string;
-    hora: string;
-    minutosPara: number; // puede ser negativo si ya pasó la hora
-};
-
-export type MesaMeta =
-    | {
-          estado: MesaEstado;
-          reserva: null;
-      }
-    | {
-          estado: MesaEstado;
-          reserva: ReservaMesaMeta;
-      };

@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
-import { type LoteRow } from "../api/inventarioAPI";
+import type { LoteDto } from "@tpv/contracts";
+
+import { CampoDinero, useImporte } from "../../../shared/ui/CampoDinero";
 import { useCreateLote, useUpdateLote } from "../inventarioQueries";
 import { conAviso } from "../../../shared/lib/conAviso";
 
@@ -9,7 +11,7 @@ type Props = {
     open: boolean;
     onClose: () => void;
     productId: string | null;
-    loteToEdit?: LoteRow | null;
+    loteToEdit?: LoteDto | null;
     onSaved: () => void;
 };
 
@@ -32,7 +34,8 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
     const [codigoLote, setCodigoLote] = useState("");
     const [caducidad, setCaducidad] = useState("");
     const [cantidad, setCantidad] = useState("");
-    const [costeUnitario, setCosteUnitario] = useState("");
+    const coste = useImporte();
+    const ponerCoste = coste.poner;
     const [notas, setNotas] = useState("");
 
     const [loading, setLoading] = useState(false);
@@ -48,10 +51,10 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
         setCodigoLote(loteToEdit.Codigo_Lote ?? "");
         setCaducidad(dateInputValue(loteToEdit.Caducidad));
         setCantidad(String(loteToEdit.Stock_Disponible ?? ""));
-        setCosteUnitario(loteToEdit.Coste_Unitario == null ? "" : String(loteToEdit.Coste_Unitario));
+        ponerCoste(loteToEdit.Coste_Unitario);
         setNotas(loteToEdit.Notas ?? "");
         setLoading(false);
-    }, [open, loteToEdit]);
+    }, [open, loteToEdit, ponerCoste]);
 
     const ok = useMemo(() => {
         if (!productId) return false;
@@ -60,17 +63,14 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
         const cant = toNum(cantidad);
         if (!Number.isFinite(cant) || cant < 0) return false;
 
-        const cu = costeUnitario.trim() ? toNum(costeUnitario) : NaN;
-        if (costeUnitario.trim() && (!Number.isFinite(cu) || cu < 0)) return false;
-
-        return true;
-    }, [productId, codigoLote, cantidad, costeUnitario]);
+        return coste.legible;
+    }, [productId, codigoLote, cantidad, coste.legible]);
 
     const reset = () => {
         setCodigoLote("");
         setCaducidad("");
         setCantidad("");
-        setCosteUnitario("");
+        ponerCoste(null);
         setNotas("");
         setLoading(false);
     };
@@ -80,37 +80,34 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
         if (!productId) return;
 
         if (!ok) {
-            toast.info("Validación", "Revisa el código de lote y la cantidad.");
+            toast.info("Validación", "Revisa el código de lote, la cantidad y el coste.");
             return;
         }
 
         setLoading(true);
         try {
             const cant = toNum(cantidad);
-            const cu = costeUnitario.trim() ? toNum(costeUnitario) : null;
 
             if (isEdit && loteToEdit) {
                 await updateLote.mutateAsync({
                     id_lote: loteToEdit.ID_Lote,
                     id_producto: productId,
                     codigo_lote: codigoLote.trim(),
-                    caducidad: caducidad.trim() ? caducidad : null,
+                    caducidad: caducidad.trim() || undefined,
                     stock_disponible: cant,
-                    coste_unitario: cu != null && Number.isFinite(cu) ? cu : null,
-                    fecha_entrada: loteToEdit.Fecha_Entrada || null,
-                    id_proveedor: loteToEdit.ID_Proveedor ?? null,
-                    notas: notas.trim() ? notas.trim() : null,
+                    coste_unitario: coste.valor ?? undefined,
+                    fecha_entrada: loteToEdit.Fecha_Entrada || undefined,
+                    id_proveedor: loteToEdit.ID_Proveedor ?? undefined,
+                    notas: notas.trim() || undefined,
                 });
             } else {
                 await createLote.mutateAsync({
                     id_producto: productId,
                     codigo_lote: codigoLote.trim(),
-                    caducidad: caducidad.trim() ? caducidad : null,
+                    caducidad: caducidad.trim() || undefined,
                     stock_disponible: cant,
-                    coste_unitario: cu != null && Number.isFinite(cu) ? cu : null,
-                    fecha_entrada: null,
-                    id_proveedor: null,
-                    notas: notas.trim() ? notas.trim() : null,
+                    coste_unitario: coste.valor ?? undefined,
+                    notas: notas.trim() || undefined,
                 });
             }
 
@@ -168,11 +165,9 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
 
                 <div>
                     <label className="text-sm font-semibold text-fg">Coste unitario</label>
-                    <input
-                        type="number"
-                        step="0.01"
-                        value={costeUnitario}
-                        onChange={(e) => setCosteUnitario(e.target.value)}
+                    <CampoDinero
+                        {...coste.campo}
+                        aria-label="Coste unitario"
                         className="mt-1 w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                         disabled={loading}
                     />

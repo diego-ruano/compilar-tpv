@@ -4,7 +4,6 @@ import type { CategoriaDisplay, ProductoDisplay } from "../types";
 import AddProductoCard from "./AddProductoCard";
 import ProductCard from "./ProductCard";
 import CategoryCard from "./CategoryCard";
-import type { Dinero } from "@tpv/contracts";
 
 type Variant = "search" | "categories" | "products";
 
@@ -23,7 +22,6 @@ type Props = {
   onRemoveProducto: (productoId: string) => void;
   getQty: (productoId: string) => number;
 
-  formatPrice: (d: Dinero) => string;
   onOpenProductDetail: (productId: string) => void;
 };
 
@@ -77,7 +75,7 @@ function sameProductosWithQty(
     if (x.ID_Producto !== y.ID_Producto) return false;
     if (x.ID_Categoria !== y.ID_Categoria) return false;
     if (x.Nombre !== y.Nombre) return false;
-    if (Number(x.Precio_Venta || 0) !== Number(y.Precio_Venta || 0)) return false;
+    if (x.Precio_Venta !== y.Precio_Venta) return false;
     if ((x.urlImagen ?? "") !== (y.urlImagen ?? "")) return false;
     if ((x.Ruta_Imagen ?? "") !== (y.Ruta_Imagen ?? "")) return false;
 
@@ -101,7 +99,6 @@ function CatalogGrid({
   onAddProducto,
   onRemoveProducto,
   getQty,
-  formatPrice,
   onOpenProductDetail,
 }: Props) {
   const cats: CategoriaDisplay[] = Array.isArray(categorias) ? categorias : [];
@@ -130,7 +127,6 @@ function CatalogGrid({
               onAdd={onAddProducto}
               onRemove={onRemoveProducto}
               onInfo={onOpenProductDetail}
-              formatPrice={formatPrice}
             />
           ))}
         </div>
@@ -187,7 +183,6 @@ function CatalogGrid({
             onAdd={onAddProducto}
             onRemove={onRemoveProducto}
             onInfo={onOpenProductDetail}
-            formatPrice={formatPrice}
           />
         ))}
       </div>
@@ -204,7 +199,6 @@ export default React.memo(CatalogGrid, (prev, next) => {
   if (prev.onAddProducto !== next.onAddProducto) return false;
   if (prev.onRemoveProducto !== next.onRemoveProducto) return false;
   if (prev.onOpenProductDetail !== next.onOpenProductDetail) return false;
-  if (prev.formatPrice !== next.formatPrice) return false;
 
   if (!sameCategorias(prev.categorias, next.categorias)) return false;
 

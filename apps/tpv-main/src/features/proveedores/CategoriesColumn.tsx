@@ -1,17 +1,9 @@
 import { useMemo } from "react";
+import type { CategoriaProveedorDto, ProductoProveedorDto } from "@tpv/contracts";
+
 import { cn } from "../../shared/lib/cn";
 
-export type Categoria = {
-	ID_Categoria: string;
-	Nombre: string;
-	Nombre_Imagen: string | null;
-	Ruta_Imagen: string | null;
-};
-
-export type ProductoMin = {
-	ID_Producto: string;
-	ID_Categoria: string | null;
-};
+type ProductoMin = Pick<ProductoProveedorDto, "id_producto" | "id_categoria">;
 
 export default function CategoriesColumn({
 	categorias,
@@ -19,7 +11,7 @@ export default function CategoriesColumn({
 	categoriaActivaId,
 	setCategoriaActivaId,
 }: {
-	categorias: Categoria[];
+	categorias: CategoriaProveedorDto[];
 	productos: ProductoMin[];
 	categoriaActivaId: string | null;
 	setCategoriaActivaId: (id: string | null) => void;
@@ -29,7 +21,7 @@ export default function CategoriesColumn({
 	const countByCat = useMemo(() => {
 		const map = new Map<string, number>();
 		for (const p of productos) {
-			const id = p.ID_Categoria;
+			const id = p.id_categoria;
 			if (id == null) continue;
 			map.set(id, (map.get(id) ?? 0) + 1);
 		}
@@ -65,17 +57,17 @@ export default function CategoriesColumn({
 						<div className="p-3 text-sm text-fg-muted">No hay categorías creadas.</div>
 					) : (
 						categorias.map((c) => {
-							const active = c.ID_Categoria === categoriaActivaId;
-							const count = countByCat.get(c.ID_Categoria) ?? 0;
+							const active = c.id_categoria === categoriaActivaId;
+							const count = countByCat.get(c.id_categoria) ?? 0;
 
 							return (
 								<button
-									key={c.ID_Categoria}
+									key={c.id_categoria}
 									type="button"
-									onClick={() => setCategoriaActivaId(c.ID_Categoria)}
+									onClick={() => setCategoriaActivaId(c.id_categoria)}
 									className={itemClass(active)}
 								>
-									<div className="truncate font-semibold text-fg">{c.Nombre}</div>
+									<div className="truncate font-semibold text-fg">{c.nombre}</div>
 									<div className="text-xs text-fg-muted">{count} productos</div>
 								</button>
 							);

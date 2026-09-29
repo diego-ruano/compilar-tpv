@@ -9,6 +9,7 @@
 #![allow(non_snake_case)]
 
 use super::*;
+use tpv_contracts::impresion::{PrintTicketLine, RectificacionArqueo};
 
 #[cfg(test)]
 mod fixtures {

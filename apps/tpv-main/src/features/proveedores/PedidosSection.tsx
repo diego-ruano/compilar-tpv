@@ -4,10 +4,16 @@ import { SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import { useToast } from "../../shared/toast";
 import PedidoModal from "./PedidoModal";
-import type { PedidoEstado, PedidoRow, PedidoCrearInput, PedidoActualizarInput, LineaPedido } from "./pedidosApis";
-import type { LineaPedidoInput } from "./pedidosApis";
+import type {
+  LineaPedidoDto,
+  LineaPedidoInput,
+  PedidoProveedorDto,
+  PedidosActualizarInput,
+  PedidosCrearInput,
+  ProveedorDto,
+} from "@tpv/contracts";
+import { estadoDelPedido, type PedidoEstado } from "./pedidosApis";
 import { emailEnviarPedido } from "../configuracion/api/emailConfigApis";
-import type { ProveedorRow } from "./proveedoresApis";
 import {
   usePedidosPage,
   useCrearPedido,
@@ -18,7 +24,7 @@ import {
 import { conAviso } from "../../shared/lib/conAviso";
 
 type Props = {
-  proveedores: ProveedorRow[];
+  proveedores: ProveedorDto[];
 };
 
 const ESTADO_LABEL: Record<PedidoEstado, string> = {
@@ -33,46 +39,37 @@ const ESTADO_CLASS: Record<PedidoEstado, string> = {
   cancelado: "bg-danger-soft text-danger",
 };
 
-function buildPedidoVacio(): PedidoRow {
+function buildPedidoVacio(): PedidoProveedorDto {
   return {
-    id: crypto.randomUUID(),
-    idProveedor: null,
-    nombreProveedor: null,
-    emailDestino: null,
+    id_pedido: crypto.randomUUID(),
+    id_proveedor: null,
+    nombre_proveedor: null,
+    email_destino: null,
     estado: "borrador",
-    fechaCreacion: new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }),
-    fechaEnvio: null,
+    fecha_creacion: new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }),
+    fecha_envio: null,
     notas: null,
     lineas: [],
   };
 }
 
-function toLineasInput(lineas: LineaPedido[]): LineaPedidoInput[] {
+function toLineasInput(lineas: LineaPedidoDto[]): LineaPedidoInput[] {
   return lineas.map((l) => ({
-    idLinea: l.id || crypto.randomUUID(),
-    nombreProducto: l.nombreProducto,
+    id_linea: l.id_linea || crypto.randomUUID(),
+    nombre_producto: l.nombre_producto,
     cantidad: l.cantidad,
-    precioUnitario: l.precioUnitario,
-    unidad: l.unidad,
+    precio_unitario: l.precio_unitario ?? undefined,
+    unidad: l.unidad ?? undefined,
   }));
 }
 
-function toCrearInput(p: PedidoRow): PedidoCrearInput {
+/** Crear y actualizar llevan la misma forma. */
+function toInput(p: PedidoProveedorDto): PedidosCrearInput & PedidosActualizarInput {
   return {
-    idPedido: p.id,
-    idProveedor: p.idProveedor,
-    emailDestino: p.emailDestino,
-    notas: p.notas,
-    lineas: toLineasInput(p.lineas),
-  };
-}
-
-function toActualizarInput(p: PedidoRow): PedidoActualizarInput {
-  return {
-    idPedido: p.id,
-    idProveedor: p.idProveedor,
-    emailDestino: p.emailDestino,
-    notas: p.notas,
+    id_pedido: p.id_pedido,
+    id_proveedor: p.id_proveedor ?? undefined,
+    email_destino: p.email_destino ?? undefined,
+    notas: p.notas ?? undefined,
     lineas: toLineasInput(p.lineas),
   };
 }
@@ -80,7 +77,7 @@ function toActualizarInput(p: PedidoRow): PedidoActualizarInput {
 export default function PedidosSection({ proveedores }: Props) {
   const toast = useToast();
   const [busqueda, setBusqueda] = useState("");
-  const [pedidoAbierto, setPedidoAbierto] = useState<PedidoRow | null>(null);
+  const [pedidoAbierto, setPedidoAbierto] = useState<PedidoProveedorDto | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [isNewPedido, setIsNewPedido] = useState(false);
 
@@ -108,7 +105,7 @@ export default function PedidosSection({ proveedores }: Props) {
     setModalOpen(true);
   }
 
-  function abrirPedido(p: PedidoRow) {
+  function abrirPedido(p: PedidoProveedorDto) {
     setPedidoAbierto(p);
     setIsNewPedido(false);
     setModalOpen(true);
@@ -119,12 +116,12 @@ export default function PedidosSection({ proveedores }: Props) {
     setIsNewPedido(false);
   }
 
-  async function handleSave(updated: PedidoRow) {
+  async function handleSave(updated: PedidoProveedorDto) {
     try {
       if (isNewPedido) {
-        await crearMutation.mutateAsync(toCrearInput(updated));
+        await crearMutation.mutateAsync(toInput(updated));
       } else {
-        await actualizarMutation.mutateAsync(toActualizarInput(updated));
+        await actualizarMutation.mutateAsync(toInput(updated));
       }
       cerrarModal();
     } catch (e: any) {
@@ -145,7 +142,7 @@ export default function PedidosSection({ proveedores }: Props) {
     }
   }
 
-  async function handleMandar(updated: PedidoRow) {
+  async function handleMandar(updated: PedidoProveedorDto) {
     // Condiciones para enviar un pedido:
     //   · correo destino (es a donde va);
     //   · y ALGO que comunicar: al menos una línea, o unas notas.
@@ -158,7 +155,7 @@ export default function PedidosSection({ proveedores }: Props) {
     const notas = (updated.notas ?? "").trim();
     const tieneContenido = updated.lineas.length > 0 || notas.length > 0;
 
-    if (!updated.emailDestino) {
+    if (!updated.email_destino) {
       toast.error("Falta el correo", "Indica el correo del proveedor para enviar el pedido.");
       return;
     }
@@ -174,28 +171,28 @@ export default function PedidosSection({ proveedores }: Props) {
       // Email primero: si falla aquí, la DB no se toca
       {
         await emailEnviarPedido({
-          email_destino: updated.emailDestino!,
-          nombre_proveedor: updated.nombreProveedor ?? "Proveedor",
-          notas: updated.notas,
+          email_destino: updated.email_destino!,
+          nombre_proveedor: updated.nombre_proveedor ?? "Proveedor",
+          notas: updated.notas ?? undefined,
           lineas: updated.lineas.map((l) => ({
-            nombre_producto: l.nombreProducto,
+            nombre_producto: l.nombre_producto,
             cantidad: l.cantidad,
-            precio_unitario: l.precioUnitario,
-            unidad: l.unidad,
+            precio_unitario: l.precio_unitario ?? undefined,
+            unidad: l.unidad ?? undefined,
           })),
         });
       }
 
       // Solo llegamos aquí si el correo salió de verdad.
       if (isNewPedido) {
-        await crearMutation.mutateAsync(toCrearInput(updated));
+        await crearMutation.mutateAsync(toInput(updated));
       } else {
-        await actualizarMutation.mutateAsync(toActualizarInput(updated));
+        await actualizarMutation.mutateAsync(toInput(updated));
       }
       const fecha = new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
-      await enviarMutation.mutateAsync({ idPedido: updated.id, estado: "enviado", fechaEnvio: fecha });
+      await enviarMutation.mutateAsync({ id_pedido: updated.id_pedido, estado: "enviado", fecha_envio: fecha });
 
-      toast.success("Pedido enviado", `Correo enviado a ${updated.emailDestino}`);
+      toast.success("Pedido enviado", `Correo enviado a ${updated.email_destino}`);
 
       cerrarModal();
     } catch (e: any) {
@@ -205,7 +202,7 @@ export default function PedidosSection({ proveedores }: Props) {
       if (msg.includes("email_destino_no_autorizado")) {
         toast.error(
           "Ese correo no está dado de alta",
-          `Para enviar pedidos a ${updated.emailDestino} primero tienes que guardarlo como correo de un proveedor en la pestaña Proveedores.`,
+          `Para enviar pedidos a ${updated.email_destino} primero tienes que guardarlo como correo de un proveedor en la pestaña Proveedores.`,
         );
         return;
       }
@@ -274,7 +271,7 @@ export default function PedidosSection({ proveedores }: Props) {
           <div className="max-h-90 overflow-y-auto overscroll-contain rounded-xl border border-border [scrollbar-gutter:stable]">
             {pedidos.map((p, i) => (
               <button
-                key={p.id}
+                key={p.id_pedido}
                 type="button"
                 onClick={() => abrirPedido(p)}
                 className={cn(
@@ -285,19 +282,19 @@ export default function PedidosSection({ proveedores }: Props) {
                 <span
                   className={cn(
                     "inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-xs font-semibold",
-                    ESTADO_CLASS[p.estado],
+                    ESTADO_CLASS[estadoDelPedido(p)],
                   )}
                 >
-                  {ESTADO_LABEL[p.estado]}
+                  {ESTADO_LABEL[estadoDelPedido(p)]}
                 </span>
 
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">
-                  {p.nombreProveedor ?? (
+                  {p.nombre_proveedor ?? (
                     <span className="italic text-fg-muted">Sin proveedor</span>
                   )}
                 </span>
 
-                <span className="col-span-2 min-w-0 text-xs text-fg-muted sm:col-span-1 sm:shrink-0">{p.fechaCreacion}</span>
+                <span className="col-span-2 min-w-0 text-xs text-fg-muted sm:col-span-1 sm:shrink-0">{p.fecha_creacion}</span>
 
                 <span className="min-w-0 text-right text-xs text-fg-muted sm:shrink-0 sm:text-left">
                   {p.lineas.length} {p.lineas.length === 1 ? "línea" : "líneas"}

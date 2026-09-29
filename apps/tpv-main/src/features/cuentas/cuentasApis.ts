@@ -1,59 +1,34 @@
 // src/features/cuentas/cuentasApis.ts
 //
-// API de cuentas (caja) — Local-First puro (invokeClient vía @tpv/client). Sustituye
-// dualCall/op_id/outbox/afterRemoteOk. Conserva tipos, mappers, DEFAULT_DENOMS y los
-// helpers de caja (solo frontend / localStorage).
+// API de cuentas (caja): una función por comando Tauri, con los tipos que genera ts-rs desde Rust.
+// Lo que vuelve se entrega tal cual —sin convertirlo a camelCase ni «normalizarlo»— y lo que se
+// escribe es el `Input` generado, con el dinero como `Dinero` (RI-53). Aquí quedan además las
+// denominaciones del cajón y el recuento, que son sólo de la pantalla.
 
 import { invokeClient } from "@tpv/client";
-import type { CambioCajaInput, Dinero, ImpactoCajaDto } from "@tpv/contracts";
+import type {
+    AnularPagoInput,
+    CambioCajaInput,
+    CreateGastoInput,
+    CuentasRangoArgs,
+    Dinero,
+    EntradaDto,
+    ImpactoCajaDto,
+    ProveedorMiniDto,
+    ResumenCajaDto,
+    SalidaDto,
+    UpdateGastoInput,
+    UpdatePagoInput,
+} from "@tpv/contracts";
 
 import { deCentimos } from "../../shared/lib/dinero";
 
-/* =========================
-   Tipos UI
-========================= */
+export type { EntradaDto, SalidaDto };
 
-export type Entrada = {
-    id: string;
-    fechaHora: string; // "YYYY-MM-DD HH:mm"
-    cliente: string;
-    metodo: "Tarjeta" | "Efectivo";
-    importe: Dinero;
-    /** CUENTA-07: un cobro anulado NO se borra. Sale en la lista, marcado. */
-    anulado: boolean;
-    anuladoEn?: string | null;
-    /** Nombre de quien anuló (lo resuelve el backend; la fila sólo guarda el id). */
-    anuladoPor?: string | null;
-    motivoAnulacion?: string | null;
-};
-
-export type Salida = {
-    id: string;
-    fechaHora: string; // "YYYY-MM-DD"
-    tipoGasto: string;
-    concepto: string;
-    importe: Dinero;
-    proveedorId?: string | null;
-    /** CAJA-01: el dinero salió del cajón, así que resta del esperado del arqueo. */
-    pagadoConCaja: boolean;
-};
-
-export type ProveedorMini = {
-    id: string;
-    nombre: string;
-};
-
-export type ResumenCaja = {
-    totalEntradas: Dinero;
-    totalSalidas: Dinero;
-    totalEfectivo: Dinero;
-    totalTarjeta: number;
-    countEntradas: number;
-    countSalidas: number;
-    /** Anulaciones del rango. NO entran en los totales de arriba (CUENTA-07). */
-    countAnuladas: number;
-    totalAnulado: Dinero;
-};
+/** Un cobro anulado NO se borra (CUENTA-07): sale en la lista, marcado. */
+export function esAnulado(e: EntradaDto): boolean {
+    return e.estado === "ANULADO";
+}
 
 /** Tamaño de página por defecto de los listados de caja (CUENTA-05). */
 export const CUENTAS_PAGE_SIZE = 50;
@@ -88,236 +63,70 @@ export const DEFAULT_DENOMS: Denom[] = [
 ];
 
 /* =========================
-   Helpers
-========================= */
-
-function toNum(v: any, fallback = 0): number {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-}
-
-function toStr(v: any, fallback = ""): string {
-    if (v == null) return fallback;
-    return String(v);
-}
-
-function toIdOrNull(v: any): string | null {
-    const t = String(v ?? "").trim();
-    return t ? t : null;
-}
-
-function cleanString(v: any): string {
-    return String(v ?? "").trim();
-}
-
-function toPositiveIntOrNull(v: any): number | null {
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
-}
-
-function mapEntrada(r: any): Entrada {
-    const metodoRaw = toStr(
-        r?.metodo ?? r?.Metodo_Pago ?? r?.metodo_pago,
-        "Efectivo",
-    );
-
-    return {
-        id: toStr(r?.id ?? r?.ID_Pago ?? r?.id_pago ?? ""),
-        fechaHora: toStr(r?.fechaHora ?? r?.fecha_hora ?? r?.Fecha_Hora ?? ""),
-        cliente: toStr(r?.cliente ?? r?.Cliente ?? "—"),
-        metodo: metodoRaw === "Tarjeta" ? "Tarjeta" : "Efectivo",
-        importe: deCentimos(toNum(r?.importe ?? r?.Importe_Total ?? r?.importe_total, 0)),
-        anulado: toStr(r?.estado ?? r?.Estado, "ACTIVO") === "ANULADO",
-        anuladoEn: toIdOrNull(r?.anuladoEn ?? r?.anulado_en),
-        anuladoPor: toIdOrNull(r?.anuladoPor ?? r?.anulado_por),
-        motivoAnulacion: toIdOrNull(r?.motivoAnulacion ?? r?.motivo_anulacion),
-    };
-}
-
-function mapSalida(r: any): Salida {
-    return {
-        id: toStr(r?.id ?? r?.ID_Gasto ?? r?.id_gasto ?? ""),
-        fechaHora: toStr(
-            r?.fechaHora ?? r?.fecha_hora ?? r?.fecha ?? r?.Fecha ?? "",
-        ),
-        tipoGasto: toStr(r?.tipoGasto ?? r?.tipo_gasto ?? r?.Tipo_Gasto ?? ""),
-        concepto: toStr(r?.concepto ?? r?.Concepto ?? ""),
-        importe: deCentimos(toNum(r?.importe ?? r?.Importe ?? 0)),
-        proveedorId: toIdOrNull(
-            r?.proveedorId ?? r?.proveedor_id ?? r?.id_proveedor ?? r?.ID_Proveedor,
-        ),
-        pagadoConCaja: Boolean(r?.pagadoConCaja ?? r?.pagado_con_caja),
-    };
-}
-
-/* =========================
    Proveedores mini
 ========================= */
 
-export async function cuentasListProveedoresMini(): Promise<ProveedorMini[]> {
-    const rows = await invokeClient<any[]>("inventario_list_proveedores_mini");
-
-    return (rows ?? [])
-        .map((r) => ({
-            id: toStr(r?.id ?? r?.ID_Proveedor ?? r?.id_proveedor, ""),
-            nombre: String(
-                r?.nombre ?? r?.Nombre_Empresa ?? r?.nombre_empresa ?? "",
-            ),
-        }))
-        .filter((p) => p.id.length > 0 && !!p.nombre);
+export function cuentasListProveedoresMini(): Promise<ProveedorMiniDto[]> {
+    return invokeClient<ProveedorMiniDto[]>("inventario_list_proveedores_mini");
 }
 
 /* =========================
    GET
 ========================= */
 
-/** Filtros de listado. `page`/`pageSize` omitidos ⇒ el backend devuelve TODAS las filas (PDF). */
-export type CuentasListParams = {
-    del?: string | null;
-    al?: string | null;
-    q?: string | null;
-    page?: number | null;
-    pageSize?: number | null;
-};
+/** Filtros de listado. `page`/`page_size` omitidos ⇒ el backend devuelve TODAS las filas (PDF). */
+export type CuentasListParams = CuentasRangoArgs;
 
-function listArgs(params: CuentasListParams): Record<string, any> {
-    const q = (params.q ?? "").trim();
-    return {
-        del: params.del ?? null,
-        al: params.al ?? null,
-        q: q ? q : null,
-        page: params.page ?? null,
-        page_size: params.pageSize ?? null,
-    };
+function rango(params: CuentasRangoArgs): CuentasRangoArgs {
+    return { ...params, q: params.q?.trim() || undefined };
 }
 
-export async function cuentasGetEntradas(
-    params: CuentasListParams,
-): Promise<Entrada[]> {
-    const rows = await invokeClient<any[]>("cuentas_get_entradas", {
-        args: listArgs(params),
-    });
-    return (rows ?? []).map(mapEntrada);
+export function cuentasGetEntradas(params: CuentasRangoArgs): Promise<EntradaDto[]> {
+    return invokeClient<EntradaDto[]>("cuentas_get_entradas", { args: rango(params) });
 }
 
-export async function cuentasGetSalidas(
-    params: CuentasListParams,
-): Promise<Salida[]> {
-    const rows = await invokeClient<any[]>("cuentas_get_salidas", {
-        args: listArgs(params),
-    });
-    return (rows ?? []).map(mapSalida);
+export function cuentasGetSalidas(params: CuentasRangoArgs): Promise<SalidaDto[]> {
+    return invokeClient<SalidaDto[]>("cuentas_get_salidas", { args: rango(params) });
 }
 
-export async function cuentasGetResumen(params: {
-    del?: string | null;
-    al?: string | null;
-    q?: string | null;
-}): Promise<ResumenCaja> {
-    const q = (params.q ?? "").trim();
-    const r = await invokeClient<any>("cuentas_get_resumen", {
-        args: { del: params.del ?? null, al: params.al ?? null, q: q ? q : null },
-    });
-    return {
-        totalEntradas: deCentimos(toNum(r?.total_entradas ?? r?.totalEntradas, 0)),
-        totalSalidas: deCentimos(toNum(r?.total_salidas ?? r?.totalSalidas, 0)),
-        totalEfectivo: deCentimos(toNum(r?.total_efectivo ?? r?.totalEfectivo, 0)),
-        totalTarjeta: toNum(r?.total_tarjeta ?? r?.totalTarjeta, 0),
-        countEntradas: toNum(r?.count_entradas ?? r?.countEntradas, 0),
-        countSalidas: toNum(r?.count_salidas ?? r?.countSalidas, 0),
-        countAnuladas: toNum(r?.count_anuladas ?? r?.countAnuladas, 0),
-        totalAnulado: deCentimos(toNum(r?.total_anulado ?? r?.totalAnulado, 0)),
-    };
+export function cuentasGetResumen(params: CuentasRangoArgs): Promise<ResumenCajaDto> {
+    return invokeClient<ResumenCajaDto>("cuentas_get_resumen", { args: rango(params) });
 }
 
 /* =========================
-   CRUD GASTOS
+   ESCRITURAS
 ========================= */
 
 /**
- * El motivo de la rectificación (CAJA-01) viaja fuera de `args` porque no es un dato del apunte: es
- * de la corrección. Sólo hace falta cuando el cambio mueve el descuadre de un cierre ya hecho.
+ * Una escritura de caja con su motivo de rectificación (CAJA-01). El motivo viaja fuera de `args`
+ * porque no es un dato del apunte: es de la corrección, y sólo hace falta cuando el cambio mueve el
+ * descuadre de un cierre ya hecho.
  */
-export async function cuentasCreateGasto(payload: {
-    fecha: string;
-    tipoGasto: string;
-    concepto: string;
-    importe: Dinero;
-    proveedorId?: string | null;
-    pagadoConCaja?: boolean;
-    motivoRectificacion?: string | null;
-}): Promise<boolean> {
-    const r = await invokeClient<any>("cuentas_create_gasto", {
-        args: {
-            fecha: cleanString(payload.fecha),
-            tipo_gasto: cleanString(payload.tipoGasto),
-            concepto: cleanString(payload.concepto),
-            importe: Number(payload.importe ?? 0),
-            proveedor_id: toIdOrNull(payload.proveedorId),
-            pagado_con_caja: Boolean(payload.pagadoConCaja),
-        },
-        motivoRectificacion: toIdOrNull(payload.motivoRectificacion),
+export type ConMotivo<T> = { args: T; motivoRectificacion?: string | null };
+
+async function escribir<T>(comando: string, { args, motivoRectificacion }: ConMotivo<T>) {
+    const r = await invokeClient<boolean>(comando, {
+        args,
+        motivoRectificacion: motivoRectificacion?.trim() || null,
     });
-    return typeof r === "boolean" ? r : true;
+    return r !== false;
 }
 
-export async function cuentasUpdateGasto(payload: {
-    idGasto: string;
-    fecha: string;
-    tipoGasto: string;
-    concepto: string;
-    importe: Dinero;
-    proveedorId?: string | null;
-    pagadoConCaja?: boolean;
-    motivoRectificacion?: string | null;
-}): Promise<boolean> {
-    const r = await invokeClient<any>("cuentas_update_gasto", {
-        args: {
-            id_gasto: payload.idGasto,
-            fecha: cleanString(payload.fecha),
-            tipo_gasto: cleanString(payload.tipoGasto),
-            concepto: cleanString(payload.concepto),
-            importe: Number(payload.importe ?? 0),
-            proveedor_id: toIdOrNull(payload.proveedorId),
-            pagado_con_caja: Boolean(payload.pagadoConCaja),
-        },
-        motivoRectificacion: toIdOrNull(payload.motivoRectificacion),
-    });
-    return typeof r === "boolean" ? r : true;
+export function cuentasCreateGasto(p: ConMotivo<CreateGastoInput>): Promise<boolean> {
+    return escribir("cuentas_create_gasto", p);
 }
 
-export async function cuentasDeleteGasto(payload: {
-    idGasto: string;
-    motivoRectificacion?: string | null;
-}): Promise<boolean> {
-    const r = await invokeClient<any>("cuentas_delete_gasto", {
-        args: { id_gasto: payload.idGasto },
-        motivoRectificacion: toIdOrNull(payload.motivoRectificacion),
-    });
-    return typeof r === "boolean" ? r : true;
+export function cuentasUpdateGasto(p: ConMotivo<UpdateGastoInput>): Promise<boolean> {
+    return escribir("cuentas_update_gasto", p);
 }
 
-/* =========================
-   CRUD PAGOS / ENTRADAS
-========================= */
+export function cuentasDeleteGasto(p: ConMotivo<{ id_gasto: string }>): Promise<boolean> {
+    return escribir("cuentas_delete_gasto", p);
+}
 
-export async function cuentasUpdatePago(payload: {
-    idPago: string;
-    fechaHora: string;
-    metodo: "Tarjeta" | "Efectivo";
-    importe: Dinero;
-    motivoRectificacion?: string | null;
-}): Promise<boolean> {
-    const r = await invokeClient<any>("cuentas_update_pago", {
-        args: {
-            id_pago: payload.idPago,
-            fecha_hora: cleanString(payload.fechaHora),
-            metodo: payload.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo",
-            importe: Number(payload.importe ?? 0),
-        },
-        motivoRectificacion: toIdOrNull(payload.motivoRectificacion),
-    });
-    return typeof r === "boolean" ? r : true;
+/** El importe del cobro no se edita (CUENTA-02): el backend lo recalcula desde las líneas. */
+export function cuentasUpdatePago(p: ConMotivo<UpdatePagoInput>): Promise<boolean> {
+    return escribir("cuentas_update_pago", p);
 }
 
 /**
@@ -325,32 +134,21 @@ export async function cuentasUpdatePago(payload: {
  * exactamente lo mismo que faltaba en el cajón y el descuadre salía cero.
  *
  * El motivo es obligatorio; quién anula NO se manda —lo pone la sesión del backend (SEC-01)—.
+ * `clase` es una `ClaseBaja`; ausente = `"ERROR"`.
  */
-export async function cuentasAnularPago(payload: {
-    idPago: string;
-    motivo: string;
-    /**
-     * FISCAL-01: cuál de los dos instrumentos legales se está usando. Ausente = `"ERROR"`.
-     *
-     * - `"ERROR"`: la venta **no existió** (ticket de prueba, mesa equivocada). Genera un registro
-     *   de anulación, devuelve el stock y las líneas vuelven a la comanda.
-     * - `"DEVOLUCION"`: la venta **sí existió** y se devuelve el dinero. Genera una factura
-     *   rectificativa (`R5`). El stock no vuelve y las líneas tampoco.
-     */
-    clase?: ClaseBaja;
-}): Promise<boolean> {
-    const r = await invokeClient<any>("cuentas_anular_pago", {
-        args: {
-            id_pago: payload.idPago,
-            motivo: cleanString(payload.motivo),
-            clase: payload.clase ?? "ERROR",
-        },
-    });
-    return typeof r === "boolean" ? r : true;
+export async function cuentasAnularPago(args: AnularPagoInput): Promise<boolean> {
+    const r = await invokeClient<boolean>("cuentas_anular_pago", { args });
+    return r !== false;
 }
 
 /**
  * Los dos instrumentos de FISCAL-01. La AEAT los separa sin matices:
+ *
+ * - `"ERROR"`: la venta **no existió** (ticket de prueba, mesa equivocada). Genera un registro
+ *   de anulación, devuelve el stock y las líneas vuelven a la comanda.
+ * - `"DEVOLUCION"`: la venta **sí existió** y se devuelve el dinero. Genera una factura
+ *   rectificativa (`R5`). El stock no vuelve y las líneas tampoco.
+ *
  *
  * - Anular es para una factura que *no responde a una operación real* (art. 11.1 RRSIF), y su FAQ
  *   dice que estos casos deben ser «MUY POCO FRECUENTES».

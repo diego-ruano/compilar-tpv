@@ -8,11 +8,6 @@ import {
     Send,
     Calculator,
     ReceiptText,
-    Save,
-    Coins,
-    ArrowRightLeft,
-    Plus,
-    Minus,
     Printer,
     FileText,
 } from "lucide-react";
@@ -22,28 +17,28 @@ import PrintTicketModal, {
 } from "../../shared/ticket/PrintTicketModal";
 import type { DatosDelTicket } from "../../features/configuracion/api/printerApis";
 import DatosFiscalesModal, {
-    type DatosFiscales,
 } from "../../shared/ticket/DatosFiscalesModal";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
-import type { CambioCajaInput, Dinero, ImpactoCajaDto, LineaTicketDto, TicketReimpresionDto } from "@tpv/contracts";
+import type {
+    CambioCajaInput,
+    DestinatarioInput,
+    Dinero,
+    ImpactoCajaDto,
+    LineaTicketDto,
+    ProveedorMiniDto,
+    TicketReimpresionDto,
+} from "@tpv/contracts";
 import { invokeClient, toAppError } from "@tpv/client";
 import { ModalShell, SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import {
     cuentasGetEntradas,
     cuentasGetSalidas,
-    type ProveedorMini,
-    type Entrada,
-    type Salida,
-    DEFAULT_DENOMS,
-    incCash,
-    decCash,
-    resetCash,
-    type Denom,
-    type CashCount,
+    esAnulado,
+    type EntradaDto,
+    type SalidaDto,
     type ClaseBaja,
 } from "../../features/cuentas/cuentasApis";
-import { euro, moneyLabel } from "../../features/cuentas/formato";
 import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
 import ImpactoCierreModal from "../../features/cuentas/ImpactoCierreModal";
 import {
@@ -53,7 +48,6 @@ import {
     cierreReabrir,
     type CierreResumenDto,
 } from "../../features/cuentas/cierreApis";
-import DenomsGrid from "../../features/cuentas/DenomsGrid";
 import {
     useCuentasEntradas,
     useCuentasSalidas,
@@ -74,7 +68,8 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { conAviso } from "../../shared/lib/conAviso";
-import { CERO, deCentimos, deTexto, eur, restar, sumar } from "../../shared/lib/dinero";
+import { CERO, eur, restar, sumar } from "../../shared/lib/dinero";
+import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
 
 function todayYMD() {
     const d = new Date();
@@ -160,36 +155,11 @@ function MiniIconButton({
     );
 }
 
-type SalidaExt = Salida & {
-    proveedorId?: string | null;
-    proveedorNombre?: string | null;
-};
-
-function normalizeProveedorId(v: unknown): string | null {
-    const s = String(v ?? "").trim();
-    return s ? s : null;
-}
-
 /** Lo que se le pasa al modal para reimprimir un cobro ya hecho. */
 type Reimpresion = {
     items: PrintableLine[];
     datos: DatosDelTicket;
 };
-
-function mapEntradaUI(r: any): Entrada {
-    return {
-        id: String(r?.id ?? ""),
-        fechaHora: String(r?.fechaHora ?? "").slice(0, 16),
-        cliente: String(r?.cliente ?? ""),
-        metodo:
-            String(r?.metodo ?? "Efectivo") === "Tarjeta" ? "Tarjeta" : "Efectivo",
-        importe: deCentimos(Number(r?.importe ?? 0)),
-        anulado: Boolean(r?.anulado),
-        anuladoEn: r?.anuladoEn ?? null,
-        anuladoPor: r?.anuladoPor ?? null,
-        motivoAnulacion: r?.motivoAnulacion ?? null,
-    };
-}
 
 /** Añade el tachado a las clases de una celda cuando el cobro está anulado. */
 function tachadoSi(anulado: boolean, clases: string): string {
@@ -203,12 +173,12 @@ function tachadoSi(anulado: boolean, clases: string): string {
  * por qué falta dinero de la caja, y lo que se está mirando es precisamente la lista de cobros que
  * alguien deshizo: esconder el motivo detrás de un hover es esconderlo.
  */
-function SelloAnulado({ entrada }: { entrada: Entrada }) {
-    if (!entrada.anulado) return null;
+function SelloAnulado({ entrada }: { entrada: EntradaDto }) {
+    if (!esAnulado(entrada)) return null;
 
-    const quien = (entrada.anuladoPor ?? "").trim();
-    const cuando = (entrada.anuladoEn ?? "").slice(0, 16);
-    const motivo = (entrada.motivoAnulacion ?? "").trim();
+    const quien = (entrada.anulado_por ?? "").trim();
+    const cuando = (entrada.anulado_en ?? "").slice(0, 16);
+    const motivo = (entrada.motivo_anulacion ?? "").trim();
 
     return (
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -225,33 +195,6 @@ function SelloAnulado({ entrada }: { entrada: Entrada }) {
             ) : null}
         </div>
     );
-}
-
-function mapSalidaUI(
-    r: any,
-    proveedoresMap: Map<string, string>,
-): SalidaExt {
-    const proveedorId = normalizeProveedorId(
-        r?.proveedorId ?? r?.ID_Proveedor ?? r?.idProveedor ?? r?.id_proveedor,
-    );
-
-    const proveedorNombre =
-        r?.proveedorNombre ??
-        r?.Proveedor_Nombre ??
-        r?.proveedor_nombre ??
-        (proveedorId ? proveedoresMap.get(proveedorId) : null) ??
-        null;
-
-    return {
-        id: String(r?.id ?? r?.ID_Gasto ?? ""),
-        fechaHora: String(r?.fechaHora ?? r?.Fecha ?? "").slice(0, 10),
-        tipoGasto: String(r?.tipoGasto ?? r?.Tipo_Gasto ?? ""),
-        concepto: String(r?.concepto ?? r?.Concepto ?? ""),
-        importe: deCentimos(Number(r?.importe ?? r?.Importe ?? 0)),
-        proveedorId,
-        proveedorNombre,
-        pagadoConCaja: Boolean(r?.pagadoConCaja ?? r?.pagado_con_caja),
-    };
 }
 
 export default function Cuentas() {
@@ -298,7 +241,7 @@ export default function Cuentas() {
     const updatePago = useUpdatePago();
     const anularPago = useAnularPago();
 
-    const proveedores: ProveedorMini[] = useMemo(
+    const proveedores: ProveedorMiniDto[] = useMemo(
         () => proveedoresQuery.data ?? [],
         [proveedoresQuery.data],
     );
@@ -312,21 +255,14 @@ export default function Cuentas() {
 
     const proveedoresMap = useMemo(() => {
         const m = new Map<string, string>();
-        for (const p of proveedores) m.set(p.id, p.nombre);
+        for (const p of proveedores) m.set(p.ID_Proveedor, p.Nombre_Empresa);
         return m;
     }, [proveedores]);
 
-    // Datos derivados de las queries (mismos mappers que antes).
-    const entradasDB = useMemo<Entrada[]>(
-        () => (entradasQuery.data ?? []).map(mapEntradaUI),
-        [entradasQuery.data],
-    );
+    const entradasDB = useMemo(() => entradasQuery.data ?? [], [entradasQuery.data]);
     const loadingEntradas = entradasQuery.isFetching;
 
-    const salidasDB = useMemo<SalidaExt[]>(
-        () => (salidasQuery.data ?? []).map((r) => mapSalidaUI(r, proveedoresMap)),
-        [salidasQuery.data, proveedoresMap],
-    );
+    const salidasDB = useMemo(() => salidasQuery.data ?? [], [salidasQuery.data]);
     const loadingSalidas = salidasQuery.isFetching;
 
     // Wrapper que conserva el nombre/uso previo: refresca proveedores bajo demanda.
@@ -335,8 +271,8 @@ export default function Cuentas() {
     };
 
     const [confirmAccion, setConfirmAccion] = useState<
-        | { tipo: "gasto"; gasto: SalidaExt }
-        | { tipo: "entrada"; entrada: Entrada }
+        | { tipo: "gasto"; gasto: SalidaDto }
+        | { tipo: "entrada"; entrada: EntradaDto }
         | null
     >(null);
     const [confirmando, setConfirmando] = useState(false);
@@ -358,7 +294,7 @@ export default function Cuentas() {
     const [gFecha, setGFecha] = useState(() => todayYMD());
     const [gTipo, setGTipo] = useState("Suministros");
     const [gConcepto, setGConcepto] = useState("");
-    const [gImporte, setGImporte] = useState<string>("");
+    const gImporte = useImporte();
     const [gProveedorId, setGProveedorId] = useState<string>("");
     const [savingGasto, setSavingGasto] = useState(false);
     const savingGastoRef = useRef(false);
@@ -373,7 +309,7 @@ export default function Cuentas() {
     const [egFecha, setEgFecha] = useState("");
     const [egTipo, setEgTipo] = useState("Suministros");
     const [egConcepto, setEgConcepto] = useState("");
-    const [egImporte, setEgImporte] = useState<string>("");
+    const egImporte = useImporte();
     const [egProveedorId, setEgProveedorId] = useState<string>("");
     const [savingEditGasto, setSavingEditGasto] = useState(false);
     const [errEditGasto, setErrEditGasto] = useState<string | null>(null);
@@ -385,7 +321,8 @@ export default function Cuentas() {
     const [editPagoId, setEditPagoId] = useState<string | null>(null);
     const [epFechaHora, setEpFechaHora] = useState("");
     const [epMetodo, setEpMetodo] = useState<"Tarjeta" | "Efectivo">("Efectivo");
-    const [epImporte, setEpImporte] = useState<string>("");
+    // El importe de un cobro no se edita (CUENTA-02): sólo se enseña.
+    const [epImporte, setEpImporte] = useState<Dinero>(CERO);
     const [savingEditPago, setSavingEditPago] = useState(false);
     const [errEditPago, setErrEditPago] = useState<string | null>(null);
 
@@ -405,8 +342,6 @@ export default function Cuentas() {
     } | null>(null);
     const [avisoGuardando, setAvisoGuardando] = useState(false);
     const [avisoError, setAvisoError] = useState<string | null>(null);
-
-    const denoms = DEFAULT_DENOMS;
 
     const recargarCierres = React.useCallback(async () => {
         try {
@@ -496,8 +431,8 @@ export default function Cuentas() {
 
     // Totales de cabecera: del resumen agregado (todo el rango + búsqueda), no de la página visible.
     const resumen = resumenQuery.data;
-    const totalEntradas = resumen?.totalEntradas ?? CERO;
-    const totalSalidas = resumen?.totalSalidas ?? CERO;
+    const totalEntradas = resumen?.total_entradas ?? CERO;
+    const totalSalidas = resumen?.total_salidas ?? CERO;
     const balance = restar(totalEntradas, totalSalidas);
 
     // Controles de paginación: hay "siguiente" si aún quedan filas por debajo del total del resumen.
@@ -505,35 +440,33 @@ export default function Cuentas() {
     // la paginación tiene que sumar los dos o la última página se quedaría corta.
     const hasNextEntradas =
         pageEntradas * CUENTAS_PAGE_SIZE <
-        (resumen?.countEntradas ?? 0) + (resumen?.countAnuladas ?? 0);
+        (resumen?.count_entradas ?? 0) + (resumen?.count_anuladas ?? 0);
     const hasNextSalidas =
-        pageSalidas * CUENTAS_PAGE_SIZE < (resumen?.countSalidas ?? 0);
+        pageSalidas * CUENTAS_PAGE_SIZE < (resumen?.count_salidas ?? 0);
 
     const abrirModalGasto = async () => {
         setErrGasto(null);
         setGFecha(todayYMD());
         setGTipo("Suministros");
         setGConcepto("");
-        setGImporte("");
+        gImporte.poner(null);
         setGProveedorId("");
         setGPagadoConCaja(false);
         await ensureProveedores();
         setOpenAddGasto(true);
     };
 
-    const abrirEditarGasto = async (s: SalidaExt) => {
+    const abrirEditarGasto = async (s: SalidaDto) => {
         setErrEditGasto(null);
         setEditGastoId(s.id);
-        setEgFecha(s.fechaHora);
-        setEgTipo(s.tipoGasto || "Suministros");
+        setEgFecha(s.fecha_hora);
+        setEgTipo(s.tipo_gasto || "Suministros");
         setEgConcepto(s.concepto || "");
-        setEgImporte(String(s.importe ?? ""));
-        setEgProveedorId(
-            s.proveedorId !== null && s.proveedorId !== undefined
-                ? String(s.proveedorId)
-                : "",
-        );
-        setEgPagadoConCaja(Boolean(s.pagadoConCaja));
+        // RI-53: se rellenaba con los céntimos en crudo («1250») y se releía como euros, así que
+        // guardar sin tocar nada multiplicaba el gasto por 100.
+        egImporte.poner(s.importe);
+        setEgProveedorId(s.proveedor_id ?? "");
+        setEgPagadoConCaja(s.pagado_con_caja);
         await ensureProveedores();
         setOpenEditGasto(true);
     };
@@ -546,7 +479,7 @@ export default function Cuentas() {
             const fecha = (egFecha || "").trim();
             const tipo = (egTipo || "").trim();
             const concepto = (egConcepto || "").trim();
-            const importe = deTexto(egImporte) ?? CERO;
+            const importe = egImporte.valor ?? CERO;
 
             const provRaw = (egProveedorId || "").trim();
             const proveedorId = provRaw === "" ? null : provRaw;
@@ -554,7 +487,8 @@ export default function Cuentas() {
             if (!fecha) return setErrEditGasto("La fecha es obligatoria.");
             if (!tipo) return setErrEditGasto("El tipo es obligatorio.");
             if (!concepto) return setErrEditGasto("El concepto es obligatorio.");
-            if (!Number.isFinite(importe) || importe <= 0) {
+            if (!egImporte.legible) return setErrEditGasto("El importe no se entiende.");
+            if (importe <= 0) {
                 return setErrEditGasto("El importe debe ser mayor que 0.");
             }
 
@@ -572,13 +506,15 @@ export default function Cuentas() {
                 { tipo: "editar_gasto", id_gasto: idGasto, fecha, importe, pagado_con_caja: pagadoConCaja },
                 async (motivo) => {
                     const ok = await updateGasto.mutateAsync({
-                        idGasto,
-                        fecha,
-                        tipoGasto: tipo,
-                        concepto,
-                        importe,
-                        proveedorId: tipo === "Proveedor" ? proveedorId : null,
-                        pagadoConCaja,
+                        args: {
+                            id_gasto: idGasto,
+                            fecha,
+                            tipo_gasto: tipo,
+                            concepto,
+                            importe,
+                            proveedor_id: tipo === "Proveedor" ? (proveedorId ?? undefined) : undefined,
+                            pagado_con_caja: pagadoConCaja,
+                        },
                         motivoRectificacion: motivo,
                     });
                     if (!ok) throw new Error("No se pudo actualizar el gasto.");
@@ -594,7 +530,7 @@ export default function Cuentas() {
         }
     };
 
-    const borrarGasto = (s: SalidaExt) => {
+    const borrarGasto = (s: SalidaDto) => {
         setConfirmError(null);
         setConfirmAccion({ tipo: "gasto", gasto: s });
     };
@@ -606,7 +542,7 @@ export default function Cuentas() {
      * líneas—, así que la copia dice lo mismo que dijo el original aunque hoy hayan cambiado los
      * precios o los tipos. Y sale marcada como COPIA: dos papeles idénticos parecerían dos ventas.
      */
-    const reimprimirTicket = async (e: Entrada) => {
+    const reimprimirTicket = async (e: EntradaDto) => {
         try {
             const t = await invokeClient<TicketReimpresionDto | null>(
                 "cuentas_ticket_para_reimprimir",
@@ -648,11 +584,11 @@ export default function Cuentas() {
 
        Lo que sí se esconde es en los **anulados**: un cobro que no existe no se puede facturar. */
     const limiteSimplif = useBusinessSettings((st) => st.limiteSimplif);
-    const [f3Pago, setF3Pago] = useState<Entrada | null>(null);
+    const [f3Pago, setF3Pago] = useState<EntradaDto | null>(null);
     const [f3Guardando, setF3Guardando] = useState(false);
     const [f3Error, setF3Error] = useState<string | null>(null);
 
-    const emitirFacturaSustitutiva = async (e: Entrada, d: DatosFiscales) => {
+    const emitirFacturaSustitutiva = async (e: EntradaDto, d: DestinatarioInput) => {
         setF3Guardando(true);
         setF3Error(null);
         try {
@@ -673,11 +609,7 @@ export default function Cuentas() {
 
             await invokeClient("verifactu_emitir_factura_de_ticket", {
                 numeroTicket: numero,
-                destinatario: {
-                    nombre_razon: d.nombre_razon,
-                    nif: d.nif,
-                    domicilio: d.domicilio ?? null,
-                },
+                destinatario: d,
             });
 
             setF3Pago(null);
@@ -690,12 +622,12 @@ export default function Cuentas() {
         }
     };
 
-    const abrirEditarPago = (e: Entrada) => {
+    const abrirEditarPago = (e: EntradaDto) => {
         setErrEditPago(null);
         setEditPagoId(e.id);
-        setEpFechaHora(e.fechaHora);
-        setEpMetodo(e.metodo);
-        setEpImporte(String(e.importe ?? ""));
+        setEpFechaHora(e.fecha_hora);
+        setEpMetodo(e.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo");
+        setEpImporte(e.importe);
         setOpenEditPago(true);
     };
 
@@ -706,7 +638,7 @@ export default function Cuentas() {
 
             const fechaHora = (epFechaHora || "").trim();
             // El importe no se edita (CUENTA-02): el backend lo recalcula desde las líneas cobradas.
-            const importe = deTexto(epImporte) ?? CERO;
+            const importe = epImporte;
 
             if (!fechaHora) return setErrEditPago("La fecha/hora es obligatoria.");
 
@@ -718,10 +650,7 @@ export default function Cuentas() {
                 { tipo: "editar_pago", id_pago: idPago, fecha_hora: fechaHora, metodo },
                 async (motivo) => {
                     const ok = await updatePago.mutateAsync({
-                        idPago,
-                        fechaHora,
-                        metodo,
-                        importe,
+                        args: { id_pago: idPago, fecha_hora: fechaHora, metodo, importe },
                         motivoRectificacion: motivo,
                     });
                     if (!ok) throw new Error("No se pudo actualizar la entrada.");
@@ -737,7 +666,7 @@ export default function Cuentas() {
         }
     };
 
-    const borrarPago = (e: Entrada) => {
+    const borrarPago = (e: EntradaDto) => {
         setConfirmError(null);
         setMotivoAnulacion("");
         setClaseBaja(null);
@@ -754,7 +683,7 @@ export default function Cuentas() {
             if (confirmAccion.tipo === "gasto") {
                 const idGasto = confirmAccion.gasto.id;
                 await conAvisoDeCierre({ tipo: "borrar_gasto", id_gasto: idGasto }, async (motivo) => {
-                    await deleteGasto.mutateAsync({ idGasto, motivoRectificacion: motivo });
+                    await deleteGasto.mutateAsync({ args: { id_gasto: idGasto }, motivoRectificacion: motivo });
                     setConfirmAccion(null);
                     void recargarCierres();
                 });
@@ -771,7 +700,7 @@ export default function Cuentas() {
                     // motivo por un descuadre que no va a ocurrir.
                     { tipo: "anular_pago", id_pago: idPago, clase },
                     async () => {
-                        await anularPago.mutateAsync({ idPago, motivo, clase });
+                        await anularPago.mutateAsync({ id_pago: idPago, motivo, clase });
                         setConfirmAccion(null);
                         void recargarCierres();
                     },
@@ -798,7 +727,7 @@ export default function Cuentas() {
             const fecha = (gFecha || "").trim();
             const tipo = (gTipo || "").trim();
             const concepto = (gConcepto || "").trim();
-            const importe = deTexto(gImporte) ?? CERO;
+            const importe = gImporte.valor ?? CERO;
 
             const provRaw = (gProveedorId || "").trim();
             const proveedorId = provRaw === "" ? null : provRaw;
@@ -806,7 +735,8 @@ export default function Cuentas() {
             if (!fecha) { setErrGasto("La fecha es obligatoria."); return; }
             if (!tipo) { setErrGasto("El tipo es obligatorio."); return; }
             if (!concepto) { setErrGasto("El concepto es obligatorio."); return; }
-            if (!Number.isFinite(importe) || importe <= 0) {
+            if (!gImporte.legible) { setErrGasto("El importe no se entiende."); return; }
+            if (importe <= 0) {
                 setErrGasto("El importe debe ser un número mayor que 0.");
                 return;
             }
@@ -821,12 +751,14 @@ export default function Cuentas() {
                 { tipo: "crear_gasto", fecha, importe, pagado_con_caja: pagadoConCaja },
                 async (motivo) => {
                     const ok = await createGasto.mutateAsync({
-                        fecha,
-                        tipoGasto: tipo,
-                        concepto,
-                        importe,
-                        proveedorId: tipo === "Proveedor" ? proveedorId : null,
-                        pagadoConCaja,
+                        args: {
+                            fecha,
+                            tipo_gasto: tipo,
+                            concepto,
+                            importe,
+                            proveedor_id: tipo === "Proveedor" ? (proveedorId ?? undefined) : undefined,
+                            pagado_con_caja: pagadoConCaja,
+                        },
                         motivoRectificacion: motivo,
                     });
                     if (!ok) throw new Error("No se pudo guardar el gasto.");
@@ -864,13 +796,13 @@ export default function Cuentas() {
                 cuentasGetEntradas({ del, al, q: qDebounced }),
                 cuentasGetSalidas({ del, al, q: qDebounced }),
             ]);
-            const entradasFull = entradasRaw.map(mapEntradaUI);
-            const salidasFull = salidasRaw.map((r) => mapSalidaUI(r, proveedoresMap));
+            const entradasFull = entradasRaw;
+            const salidasFull = salidasRaw;
             // Un cobro anulado no es una venta: no suma (CUENTA-07). Sale en el listado igual, y
             // marcado, porque este PDF es el documento con el que se cuadra la caja y una salida
             // de dinero que no aparece es exactamente lo que no se puede explicar después.
             const totalEntradasPdf = sumar(
-                ...entradasFull.map((e) => (e.anulado ? CERO : e.importe)),
+                ...entradasFull.map((e) => (esAnulado(e) ? CERO : e.importe)),
             );
             const totalSalidasPdf = sumar(...salidasFull.map((s) => s.importe));
             const balancePdf = restar(totalEntradasPdf, totalSalidasPdf);
@@ -891,7 +823,6 @@ export default function Cuentas() {
             const gray = rgb(0.35, 0.35, 0.35);
             const black = rgb(0.1, 0.1, 0.1);
 
-            const formatMoney = (d: Dinero) => eur(d);
 
             const safeText = (t: any) =>
                 asciiSafe(
@@ -981,9 +912,9 @@ export default function Cuentas() {
             });
             ctx = write(
                 ctx,
-                `Entradas: ${formatMoney(totalEntradasPdf)} | Salidas: ${formatMoney(
+                `Entradas: ${eur(totalEntradasPdf)} | Salidas: ${eur(
                     totalSalidasPdf,
-                )} | Balance: ${formatMoney(balancePdf)}`,
+                )} | Balance: ${eur(balancePdf)}`,
                 { size: 12, bold: true },
             );
             ctx.y -= 6;
@@ -1014,11 +945,11 @@ export default function Cuentas() {
             } else {
                 for (const e of entradasFull) {
                     ctx = writeRow(ctx, [
-                        { text: e.fechaHora, x: M },
+                        { text: e.fecha_hora, x: M },
                         { text: e.cliente, x: M + 140 },
-                        { text: e.anulado ? `${e.metodo} · ANULADO` : e.metodo, x: M + 380 },
+                        { text: esAnulado(e) ? `${e.metodo} · ANULADO` : e.metodo, x: M + 380 },
                         {
-                            text: formatMoney(e.importe),
+                            text: eur(e.importe),
                             x: M + 460,
                             w: PAGE_W - M - (M + 460),
                             align: "right",
@@ -1054,21 +985,19 @@ export default function Cuentas() {
                 ctx = write(ctx, "Sin salidas para este rango/filtro.", { color: gray });
             } else {
                 for (const s of salidasFull) {
-                    const provName =
-                        s.proveedorNombre ??
-                        (s.proveedorId ? proveedoresMap.get(s.proveedorId) : null);
+                    const provName = s.proveedor_id ? proveedoresMap.get(s.proveedor_id) : null;
 
                     const conceptoPdf =
-                        s.tipoGasto === "Proveedor" && (provName || s.proveedorId)
-                            ? `${s.concepto} (Prov: ${provName ?? s.proveedorId})`
+                        s.tipo_gasto === "Proveedor" && (provName || s.proveedor_id)
+                            ? `${s.concepto} (Prov: ${provName ?? s.proveedor_id})`
                             : s.concepto;
 
                     ctx = writeRow(ctx, [
-                        { text: s.fechaHora, x: M },
-                        { text: s.tipoGasto, x: M + 110 },
+                        { text: s.fecha_hora, x: M },
+                        { text: s.tipo_gasto, x: M + 110 },
                         { text: conceptoPdf, x: M + 230 },
                         {
-                            text: formatMoney(s.importe),
+                            text: eur(s.importe),
                             x: M + 460,
                             w: PAGE_W - M - (M + 460),
                             align: "right",
@@ -1111,13 +1040,9 @@ export default function Cuentas() {
             const salidasHoyF = salidasHoy ?? [];
 
             const totalEntradasHoy = sumar(
-                ...entradasHoyF.map((e: any) =>
-                    e?.anulado ? CERO : deCentimos(Number(e.importe) || 0),
-                ),
+                ...entradasHoyF.map((e) => (esAnulado(e) ? CERO : e.importe)),
             );
-            const totalSalidasHoy = sumar(
-                ...salidasHoyF.map((s: any) => deCentimos(Number(s.importe ?? s.Importe) || 0)),
-            );
+            const totalSalidasHoy = sumar(...salidasHoyF.map((s) => s.importe));
             const balanceHoy = restar(totalEntradasHoy, totalSalidasHoy);
 
             const defaultName = `cuenta_dia_${hoy}.pdf`;
@@ -1143,7 +1068,6 @@ export default function Cuentas() {
 
             const gray = rgb(0.35, 0.35, 0.35);
             const black = rgb(0.1, 0.1, 0.1);
-            const formatMoney = (d: Dinero) => eur(d);
             const safeText = (t: any) =>
                 asciiSafe(
                     String(t ?? "")
@@ -1227,9 +1151,9 @@ export default function Cuentas() {
             ctx = write(ctx, `Fecha: ${hoy}`, { size: 11, color: gray });
             ctx = write(
                 ctx,
-                `Entradas: ${formatMoney(totalEntradasHoy)} | Salidas: ${formatMoney(
+                `Entradas: ${eur(totalEntradasHoy)} | Salidas: ${eur(
                     totalSalidasHoy,
-                )} | Balance: ${formatMoney(balanceHoy)}`,
+                )} | Balance: ${eur(balanceHoy)}`,
                 { size: 12, bold: true },
             );
             ctx.y -= 6;
@@ -1260,16 +1184,14 @@ export default function Cuentas() {
             } else {
                 for (const e of entradasHoyF) {
                     ctx = writeRow(ctx, [
-                        { text: String(e.fechaHora ?? ""), x: M },
-                        { text: String(e.cliente ?? ""), x: M + 140 },
+                        { text: e.fecha_hora, x: M },
+                        { text: e.cliente, x: M + 140 },
                         {
-                            text: e.anulado
-                                ? `${String(e.metodo ?? "")} · ANULADO`
-                                : String(e.metodo ?? ""),
+                            text: esAnulado(e) ? `${e.metodo} · ANULADO` : e.metodo,
                             x: M + 380,
                         },
                         {
-                            text: formatMoney(e.importe),
+                            text: eur(e.importe),
                             x: M + 460,
                             w: PAGE_W - M - (M + 460),
                             align: "right",
@@ -1304,11 +1226,11 @@ export default function Cuentas() {
             if (!salidasHoyF.length) {
                 ctx = write(ctx, "Sin salidas hoy.", { color: gray });
             } else {
-                for (const s of salidasHoyF as any[]) {
-                    const fecha = String(s.fechaHora ?? s.Fecha ?? "");
-                    const tipo = String(s.tipoGasto ?? s.Tipo_Gasto ?? "");
-                    const conceptoBase = String(s.concepto ?? s.Concepto ?? "");
-                    const provId = normalizeProveedorId(s.proveedorId ?? s.ID_Proveedor ?? 0);
+                for (const s of salidasHoyF) {
+                    const fecha = s.fecha_hora;
+                    const tipo = s.tipo_gasto;
+                    const conceptoBase = s.concepto;
+                    const provId = s.proveedor_id;
                     const provName = provId ? proveedoresMap.get(provId) : null;
 
                     const concepto =
@@ -1321,7 +1243,7 @@ export default function Cuentas() {
                         { text: tipo, x: M + 110 },
                         { text: concepto, x: M + 230 },
                         {
-                            text: formatMoney(s.importe),
+                            text: eur(s.importe),
                             x: M + 460,
                             w: PAGE_W - M - (M + 460),
                             align: "right",
@@ -1373,21 +1295,21 @@ export default function Cuentas() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                        <Badge>Entradas: {euro(totalEntradas)}</Badge>
-                        <Badge>Salidas: {euro(totalSalidas)}</Badge>
+                        <Badge>Entradas: {eur(totalEntradas)}</Badge>
+                        <Badge>Salidas: {eur(totalSalidas)}</Badge>
                         {/* Sólo aparece si ha habido alguna: un contador a cero todos los días
                             deja de leerse, y éste es el número por el que hay que preguntar. */}
-                        {(resumen?.countAnuladas ?? 0) > 0 ? (
+                        {(resumen?.count_anuladas ?? 0) > 0 ? (
                             <Badge>
                                 <span className="text-danger">
-                                    Anulados: {resumen?.countAnuladas} · {euro(resumen?.totalAnulado ?? CERO)}
+                                    Anulados: {resumen?.count_anuladas} · {eur(resumen?.total_anulado ?? CERO)}
                                 </span>
                             </Badge>
                         ) : null}
                         <Badge>
                             Balance:{" "}
                             <span className={balance >= 0 ? "text-success" : "text-danger"}>
-                                {euro(balance)}
+                                {eur(balance)}
                             </span>
                         </Badge>
                     </div>
@@ -1448,7 +1370,7 @@ export default function Cuentas() {
                                         Pagos de clientes (tarjeta o efectivo).
                                     </p>
                                 </div>
-                                <Badge>Total: {euro(totalEntradas)}</Badge>
+                                <Badge>Total: {eur(totalEntradas)}</Badge>
                             </div>
 
                             <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border">
@@ -1468,16 +1390,16 @@ export default function Cuentas() {
                                                 <div key={e.id} className="p-4 sm:p-0">
                                                     <div className="sm:hidden flex items-start justify-between gap-3">
                                                         <div className="min-w-0">
-                                                            <div className="text-xs text-fg-muted">{e.fechaHora}</div>
-                                                            <div className={tachadoSi(e.anulado, "font-semibold text-fg truncate")}>
+                                                            <div className="text-xs text-fg-muted">{e.fecha_hora}</div>
+                                                            <div className={tachadoSi(esAnulado(e), "font-semibold text-fg truncate")}>
                                                                 {e.cliente}
                                                             </div>
                                                             <div className="text-xs text-fg-muted">{e.metodo}</div>
                                                             <SelloAnulado entrada={e} />
                                                         </div>
                                                         <div className="flex flex-col items-end gap-2">
-                                                            <div className={tachadoSi(e.anulado, "font-extrabold text-fg")}>
-                                                                {euro(e.importe)}
+                                                            <div className={tachadoSi(esAnulado(e), "font-extrabold text-fg")}>
+                                                                {eur(e.importe)}
                                                             </div>
                                                             <div className="flex gap-2">
                                                                 <MiniIconButton
@@ -1486,7 +1408,7 @@ export default function Cuentas() {
                                                                 >
                                                                     <Printer className="size-4" aria-hidden />
                                                                 </MiniIconButton>
-                                                                {e.anulado ? null : (
+                                                                {esAnulado(e) ? null : (
                                                                     <>
                                                                         <MiniIconButton
                                                                             title="Hacer factura con NIF"
@@ -1514,18 +1436,18 @@ export default function Cuentas() {
                                                     </div>
 
                                                     <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-3 text-sm hover:bg-surface-2">
-                                                        <div className={tachadoSi(e.anulado, "col-span-3")}>
-                                                            {e.fechaHora}
+                                                        <div className={tachadoSi(esAnulado(e), "col-span-3")}>
+                                                            {e.fecha_hora}
                                                         </div>
                                                         <div className="col-span-4 min-w-0">
-                                                            <div className={tachadoSi(e.anulado, "font-medium truncate")}>
+                                                            <div className={tachadoSi(esAnulado(e), "font-medium truncate")}>
                                                                 {e.cliente}
                                                             </div>
                                                             <div className="text-xs text-fg-muted">{e.metodo}</div>
                                                             <SelloAnulado entrada={e} />
                                                         </div>
-                                                        <div className={tachadoSi(e.anulado, "col-span-2 font-semibold")}>
-                                                            {euro(e.importe)}
+                                                        <div className={tachadoSi(esAnulado(e), "col-span-2 font-semibold")}>
+                                                            {eur(e.importe)}
                                                         </div>
                                                         <div className="col-span-3 flex justify-end gap-2">
                                                             <MiniIconButton
@@ -1534,7 +1456,7 @@ export default function Cuentas() {
                                                             >
                                                                 <Printer className="size-4" aria-hidden />
                                                             </MiniIconButton>
-                                                            {e.anulado ? null : (
+                                                            {esAnulado(e) ? null : (
                                                                 <>
                                                                     <MiniIconButton
                                                                         title="Hacer factura con NIF"
@@ -1621,26 +1543,26 @@ export default function Cuentas() {
                                         <div className="divide-y divide-border">
                                             {salidasFiltradas.map((s) => {
                                                 const provText =
-                                                    s.tipoGasto === "Proveedor" && s.proveedorId
-                                                        ? proveedorLabel(s.proveedorId)
+                                                    s.tipo_gasto === "Proveedor" && s.proveedor_id
+                                                        ? proveedorLabel(s.proveedor_id)
                                                         : null;
 
                                                 return (
                                                     <div key={s.id} className="p-4 sm:p-0">
                                                         <div className="sm:hidden flex items-start justify-between gap-3">
                                                             <div className="min-w-0">
-                                                                <div className="text-xs text-fg-muted">{s.fechaHora}</div>
+                                                                <div className="text-xs text-fg-muted">{s.fecha_hora}</div>
                                                                 <div className="font-semibold text-fg truncate">
                                                                     {s.concepto}
                                                                 </div>
                                                                 <div className="text-xs text-fg-muted">
-                                                                    {s.tipoGasto}
+                                                                    {s.tipo_gasto}
                                                                     {provText ? <> · {provText}</> : null}
                                                                 </div>
                                                             </div>
                                                             <div className="flex flex-col items-end gap-2">
                                                                 <div className="font-extrabold text-fg">
-                                                                    {euro(s.importe)}
+                                                                    {eur(s.importe)}
                                                                 </div>
                                                                 <div className="flex gap-2">
                                                                     <MiniIconButton title="Editar" onClick={conAviso(() => abrirEditarGasto(s))}>
@@ -1658,9 +1580,9 @@ export default function Cuentas() {
                                                         </div>
 
                                                         <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-3 text-sm hover:bg-surface-2">
-                                                            <div className="col-span-2">{s.fechaHora}</div>
+                                                            <div className="col-span-2">{s.fecha_hora}</div>
                                                             <div className="col-span-2 truncate">
-                                                                {s.tipoGasto}
+                                                                {s.tipo_gasto}
                                                                 {provText ? (
                                                                     <span className="ml-1 text-xs text-fg-muted">
                                                                         ({provText})
@@ -1669,7 +1591,7 @@ export default function Cuentas() {
                                                             </div>
                                                             <div className="col-span-3 truncate">{s.concepto}</div>
                                                             <div className="col-span-2 font-semibold">
-                                                                {euro(s.importe)}
+                                                                {eur(s.importe)}
                                                             </div>
                                                             <div className="col-span-3 flex justify-end gap-2">
                                                                 <MiniIconButton title="Editar" onClick={conAviso(() => abrirEditarGasto(s))}>
@@ -1827,26 +1749,26 @@ export default function Cuentas() {
                                         </td>
                                         <td className="py-2 text-fg-muted">{c.usuario_nombre ?? "—"}</td>
                                         <td className="py-2 text-right text-fg-muted">
-                                            {euro(c.esperado)}
+                                            {eur(c.esperado)}
                                             {esperadoHoy !== null ? (
-                                                <span className="block text-[11px]">hoy {euro(esperadoHoy)}</span>
+                                                <span className="block text-[11px]">hoy {eur(esperadoHoy)}</span>
                                             ) : null}
                                         </td>
-                                        <td className="py-2 text-right text-fg">{euro(c.contado)}</td>
+                                        <td className="py-2 text-right text-fg">{eur(c.contado)}</td>
                                         <td
                                             className={cn(
                                                 "py-2 text-right font-semibold",
                                                 descuadreVigente === 0 ? "text-success" : "text-danger",
                                             )}
                                         >
-                                            {c.descuadre === 0 ? "—" : euro(c.descuadre)}
+                                            {c.descuadre === 0 ? "—" : eur(c.descuadre)}
                                             {descuadreHoy !== null ? (
                                                 <span className="block text-[11px] font-normal">
-                                                    hoy {descuadreHoy === 0 ? "cuadra" : euro(descuadreHoy)}
+                                                    hoy {descuadreHoy === 0 ? "cuadra" : eur(descuadreHoy)}
                                                 </span>
                                             ) : null}
                                         </td>
-                                        <td className="py-2 text-right text-fg-muted">{euro(c.retirado)}</td>
+                                        <td className="py-2 text-right text-fg-muted">{eur(c.retirado)}</td>
                                         <td className="py-2 text-fg-muted">{c.motivo ?? ""}</td>
                                         <td className="py-2">
                                             <div className="flex items-center justify-end gap-1.5">
@@ -1951,8 +1873,8 @@ export default function Cuentas() {
                                             {loadingProveedores ? "Cargando..." : "Selecciona proveedor"}
                                         </option>
                                         {proveedores.map((p) => (
-                                            <option key={p.id} value={String(p.id)}>
-                                                {p.nombre}
+                                            <option key={p.ID_Proveedor} value={p.ID_Proveedor}>
+                                                {p.Nombre_Empresa}
                                             </option>
                                         ))}
                                     </select>
@@ -1979,11 +1901,9 @@ export default function Cuentas() {
 
                             <label className="text-xs font-semibold text-fg-muted">
                                 Importe (EUR)
-                                <input
-                                    value={gImporte}
-                                    onChange={(e) => setGImporte(e.target.value)}
-                                    inputMode="decimal"
-                                    placeholder="Ej: 120.50"
+                                <CampoDinero
+                                    {...gImporte.campo}
+                                    placeholder="Ej: 120,50"
                                     className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle"
                                 />
                             </label>
@@ -2111,8 +2031,8 @@ export default function Cuentas() {
                                             {loadingProveedores ? "Cargando..." : "Selecciona proveedor"}
                                         </option>
                                         {proveedores.map((p) => (
-                                            <option key={p.id} value={String(p.id)}>
-                                                {p.nombre}
+                                            <option key={p.ID_Proveedor} value={p.ID_Proveedor}>
+                                                {p.Nombre_Empresa}
                                             </option>
                                         ))}
                                     </select>
@@ -2134,10 +2054,8 @@ export default function Cuentas() {
 
                             <label className="text-xs font-semibold text-fg-muted">
                                 Importe (EUR)
-                                <input
-                                    value={egImporte}
-                                    onChange={(e) => setEgImporte(e.target.value)}
-                                    inputMode="decimal"
+                                <CampoDinero
+                                    {...egImporte.campo}
                                     className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
                                 />
                             </label>
@@ -2248,10 +2166,9 @@ export default function Cuentas() {
                             <label className="text-xs font-semibold text-fg-muted">
                                 Importe (EUR)
                                 <input
-                                    value={epImporte}
+                                    value={eur(epImporte)}
                                     readOnly
                                     disabled
-                                    inputMode="decimal"
                                     className="mt-1 w-full cursor-not-allowed rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg-muted outline-none"
                                 />
                                 <span className="mt-1 block text-[11px] font-normal text-fg-subtle">
@@ -2349,7 +2266,7 @@ export default function Cuentas() {
                                 <div className="space-y-1">
                                     <div>
                                         <span className="font-semibold">Fecha:</span>{" "}
-                                        {confirmAccion.gasto.fechaHora || "—"}
+                                        {confirmAccion.gasto.fecha_hora || "—"}
                                     </div>
                                     <div className="truncate">
                                         <span className="font-semibold">Concepto:</span>{" "}
@@ -2357,13 +2274,13 @@ export default function Cuentas() {
                                     </div>
                                     <div>
                                         <span className="font-semibold">Importe:</span>{" "}
-                                        {euro(confirmAccion.gasto.importe)}
+                                        {eur(confirmAccion.gasto.importe)}
                                     </div>
-                                    {confirmAccion.gasto.tipoGasto === "Proveedor" &&
-                                        confirmAccion.gasto.proveedorId ? (
+                                    {confirmAccion.gasto.tipo_gasto === "Proveedor" &&
+                                        confirmAccion.gasto.proveedor_id ? (
                                         <div>
                                             <span className="font-semibold">Proveedor:</span>{" "}
-                                            {proveedorLabel(confirmAccion.gasto.proveedorId)}
+                                            {proveedorLabel(confirmAccion.gasto.proveedor_id)}
                                         </div>
                                     ) : null}
                                 </div>
@@ -2371,7 +2288,7 @@ export default function Cuentas() {
                                 <div className="space-y-1">
                                     <div>
                                         <span className="font-semibold">Fecha/Hora:</span>{" "}
-                                        {confirmAccion.entrada.fechaHora || "—"}
+                                        {confirmAccion.entrada.fecha_hora || "—"}
                                     </div>
                                     <div className="truncate">
                                         <span className="font-semibold">Cliente:</span>{" "}
@@ -2383,7 +2300,7 @@ export default function Cuentas() {
                                     </div>
                                     <div>
                                         <span className="font-semibold">Importe:</span>{" "}
-                                        {euro(confirmAccion.entrada.importe)}
+                                        {eur(confirmAccion.entrada.importe)}
                                     </div>
                                 </div>
                             )}

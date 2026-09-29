@@ -4,7 +4,7 @@
 //  - Lecturas  -> useQuery con queryKey prefijada por el nombre de la feature.
 //  - Escrituras -> useMutation que, en onSuccess, invalida la clave de la feature para
 //    que las listas en caché se refresquen solas (Local-First: el dato sólo cambia aquí).
-//  - El hook envuelve las funciones de `proveedoresApis.ts` (invokeClient) sin tocar su firma.
+//  - El hook envuelve las funciones de `proveedoresApis.ts`, con los tipos generados desde Rust.
 //
 // Nota: `proveedoresGetProductosAll` se deja como llamada directa en el consumidor (carga
 // puntual on-demand al abrir el modal de vincular, con post-proceso/preselección y re-invocación
@@ -51,7 +51,7 @@ export function useProveedoresProductos(idProveedor: string | null | undefined) 
   const id = String(idProveedor ?? "").trim();
   return useQuery({
     queryKey: proveedoresKeys.productos(id),
-    queryFn: () => proveedoresGetProductos({ idProveedor: id }),
+    queryFn: () => proveedoresGetProductos(id),
     enabled: id.length > 0,
   });
 }

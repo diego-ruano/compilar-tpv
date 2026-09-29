@@ -9,10 +9,10 @@ import React from "react";
 import { Minus, Plus } from "lucide-react";
 
 import { cn } from "../../shared/lib/cn";
-import { euro, moneyLabel } from "./formato";
+import { moneyLabel } from "./formato";
 import type { CashCount, Denom } from "./cuentasApis";
 import type { Dinero } from "@tpv/contracts";
-import { por } from "../../shared/lib/dinero";
+import { eur, por } from "../../shared/lib/dinero";
 
 function Badge({ children }: { children: React.ReactNode }) {
     return (
@@ -49,7 +49,7 @@ export default function DenomsGrid({
                         <h3 className="text-base font-bold text-fg sm:text-lg">
                             {title}
                         </h3>
-                        <Badge>Total: {euro(total)}</Badge>
+                        <Badge>Total: {eur(total)}</Badge>
                     </div>
                     {subtitle ? (
                         <p className="mt-1 text-sm text-fg-muted">{subtitle}</p>
@@ -94,7 +94,7 @@ export default function DenomsGrid({
                             </div>
 
                             <p className="mt-0.5 truncate text-[11px] text-fg-muted">
-                                {active ? `Subtotal ${euro(subtotal)}` : moneyLabel(d.value)}
+                                {active ? `Subtotal ${eur(subtotal)}` : moneyLabel(d.value)}
                             </p>
 
                             <div className="mt-3 grid grid-cols-[2rem_minmax(1.5rem,1fr)_2rem] items-center gap-1.5">

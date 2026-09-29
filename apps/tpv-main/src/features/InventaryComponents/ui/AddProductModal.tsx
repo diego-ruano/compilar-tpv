@@ -6,11 +6,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { convertirABase64 } from "../utils/inventarioFormat";
 import { resolveImageUrl, triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 
-import {
-    inventarioAPI,
-    type AlergenoRow,
-    type ProveedorMiniRow,
-} from "../api/inventarioAPI";
+import type { AlergenoInvDto, ProveedorMiniDto } from "@tpv/contracts";
+
+import { inventarioAPI } from "../api/inventarioAPI";
+import { CampoDinero, useImporte } from "../../../shared/ui/CampoDinero";
 import {
     useAlergenos,
     useCategorias,
@@ -27,6 +26,13 @@ const UNIDADES_MEDIDA = ["UD", "KG", "GR", "MG", "L", "CL", "ML"] as const;
 function toNum(v: any, fallback = 0) {
     const n = Number(v);
     return Number.isFinite(n) ? n : fallback;
+}
+
+/** Una cantidad o un porcentaje escrito a mano; vacío o ilegible = sin informar. */
+function numeroOpcional(texto: string): number | undefined {
+    if (!texto.trim()) return undefined;
+    const n = Number(texto.replace(",", "."));
+    return Number.isFinite(n) ? n : undefined;
 }
 
 const toImageUrlMaybe = resolveImageUrl;
@@ -62,14 +68,15 @@ export function AddProductModal({
             })),
         [categoriasQuery.data],
     );
-    const proveedores: ProveedorMiniRow[] = proveedoresQuery.data ?? [];
-    const alergenos: AlergenoRow[] = alergenosQuery.data ?? [];
+    const proveedores: ProveedorMiniDto[] = proveedoresQuery.data ?? [];
+    const alergenos: AlergenoInvDto[] = alergenosQuery.data ?? [];
 
     const [idCategoria, setIdCategoria] = useState<string>("");
     const [idProveedor, setIdProveedor] = useState<string>("");
 
     const [nombre, setNombre] = useState("");
-    const [precioVenta, setPrecioVenta] = useState("");
+    const precio = useImporte();
+    const ponerPrecio = precio.poner;
     const [stockMinimo, setStockMinimo] = useState("");
     const [unidadMedida, setUnidadMedida] = useState("");
 
@@ -137,8 +144,8 @@ export function AddProductModal({
             const urlMap: Record<string, string> = {};
             await Promise.all(
                 (alergenos ?? []).map(async (a) => {
-                    const id = toNum((a as any).ID_Alergeno, 0);
-                    const url = await toImageUrlMaybe((a as any).Ruta_Imagen);
+                    const id = toNum(a.ID_Alergeno, 0);
+                    const url = await toImageUrlMaybe(a.Ruta_Imagen);
                     if (id > 0 && url) urlMap[id] = url;
                 }),
             );
@@ -162,7 +169,7 @@ export function AddProductModal({
         (async () => {
             if (!productIdToEdit) {
                 setNombre("");
-                setPrecioVenta("");
+                ponerPrecio(null);
                 setStockMinimo("");
                 setUnidadMedida("");
                 setCantidadPedidoEsperada("");
@@ -193,9 +200,7 @@ export function AddProductModal({
             setIdCategoria(detalle.ID_Categoria);
             setIdProveedor(detalle.ID_Proveedor ?? "");
             setNombre(detalle.Nombre ?? "");
-            setPrecioVenta(
-                detalle.Precio_Venta != null ? String(detalle.Precio_Venta) : "",
-            );
+            ponerPrecio(detalle.Precio_Venta);
             setStockMinimo(
                 detalle.Stock_Minimo != null ? String(detalle.Stock_Minimo) : "",
             );
@@ -226,7 +231,7 @@ export function AddProductModal({
             setSelectedAlergenos(
                 new Set(
                     (detalle.alergs ?? [])
-                        .map((a) => String((a as any).ID_Alergeno ?? "").trim())
+                        .map((a) => a.ID_Alergeno.trim())
                         .filter((x) => x.length > 0),
                 ),
             );
@@ -247,7 +252,7 @@ export function AddProductModal({
         return () => {
             cancelled = true;
         };
-    }, [open, categoriaPreseleccionadaId, productIdToEdit, toast]);
+    }, [open, categoriaPreseleccionadaId, productIdToEdit, toast, ponerPrecio]);
 
     const toggleAlergeno = (id: string, checked: boolean) => {
         setSelectedAlergenos((prev) => {
@@ -270,6 +275,11 @@ export function AddProductModal({
 
         if (!nombre.trim() || idCategoria === "") {
             toast.info("Validación", "Nombre y categoría son obligatorios.");
+            return;
+        }
+
+        if (!precio.legible) {
+            toast.info("Validación", "El precio de venta no se entiende como importe.");
             return;
         }
 
@@ -316,36 +326,18 @@ export function AddProductModal({
                 (await upsertProducto.mutateAsync({
                     id_producto: isEdit ? (productIdToEdit ?? undefined) : undefined,
                     id_categoria: idCategoria,
-                    // ID_Proveedor es un UUID string (no numérico): conservarlo como
-                    // string. Convertirlo con Number() daba NaN para cualquier UUID y
-                    // volvía a dejar el proveedor en null (el bug que H-01 pretendía cerrar).
-                    id_proveedor: idProveedor !== "" ? idProveedor : null,
+                    id_proveedor: idProveedor || undefined,
                     nombre: nombre.trim(),
-                    precio_venta:
-                        precioVenta.trim() === ""
-                            ? null
-                            : Number(precioVenta.replace(",", ".")),
-                    stock_minimo:
-                        stockMinimo.trim() === ""
-                            ? null
-                            : Number(stockMinimo.replace(",", ".")),
-                    unidad_medida: unidadMedida.trim() ? unidadMedida.trim() : null,
-                    nombre_imagen: nombreArchivo ?? null,
-                    ruta_imagen: rutaParaBD ?? null,
-                    cantidad_pedido_esperada:
-                        cantidadPedidoEsperada.trim() === ""
-                            ? null
-                            : Number(cantidadPedidoEsperada.replace(",", ".")),
-                    iva_percent:
-                        ivaPercent.trim() === ""
-                            ? null
-                            : Number(ivaPercent.replace(",", ".")),
-                    stock_suelto:
-                        stockSuelto.trim() === ""
-                            ? null
-                            : Number(stockSuelto.replace(",", ".")),
+                    precio_venta: precio.valor ?? undefined,
+                    stock_minimo: numeroOpcional(stockMinimo),
+                    unidad_medida: unidadMedida.trim() || undefined,
+                    nombre_imagen: nombreArchivo ?? undefined,
+                    ruta_imagen: rutaParaBD ?? undefined,
+                    cantidad_pedido_esperada: numeroOpcional(cantidadPedidoEsperada),
+                    iva_percent: numeroOpcional(ivaPercent),
+                    stock_suelto: numeroOpcional(stockSuelto),
                     ids_alergenos: alergIds,
-                })) ?? (isEdit ? (productIdToEdit ?? null) : null);
+                })) || (isEdit ? productIdToEdit : null);
 
             if (!finalProductId) {
                 throw new Error("No se pudo obtener el ID del producto.");
@@ -367,12 +359,8 @@ export function AddProductModal({
                 await createLote.mutateAsync({
                     id_producto: finalProductId,
                     codigo_lote: codigoLoteInicial.trim(),
-                    caducidad: caducidadLoteInicial.trim() ? caducidadLoteInicial : null,
+                    caducidad: caducidadLoteInicial.trim() || undefined,
                     stock_disponible: ci,
-                    coste_unitario: null,
-                    fecha_entrada: null,
-                    id_proveedor: null,
-                    notas: null,
                 });
             }
 
@@ -459,12 +447,9 @@ export function AddProductModal({
                         <label htmlFor="producto-precio-venta" className="block font-semibold">
                             Precio venta
                         </label>
-                        <input
+                        <CampoDinero
                             id="producto-precio-venta"
-                            type="number"
-                            step="0.01"
-                            value={precioVenta}
-                            onChange={(e) => setPrecioVenta(e.target.value)}
+                            {...precio.campo}
                             className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         />

@@ -25,10 +25,11 @@ import { AddProductModal } from "../../features/InventaryComponents/ui/AddProduc
 
 import {
   proveedoresGetProductosAll,
-  type ProveedorRow,
-  type ProductoRow,
-  type Categoria,
+  type CategoriaProveedorDto,
+  type ProductoProveedorDto,
+  type ProveedorDto,
 } from "../../features/proveedores/proveedoresApis";
+import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
 import {
   useProveedoresAll,
   useProveedoresCategorias,
@@ -40,8 +41,8 @@ import {
 } from "../../features/proveedores/proveedoresQueries";
 import { conAviso } from "../../shared/lib/conAviso";
 
-type ProveedorUI = ProveedorRow & { urlImagen: string };
-type ProductoUI = ProductoRow & { urlImagen: string };
+type ProveedorUI = ProveedorDto & { urlImagen: string };
+type ProductoUI = ProductoProveedorDto & { urlImagen: string };
 
 type Vista = "list" | "detail";
 
@@ -53,11 +54,12 @@ const convertirABase64 = (file: File): Promise<string> =>
     reader.onerror = (error) => reject(error);
   });
 
-function toNumOrNull(v: string): number | null {
+/** Una cantidad escrita a mano; vacío o ilegible = sin informar. */
+function numeroOpcional(v: string): number | undefined {
   const t = v.trim();
-  if (!t) return null;
+  if (!t) return undefined;
   const n = Number(t.replace(",", "."));
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) ? n : undefined;
 }
 
 export default function Proveedores() {
@@ -78,7 +80,7 @@ export default function Proveedores() {
   // ---- TanStack Query: lecturas cacheadas + mutaciones (invalidan la feature) ----
   const proveedoresQuery = useProveedoresAll();
   const categoriasQuery = useProveedoresCategorias();
-  const productosProveedorQuery = useProveedoresProductos(proveedorActivo?.ID_Proveedor ?? null);
+  const productosProveedorQuery = useProveedoresProductos(proveedorActivo?.id_proveedor ?? null);
 
   const saveProveedor = useSaveProveedor();
   const deleteProveedor = useDeleteProveedor();
@@ -105,7 +107,7 @@ export default function Proveedores() {
   const [productosProveedor, setProductosProveedor] = useState<ProductoUI[]>([]);
 
   // Categorías: derivadas directamente de la query (no requieren mapeo async de imágenes).
-  const categorias: Categoria[] = categoriasQuery.data ?? [];
+  const categorias: CategoriaProveedorDto[] = categoriasQuery.data ?? [];
 
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false);
   const [modalProveedorModo, setModalProveedorModo] = useState<"nuevo" | "editar">("nuevo");
@@ -136,28 +138,28 @@ export default function Proveedores() {
   const [categoriaActivaId, setCategoriaActivaId] = useState<string | null>(null);
 
   const [pNombre, setPNombre] = useState("");
-  const [pPrecio, setPPrecio] = useState("");
+  const pPrecio = useImporte();
   const [pStockActual, setPStockActual] = useState("");
   const [pStockMin, setPStockMin] = useState("");
   const [pUnidad, setPUnidad] = useState("");
   const [pCategoriaId, setPCategoriaId] = useState<string>("");
 
-  async function mapProveedoresUI(rows: ProveedorRow[]): Promise<ProveedorUI[]> {
+  async function mapProveedoresUI(rows: ProveedorDto[]): Promise<ProveedorUI[]> {
     const out: ProveedorUI[] = [];
     for (const r of rows) {
       out.push({
         ...r,
-        urlImagen: await resolveImageUrl(r.Ruta_Imagen),
+        urlImagen: await resolveImageUrl(r.ruta_imagen),
       });
     }
     return out;
   }
 
-  async function mapProductosUI(rows: ProductoRow[]): Promise<ProductoUI[]> {
+  async function mapProductosUI(rows: ProductoProveedorDto[]): Promise<ProductoUI[]> {
     return await Promise.all(
       (rows ?? []).map(async (p) => ({
         ...p,
-        urlImagen: await resolveImageUrl(p.Ruta_Imagen),
+        urlImagen: await resolveImageUrl(p.ruta_imagen),
       })),
     );
   }
@@ -189,8 +191,8 @@ export default function Proveedores() {
       setProveedores(ui);
 
       if (proveedorActivo) {
-        const id = proveedorActivo.ID_Proveedor;
-        const updated = ui.find((x) => x.ID_Proveedor === id);
+        const id = proveedorActivo.id_proveedor;
+        const updated = ui.find((x) => x.id_proveedor === id);
         if (updated) setProveedorActivo(updated);
       }
     })();
@@ -233,11 +235,11 @@ export default function Proveedores() {
     const s = busqueda.trim().toLowerCase();
     if (!s) return proveedores;
     return proveedores.filter((p) => {
-      const n = (p.Nombre_Empresa || "").toLowerCase();
-      const e = (p.Email || "").toLowerCase();
-      const t = (p.Telefono || "").toLowerCase();
-      const c = (p.CIF || "").toLowerCase();
-      const o = (p.Informacion_adicional || "").toLowerCase();
+      const n = (p.nombre_empresa || "").toLowerCase();
+      const e = (p.email || "").toLowerCase();
+      const t = (p.telefono || "").toLowerCase();
+      const c = (p.cif || "").toLowerCase();
+      const o = (p.informacion_adicional || "").toLowerCase();
       return n.includes(s) || e.includes(s) || t.includes(s) || c.includes(s) || o.includes(s);
     });
   }, [proveedores, busqueda]);
@@ -246,17 +248,17 @@ export default function Proveedores() {
     if (vista !== "detail") return [];
     const s = busqueda.trim().toLowerCase();
     if (!s) return productosProveedor;
-    return productosProveedor.filter((p) => p.Nombre.toLowerCase().includes(s));
+    return productosProveedor.filter((p) => p.nombre.toLowerCase().includes(s));
   }, [vista, productosProveedor, busqueda]);
 
   const productosDisponiblesFiltrados = useMemo(() => {
     let list = productosDisponibles;
     if (categorias.length > 0 && categoriaActivaId !== null) {
-      list = list.filter((p) => p.ID_Categoria === categoriaActivaId);
+      list = list.filter((p) => p.id_categoria === categoriaActivaId);
     }
     const s = busquedaProductos.trim().toLowerCase();
     if (!s) return list;
-    return list.filter((p) => p.Nombre.toLowerCase().includes(s));
+    return list.filter((p) => p.nombre.toLowerCase().includes(s));
   }, [productosDisponibles, busquedaProductos, categoriaActivaId, categorias.length]);
 
   function volverALista() {
@@ -293,12 +295,12 @@ export default function Proveedores() {
     if (!proveedorActivo) return;
 
     setModalProveedorModo("editar");
-    setFNombre(proveedorActivo.Nombre_Empresa ?? "");
-    setFContacto(proveedorActivo.Contacto ?? "");
-    setFTelefono(proveedorActivo.Telefono ?? "");
-    setFEmail(proveedorActivo.Email ?? "");
-    setFCif(proveedorActivo.CIF ?? "");
-    setFOtros(proveedorActivo.Informacion_adicional ?? "");
+    setFNombre(proveedorActivo.nombre_empresa ?? "");
+    setFContacto(proveedorActivo.contacto ?? "");
+    setFTelefono(proveedorActivo.telefono ?? "");
+    setFEmail(proveedorActivo.email ?? "");
+    setFCif(proveedorActivo.cif ?? "");
+    setFOtros(proveedorActivo.informacion_adicional ?? "");
 
     setFotoNuevaPreview(null);
     setFotoNuevaFile(null);
@@ -327,7 +329,7 @@ export default function Proveedores() {
       let rutaImagen: string | null = null;
       // Ruta de la imagen anterior, para limpiarla del bucket tras reemplazo/eliminación.
       const rutaAnterior =
-        modalProveedorModo === "editar" ? (proveedorActivo?.Ruta_Imagen ?? null) : null;
+        modalProveedorModo === "editar" ? (proveedorActivo?.ruta_imagen ?? null) : null;
 
       // La imagen se procesa (resize + JPEG) en Rust y se sube a R2 (Main y Handy).
       if (fotoNuevaFile) {
@@ -354,21 +356,22 @@ export default function Proveedores() {
           nombreImagen = null;
           rutaImagen = null;
         } else if (!fotoNuevaFile) {
-          nombreImagen = proveedorActivo.Nombre_Imagen ?? null;
-          rutaImagen = proveedorActivo.Ruta_Imagen ?? null;
+          nombreImagen = proveedorActivo.nombre_imagen ?? null;
+          rutaImagen = proveedorActivo.ruta_imagen ?? null;
         }
       }
 
       const ok = await saveProveedor.mutateAsync({
-        idProveedor: modalProveedorModo === "editar" ? (proveedorActivo?.ID_Proveedor ?? null) : null,
-        nombreEmpresa: nombre,
-        contacto: contacto || null,
-        telefono: telefono || null,
-        email: email || null,
-        cif: cif || null,
-        informacionAdicional: otros || null,
-        nombreImagen,
-        rutaImagen,
+        id_proveedor:
+          modalProveedorModo === "editar" ? proveedorActivo?.id_proveedor : undefined,
+        nombre_empresa: nombre,
+        contacto: contacto || undefined,
+        telefono: telefono || undefined,
+        email: email || undefined,
+        cif: cif || undefined,
+        informacion_adicional: otros || undefined,
+        nombre_imagen: nombreImagen ?? undefined,
+        ruta_imagen: rutaImagen ?? undefined,
       });
 
       if (!ok) {
@@ -399,12 +402,12 @@ export default function Proveedores() {
 
   function eliminarProductoDelProveedor(idProducto: string, cerrarDetalle = false) {
     if (!proveedorActivo) return;
-    const prod = productosProveedor.find((x) => x.ID_Producto === idProducto);
+    const prod = productosProveedor.find((x) => x.id_producto === idProducto);
 
     setConfirmAccion({
       tipo: "producto",
       idProducto,
-      nombreProducto: prod?.Nombre,
+      nombreProducto: prod?.nombre,
       cerrarDetalle,
     });
   }
@@ -416,8 +419,8 @@ export default function Proveedores() {
     try {
       if (confirmAccion.tipo === "proveedor") {
         try {
-          const id = confirmAccion.proveedor.ID_Proveedor;
-          const deleted = await deleteProveedor.mutateAsync({ idProveedor: id });
+          const id = confirmAccion.proveedor.id_proveedor;
+          const deleted = await deleteProveedor.mutateAsync(id);
           if (!deleted) {
             toast.error("Error", "No se pudo eliminar el proveedor.");
             return;
@@ -435,15 +438,15 @@ export default function Proveedores() {
 
       if (confirmAccion.tipo === "producto") {
         try {
-          const idProv = proveedorActivo.ID_Proveedor;
+          const idProv = proveedorActivo.id_proveedor;
 
           const next = productosProveedor
-            .filter((x) => x.ID_Producto !== confirmAccion.idProducto)
-            .map((x) => x.ID_Producto);
+            .filter((x) => x.id_producto !== confirmAccion.idProducto)
+            .map((x) => x.id_producto);
 
           const ok = await setVinculos.mutateAsync({
-            idProveedor: idProv,
-            productoIds: next,
+            id_proveedor: idProv,
+            producto_ids: next,
           });
 
           if (!ok) {
@@ -451,7 +454,7 @@ export default function Proveedores() {
             return;
           }
 
-          setProductosProveedor((prev) => prev.filter((x) => x.ID_Producto !== confirmAccion.idProducto));
+          setProductosProveedor((prev) => prev.filter((x) => x.id_producto !== confirmAccion.idProducto));
 
           if (confirmAccion.cerrarDetalle) {
             setOpenProductDetail(false);
@@ -479,7 +482,7 @@ export default function Proveedores() {
     setLoadingVincular(true);
 
     try {
-      const idProv = proveedorActivo.ID_Proveedor;
+      const idProv = proveedorActivo.id_proveedor;
       const rows = await proveedoresGetProductosAll();
       const ui = await mapProductosUI(rows);
 
@@ -487,7 +490,7 @@ export default function Proveedores() {
 
       const pre = new Set<string>();
       for (const p of ui) {
-        if (p.ID_Proveedor === idProv) pre.add(p.ID_Producto);
+        if (p.id_proveedor === idProv) pre.add(p.id_producto);
       }
       setSeleccionProductoIds(pre);
     } catch (e) {
@@ -511,13 +514,13 @@ export default function Proveedores() {
   async function guardarVinculos() {
     if (!proveedorActivo) return;
 
-    const idProv = proveedorActivo.ID_Proveedor;
+    const idProv = proveedorActivo.id_proveedor;
     const idsSeleccionados = Array.from(seleccionProductoIds);
 
     try {
       const ok = await setVinculos.mutateAsync({
-        idProveedor: idProv,
-        productoIds: idsSeleccionados,
+        id_proveedor: idProv,
+        producto_ids: idsSeleccionados,
       });
       if (!ok) {
         toast.error("Error", "No se pudieron guardar los vínculos.");
@@ -535,11 +538,11 @@ export default function Proveedores() {
 
   function abrirCrearProductoEnModal() {
     setPNombre("");
-    setPPrecio("");
+    pPrecio.poner(null);
     setPStockActual("");
     setPStockMin("");
     setPUnidad("");
-    setPCategoriaId(categorias[0]?.ID_Categoria ?? "");
+    setPCategoriaId(categorias[0]?.id_categoria ?? "");
     setModalCrearProductoOpen(true);
   }
 
@@ -556,22 +559,23 @@ export default function Proveedores() {
       return;
     }
 
-    const idProv = proveedorActivo.ID_Proveedor;
+    const idProv = proveedorActivo.id_proveedor;
     const idCat = pCategoriaId;
-    const precio = toNumOrNull(pPrecio);
-    const stockA = toNumOrNull(pStockActual);
-    const stockM = toNumOrNull(pStockMin);
+    if (!pPrecio.legible) {
+      toast.info("Validación", "El precio de venta no se entiende como importe.");
+      return;
+    }
     const unidad = pUnidad.trim();
 
     try {
       const idNuevo = await createProducto.mutateAsync({
-        idCategoria: idCat,
-        idProveedor: idProv,
+        id_categoria: idCat,
+        id_proveedor: idProv,
         nombre,
-        precioVenta: precio,
-        stockActual: stockA,
-        stockMinimo: stockM,
-        unidadMedida: unidad || null,
+        precio_venta: pPrecio.valor ?? undefined,
+        stock_actual: numeroOpcional(pStockActual),
+        stock_minimo: numeroOpcional(pStockMin),
+        unidad_medida: unidad || undefined,
       });
 
       if (!idNuevo) {
@@ -589,8 +593,8 @@ export default function Proveedores() {
 
   const categoriaActivaNombre = useMemo(() => {
     if (categoriaActivaId === null) return "Todas";
-    const c = categorias.find((x) => x.ID_Categoria === categoriaActivaId);
-    return c?.Nombre ?? "Categoría";
+    const c = categorias.find((x) => x.id_categoria === categoriaActivaId);
+    return c?.nombre ?? "Categoría";
   }, [categoriaActivaId, categorias]);
 
   return (
@@ -638,7 +642,7 @@ export default function Proveedores() {
                 className="inline-flex min-w-0 shrink cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
               >
                 <ArrowLeft className="size-4 shrink-0" aria-hidden />
-                <span className="truncate">{proveedorActivo?.Nombre_Empresa ?? "Volver"}</span>
+                <span className="truncate">{proveedorActivo?.nombre_empresa ?? "Volver"}</span>
               </button>
 
               <button
@@ -676,7 +680,7 @@ export default function Proveedores() {
               <div className="max-h-88 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
                 <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
                   {proveedoresFiltrados.map((p) => (
-                    <ProveedorCard key={p.ID_Proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
+                    <ProveedorCard key={p.id_proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
                   ))}
                 </div>
               </div>
@@ -693,39 +697,39 @@ export default function Proveedores() {
             <div className="flex h-[200px] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-[240px] lg:h-[280px] lg:w-[280px] lg:shrink-0">
               <ImageWithFallback
                 src={proveedorActivo.urlImagen}
-                alt={proveedorActivo.Nombre_Empresa}
+                alt={proveedorActivo.nombre_empresa}
                 className="h-full w-full object-cover"
                 fallback={
                   <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-4 text-center text-fg-subtle">
                     <ImageOff className="size-8" aria-hidden />
-                    <span className="text-sm font-bold">{proveedorActivo.Nombre_Empresa}</span>
+                    <span className="text-sm font-bold">{proveedorActivo.nombre_empresa}</span>
                   </div>
                 }
               />
             </div>
 
             <div className="flex flex-1 flex-col gap-3 text-fg">
-              <h3 className="text-2xl font-bold text-fg">{proveedorActivo.Nombre_Empresa}</h3>
+              <h3 className="text-2xl font-bold text-fg">{proveedorActivo.nombre_empresa}</h3>
 
               <div className="flex flex-col gap-1 text-sm text-fg-muted">
                 <p>
                   <span className="font-semibold text-fg">Contacto:</span>{" "}
-                  {proveedorActivo.Contacto ?? "—"}
+                  {proveedorActivo.contacto ?? "—"}
                 </p>
                 <p>
                   <span className="font-semibold text-fg">Teléfono:</span>{" "}
-                  {proveedorActivo.Telefono ?? "—"}
+                  {proveedorActivo.telefono ?? "—"}
                 </p>
                 <p>
                   <span className="font-semibold text-fg">Email:</span>{" "}
-                  {proveedorActivo.Email ?? "—"}
+                  {proveedorActivo.email ?? "—"}
                 </p>
                 <p>
-                  <span className="font-semibold text-fg">CIF:</span> {proveedorActivo.CIF ?? "—"}
+                  <span className="font-semibold text-fg">CIF:</span> {proveedorActivo.cif ?? "—"}
                 </p>
                 <p>
                   <span className="font-semibold text-fg">Otros:</span>{" "}
-                  {proveedorActivo.Informacion_adicional ?? "—"}
+                  {proveedorActivo.informacion_adicional ?? "—"}
                 </p>
               </div>
 
@@ -776,19 +780,19 @@ export default function Proveedores() {
             ) : (
               <div className="grid w-full grid-cols-1 gap-4 xs:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
                 {productosProveedorFiltrados.map((p) => (
-                  <div key={p.ID_Producto} className="w-full">
+                  <div key={p.id_producto} className="w-full">
                     <Product
                       img={p.urlImagen}
-                      name={p.Nombre}
+                      name={p.nombre}
                       onSelect={() => {
-                        setProductDetailId(p.ID_Producto);
+                        setProductDetailId(p.id_producto);
                         setOpenProductDetail(true);
                       }}
                     />
 
                     <button
                       type="button"
-                      onClick={() => eliminarProductoDelProveedor(p.ID_Producto)}
+                      onClick={() => eliminarProductoDelProveedor(p.id_producto)}
                       className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer"
                     >
                       <Trash2 className="size-4" aria-hidden />
@@ -829,14 +833,14 @@ export default function Proveedores() {
                   ? "Se eliminará la foto"
                   : fotoNuevaFile
                     ? "Nueva foto seleccionada"
-                    : modalProveedorModo === "editar" && proveedorActivo?.Ruta_Imagen
+                    : modalProveedorModo === "editar" && proveedorActivo?.ruta_imagen
                       ? "Foto actual"
                       : "No hay foto aún"}
               </div>
 
               <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:flex">
                 <label className="min-w-0 cursor-pointer whitespace-normal break-words rounded-xl bg-accent px-3 py-1.5 text-center text-sm font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover">
-                  {fotoNuevaFile || (modalProveedorModo === "editar" && proveedorActivo?.Ruta_Imagen && !fotoEliminar)
+                  {fotoNuevaFile || (modalProveedorModo === "editar" && proveedorActivo?.ruta_imagen && !fotoEliminar)
                     ? "Cambiar"
                     : "Subir"}
                   <input
@@ -858,7 +862,7 @@ export default function Proveedores() {
 
                 {(() => {
                   const hayFotoActiva =
-                    !!fotoNuevaFile || (modalProveedorModo === "editar" && !!proveedorActivo?.Ruta_Imagen && !fotoEliminar);
+                    !!fotoNuevaFile || (modalProveedorModo === "editar" && !!proveedorActivo?.ruta_imagen && !fotoEliminar);
 
                   if (!hayFotoActiva) return null;
 
@@ -946,7 +950,7 @@ export default function Proveedores() {
       <Modal
         open={modalVincularOpen}
         onClose={() => setModalVincularOpen(false)}
-        title={`Vincular productos · ${proveedorActivo?.Nombre_Empresa ?? ""}`}
+        title={`Vincular productos · ${proveedorActivo?.nombre_empresa ?? ""}`}
         zIndex={70}
         widthClass="max-w-[1100px]"
       >
@@ -1001,15 +1005,15 @@ export default function Proveedores() {
                   ) : (
                     categorias.map((c) => {
                       const count = productosDisponibles.filter(
-                        (p) => p.ID_Categoria === c.ID_Categoria,
+                        (p) => p.id_categoria === c.id_categoria,
                       ).length;
-                      const active = categoriaActivaId === c.ID_Categoria;
+                      const active = categoriaActivaId === c.id_categoria;
 
                       return (
                         <button
-                          key={c.ID_Categoria}
+                          key={c.id_categoria}
                           type="button"
-                          onClick={() => setCategoriaActivaId(c.ID_Categoria)}
+                          onClick={() => setCategoriaActivaId(c.id_categoria)}
                           className={cn(
                             "w-full cursor-pointer border-b border-border px-3 py-2 text-left transition",
                             active
@@ -1017,7 +1021,7 @@ export default function Proveedores() {
                               : "hover:bg-surface-2",
                           )}
                         >
-                          <div className="truncate font-semibold text-fg">{c.Nombre}</div>
+                          <div className="truncate font-semibold text-fg">{c.nombre}</div>
                           <div className="text-xs text-fg-muted">{count} productos</div>
                         </button>
                       );
@@ -1038,12 +1042,12 @@ export default function Proveedores() {
                 <div className="max-h-[55vh] overflow-auto pr-1">
                   <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
                     {productosDisponiblesFiltrados.map((p) => {
-                      const checked = seleccionProductoIds.has(p.ID_Producto);
+                      const checked = seleccionProductoIds.has(p.id_producto);
                       return (
                         <button
-                          key={p.ID_Producto}
+                          key={p.id_producto}
                           type="button"
-                          onClick={() => toggleSeleccion(p.ID_Producto)}
+                          onClick={() => toggleSeleccion(p.id_producto)}
                           className={cn(
                             "cursor-pointer rounded-xl border p-3 text-left transition",
                             checked
@@ -1054,7 +1058,7 @@ export default function Proveedores() {
                           <div className="flex items-center gap-3">
                             <div className="flex h-[54px] w-[54px] shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-surface-2">
                               {p.urlImagen ? (
-                                <img src={p.urlImagen} alt={p.Nombre} className="h-full w-full object-cover" draggable={false} />
+                                <img src={p.urlImagen} alt={p.nombre} className="h-full w-full object-cover" draggable={false} />
                               ) : (
                                 <ImageOff className="size-5 text-fg-subtle" aria-hidden />
                               )}
@@ -1062,7 +1066,7 @@ export default function Proveedores() {
 
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
-                                <p className="truncate font-semibold text-fg">{p.Nombre}</p>
+                                <p className="truncate font-semibold text-fg">{p.nombre}</p>
                                 <input type="checkbox" checked={checked} readOnly className="size-4 accent-accent" />
                               </div>
                             </div>
@@ -1111,7 +1115,17 @@ export default function Proveedores() {
       >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
           <Campo label="Nombre *" value={pNombre} onChange={setPNombre} placeholder="Ej: Coca-Cola 33cl" />
-          <Campo label="Precio venta" value={pPrecio} onChange={setPPrecio} placeholder="Ej: 1.80" />
+          <div className="flex flex-col gap-1">
+            <label htmlFor="proveedor-producto-precio" className="text-sm font-semibold text-fg">
+              Precio venta
+            </label>
+            <CampoDinero
+              id="proveedor-producto-precio"
+              {...pPrecio.campo}
+              placeholder="Ej: 1,80"
+              className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
 
           <div>
             <label className="text-sm font-semibold text-fg">Categoría *</label>
@@ -1126,8 +1140,8 @@ export default function Proveedores() {
                 <>
                   <option value="">Selecciona…</option>
                   {categorias.map((c) => (
-                    <option key={c.ID_Categoria} value={c.ID_Categoria}>
-                      {c.Nombre}
+                    <option key={c.id_categoria} value={c.id_categoria}>
+                      {c.nombre}
                     </option>
                   ))}
                 </>
@@ -1208,7 +1222,7 @@ export default function Proveedores() {
           {confirmAccion?.tipo === "proveedor" ? (
             <p>
               ¿Seguro que quieres eliminar el proveedor{" "}
-              <span className="font-semibold text-fg">"{confirmAccion.proveedor.Nombre_Empresa}"</span>?
+              <span className="font-semibold text-fg">"{confirmAccion.proveedor.nombre_empresa}"</span>?
             </p>
           ) : (
             <p>

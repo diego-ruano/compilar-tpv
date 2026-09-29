@@ -2145,8 +2145,6 @@ pub fn run() {
             commands::inventario::inventario_list_productos_by_categoria,
             commands::inventario::inventario_get_resumen,
             commands::inventario::inventario_list_alergenos,
-            commands::inventario::inventario_get_alergenos_producto,
-            commands::inventario::inventario_set_alergenos_producto,
             commands::inventario::inventario_get_product_detail,
             commands::inventario::inventario_delete_producto,
             commands::inventario::inventario_upsert_producto,
@@ -2244,7 +2242,6 @@ pub fn run() {
             commands::venta_rapida::vr_delete_linea_if_unpaid,
             commands::venta_rapida::vr_update_nota_detalle,
             commands::venta_rapida::vr_cobrar_fraccionado,
-            commands::venta_rapida::vr_restar_stock,
             commands::venta_rapida::vr_delete_comanda_if_safe,
             commands::venta_rapida::vr_get_index_rows,
             commands::venta_rapida::vr_get_detalles_ver_ticket,
@@ -2760,7 +2757,7 @@ mod tests_exenciones_del_gate {
     /// `scripts/check-comandos-tauri.mjs`, que rompe si el frontend invoca algo que no está.
     #[test]
     fn los_comandos_retirados_no_vuelven_por_la_puerta_de_atras() {
-        // Sólo el registro, no el fichero entero: si no, este propio test —que nombra los dos
+        // Sólo el registro, no el fichero entero: si no, este propio test —que nombra los
         // comandos— se contaría como una reaparición.
         const FUENTE_COMPLETA: &str = include_str!("lib.rs");
         let desde = FUENTE_COMPLETA
@@ -2780,6 +2777,11 @@ mod tests_exenciones_del_gate {
             (
                 "cobrar_venta_rapida",
                 "es un segundo camino de cobro de barra, y no es idempotente",
+            ),
+            (
+                "vr_restar_stock",
+                "descuenta stock fuera de un cobro, sin su rastro en `Lote_Consumos` (el cobro ya lo \
+                 descuenta en su propia transacción, STOCK-01)",
             ),
         ] {
             assert!(

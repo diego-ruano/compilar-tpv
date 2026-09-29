@@ -1,283 +1,66 @@
 // src/features/proveedores/proveedoresApis.ts
 //
-// API de proveedores — Local-First puro (invokeClient vía @tpv/client). Sustituye dualCall/
-// op_id/outbox/afterRemoteOk. Se conservan tipos, firmas, mappers y la superficie exportada.
+// API de proveedores: una función por comando Tauri, con los tipos que genera ts-rs desde Rust.
+//
+// Aquí no se redeclaran tipos ni se normaliza lo que vuelve (RI-53). Los antiguos mappers
+// convertían los DTO a otros nombres (`precio_venta` → `Precio_Venta`) y los tipos a mano
+// declaraban el precio como `number`, que es por donde un producto dado de alta a «3» se guardaba a
+// 3 céntimos.
 
 import { invokeClient } from "@tpv/client";
+import type {
+    CategoriaProveedorDto,
+    ProductoProveedorDto,
+    ProveedorDto,
+    ProveedoresCreateProductoInput,
+    ProveedoresSetVinculosInput,
+    ProveedorSaveInput,
+} from "@tpv/contracts";
 
-/* =========================
-   Tipos UI
-========================= */
-
-export type ProveedorRow = {
-    ID_Proveedor: string;
-    Nombre_Empresa: string;
-    Contacto: string | null;
-    Telefono: string | null;
-    Email: string | null;
-    CIF: string | null;
-    Informacion_adicional: string | null;
-    Nombre_Imagen: string | null;
-    Ruta_Imagen: string | null;
-};
-
-export type Categoria = {
-    ID_Categoria: string;
-    Nombre: string;
-    Nombre_Imagen: string | null;
-    Ruta_Imagen: string | null;
-};
-
-export type ProductoRow = {
-    ID_Producto: string;
-    ID_Categoria: string | null;
-    ID_Proveedor: string | null;
-    Nombre: string;
-    Precio_Venta: number | null;
-    Stock_Actual: number | null;
-    Stock_Minimo: number | null;
-    Unidad_Medida: string | null;
-    Nombre_Imagen: string | null;
-    Ruta_Imagen: string | null;
-
-    Cantidad_Pedido_Esperada: number | null;
-    Ultima_Entrada: string | null;
-    Caducidad_Proxima: string | null;
-};
-
-export type ProveedorSaveInput = {
-    idProveedor?: string | null;
-
-    nombreEmpresa: string;
-    contacto?: string | null;
-    telefono?: string | null;
-    email?: string | null;
-    cif?: string | null;
-    informacionAdicional?: string | null;
-
-    nombreImagen?: string | null;
-    rutaImagen?: string | null;
-};
-
-export type ProductoCreateInput = {
-    idCategoria: string;
-    idProveedor: string;
-
-    nombre: string;
-    precioVenta?: number | null;
-    stockActual?: number | null;
-    stockMinimo?: number | null;
-    unidadMedida?: string | null;
-};
-
-/* =========================
-   Helpers
-========================= */
-
-function toNum(v: any, fallback = 0): number {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-}
-
-function toNumOrNull(v: any): number | null {
-    if (v === null || v === undefined || v === "") return null;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-}
-
-function toNullableStr(v: any): string | null {
-    if (v == null) return null;
-    const s = String(v).trim();
-    return s ? s : null;
-}
-
-function toId(v: any): string {
-    return String(v ?? "").trim();
-}
-
-function resolveReturnedId(data: any, keys: string[]): number {
-    if (typeof data === "number") {
-        return toNum(data, 0);
-    }
-    if (data && typeof data === "object") {
-        for (const k of keys) {
-            const n = toNum(data?.[k], 0);
-            if (n > 0) return n;
-        }
-    }
-    return 0;
-}
-
-/* =========================
-   Mappers
-========================= */
-
-function mapProveedor(r: any): ProveedorRow {
-    return {
-        ID_Proveedor: toId(r?.id_proveedor ?? r?.ID_Proveedor ?? r?.idProveedor),
-        Nombre_Empresa: String(
-            r?.nombre_empresa ?? r?.Nombre_Empresa ?? r?.nombreEmpresa ?? "",
-        ),
-        Contacto: toNullableStr(r?.contacto ?? r?.Contacto),
-        Telefono: toNullableStr(r?.telefono ?? r?.Telefono),
-        Email: toNullableStr(r?.email ?? r?.Email),
-        CIF: toNullableStr(r?.cif ?? r?.CIF),
-        Informacion_adicional: toNullableStr(
-            r?.informacion_adicional ??
-            r?.Informacion_adicional ??
-            r?.informacionAdicional,
-        ),
-        Nombre_Imagen: toNullableStr(
-            r?.nombre_imagen ?? r?.Nombre_Imagen ?? r?.nombreImagen,
-        ),
-        Ruta_Imagen: toNullableStr(
-            r?.ruta_imagen ?? r?.Ruta_Imagen ?? r?.rutaImagen,
-        ),
-    };
-}
-
-function mapCategoria(r: any): Categoria {
-    return {
-        ID_Categoria: toId(r?.id_categoria ?? r?.ID_Categoria ?? r?.idCategoria),
-        Nombre: String(r?.nombre ?? r?.Nombre ?? ""),
-        Nombre_Imagen: toNullableStr(
-            r?.nombre_imagen ?? r?.Nombre_Imagen ?? r?.nombreImagen,
-        ),
-        Ruta_Imagen: toNullableStr(
-            r?.ruta_imagen ?? r?.Ruta_Imagen ?? r?.rutaImagen,
-        ),
-    };
-}
-
-function mapProducto(r: any): ProductoRow {
-    return {
-        ID_Producto: toId(r?.id_producto ?? r?.ID_Producto ?? r?.idProducto),
-        ID_Categoria: toNullableStr(
-            r?.id_categoria ?? r?.ID_Categoria ?? r?.idCategoria,
-        ),
-        ID_Proveedor: toNullableStr(
-            r?.id_proveedor ?? r?.ID_Proveedor ?? r?.idProveedor,
-        ),
-        Nombre: String(r?.nombre ?? r?.Nombre ?? ""),
-        Precio_Venta: toNumOrNull(
-            r?.precio_venta ?? r?.Precio_Venta ?? r?.precioVenta ?? null,
-        ),
-        Stock_Actual: toNumOrNull(
-            r?.stock_actual ?? r?.Stock_Actual ?? r?.stockActual ?? null,
-        ),
-        Stock_Minimo: toNumOrNull(
-            r?.stock_minimo ?? r?.Stock_Minimo ?? r?.stockMinimo ?? null,
-        ),
-        Unidad_Medida: toNullableStr(
-            r?.unidad_medida ?? r?.Unidad_Medida ?? r?.unidadMedida,
-        ),
-        Nombre_Imagen: toNullableStr(
-            r?.nombre_imagen ?? r?.Nombre_Imagen ?? r?.nombreImagen,
-        ),
-        Ruta_Imagen: toNullableStr(
-            r?.ruta_imagen ?? r?.Ruta_Imagen ?? r?.rutaImagen,
-        ),
-
-        Cantidad_Pedido_Esperada: toNumOrNull(
-            r?.cantidad_pedido_esperada ??
-            r?.Cantidad_Pedido_Esperada ??
-            r?.cantidadPedidoEsperada ??
-            null,
-        ),
-        Ultima_Entrada: toNullableStr(
-            r?.ultima_entrada ?? r?.Ultima_Entrada ?? r?.ultimaEntrada,
-        ),
-        Caducidad_Proxima: toNullableStr(
-            r?.caducidad_proxima ?? r?.Caducidad_Proxima ?? r?.caducidadProxima,
-        ),
-    };
-}
+export type { CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto };
 
 /* =========================
    API lectura
 ========================= */
 
-export async function proveedoresGetAll(): Promise<ProveedorRow[]> {
-    const rows = await invokeClient<any[]>("proveedores_get_all");
-    return Array.isArray(rows) ? rows.map(mapProveedor) : [];
+export function proveedoresGetAll(): Promise<ProveedorDto[]> {
+    return invokeClient<ProveedorDto[]>("proveedores_get_all");
 }
 
-export async function proveedoresGetProductos(params: {
-    idProveedor: string;
-}): Promise<ProductoRow[]> {
-    const rows = await invokeClient<any[]>("proveedores_get_productos", {
-        args: { id_proveedor: params.idProveedor },
+export function proveedoresGetProductos(idProveedor: string): Promise<ProductoProveedorDto[]> {
+    return invokeClient<ProductoProveedorDto[]>("proveedores_get_productos", {
+        args: { id_proveedor: idProveedor },
     });
-    return Array.isArray(rows) ? rows.map(mapProducto) : [];
 }
 
-export async function proveedoresGetCategorias(): Promise<Categoria[]> {
-    const rows = await invokeClient<any[]>("proveedores_get_categorias");
-    return Array.isArray(rows) ? rows.map(mapCategoria) : [];
+export function proveedoresGetCategorias(): Promise<CategoriaProveedorDto[]> {
+    return invokeClient<CategoriaProveedorDto[]>("proveedores_get_categorias");
 }
 
-export async function proveedoresGetProductosAll(): Promise<ProductoRow[]> {
-    const rows = await invokeClient<any[]>("proveedores_get_productos_all");
-    return Array.isArray(rows) ? rows.map(mapProducto) : [];
+export function proveedoresGetProductosAll(): Promise<ProductoProveedorDto[]> {
+    return invokeClient<ProductoProveedorDto[]>("proveedores_get_productos_all");
 }
 
 /* =========================
    Escrituras
 ========================= */
 
-export async function proveedoresSave(
-    input: ProveedorSaveInput,
-): Promise<boolean> {
-    const r = await invokeClient<any>("proveedores_save", {
-        args: {
-            id_proveedor: input.idProveedor ?? null,
-            nombre_empresa: String(input.nombreEmpresa ?? ""),
-            contacto: input.contacto ?? null,
-            telefono: input.telefono ?? null,
-            email: input.email ?? null,
-            cif: input.cif ?? null,
-            informacion_adicional: input.informacionAdicional ?? null,
-            nombre_imagen: input.nombreImagen ?? null,
-            ruta_imagen: input.rutaImagen ?? null,
-        },
-    });
-    return typeof r === "boolean" ? r : true;
+export async function proveedoresSave(args: ProveedorSaveInput): Promise<boolean> {
+    return (await invokeClient<boolean>("proveedores_save", { args })) !== false;
 }
 
-export async function proveedoresDelete(params: {
-    idProveedor: string;
-}): Promise<boolean> {
-    const r = await invokeClient<any>("proveedores_delete", {
-        args: { id_proveedor: params.idProveedor },
+export async function proveedoresDelete(idProveedor: string): Promise<boolean> {
+    const r = await invokeClient<boolean>("proveedores_delete", {
+        args: { id_proveedor: idProveedor },
     });
-    return typeof r === "boolean" ? r : true;
+    return r !== false;
 }
 
-export async function proveedoresSetVinculos(params: {
-    idProveedor: string;
-    productoIds: string[];
-}): Promise<boolean> {
-    const r = await invokeClient<any>("proveedores_set_vinculos", {
-        args: {
-            id_proveedor: params.idProveedor,
-            producto_ids: params.productoIds ?? [],
-        },
-    });
-    return typeof r === "boolean" ? r : true;
+export async function proveedoresSetVinculos(args: ProveedoresSetVinculosInput): Promise<boolean> {
+    return (await invokeClient<boolean>("proveedores_set_vinculos", { args })) !== false;
 }
 
-export async function proveedoresCreateProducto(
-    input: ProductoCreateInput,
-): Promise<string> {
-    return invokeClient<string>("proveedores_create_producto", {
-        args: {
-            id_categoria: input.idCategoria,
-            id_proveedor: input.idProveedor,
-            nombre: String(input.nombre ?? ""),
-            precio_venta: input.precioVenta ?? null,
-            stock_actual: input.stockActual ?? null,
-            stock_minimo: input.stockMinimo ?? null,
-            unidad_medida: input.unidadMedida ?? null,
-        },
-    });
+/** Da de alta un producto ya vinculado al proveedor; devuelve su id. */
+export function proveedoresCreateProducto(args: ProveedoresCreateProductoInput): Promise<string> {
+    return invokeClient<string>("proveedores_create_producto", { args });
 }

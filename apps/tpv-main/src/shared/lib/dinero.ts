@@ -43,7 +43,10 @@ export function redondear(centimos: number): Dinero {
 	return ((centimos < 0 ? -abs : abs) || 0) as Dinero;
 }
 
-/** Euros → `Dinero`. Para lo que una persona teclea, y para lo que sigue siendo fraccionario. */
+/**
+ * Euros (un flotante) → `Dinero`. Gemelo de `Dinero::de_euros`, y está por la tabla compartida.
+ * Lo que una persona teclea NO pasa por aquí sino por `deTexto`, que no atraviesa un flotante.
+ */
 export function deEuros(euros: number): Dinero {
 	return redondear(euros * 100);
 }
@@ -87,11 +90,6 @@ export function esCero(d: Dinero): boolean {
 	return d === 0;
 }
 
-/** ¿Falta dinero? */
-export function esNegativo(d: Dinero): boolean {
-	return d < 0;
-}
-
 /** El valor absoluto. */
 export function abs(d: Dinero): Dinero {
 	return Math.abs(d) as Dinero;
@@ -131,17 +129,75 @@ export function eur(d: Dinero): string {
 }
 
 /**
- * Lo que una persona teclea en un campo de precio → `Dinero`.
+ * **El lector de la interfaz.** Lo que una persona teclea en un campo de dinero → `Dinero`, o `null`
+ * si no hay nada escrito o no se entiende (`esVacio` los separa). Todo campo de dinero pasa por aquí,
+ * normalmente a través de `<CampoDinero>`.
  *
- * Acepta la coma y el punto (el teclado numérico de un TPV da coma) y descarta lo que no sea un
- * número. Devuelve `null` si no hay nada que leer, para que el llamante decida si eso es un cero
- * o un campo sin rellenar — que no son lo mismo en un precio.
+ * Había dos lectores y no decían lo mismo (RI-53). Éste era `Number(texto.replace(",", "."))`, que
+ * leía «1.500» como 1,50 € —en España son mil quinientos—, no entendía «150 €» y redondeaba «2,555»
+ * sin avisar. El otro (`leerImporte`, el del fondo del cierre) ya lo hacía bien y es el que queda.
+ *
+ * Las reglas, y el porqué de las dudosas:
+ * - La coma es decimal; el punto y el espacio agrupan miles. Si aparecen coma y punto, el último de
+ *   los dos es el decimal («1,234.56» también vale): no admite otra lectura.
+ * - Un punto seguido de 1 o 2 cifras es decimal («150.50»); seguido de 3, agrupa miles («1.500»).
+ *   Un importe no tiene tres decimales, y en España «1.500» son mil quinientos.
+ * - Lo que admite dos lecturas no se adivina: «1,500» (¿1,50 o 1.500?) o «0.500» dan `null`.
+ * - Más de dos decimales, un signo o cualquier otro carácter dan `null`. Ningún campo de dinero de
+ *   la interfaz es negativo, y un «-» ahí es un dedo que se ha ido.
+ * - El símbolo € delante o detrás se ignora.
  */
 export function deTexto(texto: string): Dinero | null {
-	const t = String(texto ?? "").trim().replace(",", ".");
+	const t = limpiar(texto);
 	if (t === "") return null;
-	const n = Number(t);
-	return Number.isFinite(n) ? deEuros(n) : null;
+	if (!/^[\d., ]+$/.test(t)) return null;
+
+	const ultimoPunto = t.lastIndexOf(".");
+	const ultimaComa = t.lastIndexOf(",");
+	let decimal = -1;
+	if (ultimoPunto >= 0 && ultimaComa >= 0) {
+		decimal = Math.max(ultimoPunto, ultimaComa);
+	} else if (ultimaComa >= 0) {
+		decimal = ultimaComa;
+	} else if (
+		ultimoPunto >= 0 &&
+		t.indexOf(".") === ultimoPunto &&
+		/^\d{1,2}$/.test(t.slice(ultimoPunto + 1))
+	) {
+		decimal = ultimoPunto;
+	}
+
+	const entera = decimal >= 0 ? t.slice(0, decimal) : t;
+	const decimales = decimal >= 0 ? t.slice(decimal + 1) : "";
+	if (decimal >= 0 && !/^\d{1,2}$/.test(decimales)) return null;
+
+	let cifras: string;
+	if (/^\d+$/.test(entera)) {
+		cifras = entera;
+	} else {
+		// Agrupada de tres en tres con un solo separador, que no puede ser también el decimal.
+		const miles = /^[1-9]\d{0,2}([., ])\d{3}(?:\1\d{3})*$/.exec(entera);
+		if (!miles || (decimal >= 0 && miles[1] === t[decimal])) return null;
+		cifras = entera.replace(/[., ]/g, "");
+	}
+
+	// Se calcula en céntimos desde el texto: sin pasar por un flotante en euros.
+	const centimos = Number(cifras) * 100 + Number(decimales.padEnd(2, "0"));
+	return Number.isSafeInteger(centimos) ? deCentimos(centimos) : null;
+}
+
+/** ¿No hay nada escrito? Separa «sin rellenar» de «no se entiende», que `deTexto` devuelve igual. */
+export function esVacio(texto: string): boolean {
+	return limpiar(texto) === "";
+}
+
+function limpiar(texto: string): string {
+	return String(texto ?? "")
+		.replace(/[\s\u00a0\u202f]+/g, " ")
+		.trim()
+		.replace(/^€ ?/, "")
+		.replace(/ ?€$/, "")
+		.trim();
 }
 
 /** Un importe en el cuadro de texto que lo edita: euros con coma, sin símbolo. */

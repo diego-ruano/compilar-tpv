@@ -9,7 +9,7 @@
 // ve en el ticket que ya se le ha dado al cliente.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { deEuros, redondear } from "../src/shared/lib/dinero";
+import { deCentimos, deEuros, redondear } from "../src/shared/lib/dinero";
 
 // El módulo llama a `invokeClient` en las funciones de impresora; los tests de payload no lo tocan,
 // pero importar el módulo arrastra el cliente de Tauri, que en node no existe.
@@ -57,6 +57,17 @@ beforeEach(() => {
 });
 
 describe("agrupación de líneas", () => {
+	it("un producto al peso viaja con un importe entero de céntimos (RI-53)", () => {
+		// 12,34 € × 0,333 son 410,92 céntimos. Esta función tenía su propia copia de la agrupación y
+		// no redondeaba: Rust no puede leer 410,92 como `Dinero` y el ticket no salía. Ahora agrupa
+		// `agruparLineas`, la misma que la vista previa, y el papel dice lo mismo que la pantalla.
+		const p = buildTicketPayload([{ nombre: "Jamon", precio: deCentimos(1234), cantidad: 0.333 }]);
+		expect(p.items).toHaveLength(1);
+		expect(p.items[0].cantidad).toBe(1);
+		expect(p.items[0].precio_unitario).toBe(411);
+		expect(Number.isInteger(p.items[0].precio_unitario)).toBe(true);
+	});
+
 	it("junta las unidades idénticas en una línea con su cantidad", () => {
 		const p = buildTicketPayload([
 			unidad("Cafe", 1.1),
@@ -165,7 +176,7 @@ describe("personalización y datos del cobro", () => {
 		expect(buildTicketPayload([]).logo_path).toBe("images/logo.png");
 
 		useBusinessSettings.setState({ logoDataUrl: null });
-		expect(buildTicketPayload([]).logo_path).toBeNull();
+		expect(buildTicketPayload([]).logo_path).toBeUndefined();
 	});
 
 	it("las once casillas del panel llegan al payload", () => {
@@ -227,12 +238,13 @@ describe("personalización y datos del cobro", () => {
 
 	it("sin datos del cobro el papel es una precuenta", () => {
 		// Sin número, Rust imprime "NO ES UN TICKET DE VENTA". Mandar aquí una cadena vacía en vez
-		// de null daría lo mismo, pero `es_copia` en true por descuido marcaría COPIA una venta.
+		// de omitirlo daría lo mismo, pero `es_copia` en true por descuido marcaría COPIA una venta.
 		const p = buildTicketPayload([unidad("Cafe", 1.1)]);
 
-		expect(p.numero_ticket).toBeNull();
-		expect(p.metodo_pago).toBeNull();
-		expect(p.origen).toBeNull();
+		// Ausentes, no vacíos: el contrato generado los declara opcionales y Rust los lee como `None`.
+		expect(p.numero_ticket).toBeUndefined();
+		expect(p.metodo_pago).toBeUndefined();
+		expect(p.origen).toBeUndefined();
 		expect(p.es_copia).toBe(false);
 	});
 

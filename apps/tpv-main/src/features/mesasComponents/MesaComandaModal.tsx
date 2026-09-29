@@ -7,13 +7,11 @@ import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import { shouldReloadTicket } from "../../shared/lib/syncStatements";
-import type { MesaMeta } from "./types";
 import { reservasKeys } from "../reservas/reservasQueries";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
 import PrintTicketModal from "../../shared/ticket/PrintTicketModal";
 import DatosFiscalesModal, {
-    type DatosFiscales,
 } from "../../shared/ticket/DatosFiscalesModal";
 import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
 import type { DatosDelTicket } from "../configuracion/api/printerApis";
@@ -35,12 +33,17 @@ import {
     productosSearchByNombre,
     reservaMarcarActivaAhora,
     reservaFinalizar,
-    type CategoriaDTO,
-    type ProductoDTO,
 } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
-import { CERO, abs, deCentimos, eur } from "../../shared/lib/dinero";
-import type { Dinero } from "@tpv/contracts";
+import { CERO, abs, eur } from "../../shared/lib/dinero";
+import type {
+    CategoriaVendibleOut,
+    DestinatarioInput,
+    Dinero,
+    MesaLineaComandaRow,
+    MesaMetaOut,
+    ProductoVendibleOut,
+} from "@tpv/contracts";
 import {
     cambioDelCobro,
     DENOMS_COBRO,
@@ -51,11 +54,8 @@ import {
 /* =========================
    Tipos
 ========================= */
-type Categoria = CategoriaDTO;
-type CategoriaDisplay = Categoria & { urlImagen: string };
-
-type Producto = ProductoDTO;
-type ProductoDisplay = Producto & { urlImagen: string };
+type CategoriaDisplay = CategoriaVendibleOut & { urlImagen: string };
+type ProductoDisplay = ProductoVendibleOut & { urlImagen: string };
 
 type TicketItem = {
     id: string; // ID_Detalle
@@ -77,12 +77,6 @@ function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
 }
 
-function pick(obj: any, keys: string[]) {
-    for (const k of keys) {
-        if (obj && obj[k] != null) return obj[k];
-    }
-    return undefined;
-}
 
 
 function Modal({
@@ -237,43 +231,21 @@ async function ensureOpenComanda(
     });
 }
 
-function mapTicketRows(rows: any[]): TicketItem[] {
-    const mapped: TicketItem[] = (rows ?? []).map((r: any) => {
-        const idDetalle = String(pick(r, ["id", "ID_Detalle", "idDetalle"]) ?? "");
-        const idProducto = String(
-            pick(r, ["productoId", "ID_Producto", "idProducto"]) ?? "",
-        );
-        const nombre = String(
-            pick(r, ["nombre", "Nombre_Producto", "Nombre"]) ?? "",
-        );
-        const precio = deCentimos(
-            Number(pick(r, ["precio", "Precio_Unitario", "precioUnitario"]) ?? 0),
-        );
-        const pagadoNum = Number(pick(r, ["pagado", "Pagado"]) ?? 0);
-        const pagado = pagadoNum === 1;
-        const pasaNum = Number(
-            pick(r, ["pasaCocina", "Pasa_Cocina", "pasa_cocina"]) ?? 0,
-        );
-        const pasa = pasaNum === 1;
-        const estadoDb = String(
-            pick(r, ["estadoCocina", "Estado_Cocina", "estado_cocina"]) ??
-            "PENDIENTE",
-        );
-        const estadoCocina = pasa ? estadoDb || "PENDIENTE" : "NO_COCINA";
-        const notas = (pick(r, ["notas", "Notas"]) ?? null) as string | null;
-        // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
-        const ivaRaw = pick(r, ["ivaPercent", "IVA_Percent", "iva_percent"]);
+function mapTicketRows(rows: MesaLineaComandaRow[]): TicketItem[] {
+    const mapped: TicketItem[] = rows.map((r) => {
+        const pasa = r.Pasa_Cocina === 1;
         return {
-            id: idDetalle,
-            productoId: idProducto,
-            nombre,
-            precio,
-            pagado,
+            id: r.ID_Detalle,
+            productoId: r.ID_Producto,
+            nombre: r.Nombre,
+            precio: r.Precio_Unitario,
+            pagado: r.Pagado === 1,
             seleccionado: false,
-            estadoCocina,
+            estadoCocina: pasa ? r.Estado_Cocina || "PENDIENTE" : "NO_COCINA",
             pasaCocina: pasa,
-            notas: notas ? String(notas) : null,
-            ivaPercent: ivaRaw == null ? null : Number(ivaRaw),
+            notas: r.Notas,
+            // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
+            ivaPercent: r.IVA_Percent ?? null,
         };
     });
     const hayPendientes = mapped.some((t) => !t.pagado);
@@ -295,7 +267,7 @@ async function addDetalle(
         idComanda,
         idProducto: p.ID_Producto,
         cantidad: 1,
-        precio: Number(p.Precio_Venta ?? 0),
+        precio: p.Precio_Venta,
         idUsuario: operadorId,
     });
     return mapTicketRows(rows);
@@ -309,7 +281,7 @@ async function deleteDetalleById(idDetalle: string) {
     await mesasDeleteDetalle(idDetalle);
 }
 
-function fmtReserva(res: NonNullable<MesaMeta["reserva"]>) {
+function fmtReserva(res: NonNullable<MesaMetaOut["reserva"]>) {
     const min = res.minutosPara;
     if (res.estado === "ACTIVA") {
         if (min < 0) return `Reserva activa · llegó hace ${Math.abs(min)} min`;
@@ -384,7 +356,7 @@ const ProductCard = React.memo(function ProductCard({
                 <div className="mt-2 flex items-start justify-between gap-2">
                     <p className="font-semibold leading-tight">{p.Nombre}</p>
                     <span className="text-sm font-bold">
-                        {eur(deCentimos(Number(p.Precio_Venta || 0)))}
+                        {eur(p.Precio_Venta)}
                     </span>
                 </div>
             </div>
@@ -431,7 +403,7 @@ export default function MesaComandaModal({
     onClose: () => void;
     mesaId: string;
     mesaNombre: string;
-    mesaMeta?: MesaMeta | null;
+    mesaMeta?: MesaMetaOut | null;
     onChanged?: () => void;
 }) {
     const [categorias, setCategorias] = useState<CategoriaDisplay[]>([]);
@@ -713,7 +685,7 @@ export default function MesaComandaModal({
                     id: optimisticId,
                     productoId: p.ID_Producto,
                     nombre: p.Nombre,
-                    precio: deCentimos(Number(p.Precio_Venta ?? 0)),
+                    precio: p.Precio_Venta,
                     pagado: false,
                     seleccionado: false,
                     estadoCocina: "PENDIENTE",
@@ -863,7 +835,7 @@ export default function MesaComandaModal({
 
     const cobrar = async (
         metodo: "tarjeta" | "efectivo",
-        destinatario?: DatosFiscales | null,
+        destinatario?: DestinatarioInput | null,
     ) => {
         if (!idComanda) return;
 
@@ -898,7 +870,7 @@ export default function MesaComandaModal({
                         ? "TOTAL"
                         : "FRACCIONADO",
                 detalleIds: ids,
-                destinatario: destinatario ?? null,
+                destinatario: destinatario ?? undefined,
             });
 
             // Datos del ticket recién emitido: con ellos, imprimir saca un ticket de venta

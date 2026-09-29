@@ -5,7 +5,7 @@ use tauri::State;
 use tpv_application::use_cases::inventario as uc;
 use tpv_contracts::inventario::{
     AjusteLoteInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, IdCategoriaArgs,
-    IdProductoArgs, InventarioResumenResponse, LoteDto, ProductDetailResponse, ProductoListDto, ProveedorMiniDto, SetProductoAlergenosInput, SummaryArgs,
+    IdProductoArgs, InventarioResumenResponse, LoteDto, ProductDetailResponse, ProductoListDto, ProveedorMiniDto, SummaryArgs,
     UpdateLoteInput, UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
 use crate::AppState;
@@ -60,24 +60,6 @@ pub async fn inventario_list_alergenos(
 ) -> Result<Vec<AlergenoInvDto>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::list_alergenos(repo.as_ref()).await?)
-}
-
-#[tauri::command]
-pub async fn inventario_get_alergenos_producto(
-    state: State<'_, AppState>,
-    args: IdProductoArgs,
-) -> Result<Vec<String>, AppErrorDto> {
-    let repo = state.inventario_repo().await?;
-    Ok(uc::get_alergenos_producto(repo.as_ref(), args.id_producto).await?)
-}
-
-#[tauri::command]
-pub async fn inventario_set_alergenos_producto(
-    state: State<'_, AppState>,
-    args: SetProductoAlergenosInput,
-) -> Result<String, AppErrorDto> {
-    let repo = state.inventario_repo().await?;
-    Ok(uc::set_alergenos_producto(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]

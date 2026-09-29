@@ -15,6 +15,7 @@ import { useMode } from "../../../shared/stores/useMode";
 import type { DatosDelTicket } from "../../configuracion/api/printerApis";
 import { conAviso } from "../../../shared/lib/conAviso";
 import type { Dinero } from "@tpv/contracts";
+import { eur } from "../../../shared/lib/dinero";
 
 export default function TicketPanel({
   ticket,
@@ -39,7 +40,6 @@ export default function TicketPanel({
 
   onGuardarNota,
 
-  formatMoney,
 }: {
   ticket: TicketItem[];
   paso: Paso;
@@ -68,7 +68,6 @@ export default function TicketPanel({
 
   onGuardarNota: (detalleId: string, nota: string) => void | Promise<void>;
 
-  formatMoney: (d: Dinero) => string;
 }) {
   const hayPendientes = ticket.some((t) => !t.pagado);
 
@@ -211,7 +210,7 @@ export default function TicketPanel({
 
             <div className="text-xs font-semibold text-fg-muted sm:text-sm">
               Total pendiente:{" "}
-              <span className="text-fg">{formatMoney(totalPendiente)}</span>
+              <span className="text-fg">{eur(totalPendiente)}</span>
             </div>
           </div>
         </div>
@@ -383,7 +382,7 @@ export default function TicketPanel({
                                       t.pagado && "text-fg-subtle line-through",
                                     )}
                                   >
-                                    {formatMoney(t.precio)}
+                                    {eur(t.precio)}
                                   </span>
 
                                   <button
@@ -441,7 +440,7 @@ export default function TicketPanel({
       <div className="mt-4 shrink-0 rounded-2xl border border-border bg-surface p-3">
         <div className="flex items-center justify-between">
           <p className="text-sm text-fg-muted">Seleccionado</p>
-          <p className="text-lg font-bold text-fg">{formatMoney(totalSeleccionado)}</p>
+          <p className="text-lg font-bold text-fg">{eur(totalSeleccionado)}</p>
         </div>
 
         {paso === "metodo" ? (

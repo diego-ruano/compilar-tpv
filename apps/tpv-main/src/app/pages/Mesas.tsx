@@ -11,7 +11,8 @@ import KitchenBoard from "../../features/mesasComponents/KitchenBoard";
 
 import { fitTransform } from "../../features/mesasComponents/geometry";
 import { useElementSize } from "../../features/mesasComponents/useElementSize";
-import type { Salon, MesaMeta } from "../../features/mesasComponents/types";
+import type { MesaMetaOut } from "@tpv/contracts";
+import type { Salon } from "../../features/mesasComponents/types";
 import { useAuth } from "../../shared/stores/useAuth";
 
 import {
@@ -19,7 +20,7 @@ import {
     useMesasMesaMeta,
 } from "../../features/mesasComponents/mesasQueries";
 
-type MesaMetaMap = Record<number, MesaMeta> & Record<string, MesaMeta>;
+type MesaMetaMap = Record<number, MesaMetaOut> & Record<string, MesaMetaOut>;
 
 export default function Mesas() {
     const [activeSalonId, setActiveSalonId] = useState<string>("");

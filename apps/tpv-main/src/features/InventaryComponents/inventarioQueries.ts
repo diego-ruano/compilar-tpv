@@ -3,7 +3,7 @@
 //  - Lecturas  -> useQuery con queryKey con "inventario" como prefijo.
 //  - Escrituras -> useMutation que, en onSuccess, invalida la clave de la feature
 //    (Local-First: el dato sólo cambia aquí, así las listas en caché se refrescan solas).
-//  - Los hooks envuelven las funciones de `inventarioAPI` sin tocar su firma.
+//  - Los hooks envuelven las funciones de `inventarioAPI`, con los tipos generados desde Rust.
 //
 // Nota: las lecturas de categorías/productos resuelven además la URL de imagen
 // (resolveImageUrl) DENTRO del queryFn, de modo que la caché ya guarda las filas
@@ -11,14 +11,15 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  inventarioAPI,
-  type AjusteLoteArgs,
-  type CreateCategoriaArgs,
-  type CreateLoteArgs,
-  type UpdateLoteArgs,
-  type UpsertProductoArgs,
-} from "./api/inventarioAPI";
+import type {
+  AjusteLoteInput,
+  CreateLoteInput,
+  UpdateLoteInput,
+  UpsertCategoriaInput,
+  UpsertProductoInput,
+} from "@tpv/contracts";
+
+import { inventarioAPI } from "./api/inventarioAPI";
 import { resolveImageUrl } from "../../shared/lib/imageUrl";
 import type { CategoriaDisplay, ProductoDisplay } from "./hooks/useInventario";
 
@@ -125,7 +126,7 @@ export function useAlergenos() {
 export function useCreateCategoria() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: CreateCategoriaArgs) => inventarioAPI.createCategoria(args),
+    mutationFn: (args: UpsertCategoriaInput) => inventarioAPI.createCategoria(args),
     onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
   });
 }
@@ -134,7 +135,7 @@ export function useCreateCategoria() {
 export function useUpsertProducto() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: UpsertProductoArgs) => inventarioAPI.upsertProducto(args),
+    mutationFn: (args: UpsertProductoInput) => inventarioAPI.upsertProducto(args),
     onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
   });
 }
@@ -152,7 +153,7 @@ export function useDeleteProducto() {
 export function useCreateLote() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: CreateLoteArgs) => inventarioAPI.createLote(args),
+    mutationFn: (args: CreateLoteInput) => inventarioAPI.createLote(args),
     onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
   });
 }
@@ -161,7 +162,7 @@ export function useCreateLote() {
 export function useUpdateLote() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: UpdateLoteArgs) => inventarioAPI.updateLote(args),
+    mutationFn: (args: UpdateLoteInput) => inventarioAPI.updateLote(args),
     onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
   });
 }
@@ -170,7 +171,7 @@ export function useUpdateLote() {
 export function useAjustarLote() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: AjusteLoteArgs) => inventarioAPI.ajustarLote(args),
+    mutationFn: (args: AjusteLoteInput) => inventarioAPI.ajustarLote(args),
     onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
   });
 }

@@ -1,29 +1,8 @@
-import type { Dinero } from "@tpv/contracts";
+import type { CategoriaRow, Dinero, ProductoRow } from "@tpv/contracts";
 
-export type Categoria = {
-    ID_Categoria: string;
-    Nombre: string;
-    Nombre_Imagen: string | null;
-    Ruta_Imagen: string | null;
-
-    Vendible?: number; // 0/1
-};
-
-export type CategoriaDisplay = Categoria & { urlImagen: string };
-
-export type Producto = {
-    ID_Producto: string;
-    ID_Categoria: string;
-    Nombre: string;
-    Precio_Venta: number;
-    Stock_Actual: number;
-    Stock_Minimo: number;
-    Unidad_Medida: string | null;
-    Nombre_Imagen: string | null;
-    Ruta_Imagen: string | null;
-};
-
-export type ProductoDisplay = Producto & { urlImagen: string };
+/** Una categoría o un producto del catálogo, con la URL de su imagen ya resuelta para pintar. */
+export type CategoriaDisplay = CategoriaRow & { urlImagen: string };
+export type ProductoDisplay = ProductoRow & { urlImagen: string };
 
 export type TicketItem = {
     id: string;

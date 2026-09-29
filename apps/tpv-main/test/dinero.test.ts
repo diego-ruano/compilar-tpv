@@ -19,6 +19,7 @@ import {
 	deTexto,
 	entre,
 	escalar,
+	esVacio,
 	eur,
 	sumar,
 	textoFiscal,
@@ -94,23 +95,102 @@ describe("lo que se pinta en pantalla", () => {
 	});
 });
 
-describe("lo que una persona teclea", () => {
-	it("acepta la coma del teclado numerico y el punto", () => {
-		expect(deTexto("3,50")).toBe(350);
-		expect(deTexto("3.50")).toBe(350);
-		expect(deTexto(" 12 ")).toBe(1200);
+describe("lo que una persona teclea (deTexto, el unico lector)", () => {
+	// Habia dos lectores (RI-53). El de los formularios era `Number(texto.replace(",", "."))`: leia
+	// «1.500» como 1,50 €, no entendia «150 €» y redondeaba «2,555» sin avisar. El del fondo del
+	// cierre (`leerImporte`) ya lo hacia bien; sus casos son los de aqui.
+
+	it.each([
+		["0", 0],
+		["150", 15_000],
+		["0150", 15_000],
+		[" 150 ", 15_000],
+		["1250", 125_000],
+		["150,50", 15_050],
+		["150,5", 15_050],
+		["0,05", 5],
+		["3,50", 350],
+		["150.50", 15_050],
+		["150.5", 15_050],
+		// Un punto con tres cifras detras agrupa miles, como se escribe en España.
+		["1.500", 150_000],
+		["1.250", 125_000],
+		["12.000", 1_200_000],
+		["150.555", 15_055_500],
+		["1.234,56", 123_456],
+		["150 €", 15_000],
+		["1 500", 150_000],
+		["1.234.567,89", 123_456_789],
+		["1,234.56", 123_456],
+		["1 500,50", 150_050],
+		["150€", 15_000],
+		["€150", 15_000],
+		["€ 150", 15_000],
+		["1.500,00 €", 150_000],
+	])("«%s» → %s céntimos", (texto, esperado) => {
+		expect(deTexto(texto)).toBe(esperado);
 	});
 
-	it("un campo vacio no es un cero", () => {
+	it.each([
+		// Dos lecturas posibles: no se adivina.
+		["1,500"],
+		["0.500"],
+		// Mas de dos decimales: no se redondea a escondidas.
+		["150,555"],
+		["2,555"],
+		["1.5000"],
+		// Separadores que no agrupan de tres en tres, o repetidos donde va el decimal.
+		["1..5"],
+		["1.2,5"],
+		["12.34,5"],
+		["1,2,3"],
+		["1,234,56"],
+		["150 50"],
+		// Media cifra.
+		["150,"],
+		["150."],
+		[",50"],
+		[".50"],
+		// Ningun campo de dinero de la interfaz es negativo.
+		["-50"],
+		["+50"],
+		["abc"],
+		["150€50"],
+		["1e3"],
+		["99999999999999999"],
+	])("«%s» no se entiende", (texto) => {
+		expect(deTexto(texto)).toBeNull();
+		expect(esVacio(texto)).toBe(false);
+	});
+
+	it("un campo vacio no es un cero, y se distingue de uno que no se entiende", () => {
 		// En un precio no son lo mismo: «gratis» y «sin rellenar» se deciden arriba.
-		expect(deTexto("")).toBeNull();
-		expect(deTexto("   ")).toBeNull();
-		expect(deTexto("abc")).toBeNull();
+		for (const t of ["", "   ", " € "]) {
+			expect(deTexto(t), `«${t}»`).toBeNull();
+			expect(esVacio(t), `«${t}»`).toBe(true);
+		}
 	});
 
 	it("ida y vuelta por el cuadro de texto que lo edita", () => {
-		for (const c of [0, 5, 350, 123_456, -1250]) {
+		for (const c of [0, 5, 350, 123_456, 100_000_000]) {
 			expect(deTexto(aTexto(deCentimos(c))), `${c}`).toBe(c);
+		}
+	});
+
+	it("barrido: cualquier importe escrito como lo pinta la pantalla, o a mano, se lee exacto", () => {
+		for (let cent = 0; cent <= 2_000_000; cent += 137) {
+			const [euros, decimales] = [Math.floor(cent / 100), String(cent % 100).padStart(2, "0")];
+			for (const escrito of [
+				eur(deCentimos(cent)),
+				aTexto(deCentimos(cent)),
+				`${euros},${decimales}`,
+				`${euros}.${decimales}`,
+				`${euros}`,
+			]) {
+				const esperado = escrito === `${euros}` ? euros * 100 : cent;
+				const leido = deTexto(escrito);
+				if (leido !== esperado) throw new Error(`«${escrito}» se lee ${leido}, no ${esperado}`);
+			}
 		}
 	});
 });

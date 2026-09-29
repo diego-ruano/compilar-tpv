@@ -1,11 +1,10 @@
 import { ArrowRight, ImageOff } from "lucide-react";
+import type { ProveedorDto } from "@tpv/contracts";
+
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 
-type ProveedorUI = {
-	ID_Proveedor: string;
-	Nombre_Empresa: string;
-	Email: string | null;
-	urlImagen: string; // ← lo que ya calculas con convertFileSrc
+type ProveedorUI = Pick<ProveedorDto, "id_proveedor" | "nombre_empresa" | "email"> & {
+	urlImagen: string;
 };
 
 export default function ProveedorCard({
@@ -26,13 +25,13 @@ export default function ProveedorCard({
 				<div className="flex h-20 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
 					<ImageWithFallback
 						src={proveedor.urlImagen}
-						alt={proveedor.Nombre_Empresa}
+						alt={proveedor.nombre_empresa}
 						className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
 						fallback={
 							<div className="flex h-full w-full flex-col items-center justify-center gap-1 text-fg-subtle">
 								<ImageOff className="size-5" aria-hidden />
 								<span className="px-2 text-center text-xs font-semibold">
-									{proveedor.Nombre_Empresa}
+									{proveedor.nombre_empresa}
 								</span>
 							</div>
 						}
@@ -42,7 +41,7 @@ export default function ProveedorCard({
 				{/* NOMBRE + VER DETALLE */}
 				<div className="mt-2 flex items-center justify-between gap-1">
 					<h5 className="min-w-0 truncate text-base font-semibold tracking-tight text-fg">
-						{proveedor.Nombre_Empresa}
+						{proveedor.nombre_empresa}
 					</h5>
 					<div className="flex shrink-0 items-center gap-0.5 text-xs font-medium text-fg-muted transition group-hover:text-accent">
 						<span>Ver detalle</span>
@@ -55,7 +54,7 @@ export default function ProveedorCard({
 
 				{/* EMAIL */}
 				<p className="truncate text-xs text-fg-muted">
-					{proveedor.Email ?? "Sin email"}
+					{proveedor.email ?? "Sin email"}
 				</p>
 			</div>
 		</button>

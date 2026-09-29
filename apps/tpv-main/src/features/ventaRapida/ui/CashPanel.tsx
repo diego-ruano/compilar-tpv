@@ -4,7 +4,7 @@ import { Minus, Plus, RotateCcw } from "lucide-react";
 import { Denom } from "../types";
 import { cn } from "../utils";
 import type { Dinero } from "@tpv/contracts";
-import { abs } from "../../../shared/lib/dinero";
+import { abs, eur } from "../../../shared/lib/dinero";
 
 export default function CashPanel({
   denoms,
@@ -12,7 +12,6 @@ export default function CashPanel({
   totalACobrar,
   totalEfectivo,
   diferencia,
-  formatMoney,
   onAddCash,
   onRemoveCash,
   onReset,
@@ -24,7 +23,6 @@ export default function CashPanel({
   totalACobrar: Dinero;
   totalEfectivo: Dinero;
   diferencia: Dinero;
-  formatMoney: (d: Dinero) => string;
   onAddCash: (label: string) => void;
   onRemoveCash: (label: string) => void;
   onReset: () => void;
@@ -36,12 +34,12 @@ export default function CashPanel({
       <div className="rounded-2xl border border-border bg-surface p-3 sm:p-4">
         <div className="flex items-center justify-between">
           <p className="text-xs text-fg-muted sm:text-sm">Total a cobrar</p>
-          <p className="text-lg font-bold text-fg sm:text-xl">{formatMoney(totalACobrar)}</p>
+          <p className="text-lg font-bold text-fg sm:text-xl">{eur(totalACobrar)}</p>
         </div>
 
         <div className="mt-2 flex items-center justify-between">
           <p className="text-xs text-fg-muted sm:text-sm">Te han dado</p>
-          <p className="text-lg font-bold text-fg sm:text-xl">{formatMoney(totalEfectivo)}</p>
+          <p className="text-lg font-bold text-fg sm:text-xl">{eur(totalEfectivo)}</p>
         </div>
 
         <div
@@ -55,13 +53,13 @@ export default function CashPanel({
           {diferencia >= 0 ? (
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-success sm:text-sm">Cambio</p>
-              <p className="text-base font-bold text-success sm:text-lg">{formatMoney(diferencia)}</p>
+              <p className="text-base font-bold text-success sm:text-lg">{eur(diferencia)}</p>
             </div>
           ) : (
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-danger sm:text-sm">Falta</p>
               <p className="text-base font-bold text-danger sm:text-lg">
-                {formatMoney(abs(diferencia))}
+                {eur(abs(diferencia))}
               </p>
             </div>
           )}
@@ -115,7 +113,7 @@ export default function CashPanel({
             >
               <div className="flex items-center justify-between">
                 <p className="text-sm font-bold text-fg sm:text-base">{d.label}</p>
-                <span className="text-[11px] text-fg-subtle sm:text-xs">{formatMoney(d.value)}</span>
+                <span className="text-[11px] text-fg-subtle sm:text-xs">{eur(d.value)}</span>
               </div>
 
               <div className="flex items-center justify-between gap-2">

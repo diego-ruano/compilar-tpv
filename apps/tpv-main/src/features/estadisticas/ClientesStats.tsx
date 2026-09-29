@@ -4,7 +4,7 @@ import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 import { APEX_CHART_BASE } from "./apexBase";
 import { useClientesStats } from "./statsQueries";
-import { CERO, deCentimos, eur as formatEur } from "../../shared/lib/dinero";
+import { CERO, deCentimos, eur } from "../../shared/lib/dinero";
 import type { Dinero } from "@tpv/contracts";
 
 /* =========================
@@ -290,7 +290,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
             tooltip: {
                 fillSeriesColor: false,
                 y: {
-                    formatter: (v: number) => formatEur(deCentimos(v)),
+                    formatter: (v: number) => eur(deCentimos(v)),
                     title: { formatter: () => "Total" },
                 },
             },
@@ -354,7 +354,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
 
                 <KPICard
                     label="Ticket medio / cliente"
-                    value={formatEur(data?.ticket_medio_cliente ?? CERO)}
+                    value={eur(data?.ticket_medio_cliente ?? CERO)}
                 />
             </div>
 

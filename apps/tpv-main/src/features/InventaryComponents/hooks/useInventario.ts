@@ -4,21 +4,18 @@
 // (categoriaSeleccionada) sigue siendo local; las listas se derivan de las queries cacheadas.
 // La superficie pública del hook se conserva idéntica para no tocar el consumidor.
 import { useEffect, useMemo, useState } from "react";
-import {
-  type CategoriaRow,
-  type ProductoListRow,
-} from "../api/inventarioAPI";
+import type { CategoriaInvDto, ProductoListDto } from "@tpv/contracts";
 import {
   useCategorias,
   useProductosByCategoria,
   useResumenInventario,
 } from "../inventarioQueries";
 
-export interface CategoriaDisplay extends CategoriaRow {
+export interface CategoriaDisplay extends CategoriaInvDto {
   urlImagen: string;
 }
 
-export interface ProductoDisplay extends ProductoListRow {
+export interface ProductoDisplay extends ProductoListDto {
   urlImagen: string;
 }
 
@@ -35,11 +32,11 @@ export function useInventario() {
   const productos = useMemo(() => productosQuery.data ?? [], [productosQuery.data]);
 
   const proximosCaducar = useMemo(
-    () => resumenQuery.data?.proximos ?? [],
+    () => resumenQuery.data?.proximosCaducar ?? [],
     [resumenQuery.data],
   );
   const menosCantidad = useMemo(
-    () => resumenQuery.data?.menos ?? [],
+    () => resumenQuery.data?.menosCantidad ?? [],
     [resumenQuery.data],
   );
 

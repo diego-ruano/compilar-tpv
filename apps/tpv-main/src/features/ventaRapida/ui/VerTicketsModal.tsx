@@ -3,29 +3,11 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { Search, ChevronDown, ChevronUp, Trash2, FolderOpen } from "lucide-react";
 import { cn } from "../utils";
 
-import {
-  type IndexRow as ApiIndexRow,
-  type VerTicketsDetalleRow as ApiDetalleRow,
-} from "../ventaRapidaAPI";
+import type { ComandaBarraRow, IndexRow, VerTicketsDetalleRow } from "@tpv/contracts";
 
 import { vrGetIndexRows, vrGetDetallesVerTicket } from "../ventaRapidaAPI";
 import { conAviso } from "../../../shared/lib/conAviso";
-import { CERO, deCentimos, eur, redondear } from "../../../shared/lib/dinero";
-
-export type VentaRapidaComandaBarraRow = {
-  ID_Comanda: string;
-  Fecha_Hora_Apertura: string;
-  Estado: "Abierta" | "Pagada" | string;
-
-  Total_Pendiente: number;
-  Total_Comanda: number;
-
-  Pendientes_Cocina: number;
-  Pendientes_Pago: number;
-};
-
-type LineaDetalleUI = ApiDetalleRow;
-type IndexRow = ApiIndexRow;
+import { eur, escalar } from "../../../shared/lib/dinero";
 
 function parseWhen(fecha: string) {
   const t = Date.parse(fecha);
@@ -41,30 +23,11 @@ function isTodayLocal(dt: Date) {
   );
 }
 
-function estadoTicket(c: VentaRapidaComandaBarraRow) {
-  const pendPago = Number(c.Total_Pendiente ?? 0);
-  if (pendPago <= 0) return "COBRADO";
-
-  const pendCocina = Number(c.Pendientes_Cocina ?? 0);
-  if (pendCocina > 0) return "PEDIDO";
+function estadoTicket(c: ComandaBarraRow) {
+  if (c.Total_Pendiente <= 0) return "COBRADO";
+  if (c.Pendientes_Cocina > 0) return "PEDIDO";
 
   return "PREPARADO";
-}
-
-function asArray<T>(value: unknown): T[] {
-  if (Array.isArray(value)) return value as T[];
-
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-
-    if (Array.isArray(obj.data)) return obj.data as T[];
-    if (Array.isArray(obj.rows)) return obj.rows as T[];
-    if (Array.isArray(obj.result)) return obj.result as T[];
-    if (Array.isArray(obj.comandas)) return obj.comandas as T[];
-    if (Array.isArray(obj.items)) return obj.items as T[];
-  }
-
-  return [];
 }
 
 type Filtro = "RECIENTES" | "COBRADOS" | "PREPARADOS" | "PEDIDOS";
@@ -79,14 +42,14 @@ export default function VerTicketsModal({
 }: {
   open: boolean;
   onClose: () => void;
-  comandas: VentaRapidaComandaBarraRow[];
+  comandas: ComandaBarraRow[];
 
   onOpenTicket: (idComanda: string) => void;
   onDeleteTicket: (idComanda: string) => void;
   onCobrarTicket: (idComanda: string) => void | Promise<void>;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [detallesByComanda, setDetallesByComanda] = useState<Record<string, LineaDetalleUI[]>>({});
+  const [detallesByComanda, setDetallesByComanda] = useState<Record<string, VerTicketsDetalleRow[]>>({});
   const [loadingDetallesId, setLoadingDetallesId] = useState<string | null>(null);
 
   const [filtro, setFiltro] = useState<Filtro>("RECIENTES");
@@ -115,15 +78,13 @@ export default function VerTicketsModal({
   }, [loadingIndex]);
 
   const baseRows = useMemo(() => {
-    const listaComandas = asArray<VentaRapidaComandaBarraRow>(comandas);
-
-    const filtered = listaComandas
+    const filtered = comandas
       .map((c) => ({ c, dt: parseWhen(c.Fecha_Hora_Apertura) }))
       .filter(({ dt }) => isTodayLocal(dt));
 
     return filtered.map(({ c, dt }) => {
-      const totalPendiente = deCentimos(Number(c.Total_Pendiente ?? 0));
-      const total = deCentimos(Number(c.Total_Comanda ?? 0));
+      const totalPendiente = c.Total_Pendiente;
+      const total = c.Total_Comanda;
       const est = estadoTicket(c);
 
       const when = dt.toLocaleString("es-ES", {
@@ -140,8 +101,8 @@ export default function VerTicketsModal({
         totalPendiente,
         total,
         est,
-        pendientesCocina: Number(c.Pendientes_Cocina ?? 0),
-        pendientesPago: Number(c.Pendientes_Pago ?? 0),
+        pendientesCocina: c.Pendientes_Cocina,
+        pendientesPago: c.Pendientes_Pago,
       };
     });
   }, [comandas]);
@@ -156,19 +117,11 @@ export default function VerTicketsModal({
       setLoadingIndex(true);
       try {
         const rows = await vrGetIndexRows(idsHoy);
-        const safeRows = asArray<IndexRow>(rows);
 
         if (indexRunIdRef.current !== runId) return;
 
         const map: Record<string, IndexRow> = {};
-        for (const r of safeRows) {
-          map[String(r.ID_Comanda ?? "")] = {
-            ID_Comanda: String(r.ID_Comanda ?? ""),
-            Productos: r.Productos ?? null,
-            NumLineas: Number((r as any).NumLineas ?? 0),
-            Unidades: Number((r as any).Unidades ?? 0),
-          };
-        }
+        for (const r of rows) map[r.ID_Comanda] = r;
         setIndexByComanda((prev) => ({ ...prev, ...map }));
       } catch (e) {
         console.error("prefetchIndex error:", e);
@@ -197,9 +150,7 @@ export default function VerTicketsModal({
     if (!open) return;
     if (!s) return;
 
-    const idsHoy = baseRows
-      .map((r) => String(r.c.ID_Comanda ?? ""))
-      .filter((n) => Number.isFinite(n));
+    const idsHoy = baseRows.map((r) => r.c.ID_Comanda).filter((id) => id.length > 0);
 
     void prefetchIndex(idsHoy);
   }, [open, s, baseRows, prefetchIndex]);
@@ -208,8 +159,7 @@ export default function VerTicketsModal({
     setLoadingDetallesId(idComanda);
     try {
       const det = await vrGetDetallesVerTicket(idComanda);
-      const safeDet = asArray<LineaDetalleUI>(det);
-      setDetallesByComanda((prev) => ({ ...prev, [idComanda]: safeDet }));
+      setDetallesByComanda((prev) => ({ ...prev, [idComanda]: det }));
     } catch (e) {
       console.error("Error loadDetalles:", e);
       setDetallesByComanda((prev) => ({ ...prev, [idComanda]: [] }));
@@ -281,8 +231,8 @@ export default function VerTicketsModal({
           String(r.c.Estado ?? ""),
           String(r.totalPendiente ?? ""),
           String(r.total ?? ""),
-          eur(r.totalPendiente ?? CERO),
-          eur(r.total ?? CERO),
+          eur(r.totalPendiente),
+          eur(r.total),
           `cocina ${r.pendientesCocina}`,
           `pago ${r.pendientesPago}`,
           idx?.Productos ?? "",
@@ -539,8 +489,9 @@ export default function VerTicketsModal({
 
                                   // Centimos por una cantidad fraccionaria: vuelve a ser
                                   // flotante, asi que se redondea al centimo como hace el SQL.
-                                  const importe = redondear(
-                                    Number(d.Cantidad) * Number(d.Precio_Unitario),
+                                  const importe = escalar(
+                                    d.Precio_Unitario,
+                                    d.Cantidad,
                                   );
 
                                   return (
@@ -586,7 +537,7 @@ export default function VerTicketsModal({
                                       <div className="shrink-0 text-right">
                                         <p className="text-sm font-bold text-fg">{eur(importe)}</p>
                                         <p className="text-xs text-fg-subtle">
-                                          {eur(deCentimos(Number(d.Precio_Unitario || 0)))} / ud
+                                          {eur(d.Precio_Unitario)} / ud
                                         </p>
                                       </div>
                                     </div>

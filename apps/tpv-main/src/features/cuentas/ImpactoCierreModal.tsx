@@ -12,8 +12,7 @@ import type { ImpactoCajaDto } from "@tpv/contracts";
 
 import { ModalShell } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
-import { euro } from "./formato";
-import { abs } from "../../shared/lib/dinero";
+import { abs, esCero, eur } from "../../shared/lib/dinero";
 import type { Dinero } from "@tpv/contracts";
 
 type Props = {
@@ -27,8 +26,8 @@ type Props = {
 };
 
 function descuadreEnPalabras(d: Dinero): string {
-    if (Math.round(d * 100) === 0) return "cuadra";
-    return d < 0 ? `faltan ${euro(abs(d))}` : `sobran ${euro(d)}`;
+    if (esCero(d)) return "cuadra";
+    return d < 0 ? `faltan ${eur(abs(d))}` : `sobran ${eur(d)}`;
 }
 
 export default function ImpactoCierreModal({
@@ -88,7 +87,7 @@ export default function ImpactoCierreModal({
                 <div className="mt-4 grid gap-2">
                     {impacto.cierres.map((c) => {
                         const cambia =
-                            Math.round(c.descuadre_antes * 100) !== Math.round(c.descuadre_despues * 100);
+                            c.descuadre_antes !== c.descuadre_despues;
                         return (
                             <div
                                 key={c.id_cierre}
@@ -99,13 +98,13 @@ export default function ImpactoCierreModal({
                                     <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-fg-muted">
                                         <span>Debería haber</span>
                                         <span className="text-right text-fg">
-                                            {euro(c.esperado_antes)} → {euro(c.esperado_despues)}
+                                            {eur(c.esperado_antes)} → {eur(c.esperado_despues)}
                                         </span>
                                         <span>Diferencia</span>
                                         <span
                                             className={cn(
                                                 "text-right font-semibold",
-                                                Math.round(c.descuadre_despues * 100) === 0
+                                                esCero(c.descuadre_despues)
                                                     ? "text-success"
                                                     : "text-danger",
                                             )}
