@@ -1377,6 +1377,18 @@ WHERE Subsanacion IS NULL OR Subsanacion <> 'S';
 CREATE INDEX IF NOT EXISTS idx_regfact_orden
 ON Registros_Facturacion(Orden);
 
+-- RI-03: reservar el numero de factura hace MAX(Numero) de la serie en CADA cobro, dentro de la
+-- transaccion del escritor unico. Sin este indice recorria la tabla entera, que es la que por ley no
+-- se purga nunca y cuyas filas son anchas: ~120 ms por cobro con un ano de registros, y subiendo.
+CREATE INDEX IF NOT EXISTS idx_regfact_serie_numero
+ON Registros_Facturacion(Serie, Numero);
+
+-- RI-03: "el registro de este numero de ticket" (reimpresion, F3). ux_regfact_idfactura no sirve:
+-- empieza por NIF_Emisor, y quien pregunta solo tiene el numero. Sin esto, reimprimir un ticket
+-- antiguo recorria los registros hacia atras por Orden hasta dar con el.
+CREATE INDEX IF NOT EXISTS idx_regfact_numserie
+ON Registros_Facturacion(Num_Serie_Factura, Tipo, Orden);
+
 -- El panel fiscal y la exportacion (art. 8 RRSIF) filtran por rango de fechas.
 CREATE INDEX IF NOT EXISTS idx_regfact_fecha
 ON Registros_Facturacion(Fecha_Expedicion);
