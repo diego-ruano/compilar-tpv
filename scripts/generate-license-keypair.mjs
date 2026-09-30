@@ -13,7 +13,9 @@
 // durante una ventana (ver §5.7 del plan).
 //
 // La privada NO se guarda en el repo, ni en un fichero, ni en el historial del terminal:
-// cópiala directamente al `wrangler secret put` y olvídala.
+// cópiala directamente al `wrangler secret put`, y guárdala también en el gestor de
+// contraseñas (junto con el resto de secretos del worker): sin ella no se puede volver a
+// pedir a Cloudflare, que sólo deja escribir secretos, no leerlos.
 
 import { webcrypto } from "node:crypto";
 
@@ -50,6 +52,4 @@ console.log(`
            "${b64(raw)}";
 
   ─────────────────────────────────────────────────────────────────────
-  No guardes la privada en ningún fichero. Si la pierdes, genera otro par
-  y despliega a la vez worker y app (los TPV viejos dejarían de validar).
 `);

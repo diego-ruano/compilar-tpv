@@ -93,9 +93,11 @@ mod tests {
         for cantidad in [-1.0, f64::NAN, f64::INFINITY] {
             assert!(LineaPedidoNueva::validar("l".into(), "x".into(), cantidad, None, None).is_err());
         }
-        for precio in [Dinero::de_centimos(-1)] {
-            assert!(LineaPedidoNueva::validar("l".into(), "x".into(), 1.0, Some(precio), None).is_err());
-        }
+        let precio_negativo = Dinero::de_centimos(-1);
+        assert!(
+            LineaPedidoNueva::validar("l".into(), "x".into(), 1.0, Some(precio_negativo), None)
+                .is_err()
+        );
     }
 
     #[test]

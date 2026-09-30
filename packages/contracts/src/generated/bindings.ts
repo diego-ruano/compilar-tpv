@@ -576,6 +576,12 @@ modo_prueba: boolean, };
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 
+/**
+ * Geometría del papel para preguntar por las columnas desde el frontend (previsualización).
+ * Es un subconjunto de [`PrintTicketPayload`]: la vista previa no necesita ni negocio ni líneas.
+ */
+export type GeometriaTicket = { paper_width_mm: number, chars_per_line: number, margin_left_mm: number, margin_right_mm: number, };
+
 export type HandySetTokenArgs = { token: string, tenant_id: string, };
 
 /**
@@ -1031,6 +1037,119 @@ umbral_descuadre: Dinero,
  */
 anulaciones: number, anulaciones_importe: Dinero, };
 
+/**
+ * Lo que hace falta para imprimir un arqueo. CUENTA-06.
+ */
+export type PrintArqueoPayload = { printer_name?: string, business_name: string, fecha_hora: string, desde?: string, usuario?: string, fondo_inicial: Dinero, ventas_efectivo: Dinero, esperado: Dinero, contado: Dinero, descuadre: Dinero, dejado: Dinero, retirado: Dinero, motivo?: string, 
+/**
+ * Gastos pagados con dinero del cajón (CAJA-01). Restan del esperado.
+ */
+gastos_caja: Dinero, 
+/**
+ * Lo que el cierre marca hoy, si se corrigió un apunte de su periodo (CAJA-01).
+ */
+rect_esperado?: Dinero, rect_descuadre?: Dinero, rectificaciones: Array<RectificacionArqueo>, 
+/**
+ * `(valor, unidades)` de lo contado, para el desglose. Las unidades de un recuento no pasan
+ * de 2^53, así que viajan como `number` y no como `bigint` (§4.3).
+ */
+contado_denoms: Array<[Dinero, number]>, paper_width_mm: number, paper_dpi: number, chars_per_line: number, margin_left_mm: number, margin_right_mm: number, margin_top_mm: number, margin_bottom_mm: number, };
+
+/**
+ * Una línea (producto agrupado) del ticket.
+ */
+export type PrintTicketLine = { nombre: string, cantidad: number, precio_unitario: Dinero, 
+/**
+ * Tipo de IVA con el que se vendió esta línea. `None` = el general del negocio.
+ * Viene congelado de `Detalle_Comanda`, no del producto: una reimpresión tiene que enseñar
+ * el tipo del día de la venta.
+ */
+iva_percent?: number, 
+/**
+ * FISCAL-01: la línea se vendió EXENTA de IVA, que no es lo mismo que vendida al 0 %. Va
+ * congelada como el tipo, y por lo mismo.
+ */
+exento: boolean, 
+/**
+ * `E1`..`E6`. Sólo se mira si `exento`.
+ */
+causa_exencion?: string, };
+
+/**
+ * Payload de impresión enviado desde el frontend. Lleva los datos del negocio + los flags de
+ * personalización del ticket (mismos que `useBusinessSettings`/`useTicketSettings`) para que el
+ * builder ESC/POS produzca exactamente lo que el usuario ve en la previsualización.
+ */
+export type PrintTicketPayload = { 
+/**
+ * Impresora destino; si es `None`, el comando resuelve la seleccionada en `device_config.json`.
+ */
+printer_name?: string, business_name: string, direccion: string, telefono: string, cif: string, mensaje_footer: string, iva_percent: number, show_logo: boolean, 
+/**
+ * Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
+ * no el builder: aquí dentro no se toca el disco.
+ */
+logo_path?: string, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, 
+/**
+ * URL exacta que va dentro del código QR tributario. Sale de la fila de
+ * `Registros_Facturacion` (`QR_Url`), **no se compone aquí**: es la misma cadena que se
+ * guardó al emitir, y una reimpresión tiene que sacar exactamente esa.
+ *
+ * Vacío o ausente = este papel no lleva QR. Es el caso de la **precuenta**, que no es una
+ * factura, y el de un ticket emitido antes de que el negocio completara sus datos fiscales.
+ */
+qr_url?: string, 
+/**
+ * `true` si el registro se emitió contra el entorno de **pruebas**. El QR apunta entonces a
+ * `prewww2.aeat.es` y el papel lo dice: un ticket de pruebas que parece real es peor que uno
+ * que no sale.
+ */
+qr_pruebas: boolean, 
+/**
+ * Ancho de papel en mm (58 / 80 / 112). Acota físicamente las columnas imprimibles.
+ */
+paper_width_mm: number, 
+/**
+ * DPI de la impresora (203 | 300). Convierte mm→dots para márgenes y ancho útil.
+ */
+paper_dpi: number, 
+/**
+ * Caracteres por línea deseados (fuente A). Se acota al ancho físico disponible.
+ */
+chars_per_line: number, margin_top_mm: number, margin_bottom_mm: number, margin_left_mm: number, margin_right_mm: number, 
+/**
+ * Escala de fuente (0.5–2.0). ≥1.5 imprime el cuerpo a doble alto (sin perder columnas).
+ */
+font_scale: number, 
+/**
+ * Número correlativo del ticket. `None` = **precuenta**: lo que se le enseña al cliente antes
+ * de cobrar, que no es un ticket de venta y se marca como tal.
+ */
+numero_ticket?: string, 
+/**
+ * Cómo se cobró (`Efectivo` | `Tarjeta`). `None` en una precuenta.
+ */
+metodo_pago?: string, 
+/**
+ * De dónde sale la venta: `Mesa 5`, `Barra`… Ayuda a localizar el cobro después.
+ */
+origen?: string, 
+/**
+ * Reimpresión de un ticket ya emitido: sale el MISMO número, marcado como copia para que dos
+ * papeles iguales no parezcan dos ventas.
+ */
+es_copia: boolean, 
+/**
+ * El cobro está anulado (CUENTA-07). Reimprimirlo sigue permitido —es la prueba de qué
+ * contenía— pero el papel tiene que decirlo: sin la marca circularía como un cobro válido.
+ */
+es_anulado: boolean, items: Array<PrintTicketLine>, };
+
+/**
+ * Una impresora detectada por el sistema.
+ */
+export type PrinterInfo = { name: string, is_default: boolean, };
+
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
 export type ProductoBaseDto = { ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: Dinero | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
@@ -1121,6 +1240,11 @@ export type PuntualidadInfo = { puntual: boolean, programado: string, entrada: s
 export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending" | "transfer_pending";
 
 export type RecoveryStatus = { state: RecoveryState, };
+
+/**
+ * Una corrección de un cierre ya hecho, tal como sale en el papel (CAJA-01).
+ */
+export type RectificacionArqueo = { fecha_hora: string, descripcion: string, motivo?: string, };
 
 /**
  * Una corrección de un apunte que cambió los números de un cierre ya hecho (CAJA-01).
@@ -1414,7 +1538,7 @@ export type TpvServerSignedHeadersArgs = { mode: string, method: string, path: s
  */
 body?: string, };
 
-export type TrabajadorCardStats = { id_trabajador: string, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio_eur?: Dinero, };
+export type TrabajadorCardStats = { id_trabajador: string, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio?: Dinero, };
 
 /**
  * Alta de trabajador (crea Usuario + Trabajador en local). Local-First.

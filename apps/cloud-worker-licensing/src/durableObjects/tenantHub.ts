@@ -946,7 +946,12 @@ export class TenantHub {
 		challenge: { nonceB64: string; expiresAtMs: number } | null;
 		pubkeyB64Hint?: string | null;
 	}): Promise<{ roleFinal: Role; pubkeyB64: string }> {
-		return verifyHelloSigned({
+		// `return await` y no `return` a secas: `verifyHelloSigned` rechaza ANTES de su primer
+		// `await` cuando el saludo es inválido, y devolverla sin esperar engancha el manejador un
+		// microtask tarde. workerd da la promesa por no manejada en ese hueco y cada saludo
+		// rechazado dejaba además un «unhandled rejection» en los logs, aunque quien llama sí lo
+		// captura. Mismo arreglo en `tenantHubHello.test.ts`, donde rompía el CI.
+		return await verifyHelloSigned({
 			...params,
 			cargarDispositivo: (tenantId, deviceId) =>
 				loadDeviceFromCentral(this.getCentralDb(), tenantId, deviceId),

@@ -126,15 +126,7 @@ pub(crate) async fn snapshot_del_producto<C: Reader>(conn: &C, id_producto: &str
     }
 }
 
-async fn select_one_f64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> AppResult<Option<f64>> {
-    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
-    if let Some(row) = rows.next().await.map_err(db_err)? {
-        return Ok(v_f64(row.get_value(0).map_err(db_err)?));
-    }
-    Ok(None)
-}
-
-/// Lo mismo para una columna de DINERO (`INTEGER` de centimos).
+/// Una columna de DINERO (`INTEGER` de centimos).
 async fn select_one_dinero<C: Reader>(
     conn: &C,
     sql: &str,

@@ -1256,7 +1256,7 @@ impl SqliteStatsRepository {
                     comandas_preparadas: Some(comandas),
                     comandas_tomadas: None,
                     cobros_realizados: None,
-                    ticket_medio_eur: None,
+                    ticket_medio: None,
                 });
             } else if w.rol == "Camarero" {
                 let comandas = *cam_comandas_tomadas.get(&w.id_trabajador).unwrap_or(&0);
@@ -1274,7 +1274,7 @@ impl SqliteStatsRepository {
                     comandas_preparadas: None,
                     comandas_tomadas: Some(comandas),
                     cobros_realizados: Some(cobros),
-                    ticket_medio_eur: Some(ticket),
+                    ticket_medio: Some(ticket),
                 });
             } else {
                 limpieza.push(TrabajadorCardStats {
@@ -1288,7 +1288,7 @@ impl SqliteStatsRepository {
                     comandas_preparadas: None,
                     comandas_tomadas: None,
                     cobros_realizados: None,
-                    ticket_medio_eur: None,
+                    ticket_medio: None,
                 });
             }
         }

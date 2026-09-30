@@ -335,7 +335,7 @@ mod tests {
         assert_eq!(a + b, Dinero::de_centimos(30));
 
         // Mil líneas de 0,10 €: en f64 la suma se desviaba; aquí no hay desviación posible.
-        let suma: Dinero = std::iter::repeat(Dinero::de_centimos(10)).take(1000).sum();
+        let suma: Dinero = std::iter::repeat_n(Dinero::de_centimos(10), 1000).sum();
         assert_eq!(suma, Dinero::de_centimos(10_000));
     }
 

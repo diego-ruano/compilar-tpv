@@ -15,6 +15,7 @@ pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;
 pub mod email_config;
+pub mod impresion;
 pub mod errors;
 pub mod interruptores;
 pub mod inventario;

@@ -203,7 +203,7 @@ pub struct TrabajadorCardStats {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub ticket_medio_eur: Option<Dinero>,
+    pub ticket_medio: Option<Dinero>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

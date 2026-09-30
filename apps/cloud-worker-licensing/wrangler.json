@@ -64,6 +64,11 @@
 		{
 			"binding": "COPIAS",
 			"bucket_name": "tpv-copias-control"
+		},
+		{
+			"bucket_name": "tpv-copias-control",
+			"binding": "tpv_copias_control",
+			"remote": true
 		}
 	],
 	"triggers": {

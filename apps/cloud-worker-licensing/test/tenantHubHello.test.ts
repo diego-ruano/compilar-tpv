@@ -83,7 +83,10 @@ async function verificar(params: {
 	tenantId?: string;
 	deviceId?: string;
 }) {
-	return verifyHelloSigned({
+	// `return await`: sin él, el rechazo síncrono de un hello inválido se queda un microtask sin
+	// manejador y workerd lo cuenta como «unhandled rejection», que hace fallar la tanda aunque
+	// `verificarFalla` sí lo capture.
+	return await verifyHelloSigned({
 		tenantId: params.tenantId ?? TENANT,
 		deviceId: params.deviceId ?? DEVICE,
 		msg: params.msg,

@@ -664,7 +664,7 @@ export async function trabajadores(
 				comandas_preparadas: cocComandas.get(w.id_usuario) ?? 0,
 				comandas_tomadas: null,
 				cobros_realizados: null,
-				ticket_medio_eur: null,
+				ticket_medio: null,
 			});
 		} else if (w.rol === "Camarero") {
 			camareros.push({
@@ -673,7 +673,7 @@ export async function trabajadores(
 				comandas_preparadas: null,
 				comandas_tomadas: camComandas.get(w.id_trabajador) ?? 0,
 				cobros_realizados: camCobros.get(w.id_trabajador) ?? 0,
-				ticket_medio_eur: camTicket.get(w.id_trabajador) ?? 0,
+				ticket_medio: camTicket.get(w.id_trabajador) ?? 0,
 			});
 		} else {
 			limpieza.push({
@@ -682,7 +682,7 @@ export async function trabajadores(
 				comandas_preparadas: null,
 				comandas_tomadas: null,
 				cobros_realizados: null,
-				ticket_medio_eur: null,
+				ticket_medio: null,
 			});
 		}
 	}

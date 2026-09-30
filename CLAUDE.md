@@ -519,7 +519,27 @@ la lógica/SQL vive en `crates/*`.
     separador de miles) y el del **papel** (`shared/ticket/ticketMath.ts`, sin él: en 32 columnas
     un punto de millar se confunde con el decimal). Eran **once** copias y no eran iguales —cuatro
     protegían contra un valor no finito y siete no—, así que el mismo importe corrupto salía
-    «0,00 €» en Estadísticas y «NaN €» en las tres pantallas de venta.
+    «0,00 €» en Estadísticas y «NaN €» en las tres pantallas de venta. Tampoco se le ponen alias
+    (`formatEur`, `euro`) ni se pasa como *prop* (`formatMoney={eur}`): quien pinta dinero importa
+    `eur`.
+  - **Un lector de lo que se teclea, y un campo que lo usa (RI-53).** Todo campo de dinero es un
+    `<CampoDinero>` con `useImporte()` (`shared/ui/CampoDinero.tsx`): hacia fuera sólo hay
+    `Dinero | null` y si el texto se entiende (`legible`), y la conversión —rellenar con `aTexto`,
+    leer con `deTexto`— no sale del componente. Tras ARQ-01 cada formulario leía su cuadro a mano y
+    **ninguno** se enteró: un café dado de alta a «3» se guardaba a 3 céntimos, «2,50» no se podía
+    guardar y editar un gasto sin tocarlo lo multiplicaba por 100. Y había dos lectores que no
+    decían lo mismo: `deTexto` leía «1.500» como 1,50 € (en España son mil quinientos). Ahora
+    `deTexto` es el único, y lo ambiguo («1,500», tres decimales, un signo) lo rechaza en vez de
+    adivinarlo. Es un campo de texto con teclado decimal, no un `type="number"`, que deja la coma
+    en manos de la configuración regional de la webview.
+  - **Un `*Apis.ts` no redeclara tipos ni «normaliza» lo que vuelve (RI-53).** Recibe el `Input`
+    que genera ts-rs y devuelve el DTO tal cual: nada de tipos propios con el dinero como `number`,
+    de `pick(row, ["Precio_Venta", "precio_venta", …])` ni de mappers a camelCase. Así, un `number`
+    en un campo `Dinero` no compila, y la marca llega hasta la pantalla sin volver a ponerla con
+    `deCentimos(Number(…))`. `deCentimos` queda para constantes y para lo que llega sin tipo de
+    verdad (`localStorage`, el *formatter* de una gráfica). Lo que cruza la frontera y no tiene
+    DTO se crea en `tpv-contracts` —así acabaron allí los *payloads* de impresión
+    (`impresion.rs`)—. Los `*Apis.ts` que aún no siguen esta regla están listados en RI-87.
   - **Las CANTIDADES siguen en `REAL` a propósito** (0,5 kg es fraccionario de verdad), y los
     tipos de IVA también (existe el 7,5 %). **Consecuencia al escribir SQL:** `Cantidad` × un
     precio en céntimos vuelve a ser un **flotante**, así que hay que devolverlo a entero antes de
@@ -1534,7 +1554,7 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
 | Generador ESC/POS | `src-tauri/src/printing.rs` | Ancho, columnas, desglose de IVA, logo, corte, cajón |
 | Comandos Tauri | `src-tauri/src/lib.rs` | `printer_print_ticket`, `printer_ticket_cols`, `printer_open_drawer` |
 | Vista previa | `src/shared/ticket/TicketPaper.tsx` | Espejo del generador (mismo truncado, mismo desglose) |
-| Payload | `src/features/configuracion/api/printerApis.ts` | `buildTicketPayload` agrupa líneas por `nombre__precio__iva` |
+| Payload | `src/features/configuracion/api/printerApis.ts` + `crates/tpv-contracts/src/impresion.rs` | `buildTicketPayload` agrupa con `agruparLineas`, la misma función que la vista previa; el tipo es el DTO generado |
 | Reimpresión | `src/app/pages/Cuentas.tsx` | Copia marcada (`es_copia`, y `es_anulado` si el cobro lo está), no genera número nuevo |
 
 ### Reglas
@@ -1602,7 +1622,10 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
   un producto lo escribe el usuario, y un `ESC` ahí lo leería la impresora como un comando.
 - **La vista previa es un espejo, y se prueba como tal.** Todo lo que la previa comparte con el
   papel —agrupación, desglose de IVA, formato del dinero y recorte del nombre— vive en
-  `shared/ticket/ticketMath.ts`, fuera del componente, para poder probarlo sin React. Hay tablas de
+  `shared/ticket/ticketMath.ts`, fuera del componente, para poder probarlo sin React. Y el
+  *payload* que va a la impresora agrupa con esa misma función: tenía su propia copia, que no
+  redondeaba el importe de un producto al peso, y un precio de 410,92 céntimos no se puede leer
+  como `Dinero`, así que el ticket no salía (RI-53). Hay tablas de
   golden duplicadas a propósito en los dos lados (`printing/tests.rs` y `test/ticketMath.test.ts`):
   si uno cambia de criterio, el otro falla. Dos trampas ya pisadas: `Intl.NumberFormat` mete el
   punto de los miles y un espacio duro que el papel no lleva, y `String.slice` cuenta unidades
