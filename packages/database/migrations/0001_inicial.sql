@@ -959,6 +959,17 @@ CREATE TABLE IF NOT EXISTS Movimientos_Caja (
 CREATE INDEX IF NOT EXISTS idx_movcaja_fecha
 ON Movimientos_Caja(Fecha_Hora);
 
+-- RI-04: un movimiento por (Tipo, apunte). Es la idempotencia que caja_movimientos::registrar ya
+-- garantiza con su WHERE NOT EXISTS, y es tambien lo que hace barata esa comprobacion: sin estos
+-- indices era un SCAN de la tabla en cada cobro, gasto y anulacion, y como la sentencia se replica
+-- tal cual, en Turso cada cobro leia (y facturaba) el historial entero. Parciales porque cada fila
+-- apunta a un pago O a un gasto. SQLite parte el OR de aquella sentencia y usa uno por rama.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_movcaja_pago
+ON Movimientos_Caja(Tipo, ID_Pago) WHERE ID_Pago IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_movcaja_gasto
+ON Movimientos_Caja(Tipo, ID_Gasto) WHERE ID_Gasto IS NOT NULL;
+
 /* =========================================================
    10. Idempotencia / Atomicidad (tabla de la NUBE)
    Applied_Operations la usa el WORKER (nube) como gate idempotente por Op_Id al

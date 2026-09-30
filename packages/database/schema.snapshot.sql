@@ -57,6 +57,8 @@ CREATE INDEX idx_tarea_asig_trab ON Tarea_Asignaciones(ID_Trabajador, Estado);
 CREATE INDEX idx_verifactu_anomalias_pend ON _Verifactu_Anomalias(Reconocida, Detectada_En_Ms);
 CREATE INDEX idx_verifactu_envios_estado ON _Verifactu_Envios(Estado);
 CREATE UNIQUE INDEX ux_clientes_email ON Clientes(lower(Email)) WHERE Email IS NOT NULL AND Email <> '';
+CREATE UNIQUE INDEX ux_movcaja_gasto ON Movimientos_Caja(Tipo, ID_Gasto) WHERE ID_Gasto IS NOT NULL;
+CREATE UNIQUE INDEX ux_movcaja_pago ON Movimientos_Caja(Tipo, ID_Pago) WHERE ID_Pago IS NOT NULL;
 CREATE UNIQUE INDEX ux_regfact_idfactura ON Registros_Facturacion(NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Tipo) WHERE Subsanacion IS NULL OR Subsanacion <> 'S';
 CREATE TABLE Alergenos ( ID_Alergeno TEXT PRIMARY KEY, Nombre TEXT NOT NULL UNIQUE, Nombre_Imagen TEXT, Ruta_Imagen TEXT );
 CREATE TABLE Aperturas_Cajon ( ID_Apertura TEXT PRIMARY KEY, ID_Usuario TEXT, Fecha DATETIME NOT NULL, FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL );
