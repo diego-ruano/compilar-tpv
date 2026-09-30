@@ -85,17 +85,22 @@ fn patch_f64(patch: &JsonValue, key: &str) -> Option<f64> {
     }
 }
 /// Un importe que llega en el patch de configuracion. Viene en CENTIMOS enteros, igual que
-/// cruza el resto de la frontera (ARQ-01); el `as_f64` de respaldo cubre un cliente que todavia
-/// mande un decimal, que se redondea al centimo mas cercano en vez de truncarse.
-fn patch_dinero(patch: &JsonValue, key: &str) -> Option<Dinero> {
-    match patch_get(patch, key)? {
-        JsonValue::Number(n) => n
-            .as_i64()
-            .or_else(|| n.as_f64().map(|f| f.round() as i64))
-            .map(Dinero::de_centimos),
-        JsonValue::String(s) => s.parse::<i64>().ok().map(Dinero::de_centimos),
-        _ => None,
-    }
+/// cruza el resto de la frontera (ARQ-01).
+///
+/// Un decimal se RECHAZA, no se redondea (RI-66): un `12.5` no es «doce euros con cincuenta», es un
+/// cliente que habla en la unidad equivocada, y redondearlo por su cuenta guardaria 13 centimos
+/// donde alguien queria 1.250. Es la misma regla que `zDinero` en el worker. Ausente o `null` es
+/// «no lo toques» (`Ok(None)`).
+fn patch_dinero(patch: &JsonValue, key: &str) -> AppResult<Option<Dinero>> {
+    let entero = match patch_get(patch, key) {
+        None | Some(JsonValue::Null) => return Ok(None),
+        Some(JsonValue::Number(n)) => n.as_i64(),
+        // Ni texto: `"750"` tampoco es un importe. Mismo criterio que `zDinero`.
+        Some(_) => None,
+    };
+    entero.map(|c| Some(Dinero::de_centimos(c))).ok_or_else(|| {
+        AppError::validation(format!("`{key}` va en céntimos enteros"))
+    })
 }
 fn patch_i64(patch: &JsonValue, key: &str) -> Option<i64> {
     match patch_get(patch, key)? {
@@ -274,9 +279,10 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             }
         }
         if patch_has(patch, "umbral_descuadre") {
-            if let Some(v) = patch_f64(patch, "umbral_descuadre") {
+            // RI-66: era `patch_f64` + `Value::Real`, o sea un REAL en una columna de dinero.
+            if let Some(v) = patch_dinero(patch, "umbral_descuadre")? {
                 sets.push("Umbral_Descuadre = ?");
-                args.push(Value::Real(v));
+                args.push(dinero_val(v));
             }
         }
         if patch_has(patch, "iva_percent") {
@@ -307,7 +313,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             }
         }
         if patch_has(patch, "limite_simplif") {
-            if let Some(v) = patch_dinero(patch, "limite_simplif") {
+            if let Some(v) = patch_dinero(patch, "limite_simplif")? {
                 sets.push("Limite_Simplif = ?");
                 args.push(dinero_val(if v > Dinero::CERO {
                     v
@@ -545,6 +551,97 @@ mod tests_lecturas_no_escriben {
         );
         assert_eq!(repo.get_business().await.unwrap().business_name, "Bar Nuevo");
 
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod tests_dinero_del_patch {
+    //! RI-66: un importe del patch de negocio va en céntimos ENTEROS. El umbral de descuadre se
+    //! guardaba como `REAL`; y `patch_dinero` redondeaba un decimal en vez de rechazarlo, así que un
+    //! cliente que mandara euros (`12.5`) guardaba 13 céntimos sin que nadie se enterase.
+
+    use libsql::Value;
+    use tpv_application::error::AppError;
+    use tpv_application::ports::configuracion::ConfiguracionRepository;
+
+    use super::SqliteConfiguracionRepository;
+    use crate::db::{Db, Reader};
+
+    async fn tipo_y_valor(db: &Db, columna: &str) -> (String, Value) {
+        let g = db.read().await;
+        let mut rows = g
+            .query(
+                &format!("SELECT typeof({columna}), {columna} FROM Business_Settings WHERE ID = 1;"),
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap().unwrap();
+        let tipo = match fila.get_value(0).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("typeof no devolvió texto: {otro:?}"),
+        };
+        (tipo, fila.get_value(1).unwrap())
+    }
+
+    #[tokio::test]
+    async fn el_umbral_se_guarda_como_entero_de_centimos() {
+        let dir = crate::test_temp::dir_temporal("configuracion_dinero");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let repo = SqliteConfiguracionRepository::new(db.clone());
+
+        repo.patch_business(&serde_json::json!({ "umbral_descuadre": 750 }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            tipo_y_valor(&db, "Umbral_Descuadre").await,
+            ("integer".to_string(), Value::Integer(750))
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn un_importe_con_decimales_se_rechaza_y_no_se_redondea() {
+        let dir = crate::test_temp::dir_temporal("configuracion_dinero");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let repo = SqliteConfiguracionRepository::new(db.clone());
+        let antes_umbral = tipo_y_valor(&db, "Umbral_Descuadre").await;
+        let antes_limite = tipo_y_valor(&db, "Limite_Simplif").await;
+
+        for patch in [
+            serde_json::json!({ "umbral_descuadre": 7.5 }),
+            serde_json::json!({ "umbral_descuadre": "7,50" }),
+            serde_json::json!({ "umbral_descuadre": "750" }),
+            serde_json::json!({ "limite_simplif": 3000.5 }),
+        ] {
+            let err = repo.patch_business(&patch).await.unwrap_err();
+            assert!(
+                matches!(err, AppError::Validation(_)),
+                "{patch} debía rechazarse como validación, no {err:?}"
+            );
+        }
+
+        assert_eq!(tipo_y_valor(&db, "Umbral_Descuadre").await, antes_umbral);
+        assert_eq!(tipo_y_valor(&db, "Limite_Simplif").await, antes_limite);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn null_o_ausente_no_toca_el_importe() {
+        let dir = crate::test_temp::dir_temporal("configuracion_dinero");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let repo = SqliteConfiguracionRepository::new(db.clone());
+        repo.patch_business(&serde_json::json!({ "umbral_descuadre": 900 }))
+            .await
+            .unwrap();
+
+        repo.patch_business(&serde_json::json!({ "umbral_descuadre": null, "business_name": "X" }))
+            .await
+            .unwrap();
+
+        assert_eq!(tipo_y_valor(&db, "Umbral_Descuadre").await.1, Value::Integer(900));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

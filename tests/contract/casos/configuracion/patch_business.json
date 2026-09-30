@@ -1,5 +1,5 @@
 {
-  "descripcion": "Patch de los ajustes de negocio (singleton ID=1). UPSERT + UPDATE de solo las columnas del patch. Updated_At (now) se excluye del snapshot.",
+  "descripcion": "Patch de los ajustes de negocio (singleton ID=1). UPSERT + UPDATE de solo las columnas del patch. Updated_At (now) se excluye del snapshot. El umbral de descuadre es dinero y queda como entero de céntimos en los dos lados (RI-66). Que un decimal se RECHACE no cabe aquí (el harness no tiene casos de error): lo prueban configuracion.rs y configuracionDinero.test.ts.",
   "comando": "config.patch_business",
   "seed": [],
   "entrada": {
@@ -9,10 +9,11 @@
       "telefono": "600100200",
       "cif": "B12345678",
       "mensaje_footer": "Gracias por su visita",
-      "iva_percent": 21
+      "iva_percent": 21,
+      "umbral_descuadre": 750
     }
   },
   "snapshot": {
-    "Business_Settings": "SELECT Business_Name, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent FROM Business_Settings"
+    "Business_Settings": "SELECT Business_Name, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre, typeof(Umbral_Descuadre) AS Tipo_Umbral FROM Business_Settings"
   }
 }

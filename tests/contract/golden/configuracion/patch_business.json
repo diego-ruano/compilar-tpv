@@ -6,7 +6,9 @@
       "Direccion": "Calle Mayor 1",
       "IVA_Percent": 21.0,
       "Mensaje_Footer": "Gracias por su visita",
-      "Telefono": "600100200"
+      "Telefono": "600100200",
+      "Tipo_Umbral": "integer",
+      "Umbral_Descuadre": 750
     }
   ]
 }

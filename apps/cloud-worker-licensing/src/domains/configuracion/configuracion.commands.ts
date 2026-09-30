@@ -1,5 +1,7 @@
 // src/domains/configuracion/configuracion.commands.ts
 
+import { zDinero } from "../../lib/dinero";
+import { HubError } from "../../lib/errorHttp";
 import type { ApplyCommand } from "../../lib/hub";
 
 export type BuiltCommand = {
@@ -111,9 +113,17 @@ export function patchBusiness(patch: Record<string, unknown>): BuiltCommand {
 		const n = Number(patch.iva_percent);
 		if (Number.isFinite(n)) add("IVA_Percent", n);
 	}
-	if ("umbral_descuadre" in patch) {
-		const n = Number(patch.umbral_descuadre);
-		if (Number.isFinite(n)) add("Umbral_Descuadre", n);
+	// RI-66: el umbral es dinero, en céntimos enteros. Con `Number(...)` un decimal entraba como REAL
+	// en una columna de dinero (y un `null` se guardaba como 0). Ausente o `null` es «no lo toques»,
+	// como en la Main; un decimal se rechaza en la puerta, no se redondea.
+	if (patch.umbral_descuadre != null) {
+		const umbral = zDinero.safeParse(patch.umbral_descuadre);
+		if (!umbral.success) {
+			throw new HubError("validation_error", 400, {
+				umbral_descuadre: "el importe va en céntimos enteros",
+			});
+		}
+		add("Umbral_Descuadre", umbral.data);
 	}
 
 	// FISCAL-01. Los datos fiscales (`Razon_Social`, `Descripcion_Op`, `Limite_Simplif`,

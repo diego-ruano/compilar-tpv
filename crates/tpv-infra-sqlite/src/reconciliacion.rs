@@ -81,7 +81,7 @@ const SQL_LOTES: &str = r#"
 
 /// El gasto que DEBERÍA tener cada cliente: la suma de los pagos **activos** de las comandas que
 /// cuelgan de sus reservas, que es exactamente el camino por el que se acredita al cobrar
-/// (`sumar_gasto_cliente_por_comanda`). Redondeado a 2 decimales, como los incrementos.
+/// (`sumar_gasto_cliente_por_comanda`). Sin `ROUND`: una suma de céntimos ya es entera (RI-66).
 ///
 /// El filtro por estado es obligatorio: al anular se decrementa `Total_Gastado`, así que una suma
 /// que siguiera incluyendo el pago anulado sacaría al cliente como descuadrado para siempre.
@@ -92,14 +92,14 @@ const SQL_CLIENTES: &str = r#"
             c.ID_Cliente               AS id_cliente,
             COALESCE(c.Nombre, '')     AS nombre,
             COALESCE(c.Total_Gastado, 0) AS guardado,
-            ROUND(COALESCE((
+            COALESCE((
                 SELECT SUM(pg.Importe_Total)
                 FROM Pagos pg
                 JOIN Comandas co ON co.ID_Comanda = pg.ID_Comanda
                 JOIN Reservas r  ON r.ID_Reserva  = co.ID_Reserva
                 WHERE r.ID_Cliente = c.ID_Cliente
                   AND COALESCE(pg.Estado,'ACTIVO') = 'ACTIVO'
-            ), 0), 2)                  AS calculado
+            ), 0)                      AS calculado
         FROM Clientes c
     )
     WHERE ABS(guardado - calculado) > ?1
@@ -115,14 +115,14 @@ const SQL_CLIENTES: &str = r#"
 /// que viera el aviso de descuadre y pulsara «recalcular» grabaría un total que incluye el pago
 /// anulado: el aviso falso induciría a la acción que corrompe el dato, en local y en la nube.
 const SQL_GASTO_DE_UNO: &str = r#"
-    SELECT ROUND(COALESCE((
+    SELECT COALESCE((
         SELECT SUM(pg.Importe_Total)
         FROM Pagos pg
         JOIN Comandas co ON co.ID_Comanda = pg.ID_Comanda
         JOIN Reservas r  ON r.ID_Reserva  = co.ID_Reserva
         WHERE r.ID_Cliente = c.ID_Cliente
           AND COALESCE(pg.Estado,'ACTIVO') = 'ACTIVO'
-    ), 0), 2)
+    ), 0)
     FROM Clientes c
     WHERE c.ID_Cliente = ?1
     LIMIT 1;

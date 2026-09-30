@@ -208,7 +208,6 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         let sql = format!(
             r#"
             SELECT
-              ROUND(
                 COALESCE((
                   SELECT SUM(Importe_Total) FROM Pagos
                   WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
@@ -224,13 +223,12 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                     AND Fecha_Hora <= ?1
                     AND Anulado_En IS NOT NULL
                     AND Anulado_En > ?1
-                ), 0)
-              , 2),
-              ROUND(COALESCE((
+                ), 0),
+              COALESCE((
                 SELECT SUM(Importe) FROM Cuentas_Gastos
                 WHERE Pagado_Con_Caja = 1
                   AND (?1 IS NULL OR {gasto} > datetime(?1))
-              ), 0), 2);
+              ), 0);
             "#
         );
 
