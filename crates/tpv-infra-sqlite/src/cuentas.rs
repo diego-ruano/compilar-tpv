@@ -33,6 +33,11 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 }
 
 /// Construye la cláusula WHERE de rango y los parámetros, dada la columna de fecha.
+///
+/// `del` y `al` son días, y los dos entran: `[del, al + 1 día)`. La función va sobre el PARÁMETRO y
+/// nunca sobre la columna (RI-18): `date(columna)` impedía usar el índice por fecha y cada página de
+/// Cuentas recorría todos los cobros. Vale para una columna con hora (`Pagos.Fecha_Hora`) y para
+/// una que sólo guarda el día (`Cuentas_Gastos.Fecha`), porque las dos están en formato canónico.
 fn rango_where(
     del: Option<String>,
     al: Option<String>,
@@ -45,11 +50,11 @@ fn rango_where(
     let mut params: Vec<Value> = Vec::new();
 
     if del.is_some() {
-        parts.push(format!("date({fecha_expr}) >= date(?1)"));
+        parts.push(format!("{fecha_expr} >= date(?1)"));
     }
     let al_idx = if del.is_some() { 2 } else { 1 };
     if al.is_some() {
-        parts.push(format!("date({fecha_expr}) <= date(?{al_idx})"));
+        parts.push(format!("{fecha_expr} < date(?{al_idx}, '+1 day')"));
     }
 
     if let Some(d) = del {

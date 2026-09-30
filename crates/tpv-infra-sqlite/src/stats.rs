@@ -365,10 +365,16 @@ impl SqliteStatsRepository {
             paid_det AS (
               -- Sólo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, así que sus
               -- líneas no pueden aparecer en «lo más vendido» ni sumar en el histórico.
+              -- El rango va AQUÍ y no fuera (RI-18): fuera, la CTE agrupaba todos los cobros de la
+              -- historia antes de filtrar. Lo de fuera de rango ya no contaba (las consultas de «el
+              -- peor» lo ponían a 0 con su CASE), así que el resultado es el mismo.
               SELECT pd.ID_Detalle AS ID_Detalle, MIN(p.Fecha_Hora) AS paid_at
               FROM Pago_Detalles pd
               JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
-              WHERE COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+              JOIN rng ON 1=1
+              WHERE p.Estado = 'ACTIVO'
+                AND p.Fecha_Hora >= rng.start_dt
+                AND p.Fecha_Hora <  rng.end_dt
               GROUP BY pd.ID_Detalle
             )
             "#,
@@ -973,8 +979,8 @@ impl SqliteStatsRepository {
               COUNT(*) AS n
             FROM Comandas
             WHERE ID_Trabajador IS NOT NULL
-              AND datetime(Fecha_Hora_Apertura) >= (SELECT start_dt FROM rng)
-              AND datetime(Fecha_Hora_Apertura) <  (SELECT end_dt   FROM rng)
+              AND Fecha_Hora_Apertura >= (SELECT start_dt FROM rng)
+              AND Fecha_Hora_Apertura <  (SELECT end_dt   FROM rng)
             GROUP BY ID_Trabajador;
             "#,
             start = start_expr,
@@ -1006,9 +1012,9 @@ impl SqliteStatsRepository {
             JOIN Trabajadores t ON t.ID_Trabajador = p.ID_Trabajador_Cobrador
             JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
             JOIN Roles r ON r.ID_Rol = u.ID_Rol
-            WHERE datetime(p.Fecha_Hora) >= rng.start_dt
-              AND datetime(p.Fecha_Hora) <  rng.end_dt
-              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+            WHERE p.Fecha_Hora >= rng.start_dt
+              AND p.Fecha_Hora <  rng.end_dt
+              AND p.Estado = 'ACTIVO'
               AND p.ID_Trabajador_Cobrador IS NOT NULL
               AND r.Nombre_Rol = 'Camarero'
             GROUP BY p.ID_Trabajador_Cobrador;
@@ -1035,9 +1041,9 @@ impl SqliteStatsRepository {
             pagos_rng AS (
               SELECT ID_Comanda, COALESCE(Importe_Total,0) AS imp
               FROM Pagos, rng
-              WHERE datetime(Fecha_Hora) >= rng.start_dt
-                AND datetime(Fecha_Hora) <  rng.end_dt
-                AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
+              WHERE Fecha_Hora >= rng.start_dt
+                AND Fecha_Hora <  rng.end_dt
+                AND Estado = 'ACTIVO'
             ),
             comanda_trab AS (
               SELECT ID_Comanda, ID_Trabajador

@@ -503,6 +503,12 @@ ON Comandas(ID_Reserva);
 CREATE INDEX IF NOT EXISTS idx_comandas_trab_apertura
 ON Comandas(ID_Trabajador, Fecha_Hora_Apertura);
 
+-- RI-18: el tablero de cocina pide las comandas de los ultimos dos dias en cada refresco (y se
+-- refresca con cada linea que se anade). Sin indice por fecha recorria todas las lineas de la
+-- historia.
+CREATE INDEX IF NOT EXISTS idx_comandas_apertura
+ON Comandas(Fecha_Hora_Apertura);
+
 -- Cantidad y Precio_Unitario: la POSITIVIDAD (Cantidad > 0, Precio_Unitario >= 0) se valida en la
 -- CAPA DE APLICACION (use_cases de Rust + esquemas zod del worker), NO con CHECK: SQLite no permite
 -- anadir un CHECK a una tabla ya existente via ALTER, y el runner envuelve cada migracion en una

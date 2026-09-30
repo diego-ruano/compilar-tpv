@@ -198,6 +198,12 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         //
         // Las mismas reglas, sumadas aquí, son las que usa `TotalesCaja::de_cobro`/`de_gasto` para
         // previsualizar un cambio. Si una cambia, la otra también.
+        //
+        // Las horas se comparan como TEXTO, sin `datetime()` (RI-18): envolver la columna impedía
+        // usar idx_pagos_estado_fecha y cada arqueo recorría todos los cobros de la historia. Vale
+        // porque las dos partes están en formato canónico: `desde` es la `Fecha_Hora` de un cierre y
+        // `Fecha_Hora`/`Anulado_En` de un pago las pone el sistema (`fecha_de_apunte` normaliza lo que
+        // se edita a mano). Los gastos sí pasan por `momento_de_gasto_sql`: sólo guardan el día.
         let gasto = momento_de_gasto_sql("Fecha");
         let sql = format!(
             r#"
@@ -206,8 +212,8 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 COALESCE((
                   SELECT SUM(Importe_Total) FROM Pagos
                   WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
-                    AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
-                    AND (?1 IS NULL OR datetime(Fecha_Hora) > datetime(?1))
+                    AND Estado = 'ACTIVO'
+                    AND (?1 IS NULL OR Fecha_Hora > ?1)
                 ), 0)
                 - COALESCE((
                   SELECT SUM(Importe_Total) FROM Pagos
@@ -215,9 +221,9 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                     AND Estado = 'ANULADO'
                     AND Motivo_Baja = 'DEVOLUCION'
                     AND ?1 IS NOT NULL
-                    AND datetime(Fecha_Hora) <= datetime(?1)
+                    AND Fecha_Hora <= ?1
                     AND Anulado_En IS NOT NULL
-                    AND datetime(Anulado_En) > datetime(?1)
+                    AND Anulado_En > ?1
                 ), 0)
               , 2),
               ROUND(COALESCE((
@@ -260,9 +266,9 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 r#"
                 SELECT COUNT(*), COALESCE(SUM(Importe_Total),0)
                 FROM Pagos
-                WHERE COALESCE(Estado,'ACTIVO') = 'ANULADO'
+                WHERE Estado = 'ANULADO'
                   AND Anulado_En IS NOT NULL
-                  AND datetime(Anulado_En) > datetime(?1);
+                  AND Anulado_En > ?1;
                 "#,
                 vec![Value::Text(d.to_string())],
             ),

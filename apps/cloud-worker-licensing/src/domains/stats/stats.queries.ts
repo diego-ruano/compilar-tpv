@@ -187,10 +187,15 @@ export async function productos(
 		paid_det AS (
 			-- Solo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, asi que sus
 			-- lineas no pueden aparecer en "lo mas vendido" ni sumar en el historico.
+			-- El rango va AQUI y no fuera (RI-18): fuera, la CTE agrupaba todos los cobros de la
+			-- historia antes de filtrar. Mismo resultado: lo de fuera de rango ya no contaba.
 			SELECT pd.ID_Detalle AS ID_Detalle, MIN(p.Fecha_Hora) AS paid_at
 			FROM Pago_Detalles pd
 			JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
-			WHERE COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+			JOIN rng ON 1=1
+			WHERE p.Estado = 'ACTIVO'
+				AND p.Fecha_Hora >= rng.start_dt
+				AND p.Fecha_Hora <  rng.end_dt
 			GROUP BY pd.ID_Detalle
 		)`;
 
@@ -503,8 +508,8 @@ export async function trabajadores(
 		SELECT ID_Trabajador AS id, COUNT(*) AS n
 		FROM Comandas
 		WHERE ID_Trabajador IS NOT NULL
-			AND datetime(Fecha_Hora_Apertura) >= (SELECT start_dt FROM rng)
-			AND datetime(Fecha_Hora_Apertura) <  (SELECT end_dt FROM rng)
+			AND Fecha_Hora_Apertura >= (SELECT start_dt FROM rng)
+			AND Fecha_Hora_Apertura <  (SELECT end_dt FROM rng)
 		GROUP BY ID_Trabajador;
 	`);
 	const camComandas = porClave(rows(camComRs), "id", "n");
@@ -518,9 +523,9 @@ export async function trabajadores(
 		JOIN Trabajadores t ON t.ID_Trabajador = p.ID_Trabajador_Cobrador
 		JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
 		JOIN Roles r ON r.ID_Rol = u.ID_Rol
-		WHERE datetime(p.Fecha_Hora) >= rng.start_dt
-			AND datetime(p.Fecha_Hora) <  rng.end_dt
-			AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+		WHERE p.Fecha_Hora >= rng.start_dt
+			AND p.Fecha_Hora <  rng.end_dt
+			AND p.Estado = 'ACTIVO'
 			AND p.ID_Trabajador_Cobrador IS NOT NULL
 			AND r.Nombre_Rol = 'Camarero'
 		GROUP BY p.ID_Trabajador_Cobrador;
@@ -535,8 +540,8 @@ export async function trabajadores(
 		pagos_rng AS (
 			SELECT ID_Comanda, COALESCE(Importe_Total,0) AS imp
 			FROM Pagos, rng
-			WHERE datetime(Fecha_Hora) >= rng.start_dt AND datetime(Fecha_Hora) < rng.end_dt
-			  AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
+			WHERE Fecha_Hora >= rng.start_dt AND Fecha_Hora < rng.end_dt
+			  AND Estado = 'ACTIVO'
 		),
 		comanda_trab AS (
 			SELECT ID_Comanda, ID_Trabajador FROM Comandas WHERE ID_Trabajador IS NOT NULL

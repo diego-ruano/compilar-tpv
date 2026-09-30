@@ -46,7 +46,7 @@ mod tests {
         let malos: Vec<&String> = p
             .iter()
             .filter(|l| {
-                (l.starts_with("SCAN ") && !SCAN_PERMITIDO.iter().any(|ok| l.as_str() == *ok))
+                (l.starts_with("SCAN ") && !SCAN_PERMITIDO.contains(&l.as_str()))
                     || l.contains("MATERIALIZE")
                     || l.contains("(Estado=?)")
             })
@@ -65,6 +65,16 @@ mod tests {
     #[tokio::test]
     async fn el_plano_de_mesas_no_materializa_las_lineas_cobradas() {
         sin_recorridos("mesas_meta_all", crate::mesas::SQL_MESAS_META_ALL).await;
+    }
+
+    #[tokio::test]
+    async fn el_tablero_de_cocina_solo_lee_las_comandas_recientes() {
+        sin_recorridos("kitchen_list_today_pending", crate::mesas::SQL_COCINA_PENDIENTE).await;
+        let p = plan(crate::mesas::SQL_COCINA_PENDIENTE).await;
+        assert!(
+            p.iter().any(|l| l.contains("idx_comandas_apertura")),
+            "la cocina debe entrar por idx_comandas_apertura: {p:#?}"
+        );
     }
 
     #[tokio::test]

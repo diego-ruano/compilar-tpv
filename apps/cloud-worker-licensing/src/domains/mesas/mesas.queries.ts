@@ -496,6 +496,10 @@ export async function cobrarDetallesPlan(
 	};
 }
 
+// RI-18: se empieza por Comandas (CROSS JOIN fija el orden de las tablas en SQLite) y la fecha se
+// compara tal cual, sin datetime(). Asi entra por idx_comandas_apertura y lee solo las comandas de
+// los dos ultimos dias; antes recorria todas las lineas de la historia en cada refresco, y el
+// tablero se refresca con cada linea que se anade. Mismo cambio que kitchen_list_today_pending.
 export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 	const rs = await db.execute(`
 		SELECT
@@ -510,13 +514,13 @@ export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 			CASE WHEN EXISTS (
 				SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 			) THEN 1 ELSE 0 END AS Pagado
-		FROM Detalle_Comanda dc
-		JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda
+		FROM Comandas c
+		CROSS JOIN Detalle_Comanda dc ON dc.ID_Comanda = c.ID_Comanda
 		JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		JOIN Productos p ON p.ID_Producto = dc.ID_Producto
 		JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 		WHERE COALESCE(cat.Pasa_Cocina, 0) = 1
-			AND datetime(c.Fecha_Hora_Apertura) >= datetime('now','localtime','-2 days')
+			AND c.Fecha_Hora_Apertura >= datetime('now','localtime','-2 days')
 			AND EXISTS (
 				SELECT 1
 				FROM Detalle_Comanda dc2
@@ -526,7 +530,7 @@ export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 					AND COALESCE(cat2.Pasa_Cocina, 0) = 1
 					AND COALESCE(dc2.Estado_Cocina,'PENDIENTE') <> 'PREPARADO'
 			)
-		ORDER BY datetime(c.Fecha_Hora_Apertura) ASC, c.ID_Comanda ASC, dc.ID_Detalle ASC;
+		ORDER BY c.Fecha_Hora_Apertura ASC, c.ID_Comanda ASC, dc.ID_Detalle ASC;
 	`);
 	return rows(rs) as KitchenRow[];
 }

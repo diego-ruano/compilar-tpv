@@ -4,6 +4,7 @@ CREATE INDEX idx_asig_fecha ON Asignacion_Turnos(Fecha);
 CREATE INDEX idx_asig_trab_fecha ON Asignacion_Turnos(ID_Trabajador, Fecha);
 CREATE INDEX idx_cierre_rectificaciones_cierre ON Cierre_Rectificaciones(ID_Cierre, Fecha_Hora);
 CREATE INDEX idx_cierres_fecha ON Cierres_Caja(Fecha_Hora DESC);
+CREATE INDEX idx_comandas_apertura ON Comandas(Fecha_Hora_Apertura);
 CREATE INDEX idx_comandas_canal_estado ON Comandas(Canal, Estado);
 CREATE INDEX idx_comandas_mesa_estado ON Comandas(ID_Mesa, Estado);
 CREATE INDEX idx_comandas_reserva ON Comandas(ID_Reserva);
