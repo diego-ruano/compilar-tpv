@@ -9,7 +9,8 @@ use libsql::Value;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository, ClaseBaja};
 use tpv_contracts::cuentas::{
-    EntradaDto, LineaTicketDto, ResumenCajaDto, SalidaDto, TicketReimpresionDto,
+    CursorCuentas, EntradaDto, LineaTicketDto, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
+    SalidaDto, TicketReimpresionDto,
 };
 use tpv_domain::cuentas::{GastoData, PagoData, ESTADO_ACTIVO, ESTADO_ANULADO};
 
@@ -32,36 +33,43 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
 }
 
-/// Construye la cláusula WHERE de rango y los parámetros, dada la columna de fecha.
+/// La cláusula WHERE de un listado de caja: el rango de días y, si lo hay, el cursor de la página.
 ///
 /// `del` y `al` son días, y los dos entran: `[del, al + 1 día)`. La función va sobre el PARÁMETRO y
 /// nunca sobre la columna (RI-18): `date(columna)` impedía usar el índice por fecha y cada página de
 /// Cuentas recorría todos los cobros. Vale para una columna con hora (`Pagos.Fecha_Hora`) y para
 /// una que sólo guarda el día (`Cuentas_Gastos.Fecha`), porque las dos están en formato canónico.
-fn rango_where(
+///
+/// El cursor deja sólo lo que va DESPUÉS de esa fila en el orden de la lista (`fecha DESC, id
+/// DESC`). Se escribe `fecha <= c AND (fecha < c OR id < c_id)` y no como `(fecha, id) < (c, c_id)`
+/// para que el índice por fecha quede acotado también por arriba: es lo que hace que la página 100
+/// cueste lo mismo que la primera.
+fn where_listado(
     del: Option<String>,
     al: Option<String>,
-    fecha_expr: &str,
+    cursor: Option<&CursorCuentas>,
+    fecha_col: &str,
+    id_col: &str,
 ) -> (String, Vec<Value>) {
-    let del = del.filter(|s| !s.trim().is_empty());
-    let al = al.filter(|s| !s.trim().is_empty());
-
     let mut parts: Vec<String> = Vec::new();
     let mut params: Vec<Value> = Vec::new();
 
-    if del.is_some() {
-        parts.push(format!("{fecha_expr} >= date(?1)"));
-    }
-    let al_idx = if del.is_some() { 2 } else { 1 };
-    if al.is_some() {
-        parts.push(format!("{fecha_expr} < date(?{al_idx}, '+1 day')"));
-    }
-
-    if let Some(d) = del {
+    if let Some(d) = del.filter(|s| !s.trim().is_empty()) {
         params.push(Value::Text(d));
+        parts.push(format!("{fecha_col} >= date(?{})", params.len()));
     }
-    if let Some(a) = al {
+    if let Some(a) = al.filter(|s| !s.trim().is_empty()) {
         params.push(Value::Text(a));
+        parts.push(format!("{fecha_col} < date(?{}, '+1 day')", params.len()));
+    }
+    if let Some(c) = cursor {
+        params.push(Value::Text(c.fecha.clone()));
+        let f = params.len();
+        params.push(Value::Text(c.id.clone()));
+        let i = params.len();
+        parts.push(format!(
+            "{fecha_col} <= ?{f} AND ({fecha_col} < ?{f} OR {id_col} < ?{i})"
+        ));
     }
 
     let where_sql = if parts.is_empty() {
@@ -86,32 +94,46 @@ fn q_filter(params: &mut Vec<Value>, q: Option<String>, expr: &str) -> String {
     }
 }
 
-/// Cláusula de paginación (`LIMIT ? OFFSET ?`) a partir de page (1-based) y page_size. Si no hay
-/// paginación válida (falta page_size o es 0), devuelve cadena vacía → se listan todas las filas.
-fn paginacion(params: &mut Vec<Value>, page: Option<u32>, page_size: Option<u32>) -> String {
+/// El `LIMIT` de una página: pide UNA fila de más, que no se devuelve, para saber si hay página
+/// siguiente sin contar. `None` = sin paginar (se listan todas las filas).
+fn limite(params: &mut Vec<Value>, page_size: Option<u32>) -> (String, Option<usize>) {
     match page_size {
         Some(ps) if ps > 0 => {
-            let page = page.unwrap_or(1).max(1);
-            let offset = (page as i64 - 1) * ps as i64;
-            let li = params.len() + 1;
-            let oi = params.len() + 2;
-            params.push(Value::Integer(ps as i64));
-            params.push(Value::Integer(offset));
-            format!("LIMIT ?{li} OFFSET ?{oi}")
+            params.push(Value::Integer(ps as i64 + 1));
+            (format!("LIMIT ?{}", params.len()), Some(ps as usize))
         }
-        _ => String::new(),
+        _ => (String::new(), None),
     }
+}
+
+/// Recorta la fila de más que pidió [`limite`] y, si la había, devuelve el cursor de la siguiente
+/// página: la clave de orden de la ÚLTIMA fila que sí se devuelve.
+fn cortar_pagina<T>(
+    mut filas: Vec<(T, CursorCuentas)>,
+    page_size: Option<usize>,
+) -> (Vec<T>, Option<CursorCuentas>) {
+    let hay_mas = matches!(page_size, Some(ps) if filas.len() > ps);
+    if let Some(ps) = page_size {
+        filas.truncate(ps);
+    }
+    let siguiente = if hay_mas { filas.last().map(|(_, c)| c.clone()) } else { None };
+    (filas.into_iter().map(|(f, _)| f).collect(), siguiente)
 }
 
 /// Subquery interno de **entradas** (cobros) con las columnas calculadas (fechaHora, cliente,
 /// metodo, importe). Devuelve el SQL y los parámetros del rango de fechas.
-fn entradas_inner(del: Option<String>, al: Option<String>) -> (String, Vec<Value>) {
-    let (where_rango, params) = rango_where(del, al, "p.Fecha_Hora");
+fn entradas_inner(
+    del: Option<String>,
+    al: Option<String>,
+    cursor: Option<&CursorCuentas>,
+) -> (String, Vec<Value>) {
+    let (where_rango, params) = where_listado(del, al, cursor, "p.Fecha_Hora", "p.ID_Pago");
     let sql = format!(
         r#"
         SELECT
           p.ID_Pago AS id,
           substr(p.Fecha_Hora, 1, 16) AS fechaHora,
+          p.Fecha_Hora AS orden,
           (
             CASE
               WHEN m.Numero_Mesa = 'BARRA' THEN 'Take away'
@@ -148,13 +170,18 @@ const ENTRADAS_Q_EXPR: &str =
 
 /// Subquery interno de **salidas** (gastos) con el nombre del proveedor incluido para poder
 /// buscarlo. Devuelve el SQL y los parámetros del rango de fechas.
-fn salidas_inner(del: Option<String>, al: Option<String>) -> (String, Vec<Value>) {
-    let (where_rango, params) = rango_where(del, al, "g.Fecha");
+fn salidas_inner(
+    del: Option<String>,
+    al: Option<String>,
+    cursor: Option<&CursorCuentas>,
+) -> (String, Vec<Value>) {
+    let (where_rango, params) = where_listado(del, al, cursor, "g.Fecha", "g.ID_Gasto");
     let sql = format!(
         r#"
         SELECT
           g.ID_Gasto AS id,
           substr(g.Fecha, 1, 10) AS fechaHora,
+          g.Fecha AS orden,
           g.Tipo_Gasto AS tipoGasto,
           g.Concepto AS concepto,
           g.Importe AS importe,
@@ -177,14 +204,17 @@ impl CuentasRepository for SqliteCuentasRepository {
     /// Los cobros anulados **salen** en esta lista, marcados: es la pantalla donde se investiga un
     /// descuadre y esconderlos aquí devolvería el producto al estado que CUENTA-07 arregla. Quien
     /// sí los descuenta es `resumen` (los totales de cabecera).
-    async fn entradas(&self, filtro: CuentasFiltro) -> AppResult<Vec<EntradaDto>> {
-        let (inner, mut params) = entradas_inner(filtro.del, filtro.al);
+    async fn entradas(&self, filtro: CuentasFiltro) -> AppResult<PaginaEntradas> {
+        let (inner, mut params) = entradas_inner(filtro.del, filtro.al, filtro.cursor.as_ref());
         let q_clause = q_filter(&mut params, filtro.q, ENTRADAS_Q_EXPR);
-        let limit_clause = paginacion(&mut params, filtro.page, filtro.page_size);
+        let (limit_clause, page_size) = limite(&mut params, filtro.page_size);
+        // Se ordena por la columna tal cual (`orden`), no por la que se enseña (`fechaHora`, un
+        // `substr`): ordenar por una expresión obligaba a leer y ordenar TODO el rango incluso
+        // para la primera página (RI-18).
         let sql = format!(
             "SELECT id, fechaHora, cliente, metodo, importe, estado, anuladoEn, anuladoPor, \
-             motivoAnulacion FROM ({inner}) AS e {q_clause} \
-             ORDER BY fechaHora DESC, id DESC {limit_clause};"
+             motivoAnulacion, orden FROM ({inner}) AS e {q_clause} \
+             ORDER BY orden DESC, id DESC {limit_clause};"
         );
 
         let db = self.db.read().await;
@@ -199,28 +229,36 @@ impl CuentasRepository for SqliteCuentasRepository {
             let importe = v_dinero(row.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO);
             let estado = v_string(row.get_value(5).map_err(db_err)?)
                 .unwrap_or_else(|| ESTADO_ACTIVO.to_string());
-            out.push(EntradaDto {
-                id,
-                fecha_hora: fecha_hora.chars().take(16).collect(),
-                cliente,
-                metodo,
-                importe,
-                estado,
-                anulado_en: norm_opt_string(row.get_value(6).map_err(db_err)?),
-                anulado_por: norm_opt_string(row.get_value(7).map_err(db_err)?),
-                motivo_anulacion: norm_opt_string(row.get_value(8).map_err(db_err)?),
-            });
+            let cursor = CursorCuentas {
+                fecha: v_string(row.get_value(9).map_err(db_err)?).unwrap_or_default(),
+                id: id.clone(),
+            };
+            out.push((
+                EntradaDto {
+                    id,
+                    fecha_hora: fecha_hora.chars().take(16).collect(),
+                    cliente,
+                    metodo,
+                    importe,
+                    estado,
+                    anulado_en: norm_opt_string(row.get_value(6).map_err(db_err)?),
+                    anulado_por: norm_opt_string(row.get_value(7).map_err(db_err)?),
+                    motivo_anulacion: norm_opt_string(row.get_value(8).map_err(db_err)?),
+                },
+                cursor,
+            ));
         }
-        Ok(out)
+        let (filas, siguiente) = cortar_pagina(out, page_size);
+        Ok(PaginaEntradas { filas, siguiente })
     }
 
-    async fn salidas(&self, filtro: CuentasFiltro) -> AppResult<Vec<SalidaDto>> {
-        let (inner, mut params) = salidas_inner(filtro.del, filtro.al);
+    async fn salidas(&self, filtro: CuentasFiltro) -> AppResult<PaginaSalidas> {
+        let (inner, mut params) = salidas_inner(filtro.del, filtro.al, filtro.cursor.as_ref());
         let q_clause = q_filter(&mut params, filtro.q, SALIDAS_Q_EXPR);
-        let limit_clause = paginacion(&mut params, filtro.page, filtro.page_size);
+        let (limit_clause, page_size) = limite(&mut params, filtro.page_size);
         let sql = format!(
-            "SELECT id, fechaHora, tipoGasto, concepto, importe, proveedorId, pagadoConCaja FROM ({inner}) AS g \
-             {q_clause} ORDER BY fechaHora DESC, id DESC {limit_clause};"
+            "SELECT id, fechaHora, tipoGasto, concepto, importe, proveedorId, pagadoConCaja, orden \
+             FROM ({inner}) AS g {q_clause} ORDER BY orden DESC, id DESC {limit_clause};"
         );
 
         let db = self.db.read().await;
@@ -234,17 +272,25 @@ impl CuentasRepository for SqliteCuentasRepository {
             let importe = v_dinero(row.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO);
             let prov = norm_opt_string(row.get_value(5).map_err(db_err)?);
             let pagado_con_caja = v_i64(row.get_value(6).map_err(db_err)?).unwrap_or(0) != 0;
-            out.push(SalidaDto {
-                id,
-                fecha_hora: fecha.chars().take(10).collect(),
-                tipo_gasto: tipo,
-                concepto,
-                importe,
-                proveedor_id: prov,
-                pagado_con_caja,
-            });
+            let cursor = CursorCuentas {
+                fecha: v_string(row.get_value(7).map_err(db_err)?).unwrap_or_default(),
+                id: id.clone(),
+            };
+            out.push((
+                SalidaDto {
+                    id,
+                    fecha_hora: fecha.chars().take(10).collect(),
+                    tipo_gasto: tipo,
+                    concepto,
+                    importe,
+                    proveedor_id: prov,
+                    pagado_con_caja,
+                },
+                cursor,
+            ));
         }
-        Ok(out)
+        let (filas, siguiente) = cortar_pagina(out, page_size);
+        Ok(PaginaSalidas { filas, siguiente })
     }
 
     async fn resumen(
@@ -256,7 +302,7 @@ impl CuentasRepository for SqliteCuentasRepository {
         let db = self.db.read().await;
 
         // ── Entradas: total + total por método + conteo, sobre todo el rango + búsqueda. ──
-        let (entradas_inner_sql, mut e_params) = entradas_inner(del.clone(), al.clone());
+        let (entradas_inner_sql, mut e_params) = entradas_inner(del.clone(), al.clone(), None);
         let e_q = q_filter(&mut e_params, q.clone(), ENTRADAS_Q_EXPR);
         // Los cobros anulados NO entran en los totales: un ticket anulado no es una venta. Y se
         // cuentan aparte porque «3 anulaciones por 40 €» junto a un descuadre de 40 € se explica
@@ -296,7 +342,7 @@ impl CuentasRepository for SqliteCuentasRepository {
         };
 
         // ── Salidas: total + conteo. ──
-        let (salidas_inner_sql, mut s_params) = salidas_inner(del, al);
+        let (salidas_inner_sql, mut s_params) = salidas_inner(del, al, None);
         let s_q = q_filter(&mut s_params, q, SALIDAS_Q_EXPR);
         let s_sql = format!(
             "SELECT IFNULL(SUM(importe), 0), COUNT(*) FROM ({salidas_inner_sql}) AS g {s_q};"
@@ -1648,12 +1694,143 @@ mod tests_arqueo_ciego {
         assert_eq!(res.count_anuladas, 1);
         assert_eq!(res.total_anulado, eur(30.0));
 
-        let filas = r.entradas(Default::default()).await.unwrap();
+        let filas = r.entradas(Default::default()).await.unwrap().filas;
         assert_eq!(filas.len(), 2, "en la lista salen los dos: aquí se investiga");
         let anulada = filas.iter().find(|e| e.id == "p2").unwrap();
         assert_eq!(anulada.estado, "ANULADO");
         assert_eq!(anulada.anulado_por.as_deref(), Some("Marta"));
         assert_eq!(anulada.motivo_anulacion.as_deref(), Some("x"));
+    }
+}
+
+#[cfg(test)]
+mod tests_paginacion {
+    //! La lista de Cuentas pagina por clave (RI-18): cada página empieza justo después de la última
+    //! fila de la anterior. Lo que no puede pasar es que una fila se repita o se pierda entre dos
+    //! páginas, que es justo lo que pasa si el cursor y el orden no miran las mismas columnas.
+
+    use super::tests_comunes::*;
+    use super::*;
+
+    /// Siete cobros: tres en el MISMO segundo (el orden entre ellos lo decide el id) y dos en el
+    /// mismo minuto pero distinto segundo (lo decide la fecha completa, no la recortada).
+    const COBROS: &[&str] = &[
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
+           VALUES ('com', 'BARRA', '2026-03-01 09:00:00', 'Pagada');",
+        "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES
+           ('a', 'com', '2026-03-01 10:00:00', 'Efectivo', 100, 'TOTAL'),
+           ('b', 'com', '2026-03-01 10:00:00', 'Efectivo', 200, 'TOTAL'),
+           ('c', 'com', '2026-03-01 10:00:00', 'Tarjeta', 300, 'TOTAL'),
+           ('d', 'com', '2026-03-01 10:05:07', 'Efectivo', 400, 'TOTAL'),
+           ('e', 'com', '2026-03-01 10:05:59', 'Efectivo', 500, 'TOTAL'),
+           ('f', 'com', '2026-03-02 08:00:00', 'Efectivo', 600, 'TOTAL'),
+           ('g', 'com', '2026-02-27 20:00:00', 'Efectivo', 700, 'TOTAL');",
+    ];
+
+    async fn todas_las_paginas(
+        r: &SqliteCuentasRepository,
+        page_size: u32,
+        del: Option<&str>,
+    ) -> Vec<Vec<String>> {
+        let mut paginas = Vec::new();
+        let mut cursor = None;
+        loop {
+            let p = r
+                .entradas(CuentasFiltro {
+                    del: del.map(String::from),
+                    al: None,
+                    q: None,
+                    page_size: Some(page_size),
+                    cursor: cursor.take(),
+                })
+                .await
+                .unwrap();
+            paginas.push(p.filas.iter().map(|e| e.id.clone()).collect());
+            match p.siguiente {
+                Some(c) => cursor = Some(c),
+                None => break,
+            }
+            assert!(paginas.len() < 20, "la paginación no termina");
+        }
+        paginas
+    }
+
+    #[tokio::test]
+    async fn recorrer_las_paginas_da_la_lista_entera_sin_repetir_ni_perder() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, COBROS).await;
+        let r = SqliteCuentasRepository::new(db.clone());
+
+        let entera: Vec<String> = r
+            .entradas(Default::default())
+            .await
+            .unwrap()
+            .filas
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        // Fecha completa DESC y, a igual fecha, id DESC.
+        assert_eq!(entera, ["f", "e", "d", "c", "b", "a", "g"]);
+
+        for tam in 1..=8 {
+            let paginas = todas_las_paginas(&r, tam, None).await;
+            assert_eq!(
+                paginas.concat(),
+                entera,
+                "con páginas de {tam}, alguna fila se repite o se pierde: {paginas:?}"
+            );
+            assert!(paginas.iter().all(|p| p.len() <= tam as usize));
+            // Cuando el total es múltiplo del tamaño, la última página llena no dice «hay más».
+            assert!(!paginas.last().unwrap().is_empty() || paginas.len() == 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn el_cursor_lleva_la_fecha_completa_y_convive_con_el_rango() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, COBROS).await;
+        let r = SqliteCuentasRepository::new(db.clone());
+
+        let p1 = r
+            .entradas(CuentasFiltro { page_size: Some(2), ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(
+            p1.siguiente,
+            Some(CursorCuentas { fecha: "2026-03-01 10:05:59".into(), id: "e".into() }),
+            "el cursor es la fecha con segundos, no la recortada que se enseña"
+        );
+        assert_eq!(p1.filas[1].fecha_hora, "2026-03-01 10:05");
+
+        // Con rango desde el día 1, el cobro del 27 de febrero no aparece en ninguna página.
+        let paginas = todas_las_paginas(&r, 2, Some("2026-03-01")).await;
+        assert_eq!(paginas.concat(), ["f", "e", "d", "c", "b", "a"]);
+    }
+
+    #[tokio::test]
+    async fn los_gastos_paginan_igual_con_una_fecha_sin_hora() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &["INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto) VALUES
+                 ('g1', '2026-03-01', 'Hielo', 500, 'Otro'),
+                 ('g2', '2026-03-01', 'Pan', 300, 'Otro'),
+                 ('g3', '2026-03-02', 'Luz', 9000, 'Otro');"],
+        )
+        .await;
+        let r = SqliteCuentasRepository::new(db.clone());
+
+        let p1 = r
+            .salidas(CuentasFiltro { page_size: Some(2), ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(p1.filas.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(), ["g3", "g2"]);
+        let p2 = r
+            .salidas(CuentasFiltro { page_size: Some(2), cursor: p1.siguiente, ..Default::default() })
+            .await
+            .unwrap();
+        assert_eq!(p2.filas.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(), ["g1"]);
+        assert!(p2.siguiente.is_none());
     }
 }
 

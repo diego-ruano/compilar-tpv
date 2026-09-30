@@ -267,11 +267,14 @@ export async function esperarMesaLibre(idMesa: string): Promise<void> {
     if (!libre) throw new Error(`La mesa ${idMesa} sigue en ${ultimo} tras el cobro.`);
 }
 
-/** Las entradas de caja (cobros) que ve la pantalla de Cuentas. Sólo LEE. */
+/** Las entradas de caja (cobros) que ve la pantalla de Cuentas. Sólo LEE. Sin `page_size` vuelve
+ *  todo en una página; lo que viaja es `{ filas, siguiente }` (RI-18), no la lista a secas. */
 export async function entradasDeCaja(): Promise<
     Array<{ id: string; importe: number; metodo: string }>
 > {
-    return await leerDeLaApp("cuentas_get_entradas", {
-        args: { del: null, al: null, q: null, page: null, page_size: null },
-    });
+    const pagina = await leerDeLaApp<{ filas: Array<{ id: string; importe: number; metodo: string }> }>(
+        "cuentas_get_entradas",
+        { args: { del: null, al: null, q: null, page_size: null } },
+    );
+    return pagina.filas;
 }

@@ -119,6 +119,8 @@ import casoCtaEntradas from "../../../tests/contract/lecturas/casos/cuentas/entr
 import goldenCtaEntradas from "../../../tests/contract/lecturas/golden/cuentas/entradas.json";
 import casoCtaEntradasPag from "../../../tests/contract/lecturas/casos/cuentas/entradas_busqueda_paginada.json";
 import goldenCtaEntradasPag from "../../../tests/contract/lecturas/golden/cuentas/entradas_busqueda_paginada.json";
+import casoCtaEntradasPag1 from "../../../tests/contract/lecturas/casos/cuentas/entradas_primera_pagina.json";
+import goldenCtaEntradasPag1 from "../../../tests/contract/lecturas/golden/cuentas/entradas_primera_pagina.json";
 import casoCtaSalidas from "../../../tests/contract/lecturas/casos/cuentas/salidas.json";
 import goldenCtaSalidas from "../../../tests/contract/lecturas/golden/cuentas/salidas.json";
 import casoCtaCierreUltimo from "../../../tests/contract/lecturas/casos/cuentas/cierre_ultimo.json";
@@ -255,6 +257,11 @@ const CASOS = [
 		nombre: "cuentas_entradas_busqueda_paginada",
 		caso: casoCtaEntradasPag,
 		golden: goldenCtaEntradasPag,
+	},
+	{
+		nombre: "cuentas_entradas_primera_pagina",
+		caso: casoCtaEntradasPag1,
+		golden: goldenCtaEntradasPag1,
 	},
 	{ nombre: "cuentas_salidas", caso: casoCtaSalidas, golden: goldenCtaSalidas },
 	{ nombre: "cuentas_resumen", caso: casoCtaResumen, golden: goldenCtaResumen },
@@ -422,6 +429,11 @@ function omitirCampos(v: any, campos: string[]): any {
 
 /** Corre la lectura del caso por su camino real. El `switch` es el punto de extensión: una lectura
  *  nueva añade su brazo aquí y en el lado Rust (`ejecutar_lectura`). */
+/** El cursor de un listado de caja, como lo compone `listadoSchema` desde sus dos parámetros. */
+function cursorDe(e: any): { fecha: string; id: string } | null {
+	return e.cursor_fecha && e.cursor_id ? { fecha: e.cursor_fecha, id: e.cursor_id } : null;
+}
+
 async function ejecutarLectura(db: any, caso: any): Promise<any> {
 	const e = caso.entrada ?? {};
 	switch (caso.lectura) {
@@ -430,9 +442,9 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 		case "clientes.form":
 			return clienteForm(db, e.id_cliente);
 		case "cuentas.entradas":
-			return entradas(db, e.del ?? null, e.al ?? null, e.q ?? null, e.page ?? null, e.page_size ?? null);
+			return entradas(db, e.del ?? null, e.al ?? null, e.q ?? null, e.page_size ?? null, cursorDe(e));
 		case "cuentas.salidas":
-			return salidas(db, e.del ?? null, e.al ?? null, e.q ?? null, e.page ?? null, e.page_size ?? null);
+			return salidas(db, e.del ?? null, e.al ?? null, e.q ?? null, e.page_size ?? null, cursorDe(e));
 		case "cuentas.cierre_ultimo":
 			return ultimoCierre(db);
 		case "cuentas.cierre_listar":

@@ -64,6 +64,36 @@ pub struct TicketReimpresionDto {
     pub anulado: bool,
 }
 
+/// Dónde empieza la página siguiente de un listado de caja: la clave de orden de la ÚLTIMA fila de
+/// la página actual. Paginar por clave y no por `OFFSET` (RI-18) es lo que hace que la página 100 de
+/// un año cueste lo mismo que la primera: con `OFFSET` había que leer y descartar todo lo anterior.
+///
+/// `fecha` es la columna de orden tal cual (`Pagos.Fecha_Hora` con segundos, `Cuentas_Gastos.Fecha`
+/// sólo el día), no la que se enseña (`fecha_hora`, recortada): con la recortada, dos cobros del
+/// mismo minuto no tendrían un orden estable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct CursorCuentas {
+    pub fecha: String,
+    pub id: String,
+}
+
+/// Una página de entradas. `siguiente` es `None` cuando no hay más filas (o no se pidió paginar).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct PaginaEntradas {
+    pub filas: Vec<EntradaDto>,
+    pub siguiente: Option<CursorCuentas>,
+}
+
+/// Una página de salidas. Ver [`PaginaEntradas`].
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct PaginaSalidas {
+    pub filas: Vec<SalidaDto>,
+    pub siguiente: Option<CursorCuentas>,
+}
+
 /// Fila de salidas (gastos).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
@@ -94,14 +124,31 @@ pub struct CuentasRangoArgs {
     #[serde(default)]
     #[ts(optional)]
     pub q: Option<String>,
-    /// Página 1-based. Si es `None`, se devuelven **todas** las filas (usado por el PDF).
-    #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub page: Option<u32>,
-    /// Tamaño de página. Si es `None`/0 junto con `page`, se ignora la paginación.
+    /// Tamaño de página. `None`/0 = sin paginar: se devuelven **todas** las filas (el PDF).
     #[serde(default)]
     #[ts(optional, type = "number")]
     pub page_size: Option<u32>,
+    /// La página empieza justo después de esta fila (el `siguiente` de la página anterior, ver
+    /// [`CursorCuentas`]). Van planos y no como un objeto porque hacia el worker viajan como
+    /// parámetros de la URL. Sin los dos, es la primera página.
+    #[serde(default)]
+    #[ts(optional)]
+    pub cursor_fecha: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub cursor_id: Option<String>,
+}
+
+impl CuentasRangoArgs {
+    /// El cursor, si vienen sus dos partes (una sola no sirve para nada: se ignora).
+    pub fn cursor(&self) -> Option<CursorCuentas> {
+        match (&self.cursor_fecha, &self.cursor_id) {
+            (Some(fecha), Some(id)) if !fecha.trim().is_empty() && !id.trim().is_empty() => {
+                Some(CursorCuentas { fecha: fecha.clone(), id: id.clone() })
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el

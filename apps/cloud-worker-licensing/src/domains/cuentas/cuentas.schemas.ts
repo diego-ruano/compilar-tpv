@@ -79,14 +79,21 @@ const optInt = z
 		return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 	});
 
-// Listado de caja con búsqueda de texto + paginación (CUENTA-05).
-export const listadoSchema = z.object({
-	del: z.string().nullish().transform(cleanOptional),
-	al: z.string().nullish().transform(cleanOptional),
-	q: z.string().nullish().transform(cleanOptional),
-	page: optInt,
-	page_size: optInt,
-});
+// Listado de caja con búsqueda de texto + paginación por clave (CUENTA-05, RI-18). El cursor viaja
+// en dos parámetros planos; con uno solo no dice dónde empezar y es la primera página.
+export const listadoSchema = z
+	.object({
+		del: z.string().nullish().transform(cleanOptional),
+		al: z.string().nullish().transform(cleanOptional),
+		q: z.string().nullish().transform(cleanOptional),
+		page_size: optInt,
+		cursor_fecha: z.string().nullish().transform(cleanOptional),
+		cursor_id: z.string().nullish().transform(cleanOptional),
+	})
+	.transform(({ cursor_fecha, cursor_id, ...resto }) => ({
+		...resto,
+		cursor: cursor_fecha && cursor_id ? { fecha: cursor_fecha, id: cursor_id } : null,
+	}));
 
 export type CreateGastoInput = Omit<
 	ContractCreateGastoInput,

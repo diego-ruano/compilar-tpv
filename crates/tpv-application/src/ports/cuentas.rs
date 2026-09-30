@@ -2,7 +2,9 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto, TicketReimpresionDto};
+use tpv_contracts::cuentas::{
+    CursorCuentas, PaginaEntradas, PaginaSalidas, ResumenCajaDto, TicketReimpresionDto,
+};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
 use crate::error::AppResult;
@@ -72,21 +74,21 @@ impl ClaseBaja {
     }
 }
 
-/// Filtros de listado de caja: rango, búsqueda de texto y paginación (`page`/`page_size` en `None`
-/// => sin paginar, para exportaciones como el PDF).
+/// Filtros de listado de caja: rango, búsqueda de texto y paginación por clave (`page_size` en
+/// `None` => sin paginar, para exportaciones como el PDF; `cursor` en `None` => primera página).
 #[derive(Debug, Clone, Default)]
 pub struct CuentasFiltro {
     pub del: Option<String>,
     pub al: Option<String>,
     pub q: Option<String>,
-    pub page: Option<u32>,
     pub page_size: Option<u32>,
+    pub cursor: Option<CursorCuentas>,
 }
 
 #[async_trait]
 pub trait CuentasRepository: Send + Sync {
-    async fn entradas(&self, filtro: CuentasFiltro) -> AppResult<Vec<EntradaDto>>;
-    async fn salidas(&self, filtro: CuentasFiltro) -> AppResult<Vec<SalidaDto>>;
+    async fn entradas(&self, filtro: CuentasFiltro) -> AppResult<PaginaEntradas>;
+    async fn salidas(&self, filtro: CuentasFiltro) -> AppResult<PaginaSalidas>;
     /// Resumen agregado de caja (totales por método y conteos) sobre todo el rango + búsqueda.
     async fn resumen(
         &self,

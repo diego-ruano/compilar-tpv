@@ -6,7 +6,10 @@ import { deLaBase } from "../../lib/dinero";
 import type {
 	CierreDto,
 	CierreResumenDto,
+	CursorCuentas,
 	EntradaDto,
+	PaginaEntradas,
+	PaginaSalidas,
 	ResumenCajaDto,
 	SalidaDto,
 } from "@tpv/contracts";
@@ -23,18 +26,52 @@ function rows(rs: any): any[] {
 	});
 }
 
-function rangoWhere(del: string | null, al: string | null, fechaExpr: string) {
+// El rango de días y, si lo hay, el cursor de la página. Paridad con
+// `tpv-infra-sqlite::cuentas::where_listado` (RI-18):
+// - `del`/`al` son días y los dos entran: `[del, al + 1 día)`. La función va sobre el PARÁMETRO y no
+//   sobre la columna, o el índice por fecha no se puede usar.
+// - El cursor deja sólo lo que va DESPUÉS de esa fila en el orden de la lista (fecha DESC, id DESC).
+//   Escrito así, y no como `(fecha, id) < (?, ?)`, el índice queda acotado también por arriba.
+function rangoWhere(
+	del: string | null,
+	al: string | null,
+	cursor: CursorCuentas | null,
+	fechaCol: string,
+	idCol: string,
+) {
 	const parts: string[] = [];
 	const args: any[] = [];
 	if (del) {
 		args.push(del);
-		parts.push(`date(${fechaExpr}) >= date(?${args.length})`);
+		parts.push(`${fechaCol} >= date(?${args.length})`);
 	}
 	if (al) {
 		args.push(al);
-		parts.push(`date(${fechaExpr}) <= date(?${args.length})`);
+		parts.push(`${fechaCol} < date(?${args.length}, '+1 day')`);
+	}
+	if (cursor) {
+		args.push(cursor.fecha);
+		const f = args.length;
+		args.push(cursor.id);
+		const i = args.length;
+		parts.push(`${fechaCol} <= ?${f} AND (${fechaCol} < ?${f} OR ${idCol} < ?${i})`);
 	}
 	return { whereSql: parts.length ? `WHERE ${parts.join(" AND ")}` : "", args };
+}
+
+// Pide UNA fila de más para saber si hay página siguiente sin contar; `cortarPagina` la quita y
+// devuelve el cursor de la última que sí se enseña.
+function cortarPagina<T extends { id: string }>(
+	filas: (T & { orden: string })[],
+	pageSize: number | null,
+): { filas: T[]; siguiente: CursorCuentas | null } {
+	const hayMas = pageSize != null && pageSize > 0 && filas.length > pageSize;
+	const visibles = hayMas ? filas.slice(0, pageSize!) : filas;
+	const ultima = visibles[visibles.length - 1];
+	return {
+		filas: visibles.map(({ orden: _orden, ...f }) => f as unknown as T),
+		siguiente: hayMas && ultima ? { fecha: String(ultima.orden), id: String(ultima.id) } : null,
+	};
 }
 
 // Añade búsqueda de texto (LIKE sobre las columnas ya calculadas) y paginación a `args`, numerando
@@ -43,7 +80,6 @@ function applyFilters(
 	args: any[],
 	q: string | null,
 	expr: string,
-	page: number | null,
 	pageSize: number | null,
 ): { qClause: string; limitClause: string } {
 	let qClause = "";
@@ -53,12 +89,8 @@ function applyFilters(
 	}
 	let limitClause = "";
 	if (pageSize && pageSize > 0) {
-		const pg = Math.max(1, page ?? 1);
-		args.push(pageSize);
-		const li = args.length;
-		args.push((pg - 1) * pageSize);
-		const oi = args.length;
-		limitClause = `LIMIT ?${li} OFFSET ?${oi}`;
+		args.push(pageSize + 1);
+		limitClause = `LIMIT ?${args.length}`;
 	}
 	return { qClause, limitClause };
 }
@@ -67,6 +99,7 @@ const entradasInner = (whereRango: string) => `
 	SELECT
 		CAST(p.ID_Pago AS TEXT) AS id,
 		substr(p.Fecha_Hora, 1, 16) AS fecha_hora,
+		p.Fecha_Hora AS orden,
 		(
 			CASE
 				WHEN m.Numero_Mesa = 'BARRA' THEN 'Take away'
@@ -101,6 +134,7 @@ const salidasInner = (whereRango: string) => `
 	SELECT
 		CAST(g.ID_Gasto AS TEXT) AS id,
 		substr(g.Fecha, 1, 10) AS fecha_hora,
+		g.Fecha AS orden,
 		g.Tipo_Gasto AS tipo_gasto,
 		g.Concepto AS concepto,
 		g.Importe AS importe,
@@ -120,25 +154,25 @@ export async function entradas(
 	del: string | null,
 	al: string | null,
 	q: string | null = null,
-	page: number | null = null,
 	pageSize: number | null = null,
-): Promise<EntradaDto[]> {
-	const { whereSql, args } = rangoWhere(del, al, "p.Fecha_Hora");
-	const { qClause, limitClause } = applyFilters(args, q, ENTRADAS_Q_EXPR, page, pageSize);
+	cursor: CursorCuentas | null = null,
+): Promise<PaginaEntradas> {
+	const { whereSql, args } = rangoWhere(del, al, cursor, "p.Fecha_Hora", "p.ID_Pago");
+	const { qClause, limitClause } = applyFilters(args, q, ENTRADAS_Q_EXPR, pageSize);
 	// Sin filtro por estado: los cobros anulados SALEN, marcados (CUENTA-07). Es la pantalla
 	// donde se investiga un descuadre; quien no los cuenta es `resumen`.
 	const rs = await db.execute({
 		sql: `
 			SELECT id, fecha_hora, cliente, metodo, importe, estado, anulado_en, anulado_por,
-			       motivo_anulacion
+			       motivo_anulacion, orden
 			FROM (${entradasInner(whereSql)}) AS e
 			${qClause}
-			ORDER BY fecha_hora DESC, id DESC
+			ORDER BY orden DESC, id DESC
 			${limitClause};
 		`,
 		args,
 	});
-	return rows(rs) as EntradaDto[];
+	return cortarPagina(rows(rs) as (EntradaDto & { orden: string })[], pageSize);
 }
 
 export async function salidas(
@@ -146,23 +180,28 @@ export async function salidas(
 	del: string | null,
 	al: string | null,
 	q: string | null = null,
-	page: number | null = null,
 	pageSize: number | null = null,
-): Promise<SalidaDto[]> {
-	const { whereSql, args } = rangoWhere(del, al, "g.Fecha");
-	const { qClause, limitClause } = applyFilters(args, q, SALIDAS_Q_EXPR, page, pageSize);
+	cursor: CursorCuentas | null = null,
+): Promise<PaginaSalidas> {
+	const { whereSql, args } = rangoWhere(del, al, cursor, "g.Fecha", "g.ID_Gasto");
+	const { qClause, limitClause } = applyFilters(args, q, SALIDAS_Q_EXPR, pageSize);
 	const rs = await db.execute({
 		sql: `
-			SELECT id, fecha_hora, tipo_gasto, concepto, importe, proveedor_id, pagado_con_caja
+			SELECT id, fecha_hora, tipo_gasto, concepto, importe, proveedor_id, pagado_con_caja, orden
 			FROM (${salidasInner(whereSql)}) AS g
 			${qClause}
-			ORDER BY fecha_hora DESC, id DESC
+			ORDER BY orden DESC, id DESC
 			${limitClause};
 		`,
 		args,
 	});
 	// SQLite guarda el booleano como 0/1; la Main lo devuelve como `bool` y la lectura tiene que ser igual.
-	return rows(rs).map((r) => ({ ...r, pagado_con_caja: Number(r.pagado_con_caja ?? 0) !== 0 })) as SalidaDto[];
+	return cortarPagina(
+		rows(rs).map((r) => ({ ...r, pagado_con_caja: Number(r.pagado_con_caja ?? 0) !== 0 })) as (SalidaDto & {
+			orden: string;
+		})[],
+		pageSize,
+	);
 }
 
 // Resumen agregado (totales por método + conteos) sobre TODO el rango + búsqueda, para que la
@@ -173,8 +212,8 @@ export async function resumen(
 	al: string | null,
 	q: string | null = null,
 ): Promise<ResumenCajaDto> {
-	const eRango = rangoWhere(del, al, "p.Fecha_Hora");
-	const { qClause: eQ } = applyFilters(eRango.args, q, ENTRADAS_Q_EXPR, null, null);
+	const eRango = rangoWhere(del, al, null, "p.Fecha_Hora", "p.ID_Pago");
+	const { qClause: eQ } = applyFilters(eRango.args, q, ENTRADAS_Q_EXPR, null);
 	// Los anulados no cuentan en los totales (un ticket anulado no es una venta) y se cuentan
 	// aparte, que es el dato que hace visible la sisa (CUENTA-07).
 	const eRs = await db.execute({
@@ -193,8 +232,8 @@ export async function resumen(
 	});
 	const e = rows(eRs)[0] ?? {};
 
-	const sRango = rangoWhere(del, al, "g.Fecha");
-	const { qClause: sQ } = applyFilters(sRango.args, q, SALIDAS_Q_EXPR, null, null);
+	const sRango = rangoWhere(del, al, null, "g.Fecha", "g.ID_Gasto");
+	const { qClause: sQ } = applyFilters(sRango.args, q, SALIDAS_Q_EXPR, null);
 	const sRs = await db.execute({
 		sql: `
 			SELECT IFNULL(SUM(importe), 0) AS ts, COUNT(*) AS cs

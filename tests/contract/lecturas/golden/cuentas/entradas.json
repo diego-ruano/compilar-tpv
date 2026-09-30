@@ -1,57 +1,60 @@
-[
-  {
-    "anulado_en": null,
-    "anulado_por": null,
-    "cliente": "Venta",
-    "estado": "ACTIVO",
-    "fecha_hora": "2026-05-12 20:00",
-    "id": "pago-d",
-    "importe": 300,
-    "metodo": "Efectivo",
-    "motivo_anulacion": null
-  },
-  {
-    "anulado_en": null,
-    "anulado_por": null,
-    "cliente": "Take away",
-    "estado": "ACTIVO",
-    "fecha_hora": "2026-05-12 20:00",
-    "id": "pago-c",
-    "importe": 725,
-    "metodo": "Efectivo",
-    "motivo_anulacion": null
-  },
-  {
-    "anulado_en": null,
-    "anulado_por": null,
-    "cliente": "Mesa 7",
-    "estado": "ACTIVO",
-    "fecha_hora": "2026-05-11 13:05",
-    "id": "pago-b",
-    "importe": 1000,
-    "metodo": "Tarjeta",
-    "motivo_anulacion": null
-  },
-  {
-    "anulado_en": null,
-    "anulado_por": null,
-    "cliente": "Mesa 7 / Ana Gomez",
-    "estado": "ACTIVO",
-    "fecha_hora": "2026-05-10 13:05",
-    "id": "pago-a",
-    "importe": 2450,
-    "metodo": "Efectivo",
-    "motivo_anulacion": null
-  },
-  {
-    "anulado_en": "2026-05-14 09:00:00",
-    "anulado_por": "Marta Ruiz",
-    "cliente": "Venta",
-    "estado": "ANULADO",
-    "fecha_hora": "2026-05-09 10:00",
-    "id": "pago-e",
-    "importe": 4000,
-    "metodo": "Efectivo",
-    "motivo_anulacion": "se lo llevo puesto"
-  }
-]
+{
+  "filas": [
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Venta",
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-12 20:00",
+      "id": "pago-d",
+      "importe": 300,
+      "metodo": "Efectivo",
+      "motivo_anulacion": null
+    },
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Take away",
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-12 20:00",
+      "id": "pago-c",
+      "importe": 725,
+      "metodo": "Efectivo",
+      "motivo_anulacion": null
+    },
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Mesa 7",
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-11 13:05",
+      "id": "pago-b",
+      "importe": 1000,
+      "metodo": "Tarjeta",
+      "motivo_anulacion": null
+    },
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Mesa 7 / Ana Gomez",
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-10 13:05",
+      "id": "pago-a",
+      "importe": 2450,
+      "metodo": "Efectivo",
+      "motivo_anulacion": null
+    },
+    {
+      "anulado_en": "2026-05-14 09:00:00",
+      "anulado_por": "Marta Ruiz",
+      "cliente": "Venta",
+      "estado": "ANULADO",
+      "fecha_hora": "2026-05-09 10:00",
+      "id": "pago-e",
+      "importe": 4000,
+      "metodo": "Efectivo",
+      "motivo_anulacion": "se lo llevo puesto"
+    }
+  ],
+  "siguiente": null
+}

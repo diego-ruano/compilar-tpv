@@ -1,5 +1,5 @@
 {
-  "descripcion": "El mismo listado con rango + busqueda de texto + paginacion (CUENTA-05). La busqueda va sobre las columnas YA calculadas (el LIKE mira el 'cliente' compuesto, no las de origen) y la paginacion es LIMIT/OFFSET sobre ese resultado, asi que si un lado numera los placeholders distinto o pagina antes de filtrar, la pagina 2 sale con otras filas.",
+  "descripcion": "El mismo listado con rango + busqueda de texto + paginacion POR CLAVE (CUENTA-05, RI-18). La busqueda va sobre las columnas YA calculadas (el LIKE mira el 'cliente' compuesto, no las de origen) y la pagina 2 empieza despues del cursor que devolvio la 1 (pago-3, ver entradas_primera_pagina): si un lado numera los placeholders distinto, compara el cursor con otra columna o pagina antes de filtrar, sale con otras filas.",
   "lectura": "cuentas.entradas",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
@@ -15,7 +15,8 @@
     "del": "2026-05-01",
     "al": "2026-05-31",
     "q": "efectivo",
-    "page": 2,
-    "page_size": 2
+    "page_size": 2,
+    "cursor_fecha": "2026-05-10 12:00:00",
+    "cursor_id": "pago-3"
   }
 }

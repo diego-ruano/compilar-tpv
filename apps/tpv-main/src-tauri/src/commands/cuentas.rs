@@ -17,8 +17,8 @@ use tpv_application::use_cases::cuentas as uc;
 use tpv_application::use_cases::rectificacion_caja as rect;
 use tpv_contracts::cierre_caja::{CambioCajaInput, ImpactoCajaDto};
 use tpv_contracts::cuentas::{
-    AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, EntradaDto,
-    ResumenCajaDto, SalidaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
+    AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, PaginaEntradas,
+    PaginaSalidas, ResumenCajaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
 };
 use crate::{AppState, ADMIN};
 use tpv_contracts::errors::AppErrorDto;
@@ -27,7 +27,7 @@ use tpv_contracts::errors::AppErrorDto;
 pub async fn cuentas_get_entradas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
-) -> Result<Vec<EntradaDto>, AppErrorDto> {
+) -> Result<PaginaEntradas, AppErrorDto> {
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_entradas(repo.as_ref(), args).await?)
@@ -37,7 +37,7 @@ pub async fn cuentas_get_entradas(
 pub async fn cuentas_get_salidas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
-) -> Result<Vec<SalidaDto>, AppErrorDto> {
+) -> Result<PaginaSalidas, AppErrorDto> {
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_salidas(repo.as_ref(), args).await?)

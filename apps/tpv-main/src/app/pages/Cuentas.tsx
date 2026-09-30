@@ -58,8 +58,9 @@ import {
     useDeleteGasto,
     useUpdatePago,
     useAnularPago,
+    usePilaDeCursores,
 } from "../../features/cuentas/cuentasQueries";
-import { CUENTAS_PAGE_SIZE, cuentasPrevisualizarCambio } from "../../features/cuentas/cuentasApis";
+import { cuentasPrevisualizarCambio } from "../../features/cuentas/cuentasApis";
 
 // PDF
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
@@ -204,9 +205,11 @@ export default function Cuentas() {
 
     const rangoInvalido = !!del && !!al && del > al;
 
-    // Paginación (CUENTA-05): página 1-based por panel.
-    const [pageEntradas, setPageEntradas] = useState(1);
-    const [pageSalidas, setPageSalidas] = useState(1);
+    // Paginación por clave (CUENTA-05, RI-18), una por panel.
+    const paginasEntradas = usePilaDeCursores();
+    const paginasSalidas = usePilaDeCursores();
+    const { reiniciar: reiniciarEntradas } = paginasEntradas;
+    const { reiniciar: reiniciarSalidas } = paginasSalidas;
 
     // Búsqueda server-side con debounce: el texto viaja al backend (no filtra en cliente).
     const [qDebounced, setQDebounced] = useState("");
@@ -217,17 +220,17 @@ export default function Cuentas() {
 
     // Al cambiar rango o búsqueda, volver a la primera página.
     useEffect(() => {
-        setPageEntradas(1);
-        setPageSalidas(1);
-    }, [del, al, qDebounced]);
+        reiniciarEntradas();
+        reiniciarSalidas();
+    }, [del, al, qDebounced, reiniciarEntradas, reiniciarSalidas]);
 
     // Lecturas cacheadas (TanStack Query). Rango + búsqueda + página forman la queryKey.
     const entradasQuery = useCuentasEntradas(
-        { del, al, q: qDebounced, page: pageEntradas },
+        { del, al, q: qDebounced, cursor: paginasEntradas.cursor },
         !rangoInvalido,
     );
     const salidasQuery = useCuentasSalidas(
-        { del, al, q: qDebounced, page: pageSalidas },
+        { del, al, q: qDebounced, cursor: paginasSalidas.cursor },
         !rangoInvalido,
     );
     // Totales de cabecera sobre TODO el rango (no solo la página visible).
@@ -259,10 +262,10 @@ export default function Cuentas() {
         return m;
     }, [proveedores]);
 
-    const entradasDB = useMemo(() => entradasQuery.data ?? [], [entradasQuery.data]);
+    const entradasDB = useMemo(() => entradasQuery.data?.filas ?? [], [entradasQuery.data]);
     const loadingEntradas = entradasQuery.isFetching;
 
-    const salidasDB = useMemo(() => salidasQuery.data ?? [], [salidasQuery.data]);
+    const salidasDB = useMemo(() => salidasQuery.data?.filas ?? [], [salidasQuery.data]);
     const loadingSalidas = salidasQuery.isFetching;
 
     // Wrapper que conserva el nombre/uso previo: refresca proveedores bajo demanda.
@@ -435,14 +438,13 @@ export default function Cuentas() {
     const totalSalidas = resumen?.total_salidas ?? CERO;
     const balance = restar(totalEntradas, totalSalidas);
 
-    // Controles de paginación: hay "siguiente" si aún quedan filas por debajo del total del resumen.
-    // Los anulados salen en la lista pero NO cuentan en `countEntradas` (no son ventas), así que
-    // la paginación tiene que sumar los dos o la última página se quedaría corta.
-    const hasNextEntradas =
-        pageEntradas * CUENTAS_PAGE_SIZE <
-        (resumen?.count_entradas ?? 0) + (resumen?.count_anuladas ?? 0);
-    const hasNextSalidas =
-        pageSalidas * CUENTAS_PAGE_SIZE < (resumen?.count_salidas ?? 0);
+    // Hay "siguiente" si el backend devolvió dónde empieza (RI-18). Lo sabe él, que pide una fila
+    // de más: antes se deducía de los contadores del resumen, que son otra consulta y cuentan otra
+    // cosa (los anulados salen en la lista pero no son ventas).
+    const siguienteEntradas = entradasQuery.data?.siguiente ?? null;
+    const siguienteSalidas = salidasQuery.data?.siguiente ?? null;
+    const hasNextEntradas = siguienteEntradas != null;
+    const hasNextSalidas = siguienteSalidas != null;
 
     const abrirModalGasto = async () => {
         setErrGasto(null);
@@ -791,13 +793,13 @@ export default function Cuentas() {
             if (!filePath) return;
 
             // El PDF refleja TODO el rango (no la página visible): traemos todas las filas sin
-            // paginar (page/pageSize omitidos ⇒ el backend devuelve el conjunto completo).
+            // paginar (sin page_size ⇒ el backend devuelve el conjunto completo en una página).
             const [entradasRaw, salidasRaw] = await Promise.all([
                 cuentasGetEntradas({ del, al, q: qDebounced }),
                 cuentasGetSalidas({ del, al, q: qDebounced }),
             ]);
-            const entradasFull = entradasRaw;
-            const salidasFull = salidasRaw;
+            const entradasFull = entradasRaw.filas;
+            const salidasFull = salidasRaw.filas;
             // Un cobro anulado no es una venta: no suma (CUENTA-07). Sale en el listado igual, y
             // marcado, porque este PDF es el documento con el que se cuadra la caja y una salida
             // de dinero que no aparece es exactamente lo que no se puede explicar después.
@@ -1036,8 +1038,8 @@ export default function Cuentas() {
             const entradasHoy = await cuentasGetEntradas({ del: hoy, al: hoy });
             const salidasHoy = await cuentasGetSalidas({ del: hoy, al: hoy });
 
-            const entradasHoyF = entradasHoy ?? [];
-            const salidasHoyF = salidasHoy ?? [];
+            const entradasHoyF = entradasHoy?.filas ?? [];
+            const salidasHoyF = salidasHoy?.filas ?? [];
 
             const totalEntradasHoy = sumar(
                 ...entradasHoyF.map((e) => (esAnulado(e) ? CERO : e.importe)),
@@ -1492,14 +1494,14 @@ export default function Cuentas() {
 
                             <div className="mt-3 flex flex-none items-center justify-between gap-2 text-xs text-fg-muted">
                                 <span>
-                                    Página {pageEntradas}
+                                    Página {paginasEntradas.pagina}
                                     {loadingEntradas ? " · cargando…" : ""}
                                 </span>
                                 <div className="flex gap-2">
                                     <button
                                         type="button"
-                                        disabled={pageEntradas <= 1 || loadingEntradas}
-                                        onClick={() => setPageEntradas((p) => Math.max(1, p - 1))}
+                                        disabled={paginasEntradas.pagina <= 1 || loadingEntradas}
+                                        onClick={paginasEntradas.retroceder}
                                         className="h-8 rounded-lg border border-border bg-surface px-3 font-semibold text-fg transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         Anterior
@@ -1507,7 +1509,9 @@ export default function Cuentas() {
                                     <button
                                         type="button"
                                         disabled={!hasNextEntradas || loadingEntradas}
-                                        onClick={() => setPageEntradas((p) => p + 1)}
+                                        onClick={() => {
+                                            if (siguienteEntradas) paginasEntradas.avanzar(siguienteEntradas);
+                                        }}
                                         className="h-8 rounded-lg border border-border bg-surface px-3 font-semibold text-fg transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         Siguiente
@@ -1618,14 +1622,14 @@ export default function Cuentas() {
 
                             <div className="mt-3 flex flex-none items-center justify-between gap-2 text-xs text-fg-muted">
                                 <span>
-                                    Página {pageSalidas}
+                                    Página {paginasSalidas.pagina}
                                     {loadingSalidas ? " · cargando…" : ""}
                                 </span>
                                 <div className="flex gap-2">
                                     <button
                                         type="button"
-                                        disabled={pageSalidas <= 1 || loadingSalidas}
-                                        onClick={() => setPageSalidas((p) => Math.max(1, p - 1))}
+                                        disabled={paginasSalidas.pagina <= 1 || loadingSalidas}
+                                        onClick={paginasSalidas.retroceder}
                                         className="h-8 rounded-lg border border-border bg-surface px-3 font-semibold text-fg transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         Anterior
@@ -1633,7 +1637,9 @@ export default function Cuentas() {
                                     <button
                                         type="button"
                                         disabled={!hasNextSalidas || loadingSalidas}
-                                        onClick={() => setPageSalidas((p) => p + 1)}
+                                        onClick={() => {
+                                            if (siguienteSalidas) paginasSalidas.avanzar(siguienteSalidas);
+                                        }}
                                         className="h-8 rounded-lg border border-border bg-surface px-3 font-semibold text-fg transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
                                     >
                                         Siguiente

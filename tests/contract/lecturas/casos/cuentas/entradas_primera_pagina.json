@@ -1,0 +1,20 @@
+{
+  "descripcion": "La primera pagina del listado paginado (sin cursor). Fija las dos mitades del contrato de la paginacion por clave: el orden (fecha con segundos DESC, id DESC) y el cursor 'siguiente', que tiene que llevar la fecha COMPLETA de la ultima fila y no la recortada que se ensena.",
+  "lectura": "cuentas.entradas",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', '2026-05-10 12:00:00', 'Pagada');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 10:00:00', 'Efectivo', 1000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-1', '2026-05-10 11:00:00', 'Tarjeta', 2000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3', 'com-1', '2026-05-10 12:00:00', 'Efectivo', 3000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-4', 'com-1', '2026-05-11 09:00:00', 'Efectivo', 4000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-5', 'com-1', '2026-06-01 09:00:00', 'Efectivo', 5000, 'total');"
+  ],
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": "efectivo",
+    "page_size": 2
+  }
+}

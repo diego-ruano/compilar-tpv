@@ -28,12 +28,13 @@ cuentasRoutes.get("/entradas", async (c) => {
 		del: c.req.query("del"),
 		al: c.req.query("al"),
 		q: c.req.query("q"),
-		page: c.req.query("page"),
 		page_size: c.req.query("page_size"),
+		cursor_fecha: c.req.query("cursor_fecha"),
+		cursor_id: c.req.query("cursor_id"),
 	});
 	return c.json(
 		await tenantQuery(c, (db) =>
-			q.entradas(db, p.del, p.al, p.q, p.page, p.page_size),
+			q.entradas(db, p.del, p.al, p.q, p.page_size, p.cursor),
 		),
 	);
 });
@@ -43,12 +44,13 @@ cuentasRoutes.get("/salidas", async (c) => {
 		del: c.req.query("del"),
 		al: c.req.query("al"),
 		q: c.req.query("q"),
-		page: c.req.query("page"),
 		page_size: c.req.query("page_size"),
+		cursor_fecha: c.req.query("cursor_fecha"),
+		cursor_id: c.req.query("cursor_id"),
 	});
 	return c.json(
 		await tenantQuery(c, (db) =>
-			q.salidas(db, p.del, p.al, p.q, p.page, p.page_size),
+			q.salidas(db, p.del, p.al, p.q, p.page_size, p.cursor),
 		),
 	);
 });

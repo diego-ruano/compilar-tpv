@@ -412,13 +412,26 @@ export type CuentasRangoArgs = { del?: string, al?: string,
  */
 q?: string, 
 /**
- * Página 1-based. Si es `None`, se devuelven **todas** las filas (usado por el PDF).
+ * Tamaño de página. `None`/0 = sin paginar: se devuelven **todas** las filas (el PDF).
  */
-page?: number, 
+page_size?: number, 
 /**
- * Tamaño de página. Si es `None`/0 junto con `page`, se ignora la paginación.
+ * La página empieza justo después de esta fila (el `siguiente` de la página anterior, ver
+ * [`CursorCuentas`]). Van planos y no como un objeto porque hacia el worker viajan como
+ * parámetros de la URL. Sin los dos, es la primera página.
  */
-page_size?: number, };
+cursor_fecha?: string, cursor_id?: string, };
+
+/**
+ * Dónde empieza la página siguiente de un listado de caja: la clave de orden de la ÚLTIMA fila de
+ * la página actual. Paginar por clave y no por `OFFSET` (RI-18) es lo que hace que la página 100 de
+ * un año cueste lo mismo que la primera: con `OFFSET` había que leer y descartar todo lo anterior.
+ *
+ * `fecha` es la columna de orden tal cual (`Pagos.Fecha_Hora` con segundos, `Cuentas_Gastos.Fecha`
+ * sólo el día), no la que se enseña (`fecha_hora`, recortada): con la recortada, dos cobros del
+ * mismo minuto no tendrían un orden estable.
+ */
+export type CursorCuentas = { fecha: string, id: string, };
 
 export type DeleteGastoInput = { id_gasto: string, };
 
@@ -948,6 +961,16 @@ command_name: string,
  * sólo lo prueba que la reparación llegue a subir.
  */
 reparadas: number, };
+
+/**
+ * Una página de entradas. `siguiente` es `None` cuando no hay más filas (o no se pidió paginar).
+ */
+export type PaginaEntradas = { filas: Array<EntradaDto>, siguiente: CursorCuentas | null, };
+
+/**
+ * Una página de salidas. Ver [`PaginaEntradas`].
+ */
+export type PaginaSalidas = { filas: Array<SalidaDto>, siguiente: CursorCuentas | null, };
 
 /**
  * Resultado de `POST /v1/pair/create`: código de emparejamiento recién generado por el

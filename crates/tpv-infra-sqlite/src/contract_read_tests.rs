@@ -210,14 +210,24 @@ fn opt_str(v: &Json) -> Option<String> {
     v.as_str().map(|s| s.to_string())
 }
 
-/// `entrada` → filtro de los listados de caja (rango + búsqueda + paginación).
+/// `entrada` → filtro de los listados de caja (rango + búsqueda + paginación por clave). El
+/// cursor se lee como lo mandaría el cliente (`cursor_fecha` + `cursor_id`), por el mismo
+/// `CuentasRangoArgs::cursor` que usa el comando.
 fn filtro_cuentas(e: &Json) -> CuentasFiltro {
-    CuentasFiltro {
+    let args = tpv_contracts::cuentas::CuentasRangoArgs {
         del: opt_str(&e["del"]),
         al: opt_str(&e["al"]),
         q: opt_str(&e["q"]),
-        page: e["page"].as_u64().map(|n| n as u32),
         page_size: e["page_size"].as_u64().map(|n| n as u32),
+        cursor_fecha: opt_str(&e["cursor_fecha"]),
+        cursor_id: opt_str(&e["cursor_id"]),
+    };
+    CuentasFiltro {
+        cursor: args.cursor(),
+        del: args.del,
+        al: args.al,
+        q: args.q,
+        page_size: args.page_size,
     }
 }
 
@@ -244,6 +254,7 @@ lecturas_de_contrato! {
     clientes__form,
     cuentas__entradas,
     cuentas__entradas_busqueda_paginada,
+    cuentas__entradas_primera_pagina,
     cuentas__salidas,
     cuentas__resumen,
     cuentas__cierre_ultimo,

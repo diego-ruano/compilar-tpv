@@ -11,9 +11,12 @@ import type {
     CambioCajaInput,
     CreateGastoInput,
     CuentasRangoArgs,
+    CursorCuentas,
     Dinero,
     EntradaDto,
     ImpactoCajaDto,
+    PaginaEntradas,
+    PaginaSalidas,
     ProveedorMiniDto,
     ResumenCajaDto,
     SalidaDto,
@@ -23,7 +26,7 @@ import type {
 
 import { deCentimos } from "../../shared/lib/dinero";
 
-export type { EntradaDto, SalidaDto };
+export type { CursorCuentas, EntradaDto, PaginaEntradas, PaginaSalidas, SalidaDto };
 
 /** Un cobro anulado NO se borra (CUENTA-07): sale en la lista, marcado. */
 export function esAnulado(e: EntradaDto): boolean {
@@ -81,12 +84,14 @@ function rango(params: CuentasRangoArgs): CuentasRangoArgs {
     return { ...params, q: params.q?.trim() || undefined };
 }
 
-export function cuentasGetEntradas(params: CuentasRangoArgs): Promise<EntradaDto[]> {
-    return invokeClient<EntradaDto[]>("cuentas_get_entradas", { args: rango(params) });
+/** Sin `page_size` vuelve todo el rango en una página (el PDF); con él, `siguiente` dice dónde
+ *  empieza la próxima (RI-18). */
+export function cuentasGetEntradas(params: CuentasRangoArgs): Promise<PaginaEntradas> {
+    return invokeClient<PaginaEntradas>("cuentas_get_entradas", { args: rango(params) });
 }
 
-export function cuentasGetSalidas(params: CuentasRangoArgs): Promise<SalidaDto[]> {
-    return invokeClient<SalidaDto[]>("cuentas_get_salidas", { args: rango(params) });
+export function cuentasGetSalidas(params: CuentasRangoArgs): Promise<PaginaSalidas> {
+    return invokeClient<PaginaSalidas>("cuentas_get_salidas", { args: rango(params) });
 }
 
 export function cuentasGetResumen(params: CuentasRangoArgs): Promise<ResumenCajaDto> {

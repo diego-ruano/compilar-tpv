@@ -5,8 +5,8 @@
 
 use tpv_domain::dinero::Dinero;
 use tpv_contracts::cuentas::{
-    AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, EntradaDto,
-    ResumenCajaDto, SalidaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
+    AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, PaginaEntradas,
+    PaginaSalidas, ResumenCajaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
 };
 use tpv_domain::cuentas::{
     normalize_metodo, puede_anularse, requerido, GastoData, PagoData, RechazoAnulacion,
@@ -17,26 +17,27 @@ use crate::error::{AppError, AppResult};
 use crate::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository, ClaseBaja};
 
 fn filtro_de(args: CuentasRangoArgs) -> CuentasFiltro {
+    let cursor = args.cursor();
     CuentasFiltro {
         del: args.del,
         al: args.al,
         q: args.q,
-        page: args.page,
         page_size: args.page_size,
+        cursor,
     }
 }
 
 pub async fn get_entradas(
     repo: &dyn CuentasRepository,
     args: CuentasRangoArgs,
-) -> AppResult<Vec<EntradaDto>> {
+) -> AppResult<PaginaEntradas> {
     repo.entradas(filtro_de(args)).await
 }
 
 pub async fn get_salidas(
     repo: &dyn CuentasRepository,
     args: CuentasRangoArgs,
-) -> AppResult<Vec<SalidaDto>> {
+) -> AppResult<PaginaSalidas> {
     repo.salidas(filtro_de(args)).await
 }
 
@@ -212,6 +213,7 @@ pub async fn anular_pago(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tpv_contracts::cuentas::CursorCuentas;
 
     #[test]
     fn proveedor_solo_se_conserva_en_gastos_de_proveedor() {
@@ -229,22 +231,37 @@ mod tests {
             del: Some("2026-01-01".into()),
             al: Some("2026-01-31".into()),
             q: Some("cafe".into()),
-            page: Some(2),
             page_size: Some(25),
+            cursor_fecha: Some("2026-01-20 13:00:00".into()),
+            cursor_id: Some("p9".into()),
         });
         assert_eq!(filtro.del.as_deref(), Some("2026-01-01"));
         assert_eq!(filtro.al.as_deref(), Some("2026-01-31"));
         assert_eq!(filtro.q.as_deref(), Some("cafe"));
-        assert_eq!((filtro.page, filtro.page_size), (Some(2), Some(25)));
+        assert_eq!(filtro.page_size, Some(25));
+        assert_eq!(
+            filtro.cursor,
+            Some(CursorCuentas { fecha: "2026-01-20 13:00:00".into(), id: "p9".into() })
+        );
     }
 
     #[test]
     fn filtro_admite_consulta_sin_rango_ni_paginacion() {
         let filtro = filtro_de(CuentasRangoArgs {
-            del: None, al: None, q: None, page: None, page_size: None,
+            del: None, al: None, q: None, page_size: None, cursor_fecha: None, cursor_id: None,
         });
         assert!(filtro.del.is_none() && filtro.al.is_none() && filtro.q.is_none());
-        assert!(filtro.page.is_none() && filtro.page_size.is_none());
+        assert!(filtro.page_size.is_none() && filtro.cursor.is_none());
+    }
+
+    #[test]
+    fn medio_cursor_es_la_primera_pagina() {
+        // Una parte sola no dice dónde empezar: se ignora en vez de filtrar con la mitad.
+        let filtro = filtro_de(CuentasRangoArgs {
+            del: None, al: None, q: None, page_size: Some(25),
+            cursor_fecha: Some("2026-01-20 13:00:00".into()), cursor_id: None,
+        });
+        assert!(filtro.cursor.is_none());
     }
 
     #[test]
