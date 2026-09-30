@@ -178,9 +178,6 @@ CREATE TABLE IF NOT EXISTS Horario_Predeterminado (
   UNIQUE (ID_Trabajador, Weekday, Orden)
 );
 
-CREATE INDEX IF NOT EXISTS idx_hp_trab_weekday
-ON Horario_Predeterminado(ID_Trabajador, Weekday);
-
 /* =========================================================
    3. Inventario y Productos
 ========================================================= */
@@ -276,9 +273,6 @@ CREATE TABLE IF NOT EXISTS Lotes_Producto (
 CREATE INDEX IF NOT EXISTS idx_lotes_producto_cad
 ON Lotes_Producto(ID_Producto, Caducidad);
 
-CREATE INDEX IF NOT EXISTS idx_lotes_producto_stock
-ON Lotes_Producto(ID_Producto, Stock_Disponible);
-
 CREATE INDEX IF NOT EXISTS idx_lotes_producto_entrada
 ON Lotes_Producto(ID_Producto, Fecha_Entrada);
 
@@ -357,9 +351,6 @@ CREATE TABLE IF NOT EXISTS Producto_Alergenos (
   FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE CASCADE,
   FOREIGN KEY (ID_Alergeno) REFERENCES Alergenos(ID_Alergeno) ON DELETE CASCADE
 );
-
-CREATE INDEX IF NOT EXISTS idx_prod_alerg_prod
-ON Producto_Alergenos(ID_Producto);
 
 CREATE INDEX IF NOT EXISTS idx_prod_alerg_alerg
 ON Producto_Alergenos(ID_Alergeno);
@@ -747,9 +738,6 @@ CREATE TABLE IF NOT EXISTS Tarea_Asignaciones (
 CREATE INDEX IF NOT EXISTS idx_tarea_asig_trab
 ON Tarea_Asignaciones(ID_Trabajador, Estado);
 
-CREATE INDEX IF NOT EXISTS idx_tarea_asig_tarea
-ON Tarea_Asignaciones(ID_Tarea);
-
 /* =========================================================
    8. Fichajes
 ========================================================= */
@@ -767,9 +755,6 @@ CREATE TABLE IF NOT EXISTS Fichajes (
   UNIQUE(ID_Usuario, Fecha, Parte),
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario)
 );
-
-CREATE INDEX IF NOT EXISTS idx_fichajes_user_fecha
-ON Fichajes(ID_Usuario, Fecha);
 
 CREATE INDEX IF NOT EXISTS idx_fichajes_user_abierto
 ON Fichajes(ID_Usuario, Estado);
@@ -1001,14 +986,8 @@ CREATE TABLE IF NOT EXISTS Applied_Operations (
   CHECK (Status IN ('PROCESSING', 'APPLIED', 'FAILED'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_applied_ops_status
-ON Applied_Operations(Status);
-
 CREATE INDEX IF NOT EXISTS idx_applied_ops_created_at
 ON Applied_Operations(Created_At_Ms);
-
-CREATE INDEX IF NOT EXISTS idx_applied_ops_command
-ON Applied_Operations(Command_Name);
 
 /* Log de replicacion de la NUBE (tambien vacias en la Main, por la misma politica):
      - Sync_Changes: cada escritura aplicada por el TenantHub, con sus sentencias ya
@@ -1383,10 +1362,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_regfact_idfactura
 ON Registros_Facturacion(NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Tipo)
 WHERE Subsanacion IS NULL OR Subsanacion <> 'S';
 
--- Ruta caliente del envio: "dame los pendientes por Orden ascendente". El orden importa porque la
--- AEAT valida cada registro contra su encadenamiento anterior.
-CREATE INDEX IF NOT EXISTS idx_regfact_orden
-ON Registros_Facturacion(Orden);
+-- La ruta caliente del envio ("dame los pendientes por Orden ascendente") la sirve el UNIQUE (Orden)
+-- de la tabla, que ya es un indice por Orden. Tenia ademas uno propio identico (RI-17): una escritura
+-- mas en la transaccion de cada cobro para nada.
 
 -- RI-03: reservar el numero de factura hace MAX(Numero) de la serie en CADA cobro, dentro de la
 -- transaccion del escritor unico. Sin este indice recorria la tabla entera, que es la que por ley no
