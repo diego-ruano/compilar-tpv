@@ -113,7 +113,9 @@ export const setTrabajadorSchema = z
 
 export const cerrarComandaSchema = z.object({
 	id_comanda: idField("id_comanda"),
-	total: z.coerce.number().min(0),
+	// Se ignora al cerrar (Total_Comanda se re-deriva del SQL, MESA-05), pero es dinero y entra
+	// como todo el dinero de la API: céntimos enteros. Aceptaba decimales y texto (RI-65).
+	total: zDineroNoNegativo,
 });
 
 export const addLineaSchema = z

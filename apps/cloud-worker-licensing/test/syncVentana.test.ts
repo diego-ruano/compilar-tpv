@@ -117,12 +117,12 @@ function sembrarVenta(
 	);
 	sql.exec(
 		`INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, Nombre_Producto, Cantidad, Precio_Unitario)
-		 VALUES ('d-${sufijo}', 'c-${sufijo}', 'Caña', 1, 2.5);`,
+		 VALUES ('d-${sufijo}', 'c-${sufijo}', 'Caña', 1, 250);`,
 	);
 	if (estado === "Pagada") {
 		sql.exec(
 			`INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-			 VALUES ('p-${sufijo}', 'c-${sufijo}', ?, 'efectivo', 2.5, 'TOTAL');`,
+			 VALUES ('p-${sufijo}', 'c-${sufijo}', ?, 'efectivo', 250, 'TOTAL');`,
 			fechaPago,
 		);
 		sql.exec(
@@ -145,7 +145,7 @@ describe("bootstrap acotado · los maestros", () => {
 				"INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat1','Bebidas');",
 			);
 			sql.exec(
-				"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('pr1','cat1','Caña',2.5);",
+				"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('pr1','cat1','Caña',250);",
 			);
 			sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','Terraza');");
 			sql.exec(
@@ -251,7 +251,7 @@ describe("bootstrap acotado · la ventana de los transaccionales", () => {
 			sembrarVenta(sql, "vieja", ANTIGUO);
 			sql.exec(
 				`INSERT INTO Movimientos_Caja (ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, Importe, Metodo_Pago)
-				 VALUES ('m1', ?, 'COBRO', 'p-vieja', 2.5, 'efectivo');`,
+				 VALUES ('m1', ?, 'COBRO', 'p-vieja', 250, 'efectivo');`,
 				RECIENTE,
 			);
 			sql.exec(

@@ -575,6 +575,140 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Las columnas `INTEGER` que NO son dinero. Todas las demás tienen que llevar
+    /// `CHECK (typeof(col) IN ('integer','null'))` (RI-65). Una columna entera nueva obliga a
+    /// decidir: o es dinero y lleva el CHECK, o se añade aquí. Así no hay forma de olvidarse.
+    /// Las tablas locales del dispositivo (`_…`) no guardan dinero y no se miran.
+    const INTEGER_QUE_NO_ES_DINERO: &[(&str, &[&str])] = &[
+        ("Applied_Operations", &["Created_At_Ms", "Applied_At_Ms", "Updated_At_Ms"]),
+        ("Business_Settings", &["Modo_Prueba"]),
+        ("Categorias_Producto", &["Vendible", "Pasa_Cocina"]),
+        ("Cierre_Denominaciones", &["Unidades"]),
+        ("Cuentas_Gastos", &["Pagado_Con_Caja"]),
+        ("Detalle_Comanda", &["Exento"]),
+        ("Fichaje_Dia", &["Turno_Partido"]),
+        ("Fichajes", &["Parte", "Cerrado_Automatico"]),
+        ("Horario_Predeterminado", &["Weekday", "Orden"]),
+        ("Intentos_Login", &["Intentos_Fallidos", "Bloqueado_Hasta_Ms", "Ultimo_Intento_Ms"]),
+        ("Mesas", &["Capacidad", "Ubicacion_X", "Ubicacion_Y", "Width", "Height", "Radius"]),
+        ("Productos", &["Exento"]),
+        ("Registros_Facturacion", &["Orden", "Numero"]),
+        ("Reservas", &["Comensales"]),
+        ("Serie_Facturacion", &["Ultimo"]),
+        ("Sync_Changes", &["Created_At_Ms"]),
+        ("Sync_Main_Checkpoints", &["Last_Seq", "Updated_At_Ms"]),
+        (
+            "Ticket_Settings",
+            &[
+                "Show_Logo", "Show_BusinessName", "Show_Address", "Show_Phone", "Show_CIF",
+                "Show_DateTime", "Show_LineItems", "Show_BaseAndIVA", "Show_Total",
+                "Show_FooterMessage", "Paper_Width_Mm", "Paper_Dpi", "Chars_Per_Line",
+            ],
+        ),
+        ("Usuarios", &["Requiere_Setup"]),
+    ];
+
+    /// RI-65: toda columna de dinero lleva su CHECK de tipo, y ninguna otra lo necesita. Ver
+    /// [`INTEGER_QUE_NO_ES_DINERO`].
+    #[tokio::test]
+    async fn todas_las_columnas_de_dinero_llevan_su_check() {
+        let (_db, conn, dir) = open_temp().await;
+        run(&conn).await.unwrap();
+
+        let mut rows = conn
+            .query(
+                "SELECT m.name, p.name, m.sql \
+                 FROM sqlite_master m JOIN pragma_table_info(m.name) p \
+                 WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '\\_%' ESCAPE '\\' \
+                   AND upper(p.type) = 'INTEGER' \
+                   AND NOT (p.pk = 1 AND (SELECT COUNT(*) FROM pragma_table_info(m.name) x WHERE x.pk > 0) = 1) \
+                 ORDER BY 1, 2;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let mut sin_check = Vec::new();
+        let mut sobra_en_la_lista = Vec::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            let (Value::Text(tabla), Value::Text(col), Value::Text(sql)) = (
+                row.get_value(0).unwrap(),
+                row.get_value(1).unwrap(),
+                row.get_value(2).unwrap(),
+            ) else {
+                panic!("fila inesperada");
+            };
+            let no_es_dinero = INTEGER_QUE_NO_ES_DINERO
+                .iter()
+                .any(|(t, cols)| *t == tabla && cols.contains(&col.as_str()));
+            let tiene_check = sql.contains(&format!("typeof({col}) IN ('integer','null')"));
+            if !no_es_dinero && !tiene_check {
+                sin_check.push(format!("{tabla}.{col}"));
+            }
+            if no_es_dinero && tiene_check {
+                sobra_en_la_lista.push(format!("{tabla}.{col}"));
+            }
+        }
+        assert!(
+            sin_check.is_empty(),
+            "columnas INTEGER sin CHECK de tipo: si son dinero, añádeselo; si no, decláralas en \
+             INTEGER_QUE_NO_ES_DINERO: {sin_check:?}"
+        );
+        assert!(
+            sobra_en_la_lista.is_empty(),
+            "llevan el CHECK de dinero pero están en INTEGER_QUE_NO_ES_DINERO: {sobra_en_la_lista:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RI-65: qué deja pasar el CHECK. Mira el valor ya convertido por la afinidad de la columna,
+    /// así que lo que es un entero entra aunque llegue escrito de otra forma, y lo que no lo es se
+    /// rechaza. En la Main y en Turso, igual.
+    #[tokio::test]
+    async fn el_dinero_solo_admite_enteros() {
+        let (_db, conn, dir) = open_temp().await;
+        run(&conn).await.unwrap();
+        conn.execute(
+            "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Cat');",
+            Vec::<Value>::new(),
+        )
+        .await
+        .unwrap();
+
+        let insertar = |id: &'static str, precio: Value| {
+            let conn = &conn;
+            async move {
+                conn.execute(
+                    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) \
+                     VALUES (?1, 'cat', ?1, ?2);",
+                    vec![Value::Text(id.into()), precio],
+                )
+                .await
+            }
+        };
+
+        assert!(insertar("real", Value::Real(2.5)).await.is_err(), "2.5 no es un importe");
+        assert!(insertar("texto", Value::Text("2,50".into())).await.is_err(), "'2,50' tampoco");
+        insertar("entero", Value::Integer(250)).await.unwrap();
+        insertar("real_entero", Value::Real(250.0)).await.unwrap();
+        insertar("texto_entero", Value::Text("250".into())).await.unwrap();
+        insertar("nulo", Value::Null).await.unwrap();
+
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM Productos \
+                 WHERE ID_Producto IN ('entero','real_entero','texto_entero') \
+                   AND typeof(Precio_Venta) = 'integer' AND Precio_Venta = 250;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let n = rows.next().await.unwrap().unwrap().get_value(0).unwrap();
+        assert_eq!(n, Value::Integer(3), "los tres se guardan como el entero 250");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// DB-12: la vista `v_inventario_producto_stock` se reescribio (window functions en vez de
     /// subconsultas correlacionadas). Verifica que su semantica es la misma: SUM de stock (todos los
     /// lotes), caducidad mas proxima (MIN de lotes CON stock) y lote FEFO siguiente (NULLs al final),

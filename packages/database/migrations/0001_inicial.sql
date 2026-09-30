@@ -50,7 +50,14 @@
      que parece entero. El ROUND de SQLite y el .round() de Rust rompen el empate
      igual (alejandose del cero); Math.round de JavaScript NO, y por eso esa cuenta
      no se hace nunca en TypeScript.
-   - Una columna de dinero nueva: INTEGER, y su DEFAULT en centimos (5 EUR -> 500).
+   - Una columna de dinero nueva: INTEGER, su DEFAULT en centimos (5 EUR -> 500) y
+     CHECK (typeof(col) IN ('integer','null')) (RI-65). Una columna INTEGER de SQLite
+     admite REAL y TEXT sin quejarse (2.5 se guarda como real, '2,50' como texto), asi
+     que sin el CHECK la regla la sostenia solo el codigo, en dos lenguajes, y ya fallo
+     una vez (RI-66). El CHECK mira el valor YA convertido por la afinidad de la columna:
+     750.0 y '750' entran como el entero 750; solo se rechaza lo que no es un entero.
+     Lo vigila todas_las_columnas_de_dinero_llevan_su_check (migrations.rs): una
+     columna INTEGER nueva o lleva el CHECK o se declara alli como no-dinero.
 
    IDENTIFICADORES (UUIDv7):
    - Todas las claves primarias de negocio son TEXT (UUIDv7 generado por el
@@ -211,7 +218,7 @@ CREATE TABLE IF NOT EXISTS Productos (
   ID_Categoria TEXT NOT NULL,
   ID_Proveedor TEXT,
   Nombre TEXT NOT NULL UNIQUE,
-  Precio_Venta INTEGER,
+  Precio_Venta INTEGER CHECK (typeof(Precio_Venta) IN ('integer','null')),
   Stock_Minimo REAL DEFAULT 0,
   Unidad_Medida TEXT,
   Nombre_Imagen TEXT,
@@ -266,7 +273,7 @@ CREATE TABLE IF NOT EXISTS Lotes_Producto (
   Fecha_Entrada DATETIME NOT NULL,
   Caducidad DATE,
   Stock_Disponible REAL NOT NULL DEFAULT 0,
-  Coste_Unitario INTEGER,
+  Coste_Unitario INTEGER CHECK (typeof(Coste_Unitario) IN ('integer','null')),
   ID_Proveedor TEXT,
   Notas TEXT,
   FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE CASCADE,
@@ -327,7 +334,7 @@ CREATE TABLE IF NOT EXISTS Lineas_Pedido_Proveedor (
   ID_Pedido TEXT NOT NULL,
   Nombre_Producto TEXT NOT NULL,
   Cantidad REAL NOT NULL DEFAULT 1,
-  Precio_Unitario INTEGER,
+  Precio_Unitario INTEGER CHECK (typeof(Precio_Unitario) IN ('integer','null')),
   Unidad TEXT,
   FOREIGN KEY (ID_Pedido) REFERENCES Pedidos_Proveedor(ID_Pedido) ON DELETE CASCADE
 );
@@ -391,7 +398,7 @@ CREATE TABLE IF NOT EXISTS Clientes (
   Telefono TEXT,
   Email TEXT,
   Notas TEXT,
-  Total_Gastado INTEGER NOT NULL DEFAULT 0,
+  Total_Gastado INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Total_Gastado) IN ('integer','null')),
   Created_At TEXT,
   -- FISCAL-02: datos para emitir una factura COMPLETA (F1/F3) a este cliente. Son opcionales: la
   -- inmensa mayoria de los clientes de un bar no piden factura y nunca los tendran.
@@ -469,7 +476,7 @@ CREATE TABLE IF NOT EXISTS Comandas (
   Canal TEXT NOT NULL DEFAULT 'MESA',
   Fecha_Hora_Apertura TEXT NOT NULL,
   Fecha_Hora_Cierre TEXT NULL,
-  Total_Comanda INTEGER NOT NULL DEFAULT 0,
+  Total_Comanda INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Total_Comanda) IN ('integer','null')),
   Estado TEXT NOT NULL DEFAULT 'Abierta',
   FOREIGN KEY (ID_Mesa) REFERENCES Mesas(ID_Mesa),
   FOREIGN KEY (ID_Reserva) REFERENCES Reservas(ID_Reserva),
@@ -528,7 +535,7 @@ CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   ID_Producto TEXT,
   Nombre_Producto TEXT,
   Cantidad REAL NOT NULL,
-  Precio_Unitario INTEGER NOT NULL,
+  Precio_Unitario INTEGER NOT NULL CHECK (typeof(Precio_Unitario) IN ('integer','null')),
   IVA_Percent REAL,
   Notas TEXT,
   Estado_Cocina TEXT DEFAULT 'PENDIENTE',
@@ -627,7 +634,7 @@ CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   ID_Gasto TEXT NOT NULL PRIMARY KEY,
   Fecha DATE NOT NULL,
   Concepto TEXT NOT NULL,
-  Importe INTEGER NOT NULL,
+  Importe INTEGER NOT NULL CHECK (typeof(Importe) IN ('integer','null')),
   Tipo_Gasto TEXT NOT NULL,
   ID_Proveedor TEXT NULL,
   Pagado_Con_Caja INTEGER NOT NULL DEFAULT 0,
@@ -660,13 +667,13 @@ CREATE TABLE IF NOT EXISTS Cierres_Caja (
   ID_Cierre TEXT NOT NULL PRIMARY KEY,
   Fecha_Hora DATETIME NOT NULL,
   ID_Usuario TEXT,
-  Fondo_Inicial INTEGER NOT NULL DEFAULT 0,
-  Ventas_Efectivo INTEGER NOT NULL DEFAULT 0,
-  Esperado INTEGER NOT NULL DEFAULT 0,
-  Contado INTEGER NOT NULL DEFAULT 0,
-  Descuadre INTEGER NOT NULL DEFAULT 0,
-  Dejado INTEGER NOT NULL DEFAULT 0,
-  Retirado INTEGER NOT NULL DEFAULT 0,
+  Fondo_Inicial INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Fondo_Inicial) IN ('integer','null')),
+  Ventas_Efectivo INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Ventas_Efectivo) IN ('integer','null')),
+  Esperado INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Esperado) IN ('integer','null')),
+  Contado INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Contado) IN ('integer','null')),
+  Descuadre INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Descuadre) IN ('integer','null')),
+  Dejado INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Dejado) IN ('integer','null')),
+  Retirado INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Retirado) IN ('integer','null')),
   Motivo TEXT,
   Reabierto_En DATETIME,
   Reabierto_Por TEXT,
@@ -674,12 +681,12 @@ CREATE TABLE IF NOT EXISTS Cierres_Caja (
   -- que dice a que cierre pertenece un apunte que se corrige despues.
   Periodo_Desde DATETIME,
   -- Gastos pagados con dinero del cajon durante el periodo. Restan del esperado.
-  Gastos_Caja INTEGER NOT NULL DEFAULT 0,
+  Gastos_Caja INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Gastos_Caja) IN ('integer','null')),
   -- Lo que el cierre marca HOY tras corregir apuntes de su periodo. NULL = nunca se ha rectificado.
-  Rect_Ventas_Efectivo INTEGER,
-  Rect_Gastos_Caja INTEGER,
-  Rect_Esperado INTEGER,
-  Rect_Descuadre INTEGER,
+  Rect_Ventas_Efectivo INTEGER CHECK (typeof(Rect_Ventas_Efectivo) IN ('integer','null')),
+  Rect_Gastos_Caja INTEGER CHECK (typeof(Rect_Gastos_Caja) IN ('integer','null')),
+  Rect_Esperado INTEGER CHECK (typeof(Rect_Esperado) IN ('integer','null')),
+  Rect_Descuadre INTEGER CHECK (typeof(Rect_Descuadre) IN ('integer','null')),
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   FOREIGN KEY (Reabierto_Por) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
 );
@@ -699,10 +706,10 @@ CREATE TABLE IF NOT EXISTS Cierre_Rectificaciones (
   ID_Usuario TEXT,
   Descripcion TEXT NOT NULL,
   Motivo TEXT,
-  Esperado_Antes INTEGER NOT NULL,
-  Esperado_Despues INTEGER NOT NULL,
-  Descuadre_Antes INTEGER NOT NULL,
-  Descuadre_Despues INTEGER NOT NULL,
+  Esperado_Antes INTEGER NOT NULL CHECK (typeof(Esperado_Antes) IN ('integer','null')),
+  Esperado_Despues INTEGER NOT NULL CHECK (typeof(Esperado_Despues) IN ('integer','null')),
+  Descuadre_Antes INTEGER NOT NULL CHECK (typeof(Descuadre_Antes) IN ('integer','null')),
+  Descuadre_Despues INTEGER NOT NULL CHECK (typeof(Descuadre_Despues) IN ('integer','null')),
   FOREIGN KEY (ID_Cierre) REFERENCES Cierres_Caja(ID_Cierre) ON DELETE CASCADE,
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
 );
@@ -715,7 +722,7 @@ ON Cierre_Rectificaciones(ID_Cierre, Fecha_Hora);
 CREATE TABLE IF NOT EXISTS Cierre_Denominaciones (
   ID_Cierre TEXT NOT NULL,
   Momento TEXT NOT NULL,
-  Valor INTEGER NOT NULL,
+  Valor INTEGER NOT NULL CHECK (typeof(Valor) IN ('integer','null')),
   Unidades INTEGER NOT NULL,
   PRIMARY KEY (ID_Cierre, Momento, Valor),
   CHECK (Momento IN ('CONTADO','DEJADO')),
@@ -793,7 +800,7 @@ CREATE TABLE IF NOT EXISTS Pagos (
   ID_Comanda TEXT NOT NULL,
   Fecha_Hora DATETIME NOT NULL,
   Metodo_Pago TEXT NOT NULL,
-  Importe_Total INTEGER NOT NULL,
+  Importe_Total INTEGER NOT NULL CHECK (typeof(Importe_Total) IN ('integer','null')),
   Tipo TEXT NOT NULL,
   ID_Usuario_Cobrador TEXT,
   ID_Trabajador_Cobrador TEXT,
@@ -954,7 +961,7 @@ CREATE TABLE IF NOT EXISTS Movimientos_Caja (
   ID_Gasto TEXT,
   ID_Usuario TEXT,
   ID_Trabajador TEXT,
-  Importe INTEGER NOT NULL DEFAULT 0,
+  Importe INTEGER NOT NULL DEFAULT 0 CHECK (typeof(Importe) IN ('integer','null')),
   Metodo_Pago TEXT,
   Motivo TEXT,
   FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago) ON DELETE SET NULL,
@@ -1052,7 +1059,7 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- A partir de cuanto descuadre el cierre de caja exige escribir un motivo (CUENTA-06). 5 euros
   -- deja pasar el centimo de redondeo y el error de vuelta sin dar la lata, y obliga a explicar lo
   -- que ya es dinero de verdad. Cada negocio lo ajusta.
-  Umbral_Descuadre INTEGER NOT NULL DEFAULT 500,
+  Umbral_Descuadre INTEGER NOT NULL DEFAULT 500 CHECK (typeof(Umbral_Descuadre) IN ('integer','null')),
   -- ── FISCAL-01 (Veri*factu) ──────────────────────────────────────────────────────────────────
   -- Razon_Social NO es Business_Name. "Bar La Plaza" es el rotulo; "Francisco Garcia SL" es quien
   -- factura. El ticket ensena los dos; el registro de facturacion (NombreRazonEmisor y el bloque
@@ -1066,7 +1073,7 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- emitir factura completa (F1). El general del art. 4.1 RD 1619/2012 son 400 EUR, pero la
   -- hosteleria esta en la lista del art. 4.2 y sube a 3.000. La AEAT lo valida en el servicio web
   -- (error 1150). Va aqui y no incrustado porque es un numero que la norma puede mover.
-  Limite_Simplif INTEGER NOT NULL DEFAULT 300000,
+  Limite_Simplif INTEGER NOT NULL DEFAULT 300000 CHECK (typeof(Limite_Simplif) IN ('integer','null')),
   -- 'produccion' | 'pruebas'. Cambia A LA VEZ el endpoint del servicio web y la URL del QR que se
   -- imprime en el papel. Un ticket emitido en pruebas lleva un QR que apunta a prewww2.aeat.es: la
   -- pantalla tiene que gritarlo. Es una decision explicita y visible, y no una variable de entorno,

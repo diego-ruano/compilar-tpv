@@ -537,6 +537,17 @@ la lógica/SQL vive en `crates/*`.
   - **Un importe que llega por la API viene en céntimos ENTEROS** (`zDinero` en el worker). Un
     `12.5` en el cuerpo de una petición no es «doce euros con medio»: es un cliente hablando en la
     unidad equivocada, y lo correcto es rechazarlo en la puerta, no redondearlo por su cuenta.
+    Lo mismo en Rust: `patch_dinero` (configuración) lo rechaza con un error de validación.
+  - **Y la base lo impone (RI-65).** Una columna `INTEGER` de SQLite guarda sin quejarse un `2.5`
+    como `real` y un `'2,50'` como `text`, así que la regla la sostenía sólo el código, en dos
+    lenguajes, y ya falló una vez (RI-66). Ahora cada columna de dinero lleva
+    `CHECK (typeof(col) IN ('integer','null'))`, en la Main y en Turso. El `CHECK` mira el valor ya
+    convertido por la afinidad: `750.0` y `'750'` entran como el entero 750, y sólo se rechaza lo
+    que no es un entero. **Una columna de dinero nueva lleva ese `CHECK`**; lo vigila
+    `todas_las_columnas_de_dinero_llevan_su_check` (`migrations.rs`), que obliga a declarar como
+    no-dinero cualquier columna `INTEGER` que no lo lleve. Consecuencia al tocar el cobro: un
+    importe decimal ya no se guarda mal en silencio, **hace fallar la escritura**. Por eso todo lo
+    que calcule dinero en SQL termina en `CAST(ROUND(…) AS INTEGER)`.
 - **PII del personal cifrada (TRAB-03).** `DNI`, `IBAN` y `Numero_Seguridad_Social` se guardan
   cifrados (AES-256-GCM **determinista**, para que el `UNIQUE` del esquema siga detectando
   duplicados). El cifrado ocurre en `tpv-infra-sqlite::trabajadores` **antes** de construir la

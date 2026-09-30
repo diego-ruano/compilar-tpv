@@ -3115,11 +3115,14 @@ mod tests_verificacion {
         // Dos drivers distintos escriben el mismo número de formas distintas. Sin esto, cada pasada
         // "encontraría" descuadrada toda tabla con una columna numérica — y el aviso que de verdad
         // importa se perdería entre cientos de falsos.
+        //
+        // Va sobre una columna REAL de verdad (el stock mínimo): el dinero es entero desde ARQ-01, y
+        // desde RI-65 el esquema ni siquiera admite un 2.5 en un precio.
         let (repo, db, _dir) = repo_temporal().await;
         sembrar(
             &db,
             "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('c1','Bebidas');\
-             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) \
+             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Stock_Minimo) \
              VALUES ('p1','c1','Caña', 2.5);",
         )
         .await;
@@ -3128,8 +3131,8 @@ mod tests_verificacion {
             conteos: vec![],
             ventana: vec![BootstrapTabla {
                 nombre: "Productos".into(),
-                columnas: vec!["ID_Producto".into(), "Precio_Venta".into()],
-                // La nube lo devuelve como "2.50" en texto: mismo precio, otra grafía.
+                columnas: vec!["ID_Producto".into(), "Stock_Minimo".into()],
+                // La nube lo devuelve como "2.50" en texto: mismo número, otra grafía.
                 filas: vec![vec![serde_json::json!("p1"), serde_json::json!("2.50")]],
                 parcial: false,
             }],
@@ -3139,7 +3142,7 @@ mod tests_verificacion {
         };
 
         let r = repo.contrastar_con_la_nube(foto).await.unwrap();
-        assert!(r.descuadres.is_empty(), "2.5 y \"2.50\" son el mismo precio: {:?}", r.descuadres);
+        assert!(r.descuadres.is_empty(), "2.5 y \"2.50\" son el mismo número: {:?}", r.descuadres);
     }
 
     #[tokio::test]
