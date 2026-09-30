@@ -23,6 +23,10 @@
      Todo cambio va en una migracion NUEVA y aditiva: 0002, 0003, ...
    - Inventario con LOTES + FEFO.
    - Idempotencia/atomicidad: Applied_Operations (ver §10).
+   - Toda `TEXT PRIMARY KEY` lleva NOT NULL (RI-65). En SQLite solo INTEGER PRIMARY KEY lo impide
+     por si misma; una de texto admite NULL -y varios, porque en un indice unico los NULL son
+     distintos-. Ya paso: un lote creado desde Proveedores nacia con ID_Lote NULL, invisible para
+     el FEFO. Con NOT NULL ese INSERT falla en el acto en vez de dejar una fila sin clave.
    - No pasa nada si alguna tabla queda vacia en un lado u otro: es un
      unico esquema para ambos.
 
@@ -77,7 +81,7 @@
    1. Seguridad y Usuarios
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Roles (
-  ID_Rol TEXT PRIMARY KEY,
+  ID_Rol TEXT NOT NULL PRIMARY KEY,
   Nombre_Rol TEXT NOT NULL UNIQUE
 );
 
@@ -88,7 +92,7 @@ INSERT OR IGNORE INTO Roles (ID_Rol, Nombre_Rol) VALUES
   ('00000000-0000-7000-8000-000000000004', 'Limpieza');
 
 CREATE TABLE IF NOT EXISTS Usuarios (
-  ID_Usuario TEXT PRIMARY KEY,
+  ID_Usuario TEXT NOT NULL PRIMARY KEY,
   ID_Rol TEXT NOT NULL,
   Email TEXT NOT NULL UNIQUE,
   Password_Hash TEXT NOT NULL,
@@ -112,7 +116,7 @@ CREATE TABLE IF NOT EXISTS Usuarios (
 -- comparan contra "ahora" en la capa de aplicacion; no se usan funciones de tiempo de SQL (no es
 -- una escritura replicable, asi que no aplica el determinismo temporal del outbox).
 CREATE TABLE IF NOT EXISTS Intentos_Login (
-  ID_Usuario TEXT PRIMARY KEY,
+  ID_Usuario TEXT NOT NULL PRIMARY KEY,
   Intentos_Fallidos INTEGER NOT NULL DEFAULT 0,
   Bloqueado_Hasta_Ms INTEGER NOT NULL DEFAULT 0,
   Ultimo_Intento_Ms INTEGER NOT NULL DEFAULT 0,
@@ -123,7 +127,7 @@ CREATE TABLE IF NOT EXISTS Intentos_Login (
    2. Personal y Horarios
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Trabajadores (
-  ID_Trabajador TEXT PRIMARY KEY,
+  ID_Trabajador TEXT NOT NULL PRIMARY KEY,
   ID_Usuario TEXT UNIQUE NOT NULL,
   DNI TEXT UNIQUE,
   Telefono TEXT,
@@ -136,12 +140,12 @@ CREATE TABLE IF NOT EXISTS Trabajadores (
 );
 
 CREATE TABLE IF NOT EXISTS Turnos (
-  ID_Turno TEXT PRIMARY KEY,
+  ID_Turno TEXT NOT NULL PRIMARY KEY,
   Nombre_Turno TEXT NOT NULL UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS Asignacion_Turnos (
-  ID_Asignacion TEXT PRIMARY KEY,
+  ID_Asignacion TEXT NOT NULL PRIMARY KEY,
   ID_Trabajador TEXT NOT NULL,
   Fecha DATE NOT NULL,
   ID_Turno TEXT NOT NULL,
@@ -164,7 +168,7 @@ INSERT OR IGNORE INTO Turnos (ID_Turno, Nombre_Turno) VALUES
   ('00000000-0000-7000-8000-000000000105', 'NOCHE');
 
 CREATE TABLE IF NOT EXISTS Horario_Predeterminado (
-  ID_Default TEXT PRIMARY KEY,
+  ID_Default TEXT NOT NULL PRIMARY KEY,
   ID_Trabajador TEXT NOT NULL,
   Weekday INTEGER NOT NULL,
   Orden INTEGER NOT NULL DEFAULT 1,
@@ -182,7 +186,7 @@ CREATE TABLE IF NOT EXISTS Horario_Predeterminado (
    3. Inventario y Productos
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Categorias_Producto (
-  ID_Categoria TEXT PRIMARY KEY,
+  ID_Categoria TEXT NOT NULL PRIMARY KEY,
   Nombre TEXT NOT NULL UNIQUE,
   Nombre_Imagen TEXT,
   Ruta_Imagen TEXT,
@@ -191,7 +195,7 @@ CREATE TABLE IF NOT EXISTS Categorias_Producto (
 );
 
 CREATE TABLE IF NOT EXISTS Proveedores (
-  ID_Proveedor TEXT PRIMARY KEY,
+  ID_Proveedor TEXT NOT NULL PRIMARY KEY,
   Nombre_Empresa TEXT NOT NULL,
   Contacto TEXT,
   Telefono TEXT,
@@ -203,7 +207,7 @@ CREATE TABLE IF NOT EXISTS Proveedores (
 );
 
 CREATE TABLE IF NOT EXISTS Productos (
-  ID_Producto TEXT PRIMARY KEY,
+  ID_Producto TEXT NOT NULL PRIMARY KEY,
   ID_Categoria TEXT NOT NULL,
   ID_Proveedor TEXT,
   Nombre TEXT NOT NULL UNIQUE,
@@ -256,7 +260,7 @@ ON Productos(ID_Proveedor);
 -- nadie la usaba para nada salvo para prohibir subir el disponible por encima de ella, o sea
 -- para convertir en un error corregir al alza justo lo que se acababa de contar.
 CREATE TABLE IF NOT EXISTS Lotes_Producto (
-  ID_Lote TEXT PRIMARY KEY,
+  ID_Lote TEXT NOT NULL PRIMARY KEY,
   ID_Producto TEXT NOT NULL,
   Codigo_Lote TEXT NOT NULL,
   Fecha_Entrada DATETIME NOT NULL,
@@ -287,7 +291,7 @@ ON Lotes_Producto(ID_Producto, Fecha_Entrada);
 -- ID_Usuario: quien lo hizo (NULLABLE: no siempre disponible en la capa de comando todavia).
 -- Fecha: instante local; el outbox/tenantHub lo congela a literal antes de replicar.
 CREATE TABLE IF NOT EXISTS Movimientos_Stock (
-  ID_Movimiento TEXT PRIMARY KEY,
+  ID_Movimiento TEXT NOT NULL PRIMARY KEY,
   ID_Lote TEXT NOT NULL,
   Tipo TEXT NOT NULL,
   Delta REAL NOT NULL,
@@ -307,7 +311,7 @@ CREATE INDEX IF NOT EXISTS idx_mov_stock_fecha
 ON Movimientos_Stock(Fecha);
 
 CREATE TABLE IF NOT EXISTS Pedidos_Proveedor (
-  ID_Pedido TEXT PRIMARY KEY,
+  ID_Pedido TEXT NOT NULL PRIMARY KEY,
   ID_Proveedor TEXT,
   Email_Destino TEXT,
   Estado TEXT NOT NULL DEFAULT 'borrador',
@@ -319,7 +323,7 @@ CREATE TABLE IF NOT EXISTS Pedidos_Proveedor (
 );
 
 CREATE TABLE IF NOT EXISTS Lineas_Pedido_Proveedor (
-  ID_Linea TEXT PRIMARY KEY,
+  ID_Linea TEXT NOT NULL PRIMARY KEY,
   ID_Pedido TEXT NOT NULL,
   Nombre_Producto TEXT NOT NULL,
   Cantidad REAL NOT NULL DEFAULT 1,
@@ -338,7 +342,7 @@ ON Lineas_Pedido_Proveedor(ID_Pedido);
    4. Alérgenos
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Alergenos (
-  ID_Alergeno TEXT PRIMARY KEY,
+  ID_Alergeno TEXT NOT NULL PRIMARY KEY,
   Nombre TEXT NOT NULL UNIQUE,
   Nombre_Imagen TEXT,
   Ruta_Imagen TEXT
@@ -359,14 +363,14 @@ ON Producto_Alergenos(ID_Alergeno);
    5. Zonas / Mesas / Clientes / Reservas
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Zonas (
-  ID_Zona TEXT PRIMARY KEY,
+  ID_Zona TEXT NOT NULL PRIMARY KEY,
   Nombre_Zona TEXT NOT NULL UNIQUE,
   Room_Points TEXT NOT NULL DEFAULT '[]',
   Updated_At DATETIME
 );
 
 CREATE TABLE IF NOT EXISTS Mesas (
-  ID_Mesa TEXT PRIMARY KEY,
+  ID_Mesa TEXT NOT NULL PRIMARY KEY,
   ID_Zona TEXT NOT NULL,
   Numero_Mesa TEXT NOT NULL,
   Capacidad INTEGER NOT NULL,
@@ -382,7 +386,7 @@ CREATE TABLE IF NOT EXISTS Mesas (
 );
 
 CREATE TABLE IF NOT EXISTS Clientes (
-  ID_Cliente TEXT PRIMARY KEY,
+  ID_Cliente TEXT NOT NULL PRIMARY KEY,
   Nombre TEXT NOT NULL,
   Telefono TEXT,
   Email TEXT,
@@ -415,7 +419,7 @@ WHERE Email IS NOT NULL AND Email <> '';
 -- mesa se sienta. Una reserva sin mesa no sale en el plano (la meta filtra ID_Mesa IS NOT NULL)
 -- ni puede chocar con otra por el hueco: no ocupa nada hasta que se le asigna una.
 CREATE TABLE IF NOT EXISTS Reservas (
-  ID_Reserva TEXT PRIMARY KEY,
+  ID_Reserva TEXT NOT NULL PRIMARY KEY,
   ID_Cliente TEXT,
   ID_Mesa TEXT,
   Dia_YMD TEXT NOT NULL,
@@ -458,7 +462,7 @@ ON Reservas(ID_Cliente);
 -- (Los comentarios van FUERA del CREATE TABLE a proposito: el snapshot anti-drift colapsa cada
 --  sentencia a una linea, y un `--` dentro se comeria el resto de la linea.)
 CREATE TABLE IF NOT EXISTS Comandas (
-  ID_Comanda TEXT PRIMARY KEY,
+  ID_Comanda TEXT NOT NULL PRIMARY KEY,
   ID_Mesa TEXT NULL,
   ID_Reserva TEXT NULL,
   ID_Trabajador TEXT NULL,
@@ -513,7 +517,7 @@ ON Comandas(ID_Trabajador, Fecha_Hora_Apertura);
 -- precio y su tipo- y solo pierde el enlace a una ficha que ya no existe. Sin el snapshot, esa misma
 -- FK dejaria las lineas historicas sin nombre.
 CREATE TABLE IF NOT EXISTS Detalle_Comanda (
-  ID_Detalle TEXT PRIMARY KEY,
+  ID_Detalle TEXT NOT NULL PRIMARY KEY,
   ID_Comanda TEXT NOT NULL,
   ID_Producto TEXT,
   Nombre_Producto TEXT,
@@ -614,7 +618,7 @@ ON Suelto_Consumos(ID_Producto);
 -- Pagado_Con_Caja (CAJA-01): el dinero salio del cajon. Solo esos gastos restan del esperado del
 -- arqueo; una factura pagada por banco no ha tocado el cajon, y restarla haria "sobrar" ese dinero.
 CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
-  ID_Gasto TEXT PRIMARY KEY,
+  ID_Gasto TEXT NOT NULL PRIMARY KEY,
   Fecha DATE NOT NULL,
   Concepto TEXT NOT NULL,
   Importe INTEGER NOT NULL,
@@ -647,7 +651,7 @@ ON Cuentas_Gastos(ID_Proveedor);
 -- periodos sin que nadie tenga que declarar dos veces el mismo numero. Y como lo dejado es dinero
 -- contado a mano, rectificar un cierre no mueve a los siguientes.
 CREATE TABLE IF NOT EXISTS Cierres_Caja (
-  ID_Cierre TEXT PRIMARY KEY,
+  ID_Cierre TEXT NOT NULL PRIMARY KEY,
   Fecha_Hora DATETIME NOT NULL,
   ID_Usuario TEXT,
   Fondo_Inicial INTEGER NOT NULL DEFAULT 0,
@@ -683,7 +687,7 @@ ON Cierres_Caja(Fecha_Hora DESC);
 -- quien, cuando y por que, con el esperado y el descuadre de antes y de despues. Es el rastro de las
 -- columnas Rect_* de Cierres_Caja: sin el, un cierre rectificado diria cuanto marca pero no por que.
 CREATE TABLE IF NOT EXISTS Cierre_Rectificaciones (
-  ID_Rectificacion TEXT PRIMARY KEY,
+  ID_Rectificacion TEXT NOT NULL PRIMARY KEY,
   ID_Cierre TEXT NOT NULL,
   Fecha_Hora DATETIME NOT NULL,
   ID_Usuario TEXT,
@@ -716,7 +720,7 @@ CREATE TABLE IF NOT EXISTS Cierre_Denominaciones (
    7. Tareas
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Tareas (
-  ID_Tarea TEXT PRIMARY KEY,
+  ID_Tarea TEXT NOT NULL PRIMARY KEY,
   Titulo TEXT NOT NULL,
   Descripcion TEXT,
   Fecha_Creacion DATETIME NOT NULL,
@@ -742,7 +746,7 @@ ON Tarea_Asignaciones(ID_Trabajador, Estado);
    8. Fichajes
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Fichajes (
-  ID_Fichaje TEXT PRIMARY KEY,
+  ID_Fichaje TEXT NOT NULL PRIMARY KEY,
   ID_Usuario TEXT NOT NULL,
   Fecha DATE NOT NULL,
   Parte INTEGER NOT NULL DEFAULT 1,
@@ -779,7 +783,7 @@ CREATE TABLE IF NOT EXISTS Fichaje_Dia (
 -- (obligarlo por esquema convertiria un olvido en un error de base de datos, que no se puede
 -- explicar); lo exige el caso de uso, que si puede dar un mensaje decente.
 CREATE TABLE IF NOT EXISTS Pagos (
-  ID_Pago TEXT PRIMARY KEY,
+  ID_Pago TEXT NOT NULL PRIMARY KEY,
   ID_Comanda TEXT NOT NULL,
   Fecha_Hora DATETIME NOT NULL,
   Metodo_Pago TEXT NOT NULL,
@@ -898,7 +902,7 @@ WHERE p.Estado = 'ACTIVO';
 -- que es justo por donde se va el dinero. No se registra para impedirlo -el camarero necesita
 -- abrirlo- sino para que exista la pregunta "quien lo abrio a las 17:40".
 CREATE TABLE IF NOT EXISTS Aperturas_Cajon (
-  ID_Apertura TEXT PRIMARY KEY,
+  ID_Apertura TEXT NOT NULL PRIMARY KEY,
   ID_Usuario TEXT,
   Fecha DATETIME NOT NULL,
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
@@ -925,7 +929,7 @@ ON Aperturas_Cajon(Fecha);
 -- va a sumar es pedir un error. Ampliar Tipo (devoluciones de VENTA-01, Veri*factu) es tocar solo
 -- el CHECK.
 CREATE TABLE IF NOT EXISTS Movimientos_Caja (
-  ID_Movimiento TEXT PRIMARY KEY,
+  ID_Movimiento TEXT NOT NULL PRIMARY KEY,
   Fecha_Hora TEXT NOT NULL,
   Tipo TEXT NOT NULL,
   ID_Pago TEXT,
@@ -1008,7 +1012,7 @@ CREATE TABLE IF NOT EXISTS Sync_Changes (
 );
 
 CREATE TABLE IF NOT EXISTS Sync_Main_Checkpoints (
-  Device_Id TEXT PRIMARY KEY,
+  Device_Id TEXT NOT NULL PRIMARY KEY,
   Last_Seq INTEGER NOT NULL,
   Updated_At_Ms INTEGER NOT NULL
 );
@@ -1132,7 +1136,7 @@ INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);
 -- Estado: ciclo de vida. Al reponer stock / aprobar el pedido, el emisor marca 'resuelta' en vez
 --   de acumular avisos.
 CREATE TABLE IF NOT EXISTS Notificaciones (
-  ID_Notificacion TEXT PRIMARY KEY,
+  ID_Notificacion TEXT NOT NULL PRIMARY KEY,
   Tipo            TEXT NOT NULL,
   Severidad       TEXT NOT NULL DEFAULT 'info',
   Titulo          TEXT NOT NULL,
@@ -1258,7 +1262,7 @@ LEFT JOIN lote_fefo f ON f.ID_Producto = p.ID_Producto;
 -- + fecha, error 3000). Un hueco en la numeracion es explicable; un numero repetido es un registro
 -- que no entra. SE FALLA HACIA EL HUECO.
 CREATE TABLE IF NOT EXISTS Serie_Facturacion (
-  Serie  TEXT PRIMARY KEY,
+  Serie  TEXT NOT NULL PRIMARY KEY,
   Ultimo INTEGER NOT NULL DEFAULT 0
 );
 
@@ -1302,7 +1306,7 @@ CREATE TABLE IF NOT EXISTS Serie_Facturacion (
 -- que: el importe, la base, la cuota y el desglose ya viven DENTRO del registro, no se derivan de
 -- la comanda al leer.
 CREATE TABLE IF NOT EXISTS Registros_Facturacion (
-  ID_Registro           TEXT PRIMARY KEY,
+  ID_Registro           TEXT NOT NULL PRIMARY KEY,
   Orden                 INTEGER NOT NULL,
   Tipo                  TEXT NOT NULL,
   NIF_Emisor            TEXT NOT NULL,
@@ -1467,7 +1471,7 @@ ON _Sync_Outbox(Cuarentena, Seq);
 -- Anti-eco de las escrituras propias + gate de idempotencia del catch-up.
 -- Reparto (ver §10): la NUBE usa `Applied_Operations`; la MAIN usa esta.
 CREATE TABLE IF NOT EXISTS _Sync_Applied_Ops (
-    Op_Id TEXT PRIMARY KEY,
+    Op_Id TEXT NOT NULL PRIMARY KEY,
     Seq INTEGER NOT NULL,
     Applied_At_Ms INTEGER NOT NULL
 );
@@ -1477,7 +1481,7 @@ CREATE TABLE IF NOT EXISTS _Sync_Applied_Ops (
 -- catch-up (que es la prueba de que se aplico de verdad), esta Main conserva su copia y
 -- puede reenviarla. Lo que hace esta tabla es que no se reenvie MIENTRAS TANTO.
 CREATE TABLE IF NOT EXISTS _Sync_Encoladas (
-    Op_Id TEXT PRIMARY KEY,
+    Op_Id TEXT NOT NULL PRIMARY KEY,
     Encolada_En_Ms INTEGER NOT NULL
 );
 
@@ -1491,7 +1495,7 @@ INSERT OR IGNORE INTO _Sync_State (Id, Last_Seq) VALUES (1, 0);
 -- Cuarentena de BAJADA: cambios remotos que esta Main no ha sabido aplicar. Tras 5
 -- intentos se apartan y el checkpoint AVANZA, para que el resto siga convergiendo.
 CREATE TABLE IF NOT EXISTS _Sync_Failed (
-    Op_Id TEXT PRIMARY KEY,
+    Op_Id TEXT NOT NULL PRIMARY KEY,
     Seq INTEGER NOT NULL,
     Statements_Json TEXT NOT NULL,
     Attempts INTEGER NOT NULL,
@@ -1520,7 +1524,7 @@ INSERT OR IGNORE INTO _Recovery_State (Id, Reconciliation_Pending) VALUES (1, 0)
 -- transaccion, asi que `defer_foreign_keys` no cubre a una hija insertada antes que su
 -- padre; sin ese orden la fase 2 fallaria fila a fila y no terminaria nunca.
 CREATE TABLE IF NOT EXISTS _Backfill_Historico (
-    Tabla TEXT PRIMARY KEY,
+    Tabla TEXT NOT NULL PRIMARY KEY,
     Orden INTEGER NOT NULL DEFAULT 0,
     Cursor INTEGER NOT NULL DEFAULT 0,
     Filas_Traidas INTEGER NOT NULL DEFAULT 0,
@@ -1542,7 +1546,7 @@ CREATE TABLE IF NOT EXISTS _Backfill_Historico (
 --   ACEPTADO_CON_ERRORES   -> esta en la AEAT pero hay que SUBSANARLO (errores 2000-2008).
 --   RECHAZADO              -> NO esta en la AEAT. Se subsana (Subsanacion=S, RechazoPrevio=X).
 CREATE TABLE IF NOT EXISTS _Verifactu_Envios (
-    ID_Registro       TEXT PRIMARY KEY,
+    ID_Registro       TEXT NOT NULL PRIMARY KEY,
     Estado            TEXT NOT NULL,
     Intentos          INTEGER NOT NULL DEFAULT 0,
     Ultimo_Intento_Ms INTEGER,
@@ -1563,7 +1567,7 @@ ON _Verifactu_Envios(Estado);
 -- apartado 15 del FAQ de desarrolladores de la AEAT). Esto es la parte util de aquello: que
 -- una anomalia no se quede solo en un log que nadie abre.
 CREATE TABLE IF NOT EXISTS _Verifactu_Anomalias (
-    ID_Anomalia     TEXT PRIMARY KEY,
+    ID_Anomalia     TEXT NOT NULL PRIMARY KEY,
     Clase           TEXT NOT NULL,
     Mensaje         TEXT NOT NULL,
     ID_Registro     TEXT,
@@ -1589,7 +1593,7 @@ INSERT OR IGNORE INTO _Verifactu_Flujo (ID, Espera_Segundos) VALUES (1, 60);
 -- exito) en vez de por tiempo de proceso, de modo que un job de 6 h se ejecute igualmente
 -- en un equipo que se apaga cada noche.
 CREATE TABLE IF NOT EXISTS _Jobs_State (
-    Nombre TEXT PRIMARY KEY,
+    Nombre TEXT NOT NULL PRIMARY KEY,
     Last_Run_Ms INTEGER,
     Last_Ok_Ms INTEGER,
     Last_Error TEXT,

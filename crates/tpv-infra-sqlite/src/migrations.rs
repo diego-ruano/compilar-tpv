@@ -536,6 +536,45 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// RI-65: ninguna columna de clave primaria admite NULL. En SQLite sólo una `INTEGER PRIMARY
+    /// KEY` de una columna (el alias del rowid) lo impide por sí misma; cualquier otra —una de
+    /// texto, o una parte de una clave compuesta— lo admite si no lleva `NOT NULL`, y admite
+    /// varios, porque en un índice único los NULL son distintos. Ya pasó: un lote nacía con
+    /// `ID_Lote` NULL, invisible para el FEFO. Una tabla nueva que se olvide del `NOT NULL` se
+    /// pone roja aquí. (`_migrations` es del runner, no del esquema: la crea cada runner por su
+    /// cuenta y sólo la escribe él.)
+    #[tokio::test]
+    async fn ninguna_clave_primaria_admite_null() {
+        let (_db, conn, dir) = open_temp().await;
+        run(&conn).await.unwrap();
+
+        let mut rows = conn
+            .query(
+                "SELECT m.name || '.' || p.name \
+                 FROM sqlite_master m JOIN pragma_table_info(m.name) p \
+                 WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name <> '_migrations' \
+                   AND p.pk > 0 AND p.\"notnull\" = 0 \
+                   AND NOT (upper(p.type) = 'INTEGER' \
+                            AND (SELECT COUNT(*) FROM pragma_table_info(m.name) x WHERE x.pk > 0) = 1) \
+                 ORDER BY 1;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let mut sin_not_null = Vec::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            if let Value::Text(col) = row.get_value(0).unwrap() {
+                sin_not_null.push(col);
+            }
+        }
+        assert!(
+            sin_not_null.is_empty(),
+            "estas claves primarias admiten NULL (añádeles NOT NULL): {sin_not_null:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// DB-12: la vista `v_inventario_producto_stock` se reescribio (window functions en vez de
     /// subconsultas correlacionadas). Verifica que su semantica es la misma: SUM de stock (todos los
     /// lotes), caducidad mas proxima (MIN de lotes CON stock) y lote FEFO siguiente (NULLs al final),
