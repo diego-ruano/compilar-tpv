@@ -182,10 +182,9 @@ export function removeLastUnpaidLinea(input: RemoveLastLineaInput): BuiltCommand
 							WHERE ID_Detalle = (
 								SELECT dc.ID_Detalle
 								FROM Detalle_Comanda dc
-								LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 								WHERE dc.ID_Comanda = ?1
 									AND dc.ID_Producto = ?2
-									AND pd.ID_Detalle IS NULL
+									AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 								ORDER BY dc.ID_Detalle DESC
 								LIMIT 1
 							);
@@ -417,9 +416,8 @@ export function cobrarFraccionado(
 				AND NOT EXISTS (
 					SELECT 1
 					FROM Detalle_Comanda dc
-					LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 					WHERE dc.ID_Comanda = ?1
-						AND pd.ID_Detalle IS NULL
+						AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 				);
 		`,
 		args: [input.id_comanda],

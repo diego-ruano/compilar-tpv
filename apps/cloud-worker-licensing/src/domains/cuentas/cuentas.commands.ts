@@ -315,8 +315,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
 				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
-				        LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
+				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 				      )
 				       AND NOT EXISTS (
 				        SELECT 1 FROM Comandas abierta
@@ -329,8 +328,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
 				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
-				        LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
+				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 				      )
 				       AND NOT EXISTS (
 				        SELECT 1 FROM Comandas abierta

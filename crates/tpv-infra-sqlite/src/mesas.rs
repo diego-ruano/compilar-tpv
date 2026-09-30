@@ -412,6 +412,56 @@ async fn read_comanda_by_id<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Op
     }))
 }
 
+/// Las líneas de una comanda con su marca de cobrada. Constante para que `planes::tests` vigile el
+/// plan de ESTA sentencia y no el de una copia (RI-02).
+pub(crate) const SQL_LINEAS_COMANDA: &str = r#"
+    SELECT
+      D.ID_Detalle, D.ID_Comanda, D.ID_Producto,
+      COALESCE(D.Cantidad, 1) AS Cantidad,
+      COALESCE(D.Precio_Unitario, 0) AS Precio_Unitario,
+      D.Notas, D.Estado_Cocina,
+      COALESCE(D.Nombre_Producto, P.Nombre, 'Producto') AS Nombre,
+      COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
+      D.IVA_Percent,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = D.ID_Detalle
+      ) THEN 1 ELSE 0 END AS Pagado
+    FROM Detalle_Comanda D
+    LEFT JOIN Productos P ON P.ID_Producto = D.ID_Producto
+    LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = P.ID_Categoria
+    WHERE D.ID_Comanda = ?1
+    ORDER BY D.ID_Detalle ASC;
+"#;
+
+/// El plano de mesas: pendiente de cobro y de cocina de cada comanda abierta. Constante para que
+/// `planes::tests` vigile el plan de ESTA sentencia (RI-02).
+pub(crate) const SQL_MESAS_META_ALL: &str = r#"
+    SELECT
+      c.ID_Mesa, c.ID_Comanda,
+      (
+        SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
+        FROM Detalle_Comanda dc
+        WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+      ) AS Total_Pendiente,
+      (
+        SELECT COUNT(*)
+        FROM Detalle_Comanda dc
+        WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+      ) AS Pendientes_Pago,
+      (
+        SELECT COUNT(*)
+        FROM Detalle_Comanda dc
+        JOIN Productos p ON p.ID_Producto = dc.ID_Producto
+        JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
+        WHERE dc.ID_Comanda = c.ID_Comanda
+          AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+          AND COALESCE(cat.Pasa_Cocina, 0) = 1
+          AND COALESCE(dc.Estado_Cocina,'PENDIENTE') <> 'PREPARADO'
+      ) AS Pendientes_Cocina
+    FROM Comandas c
+    WHERE c.Estado = 'Abierta';
+"#;
+
 #[async_trait]
 impl MesasRepository for SqliteMesasRepository {
     /* ===== LAYOUT ===== */
@@ -1046,24 +1096,7 @@ impl MesasRepository for SqliteMesasRepository {
         let db = &g;
         let mut rows = db
             .query(
-                r#"
-                SELECT
-                  D.ID_Detalle, D.ID_Comanda, D.ID_Producto,
-                  COALESCE(D.Cantidad, 1) AS Cantidad,
-                  COALESCE(D.Precio_Unitario, 0) AS Precio_Unitario,
-                  D.Notas, D.Estado_Cocina,
-                  COALESCE(D.Nombre_Producto, P.Nombre, 'Producto') AS Nombre,
-                  COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
-                  D.IVA_Percent,
-                  CASE WHEN EXISTS (
-                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = D.ID_Detalle
-                  ) THEN 1 ELSE 0 END AS Pagado
-                FROM Detalle_Comanda D
-                LEFT JOIN Productos P ON P.ID_Producto = D.ID_Producto
-                LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = P.ID_Categoria
-                WHERE D.ID_Comanda = ?1
-                ORDER BY D.ID_Detalle ASC;
-                "#,
+                SQL_LINEAS_COMANDA,
                 vec![Value::Text(id_comanda.to_string())],
             )
             .await
@@ -1466,8 +1499,7 @@ impl MesasRepository for SqliteMesasRepository {
               (
                 SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
                 FROM Detalle_Comanda dc
-                LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-                WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
+                WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
               ) AS Total_Pendiente,
               (
                 SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
@@ -1478,17 +1510,15 @@ impl MesasRepository for SqliteMesasRepository {
                 FROM Detalle_Comanda dc
                 JOIN Productos p ON p.ID_Producto = dc.ID_Producto
                 JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-                LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                 WHERE dc.ID_Comanda = c.ID_Comanda
-                  AND pd.ID_Detalle IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
                   AND COALESCE(cat.Pasa_Cocina, 0) = 1
                   AND COALESCE(dc.Estado_Cocina,'PENDIENTE') <> 'PREPARADO'
               ) AS Pendientes_Cocina,
               (
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
-                LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-                WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
+                WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
               ) AS Pendientes_Pago
             FROM Comandas c
             WHERE c.Canal = ?1
@@ -1589,35 +1619,7 @@ impl MesasRepository for SqliteMesasRepository {
 
         let mut rows = db
             .query(
-                r#"
-                SELECT
-                  c.ID_Mesa, c.ID_Comanda,
-                  (
-                    SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
-                    FROM Detalle_Comanda dc
-                    LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-                    WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
-                  ) AS Total_Pendiente,
-                  (
-                    SELECT COUNT(*)
-                    FROM Detalle_Comanda dc
-                    LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-                    WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
-                  ) AS Pendientes_Pago,
-                  (
-                    SELECT COUNT(*)
-                    FROM Detalle_Comanda dc
-                    JOIN Productos p ON p.ID_Producto = dc.ID_Producto
-                    JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-                    LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-                    WHERE dc.ID_Comanda = c.ID_Comanda
-                      AND pd.ID_Detalle IS NULL
-                      AND COALESCE(cat.Pasa_Cocina, 0) = 1
-                      AND COALESCE(dc.Estado_Cocina,'PENDIENTE') <> 'PREPARADO'
-                  ) AS Pendientes_Cocina
-                FROM Comandas c
-                WHERE c.Estado = 'Abierta';
-                "#,
+                SQL_MESAS_META_ALL,
                 (),
             )
             .await
@@ -2154,8 +2156,7 @@ impl MesasRepository for SqliteMesasRepository {
                 r#"
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
-                LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-                WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL;
+                WHERE dc.ID_Comanda = ?1 AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                 "#,
                 vec![Value::Text(data.id_comanda.clone())],
             )

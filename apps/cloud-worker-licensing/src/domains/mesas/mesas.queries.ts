@@ -223,23 +223,20 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 			(
 				SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
 				FROM Detalle_Comanda dc
-				LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-				WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
+				WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 			) AS total_pendiente,
 			(
 				SELECT COUNT(*)
 				FROM Detalle_Comanda dc
-				LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-				WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
+				WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 			) AS pendientes_pago,
 			(
 				SELECT COUNT(*)
 				FROM Detalle_Comanda dc
 				JOIN Productos p ON p.ID_Producto = dc.ID_Producto
 				JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-				LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 				WHERE dc.ID_Comanda = c.ID_Comanda
-					AND pd.ID_Detalle IS NULL
+					AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 					AND COALESCE(cat.Pasa_Cocina, 0) = 1
 					AND COALESCE(dc.Estado_Cocina,'PENDIENTE') <> 'PREPARADO'
 			) AS pendientes_cocina

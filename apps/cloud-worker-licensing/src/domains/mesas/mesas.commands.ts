@@ -704,8 +704,7 @@ export function cobrarDetalles(
 								AND NOT EXISTS (
 									SELECT 1
 									FROM Detalle_Comanda dc
-									LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-									WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL
+									WHERE dc.ID_Comanda = ?1 AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 								);
 						`,
 						args: [input.id_comanda],

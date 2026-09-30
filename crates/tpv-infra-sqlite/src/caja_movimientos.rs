@@ -53,6 +53,23 @@ fn texto(v: Option<String>) -> Value {
     }
 }
 
+/// La sentencia de [`registrar`]. Se replica tal cual, así que su `NOT EXISTS` se ejecuta también en
+/// Turso en cada cobro: `planes::tests` vigila que vaya por `ux_movcaja_pago`/`ux_movcaja_gasto` y
+/// no recorra el historial (RI-04).
+pub(crate) const SQL_REGISTRAR: &str = r#"
+    INSERT INTO Movimientos_Caja (
+      ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, ID_Gasto, ID_Usuario, ID_Trabajador,
+      Importe, Metodo_Pago, Motivo
+    )
+    SELECT ?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+    WHERE NOT EXISTS (
+      SELECT 1 FROM Movimientos_Caja mc
+      WHERE mc.Tipo = ?2
+        AND (?3 IS NOT NULL OR ?4 IS NOT NULL)
+        AND ((?3 IS NOT NULL AND mc.ID_Pago = ?3) OR (?4 IS NOT NULL AND mc.ID_Gasto = ?4))
+    );
+"#;
+
 /// Anota el movimiento. Va por `execute` (no por `raw`): el historial de caja es justo lo que hay
 /// que poder mirar desde fuera del local, así que se replica como cualquier otra escritura.
 ///
@@ -66,19 +83,7 @@ fn texto(v: Option<String>) -> Value {
 /// así que ninguna clave los frenaría— y el historial contaría dos cobros donde hubo uno.
 pub async fn registrar<C: Writer>(db: &C, m: MovimientoCaja) -> AppResult<()> {
     db.execute(
-        r#"
-        INSERT INTO Movimientos_Caja (
-          ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, ID_Gasto, ID_Usuario, ID_Trabajador,
-          Importe, Metodo_Pago, Motivo
-        )
-        SELECT ?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
-        WHERE NOT EXISTS (
-          SELECT 1 FROM Movimientos_Caja mc
-          WHERE mc.Tipo = ?2
-            AND (?3 IS NOT NULL OR ?4 IS NOT NULL)
-            AND ((?3 IS NOT NULL AND mc.ID_Pago = ?3) OR (?4 IS NOT NULL AND mc.ID_Gasto = ?4))
-        );
-        "#,
+        SQL_REGISTRAR,
         vec![
             Value::Text(new_id()),
             Value::Text(m.tipo.to_string()),

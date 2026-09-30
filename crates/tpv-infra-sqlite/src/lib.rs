@@ -22,6 +22,9 @@ mod contract_comun;
 mod contract_read_tests;
 #[cfg(test)]
 mod contract_tests;
+// Los planes de las consultas calientes, sin estadísticas (RI-02).
+#[cfg(test)]
+mod planes;
 
 // Helpers de mapeo libsql::Value <-> tipos Rust:
 pub mod mapping;

@@ -875,13 +875,25 @@ ON Pago_Detalles(ID_Detalle);
 -- y el worker: escrito 27 veces, la proxima consulta que alguien anada se olvidara del filtro y el
 -- sintoma sera una mesa con lineas congeladas o un pendiente descuadrado, no un error. Las
 -- ESCRITURAS siguen yendo contra Pago_Detalles; esta vista es solo para leer.
+--
+-- RI-02: el `+` de `+p.Estado` NO es una errata y no se puede quitar. Es la forma documentada de
+-- SQLite de impedir que una columna elija indice. Sin el, el planificador ve idx_pagos_estado_fecha,
+-- cree que `Estado = 'ACTIVO'` es selectivo (casi todos los cobros lo son) y resuelve
+-- `EXISTS (... WHERE ID_Detalle = X)` recorriendo TODOS los cobros activos y probando cada uno:
+-- segundos por mesa con un ano de datos. Con el `+` entra por idx_pago_detalles_detalle. No depende
+-- de estadisticas, que es lo que importa: las lecturas de la Handy corren en Turso, donde no hay
+-- ANALYZE.
+--
+-- Y por lo mismo esta vista se consulta con `NOT EXISTS`, nunca como operando derecho de un
+-- `LEFT JOIN ... IS NULL`: ahi SQLite no puede aplanarla (es un JOIN) y la materializa entera, o sea
+-- todas las lineas cobradas de la historia, en cada consulta.
 -- (Comentario fuera del CREATE VIEW: el snapshot anti-drift colapsa cada sentencia a una linea y
 --  un `--` dentro se comeria el resto.)
 CREATE VIEW IF NOT EXISTS v_lineas_cobradas AS
 SELECT pd.ID_Pago AS ID_Pago, pd.ID_Detalle AS ID_Detalle
 FROM Pago_Detalles pd
 JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
-WHERE p.Estado = 'ACTIVO';
+WHERE +p.Estado = 'ACTIVO';
 
 -- Correlativo del ticket impreso (Pagos.Numero_Ticket). Sin el, un papel no se puede atar a su
 -- cobro: ni para una devolucion, ni para cuadrar un arqueo, ni para el cliente que vuelve a

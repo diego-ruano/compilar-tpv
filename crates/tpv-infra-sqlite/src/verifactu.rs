@@ -433,6 +433,11 @@ fn es_rectificativa(tipo_factura: &str) -> bool {
     matches!(tipo_factura, "R1" | "R2" | "R3" | "R4" | "R5")
 }
 
+/// El número más alto ya emitido en una serie. Corre en cada cobro, dentro de la transacción del
+/// escritor único: `planes::tests` vigila que vaya por `idx_regfact_serie_numero` (RI-03).
+pub(crate) const SQL_MAX_NUMERO_EMITIDO: &str =
+    "SELECT COALESCE(MAX(Numero), 0) FROM Registros_Facturacion WHERE Serie = ?1;";
+
 /// Reserva el siguiente número de la serie y lo devuelve formateado (`2027/000001`).
 ///
 /// El incremento es **relativo** (`Ultimo + 1`), como el antiguo `Ticket_Contador`, para que la
@@ -458,7 +463,7 @@ pub(crate) async fn reservar_numero(
 
     let max_emitido = select_i64(
         db,
-        "SELECT COALESCE(MAX(Numero), 0) FROM Registros_Facturacion WHERE Serie = ?1;",
+        SQL_MAX_NUMERO_EMITIDO,
         vec![Value::Text(serie.to_string())],
     )
     .await?
@@ -3327,18 +3332,24 @@ impl SqliteVerifactuRepository {
     }
 }
 
+/// El bloque fiscal de un número de ticket (reimpresión). Un ticket antiguo tiene que encontrarse
+/// por `idx_regfact_numserie`, no recorriendo los registros hacia atrás: lo vigila
+/// `planes::tests` (RI-03).
+pub(crate) const SQL_BLOQUE_POR_NUMERO: &str =
+    "SELECT r.Num_Serie_Factura, r.Fecha_Expedicion, r.QR_Url, r.Huella, \
+            COALESCE(r.Tipo_Factura, ''), \
+            (SELECT Verifactu_Entorno FROM Business_Settings WHERE ID = 1) \
+     FROM Registros_Facturacion r \
+     WHERE r.Num_Serie_Factura = ?1 AND r.Tipo = 'ALTA' \
+     ORDER BY r.Orden DESC LIMIT 1;";
+
 #[async_trait]
 impl VerifactuRepository for SqliteVerifactuRepository {
     async fn bloque_por_numero(&self, num_serie_factura: &str) -> AppResult<Option<BloqueFiscal>> {
         let g = self.db.read().await;
         let mut rows = g
             .query(
-                "SELECT r.Num_Serie_Factura, r.Fecha_Expedicion, r.QR_Url, r.Huella, \
-                        COALESCE(r.Tipo_Factura, ''), \
-                        (SELECT Verifactu_Entorno FROM Business_Settings WHERE ID = 1) \
-                 FROM Registros_Facturacion r \
-                 WHERE r.Num_Serie_Factura = ?1 AND r.Tipo = 'ALTA' \
-                 ORDER BY r.Orden DESC LIMIT 1;",
+                SQL_BLOQUE_POR_NUMERO,
                 vec![Value::Text(num_serie_factura.to_string())],
             )
             .await

@@ -667,10 +667,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 WHERE ID_Detalle = (
                   SELECT dc.ID_Detalle
                   FROM Detalle_Comanda dc
-                  LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                   WHERE dc.ID_Comanda = ?1
                     AND dc.ID_Producto = ?2
-                    AND pd.ID_Detalle IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
                   ORDER BY dc.ID_Detalle DESC
                   LIMIT 1
                 );
@@ -1111,9 +1110,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     r#"
                     SELECT COUNT(*)
                     FROM Detalle_Comanda dc
-                    LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                     WHERE dc.ID_Comanda = ?1
-                      AND pd.ID_Detalle IS NULL;
+                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                     "#,
                     vec![Value::Text(data.id_comanda.clone())],
                 )
