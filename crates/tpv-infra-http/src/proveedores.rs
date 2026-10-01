@@ -43,6 +43,7 @@ impl ProveedoresRepository for HttpProveedoresRepository {
     }
 
     async fn guardar(&self, proveedor: ProveedorValidado) -> AppResult<bool> {
+        let generado = proveedor.id.is_none().then_some("id_proveedor");
         let id_proveedor = proveedor
             .id
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
@@ -57,7 +58,10 @@ impl ProveedoresRepository for HttpProveedoresRepository {
             "nombre_imagen": proveedor.nombre_imagen,
             "ruta_imagen": proveedor.ruta_imagen,
         });
-        let _: JsonValue = self.client.post_json("/v1/proveedores", &body).await?;
+        let _: (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/proveedores", &body, generado)
+            .await?;
         Ok(true)
     }
 
@@ -79,6 +83,7 @@ impl ProveedoresRepository for HttpProveedoresRepository {
     }
 
     async fn crear_producto(&self, producto: ProductoNuevo) -> AppResult<String> {
+        let generado = producto.id.is_none().then_some("id_producto");
         let id_producto = producto
             .id
             .clone()
@@ -93,10 +98,11 @@ impl ProveedoresRepository for HttpProveedoresRepository {
             "stock_minimo": producto.stock_minimo,
             "unidad_medida": producto.unidad_medida,
         });
-        let _: JsonValue = self
+        // En el reintento de un alta incierta (RI-64) el id que vale es el del primer envío.
+        let (_, enviado): (JsonValue, _) = self
             .client
-            .post_json("/v1/proveedores/productos", &body)
+            .post_json_creando("/v1/proveedores/productos", &body, generado)
             .await?;
-        Ok(id_producto)
+        Ok(enviado.unwrap_or(id_producto))
     }
 }

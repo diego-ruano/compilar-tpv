@@ -64,6 +64,7 @@ impl ClientesRepository for HttpClientesRepository {
     async fn create(&self, nuevo: NuevoCliente) -> AppResult<bool> {
         // POST /v1/clientes — el `id_cliente` (UUIDv7) lo genera el cliente: si no viene, lo
         // creamos aquí. El worker lo persiste tal cual (no recalcula ids).
+        let generado = nuevo.id.is_none().then_some("id_cliente");
         let id_cliente = nuevo
             .id
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
@@ -74,7 +75,10 @@ impl ClientesRepository for HttpClientesRepository {
             "telefono": nuevo.telefono,
             "notas": nuevo.notas,
         });
-        let resp: OkFlag = self.client.post_json("/v1/clientes", &body).await?;
+        let (resp, _): (OkFlag, _) = self
+            .client
+            .post_json_creando("/v1/clientes", &body, generado)
+            .await?;
         Ok(resp.ok)
     }
 

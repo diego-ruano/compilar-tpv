@@ -104,6 +104,7 @@ impl InventarioRepository for HttpInventarioRepository {
 
     // ── Escrituras ──
     async fn create_categoria(&self, cat: CategoriaUpsert) -> AppResult<()> {
+        let generado = cat.id.is_none().then_some("id_categoria");
         let id_categoria = cat.id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
             "id_categoria": id_categoria,
@@ -113,7 +114,10 @@ impl InventarioRepository for HttpInventarioRepository {
             "vendible": cat.vendible,
             "pasa_cocina": cat.pasa_cocina,
         });
-        let _: JsonValue = self.client.post_json("/v1/inventario/categorias", &body).await?;
+        let _: (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/inventario/categorias", &body, generado)
+            .await?;
         Ok(())
     }
 
@@ -135,6 +139,7 @@ impl InventarioRepository for HttpInventarioRepository {
     }
 
     async fn upsert_producto(&self, producto: ProductoUpsert) -> AppResult<String> {
+        let generado = producto.id.is_none().then_some("id_producto");
         let id_producto = producto
             .id
             .clone()
@@ -152,11 +157,16 @@ impl InventarioRepository for HttpInventarioRepository {
             "cantidad_pedido_esperada": producto.cantidad_pedido_esperada,
             "ids_alergenos": producto.ids_alergenos,
         });
-        let _: JsonValue = self.client.post_json("/v1/inventario/productos", &body).await?;
-        Ok(id_producto)
+        // En el reintento de un alta incierta (RI-64) el id que vale es el del primer envío.
+        let (_, enviado): (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/inventario/productos", &body, generado)
+            .await?;
+        Ok(enviado.unwrap_or(id_producto))
     }
 
     async fn create_lote(&self, lote: LoteNuevo) -> AppResult<()> {
+        let generado = lote.id.is_none().then_some("id_lote");
         let id_lote = lote.id.clone().unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
             "id_lote": id_lote,
@@ -169,7 +179,10 @@ impl InventarioRepository for HttpInventarioRepository {
             "id_proveedor": lote.id_proveedor,
             "notas": lote.notas,
         });
-        let _: JsonValue = self.client.post_json("/v1/inventario/lotes", &body).await?;
+        let _: (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/inventario/lotes", &body, generado)
+            .await?;
         Ok(())
     }
 

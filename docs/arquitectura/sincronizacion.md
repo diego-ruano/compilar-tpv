@@ -251,3 +251,9 @@ aplica por `lib/hub.ts` → `/internal/apply` del DO, que la ejecuta en Turso y 
 Handy no puede hacer, lo veta un middleware antes de leer el cuerpo ([worker.md](worker.md)). La lógica
 duplicada entre Rust y estos comandos la sujetan los arneses de contrato
 ([tests/contract/README.md](../../tests/contract/README.md)).
+
+La `X-Idempotency-Key` la pone el `CloudClient` de `tpv-infra-http`, una por escritura, salvo cuando el
+resultado de la anterior quedó **incierto** (fallo de transporte, timeout o 5xx): entonces la misma
+petición vuelve a salir con su clave y sus bytes durante 5 minutos, y el DO devuelve el resultado de
+la primera si se aplicó (RI-64). Así, el camarero que vuelve a pulsar tras un error no duplica la
+línea. Con una respuesta clara la clave se olvida, y pedir dos veces lo mismo son dos operaciones.

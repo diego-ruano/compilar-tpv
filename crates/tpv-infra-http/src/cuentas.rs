@@ -85,6 +85,7 @@ impl CuentasRepository for HttpCuentasRepository {
         gasto: GastoData,
         _id_usuario: Option<&str>,
     ) -> AppResult<bool> {
+        let generado = id.is_none().then_some("id_gasto");
         let id_gasto = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
             "id_gasto": id_gasto,
@@ -95,7 +96,10 @@ impl CuentasRepository for HttpCuentasRepository {
             "proveedor_id": gasto.proveedor_id,
             "pagado_con_caja": gasto.pagado_con_caja,
         });
-        let _: JsonValue = self.client.post_json("/v1/cuentas/gastos", &body).await?;
+        let _: (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/cuentas/gastos", &body, generado)
+            .await?;
         Ok(true)
     }
 

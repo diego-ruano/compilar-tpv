@@ -119,9 +119,9 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
             "id_trabajador": id_trabajador,
             "get_or_create": get_or_create,
         });
-        let resp: JsonValue = self
+        let (resp, _): (JsonValue, _) = self
             .client
-            .post_json("/v1/venta-rapida/comandas/barra", &body)
+            .post_json_creando("/v1/venta-rapida/comandas/barra", &body, Some("id_comanda"))
             .await?;
         // Ojo: con `get_or_create` el worker puede devolver el id de un ticket ya abierto, distinto
         // del que acabamos de proponer. Por eso manda la respuesta, no nuestro uuid.
@@ -142,7 +142,10 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
             "cantidad": cantidad,
             "precio_unitario": precio_unitario,
         });
-        let resp: JsonValue = self.client.post_json("/v1/venta-rapida/lineas", &body).await?;
+        let (resp, _): (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/venta-rapida/lineas", &body, Some("id_detalle"))
+            .await?;
         id_from_response(&resp, "id_detalle")
     }
 

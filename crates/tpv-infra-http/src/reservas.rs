@@ -39,6 +39,7 @@ impl ReservasRepository for HttpReservasRepository {
 
     async fn guardar(&self, reserva: ReservaValidada) -> AppResult<bool> {
         // El worker hace el upsert del cliente internamente a partir de estos campos.
+        let generado = reserva.id.is_none().then_some("id_reserva");
         let id_reserva = reserva
             .id
             .clone()
@@ -57,7 +58,10 @@ impl ReservasRepository for HttpReservasRepository {
             "email": reserva.cliente.email,
             "notas_cliente": reserva.cliente.notas,
         });
-        let _: JsonValue = self.client.post_json("/v1/reservas", &body).await?;
+        let _: (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/reservas", &body, generado)
+            .await?;
         Ok(true)
     }
 
