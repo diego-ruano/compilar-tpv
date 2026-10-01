@@ -3317,7 +3317,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tpv_application::ports::aeat::RegistroParaEnvio;
-use tpv_application::ports::verifactu::VerifactuRepository;
+use tpv_application::ports::verifactu::{ResultadoRegistro, VerifactuRepository};
 
 use crate::db::Db;
 
@@ -3493,35 +3493,43 @@ impl VerifactuRepository for SqliteVerifactuRepository {
         Ok(())
     }
 
-    async fn marcar_resultado(
-        &self,
-        id_registro: &str,
-        estado: &str,
-        codigo_error: Option<i64>,
-        descripcion_error: Option<&str>,
-        csv: Option<&str>,
-    ) -> AppResult<()> {
+    async fn marcar_resultados(&self, resultados: &[ResultadoRegistro]) -> AppResult<()> {
+        if resultados.is_empty() {
+            return Ok(());
+        }
+        // RI-34: todo el lote en UNA transacción, que es un solo commit a disco en vez de uno por
+        // registro. Va por `raw()` porque `_Verifactu_Envios` es estado local; el COMMIT del guard
+        // no tiene nada que capturar en el outbox.
         let g = self.db.write().await;
-        g.raw()
-            .execute(
-                // El CSV se guarda con `COALESCE(?, CSV)`: la propia documentación avisa de que no
-                // se puede recuperar con una consulta posterior, así que una respuesta que no lo
-                // traiga no puede borrar el que ya teníamos.
-                "UPDATE _Verifactu_Envios \
-                 SET Estado = ?2, Intentos = Intentos + 1, Ultimo_Intento_Ms = ?3, \
-                     Codigo_Error = ?4, Descripcion_Error = ?5, CSV = COALESCE(?6, CSV) \
-                 WHERE ID_Registro = ?1;",
-                vec![
-                    Value::Text(id_registro.to_string()),
-                    Value::Text(estado.to_string()),
-                    Value::Integer(now_ms()),
-                    codigo_error.map(|c| Value::Text(c.to_string())).unwrap_or(Value::Null),
-                    opt_text(descripcion_error.map(|s| s.to_string())),
-                    opt_text(csv.map(|s| s.to_string())),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
+        let ahora = now_ms();
+        g.execute_batch("BEGIN;").await.map_err(db_err)?;
+        for r in resultados {
+            let res = g
+                .raw()
+                .execute(
+                    // El CSV se guarda con `COALESCE(?, CSV)`: la propia documentación avisa de que
+                    // no se puede recuperar con una consulta posterior, así que una respuesta que
+                    // no lo traiga no puede borrar el que ya teníamos.
+                    "UPDATE _Verifactu_Envios \
+                     SET Estado = ?2, Intentos = Intentos + 1, Ultimo_Intento_Ms = ?3, \
+                         Codigo_Error = ?4, Descripcion_Error = ?5, CSV = COALESCE(?6, CSV) \
+                     WHERE ID_Registro = ?1;",
+                    vec![
+                        Value::Text(r.id_registro.clone()),
+                        Value::Text(r.estado.to_string()),
+                        Value::Integer(ahora),
+                        r.codigo_error.map(|c| Value::Text(c.to_string())).unwrap_or(Value::Null),
+                        opt_text(r.descripcion_error.clone()),
+                        opt_text(r.csv.clone()),
+                    ],
+                )
+                .await;
+            if let Err(e) = res {
+                let _ = g.execute_batch("ROLLBACK;").await;
+                return Err(db_err(e));
+            }
+        }
+        g.execute_batch("COMMIT;").await.map_err(db_err)?;
         Ok(())
     }
 
@@ -3529,20 +3537,24 @@ impl VerifactuRepository for SqliteVerifactuRepository {
         if ids.is_empty() {
             return Ok(());
         }
+        // RI-34: una sola sentencia. Antes era un `UPDATE` por registro con el escritor tomado
+        // todo el rato, así que tras un fallo de transporte con el lote lleno un cobro esperaba a
+        // mil escrituras seguidas.
+        //
+        // El estado NO se toca: siguen PENDIENTE. Un fallo de transporte no dice nada de si la AEAT
+        // los tiene o no, y darlos por perdidos sería tan malo como darlos por buenos.
+        let ids_json = serde_json::to_string(ids)
+            .map_err(|e| AppError::internal(format!("serializando los ids: {e}")))?;
         let g = self.db.write().await;
-        for id in ids {
-            // El estado NO se toca: siguen PENDIENTE. Un fallo de transporte no dice nada de si la
-            // AEAT los tiene o no, y darlos por perdidos sería tan malo como darlos por buenos.
-            g.raw()
-                .execute(
-                    "UPDATE _Verifactu_Envios \
-                     SET Intentos = Intentos + 1, Ultimo_Intento_Ms = ?2 \
-                     WHERE ID_Registro = ?1;",
-                    vec![Value::Text(id.clone()), Value::Integer(now_ms())],
-                )
-                .await
-                .map_err(db_err)?;
-        }
+        g.raw()
+            .execute(
+                "UPDATE _Verifactu_Envios \
+                 SET Intentos = Intentos + 1, Ultimo_Intento_Ms = ?2 \
+                 WHERE ID_Registro IN (SELECT value FROM json_each(?1));",
+                vec![Value::Text(ids_json), Value::Integer(now_ms())],
+            )
+            .await
+            .map_err(db_err)?;
         Ok(())
     }
 
@@ -3665,5 +3677,81 @@ mod tests_cola_de_envio {
         }
         let (nif, _, _) = SqliteVerifactuRepository::new(db).obligado().await.unwrap().unwrap();
         assert_eq!(nif, "B12345674");
+    }
+
+    /// Filas de `_Verifactu_Envios` en PENDIENTE, con un CSV previo en la primera.
+    async fn envios(db: &Arc<Db>, ids: &[&str]) {
+        let g = db.write().await;
+        for (i, id) in ids.iter().enumerate() {
+            g.raw()
+                .execute(
+                    "INSERT INTO _Verifactu_Envios (ID_Registro, Estado, CSV, Creado_En_Ms) \
+                     VALUES (?1, 'PENDIENTE', ?2, 1);",
+                    vec![
+                        Value::Text((*id).into()),
+                        if i == 0 { Value::Text("CSV-VIEJO".into()) } else { Value::Null },
+                    ],
+                )
+                .await
+                .unwrap();
+        }
+    }
+
+    async fn fila(db: &Arc<Db>, id: &str) -> (String, i64, Option<String>, Option<String>) {
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Estado, Intentos, Codigo_Error, CSV FROM _Verifactu_Envios WHERE ID_Registro = ?1;",
+                vec![Value::Text(id.into())],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        (
+            v_string(row.get_value(0).unwrap()).unwrap(),
+            v_i64(row.get_value(1).unwrap()).unwrap(),
+            v_string(row.get_value(2).unwrap()),
+            v_string(row.get_value(3).unwrap()),
+        )
+    }
+
+    #[tokio::test]
+    async fn los_resultados_del_lote_se_anotan_todos_y_un_CSV_ausente_no_borra_el_viejo() {
+        let (db, _dir) = db_temporal().await;
+        envios(&db, &["a", "b", "c"]).await;
+        let repo = SqliteVerifactuRepository::new(db.clone());
+        let r = |id: &str, estado: &'static str, cod: Option<i64>, csv: Option<&str>| ResultadoRegistro {
+            id_registro: id.into(),
+            estado,
+            codigo_error: cod,
+            descripcion_error: None,
+            csv: csv.map(str::to_string),
+        };
+        repo.marcar_resultados(&[
+            r("a", "ACEPTADO", None, None),
+            r("b", "ACEPTADO", None, Some("CSV-NUEVO")),
+            r("c", "RECHAZADO", Some(1150), None),
+        ])
+        .await
+        .unwrap();
+
+        assert_eq!(fila(&db, "a").await, ("ACEPTADO".into(), 1, None, Some("CSV-VIEJO".into())));
+        assert_eq!(fila(&db, "b").await, ("ACEPTADO".into(), 1, None, Some("CSV-NUEVO".into())));
+        assert_eq!(fila(&db, "c").await, ("RECHAZADO".into(), 1, Some("1150".into()), None));
+    }
+
+    #[tokio::test]
+    async fn un_intento_cuenta_SOLO_en_los_registros_que_se_le_pasan_y_no_cambia_su_estado() {
+        let (db, _dir) = db_temporal().await;
+        envios(&db, &["a", "b", "c"]).await;
+        SqliteVerifactuRepository::new(db.clone())
+            .marcar_intento(&["a".to_string(), "c".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(fila(&db, "a").await.0, "PENDIENTE");
+        assert_eq!(fila(&db, "a").await.1, 1);
+        assert_eq!(fila(&db, "b").await.1, 0);
+        assert_eq!(fila(&db, "c").await.1, 1);
     }
 }

@@ -5,9 +5,11 @@
 //! queda aquí son las lecturas —el panel, el bloque para imprimir— y la orquestación de lo que no
 //! puede vivir dentro de una transacción.
 
+use std::collections::HashMap;
+
 use crate::error::AppResult;
-use crate::ports::aeat::{AeatClient, CabeceraEnvio, EntornoAeat};
-use crate::ports::verifactu::VerifactuRepository;
+use crate::ports::aeat::{AeatClient, CabeceraEnvio, EntornoAeat, LineaRespuesta, RegistroParaEnvio};
+use crate::ports::verifactu::{ResultadoRegistro, VerifactuRepository};
 use crate::error::AppError;
 use tpv_contracts::verifactu::{
     BloqueFiscal, DestinatarioInput, EstadoFiscal, RegistroFiscal,
@@ -602,9 +604,9 @@ pub struct ResultadoCiclo {
 /// ## El orden importa y no es negociable
 ///
 /// Se manda **por `Orden` ascendente** porque la AEAT valida cada registro contra su encadenamiento
-/// anterior. Y se anota el resultado **registro a registro**, casando por número de factura y no
-/// por posición: si la AEAT omitiera una línea de la respuesta, casar por índice desplazaría todos
-/// los estados una posición y marcaría como aceptado un registro rechazado.
+/// anterior. Y el resultado de cada registro se casa por tipo y número de factura y no por
+/// posición: si la AEAT omitiera una línea de la respuesta, casar por índice desplazaría todos los
+/// estados una posición y marcaría como aceptado un registro rechazado.
 pub async fn remitir_ciclo(
     repo: &dyn VerifactuRepository,
     aeat: &dyn AeatClient,
@@ -679,29 +681,46 @@ pub async fn remitir_ciclo(
         rechazados: 0,
     };
 
+    // Se casa por **tipo y número**, no por posición. Ver la nota de arriba.
+    //
+    // El tipo no es un extra: un registro de anulación lleva el MISMO `NumSerieFactura` que el
+    // alta que anula, y los dos pueden ir en el mismo envío — basta cobrar por error y anular
+    // dentro del mismo ciclo. Casando sólo por número, los dos registros cogerían la misma línea.
+    //
+    // Lo que eso rompe no se ve: si la AEAT acepta el alta y rechaza la anulación, la anulación
+    // queda anotada como ACEPTADA. Y como `pendientes()` sólo coge los `PENDIENTE` y
+    // `subsanar_rechazados` sólo los `RECHAZADO`, esa anulación no se reintenta jamás: la
+    // factura sigue viva para Hacienda y el panel dice que todo salió bien.
+    //
+    // RI-34: se indexa en un mapa, y una clave que no es de UN registro y UNA línea no se atribuye.
+    // Dos líneas para el mismo tipo y número, o dos registros del lote que los compartan, no dicen
+    // cuál es de cuál: se quedan PENDIENTE, como si la AEAT no hubiera dicho nada, en vez de que el
+    // primero que llegue se lleve una línea que quizá no es la suya.
+    fn clave(r: &RegistroParaEnvio) -> (bool, &str) {
+        (r.tipo.eq_ignore_ascii_case("ANULACION"), r.num_serie_factura.as_str())
+    }
+    let mut lineas: HashMap<(bool, &str), Vec<&LineaRespuesta>> =
+        HashMap::with_capacity(respuesta.lineas.len());
+    for l in &respuesta.lineas {
+        lineas.entry((l.anulacion, l.num_serie_factura.as_str())).or_default().push(l);
+    }
+    let mut enviados: HashMap<(bool, &str), usize> = HashMap::with_capacity(lote.len());
     for enviado in &lote {
-        // Se casa por **tipo y número**, no por posición. Ver la nota de arriba.
-        //
-        // El tipo no es un extra: un registro de anulación lleva el MISMO `NumSerieFactura` que el
-        // alta que anula, y los dos pueden ir en el mismo envío — basta cobrar por error y anular
-        // dentro del mismo ciclo. Casando
-        // sólo por número, `find` devuelve la primera de las dos líneas para ambos registros.
-        //
-        // Lo que eso rompe no se ve: si la AEAT acepta el alta y rechaza la anulación, la anulación
-        // queda anotada como ACEPTADA. Y como `pendientes()` sólo coge los `PENDIENTE` y
-        // `subsanar_rechazados` sólo los `RECHAZADO`, esa anulación no se reintenta jamás: la
-        // factura sigue viva para Hacienda y el panel dice que todo salió bien.
-        let es_anulacion = enviado.tipo.eq_ignore_ascii_case("ANULACION");
-        let Some(linea) = respuesta
-            .lineas
-            .iter()
-            .find(|l| l.anulacion == es_anulacion && l.num_serie_factura == enviado.num_serie_factura)
-        else {
-            // La AEAT no dijo nada de este registro. Se queda PENDIENTE y se reintenta: es
-            // exactamente el caso en el que no se puede suponer nada.
-            repo.marcar_intento(std::slice::from_ref(&enviado.id_registro))
-                .await?;
-            continue;
+        *enviados.entry(clave(enviado)).or_default() += 1;
+    }
+
+    let mut resultados = Vec::with_capacity(lote.len());
+    let mut sin_respuesta = Vec::new();
+    for enviado in &lote {
+        let k = clave(enviado);
+        let linea = match lineas.get(&k).map(Vec::as_slice) {
+            Some([l]) if enviados[&k] == 1 => *l,
+            // La AEAT no dijo nada de este registro, o no se sabe qué línea es la suya. Se queda
+            // PENDIENTE y se reintenta: es exactamente el caso en el que no se puede suponer nada.
+            _ => {
+                sin_respuesta.push(enviado.id_registro.clone());
+                continue;
+            }
         };
 
         let estado = clasificar(&linea.estado, linea.codigo_error);
@@ -712,22 +731,24 @@ pub async fn remitir_ciclo(
             EstadoEnvio::Pendiente => {}
         }
 
-        repo.marcar_resultado(
-            &enviado.id_registro,
-            estado.wire(),
-            linea.codigo_error,
-            linea.descripcion_error.as_deref(),
+        resultados.push(ResultadoRegistro {
+            id_registro: enviado.id_registro.clone(),
+            estado: estado.wire(),
+            codigo_error: linea.codigo_error,
+            descripcion_error: linea.descripcion_error.clone(),
             // El CSV es del ENVÍO, no de la línea, y hay que guardarlo en el momento del alta: no
             // se puede recuperar con una consulta posterior. Se guarda en cada registro aceptado
             // del lote, que es donde alguien lo va a buscar.
-            if matches!(estado, EstadoEnvio::Aceptado | EstadoEnvio::AceptadoConErrores) {
-                respuesta.csv.as_deref()
+            csv: if matches!(estado, EstadoEnvio::Aceptado | EstadoEnvio::AceptadoConErrores) {
+                respuesta.csv.clone()
             } else {
                 None
             },
-        )
-        .await?;
+        });
     }
+
+    repo.marcar_resultados(&resultados).await?;
+    repo.marcar_intento(&sin_respuesta).await?;
 
     Ok(Ok(r))
 }
@@ -893,6 +914,7 @@ mod tests {
         #[derive(Default)]
         struct Anotado {
             resultados: Vec<(String, String, Option<i64>, Option<String>)>,
+            llamadas_resultados: usize,
             intentos: Vec<String>,
             flujo: Option<(i64, i64)>,
         }
@@ -939,20 +961,12 @@ mod tests {
                 self.anotado.lock().unwrap().flujo = Some((espera_s, ultimo));
                 Ok(())
             }
-            async fn marcar_resultado(
-                &self,
-                id: &str,
-                estado: &str,
-                cod: Option<i64>,
-                _desc: Option<&str>,
-                csv: Option<&str>,
-            ) -> AppResult<()> {
-                self.anotado.lock().unwrap().resultados.push((
-                    id.to_string(),
-                    estado.to_string(),
-                    cod,
-                    csv.map(str::to_string),
-                ));
+            async fn marcar_resultados(&self, resultados: &[ResultadoRegistro]) -> AppResult<()> {
+                let mut a = self.anotado.lock().unwrap();
+                a.llamadas_resultados += 1;
+                a.resultados.extend(resultados.iter().map(|r| {
+                    (r.id_registro.clone(), r.estado.to_string(), r.codigo_error, r.csv.clone())
+                }));
                 Ok(())
             }
             async fn marcar_intento(&self, ids: &[String]) -> AppResult<()> {
@@ -1199,6 +1213,58 @@ mod tests {
         }
 
         #[test]
+        fn el_lote_entero_se_anota_en_UNA_escritura() {
+            // RI-34: un envío trae hasta 1000 registros, y anotarlos de uno en uno eran 1000
+            // escrituras compitiendo con los cobros justo tras un atraso.
+            let lote: Vec<_> = (0..50).map(|i| registro(&i.to_string())).collect();
+            let lineas = (0..50).map(|i| linea(&i.to_string(), "Correcto", None)).collect();
+            let repo = RepoFalso::con(lote);
+            let aeat = AeatFalso::ok(lineas, Some("CSV1"), Some(60));
+
+            assert_eq!(correr(&repo, &aeat).unwrap().unwrap().aceptados, 50);
+            let a = repo.anotado.lock().unwrap();
+            assert_eq!(a.llamadas_resultados, 1);
+            assert_eq!(a.resultados.len(), 50);
+        }
+
+        #[test]
+        fn dos_LINEAS_con_el_mismo_tipo_y_numero_no_se_atribuyen() {
+            // Si la AEAT contestara dos veces por la misma factura, no se sabe cuál vale: la
+            // primera que llegara no puede llevarse el registro.
+            let repo = RepoFalso::con(vec![registro("A"), registro("B")]);
+            let aeat = AeatFalso::ok(
+                vec![
+                    linea("A", "Correcto", None),
+                    linea("A", "Incorrecto", Some(1150)),
+                    linea("B", "Correcto", None),
+                ],
+                Some("CSV1"),
+                Some(60),
+            );
+
+            correr(&repo, &aeat).unwrap().unwrap();
+            let a = repo.anotado.lock().unwrap();
+            assert!(a.resultados.iter().all(|(i, ..)| i != "id-A"), "A no se anota");
+            assert!(a.intentos.iter().any(|i| i == "id-A"), "A se queda PENDIENTE");
+            assert!(a.resultados.iter().any(|(i, ..)| i == "id-B"), "B sí");
+        }
+
+        #[test]
+        fn dos_REGISTROS_con_el_mismo_tipo_y_numero_no_se_reparten_una_linea() {
+            // La estructura lo permitía aunque hoy no pase (un rechazado no está PENDIENTE): con
+            // `find`, los dos se llevaban la misma línea.
+            let mut otro = registro("A");
+            otro.id_registro = "id-A-bis".into();
+            let repo = RepoFalso::con(vec![registro("A"), otro]);
+            let aeat = AeatFalso::ok(vec![linea("A", "Correcto", None)], Some("CSV1"), Some(60));
+
+            correr(&repo, &aeat).unwrap().unwrap();
+            let a = repo.anotado.lock().unwrap();
+            assert!(a.resultados.is_empty());
+            assert_eq!(a.intentos, vec!["id-A".to_string(), "id-A-bis".to_string()]);
+        }
+
+        #[test]
         fn un_registro_del_que_la_aeat_no_dice_nada_se_queda_pendiente() {
             // No se puede suponer nada: ni que lo tiene ni que no. Se reintenta.
             let repo = RepoFalso::con(vec![registro("A"), registro("B")]);
@@ -1412,14 +1478,7 @@ mod tests_aviso_de_atraso {
         async fn guardar_flujo(&self, _e: i64, _u: i64) -> AppResult<()> {
             Ok(())
         }
-        async fn marcar_resultado(
-            &self,
-            _id: &str,
-            _e: &str,
-            _c: Option<i64>,
-            _d: Option<&str>,
-            _csv: Option<&str>,
-        ) -> AppResult<()> {
+        async fn marcar_resultados(&self, _r: &[ResultadoRegistro]) -> AppResult<()> {
             Ok(())
         }
         async fn marcar_intento(&self, _ids: &[String]) -> AppResult<()> {

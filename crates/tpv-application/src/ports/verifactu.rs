@@ -14,6 +14,19 @@ use crate::error::AppResult;
 use crate::ports::aeat::RegistroParaEnvio;
 use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal, RegistroFiscal};
 
+/// En qué quedó un registro tras el envío: lo que [`VerifactuRepository::marcar_resultados`]
+/// guarda en su fila de `_Verifactu_Envios`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResultadoRegistro {
+    pub id_registro: String,
+    /// El estado de la cola (`EstadoEnvio::wire`).
+    pub estado: &'static str,
+    pub codigo_error: Option<i64>,
+    pub descripcion_error: Option<String>,
+    /// El CSV **del envío**, sólo en los aceptados. `None` no borra el que ya hubiera.
+    pub csv: Option<String>,
+}
+
 /// La cadena de registros y su cola de envío, en local.
 #[async_trait]
 pub trait VerifactuRepository: Send + Sync {
@@ -50,15 +63,11 @@ pub trait VerifactuRepository: Send + Sync {
     /// Guarda el estado del control de flujo tras un envío.
     async fn guardar_flujo(&self, espera_s: i64, ultimo_envio_ms: i64) -> AppResult<()>;
 
-    /// Anota en qué quedó un registro tras el envío.
-    async fn marcar_resultado(
-        &self,
-        id_registro: &str,
-        estado: &str,
-        codigo_error: Option<i64>,
-        descripcion_error: Option<&str>,
-        csv: Option<&str>,
-    ) -> AppResult<()>;
+    /// Anota en qué quedó cada registro de un envío, **todos a la vez** (RI-34).
+    ///
+    /// Un envío trae hasta 1000: anotarlos de uno en uno eran 1000 escrituras sueltas compitiendo
+    /// con los cobros por el escritor, justo tras un atraso, que es cuando el lote viene lleno.
+    async fn marcar_resultados(&self, resultados: &[ResultadoRegistro]) -> AppResult<()>;
 
     /// Anota que se intentó enviar estos registros y no se pudo procesar la respuesta.
     ///

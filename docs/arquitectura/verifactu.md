@@ -277,7 +277,9 @@ Cada vuelta, en este orden:
    - Casa cada línea por **tipo y número** (un alta y su anulación comparten número). El tipo sale
      de `Operacion/TipoOperacion`: el `IDFactura` de la respuesta lleva `NumSerieFactura` también en
      una anulación. Una línea que no aparece en la respuesta, o que no dice su tipo, se queda
-     `PENDIENTE` con un intento más.
+     `PENDIENTE` con un intento más; también si dos líneas, o dos registros del lote, comparten
+     tipo y número, porque no se sabe cuál es de cuál.
+   - Los resultados del lote se anotan en una sola transacción, y los intentos en una sola sentencia.
    - Un fallo de transporte o un *Fault* anota un intento a todo el lote, que sigue `PENDIENTE`, y
      devuelve `Err` (backoff del runner).
 7. Evalúa el aviso de atraso y emite `verifactu:cambio` para que la pantalla se refresque.
