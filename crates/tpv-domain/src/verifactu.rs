@@ -289,6 +289,21 @@ pub fn fecha_registro_desde_iso(ymd: &str) -> Option<String> {
 /// Letra de control de un NIF de persona física, por el resto de la división entre 23.
 const LETRAS_NIF: &[u8; 23] = b"TRWAGMYFPDXBNJZSQVHLCKE";
 
+/// Letras iniciales de un NIF de persona jurídica o entidad: el art. 3 de la Orden EHA/451/2008
+/// (españolas), más la `N` (art. 4, extranjeras) y la `W` (art. 5.2, establecimientos permanentes
+/// de no residentes). <https://www.boe.es/buscar/act.php?id=BOE-A-2008-3580>
+const INICIALES_CIF: &[u8] = b"ABCDEFGHJNPQRSUVW";
+
+/// Deja un NIF como lo quiere la AEAT: sin blancos en los extremos, en mayúsculas y sin guiones ni
+/// espacios en medio.
+///
+/// Es la forma que tiene que salir hacia el XML, el QR y la huella, y no sólo la que se valida: un
+/// NIF que se diera por bueno quitándole el guion pero se enviara con él tendría 10 caracteres y la
+/// AEAT rechazaría todos los registros (RI-14).
+pub fn normalizar_nif(nif: &str) -> String {
+    nif.trim().to_ascii_uppercase().replace(['-', ' '], "")
+}
+
 /// Valida un **NIF/NIE/CIF español** comprobando el dígito o letra de control.
 ///
 /// La AEAT lo tipa como una cadena de longitud exacta 9 y lo contrasta contra su censo. Un NIF mal
@@ -296,14 +311,20 @@ const LETRAS_NIF: &[u8; 23] = b"TRWAGMYFPDXBNJZSQVHLCKE";
 /// 2001), o sea horas después y sin el cliente delante. Comprobar el control aquí mismo evita casi
 /// todos esos casos, que es la razón de que esta función exista en el dominio y no en la interfaz.
 ///
-/// Cubre las tres formas:
+/// Cubre cuatro formas:
 ///
 /// - **NIF** de persona física: 8 dígitos + letra (`12345678Z`).
 /// - **NIE**: `X`/`Y`/`Z` + 7 dígitos + letra, sustituyendo la inicial por `0`/`1`/`2`.
-/// - **CIF** de persona jurídica: letra + 7 dígitos + dígito o letra de control, con la suma
-///   ponderada de Luhn sobre las posiciones impares.
+/// - **NIF K, L y M** (españoles menores de 14 años, residentes en el extranjero y extranjeros sin
+///   NIE): sólo la **forma**, letra + 7 caracteres alfanuméricos + letra. Es lo que dice el art. 20
+///   del RD 1065/2007, que no publica cómo se calcula el carácter de control; rechazar con una regla
+///   inventada dejaría sin factura a quien tiene un NIF real (RI-14). Lo confirma la AEAT al recibir.
+/// - **CIF** de persona jurídica: una inicial de [`INICIALES_CIF`] + 7 dígitos + dígito o letra de
+///   control, con la suma ponderada de Luhn sobre las posiciones impares.
+///
+/// La tabla de casos es `nif_casos.json`, la misma que lee el test de la pantalla.
 pub fn nif_valido(nif: &str) -> bool {
-    let s: String = nif.trim().to_ascii_uppercase().replace(['-', ' '], "");
+    let s = normalizar_nif(nif);
     if s.len() != 9 || !s.is_ascii() {
         return false;
     }
@@ -329,8 +350,13 @@ pub fn nif_valido(nif: &str) -> bool {
         return b[8] == LETRAS_NIF[(n % 23) as usize];
     }
 
+    // NIF K, L y M: sólo la forma (ver la nota de la función).
+    if matches!(b[0], b'K' | b'L' | b'M') {
+        return b[1..8].iter().all(|c| c.is_ascii_alphanumeric()) && b[8].is_ascii_alphabetic();
+    }
+
     // CIF: letra de organización + 7 dígitos + control (dígito o letra, según la letra inicial).
-    if b[0].is_ascii_alphabetic() && b[1..8].iter().all(|c| c.is_ascii_digit()) {
+    if INICIALES_CIF.contains(&b[0]) && b[1..8].iter().all(|c| c.is_ascii_digit()) {
         let mut suma_par = 0u32;
         let mut suma_impar = 0u32;
         for (i, c) in s[1..8].bytes().enumerate() {
@@ -349,7 +375,7 @@ pub fn nif_valido(nif: &str) -> bool {
 
         return match b[0] {
             // Sólo letra de control.
-            b'K' | b'P' | b'Q' | b'R' | b'S' | b'N' | b'W' => b[8] == control_letra,
+            b'P' | b'Q' | b'R' | b'S' | b'N' | b'W' => b[8] == control_letra,
             // Sólo dígito de control.
             b'A' | b'B' | b'E' | b'H' => b[8] == b'0' + control_num,
             // Cualquiera de los dos.
@@ -481,7 +507,7 @@ pub fn validar_destinatario(d: Destinatario) -> Result<Destinatario, Destinatari
     if nombre.is_empty() {
         return Err(DestinatarioInvalido::FaltaNombre);
     }
-    let nif = d.nif.trim().to_ascii_uppercase().replace([' ', '-'], "");
+    let nif = normalizar_nif(&d.nif);
     if nif.is_empty() {
         return Err(DestinatarioInvalido::FaltaNif);
     }
@@ -883,50 +909,23 @@ mod tests {
 
     #[test]
     fn nif_misma_tabla_que_la_pantalla() {
-        // Tabla repetida en `apps/tpv-main/test/nif.test.ts`. La pantalla valida el NIF al escribir y
-        // esto lo revalida: si la pantalla rechazara uno que aquí vale, el cliente se quedaría sin
-        // factura sin que la petición llegara nunca hasta aquí.
-        for nif in [
-            "12345678Z",
-            "89890001K",
-            "00000015S",
-            " 12345678z ",
-            "12345678-Z",
-            "12 345 678 Z",
-            "X1234567L",
-            "Y1234567X",
-            "Z1234567R",
-            "x-1234567-l",
-            "A58818501",
-            "A12345674",
-            "B12345674",
-            "Q2826000H",
-            "K1234567D",
-            "G12345674",
-            "G1234567D",
-        ] {
-            assert!(nif_valido(nif), "{nif:?} debería ser válido");
+        // `nif_casos.json` lo lee también `apps/tpv-main/test/nif.test.ts`. La pantalla valida el NIF
+        // al escribir y esto lo revalida: si la pantalla rechazara uno que aquí vale, el cliente se
+        // quedaría sin factura sin que la petición llegara nunca hasta aquí (RI-14).
+        #[derive(serde::Deserialize)]
+        struct Casos {
+            validos: Vec<(String, String)>,
+            invalidos: Vec<(String, String)>,
         }
+        let casos: Casos =
+            serde_json::from_str(include_str!("nif_casos.json")).expect("nif_casos.json no es JSON válido");
+        assert!(!casos.validos.is_empty() && !casos.invalidos.is_empty());
 
-        // Un espacio duro pegado de una web, y una «ſ» que `toUpperCase()` de JavaScript convierte en
-        // «S»: la pantalla los aceptaba y esto no.
-        let con_espacio_duro = format!("12345678{}Z", char::from(0xa0u8));
-        let con_s_larga = format!("00000015{}", char::from_u32(0x17f).unwrap());
-        for nif in [
-            "12345678A",
-            "1234567Z",
-            "12345678",
-            "12345678ZZ",
-            "",
-            "X1234567A",
-            "B12345670",
-            "A1234567D",
-            "K12345674",
-            "12345678\tZ",
-            con_espacio_duro.as_str(),
-            con_s_larga.as_str(),
-        ] {
-            assert!(!nif_valido(nif), "{nif:?} no debería ser válido");
+        for (nif, por_que) in &casos.validos {
+            assert!(nif_valido(nif), "{nif:?} debería ser válido: {por_que}");
+        }
+        for (nif, por_que) in &casos.invalidos {
+            assert!(!nif_valido(nif), "{nif:?} no debería ser válido: {por_que}");
         }
     }
 

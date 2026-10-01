@@ -4,9 +4,9 @@
 //
 // ⚠️ Gemela de `nif_valido` en `crates/tpv-domain/src/verifactu.rs`, y lo es a propósito. El backend
 // la vuelve a comprobar —quien puede invocar un comando puede mandar lo que quiera—, pero si sólo
-// estuviera allí el camarero se enteraría del error después de pulsar cobrar. Las dos llevan la misma
-// tabla de casos en sus tests (`test/nif.test.ts` y los de `verifactu.rs`): si una cambia de
-// criterio, falla la otra.
+// estuviera allí el camarero se enteraría del error después de pulsar cobrar. Las dos leen en sus
+// tests la misma tabla, `crates/tpv-domain/src/nif_casos.json`: si una cambia de criterio, falla la
+// otra (RI-14).
 //
 // El sentido en que más duele que se separen es uno: si la pantalla rechaza un NIF que el backend
 // aceptaría, el cliente se queda sin factura —y por encima del límite de la simplificada, sin poder
@@ -14,6 +14,9 @@
 
 /** Letras de control de un NIF de persona física, por el resto entre 23. */
 const LETRAS_NIF = "TRWAGMYFPDXBNJZSQVHLCKE";
+
+/** Iniciales de un NIF de persona jurídica o entidad: arts. 3, 4 y 5.2 de la Orden EHA/451/2008. */
+const INICIALES_CIF = "ABCDEFGHJNPQRSUVW";
 
 /**
  * Valida un NIF/NIE/CIF español comprobando su dígito o letra de control.
@@ -39,8 +42,13 @@ export function nifValido(valor: string): boolean {
         const pref = { X: "0", Y: "1", Z: "2" }[s[0] as "X" | "Y" | "Z"];
         return s[8] === LETRAS_NIF[Number(pref + s.slice(1, 8)) % 23];
     }
+    // NIF K, L y M: sólo la forma. El art. 20 del RD 1065/2007 dice «siete caracteres alfanuméricos»
+    // y no publica cómo se calcula el carácter de control (RI-14).
+    if (/^[KLM]/.test(s)) {
+        return /^[KLM][0-9A-Z]{7}[A-Z]$/.test(s);
+    }
     // CIF: letra + 7 dígitos + control (dígito o letra según la inicial).
-    if (/^[A-Z]\d{7}[0-9A-Z]$/.test(s)) {
+    if (INICIALES_CIF.includes(s[0]) && /^[A-Z]\d{7}[0-9A-Z]$/.test(s)) {
         let par = 0;
         let impar = 0;
         for (let i = 0; i < 7; i++) {
@@ -55,7 +63,7 @@ export function nifValido(valor: string): boolean {
         const control = (10 - ((par + impar) % 10)) % 10;
         const letra = "JABCDEFGHI"[control];
         const inicial = s[0];
-        if ("KPQRSNW".includes(inicial)) return s[8] === letra;
+        if ("PQRSNW".includes(inicial)) return s[8] === letra;
         if ("ABEH".includes(inicial)) return s[8] === String(control);
         return s[8] === String(control) || s[8] === letra;
     }

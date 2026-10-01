@@ -353,10 +353,10 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         )
     })?;
 
-    let nif = v_string(row.get_value(0).map_err(db_err)?)
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_uppercase();
+    // RI-14: normalizado igual que se valida. `nif_valido` da por bueno `B-12345674`, y sin esto
+    // saldría así al XML, al QR y a la huella: diez caracteres que la AEAT rechaza en cada registro.
+    // El campo se guarda como lo escribió el dueño, que es lo que se imprime en el ticket.
+    let nif = vf::normalizar_nif(&v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default());
     let razon_social = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
     let descripcion_op = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
     let entorno = vf::Entorno::desde_texto(
@@ -3645,5 +3645,25 @@ mod tests_cola_de_envio {
         let lote = SqliteVerifactuRepository::new(db).pendientes(10).await.unwrap();
         assert_eq!(lote[0].fecha_operacion, None);
         assert_eq!(lote[0].sin_registro_previo.as_deref(), Some("S"));
+    }
+
+    #[tokio::test]
+    async fn el_NIF_del_negocio_sale_hacia_la_AEAT_SIN_GUIONES_ni_espacios() {
+        // RI-14: la validación los quita, así que `B-12345674` se daba por bueno; si saliera tal
+        // cual, serían diez caracteres en cada registro y la AEAT los rechazaría todos.
+        let (db, _dir) = db_temporal().await;
+        {
+            let g = db.write().await;
+            g.raw()
+                .execute(
+                    "UPDATE Business_Settings SET CIF = ' b-1234 5674 ', Razon_Social = 'Bar SL' \
+                     WHERE ID = 1;",
+                    Vec::<Value>::new(),
+                )
+                .await
+                .unwrap();
+        }
+        let (nif, _, _) = SqliteVerifactuRepository::new(db).obligado().await.unwrap().unwrap();
+        assert_eq!(nif, "B12345674");
     }
 }

@@ -1,0 +1,52 @@
+{
+  "_leeme": "Tabla de casos que comparten las DOS validaciones del NIF: nif_valido en crates/tpv-domain/src/verifactu.rs (el backend, que decide) y nifValido en apps/tpv-main/src/shared/ticket/nif.ts (la pantalla, que avisa al escribir). Las dos la leen en sus tests: si una cambia de criterio, la otra se pone roja hasta que se igualen. El sentido en que mas duele que se separen es que la pantalla rechace un NIF que el backend aceptaria: el cliente se queda sin factura sin que la peticion llegue a ningun sitio. Al cambiar el criterio NO se tocan dos listas: se anade un caso aqui (RI-14).",
+
+  "_validos": "Cada caso es [nif, por que]. Los K, L y M sólo se validan por su forma (art. 20 del RD 1065/2007: letra + 7 alfanumericos + letra de control, sin algoritmo publicado).",
+  "validos": [
+    ["12345678Z", "persona fisica"],
+    ["89890001K", "el de los ejemplos oficiales de la AEAT"],
+    ["00000015S", "persona fisica con ceros a la izquierda"],
+    [" 12345678z ", "se recortan los extremos y se pasan a mayusculas las letras ASCII"],
+    ["12345678-Z", "se quitan los guiones"],
+    ["12 345 678 Z", "se quitan los espacios normales"],
+    ["X1234567L", "NIE con X"],
+    ["Y1234567X", "NIE con Y"],
+    ["Z1234567R", "NIE con Z"],
+    ["x-1234567-l", "NIE escrito a mano"],
+    ["A58818501", "CIF de una A: solo digito de control"],
+    ["A12345674", "CIF de una A"],
+    ["B12345674", "CIF de una B"],
+    ["Q2826000H", "CIF de un organismo publico: solo letra de control"],
+    ["G12345674", "CIF de una G: digito..."],
+    ["G1234567D", "...o letra de control"],
+    ["N1234567D", "entidad extranjera (art. 4 de la Orden EHA/451/2008)"],
+    ["W1234567D", "establecimiento permanente de no residente (art. 5.2)"],
+    ["K1234567D", "NIF K: menor de 14 años"],
+    ["L1234567L", "NIF L: español residente en el extranjero"],
+    ["M1234567L", "NIF M: extranjero sin NIE"],
+    ["M12A4567B", "NIF M con una letra en el cuerpo: siete caracteres ALFANUMERICOS"],
+    ["l-1234567-a", "NIF L escrito a mano"]
+  ],
+
+  "_invalidos": "Cada caso es [nif, por que]. Los caracteres raros van escapados: \\u00a0 es un espacio duro (el que se cuela al copiar de una web o un PDF) y \\u017f una «ſ», que toUpperCase() de JavaScript convierte en «S».",
+  "invalidos": [
+    ["12345678A", "letra que no corresponde"],
+    ["1234567Z", "le falta una cifra"],
+    ["12345678", "sin letra"],
+    ["12345678ZZ", "le sobra un caracter"],
+    ["", "vacio"],
+    ["X1234567A", "NIE con la letra de otro"],
+    ["X12345674", "NIE con digito de control: no es un CIF aunque cuadre su suma"],
+    ["B12345670", "CIF con el digito de otro"],
+    ["A1234567D", "una A solo admite digito"],
+    ["Q28260008", "una Q solo admite letra"],
+    ["I12345674", "la I no es inicial de ningun NIF"],
+    ["T12345674", "la T no es inicial de ningun NIF"],
+    ["K12345674", "un NIF K termina en letra"],
+    ["M1234567", "un NIF M con un caracter de menos"],
+    ["M12#4567L", "un NIF M con un simbolo en el cuerpo"],
+    ["12345678\tZ", "un tabulador en medio no se quita"],
+    ["12345678 Z", "un espacio duro en medio no se quita"],
+    ["00000015ſ", "una «ſ» no es una «S»"]
+  ]
+}
