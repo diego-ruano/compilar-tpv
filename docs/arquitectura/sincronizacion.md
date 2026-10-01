@@ -69,6 +69,11 @@ sin nube no opera.
   última» es la de clave mayor. Donde la hay, «lo más reciente» se ordena por ella.
 - **Los agregados derivados se re-derivan en el SQL** (`Total_Comanda = SUM(…)`), no se escriben como
   literal: tienen dos escritores (Main por el outbox, Handy por el DO) y sólo convergen así.
+- **Las FK están activas en los dos motores**: la Main las activa en su conexión y Turso las trae
+  activadas en cada una (comprobado con el cliente HTTP del DO, RI-06). Las cascadas (`ON DELETE
+  CASCADE / SET NULL`) las ejecuta cada motor al aplicar, y el `defer_foreign_keys` del lote aplaza la
+  comprobación al `COMMIT`. Un `PRAGMA foreign_keys` suelto en el DO no serviría: el cliente HTTP abre
+  un stream por llamada y el ajuste es por conexión.
 - Las tablas que sólo usa la nube (`Applied_Operations`, `Sync_Changes`, `Sync_Main_Checkpoints`) están
   en el esquema único, así que existen también, vacías, en la Main. Un volcado o una comparación que
   recorra tablas **se las salta**, igual que todo lo que empieza por `_`.

@@ -156,11 +156,13 @@ export class TenantHub {
 	}
 
 	private async probeTenantDb(db: Client): Promise<void> {
-		// Activamos las FOREIGN KEYS en la conexión del tenant: la BD local de la Main las
-		// aplica (`PRAGMA foreign_keys=ON`), así que la nube debe enforcearlas igual para no
-		// aceptar estados que luego la Main rechace al reproducir (y para que CASCADE/SET NULL
-		// se comporten idénticamente en ambos lados).
-		await db.execute({ sql: "PRAGMA foreign_keys = ON;", args: [] });
+		// RI-06: aquí no se activan las FOREIGN KEYS. Turso las trae activadas en cada conexión, y
+		// un `PRAGMA foreign_keys = ON` no serviría de nada: el cliente HTTP abre un stream por
+		// llamada y el ajuste es por conexión, así que no llegaría al `batch()` que aplica. Se
+		// comprobó el 01/10/2026 contra una base de Turso con ese cliente: `PRAGMA foreign_keys`
+		// da 1 en una llamada nueva, un lote con una fila huérfana falla con FOREIGN KEY, el
+		// `defer_foreign_keys` del lote aplaza la comprobación al COMMIT y el ON DELETE CASCADE se
+		// ejecuta. Es lo que la Main necesita: la nube rechaza lo mismo que ella rechazaría.
 		await db.execute({
 			sql: "SELECT 1 AS ok;",
 			args: [],

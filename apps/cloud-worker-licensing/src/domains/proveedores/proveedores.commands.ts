@@ -103,8 +103,9 @@ export function eliminarProveedor(idProveedor: string): BuiltCommand {
 			sql: "UPDATE Productos SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
 			args: [idProveedor],
 		},
-		// DB-03: replicar EXPLICITAMENTE el ON DELETE SET NULL (no dependemos de la FK del motor en
-		// la nube, donde foreign_keys puede no estar activo en el batch). Mismo criterio que Rust.
+		// DB-03: el ON DELETE SET NULL se escribe EXPLICITAMENTE, mismo criterio que Rust. En la
+		// nube la FK también lo haría (Turso trae las FK activadas, RI-06), pero así el lote dice
+		// lo que hace sin depender de leer el esquema.
 		{
 			kind: "execute",
 			sql: "UPDATE Pedidos_Proveedor SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
