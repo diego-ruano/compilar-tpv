@@ -1,7 +1,7 @@
 // apps/tpv-main/test/socketMain.test.ts
 //
 // El socket de la Main: conectar, ponerse al día con la nube, subir el outbox y reconectar. Es el
-// núcleo de la replicación (CLAUDE.md §9), y cada regla de aquí es una que, rota, deja a un TPV
+// núcleo de la replicación (docs/arquitectura/sincronizacion.md), y cada regla de aquí es una que, rota, deja a un TPV
 // vendiendo sin que la nube se entere o a una Handy enseñando otra cosa, sin ningún error visible.
 //
 // Se prueba entero, sin React, con tres dobles:

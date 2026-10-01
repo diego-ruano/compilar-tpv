@@ -2221,7 +2221,7 @@ mod tests_backfill {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// §4.1 del plan. La fase 2 NUNCA pisa una fila que ya esté: lo que está en local llegó por el
+    /// SYNC-19. La fase 2 NUNCA pisa una fila que ya esté: lo que está en local llegó por el
     /// catch-up y es más nuevo que esta foto del histórico.
     #[tokio::test]
     async fn una_pagina_no_pisa_lo_que_ya_esta() {
@@ -2263,7 +2263,7 @@ mod tests_backfill {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// §4.2 del plan, y el más caro de los dos si se rompe.
+    /// SYNC-19: el backfill va por `raw()`, y es el más caro de los dos si se rompe.
     #[tokio::test]
     async fn el_backfill_no_deja_nada_en_el_outbox() {
         let (repo, db, dir) = repo_temporal().await;

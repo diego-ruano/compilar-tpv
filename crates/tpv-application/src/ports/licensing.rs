@@ -44,7 +44,7 @@ pub trait LicensingService: Send + Sync {
 
     /// Canjea la clave en el servidor. Persiste el **token** concedido en el keyring (es una
     /// credencial, no estado), pero no escribe `license_state.json` (eso lo hace el caso de uso con
-    /// `save_state`). `device_change_code` solo se envía al mover la licencia a otro equipo (§6.4);
+    /// `save_state`). `device_change_code` solo se envía al mover la licencia a otro equipo;
     /// el servidor puede responder pidiéndolo.
     async fn activar_remoto(
         &self,

@@ -1,7 +1,8 @@
 //! Puerto de **alertas de stock**: detectar productos con stock total negativo (sobreventa) para
-//! avisar una vez por producto. Desde que los lotes pueden quedar en negativo (VR-06, migración
-//! 0003), un producto puede acabar con stock total por debajo de cero; esto es la señal honesta de
-//! que se ha vendido más de lo registrado y hay que recontar.
+//! avisar una vez por producto. Los lotes y el stock suelto pueden quedar en negativo (VR-04/06: el
+//! cobro no se bloquea por falta de stock y el descuento es relativo), así que un producto puede
+//! acabar con stock total por debajo de cero; esto es la señal honesta de que se ha vendido más de
+//! lo registrado y hay que recontar.
 //!
 //! Solo lo implementa el adaptador SQLite: corre en la Main, que es el escritor único.
 

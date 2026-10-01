@@ -239,8 +239,8 @@ struct SetPrinterArgs {
        `SistemaInformatico` NO entra en la cadena de huella.
      · El panel y el aviso dicen que la culpa es del programa, no del bar.
 
-   Lo que falta y por qué, en docs/VERIFACTU_PENDIENTES.md §1. Va junto con la declaración
-   responsable del art. 13 RRSIF (§2 de ese mismo documento).
+   Lo que falta y por qué, en docs/pendientes.md (Veri*factu). Va junto con la declaración
+   responsable del art. 13 RRSIF.
 ========================================================= */
 
 /// Razón social del productor. Máx. 120 caracteres.
@@ -487,7 +487,7 @@ pub(crate) struct AppState {
 #[derive(Clone, Debug)]
 pub(crate) struct Sesion {
     pub id_usuario: String,
-    /// Lo consumirá `Anulado_Por` cuando llegue CUENTA-07; hoy nadie lo lee.
+    /// Hoy nadie lo lee: lo que se firma en las filas (`Anulado_Por`, el cobrador…) es `id_usuario`.
     #[allow(dead_code)]
     pub id_trabajador: Option<String>,
     pub rol: String,
@@ -1914,7 +1914,7 @@ pub fn run() {
             // ningún registro de actividad económica.
             //
             // ⚠️ El NIF está vacío a propósito y no rompe nada: ver el bloque de constantes arriba
-            // y docs/VERIFACTU_PENDIENTES.md §1.
+            // y docs/pendientes.md (Veri*factu).
             {
                 let tenant = tpv_infra_licensing::LicensingAdapter::new(app_data_dir.clone());
                 let numero_instalacion = {
@@ -2320,7 +2320,7 @@ pub fn run() {
 /// la máquina de desarrollo, así que el entorno es lo único que separa un error de un cliente de uno
 /// provocado a propósito. El E2E se compila en release y rompe la base de datos adrede: sin esto,
 /// sus errores llegaban como `prod`. Se decide por el identificador porque es lo que define ese
-/// build (§16 de CLAUDE.md), no por una variable que alguien pueda olvidar al compilar.
+/// build (apps/tpv-main/e2e/README.md), no por una variable que alguien pueda olvidar al compilar.
 fn entorno_de_sentry(identificador: &str, depuracion: bool) -> &'static str {
     if identificador.ends_with(".e2e") {
         "e2e"

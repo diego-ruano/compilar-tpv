@@ -18,7 +18,7 @@
 //! - El **golden** (`tests/contract/golden/<nombre>.json`) es `{ tabla: [filas] }`.
 //! - La comparación es por **multiconjunto** de filas (sin orden) con igualdad estructural (números
 //!   como números, con tolerancia). El golden lo **bendice Rust** (lado canónico: escritor único);
-//!   el worker se conforma. Regenerar: `BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`.
+//!   el worker se conforma. Regenerar: `BLESS_CONTRACT=1 cargo nextest run -p tpv-infra-sqlite contract_tests`.
 //!
 //! **Los tests se llaman `dominio__caso`**, con doble guion bajo, para separar de un vistazo el
 //! dominio del supuesto — y ese nombre es ademas la clave del JSON en `tests/contract/casos/`. Como

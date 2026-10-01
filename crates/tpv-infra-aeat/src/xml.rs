@@ -31,10 +31,9 @@ pub const ID_VERSION: &str = "1.0";
 
 /// Escapa un texto para meterlo en un nodo XML.
 ///
-/// Además del escapado, la AEAT **rechaza la factura** (error 1287) si un campo contiene `<`, `>`,
-/// `"`, `'` o `=` — y eso pasa antes de aquí, en `tpv_domain::verifactu::sanear_texto`, porque los
-/// rechaza aunque vayan escapados. Esta función es la segunda red: un texto que se colara sin
-/// sanear produciría un XML inválido, que es peor que un rechazo.
+/// Esos caracteres ya se han quitado antes, en `tpv_domain::verifactu::sanear_texto` (el catálogo
+/// de la AEAT define el error 1287 para `<`, `>`, `"`, `'` y `=`). Esta función es la segunda red:
+/// un texto que se colara sin sanear produciría un XML inválido, que es peor que un rechazo.
 fn esc(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

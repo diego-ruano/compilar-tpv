@@ -1,10 +1,8 @@
 //! Comandos Tauri de cuentas/caja (capa fina hexagonal).
 //!
-//! SEC-01: **toda la sección es de administrador**, lecturas incluidas. No es una ampliación
-//! del gate por gusto: `PLAN_CIERRE_CAJA.md` §8 ya lo decidió ("el gate por rol en la ruta del
-//! frontend y, sobre todo, en los comandos Tauri"), y hasta ahora sólo existía la mitad de UI.
-//! El libro de caja dice cuánto se factura y cuánto se gasta; esconderlo del menú no es
-//! esconderlo.
+//! SEC-01: **toda la sección es de administrador**, lecturas incluidas (`docs/arquitectura/caja.md`):
+//! el gate va en la ruta del frontend y, sobre todo, en estos comandos. El libro de caja dice
+//! cuánto se factura y cuánto se gasta; esconderlo del menú no es esconderlo.
 //!
 //! CAJA-01: los que tocan un apunte ya no se niegan por fecha. Pasan por `rectificacion_caja`, que
 //! rectifica el cierre ya hecho al que pertenezca el apunte. El aviso previo lo pide la pantalla con

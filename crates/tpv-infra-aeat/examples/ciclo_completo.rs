@@ -69,7 +69,7 @@ fn main() {
 
             // El bloque del productor. Se inyecta el mismo NIF: es DATO DECLARADO y la AEAT no lo
             // contrasta contra ningún registro de actividad. Cuando exista la empresa, esto será su
-            // NIF de verdad (punto 1 de docs/VERIFACTU_PENDIENTES.md).
+            // NIF de verdad (docs/pendientes.md, Veri*factu).
             vfdb::set_sistema_informatico(SistemaInformatico {
                 nombre_razon: razon.clone(),
                 nif: nif.clone(),

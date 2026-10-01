@@ -1,0 +1,317 @@
+# Pendientes
+
+Lo que está abierto y no depende de que alguien se acuerde. Cada punto dice qué falta, por qué
+importa y qué se ha decidido. **Lo que se resuelve se borra de aquí**: la traza del arreglo queda en
+el código (un comentario con su ID, `git grep -n "FABLE-B"`) y en el commit.
+
+Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
+
+| ID | Sev | Qué | Estado |
+|---|---|---|---|
+| [VF-PRODUCTOR](#identidad-del-productor) | 🔴 | Identidad del productor del software | Aplazado a propósito; bloquea la remisión |
+| [VF-DECLARACION](#texto-de-la-declaración-responsable) | 🔴 | Texto definitivo de la declaración responsable | Borrador |
+| [VF-MODO-PRUEBA](#quitar-el-modo-prueba) | 🔴 | Quitar el modo prueba antes del 1-1-2027 | Sin empezar |
+| [LEGAL-01](#legal-01--rgpd) | 🟠 | Papeleo RGPD de encargado del tratamiento | Sin empezar |
+| [LEGAL-02](#legal-02--reglamento-de-ciberresiliencia) | 🟠 | Reglamento de Ciberresiliencia | Sin empezar |
+| [FABLE-B](#fable-b--detalles-internos-en-las-respuestas-de-error) | 🟠 | El worker devuelve detalles internos en los 500 | Aplazado |
+| [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
+| [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
+| [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
+| [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
+| [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio |
+| [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
+| [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
+| [SEC-02](#sec-02--license_store_key-es-global) | 🔵 | `LICENSE_STORE_KEY` sin rotación ni custodia | Sin empezar |
+| [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
+| [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
+| [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
+| [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
+
+---
+
+## Veri\*factu
+
+Lo técnico funciona contra la AEAT ([PRUEBAS_AEAT.md](PRUEBAS_AEAT.md)); lo que queda son datos y
+decisiones.
+
+### Identidad del productor
+
+Las constantes `PRODUCTOR_*` de `apps/tpv-main/src-tauri/src/lib.rs` van en el bloque
+`SistemaInformatico` de cada registro:
+
+| Constante | Valor | Máx. | Falta |
+|---|---|---|---|
+| `PRODUCTOR_NOMBRE_RAZON` | `Altaria Lights` | 120 | Confirmar que es la razón social y no el nombre comercial |
+| `PRODUCTOR_NIF` | **vacío** | 9 | El NIF definitivo |
+| `PRODUCTOR_NOMBRE_SISTEMA` | `TPV Altaria` | 30 | Confirmar |
+| `PRODUCTOR_ID_SISTEMA` | `01` | 2 | Confirmar |
+
+Aplazado a propósito hasta saber si el productor será un autónomo o una sociedad. Mientras tanto se
+vende, se emite y se encadena, pero **no se remite** (`productor_configurado`), y el día que la
+versión traiga el NIF los registros emitidos sin él se corrigen solos antes del primer envío
+(`asegurar_sistema_reparado`). Detalle en
+[arquitectura/verifactu.md](arquitectura/verifactu.md#la-remisión).
+
+Si algún día hay que probar en producción, un `IdSistemaInformatico` distinto para las pruebas hace
+que el sistema definitivo empiece sin el aviso 2007.
+
+### Texto de la declaración responsable
+
+`TEXTO_DECLARACION` en `commands/verifactu.rs` es un borrador con lo que exige el art. 13 RRSIF. Hay
+que revisarlo con la empresa constituida y, si procede, con un asesor: la firma el productor. Hasta
+que `PRODUCTOR_NIF` exista, la pantalla dice que la declaración está incompleta.
+
+### Quitar el modo prueba
+
+Todo lo que hay que borrar lleva la etiqueta `MODO-PRUEBA` (`git grep -n MODO-PRUEBA`), más la columna
+`Business_Settings.Modo_Prueba`, que para entonces irá en una migración nueva. **Antes del 1 de enero
+de 2027**: un interruptor que deja de declarar ventas no puede existir en un TPV que se venda.
+
+---
+
+## Legal
+
+### LEGAL-01 · RGPD
+
+El TPV guarda datos de clientes (nombre, teléfono, email, notas) y PII del personal, y los replica a
+la nube: somos **encargado del tratamiento**. Falta el contrato de encargado, la política de
+privacidad, el ejercicio de derechos (exportar y borrar un cliente) y la política de retención.
+
+El cifrado de la PII del personal no la pone fuera de nuestro alcance: el texto cifrado está en Turso
+y la DEK en el control-plane ([arquitectura/licencias.md](arquitectura/licencias.md)). Hay que
+declararlo así.
+
+Marco de la política de retención (fuentes oficiales):
+
+- Limitación del plazo de conservación: RGPD art. 5.1.e
+  ([AEPD](https://www.aepd.es/derechos-y-deberes/cumple-tus-deberes/principios)).
+- Derecho de supresión: RGPD art. 17; no procede si conservar es una obligación legal
+  ([AEPD](https://www.aepd.es/derechos-y-deberes/conoce-tus-derechos/derecho-de-supresion-al-olvido)).
+- Suprimir empieza por bloquear: LOPDGDD art. 32
+  ([BOE-A-2018-16673](https://www.boe.es/buscar/act.php?id=BOE-A-2018-16673)).
+- Plazos que obligan a conservar: documentación del negocio, **6 años** (Código de Comercio art. 30,
+  [BOE-A-1885-6627](https://www.boe.es/buscar/act.php?id=BOE-A-1885-6627)); registros de jornada,
+  **4 años** (Estatuto de los Trabajadores art. 34.9,
+  [RDL 8/2019](https://www.boe.es/buscar/doc.php?id=BOE-A-2019-3481)); registros de facturación, no
+  se purgan (DB-14).
+
+### LEGAL-02 · Reglamento de Ciberresiliencia
+
+El TPV es un *producto con elementos digitales* del Reglamento (UE) 2024/2847
+([BOE](https://www.boe.es/buscar/doc.php?id=DOUE-L-2024-81720),
+[Comisión](https://digital-strategy.ec.europa.eu/en/policies/cra-summary)).
+
+- **Desde el 11 de septiembre de 2026:** notificar las vulnerabilidades explotadas activamente y los
+  incidentes graves al CSIRT del país del establecimiento principal (y a ENISA) por la plataforma
+  única: alerta temprana en 24 h, notificación en 72 h, informe final a los 14 días de la corrección
+  o al mes de la notificación
+  ([Comisión](https://digital-strategy.ec.europa.eu/en/policies/cra-reporting)).
+- **Desde el 11 de diciembre de 2027:** el reglamento entero, incluida la información para el usuario
+  del Anexo II.
+
+Falta: saber a qué CSIRT le toca y cómo se notifica en 24 h, y leer el Anexo II en el texto oficial
+antes de redactar esa información.
+
+---
+
+## Seguridad
+
+### FABLE-B · Detalles internos en las respuestas de error
+
+`serverError(req, code, details)` (`apps/cloud-worker-licensing/src/server/utils/response.ts`)
+serializa `details` en el cuerpo, y lo mismo `unauthorized` y `forbidden`. Hoy lo usan dos sitios de
+`src/index.ts`: el `catch` de la ruta `/ws`, que pasa `{ message, name, stack }`, y el `onError`
+global, que pasa el `message`. Quien llama a la API recibe la traza o el texto crudo de Turso.
+
+Aplazado mientras no haya clientes en producción. Cuando se haga, en tres partes:
+
+1. `serverError` deja de serializar `details`.
+2. Cada `catch` lo registra en el servidor (`console.error` y `Sentry.captureException`), para no
+   perder información al quitarlo de la respuesta.
+3. Opcional: seguir devolviéndolo cuando `ENVIRONMENT !== "prod"`, añadiendo `ENVIRONMENT` a las
+   `vars` de `wrangler.json` (`env.ts` ya lo declara; `sentry.ts` usa `"prod"` si falta).
+
+### FABLE-E · Sin nonce en el device-proof
+
+La firma del dispositivo cubre método, ruta, token y cuerpo, pero no lleva nonce: dentro de la
+ventana de ±2 minutos (`MAX_SKEW_MS` en `server/middleware/auth.ts`) una petición firmada se podría
+reproducir tal cual. Aplazado: hay que haber capturado el tráfico (va por TLS) y las escrituras son
+idempotentes por `Op_Id`. Cuando se retome hace falta un almacén de nonces compartido entre isolates
+(KV es eventualmente consistente; un Durable Object o una tabla con TTL sí sirven) y un despliegue en
+tres pasos: worker tolerante, clientes nuevos, worker estricto.
+
+### SEC-02 · `LICENSE_STORE_KEY` es global
+
+Cifra en reposo las DEK de **todos** los tenants (`tenants.field_dek`) y los tokens de Turso. Perderla
+deja la PII de todos irrecuperable; filtrarla la expone toda. No hay rotación ni custodia documentadas
+(los secretos de wrangler no se pueden volver a leer: tiene que estar guardada fuera de Cloudflare).
+
+### LOGIN-04 · El hash del PIN se puede romper offline
+
+PBKDF2-HMAC-SHA256, 100.000 iteraciones, sal de 16 bytes por usuario (`tpv-domain/src/login.rs`,
+`PBKDF2_ITERS`). `Usuarios.Password_Hash` se replica a Turso porque el worker verifica el PIN de la
+Handy. Con un PIN de 4 cifras (10⁴ candidatos), probarlos todos contra un hash cuesta décimas de
+segundo en una GPU de consumo.
+
+- 100.000 es el techo de `crypto.subtle` en Cloudflare Workers, no del plan: subirlo no se puede, y a
+  600.000 tampoco cambiaría nada con ese espacio de claves.
+- Lo que movería la aguja, por coste: **PIN más largo** para administradores (el dominio exige
+  `len >= 4`); un **pepper** fuera de la base (secreto del worker más almacén de secretos de la Main;
+  perderlo deja a todos fuera); un KDF más fuerte, que aporta menos que los dos anteriores.
+- Dejar de replicar `Password_Hash` está descartado: la Handy lo necesita.
+- El ataque online ya lo corta el bloqueo escalado (LOGIN-01), y el rehash al iniciar sesión
+  (`tpv-infra-sqlite/src/login.rs`) migraría los hashes solos si cambia el esquema.
+
+Aplazado: exige primero acceso de lectura a la base del tenant.
+
+### LIC-02 · Sin certificate pinning
+
+`http_client()` (`tpv-infra-licensing/src/lib.rs`) no fija el certificado del host. No habilita ningún
+bypass: el estado de licencia va firmado con ed25519 y la clave pública está fijada en el binario
+(`LICENSE_SIGNING_PUBLIC_KEY_B64`), y el emparejamiento firma con la clave del dispositivo. Queda como
+extra opcional, a revisar al fijar el modelo de precios.
+
+---
+
+## Infraestructura y operación
+
+### INFRA-01 · Entorno de staging
+
+Hay un worker (`tpv-api`), una base de control y un juego de secretos, y los binarios apuntan a ellos
+por constante. No hay dónde probar un cambio del worker, del esquema de la nube o de licencias antes
+de que lo vea un cliente. Aplazado a cuando el SaaS esté asentado: es duplicar la infraestructura.
+Por orden de dependencia:
+
+1. Un `env.staging` en `wrangler.json` con su `name` y sus `vars` (`ENVIRONMENT: "staging"`, `TURSO_*`,
+   `EMAIL_*`). Su `TenantHub` sería otro namespace.
+2. Todos los secretos repetidos con `--env staging`.
+3. **Otra base de control y otras bases de tenant en Turso**: compartirlas sería escribir sobre datos
+   de clientes.
+4. Otro bucket de R2, y la URL de imágenes configurable (`CDN_IMAGES_BASE` en `imageUrl.ts` y la CSP).
+5. Stripe en modo test, con su webhook y sus Prices.
+6. Cliente compilable contra staging: `CLOUD_API_BASE` (`tpv-infra-licensing/src/lib.rs`), `CLOUD_WS_URL`
+   (`shared/lib/cloudApi.ts`) y `LICENSE_SIGNING_PUBLIC_KEY_B64` están fijados en el código; hay que
+   hacerlos configurables al compilar (como `TPV_SENTRY_DSN`).
+7. Etiqueta de entorno: `tpv_telemetry::Environment` sólo tiene `Dev` y `Prod`, y el entorno de Sentry
+   lo decide `lib.rs::entorno_de_sentry` (`e2e` / `dev` / `prod`).
+8. Canal de actualizaciones propio: el feed sólo sirve `channel = 'stable'`
+   (`domains/updates/updates.routes.ts`).
+9. Correo contenido: staging no puede mandar pedidos a proveedores reales.
+10. Un workflow que despliegue staging.
+
+Los puntos 1–4 ya bastan para probar el backend con `curl` o el CLI de licencias; el 6 es lo que hace
+falta para probar la aplicación.
+
+### INFRA-02 · Instalador sin firmar
+
+`tauri.conf.json` empaqueta NSIS sin Authenticode. La firma ed25519 del updater protege las
+actualizaciones, no la primera instalación. **Aceptado** mientras no haya ingresos: SmartScreen avisa
+pero deja instalar («Más información → Ejecutar de todas formas»). Azure Trusted Signing evita el token
+hardware de un certificado EV.
+
+### INFRA-03 · Imágenes por `r2.dev`
+
+La Handy carga las imágenes de `pub-6814….r2.dev` (`CDN_IMAGES_BASE`, `shared/lib/imageUrl.ts`), que
+Cloudflare documenta como no destinado a producción. **Decidido: subdominio propio.** Al hacerlo hay
+que tocar `CDN_IMAGES_BASE`, `img-src` de `csp` **y** `devCsp` en `tauri.conf.json`, y la guía de
+Android, que documenta ese host.
+
+### OPS-02 · Soporte sin canal ni diagnóstico
+
+Conectividad dice «contacta con soporte» sin decir cuál
+(`features/configuracion/sections/Conectividad.tsx`), y no hay ningún botón para sacar un paquete de
+diagnóstico, que es lo que hace falta cuando el bar no tiene internet y la telemetría no ha salido.
+
+---
+
+## Datos
+
+### DB-14 · Retención y archivado
+
+Nada purga `Comandas`, `Detalle_Comanda`, `Pagos`, `Movimientos_Stock` ni `Notificaciones` (las
+notificaciones se borran de una en una). `purga_sync` limpia el andamiaje de replicación y
+`server/purga.ts` sólo `pair_claim_fallos` y `email_sends`. Las siete copias diarias son completas y
+engordan con todo.
+
+Reglas fijadas:
+
+- `Registros_Facturacion` y `Serie_Facturacion` **no se purgan nunca** (art. 7 RRSIF; borrar una serie
+  devolvería su contador a 1).
+- Una comanda no se archiva sin comprobar que ningún registro de facturación la necesita para
+  reimprimir el papel (`Registros_Facturacion.ID_Pago` es `ON DELETE SET NULL`). El importe y el
+  desglose ya viven dentro del registro.
+
+Decidido, a falta de medir cuánto genera un bar al año:
+
+- Lo que no vale nada se purga sin archivar: notificaciones cerradas y estado de cocina antiguo.
+- Lo antiguo que hay que conservar va a R2, en un bucket **privado** propio: un SQLite comprimido por
+  negocio y ejercicio, legible sin nuestro código. En la base quedan los resúmenes de estadísticas.
+- KV no sirve (valores pequeños, no consultable) y D1 no aporta (es otra base SQL con su propio tope).
+- Coste: R2 a 0,015 $/GB-mes (0,01 $ en acceso poco frecuente), salida gratis
+  ([tarifa](https://developers.cloudflare.com/r2/pricing/)).
+- Lo legal manda (LEGAL-01): plazos mínimos, bloqueo y supresión de lo personal, borrar el fichero del
+  ejercicio al vencer.
+
+⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
+(`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
+
+---
+
+## Arquitectura
+
+### ARCH-01 · Doble implementación Main/worker
+
+Cada escritura existe en Rust (`tpv-infra-sqlite`, para la Main) y en TypeScript
+(`domains/*/*.commands.ts`, para la Handy), con dos sistemas de tipos (ts-rs y zod) y dos
+validaciones. Tienen que producir lo mismo para que la replicación converja. La red que hay: los dos
+arneses de contrato ([tests/contract/README.md](../tests/contract/README.md)) y
+`scripts/check-contract-coverage.mjs`, que lista en CI lo que se quede sin caso.
+
+Opciones, de menos a más ambiciosas:
+
+1. Tests de contrato. **Hecho**, en escritura y lectura.
+2. El texto SQL en una fuente compartida (ficheros `.sql` o JSON con *placeholders*, leídos con
+   `include_str!` e `import`). Elimina la divergencia más frecuente; la orquestación seguiría doble.
+3. Un solo cerebro en WASM: los *command builders* compilados a WebAssembly e importados en el worker.
+   Es un refactor sólo del worker, desplegable con clientes en producción y con el arnés como red.
+4. La Handy delega siempre en una Main viva: decisión de producto, cambia su historia offline.
+5. Codegen desde una especificación: el generador pasa a ser su propia carga.
+
+Decisión: refactor gradual después del lanzamiento, por (2) y luego (3) si la duplicación sigue
+doliendo.
+
+### RELOJ-01 · La hora del negocio es la del equipo
+
+Las **firmas** usan la hora de la nube (`tpv-infra-licensing/src/reloj.rs`), pero ventas, fichajes,
+caja, registros Veri\*factu y `x-client-now` usan el reloj del PC. Un desvío lento no importa; un salto
+grande (pila de la placa agotada, cambio manual, zona horaria mal puesta) facturaría con otra fecha. No
+se corrige sin más porque quitarle minutos de golpe a un PC adelantado fecharía una factura antes que la
+anterior, que es lo que el art. 7.i) anota como anomalía. Si se retoma, la medida del desfase ya existe
+(`reloj::ahora_ms()`); falta decidir a partir de cuánto se actúa y cómo, sin que la cadena retroceda.
+
+---
+
+## Detectado al revisar la documentación
+
+Contrastando la documentación con el código salieron cosas que no son de documentación. Ninguna se ha
+tocado; están aquí para decidir.
+
+- **Una devolución emite siempre `R5`**, también cuando la factura original es una `F1`
+  (`verifactu::emitir_baja_de_pago`). No hay camino para `R1`.
+- **`Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal` existen en el esquema pero nada los lee ni los
+  escribe**: el formulario de factura completa siempre empieza vacío.
+- **`Registros_Facturacion.Sin_Registro_Previo`** se lee y viaja al XML, pero ningún camino la rellena.
+- **La pantalla Fiscal dice que el NIF «no es algo que se haga desde esta pantalla»** cuando ya hay
+  registros, pero el campo sigue siendo editable y se guarda.
+- **El test `migracion_0003_conserva_hijas_y_permite_stock_negativo`** (`migrations.rs`) aplica las dos
+  primeras migraciones a mano y espera que el runner aplique la tercera; con una sola migración, el
+  runner no aplica nada y el test ya no comprueba lo que dice su nombre.
+- **`tests/contract/cobertura.json`** excluye `login.completeInitialSetup`, que ya no existe en el
+  worker (el script de cobertura lo marca como exclusión obsoleta), y da para
+  `trabajadores.setPredeterminadoDesdeSemana` el motivo de `copySemana`, que ya tiene caso.
+- **`descartarAvisoDatosFiscales`** (`e2e/helpers/fiscal.ts`) no la llama ningún recorrido.
+- **Los comentarios de `0001_inicial.sql` citan documentos y secciones que ya no existen**
+  (`docs/PLAN_VERIFACTU.md`, `docs/VERIFACTU_PENDIENTES.md`, `BACKLOG.md DB-14`, «CLAUDE.md 9») y uno de
+  `inventario.queries.ts`, dentro de un texto SQL, cita una «migración 0004». No se han tocado: el hash
+  de la migración incluye los comentarios, y cambiarla obliga a resetear las bases de desarrollo.
+  Conviene hacerlo en el próximo cambio de esquema. `schema.snapshot.sql` lleva el mismo texto.

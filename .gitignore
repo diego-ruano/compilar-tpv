@@ -5,7 +5,7 @@ node_modules/
 # El ÚNICO lock válido es el `pnpm-lock.yaml` de la raíz (el workspace se instala desde ahí con
 # --frozen-lockfile). Un lock dentro de apps/ o packages/ no lo lee nadie y se queda viejo: si
 # alguien instala dentro de esa carpeta, se lleva un árbol de dependencias distinto al desplegado.
-# Los `package-lock.json` de npm, además, están prohibidos por §8 de CLAUDE.md.
+# Los `package-lock.json` de npm, además, están prohibidos por CLAUDE.md.
 **/package-lock.json
 apps/*/pnpm-lock.yaml
 packages/*/pnpm-lock.yaml
@@ -25,7 +25,7 @@ apps/tpv-main/src-tauri/gen/schemas/
 
 # ── WebView2 «fixed runtime» (descargado, ~444 MB) ──
 # El runtime que se empaqueta con el instalador cuando no se quiere depender del WebView2 del
-# sistema (ver docs/COMPATIBILIDAD_WINDOWS_7.md). Es un artefacto que se BAJA de Microsoft, no
+# sistema (ver docs/estudios/compatibilidad-windows-7.md). Es un artefacto que se BAJA de Microsoft, no
 # código nuestro: versionarlo mete casi medio giga en el historial para siempre, y un `git add -A`
 # distraído basta para hacerlo. Se obtiene del Evergreen Standalone Installer del canal que toque.
 apps/tpv-main/src-tauri/webview2-fixed-runtime/

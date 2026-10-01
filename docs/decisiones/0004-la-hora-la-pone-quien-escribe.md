@@ -1,0 +1,31 @@
+# 0004 · La hora la pone quien escribe
+
+**Estado:** vigente.
+
+## Contexto
+
+Una sentencia replicada con `datetime('now')` dentro la evaluaría cada base cuando la aplica: la Main
+ahora, Turso segundos o días después (si la Main estuvo sin conexión) y en UTC. La misma fila tendría
+horas distintas en cada sitio, y una venta de las 23:59 podría caer en otro día.
+
+## Decisión
+
+- **Toda forma de «ahora» se resuelve a literal antes de ejecutar.** La Main fija un instante por
+  operación y reescribe las sentencias (`db.rs::rewrite_now_literals`): `'now'` con `'localtime'` a la
+  hora local fija, `'now'` sin él y `CURRENT_*` a la UTC fija. **En local se ejecuta la misma sentencia que
+  sube.**
+- **El esquema no tiene `DEFAULT` de hora**: quien inserta la informa.
+- **En la nube, la hora local del emisor viaja en `X-Client-Now`** y el `TenantHub` la usa para fijar
+  `'now'` en las escrituras de la Handy (`tenantHub.tiempo.ts`). Lo que no puede fijar (`'now'` en UTC,
+  `CURRENT_*`, o sin cabecera) se rechaza.
+- **Las lecturas de la Handy también** se resuelven con `X-Client-Now` (`lib/tenantClient.ts::tenantQuery`):
+  si no, «hoy» sería el día UTC de Turso.
+
+## Consecuencias
+
+- La hora del negocio es la del reloj del equipo que escribe. Corregirla con la de la nube podría fechar
+  una factura antes que la anterior ([RELOJ-01](../pendientes.md#reloj-01--la-hora-del-negocio-es-la-del-equipo)).
+  Las **firmas**, en cambio, usan la hora de la nube ([licencias.md](../arquitectura/licencias.md)).
+- Un `'localtime'` aplicado a un valor (`datetime(Fecha,'localtime')`) no se puede fijar: depende de quién
+  lo ejecuta.
+- El arnés de contrato no ve errores de zona horaria; los cubre `test/lecturasEnHoraLocal.test.ts`.

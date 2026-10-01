@@ -162,7 +162,7 @@ async fn applied_map(conn: &Connection) -> Result<HashMap<String, String>, Libsq
 /// modificada (hash distinto).
 ///
 /// **Enforcement de FK apagado durante las migraciones.** Un cambio de esquema que quite una
-/// restricción de tabla (un `CHECK`, p. ej. 0003) obliga a reconstruir la tabla (SQLite no soporta
+/// restricción de tabla (un `CHECK`) obliga a reconstruir la tabla (SQLite no soporta
 /// `ALTER TABLE ... DROP CONSTRAINT`): crear la nueva, copiar, `DROP` la vieja, renombrar. Con las
 /// FK activas ese `DROP` de la tabla referenciada haría un DELETE implícito que **cascadearía** a
 /// `Movimientos_Stock` (`ON DELETE CASCADE`) o **violaría** la FK `NO ACTION` de `Lote_Consumos`.

@@ -1,7 +1,7 @@
 //! Persistencia del **cierre de caja** (arqueo). CUENTA-06 · CAJA-01.
 //!
 //! Todo va por `execute()` y no por `raw()`: un cierre es un dato de negocio y se replica como
-//! cualquier otro (ver la regla del escritor único en CLAUDE.md §9). Las rectificaciones también:
+//! cualquier otro (ver la regla del escritor único en docs/arquitectura/sincronizacion.md). Las rectificaciones también:
 //! la Handy tiene que ver en un cierre lo mismo que la Main.
 
 use tpv_domain::dinero::Dinero;
@@ -589,7 +589,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         let g = self.db.write().await;
         let conn = &g;
         // El id se genera ANTES del INSERT y viaja como valor: una `TEXT PRIMARY KEY` calculada
-        // dentro de la sentencia se re-evaluaría al replicar (CLAUDE.md §9).
+        // dentro de la sentencia se re-evaluaría al replicar (docs/arquitectura/sincronizacion.md).
         let id_rectificacion = new_id();
 
         // Las dos escrituras van juntas: un cierre que dice lo que marca hoy sin la fila que explica

@@ -13,7 +13,7 @@
 //! ## Lo que este módulo NO hace
 //!
 //! No habla con la AEAT ni construye XML. Sólo escribe la fila y la encola. El envío es un job
-//! aparte (§10 de CLAUDE.md) por una razón de la propia norma: el art. 16.2 de la Orden impone un
+//! aparte (docs/arquitectura/jobs-e-interruptores.md) por una razón de la propia norma: el art. 16.2 de la Orden impone un
 //! **control de flujo** entre envíos, así que remitir no puede ser una llamada HTTP dentro del
 //! cobro aunque se quisiera.
 
@@ -958,7 +958,7 @@ pub(crate) async fn lineas_de_pago<C: Reader>(
 ///
 /// **Importante**: se llama DESPUÉS de insertar `Pago_Detalles`, porque el desglose sale de ahí.
 ///
-/// ## El límite de la simplificada (§2.2 del plan)
+/// ## El límite de la simplificada
 ///
 /// Una `F2` vale hasta **3.000 € con IVA** en hostelería (art. 4.2 RD 1619/2012, y la AEAT lo valida
 /// en el servicio web con el error 1150). Por encima no cabe una `F2`, y una `F1` sin destinatario es
@@ -1086,7 +1086,7 @@ async fn fecha_apertura_de_la_comanda<C: Reader>(
         .and_then(|f| vf::fecha_registro_desde_iso(&f[..10])))
 }
 
-/// Emite el registro que corresponde cuando un cobro deja de contar (FISCAL-01, §7 del plan).
+/// Emite el registro que corresponde cuando un cobro deja de contar (FISCAL-01).
 ///
 /// **Los dos instrumentos no son intercambiables y la AEAT es explícita al respecto**:
 ///
@@ -1109,9 +1109,9 @@ async fn fecha_apertura_de_la_comanda<C: Reader>(
 /// Se llama **dentro de la transacción** de la baja: si esa transacción rueda atrás, no queda
 /// registro ni se gasta número.
 ///
-/// Si el pago no tiene registro fiscal (un cobro anterior a FISCAL-01, o emitido cuando faltaban los
-/// datos fiscales) no hay nada que anular ni que rectificar, y no es un error: la baja del cobro
-/// sigue adelante. Lo que no puede es fallar y dejar el cobro sin anular.
+/// Si el pago no tiene registro fiscal (p. ej. un cobro hecho en modo prueba) no hay nada que anular ni que
+/// rectificar, y no es un error: la baja del cobro sigue adelante. Lo que no puede es fallar y dejar
+/// el cobro sin anular.
 pub async fn emitir_baja_de_pago(
     db: &WriteGuard<'_>,
     id_pago: &str,
@@ -1606,8 +1606,8 @@ async fn qr_de<C: Reader>(conn: &C, id_registro: &str) -> AppResult<Option<Strin
 ///
 /// ⚠️ Va por **`raw()`**: `_Verifactu_Envios` es una tabla de control local y por `execute()` cada
 /// intento de envío se capturaría en `_Sync_Outbox` y se replicaría a la nube. El estado del envío
-/// no se replica a propósito: tras una restauración la verdad no está en nuestra nube sino en la
-/// AEAT, a la que se le puede preguntar.
+/// no se replica a propósito: tras una restauración [`resembrar_cola_de_envio`] vuelve a encolarlo
+/// todo, y lo que la AEAT ya tenga vuelve como duplicado (3000) y se da por aceptado.
 async fn encolar_envio(db: &WriteGuard<'_>, id_registro: &str) -> AppResult<()> {
     db.raw()
         .execute(
@@ -1750,9 +1750,9 @@ pub async fn bloque_de_pago<C: Reader>(
     }))
 }
 
-/// Escalones de la escalera de avisos (§1.2.1 del plan), medidos sobre la **antigüedad del
-/// registro pendiente más viejo** y no sobre el tiempo sin conexión: estar desconectado sin nada
-/// que enviar no es un problema.
+/// Escalones de la escalera de avisos (`docs/arquitectura/verifactu.md`, «La escalera de avisos»),
+/// medidos sobre la **antigüedad del registro pendiente más viejo** y no sobre el tiempo sin
+/// conexión: estar desconectado sin nada que enviar no es un problema.
 ///
 /// Es una función **pura** para poder probarla, y ninguno de sus escalones bloquea el cobro. La
 /// obligación de remitir es del bar; nuestro trabajo es que no pueda decir que no lo sabía.
@@ -1760,10 +1760,10 @@ pub fn escalon_aviso(antiguedad_min: Option<i64>) -> &'static str {
     match antiguedad_min {
         None => "ninguno",
         Some(m) if m < 60 => "ninguno",           // < 1 h: funcionamiento normal, incluso con fibra
-        Some(m) if m < 6 * 60 => "visible",       // indicador en la barra
-        Some(m) if m < 24 * 60 => "notificacion", // notificación persistente al administrador
-        Some(m) if m < 72 * 60 => "modal_login",  // modal al iniciar sesión, con reconocimiento
-        Some(_) => "modal_cobro",                 // modal en cada cobro + telemetría
+        Some(m) if m < 6 * 60 => "visible",       // aviso en Configuración → Fiscal
+        Some(m) if m < 24 * 60 => "notificacion", // notificación al administrador (job)
+        Some(m) if m < 72 * 60 => "modal_login",  // aviso al iniciar sesión, con reconocimiento
+        Some(_) => "modal_cobro",                 // aviso después de cada cobro
     }
 }
 
@@ -2740,7 +2740,7 @@ mod tests_identidad_del_productor {
     //! registro creado con `"NIF":""` lo lleva vacío para siempre, la AEAT lo rechaza por formato y
     //! rellenar la constante en una versión posterior no toca las filas ya escritas.
     //!
-    //! ⚠️ Estos tests **dependen de `cargo nextest`**, que ya es lo que manda CLAUDE.md §6. El bloque
+    //! ⚠️ Estos tests **dependen de `cargo nextest`**, que ya es lo que manda CLAUDE.md. El bloque
     //! del productor es un estático del proceso (lo inyecta el shell al arrancar), así que un test que
     //! lo inyecta y otro que lo quiere vacío no pueden convivir en el mismo proceso. Con nextest cada
     //! test tiene el suyo; con `cargo test` se pisarían y el que fallara dependería del orden.

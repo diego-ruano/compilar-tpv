@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 //
-// Genera el par ed25519 con el que el worker FIRMA el estado de licencia (§5.1 del plan).
+// Genera el par ed25519 con el que el worker FIRMA el estado de licencia (docs/arquitectura/licencias.md).
 //
 //   node scripts/generate-license-keypair.mjs
 //
@@ -10,7 +10,7 @@
 //
 // La pública no es secreta, pero es INTEGRIDAD CRÍTICA: si se cambia, todos los TPVs ya
 // instalados dejan de validar la firma y se bloquean. Rotarla exige pinear dos claves a la vez
-// durante una ventana (ver §5.7 del plan).
+// durante una ventana.
 //
 // La privada NO se guarda en el repo, ni en un fichero, ni en el historial del terminal:
 // cópiala directamente al `wrangler secret put`, y guárdala también en el gestor de

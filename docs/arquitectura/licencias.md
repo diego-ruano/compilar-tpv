@@ -1,0 +1,270 @@
+# Licencias
+
+Las licencias son nuestras: viven en la base central (control-plane, una Turso que no se recrea), las
+emiten **Stripe** (pago único) o el **administrador** a mano, y el TPV las valida contra el worker
+`tpv-api`. El estado que decide si el TPV puede trabajar viaja **firmado con ed25519** y el cliente
+lo verifica contra una clave pública fijada en el binario: un servidor falso, un MITM con CA propia o
+un DNS envenenado no pueden fabricar una licencia válida.
+
+**1 licencia = 1 negocio (tenant) = 1 Main**, más todas las Handy que se emparejen, que no consumen
+licencia. Es además un invariante de la replicación: el `TenantHub` asume un único escritor por
+tenant ([sincronizacion.md](sincronizacion.md)).
+
+> Límite honesto: el gate decide en el cliente. Quien controle la máquina y parchee el binario puede
+> saltárselo. Lo que la firma cierra es cualquier ataque de red o de servidor.
+
+---
+
+## Piezas
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| Rutas del TPV | `apps/cloud-worker-licensing/src/domains/licensing/licensing.routes.ts` | `activate`, `device-change/request`, `status`, `refresh` |
+| Estado y firma | `…/licensing/licensing.helpers.ts` | `computeLicenseState`, `stateAllowsUse`, mensaje canónico y firma, OTP, device-proof, aprovisionar el tenant |
+| La clave | `…/licensing/licenseKey.ts` | Formato, generación y normalización |
+| Correos | `…/licensing/licenseEmails.ts` | Clave, código de cambio de equipo, aviso de cambio, recibo de canje, aviso de caducidad |
+| Avisos de caducidad | `…/licensing/avisosDeCaducidad.ts` | Del cron diario (`scheduled` en `src/index.ts`) |
+| Compra | `…/domains/stripe/{stripe.routes,stripe.helpers}.ts` | Webhook: emitir, revertir, restaurar |
+| Administración | `…/domains/admin/admin.routes.ts` + `scripts/tpv-license.mjs` | Emitir, listar, reenviar, revocar, desrevocar, extender, acortar |
+| Almacén | `…/src/server/licenseStore.ts` | Todas las lecturas y escrituras de la base central |
+| Cliente | `crates/tpv-infra-licensing/src/{lib,device,reloj,secret_store,field_crypto}.rs` | Llamadas al worker, verificación de la firma, identidad del dispositivo, hora de la nube, secretos, cifrado de PII |
+| Política del gate | `crates/tpv-domain/src/licensing.rs` | Veredicto, gracia sin conexión, mensaje canónico. Puro |
+| Casos de uso | `tpv-application/src/use_cases/licensing.rs` | `gate` (con avisos) y la comprobación manual |
+| Comandos | `apps/tpv-main/src-tauri/src/commands/licensing.rs` | `license_activate`, `license_check_now`, `license_clear_state`… |
+| Pulso | `jobs/registro.rs::licencia` | Cada 6 h (`MainOperativa`), emite `license:changed` |
+| Estructura de la base central | `docs/sql/control-plane/esquema-actual.sql` | La foto de producción; la usan los tests |
+
+---
+
+## La clave y la licencia
+
+- **Formato**: `TPV-XXXXX-XXXXX-XXXXX-XXXXX` en base32 Crockford, con `crypto.getRandomValues`. En la
+  base se guarda `sha256(clave)` (único, por donde se busca) y la clave cifrada con
+  `LICENSE_STORE_KEY` (para reenviarla). Nunca en claro ni en logs.
+- **Tabla `licenses`**: `status` (`issued`, `active`, `revoked`, `redeemed`), `disabled`, `plan`
+  (`standard`), `term_months`, `origin` (`stripe` | `manual`), `issued_at_ms`, `activated_at_ms`,
+  `expires_at_ms`, `main_device_id`, `tenant_id`, `customer_email` (obligatorio: es a donde va el
+  código de cambio de equipo), datos del cliente de Stripe, `redeemed_into_license_id` y
+  `key_email_sent_at_ms`.
+- **El reloj arranca en la primera activación**, no en la compra: al emitir, `expires_at_ms` es
+  `NULL`.
+
+## Comprar
+
+`POST /v1/stripe/webhook`. Barreras, en orden:
+
+1. Firma HMAC-SHA256 de Stripe sobre el cuerpo **crudo**, comparación de tiempo constante.
+2. El timestamp de la firma no se desvía más de 5 minutos.
+3. Idempotencia por `event.id` (`webhook_events`): un evento procesado bien no se repite; uno que
+   falló sí, y por eso se contestó 500.
+4. Idempotencia por sesión de checkout (índice único en `license_payments` y en
+   `licenses.stripe_checkout_session_id`), comprobada dentro de la transacción.
+5. Sin `metadata.term_months` en el Price no se emite nada (fail-closed).
+
+Eventos de pago: `checkout.session.completed` y `checkout.session.async_payment_succeeded` (un
+checkout `unpaid` espera al segundo). **Toda compra emite una clave nueva**, la registra como cobro
+`kind='issue'` en `license_payments` y, después del `COMMIT`, la manda por correo. Si el correo falla
+la venta sigue: `key_email_sent_at_ms` queda a `NULL` y `pnpm license:list` la enseña pendiente de
+`pnpm license:resend`. La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
+para `customer_details.business_name`).
+
+Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.
+
+### Deshacer un cobro
+
+Eventos `charge.refunded`, `charge.dispute.created` y `charge.dispute.closed` (hay que suscribirlos
+en el endpoint del Dashboard de Stripe). Todo en una transacción:
+
+| Caso | Efecto |
+|---|---|
+| Reembolso total o disputa abierta de un **alta** | Licencia revocada |
+| … de una **renovación** (`kind='renewal'`, incluida una clave canjeada) | Se restan sus meses |
+| Reembolso parcial | Nada; queda en `admin_audit` |
+| Disputa **ganada** | Se deshace lo que revirtió esa disputa (y sólo eso) |
+| Cargo sin licencia atribuible | Nada; se audita |
+
+El cargo se atribuye por el historial de cobros, luego por el último cobro de la licencia y, como
+último recurso, por el cliente de Stripe **sólo si tiene una única licencia**. La auditoría anota los
+días que llevaba activada.
+
+## Activar
+
+`POST /v1/license/activate { activationKey, deviceId, devicePubKey, tenantInfo, deviceChangeCode? }`.
+No existe o no se reconoce → `license_not_found`; revocada → `license_revoked`; caducada **y pasada la
+gracia** → `license_expired`. Después, uno de tres caminos según `main_device_id`:
+
+### 1. Clave sin estrenar en un equipo que ya tiene licencia: suma tiempo (canje)
+
+Si este `deviceId` ya es la Main de una licencia viva, la clave nueva **no crea un negocio**:
+
+- Comprueba antes la clave del equipo (`exigirLaClaveDeEsteEquipo`): el `device_id` no es un secreto.
+- Calcula antes todo lo que puede fallar sin escribir (la DEK y el token).
+- En una transacción: `canjearLicencia` (`WHERE status='issued'`, y si no gana la carrera contesta
+  `license_already_used`), `extendLicense` (suma sobre lo que quedaba, o sobre hoy si ya venció) y
+  `reasignarCobrosDeLaClave` (el cobro pasa a la licencia viva como `renewal`, para que un reembolso
+  tenga de dónde restar).
+- Ni tenant, ni base en Turso, ni DEK nuevos. Manda un recibo por correo y responde
+  `tiempoSumado: true`; la pantalla enseña «tiempo añadido, vence el X» y espera a que se pulse.
+
+Teclear en el bar 1 la clave que era para el bar 2 le suma el tiempo al bar 1: se ve en el acto.
+
+### 2. Primera activación
+
+Crea el tenant (`ensureTenantExistsMinimal`), da de alta el dispositivo con su clave pública,
+aprovisiona su base en Turso (`provisionTenantDatabase`) y guarda los datos del negocio. Después
+`activateLicenseFirstTime` pone `active`, `activated_at_ms`, `expires_at_ms = ahora + meses` y
+`main_device_id`, condicionado a que siga sin activar: si otro equipo ganó la carrera, contesta
+`device_replaced`. La base de Turso aprovisionada para el perdedor se queda vacía.
+
+### 3. Cambio de equipo (la licencia ya está en otro)
+
+Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email`):
+
+1. Sin código → `device_change_required` con una pista del correo.
+2. `POST /v1/license/device-change/request` manda el código: hash guardado en `license_device_otp`,
+   ligado a ese `deviceId`, 10 minutos y 5 intentos, como mucho uno por minuto. Responde siempre lo
+   mismo, exista o no la clave.
+3. Activar con el código: se verifica (tiempo constante), se consume de forma atómica,
+   `reassignMainDevice` cambia la Main (registro en `license_device_swaps`) **conservando el
+   tenant**, y se avisa por correo al titular.
+
+El traslado va siempre al correo de la compra, no al de recuperación: si siguiera a éste, quien sepa
+el PIN de un administrador podría cambiarlo y llevarse la licencia.
+
+### Lo que hacen los tres
+
+- Antes de tocar `devices`, `exigirClaveSiEsDeOtroNegocio`: si el `device_id` ya tiene clave
+  registrada en **otro** negocio y no es ésta, no se mueve nada (`device_key_mismatch`). Toda puerta
+  que dé de alta un dispositivo llama a ese guardián (hoy: activar y recoger el token del
+  emparejamiento). Dentro del mismo negocio, que la clave cambie es la vía de recuperación de una
+  Handy revocada.
+- Entregan la **DEK** del tenant (`getOrCreateTenantFieldDek`, la existente si ya la hay), para que
+  un equipo nuevo pueda descifrar la PII del personal.
+- Devuelven el token de sesión (JWT HS256 de 30 días) y `cambioDeEquipo`. **Quién decide que hubo
+  traslado es el servidor**: con `cambioDeEquipo`, el TPV marca `traslado-pendiente` y reconstruye su
+  base desde la nube ([recuperacion.md](recuperacion.md)).
+
+## El gate
+
+`GET /v1/license/status` con token y device-proof. El worker:
+
+- Verifica el token (si no vale: `token_expired`, y el cliente va a `/refresh`) y el device-proof. Si
+  la clave del dispositivo no está registrada en ese tenant —una Main que se usó como Handy de otro
+  negocio—, `readmitirMain` la vuelve a dar de alta si firma con su clave registrada y sigue siendo
+  la Main.
+- Deriva el estado (`computeLicenseState`):
+
+| Estado | Cuándo | ¿Trabaja? |
+|---|---|---|
+| `revoked` | Revocada o `disabled` | No, y el cliente borra su estado |
+| `device_replaced` | La Main de la licencia es otro equipo | No, y borra |
+| `active` | Faltan más de 7 días (o no ha arrancado el reloj) | Sí |
+| `warn` | Últimos 7 días | Sí, con aviso |
+| `expiry_grace` | Hasta 3 días después de caducar | Sí, con aviso en rojo |
+| `expired` | Pasada la gracia | No, pero **conserva** el estado: al renovar basta con reintentar |
+
+- Firma la **aserción**: `v|tenant|device|license|state|plan|expires_at|issued_at|assertion_expires_at|client_ts`
+  con `LICENSE_SIGNING_PRIVATE_KEY`. Dura 5 minutos y lleva el `X-Device-Ts` de esta petición, así
+  que una aserción vieja no se puede reproducir. Cambiar el formato obliga a cambiarlo igual en
+  `tpv-domain::licensing::mensaje_canonico` y subir la versión `v`.
+- **Renueva el token sólo si el estado deja trabajar.** La respuesta llega siempre (es por donde el
+  cliente se entera), pero un equipo anulado no recibe credencial nueva.
+
+El cliente verifica la firma con `LICENSE_SIGNING_PUBLIC_KEY_B64` y la frescura, y decide
+(`evaluar_estado` / `evaluar_fallo`):
+
+| Fallo | Veredicto |
+|---|---|
+| `license_not_found`, `license_revoked`, `device_replaced` | Bloquea y **borra** el estado local |
+| Firma inválida | Bloquea y conserva (`bad_signature`) |
+| Sin conexión, 5xx o token o proof rechazados | Gracia sin conexión |
+| `device_ts_out_of_range` (reloj desfasado) | Igual que sin conexión, con motivo `clock_skew_detected` |
+
+**Gracia sin conexión: 72 h** desde la última comprobación correcta (o desde la activación). Si el
+reloj está más de 2 minutos por detrás de esa base, bloquea con `clock_rollback_detected`.
+
+El pulso es el job `licencia`, cada 6 h; usa `gate` (que aplica la gracia y emite los avisos a los
+administradores), no la comprobación manual del botón «Reintentar». Además de esto, el worker
+**comprueba la licencia en todas las rutas autenticadas** (`tenantAuth` → `lib/licenciaEnUso.ts`, con
+caché de 60 s), así que una licencia anulada deja sin correo, R2, volcado ni lecturas de la Handy
+aunque el equipo conserve un token. Detalle en [permisos.md](permisos.md).
+
+### Renovar el token
+
+`POST /v1/license/refresh`: lee los claims del token **sin verificarlo** y exige el device-proof. Con
+licencia anulada → `license_revoked`; dispositivo revocado → `device_revoked`; una Main desplazada →
+`device_replaced`. Una Handy recibe su token con su propia duración (`handyTokenTtlSeconds`) y sin la
+comprobación de traslado, que la daría por desplazada siempre (ver [emparejamiento.md](emparejamiento.md)).
+
+### La hora con la que se firma
+
+Toda firma con hora sale de `reloj::ahora_ms()`: el reloj del equipo más el desfase medido con la
+cabecera `Date` de cada respuesta del worker. Todo lo que habla con el worker se manda con
+`reloj::enviar`, para anotar la medida. Un rechazo por la hora se repite **una vez** con la hora que
+trajo ese rechazo. El desfase vive en memoria; se descarta una medida con una ida y vuelta de más de
+10 s. Las caducidades que pone la nube (de la aserción, del token) también se comparan con su hora.
+La **hora del negocio** —ventas, fichajes, caja, Veri\*factu, `x-client-now`— sigue siendo la del
+equipo ([pendientes.md](../pendientes.md#reloj-01--la-hora-del-negocio-es-la-del-equipo)).
+
+## Anular desde la administración
+
+`POST /v1/admin/licenses/:id/revoke` revoca y, como best-effort, pide al `TenantHub` del tenant que
+cierre el socket de la Main (`lib/hub.ts::cerrarSocketsDelDispositivo` → `/internal/revoke`, firmado
+con HMAC sobre método, ruta y cuerpo). El cliente reconecta, recibe un 403, lo traduce en un
+`license_check_now` y se bloquea en el acto, sin esperar al job. Las Handy no se cierran a mano: el DO
+las congela al irse la Main. **Caducar no empuja**: se nota en la siguiente comprobación.
+
+| Operación | Ruta | CLI |
+|---|---|---|
+| Emitir | `POST /v1/admin/licenses` | `pnpm license:issue -- --term 12 --email … --name … [--send-key]` |
+| Listar | `GET /v1/admin/licenses` | `pnpm license:list` |
+| Reenviar la clave | `POST …/:id/resend-key` | `pnpm license:resend` |
+| Revocar | `POST …/:id/revoke` | `pnpm license:revoke -- --id …` |
+| Desrevocar | `POST …/:id/unrevoke` (vuelve a `issued` o `active`) | `pnpm license:unrevoke` |
+| Extender | `POST …/:id/extend` | `pnpm license:extend -- --id … --months 12` |
+| Acortar | `POST …/:id/shorten` (puede dejarla caducada) | `pnpm license:shorten` |
+
+Todas exigen `ADMIN_API_TOKEN` (comparación de tiempo constante; sin el secreto la ruta responde 503)
+y quedan en `admin_audit`. El CLI lee el token de la variable de entorno `ADMIN_API_TOKEN`.
+
+## Avisos de caducidad
+
+El cron diario manda un correo a 30 y a 7 días de caducar, **el peldaño más urgente que toque** y uno
+por licencia y ciclo, con el enlace de compra `CHECKOUT_URL`. Sin esa variable no se manda nada. Se
+marca en `license_notices` antes de enviar y sólo envía quien gana la marca; si el correo falla, la
+marca se suelta. La clave de `license_notices` incluye `expires_at_ms`, para que un aviso de un ciclo
+no silencie el del siguiente.
+
+## Lo que guarda el equipo
+
+| Qué | Dónde |
+|---|---|
+| `device_id` y clave privada ed25519 del dispositivo | Almacén de secretos: keyring del sistema en escritorio, Android Keystore (AES-GCM) en la Handy |
+| Estado de la licencia (`tenant_id`, `device_id`, token, estado, caducidad, última comprobación) | `AppData/license_state.json` |
+| DEK de la PII del personal | Almacén de secretos (y en la base central, cifrada con `LICENSE_STORE_KEY`) |
+
+El device-proof firma `ts \n MÉTODO \n ruta \n sha256(token) \n sha256(cuerpo)` (`device.rs`), con ±2
+minutos de margen en el worker.
+
+## Secretos del worker
+
+| Secreto | Para qué |
+|---|---|
+| `LICENSE_SIGNING_PRIVATE_KEY` | Firmar la aserción. La pública va fija en `tpv-infra-licensing/src/lib.rs` (`pnpm license:keypair` genera el par) |
+| `LICENSE_JWT_SECRET` | Tokens de sesión |
+| `LICENSE_STORE_KEY` | Cifrar en reposo claves, DEK y tokens de Turso. Global y sin rotación ([SEC-02](../pendientes.md#sec-02--license_store_key-es-global)) |
+| `ADMIN_API_TOKEN` | Las rutas de administración |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Leer la sesión de checkout y verificar el webhook |
+| `CHECKOUT_URL` | El enlace de compra de los avisos de caducidad |
+
+Stripe: un producto con un Price *one-time* por duración, cada uno con `metadata.term_months`, el
+enlace de compra con «recopilar email», y el webhook en
+`https://tpv-api.altarialights.workers.dev/v1/stripe/webhook` con los cinco eventos de arriba. Pagar
+con Checkout alojado deja los datos de tarjeta fuera de nuestros servidores.
+
+## Al tocar esto
+
+- **La estructura de la base central se cambia a mano en Turso, antes de desplegar** el worker que la
+  use, y se refleja en `docs/sql/control-plane/esquema-actual.sql` ([worker.md](worker.md)).
+- El correo de recuperación del PIN (LOGIN-07/08) vive en la misma base pero es otra cosa: ver
+  [permisos.md](permisos.md#recuperar-el-pin).

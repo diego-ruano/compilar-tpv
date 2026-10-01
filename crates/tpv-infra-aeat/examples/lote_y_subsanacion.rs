@@ -16,11 +16,8 @@
 //!
 //! ## Prueba B — la subsanación de un rechazo
 //!
-//! Es el único camino del código que la AEAT no había visto nunca, y hasta hoy **no existía**: las
-//! columnas estaban, el XML las escribía y la clasificación las decidía, pero nadie creaba la fila.
-//! Un registro rechazado se quedaba en el panel sin ninguna forma de avanzar.
-//!
-//! Aquí se provoca un rechazo de verdad (una `F1` sin destinatario, error 1189 — comprobado en el
+//! Un registro rechazado no se reintenta solo: lo saca de ahí `subsanar_rechazados`, que emite una
+//! subsanación con el mismo `IDFactura`. Aquí se provoca un rechazo de verdad (una `F1` sin destinatario, error 1189 — comprobado en el
 //! banco adversario), se emite la subsanación y se mira si la AEAT la acepta.
 
 use tpv_domain::dinero::Dinero;

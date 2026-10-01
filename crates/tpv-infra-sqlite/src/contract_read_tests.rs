@@ -40,7 +40,7 @@
 //!   coincidan sería inventarse un requisito que el sistema real no tiene.
 //!
 //! El golden lo **bendice Rust** (lado canónico: es el escritor único y el que define el DTO); el
-//! worker se conforma. Regenerar: `BLESS_CONTRACT_READ=1 cargo test -p tpv-infra-sqlite lectura_`.
+//! worker se conforma. Regenerar: `BLESS_CONTRACT_READ=1 cargo nextest run -p tpv-infra-sqlite contract_read_tests`.
 
 //!
 //! **Los tests se llaman `dominio__caso`**, con doble guion bajo, para separar de un vistazo el

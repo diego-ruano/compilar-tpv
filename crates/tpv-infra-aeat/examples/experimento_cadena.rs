@@ -1,5 +1,5 @@
-//! **Qué hace la AEAT con una cadena que no cuadra**: los dos experimentos que cierran el punto 5
-//! de `docs/VERIFACTU_PENDIENTES.md`.
+//! **Qué hace la AEAT con una cadena que no cuadra**: los dos experimentos cuyo resultado
+//! recoge `docs/PRUEBAS_AEAT.md`.
 //!
 //! ```text
 //! pnpm verifactu:experimento -- <huella> <NIF> "Razon Social"

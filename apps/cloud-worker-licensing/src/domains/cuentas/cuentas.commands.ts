@@ -40,7 +40,7 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 	const steps = [
 		idStep(cloudPayload.id_gasto),
 		// Los dos ids se generan ANTES de sus INSERT, nunca dentro del SQL: una `TEXT PRIMARY KEY`
-		// calculada en la sentencia se re-evaluaría al replicar (CLAUDE.md §9).
+		// calculada en la sentencia se re-evaluaría al replicar (docs/arquitectura/sincronizacion.md).
 		{ kind: "value", saveAs: "mov", sql: "SELECT ?1;", args: [crypto.randomUUID()] },
 		{
 			kind: "execute",

@@ -3,7 +3,7 @@
 // El tramo anterior recupera desde una copia de este ordenador. Éste prueba **el otro botón de la
 // misma pantalla**, y es el que de verdad importa: la copia local sólo existe si el disco sigue
 // vivo. El día del robo, del disco muerto o del ordenador nuevo, «Recuperar el estado actual de la
-// nube» es lo único que hay — y CLAUDE.md §9 lo dice sin rodeos: *sin internet, una Main que perdió
+// nube» es lo único que hay — y docs/arquitectura/recuperacion.md lo dice sin rodeos: *sin internet, una Main que perdió
 // su `data.db` no vende*.
 //
 // Hasta ahora estaba probado por piezas —`syncBootstrap.test.ts` y `syncHistorico.test.ts` en el

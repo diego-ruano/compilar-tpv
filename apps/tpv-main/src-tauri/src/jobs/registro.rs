@@ -453,6 +453,15 @@ async fn fichajes_colgados(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Si ya se ha contado en este arranque que falta la identidad del productor.
+static PRODUCTOR_SIN_IDENTIDAD_AVISADO: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// `true` sólo la primera vez que se pregunta por esa marca.
+fn primera_vez(marca: &std::sync::atomic::AtomicBool) -> bool {
+    !marca.swap(true, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Remite a la AEAT los registros de facturación pendientes (FISCAL-01).
 ///
 /// El cuerpo es fino porque la decisión vive en el caso de uso, que es donde se puede probar sin
@@ -467,15 +476,6 @@ async fn fichajes_colgados(app: AppHandle) -> Result<(), String> {
 /// **No** lo es para «faltan los datos fiscales» ni para «no hay certificado»: eso no se arregla
 /// esperando, es una tarea del dueño, y tratarlo como avería llenaría el panel de rojo por algo que
 /// el propio panel ya explica mejor en su sección. Esos casos devuelven `Ok` y se anotan en el log.
-/// Si ya se ha contado en este arranque que falta la identidad del productor.
-static PRODUCTOR_SIN_IDENTIDAD_AVISADO: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-/// `true` sólo la primera vez que se pregunta por esa marca.
-fn primera_vez(marca: &std::sync::atomic::AtomicBool) -> bool {
-    !marca.swap(true, std::sync::atomic::Ordering::Relaxed)
-}
-
 async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
     use tpv_application::use_cases::verifactu::{self as uc_verifactu, SinEnviar};
 
@@ -631,17 +631,16 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
     }
 }
 
-/// Red de seguridad de la subida de imágenes a R2: sube lo que quedó en la cola de AppData.
-///
-/// El camino normal sigue siendo el evento (tras guardar una imagen, y al reconectar el WS), que es
-/// lo que da inmediatez. Este job cubre lo que aquel no puede: una imagen creada sin red cuyo
-/// dispositivo no vuelve a guardar ninguna, o una Main con internet pero sin WebSocket. Antes esto
-/// lo hacía un `setInterval` de 3 s colgado del socket, que dependía de la condición equivocada.
 /// PROD-06: ver `crate::interruptores`.
 async fn interruptores(app: AppHandle) -> Result<(), String> {
     crate::interruptores::refrescar(&app).await
 }
 
+/// Red de seguridad de la subida de imágenes a R2: sube lo que quedó en la cola de AppData.
+///
+/// El camino normal sigue siendo el evento (tras guardar una imagen, y al reconectar el WS), que es
+/// lo que da inmediatez. Este job cubre lo que aquel no puede: una imagen creada sin red cuyo
+/// dispositivo no vuelve a guardar ninguna, o una Main con internet pero sin WebSocket.
 async fn imagenes(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     crate::drenar_imagenes(&app, &state).await.map(|_| ())

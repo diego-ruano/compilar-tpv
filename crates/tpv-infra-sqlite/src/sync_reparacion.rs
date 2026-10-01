@@ -57,7 +57,7 @@ pub struct Analisis {
     /// Alguna sentencia tocó datos que no se han sabido localizar.
     pub incierto: bool,
     /// Alguna sentencia era un `DELETE`. No se puede reparar por estado: la ausencia de una fila no
-    /// es una fila que mandar. Se marca para poder informarlo (ver SYNC-23 en HALLAZGOS.md).
+    /// es una fila que mandar. Se marca para poder informarlo (SYNC-23).
     pub borrados: Vec<String>,
 }
 

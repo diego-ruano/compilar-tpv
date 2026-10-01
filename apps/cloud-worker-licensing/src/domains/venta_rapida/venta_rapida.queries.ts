@@ -321,8 +321,9 @@ export type CobroPlan =
 
 // VR-01/02/04: reparto FEFO con estado de lotes EN MEMORIA (se decrementa al asignar), para que
 // varias lineas del mismo producto consuman los lotes en cascada (y no re-lean stock ya asignado,
-// que provocaba sobre-asignacion). Los lotes nunca quedan negativos; lo que no cubran va al stock
-// suelto (que si puede quedar negativo). No bloquea por falta de stock.
+// que provocaba sobre-asignacion). El reparto nunca toma de un lote mas de lo que tiene en esta
+// copia; lo que no cubran va al stock suelto (que si puede quedar negativo). No bloquea por falta
+// de stock.
 async function buildFefoAllocations(
 	db: Client,
 	items: { id_producto: string; cantidad: number; id_detalle?: string }[],

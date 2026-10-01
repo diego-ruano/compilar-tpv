@@ -175,7 +175,7 @@ pub async fn recovery_restore_backup(
     // no haya nada sin subir (`asegurar_reemplazo_seguro`, la misma guardia que el volcado desde la
     // nube). Pero se comprobaba soltando el cerrojo justo después, y entre el permiso y el
     // reemplazo cabía una escritura: exactamente la ventana que `bootstrap_restaurar` evita
-    // haciendo la comprobación DENTRO de su transacción, y que CLAUDE.md dice no dejar abierta.
+    // haciendo la comprobación DENTRO de su transacción, y que docs/arquitectura/recuperacion.md dice no dejar abierta.
     //
     // El precio es que la copia del fichero se prepara con el cerrojo tomado, o sea que ningún
     // comando puede coger una conexión mientras dura. Es aceptable justo aquí: a esta pantalla sólo

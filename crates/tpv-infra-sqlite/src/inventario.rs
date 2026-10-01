@@ -618,6 +618,8 @@ impl InventarioRepository for SqliteInventarioRepository {
             .map_err(db_err)?;
 
             // Auditoría (INV-01b): el alta entra como movimiento 'ALTA' con delta = stock inicial.
+            // `ID_Usuario` va a NULL aquí y en los otros dos movimientos del fichero: los comandos
+            // de inventario no reciben hoy quién hace el cambio.
             conn.execute(
                 r#"
                 INSERT INTO Movimientos_Stock

@@ -180,8 +180,8 @@ export type Cumplimiento =
 	| { accion: "emitida"; license_id: string };
 
 /**
- * Convierte una sesión pagada en licencia: extiende la del cliente si ya tenía una viva, o le
- * minta una nueva y se la manda por correo.
+ * Convierte una sesión pagada en licencia: siempre emite una clave nueva y se la manda por correo.
+ * Si esa clave suma tiempo a un negocio o estrena uno se decide al activarla (REV-13).
  *
  * Recibe la sesión ya leída de Stripe para que la llamada de red quede fuera de la transacción
  * (y para que los tests puedan pasarle una sin salir a internet).

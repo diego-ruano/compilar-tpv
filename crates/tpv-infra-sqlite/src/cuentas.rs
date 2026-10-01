@@ -669,7 +669,7 @@ impl CuentasRepository for SqliteCuentasRepository {
     ///   comparar.
     /// - `Detalle_Comanda` y `Pago_Detalles` se **conservan**. Son lo que permite reimprimir el
     ///   ticket anulado tal y como se emitió, y lo que devuelve las consumiciones a la mesa en vez
-    ///   de esfumarlas (Opción A del plan). Que una línea esté cobrada pasa a leerse por la vista
+    ///   de esfumarlas. Que una línea esté cobrada pasa a leerse por la vista
     ///   `v_lineas_cobradas`, que sólo mira los pagos activos.
     /// - Las trazas de consumo (`Lote_Consumos`, `Suelto_Consumos`) tampoco se borran: sin ellas,
     ///   el ticket anulado perdería su trazabilidad por lote.
@@ -1586,7 +1586,7 @@ mod tests_lineas_devueltas {
 
 #[cfg(test)]
 mod tests_arqueo_ciego {
-    //! El criterio de aceptación del plan entero: anular un cobro en efectivo ya **no** baja el
+    //! Lo que hace útil el arqueo (CUENTA-07): anular un cobro en efectivo ya **no** baja el
     //! esperado del arqueo, así que el dinero que falta sale como que falta.
 
     use super::tests_comunes::*;

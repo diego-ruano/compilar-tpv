@@ -63,7 +63,7 @@ export default function ActivacionLicencia({
 	const fijarCorreoPendiente = useCorreoRecuperacionPendiente((s) => s.fijar);
 	const correoRecuperacionValido = correoValido(correoRecuperacion);
 
-	// Cambio de dispositivo (§6.4): si la licencia ya está en otro equipo, el servidor pide un
+	// Cambio de dispositivo: si la licencia ya está en otro equipo, el servidor pide un
 	// código de 6 dígitos que le llega al email. `hint` (p. ej. `a***@bar.com`) != null significa
 	// que estamos en ese paso.
 	const [deviceChangeHint, setDeviceChangeHint] = useState<string | null>(null);

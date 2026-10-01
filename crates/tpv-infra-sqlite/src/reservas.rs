@@ -72,6 +72,10 @@ fn cliente_existente(row: &Row) -> AppResult<ClienteExistente> {
 /// RES-01: al reusar un cliente existente NO se sobrescriben sus datos; solo se rellenan los
 /// campos que estén vacíos (p. ej. añadir un email que no tenía). Así reservar a nombre de una
 /// persona que comparte teléfono/email con otra ya NO renombra ni corrompe la ficha existente.
+///
+/// Que una reserva deduplique también por teléfono (la pantalla de Clientes sólo por email) es una
+/// decisión del responsable: una reserva se coge por teléfono y con datos a medias. Si dos personas
+/// comparten teléfono, la reserva se engancha a la ficha existente y aparece con **su** nombre.
 async fn upsert_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<String> {
     let email = c.email.clone();
     let telefono = c.telefono.clone();

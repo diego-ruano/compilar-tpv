@@ -44,7 +44,7 @@ export type ActivateRequest = {
 	devicePubKey: string;
 	instanceName?: string;
 	tenantInfo?: TenantInfo;
-	/** Código de 6 dígitos del email. Solo necesario al mover la licencia a otro Main (§6.4). */
+	/** Código de 6 dígitos del email. Solo necesario al mover la licencia a otro Main. */
 	deviceChangeCode?: string;
 };
 

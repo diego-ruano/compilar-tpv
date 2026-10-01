@@ -54,7 +54,7 @@ const TERMS = [1, 3, 12] as const;
 
 const issueSchema = z.object({
 	termMonths: z.union([z.literal(1), z.literal(3), z.literal(12)]),
-	// Obligatorio: es la raíz de confianza del cambio de dispositivo (§6.4). Sin email, ese
+	// Obligatorio: es la raíz de confianza del cambio de dispositivo. Sin email, ese
 	// cliente no puede recuperar su licencia sin pasar por ti.
 	email: z.string().email("email inválido"),
 	name: z.string().max(200).optional(),

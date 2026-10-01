@@ -342,10 +342,12 @@ export function cobrarFraccionado(
 	for (const a of plan.allocations) {
 		steps.push({
 			kind: "execute",
-			// VR-06: descuento RELATIVO sin clamp. El clamp a 0 (VR-02) floreaba en una copia y no
-			// en la otra según su stock local, inventando divergencia Main↔nube; aplicando el mismo
-			// delta a secas, las dos convergen. Un lote puede quedar negativo (sobreventa): se
-			// admite a propósito y se avisa (el CHECK se quitó en la migración 0003).
+			// VR-06: descuento RELATIVO sin clamp. Un clamp a 0 se dispararía en una copia y no en
+			// la otra según su stock local; aplicando el mismo delta a secas, las dos convergen. El
+			// plan nunca toma de un lote más de lo que tiene aquí, pero dos cobros a la vez (Main y
+			// Handy) sobre el mismo lote sí pueden dejarlo negativo al replicarse: es la señal de
+			// sobreventa, se admite a propósito (el esquema no lleva CHECK) y el job
+			// `stock_negativo` avisa.
 			sql: `
 				UPDATE Lotes_Producto
 				SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
@@ -437,7 +439,8 @@ export function restarStock(
 	const steps: any[] = plan.allocations.map((a) => ({
 		kind: "execute",
 		// VR-06: descuento RELATIVO sin clamp, para converger con la Main al aplicar el mismo delta.
-		// Un lote puede quedar negativo (sobreventa): se admite a propósito (CHECK quitado en 0003).
+		// Un lote puede quedar negativo (sobreventa) si otro cobro lo consumió a la vez: se admite a
+		// propósito y el esquema no lleva CHECK.
 		sql: `
 			UPDATE Lotes_Producto
 			SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2

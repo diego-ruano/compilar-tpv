@@ -416,6 +416,9 @@ impl SqliteStatsRepository {
                 None => None,
             };
 
+        // El PEOR parte del CATÁLOGO, no de lo vendido: el producto que no compra nadie no aparece
+        // en ninguna línea de comanda, así que se sale de `Productos` y las ventas entran por
+        // LEFT JOIN, contando 0 cuando no las hay.
         let sql_worst_one = format!(
             r#"
             {ctes}
@@ -661,6 +664,8 @@ impl SqliteStatsRepository {
             None => 0,
         };
 
+        // El filtro de turno se aplica SOLO al reparto de mesas. El total, las cancelaciones y las
+        // gráficas son de todo el rango: elegir «cena» no cambia el total de reservas del día.
         let turno_filter = match args.turno {
             StatsTurno::Todos => "".to_string(),
             StatsTurno::Comida => "AND Turno='COMIDA'".to_string(),
@@ -722,6 +727,8 @@ impl SqliteStatsRepository {
             values: bar_values,
         };
 
+        // Estado y franjas son barras FIJAS, no un GROUP BY: la gráfica tiene siempre las mismas
+        // columnas aunque alguna valga cero, y no cambia de forma un día sin cancelaciones.
         let sql_estado = format!(
             r#"
             {ctes}
@@ -1034,6 +1041,8 @@ impl SqliteStatsRepository {
             }
         }
 
+        // Ventas y ticket medio: se agrupa PRIMERO por comanda y luego se promedia. Promediando los
+        // pagos sueltos, una mesa cobrada en tres veces hundiría la media del camarero.
         let sql_sales = format!(
             r#"
             WITH

@@ -136,7 +136,7 @@ pub struct LicenseActivateInput {
     #[serde(default)]
     #[ts(optional)]
     pub country: Option<String>,
-    /// Código de 6 dígitos del email. Solo hace falta al mover la licencia a otro equipo (§6.4).
+    /// Código de 6 dígitos del email. Solo hace falta al mover la licencia a otro equipo.
     #[serde(default)]
     #[ts(optional)]
     pub device_change_code: Option<String>,

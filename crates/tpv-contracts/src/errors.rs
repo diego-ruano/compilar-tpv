@@ -213,8 +213,8 @@ impl ErrorCode {
             // Para quien lo recibe es el mismo caso que no haber Main —congelar—, solo cambia el
             // texto; el detalle de en cuál de los dos estamos viaja por la presencia del WS.
             "main_offline" | "main_volcando" => ErrorCode::MainOffline,
-            // `device_replaced`: la licencia se activó en otro equipo (§6.4 del plan de
-            // licencias). Este Main ya no lo es, así que para él la consecuencia es la misma que
+            // `device_replaced`: la licencia se activó en otro equipo (cambio de
+            // equipo). Este Main ya no lo es, así que para él la consecuencia es la misma que
             // estar revocado: parar. Ver el fixture compartido `error-codes.json`.
             // `device_not_registered`: la fila de este dispositivo ya no está en este negocio
             // (se vinculó como Handy de otro, o se borró). La consecuencia es la misma que estar

@@ -1,7 +1,7 @@
 //! Comandos Tauri del **cierre de caja** (arqueo). CUENTA-06. Capa fina: ni SQL ni reglas.
 //!
 //! SEC-01: los cinco exigen Administrador, igual que el resto de la sección Cuentas
-//! (`PLAN_CIERRE_CAJA.md` §8). Y quién cierra o reabre sale de la **sesión**, no de la entrada:
+//! (`docs/arquitectura/caja.md`). Y quién cierra o reabre sale de la **sesión**, no de la entrada:
 //! `ConfirmarCierreInput` y `CierreIdInput` ya no llevan `id_usuario`.
 
 use tpv_domain::dinero::Dinero;

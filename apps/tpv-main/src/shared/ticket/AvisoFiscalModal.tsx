@@ -1,6 +1,6 @@
 // src/shared/ticket/AvisoFiscalModal.tsx
 //
-// Los dos peldaños altos de la escalera de avisos de Veri*factu (FISCAL-01, §1.2.1 del plan).
+// Los dos peldaños altos de la escalera de avisos de Veri*factu (FISCAL-01; docs/arquitectura/verifactu.md).
 //
 // Los dos primeros peldaños viven donde corresponde: `visible` es el panel de Configuración →
 // Fiscal, y `notificacion` es una notificación al Administrador que emite el job. Los dos últimos

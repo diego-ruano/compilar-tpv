@@ -45,7 +45,7 @@ pub enum RechazoAnulacion {
     /// Ya está anulado. Se rechaza en vez de dejarlo pasar en silencio: quien pulsa dos veces
     /// tiene que enterarse de que la segunda no ha hecho nada y —sobre todo— la reversión del
     /// stock y del gasto del cliente sólo puede ocurrir una vez. Este estado **es** el guardia
-    /// anti-doble-abono desde que las trazas de consumo dejaron de borrarse (CUENTA-07 §6.4).
+    /// anti-doble-abono desde que las trazas de consumo dejaron de borrarse (CUENTA-07).
     YaAnulado,
     /// Falta el motivo. Anular es la operación por la que se va el dinero de un bar sin dejar
     /// rastro; quién y cuándo los pone el sistema, el porqué sólo puede ponerlo quien anula.

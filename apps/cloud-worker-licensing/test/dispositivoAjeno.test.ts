@@ -3,7 +3,7 @@
 // REV-07: el `device_id` de otro negocio no se toca sin su clave.
 //
 // Un equipo tiene UNA identidad para sus dos modos, así que su fila de `devices` puede mudarse de
-// negocio (§9 de CLAUDE.md). El fallo era que la mudanza no exigía demostrar nada: las dos puertas
+// negocio (docs/arquitectura/emparejamiento.md). El fallo era que la mudanza no exigía demostrar nada: las dos puertas
 // que dan de alta un dispositivo —activar una licencia y recoger el token de un emparejamiento—
 // hacían `ON CONFLICT(device_id) DO UPDATE SET tenant_id=…` antes de mirar la clave registrada.
 //

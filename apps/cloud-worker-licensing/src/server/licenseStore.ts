@@ -10,7 +10,7 @@
 //
 // Invariantes:
 //   · La clave en claro NUNCA se guarda: solo `sha256` (único, indexado) y AES-GCM.
-//   · Una licencia = un tenant = un Main (`main_device_id`). Cambiarlo exige OTP (§6.4).
+//   · Una licencia = un tenant = un Main (`main_device_id`). Cambiarlo exige OTP.
 //   · `customer_email` es obligatorio: es la raíz de confianza de la recuperación.
 
 import type { LicenseOrigin, LicenseStatus } from "../shared";
@@ -91,11 +91,6 @@ export async function getLicenseById(db: Sql, licenseId: string): Promise<Licens
 	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
 }
 
-/**
- * La licencia vigente de un cliente de Stripe, para decidir si una compra nueva **extiende**
- * la que ya tiene en vez de emitirle otra clave (§4.1 del plan). Vigente = no revocada, no
- * deshabilitada y aún dentro de su `expires_at_ms` (o sin activar todavía).
- */
 /**
  * Exige que un equipo YA conocido presente la clave pública con la que está registrado (REV-13).
  *
@@ -413,7 +408,7 @@ export async function activateLicenseFirstTime(
 	return Number((r as any)?.rowsAffected ?? 0) > 0 ? expiresAt : null;
 }
 
-/** Reasigna el Main (cambio de dispositivo, §6.4) y deja la traza de auditoría. */
+/** Reasigna el Main (cambio de dispositivo) y deja la traza de auditoría. */
 export async function reassignMainDevice(
 	db: Sql,
 	args: { licenseId: string; fromDeviceId: string | null; toDeviceId: string },
@@ -842,7 +837,7 @@ async function leerFieldDek(
 }
 
 /* ============================================================
-   OTP de cambio de dispositivo (§6.4)
+   OTP de cambio de dispositivo
 ============================================================ */
 
 export type DeviceOtpRow = {
@@ -1152,7 +1147,7 @@ export async function getDevicePubKeyB64EnCualquierNegocio(
  * REV-07: un `device_id` de OTRO negocio no se toca sin su clave.
  *
  * Un equipo tiene una sola identidad para sus dos modos, así que su fila puede mudarse de negocio
- * (§9 de CLAUDE.md, `readmitirMain`) — pero mudarse es algo que hace **él**, firmando con su clave.
+ * (docs/arquitectura/emparejamiento.md, `readmitirMain`) — pero mudarse es algo que hace **él**, firmando con su clave.
  * Lo que no puede es que otro se lo lleve: bastaba presentar un `device_id` ajeno para que el
  * `ON CONFLICT(device_id) DO UPDATE` del alta moviera la fila de la víctima, y en el camino del
  * emparejamiento también su `device_pubkey_b64`.

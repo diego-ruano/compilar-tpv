@@ -4,7 +4,7 @@
 # seguridad publicado. NO despliega nada: cada actualización es un PR que se revisa y se mergea a
 # mano. El escaneo activo (que falla el CI) vive en `.github/workflows/audit.yml`.
 #
-# Nota pnpm: Dependabot lee el `pnpm-lock.yaml` de la RAÍZ (el único válido del workspace, §8 de
+# Nota pnpm: Dependabot lee el `pnpm-lock.yaml` de la RAÍZ (el único válido del workspace, ver
 # CLAUDE.md) y cubre desde ahí todos los `apps/*` y `packages/*`. No hay que declarar un `directory`
 # por paquete.
 

@@ -80,7 +80,7 @@ pub struct Concesion {
 }
 
 /// Resultado de intentar activar. El servidor puede exigir un código de cambio de dispositivo
-/// si la licencia ya está ligada a otro Main (§6.4 del plan).
+/// si la licencia ya está ligada a otro Main.
 #[derive(Debug, Clone)]
 pub enum ResultadoActivacion {
     Activada(Concesion),

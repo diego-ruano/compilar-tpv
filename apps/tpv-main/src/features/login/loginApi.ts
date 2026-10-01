@@ -206,7 +206,7 @@ export async function crearCopiaLocal(): Promise<LocalBackupInfo> {
  *
  * (Aquí ponía que era «lo único que salva» el DNI, el IBAN y el nº de la Seguridad Social del
  * personal. Era falso: esas columnas se cifran antes de construir la sentencia, viajan cifradas
- * por el outbox y el volcado de la nube las devuelve. Ver TRAB-03 en CLAUDE.md.)
+ * por el outbox y el volcado de la nube las devuelve. Ver TRAB-03 en docs/arquitectura/permisos.md.)
  */
 export async function exportarCopiaLocal(backupId: string, destino: string): Promise<void> {
     await invokeClient<void>("recovery_export_backup", { backupId, destino });

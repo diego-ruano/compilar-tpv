@@ -13,7 +13,7 @@
 //      endpoints se distinguen en tres caracteres y un ticket de pruebas que parece real es peor
 //      que uno que no sale.
 //   4. El estado de la COLA: cuántos registros esperan y desde cuándo. Es lo que hace visible la
-//      escalera de avisos (§1.2.1 del plan) — la obligación de remitir es del bar, y nuestro
+//      escalera de avisos (docs/arquitectura/verifactu.md) — la obligación de remitir es del bar, y nuestro
 //      trabajo es que no pueda decir que no lo sabía.
 //
 // Y dos cosas que no son ajustes sino OBLIGACIONES del sistema, y que por eso viven aquí y no en un

@@ -19,7 +19,7 @@ use crate::CloudClient;
 
 /// Confirma con el cuerpo de la respuesta el id de la fila creada.
 ///
-/// Convención del proyecto (CLAUDE.md §9 · `idStep` en cada `*.commands.ts`): **el id lo genera el
+/// Convención del proyecto (docs/arquitectura/sincronizacion.md · `idStep` en cada `*.commands.ts`): **el id lo genera el
 /// dispositivo** y lo envía; la nube lo honra y solo genera uno si no llega. Aun así leemos el id de
 /// la respuesta en lugar de dar por hecho el nuestro: es la autoridad, y así es imposible que la UI
 /// y la nube se desincronicen aunque el servidor decidiera otro (p. ej. un `get_or_create` que

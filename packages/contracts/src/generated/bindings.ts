@@ -690,7 +690,7 @@ export type KitchenRow = { ID_Comanda: string, Numero_Mesa: string, Fecha_Hora_A
  */
 export type LicenseActivateInput = { activation_key: string, business_name: string, legal_name?: string, phone?: string, country?: string, 
 /**
- * Código de 6 dígitos del email. Solo hace falta al mover la licencia a otro equipo (§6.4).
+ * Código de 6 dígitos del email. Solo hace falta al mover la licencia a otro equipo.
  */
 device_change_code?: string, };
 

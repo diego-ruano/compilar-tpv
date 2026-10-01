@@ -368,10 +368,10 @@ pub fn nif_valido(nif: &str) -> bool {
 ///
 /// Hay dos razones distintas y las dos son de la AEAT:
 ///
-/// - El error **1287** rechaza la factura si un campo contiene `<`, `>`, `"`, `'` o `=`. No es el
-///   escapado de XML (que también hay que hacer, pero eso es del serializador): son caracteres que
-///   el validador rechaza aunque vayan escapados. Y por estos campos pasan textos que escribe el
-///   usuario.
+/// - El catálogo de la AEAT define el error **1287** para un campo con `<`, `>`, `"`, `'` o `=`. En
+///   `DescripcionOperacion` se comprobó que los acepta escapados (`docs/PRUEBAS_AEAT.md`), pero el
+///   error lleva el nombre del campo como parámetro y puede aplicar a otros, así que se quitan en
+///   todos. Por estos campos pasan textos que escribe el usuario.
 /// - Los campos tienen longitud máxima y superarla es el error 1100.
 ///
 /// Los caracteres de control se convierten en espacio por la misma razón por la que el generador de
@@ -433,7 +433,7 @@ pub fn cabe_en_simplificada(importe: Dinero, limite: Dinero) -> bool {
 }
 
 /// Los datos del cliente cuando pide **factura completa** (`F1`) o cuando el importe obliga a
-/// emitirla (§2.2 del plan).
+/// emitirla (ver [`cabe_en_simplificada`]).
 ///
 /// El **registro** sólo necesita `nombre_razon` + `nif`. La **factura en papel** es otro documento y
 /// el art. 6 ROF le exige además el domicilio del destinatario, así que el formulario pide tres
@@ -976,7 +976,7 @@ mod tests {
         assert_eq!(macrodato(eur(100_000_000.0)), Some("S"));
         assert_eq!(macrodato(eur(-100_000_000.0)), Some("S"));
     }
-    // ── Factura completa (§2.2 y §9 del plan) ───────────────────────────────────────────────────
+    // ── Factura completa ────────────────────────────────────────────────────────────────
 
     #[test]
     fn sin_destinatario_y_dentro_del_limite_es_una_simplificada() {

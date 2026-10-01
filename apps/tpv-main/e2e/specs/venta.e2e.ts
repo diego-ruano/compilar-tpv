@@ -295,7 +295,7 @@ describe("El camino del dinero", () => {
         // crece sin explicación es el fallo que deja a un bar sin remitir durante semanas.
         //
         // No se fija CUÁL de los dos motivos, y no es pereza. Hoy sale `sin_datos_del_productor`
-        // —el NIF del productor del software sigue pendiente, ver `docs/VERIFACTU_PENDIENTES.md`—
+        // —el NIF del productor del software sigue pendiente, ver `docs/pendientes.md`—
         // y el día que se rellene pasará a `sin_certificado`, porque el equipo del test tampoco
         // tiene certificado. El orden entre ellos es deliberado (`estado_fiscal`): primero lo que
         // puede arreglar el bar, después lo que sólo podemos arreglar nosotros. Atar el test a uno

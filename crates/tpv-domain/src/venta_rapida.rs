@@ -48,7 +48,7 @@ pub struct CobroFraccionado {
     /// IDs de detalle a cobrar (no vacíos, ordenados y deduplicados).
     pub detalles: Vec<String>,
     /// FISCAL-02: datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe
-    /// pasa del límite de la simplificada y entonces no hay alternativa (§2.2 del plan).
+    /// pasa del límite de la simplificada y entonces no hay alternativa (`tpv_domain::verifactu::cabe_en_simplificada`).
     ///
     /// `None` = ticket normal (`F2`), que es el caso de casi todo. Si el importe pasa del límite y
     /// esto viene vacío, el cobro se rechaza con `factura_completa_requerida` y la pantalla pide

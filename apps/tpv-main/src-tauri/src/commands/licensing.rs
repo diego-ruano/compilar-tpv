@@ -99,7 +99,7 @@ pub async fn license_activate(
     Ok(outcome)
 }
 
-/// Pide al servidor que envíe el OTP de cambio de dispositivo al email de la licencia (§6.4).
+/// Pide al servidor que envíe el OTP de cambio de dispositivo al email de la licencia.
 #[tauri::command]
 pub async fn license_request_device_change(
     app: AppHandle,

@@ -1,7 +1,7 @@
 // src/domains/licensing/licensing.helpers.ts
 //
 // Helpers del dominio de licencias: device-proof, estado derivado de la licencia, **firma
-// ed25519 del estado** (el control central del gate, §5.1 del plan), OTP de cambio de
+// ed25519 del estado** (el control central del gate, ver docs/arquitectura/licencias.md), OTP de cambio de
 // dispositivo y provisión de la BD del tenant.
 //
 // El JWT de sesión ya no vive aquí: es una primitiva que usa el worker entero y no algo del
@@ -34,7 +34,7 @@ import {
 	upsertTenantDbRow,
 } from "../../server/db/tenantDb";
 
-/** Caducidad: aviso los 7 días previos, y 3 días de gracia después (decisión §0 del plan). */
+/** Caducidad: aviso los 7 días previos, y 3 días de gracia después */
 export const WARN_DAYS = 7;
 export const GRACE_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -75,7 +75,7 @@ export function toBool01(v: any, fallback = false): boolean {
  * continuación. El cliente no recalcula esto: lo verifica y obedece.
  *
  * `deviceId` es el del dispositivo que pregunta: si la licencia ya se movió a otro Main
- * (§6.4), a este se le responde `device_replaced` y se queda fuera.
+ * (cambio de equipo), a este se le responde `device_replaced` y se queda fuera.
  */
 export function computeLicenseState(
 	lic: LicenseRow,

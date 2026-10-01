@@ -75,7 +75,7 @@ pub(crate) const SQL_REGISTRAR: &str = r#"
 ///
 /// El `ID_Movimiento` se genera **aquí, antes** de la sentencia, y nunca por DEFAULT ni trigger:
 /// una `TEXT PRIMARY KEY` calculada dentro del SQL se re-evaluaría al replicar y la nube y la Main
-/// acabarían con dos filas distintas para el mismo hecho (CLAUDE.md §9, «IDs deterministas»).
+/// acabarían con dos filas distintas para el mismo hecho (docs/arquitectura/sincronizacion.md, «IDs deterministas»).
 ///
 /// **Idempotente por (`Tipo`, apunte).** Los cobros y los gastos se guardan con `ON CONFLICT DO
 /// UPDATE` para que un reintento del cliente no duplique la venta; sin el `WHERE NOT EXISTS` de

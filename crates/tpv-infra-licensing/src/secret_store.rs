@@ -9,8 +9,9 @@
 //!   pero implementado con **solo clases del framework** vía JNI, para:
 //!   · no añadir dependencias AndroidX ni un plugin Kotlin, y
 //!   · no tocar `gen/android` (sobrevive a `tauri android init`, que regenera ese árbol).
-//!   El `Context` de la app se obtiene globalmente con `ndk_context` (no hace falta `AppHandle`),
-//!   así las funciones libres de `device.rs` no cambian de firma.
+//!   La `JavaVM` la guarda `JNI_OnLoad` del cdylib de la app y el `Context` se obtiene con
+//!   `ActivityThread.currentApplication()` (no hace falta `AppHandle`), así las funciones libres de
+//!   `device.rs` no cambian de firma.
 //!
 //! ⚠️ El backend Android compila pero su comportamiento en runtime debe validarse en un
 //!    dispositivo/emulador (los errores de firma JNI solo aparecen al ejecutar).
@@ -70,7 +71,7 @@ mod imp {
         format!("{service}\u{1f}{key}")
     }
 
-    /// Ejecuta `f` con un `JNIEnv` adjunto al hilo actual y el `Context` de la app (vía `ndk_context`).
+    /// Ejecuta `f` con un `JNIEnv` adjunto al hilo actual y el `Context` de la app.
     static JAVA_VM: OnceLock<JavaVM> = OnceLock::new();
 
     /// Guarda la `JavaVM` del proceso. La invoca `JNI_OnLoad` del cdylib de la app (ver app `lib.rs`),

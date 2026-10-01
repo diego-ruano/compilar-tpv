@@ -31,6 +31,6 @@ log = "0.4"
 keyring = { workspace = true }
 
 # Android: clases del framework (jni) para el almacen de secretos cifrado con Android Keystore. La
-# JavaVM se obtiene con JNI_GetCreatedJavaVMs (dlsym) y el Context con ActivityThread. Ver secret_store.rs.
+# JavaVM la entrega JNI_OnLoad del cdylib de la app y el Context sale de ActivityThread. Ver secret_store.rs.
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

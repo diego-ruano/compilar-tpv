@@ -9,7 +9,7 @@
 //
 // La verdad comercial es NUESTRA (tabla `licenses` en la Turso central): ya no se consulta a
 // ningún tercero. Y el estado que decide el gate viaja firmado: el TLS deja de ser la única
-// barrera (§5.1 del plan).
+// barrera (docs/arquitectura/licencias.md).
 
 import { Hono } from "hono";
 
@@ -237,7 +237,7 @@ licenseRoutes.post("/activate", async (c) => {
 		}
 	}
 
-	// ── Cambio de equipo: exige el OTP del email (§6.4) ──────────────────────
+	// ── Cambio de equipo: exige el OTP del email ──────────────────────────
 	if (esCambioDeEquipo) {
 		if (!deviceChangeCode) {
 			return c.json(

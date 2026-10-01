@@ -13,7 +13,7 @@
 // no es perder un histórico: es que todos los equipos se desactivan en la siguiente comprobación.
 //
 // Reglas al tocarlo:
-//   · SÓLO LEE. El worker no cambia la estructura de esta base (CLAUDE.md §4.5), y la copia tampoco
+//   · SÓLO LEE. El worker no cambia la estructura de esta base (docs/arquitectura/worker.md), y la copia tampoco
 //     escribe filas: es un `SELECT` por tabla dentro de una transacción de lectura.
 //   · Una transacción de lectura para todo, y no una consulta suelta por tabla, porque las tablas se
 //     apuntan entre sí (una licencia a su tenant, un dispositivo a su tenant): leídas en momentos

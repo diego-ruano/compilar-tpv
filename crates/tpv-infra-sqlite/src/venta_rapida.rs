@@ -911,8 +911,10 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             }
 
             // VR-04: NO se valida suficiencia ni se bloquea el cobro por falta de stock. Los lotes
-            // se consumen FEFO (nunca quedan negativos); lo que no cubran se descuenta del stock
-            // suelto del producto (que SÍ puede quedar negativo, como señal de sobreventa). Un
+            // se consumen FEFO sin tomar de ninguno más de lo que tiene aquí; lo que no cubran se
+            // descuenta del stock suelto del producto (que SÍ puede quedar negativo, como señal de
+            // sobreventa). Un lote sólo baja de cero si una Handy lo consumió a la vez: el
+            // descuento es relativo (VR-06) y los dos deltas se suman al replicar. Un
             // producto sin lotes y sin stock suelto configurado se vende sin descontar (no
             // inventariado). El exceso ya no aborta el cobro.
 
@@ -977,7 +979,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 .map_err(db_err)?;
             }
 
-            // Consumo FEFO + trazabilidad por detalle (la suficiencia ya está validada).
+            // Consumo FEFO + trazabilidad por detalle (sin validar suficiencia: ver VR-04 arriba).
             for (id_detalle, producto_id, cantidad) in &charged {
                 let lot_rows: Vec<(String, f64)> = {
                     let mut lots = db
@@ -1166,7 +1168,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             // VR-04: sin validación de suficiencia ni bloqueo (coherente con cobrar_fraccionado).
-            // Se consume FEFO de los lotes (nunca negativos) y el resto va al stock suelto.
+            // Se consume FEFO de los lotes (sin tomar más de lo que tiene cada uno aquí) y el resto
+            // va al stock suelto.
             for it in lineas.iter() {
                 let mut remaining = it.cantidad;
 

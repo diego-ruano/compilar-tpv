@@ -541,13 +541,12 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     // ésta generado por el sistema informático de facturación», centrado respecto a los márgenes,
     // precedido siempre por el texto «QR tributario:» y seguido de la leyenda «VERI*FACTU».
     //
-    // Esto DEROGA la regla de §11 de CLAUDE.md que ponía el logo arriba y luego lo bajó al final:
-    // el QR gana, y no por jerarquía de normas sino porque la razón que puso el logo abajo —que lo
-    // primero que se lea sea de quién es el ticket y cuánto se ha pagado— sigue cumpliéndose. El
-    // QR no es contenido que compita por la atención: es una etiqueta.
+    // El logo, en cambio, cierra el ticket (`docs/arquitectura/tickets.md`): lo primero que se lee
+    // tiene que ser de quién es el ticket y cuánto se ha pagado, y el QR no compite con eso porque
+    // no es contenido sino una etiqueta.
     //
-    // Si no hay URL (una precuenta, o un ticket de antes de configurar los datos fiscales) no se
-    // imprime nada: ni el hueco ni la leyenda.
+    // Si no hay URL (una precuenta, o un cobro de modo prueba) no se imprime nada: ni el hueco ni la
+    // leyenda.
     if let Some(url) = p.qr_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
         let lado = lado_qr_dots(p.paper_width_mm, p.margin_left_mm, p.margin_right_mm, dpi);
         if let Some(bloque) = rasterizar_qr(url, lado) {

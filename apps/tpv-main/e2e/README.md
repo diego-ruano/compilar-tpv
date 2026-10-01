@@ -1,0 +1,102 @@
+# E2E sobre la aplicación compilada
+
+Cinco recorridos sobre la aplicación **compilada**, encadenados sobre un mismo equipo. Prueban la costura
+que no prueba nada más: React → IPC de Tauri → comandos Rust → SQLite → y vuelta. No cubren el frontend
+(la cobertura de componentes está descartada a propósito, ver `vitest.config.ts`). Van sobre
+WebdriverIO + `@wdio/tauri-service` y tardan algo más de un minuto.
+
+```bash
+cargo install tauri-driver --locked          # una vez por máquina
+pnpm --filter @tpv/main build:e2e            # compila el binario aislado y lo verifica
+pnpm --filter @tpv/main test:e2e             # la tanda
+```
+
+Hace falta `ADMIN_API_TOKEN` en el `.env` de la raíz: la tanda emite su propia licencia y la revoca al
+terminar. **No va a CI**: la licencia se ata al `main_device_id` del equipo, que vive en el keyring de la
+máquina, y un runner nuevo cada vez chocaría con el cambio de equipo, que pide un código por correo. Se
+corre antes de cada versión ([publicar-version.md](../../../docs/guias/publicar-version.md)).
+
+## Los recorridos, en orden
+
+| Recorrido | Fichero | Qué hace |
+|---|---|---|
+| El camino del dinero | `specs/venta.e2e.ts` | Equipo nuevo → modo TPV → **activar una licencia real** → PIN → fichar y entrar → declarar los datos fiscales (la pantalla avisa de que faltan) → categoría y producto con precio, IVA y lote → zona y mesa → dos líneas → **cobro en efectivo exacto** → el registro de facturación existe, es `F2` y su número es el del ticket → el ticket lleva su QR y una reimpresión saca el mismo → una segunda venta avanza la cadena sin anomalías → las dos quedan en cola diciendo por qué no salen → **cierre de caja con descuadre 0** |
+| Copias, 1 | `specs/copias-1-copia.e2e.ts` | Crea algo más, espera a que la nube lo tenga todo y guarda una copia |
+| Copias, 2 | `specs/copias-2-recuperar.e2e.ts` | Con la base rota: la app arranca igual y ofrece recuperar; rechaza una copia inservible diciendo por qué; restaura la buena, reconcilia y abre el login |
+| Copias, 3 | `specs/copias-3-nube.e2e.ts` | Con la base rota otra vez: **«Recuperar el estado actual de la nube»**, sin copia local (el volcado de la recuperación) |
+| La licencia | `specs/licencia.e2e.ts` | Anulada → se bloquea sola → desanulada y la misma clave vuelve a activar sin perder datos → caducada → pantalla de bloqueo → renovada y «Reintentar» la desbloquea |
+
+La licencia va la última porque le rompe la licencia a todo el equipo. Los estados se provocan por el API
+de administración (`revoke`, `unrevoke`, `shorten`). **El paso de la anulación no llama a nada**: espera a
+que la pantalla se bloquee sola, y con poca espera, porque anular empuja (cierra el socket) y el job
+`licencia` tarda 2 minutos en su primera vuelta. La caducidad no empuja, y por eso sí usa
+`license_check_now`.
+
+## Piezas
+
+| Pieza | Archivo |
+|---|---|
+| El equipo de la tanda (negocio, PIN, obligado) | `helpers/equipo.ts` |
+| Arranque compartido (modo, activación, PIN, login) | `helpers/arranque.ts` |
+| Vender por mesa | `helpers/vender.ts` |
+| Lo fiscal | `helpers/fiscal.ts` |
+| Lo común a los tramos de copias | `helpers/copias.ts` |
+| Licencias de la tanda (emitir, revocar, desrevocar, acortar) | `helpers/licencias.ts` |
+| Aislamiento del equipo (verificar el binario, preparar AppData, romper la base) | `helpers/entorno.ts` |
+| Gestos (pulsar, escribir, leer por IPC) | `helpers/ui.ts` |
+| Esperar a la nube (outbox a cero) | `helpers/nube.ts` |
+| Huella del código que entra en el binario | `helpers/huella.ts` |
+| Configuración, recetas y captura al fallar | `wdio.conf.ts` |
+| Build aislado | `construir.ts` + `../src-tauri/tauri.e2e.conf.json` |
+
+## Reglas
+
+- **El aislamiento es un identificador, no una variable de entorno.** `app_data_dir()` sale de
+  `SHGetKnownFolderPath`, que no mira `%APPDATA%`: lanzar el `.exe` con otro `APPDATA` usaría la carpeta
+  real. El build de E2E tiene su propio `identifier` (`…tpv.e2e`).
+- **Por eso el binario se verifica antes de borrar nada.** `tauri build --no-bundle` no renombra el
+  ejecutable, así que el de E2E y el de producción escribirían los dos en `target/release/tpv.exe`.
+  `construir.ts` deja una copia en `target/e2e/tpv-e2e.exe`, y `onPrepare` abre el fichero y comprueba el
+  identificador que lleva dentro. La limpieza se niega si la ruta no termina en `.e2e`.
+- **Un binario viejo pasaría sin decir nada**, así que `construir.ts` deja junto al binario la huella
+  (sha256 por fichero) de lo que entra en él, y el arranque la recalcula y se niega diciendo qué cambió.
+  Compara contenido, no fechas, y deja fuera `e2e/` y `test/`.
+- **Lo que impide ejecutar no es un test que falla**: las guardias del arranque (identificador, huella,
+  licencia) terminan el proceso. WDIO registraría el error de un hook y seguiría.
+- **Una licencia por tanda, nunca fija**: activar graba en el tenant el hash de `0001_inicial.sql`, y un
+  tenant con historia se traería por catch-up lo de tandas anteriores.
+- **La tanda estrena un equipo y una licencia, y los recorridos se los pasan.** Un fallo arrastra a los de
+  detrás: en un informe rojo, el que importa es **el primero**.
+- **Con la nube encendida**, como se vende. Con el worker desplegado por detrás del esquema, la tanda falla
+  (en las copias, que esperan a que suba todo): tras un cambio de esquema, redesplegar antes.
+- **Cada recorrido declara qué hay que hacerle al equipo** (`RECETAS` en `wdio.conf.ts`: nuevo, el de
+  antes, el de antes roto, con copia mala) y se hace en `beforeSession`, con la app cerrada (en Windows
+  SQLite tiene la base cogida).
+- ⚠️ **Un recorrido no importa a otro**: importar un fichero de recorrido lo ejecuta. Lo compartido va en
+  `helpers/`.
+- **La mesa se pulsa por coordenadas**: el plano es un `<canvas>` de Konva. El test lee el layout y calcula
+  el punto con la misma función que la pantalla (`fitTransform`), importada.
+- **El IPC se usa para leer, nunca para sembrar** (`leerDeLaApp`): dónde cae una mesa, si ha vuelto a
+  libre, el número de ticket.
+- **Un clic se comprueba**: el teclado del PIN se lee de vuelta tras cada tecla, y `pulsar` elige el primer
+  candidato **visible** (la app duplica bloques para móvil y escritorio).
+- ⚠️ **`aria-label="Cerrar"` también es el aspa de la ventana**: los selectores dentro de un modal se
+  anclan a su cabecera.
+- **El servicio pregunta por `tauri-plugin-wdio`, que la app no lleva**, y sin respuesta reintenta cada
+  comando 100 veces: el hook `beforeSuite` hace que ese puente falle en el acto. `driverProvider` es
+  `external`. Instalar el plugin metería un servidor de depuración en el binario que se distribuye.
+- **`timeoutMsg` se construye al llamar**, no al fallar: lo que cuente el último intento va en un `throw`
+  después de esperar.
+- **Pasa por el typecheck de CI** aunque no se ejecute allí (`e2e/tsconfig.json` en el script
+  `typecheck`).
+- **Un fallo deja una captura** en `e2e/fallos/` (no se versiona).
+- **Sus errores llegan a Sentry como `e2e`**: lo decide el identificador (`lib.rs::entorno_de_sentry`).
+- **Cada tanda crea una base en Turso** que no se borra sola.
+
+## Lo que no sube a E2E
+
+- Las reglas de `recovery.rs` (retención, copias importadas, exportar): tests de Rust sobre ficheros, sin
+  React ni IPC.
+- La guardia del outbox al restaurar: la interfaz no puede producir ese caso.
+- La reconciliación bloqueada tras cinco ciclos: serían unos quince minutos; está en
+  `test/estadoSync.test.ts` y `test/recoverySync.test.ts`.

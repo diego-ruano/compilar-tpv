@@ -441,13 +441,14 @@ pub const COD_DUPLICADO: i64 = 3000;
 /// siempre un registro que la AEAT ya tiene guardado.
 pub const RANGO_ADMISIBLES: std::ops::RangeInclusive<i64> = 2000..=2999;
 
-/// Los dos errores admisibles que **están exceptuados de subsanar**.
+/// Los errores admisibles que **están exceptuados de subsanar**. La AEAT exceptúa dos y aquí sólo
+/// se lista uno:
 ///
 /// - `2004`: la `FechaHoraHusoGenRegistro` va por delante del reloj de la AEAT. El reloj del equipo
 ///   del bar puede ir adelantado y nadie ha hecho nada mal. No hay que corregirlo, pero sí hay que
 ///   **no asustarse** al verlo en el panel.
-/// - El de `ClaveRegimen` sin informar con IPSI, que no nos toca (Ceuta y Melilla están fuera de
-///   alcance).
+/// - El otro, `ClaveRegimen` sin informar con IPSI, no puede salir de este TPV (Ceuta y Melilla
+///   están fuera de alcance), así que no se lista.
 pub const ADMISIBLES_SIN_SUBSANAR: [i64; 1] = [2004];
 
 /// Clasifica **una línea** de la respuesta.

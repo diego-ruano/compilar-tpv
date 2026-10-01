@@ -40,7 +40,7 @@ jobs:
         with:
           tool: cargo-nextest
 
-      # Por `cargo nextest` y NO por `cargo test`, que es lo que manda CLAUDE.md §6 y lo que este
+      # Por `cargo nextest` y NO por `cargo test`, que es lo que manda CLAUDE.md y lo que este
       # job no hacía. Con `cargo test` todos los tests comparten UN proceso, y eso rompe dos cosas:
       #
       # - Los tests que dependen de estado global de proceso. `tests_identidad_del_productor` inyecta

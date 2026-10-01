@@ -46,7 +46,7 @@ export function punchEntrada(input: {
 	// TRAB-07: el UUID se genera aqui, en un paso `value`, y entra en el INSERT. `ID_Fichaje` es
 	// TEXT PRIMARY KEY sin DEFAULT y en SQLite una PK de texto ADMITE NULL: omitirla no daba error,
 	// creaba el fichaje sin clave y luego la salida (WHERE ID_Fichaje = ?) no casaba ninguna fila,
-	// asi que la jornada no cerraba nunca. Es el patron de CLAUDE.md §9 para toda TEXT PRIMARY KEY.
+	// asi que la jornada no cerraba nunca. Es el patron de docs/arquitectura/sincronizacion.md para toda TEXT PRIMARY KEY.
 	const steps: any[] = [
 		{
 			kind: "value",

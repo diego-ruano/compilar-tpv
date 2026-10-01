@@ -1,9 +1,11 @@
 //! Comandos Tauri de **Veri\*factu** (FISCAL-01). Capa fina: ni SQL ni reglas.
 //!
-//! Los tres son de LECTURA. La emisión no tiene comando propio a propósito: ocurre **dentro de la
-//! transacción del cobro**, en el repositorio, porque ahí es donde está la transacción. Un comando
-//! «emitir registro» sería la puerta a expedir una factura sin registro (o al revés), que es la
-//! única forma de romper esto de verdad.
+//! La emisión de un alta no tiene comando propio a propósito: ocurre **dentro de la transacción
+//! del cobro** (o de la baja de un cobro), en el repositorio, porque ahí es donde está la
+//! transacción. Un comando «emitir registro» sería la puerta a expedir una factura sin registro (o
+//! al revés), que es la única forma de romper esto de verdad. Los únicos que escriben un registro
+//! son la `F3` de un ticket ya expedido y la subsanación de los rechazados, y los dos parten de un
+//! registro que ya existe.
 
 use tauri::{AppHandle, Manager, State};
 
@@ -35,8 +37,9 @@ pub async fn verifactu_bloque_ticket(
 
 /// Resumen del estado fiscal para Configuración → Fiscal y para la escalera de avisos.
 ///
-/// Sin exigir rol tampoco: el escalón de aviso lo pinta la barra de estado, que ve todo el mundo, y
-/// el objetivo de la escalera es justamente que **no se pueda ignorar**.
+/// Sin exigir rol tampoco: el escalón de aviso lo leen el aviso al iniciar sesión y el aviso tras
+/// cada cobro, que salen a quien esté delante, y el objetivo de la escalera es justamente que **no
+/// se pueda ignorar**.
 #[tauri::command]
 pub async fn verifactu_estado(
     app: AppHandle,
@@ -425,8 +428,8 @@ pub async fn verifactu_declaracion_responsable(
         nombre_sistema: crate::PRODUCTOR_NOMBRE_SISTEMA.to_string(),
         id_sistema: crate::PRODUCTOR_ID_SISTEMA.to_string(),
         version: app.package_info().version.to_string(),
-        // ⚠️ El texto está PENDIENTE de redactar y necesita el NIF y la razón social definitivos del
-        // productor (§15 del plan, puntos 3 y 4). Lo que NO puede es salir en blanco sin decirlo:
+        // ⚠️ El texto es un borrador y necesita el NIF y la razón social definitivos del productor
+        // (`docs/pendientes.md`, Veri*factu). Lo que NO puede es salir en blanco sin decirlo:
         // una pantalla vacía donde la ley exige una declaración se lee como que la hay.
         texto: if crate::PRODUCTOR_NIF.trim().is_empty() {
             String::new()

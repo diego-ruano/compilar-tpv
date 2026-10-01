@@ -160,10 +160,9 @@ export async function declararDatosFiscales(razonSocial: string, nif: string): P
 /**
  * Cierra el aviso de «este TPV todavía no puede cobrar» con «Ahora no», si está.
  *
- * Lo usan los recorridos que **no** van de facturar: el aviso es un `fixed inset-0` y tapa el menú,
- * así que sin quitarlo no se llega a ninguna pantalla. Declarar los datos sería más fiel, pero hoy
- * no se puede — ver `docs/analisis/HALLAZGOS.md`, SYNC-20: ese `UPDATE` atasca el outbox contra el
- * worker desplegado.
+ * Sirve a un recorrido que **no** vaya de facturar: el aviso es un `fixed inset-0` y tapa el menú,
+ * así que sin quitarlo no se llega a ninguna pantalla. Hoy no lo llama ninguno: todos comparten el
+ * equipo que estrena la venta, que ya declara los datos.
  *
  * Es tolerante a que no esté: en un equipo restaurado los datos ya vienen puestos.
  */

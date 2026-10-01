@@ -1,0 +1,474 @@
+# Veri\*factu: el registro de facturación
+
+Cada cobro expide una **factura** y produce un **registro de facturación** encadenado que se remite a
+la AEAT. Es la obligación del RD 1007/2023 (RRSIF) y de la Orden HAC/1177/2024, exigible desde el
+**1 de enero de 2027** a los contribuyentes del Impuesto sobre Sociedades y desde el 1 de julio de
+2027 al resto.
+
+El TPV opera en modalidad **VERI\*FACTU** y sólo en ella (`TipoUsoPosibleSoloVerifactu = "S"`):
+remite todos los registros. Por eso no firma los registros (la firma XAdES es de la modalidad no
+verificable) ni lleva registro de eventos (la NOTA 1 del apartado 15 del FAQ de desarrolladores de
+la AEAT exime a los sistemas «solo VERI\*FACTU»). La integridad la da la cadena de huellas.
+
+El principio que ordena todo: **el registro es el hecho fiscal**; el papel es una copia suya y el
+envío a la AEAT, una consecuencia diferida. De ahí salen las tres reglas que no se negocian:
+
+1. El registro se crea **en la misma transacción que el cobro**.
+2. **No se modifica**: `Registros_Facturacion` es *append-only* y no se purga nunca (art. 7 RRSIF).
+3. **Nada de lo que rodea al envío puede impedir cobrar.**
+
+Cómo probarlo contra la AEAT: [docs/PRUEBAS_AEAT.md](../PRUEBAS_AEAT.md). Lo que falta para producción:
+[docs/pendientes.md](../pendientes.md#verifactu).
+
+---
+
+## Piezas
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| Aritmética fiscal | `crates/tpv-domain/src/verifactu.rs` | Huella, formato de importes, URL del QR, NIF, límite de la simplificada, comprobación del art. 7.i), saneado de texto. Sin BD, red ni reloj; aquí están los tres vectores oficiales de la huella como test |
+| Desglose de IVA | `crates/tpv-domain/src/ticket.rs` | `desglose`, `prorratear`. Lo comparten el papel, la vista previa y el registro |
+| Puertos | `tpv-application/src/ports/{verifactu,aeat}.rs` | `VerifactuRepository` y `AeatClient` (los cuatro endpoints, la cabecera, la respuesta) |
+| Casos de uso | `tpv-application/src/use_cases/verifactu.rs` | `clasificar`, `puede_enviar`, `remitir_ciclo`, los tres avisos y el estado del certificado |
+| Emisión y persistencia | `crates/tpv-infra-sqlite/src/verifactu.rs` | `emitir_cobro`, `emitir_alta`, `emitir_anulacion`, `emitir_baja_de_pago`, `emitir_sustitutiva`, `subsanar_rechazados`, `resembrar_cola_de_envio`, `estado_fiscal` |
+| Exportación | `crates/tpv-infra-sqlite/src/verifactu_export.rs` | El ZIP del art. 8 RRSIF |
+| Adaptador AEAT | `crates/tpv-infra-aeat/` | `xml.rs` (sobre SOAP y respuesta), `certificados.rs` (almacén de Windows), `transporte.rs` (WinHTTP con TLS mutuo), `esquemas/` (XSD, WSDL y `errores.properties` oficiales) |
+| Job de remisión | `apps/tpv-main/src-tauri/src/jobs/registro.rs::verifactu_remitir` | Cada 60 s, `MainOperativa` |
+| Comandos | `apps/tpv-main/src-tauri/src/commands/verifactu.rs` | Estado, listado, certificado, prueba de conexión, `F3`, subsanación, exportación, declaración responsable, modo prueba |
+| Identidad del productor | `apps/tpv-main/src-tauri/src/lib.rs` (`PRODUCTOR_*`) | El bloque `SistemaInformatico`, inyectado al arrancar |
+| QR en el papel | `apps/tpv-main/src-tauri/src/printing.rs` | `rasterizar_qr`, `lado_qr_dots` |
+| Pantalla | `src/features/configuracion/sections/Fiscal.tsx` | Obligado, envío, entorno, modo prueba, certificado, exportación, declaración |
+| Factura completa | `src/shared/ticket/DatosFiscalesModal.tsx` + `nif.ts` | Datos del destinatario, con el NIF validado al escribir |
+| Escalera de avisos | `src/shared/stores/useEstadoFiscal.ts` + `src/shared/ticket/AvisoFiscalModal.tsx` | Los avisos de login y tras cobro |
+| Veto en la nube | `apps/cloud-worker-licensing/src/lib/hub.ts` (`TABLAS_SOLO_MAIN`) | Ninguna escritura del worker toca `Registros_Facturacion` ni `Serie_Facturacion` |
+
+---
+
+## Qué es una factura en este TPV
+
+**Un cobro activo es una factura, con su número.** Una comanda pagada en tres veces son tres
+facturas, cada una con su registro y su QR.
+
+| Clave | Cuándo la emite el código |
+|---|---|
+| `F2` | El cobro normal: factura simplificada, sin destinatario |
+| `F1` | El cobro lleva destinatario: el cliente la pide (casilla «El cliente pide factura con NIF» en mesas, opción equivalente en venta rápida) o el importe pasa del límite de la simplificada |
+| `F3` | Desde Cuentas, «emitir factura de este ticket»: factura completa **en sustitución** de una `F2` ya expedida |
+| `R5` | Devolución de un cobro (`ClaseBaja::Devolucion`): rectificativa por diferencias (`TipoRectificativa = I`), importe negativo, referencia a la factura original |
+| Anulación | Baja de un cobro por error (`ClaseBaja::Error`): registro de anulación del art. 11.1 RRSIF |
+
+Lo que **no** es una factura: la precuenta (sin número, sin registro, sin QR), el arqueo de caja
+(documento interno) y una apertura de cajón.
+
+### El límite de la simplificada
+
+`Business_Settings.Limite_Simplif` (céntimos, por defecto `300000` = 3.000 €: la hostelería está en
+el art. 4.2 del RD 1619/2012). Se mira sobre el **importe del cobro**, no sobre el total de la
+comanda: una comanda de 4.000 € que pagan dos empresas a 2.000 € son dos `F2` correctas.
+
+Si el cobro pasa del límite y no trae destinatario, `emitir_cobro` devuelve
+`FacturaCompletaRequerida`, la transacción del cobro hace `ROLLBACK` y la pantalla abre
+`DatosFiscalesModal` en modo obligatorio. No hay botón para «dividir el cobro»: partir el pago de
+un mismo cliente para bajar del límite es fraccionar artificialmente una operación.
+
+### Exento no es lo mismo que IVA al 0 %
+
+El XSD pone `CalificacionOperacion` y `OperacionExenta` en un `<choice>`, y `TramoIva` es un enum
+por lo mismo:
+
+| | En el producto | En el registro |
+|---|---|---|
+| Sujeto al 0 % | `IVA_Percent = 0` | `CalificacionOperacion = S1`, `TipoImpositivo = 0`, `CuotaRepercutida = 0.00` |
+| Exento | `Exento = 1`, `Causa_Exencion = E1…E6` | `OperacionExenta = causa` y **ni tipo ni cuota** (informarlos es el error 1238) |
+
+`Productos.Exento` y `Causa_Exencion` se congelan en `Detalle_Comanda` al vender, como el nombre, el
+precio y el tipo. El esquema obliga a que vayan juntos (`CHECK ((Exento = 1) = (Causa_Exencion IS
+NOT NULL))`); si una línea exenta llegara sin causa, el desglose usa `E1`
+(`CAUSA_EXENCION_POR_DEFECTO`). `xml.rs::escribir_detalle` no sabe escribir tipo y cuota en un tramo
+exento: la invariante no depende de que nadie la vigile.
+
+---
+
+## El registro y su cadena
+
+### La huella
+
+SHA-256 de una cadena UTF-8 `nombre=valor&…` en el orden exacto del diseño de registro, en
+hexadecimal y mayúsculas (`TipoHuella = "01"`). Los valores van recortados y un campo ausente se
+escribe con su nombre y el `=` (`…&Huella=&…` en el primer registro).
+
+- Alta: `IDEmisorFactura, NumSerieFactura, FechaExpedicionFactura, TipoFactura, CuotaTotal,
+  ImporteTotal, Huella (anterior), FechaHoraHusoGenRegistro`.
+- Anulación: `IDEmisorFacturaAnulada, NumSerieFacturaAnulada, FechaExpedicionFacturaAnulada,
+  Huella (anterior), FechaHoraHusoGenRegistro`.
+
+`FechaOperacion`, el desglose y el bloque `SistemaInformatico` **no** entran en la cadena.
+
+### Lo que se guarda, y por qué así
+
+- **Los importes son texto.** `ImporteTotal`, `CuotaTotal` y los del desglose se formatean una vez
+  (`fmt_importe`, sobre `Dinero`) y se guardan como texto. El XML, el QR, la exportación, la
+  rectificativa, la `F3` y la subsanación salen de ese texto: nadie recompone un importe.
+- **`Cadena_Huella` se guarda** aunque se pueda recomputar: es lo que hace auditable la exportación
+  sin nuestro código.
+- **`Orden` es explícito.** El eslabón anterior es la fila de `MAX(Orden)`, no la de `rowid`: el
+  orden de reinserción tras una restauración no está garantizado.
+- **`Fecha_Hora_Huso` lleva huso** (`chrono::Local`, RFC 3339 con segundos) y se calcula en Rust, como
+  un literal más.
+- **`Sistema_Json`** congela el bloque `SistemaInformatico` tal como iba: el registro de ayer sigue
+  diciendo con qué versión se generó.
+- **`QR_Url`** guarda la URL exacta del papel: una reimpresión saca la misma.
+
+### `FechaOperacion`
+
+Se informa sólo si es **distinta** de la de expedición (arts. 6.1.i y 7.1.c del RD 1619/2012); el
+filtro está en `emitir_alta`, no en cada llamante. Sale de:
+
+| Caso | Fecha de operación |
+|---|---|
+| Cobro de una comanda que cruza la medianoche | Apertura de la comanda |
+| `R5` | La de la factura original (su `Fecha_Operacion`, o su expedición) |
+| `F3` | La del ticket sustituido |
+
+### La comprobación previa del art. 7.i)
+
+Antes de generar cada alta o anulación, `estado_de_la_cadena` lee las **dos** últimas filas (la
+misma consulta que da el eslabón anterior) y `comprobar_registro_previo` mira dos cosas: que el
+último registro esté bien encadenado con el suyo y que no esté fechado más de 60 s **por delante**
+del reloj actual (un reloj que ha ido hacia atrás).
+
+**Nunca impide facturar** (el FAQ de la AEAT: «la facturación por este motivo NUNCA debe
+interrumpirse»). Lo detectado se anota en `_Verifactu_Anomalias` (local, por `raw()`, best-effort),
+se registra como error en el log, sale lo primero en Configuración → Fiscal y genera una
+notificación al Administrador. «Reconocer» las marca como vistas sin borrarlas.
+
+---
+
+## La numeración
+
+| Serie | Formato | Quién numera en ella |
+|---|---|---|
+| Ejercicio | `2027/000001` | Todos los cobros (`F1`, `F2`) y las `F3` |
+| Rectificativas | `R2027/000001` | Las `R1`–`R5` (art. 6.1.a del RD 1619/2012: series específicas «en todo caso») |
+| Modo prueba | `PRUEBA/000001` | Los cobros con el modo prueba activado (temporal, ver abajo) |
+
+La `F3` va en la serie ordinaria porque el art. 15.6 dice que las facturas de canje «no tendrán la
+condición de rectificativas». La serie la decide el **tipo de factura** dentro de `emitir_alta`.
+
+`reservar_numero` hace `INSERT OR IGNORE` de la serie y un `UPDATE … Ultimo = Ultimo + 1`
+**relativo**, para que la sentencia que sale por el outbox converja. Antes compara el contador con
+`MAX(Numero)` ya emitido en esa serie y, si va por detrás (una copia local restaurada), **salta
+hacia adelante** con `MAX(Ultimo, ?)`: un hueco se explica, un número repetido es un registro que
+la AEAT rechaza.
+
+**El número del ticket ES el número de la factura.** El camino del cobro reserva el número
+(`reservar_numero_factura`, que elige la serie con `serie_del_cobro`) **antes** del `INSERT INTO
+Pagos`, y `Pagos.Numero_Ticket` guarda ese mismo valor. `emitir_alta` comprueba que un número
+reservado sea de la serie que toca y se niega si no; una rectificativa no puede usar un número
+reservado.
+
+---
+
+## La emisión
+
+`emitir_cobro` la llaman los tres caminos que cobran (`mesas` por detalles, `mesas` por productos y
+`venta_rapida`), **dentro** de su transacción y **después** de enlazar `Pago_Detalles`, entre el
+`INSERT INTO Pagos` y el `COMMIT`:
+
+1. Si el número es de la serie `PRUEBA`, no emite nada (modo prueba).
+2. Lee y valida los datos del obligado (`datos_obligado`): sin NIF válido o sin razón social,
+   `DatosFiscalesIncompletos` y el cobro no se hace.
+3. Valida el destinatario si lo hay (`validar_destinatario`: nombre, NIF con dígito de control).
+4. Decide la clave (`clave_de_factura`) o devuelve `FacturaCompletaRequerida`.
+5. Lee las líneas cobradas de `Pago_Detalles ⋈ Detalle_Comanda`, con sus valores congelados. Si no
+   hay líneas o no suman lo cobrado (un cobro parcial), reparte el importe en proporción con
+   `ticket::prorratear`, que conserva el peso de cada tipo de IVA y cuadra al céntimo.
+6. `emitir_alta`: desglose, importes en texto, eslabón anterior y comprobación del art. 7.i),
+   huella, URL del QR, `INSERT INTO Registros_Facturacion`, `_Verifactu_Envios` en `PENDIENTE` (por
+   `raw()`), y la anomalía si la hubo.
+
+Devuelve el `BloqueFiscal` (número, fecha, URL del QR, huella, tipo y si es entorno de pruebas), que
+el frontend mete en el payload de impresión: esos datos no se inventan en el cliente.
+
+Si el cobro hace `ROLLBACK`, no queda registro ni se gasta número. Si falla la **impresión**, el
+registro ya es correcto y el papel se reimprime.
+
+`Registros_Facturacion` y `Serie_Facturacion` se escriben por `execute()`: son esquema compartido y
+tienen que volver de la nube en una recuperación. Las tablas `_Verifactu_*` van por `raw()`: son
+estado local y por `execute()` cada tick del job se replicaría.
+
+### Dar de baja un cobro
+
+`cuentas_anular_pago` (Administrador) llama, dentro de la transacción de la baja, a
+`emitir_baja_de_pago` con la `ClaseBaja` elegida en la pantalla:
+
+- **`Error`** — la venta no existió. Emite un registro de **anulación** del alta vigente del pago
+  (la última por `Orden`), y las líneas vuelven a la comanda.
+- **`Devolucion`** — la venta existió. Emite una **`R5`** por diferencias con el desglose original
+  negado (leído de `Desglose_Json`, no recalculado) y sin destinatario, referenciando la factura
+  original. Las líneas no vuelven.
+
+La devolución emite siempre una `R5`, también cuando la factura original es una `F1`; el código no
+tiene camino para `R1`. Si el pago no tiene registro (un cobro de modo prueba), la baja sigue
+adelante sin emitir nada. El efecto en la caja de cada clase está en [caja.md](caja.md).
+
+### La factura completa de un ticket ya expedido (`F3`)
+
+`verifactu_emitir_factura_de_ticket` (Administrador, desde Cuentas): sólo sobre una `F2`, y sólo una
+vez por ticket (se busca una `F3` que lo referencie). Reemite el **mismo desglose** con destinatario y
+`FacturasSustituidas`; la simplificada original no se toca.
+
+El esquema tiene `Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal`, pero hoy ningún camino los lee
+ni los escribe: el formulario de datos fiscales siempre empieza vacío.
+
+---
+
+## El QR y el papel
+
+- URL: `https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?nif=…&numserie=…&fecha=…&importe=…`
+  (`prewww2.aeat.es` en pruebas), con los valores codificados en UTF-8 (`url_qr`). Se compone al
+  emitir y se guarda; el papel la lee de la fila.
+- Código ISO/IEC 18004 con corrección **M**, de **30 a 40 mm** de lado según el papel, con 2 mm de
+  zona de silencio, rasterizado por el mismo camino que el logo (`GS v 0`), no con `GS ( k`.
+- Va lo primero, centrado, precedido de «QR tributario:» y seguido de «VERI\*FACTU». En pruebas
+  añade «-- ENTORNO DE PRUEBAS --».
+- Si la URL no cabe en un QR o el papel no da para un módulo, el ticket sale sin código: nada de lo
+  que rodea al ticket puede impedir cobrar.
+- Una reimpresión saca el mismo número, QR y huella (`verifactu_bloque_ticket`), marcada COPIA.
+
+El orden completo del ticket está en [tickets.md](tickets.md).
+
+---
+
+## La remisión
+
+`verifactu_remitir` es un job del runner ([jobs-e-interruptores.md](jobs-e-interruptores.md)): cada
+60 s, primer intento al minuto del arranque, `Requiere::MainOperativa`. Remitir no puede ser una
+llamada dentro del cobro porque el art. 16.2 de la Orden impone un control de flujo entre envíos.
+
+⚠️ **El job no depende de `connectivity: "off"`.** Ese ajuste apaga el WebSocket de nuestra nube;
+remitir a la AEAT es una obligación tributaria. Cumplir la regla consiste en no añadir esa
+comprobación al job. El interruptor remoto `verifactu_remitir` sí lo pausa, pero lo decide soporte,
+caduca a las 24 h como mucho y se ve en Configuración → Fiscal.
+
+Cada vuelta, en este orden:
+
+1. Con el modo prueba activado, no hace nada.
+2. Sin identidad del productor (`productor_configurado`: `PRODUCTOR_NIF` con dígito de control
+   válido), no remite: un registro mandado con `"NIF":""` lo rechazaría la AEAT por formato y la
+   fila no se recompone. Lo dice una vez por arranque en el log y evalúa el aviso de atraso.
+3. Evalúa el aviso del certificado y el de anomalías.
+4. Si el certificado elegido ya no está o caducó, no lo intenta. Si pide PIN, sí.
+5. `asegurar_sistema_reparado`: si el bloque `SistemaInformatico` ha cambiado desde la última vez
+   (arranque, activación con `tenant_id`), rellena con `json_set` el `NIF`/`NombreRazon` o el
+   `NumeroInstalacion` que falten en registros que la AEAT no tiene aceptados. Si falla, no remite.
+   Es la única escritura sobre registros ya emitidos, y es legítima porque ese bloque no entra en la
+   huella ni en los datos de la factura.
+6. `remitir_ciclo`:
+   - Sin pendientes, sin datos del obligado o sin certificado, no envía (no es un error del job).
+   - `puede_enviar`: han pasado los `Espera_Segundos` desde el último envío **o** hay al menos 1000
+     pendientes. Un reloj que retrocede cuenta como «ya ha pasado».
+   - Hasta 1000 `PENDIENTE` por `Orden` ascendente.
+   - `Incidencia = "S"` en la cabecera si hay más de 1000 pendientes o el último envío fue hace más
+     de una hora.
+   - Endpoint según entorno y tipo de certificado (persona → `www1`/`prewww1`; sello →
+     `www10`/`prewww10`).
+   - Guarda el `TiempoEsperaEnvio` devuelto (acotado a 1–3600 s) **antes** de procesar las líneas.
+   - Casa cada línea por **tipo y número** (un alta y su anulación comparten número). Una línea que
+     no aparece en la respuesta se queda `PENDIENTE` con un intento más.
+   - Un fallo de transporte o un *Fault* anota un intento a todo el lote, que sigue `PENDIENTE`, y
+     devuelve `Err` (backoff del runner).
+7. Evalúa el aviso de atraso y emite `verifactu:cambio` para que la pantalla se refresque.
+
+### Qué significa cada respuesta (`clasificar`)
+
+| La AEAT dice | Estado | Qué pasa después |
+|---|---|---|
+| `Correcto` | `ACEPTADO` | Se guarda el CSV del envío |
+| `AceptadoConErrores`, o un código 2000–2999 | `ACEPTADO_CON_ERRORES` | Está en la AEAT; se guarda el CSV; hay que subsanarlo salvo el `2004` |
+| `Incorrecto` con `3000` (duplicado) | `ACEPTADO` | Es la idempotencia del sistema: reenviar lo que la AEAT ya tiene converge |
+| `Incorrecto` con otro código | `RECHAZADO` | No se reintenta solo |
+| Un estado desconocido | `PENDIENTE` | Se reintenta: no se da por bueno nada que no se entiende |
+
+Se clasifica **por rango**, no por lista: el catálogo de la AEAT crece.
+
+### Subsanación
+
+`pendientes()` sólo coge `PENDIENTE`, así que un rechazo se queda quieto hasta que alguien pulsa
+«Volver a mandarlas corregidas» (`verifactu_subsanar_rechazados`, Administrador). Por cada rechazado
+sin subsanación previa, `subsanar_rechazados` emite un alta nueva con:
+
+- el **mismo `IDFactura`** (serie, número y fecha), sin gastar número;
+- `Subsanacion = "S"` y `RechazoPrevio = "X"`;
+- los mismos datos fiscales del original, reconstruidos de su fila;
+- su propio `Orden`, huella y hora, encadenada al final.
+
+El índice único de la terna (`ux_regfact_idfactura`) excluye las subsanaciones para que la segunda
+entre. Es manual a propósito: un rechazo casi siempre es un fallo del programa que arregla una
+versión nueva, y reintentarlo solo repetiría el rechazo cada minuto. Hoy sólo se subsanan
+rechazados; `marcas_de_subsanacion` ya sabe las marcas de un aceptado con errores (`S` sin
+`RechazoPrevio`), pero ningún botón lo dispara. La columna `Sin_Registro_Previo` existe y viaja al
+XML, pero ningún camino la rellena.
+
+---
+
+## El certificado
+
+- **Lo usa Windows, no el programa.** El TLS mutuo va por **WinHTTP** (schannel), al que se le pasa
+  el `CERT_CONTEXT` del almacén. La clave privada no sale nunca del almacén, no hay `.p12` que leer
+  ni contraseña que guardar. Sirve un certificado con clave en un KSP de CNG, en un **CSP heredado**
+  (como queda un `.p12` importado con doble clic) o en una tarjeta. `rustls-cng` no valdría: habla
+  NCrypt, que no ve los CSP heredados.
+- **Se guarda sólo la huella**, en `device_config.json` (`verifactu_cert`). No es un secreto. Al
+  elegirlo se comprueba que exista en el almacén.
+- **Dos almacenes**: `CurrentUser\My` y `LocalMachine\My`. Sólo aparecen certificados con clave
+  privada, y la lista dice en qué almacén está cada uno (el personal es por usuario de Windows).
+- El tipo (persona o **sello de entidad**, detectado por OID de política o por el sujeto) sólo
+  decide el endpoint. La interfaz no habla del sello.
+- **Uso silencioso**: un certificado que pide PIN o contraseña no puede remitir solo. La pantalla lo
+  marca; el estado da `certificado_pide_pin`. El indicador no es infalible (lectores con *pinpad*).
+- **«Probar»** (`verifactu_probar_conexion`) hace un *handshake* real contra el entorno configurado
+  mandando un sobre **sin registros**. Con los datos del obligado configurados, la cabecera los
+  lleva y la prueba comprueba también que el titular esté autorizado sobre ese NIF.
+- El estado del certificado lo completa el shell (`completar_con_el_certificado`): el almacén no está
+  en la base. Da `sin_certificado`, `certificado_no_encontrado`, `certificado_caducado` o
+  `certificado_pide_pin` como `motivo_no_remite`, sin pisar un motivo que ya viniera de la capa de
+  datos.
+- **Aviso de caducidad** a 30 días (aviso) y a 7 (error), aparte del aviso de atraso, que llega
+  tarde por definición.
+
+## El entorno
+
+`Business_Settings.Verifactu_Entorno` (`produccion` | `pruebas`) cambia **a la vez** el endpoint y
+la base del QR. Cualquier valor que no sea exactamente `pruebas` se trata como producción. En pruebas
+el panel lo dice en amarillo, el QR apunta a `prewww2.aeat.es` y el papel lleva el aviso. Pasar a
+producción con registros ya emitidos muestra un aviso en rojo: los emitidos contra preproducción
+ocupan la cadena local y Hacienda no los tiene (cómo partir de cero: [PRUEBAS_AEAT.md](../PRUEBAS_AEAT.md)).
+
+## Los datos del obligado y del productor
+
+- **Obligado** (el bar): `Business_Settings.CIF`, `Razon_Social` (no es `Business_Name`: el rótulo
+  frente a quien factura) y `Descripcion_Op` (texto fijo, por defecto «Servicios de hosteleria y
+  restauracion», hasta 500 caracteres). Sin NIF válido o sin razón social no se cobra.
+  `config_patch_business_settings` exige Administrador, así que el aviso de que faltan sale después
+  del login y lleva a Configuración → Fiscal. El NIF sigue siendo editable con registros emitidos;
+  la pantalla sólo avisa de que cambiarlo empieza otra cadena.
+- **Productor** (quien hace el TPV): las constantes `PRODUCTOR_NOMBRE_RAZON`, `PRODUCTOR_NIF`,
+  `PRODUCTOR_NOMBRE_SISTEMA` y `PRODUCTOR_ID_SISTEMA` de `lib.rs`, más la versión de
+  `tauri.conf.json` y el `tenant_id` como `NumeroInstalacion`. Se inyectan en `setup()`; la
+  activación de la licencia actualiza el número de instalación sin reiniciar
+  (`set_numero_instalacion`). Es dato declarado: la AEAT valida el formato, no la actividad.
+  `PRODUCTOR_NIF` está vacío hoy, y por eso el job no remite (ver arriba).
+
+## La escalera de avisos
+
+Se mide sobre la **antigüedad del pendiente más viejo** (`_Verifactu_Envios.Creado_En_Ms`), no sobre
+el tiempo sin conexión. La calcula `escalon_aviso`.
+
+| Antigüedad | Escalón | Dónde se ve |
+|---|---|---|
+| < 1 h | `ninguno` | — (es el funcionamiento normal) |
+| 1–6 h | `visible` | Configuración → Fiscal |
+| 6–24 h | `notificacion` | Notificación al Administrador, emitida por el job |
+| 24–72 h | `modal_login` | Aviso al entrar, una vez por sesión, con reconocimiento |
+| > 72 h | `modal_cobro` | Aviso **después** de cada cobro (y el de login) |
+
+- **Nunca bloquea el cobro**, y el aviso de cobro va después de cobrar: un diálogo delante sería una
+  pulsación más en la ruta más caliente.
+- Una sola clave de dedupe (`verifactu_atraso`): subir de escalón no deja abiertos los anteriores, y
+  el aviso **se cierra solo** cuando la cola baja.
+- Si lo que impide remitir es la identidad del productor, el texto dice que el problema es del
+  programa, no del equipo ni de la conexión.
+- El aviso de que **faltan los datos fiscales** manda sobre los dos de la escalera: aquéllos hablan
+  de facturas sin remitir; éste, de que el siguiente cobro va a fallar.
+- `useEstadoFiscal` refresca cada 2 minutos y al recibir `verifactu:cambio`. Arranca con
+  `datosFiscalesCompletos = true` para no sacar el aviso en una Handy (donde el comando falla) ni
+  antes de la primera respuesta.
+
+## Tras restaurar
+
+`Registros_Facturacion` se replica y vuelve con la recuperación; `_Verifactu_Envios` es local y no.
+`recovery::mark_reconciliation_pending` llama a `resembrar_cola_de_envio`, que encola como
+`PENDIENTE` todo registro sin estado de envío, con `Creado_En_Ms` = ahora (la escalera mide cuánto
+lleva el equipo sin remitir desde la restauración). Lo que la AEAT ya tenga vuelve como `3000` y se
+da por aceptado. No se usa `ConsultaFactuSistemaFacturacion`.
+
+El cerrojo de escrituras de negocio de la recuperación impide emitir mientras tanto, igual que
+impide vender. La fase 1 del volcado trae `Registros_Facturacion` de la ventana más **siempre la
+última fila por `Orden`**, que es el eslabón del que sigue la cadena; el resto llega en la fase 2.
+
+## La exportación (art. 8 RRSIF)
+
+Configuración → Fiscal → «Exportar los registros de facturación», por rango de fechas, a un ZIP que
+el usuario guarda donde quiera (`verifactu_exportar`, Administrador):
+
+| Fichero | Qué lleva |
+|---|---|
+| `registros.xml` | Los registros en el formato del diseño oficial |
+| `registros.csv` | Lo mismo, para una hoja de cálculo |
+| `cadena.txt` | Número, cadena hasheada y huella de cada registro: con un SHA-256 cualquiera verifica la cadena sin nuestro código |
+| `manifiesto.json` | Obligado, productor, sistema, versión, entorno, rango y recuento |
+
+Sólo lee y no abre transacciones: si falta `_Verifactu_Envios`, el estado sale vacío y los registros
+salen igual.
+
+## La declaración responsable (art. 13 RRSIF)
+
+`verifactu_declaracion_responsable` (sin rol: es pública) devuelve los datos del productor, la
+versión real y el texto `TEXTO_DECLARACION`. Mientras `PRODUCTOR_NIF` esté vacío devuelve el texto
+vacío y `completa = false`, y la pantalla dice que está incompleta en vez de enseñarla a medias. El
+texto actual es un borrador.
+
+## Modo prueba (temporal)
+
+Etiqueta `MODO-PRUEBA` en el código (`git grep -n MODO-PRUEBA`). Se quita entero antes del 1 de enero
+de 2027 ([pendientes.md](../pendientes.md#verifactu)).
+
+- `Business_Settings.Modo_Prueba = 1` (Configuración → Fiscal, Administrador).
+- Los cobros numeran en la serie `PRUEBA`, que se fija **antes** de reservar el número
+  (`serie_del_cobro`), y no emiten registro: ni QR, ni envío, ni datos del obligado. El papel sale
+  marcado «\*\*\* MODO PRUEBA \*\*\*» / «SIN VALOR FISCAL».
+- Lo que decide es el número (`es_numero_de_prueba`), así que una reimpresión de mañana dice lo que
+  fue aunque el modo ya esté apagado.
+- El estado no dice que falten datos fiscales y el motivo de no remitir es `modo_prueba`; el job no
+  hace nada.
+- Las ventas de prueba cuentan en la caja y en las estadísticas como cualquier otra.
+
+## La Handy
+
+No cobra (`cobro_solo_en_main`), así que no emite registros. El worker veta además cualquier
+escritura a `Registros_Facturacion` y `Serie_Facturacion` (`lib/hub.ts`, `TABLAS_SOLO_MAIN`;
+`test/fiscalSoloMain.test.ts`): el número correlativo y la cadena tienen un único escritor. En la
+Handy, el adaptador AEAT existe pero devuelve error, y el estado fiscal falla sin consecuencias.
+
+---
+
+## Fuera de alcance
+
+- **TicketBAI** (País Vasco y Navarra) e **IGIC/IPSI** (Canarias, Ceuta y Melilla): `Impuesto` no se
+  informa (IVA) y `ClaveRegimen` es siempre `01`.
+- La **lotería**: es un suplido, no un producto exento, y no entra en el registro.
+- La modalidad **NO VERI\*FACTU** (firma XAdES y registro de eventos).
+- **Varios obligados por instalación** (`TipoUsoPosibleMultiOT = N`) y **varias cajas por negocio**:
+  la cadena asume una única Main.
+- Que el worker remita en nombre de los clientes (apoderamiento): el certificado y el envío se
+  quedan en el equipo del bar.
+- Los endpoints, `IDVersion` (`1.0`) y la base del QR son constantes del binario: cambiarlos es
+  publicar una versión.
+
+## Fuentes
+
+- RD 1007/2023 (RRSIF): arts. 7, 8, 9, 11, 13, 15 y 16. <https://www.boe.es/buscar/act.php?id=BOE-A-2023-24840>
+- Orden HAC/1177/2024: art. 7.i (comprobación previa), 16.2 (control de flujo), 20–21 (QR).
+  <https://www.boe.es/diario_boe/txt.php?id=BOE-A-2024-22138>
+- RD 1619/2012 (reglamento de facturación): arts. 4.2 (límite de 3.000 €), 6.1.a (serie de
+  rectificativas), 6.1.i y 7.1.c (fecha de operación), 15.6 (canje de simplificadas).
+  <https://www.boe.es/buscar/act.php?id=BOE-A-2012-14696>
+- AEAT, especificaciones de la huella v0.1.2, del QR v0.5.0, descripción del servicio web v1.0.3,
+  validaciones y errores v1.2.2 y FAQ de desarrolladores, en
+  <https://www.agenciatributaria.es/AEAT_Desarrolladores/>. El WSDL, los XSD y el catálogo de errores
+  vendorizados están en `crates/tpv-infra-aeat/esquemas/`.
+- Portal de pruebas externas: <https://preportal.aeat.es>.
+
+> Esto es documentación de ingeniería, no asesoramiento fiscal. Las decisiones con consecuencia
+> tributaria conviene contrastarlas con un asesor antes de lanzar.
