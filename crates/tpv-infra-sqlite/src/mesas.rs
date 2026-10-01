@@ -978,7 +978,7 @@ impl MesasRepository for SqliteMesasRepository {
             r#"
             SELECT ID_Comanda FROM Comandas
             WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
-            ORDER BY datetime(Fecha_Hora_Apertura) DESC LIMIT 1;
+            ORDER BY datetime(Fecha_Hora_Apertura) DESC, ID_Comanda DESC LIMIT 1;
             "#,
             vec![Value::Text(bare_id)],
         )
@@ -1006,7 +1006,7 @@ impl MesasRepository for SqliteMesasRepository {
             r#"
             SELECT ID_Comanda FROM Comandas
             WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
-            ORDER BY datetime(Fecha_Hora_Apertura) DESC LIMIT 1;
+            ORDER BY datetime(Fecha_Hora_Apertura) DESC, ID_Comanda DESC LIMIT 1;
             "#,
             vec![Value::Text(bare_id_mesa.clone())],
         )
@@ -1051,7 +1051,7 @@ impl MesasRepository for SqliteMesasRepository {
             r#"
             SELECT ID_Comanda FROM Comandas
             WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
-            ORDER BY datetime(Fecha_Hora_Apertura) DESC LIMIT 1;
+            ORDER BY datetime(Fecha_Hora_Apertura) DESC, ID_Comanda DESC LIMIT 1;
             "#,
             vec![Value::Text(bare_id_mesa)],
         )
@@ -1870,6 +1870,8 @@ impl MesasRepository for SqliteMesasRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
+            // RI-59: «la última» es la de clave mayor (UUIDv7, también las del worker), pero antes
+            // una que cocina no haya preparado: quitar una ya hecha descuadra lo que hay en el pase.
             db.execute(
                 r#"
                 DELETE FROM Detalle_Comanda
@@ -1879,7 +1881,7 @@ impl MesasRepository for SqliteMesasRepository {
                   WHERE dc.ID_Comanda = ?1
                     AND dc.ID_Producto = ?2
                     AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-                  ORDER BY dc.ID_Detalle DESC LIMIT 1
+                  ORDER BY (COALESCE(dc.Estado_Cocina,'PENDIENTE') = 'PREPARADO') ASC, dc.ID_Detalle DESC LIMIT 1
                 );
                 "#,
                 vec![Value::Text(id_comanda.to_string()), Value::Text(id_producto.to_string())],

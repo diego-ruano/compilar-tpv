@@ -123,7 +123,7 @@ y cuáles faltan.
 - **`trabajadores.createTrabajador` / `updateTrabajador`**: escriben PII cifrada (que el worker ni escribe)
   y `Password_Hash` con sal aleatoria; sólo las columnas no sensibles serían comparables.
 - **`trabajadores.setPredeterminadoDesdeSemana`**: genera los IDs nuevos con `new_id` en Rust y
-  `randomUUID` en el worker; sólo el resto de columnas sería comparable.
+  `nuevoId` en el worker; sólo el resto de columnas sería comparable.
 - **`login.completeInitialSetup`**: ya no existe en el worker (el PIN inicial se elige sólo en la Main); el
   script la marca como **exclusión obsoleta**.
 

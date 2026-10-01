@@ -171,7 +171,7 @@ export async function comandaAbiertaByMesa(
 			SELECT ID_Comanda AS id
 			FROM Comandas
 			WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
-			ORDER BY ID_Comanda DESC
+			ORDER BY datetime(Fecha_Hora_Apertura) DESC, ID_Comanda DESC
 			LIMIT 1;
 		`,
 		args: [bareId],

@@ -133,7 +133,7 @@ export async function findClienteReserva(
 		const rs = await db.execute({
 			sql: `SELECT ${COLS} FROM Clientes
 			      WHERE Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1
-			      ORDER BY ID_Cliente DESC LIMIT 1;`,
+			      ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;`,
 			args: [email.toLowerCase()],
 		});
 		const row = rows(rs)[0];
@@ -142,7 +142,7 @@ export async function findClienteReserva(
 
 	if (telefono) {
 		const rs = await db.execute({
-			sql: `SELECT ${COLS} FROM Clientes WHERE Telefono = ?1 ORDER BY ID_Cliente DESC LIMIT 1;`,
+			sql: `SELECT ${COLS} FROM Clientes WHERE Telefono = ?1 ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;`,
 			args: [telefono],
 		});
 		const row = rows(rs)[0];

@@ -6,6 +6,7 @@
 // VALUES explícitos (nunca INSERT ... SELECT), y el UUID se genera en un paso `value` previo, para
 // que la nube y cada Main/Handy escriban EXACTAMENTE la misma fila al re-aplicar el broadcast.
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type { CrearNotificacionBody } from "./notificaciones.schemas";
 
@@ -49,7 +50,7 @@ export function crear(input: CrearNotificacionBody): BuiltCommand {
 			kind: "value",
 			saveAs: "id",
 			sql: "SELECT ?1;",
-			args: [crypto.randomUUID()],
+			args: [nuevoId()],
 		},
 		{
 			kind: "execute",

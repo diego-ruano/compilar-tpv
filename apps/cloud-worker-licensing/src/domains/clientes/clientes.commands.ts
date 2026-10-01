@@ -1,5 +1,6 @@
 // src/domains/clientes/clientes.commands.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type { CreateClienteInput, UpdateClienteInput } from "./clientes.schemas";
 
@@ -18,7 +19,7 @@ function cleanOrNull(s: unknown): string | null {
 
 // Local-First/UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno.
 function idStep(provided?: string) {
-	const id = (provided ?? "").trim() || crypto.randomUUID();
+	const id = (provided ?? "").trim() || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 

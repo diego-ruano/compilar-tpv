@@ -149,7 +149,9 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   que es estado local del equipo (`_Jobs_State`, `_Sync_*`, `_Verifactu_*`, `_Recovery_State`,
   `_Backfill_Historico`, el backfill) va por `raw()`. `is_write_sql` no reconoce un `WITH … INSERT`.
 - **IDs deterministas**: toda `TEXT PRIMARY KEY` recibe su UUID antes del `INSERT`; en el worker, un paso
-  `kind:"value"` con `crypto.randomUUID()`. Nada de `randomblob()`/`random()` en una sentencia replicada.
+  `kind:"value"` con `nuevoId()` (`lib/ids.ts`, UUIDv7 como el `new_id()` de Rust). Nada de
+  `randomblob()`/`random()` en una sentencia replicada. «Lo más reciente» se ordena por la columna de
+  fecha; la clave sólo desempata.
 - **La hora la pone quien escribe** ([0004](docs/decisiones/0004-la-hora-la-pone-quien-escribe.md)): ningún
   `DEFAULT` de hora en el esquema; en la Handy, `X-Client-Now` fija «ahora» en escrituras **y lecturas**.
 - **Los agregados (`Total_Comanda`…) se re-derivan en el SQL**, nunca se escriben como literal.

@@ -88,7 +88,7 @@ export async function overview(
 					ORDER BY total_gastado_stored DESC, total_reservas DESC, c.ID_Cliente DESC
 					LIMIT 10;`
 				: `${base}
-					ORDER BY c.ID_Cliente DESC;`;
+					ORDER BY c.Created_At DESC, c.ID_Cliente DESC;`;
 
 	const rs = await db.execute(sql);
 	return rows(rs) as ClienteOverview[];

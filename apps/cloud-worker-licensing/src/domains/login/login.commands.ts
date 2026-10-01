@@ -1,5 +1,6 @@
 // src/domains/login/login.commands.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 
 export type BuiltCommand = {
@@ -52,7 +53,7 @@ export function punchEntrada(input: {
 			kind: "value",
 			saveAs: "id_fichaje",
 			sql: "SELECT ?1;",
-			args: [crypto.randomUUID()],
+			args: [nuevoId()],
 		},
 		{
 			kind: "execute",

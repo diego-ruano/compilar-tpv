@@ -1,5 +1,6 @@
 // src/domains/reservas/reservas.commands.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type { ReservaSaveInput } from "./reservas.schemas";
 
@@ -66,7 +67,7 @@ function clienteSteps(input: ReservaSaveInput, cliente: ClienteReservaExistente)
 			kind: "value",
 			saveAs: "id_cliente",
 			sql: "SELECT ?1;",
-			args: [crypto.randomUUID()],
+			args: [nuevoId()],
 		},
 		{
 			kind: "execute",
@@ -175,7 +176,7 @@ export function saveReserva(
 			kind: "value",
 			saveAs: "id_reserva",
 			sql: "SELECT ?1;",
-			args: [crypto.randomUUID()],
+			args: [nuevoId()],
 		});
 		steps.push({
 			kind: "execute",

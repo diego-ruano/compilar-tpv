@@ -4,6 +4,7 @@
 // replica tpv-infra-sqlite/src/tareas.rs y el DO aporta transaccion,
 // idempotencia por Op_Id y broadcast.
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
 	CreateTareaInput,
@@ -97,7 +98,7 @@ export function createTarea(input: CreateTareaInput): BuiltCommand {
 			kind: "value",
 			saveAs: "id_tarea",
 			sql: "SELECT ?1;",
-			args: [crypto.randomUUID()],
+			args: [nuevoId()],
 		},
 		{
 			kind: "execute",

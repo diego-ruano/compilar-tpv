@@ -62,9 +62,11 @@ sin nube no opera.
 - **Idempotencia** por `Op_Id`: `Applied_Operations` en la nube y `_Sync_Applied_Ops` en la Main evitan
   duplicados en catch-up y en vivo, y los ecos de las propias escrituras.
 - **IDs deterministas**: toda columna `TEXT PRIMARY KEY` recibe su UUID generado **antes** del
-  `INSERT` (en el worker, un paso `kind:"value"` con `crypto.randomUUID()`), sin `DEFAULT` ni trigger.
-  Una función no determinista dentro de una sentencia replicada (`randomblob`, `random`) se evaluaría
-  otra vez al aplicarla; el arnés de contrato lo rechaza (`SQL_NO_DETERMINISTA`).
+  `INSERT` (en el worker, un paso `kind:"value"` con `nuevoId()`, un UUIDv7 como el `new_id()` de
+  Rust), sin `DEFAULT` ni trigger. Una función no determinista dentro de una sentencia replicada
+  (`randomblob`, `random`) se evaluaría otra vez al aplicarla; el arnés de contrato lo rechaza
+  (`SQL_NO_DETERMINISTA`). Que sean v7 importa: donde no hay columna de fecha (`Detalle_Comanda`), «la
+  última» es la de clave mayor. Donde la hay, «lo más reciente» se ordena por ella.
 - **Los agregados derivados se re-derivan en el SQL** (`Total_Comanda = SUM(…)`), no se escriben como
   literal: tienen dos escritores (Main por el outbox, Handy por el DO) y sólo convergen así.
 - Las tablas que sólo usa la nube (`Applied_Operations`, `Sync_Changes`, `Sync_Main_Checkpoints`) están

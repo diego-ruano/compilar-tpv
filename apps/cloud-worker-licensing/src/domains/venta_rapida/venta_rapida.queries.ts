@@ -1,5 +1,6 @@
 // src/domains/venta_rapida/venta_rapida.queries.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { Client } from "@libsql/client/web";
 
 import type {
@@ -183,7 +184,7 @@ export async function listComandas(
 			FROM Comandas c
 			WHERE c.Canal = ?2
 				AND (${whereClause})
-			ORDER BY c.ID_Comanda DESC
+			ORDER BY datetime(c.Fecha_Hora_Apertura) DESC, c.ID_Comanda DESC
 			LIMIT ?1;
 		`,
 		args: [limit, CANAL_BARRA],
@@ -444,7 +445,7 @@ export async function cobrarPlan(
 
 	return {
 		ok: true,
-		id_pago: crypto.randomUUID(),
+		id_pago: nuevoId(),
 		importe_total: Number(resumen.importe ?? 0),
 		id_usuario_cobrador: idUsuario,
 		id_trabajador_cobrador:

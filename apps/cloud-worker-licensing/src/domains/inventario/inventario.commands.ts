@@ -9,6 +9,7 @@
 // calcula igual con un paso `value` + `$ref`, para que el ID quede en el resultado
 // y viaje en el broadcast (la Main lo aplica con ese mismo ID).
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
 	UpsertCategoriaInput,
@@ -100,7 +101,7 @@ const SQL_INSERT_MOVIMIENTO = `
 // UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno aquí.
 // Queda en `id` para que viaje en el broadcast y la Main lo aplique con el mismo id.
 function idStep(provided?: string) {
-	const id = (provided ?? "").trim() || crypto.randomUUID();
+	const id = (provided ?? "").trim() || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
@@ -211,7 +212,7 @@ export function setAlergenosProducto(
 
 export function createLote(input: CreateLoteInput): BuiltCommand {
 	const stock = input.stock_disponible;
-	const movId = crypto.randomUUID();
+	const movId = nuevoId();
 
 	const steps: any[] = [
 		idStep(input.id_lote),
@@ -288,7 +289,7 @@ export function updateLote(
 			kind: "execute",
 			sql: SQL_INSERT_MOVIMIENTO,
 			args: [
-				crypto.randomUUID(),
+				nuevoId(),
 				idLote,
 				"AJUSTE",
 				input.stock_disponible - stockActual,
@@ -311,7 +312,7 @@ export function ajustarLote(
 	input: AjusteLoteInput,
 	stockActual: number,
 ): BuiltCommand {
-	const movId = crypto.randomUUID();
+	const movId = nuevoId();
 	const steps: any[] = [
 		{
 			kind: "execute",

@@ -323,7 +323,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             FROM Comandas c
             WHERE c.Canal = ?2
               AND ({where_clause})
-            ORDER BY c.ID_Comanda DESC
+            ORDER BY datetime(c.Fecha_Hora_Apertura) DESC, c.ID_Comanda DESC
             LIMIT ?1;
             "#,
             pending_expr = pending_expr,
@@ -661,6 +661,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
+            // RI-59: la última por clave (UUIDv7), pero antes una que cocina no haya preparado.
             db.execute(
                 r#"
                 DELETE FROM Detalle_Comanda
@@ -670,7 +671,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   WHERE dc.ID_Comanda = ?1
                     AND dc.ID_Producto = ?2
                     AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-                  ORDER BY dc.ID_Detalle DESC
+                  ORDER BY (COALESCE(dc.Estado_Cocina,'PENDIENTE') = 'PREPARADO') ASC, dc.ID_Detalle DESC
                   LIMIT 1
                 );
                 "#,

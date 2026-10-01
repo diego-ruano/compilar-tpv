@@ -1,5 +1,6 @@
 // src/domains/trabajadores/trabajadores.commands.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type { FilaSemanaOrigen } from "./trabajadores.queries";
 import type { PredeterminadoItem } from "./trabajadores.queries";
@@ -26,7 +27,7 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 			kind: "value",
 			saveAs: "id_usuario",
 			sql: "SELECT ?1;",
-			args: [crypto.randomUUID()],
+			args: [nuevoId()],
 		},
 		{
 			kind: "execute",
@@ -56,7 +57,7 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 			kind: "value",
 			saveAs: "id_trabajador",
 			sql: "SELECT ?1;",
-			args: [crypto.randomUUID()],
+			args: [nuevoId()],
 		},
 		{
 			kind: "execute",
@@ -183,7 +184,7 @@ export function updateTrabajador(
 }
 
 export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
-	const idAsignacion = crypto.randomUUID();
+	const idAsignacion = nuevoId();
 	return {
 		commandName: "horarios_create_asignacion",
 		command: {
@@ -318,7 +319,7 @@ export function copySemana(
 				VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8);
 			`,
 			args: [
-				crypto.randomUUID(),
+				nuevoId(),
 				f.id_trabajador,
 				destino,
 				f.id_turno,
@@ -416,7 +417,7 @@ export function setPredeterminadoDesdeSemana(
 				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
 			`,
 			args: [
-				crypto.randomUUID(),
+				nuevoId(),
 				it.id_trabajador,
 				it.weekday,
 				it.orden,

@@ -94,7 +94,7 @@ async fn upsert_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<St
                 &format!(
                     "SELECT {COLS} FROM Clientes \
                      WHERE Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1 \
-                     ORDER BY ID_Cliente DESC LIMIT 1;"
+                     ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;"
                 ),
                 vec![Value::Text(e.to_lowercase())],
             )
@@ -109,7 +109,7 @@ async fn upsert_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<St
         if let Some(ref t) = telefono {
             let mut rows = conn
                 .query(
-                    &format!("SELECT {COLS} FROM Clientes WHERE Telefono = ?1 ORDER BY ID_Cliente DESC LIMIT 1;"),
+                    &format!("SELECT {COLS} FROM Clientes WHERE Telefono = ?1 ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;"),
                     vec![Value::Text(t.clone())],
                 )
                 .await

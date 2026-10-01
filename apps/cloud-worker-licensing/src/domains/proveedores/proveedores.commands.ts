@@ -1,5 +1,6 @@
 // src/domains/proveedores/proveedores.commands.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
 	CreateProductoInput,
@@ -35,7 +36,7 @@ function normalizeIds(ids: string[]): string[] {
 
 // UUIDv7: el id lo genera el cliente y lo envía; si faltara, generamos uno.
 function idStep(provided?: string | null) {
-	const id = (provided ?? "").trim() || crypto.randomUUID();
+	const id = (provided ?? "").trim() || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
@@ -190,7 +191,7 @@ export function crearProducto(input: CreateProductoInput): BuiltCommand {
 	];
 
 	if (stock != null && stock > 0) {
-		const idLoteInicial = crypto.randomUUID();
+		const idLoteInicial = nuevoId();
 		steps.push({
 			kind: "execute",
 			sql: `
@@ -222,7 +223,7 @@ export function crearProducto(input: CreateProductoInput): BuiltCommand {
 				WHERE EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?2);
 			`,
 			args: [
-				crypto.randomUUID(),
+				nuevoId(),
 				idLoteInicial,
 				stock,
 				"Lote inicial creado desde Proveedores",

@@ -1,5 +1,6 @@
 // src/domains/mesas/mesas.commands.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type { CobroDetallesPlan } from "./mesas.queries";
 import type {
@@ -121,7 +122,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 				args: [idZona, z.name, points],
 			});
 		} else {
-			const newZonaId = crypto.randomUUID();
+			const newZonaId = nuevoId();
 			steps.push({
 				kind: "execute",
 				sql: `
@@ -192,7 +193,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 					],
 				});
 			} else {
-				const newMesaId = crypto.randomUUID();
+				const newMesaId = nuevoId();
 				steps.push({
 					kind: "execute",
 					sql: `
@@ -301,7 +302,7 @@ export function abrirComanda(
 						kind: "value",
 						saveAs: "id_comanda",
 						sql: "SELECT ?1;",
-						args: [crypto.randomUUID()],
+						args: [nuevoId()],
 					},
 					{
 						kind: "execute",
@@ -411,7 +412,7 @@ export function addLinea(
 	const steps: any[] = [];
 	// UUID generado en JS e insertado como literal: no necesita un paso `value` (SELECT ?1)
 	// con su round trip — el statement capturado para la Main ya lleva el id resuelto.
-	const idDetalle = crypto.randomUUID();
+	const idDetalle = nuevoId();
 
 	// Resolución de trabajador embebida en la propia UPDATE para evitar un round-trip
 	// previo a Turso. El EXISTS garantiza que solo se actualiza si hay match real.
@@ -477,6 +478,8 @@ export function addLinea(
 	};
 }
 
+// RI-59: «la última» es la de clave mayor (UUIDv7, `nuevoId`), pero antes una que cocina no haya
+// preparado. Espejo de `remove_one_pending_detalle` en la Main.
 export function removeOnePendingDetalle(idComanda: string, idProducto: string): BuiltCommand {
 	return {
 		commandName: "remove_one_pending_detalle",
@@ -496,7 +499,7 @@ export function removeOnePendingDetalle(idComanda: string, idProducto: string): 
 									AND NOT EXISTS (
 										SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 									)
-								ORDER BY dc.ID_Detalle DESC LIMIT 1
+								ORDER BY (COALESCE(dc.Estado_Cocina,'PENDIENTE') = 'PREPARADO') ASC, dc.ID_Detalle DESC LIMIT 1
 							);
 						`,
 						args: [idComanda, idProducto],
@@ -600,7 +603,7 @@ export function cobrarDetalles(
 						kind: "value",
 						saveAs: "id_pago",
 						sql: "SELECT ?1;",
-						args: [crypto.randomUUID()],
+						args: [nuevoId()],
 					},
 					{
 						kind: "execute",
@@ -634,7 +637,7 @@ export function cobrarDetalles(
 						kind: "value",
 						saveAs: "id_mov",
 						sql: "SELECT ?1;",
-						args: [crypto.randomUUID()],
+						args: [nuevoId()],
 					},
 					{
 						kind: "execute",

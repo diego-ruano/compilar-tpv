@@ -1,5 +1,6 @@
 // src/domains/cuentas/cuentas.commands.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
 	AnularPagoInput,
@@ -23,7 +24,7 @@ function normalizeMetodo(input: string): string {
 
 // UUIDv7: el id lo genera el cliente y lo envía; si faltara, generamos uno.
 function idStep(provided?: string | null) {
-	const id = (provided ?? "").trim() || crypto.randomUUID();
+	const id = (provided ?? "").trim() || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
@@ -41,7 +42,7 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 		idStep(cloudPayload.id_gasto),
 		// Los dos ids se generan ANTES de sus INSERT, nunca dentro del SQL: una `TEXT PRIMARY KEY`
 		// calculada en la sentencia se re-evaluaría al replicar (docs/arquitectura/sincronizacion.md).
-		{ kind: "value", saveAs: "mov", sql: "SELECT ?1;", args: [crypto.randomUUID()] },
+		{ kind: "value", saveAs: "mov", sql: "SELECT ?1;", args: [nuevoId()] },
 		{
 			kind: "execute",
 			sql: `
@@ -120,7 +121,7 @@ export function updateGasto(idGasto: string, input: UpdateGastoInput): BuiltComm
 
 export function deleteGasto(idGasto: string): BuiltCommand {
 	const steps = [
-		{ kind: "value", saveAs: "mov", sql: "SELECT ?1;", args: [crypto.randomUUID()] },
+		{ kind: "value", saveAs: "mov", sql: "SELECT ?1;", args: [nuevoId()] },
 		// El movimiento se anota ANTES del borrado: después la fila ya no está y el historial se
 		// quedaría con un importe de 0, que no dice nada de lo que se deshizo.
 		{

@@ -80,7 +80,7 @@ export async function getTareasAdmin(db: Client): Promise<TareaAdminRow[]> {
 			) AS Total_Finalizadas
 		FROM Tareas t
 		WHERE COALESCE(t.Estado, 'ABIERTA') = 'ABIERTA'
-		ORDER BY t.ID_Tarea DESC;
+		ORDER BY t.Fecha_Creacion DESC, t.ID_Tarea DESC;
 	`);
 	return rows(rs) as TareaAdminRow[];
 }
@@ -107,7 +107,7 @@ export async function getPapelera(db: Client): Promise<TareaAdminRow[]> {
 			) AS Total_Finalizadas
 		FROM Tareas t
 		WHERE COALESCE(t.Estado, 'ABIERTA') = 'ELIMINADA'
-		ORDER BY t.ID_Tarea DESC;
+		ORDER BY t.Fecha_Creacion DESC, t.ID_Tarea DESC;
 	`);
 	return rows(rs) as TareaAdminRow[];
 }

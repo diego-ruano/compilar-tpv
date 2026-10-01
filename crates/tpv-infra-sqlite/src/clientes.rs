@@ -114,7 +114,10 @@ impl ClientesRepository for SqliteClientesRepository {
             ClienteRanking::PorGasto => format!(
                 "{base}\nORDER BY Total_Gastado_Stored DESC, Total_Reservas DESC, c.ID_Cliente DESC\nLIMIT 10;"
             ),
-            ClienteRanking::Reciente => format!("{base}\nORDER BY c.ID_Cliente DESC;"),
+            // RI-59: «reciente» es la fecha de alta; la clave sólo desempata.
+            ClienteRanking::Reciente => {
+                format!("{base}\nORDER BY c.Created_At DESC, c.ID_Cliente DESC;")
+            }
         };
 
         let db = self.db.read().await;

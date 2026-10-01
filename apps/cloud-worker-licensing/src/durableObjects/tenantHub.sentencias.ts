@@ -12,7 +12,7 @@
 // normalizar valores que vienen de libsql y leer resultados.
 //
 // El mecanismo de `$ref` es lo que permite que un paso use el resultado de otro anterior (el
-// caso típico: un `crypto.randomUUID()` guardado con `saveAs` y referenciado por el INSERT
+// caso típico: un `nuevoId()` guardado con `saveAs` y referenciado por el INSERT
 // siguiente) manteniendo la sentencia **determinista**: la nube y la Main acaban con la misma
 // fila porque el id se resuelve una vez y viaja resuelto.
 

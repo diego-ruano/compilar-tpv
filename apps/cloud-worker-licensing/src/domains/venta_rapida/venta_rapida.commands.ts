@@ -1,5 +1,6 @@
 // src/domains/venta_rapida/venta_rapida.commands.ts
 
+import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type { CobroPlan, RestarStockPlan } from "./venta_rapida.queries";
 import type {
@@ -42,7 +43,7 @@ const UPDATE_TOTAL = `
 // Misma convención que el resto de dominios (ver `idStep` en clientes/inventario/…): una fila
 // tiene UN id, elegido por quien la crea, e idéntico en el dispositivo y en la nube.
 function idStep(saveAs: string, provided?: string) {
-	const id = (provided ?? "").trim() || crypto.randomUUID();
+	const id = (provided ?? "").trim() || nuevoId();
 	return { kind: "value", saveAs, sql: "SELECT ?1;", args: [id] };
 }
 
@@ -168,6 +169,8 @@ export function addLinea(
 	};
 }
 
+// RI-59: la última por clave (UUIDv7, `nuevoId`), pero antes una que cocina no haya preparado.
+// Espejo de `remove_last_unpaid_linea` en la Main.
 export function removeLastUnpaidLinea(input: RemoveLastLineaInput): BuiltCommand {
 	return {
 		commandName: "vr_remove_last_unpaid_linea",
@@ -185,7 +188,7 @@ export function removeLastUnpaidLinea(input: RemoveLastLineaInput): BuiltCommand
 								WHERE dc.ID_Comanda = ?1
 									AND dc.ID_Producto = ?2
 									AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-								ORDER BY dc.ID_Detalle DESC
+								ORDER BY (COALESCE(dc.Estado_Cocina,'PENDIENTE') = 'PREPARADO') ASC, dc.ID_Detalle DESC
 								LIMIT 1
 							);
 						`,
@@ -297,7 +300,7 @@ export function cobrarFraccionado(
 		kind: "value",
 		saveAs: "id_mov",
 		sql: "SELECT ?1;",
-		args: [crypto.randomUUID()],
+		args: [nuevoId()],
 	});
 	steps.push({
 		kind: "execute",
