@@ -135,6 +135,9 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   (`outbox_pending` es lo que aún puede subir), no se borra ni se reintenta, y avisa a dos sitios: a
   Sentry el diagnóstico (op, comando y error, nunca las sentencias), al usuario la consecuencia. Ver
   la reparación abajo.
+- El camino normal es el evento `outbox:pending`, que Rust emite al confirmar cada escritura. Además
+  hay un sondeo de seguridad, para los reintentos: cada 3 s mientras queda algo pendiente, y cada 30 s
+  con el outbox vacío (RI-33).
 
 ### Volcar el atraso (SYNC-18)
 
@@ -170,6 +173,9 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   los `change` en vivo hasta terminar.
 - Una operación remota que falla al aplicarse se reintenta 5 veces (`MAX_APPLY_ATTEMPTS`) y pasa a
   cuarentena de bajada (`_Sync_Failed`): se salta, avanza el checkpoint y se señala.
+- Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,
+  sentencias, checkpoint) y el escritor se suelta cada 50 (`CAMBIOS_POR_TURNO_DE_ESCRITOR`): una
+  página de catch-up de 500 no deja a un cobro esperando a que termine entera (RI-33).
 - La Handy no aplica nada: refresca las claves de React Query de las tablas tocadas.
 - **Freeze**: si no hay ninguna Main conectada al DO, las Handy reciben `main_offline` y bloquean su
   interfaz.

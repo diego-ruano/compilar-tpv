@@ -93,6 +93,10 @@ const CATCHUP_MAX_PAGES = 2000;
 // Rust al confirmar cada escritura local). Este poll solo cubre reintentos de ops que fallaron al
 // subir y el arranque; por eso puede ser holgado (no es el camino de latencia normal).
 const DRAIN_INTERVAL_MS = 3000;
+// RI-33: con el outbox vacío no hay reintento que valga, y mirar cada 3 s era un `invoke` y una
+// lectura de SQLite permanentes. Se mira cada 30 s; en cuanto queda algo pendiente (un fallo que
+// reintentar, o un `outbox:pending`), se vuelve a los 3 s.
+const SONDEO_OUTBOX_VACIO_MS = 30_000;
 
 type ChangeArg = { op_id: string; seq: number; statements: unknown[] };
 type OutboxEntry = {
@@ -193,6 +197,9 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 	// el tenant está roto) gira para siempre diciendo que espera conexión.
 	let recuperacionBloqueada = false;
 	let drainTimer: ReturnType<typeof setInterval> | null = null;
+	// RI-33: cuándo vio el drenado el outbox vacío por última vez (null: hay o puede haber algo).
+	// Con el outbox vacío el sondeo no tiene nada que reintentar; lo nuevo llega por el evento.
+	let outboxVacioDesde: number | null = null;
 	/**
 	 * Lo que contesta la nube a un `apply`, o lo que ponemos nosotros cuando no llega a contestar.
 	 *
@@ -460,7 +467,11 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 				const pending = (await invoke<OutboxEntry[]>("sync_outbox_pending", {
 					limit: OUTBOX_BATCH,
 				})) as OutboxEntry[];
-				if (!pending.length) break;
+				if (!pending.length) {
+					outboxVacioDesde = Date.now();
+					break;
+				}
+				outboxVacioDesde = null;
 				console.log(`[outbox] ${pending.length} op(s) pendientes`);
 
 				let progressed = false;
@@ -981,7 +992,14 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 				// el job `imagenes` (jobs/registro.rs); aquí se queda el intento del `hello_ok`,
 				// que es un evento útil ("acabamos de recuperar conectividad"), no un poll.
 				if (drainTimer) clearInterval(drainTimer);
+				outboxVacioDesde = null;
 				drainTimer = setInterval(() => {
+					if (
+						outboxVacioDesde !== null &&
+						Date.now() - outboxVacioDesde < SONDEO_OUTBOX_VACIO_MS
+					) {
+						return;
+					}
 					void drainOutbox(socket);
 				}, DRAIN_INTERVAL_MS);
 				return;
@@ -1092,6 +1110,9 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 	// escritura local. Drenamos al instante (sin esperar al poll de seguridad). `drainOutbox`
 	// ya es no-op si no hay socket abierto/autenticado o si ya hay un drenado en curso.
 	void listen("outbox:pending", () => {
+		// Aunque el drenado no arranque (ya hay uno en curso), el sondeo vuelve a su ritmo corto:
+		// esta operación pudo llegar justo después de que ese drenado viera el outbox vacío.
+		outboxVacioDesde = null;
 		if (!cancelled && ws) void drainOutbox(ws);
 	}).then((un) => {
 		if (cancelled) un();

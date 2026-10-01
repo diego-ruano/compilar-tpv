@@ -328,7 +328,9 @@ fn batch_kind(sql: &str) -> BatchKind {
 /// Persiste una operación (lista de sentencias resueltas) en `_Sync_Outbox` y la auto-marca en
 /// `_Sync_Applied_Ops` (anti-eco). Usa la conexión cruda (no recursivo).
 async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), LibsqlError> {
-    let op_id = uuid::Uuid::new_v4().to_string();
+    // RI-33: v7 y no v4, para que cada `Op_Id` nuevo entre al final de los índices de
+    // `_Sync_Outbox`, `_Sync_Applied_Ops` y `Applied_Operations` y no en un sitio cualquiera.
+    let op_id = uuid::Uuid::now_v7().to_string();
     let now = now_ms();
     let statements_json = serde_json::to_string(stmts).unwrap_or_else(|_| "[]".to_string());
 

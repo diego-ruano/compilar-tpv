@@ -864,6 +864,21 @@ describe("subida: de la Main a la nube", () => {
 		await asentar();
 		expect(s.applies()).toEqual(["op-2"]);
 	});
+
+	it("con el outbox vacío el sondeo mira cada 30 s, no cada 3 (RI-33)", async () => {
+		const b = crearBackend();
+		await montar();
+		const s = ultimo();
+		await conectar(s);
+		const consultas = () => b.llamadas.filter((l) => l.cmd === "sync_outbox_pending").length;
+
+		const antes = consultas();
+		await avanzar(27_000);
+		expect(consultas(), "nueve vueltas del temporizador sin preguntar").toBe(antes);
+		await avanzar(3_000);
+		expect(consultas()).toBe(antes + 1);
+		// Con algo pendiente vuelve a los 3 s: lo cubre «un rechazo transitorio para la cola…».
+	});
 });
 
 describe("recuperación de una BD restaurada", () => {
@@ -940,10 +955,11 @@ describe("un socket que ya no es el actual no toca nada", () => {
 		await s2.recibir({ type: "change", ...cambio(1) });
 		await asentar();
 		expect(b.aplicados, "lo que llega en vivo se sigue aplicando").toEqual([["rem-1"]]);
+		// Sin `outbox:pending`: sólo el sondeo la ve, y con el outbox vacío mira cada 30 s (RI-33).
 		b.outbox.push(op(9));
-		await avanzar(3_000);
+		await avanzar(30_000);
 		expect(s2.applies(), "la subida periódica sigue en marcha").toEqual(["op-9"]);
-		await avanzar(57_000);
+		await avanzar(30_000);
 		expect(s2.tipos().filter((t) => t === "ping"), "el latido sigue en marcha").toHaveLength(2);
 		expect(SocketFalso.creados, "no se abre ningún socket más").toHaveLength(2);
 	});

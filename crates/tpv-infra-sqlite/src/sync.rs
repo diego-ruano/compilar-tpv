@@ -280,7 +280,7 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
     }
 
     let n = sentencias.len() as i64;
-    let nuevo_op = uuid::Uuid::new_v4().to_string();
+    let nuevo_op = uuid::Uuid::now_v7().to_string();
     let ahora = now_ms();
     // Se anota de qué operación apartada viene: cuando esta reparación suba, aquélla deja de tener
     // sentido y se retira (ver `outbox_mark_sent`). Sin el enlace, el aviso de cuarentena no se
@@ -384,15 +384,45 @@ async fn clear_failure(conn: &Connection, op_id: &str) -> AppResult<()> {
     Ok(())
 }
 
-/// Aplica una operación de forma atómica: sus sentencias + el registro de idempotencia + el
-/// avance del checkpoint, todo dentro de una transacción. `defer_foreign_keys` evita fallos por
-/// orden dentro de la propia operación. Corre sobre la conexión CRUDA de escritura (sin captura).
-async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
+/// RI-33: cuántos cambios se aplican seguidos antes de soltar el escritor. Una página de catch-up
+/// son hasta 500, y con el escritor cogido para toda ella ningún cobro podía escribir: tras una
+/// tarde sin red, la reconexión congelaba la caja unos segundos. Soltarlo entre cambios es seguro
+/// porque cada uno es su propia transacción y avanza su propio checkpoint.
+const CAMBIOS_POR_TURNO_DE_ESCRITOR: usize = 50;
+
+/// Qué pasó con un cambio que no falló.
+enum Aplicacion {
+    /// Ya estaba aplicado (re-broadcast, eco de nuestras escrituras, cuarentena): sólo se avanzó
+    /// el checkpoint.
+    YaEstaba,
+    Aplicada,
+}
+
+/// Aplica un cambio en UNA transacción: la confirmación de subida, el gate de idempotencia, sus
+/// sentencias, el registro de idempotencia, el avance del checkpoint y la limpieza de un fallo
+/// anterior. Antes eran la transacción más cuatro sentencias sueltas en autocommit, cada una con su
+/// propio commit (RI-33). `defer_foreign_keys` evita fallos por orden dentro de la propia
+/// operación. Corre sobre la conexión CRUDA de escritura (sin captura).
+async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> {
     conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
         .await
         .map_err(db_err)?;
 
-    let res: AppResult<()> = async {
+    let res: AppResult<Aplicacion> = async {
+        // SYNC-18: que un cambio VUELVA de la nube es la prueba de que allí se aplicó. Si era una
+        // de las nuestras (encolada o simplemente sin ack), esta es su confirmación: se retira del
+        // outbox y deja de estar pendiente. Cubre de una vez el camino de la cola y cualquier
+        // `apply_ack` que se perdiera por el camino.
+        confirmar_subida(conn, &ch.op_id).await?;
+
+        // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up, eco de las
+        // propias escrituras de la Main o una op en cuarentena) se ignora, pero igualmente avanza
+        // el checkpoint.
+        if op_already_applied(conn, &ch.op_id).await? {
+            advance_checkpoint(conn, ch.seq).await?;
+            return Ok(Aplicacion::YaEstaba);
+        }
+
         for (i, st) in ch.statements.iter().enumerate() {
             let args: Vec<Value> = st.args.iter().map(json_to_value).collect();
             conn.execute(&st.sql, args).await.map_err(|e| {
@@ -432,13 +462,16 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
         .await
         .map_err(db_err)?;
 
-        Ok(())
+        // Éxito (posible recuperación de un fallo transitorio previo): limpia su marca.
+        clear_failure(conn, &ch.op_id).await?;
+
+        Ok(Aplicacion::Aplicada)
     }
     .await;
 
     match res {
-        Ok(()) => match conn.execute_batch("COMMIT;").await {
-            Ok(_) => Ok(()),
+        Ok(aplicacion) => match conn.execute_batch("COMMIT;").await {
+            Ok(_) => Ok(aplicacion),
             Err(e) => {
                 // Con `defer_foreign_keys`, las violaciones de FK saltan AQUÍ (en el COMMIT), no
                 // en la sentencia. Volcamos el op_id + sus sentencias para identificar qué fila
@@ -469,60 +502,55 @@ impl SyncRepository for SqliteSyncRepository {
         // re-broadcast, el eco de nuestras propias escrituras al volver por el catch-up, una op en
         // cuarentena) no cambió nada en esta BD, así que el frontend no tiene por qué reaccionar.
         let mut aplicadas: Vec<String> = Vec::new();
-        // Acceso EXCLUSIVO de escritura durante todo el lote: serializa con las transacciones de
-        // los repos (un único escritor). Conexión CRUDA → no se re-captura en el outbox.
-        let w = self.db.write().await;
-        let conn: &Connection = w.raw();
 
-        for ch in &changes {
-            // SYNC-18: que un cambio VUELVA de la nube es la prueba de que allí se aplicó. Si era
-            // una de las nuestras (encolada o simplemente sin ack), esta es su confirmación: se
-            // retira del outbox y deja de estar pendiente. Cubre de una vez el camino de la cola y
-            // cualquier `apply_ack` que se perdiera por el camino.
-            confirmar_subida(conn, &ch.op_id).await?;
+        'lote: for tramo in changes.chunks(CAMBIOS_POR_TURNO_DE_ESCRITOR) {
+            // Acceso EXCLUSIVO de escritura, pero por tramos (RI-33): serializa con las
+            // transacciones de los repos (un único escritor) y entre tramo y tramo deja pasar a
+            // quien espera, un cobro por ejemplo. Conexión CRUDA → no se re-captura en el outbox.
+            let w = self.db.write().await;
+            let conn: &Connection = w.raw();
 
-            // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up, eco de las
-            // propias escrituras de la Main o una op en cuarentena) se ignora, pero igualmente
-            // avanza el checkpoint.
-            if op_already_applied(conn, &ch.op_id).await? {
-                advance_checkpoint(conn, ch.seq).await?;
-                continue;
-            }
-            match apply_one(conn, ch).await {
-                Ok(()) => {
-                    // Éxito (posible recuperación de un fallo transitorio previo): limpia su marca.
-                    clear_failure(conn, &ch.op_id).await?;
-                    aplicadas.push(ch.op_id.clone());
-                }
-                Err(e) => {
-                    // SYNC-01: política de poison-message. Contamos el intento; agotados los
-                    // reintentos, ponemos la op en cuarentena (se salta + avanza checkpoint +
-                    // alerta) para NO bloquear el resto de la cola indefinidamente.
-                    let attempts = bump_failure(conn, ch, &e.to_string()).await?;
-                    if attempts >= MAX_APPLY_ATTEMPTS {
-                        quarantine(conn, ch).await?;
-                        tracing::error!(
-                            target: "tpv::sync",
-                            op_id = %ch.op_id,
-                            seq = ch.seq,
-                            attempts,
-                            error = %e,
-                            "op de sync en CUARENTENA tras agotar reintentos: se salta para no bloquear el pipeline"
-                        );
-                        // Cuarentenada: seguimos con el resto del lote.
-                    } else {
-                        // Aún dentro del margen: paramos el lote SIN avanzar el checkpoint, para
-                        // reintentar esta op (y las siguientes) en el próximo ciclo de catch-up.
-                        tracing::warn!(
-                            target: "tpv::sync",
-                            op_id = %ch.op_id,
-                            seq = ch.seq,
-                            attempts,
-                            error = %e,
-                            "fallo aplicando op de sync; se reintentará en el próximo ciclo"
-                        );
-                        break;
+            for ch in tramo {
+                let e = match apply_one(conn, ch).await {
+                    Ok(Aplicacion::Aplicada) => {
+                        aplicadas.push(ch.op_id.clone());
+                        continue;
                     }
+                    Ok(Aplicacion::YaEstaba) => continue,
+                    Err(e) => e,
+                };
+
+                // El ROLLBACK se llevó también la confirmación de subida, y esa no depende de
+                // que aquí se pueda aplicar: el cambio ha vuelto de la nube, así que allí está.
+                confirmar_subida(conn, &ch.op_id).await?;
+
+                // SYNC-01: política de poison-message. Contamos el intento; agotados los
+                // reintentos, ponemos la op en cuarentena (se salta + avanza checkpoint +
+                // alerta) para NO bloquear el resto de la cola indefinidamente.
+                let attempts = bump_failure(conn, ch, &e.to_string()).await?;
+                if attempts >= MAX_APPLY_ATTEMPTS {
+                    quarantine(conn, ch).await?;
+                    tracing::error!(
+                        target: "tpv::sync",
+                        op_id = %ch.op_id,
+                        seq = ch.seq,
+                        attempts,
+                        error = %e,
+                        "op de sync en CUARENTENA tras agotar reintentos: se salta para no bloquear el pipeline"
+                    );
+                    // Cuarentenada: seguimos con el resto del lote.
+                } else {
+                    // Aún dentro del margen: paramos el lote SIN avanzar el checkpoint, para
+                    // reintentar esta op (y las siguientes) en el próximo ciclo de catch-up.
+                    tracing::warn!(
+                        target: "tpv::sync",
+                        op_id = %ch.op_id,
+                        seq = ch.seq,
+                        attempts,
+                        error = %e,
+                        "fallo aplicando op de sync; se reintentará en el próximo ciclo"
+                    );
+                    break 'lote;
                 }
             }
         }
@@ -530,6 +558,8 @@ impl SyncRepository for SqliteSyncRepository {
         // Cada vez que el checkpoint avanza (por catch-up o por cambios en vivo) intentamos retirar
         // los registros de idempotencia ya superados. Coste despreciable (DELETE indexado) y solo
         // borra filas seguras.
+        let w = self.db.write().await;
+        let conn: &Connection = w.raw();
         let last_seq = checkpoint(conn).await?;
         purge_by_cursor(conn, last_seq).await?;
         Ok(AplicacionSync {
@@ -1683,6 +1713,46 @@ mod tests_aplicadas {
             .unwrap();
 
         assert_eq!(r.aplicadas, vec!["op-2".to_string()]);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // RI-33: el escritor se suelta cada `CAMBIOS_POR_TURNO_DE_ESCRITOR` cambios. Un lote que cruza
+    // varios tramos se aplica entero y en orden, y un fallo en un tramo posterior para ahí sin
+    // perder lo que ya entró.
+    #[tokio::test]
+    async fn un_lote_que_cruza_tramos_se_aplica_entero() {
+        let (repo, _db, dir) = repo_temporal().await;
+        let n = CAMBIOS_POR_TURNO_DE_ESCRITOR as i64 * 2 + 20;
+        let lote: Vec<SyncChange> = (1..=n).map(|s| cambio(&format!("op-{s}"), s)).collect();
+
+        let r = repo.apply_changes(lote).await.unwrap();
+
+        assert_eq!(r.aplicadas.len() as i64, n);
+        assert_eq!(r.aplicadas.last().unwrap(), &format!("op-{n}"));
+        assert_eq!(r.last_seq, n);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn un_fallo_en_un_tramo_posterior_para_el_lote_ahi() {
+        let (repo, _db, dir) = repo_temporal().await;
+        let rota = CAMBIOS_POR_TURNO_DE_ESCRITOR as i64 + 10;
+        let lote: Vec<SyncChange> = (1..=rota + 5)
+            .map(|s| {
+                let mut c = cambio(&format!("op-{s}"), s);
+                if s == rota {
+                    c.statements[0].sql = "UPDATE Tabla_Que_No_Existe SET x = 1;".into();
+                }
+                c
+            })
+            .collect();
+
+        let r = repo.apply_changes(lote).await.unwrap();
+
+        assert_eq!(r.aplicadas.len() as i64, rota - 1, "entra todo lo anterior");
+        assert_eq!(r.last_seq, rota - 1, "el checkpoint se queda delante de la rota");
 
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -2918,7 +2988,7 @@ impl SqliteSyncRepository {
             }
             if !sentencias.is_empty() {
                 reparadas = sentencias.len() as i64;
-                let op = uuid::Uuid::new_v4().to_string();
+                let op = uuid::Uuid::now_v7().to_string();
                 let ahora = now_ms();
                 conn.execute(
                     "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
@@ -3482,7 +3552,7 @@ fn fila_de(
 /// fabrican PARA replicarse, no son escrituras de negocio que haya que capturar, y no se aplican en
 /// local (aquí la base ya está bien; la que está mal es la copia de la nube).
 async fn encolar_op_de_reparacion(conn: &Connection, sentencias: &[SqlStatement]) -> AppResult<()> {
-    let op = uuid::Uuid::new_v4().to_string();
+    let op = uuid::Uuid::now_v7().to_string();
     let ahora = now_ms();
     conn.execute(
         "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
