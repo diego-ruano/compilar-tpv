@@ -3415,9 +3415,12 @@ impl VerifactuRepository for SqliteVerifactuRepository {
                 nif_emisor: v_string(g(2)?).unwrap_or_default(),
                 num_serie_factura: v_string(g(3)?).unwrap_or_default(),
                 fecha_expedicion: v_string(g(4)?).unwrap_or_default(),
-                // Va la última en el SELECT (índice 26) aunque su columna esté al principio de la
-                // tabla: añadirla en medio desplazaría los veintiséis índices siguientes de golpe.
-                fecha_operacion: v_string(g(26)?),
+                // Va la última en el SELECT (índice 27) aunque su columna esté al principio de la
+                // tabla: añadirla en medio desplazaría los índices siguientes de golpe.
+                //
+                // RI-88: se leía la 26, que es `Sin_Registro_Previo`, y `FechaOperacion` no llegaba
+                // nunca a la AEAT. Lo vigila `tests_cola_de_envio`.
+                fecha_operacion: v_string(g(27)?),
                 nombre_razon_emisor: v_string(g(5)?).unwrap_or_default(),
                 tipo_factura: v_string(g(6)?),
                 tipo_rectificativa: v_string(g(7)?),
@@ -3574,5 +3577,73 @@ impl VerifactuRepository for SqliteVerifactuRepository {
             Err(e) if e.code() == ErrorCode::DatosFiscalesIncompletos => Ok(None),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_cola_de_envio {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! Lo que `pendientes()` lee de la fila es lo que sale en el XML. Sus columnas se leen por
+    //! posición, así que cada campo que no entra en la huella necesita un test que lo vea salir:
+    //! si se cruzan, la AEAT no lo rechaza y nadie se entera (RI-88).
+
+    use super::*;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("verifactu_cola");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    /// Un registro pendiente con su `Fecha_Operacion` y su `Sin_Registro_Previo`.
+    async fn pendiente(db: &Arc<Db>, fecha_operacion: Option<&str>, sin_registro_previo: Option<&str>) {
+        let g = db.write().await;
+        g.raw()
+            .execute(
+                "INSERT INTO Registros_Facturacion (ID_Registro, Orden, Tipo, NIF_Emisor, \
+                   Num_Serie_Factura, Fecha_Expedicion, Fecha_Operacion, Serie, Numero, \
+                   Nombre_Razon_Emisor, Cadena_Huella, Huella, Fecha_Hora_Huso, \
+                   Sin_Registro_Previo, Sistema_Json, QR_Url) \
+                 VALUES ('r1', 1, 'ALTA', 'B12345674', '2027/000001', '16-01-2027', ?1, '2027', 1, \
+                         'Bar', 'c', 'h', '2027-01-16T01:34:56+01:00', ?2, '{}', 'u');",
+                vec![
+                    fecha_operacion.map(|v| Value::Text(v.into())).unwrap_or(Value::Null),
+                    sin_registro_previo.map(|v| Value::Text(v.into())).unwrap_or(Value::Null),
+                ],
+            )
+            .await
+            .unwrap();
+        g.raw()
+            .execute(
+                "INSERT INTO _Verifactu_Envios (ID_Registro, Estado, Creado_En_Ms) \
+                 VALUES ('r1', 'PENDIENTE', 1);",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn la_FECHA_DE_OPERACION_guardada_es_la_que_sale_hacia_la_AEAT() {
+        // La cena que cruza la medianoche: abierta el 15, cobrada el 16.
+        let (db, _dir) = db_temporal().await;
+        pendiente(&db, Some("15-01-2027"), None).await;
+
+        let lote = SqliteVerifactuRepository::new(db).pendientes(10).await.unwrap();
+        assert_eq!(lote.len(), 1);
+        assert_eq!(lote[0].fecha_operacion.as_deref(), Some("15-01-2027"));
+        assert_eq!(lote[0].sin_registro_previo, None);
+    }
+
+    #[tokio::test]
+    async fn SIN_REGISTRO_PREVIO_no_se_cuela_como_fecha_de_operacion() {
+        let (db, _dir) = db_temporal().await;
+        pendiente(&db, None, Some("S")).await;
+
+        let lote = SqliteVerifactuRepository::new(db).pendientes(10).await.unwrap();
+        assert_eq!(lote[0].fecha_operacion, None);
+        assert_eq!(lote[0].sin_registro_previo.as_deref(), Some("S"));
     }
 }
