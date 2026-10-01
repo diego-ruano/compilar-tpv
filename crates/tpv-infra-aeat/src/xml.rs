@@ -339,55 +339,120 @@ fn campo_o(v: &serde_json::Value, k: &str, por_defecto: &str) -> String {
 // Lectura de la respuesta
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Extrae el contenido del **primer** elemento con ese nombre local, ignorando el prefijo.
+/// Un elemento de la respuesta, ya leído: su nombre local, su texto y sus hijos.
 ///
-/// Se busca por nombre local y no por `prefijo:nombre` porque el prefijo lo elige el servidor y no
+/// Se guarda el nombre **local** y no `prefijo:nombre` porque el prefijo lo elige el servidor y no
 /// forma parte del contrato: la misma respuesta puede llegar como `sfR:EstadoEnvio` o
 /// `ns2:EstadoEnvio` sin dejar de ser válida. Un parser que se ate al prefijo funciona hasta el día
 /// que la AEAT cambia su serializador.
-fn extraer(xml: &str, nombre_local: &str) -> Option<String> {
-    let (ini, fin) = rango_de(xml, nombre_local, 0)?;
-    Some(descodificar(&xml[ini..fin]))
+///
+/// RI-35: antes la respuesta se leía buscando cadenas `nombre>`, y eso no entendía una etiqueta con
+/// atributos (`<ns:EstadoEnvio xmlns:ns="…">` no se encontraba), ni `CDATA`, ni las referencias
+/// numéricas (`&#241;` llegaba tal cual a `DescripcionErrorRegistro`), y casaba por sufijo
+/// (`<x:OtroCSV>` valía por `CSV`). Ahora lo lee `quick-xml`, y cada campo se busca donde lo pone
+/// `RespuestaSuministro.xsd`, no en cualquier punto del documento.
+#[derive(Debug, Default)]
+struct Nodo {
+    nombre: String,
+    texto: String,
+    hijos: Vec<Nodo>,
 }
 
-/// El rango `(inicio_contenido, fin_contenido)` del primer `<…:nombre>` a partir de `desde`.
-fn rango_de(xml: &str, nombre_local: &str, desde: usize) -> Option<(usize, usize)> {
-    let apertura = format!("{nombre_local}>");
-    let mut i = desde;
-    loop {
-        let rel = xml.get(i..)?.find(&apertura)?;
-        let pos = i + rel;
-        // La etiqueta tiene que empezar en un `<` con, como mucho, un prefijo y dos puntos.
-        let inicio_tag = xml[..pos].rfind('<')?;
-        let entre = &xml[inicio_tag + 1..pos];
-        let es_apertura = !entre.contains('/') && !entre.contains(' ') && entre.matches(':').count() <= 1;
-        if es_apertura {
-            let ini = pos + apertura.len();
-            let cierre = format!("{nombre_local}>");
-            // El cierre es `</…:nombre>`: se busca el siguiente y se comprueba que sea de cierre.
-            let mut j = ini;
-            loop {
-                let rel2 = xml.get(j..)?.find(&cierre)?;
-                let p2 = j + rel2;
-                let tag2 = xml[..p2].rfind('<')?;
-                if xml[tag2 + 1..p2].starts_with('/') || xml[tag2 + 1..p2].contains("/") {
-                    return Some((ini, tag2));
-                }
-                j = p2 + cierre.len();
+impl Nodo {
+    fn nuevo(nombre: &[u8]) -> Self {
+        Nodo {
+            nombre: String::from_utf8_lossy(nombre).into_owned(),
+            ..Nodo::default()
+        }
+    }
+
+    /// El hijo directo con ese nombre.
+    fn hijo(&self, nombre: &str) -> Option<&Nodo> {
+        self.hijos.iter().find(|h| h.nombre == nombre)
+    }
+
+    /// El texto, sin blancos en los extremos, del hijo directo con ese nombre.
+    fn texto_de(&self, nombre: &str) -> Option<String> {
+        self.hijo(nombre).map(|h| h.texto.trim().to_string())
+    }
+
+    /// El primer descendiente con ese nombre, en orden de documento.
+    fn buscar(&self, nombre: &str) -> Option<&Nodo> {
+        self.hijos
+            .iter()
+            .find_map(|h| if h.nombre == nombre { Some(h) } else { h.buscar(nombre) })
+    }
+
+    /// Todos los descendientes con ese nombre, en orden de documento. No entra dentro de uno que
+    /// ya casa: una `RespuestaLinea` no contiene otra.
+    fn todos<'a>(&'a self, nombre: &str, out: &mut Vec<&'a Nodo>) {
+        for h in &self.hijos {
+            if h.nombre == nombre {
+                out.push(h);
+            } else {
+                h.todos(nombre, out);
             }
         }
-        i = pos + apertura.len();
     }
 }
 
-fn descodificar(s: &str) -> String {
-    s.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&amp;", "&")
-        .trim()
-        .to_string()
+/// Lee el documento entero a un árbol de [`Nodo`].
+///
+/// Un XML mal formado es un error con su motivo, no una respuesta vacía: así el job falla diciendo
+/// por qué, en vez de reintentar el lote sin explicación.
+fn parsear(xml: &str) -> Result<Nodo, String> {
+    use quick_xml::events::Event;
+
+    let mut reader = quick_xml::Reader::from_str(xml);
+    let ilegible = |e: &dyn std::fmt::Display| format!("La respuesta de la AEAT no es un XML legible: {e}");
+
+    // La raíz es un nodo sin nombre que hace de documento.
+    let mut pila = vec![Nodo::default()];
+    loop {
+        match reader.read_event().map_err(|e| ilegible(&e))? {
+            Event::Start(e) => pila.push(Nodo::nuevo(e.local_name().as_ref())),
+            Event::Empty(e) => {
+                let n = Nodo::nuevo(e.local_name().as_ref());
+                pila.last_mut().expect("la raíz no se saca nunca").hijos.push(n);
+            }
+            Event::End(_) => {
+                // `check_end_names` está activo por defecto: un cierre que no corresponde ya es un
+                // error de `read_event`. Aquí sólo queda que haya algo abierto que cerrar.
+                if pila.len() < 2 {
+                    return Err(ilegible(&"cierre sin apertura"));
+                }
+                let n = pila.pop().expect("hay al menos dos");
+                pila.last_mut().expect("hay al menos uno").hijos.push(n);
+            }
+            Event::Text(t) => {
+                let t = t.xml10_content().map_err(|e| ilegible(&e))?;
+                pila.last_mut().expect("la raíz no se saca nunca").texto.push_str(&t);
+            }
+            Event::CData(c) => {
+                let c = c.decode().map_err(|e| ilegible(&e))?;
+                pila.last_mut().expect("la raíz no se saca nunca").texto.push_str(&c);
+            }
+            // `&amp;`, `&#241;`… llegan como un evento aparte del texto que las rodea.
+            Event::GeneralRef(r) => {
+                let c = match r.resolve_char_ref().map_err(|e| ilegible(&e))? {
+                    Some(c) => c.to_string(),
+                    None => {
+                        let nombre = r.decode().map_err(|e| ilegible(&e))?;
+                        quick_xml::escape::resolve_predefined_entity(&nombre)
+                            .ok_or_else(|| ilegible(&format!("entidad desconocida &{nombre};")))?
+                            .to_string()
+                    }
+                };
+                pila.last_mut().expect("la raíz no se saca nunca").texto.push_str(&c);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if pila.len() != 1 {
+        return Err(ilegible(&"el documento termina con elementos sin cerrar"));
+    }
+    Ok(pila.pop().expect("comprobado arriba"))
 }
 
 /// Lee la respuesta del servicio.
@@ -396,18 +461,27 @@ fn descodificar(s: &str) -> String {
 /// bien formado o que la cabecera no pasó, y en los dos casos **el envío completo se rechazó** — no
 /// hay líneas que clasificar.
 pub fn leer_respuesta(xml: &str) -> Result<RespuestaRemision, String> {
-    if let Some(fs) = extraer(xml, "faultstring") {
+    let doc = parsear(xml)?;
+
+    if let Some(fault) = doc.buscar("Fault") {
+        let fs = fault
+            .buscar("faultstring")
+            .map(|n| n.texto.trim().to_string())
+            .unwrap_or_else(|| "sin descripción".to_string());
         return Err(format!("SOAP Fault: {fs}"));
     }
 
-    let estado_envio = extraer(xml, "EstadoEnvio").unwrap_or_else(|| "Incorrecto".to_string());
-    let csv = extraer(xml, "CSV").filter(|s| !s.is_empty());
-    let tiempo_espera_envio = extraer(xml, "TiempoEsperaEnvio").and_then(|s| s.trim().parse().ok());
+    // Los tres van en `RespuestaRegFactuSistemaFacturacion`, fuera de las líneas, y ninguna línea
+    // trae elementos con esos nombres: el primero que aparece es el del envío.
+    let campo = |nombre: &str| doc.buscar(nombre).map(|n| n.texto.trim().to_string());
+    let estado_envio = campo("EstadoEnvio").unwrap_or_else(|| "Incorrecto".to_string());
+    let csv = campo("CSV").filter(|s| !s.is_empty());
+    let tiempo_espera_envio = campo("TiempoEsperaEnvio").and_then(|s| s.parse().ok());
 
     // Cada `RespuestaLinea` es un registro del envío. Se recorren en orden, que es el mismo en el
-    // que se mandaron, pero se casan por `NumSerieFactura` y no por posición: si la AEAT omitiera
-    // una línea, casar por índice desplazaría todos los estados una posición y marcaría como
-    // aceptado un registro rechazado.
+    // que se mandaron, pero se casan por número y no por posición: si la AEAT omitiera una línea,
+    // casar por índice desplazaría todos los estados una posición y marcaría como aceptado un
+    // registro rechazado.
     //
     // ⚠️ Y el número **no basta**: una anulación lleva el mismo que su alta. Lo que las separa es
     // `Operacion/TipoOperacion` (`Alta` | `Anulacion`): en la respuesta el `IDFactura` es siempre
@@ -421,25 +495,36 @@ pub fn leer_respuesta(xml: &str) -> Result<RespuestaRemision, String> {
     // Una línea sin `TipoOperacion` (el XSD lo exige) no se puede atribuir: se descarta, que para
     // `remitir_ciclo` es «la AEAT no dijo nada de este registro» y lo deja PENDIENTE. Suponerla un
     // alta podría anotar en el alta el resultado de su anulación.
-    let mut lineas = Vec::new();
-    let mut desde = 0usize;
-    while let Some((ini, fin)) = rango_de(xml, "RespuestaLinea", desde) {
-        let bloque = &xml[ini..fin];
-        desde = fin;
-        let anulacion = match extraer(bloque, "TipoOperacion").as_deref() {
-            Some("Alta") => false,
-            Some("Anulacion") => true,
-            _ => continue,
-        };
-        lineas.push(LineaRespuesta {
-            anulacion,
-            num_serie_factura: extraer(bloque, "NumSerieFactura").unwrap_or_default(),
-            estado: extraer(bloque, "EstadoRegistro").unwrap_or_default(),
-            codigo_error: extraer(bloque, "CodigoErrorRegistro").and_then(|s| s.trim().parse().ok()),
-            descripcion_error: extraer(bloque, "DescripcionErrorRegistro").filter(|s| !s.is_empty()),
-            estado_duplicado: extraer(bloque, "EstadoRegistroDuplicado").filter(|s| !s.is_empty()),
-        });
-    }
+    //
+    // Los campos se leen como hijos directos de la línea: `RegistroDuplicado` trae su propio
+    // `CodigoErrorRegistro` y `DescripcionErrorRegistro`, y esos son los del registro que ya había
+    // en la AEAT, no los de esta línea.
+    let mut nodos = Vec::new();
+    doc.todos("RespuestaLinea", &mut nodos);
+    let lineas = nodos
+        .into_iter()
+        .filter_map(|l| {
+            let anulacion = match l.hijo("Operacion")?.texto_de("TipoOperacion")?.as_str() {
+                "Alta" => false,
+                "Anulacion" => true,
+                _ => return None,
+            };
+            Some(LineaRespuesta {
+                anulacion,
+                num_serie_factura: l
+                    .hijo("IDFactura")
+                    .and_then(|i| i.texto_de("NumSerieFactura"))
+                    .unwrap_or_default(),
+                estado: l.texto_de("EstadoRegistro").unwrap_or_default(),
+                codigo_error: l.texto_de("CodigoErrorRegistro").and_then(|s| s.parse().ok()),
+                descripcion_error: l.texto_de("DescripcionErrorRegistro").filter(|s| !s.is_empty()),
+                estado_duplicado: l
+                    .hijo("RegistroDuplicado")
+                    .and_then(|d| d.texto_de("EstadoRegistroDuplicado"))
+                    .filter(|s| !s.is_empty()),
+            })
+        })
+        .collect();
 
     Ok(RespuestaRemision {
         estado_envio,
@@ -899,5 +984,89 @@ mod tests {
         let b = leer_respuesta(&RESPUESTA_OK.replace("sfR:", "ns2:")).unwrap();
         assert_eq!(a.estado_envio, b.estado_envio);
         assert_eq!(a.lineas.len(), b.lineas.len());
+    }
+
+    // ── RI-35: lo que un escáner de cadenas no entendía ──
+
+    #[test]
+    fn una_etiqueta_con_ATRIBUTOS_se_lee_igual() {
+        // Un serializador que declare el espacio de nombres en cada elemento es igual de válido.
+        // Con el escáner, `EstadoEnvio>` no aparecía y el envío se leía como «Incorrecto» sin líneas.
+        let xml = r#"<r:Resp xmlns:r="y">
+          <r:EstadoEnvio xmlns:r="y">Correcto</r:EstadoEnvio>
+          <r:RespuestaLinea xmlns:r="y">
+            <s:IDFactura xmlns:s="z"><s:NumSerieFactura>2027/000001</s:NumSerieFactura></s:IDFactura>
+            <s:Operacion xmlns:s="z"><s:TipoOperacion>Alta</s:TipoOperacion></s:Operacion>
+            <r:EstadoRegistro>Correcto</r:EstadoRegistro>
+          </r:RespuestaLinea>
+        </r:Resp>"#;
+        let r = leer_respuesta(xml).unwrap();
+        assert_eq!(r.estado_envio, "Correcto");
+        assert_eq!(r.lineas.len(), 1);
+        assert_eq!(r.lineas[0].num_serie_factura, "2027/000001");
+    }
+
+    #[test]
+    fn el_texto_se_descodifica_entero_con_CDATA_y_referencias_numericas() {
+        let xml = r#"<r:Resp xmlns:r="y">
+          <r:EstadoEnvio>Incorrecto</r:EstadoEnvio>
+          <r:RespuestaLinea>
+            <s:IDFactura><s:NumSerieFactura>A&amp;B/1</s:NumSerieFactura></s:IDFactura>
+            <s:Operacion><s:TipoOperacion>Alta</s:TipoOperacion></s:Operacion>
+            <r:EstadoRegistro>Incorrecto</r:EstadoRegistro>
+            <r:CodigoErrorRegistro>1100</r:CodigoErrorRegistro>
+            <r:DescripcionErrorRegistro>A&#241;o <![CDATA[<incorrecto>]]> &#x2014; ver</r:DescripcionErrorRegistro>
+          </r:RespuestaLinea>
+        </r:Resp>"#;
+        let l = &leer_respuesta(xml).unwrap().lineas[0];
+        assert_eq!(l.num_serie_factura, "A&B/1");
+        assert_eq!(l.descripcion_error.as_deref(), Some("Año <incorrecto> — ver"));
+    }
+
+    #[test]
+    fn un_nombre_que_ACABA_igual_no_es_el_campo() {
+        // El escáner buscaba `CSV>` y casaba con `<x:OtroCSV>`.
+        let xml = r#"<r:Resp xmlns:r="y">
+          <r:OtroCSV>NO</r:OtroCSV>
+          <r:EstadoEnvio>Correcto</r:EstadoEnvio>
+        </r:Resp>"#;
+        assert_eq!(leer_respuesta(xml).unwrap().csv, None);
+    }
+
+    #[test]
+    fn el_codigo_de_la_linea_no_se_toma_del_REGISTRO_DUPLICADO() {
+        // `RegistroDuplicado` trae su propio código y descripción, los del registro que ya estaba
+        // en la AEAT. Aquí la línea no trae los suyos y no se le pueden atribuir aquellos.
+        let xml = r#"<r:Resp xmlns:r="y">
+          <r:EstadoEnvio>Incorrecto</r:EstadoEnvio>
+          <r:RespuestaLinea>
+            <s:IDFactura><s:NumSerieFactura>2027/000001</s:NumSerieFactura></s:IDFactura>
+            <s:Operacion><s:TipoOperacion>Alta</s:TipoOperacion></s:Operacion>
+            <r:EstadoRegistro>Incorrecto</r:EstadoRegistro>
+            <r:RegistroDuplicado>
+              <s:EstadoRegistroDuplicado>AceptadaConErrores</s:EstadoRegistroDuplicado>
+              <s:CodigoErrorRegistro>2000</s:CodigoErrorRegistro>
+              <s:DescripcionErrorRegistro>La del registro que ya estaba</s:DescripcionErrorRegistro>
+            </r:RegistroDuplicado>
+          </r:RespuestaLinea>
+        </r:Resp>"#;
+        let l = &leer_respuesta(xml).unwrap().lineas[0];
+        assert_eq!(l.codigo_error, None);
+        assert_eq!(l.descripcion_error, None);
+        assert_eq!(l.estado_duplicado.as_deref(), Some("AceptadaConErrores"));
+    }
+
+    #[test]
+    fn un_XML_mal_formado_es_un_error_que_dice_por_que() {
+        // Antes se leía como un envío «Incorrecto» sin líneas: todo el lote seguía PENDIENTE y el
+        // job reintentaba sin decir nada. Ahora el error llega al panel del job.
+        for roto in [
+            r#"<r:Resp><r:EstadoEnvio>Correcto</r:Otro></r:Resp>"#,
+            r#"<r:Resp><r:EstadoEnvio>Correcto</r:EstadoEnvio>"#,
+            r#"<html><body>502 Bad Gateway<br></body></html>"#,
+        ] {
+            let e = leer_respuesta(roto).unwrap_err();
+            assert!(e.contains("no es un XML legible"), "{roto} → {e}");
+        }
     }
 }

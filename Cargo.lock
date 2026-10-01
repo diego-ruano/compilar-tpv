@@ -5957,6 +5957,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "libsql",
+ "quick-xml",
  "serde",
  "serde_json",
  "tokio",
