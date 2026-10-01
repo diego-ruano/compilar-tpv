@@ -409,29 +409,36 @@ pub fn leer_respuesta(xml: &str) -> Result<RespuestaRemision, String> {
     // una línea, casar por índice desplazaría todos los estados una posición y marcaría como
     // aceptado un registro rechazado.
     //
-    // ⚠️ Y el número **no basta**: una anulación lleva el mismo que su alta. Lo que las separa es la
-    // FORMA del `IDFactura` que devuelve la AEAT — `NumSerieFacturaAnulada` en la anulación,
-    // `NumSerieFactura` en el alta —, así que se conserva cuál de las dos era. Aquí es el único
-    // sitio donde ese dato existe; más arriba ya sólo hay un booleano.
+    // ⚠️ Y el número **no basta**: una anulación lleva el mismo que su alta. Lo que las separa es
+    // `Operacion/TipoOperacion` (`Alta` | `Anulacion`): en la respuesta el `IDFactura` es siempre
+    // `IDFacturaExpedidaType`, con `NumSerieFactura` también en una anulación
+    // (`RespuestaExpedidaType` en `esquemas/RespuestaSuministro.xsd`). Aquí es el único sitio donde
+    // ese dato existe; más arriba ya sólo hay un booleano.
     //
-    // Ojo al buscar: `rango_de` busca la cadena `"NumSerieFactura>"`, que NO aparece dentro de
-    // `<…:NumSerieFacturaAnulada>` (ahí detrás de `Factura` viene una `A`, no un `>`). Por eso el
-    // primer `extraer` devuelve `None` en una anulación y el `or_else` es lo que decide.
+    // RI-89: se distinguía por un `NumSerieFacturaAnulada` que la respuesta no trae, así que toda
+    // línea salía como alta y ninguna anulación casaba: se quedaban PENDIENTE para siempre.
+    //
+    // Una línea sin `TipoOperacion` (el XSD lo exige) no se puede atribuir: se descarta, que para
+    // `remitir_ciclo` es «la AEAT no dijo nada de este registro» y lo deja PENDIENTE. Suponerla un
+    // alta podría anotar en el alta el resultado de su anulación.
     let mut lineas = Vec::new();
     let mut desde = 0usize;
     while let Some((ini, fin)) = rango_de(xml, "RespuestaLinea", desde) {
         let bloque = &xml[ini..fin];
-        let alta = extraer(bloque, "NumSerieFactura");
-        let anulada = extraer(bloque, "NumSerieFacturaAnulada");
+        desde = fin;
+        let anulacion = match extraer(bloque, "TipoOperacion").as_deref() {
+            Some("Alta") => false,
+            Some("Anulacion") => true,
+            _ => continue,
+        };
         lineas.push(LineaRespuesta {
-            anulacion: alta.is_none() && anulada.is_some(),
-            num_serie_factura: alta.or(anulada).unwrap_or_default(),
+            anulacion,
+            num_serie_factura: extraer(bloque, "NumSerieFactura").unwrap_or_default(),
             estado: extraer(bloque, "EstadoRegistro").unwrap_or_default(),
             codigo_error: extraer(bloque, "CodigoErrorRegistro").and_then(|s| s.trim().parse().ok()),
             descripcion_error: extraer(bloque, "DescripcionErrorRegistro").filter(|s| !s.is_empty()),
             estado_duplicado: extraer(bloque, "EstadoRegistroDuplicado").filter(|s| !s.is_empty()),
         });
-        desde = fin;
     }
 
     Ok(RespuestaRemision {
@@ -745,6 +752,7 @@ mod tests {
    <sfR:EstadoEnvio>Correcto</sfR:EstadoEnvio>
    <sfR:RespuestaLinea>
      <sf:IDFactura><sf:NumSerieFactura>2027/000001</sf:NumSerieFactura></sf:IDFactura>
+     <sf:Operacion><sf:TipoOperacion>Alta</sf:TipoOperacion></sf:Operacion>
      <sfR:EstadoRegistro>Correcto</sfR:EstadoRegistro>
    </sfR:RespuestaLinea>
   </sfR:RespuestaRegFactuSistemaFacturacion>
@@ -769,10 +777,12 @@ mod tests {
           <r:EstadoEnvio>ParcialmenteCorrecto</r:EstadoEnvio>
           <r:RespuestaLinea>
             <s:IDFactura><s:NumSerieFactura>2027/000001</s:NumSerieFactura></s:IDFactura>
+            <s:Operacion><s:TipoOperacion>Alta</s:TipoOperacion></s:Operacion>
             <r:EstadoRegistro>Correcto</r:EstadoRegistro>
           </r:RespuestaLinea>
           <r:RespuestaLinea>
             <s:IDFactura><s:NumSerieFactura>2027/000002</s:NumSerieFactura></s:IDFactura>
+            <s:Operacion><s:TipoOperacion>Alta</s:TipoOperacion></s:Operacion>
             <r:EstadoRegistro>AceptadoConErrores</r:EstadoRegistro>
             <r:CodigoErrorRegistro>2000</r:CodigoErrorRegistro>
             <r:DescripcionErrorRegistro>El calculo de la huella suministrada es incorrecta.</r:DescripcionErrorRegistro>
@@ -791,21 +801,25 @@ mod tests {
     #[test]
     fn distingue_el_alta_de_su_ANULACION_aunque_lleven_el_MISMO_numero() {
         // El `IDFactura` de una anulación es el de la factura que anula, así que las dos líneas
-        // traen `2027/000001`. Lo único que las separa es la FORMA: `NumSerieFacturaAnulada` en la
-        // anulación. Aquí es el único sitio del programa donde ese dato existe — si se pierde,
-        // `remitir_ciclo` casa las dos con la misma línea y anota un rechazo como aceptado.
+        // traen `2027/000001`, y las dos con `NumSerieFactura`: la respuesta usa
+        // `IDFacturaExpedidaType` para todas (`RespuestaExpedidaType` en RespuestaSuministro.xsd).
+        // Lo único que las separa es `Operacion/TipoOperacion`. Aquí es el único sitio del
+        // programa donde ese dato existe — si se pierde, `remitir_ciclo` no casa nunca la anulación
+        // (RI-89) o la casa con la línea del alta.
         //
         // Y va con la anulación PRIMERO a propósito: si el parser mirase sólo por posición o
         // devolviese siempre el primer número que encuentra, este orden lo delataría.
         let xml = r#"<env:Envelope xmlns:env="x"><env:Body><r:Resp xmlns:r="y">
           <r:EstadoEnvio>ParcialmenteCorrecto</r:EstadoEnvio>
           <r:RespuestaLinea>
-            <s:IDFactura><s:NumSerieFacturaAnulada>2027/000001</s:NumSerieFacturaAnulada></s:IDFactura>
+            <s:IDFactura><s:IDEmisorFactura>89890001K</s:IDEmisorFactura><s:NumSerieFactura>2027/000001</s:NumSerieFactura><s:FechaExpedicionFactura>15-01-2027</s:FechaExpedicionFactura></s:IDFactura>
+            <s:Operacion><s:TipoOperacion>Anulacion</s:TipoOperacion></s:Operacion>
             <r:EstadoRegistro>Incorrecto</r:EstadoRegistro>
             <r:CodigoErrorRegistro>1150</r:CodigoErrorRegistro>
           </r:RespuestaLinea>
           <r:RespuestaLinea>
             <s:IDFactura><s:NumSerieFactura>2027/000001</s:NumSerieFactura></s:IDFactura>
+            <s:Operacion><s:TipoOperacion>Alta</s:TipoOperacion></s:Operacion>
             <r:EstadoRegistro>Correcto</r:EstadoRegistro>
           </r:RespuestaLinea>
         </r:Resp></env:Body></env:Envelope>"#;
@@ -823,6 +837,21 @@ mod tests {
     }
 
     #[test]
+    fn una_linea_sin_TIPO_DE_OPERACION_no_se_atribuye_a_nadie() {
+        // El XSD lo exige, pero si faltara no se sabe si es la del alta o la de su anulación.
+        // Suponer una de las dos podría anotar en un registro el resultado del otro; descartarla
+        // deja el registro PENDIENTE, que es lo que `remitir_ciclo` hace con lo que la AEAT calla.
+        let xml = r#"<r:Resp xmlns:r="y">
+          <r:EstadoEnvio>Correcto</r:EstadoEnvio>
+          <r:RespuestaLinea>
+            <s:IDFactura><s:NumSerieFactura>2027/000001</s:NumSerieFactura></s:IDFactura>
+            <r:EstadoRegistro>Correcto</r:EstadoRegistro>
+          </r:RespuestaLinea>
+        </r:Resp>"#;
+        assert!(leer_respuesta(xml).unwrap().lineas.is_empty());
+    }
+
+    #[test]
     fn lee_el_estado_de_un_duplicado() {
         // Un rechazo por duplicado (3000) trae el estado en que quedó el registro que ya tenían.
         // Es lo que permite tratarlo como aceptado en vez de reintentar para siempre.
@@ -830,6 +859,7 @@ mod tests {
           <r:EstadoEnvio>Incorrecto</r:EstadoEnvio>
           <r:RespuestaLinea>
             <s:IDFactura><s:NumSerieFactura>2027/000001</s:NumSerieFactura></s:IDFactura>
+            <s:Operacion><s:TipoOperacion>Alta</s:TipoOperacion></s:Operacion>
             <r:EstadoRegistro>Incorrecto</r:EstadoRegistro>
             <r:CodigoErrorRegistro>3000</r:CodigoErrorRegistro>
             <r:DescripcionErrorRegistro>Registro de facturacion duplicado.</r:DescripcionErrorRegistro>

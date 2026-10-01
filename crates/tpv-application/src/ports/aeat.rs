@@ -133,9 +133,9 @@ pub struct LineaRespuesta {
     pub num_serie_factura: String,
     /// `true` si la línea responde a un registro de **anulación**, `false` si a uno de alta.
     ///
-    /// La AEAT no manda un campo «tipo»: lo dice la **forma** del `IDFactura` de la respuesta, que
-    /// en una anulación trae `NumSerieFacturaAnulada` en vez de `NumSerieFactura`. El adaptador
-    /// traduce esa forma a este booleano porque interpretar XML no es trabajo del caso de uso.
+    /// Lo dice `Operacion/TipoOperacion` (`Alta` | `Anulacion`) de la línea de respuesta: el
+    /// `IDFactura` trae `NumSerieFactura` en los dos casos (RI-89). El adaptador lo traduce a este
+    /// booleano porque interpretar XML no es trabajo del caso de uso.
     ///
     /// **Sin esto el par (alta, anulación) del mismo número es indistinguible**, y en un envío
     /// pueden ir los dos: basta cobrar por error y anular dentro del mismo ciclo. El daño no es

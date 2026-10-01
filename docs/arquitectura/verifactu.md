@@ -274,8 +274,10 @@ Cada vuelta, en este orden:
    - Endpoint según entorno y tipo de certificado (persona → `www1`/`prewww1`; sello →
      `www10`/`prewww10`).
    - Guarda el `TiempoEsperaEnvio` devuelto (acotado a 1–3600 s) **antes** de procesar las líneas.
-   - Casa cada línea por **tipo y número** (un alta y su anulación comparten número). Una línea que
-     no aparece en la respuesta se queda `PENDIENTE` con un intento más.
+   - Casa cada línea por **tipo y número** (un alta y su anulación comparten número). El tipo sale
+     de `Operacion/TipoOperacion`: el `IDFactura` de la respuesta lleva `NumSerieFactura` también en
+     una anulación. Una línea que no aparece en la respuesta, o que no dice su tipo, se queda
+     `PENDIENTE` con un intento más.
    - Un fallo de transporte o un *Fault* anota un intento a todo el lote, que sigue `PENDIENTE`, y
      devuelve `Err` (backoff del runner).
 7. Evalúa el aviso de atraso y emite `verifactu:cambio` para que la pantalla se refresque.
