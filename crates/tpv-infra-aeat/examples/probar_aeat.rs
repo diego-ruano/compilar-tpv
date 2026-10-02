@@ -39,7 +39,9 @@ fn main() {
     {
         use tpv_application::ports::aeat::{AeatClient, CabeceraEnvio, EntornoAeat};
 
-        let args: Vec<String> = std::env::args().skip(1).collect();
+        // `pnpm <script> -- …` le pasa el `--` al programa: sin quitarlo, cada argumento caería en el
+        // sitio del anterior (la huella sería «--»).
+        let args: Vec<String> = std::env::args().skip(1).skip_while(|a| a == "--").collect();
         let Some(huella) = args.first().cloned() else {
             eprintln!("Uso: pnpm verifactu:probar-aeat -- <huella> [pruebas|produccion]");
             eprintln!();

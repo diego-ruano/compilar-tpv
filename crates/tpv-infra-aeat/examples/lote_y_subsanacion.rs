@@ -36,7 +36,9 @@ fn main() {
             self as vfdb, DatosFactura, SistemaInformatico, SqliteVerifactuRepository,
         };
 
-        let a: Vec<String> = std::env::args().skip(1).collect();
+        // `pnpm <script> -- …` le pasa el `--` al programa: sin quitarlo, cada argumento caería en el
+        // sitio del anterior (la huella sería «--»).
+        let a: Vec<String> = std::env::args().skip(1).skip_while(|a| a == "--").collect();
         let (Some(huella), Some(nif), Some(razon)) =
             (a.first().cloned(), a.get(1).cloned(), a.get(2).cloned())
         else {
