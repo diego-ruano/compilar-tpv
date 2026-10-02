@@ -1,0 +1,9 @@
+{
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1",
+      "Stock_Disponible": 7.0
+    }
+  ],
+  "Movimientos_Stock": []
+}

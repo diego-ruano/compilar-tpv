@@ -4,7 +4,7 @@ use tauri::State;
 
 use tpv_application::use_cases::inventario as uc;
 use tpv_contracts::inventario::{
-    AjusteLoteInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, IdCategoriaArgs,
+    AjusteLoteInput, AjusteStockSueltoInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, IdCategoriaArgs,
     IdProductoArgs, InventarioResumenResponse, LoteDto, ProductDetailResponse, ProductoListDto, ProveedorMiniDto, SummaryArgs,
     UpdateLoteInput, UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
@@ -123,4 +123,14 @@ pub async fn inventario_ajustar_lote(
 ) -> Result<String, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::ajustar_lote(repo.as_ref(), args).await?)
+}
+
+/// RI-55: el stock suelto de un producto se cambia aquí, con su movimiento, y no al guardar la ficha.
+#[tauri::command]
+pub async fn inventario_ajustar_stock_suelto(
+    state: State<'_, AppState>,
+    args: AjusteStockSueltoInput,
+) -> Result<String, AppErrorDto> {
+    let repo = state.inventario_repo().await?;
+    Ok(uc::ajustar_stock_suelto(repo.as_ref(), args).await?)
 }

@@ -253,6 +253,9 @@ pub struct UpsertProductoInput {
     #[ts(optional)]
     pub cantidad_pedido_esperada: Option<f64>,
     /// VR-04: stock suelto fuera de lotes (opcional; None = el producto no lo usa).
+    ///
+    /// **Sólo cuenta al crear el producto** (RI-55): editando la ficha se ignora, y el stock suelto
+    /// se cambia con `AjusteStockSueltoInput`, que deja su movimiento.
     #[serde(default)]
     #[ts(optional)]
     pub stock_suelto: Option<f64>,
@@ -292,6 +295,7 @@ pub struct CreateLoteInput {
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+/// Los datos de un lote, **sin sus existencias** (RI-55): esas se cambian con `AjusteLoteInput`.
 pub struct UpdateLoteInput {
     pub id_lote: String,
     pub id_producto: String,
@@ -299,7 +303,6 @@ pub struct UpdateLoteInput {
     #[serde(default)]
     #[ts(optional)]
     pub caducidad: Option<String>,
-    pub stock_disponible: f64,
     #[serde(default)]
     #[ts(optional)]
     pub fecha_entrada: Option<String>,
@@ -316,10 +319,30 @@ pub struct UpdateLoteInput {
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+/// Ajuste de las existencias de un lote (RI-55). `stock_visto` es lo que enseñaba la pantalla al
+/// abrir el ajuste: si ya no es lo que hay, se rechaza en vez de pisar lo que se movió entre medias.
 pub struct AjusteLoteInput {
     pub id_lote: String,
-    pub stock_disponible: f64,
+    pub stock_visto: f64,
+    pub stock_nuevo: f64,
     #[serde(default)]
     #[ts(optional)]
-    pub notas: Option<String>,
+    pub motivo: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+/// Ajuste del stock suelto de un producto (RI-55), igual que `AjusteLoteInput`. `None` es «no lleva
+/// stock suelto»: en `stock_nuevo` lo desactiva y en `stock_visto` dice que no lo llevaba.
+pub struct AjusteStockSueltoInput {
+    pub id_producto: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub stock_visto: Option<f64>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub stock_nuevo: Option<f64>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub motivo: Option<String>,
 }

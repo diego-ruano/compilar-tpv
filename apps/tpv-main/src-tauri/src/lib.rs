@@ -2152,6 +2152,7 @@ pub fn run() {
             commands::inventario::inventario_create_lote,
             commands::inventario::inventario_update_lote,
             commands::inventario::inventario_ajustar_lote,
+            commands::inventario::inventario_ajustar_stock_suelto,
             // tareas
             commands::tareas::tareas_get_trabajadores,
             commands::tareas::tareas_create_tarea,

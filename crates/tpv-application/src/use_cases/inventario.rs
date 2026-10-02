@@ -1,13 +1,13 @@
 //! Casos de uso de inventario (Local-First).
 
 use tpv_contracts::inventario::{
-    AjusteLoteInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, InventarioResumenResponse,
+    AjusteLoteInput, AjusteStockSueltoInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, InventarioResumenResponse,
     LoteDto, ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto,
     ProveedorMiniDto, SetProductoAlergenosInput, SummaryArgs, UpdateLoteInput,
     UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
 use tpv_domain::inventario::{
-    normalize_ids, AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+    normalize_ids, AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
 };
 
 use crate::error::{AppError, AppResult};
@@ -145,7 +145,6 @@ pub async fn update_lote(repo: &R, input: UpdateLoteInput) -> AppResult<String> 
         input.id_producto,
         input.codigo_lote,
         input.caducidad,
-        input.stock_disponible,
         input.fecha_entrada,
         input.coste_unitario,
         input.id_proveedor,
@@ -157,11 +156,24 @@ pub async fn update_lote(repo: &R, input: UpdateLoteInput) -> AppResult<String> 
 }
 
 pub async fn ajustar_lote(repo: &R, input: AjusteLoteInput) -> AppResult<String> {
-    let ajuste = AjusteLote::validar(input.id_lote, input.stock_disponible, input.notas)
-        .map_err(AppError::validation)?;
-    // El repo lee el stock previo dentro de la misma transacción, que es lo que da el delta de
-    // auditoría (INV-01b) sin TOCTOU.
+    let ajuste =
+        AjusteLote::validar(input.id_lote, input.stock_visto, input.stock_nuevo, input.motivo)
+            .map_err(AppError::validation)?;
+    // El repo lee el stock dentro de la misma transacción: compara con lo visto (RI-55) y saca el
+    // delta de auditoría (INV-01b) sin TOCTOU.
     repo.ajustar_lote(ajuste).await?;
+    Ok("OK".to_string())
+}
+
+pub async fn ajustar_stock_suelto(repo: &R, input: AjusteStockSueltoInput) -> AppResult<String> {
+    let ajuste = AjusteSuelto::validar(
+        input.id_producto,
+        input.stock_visto,
+        input.stock_nuevo,
+        input.motivo,
+    )
+    .map_err(AppError::validation)?;
+    repo.ajustar_stock_suelto(ajuste).await?;
     Ok("OK".to_string())
 }
 

@@ -1,0 +1,18 @@
+{
+  "Movimientos_Stock": [
+    {
+      "Delta": 4.0,
+      "ID_Lote": null,
+      "ID_Producto": "prod-1",
+      "Motivo": "Alta del producto",
+      "Stock_Resultante": 4.0,
+      "Tipo": "ALTA"
+    }
+  ],
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "Stock_Suelto": 4.0
+    }
+  ]
+}

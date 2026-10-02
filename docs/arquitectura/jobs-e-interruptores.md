@@ -48,7 +48,7 @@ un fallo parcial.
 | `stock_negativo` | 10 min | 90 s | MainOperativa | — | Avisa de productos con stock total negativo |
 | `imagenes` | 15 min | 3 min | Siempre | — | Red de seguridad de la subida de imágenes a R2 (el camino normal es el evento) |
 | `purga_sync` | 24 h | 5 min | MainOperativa | — | Poda `_Sync_Applied_Ops` (TTL 72 h) |
-| `reconciliacion` | 24 h | 10 min | MainOperativa | — | Comprueba stock por lote y gasto por cliente contra su origen y avisa; se calla con el histórico a medias |
+| `reconciliacion` | 24 h | 10 min | MainOperativa | — | Comprueba el stock por lote y el stock suelto de cada producto contra sus movimientos y consumos, y el gasto por cliente contra sus cobros, y avisa; se calla con el histórico a medias |
 | `backup_local` | 24 h | 5 min | MainOperativa | — | Copia diaria y purga de restos ([recuperacion.md](recuperacion.md)) |
 | `backfill_historico` | 5 min | 3 min | MainOperativa | `backfill_historico` | Fase 2 de la recuperación |
 | `verificar_nube` | 24 h | 10 min | MainOperativa | (`reparacion_nube` dentro) | Contraste con la nube y reparación ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)) |

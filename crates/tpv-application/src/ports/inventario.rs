@@ -6,7 +6,9 @@ use tpv_contracts::inventario::{
     AlergenoInvDto, CategoriaInvDto, InventarioResumenResponse, LoteDto, ProductDetailResponse,
     ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
 };
-use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
+use tpv_domain::inventario::{
+    AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+};
 
 use crate::error::AppResult;
 
@@ -35,8 +37,16 @@ pub trait InventarioRepository: Send + Sync {
     async fn set_alergenos_producto(&self, id_producto: &str, ids: Vec<String>) -> AppResult<()>;
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()>;
     /// Upsert de producto + alérgenos. Devuelve el id de producto.
+    ///
+    /// El stock suelto sólo se escribe al **crear** (con su movimiento de alta); editando la ficha
+    /// no se toca (RI-55).
     async fn upsert_producto(&self, producto: ProductoUpsert) -> AppResult<String>;
     async fn create_lote(&self, lote: LoteNuevo) -> AppResult<()>;
+    /// Los datos de un lote, sin tocar sus existencias (RI-55).
     async fn update_lote(&self, lote: LoteUpdate) -> AppResult<()>;
+    /// Ajusta las existencias de un lote y deja el movimiento. Si lo que hay ya no es
+    /// `stock_visto`, no toca nada y devuelve `Conflict` (RI-55).
     async fn ajustar_lote(&self, ajuste: AjusteLote) -> AppResult<()>;
+    /// Lo mismo para el stock suelto de un producto (RI-55).
+    async fn ajustar_stock_suelto(&self, ajuste: AjusteSuelto) -> AppResult<()>;
 }

@@ -54,6 +54,7 @@ import {
 } from "../src/domains/configuracion/configuracion.commands";
 import {
 	ajustarLote,
+	ajustarStockSuelto,
 	createCategoria,
 	createLote,
 	deleteProducto,
@@ -148,6 +149,14 @@ import casoInvUpdateLote from "../../../tests/contract/casos/inventario/update_l
 import goldenInvUpdateLote from "../../../tests/contract/golden/inventario/update_lote.json";
 import casoInvAjustarLote from "../../../tests/contract/casos/inventario/ajustar_lote.json";
 import goldenInvAjustarLote from "../../../tests/contract/golden/inventario/ajustar_lote.json";
+import casoInvAjustarLoteTarde from "../../../tests/contract/casos/inventario/ajustar_lote_stock_cambiado.json";
+import goldenInvAjustarLoteTarde from "../../../tests/contract/golden/inventario/ajustar_lote_stock_cambiado.json";
+import casoInvAjustarSuelto from "../../../tests/contract/casos/inventario/ajustar_stock_suelto.json";
+import goldenInvAjustarSuelto from "../../../tests/contract/golden/inventario/ajustar_stock_suelto.json";
+import casoInvUpsertSuelto from "../../../tests/contract/casos/inventario/upsert_producto_con_suelto.json";
+import goldenInvUpsertSuelto from "../../../tests/contract/golden/inventario/upsert_producto_con_suelto.json";
+import casoInvUpsertNoSuelto from "../../../tests/contract/casos/inventario/upsert_producto_no_toca_suelto.json";
+import goldenInvUpsertNoSuelto from "../../../tests/contract/golden/inventario/upsert_producto_no_toca_suelto.json";
 import casoCfgBusiness from "../../../tests/contract/casos/configuracion/patch_business.json";
 import goldenCfgBusiness from "../../../tests/contract/golden/configuracion/patch_business.json";
 import casoCfgContact from "../../../tests/contract/casos/configuracion/patch_contact.json";
@@ -265,6 +274,10 @@ const CASOS = [
 	{ nombre: "inventario_delete_producto", caso: casoInvDeleteProd, golden: goldenInvDeleteProd },
 	{ nombre: "inventario_update_lote", caso: casoInvUpdateLote, golden: goldenInvUpdateLote },
 	{ nombre: "inventario_ajustar_lote", caso: casoInvAjustarLote, golden: goldenInvAjustarLote },
+	{ nombre: "inventario_ajustar_lote_stock_cambiado", caso: casoInvAjustarLoteTarde, golden: goldenInvAjustarLoteTarde },
+	{ nombre: "inventario_ajustar_stock_suelto", caso: casoInvAjustarSuelto, golden: goldenInvAjustarSuelto },
+	{ nombre: "inventario_upsert_producto_con_suelto", caso: casoInvUpsertSuelto, golden: goldenInvUpsertSuelto },
+	{ nombre: "inventario_upsert_producto_no_toca_suelto", caso: casoInvUpsertNoSuelto, golden: goldenInvUpsertNoSuelto },
 	{ nombre: "config_patch_business", caso: casoCfgBusiness, golden: goldenCfgBusiness },
 	{ nombre: "config_patch_contact", caso: casoCfgContact, golden: goldenCfgContact },
 	{ nombre: "config_patch_ticket", caso: casoCfgTicket, golden: goldenCfgTicket },
@@ -507,7 +520,12 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "inventario.upsert_producto": {
-			aplicar(hub, sql, upsertProducto(caso.entrada as any));
+			// La ruta mira si el producto existe: el stock suelto sólo cuenta al crearlo (RI-55).
+			const ex = await db.execute({
+				sql: "SELECT 1 FROM Productos WHERE ID_Producto=?1;",
+				args: [caso.entrada.id_producto ?? ""],
+			});
+			aplicar(hub, sql, upsertProducto(caso.entrada as any, ex.rows.length === 0));
 			return;
 		}
 		case "inventario.set_alergenos": {
@@ -525,30 +543,17 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "inventario.update_lote": {
-			// La ruta lee el stock previo (para el delta de auditoría) antes de construir el comando.
-			const rs = await db.execute({
-				sql: "SELECT Stock_Disponible AS s FROM Lotes_Producto WHERE ID_Lote=?1;",
-				args: [caso.entrada.id_lote],
-			});
-			const stockActual = Number(rs.rows[0]?.s ?? 0);
-			aplicar(hub, sql, updateLote(caso.entrada.id_lote, caso.entrada as any, stockActual));
+			aplicar(hub, sql, updateLote(caso.entrada.id_lote, caso.entrada as any));
 			return;
 		}
 		case "inventario.ajustar_lote": {
-			const rs = await db.execute({
-				sql: "SELECT Stock_Disponible AS s FROM Lotes_Producto WHERE ID_Lote=?1;",
-				args: [caso.entrada.id_lote],
-			});
-			const stockActual = Number(rs.rows[0]?.s ?? 0);
-			aplicar(
-				hub,
-				sql,
-				ajustarLote(
-					caso.entrada.id_lote,
-					{ stock_disponible: caso.entrada.stock_disponible, notas: caso.entrada.notas } as any,
-					stockActual,
-				),
-			);
+			// Sin la comprobación previa de la ruta: si lo visto no es lo que hay, la condición del
+			// propio comando tiene que dejarlo todo como estaba (RI-55).
+			aplicar(hub, sql, ajustarLote(caso.entrada.id_lote, caso.entrada as any));
+			return;
+		}
+		case "inventario.ajustar_stock_suelto": {
+			aplicar(hub, sql, ajustarStockSuelto(caso.entrada.id_producto, caso.entrada as any));
 			return;
 		}
 		case "config.patch_business": {

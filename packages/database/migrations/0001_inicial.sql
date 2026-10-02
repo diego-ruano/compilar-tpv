@@ -291,7 +291,11 @@ ON Lotes_Producto(ID_Producto, Fecha_Entrada);
 -- (alta y ajuste) deja una fila trazable en vez de sobrescribir el valor a pelo sin rastro. Base
 -- para la reconciliacion (INV-06): Stock_Disponible == SUM(movimientos) - SUM(consumo).
 --
--- Tipo: 'ALTA' (creacion del lote) | 'AJUSTE' (correccion manual del disponible).
+-- RI-55: tambien los del stock SUELTO de un producto (Productos.Stock_Suelto), que antes cambiaba
+-- al guardar la ficha sin dejar rastro. Cada fila es de un lote O de un producto, nunca de los dos,
+-- y la reconciliacion cuadra los dos: Stock_Suelto == SUM(movimientos) - SUM(Suelto_Consumos).
+--
+-- Tipo: 'ALTA' (creacion del lote, o del producto con stock suelto) | 'AJUSTE' (correccion manual).
 -- Delta: variacion aplicada a Stock_Disponible (+entrada / -salida).
 -- Stock_Resultante: disponible tras el movimiento (snapshot para reconciliar sin recomputar).
 -- Motivo: texto libre (las Notas del alta/ajuste).
@@ -299,7 +303,8 @@ ON Lotes_Producto(ID_Producto, Fecha_Entrada);
 -- Fecha: instante local; el outbox/tenantHub lo congela a literal antes de replicar.
 CREATE TABLE IF NOT EXISTS Movimientos_Stock (
   ID_Movimiento TEXT NOT NULL PRIMARY KEY,
-  ID_Lote TEXT NOT NULL,
+  ID_Lote TEXT,
+  ID_Producto TEXT,
   Tipo TEXT NOT NULL,
   Delta REAL NOT NULL,
   Stock_Resultante REAL NOT NULL,
@@ -307,12 +312,17 @@ CREATE TABLE IF NOT EXISTS Movimientos_Stock (
   ID_Usuario TEXT,
   Fecha DATETIME NOT NULL,
   FOREIGN KEY (ID_Lote) REFERENCES Lotes_Producto(ID_Lote) ON DELETE CASCADE,
+  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE CASCADE,
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
-  CHECK (Tipo IN ('ALTA', 'AJUSTE'))
+  CHECK (Tipo IN ('ALTA', 'AJUSTE')),
+  CHECK ((ID_Lote IS NULL) <> (ID_Producto IS NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_mov_stock_lote
 ON Movimientos_Stock(ID_Lote);
+
+CREATE INDEX IF NOT EXISTS idx_mov_stock_producto
+ON Movimientos_Stock(ID_Producto);
 
 CREATE INDEX IF NOT EXISTS idx_mov_stock_fecha
 ON Movimientos_Stock(Fecha);

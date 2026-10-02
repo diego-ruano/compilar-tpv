@@ -50,7 +50,8 @@ impl ClienteDescuadrado {
 
 #[async_trait]
 pub trait ReconciliacionRepository: Send + Sync {
-    /// Lotes cuyo disponible se desvía más de `tolerancia` de su historial.
+    /// Lotes cuyo disponible se desvía más de `tolerancia` de su historial, y también los stocks
+    /// sueltos (RI-55): salen como una fila más, con «stock suelto» como código y el id del producto.
     ///
     /// No se corrigen solos **a propósito**: un descuadre de stock puede venir de un movimiento
     /// que falta o de una venta que no llegó a aplicarse, y no hay forma de saber cuál de los dos

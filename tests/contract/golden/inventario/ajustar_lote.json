@@ -2,7 +2,7 @@
   "Lotes_Producto": [
     {
       "ID_Lote": "lote-1",
-      "Notas": "recuento fisico",
+      "Notas": "original",
       "Stock_Disponible": 3.0
     }
   ],
@@ -10,6 +10,7 @@
     {
       "Delta": -2.0,
       "ID_Lote": "lote-1",
+      "ID_Producto": null,
       "Motivo": "recuento fisico",
       "Stock_Resultante": 3.0,
       "Tipo": "AJUSTE"

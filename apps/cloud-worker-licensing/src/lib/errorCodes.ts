@@ -199,6 +199,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	cobro_solo_en_main: "Los cobros sólo se hacen desde el TPV principal.",
 	recuperacion_solo_en_main: SOLO_EN_LA_MAIN,
 	reserva_solapada: "Ya existe una reserva en esa mesa para ese día y hora.",
+	// RI-55: un ajuste de existencias que llega tarde. La ruta lo acompaña de lo que hay ahora.
+	stock_cambiado:
+		"Las existencias han cambiado mientras las ajustabas. Revísalas y vuelve a ajustar.",
 	image_too_large: "La imagen es demasiado grande.",
 	empty_body: "La imagen está vacía.",
 	idempotency_operation_processing:

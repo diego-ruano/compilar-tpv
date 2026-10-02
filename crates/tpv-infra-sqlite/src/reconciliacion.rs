@@ -73,6 +73,31 @@ const SQL_LOTES: &str = r#"
             ), 0)                         AS calculado
         FROM Lotes_Producto l
         LEFT JOIN Productos p ON p.ID_Producto = l.ID_Producto
+
+        UNION ALL
+
+        -- RI-55: el stock SUELTO, con la misma cuenta. Sus movimientos son los de ID_Producto y sus
+        -- consumos los de Suelto_Consumos, con el mismo filtro de anulaciones. Sale como una fila más,
+        -- con «stock suelto» en lugar del código de lote.
+        SELECT
+            pr.ID_Producto                AS id_lote,
+            'stock suelto'                AS codigo_lote,
+            COALESCE(pr.Nombre, '')       AS producto,
+            pr.Stock_Suelto               AS guardado,
+            COALESCE((
+                SELECT SUM(m.Delta) FROM Movimientos_Stock m WHERE m.ID_Producto = pr.ID_Producto
+            ), 0)
+            - COALESCE((
+                SELECT SUM(c.Cantidad)
+                FROM Suelto_Consumos c
+                JOIN Pagos pg ON pg.ID_Pago = c.ID_Pago
+                WHERE c.ID_Producto = pr.ID_Producto
+                  AND NOT (
+                    pg.Estado = 'ANULADO' AND COALESCE(pg.Motivo_Baja, 'ERROR') = 'ERROR'
+                  )
+            ), 0)                         AS calculado
+        FROM Productos pr
+        WHERE pr.Stock_Suelto IS NOT NULL
     )
     WHERE ABS(guardado - calculado) > ?1
     ORDER BY ABS(guardado - calculado) DESC
@@ -542,5 +567,59 @@ mod tests {
         let out = repo.lotes_descuadrados(0.001).await.unwrap();
 
         assert!(out.is_empty(), "10 de alta - 3 consumidos = 7: {out:?}");
+    }
+
+    // ── RI-55: el stock suelto también se cuadra ──
+
+    /// Un producto sin lotes con 5 de stock suelto y su movimiento de alta.
+    const SEMILLA_SUELTO: &[&str] = &[
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
+           VALUES ('prod', 'cat', 'Cerveza', 250, 5);",
+        "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Fecha)
+           VALUES ('mov', 'prod', 'ALTA', 5, 5, '2026-01-01 10:00:00');",
+    ];
+
+    #[tokio::test]
+    async fn el_stock_suelto_con_su_alta_y_sus_ventas_cuadra() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_SUELTO).await;
+        sembrar(&db, SEMILLA_TICKET).await;
+        sembrar(
+            &db,
+            &[
+                "UPDATE Productos SET Stock_Suelto = 2 WHERE ID_Producto = 'prod';",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 750, 'TOTAL');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
+                "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad) VALUES ('det', 'prod', 'pago', 3);",
+            ],
+        )
+        .await;
+
+        let out = SqliteReconciliacionRepository::new(db).lotes_descuadrados(0.001).await.unwrap();
+        assert!(out.is_empty(), "5 de alta - 3 vendidos = 2: {out:?}");
+    }
+
+    #[tokio::test]
+    async fn un_stock_suelto_cambiado_sin_rastro_se_detecta() {
+        // Lo que hacía guardar la ficha del producto antes de RI-55.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_SUELTO).await;
+        sembrar(&db, &["UPDATE Productos SET Stock_Suelto = 9 WHERE ID_Producto = 'prod';"]).await;
+
+        let out = SqliteReconciliacionRepository::new(db).lotes_descuadrados(0.001).await.unwrap();
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(out[0].codigo_lote, "stock suelto");
+        assert_eq!(out[0].producto, "Cerveza");
+        assert_eq!((out[0].guardado, out[0].calculado), (9.0, 5.0));
+    }
+
+    #[tokio::test]
+    async fn un_producto_sin_stock_suelto_no_se_cuadra() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_LOTE).await;
+        let out = SqliteReconciliacionRepository::new(db).lotes_descuadrados(0.001).await.unwrap();
+        assert!(out.is_empty(), "{out:?}");
     }
 }

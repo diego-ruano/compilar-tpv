@@ -1,5 +1,5 @@
 {
-  "descripcion": "Ajuste manual del disponible de un lote (5 → 3): UPDATE de stock/notas + movimiento 'AJUSTE' con delta = nuevo − previo (−2), motivo = las notas. Stock previo leído antes; ID_Movimiento y Fecha excluidos.",
+  "descripcion": "Ajuste de las existencias de un lote (se vio 5, hay 3): UPDATE del disponible + movimiento 'AJUSTE' con delta −2 y el motivo. Las notas del lote no se tocan. ID_Movimiento y Fecha excluidos.",
   "comando": "inventario.ajustar_lote",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
@@ -8,11 +8,12 @@
   ],
   "entrada": {
     "id_lote": "lote-1",
-    "stock_disponible": 3,
-    "notas": "recuento fisico"
+    "stock_visto": 5,
+    "stock_nuevo": 3,
+    "motivo": "recuento fisico"
   },
   "snapshot": {
     "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible, Notas FROM Lotes_Producto",
-    "Movimientos_Stock": "SELECT ID_Lote, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
+    "Movimientos_Stock": "SELECT ID_Lote, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
   }
 }

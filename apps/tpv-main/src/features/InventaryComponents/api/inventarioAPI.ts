@@ -10,6 +10,7 @@
 import { invokeClient } from "@tpv/client";
 import type {
     AjusteLoteInput,
+    AjusteStockSueltoInput,
     AlergenoInvDto,
     CategoriaInvDto,
     CreateLoteInput,
@@ -94,5 +95,9 @@ export const inventarioAPI = {
 
     async ajustarLote(args: AjusteLoteInput): Promise<void> {
         await invokeClient("inventario_ajustar_lote", { args });
+    },
+
+    async ajustarStockSuelto(args: AjusteStockSueltoInput): Promise<void> {
+        await invokeClient("inventario_ajustar_stock_suelto", { args });
     },
 };

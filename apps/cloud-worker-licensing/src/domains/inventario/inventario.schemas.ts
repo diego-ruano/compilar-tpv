@@ -11,6 +11,7 @@ import { zDineroOpcional } from "../../lib/dinero";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	AjusteLoteInput as ContractAjusteLoteInput,
+	AjusteStockSueltoInput as ContractAjusteStockSueltoInput,
 	CreateLoteInput as ContractCreateLoteInput,
 	SetProductoAlergenosInput,
 	UpdateLoteInput as ContractUpdateLoteInput,
@@ -73,16 +74,24 @@ export const updateLoteSchema = z.object({
 	id_producto: idStr,
 	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
 	caducidad: optStr,
-	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	fecha_entrada: optStr,
 	coste_unitario: zDineroOpcional,
 	id_proveedor: idStr.nullish(),
 	notas: optStr,
 });
 
+// RI-55: lo que se vio y lo que hay. Lo visto puede ser negativo (una sobreventa); lo nuevo, no.
 export const ajusteLoteSchema = z.object({
-	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
-	notas: optStr,
+	stock_visto: z.number().finite(),
+	stock_nuevo: z.number().finite().min(0, "La cantidad no puede ser negativa"),
+	motivo: optStr,
+});
+
+// `null` es «no lleva stock suelto»: en lo nuevo lo desactiva, en lo visto dice que no lo llevaba.
+export const ajusteStockSueltoSchema = z.object({
+	stock_visto: optNum,
+	stock_nuevo: z.number().finite().min(0, "La cantidad no puede ser negativa").nullish(),
+	motivo: optStr,
 });
 
 export type UpsertCategoriaInput = ContractUpsertCategoriaInput;
@@ -140,8 +149,17 @@ export type UpdateLoteInput = Omit<
 	notas?: string | null;
 };
 
-export type AjusteLoteInput = Omit<ContractAjusteLoteInput, "id_lote" | "notas"> & {
-	notas?: string | null;
+export type AjusteLoteInput = Omit<ContractAjusteLoteInput, "id_lote" | "motivo"> & {
+	motivo?: string | null;
+};
+
+export type AjusteStockSueltoInput = Omit<
+	ContractAjusteStockSueltoInput,
+	"id_producto" | "stock_visto" | "stock_nuevo" | "motivo"
+> & {
+	stock_visto?: number | null;
+	stock_nuevo?: number | null;
+	motivo?: string | null;
 };
 
 // ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
@@ -154,3 +172,4 @@ type _GSetAlergenos = Assert<SameKeys<z.infer<typeof setAlergenosSchema>, SetAle
 type _GCreateLote = Assert<SameKeys<z.infer<typeof createLoteSchema>, CreateLoteInput>>;
 type _GUpdateLote = Assert<SameKeys<z.infer<typeof updateLoteSchema>, UpdateLoteInput>>;
 type _GAjusteLote = Assert<SameKeys<z.infer<typeof ajusteLoteSchema>, AjusteLoteInput>>;
+type _GAjusteSuelto = Assert<SameKeys<z.infer<typeof ajusteStockSueltoSchema>, AjusteStockSueltoInput>>;

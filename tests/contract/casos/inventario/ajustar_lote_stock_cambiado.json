@@ -1,0 +1,19 @@
+{
+  "descripcion": "RI-55: el ajuste llega tarde. Quien ajusta vio 10, pero mientras tanto se vendieron 3 y hay 7: no se toca el lote ni se anota nada (en la Main es un Conflict; en el worker, la condición del propio comando).",
+  "comando": "inventario.ajustar_lote",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-1', 'cat-1', 'Cerveza');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-1', 'prod-1', 'L1', 7, '2026-01-01 10:00:00');"
+  ],
+  "entrada": {
+    "id_lote": "lote-1",
+    "stock_visto": 10,
+    "stock_nuevo": 4,
+    "motivo": "recuento"
+  },
+  "snapshot": {
+    "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible FROM Lotes_Producto",
+    "Movimientos_Stock": "SELECT ID_Lote, ID_Producto, Tipo, Delta FROM Movimientos_Stock"
+  }
+}

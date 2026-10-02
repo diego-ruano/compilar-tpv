@@ -19,6 +19,7 @@ import type {
 	CreateLoteInput,
 	UpdateLoteInput,
 	AjusteLoteInput,
+	AjusteStockSueltoInput,
 } from "./inventario.schemas";
 
 export type BuiltCommand = {
@@ -71,7 +72,6 @@ const SQL_UPSERT_PRODUCTO = `
 		Nombre_Imagen = COALESCE(excluded.Nombre_Imagen, Productos.Nombre_Imagen),
 		Ruta_Imagen = COALESCE(excluded.Ruta_Imagen, Productos.Ruta_Imagen),
 		Cantidad_Pedido_Esperada = excluded.Cantidad_Pedido_Esperada,
-		Stock_Suelto = excluded.Stock_Suelto,
 		IVA_Percent = excluded.IVA_Percent;
 `;
 
@@ -101,6 +101,14 @@ const SQL_INSERT_LOTE = `
 const SQL_INSERT_MOVIMIENTO = `
 	INSERT INTO Movimientos_Stock
 		(ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+	VALUES
+		(?1, ?2, ?3, ?4, ?5, ?6, NULL, datetime('now','localtime'));
+`;
+
+// RI-55: el movimiento del stock suelto de un producto (sin lote).
+const SQL_INSERT_MOVIMIENTO_PRODUCTO = `
+	INSERT INTO Movimientos_Stock
+		(ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
 	VALUES
 		(?1, ?2, ?3, ?4, ?5, ?6, NULL, datetime('now','localtime'));
 `;
@@ -135,7 +143,11 @@ export function createCategoria(input: UpsertCategoriaInput): BuiltCommand {
 	};
 }
 
-export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
+// RI-55: el stock suelto sólo se escribe al CREAR el producto, con su movimiento de alta; editando
+// la ficha se ignora (el formulario lo reescribía sin rastro). `esNuevo` lo decide la ruta leyendo.
+// Se cambia con `ajustarStockSuelto`.
+export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean): BuiltCommand {
+	const stockSuelto = esNuevo ? cantidadONull(input.stock_suelto) : null;
 	const steps: any[] = [
 		idStep(input.id_producto),
 		{
@@ -152,7 +164,7 @@ export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
 				cleanOrNull(input.nombre_imagen),
 				cleanOrNull(input.ruta_imagen),
 				numOrNull(input.cantidad_pedido_esperada),
-				cantidadONull(input.stock_suelto),
+				stockSuelto,
 				numOrNull(input.iva_percent),
 			],
 		},
@@ -161,6 +173,15 @@ export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
 			sql: "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
 			args: [REF_ID],
 		},
+		...(stockSuelto == null
+			? []
+			: [
+					{
+						kind: "execute",
+						sql: SQL_INSERT_MOVIMIENTO_PRODUCTO,
+						args: [nuevoId(), REF_ID, "ALTA", stockSuelto, stockSuelto, "Alta del producto"],
+					},
+				]),
 		...normalizeIds(input.ids_alergenos).map((idA) => ({
 			kind: "execute",
 			sql: "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
@@ -181,6 +202,8 @@ export function deleteProducto(idProducto: string): BuiltCommand {
 		// que los lotes por su FK.
 		"UPDATE Detalle_Comanda SET ID_Producto = NULL WHERE ID_Producto=?1;",
 		"DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto=?1);",
+		// Y los de su stock suelto (RI-55).
+		"DELETE FROM Movimientos_Stock WHERE ID_Producto=?1;",
 		"DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
 		"DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
 		"DELETE FROM Productos WHERE ID_Producto=?1;",
@@ -253,16 +276,11 @@ export function createLote(input: CreateLoteInput): BuiltCommand {
 	};
 }
 
-// `stockActual` = Stock_Disponible previo (lo lee la ruta antes de aplicar), para el delta de
-// auditoría: editar un lote puede cambiar el disponible, y eso es un movimiento de stock como
-// cualquier otro. Sin anotarlo, la reconciliación (INV-06) no distinguiría una edición legítima de
-// un descuadre real.
-export function updateLote(
-	idLote: string,
-	input: UpdateLoteInput,
-	stockActual: number,
-): BuiltCommand {
-	const nuevo = redondearCantidad(input.stock_disponible);
+// RI-55: los DATOS de un lote, sin tocar sus existencias. Antes se escribía el disponible que había
+// cargado el formulario, y si mientras estaba abierto se vendía algo, guardar la caducidad devolvía
+// el lote al valor viejo con un ajuste «Edición del lote» que lo justificaba. Las existencias se
+// cambian con `ajustarLote`.
+export function updateLote(idLote: string, input: UpdateLoteInput): BuiltCommand {
 	const steps: any[] = [
 		{
 			kind: "execute",
@@ -272,10 +290,9 @@ export function updateLote(
 					Codigo_Lote = ?3,
 					Fecha_Entrada = COALESCE(NULLIF(?4, ''), Fecha_Entrada),
 					Caducidad = NULLIF(?5, ''),
-					Stock_Disponible = ?6,
-					Coste_Unitario = ?7,
-					ID_Proveedor = ?8,
-					Notas = ?9
+					Coste_Unitario = ?6,
+					ID_Proveedor = ?7,
+					Notas = ?8
 				WHERE ID_Lote = ?1;
 			`,
 			args: [
@@ -284,30 +301,12 @@ export function updateLote(
 				input.codigo_lote.trim(),
 				cleanOrNull(input.fecha_entrada),
 				cleanOrNull(input.caducidad),
-				nuevo,
 				numOrNull(input.coste_unitario),
 				idOrNull(input.id_proveedor),
 				cleanOrNull(input.notas),
 			],
 		},
 	];
-
-	// Solo si cambió el disponible: renombrar el lote o cambiarle el proveedor no mueve stock.
-	if (Math.abs(nuevo - stockActual) > 1e-9) {
-		steps.push({
-			kind: "execute",
-			sql: SQL_INSERT_MOVIMIENTO,
-			args: [
-				nuevoId(),
-				idLote,
-				"AJUSTE",
-				redondearCantidad(nuevo - stockActual),
-				nuevo,
-				"Edición del lote",
-			],
-		});
-	}
-
 	return {
 		commandName: "inventario_update_lote",
 		command: { type: "tenantDb.transaction", payload: { steps } },
@@ -315,37 +314,87 @@ export function updateLote(
 	};
 }
 
-// `stockActual` = Stock_Disponible previo (lo lee la ruta antes de aplicar), para el delta de auditoría.
-export function ajustarLote(
-	idLote: string,
-	input: AjusteLoteInput,
-	stockActual: number,
-): BuiltCommand {
-	const movId = nuevoId();
-	const nuevo = redondearCantidad(input.stock_disponible);
+/** `|stock - visto| < medio gramo` en SQL: la misma tolerancia que `stock_sin_cambios` de Rust. */
+const SIGUE_COMO_SE_VIO = "ABS(COALESCE(Stock_Disponible,0) - ?2) < 0.0005";
+
+// RI-55: ajuste de las existencias de un lote con lo que se vio. La ruta ya ha comprobado que lo
+// visto es lo que hay, pero entre esa lectura y el DO puede colarse una venta: por eso el movimiento
+// y el UPDATE llevan la misma condición, evaluada antes de cambiar nada, y si no se cumple no se
+// aplica ninguno (`ajustado` = 0 filas, y la ruta contesta 409).
+export function ajustarLote(idLote: string, input: AjusteLoteInput): BuiltCommand {
+	const visto = redondearCantidad(input.stock_visto);
+	const nuevo = redondearCantidad(input.stock_nuevo);
 	const steps: any[] = [
 		{
 			kind: "execute",
-			sql: "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
-			args: [nuevo, cleanOrNull(input.notas), idLote],
+			sql: `
+				INSERT INTO Movimientos_Stock
+					(ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+				SELECT ?3, ?1, 'AJUSTE', ?4, ?5, ?6, NULL, datetime('now','localtime')
+				WHERE EXISTS (
+					SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?1 AND ${SIGUE_COMO_SE_VIO}
+				);
+			`,
+			args: [
+				idLote,
+				visto,
+				nuevoId(),
+				redondearCantidad(nuevo - visto),
+				nuevo,
+				cleanOrNull(input.motivo) ?? "Ajuste manual",
+			],
 		},
-		// Auditoría: el ajuste queda como movimiento 'AJUSTE' con su delta (nuevo - anterior).
 		{
 			kind: "execute",
-			sql: SQL_INSERT_MOVIMIENTO,
-			args: [
-				movId,
-				idLote,
-				"AJUSTE",
-				redondearCantidad(nuevo - stockActual),
-				nuevo,
-				cleanOrNull(input.notas),
-			],
+			saveAs: "ajustado",
+			sql: `UPDATE Lotes_Producto SET Stock_Disponible = ?3 WHERE ID_Lote = ?1 AND ${SIGUE_COMO_SE_VIO};`,
+			args: [idLote, visto, nuevo],
 		},
 	];
 	return {
 		commandName: "inventario_ajustar_lote",
-		command: { type: "tenantDb.transaction", payload: { steps } },
+		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "ajustado" } },
 		cloudPayload: { id_lote: idLote, ...input },
+	};
+}
+
+// RI-55: lo mismo para el stock suelto de un producto. `null` es «no lleva stock suelto», así que la
+// condición compara también eso; dejar de llevarlo es un movimiento que lo devuelve a cero.
+export function ajustarStockSuelto(idProducto: string, input: AjusteStockSueltoInput): BuiltCommand {
+	const visto = input.stock_visto == null ? null : redondearCantidad(input.stock_visto);
+	const nuevo = input.stock_nuevo == null ? null : redondearCantidad(input.stock_nuevo);
+	const comoSeVio =
+		"((?2 IS NULL AND Stock_Suelto IS NULL) OR ABS(Stock_Suelto - ?2) < 0.0005)";
+	const motivo =
+		cleanOrNull(input.motivo) ?? (nuevo == null ? "Deja de llevar stock suelto" : "Ajuste manual");
+	const steps: any[] = [
+		{
+			kind: "execute",
+			sql: `
+				INSERT INTO Movimientos_Stock
+					(ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+				SELECT ?3, ?1, 'AJUSTE', ?4, ?5, ?6, NULL, datetime('now','localtime')
+				WHERE EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND ${comoSeVio});
+			`,
+			args: [
+				idProducto,
+				visto,
+				nuevoId(),
+				redondearCantidad((nuevo ?? 0) - (visto ?? 0)),
+				nuevo ?? 0,
+				motivo,
+			],
+		},
+		{
+			kind: "execute",
+			saveAs: "ajustado",
+			sql: `UPDATE Productos SET Stock_Suelto = ?3 WHERE ID_Producto = ?1 AND ${comoSeVio};`,
+			args: [idProducto, visto, nuevo],
+		},
+	];
+	return {
+		commandName: "inventario_ajustar_stock_suelto",
+		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "ajustado" } },
+		cloudPayload: { id_producto: idProducto, ...input },
 	};
 }

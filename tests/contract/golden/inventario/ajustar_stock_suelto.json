@@ -1,0 +1,18 @@
+{
+  "Movimientos_Stock": [
+    {
+      "Delta": -3.0,
+      "ID_Lote": null,
+      "ID_Producto": "prod-1",
+      "Motivo": "recuento",
+      "Stock_Resultante": 2.0,
+      "Tipo": "AJUSTE"
+    }
+  ],
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "Stock_Suelto": 2.0
+    }
+  ]
+}

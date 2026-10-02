@@ -1,0 +1,27 @@
+{
+  "descripcion": "RI-55: guardar la ficha de un producto que ya existe no reescribe su stock suelto (7) aunque el formulario mande otro valor (99), ni anota nada: el formulario llevaba el valor que había cargado y pisaba lo vendido mientras estaba abierto.",
+  "comando": "inventario.upsert_producto",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Rioja', 7);"
+  ],
+  "entrada": {
+    "id_producto": "prod-1",
+    "id_categoria": "cat-1",
+    "id_proveedor": null,
+    "nombre": "Rioja",
+    "precio_venta": 1200,
+    "stock_minimo": 2,
+    "unidad_medida": "botella",
+    "nombre_imagen": null,
+    "ruta_imagen": null,
+    "cantidad_pedido_esperada": null,
+    "stock_suelto": 99,
+    "iva_percent": 21,
+    "ids_alergenos": []
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto, Nombre, Stock_Suelto FROM Productos",
+    "Movimientos_Stock": "SELECT ID_Lote, ID_Producto, Tipo, Delta FROM Movimientos_Stock"
+  }
+}

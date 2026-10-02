@@ -7,16 +7,8 @@
       "ID_Lote": "lote-1",
       "ID_Producto": "prod-1",
       "Notas": "editado",
-      "Stock_Disponible": 8.0
+      "Stock_Disponible": 5.0
     }
   ],
-  "Movimientos_Stock": [
-    {
-      "Delta": 3.0,
-      "ID_Lote": "lote-1",
-      "Motivo": "Edición del lote",
-      "Stock_Resultante": 8.0,
-      "Tipo": "AJUSTE"
-    }
-  ]
+  "Movimientos_Stock": []
 }

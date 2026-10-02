@@ -14,7 +14,8 @@ use tpv_contracts::inventario::{
 };
 use tpv_domain::cantidad::redondear_cantidad;
 use tpv_domain::inventario::{
-    AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+    stock_sin_cambios, AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate,
+    ProductoUpsert,
 };
 
 use crate::db::{Db, Reader, Writer};
@@ -501,6 +502,8 @@ impl InventarioRepository for SqliteInventarioRepository {
                 "UPDATE Detalle_Comanda SET ID_Producto = NULL WHERE ID_Producto=?1;",
                 // Movimientos antes que lotes (FK → Lotes), por el mismo motivo.
                 "DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto=?1);",
+                // Y los de su stock suelto (RI-55).
+                "DELETE FROM Movimientos_Stock WHERE ID_Producto=?1;",
                 "DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
                 "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
                 "DELETE FROM Productos WHERE ID_Producto=?1;",
@@ -521,6 +524,23 @@ impl InventarioRepository for SqliteInventarioRepository {
         let id_producto = p.id.unwrap_or_else(new_id);
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
+            // RI-55: el stock suelto sólo se escribe al CREAR el producto, y con su movimiento de
+            // alta. Editando la ficha se ignora: el formulario llevaba el valor que había cargado y
+            // lo reescribía sin rastro, pisando lo vendido mientras estaba abierto. Se cambia con
+            // `ajustar_stock_suelto`.
+            let es_nuevo = conn
+                .query(
+                    "SELECT 1 FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
+                    vec![Value::Text(id_producto.to_string())],
+                )
+                .await
+                .map_err(db_err)?
+                .next()
+                .await
+                .map_err(db_err)?
+                .is_none();
+            let stock_suelto = if es_nuevo { p.stock_suelto.map(redondear_cantidad) } else { None };
+
             conn.execute(
                 r#"
                 INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent)
@@ -535,7 +555,6 @@ impl InventarioRepository for SqliteInventarioRepository {
                   Nombre_Imagen = COALESCE(excluded.Nombre_Imagen, Productos.Nombre_Imagen),
                   Ruta_Imagen = COALESCE(excluded.Ruta_Imagen, Productos.Ruta_Imagen),
                   Cantidad_Pedido_Esperada = excluded.Cantidad_Pedido_Esperada,
-                  Stock_Suelto = excluded.Stock_Suelto,
                   IVA_Percent = excluded.IVA_Percent;
                 "#,
                 vec![
@@ -552,12 +571,30 @@ impl InventarioRepository for SqliteInventarioRepository {
                     opt_text(p.nombre_imagen),
                     opt_text(p.ruta_imagen),
                     opt_real(p.cantidad_pedido_esperada),
-                    opt_real(p.stock_suelto.map(redondear_cantidad)),
+                    opt_real(stock_suelto),
                     opt_real(p.iva_percent),
                 ],
             )
             .await
             .map_err(db_err)?;
+
+            if let Some(stock) = stock_suelto {
+                conn.execute(
+                    r#"
+                    INSERT INTO Movimientos_Stock
+                      (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                    VALUES
+                      (?1, ?2, 'ALTA', ?3, ?3, 'Alta del producto', NULL, datetime('now','localtime'));
+                    "#,
+                    vec![
+                        Value::Text(new_id()),
+                        Value::Text(id_producto.to_string()),
+                        Value::Real(stock),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
 
             conn.execute(
                 "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
@@ -645,45 +682,26 @@ impl InventarioRepository for SqliteInventarioRepository {
         finish_tx(conn, res).await
     }
 
-    /// Edición de un lote. Si el editor cambia `Stock_Disponible`, eso es un movimiento de
-    /// stock como cualquier otro y queda anotado como 'AJUSTE': la tabla `Movimientos_Stock`
-    /// existe precisamente para que ningún cambio del disponible se haga "a pelo sin rastro"
-    /// (INV-01b). Sin esta anotación, la reconciliación (INV-06) no puede distinguir una edición
-    /// legítima de un descuadre real y avisaría en falso cada vez que alguien edita un lote.
+    /// Edición de los **datos** de un lote: código, caducidad, coste, proveedor, notas. Las
+    /// existencias no se tocan (RI-55).
+    ///
+    /// Antes se escribía el `Stock_Disponible` que había cargado el formulario: si mientras estaba
+    /// abierto se vendían 3 de 10, cambiar sólo la caducidad devolvía el lote a 10 y anotaba un
+    /// ajuste de +3 «Edición del lote», y la reconciliación lo daba por bueno porque había un
+    /// movimiento que lo explicaba. Las existencias se cambian con `ajustar_lote`.
     async fn update_lote(&self, l: LoteUpdate) -> AppResult<()> {
-        let id_mov = new_id();
-        let id_lote = l.id_lote.clone();
-        let nuevo_stock = redondear_cantidad(l.stock_disponible);
-
         let db = self.db.write().await;
-        let conn = &db;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
-        let stock_previo = {
-            let mut rows = conn
-                .query(
-                    "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote = ?1 LIMIT 1;",
-                    vec![Value::Text(id_lote.clone())],
-                )
-                .await
-                .map_err(db_err)?;
-            match rows.next().await.map_err(db_err)? {
-                Some(r) => fl(r.get_value(0).map_err(db_err)?),
-                None => return Err(AppError::validation("Lote no encontrado")),
-            }
-        };
-
-        conn.execute(
+        let n = db
+            .execute(
                 r#"
                 UPDATE Lotes_Producto SET
                   ID_Producto = ?2,
                   Codigo_Lote = ?3,
                   Fecha_Entrada = COALESCE(NULLIF(?4, ''), Fecha_Entrada),
                   Caducidad = NULLIF(?5, ''),
-                  Stock_Disponible = ?6,
-                  Coste_Unitario = ?7,
-                  ID_Proveedor = ?8,
-                  Notas = ?9
+                  Coste_Unitario = ?6,
+                  ID_Proveedor = ?7,
+                  Notas = ?8
                 WHERE ID_Lote = ?1;
                 "#,
                 vec![
@@ -692,7 +710,6 @@ impl InventarioRepository for SqliteInventarioRepository {
                     Value::Text(l.codigo_lote),
                     opt_text(l.fecha_entrada),
                     opt_text(l.caducidad),
-                    Value::Real(nuevo_stock),
                     opt_dinero(l.coste_unitario),
                     match l.id_proveedor {
                         Some(v) => Value::Text(v),
@@ -703,45 +720,24 @@ impl InventarioRepository for SqliteInventarioRepository {
             )
             .await
             .map_err(db_err)?;
-
-            // Solo si cambió el disponible: renombrar el lote o cambiarle el proveedor no mueve
-            // stock. El delta es el físico (nuevo - previo), que es lo que hace que la suma de
-            // movimientos menos los consumos vuelva a dar el disponible.
-            if (nuevo_stock - stock_previo).abs() > 1e-9 {
-                conn.execute(
-                    r#"
-                    INSERT INTO Movimientos_Stock
-                      (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
-                    VALUES
-                      (?1, ?2, 'AJUSTE', ?3, ?4, ?5, NULL, datetime('now','localtime'));
-                    "#,
-                    vec![
-                        Value::Text(id_mov),
-                        Value::Text(id_lote),
-                        Value::Real(redondear_cantidad(nuevo_stock - stock_previo)),
-                        Value::Real(nuevo_stock),
-                        Value::Text("Edición del lote".into()),
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-
-            Ok(())
+        if n == 0 {
+            return Err(AppError::validation("Lote no encontrado"));
         }
-        .await;
-        finish_tx(conn, res).await
+        Ok(())
     }
 
+    /// Ajuste de las existencias de un lote (un recuento, una merma) con su movimiento 'AJUSTE'.
+    ///
+    /// RI-55: se compara lo que vio quien ajusta con lo que hay, dentro de la transacción. Si alguien
+    /// vendió o ajustó entre medias, no se toca nada y se avisa: aplicar el valor absoluto pisaría ese
+    /// movimiento y dejaría un descuadre con justificante.
     async fn ajustar_lote(&self, a: AjusteLote) -> AppResult<()> {
         let id_mov = new_id();
-        let new_stock = redondear_cantidad(a.stock_disponible);
         let g = self.db.write().await;
         let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
-            // Stock previo (dentro de la tx): da el delta del movimiento, atómico con la escritura.
-            let old_stock = {
+            let actual = {
                 let mut rows = conn
                     .query(
                         "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote = ?1 LIMIT 1;",
@@ -750,18 +746,21 @@ impl InventarioRepository for SqliteInventarioRepository {
                     .await
                     .map_err(db_err)?;
                 match rows.next().await.map_err(db_err)? {
-                    Some(r) => fl(r.get_value(0).map_err(db_err)?),
+                    Some(r) => redondear_cantidad(fl(r.get_value(0).map_err(db_err)?)),
                     None => return Err(AppError::validation("Lote no encontrado")),
                 }
             };
+            if !stock_sin_cambios(Some(a.stock_visto), Some(actual)) {
+                return Err(stock_cambiado(Some(actual)));
+            }
+            let delta = redondear_cantidad(a.stock_nuevo - actual);
+            if delta == 0.0 {
+                return Ok(());
+            }
 
             conn.execute(
-                "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
-                vec![
-                    Value::Real(new_stock),
-                    opt_text(a.notas.clone()),
-                    Value::Text(a.id_lote.clone()),
-                ],
+                "UPDATE Lotes_Producto SET Stock_Disponible = ?1 WHERE ID_Lote = ?2;",
+                vec![Value::Real(a.stock_nuevo), Value::Text(a.id_lote.clone())],
             )
             .await
             .map_err(db_err)?;
@@ -777,9 +776,9 @@ impl InventarioRepository for SqliteInventarioRepository {
                 vec![
                     Value::Text(id_mov),
                     Value::Text(a.id_lote),
-                    Value::Real(redondear_cantidad(new_stock - old_stock)),
-                    Value::Real(new_stock),
-                    opt_text(a.notas),
+                    Value::Real(delta),
+                    Value::Real(a.stock_nuevo),
+                    Value::Text(a.motivo.unwrap_or_else(|| "Ajuste manual".into())),
                 ],
             )
             .await
@@ -789,6 +788,94 @@ impl InventarioRepository for SqliteInventarioRepository {
         .await;
         finish_tx(conn, res).await
     }
+
+    /// Ajuste del stock suelto de un producto, con su movimiento (RI-55). Mismo trato que un lote:
+    /// se compara con lo visto y queda el rastro, que es lo que permite que la reconciliación cuadre
+    /// también el suelto.
+    async fn ajustar_stock_suelto(&self, a: AjusteSuelto) -> AppResult<()> {
+        let id_mov = new_id();
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<()> = async {
+            let actual = {
+                let mut rows = conn
+                    .query(
+                        "SELECT Stock_Suelto FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
+                        vec![Value::Text(a.id_producto.clone())],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                match rows.next().await.map_err(db_err)? {
+                    Some(r) => v_f64(r.get_value(0).map_err(db_err)?).map(redondear_cantidad),
+                    None => return Err(AppError::validation("Producto no encontrado")),
+                }
+            };
+            if !stock_sin_cambios(a.stock_visto, actual) {
+                return Err(stock_cambiado(actual));
+            }
+            if stock_sin_cambios(a.stock_nuevo, actual) {
+                return Ok(());
+            }
+
+            conn.execute(
+                "UPDATE Productos SET Stock_Suelto = ?1 WHERE ID_Producto = ?2;",
+                vec![opt_real(a.stock_nuevo), Value::Text(a.id_producto.clone())],
+            )
+            .await
+            .map_err(db_err)?;
+
+            // Dejar de llevar stock suelto es un movimiento que lo devuelve a cero: así la suma de
+            // movimientos menos los consumos sigue cuadrando si algún día se vuelve a activar.
+            let motivo = a.motivo.unwrap_or_else(|| {
+                if a.stock_nuevo.is_none() {
+                    "Deja de llevar stock suelto".into()
+                } else {
+                    "Ajuste manual".into()
+                }
+            });
+            conn.execute(
+                r#"
+                INSERT INTO Movimientos_Stock
+                  (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                VALUES
+                  (?1, ?2, 'AJUSTE', ?3, ?4, ?5, NULL, datetime('now','localtime'));
+                "#,
+                vec![
+                    Value::Text(id_mov),
+                    Value::Text(a.id_producto),
+                    Value::Real(redondear_cantidad(
+                        a.stock_nuevo.unwrap_or(0.0) - actual.unwrap_or(0.0),
+                    )),
+                    Value::Real(a.stock_nuevo.unwrap_or(0.0)),
+                    Value::Text(motivo),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(())
+        }
+        .await;
+        finish_tx(conn, res).await
+    }
+}
+
+/// Una cantidad para un mensaje: sin ceros de más y con coma decimal («7», «0,5»).
+fn cantidad_texto(x: f64) -> String {
+    let s = format!("{:.3}", redondear_cantidad(x));
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    s.replace('.', ",")
+}
+
+/// El ajuste llega tarde: lo que se vio ya no es lo que hay (RI-55).
+fn stock_cambiado(actual: Option<f64>) -> AppError {
+    let ahora = match actual {
+        Some(x) => format!("ahora hay {}", cantidad_texto(x)),
+        None => "ahora no lleva stock suelto".to_string(),
+    };
+    AppError::conflict(format!(
+        "Las existencias han cambiado mientras las ajustabas ({ahora}). Revísalas y vuelve a ajustar."
+    ))
 }
 
 async fn finish_tx<C: Writer>(conn: &C, res: AppResult<()>) -> AppResult<()> {

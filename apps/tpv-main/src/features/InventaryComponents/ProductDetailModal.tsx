@@ -21,7 +21,10 @@ import { eur } from "../../shared/lib/dinero";
 import { resolveImageUrl } from "../../shared/lib/imageUrl";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 import AddLoteModal from "./ui/AddLoteModal";
+import AjustarExistenciasModal from "./ui/AjustarExistenciasModal";
 import {
+  useAjustarLote,
+  useAjustarStockSuelto,
   useLotesByProducto,
   useProductoDetalle,
 } from "./inventarioQueries";
@@ -77,6 +80,10 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   const [lotesOpen, setLotesOpen] = useState(false);
   const [addLoteOpen, setAddLoteOpen] = useState(false);
   const [editingLote, setEditingLote] = useState<LoteDto | null>(null);
+  // RI-55: las existencias se cambian con un ajuste aparte, que manda lo que se veía.
+  const [ajustando, setAjustando] = useState<{ lote: LoteDto } | { suelto: true } | null>(null);
+  const ajustarLote = useAjustarLote();
+  const ajustarSuelto = useAjustarStockSuelto();
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -304,6 +311,23 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   </p>
                   <p className="mt-1 text-xl font-extrabold text-fg">{formatDateTimeES(ultimaEntrada?.Fecha_Entrada ?? null)}</p>
                 </div>
+
+                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
+                    <Boxes className="size-4 text-accent" aria-hidden />
+                    Stock suelto
+                  </p>
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <p className="text-xl font-extrabold text-fg">{numOrDash(p.Stock_Suelto)}</p>
+                    <button
+                      type="button"
+                      className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface transition text-xs font-extrabold cursor-pointer"
+                      onClick={() => setAjustando({ suelto: true })}
+                    >
+                      Ajustar
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* Alérgenos */}
@@ -423,6 +447,13 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                                   <button
                                     type="button"
                                     className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
+                                    onClick={() => setAjustando({ lote: l })}
+                                  >
+                                    Ajustar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
                                     onClick={() => {
                                       setEditingLote(l);
                                       setAddLoteOpen(true);
@@ -489,6 +520,39 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   await lotesQuery.refetch();
                 })}
               />
+
+              {ajustando && "lote" in ajustando && (
+                <AjustarExistenciasModal
+                  onClose={() => setAjustando(null)}
+                  titulo={`Lote ${ajustando.lote.Codigo_Lote} de ${p.Nombre}`}
+                  actual={Number(ajustando.lote.Stock_Disponible ?? 0)}
+                  onConfirmar={async (nuevo, motivo) => {
+                    await ajustarLote.mutateAsync({
+                      id_lote: ajustando.lote.ID_Lote,
+                      stock_visto: Number(ajustando.lote.Stock_Disponible ?? 0),
+                      stock_nuevo: nuevo ?? 0,
+                      motivo: motivo ?? undefined,
+                    });
+                  }}
+                />
+              )}
+
+              {ajustando && "suelto" in ajustando && (
+                <AjustarExistenciasModal
+                  onClose={() => setAjustando(null)}
+                  titulo={`Stock suelto de ${p.Nombre}`}
+                  actual={p.Stock_Suelto ?? null}
+                  permiteDejarDeLlevar
+                  onConfirmar={async (nuevo, motivo) => {
+                    await ajustarSuelto.mutateAsync({
+                      id_producto: p.ID_Producto,
+                      stock_visto: p.Stock_Suelto ?? undefined,
+                      stock_nuevo: nuevo ?? undefined,
+                      motivo: motivo ?? undefined,
+                    });
+                  }}
+                />
+              )}
 
             </>
           )}

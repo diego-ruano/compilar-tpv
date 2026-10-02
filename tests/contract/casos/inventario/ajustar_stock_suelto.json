@@ -1,0 +1,18 @@
+{
+  "descripcion": "RI-55: ajuste del stock suelto de un producto (se vio 5, hay 2), con su movimiento 'AJUSTE' del producto —sin lote— y delta −3.",
+  "comando": "inventario.ajustar_stock_suelto",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Cerveza', 5);"
+  ],
+  "entrada": {
+    "id_producto": "prod-1",
+    "stock_visto": 5,
+    "stock_nuevo": 2,
+    "motivo": "recuento"
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto, Stock_Suelto FROM Productos",
+    "Movimientos_Stock": "SELECT ID_Lote, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
+  }
+}

@@ -207,6 +207,21 @@ export async function getLoteStock(
 	return { stock_disponible: Number(r.Stock_Disponible ?? 0) };
 }
 
+// RI-55: el stock suelto de un producto, o `undefined` si el producto no existe (`null` es que
+// no lleva stock suelto).
+export async function getProductoStockSuelto(
+	db: Client,
+	idProducto: string,
+): Promise<number | null | undefined> {
+	const rs = await db.execute({
+		sql: "SELECT Stock_Suelto FROM Productos WHERE ID_Producto=?1 LIMIT 1;",
+		args: [idProducto],
+	});
+	const r = rows(rs)[0];
+	if (!r) return undefined;
+	return r.Stock_Suelto == null ? null : Number(r.Stock_Suelto);
+}
+
 // ¿El producto está referenciado por alguna Detalle_Comanda? (borrado con histórico, INV-05).
 export async function productoReferenciado(
 	db: Client,

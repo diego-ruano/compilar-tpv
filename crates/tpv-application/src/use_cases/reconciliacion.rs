@@ -124,9 +124,9 @@ async fn avisar(notifier: &dyn Notifier, clave: &str, cuadrado: bool, aviso: Nue
 
 fn titulo_stock(n: usize) -> String {
     if n == 1 {
-        "Un lote no cuadra con su historial".to_string()
+        "Un lote o stock suelto no cuadra con su historial".to_string()
     } else {
-        format!("{n} lotes no cuadran con su historial")
+        format!("{n} lotes o stocks sueltos no cuadran con su historial")
     }
 }
 

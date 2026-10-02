@@ -1,0 +1,10 @@
+{
+  "Movimientos_Stock": [],
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "Nombre": "Rioja",
+      "Stock_Suelto": 7.0
+    }
+  ]
+}

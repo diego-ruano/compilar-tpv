@@ -60,11 +60,14 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
         if (!productId) return false;
         if (!codigoLote.trim()) return false;
 
-        const cant = toNum(cantidad);
-        if (!Number.isFinite(cant) || cant < 0) return false;
+        // Editando, la cantidad no se toca (RI-55): no hay nada que validar.
+        if (!isEdit) {
+            const cant = toNum(cantidad);
+            if (!Number.isFinite(cant) || cant < 0) return false;
+        }
 
         return coste.legible;
-    }, [productId, codigoLote, cantidad, coste.legible]);
+    }, [productId, codigoLote, cantidad, coste.legible, isEdit]);
 
     const reset = () => {
         setCodigoLote("");
@@ -94,7 +97,6 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
                     id_producto: productId,
                     codigo_lote: codigoLote.trim(),
                     caducidad: caducidad.trim() || undefined,
-                    stock_disponible: cant,
                     coste_unitario: coste.valor ?? undefined,
                     fecha_entrada: loteToEdit.Fecha_Entrada || undefined,
                     id_proveedor: loteToEdit.ID_Proveedor ?? undefined,
@@ -151,16 +153,23 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
                 </div>
 
                 <div>
-                    <label className="text-sm font-semibold text-fg">Cantidad *</label>
+                    <label className="text-sm font-semibold text-fg">{isEdit ? "Cantidad" : "Cantidad *"}</label>
                     <input
                         type="number"
-                        step="0.01"
+                        step="0.001"
                         value={cantidad}
                         onChange={(e) => setCantidad(e.target.value)}
-                        className="mt-1 w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
-                        disabled={loading}
-                        required
+                        className="mt-1 w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                        disabled={loading || isEdit}
+                        required={!isEdit}
                     />
+                    {isEdit && (
+                        // RI-55: editar el lote no cambia sus existencias. Antes se guardaba la
+                        // cantidad cargada al abrir, y lo vendido mientras tanto volvía al lote.
+                        <p className="mt-1 text-xs text-fg-muted">
+                            Para cambiar las existencias usa «Ajustar» en la lista de lotes.
+                        </p>
+                    )}
                 </div>
 
                 <div>

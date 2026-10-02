@@ -1,0 +1,26 @@
+{
+  "descripcion": "RI-55: crear un producto con stock suelto (4) lo guarda con su movimiento 'ALTA' del producto, para que la reconciliación pueda cuadrarlo.",
+  "comando": "inventario.upsert_producto",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');"
+  ],
+  "entrada": {
+    "id_producto": "prod-1",
+    "id_categoria": "cat-1",
+    "id_proveedor": null,
+    "nombre": "Rioja",
+    "precio_venta": 1200,
+    "stock_minimo": 2,
+    "unidad_medida": "botella",
+    "nombre_imagen": null,
+    "ruta_imagen": null,
+    "cantidad_pedido_esperada": null,
+    "stock_suelto": 4,
+    "iva_percent": 21,
+    "ids_alergenos": []
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto, Stock_Suelto FROM Productos",
+    "Movimientos_Stock": "SELECT ID_Lote, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
+  }
+}

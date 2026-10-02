@@ -48,7 +48,9 @@ use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::mesas::SalonInput;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::cuentas::{normalize_metodo, GastoData, PagoData};
-use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
+use tpv_domain::inventario::{
+    AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+};
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 use tpv_domain::notificaciones::NuevaNotificacion;
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
@@ -285,6 +287,10 @@ casos_de_contrato! {
     inventario__delete_producto,
     inventario__update_lote,
     inventario__ajustar_lote,
+    inventario__ajustar_lote_stock_cambiado,
+    inventario__ajustar_stock_suelto,
+    inventario__upsert_producto_con_suelto,
+    inventario__upsert_producto_no_toca_suelto,
     configuracion__patch_business,
     configuracion__patch_contact,
     configuracion__patch_ticket,
@@ -510,7 +516,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 id_producto: s(&e["id_producto"]),
                 codigo_lote: s(&e["codigo_lote"]),
                 caducidad: opt_str(&e["caducidad"]),
-                stock_disponible: e["stock_disponible"].as_f64().unwrap(),
                 fecha_entrada: opt_str(&e["fecha_entrada"]),
                 coste_unitario: dinero(&e["coste_unitario"]),
                 id_proveedor: opt_str(&e["id_proveedor"]),
@@ -521,13 +526,27 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "inventario.ajustar_lote" => {
             let repo = SqliteInventarioRepository::new(db.clone());
-            repo.ajustar_lote(AjusteLote {
-                id_lote: s(&e["id_lote"]),
-                stock_disponible: e["stock_disponible"].as_f64().unwrap(),
-                notas: opt_str(&e["notas"]),
-            })
-            .await
-            .expect("ajustar lote");
+            // Un ajuste que llega tarde (RI-55) es un `Conflict` que no toca nada: lo que se
+            // compara es el efecto, así que el error no se trata como fallo del caso.
+            let _ = repo
+                .ajustar_lote(AjusteLote {
+                    id_lote: s(&e["id_lote"]),
+                    stock_visto: e["stock_visto"].as_f64().unwrap(),
+                    stock_nuevo: e["stock_nuevo"].as_f64().unwrap(),
+                    motivo: opt_str(&e["motivo"]),
+                })
+                .await;
+        }
+        "inventario.ajustar_stock_suelto" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            let _ = repo
+                .ajustar_stock_suelto(AjusteSuelto {
+                    id_producto: s(&e["id_producto"]),
+                    stock_visto: e["stock_visto"].as_f64(),
+                    stock_nuevo: e["stock_nuevo"].as_f64(),
+                    motivo: opt_str(&e["motivo"]),
+                })
+                .await;
         }
         "config.patch_business" => {
             let repo = SqliteConfiguracionRepository::new(db.clone());

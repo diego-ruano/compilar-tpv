@@ -15,7 +15,7 @@ use tpv_contracts::inventario::{
     ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
 };
 use tpv_domain::inventario::{
-    AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+    AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
 };
 
 use crate::CloudClient;
@@ -192,7 +192,6 @@ impl InventarioRepository for HttpInventarioRepository {
             "id_producto": lote.id_producto,
             "codigo_lote": lote.codigo_lote,
             "caducidad": lote.caducidad,
-            "stock_disponible": lote.stock_disponible,
             "fecha_entrada": lote.fecha_entrada,
             "coste_unitario": lote.coste_unitario,
             "id_proveedor": lote.id_proveedor,
@@ -212,12 +211,29 @@ impl InventarioRepository for HttpInventarioRepository {
 
     async fn ajustar_lote(&self, ajuste: AjusteLote) -> AppResult<()> {
         let body = json!({
-            "stock_disponible": ajuste.stock_disponible,
-            "notas": ajuste.notas,
+            "stock_visto": ajuste.stock_visto,
+            "stock_nuevo": ajuste.stock_nuevo,
+            "motivo": ajuste.motivo,
         });
         let _: JsonValue = self
             .client
             .patch_json(&format!("/v1/inventario/lotes/{}", ajuste.id_lote), &body)
+            .await?;
+        Ok(())
+    }
+
+    async fn ajustar_stock_suelto(&self, ajuste: AjusteSuelto) -> AppResult<()> {
+        let body = json!({
+            "stock_visto": ajuste.stock_visto,
+            "stock_nuevo": ajuste.stock_nuevo,
+            "motivo": ajuste.motivo,
+        });
+        let _: JsonValue = self
+            .client
+            .patch_json(
+                &format!("/v1/inventario/productos/{}/stock-suelto", ajuste.id_producto),
+                &body,
+            )
             .await?;
         Ok(())
     }

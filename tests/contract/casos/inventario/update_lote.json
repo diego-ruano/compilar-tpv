@@ -1,5 +1,5 @@
 {
-  "descripcion": "Edición de un lote que cambia el disponible (5 → 8): UPDATE del lote + movimiento 'AJUSTE' con delta = nuevo − previo (+3), motivo 'Edición del lote'. El stock previo lo lee el despacho antes de llamar al builder (el worker lo recibe como arg; Rust lo lee dentro). ID_Movimiento y Fecha se excluyen.",
+  "descripcion": "Edición de los DATOS de un lote (código, caducidad, coste, notas): las existencias no se tocan —el lote sigue con 5— y no se anota ningún movimiento (RI-55: antes se escribía el disponible que había cargado el formulario).",
   "comando": "inventario.update_lote",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
@@ -11,7 +11,6 @@
     "id_producto": "prod-1",
     "codigo_lote": "L1B",
     "caducidad": "2026-09-01",
-    "stock_disponible": 8,
     "fecha_entrada": "2026-01-01 00:00:00",
     "coste_unitario": 200,
     "id_proveedor": null,

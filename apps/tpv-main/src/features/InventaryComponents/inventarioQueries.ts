@@ -13,6 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import type {
   AjusteLoteInput,
+  AjusteStockSueltoInput,
   CreateLoteInput,
   UpdateLoteInput,
   UpsertCategoriaInput,
@@ -158,7 +159,7 @@ export function useCreateLote() {
   });
 }
 
-/** Edición completa de lote; invalida la caché de inventario al confirmar. */
+/** Edición de los datos de un lote (sin sus existencias, RI-55); invalida la caché de inventario. */
 export function useUpdateLote() {
   const qc = useQueryClient();
   return useMutation({
@@ -167,11 +168,23 @@ export function useUpdateLote() {
   });
 }
 
-/** Ajuste de stock de un lote; invalida la caché de inventario al confirmar. */
+/**
+ * Ajuste de las existencias de un lote con lo que se vio (RI-55). Invalida la caché también si falla:
+ * un rechazo por «las existencias han cambiado» significa que lo que se enseña ya no vale.
+ */
 export function useAjustarLote() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: AjusteLoteInput) => inventarioAPI.ajustarLote(args),
-    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+    onSettled: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+  });
+}
+
+/** Lo mismo para el stock suelto de un producto (RI-55). */
+export function useAjustarStockSuelto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: AjusteStockSueltoInput) => inventarioAPI.ajustarStockSuelto(args),
+    onSettled: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
   });
 }

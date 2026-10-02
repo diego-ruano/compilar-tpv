@@ -524,17 +524,19 @@ export function AddProductModal({
                         <input
                             id="producto-stock-suelto"
                             type="number"
-                            step="0.01"
+                            step="0.001"
                             value={stockSuelto}
                             onChange={(e) => setStockSuelto(e.target.value)}
                             placeholder="Vacío = no se controla"
-                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            disabled={loading}
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                            // RI-55: sólo al crear. Guardar la ficha reescribía el valor que había
+                            // cargado y pisaba lo vendido mientras estaba abierta.
+                            disabled={loading || isEdit}
                         />
                         <p className="mt-1 text-xs text-fg-muted">
-                            Stock simple sin lotes: se descuenta al vender lo que no cubran los lotes y
-                            puede quedar negativo (aviso de que has vendido de más). Déjalo vacío si el
-                            producto no lleva control de stock.
+                            {isEdit
+                                ? "Se cambia con «Ajustar» en la ficha del producto, que deja constancia del cambio."
+                                : "Stock simple sin lotes: se descuenta al vender lo que no cubran los lotes y puede quedar negativo (aviso de que has vendido de más). Déjalo vacío si el producto no lleva control de stock."}
                         </p>
                     </div>
 

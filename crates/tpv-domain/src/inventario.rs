@@ -143,14 +143,18 @@ pub struct LoteNuevo {
     pub notas: Option<String>,
 }
 
-/// Lote existente a actualizar.
+/// Lote existente a actualizar: sus **datos**, nunca sus existencias.
+///
+/// RI-55: la edición llevaba el stock que el formulario había cargado y lo escribía en absoluto. Si
+/// mientras estaba abierto se vendían 3 de 10, guardar sólo la caducidad devolvía el lote a 10 y
+/// anotaba un ajuste de +3 «Edición del lote»: stock fantasma con justificante. Las existencias se
+/// cambian con [`AjusteLote`], que comprueba que nadie las ha movido entre medias.
 #[derive(Debug, Clone)]
 pub struct LoteUpdate {
     pub id_lote: String,
     pub id_producto: String,
     pub codigo_lote: String,
     pub caducidad: Option<String>,
-    pub stock_disponible: f64,
     pub fecha_entrada: Option<String>,
     pub coste_unitario: Option<Dinero>,
     pub id_proveedor: Option<String>,
@@ -164,7 +168,6 @@ impl LoteUpdate {
         id_producto: String,
         codigo_lote: String,
         caducidad: Option<String>,
-        stock_disponible: f64,
         fecha_entrada: Option<String>,
         coste_unitario: Option<Dinero>,
         id_proveedor: Option<String>,
@@ -174,12 +177,13 @@ impl LoteUpdate {
         if id_lote.is_empty() {
             return Err("id_lote inválido".into());
         }
+        // Las mismas reglas que el alta para todo lo demás; la cantidad no entra.
         let lote = LoteNuevo::validar(
             Some(id_lote.clone()),
             id_producto,
             codigo_lote,
             caducidad,
-            stock_disponible,
+            0.0,
             fecha_entrada,
             coste_unitario,
             id_proveedor,
@@ -190,7 +194,6 @@ impl LoteUpdate {
             id_producto: lote.id_producto,
             codigo_lote: lote.codigo_lote,
             caducidad: lote.caducidad,
-            stock_disponible: lote.stock_disponible,
             fecha_entrada: lote.fecha_entrada,
             coste_unitario: lote.coste_unitario,
             id_proveedor: lote.id_proveedor,
@@ -266,31 +269,95 @@ impl LoteNuevo {
     }
 }
 
-/// Ajuste de stock de un lote.
+/// Cuánto se puede separar lo que vio quien ajusta de lo que hay: menos de medio gramo, la mitad de la
+/// precisión con que se guardan las cantidades (`crate::cantidad`).
+const TOLERANCIA_STOCK_VISTO: f64 = 0.0005;
+
+/// ¿Sigue habiendo lo que se vio? Si no, alguien vendió o ajustó mientras el formulario estaba
+/// abierto y aplicar el ajuste pisaría ese movimiento (RI-55).
+pub fn stock_sin_cambios(visto: Option<f64>, actual: Option<f64>) -> bool {
+    match (visto, actual) {
+        (None, None) => true,
+        (Some(v), Some(a)) => (v - a).abs() < TOLERANCIA_STOCK_VISTO,
+        _ => false,
+    }
+}
+
+/// Ajuste de las existencias de un lote: un recuento, una merma, una rotura (RI-55).
+///
+/// Lleva **lo que se vio** además de lo que hay ahora. Un recuento es un valor absoluto —«en la
+/// estantería hay 7»—, pero si entre que se abrió el formulario y se guardó se vendió algo, ese 7 ya
+/// no cuenta lo mismo: el ajuste se rechaza y se vuelve a mirar, en vez de pisar la venta.
 #[derive(Debug, Clone)]
 pub struct AjusteLote {
     pub id_lote: String,
-    pub stock_disponible: f64,
-    pub notas: Option<String>,
+    pub stock_visto: f64,
+    pub stock_nuevo: f64,
+    pub motivo: Option<String>,
 }
 
 impl AjusteLote {
     pub fn validar(
         id_lote: String,
-        stock_disponible: f64,
-        notas: Option<String>,
+        stock_visto: f64,
+        stock_nuevo: f64,
+        motivo: Option<String>,
     ) -> Result<Self, String> {
         let id_lote = id_lote.trim().to_string();
         if id_lote.is_empty() {
             return Err("id_lote inválido".into());
         }
-        if !stock_disponible.is_finite() || stock_disponible < 0.0 {
-            return Err("Stock_Disponible inválido".into());
+        // Lo visto puede ser negativo (una sobreventa); lo que queda tras el recuento, no.
+        if !stock_visto.is_finite() {
+            return Err("Stock visto inválido".into());
+        }
+        if !stock_nuevo.is_finite() || stock_nuevo < 0.0 {
+            return Err("La cantidad no puede ser negativa".into());
         }
         Ok(AjusteLote {
             id_lote,
-            stock_disponible,
-            notas: limpia(notas),
+            stock_visto: crate::cantidad::redondear_cantidad(stock_visto),
+            stock_nuevo: crate::cantidad::redondear_cantidad(stock_nuevo),
+            motivo: limpia(motivo),
+        })
+    }
+}
+
+/// Ajuste del stock **suelto** de un producto (RI-55), con lo que se vio igual que [`AjusteLote`].
+///
+/// `None` es «este producto no lleva stock suelto»: `stock_nuevo = None` deja de llevarlo y
+/// `stock_visto = None` dice que no lo llevaba. A diferencia de un lote, el suelto puede quedarse en
+/// negativo (la señal de sobreventa), pero un recuento no lo deja ahí.
+#[derive(Debug, Clone)]
+pub struct AjusteSuelto {
+    pub id_producto: String,
+    pub stock_visto: Option<f64>,
+    pub stock_nuevo: Option<f64>,
+    pub motivo: Option<String>,
+}
+
+impl AjusteSuelto {
+    pub fn validar(
+        id_producto: String,
+        stock_visto: Option<f64>,
+        stock_nuevo: Option<f64>,
+        motivo: Option<String>,
+    ) -> Result<Self, String> {
+        let id_producto = id_producto.trim().to_string();
+        if id_producto.is_empty() {
+            return Err("id_producto inválido".into());
+        }
+        if stock_visto.is_some_and(|v| !v.is_finite()) {
+            return Err("Stock visto inválido".into());
+        }
+        if stock_nuevo.is_some_and(|v| !v.is_finite() || v < 0.0) {
+            return Err("La cantidad no puede ser negativa".into());
+        }
+        Ok(AjusteSuelto {
+            id_producto,
+            stock_visto: stock_visto.map(crate::cantidad::redondear_cantidad),
+            stock_nuevo: stock_nuevo.map(crate::cantidad::redondear_cantidad),
+            motivo: limpia(motivo),
         })
     }
 }
@@ -406,22 +473,43 @@ mod tests {
     }
 
     #[test]
-    fn update_exige_id_y_reutiliza_reglas_de_lote() {
-        assert!(LoteUpdate::validar(" ".into(), "p".into(), "l".into(), None, 1.0, None, None, None, None).is_err());
-        assert!(LoteUpdate::validar("l1".into(), "p".into(), "l".into(), None, -1.0, None, None, None, None).is_err());
-        let l = LoteUpdate::validar(" l1 ".into(), " p1 ".into(), " lote ".into(), None, 2.0, None, None, None, Some(" nota ".into())).unwrap();
+    fn update_exige_id_y_reutiliza_reglas_de_lote_pero_no_lleva_cantidad() {
+        assert!(LoteUpdate::validar(" ".into(), "p".into(), "l".into(), None, None, None, None, None).is_err());
+        assert!(LoteUpdate::validar("l1".into(), " ".into(), "l".into(), None, None, None, None, None).is_err());
+        let l = LoteUpdate::validar(" l1 ".into(), " p1 ".into(), " lote ".into(), None, None, None, None, Some(" nota ".into())).unwrap();
         assert_eq!(l.id_lote, "l1");
-        assert_eq!(l.stock_disponible, 2.0);
         assert_eq!(l.notas.as_deref(), Some("nota"));
     }
 
     #[test]
-    fn ajuste_exige_id_y_stock_finito_no_negativo() {
-        assert!(AjusteLote::validar(" ".into(), 1.0, None).is_err());
-        for stock in [-1.0, f64::NAN, f64::INFINITY] { assert!(AjusteLote::validar("l1".into(), stock, None).is_err()); }
-        let a = AjusteLote::validar(" l1 ".into(), 0.0, Some(" merma ".into())).unwrap();
+    fn ajuste_exige_id_y_cantidad_nueva_finita_no_negativa() {
+        assert!(AjusteLote::validar(" ".into(), 1.0, 1.0, None).is_err());
+        for nuevo in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(AjusteLote::validar("l1".into(), 1.0, nuevo, None).is_err());
+        }
+        // Lo visto sí puede ser negativo: un lote en sobreventa que se recuenta.
+        let a = AjusteLote::validar(" l1 ".into(), -2.0, 0.30000000000000004, Some(" merma ".into())).unwrap();
         assert_eq!(a.id_lote, "l1");
-        assert_eq!(a.stock_disponible, 0.0);
-        assert_eq!(a.notas.as_deref(), Some("merma"));
+        assert_eq!(a.stock_visto, -2.0);
+        assert_eq!(a.stock_nuevo, 0.3, "se guarda redondeado a milésimas (RI-26)");
+        assert_eq!(a.motivo.as_deref(), Some("merma"));
+    }
+
+    #[test]
+    fn ajuste_suelto_admite_dejar_de_llevarlo_pero_no_un_negativo() {
+        assert!(AjusteSuelto::validar("p".into(), Some(3.0), Some(-1.0), None).is_err());
+        assert!(AjusteSuelto::validar(" ".into(), None, Some(1.0), None).is_err());
+        let a = AjusteSuelto::validar("p".into(), Some(-4.0), None, None).unwrap();
+        assert_eq!((a.stock_visto, a.stock_nuevo), (Some(-4.0), None));
+    }
+
+    #[test]
+    fn el_stock_visto_tiene_que_seguir_siendo_el_actual() {
+        assert!(stock_sin_cambios(Some(7.0), Some(7.0)));
+        assert!(stock_sin_cambios(Some(7.0), Some(7.0004)), "por debajo de la precisión no es un cambio");
+        assert!(!stock_sin_cambios(Some(10.0), Some(7.0)), "se vendieron 3 mientras se ajustaba");
+        assert!(stock_sin_cambios(None, None));
+        assert!(!stock_sin_cambios(None, Some(2.0)), "alguien le puso stock suelto entre medias");
+        assert!(!stock_sin_cambios(Some(2.0), None));
     }
 }
