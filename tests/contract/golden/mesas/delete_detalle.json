@@ -1,3 +1,13 @@
 {
-  "Detalle_Comanda": []
+  "Comandas": [
+    {
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 300
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "ID_Detalle": "detalle-2"
+    }
+  ]
 }

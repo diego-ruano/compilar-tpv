@@ -1,19 +1,21 @@
 {
-  "descripcion": "Borra un detalle concreto de la comanda. Queda la tabla de detalles vacía.",
+  "descripcion": "Borra un detalle concreto de la comanda y re-deriva Total_Comanda de las líneas que quedan (RI-11: la Main leía el id de la comanda como entero, fallaba en silencio y no recalculaba).",
   "comando": "mesas.delete_detalle",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 300);",
-    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-1', 'comanda-1', 'prod-1', 2, 300);"
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta', 900);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-1', 'comanda-1', 'prod-1', 2, 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-2', 'comanda-1', 'prod-1', 1, 300);"
   ],
   "entrada": {
     "id_detalle": "detalle-1",
     "id_comanda": "comanda-1"
   },
   "snapshot": {
-    "Detalle_Comanda": "SELECT ID_Detalle FROM Detalle_Comanda"
+    "Detalle_Comanda": "SELECT ID_Detalle FROM Detalle_Comanda",
+    "Comandas": "SELECT ID_Comanda, Total_Comanda FROM Comandas"
   }
 }

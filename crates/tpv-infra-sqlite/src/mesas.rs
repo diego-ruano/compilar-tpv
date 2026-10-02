@@ -1914,7 +1914,9 @@ impl MesasRepository for SqliteMesasRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
-            let id_comanda = select_one_i64(
+            // RI-11: el id es un UUID de texto. Leído como entero daba `None` y el total no se
+            // recalculaba nunca; lo vigila el caso de contrato `mesas__delete_detalle`.
+            let id_comanda = select_one_string(
                 db,
                 "SELECT ID_Comanda FROM Detalle_Comanda WHERE ID_Detalle=?1 LIMIT 1;",
                 vec![Value::Text(id_detalle.to_string())],
@@ -1935,7 +1937,7 @@ impl MesasRepository for SqliteMesasRepository {
             .map_err(db_err)?;
 
             if let Some(idc) = id_comanda {
-                db.execute(update_total_comanda_sql(), vec![Value::Integer(idc)])
+                db.execute(update_total_comanda_sql(), vec![Value::Text(idc)])
                     .await
                     .map_err(db_err)?;
             }
