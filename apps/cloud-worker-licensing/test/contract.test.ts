@@ -99,10 +99,9 @@ import {
 	deleteComandaIfSafe,
 	deleteLineaIfUnpaid,
 	removeLastUnpaidLinea,
-	restarStock,
 	updateNotaDetalle,
 } from "../src/domains/venta_rapida/venta_rapida.commands";
-import { cobrarPlan, restarStockPlan } from "../src/domains/venta_rapida/venta_rapida.queries";
+import { cobrarPlan } from "../src/domains/venta_rapida/venta_rapida.queries";
 
 // Casos del harness. Los goldens los bendice Rust (lado canónico). Añadir uno: crear el fixture,
 // bendecir su golden y sumar aquí su par caso/golden (workerd no lee del disco: los imports son
@@ -113,6 +112,8 @@ import casoVrMultilote from "../../../tests/contract/casos/venta_rapida/cobro_fr
 import goldenVrMultilote from "../../../tests/contract/golden/venta_rapida/cobro_fraccionado_fefo_multilote.json";
 import casoMesasCobro from "../../../tests/contract/casos/mesas/cobrar_detalles_un_lote.json";
 import goldenMesasCobro from "../../../tests/contract/golden/mesas/cobrar_detalles_un_lote.json";
+import casoMesasCobroSuelto from "../../../tests/contract/casos/mesas/cobrar_detalles_lote_y_suelto.json";
+import goldenMesasCobroSuelto from "../../../tests/contract/golden/mesas/cobrar_detalles_lote_y_suelto.json";
 import casoCliCrear from "../../../tests/contract/casos/clientes/crear.json";
 import goldenCliCrear from "../../../tests/contract/golden/clientes/crear.json";
 import casoCliActualizar from "../../../tests/contract/casos/clientes/actualizar.json";
@@ -177,8 +178,6 @@ import casoVrDeleteLinea from "../../../tests/contract/casos/venta_rapida/delete
 import goldenVrDeleteLinea from "../../../tests/contract/golden/venta_rapida/delete_linea_if_unpaid.json";
 import casoVrUpdateNota from "../../../tests/contract/casos/venta_rapida/update_nota_detalle.json";
 import goldenVrUpdateNota from "../../../tests/contract/golden/venta_rapida/update_nota_detalle.json";
-import casoVrRestarStock from "../../../tests/contract/casos/venta_rapida/restar_stock.json";
-import goldenVrRestarStock from "../../../tests/contract/golden/venta_rapida/restar_stock.json";
 import casoVrDeleteComanda from "../../../tests/contract/casos/venta_rapida/delete_comanda_if_safe.json";
 import goldenVrDeleteComanda from "../../../tests/contract/golden/venta_rapida/delete_comanda_if_safe.json";
 import casoMesaSaveLayout from "../../../tests/contract/casos/mesas/save_layout.json";
@@ -246,6 +245,7 @@ const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
 	{ nombre: "vr_fefo_multilote", caso: casoVrMultilote, golden: goldenVrMultilote },
 	{ nombre: "mesas_cobro_un_lote", caso: casoMesasCobro, golden: goldenMesasCobro },
+	{ nombre: "mesas_cobro_lote_y_suelto", caso: casoMesasCobroSuelto, golden: goldenMesasCobroSuelto },
 	{ nombre: "clientes_crear", caso: casoCliCrear, golden: goldenCliCrear },
 	{ nombre: "clientes_actualizar", caso: casoCliActualizar, golden: goldenCliActualizar },
 	{ nombre: "tareas_crear", caso: casoTareaCrear, golden: goldenTareaCrear },
@@ -278,7 +278,6 @@ const CASOS = [
 	{ nombre: "vr_remove_last_unpaid_linea", caso: casoVrRemoveLast, golden: goldenVrRemoveLast },
 	{ nombre: "vr_delete_linea_if_unpaid", caso: casoVrDeleteLinea, golden: goldenVrDeleteLinea },
 	{ nombre: "vr_update_nota_detalle", caso: casoVrUpdateNota, golden: goldenVrUpdateNota },
-	{ nombre: "vr_restar_stock", caso: casoVrRestarStock, golden: goldenVrRestarStock },
 	{ nombre: "vr_delete_comanda_if_safe", caso: casoVrDeleteComanda, golden: goldenVrDeleteComanda },
 	{ nombre: "mesas_save_layout", caso: casoMesaSaveLayout, golden: goldenMesaSaveLayout },
 	{ nombre: "mesas_abrir_comanda", caso: casoMesaAbrir, golden: goldenMesaAbrir },
@@ -625,11 +624,6 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "venta_rapida.update_nota_detalle": {
 			aplicar(hub, sql, updateNotaDetalle(caso.entrada as any));
-			return;
-		}
-		case "venta_rapida.restar_stock": {
-			const plan = await restarStockPlan(db, caso.entrada as any);
-			aplicar(hub, sql, restarStock(caso.entrada as any, plan as any));
 			return;
 		}
 		case "venta_rapida.delete_comanda_if_safe": {

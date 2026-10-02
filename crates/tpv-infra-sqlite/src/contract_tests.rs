@@ -46,7 +46,6 @@ use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::mesas::SalonInput;
-use tpv_contracts::venta_rapida::StockLinea;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::cuentas::{normalize_metodo, GastoData, PagoData};
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
@@ -268,6 +267,7 @@ casos_de_contrato! {
     venta_rapida__cobro_fraccionado_un_lote,
     venta_rapida__cobro_fraccionado_fefo_multilote,
     mesas__cobrar_detalles_un_lote,
+    mesas__cobrar_detalles_lote_y_suelto,
     clientes__crear,
     clientes__actualizar,
     tareas__crear,
@@ -300,7 +300,6 @@ casos_de_contrato! {
     venta_rapida__remove_last_unpaid_linea,
     venta_rapida__delete_linea_if_unpaid,
     venta_rapida__update_nota_detalle,
-    venta_rapida__restar_stock,
     venta_rapida__delete_comanda_if_safe,
     mesas__save_layout,
     mesas__set_reserva_estado,
@@ -639,19 +638,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             repo.update_nota_detalle(&s(&e["id_detalle"]), opt_str(&e["nota"]))
                 .await
                 .expect("update nota detalle");
-        }
-        "venta_rapida.restar_stock" => {
-            let repo = SqliteVentaRapidaRepository::new(db.clone());
-            let lineas = e["lineas"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|l| StockLinea {
-                    producto_id: s(&l["producto_id"]),
-                    cantidad: l["cantidad"].as_f64().unwrap(),
-                })
-                .collect();
-            repo.restar_stock(lineas).await.expect("restar stock");
         }
         "venta_rapida.delete_comanda_if_safe" => {
             let repo = SqliteVentaRapidaRepository::new(db.clone());

@@ -2,6 +2,7 @@
 
 import type { Client } from "@libsql/client/web";
 import { deLaBase } from "../../lib/dinero";
+import { planConsumo, type PlanConsumo } from "../inventario/consumo";
 
 import type {
 	CategoriaVendibleOut,
@@ -387,33 +388,8 @@ export async function idComandaByDetalle(
 	return id ? id : null;
 }
 
-type StockAllocation = { id_lote: string; take: number; id_detalle: string | null };
-
-async function lotRows(db: Client, productoId: string) {
-	const rs = await db.execute({
-		sql: `
-			SELECT
-				ID_Lote AS id_lote,
-				COALESCE(Stock_Disponible,0) AS stock
-			FROM Lotes_Producto
-			WHERE ID_Producto = ?1
-				AND COALESCE(Stock_Disponible,0) > 0
-			ORDER BY
-				CASE WHEN Caducidad IS NULL THEN 1 ELSE 0 END,
-				date(Caducidad) ASC,
-				datetime(Fecha_Entrada) ASC,
-				ID_Lote ASC;
-		`,
-		args: [productoId],
-	});
-	return rows(rs).map((r) => ({
-		id_lote: String(r.id_lote ?? ""),
-		stock: Number(r.stock ?? 0),
-	}));
-}
-
 export type CobroDetallesPlan =
-	| { ok: true; total: number; id_trabajador: string | null; allocations: StockAllocation[] }
+	| { ok: true; total: number; id_trabajador: string | null; consumo: PlanConsumo }
 	| { ok: false; error: string };
 
 export async function cobrarDetallesPlan(
@@ -477,22 +453,12 @@ export async function cobrarDetallesPlan(
 		}))
 		.filter((r) => r.id_detalle.length > 0 && r.id_producto.length > 0 && r.cantidad > 0);
 
-	const allocations: StockAllocation[] = [];
-	for (const linea of charged) {
-		let remaining = linea.cantidad;
-		for (const lot of await lotRows(db, linea.id_producto)) {
-			if (remaining <= 0) break;
-			const take = Math.min(remaining, lot.stock);
-			if (take <= 0) continue;
-			allocations.push({ id_lote: lot.id_lote, take, id_detalle: linea.id_detalle });
-			remaining -= take;
-		}
-	}
+	const consumo = await planConsumo(db, charged);
 	return {
 		ok: true,
 		total,
 		id_trabajador: await resolveTrabajadorId(db, input.id_usuario),
-		allocations,
+		consumo,
 	};
 }
 

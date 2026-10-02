@@ -2,14 +2,14 @@
 
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
-import type { CobroPlan, RestarStockPlan } from "./venta_rapida.queries";
+import { pasosConsumo } from "../inventario/consumo";
+import type { CobroPlan } from "./venta_rapida.queries";
 import type {
 	AddLineaInput,
 	CobrarFraccionadoInput,
 	CreateComandaBarraInput,
 	DeleteLineaInput,
 	RemoveLastLineaInput,
-	RestarStockInput,
 	UpdateNotaInput,
 } from "./venta_rapida.schemas";
 
@@ -342,67 +342,8 @@ export function cobrarFraccionado(
 		});
 	}
 
-	for (const a of plan.allocations) {
-		steps.push({
-			kind: "execute",
-			// VR-06: descuento RELATIVO sin clamp. Un clamp a 0 se dispararía en una copia y no en
-			// la otra según su stock local; aplicando el mismo delta a secas, las dos convergen. El
-			// plan nunca toma de un lote más de lo que tiene aquí, pero dos cobros a la vez (Main y
-			// Handy) sobre el mismo lote sí pueden dejarlo negativo al replicarse: es la señal de
-			// sobreventa, se admite a propósito (el esquema no lleva CHECK) y el job
-			// `stock_negativo` avisa.
-			sql: `
-				UPDATE Lotes_Producto
-				SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
-				WHERE ID_Lote = ?1;
-			`,
-			args: [a.id_lote, a.take],
-		});
-		if (a.id_detalle) {
-			steps.push({
-				kind: "execute",
-				sql: `
-					INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
-					VALUES (?1, ?2, ?3, ?4)
-					ON CONFLICT(ID_Detalle, ID_Lote, ID_Pago) DO NOTHING;
-				`,
-				args: [a.id_detalle, a.id_lote, plan.id_pago, a.take],
-			});
-		}
-	}
-
-	// VR-04: lo que los lotes no cubrieron se descuenta del stock suelto (puede quedar negativo;
-	// solo si el producto lo usa).
-	for (const s of plan.suelto) {
-		steps.push({
-			kind: "execute",
-			sql: `
-				UPDATE Productos
-				SET Stock_Suelto = Stock_Suelto - ?2
-				WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;
-			`,
-			args: [s.id_producto, s.take],
-		});
-
-		// Y se anota, igual que el consumo de lotes: sin esta traza, anular el pago devolvía los
-		// lotes y perdía esta parte para siempre. El EXISTS repite la condición del UPDATE de
-		// arriba para no apuntar un consumo que no llegó a producirse.
-		if (s.id_detalle) {
-			steps.push({
-				kind: "execute",
-				sql: `
-					INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad)
-					SELECT ?1, ?2, ?3, ?4
-					WHERE EXISTS (
-						SELECT 1 FROM Productos
-						WHERE ID_Producto = ?2 AND Stock_Suelto IS NOT NULL
-					)
-					ON CONFLICT(ID_Detalle, ID_Producto, ID_Pago) DO NOTHING;
-				`,
-				args: [s.id_detalle, s.id_producto, plan.id_pago, s.take],
-			});
-		}
-	}
+	// RI-10: el consumo (lotes FEFO, suelto y sus trazas) es el mismo que el del cobro de mesa.
+	steps.push(...pasosConsumo(plan.consumo, plan.id_pago));
 
 	steps.push({ kind: "execute", sql: UPDATE_TOTAL, args: [input.id_comanda] });
 	steps.push({
@@ -435,49 +376,6 @@ export function cobrarFraccionado(
 	};
 }
 
-export function restarStock(
-	input: RestarStockInput,
-	plan: Extract<RestarStockPlan, { ok: true }>,
-): BuiltCommand {
-	const steps: any[] = plan.allocations.map((a) => ({
-		kind: "execute",
-		// VR-06: descuento RELATIVO sin clamp, para converger con la Main al aplicar el mismo delta.
-		// Un lote puede quedar negativo (sobreventa) si otro cobro lo consumió a la vez: se admite a
-		// propósito y el esquema no lleva CHECK.
-		sql: `
-			UPDATE Lotes_Producto
-			SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
-			WHERE ID_Lote = ?1;
-		`,
-		args: [a.id_lote, a.take],
-	}));
-	// VR-04: sobrante tras los lotes → stock suelto (puede quedar negativo; solo si se usa).
-	for (const s of plan.suelto) {
-		steps.push({
-			kind: "execute",
-			sql: `
-				UPDATE Productos
-				SET Stock_Suelto = Stock_Suelto - ?2
-				WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;
-			`,
-			args: [s.id_producto, s.take],
-		});
-	}
-	if (steps.length === 0) {
-		// Producto sin lotes ni stock suelto: nada que descontar (transacción no vacía).
-		steps.push({ kind: "value", saveAs: "ok", sql: "SELECT 1;" });
-	}
-	return {
-		commandName: "vr_restar_stock",
-		command: {
-			type: "tenantDb.transaction",
-			payload: {
-				steps,
-			},
-		},
-		cloudPayload: { ...input, plan },
-	};
-}
 
 export function deleteComandaIfSafe(idComanda: string): BuiltCommand {
 	return {

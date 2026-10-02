@@ -55,6 +55,7 @@ pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;
+pub(crate) mod consumo_stock;
 pub mod inventario;
 pub mod jobs;
 pub mod login;

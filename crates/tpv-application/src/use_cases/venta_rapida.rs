@@ -1,11 +1,11 @@
 //! Casos de uso de venta rápida (barra). Local-First: validan/normalizan e invocan el puerto.
 
 use tpv_contracts::venta_rapida::{
-    CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow, StockLinea,
+    CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow,
     VerTicketsDetalleRow, VrAddLineaComandaInput, VrCobrarFraccionadoInput,
     VrCreateComandaBarraInput, VrDeleteComandaIfSafeInput, VrDeleteLineaIfUnpaidInput,
     VrIdCategoriaArgs, VrIdComandaArgs, VrIdsArgs, VrListComandasArgs,
-    VrRemoveLastUnpaidLineaInput, VrRestarStockInput, VrSearchProductosArgs,
+    VrRemoveLastUnpaidLineaInput, VrSearchProductosArgs,
     VrUpdateNotaDetalleInput,
 };
 use tpv_contracts::verifactu::DestinatarioInput;
@@ -214,38 +214,6 @@ pub async fn cobrar_fraccionado(
     repo.cobrar_fraccionado(data).await
 }
 
-pub async fn restar_stock(
-    repo: &dyn VentaRapidaRepository,
-    input: VrRestarStockInput,
-) -> AppResult<bool> {
-    let mut norm: Vec<StockLinea> = input
-        .lineas
-        .into_iter()
-        .filter(|it| {
-            !it.producto_id.trim().is_empty() && it.cantidad.is_finite() && it.cantidad > 0.0
-        })
-        .collect();
-
-    norm.sort_by(|a, b| a.producto_id.cmp(&b.producto_id));
-
-    let mut merged: Vec<StockLinea> = Vec::new();
-    for item in norm {
-        if let Some(last) = merged.last_mut() {
-            if last.producto_id == item.producto_id {
-                last.cantidad += item.cantidad;
-                continue;
-            }
-        }
-        merged.push(item);
-    }
-
-    if merged.is_empty() {
-        return Ok(true);
-    }
-
-    repo.restar_stock(merged).await
-}
-
 pub async fn delete_comanda_if_safe(
     repo: &dyn VentaRapidaRepository,
     input: VrDeleteComandaIfSafeInput,
@@ -284,7 +252,7 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct FakeRepo { stock: Mutex<Vec<Vec<StockLinea>>>, cobros: Mutex<Vec<CobroFraccionado>> }
+    struct FakeRepo { cobros: Mutex<Vec<CobroFraccionado>> }
 
     #[async_trait]
     impl VentaRapidaRepository for FakeRepo {
@@ -301,7 +269,6 @@ mod tests {
         async fn delete_linea_if_unpaid(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
         async fn update_nota_detalle(&self, _: &str, _: Option<String>) -> AppResult<bool> { panic!("no usado") }
         async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String> { self.cobros.lock().unwrap().push(data); Ok("T-000001".into()) }
-        async fn restar_stock(&self, lineas: Vec<StockLinea>) -> AppResult<bool> { self.stock.lock().unwrap().push(lineas); Ok(true) }
         async fn delete_comanda_if_safe(&self, _: &str) -> AppResult<bool> { panic!("no usado") }
     }
 
@@ -329,35 +296,6 @@ mod tests {
     #[test]
     fn notas_none_permanecen_ausentes() {
         assert_eq!(limpiar_opcional(None), None);
-    }
-
-    #[tokio::test]
-    async fn restar_stock_filtra_invalidos_ordena_y_agrupa_productos() {
-        let repo = FakeRepo::default();
-        let input = VrRestarStockInput { lineas: vec![
-            StockLinea { producto_id: "b".into(), cantidad: 2.0 },
-            StockLinea { producto_id: "a".into(), cantidad: 1.5 },
-            StockLinea { producto_id: "b".into(), cantidad: 3.0 },
-            StockLinea { producto_id: " ".into(), cantidad: 8.0 },
-            StockLinea { producto_id: "c".into(), cantidad: 0.0 },
-            StockLinea { producto_id: "d".into(), cantidad: f64::NAN },
-        ]};
-        assert!(restar_stock(&repo, input).await.unwrap());
-        let calls = repo.stock.lock().unwrap();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].len(), 2);
-        assert_eq!(calls[0][0].producto_id, "a");
-        assert_eq!(calls[0][0].cantidad, 1.5);
-        assert_eq!(calls[0][1].producto_id, "b");
-        assert_eq!(calls[0][1].cantidad, 5.0);
-    }
-
-    #[tokio::test]
-    async fn restar_stock_sin_lineas_validas_no_toca_repo() {
-        let repo = FakeRepo::default();
-        let input = VrRestarStockInput { lineas: vec![StockLinea { producto_id: "".into(), cantidad: -1.0 }] };
-        assert!(restar_stock(&repo, input).await.unwrap());
-        assert!(repo.stock.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

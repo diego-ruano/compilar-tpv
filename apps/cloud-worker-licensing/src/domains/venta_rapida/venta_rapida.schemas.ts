@@ -10,7 +10,6 @@ import type {
 	VrCreateComandaBarraInput,
 	VrDeleteLineaIfUnpaidInput,
 	VrRemoveLastUnpaidLineaInput,
-	VrRestarStockInput,
 	VrUpdateNotaDetalleInput,
 } from "@tpv/contracts";
 
@@ -146,24 +145,6 @@ export const cobrarFraccionadoSchema = z
 		message: "detalles required",
 	});
 
-export const restarStockSchema = z
-	.object({ lineas: z.any() })
-	.transform((v) => ({
-		lineas: Array.isArray(v.lineas)
-			? v.lineas
-					.map((it: any) => ({
-						producto_id: String(it?.producto_id ?? "").trim(),
-						cantidad: Number(it?.cantidad),
-					}))
-					.filter(
-						(it) =>
-							it.producto_id.length > 0
-							&& Number.isFinite(it.cantidad)
-							&& it.cantidad > 0,
-					)
-			: [],
-	}));
-
 // `id_comanda`/`id_detalle` NO están en los DTOs de `@tpv/contracts` a propósito: esos describen la
 // frontera frontend↔Rust, donde el id no viaja (lo pone el repositorio). Aquí, en la frontera HTTP,
 // el dispositivo sí lo envía para que la fila tenga el MISMO id en el Handy y en la nube.
@@ -209,8 +190,6 @@ export type CobrarFraccionadoInput = Omit<
 	id_trabajador_cobrador: string | null;
 };
 
-export type RestarStockInput = VrRestarStockInput;
-
 // ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
 // Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
 // las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
@@ -221,4 +200,3 @@ type _GRemoveLastLinea = Assert<SameKeys<z.infer<typeof removeLastLineaSchema>, 
 type _GDeleteLinea = Assert<SameKeys<z.infer<typeof deleteLineaSchema>, DeleteLineaInput>>;
 type _GUpdateNota = Assert<SameKeys<z.infer<typeof updateNotaSchema>, UpdateNotaInput>>;
 type _GCobrarFraccionado = Assert<SameKeys<z.infer<typeof cobrarFraccionadoSchema>, CobrarFraccionadoInput>>;
-type _GRestarStock = Assert<SameKeys<z.infer<typeof restarStockSchema>, RestarStockInput>>;

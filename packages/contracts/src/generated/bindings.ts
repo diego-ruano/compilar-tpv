@@ -1418,8 +1418,6 @@ export type StatsRange = "hoy" | "semana" | "mes" | "anio";
 
 export type StatsTurno = "COMIDA" | "CENA" | "TODOS";
 
-export type StockLinea = { producto_id: string, cantidad: number, };
-
 export type SummaryArgs = { limit?: number, };
 
 /**
@@ -1696,8 +1694,6 @@ export type VrIdsArgs = { ids: Array<string>, };
 export type VrListComandasArgs = { include_pagadas: boolean, limit?: number, };
 
 export type VrRemoveLastUnpaidLineaInput = { id_comanda: string, id_producto: string, };
-
-export type VrRestarStockInput = { lineas: Array<StockLinea>, };
 
 export type VrSearchProductosArgs = { query: string, limit: number, };
 

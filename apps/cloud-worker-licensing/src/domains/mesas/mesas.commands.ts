@@ -2,6 +2,7 @@
 
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
+import { pasosConsumo } from "../inventario/consumo";
 import type { CobroDetallesPlan } from "./mesas.queries";
 import type {
 	AbrirComandaInput,
@@ -555,39 +556,6 @@ export function updateDetalleNota(idDetalle: string, nota: string | null): Built
 	};
 }
 
-// MESA-01: pasos deterministas de descuento de stock FEFO a partir del plan resuelto
-// en el route handler. Cada UPDATE lleva el ID_Lote y la cantidad como literales.
-function stockConsumoSteps(
-	allocations: { id_lote: string; take: number; id_detalle: string | null }[],
-	// STOCK-01: el cobro que hace el consumo. Los pasos van DESPUÉS del INSERT del pago (FK).
-	idPago: typeof REF_ID_PAGO,
-) {
-	const steps: any[] = [];
-	for (const a of allocations) {
-		steps.push({
-			kind: "execute",
-			sql: `
-				UPDATE Lotes_Producto
-				SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
-				WHERE ID_Lote = ?1;
-			`,
-			args: [a.id_lote, a.take],
-		});
-		if (a.id_detalle) {
-			steps.push({
-				kind: "execute",
-				sql: `
-					INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
-					VALUES (?1, ?2, ?3, ?4)
-					ON CONFLICT(ID_Detalle, ID_Lote, ID_Pago) DO NOTHING;
-				`,
-				args: [a.id_detalle, a.id_lote, idPago, a.take],
-			});
-		}
-	}
-	return steps;
-}
-
 export function cobrarDetalles(
 	input: CobrarDetallesInput,
 	plan: Extract<CobroDetallesPlan, { ok: true }>,
@@ -691,7 +659,9 @@ export function cobrarDetalles(
 						args: [REF_ID_PAGO, input.id_comanda, ...input.detalle_ids],
 					},
 					// MESA-01: descuento de stock/lotes (FEFO) de las lineas cobradas.
-					...stockConsumoSteps(plan.allocations, REF_ID_PAGO),
+					// RI-10: el mismo consumo que el cobro de barra (lotes FEFO, suelto y trazas). Va
+					// DESPUÉS del INSERT del pago por la FK de las trazas (STOCK-01).
+					...pasosConsumo(plan.consumo, REF_ID_PAGO),
 					{
 						kind: "execute",
 						sql: `

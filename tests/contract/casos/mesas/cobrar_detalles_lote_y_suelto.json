@@ -1,0 +1,30 @@
+{
+  "descripcion": "Cobro de MESA de dos líneas del mismo producto (2 + 2 uds) con un lote de 3 y stock suelto de 5 (RI-10). La primera línea toma 2 del lote; la segunda, el 1 que queda y 1 del suelto, con su traza en Suelto_Consumos. Antes el cobro de mesa sólo miraba lotes, y el plan del worker releía el lote en cada línea sin descontar lo ya asignado.",
+  "comando": "mesas.cobrar_detalles",
+  "seed": [
+    "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL' WHERE ID = 1;",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Cerveza', 300, 5);",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-1', 'prod-1', 'L1', 3, '2026-01-01 10:00:00');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-1', 'comanda-1', 'prod-1', 2, 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-2', 'comanda-1', 'prod-1', 2, 300);"
+  ],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "metodo": "TARJETA",
+    "tipo": "TOTAL",
+    "detalle_ids": [
+      "detalle-1",
+      "detalle-2"
+    ]
+  },
+  "snapshot": {
+    "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible FROM Lotes_Producto",
+    "Productos": "SELECT ID_Producto, Stock_Suelto FROM Productos",
+    "Lote_Consumos": "SELECT ID_Detalle, ID_Lote, Cantidad FROM Lote_Consumos",
+    "Suelto_Consumos": "SELECT ID_Detalle, ID_Producto, Cantidad FROM Suelto_Consumos"
+  }
+}

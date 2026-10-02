@@ -9,7 +9,7 @@ use serde_json::{json, Value as JsonValue};
 use tpv_application::error::AppResult;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::venta_rapida::{
-    CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow, StockLinea,
+    CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow,
     VerTicketsDetalleRow,
 };
 use tpv_application::error::AppError;
@@ -197,14 +197,6 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
             .post_json("/v1/venta-rapida/cobrar-fraccionado", &body)
             .await?;
         Ok(String::new())
-    }
-
-    async fn restar_stock(&self, lineas: Vec<StockLinea>) -> AppResult<bool> {
-        let _: JsonValue = self
-            .client
-            .post_json("/v1/venta-rapida/restar-stock", &json!({ "lineas": lineas }))
-            .await?;
-        Ok(true)
     }
 
     async fn delete_comanda_if_safe(&self, id_comanda: &str) -> AppResult<bool> {

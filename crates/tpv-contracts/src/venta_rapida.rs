@@ -186,13 +186,6 @@ pub struct VrUpdateNotaDetalleInput {
     pub nota: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct StockLinea {
-    pub producto_id: String,
-    pub cantidad: f64,
-}
-
 #[derive(Debug, Clone, Deserialize, TS)]
 /// REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
 ///
@@ -222,12 +215,6 @@ pub struct VrCobrarFraccionadoInput {
     #[serde(default)]
     #[ts(optional)]
     pub destinatario: Option<DestinatarioInput>,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct VrRestarStockInput {
-    pub lineas: Vec<StockLinea>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

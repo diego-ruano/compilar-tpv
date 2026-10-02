@@ -1012,9 +1012,8 @@ export default function VentaRapida() {
           const metodoDb = intent.metodo === "tarjeta" ? "Tarjeta" : "Efectivo";
 
           /*
-            Una sola llamada: el cobro descuenta stock e inserta Lote_Consumos
-            en la misma transacción idempotente. Ya no hay segunda llamada a
-            restarStock ni opIdStock.
+            Una sola llamada: el cobro descuenta el stock (lotes y suelto) y
+            deja su traza en la misma transacción idempotente.
           */
           const pago = await vrCobrarFraccionado({
             idComanda: intent.idComanda,

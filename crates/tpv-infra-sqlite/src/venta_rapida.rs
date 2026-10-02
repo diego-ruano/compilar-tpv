@@ -11,7 +11,7 @@ use libsql::Value;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::venta_rapida::{
-    CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow, StockLinea,
+    CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow,
     VerTicketsDetalleRow,
 };
 use tpv_domain::venta_rapida::CobroFraccionado;
@@ -980,115 +980,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 .map_err(db_err)?;
             }
 
-            // Consumo FEFO + trazabilidad por detalle (sin validar suficiencia: ver VR-04 arriba).
-            for (id_detalle, producto_id, cantidad) in &charged {
-                let lot_rows: Vec<(String, f64)> = {
-                    let mut lots = db
-                        .query(
-                            r#"
-                            SELECT ID_Lote, COALESCE(Stock_Disponible,0)
-                            FROM Lotes_Producto
-                            WHERE ID_Producto = ?1
-                              AND COALESCE(Stock_Disponible,0) > 0
-                            ORDER BY
-                              CASE WHEN Caducidad IS NULL THEN 1 ELSE 0 END,
-                              date(Caducidad) ASC,
-                              datetime(Fecha_Entrada) ASC,
-                              ID_Lote ASC;
-                            "#,
-                            vec![Value::Text(producto_id.clone())],
-                        )
-                        .await
-                        .map_err(db_err)?;
-
-                    let mut o: Vec<(String, f64)> = Vec::new();
-                    while let Some(r) = lots.next().await.map_err(db_err)? {
-                        let id_lote = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
-                        let stock = v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0);
-                        if !id_lote.is_empty() && stock > 0.0 {
-                            o.push((id_lote, stock));
-                        }
-                    }
-                    o
-                };
-
-                let mut remaining = *cantidad;
-                for (id_lote, stock) in lot_rows {
-                    if remaining <= 0.0 {
-                        break;
-                    }
-                    let take = if remaining < stock { remaining } else { stock };
-                    if take <= 0.0 {
-                        continue;
-                    }
-
-                    db.execute(
-                        r#"
-                        UPDATE Lotes_Producto
-                        SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
-                        WHERE ID_Lote = ?1;
-                        "#,
-                        vec![Value::Text(id_lote.clone()), Value::Real(take)],
-                    )
-                    .await
-                    .map_err(db_err)?;
-
-                    db.execute(
-                        r#"
-                        INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
-                        VALUES (?1, ?2, ?3, ?4)
-                        ON CONFLICT(ID_Detalle, ID_Lote, ID_Pago) DO NOTHING;
-                        "#,
-                        vec![
-                            Value::Text(id_detalle.clone()),
-                            Value::Text(id_lote),
-                            Value::Text(id_pago_final.clone()),
-                            Value::Real(take),
-                        ],
-                    )
-                    .await
-                    .map_err(db_err)?;
-
-                    remaining -= take;
-                }
-
-                // VR-04: lo que los lotes no cubrieron se descuenta del stock suelto del producto,
-                // que puede quedar negativo (señal de sobreventa). Solo si el producto usa stock
-                // suelto (Stock_Suelto IS NOT NULL); si no, la venta no descuenta más (no inventariado).
-                if remaining > 0.0 {
-                    db.execute(
-                        "UPDATE Productos SET Stock_Suelto = Stock_Suelto - ?2 WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;",
-                        vec![Value::Text(producto_id.clone()), Value::Real(remaining)],
-                    )
-                    .await
-                    .map_err(db_err)?;
-
-                    // Y se anota, igual que se anota el consumo de lotes: sin esta traza, anular
-                    // el pago devolvía los lotes y perdía esta parte para siempre (no había de
-                    // dónde reconstruirla). El EXISTS repite la condición del UPDATE de arriba
-                    // para no apuntar un consumo que no llegó a producirse — devolverlo luego
-                    // sería inventar stock.
-                    db.execute(
-                        r#"
-                        INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad)
-                        SELECT ?1, ?2, ?3, ?4
-                        WHERE EXISTS (
-                            SELECT 1 FROM Productos
-                            WHERE ID_Producto = ?2 AND Stock_Suelto IS NOT NULL
-                        )
-                        ON CONFLICT(ID_Detalle, ID_Producto, ID_Pago) DO NOTHING;
-                        "#,
-                        vec![
-                            Value::Text(id_detalle.clone()),
-                            Value::Text(producto_id.clone()),
-                            Value::Text(id_pago_final.clone()),
-                            Value::Real(remaining),
-                        ],
-                    )
-                    .await
-                    .map_err(db_err)?;
-                }
-            }
+            // Consumo de stock (lotes FEFO, luego suelto) con su traza por cobro: el mismo que el
+            // cobro de mesa (RI-10). Sin validar suficiencia: ver VR-04 arriba.
+            crate::consumo_stock::consumir_stock(db, &id_pago_final, &charged).await?;
 
             db.execute(update_total_comanda_sql(), vec![Value::Text(data.id_comanda.clone())])
                 .await
@@ -1147,95 +1041,6 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             }
 
             Ok(numero_ticket.clone())
-        }
-        .await;
-
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
-    }
-
-    async fn restar_stock(&self, lineas: Vec<StockLinea>) -> AppResult<bool> {
-        let g = self.db.write().await;
-        let db = &g;
-
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
-            // VR-04: sin validación de suficiencia ni bloqueo (coherente con cobrar_fraccionado).
-            // Se consume FEFO de los lotes (sin tomar más de lo que tiene cada uno aquí) y el resto
-            // va al stock suelto.
-            for it in lineas.iter() {
-                let mut remaining = it.cantidad;
-
-                let mut lots = db
-                    .query(
-                        r#"
-                        SELECT ID_Lote, COALESCE(Stock_Disponible,0) AS Stock
-                        FROM Lotes_Producto
-                        WHERE ID_Producto = ?1
-                          AND COALESCE(Stock_Disponible,0) > 0
-                        ORDER BY
-                          CASE WHEN Caducidad IS NULL THEN 1 ELSE 0 END,
-                          date(Caducidad) ASC,
-                          datetime(Fecha_Entrada) ASC,
-                          ID_Lote ASC;
-                        "#,
-                        vec![Value::Text(it.producto_id.clone())],
-                    )
-                    .await
-                    .map_err(db_err)?;
-
-                while remaining > 0.0 {
-                    let row = lots.next().await.map_err(db_err)?;
-                    let Some(r) = row else { break };
-
-                    let id_lote = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
-                    let stock = v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0);
-
-                    if id_lote.is_empty() || stock <= 0.0 {
-                        continue;
-                    }
-
-                    let take = if remaining < stock { remaining } else { stock };
-
-                    // VR-06: descuento relativo sin clamp (igual que cobrar_fraccionado y que el
-                    // worker), para que Main y nube converjan al aplicar el mismo delta. Aquí el
-                    // `take` va acotado por el stock del lote, así que este camino propio no baja de
-                    // cero; el clamp solo enmascaraba el delta replicado y rompía la convergencia.
-                    db.execute(
-                        r#"
-                        UPDATE Lotes_Producto
-                        SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
-                        WHERE ID_Lote = ?1;
-                        "#,
-                        vec![Value::Text(id_lote), Value::Real(take)],
-                    )
-                    .await
-                    .map_err(db_err)?;
-
-                    remaining -= take;
-                }
-
-                // VR-04: sobrante tras los lotes → stock suelto (puede quedar negativo; solo si el
-                // producto lo usa).
-                if remaining > 0.0 {
-                    db.execute(
-                        "UPDATE Productos SET Stock_Suelto = Stock_Suelto - ?2 WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;",
-                        vec![Value::Text(it.producto_id.clone()), Value::Real(remaining)],
-                    )
-                    .await
-                    .map_err(db_err)?;
-                }
-            }
-
-            Ok(true)
         }
         .await;
 

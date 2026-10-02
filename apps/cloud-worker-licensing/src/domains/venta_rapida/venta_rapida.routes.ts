@@ -142,17 +142,6 @@ ventaRapidaRoutes.post("/cobrar-fraccionado", soloLaMainCobra, cuerpo(S.cobrarFr
 	return c.json({ ok: true, id_pago: plan.id_pago });
 });
 
-ventaRapidaRoutes.post("/restar-stock", cuerpo(S.restarStockSchema), async (c) => {
-	const datos = c.req.valid("json");
-	if (!datos.lineas.length) return c.json({ ok: true });
-	const plan = await tenantQuery(c, (db) =>
-		q.restarStockPlan(db, datos),
-	);
-	if (!plan.ok) conflictStock(plan);
-	await apply(c, cmd.restarStock(datos, plan));
-	return c.json({ ok: true });
-});
-
 ventaRapidaRoutes.post("/comandas/delete-if-safe", cuerpo(z.object({ id_comanda: z.coerce.string().trim().min(1) })), async (c) => {
 	const datos = c.req.valid("json");
 	const hasPaid = await tenantQuery(c, (db) =>

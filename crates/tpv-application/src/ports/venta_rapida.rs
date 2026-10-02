@@ -4,7 +4,7 @@ use tpv_domain::dinero::Dinero;
 use async_trait::async_trait;
 
 use tpv_contracts::venta_rapida::{
-    CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow, StockLinea,
+    CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow,
     VerTicketsDetalleRow,
 };
 use tpv_domain::venta_rapida::CobroFraccionado;
@@ -59,8 +59,6 @@ pub trait VentaRapidaRepository: Send + Sync {
     /// él, el papel saldría sin número o habría que volver a consultarlo. Y guardarlo con el pago
     /// es lo que permite que una reimpresión saque el mismo.
     async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String>;
-    /// Resta stock (FEFO) de las líneas dadas (sin trazabilidad por detalle).
-    async fn restar_stock(&self, lineas: Vec<StockLinea>) -> AppResult<bool>;
     /// Borra una comanda si no tiene líneas pagadas. Error si tiene pagos o no existe.
     async fn delete_comanda_if_safe(&self, id_comanda: &str) -> AppResult<bool>;
 }

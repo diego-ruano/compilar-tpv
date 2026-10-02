@@ -1,6 +1,7 @@
 // src/domains/venta_rapida/venta_rapida.queries.ts
 
 import { nuevoId } from "../../lib/ids";
+import { planConsumo, type PlanConsumo } from "../inventario/consumo";
 import type { Client } from "@libsql/client/web";
 
 import type {
@@ -14,7 +15,6 @@ import type {
 
 import type {
 	CobrarFraccionadoInput,
-	RestarStockInput,
 } from "./venta_rapida.schemas";
 
 import { CANAL_BARRA } from "./venta_rapida.commands";
@@ -290,18 +290,6 @@ export async function detallesVerTicket(
 	return rows(rs) as VerTicketsDetalleRow[];
 }
 
-export type StockAllocation = {
-	id_lote: string;
-	take: number;
-	id_detalle?: string;
-};
-
-// VR-04: cantidad que, tras agotar los lotes, se descuenta del stock suelto del producto.
-// Lleva `id_detalle` (como `StockAllocation`) para poder anotar el consumo y devolverlo si el
-// pago se anula. Por eso NO se agrupa por producto: dos líneas del mismo producto son dos
-// consumos distintos, cada uno de su línea.
-export type SueltoDecrement = { id_producto: string; take: number; id_detalle?: string };
-
 export type CobroPlan =
 	| {
 			ok: true;
@@ -309,8 +297,7 @@ export type CobroPlan =
 			importe_total: number;
 			id_usuario_cobrador: string | null;
 			id_trabajador_cobrador: string | null;
-			allocations: StockAllocation[];
-			suelto: SueltoDecrement[];
+			consumo: PlanConsumo;
 		}
 	| {
 			ok: false;
@@ -319,67 +306,6 @@ export type CobroPlan =
 			requested?: number;
 			available?: number;
 		};
-
-// VR-01/02/04: reparto FEFO con estado de lotes EN MEMORIA (se decrementa al asignar), para que
-// varias lineas del mismo producto consuman los lotes en cascada (y no re-lean stock ya asignado,
-// que provocaba sobre-asignacion). El reparto nunca toma de un lote mas de lo que tiene en esta
-// copia; lo que no cubran va al stock suelto (que si puede quedar negativo). No bloquea por falta
-// de stock.
-async function buildFefoAllocations(
-	db: Client,
-	items: { id_producto: string; cantidad: number; id_detalle?: string }[],
-): Promise<{ allocations: StockAllocation[]; suelto: SueltoDecrement[] }> {
-	const lotState = new Map<string, { id_lote: string; stock: number }[]>();
-	const getLots = async (pid: string) => {
-		let l = lotState.get(pid);
-		if (!l) {
-			l = (await lotRows(db, pid)).map((x) => ({ id_lote: x.id_lote, stock: x.stock }));
-			lotState.set(pid, l);
-		}
-		return l;
-	};
-
-	const allocations: StockAllocation[] = [];
-	const suelto: SueltoDecrement[] = [];
-	for (const it of items) {
-		let remaining = it.cantidad;
-		for (const lot of await getLots(it.id_producto)) {
-			if (remaining <= 0) break;
-			const take = Math.min(remaining, lot.stock);
-			if (take <= 0) continue;
-			allocations.push({ id_lote: lot.id_lote, take, id_detalle: it.id_detalle });
-			lot.stock -= take;
-			remaining -= take;
-		}
-		if (remaining > 0) {
-			suelto.push({ id_producto: it.id_producto, take: remaining, id_detalle: it.id_detalle });
-		}
-	}
-	return { allocations, suelto };
-}
-
-async function lotRows(db: Client, productoId: string) {
-	const rs = await db.execute({
-		sql: `
-			SELECT
-				ID_Lote AS id_lote,
-				COALESCE(Stock_Disponible,0) AS stock
-			FROM Lotes_Producto
-			WHERE ID_Producto = ?1
-				AND COALESCE(Stock_Disponible,0) > 0
-			ORDER BY
-				CASE WHEN Caducidad IS NULL THEN 1 ELSE 0 END,
-				date(Caducidad) ASC,
-				datetime(Fecha_Entrada) ASC,
-				ID_Lote ASC;
-		`,
-		args: [productoId],
-	});
-	return rows(rs).map((r) => ({
-		id_lote: String(r.id_lote ?? ""),
-		stock: Number(r.stock ?? 0),
-	}));
-}
 
 export async function cobrarPlan(
 	db: Client,
@@ -433,7 +359,7 @@ export async function cobrarPlan(
 
 	// VR-01/02/04: sin bloqueo por falta de stock. Reparto FEFO (lotes nunca negativos) y el
 	// sobrante al stock suelto.
-	const { allocations, suelto } = await buildFefoAllocations(db, charged);
+	const consumo = await planConsumo(db, charged);
 
 	const idUsuario = input.id_usuario_cobrador;
 	const idTrabFromUser = await resolveTrabajadorId(db, idUsuario);
@@ -450,31 +376,8 @@ export async function cobrarPlan(
 		id_usuario_cobrador: idUsuario,
 		id_trabajador_cobrador:
 			input.id_trabajador_cobrador ?? idTrabFromUser ?? idTrabComanda,
-		allocations,
-		suelto,
+		consumo,
 	};
-}
-
-export type RestarStockPlan =
-	| { ok: true; allocations: StockAllocation[]; suelto: SueltoDecrement[] }
-	| {
-			ok: false;
-			error: string;
-			productoId?: string;
-			requested?: number;
-			available?: number;
-		};
-
-export async function restarStockPlan(
-	db: Client,
-	input: RestarStockInput,
-): Promise<RestarStockPlan> {
-	// VR-01/02/04: sin bloqueo; FEFO (lotes nunca negativos) + sobrante al stock suelto.
-	const { allocations, suelto } = await buildFefoAllocations(
-		db,
-		input.lineas.map((it) => ({ id_producto: it.producto_id, cantidad: it.cantidad })),
-	);
-	return { ok: true, allocations, suelto };
 }
 
 // Basta con que la comanda tenga UN cobro, activo o anulado (CUENTA-07). Y no es una sutileza:
