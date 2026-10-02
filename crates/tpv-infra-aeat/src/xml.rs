@@ -986,6 +986,39 @@ mod tests {
         assert_eq!(a.lineas.len(), b.lineas.len());
     }
 
+    // ── Respuestas REALES de preproducción ──
+    //
+    // `testdata/` guarda respuestas tal como las mandó la AEAT (capturadas con el arnés
+    // `verifactu:ciclo`, que las deja en `target/verifactu-pruebas/respuestas/`), con el NIF, el
+    // nombre del titular y el CSV cambiados por otros de prueba. Son la referencia de la forma de la
+    // respuesta: los XML escritos a mano de arriba fueron los que dejaron pasar RI-89.
+
+    const REAL_ALTAS: &str = include_str!("../testdata/respuesta_altas.xml");
+    const REAL_ANULACIONES: &str = include_str!("../testdata/respuesta_anulaciones.xml");
+
+    #[test]
+    fn una_respuesta_REAL_de_altas_se_lee_entera() {
+        let r = leer_respuesta(REAL_ALTAS).unwrap();
+        assert_eq!(r.estado_envio, "Correcto");
+        assert_eq!(r.csv.as_deref(), Some("A-PRUEBAALTAS000"));
+        assert_eq!(r.tiempo_espera_envio, Some(60));
+        let nums: Vec<_> = r.lineas.iter().map(|l| l.num_serie_factura.as_str()).collect();
+        assert_eq!(nums, ["2026/000003", "2026/000004"]);
+        assert!(r.lineas.iter().all(|l| !l.anulacion && l.estado == "Correcto"));
+    }
+
+    #[test]
+    fn una_respuesta_REAL_de_anulaciones_trae_NumSerieFactura_y_se_distingue_por_TipoOperacion() {
+        // Es la prueba de RI-89 con lo que de verdad contesta la AEAT: ni rastro de
+        // `NumSerieFacturaAnulada` en la respuesta.
+        assert!(!REAL_ANULACIONES.contains("NumSerieFacturaAnulada"));
+        let r = leer_respuesta(REAL_ANULACIONES).unwrap();
+        assert_eq!(r.csv.as_deref(), Some("A-PRUEBAANULAC00"));
+        let nums: Vec<_> = r.lineas.iter().map(|l| l.num_serie_factura.as_str()).collect();
+        assert_eq!(nums, ["2026/000003", "2026/000004"]);
+        assert!(r.lineas.iter().all(|l| l.anulacion && l.estado == "Correcto"));
+    }
+
     // ── RI-35: lo que un escáner de cadenas no entendía ──
 
     #[test]

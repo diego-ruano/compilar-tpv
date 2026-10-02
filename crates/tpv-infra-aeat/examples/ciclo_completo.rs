@@ -175,9 +175,12 @@ fn main() {
     }
 }
 
+/// Guarda cada respuesta de la AEAT en bruto en `target/verifactu-pruebas/respuestas/`: son la
+/// materia prima de los tests del parser con respuestas reales (`crates/tpv-infra-aeat/testdata/`),
+/// que se copian de aquí **anonimizadas** (llevan el NIF y el nombre del titular).
 #[cfg(windows)]
 fn crate_adapter() -> tpv_infra_aeat::AeatAdapter {
-    tpv_infra_aeat::AeatAdapter::new()
+    tpv_infra_aeat::AeatAdapter::con_volcado("target/verifactu-pruebas/respuestas")
 }
 
 #[cfg(windows)]

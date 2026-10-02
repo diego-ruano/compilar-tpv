@@ -42,11 +42,27 @@ pub const MAX_REGISTROS_POR_ENVIO: usize = 1000;
 pub const ESPERA_INICIAL_SEGUNDOS: i64 = 60;
 
 /// El adaptador. En Windows habla de verdad; en el resto de plataformas existe para que compile.
-pub struct AeatAdapter;
+pub struct AeatAdapter {
+    /// Carpeta donde se deja cada respuesta en bruto. Sólo para los arneses de `examples/`.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    volcado: Option<std::path::PathBuf>,
+}
 
 impl AeatAdapter {
     pub fn new() -> Self {
-        Self
+        Self { volcado: None }
+    }
+
+    /// Igual que [`Self::new`], pero guarda cada respuesta de `remitir` tal cual llegó, en un
+    /// fichero de `dir`.
+    ///
+    /// Es para capturar respuestas **reales** de preproducción con las que probar el parser: los
+    /// XML escritos a mano son los que dejaron pasar RI-89. El TPV no lo usa, y un fallo al
+    /// escribir no afecta al envío.
+    pub fn con_volcado(dir: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            volcado: Some(dir.into()),
+        }
     }
 }
 
@@ -119,6 +135,11 @@ impl AeatClient for AeatAdapter {
                 .await
                 .map_err(|e| AppError::internal(format!("enviando a la AEAT: {e}")))?
                 .map_err(AppError::external)?;
+
+        if let Some(dir) = &self.volcado {
+            let nombre = format!("respuesta-{}.xml", chrono::Local::now().format("%Y%m%d-%H%M%S%3f"));
+            let _ = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(dir.join(nombre), &respuesta));
+        }
 
         xml::leer_respuesta(&respuesta).map_err(AppError::external)
     }

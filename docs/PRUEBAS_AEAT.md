@@ -122,7 +122,12 @@ pnpm verifactu:ciclo -- <huella> <NIF> "Razon Social"
 ```
 
 Usa una base **dedicada** (`target/verifactu-pruebas/`), emite dos altas por el camino de verdad, las
-remite, las anula y remite las anulaciones. Volver a empezar es borrar esa carpeta.
+remite, las anula y remite las anulaciones. Volver a empezar es borrar esa carpeta (también hace
+falta cuando cambia `0001_inicial.sql`: la base vieja ya no abre).
+
+Cada respuesta de la AEAT queda en bruto en `target/verifactu-pruebas/respuestas/`. De ahí salen
+las de `crates/tpv-infra-aeat/testdata/`, que prueban el parser contra lo que contesta de verdad la
+AEAT; al copiar una nueva, **anonimízala** (NIF, nombre del titular y CSV).
 
 ### Desde la aplicación
 
