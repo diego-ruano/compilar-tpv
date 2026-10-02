@@ -1,0 +1,70 @@
+{
+  "descripcion": "RI-54: quitar del plano lo que tiene historia lo ARCHIVA en vez de dejarlo ahí para siempre. En el Salón se quitan S1 (con una comanda cobrada: se archiva) y S2 (sin historia: se borra), y se crea otra S1, que puede llamarse igual porque la vieja ya no está activa. La zona Antigua desaparece del editor: su mesa A1 tiene historia, así que mesa y zona se archivan; y se crea una zona nueva que también se llama Antigua. Las fechas de archivado se comparan como «tiene o no».",
+  "comando": "mesas.save_layout",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-salon', 'Salon', '[0.5,0.5]');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-antigua', 'Antigua', '[1.5,1.5]');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-s1', 'zona-salon', 'S1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-s2', 'zona-salon', 'S2', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-a1', 'zona-antigua', 'A1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-s1', 'MESA', 'mesa-s1', '2026-01-01 12:00:00', 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-a1', 'MESA', 'mesa-a1', '2026-01-01 13:00:00', 'Pagada');"
+  ],
+  "entrada": {
+    "salons": [
+      {
+        "id": "db-zona-zona-salon",
+        "name": "Salon",
+        "room": {
+          "type": "poly",
+          "points": [
+            0.5,
+            0.5
+          ]
+        },
+        "tables": [
+          {
+            "id": "nueva-s1",
+            "name": "S1",
+            "x": 10,
+            "y": 10,
+            "width": 80,
+            "height": 80,
+            "radius": null,
+            "seats": 4,
+            "shape": "rect"
+          }
+        ]
+      },
+      {
+        "id": "nueva-antigua",
+        "name": "Antigua",
+        "room": {
+          "type": "poly",
+          "points": [
+            2.5,
+            2.5
+          ]
+        },
+        "tables": [
+          {
+            "id": "nueva-n1",
+            "name": "N1",
+            "x": 10,
+            "y": 10,
+            "width": 80,
+            "height": 80,
+            "radius": null,
+            "seats": 4,
+            "shape": "rect"
+          }
+        ]
+      }
+    ]
+  },
+  "snapshot": {
+    "Zonas": "SELECT Nombre_Zona, Archivada_En IS NOT NULL AS Archivada FROM Zonas",
+    "Mesas": "SELECT z.Nombre_Zona AS Zona, z.Archivada_En IS NOT NULL AS Zona_Archivada, m.Numero_Mesa AS Numero, m.Archivada_En IS NOT NULL AS Archivada FROM Mesas m LEFT JOIN Zonas z ON z.ID_Zona = m.ID_Zona",
+    "Comandas": "SELECT ID_Comanda, ID_Mesa FROM Comandas"
+  }
+}

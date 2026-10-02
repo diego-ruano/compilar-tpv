@@ -63,7 +63,7 @@ export async function getProductos(
 	idProveedor: string,
 ): Promise<ProductoProveedorDto[]> {
 	const rs = await db.execute({
-		sql: `SELECT ${PRODUCTO_COLS} FROM Productos p WHERE p.ID_Proveedor = ?1 ORDER BY p.Nombre ASC;`,
+		sql: `SELECT ${PRODUCTO_COLS} FROM Productos p WHERE p.ID_Proveedor = ?1 AND p.Archivado_En IS NULL ORDER BY p.Nombre ASC;`,
 		args: [idProveedor],
 	});
 	return rows(rs) as ProductoProveedorDto[];
@@ -84,7 +84,7 @@ export async function getCategorias(db: Client): Promise<CategoriaProveedorDto[]
 
 export async function getProductosAll(db: Client): Promise<ProductoProveedorDto[]> {
 	const rs = await db.execute(
-		`SELECT ${PRODUCTO_COLS} FROM Productos p ORDER BY p.Nombre ASC;`,
+		`SELECT ${PRODUCTO_COLS} FROM Productos p WHERE p.Archivado_En IS NULL ORDER BY p.Nombre ASC;`,
 	);
 	return rows(rs) as ProductoProveedorDto[];
 }

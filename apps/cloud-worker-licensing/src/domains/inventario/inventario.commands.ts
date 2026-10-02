@@ -195,20 +195,32 @@ export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean): Bu
 	};
 }
 
-export function deleteProducto(idProducto: string): BuiltCommand {
-	const steps = [
-		// DB-03: todo lo que la FK haría sola se hace A MANO. Soltar el enlace de las ventas va
-		// primero (la línea conserva su snapshot y no pierde nada, INV-05); los movimientos, antes
-		// que los lotes por su FK.
-		"UPDATE Detalle_Comanda SET ID_Producto = NULL WHERE ID_Producto=?1;",
-		"DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto=?1);",
-		// Y los de su stock suelto (RI-55).
-		"DELETE FROM Movimientos_Stock WHERE ID_Producto=?1;",
-		"DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
-		"DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
-		"DELETE FROM Productos WHERE ID_Producto=?1;",
-	].map((sql) => ({ kind: "execute", sql, args: [idProducto] }));
+// INV-05 / RI-54: quitar un producto del catálogo. Se ARCHIVA si tiene historia (líneas de comanda,
+// consumos de lote o de stock suelto) y se BORRA si no. Son exactamente las sentencias de
+// `SQL_QUITAR_PRODUCTO` (tpv-infra-sqlite/src/inventario.rs): cada una lleva su condición —la primera
+// archiva si hay historia, las demás sólo borran si no ha quedado archivado— y por eso no hace falta
+// leer antes ni hay carrera con una venta que se cuele. DB-03: lo que haría la FK, a mano y en orden.
+const SQL_QUITAR_PRODUCTO = [
+	`UPDATE Productos SET Archivado_En = datetime('now','localtime')
+		WHERE ID_Producto = ?1 AND Archivado_En IS NULL AND (
+			EXISTS (SELECT 1 FROM Detalle_Comanda WHERE ID_Producto = ?1)
+			OR EXISTS (SELECT 1 FROM Suelto_Consumos WHERE ID_Producto = ?1)
+			OR EXISTS (SELECT 1 FROM Lote_Consumos lc JOIN Lotes_Producto l ON l.ID_Lote = lc.ID_Lote
+				WHERE l.ID_Producto = ?1));`,
+	`DELETE FROM Movimientos_Stock
+		WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto = ?1)
+			AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);`,
+	`DELETE FROM Movimientos_Stock WHERE ID_Producto = ?1
+		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);`,
+	`DELETE FROM Lotes_Producto WHERE ID_Producto = ?1
+		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);`,
+	`DELETE FROM Producto_Alergenos WHERE ID_Producto = ?1
+		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);`,
+	"DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL;",
+];
 
+export function deleteProducto(idProducto: string): BuiltCommand {
+	const steps = SQL_QUITAR_PRODUCTO.map((sql) => ({ kind: "execute", sql, args: [idProducto] }));
 	return {
 		commandName: "inventario_delete_producto",
 		command: { type: "tenantDb.transaction", payload: { steps } },

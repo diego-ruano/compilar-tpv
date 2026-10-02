@@ -1,0 +1,22 @@
+{
+  "descripcion": "RI-54, el caso que rompía: un producto inventariado por lotes del que se ha vendido algo. Su consumo en Lote_Consumos apunta al lote con una FK sin acción, y borrar los lotes fallaba con «FOREIGN KEY constraint failed». Ahora se archiva y el lote y su consumo se quedan.",
+  "comando": "inventario.delete_producto",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-1', 'cat-1', 'Rioja');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-1', 'prod-1', 'L1', 3, '2026-01-01 10:00:00');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'BARRA', '2026-01-01 12:00:00', 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-1', 'comanda-1', 'prod-1', 'Rioja', 2, 1200);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'comanda-1', '2026-01-01 12:30:00', 'Efectivo', 2400, 'TOTAL');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-1');",
+    "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det-1', 'lote-1', 'pago-1', 2);"
+  ],
+  "entrada": {
+    "id_producto": "prod-1"
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto, Archivado_En IS NOT NULL AS Archivado FROM Productos",
+    "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible FROM Lotes_Producto",
+    "Lote_Consumos": "SELECT ID_Detalle, ID_Lote, Cantidad FROM Lote_Consumos"
+  }
+}

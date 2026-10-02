@@ -59,6 +59,7 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 	const zonasRs = await db.execute(`
 		SELECT ID_Zona, Nombre_Zona, Room_Points
 		FROM Zonas
+		WHERE Archivada_En IS NULL -- RI-54: lo archivado ya no está en el plano
 		ORDER BY ID_Zona ASC;
 	`);
 	const mesasRs = await db.execute(`
@@ -74,6 +75,7 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 			Height,
 			Radius
 		FROM Mesas
+		WHERE Archivada_En IS NULL
 		ORDER BY ID_Zona ASC, ID_Mesa ASC;
 	`);
 
@@ -290,7 +292,7 @@ export async function productosByCategoria(
 				COALESCE(Precio_Venta,0) AS Precio_Venta,
 				Ruta_Imagen AS Ruta_Imagen
 			FROM Productos
-			WHERE ID_Categoria = ?1
+			WHERE ID_Categoria = ?1 AND Archivado_En IS NULL
 			ORDER BY Nombre ASC;
 		`,
 		args: [idCategoria],
@@ -312,7 +314,7 @@ export async function searchProductos(
 				COALESCE(Precio_Venta,0) AS Precio_Venta,
 				Ruta_Imagen AS Ruta_Imagen
 			FROM Productos
-			WHERE LOWER(Nombre) LIKE ?1
+			WHERE LOWER(Nombre) LIKE ?1 AND Archivado_En IS NULL
 			ORDER BY Nombre ASC
 			LIMIT 200;
 		`,
@@ -333,10 +335,16 @@ export async function searchProductos(
 export async function datosDeLinea(
 	db: Client,
 	idProducto: string,
-): Promise<{ pasaCocina: boolean; ivaPercent: number | null; nombre: string | null }> {
+): Promise<{
+	pasaCocina: boolean;
+	ivaPercent: number | null;
+	nombre: string | null;
+	archivado: boolean;
+}> {
 	const rs = await db.execute({
 		sql: `
-			SELECT COALESCE(cat.Pasa_Cocina, 0) AS pasa, p.IVA_Percent AS iva, p.Nombre AS nombre
+			SELECT COALESCE(cat.Pasa_Cocina, 0) AS pasa, p.IVA_Percent AS iva, p.Nombre AS nombre,
+				p.Archivado_En IS NOT NULL AS archivado
 			FROM Productos p
 			JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 			WHERE p.ID_Producto = ?1
@@ -351,6 +359,8 @@ export async function datosDeLinea(
 		pasaCocina: Number(fila?.pasa ?? 0) === 1,
 		ivaPercent: iva === null || iva === undefined ? null : Number(iva),
 		nombre: nombre === null || nombre === undefined ? null : String(nombre),
+		// RI-54: la ruta lo rechaza, igual que `snapshot_del_producto` en la Main.
+		archivado: Number(fila?.archivado ?? 0) === 1,
 	};
 }
 

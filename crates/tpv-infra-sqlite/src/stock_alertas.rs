@@ -37,6 +37,7 @@ const SQL_NEGATIVOS: &str = r#"
                 0
             ) + COALESCE(p.Stock_Suelto, 0) AS stock_total
         FROM Productos p
+        WHERE p.Archivado_En IS NULL
     )
     WHERE stock_total < ?1
     ORDER BY stock_total ASC

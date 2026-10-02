@@ -199,6 +199,10 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	cobro_solo_en_main: "Los cobros sólo se hacen desde el TPV principal.",
 	recuperacion_solo_en_main: SOLO_EN_LA_MAIN,
 	reserva_solapada: "Ya existe una reserva en esa mesa para ese día y hora.",
+	// RI-54: una pantalla con la carta de antes en caché ofrece un producto que ya se quitó.
+	producto_archivado: "Ese producto ya no está en la carta. Vuelve a abrir la carta y elige otro.",
+	producto_en_comanda_abierta:
+		"No se puede borrar: el producto está en una comanda abierta. Cóbrala o quita la línea y vuelve a intentarlo.",
 	// RI-55: un ajuste de existencias que llega tarde. La ruta lo acompaña de lo que hay ahora.
 	stock_cambiado:
 		"Las existencias han cambiado mientras las ajustabas. Revísalas y vuelve a ajustar.",

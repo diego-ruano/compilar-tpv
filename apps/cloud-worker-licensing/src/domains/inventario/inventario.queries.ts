@@ -70,6 +70,7 @@ export async function listProductosByCategoria(
 				p.IVA_Percent
 			FROM Productos p
 			WHERE p.ID_Categoria = ?1
+				AND p.Archivado_En IS NULL -- RI-54: un archivado ya no es del inventario
 			ORDER BY p.Nombre ASC;
 		`,
 		args: [idCategoria],
@@ -87,6 +88,7 @@ export async function resumen(
 			FROM Lotes_Producto l
 			JOIN Productos p ON p.ID_Producto = l.ID_Producto
 			WHERE l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL
+				AND p.Archivado_En IS NULL
 			ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC
 			LIMIT ?1;
 		`,
@@ -125,6 +127,7 @@ export async function resumen(
 			FROM Productos p
 			LEFT JOIN stock_por_prod sp ON sp.ID_Producto = p.ID_Producto
 			LEFT JOIN fefo f ON f.ID_Producto = p.ID_Producto
+			WHERE p.Archivado_En IS NULL
 			ORDER BY Stock_Actual ASC, p.Nombre ASC
 			LIMIT ?1;
 		`,
@@ -222,13 +225,20 @@ export async function getProductoStockSuelto(
 	return r.Stock_Suelto == null ? null : Number(r.Stock_Suelto);
 }
 
-// ¿El producto está referenciado por alguna Detalle_Comanda? (borrado con histórico, INV-05).
-export async function productoReferenciado(
+// INV-05: ¿está el producto en una comanda todavía abierta? Es lo único que impide quitarlo; si sólo
+// tiene ventas cerradas, se archiva (RI-54).
+export async function productoEnComandaAbierta(
 	db: Client,
 	idProducto: string,
 ): Promise<boolean> {
 	const rs = await db.execute({
-		sql: "SELECT 1 FROM Detalle_Comanda WHERE ID_Producto=?1 LIMIT 1;",
+		sql: `
+			SELECT 1
+			FROM Detalle_Comanda dc
+			JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda
+			WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta'
+			LIMIT 1;
+		`,
 		args: [idProducto],
 	});
 	return (rs.rows ?? []).length > 0;

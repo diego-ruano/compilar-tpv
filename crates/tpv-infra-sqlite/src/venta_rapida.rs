@@ -201,6 +201,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 LEFT JOIN v_inventario_producto_stock v ON v.ID_Producto = p.ID_Producto
                 WHERE p.ID_Categoria = ?1
                   AND COALESCE(c.Vendible,1)=1
+                  AND p.Archivado_En IS NULL
                 ORDER BY p.Nombre ASC;
                 "#,
                 vec![Value::Text(id_categoria.to_string())],
@@ -247,6 +248,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 LEFT JOIN v_inventario_producto_stock v ON v.ID_Producto = p.ID_Producto
                 WHERE p.Nombre LIKE ?1
                   AND COALESCE(c.Vendible,1)=1
+                  AND p.Archivado_En IS NULL
                 ORDER BY p.Nombre ASC
                 LIMIT ?2;
                 "#,

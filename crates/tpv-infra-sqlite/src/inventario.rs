@@ -130,6 +130,43 @@ async fn fetch_producto<C: Reader>(
     }
 }
 
+/// Quitar un producto del catálogo (INV-05, RI-54): **se archiva si tiene historia y se borra si
+/// no**, en una sola tanda de sentencias que deciden cada una por su cuenta.
+///
+/// «Historia» es que alguna línea de comanda lo nombre o que haya consumos suyos, de lote o de
+/// stock suelto. Antes se borraba siempre: el `DELETE` de sus lotes chocaba con la FK de
+/// `Lote_Consumos` en cuanto se había vendido algo de un lote, y la pantalla enseñaba el error del
+/// motor. Archivado (`Archivado_En`), sale de la carta, del inventario, de los pedidos y de las
+/// alertas; sus ventas, sus lotes y su trazabilidad siguen para las estadísticas.
+///
+/// Cada sentencia lleva su condición en el propio SQL, sin leer antes: la primera archiva si hay
+/// historia, y las demás sólo borran si el producto no ha quedado archivado. Así la decisión se toma
+/// una vez, dentro de la transacción, y es la misma en la nube al replicar las sentencias.
+/// El worker manda exactamente estas (`inventario.commands.ts::deleteProducto`).
+///
+/// DB-03: lo que haría una FK se hace a mano (los movimientos antes que los lotes), porque lo que
+/// viaja a la nube son estas sentencias y allí no se garantiza que las acciones referenciales se
+/// apliquen igual.
+pub(crate) const SQL_QUITAR_PRODUCTO: &[&str] = &[
+    "UPDATE Productos SET Archivado_En = datetime('now','localtime') \
+     WHERE ID_Producto = ?1 AND Archivado_En IS NULL AND (\
+       EXISTS (SELECT 1 FROM Detalle_Comanda WHERE ID_Producto = ?1) \
+       OR EXISTS (SELECT 1 FROM Suelto_Consumos WHERE ID_Producto = ?1) \
+       OR EXISTS (SELECT 1 FROM Lote_Consumos lc JOIN Lotes_Producto l ON l.ID_Lote = lc.ID_Lote \
+                  WHERE l.ID_Producto = ?1));",
+    "DELETE FROM Movimientos_Stock \
+     WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto = ?1) \
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);",
+    // Y los de su stock suelto (RI-55).
+    "DELETE FROM Movimientos_Stock WHERE ID_Producto = ?1 \
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);",
+    "DELETE FROM Lotes_Producto WHERE ID_Producto = ?1 \
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);",
+    "DELETE FROM Producto_Alergenos WHERE ID_Producto = ?1 \
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);",
+    "DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL;",
+];
+
 #[async_trait]
 impl InventarioRepository for SqliteInventarioRepository {
     async fn list_categorias(&self) -> AppResult<Vec<CategoriaInvDto>> {
@@ -193,6 +230,7 @@ impl InventarioRepository for SqliteInventarioRepository {
             p.IVA_Percent
           FROM Productos p
           WHERE p.ID_Categoria = ?1
+            AND p.Archivado_En IS NULL -- RI-54: un archivado ya no es del inventario
           ORDER BY p.Nombre ASC;
         "#;
         let db = self.db.read().await;
@@ -216,6 +254,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 FROM Lotes_Producto l
                 JOIN Productos p ON p.ID_Producto = l.ID_Producto
                 WHERE l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL
+                  AND p.Archivado_En IS NULL
                 ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC
                 LIMIT ?1;
                 "#,
@@ -261,6 +300,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 FROM Productos p
                 LEFT JOIN stock_por_prod sp ON sp.ID_Producto = p.ID_Producto
                 LEFT JOIN fefo f ON f.ID_Producto = p.ID_Producto
+                WHERE p.Archivado_En IS NULL
                 ORDER BY Stock_Actual ASC, p.Nombre ASC
                 LIMIT ?1;
                 "#,
@@ -457,14 +497,9 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()> {
-        // INV-05: lo único que impide borrar es que el producto esté EN USO ahora mismo, o sea en
-        // una comanda todavía abierta. Quitarlo del catálogo con una mesa a medias dejaría a la
+        // INV-05: lo único que impide quitar un producto es que esté EN USO ahora mismo, o sea en
+        // una comanda todavía abierta. Quitarlo de la carta con una mesa a medias dejaría a la
         // línea sin precio ni cocina y al camarero sin saber por qué.
-        //
-        // Las ventas ya cobradas NO lo impiden: la línea es un snapshot (nombre, precio y tipo de
-        // IVA copiados al vender), así que el histórico se sostiene solo y la FK deja `ID_Producto`
-        // a NULL. Un bar que deja de servir algo tiene que poder quitarlo de la carta sin arrastrar
-        // para siempre una ficha que ya no usa.
         {
             let rg = self.db.read().await;
             let mut rows = rg
@@ -490,24 +525,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
-            for sql in [
-                // DB-03: todo lo que la FK haría sola se hace A MANO, porque lo que viaja a la nube
-                // son estas sentencias y allí no se garantiza que las acciones referenciales se
-                // apliquen igual. Si la Main confiara en el motor, la nube se quedaría con el
-                // enlace colgando y las dos copias dejarían de decir lo mismo.
-                //
-                // Soltar el enlace de las ventas va PRIMERO: es lo que permite que el DELETE de
-                // abajo no choque. La línea conserva su snapshot (nombre, precio, IVA), así que no
-                // pierde nada al quedarse sin producto (INV-05).
-                "UPDATE Detalle_Comanda SET ID_Producto = NULL WHERE ID_Producto=?1;",
-                // Movimientos antes que lotes (FK → Lotes), por el mismo motivo.
-                "DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto=?1);",
-                // Y los de su stock suelto (RI-55).
-                "DELETE FROM Movimientos_Stock WHERE ID_Producto=?1;",
-                "DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
-                "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
-                "DELETE FROM Productos WHERE ID_Producto=?1;",
-            ] {
+            for sql in SQL_QUITAR_PRODUCTO {
                 conn.execute(sql, vec![Value::Text(id_producto.to_string())])
                     .await
                     .map_err(db_err)?;
@@ -899,9 +917,9 @@ mod tests_borrado_de_producto {
     //! es que el producto esté EN USO ahora mismo —en una comanda abierta—, porque quitarlo con
     //! una mesa a medias deja la línea sin precio ni cocina.
     //!
-    //! Las ventas ya cobradas no lo impiden y tampoco se pierden: la línea guarda su propio
-    //! snapshot (nombre, precio, tipo de IVA) y la FK solo suelta el enlace. Lo que sí se va con el
-    //! producto son sus lotes, en cascada: es stock de esa ficha y no significa nada sin ella.
+    //! Las ventas ya cobradas no lo impiden, pero sí deciden **cómo** se quita (RI-54): un producto
+    //! con historia se archiva —sale de la carta y del inventario, y sus ventas, sus lotes y su
+    //! trazabilidad se quedan— y uno sin historia se borra con sus lotes.
 
     use super::*;
     use crate::db::Db;
@@ -974,10 +992,10 @@ mod tests_borrado_de_producto {
     }
 
     #[tokio::test]
-    async fn un_producto_ya_vendido_tambien_se_borra() {
-        // Un bar que deja de servir algo tiene que poder quitarlo de la carta. Lo que impedia
-        // hacerlo era la FK de Detalle_Comanda; ahora la linea guarda su propio snapshot y la FK
-        // deja el enlace a NULL.
+    async fn un_producto_ya_vendido_se_archiva_y_sale_de_la_carta() {
+        // RI-54: un bar que deja de servir algo tiene que poder quitarlo de la carta, y lo vendido
+        // tiene que seguir en las estadísticas. Se archiva: deja de salir en el catálogo y el nombre
+        // queda libre para otro producto.
         let (db, _dir) = db_temporal().await;
         sembrar(&db, CATALOGO).await;
         sembrar(&db, UNA_VENTA_COBRADA).await;
@@ -985,13 +1003,34 @@ mod tests_borrado_de_producto {
 
         repo.delete_producto("vendido").await.unwrap();
 
-        assert!(!existe(&db, "vendido").await);
+        assert!(existe(&db, "vendido").await, "con historia no se borra");
+        let carta = repo.list_productos_by_categoria("cat").await.unwrap();
+        assert!(carta.iter().all(|p| p.base.id_producto != "vendido"), "pero ya no sale en la carta");
+        sembrar(
+            &db,
+            &["INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('otro', 'cat', 'Cafe');"],
+        )
+        .await;
+        assert!(existe(&db, "otro").await, "y su nombre se puede volver a usar");
+    }
+
+    #[tokio::test]
+    async fn un_producto_archivado_no_se_puede_volver_a_pedir() {
+        // Una pantalla con la carta de antes en caché todavía puede ofrecerlo.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_VENTA_COBRADA).await;
+        SqliteInventarioRepository::new(db.clone()).delete_producto("vendido").await.unwrap();
+
+        let r = db.read().await;
+        let err = crate::mesas::snapshot_del_producto(&r, "vendido").await.unwrap_err();
+        assert!(err.to_string().contains("ya no está en la carta"), "{err}");
     }
 
     #[tokio::test]
     async fn la_venta_sobrevive_al_borrado_con_su_nombre_y_su_precio() {
         // Lo que no puede pasar es que borrar del catalogo borre historia: la linea sigue ahi, con
-        // lo que se cobro, y solo pierde el enlace a una ficha que ya no existe.
+        // lo que se cobro, y como el producto se archiva conserva incluso el enlace (RI-54).
         let (db, _dir) = db_temporal().await;
         sembrar(&db, CATALOGO).await;
         sembrar(&db, UNA_VENTA_COBRADA).await;
@@ -1009,7 +1048,11 @@ mod tests_borrado_de_producto {
             .unwrap();
         let fila = rows.next().await.unwrap().expect("la linea de la venta sigue existiendo");
 
-        assert_eq!(crate::mapping::v_string(fila.get_value(0).unwrap()), None, "el enlace se suelta");
+        assert_eq!(
+            crate::mapping::v_string(fila.get_value(0).unwrap()).as_deref(),
+            Some("vendido"),
+            "el enlace se queda"
+        );
         assert_eq!(
             crate::mapping::v_string(fila.get_value(1).unwrap()).as_deref(),
             Some("Cafe"),

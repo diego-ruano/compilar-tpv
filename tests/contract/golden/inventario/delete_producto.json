@@ -3,14 +3,31 @@
     {
       "Cantidad": 2.0,
       "ID_Detalle": "det-1",
-      "ID_Producto": null,
+      "ID_Producto": "prod-1",
       "IVA_Percent": 21.0,
       "Nombre_Producto": "Rioja",
       "Precio_Unitario": 1200
     }
   ],
-  "Lotes_Producto": [],
-  "Movimientos_Stock": [],
-  "Producto_Alergenos": [],
-  "Productos": []
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1"
+    }
+  ],
+  "Movimientos_Stock": [
+    {
+      "ID_Movimiento": "mov-1"
+    }
+  ],
+  "Producto_Alergenos": [
+    {
+      "ID_Producto": "prod-1"
+    }
+  ],
+  "Productos": [
+    {
+      "Archivado": 1,
+      "ID_Producto": "prod-1"
+    }
+  ]
 }

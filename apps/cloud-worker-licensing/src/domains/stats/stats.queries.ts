@@ -87,7 +87,7 @@ export async function mesas(
 
 	const total = await one(
 		db,
-		"SELECT COUNT(*) AS n FROM Mesas;",
+		"SELECT COUNT(*) AS n FROM Mesas WHERE Archivada_En IS NULL;",
 	);
 	// Ingresos al nivel de PAGO (fuente de verdad = Pagos, coherente con caja), semántica por-mesa:
 	// 'ocupadas' = nº de mesas reales con cobro en el rango; ingresos = SUM(Importe_Total). La venta
@@ -334,7 +334,7 @@ export async function reservas(
 	const turnoFilter =
 		turno === "COMIDA" ? "AND Turno='COMIDA'" : turno === "CENA" ? "AND Turno='CENA'" : "";
 
-	const totalMesas = await one(db, "SELECT COUNT(*) AS n FROM Mesas;");
+	const totalMesas = await one(db, "SELECT COUNT(*) AS n FROM Mesas WHERE Archivada_En IS NULL;");
 	const total = await one(db, `${CTES} SELECT COUNT(*) AS n FROM res_rng;`);
 	const cancel = await one(
 		db,

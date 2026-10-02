@@ -61,6 +61,11 @@ En los dos casos:
   sin mesa), con un `CHECK` que impide mezclarlos. `idx_comandas_una_abierta_por_mesa` garantiza una
   comanda abierta por mesa; los tickets de barra no compiten porque los `NULL` son distintos en un índice
   único. Un canal nuevo sólo amplía el `CHECK`.
+- **Lo que tiene historia se archiva, no se borra** (RI-54): un producto con ventas o consumos
+  (`Productos.Archivado_En`) y una mesa o zona con comandas o reservas (`Archivada_En`). Lo archivado
+  sale de la carta, del inventario, del plano y de las reservas nuevas, y sigue en estadísticas,
+  tickets y reconciliación. Sus `UNIQUE` de nombre sólo cuentan entre los activos (índices parciales,
+  y los `ON CONFLICT` llevan su `WHERE`). Una lista nueva de catálogo filtra `Archivado_En IS NULL`.
 - **«Línea cobrada»** se lee por la vista `v_lineas_cobradas` (pagos activos), no por `Pago_Detalles`
   ([caja.md](caja.md#dar-de-baja-un-cobro)).
 - **`Registros_Facturacion` y `Serie_Facturacion` no se purgan nunca** ([verifactu.md](verifactu.md)).

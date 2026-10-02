@@ -128,16 +128,10 @@ inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema), async (c) =>
 inventarioRoutes.delete("/productos/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto inválido");
-	// INV-05: no borrar productos con histórico de ventas; mensaje claro en vez de error crudo de FK.
-	const enUso = await tenantQuery(c, (db) =>
-		q.productoReferenciado(db, id),
-	);
-	if (enUso) {
-		return c.json(
-			{ error: "No se puede borrar: el producto tiene ventas registradas en comandas." },
-			409,
-		);
-	}
+	// INV-05: sólo lo impide estar en una comanda abierta. Con ventas cerradas se archiva (RI-54),
+	// y eso lo decide el propio comando.
+	const enUso = await tenantQuery(c, (db) => q.productoEnComandaAbierta(db, id));
+	if (enUso) return c.json({ ok: false, error: "producto_en_comanda_abierta" }, 409);
 	await apply(c, cmd.deleteProducto(id));
 	return c.json({ ok: true });
 });

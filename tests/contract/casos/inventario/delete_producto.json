@@ -1,5 +1,5 @@
 {
-  "descripcion": "Borrado de un producto YA VENDIDO (INV-05): elimina explícitamente sus movimientos, lotes, alérgenos y el producto, y suelta a mano el enlace de las ventas (DB-03: no se depende del ON DELETE SET NULL del motor, que en Turso no se garantiza). La línea de la venta sobrevive con su snapshot —nombre, precio y tipo de IVA— y solo pierde el ID_Producto.",
+  "descripcion": "Quitar un producto YA VENDIDO (INV-05, RI-54): tiene una línea en una comanda cobrada, así que se ARCHIVA en vez de borrarse. Sigue con sus lotes, sus movimientos y sus alérgenos, y la línea conserva su ID_Producto: las estadísticas y la trazabilidad no pierden nada. Archivado_En es una fecha y se compara como «tiene o no».",
   "comando": "inventario.delete_producto",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');",
@@ -14,7 +14,7 @@
     "id_producto": "prod-1"
   },
   "snapshot": {
-    "Productos": "SELECT ID_Producto FROM Productos",
+    "Productos": "SELECT ID_Producto, Archivado_En IS NOT NULL AS Archivado FROM Productos",
     "Lotes_Producto": "SELECT ID_Lote FROM Lotes_Producto",
     "Movimientos_Stock": "SELECT ID_Movimiento FROM Movimientos_Stock",
     "Producto_Alergenos": "SELECT ID_Producto FROM Producto_Alergenos",

@@ -110,6 +110,7 @@ ventaRapidaRoutes.post("/lineas", cuerpo(S.addLineaSchema), async (c) => {
 	const datos = await tenantQuery(c, (db) =>
 		mesasQ.datosDeLinea(db, entrada.id_producto),
 	);
+	if (datos.archivado) return c.json({ ok: false, error: "producto_archivado" }, 409);
 	const id = await apply(c, cmd.addLinea(entrada, datos.ivaPercent, datos.nombre));
 	return c.json({ ok: true, id_detalle: id });
 });

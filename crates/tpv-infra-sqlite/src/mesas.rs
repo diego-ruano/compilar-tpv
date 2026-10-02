@@ -104,16 +104,22 @@ async fn select_one_string<C: Reader>(
 ///   (INV-05) y la FK deja `ID_Producto` a NULL. Sin este nombre, esa línea se quedaría muda.
 ///
 /// El IVA es `NULL` si el producto no tiene tipo propio (hereda el del negocio).
+///
+/// RI-54: un producto **archivado** ya no está en la carta, y una pantalla con la carta de antes
+/// en caché todavía puede ofrecerlo. Se rechaza aquí, que es por donde pasa toda línea nueva.
 pub(crate) async fn snapshot_del_producto<C: Reader>(conn: &C, id_producto: &str) -> AppResult<(Value, Value)> {
     let mut rows = conn
         .query(
-            "SELECT Nombre, IVA_Percent FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
+            "SELECT Nombre, IVA_Percent, Archivado_En IS NOT NULL FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
             vec![Value::Text(id_producto.to_string())],
         )
         .await
         .map_err(db_err)?;
 
     match rows.next().await.map_err(db_err)? {
+        Some(row) if v_i64(row.get_value(2).map_err(db_err)?) == Some(1) => Err(AppError::validation(
+            "Ese producto ya no está en la carta. Vuelve a abrir la carta y elige otro.",
+        )),
         Some(row) => Ok((
             v_string(row.get_value(0).map_err(db_err)?)
                 .map(Value::Text)
@@ -239,6 +245,28 @@ async fn sumar_gasto_cliente_por_comanda<C: Writer>(
     .await?;
 
     Ok(())
+}
+
+/// Las dos sentencias que quitan del plano las mesas que cumplen `filtro` (RI-54).
+///
+/// - Las que tienen historia (comandas o reservas) se **archivan**: desaparecen del plano y de las
+///   reservas nuevas, y sus comandas siguen contando en las estadísticas. Antes se quedaban sin decir
+///   nada y volvían a aparecer en el plano, así que una zona antigua no se podía quitar nunca.
+/// - Las que no tienen historia se borran.
+/// - Una mesa con una comanda **abierta** no se toca: quitarla escondería una cuenta sin cobrar.
+///
+/// Las condiciones van en el SQL para que la nube, al replicarlas, decida lo mismo.
+fn sql_quitar_mesas(filtro: &str) -> [String; 2] {
+    let historia = "(EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa) \
+                    OR EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa))";
+    [
+        format!(
+            "UPDATE Mesas SET Archivada_En = datetime('now','localtime') \
+             WHERE {filtro} AND Archivada_En IS NULL AND {historia} \
+               AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa AND C.Estado = 'Abierta');"
+        ),
+        format!("DELETE FROM Mesas WHERE {filtro} AND NOT {historia};"),
+    ]
 }
 
 /// Get-or-create del ticket de barra abierto (Local-First: id UUIDv7 explícito). Los tickets de
@@ -445,21 +473,27 @@ impl MesasRepository for SqliteMesasRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
-            // ── 1. Eliminar las zonas borradas en el editor (las que ya no llegan) ──────
-            // Primero sus mesas libres; las que tienen comanda/reserva quedan, y esas mesas
-            // residuales impiden borrar su zona (no se pierde histórico).
+            // ── 1. Quitar las zonas borradas en el editor (las que ya no llegan) ─────────
+            // RI-54: primero sus mesas (archivadas si tienen historia, borradas si no), y luego la
+            // zona: archivada si le quedan mesas archivadas, borrada si no le queda ninguna. Una
+            // mesa con una comanda abierta se queda, y con ella su zona.
+            for sql in sql_quitar_mesas(&format!("1 = 1{not_in_clause}")) {
+                db.execute(&sql, kept_args.clone()).await.map_err(db_err)?;
+            }
             db.execute(
                 &format!(
-                    r#"DELETE FROM Mesas
+                    r#"UPDATE Zonas SET Archivada_En = datetime('now','localtime')
                        WHERE 1 = 1{not_in_clause}
-                         AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
-                         AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);"#
+                         AND Archivada_En IS NULL
+                         AND EXISTS (SELECT 1 FROM Mesas M WHERE M.ID_Zona = Zonas.ID_Zona)
+                         AND NOT EXISTS (
+                           SELECT 1 FROM Mesas M WHERE M.ID_Zona = Zonas.ID_Zona AND M.Archivada_En IS NULL
+                         );"#
                 ),
                 kept_args.clone(),
             )
             .await
             .map_err(db_err)?;
-
             db.execute(
                 &format!(
                     r#"DELETE FROM Zonas
@@ -518,7 +552,7 @@ impl MesasRepository for SqliteMesasRepository {
                         r#"
                         INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
                         VALUES (?1, ?2, ?3, datetime('now','localtime'))
-                        ON CONFLICT(Nombre_Zona) DO UPDATE SET
+                        ON CONFLICT(Nombre_Zona) WHERE Archivada_En IS NULL DO UPDATE SET
                           Room_Points = excluded.Room_Points,
                           Updated_At = excluded.Updated_At;
                         "#,
@@ -535,7 +569,7 @@ impl MesasRepository for SqliteMesasRepository {
                     // existente (así las mesas se cuelgan de un ID_Zona que sí existe → sin FK rota).
                     let mut rows = db
                         .query(
-                            "SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?1 LIMIT 1;",
+                            "SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?1 AND Archivada_En IS NULL LIMIT 1;",
                             vec![Value::Text(zone_name.clone())],
                         )
                         .await
@@ -558,35 +592,15 @@ impl MesasRepository for SqliteMesasRepository {
                     }
                 }
 
-                let mut sql = String::from(
-                    r#"
-                    DELETE FROM Mesas
-                    WHERE ID_Zona = ?1
-                    "#,
-                );
+                let mut filtro = String::from("ID_Zona = ?1");
                 let mut sql_args: Vec<Value> = vec![Value::Text(zone_id.clone())];
-
                 if !kept.is_empty() {
-                    sql.push_str(" AND ID_Mesa NOT IN (");
-                    for (i, idm) in kept.iter().enumerate() {
-                        let idx = (i + 2) as i64;
-                        if i > 0 {
-                            sql.push_str(", ");
-                        }
-                        sql.push_str(&format!("?{idx}"));
-                        sql_args.push(Value::Text(idm.clone()));
-                    }
-                    sql.push(')');
+                    filtro.push_str(&format!(" AND ID_Mesa NOT IN ({})", build_in_placeholders(2, kept.len())));
+                    sql_args.extend(kept.iter().cloned().map(Value::Text));
                 }
-
-                sql.push_str(
-                    r#"
-                      AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
-                      AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);
-                    "#,
-                );
-
-                db.execute(&sql, sql_args).await.map_err(db_err)?;
+                for sql in sql_quitar_mesas(&filtro) {
+                    db.execute(&sql, sql_args.clone()).await.map_err(db_err)?;
+                }
 
                 for t in z.tables.iter() {
                     let id_mesa_opt = parse_db_id(&t.id, "db-mesa-");
@@ -645,7 +659,7 @@ impl MesasRepository for SqliteMesasRepository {
                               ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                               datetime('now','localtime')
                             )
-                            ON CONFLICT(ID_Zona, Numero_Mesa) DO UPDATE SET
+                            ON CONFLICT(ID_Zona, Numero_Mesa) WHERE Archivada_En IS NULL DO UPDATE SET
                               Capacidad   = excluded.Capacidad,
                               Ubicacion_X = excluded.Ubicacion_X,
                               Ubicacion_Y = excluded.Ubicacion_Y,
@@ -695,7 +709,8 @@ impl MesasRepository for SqliteMesasRepository {
 
         let mut zonas = db
             .query(
-                "SELECT ID_Zona, Nombre_Zona, Room_Points FROM Zonas ORDER BY ID_Zona ASC;",
+                // RI-54: lo archivado ya no está en el plano.
+                "SELECT ID_Zona, Nombre_Zona, Room_Points FROM Zonas WHERE Archivada_En IS NULL ORDER BY ID_Zona ASC;",
                 (),
             )
             .await
@@ -707,6 +722,7 @@ impl MesasRepository for SqliteMesasRepository {
                 SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad,
                        Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius
                 FROM Mesas
+                WHERE Archivada_En IS NULL
                 ORDER BY ID_Zona ASC, ID_Mesa ASC;
                 "#,
                 (),
@@ -1748,11 +1764,11 @@ impl MesasRepository for SqliteMesasRepository {
         let db = &g;
         let sql1 = r#"
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), Ruta_Imagen
-            FROM Productos WHERE ID_Categoria = ?1 ORDER BY Nombre ASC;
+            FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC;
         "#;
         let sql2 = r#"
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), NULL as Ruta_Imagen
-            FROM Productos WHERE ID_Categoria = ?1 ORDER BY Nombre ASC;
+            FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC;
         "#;
         productos_query(db, sql1, sql2, vec![Value::Text(id_categoria.to_string())]).await
     }
@@ -1763,11 +1779,11 @@ impl MesasRepository for SqliteMesasRepository {
         let needle = format!("%{}%", q.trim().to_lowercase());
         let sql1 = r#"
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), Ruta_Imagen
-            FROM Productos WHERE LOWER(Nombre) LIKE ?1 ORDER BY Nombre ASC LIMIT 200;
+            FROM Productos WHERE LOWER(Nombre) LIKE ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC LIMIT 200;
         "#;
         let sql2 = r#"
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), NULL as Ruta_Imagen
-            FROM Productos WHERE LOWER(Nombre) LIKE ?1 ORDER BY Nombre ASC LIMIT 200;
+            FROM Productos WHERE LOWER(Nombre) LIKE ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC LIMIT 200;
         "#;
         productos_query(db, sql1, sql2, vec![Value::Text(needle)]).await
     }

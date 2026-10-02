@@ -1,0 +1,21 @@
+{
+  "Lote_Consumos": [
+    {
+      "Cantidad": 2.0,
+      "ID_Detalle": "det-1",
+      "ID_Lote": "lote-1"
+    }
+  ],
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1",
+      "Stock_Disponible": 3.0
+    }
+  ],
+  "Productos": [
+    {
+      "Archivado": 1,
+      "ID_Producto": "prod-1"
+    }
+  ]
+}

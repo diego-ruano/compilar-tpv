@@ -55,6 +55,29 @@ function puntosComoRust(points: number[] | undefined | null): string {
 	return `[${partes.join(",")}]`;
 }
 
+/**
+ * RI-54: los dos pasos que quitan del plano las mesas que cumplen `filtro`. Espejo de
+ * `sql_quitar_mesas` en tpv-infra-sqlite: las que tienen historia (comandas o reservas) se ARCHIVAN
+ * —desaparecen del plano y siguen en las estadísticas—, las demás se borran, y una con una comanda
+ * abierta no se toca. Las condiciones van en el SQL para que la Main, al replicarlas, decida lo mismo.
+ */
+function pasosQuitarMesas(filtro: string, args: unknown[]): any[] {
+	const historia = `(EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
+		OR EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa))`;
+	return [
+		{
+			kind: "execute",
+			sql: `
+				UPDATE Mesas SET Archivada_En = datetime('now','localtime')
+				WHERE ${filtro} AND Archivada_En IS NULL AND ${historia}
+					AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa AND C.Estado = 'Abierta');
+			`,
+			args,
+		},
+		{ kind: "execute", sql: `DELETE FROM Mesas WHERE ${filtro} AND NOT ${historia};`, args },
+	];
+}
+
 export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 	const steps: any[] = [];
 
@@ -67,20 +90,24 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 		? `AND ID_Zona NOT IN (${keptZoneIds.map((_, i) => `?${i + 1}`).join(",")})`
 		: "";
 
-	// Borra mesas de zonas eliminadas (las que no tengan comanda/reserva asociada)
+	// RI-54: las mesas de las zonas eliminadas se archivan si tienen historia y se borran si no; una
+	// con comanda abierta se queda. Luego la zona: archivada si le quedan mesas archivadas, borrada si
+	// no le queda ninguna. Mismo criterio y mismas sentencias que la Main.
+	steps.push(...pasosQuitarMesas(`1 = 1 ${zoneNotInClause}`, [...keptZoneIds]));
 	steps.push({
 		kind: "execute",
 		sql: `
-			DELETE FROM Mesas
+			UPDATE Zonas SET Archivada_En = datetime('now','localtime')
 			WHERE 1 = 1
 				${zoneNotInClause}
-				AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
-				AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);
+				AND Archivada_En IS NULL
+				AND EXISTS (SELECT 1 FROM Mesas M WHERE M.ID_Zona = Zonas.ID_Zona)
+				AND NOT EXISTS (
+					SELECT 1 FROM Mesas M WHERE M.ID_Zona = Zonas.ID_Zona AND M.Archivada_En IS NULL
+				);
 		`,
 		args: [...keptZoneIds],
 	});
-
-	// Borra las propias zonas eliminadas (solo si ya quedaron sin mesas)
 	steps.push({
 		kind: "execute",
 		sql: `
@@ -129,7 +156,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 				sql: `
 					INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
 					VALUES (?1, ?2, ?3, datetime('now','localtime'))
-					ON CONFLICT(Nombre_Zona) DO UPDATE SET
+					ON CONFLICT(Nombre_Zona) WHERE Archivada_En IS NULL DO UPDATE SET
 						Room_Points = excluded.Room_Points,
 						Updated_At = excluded.Updated_At;
 				`,
@@ -143,17 +170,12 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 		const keptClause = kept.length
 			? `AND ID_Mesa NOT IN (${kept.map((_, i) => `?${i + 3}`).join(",")})`
 			: "";
-		steps.push({
-			kind: "execute",
-			sql: `
-				DELETE FROM Mesas
-				WHERE ID_Zona = COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 LIMIT 1))
-					${keptClause}
-					AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
-					AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);
-			`,
-			args: [idZona, z.name, ...kept],
-		});
+		steps.push(
+			...pasosQuitarMesas(
+				`ID_Zona = COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 AND Archivada_En IS NULL LIMIT 1)) ${keptClause}`,
+				[idZona, z.name, ...kept],
+			),
+		);
 
 		for (const t of z.tables) {
 			const idMesa = parseDbId(t.id, "db-mesa-");
@@ -167,7 +189,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 					sql: `
 						UPDATE Mesas
 						SET
-							ID_Zona = COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 LIMIT 1)),
+							ID_Zona = COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 AND Archivada_En IS NULL LIMIT 1)),
 							Numero_Mesa = ?3,
 							Capacidad = ?4,
 							Ubicacion_X = ?5,
@@ -213,10 +235,10 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 						)
 						SELECT
 							?11,
-							COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 LIMIT 1)),
+							COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 AND Archivada_En IS NULL LIMIT 1)),
 							?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
 							datetime('now','localtime')
-						ON CONFLICT(ID_Zona, Numero_Mesa) DO UPDATE SET
+						ON CONFLICT(ID_Zona, Numero_Mesa) WHERE Archivada_En IS NULL DO UPDATE SET
 							Capacidad = excluded.Capacidad,
 							Ubicacion_X = excluded.Ubicacion_X,
 							Ubicacion_Y = excluded.Ubicacion_Y,

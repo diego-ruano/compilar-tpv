@@ -145,6 +145,10 @@ import casoInvSetAlerg from "../../../tests/contract/casos/inventario/set_alerge
 import goldenInvSetAlerg from "../../../tests/contract/golden/inventario/set_alergenos.json";
 import casoInvDeleteProd from "../../../tests/contract/casos/inventario/delete_producto.json";
 import goldenInvDeleteProd from "../../../tests/contract/golden/inventario/delete_producto.json";
+import casoInvDeleteLoteVendido from "../../../tests/contract/casos/inventario/delete_producto_con_lote_vendido.json";
+import goldenInvDeleteLoteVendido from "../../../tests/contract/golden/inventario/delete_producto_con_lote_vendido.json";
+import casoInvDeleteSinHistoria from "../../../tests/contract/casos/inventario/delete_producto_sin_historia.json";
+import goldenInvDeleteSinHistoria from "../../../tests/contract/golden/inventario/delete_producto_sin_historia.json";
 import casoInvUpdateLote from "../../../tests/contract/casos/inventario/update_lote.json";
 import goldenInvUpdateLote from "../../../tests/contract/golden/inventario/update_lote.json";
 import casoInvAjustarLote from "../../../tests/contract/casos/inventario/ajustar_lote.json";
@@ -193,6 +197,8 @@ import casoVrDeleteComanda from "../../../tests/contract/casos/venta_rapida/dele
 import goldenVrDeleteComanda from "../../../tests/contract/golden/venta_rapida/delete_comanda_if_safe.json";
 import casoMesaSaveLayout from "../../../tests/contract/casos/mesas/save_layout.json";
 import goldenMesaSaveLayout from "../../../tests/contract/golden/mesas/save_layout.json";
+import casoMesaSaveLayoutArchiva from "../../../tests/contract/casos/mesas/save_layout_archiva.json";
+import goldenMesaSaveLayoutArchiva from "../../../tests/contract/golden/mesas/save_layout_archiva.json";
 import casoMesaAbrir from "../../../tests/contract/casos/mesas/abrir_comanda.json";
 import goldenMesaAbrir from "../../../tests/contract/golden/mesas/abrir_comanda.json";
 import casoMesaSetTrab from "../../../tests/contract/casos/mesas/set_trabajador_if_null.json";
@@ -272,6 +278,8 @@ const CASOS = [
 	{ nombre: "inventario_upsert_producto", caso: casoInvUpsertProd, golden: goldenInvUpsertProd },
 	{ nombre: "inventario_set_alergenos", caso: casoInvSetAlerg, golden: goldenInvSetAlerg },
 	{ nombre: "inventario_delete_producto", caso: casoInvDeleteProd, golden: goldenInvDeleteProd },
+	{ nombre: "inventario_delete_producto_con_lote_vendido", caso: casoInvDeleteLoteVendido, golden: goldenInvDeleteLoteVendido },
+	{ nombre: "inventario_delete_producto_sin_historia", caso: casoInvDeleteSinHistoria, golden: goldenInvDeleteSinHistoria },
 	{ nombre: "inventario_update_lote", caso: casoInvUpdateLote, golden: goldenInvUpdateLote },
 	{ nombre: "inventario_ajustar_lote", caso: casoInvAjustarLote, golden: goldenInvAjustarLote },
 	{ nombre: "inventario_ajustar_lote_stock_cambiado", caso: casoInvAjustarLoteTarde, golden: goldenInvAjustarLoteTarde },
@@ -296,6 +304,7 @@ const CASOS = [
 	{ nombre: "vr_update_nota_detalle", caso: casoVrUpdateNota, golden: goldenVrUpdateNota },
 	{ nombre: "vr_delete_comanda_if_safe", caso: casoVrDeleteComanda, golden: goldenVrDeleteComanda },
 	{ nombre: "mesas_save_layout", caso: casoMesaSaveLayout, golden: goldenMesaSaveLayout },
+	{ nombre: "mesas_save_layout_archiva", caso: casoMesaSaveLayoutArchiva, golden: goldenMesaSaveLayoutArchiva },
 	{ nombre: "mesas_abrir_comanda", caso: casoMesaAbrir, golden: goldenMesaAbrir },
 	{ nombre: "mesas_set_trabajador_if_null", caso: casoMesaSetTrab, golden: goldenMesaSetTrab },
 	{ nombre: "mesas_cerrar_comanda", caso: casoMesaCerrar, golden: goldenMesaCerrar },

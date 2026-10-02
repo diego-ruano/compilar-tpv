@@ -213,11 +213,16 @@ CREATE TABLE IF NOT EXISTS Proveedores (
   Ruta_Imagen TEXT
 );
 
+-- RI-54: un producto con historia (lineas vendidas, consumos de lote o de stock suelto) no se
+-- borra: se ARCHIVA (Archivado_En). Sale de la carta, del inventario, de los pedidos y de las
+-- alertas, y sus ventas, sus lotes y su trazabilidad siguen ahi para las estadisticas y la
+-- reconciliacion. Uno sin historia si se borra. El nombre es unico solo entre los activos
+-- (idx_productos_nombre_activo): uno archivado no impide crear otro que se llame igual.
 CREATE TABLE IF NOT EXISTS Productos (
   ID_Producto TEXT NOT NULL PRIMARY KEY,
   ID_Categoria TEXT NOT NULL,
   ID_Proveedor TEXT,
-  Nombre TEXT NOT NULL UNIQUE,
+  Nombre TEXT NOT NULL,
   Precio_Venta INTEGER CHECK (typeof(Precio_Venta) IN ('integer','null')),
   Stock_Minimo REAL DEFAULT 0,
   Unidad_Medida TEXT,
@@ -249,12 +254,16 @@ CREATE TABLE IF NOT EXISTS Productos (
   -- columnas. 'E1' (art. 20 LIVA, operaciones interiores) es la unica realista en hosteleria.
   Exento INTEGER NOT NULL DEFAULT 0,
   Causa_Exencion TEXT,
+  Archivado_En DATETIME,
   FOREIGN KEY (ID_Categoria) REFERENCES Categorias_Producto(ID_Categoria),
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor),
   CHECK (Exento IN (0,1)),
   CHECK (Causa_Exencion IS NULL OR Causa_Exencion IN ('E1','E2','E3','E4','E5','E6')),
   CHECK ((Exento = 1) = (Causa_Exencion IS NOT NULL))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_nombre_activo
+ON Productos(Nombre) WHERE Archivado_En IS NULL;
 
 -- La rejilla de productos filtra por categoria; ambos son FKs muy consultadas.
 CREATE INDEX IF NOT EXISTS idx_productos_categoria
@@ -379,12 +388,20 @@ ON Producto_Alergenos(ID_Alergeno);
 /* =========================================================
    5. Zonas / Mesas / Clientes / Reservas
 ========================================================= */
+-- RI-54: quitar del plano una mesa o una zona con historia (comandas, reservas) la ARCHIVA
+-- (Archivada_En): desaparece del plano y de las reservas nuevas, y sus comandas siguen contando en
+-- las estadisticas. Sin historia, se borra. Una mesa con una comanda ABIERTA no se quita del plano,
+-- y una zona con alguna mesa activa tampoco. Los nombres son unicos solo entre las activas.
 CREATE TABLE IF NOT EXISTS Zonas (
   ID_Zona TEXT NOT NULL PRIMARY KEY,
-  Nombre_Zona TEXT NOT NULL UNIQUE,
+  Nombre_Zona TEXT NOT NULL,
   Room_Points TEXT NOT NULL DEFAULT '[]',
-  Updated_At DATETIME
+  Updated_At DATETIME,
+  Archivada_En DATETIME
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_zonas_nombre_activa
+ON Zonas(Nombre_Zona) WHERE Archivada_En IS NULL;
 
 CREATE TABLE IF NOT EXISTS Mesas (
   ID_Mesa TEXT NOT NULL PRIMARY KEY,
@@ -398,9 +415,12 @@ CREATE TABLE IF NOT EXISTS Mesas (
   Height INTEGER NOT NULL,
   Radius INTEGER,
   Updated_At DATETIME,
-  UNIQUE (ID_Zona, Numero_Mesa),
+  Archivada_En DATETIME,
   FOREIGN KEY (ID_Zona) REFERENCES Zonas(ID_Zona) ON DELETE CASCADE
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mesas_numero_activa
+ON Mesas(ID_Zona, Numero_Mesa) WHERE Archivada_En IS NULL;
 
 CREATE TABLE IF NOT EXISTS Clientes (
   ID_Cliente TEXT NOT NULL PRIMARY KEY,

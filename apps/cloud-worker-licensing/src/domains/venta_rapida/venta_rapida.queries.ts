@@ -79,6 +79,7 @@ function productosSql(where: string, suffix = "") {
 		LEFT JOIN v_inventario_producto_stock v ON v.ID_Producto = p.ID_Producto
 		WHERE ${where}
 			AND COALESCE(c.Vendible,1) = 1
+			AND p.Archivado_En IS NULL -- RI-54
 		ORDER BY p.Nombre ASC
 		${suffix};
 	`;

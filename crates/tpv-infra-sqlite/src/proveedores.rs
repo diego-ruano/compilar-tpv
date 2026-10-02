@@ -136,7 +136,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
 
     async fn get_productos(&self, id_proveedor: &str) -> AppResult<Vec<ProductoProveedorDto>> {
         let sql = format!(
-            "SELECT {SQL_PRODUCTO_COLS} FROM Productos p WHERE p.ID_Proveedor = ?1 ORDER BY p.Nombre ASC;"
+            "SELECT {SQL_PRODUCTO_COLS} FROM Productos p WHERE p.ID_Proveedor = ?1 AND p.Archivado_En IS NULL ORDER BY p.Nombre ASC;"
         );
         let db = self.db.read().await;
         let mut rows = db
@@ -168,7 +168,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
     }
 
     async fn get_productos_all(&self) -> AppResult<Vec<ProductoProveedorDto>> {
-        let sql = format!("SELECT {SQL_PRODUCTO_COLS} FROM Productos p ORDER BY p.Nombre ASC;");
+        let sql = format!("SELECT {SQL_PRODUCTO_COLS} FROM Productos p WHERE p.Archivado_En IS NULL ORDER BY p.Nombre ASC;");
         let db = self.db.read().await;
         let mut rows = db.query(&sql, ()).await.map_err(db_err)?;
         let mut out = Vec::new();

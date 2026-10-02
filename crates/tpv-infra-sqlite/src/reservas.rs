@@ -167,7 +167,7 @@ impl ReservasRepository for SqliteReservasRepository {
 
         // Zonas
         let mut zrows = conn
-            .query("SELECT ID_Zona, Nombre_Zona FROM Zonas ORDER BY ID_Zona ASC;", ())
+            .query("SELECT ID_Zona, Nombre_Zona FROM Zonas WHERE Archivada_En IS NULL ORDER BY ID_Zona ASC;", ())
             .await
             .map_err(db_err)?;
         let mut zonas: Vec<ZonaDto> = Vec::new();
@@ -178,9 +178,9 @@ impl ReservasRepository for SqliteReservasRepository {
             });
         }
 
-        // Todas las mesas son reservables: ya no existen "mesas de sistema" (la venta rápida no
-        // usa mesa, ver `Comandas.Canal`), así que no hay nada que excluir.
-        let msql = "SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad FROM Mesas ORDER BY ID_Zona ASC, ID_Mesa ASC;";
+        // Son reservables todas las mesas del plano: ya no existen "mesas de sistema" (la venta
+        // rápida no usa mesa, ver `Comandas.Canal`). Lo archivado (RI-54) ya no está en el plano.
+        let msql = "SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad FROM Mesas WHERE Archivada_En IS NULL ORDER BY ID_Zona ASC, ID_Mesa ASC;";
         let mut mrows = conn.query(msql, ()).await.map_err(db_err)?;
         let mut mesas: Vec<MesaDto> = Vec::new();
         while let Some(row) = mrows.next().await.map_err(db_err)? {

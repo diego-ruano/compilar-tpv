@@ -573,6 +573,11 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
               <div className="p-5">
                 <p className="text-fg-muted text-center">¿Seguro que quieres eliminar este producto?</p>
+                {/* RI-54: lo que tiene historia se archiva en vez de borrarse. */}
+                <p className="mt-2 text-sm text-fg-muted text-center">
+                  Si ya se ha vendido, desaparece de la carta y del inventario, pero sus ventas
+                  siguen contando en las estadísticas.
+                </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">
                   <button

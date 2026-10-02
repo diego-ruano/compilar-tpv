@@ -22,11 +22,13 @@ export async function meta(db: Client): Promise<ReservasMetaDto> {
 			ID_Zona AS id_zona,
 			Nombre_Zona AS nombre_zona
 		FROM Zonas
+		WHERE Archivada_En IS NULL
 		ORDER BY ID_Zona ASC;
 	`);
 
-	// Todas las mesas son reservables: ya no existen "mesas de sistema" (la venta rápida no usa
-	// mesa, ver `Comandas.Canal`), así que no hay nada que excluir. Espejo del repo local.
+	// Son reservables todas las mesas del plano: ya no existen "mesas de sistema" (la venta rápida
+	// no usa mesa, ver `Comandas.Canal`). Lo archivado (RI-54) ya no está en el plano. Espejo del repo
+	// local.
 	const mesasRs = await db.execute(`
 		SELECT
 			ID_Mesa AS id_mesa,
@@ -34,6 +36,7 @@ export async function meta(db: Client): Promise<ReservasMetaDto> {
 			Numero_Mesa AS numero_mesa,
 			Capacidad AS capacidad
 		FROM Mesas
+		WHERE Archivada_En IS NULL
 		ORDER BY ID_Zona ASC, ID_Mesa ASC;
 	`);
 

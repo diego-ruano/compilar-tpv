@@ -1,0 +1,52 @@
+{
+  "Comandas": [
+    {
+      "ID_Comanda": "comanda-s1",
+      "ID_Mesa": "mesa-s1"
+    },
+    {
+      "ID_Comanda": "comanda-a1",
+      "ID_Mesa": "mesa-a1"
+    }
+  ],
+  "Mesas": [
+    {
+      "Archivada": 1,
+      "Numero": "S1",
+      "Zona": "Salon",
+      "Zona_Archivada": 0
+    },
+    {
+      "Archivada": 1,
+      "Numero": "A1",
+      "Zona": "Antigua",
+      "Zona_Archivada": 1
+    },
+    {
+      "Archivada": 0,
+      "Numero": "S1",
+      "Zona": "Salon",
+      "Zona_Archivada": 0
+    },
+    {
+      "Archivada": 0,
+      "Numero": "N1",
+      "Zona": "Antigua",
+      "Zona_Archivada": 0
+    }
+  ],
+  "Zonas": [
+    {
+      "Archivada": 0,
+      "Nombre_Zona": "Salon"
+    },
+    {
+      "Archivada": 1,
+      "Nombre_Zona": "Antigua"
+    },
+    {
+      "Archivada": 0,
+      "Nombre_Zona": "Antigua"
+    }
+  ]
+}

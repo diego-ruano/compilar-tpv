@@ -167,7 +167,8 @@ impl SqliteStatsRepository {
             .query(
                 r#"
                 SELECT COUNT(*)
-                FROM Mesas;
+                FROM Mesas
+                WHERE Archivada_En IS NULL; -- RI-54: las mesas que hay hoy en el plano
                 "#,
                 (),
             )
@@ -594,7 +595,8 @@ impl SqliteStatsRepository {
             .query(
                 r#"
                 SELECT COUNT(*)
-                FROM Mesas;
+                FROM Mesas
+                WHERE Archivada_En IS NULL; -- RI-54: las mesas que hay hoy en el plano
                 "#,
                 (),
             )
