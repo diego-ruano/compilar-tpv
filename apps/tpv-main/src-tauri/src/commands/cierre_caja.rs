@@ -52,11 +52,9 @@ pub async fn cierre_confirmar(
 
     let u = umbral(&state).await;
     let repo = state.cierre_caja_repo().await?;
-    // El id lo genera la Main antes del INSERT, nunca la sentencia: una `TEXT PRIMARY KEY` con
-    // `randomblob` dentro se re-evaluaría al replicar y las dos BD acabarían con claves distintas
-    // para la misma fila (el fallo de TRAB-08).
-    let id = tpv_infra_sqlite::util::new_id();
-    Ok(uc::confirmar(repo.as_ref(), id, Some(&sesion.id_usuario), args, u).await?)
+    // El id llega en `args` (RI-58): lo genera la pantalla al abrir el arqueo, para que confirmar
+    // dos veces sea confirmar una. Sigue siendo un literal anterior al INSERT, nunca la sentencia.
+    Ok(uc::confirmar(repo.as_ref(), Some(&sesion.id_usuario), args, u).await?)
 }
 
 #[tauri::command]

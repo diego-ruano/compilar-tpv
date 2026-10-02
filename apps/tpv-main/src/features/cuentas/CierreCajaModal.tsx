@@ -60,6 +60,10 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
     const [contado, setContado] = useState<CashCount>({});
     const [dejado, setDejado] = useState<CashCount>({});
     const [motivo, setMotivo] = useState("");
+    // RI-58: el id del cierre nace al abrir el arqueo y se reutiliza en cada intento de confirmar,
+    // así que un doble clic o un reintento tras un error devuelven el mismo cierre en vez de crear
+    // otro con el periodo vacío.
+    const [idCierre, setIdCierre] = useState(() => crypto.randomUUID());
     // Sólo se usa en el primer cierre: después lo manda el `dejado` del anterior.
     const fondoInicial = useImporte();
     const ponerFondo = fondoInicial.poner;
@@ -72,6 +76,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         setContado({});
         setDejado({});
         setMotivo("");
+        setIdCierre(crypto.randomUUID());
         ponerFondo(null);
         cierrePreparar()
             .then((p) => {
@@ -130,6 +135,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         setError(null);
         try {
             const cierre = await cierreConfirmar({
+                idCierre,
                 fondoInicial: prep.es_primer_cierre ? fondo : null,
                 contado: aDenominaciones(denoms, contado),
                 dejado: aDenominaciones(denoms, dejado),

@@ -96,6 +96,16 @@ rectificado después (con cada corrección) y lo dejado y retirado.
 `Cierre_Denominaciones` lleva los dos recuentos (`CONTADO` y `DEJADO`). Todo va por `execute()`: un
 cierre es un dato de negocio y se replica.
 
+Confirmar es **idempotente y atómico** (RI-58):
+
+- El id del cierre lo genera la pantalla al abrir el arqueo y se reutiliza en cada intento: un doble
+  clic o un reintento devuelven el cierre ya guardado.
+- Leer el último cierre, sumar el periodo y guardar el cierre con sus denominaciones es **una sola
+  transacción del escritor** (`cerrar_periodo`). La hora del cierre es también el límite superior de
+  sus totales, y antes de soltar el escritor se espera a que cambie el segundo: un cobro guardado
+  después nunca lleva la misma hora que el cierre, que no contaría ningún periodo.
+- `idx_cierres_un_periodo` impide dos cierres vigentes con el mismo `Periodo_Desde`.
+
 ### Deshacer
 
 Sólo el **último** cierre (`reabrir`): marca `Reabierto_En`/`Reabierto_Por` y el periodo vuelve a

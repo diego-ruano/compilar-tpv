@@ -13,7 +13,7 @@ use async_trait::async_trait;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cierre_caja::{
-    ApunteCaja, ApunteGuardado, CierreCajaRepository, CierreNuevo, RectificacionNueva,
+    ApunteCaja, ApunteGuardado, ArmarCierre, CierreCajaRepository, RectificacionNueva,
 };
 use tpv_contracts::cierre_caja::{CierreDto, CierreResumenDto};
 use tpv_domain::cierre_caja::TotalesCaja;
@@ -73,7 +73,7 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
         Err(solo_main("Preparar un cierre"))
     }
 
-    async fn crear(&self, _cierre: CierreNuevo) -> AppResult<()> {
+    async fn cerrar_periodo(&self, _id_cierre: &str, _armar: ArmarCierre<'_>) -> AppResult<()> {
         Err(solo_main("Cerrar la caja"))
     }
 

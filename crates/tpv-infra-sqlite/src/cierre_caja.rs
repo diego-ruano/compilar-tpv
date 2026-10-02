@@ -12,7 +12,8 @@ use libsql::{Row, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cierre_caja::{
-    ApunteCaja, ApunteGuardado, CierreCajaRepository, CierreNuevo, RectificacionNueva,
+    ApunteCaja, ApunteGuardado, ArmarCierre, CierreCajaRepository, CierreNuevo, PeriodoAbierto,
+    RectificacionNueva,
 };
 use tpv_contracts::cierre_caja::{
     CierreDto, CierreResumenDto, DenominacionDto, RectificacionDto,
@@ -108,6 +109,253 @@ fn map_cierre(row: &Row) -> AppResult<CierreDto> {
     })
 }
 
+/// Lo que entró y salió del cajón en `(desde, hasta]`: cobros en efectivo y gastos pagados con
+/// caja. `desde = None` es desde el principio; `hasta = None`, hasta ahora.
+///
+/// El límite superior lo pone el cierre (RI-58): suma y guarda en la misma transacción, con la
+/// misma hora como límite y como `Fecha_Hora` del cierre, para que lo que cae dentro del periodo
+/// cerrado sea exactamente lo que suman sus cifras.
+async fn totales_entre<C: Reader>(
+    conn: &C,
+    desde: Option<&str>,
+    hasta: Option<&str>,
+) -> AppResult<TotalesCaja> {
+    // COBROS. El método se normaliza igual que en el resto de caja: todo lo que no sea 'Tarjeta'
+    // cuenta como efectivo (CUENTA-03). Un método nuevo entra por defecto en el cajón, que es el
+    // lado seguro: aparecería como descuadre y se investigaría, en vez de desaparecer sin más.
+    //
+    // ⚠️ El `Estado = 'ACTIVO'` es LA consulta de CUENTA-07. Antes anular borraba la fila, así
+    // que el esperado bajaba exactamente lo mismo que faltaba en el cajón y el descuadre salía
+    // cero: el único control de caja del producto era ciego ante la forma más común de sisa.
+    // Ahora el cobro anulado sigue ahí pero no cuenta como venta, así que el dinero que falta
+    // sale como que falta.
+    //
+    // ⚠️ Y con FISCAL-01 ese mismo filtro cubre ya las DEVOLUCIONES: una devolución deja el
+    // cobro en 'ANULADO' (`Motivo_Baja = 'DEVOLUCION'`). Al cajón le da igual POR QUÉ salió el
+    // dinero: lo que cambia entre los dos instrumentos es el registro fiscal que se emite, no
+    // la aritmética.
+    //
+    // ⚠️ Pero sólo cubre la devolución del MISMO periodo, y por eso está la segunda resta
+    // (REV-08). El dinero de una devolución sale del cajón el día que se devuelve, no el día
+    // que se vendió: devolver el martes una venta del viernes no quita nada del periodo
+    // abierto —aquel cobro ya no está en él— y el arqueo del martes salía con esa falta. Se
+    // resta aquí, que es donde el dinero se fue de verdad.
+    //
+    // La condición `Fecha_Hora <= desde` es la que impide contarlo dos veces: una venta
+    // devuelta DENTRO de su propio periodo ya sale del primer sumando al dejar de ser 'ACTIVO'
+    // —entró y salió, neto cero—, y restarla otra vez la dejaría en negativo. Sin cierre
+    // anterior (`?1 IS NULL`) no hay «periodo anterior» posible, así que tampoco se resta.
+    //
+    // Quien venga a «arreglar» esto restando además desde `Movimientos_Caja` habría creado la
+    // segunda fuente para la misma cifra que esa tabla existe para no ser, y restaría dos veces.
+    //
+    // GASTOS (CAJA-01). Sólo los que salieron del cajón, y comparados a mediodía de su día
+    // (`HORA_DE_UN_GASTO`): un gasto no guarda hora.
+    //
+    // Las mismas reglas, sumadas aquí, son las que usa `TotalesCaja::de_cobro`/`de_gasto` para
+    // previsualizar un cambio. Si una cambia, la otra también.
+    //
+    // Las horas se comparan como TEXTO, sin `datetime()` (RI-18): envolver la columna impedía
+    // usar idx_pagos_estado_fecha y cada arqueo recorría todos los cobros de la historia. Vale
+    // porque las dos partes están en formato canónico: `desde` es la `Fecha_Hora` de un cierre y
+    // `Fecha_Hora`/`Anulado_En` de un pago las pone el sistema (`fecha_de_apunte` normaliza lo que
+    // se edita a mano). Los gastos sí pasan por `momento_de_gasto_sql`: sólo guardan el día.
+    let gasto = momento_de_gasto_sql("Fecha");
+    let sql = format!(
+        r#"
+        SELECT
+            COALESCE((
+              SELECT SUM(Importe_Total) FROM Pagos
+              WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
+                AND Estado = 'ACTIVO'
+                AND (?1 IS NULL OR Fecha_Hora > ?1)
+                AND (?2 IS NULL OR Fecha_Hora <= ?2)
+            ), 0)
+            - COALESCE((
+              SELECT SUM(Importe_Total) FROM Pagos
+              WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
+                AND Estado = 'ANULADO'
+                AND Motivo_Baja = 'DEVOLUCION'
+                AND ?1 IS NOT NULL
+                AND Fecha_Hora <= ?1
+                AND Anulado_En IS NOT NULL
+                AND Anulado_En > ?1
+                AND (?2 IS NULL OR Anulado_En <= ?2)
+            ), 0),
+          COALESCE((
+            SELECT SUM(Importe) FROM Cuentas_Gastos
+            WHERE Pagado_Con_Caja = 1
+              AND (?1 IS NULL OR {gasto} > datetime(?1))
+              AND (?2 IS NULL OR {gasto} <= datetime(?2))
+          ), 0);
+        "#
+    );
+
+    let mut rows = conn
+        .query(sql.as_str(), vec![texto_o_nulo(desde), texto_o_nulo(hasta)])
+        .await
+        .map_err(db_err)?;
+    Ok(match rows.next().await.map_err(db_err)? {
+        Some(r) => TotalesCaja {
+            ventas_efectivo: v_dinero(r.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
+            gastos_caja: v_dinero(r.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
+        },
+        None => TotalesCaja::default(),
+    })
+}
+
+/// Cierra el periodo en **una sola transacción del escritor** (RI-58).
+///
+/// Antes eran tres pasos sueltos: leer el último cierre y los totales por el pool de lectura,
+/// insertar el cierre con su propio `datetime('now')` y luego, una a una y sin transacción, sus
+/// denominaciones. Un cobro entre la lectura y el `INSERT` caía dentro del periodo cerrado (su hora
+/// era anterior a la del cierre) pero fuera de sus cifras, y el periodo siguiente empieza después: no
+/// lo contaba nadie. Un corte entre los dos `INSERT` dejaba un arqueo sin desglose. Y dos
+/// confirmaciones creaban dos cierres.
+async fn cerrar_periodo(db: &Db, id_cierre: &str, armar: ArmarCierre<'_>) -> AppResult<()> {
+    let g = db.write().await;
+    // La hora del cierre, que es también el límite superior de los totales. La pone quien escribe
+    // (decisión 0004), con el mismo formato que `datetime('now','localtime')`.
+    let inicio = chrono::Local::now();
+    let ahora = inicio.format("%Y-%m-%d %H:%M:%S").to_string();
+
+    g.execute_batch("BEGIN;").await.map_err(db_err)?;
+    let res: AppResult<bool> = async {
+        // Confirmar dos veces es confirmar una: el id lo genera la pantalla al abrir el arqueo.
+        let ya_existe = g
+            .query(
+                "SELECT 1 FROM Cierres_Caja WHERE ID_Cierre = ?1 LIMIT 1;",
+                vec![Value::Text(id_cierre.to_string())],
+            )
+            .await
+            .map_err(db_err)?
+            .next()
+            .await
+            .map_err(db_err)?
+            .is_some();
+        if ya_existe {
+            return Ok(false);
+        }
+
+        let (desde, dejado_anterior) = {
+            let mut rows = g
+                .query(
+                    "SELECT Fecha_Hora, Dejado FROM Cierres_Caja \
+                     WHERE Reabierto_En IS NULL \
+                     ORDER BY Fecha_Hora DESC, ID_Cierre DESC LIMIT 1;",
+                    (),
+                )
+                .await
+                .map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(r) => (
+                    v_string(r.get_value(0).map_err(db_err)?),
+                    Some(v_dinero(r.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO)),
+                ),
+                None => (None, None),
+            }
+        };
+
+        let totales = totales_entre(&g, desde.as_deref(), Some(&ahora)).await?;
+        let c = armar(PeriodoAbierto { desde, dejado_anterior, totales })?;
+        insertar_cierre(&g, &c, &ahora).await?;
+        Ok(true)
+    }
+    .await;
+
+    match res {
+        Ok(guardado) => {
+            if guardado {
+                esperar_al_segundo_siguiente(inicio).await;
+            }
+            g.execute_batch("COMMIT;").await.map_err(db_err)?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = g.execute_batch("ROLLBACK;").await;
+            Err(e)
+        }
+    }
+}
+
+/// Espera, **con el escritor todavía tomado**, a que cambie el segundo.
+///
+/// Las horas tienen precisión de segundo, el periodo cerrado cuenta hasta su hora inclusive y el
+/// siguiente desde ella en exclusiva. Un cobro guardado justo después del cierre y en el mismo
+/// segundo llevaría su misma `Fecha_Hora` y no lo contaría ninguno de los dos. Los cobros fijan su
+/// hora al abrir su transacción, que es después de soltar el escritor: esperando aquí, todo lo que
+/// se escriba después lleva una hora posterior. Es menos de un segundo, una vez por noche.
+async fn esperar_al_segundo_siguiente(inicio: chrono::DateTime<chrono::Local>) {
+    use chrono::Timelike;
+    let Some(base) = inicio.with_nanosecond(0) else {
+        return;
+    };
+    let siguiente = base + chrono::Duration::seconds(1);
+    if let Ok(falta) = (siguiente - chrono::Local::now()).to_std() {
+        tokio::time::sleep(falta).await;
+    }
+}
+
+/// El `INSERT` del cierre y de su doble recuento, dentro de la transacción de [`cerrar_periodo`].
+async fn insertar_cierre<C: Writer>(db: &C, c: &CierreNuevo, fecha_hora: &str) -> AppResult<()> {
+    db.execute(
+        r#"
+        INSERT INTO Cierres_Caja (
+          ID_Cierre, Fecha_Hora, ID_Usuario, Periodo_Desde, Fondo_Inicial, Ventas_Efectivo,
+          Gastos_Caja, Esperado, Contado, Descuadre, Dejado, Retirado, Motivo
+        ) VALUES (?1, ?13, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);
+        "#,
+        vec![
+            Value::Text(c.id_cierre.clone()),
+            texto_o_nulo(c.id_usuario.as_deref()),
+            texto_o_nulo(c.periodo_desde.as_deref()),
+            dinero_val(c.fondo_inicial),
+            dinero_val(c.ventas_efectivo),
+            dinero_val(c.gastos_caja),
+            dinero_val(c.esperado),
+            dinero_val(c.contado),
+            dinero_val(c.descuadre),
+            dinero_val(c.dejado),
+            dinero_val(c.retirado),
+            texto_o_nulo(c.motivo.as_deref()),
+            Value::Text(fecha_hora.to_string()),
+        ],
+    )
+    .await
+    .map_err(|e| {
+        // `idx_cierres_un_periodo`: ya hay un cierre vigente que empieza donde este. Con la
+        // transacción no puede pasar; si pasa, es un fallo nuestro y no se guarda un segundo
+        // arqueo del mismo periodo.
+        if e.to_string().contains("UNIQUE") {
+            AppError::conflict("Ya hay un cierre de este periodo. Vuelve a abrir el cierre de caja.")
+        } else {
+            db_err(e)
+        }
+    })?;
+
+    for (momento, denoms) in [("CONTADO", &c.contado_denoms), ("DEJADO", &c.dejado_denoms)] {
+        for d in denoms.iter().filter(|d| d.unidades > 0 && d.valor > Dinero::CERO) {
+            db.execute(
+                r#"
+                INSERT INTO Cierre_Denominaciones (ID_Cierre, Momento, Valor, Unidades)
+                VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT(ID_Cierre, Momento, Valor) DO UPDATE SET
+                  Unidades = excluded.Unidades;
+                "#,
+                vec![
+                    Value::Text(c.id_cierre.clone()),
+                    Value::Text(momento.to_string()),
+                    dinero_val(d.valor),
+                    Value::Integer(d.unidades),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+        }
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl CierreCajaRepository for SqliteCierreCajaRepository {
     async fn ultimo_cierre(&self) -> AppResult<Option<CierreDto>> {
@@ -163,86 +411,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
 
     async fn totales_desde(&self, desde: Option<&str>) -> AppResult<TotalesCaja> {
         let db = self.db.read().await;
-
-        // COBROS. El método se normaliza igual que en el resto de caja: todo lo que no sea 'Tarjeta'
-        // cuenta como efectivo (CUENTA-03). Un método nuevo entra por defecto en el cajón, que es el
-        // lado seguro: aparecería como descuadre y se investigaría, en vez de desaparecer sin más.
-        //
-        // ⚠️ El `Estado = 'ACTIVO'` es LA consulta de CUENTA-07. Antes anular borraba la fila, así
-        // que el esperado bajaba exactamente lo mismo que faltaba en el cajón y el descuadre salía
-        // cero: el único control de caja del producto era ciego ante la forma más común de sisa.
-        // Ahora el cobro anulado sigue ahí pero no cuenta como venta, así que el dinero que falta
-        // sale como que falta.
-        //
-        // ⚠️ Y con FISCAL-01 ese mismo filtro cubre ya las DEVOLUCIONES: una devolución deja el
-        // cobro en 'ANULADO' (`Motivo_Baja = 'DEVOLUCION'`). Al cajón le da igual POR QUÉ salió el
-        // dinero: lo que cambia entre los dos instrumentos es el registro fiscal que se emite, no
-        // la aritmética.
-        //
-        // ⚠️ Pero sólo cubre la devolución del MISMO periodo, y por eso está la segunda resta
-        // (REV-08). El dinero de una devolución sale del cajón el día que se devuelve, no el día
-        // que se vendió: devolver el martes una venta del viernes no quita nada del periodo
-        // abierto —aquel cobro ya no está en él— y el arqueo del martes salía con esa falta. Se
-        // resta aquí, que es donde el dinero se fue de verdad.
-        //
-        // La condición `Fecha_Hora <= desde` es la que impide contarlo dos veces: una venta
-        // devuelta DENTRO de su propio periodo ya sale del primer sumando al dejar de ser 'ACTIVO'
-        // —entró y salió, neto cero—, y restarla otra vez la dejaría en negativo. Sin cierre
-        // anterior (`?1 IS NULL`) no hay «periodo anterior» posible, así que tampoco se resta.
-        //
-        // Quien venga a «arreglar» esto restando además desde `Movimientos_Caja` habría creado la
-        // segunda fuente para la misma cifra que esa tabla existe para no ser, y restaría dos veces.
-        //
-        // GASTOS (CAJA-01). Sólo los que salieron del cajón, y comparados a mediodía de su día
-        // (`HORA_DE_UN_GASTO`): un gasto no guarda hora.
-        //
-        // Las mismas reglas, sumadas aquí, son las que usa `TotalesCaja::de_cobro`/`de_gasto` para
-        // previsualizar un cambio. Si una cambia, la otra también.
-        //
-        // Las horas se comparan como TEXTO, sin `datetime()` (RI-18): envolver la columna impedía
-        // usar idx_pagos_estado_fecha y cada arqueo recorría todos los cobros de la historia. Vale
-        // porque las dos partes están en formato canónico: `desde` es la `Fecha_Hora` de un cierre y
-        // `Fecha_Hora`/`Anulado_En` de un pago las pone el sistema (`fecha_de_apunte` normaliza lo que
-        // se edita a mano). Los gastos sí pasan por `momento_de_gasto_sql`: sólo guardan el día.
-        let gasto = momento_de_gasto_sql("Fecha");
-        let sql = format!(
-            r#"
-            SELECT
-                COALESCE((
-                  SELECT SUM(Importe_Total) FROM Pagos
-                  WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
-                    AND Estado = 'ACTIVO'
-                    AND (?1 IS NULL OR Fecha_Hora > ?1)
-                ), 0)
-                - COALESCE((
-                  SELECT SUM(Importe_Total) FROM Pagos
-                  WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
-                    AND Estado = 'ANULADO'
-                    AND Motivo_Baja = 'DEVOLUCION'
-                    AND ?1 IS NOT NULL
-                    AND Fecha_Hora <= ?1
-                    AND Anulado_En IS NOT NULL
-                    AND Anulado_En > ?1
-                ), 0),
-              COALESCE((
-                SELECT SUM(Importe) FROM Cuentas_Gastos
-                WHERE Pagado_Con_Caja = 1
-                  AND (?1 IS NULL OR {gasto} > datetime(?1))
-              ), 0);
-            "#
-        );
-
-        let mut rows = db
-            .query(sql.as_str(), vec![texto_o_nulo(desde)])
-            .await
-            .map_err(db_err)?;
-        Ok(match rows.next().await.map_err(db_err)? {
-            Some(r) => TotalesCaja {
-                ventas_efectivo: v_dinero(r.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
-                gastos_caja: v_dinero(r.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
-            },
-            None => TotalesCaja::default(),
-        })
+        totales_entre(&db, desde, None).await
     }
 
     /// Cuántas anulaciones ha habido en el periodo y por cuánto importe. **Informativo**: no entra
@@ -301,56 +470,8 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         })
     }
 
-    async fn crear(&self, c: CierreNuevo) -> AppResult<()> {
-        let db = self.db.write().await;
-
-        db.execute(
-            r#"
-            INSERT INTO Cierres_Caja (
-              ID_Cierre, Fecha_Hora, ID_Usuario, Periodo_Desde, Fondo_Inicial, Ventas_Efectivo,
-              Gastos_Caja, Esperado, Contado, Descuadre, Dejado, Retirado, Motivo
-            ) VALUES (?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);
-            "#,
-            vec![
-                Value::Text(c.id_cierre.clone()),
-                texto_o_nulo(c.id_usuario.as_deref()),
-                texto_o_nulo(c.periodo_desde.as_deref()),
-                dinero_val(c.fondo_inicial),
-                dinero_val(c.ventas_efectivo),
-                dinero_val(c.gastos_caja),
-                dinero_val(c.esperado),
-                dinero_val(c.contado),
-                dinero_val(c.descuadre),
-                dinero_val(c.dejado),
-                dinero_val(c.retirado),
-                texto_o_nulo(c.motivo.as_deref()),
-            ],
-        )
-        .await
-        .map_err(db_err)?;
-
-        for (momento, denoms) in [("CONTADO", &c.contado_denoms), ("DEJADO", &c.dejado_denoms)] {
-            for d in denoms.iter().filter(|d| d.unidades > 0 && d.valor > Dinero::CERO) {
-                db.execute(
-                    r#"
-                    INSERT INTO Cierre_Denominaciones (ID_Cierre, Momento, Valor, Unidades)
-                    VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(ID_Cierre, Momento, Valor) DO UPDATE SET
-                      Unidades = excluded.Unidades;
-                    "#,
-                    vec![
-                        Value::Text(c.id_cierre.clone()),
-                        Value::Text(momento.to_string()),
-                        dinero_val(d.valor),
-                        Value::Integer(d.unidades),
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-        }
-
-        Ok(())
+    async fn cerrar_periodo(&self, id_cierre: &str, armar: ArmarCierre<'_>) -> AppResult<()> {
+        cerrar_periodo(&self.db, id_cierre, armar).await
     }
 
     async fn listar(&self, limite: i64) -> AppResult<Vec<CierreResumenDto>> {
@@ -1078,5 +1199,112 @@ mod tests {
         let e = cierre_uc::reabrir(&repo, "a", Some("u1")).await.unwrap_err();
         assert_eq!(e.code(), ErrorCode::Conflict);
         assert!(cierre_uc::reabrir(&repo, "b", Some("u1")).await.unwrap());
+    }
+
+    // ── RI-58: una sola vez y en una sola transacción ──
+
+    /// Un arqueo de 20 € en dos billetes de 10, sin fondo y sin dejar nada.
+    fn arqueo_de_20(id: &str, motivo: Option<&str>) -> tpv_contracts::cierre_caja::ConfirmarCierreInput {
+        tpv_contracts::cierre_caja::ConfirmarCierreInput {
+            id_cierre: id.into(),
+            fondo_inicial: None,
+            contado: vec![tpv_contracts::cierre_caja::DenominacionInput { valor: eur(10.0), unidades: 2 }],
+            dejado: vec![],
+            motivo: motivo.map(str::to_string),
+        }
+    }
+
+    #[tokio::test]
+    async fn confirmar_DOS_VECES_con_el_mismo_id_guarda_un_solo_cierre() {
+        // El doble clic o el reintento tras una respuesta que no llegó. Antes cada llamada generaba
+        // su id y el segundo arqueo salía con un periodo casi vacío y su descuadre.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, COBRO[0], COBRO[1]]).await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+
+        let a = cierre_uc::confirmar(&repo, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
+            .await
+            .unwrap();
+        let b = cierre_uc::confirmar(&repo, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
+            .await
+            .unwrap();
+
+        assert_eq!(a.id_cierre, b.id_cierre);
+        assert_eq!(a.fecha_hora, b.fecha_hora, "el segundo devuelve el que ya estaba");
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 1);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierre_Denominaciones;").await, 1);
+    }
+
+    #[tokio::test]
+    async fn la_hora_del_cierre_es_tambien_el_LIMITE_de_sus_cifras() {
+        // Lo que tenga una hora posterior a la del cierre es del periodo siguiente, no de este: el
+        // cierre suma hasta su propia `Fecha_Hora` inclusive y el siguiente empieza ahí en exclusiva.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, COBRO[0], COBRO[1]]).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                 VALUES ('p-futuro', 'com', '2099-01-01 00:00:00', 'Efectivo', 5000, 'TOTAL');"],
+        )
+        .await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+
+        let c = cierre_uc::confirmar(&repo, Some("u1"), arqueo_de_20("cierre-1", None), Dinero::CERO)
+            .await
+            .unwrap();
+
+        assert_eq!(c.ventas_efectivo, eur(20.0), "el cobro de 2099 no es de este periodo");
+        assert_eq!(c.descuadre, Dinero::CERO);
+    }
+
+    #[tokio::test]
+    async fn un_cierre_rechazado_no_deja_NADA_a_medias() {
+        // Un descuadre por encima del umbral sin motivo: no se guarda ni el cierre ni su recuento.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, COBRO[0], COBRO[1]]).await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+        let mut faltan_15 = arqueo_de_20("cierre-1", None);
+        faltan_15.contado = vec![tpv_contracts::cierre_caja::DenominacionInput { valor: eur(5.0), unidades: 1 }];
+
+        let e = cierre_uc::confirmar(&repo, Some("u1"), faltan_15, Dinero::CERO).await.unwrap_err();
+
+        assert_eq!(e.code(), ErrorCode::Validation);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierre_Denominaciones;").await, 0);
+    }
+
+    #[tokio::test]
+    async fn dos_cierres_VIGENTES_no_pueden_empezar_en_el_mismo_sitio() {
+        // `idx_cierres_un_periodo`, la red de seguridad. Deshacer el primero sí deja volver a
+        // cerrar desde el mismo punto.
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &["INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde)
+                 VALUES ('a', '2026-05-10 23:00:00', '2026-05-09 23:00:00');"],
+        )
+        .await;
+        let w = db.write().await;
+        let duplicado = w
+            .raw()
+            .execute(
+                "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde)
+                 VALUES ('b', '2026-05-10 23:00:05', '2026-05-09 23:00:00');",
+                Vec::<Value>::new(),
+            )
+            .await;
+        assert!(duplicado.is_err(), "dos cierres vigentes del mismo periodo");
+        drop(w);
+
+        sembrar(
+            &db,
+            &[
+                "UPDATE Cierres_Caja SET Reabierto_En = '2026-05-10 23:01:00' WHERE ID_Cierre = 'a';",
+                "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde)
+                   VALUES ('b', '2026-05-10 23:05:00', '2026-05-09 23:00:00');",
+            ],
+        )
+        .await;
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 2);
     }
 }

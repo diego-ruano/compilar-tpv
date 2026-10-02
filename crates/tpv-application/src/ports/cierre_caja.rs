@@ -55,6 +55,21 @@ pub struct CierreNuevo {
     pub dejado_denoms: Vec<Denominacion>,
 }
 
+/// El periodo que se va a cerrar, leído **dentro** de la transacción del cierre (RI-58).
+#[derive(Debug, Clone)]
+pub struct PeriodoAbierto {
+    /// La hora del último cierre no reabierto, o `None` si es el primero.
+    pub desde: Option<String>,
+    /// Lo que dejó en el cajón ese cierre: el fondo de este.
+    pub dejado_anterior: Option<Dinero>,
+    /// Lo que entró y salió del cajón desde `desde` hasta la hora del cierre.
+    pub totales: TotalesCaja,
+}
+
+/// Arma el cierre con lo que se ha leído del periodo: calcula y valida. Es dominio puro; el
+/// repositorio sólo lo llama dentro de su transacción.
+pub type ArmarCierre<'a> = &'a (dyn Fn(PeriodoAbierto) -> AppResult<CierreNuevo> + Send + Sync);
+
 /// Una rectificación ya calculada, lista para guardar (CAJA-01).
 #[derive(Debug, Clone)]
 pub struct RectificacionNueva {
@@ -92,8 +107,15 @@ pub trait CierreCajaRepository: Send + Sync {
     /// Cuántas comandas siguen abiertas. No impide cerrar: sólo se avisa.
     async fn comandas_abiertas(&self) -> AppResult<i64>;
 
-    /// Guarda el cierre y su doble recuento.
-    async fn crear(&self, cierre: CierreNuevo) -> AppResult<()>;
+    /// Cierra el periodo **en una sola transacción del escritor** (RI-58): lee el último cierre y
+    /// los totales hasta la hora del cierre, deja que `armar` calcule y valide, y guarda el cierre
+    /// con su doble recuento.
+    ///
+    /// - **Idempotente por `id_cierre`**: si ya existe, no hace nada. Una doble confirmación o un
+    ///   reintento tras una respuesta perdida no crean un segundo arqueo.
+    /// - La hora del cierre es también el límite de los totales: un cobro no puede quedar dentro del
+    ///   periodo cerrado y fuera de sus cifras.
+    async fn cerrar_periodo(&self, id_cierre: &str, armar: ArmarCierre<'_>) -> AppResult<()>;
 
     /// Histórico, de más reciente a más antiguo.
     async fn listar(&self, limite: i64) -> AppResult<Vec<CierreResumenDto>>;

@@ -47,12 +47,15 @@ export function cierrePreparar(): Promise<PreparacionCierreDto> {
  * mismo vale para `cierreReabrir`.
  */
 export function cierreConfirmar(payload: {
+    /** Clave de idempotencia del cierre (RI-58): la misma en cada intento de confirmar. */
+    idCierre: string;
     fondoInicial?: Dinero | null;
     contado: DenominacionInput[];
     dejado: DenominacionInput[];
     motivo?: string | null;
 }): Promise<CierreDto> {
     const args: ConfirmarCierreInput = {
+        id_cierre: payload.idCierre,
         fondo_inicial: payload.fondoInicial ?? undefined,
         contado: payload.contado,
         dejado: payload.dejado,

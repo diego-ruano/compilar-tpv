@@ -360,6 +360,13 @@ export type ConfirmarCambioCorreoInput = { codigo: string, };
 
 export type ConfirmarCierreInput = { 
 /**
+ * El id del cierre, un UUID que genera la pantalla al abrir el arqueo (RI-58).
+ *
+ * Es lo que hace idempotente la confirmación: un doble clic o un reintento tras una respuesta
+ * que no llegó devuelven el cierre ya guardado en vez de crear otro con el periodo vacío.
+ */
+id_cierre: string, 
+/**
  * Sólo se usa en el primer cierre; en los demás manda el `dejado` del anterior y esto se
  * ignora, para que nadie pueda reescribir el punto de partida a posteriori.
  */

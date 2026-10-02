@@ -696,6 +696,14 @@ CREATE TABLE IF NOT EXISTS Cierres_Caja (
 CREATE INDEX IF NOT EXISTS idx_cierres_fecha
 ON Cierres_Caja(Fecha_Hora DESC);
 
+-- RI-58: un periodo se cierra una sola vez. Entre los cierres vigentes (no deshechos) no puede haber
+-- dos que empiecen en el mismo sitio; el primero de todos empieza en NULL, de ahi el COALESCE. Deshacer
+-- un cierre (Reabierto_En) lo saca del indice, y el siguiente vuelve a empezar donde empezaba el.
+-- La confirmacion ya es idempotente y va en una transaccion: esto es la red por si algo lo rompe.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cierres_un_periodo
+ON Cierres_Caja(COALESCE(Periodo_Desde, ''))
+WHERE Reabierto_En IS NULL;
+
 -- Cada correccion de un apunte que cambio los numeros de un cierre ya hecho (CAJA-01): que se toco,
 -- quien, cuando y por que, con el esperado y el descuadre de antes y de despues. Es el rastro de las
 -- columnas Rect_* de Cierres_Caja: sin el, un cierre rectificado diria cuanto marca pero no por que.

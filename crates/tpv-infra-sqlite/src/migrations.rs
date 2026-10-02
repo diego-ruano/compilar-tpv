@@ -43,9 +43,8 @@ use sha2::{Digest, Sha256};
 ///
 /// ⚠️ Cargo no vigila ese directorio, así que **editar una migración no basta para que se recompile
 /// esto**: hay que tocar además este fichero, o `include_dir!` seguirá sirviendo la copia vieja y
-/// los tests pasarán contra un esquema que ya no existe. Última vez: RI-02/03/04/17/18/65 (la vista
-/// `v_lineas_cobradas` con `+p.Estado`, índices nuevos y quitados, y `NOT NULL` en las claves de
-/// texto).
+/// los tests pasarán contra un esquema que ya no existe. Última vez: RI-58 (el índice único
+/// `idx_cierres_un_periodo`).
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../packages/database/migrations");
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;

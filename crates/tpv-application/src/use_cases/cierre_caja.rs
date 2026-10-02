@@ -14,7 +14,7 @@ use tpv_domain::cierre_caja::{
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::{AppError, AppResult};
-use crate::ports::cierre_caja::{CierreCajaRepository, CierreNuevo};
+use crate::ports::cierre_caja::{CierreCajaRepository, CierreNuevo, PeriodoAbierto};
 use crate::ports::notificaciones::Notifier;
 
 fn a_denoms(input: &[tpv_contracts::cierre_caja::DenominacionInput]) -> Vec<Denominacion> {
@@ -90,61 +90,69 @@ pub async fn preparar(
 /// `id_usuario` es un parámetro y no un campo del input **a propósito** (SEC-01): quien firma
 /// el arqueo lo pone la sesión del backend, así que no puede llegar por el mismo camino que los
 /// datos que sí escribe la pantalla.
+///
+/// ## Una sola vez y en una sola transacción (RI-58)
+///
+/// El id lo genera la pantalla al abrir el cierre (`input.id_cierre`), así que confirmar dos veces
+/// —un doble clic, un reintento tras una respuesta que no llegó— devuelve el mismo cierre en vez de
+/// crear un segundo arqueo con un periodo vacío. Y leer el último cierre, sumar y guardar ocurren en
+/// la misma transacción del escritor: antes los totales se leían por el pool de lectura y el
+/// `INSERT` iba después, con su propia hora, y un cobro confirmado entre las dos cosas caía dentro
+/// del periodo cerrado pero fuera de sus cifras.
 pub async fn confirmar(
     repo: &dyn CierreCajaRepository,
-    id_cierre: String,
     id_usuario: Option<&str>,
     input: ConfirmarCierreInput,
     umbral_descuadre: Dinero,
 ) -> AppResult<CierreDto> {
-    let ultimo = repo.ultimo_cierre().await?;
-    let desde = ultimo.as_ref().map(|c| c.fecha_hora.clone());
-
-    let fondo_inicial = match &ultimo {
-        Some(c) => c.dejado,
-        None => input.fondo_inicial.unwrap_or(Dinero::CERO),
-    };
-    if fondo_inicial.es_negativo() {
-        return Err(AppError::validation("El fondo inicial no puede ser negativo"));
+    let id_cierre = input.id_cierre.trim().to_string();
+    if id_cierre.is_empty() || id_cierre.len() > 64 {
+        return Err(AppError::validation("Falta el identificador del cierre"));
     }
-
-    let totales = repo.totales_desde(desde.as_deref()).await?;
 
     let contado_denoms = a_denoms(&input.contado);
     let dejado_denoms = a_denoms(&input.dejado);
+    let umbral = umbral_o_defecto(umbral_descuadre);
 
-    let calculo = calcular(
-        fondo_inicial,
-        totales.ventas_efectivo,
-        totales.gastos_caja,
-        total_recuento(&contado_denoms),
-        total_recuento(&dejado_denoms),
-    );
+    let armar = |periodo: PeriodoAbierto| -> AppResult<CierreNuevo> {
+        let fondo_inicial = match periodo.dejado_anterior {
+            Some(dejado) => dejado,
+            None => input.fondo_inicial.unwrap_or(Dinero::CERO),
+        };
+        if fondo_inicial.es_negativo() {
+            return Err(AppError::validation("El fondo inicial no puede ser negativo"));
+        }
 
-    let motivo = validar(
-        &calculo,
-        input.motivo.as_deref(),
-        umbral_o_defecto(umbral_descuadre),
-    )
-    .map_err(AppError::validation)?;
+        let calculo = calcular(
+            fondo_inicial,
+            periodo.totales.ventas_efectivo,
+            periodo.totales.gastos_caja,
+            total_recuento(&contado_denoms),
+            total_recuento(&dejado_denoms),
+        );
 
-    repo.crear(CierreNuevo {
-        id_cierre: id_cierre.clone(),
-        id_usuario: id_usuario.map(str::to_string),
-        periodo_desde: desde,
-        fondo_inicial: calculo.fondo_inicial,
-        ventas_efectivo: calculo.ventas_efectivo,
-        gastos_caja: calculo.gastos_caja,
-        esperado: calculo.esperado,
-        contado: calculo.contado,
-        descuadre: calculo.descuadre,
-        dejado: calculo.dejado,
-        retirado: calculo.retirado,
-        motivo,
-        contado_denoms,
-        dejado_denoms,
-    })
-    .await?;
+        let motivo =
+            validar(&calculo, input.motivo.as_deref(), umbral).map_err(AppError::validation)?;
+
+        Ok(CierreNuevo {
+            id_cierre: id_cierre.clone(),
+            id_usuario: id_usuario.map(str::to_string),
+            periodo_desde: periodo.desde,
+            fondo_inicial: calculo.fondo_inicial,
+            ventas_efectivo: calculo.ventas_efectivo,
+            gastos_caja: calculo.gastos_caja,
+            esperado: calculo.esperado,
+            contado: calculo.contado,
+            descuadre: calculo.descuadre,
+            dejado: calculo.dejado,
+            retirado: calculo.retirado,
+            motivo,
+            contado_denoms: contado_denoms.clone(),
+            dejado_denoms: dejado_denoms.clone(),
+        })
+    };
+
+    repo.cerrar_periodo(&id_cierre, &armar).await?;
 
     repo.detalle(&id_cierre)
         .await?
