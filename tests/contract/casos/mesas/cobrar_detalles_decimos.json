@@ -1,0 +1,38 @@
+{
+  "descripcion": "Un lote de 1 kg vendido en diez líneas de 0,1 (RI-26). Con REAL sin redondear, la última línea encontraba 0,0999…9 en el lote y apuntaba el resto (1e-16) como consumo de stock suelto, y el lote se quedaba con un residuo. Redondeando a milésimas en cada escritura, el lote acaba exactamente en 0 y no hay consumo suelto.",
+  "comando": "mesas.cobrar_detalles",
+  "seed": [
+    "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL' WHERE ID = 1;",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Charcuteria');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Jamon al peso', 4000, 5);",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-1', 'prod-1', 'L1', 1, '2026-01-01 10:00:00');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-01', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-02', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-03', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-04', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-05', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-06', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-07', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-08', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-09', 'comanda-1', 'prod-1', 0.1, 4000);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-10', 'comanda-1', 'prod-1', 0.1, 4000);"
+  ],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "metodo": "TARJETA",
+    "tipo": "TOTAL",
+    "detalle_ids": [
+      "detalle-01", "detalle-02", "detalle-03", "detalle-04", "detalle-05",
+      "detalle-06", "detalle-07", "detalle-08", "detalle-09", "detalle-10"
+    ]
+  },
+  "snapshot": {
+    "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible = 0 AS Agotado_Exacto FROM Lotes_Producto",
+    "Productos": "SELECT ID_Producto, Stock_Suelto FROM Productos",
+    "Suelto_Consumos": "SELECT ID_Detalle, Cantidad FROM Suelto_Consumos",
+    "Lote_Consumos": "SELECT COUNT(*) AS Consumos FROM Lote_Consumos"
+  }
+}

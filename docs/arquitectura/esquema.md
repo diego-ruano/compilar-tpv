@@ -53,6 +53,10 @@ En los dos casos:
 - **Las cantidades y los tipos de IVA son `REAL`** (0,5 kg; un 7,5 %). `Cantidad × Precio_Unitario` da
   un flotante, así que antes de sumar se vuelve a entero: `SUM(CAST(ROUND(Cantidad * Precio_Unitario) AS
   INTEGER))`. Nunca `ROUND(x, 2)` sobre dinero.
+- **Toda cantidad de stock se escribe redondeada a milésimas** (RI-26): `ROUND(… , 3)` en el SQL y
+  `redondear_cantidad` / `redondearCantidad` al calcularla (`tpv_domain::cantidad`, `lib/cantidad.ts`,
+  con su tabla `cantidad_casos.json`). Sin eso, un kilo vendido en diez raciones de 0,1 dejaba
+  `1,39e-16` en el lote y el FEFO lo seguía eligiendo.
 - **El canal de una comanda**: `Comandas.Canal` es `'MESA'` (con `ID_Mesa`) o `'BARRA'` (venta rápida,
   sin mesa), con un `CHECK` que impide mezclarlos. `idx_comandas_una_abierta_por_mesa` garantiza una
   comanda abierta por mesa; los tickets de barra no compiten porque los `NULL` son distintos en un índice

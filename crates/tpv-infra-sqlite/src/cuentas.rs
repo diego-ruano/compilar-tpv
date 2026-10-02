@@ -741,14 +741,15 @@ impl CuentasRepository for SqliteCuentasRepository {
             //    consumo y no por sus líneas (STOCK-01): una línea anulada y vuelta a cobrar tiene un
             //    consumo por cobro, y por la línea se devolvía también el del cobro anulado antes,
             //    que ya había vuelto. La traza se CONSERVA: el doble abono lo impide el `Estado`.
+            //    Redondeado a milésimas como todo movimiento de stock (RI-26).
             conn.execute(
                 r#"
                 UPDATE Lotes_Producto
-                SET Stock_Disponible = COALESCE(Stock_Disponible,0) + (
+                SET Stock_Disponible = ROUND(COALESCE(Stock_Disponible,0) + (
                     SELECT IFNULL(SUM(lc.Cantidad),0)
                     FROM Lote_Consumos lc
                     WHERE lc.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
-                )
+                ), 3)
                 WHERE ID_Lote IN (
                     SELECT lc.ID_Lote
                     FROM Lote_Consumos lc
@@ -764,11 +765,11 @@ impl CuentasRepository for SqliteCuentasRepository {
             conn.execute(
                 r#"
                 UPDATE Productos
-                SET Stock_Suelto = COALESCE(Stock_Suelto,0) + (
+                SET Stock_Suelto = ROUND(COALESCE(Stock_Suelto,0) + (
                     SELECT IFNULL(SUM(sc.Cantidad),0)
                     FROM Suelto_Consumos sc
                     WHERE sc.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
-                )
+                ), 3)
                 WHERE ID_Producto IN (
                     SELECT sc.ID_Producto
                     FROM Suelto_Consumos sc

@@ -1,0 +1,18 @@
+{
+  "_leeme": "Tabla de casos que comparten las DOS implementaciones del redondeo de cantidades de stock: crates/tpv-domain/src/cantidad.rs (la Main) y apps/cloud-worker-licensing/src/lib/cantidad.ts (el worker). Las cantidades son REAL a proposito (0,5 kg; decision 0005), pero restar 0,1 diez veces a 1 no da 0 sino 1,39e-16: el lote seguia 'con existencias' y el FEFO apuntaba consumos de esa cantidad (RI-26). Se redondea a milesimas en cada escritura, y los dos lados tienen que hacerlo igual o la Main y la nube dejan de coincidir. Un criterio nuevo es un caso nuevo aqui.",
+
+  "_redondear": "[entrada, salida]: a milesimas, la mitad lejos del cero (f64::round de Rust; en JavaScript hay que hacerlo sobre el valor absoluto). El cero negativo sale como cero.",
+  "redondear": [
+    [1.3877787807814457e-16, 0],
+    [-2.7755575615628914e-17, 0],
+    [0.30000000000000004, 0.3],
+    [0.3333333, 0.333],
+    [0.0005, 0.001],
+    [-0.0005, -0.001],
+    [0.00049, 0],
+    [2.5, 2.5],
+    [-3.1234, -3.123],
+    [1000.0004, 1000],
+    [0, 0]
+  ]
+}

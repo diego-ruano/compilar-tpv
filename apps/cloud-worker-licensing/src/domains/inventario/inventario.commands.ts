@@ -9,6 +9,7 @@
 // calcula igual con un paso `value` + `$ref`, para que el ID quede en el resultado
 // y viaje en el broadcast (la Main lo aplica con ese mismo ID).
 
+import { redondearCantidad } from "../../lib/cantidad";
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
@@ -37,6 +38,12 @@ function numOrNull(v: unknown): number | null {
 	if (v == null) return null;
 	const n = Number(v);
 	return Number.isFinite(n) ? n : null;
+}
+
+/** Una cantidad de stock opcional, redondeada a milésimas (RI-26). */
+function cantidadONull(v: unknown): number | null {
+	const n = numOrNull(v);
+	return n === null ? null : redondearCantidad(n);
 }
 
 function idOrNull(v: unknown): string | null {
@@ -145,7 +152,7 @@ export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
 				cleanOrNull(input.nombre_imagen),
 				cleanOrNull(input.ruta_imagen),
 				numOrNull(input.cantidad_pedido_esperada),
-				numOrNull(input.stock_suelto),
+				cantidadONull(input.stock_suelto),
 				numOrNull(input.iva_percent),
 			],
 		},
@@ -211,7 +218,8 @@ export function setAlergenosProducto(
 }
 
 export function createLote(input: CreateLoteInput): BuiltCommand {
-	const stock = input.stock_disponible;
+	// RI-26: toda cantidad de stock se guarda redondeada a milésimas, como en la Main.
+	const stock = redondearCantidad(input.stock_disponible ?? 0);
 	const movId = nuevoId();
 
 	const steps: any[] = [
@@ -254,6 +262,7 @@ export function updateLote(
 	input: UpdateLoteInput,
 	stockActual: number,
 ): BuiltCommand {
+	const nuevo = redondearCantidad(input.stock_disponible);
 	const steps: any[] = [
 		{
 			kind: "execute",
@@ -275,7 +284,7 @@ export function updateLote(
 				input.codigo_lote.trim(),
 				cleanOrNull(input.fecha_entrada),
 				cleanOrNull(input.caducidad),
-				input.stock_disponible,
+				nuevo,
 				numOrNull(input.coste_unitario),
 				idOrNull(input.id_proveedor),
 				cleanOrNull(input.notas),
@@ -284,7 +293,7 @@ export function updateLote(
 	];
 
 	// Solo si cambió el disponible: renombrar el lote o cambiarle el proveedor no mueve stock.
-	if (Math.abs(input.stock_disponible - stockActual) > 1e-9) {
+	if (Math.abs(nuevo - stockActual) > 1e-9) {
 		steps.push({
 			kind: "execute",
 			sql: SQL_INSERT_MOVIMIENTO,
@@ -292,8 +301,8 @@ export function updateLote(
 				nuevoId(),
 				idLote,
 				"AJUSTE",
-				input.stock_disponible - stockActual,
-				input.stock_disponible,
+				redondearCantidad(nuevo - stockActual),
+				nuevo,
 				"Edición del lote",
 			],
 		});
@@ -313,11 +322,12 @@ export function ajustarLote(
 	stockActual: number,
 ): BuiltCommand {
 	const movId = nuevoId();
+	const nuevo = redondearCantidad(input.stock_disponible);
 	const steps: any[] = [
 		{
 			kind: "execute",
 			sql: "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
-			args: [input.stock_disponible, cleanOrNull(input.notas), idLote],
+			args: [nuevo, cleanOrNull(input.notas), idLote],
 		},
 		// Auditoría: el ajuste queda como movimiento 'AJUSTE' con su delta (nuevo - anterior).
 		{
@@ -327,8 +337,8 @@ export function ajustarLote(
 				movId,
 				idLote,
 				"AJUSTE",
-				input.stock_disponible - stockActual,
-				input.stock_disponible,
+				redondearCantidad(nuevo - stockActual),
+				nuevo,
 				cleanOrNull(input.notas),
 			],
 		},

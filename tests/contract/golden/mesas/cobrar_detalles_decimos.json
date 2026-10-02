@@ -1,0 +1,20 @@
+{
+  "Lote_Consumos": [
+    {
+      "Consumos": 10
+    }
+  ],
+  "Lotes_Producto": [
+    {
+      "Agotado_Exacto": 1,
+      "ID_Lote": "lote-1"
+    }
+  ],
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "Stock_Suelto": 5.0
+    }
+  ],
+  "Suelto_Consumos": []
+}

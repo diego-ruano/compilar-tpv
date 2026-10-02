@@ -209,6 +209,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 		idStep(null),
 		// 1) Devolver el stock que consumió ESTE pago: por el pago del consumo y no por sus líneas
 		//    (STOCK-01). La traza (`Lote_Consumos`) se CONSERVA: el doble abono lo impide el `Estado`.
+		//    Redondeado a milésimas como todo movimiento de stock (RI-26).
 		//
 		//    SÓLO si la venta no existió (FISCAL-01). En una devolución el cliente se llevó la
 		//    consumición: abonar el stock inventaría unidades que no están en la estantería.
@@ -216,11 +217,11 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			kind: "execute",
 			sql: `
 				UPDATE Lotes_Producto
-				SET Stock_Disponible = COALESCE(Stock_Disponible,0) + (
+				SET Stock_Disponible = ROUND(COALESCE(Stock_Disponible,0) + (
 				    SELECT IFNULL(SUM(lc.Cantidad),0)
 				    FROM Lote_Consumos lc
 				    WHERE lc.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
-				)
+				), 3)
 				WHERE ID_Lote IN (
 				    SELECT lc.ID_Lote
 				    FROM Lote_Consumos lc
@@ -235,11 +236,11 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			kind: "execute",
 			sql: `
 				UPDATE Productos
-				SET Stock_Suelto = COALESCE(Stock_Suelto,0) + (
+				SET Stock_Suelto = ROUND(COALESCE(Stock_Suelto,0) + (
 				    SELECT IFNULL(SUM(sc.Cantidad),0)
 				    FROM Suelto_Consumos sc
 				    WHERE sc.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
-				)
+				), 3)
 				WHERE ID_Producto IN (
 				    SELECT sc.ID_Producto
 				    FROM Suelto_Consumos sc

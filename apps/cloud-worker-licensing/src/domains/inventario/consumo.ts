@@ -7,9 +7,11 @@
 // del mismo producto podían tomar dos veces del mismo lote.
 //
 // Se planifica aquí, leyendo, y el builder del comando emite cada paso con sus literales: la
-// sentencia que se replica hace lo mismo en las dos bases.
+// sentencia que se replica hace lo mismo en las dos bases. Todo va redondeado a milésimas (RI-26),
+// con `redondearCantidad` aquí y `ROUND(…, 3)` en el SQL, igual que en la Main.
 
 import type { Client } from "@libsql/client/web";
+import { redondearCantidad } from "../../lib/cantidad";
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
@@ -53,14 +55,14 @@ export async function planConsumo(db: Client, lineas: LineaConsumo[]): Promise<P
 
 	const plan: PlanConsumo = { lotes: [], suelto: [] };
 	for (const linea of lineas) {
-		let restante = linea.cantidad;
+		let restante = redondearCantidad(linea.cantidad);
 		for (const lote of await lotesDe(linea.id_producto)) {
 			if (restante <= 0) break;
-			const take = Math.min(restante, lote.stock);
+			const take = redondearCantidad(Math.min(restante, lote.stock));
 			if (take <= 0) continue;
 			plan.lotes.push({ id_lote: lote.id_lote, take, id_detalle: linea.id_detalle });
-			lote.stock -= take;
-			restante -= take;
+			lote.stock = redondearCantidad(lote.stock - take);
+			restante = redondearCantidad(restante - take);
 		}
 		if (restante > 0) {
 			plan.suelto.push({ id_producto: linea.id_producto, take: restante, id_detalle: linea.id_detalle });
@@ -77,7 +79,7 @@ async function lotesConStock(db: Client, idProducto: string) {
 				COALESCE(Stock_Disponible,0) AS stock
 			FROM Lotes_Producto
 			WHERE ID_Producto = ?1
-				AND COALESCE(Stock_Disponible,0) > 0
+				AND ROUND(COALESCE(Stock_Disponible,0), 3) > 0
 			ORDER BY
 				CASE WHEN Caducidad IS NULL THEN 1 ELSE 0 END,
 				date(Caducidad) ASC,
@@ -87,7 +89,7 @@ async function lotesConStock(db: Client, idProducto: string) {
 		args: [idProducto],
 	});
 	return rows(rs)
-		.map((r) => ({ id_lote: String(r.id_lote ?? ""), stock: Number(r.stock ?? 0) }))
+		.map((r) => ({ id_lote: String(r.id_lote ?? ""), stock: redondearCantidad(Number(r.stock ?? 0)) }))
 		.filter((l) => l.id_lote.length > 0 && l.stock > 0);
 }
 
@@ -106,7 +108,7 @@ export function pasosConsumo(plan: PlanConsumo, idPago: unknown): any[] {
 			// señal de sobreventa, se admite a propósito y el job `stock_negativo` avisa.
 			sql: `
 				UPDATE Lotes_Producto
-				SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
+				SET Stock_Disponible = ROUND(COALESCE(Stock_Disponible,0) - ?2, 3)
 				WHERE ID_Lote = ?1;
 			`,
 			args: [t.id_lote, t.take],
@@ -126,7 +128,7 @@ export function pasosConsumo(plan: PlanConsumo, idPago: unknown): any[] {
 			kind: "execute",
 			sql: `
 				UPDATE Productos
-				SET Stock_Suelto = Stock_Suelto - ?2
+				SET Stock_Suelto = ROUND(Stock_Suelto - ?2, 3)
 				WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;
 			`,
 			args: [s.id_producto, s.take],

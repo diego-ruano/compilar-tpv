@@ -132,7 +132,8 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 ### Dinero ([0005](docs/decisiones/0005-dinero-en-centimos.md))
 
 - **Entero de céntimos de la base a la pantalla**: `Dinero` en Rust, en el worker y en el frontend (marcado:
-  un `number` no se le asigna). Las cantidades y los tipos de IVA son `REAL`.
+  un `number` no se le asigna). Las cantidades y los tipos de IVA son `REAL`; **una cantidad de stock se
+  escribe redondeada a milésimas** (`ROUND(…, 3)`, `redondear_cantidad`), igual en la Main y en el worker.
 - La aritmética compartida tiene su tabla de casos, `crates/tpv-domain/src/dinero_casos.json`: **un criterio
   nuevo es un caso nuevo ahí**, no tres funciones.
 - En SQL: `SUM(CAST(ROUND(Cantidad * Precio_Unitario) AS INTEGER))`. **Nunca `ROUND(x, 2)` sobre dinero.**

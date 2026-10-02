@@ -12,6 +12,7 @@ use tpv_contracts::inventario::{
     ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProductoResumenDto,
     ProveedorMiniDto,
 };
+use tpv_domain::cantidad::redondear_cantidad;
 use tpv_domain::inventario::{
     AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
 };
@@ -551,7 +552,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     opt_text(p.nombre_imagen),
                     opt_text(p.ruta_imagen),
                     opt_real(p.cantidad_pedido_esperada),
-                    opt_real(p.stock_suelto),
+                    opt_real(p.stock_suelto.map(redondear_cantidad)),
                     opt_real(p.iva_percent),
                 ],
             )
@@ -582,7 +583,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     async fn create_lote(&self, l: LoteNuevo) -> AppResult<()> {
         let id_lote = l.id.unwrap_or_else(new_id);
         let id_mov = new_id();
-        let stock = l.stock_disponible;
+        // RI-26: toda cantidad de stock se guarda redondeada a milésimas.
+        let stock = redondear_cantidad(l.stock_disponible);
         let motivo = l.notas.clone();
         let g = self.db.write().await;
         let conn = &g;
@@ -651,7 +653,7 @@ impl InventarioRepository for SqliteInventarioRepository {
     async fn update_lote(&self, l: LoteUpdate) -> AppResult<()> {
         let id_mov = new_id();
         let id_lote = l.id_lote.clone();
-        let nuevo_stock = l.stock_disponible;
+        let nuevo_stock = redondear_cantidad(l.stock_disponible);
 
         let db = self.db.write().await;
         let conn = &db;
@@ -690,7 +692,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     Value::Text(l.codigo_lote),
                     opt_text(l.fecha_entrada),
                     opt_text(l.caducidad),
-                    Value::Real(l.stock_disponible),
+                    Value::Real(nuevo_stock),
                     opt_dinero(l.coste_unitario),
                     match l.id_proveedor {
                         Some(v) => Value::Text(v),
@@ -716,7 +718,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     vec![
                         Value::Text(id_mov),
                         Value::Text(id_lote),
-                        Value::Real(nuevo_stock - stock_previo),
+                        Value::Real(redondear_cantidad(nuevo_stock - stock_previo)),
                         Value::Real(nuevo_stock),
                         Value::Text("Edición del lote".into()),
                     ],
@@ -733,7 +735,7 @@ impl InventarioRepository for SqliteInventarioRepository {
 
     async fn ajustar_lote(&self, a: AjusteLote) -> AppResult<()> {
         let id_mov = new_id();
-        let new_stock = a.stock_disponible;
+        let new_stock = redondear_cantidad(a.stock_disponible);
         let g = self.db.write().await;
         let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -775,7 +777,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 vec![
                     Value::Text(id_mov),
                     Value::Text(a.id_lote),
-                    Value::Real(new_stock - old_stock),
+                    Value::Real(redondear_cantidad(new_stock - old_stock)),
                     Value::Real(new_stock),
                     opt_text(a.notas),
                 ],

@@ -268,6 +268,7 @@ casos_de_contrato! {
     venta_rapida__cobro_fraccionado_fefo_multilote,
     mesas__cobrar_detalles_un_lote,
     mesas__cobrar_detalles_lote_y_suelto,
+    mesas__cobrar_detalles_decimos,
     clientes__crear,
     clientes__actualizar,
     tareas__crear,
