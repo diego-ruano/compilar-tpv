@@ -1,11 +1,10 @@
 //! Puerto de persistencia de venta rápida (barra).
 
-use tpv_domain::dinero::Dinero;
 use async_trait::async_trait;
 
 use tpv_contracts::venta_rapida::{
     CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow,
-    VerTicketsDetalleRow,
+    VerTicketsDetalleRow, VrLineaAnadida,
 };
 use tpv_domain::venta_rapida::CobroFraccionado;
 
@@ -36,14 +35,13 @@ pub trait VentaRapidaRepository: Send + Sync {
         id_trabajador: Option<String>,
         get_or_create: bool,
     ) -> AppResult<String>;
-    /// Añade una línea. Devuelve el id de detalle.
+    /// Añade una línea al precio del catálogo (RI-27). Devuelve su id y ese precio.
     async fn add_linea_comanda(
         &self,
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio_unitario: Dinero,
-    ) -> AppResult<String>;
+    ) -> AppResult<VrLineaAnadida>;
     /// Elimina la última línea no pagada de ese producto en la comanda.
     async fn remove_last_unpaid_linea(
         &self,

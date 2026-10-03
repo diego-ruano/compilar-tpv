@@ -1,5 +1,6 @@
 // src/domains/venta_rapida/venta_rapida.commands.ts
 
+import type { Dinero } from "@tpv/contracts";
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import { pasosConsumo } from "../inventario/consumo";
@@ -94,6 +95,7 @@ export function addLinea(
 	input: AddLineaInput,
 	ivaPercent: number | null,
 	nombreProducto: string | null,
+	precio: Dinero,
 ): BuiltCommand {
 	return {
 		commandName: "vr_add_linea_comanda",
@@ -152,7 +154,7 @@ export function addLinea(
 							input.id_producto,
 							nombreProducto,
 							input.cantidad,
-							input.precio_unitario,
+							precio,
 							ivaPercent,
 						],
 					},

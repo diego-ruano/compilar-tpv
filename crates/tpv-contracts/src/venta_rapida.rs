@@ -154,12 +154,21 @@ pub struct VrCreateComandaBarraInput {
     pub get_or_create: Option<bool>,
 }
 
+/// RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrAddLineaComandaInput {
     pub id_comanda: String,
     pub id_producto: String,
     pub cantidad: f64,
+}
+
+/// La línea recién añadida, con el precio que se le ha puesto: el del catálogo en ese momento, que
+/// puede no ser el de la carta en caché de la pantalla (RI-27).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct VrLineaAnadida {
+    pub id_detalle: String,
     pub precio_unitario: Dinero,
 }
 

@@ -100,14 +100,20 @@ mesasRoutes.post("/lineas", cuerpo(S.addLineaSchema), async (c) => {
 	const entrada = c.req.valid("json");
 	// MESA-07: resolvemos Estado_Cocina como literal para que el statement replicado a
 	// la Main sea determinista (no una subquery de catalogo dentro del INSERT). El tipo de
-	// IVA del producto viaja igual, y en la misma lectura.
+	// IVA y el precio del producto viajan igual, y en la misma lectura (RI-27).
 	const datos = await tenantQuery(c, (db) =>
 		q.datosDeLinea(db, entrada.id_producto),
 	);
 	if (datos.archivado) return c.json({ ok: false, error: "producto_archivado" }, 409);
 	await apply(
 		c,
-		cmd.addLinea(entrada, datos.pasaCocina ? "PENDIENTE" : null, datos.ivaPercent, datos.nombre),
+		cmd.addLinea(
+			entrada,
+			datos.pasaCocina ? "PENDIENTE" : null,
+			datos.ivaPercent,
+			datos.nombre,
+			datos.precio,
+		),
 	);
 	const lineas = await tenantQuery(c, (db) =>
 		q.lineas(db, entrada.id_comanda),

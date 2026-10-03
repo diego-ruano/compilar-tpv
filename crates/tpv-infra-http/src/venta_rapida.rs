@@ -1,6 +1,5 @@
 //! Adaptador HTTP del repositorio de venta rápida/barra (dominio `/v1/venta-rapida`).
 
-use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -10,7 +9,7 @@ use tpv_application::error::AppResult;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::venta_rapida::{
     CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow,
-    VerTicketsDetalleRow,
+    VerTicketsDetalleRow, VrLineaAnadida,
 };
 use tpv_application::error::AppError;
 use tpv_domain::venta_rapida::CobroFraccionado;
@@ -133,20 +132,22 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio_unitario: Dinero,
-    ) -> AppResult<String> {
+    ) -> AppResult<VrLineaAnadida> {
         let body = json!({
             "id_detalle": uuid::Uuid::now_v7().to_string(),
             "id_comanda": id_comanda,
             "id_producto": id_producto,
             "cantidad": cantidad,
-            "precio_unitario": precio_unitario,
         });
         let (resp, _): (JsonValue, _) = self
             .client
             .post_json_creando("/v1/venta-rapida/lineas", &body, Some("id_detalle"))
             .await?;
-        id_from_response(&resp, "id_detalle")
+        Ok(VrLineaAnadida {
+            id_detalle: id_from_response(&resp, "id_detalle")?,
+            precio_unitario: serde_json::from_value(resp["precio_unitario"].clone())
+                .map_err(|e| AppError::external(format!("bad_precio_unitario: {e}")))?,
+        })
     }
 
     async fn remove_last_unpaid_linea(

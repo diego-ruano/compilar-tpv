@@ -1,0 +1,22 @@
+{
+  "descripcion": "RI-27: un producto sin precio de venta se apunta a 0 € (es decisión del negocio; la AEAT acepta el registro a cero). El precio lo pone el catálogo, no la entrada. La comanda ya tenía una línea de 300: el Total sigue en 300.",
+  "comando": "mesas.add_linea",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 300);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-2', 'cat-1', 'Agua del grifo');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta', 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-1', 'comanda-1', 'prod-1', 'Cerveza', 1, 300);"
+  ],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "id_producto": "prod-2",
+    "cantidad": 1
+  },
+  "snapshot": {
+    "Detalle_Comanda": "SELECT ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario FROM Detalle_Comanda ORDER BY ID_Producto",
+    "Comandas": "SELECT ID_Comanda, Total_Comanda FROM Comandas"
+  }
+}

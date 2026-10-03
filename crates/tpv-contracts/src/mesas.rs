@@ -249,17 +249,6 @@ pub struct KitchenRow {
 }
 
 /* =========================================================
-   Entrada: items de cobro venta rápida
-========================================================= */
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct CobroVRItem {
-    pub producto_id: String,
-    pub precio: Dinero,
-}
-
-/* =========================================================
    Args / Inputs — Local-First (sin op_id/outbox/remote_id)
 ========================================================= */
 
@@ -322,13 +311,13 @@ pub struct MesasCerrarComandaInput {
     pub total: Dinero,
 }
 
+/// RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasAddLineaComandaInput {
     pub id_comanda: String,
     pub id_producto: String,
     pub cantidad: f64,
-    pub precio: Dinero,
     #[serde(default)]
     #[ts(optional)]
     pub id_usuario: Option<String>,
@@ -351,30 +340,6 @@ pub struct MesasCreateComandaBarraInput {
     #[serde(default)]
     #[ts(optional)]
     pub id_trabajador: Option<String>,
-}
-
-/// REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
-///
-/// Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
-/// justo donde más duele: el cobrador que se guarda con el pago es el rastro con el que se
-/// investiga un descuadre del cajón. Firmándolo con lo que le pase la pantalla, quien alcance el
-/// IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
-/// ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
-/// pasando el login.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct MesasCobrarVentaRapidaInput {
-    pub metodo: String,
-    pub items: Vec<CobroVRItem>,
-    /// Comanda concreta a cobrar (si no, se usa/crea la de barra abierta).
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_comanda: Option<String>,
-    /// FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket. Ver
-    /// `MesasCobrarDetallesInput::destinatario`.
-    #[serde(default)]
-    #[ts(optional)]
-    pub destinatario: Option<DestinatarioInput>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

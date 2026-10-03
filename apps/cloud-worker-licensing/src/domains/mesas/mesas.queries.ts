@@ -1,6 +1,7 @@
 // src/domains/mesas/mesas.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import type { Dinero } from "@tpv/contracts";
 import { deLaBase } from "../../lib/dinero";
 import { planConsumo, type PlanConsumo } from "../inventario/consumo";
 
@@ -340,11 +341,12 @@ export async function datosDeLinea(
 	ivaPercent: number | null;
 	nombre: string | null;
 	archivado: boolean;
+	precio: Dinero;
 }> {
 	const rs = await db.execute({
 		sql: `
 			SELECT COALESCE(cat.Pasa_Cocina, 0) AS pasa, p.IVA_Percent AS iva, p.Nombre AS nombre,
-				p.Archivado_En IS NOT NULL AS archivado
+				p.Archivado_En IS NOT NULL AS archivado, COALESCE(p.Precio_Venta, 0) AS precio
 			FROM Productos p
 			JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 			WHERE p.ID_Producto = ?1
@@ -361,6 +363,9 @@ export async function datosDeLinea(
 		nombre: nombre === null || nombre === undefined ? null : String(nombre),
 		// RI-54: la ruta lo rechaza, igual que `snapshot_del_producto` en la Main.
 		archivado: Number(fila?.archivado ?? 0) === 1,
+		// RI-27: el precio de la línea sale del catálogo, nunca de la pantalla. Sin precio, 0 €.
+		// Espejo de `snapshot_del_producto` en la Main.
+		precio: deLaBase(fila?.precio),
 	};
 }
 

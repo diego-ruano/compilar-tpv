@@ -1,5 +1,5 @@
 {
-  "descripcion": "Añade una línea a una comanda de mesa. ID_Detalle generado (excluido). Estado_Cocina lo resuelve el route (fuera del builder) → excluido del snapshot. Sin trabajador. Se comprueba la línea, su nombre y su tipo de IVA (copiados del producto al vender, no consultado al imprimir: una reimpresión tiene que enseñar el del día de la venta) y el Total.",
+  "descripcion": "Añade una línea a una comanda de mesa. ID_Detalle generado (excluido). Estado_Cocina lo resuelve el route (fuera del builder) → excluido del snapshot. Sin trabajador. Se comprueba la línea, su nombre y su tipo de IVA (copiados del producto al vender, no consultado al imprimir: una reimpresión tiene que enseñar el del día de la venta), el precio (el del catálogo: la entrada no lo trae, RI-27) y el Total.",
   "comando": "mesas.add_linea",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
@@ -11,8 +11,7 @@
   "entrada": {
     "id_comanda": "comanda-1",
     "id_producto": "prod-1",
-    "cantidad": 2,
-    "precio": 300
+    "cantidad": 2
   },
   "snapshot": {
     "Detalle_Comanda": "SELECT ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent FROM Detalle_Comanda",

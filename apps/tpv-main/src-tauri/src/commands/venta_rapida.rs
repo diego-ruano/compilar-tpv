@@ -5,7 +5,7 @@ use tauri::State;
 use tpv_application::use_cases::venta_rapida as uc;
 use tpv_contracts::venta_rapida::{
     CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow, VerTicketsDetalleRow,
-    VrAddLineaComandaInput, VrCobrarFraccionadoInput, VrCreateComandaBarraInput,
+    VrAddLineaComandaInput, VrCobrarFraccionadoInput, VrCreateComandaBarraInput, VrLineaAnadida,
     VrDeleteComandaIfSafeInput, VrDeleteLineaIfUnpaidInput, VrIdCategoriaArgs, VrIdComandaArgs,
     VrIdsArgs, VrListComandasArgs, VrRemoveLastUnpaidLineaInput,
     VrSearchProductosArgs, VrUpdateNotaDetalleInput,
@@ -92,7 +92,7 @@ pub async fn vr_create_comanda_barra(
 pub async fn vr_add_linea_comanda(
     state: State<'_, AppState>,
     args: VrAddLineaComandaInput,
-) -> Result<String, AppErrorDto> {
+) -> Result<VrLineaAnadida, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::add_linea_comanda(repo.as_ref(), args).await?)
 }

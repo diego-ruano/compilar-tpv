@@ -1,0 +1,18 @@
+{
+  "descripcion": "RI-27: un producto sin precio de venta se apunta a 0 € en la barra, igual que en mesas. El precio lo pone el catálogo, no la entrada. ID_Detalle generado (asimétrico) → excluido.",
+  "comando": "venta_rapida.add_linea",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-2', 'cat-1', 'Agua del grifo');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'BARRA', '2026-01-01 12:00:00', 'Abierta');"
+  ],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "id_producto": "prod-2",
+    "cantidad": 1
+  },
+  "snapshot": {
+    "Detalle_Comanda": "SELECT ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario FROM Detalle_Comanda",
+    "Comandas": "SELECT ID_Comanda, Total_Comanda FROM Comandas"
+  }
+}

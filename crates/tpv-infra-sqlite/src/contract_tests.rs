@@ -306,6 +306,7 @@ casos_de_contrato! {
     reservas__eliminar,
     venta_rapida__create_comanda_barra,
     venta_rapida__add_linea,
+    venta_rapida__add_linea_sin_precio,
     venta_rapida__remove_last_unpaid_linea,
     venta_rapida__delete_linea_if_unpaid,
     venta_rapida__update_nota_detalle,
@@ -317,6 +318,7 @@ casos_de_contrato! {
     mesas__set_trabajador_if_null,
     mesas__cerrar_comanda,
     mesas__add_linea,
+    mesas__add_linea_sin_precio,
     mesas__remove_one_pending_detalle,
     mesas__delete_detalle,
     mesas__update_detalle_nota,
@@ -639,7 +641,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 &s(&e["id_comanda"]),
                 &s(&e["id_producto"]),
                 e["cantidad"].as_f64().unwrap(),
-                dinero(&e["precio_unitario"]).unwrap(),
             )
             .await
             .expect("add linea");
@@ -801,7 +802,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 &s(&e["id_comanda"]),
                 &s(&e["id_producto"]),
                 e["cantidad"].as_f64().unwrap(),
-                dinero(&e["precio"]).unwrap(),
                 None,
             )
             .await

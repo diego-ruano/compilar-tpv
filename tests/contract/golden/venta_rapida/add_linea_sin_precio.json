@@ -1,0 +1,17 @@
+{
+  "Comandas": [
+    {
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 0
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "Cantidad": 1.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Producto": "prod-2",
+      "Nombre_Producto": "Agua del grifo",
+      "Precio_Unitario": 0
+    }
+  ]
+}

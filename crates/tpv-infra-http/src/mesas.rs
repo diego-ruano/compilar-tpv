@@ -1,7 +1,7 @@
 //! Adaptador HTTP del repositorio de mesas/comandas/cocina (dominio `/v1/mesas` del worker).
 //!
 //! Los métodos de **barra** (`get_or_create_comanda_barra`,
-//! `cobrar_venta_rapida`, `create_comanda_barra`, `list_comandas_barra`,
+//! `create_comanda_barra`, `list_comandas_barra`,
 //! `delete_comanda_barra_if_safe`) NO tienen endpoint en el dominio `mesas` del worker: la
 //! barra se sirve bajo `venta_rapida`. Aquí devuelven un error explícito.
 
@@ -18,7 +18,7 @@ use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
 };
-use tpv_domain::mesas::{AbrirComandaData, CobroDetalles, CobroVentaRapida};
+use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
 use crate::CloudClient;
 
@@ -118,14 +118,12 @@ impl MesasRepository for HttpMesasRepository {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio: Dinero,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<Vec<MesaLineaComandaRow>> {
         let body = json!({
             "id_comanda": id_comanda,
             "id_producto": id_producto,
             "cantidad": cantidad,
-            "precio": precio,
             "id_trabajador": id_trab_o_usuario,
         });
         let resp: JsonValue = self.client.post_json("/v1/mesas/lineas", &body).await?;
@@ -136,10 +134,6 @@ impl MesasRepository for HttpMesasRepository {
     /* Barra — sin endpoint en el dominio `mesas` del worker (lo cubre venta_rapida) */
     async fn get_or_create_comanda_barra(&self, _id_trabajador: Option<String>) -> AppResult<String> {
         Err(barra_no_disponible("get_or_create_comanda_barra"))
-    }
-
-    async fn cobrar_venta_rapida(&self, _data: CobroVentaRapida) -> AppResult<String> {
-        Err(barra_no_disponible("cobrar_venta_rapida"))
     }
 
     async fn create_comanda_barra(&self, _id_trabajador: Option<String>) -> AppResult<String> {

@@ -323,8 +323,6 @@ export type ClientesStatsArgs = { range: StatsRange, };
 
 export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_recurrentes: number, ticket_medio_cliente: Dinero, nuevos_por_bucket: ChartSeriesI64, top_clientes_gasto: ChartSerieDinero, };
 
-export type CobroVRItem = { producto_id: string, precio: Dinero, };
-
 /**
  * Un código por correo ya va de camino (recuperar el PIN o confirmar un correo de recuperación).
  * Sólo la pista del correo: el correo entero no sale de la nube.
@@ -833,7 +831,10 @@ export type MesaMetaOut = { ocupada: boolean, id_comanda: string, idComanda: str
 
 export type MesasAbrirComandaInput = { id_mesa: string, id_trabajador?: string, id_usuario?: string, id_reserva?: string, };
 
-export type MesasAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio: Dinero, id_usuario?: string, id_trabajador?: string, };
+/**
+ * RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla.
+ */
+export type MesasAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, id_usuario?: string, id_trabajador?: string, };
 
 export type MesasCerrarComandaInput = { id_comanda: string, total: Dinero, };
 
@@ -854,27 +855,6 @@ export type MesasCobrarDetallesInput = { id_comanda: string, metodo: string, tip
  * Se llega aquí por dos caminos: el cliente lo pide («Factura con NIF») o el importe pasa del
  * límite de la simplificada y entonces no hay alternativa. Si pasa del límite y esto va vacío,
  * el cobro se rechaza con `factura_completa_requerida` y la pantalla pide los datos.
- */
-destinatario?: DestinatarioInput, };
-
-/**
- * REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
- *
- * Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
- * justo donde más duele: el cobrador que se guarda con el pago es el rastro con el que se
- * investiga un descuadre del cajón. Firmándolo con lo que le pase la pantalla, quien alcance el
- * IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
- * ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
- * pasando el login.
- */
-export type MesasCobrarVentaRapidaInput = { metodo: string, items: Array<CobroVRItem>, 
-/**
- * Comanda concreta a cobrar (si no, se usa/crea la de barra abierta).
- */
-id_comanda?: string, 
-/**
- * FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket. Ver
- * `MesasCobrarDetallesInput::destinatario`.
  */
 destinatario?: DestinatarioInput, };
 
@@ -1668,7 +1648,10 @@ desde: string,
  */
 hasta_seq: number, };
 
-export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: Dinero, };
+/**
+ * RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla.
+ */
+export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, };
 
 /**
  * REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
@@ -1713,6 +1696,12 @@ export type VrIdCategoriaArgs = { id_categoria: string, };
 export type VrIdComandaArgs = { id_comanda: string, };
 
 export type VrIdsArgs = { ids: Array<string>, };
+
+/**
+ * La línea recién añadida, con el precio que se le ha puesto: el del catálogo en ese momento, que
+ * puede no ser el de la carta en caché de la pantalla (RI-27).
+ */
+export type VrLineaAnadida = { id_detalle: string, precio_unitario: Dinero, };
 
 export type VrListComandasArgs = { include_pagadas: boolean, limit?: number, };
 

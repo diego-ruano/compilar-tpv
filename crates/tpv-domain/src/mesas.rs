@@ -1,7 +1,5 @@
 //! Dominio de **mesas / salón / comandas / cocina**: validaciones y value objects puros.
 
-use crate::dinero::Dinero;
-
 /// Texto obligatorio: recorta y exige no vacío.
 pub fn requerido(input: &str, field: &str) -> Result<String, String> {
     let out = input.trim().to_string();
@@ -43,23 +41,6 @@ pub struct AbrirComandaData {
     /// Trabajador/usuario que abre (se resuelve a ID_Trabajador en infraestructura).
     pub id_trabajador_o_usuario: Option<String>,
     pub id_reserva: Option<String>,
-}
-
-/// Datos de un cobro fraccionado de venta rápida (legacy de mesas).
-#[derive(Debug, Clone)]
-pub struct CobroVentaRapida {
-    pub metodo: String,
-    pub items: Vec<(String, Dinero)>, // (producto_id, precio)
-    pub id_usuario_cobrador: Option<String>,
-    pub id_trabajador_cobrador: Option<String>,
-    pub id_comanda: Option<String>,
-    /// FISCAL-02: datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe
-    /// pasa del límite de la simplificada y entonces no hay alternativa (`tpv_domain::verifactu::cabe_en_simplificada`).
-    ///
-    /// `None` = ticket normal (`F2`), que es el caso de casi todo. Si el importe pasa del límite y
-    /// esto viene vacío, el cobro se rechaza con `factura_completa_requerida` y la pantalla pide
-    /// los datos: no es un fallo, es un dato que falta.
-    pub destinatario: Option<crate::verifactu::Destinatario>,
 }
 
 /// Datos de un cobro de detalles concretos de una comanda de mesa.

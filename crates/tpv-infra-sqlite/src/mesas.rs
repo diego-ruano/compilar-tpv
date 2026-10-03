@@ -20,7 +20,7 @@ use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, ProductoVendibleOut, ReservaMesaOut, RoomPoly, SalonInput, SalonOut, TableOut,
 };
-use tpv_domain::mesas::{AbrirComandaData, CobroDetalles, CobroVentaRapida};
+use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
 use crate::util::{new_id, CANAL_BARRA};
@@ -90,7 +90,7 @@ async fn select_one_string<C: Reader>(
     Ok(None)
 }
 
-/// Lo que se congela del producto al vender: `(nombre, tipo de IVA)`.
+/// Lo que se congela del producto al vender: nombre, tipo de IVA y precio.
 ///
 /// Se lee ANTES del INSERT y se insertan como literales, igual que `Estado_Cocina` y por el mismo
 /// motivo: una subconsulta dentro del INSERT la reevaluaría la nube en otro estado y la fila
@@ -105,12 +105,17 @@ async fn select_one_string<C: Reader>(
 ///
 /// El IVA es `NULL` si el producto no tiene tipo propio (hereda el del negocio).
 ///
+/// RI-27: **el precio sale del catálogo, nunca de la pantalla.** La pantalla mandaba el de su carta
+/// en caché, y tras un cambio de precio otro puesto seguía vendiendo al de antes durante minutos.
+/// Un producto sin precio se vende a 0 € (es decisión del negocio; la AEAT acepta un registro a
+/// cero y un tramo de base cero, probado en preproducción).
+///
 /// RI-54: un producto **archivado** ya no está en la carta, y una pantalla con la carta de antes
 /// en caché todavía puede ofrecerlo. Se rechaza aquí, que es por donde pasa toda línea nueva.
-pub(crate) async fn snapshot_del_producto<C: Reader>(conn: &C, id_producto: &str) -> AppResult<(Value, Value)> {
+pub(crate) async fn snapshot_del_producto<C: Reader>(conn: &C, id_producto: &str) -> AppResult<ProductoEnLinea> {
     let mut rows = conn
         .query(
-            "SELECT Nombre, IVA_Percent, Archivado_En IS NOT NULL FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
+            "SELECT Nombre, IVA_Percent, Archivado_En IS NOT NULL, COALESCE(Precio_Venta, 0)              FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
             vec![Value::Text(id_producto.to_string())],
         )
         .await
@@ -120,16 +125,26 @@ pub(crate) async fn snapshot_del_producto<C: Reader>(conn: &C, id_producto: &str
         Some(row) if v_i64(row.get_value(2).map_err(db_err)?) == Some(1) => Err(AppError::validation(
             "Ese producto ya no está en la carta. Vuelve a abrir la carta y elige otro.",
         )),
-        Some(row) => Ok((
-            v_string(row.get_value(0).map_err(db_err)?)
+        Some(row) => Ok(ProductoEnLinea {
+            nombre: v_string(row.get_value(0).map_err(db_err)?)
                 .map(Value::Text)
                 .unwrap_or(Value::Null),
-            v_f64(row.get_value(1).map_err(db_err)?)
+            iva: v_f64(row.get_value(1).map_err(db_err)?)
                 .map(Value::Real)
                 .unwrap_or(Value::Null),
-        )),
-        None => Ok((Value::Null, Value::Null)),
+            precio: v_dinero(row.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
+        }),
+        // Sin producto no hay línea: la FK del INSERT la rechaza.
+        None => Ok(ProductoEnLinea { nombre: Value::Null, iva: Value::Null, precio: Dinero::CERO }),
     }
+}
+
+/// Ver [`snapshot_del_producto`].
+#[derive(Debug)]
+pub(crate) struct ProductoEnLinea {
+    pub nombre: Value,
+    pub iva: Value,
+    pub precio: Dinero,
 }
 
 /// Una columna de DINERO (`INTEGER` de centimos).
@@ -1086,7 +1101,6 @@ impl MesasRepository for SqliteMesasRepository {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio: Dinero,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<Vec<MesaLineaComandaRow>> {
         {
@@ -1131,7 +1145,7 @@ impl MesasRepository for SqliteMesasRepository {
                 Value::Null
             };
 
-            let (nombre_producto, iva) = snapshot_del_producto(db, id_producto).await?;
+            let producto = snapshot_del_producto(db, id_producto).await?;
 
             db.execute(
                 r#"
@@ -1145,11 +1159,11 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Text(new_id()),
                     Value::Text(id_comanda.to_string()),
                     Value::Text(id_producto.to_string()),
-                    nombre_producto,
+                    producto.nombre,
                     Value::Real(cantidad),
-                    dinero_val(precio),
+                    dinero_val(producto.precio),
                     estado_cocina,
-                    iva,
+                    producto.iva,
                 ],
             )
             .await
@@ -1184,219 +1198,6 @@ impl MesasRepository for SqliteMesasRepository {
             id_trabajador.filter(|s| !s.trim().is_empty()),
         )
         .await
-    }
-
-    async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<String> {
-        let g = self.db.write().await;
-        let db = &g;
-
-        if data.items.is_empty() {
-            // Sin líneas no hay venta: tampoco ticket ni número.
-            return Ok(String::new());
-        }
-
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<String> = async {
-            let id_trabajador_cobrador = match data.id_trabajador_cobrador.clone() {
-                Some(s) if !s.trim().is_empty() => Some(s),
-                _ => trabajador_id_from_usuario(db, data.id_usuario_cobrador.clone()).await?,
-            };
-
-            let id_comanda = match data.id_comanda.clone() {
-                Some(idc) if exists_by_id(db, "Comandas", "ID_Comanda", &idc).await? => idc,
-                _ => get_or_create_comanda_barra_inner(db, id_trabajador_cobrador.clone()).await?,
-            };
-
-            let importe_total: Dinero = data.items.iter().map(|(_p, precio)| *precio).sum();
-
-            // Líneas cobradas (detalle, producto, cantidad=1) para el descuento de stock FEFO.
-            let mut charged: Vec<(String, String, f64)> = Vec::new();
-            for (producto_id, precio) in data.items.iter() {
-                // MESA-02: resolvemos Pasa_Cocina con una lectura previa e insertamos el
-                // Estado_Cocina como LITERAL (no un INSERT…SELECT sobre el catálogo). Así la
-                // sentencia capturada en el outbox es determinista al replicarse en la nube,
-                // aunque el producto/categoría difiera del lado que aplica. Mismo patrón que
-                // add_linea_comanda.
-                let pasa = select_one_i64(
-                    db,
-                    r#"
-                    SELECT COALESCE(cat.Pasa_Cocina, 0)
-                    FROM Productos p
-                    JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-                    WHERE p.ID_Producto = ?1 LIMIT 1;
-                    "#,
-                    vec![Value::Text(producto_id.clone())],
-                )
-                .await?
-                .unwrap_or(0)
-                    == 1;
-                let estado_cocina = if pasa {
-                    Value::Text("PENDIENTE".into())
-                } else {
-                    Value::Null
-                };
-
-                let (nombre_producto, iva) = snapshot_del_producto(db, producto_id).await?;
-
-                let id_detalle = new_id();
-                // MESA-12: no se escribe la clave de lote en Notas; la correlación con
-                // Pago_Detalles se hace por los ID_Detalle recién insertados (ver abajo).
-                db.execute(
-                    r#"
-                    INSERT INTO Detalle_Comanda (
-                      ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad,
-                      Precio_Unitario, Estado_Cocina, IVA_Percent
-                    )
-                    VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7);
-                    "#,
-                    vec![
-                        Value::Text(id_detalle.clone()),
-                        Value::Text(id_comanda.to_string()),
-                        Value::Text(producto_id.clone()),
-                        nombre_producto,
-                        dinero_val(*precio),
-                        estado_cocina,
-                        iva,
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-                charged.push((id_detalle, producto_id.clone(), 1.0));
-            }
-
-            db.execute(update_total_comanda_sql(), vec![Value::Text(id_comanda.to_string())])
-                .await
-                .map_err(db_err)?;
-
-            // Numero correlativo del ticket: se reserva aqui y viaja como literal en el pago,
-            // para que una reimpresion saque el mismo papel.
-            // El número se reserva DENTRO de la transacción: si el cobro hace ROLLBACK, no se gasta
-            // (y el registro fiscal tampoco llega a existir).
-            let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
-            let numero_ticket = numero_reservado.0.clone();
-            // FISCAL-02: se captura aquí porque `data` se consume al construir los parámetros.
-            let destinatario = data.destinatario.clone();
-            let id_pago = new_id();
-            let trabajador_mov = id_trabajador_cobrador.clone();
-            let ok = try_exec(
-                db,
-                r#"
-                INSERT INTO Pagos (
-                  ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
-                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador, Numero_Ticket
-                )
-                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6, ?7);
-                "#,
-                vec![
-                    Value::Text(id_pago.clone()),
-                    Value::Text(id_comanda.to_string()),
-                    Value::Text(data.metodo.clone()),
-                    dinero_val(importe_total),
-                    data.id_usuario_cobrador.clone().map(Value::Text).unwrap_or(Value::Null),
-                    id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
-                    Value::Text(numero_ticket.clone()),
-                ],
-            )
-            .await?;
-
-            if !ok {
-                // MESA-15: el INSERT con ID_Trabajador_Cobrador falló (típicamente FK
-                // inexistente). Reintentamos sin el cobrador para no perder el cobro, pero
-                // lo reportamos por telemetría en vez de degradar en silencio.
-                tracing::warn!(
-                    target: "tpv::mesas",
-                    id_comanda = %id_comanda,
-                    id_pago = %id_pago,
-                    "cobro (VR) registrado sin ID_Trabajador_Cobrador: el cobrador no resolvió como FK válida"
-                );
-                db.execute(
-                    r#"
-                    INSERT INTO Pagos (
-                      ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
-                      ID_Usuario_Cobrador, Numero_Ticket
-                    )
-                    VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6);
-                    "#,
-                    vec![
-                        Value::Text(id_pago.clone()),
-                        Value::Text(id_comanda.to_string()),
-                        Value::Text(data.metodo.clone()),
-                        dinero_val(importe_total),
-                        data.id_usuario_cobrador.clone().map(Value::Text).unwrap_or(Value::Null),
-                        Value::Text(numero_ticket.clone()),
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-
-            // El cobro en el historial de caja (CUENTA-07). Va dentro de la transacción del
-            // cobro: si esto fallara, lo que NO puede quedar es la venta registrada y el
-            // movimiento no. El trabajador sólo se anota si el propio pago pudo guardarlo (si
-            // `ok` es falso, esa columna no existe en este esquema y el valor no significa nada).
-            caja_movimientos::registrar(
-                db,
-                MovimientoCaja {
-                    tipo: caja_movimientos::TIPO_COBRO,
-                    id_pago: Some(id_pago.clone()),
-                    id_usuario: data.id_usuario_cobrador.clone(),
-                    id_trabajador: if ok { trabajador_mov } else { None },
-                    importe: importe_total,
-                    metodo_pago: Some(data.metodo.clone()),
-                    ..Default::default()
-                },
-            )
-            .await?;
-
-            // MESA-12: enlazamos el pago con exactamente las líneas recién insertadas por sus
-            // ID_Detalle (recogidos en `charged`), en vez de correlacionar por un valor técnico
-            // guardado en la columna Notas del usuario.
-            for (id_detalle, _producto_id, _cantidad) in &charged {
-                db.execute(
-                    r#"
-                    INSERT OR IGNORE INTO Pago_Detalles (ID_Pago, ID_Detalle)
-                    VALUES (?1, ?2);
-                    "#,
-                    vec![Value::Text(id_pago.clone()), Value::Text(id_detalle.clone())],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-
-            // MESA-01: descuento de stock/lotes (FEFO) de las líneas recién vendidas. Va DESPUÉS del
-            // pago y no antes (STOCK-01): cada consumo apunta al cobro que lo hizo, y esa FK se
-            // comprueba sentencia a sentencia — también al replicarla en la nube.
-            crate::consumo_stock::consumir_stock(db, &id_pago, &charged).await?;
-
-            // FISCAL-01. El registro de facturación se crea AQUÍ, dentro de la misma transacción
-            // que el pago y después de enlazar las líneas (de las que sale el desglose). Es el
-            // orden del art. 9 RRSIF y el único que no puede dejar facturas huérfanas.
-            crate::verifactu::emitir_cobro(
-                db,
-                &id_pago,
-                numero_reservado,
-                importe_total,
-                // FISCAL-02: si el cliente dio sus datos sale una F1; si no, una F2 — y si el
-                // importe pasa del límite de la simplificada sin datos, esto corta el cobro con
-                // `factura_completa_requerida` y la pantalla los pide.
-                destinatario,
-            )
-            .await?;
-
-            Ok(numero_ticket)
-        }
-        .await;
-
-        match res {
-            Ok(numero) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(numero)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
     }
 
     async fn create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String> {
@@ -2497,7 +2298,7 @@ mod tests_snapshot_de_la_linea {
         sembrar(&db, CATALOGO).await;
         let r = db.read().await;
 
-        assert_eq!(snapshot_del_producto(&r, "con").await.unwrap().1, Value::Real(21.0));
+        assert_eq!(snapshot_del_producto(&r, "con").await.unwrap().iva, Value::Real(21.0));
     }
 
     #[tokio::test]
@@ -2508,7 +2309,7 @@ mod tests_snapshot_de_la_linea {
         sembrar(&db, CATALOGO).await;
         let r = db.read().await;
 
-        assert_eq!(snapshot_del_producto(&r, "sin").await.unwrap().1, Value::Null);
+        assert_eq!(snapshot_del_producto(&r, "sin").await.unwrap().iva, Value::Null);
     }
 
     #[tokio::test]
@@ -2517,7 +2318,7 @@ mod tests_snapshot_de_la_linea {
         sembrar(&db, CATALOGO).await;
         let r = db.read().await;
 
-        assert_eq!(snapshot_del_producto(&r, "fantasma").await.unwrap().1, Value::Null);
+        assert_eq!(snapshot_del_producto(&r, "fantasma").await.unwrap().iva, Value::Null);
     }
 
     #[tokio::test]
@@ -2528,15 +2329,37 @@ mod tests_snapshot_de_la_linea {
 
         let antes = {
             let r = db.read().await;
-            snapshot_del_producto(&r, "con").await.unwrap().1
+            snapshot_del_producto(&r, "con").await.unwrap().iva
         };
         sembrar(&db, &["UPDATE Productos SET IVA_Percent = 10 WHERE ID_Producto = 'con';"]).await;
         let despues = {
             let r = db.read().await;
-            snapshot_del_producto(&r, "con").await.unwrap().1
+            snapshot_del_producto(&r, "con").await.unwrap().iva
         };
 
         assert_eq!(antes, Value::Real(21.0));
         assert_eq!(despues, Value::Real(10.0), "las ventas nuevas sí usan el tipo nuevo");
+    }
+
+    #[tokio::test]
+    async fn la_linea_nueva_lleva_el_precio_del_catalogo_de_ese_momento() {
+        // RI-27: la pantalla mandaba el precio de su carta en caché, y tras subir el café otro
+        // puesto lo seguía vendiendo al de antes. Ahora no lo manda: se lee aquí.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, &["UPDATE Productos SET Precio_Venta = 140 WHERE ID_Producto = 'sin';"]).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('gratis', 'cat', 'Agua');"],
+        )
+        .await;
+        let r = db.read().await;
+
+        assert_eq!(snapshot_del_producto(&r, "sin").await.unwrap().precio, Dinero::de_centimos(140));
+        assert_eq!(
+            snapshot_del_producto(&r, "gratis").await.unwrap().precio,
+            Dinero::CERO,
+            "sin precio se vende a 0 €"
+        );
     }
 }

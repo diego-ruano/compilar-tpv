@@ -81,7 +81,7 @@ leen la escalera de avisos, la impresión y cualquiera que quiera ver la declara
 
 - **Cobrar**: `cobrar_detalles` (mesas) y `vr_cobrar_fraccionado` (venta rápida). El cobrador se
   guarda con el pago y es el rastro de un descuadre, así que sale de la sesión; un administrador que
-  cobra queda registrado como él mismo. `VrCobrarFraccionadoInput`, `MesasCobrarVentaRapidaInput` y
+  cobra queda registrado como él mismo. `VrCobrarFraccionadoInput` y
   `MesasCobrarDetallesInput` no llevan cobrador. Lo vigila
   `todo_comando_que_cobra_saca_el_cobrador_de_la_sesion`.
 - **Abrir el cajón**: `printer_open_drawer`. Se anota en `Aperturas_Cajon` con quien tenga la sesión.

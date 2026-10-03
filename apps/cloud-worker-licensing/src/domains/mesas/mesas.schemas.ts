@@ -123,7 +123,6 @@ export const addLineaSchema = z
 		id_comanda: idField("id_comanda"),
 		id_producto: idField("id_producto"),
 		cantidad: z.coerce.number().positive(),
-		precio: zDineroNoNegativo,
 		id_usuario: z.any().optional().nullable(),
 		id_trabajador: z.any().optional().nullable(),
 	})
@@ -135,7 +134,6 @@ export const addLineaSchema = z
 		id_comanda: v.id_comanda,
 		id_producto: v.id_producto,
 		cantidad: v.cantidad,
-		precio: v.precio,
 		id_trabajador_o_usuario:
 			optIdStr(v.id_trabajador) ?? optIdStr(v.id_usuario),
 	}));
@@ -208,7 +206,7 @@ export type SetTrabajadorInput = Pick<
 
 export type AddLineaInput = Pick<
 	MesasAddLineaComandaInput,
-	"id_comanda" | "id_producto" | "cantidad" | "precio"
+	"id_comanda" | "id_producto" | "cantidad"
 > & {
 	id_trabajador_o_usuario: string | null;
 };

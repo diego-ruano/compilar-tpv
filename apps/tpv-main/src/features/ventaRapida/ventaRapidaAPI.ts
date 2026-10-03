@@ -18,6 +18,7 @@ import type {
     ProductoRow,
     VerTicketsDetalleRow,
     VrAddLineaComandaInput,
+    VrLineaAnadida,
     VrCobrarFraccionadoInput,
     VrCreateComandaBarraInput,
 } from "@tpv/contracts";
@@ -29,6 +30,8 @@ import type {
 export type VrAddLineaComandaResult = {
     ok: boolean;
     idDetalle: string | null;
+    /** El precio que se le ha puesto a la línea: el del catálogo, no el de la carta en caché (RI-27). */
+    precioUnitario: Dinero;
 };
 
 export type VrCobrarFraccionadoResult = {
@@ -171,19 +174,18 @@ export async function vrAddLineaComanda(
     idComanda: string,
     idProducto: string,
     cantidad: number,
-    precioUnitario: Dinero,
 ): Promise<VrAddLineaComandaResult> {
     const args: VrAddLineaComandaInput = {
         id_comanda: idComanda,
         id_producto: idProducto,
         cantidad,
-        precio_unitario: precioUnitario,
     };
-    const idDetalle = await invokeClient<string>("vr_add_linea_comanda", { args });
+    const linea = await invokeClient<VrLineaAnadida>("vr_add_linea_comanda", { args });
 
     return {
         ok: true,
-        idDetalle: idDetalle || null,
+        idDetalle: linea.id_detalle || null,
+        precioUnitario: linea.precio_unitario,
     };
 }
 

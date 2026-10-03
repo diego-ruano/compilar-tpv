@@ -6,7 +6,7 @@ use tpv_contracts::venta_rapida::{
     VrCreateComandaBarraInput, VrDeleteComandaIfSafeInput, VrDeleteLineaIfUnpaidInput,
     VrIdCategoriaArgs, VrIdComandaArgs, VrIdsArgs, VrListComandasArgs,
     VrRemoveLastUnpaidLineaInput, VrSearchProductosArgs,
-    VrUpdateNotaDetalleInput,
+    VrLineaAnadida, VrUpdateNotaDetalleInput,
 };
 use tpv_contracts::verifactu::DestinatarioInput;
 use tpv_domain::venta_rapida::{id_de_cobro, limpiar_opcional, normalize_metodo, CobroFraccionado};
@@ -106,7 +106,7 @@ pub async fn create_comanda_barra(
 pub async fn add_linea_comanda(
     repo: &dyn VentaRapidaRepository,
     input: VrAddLineaComandaInput,
-) -> AppResult<String> {
+) -> AppResult<VrLineaAnadida> {
     if input.id_comanda.trim().is_empty()
         || input.id_producto.trim().is_empty()
         || !input.cantidad.is_finite()
@@ -116,19 +116,8 @@ pub async fn add_linea_comanda(
             "id_comanda/id_producto/cantidad invalid",
         ));
     }
-    // DB-06: Precio_Unitario nunca negativo (paridad con el worker: precio.min(0)).
-    if input.precio_unitario.es_negativo() {
-        return Err(AppError::validation(
-            "precio_unitario invalid (debe ser >= 0)",
-        ));
-    }
-    repo.add_linea_comanda(
-        &input.id_comanda,
-        &input.id_producto,
-        input.cantidad,
-        input.precio_unitario,
-    )
-    .await
+    repo.add_linea_comanda(&input.id_comanda, &input.id_producto, input.cantidad)
+        .await
 }
 
 pub async fn remove_last_unpaid_linea(
@@ -264,7 +253,7 @@ mod tests {
         async fn get_index_rows(&self, _: Vec<String>) -> AppResult<Vec<IndexRow>> { panic!("no usado") }
         async fn get_detalles_ver_ticket(&self, _: &str) -> AppResult<Vec<VerTicketsDetalleRow>> { panic!("no usado") }
         async fn create_comanda_barra(&self, _: Option<String>, _: bool) -> AppResult<String> { panic!("no usado") }
-        async fn add_linea_comanda(&self, _: &str, _: &str, _: f64, _: Dinero) -> AppResult<String> { panic!("no usado") }
+        async fn add_linea_comanda(&self, _: &str, _: &str, _: f64) -> AppResult<VrLineaAnadida> { panic!("no usado") }
         async fn remove_last_unpaid_linea(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
         async fn delete_linea_if_unpaid(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
         async fn update_nota_detalle(&self, _: &str, _: Option<String>) -> AppResult<bool> { panic!("no usado") }

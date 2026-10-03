@@ -14,7 +14,6 @@ import type {
     CategoriaVendibleOut,
     ComandaRow,
     DestinatarioInput,
-    Dinero,
     KitchenRow,
     MesaLineaComandaRow,
     MesaMetaOut,
@@ -179,19 +178,20 @@ export async function mesasLoadTicket(idComanda: string): Promise<MesaLineaComan
     });
 }
 
-/** Añade una línea y devuelve todas las de la comanda. */
+/**
+ * Añade una línea y devuelve todas las de la comanda. Sin precio: lo pone el backend desde el
+ * catálogo (RI-27), y llega en las filas que devuelve.
+ */
 export async function mesasAddDetalle(params: {
     idComanda: string;
     idProducto: string;
     cantidad?: number;
-    precio: Dinero;
     idUsuario?: string | null;
 }): Promise<MesaLineaComandaRow[]> {
     const args: MesasAddLineaComandaInput = {
         id_comanda: params.idComanda.trim(),
         id_producto: params.idProducto.trim(),
         cantidad: params.cantidad ?? 1,
-        precio: params.precio,
         id_usuario: params.idUsuario?.trim() || undefined,
     };
     if (!args.id_comanda) throw new Error("id_comanda inválido");

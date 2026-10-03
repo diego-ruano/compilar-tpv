@@ -12,7 +12,7 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::venta_rapida::{
     CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow,
-    VerTicketsDetalleRow,
+    VerTicketsDetalleRow, VrLineaAnadida,
 };
 use tpv_domain::venta_rapida::CobroFraccionado;
 
@@ -587,22 +587,23 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio_unitario: Dinero,
-    ) -> AppResult<String> {
+    ) -> AppResult<VrLineaAnadida> {
         let g = self.db.write().await;
         let db = &g;
         let id_detalle_final = new_id();
 
-        // El nombre y el tipo de IVA se leen ANTES y se insertan como literales (igual que
-        // `Estado_Cocina`): una subconsulta dentro del INSERT la reevaluaría la nube en otro estado.
-        // Y se guardan en la línea porque una reimpresión tiene que enseñar lo del día de la venta,
-        // y porque el producto puede haberse borrado del catálogo desde entonces (INV-05).
-        let (nombre_producto, iva) = {
+        // El nombre, el tipo de IVA y el precio se leen ANTES y se insertan como literales (igual
+        // que `Estado_Cocina`): una subconsulta dentro del INSERT la reevaluaría la nube en otro
+        // estado. Y se guardan en la línea porque una reimpresión tiene que enseñar lo del día de la
+        // venta, y porque el producto puede haberse borrado del catálogo desde entonces (INV-05).
+        // El precio sale del catálogo y no de la pantalla (RI-27).
+        let producto = {
             let r = self.db.read().await;
             crate::mesas::snapshot_del_producto(&r, id_producto).await?
         };
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let precio = producto.precio;
         let res: AppResult<String> = async {
             db.execute(
                 r#"
@@ -624,10 +625,10 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     Value::Text(id_detalle_final.clone()),
                     Value::Text(id_comanda.to_string()),
                     Value::Text(id_producto.to_string()),
-                    nombre_producto,
+                    producto.nombre,
                     Value::Real(cantidad),
-                    dinero_val(precio_unitario),
-                    iva,
+                    dinero_val(producto.precio),
+                    producto.iva,
                 ],
             )
             .await
@@ -642,9 +643,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         .await;
 
         match res {
-            Ok(id) => {
+            Ok(id_detalle) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(id)
+                Ok(VrLineaAnadida { id_detalle, precio_unitario: precio })
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;

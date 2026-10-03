@@ -1349,7 +1349,7 @@ export default function VentaRapida() {
       try {
         idComanda = await ensureComandaActiva();
 
-        const result = await vrAddLineaComanda(idComanda, idProducto, 1, precio);
+        const result = await vrAddLineaComanda(idComanda, idProducto, 1);
 
         if (!result?.ok) {
           throw new Error("No se pudo insertar la línea.");
@@ -1365,10 +1365,13 @@ export default function VentaRapida() {
         const idDetalle = String(result.idDetalle ?? "").trim();
 
         if (idDetalle) {
+          // El precio de verdad es el que ha puesto el backend desde el catálogo; el de la
+          // carta en caché puede haberse quedado viejo (RI-27).
           replaceTicketItemLocal(tempId, {
             ...tempItem,
             id: makeDetalleTicketId(idDetalle),
             detalleId: idDetalle,
+            precio: result.precioUnitario,
           });
 
           queueFlushPendingCobros();

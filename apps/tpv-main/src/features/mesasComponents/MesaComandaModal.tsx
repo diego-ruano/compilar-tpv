@@ -267,7 +267,6 @@ async function addDetalle(
         idComanda,
         idProducto: p.ID_Producto,
         cantidad: 1,
-        precio: p.Precio_Venta,
         idUsuario: operadorId,
     });
     return mapTicketRows(rows);
@@ -694,6 +693,7 @@ export default function MesaComandaModal({
                     // La fila optimista todavía no tiene tipo congelado: lo fija el backend al
                     // insertar y llega con la fila de verdad, que sustituye a esta en cuanto
                     // responde. Hasta entonces vale el del negocio, que es lo que significa `null`.
+                    // Lo mismo el precio: el de verdad es el del catálogo al insertar (RI-27).
                     ivaPercent: null,
                 },
             ]);

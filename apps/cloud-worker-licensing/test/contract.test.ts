@@ -187,6 +187,8 @@ import casoVrCrearComanda from "../../../tests/contract/casos/venta_rapida/creat
 import goldenVrCrearComanda from "../../../tests/contract/golden/venta_rapida/create_comanda_barra.json";
 import casoVrAddLinea from "../../../tests/contract/casos/venta_rapida/add_linea.json";
 import goldenVrAddLinea from "../../../tests/contract/golden/venta_rapida/add_linea.json";
+import casoVrAddLineaSinPrecio from "../../../tests/contract/casos/venta_rapida/add_linea_sin_precio.json";
+import goldenVrAddLineaSinPrecio from "../../../tests/contract/golden/venta_rapida/add_linea_sin_precio.json";
 import casoVrRemoveLast from "../../../tests/contract/casos/venta_rapida/remove_last_unpaid_linea.json";
 import goldenVrRemoveLast from "../../../tests/contract/golden/venta_rapida/remove_last_unpaid_linea.json";
 import casoVrDeleteLinea from "../../../tests/contract/casos/venta_rapida/delete_linea_if_unpaid.json";
@@ -207,6 +209,8 @@ import casoMesaCerrar from "../../../tests/contract/casos/mesas/cerrar_comanda.j
 import goldenMesaCerrar from "../../../tests/contract/golden/mesas/cerrar_comanda.json";
 import casoMesaAddLinea from "../../../tests/contract/casos/mesas/add_linea.json";
 import goldenMesaAddLinea from "../../../tests/contract/golden/mesas/add_linea.json";
+import casoMesaAddLineaSinPrecio from "../../../tests/contract/casos/mesas/add_linea_sin_precio.json";
+import goldenMesaAddLineaSinPrecio from "../../../tests/contract/golden/mesas/add_linea_sin_precio.json";
 import casoMesaRemoveOne from "../../../tests/contract/casos/mesas/remove_one_pending_detalle.json";
 import goldenMesaRemoveOne from "../../../tests/contract/golden/mesas/remove_one_pending_detalle.json";
 import casoMesaDeleteDet from "../../../tests/contract/casos/mesas/delete_detalle.json";
@@ -299,6 +303,7 @@ const CASOS = [
 	{ nombre: "reservas_eliminar", caso: casoResEliminar, golden: goldenResEliminar },
 	{ nombre: "vr_create_comanda_barra", caso: casoVrCrearComanda, golden: goldenVrCrearComanda },
 	{ nombre: "vr_add_linea", caso: casoVrAddLinea, golden: goldenVrAddLinea },
+	{ nombre: "vr_add_linea_sin_precio", caso: casoVrAddLineaSinPrecio, golden: goldenVrAddLineaSinPrecio },
 	{ nombre: "vr_remove_last_unpaid_linea", caso: casoVrRemoveLast, golden: goldenVrRemoveLast },
 	{ nombre: "vr_delete_linea_if_unpaid", caso: casoVrDeleteLinea, golden: goldenVrDeleteLinea },
 	{ nombre: "vr_update_nota_detalle", caso: casoVrUpdateNota, golden: goldenVrUpdateNota },
@@ -309,6 +314,7 @@ const CASOS = [
 	{ nombre: "mesas_set_trabajador_if_null", caso: casoMesaSetTrab, golden: goldenMesaSetTrab },
 	{ nombre: "mesas_cerrar_comanda", caso: casoMesaCerrar, golden: goldenMesaCerrar },
 	{ nombre: "mesas_add_linea", caso: casoMesaAddLinea, golden: goldenMesaAddLinea },
+	{ nombre: "mesas_add_linea_sin_precio", caso: casoMesaAddLineaSinPrecio, golden: goldenMesaAddLineaSinPrecio },
 	{ nombre: "mesas_remove_one_pending", caso: casoMesaRemoveOne, golden: goldenMesaRemoveOne },
 	{ nombre: "mesas_delete_detalle", caso: casoMesaDeleteDet, golden: goldenMesaDeleteDet },
 	{ nombre: "mesas_update_detalle_nota", caso: casoMesaUpdateNota, golden: goldenMesaUpdateNota },
@@ -625,10 +631,14 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "venta_rapida.add_linea": {
-			// El tipo de IVA y el nombre los resuelve el route, no el builder: se entra a la misma
-			// altura.
+			// El tipo de IVA, el nombre y el precio los resuelve el route, no el builder: se entra a
+			// la misma altura.
 			const datosVr = await datosDeLinea(db, caso.entrada.id_producto);
-			aplicar(hub, sql, addLinea(caso.entrada as any, datosVr.ivaPercent, datosVr.nombre));
+			aplicar(
+				hub,
+				sql,
+				addLinea(caso.entrada as any, datosVr.ivaPercent, datosVr.nombre, datosVr.precio),
+			);
 			return;
 		}
 		case "venta_rapida.remove_last_unpaid_linea": {
@@ -743,9 +753,9 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "mesas.add_linea": {
-			// Estado_Cocina, el tipo de IVA y el nombre los resuelve el ROUTE, no el builder, así
-			// que hay que entrar a la misma altura: se leen de la BD igual que en producción.
-			// (Estado_Cocina se excluye del snapshot; el IVA y el nombre no, que es lo que se
+			// Estado_Cocina, el tipo de IVA, el nombre y el precio los resuelve el ROUTE, no el
+			// builder, así que hay que entrar a la misma altura: se leen de la BD igual que en
+			// producción. (Estado_Cocina se excluye del snapshot; lo demás no, que es lo que se
 			// quiere comprobar.)
 			const datos = await datosDeLinea(db, caso.entrada.id_producto);
 			aplicar(
@@ -756,12 +766,12 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 						id_comanda: caso.entrada.id_comanda,
 						id_producto: caso.entrada.id_producto,
 						cantidad: caso.entrada.cantidad,
-						precio: caso.entrada.precio,
 						id_trabajador_o_usuario: null,
 					} as any,
 					datos.pasaCocina ? "PENDIENTE" : null,
 					datos.ivaPercent,
 					datos.nombre,
+					datos.precio,
 				),
 			);
 			return;

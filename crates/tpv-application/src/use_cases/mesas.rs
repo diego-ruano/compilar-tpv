@@ -1,13 +1,12 @@
 //! Casos de uso de mesas / salón / comandas / cocina. Local-First: validan/normalizan
 //! e invocan el puerto. Las escrituras "OK" devuelven `()` (el comando mapea a "OK").
 
-use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCerrarComandaInput,
-    MesasCobrarDetallesInput, MesasCobrarVentaRapidaInput, MesasComandaSetTrabajadorInput,
+    MesasCobrarDetallesInput, MesasComandaSetTrabajadorInput,
     MesasCreateComandaBarraInput, MesasDeleteComandaBarraIfSafeInput, MesasDeleteDetalleInput,
     MesasGetOrCreateComandaBarraInput, MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
     MesasKitchenSetLineStateInput, MesasListComandasBarraArgs, MesasRemoveOnePendingDetalleInput,
@@ -16,8 +15,8 @@ use tpv_contracts::mesas::{
 };
 use tpv_contracts::verifactu::DestinatarioInput;
 use tpv_domain::mesas::{
-    limpiar_opcional, normalize_estado_cocina, normalize_metodo, requerido, AbrirComandaData,
-    CobroDetalles, CobroVentaRapida,
+    limpiar_opcional, normalize_estado_cocina, requerido, AbrirComandaData,
+    CobroDetalles,
 };
 
 use crate::error::{AppError, AppResult};
@@ -129,19 +128,10 @@ pub async fn add_linea_comanda(
     if !input.cantidad.is_finite() || input.cantidad <= 0.0 {
         return Err(AppError::validation("cantidad inválida"));
     }
-    // DB-06: Precio_Unitario nunca negativo (paridad con el worker: precio.min(0)).
-    if input.precio.es_negativo() {
-        return Err(AppError::validation("precio inválido (debe ser >= 0)"));
-    }
+    // RI-27: el precio no viene de la pantalla; lo pone el repositorio desde el catálogo.
     let id = opt_id(input.id_usuario.or(input.id_trabajador));
-    repo.add_linea_comanda(
-        &input.id_comanda,
-        &input.id_producto,
-        input.cantidad,
-        input.precio,
-        id,
-    )
-    .await
+    repo.add_linea_comanda(&input.id_comanda, &input.id_producto, input.cantidad, id)
+        .await
 }
 
 /* Barra */
@@ -152,33 +142,6 @@ pub async fn get_or_create_comanda_barra(
 ) -> AppResult<String> {
     repo.get_or_create_comanda_barra(opt_id(input.id_trabajador))
         .await
-}
-
-/// REV-17: el cobrador llega **aparte** del input, porque sale de la sesión y no de la pantalla.
-pub async fn cobrar_venta_rapida(
-    repo: &dyn MesasRepository,
-    id_usuario: &str,
-    id_trabajador: Option<&str>,
-    input: MesasCobrarVentaRapidaInput,
-) -> AppResult<String> {
-    let items: Vec<(String, Dinero)> = input
-        .items
-        .into_iter()
-        // DB-06: descarta precios negativos (nunca escriben Precio_Unitario < 0). Ya no hace
-        // falta comprobar que sean finitos: un `Dinero` siempre lo es.
-        .filter(|it| !it.producto_id.trim().is_empty() && !it.precio.es_negativo())
-        .map(|it| (it.producto_id, it.precio))
-        .collect();
-
-    let data = CobroVentaRapida {
-        metodo: normalize_metodo(&input.metodo),
-        items,
-        id_usuario_cobrador: opt_id(Some(id_usuario.to_string())),
-        id_trabajador_cobrador: opt_id(id_trabajador.map(str::to_string)),
-        id_comanda: opt_id(input.id_comanda),
-        destinatario: destinatario_de(input.destinatario),
-    };
-    repo.cobrar_venta_rapida(data).await
 }
 
 pub async fn create_comanda_barra(

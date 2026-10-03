@@ -103,7 +103,6 @@ export const addLineaSchema = z.object({
 	id_comanda: idField("id_comanda"),
 	id_producto: idField("id_producto"),
 	cantidad: positiveNumber("cantidad"),
-	precio_unitario: zDineroNoNegativo,
 });
 
 export const removeLastLineaSchema = z.object({

@@ -1,5 +1,5 @@
 {
-  "descripcion": "Añade una línea a una comanda de barra. ID_Detalle generado (asimétrico) → excluido. Se comprueba la línea (producto/cantidad/precio), su tipo de IVA -copiado del producto al vender, para que una reimpresión enseñe el del día de la venta- y el Total recalculado.",
+  "descripcion": "Añade una línea a una comanda de barra. ID_Detalle generado (asimétrico) → excluido. Se comprueba la línea (producto/cantidad/precio), su tipo de IVA -copiado del producto al vender, para que una reimpresión enseñe el del día de la venta-, el precio (el del catálogo: la entrada no lo trae, RI-27) y el Total recalculado.",
   "comando": "venta_rapida.add_linea",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
@@ -9,8 +9,7 @@
   "entrada": {
     "id_comanda": "comanda-1",
     "id_producto": "prod-1",
-    "cantidad": 2,
-    "precio_unitario": 300
+    "cantidad": 2
   },
   "snapshot": {
     "Detalle_Comanda": "SELECT ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent FROM Detalle_Comanda",

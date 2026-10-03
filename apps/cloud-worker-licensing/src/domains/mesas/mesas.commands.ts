@@ -1,5 +1,6 @@
 // src/domains/mesas/mesas.commands.ts
 
+import type { Dinero } from "@tpv/contracts";
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import { pasosConsumo } from "../inventario/consumo";
@@ -431,6 +432,7 @@ export function addLinea(
 	estadoCocina: string | null,
 	ivaPercent: number | null,
 	nombreProducto: string | null,
+	precio: Dinero,
 ): BuiltCommand {
 	const steps: any[] = [];
 	// UUID generado en JS e insertado como literal: no necesita un paso `value` (SELECT ?1)
@@ -464,7 +466,7 @@ export function addLinea(
 	// va una subquery embebida en el INSERT (no determinista al replicarse a la Main).
 	// El tipo de IVA (?7) y el nombre (?8) viajan igual y por el mismo motivo, y se guardan EN LA
 	// LÍNEA: una reimpresión tiene que enseñar lo del día de la venta, y el producto puede haberse
-	// borrado del catálogo desde entonces (INV-05).
+	// borrado del catálogo desde entonces (INV-05). El precio (?5) también sale del catálogo (RI-27).
 	steps.push({
 		kind: "execute",
 		sql: `
@@ -485,7 +487,7 @@ export function addLinea(
 			input.id_comanda,
 			input.id_producto,
 			input.cantidad,
-			input.precio,
+			precio,
 			estadoCocina,
 			ivaPercent,
 			nombreProducto,

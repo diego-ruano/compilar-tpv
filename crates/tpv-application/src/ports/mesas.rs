@@ -9,7 +9,7 @@ use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
 };
-use tpv_domain::mesas::{AbrirComandaData, CobroDetalles, CobroVentaRapida};
+use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
 use crate::error::AppResult;
 
@@ -38,17 +38,12 @@ pub trait MesasRepository: Send + Sync {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio: Dinero,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<Vec<MesaLineaComandaRow>>;
 
     /* Barra */
     async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>)
         -> AppResult<String>;
-    /// Devuelve el **número de ticket** que ha reservado el cobro. Lo necesita quien imprime: sin
-    /// él, el papel saldría sin número o habría que volver a consultarlo. Y guardarlo con el pago
-    /// es lo que permite que una reimpresión saque el mismo.
-    async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<String>;
     async fn create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String>;
     async fn list_comandas_barra(
         &self,
