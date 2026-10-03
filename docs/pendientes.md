@@ -17,6 +17,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
 | [RI-31](#ri-31--la-replicación-de-la-main-vive-en-la-webview) | 🔵 | La replicación de la Main vive en la webview | Sin decidir; se aborda aparte |
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
+| [RI-13](#ri-13--la-pii-del-personal-se-cifra-sin-normalizar-ni-validar) | 🟡 | DNI, IBAN y nº de la Seguridad Social se cifran sin normalizar ni validar | Pendiente de decidir si estos campos se quedan |
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio |
@@ -255,6 +256,63 @@ Decidido, a falta de medir cuánto genera un bar al año:
 
 ⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
 (`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
+
+### RI-13 · La PII del personal se cifra sin normalizar ni validar
+
+**Pendiente de decisión: si la ficha del trabajador sigue guardando DNI, IBAN y nº de la Seguridad
+Social.** Puede que se quiten. Hasta saberlo no se toca nada; abajo están las dos salidas.
+
+**Qué pasa.** Los tres campos se cifran en la Main antes de escribirlos (TRAB-03, `FieldCipher`), con
+cifrado **determinista**: el mismo texto da siempre el mismo cifrado. Es lo que permite que
+`Trabajadores.DNI` y `Trabajadores.Numero_Seguridad_Social` sigan siendo `UNIQUE` con el valor
+cifrado. Pero el `UNIQUE` sólo ve un duplicado si el texto en claro es idéntico byte a byte, y lo
+único que se normaliza antes de cifrar es el `trim` (`limpiar_opcional` en
+`use_cases/trabajadores.rs`, alta y edición):
+
+- `12345678Z`, `12345678z` y `12.345.678-Z` son tres cifrados distintos: el mismo DNI entra tres
+  veces sin que el `UNIQUE` lo vea. Lo mismo un IBAN con y sin espacios.
+- No se valida nada: ni la letra del DNI/NIE, ni el dígito de control del IBAN, ni la forma del nº de
+  la Seguridad Social.
+- Como el dato va cifrado, una errata no se encuentra después con una consulta: sale cuando falla
+  una nómina.
+
+El worker no entra: la Handy no escribe esos campos, porque no tiene la clave (los rechaza en
+`trabajadores.schemas.ts` y no los toca en `trabajadores.commands.ts`).
+
+**Si se quedan:**
+
+1. **Normalizar antes de cifrar**, en el dominio, una función por campo, aplicada en el alta y en la
+   edición:
+   - DNI/NIE: mayúsculas, sin espacios, puntos ni guiones. Ojo: `normalizar_nif`
+     (`tpv-domain/src/verifactu.rs`) quita espacios y guiones pero **no puntos**, así que
+     `12.345.678-Z` seguiría saliendo distinto; o se amplía o se escribe una propia.
+   - IBAN: mayúsculas, sin espacios.
+   - Nº de la Seguridad Social: sólo dígitos.
+2. **Validar como aviso, no como bloqueo**: el dato se guarda igual y la pantalla avisa junto al
+   campo mientras se escribe.
+   - DNI/NIE: `nif_valido` ya existe.
+   - IBAN: el dígito de control mod 97 de ISO 13616.
+   - Nº de la Seguridad Social: al menos la forma (12 dígitos). Su dígito de control no se implementa
+     sin contrastarlo antes en una fuente oficial.
+3. **Lo ya guardado**: sin clientes no hace falta tocarlo. Con clientes, el job `cifrado_pii` tendría
+   que descifrar, normalizar y volver a cifrar, y decidir qué hacer si dos fichas pasan a chocar en
+   el `UNIQUE`.
+4. Tests: un `UNIQUE` que detecta `12345678Z` contra `12.345.678-z`, y la normalización como tabla de
+   casos.
+
+**Si se quitan**, hay que retirar los tres campos de todas las capas:
+
+- Esquema: las tres columnas de `Trabajadores` en `0001_inicial.sql` (sin clientes se edita ahí, con
+  su reset) y `schema.snapshot.sql`.
+- DTOs (`tpv-contracts/src/trabajadores.rs`, `bindings.ts`), dominio, caso de uso y los dos
+  adaptadores (`tpv-infra-sqlite`, `tpv-infra-http`), y el schema y los comandos del worker.
+- Pantallas de alta y edición (`AddTrabajador.tsx`, `EditTrabajador.tsx`).
+- El cifrado de campos entero, si no queda nada más que cifrar: `FieldCipher`, `field_crypto.rs`, el
+  job `cifrado_pii`, la DEK que entrega el worker al activar y su custodia en el control-plane.
+- Lo que los nombra en recuperación (`recovery.rs`, `RecuperarDatos.tsx`), en el filtro de datos
+  personales de la telemetría (tres copias y `scrub_casos.json`) y en el caso de lectura de contrato
+  `trabajadores/detalle`.
+- LEGAL-01, que cuenta la PII del personal como dato que tratamos.
 
 ---
 
