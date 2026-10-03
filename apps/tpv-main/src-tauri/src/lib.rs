@@ -2922,8 +2922,16 @@ mod tests_exenciones_del_gate {
             ),
         ];
         for (fichero, fuente) in FUENTES {
+            // Sólo el código, sin comentarios: citar `docs/arquitectura/jobs-e-interruptores.md` en
+            // un comentario no consulta ningún interruptor, y en `verifactu.rs` lo hacía saltar.
+            // Toda consulta real pasa por un identificador (`interruptores::`, `Interruptor`).
+            let codigo = fuente
+                .lines()
+                .map(|linea| linea.split("//").next().unwrap_or(""))
+                .collect::<Vec<_>>()
+                .join("\n");
             assert!(
-                !fuente.to_lowercase().contains("interruptor"),
+                !codigo.to_lowercase().contains("interruptor"),
                 "{fichero} consulta un interruptor remoto (PROD-06). Nada de lo que rodea al cobro \
                  puede depender de uno: la regla más firme del producto es que nada impide cobrar."
             );
