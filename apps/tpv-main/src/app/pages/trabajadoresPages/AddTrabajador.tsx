@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UserPlus, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { invokeClient } from "@tpv/client";
+import { invokeClient, toAppError } from "@tpv/client";
 import { useMode } from "../../../shared/stores/useMode";
 import { conAviso } from "../../../shared/lib/conAviso";
 
@@ -86,6 +86,14 @@ function getErrorMessage(e: unknown) {
     msg.includes("nss")
   ) {
     return "Ese Nº de Seguridad Social ya existe";
+  }
+
+  // Lo que el backend rechaza a propósito (una validación, un conflicto) llega con su frase y se
+  // enseña tal cual, por código; antes caía en el «Error al guardar el trabajador» de abajo. Lo de
+  // arriba son los choques del UNIQUE, que llegan con el texto de SQLite.
+  const { code, message } = toAppError(e);
+  if (code === "validation" || code === "conflict" || code === "not_found") {
+    return message;
   }
 
   if (msg.includes("role_not_found")) {
