@@ -2,7 +2,7 @@
 //
 // RI-62: editar una ficha desde la Handy no puede dejar el negocio sin ningún administrador
 // activo. Es la comprobación previa de `PUT /v1/trabajadores/:id`; la Main hace la misma, con el
-// mismo SQL, dentro de su transacción (`tests_ultimo_administrador` en `trabajadores.rs`).
+// mismo SQL, dentro de su transacción (`tests_edicion` en `trabajadores.rs`).
 
 import { describe, expect, it } from "vitest";
 

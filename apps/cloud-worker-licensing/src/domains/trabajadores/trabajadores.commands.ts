@@ -21,7 +21,16 @@ export type BuiltCommand = {
 const REF_ID_USUARIO = { $ref: "id_usuario" } as const;
 const REF_ID_TRABAJADOR = { $ref: "id_trabajador" } as const;
 
-export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
+/**
+ * RI-63: el PIN llega en claro y la ruta lo hashea antes de construir el comando. El PIN no puede
+ * quedarse en el `cloudPayload`, que el Durable Object guarda en su cola (`Cloud_Payload_Json`).
+ */
+function sinPin<T extends { pin?: string | null }>(input: T): Omit<T, "pin"> {
+	const { pin: _pin, ...resto } = input;
+	return resto;
+}
+
+export function createTrabajador(input: TrabajadorCreateInput, passwordHash: string): BuiltCommand {
 	const steps = [
 		{
 			kind: "value",
@@ -47,7 +56,7 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 				REF_ID_USUARIO,
 				input.id_rol,
 				input.email,
-				input.password_hash,
+				passwordHash,
 				input.nombre,
 				input.apellido,
 				input.estado,
@@ -93,17 +102,24 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 			type: "tenantDb.transaction",
 			payload: { steps, resultKey: "id_trabajador" },
 		},
-		cloudPayload: input,
+		cloudPayload: sinPin(input),
 	};
 }
 
+/**
+ * Sin `resultKey`: el resultado son las filas que tocó cada UPDATE (`usuarios`, `trabajadores`),
+ * para que la ruta diga que el trabajador no existe en vez de responder `ok` sin haber tocado nada
+ * (RI-63). En un reintento idempotente llegan a `null`: ese resultado se guarda sin leer la base.
+ */
 export function updateTrabajador(
 	idTrabajador: string,
 	input: TrabajadorUpdateInput,
+	passwordHash: string | null,
 ): BuiltCommand {
-	const updateUsuario = input.password_hash
+	const updateUsuario = passwordHash
 		? {
 				kind: "execute",
+				saveAs: "usuarios",
 				sql: `
 					UPDATE Usuarios
 					SET
@@ -121,12 +137,13 @@ export function updateTrabajador(
 					input.nombre,
 					input.apellido,
 					input.estado,
-					input.password_hash,
+					passwordHash,
 					input.id_usuario,
 				],
 			}
 		: {
 				kind: "execute",
+				saveAs: "usuarios",
 				sql: `
 					UPDATE Usuarios
 					SET
@@ -156,6 +173,7 @@ export function updateTrabajador(
 					updateUsuario,
 					{
 						kind: "execute",
+						saveAs: "trabajadores",
 						// TRAB-03: las tres columnas cifradas se omiten del SET. Omitirlas (en vez
 						// de ponerlas a NULL) es lo que hace que editar un trabajador desde la
 						// Handy CONSERVE lo que la Main guardó, en lugar de borrárselo.
@@ -179,7 +197,7 @@ export function updateTrabajador(
 				],
 			},
 		},
-		cloudPayload: { ...input, id_trabajador: idTrabajador },
+		cloudPayload: { ...sinPin(input), id_trabajador: idTrabajador },
 	};
 }
 

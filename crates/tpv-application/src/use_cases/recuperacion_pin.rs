@@ -18,6 +18,7 @@
 //!     gasta: un PIN mal escrito no puede costarle al usuario un código.
 
 use tpv_contracts::login::{CodigoEnviado, ConfirmarCodigoPinInput, SolicitarCodigoPinInput};
+use tpv_domain::login::pin_de_teclado;
 
 use crate::error::{AppError, AppResult};
 use crate::ports::login::LoginRepository;
@@ -42,14 +43,10 @@ pub(crate) fn codigo_valido(input: &str) -> AppResult<String> {
     Ok(c.to_string())
 }
 
-/// El PIN se teclea en el teclado del login, que sólo tiene cifras y admite hasta 6. Uno que no se
-/// pueda escribir ahí dejaría al administrador igual de fuera que antes de recuperarlo.
+/// El PIN se teclea en el teclado del login: uno que no se pueda escribir ahí dejaría al
+/// administrador igual de fuera que antes de recuperarlo (ver `pin_de_teclado`).
 fn pin_valido(input: &str) -> AppResult<String> {
-    let p = input.trim();
-    if !(4..=6).contains(&p.len()) || !p.chars().all(|ch| ch.is_ascii_digit()) {
-        return Err(AppError::validation("El PIN tiene que tener entre 4 y 6 cifras"));
-    }
-    Ok(p.to_string())
+    pin_de_teclado(input).map_err(AppError::validation)
 }
 
 async fn exigir_admin_activo(repo: &dyn LoginRepository, id: &str) -> AppResult<()> {

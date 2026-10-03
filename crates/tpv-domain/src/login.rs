@@ -40,6 +40,18 @@ pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
     })
 }
 
+/// El PIN que se puede teclear en el login: de 4 a 6 cifras. El teclado del login sólo tiene
+/// cifras y no admite más de 6, así que un PIN fuera de eso deja a su dueño sin poder entrar
+/// (RI-63: el alta de trabajador aceptaba siete cifras). Devuelve el PIN sin espacios en los
+/// extremos. Espejo de `pinSchema` en el worker (`trabajadores.schemas.ts`).
+pub fn pin_de_teclado(input: &str) -> Result<String, String> {
+    let p = input.trim();
+    if !(4..=6).contains(&p.len()) || !p.chars().all(|ch| ch.is_ascii_digit()) {
+        return Err("El PIN tiene que tener entre 4 y 6 cifras".into());
+    }
+    Ok(p.to_string())
+}
+
 pub fn validate_email_basic(email: &str) -> bool {
     let e = email.trim();
     e.len() >= 6 && e.contains('@') && e.contains('.') && !e.contains(' ')
@@ -277,6 +289,45 @@ mod tests {
         assert!(verify_pin("cafe 2026", &hash).is_ok());
         assert!(verify_pin(" cafe 2026 ", &hash).is_ok());
         assert!(verify_pin("cafe2026", &hash).is_err());
+    }
+
+    #[test]
+    fn el_pin_de_teclado_son_de_4_a_6_cifras() {
+        for pin in ["1234", "123456", " 0000 "] {
+            assert!(pin_de_teclado(pin).is_ok(), "{pin:?} debería valer");
+        }
+        assert_eq!(pin_de_teclado(" 1234 ").unwrap(), "1234");
+        // Siete cifras no caben en el teclado del login; letras, tampoco.
+        for pin in ["", "123", "1234567", "12a4", "12 34", "１２３４"] {
+            assert!(pin_de_teclado(pin).is_err(), "{pin:?} no debería valer");
+        }
+    }
+
+    #[test]
+    fn pin_alfanumerico_distingue_mayusculas_y_minusculas() {
+        let hash = hash_pin("Clave9X").unwrap();
+        assert!(verify_pin("Clave9X", &hash).is_ok());
+        assert!(verify_pin("clave9x", &hash).is_err());
+        assert!(verify_pin("CLAVE9X", &hash).is_err());
+    }
+
+    #[test]
+    fn pin_admite_simbolos_sin_perder_entropia() {
+        let hash = hash_pin("Barra#27!").unwrap();
+        assert!(verify_pin("Barra#27!", &hash).is_ok());
+        assert!(verify_pin("Barra27", &hash).is_err());
+        assert!(verify_pin("Barra#27?", &hash).is_err());
+    }
+
+    #[test]
+    fn pin_unicode_se_verifica_sin_normalizaciones_ocultas() {
+        // REV-25: el hash y la verificación tratan los caracteres multibyte como la misma secuencia
+        // de bytes en los dos sentidos.
+        let hash = hash_pin("Café42ñ").unwrap();
+        assert!(verify_pin("Café42ñ", &hash).is_ok());
+        assert!(verify_pin("Cafe42n", &hash).is_err());
+        // Y que no se normaliza por detrás: «é» compuesta no es «é» precompuesta.
+        assert!(verify_pin("Cafe\u{301}42ñ", &hash).is_err());
     }
 
     #[test]

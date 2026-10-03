@@ -126,7 +126,7 @@ function getErrorMessage(e: unknown) {
 async function createTrabajadorRemote(payload: {
   idRol: string;
   email: string;
-  passwordHash: string;
+  pin: string;
   nombre: string;
   apellido?: string | null;
   estado: "Activo" | "Inactivo";
@@ -143,8 +143,7 @@ async function createTrabajadorRemote(payload: {
     id_rol: payload.idRol,
 
     email: payload.email,
-    passwordHash: payload.passwordHash,
-    password_hash: payload.passwordHash,
+    pin: payload.pin,
 
     nombre: payload.nombre,
     apellido: payload.apellido ?? null,
@@ -169,7 +168,8 @@ async function createTrabajadorRemote(payload: {
     args: {
       id_rol: body.id_rol,
       email: body.email,
-      password_hash: body.password_hash,
+      // RI-63: el PIN, no su hash: lo hashea el backend, que así exige la política del PIN.
+      pin: body.pin,
       nombre: body.nombre,
       apellido: body.apellido,
       estado: body.estado,
@@ -256,22 +256,19 @@ function AddTrabajador() {
     if (!idRol) return setError("Selecciona un rol");
     if (!email.trim()) return setError("El email es obligatorio");
     if (!password.trim()) return setError("El PIN es obligatorio");
-    if (password.trim().length < 4) {
-      return setError("El PIN debe tener al menos 4 dígitos");
+    // RI-63: el teclado del login sólo admite de 4 a 6 cifras (el backend lo exige igual).
+    if (!/^\d{4,6}$/.test(password.trim())) {
+      return setError("El PIN tiene que tener entre 4 y 6 cifras");
     }
     if (!nombre.trim()) return setError("El nombre es obligatorio");
 
     setSaving(true);
 
     try {
-      const passwordHash = await invoke<string>("hash_password", {
-        pin: password.trim(),
-      });
-
       const ok = await createTrabajadorRemote({
         idRol: idRol,
         email: email.trim(),
-        passwordHash,
+        pin: password.trim(),
         nombre: nombre.trim(),
         apellido: normalizeNullable(apellido),
         estado,
@@ -394,14 +391,15 @@ function AddTrabajador() {
               <label className="text-sm font-medium">PIN (solo números) *</label>
               <input
                 value={password}
-                onChange={(e) => setPassword(e.target.value.replace(/\D/g, ""))}
+                onChange={(e) => setPassword(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 inputMode="numeric"
                 pattern="[0-9]*"
+                maxLength={6}
                 className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="1234"
                 autoComplete="off"
               />
-              <p className="text-xs text-fg-subtle">Recomendado 4–6 dígitos.</p>
+              <p className="text-xs text-fg-subtle">De 4 a 6 cifras: es lo que admite el teclado del fichaje.</p>
             </div>
           </div>
           </div>

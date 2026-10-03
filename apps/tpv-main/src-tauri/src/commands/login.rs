@@ -12,12 +12,6 @@ use tpv_contracts::login::{
 use crate::{AppState, Sesion};
 use tpv_contracts::errors::AppErrorDto;
 
-/// Hash de un PIN. Síncrono y sin estado (lo usa también el arranque en main.rs).
-#[tauri::command]
-pub fn hash_password(pin: String) -> Result<String, AppErrorDto> {
-    Ok(uc::hash_password(&pin)?)
-}
-
 #[tauri::command]
 pub async fn list_login_users(state: State<'_, AppState>) -> Result<Vec<UserListItem>, AppErrorDto> {
     let repo = state.login_repo().await?;

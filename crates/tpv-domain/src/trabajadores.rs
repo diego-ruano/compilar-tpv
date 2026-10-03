@@ -54,11 +54,14 @@ pub fn normalizar_estado(estado: &str) -> String {
 }
 
 /// Datos para dar de alta un trabajador (crea Usuario + Trabajador). Ya validados.
+///
+/// `pin` va en claro y ya validado (`login::pin_de_teclado`): lo hashea el adaptador que lo
+/// guarda, la Main en su SQLite o el worker en la nube (RI-63).
 #[derive(Debug, Clone)]
 pub struct TrabajadorNuevo {
     pub id_rol: String,
     pub email: String,
-    pub password_hash: String,
+    pub pin: String,
     pub nombre: String,
     pub apellido: Option<String>,
     pub estado: String,
@@ -71,7 +74,8 @@ pub struct TrabajadorNuevo {
     pub fecha_fin_contrato: Option<String>,
 }
 
-/// Cambios sobre un trabajador existente. `password_hash` opcional (si `None`, no se cambia).
+/// Cambios sobre un trabajador existente. `pin` opcional (si `None`, no se cambia); como en el
+/// alta, en claro y ya validado.
 #[derive(Debug, Clone)]
 pub struct TrabajadorCambios {
     pub id_usuario: String,
@@ -87,7 +91,7 @@ pub struct TrabajadorCambios {
     pub numero_seguridad_social: Option<String>,
     pub fecha_inicio_contrato: Option<String>,
     pub fecha_fin_contrato: Option<String>,
-    pub password_hash: Option<String>,
+    pub pin: Option<String>,
 }
 
 #[cfg(test)]

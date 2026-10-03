@@ -96,7 +96,7 @@ dentro de la transacción de `update_trabajador`. El worker lo comprueba antes d
 
 | Comandos | Por qué |
 |---|---|
-| `login_user`, `list_login_users`, `setup_pendiente`, `hash_password`, `logout` | Son el login |
+| `login_user`, `list_login_users`, `setup_pendiente`, `logout` | Son el login |
 | `complete_initial_setup` | Antes del primer login no hay con quién iniciar sesión (ver abajo) |
 | `punch` y fichajes | Se ficha antes de tener sesión |
 | `license_*`, `set_device_mode` | Las pantallas de arranque se pintan **en lugar** del router |

@@ -6,7 +6,7 @@ use tpv_contracts::login::{
     CompleteInitialSetupInput, LoginOk, LoginUserArgs, PunchInput, PunchStatus, PunchStatusArgs,
     SetTurnoPartidoInput, SetupPendiente, UserListItem,
 };
-use tpv_domain::login::{hash_pin, limpiar_opcional, requerido, validate_email_basic};
+use tpv_domain::login::{limpiar_opcional, pin_de_teclado, requerido, validate_email_basic};
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::{AppError, AppResult};
@@ -15,11 +15,6 @@ use crate::ports::notificaciones::Notifier;
 
 /// Umbral de intentos de PIN fallidos consecutivos que dispara el aviso de seguridad.
 const UMBRAL_LOGIN_FALLIDOS: i64 = 5;
-
-/// Hash de un PIN (comando `hash_password`). Cómputo puro de dominio.
-pub fn hash_password(pin: &str) -> AppResult<String> {
-    hash_pin(pin).map_err(AppError::validation)
-}
 
 pub async fn list_login_users(repo: &dyn LoginRepository) -> AppResult<Vec<UserListItem>> {
     repo.list_login_users().await
@@ -92,21 +87,17 @@ pub async fn complete_initial_setup(
     input: CompleteInitialSetupInput,
 ) -> AppResult<()> {
     let email_nuevo = requerido(&input.email_nuevo, "email_nuevo").map_err(AppError::validation)?;
-    let pin_nuevo = requerido(&input.pin_nuevo, "pin_nuevo").map_err(AppError::validation)?;
+    // RI-63: el mismo PIN que se puede teclear en el login, no sólo «al menos 4».
+    let pin_nuevo = pin_de_teclado(&input.pin_nuevo).map_err(AppError::validation)?;
 
     if input.id_usuario.trim().is_empty() {
         return Err(AppError::validation("id_usuario inválido"));
-    }
-    if pin_nuevo.trim().len() < 4 {
-        return Err(AppError::validation(
-            "El PIN nuevo debe tener al menos 4 dígitos",
-        ));
     }
     if !validate_email_basic(&email_nuevo) {
         return Err(AppError::validation("Email inválido"));
     }
 
-    repo.complete_initial_setup(&input.id_usuario, pin_nuevo.trim(), email_nuevo.trim())
+    repo.complete_initial_setup(&input.id_usuario, &pin_nuevo, email_nuevo.trim())
         .await
 }
 
@@ -205,84 +196,5 @@ mod tests {
         let args = LoginUserArgs { id_usuario: "u1".into(), pin: "0000".into() };
         assert!(login_user(&repo, Some(&notifier), args).await.is_err());
         assert!(notifier.emitidas.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn hash_password_genera_hash_verificable_y_no_deja_pin_en_claro() {
-        let hash = hash_password("1234").unwrap();
-        assert_ne!(hash, "1234");
-        assert!(tpv_domain::login::verify_pin("1234", &hash).is_ok());
-        assert!(tpv_domain::login::verify_pin("9999", &hash).is_err());
-    }
-
-    #[test]
-    fn hash_password_rechaza_pin_invalido() {
-        assert!(matches!(hash_password(" "), Err(AppError::Validation(_))));
-    }
-
-    #[test]
-    fn hashes_del_mismo_pin_tienen_salts_distintos() {
-        let primero = hash_password("1234").unwrap();
-        let segundo = hash_password("1234").unwrap();
-        assert_ne!(primero, segundo);
-        assert!(tpv_domain::login::verify_pin("1234", &primero).is_ok());
-        assert!(tpv_domain::login::verify_pin("1234", &segundo).is_ok());
-    }
-
-    #[test]
-    fn pin_se_verifica_tras_recortar_extremos() {
-        let hash = hash_password(" 1234 ").unwrap();
-        assert!(tpv_domain::login::verify_pin("1234", &hash).is_ok());
-    }
-
-    #[test]
-    fn pin_alfanumerico_se_hashea_y_verifica() {
-        let hash = hash_password("Abc12345").unwrap();
-        assert!(tpv_domain::login::verify_pin("Abc12345", &hash).is_ok());
-        assert!(tpv_domain::login::verify_pin("Abc12346", &hash).is_err());
-    }
-
-    #[test]
-    fn pin_alfanumerico_distingue_mayusculas_y_minusculas() {
-        let hash = hash_password("Clave9X").unwrap();
-        assert!(tpv_domain::login::verify_pin("Clave9X", &hash).is_ok());
-        assert!(tpv_domain::login::verify_pin("clave9x", &hash).is_err());
-        assert!(tpv_domain::login::verify_pin("CLAVE9X", &hash).is_err());
-    }
-
-    #[test]
-    fn pin_admite_simbolos_sin_perder_entropia() {
-        let hash = hash_password("Barra#27!").unwrap();
-        assert!(tpv_domain::login::verify_pin("Barra#27!", &hash).is_ok());
-        assert!(tpv_domain::login::verify_pin("Barra27", &hash).is_err());
-        assert!(tpv_domain::login::verify_pin("Barra#27?", &hash).is_err());
-    }
-
-    #[test]
-    fn pin_con_espacios_interiores_los_conserva() {
-        let hash = hash_password("cafe 2026").unwrap();
-        assert!(tpv_domain::login::verify_pin("cafe 2026", &hash).is_ok());
-        assert!(tpv_domain::login::verify_pin("cafe2026", &hash).is_err());
-        // Solo se eliminan espacios de los extremos.
-        assert!(tpv_domain::login::verify_pin("  cafe 2026  ", &hash).is_ok());
-    }
-
-    #[test]
-    fn pin_unicode_se_verifica_sin_normalizaciones_ocultas() {
-        // REV-25: el literal estaba mojibakeado («CafÃ©42Ã±»), o sea que probaba un PIN de ASCII
-        // con símbolos, no uno con acentos. Justo lo que dice comprobar era lo único que no
-        // comprobaba: que el hash y la verificación tratan los caracteres multibyte como la misma
-        // secuencia de bytes en los dos sentidos.
-        let hash = hash_password("Café42ñ").unwrap();
-        assert!(tpv_domain::login::verify_pin("Café42ñ", &hash).is_ok());
-        assert!(tpv_domain::login::verify_pin("Cafe42n", &hash).is_err());
-        // Y que no se normaliza por detrás: «é» compuesta no es «é» precompuesta.
-        assert!(tpv_domain::login::verify_pin("Cafe\u{301}42ñ", &hash).is_err());
-    }
-
-    #[test]
-    fn pin_alfanumerico_demasiado_corto_se_rechaza() {
-        assert!(matches!(hash_password("a1"), Err(AppError::Validation(_))));
-        assert!(matches!(hash_password("X9 "), Err(AppError::Validation(_))));
     }
 }

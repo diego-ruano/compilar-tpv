@@ -32,7 +32,7 @@ function argsDe(built: { command: { payload: any } }): string[] {
 const ALTA = {
 	id_rol: "rol-1",
 	email: "ada@test.local",
-	password_hash: "hash",
+	pin: "1234",
 	nombre: "Ada",
 	apellido: "Lovelace",
 	estado: "Activo",
@@ -44,7 +44,7 @@ const ALTA = {
 
 describe("TRAB-03 · el worker no toca la PII cifrada", () => {
 	it("el alta no escribe ninguna de las tres columnas", () => {
-		const built = cmd.createTrabajador(trabajadorCreateSchema.parse(ALTA) as any);
+		const built = cmd.createTrabajador(trabajadorCreateSchema.parse(ALTA) as any, "hash");
 		const sql = sqlDe(built);
 
 		for (const col of PII) {
@@ -60,6 +60,7 @@ describe("TRAB-03 · el worker no toca la PII cifrada", () => {
 				id_trabajador: "trab-1",
 				id_usuario: "user-1",
 			}) as any,
+			null,
 		);
 		const sql = sqlDe(built);
 
@@ -82,7 +83,7 @@ describe("TRAB-03 · el worker no toca la PII cifrada", () => {
 			numero_seguridad_social: "281234567840",
 		};
 
-		const built = cmd.createTrabajador(trabajadorCreateSchema.parse(conPii) as any);
+		const built = cmd.createTrabajador(trabajadorCreateSchema.parse(conPii) as any, "hash");
 		const args = argsDe(built).join("|");
 
 		expect(args).not.toContain("12345678Z");

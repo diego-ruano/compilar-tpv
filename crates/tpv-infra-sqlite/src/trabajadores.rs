@@ -14,6 +14,7 @@ use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_contracts::trabajadores::{
     AsignacionRow, RolRow, TrabajadorDetailRow, TrabajadorRow, TurnoRow,
 };
+use tpv_domain::login::hash_pin;
 use tpv_domain::trabajadores::{
     limpiar_opcional, AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
 };
@@ -565,6 +566,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn create_trabajador(&self, data: TrabajadorNuevo) -> AppResult<bool> {
+        // RI-63: el PIN llega en claro y el hash se hace aquí, así que no se guarda un hash que
+        // venga de fuera (con las iteraciones que sea). Antes de coger el cerrojo: PBKDF2 tarda.
+        let password_hash = hash_pin(&data.pin).map_err(AppError::validation)?;
         let db = self.db.write().await;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -582,7 +586,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                     Value::Text(id_usuario.clone()),
                     Value::Text(data.id_rol.clone()),
                     Value::Text(data.email.clone()),
-                    Value::Text(data.password_hash.clone()),
+                    Value::Text(password_hash),
                     Value::Text(data.nombre.clone()),
                     opt_text(data.apellido.clone()),
                     Value::Text(data.estado.clone()),
@@ -634,6 +638,11 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         id_trabajador: &str,
         cambios: TrabajadorCambios,
     ) -> AppResult<bool> {
+        // RI-63: como en el alta, el hash del PIN nuevo se hace aquí y antes del cerrojo.
+        let password_hash = match cambios.pin.as_deref() {
+            Some(pin) => Some(hash_pin(pin).map_err(AppError::validation)?),
+            None => None,
+        };
         let db = self.db.write().await;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -645,8 +654,11 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 return Err(AppError::conflict(MSG_ULTIMO_ADMINISTRADOR));
             }
 
-            // Datos de cuenta (Usuarios). El PIN sólo se actualiza si llega un hash nuevo.
-            if let Some(hash) = cambios.password_hash.clone() {
+            // RI-63: un id que no existe era un `Ok(true)` sin tocar nada.
+            let sin_fila = || AppError::not_found("Ese trabajador ya no existe. Actualiza la lista.");
+
+            // Datos de cuenta (Usuarios). El PIN sólo se actualiza si llega uno nuevo.
+            let usuarios = if let Some(hash) = password_hash {
                 db.execute(
                     r#"
                     UPDATE Usuarios
@@ -665,7 +677,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                     ],
                 )
                 .await
-                .map_err(db_err)?;
+                .map_err(db_err)?
             } else {
                 db.execute(
                     r#"
@@ -683,11 +695,14 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                     ],
                 )
                 .await
-                .map_err(db_err)?;
+                .map_err(db_err)?
+            };
+            if usuarios == 0 {
+                return Err(sin_fila());
             }
 
             // Datos laborales (Trabajadores).
-            db.execute(
+            let trabajadores = db.execute(
                 r#"
                 UPDATE Trabajadores
                    SET DNI = ?1, Telefono = ?2, Puesto = ?3, IBAN = ?4,
@@ -708,6 +723,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             )
             .await
             .map_err(db_err)?;
+            if trabajadores == 0 {
+                return Err(sin_fila());
+            }
 
             Ok(true)
         }
@@ -1090,8 +1108,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 }
 
 #[cfg(test)]
-mod tests_ultimo_administrador {
-    //! RI-62: editar una ficha no puede dejar el negocio sin ningún administrador activo.
+mod tests_edicion {
+    //! El alta y la edición de una ficha: no pueden dejar el negocio sin ningún administrador
+    //! activo (RI-62), y el PIN llega en claro y lo hashea el repositorio (RI-63).
 
     use std::sync::Arc;
 
@@ -1124,7 +1143,7 @@ mod tests_ultimo_administrador {
         repo.create_trabajador(TrabajadorNuevo {
             id_rol: rol.to_string(),
             email: email.to_string(),
-            password_hash: "hash".to_string(),
+            pin: "1234".to_string(),
             nombre: "Nombre".to_string(),
             apellido: None,
             estado: estado.to_string(),
@@ -1162,6 +1181,16 @@ mod tests_ultimo_administrador {
         rol: &str,
         estado: &str,
     ) -> Result<bool, AppError> {
+        editar_con_pin(repo, f, rol, estado, None).await
+    }
+
+    async fn editar_con_pin(
+        repo: &SqliteTrabajadoresRepository,
+        f: &Ficha,
+        rol: &str,
+        estado: &str,
+        pin: Option<&str>,
+    ) -> Result<bool, AppError> {
         repo.update_trabajador(
             &f.id_trabajador,
             TrabajadorCambios {
@@ -1178,10 +1207,25 @@ mod tests_ultimo_administrador {
                 numero_seguridad_social: None,
                 fecha_inicio_contrato: None,
                 fecha_fin_contrato: None,
-                password_hash: None,
+                pin: pin.map(str::to_string),
             },
         )
         .await
+    }
+
+    async fn hash_guardado(db: &Arc<Db>, f: &Ficha) -> String {
+        let conn = db.read().await;
+        let mut rows = conn
+            .query(
+                "SELECT Password_Hash FROM Usuarios WHERE ID_Usuario = ?1;",
+                vec![Value::Text(f.id_usuario.clone())],
+            )
+            .await
+            .unwrap();
+        match rows.next().await.unwrap().unwrap().get_value(0).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("se esperaba texto, había {otro:?}"),
+        }
     }
 
     async fn rol_y_estado(db: &Arc<Db>, f: &Ficha) -> (String, String) {
@@ -1252,6 +1296,47 @@ mod tests_ultimo_administrador {
 
         assert!(editar(&repo, &pepe, CAMARERO, "Inactivo").await.unwrap());
     }
+
+    /* RI-63: el PIN llega en claro y el hash lo hace el repositorio. */
+
+    #[tokio::test]
+    async fn el_alta_guarda_el_hash_del_pin_y_no_el_pin() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+
+        let hash = hash_guardado(&db, &ana).await;
+        assert_ne!(hash, "1234");
+        assert!(tpv_domain::login::verify_pin("1234", &hash).is_ok());
+    }
+
+    #[tokio::test]
+    async fn editar_con_pin_lo_cambia_y_sin_pin_no_lo_toca() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+
+        assert!(editar(&repo, &ana, ADMIN, "Activo").await.unwrap());
+        assert!(tpv_domain::login::verify_pin("1234", &hash_guardado(&db, &ana).await).is_ok());
+
+        assert!(editar_con_pin(&repo, &ana, ADMIN, "Activo", Some("987654")).await.unwrap());
+        let hash = hash_guardado(&db, &ana).await;
+        assert!(tpv_domain::login::verify_pin("987654", &hash).is_ok());
+        assert!(tpv_domain::login::verify_pin("1234", &hash).is_err());
+    }
+
+    #[tokio::test]
+    async fn editar_una_ficha_que_no_existe_es_un_error() {
+        // RI-63: era un `Ok(true)` sin haber tocado nada.
+        let (db, repo, _dir) = abrir().await;
+        alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        let fantasma = Ficha {
+            id_trabajador: "no-existe".into(),
+            id_usuario: "tampoco".into(),
+            email: "x@bar.test".into(),
+        };
+
+        let r = editar(&repo, &fantasma, CAMARERO, "Activo").await;
+        assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+    }
 }
 
 #[cfg(test)]
@@ -1321,7 +1406,7 @@ mod tests_cifrado {
         TrabajadorNuevo {
             id_rol: ROL_ADMIN.to_string(),
             email: email.to_string(),
-            password_hash: "hash".to_string(),
+            pin: "1234".to_string(),
             nombre: "Ada".to_string(),
             apellido: Some("Lovelace".to_string()),
             estado: "Activo".to_string(),

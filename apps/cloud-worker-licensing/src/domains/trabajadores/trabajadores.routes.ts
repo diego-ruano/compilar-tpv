@@ -12,6 +12,7 @@ import * as S from "./trabajadores.schemas";
 import { badRequest } from "../../server/utils/response";
 import { consulta, cuerpo } from "../../lib/validacion";
 import { apply, parseId } from "../../lib/rutas";
+import { hashPin } from "../login/login.crypto";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -53,7 +54,9 @@ trabajadoresRoutes.get("/:id", async (c) => {
 
 trabajadoresRoutes.post("/", cuerpo(S.trabajadorCreateSchema), async (c) => {
 	const datos = c.req.valid("json");
-	const id = await apply(c, cmd.createTrabajador(datos));
+	// RI-63: llega el PIN y el hash se hace aquí, como la Main en su SQLite.
+	const passwordHash = await hashPin(datos.pin);
+	const id = await apply(c, cmd.createTrabajador(datos, passwordHash));
 	return c.json({ ok: true, id_trabajador: id });
 });
 
@@ -67,7 +70,13 @@ trabajadoresRoutes.put("/:id", cuerpo(S.trabajadorUpdateSchema), async (c) => {
 		q.dejariaSinAdministrador(db, datos.id_usuario, datos.id_rol, datos.estado),
 	);
 	if (sinAdmin) return c.json({ error: "ultimo_administrador" }, 409);
-	await apply(c, cmd.updateTrabajador(id, datos));
+	const passwordHash = datos.pin ? await hashPin(datos.pin) : null;
+	const filas = await apply(c, cmd.updateTrabajador(id, datos, passwordHash));
+	// RI-63: un id que no existe respondía `ok`. En un reintento las cuentas llegan a `null` (el
+	// resultado guardado no lee la base): eso no es «no existe».
+	if (filas?.usuarios === 0 || filas?.trabajadores === 0) {
+		return c.json({ error: "trabajador_no_encontrado" }, 404);
+	}
 	return c.json({ ok: true });
 });
 

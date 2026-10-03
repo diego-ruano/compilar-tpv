@@ -56,7 +56,8 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
         let body = json!({
             "id_rol": data.id_rol,
             "email": data.email,
-            "password_hash": data.password_hash,
+            // RI-63: el PIN, no su hash: lo hashea el worker, como la Main en su SQLite.
+            "pin": data.pin,
             "nombre": data.nombre,
             "apellido": data.apellido,
             "estado": data.estado,
@@ -92,7 +93,7 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
             "numero_seguridad_social": cambios.numero_seguridad_social,
             "fecha_inicio_contrato": cambios.fecha_inicio_contrato,
             "fecha_fin_contrato": cambios.fecha_fin_contrato,
-            "password_hash": cambios.password_hash,
+            "pin": cambios.pin,
         });
         let _: JsonValue = self
             .client

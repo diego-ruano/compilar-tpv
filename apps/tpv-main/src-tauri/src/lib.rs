@@ -2099,7 +2099,6 @@ pub fn run() {
             commands::login::setup_pendiente,
             commands::login::login_user,
             commands::login::logout,
-            commands::login::hash_password,
             commands::login::get_today_punch_status,
             commands::login::punch,
             commands::login::complete_initial_setup,
@@ -2783,6 +2782,12 @@ mod tests_exenciones_del_gate {
                 "vr_restar_stock",
                 "descuenta stock fuera de un cobro, sin su rastro en `Lote_Consumos` (el cobro ya lo \
                  descuenta en su propia transacción, STOCK-01)",
+            ),
+            (
+                "hash_password",
+                "con él la pantalla volvería a mandar un hash hecho fuera, que el backend guarda sin \
+                 poder exigir la política del PIN ni las iteraciones; el alta y la edición reciben el \
+                 PIN y lo hashean dentro (RI-63)",
             ),
         ] {
             assert!(

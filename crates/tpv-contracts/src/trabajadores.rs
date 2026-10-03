@@ -186,12 +186,15 @@ pub struct SetPredeterminadoInput {
 }
 
 /// Alta de trabajador (crea Usuario + Trabajador en local). Local-First.
+///
+/// RI-63: llega el PIN, no su hash. Lo hashea quien lo guarda (la Main o el worker), que así puede
+/// exigir la política del PIN y no guarda un hash con las iteraciones que alguien quiera.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorCreateInput {
     pub id_rol: String,
     pub email: String,
-    pub password_hash: String,
+    pub pin: String,
     pub nombre: String,
     #[serde(default)]
     #[ts(optional)]
@@ -220,8 +223,9 @@ pub struct TrabajadorCreateInput {
     pub fecha_fin_contrato: Option<String>,
 }
 
-/// Edición de trabajador (actualiza Usuario + Trabajador). `password_hash` opcional:
-/// si viene, cambia el PIN; si no, se mantiene el actual. Local-First.
+/// Edición de trabajador (actualiza Usuario + Trabajador). `pin` opcional: si viene, cambia el
+/// PIN; si no, se mantiene el actual. Como en el alta, llega el PIN y no su hash (RI-63).
+/// Local-First.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorUpdateInput {
@@ -257,5 +261,5 @@ pub struct TrabajadorUpdateInput {
     pub fecha_fin_contrato: Option<String>,
     #[serde(default)]
     #[ts(optional)]
-    pub password_hash: Option<String>,
+    pub pin: Option<String>,
 }

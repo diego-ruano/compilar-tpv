@@ -27,6 +27,14 @@ function idField(field: string) {
 	return z.coerce.string().trim().min(1, `${field} invalido`);
 }
 
+/**
+ * RI-63: el PIN que se puede teclear en el login, de 4 a 6 cifras (espejo de `pin_de_teclado` en
+ * `tpv-domain/src/login.rs`). Llega en claro y lo hashea la ruta con `hashPin`: así no se guarda un
+ * hash hecho fuera, con las iteraciones que sea.
+ */
+const PIN_DE_TECLADO = /^\d{4,6}$/;
+const MSG_PIN = "El PIN tiene que tener entre 4 y 6 cifras";
+
 function normalizeEstado(v: unknown): string {
 	return String(v ?? "").trim().toLowerCase() === "inactivo"
 		? "Inactivo"
@@ -54,7 +62,10 @@ export const trabajadorCreateSchema = z
 	.object({
 		id_rol: idField("id_rol"),
 		email: requiredString("email"),
-		password_hash: requiredString("password_hash"),
+		pin: z
+			.string()
+			.transform((s) => s.trim())
+			.refine((s) => PIN_DE_TECLADO.test(s), MSG_PIN),
 		nombre: requiredString("nombre"),
 		apellido: z.any().optional().nullable(),
 		estado: z.any(),
@@ -94,7 +105,13 @@ export const trabajadorUpdateSchema = z
 		puesto: z.any().optional().nullable(),
 		fecha_inicio_contrato: z.any().optional().nullable(),
 		fecha_fin_contrato: z.any().optional().nullable(),
-		password_hash: z.any().optional().nullable(),
+		// Vacío o ausente: el PIN no se cambia.
+		pin: z
+			.string()
+			.optional()
+			.nullable()
+			.transform((v) => cleanOrNull(v))
+			.refine((v) => v === null || PIN_DE_TECLADO.test(v), MSG_PIN),
 	})
 	.transform((v) => ({
 		...v,
@@ -104,7 +121,6 @@ export const trabajadorUpdateSchema = z
 		puesto: cleanOrNull(v.puesto),
 		fecha_inicio_contrato: cleanOrNull(v.fecha_inicio_contrato),
 		fecha_fin_contrato: cleanOrNull(v.fecha_fin_contrato),
-		password_hash: cleanOrNull(v.password_hash),
 	}));
 
 export const asignacionCreateSchema = z
@@ -169,7 +185,7 @@ type NullableTrabajadorCreateFields =
 
 type NullableTrabajadorUpdateFields =
 	| NullableTrabajadorCreateFields
-	| "password_hash";
+	| "pin";
 
 type NullableAsignacionFields = "hora_inicio" | "hora_fin" | "notas";
 

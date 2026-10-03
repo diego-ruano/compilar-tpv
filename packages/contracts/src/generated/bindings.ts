@@ -1528,8 +1528,11 @@ export type TrabajadorCardStats = { id_trabajador: string, nombre: string, rol: 
 
 /**
  * Alta de trabajador (crea Usuario + Trabajador en local). Local-First.
+ *
+ * RI-63: llega el PIN, no su hash. Lo hashea quien lo guarda (la Main o el worker), que así puede
+ * exigir la política del PIN y no guarda un hash con las iteraciones que alguien quiera.
  */
-export type TrabajadorCreateInput = { id_rol: string, email: string, password_hash: string, nombre: string, apellido?: string, estado: string, dni?: string, telefono?: string, puesto?: string, iban?: string, numero_seguridad_social?: string, fecha_inicio_contrato?: string, fecha_fin_contrato?: string, };
+export type TrabajadorCreateInput = { id_rol: string, email: string, pin: string, nombre: string, apellido?: string, estado: string, dni?: string, telefono?: string, puesto?: string, iban?: string, numero_seguridad_social?: string, fecha_inicio_contrato?: string, fecha_fin_contrato?: string, };
 
 export type TrabajadorDetailArgs = { id_trabajador: string, };
 
@@ -1542,10 +1545,11 @@ export type TrabajadorRow = { ID_Trabajador: string, ID_Usuario: string, Nombre:
 export type TrabajadorUI = { ID_Trabajador: string, ID_Usuario: string, Nombre: string, Apellido: string | null, Puesto: string | null, Email: string, };
 
 /**
- * Edición de trabajador (actualiza Usuario + Trabajador). `password_hash` opcional:
- * si viene, cambia el PIN; si no, se mantiene el actual. Local-First.
+ * Edición de trabajador (actualiza Usuario + Trabajador). `pin` opcional: si viene, cambia el
+ * PIN; si no, se mantiene el actual. Como en el alta, llega el PIN y no su hash (RI-63).
+ * Local-First.
  */
-export type TrabajadorUpdateInput = { id_trabajador: string, id_usuario: string, id_rol: string, email: string, nombre: string, apellido?: string, estado: string, dni?: string, telefono?: string, puesto?: string, iban?: string, numero_seguridad_social?: string, fecha_inicio_contrato?: string, fecha_fin_contrato?: string, password_hash?: string, };
+export type TrabajadorUpdateInput = { id_trabajador: string, id_usuario: string, id_rol: string, email: string, nombre: string, apellido?: string, estado: string, dni?: string, telefono?: string, puesto?: string, iban?: string, numero_seguridad_social?: string, fecha_inicio_contrato?: string, fecha_fin_contrato?: string, pin?: string, };
 
 export type TrabajadoresStatsArgs = { range: StatsRange, };
 

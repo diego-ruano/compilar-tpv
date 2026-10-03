@@ -7,6 +7,7 @@ use tpv_contracts::trabajadores::{
     TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow,
     TrabajadorUpdateInput, TurnoRow,
 };
+use tpv_domain::login::pin_de_teclado;
 use tpv_domain::trabajadores::{
     limpiar_opcional, normalizar_estado, requerido, AsignacionCambios, AsignacionNueva,
     TrabajadorCambios, TrabajadorNuevo,
@@ -120,7 +121,9 @@ pub async fn copy_semana_asignaciones(
 ) -> AppResult<bool> {
     let from_monday = requerido(&input.from_monday, "from_monday").map_err(AppError::validation)?;
     let to_monday = requerido(&input.to_monday, "to_monday").map_err(AppError::validation)?;
-    let overwrite = input.overwrite.unwrap_or(true);
+    // RI-63: sin decirlo no se borra la semana de destino. Era `true` aquí y `false` en el worker
+    // (`copySemanaSchema`); la pantalla lo manda siempre explícito.
+    let overwrite = input.overwrite.unwrap_or(false);
 
     repo.copy_semana(from_monday, to_monday, overwrite).await
 }
@@ -144,14 +147,14 @@ pub async fn create_trabajador(
     }
 
     let email = requerido(&input.email, "email").map_err(AppError::validation)?;
-    let password_hash =
-        requerido(&input.password_hash, "password_hash").map_err(AppError::validation)?;
+    // RI-63: llega el PIN y se valida aquí; lo hashea el adaptador que lo guarda.
+    let pin = pin_de_teclado(&input.pin).map_err(AppError::validation)?;
     let nombre = requerido(&input.nombre, "nombre").map_err(AppError::validation)?;
 
     let data = TrabajadorNuevo {
         id_rol: input.id_rol,
         email,
-        password_hash,
+        pin,
         nombre,
         apellido: limpiar_opcional(input.apellido),
         estado: normalizar_estado(&input.estado),
@@ -182,6 +185,11 @@ pub async fn update_trabajador(
 
     let email = requerido(&input.email, "email").map_err(AppError::validation)?;
     let nombre = requerido(&input.nombre, "nombre").map_err(AppError::validation)?;
+    // RI-63: un PIN vacío es «no se cambia»; uno que no se puede teclear en el login, un error.
+    let pin = match limpiar_opcional(input.pin) {
+        Some(p) => Some(pin_de_teclado(&p).map_err(AppError::validation)?),
+        None => None,
+    };
 
     let cambios = TrabajadorCambios {
         id_usuario: input.id_usuario,
@@ -197,7 +205,7 @@ pub async fn update_trabajador(
         numero_seguridad_social: limpiar_opcional(input.numero_seguridad_social),
         fecha_inicio_contrato: limpiar_opcional(input.fecha_inicio_contrato),
         fecha_fin_contrato: limpiar_opcional(input.fecha_fin_contrato),
-        password_hash: limpiar_opcional(input.password_hash),
+        pin,
     };
 
     repo.update_trabajador(&input.id_trabajador, cambios).await
@@ -230,6 +238,11 @@ mod tests {
 
     #[test]
     fn limpiar_opcional_conserva_unicode() {
-        assert_eq!(limpiar_opcional(Some("  PeÃ±a Ã�lvarez  ".into())), Some("PeÃ±a Ã�lvarez".into()));
+        // RI-63: el literal estuvo mal codificado («PeÃ±a…»): probaba otros caracteres, no la eñe ni
+        // la tilde de un apellido.
+        assert_eq!(
+            limpiar_opcional(Some("  Peña Álvarez  ".into())),
+            Some("Peña Álvarez".into())
+        );
     }
 }

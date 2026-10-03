@@ -171,7 +171,7 @@ function getErrorMessage(e: unknown) {
 
 /**
  * Local-First: edición de trabajador contra el comando Tauri `trabajadores_update`
- * (actualiza Usuario + Trabajador de forma atómica). El PIN sólo se cambia si llega hash.
+ * (actualiza Usuario + Trabajador de forma atómica). El PIN sólo se cambia si llega uno.
  */
 async function updateTrabajadorRemote(payload: {
   idTrabajador: string;
@@ -188,7 +188,7 @@ async function updateTrabajadorRemote(payload: {
   numeroSeguridadSocial?: string | null;
   fechaInicioContrato?: string | null;
   fechaFinContrato?: string | null;
-  passwordHash?: string | null;
+  pin?: string | null;
 }): Promise<boolean> {
   const body: Record<string, any> = {
     idTrabajador: payload.idTrabajador,
@@ -219,9 +219,8 @@ async function updateTrabajadorRemote(payload: {
     fecha_fin_contrato: payload.fechaFinContrato ?? null,
   };
 
-  if (payload.passwordHash != null && String(payload.passwordHash).trim() !== "") {
-    body.passwordHash = payload.passwordHash;
-    body.password_hash = payload.passwordHash;
+  if (payload.pin != null && String(payload.pin).trim() !== "") {
+    body.pin = payload.pin;
   }
 
   const ok = await invokeClient<boolean>("trabajadores_update", {
@@ -240,7 +239,8 @@ async function updateTrabajadorRemote(payload: {
       numero_seguridad_social: body.numero_seguridad_social,
       fecha_inicio_contrato: body.fecha_inicio_contrato,
       fecha_fin_contrato: body.fecha_fin_contrato,
-      password_hash: body.password_hash,
+      // RI-63: el PIN, no su hash: lo hashea el backend, que así exige la política del PIN.
+      pin: body.pin,
     },
   });
 
@@ -360,21 +360,14 @@ function EditTrabajador() {
     if (!email.trim()) return setError("El email es obligatorio");
     if (!nombre.trim()) return setError("El nombre es obligatorio");
 
-    if (pinNuevo.trim() && pinNuevo.trim().length < 4) {
-      return setError("El PIN nuevo debe tener al menos 4 dígitos");
+    // RI-63: el teclado del login sólo admite de 4 a 6 cifras (el backend lo exige igual).
+    if (pinNuevo.trim() && !/^\d{4,6}$/.test(pinNuevo.trim())) {
+      return setError("El PIN nuevo tiene que tener entre 4 y 6 cifras");
     }
 
     setSaving(true);
 
     try {
-      let passwordHash: string | undefined;
-
-      if (pinNuevo.trim()) {
-        passwordHash = await invoke<string>("hash_password", {
-          pin: pinNuevo.trim(),
-        });
-      }
-
       const ok = await updateTrabajadorRemote({
         idTrabajador,
         idUsuario,
@@ -390,7 +383,7 @@ function EditTrabajador() {
         numeroSeguridadSocial: normalizeNullable(numeroSS),
         fechaInicioContrato: normalizeNullable(fechaInicioContrato),
         fechaFinContrato: indefinido ? null : normalizeNullable(fechaFinContrato),
-        passwordHash,
+        pin: pinNuevo.trim() || null,
       });
 
       if (!ok) {
@@ -508,15 +501,16 @@ function EditTrabajador() {
               <label className="text-sm font-medium">PIN nuevo (opcional)</label>
               <input
                 value={pinNuevo}
-                onChange={(e) => setPinNuevo(e.target.value.replace(/\D/g, ""))}
+                onChange={(e) => setPinNuevo(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 inputMode="numeric"
                 pattern="[0-9]*"
+                maxLength={6}
                 className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="Dejar vacío para no cambiar"
                 autoComplete="off"
               />
               <p className="text-xs text-fg-subtle">
-                Si lo dejas vacío, se mantiene el PIN actual.
+                De 4 a 6 cifras. Si lo dejas vacío, se mantiene el PIN actual.
               </p>
             </div>
           </div>
