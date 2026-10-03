@@ -22,6 +22,56 @@ use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_i64, v_string};
 use crate::util::new_id;
 
+/// RI-62: ¿este cambio deja el negocio sin ningún administrador activo? Sí cuando el usuario que se
+/// edita es administrador activo, deja de serlo (otro rol, o `Inactivo`) y no queda ningún otro.
+/// Con cero administradores se cierran Configuración, Cuentas, los cierres, Fiscal y el alta de
+/// personal, y no hay salida desde la aplicación: la recuperación del PIN por correo es para un
+/// administrador (LOGIN-07) y la pantalla de recuperación sólo sale con cero usuarios.
+///
+/// Sólo se mira el paso de «hay» a «no hay»: si ya no había ninguno (una base rara), editar a
+/// cualquier otro sigue funcionando. Mismo SQL en el worker (`dejariaSinAdministrador`).
+///
+/// ?1 = ID_Usuario editado, ?2 = su ID_Rol nuevo, ?3 = su Estado nuevo.
+const SQL_DEJARIA_SIN_ADMINISTRADOR: &str = r#"
+    SELECT
+      EXISTS (
+        SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+        WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+      )
+      AND NOT (
+        ?3 = 'Activo'
+        AND EXISTS (SELECT 1 FROM Roles WHERE ID_Rol = ?2 AND Nombre_Rol = 'Administrador')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+        WHERE u.ID_Usuario <> ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+      );
+"#;
+
+const MSG_ULTIMO_ADMINISTRADOR: &str = "No se puede dejar el negocio sin ningún administrador \
+     activo. Da antes el rol de Administrador a otra persona.";
+
+async fn dejaria_sin_administrador<C: Reader>(
+    conn: &C,
+    cambios: &TrabajadorCambios,
+) -> AppResult<bool> {
+    let mut rows = conn
+        .query(
+            SQL_DEJARIA_SIN_ADMINISTRADOR,
+            vec![
+                Value::Text(cambios.id_usuario.clone()),
+                Value::Text(cambios.id_rol.clone()),
+                Value::Text(cambios.estado.clone()),
+            ],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(match rows.next().await.map_err(db_err)? {
+        Some(row) => v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0) != 0,
+        None => false,
+    })
+}
+
 pub struct SqliteTrabajadoresRepository {
     db: Arc<Db>,
     /// TRAB-03: cifra DNI/IBAN/nº de la Seguridad Social antes de que el valor entre en la
@@ -589,6 +639,12 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
 
         let res: AppResult<bool> = async {
+            // RI-62: dentro de la transacción y con el cerrojo de escritura, así que nadie puede
+            // degradar al otro administrador entre la comprobación y el UPDATE.
+            if dejaria_sin_administrador(&db, &cambios).await? {
+                return Err(AppError::conflict(MSG_ULTIMO_ADMINISTRADOR));
+            }
+
             // Datos de cuenta (Usuarios). El PIN sólo se actualiza si llega un hash nuevo.
             if let Some(hash) = cambios.password_hash.clone() {
                 db.execute(
@@ -1030,6 +1086,171 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_ultimo_administrador {
+    //! RI-62: editar una ficha no puede dejar el negocio sin ningún administrador activo.
+
+    use std::sync::Arc;
+
+    use libsql::Value;
+    use tpv_application::error::AppError;
+    use tpv_application::ports::trabajadores::TrabajadoresRepository;
+    use tpv_domain::trabajadores::{TrabajadorCambios, TrabajadorNuevo};
+
+    use super::SqliteTrabajadoresRepository;
+    use crate::db::{Db, Reader};
+
+    const ADMIN: &str = "00000000-0000-7000-8000-000000000001";
+    const CAMARERO: &str = "00000000-0000-7000-8000-000000000002";
+
+    struct Ficha {
+        id_trabajador: String,
+        id_usuario: String,
+        email: String,
+    }
+
+    async fn abrir() -> (Arc<Db>, SqliteTrabajadoresRepository, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("ultimo_admin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let repo = SqliteTrabajadoresRepository::new(db.clone());
+        (db, repo, dir)
+    }
+
+    async fn alta(db: &Arc<Db>, repo: &SqliteTrabajadoresRepository, email: &str, rol: &str, estado: &str) -> Ficha {
+        repo.create_trabajador(TrabajadorNuevo {
+            id_rol: rol.to_string(),
+            email: email.to_string(),
+            password_hash: "hash".to_string(),
+            nombre: "Nombre".to_string(),
+            apellido: None,
+            estado: estado.to_string(),
+            dni: None,
+            telefono: None,
+            puesto: None,
+            iban: None,
+            numero_seguridad_social: None,
+            fecha_inicio_contrato: None,
+            fecha_fin_contrato: None,
+        })
+        .await
+        .unwrap();
+
+        let conn = db.read().await;
+        let mut rows = conn
+            .query(
+                "SELECT t.ID_Trabajador, u.ID_Usuario FROM Trabajadores t \
+                 JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario WHERE u.Email = ?1;",
+                vec![Value::Text(email.to_string())],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let txt = |i: i32| match row.get_value(i).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("se esperaba texto, había {otro:?}"),
+        };
+        Ficha { id_trabajador: txt(0), id_usuario: txt(1), email: email.to_string() }
+    }
+
+    async fn editar(
+        repo: &SqliteTrabajadoresRepository,
+        f: &Ficha,
+        rol: &str,
+        estado: &str,
+    ) -> Result<bool, AppError> {
+        repo.update_trabajador(
+            &f.id_trabajador,
+            TrabajadorCambios {
+                id_usuario: f.id_usuario.clone(),
+                id_rol: rol.to_string(),
+                email: f.email.clone(),
+                nombre: "Nombre editado".to_string(),
+                apellido: None,
+                estado: estado.to_string(),
+                dni: None,
+                telefono: None,
+                puesto: None,
+                iban: None,
+                numero_seguridad_social: None,
+                fecha_inicio_contrato: None,
+                fecha_fin_contrato: None,
+                password_hash: None,
+            },
+        )
+        .await
+    }
+
+    async fn rol_y_estado(db: &Arc<Db>, f: &Ficha) -> (String, String) {
+        let conn = db.read().await;
+        let mut rows = conn
+            .query(
+                "SELECT ID_Rol, Estado FROM Usuarios WHERE ID_Usuario = ?1;",
+                vec![Value::Text(f.id_usuario.clone())],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let txt = |i: i32| match row.get_value(i).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("se esperaba texto, había {otro:?}"),
+        };
+        (txt(0), txt(1))
+    }
+
+    #[tokio::test]
+    async fn el_unico_administrador_no_puede_quitarse_el_rol_ni_desactivarse() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+
+        let r = editar(&repo, &ana, CAMARERO, "Activo").await;
+        assert!(matches!(r, Err(AppError::Conflict(_))), "{r:?}");
+        let r = editar(&repo, &ana, ADMIN, "Inactivo").await;
+        assert!(matches!(r, Err(AppError::Conflict(_))), "{r:?}");
+
+        // Rechazado entero: ni el rol, ni el estado, ni el resto de la ficha.
+        assert_eq!(rol_y_estado(&db, &ana).await, (ADMIN.into(), "Activo".into()));
+    }
+
+    #[tokio::test]
+    async fn editar_al_unico_administrador_sin_quitarle_nada_funciona() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+
+        assert!(editar(&repo, &ana, ADMIN, "Activo").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn con_otro_administrador_activo_si_se_puede() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        alta(&db, &repo, "luis@bar.test", ADMIN, "Activo").await;
+
+        assert!(editar(&repo, &ana, CAMARERO, "Activo").await.unwrap());
+        assert_eq!(rol_y_estado(&db, &ana).await, (CAMARERO.into(), "Activo".into()));
+    }
+
+    #[tokio::test]
+    async fn un_administrador_inactivo_no_cuenta_como_el_otro() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        alta(&db, &repo, "luis@bar.test", ADMIN, "Inactivo").await;
+
+        let r = editar(&repo, &ana, ADMIN, "Inactivo").await;
+        assert!(matches!(r, Err(AppError::Conflict(_))), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn sin_administradores_de_partida_editar_a_otro_no_se_bloquea() {
+        // La regla mira el paso de «hay» a «no hay»: una base que ya no tenía ninguno no deja a
+        // nadie sin poder editar al resto.
+        let (db, repo, _dir) = abrir().await;
+        let pepe = alta(&db, &repo, "pepe@bar.test", CAMARERO, "Activo").await;
+
+        assert!(editar(&repo, &pepe, CAMARERO, "Inactivo").await.unwrap());
     }
 }
 

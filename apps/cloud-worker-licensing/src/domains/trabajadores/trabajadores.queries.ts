@@ -74,6 +74,39 @@ export async function existeAsignacionTurno(
 	return rows(rs).length > 0;
 }
 
+/**
+ * RI-62: ¿editar esta ficha deja el negocio sin ningún administrador activo? Sí cuando el usuario es
+ * administrador activo, deja de serlo (otro rol, o `Inactivo`) y no queda ningún otro. Sólo se mira
+ * el paso de «hay» a «no hay». El porqué, en `SQL_DEJARIA_SIN_ADMINISTRADOR` de
+ * `tpv-infra-sqlite/src/trabajadores.rs`: es el mismo SQL y tiene que seguir siéndolo.
+ */
+export async function dejariaSinAdministrador(
+	db: Client,
+	idUsuario: string,
+	idRolNuevo: string,
+	estadoNuevo: string,
+): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `
+			SELECT
+				EXISTS (
+					SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+					WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+				)
+				AND NOT (
+					?3 = 'Activo'
+					AND EXISTS (SELECT 1 FROM Roles WHERE ID_Rol = ?2 AND Nombre_Rol = 'Administrador')
+				)
+				AND NOT EXISTS (
+					SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol = u.ID_Rol
+					WHERE u.ID_Usuario <> ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+				) AS sin_admin;
+		`,
+		args: [idUsuario, idRolNuevo, estadoNuevo],
+	});
+	return Number(rows(rs)[0]?.sin_admin ?? 0) !== 0;
+}
+
 function ymdToDate(ymd: string): Date {
 	const [y, m, d] = ymd.split("-").map(Number);
 	return new Date(Date.UTC(y, m - 1, d));

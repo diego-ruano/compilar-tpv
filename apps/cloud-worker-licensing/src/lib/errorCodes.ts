@@ -191,6 +191,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	// Operativa
 	email_duplicado: "Ya hay un cliente con ese correo.",
 	asignacion_duplicada: "Ese trabajador ya tiene ese turno asignado ese día.",
+	// RI-62: el mismo texto que da la Main (`MSG_ULTIMO_ADMINISTRADOR`).
+	ultimo_administrador:
+		"No se puede dejar el negocio sin ningún administrador activo. Da antes el rol de Administrador a otra persona.",
 	trabajador_inexistente: "Alguno de los trabajadores elegidos ya no existe. Actualiza la lista.",
 	comanda_has_paid_lines: "No se puede borrar: el ticket tiene líneas cobradas.",
 	no_valid_pending_details: "Esas líneas ya no están pendientes de cobro. Actualiza el ticket.",

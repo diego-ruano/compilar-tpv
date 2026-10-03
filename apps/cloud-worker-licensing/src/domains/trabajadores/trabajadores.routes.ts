@@ -61,6 +61,12 @@ trabajadoresRoutes.put("/:id", cuerpo(S.trabajadorUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_trabajador invalido");
 	const datos = c.req.valid("json");
+	// RI-62: comprobación previa, como TRAB-04: los pasos de una transacción del DO no pueden
+	// abortarla según lo que lean. La Main la hace dentro de su transacción.
+	const sinAdmin = await tenantQuery(c, (db) =>
+		q.dejariaSinAdministrador(db, datos.id_usuario, datos.id_rol, datos.estado),
+	);
+	if (sinAdmin) return c.json({ error: "ultimo_administrador" }, 409);
 	await apply(c, cmd.updateTrabajador(id, datos));
 	return c.json({ ok: true });
 });

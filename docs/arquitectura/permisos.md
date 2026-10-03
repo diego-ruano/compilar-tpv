@@ -77,6 +77,12 @@ encargado.
 `verifactu_estado`, `verifactu_bloque_ticket` y `verifactu_declaracion_responsable` no piden rol: los
 leen la escalera de avisos, la impresión y cualquiera que quiera ver la declaración.
 
+**Siempre queda un administrador activo.** Editar una ficha no puede quitarle el rol ni desactivar
+al último (RI-62): sin ninguno, todo lo de esta tabla queda cerrado y no hay salida desde la
+aplicación, porque la recuperación del PIN por correo es para un administrador. La Main lo comprueba
+dentro de la transacción de `update_trabajador`. El worker lo comprueba antes de aplicar
+(`ultimo_administrador`), con el mismo SQL.
+
 ### Basta con estar identificado
 
 - **Cobrar**: `cobrar_detalles` (mesas) y `vr_cobrar_fraccionado` (venta rápida). El cobrador se
