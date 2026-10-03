@@ -60,28 +60,87 @@ fn now_iso() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+/// RI-05: la entrada más antigua que todavía cuenta como **jornada en curso**. La jornada se busca
+/// por su hora de entrada y no por su `Fecha`: quien entra a las 18:00 y sale a la 01:30 ficha la
+/// salida al día siguiente, y buscarla por `Fecha = hoy` no la encontraba. Peor: la pantalla, al
+/// no ver nada abierto hoy, mandaba una ENTRADA nueva a la 01:30, que se cerraba con la salida de la
+/// noche siguiente como una jornada de dieciséis horas.
+///
+/// Pasado este margen el fichaje se da por olvidado: ni la entrada ni la salida lo ven, y lo cierra
+/// [`auto_close_stale_punches`] como incidencia. Son 16 h y no 24 porque una jornada de día con la
+/// salida olvidada (entrada a las 09:00) tiene que haber caducado a la mañana siguiente; si no, el
+/// primer fichaje del día cerraría la de ayer con veinticuatro horas trabajadas. 16 h cubren de
+/// sobra un turno de noche o uno doble.
+///
+/// La `Fecha` del fichaje sigue siendo la del día en que se entró. El worker usa el mismo margen
+/// (`INICIO_MAS_ANTIGUO` en `login.queries.ts`).
+const INICIO_MAS_ANTIGUO: &str = "datetime('now','localtime','-16 hours')";
+
+/// El fichaje en curso del usuario (ver [`INICIO_MAS_ANTIGUO`]), sea del día que sea: su id y su
+/// `Fecha`.
+async fn fichaje_en_curso<C: Reader>(
+    conn: &C,
+    id_usuario: &str,
+) -> AppResult<Option<(String, String)>> {
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT ID_Fichaje, Fecha FROM Fichajes \
+                 WHERE ID_Usuario = ?1 \
+                   AND Estado = 'ABIERTO' \
+                   AND Hora_Entrada IS NOT NULL \
+                   AND Hora_Salida IS NULL \
+                   AND Hora_Entrada >= {INICIO_MAS_ANTIGUO} \
+                 ORDER BY Hora_Entrada DESC, ID_Fichaje DESC \
+                 LIMIT 1;"
+            ),
+            vec![Value::Text(id_usuario.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+
+    let Some(row) = rows.next().await.map_err(db_err)? else {
+        return Ok(None);
+    };
+    let id = match row.get_value(0).map_err(db_err)? {
+        Value::Text(s) => s,
+        _ => return Err(AppError::repository("ID_Fichaje inválido")),
+    };
+    let fecha = match row.get_value(1).map_err(db_err)? {
+        Value::Text(s) => s,
+        _ => return Err(AppError::repository("Fecha de fichaje inválida")),
+    };
+    Ok(Some((id, fecha)))
+}
+
 /// TRAB-01: cierre automático de jornadas colgadas. Si un trabajador ficha entrada y olvida la
 /// salida, su fichaje queda `ABIERTO` indefinidamente y corrompe las horas trabajadas que lee
-/// `stats`. Esta función cierra los fichajes ABIERTOS **de días anteriores** marcándolos
-/// `Cerrado_Automatico=1` + `Cierre_Motivo` + `Incidencia` (para revisión manual) y **sin inventar
-/// hora de salida** (`Hora_Salida` queda NULL). Solo afecta a `Fecha < hoy`, así que la jornada en
-/// curso del día no se toca. Es idempotente (los ya cerrados no vuelven a entrar) y va por el
-/// `Writer`, de modo que el cambio se captura en el outbox y se replica a la nube.
+/// `stats`. Esta función cierra los fichajes ABIERTOS que ya **no son jornada en curso** (entrada
+/// anterior a [`INICIO_MAS_ANTIGUO`]) marcándolos `Cerrado_Automatico=1` + `Cierre_Motivo` +
+/// `Incidencia` (para revisión manual) y **sin inventar hora de salida** (`Hora_Salida` queda
+/// NULL). Es idempotente (los ya cerrados no vuelven a entrar) y va por el `Writer`, de modo que el
+/// cambio se captura en el outbox y se replica a la nube.
+///
+/// RI-05: antes cerraba todo lo de `Fecha < hoy`, y como el job corre cada hora, el turno de noche
+/// se cerraba solo pasada la medianoche, antes de que nadie pudiera fichar su salida. El fallback a
+/// `Fecha` es para una fila sin hora de entrada, que sólo puede venir de fuera de `exec_punch`.
 ///
 /// La ejecuta el job `fichajes_colgados` (RI-01): antes era un paso de `init_main`, que en un
 /// arranque normal no llega a ejecutarse, y además un TPV que no se reinicia en días no cerraría
 /// nunca nada. Por eso pregunta antes de escribir: `execute()` sube al outbox toda escritura, toque
 /// filas o no, y un `UPDATE` a ciegas cada hora sería una operación vacía por hora en la nube.
 pub async fn auto_close_stale_punches(db: &Db) -> AppResult<u64> {
-    const COLGADO: &str = "Estado = 'ABIERTO' \
-              AND Hora_Salida IS NULL \
-              AND Fecha < date('now','localtime')";
+    let colgado = format!(
+        "Estado = 'ABIERTO' \
+         AND Hora_Salida IS NULL \
+         AND COALESCE(Hora_Entrada, Fecha) < {INICIO_MAS_ANTIGUO}"
+    );
 
     let conn = db.write().await;
     let hay = {
         let mut rows = conn
             .query(
-                &format!("SELECT EXISTS (SELECT 1 FROM Fichajes WHERE {COLGADO});"),
+                &format!("SELECT EXISTS (SELECT 1 FROM Fichajes WHERE {colgado});"),
                 Vec::<Value>::new(),
             )
             .await
@@ -97,17 +156,15 @@ pub async fn auto_close_stale_punches(db: &Db) -> AppResult<u64> {
 
     let affected = conn
         .execute(
-            r#"
-            UPDATE Fichajes
-            SET Estado = 'CERRADO',
-                Cerrado_Automatico = 1,
-                Cierre_Motivo = 'Cierre automático: jornada sin fichar salida',
-                Incidencia = 'Falta fichar la salida'
-            WHERE Estado = 'ABIERTO'
-              AND Hora_Salida IS NULL
-              AND Fecha < date('now','localtime');
-            "#,
-            vec![],
+            &format!(
+                "UPDATE Fichajes \
+                 SET Estado = 'CERRADO', \
+                     Cerrado_Automatico = 1, \
+                     Cierre_Motivo = 'Cierre automático: jornada sin fichar salida', \
+                     Incidencia = 'Falta fichar la salida' \
+                 WHERE {colgado};"
+            ),
+            Vec::<Value>::new(),
         )
         .await
         .map_err(db_err)?;
@@ -398,23 +455,8 @@ pub(crate) async fn exec_punch<C: Writer>(
 
     let res: AppResult<PunchStatus> = async {
         if tipo == "entrada" {
-            let mut o = conn
-                .query(
-                    r#"
-                    SELECT ID_Fichaje
-                    FROM Fichajes
-                    WHERE ID_Usuario=?1 AND Fecha=?2
-                      AND Estado='ABIERTO'
-                      AND Hora_Entrada IS NOT NULL
-                      AND Hora_Salida IS NULL
-                    LIMIT 1;
-                    "#,
-                    vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.clone())],
-                )
-                .await
-                .map_err(db_err)?;
-
-            if o.next().await.map_err(db_err)?.is_some() {
+            // RI-05: el abierto que bloquea puede ser de ayer (un turno de noche sin cerrar).
+            if fichaje_en_curso(conn, id_usuario).await?.is_some() {
                 return Err(AppError::conflict(
                     "Tienes un fichaje abierto. Ficha salida antes de fichar entrada.",
                 ));
@@ -497,33 +539,15 @@ pub(crate) async fn exec_punch<C: Writer>(
             )
             .await
             .map_err(db_err)?;
-        } else {
-            let mut o = conn
-                .query(
-                    r#"
-                    SELECT ID_Fichaje, Parte
-                    FROM Fichajes
-                    WHERE ID_Usuario=?1 AND Fecha=?2
-                      AND Estado='ABIERTO'
-                      AND Hora_Entrada IS NOT NULL
-                      AND Hora_Salida IS NULL
-                    ORDER BY Parte DESC
-                    LIMIT 1;
-                    "#,
-                    vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.clone())],
-                )
-                .await
-                .map_err(db_err)?;
 
-            let Some(row) = o.next().await.map_err(db_err)? else {
+            build_punch_status(conn, id_usuario, &fecha).await
+        } else {
+            // RI-05: la jornada en curso, aunque empezara ayer. El estado que se devuelve es el
+            // de SU día, que es el que se acaba de completar.
+            let Some((id_f, fecha_jornada)) = fichaje_en_curso(conn, id_usuario).await? else {
                 return Err(AppError::conflict(
                     "No hay fichaje abierto para cerrar (primero ficha entrada).",
                 ));
-            };
-
-            let id_f = match row.get_value(0).map_err(db_err)? {
-                Value::Text(s) => s,
-                _ => return Err(AppError::repository("ID_Fichaje inválido")),
             };
 
             conn.execute(
@@ -540,9 +564,9 @@ pub(crate) async fn exec_punch<C: Writer>(
             )
             .await
             .map_err(db_err)?;
-        }
 
-        build_punch_status(conn, id_usuario, &fecha).await
+            build_punch_status(conn, id_usuario, &fecha_jornada).await
+        }
     }
     .await;
 
@@ -659,9 +683,16 @@ impl LoginRepository for SqliteLoginRepository {
         })
     }
 
+    /// RI-05: con una jornada en curso, el estado es el de SU día aunque haya empezado ayer. La
+    /// pantalla decide si el siguiente fichaje es entrada o salida mirando este estado; con el de
+    /// hoy, a la 01:30 un turno de noche aparecía sin empezar y se fichaba una entrada nueva.
     async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus> {
         let db = self.db.read().await;
-        build_punch_status(&db, id_usuario, &today_ymd()).await
+        let fecha = match fichaje_en_curso(&db, id_usuario).await? {
+            Some((_, fecha)) => fecha,
+            None => today_ymd(),
+        };
+        build_punch_status(&db, id_usuario, &fecha).await
     }
 
     async fn intentos_fallidos(&self, id_usuario: &str) -> AppResult<i64> {
@@ -873,13 +904,35 @@ mod tests_fichajes_colgados {
         (db, dir)
     }
 
-    async fn fichaje(db: &Db, id: &str, fecha: &str) {
+    /// Un fichaje abierto que entró hace `horas` horas. La hora se calcula en SQL, relativa a
+    /// «ahora», para que el test no dependa de a qué hora se corra; la `Fecha` es la de la entrada.
+    async fn abierto_hace(db: &Db, id: &str, horas: i64) {
         let w = db.write().await;
         w.raw()
             .execute(
-                "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Estado)
-                 VALUES (?1, 'u1', ?2, 1, ?2 || ' 09:00:00', 'ABIERTO');",
-                vec![Value::Text(id.into()), Value::Text(fecha.into())],
+                &format!(
+                    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Estado)
+                     VALUES (?1, 'u1', date('now','localtime','-{horas} hours'), 1,
+                             datetime('now','localtime','-{horas} hours'), 'ABIERTO');"
+                ),
+                vec![Value::Text(id.into())],
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Un fichaje abierto con `Fecha` de AYER que entró hace `horas` horas: el turno de noche
+    /// visto después de medianoche, sea cual sea la hora a la que corra el test.
+    async fn abierto_ayer_hace(db: &Db, id: &str, horas: i64) {
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                &format!(
+                    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Estado)
+                     VALUES (?1, 'u1', date('now','localtime','-1 day'), 1,
+                             datetime('now','localtime','-{horas} hours'), 'ABIERTO');"
+                ),
+                vec![Value::Text(id.into())],
             )
             .await
             .unwrap();
@@ -910,35 +963,115 @@ mod tests_fichajes_colgados {
         v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(0)
     }
 
-    fn dia(delta: i64) -> String {
-        (Local::now().date_naive() + chrono::Duration::days(delta))
-            .format("%Y-%m-%d")
-            .to_string()
-    }
-
     #[tokio::test]
-    async fn cierra_la_de_ayer_y_deja_la_de_hoy() {
+    async fn cierra_la_olvidada_y_deja_la_en_curso() {
+        // Con más de 24 h entre las dos, sus `Fecha` nunca coinciden (UNIQUE usuario-fecha-parte).
         let (db, _dir) = db_con_usuario().await;
-        fichaje(&db, "ayer", &dia(-1)).await;
-        fichaje(&db, "hoy", &dia(0)).await;
+        abierto_hace(&db, "olvidada", 30).await;
+        abierto_hace(&db, "en_curso", 2).await;
 
         assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 1);
-        assert_eq!(estado(&db, "ayer").await, ("CERRADO".into(), 1));
-        assert_eq!(estado(&db, "hoy").await, ("ABIERTO".into(), 0));
+        assert_eq!(estado(&db, "olvidada").await, ("CERRADO".into(), 1));
+        assert_eq!(estado(&db, "en_curso").await, ("ABIERTO".into(), 0));
 
         // El cierre replica: la nube tiene que ver la misma jornada cerrada.
         assert_eq!(outbox(&db).await, 1);
     }
 
     #[tokio::test]
+    async fn no_cierra_un_turno_de_noche_por_ser_de_ayer() {
+        // RI-05: con `Fecha < hoy`, el job (cada hora) cerraba el turno de noche nada más pasar la
+        // medianoche, antes de que su salida se pudiera fichar.
+        let (db, _dir) = db_con_usuario().await;
+        abierto_ayer_hace(&db, "noche", 3).await;
+
+        assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 0);
+        assert_eq!(estado(&db, "noche").await, ("ABIERTO".into(), 0));
+    }
+
+    #[tokio::test]
     async fn sin_nada_colgado_no_sube_nada_a_la_nube() {
         // Corre cada hora: un `UPDATE` a ciegas serían veinticuatro operaciones vacías al día.
         let (db, _dir) = db_con_usuario().await;
-        fichaje(&db, "hoy", &dia(0)).await;
+        abierto_hace(&db, "en_curso", 2).await;
 
         assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 0);
         assert_eq!(auto_close_stale_punches(&db).await.unwrap(), 0);
         assert_eq!(outbox(&db).await, 0);
+    }
+
+    /* RI-05: el turno de noche, de la entrada a la salida. */
+
+    fn ayer() -> String {
+        (Local::now().date_naive() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn la_salida_cierra_la_jornada_que_empezo_ayer() {
+        let (db, _dir) = db_con_usuario().await;
+        abierto_ayer_hace(&db, "noche", 3).await;
+
+        let status = {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "salida").await.unwrap()
+        };
+
+        assert_eq!(estado(&db, "noche").await, ("CERRADO".into(), 0));
+        // El estado devuelto es el de la jornada que se cierra, no el de hoy (que está vacío).
+        assert_eq!(status.fecha, ayer());
+        assert_eq!(status.partes.len(), 1);
+        assert!(status.partes[0].salida.is_some());
+    }
+
+    #[tokio::test]
+    async fn el_estado_ensena_la_jornada_en_curso_de_ayer() {
+        // Es lo que mira la pantalla para elegir entre entrada y salida: con el estado de hoy, a
+        // la 01:30 mandaba una ENTRADA nueva.
+        let (db, _dir) = db_con_usuario().await;
+        abierto_ayer_hace(&db, "noche", 3).await;
+
+        let status = SqliteLoginRepository::new(db.clone())
+            .get_today_punch_status("u1")
+            .await
+            .unwrap();
+
+        assert_eq!(status.fecha, ayer());
+        assert_eq!(status.partes.len(), 1);
+        assert!(status.partes[0].entrada.is_some());
+        assert!(status.partes[0].salida.is_none());
+    }
+
+    #[tokio::test]
+    async fn la_entrada_ve_la_jornada_en_curso_de_ayer() {
+        let (db, _dir) = db_con_usuario().await;
+        abierto_ayer_hace(&db, "noche", 3).await;
+
+        let r = {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "entrada").await
+        };
+
+        assert!(matches!(r, Err(AppError::Conflict(_))), "{r:?}");
+        assert_eq!(estado(&db, "noche").await, ("ABIERTO".into(), 0));
+    }
+
+    #[tokio::test]
+    async fn una_jornada_olvidada_no_impide_fichar_ni_la_cierra_la_salida() {
+        // Pasado el margen, el fichaje es del auto-cierre: ni bloquea la entrada de hoy ni se lo
+        // lleva la salida (que le pondría veinte horas de trabajo).
+        // 30 h y no 20: su `Fecha` nunca es hoy, y así no es la Parte 1 de la entrada que se ficha.
+        let (db, _dir) = db_con_usuario().await;
+        abierto_hace(&db, "olvidada", 30).await;
+
+        {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "entrada").await.unwrap();
+            exec_punch(&w, "u1", "salida").await.unwrap();
+        }
+
+        assert_eq!(estado(&db, "olvidada").await, ("ABIERTO".into(), 0));
     }
 }
 

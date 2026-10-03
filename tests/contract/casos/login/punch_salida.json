@@ -8,8 +8,7 @@
   ],
   "entrada": {
     "id_usuario": "user-1",
-    "tipo": "salida",
-    "id_fichaje": "fich-1"
+    "tipo": "salida"
   },
   "snapshot": {
     "Fichajes": "SELECT ID_Fichaje, ID_Usuario, Parte, Estado, Cerrado_Automatico, Cierre_Motivo, Incidencia, CASE WHEN Hora_Salida IS NOT NULL THEN 1 ELSE 0 END AS Tiene_Salida FROM Fichajes"

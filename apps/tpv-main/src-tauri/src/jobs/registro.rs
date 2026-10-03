@@ -434,7 +434,8 @@ async fn caja_sin_cerrar(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Cierra las jornadas de días anteriores que quedaron sin fichar la salida (TRAB-01). Las marca
+/// Cierra las jornadas que quedaron sin fichar la salida (TRAB-01): las que entraron hace más de
+/// 16 h, no las de días anteriores, para no llevarse un turno de noche en curso (RI-05). Las marca
 /// como incidencia para revisarlas, sin inventar la hora de salida.
 async fn fichajes_colgados(app: AppHandle) -> Result<(), String> {
     let db = app

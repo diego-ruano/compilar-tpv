@@ -1,0 +1,24 @@
+{
+  "Fichajes": [
+    {
+      "Cerrado_Automatico": 0,
+      "Cierre_Motivo": null,
+      "Estado": "CERRADO",
+      "ID_Fichaje": "fich-noche",
+      "ID_Usuario": "user-1",
+      "Incidencia": null,
+      "Parte": 1,
+      "Tiene_Salida": 1
+    },
+    {
+      "Cerrado_Automatico": 0,
+      "Cierre_Motivo": null,
+      "Estado": "ABIERTO",
+      "ID_Fichaje": "fich-olvidada",
+      "ID_Usuario": "user-1",
+      "Incidencia": null,
+      "Parte": 1,
+      "Tiene_Salida": 0
+    }
+  ]
+}

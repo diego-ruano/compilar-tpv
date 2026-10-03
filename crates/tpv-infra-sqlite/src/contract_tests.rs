@@ -339,6 +339,7 @@ casos_de_contrato! {
     login__set_turno_partido,
     login__punch_entrada,
     login__punch_salida,
+    login__punch_salida_turno_noche,
     horarios__copiar_semana,
     horarios__create_asignacion,
     horarios__update_asignacion,

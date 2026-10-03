@@ -150,9 +150,29 @@ export async function applyInitialSetupDirect(
 	});
 }
 
-export async function punchStatus(db: Client, idUsuario: string): Promise<PunchStatus> {
+/**
+ * RI-05: la entrada más antigua que todavía cuenta como jornada en curso. La jornada se busca por su
+ * hora de entrada y no por su `Fecha`, porque el turno de noche ficha la salida al día siguiente.
+ * Pasado este margen el fichaje se da por olvidado y lo cierra el job `fichajes_colgados` de la Main.
+ * El porqué de las 16 h, en `INICIO_MAS_ANTIGUO` de `tpv-infra-sqlite/src/login.rs`: es el mismo
+ * valor y tiene que seguir siéndolo.
+ */
+const INICIO_MAS_ANTIGUO = "datetime('now','localtime','-16 hours')";
+
+/** «Hoy» de quien pregunta (REV-03: `tenantQuery` fija su hora antes de ejecutar). */
+export async function hoy(db: Client): Promise<string> {
 	const fechaRs = await db.execute("SELECT date('now','localtime') AS fecha;");
-	const fecha = String(rows(fechaRs)[0]?.fecha ?? "");
+	return String(rows(fechaRs)[0]?.fecha ?? "");
+}
+
+/**
+ * RI-05: con una jornada en curso, el estado es el de SU día aunque empezara ayer. La pantalla elige
+ * entre entrada y salida mirando este estado; con el de hoy, a la 01:30 un turno de noche aparecía
+ * sin empezar y se fichaba una entrada nueva.
+ */
+export async function punchStatus(db: Client, idUsuario: string): Promise<PunchStatus> {
+	const enCurso = await getOpenPunch(db, idUsuario);
+	const fecha = enCurso ? enCurso.fecha : await hoy(db);
 	return punchStatusForDate(db, idUsuario, fecha);
 }
 
@@ -195,27 +215,35 @@ export async function punchStatusForDate(
 	};
 }
 
-export async function getOpenPunch(db: Client, idUsuario: string, fecha: string) {
+/** La jornada en curso del usuario (ver `INICIO_MAS_ANTIGUO`), sea del día que sea. */
+export async function getOpenPunch(
+	db: Client,
+	idUsuario: string,
+): Promise<{ id_fichaje: string; fecha: string } | null> {
 	const rs = await db.execute({
 		sql: `
-			SELECT ID_Fichaje AS id_fichaje, Parte AS parte
+			SELECT ID_Fichaje AS id_fichaje, Fecha AS fecha
 			FROM Fichajes
-			WHERE ID_Usuario=?1 AND Fecha=?2
+			WHERE ID_Usuario=?1
 				AND Estado='ABIERTO'
 				AND Hora_Entrada IS NOT NULL
 				AND Hora_Salida IS NULL
-			ORDER BY Parte DESC
+				AND Hora_Entrada >= ${INICIO_MAS_ANTIGUO}
+			ORDER BY Hora_Entrada DESC, ID_Fichaje DESC
 			LIMIT 1;
 		`,
-		args: [idUsuario, fecha],
+		args: [idUsuario],
 	});
-	return rows(rs)[0] ?? null;
+	const r = rows(rs)[0];
+	return r ? { id_fichaje: String(r.id_fichaje), fecha: String(r.fecha) } : null;
 }
 
 export async function nextPunchPart(db: Client, idUsuario: string, fecha: string) {
+	// RI-05: el abierto que bloquea puede ser de ayer (un turno de noche sin cerrar).
+	if (await getOpenPunch(db, idUsuario)) {
+		throw new Error("Tienes un fichaje abierto. Ficha salida antes de fichar entrada.");
+	}
 	const status = await punchStatusForDate(db, idUsuario, fecha);
-	const open = status.partes.find((p) => p.estado === "ABIERTO" && p.entrada && !p.salida);
-	if (open) throw new Error("Tienes un fichaje abierto. Ficha salida antes de fichar entrada.");
 	const p1 = status.partes.find((p) => p.parte === 1);
 	if (!p1) return 1;
 	if (!p1.salida) throw new Error("La Parte 1 no esta cerrada. Ficha salida primero.");

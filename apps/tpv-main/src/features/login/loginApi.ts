@@ -82,7 +82,7 @@ function pad2(n: number): string {
     return String(n).padStart(2, "0");
 }
 
-function todayLocalYmd(): string {
+export function todayLocalYmd(): string {
     const d = new Date();
     return [d.getFullYear(), pad2(d.getMonth() + 1), pad2(d.getDate())].join("-");
 }
@@ -268,12 +268,14 @@ export async function punch(params: {
 export async function setTurnoPartidoHoy(params: {
     idUsuario: string;
     turnoPartido: boolean;
+    /** El día de la jornada que se está viendo (RI-05: puede ser ayer, en un turno de noche). */
+    fecha?: string;
 }): Promise<string> {
     const data = await invokeClient<any>("set_turno_partido_hoy", {
         args: {
             id_usuario: params.idUsuario,
             turno_partido: Boolean(params.turnoPartido),
-            fecha: todayLocalYmd(),
+            fecha: params.fecha ?? todayLocalYmd(),
         },
     });
     return typeof data === "string"

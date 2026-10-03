@@ -20,6 +20,7 @@ import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import { punchEntrada, punchSalida, setTurnoPartido } from "../src/domains/login/login.commands";
+import { getOpenPunch } from "../src/domains/login/login.queries";
 import {
 	anularPago,
 	createGasto,
@@ -253,6 +254,8 @@ import casoLoginPunchEntrada from "../../../tests/contract/casos/login/punch_ent
 import goldenLoginPunchEntrada from "../../../tests/contract/golden/login/punch_entrada.json";
 import casoLoginPunchSalida from "../../../tests/contract/casos/login/punch_salida.json";
 import goldenLoginPunchSalida from "../../../tests/contract/golden/login/punch_salida.json";
+import casoLoginPunchSalidaNoche from "../../../tests/contract/casos/login/punch_salida_turno_noche.json";
+import goldenLoginPunchSalidaNoche from "../../../tests/contract/golden/login/punch_salida_turno_noche.json";
 import casoLoginTurno from "../../../tests/contract/casos/login/set_turno_partido.json";
 import goldenLoginTurno from "../../../tests/contract/golden/login/set_turno_partido.json";
 import casoHorCreate from "../../../tests/contract/casos/horarios/create_asignacion.json";
@@ -336,6 +339,11 @@ const CASOS = [
 	{ nombre: "horarios_copiar_semana", caso: casoHorariosCopiar, golden: goldenHorariosCopiar },
 	{ nombre: "login_punch_entrada", caso: casoLoginPunchEntrada, golden: goldenLoginPunchEntrada },
 	{ nombre: "login_punch_salida", caso: casoLoginPunchSalida, golden: goldenLoginPunchSalida },
+	{
+		nombre: "login_punch_salida_turno_noche",
+		caso: casoLoginPunchSalidaNoche,
+		golden: goldenLoginPunchSalidaNoche,
+	},
 	{ nombre: "login_set_turno_partido", caso: casoLoginTurno, golden: goldenLoginTurno },
 	{ nombre: "horarios_create_asignacion", caso: casoHorCreate, golden: goldenHorCreate },
 	{ nombre: "horarios_update_asignacion", caso: casoHorUpdate, golden: goldenHorUpdate },
@@ -818,12 +826,17 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					}),
 				);
 			} else {
+				// RI-05: el fichaje que se cierra lo elige la misma consulta que usa la ruta, y no el
+				// caso: qué jornada cierra la salida (la de ayer en un turno de noche, nunca una
+				// olvidada) es parte de lo que se contrasta con `exec_punch`.
+				const enCurso = await getOpenPunch(db, caso.entrada.id_usuario);
+				if (!enCurso) throw new Error("login.punch: no hay jornada en curso que cerrar");
 				aplicar(
 					hub,
 					sql,
 					punchSalida({
 						id_usuario: caso.entrada.id_usuario,
-						id_fichaje: caso.entrada.id_fichaje,
+						id_fichaje: enCurso.id_fichaje,
 					}),
 				);
 			}

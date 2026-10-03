@@ -1,0 +1,17 @@
+{
+  "descripcion": "RI-05: la salida de un turno de noche. El fichaje en curso es de AYER (entró hace 3 h, antes de medianoche) y la salida tiene que cerrarlo a él, no buscar uno de hoy. El otro abierto entró hace 50 h: es una jornada olvidada, la salida no la toca (le pondría cincuenta horas de trabajo) y se queda para el cierre automático. Las horas se calculan en SQL relativas a 'ahora', así que el caso vale a cualquier hora del día; las 50 h hacen que su Fecha nunca sea ayer, que chocaría con el UNIQUE (usuario, fecha, parte).",
+  "comando": "login.punch",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico) VALUES ('fich-noche', 'user-1', date('now','localtime','-1 day'), 1, datetime('now','localtime','-3 hours'), NULL, 'ABIERTO', 0);",
+    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico) VALUES ('fich-olvidada', 'user-1', date('now','localtime','-50 hours'), 1, datetime('now','localtime','-50 hours'), NULL, 'ABIERTO', 0);"
+  ],
+  "entrada": {
+    "id_usuario": "user-1",
+    "tipo": "salida"
+  },
+  "snapshot": {
+    "Fichajes": "SELECT ID_Fichaje, ID_Usuario, Parte, Estado, Cerrado_Automatico, Cierre_Motivo, Incidencia, CASE WHEN Hora_Salida IS NOT NULL THEN 1 ELSE 0 END AS Tiene_Salida FROM Fichajes"
+  }
+}

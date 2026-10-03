@@ -43,7 +43,7 @@ un fallo parcial.
 | `interruptores` | 5 min | 20 s | MainOperativa | — | Pregunta a la nube qué está apagado |
 | `verifactu_remitir` | 60 s | 60 s | MainOperativa | `verifactu_remitir` | Remite a la AEAT ([verifactu.md](verifactu.md#la-remisión)) |
 | `avisos` | 10 min | 60 s | MainOperativa | — | Tareas vencidas y reservas próximas |
-| `fichajes_colgados` | 1 h | 30 s | MainOperativa | — | Cierra como incidencia las jornadas de días anteriores sin salida |
+| `fichajes_colgados` | 1 h | 30 s | MainOperativa | — | Cierra como incidencia, sin hora de salida, las jornadas abiertas que entraron hace más de 16 h. Hasta entonces son la jornada en curso, aunque sean de ayer: un turno de noche ficha la salida al día siguiente |
 | `caja_sin_cerrar` | 1 h | 2 min | MainOperativa | — | Avisa si la caja lleva más de 20 h abierta ([caja.md](caja.md)) |
 | `stock_negativo` | 10 min | 90 s | MainOperativa | — | Avisa de productos con stock total negativo |
 | `imagenes` | 15 min | 3 min | Siempre | — | Red de seguridad de la subida de imágenes a R2 (el camino normal es el evento) |

@@ -145,4 +145,42 @@ describe("el fichaje de madrugada", () => {
 			expect(delServidor.fecha).toBe(hoyDeLaBase);
 		});
 	});
+
+	/**
+	 * RI-05: el turno de noche. Lo que decide si la jornada sigue en curso es la hora de entrada
+	 * contra un margen (`datetime('now','localtime','-16 hours')`), y ese «ahora» tiene que ser el de
+	 * quien ficha también cuando lleva modificadores detrás.
+	 */
+	it("a la 01:30 sigue en curso la jornada que entró ayer a las 18:00", async () => {
+		await enElHub("lecturas-hora-local-noche", async (hub: any) => {
+			const sqlStorage = hub.state.storage.sql;
+			crearEsquemaTenant(sqlStorage);
+			const db = clienteSobre(sqlStorage);
+
+			sqlStorage.exec(
+				`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+				 SELECT 'u1', ID_Rol, 'ana@bar.test', 'x', 'Ana' FROM Roles WHERE Nombre_Rol='Camarero';`,
+			);
+			sqlStorage.exec(
+				`INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico)
+				 VALUES ('noche', 'u1', '2020-01-01', 1, '2020-01-01 18:00:00', NULL, 'ABIERTO', 0);`,
+			);
+
+			// La pantalla elige entre entrada y salida con este estado: tiene que ser el de ayer.
+			const deMadrugada = await punchStatus(
+				conLaHoraDeQuienPregunta(db, "2020-01-02 01:30:00"),
+				"u1",
+			);
+			expect(deMadrugada.fecha).toBe("2020-01-01");
+			expect(deMadrugada.partes).toHaveLength(1);
+
+			// Al mediodía siguiente (18 h después) ya no es una jornada en curso, sino una olvidada.
+			const alMediodia = await punchStatus(
+				conLaHoraDeQuienPregunta(db, "2020-01-02 12:00:00"),
+				"u1",
+			);
+			expect(alMediodia.fecha).toBe("2020-01-02");
+			expect(alMediodia.partes).toHaveLength(0);
+		});
+	});
 });

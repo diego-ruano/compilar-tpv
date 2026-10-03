@@ -297,12 +297,12 @@ loginRoutes.post("/punch", cuerpo(S.punchSchema), async (c) => {
 	// — las llevó, y nadie las leía. Un valor del cuerpo es cualquier cosa; `X-Client-Now` es el
 	// reloj del equipo que ficha, el mismo que en la Main escribe el fichaje, y llega con su
 	// guardia de deriva.
-	const fecha = await tenantQuery(c, async (db) => {
-		const status = await q.punchStatus(db, datos.id_usuario);
-		return status.fecha;
-	});
-
+	//
+	// RI-05: la fecha del estado que se devuelve es la de la jornada fichada. Una entrada abre la de
+	// hoy; una salida cierra la jornada en curso, que en un turno de noche empezó ayer.
+	let fecha: string;
 	if (datos.tipo === "entrada") {
+		fecha = await tenantQuery(c, (db) => q.hoy(db));
 		const parte = await tenantQuery(c, (db) =>
 			q.nextPunchPart(db, datos.id_usuario, fecha),
 		);
@@ -315,17 +315,16 @@ loginRoutes.post("/punch", cuerpo(S.punchSchema), async (c) => {
 			}),
 		);
 	} else {
-		const open = await tenantQuery(c, (db) =>
-			q.getOpenPunch(db, datos.id_usuario, fecha),
-		);
+		const open = await tenantQuery(c, (db) => q.getOpenPunch(db, datos.id_usuario));
 		if (!open) {
 			return c.json({ error: "No hay fichaje abierto para cerrar (primero ficha entrada)." }, 409);
 		}
+		fecha = open.fecha;
 		await apply(
 			c,
 			cmd.punchSalida({
 				id_usuario: datos.id_usuario,
-				id_fichaje: String(open.id_fichaje),
+				id_fichaje: open.id_fichaje,
 			}),
 		);
 	}

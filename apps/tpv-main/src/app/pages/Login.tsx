@@ -31,6 +31,7 @@ import {
     getTodayPunchStatus,
     punch as punchApi,
     setTurnoPartidoHoy,
+    todayLocalYmd,
     type DbUser,
     type PunchStatus,
 } from "../../features/login/loginApi";
@@ -136,6 +137,8 @@ export default function Login() {
     );
 
     const turnoPartido = punchStatus?.turno_partido === 1;
+    // RI-05: con un turno de noche en curso, el estado es el de la jornada que empezó ayer.
+    const jornadaDeAyer = Boolean(punchStatus?.fecha) && punchStatus?.fecha !== todayLocalYmd();
 
     const hasEntrada1 = Boolean(p1?.entrada);
     const hasSalida1 = Boolean(p1?.salida);
@@ -285,6 +288,7 @@ export default function Login() {
             await setTurnoPartidoHoy({
                 idUsuario: selectedUserId,
                 turnoPartido: checked,
+                fecha: punchStatus?.fecha,
             });
             await refreshPunch(selectedUserId);
             toast.success(
@@ -786,7 +790,9 @@ export default function Login() {
                                 )}
                             >
                                 <div className="rounded-3xl border border-border bg-surface-2 p-4 text-sm text-fg-muted">
-                                    <p className="font-semibold text-fg">Fichaje de hoy</p>
+                                    <p className="font-semibold text-fg">
+                                        {jornadaDeAyer ? "Jornada de ayer" : "Fichaje de hoy"}
+                                    </p>
 
                                     {loadingPunch ? (
                                         <p className="mt-1 text-fg-muted">Comprobando...</p>
@@ -800,7 +806,9 @@ export default function Login() {
                                                     onChange={conAviso((e) => handleTurnoPartidoToggle(e.target.checked))}
                                                     disabled={!selectedUserId}
                                                 />
-                                                <span className="text-sm text-fg-muted">Hoy tienes turno partido</span>
+                                                <span className="text-sm text-fg-muted">
+                                                    {jornadaDeAyer ? "Ayer tenías turno partido" : "Hoy tienes turno partido"}
+                                                </span>
                                             </label>
 
                                             <div className="mt-3 space-y-3">
