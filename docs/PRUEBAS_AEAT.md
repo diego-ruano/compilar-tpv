@@ -39,9 +39,9 @@ pip install xmlschema          # la primera vez
 pnpm verifactu:validar-xml
 ```
 
-Genera **13 muestras** (alta simplificada, con destinatario, varios tipos de IVA, exenta, `F3`,
+Genera **12 muestras** (alta simplificada, con destinatario, varios tipos de IVA, al 0 %, `F3`,
 anulación, subsanación, operación de otro día…) y las valida contra los XSD de
-`crates/tpv-infra-aeat/esquemas/`, descargados de la sede sin tocar. Las 13 tienen que pasar; el
+`crates/tpv-infra-aeat/esquemas/`, descargados de la sede sin tocar. Las 12 tienen que pasar; el
 script está probado en negativo (si se rompe un campo a mano, falla).
 
 Para ver el XML sin validarlo: `cargo run -q -p tpv-infra-aeat --example muestras_xml`.
@@ -201,8 +201,6 @@ Emite registros válidos, manipula su fila y compara el código que devuelve la 
   (la cuota es lo que falta hasta el total) y sus tablas de golden.
 - `sanear_texto` quita esos caracteres aunque la AEAT los acepte escapados en ese campo: el error
   1287 lleva el nombre del campo como parámetro y puede aplicar a otros.
-- Una línea exenta con `TipoImpositivo` (error 1238) no se puede provocar: `escribir_detalle` no sabe
-  construirla.
 
 Dos cosas sobre el orden de validación de la AEAT: los errores de formato (`1xxx`) van antes que los
 de contenido (`2xxx`), y dentro de éstos la huella (2000) va primero, así que manipular un campo que

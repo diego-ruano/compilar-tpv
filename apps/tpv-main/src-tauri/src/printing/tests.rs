@@ -81,20 +81,6 @@ mod fixtures {
             cantidad,
             precio_unitario: eur(precio),
             iva_percent: iva,
-            exento: false,
-            causa_exencion: None,
-        }
-    }
-
-    /// Una línea vendida EXENTA de IVA (FISCAL-01). No es lo mismo que vendida al 0 %.
-    pub fn linea_exenta(precio: f64, cantidad: u32, causa: &str) -> PrintTicketLine {
-        PrintTicketLine {
-            nombre: "Exento".into(),
-            cantidad,
-            precio_unitario: eur(precio),
-            iva_percent: None,
-            exento: true,
-            causa_exencion: Some(causa.into()),
         }
     }
 
@@ -105,8 +91,6 @@ mod fixtures {
             cantidad: 1,
             precio_unitario: eur(1.1),
             iva_percent: None,
-            exento: false,
-            causa_exencion: None,
         }
     }
 
@@ -195,12 +179,9 @@ mod tests_desglose_iva {
         a == eur(euros)
     }
 
-    /// Los tres números de un tramo sujeto, o pánico si es exento.
+    /// Los tres números de un tramo.
     fn sujeta(t: &TramoIva) -> (f64, Dinero, Dinero) {
-        match t {
-            TramoIva::Sujeta { tipo, base, cuota } => (*tipo, *base, *cuota),
-            TramoIva::Exenta { .. } => panic!("se esperaba un tramo sujeto"),
-        }
+        (t.tipo, t.base, t.cuota)
     }
 
     #[test]
@@ -255,7 +236,7 @@ mod tests_desglose_iva {
 
         assert_eq!(d.len(), 2);
         // Los dos del 21 suman 22 € con IVA.
-        let (_, base, cuota) = sujeta(d.iter().find(|t| matches!(t, TramoIva::Sujeta { tipo, .. } if cerca(*tipo, 21.0))).unwrap());
+        let (_, base, cuota) = sujeta(d.iter().find(|t| cerca(t.tipo, 21.0)).unwrap());
         assert!(cerca_eur(base + cuota, 22.0));
     }
 
@@ -277,29 +258,15 @@ mod tests_desglose_iva {
     }
 
     #[test]
-    fn una_linea_exenta_es_otra_clase_de_tramo_y_no_un_cero_por_ciento() {
-        // FISCAL-01. El payload lleva la exención congelada y tiene que llegar al desglose como
-        // tal: si se colara como un tramo sujeto al 0 %, el registro diría `CalificacionOperacion`
-        // donde la norma exige `OperacionExenta`, que es otra afirmación legal.
-        let p = payload(10.0, vec![linea_de(11.0, 1, None), linea_exenta(5.0, 1, "E1")]);
-        let d = desglose_iva(&p);
-
-        assert_eq!(d.len(), 2);
-        assert!(matches!(d[0], TramoIva::Sujeta { .. }));
-        assert_eq!(d[1], TramoIva::Exenta { causa: "E1".into(), base: eur(5.0) });
-    }
-
-    #[test]
-    fn el_ticket_imprime_la_base_exenta_sin_linea_de_iva() {
-        // Un tramo exento no tiene ninguna cifra de IVA que enseñar, y poner "IVA (0%) 0,00" sería
-        // decir en el papel justo lo contrario de lo que declara el registro.
-        let mut p = payload(10.0, vec![linea_de(11.0, 1, None), linea_exenta(5.0, 1, "E1")]);
+    fn el_ticket_con_dos_tipos_imprime_base_e_iva_de_cada_uno() {
+        let mut p = payload(10.0, vec![linea_de(11.0, 1, None), linea_de(12.1, 1, Some(21.0))]);
         p.show_base_and_iva = true;
         let bytes = build_ticket(&p, None);
 
-        assert!(contiene(&bytes, "BASE EXENTA (E1)"));
         assert!(contiene(&bytes, "BASE (10%)"));
-        assert!(!contiene(&bytes, "IVA (0%)"));
+        assert!(contiene(&bytes, "IVA (10%)"));
+        assert!(contiene(&bytes, "BASE (21%)"));
+        assert!(contiene(&bytes, "IVA (21%)"));
     }
 }
 
@@ -1557,8 +1524,6 @@ mod tests_secciones {
                 cantidad: 12,
                 precio_unitario: eur(24.5),
                 iva_percent: None,
-                exento: false,
-                causa_exencion: None,
             }];
 
             let bytes = build_ticket(&p, None);

@@ -23,15 +23,10 @@ no vale nada. **Caza**: un campo obligatorio que falta (`TipoHuella`), el orden 
 `sequence`, un importe con coma decimal, una fecha en `AAAA-MM-DD` en vez de `DD-MM-AAAA`, un
 `TipoFactura` que no está en la lista.
 
-**No caza** las validaciones de NEGOCIO, y una en particular conviene tenerla presente: una línea
-exenta que además informe `TipoImpositivo` **pasa el XSD**. El esquema pone `CalificacionOperacion`
-y `OperacionExenta` en un `<choice>`, pero `TipoImpositivo` va después y es opcional en los dos
-casos — la prohibición es del documento de validaciones (error 1238), no del esquema. Por eso hay
-un test unitario en `xml.rs` que la cubre: aquí no saltaría.
-
-Tampoco caza que el NIF exista en el censo, que la huella cuadre con lo que calcula la AEAT o que
-un F2 no pase de 3.000 €. Eso sólo lo dice el servidor. Aquí se cierra la parte que se puede cerrar
-sin red.
+**No caza** las validaciones de NEGOCIO, que son las del documento de validaciones y no las del
+esquema: que el NIF exista en el censo, que la huella cuadre con lo que calcula la AEAT o que un F2
+no pase de 3.000 €. Eso sólo lo dice el servidor. Aquí se cierra la parte que se puede cerrar sin
+red.
 
 Requisito: `pip install xmlschema`.
 """

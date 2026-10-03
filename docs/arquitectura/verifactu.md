@@ -71,21 +71,16 @@ Si el cobro pasa del límite y no trae destinatario, `emitir_cobro` devuelve
 `DatosFiscalesModal` en modo obligatorio. No hay botón para «dividir el cobro»: partir el pago de
 un mismo cliente para bajar del límite es fraccionar artificialmente una operación.
 
-### Exento no es lo mismo que IVA al 0 %
+### Todo tramo es sujeto
 
-El XSD pone `CalificacionOperacion` y `OperacionExenta` en un `<choice>`, y `TramoIva` es un enum
-por lo mismo:
+Cada tramo del desglose (`tpv_domain::ticket::TramoIva`, uno por tipo de IVA) va como sujeto y no
+exento: `CalificacionOperacion = S1` con su `TipoImpositivo` y su `CuotaRepercutida`. Un producto al
+0 % es eso mismo con tipo y cuota a cero, que también se informan (error 1208).
 
-| | En el producto | En el registro |
-|---|---|---|
-| Sujeto al 0 % | `IVA_Percent = 0` | `CalificacionOperacion = S1`, `TipoImpositivo = 0`, `CuotaRepercutida = 0.00` |
-| Exento | `Exento = 1`, `Causa_Exencion = E1…E6` | `OperacionExenta = causa` y **ni tipo ni cuota** (informarlos es el error 1238) |
-
-`Productos.Exento` y `Causa_Exencion` se congelan en `Detalle_Comanda` al vender, como el nombre, el
-precio y el tipo. El esquema obliga a que vayan juntos (`CHECK ((Exento = 1) = (Causa_Exencion IS
-NOT NULL))`); si una línea exenta llegara sin causa, el desglose usa `E1`
-(`CAUSA_EXENCION_POR_DEFECTO`). `xml.rs::escribir_detalle` no sabe escribir tipo y cuota en un tramo
-exento: la invariante no depende de que nadie la vigile.
+No hay tramos exentos (`OperacionExenta`). En hostelería la comida y la bebida sólo están exentas
+cuando las sirven a sus usuarios el propio hospital, el centro educativo o la entidad de asistencia
+social ([art. 20.Uno LIVA](https://www.boe.es/buscar/act.php?id=BOE-A-1992-28740)), no un bar; y la
+lotería va fuera del registro (ver *Fuera de alcance*).
 
 ---
 
@@ -451,7 +446,10 @@ Handy, el adaptador AEAT existe pero devuelve error, y el estado fiscal falla si
 
 - **TicketBAI** (País Vasco y Navarra) e **IGIC/IPSI** (Canarias, Ceuta y Melilla): `Impuesto` no se
   informa (IVA) y `ClaveRegimen` es siempre `01`.
-- La **lotería**: es un suplido, no un producto exento, y no entra en el registro.
+- La **lotería**: es un suplido, no un producto exento, y no entra en el registro
+  ([FAQ de desarrolladores de la AEAT](https://sede.agenciatributaria.gob.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/FAQs-Desarrolladores.pdf),
+  pregunta 22).
+- Las **operaciones exentas** (`OperacionExenta`, causas `E1`…`E6`): ver *Todo tramo es sujeto*.
 - La modalidad **NO VERI\*FACTU** (firma XAdES y registro de eventos).
 - **Varios obligados por instalación** (`TipoUsoPosibleMultiOT = N`) y **varias cajas por negocio**:
   la cadena asume una única Main.

@@ -32,7 +32,7 @@ logo → corte.**
   márgenes y `chars_per_line`. Nada se maqueta con anchos fijos: un nombre largo se trunca contra ese
   ancho.
 - **El IVA es por producto** (`Productos.IVA_Percent`, congelado en la línea). El pie lleva una línea de
-  base y cuota por tipo, y las exentas aparte. El `iva_percent` del payload es sólo el defecto.
+  base y cuota por tipo. El `iva_percent` del payload es sólo el defecto.
 - **La cuota es lo que falta hasta el total**: se redondea la base y la cuota se despeja. Base más IVA
   tienen que dar el total (0,39 € al 4 % es el primer caso en que redondear por separado falla). La AEAT
   no detecta una `CuotaTotal` descuadrada, así que esta regla y sus goldens son la única red.

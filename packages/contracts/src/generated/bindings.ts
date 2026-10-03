@@ -1061,16 +1061,7 @@ export type PrintTicketLine = { nombre: string, cantidad: number, precio_unitari
  * Viene congelado de `Detalle_Comanda`, no del producto: una reimpresión tiene que enseñar
  * el tipo del día de la venta.
  */
-iva_percent?: number, 
-/**
- * FISCAL-01: la línea se vendió EXENTA de IVA, que no es lo mismo que vendida al 0 %. Va
- * congelada como el tipo, y por lo mismo.
- */
-exento: boolean, 
-/**
- * `E1`..`E6`. Sólo se mira si `exento`.
- */
-causa_exencion?: string, };
+iva_percent?: number, };
 
 /**
  * Payload de impresión enviado desde el frontend. Lleva los datos del negocio + los flags de

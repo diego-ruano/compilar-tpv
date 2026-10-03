@@ -40,10 +40,6 @@ export type PrintableLine = {
      * pulsación). La reimpresión sí la trae: lee del cobro una línea que ya venía con su cantidad.
      */
     cantidad?: number;
-    /** FISCAL-01: la línea se vendió exenta de IVA. Congelado en la línea, como el tipo. */
-    exento?: boolean;
-    /** `E1`..`E6`. Sólo se mira si `exento`. */
-    causaExencion?: string | null;
 };
 
 type Modo = "completo" | "cobrado" | "seleccion";

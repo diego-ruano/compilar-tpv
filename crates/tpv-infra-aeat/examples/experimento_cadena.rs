@@ -87,8 +87,6 @@ fn main() {
                         lineas: vec![LineaTicket {
                             total_con_iva: Dinero::de_euros(12.10),
                             tipo_iva: 10.0,
-                            exento: false,
-                            causa_exencion: None,
                         }],
                         ..Default::default()
                     },

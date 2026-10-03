@@ -87,7 +87,7 @@ fn main() {
             for _ in 0..1000 {
                 let g = db.write().await;
                 vfdb::emitir_alta(&g, DatosFactura {
-                    lineas: vec![LineaTicket { total_con_iva: Dinero::de_euros(12.10), tipo_iva: 10.0, exento: false, causa_exencion: None }],
+                    lineas: vec![LineaTicket { total_con_iva: Dinero::de_euros(12.10), tipo_iva: 10.0 }],
                     ..Default::default()
                 }).await.unwrap();
             }
@@ -132,7 +132,7 @@ fn main() {
             let b = {
                 let g = db2.write().await;
                 vfdb::emitir_alta(&g, DatosFactura {
-                    lineas: vec![LineaTicket { total_con_iva: Dinero::de_euros(12.10), tipo_iva: 10.0, exento: false, causa_exencion: None }],
+                    lineas: vec![LineaTicket { total_con_iva: Dinero::de_euros(12.10), tipo_iva: 10.0 }],
                     ..Default::default()
                 }).await.unwrap()
             };

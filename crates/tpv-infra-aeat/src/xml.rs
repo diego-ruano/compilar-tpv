@@ -271,9 +271,8 @@ fn escribir_sistema(b: &mut String, sistema_json: &str) {
 
 /// Una línea del desglose (`DetalleType`), en el orden del XSD.
 ///
-/// El `choice` entre `CalificacionOperacion` y `OperacionExenta` es lo que separa «sujeta al 0 %» de
-/// «exenta», y son dos afirmaciones legales distintas. En una exenta está **prohibido** informar
-/// `TipoImpositivo` y `CuotaRepercutida` (error 1238): no van a cero, no van.
+/// Siempre sujeta y no exenta (`CalificacionOperacion`), con tipo y cuota: el TPV no emite tramos
+/// exentos (`tpv_domain::ticket`). Al 0 %, el tipo y la cuota también se informan (error 1208).
 fn escribir_detalle(b: &mut String, t: &serde_json::Value) {
     b.push_str("<sum1:DetalleDesglose>");
     // `Impuesto` no se informa: vacío se considera `01` (IVA), que es el caso. Canarias, Ceuta y
@@ -281,16 +280,10 @@ fn escribir_detalle(b: &mut String, t: &serde_json::Value) {
     // `ClaveRegimen` SÍ es obligatorio cuando el impuesto es IVA (error 1245).
     el(b, "ClaveRegimen", &campo_o(t, "ClaveRegimen", "01"));
 
-    let exenta = campo(t, "OperacionExenta");
-    if !exenta.is_empty() {
-        el(b, "OperacionExenta", &exenta);
-        el(b, "BaseImponibleOimporteNoSujeto", &campo(t, "BaseImponibleOimporteNoSujeto"));
-    } else {
-        el(b, "CalificacionOperacion", &campo_o(t, "CalificacionOperacion", "S1"));
-        el(b, "TipoImpositivo", &campo(t, "TipoImpositivo"));
-        el(b, "BaseImponibleOimporteNoSujeto", &campo(t, "BaseImponibleOimporteNoSujeto"));
-        el(b, "CuotaRepercutida", &campo(t, "CuotaRepercutida"));
-    }
+    el(b, "CalificacionOperacion", &campo_o(t, "CalificacionOperacion", "S1"));
+    el(b, "TipoImpositivo", &campo(t, "TipoImpositivo"));
+    el(b, "BaseImponibleOimporteNoSujeto", &campo(t, "BaseImponibleOimporteNoSujeto"));
+    el(b, "CuotaRepercutida", &campo(t, "CuotaRepercutida"));
     b.push_str("</sum1:DetalleDesglose>");
 }
 
@@ -660,26 +653,9 @@ mod tests {
     }
 
     #[test]
-    fn una_linea_exenta_no_lleva_tipo_ni_cuota() {
-        // Error 1238. No van a cero: NO VAN. Y el `choice` del XSD hace que informar los dos sea un
-        // XML inválido, no un aviso.
-        let mut r = registro_base();
-        r.desglose_json = Some(
-            r#"[{"ClaveRegimen":"01","OperacionExenta":"E1","BaseImponibleOimporteNoSujeto":"10.00"}]"#
-                .into(),
-        );
-        let xml = construir_envio(&cabecera(), &[r]);
-
-        assert!(xml.contains("<sum1:OperacionExenta>E1</sum1:OperacionExenta>"));
-        assert!(!xml.contains("TipoImpositivo"), "{xml}");
-        assert!(!xml.contains("CuotaRepercutida"), "{xml}");
-        assert!(!xml.contains("CalificacionOperacion"), "{xml}");
-    }
-
-    #[test]
-    fn una_linea_al_cero_por_ciento_si_los_lleva() {
-        // El otro lado: un producto al 0 % es «sujeta y no exenta, gravada al 0 %», y ahí el tipo y
-        // la cuota son OBLIGATORIOS (error 1208).
+    fn una_linea_al_cero_por_ciento_lleva_tipo_y_cuota() {
+        // Un producto al 0 % es «sujeta y no exenta, gravada al 0 %», y ahí el tipo y la cuota son
+        // OBLIGATORIOS (error 1208).
         let mut r = registro_base();
         r.desglose_json = Some(
             r#"[{"ClaveRegimen":"01","CalificacionOperacion":"S1","TipoImpositivo":"0","BaseImponibleOimporteNoSujeto":"10.00","CuotaRepercutida":"0.00"}]"#
@@ -690,7 +666,6 @@ mod tests {
         assert!(xml.contains("<sum1:CalificacionOperacion>S1</sum1:CalificacionOperacion>"));
         assert!(xml.contains("<sum1:TipoImpositivo>0</sum1:TipoImpositivo>"));
         assert!(xml.contains("<sum1:CuotaRepercutida>0.00</sum1:CuotaRepercutida>"));
-        assert!(!xml.contains("OperacionExenta"));
     }
 
     #[test]

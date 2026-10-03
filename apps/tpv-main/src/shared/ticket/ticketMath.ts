@@ -22,14 +22,6 @@ export type LineaEntrada = {
 	ivaPercent?: number | null;
 	/** Unidades de la línea. Ausente = 1. */
 	cantidad?: number;
-	/**
-	 * FISCAL-01: la línea se vendió EXENTA de IVA. **No es lo mismo que un 0 %**, y por eso no se
-	 * representa con `ivaPercent: 0`: son dos afirmaciones legales distintas y el registro de
-	 * facturación las expresa en campos excluyentes (`CalificacionOperacion` vs `OperacionExenta`).
-	 */
-	exento?: boolean;
-	/** `E1`..`E6`. Sólo se mira si `exento`. */
-	causaExencion?: string | null;
 };
 
 /** Una línea ya agrupada, como se imprime. */
@@ -38,21 +30,10 @@ export type LineaAgrupada = {
 	precio: Dinero;
 	qty: number;
 	ivaPercent: number | null;
-	exento: boolean;
-	causaExencion: string | null;
 };
 
-/**
- * Un tramo del desglose del pie. Gemelo de `TramoIva` en `tpv_domain::ticket`, y como allí son dos
- * clases y no una: el XSD del registro pone `CalificacionOperacion` y `OperacionExenta` en un
- * `<choice>`, así que un tramo exento **no tiene** tipo ni cuota — no los tiene a cero.
- */
-export type TramoIva =
-	| { clase: "sujeta"; tipo: number; base: Dinero; iva: Dinero }
-	| { clase: "exenta"; causa: string; base: Dinero };
-
-/** Causa por defecto de una línea marcada exenta sin elegir cuál. Gemelo del dominio. */
-export const CAUSA_EXENCION_POR_DEFECTO = "E1";
+/** Un tramo del desglose del pie: todo lo vendido a un tipo. Gemelo de `TramoIva` en `tpv_domain::ticket`. */
+export type TramoIva = { tipo: number; base: Dinero; iva: Dinero };
 
 // El redondeo vivía aquí, con un `Math.round` pelado, y NO era el de Rust: `Math.round` lleva la
 // mitad hacia +∞ y `f64::round` la aleja del cero, así que -1,125 € daba -1,12 en esta vista previa
@@ -107,14 +88,9 @@ export function agruparLineas(items: LineaEntrada[]): LineaAgrupada[] {
 		// Céntimos por una cantidad fraccionaria vuelve a ser flotante: se redondea al
 		// céntimo, igual que hace el SQL con su CAST(ROUND(...)).
 		const precio = entera ? it.precio : redondear(it.precio * (it.cantidad ?? 1));
-		const exento = it.exento === true;
-		const causa = exento ? (it.causaExencion || CAUSA_EXENCION_POR_DEFECTO) : null;
-		// La exención entra en la clave de agrupación: dos unidades del mismo producto, una exenta
-		// y otra no, son dos líneas del ticket porque son dos tramos del desglose.
-		const key = `${it.nombre}__${precio}__${iva ?? "neg"}__${causa ?? ""}`;
+		const key = `${it.nombre}__${precio}__${iva ?? "neg"}`;
 		const cur = map.get(key);
-		if (!cur)
-			map.set(key, { nombre: it.nombre, precio, qty: unidades, ivaPercent: iva, exento, causaExencion: causa });
+		if (!cur) map.set(key, { nombre: it.nombre, precio, qty: unidades, ivaPercent: iva });
 		else cur.qty += unidades;
 	}
 	return Array.from(map.values());
@@ -137,24 +113,15 @@ export function totalDe(lineas: LineaAgrupada[]): Dinero {
  * suban las dos y el papel diga `0,38 + 0,02 = 0,39` (0,39 € al 4 % es el primer caso). Un ticket
  * cuya base más su IVA no dan el total es un documento contable mal emitido — y en el registro es
  * además el error admisible 2005 de la AEAT.
- *
- * Las **exentas** se agrupan por causa, van después de las sujetas y no llevan ni tipo ni cuota.
  */
 export function desgloseIva(lineas: LineaAgrupada[], ivaNegocio: number | null): TramoIva[] {
 	const porTipo = new Map<number, Dinero>();
-	const porCausa = new Map<string, Dinero>();
 	for (const g of lineas) {
-		const importe = por(g.precio, g.qty);
-		if (g.exento) {
-			const causa = g.causaExencion || CAUSA_EXENCION_POR_DEFECTO;
-			porCausa.set(causa, sumar(porCausa.get(causa) ?? CERO, importe));
-		} else {
-			const tipo = g.ivaPercent ?? ivaNegocio ?? 0;
-			porTipo.set(tipo, sumar(porTipo.get(tipo) ?? CERO, importe));
-		}
+		const tipo = g.ivaPercent ?? ivaNegocio ?? 0;
+		porTipo.set(tipo, sumar(porTipo.get(tipo) ?? CERO, por(g.precio, g.qty)));
 	}
 
-	const sujetas: TramoIva[] = Array.from(porTipo.entries())
+	return Array.from(porTipo.entries())
 		.sort((a, b) => a[0] - b[0])
 		.map(([tipo, bruto]) => {
 			const totalTramo = bruto;
@@ -162,14 +129,8 @@ export function desgloseIva(lineas: LineaAgrupada[], ivaNegocio: number | null):
 			// La base se DIVIDE, no se multiplica por el recíproco: la de 0,91 € al 4 % sale 87
 			// por ese camino y 88 dividiendo, que es lo que imprime el papel.
 			const base = divisor === 0 ? totalTramo : entre(totalTramo, divisor);
-			return { clase: "sujeta" as const, tipo, base, iva: restar(totalTramo, base) };
+			return { tipo, base, iva: restar(totalTramo, base) };
 		});
-
-	const exentas: TramoIva[] = Array.from(porCausa.entries())
-		.sort((a, b) => a[0].localeCompare(b[0]))
-		.map(([causa, bruto]) => ({ clase: "exenta" as const, causa, base: bruto }));
-
-	return [...sujetas, ...exentas];
 }
 
 /** Suma de las bases del desglose. */
@@ -177,7 +138,7 @@ export function baseTotal(tramos: TramoIva[]): Dinero {
 	return sumar(...tramos.map((t) => t.base));
 }
 
-/** Suma de las cuotas. Un tramo exento aporta cero — y en el XML ese cero no se informa. */
+/** Suma de las cuotas. */
 export function cuotaTotal(tramos: TramoIva[]): Dinero {
-	return sumar(...tramos.map((t) => (t.clase === "sujeta" ? t.iva : CERO)));
+	return sumar(...tramos.map((t) => t.iva));
 }

@@ -931,7 +931,7 @@ pub(crate) async fn lineas_de_pago<C: Reader>(
 ) -> AppResult<Vec<LineaTicket>> {
     let mut rows = conn
         .query(
-            "SELECT COALESCE(dc.Cantidad, 1) * COALESCE(dc.Precio_Unitario, 0),                     dc.IVA_Percent, COALESCE(dc.Exento, 0), dc.Causa_Exencion              FROM Pago_Detalles pd              JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle              WHERE pd.ID_Pago = ?1;",
+            "SELECT COALESCE(dc.Cantidad, 1) * COALESCE(dc.Precio_Unitario, 0),                     dc.IVA_Percent              FROM Pago_Detalles pd              JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle              WHERE pd.ID_Pago = ?1;",
             vec![Value::Text(id_pago.to_string())],
         )
         .await
@@ -942,8 +942,6 @@ pub(crate) async fn lineas_de_pago<C: Reader>(
         out.push(LineaTicket {
             total_con_iva: v_dinero(row.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
             tipo_iva: v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(iva_general),
-            exento: v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0) == 1,
-            causa_exencion: v_string(row.get_value(3).map_err(db_err)?),
         });
     }
     Ok(out)
@@ -1030,9 +1028,7 @@ pub async fn emitir_cobro(
         //
         // REV-16: lo que se hacía era colapsarlo todo en UNA línea al tipo de la primera, y eso
         // declara mal el IVA en cuanto el ticket mezcla tipos — comida al 10 % y alcohol al 21 %,
-        // o sea lo normal en un bar. Con las exentas era peor: sólo se declaraba exento si lo eran
-        // todas, así que una línea exenta junto a otra que no lo es salía entera como *sujeta* y
-        // al tipo de la exenta. Ahora se reparte en proporción (`ticket::prorratear`), que
+        // o sea lo normal en un bar. Ahora se reparte en proporción (`ticket::prorratear`), que
         // conserva el peso de cada tipo y cuadra al céntimo.
         //
         // ⚠️ Esto no lo habría cazado nadie de fuera: la AEAT acepta una `CuotaTotal` descuadrada
@@ -1203,7 +1199,7 @@ pub async fn emitir_baja_de_pago(
 /// Las líneas de la rectificativa: las del desglose original con el signo cambiado.
 ///
 /// Se reconstruyen desde `Desglose_Json` para que el desglose de la `R5` sea el espejo exacto del de
-/// la factura rectificada — mismos tipos, mismas causas de exención, mismas bases. Un desglose
+/// la factura rectificada — mismos tipos, mismas bases. Un desglose
 /// inventado aquí podría no cuadrar con lo que se devolvió.
 ///
 /// Si no hay desglose guardado (no debería pasar) se devuelve vacío y el registro sale con importe
@@ -1345,7 +1341,6 @@ fn tramos_del_desglose(desglose_json: Option<&str>, signo: i64) -> Vec<LineaTick
                 .and_then(|v| v.as_str())
                 .and_then(Dinero::de_texto_fiscal)
                 .unwrap_or(Dinero::CERO);
-            let exenta = t.get("OperacionExenta").and_then(|v| v.as_str());
             let tipo: f64 = t
                 .get("TipoImpositivo")
                 .and_then(|v| v.as_str())
@@ -1355,8 +1350,6 @@ fn tramos_del_desglose(desglose_json: Option<&str>, signo: i64) -> Vec<LineaTick
                 // `LineaTicket` trabaja con el total CON IVA, que es base + cuota.
                 total_con_iva: (base + cuota).por(signo),
                 tipo_iva: tipo,
-                exento: exenta.is_some(),
-                causa_exencion: exenta.map(str::to_string),
             })
         })
         .collect()
@@ -1642,27 +1635,22 @@ fn normalizar_lineas(lineas: &[LineaTicket], iva_general: f64) -> Vec<LineaTicke
 /// Los importes van ya **formateados como texto**, que es lo mismo que se hasheó y lo que se
 /// remite: nadie los recompone desde un `f64` al construir el XML.
 ///
+/// Todo tramo es sujeto y no exento (`S1`); ver `tpv_domain::ticket`.
+///
 /// `ClaveRegimen` es `"01"` (régimen general) y es **obligatorio** cuando el impuesto es IVA
 /// (error 1245). `Impuesto` no se informa: vacío se considera `"01"` (IVA), que es el caso, y
 /// Canarias/Ceuta/Melilla están fuera de alcance.
 fn desglose_json(tramos: &[TramoIva]) -> String {
     let arr: Vec<serde_json::Value> = tramos
         .iter()
-        .map(|t| match t {
-            TramoIva::Sujeta { tipo, base, cuota } => serde_json::json!({
+        .map(|t| {
+            serde_json::json!({
                 "ClaveRegimen": "01",
                 "CalificacionOperacion": "S1",
-                "TipoImpositivo": vf::fmt_tipo(*tipo),
-                "BaseImponibleOimporteNoSujeto": vf::fmt_importe(*base),
-                "CuotaRepercutida": vf::fmt_importe(*cuota),
-            }),
-            // Una operación exenta NO lleva TipoImpositivo ni CuotaRepercutida: informarlos es el
-            // error 1238. No van a cero — no van.
-            TramoIva::Exenta { causa, base } => serde_json::json!({
-                "ClaveRegimen": "01",
-                "OperacionExenta": causa,
-                "BaseImponibleOimporteNoSujeto": vf::fmt_importe(*base),
-            }),
+                "TipoImpositivo": vf::fmt_tipo(t.tipo),
+                "BaseImponibleOimporteNoSujeto": vf::fmt_importe(t.base),
+                "CuotaRepercutida": vf::fmt_importe(t.cuota),
+            })
         })
         .collect();
     serde_json::Value::Array(arr).to_string()
@@ -2210,8 +2198,6 @@ mod tests_subsanacion {
                     lineas: vec![LineaTicket {
                         total_con_iva: eur(12.10),
                         tipo_iva: 10.0,
-                        exento: false,
-                        causa_exencion: None,
                     }],
                     ..Default::default()
                 },
@@ -2357,8 +2343,6 @@ mod tests_subsanacion {
                     lineas: vec![LineaTicket {
                         total_con_iva: eur(12.10),
                         tipo_iva: 10.0,
-                        exento: false,
-                        causa_exencion: None,
                     }],
                     ..Default::default()
                 },
@@ -3235,24 +3219,10 @@ mod tests {
     }
 
     #[test]
-    fn el_desglose_json_no_informa_tipo_ni_cuota_en_una_exenta() {
-        // Es el error 1238 de la AEAT: "Si la operacion es exenta no se puede informar ninguno de
-        // los campos TipoImpositivo, CuotaRepercutida...". No van a cero: NO VAN.
-        let json = desglose_json(&[TramoIva::Exenta {
-            causa: "E1".into(),
-            base: eur(10.0),
-        }]);
-        assert!(json.contains("\"OperacionExenta\":\"E1\""));
-        assert!(!json.contains("TipoImpositivo"), "{json}");
-        assert!(!json.contains("CuotaRepercutida"), "{json}");
-        assert!(!json.contains("CalificacionOperacion"), "{json}");
-    }
-
-    #[test]
-    fn el_desglose_json_de_una_sujeta_al_cero_por_ciento_si_los_informa() {
-        // El otro lado de la moneda: un producto al 0 % es "sujeta y no exenta, gravada al 0 %", y
-        // ahí el tipo y la cuota son OBLIGATORIOS (error 1208).
-        let json = desglose_json(&[TramoIva::Sujeta {
+    fn el_desglose_json_de_un_tramo_al_cero_por_ciento_informa_tipo_y_cuota() {
+        // Un producto al 0 % es "sujeta y no exenta, gravada al 0 %", y ahí el tipo y la cuota son
+        // OBLIGATORIOS (error 1208).
+        let json = desglose_json(&[TramoIva {
             tipo: 0.0,
             base: eur(10.0),
             cuota: Dinero::CERO,
@@ -3260,7 +3230,6 @@ mod tests {
         assert!(json.contains("\"CalificacionOperacion\":\"S1\""));
         assert!(json.contains("\"TipoImpositivo\":\"0\""));
         assert!(json.contains("\"CuotaRepercutida\":\"0.00\""));
-        assert!(!json.contains("OperacionExenta"), "{json}");
     }
 
     #[test]
@@ -3268,8 +3237,8 @@ mod tests {
         // Error 1245: si Impuesto está vacío (que es como va: vacío se considera IVA), ClaveRegimen
         // es obligatorio.
         let json = desglose_json(&[
-            TramoIva::Sujeta { tipo: 10.0, base: eur(10.0), cuota: eur(1.0) },
-            TramoIva::Exenta { causa: "E1".into(), base: eur(5.0) },
+            TramoIva { tipo: 10.0, base: eur(10.0), cuota: eur(1.0) },
+            TramoIva { tipo: 21.0, base: eur(5.0), cuota: eur(1.05) },
         ]);
         assert_eq!(json.matches("\"ClaveRegimen\":\"01\"").count(), 2);
     }

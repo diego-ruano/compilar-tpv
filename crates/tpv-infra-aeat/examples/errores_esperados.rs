@@ -113,13 +113,6 @@ fn main() {
                 recomputar: false,
             },
             Caso {
-                nombre: "exenta informando TipoImpositivo",
-                esperado: 1238,
-                sql: "UPDATE Registros_Facturacion SET Desglose_Json = '[{\"Impuesto\":\"01\",\"ClaveRegimen\":\"01\",\"OperacionExenta\":\"E1\",\"BaseImponibleOimporteNoSujeto\":\"10.00\",\"TipoImpositivo\":\"10\",\"CuotaRepercutida\":\"1.00\"}]', Importe_Total = '10.00', Cuota_Total = '0.00' WHERE ID_Registro = '{id}'",
-                porque: "es el <choice> del XSD que motivo el enum TramoIva del dominio",
-                recomputar: true,
-            },
-            Caso {
                 nombre: "caracteres prohibidos en la descripcion",
                 esperado: 1287,
                 sql: "UPDATE Registros_Facturacion SET Descripcion_Operacion = 'Menu <del> dia = \"bueno\"' WHERE ID_Registro = '{id}'",
@@ -199,8 +192,6 @@ fn main() {
                         lineas: vec![LineaTicket {
                             total_con_iva: Dinero::de_euros(12.10),
                             tipo_iva: 10.0,
-                            exento: false,
-                            causa_exencion: None,
                         }],
                         ..Default::default()
                     },

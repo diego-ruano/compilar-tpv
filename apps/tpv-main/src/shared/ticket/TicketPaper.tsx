@@ -31,10 +31,6 @@ export type TicketPaperItem = {
     ivaPercent?: number | null;
     /** Unidades de la línea. Ausente = 1. */
     cantidad?: number;
-    /** FISCAL-01: la línea se vendió exenta de IVA. No es lo mismo que un 0 %. */
-    exento?: boolean;
-    /** `E1`..`E6`. Sólo se mira si `exento`. */
-    causaExencion?: string | null;
 };
 
 /**
@@ -256,9 +252,9 @@ export default function TicketPaper({
 
                 {showBaseIva ? (
                     <>
-                        {tramosIva.length === 0 || (tramosIva.length === 1 && tramosIva[0].clase === "sujeta") ? (
-                            // Un solo tipo sujeto (el caso normal): como toda la vida, sin
-                            // convertir el ticket en una tabla por algo que no aporta nada.
+                        {tramosIva.length <= 1 ? (
+                            // Un solo tipo (el caso normal): como toda la vida, sin convertir el
+                            // ticket en una tabla por algo que no aporta nada.
                             <>
                                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                                     <span>BASE</span>
@@ -266,37 +262,25 @@ export default function TicketPaper({
                                 </div>
                                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                                     <span>
-                                        IVA ({tramosIva[0]?.clase === "sujeta" ? tramosIva[0].tipo : ivaPercent}%)
+                                        IVA ({tramosIva[0]?.tipo ?? ivaPercent}%)
                                     </span>
-                                    <span>{eur(tramosIva[0]?.clase === "sujeta" ? tramosIva[0].iva : CERO)}</span>
+                                    <span>{eur(tramosIva[0]?.iva ?? CERO)}</span>
                                 </div>
                             </>
                         ) : (
-                            // Varios tramos. Una línea EXENTA no tiene ninguna cifra de IVA que
-                            // enseñar: poner "IVA (0%) 0,00" diría en el papel justo lo contrario
-                            // de lo que declara el registro de facturación (FISCAL-01).
-                            tramosIva.map((t) =>
-                                t.clase === "sujeta" ? (
-                                    <React.Fragment key={`s-${t.tipo}`}>
-                                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                            <span>BASE ({t.tipo}%)</span>
-                                            <span>{eur(t.base)}</span>
-                                        </div>
-                                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                            <span>IVA ({t.tipo}%)</span>
-                                            <span>{eur(t.iva)}</span>
-                                        </div>
-                                    </React.Fragment>
-                                ) : (
-                                    <div
-                                        key={`e-${t.causa}`}
-                                        style={{ display: "flex", justifyContent: "space-between" }}
-                                    >
-                                        <span>BASE EXENTA ({t.causa})</span>
+                            // Varios tramos: cada uno con su base y su IVA.
+                            tramosIva.map((t) => (
+                                <React.Fragment key={t.tipo}>
+                                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                        <span>BASE ({t.tipo}%)</span>
                                         <span>{eur(t.base)}</span>
                                     </div>
-                                ),
-                            )
+                                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                        <span>IVA ({t.tipo}%)</span>
+                                        <span>{eur(t.iva)}</span>
+                                    </div>
+                                </React.Fragment>
+                            ))
                         )}
                     </>
                 ) : null}

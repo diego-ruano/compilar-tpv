@@ -242,24 +242,9 @@ CREATE TABLE IF NOT EXISTS Productos (
   -- distintas. Un producto que nadie ha tocado tiene que SEGUIR al tipo general si este cambia;
   -- un 10 escrito en la fila se quedaria congelado sin que nadie lo pidiera.
   IVA_Percent REAL,
-  -- FISCAL-01 (Veri*factu). "Exento" NO es "IVA al 0 %": son dos afirmaciones legales distintas y
-  -- el registro de facturacion las expresa en un <choice> del XSD (CalificacionOperacion vs
-  -- OperacionExenta), asi que no hay forma de representar una con la otra.
-  --   Exento = 0 -> operacion sujeta y no exenta: va con CalificacionOperacion 'S1' + TipoImpositivo
-  --                 + CuotaRepercutida (un producto al 0 % es ESTO, con tipo y cuota a cero).
-  --   Exento = 1 -> va con OperacionExenta = Causa_Exencion, y esta PROHIBIDO informar
-  --                 TipoImpositivo, CuotaRepercutida, TipoRecargoEquivalencia ni
-  --                 CuotaRecargoEquivalencia (error 1238 de la AEAT).
-  -- Un booleano solo no basta: OperacionExenta exige CUAL exencion, no un "si". De ahi las dos
-  -- columnas. 'E1' (art. 20 LIVA, operaciones interiores) es la unica realista en hosteleria.
-  Exento INTEGER NOT NULL DEFAULT 0,
-  Causa_Exencion TEXT,
   Archivado_En DATETIME,
   FOREIGN KEY (ID_Categoria) REFERENCES Categorias_Producto(ID_Categoria),
-  FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor),
-  CHECK (Exento IN (0,1)),
-  CHECK (Causa_Exencion IS NULL OR Causa_Exencion IN ('E1','E2','E3','E4','E5','E6')),
-  CHECK ((Exento = 1) = (Causa_Exencion IS NOT NULL))
+  FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_nombre_activo
@@ -571,16 +556,8 @@ CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   Estado_Cocina TEXT DEFAULT 'PENDIENTE',
   Fecha_Hora_Cocina DATETIME,
   ID_Usuario_Cocinero TEXT,
-  -- FISCAL-01: la exencion se CONGELA en la linea igual que el nombre, el precio y el tipo, y por
-  -- el mismo motivo: el registro de facturacion es el hecho fiscal del dia de la venta. Si manana
-  -- alguien desmarca la casilla del producto, el registro ya emitido no puede cambiar de sentido.
-  Exento INTEGER NOT NULL DEFAULT 0,
-  Causa_Exencion TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda),
-  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE SET NULL,
-  CHECK (Exento IN (0,1)),
-  CHECK (Causa_Exencion IS NULL OR Causa_Exencion IN ('E1','E2','E3','E4','E5','E6')),
-  CHECK ((Exento = 1) = (Causa_Exencion IS NOT NULL))
+  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_dc_cocinero_fecha

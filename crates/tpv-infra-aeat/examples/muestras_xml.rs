@@ -113,21 +113,6 @@ fn main() {
         xml::construir_envio(&cabecera(false), &[dos_tipos]),
     ));
 
-    // ── Una línea EXENTA junto a una sujeta. Es el caso que más fácil se rompe: la exenta no
-    //    puede llevar TipoImpositivo ni CuotaRepercutida, y el XSD lo impone con un <choice>. ──
-    let mut con_exenta = encadenado(base());
-    con_exenta.importe_total = Some("17.10".into());
-    con_exenta.cuota_total = Some("1.10".into());
-    con_exenta.desglose_json = Some(
-        r#"[{"ClaveRegimen":"01","CalificacionOperacion":"S1","TipoImpositivo":"10","BaseImponibleOimporteNoSujeto":"11.00","CuotaRepercutida":"1.10"},
-            {"ClaveRegimen":"01","OperacionExenta":"E1","BaseImponibleOimporteNoSujeto":"5.00"}]"#
-            .into(),
-    );
-    muestras.push((
-        "04-f2-con-exenta",
-        xml::construir_envio(&cabecera(false), &[con_exenta]),
-    ));
-
     // ── Un producto al 0 %: SUJETO, con tipo y cuota a cero. El contrario del anterior. ──
     let mut al_cero = encadenado(base());
     al_cero.importe_total = Some("10.00".into());
@@ -137,7 +122,7 @@ fn main() {
             .into(),
     );
     muestras.push((
-        "05-f2-al-cero-por-ciento",
+        "04-f2-al-cero-por-ciento",
         xml::construir_envio(&cabecera(false), &[al_cero]),
     ));
 
@@ -145,7 +130,7 @@ fn main() {
     let mut f1 = encadenado(base());
     f1.tipo_factura = Some("F1".into());
     f1.destinatario_json = Some(r#"{"NombreRazon":"Empresa Cliente SL","NIF":"B12345674"}"#.into());
-    muestras.push(("06-f1-con-destinatario", xml::construir_envio(&cabecera(false), &[f1])));
+    muestras.push(("05-f1-con-destinatario", xml::construir_envio(&cabecera(false), &[f1])));
 
     // ── Factura sustitutiva (F3): el cliente vuelve con el ticket y pide factura ──
     let mut f3 = encadenado(base());
@@ -155,7 +140,7 @@ fn main() {
         r#"{"rectificadas":[],"sustituidas":[{"IDEmisorFactura":"89890001K","NumSerieFactura":"2027/000001","FechaExpedicionFactura":"15-01-2027"}]}"#
             .into(),
     );
-    muestras.push(("07-f3-sustitutiva", xml::construir_envio(&cabecera(false), &[f3])));
+    muestras.push(("06-f3-sustitutiva", xml::construir_envio(&cabecera(false), &[f3])));
 
     // ── Rectificativa por diferencias (R5): una devolución sobre una simplificada ──
     let mut r5 = encadenado(base());
@@ -171,19 +156,19 @@ fn main() {
         r#"{"rectificadas":[{"IDEmisorFactura":"89890001K","NumSerieFactura":"2027/000001","FechaExpedicionFactura":"15-01-2027"}],"sustituidas":[]}"#
             .into(),
     );
-    muestras.push(("08-r5-rectificativa", xml::construir_envio(&cabecera(false), &[r5])));
+    muestras.push(("07-r5-rectificativa", xml::construir_envio(&cabecera(false), &[r5])));
 
     // ── Anulación: otro diseño de registro entero ──
     let mut anul = encadenado(base());
     anul.tipo = "ANULACION".into();
-    muestras.push(("09-anulacion", xml::construir_envio(&cabecera(false), &[anul])));
+    muestras.push(("08-anulacion", xml::construir_envio(&cabecera(false), &[anul])));
 
     // ── Subsanación de un registro RECHAZADO (Subsanacion=S + RechazoPrevio=X) ──
     let mut subs = encadenado(base());
     subs.subsanacion = Some("S".into());
     subs.rechazo_previo = Some("X".into());
     muestras.push((
-        "10-subsanacion-tras-rechazo",
+        "09-subsanacion-tras-rechazo",
         xml::construir_envio(&cabecera(false), &[subs]),
     ));
 
@@ -191,13 +176,13 @@ fn main() {
     let mut subs2 = encadenado(base());
     subs2.subsanacion = Some("S".into());
     muestras.push((
-        "11-subsanacion-de-aceptado",
+        "10-subsanacion-de-aceptado",
         xml::construir_envio(&cabecera(false), &[subs2]),
     ));
 
     // ── Un lote con incidencia (el equipo estuvo sin red y esto llega tarde) ──
     muestras.push((
-        "12-lote-con-incidencia",
+        "11-lote-con-incidencia",
         xml::construir_envio(&cabecera(true), &[base(), encadenado(base())]),
     ));
 
@@ -211,7 +196,7 @@ fn main() {
     cruza_medianoche.fecha_expedicion = "16-01-2027".into();
     cruza_medianoche.fecha_operacion = Some("15-01-2027".into());
     muestras.push((
-        "13-f2-operacion-de-otro-dia",
+        "12-f2-operacion-de-otro-dia",
         xml::construir_envio(&cabecera(false), &[cruza_medianoche]),
     ));
 

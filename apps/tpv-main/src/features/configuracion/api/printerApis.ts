@@ -152,8 +152,6 @@ export function buildTicketPayload(
             cantidad: g.qty,
             precio_unitario: g.precio,
             iva_percent: g.ivaPercent ?? undefined,
-            exento: g.exento,
-            causa_exencion: g.causaExencion ?? undefined,
         })),
     };
 }

@@ -30,14 +30,6 @@ pub struct PrintTicketLine {
     #[serde(default)]
     #[ts(optional)]
     pub iva_percent: Option<f64>,
-    /// FISCAL-01: la línea se vendió EXENTA de IVA, que no es lo mismo que vendida al 0 %. Va
-    /// congelada como el tipo, y por lo mismo.
-    #[serde(default)]
-    pub exento: bool,
-    /// `E1`..`E6`. Sólo se mira si `exento`.
-    #[serde(default)]
-    #[ts(optional)]
-    pub causa_exencion: Option<String>,
 }
 
 /// Payload de impresión enviado desde el frontend. Lleva los datos del negocio + los flags de
