@@ -91,6 +91,9 @@ dentro de la transacción de `update_trabajador`. El worker lo comprueba antes d
   `MesasCobrarDetallesInput` no llevan cobrador. Lo vigila
   `todo_comando_que_cobra_saca_el_cobrador_de_la_sesion`.
 - **Abrir el cajón**: `printer_open_drawer`. Se anota en `Aperturas_Cajon` con quien tenga la sesión.
+- **Estadísticas y clientes**: todos los `stats_*` y `clientes_*`. Las estadísticas dicen cuánto se
+  factura y cuánto vende cada trabajador, y los clientes son datos personales. Toda pantalla de la app
+  está detrás del login, así que no estorba a nadie: cierra la puerta a quien llegue sin PIN.
 
 ### Exentos, y por qué
 
@@ -119,8 +122,7 @@ nueva del emparejamiento hay que añadirla también ahí.
 
 ### Lo que no está gateado
 
-Comandas, inventario, reservas, clientes, tareas, proveedores, turnos y horarios: es el trabajo del
-turno. Tampoco hay tabla de permisos (`Roles` sólo tiene nombre e id), sesión persistente ni caducidad
+Comandas, inventario, reservas, tareas, proveedores, turnos y horarios: es el trabajo del turno. Tampoco hay tabla de permisos (`Roles` sólo tiene nombre e id), sesión persistente ni caducidad
 de sesión en el backend.
 
 ### La interfaz
