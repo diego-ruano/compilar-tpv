@@ -1474,7 +1474,7 @@ async fn imprimir_ticket(
     };
 
     let bytes = printing::build_ticket(&payload, logo.as_deref());
-    tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Ticket TPV", &bytes))
+    tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_TICKET, &bytes))
         .await
         .map_err(|e| e.to_string())??;
     Ok("OK".into())
@@ -1535,7 +1535,7 @@ async fn printer_print_arqueo(
 ) -> Result<String, AppErrorDto> {
     let printer = resolve_printer(&app, payload.printer_name.clone())?;
     let bytes = printing::build_arqueo(&payload);
-    tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Cierre de caja", &bytes))
+    tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_ARQUEO, &bytes))
         .await
         .map_err(|e| e.to_string())??;
     Ok("OK".into())
@@ -1644,7 +1644,7 @@ async fn printer_open_drawer(
 
     let printer = resolve_printer(&app, None)?;
     let bytes = printing::build_abrir_cajon();
-    tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Abrir cajón", &bytes))
+    tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_CAJON, &bytes))
         .await
         .map_err(|e| e.to_string())??;
     Ok("OK".into())
@@ -1658,7 +1658,7 @@ async fn printer_print_test(
 ) -> Result<String, AppErrorDto> {
     let printer = resolve_printer(&app, args.map(|a| a.name))?;
     let bytes = printing::build_test_ticket(&printer);
-    tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Prueba TPV", &bytes))
+    tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_PRUEBA, &bytes))
         .await
         .map_err(|e| e.to_string())??;
     Ok("OK".into())

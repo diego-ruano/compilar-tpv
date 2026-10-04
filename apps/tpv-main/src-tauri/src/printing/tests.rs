@@ -2350,3 +2350,54 @@ mod tests_factura_del_registro {
         assert!(!cmds.contains(&"cajon"), "una precuenta no abre el cajón: {cmds:?}");
     }
 }
+
+#[cfg(test)]
+mod tests_cola_de_windows {
+    //! RI-29: lo que decide si se manda un trabajo y qué se purga de la cola. Las llamadas a
+    //! `GetPrinterW` y `EnumJobsW` no se pueden probar sin una impresora; lo que se decide con lo
+    //! que devuelven, sí.
+
+    use super::*;
+
+    #[test]
+    fn una_impresora_sin_avisos_esta_disponible() {
+        assert_eq!(motivo_no_disponible(0, 0), None);
+        // Ahorro de energía (0x01000000): despierta al recibir el trabajo.
+        assert_eq!(motivo_no_disponible(0x0100_0000, 0), None);
+    }
+
+    #[test]
+    fn desconectada_o_trabajando_sin_conexion_no_recibe_trabajos() {
+        assert_eq!(motivo_no_disponible(0x80, 0), Some("desconectada o apagada"));
+        assert_eq!(motivo_no_disponible(0x1000, 0), Some("desconectada o apagada"));
+        // «Usar impresora sin conexión», marcado a mano en Windows.
+        assert_eq!(motivo_no_disponible(0, 0x400), Some("desconectada o apagada"));
+    }
+
+    #[test]
+    fn cada_aviso_dice_lo_suyo() {
+        assert_eq!(motivo_no_disponible(0x1, 0), Some("en pausa"));
+        assert_eq!(motivo_no_disponible(0x10, 0), Some("sin papel"));
+        assert_eq!(motivo_no_disponible(0x8, 0), Some("con el papel atascado"));
+        assert_eq!(motivo_no_disponible(0x40_0000, 0), Some("con la tapa abierta"));
+        assert_eq!(motivo_no_disponible(0x2, 0), Some("con un error"));
+    }
+
+    #[test]
+    fn solo_se_purgan_los_trabajos_del_tpv() {
+        for doc in [DOC_TICKET, DOC_ARQUEO, DOC_CAJON, DOC_PRUEBA] {
+            assert!(es_trabajo_del_tpv(doc), "{doc}");
+        }
+        assert!(!es_trabajo_del_tpv("Microsoft Word - Carta.docx"));
+    }
+
+    #[test]
+    fn atascado_es_llevar_cinco_minutos_en_la_cola() {
+        let minuto: u64 = 60 * 10_000_000;
+        let ahora = 1_000_000 * minuto;
+        assert!(!esta_atascado(ahora - 4 * minuto, ahora));
+        assert!(esta_atascado(ahora - 5 * minuto, ahora));
+        // Un reloj que va hacia atrás no borra nada.
+        assert!(!esta_atascado(ahora + minuto, ahora));
+    }
+}

@@ -67,8 +67,15 @@ logo → corte.**
   sigue reimprimiendo como ticket, y el modal ofrece también su `F3`
   ([verifactu.md](verifactu.md#el-papel-de-una-factura-completa)).
 - **El cajón se abre con la impresora**: dentro del ticket (`ESC p`) o suelto (`DLE DC4`, que la
-  impresora atiende aunque tenga cola). Toda apertura fuera de un cobro se anota en `Aperturas_Cajon`
-  con quien tenga la sesión. Abrirlo no pide rol, pero sí estar identificado.
+  impresora atiende aunque tenga trabajos en su memoria; la cola de Windows, en cambio, lo pone detrás
+  de los que esperan). Toda apertura fuera de un cobro se anota en `Aperturas_Cajon` con quien tenga
+  la sesión. Abrirlo no pide rol, pero sí estar identificado.
+- **Con la impresora no disponible no se manda nada** (RI-29). `WritePrinter` sólo deja el trabajo en
+  la cola de Windows, así que antes `print_raw` lee el estado (`GetPrinterW` nivel 2): desconectada,
+  en pausa, sin papel, atascada, con la tapa abierta o con error, y el trabajo no se manda y se
+  avisa. Si el driver no informa, se manda. Además borra de la cola los trabajos del TPV (los que
+  empiezan por `TPV · `) que lleven más de cinco minutos: al encender la impresora no salen de golpe
+  los atrasados ni se abre el cajón por cada uno.
 - **El logo es de un bit**: `rasterizar_logo` lo reduce al ancho del papel (múltiplo de 8 dots), compone
   la transparencia sobre blanco, difumina con Floyd–Steinberg y emite `GS v 0`. Su ancho sale del
   cabezal y los márgenes (`ancho_logo_dots`), no de `chars_per_line`, que es la densidad del texto. Si

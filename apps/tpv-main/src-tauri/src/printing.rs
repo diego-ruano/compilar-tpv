@@ -6,7 +6,9 @@
 //!   - `list_printers()`  → `EnumPrintersW` (locales + conexiones de red/WiFi) + impresora por
 //!     defecto vía `GetDefaultPrinterW`.
 //!   - `print_raw()`      → `OpenPrinterW` + `StartDocPrinterW` (datatype "RAW") + `WritePrinter`,
-//!     es decir: Windows hace de puente y manda los bytes tal cual a la impresora.
+//!     es decir: Windows hace de puente y manda los bytes tal cual a la impresora. Antes purga los
+//!     trabajos del TPV atascados en la cola y, si Windows dice que la impresora no puede
+//!     imprimir, no manda nada (RI-29).
 //!
 //! Además construye el ticket en **ESC/POS** (`build_ticket`) replicando la personalización del
 //! front (`PreviewModal`): qué elementos se muestran, ancho de papel, IVA, líneas, total, footer.
@@ -1004,6 +1006,74 @@ pub fn build_test_ticket(printer_name: &str) -> Vec<u8> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// La cola de Windows (RI-29)
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// `WritePrinter` no habla con la impresora: deja el trabajo en la cola de Windows y dice que sí.
+// Con la impresora apagada, el ticket se quedaba en la cola, el TPV lo daba por impreso y, al
+// encenderla, salían de golpe todos los atrasados —y se abría el cajón por cada uno que llevara el
+// pulso—. Ahora, antes de mandar, se borran los trabajos del TPV que llevan más de
+// [`MINUTOS_ATASCADO`] en la cola y se pregunta a Windows por el estado de la impresora: si dice
+// que no puede imprimir, no se manda nada y se avisa. Si no sabe decirlo (hay drivers que no
+// informan), se manda igual.
+
+/// Los trabajos del TPV llevan este prefijo en su nombre de documento: es lo que los distingue de
+/// los de cualquier otro programa al purgar la cola.
+const PREFIJO_DOC: &str = "TPV · ";
+pub const DOC_TICKET: &str = "TPV · Ticket";
+pub const DOC_ARQUEO: &str = "TPV · Cierre de caja";
+pub const DOC_CAJON: &str = "TPV · Abrir cajón";
+pub const DOC_PRUEBA: &str = "TPV · Prueba";
+
+/// Lo que puede llevar un trabajo del TPV en la cola antes de darlo por atascado. Un ticket que
+/// sale media hora tarde no le sirve a nadie, y un pulso de cajón atrasado lo abre sin nadie
+/// delante.
+const MINUTOS_ATASCADO: u64 = 5;
+
+fn es_trabajo_del_tpv(documento: &str) -> bool {
+    documento.starts_with(PREFIJO_DOC)
+}
+
+/// `enviado` y `ahora` en unidades de `FILETIME` (centenas de nanosegundos).
+fn esta_atascado(enviado: u64, ahora: u64) -> bool {
+    ahora.saturating_sub(enviado) >= MINUTOS_ATASCADO * 60 * 10_000_000
+}
+
+/// Por qué Windows dice que la impresora no puede imprimir ahora (`PRINTER_INFO_2`), o `None` si
+/// no dice nada. El ahorro de energía no cuenta: la impresora despierta al recibir el trabajo.
+fn motivo_no_disponible(status: u32, attributes: u32) -> Option<&'static str> {
+    const ATTRIBUTE_WORK_OFFLINE: u32 = 0x0000_0400;
+    const PAUSED: u32 = 0x0000_0001;
+    const ERROR: u32 = 0x0000_0002;
+    const PENDING_DELETION: u32 = 0x0000_0004;
+    const PAPER_JAM: u32 = 0x0000_0008;
+    const PAPER_OUT: u32 = 0x0000_0010;
+    const OFFLINE: u32 = 0x0000_0080;
+    const NOT_AVAILABLE: u32 = 0x0000_1000;
+    const USER_INTERVENTION: u32 = 0x0010_0000;
+    const DOOR_OPEN: u32 = 0x0040_0000;
+
+    let tiene = |bit: u32| status & bit != 0;
+    if tiene(OFFLINE) || tiene(NOT_AVAILABLE) || attributes & ATTRIBUTE_WORK_OFFLINE != 0 {
+        Some("desconectada o apagada")
+    } else if tiene(PAUSED) {
+        Some("en pausa")
+    } else if tiene(PAPER_OUT) {
+        Some("sin papel")
+    } else if tiene(PAPER_JAM) {
+        Some("con el papel atascado")
+    } else if tiene(DOOR_OPEN) {
+        Some("con la tapa abierta")
+    } else if tiene(PENDING_DELETION) {
+        Some("eliminándose de Windows")
+    } else if tiene(ERROR) || tiene(USER_INTERVENTION) {
+        Some("con un error")
+    } else {
+        None
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Implementación específica de plataforma (Windows winspool / stub)
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -1025,6 +1095,72 @@ mod imp {
         p_server_name: *mut u16,
         attributes: u32,
     }
+
+    /// `PRINTER_INFO_2W`. Sólo se leen `attributes` y `status`, pero la estructura tiene que estar
+    /// entera para que los desplazamientos coincidan con los de Windows.
+    #[repr(C)]
+    struct PrinterInfo2W {
+        p_server_name: *mut u16,
+        p_printer_name: *mut u16,
+        p_share_name: *mut u16,
+        p_port_name: *mut u16,
+        p_driver_name: *mut u16,
+        p_comment: *mut u16,
+        p_location: *mut u16,
+        p_dev_mode: *mut c_void,
+        p_sep_file: *mut u16,
+        p_print_processor: *mut u16,
+        p_datatype: *mut u16,
+        p_parameters: *mut u16,
+        p_security_descriptor: *mut c_void,
+        attributes: u32,
+        priority: u32,
+        default_priority: u32,
+        start_time: u32,
+        until_time: u32,
+        status: u32,
+        c_jobs: u32,
+        average_ppm: u32,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct SystemTime {
+        campos: [u16; 8],
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct FileTime {
+        low: u32,
+        high: u32,
+    }
+
+    impl FileTime {
+        fn valor(&self) -> u64 {
+            ((self.high as u64) << 32) | self.low as u64
+        }
+    }
+
+    /// `JOB_INFO_1W`.
+    #[repr(C)]
+    struct JobInfo1W {
+        job_id: u32,
+        p_printer_name: *mut u16,
+        p_machine_name: *mut u16,
+        p_user_name: *mut u16,
+        p_document: *mut u16,
+        p_datatype: *mut u16,
+        p_status: *mut u16,
+        status: u32,
+        priority: u32,
+        position: u32,
+        total_pages: u32,
+        pages_printed: u32,
+        submitted: SystemTime,
+    }
+
+    const JOB_CONTROL_DELETE: u32 = 5;
 
     #[repr(C)]
     struct DocInfo1W {
@@ -1055,6 +1191,88 @@ mod imp {
         fn EndPagePrinter(hprinter: HANDLE) -> BOOL;
         fn EndDocPrinter(hprinter: HANDLE) -> BOOL;
         fn GetDefaultPrinterW(pszbuffer: *mut u16, pcchbuffer: *mut u32) -> BOOL;
+        fn GetPrinterW(hprinter: HANDLE, level: u32, pprinter: *mut u8, cbbuf: u32, pcbneeded: *mut u32) -> BOOL;
+        fn EnumJobsW(
+            hprinter: HANDLE,
+            firstjob: u32,
+            nojobs: u32,
+            level: u32,
+            pjob: *mut u8,
+            cbbuf: u32,
+            pcbneeded: *mut u32,
+            pcreturned: *mut u32,
+        ) -> BOOL;
+        fn SetJobW(hprinter: HANDLE, jobid: u32, level: u32, pjob: *mut u8, command: u32) -> BOOL;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetSystemTimeAsFileTime(lpsystemtimeasfiletime: *mut FileTime);
+        fn SystemTimeToFileTime(lpsystemtime: *const SystemTime, lpfiletime: *mut FileTime) -> BOOL;
+    }
+
+    /// `(status, attributes)` de `PRINTER_INFO_2`, o `None` si Windows no lo da.
+    unsafe fn estado(hprinter: HANDLE) -> Option<(u32, u32)> {
+        let mut needed: u32 = 0;
+        GetPrinterW(hprinter, 2, std::ptr::null_mut(), 0, &mut needed);
+        if needed == 0 {
+            return None;
+        }
+        // Alineado a 8 bytes: la estructura lleva punteros.
+        let mut buf: Vec<u64> = vec![0u64; (needed as usize).div_ceil(8)];
+        if GetPrinterW(hprinter, 2, buf.as_mut_ptr() as *mut u8, needed, &mut needed) == 0 {
+            return None;
+        }
+        let info = &*(buf.as_ptr() as *const PrinterInfo2W);
+        Some((info.status, info.attributes))
+    }
+
+    /// Borra de la cola los trabajos del TPV atascados y devuelve cuántos borró. Si no puede, no
+    /// pasa nada: es una limpieza, no una condición para imprimir.
+    unsafe fn purgar_atascados(hprinter: HANDLE) -> u32 {
+        let mut needed: u32 = 0;
+        let mut returned: u32 = 0;
+        EnumJobsW(hprinter, 0, 1000, 1, std::ptr::null_mut(), 0, &mut needed, &mut returned);
+        if needed == 0 {
+            return 0;
+        }
+        let mut buf: Vec<u64> = vec![0u64; (needed as usize).div_ceil(8)];
+        let ok = EnumJobsW(
+            hprinter,
+            0,
+            1000,
+            1,
+            buf.as_mut_ptr() as *mut u8,
+            needed,
+            &mut needed,
+            &mut returned,
+        );
+        if ok == 0 {
+            return 0;
+        }
+
+        let mut ahora = FileTime::default();
+        GetSystemTimeAsFileTime(&mut ahora);
+
+        let trabajos = buf.as_ptr() as *const JobInfo1W;
+        let mut borrados = 0;
+        for i in 0..returned as usize {
+            let t = &*trabajos.add(i);
+            if !super::es_trabajo_del_tpv(&wide_to_string(t.p_document)) {
+                continue;
+            }
+            // `Submitted` va en UTC, igual que `GetSystemTimeAsFileTime`.
+            let mut enviado = FileTime::default();
+            if SystemTimeToFileTime(&t.submitted, &mut enviado) == 0 {
+                continue;
+            }
+            if super::esta_atascado(enviado.valor(), ahora.valor())
+                && SetJobW(hprinter, t.job_id, 0, std::ptr::null_mut(), JOB_CONTROL_DELETE) != 0
+            {
+                borrados += 1;
+            }
+        }
+        borrados
     }
 
     pub(super) fn to_wide(s: &str) -> Vec<u16> {
@@ -1144,6 +1362,22 @@ mod imp {
 
             // Cerramos siempre el handle, pase lo que pase.
             let result = (|| {
+                let purgados = purgar_atascados(hprinter);
+                if purgados > 0 {
+                    tracing::warn!(
+                        target: "tpv::impresion",
+                        purgados,
+                        "trabajos del TPV atascados en la cola de Windows, borrados"
+                    );
+                }
+                let no_disponible =
+                    estado(hprinter).and_then(|(status, atributos)| super::motivo_no_disponible(status, atributos));
+                if let Some(motivo) = no_disponible {
+                    return Err(format!(
+                        "La impresora «{printer_name}» está {motivo}. No se ha mandado nada a la \
+                         cola: vuelve a imprimir cuando esté lista."
+                    ));
+                }
                 let mut wdoc = to_wide(doc_name);
                 let mut wdatatype = to_wide("RAW");
                 let mut doc = DocInfo1W {
