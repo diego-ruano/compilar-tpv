@@ -44,6 +44,7 @@ pub async fn guardar(
         &input.hora,
         input.turno,
         input.comensales,
+        input.duracion_min,
         input.nota,
         input.estado,
         input.id_mesa,
@@ -55,7 +56,7 @@ pub async fn guardar(
     )
     .map_err(AppError::validation)?;
 
-    let ok = repo.guardar(validada).await?;
+    let ok = repo.guardar(validada, input.forzar_solape.unwrap_or(false)).await?;
 
     // Aviso "nueva reserva" a los administradores (SOLO en altas, no al editar). Best-effort.
     if ok && es_nueva {
@@ -120,7 +121,7 @@ mod tests {
         async fn mes(&self, _: &str, _: &str) -> AppResult<Vec<ReservaDto>> {
             panic!("repo llamado")
         }
-        async fn guardar(&self, _: ReservaValidada) -> AppResult<bool> {
+        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<bool> {
             panic!("repo llamado")
         }
         async fn buscar_cliente(
@@ -145,7 +146,7 @@ mod tests {
         async fn mes(&self, _: &str, _: &str) -> AppResult<Vec<ReservaDto>> {
             Ok(vec![])
         }
-        async fn guardar(&self, _: ReservaValidada) -> AppResult<bool> {
+        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<bool> {
             Ok(true)
         }
         async fn buscar_cliente(
@@ -182,6 +183,8 @@ mod tests {
             hora: "20:30".into(),
             turno: None,
             comensales: 2,
+            duracion_min: None,
+            forzar_solape: None,
             nota: None,
             estado: None,
             id_mesa: Some("m1".into()),

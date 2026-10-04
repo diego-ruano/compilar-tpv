@@ -63,6 +63,7 @@ export async function mes(
 				R.Hora AS hora,
 				R.Turno AS turno,
 				R.Comensales AS comensales,
+				R.Duracion_Min AS duracion_min,
 				R.Nota AS nota,
 				R.Estado AS estado,
 				C.ID_Cliente AS id_cliente,
@@ -85,28 +86,83 @@ export async function mes(
 	return rows(rs) as ReservaDto[];
 }
 
-// RES-02: ¿hay ya una reserva que ocupe el mismo hueco exacto (mesa+día+hora)? Excluye la
-// propia reserva (edición) y los estados que no ocupan (cancelada/no-show/finalizada). Espejo
-// de la comprobación autoritativa del repo local.
-export async function haySolapeReserva(
+/** RI-61: la duración por defecto y el modo de solape del negocio. Espejo de `ajustes_de_reserva`. */
+export async function ajustesDeReserva(
 	db: Client,
-	idMesa: string,
-	diaYmd: string,
-	hora: string,
-	idReservaExcluir: string | null,
-): Promise<boolean> {
-	const rs = await db.execute({
-		sql: `
-			SELECT 1
-			FROM Reservas
-			WHERE ID_Mesa = ?1 AND Dia_YMD = ?2 AND Hora = ?3
-				AND Estado NOT IN ('CANCELADA','NO_SHOW','FINALIZADA')
-				AND ID_Reserva <> ?4
-			LIMIT 1;
-		`,
-		args: [idMesa, diaYmd, hora, idReservaExcluir ?? ""],
-	});
-	return rows(rs).length > 0;
+): Promise<{ duracion: number; modo: "avisar" | "prohibir" }> {
+	const rs = await db.execute(
+		"SELECT Reserva_Duracion_Min AS duracion, Reserva_Solape AS modo FROM Business_Settings WHERE ID = 1;",
+	);
+	const r = rows(rs)[0] ?? {};
+	return {
+		duracion: Number(r.duracion) > 0 ? Number(r.duracion) : 120,
+		modo: r.modo === "prohibir" ? "prohibir" : "avisar",
+	};
+}
+
+// RI-61: el mismo SQL que `SQL_CHOQUE_RESERVA` y `SQL_CHOQUE_COMANDA` en la Main
+// (`tpv-infra-sqlite/src/reservas.rs`), donde está explicado. Tiene que seguir siéndolo.
+const SQL_CHOQUE_RESERVA = `
+	SELECT R.Hora AS desde,
+	       strftime('%H:%M', datetime(R.Dia_YMD || ' ' || R.Hora,
+	                                  '+' || COALESCE(R.Duracion_Min, ?5) || ' minutes')) AS hasta
+	FROM Reservas R
+	WHERE R.ID_Mesa = ?1
+	  AND R.ID_Reserva <> ?6
+	  AND R.Estado NOT IN ('CANCELADA','NO_SHOW','FINALIZADA')
+	  AND datetime(R.Dia_YMD || ' ' || R.Hora) < datetime(?2 || ' ' || ?3, '+' || ?4 || ' minutes')
+	  AND datetime(R.Dia_YMD || ' ' || R.Hora, '+' || COALESCE(R.Duracion_Min, ?5) || ' minutes')
+	      > datetime(?2 || ' ' || ?3)
+	ORDER BY R.Dia_YMD, R.Hora, R.ID_Reserva
+	LIMIT 1;
+`;
+
+const SQL_CHOQUE_COMANDA = `
+	SELECT strftime('%H:%M', C.Fecha_Hora_Apertura) AS desde
+	FROM Comandas C
+	WHERE C.ID_Mesa = ?1
+	  AND C.Estado = 'Abierta'
+	  AND datetime(C.Fecha_Hora_Apertura) < datetime(?2 || ' ' || ?3, '+' || ?4 || ' minutes')
+	  AND MAX(datetime(C.Fecha_Hora_Apertura, '+' || ?5 || ' minutes'), datetime('now','localtime'))
+	      > datetime(?2 || ' ' || ?3)
+	ORDER BY C.Fecha_Hora_Apertura, C.ID_Comanda
+	LIMIT 1;
+`;
+
+/** Mismo texto que `MSG_SOLAPE_PROHIBIDO` en la Main. */
+export const MSG_SOLAPE_PROHIBIDO =
+	"En este negocio no se pueden solapar reservas (Configuración → Reservas).";
+
+/**
+ * RI-61: con qué choca la reserva en su mesa, como frase para quien reserva, o `null`: otra reserva
+ * que se cruza con ella o una comanda abierta. Espejo de `choque_en_la_mesa` en la Main. Su
+ * `'now','localtime'` lo fija `tenantQuery` con la hora de quien reserva (REV-03).
+ */
+export async function choqueEnLaMesa(
+	db: Client,
+	r: {
+		id_mesa: string;
+		dia_ymd: string;
+		hora: string;
+		duracion_min: number | null;
+		id_reserva: string | null;
+	},
+	duracionDef: number,
+): Promise<string | null> {
+	const base = [r.id_mesa, r.dia_ymd, r.hora, r.duracion_min ?? duracionDef, duracionDef];
+
+	const reserva = rows(
+		await db.execute({ sql: SQL_CHOQUE_RESERVA, args: [...base, r.id_reserva ?? ""] }),
+	)[0];
+	if (reserva) {
+		return `Esa mesa ya tiene una reserva de ${reserva.desde} a ${reserva.hasta}.`;
+	}
+
+	const comanda = rows(await db.execute({ sql: SQL_CHOQUE_COMANDA, args: base }))[0];
+	if (comanda) {
+		return `Esa mesa está ocupada: tiene una comanda abierta desde las ${comanda.desde}.`;
+	}
+	return null;
 }
 
 export type ClienteExistente = {

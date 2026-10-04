@@ -440,6 +440,10 @@ WHERE Email IS NOT NULL AND Email <> '';
 -- ID_Mesa es NULL-able a proposito: se puede apuntar una reserva sin decidir todavia en que
 -- mesa se sienta. Una reserva sin mesa no sale en el plano (la meta filtra ID_Mesa IS NOT NULL)
 -- ni puede chocar con otra por el hueco: no ocupa nada hasta que se le asigna una.
+-- Duracion_Min (RI-61): cuanto ocupa la mesa, en minutos. NULL = la del negocio
+-- (Business_Settings.Reserva_Duracion_Min): asi, cambiar la duracion por defecto cambia la de
+-- todas las reservas que no eligieron la suya. Dos reservas de la misma mesa se pisan si se cruzan
+-- [Dia_YMD Hora, + Duracion_Min).
 CREATE TABLE IF NOT EXISTS Reservas (
   ID_Reserva TEXT NOT NULL PRIMARY KEY,
   ID_Cliente TEXT,
@@ -448,6 +452,7 @@ CREATE TABLE IF NOT EXISTS Reservas (
   Hora TEXT NOT NULL,
   Turno TEXT NOT NULL,
   Comensales INTEGER NOT NULL DEFAULT 1,
+  Duracion_Min INTEGER CHECK (Duracion_Min IS NULL OR Duracion_Min > 0),
   Nota TEXT,
   Estado TEXT NOT NULL DEFAULT 'ACTIVA',
   Created_At TEXT,
@@ -1100,8 +1105,14 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- docs/VERIFACTU_PENDIENTES.md): un interruptor que deja de declarar ventas no puede existir en un
   -- TPV que se venda.
   Modo_Prueba INTEGER NOT NULL DEFAULT 0,
+  -- RI-61: lo que dura una reserva que no elige su duracion (minutos), y que pasa cuando dos
+  -- reservas de la misma mesa se pisan: 'avisar' (se guarda si quien reserva lo confirma) o
+  -- 'prohibir'. Una comanda abierta en la mesa cuenta como ocupada desde que se abrio.
+  Reserva_Duracion_Min INTEGER NOT NULL DEFAULT 120 CHECK (Reserva_Duracion_Min > 0),
+  Reserva_Solape TEXT NOT NULL DEFAULT 'avisar',
   Updated_At TEXT,
-  CHECK (Verifactu_Entorno IN ('produccion','pruebas'))
+  CHECK (Verifactu_Entorno IN ('produccion','pruebas')),
+  CHECK (Reserva_Solape IN ('avisar','prohibir'))
 );
 
 INSERT OR IGNORE INTO Business_Settings (ID) VALUES (1);

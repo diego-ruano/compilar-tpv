@@ -29,6 +29,8 @@ export type ReservaRow = {
     Hora: string;
     Turno: string | null;
     Comensales: number;
+    /** Minutos que ocupa la mesa; `null` = la duración por defecto del negocio (RI-61). */
+    Duracion_Min: number | null;
     Nota: string | null;
     Estado: string;
 
@@ -56,6 +58,10 @@ export type ReservaSaveInput = {
     hora: string;
     turno?: Turno | null;
     comensales: number;
+    /** RI-61: minutos que ocupa la mesa; `null` = la del negocio. */
+    duracionMin?: number | null;
+    /** RI-61: guardar aunque se pise con lo que ocupa la mesa (tras el aviso `reserva_solapada`). */
+    forzarSolape?: boolean;
     nota?: string | null;
     estado?: string | null;
 
@@ -131,6 +137,7 @@ function mapReserva(r: ReservaDto): ReservaRow {
         Hora: String(r.hora ?? ""),
         Turno: toNullableStr(r.turno),
         Comensales: toNum(r.comensales, 0),
+        Duracion_Min: r.duracion_min ?? null,
         Nota: toNullableStr(r.nota),
         Estado: String(r.estado ?? "PROXIMA"),
 
@@ -172,6 +179,8 @@ export async function reservasSave(input: ReservaSaveInput): Promise<boolean> {
             hora: input.hora,
             turno,
             comensales: Number(input.comensales),
+            duracion_min: input.duracionMin ?? null,
+            forzar_solape: input.forzarSolape ?? false,
             nota: input.nota ?? null,
             estado: input.estado ?? null,
             id_mesa: input.idMesa,

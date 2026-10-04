@@ -138,7 +138,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let conn = &g;
         let mut rows = conn
             .query(
-                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre, Razon_Social, Descripcion_Op, Limite_Simplif, Verifactu_Entorno FROM Business_Settings WHERE ID=1 LIMIT 1;",
+                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre, Razon_Social, Descripcion_Op, Limite_Simplif, Verifactu_Entorno, Reserva_Duracion_Min, Reserva_Solape FROM Business_Settings WHERE ID=1 LIMIT 1;",
                 (),
             )
             .await
@@ -168,6 +168,14 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
                 .filter(|v| *v > Dinero::CERO)
                 .unwrap_or(tpv_domain::verifactu::LIMITE_SIMPLIFICADA_HOSTELERIA),
             verifactu_entorno: v_string(g(11)?).unwrap_or_else(|| "produccion".to_string()),
+            reserva_duracion_min: v_i64(g(12)?)
+                .filter(|m| *m > 0)
+                .unwrap_or(tpv_domain::reservas::DURACION_POR_DEFECTO_MIN),
+            reserva_solape: tpv_domain::reservas::ModoSolape::desde(
+                &v_string(g(13)?).unwrap_or_default(),
+            )
+            .como_texto()
+            .to_string(),
         })
     }
 
@@ -333,6 +341,26 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
                 };
                 sets.push("Verifactu_Entorno = ?");
                 args.push(Value::Text(v.to_string()));
+            }
+        }
+
+        // ── Reservas (RI-61) ────────────────────────────────────────────────────────────────────
+        if patch_has(patch, "reserva_duracion_min") {
+            if let Some(v) = patch_i64(patch, "reserva_duracion_min") {
+                // Una duración absurda (cero, o horas escritas como minutos) haría que todas las
+                // reservas sin duración propia chocasen o no chocasen nunca: se dice, no se guarda.
+                tpv_domain::reservas::duracion_valida(Some(v)).map_err(AppError::validation)?;
+                sets.push("Reserva_Duracion_Min = ?");
+                args.push(Value::Integer(v));
+            }
+        }
+        if patch_has(patch, "reserva_solape") {
+            if let Some(v) = patch_string(patch, "reserva_solape") {
+                // Como el entorno: el CHECK sólo admite dos valores, y aquí se normaliza.
+                sets.push("Reserva_Solape = ?");
+                args.push(Value::Text(
+                    tpv_domain::reservas::ModoSolape::desde(&v).como_texto().to_string(),
+                ));
             }
         }
 

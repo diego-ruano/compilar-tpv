@@ -46,6 +46,7 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	permiso_denegado: "permiso_denegado",
 	datos_fiscales_incompletos: "datos_fiscales_incompletos",
 	factura_completa_requerida: "factura_completa_requerida",
+	reserva_solapada: "reserva_solapada",
 	// FISCAL-01: la Handy no cobra, así que no emite registros — pero el veto de
 	// `applyViaHub` sí sale por aquí si alguna ruta futura lo intenta.
 	escritura_solo_en_main: "permiso_denegado",
@@ -110,6 +111,7 @@ const CODIGOS: Record<ErrorCode, true> = {
 	permiso_denegado: true,
 	datos_fiscales_incompletos: true,
 	factura_completa_requerida: true,
+	reserva_solapada: true,
 };
 
 export function esCodigoDelCatalogo(valor: unknown): valor is ErrorCode {
@@ -203,7 +205,10 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	caja_solo_en_main: "La caja sólo se gestiona desde el TPV principal.",
 	cobro_solo_en_main: "Los cobros sólo se hacen desde el TPV principal.",
 	recuperacion_solo_en_main: SOLO_EN_LA_MAIN,
-	reserva_solapada: "Ya existe una reserva en esa mesa para ese día y hora.",
+	// RI-61: la ruta manda su propia frase con las horas del choque; ésta es la de reserva.
+	reserva_solapada: "Esa mesa ya está ocupada a esa hora.",
+	reserva_solapada_prohibida:
+		"Esa mesa ya está ocupada a esa hora, y en este negocio no se pueden solapar reservas.",
 	// RI-61: el mismo texto que da la Main.
 	cliente_no_encontrado:
 		"Ese cliente ya no existe. Vuelve a buscarlo o guarda la reserva sin cliente.",

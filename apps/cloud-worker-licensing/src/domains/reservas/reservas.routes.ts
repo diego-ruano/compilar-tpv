@@ -39,18 +39,25 @@ reservasRoutes.get("/buscar-cliente", consulta(S.buscarClienteSchema), async (c)
 reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 	const datos = c.req.valid("json");
 
-	// RES-02: rechazar el doble booking del mismo hueco exacto (mesa+día+hora) antes de aplicar.
-	// Una reserva sin mesa no ocupa ningún hueco, así que no puede solaparse con nadie.
-	const solapa = datos.id_mesa
-		? await tenantQuery(c, (db) =>
-				q.haySolapeReserva(db, datos.id_mesa!, datos.dia_ymd, datos.hora, datos.id_reserva ?? null),
-			)
-		: false;
-	if (solapa) {
-		return c.json(
-			{ error: "reserva_solapada", message: "Ya existe una reserva en esa mesa para ese día y hora." },
-			409,
-		);
+	// RI-61: ¿se pisa con lo que ya ocupa la mesa (otra reserva o una comanda abierta)? Sin mesa no
+	// ocupa nada. Con los solapes prohibidos no se guarda; con «avisar», sólo si llega confirmado.
+	// La Main hace lo mismo dentro de su transacción.
+	if (datos.id_mesa) {
+		const idMesa = datos.id_mesa;
+		const choque = await tenantQuery(c, async (db) => {
+			const ajustes = await q.ajustesDeReserva(db);
+			const texto = await q.choqueEnLaMesa(db, { ...datos, id_mesa: idMesa }, ajustes.duracion);
+			return texto ? { texto, modo: ajustes.modo } : null;
+		});
+		if (choque?.modo === "prohibir") {
+			return c.json(
+				{ error: "reserva_solapada_prohibida", message: `${choque.texto} ${q.MSG_SOLAPE_PROHIBIDO}` },
+				409,
+			);
+		}
+		if (choque && !datos.forzar_solape) {
+			return c.json({ error: "reserva_solapada", message: choque.texto }, 409);
+		}
 	}
 
 	// RI-61: el cliente llega decidido (ninguno, uno existente o uno nuevo); aquí no se casa nada.

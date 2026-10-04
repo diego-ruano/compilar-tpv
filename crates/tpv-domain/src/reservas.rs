@@ -185,6 +185,51 @@ impl ClienteReserva {
     }
 }
 
+/// RI-61: lo que dura una reserva que no elige su duración, si el negocio no lo ha cambiado
+/// (`Business_Settings.Reserva_Duracion_Min`, el mismo valor por defecto).
+pub const DURACION_POR_DEFECTO_MIN: i64 = 120;
+
+/// Lo más que puede durar una reserva: un día entero. Más es una errata (horas por minutos).
+pub const DURACION_MAXIMA_MIN: i64 = 24 * 60;
+
+/// La duración propia de una reserva, en minutos: `None` es «la del negocio».
+pub fn duracion_valida(minutos: Option<i64>) -> Result<Option<i64>, String> {
+    match minutos {
+        None => Ok(None),
+        Some(m) if (1..=DURACION_MAXIMA_MIN).contains(&m) => Ok(Some(m)),
+        Some(_) => Err("La duración de la reserva tiene que estar entre 1 minuto y 24 horas".into()),
+    }
+}
+
+/// RI-61: qué pasa cuando una reserva se pisa con otra de la misma mesa (o con una comanda abierta
+/// en ella). Lo elige cada negocio en Configuración; por defecto, avisar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModoSolape {
+    /// Se avisa, y se guarda si quien reserva lo confirma.
+    Avisar,
+    /// No se guarda.
+    Prohibir,
+}
+
+impl ModoSolape {
+    /// Lo guardado en `Business_Settings.Reserva_Solape`. Cualquier otra cosa es avisar: es lo que
+    /// no le quita nada a nadie.
+    pub fn desde(s: &str) -> Self {
+        if s.trim().eq_ignore_ascii_case("prohibir") {
+            ModoSolape::Prohibir
+        } else {
+            ModoSolape::Avisar
+        }
+    }
+
+    pub fn como_texto(self) -> &'static str {
+        match self {
+            ModoSolape::Avisar => "avisar",
+            ModoSolape::Prohibir => "prohibir",
+        }
+    }
+}
+
 /// Reserva ya normalizada y validada, lista para persistir.
 /// `id = Some` => upsert por id (edición); `None` => alta nueva (autoincrement).
 #[derive(Debug, Clone)]
@@ -195,6 +240,8 @@ pub struct ReservaValidada {
     pub hora: String,
     pub turno: String,
     pub comensales: i64,
+    /// Minutos que ocupa la mesa; `None` = la duración por defecto del negocio (RI-61).
+    pub duracion_min: Option<i64>,
     pub nota: Option<String>,
     pub estado: String,
     pub cliente: ClienteReserva,
@@ -208,6 +255,7 @@ impl ReservaValidada {
         hora: &str,
         turno: Option<String>,
         comensales: i64,
+        duracion_min: Option<i64>,
         nota: Option<String>,
         estado: Option<String>,
         id_mesa: Option<String>,
@@ -225,6 +273,7 @@ impl ReservaValidada {
         if comensales <= 0 {
             return Err("Comensales inválidos".into());
         }
+        let duracion_min = duracion_valida(duracion_min)?;
         // Sin mesa es un estado válido: la reserva existe y ya se le asignará una.
         let id_mesa = limpia(id_mesa);
 
@@ -243,6 +292,7 @@ impl ReservaValidada {
             hora,
             turno,
             comensales,
+            duracion_min,
             nota: limpia(nota),
             estado,
             cliente,
@@ -305,7 +355,7 @@ mod tests {
     }
 
     fn reserva_base(id: Option<String>, comensales: i64, mesa: Option<&str>, nombre: &str) -> Result<ReservaValidada, String> {
-        ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.map(str::to_string), None, Some(nombre.into()), Some(" 600 ".into()), Some(" a@b.es ".into()), Some(" cliente habitual ".into()))
+        ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, None, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.map(str::to_string), None, Some(nombre.into()), Some(" 600 ".into()), Some(" a@b.es ".into()), Some(" cliente habitual ".into()))
     }
 
     fn email_de(r: &ReservaValidada) -> Option<String> {
@@ -323,7 +373,7 @@ mod tests {
     #[test]
     fn email_del_cliente_se_normaliza_a_minusculas() {
         let r = ReservaValidada::validar(
-            None, "2026-07-22", "14:30", None, 2, None, None,
+            None, "2026-07-22", "14:30", None, 2, None, None, None,
             Some("m1".into()), None, Some("Ana".into()), None, Some("  Juan@Mail.COM  ".into()), None,
         )
         .unwrap();
@@ -334,7 +384,7 @@ mod tests {
     fn email_vacio_o_ausente_queda_en_none() {
         for valor in [None, Some("".to_string()), Some("   ".to_string())] {
             let r = ReservaValidada::validar(
-                None, "2026-07-22", "14:30", None, 2, None, None,
+                None, "2026-07-22", "14:30", None, 2, None, None, None,
                 Some("m1".into()), None, Some("Ana".into()), None, valor, None,
             )
             .unwrap();
@@ -412,5 +462,26 @@ mod tests {
     fn reserva_sin_mesa_es_valida() {
         assert_eq!(reserva_base(None, 2, None, "Ana").unwrap().id_mesa, None);
         assert_eq!(reserva_base(None, 2, Some("   "), "Ana").unwrap().id_mesa, None);
+    }
+
+    /// RI-61: la duración propia de una reserva. Ninguna es «la del negocio»; una absurda (cero,
+    /// negativa o más de un día, que suele ser horas escritas como minutos) se rechaza.
+    #[test]
+    fn la_duracion_de_una_reserva_es_opcional_y_razonable() {
+        assert_eq!(duracion_valida(None), Ok(None));
+        assert_eq!(duracion_valida(Some(90)), Ok(Some(90)));
+        assert_eq!(duracion_valida(Some(DURACION_MAXIMA_MIN)), Ok(Some(DURACION_MAXIMA_MIN)));
+        for mala in [0, -30, DURACION_MAXIMA_MIN + 1] {
+            assert!(duracion_valida(Some(mala)).is_err(), "{mala} no debería valer");
+        }
+    }
+
+    #[test]
+    fn el_modo_de_solape_por_defecto_es_avisar() {
+        assert_eq!(ModoSolape::desde(" Prohibir "), ModoSolape::Prohibir);
+        for otro in ["avisar", "", "lo que sea"] {
+            assert_eq!(ModoSolape::desde(otro), ModoSolape::Avisar);
+        }
+        assert_eq!(ModoSolape::desde(ModoSolape::Prohibir.como_texto()), ModoSolape::Prohibir);
     }
 }

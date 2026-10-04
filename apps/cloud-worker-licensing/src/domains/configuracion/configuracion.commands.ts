@@ -91,6 +91,11 @@ export function patchContact(patch: Record<string, unknown>): BuiltCommand {
 	};
 }
 
+/** RI-61: espejo de `ModoSolape::desde`: lo que no sea «prohibir» es avisar. */
+export function modoSolape(v: unknown): "avisar" | "prohibir" {
+	return String(v ?? "").trim().toLowerCase() === "prohibir" ? "prohibir" : "avisar";
+}
+
 export function patchBusiness(patch: Record<string, unknown>): BuiltCommand {
 	const steps: any[] = [
 		{ kind: "execute", sql: "INSERT OR IGNORE INTO Business_Settings (ID) VALUES (1);" },
@@ -124,6 +129,21 @@ export function patchBusiness(patch: Record<string, unknown>): BuiltCommand {
 			});
 		}
 		add("Umbral_Descuadre", umbral.data);
+	}
+
+	// RI-61: los ajustes de reservas, espejo de `patch_business` en la Main. Una duración absurda
+	// (cero, o horas escritas como minutos) se rechaza; el modo se normaliza a sus dos valores.
+	if (patch.reserva_duracion_min != null) {
+		const m = Number(patch.reserva_duracion_min);
+		if (!Number.isInteger(m) || m < 1 || m > 24 * 60) {
+			throw new HubError("validation_error", 400, {
+				reserva_duracion_min: "La duración de la reserva tiene que estar entre 1 minuto y 24 horas",
+			});
+		}
+		add("Reserva_Duracion_Min", m);
+	}
+	if (patch.reserva_solape != null) {
+		add("Reserva_Solape", modoSolape(patch.reserva_solape));
 	}
 
 	// FISCAL-01. Los datos fiscales (`Razon_Social`, `Descripcion_Op`, `Limite_Simplif`,

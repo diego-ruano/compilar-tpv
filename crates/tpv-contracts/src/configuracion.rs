@@ -33,6 +33,13 @@ pub struct BusinessSettings {
     pub limite_simplif: Dinero,
     /// `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint del servicio web y la URL del QR.
     pub verifactu_entorno: String,
+
+    // ── Reservas (RI-61) ────────────────────────────────────────────────────────────────────────
+    /// Minutos que dura una reserva que no elige su duración.
+    #[ts(type = "number")]
+    pub reserva_duracion_min: i64,
+    /// `"avisar"` | `"prohibir"`: qué pasa cuando dos reservas de la misma mesa se pisan.
+    pub reserva_solape: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -183,6 +183,8 @@ import casoResExistente from "../../../tests/contract/casos/reservas/guardar_cli
 import goldenResExistente from "../../../tests/contract/golden/reservas/guardar_cliente_existente.json";
 import casoResSinMesa from "../../../tests/contract/casos/reservas/guardar_sin_mesa.json";
 import goldenResSinMesa from "../../../tests/contract/golden/reservas/guardar_sin_mesa.json";
+import casoResConDuracion from "../../../tests/contract/casos/reservas/guardar_con_duracion.json";
+import goldenResConDuracion from "../../../tests/contract/golden/reservas/guardar_con_duracion.json";
 import casoResSinCliente from "../../../tests/contract/casos/reservas/guardar_sin_cliente.json";
 import goldenResSinCliente from "../../../tests/contract/golden/reservas/guardar_sin_cliente.json";
 import casoResOtraPersona from "../../../tests/contract/casos/reservas/guardar_otra_persona_mismo_telefono.json";
@@ -309,6 +311,7 @@ const CASOS = [
 	{ nombre: "reservas_guardar_cliente_existente", caso: casoResExistente, golden: goldenResExistente },
 	{ nombre: "reservas_guardar_sin_mesa", caso: casoResSinMesa, golden: goldenResSinMesa },
 	{ nombre: "reservas_guardar_sin_cliente", caso: casoResSinCliente, golden: goldenResSinCliente },
+	{ nombre: "reservas_guardar_con_duracion", caso: casoResConDuracion, golden: goldenResConDuracion },
 	{
 		nombre: "reservas_guardar_otra_persona_mismo_telefono",
 		caso: casoResOtraPersona,

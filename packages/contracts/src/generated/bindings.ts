@@ -214,7 +214,15 @@ limite_simplif: Dinero,
 /**
  * `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint del servicio web y la URL del QR.
  */
-verifactu_entorno: string, };
+verifactu_entorno: string, 
+/**
+ * Minutos que dura una reserva que no elige su duración.
+ */
+reserva_duracion_min: number, 
+/**
+ * `"avisar"` | `"prohibir"`: qué pasa cuando dos reservas de la misma mesa se pisan.
+ */
+reserva_solape: string, };
 
 /**
  * Un cambio de caja que todavía no se ha hecho, para saber a qué cierres afectaría (CAJA-01).
@@ -531,7 +539,7 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
 /**
  * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
  */
-export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos" | "factura_completa_requerida";
+export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos" | "factura_completa_requerida" | "reserva_solapada";
 
 /**
  * A dónde llegan los códigos para recuperar el PIN.
@@ -1299,7 +1307,11 @@ export type ReservaBuscarClienteArgs = { telefono?: string, email?: string, };
  */
 export type ReservaDeleteInput = { id_reserva: string, };
 
-export type ReservaDto = { id_reserva: string, id_mesa: string, dia_ymd: string, hora: string, turno: string | null, comensales: number, nota: string | null, estado: string, 
+export type ReservaDto = { id_reserva: string, id_mesa: string, dia_ymd: string, hora: string, turno: string | null, comensales: number, 
+/**
+ * Minutos que ocupa la mesa; `None` = la duración por defecto del negocio (RI-61).
+ */
+duracion_min: number | null, nota: string | null, estado: string, 
 /**
  * `None` si la reserva no tiene cliente (RI-61); entonces `nombre_cliente` llega vacío.
  */
@@ -1310,7 +1322,17 @@ export type ReservaMesaOut = { idReserva: string, clienteNombre: string, diaYMD:
 /**
  * Entrada de guardado de reserva (Local-First: sin op_id/outbox/remote_id).
  */
-export type ReservaSaveInput = { id_reserva?: string, dia_ymd: string, hora: string, turno?: string, comensales: number, nota?: string, estado?: string, id_mesa?: string, 
+export type ReservaSaveInput = { id_reserva?: string, dia_ymd: string, hora: string, turno?: string, comensales: number, 
+/**
+ * RI-61: minutos que ocupa la mesa. Sin ella, la duración por defecto del negocio.
+ */
+duracion_min?: number, 
+/**
+ * RI-61: guardar aunque se pise con otra reserva de la mesa (o con una comanda abierta). Lo
+ * manda la pantalla después de enseñar el aviso `reserva_solapada` y de que se confirme. Con
+ * los solapes prohibidos no sirve de nada.
+ */
+forzar_solape?: boolean, nota?: string, estado?: string, id_mesa?: string, 
 /**
  * RI-61: el cliente es opcional y explícito. `id_cliente` asigna uno que ya existe (lo que se
  * escriba abajo sólo rellena sus huecos); sin id, un `nombre_cliente` crea uno nuevo; y sin

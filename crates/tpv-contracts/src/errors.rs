@@ -94,6 +94,13 @@ pub enum ErrorCode {
     /// fiscales y reintenta el mismo cobro con el NIF y el nombre. No es un fallo, es un dato que
     /// falta — y quien lo tiene es el cliente que está delante.
     FacturaCompletaRequerida,
+    /// La reserva **se pisa con otra de la misma mesa**, o la mesa tiene una comanda abierta en ese
+    /// rato, y el negocio tiene los solapes en «permitir con aviso» (RI-61).
+    ///
+    /// Tiene código propio porque la UI **hace algo distinto**: enseña el choque y ofrece «guardar
+    /// igualmente», que reenvía la misma reserva con `forzar_solape`. Con los solapes prohibidos
+    /// el rechazo es un `Conflict` normal: no hay nada que ofrecer.
+    ReservaSolapada,
 }
 
 impl ErrorCode {
@@ -104,7 +111,7 @@ impl ErrorCode {
     /// copias —la búsqueda de `from_code` y tres tests— y a las cuatro les faltaban los dos
     /// códigos fiscales, así que un `factura_completa_requerida` del worker llegaba como
     /// `external` y los tests que debían cazarlo recorrían la misma lista incompleta.
-    pub const TODOS: [ErrorCode; 19] = [
+    pub const TODOS: [ErrorCode; 20] = [
         ErrorCode::Validation,
         ErrorCode::NotFound,
         ErrorCode::Conflict,
@@ -124,6 +131,7 @@ impl ErrorCode {
         ErrorCode::PermisoDenegado,
         ErrorCode::DatosFiscalesIncompletos,
         ErrorCode::FacturaCompletaRequerida,
+        ErrorCode::ReservaSolapada,
     ];
 
     /// Mensaje por defecto, para cuando no hay detalle que añadir.
@@ -156,6 +164,7 @@ impl ErrorCode {
             ErrorCode::FacturaCompletaRequerida => {
                 "Este importe necesita factura completa: hacen falta el NIF y el nombre del cliente"
             }
+            ErrorCode::ReservaSolapada => "La reserva se pisa con otra de la misma mesa",
         }
     }
 
@@ -182,6 +191,7 @@ impl ErrorCode {
             ErrorCode::PermisoDenegado => "permiso_denegado",
             ErrorCode::DatosFiscalesIncompletos => "datos_fiscales_incompletos",
             ErrorCode::FacturaCompletaRequerida => "factura_completa_requerida",
+            ErrorCode::ReservaSolapada => "reserva_solapada",
         }
     }
 
@@ -237,6 +247,7 @@ impl ErrorCode {
             "permiso_denegado" => ErrorCode::PermisoDenegado,
             "datos_fiscales_incompletos" => ErrorCode::DatosFiscalesIncompletos,
             "factura_completa_requerida" => ErrorCode::FacturaCompletaRequerida,
+            "reserva_solapada" => ErrorCode::ReservaSolapada,
             _ => ErrorCode::External,
         }
     }

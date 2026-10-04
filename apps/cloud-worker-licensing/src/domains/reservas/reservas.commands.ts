@@ -105,6 +105,7 @@ function reservaArgs(input: ReservaSaveInput, idCliente: unknown, withId: boolea
 		input.comensales,
 		input.nota,
 		input.estado,
+		input.duracion_min ?? null,
 	];
 	return withId ? [input.id_reserva, ...args] : args;
 }
@@ -132,6 +133,7 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 					Comensales,
 					Nota,
 					Estado,
+					Duracion_Min,
 					Created_At
 				)
 				VALUES (
@@ -144,6 +146,7 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 					?7,
 					?8,
 					?9,
+					?10,
 					datetime('now','localtime')
 				)
 				ON CONFLICT(ID_Reserva) DO UPDATE SET
@@ -154,7 +157,8 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 					Turno = excluded.Turno,
 					Comensales = excluded.Comensales,
 					Nota = excluded.Nota,
-					Estado = excluded.Estado;
+					Estado = excluded.Estado,
+					Duracion_Min = excluded.Duracion_Min;
 			`,
 			args: reservaArgs(input, idCliente, true),
 		});
@@ -184,6 +188,7 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 					Comensales,
 					Nota,
 					Estado,
+					Duracion_Min,
 					Created_At
 				)
 				VALUES (
@@ -196,6 +201,7 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 					?7,
 					?8,
 					?9,
+					?10,
 					datetime('now','localtime')
 				);
 			`,

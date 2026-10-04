@@ -304,6 +304,7 @@ casos_de_contrato! {
     reservas__guardar_cliente_existente,
     reservas__guardar_sin_mesa,
     reservas__guardar_sin_cliente,
+    reservas__guardar_con_duracion,
     reservas__guardar_otra_persona_mismo_telefono,
     reservas__eliminar,
     venta_rapida__create_comanda_barra,
@@ -618,6 +619,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 hora: s(&e["hora"]),
                 turno: s(&e["turno"]),
                 comensales: e["comensales"].as_i64().unwrap(),
+                duracion_min: e["duracion_min"].as_i64(),
                 nota: opt_str(&e["nota"]),
                 estado: s(&e["estado"]),
                 // RI-61: el mismo reparto que hace la validación (y el schema del worker).
@@ -629,7 +631,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                     opt_str(&e["notas_cliente"]),
                 )
                 .expect("cliente de la reserva"),
-            })
+            }, e["forzar_solape"].as_bool().unwrap_or(false))
             .await
             .expect("guardar reserva");
         }

@@ -22,6 +22,9 @@ const TURNOS = new Set(["DESAYUNO", "COMIDA", "CAFE", "CENA"]);
 const MSG_CLIENTE_SIN_NOMBRE =
 	"Para dar de alta al cliente hace falta su nombre. Si no quieres ficha de cliente, deja vacíos el teléfono y el email.";
 
+/** Mismo texto que `duracion_valida` en la Main. */
+const MSG_DURACION = "La duración de la reserva tiene que estar entre 1 minuto y 24 horas";
+
 function cleanOrNull(v: unknown): string | null {
 	const s = String(v ?? "").trim();
 	return s.length ? s : null;
@@ -96,6 +99,15 @@ export const reservaSaveSchema = z
 		hora: z.any(),
 		turno: z.any().optional().nullable(),
 		comensales: positiveInt("comensales"),
+		// RI-61: minutos que ocupa la mesa (sin ella, la del negocio) y «guardar aunque se pise».
+		duracion_min: z.coerce
+			.number()
+			.int()
+			.min(1, MSG_DURACION)
+			.max(24 * 60, MSG_DURACION)
+			.optional()
+			.nullable(),
+		forzar_solape: z.boolean().optional().nullable(),
 		nota: z.any().optional().nullable(),
 		estado: z.any().optional().nullable(),
 		id_mesa: z.any().optional().nullable(),
@@ -149,6 +161,8 @@ export const reservaSaveSchema = z
 			hora,
 			turno,
 			comensales: v.comensales,
+			duracion_min: v.duracion_min ?? null,
+			forzar_solape: v.forzar_solape ?? false,
 			nota: cleanOrNull(v.nota),
 			estado,
 			id_mesa: cleanOrNull(v.id_mesa),
@@ -179,6 +193,8 @@ export const mesQuerySchema = z.object({
 type NullableReservaFields =
 	| "id_reserva"
 	| "id_mesa"
+	| "duracion_min"
+	| "forzar_solape"
 	| "id_cliente"
 	| "nombre_cliente"
 	| "turno"

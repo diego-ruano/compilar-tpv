@@ -19,7 +19,9 @@ import {
   reservasBuscarCliente,
   type Turno as TurnoApi,
 } from "../../features/reservas/reservasApis";
-import { toAppError } from "@tpv/client";
+import { esError, toAppError } from "@tpv/client";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
+import { etiquetaDuracion, horaFin, opcionesDuracion } from "../../features/reservas/duracion";
 import type { ClienteCoincidente } from "@tpv/contracts";
 import {
   useReservasMeta,
@@ -63,6 +65,8 @@ type ReservaUI = {
   email: string;
 
   comensales: number;
+  /** Minutos que ocupa la mesa; `null` = la duración por defecto del negocio (RI-61). */
+  duracionMin: number | null;
   nota: string;
 
   turno: Turno;
@@ -409,6 +413,7 @@ export default function Reservas() {
         email: String(r?.Email_Cliente ?? ""),
 
         comensales: Number(r?.Comensales ?? 1),
+        duracionMin: r?.Duracion_Min == null ? null : Number(r.Duracion_Min),
         nota: String(r?.Nota ?? ""),
         turno,
 
@@ -433,6 +438,8 @@ export default function Reservas() {
     email: string;
     hora: string;
     comensales: number;
+    /** `null` = la duración por defecto del negocio. */
+    duracionMin: number | null;
     nota: string;
     idZona: string;
     idMesa: string;
@@ -442,6 +449,7 @@ export default function Reservas() {
     email: "",
     hora: "14:00",
     comensales: 2,
+    duracionMin: null,
     nota: "",
     idZona: "",
     idMesa: "",
@@ -461,6 +469,12 @@ export default function Reservas() {
     coincidente: ClienteCoincidente;
     responder: (d: DecisionCliente) => void;
   } | null>(null);
+  // RI-61: «esa mesa ya tiene una reserva de 21:00 a 23:00. ¿Guardar igualmente?».
+  const [avisoSolape, setAvisoSolape] = useState<{
+    mensaje: string;
+    responder: (guardar: boolean) => void;
+  } | null>(null);
+  const duracionDefecto = useBusinessSettings((s) => s.reservaDuracionMin);
 
   const [confirmBorrar, setConfirmBorrar] = useState<{
     open: boolean;
@@ -600,6 +614,7 @@ export default function Reservas() {
       email: "",
       hora: "14:00",
       comensales: 2,
+      duracionMin: null,
       nota: "",
       idMesa: "",
     }));
@@ -624,6 +639,7 @@ export default function Reservas() {
         email: reserva.email ?? "",
         hora: reserva.hora,
         comensales: reserva.comensales,
+        duracionMin: reserva.duracionMin,
         nota: reserva.nota ?? "",
         idZona: reserva.idZona,
         idMesa: reserva.idMesa,
@@ -643,6 +659,18 @@ export default function Reservas() {
     setReservaEditandoId(null);
     setMostrarMapaMesas(false);
     resetFormulario();
+  }
+
+  function confirmarSolape(mensaje: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      setAvisoSolape({
+        mensaje,
+        responder: (guardar) => {
+          setAvisoSolape(null);
+          resolve(guardar);
+        },
+      });
+    });
   }
 
   function preguntarCliente(coincidente: ClienteCoincidente): Promise<DecisionCliente> {
@@ -719,19 +747,9 @@ export default function Reservas() {
     const turno: Turno = turnoPorHora(form.hora);
     const horaSql = normalizarHora(form.hora);
 
-    // RES-02: se bloquea el doble booking del hueco EXACTO (misma mesa + día + hora), no todo el
-    // turno: así una mesa puede reservarse varias veces en el mismo servicio a horas distintas.
-    const ocupada = !form.idMesa ? false : reservasMes.some((r) => {
-      if (!estadoBloqueaMesa(r.estado)) return false;
-      if (r.diaYMD !== seleccionadoClave) return false;
-      if (r.hora !== horaSql) return false;
-      if (r.idMesa !== form.idMesa) return false;
-      if (reservaEditandoId != null && r.id === reservaEditandoId) return false;
-      return true;
-    });
-
-    if (ocupada) return toast.error("Error", "Esa mesa ya tiene una reserva a esa hora.");
-
+    // RI-61: si la mesa ya está ocupada a esa hora lo decide el backend, con la duración de cada
+    // reserva y el modo del negocio (avisar o prohibir). Aquí sólo se comprobaba la misma hora
+    // exacta, y sin preguntar.
     try {
       const cliente = await decidirCliente();
       if (!cliente) return;
@@ -744,12 +762,13 @@ export default function Reservas() {
         ? (reservasMes.find((r) => r.id === reservaEditandoId)?.estado ?? null)
         : null;
 
-      const ok = await saveReserva.mutateAsync({
+      const datos = {
         idReserva: reservaEditandoId,
         diaYMD: seleccionadoClave,
         hora: horaSql,
         turno: turno as TurnoApi,
         comensales: Number(form.comensales),
+        duracionMin: form.duracionMin,
         nota: notaTrim ? notaTrim : null,
         estado: estadoActual,
 
@@ -760,7 +779,18 @@ export default function Reservas() {
         telefono: cliente.telefono,
         email: cliente.email,
         notasCliente: cliente.idCliente || cliente.nombreCliente ? notaTrim || null : null,
-      });
+      };
+
+      let ok: boolean;
+      try {
+        ok = await saveReserva.mutateAsync(datos);
+      } catch (err) {
+        // RI-61: con «permitir con aviso», el backend dice con qué choca y se guarda si se confirma.
+        // Con los solapes prohibidos llega como un conflicto normal y cae al aviso de abajo.
+        if (!esError(err, "reserva_solapada")) throw err;
+        if (!(await confirmarSolape(toAppError(err).message))) return;
+        ok = await saveReserva.mutateAsync({ ...datos, forzarSolape: true });
+      }
 
       if (!ok) return toast.error("Error", "No se pudo guardar la reserva.");
 
@@ -995,6 +1025,31 @@ export default function Reservas() {
 
                       <div className="sm:col-span-2">
                         <label className="mb-1 block text-[11px] font-bold text-fg-muted">
+                          Duración
+                        </label>
+                        <select
+                          value={form.duracionMin ?? ""}
+                          onChange={(e) =>
+                            setForm((p) => ({
+                              ...p,
+                              duracionMin: e.target.value === "" ? null : Number(e.target.value),
+                            }))
+                          }
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+                        >
+                          <option value="">
+                            La del negocio ({etiquetaDuracion(duracionDefecto)})
+                          </option>
+                          {opcionesDuracion(form.duracionMin).map((m) => (
+                            <option key={m} value={m}>
+                              {etiquetaDuracion(m)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Nota (opcional)
                         </label>
                         <input
@@ -1123,6 +1178,9 @@ export default function Reservas() {
                             HORA
                           </div>
                           <div className="text-lg font-extrabold tracking-wide">{r.hora}</div>
+                          <div className="text-[11px] font-semibold text-white/80">
+                            hasta {horaFin(r.hora, r.duracionMin ?? duracionDefecto)}
+                          </div>
                           <div className="mt-1 rounded-md border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-extrabold tracking-widest text-white">
                             {turnoLabel(r.turno)}
                           </div>
@@ -1189,6 +1247,38 @@ export default function Reservas() {
               )}
             </div>
           </div>
+
+          {avisoSolape && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4"
+              onClick={() => avisoSolape.responder(false)}
+            >
+              <div
+                className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-xl sm:p-5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-lg font-extrabold text-fg">La mesa está ocupada</div>
+                <div className="mt-2 text-sm text-fg-muted">{avisoSolape.mensaje}</div>
+                <div className="mt-2 text-sm text-fg-muted">¿Guardar la reserva igualmente?</div>
+                <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => avisoSolape.responder(false)}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-bold text-fg hover:bg-surface-2"
+                  >
+                    CANCELAR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => avisoSolape.responder(true)}
+                    className="rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:opacity-90"
+                  >
+                    GUARDAR IGUALMENTE
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {preguntaCliente && (
             <div

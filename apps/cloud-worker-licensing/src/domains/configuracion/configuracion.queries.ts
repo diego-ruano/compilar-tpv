@@ -61,7 +61,9 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 			Razon_Social AS razon_social,
 			Descripcion_Op AS descripcion_op,
 			Limite_Simplif AS limite_simplif,
-			Verifactu_Entorno AS verifactu_entorno
+			Verifactu_Entorno AS verifactu_entorno,
+			Reserva_Duracion_Min AS reserva_duracion_min,
+			Reserva_Solape AS reserva_solape
 		FROM Business_Settings
 		WHERE ID=1
 		LIMIT 1;
@@ -85,6 +87,10 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 		descripcion_op: String(r.descripcion_op ?? "Servicios de hosteleria y restauracion"),
 		limite_simplif: deLaBase(r.limite_simplif ?? 300_000),
 		verifactu_entorno: r.verifactu_entorno === "pruebas" ? "pruebas" : "produccion",
+		// RI-61: espejo de `get_business` en la Main.
+		reserva_duracion_min:
+			Number(r.reserva_duracion_min) > 0 ? Number(r.reserva_duracion_min) : 120,
+		reserva_solape: r.reserva_solape === "prohibir" ? "prohibir" : "avisar",
 	};
 }
 

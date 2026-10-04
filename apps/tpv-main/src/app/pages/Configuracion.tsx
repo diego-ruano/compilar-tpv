@@ -26,6 +26,7 @@ import { TextInput } from "../../features/configuracion/ui/Inputs";
 import { Negocio } from "../../features/configuracion/sections/Negocio";
 import { Fiscal } from "../../features/configuracion/sections/Fiscal";
 import { Contacto } from "../../features/configuracion/sections/Contacto";
+import { Reservas } from "../../features/configuracion/sections/Reservas";
 import { Ticket } from "../../features/configuracion/sections/Ticket";
 import { Licencia } from "../../features/configuracion/sections/Licencia";
 import { Apariencia } from "../../features/configuracion/sections/Apariencia";
@@ -149,6 +150,12 @@ export default function Configuracion() {
             title: "Contacto",
             desc: "Correo y teléfono de contacto",
             keywords: ["email", "correo", "teléfono", "soporte"],
+        },
+        {
+            key: "RESERVAS",
+            title: "Reservas",
+            desc: "Duración de una reserva y qué hacer si dos se pisan",
+            keywords: ["reservas", "duración", "solape", "mesa ocupada", "doble reserva"],
         },
         {
             key: "TICKET",
@@ -724,6 +731,10 @@ export default function Configuracion() {
                                                 saving={savingContact}
                                                 onSave={conAviso(onSaveContact)}
                                             />
+                                        ) : null}
+
+                                        {section === "RESERVAS" ? (
+                                            <Reservas inputTone={inputTone} />
                                         ) : null}
 
                                         {section === "APARIENCIA" ? (

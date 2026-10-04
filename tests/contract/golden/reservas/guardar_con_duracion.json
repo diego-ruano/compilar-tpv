@@ -1,0 +1,12 @@
+{
+  "Reservas": [
+    {
+      "Comensales": 3,
+      "Dia_YMD": "2026-02-04",
+      "Duracion_Min": 90,
+      "Hora": "13:30",
+      "ID_Mesa": "mesa-1",
+      "ID_Reserva": "reserva-1"
+    }
+  ]
+}

@@ -580,7 +580,7 @@ mod tests {
     /// Las tablas locales del dispositivo (`_…`) no guardan dinero y no se miran.
     const INTEGER_QUE_NO_ES_DINERO: &[(&str, &[&str])] = &[
         ("Applied_Operations", &["Created_At_Ms", "Applied_At_Ms", "Updated_At_Ms"]),
-        ("Business_Settings", &["Modo_Prueba"]),
+        ("Business_Settings", &["Modo_Prueba", "Reserva_Duracion_Min"]),
         ("Categorias_Producto", &["Vendible", "Pasa_Cocina"]),
         ("Cierre_Denominaciones", &["Unidades"]),
         ("Cuentas_Gastos", &["Pagado_Con_Caja"]),
@@ -590,7 +590,7 @@ mod tests {
         ("Intentos_Login", &["Intentos_Fallidos", "Bloqueado_Hasta_Ms", "Ultimo_Intento_Ms"]),
         ("Mesas", &["Capacidad", "Ubicacion_X", "Ubicacion_Y", "Width", "Height", "Radius"]),
         ("Registros_Facturacion", &["Orden", "Numero"]),
-        ("Reservas", &["Comensales"]),
+        ("Reservas", &["Comensales", "Duracion_Min"]),
         ("Serie_Facturacion", &["Ultimo"]),
         ("Sync_Changes", &["Created_At_Ms"]),
         ("Sync_Main_Checkpoints", &["Last_Seq", "Updated_At_Ms"]),

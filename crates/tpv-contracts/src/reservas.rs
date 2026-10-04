@@ -38,6 +38,9 @@ pub struct ReservaDto {
     pub turno: Option<String>,
     #[ts(type = "number")]
     pub comensales: i64,
+    /// Minutos que ocupa la mesa; `None` = la duración por defecto del negocio (RI-61).
+    #[ts(type = "number | null")]
+    pub duracion_min: Option<i64>,
     pub nota: Option<String>,
     pub estado: String,
 
@@ -78,6 +81,16 @@ pub struct ReservaSaveInput {
 
     #[ts(type = "number")]
     pub comensales: i64,
+    /// RI-61: minutos que ocupa la mesa. Sin ella, la duración por defecto del negocio.
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub duracion_min: Option<i64>,
+    /// RI-61: guardar aunque se pise con otra reserva de la mesa (o con una comanda abierta). Lo
+    /// manda la pantalla después de enseñar el aviso `reserva_solapada` y de que se confirme. Con
+    /// los solapes prohibidos no sirve de nada.
+    #[serde(default)]
+    #[ts(optional)]
+    pub forzar_solape: Option<bool>,
     #[serde(default)]
     #[ts(optional)]
     pub nota: Option<String>,

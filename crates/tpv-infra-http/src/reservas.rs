@@ -37,7 +37,7 @@ impl ReservasRepository for HttpReservasRepository {
             .await
     }
 
-    async fn guardar(&self, reserva: ReservaValidada) -> AppResult<bool> {
+    async fn guardar(&self, reserva: ReservaValidada, forzar_solape: bool) -> AppResult<bool> {
         // RI-61: el cliente viaja decidido, en los mismos campos que la entrada de la pantalla, y el
         // worker lo resuelve igual que la Main (`resolverCliente`).
         let generado = reserva.id.is_none().then_some("id_reserva");
@@ -60,6 +60,8 @@ impl ReservasRepository for HttpReservasRepository {
             "hora": reserva.hora,
             "turno": reserva.turno,
             "comensales": reserva.comensales,
+            "duracion_min": reserva.duracion_min,
+            "forzar_solape": forzar_solape,
             "nota": reserva.nota,
             "estado": reserva.estado,
             "id_mesa": reserva.id_mesa,

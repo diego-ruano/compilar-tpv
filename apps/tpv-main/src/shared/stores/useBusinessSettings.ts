@@ -22,6 +22,9 @@ const DEFAULTS: BusinessSettings = {
     descripcionOp: "Servicios de hosteleria y restauracion",
     limiteSimplif: deCentimos(300_000),
     verifactuEntorno: "produccion",
+    // RI-61: los mismos valores por defecto que el esquema.
+    reservaDuracionMin: 120,
+    reservaSolape: "avisar",
 };
 
 type BusinessSettingsState = BusinessSettings & {

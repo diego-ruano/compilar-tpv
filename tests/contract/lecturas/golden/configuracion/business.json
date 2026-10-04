@@ -8,6 +8,8 @@
   "logo_data_url": null,
   "mensaje_footer": "Hasta pronto",
   "razon_social": "",
+  "reserva_duracion_min": 120,
+  "reserva_solape": "avisar",
   "telefono": "961111111",
   "umbral_descuadre": 1250,
   "verifactu_entorno": "produccion"

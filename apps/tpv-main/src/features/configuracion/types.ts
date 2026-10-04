@@ -12,6 +12,8 @@ export type SectionKey =
 	/** FISCAL-01 (Veri*factu): datos del obligado, certificado y estado del envío a la AEAT. */
 	| "FISCAL"
 	| "CONTACTO"
+	/** RI-61: duración por defecto de una reserva y qué hacer cuando dos se pisan. */
+	| "RESERVAS"
 	| "TICKET"
 	| "LICENCIA"
 	| "APARIENCIA"

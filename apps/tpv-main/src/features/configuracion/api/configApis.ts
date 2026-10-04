@@ -46,6 +46,12 @@ export type BusinessSettings = {
     limiteSimplif: Dinero;
     /** `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint y la URL del QR del papel. */
     verifactuEntorno: string;
+
+    // ── Reservas (RI-61) ────────────────────────────────────────────────────────────────────
+    /** Minutos que dura una reserva que no elige su duración. */
+    reservaDuracionMin: number;
+    /** Qué pasa cuando dos reservas de la misma mesa se pisan. */
+    reservaSolape: "avisar" | "prohibir";
 };
 
 export type TicketSettings = {
@@ -106,6 +112,8 @@ function mapBizFromRust(x: BusinessSettingsDto): BusinessSettings {
         descripcionOp: x.descripcion_op,
         limiteSimplif: x.limite_simplif,
         verifactuEntorno: x.verifactu_entorno === "pruebas" ? "pruebas" : "produccion",
+        reservaDuracionMin: x.reserva_duracion_min,
+        reservaSolape: x.reserva_solape === "prohibir" ? "prohibir" : "avisar",
     };
 }
 
@@ -122,6 +130,8 @@ function mapBizPatchToRust(patch: BusinessSettingsPatch): Record<string, any> {
     if ("descripcionOp" in patch) out.descripcion_op = patch.descripcionOp;
     if ("limiteSimplif" in patch) out.limite_simplif = patch.limiteSimplif;
     if ("verifactuEntorno" in patch) out.verifactu_entorno = patch.verifactuEntorno;
+    if ("reservaDuracionMin" in patch) out.reserva_duracion_min = patch.reservaDuracionMin;
+    if ("reservaSolape" in patch) out.reserva_solape = patch.reservaSolape;
     return out;
 }
 
