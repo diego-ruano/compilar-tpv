@@ -84,8 +84,9 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
     }, []);
 
     /**
-     * Copia guardada fuera del equipo (un USB). Es la única salida cuando el disco ha muerto: las
-     * copias diarias viven en el mismo disco que protegen, y la nube no guarda la PII del personal.
+     * Copia guardada fuera del equipo (un USB). Cuando el disco ha muerto es la única forma de
+     * recuperar lo que no llegó a subir a la nube: las copias diarias viven en el mismo disco que
+     * protegen. (La PII del personal sí vuelve de la nube, cifrada: RI-41, TRAB-03.)
      * Se importa al almacén local y se restaura por el MISMO camino que las demás, con sus mismas
      * guardias, en vez de abrir una segunda vía de restauración.
      */
