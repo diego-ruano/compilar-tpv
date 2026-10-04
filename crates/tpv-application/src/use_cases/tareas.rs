@@ -73,9 +73,10 @@ pub async fn create_tarea(
 
     let ok = repo.create_tarea(data, ids_trabajadores.clone()).await?;
 
-    // Emisión best-effort de "tarea_asignada" a cada usuario asignado. Solo hay Notifier en modo
-    // Main (SQLite local); en Handy (creación vía HTTP a la nube) es None y se omite — la emisión
-    // server-side es un follow-up. Un fallo emitiendo NO tumba la creación de la tarea.
+    // Emisión best-effort de "tarea_asignada" a cada usuario asignado. El Notifier va según el
+    // modo: en la Main escribe en local y en la Handy va por HTTP al worker, así que se avisa
+    // igual se cree donde se cree. `None` sólo si todavía no hay modo ni base. Un fallo emitiendo
+    // NO tumba la creación de la tarea.
     if ok {
         if let Some(notifier) = notifier {
             emitir_a_trabajadores(

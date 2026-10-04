@@ -63,7 +63,8 @@ pub async fn tareas_create_tarea(
     args: CreateTareaInput,
 ) -> Result<bool, AppErrorDto> {
     let repo = state.tareas_repo().await?;
-    // El Notifier solo existe en modo Main (SQLite local); en Handy es `None` y no se emite localmente.
+    // El Notifier va según el modo (SQLite en la Main, HTTP al worker en la Handy). `None` sólo si
+    // todavía no hay modo ni base: entonces se crea la tarea sin avisar.
     let notifier = state.notifier().await.ok();
     Ok(uc::create_tarea(repo.as_ref(), notifier.as_deref(), args).await?)
 }
