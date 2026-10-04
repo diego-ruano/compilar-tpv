@@ -190,11 +190,6 @@ export function patchTicket(patch: Record<string, unknown>): BuiltCommand {
 	addBool("show_business_name", "Show_BusinessName");
 	addBool("show_address", "Show_Address");
 	addBool("show_phone", "Show_Phone");
-	addBool("show_cif", "Show_CIF");
-	addBool("show_date_time", "Show_DateTime");
-	addBool("show_line_items", "Show_LineItems");
-	addBool("show_base_and_iva", "Show_BaseAndIVA");
-	addBool("show_total", "Show_Total");
 	addBool("show_footer_message", "Show_FooterMessage");
 
 	function addNum(key: string, col: string, clamp: (v: unknown) => number | null) {

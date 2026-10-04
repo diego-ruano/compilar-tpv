@@ -1128,17 +1128,15 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
 
 INSERT OR IGNORE INTO Business_Settings (ID) VALUES (1);
 
+-- Solo se puede ocultar lo que no es obligatorio en una factura (RI-29): el logo, el rotulo, la
+-- direccion, el telefono y el mensaje final. El NIF y la razon social del emisor, la fecha, las
+-- lineas, el tipo de IVA y el total salen siempre, asi que no tienen interruptor.
 CREATE TABLE IF NOT EXISTS Ticket_Settings (
   ID INTEGER PRIMARY KEY CHECK (ID = 1),
   Show_Logo INTEGER NOT NULL DEFAULT 1,
   Show_BusinessName INTEGER NOT NULL DEFAULT 1,
   Show_Address INTEGER NOT NULL DEFAULT 1,
   Show_Phone INTEGER NOT NULL DEFAULT 1,
-  Show_CIF INTEGER NOT NULL DEFAULT 1,
-  Show_DateTime INTEGER NOT NULL DEFAULT 1,
-  Show_LineItems INTEGER NOT NULL DEFAULT 1,
-  Show_BaseAndIVA INTEGER NOT NULL DEFAULT 1,
-  Show_Total INTEGER NOT NULL DEFAULT 1,
   Show_FooterMessage INTEGER NOT NULL DEFAULT 1,
   Paper_Width_Mm INTEGER NOT NULL DEFAULT 80,
   Paper_Dpi INTEGER NOT NULL DEFAULT 203,

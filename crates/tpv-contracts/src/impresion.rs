@@ -58,6 +58,8 @@ pub struct PrintTicketPayload {
     pub iva_percent: f64,
 
     // ── Flags de personalización ──
+    // Sólo lo que una factura no exige (RI-29). El NIF, la fecha, las líneas, el desglose de IVA y
+    // el total no tienen interruptor: salen siempre.
     #[serde(default)]
     pub show_logo: bool,
     /// Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
@@ -71,16 +73,6 @@ pub struct PrintTicketPayload {
     pub show_address: bool,
     #[serde(default)]
     pub show_phone: bool,
-    #[serde(default)]
-    pub show_cif: bool,
-    #[serde(default)]
-    pub show_date_time: bool,
-    #[serde(default)]
-    pub show_line_items: bool,
-    #[serde(default)]
-    pub show_base_and_iva: bool,
-    #[serde(default)]
-    pub show_total: bool,
     #[serde(default)]
     pub show_footer_message: bool,
 

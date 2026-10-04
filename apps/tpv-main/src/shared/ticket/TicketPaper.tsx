@@ -123,11 +123,7 @@ export default function TicketPaper({
     const showHeaderName = settings.showBusinessName;
     const showAddress = settings.showAddress && !!direccion;
     const showPhone = settings.showPhone && !!telefono;
-    const showCif = settings.showCif && !!cif;
-    const showDateTime = settings.showDateTime;
-    const showItems = settings.showLineItems;
-    const showBaseIva = settings.showBaseAndIva;
-    const showTotalLine = settings.showTotal;
+    const showCif = !!cif;
     const showFooter = settings.showFooterMessage;
 
     return (
@@ -199,28 +195,13 @@ export default function TicketPaper({
 
                 <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
 
-                {showDateTime ? (
-                    <>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span>{fechaStr}</span>
-                            <span>VENTA</span>
-                        </div>
-                        <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
-                    </>
-                ) : (
-                    <>
-                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                            <span>VENTA</span>
-                        </div>
-                        <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
-                    </>
-                )}
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>{fechaStr}</span>
+                    <span>VENTA</span>
+                </div>
+                <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
 
-                {!showItems ? (
-                    <div style={{ textAlign: "center", opacity: 0.7, padding: "8px 0" }}>
-                        (Líneas de productos ocultas)
-                    </div>
-                ) : empty ? (
+                {empty ? (
                     <div style={{ textAlign: "center", opacity: 0.65, padding: "10px 0" }}>
                         No hay productos en el ticket.
                     </div>
@@ -250,8 +231,7 @@ export default function TicketPaper({
 
                 <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
 
-                {showBaseIva ? (
-                    <>
+                <>
                         {tramosIva.length <= 1 ? (
                             // Un solo tipo (el caso normal): como toda la vida, sin convertir el
                             // ticket en una tabla por algo que no aporta nada.
@@ -282,18 +262,13 @@ export default function TicketPaper({
                                 </React.Fragment>
                             ))
                         )}
-                    </>
-                ) : null}
+                </>
 
-                {showTotalLine ? (
-                    <>
-                        <div style={{ borderTop: "1px solid #000", margin: "10px 0" }} />
-                        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 900, fontSize: 14 }}>
-                            <span>TOTAL</span>
-                            <span>{eur(total)}</span>
-                        </div>
-                    </>
-                ) : null}
+                <div style={{ borderTop: "1px solid #000", margin: "10px 0" }} />
+                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 900, fontSize: 14 }}>
+                    <span>TOTAL</span>
+                    <span>{eur(total)}</span>
+                </div>
 
                 {showFooter ? (
                     <>

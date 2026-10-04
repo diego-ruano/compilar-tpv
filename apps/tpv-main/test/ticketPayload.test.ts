@@ -179,18 +179,13 @@ describe("personalización y datos del cobro", () => {
 		expect(buildTicketPayload([]).logo_path).toBeUndefined();
 	});
 
-	it("las once casillas del panel llegan al payload", () => {
+	it("las cinco casillas del panel llegan al payload", () => {
 		// Si una se quedara por el camino, la configuración del usuario se ignoraría en silencio.
 		const apagado = {
 			showLogo: false,
 			showBusinessName: false,
 			showAddress: false,
 			showPhone: false,
-			showCif: false,
-			showDateTime: false,
-			showLineItems: false,
-			showBaseAndIva: false,
-			showTotal: false,
 			showFooterMessage: false,
 		};
 		useTicketSettings.setState({
@@ -204,11 +199,6 @@ describe("personalización y datos del cobro", () => {
 			"show_business_name",
 			"show_address",
 			"show_phone",
-			"show_cif",
-			"show_date_time",
-			"show_line_items",
-			"show_base_and_iva",
-			"show_total",
 			"show_footer_message",
 		] as const) {
 			expect(p[clave], clave).toBe(false);

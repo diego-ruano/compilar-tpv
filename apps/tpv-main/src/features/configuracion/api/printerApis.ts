@@ -121,11 +121,6 @@ export function buildTicketPayload(
         show_business_name: t.showBusinessName,
         show_address: t.showAddress,
         show_phone: t.showPhone,
-        show_cif: t.showCif,
-        show_date_time: t.showDateTime,
-        show_line_items: t.showLineItems,
-        show_base_and_iva: t.showBaseAndIva,
-        show_total: t.showTotal,
         show_footer_message: t.showFooterMessage,
 
         paper_width_mm: t.paperWidthMm,

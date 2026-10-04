@@ -590,7 +590,7 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     if p.show_phone && !p.telefono.trim().is_empty() {
         text_wrap(&mut out, &format!("Tel: {}", p.telefono), cols);
     }
-    if p.show_cif && !p.cif.trim().is_empty() {
+    if !p.cif.trim().is_empty() {
         text_wrap(&mut out, &format!("CIF: {}", p.cif), cols);
     }
 
@@ -603,12 +603,8 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
         Some(n) if !n.trim().is_empty() => n.trim().to_string(),
         _ => "PRECUENTA".to_string(),
     };
-    if p.show_date_time {
-        let fecha = chrono::Local::now().format("%d/%m/%Y %H:%M").to_string();
-        text_line(&mut out, &line_two(&fecha, &etiqueta, cols));
-    } else {
-        text_line(&mut out, &line_two("", &etiqueta, cols));
-    }
+    let fecha = chrono::Local::now().format("%d/%m/%Y %H:%M").to_string();
+    text_line(&mut out, &line_two(&fecha, &etiqueta, cols));
 
     // Origen y método: es lo que permite encontrar el cobro después (una devolución, un arqueo).
     if let Some(o) = p.origen.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
@@ -656,18 +652,13 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
 
     sep(&mut out, cols);
 
-    // Total siempre se calcula de los items, aunque las líneas estén ocultas.
     let total: Dinero = p
         .items
         .iter()
         .map(|it| it.precio_unitario.por(it.cantidad as i64))
         .sum();
 
-    if !p.show_line_items {
-        esc_align(&mut out, 1);
-        text_wrap(&mut out, "(Lineas de productos ocultas)", cols);
-        esc_align(&mut out, 0);
-    } else if p.items.is_empty() {
+    if p.items.is_empty() {
         esc_align(&mut out, 1);
         text_wrap(&mut out, "No hay productos en el ticket.", cols);
         esc_align(&mut out, 0);
@@ -685,53 +676,49 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     sep(&mut out, cols);
 
     // ── Base + IVA ──
-    if p.show_base_and_iva {
-        let tramos = desglose_iva(p);
-        match tramos.as_slice() {
-            // Sin líneas: el ticket sigue enseñando su base y su IVA a cero, como toda la vida.
-            [] => {
-                text_line(&mut out, &line_two("BASE", &fmt_eur(Dinero::CERO), cols));
+    let tramos = desglose_iva(p);
+    match tramos.as_slice() {
+        // Sin líneas: el ticket sigue enseñando su base y su IVA a cero, como toda la vida.
+        [] => {
+            text_line(&mut out, &line_two("BASE", &fmt_eur(Dinero::CERO), cols));
+            text_line(
+                &mut out,
+                &line_two(&format!("IVA ({}%)", fmt_pct(p.iva_percent)), &fmt_eur(Dinero::CERO), cols),
+            );
+        }
+        // Un solo tipo (el caso de un bar normal): se imprime como toda la vida, sin convertir
+        // el ticket en una tabla por algo que no aporta nada.
+        [TramoIva { tipo, base, cuota }] => {
+            text_line(&mut out, &line_two("BASE", &fmt_eur(*base), cols));
+            text_line(
+                &mut out,
+                &line_two(&format!("IVA ({}%)", fmt_pct(*tipo)), &fmt_eur(*cuota), cols),
+            );
+        }
+        // Varios tramos: hay que verlos por separado. Un ticket con comida al reducido y algo
+        // envasado para llevar al general no se puede resumir en una sola cifra.
+        _ => {
+            for TramoIva { tipo, base, cuota } in &tramos {
                 text_line(
                     &mut out,
-                    &line_two(&format!("IVA ({}%)", fmt_pct(p.iva_percent)), &fmt_eur(Dinero::CERO), cols),
+                    &line_two(&format!("BASE ({}%)", fmt_pct(*tipo)), &fmt_eur(*base), cols),
                 );
-            }
-            // Un solo tipo (el caso de un bar normal): se imprime como toda la vida, sin convertir
-            // el ticket en una tabla por algo que no aporta nada.
-            [TramoIva { tipo, base, cuota }] => {
-                text_line(&mut out, &line_two("BASE", &fmt_eur(*base), cols));
                 text_line(
                     &mut out,
                     &line_two(&format!("IVA ({}%)", fmt_pct(*tipo)), &fmt_eur(*cuota), cols),
                 );
             }
-            // Varios tramos: hay que verlos por separado. Un ticket con comida al reducido y algo
-            // envasado para llevar al general no se puede resumir en una sola cifra.
-            _ => {
-                for TramoIva { tipo, base, cuota } in &tramos {
-                    text_line(
-                        &mut out,
-                        &line_two(&format!("BASE ({}%)", fmt_pct(*tipo)), &fmt_eur(*base), cols),
-                    );
-                    text_line(
-                        &mut out,
-                        &line_two(&format!("IVA ({}%)", fmt_pct(*tipo)), &fmt_eur(*cuota), cols),
-                    );
-                }
-            }
         }
     }
 
     // ── Total ──
-    if p.show_total {
-        sep(&mut out, cols);
-        esc_bold(&mut out, true);
-        esc_size(&mut out, 0x11);
-        // Con tamaño doble caben la mitad de columnas.
-        text_line(&mut out, &line_two("TOTAL", &fmt_eur(total), cols / 2));
-        esc_size(&mut out, base_size);
-        esc_bold(&mut out, false);
-    }
+    sep(&mut out, cols);
+    esc_bold(&mut out, true);
+    esc_size(&mut out, 0x11);
+    // Con tamaño doble caben la mitad de columnas.
+    text_line(&mut out, &line_two("TOTAL", &fmt_eur(total), cols / 2));
+    esc_size(&mut out, base_size);
+    esc_bold(&mut out, false);
 
     // ── Mensaje final ──
     if p.show_footer_message {

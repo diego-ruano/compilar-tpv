@@ -1102,7 +1102,7 @@ printer_name?: string, business_name: string, direccion: string, telefono: strin
  * Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
  * no el builder: aquí dentro no se toca el disco.
  */
-logo_path?: string, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, 
+logo_path?: string, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_footer_message: boolean, 
 /**
  * URL exacta que va dentro del código QR tributario. Sale de la fila de
  * `Registros_Facturacion` (`QR_Url`), **no se compone aquí**: es la misma cadena que se
@@ -1551,7 +1551,7 @@ origen: string, lineas: Array<LineaTicketDto>,
  */
 anulado: boolean, };
 
-export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, paper_width_mm: number, 
+export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_footer_message: boolean, paper_width_mm: number, 
 /**
  * DPI de la impresora térmica (203 | 300). Usado para convertir márgenes mm→dots/líneas.
  */

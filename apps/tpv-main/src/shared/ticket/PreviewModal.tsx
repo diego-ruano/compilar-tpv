@@ -76,7 +76,6 @@ export default function TicketPreviewModal({
 	const { settings } = useTicketSettings();
 
 	const empty = items.length === 0;
-	const showItems = settings.showLineItems;
 
 	return (
 		<Modal open={open} onClose={onClose} title={titulo} maxWidthClass="max-w-[980px]">
@@ -90,9 +89,9 @@ export default function TicketPreviewModal({
 						type="button"
 						className={cn(
 							"px-4 py-3 rounded-xl font-bold transition",
-							empty || !showItems ? "bg-black/10 text-black/40 cursor-not-allowed" : "bg-black text-white hover:bg-black/90",
+							empty ? "bg-black/10 text-black/40 cursor-not-allowed" : "bg-black text-white hover:bg-black/90",
 						)}
-						disabled={empty || !showItems}
+						disabled={empty}
 						onClick={() => onPrint?.()}
 					>
 						Imprimir

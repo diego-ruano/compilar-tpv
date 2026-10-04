@@ -145,8 +145,9 @@ export function Ticket({
                             Consejo
                         </div>
                         <div className="text-sm text-fg-muted mt-1">
-                            Si desactivas “Mostrar base e IVA”, el IVA no se
-                            imprime pero sigue siendo el configurado.
+                            Es el tipo de los productos que no tienen uno
+                            propio. La base y el IVA de cada tipo salen
+                            siempre en el ticket.
                         </div>
                     </div>
                 </div>
@@ -271,35 +272,14 @@ export function Ticket({
                         label="Mostrar teléfono"
                     />
                     <Checkbox
-                        checked={ticket.showCif}
-                        onChange={(v) => setSetting("showCif", v)}
-                        label="Mostrar CIF"
-                    />
-                    <Checkbox
-                        checked={ticket.showDateTime}
-                        onChange={(v) => setSetting("showDateTime", v)}
-                        label="Mostrar fecha/hora"
-                    />
-                    <Checkbox
-                        checked={ticket.showLineItems}
-                        onChange={(v) => setSetting("showLineItems", v)}
-                        label="Mostrar líneas de productos"
-                    />
-                    <Checkbox
-                        checked={ticket.showBaseAndIva}
-                        onChange={(v) => setSetting("showBaseAndIva", v)}
-                        label="Mostrar base e IVA"
-                    />
-                    <Checkbox
-                        checked={ticket.showTotal}
-                        onChange={(v) => setSetting("showTotal", v)}
-                        label="Mostrar total"
-                    />
-                    <Checkbox
                         checked={ticket.showFooterMessage}
                         onChange={(v) => setSetting("showFooterMessage", v)}
                         label="Mostrar mensaje final"
                     />
+                </div>
+                <div className="mt-2 text-xs text-fg-muted">
+                    El CIF, la fecha, las líneas, la base y el IVA y el total
+                    salen siempre: los exige la factura.
                 </div>
 
                 {/* ✅ NUEVO: el mensaje final se edita aquí */}

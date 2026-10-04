@@ -28,6 +28,9 @@ logo → corte.**
 
 ## Reglas
 
+- **Lo que exige una factura no se puede ocultar.** Configuración sólo apaga el logo, el rótulo, la
+  dirección, el teléfono y el mensaje final; el NIF, la fecha, las líneas, el desglose de IVA y el
+  total salen siempre (RI-29).
 - **El ancho manda.** `cols_efectivas()` sale del papel (58 / 80 / 112 mm: 32 / 48 / 64 columnas), los
   márgenes y `chars_per_line`. Nada se maqueta con anchos fijos: un nombre largo se trunca contra ese
   ancho.

@@ -49,11 +49,6 @@ pub struct TicketSettings {
     pub show_business_name: bool,
     pub show_address: bool,
     pub show_phone: bool,
-    pub show_cif: bool,
-    pub show_date_time: bool,
-    pub show_line_items: bool,
-    pub show_base_and_iva: bool,
-    pub show_total: bool,
     pub show_footer_message: bool,
     #[ts(type = "number")]
     pub paper_width_mm: i64,

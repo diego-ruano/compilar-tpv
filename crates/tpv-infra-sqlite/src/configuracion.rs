@@ -184,7 +184,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let conn = &g;
         let mut rows = conn
             .query(
-                "SELECT Show_Logo, Show_BusinessName, Show_Address, Show_Phone, Show_CIF, Show_DateTime, Show_LineItems, Show_BaseAndIVA, Show_Total, Show_FooterMessage, Paper_Width_Mm, Paper_Dpi, Chars_Per_Line, Margin_Top_Mm, Margin_Bottom_Mm, Margin_Left_Mm, Margin_Right_Mm, Font_Scale FROM Ticket_Settings WHERE ID=1 LIMIT 1;",
+                "SELECT Show_Logo, Show_BusinessName, Show_Address, Show_Phone, Show_FooterMessage, Paper_Width_Mm, Paper_Dpi, Chars_Per_Line, Margin_Top_Mm, Margin_Bottom_Mm, Margin_Left_Mm, Margin_Right_Mm, Font_Scale FROM Ticket_Settings WHERE ID=1 LIMIT 1;",
                 (),
             )
             .await
@@ -198,29 +198,24 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             Ok(value_to_bool(row.get_value(idx).map_err(db_err)?).unwrap_or(true))
         };
         let paper_width_mm =
-            clamp_paper_width_mm(v_i64(row.get_value(10).map_err(db_err)?).unwrap_or(80));
-        let paper_dpi = clamp_paper_dpi(v_i64(row.get_value(11).map_err(db_err)?).unwrap_or(203));
+            clamp_paper_width_mm(v_i64(row.get_value(5).map_err(db_err)?).unwrap_or(80));
+        let paper_dpi = clamp_paper_dpi(v_i64(row.get_value(6).map_err(db_err)?).unwrap_or(203));
         let chars_per_line =
-            clamp_chars_per_line(v_i64(row.get_value(12).map_err(db_err)?).unwrap_or(42));
-        let margin_top_mm = clamp_margin_mm(v_f64(row.get_value(13).map_err(db_err)?).unwrap_or(0.0));
+            clamp_chars_per_line(v_i64(row.get_value(7).map_err(db_err)?).unwrap_or(42));
+        let margin_top_mm = clamp_margin_mm(v_f64(row.get_value(8).map_err(db_err)?).unwrap_or(0.0));
         let margin_bottom_mm =
-            clamp_margin_mm(v_f64(row.get_value(14).map_err(db_err)?).unwrap_or(0.0));
+            clamp_margin_mm(v_f64(row.get_value(9).map_err(db_err)?).unwrap_or(0.0));
         let margin_left_mm =
-            clamp_margin_mm(v_f64(row.get_value(15).map_err(db_err)?).unwrap_or(0.0));
+            clamp_margin_mm(v_f64(row.get_value(10).map_err(db_err)?).unwrap_or(0.0));
         let margin_right_mm =
-            clamp_margin_mm(v_f64(row.get_value(16).map_err(db_err)?).unwrap_or(0.0));
-        let font_scale = clamp_font_scale(v_f64(row.get_value(17).map_err(db_err)?).unwrap_or(1.0));
+            clamp_margin_mm(v_f64(row.get_value(11).map_err(db_err)?).unwrap_or(0.0));
+        let font_scale = clamp_font_scale(v_f64(row.get_value(12).map_err(db_err)?).unwrap_or(1.0));
         Ok(TicketSettings {
             show_logo: getb(0)?,
             show_business_name: getb(1)?,
             show_address: getb(2)?,
             show_phone: getb(3)?,
-            show_cif: getb(4)?,
-            show_date_time: getb(5)?,
-            show_line_items: getb(6)?,
-            show_base_and_iva: getb(7)?,
-            show_total: getb(8)?,
-            show_footer_message: getb(9)?,
+            show_footer_message: getb(4)?,
             paper_width_mm,
             paper_dpi,
             chars_per_line,
@@ -444,11 +439,6 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             ("show_business_name", "Show_BusinessName = ?"),
             ("show_address", "Show_Address = ?"),
             ("show_phone", "Show_Phone = ?"),
-            ("show_cif", "Show_CIF = ?"),
-            ("show_date_time", "Show_DateTime = ?"),
-            ("show_line_items", "Show_LineItems = ?"),
-            ("show_base_and_iva", "Show_BaseAndIVA = ?"),
-            ("show_total", "Show_Total = ?"),
             ("show_footer_message", "Show_FooterMessage = ?"),
         ] {
             if let Some(v) = patch_bool(patch, key) {

@@ -597,8 +597,7 @@ mod tests {
         (
             "Ticket_Settings",
             &[
-                "Show_Logo", "Show_BusinessName", "Show_Address", "Show_Phone", "Show_CIF",
-                "Show_DateTime", "Show_LineItems", "Show_BaseAndIVA", "Show_Total",
+                "Show_Logo", "Show_BusinessName", "Show_Address", "Show_Phone",
                 "Show_FooterMessage", "Paper_Width_Mm", "Paper_Dpi", "Chars_Per_Line",
             ],
         ),

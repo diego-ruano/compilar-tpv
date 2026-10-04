@@ -59,11 +59,6 @@ export type TicketSettings = {
     showBusinessName: boolean;
     showAddress: boolean;
     showPhone: boolean;
-    showCif: boolean;
-    showDateTime: boolean;
-    showLineItems: boolean;
-    showBaseAndIva: boolean;
-    showTotal: boolean;
     showFooterMessage: boolean;
     paperWidthMm: number;
 
@@ -141,11 +136,6 @@ function mapTicketFromRust(x: TicketSettingsDto): TicketSettings {
         showBusinessName: x.show_business_name,
         showAddress: x.show_address,
         showPhone: x.show_phone,
-        showCif: x.show_cif,
-        showDateTime: x.show_date_time,
-        showLineItems: x.show_line_items,
-        showBaseAndIva: x.show_base_and_iva,
-        showTotal: x.show_total,
         showFooterMessage: x.show_footer_message,
         paperWidthMm: clampPaperWidthMm(x.paper_width_mm),
         paperDpi: clampPaperDpi(x.paper_dpi),
@@ -164,11 +154,6 @@ function mapTicketPatchToRust(patch: TicketSettingsPatch): Record<string, any> {
     if ("showBusinessName" in patch) out.show_business_name = patch.showBusinessName;
     if ("showAddress" in patch) out.show_address = patch.showAddress;
     if ("showPhone" in patch) out.show_phone = patch.showPhone;
-    if ("showCif" in patch) out.show_cif = patch.showCif;
-    if ("showDateTime" in patch) out.show_date_time = patch.showDateTime;
-    if ("showLineItems" in patch) out.show_line_items = patch.showLineItems;
-    if ("showBaseAndIva" in patch) out.show_base_and_iva = patch.showBaseAndIva;
-    if ("showTotal" in patch) out.show_total = patch.showTotal;
     if ("showFooterMessage" in patch) out.show_footer_message = patch.showFooterMessage;
     if ("paperWidthMm" in patch) {
         out.paper_width_mm = clampPaperWidthMm(Number(patch.paperWidthMm));

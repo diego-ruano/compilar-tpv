@@ -12,11 +12,6 @@ const DEFAULTS: TicketSettings = {
     showBusinessName: true,
     showAddress: true,
     showPhone: true,
-    showCif: true,
-    showDateTime: true,
-    showLineItems: true,
-    showBaseAndIva: true,
-    showTotal: true,
     showFooterMessage: true,
 
     // ✅ NUEVO (schema): ancho del papel en mm

@@ -26,8 +26,7 @@ mod fixtures {
         Dinero::de_euros(euros)
     }
 
-    /// Payload con TODO apagado salvo lo que interviene en el dinero (líneas, base+IVA y total).
-    /// Cada test enciende lo suyo.
+    /// Payload con todo lo opcional apagado. Cada test enciende lo suyo.
     pub fn payload(iva_negocio: f64, items: Vec<PrintTicketLine>) -> PrintTicketPayload {
         PrintTicketPayload {
             printer_name: None,
@@ -42,11 +41,6 @@ mod fixtures {
             show_business_name: false,
             show_address: false,
             show_phone: false,
-            show_cif: false,
-            show_date_time: false,
-            show_line_items: true,
-            show_base_and_iva: true,
-            show_total: true,
             show_footer_message: false,
             qr_url: None,
             qr_pruebas: false,
@@ -259,8 +253,7 @@ mod tests_desglose_iva {
 
     #[test]
     fn el_ticket_con_dos_tipos_imprime_base_e_iva_de_cada_uno() {
-        let mut p = payload(10.0, vec![linea_de(11.0, 1, None), linea_de(12.1, 1, Some(21.0))]);
-        p.show_base_and_iva = true;
+        let p = payload(10.0, vec![linea_de(11.0, 1, None), linea_de(12.1, 1, Some(21.0))]);
         let bytes = build_ticket(&p, None);
 
         assert!(contiene(&bytes, "BASE (10%)"));
@@ -1371,19 +1364,6 @@ mod tests_cuadre {
     }
 
     #[test]
-    fn el_total_no_depende_de_que_las_lineas_se_vean() {
-        // Hay quien imprime el ticket sin detalle. El total tiene que ser el mismo papel a papel.
-        let items = vec![linea_de(1.1, 3, None), linea_de(2.45, 1, None)];
-        let con = build_ticket(&payload(10.0, items.clone()), None);
-
-        let mut sin_lineas = payload(10.0, items);
-        sin_lineas.show_line_items = false;
-        let sin = build_ticket(&sin_lineas, None);
-
-        assert_eq!(valor(&con, "TOTAL"), valor(&sin, "TOTAL"));
-    }
-
-    #[test]
     fn un_ticket_sin_productos_imprime_cero_y_lo_dice() {
         let bytes = build_ticket(&payload(10.0, vec![]), None);
 
@@ -1416,9 +1396,10 @@ mod tests_cuadre {
 mod tests_secciones {
     //! Qué sale y qué no según la personalización, y que nada se salga del papel.
     //!
-    //! Cada casilla del panel de configuración apaga o enciende un trozo del ticket. Son once
-    //! interruptores que nadie prueba a mano uno por uno, y un ticket al que le falta el CIF o el
-    //! mensaje del pie es una queja del cliente, no un fallo visible en desarrollo.
+    //! Cada casilla del panel de configuración apaga o enciende un trozo del ticket. Son cinco
+    //! interruptores que nadie prueba a mano uno por uno, y un ticket al que le falta el mensaje del
+    //! pie es una queja del cliente, no un fallo visible en desarrollo. Lo que una factura exige no
+    //! tiene casilla (RI-29), y eso también se fija aquí.
 
     use super::fixtures::*;
     use super::*;
@@ -1438,8 +1419,6 @@ mod tests_secciones {
         p.mensaje_footer = "Vuelva pronto".into();
         p.show_address = true;
         p.show_phone = true;
-        p.show_cif = true;
-        p.show_date_time = true;
         p.show_footer_message = true;
         p
     }
@@ -1452,10 +1431,7 @@ mod tests_secciones {
             ("Bar", |p| p.show_business_name = false),
             ("Calle Mayor 1", |p| p.show_address = false),
             ("600123456", |p| p.show_phone = false),
-            ("B12345678", |p| p.show_cif = false),
             ("Vuelva pronto", |p| p.show_footer_message = false),
-            ("BASE", |p| p.show_base_and_iva = false),
-            ("TOTAL", |p| p.show_total = false),
         ];
 
         for (texto, apagar) in casos {
@@ -1498,13 +1474,18 @@ mod tests_secciones {
     }
 
     #[test]
-    fn ocultar_las_lineas_lo_dice_en_vez_de_dejar_un_hueco() {
+    fn lo_que_exige_una_factura_sale_con_todo_lo_opcional_apagado() {
+        // RI-29: el NIF del emisor, las líneas, el desglose de IVA y el total no tienen casilla.
         let mut p = completo();
-        p.show_line_items = false;
+        p.show_business_name = false;
+        p.show_address = false;
+        p.show_phone = false;
+        p.show_footer_message = false;
         let bytes = build_ticket(&p, None);
 
-        assert!(contiene(&bytes, "ocultas"));
-        assert!(!contiene(&bytes, "Cafe"));
+        for texto in ["B12345678", "Cafe", "BASE", "IVA (10%)", "TOTAL"] {
+            assert!(contiene(&bytes, texto), "debería imprimir {texto:?}");
+        }
     }
 
     #[test]

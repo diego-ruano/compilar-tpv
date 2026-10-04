@@ -1,8 +1,8 @@
 {
-  "descripcion": "La configuracion del ticket: que se imprime y con que medidas. Son una docena de flags booleanos guardados como enteros, y ahi es donde los dos runtimes pueden discrepar (0/1 frente a false/true). Se apagan la mitad a proposito, porque con todos a 1 un lado que ignorase la columna acertaria por accidente.",
+  "descripcion": "La configuracion del ticket: que se imprime y con que medidas. Son media docena de flags booleanos guardados como enteros, y ahi es donde los dos runtimes pueden discrepar (0/1 frente a false/true). Se apagan la mitad a proposito, porque con todos a 1 un lado que ignorase la columna acertaria por accidente.",
   "lectura": "configuracion.ticket",
   "seed": [
-    "UPDATE Ticket_Settings SET Show_Logo=0, Show_BusinessName=1, Show_Address=0, Show_Phone=1, Show_CIF=0, Show_DateTime=1, Show_LineItems=1, Show_BaseAndIVA=0, Show_Total=1, Show_FooterMessage=0, Paper_Width_Mm=58, Chars_Per_Line=32, Margin_Left_Mm=2.5 WHERE ID=1;"
+    "UPDATE Ticket_Settings SET Show_Logo=0, Show_BusinessName=1, Show_Address=0, Show_Phone=1, Show_FooterMessage=0, Paper_Width_Mm=58, Chars_Per_Line=32, Margin_Left_Mm=2.5 WHERE ID=1;"
   ],
   "entrada": {},
   "omitir": [
