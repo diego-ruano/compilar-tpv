@@ -19,7 +19,6 @@ use crate::error::{AppError, AppResult};
 use crate::ports::licensing::LicensingService;
 use crate::ports::notificaciones::Notifier;
 
-const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const HORA_MS: i64 = 60 * 60 * 1000;
 
 fn now_ms() -> i64 {
@@ -118,9 +117,32 @@ pub async fn check_now(svc: &dyn LicensingService) -> AppResult<LicenseGateResul
     comprobar(svc, true).await
 }
 
-/// Emite (best-effort) avisos a los administradores según el veredicto del gate. Dedupe temporal:
-/// avisos de licencia una vez al DÍA; el de gracia offline una vez cada 4 H (recordatorio insistente
-/// para no jugársela a que se olvide). El estado real (permitir/bloquear) NO se toca aquí.
+/// Claves de los avisos de licencia, una por concepto (RI-12). Antes llevaban el día o una franja
+/// de 4 h (`licencia_warn:{día}`, `gracia_offline:{franja}`): cada franja abría un aviso nuevo sin
+/// cerrar el anterior, hasta 18 de «sin conexión» en las 72 h de gracia, y nadie los resolvía.
+/// Ahora hay uno por concepto, que se actualiza al volver a emitirlo y se resuelve cuando deja de
+/// aplicar. Lo que cuenta hacia atrás (los días hasta caducar, las horas de gracia) va en el TÍTULO:
+/// es lo que hace que vuelva a salir como no leído en cada pulso, el recordatorio que antes daba
+/// abrir uno nuevo cada día o cada franja.
+const CLAVE_POR_CADUCAR: &str = "licencia_warn";
+const CLAVE_CADUCADA: &str = "licencia_gracia";
+const CLAVE_GRACIA_OFFLINE: &str = "gracia_offline";
+const CLAVE_RELOJ: &str = "reloj_desfasado";
+
+/// Qué aviso corresponde a cada motivo del gate.
+const AVISOS: [(&str, &str); 4] = [
+    ("warn", CLAVE_POR_CADUCAR),
+    ("expiry_grace", CLAVE_CADUCADA),
+    ("offline_grace", CLAVE_GRACIA_OFFLINE),
+    ("clock_skew_detected", CLAVE_RELOJ),
+];
+
+/// Emite (best-effort) avisos a los administradores según el veredicto del gate, y cierra los que
+/// ya no aplican. El estado real (permitir/bloquear) NO se toca aquí.
+///
+/// Sólo se cierra lo demás cuando el servidor ha contestado (`ok`, `warn`, `expiry_grace`): sin
+/// conexión o con el reloj rechazado no se sabe cómo está la licencia, y en la Handy cada cierre
+/// sería una llamada más a una nube que no responde.
 ///
 /// `zona` es la del equipo (`Local`): «hoy» y «mañana» son fechas de quien lee el aviso.
 async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
@@ -132,9 +154,17 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
     let Some(state) = res.state.as_ref() else {
         return;
     };
-    let dia = ahora_ms / DAY_MS; // índice de día → dedupe diario sin formatear fecha
 
-    match res.reason.as_str() {
+    let motivo = res.reason.as_str();
+    if matches!(motivo, "ok" | "warn" | "expiry_grace") {
+        for (otro, clave) in AVISOS {
+            if otro != motivo {
+                let _ = notifier.resolver_por_clave(clave).await;
+            }
+        }
+    }
+
+    match motivo {
         // Licencia por caducar (estado firmado `warn` del servidor).
         "warn" => {
             let cuando = match state
@@ -150,14 +180,12 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
                 .emitir(NuevaNotificacion {
                     tipo: "licencia_por_expirar".to_string(),
                     severidad: Severidad::Aviso,
-                    titulo: "Licencia por caducar".to_string(),
-                    cuerpo: Some(format!(
-                        "Tu licencia caduca {cuando}. Renuévala para evitar el bloqueo."
-                    )),
+                    titulo: format!("Tu licencia caduca {cuando}"),
+                    cuerpo: Some("Renuévala para evitar el bloqueo.".to_string()),
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: Some("ver_licencia".to_string()),
                     payload: None,
-                    clave_dedupe: Some(format!("licencia_warn:{dia}")),
+                    clave_dedupe: Some(CLAVE_POR_CADUCAR.to_string()),
                     expira_en: None,
                 })
                 .await;
@@ -177,29 +205,30 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: Some("ver_licencia".to_string()),
                     payload: None,
-                    clave_dedupe: Some(format!("licencia_gracia:{dia}")),
+                    clave_dedupe: Some(CLAVE_CADUCADA.to_string()),
                     expira_en: None,
                 })
                 .await;
         }
-        // Sin conexión con el servidor: corriendo con la gracia offline (72 h). Recordar cada 4 h.
+        // Sin conexión con el servidor: corriendo con la gracia offline (72 h). Las horas que
+        // quedan van en el título y cambian en cada pulso: cada uno lo vuelve a poner como no leído.
         "offline_grace" => {
             let base = dom::base_gracia(state.last_check_ok_ms, state.activated_at_ms);
             let restante_ms = (dom::GRACIA_OFFLINE_MS - (ahora_ms - base)).max(0);
             let horas = horas_ceil(restante_ms);
-            let bucket = ahora_ms / (4 * HORA_MS);
             let _ = notifier
                 .emitir(NuevaNotificacion {
                     tipo: "gracia_offline".to_string(),
                     severidad: Severidad::Aviso,
-                    titulo: "Sin conexión con licencias".to_string(),
-                    cuerpo: Some(format!(
-                        "No se ha podido verificar la licencia. Quedan ~{horas} h de funcionamiento sin conexión antes de bloquear."
-                    )),
+                    titulo: format!("Sin conexión con licencias: quedan ~{horas} h"),
+                    cuerpo: Some(
+                        "No se ha podido verificar la licencia. Cuando se acabe ese tiempo sin conexión, la aplicación se bloqueará."
+                            .to_string(),
+                    ),
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: None,
                     payload: None,
-                    clave_dedupe: Some(format!("gracia_offline:{bucket}")),
+                    clave_dedupe: Some(CLAVE_GRACIA_OFFLINE.to_string()),
                     expira_en: None,
                 })
                 .await;
@@ -208,7 +237,6 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
         // Va aparte de `offline_grace` a propósito: decirle «no hay conexión» a alguien cuyo
         // problema es la hora le manda a mirar el router.
         "clock_skew_detected" => {
-            let bucket = ahora_ms / (4 * HORA_MS);
             let _ = notifier
                 .emitir(NuevaNotificacion {
                     tipo: "reloj_desfasado".to_string(),
@@ -221,7 +249,7 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: None,
                     payload: None,
-                    clave_dedupe: Some(format!("reloj_desfasado:{bucket}")),
+                    clave_dedupe: Some(CLAVE_RELOJ.to_string()),
                     expira_en: None,
                 })
                 .await;
@@ -349,9 +377,12 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::Mutex;
 
+    const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
     #[derive(Default)]
     struct FakeNotifier {
         emitidas: Mutex<Vec<NuevaNotificacion>>,
+        resueltas: Mutex<Vec<String>>,
     }
     #[async_trait]
     impl Notifier for FakeNotifier {
@@ -359,7 +390,8 @@ mod tests {
             self.emitidas.lock().unwrap().push(n);
             Ok("n".into())
         }
-        async fn resolver_por_clave(&self, _: &str) -> AppResult<bool> {
+        async fn resolver_por_clave(&self, clave: &str) -> AppResult<bool> {
+            self.resueltas.lock().unwrap().push(clave.to_string());
             Ok(false)
         }
     }
@@ -408,15 +440,54 @@ mod tests {
         let e = n.emitidas.lock().unwrap();
         assert_eq!(e.len(), 3);
         assert_eq!(e[0].tipo, "licencia_por_expirar");
-        assert!(e[0].clave_dedupe.as_deref().unwrap().starts_with("licencia_warn:"));
+        assert_eq!(e[0].clave_dedupe.as_deref(), Some("licencia_warn"));
         assert_eq!(e[1].tipo, "licencia_caducada");
-        assert!(e[1].clave_dedupe.as_deref().unwrap().starts_with("licencia_gracia:"));
+        assert_eq!(e[1].clave_dedupe.as_deref(), Some("licencia_gracia"));
         assert_eq!(e[2].tipo, "gracia_offline");
-        assert!(e[2].clave_dedupe.as_deref().unwrap().starts_with("gracia_offline:"));
+        assert_eq!(e[2].clave_dedupe.as_deref(), Some("gracia_offline"));
         assert!(e.iter().all(|n| n.destino == Destino::Rol(ADMIN_ROL_ID.to_string())));
     }
 
-    /// El cuerpo del aviso de una licencia que caduca en `caducidad`, visto en `ahora`. Las dos
+    /// RI-12: una clave por concepto, que no cambia con el día ni con la franja: si cambiara, cada
+    /// pulso abriría un aviso nuevo en vez de actualizar el que hay.
+    #[tokio::test]
+    async fn la_clave_no_cambia_con_el_tiempo() {
+        let zona = chrono::Utc;
+        let n = FakeNotifier::default();
+        for ahora in [1_000 * DAY_MS, 1_000 * DAY_MS + 5 * HORA_MS, 1_002 * DAY_MS] {
+            let mut s = state_con_expiry(None);
+            s.last_check_ok_ms = Some(1_000 * DAY_MS);
+            s.activated_at_ms = 1_000 * DAY_MS;
+            avisar_estado_licencia(&n, &result("offline_grace", s), ahora, &zona).await;
+        }
+        let e = n.emitidas.lock().unwrap();
+        assert!(e.iter().all(|n| n.clave_dedupe.as_deref() == Some("gracia_offline")));
+    }
+
+    /// RI-12: cuando el servidor contesta, se cierran los avisos que ya no aplican. Sin conexión no
+    /// se sabe cómo está la licencia, así que no se cierra nada.
+    #[tokio::test]
+    async fn cierra_los_avisos_que_ya_no_aplican() {
+        let ahora = 1_000 * DAY_MS;
+        let zona = chrono::Utc;
+
+        let n = FakeNotifier::default();
+        avisar_estado_licencia(&n, &result("ok", state_con_expiry(None)), ahora, &zona).await;
+        let mut r = n.resueltas.lock().unwrap().clone();
+        r.sort();
+        assert_eq!(r, ["gracia_offline", "licencia_gracia", "licencia_warn", "reloj_desfasado"]);
+
+        let n = FakeNotifier::default();
+        avisar_estado_licencia(&n, &result("warn", state_con_expiry(Some(ahora + 3 * DAY_MS))), ahora, &zona).await;
+        assert!(!n.resueltas.lock().unwrap().contains(&"licencia_warn".to_string()));
+        assert_eq!(n.resueltas.lock().unwrap().len(), 3);
+
+        let n = FakeNotifier::default();
+        avisar_estado_licencia(&n, &result("offline_grace", state_con_expiry(None)), ahora, &zona).await;
+        assert!(n.resueltas.lock().unwrap().is_empty());
+    }
+
+    /// El título del aviso de una licencia que caduca en `caducidad`, visto en `ahora`. Las dos
     /// son (día de septiembre de 2026, hora, minuto) en `zona`.
     async fn aviso_por_caducar(
         zona: &chrono::FixedOffset,
@@ -429,8 +500,8 @@ mod tests {
         let n = FakeNotifier::default();
         let res = result("warn", state_con_expiry(Some(ms(caducidad))));
         avisar_estado_licencia(&n, &res, ms(ahora), zona).await;
-        let cuerpo = n.emitidas.lock().unwrap()[0].cuerpo.clone().unwrap();
-        cuerpo
+        let titulo = n.emitidas.lock().unwrap()[0].titulo.clone();
+        titulo
     }
 
     #[tokio::test]
@@ -439,15 +510,15 @@ mod tests {
         let zona = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
         for (ahora, caducidad, esperado) in [
             // Quince horas: redondeadas hacia arriba eran «mañana», y es hoy.
-            ((15, 8, 0), (15, 23, 0), "Tu licencia caduca hoy."),
-            ((15, 0, 5), (15, 23, 59), "Tu licencia caduca hoy."),
+            ((15, 8, 0), (15, 23, 0), "Tu licencia caduca hoy"),
+            ((15, 0, 5), (15, 23, 59), "Tu licencia caduca hoy"),
             // Cuarenta y cinco minutos, pero pasada la medianoche: es mañana.
-            ((15, 23, 45), (16, 0, 30), "Tu licencia caduca mañana."),
-            ((15, 8, 0), (16, 23, 59), "Tu licencia caduca mañana."),
-            ((15, 23, 0), (18, 1, 0), "Tu licencia caduca en 3 días."),
+            ((15, 23, 45), (16, 0, 30), "Tu licencia caduca mañana"),
+            ((15, 8, 0), (16, 23, 59), "Tu licencia caduca mañana"),
+            ((15, 23, 0), (18, 1, 0), "Tu licencia caduca en 3 días"),
         ] {
-            let cuerpo = aviso_por_caducar(&zona, ahora, caducidad).await;
-            assert!(cuerpo.starts_with(esperado), "{ahora:?} → {caducidad:?}: {cuerpo}");
+            let titulo = aviso_por_caducar(&zona, ahora, caducidad).await;
+            assert_eq!(titulo, esperado, "{ahora:?} → {caducidad:?}");
         }
     }
 
@@ -456,8 +527,8 @@ mod tests {
         // A las 00:30 del 16 en Madrid todavía es el 15 en UTC. Una caducidad a las 23:00 del 16
         // es «hoy» para quien lo lee; contando en UTC saldría «mañana».
         let zona = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
-        let cuerpo = aviso_por_caducar(&zona, (16, 0, 30), (16, 23, 0)).await;
-        assert!(cuerpo.starts_with("Tu licencia caduca hoy."), "{cuerpo}");
+        let titulo = aviso_por_caducar(&zona, (16, 0, 30), (16, 23, 0)).await;
+        assert_eq!(titulo, "Tu licencia caduca hoy");
     }
 
     #[tokio::test]

@@ -29,16 +29,18 @@ import {
 	updatePago,
 } from "../src/domains/cuentas/cuentas.commands";
 import {
+	actualizar as actualizarNotificacion,
 	crear as crearNotificacion,
 	descartar as descartarNotificacion,
 	eliminar as eliminarNotificacion,
 	marcarLeida,
 	marcarLeidasBatch,
+	normalizar as normalizarNotificacion,
 	resolverPorClave,
 	restaurar as restaurarNotificacion,
 } from "../src/domains/notificaciones/notificaciones.commands";
 import {
-	idActivaPorClave,
+	activaPorClave,
 	idsNoLeidas,
 } from "../src/domains/notificaciones/notificaciones.queries";
 import {
@@ -244,6 +246,10 @@ import casoNotifCrear from "../../../tests/contract/casos/notificaciones/crear.j
 import goldenNotifCrear from "../../../tests/contract/golden/notificaciones/crear.json";
 import casoNotifCrearDedupe from "../../../tests/contract/casos/notificaciones/crear_dedupe.json";
 import goldenNotifCrearDedupe from "../../../tests/contract/golden/notificaciones/crear_dedupe.json";
+import casoNotifActualiza from "../../../tests/contract/casos/notificaciones/crear_actualiza.json";
+import goldenNotifActualiza from "../../../tests/contract/golden/notificaciones/crear_actualiza.json";
+import casoNotifActualizaSinReleer from "../../../tests/contract/casos/notificaciones/crear_actualiza_sin_releer.json";
+import goldenNotifActualizaSinReleer from "../../../tests/contract/golden/notificaciones/crear_actualiza_sin_releer.json";
 import casoNotifLeida from "../../../tests/contract/casos/notificaciones/marcar_leida.json";
 import goldenNotifLeida from "../../../tests/contract/golden/notificaciones/marcar_leida.json";
 import casoNotifBatch from "../../../tests/contract/casos/notificaciones/marcar_leidas_batch.json";
@@ -350,6 +356,12 @@ const CASOS = [
 	{ nombre: "mesas_set_reserva_estado", caso: casoMesaSetReserva, golden: goldenMesaSetReserva },
 	{ nombre: "notificaciones_crear", caso: casoNotifCrear, golden: goldenNotifCrear },
 	{ nombre: "notificaciones_crear_dedupe", caso: casoNotifCrearDedupe, golden: goldenNotifCrearDedupe },
+	{ nombre: "notificaciones_crear_actualiza", caso: casoNotifActualiza, golden: goldenNotifActualiza },
+	{
+		nombre: "notificaciones_crear_actualiza_sin_releer",
+		caso: casoNotifActualizaSinReleer,
+		golden: goldenNotifActualizaSinReleer,
+	},
 	{ nombre: "notificaciones_marcar_leida", caso: casoNotifLeida, golden: goldenNotifLeida },
 	{ nombre: "notificaciones_marcar_leidas_batch", caso: casoNotifBatch, golden: goldenNotifBatch },
 	{ nombre: "notificaciones_resolver_por_clave", caso: casoNotifResolver, golden: goldenNotifResolver },
@@ -725,12 +737,16 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "notificaciones.crear": {
 			// El dedupe vive en el route (una consulta previa), no en el builder: si ya hay una
-			// activa con esa clave se reutiliza y NO se emite nada. En la Main eso pasa dentro del
-			// repo, así que aquí hay que reproducir el camino del route para comparar lo mismo.
-			const clave = caso.entrada.clave_dedupe;
-			if (clave) {
-				const yaActiva = await idActivaPorClave(db, clave);
-				if (yaActiva) return;
+			// activa con esa clave se actualiza (RI-12) o, si no cambia nada, no se emite nada. En la
+			// Main eso pasa dentro del repo, así que aquí se reproduce el camino del route.
+			const nueva = normalizarNotificacion(caso.entrada as any);
+			if (nueva.clave_dedupe) {
+				const activa = await activaPorClave(db, nueva.clave_dedupe);
+				if (activa) {
+					const cambio = actualizarNotificacion(activa.id, activa.contenido, nueva);
+					if (cambio) aplicar(hub, sql, cambio);
+					return;
+				}
 			}
 			aplicar(hub, sql, crearNotificacion(caso.entrada as any));
 			return;
@@ -752,6 +768,8 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "notificaciones.resolver_por_clave": {
+			// Como el route: sin una activa con esa clave no se escribe nada.
+			if (!(await activaPorClave(db, caso.entrada.clave_dedupe))) return;
 			aplicar(hub, sql, resolverPorClave(caso.entrada.clave_dedupe));
 			return;
 		}

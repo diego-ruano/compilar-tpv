@@ -374,8 +374,9 @@ el tiempo sin conexión. La calcula `escalon_aviso`.
 
 - **Nunca bloquea el cobro**, y el aviso de cobro va después de cobrar: un diálogo delante sería una
   pulsación más en la ruta más caliente.
-- Una sola clave de dedupe (`verifactu_atraso`): subir de escalón no deja abiertos los anteriores, y
-  el aviso **se cierra solo** cuando la cola baja.
+- Una sola clave de dedupe (`verifactu_atraso`): subir de escalón actualiza el aviso que hay (título
+  y severidad nuevos, y vuelve a salir como no leído) en vez de abrir otro, y el aviso **se cierra
+  solo** cuando la cola baja. El del certificado hace lo mismo con los días que le quedan.
 - Si lo que impide remitir es la identidad del productor, el texto dice que el problema es del
   programa, no del equipo ni de la conexión.
 - El aviso de que **faltan los datos fiscales** manda sobre los dos de la escalera: aquéllos hablan

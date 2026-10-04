@@ -4,7 +4,9 @@
 //!
 //! La deduplicación es la de siempre (`clave_dedupe`): mientras la notificación de un producto siga
 //! activa no se emite otra, así que vender más unidades del mismo producto en negativo **no** genera
-//! avisos nuevos (leerla tampoco lo reactiva: sólo `resolver_por_clave` la cierra). Cuando una pasada
+//! avisos nuevos. La cantidad va en el cuerpo y se actualiza en cada pasada sin volver a ponerla como
+//! no leída (RI-12: eso sólo lo hacen un título o una severidad nuevos); sólo `resolver_por_clave`
+//! la cierra. Cuando una pasada
 //! encuentra que un producto que tenía aviso ya no está en negativo, lo resuelve; si reincide, vuelve
 //! a saltar. Mismo patrón que `reconciliacion` y `avisos`.
 
@@ -33,8 +35,8 @@ pub async fn escanear(
     let ids_negativos: HashSet<&str> = negativos.iter().map(|p| p.id_producto.as_str()).collect();
 
     // Un aviso por producto en negativo. La primera vez inserta; las siguientes pasadas re-emiten la
-    // misma clave y `emitir` devuelve la existente sin duplicar → nunca hay dos avisos del mismo
-    // producto ni "spam" al seguir vendiéndolo en negativo.
+    // misma clave y `emitir` actualiza la cantidad del cuerpo sin duplicar ni volver a avisar →
+    // nunca hay dos avisos del mismo producto ni "spam" al seguir vendiéndolo en negativo.
     for p in &negativos {
         let _ = notifier
             .emitir(NuevaNotificacion {

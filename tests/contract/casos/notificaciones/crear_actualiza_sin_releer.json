@@ -1,0 +1,25 @@
+{
+  "descripcion": "RI-12: si al volver a emitir sólo cambia el detalle (aquí el cuerpo, la acción y el payload) y no la severidad ni el título, la notificación se actualiza sin molestar: conserva sus lecturas y su Creada_En. Es el caso del aviso de stock negativo, que lleva la cantidad en el cuerpo y no puede volver a saltar con cada venta.",
+  "comando": "notificaciones.crear",
+  "seed": [
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Cuerpo, Destino_Tipo, Destino_Valor, Accion, Clave_Dedupe, Estado, Creada_En) VALUES ('notif-atraso', 'verifactu_atraso', 'aviso', 'Hay facturas sin enviar a Hacienda', 'Llevan más de 6 horas en cola.', 'rol', 'rol-admin', 'ver_fiscal', 'verifactu_atraso', 'activa', '2026-01-01 10:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-atraso', 'user-1', '2026-01-01 11:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-atraso', 'user-2', '2026-01-01 12:00:00');"
+  ],
+  "entrada": {
+    "tipo": "verifactu_atraso",
+    "severidad": "aviso",
+    "titulo": "Hay facturas sin enviar a Hacienda",
+    "cuerpo": "Llevan más de 8 horas en cola.",
+    "destino_tipo": "rol",
+    "destino_valor": "rol-admin",
+    "accion": "ver_cola_fiscal",
+    "payload": "{\"pendientes\":3}",
+    "clave_dedupe": "verifactu_atraso",
+    "expira_en": null
+  },
+  "snapshot": {
+    "Notificaciones": "SELECT ID_Notificacion, Severidad, Titulo, Cuerpo, Accion, Payload, Estado, Creada_En FROM Notificaciones",
+    "Notificacion_Lecturas": "SELECT ID_Notificacion, ID_Usuario, Leida_En FROM Notificacion_Lecturas"
+  }
+}

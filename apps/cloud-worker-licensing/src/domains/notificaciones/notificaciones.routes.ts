@@ -55,13 +55,16 @@ notificacionesRoutes.get("/count", async (c) => {
 notificacionesRoutes.post("/", cuerpo(S.crearNotificacionSchema), async (c) => {
 	const datos = c.req.valid("json");
 
-	// Idempotencia por clave de dedupe: si ya hay una activa con esa clave, devolvemos su id sin
-	// crear otra (espejo de la emisión Local-First del repo SQLite).
-	if (datos.clave_dedupe) {
-		const existing = await tenantQuery(c, (db) =>
-			q.idActivaPorClave(db, datos.clave_dedupe as string),
-		);
-		if (existing) return c.json({ ok: true, id_notificacion: existing });
+	// Con clave de dedupe y una activa con ella no se crea otra: se actualiza si ha cambiado (RI-12,
+	// espejo de `emitir` en la Main) y se devuelve su id.
+	const nueva = cmd.normalizar(datos);
+	if (nueva.clave_dedupe) {
+		const activa = await tenantQuery(c, (db) => q.activaPorClave(db, nueva.clave_dedupe as string));
+		if (activa) {
+			const cambio = cmd.actualizar(activa.id, activa.contenido, nueva);
+			if (cambio) await apply(c, cambio);
+			return c.json({ ok: true, id_notificacion: activa.id });
+		}
 	}
 
 	const id = await apply(c, cmd.crear(datos));
@@ -82,6 +85,10 @@ notificacionesRoutes.post("/leer-todas", cuerpo(S.marcarTodasSchema), async (c) 
 
 notificacionesRoutes.post("/resolver", cuerpo(S.resolverSchema), async (c) => {
 	const datos = c.req.valid("json");
+	// Sin nada activo no se escribe: quien resuelve lo hace en cada comprobación periódica, y cada
+	// escritura viaja a la Main y a las demás Handy (RI-12).
+	const activa = await tenantQuery(c, (db) => q.activaPorClave(db, datos.clave_dedupe));
+	if (!activa) return c.json({ ok: true });
 	await apply(c, cmd.resolverPorClave(datos.clave_dedupe));
 	return c.json({ ok: true });
 });

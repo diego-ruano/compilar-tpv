@@ -47,8 +47,9 @@ pub trait NotificacionesRepository: Send + Sync {
 /// La implementación persiste el aviso (y, vía captura del outbox, lo replica a la nube/Handy).
 #[async_trait]
 pub trait Notifier: Send + Sync {
-    /// Emite una notificación. Idempotente por `clave_dedupe` mientras siga activa: si ya existe
-    /// una activa con esa clave, no crea otra y devuelve el id de la existente. Devuelve el
+    /// Emite una notificación. Con `clave_dedupe` y una activa con esa clave no crea otra: la
+    /// actualiza (RI-12). Si cambian la severidad o el título vuelve a salir como no leída; si sólo
+    /// cambia el detalle, se actualiza sin más; si no cambia nada, no se escribe. Devuelve el
     /// `ID_Notificacion` (nuevo o reutilizado).
     async fn emitir(&self, nueva: NuevaNotificacion) -> AppResult<String>;
 

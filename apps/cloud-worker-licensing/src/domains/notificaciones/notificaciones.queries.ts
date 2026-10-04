@@ -8,6 +8,8 @@ import type { Client } from "@libsql/client/web";
 
 import type { NotificacionRow } from "@tpv/contracts";
 
+import type { ContenidoActivo } from "./notificaciones.commands";
+
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
 	return (rs?.rows ?? []).map((r: any) => {
@@ -145,12 +147,40 @@ export async function idsNoLeidas(db: Client, idUsuario: string): Promise<string
 		.filter((s) => s.length > 0);
 }
 
-/** ID de la notificación ACTIVA con esa clave de dedupe (o null). Para la idempotencia de `crear`. */
-export async function idActivaPorClave(db: Client, clave: string): Promise<string | null> {
+/**
+ * La notificación ACTIVA con esa clave de dedupe, con lo que `actualizar` compara (o null). Para
+ * la emisión con clave (RI-12) y para no resolver lo que no existe.
+ */
+export async function activaPorClave(
+	db: Client,
+	clave: string,
+): Promise<{ id: string; contenido: ContenidoActivo } | null> {
 	const rs = await db.execute({
-		sql: `SELECT ID_Notificacion AS id FROM Notificaciones WHERE Clave_Dedupe = ?1 AND Estado = 'activa' LIMIT 1;`,
+		sql: `
+			SELECT ID_Notificacion AS id, Severidad AS severidad, Titulo AS titulo, Cuerpo AS cuerpo,
+				Tipo AS tipo, Destino_Tipo AS destino_tipo, Destino_Valor AS destino_valor,
+				Accion AS accion, Payload AS payload, Expira_En AS expira_en
+			FROM Notificaciones
+			WHERE Clave_Dedupe = ?1 AND Estado = 'activa'
+			LIMIT 1;
+		`,
 		args: [clave],
 	});
-	const id = rows(rs)[0]?.id;
-	return id ? String(id) : null;
+	const r = rows(rs)[0];
+	if (!r?.id) return null;
+	const texto = (v: unknown) => (v == null ? null : String(v));
+	return {
+		id: String(r.id),
+		contenido: {
+			severidad: texto(r.severidad),
+			titulo: texto(r.titulo),
+			cuerpo: texto(r.cuerpo),
+			tipo: texto(r.tipo),
+			destino_tipo: texto(r.destino_tipo),
+			destino_valor: texto(r.destino_valor),
+			accion: texto(r.accion),
+			payload: texto(r.payload),
+			expira_en: texto(r.expira_en),
+		},
+	};
 }

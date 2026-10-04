@@ -1,0 +1,15 @@
+{
+  "Notificacion_Lecturas": [],
+  "Notificaciones": [
+    {
+      "Accion": "ver_fiscal",
+      "Clave_Dedupe": "verifactu_atraso",
+      "Cuerpo": "Esto ya no se arregla solo.",
+      "Estado": "activa",
+      "ID_Notificacion": "notif-atraso",
+      "Severidad": "error",
+      "Tipo": "verifactu_atraso",
+      "Titulo": "Llevas más de un día sin enviar facturas a Hacienda"
+    }
+  ]
+}

@@ -2,15 +2,19 @@
   "Notificaciones": [
     {
       "Clave_Dedupe": "stock_bajo:prod-1",
+      "Creada_En": "2026-01-01 10:00:00",
       "Estado": "activa",
       "ID_Notificacion": "notif-viva",
+      "Severidad": "aviso",
       "Tipo": "stock_bajo",
       "Titulo": "Ya avisada"
     },
     {
       "Clave_Dedupe": "stock_bajo:prod-9",
+      "Creada_En": "2026-01-01 09:00:00",
       "Estado": "resuelta",
       "ID_Notificacion": "notif-resuelta",
+      "Severidad": "aviso",
       "Tipo": "stock_bajo",
       "Titulo": "Vieja resuelta"
     }

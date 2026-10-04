@@ -1,5 +1,5 @@
 {
-  "descripcion": "Emitir con una clave de dedupe que YA tiene una notificación activa no crea otra: se reutiliza la existente. Es lo que impide que un job que se repite cada pocos minutos llene el buzón. Ojo: en la Main el dedupe vive dentro del repo y en el worker en su route (una consulta previa), así que el harness ejercita el camino real de cada lado, no sólo el builder.",
+  "descripcion": "Emitir con una clave de dedupe que YA tiene una notificación activa, y con el mismo contenido, no crea otra ni toca la existente (ni su Creada_En): es lo que impide que un job que se repite cada pocos minutos llene el buzón o suba una escritura en cada vuelta. Ojo: en la Main el dedupe vive dentro del repo y en el worker en su route (una consulta previa), así que el harness ejercita el camino real de cada lado, no sólo el builder.",
   "comando": "notificaciones.crear",
   "seed": [
     "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Cuerpo, Destino_Tipo, Destino_Valor, Clave_Dedupe, Estado, Creada_En) VALUES ('notif-viva', 'stock_bajo', 'aviso', 'Ya avisada', NULL, 'todos', NULL, 'stock_bajo:prod-1', 'activa', '2026-01-01 10:00:00');",
@@ -8,7 +8,7 @@
   "entrada": {
     "tipo": "stock_bajo",
     "severidad": "aviso",
-    "titulo": "Intento repetido",
+    "titulo": "Ya avisada",
     "cuerpo": null,
     "destino_tipo": "todos",
     "destino_valor": null,
@@ -18,6 +18,6 @@
     "expira_en": null
   },
   "snapshot": {
-    "Notificaciones": "SELECT ID_Notificacion, Tipo, Titulo, Clave_Dedupe, Estado FROM Notificaciones"
+    "Notificaciones": "SELECT ID_Notificacion, Tipo, Severidad, Titulo, Clave_Dedupe, Estado, Creada_En FROM Notificaciones"
   }
 }

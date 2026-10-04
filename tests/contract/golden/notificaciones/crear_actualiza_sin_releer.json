@@ -1,0 +1,26 @@
+{
+  "Notificacion_Lecturas": [
+    {
+      "ID_Notificacion": "notif-atraso",
+      "ID_Usuario": "user-1",
+      "Leida_En": "2026-01-01 11:00:00"
+    },
+    {
+      "ID_Notificacion": "notif-atraso",
+      "ID_Usuario": "user-2",
+      "Leida_En": "2026-01-01 12:00:00"
+    }
+  ],
+  "Notificaciones": [
+    {
+      "Accion": "ver_cola_fiscal",
+      "Creada_En": "2026-01-01 10:00:00",
+      "Cuerpo": "Llevan más de 8 horas en cola.",
+      "Estado": "activa",
+      "ID_Notificacion": "notif-atraso",
+      "Payload": "{\"pendientes\":3}",
+      "Severidad": "aviso",
+      "Titulo": "Hay facturas sin enviar a Hacienda"
+    }
+  ]
+}

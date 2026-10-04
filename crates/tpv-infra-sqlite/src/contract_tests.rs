@@ -334,6 +334,8 @@ casos_de_contrato! {
     cuentas__anular_pago_reserva_borrada,
     notificaciones__crear,
     notificaciones__crear_dedupe,
+    notificaciones__crear_actualiza,
+    notificaciones__crear_actualiza_sin_releer,
     notificaciones__marcar_leida,
     notificaciones__marcar_leidas_batch,
     notificaciones__resolver_por_clave,

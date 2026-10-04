@@ -1,0 +1,25 @@
+{
+  "descripcion": "RI-12: volver a emitir con la clave de una notificación activa y otro texto (el aviso de atraso fiscal que sube de escalón) la ACTUALIZA: misma fila, severidad, título y cuerpo nuevos, y sin lecturas, para que vuelva a salir como no leída. Creada_En pasa a 'ahora' (sube arriba), así que queda fuera del snapshot.",
+  "comando": "notificaciones.crear",
+  "seed": [
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Cuerpo, Destino_Tipo, Destino_Valor, Accion, Clave_Dedupe, Estado, Creada_En) VALUES ('notif-atraso', 'verifactu_atraso', 'aviso', 'Hay facturas sin enviar a Hacienda', 'Llevan más de 6 horas en cola.', 'rol', 'rol-admin', 'ver_fiscal', 'verifactu_atraso', 'activa', '2026-01-01 10:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-atraso', 'user-1', '2026-01-01 11:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-atraso', 'user-2', '2026-01-01 12:00:00');"
+  ],
+  "entrada": {
+    "tipo": "verifactu_atraso",
+    "severidad": "error",
+    "titulo": "Llevas más de un día sin enviar facturas a Hacienda",
+    "cuerpo": "Esto ya no se arregla solo.",
+    "destino_tipo": "rol",
+    "destino_valor": "rol-admin",
+    "accion": "ver_fiscal",
+    "payload": null,
+    "clave_dedupe": "verifactu_atraso",
+    "expira_en": null
+  },
+  "snapshot": {
+    "Notificaciones": "SELECT ID_Notificacion, Tipo, Severidad, Titulo, Cuerpo, Accion, Clave_Dedupe, Estado FROM Notificaciones",
+    "Notificacion_Lecturas": "SELECT ID_Notificacion, ID_Usuario FROM Notificacion_Lecturas"
+  }
+}

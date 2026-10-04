@@ -292,29 +292,167 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
     }
 }
 
+/// Lo que se puede cambiar de una notificación activa al volver a emitirla (RI-12), en el orden de
+/// `COLUMNAS_ACTUALIZABLES`. Los dos primeros son lo que se ve de un vistazo; si cambia alguno, el
+/// aviso vuelve a salir como no leído.
+#[derive(PartialEq)]
+struct Contenido {
+    severidad: Option<String>,
+    titulo: Option<String>,
+    cuerpo: Option<String>,
+    tipo: Option<String>,
+    destino_tipo: Option<String>,
+    destino_valor: Option<String>,
+    accion: Option<String>,
+    payload: Option<String>,
+    expira_en: Option<String>,
+}
+
+const COLUMNAS_ACTUALIZABLES: &str =
+    "Severidad, Titulo, Cuerpo, Tipo, Destino_Tipo, Destino_Valor, Accion, Payload, Expira_En";
+
+impl Contenido {
+    fn de(n: &NuevaNotificacion) -> Self {
+        let (destino_tipo, destino_valor) = n.destino.to_columns();
+        Contenido {
+            severidad: Some(n.severidad.as_str().to_string()),
+            titulo: Some(n.titulo.clone()),
+            cuerpo: n.cuerpo.clone(),
+            tipo: Some(n.tipo.clone()),
+            destino_tipo: Some(destino_tipo.to_string()),
+            destino_valor,
+            accion: n.accion.clone(),
+            payload: n.payload.clone(),
+            expira_en: n.expira_en.clone(),
+        }
+    }
+
+    fn se_ve_distinto(&self, otro: &Contenido) -> bool {
+        (&self.severidad, &self.titulo) != (&otro.severidad, &otro.titulo)
+    }
+
+    fn valores(&self) -> Vec<Value> {
+        [
+            &self.severidad,
+            &self.titulo,
+            &self.cuerpo,
+            &self.tipo,
+            &self.destino_tipo,
+            &self.destino_valor,
+            &self.accion,
+            &self.payload,
+            &self.expira_en,
+        ]
+        .into_iter()
+        .map(|v| opt_text(v.clone()))
+        .collect()
+    }
+}
+
+/// La notificación activa con esa clave, si la hay, con su contenido.
+async fn activa_por_clave<C: Reader>(conn: &C, clave: &str) -> AppResult<Option<(String, Contenido)>> {
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT ID_Notificacion, {COLUMNAS_ACTUALIZABLES} FROM Notificaciones \
+                 WHERE Clave_Dedupe = ?1 AND Estado = 'activa' LIMIT 1;"
+            ),
+            vec![Value::Text(clave.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let Some(row) = rows.next().await.map_err(db_err)? else {
+        return Ok(None);
+    };
+    let col = |i: i32| -> AppResult<Option<String>> { Ok(v_string(row.get_value(i).map_err(db_err)?)) };
+    let Some(id) = col(0)? else {
+        return Ok(None);
+    };
+    Ok(Some((
+        id,
+        Contenido {
+            severidad: col(1)?,
+            titulo: col(2)?,
+            cuerpo: col(3)?,
+            tipo: col(4)?,
+            destino_tipo: col(5)?,
+            destino_valor: col(6)?,
+            accion: col(7)?,
+            payload: col(8)?,
+            expira_en: col(9)?,
+        },
+    )))
+}
+
 #[async_trait]
 impl Notifier for SqliteNotificacionesRepository {
+    /// Emite, o actualiza la activa con la misma clave (RI-12).
+    ///
+    /// Antes, con clave, se devolvía la existente sin tocarla: el aviso de atraso fiscal se quedaba
+    /// con el texto y la severidad del primer escalón aunque llevara tres días sin remitir, y el del
+    /// certificado seguía diciendo «caduca en 30 días» con siete por delante. Ahora:
+    ///
+    /// - **Igual**: no se escribe nada (cada escritura sube a la nube, y quien emite lo hace en cada
+    ///   comprobación periódica).
+    /// - **Cambia lo que se ve de un vistazo** (severidad o título: el atraso que sube de escalón,
+    ///   «caduca en 7 días»): se actualiza, sube arriba (`Creada_En` = ahora) y se borran sus
+    ///   lecturas, para que vuelva a salir como no leída.
+    /// - **Cambia sólo el detalle** (cuerpo, acción, payload…): se actualiza sin molestar a nadie. El
+    ///   aviso de stock negativo lleva la cantidad en el cuerpo, y cada venta la cambia: si eso lo
+    ///   volviera a poner como no leído, saltaría en cada pasada en pleno servicio.
+    ///
+    /// Espejo de la ruta `POST /v1/notificaciones` del worker (`notificaciones.commands.ts::actualizar`).
     async fn emitir(&self, nueva: NuevaNotificacion) -> AppResult<String> {
         let (destino_tipo, destino_valor) = nueva.destino.to_columns();
 
-        // Escritor único: mantener el guard sobre el dedupe-check + INSERT hace la operación
+        // Escritor único: mantener el guard sobre la búsqueda + la escritura hace la operación
         // race-free en la Main (no puede colarse otra emisión con la misma clave entre medias).
         let db = self.db.write().await;
 
-        // Dedupe: si hay clave y ya existe una activa con ella, devolvemos su id (no insertamos).
         if let Some(clave) = nueva.clave_dedupe.as_deref() {
-            let mut rows = db
-                .query(
-                    "SELECT ID_Notificacion FROM Notificaciones \
-                     WHERE Clave_Dedupe = ?1 AND Estado = 'activa' LIMIT 1;",
-                    vec![Value::Text(clave.to_string())],
-                )
-                .await
-                .map_err(db_err)?;
-            if let Some(row) = rows.next().await.map_err(db_err)? {
-                if let Some(id) = v_string(row.get_value(0).map_err(db_err)?) {
+            if let Some((id, actual)) = activa_por_clave(&db, clave).await? {
+                let nuevo = Contenido::de(&nueva);
+                if nuevo == actual {
                     return Ok(id);
                 }
+                let se_ve_distinto = nuevo.se_ve_distinto(&actual);
+                let fecha = if se_ve_distinto { ", Creada_En = datetime('now','localtime')" } else { "" };
+                let mut valores = nuevo.valores();
+                valores.push(Value::Text(id.clone()));
+
+                db.execute_batch("BEGIN;").await.map_err(db_err)?;
+                let res: AppResult<()> = async {
+                    db.execute(
+                        &format!(
+                            "UPDATE Notificaciones SET Severidad = ?1, Titulo = ?2, Cuerpo = ?3, \
+                             Tipo = ?4, Destino_Tipo = ?5, Destino_Valor = ?6, Accion = ?7, \
+                             Payload = ?8, Expira_En = ?9{fecha} WHERE ID_Notificacion = ?10;"
+                        ),
+                        valores,
+                    )
+                    .await
+                    .map_err(db_err)?;
+                    if se_ve_distinto {
+                        db.execute(
+                            "DELETE FROM Notificacion_Lecturas WHERE ID_Notificacion = ?1;",
+                            vec![Value::Text(id.clone())],
+                        )
+                        .await
+                        .map_err(db_err)?;
+                    }
+                    Ok(())
+                }
+                .await;
+                return match res {
+                    Ok(()) => {
+                        db.execute_batch("COMMIT;").await.map_err(db_err)?;
+                        Ok(id)
+                    }
+                    Err(e) => {
+                        let _ = db.execute_batch("ROLLBACK;").await;
+                        Err(e)
+                    }
+                };
             }
         }
 
@@ -353,6 +491,12 @@ impl Notifier for SqliteNotificacionesRepository {
 
     async fn resolver_por_clave(&self, clave_dedupe: &str) -> AppResult<bool> {
         let db = self.db.write().await;
+        // Quien resuelve lo hace en cada comprobación periódica, haya aviso o no (RI-12: también la
+        // licencia en cada pulso). Sin nada activo no se escribe: un UPDATE que no toca ninguna
+        // fila también se captura en el outbox y sube a la nube.
+        if activa_por_clave(&db, clave_dedupe).await?.is_none() {
+            return Ok(false);
+        }
         let affected = db
             .execute(
                 "UPDATE Notificaciones SET Estado = 'resuelta' \
@@ -362,5 +506,66 @@ impl Notifier for SqliteNotificacionesRepository {
             .await
             .map_err(db_err)?;
         Ok(affected > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests_emision_repetida {
+    //! RI-12: quien emite o resuelve lo hace en cada comprobación periódica. Lo que no cambia nada
+    //! no puede escribir: cada escritura entra en el outbox y sube a la nube.
+
+    use super::*;
+    use tpv_domain::notificaciones::{Destino, Severidad};
+
+    async fn abrir() -> (Arc<Db>, SqliteNotificacionesRepository, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("notif_repetida");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db.clone(), SqliteNotificacionesRepository::new(db), dir)
+    }
+
+    async fn en_outbox(db: &Db) -> i64 {
+        let g = db.read().await;
+        let mut rows = g.query("SELECT COUNT(*) FROM _Sync_Outbox;", ()).await.unwrap();
+        v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    fn aviso(titulo: &str) -> NuevaNotificacion {
+        NuevaNotificacion {
+            tipo: "gracia_offline".into(),
+            severidad: Severidad::Aviso,
+            titulo: titulo.into(),
+            cuerpo: Some("Quedan ~72 h".into()),
+            destino: Destino::Rol("rol-admin".into()),
+            accion: None,
+            payload: None,
+            clave_dedupe: Some("gracia_offline".into()),
+            expira_en: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn repetir_el_mismo_aviso_no_escribe() {
+        let (db, repo, _dir) = abrir().await;
+        let id = repo.emitir(aviso("Sin conexión con licencias")).await.unwrap();
+        let antes = en_outbox(&db).await;
+
+        assert_eq!(repo.emitir(aviso("Sin conexión con licencias")).await.unwrap(), id);
+        assert_eq!(en_outbox(&db).await, antes);
+
+        // Y uno que cambia sí escribe, sobre la misma fila.
+        assert_eq!(repo.emitir(aviso("Otro título")).await.unwrap(), id);
+        assert!(en_outbox(&db).await > antes);
+    }
+
+    #[tokio::test]
+    async fn resolver_lo_que_no_esta_activo_no_escribe() {
+        let (db, repo, _dir) = abrir().await;
+        let antes = en_outbox(&db).await;
+        assert!(!repo.resolver_por_clave("gracia_offline").await.unwrap());
+        assert_eq!(en_outbox(&db).await, antes);
+
+        repo.emitir(aviso("Sin conexión con licencias")).await.unwrap();
+        assert!(repo.resolver_por_clave("gracia_offline").await.unwrap());
     }
 }

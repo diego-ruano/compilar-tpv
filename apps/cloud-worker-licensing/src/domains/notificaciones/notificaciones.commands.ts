@@ -30,8 +30,9 @@ function cleanOrNull(s: unknown): string | null {
 	return t.length ? t : null;
 }
 
-export function crear(input: CrearNotificacionBody): BuiltCommand {
-	const cloudPayload = {
+/** La notificación tal y como se guarda: textos recortados, vacíos a NULL, severidad conocida. */
+export function normalizar(input: CrearNotificacionBody) {
+	return {
 		tipo: input.tipo.trim(),
 		severidad: normSeveridad(input.severidad),
 		titulo: input.titulo.trim(),
@@ -44,6 +45,77 @@ export function crear(input: CrearNotificacionBody): BuiltCommand {
 		clave_dedupe: cleanOrNull(input.clave_dedupe),
 		expira_en: cleanOrNull(input.expira_en),
 	};
+}
+
+export type NotificacionNormalizada = ReturnType<typeof normalizar>;
+
+/** Lo que `actualizar` compara y reescribe, en el orden de sus `?n`. Los dos primeros se ven de un vistazo. */
+const ACTUALIZABLES = [
+	"severidad",
+	"titulo",
+	"cuerpo",
+	"tipo",
+	"destino_tipo",
+	"destino_valor",
+	"accion",
+	"payload",
+	"expira_en",
+] as const;
+
+export type ContenidoActivo = { [K in (typeof ACTUALIZABLES)[number]]: string | null };
+
+/**
+ * RI-12: volver a emitir con la clave de una notificación activa la ACTUALIZA. Espejo de
+ * `emitir` en la Main (`tpv-infra-sqlite/src/notificaciones.rs`):
+ *
+ * - igual → `null`, no se escribe nada;
+ * - cambia lo que se ve de un vistazo (severidad o título) → se reescribe, sube arriba
+ *   (`Creada_En`) y se borran sus lecturas, para que vuelva a salir como no leída;
+ * - cambia sólo el detalle (cuerpo, acción…) → se reescribe sin más. El de stock negativo lleva la
+ *   cantidad en el cuerpo y cada venta la cambia: no puede volver a saltar por eso.
+ *
+ * El route lee la activa antes (el DO no decide por una lectura) y los valores viajan horneados.
+ */
+export function actualizar(
+	idNotificacion: string,
+	actual: ContenidoActivo,
+	nueva: NotificacionNormalizada,
+): BuiltCommand | null {
+	const distinto = (k: (typeof ACTUALIZABLES)[number]) => (actual[k] ?? null) !== (nueva[k] ?? null);
+	if (!ACTUALIZABLES.some(distinto)) return null;
+	const seVeDistinto = distinto("severidad") || distinto("titulo");
+
+	const steps: any[] = [
+		{
+			kind: "execute",
+			sql: `
+				UPDATE Notificaciones
+				SET Severidad = ?1, Titulo = ?2, Cuerpo = ?3, Tipo = ?4, Destino_Tipo = ?5,
+					Destino_Valor = ?6, Accion = ?7, Payload = ?8, Expira_En = ?9${
+						seVeDistinto ? ", Creada_En = datetime('now','localtime')" : ""
+					}
+				WHERE ID_Notificacion = ?10;
+			`,
+			args: [...ACTUALIZABLES.map((k) => nueva[k] ?? null), idNotificacion],
+		},
+	];
+	if (seVeDistinto) {
+		steps.push({
+			kind: "execute",
+			sql: "DELETE FROM Notificacion_Lecturas WHERE ID_Notificacion = ?1;",
+			args: [idNotificacion],
+		});
+	}
+
+	return {
+		commandName: "notificaciones_actualizar",
+		command: { type: "tenantDb.transaction", payload: { steps } },
+		cloudPayload: { id_notificacion: idNotificacion, ...nueva },
+	};
+}
+
+export function crear(input: CrearNotificacionBody): BuiltCommand {
+	const cloudPayload = normalizar(input);
 
 	const steps: any[] = [
 		{
