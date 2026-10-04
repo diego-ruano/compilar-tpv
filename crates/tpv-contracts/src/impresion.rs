@@ -41,6 +41,17 @@ pub struct TramoTicket {
     pub cuota: Dinero,
 }
 
+/// El cliente de una factura completa (`F1`/`F3`), tal como sale en el papel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct DestinatarioTicket {
+    pub nombre_razon: String,
+    pub nif: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub domicilio: Option<String>,
+}
+
 /// Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
 ///
 /// **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
@@ -173,6 +184,24 @@ pub struct PrintTicketPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub total: Option<Dinero>,
+
+    /// `F1` | `F2` | `F3`. Una completa (`F1`/`F3`) sale titulada FACTURA y con su cliente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tipo_factura: Option<String>,
+    /// El cliente de una factura completa, leído de su registro.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub destinatario: Option<DestinatarioTicket>,
+    /// En una `F3`, el número del ticket que canjea.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sustituye: Option<String>,
+    /// Si este ticket se canjeó por una factura completa, su número. **No se imprime**: la copia de
+    /// un ticket es la del ticket. Lo usa la pantalla para ofrecer también la `F3`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sustituida_por: Option<String>,
 }
 
 /// Qué ticket de cobro se pide (RI-29): el de un pago, leído entero de la base.
@@ -183,6 +212,10 @@ pub struct TicketDePagoInput {
     /// Reimpresión: el papel sale marcado COPIA, con el mismo número.
     #[serde(default)]
     pub es_copia: bool,
+    /// Otra factura del mismo pago: la `F3` que canjeó su ticket. `None` = la del número del pago.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub num_factura: Option<String>,
 }
 
 /// Geometría del papel para preguntar por las columnas desde el frontend (previsualización).

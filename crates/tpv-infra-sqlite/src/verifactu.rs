@@ -547,6 +547,9 @@ pub struct Subsanar {
 pub struct Destinatario {
     pub nombre_razon: String,
     pub nif: String,
+    /// El domicilio del cliente. No va al XML —el registro no lo lleva— sino al **papel**: una
+    /// factura completa lo exige, y sin guardarlo no habría de dónde sacarlo al imprimirla (RI-29).
+    pub domicilio: Option<String>,
 }
 
 /// Una factura a la que este registro se refiere: la rectificada (`R1`-`R5`) o la sustituida
@@ -1045,6 +1048,7 @@ pub async fn emitir_cobro(
             destinatario: destinatario.map(|d| Destinatario {
                 nombre_razon: d.nombre_razon,
                 nif: d.nif,
+                domicilio: d.direccion,
             }),
             numero_reservado: Some(numero_reservado),
             fecha_operacion,
@@ -1295,6 +1299,7 @@ pub async fn emitir_sustitutiva(
             destinatario: Some(Destinatario {
                 nombre_razon: destinatario.nombre_razon,
                 nif: destinatario.nif,
+                domicilio: destinatario.direccion,
             }),
             // `FacturasSustituidas` sólo puede ir en una F3 (error 1116). Y no es
             // `FacturasRectificadas`: no se rectifica nada.
@@ -1665,14 +1670,32 @@ fn desglose_json(tramos: &[TramoIva]) -> String {
     serde_json::Value::Array(arr).to_string()
 }
 
+/// El destinatario como JSON. `NombreRazon` y `NIF` van al XML; `Domicilio` sólo al papel (el
+/// adaptador de la AEAT no lo lee, y el destinatario no entra en la huella).
 fn destinatario_json(d: Option<&Destinatario>) -> Option<String> {
     d.map(|d| {
-        serde_json::json!({
+        let mut v = serde_json::json!({
             "NombreRazon": vf::sanear_texto(&d.nombre_razon, 120),
             "NIF": d.nif.trim().to_ascii_uppercase(),
-        })
-        .to_string()
+        });
+        if let Some(dom) = d.domicilio.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            v["Domicilio"] = serde_json::Value::String(dom.to_string());
+        }
+        v.to_string()
     })
+}
+
+/// El destinatario guardado, para el papel: `(nombre, NIF, domicilio)`.
+pub(crate) fn destinatario_del_papel(json: Option<&str>) -> Option<(String, String, Option<String>)> {
+    destinatario_desde_json(json).map(|d| (d.nombre_razon, d.nif, d.domicilio))
+}
+
+/// Los números de las facturas que sustituye una `F3`, leídos de su `Referencias_Json`.
+pub(crate) fn numeros_sustituidos(referencias_json: Option<&str>) -> Vec<String> {
+    refs_desde_json(referencias_json, "sustituidas")
+        .into_iter()
+        .map(|r| r.num_serie)
+        .collect()
 }
 
 fn referencias_json(rect: &[RefFactura], sust: &[RefFactura]) -> Option<String> {
@@ -2043,6 +2066,7 @@ fn destinatario_desde_json(json: Option<&str>) -> Option<Destinatario> {
     Some(Destinatario {
         nombre_razon: v.get("NombreRazon")?.as_str()?.to_string(),
         nif: v.get("NIF")?.as_str()?.to_string(),
+        domicilio: v.get("Domicilio").and_then(|d| d.as_str()).map(str::to_string),
     })
 }
 

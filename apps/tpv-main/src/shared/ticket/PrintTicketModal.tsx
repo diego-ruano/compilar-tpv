@@ -48,6 +48,8 @@ export type CobroImprimible = {
     idPago: string;
     /** Reimpresión: sale marcado COPIA, con el mismo número. */
     esCopia?: boolean;
+    /** Otra factura del mismo pago: la completa (`F3`) que canjeó su ticket. */
+    numFactura?: string | null;
 };
 
 type Modo = "cobro" | "completo" | "pendiente" | "seleccion";
@@ -92,18 +94,30 @@ export default function PrintTicketModal({
     const [errorCobro, setErrorCobro] = useState<string | null>(null);
     const idPago = cobro?.idPago ?? null;
     const esCopia = cobro?.esCopia ?? false;
+    // Qué factura del pago: la de su número o, si su ticket se canjeó, la completa (`F3`).
+    const [numFactura, setNumFactura] = useState<string | null>(null);
+    const [sustituidaPor, setSustituidaPor] = useState<string | null>(null);
+    useEffect(() => {
+        if (!open) return;
+        setNumFactura(cobro?.numFactura ?? null);
+        setSustituidaPor(null);
+    }, [open, cobro]);
     useEffect(() => {
         if (!open || !idPago) return;
         let vivo = true;
         setTicketCobro(null);
         setErrorCobro(null);
-        printerTicketDePago(idPago, esCopia)
-            .then((p) => vivo && setTicketCobro(p))
+        printerTicketDePago(idPago, esCopia, numFactura)
+            .then((p) => {
+                if (!vivo) return;
+                setTicketCobro(p);
+                if (p.sustituida_por) setSustituidaPor(p.sustituida_por);
+            })
             .catch((e) => vivo && setErrorCobro(toAppError(e).message));
         return () => {
             vivo = false;
         };
-    }, [open, idPago, esCopia]);
+    }, [open, idPago, esCopia, numFactura]);
 
     const hayPendientes = useMemo(() => items.some((it) => !it.pagado), [items]);
 
@@ -139,7 +153,7 @@ export default function PrintTicketModal({
         if (!payload || !puedeImprimir) return;
         setPrinting(true);
         try {
-            if (esCobro && idPago) await printerImprimirPago(idPago, esCopia);
+            if (esCobro && idPago) await printerImprimirPago(idPago, esCopia, numFactura);
             else await printerImprimirPrecuenta(payload);
             toast.success("Ticket", "Enviado a la impresora.");
             onClose();
@@ -178,12 +192,26 @@ export default function PrintTicketModal({
                                 ¿Qué quieres imprimir?
                             </p>
                             <div className="grid grid-cols-1 gap-2">
-                                {cobro ? (
+                                {cobro && !cobro.numFactura ? (
                                     <ModoButton
-                                        active={esCobro}
-                                        onClick={() => setModo("cobro")}
+                                        active={esCobro && !numFactura}
+                                        onClick={() => {
+                                            setModo("cobro");
+                                            setNumFactura(null);
+                                        }}
                                         label={esCopia ? "Copia del ticket" : "Ticket del cobro"}
-                                        hint={ticketCobro?.numero_ticket ?? "…"}
+                                        hint={!numFactura ? (ticketCobro?.numero_ticket ?? "…") : ""}
+                                    />
+                                ) : null}
+                                {cobro && (cobro.numFactura || sustituidaPor) ? (
+                                    <ModoButton
+                                        active={esCobro && !!numFactura}
+                                        onClick={() => {
+                                            setModo("cobro");
+                                            setNumFactura(cobro.numFactura ?? sustituidaPor);
+                                        }}
+                                        label="Factura completa"
+                                        hint={cobro.numFactura ?? sustituidaPor ?? ""}
                                     />
                                 ) : null}
                                 {items.length > 0 ? (

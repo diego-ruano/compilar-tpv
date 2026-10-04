@@ -27,6 +27,10 @@ pub struct FacturaDelTicket {
     pub importe_total: Dinero,
     /// El desglose declarado, leído de `Desglose_Json`.
     pub tramos: Vec<TramoIva>,
+    /// El cliente de una factura completa (`F1`/`F3`): `(nombre, NIF, domicilio)`.
+    pub destinatario: Option<(String, String, Option<String>)>,
+    /// En una `F3`, el número de la simplificada que canjea.
+    pub sustituye: Option<String>,
 }
 
 /// Lo que hace falta para imprimir el ticket de un cobro.
@@ -44,10 +48,20 @@ pub struct TicketDePago {
     pub lineas: Vec<LineaVendida>,
     /// `None` en un cobro sin registro de facturación (modo prueba).
     pub factura: Option<FacturaDelTicket>,
+    /// Si el ticket se canjeó por una factura completa, el número de esa `F3`.
+    pub sustituida_por: Option<String>,
 }
 
 #[async_trait]
 pub trait TicketsRepository: Send + Sync {
     /// El ticket de un cobro. `None` si el pago no existe.
-    async fn ticket_de_pago(&self, id_pago: &str) -> AppResult<Option<TicketDePago>>;
+    ///
+    /// La factura es la del número del pago (`Pagos.Numero_Ticket`) salvo que se pida otra con
+    /// `num_factura`: la `F3` que canjeó ese ticket, que comparte pago y no número. Una factura
+    /// que no es de ese pago no se devuelve.
+    async fn ticket_de_pago(
+        &self,
+        id_pago: &str,
+        num_factura: Option<&str>,
+    ) -> AppResult<Option<TicketDePago>>;
 }

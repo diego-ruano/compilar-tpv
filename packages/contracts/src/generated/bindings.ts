@@ -502,6 +502,11 @@ distintas: number, };
  */
 export type DestinatarioInput = { nombre_razon: string, nif: string, domicilio?: string, };
 
+/**
+ * El cliente de una factura completa (`F1`/`F3`), tal como sale en el papel.
+ */
+export type DestinatarioTicket = { nombre_razon: string, nif: string, domicilio?: string, };
+
 export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
 
 export type DeviceSignB64Args = { payload: string, };
@@ -1170,7 +1175,24 @@ desglose?: Array<TramoTicket>,
 /**
  * El `Importe_Total` de la factura. `None` = la suma de las líneas (la precuenta).
  */
-total?: Dinero, };
+total?: Dinero, 
+/**
+ * `F1` | `F2` | `F3`. Una completa (`F1`/`F3`) sale titulada FACTURA y con su cliente.
+ */
+tipo_factura?: string, 
+/**
+ * El cliente de una factura completa, leído de su registro.
+ */
+destinatario?: DestinatarioTicket, 
+/**
+ * En una `F3`, el número del ticket que canjea.
+ */
+sustituye?: string, 
+/**
+ * Si este ticket se canjeó por una factura completa, su número. **No se imprime**: la copia de
+ * un ticket es la del ticket. Lo usa la pantalla para ofrecer también la `F3`.
+ */
+sustituida_por?: string, };
 
 /**
  * Una impresora detectada por el sistema.
@@ -1550,7 +1572,11 @@ export type TicketDePagoInput = { id_pago: string,
 /**
  * Reimpresión: el papel sale marcado COPIA, con el mismo número.
  */
-es_copia: boolean, };
+es_copia: boolean, 
+/**
+ * Otra factura del mismo pago: la `F3` que canjeó su ticket. `None` = la del número del pago.
+ */
+num_factura?: string, };
 
 export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_footer_message: boolean, paper_width_mm: number, 
 /**

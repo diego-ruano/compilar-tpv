@@ -20,6 +20,7 @@ import DatosFiscalesModal, {
 } from "../../shared/ticket/DatosFiscalesModal";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import type {
+    BloqueFiscal,
     CambioCajaInput,
     DestinatarioInput,
     Dinero,
@@ -573,14 +574,15 @@ export default function Cuentas() {
                 return;
             }
 
-            await invokeClient("verifactu_emitir_factura_de_ticket", {
+            const f3 = await invokeClient<BloqueFiscal>("verifactu_emitir_factura_de_ticket", {
                 numeroTicket: numero,
                 destinatario: d,
             });
 
             setF3Pago(null);
-            // Y se imprime, que es para lo que ha venido el cliente.
-            reimprimirTicket(e);
+            // Y se imprime LA FACTURA COMPLETA, que es a lo que ha venido el cliente: la F3, con sus
+            // datos, y no una copia del ticket que canjea (RI-29).
+            setReimpresion({ idPago: e.id, numFactura: f3.num_serie_factura });
         } catch (err) {
             setF3Error(toAppError(err).message);
         } finally {

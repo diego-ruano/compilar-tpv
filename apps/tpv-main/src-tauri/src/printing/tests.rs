@@ -62,6 +62,10 @@ mod fixtures {
             items,
             desglose: None,
             total: None,
+            tipo_factura: None,
+            destinatario: None,
+            sustituye: None,
+            sustituida_por: None,
         }
     }
 
@@ -2293,6 +2297,36 @@ mod tests_factura_del_registro {
         assert!(!contiene(&build_ticket(&p, None), "BAR PEPE"));
     }
 
+    fn f3() -> PrintTicketPayload {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("F-000001".into());
+        p.tipo_factura = Some("F3".into());
+        p.sustituye = Some("2027/000007".into());
+        p.destinatario = Some(tpv_contracts::impresion::DestinatarioTicket {
+            nombre_razon: "Cliente SL".into(),
+            nif: "B87654321".into(),
+            domicilio: Some("Calle Real 2, Madrid".into()),
+        });
+        p
+    }
+
+    #[test]
+    fn una_factura_completa_se_titula_y_lleva_a_su_cliente() {
+        let bytes = build_ticket(&f3(), None);
+        for texto in ["FACTURA", "Sustituye al ticket 2027/000007", "Cliente SL", "B87654321", "Calle Real 2"] {
+            assert!(contiene(&bytes, texto), "debería imprimir {texto:?}");
+        }
+    }
+
+    #[test]
+    fn un_ticket_simplificado_no_lleva_el_bloque_de_cliente() {
+        let mut p = f3();
+        p.tipo_factura = Some("F2".into());
+        let bytes = build_ticket(&p, None);
+        assert!(!contiene(&bytes, "Cliente:"));
+        assert!(!contiene(&bytes, "FACTURA"));
+    }
+
     #[test]
     fn lo_que_manda_la_pantalla_sale_como_precuenta() {
         let mut p = base(vec![linea()]);
@@ -2301,7 +2335,10 @@ mod tests_factura_del_registro {
         p.es_copia = true;
         p.metodo_pago = Some("Efectivo".into());
         p.total = Some(Dinero::de_centimos(9999));
+        p.tipo_factura = Some("F1".into());
+        p.destinatario = f3().destinatario;
         let bytes = build_ticket(&como_precuenta(p), None);
+        assert!(!contiene(&bytes, "Cliente SL"), "una precuenta no lleva cliente");
 
         assert!(contiene(&bytes, "PRECUENTA"));
         assert!(contiene(&bytes, "NO ES UN TICKET DE VENTA"));

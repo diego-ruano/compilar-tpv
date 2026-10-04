@@ -78,14 +78,30 @@ export async function printerPrintTest(name?: string): Promise<void> {
 export async function printerTicketDePago(
     idPago: string,
     esCopia = false,
+    numFactura?: string | null,
 ): Promise<PrintTicketPayload> {
-    const args: TicketDePagoInput = { id_pago: idPago, es_copia: esCopia };
+    const args: TicketDePagoInput = {
+        id_pago: idPago,
+        es_copia: esCopia,
+        num_factura: numFactura ?? undefined,
+    };
     return await invokeClient<PrintTicketPayload>("printer_ticket_de_pago", { args });
 }
 
-/** Imprime el ticket de un cobro. Rust lo vuelve a componer: no viaja el papel, sólo el pago. */
-export async function printerImprimirPago(idPago: string, esCopia = false): Promise<void> {
-    const args: TicketDePagoInput = { id_pago: idPago, es_copia: esCopia };
+/**
+ * Imprime el ticket de un cobro. Rust lo vuelve a componer: no viaja el papel, sólo el pago.
+ * `numFactura` pide otra factura del mismo pago: la completa (`F3`) que canjeó su ticket.
+ */
+export async function printerImprimirPago(
+    idPago: string,
+    esCopia = false,
+    numFactura?: string | null,
+): Promise<void> {
+    const args: TicketDePagoInput = {
+        id_pago: idPago,
+        es_copia: esCopia,
+        num_factura: numFactura ?? undefined,
+    };
     await invokeClient<string>("printer_imprimir_pago", { args });
 }
 

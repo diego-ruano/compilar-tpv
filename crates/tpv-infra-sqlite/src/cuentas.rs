@@ -1860,8 +1860,9 @@ mod tests_factura_completa {
             .expect("una F1 tiene que llevar destinatario (error 1189)");
         assert!(dest.contains("Empresa Cliente SL"), "{dest}");
         assert!(dest.contains("B12345674"), "{dest}");
-        // El domicilio es SÓLO para el papel: el registro no lo lleva.
-        assert!(!dest.contains("Calle Mayor"), "{dest}");
+        // El domicilio se guarda para el papel de la factura (RI-29); al XML no va (lo fija
+        // `xml.rs::el_domicilio_del_cliente_no_va_al_xml`).
+        assert!(dest.contains("Calle Mayor"), "{dest}");
     }
 
     #[tokio::test]

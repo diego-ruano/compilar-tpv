@@ -35,7 +35,8 @@ pub struct BloqueFiscal {
 ///
 /// El registro de facturación sólo necesita el nombre y el NIF. El `domicilio` es para el **papel**:
 /// el art. 6 ROF le exige a una factura el domicilio del destinatario, y el registro de la AEAT no
-/// lo lleva. Por eso el formulario pide tres cosas y sólo dos viajan.
+/// lo lleva. Por eso el formulario pide tres cosas y sólo dos viajan a la AEAT; el domicilio se
+/// guarda en `Destinatario_Json` para poder imprimir la factura (RI-29).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct DestinatarioInput {

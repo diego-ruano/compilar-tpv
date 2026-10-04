@@ -515,6 +515,30 @@ const QR_LEYENDA: &str = "VERI*FACTU";
 /// Aviso del entorno de pruebas. No lo pide la norma: lo pide el sentido común.
 const QR_AVISO_PRUEBAS: &str = "-- ENTORNO DE PRUEBAS --";
 
+/// Una factura completa (`F1`/`F3`) se titula FACTURA y lleva a su cliente: nombre, NIF y
+/// domicilio. Una `F3` dice además qué ticket canjea. Todo sale del registro (RI-29).
+fn bloque_factura_completa(out: &mut Vec<u8>, p: &PrintTicketPayload, cols: usize) {
+    if !matches!(p.tipo_factura.as_deref(), Some("F1") | Some("F3")) {
+        return;
+    }
+    esc_align(out, 1);
+    esc_bold(out, true);
+    text_line(out, "FACTURA");
+    esc_bold(out, false);
+    esc_align(out, 0);
+    if let Some(n) = p.sustituye.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        text_wrap(out, &format!("Sustituye al ticket {n}"), cols);
+    }
+    if let Some(d) = &p.destinatario {
+        sep(out, cols);
+        text_wrap(out, &format!("Cliente: {}", d.nombre_razon.trim()), cols);
+        text_wrap(out, &format!("NIF: {}", d.nif.trim()), cols);
+        if let Some(dom) = d.domicilio.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            text_wrap(out, dom, cols);
+        }
+    }
+}
+
 /// Lo que la pantalla manda a imprimir es **siempre una precuenta** (RI-29): se le quita todo lo
 /// fiscal. Un papel con número, QR o la marca de copia sólo sale de `ticket_de_pago`, que lo lee
 /// de la base; si la pantalla pudiera ponerlos, podría imprimir una factura que no es la del cobro.
@@ -528,6 +552,10 @@ pub fn como_precuenta(mut p: PrintTicketPayload) -> PrintTicketPayload {
     p.es_anulado = false;
     p.desglose = None;
     p.total = None;
+    p.tipo_factura = None;
+    p.destinatario = None;
+    p.sustituye = None;
+    p.sustituida_por = None;
     p
 }
 
@@ -677,6 +705,7 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
             esc_bold(&mut out, false);
             esc_align(&mut out, 0);
         }
+        bloque_factura_completa(&mut out, p, cols);
     }
 
     sep(&mut out, cols);

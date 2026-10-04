@@ -699,6 +699,22 @@ mod tests {
     }
 
     #[test]
+    fn el_domicilio_del_cliente_no_va_al_xml() {
+        // RI-29: `Destinatario_Json` guarda el domicilio para el papel de la factura completa. El
+        // XSD de `IDDestinatario` no tiene sitio para él: sólo salen el nombre y el NIF.
+        let mut r = registro_base();
+        r.tipo_factura = Some("F1".into());
+        r.destinatario_json = Some(
+            r#"{"NombreRazon":"Empresa SL","NIF":"B12345674","Domicilio":"Calle Mayor 1"}"#.into(),
+        );
+        let xml = construir_envio(&cabecera(), &[r]);
+
+        assert!(xml.contains("<sum1:NIF>B12345674</sum1:NIF>"));
+        assert!(!xml.contains("Calle Mayor"));
+        assert!(!xml.contains("Domicilio"));
+    }
+
+    #[test]
     fn una_rectificativa_lleva_su_tipo_y_las_facturas_rectificadas() {
         let mut r = registro_base();
         r.tipo_factura = Some("R5".into());

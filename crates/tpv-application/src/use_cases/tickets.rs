@@ -9,7 +9,9 @@ use crate::error::{AppError, AppResult};
 use crate::ports::configuracion::ConfiguracionRepository;
 use crate::ports::tickets::{TicketDePago, TicketsRepository};
 use tpv_contracts::configuracion::{BusinessSettings, TicketSettings};
-use tpv_contracts::impresion::{PrintTicketLine, PrintTicketPayload, TicketDePagoInput, TramoTicket};
+use tpv_contracts::impresion::{
+    DestinatarioTicket, PrintTicketLine, PrintTicketPayload, TicketDePagoInput, TramoTicket,
+};
 use tpv_domain::ticket;
 
 /// El payload del ticket de un cobro: el que se enseña en la vista previa y el que se imprime.
@@ -23,7 +25,7 @@ pub async fn ticket_de_pago(
         return Err(AppError::validation("Falta el cobro del que sacar el ticket."));
     }
     let t = tickets
-        .ticket_de_pago(id_pago)
+        .ticket_de_pago(id_pago, input.num_factura.as_deref())
         .await?
         .ok_or_else(|| AppError::not_found("Ese cobro no existe."))?;
     let negocio = config.get_business().await?;
@@ -82,6 +84,13 @@ pub fn componer(
         .as_deref()
         .is_some_and(|u| u.starts_with(tpv_domain::verifactu::QR_BASE_PRUEBAS));
 
+    // Una factura completa lleva a su cliente; una `F3`, además, el ticket que canjea.
+    let tipo_factura = t.factura.as_ref().and_then(|f| no_vacio(&f.tipo_factura));
+    let destinatario = t.factura.as_ref().and_then(|f| f.destinatario.clone()).map(
+        |(nombre_razon, nif, domicilio)| DestinatarioTicket { nombre_razon, nif, domicilio },
+    );
+    let sustituye = t.factura.as_ref().and_then(|f| f.sustituye.clone());
+
     PrintTicketPayload {
         printer_name: None,
         business_name: negocio.business_name.clone(),
@@ -116,6 +125,10 @@ pub fn componer(
         items,
         desglose,
         total,
+        tipo_factura,
+        destinatario,
+        sustituye,
+        sustituida_por: t.sustituida_por,
     }
 }
 
@@ -185,6 +198,7 @@ mod tests {
                 },
             ],
             factura,
+            sustituida_por: None,
         }
     }
 
@@ -203,6 +217,8 @@ mod tests {
                 base: Dinero::de_centimos(200),
                 cuota: Dinero::de_centimos(20),
             }],
+            destinatario: None,
+            sustituye: None,
         }
     }
 
@@ -244,6 +260,22 @@ mod tests {
         assert_eq!(p.fecha.as_deref(), Some("02/01/2027 13:45"));
         assert!(p.qr_url.is_none() && p.desglose.is_none() && p.total.is_none());
         assert!(p.es_copia);
+    }
+
+    #[test]
+    fn una_f3_lleva_su_cliente_y_el_ticket_que_canjea() {
+        let mut f = factura();
+        f.num_serie = "F-000001".into();
+        f.tipo_factura = "F3".into();
+        f.destinatario = Some(("Cliente SL".into(), "B87654321".into(), Some("Calle Real 2".into())));
+        f.sustituye = Some("2027/000007".into());
+        let p = componer(cobro(Some(f)), &negocio(), &ajustes(), false);
+
+        assert_eq!(p.numero_ticket.as_deref(), Some("F-000001"));
+        assert_eq!(p.tipo_factura.as_deref(), Some("F3"));
+        assert_eq!(p.destinatario.as_ref().map(|d| d.nif.as_str()), Some("B87654321"));
+        assert_eq!(p.destinatario.and_then(|d| d.domicilio).as_deref(), Some("Calle Real 2"));
+        assert_eq!(p.sustituye.as_deref(), Some("2027/000007"));
     }
 
     #[test]

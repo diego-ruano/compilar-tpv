@@ -62,6 +62,10 @@ logo → corte.**
 - **El último cobro se olvida al cambiar de comanda**: el modal sólo ofrece el ticket del último
   cobro de la comanda abierta; el de otro se reimprime desde Cuentas.
 - **La precuenta** no lleva número ni registro ni QR, y dice que no es un ticket de venta.
+- **Una factura completa** (`F1`/`F3`) se titula FACTURA y lleva el nombre, el NIF y el domicilio del
+  cliente (`bloque_factura_completa`); una `F3` dice qué ticket sustituye. Un ticket canjeado se
+  sigue reimprimiendo como ticket, y el modal ofrece también su `F3`
+  ([verifactu.md](verifactu.md#el-papel-de-una-factura-completa)).
 - **El cajón se abre con la impresora**: dentro del ticket (`ESC p`) o suelto (`DLE DC4`, que la
   impresora atiende aunque tenga cola). Toda apertura fuera de un cobro se anota en `Aperturas_Cajon`
   con quien tenga la sesión. Abrirlo no pide rol, pero sí estar identificado.

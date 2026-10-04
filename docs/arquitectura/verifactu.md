@@ -212,7 +212,15 @@ adelante sin emitir nada. El efecto en la caja de cada clase está en [caja.md](
 
 `verifactu_emitir_factura_de_ticket` (Administrador, desde Cuentas): sólo sobre una `F2`, y sólo una
 vez por ticket (se busca una `F3` que lo referencie). Reemite el **mismo desglose** con destinatario y
-`FacturasSustituidas`; la simplificada original no se toca.
+`FacturasSustituidas`; la simplificada original no se toca. Comparte pago con ella, y tras emitirla
+se imprime la `F3` (`ticket_de_pago` con `num_factura`), no una copia del ticket que canjea.
+
+### El papel de una factura completa
+
+Una `F1` o una `F3` sale titulada **FACTURA** y con su cliente: nombre, NIF y domicilio, leídos de
+`Destinatario_Json`. El domicilio se guarda ahí sólo para el papel: el adaptador de la AEAT lee
+`NombreRazon` y `NIF` y nada más (`xml.rs::el_domicilio_del_cliente_no_va_al_xml`), y el
+destinatario no entra en la huella. Una `F3` dice además qué ticket sustituye.
 
 El esquema tiene `Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal`, pero hoy ningún camino los lee
 ni los escribe: el formulario de datos fiscales siempre empieza vacío.

@@ -188,6 +188,24 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
                                 <Centrado negrita>SIN VALOR FISCAL</Centrado>
                             </>
                         ) : null}
+                        {/* Una factura completa (F1/F3) se titula y lleva a su cliente; una F3,
+                            además, el ticket que canjea. Espejo de `bloque_factura_completa`. */}
+                        {p.tipo_factura === "F1" || p.tipo_factura === "F3" ? (
+                            <>
+                                <Centrado negrita>FACTURA</Centrado>
+                                {p.sustituye ? <div>Sustituye al ticket {p.sustituye}</div> : null}
+                                {p.destinatario ? (
+                                    <>
+                                        <Separador />
+                                        <div>Cliente: {p.destinatario.nombre_razon}</div>
+                                        <div>NIF: {p.destinatario.nif}</div>
+                                        {p.destinatario.domicilio ? (
+                                            <div>{p.destinatario.domicilio}</div>
+                                        ) : null}
+                                    </>
+                                ) : null}
+                            </>
+                        ) : null}
                     </>
                 )}
 

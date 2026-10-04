@@ -66,14 +66,24 @@ const SQL_LINEAS: &str = r#"
 /// registros hacia atrás: lo vigila `planes::tests` (RI-03).
 pub(crate) const SQL_FACTURA: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Factura, ''), \
             NIF_Emisor, Nombre_Razon_Emisor, Fecha_Expedicion, Fecha_Hora_Huso, QR_Url, \
-            COALESCE(Importe_Total, ''), Desglose_Json \
+            COALESCE(Importe_Total, ''), Desglose_Json, ID_Pago, Destinatario_Json, \
+            Referencias_Json \
      FROM Registros_Facturacion \
      WHERE Num_Serie_Factura = ?1 AND Tipo = 'ALTA' \
      ORDER BY Orden DESC LIMIT 1;";
 
+/// La `F3` que canjeó el ticket de un pago, si la hay. Va por `idx_regfact_pago`.
+const SQL_SUSTITUIDA_POR: &str = "SELECT Num_Serie_Factura FROM Registros_Facturacion \
+     WHERE ID_Pago = ?1 AND Tipo = 'ALTA' AND Tipo_Factura = 'F3' \
+     ORDER BY Orden DESC LIMIT 1;";
+
 #[async_trait]
 impl TicketsRepository for SqliteTicketsRepository {
-    async fn ticket_de_pago(&self, id_pago: &str) -> AppResult<Option<TicketDePago>> {
+    async fn ticket_de_pago(
+        &self,
+        id_pago: &str,
+        num_factura: Option<&str>,
+    ) -> AppResult<Option<TicketDePago>> {
         let r = self.db.read().await;
         let conn = r.conn();
 
@@ -107,10 +117,29 @@ impl TicketsRepository for SqliteTicketsRepository {
             });
         }
 
-        let factura = if numero_ticket.trim().is_empty() {
-            None
+        let pedida = num_factura.map(str::trim).filter(|n| !n.is_empty());
+        let factura = match pedida {
+            // Otra factura del mismo pago: la `F3` que canjeó su ticket. Si no es de este pago, no
+            // se imprime con sus líneas: sería un papel que mezcla dos cobros.
+            Some(n) => match factura(&r, n).await? {
+                Some((f, Some(de_pago))) if de_pago == id_pago => Some(f),
+                _ => return Err(AppError::not_found("Esa factura no es de este cobro.")),
+            },
+            None if numero_ticket.trim().is_empty() => None,
+            None => factura(&r, numero_ticket.trim()).await?.map(|(f, _)| f),
+        };
+
+        let sustituida_por = if pedida.is_none() {
+            let mut rows = conn
+                .query(SQL_SUSTITUIDA_POR, vec![Value::Text(id_pago.to_string())])
+                .await
+                .map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(row) => v_string(row.get_value(0).map_err(db_err)?),
+                None => None,
+            }
         } else {
-            factura(&r, numero_ticket.trim()).await?
+            None
         };
 
         Ok(Some(TicketDePago {
@@ -121,11 +150,16 @@ impl TicketsRepository for SqliteTicketsRepository {
             fecha_hora,
             lineas,
             factura,
+            sustituida_por,
         }))
     }
 }
 
-async fn factura<R: Reader>(r: &R, num_serie: &str) -> AppResult<Option<FacturaDelTicket>> {
+/// La factura de un número, con el pago al que pertenece.
+async fn factura<R: Reader>(
+    r: &R,
+    num_serie: &str,
+) -> AppResult<Option<(FacturaDelTicket, Option<String>)>> {
     let mut rows = r
         .query(SQL_FACTURA, vec![Value::Text(num_serie.to_string())])
         .await
@@ -137,7 +171,10 @@ async fn factura<R: Reader>(r: &R, num_serie: &str) -> AppResult<Option<FacturaD
         Ok(v_string(row.get_value(i).map_err(db_err)?).unwrap_or_default())
     };
     let desglose = v_string(row.get_value(8).map_err(db_err)?);
-    Ok(Some(FacturaDelTicket {
+    let id_pago = v_string(row.get_value(9).map_err(db_err)?);
+    let destinatario = v_string(row.get_value(10).map_err(db_err)?);
+    let referencias = v_string(row.get_value(11).map_err(db_err)?);
+    let f = FacturaDelTicket {
         num_serie: texto(0)?,
         tipo_factura: texto(1)?,
         nif_emisor: texto(2)?,
@@ -148,7 +185,10 @@ async fn factura<R: Reader>(r: &R, num_serie: &str) -> AppResult<Option<FacturaD
         // El importe se guardó como TEXTO fiscal ("10.00"): se lee a céntimos sin pasar por f64.
         importe_total: Dinero::de_texto_fiscal(&texto(7)?).unwrap_or(Dinero::CERO),
         tramos: crate::verifactu::tramos_declarados(desglose.as_deref()),
-    }))
+        destinatario: crate::verifactu::destinatario_del_papel(destinatario.as_deref()),
+        sustituye: crate::verifactu::numeros_sustituidos(referencias.as_deref()).into_iter().next(),
+    };
+    Ok(Some((f, id_pago)))
 }
 
 #[cfg(test)]
@@ -176,8 +216,7 @@ mod tests {
         for sql in sentencias {
             conn.execute(sql, Vec::<Value>::new())
                 .await
-                .unwrap_or_else(|e| panic!("sembrando: {sql}
-{e}"));
+                .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
         }
     }
 
@@ -216,7 +255,7 @@ mod tests {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
 
-        assert!(repo(&db).ticket_de_pago("no-existe").await.unwrap().is_none());
+        assert!(repo(&db).ticket_de_pago("no-existe", None).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -224,7 +263,7 @@ mod tests {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
 
         assert_eq!(t.numero_ticket, "T-000007");
         assert_eq!(t.metodo_pago, "EFECTIVO");
@@ -235,7 +274,7 @@ mod tests {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         assert_eq!(t.origen, "Barra");
     }
 
@@ -256,7 +295,7 @@ mod tests {
         )
         .await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         assert_eq!(t.origen, "Mesa 4");
     }
 
@@ -268,7 +307,7 @@ mod tests {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
 
         assert_eq!(t.lineas.len(), 2);
         assert_eq!(t.lineas[0].nombre, "Cafe con leche");
@@ -284,7 +323,7 @@ mod tests {
         sembrar(&db, VENTA_BARRA).await;
         sembrar(&db, &["UPDATE Productos SET IVA_Percent = 4 WHERE ID_Producto = 'p2';"]).await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
 
         assert_eq!(t.lineas[1].iva_percent, Some(21.0));
     }
@@ -306,8 +345,8 @@ mod tests {
         )
         .await;
 
-        let uno = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
-        let otro = repo(&db).ticket_de_pago("pago2").await.unwrap().unwrap();
+        let uno = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
+        let otro = repo(&db).ticket_de_pago("pago2", None).await.unwrap().unwrap();
 
         assert_eq!(uno.lineas.len(), 1);
         assert_eq!(uno.lineas[0].nombre, "Cafe con leche");
@@ -331,7 +370,7 @@ mod tests {
                 .expect("borrar un producto ya vendido tiene que poder hacerse");
         }
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
 
         assert_eq!(t.lineas.len(), 2, "no puede perderse ninguna línea del cobro");
         assert_eq!(t.lineas[0].nombre, "Cafe con leche");
@@ -355,7 +394,7 @@ mod tests {
         )
         .await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         assert_eq!(t.lineas[0].nombre, "Producto");
     }
 
@@ -366,7 +405,7 @@ mod tests {
         sembrar(&db, VENTA_BARRA).await;
         sembrar(&db, &["UPDATE Pagos SET Numero_Ticket = NULL WHERE ID_Pago = 'pago';"]).await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         assert_eq!(t.numero_ticket, "");
     }
 
@@ -390,7 +429,7 @@ mod tests {
         sembrar(&db, VENTA_BARRA).await;
         sembrar(&db, FACTURA_DE_LA_VENTA).await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         let f = t.factura.expect("el cobro tiene factura");
 
         assert_eq!(f.num_serie, "T-000007");
@@ -421,7 +460,7 @@ mod tests {
         )
         .await;
 
-        let f = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap().factura.unwrap();
+        let f = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap().factura.unwrap();
         assert_eq!(f.razon_emisor, "Bar Pepe Subsanado SL");
     }
 
@@ -431,7 +470,7 @@ mod tests {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         assert!(t.factura.is_none());
         assert_eq!(t.fecha_hora, "2026-01-02 12:30:00");
     }
@@ -451,9 +490,70 @@ mod tests {
         )
         .await;
 
-        let t = repo(&db).ticket_de_pago("pago").await.unwrap().unwrap();
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
 
         assert!(t.anulado, "la copia tiene que decir que ese cobro ya no vale");
         assert_eq!(t.lineas.len(), 2, "y seguir enseñando lo que se cobró");
+    }
+
+    /// La `F3` que canjeó el ticket de [`FACTURA_DE_LA_VENTA`], con el cliente y su domicilio.
+    const F3_DE_LA_VENTA: &[&str] = &[
+        "INSERT INTO Registros_Facturacion (ID_Registro, Orden, Tipo, NIF_Emisor, Num_Serie_Factura,
+           Fecha_Expedicion, Serie, Numero, Nombre_Razon_Emisor, Tipo_Factura, Importe_Total,
+           Desglose_Json, Destinatario_Json, Referencias_Json, Cadena_Huella, Huella,
+           Fecha_Hora_Huso, Sistema_Json, QR_Url, ID_Pago)
+         VALUES ('reg-f3', 2, 'ALTA', 'B12345674', 'F-000001', '03-01-2026', 'F', 1, 'Bar Pepe SL', 'F3',
+           '5.10', '[]',
+           '{\"NombreRazon\":\"Cliente SL\",\"NIF\":\"B87654321\",\"Domicilio\":\"Calle Real 2, Madrid\"}',
+           '{\"rectificadas\":[],\"sustituidas\":[{\"IDEmisorFactura\":\"B12345674\",\"NumSerieFactura\":\"T-000007\",\"FechaExpedicionFactura\":\"02-01-2026\"}]}',
+           'c3', 'H3', '2026-01-03T10:00:00+01:00', '{}', 'https://qr-f3', 'pago');",
+    ];
+
+    #[tokio::test]
+    async fn la_f3_de_un_cobro_sale_con_su_cliente_y_lo_que_sustituye() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_BARRA).await;
+        sembrar(&db, FACTURA_DE_LA_VENTA).await;
+        sembrar(&db, F3_DE_LA_VENTA).await;
+
+        let t = repo(&db).ticket_de_pago("pago", Some("F-000001")).await.unwrap().unwrap();
+        let f = t.factura.unwrap();
+
+        assert_eq!(f.num_serie, "F-000001");
+        assert_eq!(f.tipo_factura, "F3");
+        assert_eq!(
+            f.destinatario,
+            Some(("Cliente SL".into(), "B87654321".into(), Some("Calle Real 2, Madrid".into())))
+        );
+        assert_eq!(f.sustituye.as_deref(), Some("T-000007"));
+        assert_eq!(t.lineas.len(), 2, "las líneas son las del cobro");
+    }
+
+    #[tokio::test]
+    async fn el_ticket_canjeado_sabe_cual_es_su_f3() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_BARRA).await;
+        sembrar(&db, FACTURA_DE_LA_VENTA).await;
+        sembrar(&db, F3_DE_LA_VENTA).await;
+
+        let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
+        assert_eq!(t.factura.unwrap().num_serie, "T-000007", "sin pedir otra, la del pago");
+        assert_eq!(t.sustituida_por.as_deref(), Some("F-000001"));
+    }
+
+    #[tokio::test]
+    async fn una_factura_de_otro_cobro_no_se_imprime_con_estas_lineas() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_BARRA).await;
+        sembrar(&db, FACTURA_DE_LA_VENTA).await;
+        sembrar(&db, F3_DE_LA_VENTA).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket)
+                 VALUES ('otro', 'com', '2026-01-02 12:40:00', 'TARJETA', 100, 'PARCIAL', 'T-000008');"],
+        )
+        .await;
+
+        assert!(repo(&db).ticket_de_pago("otro", Some("F-000001")).await.is_err());
     }
 }
