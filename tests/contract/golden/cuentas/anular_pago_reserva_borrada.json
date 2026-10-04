@@ -1,0 +1,14 @@
+{
+  "Clientes": [
+    {
+      "ID_Cliente": "cli-1",
+      "Total_Gastado": 1400
+    }
+  ],
+  "Pagos": [
+    {
+      "Estado": "ANULADO",
+      "ID_Pago": "pago-1"
+    }
+  ]
+}

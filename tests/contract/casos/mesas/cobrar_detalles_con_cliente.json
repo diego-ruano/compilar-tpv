@@ -1,0 +1,28 @@
+{
+  "descripcion": "RI-61: cobro de una comanda que viene de una reserva con cliente. El cliente se queda en la comanda (Comandas.ID_Cliente) y el gasto se le acredita a él: borrar o reasignar la reserva después ya no le quita ese gasto.",
+  "comando": "mesas.cobrar_detalles",
+  "seed": [
+    "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL' WHERE ID = 1;",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 300);",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-1', 'prod-1', 'L1', 10, '2026-01-01 10:00:00');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-1', 'Ana', 1000);",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales) VALUES ('res-1', 'cli-1', 'mesa-1', '2026-01-01', '13:00', 'COMIDA', 2);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', 'res-1', '2026-01-01 12:00:00', 'Abierta');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-1', 'comanda-1', 'prod-1', 2, 300);"
+  ],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "metodo": "TARJETA",
+    "tipo": "TOTAL",
+    "detalle_ids": [
+      "detalle-1"
+    ]
+  },
+  "snapshot": {
+    "Comandas": "SELECT ID_Comanda, ID_Reserva, ID_Cliente, Estado FROM Comandas",
+    "Clientes": "SELECT ID_Cliente, Total_Gastado FROM Clientes"
+  }
+}

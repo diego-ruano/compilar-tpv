@@ -222,30 +222,41 @@ async fn sumar_gasto_cliente_por_comanda<C: Writer>(
         return Ok(());
     }
 
-    // El gasto se acredita únicamente vía la reserva explícita de la comanda
-    // (Comandas.ID_Reserva → Reservas.ID_Cliente). No hay fallback por reserva
-    // activa de la mesa: acreditar el consumo de un walk-in a un cliente con
-    // reserva en esa mesa es incorrecto y divergía de la implementación Handy
-    // (MESA-04). Paridad con el worker.
-    let id_reserva = select_one_string(
-        db,
-        "SELECT ID_Reserva FROM Comandas WHERE ID_Comanda=?1 LIMIT 1;",
-        vec![Value::Text(id_comanda.to_string())],
-    )
-    .await?;
-
-    let Some(id_reserva) = id_reserva else {
+    // El gasto se acredita al cliente de la comanda: el que ya tiene (`Comandas.ID_Cliente`) o, si
+    // es su primer cobro, el de su reserva explícita. No hay fallback por reserva activa de la mesa:
+    // acreditar el consumo de un walk-in a un cliente con reserva en esa mesa es incorrecto y
+    // divergía de la implementación Handy (MESA-04).
+    let mut rows = db
+        .query(
+            "SELECT c.ID_Cliente, r.ID_Cliente FROM Comandas c \
+             LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva \
+             WHERE c.ID_Comanda = ?1 LIMIT 1;",
+            vec![Value::Text(id_comanda.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let Some(row) = rows.next().await.map_err(db_err)? else {
         return Ok(());
     };
+    let de_la_comanda = v_string(row.get_value(0).map_err(db_err)?);
+    let de_la_reserva = v_string(row.get_value(1).map_err(db_err)?);
+    drop(rows);
 
-    let Some(id_cliente) = select_one_string(
-        db,
-        "SELECT ID_Cliente FROM Reservas WHERE ID_Reserva=?1 LIMIT 1;",
-        vec![Value::Text(id_reserva)],
-    )
-    .await?
-    else {
-        return Ok(());
+    let id_cliente = match (de_la_comanda, de_la_reserva) {
+        (Some(id), _) => id,
+        (None, Some(id)) => {
+            // RI-61: el cliente se queda en la comanda al cobrar. Antes el gasto colgaba de la
+            // reserva, y borrarla o reasignarla después le quitaba el gasto al cliente; ahora la
+            // anulación y la reconciliación leen la comanda, como esto.
+            try_exec(
+                db,
+                "UPDATE Comandas SET ID_Cliente = ?2 WHERE ID_Comanda = ?1 AND ID_Cliente IS NULL;",
+                vec![Value::Text(id_comanda.to_string()), Value::Text(id.clone())],
+            )
+            .await?;
+            id
+        }
+        (None, None) => return Ok(()),
     };
 
     let _ = try_exec(

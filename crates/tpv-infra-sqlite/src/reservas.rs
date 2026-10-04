@@ -494,6 +494,8 @@ impl ReservasRepository for SqliteReservasRepository {
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
 
         let res: AppResult<bool> = async {
+            // La comanda pierde la reserva pero conserva su cliente (`ID_Cliente`, fijado al
+            // cobrar): el gasto del cliente no se descuadra por borrar la reserva (RI-61).
             conn.execute(
                 "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
                 vec![Value::Text(id_reserva.to_string())],

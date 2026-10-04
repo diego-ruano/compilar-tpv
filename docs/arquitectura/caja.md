@@ -155,7 +155,7 @@ repetidos. La pantalla obliga a elegir una de las dos clases, cada una explicada
 |---|---|---|
 | Stock | Se repone lo que consumió **ese** cobro (`Lote_Consumos.ID_Pago`, `Suelto_Consumos.ID_Pago`) | No se repone: el cliente se lo llevó |
 | Líneas | Vuelven a la comanda, que se reabre si no hay otra abierta en esa mesa | No vuelven |
-| Gasto del cliente | Se resta (sin bajar de 0) | Se resta |
+| Gasto del cliente | Se resta al cliente de la comanda (sin bajar de 0) | Se resta |
 | `Pagos` | `Estado = 'ANULADO'`, `Anulado_En`, `Anulado_Por`, `Motivo_Anulacion`, `Motivo_Baja = 'ERROR'` | Igual, con `Motivo_Baja = 'DEVOLUCION'` |
 | Historial | `Movimientos_Caja` tipo `ANULACION` | Tipo `DEVOLUCION` |
 | Registro fiscal | Registro de **anulación** | Rectificativa **`R5`** ([verifactu.md](verifactu.md#dar-de-baja-un-cobro)) |
@@ -179,6 +179,10 @@ Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
   (`reconciliacion.rs`; un `Motivo_Baja` vacío cuenta como `ERROR`).
 - **El consumo de stock se escribe después del pago**: la FK de `ID_Pago` se comprueba sentencia a
   sentencia también al replicar.
+- **El gasto se acredita y se resta al cliente de la comanda** (`Comandas.ID_Cliente`), que se fija
+  al cobrar desde el de su reserva (RI-61). Así, borrar o reasignar la reserva después de cobrar no le
+  quita el gasto al cliente; la reconciliación cuenta igual (el de la comanda y, si no lo tiene, el de
+  la reserva).
 - **Un cobro anulado queda congelado**: no se edita (moverlo de fecha cambiaría de periodo una
   anulación) ni se «desanula» (se vuelve a cobrar).
 - **Borrar una comanda se niega si tiene cualquier cobro**, activo o anulado: `Pagos.ID_Comanda` va

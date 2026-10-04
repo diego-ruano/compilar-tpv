@@ -653,17 +653,26 @@ export function cobrarDetalles(
 							input.metodo,
 						],
 					},
+					// RI-61: el cliente se queda en la comanda al cobrar (el de su reserva, si aún no
+					// tiene), y el gasto se le acredita a él. Espejo de `sumar_gasto_cliente_por_comanda`.
+					{
+						kind: "execute",
+						sql: `
+							UPDATE Comandas
+							SET ID_Cliente = (
+								SELECT r.ID_Cliente FROM Reservas r WHERE r.ID_Reserva = Comandas.ID_Reserva
+							)
+							WHERE ID_Comanda = ?1 AND ID_Cliente IS NULL AND ID_Reserva IS NOT NULL;
+						`,
+						args: [input.id_comanda],
+					},
 					{
 						kind: "execute",
 						sql: `
 							UPDATE Clientes
 							SET Total_Gastado = COALESCE(Total_Gastado,0) + ?2
 							WHERE ID_Cliente = (
-								SELECT r.ID_Cliente
-								FROM Comandas c
-								JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-								WHERE c.ID_Comanda = ?1
-								LIMIT 1
+								SELECT c.ID_Cliente FROM Comandas c WHERE c.ID_Comanda = ?1
 							);
 						`,
 						args: [input.id_comanda, plan.total],

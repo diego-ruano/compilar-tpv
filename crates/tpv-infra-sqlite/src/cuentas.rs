@@ -156,7 +156,8 @@ fn entradas_inner(
         JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
         LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
         LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-        LEFT JOIN Clientes cl ON cl.ID_Cliente = r.ID_Cliente
+        -- RI-61: el cliente de la comanda (fijado al cobrar) y, si no, el de su reserva.
+        LEFT JOIN Clientes cl ON cl.ID_Cliente = COALESCE(c.ID_Cliente, r.ID_Cliente)
         LEFT JOIN Usuarios ua ON ua.ID_Usuario = p.Anulado_Por
         {where_rango}
         "#
@@ -782,7 +783,9 @@ impl CuentasRepository for SqliteCuentasRepository {
             .map_err(db_err)?;
             }
 
-            // 3) Restar el gasto del cliente ligado a la comanda (vía Reservas), sin bajar de 0.
+            // 3) Restar el gasto del cliente ligado a la comanda, sin bajar de 0. RI-61: el de la
+            //    comanda, que se fija al cobrar, y si no lo tiene el de su reserva: así una reserva
+            //    borrada o reasignada después del cobro no impide restarlo.
             //
             //    Esto SÍ se hace en los dos casos: el cliente ya no ha gastado ese dinero, haya
             //    sido porque la venta no existía o porque se le ha devuelto.
@@ -792,9 +795,9 @@ impl CuentasRepository for SqliteCuentasRepository {
                     UPDATE Clientes
                     SET Total_Gastado = MAX(0, COALESCE(Total_Gastado,0) - ?2)
                     WHERE ID_Cliente = (
-                        SELECT r.ID_Cliente
+                        SELECT COALESCE(c.ID_Cliente, r.ID_Cliente)
                         FROM Comandas c
-                        JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+                        LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
                         WHERE c.ID_Comanda = ?1
                     );
                     "#,

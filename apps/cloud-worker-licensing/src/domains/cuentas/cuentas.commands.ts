@@ -258,11 +258,12 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				SET Total_Gastado = MAX(0, COALESCE(Total_Gastado,0) - (
 				    SELECT IFNULL(p.Importe_Total,0) FROM Pagos p WHERE p.ID_Pago = ?1
 				))
+				-- RI-61: el cliente de la comanda (fijado al cobrar) y, si no, el de su reserva.
 				WHERE ID_Cliente = (
-				    SELECT r.ID_Cliente
+				    SELECT COALESCE(c.ID_Cliente, r.ID_Cliente)
 				    FROM Pagos p
 				    JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-				    JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+				    LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
 				    WHERE p.ID_Pago = ?1
 				      AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 				);

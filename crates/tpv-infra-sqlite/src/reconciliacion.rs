@@ -104,9 +104,11 @@ const SQL_LOTES: &str = r#"
     LIMIT ?2;
 "#;
 
-/// El gasto que DEBERÍA tener cada cliente: la suma de los pagos **activos** de las comandas que
-/// cuelgan de sus reservas, que es exactamente el camino por el que se acredita al cobrar
-/// (`sumar_gasto_cliente_por_comanda`). Sin `ROUND`: una suma de céntimos ya es entera (RI-66).
+/// El gasto que DEBERÍA tener cada cliente: la suma de los pagos **activos** de sus comandas, que es
+/// exactamente el camino por el que se acredita al cobrar (`sumar_gasto_cliente_por_comanda`): el
+/// cliente de la comanda, fijado al cobrar, y si no lo tiene el de su reserva (RI-61; antes sólo la
+/// reserva, y borrarla dejaba al cliente descuadrado para siempre). Sin `ROUND`: una suma de
+/// céntimos ya es entera (RI-66).
 ///
 /// El filtro por estado es obligatorio: al anular se decrementa `Total_Gastado`, así que una suma
 /// que siguiera incluyendo el pago anulado sacaría al cliente como descuadrado para siempre.
@@ -120,9 +122,9 @@ const SQL_CLIENTES: &str = r#"
             COALESCE((
                 SELECT SUM(pg.Importe_Total)
                 FROM Pagos pg
-                JOIN Comandas co ON co.ID_Comanda = pg.ID_Comanda
-                JOIN Reservas r  ON r.ID_Reserva  = co.ID_Reserva
-                WHERE r.ID_Cliente = c.ID_Cliente
+                JOIN Comandas co     ON co.ID_Comanda = pg.ID_Comanda
+                LEFT JOIN Reservas r ON r.ID_Reserva  = co.ID_Reserva
+                WHERE COALESCE(co.ID_Cliente, r.ID_Cliente) = c.ID_Cliente
                   AND COALESCE(pg.Estado,'ACTIVO') = 'ACTIVO'
             ), 0)                      AS calculado
         FROM Clientes c
@@ -132,8 +134,8 @@ const SQL_CLIENTES: &str = r#"
     LIMIT ?2;
 "#;
 
-/// El gasto de UN cliente, por el mismo camino que `SQL_CLIENTES`: los pagos ACTIVOS de las
-/// comandas que cuelgan de sus reservas.
+/// El gasto de UN cliente, por el mismo camino que `SQL_CLIENTES`: los pagos ACTIVOS de sus
+/// comandas (el cliente de la comanda o, si no lo tiene, el de su reserva).
 ///
 /// ⚠️ Ésta es la única de las tres que **escribe** (`recalcular_gasto` hace `UPDATE Clientes` por
 /// `execute`, así que además sale por el outbox a la nube). Sin el filtro por estado, un usuario
@@ -143,9 +145,9 @@ const SQL_GASTO_DE_UNO: &str = r#"
     SELECT COALESCE((
         SELECT SUM(pg.Importe_Total)
         FROM Pagos pg
-        JOIN Comandas co ON co.ID_Comanda = pg.ID_Comanda
-        JOIN Reservas r  ON r.ID_Reserva  = co.ID_Reserva
-        WHERE r.ID_Cliente = c.ID_Cliente
+        JOIN Comandas co     ON co.ID_Comanda = pg.ID_Comanda
+        LEFT JOIN Reservas r ON r.ID_Reserva  = co.ID_Reserva
+        WHERE COALESCE(co.ID_Cliente, r.ID_Cliente) = c.ID_Cliente
           AND COALESCE(pg.Estado,'ACTIVO') = 'ACTIVO'
     ), 0)
     FROM Clientes c
@@ -402,6 +404,34 @@ mod tests {
             repo.clientes_descuadrados(eur(0.005)).await.unwrap().is_empty(),
             "y con eso deja de estar descuadrado"
         );
+    }
+
+    /// RI-61: el cliente se queda en la comanda al cobrar. Borrar la reserva después ya no le quita
+    /// el gasto en el cálculo: antes la cadena era sólo comanda → reserva → cliente, y el cliente
+    /// quedaba descuadrado para siempre (y «recalcular» le bajaba el gasto).
+    #[tokio::test]
+    async fn borrar_la_reserva_despues_de_cobrar_no_descuadra_al_cliente() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona', 'Salon');",
+                "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+                   VALUES ('mesa', 'zona', '1', 4, 0, 0, 'rect', 10, 10);",
+                "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli', 'Ana', 2550);",
+                // Lo que queda tras cobrar y borrar la reserva: la comanda con su cliente y sin
+                // reserva (`eliminar` deja `ID_Reserva` a NULL).
+                "INSERT INTO Comandas (ID_Comanda, ID_Mesa, ID_Cliente, Canal, Fecha_Hora_Apertura, Estado)
+                   VALUES ('com', 'mesa', 'cli', 'MESA', '2026-01-02 13:00:00', 'Pagada');",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago', 'com', '2026-01-02 14:00:00', 'EFECTIVO', 2550, 'TOTAL');",
+            ],
+        )
+        .await;
+
+        let repo = SqliteReconciliacionRepository::new(db);
+        assert!(repo.clientes_descuadrados(eur(0.005)).await.unwrap().is_empty());
+        assert_eq!(repo.recalcular_gasto("cli").await.unwrap(), Some(eur(25.50)));
     }
 
     #[tokio::test]

@@ -1,0 +1,16 @@
+{
+  "Clientes": [
+    {
+      "ID_Cliente": "cli-1",
+      "Total_Gastado": 1600
+    }
+  ],
+  "Comandas": [
+    {
+      "Estado": "Pagada",
+      "ID_Cliente": "cli-1",
+      "ID_Comanda": "comanda-1",
+      "ID_Reserva": "res-1"
+    }
+  ]
+}

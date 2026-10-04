@@ -486,12 +486,19 @@ ON Reservas(ID_Cliente);
 -- CHECK de `Estado`: es la clave del indice unico de mas abajo. Si se colase un valor con otra
 -- capitalizacion ('abierta'), el indice parcial dejaria de aplicar EN SILENCIO; el CHECK lo impide.
 --
+-- ID_Cliente (RI-61): el cliente al que se le acredita el gasto, fijado al cobrar desde el de la
+-- reserva. Antes el gasto se derivaba por Comandas -> Reservas -> Clientes, y borrar o reasignar
+-- la reserva despues de cobrar le quitaba ese gasto al cliente (y la reconciliacion lo marcaba
+-- descuadrado para siempre). Quien acredita, resta y reconcilia lee aqui, y la reserva queda solo
+-- como respaldo de una comanda que todavia no se ha cobrado.
+--
 -- (Los comentarios van FUERA del CREATE TABLE a proposito: el snapshot anti-drift colapsa cada
 --  sentencia a una linea, y un `--` dentro se comeria el resto de la linea.)
 CREATE TABLE IF NOT EXISTS Comandas (
   ID_Comanda TEXT NOT NULL PRIMARY KEY,
   ID_Mesa TEXT NULL,
   ID_Reserva TEXT NULL,
+  ID_Cliente TEXT NULL,
   ID_Trabajador TEXT NULL,
   Canal TEXT NOT NULL DEFAULT 'MESA',
   Fecha_Hora_Apertura TEXT NOT NULL,
@@ -500,6 +507,7 @@ CREATE TABLE IF NOT EXISTS Comandas (
   Estado TEXT NOT NULL DEFAULT 'Abierta',
   FOREIGN KEY (ID_Mesa) REFERENCES Mesas(ID_Mesa),
   FOREIGN KEY (ID_Reserva) REFERENCES Reservas(ID_Reserva),
+  FOREIGN KEY (ID_Cliente) REFERENCES Clientes(ID_Cliente),
   FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL,
   CHECK (Canal IN ('MESA', 'BARRA')),
   CHECK (Estado IN ('Abierta', 'Pagada')),
@@ -508,6 +516,9 @@ CREATE TABLE IF NOT EXISTS Comandas (
 
 CREATE INDEX IF NOT EXISTS idx_comandas_mesa_estado
 ON Comandas(ID_Mesa, Estado);
+
+CREATE INDEX IF NOT EXISTS idx_comandas_cliente
+ON Comandas(ID_Cliente);
 
 -- MESA-03: como mucho UNA comanda 'Abierta' por mesa. Evita que dos aperturas concurrentes de la
 -- misma mesa (doble toque, o Main + Handy a la vez) dejen dos comandas abiertas repartiendo lineas.

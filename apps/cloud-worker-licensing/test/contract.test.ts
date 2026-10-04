@@ -115,6 +115,8 @@ import casoVrMultilote from "../../../tests/contract/casos/venta_rapida/cobro_fr
 import goldenVrMultilote from "../../../tests/contract/golden/venta_rapida/cobro_fraccionado_fefo_multilote.json";
 import casoMesasCobro from "../../../tests/contract/casos/mesas/cobrar_detalles_un_lote.json";
 import goldenMesasCobro from "../../../tests/contract/golden/mesas/cobrar_detalles_un_lote.json";
+import casoMesasCobroCliente from "../../../tests/contract/casos/mesas/cobrar_detalles_con_cliente.json";
+import goldenMesasCobroCliente from "../../../tests/contract/golden/mesas/cobrar_detalles_con_cliente.json";
 import casoMesasCobroSuelto from "../../../tests/contract/casos/mesas/cobrar_detalles_lote_y_suelto.json";
 import goldenMesasCobroSuelto from "../../../tests/contract/golden/mesas/cobrar_detalles_lote_y_suelto.json";
 import casoMesasCobroDecimos from "../../../tests/contract/casos/mesas/cobrar_detalles_decimos.json";
@@ -237,6 +239,8 @@ import casoCuentasUpdatePago from "../../../tests/contract/casos/cuentas/update_
 import goldenCuentasUpdatePago from "../../../tests/contract/golden/cuentas/update_pago.json";
 import casoCuentasAnularPago from "../../../tests/contract/casos/cuentas/anular_pago.json";
 import goldenCuentasAnularPago from "../../../tests/contract/golden/cuentas/anular_pago.json";
+import casoCuentasAnularSinReserva from "../../../tests/contract/casos/cuentas/anular_pago_reserva_borrada.json";
+import goldenCuentasAnularSinReserva from "../../../tests/contract/golden/cuentas/anular_pago_reserva_borrada.json";
 import casoMesaSetReserva from "../../../tests/contract/casos/mesas/set_reserva_estado.json";
 import goldenMesaSetReserva from "../../../tests/contract/golden/mesas/set_reserva_estado.json";
 import casoNotifCrear from "../../../tests/contract/casos/notificaciones/crear.json";
@@ -276,6 +280,7 @@ const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
 	{ nombre: "vr_fefo_multilote", caso: casoVrMultilote, golden: goldenVrMultilote },
 	{ nombre: "mesas_cobro_un_lote", caso: casoMesasCobro, golden: goldenMesasCobro },
+	{ nombre: "mesas_cobro_con_cliente", caso: casoMesasCobroCliente, golden: goldenMesasCobroCliente },
 	{ nombre: "mesas_cobro_lote_y_suelto", caso: casoMesasCobroSuelto, golden: goldenMesasCobroSuelto },
 	{ nombre: "mesas_cobro_decimos", caso: casoMesasCobroDecimos, golden: goldenMesasCobroDecimos },
 	{ nombre: "clientes_crear", caso: casoCliCrear, golden: goldenCliCrear },
@@ -341,6 +346,11 @@ const CASOS = [
 	{ nombre: "cuentas_delete_gasto", caso: casoCuentasDeleteGasto, golden: goldenCuentasDeleteGasto },
 	{ nombre: "cuentas_update_pago", caso: casoCuentasUpdatePago, golden: goldenCuentasUpdatePago },
 	{ nombre: "cuentas_anular_pago", caso: casoCuentasAnularPago, golden: goldenCuentasAnularPago },
+	{
+		nombre: "cuentas_anular_pago_reserva_borrada",
+		caso: casoCuentasAnularSinReserva,
+		golden: goldenCuentasAnularSinReserva,
+	},
 	{ nombre: "mesas_set_reserva_estado", caso: casoMesaSetReserva, golden: goldenMesaSetReserva },
 	{ nombre: "notificaciones_crear", caso: casoNotifCrear, golden: goldenNotifCrear },
 	{ nombre: "notificaciones_crear_dedupe", caso: casoNotifCrearDedupe, golden: goldenNotifCrearDedupe },

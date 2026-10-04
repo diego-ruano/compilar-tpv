@@ -122,7 +122,8 @@ const entradasInner = (whereRango: string) => `
 	JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 	LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 	LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-	LEFT JOIN Clientes cl ON cl.ID_Cliente = r.ID_Cliente
+	-- RI-61: el cliente de la comanda (fijado al cobrar) y, si no, el de su reserva.
+	LEFT JOIN Clientes cl ON cl.ID_Cliente = COALESCE(c.ID_Cliente, r.ID_Cliente)
 	LEFT JOIN Usuarios ua ON ua.ID_Usuario = p.Anulado_Por
 	${whereRango}
 `;
