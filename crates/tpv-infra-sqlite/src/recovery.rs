@@ -2,8 +2,7 @@
 //!
 //! Las copias se crean con `VACUUM INTO`: SQLite produce un fichero autocontenido y coherente
 //! aunque la base viva use WAL. Restaurar es reemplazar el fichero completo, no copiar sólo las
-//! tablas de negocio; así también sobreviven el outbox, el checkpoint y la PII cifrada que nunca
-//! se sube a la nube.
+//! tablas de negocio; así también sobreviven el outbox y el checkpoint, que no están en la nube.
 
 use std::path::{Path, PathBuf};
 
@@ -364,9 +363,9 @@ pub fn archivar_base_ilegible(app_data_dir: &Path) -> AppResult<Option<PathBuf>>
 
 /// Copia un respaldo a una ruta de fuera del equipo (un USB, una carpeta de red).
 ///
-/// Es la ÚNICA forma de sacar del equipo el `DNI`, el `IBAN` y el `Numero_Seguridad_Social` del
-/// personal: van cifrados con una clave que nunca sube a la nube (TRAB-03), así que el volcado del
-/// worker no los trae. Sin una copia fuera del disco, un disco muerto se los lleva para siempre.
+/// RI-41: la PII del personal (`DNI`, `IBAN`, `Numero_Seguridad_Social`) no depende de esta copia:
+/// viaja cifrada por el outbox y vuelve con el volcado de la nube, y la DEK con la activación
+/// (TRAB-03). Lo que sólo salva esta copia es lo que nunca llegó a subir.
 pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path) -> AppResult<()> {
     let source = resolve_backup(app_data_dir, id)?;
     // Validar ANTES de copiar: exportar una copia ilegible es peor que no exportar nada, porque
