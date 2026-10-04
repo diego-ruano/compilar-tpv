@@ -7,9 +7,13 @@
 //   2. Anti-replay: el timestamp de la firma no puede desviarse más de 5 minutos.
 //   3. Idempotencia por `event.id` en `webhook_events`: un evento que salió bien no se repite. Uno
 //      que falló SÍ se reprocesa — para eso se contestó 500 (REV-01).
-//   4. Idempotencia por sesión de checkout en `license_payments` (índice único): si esa sesión ya
-//      se cumplió, se sale. Es la barrera de verdad, y se comprueba dentro de la transacción.
+//   4. Idempotencia por sesión de checkout en `license_payments` (índice único por sesión y
+//      unidad): si esa sesión ya se cumplió, se sale. Es la barrera de verdad, y se comprueba
+//      dentro de la transacción.
 //   5. Fail-closed en la duración: sin `metadata.term_months` no se emite NADA.
+//
+// RI-52 — una licencia por unidad: comprar 4 son 4 claves, todas en el mismo correo, y no 4 años
+// en una. Quien quiera todo el tiempo en un equipo canjea las claves una tras otra (REV-13).
 //
 // REV-01 — todo lo que escribe un cobro, o una reversión, va en UNA transacción. Antes eran
 // sentencias sueltas: si fallaba la tercera, las dos primeras se quedaban, y el reintento —que no
@@ -21,8 +25,10 @@
 // LIC-07 — la otra mitad: un pago puede DESHACERSE. Reembolso (lo emites tú desde Stripe, nunca
 // automático) o chargeback (lo pide el cliente a su banco y el dinero se va al instante). Hasta
 // ahora esos eventos se descartaban y la licencia seguía viva hasta caducar. Ahora:
-//   · reembolso TOTAL   → se revierte el cobro (revoca el alta, o resta los meses de la renovación)
-//   · reembolso PARCIAL → no toca la licencia; queda auditado (es un ajuste, no una devolución)
+//   · reembolso TOTAL   → se revierten los cobros (revoca cada alta, o resta los meses de cada
+//                         renovación): todas las licencias de la compra
+//   · reembolso PARCIAL → no toca ninguna licencia; queda auditado (es un ajuste, no una
+//                         devolución: Stripe no dice de cuál de las licencias, y eso se decide a mano)
 //   · disputa abierta   → se revierte ya, que el dinero ya no está
 //   · disputa GANADA    → se deshace la reversión
 
@@ -38,7 +44,7 @@ import {
 	extendLicense,
 	getLicenseById,
 	getLicenseByStripeIntent,
-	getLicensePaymentByIntent,
+	getLicensePaymentsByIntent,
 	getLicensePaymentBySession,
 	getSoleLicenseByStripeCustomer,
 	issueLicense,
@@ -52,7 +58,7 @@ import {
 	upsertWebhookEvent,
 } from "../../server/licenseStore";
 import type { LicenseRow, LicensePaymentRow } from "../../server/licenseStore";
-import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
+import { sendLicenseKeysEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import {
 	customerAddressJsonFromSession,
@@ -64,7 +70,7 @@ import {
 	paymentIntentIdFromSession,
 	priceIdFromSession,
 	retrieveCheckoutSession,
-	termMonthsFromSession,
+	licenciasDeLaSesion,
 	verifyStripeSignature,
 } from "./stripe.helpers";
 
@@ -176,8 +182,7 @@ stripeRoutes.post("/webhook", async (c) => {
 export type Cumplimiento =
 	| { accion: "sin_pagar" }
 	| { accion: "ya_cumplida"; license_id: string }
-	| { accion: "renovada"; license_id: string; expires_at_ms: number }
-	| { accion: "emitida"; license_id: string };
+	| { accion: "emitida"; license_ids: string[] };
 
 /**
  * Convierte una sesión pagada en licencia: siempre emite una clave nueva y se la manda por correo.
@@ -202,12 +207,10 @@ export async function cumplir(
 		return { accion: "sin_pagar" };
 	}
 
-	// Fail-closed (5): sin duración conocida no se emite. Se registra para que se vea en el log
-	// del evento (queda `processed_ok = 0` con este mensaje).
-	const termMonths = termMonthsFromSession(session);
-	if (!termMonths) {
-		throw new Error(`missing_term_months_metadata (price sin metadata.term_months): ${sessionId}`);
-	}
+	// Fail-closed (5): sin duración conocida, o con una cantidad que no se entiende, no se emite.
+	// Se registra para que se vea en el log del evento (queda `processed_ok = 0` con este mensaje).
+	const unidades = licenciasDeLaSesion(session);
+	if ("error" in unidades) throw new Error(`${unidades.error}: ${sessionId}`);
 
 	const email = customerEmailFromSession(session);
 	if (!email) throw new Error(`missing_customer_email: ${sessionId}`);
@@ -237,50 +240,60 @@ export async function cumplir(
 		// cliente de Stripe, así que comprar con los mismos datos extendía la licencia que había y
 		// el dueño de un segundo local pagaba y no recibía clave.
 
-		const { license, keyPlain } = await issueLicense(tx, {
-			storeKeyB64: env.LICENSE_STORE_KEY,
-			termMonths,
-			origin: "stripe",
-			customerEmail: email,
-			customerName: name,
-			customerBusinessName: businessName,
-			customerPhone: phone,
-			customerAddressJson: addressJson,
-			stripeCustomerId: customerId,
-			stripeCheckoutSessionId: sessionId,
-			stripePaymentIntentId: paymentIntentId,
-			stripePriceId: priceId,
-		});
+		// RI-52: una licencia (y su cobro) por unidad. Todas en esta transacción: o la compra
+		// entera, o nada. Y si otra entrega se cruza, la unidad 1 de la segunda choca con el índice
+		// único y su transacción se deshace entera.
+		const emitidas: { license: LicenseRow; keyPlain: string; termMonths: number }[] = [];
+		for (const [i, termMonths] of unidades.termMonths.entries()) {
+			const { license, keyPlain } = await issueLicense(tx, {
+				storeKeyB64: env.LICENSE_STORE_KEY,
+				termMonths,
+				origin: "stripe",
+				customerEmail: email,
+				customerName: name,
+				customerBusinessName: businessName,
+				customerPhone: phone,
+				customerAddressJson: addressJson,
+				stripeCustomerId: customerId,
+				stripeCheckoutSessionId: sessionId,
+				stripePaymentIntentId: paymentIntentId,
+				stripePriceId: priceId,
+			});
 
-		await recordLicensePayment(tx, {
-			licenseId: license.license_id,
-			kind: "issue",
-			termMonths,
-			sessionId,
-			paymentIntentId,
-		});
+			await recordLicensePayment(tx, {
+				licenseId: license.license_id,
+				kind: "issue",
+				termMonths,
+				sessionId,
+				paymentIntentId,
+				unidad: i + 1,
+			});
 
-		return { tipo: "emitida" as const, license, keyPlain };
+			emitidas.push({ license, keyPlain, termMonths });
+		}
+
+		return { tipo: "emitida" as const, emitidas };
 	});
 
 	if (hecho.tipo === "ya_cumplida") {
 		return { accion: "ya_cumplida", license_id: hecho.license_id };
 	}
 
-	const { license, keyPlain } = hecho;
-	const emailSent = await sendLicenseKeyEmail(env, {
-		to: license.customer_email,
-		name: license.customer_name,
-		key: keyPlain,
-		termMonths,
+	const { emitidas } = hecho;
+	const emailSent = await sendLicenseKeysEmail(env, {
+		to: emitidas[0].license.customer_email,
+		name: emitidas[0].license.customer_name,
+		claves: emitidas.map((e) => ({ key: e.keyPlain, termMonths: e.termMonths })),
 	});
 
-	// Si el correo falla NO reventamos el webhook (la venta es lo importante y la clave sigue
-	// recuperable cifrada): dejamos `key_email_sent_at_ms` a NULL para que la licencia salga en
-	// `pnpm license:list` como pendiente y se reenvíe con `pnpm license:resend`.
-	if (emailSent) await markKeyEmailSent(db, license.license_id);
+	// Si el correo falla NO reventamos el webhook (la venta es lo importante y las claves siguen
+	// recuperables cifradas): dejamos `key_email_sent_at_ms` a NULL para que las licencias salgan
+	// en `pnpm license:list` como pendientes y se reenvíen con `pnpm license:resend`.
+	if (emailSent) {
+		for (const e of emitidas) await markKeyEmailSent(db, e.license.license_id);
+	}
 
-	return { accion: "emitida", license_id: license.license_id };
+	return { accion: "emitida", license_ids: emitidas.map((e) => e.license.license_id) };
 }
 
 /* ============================================================
@@ -289,40 +302,41 @@ export async function cumplir(
 
 type Reversion = { reason: "refund" | "dispute"; eventUid: string };
 
+type Cobro = { license: LicenseRow; pago: LicensePaymentRow | null };
+
 /**
- * Localiza la licencia afectada por un cargo, de lo más preciso a lo más flojo:
- *   1. el historial de cobros (sabe además si fue alta o renovación y cuántos meses aportó),
- *   2. el último cobro sellado en la propia licencia (cubre las anteriores al historial),
+ * Localiza las licencias afectadas por un cargo, de lo más preciso a lo más flojo:
+ *   1. el historial de cobros (sabe además si fue alta o renovación y cuántos meses aportó). Un
+ *      cargo puede tener varios: uno por licencia de la compra (RI-52);
+ *   2. el último cobro sellado en la propia licencia (cubre las anteriores al historial);
  *   3. el cliente de Stripe, y SOLO si tiene exactamente una licencia.
  *
  * Devuelve también el cobro cuando se conoce: sin él no se puede distinguir un alta de una
- * renovación y hay que asumir lo primero.
+ * renovación y hay que asumir lo primero. Lista vacía: no hay nada atribuible.
  */
-async function localizarCobro(
-	db: Sql,
-	obj: any,
-): Promise<{ license: LicenseRow; pago: LicensePaymentRow | null } | null> {
+async function localizarCobros(db: Sql, obj: any): Promise<Cobro[]> {
 	const paymentIntentId = String(obj?.payment_intent || "");
 
-	const pago = paymentIntentId ? await getLicensePaymentByIntent(db, paymentIntentId) : null;
-	if (pago) {
-		const license = await getLicenseById(db, pago.license_id);
-		if (license) return { license, pago };
-	}
-
 	if (paymentIntentId) {
+		const cobros: Cobro[] = [];
+		for (const pago of await getLicensePaymentsByIntent(db, paymentIntentId)) {
+			const license = await getLicenseById(db, pago.license_id);
+			if (license) cobros.push({ license, pago });
+		}
+		if (cobros.length > 0) return cobros;
+
 		const license = await getLicenseByStripeIntent(db, paymentIntentId);
-		if (license) return { license, pago: null };
+		if (license) return [{ license, pago: null }];
 	}
 
 	const customerId =
 		typeof obj?.customer === "string" ? obj.customer : String(obj?.customer?.id || "");
 	if (customerId) {
 		const license = await getSoleLicenseByStripeCustomer(db, customerId);
-		if (license) return { license, pago: null };
+		if (license) return [{ license, pago: null }];
 	}
 
-	return null;
+	return [];
 }
 
 /** Días que lleva activada la licencia, para ver de un vistazo si el reembolso entró en política. */
@@ -331,18 +345,21 @@ function diasActivada(license: LicenseRow): number | null {
 	return Math.floor((Date.now() - license.activated_at_ms) / (24 * 60 * 60 * 1000));
 }
 
+
+
 /**
- * Deshace un cobro. Una renovación devuelta solo pierde los meses que añadió; un alta devuelta
- * revoca la licencia (el cliente no se queda con el producto).
+ * Deshace los cobros de un cargo: los de todas las licencias de la compra (RI-52). Una renovación
+ * devuelta solo pierde los meses que añadió; un alta devuelta revoca la licencia (el cliente no se
+ * queda con el producto).
  */
-async function revertirCobro(
+async function revertirCobros(
 	db: Sql,
 	obj: any,
 	rev: Reversion,
 ): Promise<Record<string, unknown>> {
-	const encontrado = await localizarCobro(db, obj);
+	const cobros = await localizarCobros(db, obj);
 
-	if (!encontrado) {
+	if (cobros.length === 0) {
 		// Sin licencia atribuible no se toca nada: revocar a ojo sería peor. Queda en el registro
 		// del evento y en el log para mirarlo a mano.
 		console.warn("[stripe] reversión sin licencia atribuible:", rev.eventUid);
@@ -354,78 +371,88 @@ async function revertirCobro(
 		return { reversed: false, reason: "unresolved_license" };
 	}
 
-	const { license, pago } = encontrado;
-
 	// Idempotencia: una disputa que se abre y luego se pierde puede traer dos eventos, y Stripe
-	// reintenta. El cobro solo se revierte una vez.
-	if (pago?.reversed_at_ms) {
-		return { reversed: false, reason: "already_reversed", license_id: license.license_id };
+	// reintenta. Cada cobro solo se revierte una vez.
+	const pendientes = cobros.filter((c) => !c.pago?.reversed_at_ms);
+	if (pendientes.length === 0) {
+		return { reversed: false, reason: "already_reversed", license_id: cobros[0].license.license_id };
 	}
 
-	const esRenovacion = pago?.kind === "renewal";
-	let expiresAtMs: number | null = null;
+	const licencias: { license_id: string; accion: "shortened" | "revoked" }[] = [];
+	for (const { license, pago } of pendientes) {
+		const esRenovacion = pago?.kind === "renewal";
+		let expiresAtMs: number | null = null;
 
-	if (esRenovacion) {
-		expiresAtMs = await shortenLicense(db, license.license_id, pago!.term_months);
-	} else {
-		await revokeLicense(db, license.license_id);
-	}
+		if (esRenovacion) {
+			expiresAtMs = await shortenLicense(db, license.license_id, pago!.term_months);
+		} else {
+			await revokeLicense(db, license.license_id);
+		}
 
-	if (pago) {
-		await markLicensePaymentReversed(db, pago.payment_id, {
-			reason: rev.reason,
-			eventUid: rev.eventUid,
+		if (pago) {
+			await markLicensePaymentReversed(db, pago.payment_id, {
+				reason: rev.reason,
+				eventUid: rev.eventUid,
+			});
+		}
+
+		await auditAdmin(db, rev.reason === "dispute" ? "dispute" : "refund", license.license_id, {
+			event_uid: rev.eventUid,
+			accion: esRenovacion ? "meses_restados" : "revocada",
+			term_months: pago?.term_months ?? null,
+			expires_at_ms: expiresAtMs,
+			// Si esto sale alto, el reembolso se emitió fuera de la política de 7 días.
+			dias_activada: diasActivada(license),
+			payment_intent: String(obj?.payment_intent || "") || null,
 		});
-	}
 
-	await auditAdmin(db, rev.reason === "dispute" ? "dispute" : "refund", license.license_id, {
-		event_uid: rev.eventUid,
-		accion: esRenovacion ? "meses_restados" : "revocada",
-		term_months: pago?.term_months ?? null,
-		expires_at_ms: expiresAtMs,
-		// Si esto sale alto, el reembolso se emitió fuera de la política de 7 días.
-		dias_activada: diasActivada(license),
-		payment_intent: String(obj?.payment_intent || "") || null,
-	});
+		licencias.push({ license_id: license.license_id, accion: esRenovacion ? "shortened" : "revoked" });
+	}
 
 	return {
 		reversed: true,
-		license_id: license.license_id,
-		accion: esRenovacion ? "shortened" : "revoked",
+		// El primero, como antes de RI-52: con una sola licencia es lo único que hay.
+		license_id: licencias[0].license_id,
+		accion: licencias[0].accion,
+		licencias,
 	};
 }
 
-/** Deshace la reversión de una disputa ganada: el dinero vuelve, el servicio también. */
-async function restaurarCobro(
+/**
+ * Deshace la reversión de una disputa ganada: el dinero vuelve, el servicio también. A todas las
+ * licencias de la compra que revirtió esa disputa (RI-52).
+ */
+async function restaurarCobros(
 	db: Sql,
 	obj: any,
 	eventUid: string,
 ): Promise<Record<string, unknown>> {
-	const encontrado = await localizarCobro(db, obj);
-	if (!encontrado) return { restored: false, reason: "unresolved_license" };
+	const cobros = await localizarCobros(db, obj);
+	if (cobros.length === 0) return { restored: false, reason: "unresolved_license" };
 
-	const { license, pago } = encontrado;
-
-	// Solo se deshace lo que revirtió ESTA disputa. Si la licencia se revocó a mano por otro
+	// Solo se deshace lo que revirtió ESTA disputa. Si una licencia se revocó a mano por otro
 	// motivo, ganar la disputa no es razón para resucitarla.
-	if (pago && pago.reversed_reason !== "dispute") {
-		return { restored: false, reason: "not_reversed_by_dispute" };
+	const aRestaurar = cobros.filter((c) => !c.pago || c.pago.reversed_reason === "dispute");
+	if (aRestaurar.length === 0) return { restored: false, reason: "not_reversed_by_dispute" };
+
+	const restauradas: string[] = [];
+	for (const { license, pago } of aRestaurar) {
+		if (pago?.kind === "renewal") {
+			await extendLicense(db, license.license_id, pago.term_months);
+		} else {
+			await reactivateLicense(db, license.license_id);
+		}
+
+		if (pago) await clearLicensePaymentReversal(db, pago.payment_id);
+
+		await auditAdmin(db, "reactivate", license.license_id, {
+			event_uid: eventUid,
+			motivo: "disputa_ganada",
+		});
+		restauradas.push(license.license_id);
 	}
 
-	if (pago?.kind === "renewal") {
-		await extendLicense(db, license.license_id, pago.term_months);
-	} else {
-		await reactivateLicense(db, license.license_id);
-	}
-
-	if (pago) await clearLicensePaymentReversal(db, pago.payment_id);
-
-	await auditAdmin(db, "reactivate", license.license_id, {
-		event_uid: eventUid,
-		motivo: "disputa_ganada",
-	});
-
-	return { restored: true, license_id: license.license_id };
+	return { restored: true, license_id: restauradas[0], license_ids: restauradas };
 }
 
 /**
@@ -455,22 +482,26 @@ async function decidirReversion(db: Sql, event: any): Promise<Record<string, unk
 
 		// Parcial: no es una devolución de la compra sino un ajuste, así que la licencia no se
 		// toca. Queda auditado para que se vea en el histórico del cliente.
+		//
+		// RI-52: con varias licencias en la compra, Stripe tampoco dice cuál se devuelve. Se audita
+		// con todas, para que quien emitió el reembolso revoque la que toque desde administración.
 		if (total > 0 && devuelto < total) {
-			const encontrado = await localizarCobro(db, obj);
-			await auditAdmin(db, "refund", encontrado?.license.license_id ?? null, {
+			const cobros = await localizarCobros(db, obj);
+			await auditAdmin(db, "refund", cobros[0]?.license.license_id ?? null, {
 				event_uid: eventUid,
 				accion: "parcial_sin_efecto",
 				amount: total,
 				amount_refunded: devuelto,
+				licencias: cobros.map((c) => c.license.license_id),
 			});
 			return { reversed: false, reason: "partial_refund" };
 		}
 
-		return revertirCobro(db, obj, { reason: "refund", eventUid });
+		return revertirCobros(db, obj, { reason: "refund", eventUid });
 	}
 
 	if (event?.type === "charge.dispute.created") {
-		return revertirCobro(db, obj, { reason: "dispute", eventUid });
+		return revertirCobros(db, obj, { reason: "dispute", eventUid });
 	}
 
 	// charge.dispute.closed: solo importa haberla ganado. Perdida o aceptada, la reversión de la
@@ -479,5 +510,5 @@ async function decidirReversion(db: Sql, event: any): Promise<Record<string, unk
 		return { restored: false, reason: String(obj?.status || "unknown") };
 	}
 
-	return restaurarCobro(db, obj, eventUid);
+	return restaurarCobros(db, obj, eventUid);
 }

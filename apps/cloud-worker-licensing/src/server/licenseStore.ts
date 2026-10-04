@@ -184,11 +184,11 @@ export async function canjearLicencia(
 /**
  * Pasa el cobro de una clave canjeada a la licencia que recibió su tiempo, como renovación.
  *
- * Sin esto, un reembolso de esa compra no quitaría nada: `localizarCobro` (LIC-07) llega al cobro
- * por el `payment_intent`, y ese cobro seguiría apuntando a la clave gastada —que ya no tiene
- * meses que quitar— en vez de a la licencia donde de verdad fueron a parar. Se **mueve** en vez de
- * insertar otro porque `license_payments` tiene índice único por sesión de checkout: dos filas con
- * la misma sesión es justo lo que esa barrera impide.
+ * Sin esto, un reembolso de esa compra no quitaría nada: `localizarCobros` (LIC-07) llega al
+ * cobro por el `payment_intent`, y ese cobro seguiría apuntando a la clave gastada —que ya no
+ * tiene meses que quitar— en vez de a la licencia donde de verdad fueron a parar. Se **mueve** en
+ * vez de insertar otro porque `license_payments` tiene índice único por sesión y unidad: otra fila
+ * con la misma es justo lo que esa barrera impide.
  */
 export async function reasignarCobrosDeLaClave(
 	db: Sql,
@@ -569,10 +569,15 @@ export type LicensePaymentRow = {
 	reversed_at_ms: number | null;
 	reversed_reason: string | null;
 	reversed_event_uid: string | null;
+	/** RI-52: qué unidad de la compra es (1…N). Una compra de 4 licencias son 4 cobros. */
+	unidad: number;
 	at_ms: number;
 };
 
-/** LIC-07: registra un cobro cumplido (alta o renovación) para poder revertirlo después. */
+/**
+ * LIC-07: registra un cobro cumplido (alta o renovación) para poder revertirlo después. Hay uno
+ * por licencia emitida: una compra de varias unidades deja uno por unidad (RI-52).
+ */
 export async function recordLicensePayment(
 	db: Sql,
 	args: {
@@ -581,6 +586,7 @@ export async function recordLicensePayment(
 		termMonths: number;
 		sessionId: string | null;
 		paymentIntentId: string | null;
+		unidad?: number;
 	},
 ): Promise<void> {
 	await exec(
@@ -588,8 +594,8 @@ export async function recordLicensePayment(
 		`
     INSERT INTO license_payments
       (payment_id, license_id, kind, term_months, stripe_checkout_session_id,
-       stripe_payment_intent_id, at_ms)
-    VALUES (?, ?, ?, ?, ?, ?, ?);
+       stripe_payment_intent_id, unidad, at_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
     `,
 		[
 			crypto.randomUUID(),
@@ -598,15 +604,17 @@ export async function recordLicensePayment(
 			args.termMonths,
 			args.sessionId,
 			args.paymentIntentId,
+			args.unidad ?? 1,
 			Date.now(),
 		],
 	);
 }
 
 /**
- * REV-01: el cobro que cumplió una sesión de checkout, si ya se cumplió. Es la barrera de
- * idempotencia del webhook de pago: hay una fila por cobro y nunca se sobrescribe, y el índice
- * único `ux_license_payments_session` impide que haya dos aunque dos entregas se crucen.
+ * REV-01: un cobro de esa sesión de checkout, si ya se cumplió. Es la barrera de idempotencia del
+ * webhook de pago: se cumple entera en una transacción, así que con que haya uno ya está. Y si dos
+ * entregas se cruzan, el índice único `ux_license_payments_session_unidad` rechaza la unidad 1 de
+ * la segunda y su transacción entera se deshace.
  */
 export async function getLicensePaymentBySession(
 	db: Sql,
@@ -620,22 +628,24 @@ export async function getLicensePaymentBySession(
 	return (r.rows?.[0] as unknown as LicensePaymentRow) ?? null;
 }
 
-/** LIC-07: el cobro al que apunta un cargo de Stripe (por su PaymentIntent). */
-export async function getLicensePaymentByIntent(
+/**
+ * LIC-07: los cobros a los que apunta un cargo de Stripe (por su PaymentIntent). Uno por licencia
+ * de la compra (RI-52): un reembolso total o una disputa los revierte todos.
+ */
+export async function getLicensePaymentsByIntent(
 	db: Sql,
 	paymentIntentId: string,
-): Promise<LicensePaymentRow | null> {
+): Promise<LicensePaymentRow[]> {
 	const r = await exec(
 		db,
 		`
     SELECT * FROM license_payments
     WHERE stripe_payment_intent_id = ?
-    ORDER BY at_ms DESC
-    LIMIT 1;
+    ORDER BY unidad ASC, at_ms ASC;
     `,
 		[paymentIntentId],
 	);
-	return (r.rows?.[0] as unknown as LicensePaymentRow) ?? null;
+	return (r.rows ?? []) as unknown as LicensePaymentRow[];
 }
 
 /** LIC-07: marca un cobro como devuelto. Impide que dos eventos de Stripe lo reviertan dos veces. */

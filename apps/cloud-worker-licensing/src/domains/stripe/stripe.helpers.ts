@@ -103,17 +103,55 @@ export async function retrieveCheckoutSession(env: Env, sessionId: string): Prom
  * **Fail-closed**: si el Price no la trae, o no es 1/3/12, devolvemos `null` y NO se emite nada.
  * Antes emitir una licencia sin saber cuánto dura que regalar un año por un descuido en Stripe.
  */
-export function termMonthsFromSession(session: any): number | null {
+function termMonthsDeLinea(item: any): number | null {
+	const raw = item?.price?.metadata?.term_months ?? item?.price?.product?.metadata?.term_months;
+	const n = Number(raw);
+	return n === 1 || n === 3 || n === 12 ? n : null;
+}
+
+/**
+ * Tope de licencias por compra. Una cantidad mayor no se emite sola: se mira a mano. No es un
+ * límite de negocio sino un cortafuegos contra una errata (o un enlace mal configurado) que
+ * emitiría cientos de claves de golpe.
+ */
+export const MAX_LICENCIAS_POR_COMPRA = 100;
+
+/**
+ * Las licencias que paga una sesión: **una por unidad**, cada una con su duración (RI-52).
+ *
+ * Antes se leía la duración de la primera línea y se emitía una sola licencia, mirase lo que
+ * mirase la cantidad: comprar 4 del plan anual daba un año. Ahora 4 unidades son 4 licencias, y
+ * no 4 años en una: quien compra varias puede querer varios locales, y quien quiera todo el
+ * tiempo en un equipo canjea las claves una tras otra y se suman (REV-13).
+ *
+ * **Fail-closed**, como antes: si alguna línea no trae la duración, la cantidad no es un entero
+ * positivo, la lista viene paginada (no se ha leído entera) o pasa del tope, no se emite NADA.
+ * Emitir a medias una compra sería peor que no emitirla y verlo en el registro del evento.
+ */
+export function licenciasDeLaSesion(session: any): { termMonths: number[] } | { error: string } {
+	if (session?.line_items?.has_more) return { error: "line_items_paginados" };
 	const items: any[] = session?.line_items?.data ?? [];
 
+	const termMonths: number[] = [];
 	for (const item of items) {
-		const raw =
-			item?.price?.metadata?.term_months ?? item?.price?.product?.metadata?.term_months;
-		const n = Number(raw);
-		if (n === 1 || n === 3 || n === 12) return n;
+		const meses = termMonthsDeLinea(item);
+		if (meses == null) {
+			return {
+				error: `missing_term_months_metadata (price sin metadata.term_months: ${item?.price?.id ?? "?"})`,
+			};
+		}
+		const cantidad = item?.quantity == null ? 1 : Number(item.quantity);
+		if (!Number.isInteger(cantidad) || cantidad < 1) {
+			return { error: `cantidad_invalida (${String(item?.quantity)})` };
+		}
+		for (let i = 0; i < cantidad; i++) termMonths.push(meses);
 	}
 
-	return null;
+	if (termMonths.length === 0) return { error: "missing_term_months_metadata (sesión sin líneas)" };
+	if (termMonths.length > MAX_LICENCIAS_POR_COMPRA) {
+		return { error: `demasiadas_licencias (${termMonths.length} > ${MAX_LICENCIAS_POR_COMPRA})` };
+	}
+	return { termMonths };
 }
 
 /* REV-13 · Aquí vivieron `intencionDeLaCompra` y `licenseIdFromSession`, que leían un

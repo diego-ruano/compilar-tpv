@@ -17,10 +17,14 @@ import { describe, it, expect } from "vitest";
 import { clienteSobre, conFalloSimulado } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import { cumplir } from "../src/domains/stripe/stripe.routes";
+import { cumplir, revertir } from "../src/domains/stripe/stripe.routes";
+import { MAX_LICENCIAS_POR_COMPRA } from "../src/domains/stripe/stripe.helpers";
 import {
 	activateLicenseFirstTime,
+	canjearLicencia,
+	extendLicense,
 	getLicenseById,
+	reasignarCobrosDeLaClave,
 	markWebhookProcessed,
 	upsertWebhookEvent,
 	type LicenseRow,
@@ -90,13 +94,14 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 			async licenciaActivada() {
 				const r = await cumplir(ENV, db, sesion("cs_alta"));
 				if (r.accion !== "emitida") throw new Error(`alta inesperada: ${r.accion}`);
+				const [licenseId] = r.license_ids;
 				await activateLicenseFirstTime(db, {
-					licenseId: r.license_id,
+					licenseId,
 					tenantId: "tenant-1",
 					deviceId: "device-main",
 					termMonths: 12,
 				});
-				return (await getLicenseById(db, r.license_id))!;
+				return (await getLicenseById(db, licenseId))!;
 			},
 			async leer(licenseId) {
 				return (await getLicenseById(db, licenseId))!;
@@ -223,5 +228,220 @@ describe("REV-01 · un fallo a mitad no deja nada a medias", () => {
 		expect(r.reintento.accion).toBe("emitida");
 		expect(r.licencias).toBe(1);
 		expect(r.cobros).toBe(1);
+	});
+});
+
+
+/* ============================================================
+   RI-52 · Una compra de varias unidades
+============================================================ */
+
+/** Una sesión con varias líneas: `[meses, cantidad]` por línea, como la devuelve Stripe. */
+const sesionVarias = (id: string, lineas: [number, number][]) => ({
+	...sesion(id),
+	line_items: {
+		data: lineas.map(([meses, quantity], i) => ({
+			quantity,
+			price: { id: `price_${i}`, metadata: { term_months: String(meses) } },
+		})),
+	},
+});
+
+const reembolso = (paymentIntent: string, total = 36000, devuelto = 36000) => ({
+	type: "charge.refunded",
+	id: `evt_reembolso_${paymentIntent}_${devuelto}`,
+	data: {
+		object: {
+			object: "charge",
+			payment_intent: paymentIntent,
+			customer: CUSTOMER,
+			amount: total,
+			amount_refunded: devuelto,
+		},
+	},
+});
+
+const disputa = (paymentIntent: string, tipo: "created" | "closed", status = "needs_response") => ({
+	type: `charge.dispute.${tipo}`,
+	id: `evt_disputa_${tipo}_${paymentIntent}`,
+	data: { object: { object: "dispute", payment_intent: paymentIntent, customer: CUSTOMER, status } },
+});
+
+async function emitidas(e: Escenario, id: string, lineas: [number, number][]): Promise<string[]> {
+	const r = await cumplir(ENV, e.db, sesionVarias(id, lineas));
+	if (r.accion !== "emitida") throw new Error(`compra inesperada: ${r.accion}`);
+	return r.license_ids;
+}
+
+describe("RI-52 · una licencia por unidad", () => {
+	it("comprar 3 emite 3 licencias distintas, cada una con su cobro, y repetirla no emite más", async () => {
+		const r = await escenario(async (e) => {
+			const primera = await cumplir(ENV, e.db, sesionVarias("cs_pack", [[12, 3]]));
+			const segunda = await cumplir(ENV, e.db, sesionVarias("cs_pack", [[12, 3]]));
+			const unidades = e.sql
+				.exec("SELECT unidad FROM license_payments ORDER BY unidad;")
+				.toArray()
+				.map((f: any) => Number(f.unidad));
+			const meses = e.sql
+				.exec("SELECT term_months FROM licenses;")
+				.toArray()
+				.map((f: any) => Number(f.term_months));
+			return { primera, segunda, unidades, meses, licencias: e.contar("licenses") };
+		});
+
+		expect(r.primera.accion).toBe("emitida");
+		const ids = r.primera.accion === "emitida" ? r.primera.license_ids : [];
+		expect(new Set(ids).size).toBe(3);
+		// Tres licencias de un año, no una de tres: quien compra varias puede querer varios locales.
+		expect(r.meses).toEqual([12, 12, 12]);
+		expect(r.unidades).toEqual([1, 2, 3]);
+		expect(r.segunda.accion).toBe("ya_cumplida");
+		expect(r.licencias).toBe(3);
+	});
+
+	it("con varias líneas, cada unidad lleva la duración de la suya", async () => {
+		const meses = await escenario(async (e) => {
+			await emitidas(e, "cs_mixta", [
+				[12, 2],
+				[3, 1],
+			]);
+			return e.sql
+				.exec("SELECT term_months FROM licenses ORDER BY term_months;")
+				.toArray()
+				.map((f: any) => Number(f.term_months));
+		});
+		expect(meses).toEqual([3, 12, 12]);
+	});
+
+	it("fail-closed: una línea sin duración, una cantidad rara o demasiadas no emiten nada", async () => {
+		const r = await escenario(async (e) => {
+			const sinDuracion = {
+				...sesionVarias("cs_mala", [[12, 2]]),
+				line_items: {
+					data: [
+						{ quantity: 2, price: { id: "price_anual", metadata: { term_months: "12" } } },
+						{ quantity: 1, price: { id: "price_sin_meses", metadata: {} } },
+					],
+				},
+			};
+			const errores = [
+				await cumplir(ENV, e.db, sinDuracion).catch((err) => String(err?.message)),
+				await cumplir(ENV, e.db, sesionVarias("cs_cero", [[12, 0]])).catch((err) => String(err?.message)),
+				await cumplir(ENV, e.db, sesionVarias("cs_mucho", [[12, MAX_LICENCIAS_POR_COMPRA + 1]])).catch(
+					(err) => String(err?.message),
+				),
+			];
+			return { errores, licencias: e.contar("licenses"), cobros: e.contar("license_payments") };
+		});
+
+		expect(r.errores[0]).toMatch(/missing_term_months_metadata/);
+		expect(r.errores[1]).toMatch(/cantidad_invalida/);
+		expect(r.errores[2]).toMatch(/demasiadas_licencias/);
+		expect(r.licencias).toBe(0);
+		expect(r.cobros).toBe(0);
+	});
+
+	it("si falla a mitad no queda ninguna, y el reintento emite todas", async () => {
+		const r = await escenario(async (e) => {
+			const conFallo = conFalloSimulado(e.db, /INSERT INTO license_payments/);
+			const error = await cumplir(ENV, conFallo, sesionVarias("cs_pack", [[12, 3]])).catch((err) => err);
+			const trasFallo = e.contar("licenses");
+			const reintento = await cumplir(ENV, e.db, sesionVarias("cs_pack", [[12, 3]]));
+			return { error, trasFallo, reintento, licencias: e.contar("licenses") };
+		});
+
+		expect(String(r.error?.message)).toBe("fallo_simulado");
+		expect(r.trasFallo).toBe(0);
+		expect(r.reintento.accion).toBe("emitida");
+		expect(r.licencias).toBe(3);
+	});
+
+	it("la base admite varias unidades de una sesión, pero no la misma dos veces", async () => {
+		await escenario(async (e) => {
+			const insertar = (id: string, unidad: number) =>
+				e.sql.exec(
+					`INSERT INTO license_payments (payment_id, license_id, kind, term_months,
+					   stripe_checkout_session_id, stripe_payment_intent_id, unidad, at_ms)
+					 VALUES (?, 'lic', 'issue', 12, 'cs_dup', 'pi_dup', ?, 0);`,
+					id,
+					unidad,
+				);
+			insertar("p1", 1);
+			insertar("p2", 2);
+			expect(() => insertar("p3", 1)).toThrow(/UNIQUE/i);
+		});
+	});
+});
+
+describe("RI-52 · deshacer una compra de varias unidades", () => {
+	it("un reembolso total revoca todas las licencias de la compra", async () => {
+		const estados = await escenario(async (e) => {
+			const ids = await emitidas(e, "cs_pack", [[12, 3]]);
+			await revertir(e.db, reembolso("pi_cs_pack"));
+			return Promise.all(ids.map(async (id) => (await e.leer(id)).status));
+		});
+		expect(estados).toEqual(["revoked", "revoked", "revoked"]);
+	});
+
+	it("una clave del pack ya canjeada en otro local pierde allí sus meses; las demás se revocan", async () => {
+		const r = await escenario(async (e) => {
+			const otroLocal = await e.licenciaActivada();
+			const [canjeada, sinUsar] = await emitidas(e, "cs_pack", [[12, 2]]);
+			// Lo que hace la activación al teclear una clave nueva en un equipo con licencia (REV-13).
+			await canjearLicencia(e.db, canjeada, otroLocal.license_id);
+			const conCanje = await extendLicense(e.db, otroLocal.license_id, 12);
+			await reasignarCobrosDeLaClave(e.db, canjeada, otroLocal.license_id);
+
+			const resultado = await revertir(e.db, reembolso("pi_cs_pack", 24000, 24000));
+			return {
+				resultado,
+				otroLocal: await e.leer(otroLocal.license_id),
+				antes: otroLocal.expires_at_ms,
+				conCanje,
+				sinUsar: await e.leer(sinUsar),
+			};
+		});
+
+		expect(r.resultado.reversed).toBe(true);
+		// El otro local sigue vivo, con la fecha que tenía antes del canje.
+		expect(r.otroLocal.status).toBe("active");
+		expect(r.otroLocal.expires_at_ms).toBe(r.antes);
+		expect(r.sinUsar.status).toBe("revoked");
+	});
+
+	it("un reembolso parcial no toca ninguna y deja dicho cuáles eran", async () => {
+		const r = await escenario(async (e) => {
+			const ids = await emitidas(e, "cs_pack", [[12, 3]]);
+			const resultado = await revertir(e.db, reembolso("pi_cs_pack", 36000, 12000));
+			const auditoria = JSON.parse(
+				String(e.sql.exec("SELECT detail FROM admin_audit WHERE action = 'refund';").toArray()[0].detail),
+			);
+			return {
+				ids,
+				resultado,
+				auditoria,
+				estados: await Promise.all(ids.map(async (id) => (await e.leer(id)).status)),
+			};
+		});
+
+		expect(r.resultado.reason).toBe("partial_refund");
+		expect(r.estados).toEqual(["issued", "issued", "issued"]);
+		expect([...r.auditoria.licencias].sort()).toEqual([...r.ids].sort());
+	});
+
+	it("abrir una disputa las corta todas y ganarla las devuelve todas, una sola vez", async () => {
+		const r = await escenario(async (e) => {
+			const ids = await emitidas(e, "cs_pack", [[12, 3]]);
+			await revertir(e.db, disputa("pi_cs_pack", "created"));
+			const cortadas = await Promise.all(ids.map(async (id) => (await e.leer(id)).status));
+			const repetida = await revertir(e.db, { ...disputa("pi_cs_pack", "created"), id: "evt_otra" });
+			await revertir(e.db, disputa("pi_cs_pack", "closed", "won"));
+			const devueltas = await Promise.all(ids.map(async (id) => (await e.leer(id)).status));
+			return { cortadas, repetida, devueltas };
+		});
+
+		expect(r.cortadas).toEqual(["revoked", "revoked", "revoked"]);
+		expect(r.repetida.reason).toBe("already_reversed");
+		expect(r.devueltas).toEqual(["issued", "issued", "issued"]);
 	});
 });

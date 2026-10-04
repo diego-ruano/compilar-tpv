@@ -1,7 +1,8 @@
 -- ============================================================================================
 -- Esquema de la base CENTRAL (control-plane) de `tpv-api`, tal como está en producción.
 --
--- Foto tomada el 2026-09-16. Es la única referencia de esta base en el repo.
+-- Foto tomada el 2026-09-16, más los cambios de RI-52 (2026-10-04: varias licencias por compra).
+-- Es la única referencia de esta base en el repo.
 --
 -- La estructura de esta base NO se toca desde el código: el worker no crea ni altera tablas. Se
 -- gestiona a mano en Turso, y si cambia allí esta foto se queda vieja sin que nada avise, así que
@@ -165,7 +166,9 @@ CREATE TABLE licenses (
   updated_at_ms              INTEGER NOT NULL
 , customer_business_name TEXT, customer_phone TEXT, customer_address_json TEXT, key_email_sent_at_ms INTEGER);
 
-CREATE UNIQUE INDEX ux_licenses_stripe_session
+-- RI-52: ya no es único. Una compra de varias unidades emite una licencia por unidad, y todas
+-- llevan la misma sesión. La barrera de idempotencia es la de `license_payments`.
+CREATE INDEX ix_licenses_stripe_session
   ON licenses (stripe_checkout_session_id) WHERE stripe_checkout_session_id IS NOT NULL;
 CREATE INDEX ix_licenses_stripe_customer ON licenses (stripe_customer_id);
 CREATE INDEX ix_licenses_tenant          ON licenses (tenant_id);
@@ -216,14 +219,16 @@ CREATE TABLE license_payments (
   reversed_reason            TEXT,
   reversed_event_uid         TEXT,
   at_ms                      INTEGER NOT NULL
-);
+, unidad INTEGER NOT NULL DEFAULT 1);
 
 CREATE INDEX ix_license_payments_intent
   ON license_payments (stripe_payment_intent_id);
 -- REV-01: una sesión de checkout se cumple una sola vez. Es la barrera del webhook de pago
 -- (`licenses.stripe_checkout_session_id` no sirve: cada renovación la sobrescribe).
-CREATE UNIQUE INDEX ux_license_payments_session
-  ON license_payments (stripe_checkout_session_id) WHERE stripe_checkout_session_id IS NOT NULL;
+-- RI-52: por sesión Y unidad (`unidad` = 1…N, una por licencia de la compra). Dos entregas que se
+-- cruzan chocan en la unidad 1, y la segunda se deshace entera.
+CREATE UNIQUE INDEX ux_license_payments_session_unidad
+  ON license_payments (stripe_checkout_session_id, unidad) WHERE stripe_checkout_session_id IS NOT NULL;
 CREATE INDEX ix_license_payments_license ON license_payments (license_id);
 
 CREATE TABLE admin_audit (

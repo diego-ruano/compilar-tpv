@@ -57,15 +57,20 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 2. El timestamp de la firma no se desvía más de 5 minutos.
 3. Idempotencia por `event.id` (`webhook_events`): un evento procesado bien no se repite; uno que
    falló sí, y por eso se contestó 500.
-4. Idempotencia por sesión de checkout (índice único en `license_payments` y en
-   `licenses.stripe_checkout_session_id`), comprobada dentro de la transacción.
-5. Sin `metadata.term_months` en el Price no se emite nada (fail-closed).
+4. Idempotencia por sesión de checkout (índice único en `license_payments` por sesión y unidad),
+   comprobada dentro de la transacción.
+5. Fail-closed: si una línea no trae `metadata.term_months` en su Price, la cantidad no es un entero
+   positivo, la lista de líneas viene paginada o la compra pasa de `MAX_LICENCIAS_POR_COMPRA` (100),
+   no se emite nada.
 
 Eventos de pago: `checkout.session.completed` y `checkout.session.async_payment_succeeded` (un
-checkout `unpaid` espera al segundo). **Toda compra emite una clave nueva**, la registra como cobro
-`kind='issue'` en `license_payments` y, después del `COMMIT`, la manda por correo. Si el correo falla
-la venta sigue: `key_email_sent_at_ms` queda a `NULL` y `pnpm license:list` la enseña pendiente de
-`pnpm license:resend`. La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
+checkout `unpaid` espera al segundo). **Toda compra emite claves nuevas, una por unidad**: comprar 4
+del plan anual son 4 licencias de un año, no una de cuatro, porque quien compra varias puede querer
+varios locales; quien quiera todo el tiempo en un equipo canjea las claves una tras otra y se suman
+(ver [Activar](#activar)). Cada una se registra como cobro `kind='issue'` en `license_payments` con
+su `unidad` (1…N), todas en la misma transacción, y después del `COMMIT` van **juntas en un correo**.
+Si el correo falla la venta sigue: `key_email_sent_at_ms` queda a `NULL` y `pnpm license:list` las
+enseña pendientes de `pnpm license:resend`. La API de Stripe se llama con la versión fija `2025-09-30.clover` (hace falta
 para `customer_details.business_name`).
 
 Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.
@@ -75,11 +80,14 @@ Hay un único enlace de compra (`CHECKOUT_URL`) para estrenar y para renovar.
 Eventos `charge.refunded`, `charge.dispute.created` y `charge.dispute.closed` (hay que suscribirlos
 en el endpoint del Dashboard de Stripe). Todo en una transacción:
 
+Un cargo puede tener varios cobros, uno por licencia de la compra, y cada uno se trata por su
+cuenta:
+
 | Caso | Efecto |
 |---|---|
 | Reembolso total o disputa abierta de un **alta** | Licencia revocada |
 | … de una **renovación** (`kind='renewal'`, incluida una clave canjeada) | Se restan sus meses |
-| Reembolso parcial | Nada; queda en `admin_audit` |
+| Reembolso parcial | Nada; queda en `admin_audit` con todas las licencias de la compra (Stripe no dice cuál se devuelve: se revoca a mano) |
 | Disputa **ganada** | Se deshace lo que revirtió esa disputa (y sólo eso) |
 | Cargo sin licencia atribuible | Nada; se audita |
 

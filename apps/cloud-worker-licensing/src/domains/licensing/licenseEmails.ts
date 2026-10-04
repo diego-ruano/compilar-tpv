@@ -103,6 +103,55 @@ Guarda este correo: es también el buzón desde el que podrás recuperar la lice
 	return enviar(env, { to: args.to, subject: "Tu licencia del TPV", html, text });
 }
 
+/**
+ * RI-52: las claves de una compra de varias unidades, todas en un correo. Con una sola es el
+ * correo de siempre (`sendLicenseKeyEmail`).
+ *
+ * Una clave por local: cada una estrena un negocio. Y si alguien quiere todo el tiempo en el mismo
+ * equipo, teclea las claves una tras otra y se le suman (REV-13): el correo lo dice, porque es lo
+ * único de esto que no se ve venir.
+ */
+export async function sendLicenseKeysEmail(
+	env: Env,
+	args: { to: string; name?: string | null; claves: { key: string; termMonths: number }[] },
+): Promise<boolean> {
+	if (args.claves.length === 1) {
+		const [c] = args.claves;
+		return sendLicenseKeyEmail(env, { to: args.to, name: args.name, key: c.key, termMonths: c.termMonths });
+	}
+
+	const saludo = args.name?.trim() ? `Hola, ${args.name.trim()}:` : "Hola:";
+	const n = args.claves.length;
+
+	const html = layout(
+		"Tus licencias del TPV",
+		`<p>${esc(saludo)}</p>
+     <p>Has comprado ${n} licencias. Cada clave vale para un local: introdúcela en su TPV al abrirlo
+     por primera vez.</p>
+     ${args.claves
+				.map((c, i) => `<p style="margin:16px 0 0;font-size:14px;color:#6b7280">Licencia ${i + 1} de ${n} (${esc(meses(c.termMonths))})</p>${destacado(c.key)}`)
+				.join("\n     ")}
+     <p style="font-size:14px;color:#6b7280">¿Las quieres todas para el mismo local? Introdúcelas en ese TPV una
+     detrás de otra (Configuración → Licencia) y el tiempo se va sumando.</p>
+     <p style="font-size:14px;color:#6b7280">La cuenta atrás de cada una empieza <strong>al activarla</strong>, no
+     hoy.</p>
+     <p style="font-size:14px;color:#6b7280">Guarda este correo. Es también el buzón desde el que podrás recuperar las
+     licencias si algún día cambias de ordenador.</p>`,
+	);
+
+	const text = `${saludo}
+
+Has comprado ${n} licencias del TPV. Cada clave vale para un local: introdúcela en su TPV al abrirlo por primera vez.
+
+${args.claves.map((c, i) => `Licencia ${i + 1} de ${n} (${meses(c.termMonths)}):\n    ${c.key}`).join("\n\n")}
+
+¿Las quieres todas para el mismo local? Introdúcelas en ese TPV una detrás de otra (Configuración → Licencia) y el tiempo se va sumando.
+
+La cuenta atrás de cada una empieza al activarla, no hoy. Guarda este correo: es también el buzón desde el que podrás recuperar las licencias si cambias de ordenador.`;
+
+	return enviar(env, { to: args.to, subject: "Tus licencias del TPV", html, text });
+}
+
 /* ============================================================
    1.b Renovación (el cliente ya tenía licencia: se extiende, no se emite otra)
 ============================================================ */
