@@ -263,7 +263,6 @@ lecturas_de_contrato! {
     inventario__productos_por_categoria,
     inventario__resumen,
     mesas__lineas_comanda,
-    mesas__ocupadas,
     mesas__layout,
     mesas__meta_all,
     mesas__comanda_abierta_by_mesa,
@@ -380,11 +379,6 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
                 .get_lineas_comanda(&s(&e["id_comanda"]))
                 .await
                 .expect("lineas comanda mesa");
-            serde_json::to_value(r).unwrap()
-        }
-        "mesas.ocupadas" => {
-            let repo = SqliteMesasRepository::new(db.clone());
-            let r = repo.get_mesas_ocupadas().await.expect("mesas ocupadas");
             serde_json::to_value(r).unwrap()
         }
         "mesas.layout" => {

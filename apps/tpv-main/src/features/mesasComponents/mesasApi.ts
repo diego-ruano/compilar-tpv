@@ -23,7 +23,6 @@ import type {
     ProductoVendibleOut,
 } from "@tpv/contracts";
 
-import { CERO } from "../../shared/lib/dinero";
 import type { Salon } from "./types";
 
 export type { CategoriaVendibleOut, KitchenRow, MesaLineaComandaRow, MesaMetaOut, ProductoVendibleOut };
@@ -71,33 +70,19 @@ export async function mesasSaveLayout(salons: Salon[]): Promise<void> {
     });
 }
 
-/** Estado de cada mesa del plano, indexado por el id de la mesa. */
+/**
+ * Estado de cada mesa del plano, indexado por el id de la mesa. Si falla, falla: antes caía a
+ * `get_mesas_ocupadas`, una compatibilidad de antes de que existiera el detalle, y era lo único
+ * que mantenía vivo ese comando (RI-52). React Query reintenta y la pantalla enseña el error.
+ */
 export async function mesasLoadMesaMeta(): Promise<Record<string, MesaMetaOut>> {
     const out: Record<string, MesaMetaOut> = {};
-    try {
-        const raw = await invokeClient<Record<string, MesaMetaOut>>("mesas_meta_all");
-        for (const [k, v] of Object.entries(raw)) {
-            const idMesa = parseAnyMesaId(k);
-            // `parseAnyMesaId` normaliza la clave a UUID puro, que es la que usan los lookups
-            // (TableNode/Mesas vía `parseMesaId`). Una sola clave.
-            if (idMesa) out[idMesa] = v;
-        }
-    } catch {
-        // Sólo si el detalle falla: al menos que el plano distinga libre de ocupada.
-        const ocupadas = await invokeClient<Record<string, boolean>>("get_mesas_ocupadas");
-        for (const [k, ocupada] of Object.entries(ocupadas)) {
-            const idMesa = parseAnyMesaId(k);
-            if (!idMesa) continue;
-            out[idMesa] = {
-                ocupada,
-                id_comanda: "",
-                idComanda: "",
-                totalPendiente: CERO,
-                pendientesPago: 0,
-                pendientesCocina: 0,
-                estado: ocupada ? "PENDIENTE" : "LIBRE",
-            };
-        }
+    const raw = await invokeClient<Record<string, MesaMetaOut>>("mesas_meta_all");
+    for (const [k, v] of Object.entries(raw)) {
+        const idMesa = parseAnyMesaId(k);
+        // `parseAnyMesaId` normaliza la clave a UUID puro, que es la que usan los lookups
+        // (TableNode/Mesas vía `parseMesaId`). Una sola clave.
+        if (idMesa) out[idMesa] = v;
     }
     return out;
 }

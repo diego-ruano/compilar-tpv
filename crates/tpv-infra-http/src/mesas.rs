@@ -53,10 +53,6 @@ impl MesasRepository for HttpMesasRepository {
         self.client.get_json("/v1/mesas/layout").await
     }
 
-    async fn get_mesas_ocupadas(&self) -> AppResult<HashMap<String, bool>> {
-        self.client.get_json("/v1/mesas/ocupadas").await
-    }
-
     /* Reservas */
     async fn set_reserva_estado(&self, id_reserva: &str, estado: String) -> AppResult<()> {
         let _: JsonValue = self

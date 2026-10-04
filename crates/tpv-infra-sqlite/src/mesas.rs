@@ -849,42 +849,6 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(out)
     }
 
-    /// Mesas con comanda abierta, indexadas por **el ID de mesa pelado**.
-    ///
-    /// La clave era `db-zona-<zona>:db-mesa-<mesa>`, y no la entendía nadie: `parseAnyMesaId` (en
-    /// `mesasApi.ts`) sólo sabe leer `db-mesa-<id>` o el id suelto, así que devolvía la cadena
-    /// entera y el mapa quedaba indexado por algo que ningún lookup buscaba. El worker lo tapaba
-    /// emitiendo además dos claves alternativas; ahora los dos lados devuelven la misma y única
-    /// clave útil. La zona no hace falta para nada: el ID de mesa ya es único.
-    async fn get_mesas_ocupadas(&self) -> AppResult<HashMap<String, bool>> {
-        let g = self.db.read().await;
-        let db = &g;
-        let mut rows = db
-            .query(
-                r#"
-                SELECT C.ID_Mesa
-                FROM Comandas C
-                JOIN Mesas M ON M.ID_Mesa = C.ID_Mesa
-                WHERE C.Estado = 'Abierta';
-                "#,
-                (),
-            )
-            .await
-            .map_err(db_err)?;
-
-        let mut map: HashMap<String, bool> = HashMap::new();
-        while let Some(r) = rows.next().await.map_err(db_err)? {
-            let id_mesa = match r.get_value(0).map_err(db_err)? {
-                Value::Text(s) => s,
-                _ => continue,
-            };
-            if id_mesa.trim().is_empty() {
-                continue;
-            }
-            map.insert(id_mesa, true);
-        }
-        Ok(map)
-    }
 
     /* ===== RESERVAS ===== */
 

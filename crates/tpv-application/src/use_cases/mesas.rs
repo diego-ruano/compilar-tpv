@@ -37,10 +37,6 @@ pub async fn load_layout(repo: &dyn MesasRepository) -> AppResult<Vec<SalonOut>>
     repo.load_layout().await
 }
 
-pub async fn get_mesas_ocupadas(repo: &dyn MesasRepository) -> AppResult<HashMap<String, bool>> {
-    repo.get_mesas_ocupadas().await
-}
-
 /* Reservas */
 
 pub async fn set_reserva_estado(

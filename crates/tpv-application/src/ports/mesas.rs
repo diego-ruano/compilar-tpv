@@ -18,7 +18,6 @@ pub trait MesasRepository: Send + Sync {
     /* Layout */
     async fn save_layout(&self, salons: Vec<SalonInput>) -> AppResult<()>;
     async fn load_layout(&self) -> AppResult<Vec<SalonOut>>;
-    async fn get_mesas_ocupadas(&self) -> AppResult<HashMap<String, bool>>;
 
     /* Reservas */
     async fn set_reserva_estado(&self, id_reserva: &str, estado: String) -> AppResult<()>;

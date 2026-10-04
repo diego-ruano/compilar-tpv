@@ -31,10 +31,6 @@ mesasRoutes.post("/layout", cuerpo(S.saveLayoutSchema), async (c) => {
 	return c.json({ ok: true });
 });
 
-mesasRoutes.get("/ocupadas", async (c) =>
-	c.json(await tenantQuery(c, (db) => q.mesasOcupadas(db))),
-);
-
 mesasRoutes.get("/meta", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.mesasMetaAll(db))),
 );

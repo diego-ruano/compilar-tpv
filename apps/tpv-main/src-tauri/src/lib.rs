@@ -2120,7 +2120,6 @@ pub fn run() {
             // mesass
             commands::mesas::save_layout,
             commands::mesas::load_layout,
-            commands::mesas::get_mesas_ocupadas,
             commands::mesas::set_reserva_estado,
             commands::mesas::get_comanda_abierta_by_mesa,
             commands::mesas::abrir_comanda,
@@ -2788,6 +2787,11 @@ mod tests_exenciones_del_gate {
                 "con él la pantalla volvería a mandar un hash hecho fuera, que el backend guarda sin \
                  poder exigir la política del PIN ni las iteraciones; el alta y la edición reciben el \
                  PIN y lo hashean dentro (RI-63)",
+            ),
+            (
+                "get_mesas_ocupadas",
+                "era la vuelta del plano cuando fallaba `mesas_meta_all`, de antes de que existiera el \
+                 detalle de cada mesa; el plano usa sólo el detalle (RI-52)",
             ),
             (
                 "proveedores_create_producto",

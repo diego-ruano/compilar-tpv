@@ -111,30 +111,6 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 	});
 }
 
-/**
- * Mesas con comanda abierta, indexadas por **el ID de mesa pelado**.
- *
- * Antes salían tres claves por mesa (`db-zona-Z:db-mesa-M`, `db-mesa-M` y el id suelto) para tapar
- * que la Main devolvía sólo la compuesta, que es justo la que `parseAnyMesaId` no sabe leer. Ahora
- * la Main devuelve el id pelado y aquí basta con esa: una sola clave, la misma en los dos lados y
- * la única que los lookups del frontend buscan. La zona sobraba — el ID de mesa ya es único.
- */
-export async function mesasOcupadas(db: Client): Promise<Record<string, boolean>> {
-	const rs = await db.execute(`
-		SELECT C.ID_Mesa
-		FROM Comandas C
-		JOIN Mesas M ON M.ID_Mesa = C.ID_Mesa
-		WHERE C.Estado = 'Abierta';
-	`);
-	const out: Record<string, boolean> = {};
-	for (const r of rows(rs)) {
-		const idMesa = String(r.ID_Mesa ?? "").trim();
-		if (!idMesa) continue;
-		out[idMesa] = true;
-	}
-	return out;
-}
-
 export async function readComanda(
 	db: Client,
 	idComanda: string,

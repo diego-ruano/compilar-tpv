@@ -83,7 +83,6 @@ import {
 	lineas as lineasMesa,
 	loadLayout,
 	mesasMetaAll,
-	mesasOcupadas,
 	productosByCategoria as productosByCategoriaMesa,
 	searchProductos as searchProductosMesa,
 } from "../src/domains/mesas/mesas.queries";
@@ -150,8 +149,6 @@ import casoHorSemana from "../../../tests/contract/lecturas/casos/trabajadores/a
 import goldenHorSemana from "../../../tests/contract/lecturas/golden/trabajadores/asignaciones_semana.json";
 import casoHorSemanaDef from "../../../tests/contract/lecturas/casos/trabajadores/asignaciones_semana_con_predeterminado.json";
 import goldenHorSemanaDef from "../../../tests/contract/lecturas/golden/trabajadores/asignaciones_semana_con_predeterminado.json";
-import casoMesaOcupadas from "../../../tests/contract/lecturas/casos/mesas/ocupadas.json";
-import goldenMesaOcupadas from "../../../tests/contract/lecturas/golden/mesas/ocupadas.json";
 import casoMesaLayout from "../../../tests/contract/lecturas/casos/mesas/layout.json";
 import goldenMesaLayout from "../../../tests/contract/lecturas/golden/mesas/layout.json";
 import casoMesaMetaAll from "../../../tests/contract/lecturas/casos/mesas/meta_all.json";
@@ -290,7 +287,6 @@ const CASOS = [
 		caso: casoHorSemanaDef,
 		golden: goldenHorSemanaDef,
 	},
-	{ nombre: "mesas_ocupadas", caso: casoMesaOcupadas, golden: goldenMesaOcupadas },
 	{ nombre: "mesas_layout", caso: casoMesaLayout, golden: goldenMesaLayout },
 	{ nombre: "mesas_meta_all", caso: casoMesaMetaAll, golden: goldenMesaMetaAll },
 	{
@@ -466,8 +462,6 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return resumenInventario(db, e.limit);
 		case "mesas.lineas_comanda":
 			return lineasMesa(db, e.id_comanda);
-		case "mesas.ocupadas":
-			return mesasOcupadas(db);
 		case "mesas.layout":
 			return loadLayout(db);
 		case "mesas.meta_all":

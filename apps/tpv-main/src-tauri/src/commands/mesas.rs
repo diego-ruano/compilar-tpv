@@ -36,14 +36,6 @@ pub async fn load_layout(state: State<'_, AppState>) -> Result<Vec<SalonOut>, Ap
     Ok(uc::load_layout(repo.as_ref()).await?)
 }
 
-#[tauri::command]
-pub async fn get_mesas_ocupadas(
-    state: State<'_, AppState>,
-) -> Result<HashMap<String, bool>, AppErrorDto> {
-    let repo = state.mesas_repo().await?;
-    Ok(uc::get_mesas_ocupadas(repo.as_ref()).await?)
-}
-
 /* ===== RESERVAS ===== */
 
 #[tauri::command]
