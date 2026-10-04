@@ -3,7 +3,6 @@
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
-	CreateProductoInput,
 	ProveedorSaveInput,
 	SetVinculosInput,
 } from "./proveedores.schemas";
@@ -151,99 +150,3 @@ export function setVinculos(idProveedor: string, input: SetVinculosInput): Built
 	};
 }
 
-export function crearProducto(input: CreateProductoInput): BuiltCommand {
-	const stock = numOrNull(input.stock_actual);
-	const cloudPayload = {
-		id_producto: input.id_producto ?? null,
-		id_categoria: input.id_categoria,
-		id_proveedor: input.id_proveedor,
-		nombre: input.nombre.trim(),
-		precio_venta: numOrNull(input.precio_venta),
-		stock_actual: stock,
-		stock_minimo: numOrNull(input.stock_minimo),
-		unidad_medida: cleanOrNull(input.unidad_medida),
-	};
-
-	const steps: any[] = [
-		idStep(cloudPayload.id_producto),
-		{
-			kind: "execute",
-			sql: `
-				INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada)
-				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, NULL)
-				ON CONFLICT(ID_Producto) DO UPDATE SET
-					ID_Categoria = excluded.ID_Categoria,
-					ID_Proveedor = excluded.ID_Proveedor,
-					Nombre = excluded.Nombre,
-					Precio_Venta = excluded.Precio_Venta,
-					Stock_Minimo = excluded.Stock_Minimo,
-					Unidad_Medida = excluded.Unidad_Medida;
-			`,
-			args: [
-				REF_ID,
-				cloudPayload.id_categoria,
-				cloudPayload.id_proveedor,
-				cloudPayload.nombre,
-				cloudPayload.precio_venta,
-				cloudPayload.stock_minimo,
-				cloudPayload.unidad_medida,
-			],
-		},
-	];
-
-	if (stock != null && stock > 0) {
-		const idLoteInicial = nuevoId();
-		steps.push({
-			kind: "execute",
-			sql: `
-				INSERT OR IGNORE INTO Lotes_Producto
-					(ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
-				VALUES
-					(?1, ?2, ?3, datetime('now','localtime'), NULL, ?4, NULL, ?5, ?6);
-			`,
-			args: [
-				idLoteInicial,
-				REF_ID,
-				{ $ref: "codigo_lote" },
-				stock,
-				cloudPayload.id_proveedor,
-				"Lote inicial creado desde Proveedores",
-			],
-		});
-
-		// Auditoría (INV-01b): la entrada de stock deja su movimiento, igual que el alta desde
-		// Inventario. Es el origen contra el que la reconciliación (INV-06) cuadra el lote.
-		// El INSERT de arriba es OR IGNORE, así que el movimiento se condiciona a que el lote
-		// exista con ESTE id (si ya había uno con el mismo producto+código, no se anota nada).
-		steps.push({
-			kind: "execute",
-			sql: `
-				INSERT INTO Movimientos_Stock
-					(ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
-				SELECT ?1, ?2, 'ALTA', ?3, ?3, ?4, NULL, datetime('now','localtime')
-				WHERE EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?2);
-			`,
-			args: [
-				nuevoId(),
-				idLoteInicial,
-				stock,
-				"Lote inicial creado desde Proveedores",
-			],
-		});
-	}
-
-	if (stock != null && stock > 0) {
-		steps.splice(2, 0, {
-			kind: "value",
-			saveAs: "codigo_lote",
-			sql: "SELECT 'INI-' || ?1;",
-			args: [REF_ID],
-		});
-	}
-
-	return {
-		commandName: "proveedores_create_producto",
-		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "id" } },
-		cloudPayload,
-	};
-}

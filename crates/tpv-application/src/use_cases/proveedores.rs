@@ -2,9 +2,9 @@
 
 use tpv_contracts::proveedores::{
     CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto, ProveedorSaveInput,
-    ProveedoresCreateProductoInput, ProveedoresSetVinculosInput,
+    ProveedoresSetVinculosInput,
 };
-use tpv_domain::proveedores::{normalizar_producto_ids, ProductoNuevo, ProveedorValidado};
+use tpv_domain::proveedores::{normalizar_producto_ids, ProveedorValidado};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::proveedores::ProveedoresRepository;
@@ -75,24 +75,6 @@ pub async fn set_vinculos(
     repo.set_vinculos(&id_proveedor, ids).await
 }
 
-pub async fn crear_producto(
-    repo: &dyn ProveedoresRepository,
-    input: ProveedoresCreateProductoInput,
-) -> AppResult<String> {
-    let producto = ProductoNuevo::validar(
-        input.id_producto,
-        input.id_categoria,
-        input.id_proveedor,
-        input.nombre,
-        input.precio_venta,
-        input.stock_actual,
-        input.stock_minimo,
-        input.unidad_medida,
-    )
-    .map_err(AppError::validation)?;
-    repo.crear_producto(producto).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,9 +102,6 @@ mod tests {
             panic!("repo llamado")
         }
         async fn set_vinculos(&self, _: &str, _: Vec<String>) -> AppResult<bool> {
-            panic!("repo llamado")
-        }
-        async fn crear_producto(&self, _: ProductoNuevo) -> AppResult<String> {
             panic!("repo llamado")
         }
     }

@@ -19,7 +19,6 @@ import {
   proveedoresSave,
   proveedoresDelete,
   proveedoresSetVinculos,
-  proveedoresCreateProducto,
 } from "./proveedoresApis";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
@@ -90,12 +89,3 @@ export function useSetVinculos() {
 }
 
 /** Crea un producto (ya vinculado); invalida la caché de proveedores si se creó (id > 0). */
-export function useCreateProducto() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: proveedoresCreateProducto,
-    onSuccess: (idNuevo) => {
-      if (idNuevo) void qc.invalidateQueries({ queryKey: proveedoresKeys.all });
-    },
-  });
-}

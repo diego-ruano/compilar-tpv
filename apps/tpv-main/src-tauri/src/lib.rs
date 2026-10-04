@@ -2216,7 +2216,6 @@ pub fn run() {
             commands::proveedores::proveedores_get_categorias,
             commands::proveedores::proveedores_get_productos_all,
             commands::proveedores::proveedores_set_vinculos,
-            commands::proveedores::proveedores_create_producto,
             // pedidos a proveedores (Local-First, modo Main)
             commands::pedidos_proveedor::pedidos_proveedor_get_page,
             commands::pedidos_proveedor::pedidos_proveedor_crear,
@@ -2789,6 +2788,12 @@ mod tests_exenciones_del_gate {
                 "con él la pantalla volvería a mandar un hash hecho fuera, que el backend guarda sin \
                  poder exigir la política del PIN ni las iteraciones; el alta y la edición reciben el \
                  PIN y lo hashean dentro (RI-63)",
+            ),
+            (
+                "proveedores_create_producto",
+                "era una segunda alta de producto, sin IVA, sin venta suelta ni alérgenos, cuyo \
+                 `ON CONFLICT` pisaba el precio; los productos se dan de alta desde Inventario \
+                 (RI-52)",
             ),
         ] {
             assert!(

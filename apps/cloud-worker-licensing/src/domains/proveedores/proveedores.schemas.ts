@@ -6,7 +6,6 @@ import { zDineroOpcional } from "../../lib/dinero";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	ProveedorSaveInput as ContractProveedorSaveInput,
-	ProveedoresCreateProductoInput,
 	ProveedoresSetVinculosInput,
 } from "@tpv/contracts";
 
@@ -43,17 +42,6 @@ export const setVinculosSchema = z.object({
 	producto_ids: z.array(z.string()).default([]).transform(normalizeIds),
 });
 
-export const createProductoSchema = z.object({
-	id_producto: idStr.optional().nullish(),
-	id_categoria: idStr,
-	id_proveedor: idStr,
-	nombre: z.string().trim().min(1, "nombre required"),
-	precio_venta: zDineroOpcional,
-	stock_actual: optNum,
-	stock_minimo: optNum,
-	unidad_medida: optStr,
-});
-
 type NullableProveedorFields =
 	| "contacto"
 	| "telefono"
@@ -74,21 +62,9 @@ export type ProveedorSaveInput = Omit<
 
 export type SetVinculosInput = Omit<ProveedoresSetVinculosInput, "id_proveedor">;
 
-export type CreateProductoInput = Omit<
-	ProveedoresCreateProductoInput,
-	"id_producto" | "precio_venta" | "stock_actual" | "stock_minimo" | "unidad_medida"
-> & {
-	id_producto?: string | null;
-	precio_venta?: number | null;
-	stock_actual?: number | null;
-	stock_minimo?: number | null;
-	unidad_medida?: string | null;
-};
-
 // ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
 // Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
 // las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
 // deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
 type _GProveedorSave = Assert<SameKeys<z.infer<typeof proveedorSaveSchema>, ProveedorSaveInput>>;
 type _GSetVinculos = Assert<SameKeys<z.infer<typeof setVinculosSchema>, SetVinculosInput>>;
-type _GCreateProducto = Assert<SameKeys<z.infer<typeof createProductoSchema>, CreateProductoInput>>;

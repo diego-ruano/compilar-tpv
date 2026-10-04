@@ -8,7 +8,7 @@ use serde_json::{json, Value as JsonValue};
 use tpv_application::error::AppResult;
 use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_contracts::proveedores::{CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto};
-use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
+use tpv_domain::proveedores::ProveedorValidado;
 
 use crate::CloudClient;
 
@@ -80,29 +80,5 @@ impl ProveedoresRepository for HttpProveedoresRepository {
             .put_json(&format!("/v1/proveedores/{id_proveedor}/vinculos"), &body)
             .await?;
         Ok(true)
-    }
-
-    async fn crear_producto(&self, producto: ProductoNuevo) -> AppResult<String> {
-        let generado = producto.id.is_none().then_some("id_producto");
-        let id_producto = producto
-            .id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let body = json!({
-            "id_producto": id_producto,
-            "id_categoria": producto.id_categoria,
-            "id_proveedor": producto.id_proveedor,
-            "nombre": producto.nombre,
-            "precio_venta": producto.precio_venta,
-            "stock_actual": producto.stock_actual,
-            "stock_minimo": producto.stock_minimo,
-            "unidad_medida": producto.unidad_medida,
-        });
-        // En el reintento de un alta incierta (RI-64) el id que vale es el del primer envío.
-        let (_, enviado): (JsonValue, _) = self
-            .client
-            .post_json_creando("/v1/proveedores/productos", &body, generado)
-            .await?;
-        Ok(enviado.unwrap_or(id_producto))
     }
 }

@@ -1212,8 +1212,6 @@ export type ProveedorSaveInput = { id_proveedor?: string, nombre_empresa: string
 
 export type ProveedorTop = { nombre: string, total: Dinero, };
 
-export type ProveedoresCreateProductoInput = { id_producto?: string, id_categoria: string, id_proveedor: string, nombre: string, precio_venta?: Dinero, stock_actual?: number, stock_minimo?: number, unidad_medida?: string, };
-
 export type ProveedoresDeleteInput = { id_proveedor: string, };
 
 export type ProveedoresGetProductosArgs = { id_proveedor: string, };

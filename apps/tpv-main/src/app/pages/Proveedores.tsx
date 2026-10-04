@@ -29,7 +29,6 @@ import {
   type ProductoProveedorDto,
   type ProveedorDto,
 } from "../../features/proveedores/proveedoresApis";
-import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
 import {
   useProveedoresAll,
   useProveedoresCategorias,
@@ -37,7 +36,6 @@ import {
   useSaveProveedor,
   useDeleteProveedor,
   useSetVinculos,
-  useCreateProducto,
 } from "../../features/proveedores/proveedoresQueries";
 import { conAviso } from "../../shared/lib/conAviso";
 
@@ -53,14 +51,6 @@ const convertirABase64 = (file: File): Promise<string> =>
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = (error) => reject(error);
   });
-
-/** Una cantidad escrita a mano; vacío o ilegible = sin informar. */
-function numeroOpcional(v: string): number | undefined {
-  const t = v.trim();
-  if (!t) return undefined;
-  const n = Number(t.replace(",", "."));
-  return Number.isFinite(n) ? n : undefined;
-}
 
 export default function Proveedores() {
   const [openAddProduct, setOpenAddProduct] = useState(false);
@@ -85,7 +75,6 @@ export default function Proveedores() {
   const saveProveedor = useSaveProveedor();
   const deleteProveedor = useDeleteProveedor();
   const setVinculos = useSetVinculos();
-  const createProducto = useCreateProducto();
 
   // 'loading' derivado: fetch de listas + mutaciones en curso + trabajo local (subida de imagen, etc.)
   const loading =
@@ -94,8 +83,7 @@ export default function Proveedores() {
     productosProveedorQuery.isFetching ||
     saveProveedor.isPending ||
     deleteProveedor.isPending ||
-    setVinculos.isPending ||
-    createProducto.isPending;
+    setVinculos.isPending;
 
   const [confirmAccion, setConfirmAccion] = useState<
     | { tipo: "proveedor"; proveedor: ProveedorUI }
@@ -129,20 +117,12 @@ export default function Proveedores() {
   }
 
   const [modalVincularOpen, setModalVincularOpen] = useState(false);
-  const [modalCrearProductoOpen, setModalCrearProductoOpen] = useState(false);
   const [loadingVincular, setLoadingVincular] = useState(false);
 
   const [busquedaProductos, setBusquedaProductos] = useState("");
   const [productosDisponibles, setProductosDisponibles] = useState<ProductoUI[]>([]);
   const [seleccionProductoIds, setSeleccionProductoIds] = useState<Set<string>>(new Set());
   const [categoriaActivaId, setCategoriaActivaId] = useState<string | null>(null);
-
-  const [pNombre, setPNombre] = useState("");
-  const pPrecio = useImporte();
-  const [pStockActual, setPStockActual] = useState("");
-  const [pStockMin, setPStockMin] = useState("");
-  const [pUnidad, setPUnidad] = useState("");
-  const [pCategoriaId, setPCategoriaId] = useState<string>("");
 
   async function mapProveedoresUI(rows: ProveedorDto[]): Promise<ProveedorUI[]> {
     const out: ProveedorUI[] = [];
@@ -536,61 +516,6 @@ export default function Proveedores() {
     }
   }
 
-  function abrirCrearProductoEnModal() {
-    setPNombre("");
-    pPrecio.poner(null);
-    setPStockActual("");
-    setPStockMin("");
-    setPUnidad("");
-    setPCategoriaId(categorias[0]?.id_categoria ?? "");
-    setModalCrearProductoOpen(true);
-  }
-
-  async function crearProductoYSeleccionar() {
-    if (!proveedorActivo) return;
-
-    const nombre = pNombre.trim();
-    if (!nombre) {
-      toast.info("Validación", "El nombre del producto es obligatorio.");
-      return;
-    }
-    if (pCategoriaId === "") {
-      toast.info("Validación", "Selecciona una categoría (ID_Categoria es obligatorio).");
-      return;
-    }
-
-    const idProv = proveedorActivo.id_proveedor;
-    const idCat = pCategoriaId;
-    if (!pPrecio.legible) {
-      toast.info("Validación", "El precio de venta no se entiende como importe.");
-      return;
-    }
-    const unidad = pUnidad.trim();
-
-    try {
-      const idNuevo = await createProducto.mutateAsync({
-        id_categoria: idCat,
-        id_proveedor: idProv,
-        nombre,
-        precio_venta: pPrecio.valor ?? undefined,
-        stock_actual: numeroOpcional(pStockActual),
-        stock_minimo: numeroOpcional(pStockMin),
-        unidad_medida: unidad || undefined,
-      });
-
-      if (!idNuevo) {
-        toast.error("Error", "No se pudo crear el producto.");
-        return;
-      }
-
-      await abrirVincularProductos();
-      setModalCrearProductoOpen(false);
-    } catch (e) {
-      console.error("Error creando producto", e);
-      toast.error("Error", "No se pudo crear el producto.");
-    }
-  }
-
   const categoriaActivaNombre = useMemo(() => {
     if (categoriaActivaId === null) return "Todas";
     const c = categorias.find((x) => x.id_categoria === categoriaActivaId);
@@ -962,15 +887,6 @@ export default function Proveedores() {
               placeholder={`Buscar producto en "${categoriaActivaNombre}"...`}
             />
           </div>
-
-          <button
-            type="button"
-            onClick={abrirCrearProductoEnModal}
-            className="inline-flex min-w-0 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center text-sm font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
-          >
-            <Plus className="size-4" aria-hidden />
-            Crear producto
-          </button>
         </div>
 
         <div className="mb-3 text-sm text-fg-muted">
@@ -1104,81 +1020,6 @@ export default function Proveedores() {
             {loading ? "Guardando..." : "Guardar vínculos"}
           </button>
         </div>
-      </Modal>
-
-      <Modal
-        open={modalCrearProductoOpen}
-        onClose={() => setModalCrearProductoOpen(false)}
-        title="Crear producto"
-        zIndex={80}
-        widthClass="max-w-[760px]"
-      >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-          <Campo label="Nombre *" value={pNombre} onChange={setPNombre} placeholder="Ej: Coca-Cola 33cl" />
-          <div className="flex flex-col gap-1">
-            <label htmlFor="proveedor-producto-precio" className="text-sm font-semibold text-fg">
-              Precio venta
-            </label>
-            <CampoDinero
-              id="proveedor-producto-precio"
-              {...pPrecio.campo}
-              placeholder="Ej: 1,80"
-              className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-semibold text-fg">Categoría *</label>
-            <select
-              value={pCategoriaId}
-              onChange={(e) => setPCategoriaId(e.target.value || "")}
-              className="mt-1 h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {categorias.length === 0 ? (
-                <option value="">No hay categorías</option>
-              ) : (
-                <>
-                  <option value="">Selecciona…</option>
-                  {categorias.map((c) => (
-                    <option key={c.id_categoria} value={c.id_categoria}>
-                      {c.nombre}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
-          </div>
-
-          <Campo label="Unidad medida" value={pUnidad} onChange={setPUnidad} placeholder="Ej: ud / kg / l" />
-          <Campo label="Stock actual" value={pStockActual} onChange={setPStockActual} placeholder="Ej: 20" />
-          <Campo label="Stock mínimo" value={pStockMin} onChange={setPStockMin} placeholder="Ej: 5" />
-        </div>
-
-        <div className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-3">
-          <button
-            type="button"
-            onClick={() => setModalCrearProductoOpen(false)}
-            className="cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2"
-          >
-            Cancelar
-          </button>
-
-          <button
-            type="button"
-            onClick={conAviso(crearProductoYSeleccionar)}
-            disabled={loading}
-            className={cn(
-              "rounded-xl px-4 py-2 font-semibold transition",
-              loading
-                ? "cursor-not-allowed bg-surface-2 text-fg-subtle"
-                : "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover active:scale-[0.98] cursor-pointer",
-            )}
-          >
-            {loading ? "Creando..." : "Crear producto"}
-          </button>
-        </div>
-
-        <p className="mt-3 text-sm text-fg-muted">Este producto se crea ya vinculado al proveedor actual.</p>
       </Modal>
 
       <ProductDetailModal

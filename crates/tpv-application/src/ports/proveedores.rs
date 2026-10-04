@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use tpv_contracts::proveedores::{CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto};
-use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
+use tpv_domain::proveedores::ProveedorValidado;
 
 use crate::error::AppResult;
 
@@ -20,6 +20,4 @@ pub trait ProveedoresRepository: Send + Sync {
     async fn eliminar(&self, id_proveedor: &str) -> AppResult<bool>;
     /// Reasigna el conjunto de productos vinculados al proveedor.
     async fn set_vinculos(&self, id_proveedor: &str, producto_ids: Vec<String>) -> AppResult<bool>;
-    /// Crea/upserta un producto y, si hay stock inicial, su lote. Devuelve el id de producto.
-    async fn crear_producto(&self, producto: ProductoNuevo) -> AppResult<String>;
 }

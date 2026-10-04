@@ -59,9 +59,3 @@ proveedoresRoutes.put("/:id/vinculos", cuerpo(S.setVinculosSchema), async (c) =>
 	await apply(c, cmd.setVinculos(id, datos));
 	return c.json({ ok: true });
 });
-
-proveedoresRoutes.post("/productos", cuerpo(S.createProductoSchema), async (c) => {
-	const datos = c.req.valid("json");
-	const id = await apply(c, cmd.crearProducto(datos));
-	return c.json({ ok: true, id_producto: id });
-});

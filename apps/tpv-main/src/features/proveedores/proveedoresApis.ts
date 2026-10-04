@@ -12,7 +12,6 @@ import type {
     CategoriaProveedorDto,
     ProductoProveedorDto,
     ProveedorDto,
-    ProveedoresCreateProductoInput,
     ProveedoresSetVinculosInput,
     ProveedorSaveInput,
 } from "@tpv/contracts";
@@ -58,9 +57,4 @@ export async function proveedoresDelete(idProveedor: string): Promise<boolean> {
 
 export async function proveedoresSetVinculos(args: ProveedoresSetVinculosInput): Promise<boolean> {
     return (await invokeClient<boolean>("proveedores_set_vinculos", { args })) !== false;
-}
-
-/** Da de alta un producto ya vinculado al proveedor; devuelve su id. */
-export function proveedoresCreateProducto(args: ProveedoresCreateProductoInput): Promise<string> {
-    return invokeClient<string>("proveedores_create_producto", { args });
 }

@@ -53,7 +53,7 @@ use tpv_domain::inventario::{
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 use tpv_domain::notificaciones::NuevaNotificacion;
-use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
+use tpv_domain::proveedores::ProveedorValidado;
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 use tpv_domain::tareas::TareaData;
 use tpv_domain::trabajadores::{AsignacionCambios, AsignacionNueva};
@@ -300,7 +300,6 @@ casos_de_contrato! {
     proveedores__guardar,
     proveedores__eliminar,
     proveedores__set_vinculos,
-    proveedores__crear_producto,
     reservas__guardar_cliente_nuevo,
     reservas__guardar_cliente_existente,
     reservas__guardar_sin_mesa,
@@ -596,21 +595,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             repo.set_vinculos(&s(&e["id_proveedor"]), strings(&e["producto_ids"]))
                 .await
                 .expect("set vinculos");
-        }
-        "proveedores.crear_producto" => {
-            let repo = SqliteProveedoresRepository::new(db.clone());
-            repo.crear_producto(ProductoNuevo {
-                id: opt_str(&e["id_producto"]),
-                id_categoria: s(&e["id_categoria"]),
-                id_proveedor: s(&e["id_proveedor"]),
-                nombre: s(&e["nombre"]),
-                precio_venta: dinero(&e["precio_venta"]),
-                stock_actual: e["stock_actual"].as_f64(),
-                stock_minimo: e["stock_minimo"].as_f64(),
-                unidad_medida: opt_str(&e["unidad_medida"]),
-            })
-            .await
-            .expect("crear producto");
         }
         "reservas.guardar" => {
             let repo = SqliteReservasRepository::new(db.clone());

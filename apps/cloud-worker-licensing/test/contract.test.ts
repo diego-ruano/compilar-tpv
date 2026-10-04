@@ -78,7 +78,6 @@ import {
 } from "../src/domains/mesas/mesas.commands";
 import { cobrarDetallesPlan, datosDeLinea } from "../src/domains/mesas/mesas.queries";
 import {
-	crearProducto,
 	eliminarProveedor,
 	guardarProveedor,
 	setVinculos,
@@ -177,8 +176,6 @@ import casoProvEliminar from "../../../tests/contract/casos/proveedores/eliminar
 import goldenProvEliminar from "../../../tests/contract/golden/proveedores/eliminar.json";
 import casoProvVinculos from "../../../tests/contract/casos/proveedores/set_vinculos.json";
 import goldenProvVinculos from "../../../tests/contract/golden/proveedores/set_vinculos.json";
-import casoProvCrearProd from "../../../tests/contract/casos/proveedores/crear_producto.json";
-import goldenProvCrearProd from "../../../tests/contract/golden/proveedores/crear_producto.json";
 import casoResNuevo from "../../../tests/contract/casos/reservas/guardar_cliente_nuevo.json";
 import goldenResNuevo from "../../../tests/contract/golden/reservas/guardar_cliente_nuevo.json";
 import casoResExistente from "../../../tests/contract/casos/reservas/guardar_cliente_existente.json";
@@ -311,7 +308,6 @@ const CASOS = [
 	{ nombre: "proveedores_guardar", caso: casoProvGuardar, golden: goldenProvGuardar },
 	{ nombre: "proveedores_eliminar", caso: casoProvEliminar, golden: goldenProvEliminar },
 	{ nombre: "proveedores_set_vinculos", caso: casoProvVinculos, golden: goldenProvVinculos },
-	{ nombre: "proveedores_crear_producto", caso: casoProvCrearProd, golden: goldenProvCrearProd },
 	{ nombre: "reservas_guardar_cliente_nuevo", caso: casoResNuevo, golden: goldenResNuevo },
 	{ nombre: "reservas_guardar_cliente_existente", caso: casoResExistente, golden: goldenResExistente },
 	{ nombre: "reservas_guardar_sin_mesa", caso: casoResSinMesa, golden: goldenResSinMesa },
@@ -631,10 +627,6 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					producto_ids: caso.entrada.producto_ids,
 				} as any),
 			);
-			return;
-		}
-		case "proveedores.crear_producto": {
-			aplicar(hub, sql, crearProducto(caso.entrada as any));
 			return;
 		}
 		case "reservas.guardar": {

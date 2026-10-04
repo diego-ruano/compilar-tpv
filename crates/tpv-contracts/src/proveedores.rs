@@ -98,25 +98,3 @@ pub struct ProveedoresSetVinculosInput {
     pub producto_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct ProveedoresCreateProductoInput {
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_producto: Option<String>,
-    pub id_categoria: String,
-    pub id_proveedor: String,
-    pub nombre: String,
-    #[serde(default)]
-    #[ts(optional)]
-    pub precio_venta: Option<Dinero>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub stock_actual: Option<f64>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub stock_minimo: Option<f64>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub unidad_medida: Option<String>,
-}

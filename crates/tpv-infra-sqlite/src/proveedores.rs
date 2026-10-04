@@ -9,10 +9,10 @@ use libsql::{Row, Value};
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_contracts::proveedores::{CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto};
-use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
+use tpv_domain::proveedores::ProveedorValidado;
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_string, opt_dinero, v_dinero};
+use crate::mapping::{norm_opt_string, opt_text, v_dinero, v_f64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteProveedoresRepository {
@@ -295,107 +295,6 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
             Ok(v) => {
                 conn.execute_batch("COMMIT;").await.map_err(db_err)?;
                 Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
-    }
-
-    async fn crear_producto(&self, p: ProductoNuevo) -> AppResult<String> {
-        let g = self.db.write().await;
-        let conn = &g;
-        let id_producto = p.id.unwrap_or_else(new_id);
-
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<String> = async {
-            conn.execute(
-                r#"
-                INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL, NULL)
-                ON CONFLICT(ID_Producto) DO UPDATE SET
-                  ID_Categoria = excluded.ID_Categoria,
-                  ID_Proveedor = excluded.ID_Proveedor,
-                  Nombre = excluded.Nombre,
-                  Precio_Venta = excluded.Precio_Venta,
-                  Stock_Minimo = excluded.Stock_Minimo,
-                  Unidad_Medida = excluded.Unidad_Medida;
-                "#,
-                vec![
-                    Value::Text(id_producto.clone()),
-                    Value::Text(p.id_categoria.clone()),
-                    Value::Text(p.id_proveedor.clone()),
-                    Value::Text(p.nombre.clone()),
-                    opt_dinero(p.precio_venta),
-                    opt_real(p.stock_minimo),
-                    opt_text(p.unidad_medida.clone()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-
-            if let Some(stock) = p.stock_actual {
-                if stock > 0.0 {
-                    let codigo_lote = format!("INI-{}", id_producto);
-                    // El ID_Lote se genera aquí y va en el INSERT. Antes se omitía la columna y el
-                    // lote nacía con ID_Lote NULL (SQLite lo permite en una PK de tipo TEXT), lo que
-                    // lo dejaba INVISIBLE para el consumo FEFO —que descarta los lotes sin id— y su
-                    // stock no se descontaba nunca: la venta se iba entera al stock suelto. El
-                    // worker ya lo hacía bien, así que además eran dos comportamientos distintos.
-                    let id_lote = new_id();
-                    let insertadas = conn.execute(
-                        r#"
-                        INSERT OR IGNORE INTO Lotes_Producto
-                          (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
-                        VALUES
-                          (?6, ?1, ?2, datetime('now','localtime'), NULL, ?3, NULL, ?4, ?5);
-                        "#,
-                        vec![
-                            Value::Text(id_producto.clone()),
-                            Value::Text(codigo_lote),
-                            Value::Real(stock),
-                            Value::Text(p.id_proveedor.clone()),
-                            Value::Text("Lote inicial creado desde Proveedores".into()),
-                            Value::Text(id_lote.clone()),
-                        ],
-                    )
-                    .await
-                    .map_err(db_err)?;
-
-                    // Auditoría (INV-01b): la entrada de stock deja su movimiento, igual que el
-                    // alta desde Inventario. Es lo que permite reconciliar después: sin el 'ALTA',
-                    // el lote no tiene origen contra el que cuadrar. Solo si el INSERT prosperó
-                    // (OR IGNORE: el lote pudo existir ya por el UNIQUE producto+código).
-                    if insertadas > 0 {
-                        conn.execute(
-                            r#"
-                            INSERT INTO Movimientos_Stock
-                              (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
-                            VALUES
-                              (?1, ?2, 'ALTA', ?3, ?3, ?4, NULL, datetime('now','localtime'));
-                            "#,
-                            vec![
-                                Value::Text(new_id()),
-                                Value::Text(id_lote),
-                                Value::Real(stock),
-                                Value::Text("Lote inicial creado desde Proveedores".into()),
-                            ],
-                        )
-                        .await
-                        .map_err(db_err)?;
-                    }
-                }
-            }
-
-            Ok(id_producto)
-        }
-        .await;
-
-        match res {
-            Ok(id) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(id)
             }
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK;").await;

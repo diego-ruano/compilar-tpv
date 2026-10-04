@@ -5,7 +5,7 @@ use tauri::State;
 use tpv_application::use_cases::proveedores as uc;
 use tpv_contracts::proveedores::{
     CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto, ProveedorSaveInput,
-    ProveedoresCreateProductoInput, ProveedoresDeleteInput, ProveedoresGetProductosArgs,
+    ProveedoresDeleteInput, ProveedoresGetProductosArgs,
     ProveedoresSetVinculosInput,
 };
 use crate::AppState;
@@ -67,13 +67,4 @@ pub async fn proveedores_set_vinculos(
 ) -> Result<bool, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::set_vinculos(repo.as_ref(), args).await?)
-}
-
-#[tauri::command]
-pub async fn proveedores_create_producto(
-    state: State<'_, AppState>,
-    args: ProveedoresCreateProductoInput,
-) -> Result<String, AppErrorDto> {
-    let repo = state.proveedores_repo().await?;
-    Ok(uc::crear_producto(repo.as_ref(), args).await?)
 }
