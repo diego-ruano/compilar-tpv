@@ -27,6 +27,8 @@ export type LicenseGateState =
 export type ApiError = {
 	ok: false;
 	error: string;
+	/** La frase para la persona, cuando depende del caso (si no, la pone `MENSAJES`). */
+	message?: string;
 	details?: any;
 };
 
@@ -46,6 +48,11 @@ export type ActivateRequest = {
 	tenantInfo?: TenantInfo;
 	/** Código de 6 dígitos del email. Solo necesario al mover la licencia a otro Main. */
 	deviceChangeCode?: string;
+	/**
+	 * RI-52: sólo sumar tiempo (canje desde Configuración → Licencia). Con él, todo lo que no sea
+	 * canjear una clave sin estrenar en el equipo que ya tiene licencia se rechaza sin tocar nada.
+	 */
+	soloSumar?: boolean;
 };
 
 export type ActivateResponse = {

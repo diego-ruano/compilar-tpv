@@ -2269,6 +2269,7 @@ pub fn run() {
             // licensing (migrado a arquitectura hexagonal — commands/licensing.rs)
             commands::licensing::license_get_state,
             commands::licensing::license_activate,
+            commands::licensing::license_sumar_clave,
             commands::licensing::license_request_device_change,
             commands::licensing::license_clear_state,
             commands::licensing::license_gate,

@@ -780,6 +780,12 @@ expires_at_ms: number | null,
  */
 plan: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, };
 
+/**
+ * Args de `license_sumar_clave` (RI-52): una clave sin estrenar cuyo tiempo se suma a la licencia
+ * de este equipo, desde Configuración → Licencia.
+ */
+export type LicenseSumarClaveInput = { activation_key: string, };
+
 export type LineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: Dinero, 
 /**
  * Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.

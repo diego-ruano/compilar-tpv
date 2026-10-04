@@ -30,7 +30,7 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 | Cliente | `crates/tpv-infra-licensing/src/{lib,device,reloj,secret_store,field_crypto}.rs` | Llamadas al worker, verificación de la firma, identidad del dispositivo, hora de la nube, secretos, cifrado de PII |
 | Política del gate | `crates/tpv-domain/src/licensing.rs` | Veredicto, gracia sin conexión, mensaje canónico. Puro |
 | Casos de uso | `tpv-application/src/use_cases/licensing.rs` | `gate` (con avisos) y la comprobación manual |
-| Comandos | `apps/tpv-main/src-tauri/src/commands/licensing.rs` | `license_activate`, `license_check_now`, `license_clear_state`… |
+| Comandos | `apps/tpv-main/src-tauri/src/commands/licensing.rs` | `license_activate`, `license_sumar_clave`, `license_check_now`, `license_clear_state`… |
 | Pulso | `jobs/registro.rs::licencia` | Cada 6 h (`MainOperativa`), emite `license:changed` |
 | Estructura de la base central | `docs/sql/control-plane/esquema-actual.sql` | La foto de producción; la usan los tests |
 
@@ -115,6 +115,13 @@ Si este `deviceId` ya es la Main de una licencia viva, la clave nueva **no crea 
   `tiempoSumado: true`; la pantalla enseña «tiempo añadido, vence el X» y espera a que se pulse.
 
 Teclear en el bar 1 la clave que era para el bar 2 le suma el tiempo al bar 1: se ve en el acto.
+
+Con el TPV ya en marcha, el sitio es **Configuración → Licencia → Añadir otra licencia**
+(`license_sumar_clave`, de administrador). La petición lleva `soloSumar`, y con ella el worker
+rechaza con `clave_no_canjeable` todo lo que no sea este canje, sin tocar nada: la clave que ya
+tiene el equipo, una ya activada en otro (que por la pantalla de activación sería un cambio de
+equipo) y una clave nueva en un equipo sin licencia viva (que estrenaría otro negocio). Es como
+renueva quien compra otra licencia, y como junta en un local el tiempo de varias.
 
 ### 2. Primera activación
 

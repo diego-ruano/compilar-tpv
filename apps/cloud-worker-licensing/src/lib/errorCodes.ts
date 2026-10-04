@@ -223,6 +223,7 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	empty_body: "La imagen está vacía.",
 	idempotency_operation_processing:
 		"La operación anterior todavía se está guardando. Espera un momento y vuelve a intentarlo.",
+	clave_no_canjeable: "Esa clave no se puede añadir a este equipo.",
 	email_destino_no_autorizado:
 		"Sólo se pueden mandar pedidos al correo de un proveedor dado de alta. Guárdalo primero en la ficha del proveedor.",
 	email_send_failed: "No se ha podido enviar el correo. Inténtalo más tarde.",

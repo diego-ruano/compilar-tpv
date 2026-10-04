@@ -7,10 +7,12 @@
 // Se enseña lo que el dueño del bar puede USAR para decidir algo: si está activa, cuándo caduca
 // y cuánto queda. Ni el plan (sólo hay uno) ni el UUID del dispositivo pintaban nada aquí.
 
-import React, { useEffect, useState } from "react";
-import { invokeClient } from "@tpv/client";
-import type { LicenseLocalState } from "@tpv/contracts";
+import React, { useCallback, useEffect, useState } from "react";
+import { invokeClient, toAppError } from "@tpv/client";
+import type { LicenseActivateOutcome, LicenseLocalState } from "@tpv/contracts";
 
+import { Button, Input } from "../../../shared/ui";
+import { conAviso } from "../../../shared/lib/conAviso";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
 import { CorreoRecuperacion } from "./CorreoRecuperacion";
@@ -57,15 +59,93 @@ function Fila({ label, children }: { label: string; children: React.ReactNode })
 	);
 }
 
+/**
+ * RI-52 · Añadir el tiempo de otra clave a la licencia de este equipo (el canje de REV-13). Es
+ * como renueva quien compra otra licencia, y como junta en un local el tiempo de varias.
+ *
+ * Va por `license_sumar_clave`, que sólo suma: la clave de otro local ya activada, o una clave que
+ * estrenaría un negocio nuevo, se rechazan con su frase sin tocar nada. Mover una licencia de un
+ * equipo a otro no se hace desde aquí.
+ */
+function AnadirClave({ onSumada }: { onSumada: () => void }) {
+	const [clave, setClave] = useState("");
+	const [ocupado, setOcupado] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [sumada, setSumada] = useState<string | null>(null);
+
+	async function anadir() {
+		setOcupado(true);
+		setError(null);
+		setSumada(null);
+		try {
+			const r = await invokeClient<LicenseActivateOutcome>("license_sumar_clave", {
+				args: { activation_key: clave.trim() },
+			});
+			const hasta = r.state?.expires_at ? new Date(r.state.expires_at) : null;
+			setSumada(
+				hasta && !Number.isNaN(hasta.getTime())
+					? `Tiempo añadido. La licencia vence ahora el ${formatFecha(hasta.getTime())}.`
+					: "Tiempo añadido.",
+			);
+			setClave("");
+			onSumada();
+		} catch (e) {
+			setError(toAppError(e).message);
+		} finally {
+			setOcupado(false);
+		}
+	}
+
+	return (
+		<Panel title="Añadir otra licencia" subtitle="Suma el tiempo de otra clave a la de este equipo">
+			<div className="flex flex-col gap-3">
+				<label className="block">
+					<span className="text-sm font-semibold text-fg">Clave de licencia</span>
+					<Input
+						value={clave}
+						onChange={(e) => setClave(e.target.value)}
+						placeholder="TPV-XXXXX-XXXXX-XXXXX-XXXXX"
+						autoComplete="off"
+						spellCheck={false}
+						disabled={ocupado}
+						className="mt-1 h-11 font-mono"
+					/>
+				</label>
+				<p className="text-xs text-fg-muted">
+					Para renovar, o para juntar aquí el tiempo de varias licencias compradas a la vez. Sólo
+					valen claves sin estrenar: una que ya se usa en otro local no se puede añadir.
+				</p>
+				<div>
+					<Button loading={ocupado} disabled={!clave.trim()} onClick={conAviso(anadir)}>
+						Añadir
+					</Button>
+				</div>
+				{sumada ? (
+					<p className="rounded-xl border border-success bg-success-soft px-4 py-3 text-sm text-success" role="status">
+						{sumada}
+					</p>
+				) : null}
+				{error ? (
+					<p className="rounded-xl border border-danger bg-danger-soft px-4 py-3 text-sm text-danger" role="alert">
+						{error}
+					</p>
+				) : null}
+			</div>
+		</Panel>
+	);
+}
+
 export function Licencia({ darkMode }: { darkMode: boolean }) {
 	void darkMode; // el estilo va por tokens de tema; el prop se mantiene por firma común
 	const [state, setState] = useState<LicenseLocalState | null | "loading">("loading");
 
-	useEffect(() => {
+	const leerEstado = useCallback(() => {
 		invokeClient<LicenseLocalState | null>("license_get_state")
 			.then(setState)
 			.catch(() => setState(null));
 	}, []);
+
+	useEffect(leerEstado, [leerEstado]);
 
 	if (state === "loading") {
 		return (
@@ -140,11 +220,13 @@ export function Licencia({ darkMode }: { darkMode: boolean }) {
 						)}
 					>
 						{statusCode === "warn"
-							? "Tu licencia caduca pronto. Renuévala para no perder el acceso: vuelve a comprarla con el mismo correo y se extenderá sola."
-							: "Tu licencia ha caducado y la aplicación puede bloquearse en cualquier momento. Renuévala cuanto antes con el mismo correo de compra."}
+							? "Tu licencia caduca pronto. Para renovarla, compra otra y añade su clave aquí abajo: el tiempo se suma al que te queda."
+							: "Tu licencia ha caducado y la aplicación puede bloquearse en cualquier momento. Compra otra y añade su clave aquí abajo cuanto antes."}
 					</div>
 				) : null}
 			</Panel>
+
+			<AnadirClave onSumada={leerEstado} />
 
 			<CorreoRecuperacion />
 		</div>

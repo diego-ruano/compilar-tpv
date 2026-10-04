@@ -86,6 +86,32 @@ pub async fn activate(
     }
 }
 
+/// RI-52: suma el tiempo de otra clave a la licencia de este equipo, que ya está en marcha. Es el
+/// canje de REV-13 desde Configuración: quien compra varias licencias y quiere todo el tiempo en
+/// un local las va tecleando aquí.
+///
+/// La petición lleva `solo_sumar`, y con ella el servidor rechaza todo lo que no sea sumar (la
+/// clave de otro local ya activada, o este equipo sin licencia viva) sin tocar nada. Si aun así no
+/// volviera `tiempo_sumado`, es un error: nunca se da por bueno otro resultado.
+pub async fn sumar_clave(svc: &dyn LicensingService, clave: String) -> AppResult<LicenseActivateOutcome> {
+    let solicitud = SolicitudActivacion::para_sumar(clave).map_err(AppError::validation)?;
+
+    match svc.activar_remoto(&solicitud, None).await? {
+        ResultadoActivacion::Activada(concedido) if concedido.tiempo_sumado => {
+            let estado = estado_inicial(concedido);
+            svc.save_state(&estado)?;
+            Ok(LicenseActivateOutcome {
+                outcome: "activated".to_string(),
+                state: Some(estado),
+                email_hint: None,
+                cambio_de_equipo: false,
+                tiempo_sumado: true,
+            })
+        }
+        _ => Err(AppError::conflict("Esa clave no se ha podido añadir a este equipo.")),
+    }
+}
+
 /// Pide al servidor que mande el OTP de cambio de dispositivo al email de la licencia.
 pub async fn request_device_change(
     svc: &dyn LicensingService,

@@ -71,6 +71,7 @@ encargado.
 | Configuración | `config_patch_business_settings`, `config_patch_ticket_settings`, `config_patch_contact_settings` |
 | Correo de recuperación | `correo_recuperacion_estado`, `correo_recuperacion_usar_el_de_la_compra`; y `…_solicitar` / `…_confirmar`, que sin sesión sólo valen mientras el PIN inicial esté por elegir |
 | Proveedores | `email_enviar_pedido` |
+| Licencia | `license_sumar_clave` (gastar una clave pagada desde Configuración; el resto de `license_*` es del arranque y no pide sesión) |
 | Dispositivos | `pair_create`, y `tpv_server_post_json` para `/v1/pair/…`, `/v1/device/…` y `/v1/login/correo-recuperacion/…` |
 | Modo | `device_reset_mode` (gate blando) |
 
@@ -102,7 +103,7 @@ dentro de la transacción de `update_trabajador`. El worker lo comprueba antes d
 | `login_user`, `list_login_users`, `setup_pendiente`, `logout` | Son el login |
 | `complete_initial_setup` | Antes del primer login no hay con quién iniciar sesión (ver abajo) |
 | `punch` y fichajes | Se ficha antes de tener sesión |
-| `license_*`, `set_device_mode` | Las pantallas de arranque se pintan **en lugar** del router |
+| `license_*` (salvo `license_sumar_clave`), `set_device_mode` | Las pantallas de arranque se pintan **en lugar** del router |
 | Lecturas de arranque (modo, licencia, configuración, sincronización) | Las piden `AppBoot` y los stores antes del login |
 | **Todo `commands/recovery.rs`** | ⚠️ La pantalla de recuperación existe para el caso de **cero usuarios**: un gate le cerraría la única salida, y en un equipo sano no se notaría. Tiene que tolerar `state.db == None` **y** `sesion == None` |
 | `login_recuperar_pin_solicitar` / `…_confirmar` | Quien recupera el PIN es quien no puede iniciar sesión |

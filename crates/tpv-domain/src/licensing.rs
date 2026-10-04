@@ -26,6 +26,9 @@ pub struct SolicitudActivacion {
     pub legal_name: Option<String>,
     pub phone: Option<String>,
     pub country: Option<String>,
+    /// RI-52: sólo sumar el tiempo de la clave a la licencia que este equipo ya tiene (canje desde
+    /// Configuración). El servidor rechaza cualquier otra cosa sin tocar nada.
+    pub solo_sumar: bool,
 }
 
 impl SolicitudActivacion {
@@ -53,6 +56,24 @@ impl SolicitudActivacion {
             legal_name: limpia_opcional(legal_name),
             phone: limpia_opcional(phone),
             country: limpia_opcional(country),
+            solo_sumar: false,
+        })
+    }
+
+    /// RI-52: canjear una clave en un equipo que ya funciona. No lleva datos del negocio: no va a
+    /// crear ninguno, y el servidor se niega a hacer otra cosa que sumar tiempo.
+    pub fn para_sumar(clave: String) -> Result<Self, String> {
+        let clave = clave.trim().to_string();
+        if clave.is_empty() {
+            return Err("Escribe la clave que quieres añadir.".to_string());
+        }
+        Ok(SolicitudActivacion {
+            clave,
+            business_name: String::new(),
+            legal_name: None,
+            phone: None,
+            country: None,
+            solo_sumar: true,
         })
     }
 }
@@ -557,5 +578,14 @@ mod tests {
         assert_eq!(s.business_name, "Bar");
         assert_eq!(s.legal_name, None);
         assert_eq!(s.phone.as_deref(), Some("+34 600"));
+        assert!(!s.solo_sumar);
+    }
+
+    #[test]
+    fn el_canje_solo_pide_la_clave_y_lleva_la_marca() {
+        assert!(SolicitudActivacion::para_sumar("  ".into()).is_err());
+        let s = SolicitudActivacion::para_sumar(" K ".into()).expect("válida");
+        assert_eq!(s.clave, "K");
+        assert!(s.solo_sumar);
     }
 }

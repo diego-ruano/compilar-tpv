@@ -147,6 +147,25 @@ licenseRoutes.post("/activate", async (c) => {
 	const esMismoEquipo = lic.main_device_id === deviceId;
 	const esCambioDeEquipo = !esPrimeraActivacion && !esMismoEquipo;
 
+	// RI-52 · Canje desde Configuración → Licencia: el TPV ya está en marcha y sólo quiere sumar el
+	// tiempo de otra clave. Todo lo demás que haría esta ruta con esa clave sería un desastre desde
+	// ahí: con la clave de otro local ya activada, pedir el código y MOVER aquella licencia a este
+	// equipo; con este equipo sin licencia viva, estrenar un negocio nuevo y dejar el suyo atrás. Así
+	// que se rechaza antes de tocar nada, con la frase de cada caso.
+	if (body?.soloSumar === true) {
+		const noCanjeable = (message: string) =>
+			c.json({ ok: false, error: "clave_no_canjeable", message } satisfies ApiError, 409);
+		if (esMismoEquipo) return noCanjeable("Esa es la clave que ya tiene este equipo.");
+		if (!esPrimeraActivacion) {
+			return noCanjeable(
+				"Esa clave ya está activada en otro equipo. Aquí sólo se pueden añadir claves sin estrenar.",
+			);
+		}
+		if (!(await licenciaVivaDelDispositivo(db, deviceId))) {
+			return noCanjeable("Este equipo no tiene una licencia a la que sumarle tiempo.");
+		}
+	}
+
 	// ── REV-13 · Canjear: una clave sin estrenar SUMA tiempo al negocio que este equipo ya tiene ──
 	//
 	// El mismo enlace de compra sirve para estrenar y para renovar, y lo que decide cuál es de las

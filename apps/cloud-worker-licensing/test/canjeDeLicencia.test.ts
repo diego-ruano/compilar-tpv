@@ -67,7 +67,12 @@ type Escenario = {
 	emitir: (meses?: number) => Promise<{ clave: string; id: string }>;
 	/** Deja una licencia ya activada en este equipo, con la caducidad indicada. */
 	licenciaDelEquipo: (args?: { diasRestantes?: number; status?: string }) => Promise<string>;
-	activar: (clave: string, deviceId?: string, pubKey?: string) => Promise<{ status: number; body: any }>;
+	activar: (
+		clave: string,
+		deviceId?: string,
+		pubKey?: string,
+		extra?: Record<string, unknown>,
+	) => Promise<{ status: number; body: any }>;
 	leer: (id: string) => Promise<any>;
 };
 
@@ -122,13 +127,13 @@ async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): P
 				);
 				return id;
 			},
-			async activar(clave, deviceId = EQUIPO, pubKey = CLAVE_EQUIPO) {
+			async activar(clave, deviceId = EQUIPO, pubKey = CLAVE_EQUIPO, extra = {}) {
 				const res = await licenseRoutes.request(
 					"/activate",
 					{
 						method: "POST",
 						headers: { "content-type": "application/json" },
-						body: JSON.stringify({ activationKey: clave, deviceId, devicePubKey: pubKey }),
+						body: JSON.stringify({ activationKey: clave, deviceId, devicePubKey: pubKey, ...extra }),
 					},
 					ENV,
 					// El recibo del canje sale por `waitUntil`, así que hace falta un contexto.
@@ -413,5 +418,68 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 		expect(r.bien.status).toBe(200);
 		expect(r.final.expires_at_ms).toBeGreaterThan(r.antes.expires_at_ms + 350 * DIA);
 		expect(r.final.expires_at_ms).toBeLessThan(r.antes.expires_at_ms + 380 * DIA);
+	});
+});
+
+
+describe("RI-52 · canje desde Configuración (soloSumar)", () => {
+	it("una clave sin estrenar suma tiempo, igual que sin la marca", async () => {
+		const r = await escenario("solo-sumar-ok", async (e) => {
+			const actual = await e.licenciaDelEquipo({ diasRestantes: 30 });
+			const antes = (await e.leer(actual)).expires_at_ms;
+			const { clave } = await e.emitir(12);
+			const res = await e.activar(clave, EQUIPO, CLAVE_EQUIPO, { soloSumar: true });
+			return { res, antes, despues: (await e.leer(actual)).expires_at_ms };
+		});
+		expect(r.res.status).toBe(200);
+		expect(r.res.body.tiempoSumado).toBe(true);
+		expect(r.despues).toBeGreaterThan(r.antes);
+	});
+
+	it("la clave de otro equipo, ya activada, se rechaza sin pedir el código de cambio de equipo", async () => {
+		const r = await escenario("solo-sumar-otro", async (e) => {
+			await e.licenciaDelEquipo();
+			const { clave, id } = await e.emitir(12);
+			e.sql.exec(
+				`UPDATE licenses SET status='active', main_device_id='otro-equipo', tenant_id='otro',
+				        activated_at_ms=?, expires_at_ms=? WHERE license_id=?;`,
+				Date.now(),
+				Date.now() + 300 * DIA,
+				id,
+			);
+			const res = await e.activar(clave, EQUIPO, CLAVE_EQUIPO, { soloSumar: true });
+			return { res, otra: await e.leer(id) };
+		});
+		expect(r.res.status).toBe(409);
+		expect(r.res.body.error).toBe("clave_no_canjeable");
+		expect(r.res.body.message).toMatch(/otro equipo/);
+		expect(r.otra.main_device_id).toBe("otro-equipo");
+	});
+
+	it("en un equipo sin licencia viva no estrena un negocio nuevo", async () => {
+		const r = await escenario("solo-sumar-sin-licencia", async (e) => {
+			const { clave, id } = await e.emitir(12);
+			const res = await e.activar(clave, EQUIPO, CLAVE_EQUIPO, { soloSumar: true });
+			return { res, clave: await e.leer(id), bases: basesCreadas.length };
+		});
+		expect(r.res.status).toBe(409);
+		expect(r.res.body.error).toBe("clave_no_canjeable");
+		expect(r.clave.status).toBe("issued");
+		expect(r.bases).toBe(0);
+	});
+
+	it("la clave que ya tiene este equipo no se vuelve a activar", async () => {
+		const r = await escenario("solo-sumar-misma", async (e) => {
+			const actual = await e.licenciaDelEquipo();
+			const clave = generateLicenseKey();
+			e.sql.exec(
+				"UPDATE licenses SET license_key_hash = ? WHERE license_id = ?;",
+				await licenseKeyHash(clave),
+				actual,
+			);
+			return e.activar(clave, EQUIPO, CLAVE_EQUIPO, { soloSumar: true });
+		});
+		expect(r.status).toBe(409);
+		expect(r.body.message).toMatch(/ya tiene este equipo/);
 	});
 });

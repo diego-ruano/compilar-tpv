@@ -162,6 +162,14 @@ pub struct LicenseActivateOutcome {
     pub tiempo_sumado: bool,
 }
 
+/// Args de `license_sumar_clave` (RI-52): una clave sin estrenar cuyo tiempo se suma a la licencia
+/// de este equipo, desde Configuración → Licencia.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct LicenseSumarClaveInput {
+    pub activation_key: String,
+}
+
 /// Args de `license_request_device_change`: pide al servidor que mande el OTP al email de la
 /// licencia. El `device_id` lo pone el backend (es el de este equipo).
 #[derive(Debug, Clone, Deserialize, TS)]

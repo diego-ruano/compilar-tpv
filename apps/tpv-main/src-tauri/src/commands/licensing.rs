@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tpv_application::use_cases::licensing as uc;
 use tpv_contracts::licensing::{
     LicenseActivateInput, LicenseActivateOutcome, LicenseDeviceChangeInput, LicenseGateResult,
-    LicenseLocalState,
+    LicenseLocalState, LicenseSumarClaveInput,
 };
 use tpv_infra_licensing::LicensingAdapter;
 use tpv_contracts::errors::AppErrorDto;
@@ -44,6 +44,27 @@ pub async fn license_gate(app: AppHandle) -> Result<LicenseGateResult, AppErrorD
     let notifier = app.state::<crate::AppState>().notifier().await.ok();
     let service = svc(&app)?;
     Ok(uc::gate(&service, notifier.as_deref()).await?)
+}
+
+/// RI-52: añade el tiempo de otra clave a la licencia de este equipo (Configuración → Licencia).
+///
+/// De administrador: es la pantalla de Configuración, y gastar una clave pagada no es algo que
+/// haga cualquiera a mitad de servicio. Después se comprueba la licencia contra el servidor, como
+/// `license_check_now`, para que la caducidad nueva llegue firmada y la vea toda la interfaz.
+#[tauri::command]
+pub async fn license_sumar_clave(
+    app: AppHandle,
+    args: LicenseSumarClaveInput,
+) -> Result<LicenseActivateOutcome, AppErrorDto> {
+    app.state::<crate::AppState>().exigir_rol(&[crate::ADMIN]).await?;
+    let service = svc(&app)?;
+    let outcome = uc::sumar_clave(&service, args.activation_key).await?;
+
+    // Best-effort: el tiempo ya está sumado; si la comprobación falla, el pulso lo traerá.
+    if let Ok(res) = uc::check_now(&service).await {
+        let _ = app.emit("license:changed", res);
+    }
+    Ok(outcome)
 }
 
 /// Comprueba la licencia contra el servidor AHORA, sin esperar al pulso del job.

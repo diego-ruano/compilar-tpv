@@ -276,6 +276,9 @@ struct ActivateReq<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     device_change_code: Option<&'a str>,
     tenant_info: TenantInfo<'a>,
+    /// RI-52: canje desde Configuración. Sólo viaja cuando es `true`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    solo_sumar: bool,
 }
 
 /// Respuesta de `/v1/license/status`: la aserción firmada + token renovado + info no crítica.
@@ -512,6 +515,7 @@ impl LicensingService for LicensingAdapter {
                 phone: solicitud.phone.as_deref(),
                 country: solicitud.country.as_deref(),
             },
+            solo_sumar: solicitud.solo_sumar,
         };
 
         // Sin firma, pero su respuesta es la primera hora de la nube que ve un equipo recién
