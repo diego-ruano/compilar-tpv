@@ -92,7 +92,7 @@ export function patchContact(patch: Record<string, unknown>): BuiltCommand {
 }
 
 /** RI-61: espejo de `ModoSolape::desde`: lo que no sea «prohibir» es avisar. */
-export function modoSolape(v: unknown): "avisar" | "prohibir" {
+function modoSolape(v: unknown): "avisar" | "prohibir" {
 	return String(v ?? "").trim().toLowerCase() === "prohibir" ? "prohibir" : "avisar";
 }
 
