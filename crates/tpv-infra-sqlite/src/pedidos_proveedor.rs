@@ -13,7 +13,7 @@ use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_dinero, opt_text, v_dinero, v_f64, v_string};
-use crate::util::now_local_datetime;
+use crate::util::{now_local_datetime, patron_contiene};
 
 pub struct SqlitePedidoProveedorRepository {
     db: Arc<Db>,
@@ -60,12 +60,12 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         let db = self.db.read().await;
 
         // Filtro opcional: LIKE case-insensitive sobre proveedor/email/notas/estado. El mismo
-        // patrón `?1` se reutiliza en los cuatro campos.
+        // patrón `?1` se reutiliza en los cuatro campos, con lo escrito tal cual (RI-52).
         let mut where_params: Vec<Value> = Vec::new();
         let where_sql = if let Some(term) = &search {
-            where_params.push(Value::Text(format!("%{term}%")));
-            " WHERE pr.Nombre_Empresa LIKE ?1 OR p.Email_Destino LIKE ?1 \
-              OR p.Notas LIKE ?1 OR p.Estado LIKE ?1"
+            where_params.push(Value::Text(patron_contiene(term)));
+            " WHERE pr.Nombre_Empresa LIKE ?1 ESCAPE '\\' OR p.Email_Destino LIKE ?1 ESCAPE '\\' \
+              OR p.Notas LIKE ?1 ESCAPE '\\' OR p.Estado LIKE ?1 ESCAPE '\\'"
                 .to_string()
         } else {
             String::new()
@@ -305,5 +305,49 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
             .await
             .map_err(db_err)?;
         Ok(affected > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests_busqueda {
+    //! RI-52: lo que se escribe en el buscador se busca tal cual; `%` y `_` no son comodines.
+
+    use super::*;
+
+    async fn abrir() -> (SqlitePedidoProveedorRepository, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("pedidos_busqueda");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) \
+                       VALUES ('p-50', 'borrador', '2026-01-01 10:00:00', 'descuento 50%'); \
+                     INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) \
+                       VALUES ('p-500', 'borrador', '2026-01-02 10:00:00', 'pedir 500 cajas'); \
+                     INSERT INTO Pedidos_Proveedor (ID_Pedido, Estado, Fecha_Creacion, Notas) \
+                       VALUES ('p-ab', 'borrador', '2026-01-03 10:00:00', 'ref a_b');",
+                )
+                .await
+                .unwrap();
+        }
+        (SqlitePedidoProveedorRepository::new(db), dir)
+    }
+
+    async fn ids(repo: &SqlitePedidoProveedorRepository, q: &str) -> Vec<String> {
+        let page = repo.get_page(50, 0, Some(q.into())).await.unwrap();
+        let mut v: Vec<String> = page.pedidos.into_iter().map(|p| p.id_pedido).collect();
+        v.sort();
+        v
+    }
+
+    #[tokio::test]
+    async fn el_porcentaje_y_el_guion_bajo_se_buscan_tal_cual() {
+        let (repo, _dir) = abrir().await;
+        assert_eq!(ids(&repo, "50%").await, vec!["p-50"]);
+        assert_eq!(ids(&repo, "a_b").await, vec!["p-ab"]);
+        assert_eq!(ids(&repo, "_").await, vec!["p-ab"]);
+        assert_eq!(ids(&repo, "50").await, vec!["p-50", "p-500"]);
     }
 }
