@@ -100,9 +100,10 @@ const entradasInner = (whereRango: string) => `
 		CAST(p.ID_Pago AS TEXT) AS id,
 		substr(p.Fecha_Hora, 1, 16) AS fecha_hora,
 		p.Fecha_Hora AS orden,
+		-- RI-52: un ticket de barra se reconoce por su canal (espejo de entradas_inner en la Main).
 		(
 			CASE
-				WHEN m.Numero_Mesa = 'BARRA' THEN 'Take away'
+				WHEN c.Canal = 'BARRA' THEN 'Barra'
 				WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
 				ELSE 'Venta'
 			END

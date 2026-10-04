@@ -134,9 +134,11 @@ fn entradas_inner(
           p.ID_Pago AS id,
           substr(p.Fecha_Hora, 1, 16) AS fechaHora,
           p.Fecha_Hora AS orden,
+          -- RI-52: un ticket de barra se reconoce por su canal. Antes se comparaba con la mesa
+          -- fantasma 'BARRA' de cuando la barra era una mesa, y salía como «Venta».
           (
             CASE
-              WHEN m.Numero_Mesa = 'BARRA' THEN 'Take away'
+              WHEN c.Canal = 'BARRA' THEN 'Barra'
               WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
               ELSE 'Venta'
             END

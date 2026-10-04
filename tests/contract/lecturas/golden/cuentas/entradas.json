@@ -3,7 +3,7 @@
     {
       "anulado_en": null,
       "anulado_por": null,
-      "cliente": "Venta",
+      "cliente": "Barra",
       "estado": "ACTIVO",
       "fecha_hora": "2026-05-12 20:00",
       "id": "pago-d",
@@ -14,7 +14,7 @@
     {
       "anulado_en": null,
       "anulado_por": null,
-      "cliente": "Take away",
+      "cliente": "Barra",
       "estado": "ACTIVO",
       "fecha_hora": "2026-05-12 20:00",
       "id": "pago-c",
@@ -47,7 +47,7 @@
     {
       "anulado_en": "2026-05-14 09:00:00",
       "anulado_por": "Marta Ruiz",
-      "cliente": "Venta",
+      "cliente": "Barra",
       "estado": "ANULADO",
       "fecha_hora": "2026-05-09 10:00",
       "id": "pago-e",

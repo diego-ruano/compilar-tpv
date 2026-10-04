@@ -1,16 +1,15 @@
 {
-  "descripcion": "Listado de ingresos de caja sin filtros: el orden (Fecha_Hora DESC, id DESC) y la columna 'cliente' calculada, que es un CASE anidado sobre mesa y cliente. Hay un cobro de la mesa BARRA (sale 'Take away'), uno de mesa con cliente por reserva ('Mesa 7 / Ana Gomez'), uno de mesa sin reserva ('Mesa 7') y uno de comanda sin mesa ('Venta'). Dos comparten Fecha_Hora para que el desempate por id se vea. Y un quinto cobro ANULADO (CUENTA-07): sale en la lista igual que los demas -aqui es donde se investiga un descuadre- pero marcado, con quien lo anulo resuelto a nombre y apellido y con su motivo.",
+  "descripcion": "Listado de ingresos de caja sin filtros: el orden (Fecha_Hora DESC, id DESC) y la columna 'cliente' calculada, que es un CASE anidado sobre mesa y cliente. Hay dos cobros de tickets de barra (salen 'Barra': se reconocen por el canal, RI-52), uno de mesa con cliente por reserva ('Mesa 7 / Ana Gomez') y uno de mesa sin reserva ('Mesa 7'). Dos comparten Fecha_Hora para que el desempate por id se vea. Y un quinto cobro ANULADO (CUENTA-07): sale en la lista igual que los demas -aqui es donde se investiga un descuadre- pero marcado, con quien lo anulo resuelto a nombre y apellido y con su motivo.",
   "lectura": "cuentas.entradas",
   "seed": [
     "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido) VALUES ('user-1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta', 'Ruiz');",
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
-    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-barra', 'zona-1', 'BARRA', 1, 0, 0, 'rect', 40, 40);",
     "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-1', 'Ana Gomez');",
     "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales) VALUES ('res-1', 'cli-1', 'mesa-1', '2026-05-10', '13:00', 'COMIDA', 2);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado) VALUES ('com-mesa-cli', 'MESA', 'mesa-1', 'res-1', '2026-05-10 12:00:00', 'Pagada');",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-mesa-sin', 'MESA', 'mesa-1', '2026-05-11 12:00:00', 'Pagada');",
-    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-barra', 'MESA', 'mesa-barra', '2026-05-12 12:00:00', 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-barra', 'BARRA', '2026-05-12 12:00:00', 'Pagada');",
     "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-suelta', 'BARRA', '2026-05-13 12:00:00', 'Pagada');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-a', 'com-mesa-cli', '2026-05-10 13:05:30', 'Efectivo', 2450, 'total');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-b', 'com-mesa-sin', '2026-05-11 13:05:30', 'Tarjeta', 1000, 'total');",
