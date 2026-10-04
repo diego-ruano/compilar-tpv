@@ -59,7 +59,6 @@ struct ClienteExistente {
     nombre: Option<String>,
     email: Option<String>,
     telefono: Option<String>,
-    notas: Option<String>,
 }
 
 fn cliente_existente(row: &Row) -> AppResult<ClienteExistente> {
@@ -68,7 +67,6 @@ fn cliente_existente(row: &Row) -> AppResult<ClienteExistente> {
         nombre: norm_opt_string(row.get_value(1).map_err(db_err)?),
         email: norm_opt_string(row.get_value(2).map_err(db_err)?),
         telefono: norm_opt_string(row.get_value(3).map_err(db_err)?),
-        notas: norm_opt_string(row.get_value(4).map_err(db_err)?),
     })
 }
 
@@ -88,7 +86,7 @@ async fn cliente_por<C: Reader>(
     let mut rows = conn
         .query(
             &format!(
-                "SELECT ID_Cliente, Nombre, Email, Telefono, Notas FROM Clientes \
+                "SELECT ID_Cliente, Nombre, Email, Telefono FROM Clientes \
                  WHERE {filtro} ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;"
             ),
             vec![Value::Text(valor.to_string())],
@@ -119,7 +117,7 @@ async fn resolver_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<
     match c {
         ClienteReserva::Ninguno => Ok(None),
 
-        ClienteReserva::Existente { id, telefono, email, notas } => {
+        ClienteReserva::Existente { id, telefono, email } => {
             let Some(ex) = cliente_por(conn, POR_ID, id).await? else {
                 return Err(AppError::not_found(
                     "Ese cliente ya no existe. Vuelve a buscarlo o guarda la reserva sin cliente.",
@@ -135,17 +133,14 @@ async fn resolver_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<
             };
             let email_final = ex.email.clone().or(email_libre);
             let telefono_final = ex.telefono.clone().or_else(|| telefono.clone());
-            let notas_final = ex.notas.clone().or_else(|| notas.clone());
 
             // Sin nada que rellenar no se escribe: cada escritura sube a la nube.
-            if (&email_final, &telefono_final, &notas_final) != (&ex.email, &ex.telefono, &ex.notas)
-            {
+            if (&email_final, &telefono_final) != (&ex.email, &ex.telefono) {
                 conn.execute(
-                    "UPDATE Clientes SET Email = ?1, Telefono = ?2, Notas = ?3 WHERE ID_Cliente = ?4;",
+                    "UPDATE Clientes SET Email = ?1, Telefono = ?2 WHERE ID_Cliente = ?3;",
                     vec![
                         opt_text(email_final),
                         opt_text(telefono_final),
-                        opt_text(notas_final),
                         Value::Text(ex.id.clone()),
                     ],
                 )
@@ -155,7 +150,7 @@ async fn resolver_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<
             Ok(Some(ex.id))
         }
 
-        ClienteReserva::Nuevo { nombre, telefono, email, notas } => {
+        ClienteReserva::Nuevo { nombre, telefono, email } => {
             if let Some(e) = email {
                 if cliente_por(conn, POR_EMAIL, e).await?.is_some() {
                     return Err(AppError::conflict(MSG_EMAIL_DE_OTRO));
@@ -163,14 +158,13 @@ async fn resolver_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<
             }
             let id_cliente = new_id();
             conn.execute(
-                "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Notas, Created_At) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, datetime('now','localtime'));",
+                "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Created_At) \
+                 VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'));",
                 vec![
                     Value::Text(id_cliente.clone()),
                     Value::Text(nombre.clone()),
                     opt_text(telefono.clone()),
                     opt_text(email.clone()),
-                    opt_text(notas.clone()),
                 ],
             )
             .await
@@ -585,7 +579,6 @@ mod tests_cliente {
                 id: "borrado".into(),
                 telefono: None,
                 email: None,
-                notas: None,
             }), false)
             .await;
         assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
@@ -599,7 +592,6 @@ mod tests_cliente {
                 nombre: "Luis".into(),
                 telefono: None,
                 email: Some("ana@x.com".into()),
-                notas: None,
             }), false)
             .await;
         assert!(matches!(r, Err(AppError::Conflict(_))), "{r:?}");
@@ -615,7 +607,6 @@ mod tests_cliente {
                 id: "bea".into(),
                 telefono: None,
                 email: Some("ana@x.com".into()),
-                notas: None,
             }), false)
             .await
             .unwrap());

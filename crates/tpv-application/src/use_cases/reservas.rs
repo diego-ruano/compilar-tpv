@@ -52,7 +52,6 @@ pub async fn guardar(
         input.nombre_cliente.clone(),
         input.telefono,
         input.email,
-        input.notas_cliente,
     )
     .map_err(AppError::validation)?;
 
@@ -192,7 +191,6 @@ mod tests {
             nombre_cliente: Some("Ana".into()),
             telefono: None,
             email: None,
-            notas_cliente: None,
         }
     }
 

@@ -99,6 +99,17 @@ const SIN_CLIENTE: ClienteDeLaReserva = {
   email: null,
 };
 
+/**
+ * Lo que se enseña cuando falla guardar o borrar (RI-84): el `message` del backend, que ya viene
+ * escrito para la persona (una mesa ocupada, un email que ya es de otro cliente, la Main sin
+ * conexión…). Un fallo del motor llega con su texto técnico: se enseña también, detrás de una frase
+ * que se entienda.
+ */
+function textoDelError(err: unknown) {
+  const { code, message } = toAppError(err);
+  return code === "repository" ? `Fallo de la base de datos: ${message}` : message;
+}
+
 /** «ana gómez» y «Ana Gomez» son la misma persona a efectos de no preguntar. */
 function mismoNombre(a: string, b: string) {
   return a.trim().localeCompare(b.trim(), "es", { sensitivity: "base" }) === 0;
@@ -778,7 +789,6 @@ export default function Reservas() {
         nombreCliente: cliente.nombreCliente,
         telefono: cliente.telefono,
         email: cliente.email,
-        notasCliente: cliente.idCliente || cliente.nombreCliente ? notaTrim || null : null,
       };
 
       let ok: boolean;
@@ -800,23 +810,20 @@ export default function Reservas() {
       resetFormulario();
     } catch (err) {
       console.error(err);
-      // Lo que el backend rechaza a propósito llega con su frase (un email que ya es de otro
-      // cliente, una mesa ocupada…); antes se enseñaba siempre el mismo «Error al guardar».
-      const { code, message } = toAppError(err);
-      const propio = code === "validation" || code === "conflict" || code === "not_found";
-      toast.error("No se pudo guardar la reserva", propio ? message : "Error al guardar en BBDD.");
+      toast.error("No se pudo guardar la reserva", textoDelError(err));
     }
   }
 
   async function borrarReserva(idReserva: string) {
     try {
       const ok = await deleteReserva.mutateAsync({ idReserva });
-      if (!ok) return toast.error("Error", "No se pudo borrar.");
+      // `false` es que no había nada que borrar: otro equipo la borró antes.
+      if (!ok) return toast.error("No se pudo borrar la reserva", "Esa reserva ya no existe.");
 
       toast.success?.("OK", "Reserva borrada.");
     } catch (err) {
       console.error(err);
-      toast.error("Error", "Error al borrar en BBDD.");
+      toast.error("No se pudo borrar la reserva", textoDelError(err));
     }
   }
 

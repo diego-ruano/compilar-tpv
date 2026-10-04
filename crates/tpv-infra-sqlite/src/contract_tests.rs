@@ -630,7 +630,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                     opt_str(&e["nombre_cliente"]),
                     opt_str(&e["telefono"]),
                     opt_str(&e["email"]),
-                    opt_str(&e["notas_cliente"]),
                 )
                 .expect("cliente de la reserva"),
             }, e["forzar_solape"].as_bool().unwrap_or(false))

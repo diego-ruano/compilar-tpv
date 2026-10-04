@@ -17,8 +17,7 @@
     "id_cliente": null,
     "nombre_cliente": null,
     "email": null,
-    "telefono": null,
-    "notas_cliente": null
+    "telefono": null
   },
   "snapshot": {
     "Clientes": "SELECT COUNT(*) AS Fichas FROM Clientes",

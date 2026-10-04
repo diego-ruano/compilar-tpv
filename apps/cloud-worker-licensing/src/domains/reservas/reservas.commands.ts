@@ -36,14 +36,12 @@ function clienteSteps(
 									UPDATE Clientes
 									SET
 										Email = ?1,
-										Telefono = ?2,
-										Notas = ?3
-									WHERE ID_Cliente = ?4;
+										Telefono = ?2
+									WHERE ID_Cliente = ?3;
 								`,
 								args: [
 									cliente.actualizar.email,
 									cliente.actualizar.telefono,
-									cliente.actualizar.notas,
 									cliente.id_cliente,
 								],
 							},
@@ -69,7 +67,6 @@ function clienteSteps(
 								Nombre,
 								Telefono,
 								Email,
-								Notas,
 								Created_At
 							)
 							VALUES (
@@ -77,7 +74,6 @@ function clienteSteps(
 								?2,
 								?3,
 								?4,
-								?5,
 								datetime('now','localtime')
 							);
 						`,
@@ -86,7 +82,6 @@ function clienteSteps(
 							input.nombre_cliente,
 							input.telefono,
 							input.email,
-							input.notas_cliente,
 						],
 					},
 				],

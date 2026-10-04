@@ -138,11 +138,14 @@ pub enum ClienteReserva {
     Ninguno,
     /// Un cliente que ya existe. Lo escrito sólo rellena sus huecos (RES-01): no lo renombra ni
     /// le cambia un dato que ya tenga.
+    ///
+    /// RI-84: ninguna de las dos variantes lleva notas. La nota de la reserva es de esa noche
+    /// («cumpleaños, trae tarta») y antes se copiaba también a la ficha, donde se quedaba para
+    /// siempre. Las notas del cliente se escriben sólo desde su ficha.
     Existente {
         id: String,
         telefono: Option<String>,
         email: Option<String>,
-        notas: Option<String>,
     },
     /// Una ficha nueva, aunque haya otra con el mismo teléfono (dos personas pueden compartirlo).
     /// El email sí identifica: si ya es de otro cliente, el repositorio lo rechaza.
@@ -150,7 +153,6 @@ pub enum ClienteReserva {
         nombre: String,
         telefono: Option<String>,
         email: Option<String>,
-        notas: Option<String>,
     },
 }
 
@@ -167,16 +169,14 @@ impl ClienteReserva {
         nombre: Option<String>,
         telefono: Option<String>,
         email: Option<String>,
-        notas: Option<String>,
     ) -> Result<Self, String> {
         let telefono = limpia(telefono);
         let email = limpia_email(email);
-        let notas = limpia(notas);
         if let Some(id) = limpia(id_cliente) {
-            return Ok(ClienteReserva::Existente { id, telefono, email, notas });
+            return Ok(ClienteReserva::Existente { id, telefono, email });
         }
         if let Some(nombre) = limpia(nombre) {
-            return Ok(ClienteReserva::Nuevo { nombre, telefono, email, notas });
+            return Ok(ClienteReserva::Nuevo { nombre, telefono, email });
         }
         if telefono.is_some() || email.is_some() {
             return Err(MSG_CLIENTE_SIN_NOMBRE.into());
@@ -263,13 +263,12 @@ impl ReservaValidada {
         nombre_cliente: Option<String>,
         telefono: Option<String>,
         email: Option<String>,
-        notas_cliente: Option<String>,
     ) -> Result<Self, String> {
         let dia = normalize_dia_ymd(dia_ymd)?;
         let hora = normalize_hora_hhmm(hora)?;
 
         let cliente =
-            ClienteReserva::desde(id_cliente, nombre_cliente, telefono, email, notas_cliente)?;
+            ClienteReserva::desde(id_cliente, nombre_cliente, telefono, email)?;
         if comensales <= 0 {
             return Err("Comensales inválidos".into());
         }
@@ -355,7 +354,7 @@ mod tests {
     }
 
     fn reserva_base(id: Option<String>, comensales: i64, mesa: Option<&str>, nombre: &str) -> Result<ReservaValidada, String> {
-        ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, None, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.map(str::to_string), None, Some(nombre.into()), Some(" 600 ".into()), Some(" a@b.es ".into()), Some(" cliente habitual ".into()))
+        ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, None, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.map(str::to_string), None, Some(nombre.into()), Some(" 600 ".into()), Some(" a@b.es ".into()))
     }
 
     fn email_de(r: &ReservaValidada) -> Option<String> {
@@ -374,7 +373,7 @@ mod tests {
     fn email_del_cliente_se_normaliza_a_minusculas() {
         let r = ReservaValidada::validar(
             None, "2026-07-22", "14:30", None, 2, None, None, None,
-            Some("m1".into()), None, Some("Ana".into()), None, Some("  Juan@Mail.COM  ".into()), None,
+            Some("m1".into()), None, Some("Ana".into()), None, Some("  Juan@Mail.COM  ".into()),
         )
         .unwrap();
         assert_eq!(email_de(&r).as_deref(), Some("juan@mail.com"));
@@ -385,7 +384,7 @@ mod tests {
         for valor in [None, Some("".to_string()), Some("   ".to_string())] {
             let r = ReservaValidada::validar(
                 None, "2026-07-22", "14:30", None, 2, None, None, None,
-                Some("m1".into()), None, Some("Ana".into()), None, valor, None,
+                Some("m1".into()), None, Some("Ana".into()), None, valor,
             )
             .unwrap();
             assert_eq!(email_de(&r), None);
@@ -406,7 +405,6 @@ mod tests {
                 nombre: "Ana".into(),
                 telefono: Some("600".into()),
                 email: Some("a@b.es".into()),
-                notas: Some("cliente habitual".into()),
             }
         );
     }
@@ -429,22 +427,21 @@ mod tests {
     #[test]
     fn el_cliente_de_una_reserva_es_opcional_y_explicito() {
         let s = |v: &str| Some(v.to_string());
-        assert_eq!(ClienteReserva::desde(None, None, None, None, None), Ok(ClienteReserva::Ninguno));
+        assert_eq!(ClienteReserva::desde(None, None, None, None), Ok(ClienteReserva::Ninguno));
         assert_eq!(
-            ClienteReserva::desde(None, s("  "), s(""), s(" "), None),
+            ClienteReserva::desde(None, s("  "), s(""), s(" ")),
             Ok(ClienteReserva::Ninguno)
         );
         assert_eq!(
-            ClienteReserva::desde(s(" c1 "), s("Luis"), s("600"), None, None),
+            ClienteReserva::desde(s(" c1 "), s("Luis"), s("600"), None),
             Ok(ClienteReserva::Existente {
                 id: "c1".into(),
                 telefono: s("600"),
                 email: None,
-                notas: None
             })
         );
         assert!(matches!(
-            ClienteReserva::desde(None, s("Luis"), s("600"), None, None),
+            ClienteReserva::desde(None, s("Luis"), s("600"), None),
             Ok(ClienteReserva::Nuevo { .. })
         ));
     }
@@ -452,8 +449,8 @@ mod tests {
     #[test]
     fn un_telefono_o_email_sin_nombre_no_da_de_alta_a_nadie() {
         let s = |v: &str| Some(v.to_string());
-        assert!(ClienteReserva::desde(None, None, s("600"), None, None).is_err());
-        assert!(ClienteReserva::desde(None, s(" "), None, s("a@b.es"), None).is_err());
+        assert!(ClienteReserva::desde(None, None, s("600"), None).is_err());
+        assert!(ClienteReserva::desde(None, s(" "), None, s("a@b.es")).is_err());
     }
 
     /// Apuntar la reserva y decidir la mesa después es un caso normal: una mesa en blanco es lo

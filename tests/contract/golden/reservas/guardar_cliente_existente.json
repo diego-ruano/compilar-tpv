@@ -4,7 +4,7 @@
       "Email": "bob@x.com",
       "ID_Cliente": "cliente-1",
       "Nombre": "Bob",
-      "Notas": "alergico",
+      "Notas": null,
       "Telefono": "611222333"
     }
   ],
@@ -17,7 +17,7 @@
       "ID_Cliente": "cliente-1",
       "ID_Mesa": "mesa-1",
       "ID_Reserva": "reserva-1",
-      "Nota": null,
+      "Nota": "cumpleaños, trae tarta",
       "Turno": "cena"
     }
   ]

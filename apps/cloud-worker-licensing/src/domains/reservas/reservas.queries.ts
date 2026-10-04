@@ -170,15 +170,13 @@ export type ClienteExistente = {
 	nombre: string | null;
 	email: string | null;
 	telefono: string | null;
-	notas: string | null;
 };
 
 const COLS_CLIENTE = `
 	ID_Cliente AS id_cliente,
 	Nombre AS nombre,
 	Email AS email,
-	Telefono AS telefono,
-	Notas AS notas
+	Telefono AS telefono
 `;
 
 // Por email sin distinguir mayúsculas: es el criterio del índice único `ux_clientes_email` (sobre
@@ -246,7 +244,7 @@ export type ClienteResuelto =
 	| {
 			modo: "existente";
 			id_cliente: string;
-			actualizar: { email: string | null; telefono: string | null; notas: string | null } | null;
+			actualizar: { email: string | null; telefono: string | null } | null;
 	  }
 	| { modo: "nuevo" };
 
@@ -257,7 +255,6 @@ export async function resolverCliente(
 		nombre_cliente?: string | null;
 		telefono?: string | null;
 		email?: string | null;
-		notas_cliente?: string | null;
 	},
 ): Promise<ClienteResuelto | { error: "cliente_no_encontrado" | "email_duplicado" }> {
 	if (datos.id_cliente) {
@@ -271,13 +268,13 @@ export async function resolverCliente(
 		}
 		const email = ex.email ?? emailLibre;
 		const telefono = ex.telefono ?? datos.telefono ?? null;
-		const notas = ex.notas ?? datos.notas_cliente ?? null;
-		// Sin nada que rellenar no se escribe: cada escritura viaja a la Main.
-		const cambia = email !== ex.email || telefono !== ex.telefono || notas !== ex.notas;
+		// Sin nada que rellenar no se escribe: cada escritura viaja a la Main. Las notas del cliente
+		// no se tocan desde una reserva (RI-84).
+		const cambia = email !== ex.email || telefono !== ex.telefono;
 		return {
 			modo: "existente",
 			id_cliente: ex.id_cliente,
-			actualizar: cambia ? { email, telefono, notas } : null,
+			actualizar: cambia ? { email, telefono } : null,
 		};
 	}
 

@@ -18,8 +18,7 @@
     "id_cliente": null,
     "nombre_cliente": null,
     "email": null,
-    "telefono": null,
-    "notas_cliente": null
+    "telefono": null
   },
   "snapshot": {
     "Reservas": "SELECT ID_Reserva, ID_Mesa, Dia_YMD, Hora, Comensales, Duracion_Min FROM Reservas"

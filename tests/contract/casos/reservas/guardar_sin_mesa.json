@@ -13,8 +13,7 @@
     "estado": "confirmada",
     "nombre_cliente": "Ana",
     "email": "ana@x.com",
-    "telefono": "600100200",
-    "notas_cliente": null
+    "telefono": "600100200"
   },
   "snapshot": {
     "Clientes": "SELECT Nombre, Telefono, Email, Notas FROM Clientes",

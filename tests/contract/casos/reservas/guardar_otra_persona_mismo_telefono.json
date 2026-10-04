@@ -18,8 +18,7 @@
     "id_cliente": null,
     "nombre_cliente": "Luis",
     "telefono": "600100200",
-    "email": null,
-    "notas_cliente": null
+    "email": null
   },
   "snapshot": {
     "Clientes": "SELECT Nombre, Telefono, Email, Notas FROM Clientes",

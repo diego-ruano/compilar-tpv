@@ -45,14 +45,10 @@ impl ReservasRepository for HttpReservasRepository {
             .id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let (id_cliente, nombre, telefono, email, notas) = match reserva.cliente {
-            ClienteReserva::Ninguno => (None, None, None, None, None),
-            ClienteReserva::Existente { id, telefono, email, notas } => {
-                (Some(id), None, telefono, email, notas)
-            }
-            ClienteReserva::Nuevo { nombre, telefono, email, notas } => {
-                (None, Some(nombre), telefono, email, notas)
-            }
+        let (id_cliente, nombre, telefono, email) = match reserva.cliente {
+            ClienteReserva::Ninguno => (None, None, None, None),
+            ClienteReserva::Existente { id, telefono, email } => (Some(id), None, telefono, email),
+            ClienteReserva::Nuevo { nombre, telefono, email } => (None, Some(nombre), telefono, email),
         };
         let body = json!({
             "id_reserva": id_reserva,
@@ -69,7 +65,6 @@ impl ReservasRepository for HttpReservasRepository {
             "nombre_cliente": nombre,
             "telefono": telefono,
             "email": email,
-            "notas_cliente": notas,
         });
         let _: (JsonValue, _) = self
             .client

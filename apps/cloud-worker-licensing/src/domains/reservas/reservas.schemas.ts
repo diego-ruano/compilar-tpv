@@ -116,7 +116,6 @@ export const reservaSaveSchema = z
 		nombre_cliente: z.any().optional().nullable(),
 		telefono: z.any().optional().nullable(),
 		email: z.any().optional().nullable(),
-		notas_cliente: z.any().optional().nullable(),
 	})
 	.superRefine((v, ctx) => {
 		const sinFicha = !cleanOrNull(v.id_cliente) && !cleanOrNull(v.nombre_cliente);
@@ -170,7 +169,6 @@ export const reservaSaveSchema = z
 			nombre_cliente: cleanOrNull(v.nombre_cliente),
 			telefono: cleanOrNull(v.telefono),
 			email: cleanEmailOrNull(v.email),
-			notas_cliente: cleanOrNull(v.notas_cliente),
 		};
 	});
 
@@ -201,8 +199,7 @@ type NullableReservaFields =
 	| "nota"
 	| "estado"
 	| "telefono"
-	| "email"
-	| "notas_cliente";
+	| "email";
 
 export type ReservaSaveInput = Omit<
 	ContractReservaSaveInput,

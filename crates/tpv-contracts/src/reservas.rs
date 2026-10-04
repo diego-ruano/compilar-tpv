@@ -118,9 +118,6 @@ pub struct ReservaSaveInput {
     #[serde(default)]
     #[ts(optional)]
     pub email: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub notas_cliente: Option<String>,
 }
 
 /// RI-61: ¿el teléfono o el email que se acaban de escribir ya son de un cliente? Se pregunta antes

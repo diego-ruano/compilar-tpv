@@ -1,5 +1,5 @@
 {
-  "descripcion": "Alta de reserva con cliente NUEVO (no existe por email): crea el cliente e inserta la reserva. El ID_Cliente lo generan ambos lados (distinto UUID) → se excluye de Clientes y de Reservas; ID_Reserva se provee (determinista).",
+  "descripcion": "Alta de reserva con cliente NUEVO (no existe por email): crea el cliente e inserta la reserva. El ID_Cliente lo generan ambos lados (distinto UUID) → se excluye de Clientes y de Reservas; ID_Reserva se provee (determinista). La nota de la reserva no pasa a la ficha del cliente nuevo (RI-84): sus Notas quedan vacías.",
   "comando": "reservas.guardar",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
@@ -16,8 +16,7 @@
     "estado": "confirmada",
     "nombre_cliente": "Ana",
     "email": "ana@x.com",
-    "telefono": "600100200",
-    "notas_cliente": "VIP"
+    "telefono": "600100200"
   },
   "snapshot": {
     "Clientes": "SELECT Nombre, Telefono, Email, Notas FROM Clientes",

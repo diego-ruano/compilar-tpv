@@ -1,5 +1,5 @@
 {
-  "descripcion": "RI-61: reserva ASIGNADA a un cliente que ya existe (id_cliente, después de que la pantalla preguntara). Merge NO destructivo (RES-01): conserva el nombre y el email que ya tiene —el nombre escrito no lo renombra— y rellena sólo los huecos (teléfono y notas).",
+  "descripcion": "RI-61: reserva ASIGNADA a un cliente que ya existe (id_cliente, después de que la pantalla preguntara). Merge NO destructivo (RES-01): conserva el nombre y el email que ya tiene —el nombre escrito no lo renombra— y rellena sólo los huecos (el teléfono). La nota de la reserva no pasa a la ficha del cliente (RI-84): sus Notas siguen vacías.",
   "comando": "reservas.guardar",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
@@ -13,12 +13,11 @@
     "hora": "21:00",
     "turno": "cena",
     "comensales": 2,
-    "nota": null,
+    "nota": "cumpleaños, trae tarta",
     "estado": "confirmada",
     "nombre_cliente": "Bob Cambiado",
     "email": "bob@x.com",
     "telefono": "611222333",
-    "notas_cliente": "alergico",
     "id_cliente": "cliente-1"
   },
   "snapshot": {

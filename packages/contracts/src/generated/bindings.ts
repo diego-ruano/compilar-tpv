@@ -1343,7 +1343,7 @@ forzar_solape?: boolean, nota?: string, estado?: string, id_mesa?: string,
  * nada, la reserva va sin cliente. Antes de asignar por teléfono o email, la pantalla pregunta
  * con `reservas_buscar_cliente`.
  */
-id_cliente?: string, nombre_cliente?: string, telefono?: string, email?: string, notas_cliente?: string, };
+id_cliente?: string, nombre_cliente?: string, telefono?: string, email?: string, };
 
 /**
  * Argumentos del rango mensual.

@@ -76,7 +76,6 @@ export type ReservaSaveInput = {
     nombreCliente?: string | null;
     telefono?: string | null;
     email?: string | null;
-    notasCliente?: string | null;
 };
 
 /* ========================= Helpers ========================= */
@@ -188,7 +187,6 @@ export async function reservasSave(input: ReservaSaveInput): Promise<boolean> {
             nombre_cliente: input.nombreCliente ?? null,
             telefono: input.telefono ?? null,
             email: input.email ?? null,
-            notas_cliente: input.notasCliente ?? null,
         },
     });
 }
