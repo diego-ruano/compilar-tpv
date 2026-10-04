@@ -142,7 +142,10 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
 
   const importeTotal = deCentimos(Number(obj.importeTotal ?? 0));
   const createdAtMs = Number(obj.createdAtMs ?? Date.now());
-  const idPago = String(obj.idPago ?? "").trim() || crypto.randomUUID();
+  // RI-52: el idPago es lo que hace idempotente el reintento. Un intent guardado sin él (por una
+  // versión anterior a existir el campo) recibía uno nuevo en cada carga, y reintentarlo podía
+  // cobrar dos veces; se descarta.
+  const idPago = String(obj.idPago ?? "").trim();
 
   // El destinatario se valida entero o se descarta: medio destinatario (nombre sin NIF) haría que
   // el backend rechazara el cobro una y otra vez sin que nada lo explicara.
@@ -159,6 +162,7 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
   }
 
   if (!id) return null;
+  if (!idPago) return null;
   if (!idComanda) return null;
   if (metodoRaw !== "tarjeta" && metodoRaw !== "efectivo") return null;
   if (ticketItemIds.length === 0) return null;
