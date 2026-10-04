@@ -61,6 +61,51 @@ fn valor_i64(value: Value) -> Option<i64> {
     }
 }
 
+/// Corre `f` en un hilo de bloqueo, fuera del runtime async.
+///
+/// RI-41 (y RI-16): libsql local es `async` en la firma pero ejecuta SQLite en el hilo que lo
+/// llama, sin ceder. `VACUUM INTO` y `PRAGMA quick_check` de una base grande, o copiar la base
+/// entera a un USB, tardan segundos; en un hilo del runtime dejan a la interfaz sin uno de sus
+/// pocos hilos (un TPV tiene 2–4 núcleos) todo ese rato.
+async fn en_hilo_aparte<T, F, Fut>(f: F) -> AppResult<T>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = AppResult<T>>,
+    T: Send + 'static,
+{
+    let rt = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || rt.block_on(f()))
+        .await
+        .map_err(|e| AppError::internal(format!("La tarea de la copia se interrumpió: {e}")))?
+}
+
+/// `std::fs::copy` en un hilo de bloqueo (ver [`en_hilo_aparte`]).
+async fn copiar_fichero(origen: &Path, destino: &Path) -> AppResult<()> {
+    let (origen, destino) = (origen.to_path_buf(), destino.to_path_buf());
+    en_hilo_aparte(move || async move {
+        std::fs::copy(&origen, &destino).map(|_| ()).map_err(db_err)
+    })
+    .await
+}
+
+/// `VACUUM INTO destino` por una conexión del pool de lectura, en un hilo de bloqueo. El guard
+/// viaja con la tarea: la conexión vuelve al pool cuando termina la copia, no antes.
+async fn vacuum_into(db: &Db, destino: &Path) -> AppResult<()> {
+    let destino_str = destino
+        .to_str()
+        .ok_or_else(|| AppError::internal("Ruta de copia inválida"))?
+        .to_string();
+    let r = db.read().await;
+    en_hilo_aparte(move || async move {
+        r.conn()
+            .execute("VACUUM INTO ?1;", vec![Value::Text(destino_str)])
+            .await
+            .map(|_| ())
+            .map_err(db_err)
+    })
+    .await
+}
+
 async fn scalar_i64(conn: &Connection, sql: &str) -> AppResult<i64> {
     let mut rows = conn.query(sql, ()).await.map_err(db_err)?;
     let Some(row) = rows.next().await.map_err(db_err)? else {
@@ -127,16 +172,8 @@ pub(crate) async fn guardar_base_de_antes_del_traslado(db: &Db) -> AppResult<Pat
     let dir = db.carpeta().join(BACKUP_DIR);
     std::fs::create_dir_all(&dir).map_err(db_err)?;
     let destino = dir.join(format!("{ANTES_DE_TRASLADO_PREFIX}{}{BACKUP_SUFFIX}", now_ms()));
-    let destino_str = destino
-        .to_str()
-        .ok_or_else(|| AppError::internal("Ruta de copia inválida"))?
-        .to_string();
     // Por el pool de lectura, como las copias diarias: `VACUUM INTO` hace su propia instantánea.
-    let r = db.read().await;
-    r.conn()
-        .execute("VACUUM INTO ?1;", vec![Value::Text(destino_str)])
-        .await
-        .map_err(db_err)?;
+    vacuum_into(db, &destino).await?;
     Ok(destino)
 }
 
@@ -222,7 +259,14 @@ pub fn list_backups(app_data_dir: &Path) -> AppResult<Vec<LocalBackupInfo>> {
     Ok(out)
 }
 
+/// Comprueba que la copia abre, pasa `quick_check` y tiene usuarios. En un hilo de bloqueo: el
+/// `quick_check` recorre la base entera (ver [`en_hilo_aparte`]).
 async fn validate_backup(path: &Path) -> AppResult<()> {
+    let path = path.to_path_buf();
+    en_hilo_aparte(move || async move { validar_copia(&path).await }).await
+}
+
+async fn validar_copia(path: &Path) -> AppResult<()> {
     let path_str = path
         .to_str()
         .ok_or_else(|| corrupta("La ruta de la copia no es válida"))?;
@@ -271,22 +315,12 @@ pub async fn create_backup(db: &Db, app_data_dir: &Path) -> AppResult<Option<Loc
     let stamp = now_ms();
     let tmp = dir.join(format!(".backup-{stamp}.tmp"));
     let final_path = dir.join(format!("{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}"));
-    let tmp_str = tmp
-        .to_str()
-        .ok_or_else(|| AppError::internal("Ruta temporal de backup inválida"))?
-        .to_string();
 
-    {
-        // `VACUUM INTO` abre su propia transacción de LECTURA, así que en WAL produce una
-        // instantánea coherente sin excluir al escritor. Va por el pool de lectura a propósito:
-        // tomando el `WriteGuard` se bloquearían los cobros durante toda la copia, y este job
-        // vence por reloj de pared, así que puede caer en plena cena.
-        let r = db.read().await;
-        r.conn()
-            .execute("VACUUM INTO ?1;", vec![Value::Text(tmp_str)])
-            .await
-            .map_err(db_err)?;
-    }
+    // `VACUUM INTO` abre su propia transacción de LECTURA, así que en WAL produce una
+    // instantánea coherente sin excluir al escritor. Va por el pool de lectura a propósito:
+    // tomando el `WriteGuard` se bloquearían los cobros durante toda la copia, y este job
+    // vence por reloj de pared, así que puede caer en plena cena.
+    vacuum_into(db, &tmp).await?;
 
     if let Err(e) = validate_backup(&tmp).await {
         let _ = std::fs::remove_file(&tmp);
@@ -377,7 +411,7 @@ pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path) -> App
             std::fs::create_dir_all(parent).map_err(db_err)?;
         }
     }
-    std::fs::copy(&source, destino).map_err(db_err)?;
+    copiar_fichero(&source, destino).await?;
     Ok(())
 }
 
@@ -413,7 +447,7 @@ pub async fn import_backup(app_data_dir: &Path, origen: &Path) -> AppResult<Loca
 
     let final_path = dir.join(format!("{IMPORT_PREFIX}{stamp}{BACKUP_SUFFIX}"));
     let tmp = dir.join(format!(".import-{}.tmp", now_ms()));
-    std::fs::copy(origen, &tmp).map_err(db_err)?;
+    copiar_fichero(origen, &tmp).await?;
     if let Err(e) = std::fs::rename(&tmp, &final_path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(db_err(e));
@@ -615,7 +649,7 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf
     validate_backup(&source).await?;
 
     let prepared = app_data_dir.join(format!("data.restore.{}.tmp", now_ms()));
-    std::fs::copy(source, &prepared).map_err(db_err)?;
+    copiar_fichero(&source, &prepared).await?;
 
     let result = async {
         let prepared_str = prepared
