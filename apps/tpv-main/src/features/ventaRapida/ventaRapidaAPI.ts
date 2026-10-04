@@ -38,16 +38,6 @@ export type VrCobrarFraccionadoResult = {
     ok: boolean;
     /** Número de ticket que reservó el cobro; es lo que se imprime a continuación. */
     numeroTicket?: string | null;
-
-    /**
-     * Presente cuando el cobro falla por stock insuficiente.
-     * El cobro descuenta stock e inserta Lote_Consumos en la misma
-     * transacción, así que un fallo de stock implica que NO se creó el pago.
-     */
-    error?: "insufficient_stock" | string;
-    productoId?: string;
-    requested?: number;
-    available?: number;
 };
 
 export type VrBootstrapResult = {
@@ -55,29 +45,6 @@ export type VrBootstrapResult = {
     categorias: CategoriaRow[];
     lineas: LineaComandaRow[];
 };
-
-/*
-  Detecta el error de stock insuficiente que devuelve el backend local (Rust),
-  con el formato "insufficient_stock:productoId:requested:available" (posiblemente
-  con un prefijo de AppError, p. ej. "conflicto: insufficient_stock:...").
-*/
-function parseInsufficientStock(
-    err: unknown,
-): { productoId?: string; requested?: number; available?: number } | null {
-    const msg = String((err as any)?.message ?? err ?? "");
-    if (!msg.includes("insufficient_stock")) return null;
-
-    const local = msg.match(/insufficient_stock:(\d+):([\d.]+):([\d.]+)/);
-    if (local) {
-        return {
-            productoId: local[1] || undefined,
-            requested: Number(local[2]) || undefined,
-            available: Number(local[3]) || undefined,
-        };
-    }
-
-    return {};
-}
 
 /* =========================================================
   BOOTSTRAP
@@ -241,43 +208,25 @@ export async function vrCobrarFraccionado(argsInput: {
      */
     destinatario?: DestinatarioInput;
 }): Promise<VrCobrarFraccionadoResult> {
-    try {
-        const args: VrCobrarFraccionadoInput = {
-            id_pago: argsInput.idPago,
-            id_comanda: argsInput.idComanda,
-            metodo: argsInput.metodo,
-            importe_total: argsInput.importeTotal,
-            // REV-17: quién cobra ya no viaja aquí. Lo pone el backend desde la sesión, como
-            // quién anula, quién cierra la caja y quién abre el cajón (SEC-01).
-            detalles: argsInput.detalles.map((v) => v.trim()).filter((s) => s.length > 0),
-            destinatario: argsInput.destinatario,
-        };
-        const numeroTicket = await invokeClient<string>("vr_cobrar_fraccionado", { args });
+    // RI-52: un fallo llega tal cual a quien llama, que deshace el marcado y enseña su message.
+    // Antes se buscaba «insufficient_stock» dentro del texto, y el cobro de la Main no lo
+    // produce nunca: vender sin stock no se bloquea (lo que falta sale del stock suelto).
+    const args: VrCobrarFraccionadoInput = {
+        id_pago: argsInput.idPago,
+        id_comanda: argsInput.idComanda,
+        metodo: argsInput.metodo,
+        importe_total: argsInput.importeTotal,
+        // REV-17: quién cobra ya no viaja aquí. Lo pone el backend desde la sesión, como
+        // quién anula, quién cierra la caja y quién abre el cajón (SEC-01).
+        detalles: argsInput.detalles.map((v) => v.trim()).filter((s) => s.length > 0),
+        destinatario: argsInput.destinatario,
+    };
+    const numeroTicket = await invokeClient<string>("vr_cobrar_fraccionado", { args });
 
-        return {
-            ok: true,
-            numeroTicket: numeroTicket || null,
-        };
-    } catch (e) {
-        /*
-          El cobro descuenta stock en la misma transacción. Si el backend
-          responde insufficient_stock, devolvemos un resultado estructurado
-          para que la UI no marque las líneas como cobradas.
-        */
-        const stock = parseInsufficientStock(e);
-
-        if (stock) {
-            return {
-                ok: false,
-                error: "insufficient_stock",
-                productoId: stock.productoId,
-                requested: stock.requested,
-                available: stock.available,
-            };
-        }
-
-        throw e;
-    }
+    return {
+        ok: true,
+        numeroTicket: numeroTicket || null,
+    };
 }
 
 export async function vrDeleteComandaIfSafe(

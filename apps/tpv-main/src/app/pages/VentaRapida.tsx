@@ -1038,26 +1038,6 @@ export default function VentaRapida() {
             });
           }
 
-          if (pago?.error === "insufficient_stock") {
-            // No se creó el pago: revertimos el marcado optimista de cobrado.
-            setPendingCobrosLocal((prev) => prev.filter((x) => x.id !== intent.id));
-            rollbackTicketItemsPaidLocal(intent.ticketItemIds, detallesUsados);
-
-            toast.error(
-              "Sin stock suficiente",
-              "No hay stock para cobrar estas líneas. Las he devuelto a pendiente.",
-            );
-
-            if (idComandaActivaRef.current === intent.idComanda) {
-              queueComandaRefresh(intent.idComanda, {
-                refreshTicket: true,
-                refreshComandas: false,
-              });
-            }
-
-            return;
-          }
-
           if (!pago?.ok) {
             throw new Error("No se pudo guardar el pago.");
           }

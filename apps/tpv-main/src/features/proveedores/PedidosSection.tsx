@@ -22,6 +22,7 @@ import {
   useEnviarPedido,
 } from "./pedidosQueries";
 import { conAviso } from "../../shared/lib/conAviso";
+import { toAppError } from "@tpv/client";
 
 type Props = {
   proveedores: ProveedorDto[];
@@ -195,18 +196,11 @@ export default function PedidosSection({ proveedores }: Props) {
       toast.success("Pedido enviado", `Correo enviado a ${updated.email_destino}`);
 
       cerrarModal();
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      // El worker solo envía a correos de proveedores dados de alta (FABLE-C). El código que
-      // devuelve es estable pero no se le puede enseñar a un hostelero tal cual.
-      if (msg.includes("email_destino_no_autorizado")) {
-        toast.error(
-          "Ese correo no está dado de alta",
-          `Para enviar pedidos a ${updated.email_destino} primero tienes que guardarlo como correo de un proveedor en la pestaña Proveedores.`,
-        );
-        return;
-      }
-      toast.error("Error", msg);
+    } catch (e) {
+      // RI-52: el message ya viene escrito para la persona. Un correo que no es de ningún
+      // proveedor (FABLE-C) lo completa el worker con su frase de `MENSAJES`; antes se buscaba su
+      // identificador dentro del texto.
+      toast.error("No se pudo enviar el pedido", toAppError(e).message);
     }
   }
 
