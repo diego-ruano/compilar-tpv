@@ -2131,7 +2131,10 @@ mod tests_bootstrap {
                     .is_some_and(|n| n.starts_with("antes-de-traslado-"))
             })
             .expect("la base de antes del traslado tiene que quedar guardada");
-        let vieja = Db::open(copia.to_str().unwrap()).await.unwrap();
+        // Se guarda comprimida, como todas las copias (RI-41).
+        let abierta = dir.join("antes-de-traslado.db");
+        crate::recovery::descomprimir(&copia, &abierta).await.unwrap();
+        let vieja = Db::open(abierta.to_str().unwrap()).await.unwrap();
         assert_eq!(zonas(&vieja).await, vec!["De antes".to_string()]);
         assert_eq!(contar(&vieja, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 1);
     }

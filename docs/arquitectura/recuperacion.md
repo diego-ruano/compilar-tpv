@@ -23,7 +23,7 @@ antigua crearía dos historiales que no hay forma de juntar.
 | Fase 2 | `/v1/sync/historico` + job `backfill_historico` + `use_cases/sync.rs::backfill_paso` | El resto del histórico, por páginas, con el bar ya vendiendo |
 | Cola del backfill | `_Backfill_Historico` (`0001_inicial.sql`, §16) | Progreso reanudable, local |
 | Restaurar desde la nube | `crates/tpv-infra-sqlite/src/sync.rs::bootstrap_restaurar` | Reemplaza en una transacción y siembra la cola de la fase 2 |
-| Copias locales | `crates/tpv-infra-sqlite/src/recovery.rs` + job `backup_local` | `VACUUM INTO` diario; se guardan las 7 últimas |
+| Copias locales | `crates/tpv-infra-sqlite/src/recovery.rs` + job `backup_local` | `VACUUM INTO` diario, comprimido; se guardan las 7 últimas |
 | Copia manual, exportar, importar | `commands/recovery.rs` (`recovery_create_backup`, `…_export_backup`, `…_import_backup`) | Sacar una copia del equipo y traerla de vuelta |
 | Base que no abre | `lib.rs::run` (arranque sin `Db`) + `commands/recovery.rs::asegurar_base_para_recuperar` | Arrancar igual y apartar el fichero ilegible |
 | Bloqueo del login | `_Recovery_State.Reconciliation_Pending` | Restaurado no es utilizable |
@@ -101,10 +101,16 @@ esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_
 ## Desde una copia local
 
 - **Copia diaria**: `VACUUM INTO` por el pool de **lectura** (en WAL la instantánea es coherente sin
-  bloquear al escritor ni los cobros), en `AppData/backups/data-*.db`, conservando las 7 últimas.
+  bloquear al escritor ni los cobros), se valida y se guarda **comprimida con gzip** en
+  `AppData/backups/data-*.db.gz`, conservando las 7 últimas. Lo que se valida y se restaura es siempre
+  la base descomprimida en un fichero aparte; un `.db.gz` también lo abre 7-Zip.
+- **Fuera del runtime async**: libsql local ejecuta SQLite en el hilo que lo llama, así que el
+  `VACUUM INTO`, el `quick_check`, comprimir y copiar la base entera van por `spawn_blocking`.
 - **Copia ahora / guardar fuera / traer**: `recovery_create_backup`, `recovery_export_backup` (a donde
-  elija el usuario: un USB) y `recovery_import_backup`, que la copia como `import-*` y **no caduca**. La
-  validación no comprueba que sea del mismo negocio (la base no lleva marca de tenant): la pantalla lo
+  elija el usuario: un USB; sale comprimida, tal como está guardada) y `recovery_import_backup`, que la
+  guarda comprimida como `import-*` y **no caduca**. Se importa una copia comprimida o una base tal cual
+  (una `.db` de antes, o la `data.db` rescatada de otro equipo): el formato se reconoce por el contenido.
+  La validación no comprueba que sea del mismo negocio (la base no lleva marca de tenant): la pantalla lo
   advierte, el daño se queda en local (restaurar no llena el outbox) y se deshace recuperando de la nube.
 - Una copia inservible se rechaza diciendo por qué.
 - Al restaurar se vacía `_Sync_Failed`: lo que registra son intentos contra la base que se reemplaza, y
@@ -126,8 +132,11 @@ copia restaurable) y crea una vacía en su sitio para que la nube tenga dónde e
 
 `pre-restore-*`, `failed-restore-*`, `ilegible-*` y `antes-de-traslado-*` no son copias diarias: el job
 `backup_local` conserva las dos más recientes de cada familia y purga el resto, junto con los temporales
-de más de una hora. Las copias previas a una migración (`data.db.bak.*`, en la raíz de AppData) siguen
-la misma regla.
+de más de una hora (`data.restore.*` y los `backups/.*.tmp` de una copia que no terminó). De estas
+familias, `pre-restore-*`, `failed-restore-*` e `ilegible-*` no se comprimen: se apartan con un `rename`,
+sin reescribirlas. `antes-de-traslado-*` sí va comprimida. Las copias previas a una migración
+(`data.db.bak.*`, en la raíz de AppData) siguen la misma regla, y tampoco se comprimen: se hacen al
+arrancar, antes de abrir la base, y comprimirlas retrasaría el arranque.
 
 ## Reconciliar y desbloquear
 

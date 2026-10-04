@@ -87,6 +87,11 @@ ts-rs = { version = "12", features = ["chrono-impl"] }
 # entrega a quien lo pide.
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
+# ── Copias locales comprimidas (gzip) ──
+# Ya estaba en el árbol por `zip`; con el backend en Rust puro (miniz_oxide), sin compilar C. Un
+# `.db.gz` lo abre 7-Zip, así que un técnico puede sacar la base sin nuestro código.
+flate2 = "1"
+
 # ── Codigo QR del ticket (FISCAL-01, arts. 20-21 de la Orden HAC/1177/2024) ──
 # Sin default-features: solo hace falta la MATRIZ de modulos, no renderizar a imagen. La
 # rasterizacion a ESC/POS la hace printing.rs por el mismo camino que el logo (GS v 0), que es

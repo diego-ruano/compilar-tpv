@@ -361,7 +361,10 @@ function CopiasSeguridad({ darkMode }: { darkMode: boolean }) {
 			const destino = await save({
 				title: "Guardar la copia fuera de este equipo",
 				defaultPath: copia.id,
-				filters: [{ name: "Copia de seguridad", extensions: ["db"] }],
+				// Sale tal como está guardada: comprimida (`.db.gz`), salvo una de antes de RI-41.
+				filters: [
+					{ name: "Copia de seguridad", extensions: [copia.id.endsWith(".gz") ? "gz" : "db"] },
+				],
 			});
 			if (!destino) return;
 			await exportarCopiaLocal(copia.id, destino);

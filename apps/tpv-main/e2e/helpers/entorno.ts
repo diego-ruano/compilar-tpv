@@ -201,9 +201,10 @@ export function plantarCopiaCorrupta(): void {
 
     const copias = path.join(dir, "backups");
     fs.mkdirSync(copias, { recursive: true });
-    // El nombre es el que reconoce `list_backups`: `data-<epoch ms>.db`.
+    // El nombre es el que reconoce `list_backups`: `data-<epoch ms>.db.gz`. El contenido no es
+    // gzip ni SQLite: el formato se reconoce por el contenido, así que llega a la validación.
     fs.writeFileSync(
-        path.join(copias, `data-${Date.now()}.db`),
+        path.join(copias, `data-${Date.now()}.db.gz`),
         "esto tampoco es una base de datos\n".repeat(64),
         "utf8",
     );

@@ -22,5 +22,7 @@ include_dir = { workspace = true }
 sha2 = { workspace = true }
 # Exportacion de los registros de facturacion en ZIP (art. 8 RRSIF, ver verifactu::exportar).
 zip = { workspace = true }
+# Las copias locales se guardan comprimidas (ver recovery.rs).
+flate2 = { workspace = true }
 # Fachada de logging: los fallos de aplicación de sync se registran en local (el SQL sólo a `debug`).
 tracing = { workspace = true }

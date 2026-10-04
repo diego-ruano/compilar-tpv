@@ -6016,6 +6016,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "flate2",
  "include_dir",
  "libsql",
  "serde",

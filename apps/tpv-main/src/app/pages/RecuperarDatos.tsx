@@ -96,7 +96,9 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                 multiple: false,
                 directory: false,
                 title: "Elige una copia de seguridad",
-                filters: [{ name: "Copia de seguridad", extensions: ["db"] }],
+                // La que saca «Guardar fuera…» va comprimida (`.db.gz`); una `.db` tal cual (una
+                // copia antigua, o la base rescatada de otro equipo) también vale.
+                filters: [{ name: "Copia de seguridad", extensions: ["gz", "db"] }],
             });
         } catch (e) {
             setError(toAppError(e));

@@ -3,7 +3,15 @@
 //! Las copias se crean con `VACUUM INTO`: SQLite produce un fichero autocontenido y coherente
 //! aunque la base viva use WAL. Restaurar es reemplazar el fichero completo, no copiar sólo las
 //! tablas de negocio; así también sobreviven el outbox y el checkpoint, que no están en la nube.
+//!
+//! RI-41: las copias se guardan **comprimidas con gzip** (`*.db.gz`). Son siete diarias completas
+//! más las importadas, y los registros de facturación no se purgan nunca, así que sin comprimir
+//! crecían sin techo en el mismo disco. Lo que se valida y lo que se restaura es siempre la base
+//! descomprimida en un fichero aparte. Una copia sin comprimir (`*.db`: las de antes, o una
+//! `data.db` sacada a mano de otro equipo) se sigue aceptando: el formato se reconoce por el
+//! contenido, no por el nombre.
 
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use libsql::{Builder, Connection, Value};
@@ -18,8 +26,15 @@ const BACKUP_PREFIX: &str = "data-";
 /// Copias traídas de fuera (un USB, una carpeta de red). Llevan prefijo propio porque la
 /// retención de las diarias NO debe alcanzarlas: las ha puesto ahí una persona a mano.
 const IMPORT_PREFIX: &str = "import-";
-const BACKUP_SUFFIX: &str = ".db";
+/// Las copias que hacemos (diarias, importadas, la de antes de un traslado): comprimidas.
+const BACKUP_SUFFIX: &str = ".db.gz";
+/// Una base tal cual: las copias de antes de comprimirlas, y los ficheros que sólo se apartan con
+/// un `rename` (la base ilegible, la anterior a una restauración), que no se reescriben.
+const SUFIJO_SIN_COMPRIMIR: &str = ".db";
 const BACKUPS_A_CONSERVAR: usize = 7;
+/// Los temporales de una copia a medias (`backups/.backup-*.tmp`, `.import-*`, `.validar-*`…). Si
+/// el proceso muere entre medias se quedan; el job los recoge pasada una hora.
+const TMP_ANTIGUEDAD_MS: i64 = 60 * 60 * 1000;
 /// Copia que deja el paso de migraciones (`data.db.bak.<ms>`, ver `connection.rs`). Vive en la
 /// raíz de AppData, no en `backups/`, así que la retención de las diarias nunca la vio.
 const MIGRACION_PREFIX: &str = "data.db.bak.";
@@ -86,6 +101,99 @@ async fn copiar_fichero(origen: &Path, destino: &Path) -> AppResult<()> {
         std::fs::copy(&origen, &destino).map(|_| ()).map_err(db_err)
     })
     .await
+}
+
+/// Los dos primeros bytes de todo fichero gzip (RFC 1952). Una base SQLite empieza por
+/// `SQLite format 3\0`, así que no hay confusión posible.
+const MAGIA_GZIP: [u8; 2] = [0x1f, 0x8b];
+
+fn es_gzip(path: &Path) -> std::io::Result<bool> {
+    let mut cabecera = [0u8; 2];
+    let mut f = std::fs::File::open(path)?;
+    match f.read_exact(&mut cabecera) {
+        Ok(()) => Ok(cabecera == MAGIA_GZIP),
+        // Un fichero de menos de dos bytes no es gzip; que no sea una base lo dirá la validación.
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Comprime `origen` en `destino`, en un hilo de bloqueo.
+async fn comprimir(origen: &Path, destino: &Path) -> AppResult<()> {
+    let (origen, destino) = (origen.to_path_buf(), destino.to_path_buf());
+    en_hilo_aparte(move || async move {
+        let mut entrada = BufReader::new(std::fs::File::open(&origen).map_err(db_err)?);
+        let salida = BufWriter::new(std::fs::File::create(&destino).map_err(db_err)?);
+        let mut gz = flate2::write::GzEncoder::new(salida, flate2::Compression::default());
+        std::io::copy(&mut entrada, &mut gz).map_err(db_err)?;
+        gz.finish()
+            .and_then(|mut w| w.flush())
+            .map_err(db_err)?;
+        Ok(())
+    })
+    .await
+}
+
+/// Deja en `destino` la base que hay en `origen`, esté comprimida o no, en un hilo de bloqueo.
+///
+/// Un gzip truncado o con el CRC mal es una copia estropeada (`BackupCorrupt`), igual que una
+/// base que no pasa `quick_check`: la pantalla lo dice y deja elegir otra.
+pub(crate) async fn descomprimir(origen: &Path, destino: &Path) -> AppResult<()> {
+    let (origen, destino) = (origen.to_path_buf(), destino.to_path_buf());
+    en_hilo_aparte(move || async move {
+        if !es_gzip(&origen).map_err(db_err)? {
+            return std::fs::copy(&origen, &destino).map(|_| ()).map_err(db_err);
+        }
+        let entrada = BufReader::new(std::fs::File::open(&origen).map_err(db_err)?);
+        let mut gz = flate2::read::GzDecoder::new(entrada);
+        let mut salida = BufWriter::new(std::fs::File::create(&destino).map_err(db_err)?);
+        // `io::copy` no distingue si falló leer o escribir: lo que dice el tipo de error sí. Un
+        // disco lleno no es una copia corrupta.
+        std::io::copy(&mut gz, &mut salida).map_err(|e| match e.kind() {
+            std::io::ErrorKind::InvalidData
+            | std::io::ErrorKind::InvalidInput
+            | std::io::ErrorKind::UnexpectedEof => {
+                corrupta(format!("La copia comprimida está dañada: {e}"))
+            }
+            _ => db_err(e),
+        })?;
+        salida.flush().map_err(db_err)?;
+        Ok(())
+    })
+    .await
+}
+
+/// Un temporal junto a las copias. Empieza por `.` para que `list_backups` no lo tome por una.
+fn temporal(dir: &Path, que: &str) -> PathBuf {
+    dir.join(format!(".{que}-{}-{}.tmp", now_ms(), uuid::Uuid::new_v4().simple()))
+}
+
+/// Comprime `base` (un temporal sin comprimir, ya validado) en `destino` pasando por otro temporal,
+/// para que `destino` aparezca entero o no aparezca. Los temporales se borran pase lo que pase.
+async fn guardar_comprimida(base: &Path, destino: &Path) -> AppResult<()> {
+    let dir = destino.parent().unwrap_or(Path::new("."));
+    let gz = temporal(dir, "comprimir");
+    let r = async {
+        comprimir(base, &gz).await?;
+        std::fs::rename(&gz, destino).map_err(db_err)
+    }
+    .await;
+    discard_prepared(base);
+    let _ = std::fs::remove_file(&gz);
+    r
+}
+
+/// Valida una copia del almacén, comprimida o no, descomprimiéndola en un temporal que se borra.
+async fn validar_guardada(path: &Path) -> AppResult<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let tmp = temporal(dir, "validar");
+    let r = async {
+        descomprimir(path, &tmp).await?;
+        validate_backup(&tmp).await
+    }
+    .await;
+    discard_prepared(&tmp);
+    r
 }
 
 /// `VACUUM INTO destino` por una conexión del pool de lectura, en un hilo de bloqueo. El guard
@@ -173,7 +281,12 @@ pub(crate) async fn guardar_base_de_antes_del_traslado(db: &Db) -> AppResult<Pat
     std::fs::create_dir_all(&dir).map_err(db_err)?;
     let destino = dir.join(format!("{ANTES_DE_TRASLADO_PREFIX}{}{BACKUP_SUFFIX}", now_ms()));
     // Por el pool de lectura, como las copias diarias: `VACUUM INTO` hace su propia instantánea.
-    vacuum_into(db, &destino).await?;
+    let tmp = temporal(&dir, "traslado");
+    if let Err(e) = vacuum_into(db, &tmp).await {
+        discard_prepared(&tmp);
+        return Err(e);
+    }
+    guardar_comprimida(&tmp, &destino).await?;
     Ok(destino)
 }
 
@@ -228,13 +341,22 @@ pub async fn complete_reconciliation(db: &Db) -> AppResult<()> {
     Ok(())
 }
 
+/// El instante de `<ms>.db.gz` o de `<ms>.db` (una copia de antes de comprimirlas).
+fn sello_de(resto: &str) -> Option<i64> {
+    resto
+        .strip_suffix(BACKUP_SUFFIX)
+        .or_else(|| resto.strip_suffix(SUFIJO_SIN_COMPRIMIR))?
+        .parse::<i64>()
+        .ok()
+}
+
 fn parse_backup(path: &Path) -> Option<LocalBackupInfo> {
     let id = path.file_name()?.to_str()?.to_string();
     let (importada, resto) = match id.strip_prefix(BACKUP_PREFIX) {
         Some(r) => (false, r),
         None => (true, id.strip_prefix(IMPORT_PREFIX)?),
     };
-    let stamp = resto.strip_suffix(BACKUP_SUFFIX)?.parse::<i64>().ok()?;
+    let stamp = sello_de(resto)?;
     let size_bytes = std::fs::metadata(path).ok()?.len().min(i64::MAX as u64) as i64;
     Some(LocalBackupInfo {
         id,
@@ -313,20 +435,25 @@ pub async fn create_backup(db: &Db, app_data_dir: &Path) -> AppResult<Option<Loc
     let dir = app_data_dir.join(BACKUP_DIR);
     std::fs::create_dir_all(&dir).map_err(db_err)?;
     let stamp = now_ms();
-    let tmp = dir.join(format!(".backup-{stamp}.tmp"));
+    let tmp = temporal(&dir, "backup");
     let final_path = dir.join(format!("{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}"));
 
     // `VACUUM INTO` abre su propia transacción de LECTURA, así que en WAL produce una
     // instantánea coherente sin excluir al escritor. Va por el pool de lectura a propósito:
     // tomando el `WriteGuard` se bloquearían los cobros durante toda la copia, y este job
     // vence por reloj de pared, así que puede caer en plena cena.
-    vacuum_into(db, &tmp).await?;
-
-    if let Err(e) = validate_backup(&tmp).await {
-        let _ = std::fs::remove_file(&tmp);
+    let r = async {
+        vacuum_into(db, &tmp).await?;
+        // Se valida la base tal cual, antes de comprimirla: comprimir no la cambia, y el gzip
+        // lleva su propio CRC para lo que pueda estropearse después en el disco.
+        validate_backup(&tmp).await
+    }
+    .await;
+    if let Err(e) = r {
+        discard_prepared(&tmp);
         return Err(e);
     }
-    std::fs::rename(&tmp, &final_path).map_err(db_err)?;
+    guardar_comprimida(&tmp, &final_path).await?;
 
     // La retención es la de las copias DIARIAS. Una importada la ha traído alguien a mano tras
     // perder el equipo: que caduque por antigüedad sería tirar justo lo que vino a salvar.
@@ -377,7 +504,7 @@ pub fn archivar_base_ilegible(app_data_dir: &Path) -> AppResult<Option<PathBuf>>
     let dir = app_data_dir.join(BACKUP_DIR);
     std::fs::create_dir_all(&dir).map_err(db_err)?;
     let sello = now_ms();
-    let destino = dir.join(format!("{ILEGIBLE_PREFIX}{sello}{BACKUP_SUFFIX}"));
+    let destino = dir.join(format!("{ILEGIBLE_PREFIX}{sello}{SUFIJO_SIN_COMPRIMIR}"));
     std::fs::rename(&data, &destino).map_err(db_err)?;
 
     // Los sidecars se van con ella: un WAL huérfano de la base anterior no puede quedarse al lado
@@ -400,11 +527,13 @@ pub fn archivar_base_ilegible(app_data_dir: &Path) -> AppResult<Option<PathBuf>>
 /// RI-41: la PII del personal (`DNI`, `IBAN`, `Numero_Seguridad_Social`) no depende de esta copia:
 /// viaja cifrada por el outbox y vuelve con el volcado de la nube, y la DEK con la activación
 /// (TRAB-03). Lo que sólo salva esta copia es lo que nunca llegó a subir.
+///
+/// Sale tal como está guardada: comprimida (un `.db.gz`, que también abre 7-Zip).
 pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path) -> AppResult<()> {
     let source = resolve_backup(app_data_dir, id)?;
     // Validar ANTES de copiar: exportar una copia ilegible es peor que no exportar nada, porque
     // parece un respaldo y no lo es hasta el día que hace falta.
-    validate_backup(&source).await?;
+    validar_guardada(&source).await?;
 
     if let Some(parent) = destino.parent() {
         if !parent.as_os_str().is_empty() {
@@ -422,14 +551,29 @@ pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path) -> App
 /// distinguirlo. La pantalla lo advierte. El daño de equivocarse queda acotado a este equipo —
 /// restaurar no llena el outbox, así que nada de eso se replica— y se deshace recuperando de la
 /// nube.
+///
+/// Acepta una copia comprimida (lo que saca «Guardar fuera…») o una base tal cual: una copia de
+/// antes de comprimirlas, o una `data.db` rescatada a mano de otro equipo. Se guarda comprimida.
 pub async fn import_backup(app_data_dir: &Path, origen: &Path) -> AppResult<LocalBackupInfo> {
     if !origen.is_file() {
         return Err(AppError::not_found("El archivo seleccionado ya no existe"));
     }
-    validate_backup(origen).await?;
 
     let dir = app_data_dir.join(BACKUP_DIR);
     std::fs::create_dir_all(&dir).map_err(db_err)?;
+
+    // Se trae primero a un temporal (descomprimida si venía comprimida) y se valida ahí: es la
+    // base que se va a guardar, y validar en el USB obligaría a descomprimir dos veces.
+    let tmp = temporal(&dir, "import");
+    let r = async {
+        descomprimir(origen, &tmp).await?;
+        validate_backup(&tmp).await
+    }
+    .await;
+    if let Err(e) = r {
+        discard_prepared(&tmp);
+        return Err(e);
+    }
 
     // Si el nombre es el de una copia nuestra se conserva su instante original: la fecha es lo
     // único por lo que se elige una copia, y sellarla con la hora de la importación convertiría
@@ -441,17 +585,11 @@ pub async fn import_backup(app_data_dir: &Path, origen: &Path) -> AppResult<Loca
             n.strip_prefix(BACKUP_PREFIX)
                 .or_else(|| n.strip_prefix(IMPORT_PREFIX))
         })
-        .and_then(|r| r.strip_suffix(BACKUP_SUFFIX))
-        .and_then(|s| s.parse::<i64>().ok())
+        .and_then(sello_de)
         .unwrap_or_else(now_ms);
 
     let final_path = dir.join(format!("{IMPORT_PREFIX}{stamp}{BACKUP_SUFFIX}"));
-    let tmp = dir.join(format!(".import-{}.tmp", now_ms()));
-    copiar_fichero(origen, &tmp).await?;
-    if let Err(e) = std::fs::rename(&tmp, &final_path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(db_err(e));
-    }
+    guardar_comprimida(&tmp, &final_path).await?;
 
     parse_backup(&final_path)
         .ok_or_else(|| AppError::internal("La copia importada no se pudo catalogar"))
@@ -538,10 +676,33 @@ pub async fn asegurar_reemplazo_seguro(db: &Db) -> AppResult<()> {
 /// son la marcha atrás manual si alguien restaura la copia equivocada.
 pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
     const FAMILIAS_A_CONSERVAR: usize = 2;
-    const TMP_ANTIGUEDAD_MS: i64 = 60 * 60 * 1000;
 
     let dir = app_data_dir.join(BACKUP_DIR);
     if dir.exists() {
+        // Los temporales de una copia que no terminó (`.backup-*.tmp`, `.import-*.tmp`…). Por la
+        // fecha del fichero y no por el nombre: uno reciente puede ser el de una copia en curso.
+        for entry in std::fs::read_dir(&dir).map_err(db_err)?.flatten() {
+            let path = entry.path();
+            let Some(nombre) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !(nombre.starts_with('.') && nombre.contains(".tmp")) {
+                continue;
+            }
+            let viejo = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .is_some_and(|edad| edad.as_millis() >= TMP_ANTIGUEDAD_MS as u128);
+            if !viejo {
+                continue;
+            }
+            if let Err(e) = std::fs::remove_file(&path) {
+                tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un temporal de copia");
+            }
+        }
+
         for familia in ["pre-restore-", "failed-restore-", ILEGIBLE_PREFIX, ANTES_DE_TRASLADO_PREFIX] {
             // El nombre lleva el instante justo detrás del prefijo; los sidecars (`-wal`/`-shm`)
             // comparten instante con su `.db` y se van con él, no por separado.
@@ -646,12 +807,13 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf
         ));
     }
     let source = resolve_backup(app_data_dir, id)?;
-    validate_backup(&source).await?;
 
+    // La copia se descomprime directamente en el temporal que se va a instalar, y se valida ahí:
+    // es exactamente la base que acabará siendo `data.db`.
     let prepared = app_data_dir.join(format!("data.restore.{}.tmp", now_ms()));
-    copiar_fichero(&source, &prepared).await?;
-
     let result = async {
+        descomprimir(&source, &prepared).await?;
+        validate_backup(&prepared).await?;
         let prepared_str = prepared
             .to_str()
             .ok_or_else(|| AppError::internal("Ruta temporal de restauración inválida"))?;
@@ -769,6 +931,15 @@ mod tests {
         crate::connection::init_main_db(dir, false).await.unwrap()
     }
 
+    /// La copia `id` descomprimida en un fichero aparte, para abrirla con SQLite.
+    async fn abrible(dir: &Path, id: &str) -> PathBuf {
+        let destino = dir.join(format!("abierta-{id}.db"));
+        descomprimir(&dir.join(BACKUP_DIR).join(id), &destino)
+            .await
+            .unwrap();
+        destino
+    }
+
     /// Tras un traslado de licencia la base es de antes, esté como esté: tenga usuarios o esté a
     /// medio reconciliar, no se trabaja con ella hasta reconstruirla desde la nube.
     #[tokio::test]
@@ -843,7 +1014,7 @@ mod tests {
         }
 
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
-        let path = dir.join(BACKUP_DIR).join(backup.id);
+        let path = abrible(&dir, &backup.id).await;
         validate_backup(&path).await.unwrap();
 
         let database = Builder::new_local(path.to_str().unwrap())
@@ -914,7 +1085,7 @@ mod tests {
         registrar_cuarentena(&db).await;
 
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
-        let origen = dir.join(BACKUP_DIR).join(&backup.id);
+        let origen = abrible(&dir, &backup.id).await;
         let copia_sucia = Db::open(origen.to_str().unwrap()).await.unwrap();
         assert_eq!(
             cuenta(&copia_sucia, "SELECT COUNT(*) FROM _Sync_Failed;").await,
@@ -987,8 +1158,22 @@ mod tests {
         for sello in [1, 2, 3] {
             std::fs::write(dir.join(format!("data.db.bak.{sello}")), b"x").unwrap();
         }
+        // Temporales de una copia: el de una que murió a medias hace horas, y el de una en curso.
+        let huerfano = backups.join(".backup-1-a.tmp");
+        std::fs::write(&huerfano, b"x").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&huerfano)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600))
+            .unwrap();
+        let en_curso = backups.join(".comprimir-2-b.tmp");
+        std::fs::write(&en_curso, b"x").unwrap();
 
         purge_restore_leftovers(&dir).unwrap();
+
+        assert!(!huerfano.exists(), "el temporal de una copia que no terminó no se queda");
+        assert!(en_curso.exists(), "uno reciente puede ser el de una copia en curso");
 
         assert!(backups.join("pre-restore-30.db").exists());
         assert!(backups.join("pre-restore-20.db").exists());
@@ -1179,7 +1364,7 @@ mod tests {
         let db = db_operativa(&dir).await;
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
 
-        let fuera = dir.join("usb").join("copia-del-bar.db");
+        let fuera = dir.join("usb").join("copia-del-bar.db.gz");
         export_backup(&dir, &backup.id, &fuera).await.unwrap();
         assert!(fuera.is_file(), "la carpeta destino se crea si no existía");
 
@@ -1382,6 +1567,99 @@ mod tests {
         let list = list_backups(&dir).unwrap();
         assert_eq!(list.len(), BACKUPS_A_CONSERVAR);
         assert!(list.iter().all(|b| b.created_at_ms != 1));
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    /// RI-41: las copias se guardan comprimidas, y lo que se restaura es la base descomprimida.
+    #[tokio::test]
+    async fn las_copias_se_guardan_comprimidas() {
+        let dir = test_dir("comprimidas");
+        let db = db_operativa(&dir).await;
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+
+        assert!(backup.id.ends_with(BACKUP_SUFFIX));
+        let guardada = dir.join(BACKUP_DIR).join(&backup.id);
+        assert!(es_gzip(&guardada).unwrap());
+        assert_eq!(
+            backup.size_bytes,
+            std::fs::metadata(&guardada).unwrap().len() as i64,
+            "el tamaño que se enseña es el que ocupa en el disco"
+        );
+
+        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        assert!(!es_gzip(&prepared).unwrap(), "lo que se instala es la base, no el gzip");
+        validate_backup(&prepared).await.unwrap();
+        discard_prepared(&prepared);
+
+        // Y no quedan temporales: ni el de `VACUUM INTO`, ni el de comprimir, ni el de validar.
+        let restos = std::fs::read_dir(dir.join(BACKUP_DIR))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with('.'))
+            .count();
+        assert_eq!(restos, 0);
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Una base tal cual (una copia de antes de comprimirlas, o una `data.db` sacada a mano de
+    /// otro equipo) se sigue aceptando: en el almacén y al importarla.
+    #[tokio::test]
+    async fn una_copia_sin_comprimir_se_sigue_aceptando() {
+        let dir = test_dir("sin_comprimir");
+        let db = db_operativa(&dir).await;
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+        let base = abrible(&dir, &backup.id).await;
+
+        // En el almacén, con el nombre de antes.
+        let vieja = dir.join(BACKUP_DIR).join(format!("{BACKUP_PREFIX}1{SUFIJO_SIN_COMPRIMIR}"));
+        std::fs::copy(&base, &vieja).unwrap();
+        let listada = list_backups(&dir)
+            .unwrap()
+            .into_iter()
+            .find(|b| b.created_at_ms == 1)
+            .expect("la copia sin comprimir se lista");
+        let prepared = prepare_restore(&dir, &listada.id).await.unwrap();
+        discard_prepared(&prepared);
+        export_backup(&dir, &listada.id, &dir.join("usb").join("vieja.db"))
+            .await
+            .unwrap();
+
+        // Traída de fuera: se importa y se guarda comprimida.
+        let importada = import_backup(&dir, &base).await.unwrap();
+        assert!(importada.id.ends_with(BACKUP_SUFFIX));
+        assert!(es_gzip(&dir.join(BACKUP_DIR).join(&importada.id)).unwrap());
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Un gzip estropeado en el disco es una copia corrupta, igual que una base que no pasa
+    /// `quick_check`: se rechaza diciendo por qué y sin dejar el temporal a medias.
+    #[tokio::test]
+    async fn un_gzip_estropeado_es_una_copia_corrupta() {
+        let dir = test_dir("gzip_roto");
+        let db = db_operativa(&dir).await;
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+        let guardada = dir.join(BACKUP_DIR).join(&backup.id);
+        let bytes = std::fs::read(&guardada).unwrap();
+        std::fs::write(&guardada, &bytes[..bytes.len() / 2]).unwrap();
+
+        let err = prepare_restore(&dir, &backup.id).await.unwrap_err();
+        assert_eq!(err.code(), ErrorCode::BackupCorrupt);
+        let err = export_backup(&dir, &backup.id, &dir.join("usb").join("rota.db.gz"))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), ErrorCode::BackupCorrupt);
+        assert!(
+            !std::fs::read_dir(&dir)
+                .unwrap()
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().starts_with("data.restore.")),
+            "la restauración que no pudo prepararse no deja su temporal"
+        );
 
         drop(db);
         let _ = std::fs::remove_dir_all(dir);
