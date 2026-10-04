@@ -173,7 +173,7 @@ pub async fn cobrar_detalles(
     // REV-17: quién cobra sale de la sesión. Ver `cobrar_venta_rapida`.
     let sesion = state.sesion().await?;
     let repo = state.mesas_repo().await?;
-    // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
+    // Devuelve el id del pago: con él la pantalla pide su ticket (RI-29).
     Ok(uc::cobrar_detalles(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
 

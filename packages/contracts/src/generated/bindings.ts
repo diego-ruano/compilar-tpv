@@ -799,20 +799,6 @@ export type LineaPedidoDto = { id_linea: string, nombre_producto: string, cantid
 export type LineaPedidoInput = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario?: Dinero, unidad?: string, };
 
 /**
- * Una línea de un ticket ya cobrado, tal y como hace falta para reimprimirlo.
- */
-export type LineaTicketDto = { nombre: string, 
-/**
- * Unidades vendidas en esa línea. La copia tiene que decir "2 x 1,30" igual que el original,
- * no "1 x 2,60": el importe cuadraría, pero no sería el mismo papel.
- */
-cantidad: number, precio_unitario: Dinero, 
-/**
- * Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
- */
-iva_percent?: number, };
-
-/**
  * Copia local disponible. `id` es opaco para la UI y sólo puede proceder del listado.
  */
 export type LocalBackupInfo = { id: string, created_at_ms: number, size_bytes: number, 
@@ -1089,15 +1075,29 @@ export type PrintTicketLine = { nombre: string, cantidad: number, precio_unitari
 iva_percent?: number, };
 
 /**
- * Payload de impresión enviado desde el frontend. Lleva los datos del negocio + los flags de
- * personalización del ticket (mismos que `useBusinessSettings`/`useTicketSettings`) para que el
- * builder ESC/POS produzca exactamente lo que el usuario ve en la previsualización.
+ * Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
+ *
+ * **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
+ * de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+ * facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
+ * **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
+ * con número no puede salir de lo que diga la pantalla.
  */
 export type PrintTicketPayload = { 
 /**
  * Impresora destino; si es `None`, el comando resuelve la seleccionada en `device_config.json`.
  */
-printer_name?: string, business_name: string, direccion: string, telefono: string, cif: string, mensaje_footer: string, iva_percent: number, show_logo: boolean, 
+printer_name?: string, business_name: string, direccion: string, telefono: string, 
+/**
+ * NIF del emisor. En una factura es el del registro (`NIF_Emisor`), no el de los ajustes de
+ * hoy: una reimpresión dice lo que se declaró.
+ */
+cif: string, 
+/**
+ * Razón social del emisor (`Nombre_Razon_Emisor` en una factura). No es el rótulo
+ * (`business_name`) y, a diferencia de él, no se puede ocultar.
+ */
+razon_social: string, mensaje_footer: string, iva_percent: number, show_logo: boolean, 
 /**
  * Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
  * no el builder: aquí dentro no se toca el disco.
@@ -1109,7 +1109,7 @@ logo_path?: string, show_business_name: boolean, show_address: boolean, show_pho
  * guardó al emitir, y una reimpresión tiene que sacar exactamente esa.
  *
  * Vacío o ausente = este papel no lleva QR. Es el caso de la **precuenta**, que no es una
- * factura, y el de un ticket emitido antes de que el negocio completara sus datos fiscales.
+ * factura, y el de un cobro de modo prueba.
  */
 qr_url?: string, 
 /**
@@ -1140,6 +1140,11 @@ font_scale: number,
  */
 numero_ticket?: string, 
 /**
+ * La fecha que se imprime (`DD/MM/AAAA HH:MM`). En una factura es la de expedición, leída
+ * del registro: una copia de mañana dice el día de la venta. `None` = ahora (la precuenta).
+ */
+fecha?: string, 
+/**
  * Cómo se cobró (`Efectivo` | `Tarjeta`). `None` en una precuenta.
  */
 metodo_pago?: string, 
@@ -1156,7 +1161,16 @@ es_copia: boolean,
  * El cobro está anulado (CUENTA-07). Reimprimirlo sigue permitido —es la prueba de qué
  * contenía— pero el papel tiene que decirlo: sin la marca circularía como un cobro válido.
  */
-es_anulado: boolean, items: Array<PrintTicketLine>, };
+es_anulado: boolean, items: Array<PrintTicketLine>, 
+/**
+ * El desglose de IVA de la factura, leído de su `Desglose_Json`. Es el hecho fiscal: el papel
+ * dice lo que se declaró, no un recálculo. `None` = se calcula de las líneas (la precuenta).
+ */
+desglose?: Array<TramoTicket>, 
+/**
+ * El `Importe_Total` de la factura. `None` = la suma de las líneas (la precuenta).
+ */
+total?: Dinero, };
 
 /**
  * Una impresora detectada por el sistema.
@@ -1530,26 +1544,13 @@ export type TareaIdArgs = { id_tarea: string, };
 export type TareaRow = { ID_Tarea: string, Titulo: string, Descripcion: string | null, Fecha_Creacion: string, Fecha_Limite: string | null, };
 
 /**
- * Todo lo que hace falta para volver a sacar un ticket ya cobrado.
- *
- * Se lee del cobro guardado, no se recalcula: el número es el del original y los tipos de IVA son
- * los del día de la venta. Es lo que hace que la copia sea una copia y no un ticket nuevo con los
- * datos de hoy.
+ * Qué ticket de cobro se pide (RI-29): el de un pago, leído entero de la base.
  */
-export type TicketReimpresionDto = { 
+export type TicketDePagoInput = { id_pago: string, 
 /**
- * Número del ticket original. Vacío en cobros anteriores a la numeración.
+ * Reimpresión: el papel sale marcado COPIA, con el mismo número.
  */
-numero_ticket: string, metodo_pago: string, 
-/**
- * `Mesa 5` / `Barra`.
- */
-origen: string, lineas: Array<LineaTicketDto>, 
-/**
- * El cobro está anulado: la copia sale marcada como tal. Reimprimirlo sigue permitido —es la
- * prueba de qué contenía— pero un papel que no lo diga circularía como un cobro válido.
- */
-anulado: boolean, };
+es_copia: boolean, };
 
 export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_footer_message: boolean, paper_width_mm: number, 
 /**
@@ -1608,6 +1609,11 @@ export type TrabajadorUpdateInput = { id_trabajador: string, id_usuario: string,
 export type TrabajadoresStatsArgs = { range: StatsRange, };
 
 export type TrabajadoresStatsResponse = { cocineros: Array<TrabajadorCardStats>, camareros: Array<TrabajadorCardStats>, limpieza: Array<TrabajadorCardStats>, ranking_ventas: ChartSerieDinero, };
+
+/**
+ * Un tramo del desglose de IVA tal como sale en el papel. Gemelo de `tpv_domain::ticket::TramoIva`.
+ */
+export type TramoTicket = { tipo: number, base: Dinero, cuota: Dinero, };
 
 export type TurnoRow = { ID_Turno: string, Nombre_Turno: string, };
 

@@ -36,8 +36,6 @@ export type VrAddLineaComandaResult = {
 
 export type VrCobrarFraccionadoResult = {
     ok: boolean;
-    /** Número de ticket que reservó el cobro; es lo que se imprime a continuación. */
-    numeroTicket?: string | null;
 };
 
 export type VrBootstrapResult = {
@@ -221,12 +219,11 @@ export async function vrCobrarFraccionado(argsInput: {
         detalles: argsInput.detalles.map((v) => v.trim()).filter((s) => s.length > 0),
         destinatario: argsInput.destinatario,
     };
-    const numeroTicket = await invokeClient<string>("vr_cobrar_fraccionado", { args });
+    // Devuelve el número del ticket, pero la pantalla no lo necesita: el ticket se pide por el
+    // pago, cuyo id ya se conoce (RI-29).
+    await invokeClient<string>("vr_cobrar_fraccionado", { args });
 
-    return {
-        ok: true,
-        numeroTicket: numeroTicket || null,
-    };
+    return { ok: true };
 }
 
 export async function vrDeleteComandaIfSafe(

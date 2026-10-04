@@ -16,7 +16,7 @@ use tpv_application::use_cases::rectificacion_caja as rect;
 use tpv_contracts::cierre_caja::{CambioCajaInput, ImpactoCajaDto};
 use tpv_contracts::cuentas::{
     AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, PaginaEntradas,
-    PaginaSalidas, ResumenCajaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
+    PaginaSalidas, ResumenCajaDto, UpdateGastoInput, UpdatePagoInput,
 };
 use crate::{AppState, ADMIN};
 use tpv_contracts::errors::AppErrorDto;
@@ -156,15 +156,3 @@ pub async fn cuentas_anular_pago(
     Ok(rect::anular_pago(cuentas.as_ref(), cierres.as_ref(), &sesion.id_usuario, args).await?)
 }
 
-/// Devuelve un ticket ya cobrado para volver a imprimirlo: mismo número, mismos tipos de IVA y las
-/// mismas líneas que cobró ese pago (no las de la comanda entera, que en un cobro fraccionado
-/// serían otras). Quien imprime lo marca como COPIA.
-#[tauri::command]
-pub async fn cuentas_ticket_para_reimprimir(
-    state: State<'_, AppState>,
-    id_pago: String,
-) -> Result<Option<TicketReimpresionDto>, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
-    let repo = state.cuentas_repo().await?;
-    Ok(uc::ticket_para_reimprimir(repo.as_ref(), &id_pago).await?)
-}

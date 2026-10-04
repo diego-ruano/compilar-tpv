@@ -2,17 +2,29 @@
 
 El ticket se genera **en Rust** (`apps/tpv-main/src-tauri/src/printing.rs`) y se manda en crudo a la
 impresora. La vista previa del frontend (`src/shared/ticket/TicketPaper.tsx`) es un **espejo** de ese
-generador: no imprime, enseña lo que va a salir. Al cambiar el maquetado hay que cambiar los dos; el
-frontend pregunta el ancho a Rust (`printer_ticket_cols`) en vez de calcularlo.
+generador: pinta el mismo `PrintTicketPayload` que se imprime. Al cambiar el maquetado hay que
+cambiar los dos; el frontend pregunta el ancho a Rust (`printer_ticket_cols`) en vez de calcularlo.
+
+Hay dos papeles y salen de sitios distintos (RI-29):
+
+- **El ticket de un cobro lo compone Rust desde la base** (`use_cases::tickets::ticket_de_pago`): las
+  líneas que cobró ese pago (`Pago_Detalles`) y, de su registro de facturación, el número, el NIF y la
+  razón social declarados, la fecha de expedición, el QR, el desglose y el total. La pantalla lo pide
+  para enseñarlo (`printer_ticket_de_pago`) y lo imprime por el id del pago
+  (`printer_imprimir_pago`): el papel no viaja, así que no puede no ser el de su factura.
+- **La precuenta la compone la pantalla** (`payloadDePrecuenta`) con las líneas de la comanda, y
+  `printer_imprimir_precuenta` le quita todo lo fiscal (`como_precuenta`) aunque se lo manden.
 
 | Pieza | Archivo | Rol |
 |---|---|---|
 | Generador | `src-tauri/src/printing.rs` | Ancho, columnas, desglose, QR, logo, corte, cajón, arqueo |
-| Comandos | `src-tauri/src/lib.rs` | `printer_print_ticket`, `printer_print_arqueo`, `printer_ticket_cols`, `printer_open_drawer`, `printer_print_test`, selección de impresora |
-| Desglose de IVA | `crates/tpv-domain/src/ticket.rs` | Papel, vista previa y registro fiscal ([verifactu.md](verifactu.md)) |
+| Comandos | `src-tauri/src/lib.rs` | `printer_ticket_de_pago`, `printer_imprimir_pago`, `printer_imprimir_precuenta`, `printer_print_arqueo`, `printer_ticket_cols`, `printer_open_drawer`, `printer_print_test`, selección de impresora |
+| Ticket de un cobro | `crates/tpv-application/src/use_cases/tickets.rs` + `crates/tpv-infra-sqlite/src/tickets.rs` | El payload desde el pago y su factura |
+| Desglose de IVA y agrupación | `crates/tpv-domain/src/ticket.rs` | Papel, vista previa y registro fiscal ([verifactu.md](verifactu.md)); `agrupar_lineas` es la gemela de `agruparLineas` |
 | Vista previa | `src/shared/ticket/TicketPaper.tsx` + `ticketMath.ts` | Espejo; lo compartido con el papel está en `ticketMath.ts`, sin React |
-| Payload | `src/features/configuracion/api/printerApis.ts` + `crates/tpv-contracts/src/impresion.rs` | `buildTicketPayload` agrupa con `agruparLineas`, la misma función que la vista previa; el tipo es el DTO generado |
-| Reimpresión | `src/app/pages/Cuentas.tsx` | Copia marcada, mismo número |
+| Payload | `crates/tpv-contracts/src/impresion.rs` + `src/features/configuracion/api/printerApis.ts` | El DTO; la pantalla sólo arma la precuenta (`payloadDePrecuenta`) |
+| Modal de impresión | `src/shared/ticket/PrintTicketModal.tsx` | «Ticket del cobro» (sin elegir líneas) o precuenta de todo, de lo pendiente o de una selección |
+| Reimpresión | `src/app/pages/Cuentas.tsx` | El mismo modal con el pago y `es_copia` |
 | Tests | `src-tauri/src/printing/tests.rs` · `test/ticketMath.test.ts` | Goldens duplicados a propósito |
 
 ## Orden del ticket
@@ -40,8 +52,15 @@ logo → corte.**
   tienen que dar el total (0,39 € al 4 % es el primer caso en que redondear por separado falla). La AEAT
   no detecta una `CuotaTotal` descuadrada, así que esta regla y sus goldens son la única red.
 - **El número de ticket es el número de la factura** (`Pagos.Numero_Ticket` = `Num_Serie_Factura`). Una
-  reimpresión reusa número, QR y huella y sale marcada `COPIA`; si el cobro está anulado, también
-  `*** ANULADO ***`.
+  reimpresión reusa número, fecha, QR y desglose y sale marcada `COPIA`; si el cobro está anulado,
+  también `*** ANULADO ***`.
+- **La fecha de un ticket es la de expedición** de su factura, con la hora en que se generó el
+  registro (`fecha_del_papel`). Sólo la precuenta lleva la de ahora, y un cobro de modo prueba, la del
+  pago.
+- **Lo fiscal del papel es lo declarado**: el NIF y la razón social del registro, su `Desglose_Json` y
+  su `Importe_Total`, no un recálculo ni los ajustes de hoy.
+- **El último cobro se olvida al cambiar de comanda**: el modal sólo ofrece el ticket del último
+  cobro de la comanda abierta; el de otro se reimprime desde Cuentas.
 - **La precuenta** no lleva número ni registro ni QR, y dice que no es un ticket de venta.
 - **El cajón se abre con la impresora**: dentro del ticket (`ESC p`) o suelto (`DLE DC4`, que la
   impresora atiende aunque tenga cola). Toda apertura fuera de un cobro se anota en `Aperturas_Cajon`
@@ -62,8 +81,8 @@ logo → corte.**
 ## La vista previa como espejo
 
 Lo que la previa comparte con el papel —agrupación de líneas, desglose de IVA, formato del dinero y
-recorte del nombre— vive en `ticketMath.ts`, y el payload que va a la impresora agrupa con esa misma
-función. Hay tablas de golden en los dos lados (`printing/tests.rs` y `test/ticketMath.test.ts`): si uno
+recorte del nombre— vive en `ticketMath.ts`. La previa pinta el payload tal cual: con desglose y total
+declarados los usa, y sólo en la precuenta los calcula con `ticketMath`. Hay tablas de golden en los dos lados (`printing/tests.rs` y `test/ticketMath.test.ts`): si uno
 cambia de criterio, el otro falla. El formateador del papel no lleva separador de miles (en 32 columnas
 un punto de millar se confunde con el decimal) y es distinto del de pantalla.
 

@@ -180,6 +180,96 @@ pub fn importe_total(tramos: &[TramoIva]) -> Dinero {
     base_total(tramos) + cuota_total(tramos)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Las líneas del papel (RI-29)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Una línea tal como se vendió: la de `Detalle_Comanda`, con sus valores congelados.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LineaVendida {
+    pub nombre: String,
+    /// Unidades. Un producto al peso trae una cantidad fraccionaria (0,35 kg).
+    pub cantidad: f64,
+    pub precio_unitario: Dinero,
+    /// `None` = el tipo general del negocio.
+    pub iva_percent: Option<f64>,
+}
+
+/// Una línea ya agrupada, como se imprime: `3 x 1,10`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LineaAgrupada {
+    pub nombre: String,
+    pub cantidad: u32,
+    pub precio_unitario: Dinero,
+    pub iva_percent: Option<f64>,
+}
+
+/// Junta las unidades idénticas en una línea con su cantidad. Gemelo de `agruparLineas` en
+/// `ticketMath.ts`, que agrupa la precuenta.
+///
+/// El criterio es **nombre + precio + tipo de IVA**: dos unidades del mismo producto vendidas a
+/// precios o tipos distintos son dos líneas, porque juntarlas obligaría a inventarse un precio
+/// unitario que no es ninguno de los dos.
+///
+/// Una cantidad fraccionada (un producto al peso) no cabe en un papel que cuenta unidades enteras,
+/// así que se pliega a una unidad por el importe de la línea, redondeado como lo redondea el SQL
+/// del cobro (`CAST(ROUND(Cantidad * Precio_Unitario))`): se pierde el detalle, no el dinero.
+pub fn agrupar_lineas(lineas: &[LineaVendida]) -> Vec<LineaAgrupada> {
+    let mut out: Vec<LineaAgrupada> = Vec::new();
+    for l in lineas {
+        let entera = l.cantidad.fract() == 0.0 && l.cantidad >= 1.0 && l.cantidad <= u32::MAX as f64;
+        let (unidades, precio) = if entera {
+            (l.cantidad as u32, l.precio_unitario)
+        } else {
+            (1, l.precio_unitario.escala(l.cantidad))
+        };
+        let mismo_iva = |a: Option<f64>, b: Option<f64>| match (a, b) {
+            (Some(x), Some(y)) => (x - y).abs() < 1e-9,
+            (None, None) => true,
+            _ => false,
+        };
+        match out.iter_mut().find(|g| {
+            g.nombre == l.nombre && g.precio_unitario == precio && mismo_iva(g.iva_percent, l.iva_percent)
+        }) {
+            Some(g) => g.cantidad += unidades,
+            None => out.push(LineaAgrupada {
+                nombre: l.nombre.clone(),
+                cantidad: unidades,
+                precio_unitario: precio,
+                iva_percent: l.iva_percent,
+            }),
+        }
+    }
+    out
+}
+
+/// La fecha que lleva el papel de una factura: la de **expedición**, con la hora en que se generó
+/// el registro. `fecha_expedicion` va como en el XML (`DD-MM-AAAA`) y `fecha_hora_huso` como en el
+/// registro (`2027-01-02T13:45:10+01:00`).
+///
+/// Sale del registro y no del reloj: una reimpresión de la semana que viene tiene que decir el día
+/// de la factura, no el de la copia (RI-29).
+pub fn fecha_del_papel(fecha_expedicion: &str, fecha_hora_huso: &str) -> String {
+    let dia = fecha_expedicion.trim().replace('-', "/");
+    match fecha_hora_huso.trim().get(11..16) {
+        Some(hora) if hora.as_bytes().get(2) == Some(&b':') => format!("{dia} {hora}"),
+        _ => dia,
+    }
+}
+
+/// La fecha de un cobro sin registro de facturación (modo prueba): `Pagos.Fecha_Hora`
+/// (`AAAA-MM-DD HH:MM:SS`) como la escribe el papel (`DD/MM/AAAA HH:MM`). Si no tiene esa forma se
+/// devuelve tal cual: una fecha rara en el papel es mejor que ninguna.
+pub fn fecha_de_cobro(fecha_hora: &str) -> String {
+    let f = fecha_hora.trim();
+    match (f.get(0..4), f.get(5..7), f.get(8..10), f.get(11..16)) {
+        (Some(a), Some(m), Some(d), Some(hm)) if f.as_bytes().get(4) == Some(&b'-') => {
+            format!("{d}/{m}/{a} {hm}")
+        }
+        _ => f.to_string(),
+    }
+}
+
 #[cfg(test)]
 // Los nombres de estos tests usan MAYUSCULAS para enfatizar la afirmacion que fijan
 // (`..._NO_gasta_numero`, `..._por_RANGO_...`). Es deliberado y no es snake case.
@@ -318,5 +408,61 @@ mod tests {
         let p = prorratear(&lineas, eur(231.0), 21.0);
         assert_eq!(p[0].total_con_iva, eur(110.0));
         assert_eq!(p[1].total_con_iva, eur(121.0));
+    }
+    fn vendida(nombre: &str, cantidad: f64, precio: f64, iva: Option<f64>) -> LineaVendida {
+        LineaVendida {
+            nombre: nombre.into(),
+            cantidad,
+            precio_unitario: eur(precio),
+            iva_percent: iva,
+        }
+    }
+
+    #[test]
+    fn agrupar_junta_las_unidades_iguales_y_suma_las_cantidades_ya_contadas() {
+        let g = agrupar_lineas(&[
+            vendida("Cafe", 1.0, 1.1, None),
+            vendida("Cafe", 2.0, 1.1, None),
+            vendida("Tostada", 1.0, 2.4, None),
+        ]);
+        assert_eq!(g.len(), 2);
+        assert_eq!((g[0].nombre.as_str(), g[0].cantidad), ("Cafe", 3));
+        assert_eq!(g[1].nombre, "Tostada");
+    }
+
+    #[test]
+    fn agrupar_no_junta_precios_ni_tipos_distintos() {
+        let g = agrupar_lineas(&[
+            vendida("Vino", 1.0, 12.0, Some(10.0)),
+            vendida("Vino", 1.0, 12.0, Some(21.0)),
+            vendida("Vino", 1.0, 13.0, Some(10.0)),
+            vendida("Cafe", 1.0, 1.1, None),
+            vendida("Cafe", 1.0, 1.1, Some(10.0)),
+        ]);
+        assert_eq!(g.len(), 5);
+    }
+
+    #[test]
+    fn agrupar_pliega_lo_vendido_al_peso_a_una_unidad_con_el_importe_redondeado() {
+        // El caso de RI-53: 12,34 € × 0,333 son 410,92 céntimos, y el cobro los guardó como 411.
+        let g = agrupar_lineas(&[vendida("Jamon", 0.333, 12.34, None)]);
+        assert_eq!(g[0].cantidad, 1);
+        assert_eq!(g[0].precio_unitario.centimos(), 411);
+    }
+
+    #[test]
+    fn la_fecha_del_papel_es_la_de_expedicion_con_la_hora_del_registro() {
+        assert_eq!(
+            fecha_del_papel("02-01-2027", "2027-01-02T13:45:10+01:00"),
+            "02/01/2027 13:45"
+        );
+        // Sin hora legible, al menos el día.
+        assert_eq!(fecha_del_papel("02-01-2027", ""), "02/01/2027");
+    }
+
+    #[test]
+    fn la_fecha_de_un_cobro_se_escribe_como_en_el_papel() {
+        assert_eq!(fecha_de_cobro("2027-01-02 13:45:10"), "02/01/2027 13:45");
+        assert_eq!(fecha_de_cobro("raro"), "raro");
     }
 }

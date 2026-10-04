@@ -68,9 +68,8 @@ pub trait MesasRepository: Send + Sync {
     ) -> AppResult<()>;
     async fn delete_detalle(&self, id_detalle: &str) -> AppResult<()>;
     async fn update_detalle_nota(&self, id_detalle: &str, nota: Option<String>) -> AppResult<()>;
-    /// Devuelve el **número de ticket** que ha reservado el cobro. Lo necesita quien imprime: sin
-    /// él, el papel saldría sin número o habría que volver a consultarlo. Y guardarlo con el pago
-    /// es lo que permite que una reimpresión saque el mismo.
+    /// Devuelve el **id del pago**: con él se pide su ticket (`ticket_de_pago`, RI-29), que se
+    /// compone desde la base con el número y la factura que se guardaron con el pago.
     async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<String>;
 
     /* Cocina */

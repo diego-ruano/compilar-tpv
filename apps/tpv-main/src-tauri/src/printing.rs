@@ -284,19 +284,11 @@ fn sep(out: &mut Vec<u8>, cols: usize) {
     text_line(out, &"-".repeat(cols));
 }
 
-/// Construye los bytes ESC/POS del ticket replicando la personalización del front.
-/// Redondea a céntimos. Todo lo que se imprime pasa por aquí antes de compararse con otra cifra:
-/// dos importes que "casi" cuadran en coma flotante cuadran o no cuadran **en el papel**, que es
-/// donde lo mira el cliente.
-/// Reparte el ticket por tipo de IVA: devuelve `(tipo, base, iva)` por cada tipo presente,
-/// ordenado por tipo. Las tres cifras vienen ya redondeadas a céntimos.
+/// Desglose de IVA del papel.
 ///
-/// Los precios son con IVA incluido (es lo que se le enseña al cliente en hostelería), así que la
-/// base se saca dividiendo: `base = total / (1 + tipo/100)`. Se calcula **por línea** y se suma
-/// por tipo, no sobre el total del ticket: con dos tipos distintos, aplicar uno solo al total da
-/// un desglose que no cuadra.
-///
-/// Desglose de IVA del ticket, delegado en `tpv_domain::ticket`.
+/// En una factura es el **declarado** (`p.desglose`, leído de su `Desglose_Json`): el papel dice
+/// lo que se remitió, no un recálculo (RI-29). Sólo la precuenta, que no tiene registro, lo calcula
+/// de las líneas con `tpv_domain::ticket`.
 ///
 /// **La cuenta no vive aquí desde FISCAL-01.** Tiene tres consumidores —este generador, la vista
 /// previa de `TicketPaper.tsx` y el `Desglose` del registro de facturación que se remite a la
@@ -306,6 +298,12 @@ fn sep(out: &mut Vec<u8>, cols: usize) {
 ///
 /// Una línea sin tipo propio usa el general del negocio, que es el caso de casi todo.
 fn desglose_iva(p: &PrintTicketPayload) -> Vec<TramoIva> {
+    if let Some(declarado) = &p.desglose {
+        return declarado
+            .iter()
+            .map(|t| TramoIva { tipo: t.tipo, base: t.base, cuota: t.cuota })
+            .collect();
+    }
     let lineas: Vec<LineaTicket> = p
         .items
         .iter()
@@ -517,6 +515,22 @@ const QR_LEYENDA: &str = "VERI*FACTU";
 /// Aviso del entorno de pruebas. No lo pide la norma: lo pide el sentido común.
 const QR_AVISO_PRUEBAS: &str = "-- ENTORNO DE PRUEBAS --";
 
+/// Lo que la pantalla manda a imprimir es **siempre una precuenta** (RI-29): se le quita todo lo
+/// fiscal. Un papel con número, QR o la marca de copia sólo sale de `ticket_de_pago`, que lo lee
+/// de la base; si la pantalla pudiera ponerlos, podría imprimir una factura que no es la del cobro.
+pub fn como_precuenta(mut p: PrintTicketPayload) -> PrintTicketPayload {
+    p.numero_ticket = None;
+    p.fecha = None;
+    p.metodo_pago = None;
+    p.qr_url = None;
+    p.qr_pruebas = false;
+    p.es_copia = false;
+    p.es_anulado = false;
+    p.desglose = None;
+    p.total = None;
+    p
+}
+
 pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     let cols = effective_cols(p);
     let dpi = if p.paper_dpi == 300 { 300 } else { 203 };
@@ -584,6 +598,13 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
         esc_size(&mut out, base_size);
         esc_bold(&mut out, false);
     }
+    // La razón social es quien factura, y no se puede ocultar (RI-29). Si coincide con el rótulo
+    // que ya se ha impreso, repetirla no añade nada.
+    let razon = p.razon_social.trim();
+    let ya_impresa = p.show_business_name && razon.eq_ignore_ascii_case(p.business_name.trim());
+    if !razon.is_empty() && !ya_impresa {
+        text_wrap(&mut out, razon, cols);
+    }
     if p.show_address && !p.direccion.trim().is_empty() {
         text_wrap(&mut out, &p.direccion, cols);
     }
@@ -603,7 +624,15 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
         Some(n) if !n.trim().is_empty() => n.trim().to_string(),
         _ => "PRECUENTA".to_string(),
     };
-    let fecha = chrono::Local::now().format("%d/%m/%Y %H:%M").to_string();
+    // La fecha de una factura es la de expedición, que viene del registro: una copia de mañana
+    // dice el día de la venta (RI-29). Sólo la precuenta lleva la de ahora.
+    let fecha = p
+        .fecha
+        .as_deref()
+        .map(str::trim)
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| chrono::Local::now().format("%d/%m/%Y %H:%M").to_string());
     text_line(&mut out, &line_two(&fecha, &etiqueta, cols));
 
     // Origen y método: es lo que permite encontrar el cobro después (una devolución, un arqueo).
@@ -652,11 +681,13 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
 
     sep(&mut out, cols);
 
-    let total: Dinero = p
-        .items
-        .iter()
-        .map(|it| it.precio_unitario.por(it.cantidad as i64))
-        .sum();
+    // El total de una factura es su `Importe_Total`; el de la precuenta, la suma de las líneas.
+    let total: Dinero = p.total.unwrap_or_else(|| {
+        p.items
+            .iter()
+            .map(|it| it.precio_unitario.por(it.cantidad as i64))
+            .sum()
+    });
 
     if p.items.is_empty() {
         esc_align(&mut out, 1);

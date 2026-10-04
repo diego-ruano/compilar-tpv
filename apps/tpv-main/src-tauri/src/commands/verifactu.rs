@@ -15,26 +15,6 @@ use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal, RegistroFiscal};
 
 use crate::{AppState, ADMIN};
 
-/// El bloque fiscal de un ticket (número, QR y huella), por su número de factura.
-///
-/// Sirve igual para **imprimir** y para **reimprimir**: una reimpresión saca los mismos tres, y por
-/// eso se leen de la fila en vez de recalcularse — recalcular daría otra hora de generación y, por
-/// tanto, otra huella.
-///
-/// Devuelve `null` si el número está vacío o no tiene registro: es el caso de la **precuenta**, que
-/// no es una factura y por tanto no lleva ni registro ni QR. Que no sea un error es lo que permite
-/// que la precuenta y el ticket compartan el mismo camino de impresión.
-///
-/// Sin exigir rol: lo llama la impresión, que hace cualquiera que pueda cobrar.
-#[tauri::command]
-pub async fn verifactu_bloque_ticket(
-    state: State<'_, AppState>,
-    numero_ticket: String,
-) -> Result<Option<BloqueFiscal>, AppErrorDto> {
-    let repo = state.verifactu_repo().await?;
-    Ok(uc::bloque_por_numero(repo.as_ref(), &numero_ticket).await?)
-}
-
 /// Resumen del estado fiscal para Configuración → Fiscal y para la escalera de avisos.
 ///
 /// Sin exigir rol tampoco: el escalón de aviso lo leen el aviso al iniciar sesión y el aviso tras

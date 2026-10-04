@@ -15,21 +15,6 @@ use tpv_contracts::verifactu::{
     BloqueFiscal, DestinatarioInput, EstadoFiscal, RegistroFiscal,
 };
 
-/// El bloque fiscal de un ticket ya emitido. Sirve igual para imprimir y para reimprimir.
-pub async fn bloque_por_numero(
-    repo: &dyn VerifactuRepository,
-    num_serie_factura: &str,
-) -> AppResult<Option<BloqueFiscal>> {
-    let n = num_serie_factura.trim();
-    if n.is_empty() {
-        // Una precuenta no lleva número, y no llevar número es lo correcto: no es una factura, así
-        // que no tiene registro ni QR. Devolver `None` en vez de un error es lo que permite que la
-        // impresión de la precuenta comparta camino con la del ticket.
-        return Ok(None);
-    }
-    repo.bloque_por_numero(n).await
-}
-
 /// Resumen del estado fiscal: datos del obligado, cola de envío y escalón de aviso.
 pub async fn estado(repo: &dyn VerifactuRepository) -> AppResult<EstadoFiscal> {
     repo.estado().await
@@ -939,9 +924,6 @@ mod tests {
 
         #[async_trait::async_trait]
         impl VerifactuRepository for RepoFalso {
-            async fn bloque_por_numero(&self, _n: &str) -> AppResult<Option<BloqueFiscal>> {
-                Ok(None)
-            }
             async fn estado(&self) -> AppResult<EstadoFiscal> {
                 unreachable!("el ciclo no lee el panel")
             }
@@ -1457,9 +1439,6 @@ mod tests_aviso_de_atraso {
 
     #[async_trait]
     impl VerifactuRepository for RepoEstado {
-        async fn bloque_por_numero(&self, _n: &str) -> AppResult<Option<BloqueFiscal>> {
-            Ok(None)
-        }
         async fn estado(&self) -> AppResult<EstadoFiscal> {
             Ok(self.0.clone())
         }

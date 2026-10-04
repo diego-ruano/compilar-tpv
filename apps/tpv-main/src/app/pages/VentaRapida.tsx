@@ -13,7 +13,7 @@ import AddProductModal from "../../features/ventaRapida/ui/AddProductModal";
 import CatalogGrid from "../../features/ventaRapida/ui/CatalogGrid";
 import CashPanel from "../../features/ventaRapida/ui/CashPanel";
 import TicketPanel from "../../features/ventaRapida/ui/TicketPanel";
-import type { DatosDelTicket } from "../../features/configuracion/api/printerApis";
+import type { CobroImprimible } from "../../shared/ticket/PrintTicketModal";
 import VerTicketsModal from "../../features/ventaRapida/ui/VerTicketsModal";
 
 import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
@@ -281,9 +281,9 @@ export default function VentaRapida() {
   const ticketRef = useRef<TicketItem[]>([]);
 
   const [paso, setPaso] = useState<Paso>("categorias");
-  // Qué papel se imprime. Vacío = PRECUENTA (aún no se ha cobrado); tras el cobro se rellena con
-  // el número que devuelve, y entonces sale un ticket de venta.
-  const [datosTicket, setDatosTicket] = useState<DatosDelTicket | undefined>(undefined);
+  // El último cobro de la venta en curso: su ticket lo compone Rust desde el pago (RI-29). Sin él,
+  // lo único que se imprime es una precuenta.
+  const [ultimoCobro, setUltimoCobro] = useState<CobroImprimible | null>(null);
   const [cashCount, setCashCount] = useState<Record<string, number>>({});
   const [openAddProduct, setOpenAddProduct] = useState(false);
 
@@ -298,6 +298,10 @@ export default function VentaRapida() {
   const [loadingComandas, setLoadingComandas] = useState(false);
 
   const [idComandaActiva, setIdComandaActiva] = useState<string | null>(null);
+  // Otra venta, otro papel: el cobro de la anterior no se ofrece para imprimir en ésta (RI-29).
+  useEffect(() => {
+    setUltimoCobro(null);
+  }, [idComandaActiva]);
   const idComandaActivaRef = useRef<string | null>(null);
   const ensureComandaPromiseRef = useRef<Promise<string> | null>(null);
 
@@ -1028,18 +1032,14 @@ export default function VentaRapida() {
             destinatario: intent.destinatario ?? undefined,
           });
 
-          if (pago?.numeroTicket) {
-            // Datos del ticket recién emitido: con ellos, imprimir saca un ticket de venta
-            // numerado en vez de una precuenta.
-            setDatosTicket({
-              numeroTicket: pago.numeroTicket,
-              metodoPago: metodoDb === "Tarjeta" ? "Tarjeta" : "Efectivo",
-              origen: "Barra",
-            });
-          }
-
           if (!pago?.ok) {
             throw new Error("No se pudo guardar el pago.");
+          }
+
+          // El ticket de este cobro, si la venta sigue siendo la de la pantalla: el número de una
+          // venta no puede acabar en el papel de la siguiente (RI-29).
+          if (intent.idComanda === idComandaActivaRef.current) {
+            setUltimoCobro({ idPago: intent.idPago });
           }
 
           setPendingCobrosLocal((prev) => prev.filter((x) => x.id !== intent.id));
@@ -2084,7 +2084,7 @@ export default function VentaRapida() {
 
         <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface">
           <TicketPanel
-            datosTicket={datosTicket}
+            ultimoCobro={ultimoCobro}
             ticket={ticketForPanel}
             paso={paso}
             totalPendiente={totalPendiente}

@@ -1,12 +1,11 @@
 // src/shared/ticket/TicketPaper.tsx
 //
-// "Papel" del ticket: el render visual del recibo (cabecera, líneas, base/IVA, total, footer)
-// gobernado por la personalización (`useBusinessSettings` + `useTicketSettings`). Es la ÚNICA
-// fuente de verdad del aspecto del ticket en el front: lo usan tanto la previsualización de
-// Configuración (`PreviewModal`) como el modal de impresión (`PrintTicketModal`).
+// "Papel" del ticket: el render visual del recibo, espejo de `build_ticket` en `printing.rs`.
 //
-// Agrupa por `nombre + precio` (mismo criterio que `buildTicketPayload`), de modo que lo que se
-// ve aquí coincide con lo que el backend imprime en ESC/POS.
+// Pinta un `PrintTicketPayload`, el MISMO que recibe el generador ESC/POS (RI-29). El de un cobro
+// lo compone Rust desde la base (`printer_ticket_de_pago`) y el de una precuenta lo compone la
+// pantalla (`payloadDePrecuenta`); este componente no lee los stores ni decide nada: lo que se ve
+// aquí es lo que va a salir.
 //
 // El ANCHO no es decorativo: se mide en columnas de caracteres reales, las mismas que va a tener
 // el papel, y se las pregunta a Rust (`printer_ticket_cols`) en vez de recalcularlas aquí. Dos
@@ -17,68 +16,45 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import { useBusinessSettings } from "../stores/useBusinessSettings";
-import { useTicketSettings } from "../stores/useTicketSettings";
+import type { PrintTicketPayload } from "@tpv/contracts";
 import { resolveImageUrl } from "../lib/imageUrl";
-import { agruparLineas, desgloseIva, eur, recortar as recortarA, totalDe } from "./ticketMath";
+import {
+    desgloseIva,
+    eur,
+    recortar as recortarA,
+    totalDe,
+    type LineaAgrupada,
+} from "./ticketMath";
 import { CERO, por } from "../lib/dinero";
-import type { Dinero } from "@tpv/contracts";
-
-export type TicketPaperItem = {
-    nombre: string;
-    precio: Dinero;
-    /** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
-    ivaPercent?: number | null;
-    /** Unidades de la línea. Ausente = 1. */
-    cantidad?: number;
-};
-
-/**
- * El bloque fiscal del ticket (FISCAL-01). `null` = este papel no lleva QR.
- *
- * La previa lo pinta como un **recuadro con la leyenda**, no como un código real: dibujar aquí un
- * QR de verdad obligaría a meter una librería de QR en el bundle para enseñar algo que el usuario
- * no va a escanear desde la pantalla — y el que importa, el del papel, lo genera Rust desde la URL
- * guardada. Lo que la previa tiene que reflejar fielmente es **dónde va y con qué textos**.
- */
-export type TicketPaperFiscal = {
-    qrUrl?: string | null;
-    entornoPruebas?: boolean;
-};
 
 /** Columnas mientras Rust contesta: el valor por defecto de un papel de 80 mm. */
 const COLS_POR_DEFECTO = 42;
 
-export default function TicketPaper({
-    items,
-    fiscal,
-}: {
-    items: TicketPaperItem[];
-    fiscal?: TicketPaperFiscal | null;
-}) {
-    const {
-        businessName,
-        logoDataUrl,
-        direccion,
-        telefono,
-        cif,
-        mensajeFooter,
-        ivaPercent,
-    } = useBusinessSettings();
+/** MODO-PRUEBA (temporal): gemelo de `es_numero_de_prueba` en `tpv_domain::verifactu`. */
+const esNumeroDePrueba = (n: string) => n.trim().startsWith("PRUEBA/");
 
-    const { settings } = useTicketSettings();
+const Separador = ({ solido }: { solido?: boolean }) => (
+    <div style={{ borderTop: `1px ${solido ? "solid" : "dashed"} #000`, margin: "10px 0" }} />
+);
 
-    // Columnas reales del papel con la configuración actual (ancho + márgenes). Se re-pregunta
+const Centrado = ({ children, negrita }: { children: React.ReactNode; negrita?: boolean }) => (
+    <div style={{ textAlign: "center", fontWeight: negrita ? 700 : undefined }}>{children}</div>
+);
+
+export default function TicketPaper({ payload }: { payload: PrintTicketPayload }) {
+    const p = payload;
+
+    // Columnas reales del papel con la configuración del payload (ancho + márgenes). Se re-pregunta
     // cuando cambia algo de la geometría, no en cada repintado.
     const [cols, setCols] = useState<number>(COLS_POR_DEFECTO);
     useEffect(() => {
         let vivo = true;
         invoke<number>("printer_ticket_cols", {
             args: {
-                paper_width_mm: settings.paperWidthMm,
-                chars_per_line: settings.charsPerLine,
-                margin_left_mm: settings.marginLeftMm,
-                margin_right_mm: settings.marginRightMm,
+                paper_width_mm: p.paper_width_mm,
+                chars_per_line: p.chars_per_line,
+                margin_left_mm: p.margin_left_mm,
+                margin_right_mm: p.margin_right_mm,
             },
         })
             .then((n) => vivo && setCols(Number(n) || COLS_POR_DEFECTO))
@@ -86,142 +62,153 @@ export default function TicketPaper({
         return () => {
             vivo = false;
         };
-    }, [
-        settings.paperWidthMm,
-        settings.charsPerLine,
-        settings.marginLeftMm,
-        settings.marginRightMm,
-    ]);
+    }, [p.paper_width_mm, p.chars_per_line, p.margin_left_mm, p.margin_right_mm]);
 
     /** Recorta como el papel: el nombre cede el espacio que ocupa su importe. */
     const recortar = (texto: string, importe: string) => recortarA(texto, importe, cols);
 
-    // Las cuentas viven en `ticketMath` (sin React) para poder probarlas contra los mismos
-    // números que saca Rust: la vista previa no vale de nada si no coincide con el papel.
-    const grouped = useMemo(() => agruparLineas(items), [items]);
-    const total = useMemo(() => totalDe(grouped), [grouped]);
-    const tramosIva = useMemo(() => desgloseIva(grouped, ivaPercent), [grouped, ivaPercent]);
+    // Las líneas ya llegan agrupadas. El desglose y el total de una factura vienen declarados; los
+    // de la precuenta se calculan con `ticketMath`, la misma cuenta que `tpv_domain::ticket`.
+    const lineas: LineaAgrupada[] = useMemo(
+        () =>
+            p.items.map((l) => ({
+                nombre: l.nombre,
+                precio: l.precio_unitario,
+                qty: l.cantidad,
+                ivaPercent: l.iva_percent ?? null,
+            })),
+        [p.items],
+    );
+    const total = p.total ?? totalDe(lineas);
+    const tramos = useMemo(
+        () =>
+            p.desglose?.map((t) => ({ tipo: t.tipo, base: t.base, iva: t.cuota })) ??
+            desgloseIva(lineas, p.iva_percent),
+        [p.desglose, lineas, p.iva_percent],
+    );
 
-    const fechaStr = useMemo(() => new Date().toLocaleString("es-ES"), []);
+    const ahora = useMemo(() => new Date().toLocaleString("es-ES").slice(0, 17), []);
+    const fecha = p.fecha?.trim() || ahora;
 
-    const empty = grouped.length === 0;
+    const numero = p.numero_ticket?.trim() ?? "";
+    const origen = p.origen?.trim() ?? "";
+    const metodo = p.metodo_pago?.trim() ?? "";
+    const razon = p.razon_social.trim();
+    const razonYaImpresa =
+        p.show_business_name && razon.toLowerCase() === p.business_name.trim().toLowerCase();
 
     // El logo puede ser una ruta relativa (canal R2) o un data URL heredado; se resuelve a una URL
     // usable para el <img>. Ver `imageUrl.resolveImageUrl` (maneja ambos casos y el modo Handy).
     const [logoSrc, setLogoSrc] = useState<string>("");
     useEffect(() => {
         let alive = true;
-        resolveImageUrl(logoDataUrl)
+        resolveImageUrl(p.logo_path)
             .then((u) => alive && setLogoSrc(u))
             .catch(() => alive && setLogoSrc(""));
         return () => {
             alive = false;
         };
-    }, [logoDataUrl]);
+    }, [p.logo_path]);
 
-    const showFooterLogo = settings.showLogo && !!logoDataUrl && !!logoSrc;
-    const showHeaderName = settings.showBusinessName;
-    const showAddress = settings.showAddress && !!direccion;
-    const showPhone = settings.showPhone && !!telefono;
-    const showCif = !!cif;
-    const showFooter = settings.showFooterMessage;
+    const fila = (izq: React.ReactNode, der: React.ReactNode, estilo?: React.CSSProperties) => (
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, ...estilo }}>
+            <span style={{ whiteSpace: "nowrap" }}>{izq}</span>
+            <span>{der}</span>
+        </div>
+    );
 
     return (
         <div className="bg-white text-black rounded-xl border border-black/10 shadow-sm overflow-hidden inline-block">
             {/* `ch` = ancho de un carácter en esta fuente monoespaciada: el papel mide exactamente
                 las columnas que tendrá el de verdad. */}
             <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14, width: `${cols}ch` }}>
-                {/* El QR tributario abre la factura (FISCAL-01, art. 21 de la Orden): «se situará
-                    al principio de la factura, antes de que empiece el contenido de ésta generado
-                    por el sistema informático de facturación», precedido siempre por «QR
-                    tributario:» y seguido de la leyenda «VERI*FACTU».
+                {/* El QR tributario abre la factura (FISCAL-01, art. 21 de la Orden), precedido de
+                    «QR tributario:» y seguido de «VERI*FACTU». Sin URL no se pinta nada: es el caso
+                    de la precuenta, que no es una factura.
 
-                    Esto DEROGA la regla que ponía los datos del negocio los primeros. Sigue
-                    cumpliéndose la razón que la motivaba —que lo primero que se lea sea de quién es
-                    el ticket y cuánto se ha pagado—: el QR no compite por la atención, es una
-                    etiqueta.
-
-                    Espejo de `build_ticket` en `printing.rs`. Sin URL no se pinta nada: ni el hueco
-                    ni la leyenda. Es el caso de la precuenta, que no es una factura. */}
-                {fiscal?.qrUrl ? (
+                    La previa lo pinta como un recuadro con la leyenda, no como un código real: lo
+                    que tiene que reflejar es dónde va y con qué textos; el código del papel lo
+                    genera Rust desde la URL guardada. */}
+                {p.qr_url ? (
                     <>
-                        <div style={{ textAlign: "center" }}>
-                            <div>QR tributario:</div>
-                            <div
-                                aria-label="Código QR tributario"
-                                title={fiscal.qrUrl}
-                                style={{
-                                    // 30-40 mm en el papel; aquí un cuadrado equivalente en la
-                                    // previa. Se dibuja como marco y no como código real: lo que
-                                    // hay que reflejar es la colocación, no el patrón de módulos.
-                                    width: "16ch",
-                                    height: "16ch",
-                                    margin: "6px auto",
-                                    border: "2px solid #000",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    fontSize: 10,
-                                    opacity: 0.75,
-                                    padding: 4,
-                                    textAlign: "center",
-                                    overflow: "hidden",
-                                }}
-                            >
-                                QR
-                            </div>
-                            <div style={{ fontWeight: 700 }}>VERI*FACTU</div>
-                            {fiscal.entornoPruebas ? (
-                                <div style={{ fontWeight: 700 }}>-- ENTORNO DE PRUEBAS --</div>
-                            ) : null}
+                        <Centrado>QR tributario:</Centrado>
+                        <div
+                            aria-label="Código QR tributario"
+                            title={p.qr_url}
+                            style={{
+                                width: "16ch",
+                                height: "16ch",
+                                margin: "6px auto",
+                                border: "2px solid #000",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontSize: 10,
+                                opacity: 0.75,
+                            }}
+                        >
+                            QR
                         </div>
-                        <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
+                        <Centrado negrita>VERI*FACTU</Centrado>
+                        {p.qr_pruebas ? <Centrado negrita>-- ENTORNO DE PRUEBAS --</Centrado> : null}
+                        <Separador />
                     </>
                 ) : null}
 
-                {/* Cabecera: sólo los datos del negocio, a la izquierda. El logo cierra el
-                    ticket, abajo del todo (ver el final de este componente y de `build_ticket`). */}
+                {/* Cabecera: los datos del negocio, a la izquierda. El logo cierra el ticket. */}
                 <div style={{ textAlign: "left" }}>
-                    {showHeaderName ? (
+                    {p.show_business_name ? (
                         <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: 0.2 }}>
-                            {businessName || "TPV"}
+                            {p.business_name.trim() || "TPV"}
                         </div>
                     ) : null}
-
-                    {showAddress ? <div style={{ marginTop: 2 }}>{direccion}</div> : null}
-                    {showPhone ? <div>Tel: {telefono}</div> : null}
-                    {showCif ? <div>CIF: {cif}</div> : null}
+                    {razon && !razonYaImpresa ? <div>{razon}</div> : null}
+                    {p.show_address && p.direccion.trim() ? (
+                        <div style={{ marginTop: 2 }}>{p.direccion}</div>
+                    ) : null}
+                    {p.show_phone && p.telefono.trim() ? <div>Tel: {p.telefono}</div> : null}
+                    {p.cif.trim() ? <div>CIF: {p.cif}</div> : null}
                 </div>
 
-                <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
+                <Separador />
 
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span>{fechaStr}</span>
-                    <span>VENTA</span>
-                </div>
-                <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
+                {fila(fecha, numero || "PRECUENTA")}
+                {origen ? <div>{origen}</div> : null}
+                {metodo ? fila("Pago", metodo) : null}
 
-                {empty ? (
+                {!numero ? (
+                    <Centrado>NO ES UN TICKET DE VENTA</Centrado>
+                ) : (
+                    <>
+                        {p.es_anulado ? <Centrado negrita>*** ANULADO ***</Centrado> : null}
+                        {p.es_copia ? <Centrado negrita>COPIA</Centrado> : null}
+                        {esNumeroDePrueba(numero) ? (
+                            <>
+                                <Centrado negrita>*** MODO PRUEBA ***</Centrado>
+                                <Centrado negrita>SIN VALOR FISCAL</Centrado>
+                            </>
+                        ) : null}
+                    </>
+                )}
+
+                <Separador />
+
+                {lineas.length === 0 ? (
                     <div style={{ textAlign: "center", opacity: 0.65, padding: "10px 0" }}>
                         No hay productos en el ticket.
                     </div>
                 ) : (
                     <div>
-                        {grouped.map((g, idx) => {
+                        {lineas.map((g, idx) => {
                             const lineTotal = por(g.precio, g.qty);
                             return (
                                 <div key={idx} style={{ marginBottom: 8 }}>
-                                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                                        <span style={{ whiteSpace: "nowrap" }}>
-                                            {recortar(g.nombre, eur(lineTotal))}
-                                        </span>
-                                        <span style={{ fontWeight: 700 }}>{eur(lineTotal)}</span>
-                                    </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between", opacity: 0.8 }}>
-                                        <span>
-                                            {g.qty} x {eur(g.precio)}
-                                        </span>
-                                        <span />
+                                    {fila(
+                                        recortar(g.nombre, eur(lineTotal)),
+                                        <strong>{eur(lineTotal)}</strong>,
+                                    )}
+                                    <div style={{ opacity: 0.8 }}>
+                                        {g.qty} x {eur(g.precio)}
                                     </div>
                                 </div>
                             );
@@ -229,60 +216,40 @@ export default function TicketPaper({
                     </div>
                 )}
 
-                <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
+                <Separador />
 
-                <>
-                        {tramosIva.length <= 1 ? (
-                            // Un solo tipo (el caso normal): como toda la vida, sin convertir el
-                            // ticket en una tabla por algo que no aporta nada.
-                            <>
-                                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                    <span>BASE</span>
-                                    <span>{eur(tramosIva[0]?.base ?? 0)}</span>
-                                </div>
-                                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                    <span>
-                                        IVA ({tramosIva[0]?.tipo ?? ivaPercent}%)
-                                    </span>
-                                    <span>{eur(tramosIva[0]?.iva ?? CERO)}</span>
-                                </div>
-                            </>
-                        ) : (
-                            // Varios tramos: cada uno con su base y su IVA.
-                            tramosIva.map((t) => (
-                                <React.Fragment key={t.tipo}>
-                                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                        <span>BASE ({t.tipo}%)</span>
-                                        <span>{eur(t.base)}</span>
-                                    </div>
-                                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                        <span>IVA ({t.tipo}%)</span>
-                                        <span>{eur(t.iva)}</span>
-                                    </div>
-                                </React.Fragment>
-                            ))
-                        )}
-                </>
-
-                <div style={{ borderTop: "1px solid #000", margin: "10px 0" }} />
-                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 900, fontSize: 14 }}>
-                    <span>TOTAL</span>
-                    <span>{eur(total)}</span>
-                </div>
-
-                {showFooter ? (
+                {tramos.length <= 1 ? (
+                    // Un solo tipo (el caso normal): como toda la vida, sin convertir el ticket en
+                    // una tabla por algo que no aporta nada.
                     <>
-                        <div style={{ borderTop: "1px dashed #000", margin: "12px 0" }} />
+                        {fila("BASE", eur(tramos[0]?.base ?? CERO))}
+                        {fila(`IVA (${tramos[0]?.tipo ?? p.iva_percent}%)`, eur(tramos[0]?.iva ?? CERO))}
+                    </>
+                ) : (
+                    // Varios tramos: cada uno con su base y su IVA.
+                    tramos.map((t) => (
+                        <React.Fragment key={t.tipo}>
+                            {fila(`BASE (${t.tipo}%)`, eur(t.base))}
+                            {fila(`IVA (${t.tipo}%)`, eur(t.iva))}
+                        </React.Fragment>
+                    ))
+                )}
+
+                <Separador solido />
+                {fila("TOTAL", eur(total), { fontWeight: 900, fontSize: 14 })}
+
+                {p.show_footer_message ? (
+                    <>
+                        <Separador />
                         <div style={{ textAlign: "center", fontSize: 11, opacity: 0.9 }}>
-                            {mensajeFooter || "¡Gracias por su visita!"}
+                            {p.mensaje_footer.trim() || "¡Gracias por su visita!"}
                         </div>
                     </>
                 ) : null}
 
-                {showFooterLogo ? (
+                {p.show_logo && logoSrc ? (
                     // El logo impreso ocupa el ancho del cabezal menos los márgenes (ver
-                    // `ancho_logo_dots` en printing.rs), no una fracción del bloque de texto:
-                    // enseñarlo al 70 % hacía creer que sale más pequeño de lo que sale.
+                    // `ancho_logo_dots` en printing.rs), no una fracción del bloque de texto.
                     <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
                         <img
                             src={logoSrc}

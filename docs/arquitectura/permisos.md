@@ -64,7 +64,7 @@ encargado.
 
 | Área | Comandos |
 |---|---|
-| Cuentas, lecturas incluidas | `cuentas_get_entradas`, `cuentas_get_salidas`, `cuentas_get_resumen`, `cuentas_previsualizar_cambio`, `cuentas_create_gasto`, `cuentas_update_gasto`, `cuentas_delete_gasto`, `cuentas_update_pago`, `cuentas_anular_pago`, `cuentas_ticket_para_reimprimir` |
+| Cuentas, lecturas incluidas | `cuentas_get_entradas`, `cuentas_get_salidas`, `cuentas_get_resumen`, `cuentas_previsualizar_cambio`, `cuentas_create_gasto`, `cuentas_update_gasto`, `cuentas_delete_gasto`, `cuentas_update_pago`, `cuentas_anular_pago` |
 | Cierre de caja | `cierre_preparar`, `cierre_confirmar`, `cierre_listar`, `cierre_detalle`, `cierre_reabrir` |
 | Veri\*factu | `verifactu_listar`, `verifactu_certificados`, `verifactu_set_certificado`, `verifactu_probar_conexion`, `verifactu_emitir_factura_de_ticket`, `verifactu_subsanar_rechazados`, `verifactu_reconocer_anomalias`, `verifactu_exportar`, `verifactu_set_modo_prueba` |
 | Personal | `trabajadores_create`, `trabajadores_update`, `trabajadores_get_detail` (la única lectura de personal gateada: devuelve la PII) |
@@ -75,8 +75,8 @@ encargado.
 | Dispositivos | `pair_create`, y `tpv_server_post_json` para `/v1/pair/…`, `/v1/device/…` y `/v1/login/correo-recuperacion/…` |
 | Modo | `device_reset_mode` (gate blando) |
 
-`verifactu_estado`, `verifactu_bloque_ticket` y `verifactu_declaracion_responsable` no piden rol: los
-leen la escalera de avisos, la impresión y cualquiera que quiera ver la declaración.
+`verifactu_estado` y `verifactu_declaracion_responsable` no piden rol: los leen la escalera de avisos
+y cualquiera que quiera ver la declaración.
 
 **Siempre queda un administrador activo.** Editar una ficha no puede quitarle el rol ni desactivar
 al último (RI-62): sin ninguno, todo lo de esta tabla queda cerrado y no hay salida desde la
@@ -91,6 +91,9 @@ dentro de la transacción de `update_trabajador`. El worker lo comprueba antes d
   cobra queda registrado como él mismo. `VrCobrarFraccionadoInput` y
   `MesasCobrarDetallesInput` no llevan cobrador. Lo vigila
   `todo_comando_que_cobra_saca_el_cobrador_de_la_sesion`.
+- **El ticket de un cobro**: `printer_ticket_de_pago` y `printer_imprimir_pago`. Lo imprime quien
+  acaba de cobrar, a mitad de servicio; la reimpresión de un cobro antiguo está detrás del candado de
+  Cuentas.
 - **Abrir el cajón**: `printer_open_drawer`. Se anota en `Aperturas_Cajon` con quien tenga la sesión.
 - **Estadísticas y clientes**: todos los `stats_*` y `clientes_*`. Las estadísticas dicen cuánto se
   factura y cuánto vende cada trabajador, y los clientes son datos personales. Toda pantalla de la app

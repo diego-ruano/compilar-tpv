@@ -4,33 +4,21 @@
 // `printer_*` del backend (ver `apps/tpv-main/src-tauri/src/printing.rs` + `main.rs`):
 //   - listar impresoras del sistema (locales + red/WiFi)
 //   - leer/guardar la impresora seleccionada (preferencia LOCAL del dispositivo)
-//   - imprimir un ticket real (ESC/POS) respetando la personalización del front
+//   - el ticket de un cobro (RI-29): lo compone Rust desde la base; aquí sólo se pide y se imprime
+//   - la precuenta: la compone la pantalla y Rust le quita todo lo fiscal
 //   - imprimir un ticket de prueba
 //
 // La impresora seleccionada NO va en la BD (no se sincroniza): está físicamente conectada a
 // esta máquina, así que se persiste en `device_config.json` por el backend.
 
 import { invokeClient } from "@tpv/client";
-import type { PrinterInfo, PrintTicketPayload } from "@tpv/contracts";
+import type { PrinterInfo, PrintTicketPayload, TicketDePagoInput } from "@tpv/contracts";
 
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../../shared/stores/useTicketSettings";
 import { agruparLineas, type LineaEntrada } from "../../../shared/ticket/ticketMath";
 
 export type { PrinterInfo };
-
-/** Lo que distingue un ticket de venta de una precuenta, de una copia o de un cobro anulado. */
-export type DatosDelTicket = {
-    numeroTicket?: string | null;
-    metodoPago?: string | null;
-    origen?: string | null;
-    esCopia?: boolean;
-    esAnulado?: boolean;
-    /** FISCAL-01: la URL del QR tributario, leída del registro (ver `PrintTicketPayload.qr_url`). */
-    qrUrl?: string | null;
-    /** El registro se emitió en el entorno de pruebas. */
-    qrPruebas?: boolean;
-};
 
 /* ── API ── */
 
@@ -83,26 +71,40 @@ export async function printerPrintTest(name?: string): Promise<void> {
     });
 }
 
-export async function printerPrintTicket(payload: PrintTicketPayload): Promise<void> {
-    await invokeClient<string>("printer_print_ticket", { payload });
+/**
+ * El ticket de un cobro, tal como va a salir: lo compone Rust desde el pago y su factura (RI-29).
+ * La pantalla lo pide para enseñarlo, nunca lo arma.
+ */
+export async function printerTicketDePago(
+    idPago: string,
+    esCopia = false,
+): Promise<PrintTicketPayload> {
+    const args: TicketDePagoInput = { id_pago: idPago, es_copia: esCopia };
+    return await invokeClient<PrintTicketPayload>("printer_ticket_de_pago", { args });
 }
 
-/* ── Helper: construir el payload desde los stores de configuración ── */
+/** Imprime el ticket de un cobro. Rust lo vuelve a componer: no viaja el papel, sólo el pago. */
+export async function printerImprimirPago(idPago: string, esCopia = false): Promise<void> {
+    const args: TicketDePagoInput = { id_pago: idPago, es_copia: esCopia };
+    await invokeClient<string>("printer_imprimir_pago", { args });
+}
+
+/** Imprime una precuenta. Aunque el payload trajera un número o un QR, Rust se los quita. */
+export async function printerImprimirPrecuenta(payload: PrintTicketPayload): Promise<void> {
+    await invokeClient<string>("printer_imprimir_precuenta", { payload });
+}
+
+/* ── La precuenta: se compone con los ajustes de la pantalla ── */
 
 /**
- * Construye el `PrintTicketPayload` a partir de los items (cada unidad por separado) y de la
- * personalización actual (business + ticket settings de los stores Zustand).
+ * La precuenta de unas líneas (cada unidad por separado), con la personalización actual de los
+ * stores. Es lo único que compone la pantalla: sin número, sin QR y sin copia, porque una
+ * precuenta no es una factura. La vista previa de Configuración la usa también, para que lo que se
+ * ve al tocar una casilla cambie al momento.
  *
- * Las líneas las agrupa `agruparLineas`, **la misma función que pinta la vista previa**. Había aquí
- * una segunda copia y se habían separado: la previa redondeaba al céntimo el importe de un producto
- * al peso y ésta no, así que 12,34 € × 0,333 viajaba como 410,92 céntimos, Rust no podía leerlo
- * como `Dinero` y el ticket no salía (RI-53).
+ * Las líneas las agrupa `agruparLineas`, gemela de `agrupar_lineas` en Rust (RI-53).
  */
-export function buildTicketPayload(
-    items: LineaEntrada[],
-    printerName?: string,
-    datos?: DatosDelTicket,
-): PrintTicketPayload {
+export function payloadDePrecuenta(items: LineaEntrada[], printerName?: string): PrintTicketPayload {
     const biz = useBusinessSettings.getState();
     const t = useTicketSettings.getState().settings;
 
@@ -113,6 +115,7 @@ export function buildTicketPayload(
         direccion: biz.direccion,
         telefono: biz.telefono,
         cif: biz.cif,
+        razon_social: biz.razonSocial,
         mensaje_footer: biz.mensajeFooter,
         iva_percent: biz.ivaPercent,
 
@@ -133,14 +136,9 @@ export function buildTicketPayload(
         margin_right_mm: t.marginRightMm,
         font_scale: t.fontScale,
 
-        numero_ticket: datos?.numeroTicket ?? undefined,
-        metodo_pago: datos?.metodoPago ?? undefined,
-        origen: datos?.origen ?? undefined,
-        es_copia: datos?.esCopia ?? false,
-        es_anulado: datos?.esAnulado ?? false,
-
-        qr_url: datos?.qrUrl ?? undefined,
-        qr_pruebas: datos?.qrPruebas ?? false,
+        qr_pruebas: false,
+        es_copia: false,
+        es_anulado: false,
 
         items: agruparLineas(items).map((g) => ({
             nombre: g.nombre,

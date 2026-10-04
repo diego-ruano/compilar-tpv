@@ -247,7 +247,7 @@ pub async fn cobrar_detalles(
     ids.dedup();
 
     if input.id_comanda.trim().is_empty() || ids.is_empty() {
-        // No hay nada que cobrar: tampoco hay ticket, así que no hay número que devolver.
+        // No hay nada que cobrar: tampoco hay pago que devolver.
         return Ok(String::new());
     }
 

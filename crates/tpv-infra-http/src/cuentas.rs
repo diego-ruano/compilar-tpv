@@ -8,7 +8,7 @@ use serde_json::{json, Value as JsonValue};
 use tpv_application::error::AppResult;
 use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository};
 use tpv_contracts::cuentas::{
-    PaginaEntradas, PaginaSalidas, ResumenCajaDto, TicketReimpresionDto,
+    PaginaEntradas, PaginaSalidas, ResumenCajaDto,
 };
 use tpv_domain::cuentas::{GastoData, PagoData};
 
@@ -143,15 +143,6 @@ impl CuentasRepository for HttpCuentasRepository {
     /// El cajón cuelga de la impresora de la Main: una Handy no tiene ninguno que abrir.
     async fn registrar_apertura_cajon(&self, _id_usuario: Option<String>) -> AppResult<()> {
         Ok(())
-    }
-
-    /// Reimprimir es cosa de la Main: es la que tiene la impresora, y solo ella cobra. No hay
-    /// endpoint en el worker para esto.
-    async fn ticket_para_reimprimir(
-        &self,
-        _id_pago: &str,
-    ) -> AppResult<Option<TicketReimpresionDto>> {
-        Ok(None)
     }
 
     /// No hay endpoint para esto, y devuelve `ACTIVO` **a propósito**.

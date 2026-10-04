@@ -1928,14 +1928,15 @@ impl MesasRepository for SqliteMesasRepository {
                     .await
                     .map_err(db_err)?;
             }
-            Ok(numero_ticket)
+            // RI-29: la pantalla pide el ticket por el pago, no por el número.
+            Ok(id_pago)
         }
         .await;
 
         match res {
-            Ok(numero) => {
+            Ok(id_pago) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(numero)
+                Ok(id_pago)
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;

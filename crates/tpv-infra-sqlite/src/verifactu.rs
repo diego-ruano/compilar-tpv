@@ -1321,6 +1321,19 @@ fn desglose_mismo_signo(desglose_json: Option<&str>) -> Vec<LineaTicket> {
 /// Existe porque la rectificativa y la sustitutiva necesitan lo mismo con el signo contrario, y dos
 /// copias de este parseo se separarían en cuanto alguien añadiera un campo al desglose.
 fn tramos_del_desglose(desglose_json: Option<&str>, signo: i64) -> Vec<LineaTicket> {
+    tramos_declarados(desglose_json)
+        .into_iter()
+        .map(|t| LineaTicket {
+            // `LineaTicket` trabaja con el total CON IVA, que es base + cuota.
+            total_con_iva: (t.base + t.cuota).por(signo),
+            tipo_iva: t.tipo,
+        })
+        .collect()
+}
+
+/// Los tramos de `Desglose_Json` tal como se declararon: el papel de una factura los imprime de
+/// aquí, no de un recálculo (RI-29).
+pub(crate) fn tramos_declarados(desglose_json: Option<&str>) -> Vec<TramoIva> {
     let Some(arr) = desglose_json
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
         .and_then(|v| v.as_array().cloned())
@@ -1346,11 +1359,7 @@ fn tramos_del_desglose(desglose_json: Option<&str>, signo: i64) -> Vec<LineaTick
                 .and_then(|v| v.as_str())
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
-            Some(LineaTicket {
-                // `LineaTicket` trabaja con el total CON IVA, que es base + cuota.
-                total_con_iva: (base + cuota).por(signo),
-                tipo_iva: tipo,
-            })
+            Some(TramoIva { tipo, base, cuota })
         })
         .collect()
 }
@@ -3301,44 +3310,8 @@ impl SqliteVerifactuRepository {
     }
 }
 
-/// El bloque fiscal de un número de ticket (reimpresión). Un ticket antiguo tiene que encontrarse
-/// por `idx_regfact_numserie`, no recorriendo los registros hacia atrás: lo vigila
-/// `planes::tests` (RI-03).
-pub(crate) const SQL_BLOQUE_POR_NUMERO: &str =
-    "SELECT r.Num_Serie_Factura, r.Fecha_Expedicion, r.QR_Url, r.Huella, \
-            COALESCE(r.Tipo_Factura, ''), \
-            (SELECT Verifactu_Entorno FROM Business_Settings WHERE ID = 1) \
-     FROM Registros_Facturacion r \
-     WHERE r.Num_Serie_Factura = ?1 AND r.Tipo = 'ALTA' \
-     ORDER BY r.Orden DESC LIMIT 1;";
-
 #[async_trait]
 impl VerifactuRepository for SqliteVerifactuRepository {
-    async fn bloque_por_numero(&self, num_serie_factura: &str) -> AppResult<Option<BloqueFiscal>> {
-        let g = self.db.read().await;
-        let mut rows = g
-            .query(
-                SQL_BLOQUE_POR_NUMERO,
-                vec![Value::Text(num_serie_factura.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-        let Some(row) = rows.next().await.map_err(db_err)? else {
-            return Ok(None);
-        };
-        Ok(Some(BloqueFiscal {
-            num_serie_factura: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
-            fecha_expedicion: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
-            qr_url: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
-            huella: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
-            tipo_factura: v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default(),
-            entorno_pruebas: vf::Entorno::desde_texto(
-                &v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default(),
-            )
-            .es_pruebas(),
-        }))
-    }
-
     async fn estado(&self) -> AppResult<EstadoFiscal> {
         let g = self.db.read().await;
         estado_fiscal(&g).await

@@ -89,10 +89,10 @@ mod tests {
 
     #[tokio::test]
     async fn reimprimir_un_ticket_antiguo_no_recorre_los_registros_fiscales() {
-        let p = plan(crate::verifactu::SQL_BLOQUE_POR_NUMERO).await;
+        let p = plan(crate::tickets::SQL_FACTURA).await;
         assert!(
             p.iter().any(|l| l.contains("idx_regfact_numserie")),
-            "bloque_por_numero debe ir por idx_regfact_numserie, no recorrer por Orden: {p:#?}"
+            "la factura de un ticket debe ir por idx_regfact_numserie, no recorrer por Orden: {p:#?}"
         );
     }
 

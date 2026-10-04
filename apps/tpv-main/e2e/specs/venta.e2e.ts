@@ -37,11 +37,11 @@ import { APP_ID_E2E, cargarDotEnv, dirDatosE2E } from "../helpers/entorno.js";
 import { NEGOCIO, NIF, PIN, RAZON_SOCIAL } from "../helpers/equipo.js";
 import {
     avisoDeDatosFiscalesVisible,
-    bloqueDelTicket,
     declararDatosFiscales,
     irASeccionFiscal,
     verifactuEstado,
     verifactuListar,
+    ticketDelCobro,
     type RegistroFiscal,
 } from "../helpers/fiscal.js";
 import { conTexto, irA, leerDeLaApp, literalXPath, pulsar, pulsarXPath } from "../helpers/ui.js";
@@ -184,11 +184,8 @@ describe("El camino del dinero", () => {
         const entradas = await entradasDeCaja();
 
         // El número de ticket no se pinta en ninguna pantalla —viaja al ESC/POS—, así que se lee por
-        // el mismo comando que usa la reimpresión de Cuentas.
-        const ticket = await leerDeLaApp<{ numero_ticket: string | null }>(
-            "cuentas_ticket_para_reimprimir",
-            { idPago: entradas[0].id },
-        );
+        // el mismo comando que compone el papel (RI-29).
+        const ticket = await ticketDelCobro(entradas[0].id);
         expect(ticket.numero_ticket).toBeTruthy();
 
         const registros = await verifactuListar();
@@ -224,34 +221,40 @@ describe("El camino del dinero", () => {
         primero = alta;
     });
 
-    it("10 · el ticket lleva su QR, y una reimpresión saca exactamente el mismo", async () => {
+    it("10 · el ticket dice lo que dice su factura, y una reimpresión saca exactamente el mismo", async () => {
         const numero = primero!.num_serie_factura;
+        const idPago = primero!.id_pago!;
 
-        // Este es el camino literal de `PrintTicketModal`: busca por el número del ticket. Si
-        // devolviera `null`, el papel saldría sin QR y la aplicación no diría nada.
-        const bloque = await bloqueDelTicket(numero);
-        if (!bloque) throw new Error(`El ticket ${numero} no tiene bloque fiscal: saldría sin QR.`);
+        // Este es el camino literal de la vista previa y de la impresión: el papel lo compone Rust
+        // desde el pago y su registro (RI-29). Sin QR, el papel saldría sin él.
+        const ticket = await ticketDelCobro(idPago);
+        const qr = ticket.qr_url;
+        if (!qr) throw new Error(`El ticket ${numero} no lleva QR.`);
 
-        expect(bloque.num_serie_factura).toBe(numero);
-        expect(bloque.huella).toBe(primero!.huella);
-        expect(bloque.tipo_factura).toBe("F2");
-        expect(bloque.entorno_pruebas).toBe(false);
+        expect(ticket.numero_ticket).toBe(numero);
+        expect(ticket.qr_pruebas).toBe(false);
+        expect(ticket.cif).toBe(NIF);
+        expect(ticket.razon_social).toBe(RAZON_SOCIAL);
+        // La fecha del papel es la de expedición, no la de hoy: una copia de mañana dice la misma.
+        expect(ticket.fecha?.startsWith(primero!.fecha_expedicion.replace(/-/g, "/"))).toBe(true);
+        // El total es el `Importe_Total` declarado: 10,00 €.
+        expect(ticket.total).toBe(1000);
 
         // La URL de cotejo lleva los cuatro parámetros del art. 20, y sólo esos. El número va
         // percent-encoded porque una barra sin escapar parte la URL y el cotejo devuelve un error
         // de campo.
-        expect(bloque.qr_url.startsWith("https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?")).toBe(true);
-        expect(bloque.qr_url).toContain(`nif=${NIF}`);
-        expect(bloque.qr_url).toContain(`numserie=${encodeURIComponent(numero)}`);
-        expect(bloque.qr_url).toContain(`fecha=${primero!.fecha_expedicion}`);
-        expect(bloque.qr_url).toContain("importe=10.00");
+        expect(qr.startsWith("https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?")).toBe(true);
+        expect(qr).toContain(`nif=${NIF}`);
+        expect(qr).toContain(`numserie=${encodeURIComponent(numero)}`);
+        expect(qr).toContain(`fecha=${primero!.fecha_expedicion}`);
+        expect(qr).toContain("importe=10.00");
         // El parámetro que la especificación prohíbe expresamente en el QR de una factura.
-        expect(bloque.qr_url).not.toContain("formato=json");
+        expect(qr).not.toContain("formato=json");
 
-        // Una copia con otra huella no es una copia: los tres datos se LEEN de la fila, no se
-        // recalculan (recalcular daría otra hora de generación y por tanto otra huella).
-        const otraVez = await bloqueDelTicket(numero);
-        expect(otraVez).toEqual(bloque);
+        // La copia es el mismo papel con la marca: todo se LEE de la fila, nada se recalcula.
+        const copia = await ticketDelCobro(idPago, true);
+        expect(copia.es_copia).toBe(true);
+        expect({ ...copia, es_copia: false }).toEqual(ticket);
     });
 
     it("11 · la segunda venta avanza la cadena, y la cadena está sana", async () => {

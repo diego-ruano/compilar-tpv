@@ -8,7 +8,7 @@ import { TextArea, TextInput } from "../ui/Inputs";
 import { Checkbox } from "../ui/Toggles";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { PrinterPanel } from "./PrinterPanel";
-import { buildTicketPayload, printerPrintTicket } from "../api/printerApis";
+import { payloadDePrecuenta, printerImprimirPrecuenta } from "../api/printerApis";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { deCentimos } from "../../../shared/lib/dinero";
 
@@ -89,13 +89,14 @@ export function Ticket({
     const toast = useToast();
 
     // Imprime el ticket previsualizado en la impresora seleccionada, respetando la
-    // personalización actual (los mismos flags/ancho que usa la previsualización).
+    // personalización actual (los mismos flags/ancho que usa la previsualización). Sale como
+    // precuenta: un ticket de prueba no es una venta.
     const imprimirPreview = async () => {
         try {
-            await printerPrintTicket(buildTicketPayload(previewItems));
+            await printerImprimirPrecuenta(payloadDePrecuenta(previewItems));
             toast.success("Ticket", "Enviado a la impresora.");
         } catch (e) {
-            console.error("printerPrintTicket error:", e);
+            console.error("printerImprimirPrecuenta error:", e);
             toast.error(
                 "Ticket",
                 typeof e === "string" ? e : "No se pudo imprimir el ticket.",
@@ -278,8 +279,8 @@ export function Ticket({
                     />
                 </div>
                 <div className="mt-2 text-xs text-fg-muted">
-                    El CIF, la fecha, las líneas, la base y el IVA y el total
-                    salen siempre: los exige la factura.
+                    El CIF, la razón social, la fecha, las líneas, la base y el IVA
+                    y el total salen siempre: los exige la factura.
                 </div>
 
                 {/* ✅ NUEVO: el mensaje final se edita aquí */}

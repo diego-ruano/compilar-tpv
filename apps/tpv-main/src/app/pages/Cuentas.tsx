@@ -13,9 +13,9 @@ import {
 } from "lucide-react";
 
 import PrintTicketModal, {
-    type PrintableLine,
+    type CobroImprimible,
 } from "../../shared/ticket/PrintTicketModal";
-import type { DatosDelTicket } from "../../features/configuracion/api/printerApis";
+import { printerTicketDePago } from "../../features/configuracion/api/printerApis";
 import DatosFiscalesModal, {
 } from "../../shared/ticket/DatosFiscalesModal";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
@@ -24,9 +24,7 @@ import type {
     DestinatarioInput,
     Dinero,
     ImpactoCajaDto,
-    LineaTicketDto,
     ProveedorMiniDto,
-    TicketReimpresionDto,
 } from "@tpv/contracts";
 import { invokeClient, toAppError } from "@tpv/client";
 import { ModalShell, SearchInput } from "../../shared/ui";
@@ -155,12 +153,6 @@ function MiniIconButton({
         </button>
     );
 }
-
-/** Lo que se le pasa al modal para reimprimir un cobro ya hecho. */
-type Reimpresion = {
-    items: PrintableLine[];
-    datos: DatosDelTicket;
-};
 
 /** Añade el tachado a las clases de una celda cuando el cobro está anulado. */
 function tachadoSi(anulado: boolean, clases: string): string {
@@ -320,7 +312,7 @@ export default function Cuentas() {
 
     const [openEditPago, setOpenEditPago] = useState(false);
     // Ticket que se está reimprimiendo (null = ninguno). Ver `reimprimirTicket`.
-    const [reimpresion, setReimpresion] = useState<Reimpresion | null>(null);
+    const [reimpresion, setReimpresion] = useState<CobroImprimible | null>(null);
     const [editPagoId, setEditPagoId] = useState<string | null>(null);
     const [epFechaHora, setEpFechaHora] = useState("");
     const [epMetodo, setEpMetodo] = useState<"Tarjeta" | "Efectivo">("Efectivo");
@@ -540,38 +532,13 @@ export default function Cuentas() {
     /**
      * Vuelve a sacar un ticket ya cobrado.
      *
-     * Todo se lee del cobro guardado —número, método, origen y los tipos de IVA congelados en sus
-     * líneas—, así que la copia dice lo mismo que dijo el original aunque hoy hayan cambiado los
-     * precios o los tipos. Y sale marcada como COPIA: dos papeles idénticos parecerían dos ventas.
+     * El papel lo compone Rust desde el cobro y su factura (RI-29) —número, fecha de expedición,
+     * líneas, desglose y QR—, así que la copia dice lo mismo que dijo el original aunque hoy hayan
+     * cambiado los precios o los tipos. Y sale marcada como COPIA: dos papeles idénticos parecerían
+     * dos ventas.
      */
-    const reimprimirTicket = async (e: EntradaDto) => {
-        try {
-            const t = await invokeClient<TicketReimpresionDto | null>(
-                "cuentas_ticket_para_reimprimir",
-                { idPago: e.id },
-            );
-            if (!t) return;
-
-            setReimpresion({
-                items: t.lineas.map((l: LineaTicketDto, i: number) => ({
-                    id: `${e.id}-${i}`,
-                    nombre: l.nombre,
-                    precio: l.precio_unitario,
-                    cantidad: l.cantidad,
-                    pagado: true,
-                    ivaPercent: l.iva_percent ?? null,
-                })),
-                datos: {
-                    numeroTicket: t.numero_ticket || null,
-                    metodoPago: t.metodo_pago || null,
-                    origen: t.origen || null,
-                    esCopia: true,
-                    esAnulado: t.anulado,
-                },
-            });
-        } catch (err) {
-            console.error("cuentas_ticket_para_reimprimir falló:", err);
-        }
+    const reimprimirTicket = (e: EntradaDto) => {
+        setReimpresion({ idPago: e.id, esCopia: true });
     };
 
     /* ── FISCAL-02: la factura completa EN SUSTITUCIÓN (`F3`) ───────────────────
@@ -596,11 +563,8 @@ export default function Cuentas() {
         try {
             // El número de la factura original no viaja en la fila de la lista; se pide por el mismo
             // camino que la reimpresión, que es el que ya sabe resolverlo desde el id del pago.
-            const t = await invokeClient<TicketReimpresionDto | null>(
-                "cuentas_ticket_para_reimprimir",
-                { idPago: e.id },
-            );
-            const numero = (t?.numero_ticket ?? "").trim();
+            const t = await printerTicketDePago(e.id);
+            const numero = (t.numero_ticket ?? "").trim();
             if (!numero) {
                 setF3Error(
                     "Ese cobro no tiene número de factura, así que no hay nada que sustituir. " +
@@ -616,7 +580,7 @@ export default function Cuentas() {
 
             setF3Pago(null);
             // Y se imprime, que es para lo que ha venido el cliente.
-            await reimprimirTicket(e);
+            reimprimirTicket(e);
         } catch (err) {
             setF3Error(toAppError(err).message);
         } finally {
@@ -1406,7 +1370,7 @@ export default function Cuentas() {
                                                             <div className="flex gap-2">
                                                                 <MiniIconButton
                                                                     title="Reimprimir ticket"
-                                                                    onClick={conAviso(() => reimprimirTicket(e))}
+                                                                    onClick={() => reimprimirTicket(e)}
                                                                 >
                                                                     <Printer className="size-4" aria-hidden />
                                                                 </MiniIconButton>
@@ -1454,7 +1418,7 @@ export default function Cuentas() {
                                                         <div className="col-span-3 flex justify-end gap-2">
                                                             <MiniIconButton
                                                                 title="Reimprimir ticket"
-                                                                onClick={conAviso(() => reimprimirTicket(e))}
+                                                                onClick={() => reimprimirTicket(e)}
                                                             >
                                                                 <Printer className="size-4" aria-hidden />
                                                             </MiniIconButton>
@@ -2474,8 +2438,8 @@ export default function Cuentas() {
                 open={reimpresion !== null}
                 onClose={() => setReimpresion(null)}
                 titulo="Reimprimir ticket"
-                items={reimpresion?.items ?? []}
-                datos={reimpresion?.datos}
+                items={[]}
+                cobro={reimpresion}
             />
         </div>
     );

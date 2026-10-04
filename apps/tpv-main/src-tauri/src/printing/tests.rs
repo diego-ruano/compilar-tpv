@@ -34,6 +34,7 @@ mod fixtures {
             direccion: String::new(),
             telefono: String::new(),
             cif: String::new(),
+            razon_social: String::new(),
             mensaje_footer: String::new(),
             iva_percent: iva_negocio,
             show_logo: false,
@@ -53,11 +54,14 @@ mod fixtures {
             margin_right_mm: 0.0,
             font_scale: 1.0,
             numero_ticket: None,
+            fecha: None,
             metodo_pago: None,
             origen: None,
             es_copia: false,
             es_anulado: false,
             items,
+            desglose: None,
+            total: None,
         }
     }
 
@@ -2234,5 +2238,78 @@ mod tests_arqueo {
     fn termina_cortando_el_papel() {
         let cmds = super::parser::comandos(&build_arqueo(&arqueo()));
         assert_eq!(cmds.last(), Some(&"corte"), "{cmds:?}");
+    }
+}
+
+#[cfg(test)]
+mod tests_factura_del_registro {
+    //! RI-29: el papel de un cobro dice lo que dice su factura. La fecha, el desglose y el total
+    //! vienen del registro cuando el payload los trae, y la pantalla no puede ponerlos.
+
+    use super::fixtures::*;
+    use super::*;
+    use tpv_contracts::impresion::TramoTicket;
+
+    #[test]
+    fn la_fecha_del_payload_manda_sobre_el_reloj() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("2027/000001".into());
+        p.fecha = Some("02/01/2027 13:45".into());
+        assert!(contiene(&build_ticket(&p, None), "02/01/2027 13:45"));
+    }
+
+    #[test]
+    fn el_desglose_y_el_total_declarados_se_imprimen_tal_cual() {
+        // Un registro prorrateado no coincide con un recálculo de las líneas: el papel tiene que
+        // decir lo declarado.
+        let mut p = base(vec![linea()]);
+        p.desglose = Some(vec![TramoTicket {
+            tipo: 21.0,
+            base: Dinero::de_centimos(83),
+            cuota: Dinero::de_centimos(17),
+        }]);
+        p.total = Some(Dinero::de_centimos(100));
+        let bytes = build_ticket(&p, None);
+
+        assert!(contiene(&bytes, "IVA (21%)"));
+        assert!(contiene(&bytes, "0,83 €"));
+        assert!(contiene(&bytes, "1,00 €"));
+        assert!(!contiene(&bytes, "IVA (10%)"), "no se recalcula de las líneas");
+    }
+
+    #[test]
+    fn la_razon_social_sale_aunque_el_rotulo_este_oculto() {
+        let mut p = base(vec![linea()]);
+        p.razon_social = "Francisco Garcia SL".into();
+        p.show_business_name = false;
+        assert!(contiene(&build_ticket(&p, None), "Francisco Garcia SL"));
+    }
+
+    #[test]
+    fn la_razon_social_no_se_repite_si_es_el_rotulo() {
+        let mut p = base(vec![linea()]);
+        p.business_name = "Bar Pepe".into();
+        p.razon_social = "BAR PEPE".into();
+        assert!(!contiene(&build_ticket(&p, None), "BAR PEPE"));
+    }
+
+    #[test]
+    fn lo_que_manda_la_pantalla_sale_como_precuenta() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("2027/000009".into());
+        p.qr_url = Some("https://www2.agenciatributaria.gob.es/x".into());
+        p.es_copia = true;
+        p.metodo_pago = Some("Efectivo".into());
+        p.total = Some(Dinero::de_centimos(9999));
+        let bytes = build_ticket(&como_precuenta(p), None);
+
+        assert!(contiene(&bytes, "PRECUENTA"));
+        assert!(contiene(&bytes, "NO ES UN TICKET DE VENTA"));
+        assert!(!contiene(&bytes, "2027/000009"));
+        assert!(!contiene(&bytes, "COPIA"));
+        assert!(!contiene(&bytes, "QR tributario"));
+        assert!(!contiene(&bytes, "99,99"));
+        let cmds = super::parser::comandos(&bytes);
+        assert!(!cmds.contains(&"cajon"), "una precuenta no abre el cajón: {cmds:?}");
     }
 }

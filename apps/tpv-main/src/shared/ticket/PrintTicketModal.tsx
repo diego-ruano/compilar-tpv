@@ -1,28 +1,33 @@
 // src/shared/ticket/PrintTicketModal.tsx
 //
-// Modal de impresión de tickets COMPARTIDO por mesas y venta rápida. Permite:
-//   - Elegir QUÉ se imprime: todo el ticket, sólo lo ya cobrado, o una selección manual.
-//   - Previsualizar el ticket (mismo render que la config, `TicketPaper`) y verlo cambiar
-//     dinámicamente según lo seleccionado.
-//   - Imprimir respetando la personalización (vía `buildTicketPayload` + `printerPrintTicket`).
+// Modal de impresión COMPARTIDO por mesas, venta rápida y la reimpresión de Cuentas. Saca dos
+// papeles distintos, y la diferencia es la de RI-29:
 //
-// Recibe las líneas del ticket (una por unidad) con la forma mínima `PrintableLine`; ambos
-// dominios (mesas / venta rápida) cumplen esa forma, por eso el componente es reutilizable.
+//   - **El ticket de un cobro.** Lo compone Rust desde la base (`printer_ticket_de_pago`): las
+//     líneas que cobró ese pago y su factura —número, fecha, QR, desglose y total—. Aquí no se elige
+//     nada: un papel con número tiene que ser exactamente su factura.
+//   - **La precuenta.** La compone la pantalla con las líneas de la comanda (todas, las pendientes o
+//     las que se marquen) y sale sin número: no es un ticket de venta.
+//
+// Las dos se previsualizan con `TicketPaper`, que pinta el mismo payload que imprime Rust.
 
 import React, { useEffect, useMemo, useState } from "react";
 
+import type { PrintTicketPayload } from "@tpv/contracts";
 import { useToast } from "../toast";
+import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
 import {
-    buildTicketPayload,
-    printerPrintTicket,
-    type DatosDelTicket,
+    payloadDePrecuenta,
+    printerImprimirPago,
+    printerImprimirPrecuenta,
+    printerTicketDePago,
 } from "../../features/configuracion/api/printerApis";
-import { verifactuBloqueTicket } from "../../features/configuracion/api/verifactuApis";
-import TicketPaper, { type TicketPaperFiscal } from "./TicketPaper";
+import TicketPaper from "./TicketPaper";
 import { conAviso } from "../lib/conAviso";
+import { toAppError } from "@tpv/client";
 import type { Dinero } from "@tpv/contracts";
-import { eur, sumar } from "../lib/dinero";
+import { eur, por, sumar } from "../lib/dinero";
 
 export type PrintableLine = {
     id: string;
@@ -31,91 +36,94 @@ export type PrintableLine = {
     pagado: boolean;
     /**
      * Tipo de IVA con el que se vendió la línea. `null`/ausente = el general del negocio.
-     * Viene congelado de la línea, no del producto: si el tipo cambia, un ticket reimpreso tiene
-     * que seguir enseñando el del día de la venta.
+     * Viene congelado de la línea, no del producto.
      */
     ivaPercent?: number | null;
-    /**
-     * Unidades de la línea. Ausente = 1, que es como el POS manda la comanda (una entrada por
-     * pulsación). La reimpresión sí la trae: lee del cobro una línea que ya venía con su cantidad.
-     */
+    /** Unidades de la línea. Ausente = 1, que es como el POS manda la comanda. */
     cantidad?: number;
 };
 
-type Modo = "completo" | "cobrado" | "seleccion";
+/** El cobro cuyo ticket se puede imprimir. */
+export type CobroImprimible = {
+    idPago: string;
+    /** Reimpresión: sale marcado COPIA, con el mismo número. */
+    esCopia?: boolean;
+};
+
+type Modo = "cobro" | "completo" | "pendiente" | "seleccion";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
 }
-
 
 export default function PrintTicketModal({
     open,
     onClose,
     items,
     titulo = "Imprimir ticket",
-    datos,
+    cobro,
 }: {
     open: boolean;
     onClose: () => void;
+    /** Las líneas de la comanda, para la precuenta. Vacío = sólo se puede imprimir el cobro. */
     items: PrintableLine[];
     titulo?: string;
-    /**
-     * Qué papel es este. Sin `numeroTicket` sale como PRECUENTA: lo que se le enseña al cliente
-     * antes de cobrar, que no es un ticket de venta y no puede parecerlo.
-     */
-    datos?: DatosDelTicket;
+    /** El último cobro de esta comanda (o el que se reimprime). Sin él sólo hay precuenta. */
+    cobro?: CobroImprimible | null;
 }) {
     const toast = useToast();
-    const { settings } = useTicketSettings();
+    // Los dos stores se leen para que la precuenta se repinte si cambia la personalización.
+    useBusinessSettings();
+    useTicketSettings();
 
     const [modo, setModo] = useState<Modo>("completo");
     const [seleccion, setSeleccion] = useState<Set<string>>(new Set());
     const [printing, setPrinting] = useState(false);
 
-    const hayCobrados = useMemo(() => items.some((it) => it.pagado), [items]);
-
-    // FISCAL-01: el bloque fiscal del ticket (la URL del QR y si es de pruebas).
-    //
-    // Se PREGUNTA, no se compone: la URL es la que se guardó en `Registros_Facturacion` al cobrar,
-    // y es la misma que se cotejará en la sede de la AEAT. Componerla aquí sería tener dos fuentes
-    // para una cadena que tiene que ser idéntica al carácter — y una reimpresión tiene que sacar
-    // exactamente la del original.
-    //
-    // Sin número no se pregunta: una precuenta no es una factura y no lleva QR.
-    const [fiscal, setFiscal] = useState<TicketPaperFiscal | null>(null);
+    // Al abrir: el ticket del cobro si lo hay; si no, la precuenta de todo.
     useEffect(() => {
         if (!open) return;
+        setModo(cobro ? "cobro" : "completo");
+        setSeleccion(new Set(items.map((it) => it.id)));
+    }, [open, items, cobro]);
+
+    // El ticket del cobro, tal como lo compone Rust.
+    const [ticketCobro, setTicketCobro] = useState<PrintTicketPayload | null>(null);
+    const [errorCobro, setErrorCobro] = useState<string | null>(null);
+    const idPago = cobro?.idPago ?? null;
+    const esCopia = cobro?.esCopia ?? false;
+    useEffect(() => {
+        if (!open || !idPago) return;
         let vivo = true;
-        setFiscal(null);
-        verifactuBloqueTicket(datos?.numeroTicket)
-            .then((b) => {
-                if (!vivo) return;
-                setFiscal(b ? { qrUrl: b.qr_url, entornoPruebas: b.entorno_pruebas } : null);
-            })
-            .catch(() => vivo && setFiscal(null));
+        setTicketCobro(null);
+        setErrorCobro(null);
+        printerTicketDePago(idPago, esCopia)
+            .then((p) => vivo && setTicketCobro(p))
+            .catch((e) => vivo && setErrorCobro(toAppError(e).message));
         return () => {
             vivo = false;
         };
-    }, [open, datos?.numeroTicket]);
+    }, [open, idPago, esCopia]);
 
-    // Al abrir, resetea: modo "completo" y la selección manual parte de todo el ticket.
-    useEffect(() => {
-        if (!open) return;
-        setModo("completo");
-        setSeleccion(new Set(items.map((it) => it.id)));
-    }, [open, items]);
+    const hayPendientes = useMemo(() => items.some((it) => !it.pagado), [items]);
 
-    const effectiveItems = useMemo(() => {
-        if (modo === "completo") return items;
-        if (modo === "cobrado") return items.filter((it) => it.pagado);
-        return items.filter((it) => seleccion.has(it.id));
+    const lineasPrecuenta = useMemo(() => {
+        if (modo === "pendiente") return items.filter((it) => !it.pagado);
+        if (modo === "seleccion") return items.filter((it) => seleccion.has(it.id));
+        return items;
     }, [modo, items, seleccion]);
 
-    const totalEfectivo = useMemo(
-        () => sumar(...effectiveItems.map((it) => it.precio)),
-        [effectiveItems],
-    );
+    const esCobro = modo === "cobro";
+    const payload: PrintTicketPayload | null = esCobro
+        ? ticketCobro
+        : payloadDePrecuenta(lineasPrecuenta);
+
+    const totalPapel: Dinero | null = payload
+        ? (payload.total ??
+          sumar(...payload.items.map((l) => por(l.precio_unitario, l.cantidad))))
+        : null;
+    const unidades = payload ? payload.items.reduce((acc, l) => acc + l.cantidad, 0) : 0;
+    const puedeImprimir = !!payload && payload.items.length > 0 && !printing;
 
     const toggleLinea = (id: string) => {
         setModo("seleccion");
@@ -128,24 +136,16 @@ export default function PrintTicketModal({
     };
 
     const imprimir = async () => {
-        if (effectiveItems.length === 0) return;
+        if (!payload || !puedeImprimir) return;
         setPrinting(true);
         try {
-            await printerPrintTicket(
-                buildTicketPayload(effectiveItems, undefined, {
-                    ...datos,
-                    qrUrl: fiscal?.qrUrl ?? null,
-                    qrPruebas: fiscal?.entornoPruebas ?? false,
-                }),
-            );
+            if (esCobro && idPago) await printerImprimirPago(idPago, esCopia);
+            else await printerImprimirPrecuenta(payload);
             toast.success("Ticket", "Enviado a la impresora.");
             onClose();
         } catch (e) {
-            console.error("printerPrintTicket error:", e);
-            toast.error(
-                "Ticket",
-                typeof e === "string" ? e : "No se pudo imprimir el ticket.",
-            );
+            console.error("imprimir ticket:", e);
+            toast.error("Ticket", toAppError(e).message || "No se pudo imprimir el ticket.");
         } finally {
             setPrinting(false);
         }
@@ -153,7 +153,7 @@ export default function PrintTicketModal({
 
     if (!open) return null;
 
-    const cobradosCount = items.filter((it) => it.pagado).length;
+    const pendientesCount = items.filter((it) => !it.pagado).length;
 
     return (
         <div className="fixed inset-0 z-[10000] bg-black/50 p-3 grid place-items-center">
@@ -171,41 +171,71 @@ export default function PrintTicketModal({
                 </div>
 
                 <div className="flex flex-1 min-h-0">
-                    {/* Columna izquierda: controles + lista */}
+                    {/* Columna izquierda: qué papel + sus líneas */}
                     <div className="w-[420px] shrink-0 flex flex-col min-h-0 border-r border-border">
                         <div className="p-4 border-b border-border">
                             <p className="text-sm font-semibold text-fg-muted mb-2">
                                 ¿Qué quieres imprimir?
                             </p>
                             <div className="grid grid-cols-1 gap-2">
-                                <ModoButton
-                                    active={modo === "completo"}
-                                    onClick={() => setModo("completo")}
-                                    label="Todo el ticket"
-                                    hint={`${items.length} producto${items.length === 1 ? "" : "s"}`}
-                                />
-                                <ModoButton
-                                    active={modo === "cobrado"}
-                                    onClick={() => setModo("cobrado")}
-                                    label="Solo lo cobrado"
-                                    hint={
-                                        hayCobrados
-                                            ? `${cobradosCount} producto${cobradosCount === 1 ? "" : "s"}`
-                                            : "Nada cobrado aún"
-                                    }
-                                    disabled={!hayCobrados}
-                                />
-                                <ModoButton
-                                    active={modo === "seleccion"}
-                                    onClick={() => setModo("seleccion")}
-                                    label="Elegir productos"
-                                    hint="Marca las líneas en la lista"
-                                />
+                                {cobro ? (
+                                    <ModoButton
+                                        active={esCobro}
+                                        onClick={() => setModo("cobro")}
+                                        label={esCopia ? "Copia del ticket" : "Ticket del cobro"}
+                                        hint={ticketCobro?.numero_ticket ?? "…"}
+                                    />
+                                ) : null}
+                                {items.length > 0 ? (
+                                    <>
+                                        <ModoButton
+                                            active={modo === "completo"}
+                                            onClick={() => setModo("completo")}
+                                            label="Precuenta de todo"
+                                            hint={`${items.length} producto${items.length === 1 ? "" : "s"}`}
+                                        />
+                                        <ModoButton
+                                            active={modo === "pendiente"}
+                                            onClick={() => setModo("pendiente")}
+                                            label="Precuenta de lo pendiente"
+                                            hint={
+                                                hayPendientes
+                                                    ? `${pendientesCount} producto${pendientesCount === 1 ? "" : "s"}`
+                                                    : "Nada pendiente"
+                                            }
+                                            disabled={!hayPendientes}
+                                        />
+                                        <ModoButton
+                                            active={modo === "seleccion"}
+                                            onClick={() => setModo("seleccion")}
+                                            label="Precuenta de una selección"
+                                            hint="Marca las líneas en la lista"
+                                        />
+                                    </>
+                                ) : null}
                             </div>
                         </div>
 
                         <div className="flex-1 min-h-0 overflow-y-auto p-3">
-                            {items.length === 0 ? (
+                            {esCobro ? (
+                                // Las líneas del cobro, tal como van al papel. No se eligen: son las
+                                // de su factura.
+                                <div className="flex flex-col gap-2">
+                                    {(ticketCobro?.items ?? []).map((l, i) => (
+                                        <div
+                                            key={i}
+                                            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-3 py-2.5"
+                                        >
+                                            <span className="truncate font-medium text-fg">
+                                                {l.cantidad} x {l.nombre}
+                                            </span>
+                                            <span className="shrink-0 text-sm font-bold text-fg">
+                                                {eur(por(l.precio_unitario, l.cantidad))}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : items.length === 0 ? (
                                 <div className="text-sm text-fg-muted p-4 text-center">
                                     El ticket está vacío.
                                 </div>
@@ -215,8 +245,8 @@ export default function PrintTicketModal({
                                         const incluido =
                                             modo === "completo"
                                                 ? true
-                                                : modo === "cobrado"
-                                                    ? it.pagado
+                                                : modo === "pendiente"
+                                                    ? !it.pagado
                                                     : seleccion.has(it.id);
                                         return (
                                             <button
@@ -265,25 +295,33 @@ export default function PrintTicketModal({
                     {/* Columna derecha: previsualización + acción */}
                     <div className="flex-1 min-h-0 flex flex-col">
                         <div className="flex-1 min-h-0 overflow-y-auto bg-surface-2 p-5 flex justify-center">
-                            <TicketPaper items={effectiveItems} fiscal={fiscal} />
+                            {payload ? (
+                                <TicketPaper payload={payload} />
+                            ) : (
+                                <div className="text-sm text-fg-muted p-4 text-center">
+                                    {errorCobro ?? "Preparando el ticket…"}
+                                </div>
+                            )}
                         </div>
 
                         <div className="border-t border-border p-4 flex items-center justify-between gap-3">
                             <div className="text-sm text-fg-muted">
-                                {effectiveItems.length} producto
-                                {effectiveItems.length === 1 ? "" : "s"} ·{" "}
-                                <span className="font-bold text-fg">
-                                    {eur(totalEfectivo)}
-                                </span>
+                                {unidades} producto{unidades === 1 ? "" : "s"}
+                                {totalPapel !== null ? (
+                                    <>
+                                        {" · "}
+                                        <span className="font-bold text-fg">{eur(totalPapel)}</span>
+                                    </>
+                                ) : null}
                             </div>
                             <button
                                 type="button"
                                 onClick={conAviso(imprimir)}
-                                disabled={effectiveItems.length === 0 || printing}
+                                disabled={!puedeImprimir}
                                 className={cn(
                                     "h-11 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm transition",
                                     "hover:bg-accent-hover active:scale-[0.98]",
-                                    (effectiveItems.length === 0 || printing) &&
+                                    !puedeImprimir &&
                                         "opacity-50 cursor-not-allowed hover:bg-accent active:scale-100",
                                 )}
                             >

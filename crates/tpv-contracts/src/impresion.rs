@@ -18,7 +18,7 @@ pub struct PrinterInfo {
 }
 
 /// Una línea (producto agrupado) del ticket.
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct PrintTicketLine {
     pub nombre: String,
@@ -27,19 +27,32 @@ pub struct PrintTicketLine {
     /// Tipo de IVA con el que se vendió esta línea. `None` = el general del negocio.
     /// Viene congelado de `Detalle_Comanda`, no del producto: una reimpresión tiene que enseñar
     /// el tipo del día de la venta.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub iva_percent: Option<f64>,
 }
 
-/// Payload de impresión enviado desde el frontend. Lleva los datos del negocio + los flags de
-/// personalización del ticket (mismos que `useBusinessSettings`/`useTicketSettings`) para que el
-/// builder ESC/POS produzca exactamente lo que el usuario ve en la previsualización.
-#[derive(Debug, Clone, Deserialize, TS)]
+/// Un tramo del desglose de IVA tal como sale en el papel. Gemelo de `tpv_domain::ticket::TramoIva`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct TramoTicket {
+    pub tipo: f64,
+    pub base: Dinero,
+    pub cuota: Dinero,
+}
+
+/// Todo lo que lleva un papel: los datos del negocio, la personalización y el contenido.
+///
+/// **El ticket de un cobro lo compone Rust desde la base** (`ticket_de_pago`, RI-29): las líneas
+/// de `Pago_Detalles`, y el número, la fecha, el QR, el desglose y el total del registro de
+/// facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
+/// **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
+/// con número no puede salir de lo que diga la pantalla.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct PrintTicketPayload {
     /// Impresora destino; si es `None`, el comando resuelve la seleccionada en `device_config.json`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub printer_name: Option<String>,
 
@@ -50,8 +63,14 @@ pub struct PrintTicketPayload {
     pub direccion: String,
     #[serde(default)]
     pub telefono: String,
+    /// NIF del emisor. En una factura es el del registro (`NIF_Emisor`), no el de los ajustes de
+    /// hoy: una reimpresión dice lo que se declaró.
     #[serde(default)]
     pub cif: String,
+    /// Razón social del emisor (`Nombre_Razon_Emisor` en una factura). No es el rótulo
+    /// (`business_name`) y, a diferencia de él, no se puede ocultar.
+    #[serde(default)]
+    pub razon_social: String,
     #[serde(default)]
     pub mensaje_footer: String,
     #[serde(default)]
@@ -64,7 +83,7 @@ pub struct PrintTicketPayload {
     pub show_logo: bool,
     /// Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
     /// no el builder: aquí dentro no se toca el disco.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub logo_path: Option<String>,
     #[serde(default)]
@@ -82,8 +101,8 @@ pub struct PrintTicketPayload {
     /// guardó al emitir, y una reimpresión tiene que sacar exactamente esa.
     ///
     /// Vacío o ausente = este papel no lleva QR. Es el caso de la **precuenta**, que no es una
-    /// factura, y el de un ticket emitido antes de que el negocio completara sus datos fiscales.
-    #[serde(default)]
+    /// factura, y el de un cobro de modo prueba.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub qr_url: Option<String>,
     /// `true` si el registro se emitió contra el entorno de **pruebas**. El QR apunta entonces a
@@ -117,15 +136,20 @@ pub struct PrintTicketPayload {
 
     /// Número correlativo del ticket. `None` = **precuenta**: lo que se le enseña al cliente antes
     /// de cobrar, que no es un ticket de venta y se marca como tal.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub numero_ticket: Option<String>,
+    /// La fecha que se imprime (`DD/MM/AAAA HH:MM`). En una factura es la de expedición, leída
+    /// del registro: una copia de mañana dice el día de la venta. `None` = ahora (la precuenta).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fecha: Option<String>,
     /// Cómo se cobró (`Efectivo` | `Tarjeta`). `None` en una precuenta.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub metodo_pago: Option<String>,
     /// De dónde sale la venta: `Mesa 5`, `Barra`… Ayuda a localizar el cobro después.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub origen: Option<String>,
     /// Reimpresión de un ticket ya emitido: sale el MISMO número, marcado como copia para que dos
@@ -139,6 +163,26 @@ pub struct PrintTicketPayload {
 
     #[serde(default)]
     pub items: Vec<PrintTicketLine>,
+
+    /// El desglose de IVA de la factura, leído de su `Desglose_Json`. Es el hecho fiscal: el papel
+    /// dice lo que se declaró, no un recálculo. `None` = se calcula de las líneas (la precuenta).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub desglose: Option<Vec<TramoTicket>>,
+    /// El `Importe_Total` de la factura. `None` = la suma de las líneas (la precuenta).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub total: Option<Dinero>,
+}
+
+/// Qué ticket de cobro se pide (RI-29): el de un pago, leído entero de la base.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct TicketDePagoInput {
+    pub id_pago: String,
+    /// Reimpresión: el papel sale marcado COPIA, con el mismo número.
+    #[serde(default)]
+    pub es_copia: bool,
 }
 
 /// Geometría del papel para preguntar por las columnas desde el frontend (previsualización).

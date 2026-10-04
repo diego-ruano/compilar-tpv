@@ -42,14 +42,17 @@ export type RegistroFiscal = {
     estado_envio?: string;
 };
 
-/** El bloque que se imprime en el papel: número, QR y huella. */
-export type BloqueFiscal = {
-    num_serie_factura: string;
-    fecha_expedicion: string;
-    qr_url: string;
-    huella: string;
-    tipo_factura: string;
-    entorno_pruebas: boolean;
+/** Lo fiscal del papel de un cobro, tal como lo compone Rust (`PrintTicketPayload`, RI-29). */
+export type TicketDelCobro = {
+    numero_ticket?: string;
+    fecha?: string;
+    qr_url?: string;
+    qr_pruebas: boolean;
+    cif: string;
+    razon_social: string;
+    es_copia: boolean;
+    total?: number;
+    items: Array<{ nombre: string; cantidad: number; precio_unitario: number }>;
 };
 
 /**
@@ -204,13 +207,14 @@ export async function verifactuListar(limite = 50): Promise<RegistroFiscal[]> {
 }
 
 /**
- * El bloque fiscal de un ticket por su número de factura.
+ * El ticket de un cobro, por su pago.
  *
- * Es EL MISMO camino que usa `PrintTicketModal` para poner el QR en el papel, y por eso el
- * recorrido lo prueba por aquí: si esto devuelve `null`, el ticket sale sin QR y la aplicación no
- * dice nada.
+ * Es EL MISMO camino que usan la vista previa y la impresión (`printer_ticket_de_pago`): lo que
+ * devuelve es lo que sale en el papel. Si no trae QR, el ticket sale sin QR.
  */
-export async function bloqueDelTicket(numeroTicket: string): Promise<BloqueFiscal | null> {
-    return await leerDeLaApp<BloqueFiscal | null>("verifactu_bloque_ticket", { numeroTicket });
+export async function ticketDelCobro(idPago: string, esCopia = false): Promise<TicketDelCobro> {
+    return await leerDeLaApp<TicketDelCobro>("printer_ticket_de_pago", {
+        args: { id_pago: idPago, es_copia: esCopia },
+    });
 }
 

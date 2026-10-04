@@ -6,7 +6,7 @@
 use tpv_domain::dinero::Dinero;
 use tpv_contracts::cuentas::{
     AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, PaginaEntradas,
-    PaginaSalidas, ResumenCajaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
+    PaginaSalidas, ResumenCajaDto, UpdateGastoInput, UpdatePagoInput,
 };
 use tpv_domain::cuentas::{
     normalize_metodo, puede_anularse, requerido, GastoData, PagoData, RechazoAnulacion,
@@ -156,18 +156,6 @@ pub async fn registrar_apertura_cajon(
     id_usuario: Option<String>,
 ) -> AppResult<()> {
     repo.registrar_apertura_cajon(id_usuario).await
-}
-
-/// Reconstruye un ticket ya cobrado para volver a imprimirlo. El número es el del original: la
-/// copia no es un ticket nuevo.
-pub async fn ticket_para_reimprimir(
-    repo: &dyn CuentasRepository,
-    id_pago: &str,
-) -> AppResult<Option<TicketReimpresionDto>> {
-    if id_pago.trim().is_empty() {
-        return Ok(None);
-    }
-    repo.ticket_para_reimprimir(id_pago.trim()).await
 }
 
 /// Anula un cobro. Antes se borraba (`delete_pago`); ahora se marca y se conserva (CUENTA-07).

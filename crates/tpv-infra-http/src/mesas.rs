@@ -206,7 +206,7 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     /// El worker rechaza el cobro desde un Handy (solo cobra la Main, que es la que tiene
-    /// impresora y cajón), así que esta llamada devuelve 403 y nunca llega a un número. Se
+    /// impresora y cajón), así que esta llamada devuelve 403 y nunca llega a un pago. Se
     /// mantiene el camino por si algún día se retoma.
     async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<String> {
         let body = json!({

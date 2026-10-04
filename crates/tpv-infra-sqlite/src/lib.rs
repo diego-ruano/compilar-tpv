@@ -71,6 +71,7 @@ pub mod stock_alertas;
 pub mod sync;
 pub mod sync_reparacion;
 pub mod tareas;
+pub mod tickets;
 pub mod trabajadores;
 pub mod venta_rapida;
 pub mod verifactu;

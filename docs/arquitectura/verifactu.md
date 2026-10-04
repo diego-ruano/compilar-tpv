@@ -182,8 +182,9 @@ reservado.
    huella, URL del QR, `INSERT INTO Registros_Facturacion`, `_Verifactu_Envios` en `PENDIENTE` (por
    `raw()`), y la anomalía si la hubo.
 
-Devuelve el `BloqueFiscal` (número, fecha, URL del QR, huella, tipo y si es entorno de pruebas), que
-el frontend mete en el payload de impresión: esos datos no se inventan en el cliente.
+Devuelve el `BloqueFiscal` (número, fecha, URL del QR, huella, tipo y si es entorno de pruebas) al
+camino del cobro. El papel no viaja con él: `ticket_de_pago` lee después el registro por el número
+del pago (RI-29), así que esos datos no pasan nunca por el cliente.
 
 Si el cobro hace `ROLLBACK`, no queda registro ni se gasta número. Si falla la **impresión**, el
 registro ya es correcto y el papel se reimprime.
@@ -229,7 +230,8 @@ ni los escribe: el formulario de datos fiscales siempre empieza vacío.
   añade «-- ENTORNO DE PRUEBAS --».
 - Si la URL no cabe en un QR o el papel no da para un módulo, el ticket sale sin código: nada de lo
   que rodea al ticket puede impedir cobrar.
-- Una reimpresión saca el mismo número, QR y huella (`verifactu_bloque_ticket`), marcada COPIA.
+- Una reimpresión saca el mismo número, fecha, QR y desglose, leídos del registro
+  (`ticket_de_pago`, RI-29), marcada COPIA.
 
 El orden completo del ticket está en [tickets.md](tickets.md).
 

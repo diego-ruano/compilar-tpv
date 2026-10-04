@@ -31,39 +31,6 @@ pub struct EntradaDto {
     pub motivo_anulacion: Option<String>,
 }
 
-/// Una línea de un ticket ya cobrado, tal y como hace falta para reimprimirlo.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct LineaTicketDto {
-    pub nombre: String,
-    /// Unidades vendidas en esa línea. La copia tiene que decir "2 x 1,30" igual que el original,
-    /// no "1 x 2,60": el importe cuadraría, pero no sería el mismo papel.
-    pub cantidad: f64,
-    pub precio_unitario: Dinero,
-    /// Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
-    #[ts(optional)]
-    pub iva_percent: Option<f64>,
-}
-
-/// Todo lo que hace falta para volver a sacar un ticket ya cobrado.
-///
-/// Se lee del cobro guardado, no se recalcula: el número es el del original y los tipos de IVA son
-/// los del día de la venta. Es lo que hace que la copia sea una copia y no un ticket nuevo con los
-/// datos de hoy.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct TicketReimpresionDto {
-    /// Número del ticket original. Vacío en cobros anteriores a la numeración.
-    pub numero_ticket: String,
-    pub metodo_pago: String,
-    /// `Mesa 5` / `Barra`.
-    pub origen: String,
-    pub lineas: Vec<LineaTicketDto>,
-    /// El cobro está anulado: la copia sale marcada como tal. Reimprimirlo sigue permitido —es la
-    /// prueba de qué contenía— pero un papel que no lo diga circularía como un cobro válido.
-    pub anulado: bool,
-}
-
 /// Dónde empieza la página siguiente de un listado de caja: la clave de orden de la ÚLTIMA fila de
 /// la página actual. Paginar por clave y no por `OFFSET` (RI-18) es lo que hace que la página 100 de
 /// un año cueste lo mismo que la primera: con `OFFSET` había que leer y descartar todo lo anterior.

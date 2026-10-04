@@ -2,6 +2,7 @@ import React from "react";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import TicketPaper from "./TicketPaper";
+import { payloadDePrecuenta } from "../../features/configuracion/api/printerApis";
 import type { Dinero } from "@tpv/contracts";
 
 type TicketItemLike = {
@@ -74,6 +75,9 @@ export default function TicketPreviewModal({
 }) {
 	const { ivaPercent } = useBusinessSettings();
 	const { settings } = useTicketSettings();
+	// Se recompone en cada render: los dos hooks de arriba suscriben el modal a los stores, así que
+	// tocar una casilla repinta la previa al momento. Es una precuenta: lo que imprime «Imprimir».
+	const payload = payloadDePrecuenta(items);
 
 	const empty = items.length === 0;
 
@@ -81,7 +85,7 @@ export default function TicketPreviewModal({
 		<Modal open={open} onClose={onClose} title={titulo} maxWidthClass="max-w-[980px]">
 			<div className="grid grid-cols-1 lg:grid-cols-[1fr,320px] gap-4">
 				<div className="flex justify-center">
-					<TicketPaper items={items} />
+					<TicketPaper payload={payload} />
 				</div>
 
 				<div className="rounded-2xl border border-black/10 bg-white p-4 flex flex-col gap-3">

@@ -10,11 +10,10 @@ import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import { reservasKeys } from "../reservas/reservasQueries";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
-import PrintTicketModal from "../../shared/ticket/PrintTicketModal";
+import PrintTicketModal, { type CobroImprimible } from "../../shared/ticket/PrintTicketModal";
 import DatosFiscalesModal, {
 } from "../../shared/ticket/DatosFiscalesModal";
 import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
-import type { DatosDelTicket } from "../configuracion/api/printerApis";
 import { useMode } from "../../shared/stores/useMode";
 import { useToast } from "../../shared/toast";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
@@ -424,9 +423,13 @@ export default function MesaComandaModal({
     const [paso, setPaso] = useState<Paso>("categorias");
     const [cashCount, setCashCount] = useState<Record<string, number>>({});
     const [printOpen, setPrintOpen] = useState(false);
-    // Qué papel se imprime. Vacío = PRECUENTA (aún no se ha cobrado); tras el cobro se rellena con
-    // el número que devuelve, y entonces sale un ticket de venta.
-    const [datosTicket, setDatosTicket] = useState<DatosDelTicket | undefined>(undefined);
+    // El último cobro de ESTA comanda: su ticket lo compone Rust desde el pago (RI-29). Sin él, lo
+    // único que se imprime es una precuenta. Se olvida al cambiar de comanda: el número de un cobro
+    // no puede acabar en el papel de otra mesa.
+    const [ultimoCobro, setUltimoCobro] = useState<CobroImprimible | null>(null);
+    useEffect(() => {
+        setUltimoCobro(null);
+    }, [idComanda]);
     // Cobrar es cosa de la Main: es la que tiene impresora y cajón. Cerrar una mesa desde un Handy
     // dejaría al cliente sin ticket y el dinero sin registrar. El servidor también lo rechaza;
     // esto evita que se llegue a intentar.
@@ -862,7 +865,7 @@ export default function MesaComandaModal({
                 operador,
             });
 
-            const numeroTicket = await mesasCobrarDetalles({
+            const idPago = await mesasCobrarDetalles({
                 idComanda,
                 metodo: metodo === "tarjeta" ? "Tarjeta" : "Efectivo",
                 tipo:
@@ -873,13 +876,9 @@ export default function MesaComandaModal({
                 destinatario: destinatario ?? undefined,
             });
 
-            // Datos del ticket recién emitido: con ellos, imprimir saca un ticket de venta
-            // numerado en vez de una precuenta.
-            setDatosTicket({
-                numeroTicket: numeroTicket || null,
-                metodoPago: metodo === "tarjeta" ? "Tarjeta" : "Efectivo",
-                origen: mesaNombre ? `Mesa ${mesaNombre}` : null,
-            });
+            // El ticket de este cobro: imprimir saca el de su factura, con sus líneas y no las de
+            // la mesa entera (RI-29).
+            if (idPago) setUltimoCobro({ idPago });
 
             const t = await loadTicketForComanda(idComanda);
             console.log("Ticket tras cobrar:", t);
@@ -1026,7 +1025,7 @@ export default function MesaComandaModal({
                 open={printOpen}
                 onClose={() => setPrintOpen(false)}
                 items={ticket}
-                datos={datosTicket}
+                cobro={ultimoCobro}
             />
             <DatosFiscalesModal
                 open={pideFactura !== null}

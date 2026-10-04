@@ -10,9 +10,8 @@ import {
 } from "lucide-react";
 import { Paso, TicketItem } from "../types";
 import { cn } from "../utils";
-import PrintTicketModal from "../../../shared/ticket/PrintTicketModal";
+import PrintTicketModal, { type CobroImprimible } from "../../../shared/ticket/PrintTicketModal";
 import { useMode } from "../../../shared/stores/useMode";
-import type { DatosDelTicket } from "../../configuracion/api/printerApis";
 import { conAviso } from "../../../shared/lib/conAviso";
 import type { Dinero } from "@tpv/contracts";
 import { eur } from "../../../shared/lib/dinero";
@@ -31,7 +30,7 @@ export default function TicketPanel({
   onEliminarLinea,
 
   onCobrarTarjeta,
-  datosTicket,
+  ultimoCobro,
   onStartEfectivo,
   onCancelarCobro,
 
@@ -55,10 +54,10 @@ export default function TicketPanel({
 
   onCobrarTarjeta: () => void | Promise<void>;
   /**
-   * Qué papel se imprime. Ausente = PRECUENTA (aún no se ha cobrado); tras el cobro llega con el
-   * número que devolvió, y entonces sale un ticket de venta.
+   * El último cobro de la venta en curso. Con él se puede imprimir su ticket (el de su factura);
+   * sin él, sólo una precuenta.
    */
-  datosTicket?: DatosDelTicket;
+  ultimoCobro?: CobroImprimible | null;
   onStartEfectivo: () => void;
   onCancelarCobro: () => void;
 
@@ -579,7 +578,7 @@ export default function TicketPanel({
         open={printOpen}
         onClose={() => setPrintOpen(false)}
         items={ticket}
-        datos={datosTicket}
+        cobro={ultimoCobro}
       />
     </div>
   );

@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use tpv_contracts::cuentas::{
-    CursorCuentas, PaginaEntradas, PaginaSalidas, ResumenCajaDto, TicketReimpresionDto,
+    CursorCuentas, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
 };
 use tpv_domain::cuentas::{GastoData, PagoData};
 
@@ -130,8 +130,4 @@ pub trait CuentasRepository: Send + Sync {
     /// No lo impide —el camarero lo necesita—: lo deja registrado, que es la única pista real
     /// cuando falta dinero. Las aperturas de un cobro no se anotan aquí: ya las cuenta su pago.
     async fn registrar_apertura_cajon(&self, id_usuario: Option<String>) -> AppResult<()>;
-
-    /// Reconstruye un ticket ya cobrado para volver a imprimirlo (mismo número, marcado COPIA).
-    /// `None` si el pago no existe.
-    async fn ticket_para_reimprimir(&self, id_pago: &str) -> AppResult<Option<TicketReimpresionDto>>;
 }

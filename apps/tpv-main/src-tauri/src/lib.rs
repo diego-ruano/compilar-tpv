@@ -42,6 +42,7 @@ use tpv_application::ports::{
     stock_alertas::StockAlertasRepository,
     sync::SyncRepository,
     tareas::TareasRepository,
+    tickets::TicketsRepository,
     trabajadores::TrabajadoresRepository,
     venta_rapida::VentaRapidaRepository,
     verifactu::VerifactuRepository,
@@ -67,7 +68,7 @@ use tpv_infra_sqlite::{
     reconciliacion::SqliteReconciliacionRepository, reservas::SqliteReservasRepository,
     stats::SqliteStatsRepository, stock_alertas::SqliteStockAlertasRepository,
     sync::SqliteSyncRepository, tareas::SqliteTareasRepository,
-    trabajadores::SqliteTrabajadoresRepository, venta_rapida::SqliteVentaRapidaRepository,
+    tickets::SqliteTicketsRepository, trabajadores::SqliteTrabajadoresRepository, venta_rapida::SqliteVentaRapidaRepository,
     verifactu::SqliteVerifactuRepository,
 };
 
@@ -765,6 +766,19 @@ impl AppState {
         Ok(Arc::new(SqliteVerifactuRepository::new(conn)) as Arc<dyn VerifactuRepository>)
     }
 
+    /// El ticket de un cobro (RI-29). Tampoco es mode-switched: imprime la Main, que es la que cobra,
+    /// la que tiene la impresora y la que guarda los registros de facturación.
+    pub(crate) async fn tickets_repo(&self) -> Result<Arc<dyn TicketsRepository>, String> {
+        let conn = self
+            .db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "Los tickets sólo se imprimen en el TPV principal".to_string())?;
+        Ok(Arc::new(SqliteTicketsRepository::new(conn)) as Arc<dyn TicketsRepository>)
+    }
+
     /// Repositorio de sincronización (aplicar cambios de la nube en la BD local). NO es
     /// mode-switched: siempre es la Main (SQLite local) la que aplica lo recibido por el WS.
     pub(crate) async fn sync_repo(&self) -> Result<Arc<dyn SyncRepository>, String> {
@@ -1440,13 +1454,12 @@ fn resolve_printer(app: &AppHandle, explicit: Option<String>) -> Result<String, 
     resolve_printer_destino(app, explicit, DESTINO_CAJA)
 }
 
-/// Imprime un ticket real construido en ESC/POS respetando la personalización del front.
-#[tauri::command]
-async fn printer_print_ticket(
-    app: AppHandle,
+/// Maqueta un ticket y lo manda a la impresora. Lo comparten la precuenta y el ticket de un cobro.
+async fn imprimir_ticket(
+    app: &AppHandle,
     payload: printing::PrintTicketPayload,
 ) -> Result<String, AppErrorDto> {
-    let printer = resolve_printer(&app, payload.printer_name.clone())?;
+    let printer = resolve_printer(app, payload.printer_name.clone())?;
 
     // El logo se lee AQUÍ y no dentro del builder: `build_ticket` no toca el disco, que es lo que
     // lo mantiene comprobable con un test. Si el fichero no está o no se puede decodificar, el
@@ -1455,7 +1468,7 @@ async fn printer_print_ticket(
         payload
             .logo_path
             .as_deref()
-            .and_then(|ruta| leer_imagen_local(&app, ruta))
+            .and_then(|ruta| leer_imagen_local(app, ruta))
     } else {
         None
     };
@@ -1467,10 +1480,53 @@ async fn printer_print_ticket(
     Ok("OK".into())
 }
 
+/// Imprime una **precuenta**: lo que se le enseña al cliente antes de cobrar, compuesto en la
+/// pantalla. Sale sin número, sin QR y sin marca de copia aunque la pantalla los mande
+/// (`como_precuenta`, RI-29): el ticket de un cobro sólo sale de `printer_imprimir_pago`.
+#[tauri::command]
+async fn printer_imprimir_precuenta(
+    app: AppHandle,
+    payload: printing::PrintTicketPayload,
+) -> Result<String, AppErrorDto> {
+    imprimir_ticket(&app, printing::como_precuenta(payload)).await
+}
+
+/// El ticket de un cobro, compuesto desde la base (RI-29): las líneas que cobró ese pago y su
+/// factura. Es lo que enseña la vista previa, y lo mismo que imprime `printer_imprimir_pago`.
+///
+/// Basta con estar identificado: lo imprime quien acaba de cobrar, a mitad de servicio.
+#[tauri::command]
+async fn printer_ticket_de_pago(
+    state: State<'_, AppState>,
+    args: tpv_contracts::impresion::TicketDePagoInput,
+) -> Result<printing::PrintTicketPayload, AppErrorDto> {
+    state.sesion().await?;
+    let tickets = state.tickets_repo().await?;
+    let config = state.configuracion_repo().await?;
+    Ok(tpv_application::use_cases::tickets::ticket_de_pago(tickets.as_ref(), config.as_ref(), &args).await?)
+}
+
+/// Imprime el ticket de un cobro. No recibe el papel: lo vuelve a componer desde la base, así que
+/// lo que sale es siempre lo que dice la factura.
+#[tauri::command]
+async fn printer_imprimir_pago(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: tpv_contracts::impresion::TicketDePagoInput,
+) -> Result<String, AppErrorDto> {
+    state.sesion().await?;
+    let tickets = state.tickets_repo().await?;
+    let config = state.configuracion_repo().await?;
+    let payload =
+        tpv_application::use_cases::tickets::ticket_de_pago(tickets.as_ref(), config.as_ref(), &args)
+            .await?;
+    imprimir_ticket(&app, payload).await
+}
+
 /// Imprime el papel de un arqueo (CUENTA-06).
 ///
 /// Documento **interno**: no gasta numero de ticket ni abre el cajon -que ya esta abierto, se acaba
-/// de contar-. Va aparte de `printer_print_ticket` a proposito: compartir el camino del ticket de
+/// de contar-. Va aparte del ticket de venta a proposito: compartir el camino del ticket de
 /// venta invitaria a que un cambio en uno se colara en el otro.
 #[tauri::command]
 async fn printer_print_arqueo(
@@ -2089,7 +2145,9 @@ pub fn run() {
             printer_list,
             printer_get_selected,
             printer_set_selected,
-            printer_print_ticket,
+            printer_imprimir_precuenta,
+            printer_ticket_de_pago,
+            printer_imprimir_pago,
             printer_print_arqueo,
             printer_ticket_cols,
             printer_open_drawer,
@@ -2194,7 +2252,6 @@ pub fn run() {
             commands::cierre_caja::cierre_listar,
             commands::cierre_caja::cierre_detalle,
             commands::cierre_caja::cierre_reabrir,
-            commands::cuentas::cuentas_ticket_para_reimprimir,
             // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
             commands::clientes::clientes_get_overview,
             commands::clientes::clientes_get_cliente_form,
@@ -2246,7 +2303,6 @@ pub fn run() {
             commands::venta_rapida::vr_get_detalles_ver_ticket,
             // verifactu (FISCAL-01). Sólo LECTURAS: la emisión ocurre dentro de la transacción
             // del cobro, no por un comando propio.
-            commands::verifactu::verifactu_bloque_ticket,
             commands::verifactu::verifactu_estado,
             commands::verifactu::verifactu_listar,
             commands::verifactu::verifactu_certificados,
@@ -2773,6 +2829,10 @@ mod tests_exenciones_del_gate {
             (
                 "tpv_server_signed_headers",
                 "firma cualquier petición sin gate: es la vuelta a la esquina del candado de                  `tpv_server_post_json` (SEC-01)",
+            ),
+            (
+                "printer_print_ticket",
+                "imprimía lo que la pantalla le mandara, número y QR incluidos: un papel con número que                  no era el de su factura (RI-29). El ticket de un cobro se compone en Rust desde la base",
             ),
             (
                 "cobrar_venta_rapida",

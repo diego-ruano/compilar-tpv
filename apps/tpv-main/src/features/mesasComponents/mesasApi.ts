@@ -262,7 +262,7 @@ export async function mesasCobrarDetalles(params: {
      * cobro con `factura_completa_requerida` y la pantalla abre `DatosFiscalesModal`.
      */
     destinatario?: DestinatarioInput;
-    /** Devuelve el número de ticket del cobro (cadena vacía si no había nada que cobrar). */
+    /** Devuelve el id del pago (cadena vacía si no había nada que cobrar): con él se pide su ticket. */
 }): Promise<string> {
     const idComanda = params.idComanda.trim();
     const detalleIds = params.detalleIds.map((x) => x.trim()).filter((s) => s.length > 0);
