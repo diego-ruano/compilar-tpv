@@ -17,7 +17,8 @@ type KitchenLine = {
 
 type KitchenComanda = {
     idComanda: string;
-    mesa: string;
+    /** `null` en un ticket de barra, que no tiene mesa (RI-69). */
+    mesa: string | null;
     apertura: string;
     lines: KitchenLine[];
 };
@@ -118,7 +119,7 @@ export default function KitchenBoard({
             if (!map.has(idComanda)) {
                 map.set(idComanda, {
                     idComanda,
-                    mesa: String(r.Numero_Mesa ?? ""),
+                    mesa: r.Numero_Mesa ?? null,
                     apertura: String(r.Fecha_Hora_Apertura ?? ""),
                     lines: [],
                 });
@@ -237,7 +238,7 @@ export default function KitchenBoard({
                                     <div className="flex items-center justify-between gap-3">
                                         <div className="min-w-0">
                                             <p className="text-lg font-extrabold">
-                                                Mesa {c.mesa} · Comanda #
+                                                {c.mesa !== null ? `Mesa ${c.mesa}` : "Barra"} · Comanda #
                                                 {c.idComanda}
                                             </p>
                                             <p className="text-sm text-fg-muted">

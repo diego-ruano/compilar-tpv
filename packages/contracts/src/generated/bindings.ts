@@ -712,7 +712,11 @@ last_error: string | null,
  */
 fallos: number, };
 
-export type KitchenRow = { ID_Comanda: string, Numero_Mesa: string, Fecha_Hora_Apertura: string, ID_Detalle: string, Cantidad: number, Nombre_Producto: string, Notas: string | null, Estado_Cocina: string | null, Pagado: number, };
+export type KitchenRow = { ID_Comanda: string, 
+/**
+ * `None` en un ticket de barra, que no tiene mesa (RI-69).
+ */
+Numero_Mesa: string | null, Fecha_Hora_Apertura: string, ID_Detalle: string, Cantidad: number, Nombre_Producto: string, Notas: string | null, Estado_Cocina: string | null, Pagado: number, };
 
 /**
  * Datos del formulario de activación. `activation_key` y `business_name` son los únicos

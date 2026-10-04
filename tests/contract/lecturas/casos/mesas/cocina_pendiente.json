@@ -1,5 +1,5 @@
 {
-  "descripcion": "La comanda de cocina: lo que falta por preparar. Es la pantalla mas viva del servicio. Las fechas de apertura son de 2099 a proposito: la consulta filtra por 'los ultimos 2 dias' contra date('now'), y una fecha muy futura pasa ese filtro hoy y dentro de setenta anos, asi que el golden no caduca. El seed comprueba las tres exclusiones: la bebida (su categoria no pasa por cocina), la comanda cuyos platos estan todos PREPARADO (desaparece entera) y el orden por hora de apertura.",
+  "descripcion": "La comanda de cocina: lo que falta por preparar. Es la pantalla mas viva del servicio. Las fechas de apertura son de 2099 a proposito: la consulta filtra por 'los ultimos 2 dias' contra date('now'), y una fecha muy futura pasa ese filtro hoy y dentro de setenta anos, asi que el golden no caduca. El seed comprueba las tres exclusiones: la bebida (su categoria no pasa por cocina), la comanda cuyos platos estan todos PREPARADO (desaparece entera) y el orden por hora de apertura. El ticket de barra (sin mesa) tambien sale, con Numero_Mesa null (RI-69).",
   "lectura": "mesas.cocina_pendiente",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-1', 'Salon', '[0,0,400,0,400,300,0,300]');",
@@ -18,10 +18,12 @@
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-tarde', 'MESA', 'mesa-2', '2099-01-01 21:30:00', 'Abierta');",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-pronto', 'MESA', 'mesa-1', '2099-01-01 13:00:00', 'Abierta');",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-toda-lista', 'MESA', 'mesa-3', '2099-01-01 14:00:00', 'Abierta');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-barra', 'BARRA', '2099-01-01 13:30:00', 'Abierta');",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina) VALUES ('det-a', 'com-pronto', 'prod-tortilla', 2, 900, 'sin cebolla', 'PENDIENTE');",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-b', 'com-pronto', 'prod-cerveza', 1, 300);",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-c', 'com-tarde', 'prod-croquetas', 1, 750, 'EN_PREPARACION');",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-d', 'com-toda-lista', 'prod-tortilla', 1, 900, 'PREPARADO');"
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-d', 'com-toda-lista', 'prod-tortilla', 1, 900, 'PREPARADO');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-e', 'com-barra', 'prod-croquetas', 1, 750, 'PENDIENTE');"
   ],
   "entrada": {}
 }

@@ -12,6 +12,17 @@
   },
   {
     "Cantidad": 1.0,
+    "Estado_Cocina": "PENDIENTE",
+    "Fecha_Hora_Apertura": "2099-01-01 13:30:00",
+    "ID_Comanda": "com-barra",
+    "ID_Detalle": "det-e",
+    "Nombre_Producto": "Croquetas",
+    "Notas": null,
+    "Numero_Mesa": null,
+    "Pagado": 0
+  },
+  {
+    "Cantidad": 1.0,
     "Estado_Cocina": "EN_PREPARACION",
     "Fecha_Hora_Apertura": "2099-01-01 21:30:00",
     "ID_Comanda": "com-tarde",

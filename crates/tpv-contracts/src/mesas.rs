@@ -229,8 +229,9 @@ pub struct ProductoVendibleOut {
 pub struct KitchenRow {
     #[serde(rename = "ID_Comanda")]
     pub id_comanda: String,
+    /// `None` en un ticket de barra, que no tiene mesa (RI-69).
     #[serde(rename = "Numero_Mesa")]
-    pub numero_mesa: String,
+    pub numero_mesa: Option<String>,
     #[serde(rename = "Fecha_Hora_Apertura")]
     pub fecha_hora_apertura: String,
     #[serde(rename = "ID_Detalle")]

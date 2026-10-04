@@ -428,6 +428,11 @@ pub(crate) const SQL_MESAS_META_ALL: &str = r#"
 /// RI-18: empieza por `Comandas` (el `CROSS JOIN` fija el orden de las tablas en SQLite) y
 /// compara la fecha tal cual, sin `datetime()`, para entrar por `idx_comandas_apertura`. Sin las
 /// dos cosas recorría todas las líneas de la historia. Lo vigila `planes::tests`.
+///
+/// RI-69: la mesa va con `LEFT JOIN` porque un ticket de barra no tiene (`Canal = 'BARRA'`), y
+/// con `JOIN` la comida vendida en barra no llegaba nunca a cocina. Sin mesa, `Numero_Mesa` sale
+/// `NULL` y el tablero la rotula «Barra». `Productos` sí puede ir con `JOIN`: un producto con
+/// líneas de comanda no se borra, se archiva (`SQL_QUITAR_PRODUCTO`).
 pub(crate) const SQL_COCINA_PENDIENTE: &str = r#"
     SELECT
       c.ID_Comanda, m.Numero_Mesa, c.Fecha_Hora_Apertura,
@@ -439,7 +444,7 @@ pub(crate) const SQL_COCINA_PENDIENTE: &str = r#"
       ) THEN 1 ELSE 0 END AS Pagado
     FROM Comandas c
     CROSS JOIN Detalle_Comanda dc ON dc.ID_Comanda = c.ID_Comanda
-    JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+    LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
     JOIN Productos p ON p.ID_Producto = dc.ID_Producto
     JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
     WHERE COALESCE(cat.Pasa_Cocina, 0) = 1
@@ -1992,7 +1997,7 @@ impl MesasRepository for SqliteMesasRepository {
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(KitchenRow {
                 id_comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
-                numero_mesa: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                numero_mesa: v_string(r.get_value(1).map_err(db_err)?),
                 fecha_hora_apertura: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 id_detalle: v_string(r.get_value(3).map_err(db_err)?).unwrap_or_default(),
                 cantidad: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(1.0),

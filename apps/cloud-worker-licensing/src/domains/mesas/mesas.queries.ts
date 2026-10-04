@@ -481,6 +481,8 @@ export async function cobrarDetallesPlan(
 // compara tal cual, sin datetime(). Asi entra por idx_comandas_apertura y lee solo las comandas de
 // los dos ultimos dias; antes recorria todas las lineas de la historia en cada refresco, y el
 // tablero se refresca con cada linea que se anade. Mismo cambio que kitchen_list_today_pending.
+// RI-69: la mesa va con LEFT JOIN porque un ticket de barra no tiene; sin ella Numero_Mesa sale NULL
+// y el tablero la rotula «Barra».
 export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 	const rs = await db.execute(`
 		SELECT
@@ -497,7 +499,7 @@ export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 			) THEN 1 ELSE 0 END AS Pagado
 		FROM Comandas c
 		CROSS JOIN Detalle_Comanda dc ON dc.ID_Comanda = c.ID_Comanda
-		JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+		LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		JOIN Productos p ON p.ID_Producto = dc.ID_Producto
 		JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 		WHERE COALESCE(cat.Pasa_Cocina, 0) = 1
