@@ -1,5 +1,5 @@
 {
-  "descripcion": "Alta de reserva con cliente EXISTENTE (encontrado por email): merge NO destructivo — conserva nombre/email ya presentes y rellena solo los vacíos (telefono y notas). Es el núcleo de RES-05: el mismo criterio de identidad y merge en ambos lados. ID_Cliente conocido → se incluye.",
+  "descripcion": "RI-61: reserva ASIGNADA a un cliente que ya existe (id_cliente, después de que la pantalla preguntara). Merge NO destructivo (RES-01): conserva el nombre y el email que ya tiene —el nombre escrito no lo renombra— y rellena sólo los huecos (teléfono y notas).",
   "comando": "reservas.guardar",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
@@ -18,7 +18,8 @@
     "nombre_cliente": "Bob Cambiado",
     "email": "bob@x.com",
     "telefono": "611222333",
-    "notas_cliente": "alergico"
+    "notas_cliente": "alergico",
+    "id_cliente": "cliente-1"
   },
   "snapshot": {
     "Clientes": "SELECT ID_Cliente, Nombre, Telefono, Email, Notas FROM Clientes",

@@ -1,0 +1,13 @@
+{
+  "descripcion": "RI-61: el cliente que ya tiene ese teléfono o ese email, para preguntar antes de asignarle la reserva. Se busca primero por email, que identifica: aquí el email es de Ana y el teléfono de Bea, y sale Ana con coincide_por = email. El email se compara sin mayúsculas (la ficha de Ana lo tiene con ellas).",
+  "lectura": "reservas.buscar_cliente",
+  "seed": [
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Created_At) VALUES ('cli-ana', 'Ana Gomez', '600100200', 'Ana@X.com', '2026-01-01 10:00:00');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Created_At) VALUES ('cli-bea-vieja', 'Bea (antigua)', '700700700', '2026-01-02 10:00:00');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Created_At) VALUES ('cli-bea', 'Bea Ruiz', '700700700', '2026-03-01 10:00:00');"
+  ],
+  "entrada": {
+    "telefono": "700700700",
+    "email": "ana@x.com"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "Clientes": [
+    {
+      "Fichas": 0
+    }
+  ],
+  "Reservas": [
+    {
+      "Comensales": 2,
+      "Dia_YMD": "2026-02-03",
+      "Estado": "confirmada",
+      "Hora": "21:00",
+      "ID_Cliente": null,
+      "ID_Mesa": "mesa-1",
+      "ID_Reserva": "reserva-1",
+      "Turno": "cena"
+    }
+  ]
+}

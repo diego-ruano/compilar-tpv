@@ -1,0 +1,27 @@
+{
+  "descripcion": "RI-61: una reserva SIN cliente. No se obliga a dar de alta a nadie: sin id, sin nombre, sin teléfono y sin email, la reserva va con ID_Cliente NULL y no se crea ninguna ficha.",
+  "comando": "reservas.guardar",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);"
+  ],
+  "entrada": {
+    "id_reserva": "reserva-1",
+    "id_mesa": "mesa-1",
+    "dia_ymd": "2026-02-03",
+    "hora": "21:00",
+    "turno": "cena",
+    "comensales": 2,
+    "nota": null,
+    "estado": "confirmada",
+    "id_cliente": null,
+    "nombre_cliente": null,
+    "email": null,
+    "telefono": null,
+    "notas_cliente": null
+  },
+  "snapshot": {
+    "Clientes": "SELECT COUNT(*) AS Fichas FROM Clientes",
+    "Reservas": "SELECT ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado FROM Reservas"
+  }
+}

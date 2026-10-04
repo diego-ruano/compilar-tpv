@@ -2,7 +2,7 @@
 
 import type { Client } from "@libsql/client/web";
 
-import type { ReservaDto, ReservasMetaDto } from "@tpv/contracts";
+import type { ClienteCoincidente, ReservaDto, ReservasMetaDto } from "@tpv/contracts";
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
@@ -51,24 +51,28 @@ export async function mes(
 	desde: string,
 	hasta: string,
 ): Promise<ReservaDto[]> {
+	// Los textos van con COALESCE, como el `s()` de la Main: el DTO de Rust que lee esto en la Handy
+	// los tiene como `String`, y un null de una reserva sin mesa o sin cliente (RI-61) no se dejaba
+	// deserializar y tumbaba el calendario entero.
 	const rs = await db.execute({
 		sql: `
 			SELECT
 				R.ID_Reserva AS id_reserva,
-				R.ID_Mesa AS id_mesa,
+				COALESCE(R.ID_Mesa, '') AS id_mesa,
 				R.Dia_YMD AS dia_ymd,
 				R.Hora AS hora,
 				R.Turno AS turno,
 				R.Comensales AS comensales,
 				R.Nota AS nota,
 				R.Estado AS estado,
-				C.Nombre AS nombre_cliente,
+				C.ID_Cliente AS id_cliente,
+				COALESCE(C.Nombre, '') AS nombre_cliente,
 				C.Telefono AS telefono_cliente,
 				C.Email AS email_cliente,
-				M.ID_Zona AS id_zona,
-				M.Numero_Mesa AS numero_mesa,
-				M.Capacidad AS capacidad,
-				Z.Nombre_Zona AS nombre_zona
+				COALESCE(M.ID_Zona, '') AS id_zona,
+				COALESCE(M.Numero_Mesa, '') AS numero_mesa,
+				COALESCE(M.Capacidad, 0) AS capacidad,
+				COALESCE(Z.Nombre_Zona, '') AS nombre_zona
 			FROM Reservas R
 			LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
 			LEFT JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa
@@ -113,44 +117,120 @@ export type ClienteExistente = {
 	notas: string | null;
 };
 
-// RES-01: trae TODOS los campos del cliente existente para poder rellenar solo los vacíos
-// (sin sobrescribir datos con valor). Busca por email y, si no, por teléfono.
-export async function findClienteReserva(
+const COLS_CLIENTE = `
+	ID_Cliente AS id_cliente,
+	Nombre AS nombre,
+	Email AS email,
+	Telefono AS telefono,
+	Notas AS notas
+`;
+
+// Por email sin distinguir mayúsculas: es el criterio del índice único `ux_clientes_email` (sobre
+// `lower(Email)`), el mismo por el que luego rechazaría el INSERT. Espejo de `POR_EMAIL` en la Main.
+const POR_EMAIL = "Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1";
+const POR_TELEFONO = "Telefono = ?1";
+const POR_ID = "ID_Cliente = ?1";
+
+async function clientePor(
 	db: Client,
-	email: string | null,
-	telefono: string | null,
+	filtro: string,
+	valor: string,
 ): Promise<ClienteExistente | null> {
-	const COLS = `
-		ID_Cliente AS id_cliente,
-		Nombre AS nombre,
-		Email AS email,
-		Telefono AS telefono,
-		Notas AS notas
-	`;
+	const rs = await db.execute({
+		sql: `SELECT ${COLS_CLIENTE} FROM Clientes WHERE ${filtro}
+		      ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;`,
+		args: [valor],
+	});
+	return (rows(rs)[0] as ClienteExistente | undefined) ?? null;
+}
 
-	if (email) {
-		// Case-insensitive: el email llega ya en minúsculas del schema, pero en la tabla puede
-		// haber filas antiguas con mayúsculas. Es además el criterio del índice único
-		// `ux_clientes_email` (sobre `lower(Email)`), o sea que buscamos por el mismo criterio por
-		// el que luego nos rechazaría el INSERT. Espejo de `upsert_cliente` en la Main.
-		const rs = await db.execute({
-			sql: `SELECT ${COLS} FROM Clientes
-			      WHERE Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1
-			      ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;`,
-			args: [email.toLowerCase()],
-		});
-		const row = rows(rs)[0];
-		if (row) return row as ClienteExistente;
+/**
+ * RI-61: el cliente que ya tiene ese email o, si no, ese teléfono, para que la pantalla pregunte
+ * antes de asignarle la reserva. Espejo de `buscar_cliente` en la Main.
+ */
+export async function buscarCliente(
+	db: Client,
+	telefono: string | null,
+	email: string | null,
+): Promise<ClienteCoincidente | null> {
+	const busquedas: [string | null, string, string][] = [
+		[email, POR_EMAIL, "email"],
+		[telefono, POR_TELEFONO, "telefono"],
+	];
+	for (const [valor, filtro, por] of busquedas) {
+		if (!valor) continue;
+		const c = await clientePor(db, filtro, valor);
+		if (c) {
+			return {
+				id_cliente: c.id_cliente,
+				nombre: c.nombre ?? "",
+				telefono: c.telefono,
+				email: c.email,
+				coincide_por: por,
+			};
+		}
 	}
-
-	if (telefono) {
-		const rs = await db.execute({
-			sql: `SELECT ${COLS} FROM Clientes WHERE Telefono = ?1 ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;`,
-			args: [telefono],
-		});
-		const row = rows(rs)[0];
-		if (row) return row as ClienteExistente;
-	}
-
 	return null;
+}
+
+/**
+ * El cliente que llevará la reserva, ya decidido (RI-61). Espejo de `resolver_cliente` en la Main:
+ *
+ * - **ninguno**: sin cliente.
+ * - **existente**: se le asigna; lo escrito sólo rellena sus huecos (RES-01), y un email que ya es de
+ *   otro cliente no se le pone. Si ya no existe, `cliente_no_encontrado`.
+ * - **nuevo**: una ficha nueva aunque otra comparta el teléfono; un email que ya es de otro cliente
+ *   es `email_duplicado`.
+ *
+ * Los valores del merge se calculan aquí y viajan horneados en la sentencia, para que la escritura
+ * replicada sea determinista.
+ */
+export type ClienteResuelto =
+	| { modo: "ninguno" }
+	| {
+			modo: "existente";
+			id_cliente: string;
+			actualizar: { email: string | null; telefono: string | null; notas: string | null } | null;
+	  }
+	| { modo: "nuevo" };
+
+export async function resolverCliente(
+	db: Client,
+	datos: {
+		id_cliente?: string | null;
+		nombre_cliente?: string | null;
+		telefono?: string | null;
+		email?: string | null;
+		notas_cliente?: string | null;
+	},
+): Promise<ClienteResuelto | { error: "cliente_no_encontrado" | "email_duplicado" }> {
+	if (datos.id_cliente) {
+		const ex = await clientePor(db, POR_ID, datos.id_cliente);
+		if (!ex) return { error: "cliente_no_encontrado" };
+
+		let emailLibre: string | null = null;
+		if (datos.email) {
+			const otro = await clientePor(db, POR_EMAIL, datos.email);
+			emailLibre = otro && otro.id_cliente !== ex.id_cliente ? null : datos.email;
+		}
+		const email = ex.email ?? emailLibre;
+		const telefono = ex.telefono ?? datos.telefono ?? null;
+		const notas = ex.notas ?? datos.notas_cliente ?? null;
+		// Sin nada que rellenar no se escribe: cada escritura viaja a la Main.
+		const cambia = email !== ex.email || telefono !== ex.telefono || notas !== ex.notas;
+		return {
+			modo: "existente",
+			id_cliente: ex.id_cliente,
+			actualizar: cambia ? { email, telefono, notas } : null,
+		};
+	}
+
+	if (datos.nombre_cliente) {
+		if (datos.email && (await clientePor(db, POR_EMAIL, datos.email))) {
+			return { error: "email_duplicado" };
+		}
+		return { modo: "nuevo" };
+	}
+
+	return { modo: "ninguno" };
 }

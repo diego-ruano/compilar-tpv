@@ -303,6 +303,8 @@ casos_de_contrato! {
     reservas__guardar_cliente_nuevo,
     reservas__guardar_cliente_existente,
     reservas__guardar_sin_mesa,
+    reservas__guardar_sin_cliente,
+    reservas__guardar_otra_persona_mismo_telefono,
     reservas__eliminar,
     venta_rapida__create_comanda_barra,
     venta_rapida__add_linea,
@@ -618,12 +620,15 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 comensales: e["comensales"].as_i64().unwrap(),
                 nota: opt_str(&e["nota"]),
                 estado: s(&e["estado"]),
-                cliente: ClienteReserva {
-                    nombre: s(&e["nombre_cliente"]),
-                    email: opt_str(&e["email"]),
-                    telefono: opt_str(&e["telefono"]),
-                    notas: opt_str(&e["notas_cliente"]),
-                },
+                // RI-61: el mismo reparto que hace la validación (y el schema del worker).
+                cliente: ClienteReserva::desde(
+                    opt_str(&e["id_cliente"]),
+                    opt_str(&e["nombre_cliente"]),
+                    opt_str(&e["telefono"]),
+                    opt_str(&e["email"]),
+                    opt_str(&e["notas_cliente"]),
+                )
+                .expect("cliente de la reserva"),
             })
             .await
             .expect("guardar reserva");

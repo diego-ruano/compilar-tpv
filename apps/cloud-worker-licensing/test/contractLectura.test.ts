@@ -56,6 +56,7 @@ import {
 	getProductosAll as proveedoresProductosTodos,
 } from "../src/domains/proveedores/proveedores.queries";
 import {
+	buscarCliente as reservasBuscarCliente,
 	mes as reservasMes,
 	meta as reservasMeta,
 } from "../src/domains/reservas/reservas.queries";
@@ -214,6 +215,10 @@ import casoResMeta from "../../../tests/contract/lecturas/casos/reservas/meta.js
 import goldenResMeta from "../../../tests/contract/lecturas/golden/reservas/meta.json";
 import casoResMes from "../../../tests/contract/lecturas/casos/reservas/mes.json";
 import goldenResMes from "../../../tests/contract/lecturas/golden/reservas/mes.json";
+import casoResBuscar from "../../../tests/contract/lecturas/casos/reservas/buscar_cliente.json";
+import goldenResBuscar from "../../../tests/contract/lecturas/golden/reservas/buscar_cliente.json";
+import casoResBuscarTel from "../../../tests/contract/lecturas/casos/reservas/buscar_cliente_por_telefono.json";
+import goldenResBuscarTel from "../../../tests/contract/lecturas/golden/reservas/buscar_cliente_por_telefono.json";
 import casoTareaTrab from "../../../tests/contract/lecturas/casos/tareas/trabajadores.json";
 import goldenTareaTrab from "../../../tests/contract/lecturas/golden/tareas/trabajadores.json";
 import casoTareaPapelera from "../../../tests/contract/lecturas/casos/tareas/papelera.json";
@@ -329,6 +334,8 @@ const CASOS = [
 	{ nombre: "proveedores_productos_todos", caso: casoProvProductosTodos, golden: goldenProvProductosTodos },
 	{ nombre: "reservas_meta", caso: casoResMeta, golden: goldenResMeta },
 	{ nombre: "reservas_mes", caso: casoResMes, golden: goldenResMes },
+	{ nombre: "reservas_buscar_cliente", caso: casoResBuscar, golden: goldenResBuscar },
+	{ nombre: "reservas_buscar_cliente_por_telefono", caso: casoResBuscarTel, golden: goldenResBuscarTel },
 	{ nombre: "tareas_trabajadores", caso: casoTareaTrab, golden: goldenTareaTrab },
 	{ nombre: "tareas_papelera", caso: casoTareaPapelera, golden: goldenTareaPapelera },
 	{ nombre: "tareas_por_id", caso: casoTareaPorId, golden: goldenTareaPorId },
@@ -533,6 +540,8 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return reservasMeta(db);
 		case "reservas.mes":
 			return reservasMes(db, e.desde, e.hasta);
+		case "reservas.buscar_cliente":
+			return reservasBuscarCliente(db, e.telefono ?? null, e.email ?? null);
 		case "tareas.trabajadores":
 			return getTrabajadores(db);
 		case "tareas.papelera":

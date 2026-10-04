@@ -16,8 +16,11 @@ import {
   Clock,
 } from "lucide-react";
 import {
+  reservasBuscarCliente,
   type Turno as TurnoApi,
 } from "../../features/reservas/reservasApis";
+import { toAppError } from "@tpv/client";
+import type { ClienteCoincidente } from "@tpv/contracts";
 import {
   useReservasMeta,
   useReservasMes,
@@ -53,6 +56,8 @@ type ReservaUI = {
   diaYMD: string;
   hora: string;
 
+  /** `null` si la reserva no tiene cliente (RI-61). */
+  idCliente: string | null;
   nombre: string;
   telefono: string;
   email: string;
@@ -71,6 +76,29 @@ type ReservaUI = {
 
   estado: string;
 };
+
+/** RI-61: la respuesta a «este teléfono es de Ana, ¿la reserva es para ella?». */
+type DecisionCliente = "asignar" | "nuevo" | "ninguno" | "cancelar";
+
+/** Los campos del cliente que viajan con la reserva (ver `ReservaSaveInput`). */
+type ClienteDeLaReserva = {
+  idCliente: string | null;
+  nombreCliente: string | null;
+  telefono: string | null;
+  email: string | null;
+};
+
+const SIN_CLIENTE: ClienteDeLaReserva = {
+  idCliente: null,
+  nombreCliente: null,
+  telefono: null,
+  email: null,
+};
+
+/** «ana gómez» y «Ana Gomez» son la misma persona a efectos de no preguntar. */
+function mismoNombre(a: string, b: string) {
+  return a.trim().localeCompare(b.trim(), "es", { sensitivity: "base" }) === 0;
+}
 
 type SessionBadge = {
   rolNombre: string;
@@ -375,6 +403,7 @@ export default function Reservas() {
         diaYMD: String(r?.Dia_YMD ?? ""),
         hora,
 
+        idCliente: r?.ID_Cliente ? String(r.ID_Cliente) : null,
         nombre: String(r?.Nombre_Cliente ?? ""),
         telefono: String(r?.Telefono_Cliente ?? ""),
         email: String(r?.Email_Cliente ?? ""),
@@ -419,6 +448,19 @@ export default function Reservas() {
   });
 
   const nombreInputRef = useRef<HTMLInputElement>(null);
+
+  // RI-61: el cliente que ya tenía la reserva que se edita, para no volver a preguntar si no se
+  // tocan sus datos. Y la pregunta «este teléfono es de Ana, ¿es ella?», que espera respuesta.
+  const [clienteAsignado, setClienteAsignado] = useState<{
+    id: string;
+    nombre: string;
+    telefono: string;
+    email: string;
+  } | null>(null);
+  const [preguntaCliente, setPreguntaCliente] = useState<{
+    coincidente: ClienteCoincidente;
+    responder: (d: DecisionCliente) => void;
+  } | null>(null);
 
   const [confirmBorrar, setConfirmBorrar] = useState<{
     open: boolean;
@@ -550,6 +592,7 @@ export default function Reservas() {
   }
 
   function resetFormulario() {
+    setClienteAsignado(null);
     setForm((p) => ({
       ...p,
       nombreCliente: "",
@@ -565,6 +608,16 @@ export default function Reservas() {
   function abrirFormulario(reserva?: ReservaUI) {
     if (reserva) {
       setReservaEditandoId(reserva.id);
+      setClienteAsignado(
+        reserva.idCliente
+          ? {
+              id: reserva.idCliente,
+              nombre: reserva.nombre,
+              telefono: reserva.telefono,
+              email: reserva.email ?? "",
+            }
+          : null,
+      );
       setForm({
         nombreCliente: reserva.nombre,
         telefono: reserva.telefono,
@@ -592,17 +645,73 @@ export default function Reservas() {
     resetFormulario();
   }
 
+  function preguntarCliente(coincidente: ClienteCoincidente): Promise<DecisionCliente> {
+    return new Promise((resolve) => {
+      setPreguntaCliente({
+        coincidente,
+        responder: (d) => {
+          setPreguntaCliente(null);
+          resolve(d);
+        },
+      });
+    });
+  }
+
+  /**
+   * RI-61: qué cliente lleva la reserva, o `null` si se cancela el guardado. Una reserva puede no
+   * tener cliente, y un teléfono o un email que ya son de otra persona no se le asignan sin
+   * preguntar: antes, Luis reservaba con el teléfono de Ana y el calendario decía «Ana».
+   */
+  async function decidirCliente(): Promise<ClienteDeLaReserva | null> {
+    const nombre = form.nombreCliente.trim();
+    const telefono = form.telefono.trim();
+    const email = form.email.trim();
+    const escrito = { telefono: telefono || null, email: email || null };
+
+    // Editando sin tocar los datos del cliente, se queda el que tenía.
+    if (
+      clienteAsignado &&
+      nombre === clienteAsignado.nombre.trim() &&
+      telefono === clienteAsignado.telefono.trim() &&
+      email === clienteAsignado.email.trim()
+    ) {
+      return { ...escrito, idCliente: clienteAsignado.id, nombreCliente: null };
+    }
+    if (!nombre && !telefono && !email) return SIN_CLIENTE;
+
+    if (telefono || email) {
+      const c = await reservasBuscarCliente(escrito);
+      if (c) {
+        // El mismo cliente (o el que ya tenía la reserva): no hay nada que preguntar.
+        if (c.id_cliente === clienteAsignado?.id || (nombre && mismoNombre(c.nombre, nombre))) {
+          return { ...escrito, idCliente: c.id_cliente, nombreCliente: null };
+        }
+        const d = await preguntarCliente(c);
+        if (d === "cancelar") return null;
+        if (d === "ninguno") return SIN_CLIENTE;
+        if (d === "asignar") return { ...escrito, idCliente: c.id_cliente, nombreCliente: null };
+        // «Es otra persona»: sólo se ofrece por teléfono y con un nombre escrito.
+        return { ...escrito, idCliente: null, nombreCliente: nombre };
+      }
+    }
+
+    if (!nombre) {
+      toast.info(
+        "Falta el nombre",
+        "Para dar de alta al cliente hace falta su nombre. Si no quieres ficha de cliente, deja vacíos el teléfono y el email.",
+      );
+      return null;
+    }
+    return { ...escrito, idCliente: null, nombreCliente: nombre };
+  }
+
   async function guardarReserva(e: React.FormEvent) {
     e.preventDefault();
-
-    if (!form.nombreCliente.trim()) return toast.info("Validación", "El nombre es obligatorio.");
 
     const emailTrim = form.email.trim();
     if (emailTrim && !emailValido(emailTrim)) {
       return toast.info("Validación", "El email no parece válido.");
     }
-    const emailOrNull: string | null = emailTrim ? emailTrim : null;
-
     if (!form.hora) return toast.info("Validación", "La hora es obligatoria.");
     if (!form.comensales || form.comensales < 1) {
       return toast.info("Validación", "Los comensales son obligatorios.");
@@ -624,8 +733,8 @@ export default function Reservas() {
     if (ocupada) return toast.error("Error", "Esa mesa ya tiene una reserva a esa hora.");
 
     try {
-      const nombreTrim = form.nombreCliente.trim();
-      const telTrim = form.telefono.trim();
+      const cliente = await decidirCliente();
+      if (!cliente) return;
       const notaTrim = form.nota?.trim() || "";
 
       // El estado NO se toca al editar: mandarlo fijo a "ACTIVA" resucitaba una reserva ya
@@ -646,10 +755,11 @@ export default function Reservas() {
 
         idMesa: form.idMesa || null,
 
-        nombreCliente: nombreTrim,
-        telefono: telTrim || null,
-        email: emailOrNull,
-        notasCliente: notaTrim || null,
+        idCliente: cliente.idCliente,
+        nombreCliente: cliente.nombreCliente,
+        telefono: cliente.telefono,
+        email: cliente.email,
+        notasCliente: cliente.idCliente || cliente.nombreCliente ? notaTrim || null : null,
       });
 
       if (!ok) return toast.error("Error", "No se pudo guardar la reserva.");
@@ -660,7 +770,11 @@ export default function Reservas() {
       resetFormulario();
     } catch (err) {
       console.error(err);
-      toast.error("Error", "Error al guardar en BBDD.");
+      // Lo que el backend rechaza a propósito llega con su frase (un email que ya es de otro
+      // cliente, una mesa ocupada…); antes se enseñaba siempre el mismo «Error al guardar».
+      const { code, message } = toAppError(err);
+      const propio = code === "validation" || code === "conflict" || code === "not_found";
+      toast.error("No se pudo guardar la reserva", propio ? message : "Error al guardar en BBDD.");
     }
   }
 
@@ -817,10 +931,9 @@ export default function Reservas() {
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <div className="sm:col-span-2">
                         <label className="mb-1 block text-[11px] font-bold text-fg-muted">
-                          Nombre cliente *
+                          Nombre del cliente (opcional: sin datos, la reserva va sin cliente)
                         </label>
                         <input
-                          required
                           ref={nombreInputRef}
                           value={form.nombreCliente}
                           onChange={(e) => setForm((p) => ({ ...p, nombreCliente: e.target.value }))}
@@ -1076,6 +1189,74 @@ export default function Reservas() {
               )}
             </div>
           </div>
+
+          {preguntaCliente && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4"
+              onClick={() => preguntaCliente.responder("cancelar")}
+            >
+              <div
+                className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-xl sm:p-5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="text-lg font-extrabold text-fg">
+                  ¿La reserva es para {preguntaCliente.coincidente.nombre}?
+                </div>
+
+                <div className="mt-2 text-sm text-fg-muted">
+                  {preguntaCliente.coincidente.coincide_por === "email"
+                    ? `El email ${preguntaCliente.coincidente.email ?? ""}`
+                    : `El teléfono ${preguntaCliente.coincidente.telefono ?? ""}`}{" "}
+                  ya es de <span className="font-bold text-fg">{preguntaCliente.coincidente.nombre}</span>.
+                </div>
+
+                {preguntaCliente.coincidente.coincide_por === "email" ? (
+                  <div className="mt-2 text-xs text-fg-muted">
+                    Dos clientes no pueden compartir el email. Si es otra persona, cancela y cambia el
+                    email o déjalo vacío.
+                  </div>
+                ) : !form.nombreCliente.trim() ? (
+                  <div className="mt-2 text-xs text-fg-muted">
+                    Si es otra persona, cancela y escribe su nombre para darla de alta.
+                  </div>
+                ) : null}
+
+                <div className="mt-5 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => preguntaCliente.responder("asignar")}
+                    className="rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:opacity-90"
+                  >
+                    SÍ, ES {preguntaCliente.coincidente.nombre.toUpperCase()}
+                  </button>
+                  {preguntaCliente.coincidente.coincide_por === "telefono" &&
+                  form.nombreCliente.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => preguntaCliente.responder("nuevo")}
+                      className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-bold text-fg hover:bg-surface-2"
+                    >
+                      NO, ES OTRA PERSONA (DAR DE ALTA A {form.nombreCliente.trim().toUpperCase()})
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => preguntaCliente.responder("ninguno")}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-bold text-fg hover:bg-surface-2"
+                  >
+                    GUARDAR SIN CLIENTE
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => preguntaCliente.responder("cancelar")}
+                    className="rounded-lg px-3 py-2 text-xs font-bold text-fg-muted hover:bg-surface-2"
+                  >
+                    CANCELAR
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {confirmBorrar.open && (
             <div

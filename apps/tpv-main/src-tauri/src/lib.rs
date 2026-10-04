@@ -2206,6 +2206,7 @@ pub fn run() {
             commands::reservas::reservas_get_meta,
             commands::reservas::reservas_get_mes,
             commands::reservas::reservas_save,
+            commands::reservas::reservas_buscar_cliente,
             commands::reservas::reservas_delete,
             // proveedores (migrado a arquitectura hexagonal — commands/proveedores.rs)
             commands::proveedores::proveedores_get_all,

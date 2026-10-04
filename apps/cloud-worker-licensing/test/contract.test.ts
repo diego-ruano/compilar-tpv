@@ -84,7 +84,8 @@ import {
 	setVinculos,
 } from "../src/domains/proveedores/proveedores.commands";
 import { deleteReserva, saveReserva } from "../src/domains/reservas/reservas.commands";
-import { findClienteReserva } from "../src/domains/reservas/reservas.queries";
+import { resolverCliente } from "../src/domains/reservas/reservas.queries";
+import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 import {
 	createTarea,
 	deleteTarea,
@@ -182,6 +183,10 @@ import casoResExistente from "../../../tests/contract/casos/reservas/guardar_cli
 import goldenResExistente from "../../../tests/contract/golden/reservas/guardar_cliente_existente.json";
 import casoResSinMesa from "../../../tests/contract/casos/reservas/guardar_sin_mesa.json";
 import goldenResSinMesa from "../../../tests/contract/golden/reservas/guardar_sin_mesa.json";
+import casoResSinCliente from "../../../tests/contract/casos/reservas/guardar_sin_cliente.json";
+import goldenResSinCliente from "../../../tests/contract/golden/reservas/guardar_sin_cliente.json";
+import casoResOtraPersona from "../../../tests/contract/casos/reservas/guardar_otra_persona_mismo_telefono.json";
+import goldenResOtraPersona from "../../../tests/contract/golden/reservas/guardar_otra_persona_mismo_telefono.json";
 import casoResEliminar from "../../../tests/contract/casos/reservas/eliminar.json";
 import goldenResEliminar from "../../../tests/contract/golden/reservas/eliminar.json";
 import casoVrCrearComanda from "../../../tests/contract/casos/venta_rapida/create_comanda_barra.json";
@@ -303,6 +308,12 @@ const CASOS = [
 	{ nombre: "reservas_guardar_cliente_nuevo", caso: casoResNuevo, golden: goldenResNuevo },
 	{ nombre: "reservas_guardar_cliente_existente", caso: casoResExistente, golden: goldenResExistente },
 	{ nombre: "reservas_guardar_sin_mesa", caso: casoResSinMesa, golden: goldenResSinMesa },
+	{ nombre: "reservas_guardar_sin_cliente", caso: casoResSinCliente, golden: goldenResSinCliente },
+	{
+		nombre: "reservas_guardar_otra_persona_mismo_telefono",
+		caso: casoResOtraPersona,
+		golden: goldenResOtraPersona,
+	},
 	{ nombre: "reservas_eliminar", caso: casoResEliminar, golden: goldenResEliminar },
 	{ nombre: "vr_create_comanda_barra", caso: casoVrCrearComanda, golden: goldenVrCrearComanda },
 	{ nombre: "vr_add_linea", caso: casoVrAddLinea, golden: goldenVrAddLinea },
@@ -614,13 +625,12 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "reservas.guardar": {
-			// La ruta busca el cliente existente por email/teléfono antes de construir el comando.
-			const cliente = await findClienteReserva(
-				db,
-				caso.entrada.email ?? null,
-				caso.entrada.telefono ?? null,
-			);
-			aplicar(hub, sql, saveReserva(caso.entrada as any, cliente));
+			// Como la ruta: el schema normaliza la entrada y RI-61 resuelve el cliente (ninguno, uno
+			// existente o uno nuevo) antes de construir el comando.
+			const datos = reservaSaveSchema.parse(caso.entrada);
+			const cliente = await resolverCliente(db, datos);
+			if ("error" in cliente) throw new Error(`reservas.guardar: ${cliente.error}`);
+			aplicar(hub, sql, saveReserva({ ...datos, turno: caso.entrada.turno, estado: caso.entrada.estado } as any, cliente));
 			return;
 		}
 		case "reservas.eliminar": {

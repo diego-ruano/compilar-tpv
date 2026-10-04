@@ -1,0 +1,22 @@
+{
+  "Clientes": [
+    {
+      "Email": null,
+      "Nombre": "Ana",
+      "Notas": null,
+      "Telefono": "600100200"
+    },
+    {
+      "Email": null,
+      "Nombre": "Luis",
+      "Notas": null,
+      "Telefono": "600100200"
+    }
+  ],
+  "Reservas": [
+    {
+      "Cliente": "Luis",
+      "ID_Reserva": "reserva-1"
+    }
+  ]
+}

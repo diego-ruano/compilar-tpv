@@ -300,6 +300,13 @@ export type ClavesTabla = { nombre: string, columnas: Array<string>, claves: Arr
 truncada: boolean, };
 
 /**
+ * El cliente que ya tiene ese teléfono o ese email. Se busca primero por email, que identifica
+ * (índice único), y luego por teléfono. `coincide_por` es `"email"` o `"telefono"`: con el email
+ * no cabe «es otra persona», porque dos clientes no pueden compartirlo.
+ */
+export type ClienteCoincidente = { id_cliente: string, nombre: string, telefono: string | null, email: string | null, coincide_por: string, };
+
+/**
  * Datos del formulario de edición de un cliente.
  */
 export type ClienteForm = { nombre: string, email: string | null, telefono: string | null, notas: string | null, };
@@ -1282,18 +1289,35 @@ estado_envio?: string, intentos: number, codigo_error?: string, descripcion_erro
 csv?: string, };
 
 /**
+ * RI-61: ¿el teléfono o el email que se acaban de escribir ya son de un cliente? Se pregunta antes
+ * de guardar, para que la pantalla ofrezca asignarle la reserva en vez de hacerlo por detrás.
+ */
+export type ReservaBuscarClienteArgs = { telefono?: string, email?: string, };
+
+/**
  * Entrada de borrado de reserva.
  */
 export type ReservaDeleteInput = { id_reserva: string, };
 
-export type ReservaDto = { id_reserva: string, id_mesa: string, dia_ymd: string, hora: string, turno: string | null, comensales: number, nota: string | null, estado: string, nombre_cliente: string, telefono_cliente: string | null, email_cliente: string | null, id_zona: string, numero_mesa: string, capacidad: number, nombre_zona: string, };
+export type ReservaDto = { id_reserva: string, id_mesa: string, dia_ymd: string, hora: string, turno: string | null, comensales: number, nota: string | null, estado: string, 
+/**
+ * `None` si la reserva no tiene cliente (RI-61); entonces `nombre_cliente` llega vacío.
+ */
+id_cliente: string | null, nombre_cliente: string, telefono_cliente: string | null, email_cliente: string | null, id_zona: string, numero_mesa: string, capacidad: number, nombre_zona: string, };
 
 export type ReservaMesaOut = { idReserva: string, clienteNombre: string, diaYMD: string, hora: string, estado: string, minutosPara: number, };
 
 /**
  * Entrada de guardado de reserva (Local-First: sin op_id/outbox/remote_id).
  */
-export type ReservaSaveInput = { id_reserva?: string, dia_ymd: string, hora: string, turno?: string, comensales: number, nota?: string, estado?: string, id_mesa?: string, nombre_cliente: string, telefono?: string, email?: string, notas_cliente?: string, };
+export type ReservaSaveInput = { id_reserva?: string, dia_ymd: string, hora: string, turno?: string, comensales: number, nota?: string, estado?: string, id_mesa?: string, 
+/**
+ * RI-61: el cliente es opcional y explícito. `id_cliente` asigna uno que ya existe (lo que se
+ * escriba abajo sólo rellena sus huecos); sin id, un `nombre_cliente` crea uno nuevo; y sin
+ * nada, la reserva va sin cliente. Antes de asignar por teléfono o email, la pantalla pregunta
+ * con `reservas_buscar_cliente`.
+ */
+id_cliente?: string, nombre_cliente?: string, telefono?: string, email?: string, notas_cliente?: string, };
 
 /**
  * Argumentos del rango mensual.

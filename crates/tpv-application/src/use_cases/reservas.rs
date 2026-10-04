@@ -1,7 +1,8 @@
 //! Casos de uso de reservas (Local-First).
 
 use tpv_contracts::reservas::{
-    ReservaDeleteInput, ReservaDto, ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
+    ClienteCoincidente, ReservaBuscarClienteArgs, ReservaDeleteInput, ReservaDto,
+    ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
 };
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 use tpv_domain::reservas::{normalize_dia_ymd, ReservaValidada};
@@ -34,7 +35,6 @@ pub async fn guardar(
         .as_deref()
         .map(|s| s.trim().is_empty())
         .unwrap_or(true);
-    let nombre_cliente = input.nombre_cliente.trim().to_string();
     let dia = input.dia_ymd.trim().to_string();
     let hora = input.hora.trim().to_string();
 
@@ -47,7 +47,8 @@ pub async fn guardar(
         input.nota,
         input.estado,
         input.id_mesa,
-        input.nombre_cliente,
+        input.id_cliente,
+        input.nombre_cliente.clone(),
         input.telefono,
         input.email,
         input.notas_cliente,
@@ -59,7 +60,11 @@ pub async fn guardar(
     // Aviso "nueva reserva" a los administradores (SOLO en altas, no al editar). Best-effort.
     if ok && es_nueva {
         if let Some(notifier) = notifier {
-            let cuerpo = format!("{nombre_cliente} · {dia} {hora}");
+            // Sin cliente nuevo (asignada a uno que ya existe, o sin cliente, RI-61) va sólo la hora.
+            let cuerpo = match input.nombre_cliente.as_deref().map(str::trim) {
+                Some(nombre) if !nombre.is_empty() => format!("{nombre} · {dia} {hora}"),
+                _ => format!("{dia} {hora}"),
+            };
             let _ = notifier
                 .emitir(NuevaNotificacion {
                     tipo: "reserva_nueva".to_string(),
@@ -77,6 +82,21 @@ pub async fn guardar(
     }
 
     Ok(ok)
+}
+
+/// RI-61: el cliente que ya tiene ese teléfono o ese email, para que la pantalla pregunte antes de
+/// asignarle la reserva. Sin ninguno de los dos no hay nada que buscar.
+pub async fn buscar_cliente(
+    repo: &dyn ReservasRepository,
+    args: ReservaBuscarClienteArgs,
+) -> AppResult<Option<ClienteCoincidente>> {
+    let telefono = args.telefono.map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    // En minúsculas, como se guarda (`limpia_email`) y como lo compara el índice único.
+    let email = args.email.map(|e| e.trim().to_lowercase()).filter(|e| !e.is_empty());
+    if telefono.is_none() && email.is_none() {
+        return Ok(None);
+    }
+    repo.buscar_cliente(telefono.as_deref(), email.as_deref()).await
 }
 
 pub async fn eliminar(repo: &dyn ReservasRepository, input: ReservaDeleteInput) -> AppResult<bool> {
@@ -103,6 +123,13 @@ mod tests {
         async fn guardar(&self, _: ReservaValidada) -> AppResult<bool> {
             panic!("repo llamado")
         }
+        async fn buscar_cliente(
+            &self,
+            _: Option<&str>,
+            _: Option<&str>,
+        ) -> AppResult<Option<ClienteCoincidente>> {
+            panic!("repo llamado")
+        }
         async fn eliminar(&self, _: &str) -> AppResult<bool> {
             panic!("repo llamado")
         }
@@ -120,6 +147,13 @@ mod tests {
         }
         async fn guardar(&self, _: ReservaValidada) -> AppResult<bool> {
             Ok(true)
+        }
+        async fn buscar_cliente(
+            &self,
+            _: Option<&str>,
+            _: Option<&str>,
+        ) -> AppResult<Option<ClienteCoincidente>> {
+            Ok(None)
         }
         async fn eliminar(&self, _: &str) -> AppResult<bool> {
             Ok(true)
@@ -151,7 +185,8 @@ mod tests {
             nota: None,
             estado: None,
             id_mesa: Some("m1".into()),
-            nombre_cliente: "Ana".into(),
+            id_cliente: None,
+            nombre_cliente: Some("Ana".into()),
             telefono: None,
             email: None,
             notas_cliente: None,
@@ -167,6 +202,23 @@ mod tests {
         assert_eq!(emitidas.len(), 1);
         assert_eq!(emitidas[0].tipo, "reserva_nueva");
         assert_eq!(emitidas[0].destino, Destino::Rol(ADMIN_ROL_ID.to_string()));
+    }
+
+    #[tokio::test]
+    async fn una_reserva_sin_cliente_se_guarda_y_avisa_solo_con_la_hora() {
+        // RI-61: sin cliente es un alta válida, no un «nombre_cliente required».
+        let notifier = FakeNotifier::default();
+        let input = ReservaSaveInput { nombre_cliente: None, ..input_reserva(None) };
+        assert!(guardar(&RepoOk, Some(&notifier), input).await.unwrap());
+
+        let emitidas = notifier.emitidas.lock().unwrap();
+        assert_eq!(emitidas[0].cuerpo.as_deref(), Some("2026-07-25 20:30"));
+    }
+
+    #[tokio::test]
+    async fn buscar_cliente_sin_telefono_ni_email_no_pregunta_al_repo() {
+        let args = ReservaBuscarClienteArgs { telefono: Some("  ".into()), email: None };
+        assert_eq!(buscar_cliente(&RepoQueNoDebeLlamarse, args).await.unwrap(), None);
     }
 
     #[tokio::test]

@@ -1,0 +1,28 @@
+{
+  "descripcion": "RI-61: «es otra persona». Luis reserva con el teléfono de Ana y la pantalla, al preguntar, recibe que no es Ana: se crea una ficha NUEVA para Luis con ese teléfono y la de Ana no se toca. Antes la reserva se le asignaba a Ana sin preguntar. El ID del cliente nuevo lo genera cada lado, así que la reserva se ancla por el nombre.",
+  "comando": "reservas.guardar",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Created_At) VALUES ('cli-ana', 'Ana', '600100200', '2026-01-01 00:00:00');"
+  ],
+  "entrada": {
+    "id_reserva": "reserva-1",
+    "id_mesa": "mesa-1",
+    "dia_ymd": "2026-02-03",
+    "hora": "21:00",
+    "turno": "cena",
+    "comensales": 2,
+    "nota": null,
+    "estado": "confirmada",
+    "id_cliente": null,
+    "nombre_cliente": "Luis",
+    "telefono": "600100200",
+    "email": null,
+    "notas_cliente": null
+  },
+  "snapshot": {
+    "Clientes": "SELECT Nombre, Telefono, Email, Notas FROM Clientes",
+    "Reservas": "SELECT r.ID_Reserva AS ID_Reserva, c.Nombre AS Cliente FROM Reservas r LEFT JOIN Clientes c ON c.ID_Cliente = r.ID_Cliente"
+  }
+}

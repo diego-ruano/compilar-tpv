@@ -1,0 +1,13 @@
+{
+  "descripcion": "RI-61: sin email, por teléfono. Dos fichas comparten el de Bea y sale la más reciente (Created_At), igual en los dos lados.",
+  "lectura": "reservas.buscar_cliente",
+  "seed": [
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Created_At) VALUES ('cli-ana', 'Ana Gomez', '600100200', 'Ana@X.com', '2026-01-01 10:00:00');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Created_At) VALUES ('cli-bea-vieja', 'Bea (antigua)', '700700700', '2026-01-02 10:00:00');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Created_At) VALUES ('cli-bea', 'Bea Ruiz', '700700700', '2026-03-01 10:00:00');"
+  ],
+  "entrada": {
+    "telefono": "700700700",
+    "email": null
+  }
+}

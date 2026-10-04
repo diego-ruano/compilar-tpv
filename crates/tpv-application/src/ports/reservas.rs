@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::reservas::{ReservaDto, ReservasMetaDto};
+use tpv_contracts::reservas::{ClienteCoincidente, ReservaDto, ReservasMetaDto};
 use tpv_domain::reservas::ReservaValidada;
 
 use crate::error::AppResult;
@@ -15,8 +15,16 @@ pub trait ReservasRepository: Send + Sync {
     /// Reservas en el rango `[desde, hasta]` (ambos YYYY-MM-DD ya normalizados).
     async fn mes(&self, desde: &str, hasta: &str) -> AppResult<Vec<ReservaDto>>;
 
-    /// Crea o actualiza una reserva (con upsert del cliente asociado). Devuelve `true` si quedó persistida.
+    /// Crea o actualiza una reserva con su cliente (ninguno, uno existente o uno nuevo, RI-61).
+    /// Devuelve `true` si quedó persistida.
     async fn guardar(&self, reserva: ReservaValidada) -> AppResult<bool>;
+
+    /// RI-61: el cliente que ya tiene ese email o, si no, ese teléfono (ya normalizados).
+    async fn buscar_cliente(
+        &self,
+        telefono: Option<&str>,
+        email: Option<&str>,
+    ) -> AppResult<Option<ClienteCoincidente>>;
 
     /// Elimina una reserva (desvinculando comandas). Devuelve `true` si borró alguna fila.
     async fn eliminar(&self, id_reserva: &str) -> AppResult<bool>;

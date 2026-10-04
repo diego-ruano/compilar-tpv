@@ -4,7 +4,7 @@
 // Las firmas y tipos UI exportados no cambian; los payloads vienen de @tpv/contracts.
 
 import { invokeClient } from "@tpv/client";
-import type { ReservaDto, ReservasMetaDto } from "@tpv/contracts";
+import type { ClienteCoincidente, ReservaDto, ReservasMetaDto } from "@tpv/contracts";
 
 /* ========================= Tipos UI ========================= */
 
@@ -32,6 +32,8 @@ export type ReservaRow = {
     Nota: string | null;
     Estado: string;
 
+    /** `null` si la reserva no tiene cliente (RI-61); entonces el nombre llega vacío. */
+    ID_Cliente: string | null;
     Nombre_Cliente: string;
     Telefono_Cliente: string | null;
     Email_Cliente: string | null;
@@ -60,7 +62,12 @@ export type ReservaSaveInput = {
     /** `null` = reserva apuntada sin mesa asignada todavia. */
     idMesa: string | null;
 
-    nombreCliente: string;
+    /**
+     * RI-61: el cliente es opcional y explícito. `idCliente` asigna uno que ya existe (lo escrito
+     * sólo rellena sus huecos); sin él, `nombreCliente` crea uno nuevo; sin nada, va sin cliente.
+     */
+    idCliente?: string | null;
+    nombreCliente?: string | null;
     telefono?: string | null;
     email?: string | null;
     notasCliente?: string | null;
@@ -127,6 +134,7 @@ function mapReserva(r: ReservaDto): ReservaRow {
         Nota: toNullableStr(r.nota),
         Estado: String(r.estado ?? "PROXIMA"),
 
+        ID_Cliente: toNullableStr(r.id_cliente),
         Nombre_Cliente: String(r.nombre_cliente ?? ""),
         Telefono_Cliente: toNullableStr(r.telefono_cliente),
         Email_Cliente: toNullableStr(r.email_cliente),
@@ -167,11 +175,25 @@ export async function reservasSave(input: ReservaSaveInput): Promise<boolean> {
             nota: input.nota ?? null,
             estado: input.estado ?? null,
             id_mesa: input.idMesa,
-            nombre_cliente: input.nombreCliente,
+            id_cliente: input.idCliente ?? null,
+            nombre_cliente: input.nombreCliente ?? null,
             telefono: input.telefono ?? null,
             email: input.email ?? null,
             notas_cliente: input.notasCliente ?? null,
         },
+    });
+}
+
+/**
+ * RI-61: el cliente que ya tiene ese teléfono o ese email, para preguntar antes de asignarle la
+ * reserva. `null` si no hay ninguno.
+ */
+export async function reservasBuscarCliente(params: {
+    telefono: string | null;
+    email: string | null;
+}): Promise<ClienteCoincidente | null> {
+    return await invokeClient<ClienteCoincidente | null>("reservas_buscar_cliente", {
+        args: { telefono: params.telefono, email: params.email },
     });
 }
 

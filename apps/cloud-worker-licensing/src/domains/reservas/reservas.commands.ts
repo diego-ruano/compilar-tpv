@@ -2,6 +2,7 @@
 
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
+import type { ClienteResuelto } from "./reservas.queries";
 import type { ReservaSaveInput } from "./reservas.schemas";
 
 export type BuiltCommand = {
@@ -13,96 +14,90 @@ export type BuiltCommand = {
 const REF_ID_CLIENTE = { $ref: "id_cliente" } as const;
 const REF_ID_RESERVA = { $ref: "id_reserva" } as const;
 
-export type ClienteReservaExistente = {
-	id_cliente: string;
-	nombre: string | null;
-	email: string | null;
-	telefono: string | null;
-	notas: string | null;
-} | null;
+/**
+ * Los pasos del cliente según lo que decidió `resolverCliente` (RI-61), y el valor que va en
+ * `Reservas.ID_Cliente`: nada, el id del que ya existe o la referencia al que se crea aquí.
+ */
+function clienteSteps(
+	input: ReservaSaveInput,
+	cliente: ClienteResuelto,
+): { steps: any[]; idCliente: string | typeof REF_ID_CLIENTE | null } {
+	switch (cliente.modo) {
+		case "ninguno":
+			return { steps: [], idCliente: null };
 
-function cleanOrNull(s: unknown): string | null {
-	const t = (s ?? "").toString().trim();
-	return t.length ? t : null;
-}
+		case "existente":
+			return {
+				steps: cliente.actualizar
+					? [
+							{
+								kind: "execute",
+								sql: `
+									UPDATE Clientes
+									SET
+										Email = ?1,
+										Telefono = ?2,
+										Notas = ?3
+									WHERE ID_Cliente = ?4;
+								`,
+								args: [
+									cliente.actualizar.email,
+									cliente.actualizar.telefono,
+									cliente.actualizar.notas,
+									cliente.id_cliente,
+								],
+							},
+						]
+					: [],
+				idCliente: cliente.id_cliente,
+			};
 
-/** RES-01: conserva el valor existente si lo tiene; solo rellena cuando está vacío. */
-function fillEmpty(existente: unknown, nuevo: unknown): string | null {
-	return cleanOrNull(existente) ?? cleanOrNull(nuevo);
-}
-
-function clienteSteps(input: ReservaSaveInput, cliente: ClienteReservaExistente) {
-	if (cliente?.id_cliente) {
-		// Merge no destructivo: NO se sobrescriben datos existentes; solo se rellenan los vacíos.
-		// Los valores se calculan aquí (horneados) para que la escritura sea determinista.
-		const nombre = cleanOrNull(cliente.nombre) ?? input.nombre_cliente;
-		const email = fillEmpty(cliente.email, input.email);
-		const telefono = fillEmpty(cliente.telefono, input.telefono);
-		const notas = fillEmpty(cliente.notas, input.notas_cliente);
-		return [
-			{
-				kind: "execute",
-				sql: `
-					UPDATE Clientes
-					SET
-						Nombre = ?1,
-						Email = ?2,
-						Telefono = ?3,
-						Notas = ?4
-					WHERE ID_Cliente = ?5;
-				`,
-				args: [nombre, email, telefono, notas, cliente.id_cliente],
-			},
-			{
-				kind: "value",
-				saveAs: "id_cliente",
-				sql: "SELECT ?1;",
-				args: [cliente.id_cliente],
-			},
-		];
+		case "nuevo":
+			return {
+				steps: [
+					{
+						kind: "value",
+						saveAs: "id_cliente",
+						sql: "SELECT ?1;",
+						args: [nuevoId()],
+					},
+					{
+						kind: "execute",
+						sql: `
+							INSERT INTO Clientes (
+								ID_Cliente,
+								Nombre,
+								Telefono,
+								Email,
+								Notas,
+								Created_At
+							)
+							VALUES (
+								?1,
+								?2,
+								?3,
+								?4,
+								?5,
+								datetime('now','localtime')
+							);
+						`,
+						args: [
+							REF_ID_CLIENTE,
+							input.nombre_cliente,
+							input.telefono,
+							input.email,
+							input.notas_cliente,
+						],
+					},
+				],
+				idCliente: REF_ID_CLIENTE,
+			};
 	}
-
-	return [
-		{
-			kind: "value",
-			saveAs: "id_cliente",
-			sql: "SELECT ?1;",
-			args: [nuevoId()],
-		},
-		{
-			kind: "execute",
-			sql: `
-				INSERT INTO Clientes (
-					ID_Cliente,
-					Nombre,
-					Telefono,
-					Email,
-					Notas,
-					Created_At
-				)
-				VALUES (
-					?1,
-					?2,
-					?3,
-					?4,
-					?5,
-					datetime('now','localtime')
-				);
-			`,
-			args: [
-				REF_ID_CLIENTE,
-				input.nombre_cliente,
-				input.telefono,
-				input.email,
-				input.notas_cliente,
-			],
-		},
-	];
 }
 
-function reservaArgs(input: ReservaSaveInput, withId: boolean) {
+function reservaArgs(input: ReservaSaveInput, idCliente: unknown, withId: boolean) {
 	const args = [
-		REF_ID_CLIENTE,
+		idCliente,
 		input.id_mesa,
 		input.dia_ymd,
 		input.hora,
@@ -114,16 +109,14 @@ function reservaArgs(input: ReservaSaveInput, withId: boolean) {
 	return withId ? [input.id_reserva, ...args] : args;
 }
 
-export function saveReserva(
-	input: ReservaSaveInput,
-	cliente: ClienteReservaExistente,
-): BuiltCommand {
+export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): BuiltCommand {
 	const cloudPayload = {
 		...input,
-		id_cliente: cliente?.id_cliente ?? null,
+		id_cliente: cliente.modo === "existente" ? cliente.id_cliente : null,
 	};
 
-	const steps: any[] = [...clienteSteps(input, cliente)];
+	const { steps: pasosCliente, idCliente } = clienteSteps(input, cliente);
+	const steps: any[] = [...pasosCliente];
 
 	if (input.id_reserva) {
 		steps.push({
@@ -163,7 +156,7 @@ export function saveReserva(
 					Nota = excluded.Nota,
 					Estado = excluded.Estado;
 			`,
-			args: reservaArgs(input, true),
+			args: reservaArgs(input, idCliente, true),
 		});
 		steps.push({
 			kind: "value",
@@ -206,7 +199,7 @@ export function saveReserva(
 					datetime('now','localtime')
 				);
 			`,
-			args: [REF_ID_RESERVA, ...reservaArgs(input, false)],
+			args: [REF_ID_RESERVA, ...reservaArgs(input, idCliente, false)],
 		});
 	}
 

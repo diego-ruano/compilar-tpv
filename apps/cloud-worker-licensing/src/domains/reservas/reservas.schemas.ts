@@ -3,7 +3,10 @@
 import { z } from "zod";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
-import type { ReservaSaveInput as ContractReservaSaveInput } from "@tpv/contracts";
+import type {
+	ReservaBuscarClienteArgs,
+	ReservaSaveInput as ContractReservaSaveInput,
+} from "@tpv/contracts";
 
 const ESTADOS = new Set([
 	"PROXIMA",
@@ -14,6 +17,10 @@ const ESTADOS = new Set([
 ]);
 
 const TURNOS = new Set(["DESAYUNO", "COMIDA", "CAFE", "CENA"]);
+
+/** Mismo texto que `MSG_CLIENTE_SIN_NOMBRE` en la Main (`tpv-domain/src/reservas.rs`). */
+const MSG_CLIENTE_SIN_NOMBRE =
+	"Para dar de alta al cliente hace falta su nombre. Si no quieres ficha de cliente, deja vacíos el teléfono y el email.";
 
 function cleanOrNull(v: unknown): string | null {
 	const s = String(v ?? "").trim();
@@ -92,17 +99,20 @@ export const reservaSaveSchema = z
 		nota: z.any().optional().nullable(),
 		estado: z.any().optional().nullable(),
 		id_mesa: z.any().optional().nullable(),
-		nombre_cliente: z.string().transform((s) => s.trim()),
+		// RI-61: el cliente es opcional y explícito (ver `ClienteReserva::desde` en la Main).
+		id_cliente: z.any().optional().nullable(),
+		nombre_cliente: z.any().optional().nullable(),
 		telefono: z.any().optional().nullable(),
 		email: z.any().optional().nullable(),
 		notas_cliente: z.any().optional().nullable(),
 	})
 	.superRefine((v, ctx) => {
-		if (!v.nombre_cliente) {
+		const sinFicha = !cleanOrNull(v.id_cliente) && !cleanOrNull(v.nombre_cliente);
+		if (sinFicha && (cleanOrNull(v.telefono) || cleanOrNull(v.email))) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				path: ["nombre_cliente"],
-				message: "nombre_cliente required",
+				message: MSG_CLIENTE_SIN_NOMBRE,
 			});
 		}
 	})
@@ -142,12 +152,24 @@ export const reservaSaveSchema = z
 			nota: cleanOrNull(v.nota),
 			estado,
 			id_mesa: cleanOrNull(v.id_mesa),
-			nombre_cliente: v.nombre_cliente,
+			id_cliente: cleanOrNull(v.id_cliente),
+			nombre_cliente: cleanOrNull(v.nombre_cliente),
 			telefono: cleanOrNull(v.telefono),
 			email: cleanEmailOrNull(v.email),
 			notas_cliente: cleanOrNull(v.notas_cliente),
 		};
 	});
+
+/** RI-61: la búsqueda del cliente antes de asignarle una reserva. */
+export const buscarClienteSchema = z
+	.object({
+		telefono: z.any().optional().nullable(),
+		email: z.any().optional().nullable(),
+	})
+	.transform((v) => ({
+		telefono: cleanOrNull(v.telefono),
+		email: cleanEmailOrNull(v.email),
+	}));
 
 export const mesQuerySchema = z.object({
 	desde: z.any().transform((v) => normalizeDia(v)),
@@ -157,6 +179,8 @@ export const mesQuerySchema = z.object({
 type NullableReservaFields =
 	| "id_reserva"
 	| "id_mesa"
+	| "id_cliente"
+	| "nombre_cliente"
 	| "turno"
 	| "nota"
 	| "estado"
@@ -176,3 +200,6 @@ export type ReservaSaveInput = Omit<
 // las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
 // deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
 type _GReservaSave = Assert<SameKeys<z.infer<typeof reservaSaveSchema>, ReservaSaveInput>>;
+type _GBuscarCliente = Assert<
+	SameKeys<z.infer<typeof buscarClienteSchema>, Required<ReservaBuscarClienteArgs>>
+>;

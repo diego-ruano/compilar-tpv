@@ -28,6 +28,14 @@ reservasRoutes.get("/mes", consulta(S.mesQuerySchema), async (c) => {
 	return c.json(await tenantQuery(c, (db) => q.mes(db, desde, hasta)));
 });
 
+// RI-61: ¿ese teléfono o ese email ya son de un cliente? La pantalla pregunta antes de asignarle la
+// reserva. Sin ninguno de los dos no hay nada que buscar.
+reservasRoutes.get("/buscar-cliente", consulta(S.buscarClienteSchema), async (c) => {
+	const { telefono, email } = c.req.valid("query");
+	if (!telefono && !email) return c.json(null);
+	return c.json(await tenantQuery(c, (db) => q.buscarCliente(db, telefono, email)));
+});
+
 reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 	const datos = c.req.valid("json");
 
@@ -45,9 +53,11 @@ reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 		);
 	}
 
-	const cliente = await tenantQuery(c, (db) =>
-		q.findClienteReserva(db, datos.email, datos.telefono),
-	);
+	// RI-61: el cliente llega decidido (ninguno, uno existente o uno nuevo); aquí no se casa nada.
+	const cliente = await tenantQuery(c, (db) => q.resolverCliente(db, datos));
+	if ("error" in cliente) {
+		return c.json({ error: cliente.error }, cliente.error === "email_duplicado" ? 409 : 404);
+	}
 	const id = await apply(c, cmd.saveReserva(datos, cliente));
 	return c.json({ ok: true, id_reserva: id });
 });

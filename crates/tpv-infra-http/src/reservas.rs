@@ -7,8 +7,8 @@ use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::AppResult;
 use tpv_application::ports::reservas::ReservasRepository;
-use tpv_contracts::reservas::{ReservaDto, ReservasMetaDto};
-use tpv_domain::reservas::ReservaValidada;
+use tpv_contracts::reservas::{ClienteCoincidente, ReservaDto, ReservasMetaDto};
+use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 
 use crate::CloudClient;
 
@@ -38,12 +38,22 @@ impl ReservasRepository for HttpReservasRepository {
     }
 
     async fn guardar(&self, reserva: ReservaValidada) -> AppResult<bool> {
-        // El worker hace el upsert del cliente internamente a partir de estos campos.
+        // RI-61: el cliente viaja decidido, en los mismos campos que la entrada de la pantalla, y el
+        // worker lo resuelve igual que la Main (`resolverCliente`).
         let generado = reserva.id.is_none().then_some("id_reserva");
         let id_reserva = reserva
             .id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+        let (id_cliente, nombre, telefono, email, notas) = match reserva.cliente {
+            ClienteReserva::Ninguno => (None, None, None, None, None),
+            ClienteReserva::Existente { id, telefono, email, notas } => {
+                (Some(id), None, telefono, email, notas)
+            }
+            ClienteReserva::Nuevo { nombre, telefono, email, notas } => {
+                (None, Some(nombre), telefono, email, notas)
+            }
+        };
         let body = json!({
             "id_reserva": id_reserva,
             "dia_ymd": reserva.dia_ymd,
@@ -53,16 +63,32 @@ impl ReservasRepository for HttpReservasRepository {
             "nota": reserva.nota,
             "estado": reserva.estado,
             "id_mesa": reserva.id_mesa,
-            "nombre_cliente": reserva.cliente.nombre,
-            "telefono": reserva.cliente.telefono,
-            "email": reserva.cliente.email,
-            "notas_cliente": reserva.cliente.notas,
+            "id_cliente": id_cliente,
+            "nombre_cliente": nombre,
+            "telefono": telefono,
+            "email": email,
+            "notas_cliente": notas,
         });
         let _: (JsonValue, _) = self
             .client
             .post_json_creando("/v1/reservas", &body, generado)
             .await?;
         Ok(true)
+    }
+
+    async fn buscar_cliente(
+        &self,
+        telefono: Option<&str>,
+        email: Option<&str>,
+    ) -> AppResult<Option<ClienteCoincidente>> {
+        let mut query = Vec::new();
+        if let Some(t) = telefono {
+            query.push(("telefono", t.to_string()));
+        }
+        if let Some(e) = email {
+            query.push(("email", e.to_string()));
+        }
+        self.client.get_query("/v1/reservas/buscar-cliente", &query).await
     }
 
     async fn eliminar(&self, id_reserva: &str) -> AppResult<bool> {

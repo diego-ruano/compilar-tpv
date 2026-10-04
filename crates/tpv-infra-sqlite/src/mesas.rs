@@ -1420,7 +1420,9 @@ impl MesasRepository for SqliteMesasRepository {
                 SELECT
                   R.ID_Mesa, R.ID_Reserva, R.Dia_YMD, R.Hora, R.Estado, C.Nombre AS Cliente_Nombre
                 FROM Reservas R
-                JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
+                -- RI-61: LEFT, porque una reserva puede no tener cliente y con un JOIN la mesa
+                -- aparecía libre en el plano.
+                LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
                 WHERE R.ID_Mesa IS NOT NULL AND R.Estado IN ('PROXIMA','ACTIVA');
                 "#,
                 (),

@@ -41,6 +41,8 @@ pub struct ReservaDto {
     pub nota: Option<String>,
     pub estado: String,
 
+    /// `None` si la reserva no tiene cliente (RI-61); entonces `nombre_cliente` llega vacío.
+    pub id_cliente: Option<String>,
     pub nombre_cliente: String,
     pub telefono_cliente: Option<String>,
     pub email_cliente: Option<String>,
@@ -86,7 +88,17 @@ pub struct ReservaSaveInput {
     #[serde(default)]
     #[ts(optional)]
     pub id_mesa: Option<String>,
-    pub nombre_cliente: String,
+
+    /// RI-61: el cliente es opcional y explícito. `id_cliente` asigna uno que ya existe (lo que se
+    /// escriba abajo sólo rellena sus huecos); sin id, un `nombre_cliente` crea uno nuevo; y sin
+    /// nada, la reserva va sin cliente. Antes de asignar por teléfono o email, la pantalla pregunta
+    /// con `reservas_buscar_cliente`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub id_cliente: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub nombre_cliente: Option<String>,
     #[serde(default)]
     #[ts(optional)]
     pub telefono: Option<String>,
@@ -96,6 +108,32 @@ pub struct ReservaSaveInput {
     #[serde(default)]
     #[ts(optional)]
     pub notas_cliente: Option<String>,
+}
+
+/// RI-61: ¿el teléfono o el email que se acaban de escribir ya son de un cliente? Se pregunta antes
+/// de guardar, para que la pantalla ofrezca asignarle la reserva en vez de hacerlo por detrás.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ReservaBuscarClienteArgs {
+    #[serde(default)]
+    #[ts(optional)]
+    pub telefono: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub email: Option<String>,
+}
+
+/// El cliente que ya tiene ese teléfono o ese email. Se busca primero por email, que identifica
+/// (índice único), y luego por teléfono. `coincide_por` es `"email"` o `"telefono"`: con el email
+/// no cabe «es otra persona», porque dos clientes no pueden compartirlo.
+#[derive(Debug, Clone, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ClienteCoincidente {
+    pub id_cliente: String,
+    pub nombre: String,
+    pub telefono: Option<String>,
+    pub email: Option<String>,
+    pub coincide_por: String,
 }
 
 /// Entrada de borrado de reserva.

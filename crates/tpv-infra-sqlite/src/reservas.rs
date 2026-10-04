@@ -7,7 +7,7 @@ use libsql::{Row, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::reservas::ReservasRepository;
-use tpv_contracts::reservas::{MesaDto, ReservaDto, ReservasMetaDto, ZonaDto};
+use tpv_contracts::reservas::{ClienteCoincidente, MesaDto, ReservaDto, ReservasMetaDto, ZonaDto};
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 
 use crate::db::{Db, Reader, Writer};
@@ -48,7 +48,7 @@ async fn select_one_i64<C: Reader>(
     Ok(v_i64(row.get_value(0).map_err(db_err)?))
 }
 
-/// Datos de un cliente existente encontrado en el upsert (para el merge "solo rellenar vacíos").
+/// Un cliente tal y como está guardado (para el merge «sólo rellenar huecos» y para la búsqueda).
 struct ClienteExistente {
     id: String,
     nombre: Option<String>,
@@ -67,96 +67,112 @@ fn cliente_existente(row: &Row) -> AppResult<ClienteExistente> {
     })
 }
 
-/// Busca o crea el cliente asociado a la reserva (por email, luego por teléfono).
-///
-/// RES-01: al reusar un cliente existente NO se sobrescriben sus datos; solo se rellenan los
-/// campos que estén vacíos (p. ej. añadir un email que no tenía). Así reservar a nombre de una
-/// persona que comparte teléfono/email con otra ya NO renombra ni corrompe la ficha existente.
-///
-/// Que una reserva deduplique también por teléfono (la pantalla de Clientes sólo por email) es una
-/// decisión del responsable: una reserva se coge por teléfono y con datos a medias. Si dos personas
-/// comparten teléfono, la reserva se engancha a la ficha existente y aparece con **su** nombre.
-async fn upsert_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<String> {
-    let email = c.email.clone();
-    let telefono = c.telefono.clone();
+/// Por email, sin distinguir mayúsculas: es el criterio del índice único `ux_clientes_email` (sobre
+/// `lower(Email)`), así que se busca por lo mismo por lo que luego rechazaría el INSERT. El
+/// `Email IS NOT NULL AND Email <> ''` replica el predicado del índice parcial para que pueda usarlo.
+const POR_EMAIL: &str = "Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1";
+const POR_TELEFONO: &str = "Telefono = ?1";
+const POR_ID: &str = "ID_Cliente = ?1";
 
-    const COLS: &str = "ID_Cliente, Nombre, Email, Telefono, Notas";
-    let mut existing: Option<ClienteExistente> = None;
-
-    if let Some(ref e) = email {
-        // Búsqueda case-insensitive: el email llega ya en minúsculas del dominio, pero en la tabla
-        // puede haber filas antiguas con mayúsculas. Comparar contra `lower(Email)` es además lo
-        // que hace el índice único `ux_clientes_email`, así que buscamos por el mismo criterio por
-        // el que luego nos rechazaría el INSERT. El `Email IS NOT NULL AND Email <> ''` replica el
-        // predicado del índice parcial para que pueda usarlo.
-        let mut rows = conn
-            .query(
-                &format!(
-                    "SELECT {COLS} FROM Clientes \
-                     WHERE Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1 \
-                     ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;"
-                ),
-                vec![Value::Text(e.to_lowercase())],
-            )
-            .await
-            .map_err(db_err)?;
-        if let Some(row) = rows.next().await.map_err(db_err)? {
-            existing = Some(cliente_existente(&row)?);
-        }
-    }
-
-    if existing.is_none() {
-        if let Some(ref t) = telefono {
-            let mut rows = conn
-                .query(
-                    &format!("SELECT {COLS} FROM Clientes WHERE Telefono = ?1 ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;"),
-                    vec![Value::Text(t.clone())],
-                )
-                .await
-                .map_err(db_err)?;
-            if let Some(row) = rows.next().await.map_err(db_err)? {
-                existing = Some(cliente_existente(&row)?);
-            }
-        }
-    }
-
-    if let Some(ex) = existing {
-        // Merge no destructivo: se conserva todo dato existente con valor; solo se rellenan huecos.
-        let nombre_final = ex.nombre.unwrap_or_else(|| c.nombre.clone());
-        let email_final = ex.email.or(email);
-        let telefono_final = ex.telefono.or(telefono);
-        let notas_final = ex.notas.or_else(|| c.notas.clone());
-
-        conn.execute(
-            "UPDATE Clientes SET Nombre = ?1, Email = ?2, Telefono = ?3, Notas = ?4 WHERE ID_Cliente = ?5;",
-            vec![
-                Value::Text(nombre_final),
-                opt_text(email_final),
-                opt_text(telefono_final),
-                opt_text(notas_final),
-                Value::Text(ex.id.clone()),
-            ],
+/// El cliente más reciente que cumple `filtro` (uno de los de arriba, con `?1`).
+async fn cliente_por<C: Reader>(
+    conn: &C,
+    filtro: &str,
+    valor: &str,
+) -> AppResult<Option<ClienteExistente>> {
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT ID_Cliente, Nombre, Email, Telefono, Notas FROM Clientes \
+                 WHERE {filtro} ORDER BY Created_At DESC, ID_Cliente DESC LIMIT 1;"
+            ),
+            vec![Value::Text(valor.to_string())],
         )
         .await
         .map_err(db_err)?;
-        return Ok(ex.id);
+    match rows.next().await.map_err(db_err)? {
+        Some(row) => Ok(Some(cliente_existente(&row)?)),
+        None => Ok(None),
     }
+}
 
-    let id_cliente = new_id();
-    conn.execute(
-        "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Notas, Created_At) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now','localtime'));",
-        vec![
-            Value::Text(id_cliente.clone()),
-            Value::Text(c.nombre.clone()),
-            opt_text(telefono),
-            opt_text(email),
-            opt_text(c.notas.clone()),
-        ],
-    )
-    .await
-    .map_err(db_err)?;
+/// Mismo texto que `email_duplicado` en el worker (`lib/errorCodes.ts`).
+const MSG_EMAIL_DE_OTRO: &str = "Ya hay un cliente con ese correo.";
 
-    Ok(id_cliente)
+/// El `ID_Cliente` que lleva la reserva (RI-61). Antes esto buscaba por email y por teléfono y, si
+/// encontraba a alguien, le asignaba la reserva sin preguntar. Ahora la decisión llega tomada:
+///
+/// - **Ninguno**: la reserva va sin cliente.
+/// - **Existente**: se le asigna ése. Lo escrito sólo rellena sus huecos (RES-01): no se le cambia
+///   un dato que ya tenga, y un email que ya es de otro cliente no se le pone (chocaría con el
+///   índice único).
+/// - **Nuevo**: una ficha nueva, aunque otra comparta el teléfono. Un email que ya es de otro
+///   cliente se rechaza: la pantalla ya lo había preguntado, así que llegar aquí es una carrera.
+///
+/// Espejo de `resolverCliente` en el worker (`reservas.queries.ts`).
+async fn resolver_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<Option<String>> {
+    match c {
+        ClienteReserva::Ninguno => Ok(None),
+
+        ClienteReserva::Existente { id, telefono, email, notas } => {
+            let Some(ex) = cliente_por(conn, POR_ID, id).await? else {
+                return Err(AppError::not_found(
+                    "Ese cliente ya no existe. Vuelve a buscarlo o guarda la reserva sin cliente.",
+                ));
+            };
+
+            let email_libre = match email {
+                Some(e) => match cliente_por(conn, POR_EMAIL, e).await? {
+                    Some(otro) if otro.id != ex.id => None,
+                    _ => Some(e.clone()),
+                },
+                None => None,
+            };
+            let email_final = ex.email.clone().or(email_libre);
+            let telefono_final = ex.telefono.clone().or_else(|| telefono.clone());
+            let notas_final = ex.notas.clone().or_else(|| notas.clone());
+
+            // Sin nada que rellenar no se escribe: cada escritura sube a la nube.
+            if (&email_final, &telefono_final, &notas_final) != (&ex.email, &ex.telefono, &ex.notas)
+            {
+                conn.execute(
+                    "UPDATE Clientes SET Email = ?1, Telefono = ?2, Notas = ?3 WHERE ID_Cliente = ?4;",
+                    vec![
+                        opt_text(email_final),
+                        opt_text(telefono_final),
+                        opt_text(notas_final),
+                        Value::Text(ex.id.clone()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+            Ok(Some(ex.id))
+        }
+
+        ClienteReserva::Nuevo { nombre, telefono, email, notas } => {
+            if let Some(e) = email {
+                if cliente_por(conn, POR_EMAIL, e).await?.is_some() {
+                    return Err(AppError::conflict(MSG_EMAIL_DE_OTRO));
+                }
+            }
+            let id_cliente = new_id();
+            conn.execute(
+                "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Notas, Created_At) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, datetime('now','localtime'));",
+                vec![
+                    Value::Text(id_cliente.clone()),
+                    Value::Text(nombre.clone()),
+                    opt_text(telefono.clone()),
+                    opt_text(email.clone()),
+                    opt_text(notas.clone()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(Some(id_cliente))
+        }
+    }
 }
 
 #[async_trait]
@@ -201,7 +217,8 @@ impl ReservasRepository for SqliteReservasRepository {
             R.ID_Reserva, R.ID_Mesa, R.Dia_YMD, R.Hora, R.Turno, R.Comensales, R.Nota, R.Estado,
             C.Nombre AS Nombre_Cliente, C.Telefono AS Telefono_Cliente, C.Email AS Email_Cliente,
             M.ID_Zona, M.Numero_Mesa, M.Capacidad,
-            Z.Nombre_Zona
+            Z.Nombre_Zona,
+            C.ID_Cliente
           -- RES-04: LEFT JOIN (no INNER). Una reserva cuyo cliente/mesa/zona ya no exista (borrado
           -- de layout, divergencia de sync) NO debe desaparecer del calendario: se muestra aunque
           -- falten esos datos (columnas quedan NULL → "" / 0 en el mapper) en vez de ocultarse.
@@ -231,6 +248,9 @@ impl ReservasRepository for SqliteReservasRepository {
                 comensales: i(g(5)?),
                 nota: norm_opt_string(g(6)?),
                 estado: s(g(7)?),
+                // Del cliente que existe, no de la columna de la reserva: una reserva cuyo cliente
+                // se borró sale sin cliente, igual que su nombre (RES-04).
+                id_cliente: norm_opt_string(g(15)?),
                 nombre_cliente: s(g(8)?),
                 telefono_cliente: norm_opt_string(g(9)?),
                 email_cliente: norm_opt_string(g(10)?),
@@ -280,7 +300,7 @@ impl ReservasRepository for SqliteReservasRepository {
                 }
             }
 
-            let id_cliente = upsert_cliente(conn, &r.cliente).await?;
+            let id_cliente = resolver_cliente(conn, &r.cliente).await?;
 
             let exists = select_one_i64(
                 conn,
@@ -294,7 +314,7 @@ impl ReservasRepository for SqliteReservasRepository {
                 conn.execute(
                     r#"UPDATE Reservas SET ID_Cliente = ?1, ID_Mesa = ?2, Dia_YMD = ?3, Hora = ?4, Turno = ?5, Comensales = ?6, Nota = ?7, Estado = ?8 WHERE ID_Reserva = ?9;"#,
                     vec![
-                        Value::Text(id_cliente),
+                        opt_text(id_cliente.clone()),
                         opt_text(r.id_mesa.clone()),
                         Value::Text(r.dia_ymd.clone()),
                         Value::Text(r.hora.clone()),
@@ -312,7 +332,7 @@ impl ReservasRepository for SqliteReservasRepository {
                     r#"INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado, Created_At) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now','localtime'));"#,
                     vec![
                         Value::Text(id_reserva.clone()),
-                        Value::Text(id_cliente),
+                        opt_text(id_cliente.clone()),
                         opt_text(r.id_mesa.clone()),
                         Value::Text(r.dia_ymd.clone()),
                         Value::Text(r.hora.clone()),
@@ -340,6 +360,30 @@ impl ReservasRepository for SqliteReservasRepository {
                 Err(e)
             }
         }
+    }
+
+    /// RI-61: primero por email, que identifica; luego por teléfono. Espejo de `buscarCliente` en el
+    /// worker.
+    async fn buscar_cliente(
+        &self,
+        telefono: Option<&str>,
+        email: Option<&str>,
+    ) -> AppResult<Option<ClienteCoincidente>> {
+        let db = self.db.read().await;
+        let busquedas = [(email, POR_EMAIL, "email"), (telefono, POR_TELEFONO, "telefono")];
+        for (valor, filtro, por) in busquedas {
+            let Some(valor) = valor else { continue };
+            if let Some(c) = cliente_por(&db, filtro, valor).await? {
+                return Ok(Some(ClienteCoincidente {
+                    id_cliente: c.id,
+                    nombre: c.nombre.unwrap_or_default(),
+                    telefono: c.telefono,
+                    email: c.email,
+                    coincide_por: por.to_string(),
+                }));
+            }
+        }
+        Ok(None)
     }
 
     async fn eliminar(&self, id_reserva: &str) -> AppResult<bool> {
@@ -377,5 +421,111 @@ impl ReservasRepository for SqliteReservasRepository {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_cliente {
+    //! RI-61: el cliente de una reserva es opcional y explícito. Los casos de siempre (sin cliente,
+    //! existente, nuevo, otra persona con el mismo teléfono) los fijan los contratos; aquí van los
+    //! bordes que sólo tiene la Main.
+
+    use super::*;
+
+    async fn abrir() -> (Arc<Db>, SqliteReservasRepository, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("reservas_cliente");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Created_At) \
+                       VALUES ('ana', 'Ana', '600', 'ana@x.com', '2026-01-01 00:00:00'); \
+                     INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Created_At) \
+                       VALUES ('bea', 'Bea', '700', '2026-01-01 00:00:00');",
+                )
+                .await
+                .unwrap();
+        }
+        let repo = SqliteReservasRepository::new(db.clone());
+        (db, repo, dir)
+    }
+
+    fn reserva(cliente: ClienteReserva) -> ReservaValidada {
+        ReservaValidada {
+            id: None,
+            id_mesa: None,
+            dia_ymd: "2026-05-10".into(),
+            hora: "21:00".into(),
+            turno: "CENA".into(),
+            comensales: 2,
+            nota: None,
+            estado: "PROXIMA".into(),
+            cliente,
+        }
+    }
+
+    async fn texto(db: &Db, sql: &str) -> Option<String> {
+        let g = db.read().await;
+        let mut rows = g.query(sql, ()).await.unwrap();
+        rows.next().await.unwrap().and_then(|r| v_string(r.get_value(0).unwrap()))
+    }
+
+    #[tokio::test]
+    async fn asignar_un_cliente_que_ya_no_existe_es_un_error() {
+        let (_db, repo, _dir) = abrir().await;
+        let r = repo
+            .guardar(reserva(ClienteReserva::Existente {
+                id: "borrado".into(),
+                telefono: None,
+                email: None,
+                notas: None,
+            }))
+            .await;
+        assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn un_cliente_nuevo_con_el_email_de_otro_se_rechaza() {
+        let (_db, repo, _dir) = abrir().await;
+        let r = repo
+            .guardar(reserva(ClienteReserva::Nuevo {
+                nombre: "Luis".into(),
+                telefono: None,
+                email: Some("ana@x.com".into()),
+                notas: None,
+            }))
+            .await;
+        assert!(matches!(r, Err(AppError::Conflict(_))), "{r:?}");
+    }
+
+    #[tokio::test]
+    async fn al_rellenar_huecos_no_se_le_pone_el_email_de_otro() {
+        // Bea no tiene email; se le asigna la reserva escribiendo el de Ana. Ponérselo chocaría con
+        // el índice único y tumbaría la reserva; se queda sin él.
+        let (db, repo, _dir) = abrir().await;
+        assert!(repo
+            .guardar(reserva(ClienteReserva::Existente {
+                id: "bea".into(),
+                telefono: None,
+                email: Some("ana@x.com".into()),
+                notas: None,
+            }))
+            .await
+            .unwrap());
+        assert_eq!(texto(&db, "SELECT Email FROM Clientes WHERE ID_Cliente = 'bea';").await, None);
+        assert_eq!(
+            texto(&db, "SELECT ID_Cliente FROM Reservas;").await.as_deref(),
+            Some("bea")
+        );
+    }
+
+    #[tokio::test]
+    async fn una_reserva_sin_cliente_no_crea_ninguna_ficha() {
+        let (db, repo, _dir) = abrir().await;
+        assert!(repo.guardar(reserva(ClienteReserva::Ninguno)).await.unwrap());
+        assert_eq!(texto(&db, "SELECT ID_Cliente FROM Reservas;").await, None);
+        assert_eq!(texto(&db, "SELECT CAST(COUNT(*) AS TEXT) FROM Clientes;").await.as_deref(), Some("2"));
     }
 }

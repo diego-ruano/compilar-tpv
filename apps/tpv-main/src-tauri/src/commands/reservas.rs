@@ -4,7 +4,8 @@ use tauri::State;
 
 use tpv_application::use_cases::reservas as uc;
 use tpv_contracts::reservas::{
-    ReservaDeleteInput, ReservaDto, ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
+    ClienteCoincidente, ReservaBuscarClienteArgs, ReservaDeleteInput, ReservaDto,
+    ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
 };
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
@@ -32,6 +33,16 @@ pub async fn reservas_save(
     let repo = state.reservas_repo().await?;
     let notifier = state.notifier().await.ok();
     Ok(uc::guardar(repo.as_ref(), notifier.as_deref(), args).await?)
+}
+
+/// RI-61: el cliente que ya tiene ese teléfono o ese email, para preguntar antes de asignárselo.
+#[tauri::command]
+pub async fn reservas_buscar_cliente(
+    state: State<'_, AppState>,
+    args: ReservaBuscarClienteArgs,
+) -> Result<Option<ClienteCoincidente>, AppErrorDto> {
+    let repo = state.reservas_repo().await?;
+    Ok(uc::buscar_cliente(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]
