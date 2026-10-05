@@ -240,6 +240,8 @@ import casoCuentasAnularPago from "../../../tests/contract/casos/cuentas/anular_
 import goldenCuentasAnularPago from "../../../tests/contract/golden/cuentas/anular_pago.json";
 import casoCuentasAnularSinReserva from "../../../tests/contract/casos/cuentas/anular_pago_reserva_borrada.json";
 import goldenCuentasAnularSinReserva from "../../../tests/contract/golden/cuentas/anular_pago_reserva_borrada.json";
+import casoCuentasAnularDevolucion from "../../../tests/contract/casos/cuentas/anular_pago_devolucion.json";
+import goldenCuentasAnularDevolucion from "../../../tests/contract/golden/cuentas/anular_pago_devolucion.json";
 import casoMesaSetReserva from "../../../tests/contract/casos/mesas/set_reserva_estado.json";
 import goldenMesaSetReserva from "../../../tests/contract/golden/mesas/set_reserva_estado.json";
 import casoNotifCrear from "../../../tests/contract/casos/notificaciones/crear.json";
@@ -352,6 +354,11 @@ const CASOS = [
 		nombre: "cuentas_anular_pago_reserva_borrada",
 		caso: casoCuentasAnularSinReserva,
 		golden: goldenCuentasAnularSinReserva,
+	},
+	{
+		nombre: "cuentas_anular_pago_devolucion",
+		caso: casoCuentasAnularDevolucion,
+		golden: goldenCuentasAnularDevolucion,
 	},
 	{ nombre: "mesas_set_reserva_estado", caso: casoMesaSetReserva, golden: goldenMesaSetReserva },
 	{ nombre: "notificaciones_crear", caso: casoNotifCrear, golden: goldenNotifCrear },
@@ -731,6 +738,7 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 				anularPago(caso.entrada.id_pago, {
 					id_usuario: caso.entrada.id_usuario,
 					motivo: caso.entrada.motivo,
+					clase: caso.entrada.clase,
 				}),
 			);
 			return;

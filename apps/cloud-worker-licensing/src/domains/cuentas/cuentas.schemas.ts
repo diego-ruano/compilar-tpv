@@ -59,7 +59,7 @@ export const anularPagoSchema = z.object({
 	//
 	// Un valor que no sea ninguno de los dos también cae en "ERROR" y no en un 400: la alternativa
 	// sería que un cliente con una errata no pudiera anular un cobro, y lo conservador aquí es la
-	// anulación (devuelve las líneas y el stock, que es reversible).
+	// anulación (devuelve las líneas a la comanda, que es reversible).
 	clase: z
 		.enum(["ERROR", "DEVOLUCION"])
 		.nullish()

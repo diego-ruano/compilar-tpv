@@ -39,7 +39,8 @@ pub enum ClaseBaja {
     Error,
     /// **La venta existió** y se devuelve el dinero (o se corrige el importe). Genera una **factura
     /// rectificativa** (RF de alta `R5` con `TipoRectificativa = I` e importe negativo), y las
-    /// líneas **no** vuelven a la comanda: se vendieron.
+    /// líneas **no** vuelven a la comanda: se vendieron. El stock sí se repone, como en un error:
+    /// lo devuelto vuelve al almacén.
     ///
     /// La AEAT lo dice sin matices: *«todas las facturas emitidas, en la medida en que respondan a
     /// operaciones realmente efectuadas (como es el caso habitual) no pueden anularse»*.
@@ -122,8 +123,9 @@ pub trait CuentasRepository: Send + Sync {
     /// regla o volvería a haber dos.
     async fn estado_pago(&self, id_pago: &str) -> AppResult<Option<String>>;
 
-    /// Anula un cobro **sin borrarlo** (CUENTA-07): revierte stock y gasto del cliente, marca el
-    /// pago y deja el movimiento en `Movimientos_Caja`. `true` si el pago existía.
+    /// Anula un cobro **sin borrarlo** (CUENTA-07): repone el stock y resta el gasto del cliente
+    /// (las dos clases), marca el pago y deja el movimiento en `Movimientos_Caja`. `true` si el
+    /// pago existía.
     async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool>;
 
     /// Anota que alguien abrió el cajón SIN una venta detrás (para dar cambio, para cuadrar).

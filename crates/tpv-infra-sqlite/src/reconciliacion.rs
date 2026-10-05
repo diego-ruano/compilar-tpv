@@ -41,16 +41,14 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 /// `SUM(movimientos) - SUM(consumos)`: el alta y los ajustes suman (o restan) y cada línea de
 /// comanda cobrada resta lo suyo.
 ///
-/// ⚠️ **Un consumo deja de contar cuando su stock volvió al lote: cuando SU cobro se anuló por
-/// error.** Antes esto no hacía falta porque anular borraba la fila de `Lote_Consumos` y la resta
+/// ⚠️ **Un consumo deja de contar cuando su stock volvió al lote: cuando SU cobro se dio de baja**,
+/// por error o por devolución (las dos reponen). Antes esto no hacía falta porque anular borraba la fila de `Lote_Consumos` y la resta
 /// desaparecía sola. Desde CUENTA-07 el pago se conserva y la traza también —es lo que da
 /// trazabilidad por lote al ticket anulado—, así que sin este filtro el stock habría vuelto al
 /// lote pero la resta seguiría contando: «faltan N unidades», cada día, para siempre.
 ///
 /// Se mira el cobro **del consumo** y no los de su línea (STOCK-01): una línea anulada y vuelta a
-/// cobrar tiene un consumo por cobro, y mirando la línea el del cobro anulado seguía restando. Y una
-/// **devolución** no devuelve el stock —el cliente se llevó la consumición—, así que su consumo sí
-/// cuenta. Un `Motivo_Baja` vacío es una anulación de antes de FISCAL-01, que siempre devolvía.
+/// cobrar tiene un consumo por cobro, y mirando la línea el del cobro anulado seguía restando.
 const SQL_LOTES: &str = r#"
     SELECT id_lote, codigo_lote, producto, guardado, calculado
     FROM (
@@ -67,9 +65,7 @@ const SQL_LOTES: &str = r#"
                 FROM Lote_Consumos c
                 JOIN Pagos p ON p.ID_Pago = c.ID_Pago
                 WHERE c.ID_Lote = l.ID_Lote
-                  AND NOT (
-                    p.Estado = 'ANULADO' AND COALESCE(p.Motivo_Baja, 'ERROR') = 'ERROR'
-                  )
+                  AND p.Estado <> 'ANULADO'
             ), 0)                         AS calculado
         FROM Lotes_Producto l
         LEFT JOIN Productos p ON p.ID_Producto = l.ID_Producto
@@ -92,9 +88,7 @@ const SQL_LOTES: &str = r#"
                 FROM Suelto_Consumos c
                 JOIN Pagos pg ON pg.ID_Pago = c.ID_Pago
                 WHERE c.ID_Producto = pr.ID_Producto
-                  AND NOT (
-                    pg.Estado = 'ANULADO' AND COALESCE(pg.Motivo_Baja, 'ERROR') = 'ERROR'
-                  )
+                  AND pg.Estado <> 'ANULADO'
             ), 0)                         AS calculado
         FROM Productos pr
         WHERE pr.Stock_Suelto IS NOT NULL
@@ -510,26 +504,19 @@ mod tests {
         assert!(out.is_empty(), "cada consumo cuenta según su propio cobro: {out:?}");
     }
 
-    /// Una devolución no devuelve el stock —el cliente se llevó la consumición—, así que su consumo
-    /// sigue restando aunque el cobro esté anulado.
+    /// Una devolución repone el stock igual que una anulación por error, así que su consumo deja
+    /// de restar: si siguiera, el lote saldría con «faltan 3» para siempre.
     #[tokio::test]
-    async fn el_consumo_de_una_devolucion_sigue_contando() {
+    async fn el_consumo_de_una_devolucion_deja_de_contar() {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, SEMILLA_LOTE).await;
         sembrar(&db, VENTA_ANULADA).await;
-        sembrar(
-            &db,
-            &[
-                "UPDATE Pagos SET Motivo_Baja = 'DEVOLUCION' WHERE ID_Pago = 'pago';",
-                "UPDATE Lotes_Producto SET Stock_Disponible = 7 WHERE ID_Lote = 'lote';",
-            ],
-        )
-        .await;
+        sembrar(&db, &["UPDATE Pagos SET Motivo_Baja = 'DEVOLUCION' WHERE ID_Pago = 'pago';"]).await;
 
         let repo = SqliteReconciliacionRepository::new(db);
         let out = repo.lotes_descuadrados(0.001).await.unwrap();
 
-        assert!(out.is_empty(), "10 de alta - 3 que se llevó el cliente = 7: {out:?}");
+        assert!(out.is_empty(), "10 de alta, y lo devuelto volvió: 10: {out:?}");
     }
 
     #[tokio::test]

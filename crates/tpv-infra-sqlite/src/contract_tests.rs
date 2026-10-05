@@ -332,6 +332,7 @@ casos_de_contrato! {
     cuentas__update_pago,
     cuentas__anular_pago,
     cuentas__anular_pago_reserva_borrada,
+    cuentas__anular_pago_devolucion,
     notificaciones__crear,
     notificaciones__crear_dedupe,
     notificaciones__crear_actualiza,
@@ -722,9 +723,10 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 id_pago: s(&e["id_pago"]),
                 id_usuario: s(&e["id_usuario"]),
                 motivo: s(&e["motivo"]),
-                // FISCAL-01: anulación POR ERROR, que es lo que hacía el botón único
-                // antes de partirlo. El test sigue describiendo el mismo comportamiento.
-                clase: tpv_application::ports::cuentas::ClaseBaja::Error,
+                // FISCAL-01: sin `clase` en el caso, anulación POR ERROR, como en la pantalla.
+                clase: tpv_application::ports::cuentas::ClaseBaja::desde_texto(
+                    opt_str(&e["clase"]).as_deref(),
+                ),
             })
             .await
             .expect("anular pago");

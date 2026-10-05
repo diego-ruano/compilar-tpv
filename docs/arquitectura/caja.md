@@ -153,7 +153,7 @@ repetidos. La pantalla obliga a elegir una de las dos clases, cada una explicada
 
 | | `ERROR` — «este cobro nunca debió existir» | `DEVOLUCION` — «le devuelvo el dinero al cliente» |
 |---|---|---|
-| Stock | Se repone lo que consumió **ese** cobro (`Lote_Consumos.ID_Pago`, `Suelto_Consumos.ID_Pago`) | No se repone: el cliente se lo llevó |
+| Stock | Se repone lo que consumió **ese** cobro (`Lote_Consumos.ID_Pago`, `Suelto_Consumos.ID_Pago`) | Igual: lo devuelto vuelve al almacén, y lo que ya no se pueda vender se ajusta desde el inventario |
 | Líneas | Vuelven a la comanda, que se reabre si no hay otra abierta en esa mesa | No vuelven |
 | Gasto del cliente | Se resta al cliente de la comanda (sin bajar de 0) | Se resta |
 | `Pagos` | `Estado = 'ANULADO'`, `Anulado_En`, `Anulado_Por`, `Motivo_Anulacion`, `Motivo_Baja = 'ERROR'` | Igual, con `Motivo_Baja = 'DEVOLUCION'` |
@@ -175,8 +175,8 @@ Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
   cero.
 - **«Cobrada» es estar en `v_lineas_cobradas`**, no tener fila en `Pago_Detalles`: toda lectura que
   pregunte si una línea está cobrada va por la vista (las escrituras, contra la tabla).
-- **La reconciliación de stock cuenta un consumo salvo que su cobro se anulara por `ERROR`**
-  (`reconciliacion.rs`; un `Motivo_Baja` vacío cuenta como `ERROR`).
+- **La reconciliación de stock cuenta un consumo mientras su cobro esté activo** (`reconciliacion.rs`):
+  las dos clases de baja reponen el stock.
 - **El consumo de stock se escribe después del pago**: la FK de `ID_Pago` se comprueba sentencia a
   sentencia también al replicar.
 - **El gasto se acredita y se resta al cliente de la comanda** (`Comandas.ID_Cliente`), que se fija

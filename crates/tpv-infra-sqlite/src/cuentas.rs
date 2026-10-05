@@ -648,16 +648,17 @@ impl CuentasRepository for SqliteCuentasRepository {
 
             // FISCAL-01. A partir de aquí hay dos caminos y la diferencia no es cosmética:
             //
-            //   · ERROR      → la venta NO EXISTIÓ. Se abona el stock, las líneas vuelven a la
-            //                  comanda y se emite un RF DE ANULACIÓN.
-            //   · DEVOLUCION → la venta SÍ EXISTIÓ y se devuelve el dinero. El stock NO se abona
-            //                  (el cliente se llevó la consumición) y las líneas NO vuelven: si
-            //                  volvieran, quedarían pendientes de cobro y el camarero las cobraría
-            //                  otra vez. Se emite una FACTURA RECTIFICATIVA (R5).
+            //   · ERROR      → la venta NO EXISTIÓ. Las líneas vuelven a la comanda y se emite un
+            //                  RF DE ANULACIÓN.
+            //   · DEVOLUCION → la venta SÍ EXISTIÓ y se devuelve el dinero. Las líneas NO vuelven:
+            //                  si volvieran, quedarían pendientes de cobro y el camarero las
+            //                  cobraría otra vez. Se emite una FACTURA RECTIFICATIVA (R5).
             //
             // Lo que hacen igual las dos es dejar de contar como venta, y por eso comparten
-            // `Estado = 'ANULADO'`: al cajón le da igual por qué salió el dinero.
-            if clase.devuelve_las_lineas() {
+            // `Estado = 'ANULADO'`: al cajón le da igual por qué salió el dinero. Y las dos reponen
+            // el stock: lo devuelto vuelve al almacén, y lo que ya no se pueda vender se ajusta desde el
+            // inventario, como cualquier merma.
+            //
             // 2) Devolver el stock de lotes que consumió ESTE cobro. Se busca por el cobro del
             //    consumo y no por sus líneas (STOCK-01): una línea anulada y vuelta a cobrar tiene un
             //    consumo por cobro, y por la línea se devolvía también el del cobro anulado antes,
@@ -701,7 +702,6 @@ impl CuentasRepository for SqliteCuentasRepository {
             )
             .await
             .map_err(db_err)?;
-            }
 
             // 3) Restar el gasto del cliente ligado a la comanda, sin bajar de 0. RI-61: el de la
             //    comanda, que se fija al cobrar, y si no lo tiene el de su reserva: así una reserva
@@ -1066,6 +1066,52 @@ mod tests_anulacion {
         sembrar(&db, VENTA_DE_MESA).await;
 
         repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote';").await,
+            20.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
+            8.0
+        );
+    }
+
+    #[tokio::test]
+    async fn una_devolucion_total_tambien_repone_el_stock_de_lote_y_el_suelto() {
+        // Lo devuelto vuelve al almacén igual que lo de un cobro que no debió existir: lo que no
+        // cambia entre las dos clases es el stock, sino las líneas de la comanda.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs { clase: ClaseBaja::Devolucion, ..args("pago") })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote';").await,
+            20.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
+            8.0
+        );
+    }
+
+    #[tokio::test]
+    async fn devolver_dos_veces_no_repone_el_stock_dos_veces() {
+        // El guardia por `Estado` vale igual para una devolución: la segunda no hace nada.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        let devolucion = || AnularPagoArgs { clase: ClaseBaja::Devolucion, ..args("pago") };
+
+        assert!(repo(&db).anular_pago(devolucion()).await.unwrap());
+        assert!(!repo(&db).anular_pago(devolucion()).await.unwrap());
+        assert!(
+            !repo(&db).anular_pago(args("pago")).await.unwrap(),
+            "ni una anulación por error después"
+        );
 
         assert_eq!(
             escalar(&db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote';").await,
@@ -2442,10 +2488,10 @@ mod tests_anular_vs_devolver {
             Some("Pagada".into()),
             "la comanda NO se reabre"
         );
-        // Y el stock tampoco vuelve: la cerveza se la bebieron.
+        // El stock sí vuelve: lo devuelto vuelve al almacén.
         assert_eq!(
             escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
-            9.0
+            10.0
         );
     }
 

@@ -193,9 +193,11 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 	const idUsuario = input.id_usuario;
 	// FISCAL-01: los dos instrumentos. Espejo de `ClaseBaja` en Rust.
 	//
-	//   ERROR      → la venta NO existió: se abona el stock, las líneas vuelven a la comanda.
-	//   DEVOLUCION → la venta SÍ existió: el stock NO se abona (el cliente se llevó la
-	//                consumición) y las líneas NO vuelven, o quedarían pendientes de cobro otra vez.
+	//   ERROR      → la venta NO existió: las líneas vuelven a la comanda.
+	//   DEVOLUCION → la venta SÍ existió: las líneas NO vuelven, o quedarían pendientes de cobro
+	//                otra vez.
+	//
+	// Las dos reponen el stock: lo devuelto vuelve al almacén.
 	//
 	// Lo que esta ruta **no** hace en ningún caso es emitir el registro de facturación: lo emite la
 	// Main dentro de su propia transacción, y el veto de `applyViaHub` impide escribir
@@ -210,10 +212,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 		// 1) Devolver el stock que consumió ESTE pago: por el pago del consumo y no por sus líneas
 		//    (STOCK-01). La traza (`Lote_Consumos`) se CONSERVA: el doble abono lo impide el `Estado`.
 		//    Redondeado a milésimas como todo movimiento de stock (RI-26).
-		//
-		//    SÓLO si la venta no existió (FISCAL-01). En una devolución el cliente se llevó la
-		//    consumición: abonar el stock inventaría unidades que no están en la estantería.
-		devuelveLasLineas && {
+		{
 			kind: "execute",
 			sql: `
 				UPDATE Lotes_Producto
@@ -232,7 +231,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			args: [idPago],
 		},
 		// 1-bis) Y el stock SUELTO que consumió el pago (lo que los lotes no cubrieron, VR-04).
-		devuelveLasLineas && {
+		{
 			kind: "execute",
 			sql: `
 				UPDATE Productos
@@ -348,8 +347,8 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			`,
 			args: [idPago],
 		},
-		// Los pasos marcados con `devuelveLasLineas && …` quedan en `false` cuando es una
-		// devolución; se descartan aquí. Es más legible que montar el array por trozos, y lo que
+		// El paso marcado con `devuelveLasLineas && …` queda en `false` cuando es una
+		// devolución; se descarta aquí. Es más legible que montar el array por trozos, y lo que
 		// importa —qué paso aplica a qué caso— se lee en el propio paso.
 	].filter(Boolean) as any[];
 	return {

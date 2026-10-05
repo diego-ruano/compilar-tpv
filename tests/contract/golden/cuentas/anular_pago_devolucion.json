@@ -1,0 +1,120 @@
+{
+  "Clientes": [
+    {
+      "ID_Cliente": "cli-1",
+      "Total_Gastado": 4100
+    }
+  ],
+  "Comandas": [
+    {
+      "Estado": "Pagada",
+      "Fecha_Hora_Cierre": "2026-01-01 13:00:00",
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 1200
+    },
+    {
+      "Estado": "Abierta",
+      "Fecha_Hora_Cierre": null,
+      "ID_Comanda": "comanda-otra",
+      "Total_Comanda": 0
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "Cantidad": 2.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-cobrado-lote",
+      "Precio_Unitario": 300
+    },
+    {
+      "Cantidad": 1.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-cobrado-suelto",
+      "Precio_Unitario": 300
+    },
+    {
+      "Cantidad": 1.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-pendiente",
+      "Precio_Unitario": 300
+    }
+  ],
+  "Lote_Consumos": [
+    {
+      "Cantidad": 2.0,
+      "ID_Detalle": "det-cobrado-lote",
+      "ID_Lote": "lote-1",
+      "ID_Pago": "pago-1"
+    },
+    {
+      "Cantidad": 2.0,
+      "ID_Detalle": "det-cobrado-lote",
+      "ID_Lote": "lote-0",
+      "ID_Pago": "pago-0"
+    }
+  ],
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1",
+      "Stock_Disponible": 20.0
+    },
+    {
+      "ID_Lote": "lote-0",
+      "Stock_Disponible": 5.0
+    }
+  ],
+  "Movimientos_Caja": [
+    {
+      "ID_Pago": "pago-1",
+      "ID_Usuario": "user-1",
+      "Importe": 900,
+      "Metodo_Pago": "Efectivo",
+      "Motivo": "el cliente devuelve la consumicion",
+      "Tipo": "DEVOLUCION"
+    }
+  ],
+  "Pago_Detalles": [
+    {
+      "ID_Detalle": "det-cobrado-lote",
+      "ID_Pago": "pago-1"
+    },
+    {
+      "ID_Detalle": "det-cobrado-suelto",
+      "ID_Pago": "pago-1"
+    },
+    {
+      "ID_Detalle": "det-cobrado-lote",
+      "ID_Pago": "pago-0"
+    }
+  ],
+  "Pagos": [
+    {
+      "Anulado_Por": "user-1",
+      "Estado": "ANULADO",
+      "ID_Pago": "pago-1",
+      "Motivo_Anulacion": "el cliente devuelve la consumicion",
+      "Motivo_Baja": "DEVOLUCION"
+    },
+    {
+      "Anulado_Por": "user-1",
+      "Estado": "ANULADO",
+      "ID_Pago": "pago-0",
+      "Motivo_Anulacion": "mesa equivocada",
+      "Motivo_Baja": "ERROR"
+    }
+  ],
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "Stock_Suelto": 8.0
+    }
+  ],
+  "Suelto_Consumos": [
+    {
+      "Cantidad": 1.0,
+      "ID_Detalle": "det-cobrado-suelto",
+      "ID_Pago": "pago-1",
+      "ID_Producto": "prod-1"
+    }
+  ]
+}

@@ -2410,7 +2410,7 @@ export default function Cuentas() {
                                             clase: "DEVOLUCION" as ClaseBaja,
                                             titulo: "Le devuelvo el dinero al cliente",
                                             detalle:
-                                                "La venta ocurrió. Se emite una factura rectificativa por el importe en negativo. Los artículos NO vuelven a la comanda y el stock no se repone: el cliente se los llevó.",
+                                                "La venta ocurrió. Se emite una factura rectificativa por el importe en negativo. Los artículos NO vuelven a la comanda, y el stock se repone.",
                                         },
                                         {
                                             clase: "ERROR" as ClaseBaja,
