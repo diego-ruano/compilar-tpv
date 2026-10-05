@@ -504,6 +504,10 @@ pub(crate) struct Sesion {
 /// sitio, no una docena.
 pub(crate) const ADMIN: &str = "Administrador";
 
+/// El camarero. Sólo aparece en los gates que le abren algo que el resto de roles no hace: los
+/// cobros de Cuentas y sus bajas.
+pub(crate) const CAMARERO: &str = "Camarero";
+
 pub(crate) fn permiso_denegado(detalle: impl Into<String>) -> AppErrorDto {
     AppErrorDto::new(tpv_contracts::errors::ErrorCode::PermisoDenegado, detalle)
 }
@@ -3036,6 +3040,49 @@ mod tests_exenciones_del_gate {
                  puede depender de uno: la regla más firme del producto es que nada impide cobrar."
             );
         }
+    }
+
+    /// El camarero entra en Cuentas sólo a los cobros y sus bajas (`docs/arquitectura/permisos.md`).
+    /// Se vigila el fuente porque el fallo no se ve: un gate abierto de más no rompe nada, y uno
+    /// cerrado de más sólo se nota cuando un camarero intenta devolver a mitad de servicio.
+    #[test]
+    fn el_camarero_solo_entra_en_los_cobros_de_cuentas() {
+        const FUENTE: &str = include_str!("commands/cuentas.rs");
+        let cuerpo = |nombre: &str| -> &str {
+            let inicio = FUENTE
+                .find(&format!("pub async fn {nombre}("))
+                .unwrap_or_else(|| panic!("no está el comando {nombre}"));
+            let resto = &FUENTE[inicio..];
+            let fin = resto.find("#[tauri::command]").unwrap_or(resto.len());
+            &resto[..fin]
+        };
+        for nombre in ["cuentas_get_entradas", "cuentas_anular_pago"] {
+            assert!(
+                cuerpo(nombre).contains("exigir_rol(&[ADMIN, CAMARERO])"),
+                "{nombre} es de los cobros y sus bajas: lo hace también el camarero"
+            );
+        }
+        for nombre in [
+            "cuentas_get_salidas",
+            "cuentas_get_resumen",
+            "cuentas_create_gasto",
+            "cuentas_update_gasto",
+            "cuentas_delete_gasto",
+            "cuentas_update_pago",
+        ] {
+            let c = cuerpo(nombre);
+            assert!(
+                c.contains("exigir_rol(&[ADMIN])") && !c.contains("CAMARERO"),
+                "{nombre} es del administrador"
+            );
+        }
+        let previsualizar = cuerpo("cuentas_previsualizar_cambio");
+        assert!(
+            previsualizar
+                .contains("CambioCajaInput::AnularPago { .. } => state.exigir_rol(&[ADMIN, CAMARERO])")
+                && previsualizar.contains("_ => state.exigir_rol(&[ADMIN])"),
+            "el aviso previo lo pide el camarero sólo para una baja"
+        );
     }
 
     /// Y al revés: `login_user` tiene que dejar la sesión puesta, o todos los comandos gateados

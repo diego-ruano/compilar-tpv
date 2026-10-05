@@ -64,7 +64,7 @@ encargado.
 
 | Área | Comandos |
 |---|---|
-| Cuentas, lecturas incluidas | `cuentas_get_entradas`, `cuentas_get_salidas`, `cuentas_get_resumen`, `cuentas_previsualizar_cambio`, `cuentas_create_gasto`, `cuentas_update_gasto`, `cuentas_delete_gasto`, `cuentas_update_pago`, `cuentas_anular_pago` |
+| Cuentas, lecturas incluidas (salvo los cobros y sus bajas, abajo) | `cuentas_get_salidas`, `cuentas_get_resumen`, `cuentas_previsualizar_cambio` (salvo el de una baja), `cuentas_create_gasto`, `cuentas_update_gasto`, `cuentas_delete_gasto`, `cuentas_update_pago` |
 | Cierre de caja | `cierre_preparar`, `cierre_confirmar`, `cierre_listar`, `cierre_detalle`, `cierre_reabrir` |
 | Veri\*factu | `verifactu_listar`, `verifactu_certificados`, `verifactu_set_certificado`, `verifactu_probar_conexion`, `verifactu_emitir_factura_de_tickets`, `verifactu_corregir_factura`, `verifactu_subsanar_rechazados`, `verifactu_reconocer_anomalias`, `verifactu_exportar`, `verifactu_set_modo_prueba` |
 | Personal | `trabajadores_create`, `trabajadores_update`, `trabajadores_get_detail` (la única lectura de personal gateada: devuelve la PII) |
@@ -83,6 +83,14 @@ al último (RI-62): sin ninguno, todo lo de esta tabla queda cerrado y no hay sa
 aplicación, porque la recuperación del PIN por correo es para un administrador. La Main lo comprueba
 dentro de la transacción de `update_trabajador`. El worker lo comprueba antes de aplicar
 (`ultimo_administrador`), con el mismo SQL.
+
+### Administrador o camarero
+
+**Los cobros de Cuentas y sus bajas**: `cuentas_get_entradas`, `cuentas_anular_pago` (las dos clases)
+y `cuentas_previsualizar_cambio` de una baja. El cliente que vuelve a por su dinero no espera al
+encargado, y lo que deja rastro es la firma de la sesión, no el rol. Al camarero la pantalla le enseña
+sólo el panel de cobros, con reimprimir y dar de baja; gastos, totales, cierre de caja, facturas con
+NIF y exportar ni se piden ni se enseñan. Lo vigila `el_camarero_solo_entra_en_los_cobros_de_cuentas`.
 
 ### Basta con estar identificado
 
@@ -132,7 +140,8 @@ de sesión en el backend.
 ### La interfaz
 
 El gate del backend es la red, no el sustituto: la NavBar no enseña lo que no toca y las rutas de
-administrador (`/cuentas`, `/configuracion`, las fichas de trabajador) rebotan a quien no lo es. Al
+administrador (`/configuracion`, las fichas de trabajador) rebotan a quien no lo es; `/cuentas`, a quien
+no sea administrador ni camarero (`entraEnCuentas`). Al
 gatear un comando nuevo, su pantalla necesita también el candado de ruta. Ante un rechazo, el frontend
 ramifica por `permiso_denegado` para decir «esto es de administrador».
 

@@ -71,6 +71,8 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 import { conAviso } from "../../shared/lib/conAviso";
 import { CERO, eur, restar, sumar } from "../../shared/lib/dinero";
 import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
+import { useAuth } from "../../shared/stores/useAuth";
+import { esAdmin } from "../../shared/lib/permisos";
 
 function todayYMD() {
     const d = new Date();
@@ -213,6 +215,11 @@ function SelloAnulado({ entrada }: { entrada: EntradaDto }) {
 }
 
 export default function Cuentas() {
+    // El camarero entra a los cobros y sus bajas; el resto de la caja (gastos, totales, cierre,
+    // facturas con NIF, exportar) es del administrador y ni se pide ni se enseña.
+    const { role } = useAuth();
+    const admin = esAdmin(role);
+
     const [busqueda, setBusqueda] = useState("");
     const [del, setDel] = useState(() => todayYMD());
     const [al, setAl] = useState(() => todayYMD());
@@ -245,10 +252,10 @@ export default function Cuentas() {
     );
     const salidasQuery = useCuentasSalidas(
         { del, al, q: qDebounced, cursor: paginasSalidas.cursor },
-        !rangoInvalido,
+        !rangoInvalido && admin,
     );
     // Totales de cabecera sobre TODO el rango (no solo la página visible).
-    const resumenQuery = useCuentasResumen({ del, al, q: qDebounced }, !rangoInvalido);
+    const resumenQuery = useCuentasResumen({ del, al, q: qDebounced }, !rangoInvalido && admin);
     const proveedoresQuery = useCuentasProveedoresMini();
 
     // Escrituras (mutaciones con invalidación en onSuccess).
@@ -370,8 +377,8 @@ export default function Cuentas() {
     }, []);
 
     useEffect(() => {
-        void recargarCierres();
-    }, [recargarCierres]);
+        if (admin) void recargarCierres();
+    }, [admin, recargarCierres]);
 
     const imprimirCierre = async (idCierre: string) => {
         try {
@@ -1324,6 +1331,41 @@ export default function Cuentas() {
         return proveedoresMap.get(id) ?? `Proveedor #${id}`;
     };
 
+    // Las acciones de un cobro, iguales en la fila de móvil y en la de escritorio. El camarero
+    // reimprime y da de baja; facturar con NIF y editar son del administrador.
+    const accionesDeCobro = (e: EntradaDto) => (
+        <>
+            <MiniIconButton title="Reimprimir ticket" onClick={() => reimprimirTicket(e)}>
+                <Printer className="size-4" aria-hidden />
+            </MiniIconButton>
+            {esAnulado(e) ? null : seleccionTickets ? (
+                <CasillaTicket
+                    marcada={seleccionTickets.has(e.id)}
+                    onClick={() => alternarTicket(e)}
+                />
+            ) : (
+                <>
+                    {admin ? (
+                        <>
+                            <MiniIconButton
+                                title="Factura con NIF (emitir o corregir)"
+                                onClick={() => void abrirFactura(e)}
+                            >
+                                <FileText className="size-4" aria-hidden />
+                            </MiniIconButton>
+                            <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
+                                <Pencil className="size-4" aria-hidden />
+                            </MiniIconButton>
+                        </>
+                    ) : null}
+                    <MiniIconButton title="Anular" variant="danger" onClick={() => borrarPago(e)}>
+                        <Trash2 className="size-4" aria-hidden />
+                    </MiniIconButton>
+                </>
+            )}
+        </>
+    );
+
     return (
         <div className="flex h-full w-full flex-col gap-3 overflow-hidden bg-bg p-3 sm:p-4 lg:px-10 lg:py-5">
             {/* HEADER */}
@@ -1336,11 +1378,14 @@ export default function Cuentas() {
                         <div className="min-w-0">
                             <h1 className="text-xl font-bold text-fg sm:text-2xl">Cuentas</h1>
                             <p className="text-sm text-fg-muted">
-                                Filtra ingresos y gastos por fecha o búsqueda.
+                                {admin
+                                    ? "Filtra ingresos y gastos por fecha o búsqueda."
+                                    : "Los cobros: reimprime un ticket, devuélvelo o dalo de baja."}
                             </p>
                         </div>
                     </div>
 
+                    {admin ? (
                     <div className="flex flex-wrap items-center gap-2">
                         <Badge>Entradas: {eur(totalEntradas)}</Badge>
                         <Badge>Salidas: {eur(totalSalidas)}</Badge>
@@ -1360,6 +1405,7 @@ export default function Cuentas() {
                             </span>
                         </Badge>
                     </div>
+                    ) : null}
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
@@ -1408,7 +1454,14 @@ export default function Cuentas() {
             </div>
 
             {/* PANELES */}
-            <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[repeat(2,minmax(0,1fr))] gap-4 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
+            <div
+                className={cn(
+                    "grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden",
+                    admin
+                        ? "grid-rows-[repeat(2,minmax(0,1fr))] lg:grid-cols-2 lg:grid-rows-1"
+                        : "grid-rows-[minmax(0,1fr)]",
+                )}
+            >
                         <section className="flex h-full min-h-0 overflow-hidden flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
                             <div className="flex items-start justify-between gap-3 flex-none">
                                 <div>
@@ -1417,6 +1470,7 @@ export default function Cuentas() {
                                         Pagos de clientes (tarjeta o efectivo).
                                     </p>
                                 </div>
+                                {admin ? (
                                 <div className="flex items-center gap-2">
                                     <button
                                         type="button"
@@ -1428,6 +1482,7 @@ export default function Cuentas() {
                                     </button>
                                     <Badge>Total: {eur(totalEntradas)}</Badge>
                                 </div>
+                                ) : null}
                             </div>
 
                             {seleccionTickets ? (
@@ -1487,37 +1542,7 @@ export default function Cuentas() {
                                                                 {eur(e.importe)}
                                                             </div>
                                                             <div className="flex gap-2">
-                                                                <MiniIconButton
-                                                                    title="Reimprimir ticket"
-                                                                    onClick={() => reimprimirTicket(e)}
-                                                                >
-                                                                    <Printer className="size-4" aria-hidden />
-                                                                </MiniIconButton>
-                                                                {esAnulado(e) ? null : seleccionTickets ? (
-                                                                    <CasillaTicket
-                                                                        marcada={seleccionTickets.has(e.id)}
-                                                                        onClick={() => alternarTicket(e)}
-                                                                    />
-                                                                ) : (
-                                                                    <>
-                                                                        <MiniIconButton
-                                                                            title="Factura con NIF (emitir o corregir)"
-                                                                            onClick={() => void abrirFactura(e)}
-                                                                        >
-                                                                            <FileText className="size-4" aria-hidden />
-                                                                        </MiniIconButton>
-                                                                        <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
-                                                                            <Pencil className="size-4" aria-hidden />
-                                                                        </MiniIconButton>
-                                                                        <MiniIconButton
-                                                                            title="Anular"
-                                                                            variant="danger"
-                                                                            onClick={() => borrarPago(e)}
-                                                                        >
-                                                                            <Trash2 className="size-4" aria-hidden />
-                                                                        </MiniIconButton>
-                                                                    </>
-                                                                )}
+                                                                {accionesDeCobro(e)}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1537,37 +1562,7 @@ export default function Cuentas() {
                                                             {eur(e.importe)}
                                                         </div>
                                                         <div className="col-span-3 flex justify-end gap-2">
-                                                            <MiniIconButton
-                                                                title="Reimprimir ticket"
-                                                                onClick={() => reimprimirTicket(e)}
-                                                            >
-                                                                <Printer className="size-4" aria-hidden />
-                                                            </MiniIconButton>
-                                                            {esAnulado(e) ? null : seleccionTickets ? (
-                                                                    <CasillaTicket
-                                                                        marcada={seleccionTickets.has(e.id)}
-                                                                        onClick={() => alternarTicket(e)}
-                                                                    />
-                                                                ) : (
-                                                                <>
-                                                                    <MiniIconButton
-                                                                        title="Factura con NIF (emitir o corregir)"
-                                                                        onClick={() => void abrirFactura(e)}
-                                                                    >
-                                                                        <FileText className="size-4" aria-hidden />
-                                                                    </MiniIconButton>
-                                                                    <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
-                                                                        <Pencil className="size-4" aria-hidden />
-                                                                    </MiniIconButton>
-                                                                    <MiniIconButton
-                                                                        title="Anular"
-                                                                        variant="danger"
-                                                                        onClick={() => borrarPago(e)}
-                                                                    >
-                                                                        <Trash2 className="size-4" aria-hidden />
-                                                                    </MiniIconButton>
-                                                                </>
-                                                            )}
+                                                            {accionesDeCobro(e)}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1607,6 +1602,7 @@ export default function Cuentas() {
                             </div>
                         </section>
 
+                        {admin ? (
                         <section className="flex h-full min-h-0 overflow-hidden flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
                             <div className="flex items-start justify-between gap-3 flex-none">
                                 <div>
@@ -1734,8 +1730,11 @@ export default function Cuentas() {
                                 </div>
                             </div>
                         </section>
+                        ) : null}
                     </div>
 
+            {admin ? (
+            <>
             {/* FOOTER */}
             <div className="w-full rounded-2xl border border-border bg-surface p-4 shadow-sm">
                 <div className="grid grid-cols-1 gap-3 sm:flex sm:items-center sm:justify-between">
@@ -1893,6 +1892,8 @@ export default function Cuentas() {
                     </div>
                 )}
             </div>
+            </>
+            ) : null}
 
             <ModalShell
                 open={openAddGasto}

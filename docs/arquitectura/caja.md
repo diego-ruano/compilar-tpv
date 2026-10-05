@@ -25,7 +25,7 @@ periodo (arqueo) y la baja de un cobro. Sus tres reglas de fondo:
 | Baja de un cobro | `crates/tpv-infra-sqlite/src/cuentas.rs::anular_pago` | Stock, gasto del cliente, estado, historial, comanda y registro fiscal en una transacción |
 | Historial | `crates/tpv-infra-sqlite/src/caja_movimientos.rs` → `Movimientos_Caja` | Una fila por hecho: `COBRO`, `ANULACION`, `DEVOLUCION`, `GASTO`, `GASTO_ANULADO` |
 | «Línea cobrada» | vista `v_lineas_cobradas` (`0001_inicial.sql`) | `Pago_Detalles` unida a pagos **activos** |
-| Comandos | `src-tauri/src/commands/{cierre_caja,cuentas}.rs` | Todos exigen Administrador; quién firma sale de la sesión |
+| Comandos | `src-tauri/src/commands/{cierre_caja,cuentas}.rs` | Exigen Administrador, salvo los cobros y sus bajas, que hace también el camarero ([permisos.md](permisos.md)); quién firma sale de la sesión |
 | Pantallas | `src/features/cuentas/CierreCajaModal.tsx` · `ImpactoCierreModal.tsx` · `src/app/pages/Cuentas.tsx` | El cierre en cuatro pasos · el aviso antes de tocar un cierre hecho · el libro, el histórico y la baja |
 | Papel | `src-tauri/src/printing.rs::build_arqueo` (`printer_print_arqueo`) | Documento interno |
 | Aviso | `jobs/registro.rs::caja_sin_cerrar` | Notificación si el periodo lleva más de 20 h abierto |
@@ -147,7 +147,7 @@ Reglas:
 
 ## Dar de baja un cobro
 
-`cuentas_anular_pago` (Administrador, ruta del worker `POST /v1/cuentas/pagos/:id/anular`, vetada a la
+`cuentas_anular_pago` (Administrador o camarero, ruta del worker `POST /v1/cuentas/pagos/:id/anular`, vetada a la
 Handy). El motivo es obligatorio siempre, sin umbral: la sisa que esto caza son importes pequeños
 repetidos. La pantalla obliga a elegir una de las dos clases, cada una explicada en una frase:
 

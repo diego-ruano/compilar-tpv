@@ -74,6 +74,8 @@ const MENU_BY_ROLE: Record<string, { top: MenuItem[]; bottom: MenuItem[] }> = {
       ITEMS.reservas,
       ITEMS.trabajadores,
       ITEMS.tareas,
+      // Sólo los cobros y sus bajas: el resto de la caja es del administrador.
+      ITEMS.cuentas,
     ],
     bottom: [ITEMS.notificaciones],
   },

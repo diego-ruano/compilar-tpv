@@ -1,8 +1,12 @@
 //! Comandos Tauri de cuentas/caja (capa fina hexagonal).
 //!
-//! SEC-01: **toda la sección es de administrador**, lecturas incluidas (`docs/arquitectura/caja.md`):
+//! SEC-01: **la sección es de administrador**, lecturas incluidas (`docs/arquitectura/permisos.md`):
 //! el gate va en la ruta del frontend y, sobre todo, en estos comandos. El libro de caja dice
 //! cuánto se factura y cuánto se gasta; esconderlo del menú no es esconderlo.
+//!
+//! La excepción son **los cobros y sus bajas**, que también hace el camarero: la lista de cobros,
+//! el aviso previo de una baja y la baja misma (por error o devolución). Es lo que pasa a mitad de
+//! servicio —el cliente que vuelve a por su dinero— sin el encargado delante.
 //!
 //! CAJA-01: los que tocan un apunte ya no se niegan por fecha. Pasan por `rectificacion_caja`, que
 //! rectifica el cierre ya hecho al que pertenezca el apunte. El aviso previo lo pide la pantalla con
@@ -18,7 +22,7 @@ use tpv_contracts::cuentas::{
     AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, PaginaEntradas,
     PaginaSalidas, ResumenCajaDto, UpdateGastoInput, UpdatePagoInput,
 };
-use crate::{AppState, ADMIN};
+use crate::{AppState, ADMIN, CAMARERO};
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
@@ -26,7 +30,7 @@ pub async fn cuentas_get_entradas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
 ) -> Result<PaginaEntradas, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
+    state.exigir_rol(&[ADMIN, CAMARERO]).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_entradas(repo.as_ref(), args).await?)
 }
@@ -52,12 +56,18 @@ pub async fn cuentas_get_resumen(
 }
 
 /// A qué cierres ya hechos afectaría un cambio y cómo quedarían. No toca nada.
+///
+/// El de una baja lo pide también el camarero, porque la pantalla lo enseña antes de darla; el
+/// resto de cambios son del administrador.
 #[tauri::command]
 pub async fn cuentas_previsualizar_cambio(
     state: State<'_, AppState>,
     args: CambioCajaInput,
 ) -> Result<ImpactoCajaDto, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
+    match args {
+        CambioCajaInput::AnularPago { .. } => state.exigir_rol(&[ADMIN, CAMARERO]).await?,
+        _ => state.exigir_rol(&[ADMIN]).await?,
+    };
     let cierres = state.cierre_caja_repo().await?;
     Ok(rect::previsualizar(cierres.as_ref(), &args).await?)
 }
@@ -145,12 +155,15 @@ pub async fn cuentas_update_pago(
 ///
 /// Quién anula sale de la **sesión** (SEC-01) y nunca del input: una anulación firmada con el
 /// nombre que le pase la pantalla es una auditoría que da confianza sin merecerla.
+///
+/// La hace también el camarero, las dos clases: el cliente que vuelve a por su dinero no espera
+/// al encargado, y lo que deja rastro es la firma de la sesión, no el rol.
 #[tauri::command]
 pub async fn cuentas_anular_pago(
     state: State<'_, AppState>,
     args: AnularPagoInput,
 ) -> Result<bool, AppErrorDto> {
-    let sesion = state.exigir_rol(&[ADMIN]).await?;
+    let sesion = state.exigir_rol(&[ADMIN, CAMARERO]).await?;
     let cuentas = state.cuentas_repo().await?;
     let cierres = state.cierre_caja_repo().await?;
     Ok(rect::anular_pago(cuentas.as_ref(), cierres.as_ref(), &sesion.id_usuario, args).await?)
