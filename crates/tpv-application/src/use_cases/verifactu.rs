@@ -352,30 +352,47 @@ pub async fn listar(
         .await
 }
 
-/// Emite una factura completa en sustitución de un ticket (`F3`, FISCAL-02).
+/// Emite una factura completa en sustitución de los tickets de unos cobros (`F3`, FISCAL-02).
 ///
 /// Los datos del cliente se validan en el repositorio, justo antes de emitir: un NIF con el dígito
 /// de control mal no se rechaza al enviar, vuelve como error admisible 2001 horas después.
 pub async fn emitir_sustitutiva(
     repo: &dyn VerifactuRepository,
-    num_serie_original: &str,
+    id_pagos: &[String],
     destinatario: DestinatarioInput,
 ) -> AppResult<BloqueFiscal> {
-    let n = num_serie_original.trim();
-    if n.is_empty() {
+    let ids: Vec<String> = id_pagos
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if ids.is_empty() {
         return Err(AppError::validation(
-            "Hace falta el número del ticket que se quiere facturar.",
+            "Elige al menos un cobro cuyo ticket se quiera facturar.",
         ));
     }
-    repo.emitir_sustitutiva(
-        n,
-        tpv_domain::verifactu::Destinatario {
-            nombre_razon: destinatario.nombre_razon,
-            nif: destinatario.nif,
-            direccion: destinatario.domicilio,
-        },
-    )
-    .await
+    repo.emitir_sustitutiva(&ids, destinatario_de(destinatario)).await
+}
+
+/// Corrige los datos del cliente de una factura completa ya expedida (FISCAL-02).
+pub async fn corregir_factura(
+    repo: &dyn VerifactuRepository,
+    num_factura: &str,
+    destinatario: DestinatarioInput,
+) -> AppResult<BloqueFiscal> {
+    let n = num_factura.trim();
+    if n.is_empty() {
+        return Err(AppError::validation("Hace falta el número de la factura que se corrige."));
+    }
+    repo.corregir_factura(n, destinatario_de(destinatario)).await
+}
+
+fn destinatario_de(d: DestinatarioInput) -> tpv_domain::verifactu::Destinatario {
+    tpv_domain::verifactu::Destinatario {
+        nombre_razon: d.nombre_razon,
+        nif: d.nif,
+        direccion: d.domicilio,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -960,6 +977,13 @@ mod tests {
             }
             async fn emitir_sustitutiva(
                 &self,
+                _p: &[String],
+                _d: tpv_domain::verifactu::Destinatario,
+            ) -> AppResult<BloqueFiscal> {
+                unreachable!("el ciclo de remisión no emite facturas")
+            }
+            async fn corregir_factura(
+                &self,
                 _n: &str,
                 _d: tpv_domain::verifactu::Destinatario,
             ) -> AppResult<BloqueFiscal> {
@@ -1467,6 +1491,13 @@ mod tests_aviso_de_atraso {
             Ok(None)
         }
         async fn emitir_sustitutiva(
+            &self,
+            _p: &[String],
+            _d: tpv_domain::verifactu::Destinatario,
+        ) -> AppResult<BloqueFiscal> {
+            unreachable!()
+        }
+        async fn corregir_factura(
             &self,
             _n: &str,
             _d: tpv_domain::verifactu::Destinatario,

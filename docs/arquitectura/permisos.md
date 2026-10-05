@@ -66,7 +66,7 @@ encargado.
 |---|---|
 | Cuentas, lecturas incluidas | `cuentas_get_entradas`, `cuentas_get_salidas`, `cuentas_get_resumen`, `cuentas_previsualizar_cambio`, `cuentas_create_gasto`, `cuentas_update_gasto`, `cuentas_delete_gasto`, `cuentas_update_pago`, `cuentas_anular_pago` |
 | Cierre de caja | `cierre_preparar`, `cierre_confirmar`, `cierre_listar`, `cierre_detalle`, `cierre_reabrir` |
-| Veri\*factu | `verifactu_listar`, `verifactu_certificados`, `verifactu_set_certificado`, `verifactu_probar_conexion`, `verifactu_emitir_factura_de_ticket`, `verifactu_subsanar_rechazados`, `verifactu_reconocer_anomalias`, `verifactu_exportar`, `verifactu_set_modo_prueba` |
+| Veri\*factu | `verifactu_listar`, `verifactu_certificados`, `verifactu_set_certificado`, `verifactu_probar_conexion`, `verifactu_emitir_factura_de_tickets`, `verifactu_corregir_factura`, `verifactu_subsanar_rechazados`, `verifactu_reconocer_anomalias`, `verifactu_exportar`, `verifactu_set_modo_prueba` |
 | Personal | `trabajadores_create`, `trabajadores_update`, `trabajadores_get_detail` (la única lectura de personal gateada: devuelve la PII) |
 | Configuración | `config_patch_business_settings`, `config_patch_ticket_settings`, `config_patch_contact_settings` |
 | Correo de recuperación | `correo_recuperacion_estado`, `correo_recuperacion_usar_el_de_la_compra`; y `…_solicitar` / `…_confirmar`, que sin sesión sólo valen mientras el PIN inicial esté por elegir |

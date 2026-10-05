@@ -33,6 +33,7 @@ export default function DatosFiscalesModal({
     error = null,
     /** Datos de partida, si el cobro es de un cliente con ficha. */
     inicial,
+    corrigiendo = null,
 }: {
     open: boolean;
     onClose: () => void;
@@ -43,6 +44,11 @@ export default function DatosFiscalesModal({
     guardando?: boolean;
     error?: string | null;
     inicial?: Partial<DestinatarioInput> | null;
+    /**
+     * El número de la factura completa que se corrige. Una factura expedida no se modifica: se
+     * corrige emitiendo otra (FISCAL-02), y el formulario lo dice.
+     */
+    corrigiendo?: string | null;
 }) {
     const [nombre, setNombre] = useState("");
     const [nif, setNif] = useState("");
@@ -74,10 +80,19 @@ export default function DatosFiscalesModal({
             />
             <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-border bg-surface p-6 shadow-xl">
                 <h3 className="text-lg font-semibold text-fg">
-                    {obligatorio ? "Este cobro necesita factura" : "Factura con NIF"}
+                    {corrigiendo
+                        ? `Corregir el cliente de la factura ${corrigiendo}`
+                        : obligatorio
+                          ? "Este cobro necesita factura"
+                          : "Factura con NIF"}
                 </h3>
                 <p className="mt-1 text-sm text-fg-muted">
-                    {obligatorio ? (
+                    {corrigiendo ? (
+                        <>
+                            Una factura ya expedida no se cambia: se emite otra con los datos
+                            correctos que la corrige, con los mismos importes.
+                        </>
+                    ) : obligatorio ? (
                         <>
                             Son {eur(importe)}, y por encima de {eur(limite)} la ley no permite
                             entregar un ticket: hay que emitir una factura con los datos del cliente.{" "}

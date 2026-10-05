@@ -596,6 +596,16 @@ pub struct DatosFactura {
     /// `emitir_alta` lo descarta si coincide con la de expedición — informarlo entonces es ruido, y
     /// la norma lo condiciona a que sea distinta.
     pub fecha_operacion: Option<String>,
+    /// El desglose ya declarado en otras facturas, cuando ésta lo copia (una `F3`, una
+    /// rectificativa, una subsanación). Se usa **tal cual**: recalcularlo desde los totales puede
+    /// mover un céntimo entre base y cuota —sobre todo al sumar varios tickets en una `F3`—, y
+    /// entonces dos facturas dirían cosas distintas del mismo dinero. `None` = se calcula de
+    /// `lineas`.
+    pub desglose: Option<Vec<TramoIva>>,
+    /// `ImporteRectificacion` de una rectificativa **por sustitución** (`S`): la base y la cuota de
+    /// la factura que se sustituye (FAQ del SII 2.8, opción 1). Obligatorio con `S` y prohibido con
+    /// `I`.
+    pub importe_rectificacion: Option<(Dinero, Dinero)>,
 }
 
 /// Emite un registro de **alta** y lo deja encolado para remitir.
@@ -609,7 +619,19 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
     let tipo_factura = d.tipo_factura.clone().unwrap_or_else(|| "F2".to_string());
 
     // ── Desglose e importes. Se calculan UNA vez, se formatean UNA vez y se guardan como texto ──
-    let tramos = ticket::desglose(&normalizar_lineas(&d.lineas, obligado.iva_general));
+    let tramos = match &d.desglose {
+        Some(declarado) => declarado.clone(),
+        None => ticket::desglose(&normalizar_lineas(&d.lineas, obligado.iva_general)),
+    };
+
+    // Una rectificativa por sustitución lleva SIEMPRE lo que sustituye, y sólo ella: sin
+    // `ImporteRectificacion` la AEAT no sabe qué importe deja de valer.
+    let por_sustitucion = d.tipo_rectificativa.as_deref() == Some("S");
+    if por_sustitucion != d.importe_rectificacion.is_some() {
+        return Err(AppError::internal(
+            "una rectificativa por sustitución lleva ImporteRectificacion, y sólo ella",
+        ));
+    }
     let importe_total = ticket::importe_total(&tramos);
     let cuota_total = ticket::cuota_total(&tramos);
     let importe_txt = vf::fmt_importe(importe_total);
@@ -751,7 +773,7 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
             Value::Text(cuota_txt.clone()),
             Value::Text(desglose_json(&tramos)),
             opt_text(destinatario_json(d.destinatario.as_ref())),
-            opt_text(referencias_json(&d.rectificadas, &d.sustituidas)),
+            opt_text(referencias_json(&d.rectificadas, &d.sustituidas, d.importe_rectificacion)),
             opt_text(vf::macrodato(importe_total).map(|s| s.to_string())),
             opt_text(primer_registro.map(|s| s.to_string())),
             opt_text(anterior.as_ref().map(|a| a.nif.clone())),
@@ -1119,16 +1141,19 @@ pub async fn emitir_baja_de_pago(
 ) -> AppResult<()> {
     use tpv_application::ports::cuentas::ClaseBaja;
 
-    // Un cobro puede tener varias altas: la de su ticket o factura (`F1`/`F2`, más una fila por cada
-    // subsanación, que repite el `IDFactura`) y, si el cliente volvió a pedir factura, la `F3` que
-    // canjea el ticket. Se buscan POR SEPARADO: coger «la última alta del pago» daba la `F3`, y la
-    // baja se hacía sobre ella dejando el ticket intacto.
+    // Un cobro puede tener varias facturas, y se buscan POR SEPARADO: coger «la última alta del
+    // pago» daba la `F3` y la baja se hacía sobre ella dejando el ticket intacto.
+    //
+    // - La original: su `F1` o `F2` (la última fila, por si se subsanó).
+    // - Si es una `F1` corregida, las rectificativas por sustitución que la han ido reemplazando.
+    //   La vigente es la última, y es la que se rectifica o se anula.
+    // - Si es una `F2` canjeada, la `F3` vigente que la sustituye (sola o con otros tickets).
     let altas = altas_del_pago(db, id_pago).await?;
-    // El vigente de la factura original es su última fila (la subsanación, si la hubo).
     let Some(original) = altas
         .iter()
         .filter(|a| a.tipo_factura == "F1" || a.tipo_factura == "F2")
         .next_back()
+        .cloned()
     else {
         tracing::warn!(
             target: "tpv::verifactu",
@@ -1137,12 +1162,17 @@ pub async fn emitir_baja_de_pago(
         );
         return Ok(());
     };
-    // La `F3` que canjeó ese ticket: la que lo lleva en `FacturasSustituidas`.
-    let canje = altas
-        .iter()
-        .filter(|a| a.tipo_factura == "F3")
-        .filter(|a| numeros_sustituidos(a.referencias.as_deref()).contains(&original.num_serie))
-        .next_back();
+    let sustitutivas = if original.tipo_factura == "F1" {
+        cadena_de_sustitutivas(db, &original).await?
+    } else {
+        Vec::new()
+    };
+    let vigente = sustitutivas.last().cloned().unwrap_or_else(|| original.clone());
+    let canje = if original.tipo_factura == "F2" {
+        f3_vigente(db, &original.num_serie).await?
+    } else {
+        None
+    };
 
     // La operación que documenta una rectificativa es la MISMA que la de la factura original, y
     // esa se efectuó otro día: la devolución se hace días después. Es, con diferencia, el caso más
@@ -1159,20 +1189,37 @@ pub async fn emitir_baja_de_pago(
     match clase {
         ClaseBaja::Error => {
             // La anulación «deshace» la expedición de una factura que no respondía a una operación
-            // real (FAQ de desarrolladores de la AEAT, apartado 17.2.d). Si el ticket se canjeó, la
-            // `F3` documenta esa misma operación inexistente: se anulan las dos, la `F3` primero
-            // porque se expidió después. Anular sólo una dejaría la otra declarada.
-            if let Some(c) = canje {
-                emitir_anulacion(db, &c.id_registro).await?;
+            // real (FAQ de desarrolladores de la AEAT, apartado 17.2.d). Todo lo que documenta esa
+            // operación se anula, de lo último expedido a lo primero.
+            if let Some(c) = &canje {
+                if c.sustituye_solo(&original.num_serie) {
+                    emitir_anulacion(db, &c.id_registro).await?;
+                } else {
+                    // Una F3 que canjea también otros tickets no se puede anular: los demás siguen
+                    // siendo ventas. Se contrarresta sólo la parte de este ticket con una F3
+                    // negativa que lo sustituye, como hace la FAQ (apartado 27, caso 1) para
+                    // corregir una F3. La FAQ no trata este caso de forma literal.
+                    emitir_alta(
+                        db,
+                        DatosFactura {
+                            tipo_factura: Some("F3".to_string()),
+                            id_pago: Some(id_pago.to_string()),
+                            desglose: Some(negar(&original.tramos())),
+                            destinatario: Some(c.cliente()?),
+                            sustituidas: vec![original.referencia()],
+                            fecha_operacion: fecha_op_original.clone(),
+                            ..Default::default()
+                        },
+                    )
+                    .await?;
+                }
+            }
+            for s in sustitutivas.iter().rev() {
+                emitir_anulacion(db, &s.id_registro).await?;
             }
             emitir_anulacion(db, &original.id_registro).await?;
         }
         ClaseBaja::Devolucion => {
-            // Los importes se NIEGAN sobre el texto guardado, no se recalculan desde un `f64`: es
-            // el mismo número que se facturó, con el signo cambiado. Recalcularlo podría devolver
-            // un céntimo distinto del que se cobró.
-            let lineas = desglose_negado(original.desglose.as_deref());
-
             // La clave sale de la factura que se rectifica (FAQ Veri*factu de la AEAT,
             // «¿Cómo registra el emisor una factura rectificativa?»):
             //   * una simplificada (`F2`) se rectifica con `R5`, que **no puede llevar
@@ -1180,45 +1227,35 @@ pub async fn emitir_baja_de_pago(
             //   * una completa (`F1`) con `R1`, la de las causas del art. 80.Uno, Dos y Seis LIVA:
             //     una devolución deja «sin efecto total o parcialmente» la operación (80.Dos). Al
             //     ser completa tiene que cumplir el art. 6 del RD 1619/2012 (art. 15.5), así que
-            //     lleva el cliente de la `F1`, y en el registro su destinatario es obligatorio
-            //     (error 1189).
-            let (tipo_rectificativa_factura, destinatario) = if original.tipo_factura == "F1" {
-                let cliente = destinatario_desde_json(original.destinatario.as_deref()).ok_or_else(|| {
-                    AppError::internal(format!(
-                        "la factura completa {} no tiene cliente guardado: no se puede emitir su \
-                         rectificativa",
-                        original.num_serie
-                    ))
-                })?;
-                ("R1", Some(cliente))
+            //     lleva el cliente de la factura vigente, y en el registro su destinatario es
+            //     obligatorio (error 1189).
+            //
+            // Se rectifica la factura VIGENTE: si la F1 se corrigió, la última rectificativa que la
+            // sustituye (las FAQ del SII rectifican así una rectificativa previa, ejemplos 4 y 5).
+            let (clave, destinatario) = if original.tipo_factura == "F1" {
+                ("R1", Some(vigente.cliente()?))
             } else {
                 ("R5", None)
             };
+            // Los importes se NIEGAN sobre lo declarado, no se recalculan: es el mismo número que se
+            // facturó, con el signo cambiado.
+            let devuelto = negar(&vigente.tramos());
 
             let rectificativa = emitir_alta(
                 db,
                 DatosFactura {
-                    tipo_factura: Some(tipo_rectificativa_factura.to_string()),
+                    tipo_factura: Some(clave.to_string()),
                     // `I` = rectificativa **por diferencias**: se declara sólo lo que cambia (el
-                    // importe negativo), no la factura completa sustituida. Con `S` (sustitución)
-                    // habría que informar `ImporteRectificacion`, que es otro camino y no el que
-                    // marca la FAQ para una devolución.
+                    // importe negativo). Es lo que marca la FAQ para una devolución.
                     tipo_rectificativa: Some("I".to_string()),
                     id_pago: Some(id_pago.to_string()),
-                    lineas: lineas.clone(),
+                    desglose: Some(devuelto.clone()),
                     destinatario,
                     // Rectifica el TICKET, también si se canjeó: la `F3` no es rectificativa
                     // (art. 15.6 ROF) y lo que se declaró a efectos del IVA es la simplificada.
-                    rectificadas: vec![RefFactura {
-                        nif: original.nif.clone(),
-                        num_serie: original.num_serie.clone(),
-                        fecha: original.fecha.clone(),
-                    }],
-                    sustituidas: vec![],
-                    incidencia: false,
-                    numero_reservado: None,
-                    subsanar: None,
+                    rectificadas: vec![vigente.referencia()],
                     fecha_operacion: fecha_op_original.clone(),
+                    ..Default::default()
                 },
             )
             .await?;
@@ -1226,22 +1263,16 @@ pub async fn emitir_baja_de_pago(
             // Si el ticket se canjeó, el cliente tiene una factura completa con un IVA que ya no
             // puede deducir. La FAQ de desarrolladores de la AEAT (apartado 27, casos 2 y 3) dice
             // cómo se corrige: tras la `R5`, «debe emitirse nueva F3 con los mismos datos de R5»,
-            // con el cliente y sustituyendo a la `R5`.
+            // con el cliente y sustituyendo a la `R5`. Vale igual si la F3 canjeó varios tickets
+            // (apartado 27, punto 1: «hay que emitir una F3 por la rectificativa simplificada»).
             if let Some(c) = canje {
-                let destinatario = destinatario_desde_json(c.destinatario.as_deref()).ok_or_else(|| {
-                    AppError::internal(format!(
-                        "la factura completa {} no tiene cliente guardado: no se puede emitir la F3 \
-                         de la devolución",
-                        c.num_serie
-                    ))
-                })?;
                 emitir_alta(
                     db,
                     DatosFactura {
                         tipo_factura: Some("F3".to_string()),
                         id_pago: Some(id_pago.to_string()),
-                        lineas,
-                        destinatario: Some(destinatario),
+                        desglose: Some(devuelto),
+                        destinatario: Some(c.cliente()?),
                         sustituidas: vec![RefFactura {
                             nif: datos_obligado(db).await?.nif,
                             num_serie: rectificativa.num_serie_factura,
@@ -1258,119 +1289,134 @@ pub async fn emitir_baja_de_pago(
     Ok(())
 }
 
-/// Las líneas de la rectificativa: las del desglose original con el signo cambiado.
-///
-/// Se reconstruyen desde `Desglose_Json` para que el desglose de la `R5` sea el espejo exacto del de
-/// la factura rectificada — mismos tipos, mismas bases. Un desglose
-/// inventado aquí podría no cuadrar con lo que se devolvió.
-///
-/// Si no hay desglose guardado (no debería pasar) se devuelve vacío y el registro sale con importe
-/// cero. Es mejor que no salir: lo que no puede quedar es un cobro dado de baja sin su rectificativa.
-fn desglose_negado(desglose_json: Option<&str>) -> Vec<LineaTicket> {
-    tramos_del_desglose(desglose_json, -1)
+/// El desglose con el signo cambiado, tramo a tramo.
+fn negar(tramos: &[TramoIva]) -> Vec<TramoIva> {
+    tramos
+        .iter()
+        .map(|t| TramoIva { tipo: t.tipo, base: -t.base, cuota: -t.cuota })
+        .collect()
 }
 
+/// Suma desgloses por tipo, tramo a tramo y sin recalcular: la base y la cuota de cada tipo son la
+/// suma de las declaradas. Es lo que declara una F3 de varios tickets (FAQ, apartado 27, punto 1:
+/// «F3: BI 6.000, cuota 1.260» para tres simplificadas de 1.000, 2.000 y 3.000).
+fn sumar_desgloses<'a>(desgloses: impl IntoIterator<Item = &'a [TramoIva]>) -> Vec<TramoIva> {
+    let mut out: Vec<TramoIva> = Vec::new();
+    for d in desgloses {
+        for t in d {
+            match out.iter_mut().find(|x| (x.tipo - t.tipo).abs() < 1e-9) {
+                Some(x) => {
+                    x.base += t.base;
+                    x.cuota += t.cuota;
+                }
+                None => out.push(t.clone()),
+            }
+        }
+    }
+    out.sort_by(|a, b| a.tipo.partial_cmp(&b.tipo).unwrap_or(std::cmp::Ordering::Equal));
+    out
+}
 
-/// Emite una **factura completa en sustitución** de una simplificada ya expedida (`F3`).
+/// Emite una **factura completa en sustitución** de uno o varios tickets ya expedidos (`F3`).
 ///
 /// Es la respuesta al *«¿me lo puedes hacer con IVA?»* del día siguiente: el cliente vuelve con el
-/// ticket y pide factura. **No se rectifica nada** (art. 15.6 ROF): canjear una simplificada por una
-/// completa no es rectificar, se emite una `F3` que la **sustituye** y que sí lleva destinatario. La
-/// simplificada original se queda exactamente como está — no se anula ni se modifica.
+/// ticket —o con los de un periodo— y pide factura. **No se rectifica nada** (art. 15.6 ROF):
+/// canjear simplificadas por una completa no es rectificar, se emite una `F3` que las **sustituye**
+/// y que sí lleva destinatario. Los tickets se quedan exactamente como están.
 ///
-/// La `F3` gasta número nuevo de la misma serie y entra en la cadena como cualquier otro registro.
+/// Canjear varios tickets en una sola F3 está permitido (FAQ de desarrolladores de la AEAT,
+/// apartado 27: consulta vinculante V2543-06 de la DGT). Su desglose es la suma de los declarados,
+/// y su fecha de operación la del último ticket: es el criterio de las facturas recapitulativas
+/// (FAQ del SII 2.31), que la FAQ no fija para este caso.
 ///
-/// Se niega si el ticket ya tiene una `F3`: emitir dos facturas completas del mismo ticket sería
-/// facturar dos veces la misma venta.
+/// Cada ticket tiene que ser una `F2` vigente: ni canjeado ya, ni anulado, ni devuelto.
+///
+/// La `F3` gasta número nuevo de la serie ordinaria y entra en la cadena como cualquier otro
+/// registro. Si canjea un solo ticket queda ligada a su cobro (`ID_Pago`); si canjea varios, a
+/// ninguno: sus cobros la encuentran por `FacturasSustituidas`.
 pub async fn emitir_sustitutiva(
     db: &WriteGuard<'_>,
-    num_serie_original: &str,
+    nums_tickets: &[String],
     destinatario: vf::Destinatario,
 ) -> AppResult<BloqueFiscal> {
     let destinatario =
         vf::validar_destinatario(destinatario).map_err(|e| AppError::validation(e.mensaje()))?;
 
-    // El registro de alta original, del que salen el desglose y la referencia.
-    let mut rows = db
-        .query(
-            "SELECT ID_Registro, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Desglose_Json, \
-                    ID_Pago, COALESCE(Tipo_Factura, ''), Fecha_Operacion \
-             FROM Registros_Facturacion \
-             WHERE Num_Serie_Factura = ?1 AND Tipo = 'ALTA' \
-             ORDER BY Orden DESC LIMIT 1;",
-            vec![Value::Text(num_serie_original.trim().to_string())],
-        )
-        .await
-        .map_err(db_err)?;
-    let Some(row) = rows.next().await.map_err(db_err)? else {
-        return Err(AppError::not_found(
-            "No existe ninguna factura con ese número.",
-        ));
+    let mut nums: Vec<String> = nums_tickets.iter().map(|n| n.trim().to_string()).collect();
+    nums.retain(|n| !n.is_empty());
+    let antes = nums.len();
+    nums.sort();
+    nums.dedup();
+    if nums.is_empty() {
+        return Err(AppError::validation("Elige al menos un ticket que facturar."));
+    }
+    if nums.len() != antes {
+        return Err(AppError::validation("Un mismo ticket no puede ir dos veces en la factura."));
+    }
+    // El XSD admite como mucho 1.000 facturas sustituidas por registro.
+    if nums.len() > 1000 {
+        return Err(AppError::validation("Una factura puede sustituir como mucho a 1.000 tickets."));
+    }
+
+    let mut tickets: Vec<Alta> = Vec::with_capacity(nums.len());
+    for num in &nums {
+        let Some(t) = ultima_alta(db, num).await? else {
+            return Err(AppError::not_found(format!("No existe ninguna factura con el número {num}.")));
+        };
+        if t.tipo_factura != "F2" {
+            // Sólo una simplificada se canjea. Una `F1` ya es una factura completa y una `R5` es
+            // una rectificativa: en ninguno de los dos casos hay nada que sustituir.
+            return Err(AppError::conflict(format!(
+                "La factura {num} es de tipo {}: sólo un ticket (factura simplificada) se puede \
+                 canjear por una factura completa.",
+                t.tipo_factura
+            )));
+        }
+        // ¿Ya se canjeó? Se mira la F3 VIGENTE: una corregida con su F3 negativa deja de contar.
+        if f3_vigente(db, num).await?.is_some() {
+            return Err(AppError::conflict(format!(
+                "Del ticket {num} ya se emitió una factura completa."
+            )));
+        }
+        // Una F3 canjea simplificadas «facturadas y declaradas» (clave F3 de la Orden
+        // HAC/1177/2024). Un ticket anulado ya no tiene efecto fiscal, y uno devuelto quedó a
+        // cero con su rectificativa: en los dos casos no queda venta que facturar al cliente.
+        if esta_anulada(db, num).await? {
+            return Err(AppError::conflict(format!(
+                "El ticket {num} está anulado: no hay venta que facturar."
+            )));
+        }
+        if referenciado_por(db, "R5", "rectificadas", num).await? {
+            return Err(AppError::conflict(format!(
+                "El ticket {num} se devolvió: no queda importe que facturar."
+            )));
+        }
+        tickets.push(t);
+    }
+
+    // El desglose es el de los tickets, con su signo: la F3 no cambia el importe, lo vuelve a
+    // declarar con destinatario.
+    let tramos: Vec<Vec<TramoIva>> = tickets.iter().map(|t| t.tramos()).collect();
+    let desglose = sumar_desgloses(tramos.iter().map(|t| t.as_slice()));
+
+    // La `F3` documenta LA MISMA operación que los tickets que canjea, y esos se consumieron otro
+    // día. Con uno solo se hereda la suya (o su expedición si no la tenía); con varios, la del
+    // último. `emitir_alta` la descarta sola si coincide con la de hoy.
+    let fecha_operacion = tickets
+        .iter()
+        .filter_map(|t| t.fecha_operacion.clone().or_else(|| Some(t.fecha.clone())))
+        .max_by_key(|f| vf_fecha_ordenable(f));
+    let id_pago = match tickets.as_slice() {
+        [unico] => unico.id_pago.clone(),
+        _ => None,
     };
-    let nif = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
-    let num_serie = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
-    let fecha = v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default();
-    let desglose = v_string(row.get_value(4).map_err(db_err)?);
-    let id_pago = v_string(row.get_value(5).map_err(db_err)?);
-    let tipo_original = v_string(row.get_value(6).map_err(db_err)?).unwrap_or_default();
-    // La `F3` documenta LA MISMA operación que el ticket que canjea, y ese se consumió otro día: el
-    // cliente vuelve al día siguiente o a la semana. Se hereda la del original (o su expedición si
-    // no la tenía); `emitir_alta` la descarta sola si el canje es del mismo día.
-    let fecha_op_original =
-        v_string(row.get_value(7).map_err(db_err)?).or_else(|| Some(fecha.clone()));
-
-    if tipo_original != "F2" {
-        // Sólo una simplificada se canjea. Una `F1` ya es una factura completa y una `R5` es una
-        // rectificativa: en ninguno de los dos casos hay nada que sustituir.
-        return Err(AppError::conflict(format!(
-            "Esa factura es de tipo {tipo_original}: sólo un ticket (factura simplificada) se puede \
-             canjear por una factura completa."
-        )));
-    }
-
-    // ¿Ya se canjeó? `Referencias_Json` de la F3 lleva el número sustituido. Se compara el número
-    // EXACTO: con un `LIKE '%2027/000001%'` también casaba la F3 negativa de otra devolución, que
-    // sustituye a `R2027/000001`, y el ticket 2027/000001 quedaba sin poder facturarse.
-    if referenciado_por(db, "F3", "sustituidas", &num_serie).await? {
-        return Err(AppError::conflict(
-            "De ese ticket ya se emitió una factura completa.",
-        ));
-    }
-
-    // Una F3 canjea facturas simplificadas «facturadas y declaradas» (clave F3 de la Orden
-    // HAC/1177/2024). Un ticket anulado ya no tiene efecto fiscal, y uno devuelto quedó a cero con su
-    // rectificativa: en los dos casos no queda venta que facturar al cliente.
-    let anulado = select_i64(
-        db,
-        "SELECT COUNT(*) FROM Registros_Facturacion \
-         WHERE Tipo = 'ANULACION' AND Num_Serie_Factura = ?1;",
-        vec![Value::Text(num_serie.clone())],
-    )
-    .await?
-    .unwrap_or(0)
-        > 0;
-    if anulado {
-        return Err(AppError::conflict(
-            "Ese ticket está anulado: no hay venta que facturar.",
-        ));
-    }
-    if referenciado_por(db, "R5", "rectificadas", &num_serie).await? {
-        return Err(AppError::conflict(
-            "Ese ticket se devolvió: no queda importe que facturar.",
-        ));
-    }
-
-    // El desglose es el MISMO de la simplificada, con el mismo signo: la F3 no cambia el importe, lo
-    // vuelve a declarar con destinatario. Reconstruirlo del original es lo que garantiza que las dos
-    // facturas digan exactamente lo mismo del dinero.
-    let lineas = desglose_mismo_signo(desglose.as_deref());
 
     emitir_alta(
         db,
         DatosFactura {
             tipo_factura: Some("F3".to_string()),
             id_pago,
-            lineas,
+            desglose: Some(desglose),
             destinatario: Some(Destinatario {
                 nombre_razon: destinatario.nombre_razon,
                 nif: destinatario.nif,
@@ -1378,39 +1424,169 @@ pub async fn emitir_sustitutiva(
             }),
             // `FacturasSustituidas` sólo puede ir en una F3 (error 1116). Y no es
             // `FacturasRectificadas`: no se rectifica nada.
-            sustituidas: vec![RefFactura {
-                nif,
-                num_serie,
-                fecha,
-            }],
-            fecha_operacion: fecha_op_original,
+            sustituidas: tickets.iter().map(Alta::referencia).collect(),
+            fecha_operacion,
             ..Default::default()
         },
     )
     .await
 }
 
-/// Las líneas del desglose original, **con su signo**. Gemela de `desglose_negado`, que es la de la
-/// rectificativa; aquí el importe no cambia de signo porque la `F3` no devuelve nada.
-fn desglose_mismo_signo(desglose_json: Option<&str>) -> Vec<LineaTicket> {
-    tramos_del_desglose(desglose_json, 1)
-}
-
-/// Lee `Desglose_Json` y devuelve sus tramos como líneas, multiplicando el importe por `signo`.
+/// Corrige los datos del cliente de una factura completa ya expedida. Devuelve la factura nueva.
 ///
-/// Existe porque la rectificativa y la sustitutiva necesitan lo mismo con el signo contrario, y dos
-/// copias de este parseo se separarían en cuanto alguien añadiera un campo al desglose.
-fn tramos_del_desglose(desglose_json: Option<&str>, signo: i64) -> Vec<LineaTicket> {
-    tramos_declarados(desglose_json)
-        .into_iter()
-        .map(|t| LineaTicket {
-            // `LineaTicket` trabaja con el total CON IVA, que es base + cuota.
-            total_con_iva: (t.base + t.cuota).por(signo),
-            tipo_iva: t.tipo,
-        })
-        .collect()
+/// - **Una `F3`** (FAQ de desarrolladores de la AEAT, apartado 27, caso 1): al no haber error en
+///   los tickets, no se tocan. Se emite una F3 negativa con los mismos importes y los mismos
+///   tickets sustituidos, que contrarresta la errónea, y una F3 nueva con los datos correctos.
+/// - **Una `F1`** (o la rectificativa que ya la sustituyó): una factura completa con el cliente mal
+///   no cumple el art. 6 del RD 1619/2012, y eso obliga a rectificarla (art. 15.1). Se rectifica
+///   **por sustitución** (`S`) con los mismos importes y el cliente correcto, informando en
+///   `ImporteRectificacion` la base y la cuota de la que se sustituye (FAQ del SII 2.7 y 2.8,
+///   opción 1). La clave es **`R4`** («resto»): un error material en los datos del destinatario no
+///   es un error fundado de derecho ni una causa del art. 80 LIVA, que son las de `R1`–`R3`. Esto
+///   último es una deducción: ninguna fuente oficial pone este caso como ejemplo.
+///
+/// Sólo se corrige la factura vigente, de un cobro que no se haya anulado ni devuelto.
+pub async fn corregir_factura(
+    db: &WriteGuard<'_>,
+    num_factura: &str,
+    destinatario: vf::Destinatario,
+) -> AppResult<BloqueFiscal> {
+    let destinatario =
+        vf::validar_destinatario(destinatario).map_err(|e| AppError::validation(e.mensaje()))?;
+    let nuevo = Destinatario {
+        nombre_razon: destinatario.nombre_razon,
+        nif: destinatario.nif,
+        domicilio: destinatario.direccion,
+    };
+
+    let Some(f) = ultima_alta(db, num_factura).await? else {
+        return Err(AppError::not_found("No existe ninguna factura con ese número."));
+    };
+    if esta_anulada(db, &f.num_serie).await? {
+        return Err(AppError::conflict("Esa factura está anulada: no hay nada que corregir."));
+    }
+
+    match f.tipo_factura.as_str() {
+        "F3" => {
+            let vigente_de_sus_tickets = match f.sustituidas().first() {
+                Some(primero) => f3_vigente(db, &primero.num_serie).await?,
+                None => None,
+            };
+            if f.importe().es_negativo()
+                || vigente_de_sus_tickets.as_ref().map(|v| v.num_serie.as_str()) != Some(f.num_serie.as_str())
+            {
+                return Err(AppError::conflict(
+                    "Esa factura ya no es la vigente: se corrige la última que se emitió.",
+                ));
+            }
+            for t in f.sustituidas() {
+                if referenciado_por(db, "R5", "rectificadas", &t.num_serie).await? {
+                    return Err(AppError::conflict(format!(
+                        "El ticket {} se devolvió: su factura ya no se corrige.",
+                        t.num_serie
+                    )));
+                }
+            }
+            let tramos = f.tramos();
+            // La negativa es la errónea con el signo cambiado: mismos tickets, mismo cliente.
+            emitir_alta(
+                db,
+                DatosFactura {
+                    tipo_factura: Some("F3".to_string()),
+                    id_pago: f.id_pago.clone(),
+                    desglose: Some(negar(&tramos)),
+                    destinatario: Some(f.cliente()?),
+                    sustituidas: f.sustituidas(),
+                    fecha_operacion: f.fecha_operacion.clone(),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            emitir_alta(
+                db,
+                DatosFactura {
+                    tipo_factura: Some("F3".to_string()),
+                    id_pago: f.id_pago.clone(),
+                    desglose: Some(tramos),
+                    destinatario: Some(nuevo),
+                    sustituidas: f.sustituidas(),
+                    fecha_operacion: f.fecha_operacion.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
+        }
+        "F1" | "R1" | "R2" | "R3" | "R4" => {
+            let es_sustitutiva = f.tipo_factura == "F1" || f.tipo_rectificativa.as_deref() == Some("S");
+            if !es_sustitutiva || f.importe().es_negativo() {
+                return Err(AppError::conflict(
+                    "Esa factura no es una factura completa que se pueda corregir.",
+                ));
+            }
+            // Vigente: nada la ha sustituido después, ni se ha devuelto.
+            if rectificada_por(db, &f.num_serie).await? {
+                return Err(AppError::conflict(
+                    "Esa factura ya no es la vigente: se corrige la última que se emitió.",
+                ));
+            }
+            let tramos = f.tramos();
+            emitir_alta(
+                db,
+                DatosFactura {
+                    tipo_factura: Some("R4".to_string()),
+                    tipo_rectificativa: Some("S".to_string()),
+                    id_pago: f.id_pago.clone(),
+                    importe_rectificacion: Some((ticket::base_total(&tramos), ticket::cuota_total(&tramos))),
+                    desglose: Some(tramos),
+                    destinatario: Some(nuevo),
+                    rectificadas: vec![f.referencia()],
+                    fecha_operacion: f.fecha_operacion.clone().or_else(|| Some(f.fecha.clone())),
+                    ..Default::default()
+                },
+            )
+            .await
+        }
+        otro => Err(AppError::conflict(format!(
+            "Una factura de tipo {otro} no lleva cliente que corregir."
+        ))),
+    }
 }
 
+/// Los números de ticket de unos cobros, en el mismo orden. Un cobro sin número (modo prueba, o
+/// anterior a la numeración) no tiene factura que canjear.
+async fn numeros_de_ticket<C: Reader>(conn: &C, id_pagos: &[String]) -> AppResult<Vec<String>> {
+    let mut out = Vec::with_capacity(id_pagos.len());
+    for id in id_pagos {
+        let mut rows = conn
+            .query(
+                "SELECT COALESCE(Numero_Ticket, '') FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;",
+                vec![Value::Text(id.trim().to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        let num = match rows.next().await.map_err(db_err)? {
+            Some(row) => v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+            None => return Err(AppError::not_found("Uno de los cobros no existe.")),
+        };
+        if num.trim().is_empty() || vf::es_numero_de_prueba(&num) {
+            return Err(AppError::conflict(
+                "Uno de los cobros no tiene factura: es de antes de completar los datos fiscales o del \
+                 modo prueba.",
+            ));
+        }
+        out.push(num);
+    }
+    Ok(out)
+}
+
+/// `DD-MM-AAAA` → `AAAAMMDD`, para comparar fechas de factura.
+fn vf_fecha_ordenable(f: &str) -> String {
+    let p: Vec<&str> = f.trim().split('-').collect();
+    match p.as_slice() {
+        [d, m, a] => format!("{a}{m}{d}"),
+        _ => f.to_string(),
+    }
+}
 /// Los tramos de `Desglose_Json` tal como se declararon: el papel de una factura los imprime de
 /// aquí, no de un recálculo (RI-29).
 pub(crate) fn tramos_declarados(desglose_json: Option<&str>) -> Vec<TramoIva> {
@@ -1812,53 +1988,224 @@ async fn referenciado_por<C: Reader>(
     Ok(false)
 }
 
-/// Un alta de un cobro, con lo que hace falta para anularla o rectificarla.
-struct AltaDelPago {
+/// Un registro de alta, con lo que hace falta para referenciarlo, copiar su desglose o anularlo.
+#[derive(Debug, Clone)]
+struct Alta {
     id_registro: String,
+    orden: i64,
     tipo_factura: String,
+    tipo_rectificativa: Option<String>,
     nif: String,
     num_serie: String,
     fecha: String,
+    importe: Option<String>,
     desglose: Option<String>,
     fecha_operacion: Option<String>,
     destinatario: Option<String>,
     referencias: Option<String>,
+    id_pago: Option<String>,
 }
 
-/// Las altas de un cobro, de la más antigua a la más reciente. Va por `idx_regfact_pago`.
-async fn altas_del_pago<C: Reader>(conn: &C, id_pago: &str) -> AppResult<Vec<AltaDelPago>> {
-    let mut rows = conn
-        .query(
-            "SELECT ID_Registro, COALESCE(Tipo_Factura, ''), NIF_Emisor, Num_Serie_Factura, \
-                    Fecha_Expedicion, Desglose_Json, Fecha_Operacion, Destinatario_Json, \
-                    Referencias_Json \
-             FROM Registros_Facturacion \
-             WHERE ID_Pago = ?1 AND Tipo = 'ALTA' \
-             ORDER BY Orden ASC;",
-            vec![Value::Text(id_pago.to_string())],
-        )
-        .await
-        .map_err(db_err)?;
+impl Alta {
+    /// Su `IDFactura`, para referenciarla desde otra.
+    fn referencia(&self) -> RefFactura {
+        RefFactura {
+            nif: self.nif.clone(),
+            num_serie: self.num_serie.clone(),
+            fecha: self.fecha.clone(),
+        }
+    }
+
+    /// El desglose tal como se declaró.
+    fn tramos(&self) -> Vec<TramoIva> {
+        tramos_declarados(self.desglose.as_deref())
+    }
+
+    fn importe(&self) -> Dinero {
+        self.importe
+            .as_deref()
+            .and_then(Dinero::de_texto_fiscal)
+            .unwrap_or(Dinero::CERO)
+    }
+
+    fn sustituidas(&self) -> Vec<RefFactura> {
+        refs_desde_json(self.referencias.as_deref(), "sustituidas")
+    }
+
+    /// ¿Sustituye exactamente a esa factura y a ninguna más?
+    fn sustituye_solo(&self, num: &str) -> bool {
+        matches!(self.sustituidas().as_slice(), [r] if r.num_serie.trim() == num.trim())
+    }
+
+    /// Los números que sustituye, ordenados: dos F3 sustituyen «lo mismo» si coinciden.
+    fn juego_sustituido(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.sustituidas().into_iter().map(|r| r.num_serie).collect();
+        v.sort();
+        v
+    }
+
+    /// Su cliente. Una factura completa siempre lo tiene; si falta, el registro está mal y no se
+    /// puede emitir nada que lo copie.
+    fn cliente(&self) -> AppResult<Destinatario> {
+        destinatario_desde_json(self.destinatario.as_deref()).ok_or_else(|| {
+            AppError::internal(format!(
+                "la factura completa {} no tiene cliente guardado",
+                self.num_serie
+            ))
+        })
+    }
+}
+
+/// Las altas que cumplen `filtro`, de la más antigua a la más reciente.
+async fn altas<C: Reader>(conn: &C, filtro: &str, args: Vec<Value>) -> AppResult<Vec<Alta>> {
+    let sql = format!(
+        "SELECT ID_Registro, Orden, COALESCE(Tipo_Factura, ''), Tipo_Rectificativa, NIF_Emisor, \
+                Num_Serie_Factura, Fecha_Expedicion, Importe_Total, Desglose_Json, Fecha_Operacion, \
+                Destinatario_Json, Referencias_Json, ID_Pago \
+         FROM Registros_Facturacion \
+         WHERE Tipo = 'ALTA' AND {filtro} \
+         ORDER BY Orden ASC;"
+    );
+    let mut rows = conn.query(&sql, args).await.map_err(db_err)?;
     let mut out = Vec::new();
     while let Some(row) = rows.next().await.map_err(db_err)? {
         let t = |i: i32| -> AppResult<Option<String>> { Ok(v_string(row.get_value(i).map_err(db_err)?)) };
-        out.push(AltaDelPago {
+        out.push(Alta {
             id_registro: t(0)?.unwrap_or_default(),
-            tipo_factura: t(1)?.unwrap_or_default(),
-            nif: t(2)?.unwrap_or_default(),
-            num_serie: t(3)?.unwrap_or_default(),
-            fecha: t(4)?.unwrap_or_default(),
-            desglose: t(5)?,
-            fecha_operacion: t(6)?,
-            destinatario: t(7)?,
-            referencias: t(8)?,
+            orden: v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0),
+            tipo_factura: t(2)?.unwrap_or_default(),
+            tipo_rectificativa: t(3)?,
+            nif: t(4)?.unwrap_or_default(),
+            num_serie: t(5)?.unwrap_or_default(),
+            fecha: t(6)?.unwrap_or_default(),
+            importe: t(7)?,
+            desglose: t(8)?,
+            fecha_operacion: t(9)?,
+            destinatario: t(10)?,
+            referencias: t(11)?,
+            id_pago: t(12)?,
         });
     }
     Ok(out)
 }
 
-fn referencias_json(rect: &[RefFactura], sust: &[RefFactura]) -> Option<String> {
-    if rect.is_empty() && sust.is_empty() {
+/// Las altas de un cobro, de la más antigua a la más reciente. Va por `idx_regfact_pago`.
+async fn altas_del_pago<C: Reader>(conn: &C, id_pago: &str) -> AppResult<Vec<Alta>> {
+    altas(conn, "ID_Pago = ?1", vec![Value::Text(id_pago.to_string())]).await
+}
+
+/// La última fila de alta de un número: la vigente si se subsanó. Va por `idx_regfact_numserie`.
+async fn ultima_alta<C: Reader>(conn: &C, num: &str) -> AppResult<Option<Alta>> {
+    Ok(altas(conn, "Num_Serie_Factura = ?1", vec![Value::Text(num.trim().to_string())])
+        .await?
+        .pop())
+}
+
+/// ¿Tiene esa factura un registro de anulación?
+async fn esta_anulada<C: Reader>(conn: &C, num: &str) -> AppResult<bool> {
+    Ok(select_i64(
+        conn,
+        "SELECT COUNT(*) FROM Registros_Facturacion \
+         WHERE Tipo = 'ANULACION' AND Num_Serie_Factura = ?1;",
+        vec![Value::Text(num.trim().to_string())],
+    )
+    .await?
+    .unwrap_or(0)
+        > 0)
+}
+
+/// ¿La rectifica alguna rectificativa de una factura completa (`R1`–`R4`)?
+async fn rectificada_por<C: Reader>(conn: &C, num: &str) -> AppResult<bool> {
+    for clave in ["R1", "R2", "R3", "R4"] {
+        if referenciado_por(conn, clave, "rectificadas", num).await? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// La `F3` vigente que canjea un ticket, sola o con otros. `None` si no se canjeó.
+///
+/// Una F3 deja de estar vigente cuando la contrarresta una F3 negativa con los mismos tickets y el
+/// mismo importe en negativo: es como se corrige una F3 (FAQ de desarrolladores de la AEAT,
+/// apartado 27, caso 1). Se recorren en el orden en que se emitieron; una subsanación repite el
+/// número y reemplaza a su fila anterior.
+async fn f3_vigente<C: Reader>(conn: &C, num_ticket: &str) -> AppResult<Option<Alta>> {
+    let num = num_ticket.trim();
+    let candidatas: Vec<Alta> = altas(
+        conn,
+        "Tipo_Factura = 'F3' AND Referencias_Json IS NOT NULL",
+        vec![],
+    )
+    .await?
+    .into_iter()
+    .filter(|a| a.sustituidas().iter().any(|r| r.num_serie.trim() == num))
+    .collect();
+
+    let mut vigentes: Vec<Alta> = Vec::new();
+    for a in candidatas {
+        if let Some(previa) = vigentes.iter_mut().find(|v| v.num_serie == a.num_serie) {
+            *previa = a;
+            continue;
+        }
+        if a.importe().es_negativo() {
+            let contrarrestada = vigentes.iter().rposition(|v| {
+                v.juego_sustituido() == a.juego_sustituido() && v.importe() == -a.importe()
+            });
+            if let Some(i) = contrarrestada {
+                vigentes.remove(i);
+            }
+            // Una F3 negativa que no contrarresta a ninguna (la de la parte de un ticket anulado
+            // dentro de una F3 de varios) no es una factura vigente de este ticket.
+            continue;
+        }
+        vigentes.push(a);
+    }
+    Ok(vigentes.pop())
+}
+
+/// Las rectificativas por sustitución (`R1`–`R4` con `S`) que han ido reemplazando a una factura
+/// completa, de la primera a la última. La última es la vigente.
+async fn cadena_de_sustitutivas<C: Reader>(conn: &C, original: &Alta) -> AppResult<Vec<Alta>> {
+    let sustitutivas = altas(
+        conn,
+        "Tipo_Factura IN ('R1', 'R2', 'R3', 'R4') AND Tipo_Rectificativa = 'S'",
+        vec![],
+    )
+    .await?;
+    let mut cadena: Vec<Alta> = Vec::new();
+    let mut actual = original.num_serie.clone();
+    // Cada eslabón sustituye al anterior; el tope es una red contra un ciclo que no debería existir.
+    for _ in 0..sustitutivas.len() {
+        let siguiente = sustitutivas
+            .iter()
+            .filter(|s| {
+                refs_desde_json(s.referencias.as_deref(), "rectificadas")
+                    .iter()
+                    .any(|r| r.num_serie.trim() == actual)
+            })
+            .max_by_key(|s| s.orden)
+            .cloned();
+        match siguiente {
+            Some(s) => {
+                actual = s.num_serie.clone();
+                cadena.push(s);
+            }
+            None => break,
+        }
+    }
+    Ok(cadena)
+}
+
+/// Las referencias de una factura a otras, y el `ImporteRectificacion` de una rectificativa por
+/// sustitución, que también habla de la factura rectificada (su base y su cuota). El adaptador de
+/// la AEAT escribe cada parte en su bloque; la exportación del art. 8 las lleva tal cual.
+fn referencias_json(
+    rect: &[RefFactura],
+    sust: &[RefFactura],
+    importe_rectificacion: Option<(Dinero, Dinero)>,
+) -> Option<String> {
+    if rect.is_empty() && sust.is_empty() && importe_rectificacion.is_none() {
         return None;
     }
     let mapear = |v: &[RefFactura]| -> Vec<serde_json::Value> {
@@ -1872,13 +2219,17 @@ fn referencias_json(rect: &[RefFactura], sust: &[RefFactura]) -> Option<String> 
             })
             .collect()
     };
-    Some(
-        serde_json::json!({
-            "rectificadas": mapear(rect),
-            "sustituidas": mapear(sust),
-        })
-        .to_string(),
-    )
+    let mut v = serde_json::json!({
+        "rectificadas": mapear(rect),
+        "sustituidas": mapear(sust),
+    });
+    if let Some((base, cuota)) = importe_rectificacion {
+        v["importe_rectificacion"] = serde_json::json!({
+            "BaseRectificada": vf::fmt_importe(base),
+            "CuotaRectificada": vf::fmt_importe(cuota),
+        });
+    }
+    Some(v.to_string())
 }
 
 async fn select_i64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> AppResult<Option<i64>> {
@@ -2154,15 +2505,14 @@ async fn emitir_subsanacion_de(
     // El desglose se reconstruye del original, igual que en la `F3` y en la `R5` y por lo mismo: la
     // subsanación tiene que declarar EXACTAMENTE el mismo dinero. Recalcularlo desde el ticket podría
     // dar un céntimo distinto, y entonces habría dos versiones del mismo hecho.
-    let lineas = desglose_mismo_signo(desglose.as_deref());
-
     emitir_alta(
         db,
         DatosFactura {
             tipo_factura: Some(tipo_factura),
             tipo_rectificativa: tipo_rect,
             id_pago,
-            lineas,
+            desglose: Some(tramos_declarados(desglose.as_deref())),
+            importe_rectificacion: importe_rectificacion_desde_json(refs.as_deref()),
             destinatario: destinatario_desde_json(dest.as_deref()),
             rectificadas: refs_desde_json(refs.as_deref(), "rectificadas"),
             sustituidas: refs_desde_json(refs.as_deref(), "sustituidas"),
@@ -2181,6 +2531,15 @@ async fn emitir_subsanacion_de(
     )
     .await?;
     Ok(())
+}
+
+/// El `ImporteRectificacion` guardado (base y cuota de la factura sustituida), si lo hay.
+fn importe_rectificacion_desde_json(json: Option<&str>) -> Option<(Dinero, Dinero)> {
+    let v: serde_json::Value = serde_json::from_str(json?).ok()?;
+    let ir = v.get("importe_rectificacion")?;
+    let base = Dinero::de_texto_fiscal(ir.get("BaseRectificada")?.as_str()?)?;
+    let cuota = Dinero::de_texto_fiscal(ir.get("CuotaRectificada")?.as_str()?)?;
+    Some((base, cuota))
 }
 
 /// Reconstruye el destinatario desde el JSON guardado.
@@ -3402,7 +3761,35 @@ mod tests {
     #[test]
     fn sin_referencias_no_se_escribe_el_bloque() {
         // Informar `FacturasRectificadas` en una factura que no es rectificativa es el error 1117.
-        assert!(referencias_json(&[], &[]).is_none());
+        assert!(referencias_json(&[], &[], None).is_none());
+    }
+
+    #[test]
+    fn el_importe_rectificado_se_guarda_como_texto_fiscal_y_se_lee_igual() {
+        // Lo lee la subsanación para repetir la rectificativa: si no volviera idéntico, la
+        // subsanación declararía otra cosa que el original.
+        let r = RefFactura { nif: "B12345674".into(), num_serie: "2027/000001".into(), fecha: "01-01-2027".into() };
+        let json = referencias_json(&[r], &[], Some((eur(2.73), eur(0.27)))).unwrap();
+        assert!(json.contains("\"BaseRectificada\":\"2.73\""), "{json}");
+        assert_eq!(importe_rectificacion_desde_json(Some(&json)), Some((eur(2.73), eur(0.27))));
+        assert_eq!(importe_rectificacion_desde_json(Some("{\"rectificadas\":[]}")), None);
+    }
+
+    #[test]
+    fn sumar_desgloses_suma_por_tipo_sin_recalcular() {
+        let t = |tipo: f64, b: f64, c: f64| TramoIva { tipo, base: eur(b), cuota: eur(c) };
+        let suma = sumar_desgloses([
+            vec![t(10.0, 0.95, 0.10)].as_slice(),
+            vec![t(21.0, 1.00, 0.21), t(10.0, 0.95, 0.10)].as_slice(),
+        ]);
+        assert_eq!(suma, vec![t(10.0, 1.90, 0.20), t(21.0, 1.00, 0.21)]);
+    }
+
+    #[test]
+    fn las_fechas_de_factura_se_ordenan_por_dia_real() {
+        // DD-MM-AAAA no se ordena como texto: el 31-01 iría detrás del 01-02.
+        assert!(vf_fecha_ordenable("01-02-2027") > vf_fecha_ordenable("31-01-2027"));
+        assert!(vf_fecha_ordenable("01-01-2028") > vf_fecha_ordenable("31-12-2027"));
     }
 
     #[test]
@@ -3649,15 +4036,39 @@ impl VerifactuRepository for SqliteVerifactuRepository {
 
     async fn emitir_sustitutiva(
         &self,
-        num_serie_original: &str,
+        id_pagos: &[String],
         destinatario: vf::Destinatario,
     ) -> AppResult<BloqueFiscal> {
         // En su propia transacción: la `F3` gasta número y entra en la cadena, así que o se escribe
         // entera o no se escribe.
         let g = self.db.write().await;
         g.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res = emitir_sustitutiva(&g, num_serie_original, destinatario).await;
+        let res = async {
+            let nums = numeros_de_ticket(&g, id_pagos).await?;
+            emitir_sustitutiva(&g, &nums, destinatario).await
+        }
+        .await;
         match res {
+            Ok(v) => {
+                g.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = g.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn corregir_factura(
+        &self,
+        num_factura: &str,
+        destinatario: vf::Destinatario,
+    ) -> AppResult<BloqueFiscal> {
+        // Las dos facturas de una corrección de F3 (la negativa y la nueva) van juntas o no van.
+        let g = self.db.write().await;
+        g.execute_batch("BEGIN;").await.map_err(db_err)?;
+        match corregir_factura(&g, num_factura, destinatario).await {
             Ok(v) => {
                 g.execute_batch("COMMIT;").await.map_err(db_err)?;
                 Ok(v)
@@ -3677,6 +4088,33 @@ impl VerifactuRepository for SqliteVerifactuRepository {
             // devuelve `None` para que el job lo diga con un mensaje y no con una traza.
             Err(e) if e.code() == ErrorCode::DatosFiscalesIncompletos => Ok(None),
             Err(e) => Err(e),
+        }
+    }
+}
+
+/// Para los tests: canjea un ticket por su NÚMERO, en su transacción, como hace el repositorio con
+/// los cobros. Los tests parten del número que leen del registro.
+#[cfg(test)]
+pub(crate) struct CanjePorNumero(pub std::sync::Arc<crate::db::Db>);
+
+#[cfg(test)]
+impl CanjePorNumero {
+    pub(crate) async fn emitir_sustitutiva(
+        &self,
+        num: &str,
+        destinatario: vf::Destinatario,
+    ) -> AppResult<BloqueFiscal> {
+        let g = self.0.write().await;
+        g.execute_batch("BEGIN;").await.map_err(db_err)?;
+        match emitir_sustitutiva(&g, &[num.to_string()], destinatario).await {
+            Ok(v) => {
+                g.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = g.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
         }
     }
 }

@@ -2026,8 +2026,7 @@ mod tests_factura_completa {
             .await
             .unwrap();
 
-        use tpv_application::ports::verifactu::VerifactuRepository as _;
-        let repo = crate::verifactu::SqliteVerifactuRepository::new(db.clone());
+        let repo = crate::verifactu::CanjePorNumero(db.clone());
         let bloque = repo.emitir_sustitutiva(&num, cliente()).await.unwrap();
 
         assert_eq!(bloque.tipo_factura, "F3");
@@ -2077,8 +2076,7 @@ mod tests_factura_completa {
             .await
             .unwrap();
 
-        use tpv_application::ports::verifactu::VerifactuRepository as _;
-        crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+        crate::verifactu::CanjePorNumero(db.clone())
             .emitir_sustitutiva(&num, cliente())
             .await
             .unwrap();
@@ -2106,8 +2104,7 @@ mod tests_factura_completa {
             .await
             .unwrap();
 
-        use tpv_application::ports::verifactu::VerifactuRepository as _;
-        let repo = crate::verifactu::SqliteVerifactuRepository::new(db.clone());
+        let repo = crate::verifactu::CanjePorNumero(db.clone());
         repo.emitir_sustitutiva(&num, cliente()).await.unwrap();
 
         let e = repo.emitir_sustitutiva(&num, cliente()).await.unwrap_err();
@@ -2133,8 +2130,7 @@ mod tests_factura_completa {
             .await
             .unwrap();
 
-        use tpv_application::ports::verifactu::VerifactuRepository as _;
-        let e = crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+        let e = crate::verifactu::CanjePorNumero(db.clone())
             .emitir_sustitutiva(&num, cliente())
             .await
             .unwrap_err();
@@ -2146,8 +2142,7 @@ mod tests_factura_completa {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_NORMAL).await;
 
-        use tpv_application::ports::verifactu::VerifactuRepository as _;
-        let e = crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+        let e = crate::verifactu::CanjePorNumero(db.clone())
             .emitir_sustitutiva("2027/999999", cliente())
             .await
             .unwrap_err();
@@ -2720,14 +2715,13 @@ mod tests_baja_de_un_ticket_canjeado {
     use super::tests_comunes::*;
     use super::*;
     use tpv_application::ports::tickets::TicketsRepository as _;
-    use tpv_application::ports::verifactu::VerifactuRepository as _;
     use tpv_domain::verifactu::Destinatario;
 
-    const NIF_BAR: &str = "B12345674";
-    const NIF_CLIENTE: &str = "B87654323";
+    pub(super) const NIF_BAR: &str = "B12345674";
+    pub(super) const NIF_CLIENTE: &str = "B87654323";
 
     /// Dos ventas de barra de 3,00 € al 10 %, sin cobrar todavía.
-    const DOS_VENTAS: &[&str] = &[
+    pub(super) const DOS_VENTAS: &[&str] = &[
         "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL'
            WHERE ID = 1;",
         "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
@@ -2747,36 +2741,36 @@ mod tests_baja_de_un_ticket_canjeado {
 
     /// Un registro de facturación, con lo que se comprueba.
     #[derive(Debug, Clone)]
-    struct Fila {
-        orden: i64,
-        tipo: String,
-        tipo_factura: Option<String>,
-        num: String,
-        fecha: String,
-        importe: Option<String>,
-        cuota: Option<String>,
-        destinatario: Option<String>,
-        referencias: Option<String>,
-        id_pago: Option<String>,
-        huella: String,
-        ant_huella: Option<String>,
-        cadena: String,
-        primer_registro: Option<String>,
-        tipo_rectificativa: Option<String>,
+    pub(super) struct Fila {
+        pub(super) orden: i64,
+        pub(super) tipo: String,
+        pub(super) tipo_factura: Option<String>,
+        pub(super) num: String,
+        pub(super) fecha: String,
+        pub(super) importe: Option<String>,
+        pub(super) cuota: Option<String>,
+        pub(super) destinatario: Option<String>,
+        pub(super) referencias: Option<String>,
+        pub(super) id_pago: Option<String>,
+        pub(super) huella: String,
+        pub(super) ant_huella: Option<String>,
+        pub(super) cadena: String,
+        pub(super) primer_registro: Option<String>,
+        pub(super) tipo_rectificativa: Option<String>,
     }
 
     impl Fila {
-        fn es(&self, tipo_factura: &str) -> bool {
+        pub(super) fn es(&self, tipo_factura: &str) -> bool {
             self.tipo == "ALTA" && self.tipo_factura.as_deref() == Some(tipo_factura)
         }
-        fn importe(&self) -> Dinero {
+        pub(super) fn importe(&self) -> Dinero {
             Dinero::de_texto_fiscal(self.importe.as_deref().unwrap_or("")).expect("importe legible")
         }
-        fn cuota(&self) -> Dinero {
+        pub(super) fn cuota(&self) -> Dinero {
             Dinero::de_texto_fiscal(self.cuota.as_deref().unwrap_or("")).expect("cuota legible")
         }
         /// Los números que referencia en `clave` (`"sustituidas"` / `"rectificadas"`).
-        fn refs(&self, clave: &str) -> Vec<(String, String, String)> {
+        pub(super) fn refs(&self, clave: &str) -> Vec<(String, String, String)> {
             let Some(j) = self.referencias.as_deref() else { return vec![] };
             let v: serde_json::Value = serde_json::from_str(j).expect("referencias en JSON");
             v.get(clave)
@@ -2791,12 +2785,12 @@ mod tests_baja_de_un_ticket_canjeado {
                 })
                 .unwrap_or_default()
         }
-        fn cliente(&self) -> Option<serde_json::Value> {
+        pub(super) fn cliente(&self) -> Option<serde_json::Value> {
             self.destinatario.as_deref().map(|j| serde_json::from_str(j).expect("destinatario en JSON"))
         }
     }
 
-    async fn registros(db: &Arc<Db>) -> Vec<Fila> {
+    pub(super) async fn registros(db: &Arc<Db>) -> Vec<Fila> {
         let r = db.read().await;
         let mut rows = r
             .query(
@@ -2834,7 +2828,7 @@ mod tests_baja_de_un_ticket_canjeado {
 
     /// La cadena de huellas, entera: cada huella es el SHA-256 de su cadena, cada registro apunta
     /// a la huella del anterior, el `Orden` no tiene huecos y todo se encola para remitir.
-    async fn assert_cadena_sana(db: &Arc<Db>) {
+    pub(super) async fn assert_cadena_sana(db: &Arc<Db>) {
         let filas = registros(db).await;
         assert!(!filas.is_empty());
         for (i, f) in filas.iter().enumerate() {
@@ -2872,7 +2866,7 @@ mod tests_baja_de_un_ticket_canjeado {
     }
 
     /// Cobra una comanda por el camino real de venta rápida y devuelve `(id_pago, número)`.
-    async fn cobrar(db: &Arc<Db>, comanda: &str, detalle: &str) -> (String, String) {
+    pub(super) async fn cobrar(db: &Arc<Db>, comanda: &str, detalle: &str) -> (String, String) {
         use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
         let id_pago = crate::util::new_id();
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
@@ -2897,7 +2891,7 @@ mod tests_baja_de_un_ticket_canjeado {
         (id_pago, num)
     }
 
-    fn cliente() -> Destinatario {
+    pub(super) fn cliente() -> Destinatario {
         Destinatario {
             nombre_razon: "Empresa Cliente SL".into(),
             nif: NIF_CLIENTE.into(),
@@ -2905,14 +2899,14 @@ mod tests_baja_de_un_ticket_canjeado {
         }
     }
 
-    async fn canjear(db: &Arc<Db>, num_ticket: &str) -> tpv_application::error::AppResult<String> {
-        crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+    pub(super) async fn canjear(db: &Arc<Db>, num_ticket: &str) -> tpv_application::error::AppResult<String> {
+        crate::verifactu::CanjePorNumero(db.clone())
             .emitir_sustitutiva(num_ticket, cliente())
             .await
             .map(|b| b.num_serie_factura)
     }
 
-    async fn dar_de_baja(db: &Arc<Db>, id_pago: &str, clase: ClaseBaja) -> AppResult<bool> {
+    pub(super) async fn dar_de_baja(db: &Arc<Db>, id_pago: &str, clase: ClaseBaja) -> AppResult<bool> {
         SqliteCuentasRepository::new(db.clone())
             .anular_pago(AnularPagoArgs {
                 id_pago: id_pago.into(),
@@ -2924,13 +2918,13 @@ mod tests_baja_de_un_ticket_canjeado {
     }
 
     /// Un cobro con su ticket canjeado: `(id_pago, número del ticket, número de la F3)`.
-    async fn ticket_canjeado(db: &Arc<Db>) -> (String, String, String) {
+    pub(super) async fn ticket_canjeado(db: &Arc<Db>) -> (String, String, String) {
         let (id_pago, ticket) = cobrar(db, "com1", "det1").await;
         let f3 = canjear(db, &ticket).await.expect("el canje tiene que salir");
         (id_pago, ticket, f3)
     }
 
-    fn anulaciones(filas: &[Fila]) -> Vec<&Fila> {
+    pub(super) fn anulaciones(filas: &[Fila]) -> Vec<&Fila> {
         filas.iter().filter(|f| f.tipo == "ANULACION").collect()
     }
 
@@ -3245,7 +3239,7 @@ mod tests_baja_de_un_ticket_canjeado {
     // ── Devolución de una factura completa (F1) ────────────────────────────────────────────────
 
     /// Cobra con factura completa (`F1`, con el cliente) y devuelve `(id_pago, número)`.
-    async fn cobrar_con_factura(db: &Arc<Db>, comanda: &str, detalle: &str) -> (String, String) {
+    pub(super) async fn cobrar_con_factura(db: &Arc<Db>, comanda: &str, detalle: &str) -> (String, String) {
         use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
         let id_pago = crate::util::new_id();
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
@@ -3502,5 +3496,399 @@ mod tests_baja_de_un_ticket_canjeado {
 
         let tickets = crate::tickets::SqliteTicketsRepository::new(db.clone());
         assert!(tickets.ticket_de_pago(&pago1, Some(&r5.num)).await.is_err());
+    }
+}
+
+#[cfg(test)]
+#[allow(non_snake_case)]
+mod tests_correccion_y_canje_multiple {
+    //! Corregir el cliente de una factura completa (`F3` y `F1`) y canjear varios tickets en una
+    //! sola `F3`, con lo que eso implica después para las bajas.
+    //!
+    //! - Corregir una `F3` (FAQ de desarrolladores de la AEAT, apartado 27, caso 1): una F3 negativa
+    //!   que contrarresta la errónea y una F3 nueva con los datos buenos; el ticket no se toca.
+    //! - Corregir una `F1`: una rectificativa `R4` por sustitución con `ImporteRectificacion` (FAQ del
+    //!   SII 2.7 y 2.8).
+    //! - Varios tickets en una `F3` (apartado 27, punto 1): desglose = suma de los declarados.
+
+    use super::tests_baja_de_un_ticket_canjeado::*;
+    use super::tests_comunes::*;
+    use super::*;
+    use tpv_application::ports::verifactu::VerifactuRepository as _;
+    use tpv_domain::verifactu::Destinatario;
+
+    const NIF_NUEVO: &str = "A58818501";
+
+    fn cliente_nuevo() -> Destinatario {
+        Destinatario {
+            nombre_razon: "Cliente Correcto SA".into(),
+            nif: NIF_NUEVO.into(),
+            direccion: Some("Plaza Nueva 3, Sevilla".into()),
+        }
+    }
+
+    fn repo(db: &Arc<Db>) -> crate::verifactu::SqliteVerifactuRepository {
+        crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+    }
+
+    async fn corregir(db: &Arc<Db>, num: &str) -> AppResult<String> {
+        repo(db).corregir_factura(num, cliente_nuevo()).await.map(|b| b.num_serie_factura)
+    }
+
+    async fn canjear_cobros(db: &Arc<Db>, pagos: &[&str]) -> AppResult<String> {
+        let ids: Vec<String> = pagos.iter().map(|s| s.to_string()).collect();
+        repo(db).emitir_sustitutiva(&ids, cliente()).await.map(|b| b.num_serie_factura)
+    }
+
+    fn fila<'a>(filas: &'a [Fila], num: &str) -> &'a Fila {
+        filas.iter().find(|f| f.tipo == "ALTA" && f.num == num).expect("la factura existe")
+    }
+
+    fn nums(refs: Vec<(String, String, String)>) -> Vec<String> {
+        refs.into_iter().map(|(_, n, _)| n).collect()
+    }
+
+    // ── Corregir una F3 ────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn corregir_una_F3_emite_una_negativa_igual_y_una_nueva_con_el_cliente_bueno() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (_, ticket, f3) = ticket_canjeado(&db).await;
+
+        let nueva = corregir(&db, &f3).await.unwrap();
+
+        let filas = registros(&db).await;
+        let f3s: Vec<&Fila> = filas.iter().filter(|f| f.es("F3")).collect();
+        assert_eq!(f3s.len(), 3, "{filas:#?}");
+        let negativa = f3s[1];
+        assert_eq!(negativa.importe(), Dinero::de_centimos(-300));
+        assert_eq!(negativa.cuota(), Dinero::de_centimos(-27));
+        assert_eq!(nums(negativa.refs("sustituidas")), vec![ticket.clone()], "sustituye al mismo ticket");
+        assert_eq!(negativa.cliente().unwrap()["NIF"], NIF_CLIENTE, "es la errónea en negativo");
+
+        let n = fila(&filas, &nueva);
+        assert_eq!(n.importe(), Dinero::de_centimos(300));
+        assert_eq!(nums(n.refs("sustituidas")), vec![ticket]);
+        let c = n.cliente().unwrap();
+        assert_eq!(c["NIF"], NIF_NUEVO);
+        assert_eq!(c["Domicilio"], "Plaza Nueva 3, Sevilla");
+        assert!(n.orden > negativa.orden, "primero se contrarresta, luego se emite la buena");
+
+        assert!(!filas.iter().any(|f| f.es("R5") || f.es("R4")), "el ticket no se rectifica");
+        assert!(anulaciones(&filas).is_empty());
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn la_F3_corregida_ya_no_es_la_vigente_y_no_se_corrige_otra_vez() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (_, _, f3) = ticket_canjeado(&db).await;
+        let nueva = corregir(&db, &f3).await.unwrap();
+
+        let e = corregir(&db, &f3).await.unwrap_err();
+        assert!(format!("{e:?}").contains("vigente"), "{e:?}");
+        // La nueva sí se puede volver a corregir.
+        corregir(&db, &nueva).await.expect("la vigente se corrige");
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn tras_corregir_el_ticket_sigue_canjeado() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (_, ticket, f3) = ticket_canjeado(&db).await;
+        corregir(&db, &f3).await.unwrap();
+
+        let e = canjear(&db, &ticket).await.unwrap_err();
+        assert!(format!("{e:?}").contains("ya se emitió"), "{e:?}");
+    }
+
+    #[tokio::test]
+    async fn la_devolucion_tras_corregir_lleva_el_cliente_BUENO() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, ticket, f3) = ticket_canjeado(&db).await;
+        corregir(&db, &f3).await.unwrap();
+
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+
+        let filas = registros(&db).await;
+        let r5 = filas.iter().find(|f| f.es("R5")).unwrap();
+        assert_eq!(nums(r5.refs("rectificadas")), vec![ticket]);
+        let de_la_devolucion = filas.iter().rfind(|f| f.es("F3")).unwrap();
+        assert_eq!(nums(de_la_devolucion.refs("sustituidas")), vec![r5.num.clone()]);
+        assert_eq!(de_la_devolucion.cliente().unwrap()["NIF"], NIF_NUEVO);
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn la_baja_por_error_tras_corregir_anula_el_ticket_y_la_F3_VIGENTE() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, ticket, f3) = ticket_canjeado(&db).await;
+        let nueva = corregir(&db, &f3).await.unwrap();
+
+        dar_de_baja(&db, &id_pago, ClaseBaja::Error).await.unwrap();
+
+        let filas = registros(&db).await;
+        let mut anuladas: Vec<String> = anulaciones(&filas).iter().map(|f| f.num.clone()).collect();
+        anuladas.sort();
+        let mut esperadas = vec![ticket, nueva];
+        esperadas.sort();
+        assert_eq!(anuladas, esperadas, "la errónea y su negativa ya se compensan entre sí");
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn NO_se_corrige_la_F3_de_un_ticket_devuelto_ni_anulado() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, _, f3_1) = ticket_canjeado(&db).await;
+        dar_de_baja(&db, &pago1, ClaseBaja::Devolucion).await.unwrap();
+        assert!(corregir(&db, &f3_1).await.is_err());
+
+        let (pago2, ticket2) = cobrar(&db, "com2", "det2").await;
+        let f3_2 = canjear(&db, &ticket2).await.unwrap();
+        dar_de_baja(&db, &pago2, ClaseBaja::Error).await.unwrap();
+        assert!(corregir(&db, &f3_2).await.is_err());
+    }
+
+    // ── Corregir una F1 ────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn corregir_una_F1_emite_una_R4_por_sustitucion_con_su_importe_rectificado() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (_, f1) = cobrar_con_factura(&db, "com1", "det1").await;
+
+        let r4 = corregir(&db, &f1).await.unwrap();
+
+        let filas = registros(&db).await;
+        let r = fila(&filas, &r4);
+        assert!(r.es("R4"), "{r:?}");
+        assert_eq!(r.tipo_rectificativa.as_deref(), Some("S"));
+        assert!(r.num.starts_with('R'), "serie de rectificativas: {}", r.num);
+        let alta_f1 = fila(&filas, &f1);
+        assert_eq!(r.refs("rectificadas"), vec![(NIF_BAR.to_string(), f1.clone(), alta_f1.fecha.clone())]);
+        // Por sustitución: los importes son los correctos (los mismos) y el ImporteRectificacion
+        // dice qué base y qué cuota deja de valer.
+        assert_eq!(r.importe(), Dinero::de_centimos(300));
+        assert_eq!(r.cuota(), Dinero::de_centimos(27));
+        let v: serde_json::Value = serde_json::from_str(r.referencias.as_deref().unwrap()).unwrap();
+        assert_eq!(v["importe_rectificacion"]["BaseRectificada"], "2.73");
+        assert_eq!(v["importe_rectificacion"]["CuotaRectificada"], "0.27");
+        assert_eq!(r.cliente().unwrap()["NIF"], NIF_NUEVO);
+        assert!(anulaciones(&filas).is_empty());
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn corregir_otra_vez_rectifica_la_R4_vigente_y_no_la_F1() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (_, f1) = cobrar_con_factura(&db, "com1", "det1").await;
+        let r4 = corregir(&db, &f1).await.unwrap();
+
+        assert!(corregir(&db, &f1).await.is_err(), "la F1 ya no es la vigente");
+        let r4b = corregir(&db, &r4).await.expect("la vigente sí");
+
+        let filas = registros(&db).await;
+        assert_eq!(nums(fila(&filas, &r4b).refs("rectificadas")), vec![r4]);
+    }
+
+    #[tokio::test]
+    async fn la_devolucion_de_una_F1_corregida_rectifica_la_vigente_con_el_cliente_bueno() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, f1) = cobrar_con_factura(&db, "com1", "det1").await;
+        let r4 = corregir(&db, &f1).await.unwrap();
+
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+
+        let filas = registros(&db).await;
+        let r1 = filas.iter().find(|f| f.es("R1")).unwrap();
+        assert_eq!(nums(r1.refs("rectificadas")), vec![r4]);
+        assert_eq!(r1.cliente().unwrap()["NIF"], NIF_NUEVO);
+        assert_eq!(r1.importe(), Dinero::de_centimos(-300));
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn la_baja_por_error_de_una_F1_corregida_anula_la_R4_y_la_F1() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, f1) = cobrar_con_factura(&db, "com1", "det1").await;
+        let r4 = corregir(&db, &f1).await.unwrap();
+
+        dar_de_baja(&db, &id_pago, ClaseBaja::Error).await.unwrap();
+
+        let filas = registros(&db).await;
+        let anul = anulaciones(&filas);
+        assert_eq!(anul.len(), 2);
+        assert_eq!(anul[0].num, r4, "la sustitutiva primero");
+        assert_eq!(anul[1].num, f1);
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn NO_se_corrige_una_F1_devuelta() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, f1) = cobrar_con_factura(&db, "com1", "det1").await;
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+        assert!(corregir(&db, &f1).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn NO_se_corrige_un_ticket_ni_una_rectificativa_de_devolucion() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, ticket) = cobrar(&db, "com1", "det1").await;
+        assert!(corregir(&db, &ticket).await.is_err(), "un ticket no tiene cliente");
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+        let r5 = registros(&db).await.into_iter().find(|f| f.es("R5")).unwrap();
+        assert!(corregir(&db, &r5.num).await.is_err());
+    }
+
+    // ── Varios tickets en una F3 ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn una_F3_de_dos_tickets_los_sustituye_a_los_dos_y_suma_su_desglose() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, t1) = cobrar(&db, "com1", "det1").await;
+        let (pago2, t2) = cobrar(&db, "com2", "det2").await;
+
+        let f3 = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+
+        let filas = registros(&db).await;
+        let f = fila(&filas, &f3);
+        assert!(f.es("F3"));
+        let mut sust = nums(f.refs("sustituidas"));
+        sust.sort();
+        assert_eq!(sust, vec![t1, t2]);
+        assert_eq!(f.importe(), Dinero::de_centimos(600));
+        assert_eq!(f.cuota(), Dinero::de_centimos(54));
+        assert_eq!(f.id_pago, None, "es de dos cobros: no cuelga de ninguno");
+        assert_eq!(f.cliente().unwrap()["NIF"], NIF_CLIENTE);
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn el_desglose_de_varios_tickets_es_la_SUMA_de_los_declarados_y_no_un_recalculo() {
+        // 1,05 € al 10 %: base 0,95 y cuota 0,10. Dos tickets suman base 1,90 y cuota 0,20.
+        // Recalcular desde el total (2,10) daría base 1,91 y cuota 0,19: el cliente deduciría un
+        // céntimo menos de lo que se declaró en los tickets.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        sembrar(&db, &["UPDATE Detalle_Comanda SET Precio_Unitario = 105;"]).await;
+        let (pago1, _) = cobrar(&db, "com1", "det1").await;
+        let (pago2, _) = cobrar(&db, "com2", "det2").await;
+
+        let f3 = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+
+        let filas = registros(&db).await;
+        let tickets_cuota: Dinero = filas.iter().filter(|f| f.es("F2")).map(Fila::cuota).sum();
+        assert_eq!(tickets_cuota, Dinero::de_centimos(20));
+        assert_eq!(fila(&filas, &f3).cuota(), Dinero::de_centimos(20));
+        assert_eq!(fila(&filas, &f3).importe(), Dinero::de_centimos(210));
+    }
+
+    #[tokio::test]
+    async fn NO_se_canjean_varios_si_alguno_no_puede_canjearse() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, t1) = cobrar(&db, "com1", "det1").await;
+        let (pago2, _) = cobrar(&db, "com2", "det2").await;
+        canjear(&db, &t1).await.unwrap();
+        let antes = registros(&db).await.len();
+
+        let e = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap_err();
+        assert!(format!("{e:?}").contains("ya se emitió"), "{e:?}");
+        assert_eq!(registros(&db).await.len(), antes, "no se emite nada ni se gasta número");
+
+        let e = canjear_cobros(&db, &[&pago2, &pago2]).await.unwrap_err();
+        assert!(format!("{e:?}").contains("dos veces"), "{e:?}");
+        assert!(canjear_cobros(&db, &[]).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn la_devolucion_de_un_ticket_de_una_F3_multiple_emite_su_R5_y_la_F3_de_la_R5() {
+        // FAQ, apartado 27, punto 1: «Una vez rectificada la F2, hay que emitir una F3 por la
+        // rectificativa simplificada». La F3 de los dos sigue vigente para el otro ticket.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, t1) = cobrar(&db, "com1", "det1").await;
+        let (pago2, t2) = cobrar(&db, "com2", "det2").await;
+        let f3 = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+
+        dar_de_baja(&db, &pago1, ClaseBaja::Devolucion).await.unwrap();
+
+        let filas = registros(&db).await;
+        let r5 = filas.iter().find(|f| f.es("R5")).unwrap();
+        assert_eq!(nums(r5.refs("rectificadas")), vec![t1]);
+        let de_la_r5 = filas.iter().rfind(|f| f.es("F3")).unwrap();
+        assert_ne!(de_la_r5.num, f3);
+        assert_eq!(nums(de_la_r5.refs("sustituidas")), vec![r5.num.clone()]);
+        assert_eq!(de_la_r5.importe(), Dinero::de_centimos(-300));
+        assert_eq!(de_la_r5.cliente().unwrap()["NIF"], NIF_CLIENTE);
+        assert!(anulaciones(&filas).is_empty(), "la F3 de los dos no se anula");
+
+        let e = canjear(&db, &t2).await.unwrap_err();
+        assert!(format!("{e:?}").contains("ya se emitió"), "el otro ticket sigue canjeado: {e:?}");
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn la_baja_por_error_de_un_ticket_de_una_F3_multiple_no_anula_la_F3_la_contrarresta() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, t1) = cobrar(&db, "com1", "det1").await;
+        let (pago2, t2) = cobrar(&db, "com2", "det2").await;
+        let f3 = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+
+        dar_de_baja(&db, &pago1, ClaseBaja::Error).await.unwrap();
+
+        let filas = registros(&db).await;
+        let anuladas: Vec<&str> = anulaciones(&filas).iter().map(|f| f.num.as_str()).collect();
+        assert_eq!(anuladas, vec![t1.as_str()], "sólo el ticket que no existió");
+        let negativa = filas.iter().rfind(|f| f.es("F3")).unwrap();
+        assert_ne!(negativa.num, f3);
+        assert_eq!(nums(negativa.refs("sustituidas")), vec![t1.clone()]);
+        assert_eq!(negativa.importe(), Dinero::de_centimos(-300));
+        // Lo que queda canjeado para el cliente: la F3 de los dos menos la parte anulada.
+        let neto: Dinero = filas.iter().filter(|f| f.es("F3")).map(Fila::importe).sum();
+        assert_eq!(neto, Dinero::de_centimos(300));
+
+        let e = canjear(&db, &t2).await.unwrap_err();
+        assert!(format!("{e:?}").contains("ya se emitió"), "{e:?}");
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn corregir_una_F3_multiple_la_reemite_con_todos_sus_tickets() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, t1) = cobrar(&db, "com1", "det1").await;
+        let (pago2, t2) = cobrar(&db, "com2", "det2").await;
+        let f3 = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+
+        let nueva = corregir(&db, &f3).await.unwrap();
+
+        let filas = registros(&db).await;
+        let mut sust = nums(fila(&filas, &nueva).refs("sustituidas"));
+        sust.sort();
+        let mut esperados = vec![t1, t2];
+        esperados.sort();
+        assert_eq!(sust, esperados);
+        assert_eq!(fila(&filas, &nueva).importe(), Dinero::de_centimos(600));
+        // La vigente es la nueva para los dos tickets: devolver uno pone su F3 con el cliente bueno.
+        dar_de_baja(&db, &pago2, ClaseBaja::Devolucion).await.unwrap();
+        let filas = registros(&db).await;
+        let de_la_r5 = filas.iter().rfind(|f| f.es("F3")).unwrap();
+        assert_eq!(de_la_r5.cliente().unwrap()["NIF"], NIF_NUEVO);
+        assert_cadena_sana(&db).await;
     }
 }

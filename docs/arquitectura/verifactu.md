@@ -230,12 +230,46 @@ adelante sin emitir nada. El efecto en la caja de cada clase está en [caja.md](
 
 ### La factura completa de un ticket ya expedido (`F3`)
 
-`verifactu_emitir_factura_de_ticket` (Administrador, desde Cuentas): sólo sobre una `F2`, y sólo una
-vez por ticket (se busca una `F3` que lo referencie por su número exacto), y nunca de un ticket
-anulado o devuelto: la `F3` canjea simplificadas «facturadas y declaradas», y a esos no les queda
-venta que facturar. Reemite el **mismo desglose** con destinatario y
-`FacturasSustituidas`; la simplificada original no se toca. Comparte pago con ella, y tras emitirla
-se imprime la `F3` (`ticket_de_pago` con `num_factura`), no una copia del ticket que canjea.
+`verifactu_emitir_factura_de_tickets` (Administrador, desde Cuentas) canjea uno o varios tickets
+por una sola `F3`. Cada uno tiene que ser una `F2` sin `F3` vigente (se compara su número exacto) y
+no anulada ni devuelta: la `F3` canjea simplificadas «facturadas y declaradas», y a esas no les
+queda venta que facturar. Lleva `FacturasSustituidas` con todos y, como desglose, la **suma de los
+declarados** por tipo, sin recalcular (`DatosFactura.desglose`): recalcular desde el total puede
+mover un céntimo entre base y cuota. Los tickets no se tocan. Con un solo ticket la `F3` comparte su
+pago; con varios no cuelga de ninguno y sus cobros la encuentran por `FacturasSustituidas`. Tras
+emitirla se abre su papel para imprimir.
+
+Canjear varios tickets en una `F3` lo permite la FAQ de desarrolladores (apartado 27, consulta
+vinculante V2543-06 de la DGT). Su fecha de operación es la del último ticket: es el criterio de
+las facturas recapitulativas ([FAQ del SII 2.31](https://sede.agenciatributaria.gob.es/static_files/Sede/Procedimiento_ayuda/G417/FicherosSuministros/V_1_1/FaqGral/FAQs_SII_30_12_2025.pdf)), porque la FAQ no fija
+ninguno para este caso.
+
+### Corregir el cliente de una factura completa
+
+`verifactu_corregir_factura` (Administrador; en Cuentas, el mismo botón de la factura cuando el
+cobro ya la tiene) corrige la factura **vigente**:
+
+- **Una `F3`** ([FAQ de desarrolladores](https://sede.agenciatributaria.gob.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/FAQs-Desarrolladores.pdf), apartado 27, caso 1): no se toca el ticket. Una
+  `F3` negativa con los mismos importes, los mismos tickets y el cliente erróneo la contrarresta, y
+  una `F3` nueva lleva el cliente bueno. Una `F3` deja de estar vigente cuando la contrarresta otra
+  negativa con los mismos tickets y el importe opuesto (`f3_vigente`).
+- **Una `F1`** (o la rectificativa que ya la sustituyó): un cliente erróneo incumple el art. 6 del
+  RD 1619/2012, y eso obliga a rectificar (art. 15.1). Se emite una **`R4` por sustitución** (`S`)
+  con los mismos importes, el cliente bueno e `ImporteRectificacion` con la base y la cuota de la
+  sustituida ([FAQ del SII](https://sede.agenciatributaria.gob.es/static_files/Sede/Procedimiento_ayuda/G417/FicherosSuministros/V_1_1/FaqGral/FAQs_SII_30_12_2025.pdf) 2.7 y 2.8, opción 1). La clave `R4` («resto») es una
+  deducción: un error material no es un error fundado de derecho ni una causa del art. 80 LIVA,
+  que son las de `R1`–`R3`, y ninguna fuente oficial pone este caso como ejemplo. Lo que se
+  rectifica o se anula después es siempre la última de la cadena (`cadena_de_sustitutivas`).
+
+`ImporteRectificacion` se guarda dentro de `Referencias_Json` (`importe_rectificacion`), que es lo
+que habla de la factura rectificada; el XML lo escribe entre `FacturasSustituidas` y
+`FechaOperacion`, su sitio en el XSD, y la subsanación lo copia.
+
+Las bajas siguen la factura vigente: una devolución tras corregir lleva el cliente bueno, y una
+baja por error anula la vigente y el original. Dentro de una `F3` de varios tickets, la baja por
+error de uno no anula la `F3` (los demás siguen siendo ventas): contrarresta sólo su parte con una
+`F3` negativa que lo sustituye. Es la mecánica del caso 1 aplicada a una parte; la FAQ no trata
+este caso de forma literal.
 
 ### El papel de una factura completa y de una rectificativa
 

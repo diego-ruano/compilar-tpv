@@ -138,6 +138,16 @@ fn escribir_alta(b: &mut String, r: &RegistroParaEnvio) {
     if let Some(refs) = r.referencias_json.as_deref().and_then(parsear_json) {
         escribir_referencias(b, &refs, "rectificadas", "FacturasRectificadas", "IDFacturaRectificada");
         escribir_referencias(b, &refs, "sustituidas", "FacturasSustituidas", "IDFacturaSustituida");
+
+        // `ImporteRectificacion`: la base y la cuota de la factura que sustituye una rectificativa
+        // por sustitución («S», FAQ del SII 2.8). Va justo después de las sustituidas y antes de
+        // `FechaOperacion`, que es su sitio en el `sequence` del XSD.
+        if let Some(ir) = refs.get("importe_rectificacion") {
+            b.push_str("<sum1:ImporteRectificacion>");
+            el(b, "BaseRectificada", &campo(ir, "BaseRectificada"));
+            el(b, "CuotaRectificada", &campo(ir, "CuotaRectificada"));
+            b.push_str("</sum1:ImporteRectificacion>");
+        }
     }
 
     // `FechaOperacion` va SÓLO si la operación se efectuó otro día. No es opcional a nuestro gusto:
@@ -696,6 +706,51 @@ mod tests {
         // Y va DESPUÉS de DescripcionOperacion y ANTES del desglose (orden del sequence).
         assert!(pos(&xml, "DescripcionOperacion") < pos(&xml, "Destinatarios"));
         assert!(pos(&xml, "Destinatarios") < pos(&xml, "Desglose"));
+    }
+
+    #[test]
+    fn una_rectificativa_por_sustitucion_lleva_su_importe_rectificado_en_su_sitio() {
+        let mut r = registro_base();
+        r.tipo_factura = Some("R4".into());
+        r.tipo_rectificativa = Some("S".into());
+        r.fecha_operacion = Some("01-01-2027".into());
+        r.destinatario_json = Some(r#"{"NombreRazon":"Empresa SL","NIF":"B12345674"}"#.into());
+        r.referencias_json = Some(
+            r#"{"rectificadas":[{"IDEmisorFactura":"B12345674","NumSerieFactura":"2027/000001","FechaExpedicionFactura":"01-01-2027"}],"sustituidas":[],"importe_rectificacion":{"BaseRectificada":"9.09","CuotaRectificada":"0.91"}}"#.into(),
+        );
+        let xml = construir_envio(&cabecera(), &[r]);
+
+        assert!(xml.contains(
+            "<sum1:ImporteRectificacion><sum1:BaseRectificada>9.09</sum1:BaseRectificada><sum1:CuotaRectificada>0.91</sum1:CuotaRectificada></sum1:ImporteRectificacion>"
+        ));
+        // Orden del sequence: FacturasRectificadas → ImporteRectificacion → FechaOperacion.
+        assert!(pos(&xml, "FacturasRectificadas") < pos(&xml, "ImporteRectificacion"));
+        assert!(pos(&xml, "ImporteRectificacion") < pos(&xml, "FechaOperacion"));
+        assert!(!xml.contains("importe_rectificacion"), "la clave interna no se cuela");
+    }
+
+    #[test]
+    fn una_rectificativa_por_diferencias_no_lleva_importe_rectificado() {
+        let mut r = registro_base();
+        r.tipo_factura = Some("R5".into());
+        r.tipo_rectificativa = Some("I".into());
+        r.referencias_json = Some(
+            r#"{"rectificadas":[{"IDEmisorFactura":"B12345674","NumSerieFactura":"2027/000001","FechaExpedicionFactura":"01-01-2027"}],"sustituidas":[]}"#.into(),
+        );
+        assert!(!construir_envio(&cabecera(), &[r]).contains("ImporteRectificacion"));
+    }
+
+    #[test]
+    fn una_F3_de_varios_tickets_los_lista_todos() {
+        let mut r = registro_base();
+        r.tipo_factura = Some("F3".into());
+        r.destinatario_json = Some(r#"{"NombreRazon":"Empresa SL","NIF":"B12345674"}"#.into());
+        r.referencias_json = Some(
+            r#"{"rectificadas":[],"sustituidas":[{"IDEmisorFactura":"B12345674","NumSerieFactura":"2027/000001","FechaExpedicionFactura":"01-01-2027"},{"IDEmisorFactura":"B12345674","NumSerieFactura":"2027/000002","FechaExpedicionFactura":"02-01-2027"}]}"#.into(),
+        );
+        let xml = construir_envio(&cabecera(), &[r]);
+        assert_eq!(xml.matches("<sum1:IDFacturaSustituida>").count(), 2);
+        assert!(xml.contains("2027/000002"));
     }
 
     #[test]

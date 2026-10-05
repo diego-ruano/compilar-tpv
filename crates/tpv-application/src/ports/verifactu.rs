@@ -74,14 +74,23 @@ pub trait VerifactuRepository: Send + Sync {
     /// una tarea del dueño.
     async fn obligado(&self) -> AppResult<Option<(String, String, bool)>>;
 
-    /// Emite una **factura completa en sustitución** de un ticket ya expedido (`F3`, FISCAL-02).
+    /// Emite una **factura completa en sustitución** de los tickets de unos cobros (`F3`,
+    /// FISCAL-02): uno, o varios del mismo cliente en una sola factura.
     ///
     /// Es el *«¿me lo puedes hacer con IVA?»* del día siguiente. **No rectifica nada** (art. 15.6
-    /// ROF): canjear una simplificada por una completa no es rectificar, y la original se queda
-    /// exactamente como está.
+    /// ROF): canjear simplificadas por una completa no es rectificar, y los tickets se quedan
+    /// exactamente como están.
     async fn emitir_sustitutiva(
         &self,
-        num_serie_original: &str,
+        id_pagos: &[String],
+        destinatario: tpv_domain::verifactu::Destinatario,
+    ) -> AppResult<BloqueFiscal>;
+
+    /// Corrige el cliente de una factura completa ya expedida (una `F3` o una `F1`) y devuelve la
+    /// factura nueva. Cómo se hace en cada caso está en el adaptador.
+    async fn corregir_factura(
+        &self,
+        num_factura: &str,
         destinatario: tpv_domain::verifactu::Destinatario,
     ) -> AppResult<BloqueFiscal>;
 }

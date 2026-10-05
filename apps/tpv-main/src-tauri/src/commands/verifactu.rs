@@ -160,22 +160,36 @@ pub async fn verifactu_listar(
     Ok(uc::listar(repo.as_ref(), limite, desplazamiento).await?)
 }
 
-/// Emite una **factura completa en sustitución** de un ticket ya expedido (`F3`, FISCAL-02).
+/// Emite una **factura completa en sustitución** de los tickets de unos cobros (`F3`,
+/// FISCAL-02): uno, o varios del mismo cliente en una sola factura.
 ///
-/// Es el camino del cliente que vuelve al día siguiente con el ticket y pide factura. La
-/// simplificada original **no se toca**: canjearla por una completa no es rectificarla (art. 15.6
-/// ROF), así que se emite una `F3` que la sustituye y que sí lleva destinatario.
+/// Es el camino del cliente que vuelve con el ticket —o con los de un periodo— y pide factura. Los
+/// tickets **no se tocan**: canjearlos por una completa no es rectificarlos (art. 15.6 ROF), así
+/// que se emite una `F3` que los sustituye y que sí lleva destinatario.
 ///
 /// Es de Administrador, como el resto de Cuentas: emite un documento fiscal nuevo.
 #[tauri::command]
-pub async fn verifactu_emitir_factura_de_ticket(
+pub async fn verifactu_emitir_factura_de_tickets(
     state: State<'_, AppState>,
-    numero_ticket: String,
+    id_pagos: Vec<String>,
     destinatario: tpv_contracts::verifactu::DestinatarioInput,
 ) -> Result<BloqueFiscal, AppErrorDto> {
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.verifactu_repo().await?;
-    Ok(uc::emitir_sustitutiva(repo.as_ref(), &numero_ticket, destinatario).await?)
+    Ok(uc::emitir_sustitutiva(repo.as_ref(), &id_pagos, destinatario).await?)
+}
+
+/// Corrige los datos del cliente de una factura completa ya expedida (una `F3` o una `F1`).
+/// Devuelve la factura nueva, que es la que se imprime. Administrador, como emitirla.
+#[tauri::command]
+pub async fn verifactu_corregir_factura(
+    state: State<'_, AppState>,
+    num_factura: String,
+    destinatario: tpv_contracts::verifactu::DestinatarioInput,
+) -> Result<BloqueFiscal, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+    let repo = state.verifactu_repo().await?;
+    Ok(uc::corregir_factura(repo.as_ref(), &num_factura, destinatario).await?)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

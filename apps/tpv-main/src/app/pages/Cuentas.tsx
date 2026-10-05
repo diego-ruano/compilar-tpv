@@ -567,37 +567,66 @@ export default function Cuentas() {
        tiene factura: un cliente puede pedirla con días de diferencia y lo que hay que poder hacer es
        emitirla, no impedirlo.
 
-       Lo que sí se esconde es en los **anulados**: un cobro que no existe no se puede facturar. */
+       Lo que sí se esconde es en los **anulados**: un cobro que no existe no se puede facturar.
+
+       Si el cobro YA tiene factura completa (una F3, o la F1 de cuando se cobró), el mismo botón la
+       corrige: el formulario sale con los datos actuales y se emite la factura que la corrige. */
     const limiteSimplif = useBusinessSettings((st) => st.limiteSimplif);
-    const [f3Pago, setF3Pago] = useState<EntradaDto | null>(null);
+    const [facturaDe, setFacturaDe] = useState<{
+        /** Los cobros cuyos tickets se facturan (uno, o varios del mismo cliente). */
+        entradas: EntradaDto[];
+        /** El número de la factura completa vigente que se corrige; `null` = se emite una F3. */
+        corregir: string | null;
+        inicial: Partial<DestinatarioInput> | null;
+    } | null>(null);
     const [f3Guardando, setF3Guardando] = useState(false);
     const [f3Error, setF3Error] = useState<string | null>(null);
 
-    const emitirFacturaSustitutiva = async (e: EntradaDto, d: DestinatarioInput) => {
+    /** Abre el formulario de factura de un cobro: para emitirla o, si ya la tiene, corregirla. */
+    const abrirFactura = async (e: EntradaDto) => {
+        setF3Error(null);
+        try {
+            const t = await printerTicketDePago(e.id);
+            // La factura completa vigente: la última con cliente y en positivo (una F3 corregida
+            // deja detrás la errónea y su negativa; una F1 corregida, su rectificativa).
+            const vigente = [...t.facturas_del_cobro]
+                .reverse()
+                .find((f) => ["F1", "F3", "R1", "R2", "R3", "R4"].includes(f.tipo_factura) && f.importe > 0);
+            if (!vigente) {
+                setFacturaDe({ entradas: [e], corregir: null, inicial: null });
+                return;
+            }
+            const actual = await printerTicketDePago(e.id, false, vigente.num_serie);
+            setFacturaDe({
+                entradas: [e],
+                corregir: vigente.num_serie,
+                inicial: actual.destinatario ?? null,
+            });
+        } catch (err) {
+            setFacturaDe({ entradas: [e], corregir: null, inicial: null });
+            setF3Error(toAppError(err).message);
+        }
+    };
+
+    const confirmarFactura = async (d: DestinatarioInput) => {
+        if (!facturaDe) return;
         setF3Guardando(true);
         setF3Error(null);
         try {
-            // El número de la factura original no viaja en la fila de la lista; se pide por el mismo
-            // camino que la reimpresión, que es el que ya sabe resolverlo desde el id del pago.
-            const t = await printerTicketDePago(e.id);
-            const numero = (t.numero_ticket ?? "").trim();
-            if (!numero) {
-                setF3Error(
-                    "Ese cobro no tiene número de factura, así que no hay nada que sustituir. " +
-                        "Pasa con los cobros anteriores a que el negocio completara sus datos fiscales.",
-                );
-                return;
-            }
-
-            const f3 = await invokeClient<BloqueFiscal>("verifactu_emitir_factura_de_ticket", {
-                numeroTicket: numero,
-                destinatario: d,
-            });
-
-            setF3Pago(null);
-            // Y se imprime LA FACTURA COMPLETA, que es a lo que ha venido el cliente: la F3, con sus
-            // datos, y no una copia del ticket que canjea (RI-29).
-            setReimpresion({ idPago: e.id, numFactura: f3.num_serie_factura });
+            const bloque = facturaDe.corregir
+                ? await invokeClient<BloqueFiscal>("verifactu_corregir_factura", {
+                      numFactura: facturaDe.corregir,
+                      destinatario: d,
+                  })
+                : await invokeClient<BloqueFiscal>("verifactu_emitir_factura_de_tickets", {
+                      idPagos: facturaDe.entradas.map((x) => x.id),
+                      destinatario: d,
+                  });
+            const primera = facturaDe.entradas[0];
+            setFacturaDe(null);
+            // Y se abre LA FACTURA NUEVA para imprimir, que es a lo que ha venido el cliente: no una
+            // copia del ticket que canjea ni la factura errónea (RI-29).
+            if (primera) setReimpresion({ idPago: primera.id, numFactura: bloque.num_serie_factura });
         } catch (err) {
             setF3Error(toAppError(err).message);
         } finally {
@@ -1395,11 +1424,8 @@ export default function Cuentas() {
                                                                 {esAnulado(e) ? null : (
                                                                     <>
                                                                         <MiniIconButton
-                                                                            title="Hacer factura con NIF"
-                                                                            onClick={() => {
-                                                                                setF3Error(null);
-                                                                                setF3Pago(e);
-                                                                            }}
+                                                                            title="Factura con NIF (emitir o corregir)"
+                                                                            onClick={() => void abrirFactura(e)}
                                                                         >
                                                                             <FileText className="size-4" aria-hidden />
                                                                         </MiniIconButton>
@@ -1443,11 +1469,8 @@ export default function Cuentas() {
                                                             {esAnulado(e) ? null : (
                                                                 <>
                                                                     <MiniIconButton
-                                                                        title="Hacer factura con NIF"
-                                                                        onClick={() => {
-                                                                            setF3Error(null);
-                                                                            setF3Pago(e);
-                                                                        }}
+                                                                        title="Factura con NIF (emitir o corregir)"
+                                                                        onClick={() => void abrirFactura(e)}
                                                                     >
                                                                         <FileText className="size-4" aria-hidden />
                                                                     </MiniIconButton>
@@ -2435,16 +2458,15 @@ export default function Cuentas() {
             {/* FISCAL-02: el cliente vuelve con el ticket y pide factura. Se emite una F3 EN
                 SUSTITUCIÓN y se reimprime; la simplificada original no se toca. */}
             <DatosFiscalesModal
-                open={f3Pago !== null}
+                open={facturaDe !== null}
                 onClose={() => {
-                    setF3Pago(null);
+                    setFacturaDe(null);
                     setF3Error(null);
                 }}
-                onConfirmar={(d) => {
-                    const e = f3Pago;
-                    if (e) return emitirFacturaSustitutiva(e, d);
-                }}
-                importe={f3Pago?.importe ?? CERO}
+                onConfirmar={confirmarFactura}
+                importe={sumar(...(facturaDe?.entradas ?? []).map((x) => x.importe))}
+                inicial={facturaDe?.inicial ?? null}
+                corrigiendo={facturaDe?.corregir ?? null}
                 limite={limiteSimplif}
                 obligatorio={false}
                 guardando={f3Guardando}
