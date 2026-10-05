@@ -59,6 +59,7 @@ mod fixtures {
             origen: None,
             es_copia: false,
             es_anulado: false,
+            abre_cajon: false,
             items,
             desglose: None,
             total: None,
@@ -385,10 +386,11 @@ mod tests_identidad_del_ticket {
     const PULSO_CAJON: [u8; 5] = [0x1B, 0x70, 0x00, 0x19, 0xFA];
 
     #[test]
-    fn cobrando_en_efectivo_el_ticket_abre_el_cajon() {
+    fn el_ticket_que_debe_abrir_el_cajon_lo_abre() {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("T-000001".into());
         p.metodo_pago = Some("Efectivo".into());
+        p.abre_cajon = true;
         let bytes = build_ticket(&p, None);
 
         assert!(
@@ -416,13 +418,17 @@ mod tests_identidad_del_ticket {
     }
 
     #[test]
-    fn el_metodo_se_reconoce_sin_importar_mayusculas_ni_espacios() {
+    fn pagar_en_efectivo_no_basta_una_copia_no_abre_el_cajon() {
+        // Lo decide `abre_cajon` (el ticket original de un cobro en efectivo), no el método: una
+        // copia dice «Efectivo» y abrirla con ella sería abrir el cajón sin venta.
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("T-000001".into());
-        p.metodo_pago = Some("  EFECTIVO  ".into());
+        p.metodo_pago = Some("Efectivo".into());
+        p.es_copia = true;
         let bytes = build_ticket(&p, None);
 
-        assert!(bytes.windows(5).any(|w| w == PULSO_CAJON));
+        assert!(!bytes.windows(5).any(|w| w == PULSO_CAJON));
+        assert!(contiene(&bytes, "Efectivo"), "el papel sigue diciendo cómo se pagó");
     }
 
     #[test]
@@ -1571,6 +1577,7 @@ mod tests_secciones {
         let mut p = completo();
         p.numero_ticket = Some("T-000001".into());
         p.metodo_pago = Some("EFECTIVO".into());
+        p.abre_cajon = true;
         let cmds = super::parser::comandos(&build_ticket(&p, None));
 
         let corte = cmds.iter().position(|c| *c == "corte").unwrap();
@@ -1603,6 +1610,7 @@ mod tests_secciones {
                     p.numero_ticket = Some("T-000042".into());
                     p.metodo_pago = Some("EFECTIVO".into());
                     p.es_copia = true;
+                    p.abre_cajon = true;
 
                     let bytes = build_ticket(&p, None);
                     super::parser::trocear(&bytes)
@@ -2382,6 +2390,7 @@ mod tests_factura_del_registro {
         p.qr_url = Some("https://www2.agenciatributaria.gob.es/x".into());
         p.es_copia = true;
         p.metodo_pago = Some("Efectivo".into());
+        p.abre_cajon = true;
         p.total = Some(Dinero::de_centimos(9999));
         p.tipo_factura = Some("F1".into());
         p.destinatario = f3().destinatario;
@@ -2447,5 +2456,34 @@ mod tests_cola_de_windows {
         assert!(esta_atascado(ahora - 5 * minuto, ahora));
         // Un reloj que va hacia atrás no borra nada.
         assert!(!esta_atascado(ahora + minuto, ahora));
+    }
+}
+
+#[cfg(test)]
+mod tests_tickets_impresos {
+    //! RI-29: el ticket original de un cobro sale una vez; lo que se imprime después es una copia.
+
+    use super::*;
+
+    #[test]
+    fn un_cobro_no_esta_impreso_hasta_que_se_anota() {
+        let t = TicketsImpresos::default();
+        assert!(!t.ya_impreso("pago-1"));
+        t.anotar("pago-1");
+        assert!(t.ya_impreso("pago-1"));
+    }
+
+    #[test]
+    fn anotar_un_cobro_no_marca_otro() {
+        let t = TicketsImpresos::default();
+        t.anotar("pago-1");
+        assert!(!t.ya_impreso("pago-2"));
+    }
+
+    #[test]
+    fn los_espacios_no_hacen_de_un_cobro_otro() {
+        let t = TicketsImpresos::default();
+        t.anotar(" pago-1 ");
+        assert!(t.ya_impreso("pago-1"));
     }
 }

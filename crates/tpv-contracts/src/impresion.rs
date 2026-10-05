@@ -171,6 +171,12 @@ pub struct PrintTicketPayload {
     /// contenía— pero el papel tiene que decirlo: sin la marca circularía como un cobro válido.
     #[serde(default)]
     pub es_anulado: bool,
+    /// Si el papel lleva el pulso que abre el cajón. Sólo el ticket ORIGINAL de un cobro en
+    /// efectivo, que es cuando hay que meter el dinero y dar el cambio: ni una copia, ni la `F3` de
+    /// un canje, ni una rectificativa, ni una precuenta. Lo decide `ticket_de_pago`, no el
+    /// generador.
+    #[serde(default)]
+    pub abre_cajon: bool,
 
     #[serde(default)]
     pub items: Vec<PrintTicketLine>,

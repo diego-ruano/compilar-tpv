@@ -558,6 +558,27 @@ fn bloque_tipo_de_factura(out: &mut Vec<u8>, p: &PrintTicketPayload, cols: usize
     }
 }
 
+/// Los cobros cuyo ticket original ya ha salido en esta sesión de la app.
+///
+/// El original abre el cajón (si se pagó en efectivo); imprimirlo otra vez —dos pulsaciones, o el
+/// cliente que pide otro— no es un cobro nuevo: sale como COPIA y sin abrir el cajón. Basta con
+/// recordarlo en memoria: el original sólo lo imprime la pantalla del cobro, que olvida su último
+/// cobro al cambiar de comanda o al reiniciar, y Cuentas pide siempre la copia.
+#[derive(Default)]
+pub struct TicketsImpresos(std::sync::Mutex<std::collections::HashSet<String>>);
+
+impl TicketsImpresos {
+    pub fn ya_impreso(&self, id_pago: &str) -> bool {
+        self.0.lock().map(|s| s.contains(id_pago.trim())).unwrap_or(false)
+    }
+
+    pub fn anotar(&self, id_pago: &str) {
+        if let Ok(mut s) = self.0.lock() {
+            s.insert(id_pago.trim().to_string());
+        }
+    }
+}
+
 /// Lo que la pantalla manda a imprimir es **siempre una precuenta** (RI-29): se le quita todo lo
 /// fiscal. Un papel con número, QR o la marca de copia sólo sale de `ticket_de_pago`, que lo lee
 /// de la base; si la pantalla pudiera ponerlos, podría imprimir una factura que no es la del cobro.
@@ -569,6 +590,7 @@ pub fn como_precuenta(mut p: PrintTicketPayload) -> PrintTicketPayload {
     p.qr_pruebas = false;
     p.es_copia = false;
     p.es_anulado = false;
+    p.abre_cajon = false;
     p.desglose = None;
     p.total = None;
     p.tipo_factura = None;
@@ -834,14 +856,10 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     esc_feed(&mut out, 4);
     esc_cut(&mut out);
 
-    // El cajón se abre SOLO si se cobró en efectivo: en tarjeta no hace falta y abrirlo delante
-    // del cliente sin motivo es exponer el dinero. Va después del corte, con el ticket ya fuera.
-    if p
-        .metodo_pago
-        .as_deref()
-        .map(|m| m.trim().eq_ignore_ascii_case("efectivo"))
-        .unwrap_or(false)
-    {
+    // El cajón se abre SOLO con el ticket original de un cobro en efectivo (`abre_cajon`, que
+    // decide `ticket_de_pago`): en tarjeta no hace falta, y abrirlo con una copia es abrirlo sin
+    // venta. Va después del corte, con el ticket ya fuera.
+    if p.abre_cajon {
         esc_abrir_cajon(&mut out);
     }
 

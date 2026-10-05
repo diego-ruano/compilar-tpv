@@ -1176,7 +1176,14 @@ es_copia: boolean,
  * El cobro está anulado (CUENTA-07). Reimprimirlo sigue permitido —es la prueba de qué
  * contenía— pero el papel tiene que decirlo: sin la marca circularía como un cobro válido.
  */
-es_anulado: boolean, items: Array<PrintTicketLine>, 
+es_anulado: boolean, 
+/**
+ * Si el papel lleva el pulso que abre el cajón. Sólo el ticket ORIGINAL de un cobro en
+ * efectivo, que es cuando hay que meter el dinero y dar el cambio: ni una copia, ni la `F3` de
+ * un canje, ni una rectificativa, ni una precuenta. Lo decide `ticket_de_pago`, no el
+ * generador.
+ */
+abre_cajon: boolean, items: Array<PrintTicketLine>, 
 /**
  * El desglose de IVA de la factura, leído de su `Desglose_Json`. Es el hecho fiscal: el papel
  * dice lo que se declaró, no un recálculo. `None` = se calcula de las líneas (la precuenta).

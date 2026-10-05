@@ -475,6 +475,9 @@ pub(crate) struct AppState {
     /// SEC-01: quién ha iniciado sesión, **según el backend**. `None` mientras no se haya pasado
     /// por `login_user`. No se persiste: al arrancar se pide PIN, y está bien así.
     sesion: Arc<Mutex<Option<Sesion>>>,
+    /// RI-29: los cobros cuyo ticket original ya ha salido en esta sesión. Volver a imprimirlo
+    /// saca una COPIA, que no abre el cajón.
+    tickets_impresos: Arc<printing::TicketsImpresos>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1501,9 +1504,24 @@ async fn printer_ticket_de_pago(
     args: tpv_contracts::impresion::TicketDePagoInput,
 ) -> Result<printing::PrintTicketPayload, AppErrorDto> {
     state.sesion().await?;
+    let args = copia_si_ya_salio(&state, args);
     let tickets = state.tickets_repo().await?;
     let config = state.configuracion_repo().await?;
     Ok(tpv_application::use_cases::tickets::ticket_de_pago(tickets.as_ref(), config.as_ref(), &args).await?)
+}
+
+/// El ticket original de un cobro sale una vez: si ya salió en esta sesión, lo que se pide es una
+/// copia (sale marcada COPIA y no abre el cajón). Sólo afecta a la factura del propio cobro; las
+/// demás (la F3 de un canje, una rectificativa) no abren el cajón nunca.
+fn copia_si_ya_salio(
+    state: &AppState,
+    mut args: tpv_contracts::impresion::TicketDePagoInput,
+) -> tpv_contracts::impresion::TicketDePagoInput {
+    let es_la_del_cobro = args.num_factura.as_deref().map(str::trim).is_none_or(str::is_empty);
+    if es_la_del_cobro && state.tickets_impresos.ya_impreso(&args.id_pago) {
+        args.es_copia = true;
+    }
+    args
 }
 
 /// Imprime el ticket de un cobro. No recibe el papel: lo vuelve a componer desde la base, así que
@@ -1515,12 +1533,20 @@ async fn printer_imprimir_pago(
     args: tpv_contracts::impresion::TicketDePagoInput,
 ) -> Result<String, AppErrorDto> {
     state.sesion().await?;
+    let args = copia_si_ya_salio(&state, args);
     let tickets = state.tickets_repo().await?;
     let config = state.configuracion_repo().await?;
     let payload =
         tpv_application::use_cases::tickets::ticket_de_pago(tickets.as_ref(), config.as_ref(), &args)
             .await?;
-    imprimir_ticket(&app, payload).await
+    let original = !payload.es_copia && args.num_factura.as_deref().map(str::trim).is_none_or(str::is_empty);
+    let r = imprimir_ticket(&app, payload).await?;
+    // Se anota DESPUÉS de imprimir: si la impresora no estaba, el original no ha salido y el
+    // siguiente intento tiene que seguir siendo el original (y abrir el cajón).
+    if original {
+        state.tickets_impresos.anotar(&args.id_pago);
+    }
+    Ok(r)
 }
 
 /// Imprime el papel de un arqueo (CUENTA-06).
@@ -2113,6 +2139,7 @@ pub fn run() {
                 mode_sync,
                 // Se arranca SIN sesión: la app siempre pide PIN al abrirse.
                 sesion: Arc::new(Mutex::new(None)),
+                tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
             });
 
             // Tareas periódicas de fondo (licencia, avisos, actualizaciones): las declara
@@ -2598,6 +2625,7 @@ mod tests_sesion_y_permisos {
             mode: Arc::new(Mutex::new(Some(DeviceMode::Tpv))),
             mode_sync: Arc::new(std::sync::RwLock::new(Some(DeviceMode::Tpv))),
             sesion: Arc::new(Mutex::new(None)),
+            tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
         }
     }
 

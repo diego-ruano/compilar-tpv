@@ -99,6 +99,16 @@ pub fn componer(
         Some((num, fecha)) => (Some(num), Some(fecha.trim().replace('-', "/"))),
         None => (None, None),
     };
+    // El cajón se abre con el ticket ORIGINAL del propio cobro pagado en efectivo, y con nada más:
+    // una copia, la F3 de un canje (el cliente vuelve otro día) o la rectificativa de una devolución
+    // no son el momento de meter dinero, y abrirlo sin venta es por donde se va (RI-29).
+    let es_la_factura_del_cobro = match &t.factura {
+        Some(f) => f.num_serie.trim() == t.numero_ticket.trim(),
+        None => true,
+    };
+    let en_efectivo = t.metodo_pago.trim().eq_ignore_ascii_case("efectivo");
+    let abre_cajon = !es_copia && es_la_factura_del_cobro && en_efectivo && !t.anulado && !devuelve;
+
     let facturas_del_cobro = t
         .facturas
         .into_iter()
@@ -139,6 +149,7 @@ pub fn componer(
         es_copia,
         // ANULADO marca la copia del cobro que se dio de baja, no el papel que documenta la baja.
         es_anulado: t.anulado && !devuelve,
+        abre_cajon,
         items,
         desglose,
         total,
@@ -360,6 +371,56 @@ mod tests {
         let p = componer(t, &negocio(), &ajustes(), false);
         let tipos: Vec<&str> = p.facturas_del_cobro.iter().map(|f| f.tipo_factura.as_str()).collect();
         assert_eq!(tipos, ["F2", "R5"]);
+    }
+
+    #[test]
+    fn el_ticket_original_de_un_cobro_en_efectivo_abre_el_cajon() {
+        let p = componer(cobro(Some(factura())), &negocio(), &ajustes(), false);
+        assert!(p.abre_cajon);
+    }
+
+    #[test]
+    fn una_copia_no_abre_el_cajon() {
+        let p = componer(cobro(Some(factura())), &negocio(), &ajustes(), true);
+        assert!(!p.abre_cajon);
+        assert_eq!(p.metodo_pago.as_deref(), Some("Efectivo"), "el papel sigue diciendo cómo se pagó");
+    }
+
+    #[test]
+    fn el_efectivo_se_reconoce_sin_importar_mayusculas_ni_espacios() {
+        let mut t = cobro(Some(factura()));
+        t.metodo_pago = "  EFECTIVO  ".into();
+        assert!(componer(t, &negocio(), &ajustes(), false).abre_cajon);
+    }
+
+    #[test]
+    fn un_cobro_con_tarjeta_no_abre_el_cajon() {
+        let mut t = cobro(Some(factura()));
+        t.metodo_pago = "Tarjeta".into();
+        assert!(!componer(t, &negocio(), &ajustes(), false).abre_cajon);
+    }
+
+    #[test]
+    fn la_f3_de_un_canje_no_abre_el_cajon() {
+        // El cliente vuelve otro día a pedir factura: no hay dinero que meter.
+        let mut f = factura();
+        f.num_serie = "F-000001".into();
+        f.tipo_factura = "F3".into();
+        assert!(!componer(cobro(Some(f)), &negocio(), &ajustes(), false).abre_cajon);
+    }
+
+    #[test]
+    fn ni_la_rectificativa_ni_la_copia_de_un_cobro_anulado_abren_el_cajon() {
+        assert!(!componer(cobro(Some(rectificativa())), &negocio(), &ajustes(), false).abre_cajon);
+        let mut t = cobro(Some(factura()));
+        t.anulado = true;
+        assert!(!componer(t, &negocio(), &ajustes(), false).abre_cajon);
+    }
+
+    #[test]
+    fn un_cobro_de_modo_prueba_en_efectivo_abre_el_cajon() {
+        // Sin registro fiscal sigue siendo un cobro: el dinero entra igual.
+        assert!(componer(cobro(None), &negocio(), &ajustes(), false).abre_cajon);
     }
 
     #[test]

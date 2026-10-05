@@ -70,6 +70,11 @@ logo → corte.**
   de qué fecha. Sus líneas son las del cobro **en negativo**, y su total y su desglose los
   declarados. No lleva método de pago, así que no abre el cajón, ni la marca ANULADO, que es de la
   copia del cobro dado de baja.
+- **El cajón sólo lo abre el ticket original de un cobro en efectivo** (`abre_cajon`, que decide
+  `ticket_de_pago`). Ni una copia, ni la `F3` de un canje, ni una rectificativa, ni una precuenta. El
+  original sale una vez por sesión (`TicketsImpresos`): imprimirlo otra vez desde la pantalla del
+  cobro saca una COPIA, y Cuentas pide siempre la copia. Se anota después de imprimir, así que si la
+  impresora no estaba, el siguiente intento sigue siendo el original.
 - **El cajón se abre con la impresora**: dentro del ticket (`ESC p`) o suelto (`DLE DC4`, que la
   impresora atiende aunque tenga trabajos en su memoria; la cola de Windows, en cambio, lo pone detrás
   de los que esperan). Toda apertura fuera de un cobro se anota en `Aperturas_Cajon` con quien tenga
