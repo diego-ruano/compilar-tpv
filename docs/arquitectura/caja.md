@@ -158,7 +158,7 @@ repetidos. La pantalla obliga a elegir una de las dos clases, cada una explicada
 | Gasto del cliente | Se resta al cliente de la comanda (sin bajar de 0) | Se resta |
 | `Pagos` | `Estado = 'ANULADO'`, `Anulado_En`, `Anulado_Por`, `Motivo_Anulacion`, `Motivo_Baja = 'ERROR'` | Igual, con `Motivo_Baja = 'DEVOLUCION'` |
 | Historial | `Movimientos_Caja` tipo `ANULACION` | Tipo `DEVOLUCION` |
-| Registro fiscal | Registro de **anulación** | Rectificativa **`R5`** ([verifactu.md](verifactu.md#dar-de-baja-un-cobro)) |
+| Registro fiscal | Registro de **anulación** | Rectificativa **`R5`**, o **`R1`** si era una `F1` ([verifactu.md](verifactu.md#dar-de-baja-un-cobro)) |
 | Caja | Rectifica el cierre en que cayó la venta (aquel esperado contaba un dinero que no estaba) | No toca el cierre de la venta; resta del **periodo abierto**, el día que el dinero sale |
 
 Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
