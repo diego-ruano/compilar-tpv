@@ -90,6 +90,13 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
     const ahora = useMemo(() => new Date().toLocaleString("es-ES").slice(0, 17), []);
     const fecha = p.fecha?.trim() || ahora;
 
+    const tipo = p.tipo_factura ?? "";
+    const titulo = tipo.startsWith("R")
+        ? "FACTURA RECTIFICATIVA"
+        : tipo === "F1" || tipo === "F3"
+          ? "FACTURA"
+          : null;
+
     const numero = p.numero_ticket?.trim() ?? "";
     const origen = p.origen?.trim() ?? "";
     const metodo = p.metodo_pago?.trim() ?? "";
@@ -188,12 +195,19 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
                                 <Centrado negrita>SIN VALOR FISCAL</Centrado>
                             </>
                         ) : null}
-                        {/* Una factura completa (F1/F3) se titula y lleva a su cliente; una F3,
-                            además, el ticket que canjea. Espejo de `bloque_factura_completa`. */}
-                        {p.tipo_factura === "F1" || p.tipo_factura === "F3" ? (
+                        {/* Lo que distingue el papel de una factura que no es un ticket: una
+                            rectificativa dice qué rectifica, una completa (F1/F3) qué sustituye, y
+                            las dos llevan al cliente. Espejo de `bloque_tipo_de_factura`. */}
+                        {titulo ? (
                             <>
-                                <Centrado negrita>FACTURA</Centrado>
-                                {p.sustituye ? <div>Sustituye al ticket {p.sustituye}</div> : null}
+                                <Centrado negrita>{titulo}</Centrado>
+                                {p.rectifica ? (
+                                    <div>
+                                        Rectifica a la factura {p.rectifica}
+                                        {p.rectifica_fecha ? ` del ${p.rectifica_fecha}` : ""}
+                                    </div>
+                                ) : null}
+                                {p.sustituye ? <div>Sustituye a la factura {p.sustituye}</div> : null}
                                 {p.destinatario ? (
                                     <>
                                         <Separador />

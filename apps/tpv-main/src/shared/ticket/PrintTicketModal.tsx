@@ -13,7 +13,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
-import type { PrintTicketPayload } from "@tpv/contracts";
+import type { FacturaDelCobro, PrintTicketPayload } from "@tpv/contracts";
 import { useToast } from "../toast";
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
@@ -53,6 +53,20 @@ export type CobroImprimible = {
 };
 
 type Modo = "cobro" | "completo" | "pendiente" | "seleccion";
+
+/** Cómo se llama cada factura de un cobro en el modal. */
+function etiquetaFactura(f: FacturaDelCobro): string {
+    switch (f.tipo_factura) {
+        case "F2":
+            return "Ticket";
+        case "F1":
+            return "Factura completa";
+        case "F3":
+            return f.importe < 0 ? "Factura de la devolución" : "Factura completa (canje)";
+        default:
+            return f.tipo_factura.startsWith("R") ? "Factura rectificativa" : f.tipo_factura;
+    }
+}
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -94,13 +108,14 @@ export default function PrintTicketModal({
     const [errorCobro, setErrorCobro] = useState<string | null>(null);
     const idPago = cobro?.idPago ?? null;
     const esCopia = cobro?.esCopia ?? false;
-    // Qué factura del pago: la de su número o, si su ticket se canjeó, la completa (`F3`).
+    // Qué factura del cobro se imprime: `null` = la de su número (el ticket o la F1). Un cobro puede
+    // tener más: la F3 que canjeó el ticket y, si se devolvió, la rectificativa y su F3 negativa.
     const [numFactura, setNumFactura] = useState<string | null>(null);
-    const [sustituidaPor, setSustituidaPor] = useState<string | null>(null);
+    const [facturas, setFacturas] = useState<FacturaDelCobro[]>([]);
     useEffect(() => {
         if (!open) return;
         setNumFactura(cobro?.numFactura ?? null);
-        setSustituidaPor(null);
+        setFacturas([]);
     }, [open, cobro]);
     useEffect(() => {
         if (!open || !idPago) return;
@@ -111,13 +126,16 @@ export default function PrintTicketModal({
             .then((p) => {
                 if (!vivo) return;
                 setTicketCobro(p);
-                if (p.sustituida_por) setSustituidaPor(p.sustituida_por);
+                setFacturas(p.facturas_del_cobro);
             })
             .catch((e) => vivo && setErrorCobro(toAppError(e).message));
         return () => {
             vivo = false;
         };
     }, [open, idPago, esCopia, numFactura]);
+    // La factura «propia» del cobro: la que se imprime sin pedir otra.
+    const facturaDelPago = facturas.find((f) => f.tipo_factura === "F1" || f.tipo_factura === "F2");
+    const facturaActiva = numFactura ?? facturaDelPago?.num_serie ?? null;
 
     const hayPendientes = useMemo(() => items.some((it) => !it.pagado), [items]);
 
@@ -192,28 +210,34 @@ export default function PrintTicketModal({
                                 ¿Qué quieres imprimir?
                             </p>
                             <div className="grid grid-cols-1 gap-2">
-                                {cobro && !cobro.numFactura ? (
+                                {/* Un botón por cada factura del cobro. Un cobro de modo prueba no
+                                    tiene ninguna: entonces sólo está su ticket. */}
+                                {cobro && facturas.length === 0 ? (
                                     <ModoButton
-                                        active={esCobro && !numFactura}
-                                        onClick={() => {
-                                            setModo("cobro");
-                                            setNumFactura(null);
-                                        }}
+                                        active={esCobro}
+                                        onClick={() => setModo("cobro")}
                                         label={esCopia ? "Copia del ticket" : "Ticket del cobro"}
-                                        hint={!numFactura ? (ticketCobro?.numero_ticket ?? "…") : ""}
+                                        hint={ticketCobro?.numero_ticket ?? "…"}
                                     />
                                 ) : null}
-                                {cobro && (cobro.numFactura || sustituidaPor) ? (
-                                    <ModoButton
-                                        active={esCobro && !!numFactura}
-                                        onClick={() => {
-                                            setModo("cobro");
-                                            setNumFactura(cobro.numFactura ?? sustituidaPor);
-                                        }}
-                                        label="Factura completa"
-                                        hint={cobro.numFactura ?? sustituidaPor ?? ""}
-                                    />
-                                ) : null}
+                                {cobro
+                                    ? facturas.map((f) => (
+                                          <ModoButton
+                                              key={f.num_serie}
+                                              active={esCobro && facturaActiva === f.num_serie}
+                                              onClick={() => {
+                                                  setModo("cobro");
+                                                  setNumFactura(
+                                                      f.num_serie === facturaDelPago?.num_serie
+                                                          ? null
+                                                          : f.num_serie,
+                                                  );
+                                              }}
+                                              label={`${esCopia ? "Copia: " : ""}${etiquetaFactura(f)}`}
+                                              hint={f.num_serie}
+                                          />
+                                      ))
+                                    : null}
                                 {items.length > 0 ? (
                                     <>
                                         <ModoButton

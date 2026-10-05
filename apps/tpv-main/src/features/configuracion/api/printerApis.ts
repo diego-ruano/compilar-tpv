@@ -155,6 +155,7 @@ export function payloadDePrecuenta(items: LineaEntrada[], printerName?: string):
         qr_pruebas: false,
         es_copia: false,
         es_anulado: false,
+        facturas_del_cobro: [],
 
         items: agruparLineas(items).map((g) => ({
             nombre: g.nombre,

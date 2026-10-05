@@ -517,19 +517,36 @@ const QR_LEYENDA: &str = "VERI*FACTU";
 /// Aviso del entorno de pruebas. No lo pide la norma: lo pide el sentido común.
 const QR_AVISO_PRUEBAS: &str = "-- ENTORNO DE PRUEBAS --";
 
-/// Una factura completa (`F1`/`F3`) se titula FACTURA y lleva a su cliente: nombre, NIF y
-/// domicilio. Una `F3` dice además qué ticket canjea. Todo sale del registro (RI-29).
-fn bloque_factura_completa(out: &mut Vec<u8>, p: &PrintTicketPayload, cols: usize) {
-    if !matches!(p.tipo_factura.as_deref(), Some("F1") | Some("F3")) {
-        return;
-    }
+/// Lo que distingue el papel de una factura que no es un ticket. Todo sale del registro (RI-29):
+///
+/// - Una **rectificativa** (`R1`–`R5`) se titula FACTURA RECTIFICATIVA y dice qué factura rectifica
+///   y de qué fecha: la «referencia expresa e inequívoca» de los arts. 7.1.h y 15.4 del RD
+///   1619/2012.
+/// - Una **completa** (`F1`/`F3`) se titula FACTURA; una `F3` dice además qué factura sustituye.
+/// - Las dos llevan al cliente, si lo tienen: nombre, NIF y domicilio (art. 6.1 c, d y e).
+fn bloque_tipo_de_factura(out: &mut Vec<u8>, p: &PrintTicketPayload, cols: usize) {
+    let tipo = p.tipo_factura.as_deref().unwrap_or("");
+    let titulo = match tipo {
+        "R1" | "R2" | "R3" | "R4" | "R5" => "FACTURA RECTIFICATIVA",
+        "F1" | "F3" => "FACTURA",
+        _ => return,
+    };
     esc_align(out, 1);
     esc_bold(out, true);
-    text_line(out, "FACTURA");
+    text_wrap(out, titulo, cols);
     esc_bold(out, false);
     esc_align(out, 0);
+    if let Some(n) = p.rectifica.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        let fecha = p.rectifica_fecha.as_deref().map(str::trim).unwrap_or("");
+        let texto = if fecha.is_empty() {
+            format!("Rectifica a la factura {n}")
+        } else {
+            format!("Rectifica a la factura {n} del {fecha}")
+        };
+        text_wrap(out, &texto, cols);
+    }
     if let Some(n) = p.sustituye.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-        text_wrap(out, &format!("Sustituye al ticket {n}"), cols);
+        text_wrap(out, &format!("Sustituye a la factura {n}"), cols);
     }
     if let Some(d) = &p.destinatario {
         sep(out, cols);
@@ -557,7 +574,9 @@ pub fn como_precuenta(mut p: PrintTicketPayload) -> PrintTicketPayload {
     p.tipo_factura = None;
     p.destinatario = None;
     p.sustituye = None;
-    p.sustituida_por = None;
+    p.rectifica = None;
+    p.rectifica_fecha = None;
+    p.facturas_del_cobro = Vec::new();
     p
 }
 
@@ -707,7 +726,7 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
             esc_bold(&mut out, false);
             esc_align(&mut out, 0);
         }
-        bloque_factura_completa(&mut out, p, cols);
+        bloque_tipo_de_factura(&mut out, p, cols);
     }
 
     sep(&mut out, cols);

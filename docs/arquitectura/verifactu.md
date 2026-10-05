@@ -237,12 +237,20 @@ venta que facturar. Reemite el **mismo desglose** con destinatario y
 `FacturasSustituidas`; la simplificada original no se toca. Comparte pago con ella, y tras emitirla
 se imprime la `F3` (`ticket_de_pago` con `num_factura`), no una copia del ticket que canjea.
 
-### El papel de una factura completa
+### El papel de una factura completa y de una rectificativa
 
 Una `F1` o una `F3` sale titulada **FACTURA** y con su cliente: nombre, NIF y domicilio, leídos de
 `Destinatario_Json`. El domicilio se guarda ahí sólo para el papel: el adaptador de la AEAT lee
 `NombreRazon` y `NIF` y nada más (`xml.rs::el_domicilio_del_cliente_no_va_al_xml`), y el
-destinatario no entra en la huella. Una `F3` dice además qué ticket sustituye.
+destinatario no entra en la huella. Una `F3` dice además qué factura sustituye.
+
+Las facturas de una devolución también tienen papel: son facturas expedidas, que se entregan al
+destinatario ([art. 17 del RD 1619/2012](https://www.boe.es/buscar/act.php?id=BOE-A-2012-14696#a17))
+y que impresas llevan su QR ([art. 20 de la Orden HAC/1177/2024](https://www.boe.es/buscar/act.php?id=BOE-A-2024-22138#a2-2)).
+La rectificativa sale titulada **FACTURA RECTIFICATIVA** con la referencia de la factura que
+rectifica y su fecha (arts. 7.1.h y 15.4 del RD 1619/2012), las líneas del cobro en negativo y, si es
+una `R1`, el cliente. Tras confirmar una devolución, Cuentas abre el modal de impresión con ella
+elegida, sin imprimirla: se entrega si el cliente la quiere.
 
 El esquema tiene `Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal`, pero hoy ningún camino los lee
 ni los escribe: el formulario de datos fiscales siempre empieza vacío.

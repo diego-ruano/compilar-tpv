@@ -542,6 +542,21 @@ export default function Cuentas() {
         setReimpresion({ idPago: e.id, esCopia: true });
     };
 
+    /**
+     * Tras una devolución, abre el modal de impresión con su factura rectificativa elegida. No la
+     * imprime: el cliente casi nunca la pide, pero es una factura y tiene que poder entregarse
+     * (art. 17 del RD 1619/2012). La devolución ya está hecha: si esto falla, sólo se avisa.
+     */
+    const ofrecerRectificativa = async (idPago: string) => {
+        try {
+            const t = await printerTicketDePago(idPago);
+            const rectificativa = t.facturas_del_cobro.find((f) => f.tipo_factura.startsWith("R"));
+            if (rectificativa) setReimpresion({ idPago, numFactura: rectificativa.num_serie });
+        } catch (err) {
+            console.error("no se pudo preparar la rectificativa para imprimir:", err);
+        }
+    };
+
     /* ── FISCAL-02: la factura completa EN SUSTITUCIÓN (`F3`) ───────────────────
        Es el «¿me lo puedes hacer con IVA?» del día siguiente: el cliente vuelve con un ticket ya
        expedido y pide factura.
@@ -671,6 +686,7 @@ export default function Cuentas() {
                         await anularPago.mutateAsync({ id_pago: idPago, motivo, clase });
                         setConfirmAccion(null);
                         void recargarCierres();
+                        if (clase === "DEVOLUCION") void ofrecerRectificativa(idPago);
                     },
                     // Anular pide el motivo siempre, y ése es también el de la rectificación.
                     true,

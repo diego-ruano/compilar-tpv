@@ -65,7 +65,9 @@ mod fixtures {
             tipo_factura: None,
             destinatario: None,
             sustituye: None,
-            sustituida_por: None,
+            rectifica: None,
+            rectifica_fecha: None,
+            facturas_del_cobro: vec![],
         }
     }
 
@@ -2313,9 +2315,55 @@ mod tests_factura_del_registro {
     #[test]
     fn una_factura_completa_se_titula_y_lleva_a_su_cliente() {
         let bytes = build_ticket(&f3(), None);
-        for texto in ["FACTURA", "Sustituye al ticket 2027/000007", "Cliente SL", "B87654321", "Calle Real 2"] {
+        for texto in ["FACTURA", "Sustituye a la factura 2027/000007", "Cliente SL", "B87654321", "Calle Real 2"] {
             assert!(contiene(&bytes, texto), "debería imprimir {texto:?}");
         }
+    }
+
+    fn rectificativa(tipo: &str) -> PrintTicketPayload {
+        let mut p = base(vec![PrintTicketLine {
+            nombre: "Cafe".into(),
+            cantidad: 1,
+            precio_unitario: Dinero::de_centimos(-110),
+            iva_percent: None,
+        }]);
+        p.numero_ticket = Some("R2027/000001".into());
+        p.tipo_factura = Some(tipo.into());
+        p.rectifica = Some("2027/000007".into());
+        p.rectifica_fecha = Some("02/01/2027".into());
+        p.total = Some(Dinero::de_centimos(-110));
+        p
+    }
+
+    #[test]
+    fn una_rectificativa_se_titula_y_dice_que_factura_rectifica() {
+        let bytes = build_ticket(&rectificativa("R5"), None);
+        for texto in ["FACTURA RECTIFICATIVA", "Rectifica a la factura 2027/000007", "02/01/2027", "R2027/000001"] {
+            assert!(contiene(&bytes, texto), "debería imprimir {texto:?}");
+        }
+        assert!(!contiene(&bytes, "Cliente:"), "una R5 no lleva cliente");
+        assert!(!contiene(&bytes, "NO ES UN TICKET DE VENTA"));
+    }
+
+    #[test]
+    fn la_rectificativa_de_una_completa_lleva_el_cliente() {
+        let mut p = rectificativa("R1");
+        p.destinatario = f3().destinatario;
+        let bytes = build_ticket(&p, None);
+        assert!(contiene(&bytes, "Cliente SL") && contiene(&bytes, "B87654321"));
+    }
+
+    #[test]
+    fn el_total_de_una_rectificativa_sale_en_negativo_y_cuadra() {
+        let bytes = build_ticket(&rectificativa("R5"), None);
+        assert!(contiene(&bytes, "-1,10 €"));
+    }
+
+    #[test]
+    fn una_rectificativa_sin_metodo_de_pago_no_abre_el_cajon() {
+        let bytes = build_ticket(&rectificativa("R5"), None);
+        let cmds = super::parser::comandos(&bytes);
+        assert!(!cmds.contains(&"cajon"), "{cmds:?}");
     }
 
     #[test]

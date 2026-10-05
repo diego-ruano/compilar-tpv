@@ -1773,6 +1773,14 @@ pub(crate) fn numeros_sustituidos(referencias_json: Option<&str>) -> Vec<String>
         .collect()
 }
 
+/// La factura que rectifica una rectificativa, para el papel: `(número, fecha DD-MM-AAAA)`.
+pub(crate) fn rectificada_del_papel(referencias_json: Option<&str>) -> Option<(String, String)> {
+    refs_desde_json(referencias_json, "rectificadas")
+        .into_iter()
+        .next()
+        .map(|r| (r.num_serie, r.fecha))
+}
+
 /// ¿Hay algún alta de tipo `tipo_factura` cuyas referencias (`clave`: `"sustituidas"` o
 /// `"rectificadas"`) incluyan exactamente `num_serie`?
 ///

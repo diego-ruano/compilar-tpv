@@ -8,7 +8,9 @@ use async_trait::async_trait;
 use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::tickets::{FacturaDelTicket, TicketDePago, TicketsRepository};
+use tpv_application::ports::tickets::{
+    FacturaDelCobro, FacturaDelTicket, TicketDePago, TicketsRepository,
+};
 use tpv_domain::dinero::Dinero;
 use tpv_domain::ticket::LineaVendida;
 
@@ -72,10 +74,11 @@ pub(crate) const SQL_FACTURA: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Fa
      WHERE Num_Serie_Factura = ?1 AND Tipo = 'ALTA' \
      ORDER BY Orden DESC LIMIT 1;";
 
-/// Las `F3` de un pago con lo que sustituyen. Va por `idx_regfact_pago`. Un pago puede tener dos:
-/// la que canjeó su ticket y, si después se devolvió, la negativa que sustituye a la rectificativa.
-const SQL_F3_DEL_PAGO: &str = "SELECT Num_Serie_Factura, Referencias_Json FROM Registros_Facturacion \
-     WHERE ID_Pago = ?1 AND Tipo = 'ALTA' AND Tipo_Factura = 'F3' \
+/// Las facturas de un pago, en el orden en que se expidieron. Va por `idx_regfact_pago`.
+const SQL_FACTURAS_DEL_PAGO: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Factura, ''), \
+            COALESCE(Importe_Total, '') \
+     FROM Registros_Facturacion \
+     WHERE ID_Pago = ?1 AND Tipo = 'ALTA' \
      ORDER BY Orden ASC;";
 
 #[async_trait]
@@ -120,41 +123,34 @@ impl TicketsRepository for SqliteTicketsRepository {
 
         let pedida = num_factura.map(str::trim).filter(|n| !n.is_empty());
         let factura = match pedida {
-            // Otra factura del mismo pago: la `F3` que canjeó su ticket. Si no es de este pago, no
-            // se imprime con sus líneas: sería un papel que mezcla dos cobros.
-            //
-            // Y tiene que ser la que canjea su ticket: la F3 negativa de una devolución comparte pago
-            // pero documenta la rectificativa, no estas líneas, y su papel no cuadraría con ellas.
+            // Otra factura del mismo pago: la `F3` del canje, la rectificativa de una devolución o
+            // su `F3` negativa. Todas documentan estas líneas (las de la devolución, en negativo).
+            // Si no es de este pago, no se imprime con sus líneas: mezclaría dos cobros.
             Some(n) => match factura(&r, n).await? {
-                Some((f, Some(de_pago)))
-                    if de_pago == id_pago
-                        && (f.num_serie == numero_ticket.trim()
-                            || f.sustituye.as_deref() == Some(numero_ticket.trim())) =>
-                {
-                    Some(f)
-                }
+                Some((f, Some(de_pago))) if de_pago == id_pago => Some(f),
                 _ => return Err(AppError::not_found("Esa factura no es de este cobro.")),
             },
             None if numero_ticket.trim().is_empty() => None,
             None => factura(&r, numero_ticket.trim()).await?.map(|(f, _)| f),
         };
 
-        // La F3 que canjeó el ticket: la que lo lleva en `FacturasSustituidas`.
-        let mut sustituida_por = None;
-        if pedida.is_none() && !numero_ticket.trim().is_empty() {
-            let mut rows = conn
-                .query(SQL_F3_DEL_PAGO, vec![Value::Text(id_pago.to_string())])
-                .await
-                .map_err(db_err)?;
-            while let Some(row) = rows.next().await.map_err(db_err)? {
-                let refs = v_string(row.get_value(1).map_err(db_err)?);
-                if crate::verifactu::numeros_sustituidos(refs.as_deref())
-                    .iter()
-                    .any(|n| n == numero_ticket.trim())
-                {
-                    sustituida_por = v_string(row.get_value(0).map_err(db_err)?);
-                    break;
-                }
+        // Todas las facturas del cobro. Una subsanación repite el número: cuenta una vez, con los
+        // datos de su última fila.
+        let mut facturas: Vec<FacturaDelCobro> = Vec::new();
+        let mut rows = conn
+            .query(SQL_FACTURAS_DEL_PAGO, vec![Value::Text(id_pago.to_string())])
+            .await
+            .map_err(db_err)?;
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            let num = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
+            let tipo = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
+            let importe = Dinero::de_texto_fiscal(
+                &v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
+            )
+            .unwrap_or(Dinero::CERO);
+            match facturas.iter_mut().find(|(n, _, _)| *n == num) {
+                Some(f) => *f = (num, tipo, importe),
+                None => facturas.push((num, tipo, importe)),
             }
         }
 
@@ -166,7 +162,7 @@ impl TicketsRepository for SqliteTicketsRepository {
             fecha_hora,
             lineas,
             factura,
-            sustituida_por,
+            facturas,
         }))
     }
 }
@@ -203,6 +199,7 @@ async fn factura<R: Reader>(
         tramos: crate::verifactu::tramos_declarados(desglose.as_deref()),
         destinatario: crate::verifactu::destinatario_del_papel(destinatario.as_deref()),
         sustituye: crate::verifactu::numeros_sustituidos(referencias.as_deref()).into_iter().next(),
+        rectifica: crate::verifactu::rectificada_del_papel(referencias.as_deref()),
     };
     Ok(Some((f, id_pago)))
 }
@@ -546,7 +543,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn el_ticket_canjeado_sabe_cual_es_su_f3() {
+    async fn el_cobro_canjeado_lista_sus_dos_facturas_en_orden() {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
         sembrar(&db, FACTURA_DE_LA_VENTA).await;
@@ -554,7 +551,8 @@ mod tests {
 
         let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         assert_eq!(t.factura.unwrap().num_serie, "T-000007", "sin pedir otra, la del pago");
-        assert_eq!(t.sustituida_por.as_deref(), Some("F-000001"));
+        let nums: Vec<&str> = t.facturas.iter().map(|(n, _, _)| n.as_str()).collect();
+        assert_eq!(nums, ["T-000007", "F-000001"]);
     }
 
     #[tokio::test]

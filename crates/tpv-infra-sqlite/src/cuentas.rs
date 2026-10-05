@@ -3369,21 +3369,138 @@ mod tests_baja_de_un_ticket_canjeado {
 
     // ── El papel ───────────────────────────────────────────────────────────────────────────────
 
+    //
+    // El papel se compone por el caso de uso real (`ticket_de_pago`), con los ajustes de la base:
+    // lo que se comprueba es el payload que va a la impresora.
+
+    async fn papel(
+        db: &Arc<Db>,
+        id_pago: &str,
+        num_factura: Option<&str>,
+    ) -> tpv_contracts::impresion::PrintTicketPayload {
+        let tickets = crate::tickets::SqliteTicketsRepository::new(db.clone());
+        let config = crate::configuracion::SqliteConfiguracionRepository::new(db.clone());
+        tpv_application::use_cases::tickets::ticket_de_pago(
+            &tickets,
+            &config,
+            &tpv_contracts::impresion::TicketDePagoInput {
+                id_pago: id_pago.into(),
+                es_copia: false,
+                num_factura: num_factura.map(str::to_string),
+            },
+        )
+        .await
+        .expect("el papel tiene que poder componerse")
+    }
+
+    fn suma_lineas(p: &tpv_contracts::impresion::PrintTicketPayload) -> Dinero {
+        p.items.iter().map(|l| l.precio_unitario.por(l.cantidad as i64)).sum()
+    }
+
     #[tokio::test]
-    async fn tras_la_devolucion_el_papel_sigue_ofreciendo_la_F3_del_canje_y_no_la_negativa() {
+    async fn tras_la_devolucion_el_cobro_ofrece_sus_cuatro_facturas_en_orden() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, ticket, f3) = ticket_canjeado(&db).await;
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+
+        let p = papel(&db, &id_pago, None).await;
+        let facturas: Vec<(&str, i64)> = p
+            .facturas_del_cobro
+            .iter()
+            .map(|f| (f.tipo_factura.as_str(), f.importe.centimos()))
+            .collect();
+        assert_eq!(facturas, [("F2", 300), ("F3", 300), ("R5", -300), ("F3", -300)]);
+        assert_eq!(p.facturas_del_cobro[0].num_serie, ticket);
+        assert_eq!(p.facturas_del_cobro[1].num_serie, f3);
+    }
+
+    #[tokio::test]
+    async fn el_papel_de_la_R5_dice_que_rectifica_y_sus_lineas_cuadran_en_negativo() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, ticket) = cobrar(&db, "com1", "det1").await;
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+        let filas = registros(&db).await;
+        let r5 = filas.iter().find(|f| f.es("R5")).unwrap();
+        let alta = filas.iter().find(|f| f.es("F2")).unwrap();
+
+        let p = papel(&db, &id_pago, Some(&r5.num)).await;
+
+        assert_eq!(p.numero_ticket.as_deref(), Some(r5.num.as_str()));
+        assert_eq!(p.tipo_factura.as_deref(), Some("R5"));
+        assert_eq!(p.rectifica.as_deref(), Some(ticket.as_str()));
+        assert_eq!(p.rectifica_fecha, Some(alta.fecha.replace('-', "/")));
+        assert_eq!(p.total, Some(Dinero::de_centimos(-300)));
+        assert_eq!(Some(suma_lineas(&p)), p.total, "las líneas en negativo cuadran con el total");
+        assert!(p.qr_url.as_deref().is_some_and(|u| u.contains("importe=-3.00")), "{:?}", p.qr_url);
+        assert_eq!(p.metodo_pago, None, "una devolución no abre el cajón");
+        assert!(!p.es_anulado, "el papel de la baja no se marca ANULADO");
+        assert!(p.destinatario.is_none());
+    }
+
+    #[tokio::test]
+    async fn el_papel_de_la_F3_negativa_lleva_el_cliente_y_sustituye_a_la_R5() {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, DOS_VENTAS).await;
         let (id_pago, _, f3) = ticket_canjeado(&db).await;
         dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
-        let negativa = registros(&db).await.into_iter().rfind(|f| f.es("F3")).unwrap().num;
-        assert_ne!(negativa, f3);
+        let filas = registros(&db).await;
+        let r5 = filas.iter().find(|f| f.es("R5")).unwrap();
+        let negativa = filas.iter().rfind(|f| f.es("F3")).unwrap();
+        assert_ne!(negativa.num, f3);
+
+        let p = papel(&db, &id_pago, Some(&negativa.num)).await;
+
+        assert_eq!(p.tipo_factura.as_deref(), Some("F3"));
+        assert_eq!(p.sustituye.as_deref(), Some(r5.num.as_str()));
+        assert_eq!(p.destinatario.as_ref().map(|d| d.nif.as_str()), Some(NIF_CLIENTE));
+        assert_eq!(p.total, Some(Dinero::de_centimos(-300)));
+        assert_eq!(Some(suma_lineas(&p)), p.total);
+    }
+
+    #[tokio::test]
+    async fn el_papel_de_la_R1_lleva_el_cliente_y_la_F1_que_rectifica() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, f1) = cobrar_con_factura(&db, "com1", "det1").await;
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+        let r1 = registros(&db).await.into_iter().find(|f| f.es("R1")).unwrap();
+
+        let p = papel(&db, &id_pago, Some(&r1.num)).await;
+
+        assert_eq!(p.tipo_factura.as_deref(), Some("R1"));
+        assert_eq!(p.rectifica.as_deref(), Some(f1.as_str()));
+        let d = p.destinatario.expect("la R1 lleva el cliente");
+        assert_eq!(d.nif, NIF_CLIENTE);
+        assert_eq!(d.domicilio.as_deref(), Some("Calle Mayor 1, Madrid"));
+    }
+
+    #[tokio::test]
+    async fn la_copia_del_ticket_devuelto_sale_ANULADO_y_en_positivo() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, ticket) = cobrar(&db, "com1", "det1").await;
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+
+        let p = papel(&db, &id_pago, None).await;
+
+        assert_eq!(p.numero_ticket.as_deref(), Some(ticket.as_str()));
+        assert!(p.es_anulado);
+        assert_eq!(p.total, Some(Dinero::de_centimos(300)));
+        assert_eq!(Some(suma_lineas(&p)), p.total);
+    }
+
+    #[tokio::test]
+    async fn la_rectificativa_de_otro_cobro_no_se_imprime_con_estas_lineas() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, _) = cobrar(&db, "com1", "det1").await;
+        let (pago2, _) = cobrar(&db, "com2", "det2").await;
+        dar_de_baja(&db, &pago2, ClaseBaja::Devolucion).await.unwrap();
+        let r5 = registros(&db).await.into_iter().find(|f| f.es("R5")).unwrap();
 
         let tickets = crate::tickets::SqliteTicketsRepository::new(db.clone());
-        let t = tickets.ticket_de_pago(&id_pago, None).await.unwrap().unwrap();
-        assert_eq!(t.sustituida_por.as_deref(), Some(f3.as_str()));
-
-        // La negativa no se imprime con las líneas del cobro: su papel no cuadraría con ellas.
-        assert!(tickets.ticket_de_pago(&id_pago, Some(&negativa)).await.is_err());
-        assert!(tickets.ticket_de_pago(&id_pago, Some(&f3)).await.is_ok());
+        assert!(tickets.ticket_de_pago(&pago1, Some(&r5.num)).await.is_err());
     }
 }

@@ -498,7 +498,8 @@ distintas: number, };
  *
  * El registro de facturación sólo necesita el nombre y el NIF. El `domicilio` es para el **papel**:
  * el art. 6 ROF le exige a una factura el domicilio del destinatario, y el registro de la AEAT no
- * lo lleva. Por eso el formulario pide tres cosas y sólo dos viajan.
+ * lo lleva. Por eso el formulario pide tres cosas y sólo dos viajan a la AEAT; el domicilio se
+ * guarda en `Destinatario_Json` para poder imprimir la factura (RI-29).
  */
 export type DestinatarioInput = { nombre_razon: string, nif: string, domicilio?: string, };
 
@@ -608,6 +609,15 @@ ultima_anomalia?: string,
  * antes de que Veri*factu sea obligatorio.
  */
 modo_prueba: boolean, };
+
+/**
+ * Una factura de un cobro, para elegir qué papel se imprime.
+ */
+export type FacturaDelCobro = { num_serie: string, 
+/**
+ * `F1` | `F2` | `F3` | `R1`..`R5`.
+ */
+tipo_factura: string, importe: Dinero, };
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 
@@ -1185,14 +1195,23 @@ tipo_factura?: string,
  */
 destinatario?: DestinatarioTicket, 
 /**
- * En una `F3`, el número del ticket que canjea.
+ * En una `F3`, el número de la factura que sustituye.
  */
 sustituye?: string, 
 /**
- * Si este ticket se canjeó por una factura completa, su número. **No se imprime**: la copia de
- * un ticket es la del ticket. Lo usa la pantalla para ofrecer también la `F3`.
+ * En una rectificativa, el número de la factura que rectifica (art. 7.1.h y 15.4 del RD
+ * 1619/2012: la referencia «expresa e inequívoca» de la factura rectificada).
  */
-sustituida_por?: string, };
+rectifica?: string, 
+/**
+ * La fecha de expedición de la factura rectificada (`DD/MM/AAAA`).
+ */
+rectifica_fecha?: string, 
+/**
+ * Todas las facturas del cobro. **No se imprime**: la pantalla lo usa para ofrecer cada papel
+ * (el ticket, la `F3` del canje, la rectificativa de una devolución…).
+ */
+facturas_del_cobro: Array<FacturaDelCobro>, };
 
 /**
  * Una impresora detectada por el sistema.

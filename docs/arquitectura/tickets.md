@@ -23,8 +23,8 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 | Desglose de IVA y agrupación | `crates/tpv-domain/src/ticket.rs` | Papel, vista previa y registro fiscal ([verifactu.md](verifactu.md)); `agrupar_lineas` es la gemela de `agruparLineas` |
 | Vista previa | `src/shared/ticket/TicketPaper.tsx` + `ticketMath.ts` | Espejo; lo compartido con el papel está en `ticketMath.ts`, sin React |
 | Payload | `crates/tpv-contracts/src/impresion.rs` + `src/features/configuracion/api/printerApis.ts` | El DTO; la pantalla sólo arma la precuenta (`payloadDePrecuenta`) |
-| Modal de impresión | `src/shared/ticket/PrintTicketModal.tsx` | «Ticket del cobro» (sin elegir líneas) o precuenta de todo, de lo pendiente o de una selección |
-| Reimpresión | `src/app/pages/Cuentas.tsx` | El mismo modal con el pago y `es_copia` |
+| Modal de impresión | `src/shared/ticket/PrintTicketModal.tsx` | Un botón por cada factura del cobro (`facturas_del_cobro`: el ticket, la `F3` del canje, la rectificativa, la `F3` de la devolución), sin elegir líneas; o la precuenta de todo, de lo pendiente o de una selección |
+| Reimpresión y devolución | `src/app/pages/Cuentas.tsx` | El mismo modal con el pago y `es_copia`; tras una devolución se abre con la rectificativa elegida, sin imprimir |
 | Tests | `src-tauri/src/printing/tests.rs` · `test/ticketMath.test.ts` | Goldens duplicados a propósito |
 
 ## Orden del ticket
@@ -63,9 +63,13 @@ logo → corte.**
   cobro de la comanda abierta; el de otro se reimprime desde Cuentas.
 - **La precuenta** no lleva número ni registro ni QR, y dice que no es un ticket de venta.
 - **Una factura completa** (`F1`/`F3`) se titula FACTURA y lleva el nombre, el NIF y el domicilio del
-  cliente (`bloque_factura_completa`); una `F3` dice qué ticket sustituye. Un ticket canjeado se
+  cliente (`bloque_tipo_de_factura`); una `F3` dice qué factura sustituye. Un ticket canjeado se
   sigue reimprimiendo como ticket, y el modal ofrece también su `F3`
-  ([verifactu.md](verifactu.md#el-papel-de-una-factura-completa)).
+  ([verifactu.md](verifactu.md#el-papel-de-una-factura-completa-y-de-una-rectificativa)).
+- **Una rectificativa** (`R1`–`R5`) se titula FACTURA RECTIFICATIVA y dice qué factura rectifica y
+  de qué fecha. Sus líneas son las del cobro **en negativo**, y su total y su desglose los
+  declarados. No lleva método de pago, así que no abre el cajón, ni la marca ANULADO, que es de la
+  copia del cobro dado de baja.
 - **El cajón se abre con la impresora**: dentro del ticket (`ESC p`) o suelto (`DLE DC4`, que la
   impresora atiende aunque tenga trabajos en su memoria; la cola de Windows, en cambio, lo pone detrás
   de los que esperan). Toda apertura fuera de un cobro se anota en `Aperturas_Cajon` con quien tenga

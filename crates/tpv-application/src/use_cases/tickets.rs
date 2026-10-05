@@ -10,7 +10,7 @@ use crate::ports::configuracion::ConfiguracionRepository;
 use crate::ports::tickets::{TicketDePago, TicketsRepository};
 use tpv_contracts::configuracion::{BusinessSettings, TicketSettings};
 use tpv_contracts::impresion::{
-    DestinatarioTicket, PrintTicketLine, PrintTicketPayload, TicketDePagoInput, TramoTicket,
+    DestinatarioTicket, FacturaDelCobro, PrintTicketLine, PrintTicketPayload, TicketDePagoInput, TramoTicket,
 };
 use tpv_domain::ticket;
 
@@ -42,12 +42,15 @@ pub fn componer(
 ) -> PrintTicketPayload {
     let no_vacio = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
 
+    // La rectificativa de una devolución (y su `F3` negativa) documenta las mismas líneas que el
+    // cobro, con el signo cambiado: el papel lo dice línea a línea, y su total es el declarado.
+    let devuelve = t.factura.as_ref().is_some_and(|f| f.importe_total.es_negativo());
     let items = ticket::agrupar_lineas(&t.lineas)
         .into_iter()
         .map(|l| PrintTicketLine {
             nombre: l.nombre,
             cantidad: l.cantidad,
-            precio_unitario: l.precio_unitario,
+            precio_unitario: if devuelve { -l.precio_unitario } else { l.precio_unitario },
             iva_percent: l.iva_percent,
         })
         .collect();
@@ -90,6 +93,17 @@ pub fn componer(
         |(nombre_razon, nif, domicilio)| DestinatarioTicket { nombre_razon, nif, domicilio },
     );
     let sustituye = t.factura.as_ref().and_then(|f| f.sustituye.clone());
+    // Una rectificativa dice qué factura rectifica, con su fecha (arts. 7.1.h y 15.4 del RD
+    // 1619/2012).
+    let (rectifica, rectifica_fecha) = match t.factura.as_ref().and_then(|f| f.rectifica.clone()) {
+        Some((num, fecha)) => (Some(num), Some(fecha.trim().replace('-', "/"))),
+        None => (None, None),
+    };
+    let facturas_del_cobro = t
+        .facturas
+        .into_iter()
+        .map(|(num_serie, tipo_factura, importe)| FacturaDelCobro { num_serie, tipo_factura, importe })
+        .collect();
 
     PrintTicketPayload {
         printer_name: None,
@@ -118,17 +132,22 @@ pub fn componer(
         font_scale: ajustes.font_scale,
         numero_ticket: numero,
         fecha: Some(fecha),
-        metodo_pago: no_vacio(&t.metodo_pago),
+        // Una devolución no es un pago: sin la línea «Pago» y, sobre todo, sin el pulso que abre el
+        // cajón al imprimir un cobro en efectivo.
+        metodo_pago: if devuelve { None } else { no_vacio(&t.metodo_pago) },
         origen: no_vacio(&t.origen),
         es_copia,
-        es_anulado: t.anulado,
+        // ANULADO marca la copia del cobro que se dio de baja, no el papel que documenta la baja.
+        es_anulado: t.anulado && !devuelve,
         items,
         desglose,
         total,
         tipo_factura,
         destinatario,
         sustituye,
-        sustituida_por: t.sustituida_por,
+        rectifica,
+        rectifica_fecha,
+        facturas_del_cobro,
     }
 }
 
@@ -198,7 +217,7 @@ mod tests {
                 },
             ],
             factura,
-            sustituida_por: None,
+            facturas: vec![],
         }
     }
 
@@ -219,6 +238,7 @@ mod tests {
             }],
             destinatario: None,
             sustituye: None,
+            rectifica: None,
         }
     }
 
@@ -276,6 +296,70 @@ mod tests {
         assert_eq!(p.destinatario.as_ref().map(|d| d.nif.as_str()), Some("B87654321"));
         assert_eq!(p.destinatario.and_then(|d| d.domicilio).as_deref(), Some("Calle Real 2"));
         assert_eq!(p.sustituye.as_deref(), Some("2027/000007"));
+    }
+
+    fn rectificativa() -> FacturaDelTicket {
+        let mut f = factura();
+        f.num_serie = "R2027/000001".into();
+        f.tipo_factura = "R5".into();
+        f.importe_total = Dinero::de_centimos(-220);
+        f.tramos = vec![TramoIva {
+            tipo: 10.0,
+            base: Dinero::de_centimos(-200),
+            cuota: Dinero::de_centimos(-20),
+        }];
+        f.rectifica = Some(("2027/000007".into(), "02-01-2027".into()));
+        f
+    }
+
+    #[test]
+    fn la_rectificativa_dice_que_factura_rectifica_y_cuando_se_expidio() {
+        let p = componer(cobro(Some(rectificativa())), &negocio(), &ajustes(), false);
+        assert_eq!(p.numero_ticket.as_deref(), Some("R2027/000001"));
+        assert_eq!(p.tipo_factura.as_deref(), Some("R5"));
+        assert_eq!(p.rectifica.as_deref(), Some("2027/000007"));
+        assert_eq!(p.rectifica_fecha.as_deref(), Some("02/01/2027"));
+    }
+
+    #[test]
+    fn las_lineas_de_una_devolucion_van_en_negativo_y_cuadran_con_el_total() {
+        let p = componer(cobro(Some(rectificativa())), &negocio(), &ajustes(), false);
+        assert_eq!(p.items[0].precio_unitario, Dinero::de_centimos(-110));
+        let suma: Dinero = p.items.iter().map(|l| l.precio_unitario.por(l.cantidad as i64)).sum();
+        assert_eq!(Some(suma), p.total);
+    }
+
+    #[test]
+    fn una_devolucion_no_es_un_pago_ni_se_marca_anulada() {
+        // Sin método de pago no hay línea «Pago» ni pulso de cajón; y ANULADO es para la copia del
+        // cobro dado de baja, no para el papel que documenta la baja.
+        let mut t = cobro(Some(rectificativa()));
+        t.anulado = true;
+        let p = componer(t, &negocio(), &ajustes(), false);
+        assert_eq!(p.metodo_pago, None);
+        assert!(!p.es_anulado);
+    }
+
+    #[test]
+    fn la_copia_del_cobro_dado_de_baja_sigue_saliendo_anulada_y_con_su_metodo() {
+        let mut t = cobro(Some(factura()));
+        t.anulado = true;
+        let p = componer(t, &negocio(), &ajustes(), true);
+        assert!(p.es_anulado);
+        assert_eq!(p.metodo_pago.as_deref(), Some("Efectivo"));
+        assert!(p.items.iter().all(|l| !l.precio_unitario.es_negativo()));
+    }
+
+    #[test]
+    fn las_facturas_del_cobro_viajan_en_orden() {
+        let mut t = cobro(Some(factura()));
+        t.facturas = vec![
+            ("2027/000007".into(), "F2".into(), Dinero::de_centimos(220)),
+            ("R2027/000001".into(), "R5".into(), Dinero::de_centimos(-220)),
+        ];
+        let p = componer(t, &negocio(), &ajustes(), false);
+        let tipos: Vec<&str> = p.facturas_del_cobro.iter().map(|f| f.tipo_factura.as_str()).collect();
+        assert_eq!(tipos, ["F2", "R5"]);
     }
 
     #[test]

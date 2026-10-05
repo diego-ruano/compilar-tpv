@@ -29,9 +29,15 @@ pub struct FacturaDelTicket {
     pub tramos: Vec<TramoIva>,
     /// El cliente de una factura completa (`F1`/`F3`): `(nombre, NIF, domicilio)`.
     pub destinatario: Option<(String, String, Option<String>)>,
-    /// En una `F3`, el número de la simplificada que canjea.
+    /// En una `F3`, el número de la factura que sustituye: el ticket que canjea o, tras una
+    /// devolución, la rectificativa.
     pub sustituye: Option<String>,
+    /// En una rectificativa, la factura que rectifica: `(número, fecha DD-MM-AAAA)`.
+    pub rectifica: Option<(String, String)>,
 }
+
+/// Una factura de un cobro: `(número, tipo, importe total)`.
+pub type FacturaDelCobro = (String, String, Dinero);
 
 /// Lo que hace falta para imprimir el ticket de un cobro.
 #[derive(Debug, Clone, PartialEq)]
@@ -48,8 +54,9 @@ pub struct TicketDePago {
     pub lineas: Vec<LineaVendida>,
     /// `None` en un cobro sin registro de facturación (modo prueba).
     pub factura: Option<FacturaDelTicket>,
-    /// Si el ticket se canjeó por una factura completa, el número de esa `F3`.
-    pub sustituida_por: Option<String>,
+    /// Todas las facturas del cobro, en el orden en que se expidieron: el ticket o la `F1`, la `F3`
+    /// que lo canjeó, la rectificativa de una devolución y su `F3` negativa.
+    pub facturas: Vec<FacturaDelCobro>,
 }
 
 #[async_trait]
@@ -57,8 +64,8 @@ pub trait TicketsRepository: Send + Sync {
     /// El ticket de un cobro. `None` si el pago no existe.
     ///
     /// La factura es la del número del pago (`Pagos.Numero_Ticket`) salvo que se pida otra con
-    /// `num_factura`: la `F3` que canjeó ese ticket, que comparte pago y no número. Una factura
-    /// que no es de ese pago no se devuelve.
+    /// `num_factura`: cualquiera de las del cobro (la `F3` del canje, la rectificativa…), que
+    /// comparten pago y no número. Una factura que no es de ese pago no se devuelve.
     async fn ticket_de_pago(
         &self,
         id_pago: &str,

@@ -193,15 +193,33 @@ pub struct PrintTicketPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub destinatario: Option<DestinatarioTicket>,
-    /// En una `F3`, el número del ticket que canjea.
+    /// En una `F3`, el número de la factura que sustituye.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub sustituye: Option<String>,
-    /// Si este ticket se canjeó por una factura completa, su número. **No se imprime**: la copia de
-    /// un ticket es la del ticket. Lo usa la pantalla para ofrecer también la `F3`.
+    /// En una rectificativa, el número de la factura que rectifica (art. 7.1.h y 15.4 del RD
+    /// 1619/2012: la referencia «expresa e inequívoca» de la factura rectificada).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub sustituida_por: Option<String>,
+    pub rectifica: Option<String>,
+    /// La fecha de expedición de la factura rectificada (`DD/MM/AAAA`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rectifica_fecha: Option<String>,
+    /// Todas las facturas del cobro. **No se imprime**: la pantalla lo usa para ofrecer cada papel
+    /// (el ticket, la `F3` del canje, la rectificativa de una devolución…).
+    #[serde(default)]
+    pub facturas_del_cobro: Vec<FacturaDelCobro>,
+}
+
+/// Una factura de un cobro, para elegir qué papel se imprime.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct FacturaDelCobro {
+    pub num_serie: String,
+    /// `F1` | `F2` | `F3` | `R1`..`R5`.
+    pub tipo_factura: String,
+    pub importe: Dinero,
 }
 
 /// Qué ticket de cobro se pide (RI-29): el de un pago, leído entero de la base.
