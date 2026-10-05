@@ -2710,6 +2710,9 @@ mod tests_baja_de_un_ticket_canjeado {
     //!   respondía a una operación real. La `F3` documenta esa misma operación, así que se anulan
     //!   las dos.
     //!
+    //! Y la devolución de una factura completa emitida al cobrar (`F1`): su rectificativa es una
+    //! `R1` con el cliente, no una `R5` (FAQ Veri*factu de la AEAT y art. 15.5 del RD 1619/2012).
+    //!
     //! Se comprueba el contenido de cada registro —a qué factura apunta, con qué signo, con qué
     //! cliente, en qué serie y en qué orden— y que la cadena de huellas quede íntegra: los
     //! recuentos solos no habrían cazado que la anulación caía sobre la factura equivocada.
@@ -2759,6 +2762,7 @@ mod tests_baja_de_un_ticket_canjeado {
         ant_huella: Option<String>,
         cadena: String,
         primer_registro: Option<String>,
+        tipo_rectificativa: Option<String>,
     }
 
     impl Fila {
@@ -2798,7 +2802,7 @@ mod tests_baja_de_un_ticket_canjeado {
             .query(
                 "SELECT Orden, Tipo, Tipo_Factura, Num_Serie_Factura, Fecha_Expedicion, Importe_Total,
                         Cuota_Total, Destinatario_Json, Referencias_Json, ID_Pago, Huella, Ant_Huella,
-                        Cadena_Huella, Primer_Registro
+                        Cadena_Huella, Primer_Registro, Tipo_Rectificativa
                  FROM Registros_Facturacion ORDER BY Orden ASC;",
                 Vec::<Value>::new(),
             )
@@ -2822,6 +2826,7 @@ mod tests_baja_de_un_ticket_canjeado {
                 ant_huella: t(11),
                 cadena: t(12).unwrap(),
                 primer_registro: t(13),
+                tipo_rectificativa: t(14),
             });
         }
         out
@@ -3235,6 +3240,131 @@ mod tests_baja_de_un_ticket_canjeado {
 
         let e = canjear(&db, &ticket).await.unwrap_err();
         assert!(format!("{e:?}").contains("ya se emitió"), "{e:?}");
+    }
+
+    // ── Devolución de una factura completa (F1) ────────────────────────────────────────────────
+
+    /// Cobra con factura completa (`F1`, con el cliente) y devuelve `(id_pago, número)`.
+    async fn cobrar_con_factura(db: &Arc<Db>, comanda: &str, detalle: &str) -> (String, String) {
+        use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
+        let id_pago = crate::util::new_id();
+        crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
+            .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_pago: id_pago.clone(),
+                id_comanda: comanda.into(),
+                metodo: "Tarjeta".into(),
+                importe_total: Dinero::CERO,
+                id_usuario_cobrador: Some("u1".into()),
+                id_trabajador_cobrador: None,
+                detalles: vec![detalle.into()],
+                destinatario: Some(cliente()),
+            })
+            .await
+            .expect("el cobro con factura tiene que salir");
+        let f1 = registros(db)
+            .await
+            .into_iter()
+            .find(|f| f.id_pago.as_deref() == Some(id_pago.as_str()))
+            .expect("el cobro emite su factura");
+        assert!(f1.es("F1"), "con cliente, el cobro emite una F1: {f1:?}");
+        (id_pago, f1.num)
+    }
+
+    #[tokio::test]
+    async fn devolver_una_F1_emite_una_R1_y_NO_una_R5() {
+        // La R5 es sólo para simplificadas; una devolución sobre una completa es art. 80.Dos LIVA,
+        // que la AEAT encuadra en R1.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, f1) = cobrar_con_factura(&db, "com1", "det1").await;
+
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+
+        let filas = registros(&db).await;
+        assert_eq!(filas.iter().filter(|f| f.es("R5")).count(), 0, "{filas:#?}");
+        let r1: Vec<&Fila> = filas.iter().filter(|f| f.es("R1")).collect();
+        assert_eq!(r1.len(), 1);
+        let r1 = r1[0];
+        let alta_f1 = filas.iter().find(|f| f.es("F1")).unwrap();
+        assert_eq!(r1.refs("rectificadas"), vec![(NIF_BAR.to_string(), f1, alta_f1.fecha.clone())]);
+        assert_eq!(r1.tipo_rectificativa.as_deref(), Some("I"), "por diferencias");
+        assert_eq!(r1.importe(), Dinero::de_centimos(-300));
+        assert_eq!(r1.cuota(), Dinero::de_centimos(-27));
+        assert!(r1.num.starts_with('R'), "va en la serie de rectificativas: {}", r1.num);
+        assert_eq!(r1.id_pago.as_deref(), Some(id_pago.as_str()));
+    }
+
+    #[tokio::test]
+    async fn la_R1_lleva_el_cliente_de_la_F1() {
+        // Una rectificativa de una completa cumple el art. 6 del RD 1619/2012 (art. 15.5): nombre,
+        // NIF y domicilio del destinatario. En el registro, sin él la AEAT rechaza (error 1189).
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, _) = cobrar_con_factura(&db, "com1", "det1").await;
+
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+
+        let filas = registros(&db).await;
+        let c = filas.iter().find(|f| f.es("R1")).unwrap().cliente().expect("la R1 lleva cliente");
+        assert_eq!(c["NIF"], NIF_CLIENTE);
+        assert_eq!(c["NombreRazon"], "Empresa Cliente SL");
+        assert_eq!(c["Domicilio"], "Calle Mayor 1, Madrid");
+    }
+
+    #[tokio::test]
+    async fn devolver_una_F1_la_deja_a_cero_sin_anular_ni_emitir_F3() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, _) = cobrar_con_factura(&db, "com1", "det1").await;
+
+        dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap();
+
+        let filas = registros(&db).await;
+        assert!(anulaciones(&filas).is_empty());
+        assert_eq!(filas.iter().filter(|f| f.es("F3")).count(), 0);
+        let suma: Dinero = filas.iter().filter(|f| f.es("F1") || f.es("R1")).map(Fila::importe).sum();
+        assert_eq!(suma, Dinero::CERO);
+        let cuota: Dinero = filas.iter().filter(|f| f.es("F1") || f.es("R1")).map(Fila::cuota).sum();
+        assert_eq!(cuota, Dinero::CERO);
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn anular_por_error_una_F1_la_anula_sin_rectificativa() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (id_pago, f1) = cobrar_con_factura(&db, "com1", "det1").await;
+
+        dar_de_baja(&db, &id_pago, ClaseBaja::Error).await.unwrap();
+
+        let filas = registros(&db).await;
+        let anul = anulaciones(&filas);
+        assert_eq!(anul.len(), 1);
+        assert_eq!(anul[0].num, f1);
+        assert!(!filas.iter().any(|f| f.es("R1") || f.es("R5")));
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn la_R5_de_un_ticket_sigue_sin_cliente_y_la_R1_de_una_F1_lo_lleva_en_el_mismo_libro() {
+        // Las dos claves conviven: un ticket y una factura completa devueltos el mismo día.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago_ticket, _) = cobrar(&db, "com1", "det1").await;
+        let (pago_f1, _) = cobrar_con_factura(&db, "com2", "det2").await;
+
+        dar_de_baja(&db, &pago_ticket, ClaseBaja::Devolucion).await.unwrap();
+        dar_de_baja(&db, &pago_f1, ClaseBaja::Devolucion).await.unwrap();
+
+        let filas = registros(&db).await;
+        let r5 = filas.iter().find(|f| f.es("R5")).unwrap();
+        let r1 = filas.iter().find(|f| f.es("R1")).unwrap();
+        assert_eq!(r5.id_pago.as_deref(), Some(pago_ticket.as_str()));
+        assert_eq!(r5.cliente(), None);
+        assert_eq!(r1.id_pago.as_deref(), Some(pago_f1.as_str()));
+        assert!(r1.cliente().is_some());
+        assert_ne!(r5.num, r1.num, "la serie de rectificativas no repite número");
+        assert_cadena_sana(&db).await;
     }
 
     // ── El papel ───────────────────────────────────────────────────────────────────────────────

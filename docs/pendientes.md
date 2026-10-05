@@ -384,8 +384,6 @@ anterior, que es lo que el art. 7.i) anota como anomalía. Si se retoma, la medi
 Contrastando la documentación con el código salieron cosas que no son de documentación. Ninguna se ha
 tocado; están aquí para decidir.
 
-- **Una devolución emite siempre `R5`**, también cuando la factura original es una `F1`
-  (`verifactu::emitir_baja_de_pago`). No hay camino para `R1`.
 - **`Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal` existen en el esquema pero nada los lee ni los
   escribe**: el formulario de factura completa siempre empieza vacío.
 - **`Registros_Facturacion.Sin_Registro_Previo`** se lee y viaja al XML, pero ningún camino la rellena.

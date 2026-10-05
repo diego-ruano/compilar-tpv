@@ -200,9 +200,11 @@ estado local y por `execute()` cada tick del job se replicaría.
 
 - **`Error`** — la venta no existió. Emite un registro de **anulación** de la factura del cobro
   (su última fila, por si se subsanó), y las líneas vuelven a la comanda.
-- **`Devolucion`** — la venta existió. Emite una **`R5`** por diferencias con el desglose original
-  negado (leído de `Desglose_Json`, no recalculado) y sin destinatario, referenciando la factura
-  original. Las líneas no vuelven.
+- **`Devolucion`** — la venta existió. Emite una rectificativa por diferencias con el desglose
+  original negado (leído de `Desglose_Json`, no recalculado), referenciando la factura original. Las
+  líneas no vuelven. La clave sale de la factura rectificada: una `F2` se rectifica con **`R5`**, sin
+  destinatario (error 1190), y una `F1` con **`R1`** (art. 80.Dos LIVA: la operación queda sin
+  efecto), con el cliente de la `F1` (art. 15.5 del RD 1619/2012; error 1189 si falta).
 
 Un cobro cuyo ticket se canjeó tiene **dos altas** con el mismo `ID_Pago`: la `F2` y la `F3`.
 `emitir_baja_de_pago` las busca por separado (la `F3` es la que lleva el ticket en
@@ -218,10 +220,12 @@ Un cobro cuyo ticket se canjeó tiene **dos altas** con el mismo `ID_Pago`: la `
   que el cliente puede deducir.
 
 Fuente: [Aclaraciones a dudas de los desarrolladores, v1.3, 4-12-2025](https://sede.agenciatributaria.gob.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/FAQs-Desarrolladores.pdf), apartados 17 y 27.
-Lo fijan los tests de `cuentas.rs::tests_baja_de_un_ticket_canjeado`.
+Las claves de las rectificativas: [FAQ Veri*factu de la AEAT, procedimientos de facturación](https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/preguntas-frecuentes/procedimientos-facturacion.html),
+[art. 80 LIVA](https://www.boe.es/buscar/act.php?id=BOE-A-1992-28740#a80) y
+[art. 15 del RD 1619/2012](https://www.boe.es/buscar/act.php?id=BOE-A-2012-14696#a15). Lo fijan los tests de
+`cuentas.rs::tests_baja_de_un_ticket_canjeado`.
 
-La devolución emite siempre una `R5`, también cuando la factura original es una `F1`; el código no
-tiene camino para `R1`. Si el pago no tiene registro (un cobro de modo prueba), la baja sigue
+Si el pago no tiene registro (un cobro de modo prueba), la baja sigue
 adelante sin emitir nada. El efecto en la caja de cada clase está en [caja.md](caja.md).
 
 ### La factura completa de un ticket ya expedido (`F3`)

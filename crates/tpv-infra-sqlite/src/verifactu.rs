@@ -1172,20 +1172,41 @@ pub async fn emitir_baja_de_pago(
             // el mismo número que se facturó, con el signo cambiado. Recalcularlo podría devolver
             // un céntimo distinto del que se cobró.
             let lineas = desglose_negado(original.desglose.as_deref());
-            let r5 = emitir_alta(
+
+            // La clave sale de la factura que se rectifica (FAQ Veri*factu de la AEAT,
+            // «¿Cómo registra el emisor una factura rectificativa?»):
+            //   * una simplificada (`F2`) se rectifica con `R5`, que **no puede llevar
+            //     destinatario** (error 1190);
+            //   * una completa (`F1`) con `R1`, la de las causas del art. 80.Uno, Dos y Seis LIVA:
+            //     una devolución deja «sin efecto total o parcialmente» la operación (80.Dos). Al
+            //     ser completa tiene que cumplir el art. 6 del RD 1619/2012 (art. 15.5), así que
+            //     lleva el cliente de la `F1`, y en el registro su destinatario es obligatorio
+            //     (error 1189).
+            let (tipo_rectificativa_factura, destinatario) = if original.tipo_factura == "F1" {
+                let cliente = destinatario_desde_json(original.destinatario.as_deref()).ok_or_else(|| {
+                    AppError::internal(format!(
+                        "la factura completa {} no tiene cliente guardado: no se puede emitir su \
+                         rectificativa",
+                        original.num_serie
+                    ))
+                })?;
+                ("R1", Some(cliente))
+            } else {
+                ("R5", None)
+            };
+
+            let rectificativa = emitir_alta(
                 db,
                 DatosFactura {
-                    tipo_factura: Some("R5".to_string()),
+                    tipo_factura: Some(tipo_rectificativa_factura.to_string()),
                     // `I` = rectificativa **por diferencias**: se declara sólo lo que cambia (el
                     // importe negativo), no la factura completa sustituida. Con `S` (sustitución)
                     // habría que informar `ImporteRectificacion`, que es otro camino y no el que
-                    // marca la FAQ para una devolución sobre una simplificada.
+                    // marca la FAQ para una devolución.
                     tipo_rectificativa: Some("I".to_string()),
                     id_pago: Some(id_pago.to_string()),
                     lineas: lineas.clone(),
-                    // Una `R5` **no puede llevar destinatario** (error 1190): rectifica una
-                    // simplificada, que por definición no lo tiene.
-                    destinatario: None,
+                    destinatario,
                     // Rectifica el TICKET, también si se canjeó: la `F3` no es rectificativa
                     // (art. 15.6 ROF) y lo que se declaró a efectos del IVA es la simplificada.
                     rectificadas: vec![RefFactura {
@@ -1223,8 +1244,8 @@ pub async fn emitir_baja_de_pago(
                         destinatario: Some(destinatario),
                         sustituidas: vec![RefFactura {
                             nif: datos_obligado(db).await?.nif,
-                            num_serie: r5.num_serie_factura,
-                            fecha: r5.fecha_expedicion,
+                            num_serie: rectificativa.num_serie_factura,
+                            fecha: rectificativa.fecha_expedicion,
                         }],
                         fecha_operacion: fecha_op_original,
                         ..Default::default()
