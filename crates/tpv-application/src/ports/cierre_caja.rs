@@ -133,6 +133,10 @@ pub trait CierreCajaRepository: Send + Sync {
     /// Un apunte de caja tal como está guardado. `None` si no existe.
     async fn apunte(&self, tipo: ApunteCaja, id: &str) -> AppResult<Option<ApunteGuardado>>;
 
+    /// Las devoluciones vigentes de parte de un cobro, como apuntes. Son las que deshace la baja por
+    /// error del cobro, y los cierres en que cayeron también hay que rectificarlos.
+    async fn devoluciones_de(&self, id_pago: &str) -> AppResult<Vec<ApunteGuardado>>;
+
     /// Guarda lo que un cierre marca ahora y deja constancia de por qué (CAJA-01). La foto de esa
     /// noche no se toca.
     async fn guardar_rectificacion(&self, r: RectificacionNueva) -> AppResult<()>;

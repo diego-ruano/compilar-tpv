@@ -121,8 +121,12 @@ async fn totales_entre<C: Reader>(
     hasta: Option<&str>,
 ) -> AppResult<TotalesCaja> {
     // COBROS. El método se normaliza igual que en el resto de caja: todo lo que no sea 'Tarjeta'
-    // cuenta como efectivo (CUENTA-03). Un método nuevo entra por defecto en el cajón, que es el
-    // lado seguro: aparecería como descuadre y se investigaría, en vez de desaparecer sin más.
+    // u 'Otro' cuenta como efectivo (CUENTA-03, `pago::es_efectivo`). Un método nuevo entra por
+    // defecto en el cajón, que es el lado seguro: aparecería como descuadre y se investigaría, en
+    // vez de desaparecer sin más. 'Otro' sólo lo lleva una devolución (una transferencia).
+    //
+    // Una devolución de PARTE de un cobro es un cobro negativo, ACTIVO, del día que se devuelve: el
+    // primer sumando la resta sola, en su periodo.
     //
     // ⚠️ El `Estado = 'ACTIVO'` es LA consulta de CUENTA-07. Antes anular borraba la fila, así
     // que el esperado bajaba exactamente lo mismo que faltaba en el cajón y el descuadre salía
@@ -166,14 +170,14 @@ async fn totales_entre<C: Reader>(
         SELECT
             COALESCE((
               SELECT SUM(Importe_Total) FROM Pagos
-              WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
+              WHERE COALESCE(Metodo_Pago,'') NOT IN ('Tarjeta', 'Otro')
                 AND Estado = 'ACTIVO'
                 AND (?1 IS NULL OR Fecha_Hora > ?1)
                 AND (?2 IS NULL OR Fecha_Hora <= ?2)
             ), 0)
             - COALESCE((
               SELECT SUM(Importe_Total) FROM Pagos
-              WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
+              WHERE COALESCE(Metodo_Pago,'') NOT IN ('Tarjeta', 'Otro')
                 AND Estado = 'ANULADO'
                 AND Motivo_Baja = 'DEVOLUCION'
                 AND ?1 IS NOT NULL
@@ -706,6 +710,35 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         }))
     }
 
+    async fn devoluciones_de(&self, id_pago: &str) -> AppResult<Vec<ApunteGuardado>> {
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(
+                r#"
+                SELECT COALESCE(Fecha_Hora,''), IFNULL(Importe_Total,0), COALESCE(Metodo_Pago,''),
+                       Numero_Ticket
+                FROM Pagos
+                WHERE ID_Pago_Origen = ?1 AND Estado = 'ACTIVO'
+                ORDER BY Fecha_Hora ASC, ID_Pago ASC;
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        let mut out = Vec::new();
+        while let Some(r) = rows.next().await.map_err(db_err)? {
+            let g = |i: i32| r.get_value(i).map_err(db_err);
+            out.push(ApunteGuardado::Cobro {
+                fecha_hora: v_string(g(0)?).unwrap_or_default(),
+                importe: v_dinero(g(1)?).unwrap_or(Dinero::CERO),
+                metodo: v_string(g(2)?).unwrap_or_default(),
+                activo: true,
+                numero_ticket: norm_opt_string(g(3)?),
+            });
+        }
+        Ok(out)
+    }
+
     async fn guardar_rectificacion(&self, r: RectificacionNueva) -> AppResult<()> {
         let g = self.db.write().await;
         let conn = &g;
@@ -989,6 +1022,75 @@ mod tests {
             assert_eq!(impacto.cierres[0].esperado_despues, Dinero::CERO);
             assert_eq!(impacto.cierres[0].descuadre_despues, eur(20.0));
         }
+    }
+
+    /// Una devolución de parte de `p1` (5 € de los 20) el día 11, por `metodo`, y el cierre de esa
+    /// noche, que la contó: 10 € de fondo, -5 de ventas, 5 € esperados y contados.
+    fn devolucion_de_p1_el_11(metodo: &str) -> Vec<String> {
+        vec![
+            format!(
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                   ID_Pago_Origen, Motivo_Devolucion)
+                 VALUES ('p1-dev', 'com', '2026-05-11 12:00:00', '{metodo}', -500, 'DEVOLUCION', 'p1', 'fría');"
+            ),
+            "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, ID_Usuario, Periodo_Desde, Fondo_Inicial,
+                Ventas_Efectivo, Gastos_Caja, Esperado, Contado, Descuadre, Dejado, Retirado)
+             VALUES ('c2', '2026-05-11 23:00:00', 'u1', '2026-05-10 23:00:00', 1000, -500, 0, 500, 500, 0, 0, 500);"
+                .to_string(),
+        ]
+    }
+
+    #[tokio::test]
+    async fn una_devolucion_parcial_resta_de_SU_periodo_solo_si_salio_en_efectivo() {
+        // Es un cobro negativo, activo, del día que se devuelve: el periodo del 11 lo resta solo, y
+        // el del 10 —el de la venta— no se entera. Por el datáfono o por transferencia, el dinero no
+        // sale del cajón.
+        for (metodo, ventas_del_11) in [("Efectivo", -5.0), ("Tarjeta", 0.0), ("Otro", 0.0)] {
+            let (db, _dir) = db_temporal().await;
+            sembrar(&db, &[USUARIO]).await;
+            sembrar(&db, COBRO).await;
+            let dev = devolucion_de_p1_el_11(metodo);
+            sembrar(&db, &[dev[0].as_str()]).await;
+
+            let caja = SqliteCierreCajaRepository::new(db.clone());
+            let del_10 = {
+                let r = db.read().await;
+                totales_entre(&r, Some("2026-05-09 23:00:00"), Some("2026-05-10 23:00:00")).await.unwrap()
+            };
+            let del_11 = caja.totales_desde(Some("2026-05-10 23:00:00")).await.unwrap();
+            assert_eq!(del_10.ventas_efectivo, eur(20.0), "{metodo}");
+            assert_eq!(del_11.ventas_efectivo, eur(ventas_del_11), "{metodo}");
+        }
+    }
+
+    #[tokio::test]
+    async fn la_baja_por_error_de_un_cobro_con_devoluciones_rectifica_tambien_el_cierre_de_la_devolucion() {
+        // La baja por error deshace sus devoluciones: si la venta no existió, el dinero devuelto de
+        // ella tampoco salió por una venta. El cierre del 10 contaba 20 € que no estaban, y el del
+        // 11 restaba 5 € de una devolución que deja de existir: los dos se rectifican.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO]).await;
+        sembrar(&db, COBRO).await;
+        sembrar(&db, &[CIERRE_CUADRADO]).await;
+        let dev = devolucion_de_p1_el_11("Efectivo");
+        sembrar(&db, &dev.iter().map(String::as_str).collect::<Vec<_>>()).await;
+
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+        let impacto = rect::previsualizar(
+            &caja,
+            &CambioCajaInput::AnularPago { id_pago: "p1".into(), clase: Some("ERROR".into()) },
+        )
+        .await
+        .unwrap();
+
+        let de = |id: &str| impacto.cierres.iter().find(|c| c.id_cierre == id).cloned();
+        let c1 = de("c1").expect("el cierre de la venta");
+        assert_eq!((c1.esperado_despues, c1.descuadre_despues), (Dinero::CERO, eur(20.0)));
+        let c2 = de("c2").expect("el cierre de la devolución");
+        assert_eq!((c2.esperado_antes, c2.esperado_despues), (eur(5.0), eur(10.0)));
+        assert_eq!(c2.descuadre_despues, eur(-5.0));
+        assert_eq!(impacto.cierres.len(), 2);
+        assert!(impacto.requiere_motivo);
     }
 
     #[tokio::test]

@@ -5,16 +5,19 @@
 
 use tpv_domain::dinero::Dinero;
 use tpv_contracts::cuentas::{
-    AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, PaginaEntradas,
-    PaginaSalidas, ResumenCajaDto, UpdateGastoInput, UpdatePagoInput,
+    AnularPagoInput, CobroDevolubleDto, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput,
+    DevolucionDto, DevolverLineasInput, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
+    UpdateGastoInput, UpdatePagoInput,
 };
 use tpv_domain::cuentas::{
-    normalize_metodo, puede_anularse, requerido, GastoData, PagoData, RechazoAnulacion,
-    ESTADO_ANULADO,
+    motivo_de_devolucion, normalize_metodo, normalize_metodo_devolucion, puede_anularse, requerido,
+    GastoData, PagoData, RechazoAnulacion, RechazoDevolucion, ESTADO_ANULADO,
 };
 
 use crate::error::{AppError, AppResult};
-use crate::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository, ClaseBaja};
+use crate::ports::cuentas::{
+    AnularPagoArgs, ClaseBaja, CuentasFiltro, CuentasRepository, DevolverLineasArgs,
+};
 
 fn filtro_de(args: CuentasRangoArgs) -> CuentasFiltro {
     let cursor = args.cursor();
@@ -194,6 +197,74 @@ pub async fn anular_pago(
         // FISCAL-01. Ausente = anulación por error, que es lo que hacía este comando antes: un
         // cliente que no manda el campo sigue haciendo lo que hacía.
         clase: ClaseBaja::desde_texto(input.clase.as_deref()),
+    })
+    .await
+}
+
+/// El error de un rechazo de devolución: lo que hay que corregir en la pantalla es una validación;
+/// lo que dice el estado del cobro, un conflicto. Lo usa también el repositorio, que comprueba lo
+/// que depende de la BD.
+pub fn error_de_devolucion(r: RechazoDevolucion) -> AppError {
+    match r {
+        RechazoDevolucion::MotivoRequerido
+        | RechazoDevolucion::SinLineas
+        | RechazoDevolucion::CantidadNoValida => AppError::validation(r.mensaje()),
+        _ => AppError::conflict(r.mensaje()),
+    }
+}
+
+/// Las líneas de un cobro con lo que queda por devolver de cada una.
+pub async fn lineas_devolubles(
+    repo: &dyn CuentasRepository,
+    id_pago: &str,
+) -> AppResult<CobroDevolubleDto> {
+    repo.lineas_devolubles(id_pago.trim())
+        .await?
+        .ok_or_else(|| AppError::not_found("Ese cobro no existe."))
+}
+
+/// Devuelve parte de un cobro: unas líneas, o unas unidades de una línea.
+///
+/// Es dinero que sale, así que va como un pago negativo con su factura rectificativa
+/// (`docs/arquitectura/caja.md`). El motivo es obligatorio, como al anular, y el método dice por
+/// dónde salió el dinero: sólo el efectivo resta del arqueo. `id_usuario` viene de la sesión.
+pub async fn devolver_lineas(
+    repo: &dyn CuentasRepository,
+    id_usuario: &str,
+    input: DevolverLineasInput,
+) -> AppResult<DevolucionDto> {
+    let id_pago = input.id_pago.trim().to_string();
+    if id_pago.is_empty() {
+        return Err(AppError::validation("Falta el cobro que se devuelve."));
+    }
+    let motivo = motivo_de_devolucion(input.motivo.as_deref()).map_err(error_de_devolucion)?;
+
+    // Una línea a cero es una que no se ha elegido; dos veces la misma, lo que se ha pedido en
+    // total. Lo que no es un número positivo no se adivina.
+    let mut lineas: Vec<(String, f64)> = Vec::new();
+    for l in input.lineas {
+        let id = l.id_detalle.trim().to_string();
+        if id.is_empty() || l.cantidad == 0.0 {
+            continue;
+        }
+        if !l.cantidad.is_finite() || l.cantidad < 0.0 {
+            return Err(error_de_devolucion(RechazoDevolucion::CantidadNoValida));
+        }
+        match lineas.iter_mut().find(|(i, _)| *i == id) {
+            Some((_, c)) => *c += l.cantidad,
+            None => lineas.push((id, l.cantidad)),
+        }
+    }
+    if lineas.is_empty() {
+        return Err(error_de_devolucion(RechazoDevolucion::SinLineas));
+    }
+
+    repo.devolver_lineas(DevolverLineasArgs {
+        id_pago,
+        id_usuario: id_usuario.to_string(),
+        motivo,
+        metodo: normalize_metodo_devolucion(&input.metodo),
+        lineas,
     })
     .await
 }

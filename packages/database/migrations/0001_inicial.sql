@@ -818,7 +818,8 @@ CREATE TABLE IF NOT EXISTS Fichaje_Dia (
 /* =========================================================
    9. Pagos
 ========================================================= */
--- Importe_Total >= 0: validado en la capa de aplicacion (ver nota en Detalle_Comanda, DB-06).
+-- Importe_Total >= 0: validado en la capa de aplicacion (ver nota en Detalle_Comanda, DB-06). La
+-- excepcion es una DEVOLUCION de parte de un cobro, que es un pago negativo (ver ID_Pago_Origen).
 -- Estado: un cobro anulado NO se borra (CUENTA-07). Borrarlo bajaba el esperado del arqueo
 -- exactamente lo mismo que faltaba en el cajon, asi que la sisa mas comun del sector salia con
 -- descuadre cero: los numeros eran correctos y no habia nada contra lo que compararlos.
@@ -861,14 +862,29 @@ CREATE TABLE IF NOT EXISTS Pagos (
   -- comanda, la reconciliacion y sus espejos del worker- para algo que al cajon le da igual: el
   -- dinero salio en los dos casos. Lo que cambia es el papel que hay que emitir.
   Motivo_Baja TEXT,
+  -- La DEVOLUCION de parte de un cobro: el cliente devuelve unas lineas, o unas unidades de una
+  -- linea, y se le devuelve su dinero. Es un pago NEGATIVO de la misma comanda que apunta al cobro
+  -- devuelto (ID_Pago_Origen), con Tipo = 'DEVOLUCION', el metodo por el que salio el dinero
+  -- ('Efectivo', 'Tarjeta' u 'Otro') y por que (Motivo_Devolucion). Lo devuelto de cada linea esta
+  -- en Devolucion_Lineas.
+  --
+  -- Va como un pago y no como una baja porque es dinero que sale: el arqueo, los resumenes y las
+  -- estadisticas lo restan sin saber que existe, y sale en su periodo de caja, que es el dia que
+  -- el dinero se fue. El cobro devuelto sigue ACTIVO: se vendio. La devolucion de un cobro
+  -- ENTERO es otra cosa (Motivo_Baja = 'DEVOLUCION'), y no cabe en uno que ya tenga parciales.
+  ID_Pago_Origen TEXT,
+  Motivo_Devolucion TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda) ON DELETE CASCADE,
   FOREIGN KEY (ID_Usuario_Cobrador) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   FOREIGN KEY (ID_Trabajador_Cobrador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL,
   FOREIGN KEY (Anulado_Por) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
+  FOREIGN KEY (ID_Pago_Origen) REFERENCES Pagos(ID_Pago),
   CHECK (Estado IN ('ACTIVO','ANULADO')),
   CHECK ((Estado = 'ANULADO') = (Anulado_En IS NOT NULL AND Anulado_Por IS NOT NULL)),
   CHECK (Motivo_Baja IS NULL OR Motivo_Baja IN ('ERROR','DEVOLUCION')),
-  CHECK ((Motivo_Baja IS NOT NULL) <= (Estado = 'ANULADO'))
+  CHECK ((Motivo_Baja IS NOT NULL) <= (Estado = 'ANULADO')),
+  CHECK ((ID_Pago_Origen IS NULL) = (Motivo_Devolucion IS NULL)),
+  CHECK (ID_Pago_Origen IS NULL OR (Importe_Total < 0 AND Tipo = 'DEVOLUCION'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_pagos_fecha
@@ -884,6 +900,10 @@ ON Pagos(ID_Trabajador_Cobrador, Fecha_Hora);
 -- pendiente de una comanda), y casi todas acotan ademas por fecha.
 CREATE INDEX IF NOT EXISTS idx_pagos_estado_fecha
 ON Pagos(Estado, Fecha_Hora);
+
+-- Las devoluciones de un cobro. Parcial porque casi ningun pago lo es.
+CREATE INDEX IF NOT EXISTS idx_pagos_origen
+ON Pagos(ID_Pago_Origen) WHERE ID_Pago_Origen IS NOT NULL;
 
 -- ON DELETE CASCADE en ID_Detalle desde CUENTA-07. Antes no hacia falta: una linea cobrada no se
 -- borraba nunca, y al anular se borraban las dos filas a la vez. Ahora anular devuelve la linea a
@@ -938,6 +958,44 @@ SELECT pd.ID_Pago AS ID_Pago, pd.ID_Detalle AS ID_Detalle
 FROM Pago_Detalles pd
 JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
 WHERE +p.Estado = 'ACTIVO';
+
+-- Lo que devuelve una DEVOLUCION de parte de un cobro (ver Pagos.ID_Pago_Origen): que linea y
+-- cuantas unidades, y por cuanto dinero. Pago_Detalles no sirve: no guarda cantidades, y una
+-- devolucion puede ser una cana de las tres de la linea. Y la devolucion no cobra la linea: si
+-- fuera a Pago_Detalles, v_lineas_cobradas la veria cobrada dos veces.
+--
+-- Importe es lo devuelto de ESTA linea, en positivo (el pago lleva el total en negativo). Se
+-- guarda y no se recalcula porque no siempre es unidades x precio: la ultima devolucion de una
+-- linea se lleva lo que quede, para que todas juntas sumen exactamente lo cobrado.
+CREATE TABLE IF NOT EXISTS Devolucion_Lineas (
+  ID_Pago TEXT NOT NULL,
+  ID_Detalle TEXT NOT NULL,
+  Cantidad REAL NOT NULL,
+  Importe INTEGER NOT NULL CHECK (typeof(Importe) IN ('integer','null')),
+  PRIMARY KEY (ID_Pago, ID_Detalle),
+  FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago) ON DELETE CASCADE,
+  FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle) ON DELETE CASCADE,
+  CHECK (Cantidad > 0),
+  CHECK (Importe >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_devolucion_lineas_detalle
+ON Devolucion_Lineas(ID_Detalle);
+
+-- Lo devuelto de cada linea de un cobro por sus devoluciones VIGENTES (ID_Pago es el cobro
+-- devuelto, no la devolucion). Una devolucion dada de baja deja de contar: es la que deshace la
+-- baja por error de su cobro. Lo leen el tope de lo que queda por devolver, el stock que repone la
+-- baja de un cobro con devoluciones y la reconciliacion del stock; escrito en cada sitio, alguno
+-- se olvidaria del filtro por estado.
+--
+-- El `+` de `+d.Estado` es el de v_lineas_cobradas (RI-02): que el planificador entre por la linea
+-- (idx_devolucion_lineas_detalle) y no recorriendo todos los cobros activos.
+CREATE VIEW IF NOT EXISTS v_unidades_devueltas AS
+SELECT d.ID_Pago_Origen AS ID_Pago, dl.ID_Detalle AS ID_Detalle, SUM(dl.Cantidad) AS Cantidad, SUM(dl.Importe) AS Importe
+FROM Devolucion_Lineas dl
+JOIN Pagos d ON d.ID_Pago = dl.ID_Pago
+WHERE +d.Estado = 'ACTIVO'
+GROUP BY d.ID_Pago_Origen, dl.ID_Detalle;
 
 -- Correlativo del ticket impreso (Pagos.Numero_Ticket). Sin el, un papel no se puede atar a su
 -- cobro: ni para una devolucion, ni para cuadrar un arqueo, ni para el cliente que vuelve a

@@ -412,6 +412,8 @@ describe("bootstrap acotado · lo que la Main necesita para seguir", () => {
 		expect(pos("Comandas")).toBeLessThan(pos("Detalle_Comanda"));
 		expect(pos("Detalle_Comanda")).toBeLessThan(pos("Pago_Detalles"));
 		expect(pos("Pagos")).toBeLessThan(pos("Pago_Detalles"));
+		expect(pos("Pagos")).toBeLessThan(pos("Devolucion_Lineas"));
+		expect(pos("Detalle_Comanda")).toBeLessThan(pos("Devolucion_Lineas"));
 		expect(pos("Pagos")).toBeLessThan(pos("Movimientos_Caja"));
 		expect(pos("Cierres_Caja")).toBeLessThan(pos("Cierre_Denominaciones"));
 		expect(pos("Pedidos_Proveedor")).toBeLessThan(pos("Lineas_Pedido_Proveedor"));

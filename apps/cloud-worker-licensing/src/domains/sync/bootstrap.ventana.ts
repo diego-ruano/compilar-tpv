@@ -183,6 +183,16 @@ export const TRANSACCIONALES: Transaccional[] = [
 			"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
 	},
 	{
+		// Lo devuelto de una devolución de parte de un cobro. Como `Pago_Detalles`: su pago (la
+		// devolución, un pago negativo) y su línea son de la misma comanda. Va después de `Pagos`, y
+		// la devolución después de su cobro: el `rowid` de la nube sigue el orden en que se
+		// escribieron, así que `Pagos.ID_Pago_Origen` siempre encuentra a su padre.
+		nombre: "Devolucion_Lineas",
+		ctes: [CTE_COMANDAS, CTE_DETALLES, CTE_PAGOS],
+		donde:
+			"ID_Pago IN (SELECT ID_Pago FROM sel_pagos) AND ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",
+	},
+	{
 		nombre: "Lote_Consumos",
 		ctes: [CTE_COMANDAS, CTE_DETALLES],
 		donde: "ID_Detalle IN (SELECT ID_Detalle FROM sel_detalles)",

@@ -5,7 +5,7 @@
 //! cuánto se factura y cuánto se gasta; esconderlo del menú no es esconderlo.
 //!
 //! La excepción son **los cobros y sus bajas**, que también hace el camarero: la lista de cobros,
-//! el aviso previo de una baja y la baja misma (por error o devolución). Es lo que pasa a mitad de
+//! el aviso previo de una baja, la baja misma (por error o devolución) y devolver parte de un cobro. Es lo que pasa a mitad de
 //! servicio —el cliente que vuelve a por su dinero— sin el encargado delante.
 //!
 //! CAJA-01: los que tocan un apunte ya no se niegan por fecha. Pasan por `rectificacion_caja`, que
@@ -19,8 +19,9 @@ use tpv_application::use_cases::cuentas as uc;
 use tpv_application::use_cases::rectificacion_caja as rect;
 use tpv_contracts::cierre_caja::{CambioCajaInput, ImpactoCajaDto};
 use tpv_contracts::cuentas::{
-    AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, PaginaEntradas,
-    PaginaSalidas, ResumenCajaDto, UpdateGastoInput, UpdatePagoInput,
+    AnularPagoInput, CobroDevolubleDto, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput,
+    DevolucionDto, DevolverLineasInput, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
+    UpdateGastoInput, UpdatePagoInput,
 };
 use crate::{AppState, ADMIN, CAMARERO};
 use tpv_contracts::errors::AppErrorDto;
@@ -147,6 +148,32 @@ pub async fn cuentas_update_pago(
         motivo_rectificacion,
     )
     .await?)
+}
+
+/// Las líneas de un cobro con lo que queda por devolver de cada una: lo que enseña la pantalla
+/// de devolver.
+#[tauri::command]
+pub async fn cuentas_lineas_devolubles(
+    state: State<'_, AppState>,
+    id_pago: String,
+) -> Result<CobroDevolubleDto, AppErrorDto> {
+    state.exigir_rol(&[ADMIN, CAMARERO]).await?;
+    let repo = state.cuentas_repo().await?;
+    Ok(uc::lineas_devolubles(repo.as_ref(), &id_pago).await?)
+}
+
+/// Devuelve parte de un cobro: unas líneas, o unas unidades de una línea (`docs/arquitectura/caja.md`).
+///
+/// Quién devuelve sale de la **sesión** (SEC-01), como al anular. No pasa por la rectificación de
+/// cierres: la devolución cae ahora, en el periodo abierto, que es donde sale el dinero.
+#[tauri::command]
+pub async fn cuentas_devolver_lineas(
+    state: State<'_, AppState>,
+    args: DevolverLineasInput,
+) -> Result<DevolucionDto, AppErrorDto> {
+    let sesion = state.exigir_rol(&[ADMIN, CAMARERO]).await?;
+    let repo = state.cuentas_repo().await?;
+    Ok(uc::devolver_lineas(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
 
 /// Anula un cobro (CUENTA-07). Antes lo borraba, y ése era el agujero: el arqueo calcula

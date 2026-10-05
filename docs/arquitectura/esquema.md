@@ -68,6 +68,9 @@ En los dos casos:
   y los `ON CONFLICT` llevan su `WHERE`). Una lista nueva de catálogo filtra `Archivado_En IS NULL`.
 - **«Línea cobrada»** se lee por la vista `v_lineas_cobradas` (pagos activos), no por `Pago_Detalles`
   ([caja.md](caja.md#dar-de-baja-un-cobro)).
+- **Lo devuelto de una línea** se lee por la vista `v_unidades_devueltas` (devoluciones vigentes), no
+  por `Devolucion_Lineas`. Un pago negativo con `ID_Pago_Origen` es una devolución de parte de un cobro
+  ([caja.md](caja.md#devolver-parte-de-un-cobro)).
 - **`Registros_Facturacion` y `Serie_Facturacion` no se purgan nunca** ([verifactu.md](verifactu.md)).
 
 ## El andamiaje local (§16 del fichero)

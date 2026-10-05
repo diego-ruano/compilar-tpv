@@ -1,59 +1,102 @@
 {
   "filas": [
     {
+      "anulado_en": "2026-05-16 09:00:00",
+      "anulado_por": "Marta Ruiz",
+      "cliente": "Devolución · Mesa 7 / Ana Gomez",
+      "devuelto": 0,
+      "es_devolucion": true,
+      "estado": "ANULADO",
+      "fecha_hora": "2026-05-15 11:30",
+      "id": "pago-g",
+      "importe": -200,
+      "metodo": "Efectivo",
+      "motivo_anulacion": "mesa equivocada",
+      "motivo_devolucion": "otra"
+    },
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Devolución · Mesa 7 / Ana Gomez",
+      "devuelto": 0,
+      "es_devolucion": true,
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-15 11:00",
+      "id": "pago-f",
+      "importe": -450,
+      "metodo": "Otro",
+      "motivo_anulacion": null,
+      "motivo_devolucion": "la tarta estaba fria"
+    },
+    {
       "anulado_en": null,
       "anulado_por": null,
       "cliente": "Barra",
+      "devuelto": 0,
+      "es_devolucion": false,
       "estado": "ACTIVO",
       "fecha_hora": "2026-05-12 20:00",
       "id": "pago-d",
       "importe": 300,
       "metodo": "Efectivo",
-      "motivo_anulacion": null
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
     },
     {
       "anulado_en": null,
       "anulado_por": null,
       "cliente": "Barra",
+      "devuelto": 0,
+      "es_devolucion": false,
       "estado": "ACTIVO",
       "fecha_hora": "2026-05-12 20:00",
       "id": "pago-c",
       "importe": 725,
       "metodo": "Efectivo",
-      "motivo_anulacion": null
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
     },
     {
       "anulado_en": null,
       "anulado_por": null,
       "cliente": "Mesa 7",
+      "devuelto": 0,
+      "es_devolucion": false,
       "estado": "ACTIVO",
       "fecha_hora": "2026-05-11 13:05",
       "id": "pago-b",
       "importe": 1000,
       "metodo": "Tarjeta",
-      "motivo_anulacion": null
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
     },
     {
       "anulado_en": null,
       "anulado_por": null,
       "cliente": "Mesa 7 / Ana Gomez",
+      "devuelto": 450,
+      "es_devolucion": false,
       "estado": "ACTIVO",
       "fecha_hora": "2026-05-10 13:05",
       "id": "pago-a",
       "importe": 2450,
       "metodo": "Efectivo",
-      "motivo_anulacion": null
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
     },
     {
       "anulado_en": "2026-05-14 09:00:00",
       "anulado_por": "Marta Ruiz",
       "cliente": "Barra",
+      "devuelto": 0,
+      "es_devolucion": false,
       "estado": "ANULADO",
       "fecha_hora": "2026-05-09 10:00",
       "id": "pago-e",
       "importe": 4000,
       "metodo": "Efectivo",
-      "motivo_anulacion": "se lo llevo puesto"
+      "motivo_anulacion": "se lo llevo puesto",
+      "motivo_devolucion": null
     }
   ],
   "siguiente": null

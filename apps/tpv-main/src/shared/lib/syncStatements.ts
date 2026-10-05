@@ -114,6 +114,7 @@ const TABLE_TO_FEATURES: Record<string, readonly string[]> = {
 	detalle_comanda: ["mesas", "stats"],
 	pagos: ["cuentas", "stats"],
 	pago_detalles: ["cuentas", "stats"],
+	devolucion_lineas: ["cuentas"],
 	cuentas_gastos: ["cuentas", "stats"],
 	categorias_producto: ["inventario", "stats"],
 	productos: ["inventario", "stats"],

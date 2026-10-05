@@ -49,6 +49,9 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 ///
 /// Se mira el cobro **del consumo** y no los de su línea (STOCK-01): una línea anulada y vuelta a
 /// cobrar tiene un consumo por cobro, y mirando la línea el del cobro anulado seguía restando.
+///
+/// Y de un cobro activo resta lo que no se ha devuelto: lo que repusieron sus devoluciones
+/// parciales (`cuentas::sql_ya_repuesto`) volvió al lote.
 const SQL_LOTES: &str = r#"
     SELECT id_lote, codigo_lote, producto, guardado, calculado
     FROM (
@@ -61,7 +64,7 @@ const SQL_LOTES: &str = r#"
                 SELECT SUM(m.Delta) FROM Movimientos_Stock m WHERE m.ID_Lote = l.ID_Lote
             ), 0)
             - COALESCE((
-                SELECT SUM(c.Cantidad)
+                SELECT SUM(c.Cantidad - {ya_lote})
                 FROM Lote_Consumos c
                 JOIN Pagos p ON p.ID_Pago = c.ID_Pago
                 WHERE c.ID_Lote = l.ID_Lote
@@ -84,7 +87,7 @@ const SQL_LOTES: &str = r#"
                 SELECT SUM(m.Delta) FROM Movimientos_Stock m WHERE m.ID_Producto = pr.ID_Producto
             ), 0)
             - COALESCE((
-                SELECT SUM(c.Cantidad)
+                SELECT SUM(c.Cantidad - {ya_suelto})
                 FROM Suelto_Consumos c
                 JOIN Pagos pg ON pg.ID_Pago = c.ID_Pago
                 WHERE c.ID_Producto = pr.ID_Producto
@@ -155,7 +158,9 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
         let r = self.db.read().await;
         let mut rows = r
             .query(
-                SQL_LOTES,
+                &SQL_LOTES
+                    .replace("{ya_lote}", &crate::cuentas::sql_ya_repuesto("c"))
+                    .replace("{ya_suelto}", &crate::cuentas::sql_ya_repuesto("c")),
                 vec![Value::Real(tolerancia), Value::Integer(MAX_FILAS)],
             )
             .await

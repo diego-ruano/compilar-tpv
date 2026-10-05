@@ -182,13 +182,15 @@ impl SqliteStatsRepository {
 
         // Ingresos y ocupación al nivel de PAGO (fuente de verdad = Pagos, coherente con caja):
         // cada Pago cuenta en su propia Fecha_Hora. Sin exigir comanda 100% pagada ni imputar al
-        // último pago (STAT-01/02). Mismo modelo que el worker/Handy (STAT-06). La venta rápida
+        // último pago (STAT-01/02). Mismo modelo que el worker/Handy (STAT-06). Una devolución de
+        // parte de un cobro (`ID_Pago_Origen`) resta de los ingresos el día que se devuelve, pero no
+        // cuenta como mesa servida ni como cobro: no lo es. La venta rápida
         // queda fuera del tablero de mesas sin filtro extra: sus comandas no tienen mesa
         // (Canal='BARRA', ID_Mesa NULL), así que el JOIN con Mesas ya no las incluye.
         let sql_occ_ing = format!(
             r#"
             SELECT
-              COUNT(DISTINCT c.ID_Mesa) AS ocupadas,
+              COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN c.ID_Mesa END) AS ocupadas,
               COALESCE(SUM(p.Importe_Total),0) AS ingresos
             FROM Pagos p
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
@@ -221,7 +223,7 @@ impl SqliteStatsRepository {
             SELECT
               m.Numero_Mesa,
               z.Nombre_Zona,
-              COUNT(DISTINCT p.ID_Comanda) AS comandas
+              COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS comandas
             FROM Pagos p
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -249,7 +251,7 @@ impl SqliteStatsRepository {
 
         let sql_serv = format!(
             r#"
-            SELECT {bucket} AS b, COUNT(DISTINCT p.ID_Comanda) AS n
+            SELECT {bucket} AS b, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS n
             FROM Pagos p
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -1025,6 +1027,7 @@ impl SqliteStatsRepository {
               AND p.Fecha_Hora <  rng.end_dt
               AND p.Estado = 'ACTIVO'
               AND p.ID_Trabajador_Cobrador IS NOT NULL
+              AND p.ID_Pago_Origen IS NULL
               AND r.Nombre_Rol = 'Camarero'
             GROUP BY p.ID_Trabajador_Cobrador;
             "#,

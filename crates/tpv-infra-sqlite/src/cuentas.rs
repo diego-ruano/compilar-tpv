@@ -7,15 +7,23 @@ use async_trait::async_trait;
 use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository, ClaseBaja};
-use tpv_contracts::cuentas::{
-    CursorCuentas, EntradaDto, PaginaEntradas, PaginaSalidas, ResumenCajaDto, SalidaDto,
+use tpv_application::ports::cuentas::{
+    AnularPagoArgs, ClaseBaja, CuentasFiltro, CuentasRepository, DevolverLineasArgs,
 };
-use tpv_domain::cuentas::{GastoData, PagoData, ESTADO_ACTIVO, ESTADO_ANULADO};
+use tpv_application::use_cases::cuentas::error_de_devolucion;
+use tpv_contracts::cuentas::{
+    CobroDevolubleDto, CursorCuentas, DevolucionDto, EntradaDto, LineaDevolubleDto,
+    PaginaEntradas, PaginaSalidas, ResumenCajaDto, SalidaDto,
+};
+use tpv_domain::cuentas::{
+    importe_devuelto, unidades_a_devolver, GastoData, PagoData, RechazoDevolucion, ESTADO_ACTIVO,
+    ESTADO_ANULADO, TIPO_DEVOLUCION,
+};
 
 use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, v_i64, v_string, v_dinero, dinero_val};
+use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
+use tpv_domain::cantidad::redondear_cantidad;
 use crate::util::new_id;
 
 pub struct SqliteCuentasRepository {
@@ -135,7 +143,12 @@ fn entradas_inner(
           p.Fecha_Hora AS orden,
           -- RI-52: un ticket de barra se reconoce por su canal. Antes se comparaba con la mesa
           -- fantasma 'BARRA' de cuando la barra era una mesa, y salía como «Venta».
+          --
+          -- Una devolución de parte de un cobro lo dice delante: es la fila que se busca cuando falta
+          -- dinero, y así se encuentra escribiendo «devolución».
           (
+            CASE WHEN p.ID_Pago_Origen IS NOT NULL THEN 'Devolución · ' ELSE '' END
+            ||
             CASE
               WHEN c.Canal = 'BARRA' THEN 'Barra'
               WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
@@ -147,12 +160,20 @@ fn entradas_inner(
               ELSE ''
             END
           ) AS cliente,
-          CASE WHEN p.Metodo_Pago = 'Tarjeta' THEN 'Tarjeta' ELSE 'Efectivo' END AS metodo,
+          -- «Otro» sólo lo lleva una devolución (una transferencia): no es efectivo.
+          CASE WHEN p.Metodo_Pago IN ('Tarjeta', 'Otro') THEN p.Metodo_Pago ELSE 'Efectivo' END AS metodo,
           IFNULL(p.Importe_Total, 0) AS importe,
           COALESCE(p.Estado, 'ACTIVO') AS estado,
           p.Anulado_En AS anuladoEn,
           TRIM(COALESCE(ua.Nombre,'') || CASE WHEN COALESCE(ua.Apellido,'')='' THEN '' ELSE ' ' || ua.Apellido END) AS anuladoPor,
-          p.Motivo_Anulacion AS motivoAnulacion
+          p.Motivo_Anulacion AS motivoAnulacion,
+          CASE WHEN p.ID_Pago_Origen IS NOT NULL THEN 1 ELSE 0 END AS esDevolucion,
+          -- Lo devuelto de un cobro por sus devoluciones vigentes, en positivo.
+          COALESCE((
+            SELECT -SUM(d.Importe_Total) FROM Pagos d
+            WHERE d.ID_Pago_Origen = p.ID_Pago AND d.Estado = 'ACTIVO'
+          ), 0) AS devuelto,
+          p.Motivo_Devolucion AS motivoDevolucion
         FROM Pagos p
         JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
         LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -201,6 +222,139 @@ fn salidas_inner(
 /// Expresión de texto buscable de una fila de salidas (incluye proveedor id y nombre).
 const SALIDAS_Q_EXPR: &str = "lower(fechaHora || ' ' || tipoGasto || ' ' || concepto || ' ' || CAST(importe AS TEXT) || ' ' || IFNULL(proveedorId,'') || ' ' || proveedorNombre)";
 
+/// Lo que ya repusieron al stock las devoluciones parciales vigentes de un cobro, para una traza de
+/// consumo (`a` es el alias de `Lote_Consumos` o `Suelto_Consumos`): la parte devuelta de su línea,
+/// redondeada a milésimas. Sin devoluciones, cero.
+///
+/// Es la misma cuenta con la que repone cada devolución (`devolver_lineas`), así que lo que repone
+/// la baja del cobro —su consumo menos esto— es exacto, y la reconciliación del stock (que resta del
+/// consumo lo mismo) cuadra. El worker la tiene copiada (`cuentas.commands.ts`).
+pub(crate) fn sql_ya_repuesto(a: &str) -> String {
+    format!(
+        "IFNULL(ROUND({a}.Cantidad * (\
+            SELECT ROUND(v.Cantidad, 3) FROM v_unidades_devueltas v \
+            WHERE v.ID_Pago = {a}.ID_Pago AND v.ID_Detalle = {a}.ID_Detalle\
+         ) / (\
+            SELECT NULLIF(COALESCE(dc.Cantidad, 1), 0) FROM Detalle_Comanda dc \
+            WHERE dc.ID_Detalle = {a}.ID_Detalle\
+         ), 3), 0)"
+    )
+}
+
+/// Un cobro tal como está guardado, con lo que deciden la baja y la devolución.
+struct CobroGuardado {
+    id_comanda: String,
+    importe: Dinero,
+    anulado: bool,
+    metodo: String,
+    numero_ticket: Option<String>,
+    es_devolucion: bool,
+}
+
+async fn cobro_guardado<C: Reader>(conn: &C, id_pago: &str) -> AppResult<Option<CobroGuardado>> {
+    let mut rows = conn
+        .query(
+            "SELECT ID_Comanda, IFNULL(Importe_Total, 0), COALESCE(Estado, 'ACTIVO'), \
+                    COALESCE(Metodo_Pago, ''), Numero_Ticket, ID_Pago_Origen IS NOT NULL \
+             FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;",
+            vec![Value::Text(id_pago.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let Some(row) = rows.next().await.map_err(db_err)? else {
+        return Ok(None);
+    };
+    Ok(Some(CobroGuardado {
+        id_comanda: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+        importe: v_dinero(row.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
+        anulado: v_string(row.get_value(2).map_err(db_err)?)
+            .is_some_and(|e| e.eq_ignore_ascii_case(ESTADO_ANULADO)),
+        metodo: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
+        numero_ticket: norm_opt_string(row.get_value(4).map_err(db_err)?),
+        es_devolucion: v_i64(row.get_value(5).map_err(db_err)?).unwrap_or(0) != 0,
+    }))
+}
+
+/// Las devoluciones parciales vigentes de un cobro: `(ID_Pago, importe negativo)`, de la primera a la
+/// última.
+async fn devoluciones_vigentes<C: Reader>(conn: &C, id_pago: &str) -> AppResult<Vec<(String, Dinero)>> {
+    let mut rows = conn
+        .query(
+            "SELECT ID_Pago, IFNULL(Importe_Total, 0) FROM Pagos \
+             WHERE ID_Pago_Origen = ?1 AND Estado = 'ACTIVO' \
+             ORDER BY Fecha_Hora ASC, ID_Pago ASC;",
+            vec![Value::Text(id_pago.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        out.push((
+            v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+            v_dinero(row.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
+        ));
+    }
+    Ok(out)
+}
+
+/// Una línea de un cobro, con lo ya devuelto de ella.
+struct LineaCobrada {
+    id_detalle: String,
+    nombre: String,
+    cantidad: f64,
+    precio: Dinero,
+    iva: Option<f64>,
+    devueltas: f64,
+}
+
+async fn lineas_cobradas<C: Reader>(conn: &C, id_pago: &str) -> AppResult<Vec<LineaCobrada>> {
+    let mut rows = conn
+        .query(
+            r#"
+            SELECT dc.ID_Detalle,
+                   COALESCE(dc.Nombre_Producto, pr.Nombre, 'Producto'),
+                   COALESCE(dc.Cantidad, 1),
+                   COALESCE(dc.Precio_Unitario, 0),
+                   dc.IVA_Percent,
+                   COALESCE((
+                     SELECT ROUND(v.Cantidad, 3) FROM v_unidades_devueltas v
+                     WHERE v.ID_Pago = pd.ID_Pago AND v.ID_Detalle = pd.ID_Detalle
+                   ), 0)
+            FROM Pago_Detalles pd
+            JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
+            LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
+            WHERE pd.ID_Pago = ?1
+            ORDER BY dc.ID_Detalle ASC;
+            "#,
+            vec![Value::Text(id_pago.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        out.push(LineaCobrada {
+            id_detalle: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+            nombre: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+            cantidad: v_f64(row.get_value(2).map_err(db_err)?).unwrap_or(1.0),
+            precio: v_dinero(row.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
+            iva: v_f64(row.get_value(4).map_err(db_err)?),
+            devueltas: v_f64(row.get_value(5).map_err(db_err)?).unwrap_or(0.0),
+        });
+    }
+    Ok(out)
+}
+
+/// Lo devuelto de una línea en esta devolución.
+struct LineaDevuelta {
+    id_detalle: String,
+    cobradas: f64,
+    iva: Option<f64>,
+    unidades: f64,
+    antes: f64,
+    despues: f64,
+    importe: Dinero,
+}
+
 #[async_trait]
 impl CuentasRepository for SqliteCuentasRepository {
     /// Los cobros anulados **salen** en esta lista, marcados: es la pantalla donde se investiga un
@@ -215,7 +369,8 @@ impl CuentasRepository for SqliteCuentasRepository {
         // para la primera página (RI-18).
         let sql = format!(
             "SELECT id, fechaHora, cliente, metodo, importe, estado, anuladoEn, anuladoPor, \
-             motivoAnulacion, orden FROM ({inner}) AS e {q_clause} \
+             motivoAnulacion, orden, esDevolucion, devuelto, motivoDevolucion \
+             FROM ({inner}) AS e {q_clause} \
              ORDER BY orden DESC, id DESC {limit_clause};"
         );
 
@@ -246,6 +401,9 @@ impl CuentasRepository for SqliteCuentasRepository {
                     anulado_en: norm_opt_string(row.get_value(6).map_err(db_err)?),
                     anulado_por: norm_opt_string(row.get_value(7).map_err(db_err)?),
                     motivo_anulacion: norm_opt_string(row.get_value(8).map_err(db_err)?),
+                    es_devolucion: v_i64(row.get_value(10).map_err(db_err)?).unwrap_or(0) != 0,
+                    devuelto: v_dinero(row.get_value(11).map_err(db_err)?).unwrap_or(Dinero::CERO),
+                    motivo_devolucion: norm_opt_string(row.get_value(12).map_err(db_err)?),
                 },
                 cursor,
             ));
@@ -511,6 +669,11 @@ impl CuentasRepository for SqliteCuentasRepository {
     /// fijando un importe arbitrario.
     async fn actualizar_pago(&self, id_pago: &str, p: PagoData) -> AppResult<bool> {
         let db = self.db.write().await;
+        // Una devolución no se edita: su importe no sale de `Pago_Detalles`, y recalcularlo como el
+        // de un cobro la dejaría a cero.
+        if cobro_guardado(&db, id_pago).await?.is_some_and(|c| c.es_devolucion) {
+            return Err(AppError::conflict("Una devolución no se edita."));
+        }
         let affected = db
             .execute(
                 r#"
@@ -523,7 +686,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                         JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
                         WHERE pd.ID_Pago = ?1
                     )
-                WHERE ID_Pago = ?1;
+                WHERE ID_Pago = ?1 AND ID_Pago_Origen IS NULL;
                 "#,
                 vec![
                     Value::Text(id_pago.to_string()),
@@ -614,37 +777,38 @@ impl CuentasRepository for SqliteCuentasRepository {
             .map_err(db_err)?;
         let res: AppResult<bool> = async {
             // 1) Comanda, importe y ESTADO del pago, antes de tocar nada.
-            let (id_comanda, importe, estado, metodo) = {
-                let mut rows = conn
-                    .query(
-                        r#"
-                        SELECT ID_Comanda,
-                               IFNULL(Importe_Total,0),
-                               COALESCE(Estado,'ACTIVO'),
-                               COALESCE(Metodo_Pago,'')
-                        FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;
-                        "#,
-                        vec![Value::Text(id_pago.clone())],
-                    )
-                    .await
-                    .map_err(db_err)?;
-                match rows.next().await.map_err(db_err)? {
-                    Some(row) => (
-                        v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
-                        v_dinero(row.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
-                        v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
-                        v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
-                    ),
-                    // El pago no existe: nada que revertir.
-                    None => return Ok(false),
-                }
+            let Some(cobro) = cobro_guardado(conn, &id_pago).await? else {
+                // El pago no existe: nada que revertir.
+                return Ok(false);
             };
+            let (id_comanda, importe, metodo) =
+                (cobro.id_comanda.clone(), cobro.importe, cobro.metodo.clone());
 
             // El guardia. Ver la nota de arriba: sin esto, cada pulsación del botón abonaría el
             // stock y descontaría el gasto del cliente otra vez.
-            if estado.eq_ignore_ascii_case(ESTADO_ANULADO) {
+            if cobro.anulado {
                 return Ok(false);
             }
+
+            // Una devolución de parte de un cobro no se da de baja por separado: la deshace la baja
+            // por error de su cobro, que se lleva todas las suyas.
+            if cobro.es_devolucion {
+                return Err(AppError::conflict(
+                    "Una devolución no se da de baja por separado: si la venta no existió, se da \
+                     de baja el cobro.",
+                ));
+            }
+
+            // Las devoluciones parciales vigentes del cobro. Con ellas no cabe devolverlo ENTERO
+            // (ya no está entero: se devuelve lo que queda desde «Devolver»), y la baja por error
+            // las deshace todas: si la venta no existió, lo devuelto de ella tampoco.
+            let devoluciones = devoluciones_vigentes(conn, &id_pago).await?;
+            if clase == ClaseBaja::Devolucion && !devoluciones.is_empty() {
+                return Err(AppError::conflict(
+                    "Este cobro ya tiene devoluciones: lo que queda se devuelve desde «Devolver».",
+                ));
+            }
+            let devuelto: Dinero = devoluciones.iter().map(|(_, i)| -*i).sum();
 
             // FISCAL-01. A partir de aquí hay dos caminos y la diferencia no es cosmética:
             //
@@ -664,11 +828,15 @@ impl CuentasRepository for SqliteCuentasRepository {
             //    consumo por cobro, y por la línea se devolvía también el del cobro anulado antes,
             //    que ya había vuelto. La traza se CONSERVA: el doble abono lo impide el `Estado`.
             //    Redondeado a milésimas como todo movimiento de stock (RI-26).
+            //
+            //    Menos lo que ya repusieron sus devoluciones parciales (`SQL_YA_REPUESTO`): si no, lo
+            //    devuelto volvería dos veces.
             conn.execute(
-                r#"
+                &format!(
+                    r#"
                 UPDATE Lotes_Producto
                 SET Stock_Disponible = ROUND(COALESCE(Stock_Disponible,0) + (
-                    SELECT IFNULL(SUM(lc.Cantidad),0)
+                    SELECT IFNULL(SUM(lc.Cantidad - {ya}),0)
                     FROM Lote_Consumos lc
                     WHERE lc.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
                 ), 3)
@@ -678,6 +846,8 @@ impl CuentasRepository for SqliteCuentasRepository {
                     WHERE lc.ID_Pago = ?1
                 );
                 "#,
+                    ya = sql_ya_repuesto("lc")
+                ),
                 vec![Value::Text(id_pago.clone())],
             )
             .await
@@ -685,10 +855,11 @@ impl CuentasRepository for SqliteCuentasRepository {
 
             // 2-bis) Y el stock SUELTO (lo que los lotes no cubrieron, VR-04). Mismo trato.
             conn.execute(
-                r#"
+                &format!(
+                    r#"
                 UPDATE Productos
                 SET Stock_Suelto = ROUND(COALESCE(Stock_Suelto,0) + (
-                    SELECT IFNULL(SUM(sc.Cantidad),0)
+                    SELECT IFNULL(SUM(sc.Cantidad - {ya}),0)
                     FROM Suelto_Consumos sc
                     WHERE sc.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
                 ), 3)
@@ -698,6 +869,8 @@ impl CuentasRepository for SqliteCuentasRepository {
                     WHERE sc.ID_Pago = ?1
                 );
                 "#,
+                    ya = sql_ya_repuesto("sc")
+                ),
                 vec![Value::Text(id_pago.clone())],
             )
             .await
@@ -708,8 +881,10 @@ impl CuentasRepository for SqliteCuentasRepository {
             //    borrada o reasignada después del cobro no impide restarlo.
             //
             //    Esto SÍ se hace en los dos casos: el cliente ya no ha gastado ese dinero, haya
-            //    sido porque la venta no existía o porque se le ha devuelto.
-            if importe > Dinero::CERO && !id_comanda.is_empty() {
+            //    sido porque la venta no existía o porque se le ha devuelto. Lo que ya le restaron
+            //    sus devoluciones parciales no se le resta otra vez.
+            let importe_a_restar = importe - devuelto;
+            if importe_a_restar > Dinero::CERO && !id_comanda.is_empty() {
                 conn.execute(
                     r#"
                     UPDATE Clientes
@@ -721,7 +896,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                         WHERE c.ID_Comanda = ?1
                     );
                     "#,
-                    vec![Value::Text(id_comanda.clone()), dinero_val(importe)],
+                    vec![Value::Text(id_comanda.clone()), dinero_val(importe_a_restar)],
                 )
                 .await
                 .map_err(db_err)?;
@@ -750,6 +925,31 @@ impl CuentasRepository for SqliteCuentasRepository {
                 )
                 .await
                 .map_err(db_err)?;
+
+            // 4-bis) Y sus devoluciones parciales, con la misma firma: deshechas con él. Sólo puede
+            //        haberlas en una baja por error (la devolución entera se ha rechazado arriba).
+            //        Su stock y el gasto del cliente ya están cuadrados con los pasos 2 y 3, y su
+            //        dinero deja de restar del periodo en que cayó.
+            if affected > 0 && !devoluciones.is_empty() {
+                conn.execute(
+                    r#"
+                    UPDATE Pagos
+                    SET Estado = 'ANULADO',
+                        Anulado_En = datetime('now','localtime'),
+                        Anulado_Por = ?2,
+                        Motivo_Anulacion = ?3,
+                        Motivo_Baja = 'ERROR'
+                    WHERE ID_Pago_Origen = ?1 AND Estado = 'ACTIVO';
+                    "#,
+                    vec![
+                        Value::Text(id_pago.clone()),
+                        Value::Text(id_usuario.clone()),
+                        Value::Text(motivo.clone()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
 
             // 5) El movimiento en el historial de caja, con el tipo que corresponde. Son dos
             //    hechos distintos y el historial existe justo para poder distinguirlos después:
@@ -828,10 +1028,273 @@ impl CuentasRepository for SqliteCuentasRepository {
             //    correspondiente se emitió la primera vez, y emitir otro gastaría un número y
             //    mandaría a la AEAT un hecho que no ha ocurrido.
             if affected > 0 {
-                crate::verifactu::emitir_baja_de_pago(conn, &id_pago, clase).await?;
+                let ids: Vec<String> = devoluciones.into_iter().map(|(id, _)| id).collect();
+                crate::verifactu::emitir_baja_de_pago(conn, &id_pago, clase, &ids).await?;
             }
 
             Ok(affected > 0)
+        }
+        .await;
+        match res {
+            Ok(v) => {
+                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn lineas_devolubles(&self, id_pago: &str) -> AppResult<Option<CobroDevolubleDto>> {
+        let db = self.db.read().await;
+        let Some(cobro) = cobro_guardado(&db, id_pago).await? else {
+            return Ok(None);
+        };
+        let devuelto: Dinero =
+            devoluciones_vigentes(&db, id_pago).await?.iter().map(|(_, i)| -*i).sum();
+        let lineas = lineas_cobradas(&db, id_pago)
+            .await?
+            .into_iter()
+            .map(|l| LineaDevolubleDto {
+                id_detalle: l.id_detalle,
+                nombre: l.nombre,
+                cantidad: l.cantidad,
+                devueltas: l.devueltas,
+                precio_unitario: l.precio,
+            })
+            .collect();
+        Ok(Some(CobroDevolubleDto {
+            id_pago: id_pago.to_string(),
+            numero_ticket: cobro.numero_ticket,
+            metodo: cobro.metodo,
+            importe: cobro.importe,
+            devuelto,
+            lineas,
+        }))
+    }
+
+    /// Devuelve parte de un cobro (`docs/arquitectura/caja.md`, «Devolver parte de un cobro»).
+    ///
+    /// Todo en una transacción, como la baja: el pago negativo y sus líneas devueltas, el stock
+    /// repuesto, el gasto del cliente, el movimiento de caja y la factura rectificativa. Lo que
+    /// depende de la BD —que el cobro siga activo, que las líneas sean suyas, que queden unidades—
+    /// se comprueba aquí dentro, que es donde vale.
+    async fn devolver_lineas(&self, args: DevolverLineasArgs) -> AppResult<DevolucionDto> {
+        let DevolverLineasArgs {
+            id_pago,
+            id_usuario,
+            motivo,
+            metodo,
+            lineas: pedidas,
+        } = args;
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
+            .await
+            .map_err(db_err)?;
+        let res: AppResult<DevolucionDto> = async {
+            let cobro = cobro_guardado(conn, &id_pago)
+                .await?
+                .ok_or_else(|| AppError::not_found("Ese cobro no existe."))?;
+            if cobro.anulado {
+                return Err(error_de_devolucion(RechazoDevolucion::CobroDadoDeBaja));
+            }
+            if cobro.es_devolucion {
+                return Err(error_de_devolucion(RechazoDevolucion::EsUnaDevolucion));
+            }
+
+            // Se devuelve por líneas, así que el cobro tiene que ser la suma de sus líneas. Uno
+            // prorrateado no dice cuánto se pagó de cada una.
+            let lineas = lineas_cobradas(conn, &id_pago).await?;
+            let suma: Dinero = lineas.iter().map(|l| l.precio.escala(l.cantidad)).sum();
+            if lineas.is_empty() || suma != cobro.importe {
+                return Err(error_de_devolucion(RechazoDevolucion::NoCuadra));
+            }
+
+            let mut devueltas: Vec<LineaDevuelta> = Vec::with_capacity(pedidas.len());
+            for (id_detalle, unidades) in &pedidas {
+                let l = lineas
+                    .iter()
+                    .find(|l| l.id_detalle == *id_detalle)
+                    .ok_or_else(|| error_de_devolucion(RechazoDevolucion::LineaAjena))?;
+                let unidades = unidades_a_devolver(*unidades, l.cantidad, l.devueltas)
+                    .map_err(error_de_devolucion)?;
+                devueltas.push(LineaDevuelta {
+                    id_detalle: l.id_detalle.clone(),
+                    cobradas: l.cantidad,
+                    iva: l.iva,
+                    unidades,
+                    antes: l.devueltas,
+                    despues: redondear_cantidad(l.devueltas + unidades),
+                    importe: importe_devuelto(l.precio, l.devueltas, unidades),
+                });
+            }
+            let total: Dinero = devueltas.iter().map(|d| d.importe).sum();
+            if total <= Dinero::CERO {
+                return Err(error_de_devolucion(RechazoDevolucion::SinImporte));
+            }
+            // ¿Con ésta queda devuelto el cobro entero? Entonces la rectificativa se lleva lo que
+            // quede de lo declarado, al céntimo (`emitir_devolucion_parcial`).
+            let completa = lineas.iter().all(|l| {
+                let tras = devueltas
+                    .iter()
+                    .find(|d| d.id_detalle == l.id_detalle)
+                    .map_or(l.devueltas, |d| d.despues);
+                l.cantidad - tras <= 1e-9
+            });
+
+            // 1) El pago negativo. Lo firma quien devuelve, que es quien saca el dinero.
+            let id_devolucion = new_id();
+            conn.execute(
+                r#"
+                INSERT INTO Pagos (
+                  ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador, ID_Pago_Origen, Motivo_Devolucion
+                )
+                VALUES (
+                  ?1, ?2, datetime('now','localtime'), ?3, ?4, ?5,
+                  ?6, (SELECT ID_Trabajador FROM Trabajadores WHERE ID_Usuario = ?6 LIMIT 1), ?7, ?8
+                );
+                "#,
+                vec![
+                    Value::Text(id_devolucion.clone()),
+                    Value::Text(cobro.id_comanda.clone()),
+                    Value::Text(metodo.clone()),
+                    dinero_val(-total),
+                    Value::Text(TIPO_DEVOLUCION.to_string()),
+                    Value::Text(id_usuario.clone()),
+                    Value::Text(id_pago.clone()),
+                    Value::Text(motivo.clone()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            for d in &devueltas {
+                // 2) Lo devuelto de cada línea.
+                conn.execute(
+                    "INSERT INTO Devolucion_Lineas (ID_Pago, ID_Detalle, Cantidad, Importe) \
+                     VALUES (?1, ?2, ?3, ?4);",
+                    vec![
+                        Value::Text(id_devolucion.clone()),
+                        Value::Text(d.id_detalle.clone()),
+                        Value::Real(d.unidades),
+                        dinero_val(d.importe),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+
+                // 3) El stock, a sus lotes y al suelto: la parte devuelta de lo que consumió la
+                //    línea en ESE cobro. Como el importe, es lo devuelto en total después menos lo
+                //    devuelto antes, cada uno redondeado a milésimas: devolver una línea en varias
+                //    veces repone exactamente lo que consumió (`sql_ya_repuesto` hace la misma
+                //    cuenta).
+                let args = || {
+                    vec![
+                        Value::Text(id_pago.clone()),
+                        Value::Text(d.id_detalle.clone()),
+                        Value::Real(d.antes),
+                        Value::Real(d.despues),
+                        Value::Real(d.cobradas),
+                    ]
+                };
+                conn.execute(
+                    r#"
+                    UPDATE Lotes_Producto
+                    SET Stock_Disponible = ROUND(COALESCE(Stock_Disponible,0) + (
+                        SELECT IFNULL(SUM(ROUND(lc.Cantidad * ?4 / ?5, 3) - ROUND(lc.Cantidad * ?3 / ?5, 3)), 0)
+                        FROM Lote_Consumos lc
+                        WHERE lc.ID_Pago = ?1 AND lc.ID_Detalle = ?2 AND lc.ID_Lote = Lotes_Producto.ID_Lote
+                    ), 3)
+                    WHERE ID_Lote IN (
+                        SELECT lc.ID_Lote FROM Lote_Consumos lc
+                        WHERE lc.ID_Pago = ?1 AND lc.ID_Detalle = ?2
+                    );
+                    "#,
+                    args(),
+                )
+                .await
+                .map_err(db_err)?;
+                conn.execute(
+                    r#"
+                    UPDATE Productos
+                    SET Stock_Suelto = ROUND(COALESCE(Stock_Suelto,0) + (
+                        SELECT IFNULL(SUM(ROUND(sc.Cantidad * ?4 / ?5, 3) - ROUND(sc.Cantidad * ?3 / ?5, 3)), 0)
+                        FROM Suelto_Consumos sc
+                        WHERE sc.ID_Pago = ?1 AND sc.ID_Detalle = ?2 AND sc.ID_Producto = Productos.ID_Producto
+                    ), 3)
+                    WHERE ID_Producto IN (
+                        SELECT sc.ID_Producto FROM Suelto_Consumos sc
+                        WHERE sc.ID_Pago = ?1 AND sc.ID_Detalle = ?2
+                    );
+                    "#,
+                    args(),
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            // 4) El gasto del cliente de la comanda, sin bajar de 0 (como la baja, RI-61).
+            conn.execute(
+                r#"
+                UPDATE Clientes
+                SET Total_Gastado = MAX(0, COALESCE(Total_Gastado,0) - ?2)
+                WHERE ID_Cliente = (
+                    SELECT COALESCE(c.ID_Cliente, r.ID_Cliente)
+                    FROM Comandas c
+                    LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+                    WHERE c.ID_Comanda = ?1
+                );
+                "#,
+                vec![Value::Text(cobro.id_comanda.clone()), dinero_val(total)],
+            )
+            .await
+            .map_err(db_err)?;
+
+            // 5) El historial de caja: dinero que sale por una venta real, por donde salió.
+            caja_movimientos::registrar(
+                conn,
+                MovimientoCaja {
+                    tipo: caja_movimientos::TIPO_DEVOLUCION,
+                    id_pago: Some(id_devolucion.clone()),
+                    id_usuario: Some(id_usuario.clone()),
+                    importe: total,
+                    metodo_pago: Some(metodo.clone()),
+                    motivo: Some(motivo.clone()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+            // 6) La factura rectificativa, DENTRO de esta transacción. Su número es el del papel
+            //    de la devolución, como el de un cobro es el de su ticket.
+            let lineas_fiscales: Vec<(Dinero, Option<f64>)> =
+                devueltas.iter().map(|d| (d.importe, d.iva)).collect();
+            let num_factura = crate::verifactu::emitir_devolucion_parcial(
+                conn,
+                &id_pago,
+                &id_devolucion,
+                &lineas_fiscales,
+                completa,
+            )
+            .await?;
+            if let Some(num) = &num_factura {
+                conn.execute(
+                    "UPDATE Pagos SET Numero_Ticket = ?2 WHERE ID_Pago = ?1;",
+                    vec![Value::Text(id_devolucion.clone()), Value::Text(num.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            Ok(DevolucionDto {
+                id_pago: id_devolucion,
+                importe: -total,
+                num_factura,
+            })
         }
         .await;
         match res {
@@ -3250,7 +3713,7 @@ mod tests_baja_de_un_ticket_canjeado {
 
         let e = canjear(&db, &ticket).await.unwrap_err();
 
-        assert!(format!("{e:?}").contains("devolvió"), "{e:?}");
+        assert!(format!("{e:?}").contains("tiene una devolución"), "{e:?}");
         assert_eq!(registros(&db).await.len(), antes);
     }
 
@@ -4000,6 +4463,683 @@ mod tests_correccion_y_canje_multiple {
         let filas = registros(&db).await;
         let de_la_r5 = filas.iter().rfind(|f| f.es("F3")).unwrap();
         assert_eq!(de_la_r5.cliente().unwrap()["NIF"], NIF_NUEVO);
+        assert_cadena_sana(&db).await;
+    }
+}
+
+#[cfg(test)]
+// Los nombres usan MAYÚSCULAS para la afirmación que fijan (`..._NO_...`). Es deliberado.
+#[allow(non_snake_case)]
+mod tests_devolucion_parcial {
+    //! Devolver PARTE de un cobro: unas líneas, o unas unidades de una línea.
+    //!
+    //! Es dinero que sale por una venta real, así que va como un pago negativo con su rectificativa
+    //! (`docs/arquitectura/caja.md`). Lo que fijan estos tests es que todo lo que el cobro movió se
+    //! mueva al revés **por la parte devuelta y sólo por ella**: el stock de cada lote y del suelto,
+    //! el gasto del cliente, la caja (por el método por el que salió el dinero) y el IVA declarado.
+    //! Y que devolver en varias veces sume, al céntimo y a la milésima, lo mismo que devolver de una.
+
+    use super::tests_baja_de_un_ticket_canjeado::{
+        assert_cadena_sana, canjear, cliente, papel, registros, Fila, NIF_CLIENTE,
+    };
+    use super::tests_comunes::*;
+    use super::*;
+    use tpv_application::ports::cuentas::DevolverLineasArgs;
+    use tpv_application::ports::reconciliacion::ReconciliacionRepository as _;
+    use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
+    use tpv_application::ports::verifactu::VerifactuRepository as _;
+    use tpv_domain::ticket::TramoIva;
+
+    /// Una comanda de barra con tres cañas a 3,33 € (10 %) y dos vinos a 4,00 € (21 %): 17,99 €.
+    /// Las cañas consumen dos del lote y una del suelto; los vinos, del suelto. Y otra comanda con
+    /// un vino, para las líneas ajenas.
+    const VENTA: &[&str] = &[
+        "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL'
+           WHERE ID = 1;",
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
+           VALUES ('cana', 'cat', 'Caña', 333, 10);",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
+           VALUES ('vino', 'cat', 'Vino', 400, 6);",
+        "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+           VALUES ('lote-cana', 'cana', 'L-1', 2, '2027-01-01 10:00:00');",
+        // Las altas del stock, para que la reconciliación tenga un historial con el que comparar.
+        "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha)
+           VALUES ('mov-lote', 'lote-cana', 'ALTA', 2, 2, '2027-01-01 10:00:00');",
+        "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Fecha)
+           VALUES ('mov-cana', 'cana', 'ALTA', 10, 10, '2027-01-01 10:00:00');",
+        "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Fecha)
+           VALUES ('mov-vino', 'vino', 'ALTA', 6, 6, '2027-01-01 10:00:00');",
+        // Lo gastado por la clienta, con esta venta dentro (la barra no se lo acredita al cobrar).
+        "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli', 'Ana', 10000);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda, ID_Cliente)
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 1799, 'cli');",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('det-canas', 'com', 'cana', 3, 333, 10);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('det-vino', 'com', 'vino', 2, 400, 21);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+           VALUES ('com-otra', 'BARRA', '2027-01-15 12:30:00', 'Abierta', 400);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('det-otra', 'com-otra', 'vino', 1, 400, 21);",
+    ];
+
+    fn repo(db: &Arc<Db>) -> SqliteCuentasRepository {
+        SqliteCuentasRepository::new(db.clone())
+    }
+
+    async fn texto(db: &Arc<Db>, sql: &str) -> Option<String> {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap()?;
+        crate::mapping::v_string(row.get_value(0).unwrap())
+    }
+
+    /// Cobra la comanda entera por el camino real de venta rápida. Con cliente, una `F1`.
+    async fn cobrar(db: &Arc<Db>, con_cliente: bool) -> String {
+        let id_pago = crate::util::new_id();
+        crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
+            .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_pago: id_pago.clone(),
+                id_comanda: "com".into(),
+                metodo: "Efectivo".into(),
+                importe_total: Dinero::CERO,
+                id_usuario_cobrador: Some("u1".into()),
+                id_trabajador_cobrador: None,
+                detalles: vec!["det-canas".into(), "det-vino".into()],
+                destinatario: con_cliente.then(cliente),
+            })
+            .await
+            .expect("el cobro tiene que salir");
+        id_pago
+    }
+
+    async fn devolver(
+        db: &Arc<Db>,
+        id_pago: &str,
+        lineas: &[(&str, f64)],
+        metodo: &str,
+    ) -> AppResult<DevolucionDto> {
+        repo(db)
+            .devolver_lineas(DevolverLineasArgs {
+                id_pago: id_pago.into(),
+                id_usuario: "u1".into(),
+                motivo: "estaba caliente".into(),
+                metodo: metodo.into(),
+                lineas: lineas.iter().map(|(d, n)| (d.to_string(), *n)).collect(),
+            })
+            .await
+    }
+
+    async fn una_cana(db: &Arc<Db>, id_pago: &str) -> DevolucionDto {
+        devolver(db, id_pago, &[("det-canas", 1.0)], "Efectivo")
+            .await
+            .expect("la devolución tiene que salir")
+    }
+
+    async fn stock(db: &Arc<Db>) -> (f64, f64, f64) {
+        (
+            escalar(db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote-cana';").await,
+            escalar(db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='cana';").await,
+            escalar(db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='vino';").await,
+        )
+    }
+
+    async fn gastado(db: &Arc<Db>) -> f64 {
+        escalar(db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await
+    }
+
+    /// El desglose declarado de un registro de alta.
+    async fn tramos(db: &Arc<Db>, num: &str) -> Vec<TramoIva> {
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Desglose_Json FROM Registros_Facturacion
+                 WHERE Num_Serie_Factura = ?1 AND Tipo = 'ALTA' ORDER BY Orden DESC LIMIT 1;",
+                vec![Value::Text(num.into())],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().expect("el registro existe");
+        crate::verifactu::tramos_declarados(crate::mapping::v_string(row.get_value(0).unwrap()).as_deref())
+    }
+
+    fn tramo(t: &[TramoIva], tipo: f64) -> (Dinero, Dinero) {
+        t.iter()
+            .find(|x| (x.tipo - tipo).abs() < 1e-9)
+            .map(|x| (x.base, x.cuota))
+            .unwrap_or((Dinero::CERO, Dinero::CERO))
+    }
+
+    fn del_pago<'a>(filas: &'a [Fila], id_pago: &str) -> Vec<&'a Fila> {
+        filas.iter().filter(|f| f.id_pago.as_deref() == Some(id_pago)).collect()
+    }
+
+    // ── El pago negativo ─────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn devolver_una_cana_de_tres_es_un_pago_negativo_que_apunta_al_cobro() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+
+        let d = una_cana(&db, &id_pago).await;
+
+        assert_eq!(d.importe, Dinero::de_centimos(-333));
+        let q = |c: &str| format!("SELECT {c} FROM Pagos WHERE ID_Pago = '{}';", d.id_pago);
+        assert_eq!(escalar(&db, &q("Importe_Total")).await, -333.0);
+        assert_eq!(texto(&db, &q("Tipo")).await.as_deref(), Some("DEVOLUCION"));
+        assert_eq!(texto(&db, &q("ID_Pago_Origen")).await.as_deref(), Some(id_pago.as_str()));
+        assert_eq!(texto(&db, &q("Motivo_Devolucion")).await.as_deref(), Some("estaba caliente"));
+        assert_eq!(texto(&db, &q("Estado")).await.as_deref(), Some("ACTIVO"));
+        assert_eq!(texto(&db, &q("ID_Usuario_Cobrador")).await.as_deref(), Some("u1"));
+        assert_eq!(
+            texto(&db, &q("Numero_Ticket")).await,
+            d.num_factura,
+            "su número es el de su rectificativa"
+        );
+        assert_eq!(
+            escalar(&db, &format!(
+                "SELECT Cantidad FROM Devolucion_Lineas WHERE ID_Pago = '{}' AND ID_Detalle = 'det-canas';",
+                d.id_pago
+            ))
+            .await,
+            1.0
+        );
+        // El cobro devuelto sigue igual: se vendió.
+        assert_eq!(
+            texto(&db, &format!("SELECT Estado FROM Pagos WHERE ID_Pago = '{id_pago}';")).await.as_deref(),
+            Some("ACTIVO")
+        );
+        assert_eq!(
+            escalar(&db, &format!("SELECT Importe_Total FROM Pagos WHERE ID_Pago = '{id_pago}';")).await,
+            1799.0
+        );
+        // Y las líneas siguen cobradas: no vuelven a la comanda.
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM v_lineas_cobradas WHERE ID_Detalle = 'det-canas';").await,
+            1.0
+        );
+    }
+
+    #[tokio::test]
+    async fn lo_que_queda_por_devolver_se_lee_por_linea() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        una_cana(&db, &id_pago).await;
+
+        let c = repo(&db).lineas_devolubles(&id_pago).await.unwrap().expect("el cobro existe");
+        assert_eq!(c.importe, Dinero::de_centimos(1799));
+        assert_eq!(c.devuelto, Dinero::de_centimos(333));
+        assert_eq!(c.metodo, "Efectivo");
+        let canas = c.lineas.iter().find(|l| l.id_detalle == "det-canas").unwrap();
+        assert_eq!((canas.cantidad, canas.devueltas), (3.0, 1.0));
+        assert_eq!(canas.nombre, "Caña");
+        let vino = c.lineas.iter().find(|l| l.id_detalle == "det-vino").unwrap();
+        assert_eq!((vino.cantidad, vino.devueltas), (2.0, 0.0));
+        assert!(repo(&db).lineas_devolubles("no-existe").await.unwrap().is_none());
+    }
+
+    // ── El stock ─────────────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn repone_la_parte_devuelta_de_cada_lote_y_del_suelto_y_al_final_exactamente_lo_consumido() {
+        // Las tres cañas salieron dos del lote y una del suelto. Devolver una repone un tercio de
+        // cada sitio, redondeado a milésimas; devolver las otras dos, el resto: al final, el lote y
+        // el suelto quedan exactamente como antes de vender, sin una milésima suelta.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        assert_eq!(stock(&db).await, (0.0, 9.0, 4.0), "lo que dejó el cobro");
+
+        una_cana(&db, &id_pago).await;
+        assert_eq!(stock(&db).await, (0.667, 9.333, 4.0));
+
+        devolver(&db, &id_pago, &[("det-canas", 2.0), ("det-vino", 1.0)], "Efectivo").await.unwrap();
+        assert_eq!(stock(&db).await, (2.0, 10.0, 5.0));
+        devolver(&db, &id_pago, &[("det-vino", 1.0)], "Efectivo").await.unwrap();
+        assert_eq!(stock(&db).await, (2.0, 10.0, 6.0));
+
+        let rec = crate::reconciliacion::SqliteReconciliacionRepository::new(db.clone());
+        assert!(rec.lotes_descuadrados(0.0005).await.unwrap().is_empty(), "el stock cuadra con su historial");
+    }
+
+    #[tokio::test]
+    async fn la_reconciliacion_cuadra_a_mitad_de_devolver() {
+        // Con una parte devuelta, el consumo que cuenta es el de lo que NO se ha devuelto.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        una_cana(&db, &id_pago).await;
+
+        let rec = crate::reconciliacion::SqliteReconciliacionRepository::new(db.clone());
+        let out = rec.lotes_descuadrados(0.0005).await.unwrap();
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    // ── El cliente y la caja ─────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn resta_del_gasto_del_cliente_y_deja_su_movimiento_de_caja() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let antes = gastado(&db).await;
+
+        let d = devolver(&db, &id_pago, &[("det-vino", 1.0)], "Tarjeta").await.unwrap();
+
+        assert_eq!(gastado(&db).await, antes - 400.0);
+        let q = |c: &str| {
+            format!("SELECT {c} FROM Movimientos_Caja WHERE Tipo = 'DEVOLUCION' AND ID_Pago = '{}';", d.id_pago)
+        };
+        assert_eq!(escalar(&db, &q("Importe")).await, 400.0, "en positivo: el signo lo da el tipo");
+        assert_eq!(texto(&db, &q("Metodo_Pago")).await.as_deref(), Some("Tarjeta"));
+        assert_eq!(texto(&db, &q("Motivo")).await.as_deref(), Some("estaba caliente"));
+        assert_eq!(texto(&db, &q("ID_Usuario")).await.as_deref(), Some("u1"));
+    }
+
+    #[tokio::test]
+    async fn solo_lo_devuelto_en_efectivo_sale_del_arqueo() {
+        use tpv_application::ports::cierre_caja::CierreCajaRepository as _;
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let caja = crate::cierre_caja::SqliteCierreCajaRepository::new(db.clone());
+        let efectivo = || async { caja.totales_desde(None).await.unwrap().ventas_efectivo };
+        assert_eq!(efectivo().await, Dinero::de_centimos(1799));
+
+        una_cana(&db, &id_pago).await;
+        assert_eq!(efectivo().await, Dinero::de_centimos(1799 - 333), "el efectivo sale del cajón");
+        devolver(&db, &id_pago, &[("det-canas", 1.0)], "Tarjeta").await.unwrap();
+        devolver(&db, &id_pago, &[("det-vino", 1.0)], "Otro").await.unwrap();
+        assert_eq!(
+            efectivo().await,
+            Dinero::de_centimos(1799 - 333),
+            "lo devuelto por el datáfono o por transferencia no sale del cajón"
+        );
+    }
+
+    // ── Lo que no se puede ───────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn no_se_devuelve_mas_de_lo_que_queda_y_un_rechazo_no_deja_rastro() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        devolver(&db, &id_pago, &[("det-canas", 2.0)], "Efectivo").await.unwrap();
+        let pagos = escalar(&db, "SELECT COUNT(*) FROM Pagos;").await;
+        let registros_antes = registros(&db).await.len();
+
+        let e = devolver(&db, &id_pago, &[("det-vino", 1.0), ("det-canas", 2.0)], "Efectivo")
+            .await
+            .unwrap_err();
+        assert_eq!(e.to_string(), RechazoDevolucion::MasDeLoQueQueda.mensaje(), "{e:?}");
+
+        assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Pagos;").await, pagos, "ni el pago");
+        assert_eq!(registros(&db).await.len(), registros_antes, "ni la factura");
+        assert_eq!(stock(&db).await.2, 4.0, "ni el stock del vino, que sí cabía");
+    }
+
+    #[tokio::test]
+    async fn rechaza_lineas_ajenas_cobros_de_baja_devoluciones_y_cobros_que_no_cuadran() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let rechazo = |r: RechazoDevolucion| r.mensaje().to_string();
+
+        let e = devolver(&db, &id_pago, &[("det-otra", 1.0)], "Efectivo").await.unwrap_err();
+        assert_eq!(e.to_string(), rechazo(RechazoDevolucion::LineaAjena));
+
+        let d = una_cana(&db, &id_pago).await;
+        let e = devolver(&db, &d.id_pago, &[("det-canas", 1.0)], "Efectivo").await.unwrap_err();
+        assert_eq!(e.to_string(), rechazo(RechazoDevolucion::EsUnaDevolucion));
+
+        let e = devolver(&db, "no-existe", &[("det-canas", 1.0)], "Efectivo").await.unwrap_err();
+        assert!(matches!(e, AppError::NotFound(_)), "{e:?}");
+
+        // Un cobro cuyo importe no es la suma de sus líneas (uno antiguo, prorrateado).
+        sembrar(&db, &[&format!("UPDATE Pagos SET Importe_Total = 1700 WHERE ID_Pago = '{id_pago}';")]).await;
+        let e = devolver(&db, &id_pago, &[("det-vino", 1.0)], "Efectivo").await.unwrap_err();
+        assert_eq!(e.to_string(), rechazo(RechazoDevolucion::NoCuadra));
+    }
+
+    #[tokio::test]
+    async fn un_cobro_dado_de_baja_no_se_devuelve() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        super::tests_baja_de_un_ticket_canjeado::dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion)
+            .await
+            .unwrap();
+
+        let e = devolver(&db, &id_pago, &[("det-vino", 1.0)], "Efectivo").await.unwrap_err();
+        assert_eq!(e.to_string(), RechazoDevolucion::CobroDadoDeBaja.mensaje());
+    }
+
+    #[tokio::test]
+    async fn con_devoluciones_parciales_NO_cabe_la_devolucion_entera_ni_se_da_de_baja_una_devolucion() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let d = una_cana(&db, &id_pago).await;
+
+        use super::tests_baja_de_un_ticket_canjeado::dar_de_baja;
+        let e = dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.unwrap_err();
+        assert!(e.to_string().contains("ya tiene devoluciones"), "{e:?}");
+        let e = dar_de_baja(&db, &d.id_pago, ClaseBaja::Error).await.unwrap_err();
+        assert!(e.to_string().contains("no se da de baja por separado"), "{e:?}");
+        let e = dar_de_baja(&db, &d.id_pago, ClaseBaja::Devolucion).await.unwrap_err();
+        assert!(e.to_string().contains("no se da de baja por separado"), "{e:?}");
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Pagos WHERE Estado = 'ANULADO';").await,
+            0.0,
+            "nada se ha dado de baja"
+        );
+    }
+
+    #[tokio::test]
+    async fn una_devolucion_no_se_edita_y_el_cobro_devuelto_conserva_su_importe() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let d = una_cana(&db, &id_pago).await;
+        let datos = || PagoData {
+            fecha_hora: "2027-01-15 13:00:00".into(),
+            metodo: "Tarjeta".into(),
+            importe: Dinero::CERO,
+        };
+
+        let e = repo(&db).actualizar_pago(&d.id_pago, datos()).await.unwrap_err();
+        assert!(e.to_string().contains("no se edita"), "{e:?}");
+        assert_eq!(
+            escalar(&db, &format!("SELECT Importe_Total FROM Pagos WHERE ID_Pago = '{}';", d.id_pago)).await,
+            -333.0
+        );
+
+        assert!(repo(&db).actualizar_pago(&id_pago, datos()).await.unwrap());
+        assert_eq!(
+            escalar(&db, &format!("SELECT Importe_Total FROM Pagos WHERE ID_Pago = '{id_pago}';")).await,
+            1799.0,
+            "el importe del cobro sale de sus líneas, que siguen todas"
+        );
+    }
+
+    // ── El registro fiscal ───────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn emite_una_R5_por_diferencias_por_lo_devuelto_que_rectifica_el_ticket() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let d = una_cana(&db, &id_pago).await;
+
+        let filas = registros(&db).await;
+        let ticket = del_pago(&filas, &id_pago)[0].clone();
+        assert!(ticket.es("F2"));
+        let nuevas = del_pago(&filas, &d.id_pago);
+        assert_eq!(nuevas.len(), 1, "sin canje, sólo la rectificativa: {nuevas:#?}");
+        let r5 = nuevas[0];
+        assert!(r5.es("R5"), "{r5:?}");
+        assert_eq!(Some(r5.num.clone()), d.num_factura);
+        assert!(r5.num.starts_with('R'), "en su propia serie: {}", r5.num);
+        assert_eq!(r5.tipo_rectificativa.as_deref(), Some("I"));
+        assert_eq!(r5.importe(), Dinero::de_centimos(-333));
+        assert_eq!(r5.cliente(), None, "una R5 no lleva destinatario");
+        assert_eq!(
+            r5.refs("rectificadas"),
+            vec![("B12345674".to_string(), ticket.num.clone(), ticket.fecha.clone())]
+        );
+        // Sólo el tramo de la caña: 3,03 + 0,30 al 10 %.
+        let t = tramos(&db, &r5.num).await;
+        assert_eq!(tramo(&t, 10.0), (Dinero::de_centimos(-303), Dinero::de_centimos(-30)));
+        assert_eq!(tramo(&t, 21.0), (Dinero::CERO, Dinero::CERO), "el vino no se ha devuelto");
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn devolver_por_partes_suma_al_centimo_la_base_y_la_cuota_declaradas() {
+        // La caña de 3,33 al 10 % es 3,03 + 0,30; tres cañas en un ticket son 9,08 + 0,91. Devolver
+        // las tres una a una, calculando cada una por su cuenta, declararía 9,09 + 0,90: el IVA
+        // devuelto no sería el cobrado. La última se lleva lo que quede de lo declarado.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let ticket = del_pago(&registros(&db).await, &id_pago)[0].num.clone();
+        let declarado = tramos(&db, &ticket).await;
+        assert_eq!(tramo(&declarado, 10.0), (Dinero::de_centimos(908), Dinero::de_centimos(91)));
+
+        let mut rectificativas = Vec::new();
+        for lineas in [
+            vec![("det-canas", 1.0)],
+            vec![("det-canas", 1.0)],
+            vec![("det-canas", 1.0), ("det-vino", 2.0)],
+        ] {
+            let d = devolver(&db, &id_pago, &lineas, "Efectivo").await.unwrap();
+            rectificativas.push(d.num_factura.unwrap());
+        }
+
+        let mut suma: Vec<TramoIva> = Vec::new();
+        for num in &rectificativas {
+            for t in tramos(&db, num).await {
+                match suma.iter_mut().find(|s| (s.tipo - t.tipo).abs() < 1e-9) {
+                    Some(s) => {
+                        s.base += t.base;
+                        s.cuota += t.cuota;
+                    }
+                    None => suma.push(t),
+                }
+            }
+        }
+        for tipo in [10.0, 21.0] {
+            let (b, c) = tramo(&declarado, tipo);
+            assert_eq!(tramo(&suma, tipo), (-b, -c), "al {tipo} %");
+        }
+        assert_eq!(
+            escalar(&db, &format!("SELECT SUM(Importe_Total) FROM Pagos WHERE ID_Pago_Origen = '{id_pago}';")).await,
+            -1799.0,
+            "y el dinero, todo"
+        );
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn de_un_ticket_canjeado_va_ademas_una_F3_negativa_con_el_cliente_que_sustituye_a_la_R5() {
+        // FAQ de desarrolladores, apartado 27, casos 2 y 3: tras la R5, una F3 con sus mismos
+        // datos y con el cliente. Y el canje del ticket sigue vigente: no se ha contrarrestado.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let ticket = del_pago(&registros(&db).await, &id_pago)[0].num.clone();
+        let f3 = canjear(&db, &ticket).await.unwrap();
+
+        let d = una_cana(&db, &id_pago).await;
+
+        let filas = registros(&db).await;
+        let nuevas = del_pago(&filas, &d.id_pago);
+        assert_eq!(nuevas.len(), 2, "{nuevas:#?}");
+        let (r5, f3_neg) = (nuevas[0], nuevas[1]);
+        assert!(r5.es("R5") && f3_neg.es("F3"));
+        assert_eq!(f3_neg.importe(), r5.importe());
+        assert_eq!(f3_neg.cuota(), r5.cuota());
+        assert_eq!(f3_neg.cliente().unwrap()["NIF"], NIF_CLIENTE);
+        assert_eq!(
+            f3_neg.refs("sustituidas").iter().map(|r| r.1.clone()).collect::<Vec<_>>(),
+            vec![r5.num.clone()]
+        );
+        assert_eq!(
+            r5.refs("rectificadas").iter().map(|r| r.1.clone()).collect::<Vec<_>>(),
+            vec![ticket.clone()],
+            "rectifica el TICKET, no la F3"
+        );
+        // Nada contrarresta la F3 del canje: la negativa sustituye a la R5, no al ticket.
+        let del_ticket: Vec<&Fila> = filas
+            .iter()
+            .filter(|f| f.es("F3") && f.refs("sustituidas").iter().any(|r| r.1 == ticket))
+            .collect();
+        assert_eq!(del_ticket.len(), 1, "{del_ticket:#?}");
+        assert_eq!(del_ticket[0].num, f3, "el canje sigue vigente");
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn de_una_F1_es_una_R1_con_el_cliente() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, true).await;
+        let f1 = del_pago(&registros(&db).await, &id_pago)[0].clone();
+        assert!(f1.es("F1"));
+
+        let d = devolver(&db, &id_pago, &[("det-vino", 1.0)], "Tarjeta").await.unwrap();
+
+        let filas = registros(&db).await;
+        let r1 = del_pago(&filas, &d.id_pago)[0];
+        assert!(r1.es("R1"), "{r1:?}");
+        assert_eq!(r1.tipo_rectificativa.as_deref(), Some("I"));
+        assert_eq!(r1.importe(), Dinero::de_centimos(-400));
+        assert_eq!(r1.cliente().unwrap()["NIF"], NIF_CLIENTE, "una completa lleva su cliente");
+        assert_eq!(
+            r1.refs("rectificadas").iter().map(|r| r.1.clone()).collect::<Vec<_>>(),
+            vec![f1.num.clone()]
+        );
+        assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn tras_una_devolucion_el_ticket_ya_no_se_canjea_ni_la_F1_se_corrige() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let ticket = del_pago(&registros(&db).await, &id_pago)[0].num.clone();
+        una_cana(&db, &id_pago).await;
+        let e = canjear(&db, &ticket).await.unwrap_err();
+        assert!(e.to_string().contains("tiene una devolución"), "{e:?}");
+
+        let (db, _dir2) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, true).await;
+        let f1 = del_pago(&registros(&db).await, &id_pago)[0].num.clone();
+        una_cana(&db, &id_pago).await;
+        let e = crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+            .corregir_factura(&f1, cliente())
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("tiene una devolución"), "{e:?}");
+    }
+
+    #[tokio::test]
+    async fn un_cobro_de_modo_prueba_se_devuelve_sin_factura() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        crate::verifactu::set_modo_prueba(&db, true).await.unwrap();
+        let id_pago = cobrar(&db, false).await;
+
+        let d = una_cana(&db, &id_pago).await;
+
+        assert_eq!(d.num_factura, None);
+        assert!(registros(&db).await.is_empty(), "ni el cobro ni la devolución declaran nada");
+        assert_eq!(
+            texto(&db, &format!("SELECT Numero_Ticket FROM Pagos WHERE ID_Pago = '{}';", d.id_pago)).await,
+            None
+        );
+        let p = papel(&db, &d.id_pago, None).await;
+        assert!(p.items.iter().all(|l| l.precio_unitario.es_negativo()));
+        assert!(!p.abre_cajon);
+    }
+
+    // ── El papel ─────────────────────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn el_papel_de_la_devolucion_lleva_lo_devuelto_en_negativo_y_no_abre_el_cajon() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let ticket = del_pago(&registros(&db).await, &id_pago)[0].num.clone();
+        let d = devolver(&db, &id_pago, &[("det-canas", 2.0)], "Efectivo").await.unwrap();
+
+        let p = papel(&db, &d.id_pago, None).await;
+
+        assert_eq!(p.numero_ticket, d.num_factura);
+        assert_eq!(p.tipo_factura.as_deref(), Some("R5"));
+        assert_eq!(p.rectifica.as_deref(), Some(ticket.as_str()));
+        assert_eq!(p.total, Some(Dinero::de_centimos(-666)));
+        assert_eq!(p.items.len(), 1);
+        assert_eq!((p.items[0].cantidad, p.items[0].precio_unitario), (2, Dinero::de_centimos(-333)));
+        assert_eq!(p.metodo_pago, None, "una devolución no es un pago");
+        assert!(!p.abre_cajon);
+        assert!(!p.es_anulado);
+    }
+
+    // ── La baja por error lo deshace todo ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn la_baja_por_error_de_un_cobro_con_devoluciones_lo_deshace_todo() {
+        // Si la venta no existió, lo devuelto de ella tampoco: se anula la rectificativa antes que
+        // la factura que rectifica, la devolución deja de contar en caja, y el stock y el gasto del
+        // cliente vuelven exactamente a como estaban antes de vender, sin reponer dos veces lo que
+        // ya repuso la devolución.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let gasto_con_la_venta = gastado(&db).await;
+        let d1 = una_cana(&db, &id_pago).await;
+        let d2 = devolver(&db, &id_pago, &[("det-vino", 1.0)], "Otro").await.unwrap();
+
+        assert!(super::tests_baja_de_un_ticket_canjeado::dar_de_baja(&db, &id_pago, ClaseBaja::Error)
+            .await
+            .unwrap());
+
+        for id in [&id_pago, &d1.id_pago, &d2.id_pago] {
+            let q = |c: &str| format!("SELECT {c} FROM Pagos WHERE ID_Pago = '{id}';");
+            assert_eq!(texto(&db, &q("Estado")).await.as_deref(), Some("ANULADO"), "{id}");
+            assert_eq!(texto(&db, &q("Motivo_Baja")).await.as_deref(), Some("ERROR"), "{id}");
+            assert_eq!(texto(&db, &q("Anulado_Por")).await.as_deref(), Some("u1"), "{id}");
+        }
+        assert_eq!(stock(&db).await, (2.0, 10.0, 6.0), "todo de vuelta, una sola vez");
+        assert_eq!(
+            gastado(&db).await,
+            gasto_con_la_venta - 1799.0,
+            "y al cliente se le quita lo que gastó en ella, una sola vez"
+        );
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda = 'com';").await.as_deref(),
+            Some("Abierta"),
+            "las líneas vuelven a la comanda"
+        );
+
+        let filas = registros(&db).await;
+        let ticket = del_pago(&filas, &id_pago)[0].num.clone();
+        let anulado = |num: &str| filas.iter().position(|f| f.tipo == "ANULACION" && f.num == num);
+        let (r1, r2) = (d1.num_factura.unwrap(), d2.num_factura.unwrap());
+        let (a_r1, a_r2, a_ticket) = (anulado(&r1), anulado(&r2), anulado(&ticket));
+        assert!(a_r1.is_some() && a_r2.is_some() && a_ticket.is_some(), "{filas:#?}");
+        assert!(a_r2 < a_r1 && a_r1 < a_ticket, "de lo último a lo primero: {filas:#?}");
+        assert_cadena_sana(&db).await;
+
+        let rec = crate::reconciliacion::SqliteReconciliacionRepository::new(db.clone());
+        assert!(rec.lotes_descuadrados(0.0005).await.unwrap().is_empty());
+        let c = repo(&db).lineas_devolubles(&id_pago).await.unwrap().unwrap();
+        assert_eq!(c.devuelto, Dinero::CERO, "sus devoluciones ya no cuentan");
+    }
+
+    #[tokio::test]
+    async fn la_baja_por_error_tras_devolverlo_todo_por_partes_no_repone_nada_mas() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        let id_pago = cobrar(&db, false).await;
+        let gasto_con_la_venta = gastado(&db).await;
+        devolver(&db, &id_pago, &[("det-canas", 3.0), ("det-vino", 2.0)], "Efectivo").await.unwrap();
+        assert_eq!(stock(&db).await, (2.0, 10.0, 6.0));
+
+        super::tests_baja_de_un_ticket_canjeado::dar_de_baja(&db, &id_pago, ClaseBaja::Error)
+            .await
+            .unwrap();
+
+        assert_eq!(stock(&db).await, (2.0, 10.0, 6.0));
+        assert_eq!(gastado(&db).await, gasto_con_la_venta - 1799.0);
         assert_cadena_sana(&db).await;
     }
 }

@@ -1,7 +1,7 @@
 # Caja: cobros, gastos, cierre y anulación
 
 La sección Cuentas es el libro de caja: entradas (`Pagos`), salidas (`Cuentas_Gastos`), el cierre del
-periodo (arqueo) y la baja de un cobro. Sus tres reglas de fondo:
+periodo (arqueo), la baja de un cobro y la devolución de parte de él. Sus tres reglas de fondo:
 
 1. **El programa no puede saber si el dinero está en el cajón.** Sólo registra lo que alguien declara
    y enseña la diferencia. Cuadrar la caja lo hace el encargado.
@@ -18,15 +18,18 @@ periodo (arqueo) y la baja de un cobro. Sus tres reglas de fondo:
 |---|---|---|
 | Aritmética del arqueo | `crates/tpv-domain/src/cierre_caja.rs` | Recuento, esperado, descuadre, umbral del motivo, fechas de apunte, `HORA_DE_UN_GASTO`. Sin BD ni reloj |
 | Regla de la baja | `crates/tpv-domain/src/cuentas.rs::puede_anularse` | Ya anulado / falta motivo |
+| Reglas de la devolución | `crates/tpv-domain/src/cuentas.rs` (`unidades_a_devolver`, `importe_devuelto`, `RechazoDevolucion`) · `pago.rs::es_efectivo` | Tope por línea, el importe de cada parte, qué método pasa por el cajón |
 | Espejo en pantalla | `apps/tpv-main/src/shared/lib/efectivo.ts` | El arqueo que se ve antes de confirmar, y el cambio del cobro. Redondea la mitad lejos del cero, como Rust; sus tablas de test repiten las del dominio |
 | Casos de uso | `tpv-application/src/use_cases/cierre_caja.rs` | `preparar`, `confirmar`, `listar`, `detalle`, `reabrir` (deshacer) y el aviso de caja sin cerrar |
 | Rectificación | `tpv-application/src/use_cases/rectificacion_caja.rs` | `previsualizar` y los cinco cambios: editar o anular un cobro, crear, editar o borrar un gasto |
 | Persistencia del cierre | `crates/tpv-infra-sqlite/src/cierre_caja.rs` | `Cierres_Caja`, `Cierre_Denominaciones`, `Cierre_Rectificaciones`, `totales_desde` |
 | Baja de un cobro | `crates/tpv-infra-sqlite/src/cuentas.rs::anular_pago` | Stock, gasto del cliente, estado, historial, comanda y registro fiscal en una transacción |
+| Devolución de parte de un cobro | `crates/tpv-infra-sqlite/src/cuentas.rs::devolver_lineas` → `Pagos` (negativo) + `Devolucion_Lineas` | Lo mismo, por la parte devuelta |
 | Historial | `crates/tpv-infra-sqlite/src/caja_movimientos.rs` → `Movimientos_Caja` | Una fila por hecho: `COBRO`, `ANULACION`, `DEVOLUCION`, `GASTO`, `GASTO_ANULADO` |
 | «Línea cobrada» | vista `v_lineas_cobradas` (`0001_inicial.sql`) | `Pago_Detalles` unida a pagos **activos** |
+| «Unidades devueltas» | vista `v_unidades_devueltas` | Lo devuelto de cada línea de un cobro por sus devoluciones **vigentes** |
 | Comandos | `src-tauri/src/commands/{cierre_caja,cuentas}.rs` | Exigen Administrador, salvo los cobros y sus bajas, que hace también el camarero ([permisos.md](permisos.md)); quién firma sale de la sesión |
-| Pantallas | `src/features/cuentas/CierreCajaModal.tsx` · `ImpactoCierreModal.tsx` · `src/app/pages/Cuentas.tsx` | El cierre en cuatro pasos · el aviso antes de tocar un cierre hecho · el libro, el histórico y la baja |
+| Pantallas | `src/features/cuentas/CierreCajaModal.tsx` · `ImpactoCierreModal.tsx` · `DevolverModal.tsx` · `src/app/pages/Cuentas.tsx` | El cierre en cuatro pasos · el aviso antes de tocar un cierre hecho · devolver · el libro, el histórico y la baja |
 | Papel | `src-tauri/src/printing.rs::build_arqueo` (`printer_print_arqueo`) | Documento interno |
 | Aviso | `jobs/registro.rs::caja_sin_cerrar` | Notificación si el periodo lleva más de 20 h abierto |
 | La Handy | `crates/tpv-infra-http/src/cierre_caja.rs` + worker `domains/cuentas/` (`soloLaMainEscribeCaja`) | Lee; las escrituras se rechazan en los dos sitios |
@@ -35,14 +38,16 @@ periodo (arqueo) y la baja de un cobro. Sus tres reglas de fondo:
 
 ## Quién puede
 
-- **Toda la sección es del Administrador**, lecturas incluidas (SEC-01): los comandos lo exigen, y la
-  ruta y el menú lo esconden. Ver [permisos.md](permisos.md).
+- **La sección es del Administrador**, lecturas incluidas (SEC-01), **salvo los cobros y sus bajas**:
+  el camarero ve la lista de cobros, reimprime, devuelve (entero o una parte) y da de baja por error.
+  Gastos, totales, cierre, facturas con NIF y exportar no se le piden ni se le enseñan. Ver
+  [permisos.md](permisos.md).
 - **Escribe sólo la Main.** La Handy ve ingresos, gastos y cierres (el worker sirve
   `GET /v1/cuentas/cierres`, `…/cierres/ultimo` y `…/cierres/:id`), pero toda escritura de caja se
   rechaza en su adaptador HTTP y otra vez en el worker. El worker autentica por dispositivo, no por
   usuario: el filtro por rol dentro de la Handy es de la aplicación.
-- Quién cierra, deshace, anula o corrige **lo pone la sesión**: `ConfirmarCierreInput`,
-  `CierreIdInput` y `AnularPagoInput` no llevan `id_usuario`.
+- Quién cierra, deshace, anula, devuelve o corrige **lo pone la sesión**: `ConfirmarCierreInput`,
+  `CierreIdInput`, `AnularPagoInput` y `DevolverLineasInput` no llevan `id_usuario`.
 
 ---
 
@@ -193,6 +198,48 @@ Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
   totales, las estadísticas ni el pendiente de una comanda.
 - **Una reimpresión** de un ticket anulado sale marcada `COPIA` y `*** ANULADO ***`, con el mismo
   número.
+- **Un cobro con devoluciones parciales no se devuelve entero**: lo que queda se devuelve desde
+  «Devolver» (la pantalla lleva allí al elegir «le devuelvo todo»). Y **una devolución no se da de baja
+  por separado** ni se edita: la deshace la baja por error de su cobro.
+- **La baja por error de un cobro con devoluciones lo deshace todo**: si la venta no existió, lo
+  devuelto de ella tampoco. Sus devoluciones quedan `ANULADO` con la misma firma; el stock recupera
+  sólo lo que ellas no habían repuesto (`sql_ya_repuesto`) y al cliente se le resta lo que quedaba;
+  se rectifica también el cierre en que cayó cada devolución; y sus rectificativas se anulan antes que
+  la factura que rectifican ([verifactu.md](verifactu.md#devolver-parte-de-un-cobro)).
+
+## Devolver parte de un cobro
+
+`cuentas_devolver_lineas` (Administrador o camarero; sólo en la Main, como cobrar y anular). El
+cliente devuelve unas líneas, o unas unidades de una línea —una caña de las tres—, y se le devuelve
+su dinero. Se elige qué, **por dónde sale el dinero** (`Efectivo`, `Tarjeta` u `Otro`, con el del
+cobro propuesto) y por qué. No hay devolución por un importe libre ni descuentos: sólo líneas y
+unidades. `cuentas_lineas_devolubles` da lo que queda por devolver de cada línea.
+
+Es dinero que sale por una venta real, así que **va como un pago, no como una baja**:
+
+| | |
+|---|---|
+| `Pagos` | Un pago **negativo** de la misma comanda: `Tipo = 'DEVOLUCION'`, `ID_Pago_Origen` = el cobro, `Motivo_Devolucion`, el método elegido y quien devuelve como cobrador. El cobro sigue `ACTIVO`: se vendió |
+| `Devolucion_Lineas` | Qué línea y cuántas unidades, y lo devuelto por ellas. `Pago_Detalles` no sirve: no guarda cantidades, y la línea seguiría cobrada dos veces |
+| Importe | Por línea, lo devuelto en total después menos lo devuelto antes, cada uno redondeado como se cobró (`importe_devuelto`): devolver una línea en varias veces suma exactamente lo que se cobró por ella, también al peso |
+| Stock | La parte devuelta de lo que consumió la línea en **ese** cobro, de cada lote y del suelto, con la misma resta a milésimas: al acabar de devolverla, exactamente lo consumido |
+| Líneas | Siguen cobradas: no vuelven a la comanda |
+| Gasto del cliente | Se resta lo devuelto (sin bajar de 0) |
+| Historial | `Movimientos_Caja` tipo `DEVOLUCION`, con el método y el motivo |
+| Registro fiscal | Rectificativa por diferencias por lo devuelto (`R5`, o `R1` si era una `F1`), ligada a la devolución ([verifactu.md](verifactu.md#devolver-parte-de-un-cobro)) |
+| Caja | Resta de **su** periodo, el día que el dinero sale, y sólo si salió en efectivo |
+
+Reglas:
+
+- **Sólo el efectivo pasa por el cajón.** El arqueo cuenta todo lo que no sea `Tarjeta` ni `Otro`
+  (`pago::es_efectivo`, y `NOT IN ('Tarjeta','Otro')` en SQL). `Otro` sólo lo lleva una devolución.
+- **Se devuelve por líneas, así que el cobro tiene que ser la suma de sus líneas.** Uno que no lo es
+  (un cobro prorrateado) no dice cuánto se pagó de cada una: queda la devolución entera.
+- **No se devuelve más de lo que queda**, ni de un cobro dado de baja, ni una devolución, ni lo que se
+  cobró a 0 €. Un rechazo no deja nada escrito: todo va en una transacción.
+- **En las estadísticas resta dinero, pero no es un cobro**: no cuenta como cobro de un camarero ni
+  como mesa servida.
+- Al acabar, la pantalla abre su rectificativa en el modal de impresión, sin imprimirla.
 
 ## El historial de caja
 

@@ -48,6 +48,9 @@ pub struct TicketDePago {
     /// `Mesa 5` / `Barra`.
     pub origen: String,
     pub anulado: bool,
+    /// Es la devolución de parte de otro cobro (`Pagos.ID_Pago_Origen`): sus líneas son las
+    /// devueltas, y el papel las lleva en negativo aunque no haya rectificativa (modo prueba).
+    pub es_devolucion: bool,
     /// `Pagos.Fecha_Hora`. Es la fecha del papel cuando el cobro no tiene factura (modo prueba).
     pub fecha_hora: String,
     /// Las líneas que documenta la factura: las que cobró ESE pago (no las de la comanda entera)

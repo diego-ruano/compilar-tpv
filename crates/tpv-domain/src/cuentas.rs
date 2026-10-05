@@ -12,7 +12,9 @@ pub fn requerido(input: &str, field: &str) -> Result<String, String> {
 
 /// Normalización del método de pago: reexporta la única implementación compartida
 /// (case-insensitive) para evitar divergencias entre dominios (CUENTA-03).
-pub use crate::pago::normalize_metodo;
+pub use crate::pago::{normalize_metodo, normalize_metodo_devolucion};
+
+use crate::cantidad::redondear_cantidad;
 
 /// Datos de un gasto (sin id; el id lo gestiona la capa de persistencia / caso de uso).
 #[derive(Debug, Clone)]
@@ -80,9 +82,143 @@ pub fn puede_anularse(estado: &str, motivo: Option<&str>) -> Result<String, Rech
     Ok(motivo)
 }
 
+/// El `Tipo` de una devolución de parte de un cobro: un pago negativo que apunta al cobro devuelto.
+pub const TIPO_DEVOLUCION: &str = "DEVOLUCION";
+
+/// Por qué no se puede devolver lo que se ha pedido.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RechazoDevolucion {
+    /// Como al anular: el dinero sale del cajón y el porqué sólo lo sabe quien lo devuelve.
+    MotivoRequerido,
+    /// No se ha elegido ninguna línea.
+    SinLineas,
+    /// Una cantidad que no es un número positivo.
+    CantidadNoValida,
+    /// Más unidades de las que quedan por devolver de esa línea.
+    MasDeLoQueQueda,
+    /// Una línea que no es de ese cobro.
+    LineaAjena,
+    /// El cobro está dado de baja: ya no hay nada que devolver.
+    CobroDadoDeBaja,
+    /// Es una devolución: se devuelve el cobro, no la devolución.
+    EsUnaDevolucion,
+    /// El importe del cobro no es la suma de sus líneas (un cobro antiguo prorrateado): devolver
+    /// por líneas no sabría cuánto se pagó de cada una. Queda la devolución total.
+    NoCuadra,
+    /// Lo elegido no se cobró (líneas a 0 €): no hay dinero que devolver.
+    SinImporte,
+}
+
+impl RechazoDevolucion {
+    pub fn mensaje(self) -> &'static str {
+        match self {
+            RechazoDevolucion::MotivoRequerido => {
+                "Escribe el motivo de la devolución: queda registrado con tu nombre."
+            }
+            RechazoDevolucion::SinLineas => "Elige qué se devuelve.",
+            RechazoDevolucion::CantidadNoValida => "Las unidades a devolver tienen que ser más de cero.",
+            RechazoDevolucion::MasDeLoQueQueda => {
+                "No quedan tantas unidades por devolver de esa línea."
+            }
+            RechazoDevolucion::LineaAjena => "Esa línea no es de este cobro.",
+            RechazoDevolucion::CobroDadoDeBaja => "Ese cobro está dado de baja: no queda nada que devolver.",
+            RechazoDevolucion::EsUnaDevolucion => {
+                "Eso es una devolución: lo que se devuelve es el cobro original."
+            }
+            RechazoDevolucion::NoCuadra => {
+                "Este cobro no cuadra con sus líneas, así que no se puede devolver por partes: haz la devolución total."
+            }
+            RechazoDevolucion::SinImporte => "Eso no se cobró: no hay dinero que devolver.",
+        }
+    }
+}
+
+/// El motivo de una devolución, recortado. Obligatorio.
+pub fn motivo_de_devolucion(motivo: Option<&str>) -> Result<String, RechazoDevolucion> {
+    let m = motivo.unwrap_or("").trim().to_string();
+    if m.is_empty() {
+        return Err(RechazoDevolucion::MotivoRequerido);
+    }
+    Ok(m)
+}
+
+/// Cuántas unidades de una línea se devuelven, ya redondeadas a milésimas como toda cantidad
+/// (RI-26). `cobradas` es la cantidad de la línea y `devueltas` lo que ya devolvieron otras
+/// devoluciones vigentes del mismo cobro.
+pub fn unidades_a_devolver(pedidas: f64, cobradas: f64, devueltas: f64) -> Result<f64, RechazoDevolucion> {
+    // Un NaN o un infinito salen de redondear como cero.
+    let pedidas = redondear_cantidad(pedidas);
+    if pedidas <= 0.0 {
+        return Err(RechazoDevolucion::CantidadNoValida);
+    }
+    let quedan = redondear_cantidad(cobradas - devueltas);
+    if pedidas > quedan + 1e-9 {
+        return Err(RechazoDevolucion::MasDeLoQueQueda);
+    }
+    Ok(pedidas)
+}
+
+/// El dinero que se devuelve de una línea al devolver `unidades` de ella cuando ya se habían
+/// devuelto `antes`.
+///
+/// No es `unidades × precio`: es lo devuelto en total después menos lo devuelto antes, cada uno
+/// redondeado como el SQL del cobro redondea una línea (`CAST(ROUND(Cantidad * Precio_Unitario))`,
+/// que es `Dinero::escala`). Así las devoluciones de una línea, sumadas, dan **exactamente** lo que
+/// se cobró por ella, también al peso: devolver 0,35 kg y luego el resto no deja un céntimo suelto.
+pub fn importe_devuelto(precio_unitario: Dinero, antes: f64, unidades: f64) -> Dinero {
+    let despues = redondear_cantidad(antes + unidades);
+    precio_unitario.escala(despues) - precio_unitario.escala(antes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn el_motivo_de_una_devolucion_es_obligatorio() {
+        assert_eq!(motivo_de_devolucion(Some("  frío  ")).unwrap(), "frío");
+        assert_eq!(motivo_de_devolucion(None).unwrap_err(), RechazoDevolucion::MotivoRequerido);
+        assert_eq!(motivo_de_devolucion(Some("  ")).unwrap_err(), RechazoDevolucion::MotivoRequerido);
+    }
+
+    #[test]
+    fn no_se_devuelve_mas_de_lo_que_queda() {
+        assert_eq!(unidades_a_devolver(1.0, 3.0, 0.0).unwrap(), 1.0);
+        assert_eq!(unidades_a_devolver(2.0, 3.0, 1.0).unwrap(), 2.0);
+        assert_eq!(unidades_a_devolver(1.0, 3.0, 2.5).unwrap_err(), RechazoDevolucion::MasDeLoQueQueda);
+        assert_eq!(unidades_a_devolver(1.0, 3.0, 3.0).unwrap_err(), RechazoDevolucion::MasDeLoQueQueda);
+        // Al peso, con el residuo de coma flotante que deja restar 0,1 a 0,3.
+        assert_eq!(unidades_a_devolver(0.2, 0.3, 0.1).unwrap(), 0.2);
+    }
+
+    #[test]
+    fn una_cantidad_que_no_es_positiva_no_vale() {
+        for mala in [0.0, -1.0, 0.0004, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                unidades_a_devolver(mala, 3.0, 0.0).unwrap_err(),
+                RechazoDevolucion::CantidadNoValida,
+                "{mala}"
+            );
+        }
+    }
+
+    #[test]
+    fn las_devoluciones_de_una_linea_suman_lo_cobrado() {
+        // 3 cañas a 2,50: una y luego dos.
+        let precio = Dinero::de_centimos(250);
+        assert_eq!(importe_devuelto(precio, 0.0, 1.0), Dinero::de_centimos(250));
+        assert_eq!(importe_devuelto(precio, 1.0, 2.0), Dinero::de_centimos(500));
+
+        // 0,35 kg a 12,99 €/kg = 4,5465 → 4,55 cobrados. Devueltos en 0,1 + 0,1 + 0,15.
+        let kilo = Dinero::de_centimos(1299);
+        let cobrado = kilo.escala(0.35);
+        let partes = [
+            importe_devuelto(kilo, 0.0, 0.1),
+            importe_devuelto(kilo, 0.1, 0.1),
+            importe_devuelto(kilo, 0.2, 0.15),
+        ];
+        assert_eq!(partes.iter().copied().fold(Dinero::CERO, |a, b| a + b), cobrado);
+    }
 
     #[test]
     fn requerido_recorta_y_nombra_el_campo_ausente() {

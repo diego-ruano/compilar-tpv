@@ -339,6 +339,19 @@ export type ClientesStatsArgs = { range: StatsRange, };
 export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_recurrentes: number, ticket_medio_cliente: Dinero, nuevos_por_bucket: ChartSeriesI64, top_clientes_gasto: ChartSerieDinero, };
 
 /**
+ * Un cobro visto para devolver parte de él.
+ */
+export type CobroDevolubleDto = { id_pago: string, numero_ticket?: string, 
+/**
+ * El método del cobro: el que la pantalla propone para devolver.
+ */
+metodo: string, importe: Dinero, 
+/**
+ * Lo ya devuelto por devoluciones parciales vigentes, en positivo.
+ */
+devuelto: Dinero, lineas: Array<LineaDevolubleDto>, };
+
+/**
  * Un código por correo ya va de camino (recuperar el PIN o confirmar un correo de recuperación).
  * Sólo la pista del correo: el correo entero no sale de la nube.
  */
@@ -513,6 +526,26 @@ export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
 export type DeviceSignB64Args = { payload: string, };
 
 /**
+ * La devolución hecha: el pago negativo que la registra y su factura rectificativa, si la hay
+ * (un cobro de modo prueba no tiene ninguna que rectificar).
+ */
+export type DevolucionDto = { id_pago: string, 
+/**
+ * En negativo, como el pago.
+ */
+importe: Dinero, num_factura?: string, };
+
+/**
+ * Devolver parte de un cobro. Como al anular, **no lleva quién**: sale de la sesión (SEC-01).
+ */
+export type DevolverLineasInput = { id_pago: string, lineas: Array<LineaADevolverInput>, 
+/**
+ * Por dónde sale el dinero: `Efectivo`, `Tarjeta` u `Otro`. Sólo el efectivo resta del
+ * arqueo.
+ */
+metodo: string, motivo?: string, };
+
+/**
  * Un importe, en céntimos enteros.
  *
  * Cruza la frontera a TypeScript como un `number` **marcado**: un `number` corriente no se puede
@@ -538,7 +571,21 @@ estado: string, anulado_en?: string,
  * Nombre de quien anuló, resuelto al leer (la fila sólo guarda el id). Es el dato por el que
  * se pregunta cuando falta dinero, así que no puede quedarse en un UUID.
  */
-anulado_por?: string, motivo_anulacion?: string, };
+anulado_por?: string, motivo_anulacion?: string, 
+/**
+ * Es la devolución de parte de otro cobro: un pago negativo. Se reimprime, pero no se
+ * factura, ni se edita, ni se da de baja por separado.
+ */
+es_devolucion: boolean, 
+/**
+ * Lo que se ha devuelto de este cobro con devoluciones parciales vigentes, en positivo. Cero
+ * si no tiene ninguna.
+ */
+devuelto: Dinero, 
+/**
+ * El motivo de una devolución.
+ */
+motivo_devolucion?: string, };
 
 export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: string, notas?: string, lineas: Array<LineaEmailInput>, };
 
@@ -801,11 +848,29 @@ plan: string | null, last_server_time_ms: number | null, last_check_ok_ms: numbe
  */
 export type LicenseSumarClaveInput = { activation_key: string, };
 
+/**
+ * Unas unidades de una línea que se devuelven.
+ */
+export type LineaADevolverInput = { id_detalle: string, cantidad: number, };
+
 export type LineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: Dinero, 
 /**
  * Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
  */
 IVA_Percent?: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
+
+/**
+ * Una línea de un cobro, con lo que queda por devolver de ella.
+ */
+export type LineaDevolubleDto = { id_detalle: string, nombre: string, 
+/**
+ * Las unidades que se cobraron (al peso, fraccionarias).
+ */
+cantidad: number, 
+/**
+ * Las que ya se devolvieron.
+ */
+devueltas: number, precio_unitario: Dinero, };
 
 export type LineaEmailInput = { nombre_producto: string, cantidad: number, precio_unitario?: Dinero, unidad?: string, };
 

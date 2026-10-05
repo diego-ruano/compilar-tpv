@@ -39,7 +39,8 @@ const SQL_PAGO: &str = r#"
       COALESCE(p.Metodo_Pago, ''),
       CASE WHEN m.Numero_Mesa IS NOT NULL THEN 'Mesa ' || m.Numero_Mesa ELSE 'Barra' END,
       CASE WHEN COALESCE(p.Estado, 'ACTIVO') = 'ANULADO' THEN 1 ELSE 0 END,
-      COALESCE(p.Fecha_Hora, '')
+      COALESCE(p.Fecha_Hora, ''),
+      CASE WHEN p.ID_Pago_Origen IS NOT NULL THEN 1 ELSE 0 END
     FROM Pagos p
     LEFT JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
     LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -60,6 +61,23 @@ const SQL_LINEAS: &str = r#"
     JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
     LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
     WHERE pd.ID_Pago = ?1
+    ORDER BY dc.ID_Detalle ASC;
+"#;
+
+/// Las líneas que devolvió una devolución de parte de un cobro: las unidades devueltas y lo que se
+/// devolvió por ellas, que no siempre es unidades × precio (la última devolución de una línea se
+/// lleva lo que quede).
+const SQL_LINEAS_DEVUELTAS: &str = r#"
+    SELECT
+      COALESCE(dc.Nombre_Producto, pr.Nombre, 'Producto'),
+      dl.Cantidad,
+      COALESCE(dc.Precio_Unitario, 0),
+      dc.IVA_Percent,
+      dl.Importe
+    FROM Devolucion_Lineas dl
+    JOIN Detalle_Comanda dc ON dc.ID_Detalle = dl.ID_Detalle
+    LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
+    WHERE dl.ID_Pago = ?1
     ORDER BY dc.ID_Detalle ASC;
 "#;
 
@@ -110,7 +128,12 @@ impl TicketsRepository for SqliteTicketsRepository {
         let mut origen = texto(2)?;
         let anulado = v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0) == 1;
         let fecha_hora = texto(4)?;
-        let mut lineas = lineas_de_pago(&r, id_pago).await?;
+        let es_devolucion = v_i64(row.get_value(5).map_err(db_err)?).unwrap_or(0) == 1;
+        let mut lineas = if es_devolucion {
+            lineas_devueltas(&r, id_pago).await?
+        } else {
+            lineas_de_pago(&r, id_pago).await?
+        };
 
         let pedida = num_factura.map(str::trim).filter(|n| !n.is_empty());
         let factura = match pedida {
@@ -193,6 +216,7 @@ impl TicketsRepository for SqliteTicketsRepository {
             metodo_pago,
             origen,
             anulado,
+            es_devolucion,
             fecha_hora,
             lineas,
             factura,
@@ -215,6 +239,30 @@ async fn lineas_de_pago<R: Reader>(r: &R, id_pago: &str) -> AppResult<Vec<LineaV
             precio_unitario: v_dinero(row.get_value(2).map_err(db_err)?).unwrap_or(Dinero::CERO),
             iva_percent: v_f64(row.get_value(3).map_err(db_err)?),
         });
+    }
+    Ok(lineas)
+}
+
+/// Las líneas que devolvió una devolución. Si lo devuelto de una no es unidades × precio, sale como
+/// una unidad por lo devuelto: el papel cuadra con el dinero, que es lo que importa.
+async fn lineas_devueltas<R: Reader>(r: &R, id_pago: &str) -> AppResult<Vec<LineaVendida>> {
+    let mut rows = r
+        .query(SQL_LINEAS_DEVUELTAS, vec![Value::Text(id_pago.to_string())])
+        .await
+        .map_err(db_err)?;
+    let mut lineas = Vec::new();
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        let nombre = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
+        let cantidad = v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(1.0);
+        let precio = v_dinero(row.get_value(2).map_err(db_err)?).unwrap_or(Dinero::CERO);
+        let iva_percent = v_f64(row.get_value(3).map_err(db_err)?);
+        let importe = v_dinero(row.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO);
+        let (cantidad, precio_unitario) = if precio.escala(cantidad) == importe {
+            (cantidad, precio)
+        } else {
+            (1.0, importe)
+        };
+        lineas.push(LineaVendida { nombre, cantidad, precio_unitario, iva_percent });
     }
     Ok(lineas)
 }

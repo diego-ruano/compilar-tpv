@@ -4,23 +4,29 @@
       "anulado_en": null,
       "anulado_por": null,
       "cliente": "Mesa 7",
+      "devuelto": 0,
+      "es_devolucion": false,
       "estado": "ACTIVO",
       "fecha_hora": "2026-05-11 09:00",
       "id": "pago-4",
       "importe": 4000,
       "metodo": "Efectivo",
-      "motivo_anulacion": null
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
     },
     {
       "anulado_en": null,
       "anulado_por": null,
       "cliente": "Mesa 7",
+      "devuelto": 0,
+      "es_devolucion": false,
       "estado": "ACTIVO",
       "fecha_hora": "2026-05-10 12:00",
       "id": "pago-3",
       "importe": 3000,
       "metodo": "Efectivo",
-      "motivo_anulacion": null
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
     }
   ],
   "siguiente": {

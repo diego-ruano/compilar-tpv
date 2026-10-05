@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use tpv_contracts::cuentas::{
-    CursorCuentas, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
+    CobroDevolubleDto, CursorCuentas, DevolucionDto, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
 };
 use tpv_domain::cuentas::{GastoData, PagoData};
 
@@ -21,6 +21,22 @@ pub struct AnularPagoArgs {
     /// FISCAL-01: **cuál de los dos instrumentos legales** se está usando. Son distintos y generan
     /// registros de facturación distintos; ver [`ClaseBaja`].
     pub clase: ClaseBaja,
+}
+
+/// Lo que hace falta para devolver parte de un cobro, ya validado lo que no depende de la BD.
+///
+/// Lo que sí depende —que el cobro siga activo, que las líneas sean suyas, que queden unidades— lo
+/// comprueba el repositorio dentro de la transacción, que es donde vale.
+#[derive(Debug, Clone)]
+pub struct DevolverLineasArgs {
+    pub id_pago: String,
+    /// Quién devuelve: de la sesión (SEC-01).
+    pub id_usuario: String,
+    pub motivo: String,
+    /// `Efectivo`, `Tarjeta` u `Otro`, ya normalizado.
+    pub metodo: String,
+    /// `(ID_Detalle, unidades)`, una vez cada línea.
+    pub lineas: Vec<(String, f64)>,
 }
 
 /// Por qué un cobro deja de contar. Son **dos cosas distintas** y el registro que generan no es el
@@ -127,6 +143,14 @@ pub trait CuentasRepository: Send + Sync {
     /// (las dos clases), marca el pago y deja el movimiento en `Movimientos_Caja`. `true` si el
     /// pago existía.
     async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool>;
+
+    /// Las líneas de un cobro con lo que queda por devolver de cada una. `None` si no existe.
+    async fn lineas_devolubles(&self, id_pago: &str) -> AppResult<Option<CobroDevolubleDto>>;
+
+    /// Devuelve parte de un cobro: un pago negativo con sus líneas devueltas, el stock repuesto, el
+    /// gasto del cliente restado, el movimiento de caja y la factura rectificativa, en una
+    /// transacción. Sólo en la Main.
+    async fn devolver_lineas(&self, args: DevolverLineasArgs) -> AppResult<DevolucionDto>;
 
     /// Anota que alguien abrió el cajón SIN una venta detrás (para dar cambio, para cuadrar).
     /// No lo impide —el camarero lo necesita—: lo deja registrado, que es la única pista real

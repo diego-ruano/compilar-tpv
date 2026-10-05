@@ -44,7 +44,11 @@ pub fn componer(
 
     // La rectificativa de una devolución (y su `F3` negativa) documenta las mismas líneas que el
     // cobro, con el signo cambiado: el papel lo dice línea a línea, y su total es el declarado.
-    let devuelve = t.factura.as_ref().is_some_and(|f| f.importe_total.es_negativo());
+    //
+    // Una devolución de parte de un cobro, igual aunque no tenga rectificativa (modo prueba): sus
+    // líneas son las devueltas.
+    let devuelve =
+        t.es_devolucion || t.factura.as_ref().is_some_and(|f| f.importe_total.es_negativo());
     let items = ticket::agrupar_lineas(&t.lineas)
         .into_iter()
         .map(|l| PrintTicketLine {
@@ -212,6 +216,7 @@ mod tests {
             metodo_pago: "Efectivo".into(),
             origen: "Mesa 4".into(),
             anulado: false,
+            es_devolucion: false,
             fecha_hora: "2027-01-02 13:45:10".into(),
             lineas: vec![
                 LineaVendida {
@@ -415,6 +420,19 @@ mod tests {
         let mut t = cobro(Some(factura()));
         t.anulado = true;
         assert!(!componer(t, &negocio(), &ajustes(), false).abre_cajon);
+    }
+
+    #[test]
+    fn una_devolucion_parcial_sin_rectificativa_tambien_va_en_negativo() {
+        // Un cobro de modo prueba no tiene factura que rectificar, pero su devolución sigue siendo
+        // dinero que sale: líneas en negativo, sin «Pago» y sin abrir el cajón.
+        let mut t = cobro(None);
+        t.es_devolucion = true;
+        let p = componer(t, &negocio(), &ajustes(), false);
+        assert!(p.items.iter().all(|l| l.precio_unitario.es_negativo()));
+        assert_eq!(p.metodo_pago, None);
+        assert!(!p.abre_cajon);
+        assert!(!p.es_anulado);
     }
 
     #[test]

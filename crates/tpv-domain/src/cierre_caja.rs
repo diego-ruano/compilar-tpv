@@ -52,11 +52,12 @@ impl TotalesCaja {
     /// tarjeta.
     ///
     /// Es **la misma regla** que el SQL que suma un periodo: todo lo que no sea exactamente
-    /// `Tarjeta` cuenta como efectivo (CUENTA-03), y un cobro anulado no cuenta (CUENTA-07). Si se
+    /// `Tarjeta` u `Otro` cuenta como efectivo (CUENTA-03, `pago::es_efectivo`), y un cobro
+    /// anulado no cuenta (CUENTA-07). Una devolución es un cobro negativo y resta igual. Si se
     /// separaran, lo que la pantalla enseña antes de confirmar un cambio y la rectificación que se
     /// guarda al hacerlo dirían cifras distintas.
     pub fn de_cobro(activo: bool, metodo: &str, importe: Dinero) -> Self {
-        let efectivo = activo && metodo != "Tarjeta";
+        let efectivo = activo && crate::pago::es_efectivo(metodo);
         TotalesCaja {
             ventas_efectivo: if efectivo { importe } else { Dinero::CERO },
             gastos_caja: Dinero::CERO,

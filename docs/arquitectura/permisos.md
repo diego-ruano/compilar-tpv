@@ -86,11 +86,12 @@ dentro de la transacción de `update_trabajador`. El worker lo comprueba antes d
 
 ### Administrador o camarero
 
-**Los cobros de Cuentas y sus bajas**: `cuentas_get_entradas`, `cuentas_anular_pago` (las dos clases)
-y `cuentas_previsualizar_cambio` de una baja. El cliente que vuelve a por su dinero no espera al
-encargado, y lo que deja rastro es la firma de la sesión, no el rol. Al camarero la pantalla le enseña
-sólo el panel de cobros, con reimprimir y dar de baja; gastos, totales, cierre de caja, facturas con
-NIF y exportar ni se piden ni se enseñan. Lo vigila `el_camarero_solo_entra_en_los_cobros_de_cuentas`.
+**Los cobros de Cuentas y sus bajas**: `cuentas_get_entradas`, `cuentas_anular_pago` (las dos clases),
+`cuentas_previsualizar_cambio` de una baja, y devolver parte de un cobro (`cuentas_lineas_devolubles`,
+`cuentas_devolver_lineas`). El cliente que vuelve a por su dinero no espera al encargado, y lo que deja
+rastro es la firma de la sesión, no el rol. Al camarero la pantalla le enseña sólo el panel de cobros,
+con reimprimir, devolver y dar de baja; gastos, totales, cierre de caja, facturas con NIF y exportar ni
+se piden ni se enseñan. Lo vigila `el_camarero_solo_entra_en_los_cobros_de_cuentas`.
 
 ### Basta con estar identificado
 

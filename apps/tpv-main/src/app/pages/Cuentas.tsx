@@ -11,6 +11,7 @@ import {
     Printer,
     FileText,
     Check,
+    Undo2,
 } from "lucide-react";
 
 import PrintTicketModal, {
@@ -35,11 +36,13 @@ import {
     cuentasGetEntradas,
     cuentasGetSalidas,
     esAnulado,
+    esDevolucion,
     type EntradaDto,
     type SalidaDto,
     type ClaseBaja,
 } from "../../features/cuentas/cuentasApis";
 import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
+import DevolverModal from "../../features/cuentas/DevolverModal";
 import ImpactoCierreModal from "../../features/cuentas/ImpactoCierreModal";
 import {
     cierreDetalle,
@@ -214,6 +217,33 @@ function SelloAnulado({ entrada }: { entrada: EntradaDto }) {
     );
 }
 
+/**
+ * Lo devuelto de un cobro, y el porqué de una devolución. Como el sello de un anulado, a la vista:
+ * es lo que se busca cuando falta dinero.
+ */
+function SelloDevolucion({ entrada }: { entrada: EntradaDto }) {
+    if (esAnulado(entrada)) return null;
+    if (esDevolucion(entrada)) {
+        const motivo = (entrada.motivo_devolucion ?? "").trim();
+        return (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <span className="rounded-lg border border-warning/30 bg-warning-soft px-2 py-0.5 font-bold uppercase tracking-wide text-warning">
+                    Devolución
+                </span>
+                {motivo ? (
+                    <span className="min-w-0 truncate text-fg-muted" title={motivo}>
+                        «{motivo}»
+                    </span>
+                ) : null}
+            </div>
+        );
+    }
+    if (entrada.devuelto > 0) {
+        return <div className="mt-1 text-xs text-warning">Devuelto {eur(entrada.devuelto)}</div>;
+    }
+    return null;
+}
+
 export default function Cuentas() {
     // El camarero entra a los cobros y sus bajas; el resto de la caja (gastos, totales, cierre,
     // facturas con NIF, exportar) es del administrador y ni se pide ni se enseña.
@@ -368,17 +398,19 @@ export default function Cuentas() {
     const [avisoError, setAvisoError] = useState<string | null>(null);
 
     const recargarCierres = React.useCallback(async () => {
+        // El histórico de cierres es del administrador: el camarero ni lo pide.
+        if (!admin) return;
         try {
             setCierres(await cierreListar(50));
             setCierresError(null);
         } catch (e) {
             setCierresError(toAppError(e).message);
         }
-    }, []);
+    }, [admin]);
 
     useEffect(() => {
-        if (admin) void recargarCierres();
-    }, [admin, recargarCierres]);
+        void recargarCierres();
+    }, [recargarCierres]);
 
     const imprimirCierre = async (idCierre: string) => {
         try {
@@ -566,6 +598,11 @@ export default function Cuentas() {
      * cambiado los precios o los tipos. Y sale marcada como COPIA: dos papeles idénticos parecerían
      * dos ventas.
      */
+    // Devolver parte de un cobro (o lo que queda de él). Al acabar se abre su rectificativa en el
+    // modal de impresión, sin imprimirla: casi nunca se pide, pero es una factura y tiene que poder
+    // entregarse.
+    const [devolverDe, setDevolverDe] = useState<{ entrada: EntradaDto; todo: boolean } | null>(null);
+
     const reimprimirTicket = (e: EntradaDto) => {
         setReimpresion({ idPago: e.id, esCopia: true });
     };
@@ -1332,13 +1369,14 @@ export default function Cuentas() {
     };
 
     // Las acciones de un cobro, iguales en la fila de móvil y en la de escritorio. El camarero
-    // reimprime y da de baja; facturar con NIF y editar son del administrador.
+    // reimprime, devuelve y da de baja; facturar con NIF y editar son del administrador. Una
+    // devolución sólo se reimprime: lo que la deshace es la baja por error de su cobro.
     const accionesDeCobro = (e: EntradaDto) => (
         <>
             <MiniIconButton title="Reimprimir ticket" onClick={() => reimprimirTicket(e)}>
                 <Printer className="size-4" aria-hidden />
             </MiniIconButton>
-            {esAnulado(e) ? null : seleccionTickets ? (
+            {esAnulado(e) || esDevolucion(e) ? null : seleccionTickets ? (
                 <CasillaTicket
                     marcada={seleccionTickets.has(e.id)}
                     onClick={() => alternarTicket(e)}
@@ -1358,6 +1396,12 @@ export default function Cuentas() {
                             </MiniIconButton>
                         </>
                     ) : null}
+                    <MiniIconButton
+                        title="Devolver (todo o una parte)"
+                        onClick={() => setDevolverDe({ entrada: e, todo: false })}
+                    >
+                        <Undo2 className="size-4" aria-hidden />
+                    </MiniIconButton>
                     <MiniIconButton title="Anular" variant="danger" onClick={() => borrarPago(e)}>
                         <Trash2 className="size-4" aria-hidden />
                     </MiniIconButton>
@@ -1536,6 +1580,7 @@ export default function Cuentas() {
                                                             </div>
                                                             <div className="text-xs text-fg-muted">{e.metodo}</div>
                                                             <SelloAnulado entrada={e} />
+                                                            <SelloDevolucion entrada={e} />
                                                         </div>
                                                         <div className="flex flex-col items-end gap-2">
                                                             <div className={tachadoSi(esAnulado(e), "font-extrabold text-fg")}>
@@ -1557,6 +1602,7 @@ export default function Cuentas() {
                                                             </div>
                                                             <div className="text-xs text-fg-muted">{e.metodo}</div>
                                                             <SelloAnulado entrada={e} />
+                                                            <SelloDevolucion entrada={e} />
                                                         </div>
                                                         <div className={tachadoSi(esAnulado(e), "col-span-2 font-semibold")}>
                                                             {eur(e.importe)}
@@ -2409,9 +2455,11 @@ export default function Cuentas() {
                                     [
                                         {
                                             clase: "DEVOLUCION" as ClaseBaja,
-                                            titulo: "Le devuelvo el dinero al cliente",
+                                            titulo: "Le devuelvo todo el dinero al cliente",
                                             detalle:
-                                                "La venta ocurrió. Se emite una factura rectificativa por el importe en negativo. Los artículos NO vuelven a la comanda, y el stock se repone.",
+                                                confirmAccion.entrada.devuelto > 0
+                                                    ? "Ya tiene devoluciones: se devuelve lo que queda, eligiendo cómo sale el dinero."
+                                                    : "La venta ocurrió. Se emite una factura rectificativa por el importe en negativo. Los artículos NO vuelven a la comanda, y el stock se repone. Para devolver sólo una parte, usa «Devolver».",
                                         },
                                         {
                                             clase: "ERROR" as ClaseBaja,
@@ -2427,7 +2475,19 @@ export default function Cuentas() {
                                             key={op.clase}
                                             type="button"
                                             disabled={confirmando}
-                                            onClick={() => setClaseBaja(op.clase)}
+                                            onClick={() => {
+                                                // Con devoluciones parciales, devolverlo «todo» es
+                                                // devolver lo que queda: por la pantalla de devolver.
+                                                if (
+                                                    op.clase === "DEVOLUCION" &&
+                                                    confirmAccion.entrada.devuelto > 0
+                                                ) {
+                                                    setDevolverDe({ entrada: confirmAccion.entrada, todo: true });
+                                                    setConfirmAccion(null);
+                                                    return;
+                                                }
+                                                setClaseBaja(op.clase);
+                                            }}
                                             className={[
                                                 "w-full rounded-2xl border px-4 py-3 text-left transition",
                                                 activa
@@ -2557,6 +2617,20 @@ export default function Cuentas() {
             />
 
             {/* Reimpresión de un cobro ya hecho: mismo número que el original, marcado COPIA. */}
+            {devolverDe ? (
+                <DevolverModal
+                    entrada={devolverDe.entrada}
+                    todo={devolverDe.todo}
+                    onCerrar={() => setDevolverDe(null)}
+                    onHecho={(d) => {
+                        setDevolverDe(null);
+                        setReimpresion(
+                            d.num_factura ? { idPago: d.id_pago, numFactura: d.num_factura } : { idPago: d.id_pago },
+                        );
+                    }}
+                />
+            ) : null}
+
             <PrintTicketModal
                 open={reimpresion !== null}
                 onClose={() => setReimpresion(null)}

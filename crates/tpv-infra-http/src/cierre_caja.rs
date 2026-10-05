@@ -89,6 +89,10 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
         Err(solo_main("Corregir un apunte de caja"))
     }
 
+    async fn devoluciones_de(&self, _id_pago: &str) -> AppResult<Vec<ApunteGuardado>> {
+        Err(solo_main("Corregir un apunte de caja"))
+    }
+
     async fn guardar_rectificacion(&self, _r: RectificacionNueva) -> AppResult<()> {
         Err(solo_main("Rectificar un cierre"))
     }

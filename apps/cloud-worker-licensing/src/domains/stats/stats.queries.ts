@@ -95,7 +95,7 @@ export async function mesas(
 	// sin filtro extra. Mismo modelo que Main/Rust (STAT-01/02/06).
 	const ingresos = await one(
 		db,
-		`SELECT COALESCE(SUM(p.Importe_Total),0) AS total, COUNT(DISTINCT c.ID_Mesa) AS ocupadas
+		`SELECT COALESCE(SUM(p.Importe_Total),0) AS total, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN c.ID_Mesa END) AS ocupadas
 		 FROM Pagos p
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -104,7 +104,7 @@ export async function mesas(
 	);
 	const top = await one(
 		db,
-		`SELECT m.Numero_Mesa AS mesa, z.Nombre_Zona AS zona, COUNT(DISTINCT p.ID_Comanda) AS comandas
+		`SELECT m.Numero_Mesa AS mesa, z.Nombre_Zona AS zona, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS comandas
 		 FROM Pagos p
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -116,7 +116,7 @@ export async function mesas(
 		 LIMIT 1;`,
 	);
 	const servRs = await db.execute(
-		`SELECT ${b} AS label, COUNT(DISTINCT p.ID_Comanda) AS value
+		`SELECT ${b} AS label, COUNT(DISTINCT CASE WHEN p.ID_Pago_Origen IS NULL THEN p.ID_Comanda END) AS value
 		 FROM Pagos p
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -527,6 +527,7 @@ export async function trabajadores(
 			AND p.Fecha_Hora <  rng.end_dt
 			AND p.Estado = 'ACTIVO'
 			AND p.ID_Trabajador_Cobrador IS NOT NULL
+			AND p.ID_Pago_Origen IS NULL
 			AND r.Nombre_Rol = 'Camarero'
 		GROUP BY p.ID_Trabajador_Cobrador;
 	`);

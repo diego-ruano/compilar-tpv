@@ -9,6 +9,9 @@ import { invokeClient } from "@tpv/client";
 import type {
     AnularPagoInput,
     CambioCajaInput,
+    CobroDevolubleDto,
+    DevolucionDto,
+    DevolverLineasInput,
     CreateGastoInput,
     CuentasRangoArgs,
     CursorCuentas,
@@ -144,6 +147,21 @@ export function cuentasUpdatePago(p: ConMotivo<UpdatePagoInput>): Promise<boolea
 export async function cuentasAnularPago(args: AnularPagoInput): Promise<boolean> {
     const r = await invokeClient<boolean>("cuentas_anular_pago", { args });
     return r !== false;
+}
+
+/** Las líneas de un cobro con lo que queda por devolver de cada una. */
+export function cuentasLineasDevolubles(idPago: string): Promise<CobroDevolubleDto> {
+    return invokeClient<CobroDevolubleDto>("cuentas_lineas_devolubles", { idPago });
+}
+
+/** Devuelve parte de un cobro: un pago negativo con su factura rectificativa. */
+export function cuentasDevolverLineas(args: DevolverLineasInput): Promise<DevolucionDto> {
+    return invokeClient<DevolucionDto>("cuentas_devolver_lineas", { args });
+}
+
+/** Una devolución de parte de otro cobro: un pago negativo. Se reimprime y nada más. */
+export function esDevolucion(e: EntradaDto): boolean {
+    return e.es_devolucion;
 }
 
 /**

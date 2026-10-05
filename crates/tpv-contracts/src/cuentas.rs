@@ -29,6 +29,18 @@ pub struct EntradaDto {
     pub anulado_por: Option<String>,
     #[ts(optional)]
     pub motivo_anulacion: Option<String>,
+    /// Es la devolución de parte de otro cobro: un pago negativo. Se reimprime, pero no se
+    /// factura, ni se edita, ni se da de baja por separado.
+    #[serde(default)]
+    pub es_devolucion: bool,
+    /// Lo que se ha devuelto de este cobro con devoluciones parciales vigentes, en positivo. Cero
+    /// si no tiene ninguna.
+    #[serde(default)]
+    pub devuelto: Dinero,
+    /// El motivo de una devolución.
+    #[serde(default)]
+    #[ts(optional)]
+    pub motivo_devolucion: Option<String>,
 }
 
 /// Dónde empieza la página siguiente de un listado de caja: la clave de orden de la ÚLTIMA fila de
@@ -188,6 +200,68 @@ pub struct UpdatePagoInput {
     pub fecha_hora: String,
     pub metodo: String,
     pub importe: Dinero,
+}
+
+/// Una línea de un cobro, con lo que queda por devolver de ella.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct LineaDevolubleDto {
+    pub id_detalle: String,
+    pub nombre: String,
+    /// Las unidades que se cobraron (al peso, fraccionarias).
+    pub cantidad: f64,
+    /// Las que ya se devolvieron.
+    pub devueltas: f64,
+    pub precio_unitario: Dinero,
+}
+
+/// Un cobro visto para devolver parte de él.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct CobroDevolubleDto {
+    pub id_pago: String,
+    #[ts(optional)]
+    pub numero_ticket: Option<String>,
+    /// El método del cobro: el que la pantalla propone para devolver.
+    pub metodo: String,
+    pub importe: Dinero,
+    /// Lo ya devuelto por devoluciones parciales vigentes, en positivo.
+    pub devuelto: Dinero,
+    pub lineas: Vec<LineaDevolubleDto>,
+}
+
+/// Unas unidades de una línea que se devuelven.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct LineaADevolverInput {
+    pub id_detalle: String,
+    pub cantidad: f64,
+}
+
+/// Devolver parte de un cobro. Como al anular, **no lleva quién**: sale de la sesión (SEC-01).
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct DevolverLineasInput {
+    pub id_pago: String,
+    pub lineas: Vec<LineaADevolverInput>,
+    /// Por dónde sale el dinero: `Efectivo`, `Tarjeta` u `Otro`. Sólo el efectivo resta del
+    /// arqueo.
+    pub metodo: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub motivo: Option<String>,
+}
+
+/// La devolución hecha: el pago negativo que la registra y su factura rectificativa, si la hay
+/// (un cobro de modo prueba no tiene ninguna que rectificar).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct DevolucionDto {
+    pub id_pago: String,
+    /// En negativo, como el pago.
+    pub importe: Dinero,
+    #[ts(optional)]
+    pub num_factura: Option<String>,
 }
 
 /// Anular un cobro (CUENTA-07). **No lleva `id_usuario`**: quién anula sale de la sesión del

@@ -2277,6 +2277,8 @@ pub fn run() {
             commands::cuentas::cuentas_delete_gasto,
             commands::cuentas::cuentas_update_pago,
             commands::cuentas::cuentas_anular_pago,
+            commands::cuentas::cuentas_lineas_devolubles,
+            commands::cuentas::cuentas_devolver_lineas,
             commands::cuentas::cuentas_previsualizar_cambio,
             commands::cierre_caja::cierre_preparar,
             commands::cierre_caja::cierre_confirmar,
@@ -3056,7 +3058,12 @@ mod tests_exenciones_del_gate {
             let fin = resto.find("#[tauri::command]").unwrap_or(resto.len());
             &resto[..fin]
         };
-        for nombre in ["cuentas_get_entradas", "cuentas_anular_pago"] {
+        for nombre in [
+            "cuentas_get_entradas",
+            "cuentas_anular_pago",
+            "cuentas_lineas_devolubles",
+            "cuentas_devolver_lineas",
+        ] {
             assert!(
                 cuerpo(nombre).contains("exigir_rol(&[ADMIN, CAMARERO])"),
                 "{nombre} es de los cobros y sus bajas: lo hace también el camarero"

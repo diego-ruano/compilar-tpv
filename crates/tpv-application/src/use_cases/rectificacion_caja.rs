@@ -219,7 +219,28 @@ async fn planificar(
                 momento: p.momento.clone(),
                 aporte: TotalesCaja::default(),
             });
-            Ok((afectados(repo, antes, despues).await?, guardado))
+            let mut out = afectados(repo, antes, despues).await?;
+
+            // La baja por error deshace también sus devoluciones parciales: si la venta no
+            // existió, el dinero que se devolvió de ella tampoco salió por una venta. Cada una
+            // cayó en su periodo, y si ese periodo ya se cerró, su cierre se rectifica igual.
+            for devolucion in repo.devoluciones_de(id_pago.trim()).await? {
+                let antes = posicion_guardada(&devolucion);
+                let despues = antes.as_ref().map(|p| Posicion {
+                    momento: p.momento.clone(),
+                    aporte: TotalesCaja::default(),
+                });
+                for a in afectados(repo, antes, despues).await? {
+                    match out.iter_mut().find(|o| o.cierre.id_cierre == a.cierre.id_cierre) {
+                        Some(o) => {
+                            o.quita = o.quita.mas(a.quita);
+                            o.pone = o.pone.mas(a.pone);
+                        }
+                        None => out.push(a),
+                    }
+                }
+            }
+            Ok((out, guardado))
         }
         CambioCajaInput::CrearGasto {
             fecha,

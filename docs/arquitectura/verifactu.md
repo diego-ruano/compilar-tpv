@@ -195,7 +195,7 @@ estado local y por `execute()` cada tick del job se replicaría.
 
 ### Dar de baja un cobro
 
-`cuentas_anular_pago` (Administrador) llama, dentro de la transacción de la baja, a
+`cuentas_anular_pago` (Administrador o camarero) llama, dentro de la transacción de la baja, a
 `emitir_baja_de_pago` con la `ClaseBaja` elegida en la pantalla:
 
 - **`Error`** — la venta no existió. Emite un registro de **anulación** de la factura del cobro
@@ -227,6 +227,33 @@ Las claves de las rectificativas: [FAQ Veri*factu de la AEAT, procedimientos de 
 
 Si el pago no tiene registro (un cobro de modo prueba), la baja sigue
 adelante sin emitir nada. El efecto en la caja de cada clase está en [caja.md](caja.md).
+
+### Devolver parte de un cobro
+
+`cuentas_devolver_lineas` devuelve unas líneas o unas unidades de un cobro ([caja.md](caja.md#devolver-parte-de-un-cobro)).
+Dentro de su transacción, `emitir_devolucion_parcial` emite **la misma rectificativa que la
+devolución entera, por la parte devuelta**: `R5` si se rectifica un ticket o `R1` con el cliente si
+es una `F1`, **por diferencias** (`I`) e importe negativo, rectificando la factura vigente. Una
+devolución deja la operación «sin efecto total o parcialmente» (art. 80.Dos LIVA), y la rectificativa
+por diferencias recoge sólo lo que cambia. Si el ticket se canjeó, detrás va la `F3` negativa con el
+cliente que sustituye a la `R5`, como en la devolución entera. La rectificativa queda ligada a la
+devolución (su `ID_Pago` es el del pago negativo, y su número es el `Numero_Ticket` de éste).
+
+- **El desglose sale de las líneas devueltas**, salvo en la devolución que deja el cobro devuelto
+  entero: ésa declara **lo que queda de lo declarado** (la factura vigente menos las rectificativas
+  de las devoluciones anteriores). Calcular cada parte por su cuenta descuadra el céntimo: tres
+  cañas de 3,33 € al 10 % son 9,08 + 0,91 en el ticket y 3 × (3,03 + 0,30) devueltas una a una. Así
+  todas juntas suman al céntimo la base y la cuota facturadas.
+- **Un ticket con una devolución ya no se canjea por una `F3`, ni una `F1` con una devolución se
+  corrige**: «tiene una devolución». Una `R1` siempre es una devolución (corregir el cliente emite
+  `R4`).
+- **La baja por error del cobro anula sus rectificativas**, de la última a la primera y cada una
+  después de su `F3` negativa, antes que la factura que rectifican: si la venta no existió, las
+  devoluciones tampoco respondían a nada real (apartado 17.2.d). Es la aplicación de la FAQ a este
+  caso, que no trata de forma literal.
+- Un cobro de modo prueba se devuelve sin emitir nada.
+
+Lo fijan los tests de `cuentas.rs::tests_devolucion_parcial`.
 
 ### La factura completa de un ticket ya expedido (`F3`)
 
@@ -283,8 +310,9 @@ destinatario ([art. 17 del RD 1619/2012](https://www.boe.es/buscar/act.php?id=BO
 y que impresas llevan su QR ([art. 20 de la Orden HAC/1177/2024](https://www.boe.es/buscar/act.php?id=BOE-A-2024-22138#a2-2)).
 La rectificativa sale titulada **FACTURA RECTIFICATIVA** con la referencia de la factura que
 rectifica y su fecha (arts. 7.1.h y 15.4 del RD 1619/2012), las líneas del cobro en negativo y, si es
-una `R1`, el cliente. Tras confirmar una devolución, Cuentas abre el modal de impresión con ella
-elegida, sin imprimirla: se entrega si el cliente la quiere.
+una `R1`, el cliente. La de una devolución parcial lleva sólo las líneas devueltas. Tras confirmar
+una devolución, Cuentas abre el modal de impresión con ella elegida, sin imprimirla: se entrega si el
+cliente la quiere.
 
 El esquema tiene `Clientes.NIF`, `Razon_Social` y `Direccion_Fiscal`, pero hoy ningún camino los lee
 ni los escribe: el formulario de datos fiscales siempre empieza vacío.

@@ -156,6 +156,7 @@ export function deleteGasto(idGasto: string): BuiltCommand {
 
 // Actualiza sólo método y fecha; el Importe_Total se **recalcula** desde los Pago_Detalles
 // cobrados (CUENTA-02), no se toma del input. Paridad con `SqliteCuentasRepository::actualizar_pago`.
+// Una devolución de parte de un cobro no se edita: su importe no sale de Pago_Detalles.
 export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand {
 	const cloudPayload = { id_pago: idPago, ...input };
 	return {
@@ -173,7 +174,7 @@ export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand
 					      JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
 					      WHERE pd.ID_Pago = ?1
 					    )
-					WHERE ID_Pago = ?1;
+					WHERE ID_Pago = ?1 AND ID_Pago_Origen IS NULL;
 				`,
 				args: [idPago, input.fecha_hora, normalizeMetodo(input.metodo)],
 			},
@@ -181,6 +182,19 @@ export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand
 		cloudPayload,
 	};
 }
+
+// Lo que ya repusieron al stock las devoluciones parciales vigentes de un cobro, para una traza de
+// consumo (`a` es el alias de Lote_Consumos o Suelto_Consumos). Copia de `cuentas::sql_ya_repuesto`
+// en la Main: la misma cuenta con la que repone cada devolución, para que la baja del cobro reponga
+// exactamente lo que falta.
+const yaRepuesto = (a: string) =>
+	`IFNULL(ROUND(${a}.Cantidad * (` +
+	`SELECT ROUND(v.Cantidad, 3) FROM v_unidades_devueltas v ` +
+	`WHERE v.ID_Pago = ${a}.ID_Pago AND v.ID_Detalle = ${a}.ID_Detalle` +
+	`) / (` +
+	`SELECT NULLIF(COALESCE(dc.Cantidad, 1), 0) FROM Detalle_Comanda dc ` +
+	`WHERE dc.ID_Detalle = ${a}.ID_Detalle` +
+	`), 3), 0)`;
 
 // Anula un pago SIN borrarlo (CUENTA-07): devuelve el stock (por lote y suelto), resta el gasto
 // del cliente, marca la fila de `Pagos` y deja el movimiento en `Movimientos_Caja`. Las líneas y
@@ -217,7 +231,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			sql: `
 				UPDATE Lotes_Producto
 				SET Stock_Disponible = ROUND(COALESCE(Stock_Disponible,0) + (
-				    SELECT IFNULL(SUM(lc.Cantidad),0)
+				    SELECT IFNULL(SUM(lc.Cantidad - ${yaRepuesto("lc")}),0)
 				    FROM Lote_Consumos lc
 				    WHERE lc.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
 				), 3)
@@ -236,7 +250,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			sql: `
 				UPDATE Productos
 				SET Stock_Suelto = ROUND(COALESCE(Stock_Suelto,0) + (
-				    SELECT IFNULL(SUM(sc.Cantidad),0)
+				    SELECT IFNULL(SUM(sc.Cantidad - ${yaRepuesto("sc")}),0)
 				    FROM Suelto_Consumos sc
 				    WHERE sc.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
 				), 3)
@@ -249,13 +263,18 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			`,
 			args: [idPago],
 		},
-		// 2) Restar el gasto del cliente ligado a la comanda del pago (sin bajar de 0).
+		// 2) Restar el gasto del cliente ligado a la comanda del pago (sin bajar de 0). Lo que ya le
+		//    restaron sus devoluciones parciales (pagos negativos) no se le resta otra vez.
 		{
 			kind: "execute",
 			sql: `
 				UPDATE Clientes
 				SET Total_Gastado = MAX(0, COALESCE(Total_Gastado,0) - (
-				    SELECT IFNULL(p.Importe_Total,0) FROM Pagos p WHERE p.ID_Pago = ?1
+				    SELECT IFNULL(p.Importe_Total,0) + IFNULL((
+				        SELECT SUM(d.Importe_Total) FROM Pagos d
+				        WHERE d.ID_Pago_Origen = ?1 AND d.Estado = 'ACTIVO'
+				    ),0)
+				    FROM Pagos p WHERE p.ID_Pago = ?1
 				))
 				-- RI-61: el cliente de la comanda (fijado al cobrar) y, si no, el de su reserva.
 				WHERE ID_Cliente = (
@@ -304,6 +323,22 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			`,
 			args: [idPago, idUsuario, motivo, clase],
 		},
+		// 4-bis) La baja por error deshace sus devoluciones parciales, con la misma firma: si la venta
+		//        no existió, el dinero devuelto de ella tampoco salió por una venta. Su stock y el
+		//        gasto del cliente ya están cuadrados en los pasos 1 y 2.
+		devuelveLasLineas && {
+			kind: "execute",
+			sql: `
+				UPDATE Pagos
+				SET Estado = 'ANULADO',
+				    Anulado_En = datetime('now','localtime'),
+				    Anulado_Por = ?2,
+				    Motivo_Anulacion = ?3,
+				    Motivo_Baja = 'ERROR'
+				WHERE ID_Pago_Origen = ?1 AND Estado = 'ACTIVO';
+			`,
+			args: [idPago, idUsuario, motivo],
+		},
 		// 5) Recalcular la comanda. Sus líneas vuelven a estar pendientes —el pago que las cubría
 		//    ya no está activo—, así que se reabre si no hay otra comanda abierta para la mesa.
 		//
@@ -347,8 +382,8 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			`,
 			args: [idPago],
 		},
-		// El paso marcado con `devuelveLasLineas && …` queda en `false` cuando es una
-		// devolución; se descarta aquí. Es más legible que montar el array por trozos, y lo que
+		// Los pasos marcados con `devuelveLasLineas && …` quedan en `false` cuando es una
+		// devolución; se descartan aquí. Es más legible que montar el array por trozos, y lo que
 		// importa —qué paso aplica a qué caso— se lee en el propio paso.
 	].filter(Boolean) as any[];
 	return {

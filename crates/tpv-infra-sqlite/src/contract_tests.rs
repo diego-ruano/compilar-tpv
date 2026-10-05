@@ -333,6 +333,7 @@ casos_de_contrato! {
     cuentas__anular_pago,
     cuentas__anular_pago_reserva_borrada,
     cuentas__anular_pago_devolucion,
+    cuentas__anular_pago_con_devolucion_parcial,
     notificaciones__crear,
     notificaciones__crear_dedupe,
     notificaciones__crear_actualiza,

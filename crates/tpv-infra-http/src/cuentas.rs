@@ -5,10 +5,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 
-use tpv_application::error::AppResult;
-use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository};
+use tpv_application::error::{AppError, AppResult};
+use tpv_application::ports::cuentas::{
+    AnularPagoArgs, CuentasFiltro, CuentasRepository, DevolverLineasArgs,
+};
 use tpv_contracts::cuentas::{
-    PaginaEntradas, PaginaSalidas, ResumenCajaDto,
+    CobroDevolubleDto, DevolucionDto, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
 };
 use tpv_domain::cuentas::{GastoData, PagoData};
 
@@ -154,6 +156,17 @@ impl CuentasRepository for HttpCuentasRepository {
     /// estado de cada cobro— y lo vuelve a decir el servidor, que es donde la regla vale.
     async fn estado_pago(&self, _id_pago: &str) -> AppResult<Option<String>> {
         Ok(Some(tpv_domain::cuentas::ESTADO_ACTIVO.to_string()))
+    }
+
+    /// Devolver es cosa de la Main, como cobrar y anular: tiene la caja y la numeración de las
+    /// facturas. No hay ruta en el worker, así que el «no» se dice aquí, con el mismo texto que
+    /// el worker usa para el resto de la caja.
+    async fn lineas_devolubles(&self, _id_pago: &str) -> AppResult<Option<CobroDevolubleDto>> {
+        Err(AppError::conflict("La caja sólo se gestiona desde el TPV principal."))
+    }
+
+    async fn devolver_lineas(&self, _args: DevolverLineasArgs) -> AppResult<DevolucionDto> {
+        Err(AppError::conflict("La caja sólo se gestiona desde el TPV principal."))
     }
 
     /// Anular es cosa de la Main; el worker rechaza esta escritura desde una Handy. Se manda

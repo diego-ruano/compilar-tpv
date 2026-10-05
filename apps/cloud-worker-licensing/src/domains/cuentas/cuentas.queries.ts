@@ -102,6 +102,8 @@ const entradasInner = (whereRango: string) => `
 		p.Fecha_Hora AS orden,
 		-- RI-52: un ticket de barra se reconoce por su canal (espejo de entradas_inner en la Main).
 		(
+			CASE WHEN p.ID_Pago_Origen IS NOT NULL THEN 'Devolución · ' ELSE '' END
+			||
 			CASE
 				WHEN c.Canal = 'BARRA' THEN 'Barra'
 				WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
@@ -113,12 +115,18 @@ const entradasInner = (whereRango: string) => `
 				ELSE ''
 			END
 		) AS cliente,
-		CASE WHEN p.Metodo_Pago = 'Tarjeta' THEN 'Tarjeta' ELSE 'Efectivo' END AS metodo,
+		CASE WHEN p.Metodo_Pago IN ('Tarjeta', 'Otro') THEN p.Metodo_Pago ELSE 'Efectivo' END AS metodo,
 		IFNULL(p.Importe_Total, 0) AS importe,
 		COALESCE(p.Estado, 'ACTIVO') AS estado,
 		p.Anulado_En AS anulado_en,
 		NULLIF(TRIM(COALESCE(ua.Nombre,'') || CASE WHEN COALESCE(ua.Apellido,'')='' THEN '' ELSE ' ' || ua.Apellido END), '') AS anulado_por,
-		p.Motivo_Anulacion AS motivo_anulacion
+		p.Motivo_Anulacion AS motivo_anulacion,
+		CASE WHEN p.ID_Pago_Origen IS NOT NULL THEN 1 ELSE 0 END AS es_devolucion,
+		COALESCE((
+			SELECT -SUM(d.Importe_Total) FROM Pagos d
+			WHERE d.ID_Pago_Origen = p.ID_Pago AND d.Estado = 'ACTIVO'
+		), 0) AS devuelto,
+		p.Motivo_Devolucion AS motivo_devolucion
 	FROM Pagos p
 	JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 	LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -166,7 +174,7 @@ export async function entradas(
 	const rs = await db.execute({
 		sql: `
 			SELECT id, fecha_hora, cliente, metodo, importe, estado, anulado_en, anulado_por,
-			       motivo_anulacion, orden
+			       motivo_anulacion, orden, es_devolucion, devuelto, motivo_devolucion
 			FROM (${entradasInner(whereSql)}) AS e
 			${qClause}
 			ORDER BY orden DESC, id DESC
@@ -174,7 +182,13 @@ export async function entradas(
 		`,
 		args,
 	});
-	return cortarPagina(rows(rs) as (EntradaDto & { orden: string })[], pageSize);
+	// Como `pagado_con_caja` en las salidas: SQLite devuelve 0/1 y la Main un `bool`.
+	return cortarPagina(
+		rows(rs).map((r) => ({ ...r, es_devolucion: Number(r.es_devolucion ?? 0) !== 0 })) as (EntradaDto & {
+			orden: string;
+		})[],
+		pageSize,
+	);
 }
 
 export async function salidas(

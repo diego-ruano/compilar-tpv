@@ -11,6 +11,7 @@ import {
     cuentasAnularPago,
     cuentasCreateGasto,
     cuentasDeleteGasto,
+    cuentasDevolverLineas,
     cuentasGetEntradas,
     cuentasGetResumen,
     cuentasGetSalidas,
@@ -160,6 +161,16 @@ export function useUpdatePago() {
         mutationFn: cuentasUpdatePago,
         onSuccess: (ok) => {
             if (ok) void qc.invalidateQueries({ queryKey: cuentasKeys.all });
+        },
+    });
+}
+
+export function useDevolverLineas() {
+    const qc = useQueryClient();
+    return useMutation({
+        mutationFn: cuentasDevolverLineas,
+        onSuccess: () => {
+            void qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },
     });
 }

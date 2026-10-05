@@ -1134,12 +1134,27 @@ async fn fecha_apertura_de_la_comanda<C: Reader>(
 /// Si el pago no tiene registro fiscal (p. ej. un cobro hecho en modo prueba) no hay nada que anular ni que
 /// rectificar, y no es un error: la baja del cobro sigue adelante. Lo que no puede es fallar y dejar
 /// el cobro sin anular.
+///
+/// `devoluciones` son las devoluciones parciales vigentes del cobro (sus `ID_Pago`), que una baja
+/// por error deshace: si la venta no existió, sus rectificativas tampoco responden a nada real y se
+/// anulan, de la última a la primera, antes que la factura que rectifican.
 pub async fn emitir_baja_de_pago(
     db: &WriteGuard<'_>,
     id_pago: &str,
     clase: tpv_application::ports::cuentas::ClaseBaja,
+    devoluciones: &[String],
 ) -> AppResult<()> {
     use tpv_application::ports::cuentas::ClaseBaja;
+
+    if clase == ClaseBaja::Error {
+        for id in devoluciones.iter().rev() {
+            for alta in ultimas_por_numero(altas_del_pago(db, id).await?).iter().rev() {
+                if !esta_anulada(db, &alta.num_serie).await? {
+                    emitir_anulacion(db, &alta.id_registro).await?;
+                }
+            }
+        }
+    }
 
     // Un cobro puede tener varias facturas, y se buscan POR SEPARADO: coger «la última alta del
     // pago» daba la `F3` y la baja se hacía sobre ella dejando el ticket intacto.
@@ -1289,6 +1304,151 @@ pub async fn emitir_baja_de_pago(
     Ok(())
 }
 
+/// Emite la rectificativa de una devolución de PARTE de un cobro: unas líneas, o unas unidades de
+/// una línea. Devuelve su número, o `None` si el cobro no tiene factura (modo prueba).
+///
+/// Es la misma rectificativa que la de una devolución entera (`emitir_baja_de_pago`, que explica
+/// las fuentes), por la parte devuelta: `R5` si se rectifica un ticket o `R1` con el cliente si es
+/// una factura completa, **por diferencias** (`I`) e importe negativo, rectificando la factura
+/// vigente. Una devolución deja la operación «sin efecto total o parcialmente» (art. 80.Dos LIVA), y
+/// una rectificativa por diferencias recoge sólo lo que cambia. Si el ticket se canjeó por una
+/// `F3`, detrás va la `F3` con los mismos datos de la rectificativa (FAQ de desarrolladores,
+/// apartado 27), como en la devolución entera.
+///
+/// El desglose sale de las líneas devueltas (`lineas`: importe con IVA y tipo), salvo cuando con
+/// ésta queda devuelto el cobro entero (`completa`): entonces es lo que quede de lo declarado —la
+/// factura vigente menos las rectificativas de las devoluciones anteriores—, para que todas juntas
+/// sumen al céntimo lo que se facturó, base y cuota.
+///
+/// Queda ligada a la devolución (`id_pago_devolucion`), no al cobro: es su papel.
+pub async fn emitir_devolucion_parcial(
+    db: &WriteGuard<'_>,
+    id_pago_origen: &str,
+    id_pago_devolucion: &str,
+    lineas: &[(Dinero, Option<f64>)],
+    completa: bool,
+) -> AppResult<Option<String>> {
+    let del_cobro = altas_del_pago(db, id_pago_origen).await?;
+    let Some(original) = del_cobro
+        .iter()
+        .filter(|a| a.tipo_factura == "F1" || a.tipo_factura == "F2")
+        .next_back()
+        .cloned()
+    else {
+        tracing::warn!(
+            target: "tpv::verifactu",
+            id_pago = %id_pago_origen,
+            "el cobro no tiene registro de facturación: la devolución no tiene nada que rectificar"
+        );
+        return Ok(None);
+    };
+    let sustitutivas = if original.tipo_factura == "F1" {
+        cadena_de_sustitutivas(db, &original).await?
+    } else {
+        Vec::new()
+    };
+    let vigente = sustitutivas.last().cloned().unwrap_or_else(|| original.clone());
+    let canje = if original.tipo_factura == "F2" {
+        f3_vigente(db, &original.num_serie).await?
+    } else {
+        None
+    };
+    let fecha_op_original = original
+        .fecha_operacion
+        .clone()
+        .or_else(|| Some(original.fecha.clone()));
+    let (clave, destinatario) = if original.tipo_factura == "F1" {
+        ("R1", Some(vigente.cliente()?))
+    } else {
+        ("R5", None)
+    };
+
+    let devuelto = if completa {
+        let previas = ultimas_por_numero(
+            altas(
+                db,
+                "Tipo_Factura IN ('R1', 'R5') AND ID_Pago IN (\
+                   SELECT ID_Pago FROM Pagos WHERE ID_Pago_Origen = ?1 AND Estado = 'ACTIVO' \
+                   AND ID_Pago <> ?2)",
+                vec![
+                    Value::Text(id_pago_origen.to_string()),
+                    Value::Text(id_pago_devolucion.to_string()),
+                ],
+            )
+            .await?,
+        );
+        let vigente_tramos = vigente.tramos();
+        let previas_tramos: Vec<Vec<TramoIva>> = previas.iter().map(Alta::tramos).collect();
+        let queda = sumar_desgloses(
+            std::iter::once(vigente_tramos.as_slice())
+                .chain(previas_tramos.iter().map(Vec::as_slice)),
+        );
+        // Un tipo de IVA que ya se devolvió entero no es un tramo de esta rectificativa.
+        negar(&queda)
+            .into_iter()
+            .filter(|t| !(t.base.es_cero() && t.cuota.es_cero()))
+            .collect()
+    } else {
+        let iva_general = datos_obligado(db).await?.iva_general;
+        let lineas: Vec<LineaTicket> = lineas
+            .iter()
+            .map(|(total, iva)| LineaTicket {
+                total_con_iva: *total,
+                tipo_iva: iva.unwrap_or(iva_general),
+            })
+            .collect();
+        negar(&ticket::desglose(&normalizar_lineas(&lineas, iva_general)))
+    };
+
+    let rectificativa = emitir_alta(
+        db,
+        DatosFactura {
+            tipo_factura: Some(clave.to_string()),
+            tipo_rectificativa: Some("I".to_string()),
+            id_pago: Some(id_pago_devolucion.to_string()),
+            desglose: Some(devuelto.clone()),
+            destinatario,
+            rectificadas: vec![vigente.referencia()],
+            fecha_operacion: fecha_op_original.clone(),
+            ..Default::default()
+        },
+    )
+    .await?;
+
+    if let Some(c) = canje {
+        emitir_alta(
+            db,
+            DatosFactura {
+                tipo_factura: Some("F3".to_string()),
+                id_pago: Some(id_pago_devolucion.to_string()),
+                desglose: Some(devuelto),
+                destinatario: Some(c.cliente()?),
+                sustituidas: vec![RefFactura {
+                    nif: datos_obligado(db).await?.nif,
+                    num_serie: rectificativa.num_serie_factura.clone(),
+                    fecha: rectificativa.fecha_expedicion.clone(),
+                }],
+                fecha_operacion: fecha_op_original,
+                ..Default::default()
+            },
+        )
+        .await?;
+    }
+    Ok(Some(rectificativa.num_serie_factura))
+}
+
+/// Una fila por número, la última: una subsanación repite el número de la factura que subsana.
+fn ultimas_por_numero(altas: Vec<Alta>) -> Vec<Alta> {
+    let mut out: Vec<Alta> = Vec::new();
+    for a in altas {
+        match out.iter_mut().find(|x| x.num_serie == a.num_serie) {
+            Some(x) => *x = a,
+            None => out.push(a),
+        }
+    }
+    out
+}
+
 /// El desglose con el signo cambiado, tramo a tramo.
 fn negar(tramos: &[TramoIva]) -> Vec<TramoIva> {
     tramos
@@ -1388,7 +1548,7 @@ pub async fn emitir_sustitutiva(
         }
         if referenciado_por(db, "R5", "rectificadas", num).await? {
             return Err(AppError::conflict(format!(
-                "El ticket {num} se devolvió: no queda importe que facturar."
+                "El ticket {num} tiene una devolución: ya no se canjea por una factura."
             )));
         }
         tickets.push(t);
@@ -1482,7 +1642,7 @@ pub async fn corregir_factura(
             for t in f.sustituidas() {
                 if referenciado_por(db, "R5", "rectificadas", &t.num_serie).await? {
                     return Err(AppError::conflict(format!(
-                        "El ticket {} se devolvió: su factura ya no se corrige.",
+                        "El ticket {} tiene una devolución: su factura ya no se corrige.",
                         t.num_serie
                     )));
                 }
@@ -1524,6 +1684,11 @@ pub async fn corregir_factura(
                 ));
             }
             // Vigente: nada la ha sustituido después, ni se ha devuelto.
+            if referenciado_por(db, "R1", "rectificadas", &f.num_serie).await? {
+                return Err(AppError::conflict(
+                    "Esa factura tiene una devolución: ya no se corrige.",
+                ));
+            }
             if rectificada_por(db, &f.num_serie).await? {
                 return Err(AppError::conflict(
                     "Esa factura ya no es la vigente: se corrige la última que se emitió.",

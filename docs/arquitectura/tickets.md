@@ -24,7 +24,7 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 | Vista previa | `src/shared/ticket/TicketPaper.tsx` + `ticketMath.ts` | Espejo; lo compartido con el papel está en `ticketMath.ts`, sin React |
 | Payload | `crates/tpv-contracts/src/impresion.rs` + `src/features/configuracion/api/printerApis.ts` | El DTO; la pantalla sólo arma la precuenta (`payloadDePrecuenta`) |
 | Modal de impresión | `src/shared/ticket/PrintTicketModal.tsx` | Un botón por cada factura del cobro (`facturas_del_cobro`: el ticket, la `F3` del canje, la rectificativa, la `F3` de la devolución), sin elegir líneas; o la precuenta de todo, de lo pendiente o de una selección |
-| Reimpresión y devolución | `src/app/pages/Cuentas.tsx` | El mismo modal con el pago y `es_copia`; tras una devolución se abre con la rectificativa elegida, sin imprimir |
+| Reimpresión y devolución | `src/app/pages/Cuentas.tsx` | El mismo modal con el pago y `es_copia`; tras una devolución (entera o de una parte) se abre con la rectificativa elegida, sin imprimir |
 | Tests | `src-tauri/src/printing/tests.rs` · `test/ticketMath.test.ts` | Goldens duplicados a propósito |
 
 ## Orden del ticket
@@ -74,6 +74,10 @@ logo → corte.**
   de qué fecha. Sus líneas son las del cobro **en negativo**, y su total y su desglose los
   declarados. No lleva método de pago, así que no abre el cajón, ni la marca ANULADO, que es de la
   copia del cobro dado de baja.
+- **El papel de una devolución de parte de un cobro** es el de su pago negativo: lleva sólo las
+  líneas devueltas (`Devolucion_Lineas`), en negativo, con su rectificativa. Una línea cuya parte
+  devuelta no es unidades × precio (la última de una línea al peso) sale como una unidad por lo
+  devuelto. Sin rectificativa (modo prueba), igual en negativo y sin abrir el cajón.
 - **El cajón sólo lo abre el ticket original de un cobro en efectivo** (`abre_cajon`, que decide
   `ticket_de_pago`). Ni una copia, ni la `F3` de un canje, ni una rectificativa, ni una precuenta. El
   original sale una vez por sesión (`TicketsImpresos`): imprimirlo otra vez desde la pantalla del
