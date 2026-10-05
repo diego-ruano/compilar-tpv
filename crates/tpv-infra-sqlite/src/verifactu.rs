@@ -1119,21 +1119,17 @@ pub async fn emitir_baja_de_pago(
 ) -> AppResult<()> {
     use tpv_application::ports::cuentas::ClaseBaja;
 
-    // El registro de ALTA que hay que anular o rectificar. Se busca el último por `Orden` porque un
-    // pago puede tener más de uno (una subsanación es otra fila con el mismo `IDFactura`), y el
-    // vigente es el último.
-    let mut rows = db
-        .query(
-            "SELECT ID_Registro, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, \
-                    Importe_Total, Cuota_Total, Desglose_Json, Fecha_Operacion \
-             FROM Registros_Facturacion \
-             WHERE ID_Pago = ?1 AND Tipo = 'ALTA' \
-             ORDER BY Orden DESC LIMIT 1;",
-            vec![Value::Text(id_pago.to_string())],
-        )
-        .await
-        .map_err(db_err)?;
-    let Some(row) = rows.next().await.map_err(db_err)? else {
+    // Un cobro puede tener varias altas: la de su ticket o factura (`F1`/`F2`, más una fila por cada
+    // subsanación, que repite el `IDFactura`) y, si el cliente volvió a pedir factura, la `F3` que
+    // canjea el ticket. Se buscan POR SEPARADO: coger «la última alta del pago» daba la `F3`, y la
+    // baja se hacía sobre ella dejando el ticket intacto.
+    let altas = altas_del_pago(db, id_pago).await?;
+    // El vigente de la factura original es su última fila (la subsanación, si la hubo).
+    let Some(original) = altas
+        .iter()
+        .filter(|a| a.tipo_factura == "F1" || a.tipo_factura == "F2")
+        .next_back()
+    else {
         tracing::warn!(
             target: "tpv::verifactu",
             id_pago = %id_pago,
@@ -1141,13 +1137,12 @@ pub async fn emitir_baja_de_pago(
         );
         return Ok(());
     };
-    let id_alta = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
-    let nif = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
-    let num_serie = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
-    let fecha = v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default();
-    let importe = v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default();
-    let cuota = v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default();
-    let desglose = v_string(row.get_value(6).map_err(db_err)?);
+    // La `F3` que canjeó ese ticket: la que lo lleva en `FacturasSustituidas`.
+    let canje = altas
+        .iter()
+        .filter(|a| a.tipo_factura == "F3")
+        .filter(|a| numeros_sustituidos(a.referencias.as_deref()).contains(&original.num_serie))
+        .next_back();
 
     // La operación que documenta una rectificativa es la MISMA que la de la factura original, y
     // esa se efectuó otro día: la devolución se hace días después. Es, con diferencia, el caso más
@@ -1156,18 +1151,28 @@ pub async fn emitir_baja_de_pago(
     // Se toma la del original si la tenía (una venta que ya cruzó medianoche) y, si no, su fecha de
     // expedición. `emitir_alta` la descarta sola si acaba coincidiendo con la de hoy, que es el caso
     // de devolver algo cobrado esta misma mañana.
-    let fecha_op_original = v_string(row.get_value(7).map_err(db_err)?).or_else(|| Some(fecha.clone()));
+    let fecha_op_original = original
+        .fecha_operacion
+        .clone()
+        .or_else(|| Some(original.fecha.clone()));
 
     match clase {
         ClaseBaja::Error => {
-            emitir_anulacion(db, &id_alta).await?;
+            // La anulación «deshace» la expedición de una factura que no respondía a una operación
+            // real (FAQ de desarrolladores de la AEAT, apartado 17.2.d). Si el ticket se canjeó, la
+            // `F3` documenta esa misma operación inexistente: se anulan las dos, la `F3` primero
+            // porque se expidió después. Anular sólo una dejaría la otra declarada.
+            if let Some(c) = canje {
+                emitir_anulacion(db, &c.id_registro).await?;
+            }
+            emitir_anulacion(db, &original.id_registro).await?;
         }
         ClaseBaja::Devolucion => {
             // Los importes se NIEGAN sobre el texto guardado, no se recalculan desde un `f64`: es
             // el mismo número que se facturó, con el signo cambiado. Recalcularlo podría devolver
             // un céntimo distinto del que se cobró.
-            let lineas = desglose_negado(desglose.as_deref());
-            emitir_alta(
+            let lineas = desglose_negado(original.desglose.as_deref());
+            let r5 = emitir_alta(
                 db,
                 DatosFactura {
                     tipo_factura: Some("R5".to_string()),
@@ -1177,24 +1182,56 @@ pub async fn emitir_baja_de_pago(
                     // marca la FAQ para una devolución sobre una simplificada.
                     tipo_rectificativa: Some("I".to_string()),
                     id_pago: Some(id_pago.to_string()),
-                    lineas,
+                    lineas: lineas.clone(),
                     // Una `R5` **no puede llevar destinatario** (error 1190): rectifica una
                     // simplificada, que por definición no lo tiene.
                     destinatario: None,
+                    // Rectifica el TICKET, también si se canjeó: la `F3` no es rectificativa
+                    // (art. 15.6 ROF) y lo que se declaró a efectos del IVA es la simplificada.
                     rectificadas: vec![RefFactura {
-                        nif,
-                        num_serie,
-                        fecha,
+                        nif: original.nif.clone(),
+                        num_serie: original.num_serie.clone(),
+                        fecha: original.fecha.clone(),
                     }],
                     sustituidas: vec![],
                     incidencia: false,
                     numero_reservado: None,
                     subsanar: None,
-                    fecha_operacion: fecha_op_original,
+                    fecha_operacion: fecha_op_original.clone(),
                 },
             )
             .await?;
-            let _ = (importe, cuota);
+
+            // Si el ticket se canjeó, el cliente tiene una factura completa con un IVA que ya no
+            // puede deducir. La FAQ de desarrolladores de la AEAT (apartado 27, casos 2 y 3) dice
+            // cómo se corrige: tras la `R5`, «debe emitirse nueva F3 con los mismos datos de R5»,
+            // con el cliente y sustituyendo a la `R5`.
+            if let Some(c) = canje {
+                let destinatario = destinatario_desde_json(c.destinatario.as_deref()).ok_or_else(|| {
+                    AppError::internal(format!(
+                        "la factura completa {} no tiene cliente guardado: no se puede emitir la F3 \
+                         de la devolución",
+                        c.num_serie
+                    ))
+                })?;
+                emitir_alta(
+                    db,
+                    DatosFactura {
+                        tipo_factura: Some("F3".to_string()),
+                        id_pago: Some(id_pago.to_string()),
+                        lineas,
+                        destinatario: Some(destinatario),
+                        sustituidas: vec![RefFactura {
+                            nif: datos_obligado(db).await?.nif,
+                            num_serie: r5.num_serie_factura,
+                            fecha: r5.fecha_expedicion,
+                        }],
+                        fecha_operacion: fecha_op_original,
+                        ..Default::default()
+                    },
+                )
+                .await?;
+            }
         }
     }
     Ok(())
@@ -1270,18 +1307,35 @@ pub async fn emitir_sustitutiva(
         )));
     }
 
-    // ¿Ya se canjeó? `Referencias_Json` de la F3 lleva el número sustituido.
-    let ya = select_i64(
-        db,
-        "SELECT COUNT(*) FROM Registros_Facturacion \
-         WHERE Tipo_Factura = 'F3' AND Referencias_Json LIKE ?1;",
-        vec![Value::Text(format!("%{num_serie}%"))],
-    )
-    .await?
-    .unwrap_or(0);
-    if ya > 0 {
+    // ¿Ya se canjeó? `Referencias_Json` de la F3 lleva el número sustituido. Se compara el número
+    // EXACTO: con un `LIKE '%2027/000001%'` también casaba la F3 negativa de otra devolución, que
+    // sustituye a `R2027/000001`, y el ticket 2027/000001 quedaba sin poder facturarse.
+    if referenciado_por(db, "F3", "sustituidas", &num_serie).await? {
         return Err(AppError::conflict(
             "De ese ticket ya se emitió una factura completa.",
+        ));
+    }
+
+    // Una F3 canjea facturas simplificadas «facturadas y declaradas» (clave F3 de la Orden
+    // HAC/1177/2024). Un ticket anulado ya no tiene efecto fiscal, y uno devuelto quedó a cero con su
+    // rectificativa: en los dos casos no queda venta que facturar al cliente.
+    let anulado = select_i64(
+        db,
+        "SELECT COUNT(*) FROM Registros_Facturacion \
+         WHERE Tipo = 'ANULACION' AND Num_Serie_Factura = ?1;",
+        vec![Value::Text(num_serie.clone())],
+    )
+    .await?
+    .unwrap_or(0)
+        > 0;
+    if anulado {
+        return Err(AppError::conflict(
+            "Ese ticket está anulado: no hay venta que facturar.",
+        ));
+    }
+    if referenciado_por(db, "R5", "rectificadas", &num_serie).await? {
+        return Err(AppError::conflict(
+            "Ese ticket se devolvió: no queda importe que facturar.",
         ));
     }
 
@@ -1698,6 +1752,82 @@ pub(crate) fn numeros_sustituidos(referencias_json: Option<&str>) -> Vec<String>
         .collect()
 }
 
+/// ¿Hay algún alta de tipo `tipo_factura` cuyas referencias (`clave`: `"sustituidas"` o
+/// `"rectificadas"`) incluyan exactamente `num_serie`?
+///
+/// Se parsea el JSON en vez de buscar con `LIKE`: un número es subcadena de otros (`2027/000001`
+/// está dentro de `R2027/000001`), y casar por subcadena confunde una factura con otra.
+async fn referenciado_por<C: Reader>(
+    conn: &C,
+    tipo_factura: &str,
+    clave: &str,
+    num_serie: &str,
+) -> AppResult<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT Referencias_Json FROM Registros_Facturacion \
+             WHERE Tipo = 'ALTA' AND Tipo_Factura = ?1 AND Referencias_Json IS NOT NULL;",
+            vec![Value::Text(tipo_factura.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        let refs = v_string(row.get_value(0).map_err(db_err)?);
+        if refs_desde_json(refs.as_deref(), clave)
+            .iter()
+            .any(|r| r.num_serie.trim() == num_serie.trim())
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Un alta de un cobro, con lo que hace falta para anularla o rectificarla.
+struct AltaDelPago {
+    id_registro: String,
+    tipo_factura: String,
+    nif: String,
+    num_serie: String,
+    fecha: String,
+    desglose: Option<String>,
+    fecha_operacion: Option<String>,
+    destinatario: Option<String>,
+    referencias: Option<String>,
+}
+
+/// Las altas de un cobro, de la más antigua a la más reciente. Va por `idx_regfact_pago`.
+async fn altas_del_pago<C: Reader>(conn: &C, id_pago: &str) -> AppResult<Vec<AltaDelPago>> {
+    let mut rows = conn
+        .query(
+            "SELECT ID_Registro, COALESCE(Tipo_Factura, ''), NIF_Emisor, Num_Serie_Factura, \
+                    Fecha_Expedicion, Desglose_Json, Fecha_Operacion, Destinatario_Json, \
+                    Referencias_Json \
+             FROM Registros_Facturacion \
+             WHERE ID_Pago = ?1 AND Tipo = 'ALTA' \
+             ORDER BY Orden ASC;",
+            vec![Value::Text(id_pago.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        let t = |i: i32| -> AppResult<Option<String>> { Ok(v_string(row.get_value(i).map_err(db_err)?)) };
+        out.push(AltaDelPago {
+            id_registro: t(0)?.unwrap_or_default(),
+            tipo_factura: t(1)?.unwrap_or_default(),
+            nif: t(2)?.unwrap_or_default(),
+            num_serie: t(3)?.unwrap_or_default(),
+            fecha: t(4)?.unwrap_or_default(),
+            desglose: t(5)?,
+            fecha_operacion: t(6)?,
+            destinatario: t(7)?,
+            referencias: t(8)?,
+        });
+    }
+    Ok(out)
+}
+
 fn referencias_json(rect: &[RefFactura], sust: &[RefFactura]) -> Option<String> {
     if rect.is_empty() && sust.is_empty() {
         return None;
@@ -1733,42 +1863,6 @@ async fn select_i64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> AppResu
 // ─────────────────────────────────────────────────────────────────────────────
 // Lecturas para el panel
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// El registro asociado a un cobro, para reimprimir.
-///
-/// Una reimpresión saca **el mismo número, el mismo QR y la misma huella**, marcada COPIA, y no
-/// genera registro. Por eso se leen de la fila y no se recalculan: recalcular daría otra hora de
-/// generación y, por tanto, otra huella.
-pub async fn bloque_de_pago<C: Reader>(
-    conn: &C,
-    id_pago: &str,
-) -> AppResult<Option<BloqueFiscal>> {
-    let mut rows = conn
-        .query(
-            "SELECT r.Num_Serie_Factura, r.Fecha_Expedicion, r.QR_Url, r.Huella, r.Tipo_Factura, \
-                    (SELECT Verifactu_Entorno FROM Business_Settings WHERE ID = 1) \
-             FROM Registros_Facturacion r \
-             WHERE r.ID_Pago = ?1 AND r.Tipo = 'ALTA' \
-             ORDER BY r.Orden DESC LIMIT 1;",
-            vec![Value::Text(id_pago.to_string())],
-        )
-        .await
-        .map_err(db_err)?;
-    let Some(row) = rows.next().await.map_err(db_err)? else {
-        return Ok(None);
-    };
-    Ok(Some(BloqueFiscal {
-        num_serie_factura: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
-        fecha_expedicion: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
-        qr_url: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
-        huella: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
-        tipo_factura: v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default(),
-        entorno_pruebas: vf::Entorno::desde_texto(
-            &v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default(),
-        )
-        .es_pruebas(),
-    }))
-}
 
 /// Escalones de la escalera de avisos (`docs/arquitectura/verifactu.md`, «La escalera de avisos»),
 /// medidos sobre la **antigüedad del registro pendiente más viejo** y no sobre el tiempo sin

@@ -72,10 +72,11 @@ pub(crate) const SQL_FACTURA: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Fa
      WHERE Num_Serie_Factura = ?1 AND Tipo = 'ALTA' \
      ORDER BY Orden DESC LIMIT 1;";
 
-/// La `F3` que canjeó el ticket de un pago, si la hay. Va por `idx_regfact_pago`.
-const SQL_SUSTITUIDA_POR: &str = "SELECT Num_Serie_Factura FROM Registros_Facturacion \
+/// Las `F3` de un pago con lo que sustituyen. Va por `idx_regfact_pago`. Un pago puede tener dos:
+/// la que canjeó su ticket y, si después se devolvió, la negativa que sustituye a la rectificativa.
+const SQL_F3_DEL_PAGO: &str = "SELECT Num_Serie_Factura, Referencias_Json FROM Registros_Facturacion \
      WHERE ID_Pago = ?1 AND Tipo = 'ALTA' AND Tipo_Factura = 'F3' \
-     ORDER BY Orden DESC LIMIT 1;";
+     ORDER BY Orden ASC;";
 
 #[async_trait]
 impl TicketsRepository for SqliteTicketsRepository {
@@ -121,26 +122,41 @@ impl TicketsRepository for SqliteTicketsRepository {
         let factura = match pedida {
             // Otra factura del mismo pago: la `F3` que canjeó su ticket. Si no es de este pago, no
             // se imprime con sus líneas: sería un papel que mezcla dos cobros.
+            //
+            // Y tiene que ser la que canjea su ticket: la F3 negativa de una devolución comparte pago
+            // pero documenta la rectificativa, no estas líneas, y su papel no cuadraría con ellas.
             Some(n) => match factura(&r, n).await? {
-                Some((f, Some(de_pago))) if de_pago == id_pago => Some(f),
+                Some((f, Some(de_pago)))
+                    if de_pago == id_pago
+                        && (f.num_serie == numero_ticket.trim()
+                            || f.sustituye.as_deref() == Some(numero_ticket.trim())) =>
+                {
+                    Some(f)
+                }
                 _ => return Err(AppError::not_found("Esa factura no es de este cobro.")),
             },
             None if numero_ticket.trim().is_empty() => None,
             None => factura(&r, numero_ticket.trim()).await?.map(|(f, _)| f),
         };
 
-        let sustituida_por = if pedida.is_none() {
+        // La F3 que canjeó el ticket: la que lo lleva en `FacturasSustituidas`.
+        let mut sustituida_por = None;
+        if pedida.is_none() && !numero_ticket.trim().is_empty() {
             let mut rows = conn
-                .query(SQL_SUSTITUIDA_POR, vec![Value::Text(id_pago.to_string())])
+                .query(SQL_F3_DEL_PAGO, vec![Value::Text(id_pago.to_string())])
                 .await
                 .map_err(db_err)?;
-            match rows.next().await.map_err(db_err)? {
-                Some(row) => v_string(row.get_value(0).map_err(db_err)?),
-                None => None,
+            while let Some(row) = rows.next().await.map_err(db_err)? {
+                let refs = v_string(row.get_value(1).map_err(db_err)?);
+                if crate::verifactu::numeros_sustituidos(refs.as_deref())
+                    .iter()
+                    .any(|n| n == numero_ticket.trim())
+                {
+                    sustituida_por = v_string(row.get_value(0).map_err(db_err)?);
+                    break;
+                }
             }
-        } else {
-            None
-        };
+        }
 
         Ok(Some(TicketDePago {
             numero_ticket,

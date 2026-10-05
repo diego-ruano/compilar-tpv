@@ -198,11 +198,27 @@ estado local y por `execute()` cada tick del job se replicaría.
 `cuentas_anular_pago` (Administrador) llama, dentro de la transacción de la baja, a
 `emitir_baja_de_pago` con la `ClaseBaja` elegida en la pantalla:
 
-- **`Error`** — la venta no existió. Emite un registro de **anulación** del alta vigente del pago
-  (la última por `Orden`), y las líneas vuelven a la comanda.
+- **`Error`** — la venta no existió. Emite un registro de **anulación** de la factura del cobro
+  (su última fila, por si se subsanó), y las líneas vuelven a la comanda.
 - **`Devolucion`** — la venta existió. Emite una **`R5`** por diferencias con el desglose original
   negado (leído de `Desglose_Json`, no recalculado) y sin destinatario, referenciando la factura
   original. Las líneas no vuelven.
+
+Un cobro cuyo ticket se canjeó tiene **dos altas** con el mismo `ID_Pago`: la `F2` y la `F3`.
+`emitir_baja_de_pago` las busca por separado (la `F3` es la que lleva el ticket en
+`FacturasSustituidas`):
+
+- **Error**: se anulan **las dos**, la `F3` primero. La anulación deshace la expedición de una
+  factura que no respondía a una operación real (FAQ de desarrolladores de la AEAT, apartado
+  17.2.d), y la `F3` documenta esa misma operación. La FAQ no trata este caso de forma literal: es
+  la aplicación del 17.2.d a las dos facturas.
+- **Devolución**: la `R5` rectifica **el ticket**, no la `F3`, y a continuación se emite una `F3`
+  negativa «con los mismos datos de R5», con el cliente, que sustituye a la `R5` (apartado 27,
+  casos 2 y 3). Así el ticket y la `R5` suman cero para el IVA, y las dos `F3` suman cero para lo
+  que el cliente puede deducir.
+
+Fuente: [Aclaraciones a dudas de los desarrolladores, v1.3, 4-12-2025](https://sede.agenciatributaria.gob.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/FAQs-Desarrolladores.pdf), apartados 17 y 27.
+Lo fijan los tests de `cuentas.rs::tests_baja_de_un_ticket_canjeado`.
 
 La devolución emite siempre una `R5`, también cuando la factura original es una `F1`; el código no
 tiene camino para `R1`. Si el pago no tiene registro (un cobro de modo prueba), la baja sigue
@@ -211,7 +227,9 @@ adelante sin emitir nada. El efecto en la caja de cada clase está en [caja.md](
 ### La factura completa de un ticket ya expedido (`F3`)
 
 `verifactu_emitir_factura_de_ticket` (Administrador, desde Cuentas): sólo sobre una `F2`, y sólo una
-vez por ticket (se busca una `F3` que lo referencie). Reemite el **mismo desglose** con destinatario y
+vez por ticket (se busca una `F3` que lo referencie por su número exacto), y nunca de un ticket
+anulado o devuelto: la `F3` canjea simplificadas «facturadas y declaradas», y a esos no les queda
+venta que facturar. Reemite el **mismo desglose** con destinatario y
 `FacturasSustituidas`; la simplificada original no se toca. Comparte pago con ella, y tras emitirla
 se imprime la `F3` (`ticket_de_pago` con `num_factura`), no una copia del ticket que canjea.
 
