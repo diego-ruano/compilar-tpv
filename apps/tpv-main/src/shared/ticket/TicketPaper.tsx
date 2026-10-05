@@ -207,7 +207,11 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
                                         {p.rectifica_fecha ? ` del ${p.rectifica_fecha}` : ""}
                                     </div>
                                 ) : null}
-                                {p.sustituye ? <div>Sustituye a la factura {p.sustituye}</div> : null}
+                                {p.sustituye.length === 1 ? (
+                                    <div>Sustituye a la factura {p.sustituye[0]}</div>
+                                ) : p.sustituye.length > 1 ? (
+                                    <div>Sustituye a las facturas {p.sustituye.join(", ")}</div>
+                                ) : null}
                                 {p.destinatario ? (
                                     <>
                                         <Separador />

@@ -199,10 +199,10 @@ pub struct PrintTicketPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub destinatario: Option<DestinatarioTicket>,
-    /// En una `F3`, el número de la factura que sustituye.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub sustituye: Option<String>,
+    /// En una `F3`, los números de las facturas que sustituye: el ticket que canjea, los de un
+    /// canje de varios o, tras una devolución, la rectificativa.
+    #[serde(default)]
+    pub sustituye: Vec<String>,
     /// En una rectificativa, el número de la factura que rectifica (art. 7.1.h y 15.4 del RD
     /// 1619/2012: la referencia «expresa e inequívoca» de la factura rectificada).
     #[serde(default, skip_serializing_if = "Option::is_none")]

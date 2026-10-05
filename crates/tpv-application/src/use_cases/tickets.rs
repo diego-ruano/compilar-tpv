@@ -92,7 +92,7 @@ pub fn componer(
     let destinatario = t.factura.as_ref().and_then(|f| f.destinatario.clone()).map(
         |(nombre_razon, nif, domicilio)| DestinatarioTicket { nombre_razon, nif, domicilio },
     );
-    let sustituye = t.factura.as_ref().and_then(|f| f.sustituye.clone());
+    let sustituye = t.factura.as_ref().map(|f| f.sustituye.clone()).unwrap_or_default();
     // Una rectificativa dice qué factura rectifica, con su fecha (arts. 7.1.h y 15.4 del RD
     // 1619/2012).
     let (rectifica, rectifica_fecha) = match t.factura.as_ref().and_then(|f| f.rectifica.clone()) {
@@ -248,7 +248,7 @@ mod tests {
                 cuota: Dinero::de_centimos(20),
             }],
             destinatario: None,
-            sustituye: None,
+            sustituye: vec![],
             rectifica: None,
         }
     }
@@ -299,14 +299,14 @@ mod tests {
         f.num_serie = "F-000001".into();
         f.tipo_factura = "F3".into();
         f.destinatario = Some(("Cliente SL".into(), "B87654321".into(), Some("Calle Real 2".into())));
-        f.sustituye = Some("2027/000007".into());
+        f.sustituye = vec!["2027/000007".into()];
         let p = componer(cobro(Some(f)), &negocio(), &ajustes(), false);
 
         assert_eq!(p.numero_ticket.as_deref(), Some("F-000001"));
         assert_eq!(p.tipo_factura.as_deref(), Some("F3"));
         assert_eq!(p.destinatario.as_ref().map(|d| d.nif.as_str()), Some("B87654321"));
         assert_eq!(p.destinatario.and_then(|d| d.domicilio).as_deref(), Some("Calle Real 2"));
-        assert_eq!(p.sustituye.as_deref(), Some("2027/000007"));
+        assert_eq!(p.sustituye, vec!["2027/000007".to_string()]);
     }
 
     fn rectificativa() -> FacturaDelTicket {

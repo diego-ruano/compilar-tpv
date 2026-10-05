@@ -1202,9 +1202,10 @@ tipo_factura?: string,
  */
 destinatario?: DestinatarioTicket, 
 /**
- * En una `F3`, el número de la factura que sustituye.
+ * En una `F3`, los números de las facturas que sustituye: el ticket que canjea, los de un
+ * canje de varios o, tras una devolución, la rectificativa.
  */
-sustituye?: string, 
+sustituye: Array<string>, 
 /**
  * En una rectificativa, el número de la factura que rectifica (art. 7.1.h y 15.4 del RD
  * 1619/2012: la referencia «expresa e inequívoca» de la factura rectificada).

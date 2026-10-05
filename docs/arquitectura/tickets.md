@@ -66,6 +66,10 @@ logo → corte.**
   cliente (`bloque_tipo_de_factura`); una `F3` dice qué factura sustituye. Un ticket canjeado se
   sigue reimprimiendo como ticket, y el modal ofrece también su `F3`
   ([verifactu.md](verifactu.md#el-papel-de-una-factura-completa-y-de-una-rectificativa)).
+- **Una `F3` de varios tickets** lleva las líneas de todos sus cobros y la lista de los que
+  sustituye, sin método de pago ni origen (no es un cobro) y sin abrir el cajón. Se imprime desde
+  cualquiera de esos cobros: cada uno la tiene en su lista de facturas. En Cuentas, «Factura de
+  varios tickets» permite elegirlos (la selección sobrevive al cambiar de página).
 - **Una rectificativa** (`R1`–`R5`) se titula FACTURA RECTIFICATIVA y dice qué factura rectifica y
   de qué fecha. Sus líneas son las del cobro **en negativo**, y su total y su desglose los
   declarados. No lleva método de pago, así que no abre el cajón, ni la marca ANULADO, que es de la

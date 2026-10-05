@@ -29,9 +29,9 @@ pub struct FacturaDelTicket {
     pub tramos: Vec<TramoIva>,
     /// El cliente de una factura completa (`F1`/`F3`): `(nombre, NIF, domicilio)`.
     pub destinatario: Option<(String, String, Option<String>)>,
-    /// En una `F3`, el número de la factura que sustituye: el ticket que canjea o, tras una
-    /// devolución, la rectificativa.
-    pub sustituye: Option<String>,
+    /// En una `F3`, los números de las facturas que sustituye: el ticket que canjea, los de un
+    /// canje de varios o, tras una devolución, la rectificativa.
+    pub sustituye: Vec<String>,
     /// En una rectificativa, la factura que rectifica: `(número, fecha DD-MM-AAAA)`.
     pub rectifica: Option<(String, String)>,
 }
@@ -50,12 +50,14 @@ pub struct TicketDePago {
     pub anulado: bool,
     /// `Pagos.Fecha_Hora`. Es la fecha del papel cuando el cobro no tiene factura (modo prueba).
     pub fecha_hora: String,
-    /// Las líneas que cobró ESE pago, no las de la comanda entera.
+    /// Las líneas que documenta la factura: las que cobró ESE pago (no las de la comanda entera)
+    /// o, en una `F3` de varios tickets, las de todos los cobros que canjea.
     pub lineas: Vec<LineaVendida>,
     /// `None` en un cobro sin registro de facturación (modo prueba).
     pub factura: Option<FacturaDelTicket>,
     /// Todas las facturas del cobro, en el orden en que se expidieron: el ticket o la `F1`, la `F3`
-    /// que lo canjeó, la rectificativa de una devolución y su `F3` negativa.
+    /// que lo canjeó (sola o con otros tickets), la rectificativa de una devolución y su `F3`
+    /// negativa.
     pub facturas: Vec<FacturaDelCobro>,
 }
 

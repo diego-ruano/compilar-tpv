@@ -3367,7 +3367,7 @@ mod tests_baja_de_un_ticket_canjeado {
     // El papel se compone por el caso de uso real (`ticket_de_pago`), con los ajustes de la base:
     // lo que se comprueba es el payload que va a la impresora.
 
-    async fn papel(
+    pub(super) async fn papel(
         db: &Arc<Db>,
         id_pago: &str,
         num_factura: Option<&str>,
@@ -3387,7 +3387,7 @@ mod tests_baja_de_un_ticket_canjeado {
         .expect("el papel tiene que poder componerse")
     }
 
-    fn suma_lineas(p: &tpv_contracts::impresion::PrintTicketPayload) -> Dinero {
+    pub(super) fn suma_lineas(p: &tpv_contracts::impresion::PrintTicketPayload) -> Dinero {
         p.items.iter().map(|l| l.precio_unitario.por(l.cantidad as i64)).sum()
     }
 
@@ -3447,7 +3447,7 @@ mod tests_baja_de_un_ticket_canjeado {
         let p = papel(&db, &id_pago, Some(&negativa.num)).await;
 
         assert_eq!(p.tipo_factura.as_deref(), Some("F3"));
-        assert_eq!(p.sustituye.as_deref(), Some(r5.num.as_str()));
+        assert_eq!(p.sustituye, vec![r5.num.clone()]);
         assert_eq!(p.destinatario.as_ref().map(|d| d.nif.as_str()), Some(NIF_CLIENTE));
         assert_eq!(p.total, Some(Dinero::de_centimos(-300)));
         assert_eq!(Some(suma_lineas(&p)), p.total);
@@ -3865,6 +3865,71 @@ mod tests_correccion_y_canje_multiple {
         let e = canjear(&db, &t2).await.unwrap_err();
         assert!(format!("{e:?}").contains("ya se emitió"), "{e:?}");
         assert_cadena_sana(&db).await;
+    }
+
+    #[tokio::test]
+    async fn el_papel_de_una_F3_de_varios_tickets_lleva_las_lineas_de_todos_sin_metodo_ni_cajon() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, t1) = cobrar(&db, "com1", "det1").await;
+        let (pago2, t2) = cobrar(&db, "com2", "det2").await;
+        let f3 = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+
+        let p = papel(&db, &pago1, Some(&f3)).await;
+
+        assert_eq!(p.tipo_factura.as_deref(), Some("F3"));
+        assert_eq!(p.total, Some(Dinero::de_centimos(600)));
+        assert_eq!(Some(suma_lineas(&p)), p.total, "las líneas de los dos cobros cuadran con el total");
+        assert_eq!(p.items.iter().map(|l| l.cantidad).sum::<u32>(), 2, "una cerveza de cada ticket");
+        let mut sust = p.sustituye.clone();
+        sust.sort();
+        assert_eq!(sust, vec![t1, t2]);
+        assert_eq!(p.metodo_pago, None, "no es un cobro");
+        assert_eq!(p.origen, None);
+        assert!(!p.abre_cajon);
+        assert_eq!(p.destinatario.map(|d| d.nif), Some(NIF_CLIENTE.to_string()));
+
+        // Se imprime igual desde el otro cobro.
+        let desde_el_otro = papel(&db, &pago2, Some(&f3)).await;
+        assert_eq!(desde_el_otro.total, p.total);
+        assert_eq!(desde_el_otro.items.len(), p.items.len());
+    }
+
+    #[tokio::test]
+    async fn cada_cobro_ofrece_la_F3_de_varios_en_su_lista_de_facturas() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, _) = cobrar(&db, "com1", "det1").await;
+        let (pago2, _) = cobrar(&db, "com2", "det2").await;
+        let f3 = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+        let nueva = corregir(&db, &f3).await.unwrap();
+
+        for pago in [&pago1, &pago2] {
+            let p = papel(&db, pago, None).await;
+            let lista: Vec<(&str, i64)> = p
+                .facturas_del_cobro
+                .iter()
+                .map(|f| (f.tipo_factura.as_str(), f.importe.centimos()))
+                .collect();
+            assert_eq!(lista, [("F2", 300), ("F3", 600), ("F3", -600), ("F3", 600)], "{pago}");
+            assert_eq!(p.facturas_del_cobro[3].num_serie, nueva);
+        }
+    }
+
+    #[tokio::test]
+    async fn el_papel_de_la_negativa_de_una_F3_multiple_va_en_negativo_y_cuadra() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_VENTAS).await;
+        let (pago1, _) = cobrar(&db, "com1", "det1").await;
+        let (pago2, _) = cobrar(&db, "com2", "det2").await;
+        let f3 = canjear_cobros(&db, &[&pago1, &pago2]).await.unwrap();
+        corregir(&db, &f3).await.unwrap();
+        let negativa = registros(&db).await.into_iter().filter(|f| f.es("F3")).nth(1).unwrap();
+
+        let p = papel(&db, &pago1, Some(&negativa.num)).await;
+
+        assert_eq!(p.total, Some(Dinero::de_centimos(-600)));
+        assert_eq!(Some(suma_lineas(&p)), p.total);
     }
 
     #[tokio::test]

@@ -65,7 +65,7 @@ mod fixtures {
             total: None,
             tipo_factura: None,
             destinatario: None,
-            sustituye: None,
+            sustituye: vec![],
             rectifica: None,
             rectifica_fecha: None,
             facturas_del_cobro: vec![],
@@ -2311,7 +2311,7 @@ mod tests_factura_del_registro {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("F-000001".into());
         p.tipo_factura = Some("F3".into());
-        p.sustituye = Some("2027/000007".into());
+        p.sustituye = vec!["2027/000007".into()];
         p.destinatario = Some(tpv_contracts::impresion::DestinatarioTicket {
             nombre_razon: "Cliente SL".into(),
             nif: "B87654321".into(),
@@ -2372,6 +2372,17 @@ mod tests_factura_del_registro {
         let bytes = build_ticket(&rectificativa("R5"), None);
         let cmds = super::parser::comandos(&bytes);
         assert!(!cmds.contains(&"cajon"), "{cmds:?}");
+    }
+
+    #[test]
+    fn una_F3_de_varios_tickets_los_lista_todos() {
+        let mut p = f3();
+        p.sustituye = vec!["2027/000007".into(), "2027/000008".into(), "2027/000012".into()];
+        let bytes = build_ticket(&p, None);
+        assert!(contiene(&bytes, "Sustituye a las facturas"));
+        for n in ["2027/000007", "2027/000008", "2027/000012"] {
+            assert!(contiene(&bytes, n), "falta {n}");
+        }
     }
 
     #[test]

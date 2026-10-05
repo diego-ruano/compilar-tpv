@@ -75,11 +75,15 @@ pub(crate) const SQL_FACTURA: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Fa
      ORDER BY Orden DESC LIMIT 1;";
 
 /// Las facturas de un pago, en el orden en que se expidieron. Va por `idx_regfact_pago`.
-const SQL_FACTURAS_DEL_PAGO: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Factura, ''), \
-            COALESCE(Importe_Total, '') \
-     FROM Registros_Facturacion \
-     WHERE ID_Pago = ?1 AND Tipo = 'ALTA' \
-     ORDER BY Orden ASC;";
+const SQL_FACTURAS_DEL_PAGO: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Factura, ''),             COALESCE(Importe_Total, ''), Orden      FROM Registros_Facturacion      WHERE ID_Pago = ?1 AND Tipo = 'ALTA'      ORDER BY Orden ASC;";
+
+/// Las F3 que no cuelgan de ningún pago: las que canjean varios tickets (y las que las corrigen).
+/// Sus cobros las encuentran por `FacturasSustituidas`.
+const SQL_F3_SIN_PAGO: &str = "SELECT Num_Serie_Factura, COALESCE(Importe_Total, ''), Orden,             Referencias_Json      FROM Registros_Facturacion      WHERE ID_Pago IS NULL AND Tipo = 'ALTA' AND Tipo_Factura = 'F3'      ORDER BY Orden ASC;";
+
+/// El cobro de un número de ticket.
+const SQL_PAGO_DE_TICKET: &str =
+    "SELECT ID_Pago FROM Pagos WHERE Numero_Ticket = ?1 ORDER BY Fecha_Hora ASC LIMIT 1;";
 
 #[async_trait]
 impl TicketsRepository for SqliteTicketsRepository {
@@ -102,57 +106,87 @@ impl TicketsRepository for SqliteTicketsRepository {
             Ok(v_string(row.get_value(i).map_err(db_err)?).unwrap_or_default())
         };
         let numero_ticket = texto(0)?;
-        let metodo_pago = texto(1)?;
-        let origen = texto(2)?;
+        let mut metodo_pago = texto(1)?;
+        let mut origen = texto(2)?;
         let anulado = v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0) == 1;
         let fecha_hora = texto(4)?;
-
-        let mut rows = conn
-            .query(SQL_LINEAS, vec![Value::Text(id_pago.to_string())])
-            .await
-            .map_err(db_err)?;
-        let mut lineas = Vec::new();
-        while let Some(row) = rows.next().await.map_err(db_err)? {
-            lineas.push(LineaVendida {
-                nombre: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
-                cantidad: v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(1.0),
-                precio_unitario: v_dinero(row.get_value(2).map_err(db_err)?).unwrap_or(Dinero::CERO),
-                iva_percent: v_f64(row.get_value(3).map_err(db_err)?),
-            });
-        }
+        let mut lineas = lineas_de_pago(&r, id_pago).await?;
 
         let pedida = num_factura.map(str::trim).filter(|n| !n.is_empty());
         let factura = match pedida {
-            // Otra factura del mismo pago: la `F3` del canje, la rectificativa de una devolución o
-            // su `F3` negativa. Todas documentan estas líneas (las de la devolución, en negativo).
-            // Si no es de este pago, no se imprime con sus líneas: mezclaría dos cobros.
+            // Otra factura del cobro: la `F3` del canje (sola o con otros tickets), la rectificativa
+            // de una devolución o su `F3` negativa. Si no es de este cobro, no se imprime con sus
+            // líneas: mezclaría dos cobros.
             Some(n) => match factura(&r, n).await? {
-                Some((f, Some(de_pago))) if de_pago == id_pago => Some(f),
+                Some((f, de_pago))
+                    if de_pago.as_deref() == Some(id_pago)
+                        || f.sustituye.iter().any(|s| s == numero_ticket.trim()) =>
+                {
+                    Some(f)
+                }
                 _ => return Err(AppError::not_found("Esa factura no es de este cobro.")),
             },
             None if numero_ticket.trim().is_empty() => None,
             None => factura(&r, numero_ticket.trim()).await?.map(|(f, _)| f),
         };
 
-        // Todas las facturas del cobro. Una subsanación repite el número: cuenta una vez, con los
-        // datos de su última fila.
-        let mut facturas: Vec<FacturaDelCobro> = Vec::new();
+        // Una F3 de varios tickets documenta las líneas de todos sus cobros. No es un cobro: no
+        // lleva método de pago (ni abre el cajón) ni el origen de uno de ellos.
+        if let Some(f) = &factura {
+            if f.tipo_factura == "F3" && f.sustituye.len() > 1 {
+                lineas = Vec::new();
+                for num in &f.sustituye {
+                    if let Some(p) = pago_de_ticket(&r, num).await? {
+                        lineas.extend(lineas_de_pago(&r, &p).await?);
+                    }
+                }
+                metodo_pago = String::new();
+                origen = String::new();
+            }
+        }
+
+        // Todas las facturas del cobro: las suyas y las F3 que canjean su ticket con otros. Una
+        // subsanación repite el número: cuenta una vez, con los datos de su última fila.
+        let mut con_orden: Vec<(i64, FacturaDelCobro)> = Vec::new();
+        let mut anotar = |orden: i64, num: String, tipo: String, importe: Dinero| {
+            match con_orden.iter_mut().find(|(_, (n, _, _))| *n == num) {
+                Some(f) => *f = (f.0, (num, tipo, importe)),
+                None => con_orden.push((orden, (num, tipo, importe))),
+            }
+        };
         let mut rows = conn
             .query(SQL_FACTURAS_DEL_PAGO, vec![Value::Text(id_pago.to_string())])
             .await
             .map_err(db_err)?;
         while let Some(row) = rows.next().await.map_err(db_err)? {
-            let num = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
-            let tipo = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
-            let importe = Dinero::de_texto_fiscal(
-                &v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
-            )
-            .unwrap_or(Dinero::CERO);
-            match facturas.iter_mut().find(|(n, _, _)| *n == num) {
-                Some(f) => *f = (num, tipo, importe),
-                None => facturas.push((num, tipo, importe)),
+            let t = |i: i32| -> AppResult<String> {
+                Ok(v_string(row.get_value(i).map_err(db_err)?).unwrap_or_default())
+            };
+            let importe = Dinero::de_texto_fiscal(&t(2)?).unwrap_or(Dinero::CERO);
+            let orden = v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0);
+            anotar(orden, t(0)?, t(1)?, importe);
+        }
+        if !numero_ticket.trim().is_empty() {
+            let mut rows = conn.query(SQL_F3_SIN_PAGO, ()).await.map_err(db_err)?;
+            while let Some(row) = rows.next().await.map_err(db_err)? {
+                let refs = v_string(row.get_value(3).map_err(db_err)?);
+                if !crate::verifactu::numeros_sustituidos(refs.as_deref())
+                    .iter()
+                    .any(|n| n == numero_ticket.trim())
+                {
+                    continue;
+                }
+                let num = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
+                let importe = Dinero::de_texto_fiscal(
+                    &v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                )
+                .unwrap_or(Dinero::CERO);
+                let orden = v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0);
+                anotar(orden, num, "F3".to_string(), importe);
             }
         }
+        con_orden.sort_by_key(|(orden, _)| *orden);
+        let facturas = con_orden.into_iter().map(|(_, f)| f).collect();
 
         Ok(Some(TicketDePago {
             numero_ticket,
@@ -166,6 +200,37 @@ impl TicketsRepository for SqliteTicketsRepository {
         }))
     }
 }
+
+/// Las líneas que cobró un pago.
+async fn lineas_de_pago<R: Reader>(r: &R, id_pago: &str) -> AppResult<Vec<LineaVendida>> {
+    let mut rows = r
+        .query(SQL_LINEAS, vec![Value::Text(id_pago.to_string())])
+        .await
+        .map_err(db_err)?;
+    let mut lineas = Vec::new();
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        lineas.push(LineaVendida {
+            nombre: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+            cantidad: v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(1.0),
+            precio_unitario: v_dinero(row.get_value(2).map_err(db_err)?).unwrap_or(Dinero::CERO),
+            iva_percent: v_f64(row.get_value(3).map_err(db_err)?),
+        });
+    }
+    Ok(lineas)
+}
+
+/// El cobro de un número de ticket, si existe.
+async fn pago_de_ticket<R: Reader>(r: &R, num: &str) -> AppResult<Option<String>> {
+    let mut rows = r
+        .query(SQL_PAGO_DE_TICKET, vec![Value::Text(num.trim().to_string())])
+        .await
+        .map_err(db_err)?;
+    Ok(match rows.next().await.map_err(db_err)? {
+        Some(row) => v_string(row.get_value(0).map_err(db_err)?),
+        None => None,
+    })
+}
+
 
 /// La factura de un número, con el pago al que pertenece.
 async fn factura<R: Reader>(
@@ -198,7 +263,7 @@ async fn factura<R: Reader>(
         importe_total: Dinero::de_texto_fiscal(&texto(7)?).unwrap_or(Dinero::CERO),
         tramos: crate::verifactu::tramos_declarados(desglose.as_deref()),
         destinatario: crate::verifactu::destinatario_del_papel(destinatario.as_deref()),
-        sustituye: crate::verifactu::numeros_sustituidos(referencias.as_deref()).into_iter().next(),
+        sustituye: crate::verifactu::numeros_sustituidos(referencias.as_deref()),
         rectifica: crate::verifactu::rectificada_del_papel(referencias.as_deref()),
     };
     Ok(Some((f, id_pago)))
@@ -538,7 +603,7 @@ mod tests {
             f.destinatario,
             Some(("Cliente SL".into(), "B87654321".into(), Some("Calle Real 2, Madrid".into())))
         );
-        assert_eq!(f.sustituye.as_deref(), Some("T-000007"));
+        assert_eq!(f.sustituye, vec!["T-000007".to_string()]);
         assert_eq!(t.lineas.len(), 2, "las líneas son las del cobro");
     }
 

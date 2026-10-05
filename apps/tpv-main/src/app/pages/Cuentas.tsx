@@ -10,6 +10,7 @@ import {
     ReceiptText,
     Printer,
     FileText,
+    Check,
 } from "lucide-react";
 
 import PrintTicketModal, {
@@ -122,6 +123,26 @@ function PrimaryButton({
             ].join(" ")}
         >
             {children}
+        </button>
+    );
+}
+
+/** La casilla de un cobro cuando se eligen varios tickets para una sola factura. */
+function CasillaTicket({ marcada, onClick }: { marcada: boolean; onClick: () => void }) {
+    return (
+        <button
+            type="button"
+            title={marcada ? "Quitar de la factura" : "Añadir a la factura"}
+            aria-pressed={marcada}
+            onClick={onClick}
+            className={[
+                "h-9 w-9 rounded-xl border shadow-sm transition active:scale-[0.98] grid place-items-center",
+                marcada
+                    ? "border-accent bg-accent text-white"
+                    : "border-border bg-surface text-fg-muted hover:bg-surface-2",
+            ].join(" ")}
+        >
+            {marcada ? <Check className="size-4" aria-hidden /> : null}
         </button>
     );
 }
@@ -579,6 +600,18 @@ export default function Cuentas() {
         corregir: string | null;
         inicial: Partial<DestinatarioInput> | null;
     } | null>(null);
+    // FISCAL-02: varios tickets del mismo cliente en una sola factura (FAQ de la AEAT, apartado
+    // 27). `null` = no se está eligiendo. Se guardan las entradas y no sólo sus ids: la lista va
+    // por páginas, y lo elegido en una no puede perderse al pasar a otra.
+    const [seleccionTickets, setSeleccionTickets] = useState<Map<string, EntradaDto> | null>(null);
+    const alternarTicket = (e: EntradaDto) =>
+        setSeleccionTickets((prev) => {
+            if (!prev) return prev;
+            const next = new Map(prev);
+            if (next.has(e.id)) next.delete(e.id);
+            else next.set(e.id, e);
+            return next;
+        });
     const [f3Guardando, setF3Guardando] = useState(false);
     const [f3Error, setF3Error] = useState<string | null>(null);
 
@@ -624,6 +657,7 @@ export default function Cuentas() {
                   });
             const primera = facturaDe.entradas[0];
             setFacturaDe(null);
+            setSeleccionTickets(null);
             // Y se abre LA FACTURA NUEVA para imprimir, que es a lo que ha venido el cliente: no una
             // copia del ticket que canjea ni la factura errónea (RI-29).
             if (primera) setReimpresion({ idPago: primera.id, numFactura: bloque.num_serie_factura });
@@ -1383,8 +1417,46 @@ export default function Cuentas() {
                                         Pagos de clientes (tarjeta o efectivo).
                                     </p>
                                 </div>
-                                <Badge>Total: {eur(totalEntradas)}</Badge>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSeleccionTickets((s) => (s ? null : new Map()))}
+                                        className="rounded-xl border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-fg hover:bg-surface-2"
+                                        title="Elegir varios tickets del mismo cliente y emitir una sola factura con NIF"
+                                    >
+                                        {seleccionTickets ? "Cancelar" : "Factura de varios tickets"}
+                                    </button>
+                                    <Badge>Total: {eur(totalEntradas)}</Badge>
+                                </div>
                             </div>
+
+                            {seleccionTickets ? (
+                                <div className="mt-3 flex flex-none items-center justify-between gap-3 rounded-2xl border border-accent bg-accent/10 px-4 py-2 text-sm">
+                                    <span className="text-fg">
+                                        {seleccionTickets.size} ticket{seleccionTickets.size === 1 ? "" : "s"} ·{" "}
+                                        <strong>
+                                            {eur(
+                                                sumar(...[...seleccionTickets.values()].map((x) => x.importe)),
+                                            )}
+                                        </strong>
+                                    </span>
+                                    <button
+                                        type="button"
+                                        disabled={seleccionTickets.size === 0}
+                                        onClick={() => {
+                                            setF3Error(null);
+                                            setFacturaDe({
+                                                entradas: [...seleccionTickets.values()],
+                                                corregir: null,
+                                                inicial: null,
+                                            });
+                                        }}
+                                        className="rounded-xl border border-accent bg-accent px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+                                    >
+                                        Emitir factura
+                                    </button>
+                                </div>
+                            ) : null}
 
                             <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border">
                                 <div className="hidden sm:grid grid-cols-12 gap-2 bg-surface-2 px-4 py-3 text-xs font-semibold text-fg-muted">
@@ -1421,7 +1493,12 @@ export default function Cuentas() {
                                                                 >
                                                                     <Printer className="size-4" aria-hidden />
                                                                 </MiniIconButton>
-                                                                {esAnulado(e) ? null : (
+                                                                {esAnulado(e) ? null : seleccionTickets ? (
+                                                                    <CasillaTicket
+                                                                        marcada={seleccionTickets.has(e.id)}
+                                                                        onClick={() => alternarTicket(e)}
+                                                                    />
+                                                                ) : (
                                                                     <>
                                                                         <MiniIconButton
                                                                             title="Factura con NIF (emitir o corregir)"
@@ -1466,7 +1543,12 @@ export default function Cuentas() {
                                                             >
                                                                 <Printer className="size-4" aria-hidden />
                                                             </MiniIconButton>
-                                                            {esAnulado(e) ? null : (
+                                                            {esAnulado(e) ? null : seleccionTickets ? (
+                                                                    <CasillaTicket
+                                                                        marcada={seleccionTickets.has(e.id)}
+                                                                        onClick={() => alternarTicket(e)}
+                                                                    />
+                                                                ) : (
                                                                 <>
                                                                     <MiniIconButton
                                                                         title="Factura con NIF (emitir o corregir)"

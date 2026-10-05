@@ -545,8 +545,12 @@ fn bloque_tipo_de_factura(out: &mut Vec<u8>, p: &PrintTicketPayload, cols: usize
         };
         text_wrap(out, &texto, cols);
     }
-    if let Some(n) = p.sustituye.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-        text_wrap(out, &format!("Sustituye a la factura {n}"), cols);
+    // Lo que sustituye una F3: un ticket, varios (un canje de un periodo) o una rectificativa.
+    let sustituidas: Vec<&str> = p.sustituye.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).collect();
+    match sustituidas.as_slice() {
+        [] => {}
+        [una] => text_wrap(out, &format!("Sustituye a la factura {una}"), cols),
+        varias => text_wrap(out, &format!("Sustituye a las facturas {}", varias.join(", ")), cols),
     }
     if let Some(d) = &p.destinatario {
         sep(out, cols);
@@ -595,7 +599,7 @@ pub fn como_precuenta(mut p: PrintTicketPayload) -> PrintTicketPayload {
     p.total = None;
     p.tipo_factura = None;
     p.destinatario = None;
-    p.sustituye = None;
+    p.sustituye = Vec::new();
     p.rectifica = None;
     p.rectifica_fecha = None;
     p.facturas_del_cobro = Vec::new();
