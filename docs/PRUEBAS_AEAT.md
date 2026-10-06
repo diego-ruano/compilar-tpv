@@ -235,6 +235,33 @@ pnpm verifactu:limites -- <huella> <NIF> "Razon Social"
   subsanación (mismo `Num_Serie_Factura`, `Subsanacion=S`, `RechazoPrevio=X`, su propio eslabón) y la
   AEAT la acepta. Volver a subsanar no emite nada: ya tiene una por delante.
 
+### Devoluciones, canjes y correcciones
+
+```bash
+pnpm verifactu:devoluciones -- <huella> <NIF> "Razon Social"
+```
+
+Lleva a la AEAT lo que emiten la baja de un cobro, la devolución de parte de él, el canje de tickets
+por una `F3` y la corrección del cliente, **por los repositorios de la aplicación** (no por
+`emitir_alta` a mano). El cliente de las facturas completas es el propio obligado. Trabaja sobre una
+copia de la última base de los arneses (`target/verifactu-pruebas/devoluciones/`) para seguir su
+cadena y su numeración, y la pone al día con el esquema actual. Va en tres tandas: las altas, las
+bajas por error (que anulan lo que la primera mandó) y la anulación de todo lo que quede vivo.
+
+| Caso | Registros | Resultado |
+|---|---|---|
+| Devolución parcial de un ticket en tres veces; la última lleva lo que queda del desglose | `F2` + 3 `R5` `I` | aceptados |
+| Devolución parcial de un ticket canjeado | `F2`, `F3`, `R5` `I` + `F3` negativa que la sustituye | aceptados |
+| Devolución parcial de una `F1`, y de una `F1` corregida antes | `R1` `I` con el cliente; `R4` `S` con `ImporteRectificacion` y la `R1` que la rectifica | aceptados |
+| Devolución entera de un ticket, de una `F1` y de un ticket canjeado | `R5`; `R1`; `R5` + `F3` negativa | aceptados |
+| `F3` de dos tickets y su corrección | `F3`; `F3` negativa + `F3` nueva | aceptados |
+| Baja por error de un cobro con una devolución parcial | anulación de la `R5` y del ticket | aceptadas |
+| Baja por error de un ticket canjeado | anulación de la `F3` y del ticket | aceptadas |
+| Baja por error de un ticket dentro de una `F3` de dos | `F3` negativa de su parte + anulación del ticket | aceptados |
+| Anular todo lo demás | 29 anulaciones | aceptadas |
+
+Verificado el 2026-10-06: 68 registros, todos aceptados sin avisos ni duplicados.
+
 ---
 
 ## Volver a producción: hay que partir de cero

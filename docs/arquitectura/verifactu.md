@@ -253,7 +253,8 @@ devolución (su `ID_Pago` es el del pago negativo, y su número es el `Numero_Ti
   caso, que no trata de forma literal.
 - Un cobro de modo prueba se devuelve sin emitir nada.
 
-Lo fijan los tests de `cuentas.rs::tests_devolucion_parcial`.
+Lo fijan los tests de `cuentas.rs::tests_devolucion_parcial`, y la AEAT acepta todos estos registros en
+preproducción (`pnpm verifactu:devoluciones`, [PRUEBAS_AEAT.md](../PRUEBAS_AEAT.md#devoluciones-canjes-y-correcciones)).
 
 ### La factura completa de un ticket ya expedido (`F3`)
 
