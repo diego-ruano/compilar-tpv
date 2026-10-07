@@ -64,6 +64,16 @@ pub trait LicensingService: Send + Sync {
         &self,
         state: &LicenseLocalState,
     ) -> Result<EstadoVerificado, FalloConsulta>;
+
+    /// RI-36: milisegundos transcurridos según el reloj MONÓTONO del proceso desde la llamada
+    /// anterior (que queda como nueva marca). `None` en la primera llamada del proceso: entre un
+    /// arranque y otro no hay reloj monótono que valga. Atrasar el reloj del sistema no lo cambia.
+    ///
+    /// Por defecto `None`, que es lo que haría un proceso recién arrancado: sólo cuenta el reloj de
+    /// pared, nunca hacia atrás.
+    fn transcurrido_monotono(&self) -> Option<i64> {
+        None
+    }
 }
 
 /// Servicio de identidad de dispositivo / pairing (claves, firma, handy token, tpv-server).

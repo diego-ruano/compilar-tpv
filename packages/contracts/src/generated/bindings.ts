@@ -840,7 +840,17 @@ expires_at_ms: number | null,
 /**
  * Plan de la licencia (`standard`). Lo refresca `/status`.
  */
-plan: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, };
+plan: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, 
+/**
+ * RI-36: tiempo sin conexión ya gastado desde la última comprobación correcta, contado de forma
+ * que atrasar el reloj del equipo no lo devuelva (`tpv_domain::licensing::sumar_tiempo_sin_conexion`).
+ * `None` en un fichero de antes: cuenta como cero.
+ */
+offline_consumido_ms: number | null, 
+/**
+ * RI-36: hora del reloj de pared de la última vez que se contó ese tiempo.
+ */
+marca_tiempo_ms: number | null, };
 
 /**
  * Args de `license_sumar_clave` (RI-52): una clave sin estrenar cuyo tiempo se suma a la licencia

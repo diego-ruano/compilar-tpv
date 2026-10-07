@@ -251,9 +251,7 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
         // Sin conexión con el servidor: corriendo con la gracia offline (72 h). Las horas que
         // quedan van en el título y cambian en cada pulso: cada uno lo vuelve a poner como no leído.
         "offline_grace" => {
-            let base = dom::base_gracia(state.last_check_ok_ms, state.activated_at_ms);
-            let restante_ms = (dom::GRACIA_OFFLINE_MS - (ahora_ms - base)).max(0);
-            let horas = horas_ceil(restante_ms);
+            let horas = horas_de_gracia(state, ahora_ms);
             let _ = notifier
                 .emitir(NuevaNotificacion {
                     tipo: "gracia_offline".to_string(),
@@ -296,8 +294,7 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
         // porque no se puede comprobar que lo diga él —y lo esperable es un fallo nuestro—, pero
         // quien lleva el negocio tiene que saberlo HOY: es una llamada a soporte, no a su router.
         "rejection_unverified" => {
-            let base = dom::base_gracia(state.last_check_ok_ms, state.activated_at_ms);
-            let horas = horas_ceil((dom::GRACIA_OFFLINE_MS - (ahora_ms - base)).max(0));
+            let horas = horas_de_gracia(state, ahora_ms);
             let _ = notifier
                 .emitir(NuevaNotificacion {
                     tipo: "rechazo_sin_verificar".to_string(),
@@ -331,6 +328,14 @@ fn dias_naturales_hasta<Tz: TimeZone>(zona: &Tz, fecha_ms: i64, ahora_ms: i64) -
     Some((fecha - hoy).num_days())
 }
 
+/// Las horas de gracia offline que quedan, con lo contado por RI-36: el aviso no puede prometer más
+/// tiempo del que el gate va a dar.
+fn horas_de_gracia(state: &LicenseLocalState, ahora_ms: i64) -> i64 {
+    let base = dom::base_gracia(state.last_check_ok_ms, state.activated_at_ms);
+    let gastado = dom::gracia_gastada(base, ahora_ms, state.offline_consumido_ms.unwrap_or(0));
+    horas_ceil((dom::GRACIA_OFFLINE_MS - gastado).max(0))
+}
+
 fn horas_ceil(ms: i64) -> i64 {
     if ms <= 0 {
         0
@@ -353,6 +358,7 @@ async fn comprobar(svc: &dyn LicensingService, forzar_red: bool) -> AppResult<Li
 
     let ahora = now_ms();
     estado.last_check_attempt_ms = Some(ahora);
+    contar_tiempo(svc, &mut estado, ahora);
 
     match svc.consultar_estado(&estado).await {
         Ok(verificado) => aplicar(
@@ -363,7 +369,8 @@ async fn comprobar(svc: &dyn LicensingService, forzar_red: bool) -> AppResult<Li
 
         Err(fallo) => {
             let base = dom::base_gracia(estado.last_check_ok_ms, estado.activated_at_ms);
-            match dom::evaluar_fallo(&fallo, base, ahora, forzar_red) {
+            let consumido = estado.offline_consumido_ms.unwrap_or(0);
+            match dom::evaluar_fallo(&fallo, base, ahora, consumido, forzar_red) {
                 Resolucion::Decidido(veredicto) => aplicar(svc, estado, veredicto),
                 Resolucion::Indecidible => Err(AppError::external(fallo.to_string())),
             }
@@ -384,8 +391,36 @@ fn actualizar(
     estado.plan = Some(a.plan.clone());
     estado.last_server_time_ms = Some(verificado.server_time_ms);
     estado.last_check_ok_ms = Some(ahora);
+    // RI-36: con la licencia comprobada, la gracia offline vuelve a empezar.
+    estado.offline_consumido_ms = Some(0);
+    estado.marca_tiempo_ms = Some(ahora);
     // El token renovado ya lo persistió el adaptador en el keyring; aquí no hay token que tocar.
     estado
+}
+
+/// RI-36 · Suma al estado el tiempo pasado desde la última vez que se contó, con el reloj monótono
+/// del proceso cuando lo hay (`dom::sumar_tiempo_sin_conexion`). Lo llaman cada comprobación y el
+/// pulso `licencia_reloj`, que es lo que hace que lo contado no dependa de que haya red.
+fn contar_tiempo(svc: &dyn LicensingService, estado: &mut LicenseLocalState, ahora: i64) {
+    let monotono = svc.transcurrido_monotono();
+    let pared = estado.marca_tiempo_ms.map_or(0, |m| ahora - m);
+    estado.offline_consumido_ms = Some(dom::sumar_tiempo_sin_conexion(
+        estado.offline_consumido_ms.unwrap_or(0),
+        monotono,
+        pared,
+    ));
+    estado.marca_tiempo_ms = Some(ahora);
+}
+
+/// RI-36 · El pulso del reloj de la gracia offline: cuenta el tiempo y lo guarda, sin red. Va cada
+/// pocos minutos (job `licencia_reloj`) para que lo que se pueda esconder cerrando la app y atrasando
+/// el reloj sean minutos, no las 6 h que separan dos comprobaciones.
+pub fn contar_tiempo_sin_conexion(svc: &dyn LicensingService) -> AppResult<()> {
+    let Some(mut estado) = svc.load_state()? else {
+        return Ok(());
+    };
+    contar_tiempo(svc, &mut estado, now_ms());
+    svc.save_state(&estado)
 }
 
 /// Guarda el estado y compone la respuesta para la UI. Nunca borra (RI-09, ver `Veredicto`).
@@ -415,6 +450,8 @@ fn estado_inicial(concedido: Concesion) -> LicenseLocalState {
         last_check_ok_ms: None,
         last_check_attempt_ms: None,
         activated_at_ms: now_ms(),
+        offline_consumido_ms: Some(0),
+        marca_tiempo_ms: Some(now_ms()),
     }
 }
 
@@ -455,6 +492,8 @@ mod tests {
             last_check_ok_ms: None,
             last_check_attempt_ms: None,
             activated_at_ms: 0,
+            offline_consumido_ms: None,
+            marca_tiempo_ms: None,
         }
     }
 
@@ -665,6 +704,8 @@ mod tests {
         guardado: Mutex<Option<LicenseLocalState>>,
         borrado_con: Mutex<Option<Option<String>>>,
         respuesta: Mutex<Option<Result<EstadoVerificado, dom::FalloConsulta>>>,
+        /// Lo que contesta el reloj monótono (RI-36).
+        monotono: Mutex<Option<i64>>,
     }
 
     impl ServicioDeGate {
@@ -675,6 +716,7 @@ mod tests {
                 guardado: Mutex::new(Some(s)),
                 borrado_con: Mutex::new(None),
                 respuesta: Mutex::new(Some(respuesta)),
+                monotono: Mutex::new(None),
             }
         }
     }
@@ -711,6 +753,9 @@ mod tests {
             _: &LicenseLocalState,
         ) -> Result<EstadoVerificado, dom::FalloConsulta> {
             self.respuesta.lock().unwrap().take().expect("una consulta por test")
+        }
+        fn transcurrido_monotono(&self) -> Option<i64> {
+            *self.monotono.lock().unwrap()
         }
     }
 
@@ -773,6 +818,49 @@ mod tests {
         assert_eq!(e.len(), 1);
         assert_eq!(e[0].clave_dedupe.as_deref(), Some("rechazo_sin_verificar"));
         assert!(e[0].titulo.contains("~71 h"), "{}", e[0].titulo);
+    }
+
+    /// RI-36. El reloj de pared dice que la última comprobación buena fue hace una hora, pero ya se
+    /// han contado 80 h sin conexión: alguien ha ido atrasando el reloj. Manda lo contado.
+    #[tokio::test]
+    async fn atrasar_el_reloj_no_estira_la_gracia_offline() {
+        let svc = ServicioDeGate::con(Err(dom::FalloConsulta::Inalcanzable));
+        {
+            let mut g = svc.guardado.lock().unwrap();
+            let s = g.as_mut().unwrap();
+            s.last_check_ok_ms = Some(now_ms() - HORA_MS);
+            s.offline_consumido_ms = Some(80 * HORA_MS);
+            s.marca_tiempo_ms = Some(now_ms());
+        }
+        let res = gate(&svc, None).await.unwrap();
+        assert!(!res.allowed);
+        assert_eq!(res.reason, "offline_expired");
+    }
+
+    /// Con la app abierta, atrasar el reloj no resta: el pulso suma lo que dice el monótono.
+    #[tokio::test]
+    async fn el_pulso_cuenta_con_el_monotono_aunque_el_reloj_vaya_hacia_atras() {
+        let svc = ServicioDeGate::con(Err(dom::FalloConsulta::Inalcanzable));
+        {
+            let mut g = svc.guardado.lock().unwrap();
+            let s = g.as_mut().unwrap();
+            s.offline_consumido_ms = Some(10 * HORA_MS);
+            // La última marca está tres horas «en el futuro»: el reloj se ha atrasado.
+            s.marca_tiempo_ms = Some(now_ms() + 3 * HORA_MS);
+        }
+        *svc.monotono.lock().unwrap() = Some(HORA_MS);
+        contar_tiempo_sin_conexion(&svc).unwrap();
+        let s = svc.guardado.lock().unwrap().clone().unwrap();
+        assert_eq!(s.offline_consumido_ms, Some(11 * HORA_MS));
+    }
+
+    #[tokio::test]
+    async fn una_comprobacion_buena_vuelve_a_empezar_la_cuenta() {
+        let svc = ServicioDeGate::con(Ok(firmado(EstadoLicencia::Active)));
+        svc.guardado.lock().unwrap().as_mut().unwrap().offline_consumido_ms = Some(50 * HORA_MS);
+        let res = gate(&svc, None).await.unwrap();
+        assert!(res.allowed);
+        assert_eq!(res.state.unwrap().offline_consumido_ms, Some(0));
     }
 
     /// Borrar a mano después de una anulación deja anotado el motivo, que es lo que la pantalla de

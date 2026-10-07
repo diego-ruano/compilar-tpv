@@ -344,10 +344,11 @@ pub fn evaluar_fallo(
     fallo: &FalloConsulta,
     base_ms: i64,
     ahora_ms: i64,
+    consumido_ms: i64,
     forzar_red: bool,
 ) -> Resolucion {
     match fallo {
-        FalloConsulta::Inalcanzable => Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms) {
+        FalloConsulta::Inalcanzable => Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms, consumido_ms) {
             Gracia::Vigente => Veredicto::permitir(Motivo::GraciaOffline),
             Gracia::Agotada => Veredicto::bloquear(Motivo::GraciaOfflineAgotada),
             Gracia::RelojAtrasado => Veredicto::bloquear(Motivo::RelojAtrasado),
@@ -359,7 +360,7 @@ pub fn evaluar_fallo(
         // de internet, cuando lo que hay que hacer es ajustar la hora. El motivo es el mismo
         // permita o bloquee, porque la acción de quien está delante es la misma.
         FalloConsulta::RelojDesfasado => {
-            Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms) {
+            Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms, consumido_ms) {
                 Gracia::Vigente => Veredicto::permitir(Motivo::RelojDesfasado),
                 _ => Veredicto::bloquear(Motivo::RelojDesfasado),
             })
@@ -374,7 +375,7 @@ pub fn evaluar_fallo(
         // RI-09: un «no» sin firma no se puede comprobar, así que pesa lo mismo que no haber podido
         // preguntar: la gracia offline. Con su motivo, para que se vea que no es la red.
         FalloConsulta::RechazoSinFirmar { .. } => {
-            Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms) {
+            Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms, consumido_ms) {
                 Gracia::Vigente => Veredicto::permitir(Motivo::RechazoSinVerificar),
                 Gracia::Agotada => Veredicto::bloquear(Motivo::RechazoSinVerificar),
                 Gracia::RelojAtrasado => Veredicto::bloquear(Motivo::RelojAtrasado),
@@ -385,7 +386,7 @@ pub fn evaluar_fallo(
             if forzar_red {
                 return Resolucion::Indecidible;
             }
-            match evaluar_gracia(base_ms, ahora_ms) {
+            match evaluar_gracia(base_ms, ahora_ms, consumido_ms) {
                 Gracia::Vigente => Resolucion::Decidido(Veredicto::permitir(Motivo::GraciaOffline)),
                 _ => Resolucion::Indecidible,
             }
@@ -410,11 +411,38 @@ pub fn base_gracia(last_check_ok_ms: Option<i64>, activated_at_ms: i64) -> i64 {
     last_check_ok_ms.unwrap_or(activated_at_ms)
 }
 
-pub fn evaluar_gracia(base_ms: i64, ahora_ms: i64) -> Gracia {
+/// RI-36 · Suma al tiempo sin conexión ya gastado lo que ha pasado desde la última vez que se contó.
+///
+/// La gracia se medía restando fechas del reloj del equipo, y eso se puede trampear: quien atrasara
+/// el reloj unas horas cada poco se quedaba dentro de las 72 h para siempre. Comparar con la última
+/// fecha vista no lo arreglaba —basta con no atrasarlo por debajo de ella—. Lo que no se puede
+/// atrasar es el reloj MONÓTONO del proceso, así que:
+/// - con la app abierta (`monotono_ms` = lo transcurrido según él desde la última cuenta), cuenta lo
+///   mayor de los dos relojes: atrasar el de pared no resta, y una suspensión —que el monótono puede
+///   no contar— la cuenta el de pared;
+/// - entre un arranque y otro no hay monótono, y cuenta el de pared, nunca hacia atrás.
+///
+/// Lo único que se puede esconder así es el rato con la app cerrada, que no importa: cerrada no vende.
+pub fn sumar_tiempo_sin_conexion(consumido_ms: i64, monotono_ms: Option<i64>, pared_ms: i64) -> i64 {
+    let paso = match monotono_ms {
+        Some(m) => m.max(pared_ms),
+        None => pared_ms,
+    };
+    consumido_ms.saturating_add(paso.max(0))
+}
+
+/// Cuánta gracia offline se ha gastado: lo que dice el reloj desde la base o lo que se ha contado
+/// (`sumar_tiempo_sin_conexion`), lo que sea mayor. Para alguien honrado son lo mismo; para quien ha
+/// atrasado el reloj, manda lo contado.
+pub fn gracia_gastada(base_ms: i64, ahora_ms: i64, consumido_ms: i64) -> i64 {
+    ahora_ms.saturating_sub(base_ms).max(consumido_ms)
+}
+
+pub fn evaluar_gracia(base_ms: i64, ahora_ms: i64, consumido_ms: i64) -> Gracia {
     if ahora_ms + TOLERANCIA_RELOJ_MS < base_ms {
         return Gracia::RelojAtrasado;
     }
-    if ahora_ms.saturating_sub(base_ms) <= GRACIA_OFFLINE_MS {
+    if gracia_gastada(base_ms, ahora_ms, consumido_ms) <= GRACIA_OFFLINE_MS {
         Gracia::Vigente
     } else {
         Gracia::Agotada
@@ -489,7 +517,7 @@ mod tests {
 
     #[test]
     fn firma_invalida_bloquea_pero_no_borra() {
-        match evaluar_fallo(&FalloConsulta::FirmaInvalida, AHORA, AHORA, false) {
+        match evaluar_fallo(&FalloConsulta::FirmaInvalida, AHORA, AHORA, 0, false) {
             Resolucion::Decidido(v) => {
                 assert!(!v.permitido);
                 assert_eq!(v.motivo.codigo(), "bad_signature");
@@ -506,7 +534,7 @@ mod tests {
         // usuario veía 72 h de cuenta atrás y luego un bloqueo que hablaba de internet.
         let base = AHORA - 1000;
 
-        match evaluar_fallo(&FalloConsulta::RelojDesfasado, base, AHORA, false) {
+        match evaluar_fallo(&FalloConsulta::RelojDesfasado, base, AHORA, 0, false) {
             Resolucion::Decidido(v) => {
                 assert!(v.permitido, "con gracia vigente se sigue vendiendo");
                 assert_eq!(v.motivo.codigo(), "clock_skew_detected");
@@ -517,7 +545,7 @@ mod tests {
         // Y agotada la gracia bloquea, pero diciendo lo mismo: la acción de quien está delante no
         // cambia porque hayan pasado tres días.
         let vieja = AHORA - GRACIA_OFFLINE_MS - 1;
-        match evaluar_fallo(&FalloConsulta::RelojDesfasado, vieja, AHORA, false) {
+        match evaluar_fallo(&FalloConsulta::RelojDesfasado, vieja, AHORA, 0, false) {
             Resolucion::Decidido(v) => {
                 assert!(!v.permitido);
                 assert_eq!(v.motivo.codigo(), "clock_skew_detected");
@@ -530,12 +558,12 @@ mod tests {
     fn sin_conexion_de_verdad_sigue_diciendo_lo_de_siempre() {
         // La otra mitad: si esto cambiara, un corte de internet pasaría a echarle la culpa al reloj.
         let base = AHORA - 1000;
-        match evaluar_fallo(&FalloConsulta::Inalcanzable, base, AHORA, false) {
+        match evaluar_fallo(&FalloConsulta::Inalcanzable, base, AHORA, 0, false) {
             Resolucion::Decidido(v) => assert_eq!(v.motivo.codigo(), "offline_grace"),
             _ => panic!("tiene que decidir"),
         }
         let vieja = AHORA - GRACIA_OFFLINE_MS - 1;
-        match evaluar_fallo(&FalloConsulta::Inalcanzable, vieja, AHORA, false) {
+        match evaluar_fallo(&FalloConsulta::Inalcanzable, vieja, AHORA, 0, false) {
             Resolucion::Decidido(v) => assert_eq!(v.motivo.codigo(), "offline_expired"),
             _ => panic!("tiene que decidir"),
         }
@@ -547,14 +575,14 @@ mod tests {
     #[test]
     fn un_rechazo_sin_firmar_sigue_la_gracia_con_su_propio_motivo() {
         let fallo = FalloConsulta::RechazoSinFirmar { code: "license_not_found".into() };
-        match evaluar_fallo(&fallo, AHORA - 1000, AHORA, false) {
+        match evaluar_fallo(&fallo, AHORA - 1000, AHORA, 0, false) {
             Resolucion::Decidido(v) => {
                 assert!(v.permitido, "con gracia vigente se sigue vendiendo");
                 assert_eq!(v.motivo.codigo(), "rejection_unverified");
             }
             Resolucion::Indecidible => panic!("un rechazo siempre decide"),
         }
-        match evaluar_fallo(&fallo, AHORA - GRACIA_OFFLINE_MS - 1, AHORA, false) {
+        match evaluar_fallo(&fallo, AHORA - GRACIA_OFFLINE_MS - 1, AHORA, 0, false) {
             Resolucion::Decidido(v) => {
                 assert!(!v.permitido);
                 assert_eq!(v.motivo.codigo(), "rejection_unverified");
@@ -565,14 +593,54 @@ mod tests {
 
     #[test]
     fn sin_red_se_aguanta_hasta_agotar_la_gracia() {
-        assert_eq!(evaluar_gracia(AHORA - GRACIA_OFFLINE_MS + 1, AHORA), Gracia::Vigente);
-        assert_eq!(evaluar_gracia(AHORA - GRACIA_OFFLINE_MS - 1, AHORA), Gracia::Agotada);
+        assert_eq!(evaluar_gracia(AHORA - GRACIA_OFFLINE_MS + 1, AHORA, 0), Gracia::Vigente);
+        assert_eq!(evaluar_gracia(AHORA - GRACIA_OFFLINE_MS - 1, AHORA, 0), Gracia::Agotada);
     }
 
     #[test]
     fn atrasar_el_reloj_no_estira_la_gracia() {
-        assert_eq!(evaluar_gracia(AHORA + TOLERANCIA_RELOJ_MS + 1, AHORA), Gracia::RelojAtrasado);
+        assert_eq!(evaluar_gracia(AHORA + TOLERANCIA_RELOJ_MS + 1, AHORA, 0), Gracia::RelojAtrasado);
     }
+
+    /// RI-36. El caso que se colaba: atrasar el reloj poco a poco, sin bajar nunca de la última
+    /// comprobación. El reloj de pared dice que ha pasado una hora; lo contado, cuatro días.
+    #[test]
+    fn atrasar_el_reloj_poco_a_poco_no_estira_la_gracia() {
+        let base = AHORA - HORA_MS;
+        let contado = 4 * 24 * HORA_MS;
+        assert_eq!(evaluar_gracia(base, AHORA, contado), Gracia::Agotada);
+        match evaluar_fallo(&FalloConsulta::Inalcanzable, base, AHORA, contado, false) {
+            Resolucion::Decidido(v) => {
+                assert!(!v.permitido);
+                assert_eq!(v.motivo.codigo(), "offline_expired");
+            }
+            Resolucion::Indecidible => panic!("sin red siempre decide"),
+        }
+    }
+
+    #[test]
+    fn con_la_app_abierta_manda_el_monotono_si_el_reloj_va_hacia_atras() {
+        // Ha pasado una hora de verdad, pero alguien ha atrasado el reloj tres horas.
+        assert_eq!(sumar_tiempo_sin_conexion(10, Some(HORA_MS), -2 * HORA_MS), 10 + HORA_MS);
+        // Una suspensión: el monótono puede no contarla, el de pared sí.
+        assert_eq!(sumar_tiempo_sin_conexion(0, Some(1_000), 8 * HORA_MS), 8 * HORA_MS);
+    }
+
+    #[test]
+    fn entre_arranques_cuenta_el_reloj_de_pared_y_nunca_resta() {
+        assert_eq!(sumar_tiempo_sin_conexion(5_000, None, 3_000), 8_000);
+        assert_eq!(sumar_tiempo_sin_conexion(5_000, None, -3_000), 5_000);
+    }
+
+    /// Para quien no toca el reloj, lo contado y lo que dice el reloj coinciden: nada cambia.
+    #[test]
+    fn sin_trampas_la_gracia_es_la_de_siempre() {
+        let base = AHORA - 10 * HORA_MS;
+        assert_eq!(gracia_gastada(base, AHORA, 10 * HORA_MS), 10 * HORA_MS);
+        assert_eq!(evaluar_gracia(base, AHORA, 10 * HORA_MS), Gracia::Vigente);
+    }
+
+    const HORA_MS: i64 = 60 * 60 * 1000;
 
     #[test]
     fn la_activacion_exige_clave_y_nombre_de_negocio() {

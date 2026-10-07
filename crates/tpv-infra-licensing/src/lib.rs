@@ -22,7 +22,8 @@ pub use secret_store::init_java_vm;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -469,6 +470,24 @@ fn leer_rechazo_con(claves: &[&str], r: &Respondida) -> Rechazo {
 }
 
 /* =========================================================
+   Reloj monótono de la gracia offline (RI-36)
+========================================================= */
+
+/// La última vez que se contó el tiempo sin conexión, según el reloj monótono. Es del PROCESO y no
+/// del adaptador, como el desfase de `reloj`: los adaptadores se construyen en cada comando y el
+/// pulso de la licencia tiene que medir desde lo que contó el anterior.
+static ULTIMA_MARCA_MONOTONA: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Lo transcurrido desde la marca anterior, dejando ésta como la nueva. `None` la primera vez.
+fn transcurrido_desde_la_ultima_marca() -> Option<i64> {
+    let ahora = Instant::now();
+    let mut marca = ULTIMA_MARCA_MONOTONA.lock().unwrap_or_else(|e| e.into_inner());
+    marca
+        .replace(ahora)
+        .map(|antes| ahora.saturating_duration_since(antes).as_millis() as i64)
+}
+
+/* =========================================================
    LicensingAdapter
 ========================================================= */
 
@@ -576,6 +595,10 @@ impl LicensingService for LicensingAdapter {
 
     fn last_rejection(&self) -> AppResult<Option<String>> {
         Ok(load_rejection(&self.app_data_dir))
+    }
+
+    fn transcurrido_monotono(&self) -> Option<i64> {
+        transcurrido_desde_la_ultima_marca()
     }
 
     async fn activar_remoto(

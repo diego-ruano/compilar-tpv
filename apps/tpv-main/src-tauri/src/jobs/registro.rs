@@ -34,6 +34,10 @@ use crate::AppState;
 /// Cada cuánto se revalida la licencia contra el worker mientras la app está abierta.
 const LICENCIA_INTERVAL_SECS: u64 = 6 * 60 * 60;
 
+/// RI-36: cada cuánto se cuenta el tiempo sin conexión de la gracia offline. Es lo más que se puede
+/// esconder cerrando la app y atrasando el reloj; contarlo es escribir un fichero pequeño.
+const LICENCIA_RELOJ_INTERVAL_SECS: u64 = 5 * 60;
+
 /// PROD-06: cada cuánto se pregunta a la nube qué interruptores tiene apagados este equipo.
 const INTERRUPTORES_INTERVAL_SECS: u64 = 5 * 60;
 
@@ -134,6 +138,17 @@ pub(crate) fn catalogo() -> Vec<Job> {
             requiere: Requiere::MainOperativa,
             interruptor: None,
             ejecutar: tarea(licencia),
+        },
+        Job {
+            // RI-36: cuenta el tiempo sin conexión con el reloj monótono, sin red. Entre dos pulsos
+            // de `licencia` hay 6 h: sin este, cerrar la app y atrasar el reloj escondía hasta eso.
+            // Sin BD ni red, así que corre siempre; sin licencia guardada no hace nada.
+            nombre: "licencia_reloj",
+            cada: Duration::from_secs(LICENCIA_RELOJ_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(LICENCIA_RELOJ_INTERVAL_SECS),
+            requiere: Requiere::Siempre,
+            interruptor: None,
+            ejecutar: tarea(licencia_reloj),
         },
         Job {
             // PROD-06: pregunta a la nube qué tiene apagado este equipo. Cinco minutos es lo que
@@ -335,6 +350,12 @@ async fn licencia(app: AppHandle) -> Result<(), String> {
     app.emit("license:changed", res)
         .map_err(|e| format!("no se pudo emitir license:changed: {e}"))?;
     Ok(())
+}
+
+/// RI-36: el pulso del reloj de la gracia offline (`uc_licensing::contar_tiempo_sin_conexion`).
+async fn licencia_reloj(app: AppHandle) -> Result<(), String> {
+    let svc = crate::commands::licensing::svc(&app)?;
+    uc_licensing::contar_tiempo_sin_conexion(&svc).map_err(|e| e.to_string())
 }
 
 /// Reconciliación de los valores derivados (INV-06 / DB-14).

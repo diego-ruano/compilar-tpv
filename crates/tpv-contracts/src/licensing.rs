@@ -44,6 +44,16 @@ pub struct LicenseLocalState {
     #[serde(alias = "activatedAtMs")]
     #[ts(type = "number")]
     pub activated_at_ms: i64,
+    /// RI-36: tiempo sin conexión ya gastado desde la última comprobación correcta, contado de forma
+    /// que atrasar el reloj del equipo no lo devuelva (`tpv_domain::licensing::sumar_tiempo_sin_conexion`).
+    /// `None` en un fichero de antes: cuenta como cero.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub offline_consumido_ms: Option<i64>,
+    /// RI-36: hora del reloj de pared de la última vez que se contó ese tiempo.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub marca_tiempo_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

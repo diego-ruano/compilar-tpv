@@ -214,6 +214,15 @@ a activar» (`clear_state`), que anota el motivo para que la pantalla de activac
 **Gracia sin conexión: 72 h** desde la última comprobación correcta (o desde la activación). Si el
 reloj está más de 2 minutos por detrás de esa base, bloquea con `clock_rollback_detected`.
 
+Lo gastado no sale sólo de restar fechas, que se puede trampear atrasando el reloj poco a poco (RI-36).
+Además se **cuenta** (`offline_consumido_ms` en `license_state.json`, `sumar_tiempo_sin_conexion`):
+- con la app abierta, con el reloj monótono del proceso, que no se puede atrasar;
+- entre arranques, con el de pared, nunca hacia atrás.
+
+Manda lo mayor de las dos cuentas. El job `licencia_reloj` cuenta cada 5 minutos, sin red, así que
+cerrando la app y atrasando el reloj sólo se esconden minutos. Una comprobación buena pone la cuenta
+a cero.
+
 El pulso es el job `licencia`, cada 6 h; usa `gate` (que aplica la gracia y emite los avisos a los
 administradores), no la comprobación manual del botón «Reintentar». Además de esto, el worker
 **comprueba la licencia en todas las rutas autenticadas** (`tenantAuth` → `lib/licenciaEnUso.ts`, con

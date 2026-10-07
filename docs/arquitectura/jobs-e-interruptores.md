@@ -40,6 +40,7 @@ un fallo parcial.
 | Job | Cada | Primer intento | Requiere | Interruptor | Qué hace |
 |---|---|---|---|---|---|
 | `licencia` | 6 h | 2 min | MainOperativa | — | `gate` de la licencia y sus avisos; emite `license:changed` |
+| `licencia_reloj` | 5 min | 5 min | Siempre | — | Cuenta el tiempo sin conexión de la gracia offline con el reloj monótono, sin red (RI-36) |
 | `interruptores` | 5 min | 20 s | MainOperativa | — | Pregunta a la nube qué está apagado |
 | `verifactu_remitir` | 60 s | 60 s | MainOperativa | `verifactu_remitir` | Remite a la AEAT ([verifactu.md](verifactu.md#la-remisión)) |
 | `avisos` | 10 min | 60 s | MainOperativa | — | Tareas vencidas y reservas próximas |
