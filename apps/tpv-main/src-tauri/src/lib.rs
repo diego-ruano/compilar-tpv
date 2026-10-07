@@ -4,14 +4,13 @@
 
 mod commands;
 mod interruptores;
+mod imagenes;
 mod jobs;
 mod printing;
 
 use base64::prelude::*;
-use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -194,7 +193,6 @@ struct SetConnectionModeArgs {
 #[derive(Debug, Clone, Deserialize)]
 struct SaveImageArgs {
     subfolder: String,
-    filename: String,
     base64_data: String,
 }
 
@@ -329,31 +327,6 @@ fn normalize_required(input: &str, field: &str) -> Result<String, String> {
 
 /// Lado máximo (px) al que se redimensiona la imagen antes de guardarla/subirla. Las fotos de
 /// móviles modernos (varios MB / 4000px) se reducen a algo razonable para un catálogo de TPV.
-const IMAGE_MAX_SIDE: u32 = 1024;
-/// Calidad JPEG (0-100). 80 da buen equilibrio tamaño/calidad para fotos de producto.
-const IMAGE_JPEG_QUALITY: u8 = 80;
-
-/// Decodifica unos bytes de imagen (jpeg/png/webp), redimensiona si excede `IMAGE_MAX_SIDE`
-/// (sólo reduce, nunca amplía, preservando proporción) y recodifica a JPEG optimizado.
-/// Devuelve los bytes JPEG resultantes. Así una foto de 10 MB acaba en decenas de KB.
-fn process_image(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let img = image::load_from_memory(bytes).map_err(|e| format!("Imagen no válida: {e}"))?;
-
-    let resized = if img.width() > IMAGE_MAX_SIDE || img.height() > IMAGE_MAX_SIDE {
-        img.resize(IMAGE_MAX_SIDE, IMAGE_MAX_SIDE, FilterType::Lanczos3)
-    } else {
-        img
-    };
-
-    // A RGB8 (JPEG no soporta alfa) y codificación con control de calidad.
-    let rgb = DynamicImage::ImageRgb8(resized.to_rgb8());
-    let mut out = Cursor::new(Vec::new());
-    rgb.write_with_encoder(JpegEncoder::new_with_quality(&mut out, IMAGE_JPEG_QUALITY))
-        .map_err(|e| format!("Error codificando JPEG: {e}"))?;
-
-    Ok(out.into_inner())
-}
-
 /// Una imagen pendiente de subir al bucket R2. `rel_path` es la ruta relativa idéntica a la de
 /// BD (`images/{subcarpeta}/{archivo}`); los bytes se leen del disco en el momento de subir.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -395,17 +368,7 @@ fn enqueue_image(app_data_dir: &Path, rel_path: &str, content_type: &str) -> Res
 /// Valida que una ruta relativa de imagen tenga la forma esperada y no escape de `images/`
 /// (evita borrar/leer ficheros arbitrarios desde el frontend).
 fn is_safe_image_rel_path(rel: &str) -> bool {
-    if rel.contains("..") || rel.contains('\\') {
-        return false;
-    }
-    let parts: Vec<&str> = rel.split('/').collect();
-    if parts.len() != 3 || parts[0] != "images" {
-        return false;
-    }
-    matches!(
-        parts[1],
-        "productos" | "categorias" | "proveedores" | "alergenos" | "logo"
-    ) && !parts[2].is_empty()
+    imagenes::ruta_segura(rel)
 }
 
 fn content_type_for(rel_path: &str) -> &'static str {
@@ -1074,50 +1037,26 @@ async fn device_reset_mode(
 // Comandos genéricos
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Guarda una imagen en el disco local (AppData) y la **encola** para subir al bucket R2.
-///
-/// Antes de escribir, la imagen se **redimensiona y recomprime a JPEG** (ver `process_image`),
-/// de modo que tanto la copia local como la del bucket pesen poco (fotos de móvil de varios MB
-/// acaban en decenas de KB). El `filename` debe terminar en `.jpg` (lo fija el frontend).
-///
-/// La subida a R2 NO se hace aquí: se encola y la drena `images_drain_pending` cuando hay red
-/// (el frontend lo dispara tras guardar y, en la Main online, también periódicamente). Esto
-/// hace la subida resiliente a estar offline en el momento de crear la imagen.
+/// RI-07: reconstruye una imagen en su formato real y devuelve su ruta relativa.
 #[tauri::command]
 async fn save_image(app: AppHandle, args: SaveImageArgs) -> Result<String, AppErrorDto> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Error obteniendo ruta AppData: {e}"))?;
-
     let subfolder = normalize_required(&args.subfolder, "subfolder")?;
-    let filename = normalize_required(&args.filename, "filename")?;
-    let base64_data = normalize_required(&args.base64_data, "base64_data")?;
-
-    let dir_path = app_data_dir.join("images").join(&subfolder);
-
-    fs::create_dir_all(&dir_path)
-        .map_err(|e| format!("Error creando carpeta {:?}: {e}", dir_path))?;
-
-    let raw_bytes = BASE64_STANDARD
-        .decode(&base64_data)
-        .map_err(|e| format!("Error al decodificar Base64: {e}"))?;
-
-    // Redimensionar + recomprimir a JPEG (en un hilo bloqueante: es CPU-bound).
-    let processed = tokio::task::spawn_blocking(move || process_image(&raw_bytes))
-        .await
-        .map_err(|e| format!("Error en el procesado de imagen: {e}"))??;
-
-    let file_path = dir_path.join(&filename);
-    fs::write(&file_path, processed)
-        .map_err(|e| format!("Error escribiendo el archivo en {:?}: {e}", file_path))?;
-
-    // Encolar la subida a R2 (la ruta relativa es idéntica a la que se guarda en BD).
-    let rel_path = format!("images/{}/{}", subfolder, filename);
-    let content_type = content_type_for(&rel_path);
-    enqueue_image(&app_data_dir, &rel_path, content_type)?;
-
-    Ok("Imagen guardada correctamente".to_string())
+    if !is_safe_image_rel_path(&format!("images/{subfolder}/validacion.jpg")) {
+        return Err("Carpeta de imagen no válida".into());
+    }
+    // Base64 añade un tercio: limitar antes de decodificar o copiar la entrada.
+    if args.base64_data.len() > imagenes::MAX_BYTES.div_ceil(3) * 4 {
+        return Err("La imagen debe pesar como máximo 5 MB".into());
+    }
+    let raw_bytes = BASE64_STANDARD.decode(&args.base64_data).map_err(|_| "Imagen Base64 no válida")?;
+    let (processed, extension) = tokio::task::spawn_blocking(move || imagenes::procesar(&raw_bytes))
+        .await.map_err(|e| format!("Error procesando imagen: {e}"))??;
+    let rel_path = format!("images/{subfolder}/{}.{}", uuid::Uuid::new_v4(), extension);
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let file_path = imagenes::destino(&app_data_dir, &rel_path, true)?;
+    fs::write(file_path, processed).map_err(|e| format!("No se ha podido guardar la imagen: {e}"))?;
+    enqueue_image(&app_data_dir, &rel_path, content_type_for(&rel_path))?;
+    Ok(rel_path)
 }
 
 /// Drena la cola de imágenes pendientes: por cada entrada, lee el fichero del disco y lo sube
@@ -1241,7 +1180,7 @@ async fn images_delete(
     }
 
     // Borrado local (ignoramos si ya no existe).
-    let _ = fs::remove_file(app_data_dir.join(&rel_path));
+    let _ = fs::remove_file(imagenes::destino(&app_data_dir, &rel_path, false)?);
 
     // Borrado remoto (best-effort: si falla por estar offline, el huérfano es inocuo).
     if let Some(mode_str) = signing_mode(*state.mode.lock().await) {
@@ -1277,7 +1216,7 @@ async fn images_ensure_local(
         return Err("rel_path inválido".into());
     }
 
-    let file_path = app_data_dir.join(&rel_path);
+    let file_path = imagenes::destino(&app_data_dir, &rel_path, false)?;
     if file_path.exists() {
         return Ok(true);
     }
@@ -1289,10 +1228,7 @@ async fn images_ensure_local(
     let svc = PairingAdapter::new(app_data_dir.clone());
     match uc_pairing::download_image(&svc, mode_str, &rel_path).await {
         Ok(Some(bytes)) => {
-            if let Some(parent) = file_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| format!("Error creando carpeta {:?}: {e}", parent))?;
-            }
+            let file_path = imagenes::destino(&app_data_dir, &rel_path, true)?;
             fs::write(&file_path, bytes)
                 .map_err(|e| format!("Error escribiendo {:?}: {e}", file_path))?;
             Ok(true)
@@ -2825,6 +2761,16 @@ mod tests_exenciones_del_gate {
 
     /// Marcas de que alguien ha metido el gate donde no puede estar.
     const SENALES_DE_GATE: &[&str] = &["exigir_rol", "state.sesion()"];
+
+    #[test]
+    fn guardar_imagen_valida_antes_de_escribir() {
+        let fuente = include_str!("lib.rs");
+        let comando = fuente.split("async fn save_image(").nth(1).unwrap().split("/// Drena").next().unwrap();
+        assert!(comando.find("is_safe_image_rel_path").unwrap() < comando.find("fs::write").unwrap());
+        assert!(comando.contains("imagenes::destino"));
+        assert!(comando.contains("imagenes::MAX_BYTES"));
+    }
+
 
     #[test]
     fn los_comandos_de_recuperacion_no_pueden_exigir_sesion() {

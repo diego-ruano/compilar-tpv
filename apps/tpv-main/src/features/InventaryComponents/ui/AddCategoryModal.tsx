@@ -1,8 +1,8 @@
+import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import { useToast } from "../../../shared/toast";
 import { invoke } from "@tauri-apps/api/core";
-import { convertirABase64 } from "../utils/inventarioFormat";
 import { useCreateCategoria } from "../inventarioQueries";
 import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 import { conAviso } from "../../../shared/lib/conAviso";
@@ -95,24 +95,11 @@ export default function AddCategoryModal({
             let nombreArchivo = "";
             let rutaParaBD = "";
 
-            // La imagen se procesa (resize + JPEG) en Rust y se sube a R2 (Main y Handy).
+            // La imagen se procesa (redimensionado conservando el formato) en Rust y se sube a R2 (Main y Handy).
             if (image) {
-                const uuid = crypto.randomUUID();
-                nombreArchivo = `${uuid}.jpg`;
-
-                const subcarpeta = "categorias";
-                rutaParaBD = `images/${subcarpeta}/${nombreArchivo}`;
-
-                const base64String = await convertirABase64(image);
-                const base64Data = base64String.split(",")[1];
-
-                await invoke("save_image", {
-                    args: {
-                        subfolder: subcarpeta,
-                        filename: nombreArchivo,
-                        base64_data: base64Data,
-                    },
-                });
+                const guardada = await guardarImagen(image, "categorias");
+                nombreArchivo = guardada.nombre;
+                rutaParaBD = guardada.ruta;
             }
 
             await createCategoria.mutateAsync({
@@ -249,7 +236,7 @@ export default function AddCategoryModal({
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                         className="hidden"
                         onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
                         disabled={loading}

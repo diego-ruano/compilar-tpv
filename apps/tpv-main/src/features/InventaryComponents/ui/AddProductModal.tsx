@@ -1,9 +1,9 @@
+import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
 import { invoke } from "@tauri-apps/api/core";
 
-import { convertirABase64 } from "../utils/inventarioFormat";
 import { resolveImageUrl, triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 
 import type { AlergenoInvDto, ProveedorMiniDto } from "@tpv/contracts";
@@ -296,26 +296,12 @@ export function AddProductModal({
             // Ruta de la imagen anterior, para limpiarla del bucket tras un reemplazo.
             const rutaAnterior = isEdit ? existingImagePath : null;
 
-            // La imagen se procesa (resize + JPEG) en Rust y se sube a R2 (bucket por tenant).
+            // La imagen se procesa (redimensionado conservando el formato) en Rust y se sube a R2 (bucket por tenant).
             // Funciona igual en Main y Handy: la subida la drena `images_drain_pending`.
             if (image) {
-                const uuid = crypto.randomUUID();
-                // Siempre .jpg: `save_image` recomprime a JPEG.
-                nombreArchivo = `${uuid}.jpg`;
-
-                const subcarpeta = "productos";
-                rutaParaBD = `images/${subcarpeta}/${nombreArchivo}`;
-
-                const base64String = await convertirABase64(image);
-                const base64Data = base64String.split(",")[1];
-
-                await invoke("save_image", {
-                    args: {
-                        subfolder: subcarpeta,
-                        filename: nombreArchivo,
-                        base64_data: base64Data,
-                    },
-                });
+                const guardada = await guardarImagen(image, "productos");
+                nombreArchivo = guardada.nombre;
+                rutaParaBD = guardada.ruta;
             }
 
             const alergIds = Array.from(selectedAlergenos.values())
@@ -766,7 +752,7 @@ export function AddProductModal({
                             id="producto-imagen"
                             ref={fileInputRef}
                             type="file"
-                            accept="image/*"
+                            accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                             className="hidden"
                             onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
                             disabled={loading}

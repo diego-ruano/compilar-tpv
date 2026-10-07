@@ -1,3 +1,4 @@
+import { guardarImagen } from "../../shared/lib/guardarImagen";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -44,13 +45,7 @@ type ProductoUI = ProductoProveedorDto & { urlImagen: string };
 
 type Vista = "list" | "detail";
 
-const convertirABase64 = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = (error) => reject(error);
-  });
+
 
 export default function Proveedores() {
   const [openAddProduct, setOpenAddProduct] = useState(false);
@@ -311,24 +306,11 @@ export default function Proveedores() {
       const rutaAnterior =
         modalProveedorModo === "editar" ? (proveedorActivo?.ruta_imagen ?? null) : null;
 
-      // La imagen se procesa (resize + JPEG) en Rust y se sube a R2 (Main y Handy).
+      // La imagen se procesa (redimensionado conservando el formato) en Rust y se sube a R2 (Main y Handy).
       if (fotoNuevaFile) {
-        const uuid = crypto.randomUUID();
-        nombreImagen = `prov_${uuid}.jpg`;
-
-        const subcarpeta = "proveedores";
-        rutaImagen = `images/${subcarpeta}/${nombreImagen}`;
-
-        const base64String = await convertirABase64(fotoNuevaFile);
-        const base64Data = base64String.split(",")[1];
-
-        await invoke("save_image", {
-          args: {
-            subfolder: subcarpeta,
-            filename: nombreImagen,
-            base64_data: base64Data,
-          },
-        });
+          const guardada = await guardarImagen(fotoNuevaFile, "proveedores");
+          nombreImagen = guardada.nombre;
+          rutaImagen = guardada.ruta;
       }
 
       if (modalProveedorModo === "editar" && proveedorActivo) {
@@ -771,7 +753,7 @@ export default function Proveedores() {
                   <input
                     ref={fotoInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                     className="hidden"
                     onChange={conAviso(async (e) => {
                       const file = e.target.files?.[0];

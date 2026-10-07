@@ -1,3 +1,4 @@
+import { guardarImagen } from "../../../shared/lib/guardarImagen";
 // src/features/configuracion/sections/Negocio.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -65,34 +66,14 @@ export function Negocio({
         if (!f) return;
         setUploadingLogo(true);
         try {
-            const dataUrl: string = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () =>
-                    typeof reader.result === "string"
-                        ? resolve(reader.result)
-                        : reject(new Error("No se pudo leer la imagen"));
-                reader.onerror = () => reject(reader.error);
-                reader.readAsDataURL(f);
-            });
-            const base64Data = dataUrl.split(",")[1] ?? "";
-
-            const filename = `${crypto.randomUUID()}.jpg`;
-            const relPath = `images/logo/${filename}`;
-            await invoke("save_image", {
-                args: {
-                    subfolder: "logo",
-                    filename,
-                    base64_data: base64Data,
-                },
-            });
-
-            setDraft((d) => ({ ...d, logoDataUrl: relPath }));
+            const guardada = await guardarImagen(f, "logo");
+            setDraft((d) => ({ ...d, logoDataUrl: guardada.ruta }));
             triggerImageUploadDrain();
         } catch (e) {
             console.error("save_image (logo) error:", e);
             toast.error(
                 "Logo",
-                typeof e === "string" ? e : "No se pudo subir el logo.",
+                e instanceof Error ? e.message : typeof e === "string" ? e : "No se pudo subir el logo.",
             );
         } finally {
             setUploadingLogo(false);
@@ -124,7 +105,7 @@ export function Negocio({
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept="image/*"
+                            accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                             className="hidden"
                             onChange={conAviso((e) => onLogoFile(e.target.files?.[0]))}
                         />

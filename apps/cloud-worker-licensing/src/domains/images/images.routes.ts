@@ -19,6 +19,7 @@
 //                           cacheada en el edge (REV-20; ver la nota del handler sobre el alcance).
 
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 
 import type { Env } from "../../env";
@@ -34,22 +35,20 @@ export const imagesRoutes = new Hono<Ctx>();
 const REL_PATH_RE =
 	/^images\/(productos|categorias|proveedores|alergenos|logo)\/[A-Za-z0-9][A-Za-z0-9._-]*\.(jpg|jpeg|png|webp)$/i;
 
-const ALLOWED_CONTENT_TYPES = new Set([
-	"image/jpeg",
-	"image/png",
-	"image/webp",
-]);
-
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB (la Main ya comprime antes de subir)
 const CACHE_CONTROL = "public, max-age=31536000, immutable";
 
-function contentTypeFor(relPath: string, requested: string | null | undefined): string {
-	const req = (requested || "").toLowerCase().trim();
-	if (ALLOWED_CONTENT_TYPES.has(req)) return req;
-	const ext = relPath.split(".").pop()?.toLowerCase() || "";
-	if (ext === "png") return "image/png";
-	if (ext === "webp") return "image/webp";
-	return "image/jpeg";
+function contentTypeFor(relPath: string): string {
+    const ext = relPath.split(".").pop()?.toLowerCase();
+    return ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+}
+
+// RI-07: no confiar en el MIME enviado; el procesamiento completo ocurre en Rust.
+export function tipoImagen(bytes: Uint8Array): string | null {
+    if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "image/jpeg";
+    if (bytes.length >= 8 && [137,80,78,71,13,10,26,10].every((b, i) => bytes[i] === b)) return "image/png";
+    if (bytes.length >= 12 && [82,73,70,70].every((b, i) => bytes[i] === b) && [87,69,66,80].every((b, i) => bytes[i + 8] === b)) return "image/webp";
+    return null;
 }
 
 // ───────────────── LECTURA (pública, cacheada en el edge) ─────────────────
@@ -74,8 +73,9 @@ imagesRoutes.get("/:tenant/*", async (c) => {
 	}
 
 	const headers = new Headers();
-	headers.set("Content-Type", obj.httpMetadata?.contentType || "image/jpeg");
+	headers.set("Content-Type", contentTypeFor(relPath));
 	headers.set("Cache-Control", CACHE_CONTROL);
+	headers.set("X-Content-Type-Options", "nosniff");
 	if (obj.httpEtag) headers.set("ETag", obj.httpEtag);
 
 	const res = new Response(obj.body, { headers });
@@ -98,7 +98,7 @@ function relPathFromUrl(url: string): string {
 	}
 }
 
-imagesRoutes.put("/*", tenantAuth, async (c) => {
+imagesRoutes.put("/*", bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ error: "image_too_large" }, 413) }), tenantAuth, async (c) => {
 	const relPath = relPathFromUrl(c.req.url);
 	console.log("[images PUT] relPath:", relPath);
 	if (!REL_PATH_RE.test(relPath)) {
@@ -110,7 +110,8 @@ imagesRoutes.put("/*", tenantAuth, async (c) => {
 	if (!body.byteLength) return c.json({ error: "empty_body" }, 400);
 	if (body.byteLength > MAX_BYTES) return c.json({ error: "image_too_large" }, 413);
 
-	const contentType = contentTypeFor(relPath, c.req.header("Content-Type"));
+	const contentType = tipoImagen(new Uint8Array(body));
+	if (!contentType || contentType !== contentTypeFor(relPath)) return c.json({ error: "bad_image_path" }, 400);
 	// El tenant SIEMPRE sale del token (no del cliente): aislamiento por tenant garantizado.
 	const key = `${c.get("tenantId")}/${relPath}`;
 	console.log("[images PUT] R2 key:", key);
@@ -148,7 +149,7 @@ imagesRoutes.post(
 		}
 
 		const headers = new Headers();
-		headers.set("Content-Type", obj.httpMetadata?.contentType || "image/jpeg");
+		headers.set("Content-Type", contentTypeFor(c.req.valid("json").rel_path));
 		if (obj.httpEtag) headers.set("ETag", obj.httpEtag);
 		return new Response(obj.body, { headers });
 	},
