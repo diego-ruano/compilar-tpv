@@ -17,7 +17,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { resolveTenantDbCredentials } from "../src/server/db/tenantDb";
-import { aesGcmEncrypt } from "../src/server/crypto";
+import { cifrar } from "../src/server/crypto";
 
 const CLAVE = btoa(String.fromCharCode(...new Uint8Array(32).fill(5)));
 const ENV = {
@@ -59,7 +59,7 @@ async function conTenant<R>(
 			`INSERT INTO tenant_databases (tenant_id, turso_db_name, turso_url, turso_auth_token_enc, rotated_at_ms)
 			 VALUES (?, 'db-1', 'libsql://db-1.turso.io', ?, ?);`,
 			TENANT,
-			await aesGcmEncrypt(CLAVE, TOKEN_GUARDADO),
+			await cifrar(CLAVE, TOKEN_GUARDADO),
 			Date.now() - rotadoHaceMs,
 		);
 		return prueba(clienteSobre(sql));

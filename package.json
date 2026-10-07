@@ -19,6 +19,7 @@
     "license:extend": "node scripts/tpv-license.mjs extend",
     "license:shorten": "node scripts/tpv-license.mjs shorten",
     "license:resend": "node scripts/tpv-license.mjs resend",
+    "license:recifrar": "node scripts/tpv-license.mjs recifrar",
     "license:keypair": "node scripts/generate-license-keypair.mjs",
     "interruptor:apagar": "node scripts/tpv-license.mjs interruptor-apagar",
     "interruptor:encender": "node scripts/tpv-license.mjs interruptor-encender",

@@ -21,7 +21,12 @@ export interface Env {
 
 	// Licencias / firma de tokens
 	LICENSE_JWT_SECRET: string;
-	LICENSE_STORE_KEY: string; // base64 32 bytes (AES-GCM): cifra la clave de licencia en reposo
+	LICENSE_STORE_KEY: string; // base64 32 bytes (AES-GCM): cifra en reposo claves, DEK y tokens de Turso
+	// RI-73 · La versión de `LICENSE_STORE_KEY` (por defecto "1") y, durante una rotación, la clave
+	// anterior con la suya (`server/crypto.ts`). Las dos últimas sólo existen mientras dura la rotación.
+	LICENSE_STORE_KEY_ID?: string;
+	LICENSE_STORE_KEY_ANTERIOR?: string;
+	LICENSE_STORE_KEY_ANTERIOR_ID?: string;
 
 	// Firma ed25519 del estado de licencia (docs/arquitectura/licencias.md).
 	// Semilla de 32 bytes en base64. La PRIVADA vive SOLO aquí; su pública está pineada en el binario

@@ -14,7 +14,7 @@
 //   · `customer_email` es obligatorio: es la raíz de confianza de la recuperación.
 
 import type { LicenseOrigin, LicenseStatus } from "../shared";
-import { aesGcmDecrypt, aesGcmEncrypt } from "./crypto";
+import { cifrar, descifrar, versionActual, type ClavesOClave } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec, type Sql } from "./db";
 
@@ -284,7 +284,8 @@ export async function listLicenses(db: Sql, limit = 50, offset = 0): Promise<Lic
 ============================================================ */
 
 export type IssueLicenseArgs = {
-	storeKeyB64: string;
+	/** Con qué se cifra la clave en reposo (`LICENSE_STORE_KEY`, ver `server/crypto.ts`). */
+	claves: ClavesOClave;
 	termMonths: number;
 	origin: LicenseOrigin;
 	customerEmail: string;
@@ -314,7 +315,7 @@ export async function issueLicense(
 ): Promise<{ license: LicenseRow; keyPlain: string }> {
 	const keyPlain = generateLicenseKey();
 	const licHash = await licenseKeyHash(keyPlain);
-	const keyEnc = await aesGcmEncrypt(args.storeKeyB64, keyPlain);
+	const keyEnc = await cifrar(args.claves, keyPlain);
 
 	const now = Date.now();
 	const licenseId = crypto.randomUUID();
@@ -731,6 +732,93 @@ export async function markKeyEmailSent(db: Sql, licenseId: string): Promise<void
 	);
 }
 
+/**
+ * RI-73 · Guarda la clave de una licencia ya recifrada con la `LICENSE_STORE_KEY` actual, sólo si la
+ * columna sigue teniendo lo que se leyó.
+ */
+export async function guardarClaveRecifrada(
+	db: Sql,
+	licenseId: string,
+	leida: string,
+	recifrada: string,
+): Promise<void> {
+	await exec(
+		db,
+		`UPDATE licenses SET license_key_enc=?, updated_at_ms=? WHERE license_id=? AND license_key_enc=?;`,
+		[recifrada, Date.now(), licenseId, leida],
+	);
+}
+
+/** RI-73 · Todo lo que la base central guarda cifrado con `LICENSE_STORE_KEY`. */
+const COLUMNAS_CIFRADAS = [
+	{ nombre: "licencias", tabla: "licenses", id: "license_id", columna: "license_key_enc" },
+	{ nombre: "deks", tabla: "tenants", id: "tenant_id", columna: "field_dek" },
+	{ nombre: "tokensTurso", tabla: "tenant_databases", id: "tenant_id", columna: "turso_auth_token_enc" },
+] as const;
+
+export type ResultadoRecifrado = {
+	/** Cuántos valores de cada columna se han pasado a la clave actual en esta llamada. */
+	recifrados: Record<(typeof COLUMNAS_CIFRADAS)[number]["nombre"], number>;
+	/** Los que no se dejan descifrar con ninguna clave configurada: hay que mirarlos a mano. */
+	ilegibles: { tabla: string; id: string }[];
+	/** `true` si se ha llegado al techo y quedan más: hay que volver a llamar. */
+	quedanMas: boolean;
+};
+
+/**
+ * RI-73 · Pasa a la clave actual lo que siga cifrado con otra: es el final de una rotación de
+ * `LICENSE_STORE_KEY`, para no esperar a que cada valor se lea. Como mucho `techo` valores por
+ * llamada (el techo va en la respuesta entera, no en cada tabla). Cada escritura va condicionada a
+ * que la columna siga teniendo lo leído, así que puede correr a la vez que el tráfico normal.
+ */
+export async function recifrarConLaActual(
+	db: Sql,
+	claves: ClavesOClave,
+	techo: number,
+): Promise<ResultadoRecifrado> {
+	const res: ResultadoRecifrado = {
+		recifrados: { licencias: 0, deks: 0, tokensTurso: 0 },
+		ilegibles: [],
+		quedanMas: false,
+	};
+	const conLaActual = `k${versionActual(claves)}:%`;
+	let quedan = techo;
+
+	for (const c of COLUMNAS_CIFRADAS) {
+		// Se pide uno más de lo que cabe: si llega, es que quedan más (con el cupo ya agotado, la
+		// consulta sólo sirve para saberlo).
+		const r = await exec(
+			db,
+			`SELECT ${c.id} AS id, ${c.columna} AS valor FROM ${c.tabla}
+			  WHERE ${c.columna} IS NOT NULL AND ${c.columna} <> '' AND ${c.columna} NOT LIKE ?
+			  LIMIT ?;`,
+			[conLaActual, quedan + 1],
+		);
+		const filas = (r.rows ?? []) as any[];
+		if (filas.length > quedan) res.quedanMas = true;
+
+		for (const f of filas.slice(0, quedan)) {
+			quedan--;
+			const leido = String(f.valor);
+			let nuevo: string;
+			try {
+				const { texto, recifrado } = await descifrar(claves, leido);
+				nuevo = recifrado ?? (await cifrar(claves, texto));
+			} catch {
+				res.ilegibles.push({ tabla: c.tabla, id: String(f.id) });
+				continue;
+			}
+			await exec(db, `UPDATE ${c.tabla} SET ${c.columna}=? WHERE ${c.id}=? AND ${c.columna}=?;`, [
+				nuevo,
+				String(f.id),
+				leido,
+			]);
+			res.recifrados[c.nombre]++;
+		}
+	}
+	return res;
+}
+
 /** Persiste los datos del negocio que llegan en la activación (corrige el bug #5). */
 export async function upsertTenantInfo(
 	db: Sql,
@@ -797,10 +885,10 @@ export async function ensureTenantExistsMinimal(db: Sql, tenantId: string) {
  */
 export async function getOrCreateTenantFieldDek(
 	db: Sql,
-	storeKeyB64: string,
+	claves: ClavesOClave,
 	tenantId: string,
 ): Promise<string> {
-	const existente = await leerFieldDek(db, storeKeyB64, tenantId);
+	const existente = await leerFieldDek(db, claves, tenantId);
 	if (existente) return existente;
 
 	const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -808,7 +896,7 @@ export async function getOrCreateTenantFieldDek(
 	for (const b of bytes) bin += String.fromCharCode(b);
 	const dekB64 = btoa(bin);
 
-	const cifrada = await aesGcmEncrypt(storeKeyB64, dekB64);
+	const cifrada = await cifrar(claves, dekB64);
 
 	// Guarda condicionalmente: si dos activaciones del mismo tenant corren a la vez, sólo
 	// una escribe. La perdedora relee y usa la del ganador — dos DEKs distintas para el mismo
@@ -825,14 +913,14 @@ export async function getOrCreateTenantFieldDek(
 	const escribio = Number((res as any)?.rowsAffected ?? 0) > 0;
 	if (escribio) return dekB64;
 
-	const ganadora = await leerFieldDek(db, storeKeyB64, tenantId);
+	const ganadora = await leerFieldDek(db, claves, tenantId);
 	if (!ganadora) throw new Error("field_dek_no_persistida");
 	return ganadora;
 }
 
 async function leerFieldDek(
 	db: Sql,
-	storeKeyB64: string,
+	claves: ClavesOClave,
 	tenantId: string,
 ): Promise<string | null> {
 	const r = await db.execute({
@@ -843,7 +931,16 @@ async function leerFieldDek(
 	const guardada = String((r.rows?.[0] as any)?.field_dek ?? "").trim();
 	if (!guardada) return null;
 
-	return await aesGcmDecrypt(storeKeyB64, guardada);
+	const { texto, recifrado } = await descifrar(claves, guardada);
+	// RI-73: estaba cifrada con la clave anterior. Se guarda ya con la actual, condicionado a que siga
+	// siendo la que se leyó (si otra petición la ha cambiado, se deja la suya).
+	if (recifrado) {
+		await db.execute({
+			sql: `UPDATE tenants SET field_dek=?, updated_at_ms=? WHERE tenant_id=? AND field_dek=?;`,
+			args: [recifrado, Date.now(), tenantId, guardada],
+		});
+	}
+	return texto;
 }
 
 /* ============================================================
@@ -1390,7 +1487,8 @@ export async function auditAdmin(
 		| "reactivate"
 		| "shorten"
 		| "interruptor_apagar"
-		| "interruptor_encender",
+		| "interruptor_encender"
+		| "recifrar",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

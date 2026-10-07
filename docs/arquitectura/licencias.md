@@ -292,7 +292,8 @@ gate y el updater la leen (`leer_*`) y nunca la crean. Al leer, el almacén dist
 |---|---|
 | `LICENSE_SIGNING_PRIVATE_KEY` | Firmar la aserción. Su pública va fija en `LICENSE_SIGNING_PUBLIC_KEYS_B64` (`tpv-infra-licensing/src/lib.rs`) junto a la de reserva (`pnpm license:keypair` genera cada par) |
 | `LICENSE_JWT_SECRET` | Tokens de sesión |
-| `LICENSE_STORE_KEY` | Cifrar en reposo claves, DEK y tokens de Turso. Global y sin rotación ([SEC-02](../pendientes.md#sec-02--license_store_key-es-global)) |
+| `LICENSE_STORE_KEY` (+ `LICENSE_STORE_KEY_ID`) | Cifrar en reposo claves, DEK y tokens de Turso (`server/crypto.ts`). Global: perderla deja la PII de todos irrecuperable. **No se regenera nunca**: se guarda en el gestor de contraseñas el día que se crea, porque Cloudflare no deja volver a leerla |
+| `LICENSE_STORE_KEY_ANTERIOR` (+ `_ID`) | Sólo durante una rotación: la clave de antes, para leer |
 | `ADMIN_API_TOKEN` | Las rutas de administración |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Leer la sesión de checkout y verificar el webhook |
 | `CHECKOUT_URL` | El enlace de compra de los avisos de caducidad |
@@ -311,6 +312,24 @@ de línea, en el gestor de contraseñas. Si la en uso se filtra:
 
 Subir al worker una privada cuya pública no esté en la lista deja a todos los equipos bloqueados con
 `bad_signature` (bloquea pero conserva la licencia: se arregla volviendo a poner la buena).
+
+### Rotar `LICENSE_STORE_KEY`
+
+Lo cifrado lleva la versión de la clave (`k<id>:` + base64; sin prefijo es la versión `1`, lo de antes
+de RI-73), así que cambiarla ya no deja ilegible lo anterior:
+
+1. Clave nueva: `openssl rand -base64 32`, primero al gestor de contraseñas.
+2. `wrangler secret put` de `LICENSE_STORE_KEY_ANTERIOR` (la de ahora) y `LICENSE_STORE_KEY_ANTERIOR_ID`
+   (su versión, `1` si nunca se ha rotado). Después `LICENSE_STORE_KEY` (la nueva) y `LICENSE_STORE_KEY_ID`
+   (una versión nueva: `2`, `3`…).
+3. Desde ese momento se escribe con la nueva, y lo que se lee con la anterior se guarda ya con la nueva.
+   `pnpm license:recifrar` pasa el resto de una vez y lista lo que no se deja descifrar con ninguna.
+4. Cuando no quede nada: `wrangler secret delete LICENSE_STORE_KEY_ANTERIOR` (y su `_ID`).
+
+Cambiar `LICENSE_STORE_KEY` **sin** pasar la anterior es lo que pasó el 27/09. Lo delata `/health`, que
+descifra un canario y contesta 503 (ver [worker.md](worker.md#salud-y-vigilancia-externa)). Los tokens de
+Turso se sustituyen solos en la siguiente lectura, pero las DEK y las claves de licencia no tienen
+arreglo sin la clave buena.
 
 Stripe: un producto con un Price *one-time* por duración, cada uno con `metadata.term_months`, el
 enlace de compra con «recopilar email», y el webhook en

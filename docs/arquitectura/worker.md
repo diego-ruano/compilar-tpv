@@ -106,6 +106,9 @@ Handy no lee por esa ruta: lee del `r2.dev` del bucket (`src/shared/lib/imageUrl
 - **`/health` toca la base central** (`server/salud.ts`) y contesta 200 o 503. El cuerpo no cuenta por
   qué falla (el error de libsql lleva la URL de la base). Caché de 30 s por isolate: la ruta es pública.
   No toca ninguna base de tenant. Lo vigila `test/salud.test.ts`.
+- **También descifra el canario de `LICENSE_STORE_KEY`** (`canario_cifrado`, RI-73): con una clave
+  equivocada contesta 503 (`cifrado: "falla"`). La fila la crea el propio `/health` la primera vez. Sin la
+  tabla, `cifrado: "sin_comprobar"` y la sonda sigue en verde.
 - Una sonda externa (Better Stack) la consulta en `tpv-api.altarialights.workers.dev/health`, el mismo
   hostname que usan los clientes.
 

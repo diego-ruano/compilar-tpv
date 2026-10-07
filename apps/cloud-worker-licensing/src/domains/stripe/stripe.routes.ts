@@ -246,7 +246,7 @@ export async function cumplir(
 		const emitidas: { license: LicenseRow; keyPlain: string; termMonths: number }[] = [];
 		for (const [i, termMonths] of unidades.termMonths.entries()) {
 			const { license, keyPlain } = await issueLicense(tx, {
-				storeKeyB64: env.LICENSE_STORE_KEY,
+				claves: env,
 				termMonths,
 				origin: "stripe",
 				customerEmail: email,

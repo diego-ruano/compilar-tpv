@@ -11,6 +11,7 @@
 //   POST /v1/admin/licenses/:id/extend   → suma meses
 //   POST /v1/admin/licenses/:id/shorten  → resta meses (puede dejarla caducada)
 //   /v1/admin/interruptores               → interruptores remotos de emergencia (PROD-06, abajo)
+//   POST /v1/admin/store-key/recifrar    → termina una rotación de LICENSE_STORE_KEY (RI-73)
 //
 // La clave en claro se devuelve UNA sola vez, en la respuesta del issue: después ya solo existe
 // cifrada. Si el cliente la pierde, se reemite.
@@ -22,14 +23,16 @@ import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
 import { cerrarSocketsDelDispositivo } from "../../lib/hub";
 import { getDb } from "../../server/db";
-import { aesGcmDecrypt } from "../../server/crypto";
+import { descifrar } from "../../server/crypto";
 import {
 	auditAdmin,
 	extendLicense,
+	guardarClaveRecifrada,
 	getLicenseById,
 	issueLicense,
 	listLicenses,
 	markKeyEmailSent,
+	recifrarConLaActual,
 	reactivateLicense,
 	revokeLicense,
 	shortenLicense,
@@ -71,7 +74,7 @@ adminRoutes.post("/licenses", cuerpo(issueSchema), async (c) => {
 	const db = getDb(env);
 
 	const { license, keyPlain } = await issueLicense(db, {
-		storeKeyB64: env.LICENSE_STORE_KEY,
+		claves: env,
 		termMonths,
 		origin: "manual",
 		customerEmail: email.trim().toLowerCase(),
@@ -125,7 +128,9 @@ adminRoutes.post("/licenses/:id/resend-key", async (c) => {
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 	if (!lic.license_key_enc) return c.json({ ok: false, error: "key_unavailable" }, 409);
 
-	const keyPlain = await aesGcmDecrypt(env.LICENSE_STORE_KEY, lic.license_key_enc);
+	const { texto: keyPlain, recifrado } = await descifrar(env, lic.license_key_enc);
+	// RI-73: si estaba con la clave anterior, se guarda ya con la actual.
+	if (recifrado) await guardarClaveRecifrada(db, licenseId, lic.license_key_enc, recifrado);
 
 	const emailSent = await sendLicenseKeyEmail(env, {
 		to: lic.customer_email,
@@ -145,6 +150,27 @@ adminRoutes.post("/licenses/:id/resend-key", async (c) => {
 		email: lic.customer_email,
 		emailSent,
 	});
+});
+
+/** Cuántos valores pasa a la clave actual cada llamada a `/store-key/recifrar`. */
+const TECHO_RECIFRADO = 200;
+
+/**
+ * RI-73 · Termina una rotación de `LICENSE_STORE_KEY`: pasa a la clave actual todo lo que siga cifrado
+ * con la anterior (claves de licencia, DEK de los negocios y tokens de Turso), sin esperar a que cada
+ * valor se lea. Se llama hasta que `quedanMas` sea `false`; después se puede quitar
+ * `LICENSE_STORE_KEY_ANTERIOR`. Los `ilegibles` no se dejan descifrar con ninguna de las dos: se miran
+ * a mano. Procedimiento: docs/arquitectura/licencias.md («Rotar LICENSE_STORE_KEY»).
+ */
+adminRoutes.post("/store-key/recifrar", async (c) => {
+	const env = c.env;
+	const miss = assertEnv(env, ["LICENSE_STORE_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
+	if (miss) return c.json({ ok: false, error: miss }, 500);
+
+	const db = getDb(env);
+	const r = await recifrarConLaActual(db, env, TECHO_RECIFRADO);
+	await auditAdmin(db, "recifrar", null, { recifrados: r.recifrados, ilegibles: r.ilegibles.length });
+	return c.json({ ok: true, ...r });
 });
 
 adminRoutes.get("/licenses", async (c) => {

@@ -23,7 +23,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio |
 | [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
-| [SEC-02](#sec-02--license_store_key-es-global) | 🔵 | `LICENSE_STORE_KEY` sin rotación ni custodia | Sin empezar |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
@@ -141,12 +140,6 @@ reproducir tal cual. Aplazado: hay que haber capturado el tráfico (va por TLS) 
 idempotentes por `Op_Id`. Cuando se retome hace falta un almacén de nonces compartido entre isolates
 (KV es eventualmente consistente; un Durable Object o una tabla con TTL sí sirven) y un despliegue en
 tres pasos: worker tolerante, clientes nuevos, worker estricto.
-
-### SEC-02 · `LICENSE_STORE_KEY` es global
-
-Cifra en reposo las DEK de **todos** los tenants (`tenants.field_dek`) y los tokens de Turso. Perderla
-deja la PII de todos irrecuperable; filtrarla la expone toda. No hay rotación ni custodia documentadas
-(los secretos de wrangler no se pueden volver a leer: tiene que estar guardada fuera de Cloudflare).
 
 ### LOGIN-04 · El hash del PIN se puede romper offline
 

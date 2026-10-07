@@ -62,7 +62,7 @@ async function conLicencia<T>(nombre: string, prueba: (clave: string, licenseId:
 		}
 		dbDePruebas = clienteSobre(sql);
 		const { license, keyPlain } = await issueLicense(dbDePruebas as any, {
-			storeKeyB64: STORE_KEY,
+			claves: STORE_KEY,
 			termMonths: 12,
 			origin: "manual",
 			customerEmail: "bar@ejemplo.test",

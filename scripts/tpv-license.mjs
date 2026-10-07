@@ -9,6 +9,7 @@
 //   pnpm license:extend   -- --id <licenseId> --months 12
 //   pnpm license:shorten  -- --id <licenseId> --months 24   (puede dejarla CADUCADA)
 //   pnpm license:resend -- --id <licenseId>          (reenvía/recupera la clave por email)
+//   pnpm license:recifrar                             (termina una rotación de LICENSE_STORE_KEY, RI-73)
 //
 // Y los interruptores remotos de emergencia (PROD-06), que van por el mismo token:
 //
@@ -282,6 +283,35 @@ async function interruptorLista(args) {
 	);
 }
 
+/**
+ * RI-73 · Termina una rotación de LICENSE_STORE_KEY: llama a la ruta hasta que no quede nada cifrado
+ * con la clave anterior. Lo que no se deja descifrar con ninguna de las dos se lista para mirarlo a
+ * mano. Procedimiento: docs/arquitectura/licencias.md («Rotar LICENSE_STORE_KEY»).
+ */
+async function recifrar() {
+	const total = { licencias: 0, deks: 0, tokensTurso: 0 };
+	const ilegibles = new Map();
+	for (;;) {
+		const r = await api("POST", "/v1/admin/store-key/recifrar");
+		for (const k of Object.keys(total)) total[k] += r.recifrados[k] ?? 0;
+		for (const i of r.ilegibles) ilegibles.set(`${i.tabla}:${i.id}`, i);
+		const avanzo = Object.values(r.recifrados).some((n) => n > 0);
+		// Los ilegibles vuelven a salir en cada llamada: si sólo quedan ellos, se para.
+		if (!r.quedanMas || !avanzo) break;
+	}
+	console.log(
+		`\n  ✔ Recifrado con la clave actual: ${total.licencias} claves de licencia, ${total.deks} DEK, ` +
+			`${total.tokensTurso} tokens de Turso.`,
+	);
+	if (ilegibles.size) {
+		console.log(`\n  ✖ ${ilegibles.size} no se dejan descifrar con ninguna clave configurada:`);
+		console.table([...ilegibles.values()]);
+		console.log("  No quites LICENSE_STORE_KEY_ANTERIOR hasta saber qué son.\n");
+	} else {
+		console.log("  Ya se puede quitar LICENSE_STORE_KEY_ANTERIOR (wrangler secret delete).\n");
+	}
+}
+
 /* ── Entrada ─────────────────────────────────────────────────────────────── */
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -303,6 +333,7 @@ const comandos = {
 	extend,
 	shorten,
 	resend,
+	recifrar,
 	"interruptor-apagar": interruptorApagar,
 	"interruptor-encender": interruptorEncender,
 	"interruptor-lista": interruptorLista,
@@ -319,6 +350,7 @@ if (!comandos[cmd]) {
     extend   --id <licenseId> --months 1|3|12
     shorten  --id <licenseId> --months <1-120>   (puede dejarla CADUCADA)
     resend  --id <licenseId>
+    recifrar                 (termina una rotación de LICENSE_STORE_KEY)
 
   Interruptores (pnpm interruptor:<comando>):
     apagar    --nombre <interruptor> --horas <n> --motivo "…" [--tenant <id>] [--desde x.y.z] [--hasta x.y.z]

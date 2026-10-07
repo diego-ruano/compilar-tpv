@@ -131,7 +131,7 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 				),
 			async emitir() {
 				const { license } = await issueLicense(db, {
-					storeKeyB64: STORE_KEY,
+					claves: STORE_KEY,
 					termMonths: 12,
 					origin: "manual",
 					customerEmail: "bar@ejemplo.test",

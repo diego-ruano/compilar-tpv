@@ -1,5 +1,3 @@
-import { b64ToBytes } from "./base64";
-
 /**
  * Comparación de dos hex en tiempo constante. Un `===` normal sale del bucle en cuanto
  * encuentra el primer byte distinto, y ese tiempo revela cuántos acertaste: repitiendo, se
@@ -33,32 +31,4 @@ export async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
 
 export async function sha256HexStr(s: string): Promise<string> {
 	return sha256HexBytes(new TextEncoder().encode(s));
-}
-
-/**
- * AES-GCM decrypt (payload = iv[12] + ciphertext)
- * keyB64 debe ser 32 bytes en base64
- */
-export async function aesGcmDecryptFromB64(keyB64: string, payloadB64: string): Promise<string> {
-	const raw = b64ToBytes(payloadB64);
-	const iv = raw.slice(0, 12);
-	const data = raw.slice(12);
-
-	const keyBytes = b64ToBytes(keyB64);
-
-	const key = await crypto.subtle.importKey(
-		"raw",
-		keyBytes as unknown as BufferSource,
-		{ name: "AES-GCM" },
-		false,
-		["decrypt"],
-	);
-
-	const pt = await crypto.subtle.decrypt(
-		{ name: "AES-GCM", iv },
-		key,
-		data as unknown as BufferSource
-	);
-
-	return new TextDecoder().decode(pt);
 }

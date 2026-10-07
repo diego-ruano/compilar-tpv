@@ -2,7 +2,7 @@
 -- Esquema de la base CENTRAL (control-plane) de `tpv-api`, tal como está en producción.
 --
 -- Foto tomada el 2026-09-16, más los cambios de RI-52 (2026-10-04: varias licencias por compra) y
--- de RI-68 (2026-10-07: `license_otp_eventos`).
+-- de RI-68 y RI-73 (2026-10-07: `license_otp_eventos` y `canario_cifrado`).
 -- Es la única referencia de esta base en el repo.
 --
 -- La estructura de esta base NO se toca desde el código: el worker no crea ni altera tablas. Se
@@ -345,3 +345,15 @@ CREATE TABLE interruptores (
 );
 
 CREATE INDEX idx_interruptores_vigentes ON interruptores(expires_at_ms, tenant_id);
+
+
+-- ── Canario de LICENSE_STORE_KEY (RI-73) ────────────────────────────────────────────────────
+-- Una sola fila: un texto fijo cifrado con `LICENSE_STORE_KEY`. `/health` la descifra y contesta
+-- 503 si no puede, así que una clave equivocada se ve en la sonda y no en la primera activación que
+-- falle. La crea el propio `/health` la primera vez que no la encuentra (`server/salud.ts`).
+
+CREATE TABLE canario_cifrado (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  valor      TEXT NOT NULL,
+  creado_ms  INTEGER NOT NULL
+);

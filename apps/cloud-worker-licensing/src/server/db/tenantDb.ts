@@ -16,13 +16,11 @@
 import type { Client } from "@libsql/client/web";
 
 import { HubError } from "../../lib/errorHttp";
-import { b64ToBytes, bytesToB64 } from "../utils/base64";
-import { aesGcmDecryptFromB64 } from "../utils/crypto";
+import { cifrar, descifrar, type ClavesDeAlmacen } from "../crypto";
 import { runTenantMigrations } from "../tenantMigrations";
 
 /** Campos del Env que necesita la resolución/rotación de la DB del tenant. */
-export type TenantDbEnv = {
-	LICENSE_STORE_KEY: string;
+export type TenantDbEnv = ClavesDeAlmacen & {
 	TURSO_PLATFORM_TOKEN: string;
 	TURSO_ORG_SLUG: string;
 };
@@ -76,30 +74,11 @@ export function ensureTenantMigrated(client: Client, tenantId: string): Promise<
 	return inFlight;
 }
 
-// ---------------- AES-GCM encrypt (para persistir el token rotado) ----------------
+// ---------------- El token guardado, cifrado con LICENSE_STORE_KEY ----------------
 
-async function aesGcmEncryptToB64(
-	keyB64: string,
-	plaintext: string,
-): Promise<string> {
-	const keyBytes = b64ToBytes(keyB64);
-	const key = await crypto.subtle.importKey(
-		"raw",
-		keyBytes as unknown as BufferSource,
-		{ name: "AES-GCM" },
-		false,
-		["encrypt"],
-	);
-	const iv = crypto.getRandomValues(new Uint8Array(12));
-	const ct = await crypto.subtle.encrypt(
-		{ name: "AES-GCM", iv },
-		key,
-		new TextEncoder().encode(plaintext),
-	);
-	const out = new Uint8Array(iv.length + ct.byteLength);
-	out.set(iv, 0);
-	out.set(new Uint8Array(ct), iv.length);
-	return bytesToB64(out);
+/** El token de Turso guardado, en claro. El cifrado lo lleva `server/crypto.ts` (RI-73). */
+async function descifrarToken(env: ClavesDeAlmacen, guardado: unknown): Promise<string> {
+	return (await descifrar(env, String(guardado))).texto;
 }
 
 // ---------------- tenant_databases (DB central) ----------------
@@ -131,7 +110,7 @@ export async function upsertTenantDbRow(
 	tursoUrl: string,
 	tursoTokenPlain: string,
 ) {
-	const enc = await aesGcmEncryptToB64(env.LICENSE_STORE_KEY, tursoTokenPlain);
+	const enc = await cifrar(env, tursoTokenPlain);
 	await dbCentral.execute({
 		sql: `INSERT INTO tenant_databases (tenant_id, turso_db_name, turso_url, turso_auth_token_enc, created_at_ms, rotated_at_ms)
 		      VALUES (?, ?, ?, ?, unixepoch()*1000, NULL)
@@ -253,10 +232,7 @@ export async function resolveTenantDbCredentials(
 				`[tenantDb] no se pudo rotar el token de tenant=${tenantId}: ${String(e?.message || e)}. ` +
 				`Se sigue con el guardado (le quedan ${Math.round(vidaRestante / 3_600_000)} h).`,
 			);
-			const token = await aesGcmDecryptFromB64(
-				env.LICENSE_STORE_KEY,
-				String(row.turso_auth_token_enc),
-			);
+			const token = await descifrarToken(env, row.turso_auth_token_enc);
 			return { dbName, tursoUrl, tursoAuthToken: token, rotated: false, rotatedAtMs: lastRotationBaseMs };
 		}
 
@@ -293,10 +269,7 @@ export async function resolveTenantDbCredentials(
 		if (!updated?.turso_auth_token_enc) {
 			throw new HubError("tenant_db_not_provisioned", 404);
 		}
-		const token = await aesGcmDecryptFromB64(
-			env.LICENSE_STORE_KEY,
-			String(updated.turso_auth_token_enc),
-		);
+		const token = await descifrarToken(env, updated.turso_auth_token_enc);
 		return {
 			dbName,
 			tursoUrl,
@@ -306,10 +279,19 @@ export async function resolveTenantDbCredentials(
 		};
 	}
 
-	const token = await aesGcmDecryptFromB64(
-		env.LICENSE_STORE_KEY,
-		String(row.turso_auth_token_enc),
-	);
+	// RI-73: un token guardado que no se deja descifrar (se cambió `LICENSE_STORE_KEY` sin pasar la
+	// anterior) no tiene arreglo leyéndolo otra vez, pero sí acuñando otro: para eso no hace falta el
+	// viejo. Antes el negocio se quedaba sin Handy ni Durable Object hasta la rotación del día
+	// siguiente.
+	let token: string;
+	try {
+		token = await descifrarToken(env, row.turso_auth_token_enc);
+	} catch (e: any) {
+		console.warn(
+			`[tenantDb] el token guardado de tenant=${tenantId} no se puede descifrar (${String(e?.message || e)}): se rota ya.`,
+		);
+		return resolveTenantDbCredentials(dbCentral, env, tenantId, true);
+	}
 
 	return {
 		dbName,
@@ -332,7 +314,7 @@ async function rotateTokenIfOwner(
 	freshToken: string,
 	oldRotatedAtMs: number | null,
 ): Promise<boolean> {
-	const enc = await aesGcmEncryptToB64(env.LICENSE_STORE_KEY, freshToken);
+	const enc = await cifrar(env, freshToken);
 	// IS hace comparación NULL-safe: `col IS NULL` cuando el arg es null,
 	// `col IS 1234` (equivalente a =) cuando es un número.
 	const result = await dbCentral.execute({

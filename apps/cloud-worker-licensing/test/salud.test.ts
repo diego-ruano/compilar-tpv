@@ -51,13 +51,13 @@ describe("el veredicto de /health", () => {
 
 	it("con la base central viva, dice que sí", async () => {
 		const base = baseViva();
-		expect(await comprobarSalud(base.abrir, AHORA)).toEqual({ ok: true, db: "ok" });
+		expect(await comprobarSalud(base.abrir, AHORA)).toEqual({ ok: true, db: "ok", cifrado: "sin_comprobar" });
 		expect(base.llamadas.n).toBe(1);
 	});
 
 	it("con la base central caída, dice que NO — el caso entero por el que esto existe", async () => {
 		const base = baseMuerta();
-		expect(await comprobarSalud(base.abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable" });
+		expect(await comprobarSalud(base.abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
 	});
 
 	it("sin credenciales configuradas falla igual que si la base no contestara", async () => {
@@ -66,7 +66,7 @@ describe("el veredicto de /health", () => {
 		const abrir = () => {
 			throw new Error("missing_env_TURSO_AUTH_TOKEN");
 		};
-		expect(await comprobarSalud(abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable" });
+		expect(await comprobarSalud(abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
 	});
 
 	it("no cuenta POR QUÉ falla: el cuerpo lo lee cualquiera", async () => {
@@ -76,7 +76,7 @@ describe("el veredicto de /health", () => {
 		// por un endpoint público y sin autenticar.
 		expect(JSON.stringify(salud)).not.toContain("turso.io");
 		expect(JSON.stringify(salud)).not.toContain("abc123");
-		expect(Object.keys(salud).sort()).toEqual(["db", "ok"]);
+		expect(Object.keys(salud).sort()).toEqual(["cifrado", "db", "ok"]);
 	});
 
 	it("dentro de su ventana contesta de memoria, sin volver a preguntar", async () => {
@@ -90,10 +90,10 @@ describe("el veredicto de /health", () => {
 
 	it("pasada la ventana vuelve a preguntar, y una base que revive se nota", async () => {
 		const muerta = baseMuerta();
-		expect(await comprobarSalud(muerta.abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable" });
+		expect(await comprobarSalud(muerta.abrir, AHORA)).toEqual({ ok: false, db: "inalcanzable", cifrado: "sin_comprobar" });
 
 		const viva = baseViva();
-		expect(await comprobarSalud(viva.abrir, AHORA + CACHE_MS)).toEqual({ ok: true, db: "ok" });
+		expect(await comprobarSalud(viva.abrir, AHORA + CACHE_MS)).toEqual({ ok: true, db: "ok", cifrado: "sin_comprobar" });
 	});
 });
 

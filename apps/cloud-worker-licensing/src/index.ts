@@ -92,9 +92,11 @@ app.options("*", (c) =>
 // `{ ok: true }` que no comprueba nada deja el monitor en verde durante la averia entera, que es
 // justo el silencio que esto existe para romper. El porque largo, en `server/salud.ts`.
 app.get("/health", async (c) => {
-	const salud = await comprobarSalud(() => getDb(c.env));
+	// RI-73: también descifra el canario de `LICENSE_STORE_KEY` (ver `server/salud.ts`).
+	const claves = c.env.LICENSE_STORE_KEY ? c.env : undefined;
+	const salud = await comprobarSalud(() => getDb(c.env), Date.now(), claves);
 	return json(
-		{ ok: salud.ok, service: "tpv-api", db: salud.db, ts: Date.now() },
+		{ ok: salud.ok, service: "tpv-api", db: salud.db, cifrado: salud.cifrado, ts: Date.now() },
 		salud.ok ? 200 : 503,
 		c.req.raw,
 	);

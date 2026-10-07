@@ -284,7 +284,7 @@ licenseRoutes.post("/activate", filtroExterior, async (c) => {
 			// `LICENSE_STORE_KEY` ya no es la que la cifró— dejaba la clave gastada y los meses
 			// sumados sin que el equipo recibiera su token: el reintento contestaba
 			// `license_already_used` y el TPV se quedaba sin poder entrar con ninguna de las dos.
-			const fieldDek = await getOrCreateTenantFieldDek(db, env.LICENSE_STORE_KEY, tenantId);
+			const fieldDek = await getOrCreateTenantFieldDek(db, env, tenantId);
 			// El token lleva el hash de la licencia que SIGUE viva, no el de la clave gastada: es
 			// con lo que `/status` la reconoce a partir de ahora.
 			const token = await firmarSesion(env, {
@@ -479,7 +479,7 @@ licenseRoutes.post("/activate", filtroExterior, async (c) => {
 	// TRAB-03: la clave con la que la Main cifra DNI/IBAN/nº SS. Se entrega en cada
 	// activación (no sólo en la primera) porque es justo lo que necesita un equipo nuevo
 	// tras un cambio de dispositivo para poder volver a leer los datos del personal.
-	const fieldDek = await getOrCreateTenantFieldDek(db, env.LICENSE_STORE_KEY, tenantId);
+	const fieldDek = await getOrCreateTenantFieldDek(db, env, tenantId);
 
 	const out: ActivateResponse = {
 		ok: true,

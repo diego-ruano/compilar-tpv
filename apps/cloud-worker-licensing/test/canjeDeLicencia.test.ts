@@ -41,7 +41,7 @@ const { generateLicenseKey, licenseKeyHash } = await import(
 	"../src/domains/licensing/licenseKey"
 );
 const { getLicenseById } = await import("../src/server/licenseStore");
-const { aesGcmEncrypt } = await import("../src/server/crypto");
+const { cifrar } = await import("../src/server/crypto");
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const ENV = {
@@ -368,7 +368,7 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 			const dek = btoa(String.fromCharCode(...new Uint8Array(32).fill(5)));
 			e.sql.exec(
 				`UPDATE tenants SET field_dek=? WHERE tenant_id='tenant-del-bar';`,
-				await aesGcmEncrypt(OTRA_CLAVE, dek),
+				await cifrar(OTRA_CLAVE, dek),
 			);
 			const fallo = await e.activar(nueva.clave);
 			const tras = { vieja: await e.leer(viejaId), clave: await e.leer(nueva.id) };
@@ -377,7 +377,7 @@ describe("REV-13 · un canje que falla no gasta la clave", () => {
 			// MISMO código entra a la primera.
 			e.sql.exec(
 				`UPDATE tenants SET field_dek=? WHERE tenant_id='tenant-del-bar';`,
-				await aesGcmEncrypt(STORE_KEY, dek),
+				await cifrar(STORE_KEY, dek),
 			);
 			const bien = await e.activar(nueva.clave);
 			return { antes, fallo, tras, bien, dek, final: await e.leer(viejaId) };

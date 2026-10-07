@@ -68,7 +68,7 @@ async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
 		};
 
 		const { license } = await issueLicense(db, {
-			storeKeyB64: STORE_KEY,
+			claves: STORE_KEY,
 			termMonths: 12,
 			origin: "manual",
 			customerEmail: COMPRA,
