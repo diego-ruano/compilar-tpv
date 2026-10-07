@@ -62,8 +62,12 @@ pub async fn get_comanda_abierta_by_mesa(
 #[tauri::command]
 pub async fn abrir_comanda(
     state: State<'_, AppState>,
-    args: MesasAbrirComandaInput,
+    mut args: MesasAbrirComandaInput,
 ) -> Result<Option<ComandaRow>, AppErrorDto> {
+    // RI-28: la atribución procede de la sesión del backend.
+    let sesion = state.sesion().await?;
+    args.id_usuario = Some(sesion.id_usuario);
+    args.id_trabajador = sesion.id_trabajador;
     let repo = state.mesas_repo().await?;
     Ok(uc::abrir_comanda(repo.as_ref(), args).await?)
 }
@@ -71,8 +75,12 @@ pub async fn abrir_comanda(
 #[tauri::command]
 pub async fn comanda_set_trabajador_if_null(
     state: State<'_, AppState>,
-    args: MesasComandaSetTrabajadorInput,
+    mut args: MesasComandaSetTrabajadorInput,
 ) -> Result<bool, AppErrorDto> {
+    // RI-28: la atribución procede de la sesión del backend.
+    let sesion = state.sesion().await?;
+    args.id_usuario = Some(sesion.id_usuario);
+    args.id_trabajador = sesion.id_trabajador;
     let repo = state.mesas_repo().await?;
     Ok(uc::comanda_set_trabajador_if_null(repo.as_ref(), args).await?)
 }
@@ -89,8 +97,12 @@ pub async fn get_lineas_comanda(
 #[tauri::command]
 pub async fn add_linea_comanda(
     state: State<'_, AppState>,
-    args: MesasAddLineaComandaInput,
+    mut args: MesasAddLineaComandaInput,
 ) -> Result<Vec<MesaLineaComandaRow>, AppErrorDto> {
+    // RI-28: la atribución procede de la sesión del backend.
+    let sesion = state.sesion().await?;
+    args.id_usuario = Some(sesion.id_usuario);
+    args.id_trabajador = sesion.id_trabajador;
     let repo = state.mesas_repo().await?;
     Ok(uc::add_linea_comanda(repo.as_ref(), args).await?)
 }
@@ -190,8 +202,11 @@ pub async fn kitchen_list_today_pending(
 #[tauri::command]
 pub async fn kitchen_set_line_state(
     state: State<'_, AppState>,
-    args: MesasKitchenSetLineStateInput,
+    mut args: MesasKitchenSetLineStateInput,
 ) -> Result<String, AppErrorDto> {
+    // RI-28: la atribución procede de la sesión del backend.
+    let sesion = state.sesion().await?;
+    args.id_usuario_cocinero = sesion.id_usuario;
     let repo = state.mesas_repo().await?;
     uc::kitchen_set_line_state(repo.as_ref(), args).await?;
     Ok("OK".to_string())

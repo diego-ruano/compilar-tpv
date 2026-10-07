@@ -536,7 +536,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         finish_tx(conn, res).await
     }
 
-    async fn upsert_producto(&self, p: ProductoUpsert) -> AppResult<String> {
+    async fn upsert_producto(&self, id_usuario: &str, p: ProductoUpsert) -> AppResult<String> {
         let g = self.db.write().await;
         let conn = &g;
         let id_producto = p.id.unwrap_or_else(new_id);
@@ -602,12 +602,13 @@ impl InventarioRepository for SqliteInventarioRepository {
                     INSERT INTO Movimientos_Stock
                       (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
                     VALUES
-                      (?1, ?2, 'ALTA', ?3, ?3, 'Alta del producto', NULL, datetime('now','localtime'));
+                      (?1, ?2, 'ALTA', ?3, ?3, 'Alta del producto', ?4, datetime('now','localtime'));
                     "#,
                     vec![
                         Value::Text(new_id()),
                         Value::Text(id_producto.to_string()),
                         Value::Real(stock),
+                        Value::Text(id_usuario.to_string()),
                     ],
                 )
                 .await
@@ -635,7 +636,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         Ok(id_producto)
     }
 
-    async fn create_lote(&self, l: LoteNuevo) -> AppResult<()> {
+    async fn create_lote(&self, id_usuario: &str, l: LoteNuevo) -> AppResult<()> {
         let id_lote = l.id.unwrap_or_else(new_id);
         let id_mov = new_id();
         // RI-26: toda cantidad de stock se guarda redondeada a milésimas.
@@ -675,14 +676,13 @@ impl InventarioRepository for SqliteInventarioRepository {
             .map_err(db_err)?;
 
             // Auditoría (INV-01b): el alta entra como movimiento 'ALTA' con delta = stock inicial.
-            // `ID_Usuario` va a NULL aquí y en los otros dos movimientos del fichero: los comandos
-            // de inventario no reciben hoy quién hace el cambio.
+            // RI-28: el usuario viene del contexto autenticado de la capa de aplicación.
             conn.execute(
                 r#"
                 INSERT INTO Movimientos_Stock
                   (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
                 VALUES
-                  (?1, ?2, 'ALTA', ?3, ?4, ?5, NULL, datetime('now','localtime'));
+                  (?1, ?2, 'ALTA', ?3, ?4, ?5, ?6, datetime('now','localtime'));
                 "#,
                 vec![
                     Value::Text(id_mov),
@@ -690,6 +690,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     Value::Real(stock),
                     Value::Real(stock),
                     opt_text(motivo),
+                    Value::Text(id_usuario.to_string()),
                 ],
             )
             .await
@@ -749,7 +750,7 @@ impl InventarioRepository for SqliteInventarioRepository {
     /// RI-55: se compara lo que vio quien ajusta con lo que hay, dentro de la transacción. Si alguien
     /// vendió o ajustó entre medias, no se toca nada y se avisa: aplicar el valor absoluto pisaría ese
     /// movimiento y dejaría un descuadre con justificante.
-    async fn ajustar_lote(&self, a: AjusteLote) -> AppResult<()> {
+    async fn ajustar_lote(&self, id_usuario: &str, a: AjusteLote) -> AppResult<()> {
         let id_mov = new_id();
         let g = self.db.write().await;
         let conn = &g;
@@ -789,7 +790,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 INSERT INTO Movimientos_Stock
                   (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
                 VALUES
-                  (?1, ?2, 'AJUSTE', ?3, ?4, ?5, NULL, datetime('now','localtime'));
+                  (?1, ?2, 'AJUSTE', ?3, ?4, ?5, ?6, datetime('now','localtime'));
                 "#,
                 vec![
                     Value::Text(id_mov),
@@ -797,6 +798,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     Value::Real(delta),
                     Value::Real(a.stock_nuevo),
                     Value::Text(a.motivo.unwrap_or_else(|| "Ajuste manual".into())),
+                    Value::Text(id_usuario.to_string()),
                 ],
             )
             .await
@@ -810,7 +812,7 @@ impl InventarioRepository for SqliteInventarioRepository {
     /// Ajuste del stock suelto de un producto, con su movimiento (RI-55). Mismo trato que un lote:
     /// se compara con lo visto y queda el rastro, que es lo que permite que la reconciliación cuadre
     /// también el suelto.
-    async fn ajustar_stock_suelto(&self, a: AjusteSuelto) -> AppResult<()> {
+    async fn ajustar_stock_suelto(&self, id_usuario: &str, a: AjusteSuelto) -> AppResult<()> {
         let id_mov = new_id();
         let g = self.db.write().await;
         let conn = &g;
@@ -857,7 +859,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 INSERT INTO Movimientos_Stock
                   (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
                 VALUES
-                  (?1, ?2, 'AJUSTE', ?3, ?4, ?5, NULL, datetime('now','localtime'));
+                  (?1, ?2, 'AJUSTE', ?3, ?4, ?5, ?6, datetime('now','localtime'));
                 "#,
                 vec![
                     Value::Text(id_mov),
@@ -867,6 +869,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     )),
                     Value::Real(a.stock_nuevo.unwrap_or(0.0)),
                     Value::Text(motivo),
+                    Value::Text(id_usuario.to_string()),
                 ],
             )
             .await

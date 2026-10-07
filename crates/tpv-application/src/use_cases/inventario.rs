@@ -100,6 +100,7 @@ pub async fn delete_producto(repo: &R, id_producto: String) -> AppResult<String>
 
 pub async fn upsert_producto(
     repo: &R,
+    id_usuario: &str,
     input: UpsertProductoInput,
 ) -> AppResult<UpsertProductoResult> {
     let producto = ProductoUpsert::validar(
@@ -118,11 +119,11 @@ pub async fn upsert_producto(
         input.ids_alergenos,
     )
     .map_err(AppError::validation)?;
-    let id_producto = repo.upsert_producto(producto).await?;
+    let id_producto = repo.upsert_producto(id_usuario, producto).await?;
     Ok(UpsertProductoResult { id_producto })
 }
 
-pub async fn create_lote(repo: &R, input: CreateLoteInput) -> AppResult<String> {
+pub async fn create_lote(repo: &R, id_usuario: &str, input: CreateLoteInput) -> AppResult<String> {
     let lote = LoteNuevo::validar(
         input.id_lote,
         input.id_producto,
@@ -135,7 +136,7 @@ pub async fn create_lote(repo: &R, input: CreateLoteInput) -> AppResult<String> 
         input.notas,
     )
     .map_err(AppError::validation)?;
-    repo.create_lote(lote).await?;
+    repo.create_lote(id_usuario, lote).await?;
     Ok("OK".to_string())
 }
 
@@ -155,17 +156,17 @@ pub async fn update_lote(repo: &R, input: UpdateLoteInput) -> AppResult<String> 
     Ok("OK".to_string())
 }
 
-pub async fn ajustar_lote(repo: &R, input: AjusteLoteInput) -> AppResult<String> {
+pub async fn ajustar_lote(repo: &R, id_usuario: &str, input: AjusteLoteInput) -> AppResult<String> {
     let ajuste =
         AjusteLote::validar(input.id_lote, input.stock_visto, input.stock_nuevo, input.motivo)
             .map_err(AppError::validation)?;
     // El repo lee el stock dentro de la misma transacción: compara con lo visto (RI-55) y saca el
     // delta de auditoría (INV-01b) sin TOCTOU.
-    repo.ajustar_lote(ajuste).await?;
+    repo.ajustar_lote(id_usuario, ajuste).await?;
     Ok("OK".to_string())
 }
 
-pub async fn ajustar_stock_suelto(repo: &R, input: AjusteStockSueltoInput) -> AppResult<String> {
+pub async fn ajustar_stock_suelto(repo: &R, id_usuario: &str, input: AjusteStockSueltoInput) -> AppResult<String> {
     let ajuste = AjusteSuelto::validar(
         input.id_producto,
         input.stock_visto,
@@ -173,7 +174,7 @@ pub async fn ajustar_stock_suelto(repo: &R, input: AjusteStockSueltoInput) -> Ap
         input.motivo,
     )
     .map_err(AppError::validation)?;
-    repo.ajustar_stock_suelto(ajuste).await?;
+    repo.ajustar_stock_suelto(id_usuario, ajuste).await?;
     Ok("OK".to_string())
 }
 

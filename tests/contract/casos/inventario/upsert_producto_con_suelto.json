@@ -2,7 +2,8 @@
   "descripcion": "RI-55: crear un producto con stock suelto (4) lo guarda con su movimiento 'ALTA' del producto, para que la reconciliación pueda cuadrarlo.",
   "comando": "inventario.upsert_producto",
   "seed": [
-    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');"
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('usuario-autor','00000000-0000-7000-8000-000000000001','autor@test','no-usado','Autor');"
   ],
   "entrada": {
     "id_producto": "prod-1",
@@ -17,10 +18,11 @@
     "cantidad_pedido_esperada": null,
     "stock_suelto": 4,
     "iva_percent": 21,
-    "ids_alergenos": []
+    "ids_alergenos": [],
+    "id_usuario": "usuario-autor"
   },
   "snapshot": {
     "Productos": "SELECT ID_Producto, Stock_Suelto FROM Productos",
-    "Movimientos_Stock": "SELECT ID_Lote, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
+    "Movimientos_Stock": "SELECT ID_Usuario, ID_Lote, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
   }
 }

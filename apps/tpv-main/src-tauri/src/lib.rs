@@ -2763,6 +2763,22 @@ mod tests_exenciones_del_gate {
     const SENALES_DE_GATE: &[&str] = &["exigir_rol", "state.sesion()"];
 
     #[test]
+    fn atribuciones_de_servicio_salen_de_la_sesion() {
+        for (fuente, comandos) in [
+            (include_str!("commands/mesas.rs"), vec!["abrir_comanda", "add_linea_comanda", "comanda_set_trabajador_if_null", "kitchen_set_line_state"]),
+            (include_str!("commands/tareas.rs"), vec!["tareas_marcar_tarea_finalizada"]),
+            (include_str!("commands/venta_rapida.rs"), vec!["vr_create_comanda_barra"]),
+            (include_str!("commands/inventario.rs"), vec!["inventario_upsert_producto", "inventario_create_lote", "inventario_ajustar_lote", "inventario_ajustar_stock_suelto"]),
+        ] {
+            for comando in comandos {
+                let cuerpo = fuente.split(&format!("pub async fn {comando}(" )).nth(1).unwrap().split("#[tauri::command]").next().unwrap();
+                assert!(cuerpo.contains("state.sesion().await?"), "{comando} debe obtener el actor del backend");
+                assert!(cuerpo.contains("sesion.id_") || cuerpo.contains("state.sesion().await?.id_"));
+            }
+        }
+    }
+
+    #[test]
     fn guardar_imagen_valida_antes_de_escribir() {
         let fuente = include_str!("lib.rs");
         let comando = fuente.split("async fn save_image(").nth(1).unwrap().split("/// Drena").next().unwrap();

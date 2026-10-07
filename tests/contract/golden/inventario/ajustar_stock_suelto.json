@@ -4,6 +4,7 @@
       "Delta": -3.0,
       "ID_Lote": null,
       "ID_Producto": "prod-1",
+      "ID_Usuario": "usuario-autor",
       "Motivo": "recuento",
       "Stock_Resultante": 2.0,
       "Tipo": "AJUSTE"

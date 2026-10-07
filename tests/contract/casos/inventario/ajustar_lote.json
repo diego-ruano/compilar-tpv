@@ -4,16 +4,18 @@
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-1', 'cat-1', 'Cerveza');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Notas, Fecha_Entrada) VALUES ('lote-1', 'prod-1', 'L1', 5, 'original', '2026-01-01 10:00:00');"
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Notas, Fecha_Entrada) VALUES ('lote-1', 'prod-1', 'L1', 5, 'original', '2026-01-01 10:00:00');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('usuario-autor','00000000-0000-7000-8000-000000000001','autor@test','no-usado','Autor');"
   ],
   "entrada": {
     "id_lote": "lote-1",
     "stock_visto": 5,
     "stock_nuevo": 3,
-    "motivo": "recuento fisico"
+    "motivo": "recuento fisico",
+    "id_usuario": "usuario-autor"
   },
   "snapshot": {
     "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible, Notas FROM Lotes_Producto",
-    "Movimientos_Stock": "SELECT ID_Lote, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
+    "Movimientos_Stock": "SELECT ID_Usuario, ID_Lote, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
   }
 }

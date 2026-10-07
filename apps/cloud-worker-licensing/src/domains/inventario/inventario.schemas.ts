@@ -173,3 +173,6 @@ type _GCreateLote = Assert<SameKeys<z.infer<typeof createLoteSchema>, CreateLote
 type _GUpdateLote = Assert<SameKeys<z.infer<typeof updateLoteSchema>, UpdateLoteInput>>;
 type _GAjusteLote = Assert<SameKeys<z.infer<typeof ajusteLoteSchema>, AjusteLoteInput>>;
 type _GAjusteSuelto = Assert<SameKeys<z.infer<typeof ajusteStockSueltoSchema>, AjusteStockSueltoInput>>;
+
+// RI-28: contexto del adaptador Rust; la sesión personal del Worker está aplazada.
+export const autorStockSchema = z.string().trim().min(1);

@@ -126,8 +126,10 @@ pub async fn tareas_vaciar_papelera(state: State<'_, AppState>) -> Result<i64, A
 #[tauri::command]
 pub async fn tareas_marcar_tarea_finalizada(
     state: State<'_, AppState>,
-    args: FinalizarTareaInput,
+    mut args: FinalizarTareaInput,
 ) -> Result<bool, AppErrorDto> {
+    // RI-28: solo la asignación propia; la finalización por un administrador queda aplazada.
+    args.id_trabajador = state.sesion().await?.id_trabajador.ok_or_else(|| AppErrorDto::from("No tienes una ficha de trabajador"))?;
     let repo = state.tareas_repo().await?;
     Ok(uc::marcar_finalizada(repo.as_ref(), args).await?)
 }

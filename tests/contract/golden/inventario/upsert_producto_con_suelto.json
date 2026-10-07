@@ -4,6 +4,7 @@
       "Delta": 4.0,
       "ID_Lote": null,
       "ID_Producto": "prod-1",
+      "ID_Usuario": "usuario-autor",
       "Motivo": "Alta del producto",
       "Stock_Resultante": 4.0,
       "Tipo": "ALTA"

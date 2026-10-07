@@ -40,13 +40,13 @@ pub trait InventarioRepository: Send + Sync {
     ///
     /// El stock suelto sólo se escribe al **crear** (con su movimiento de alta); editando la ficha
     /// no se toca (RI-55).
-    async fn upsert_producto(&self, producto: ProductoUpsert) -> AppResult<String>;
-    async fn create_lote(&self, lote: LoteNuevo) -> AppResult<()>;
+    async fn upsert_producto(&self, id_usuario: &str, producto: ProductoUpsert) -> AppResult<String>;
+    async fn create_lote(&self, id_usuario: &str, lote: LoteNuevo) -> AppResult<()>;
     /// Los datos de un lote, sin tocar sus existencias (RI-55).
     async fn update_lote(&self, lote: LoteUpdate) -> AppResult<()>;
     /// Ajusta las existencias de un lote y deja el movimiento. Si lo que hay ya no es
     /// `stock_visto`, no toca nada y devuelve `Conflict` (RI-55).
-    async fn ajustar_lote(&self, ajuste: AjusteLote) -> AppResult<()>;
+    async fn ajustar_lote(&self, id_usuario: &str, ajuste: AjusteLote) -> AppResult<()>;
     /// Lo mismo para el stock suelto de un producto (RI-55).
-    async fn ajustar_stock_suelto(&self, ajuste: AjusteSuelto) -> AppResult<()>;
+    async fn ajustar_stock_suelto(&self, id_usuario: &str, ajuste: AjusteSuelto) -> AppResult<()>;
 }

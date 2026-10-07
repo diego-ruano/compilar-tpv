@@ -85,8 +85,9 @@ pub async fn inventario_upsert_producto(
     state: State<'_, AppState>,
     args: UpsertProductoInput,
 ) -> Result<UpsertProductoResult, AppErrorDto> {
+    let sesion = state.sesion().await?;
     let repo = state.inventario_repo().await?;
-    Ok(uc::upsert_producto(repo.as_ref(), args).await?)
+    Ok(uc::upsert_producto(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
 
 #[tauri::command]
@@ -103,8 +104,9 @@ pub async fn inventario_create_lote(
     state: State<'_, AppState>,
     args: CreateLoteInput,
 ) -> Result<String, AppErrorDto> {
+    let sesion = state.sesion().await?;
     let repo = state.inventario_repo().await?;
-    Ok(uc::create_lote(repo.as_ref(), args).await?)
+    Ok(uc::create_lote(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
 
 #[tauri::command]
@@ -121,8 +123,9 @@ pub async fn inventario_ajustar_lote(
     state: State<'_, AppState>,
     args: AjusteLoteInput,
 ) -> Result<String, AppErrorDto> {
+    let sesion = state.sesion().await?;
     let repo = state.inventario_repo().await?;
-    Ok(uc::ajustar_lote(repo.as_ref(), args).await?)
+    Ok(uc::ajustar_lote(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
 
 /// RI-55: el stock suelto de un producto se cambia aquí, con su movimiento, y no al guardar la ficha.
@@ -131,6 +134,7 @@ pub async fn inventario_ajustar_stock_suelto(
     state: State<'_, AppState>,
     args: AjusteStockSueltoInput,
 ) -> Result<String, AppErrorDto> {
+    let sesion = state.sesion().await?;
     let repo = state.inventario_repo().await?;
-    Ok(uc::ajustar_stock_suelto(repo.as_ref(), args).await?)
+    Ok(uc::ajustar_stock_suelto(repo.as_ref(), &sesion.id_usuario, args).await?)
 }

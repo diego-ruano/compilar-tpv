@@ -16,6 +16,7 @@
     {
       "Delta": 10.0,
       "ID_Lote": "lote-1",
+      "ID_Usuario": "usuario-autor",
       "Motivo": "alta inicial",
       "Stock_Resultante": 10.0,
       "Tipo": "ALTA"

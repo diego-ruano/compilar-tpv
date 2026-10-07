@@ -466,7 +466,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "inventario.create_lote" => {
             let repo = SqliteInventarioRepository::new(db.clone());
-            repo.create_lote(LoteNuevo {
+            repo.create_lote(&s(&e["id_usuario"]), LoteNuevo {
                 id: opt_str(&e["id_lote"]),
                 id_producto: s(&e["id_producto"]),
                 codigo_lote: s(&e["codigo_lote"]),
@@ -495,7 +495,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "inventario.upsert_producto" => {
             let repo = SqliteInventarioRepository::new(db.clone());
-            repo.upsert_producto(ProductoUpsert {
+            repo.upsert_producto(&s(&e["id_usuario"]), ProductoUpsert {
                 id: opt_str(&e["id_producto"]),
                 id_categoria: s(&e["id_categoria"]),
                 id_proveedor: opt_str(&e["id_proveedor"]),
@@ -543,7 +543,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             // Un ajuste que llega tarde (RI-55) es un `Conflict` que no toca nada: lo que se
             // compara es el efecto, así que el error no se trata como fallo del caso.
             let _ = repo
-                .ajustar_lote(AjusteLote {
+                .ajustar_lote(&s(&e["id_usuario"]), AjusteLote {
                     id_lote: s(&e["id_lote"]),
                     stock_visto: e["stock_visto"].as_f64().unwrap(),
                     stock_nuevo: e["stock_nuevo"].as_f64().unwrap(),
@@ -554,7 +554,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "inventario.ajustar_stock_suelto" => {
             let repo = SqliteInventarioRepository::new(db.clone());
             let _ = repo
-                .ajustar_stock_suelto(AjusteSuelto {
+                .ajustar_stock_suelto(&s(&e["id_usuario"]), AjusteSuelto {
                     id_producto: s(&e["id_producto"]),
                     stock_visto: e["stock_visto"].as_f64(),
                     stock_nuevo: e["stock_nuevo"].as_f64(),

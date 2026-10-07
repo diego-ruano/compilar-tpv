@@ -115,13 +115,13 @@ inventarioRoutes.post("/categorias", cuerpo(S.upsertCategoriaSchema), async (c) 
 	return c.json({ id_categoria: id });
 });
 
-inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema), async (c) => {
+inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema.extend({ id_usuario: S.autorStockSchema })), async (c) => {
 	const datos = c.req.valid("json");
 	// RI-55: el stock suelto sólo cuenta al crear; por eso hay que saber si existe.
 	const esNuevo =
 		!datos.id_producto ||
 		(await tenantQuery(c, (db) => q.getProductoStockSuelto(db, datos.id_producto!))) === undefined;
-	const id = await apply(c, cmd.upsertProducto(datos, esNuevo));
+	const id = await apply(c, cmd.upsertProducto(datos, esNuevo, datos.id_usuario));
 	return c.json({ id_producto: id });
 });
 
@@ -144,9 +144,9 @@ inventarioRoutes.put("/productos/:id/alergenos", cuerpo(S.setAlergenosSchema), a
 	return c.json({ ok: true });
 });
 
-inventarioRoutes.post("/lotes", cuerpo(S.createLoteSchema), async (c) => {
+inventarioRoutes.post("/lotes", cuerpo(S.createLoteSchema.extend({ id_usuario: S.autorStockSchema })), async (c) => {
 	const datos = c.req.valid("json");
-	const id = await apply(c, cmd.createLote(datos));
+	const id = await apply(c, cmd.createLote(datos, datos.id_usuario));
 	return c.json({ id_lote: id });
 });
 
@@ -161,7 +161,7 @@ inventarioRoutes.put("/lotes/:id", cuerpo(S.updateLoteSchema), async (c) => {
 	return c.json({ ok: true });
 });
 
-inventarioRoutes.patch("/lotes/:id", cuerpo(S.ajusteLoteSchema), async (c) => {
+inventarioRoutes.patch("/lotes/:id", cuerpo(S.ajusteLoteSchema.extend({ id_usuario: S.autorStockSchema })), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_lote inválido");
 	const datos = c.req.valid("json");
@@ -172,7 +172,7 @@ inventarioRoutes.patch("/lotes/:id", cuerpo(S.ajusteLoteSchema), async (c) => {
 	if (!sigueComoSeVio(datos.stock_visto, actual)) return stockCambiado(c, actual);
 	if (sigueComoSeVio(datos.stock_nuevo, actual)) return c.json({ ok: true });
 	// Y la misma condición va dentro del comando, por si se cuela algo entre esta lectura y el DO.
-	const ajustado = await apply(c, cmd.ajustarLote(id, datos));
+	const ajustado = await apply(c, cmd.ajustarLote(id, datos, datos.id_usuario));
 	if (Number(ajustado ?? 0) === 0) {
 		const ahora = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 		return stockCambiado(c, ahora ? redondearCantidad(ahora.stock_disponible) : null);
@@ -183,7 +183,7 @@ inventarioRoutes.patch("/lotes/:id", cuerpo(S.ajusteLoteSchema), async (c) => {
 // RI-55: el stock suelto de un producto se ajusta aquí, con su movimiento, y no al guardar la ficha.
 inventarioRoutes.patch(
 	"/productos/:id/stock-suelto",
-	cuerpo(S.ajusteStockSueltoSchema),
+	cuerpo(S.ajusteStockSueltoSchema.extend({ id_usuario: S.autorStockSchema })),
 	async (c) => {
 		const id = parseId(c.req.param("id"));
 		if (id == null) return badRequest(c, "id_producto inválido");
@@ -193,7 +193,7 @@ inventarioRoutes.patch(
 		const actual = leido == null ? null : redondearCantidad(leido);
 		if (!sigueComoSeVio(datos.stock_visto ?? null, actual)) return stockCambiado(c, actual);
 		if (sigueComoSeVio(datos.stock_nuevo ?? null, actual)) return c.json({ ok: true });
-		const ajustado = await apply(c, cmd.ajustarStockSuelto(id, datos));
+		const ajustado = await apply(c, cmd.ajustarStockSuelto(id, datos, datos.id_usuario));
 		if (Number(ajustado ?? 0) === 0) {
 			const ahora = await tenantQuery(c, (db) => q.getProductoStockSuelto(db, id));
 			return stockCambiado(c, ahora == null ? null : redondearCantidad(ahora));

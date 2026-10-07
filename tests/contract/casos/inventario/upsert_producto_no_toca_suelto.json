@@ -3,7 +3,8 @@
   "comando": "inventario.upsert_producto",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Rioja', 7);"
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Rioja', 7);",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('usuario-autor','00000000-0000-7000-8000-000000000001','autor@test','no-usado','Autor');"
   ],
   "entrada": {
     "id_producto": "prod-1",
@@ -18,10 +19,11 @@
     "cantidad_pedido_esperada": null,
     "stock_suelto": 99,
     "iva_percent": 21,
-    "ids_alergenos": []
+    "ids_alergenos": [],
+    "id_usuario": "usuario-autor"
   },
   "snapshot": {
     "Productos": "SELECT ID_Producto, Nombre, Stock_Suelto FROM Productos",
-    "Movimientos_Stock": "SELECT ID_Lote, ID_Producto, Tipo, Delta FROM Movimientos_Stock"
+    "Movimientos_Stock": "SELECT ID_Usuario, ID_Lote, ID_Producto, Tipo, Delta FROM Movimientos_Stock"
   }
 }

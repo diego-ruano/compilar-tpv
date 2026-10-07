@@ -82,8 +82,10 @@ pub async fn vr_get_detalles_ver_ticket(
 #[tauri::command]
 pub async fn vr_create_comanda_barra(
     state: State<'_, AppState>,
-    args: VrCreateComandaBarraInput,
+    mut args: VrCreateComandaBarraInput,
 ) -> Result<String, AppErrorDto> {
+    // RI-28: responsable inicial, sin suplantar al trabajador desde la webview.
+    args.id_trabajador = state.sesion().await?.id_trabajador;
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::create_comanda_barra(repo.as_ref(), args).await?)
 }

@@ -138,13 +138,14 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
-    async fn upsert_producto(&self, producto: ProductoUpsert) -> AppResult<String> {
+    async fn upsert_producto(&self, id_usuario: &str, producto: ProductoUpsert) -> AppResult<String> {
         let generado = producto.id.is_none().then_some("id_producto");
         let id_producto = producto
             .id
             .clone()
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
+            "id_usuario": id_usuario,
             "id_producto": id_producto,
             "id_categoria": producto.id_categoria,
             "id_proveedor": producto.id_proveedor,
@@ -165,10 +166,11 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(enviado.unwrap_or(id_producto))
     }
 
-    async fn create_lote(&self, lote: LoteNuevo) -> AppResult<()> {
+    async fn create_lote(&self, id_usuario: &str, lote: LoteNuevo) -> AppResult<()> {
         let generado = lote.id.is_none().then_some("id_lote");
         let id_lote = lote.id.clone().unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
+            "id_usuario": id_usuario,
             "id_lote": id_lote,
             "id_producto": lote.id_producto,
             "codigo_lote": lote.codigo_lote,
@@ -209,8 +211,9 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
-    async fn ajustar_lote(&self, ajuste: AjusteLote) -> AppResult<()> {
+    async fn ajustar_lote(&self, id_usuario: &str, ajuste: AjusteLote) -> AppResult<()> {
         let body = json!({
+            "id_usuario": id_usuario,
             "stock_visto": ajuste.stock_visto,
             "stock_nuevo": ajuste.stock_nuevo,
             "motivo": ajuste.motivo,
@@ -222,8 +225,9 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
-    async fn ajustar_stock_suelto(&self, ajuste: AjusteSuelto) -> AppResult<()> {
+    async fn ajustar_stock_suelto(&self, id_usuario: &str, ajuste: AjusteSuelto) -> AppResult<()> {
         let body = json!({
+            "id_usuario": id_usuario,
             "stock_visto": ajuste.stock_visto,
             "stock_nuevo": ajuste.stock_nuevo,
             "motivo": ajuste.motivo,

@@ -580,7 +580,7 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					coste_unitario: caso.entrada.coste_unitario,
 					id_proveedor: caso.entrada.id_proveedor,
 					notas: caso.entrada.notas,
-				} as any),
+				} as any, caso.entrada.id_usuario),
 			);
 			return;
 		}
@@ -594,7 +594,7 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 				sql: "SELECT 1 FROM Productos WHERE ID_Producto=?1;",
 				args: [caso.entrada.id_producto ?? ""],
 			});
-			aplicar(hub, sql, upsertProducto(caso.entrada as any, ex.rows.length === 0));
+			aplicar(hub, sql, upsertProducto(caso.entrada as any, ex.rows.length === 0, caso.entrada.id_usuario));
 			return;
 		}
 		case "inventario.set_alergenos": {
@@ -618,11 +618,11 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		case "inventario.ajustar_lote": {
 			// Sin la comprobación previa de la ruta: si lo visto no es lo que hay, la condición del
 			// propio comando tiene que dejarlo todo como estaba (RI-55).
-			aplicar(hub, sql, ajustarLote(caso.entrada.id_lote, caso.entrada as any));
+			aplicar(hub, sql, ajustarLote(caso.entrada.id_lote, caso.entrada as any, caso.entrada.id_usuario));
 			return;
 		}
 		case "inventario.ajustar_stock_suelto": {
-			aplicar(hub, sql, ajustarStockSuelto(caso.entrada.id_producto, caso.entrada as any));
+			aplicar(hub, sql, ajustarStockSuelto(caso.entrada.id_producto, caso.entrada as any, caso.entrada.id_usuario));
 			return;
 		}
 		case "config.patch_business": {
