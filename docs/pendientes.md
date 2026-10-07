@@ -22,6 +22,8 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio |
 | [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
+| [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
+| [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
@@ -131,6 +133,38 @@ Aplazado mientras no haya clientes en producción. Cuando se haga, en tres parte
    perder información al quitarlo de la respuesta.
 3. Opcional: seguir devolviéndolo cuando `ENVIRONMENT !== "prod"`, añadiendo `ENVIRONMENT` a las
    `vars` de `wrangler.json` (`env.ts` ya lo declara; `sentry.ts` usa `"prod"` si falta).
+
+### RI-28-AUD · Ampliar la autoría y la administración de tareas
+
+Aplazado por decisión de producto. **No incluye las correcciones originales de RI-28**: las
+atribuciones existentes y los movimientos manuales de stock deben obtener su autor de la sesión
+Rust; un trabajador solo puede finalizar su propia asignación.
+
+Pendiente:
+
+- Registrar por separado el usuario que abrió una comanda y el que creó cada línea. El responsable
+  de la comanda puede cambiar; su autor original debe permanecer inmutable. Esto requiere columnas,
+  dominio/puertos, contratos, SQLite, HTTP, Worker y pruebas de replicación. No implica un historial
+  completo de ediciones y borrados.
+- Permitir al administrador finalizar una asignación de otro trabajador, registrando el actor real
+  separado del destinatario. El administrador ya ve el listado global y las asignaciones; falta la
+  acción en esa vista. Cada finalización afecta a una asignación, no a todos los destinatarios.
+- Los trabajadores no pueden delegar ni actuar en nombre de otro. Comprobar autorización sobre el
+  recurso y conservar quién realizó la acción también al replicar, reintentar y recuperar una copia.
+
+### SEC-SESION · Sesión personal verificable en el Worker
+
+Aplazado explícitamente. Los permisos personales y las atribuciones se comprueban en Rust, tanto
+Main como Handy. El Worker sigue autenticando el dispositivo con JWT + device-proof: los IDs de
+usuario que recibe desde un adaptador son atribuciones del cliente, **no prueba de una sesión
+personal**. No dar por resuelta la autorización por trabajador del servidor.
+
+Al retomarlo: emitir la sesión tras verificar el PIN con LOGIN-01; ligarla a tenant, dispositivo y
+usuario; mantener la credencial en Rust; comprobar usuario activo, permisos y propiedad del recurso
+en middleware/casos de uso; establecer caducidad y revocación al cerrar sesión o modificar permisos.
+No confiar en el rol ni en el autor enviados en el cuerpo. Adaptar login, puertos/HTTP, Worker,
+contratos y pruebas de suplantación y revocación. La Main debe conservar su funcionamiento offline,
+y la sincronización de fondo y los flujos de arranque/recuperación no dependen de una sesión personal.
 
 ### FABLE-E · Sin nonce en el device-proof
 
