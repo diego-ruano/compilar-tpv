@@ -720,7 +720,7 @@ impl LoginRepository for SqliteLoginRepository {
                 .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?
         };
 
-        if let Err(e) = verify_pin(pin, &rec.password_hash) {
+        if let Err(e) = verificar_pin_sin_bloquear(pin, &rec.password_hash).await? {
             let _ = crate::auth::throttle_registrar(&self.db, id_usuario, false).await;
             return Err(AppError::validation(e));
         }
@@ -840,7 +840,7 @@ impl LoginRepository for SqliteLoginRepository {
                 .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?
         };
 
-        if let Err(e) = verify_pin(pin, &hash) {
+        if let Err(e) = verificar_pin_sin_bloquear(pin, &hash).await? {
             let _ = crate::auth::throttle_registrar(&self.db, id_usuario, false).await;
             return Err(AppError::validation(e));
         }
@@ -1273,4 +1273,12 @@ mod tests_restablecer_pin {
             0
         );
     }
+}
+
+// RI-37: el trabajo PBKDF2 acotado tampoco ocupa los hilos del runtime de I/O.
+async fn verificar_pin_sin_bloquear(pin: &str, hash: &str) -> AppResult<Result<(), String>> {
+    let pin = pin.to_owned();
+    let hash = hash.to_owned();
+    tokio::task::spawn_blocking(move || verify_pin(&pin, &hash)).await
+        .map_err(|e| AppError::validation(format!("No se ha podido comprobar el PIN: {e}")))
 }

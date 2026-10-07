@@ -6,6 +6,7 @@ use pbkdf2::pbkdf2_hmac;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::Sha256;
+use subtle::ConstantTimeEq;
 
 const PBKDF2_PREFIX: &str = "$pbkdf2-sha256$";
 // Tope IMPUESTO por Cloudflare Workers: su `crypto.subtle` PBKDF2 no admite más de 100.000
@@ -84,17 +85,14 @@ pub fn login_bloqueo_ms(intentos_fallidos: u32) -> i64 {
 ========================================================= */
 
 fn timing_safe_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff: u8 = 0;
-    for i in 0..a.len() {
-        diff |= a[i] ^ b[i];
-    }
-    diff == 0
+    bool::from(a.ct_eq(b))
 }
 
 fn parse_pbkdf2_phc(phc: &str) -> Result<(u32, Vec<u8>, Vec<u8>), String> {
+    // RI-37: validar antes de reservar memoria o ejecutar trabajo controlado por la réplica.
+    if phc.len() > 128 {
+        return Err("Hash almacenado mal formado".into());
+    }
     let h = phc.trim();
 
     if h.starts_with("$argon2") || h.starts_with("argon2") {
@@ -107,7 +105,7 @@ fn parse_pbkdf2_phc(phc: &str) -> Result<(u32, Vec<u8>, Vec<u8>), String> {
 
     let parts: Vec<&str> = h.split('$').collect();
 
-    if parts.len() < 5 {
+    if parts.len() != 5 {
         return Err("Hash almacenado mal formado".into());
     }
 
@@ -118,7 +116,7 @@ fn parse_pbkdf2_phc(phc: &str) -> Result<(u32, Vec<u8>, Vec<u8>), String> {
         .parse::<u32>()
         .map_err(|_| "Hash params i inválido".to_string())?;
 
-    if iters == 0 {
+    if iters == 0 || iters > PBKDF2_ITERS {
         return Err("Hash params i inválido".into());
     }
 
@@ -133,7 +131,7 @@ fn parse_pbkdf2_phc(phc: &str) -> Result<(u32, Vec<u8>, Vec<u8>), String> {
         .decode(dk_b64)
         .map_err(|_| "Hash almacenado mal formado".to_string())?;
 
-    if salt.is_empty() || dk.is_empty() {
+    if salt.len() != SALT_LEN || dk.len() != DK_LEN {
         return Err("Hash almacenado mal formado".into());
     }
 
@@ -229,6 +227,20 @@ pub struct SetupInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parametros_de_replica_no_pueden_amplificar_el_coste() {
+        let hash = hash_pin("1234").unwrap();
+        for iters in [100_001u32, 1_000_000, 4_000_000_000] {
+            let alterado = hash.replace("i=100000", &format!("i={iters}"));
+            assert!(verify_pin("1234", &alterado).is_err());
+        }
+        let partes: Vec<_> = hash.split('$').collect();
+        for (sal, derivada) in [("AA==", partes[4]), (partes[3], "AA==")] {
+            assert!(verify_pin("1234", &format!("$pbkdf2-sha256$i=100000${sal}${derivada}")).is_err());
+        }
+        assert!(verify_pin("1234", &"x".repeat(129)).is_err());
+    }
 
     #[test]
     fn textos_requeridos_y_opcionales_se_limpian() {

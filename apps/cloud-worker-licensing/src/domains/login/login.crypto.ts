@@ -40,18 +40,20 @@ async function derive(pin: string, salt: Uint8Array, iters: number, len: number)
 }
 
 function parse(hash: string): { iters: number; salt: Uint8Array; dk: Uint8Array } {
+	// RI-37: el hash replicado no puede decidir un coste ni una reserva arbitrarios.
+	if (hash.length > 128) throw new Error("Hash almacenado mal formado");
 	const h = hash.trim();
 	if (h.startsWith("$argon2") || h.startsWith("argon2")) {
 		throw new Error("HASH_ARGON2_NO_SOPORTADO: rehash Password_Hash a pbkdf2-sha256");
 	}
 	if (!h.startsWith(PREFIX)) throw new Error("HASH_DESCONOCIDO: Password_Hash no es pbkdf2-sha256");
 	const parts = h.split("$");
-	if (parts.length < 5) throw new Error("Hash almacenado mal formado");
-	const iters = Number(parts[2]?.replace(/^i=/, ""));
-	if (!Number.isInteger(iters) || iters <= 0) throw new Error("Hash params i invalido");
+	if (parts.length !== 5 || !/^i=\d+$/.test(parts[2])) throw new Error("Hash almacenado mal formado");
+	const iters = Number(parts[2].slice(2));
+	if (!Number.isInteger(iters) || iters <= 0 || iters > DEFAULT_ITERS) throw new Error("Hash params i invalido");
 	const salt = b64ToBytes(parts[3]);
 	const dk = b64ToBytes(parts[4]);
-	if (!salt.length || !dk.length) throw new Error("Hash almacenado mal formado");
+	if (salt.length !== SALT_LEN || dk.length !== DK_LEN) throw new Error("Hash almacenado mal formado");
 	return { iters, salt, dk };
 }
 

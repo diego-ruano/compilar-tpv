@@ -24,6 +24,7 @@ edition = "2021"
 authors = ["Altaria Lights"]
 
 [workspace.dependencies]
+subtle = "2.6"
 # ── Crates internas (rutas relativas a la raíz del workspace) ──
 tpv-domain = { path = "crates/tpv-domain" }
 tpv-application = { path = "crates/tpv-application" }
