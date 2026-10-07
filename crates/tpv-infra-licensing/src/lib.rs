@@ -836,7 +836,10 @@ impl PairingAdapter {
 
         // PROD-04: la hora de la nube, no la del equipo (ver `reloj`).
         let ts = reloj::ahora_ms();
-        let sig = sign_device_proof(&sk, ts, &method.to_uppercase(), path, token.trim(), body)
+        // RI-50: firmar exactamente el destino que reqwest enviará, incluidos query y escapes.
+        let url = reqwest::Url::parse(&api_url(path)).map_err(|e| AppError::validation(e.to_string()))?;
+        let target = format!("{}{}", url.path(), url.query().map(|q| format!("?{q}")).unwrap_or_default());
+        let sig = sign_device_proof(&sk, ts, &method.to_uppercase(), &target, token.trim(), body)
             .map_err(ext)?;
 
         Ok(ApiSignedHeaders {

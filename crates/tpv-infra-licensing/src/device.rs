@@ -546,6 +546,7 @@ mod tests {
     /// podía cambiar el contenido de una petición sin invalidar su firma.
     #[test]
     fn el_cuerpo_cambia_el_mensaje() {
+        assert_ne!(device_proof_message(1, "GET", "/x?q=1", "tok", b""), device_proof_message(1, "GET", "/x?q=2", "tok", b""));
         let a = device_proof_message(1, "POST", "/x", "tok", b"{\"importe\":10}");
         let b = device_proof_message(1, "POST", "/x", "tok", b"{\"importe\":9999}");
         assert_ne!(a, b);

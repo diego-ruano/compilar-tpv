@@ -298,7 +298,8 @@ async function comprobarFirma(
 	const tokenHash = await sha256HexStr(token);
 
 	const method = String(target?.method || request.method).toUpperCase();
-	const path = String(target?.path || new URL(request.url).pathname);
+	const url = new URL(request.url);
+	const path = String(target?.path || url.pathname + url.search);
 
 	// FABLE-E: el cuerpo entra en la firma, y entra como BYTES (leerlo como texto rompería
 	// cualquier cuerpo binario; ver `verifyDeviceProofOrThrow`). Estos endpoints (status/refresh)

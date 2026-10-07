@@ -138,11 +138,12 @@ impl CloudClient {
         format!("{}{}", self.base_url.trim_end_matches('/'), path)
     }
 
-    /// Firma device-proof sobre el path **canónico** (sin query string) y el cuerpo exacto.
+    /// Firma device-proof sobre la ruta y la query **canónicas** y el cuerpo exacto.
     fn signed(&self, method: &str, path: &str, body: &[u8]) -> AppResult<ApiSignedHeaders> {
-        let path_only = path.split('?').next().unwrap_or(path);
+        let url = reqwest::Url::parse(&self.url(path)).map_err(|e| AppError::validation(e.to_string()))?;
+        let target = format!("{}{}", url.path(), url.query().map(|q| format!("?{q}")).unwrap_or_default());
         self.pairing
-            .tpv_server_signed_headers(&self.mode, method, path_only, body)
+            .tpv_server_signed_headers(&self.mode, method, &target, body)
     }
 
     /// Crea un `RequestBuilder` con las cabeceras device-proof firmadas para `method`/`path`.
