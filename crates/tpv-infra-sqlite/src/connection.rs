@@ -173,8 +173,16 @@ async fn backup_if_migration_pending(db_path: &Path) -> AppResult<()> {
 
     let backup = db_path.with_file_name(format!("data.db.bak.{}", now_ms()));
     match std::fs::copy(db_path, &backup) {
-        Ok(_) => eprintln!("[migrations] copia de seguridad creada: {:?}", backup),
-        Err(e) => eprintln!("[migrations] aviso: no se pudo crear copia de seguridad: {e}"),
+        Ok(bytes) => tracing::info!(
+            target: "tpv::migrations",
+            copia = %backup.file_name().unwrap_or_default().to_string_lossy(), bytes,
+            "copia de seguridad previa a migrar creada"
+        ),
+        Err(e) => tracing::warn!(
+            target: "tpv::migrations",
+            copia = %backup.file_name().unwrap_or_default().to_string_lossy(), error = %e,
+            "no se pudo crear la copia de seguridad previa a migrar"
+        ),
     }
 
     Ok(())

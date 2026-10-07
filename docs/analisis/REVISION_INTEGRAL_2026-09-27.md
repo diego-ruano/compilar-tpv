@@ -172,11 +172,11 @@ para preseleccionar reglas y devuelve cadenas prestadas cuando no hay cambios.
 
 ### Otros de observabilidad
 
-- `eprintln!` en [`connection.rs:176-177`](../../crates/tpv-infra-sqlite/src/connection.rs#L176-L177)
-  y [`migrations.rs:230`](../../crates/tpv-infra-sqlite/src/migrations.rs#L230) (copia previa a
-  migrar, migración aplicada): en un build de release no hay consola, así que esos mensajes —justo
-  los de la operación más delicada del arranque— no quedan en ningún sitio. `tracing::info!` ya
-  está inicializado a esas alturas.
+- ✅ Copia previa a migrar y migración aplicada: `tracing::info!` y `tracing::warn!` en
+  [`connection.rs`](../../crates/tpv-infra-sqlite/src/connection.rs) y
+  [`migrations.rs`](../../crates/tpv-infra-sqlite/src/migrations.rs), con target `tpv::migrations`.
+  La copia informa del nombre y los bytes, sin ruta absoluta; la migración se registra tras el
+  COMMIT. Estos eventos también quedan en el fichero local de release.
 - `tpv-infra-licensing` usa `log` y el resto `tracing`. Funciona porque `try_init()` instala el
   puente `LogTracer`, pero son dos fachadas para lo mismo; unificar en `tracing`.
 - `images.routes.ts` deja `console.log` en cada subida (ruta y clave de R2): ruido en los logs del

@@ -225,7 +225,7 @@ async fn apply_pending(conn: &Connection, applied: &HashMap<String, String>) -> 
         match applied_res {
             Ok(()) => {
                 conn.execute_batch("COMMIT;").await?;
-                eprintln!("[migrations] aplicada: {name}");
+                tracing::info!(target: "tpv::migrations", migracion = %name, "migración aplicada");
             }
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK;").await;

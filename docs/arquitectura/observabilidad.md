@@ -7,6 +7,10 @@
 | **Better Stack** | Vigilancia desde fuera: la sonda de `/health` y los latidos del cron |
 | Fichero local | `<AppData>/logs/tpv.log`, 7 días: la fuente de verdad para soporte |
 
+La copia previa a migrar y las migraciones confirmadas se registran con `tracing` (target
+`tpv::migrations`): éxitos a INFO y copia fallida a WARN. Incluyen nombre de fichero/migración,
+bytes o error, sin la ruta absoluta de AppData.
+
 Todo es **no-op** mientras falten los secretos: el código se puede desplegar sin configurar nada.
 
 ## El flujo
