@@ -1,16 +1,10 @@
 //! RI-31/RI-57: el transporte de réplica es una capacidad interna, nunca un IPC de SQL.
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 use async_trait::async_trait;
-use serde_json::Value;
 use tpv_contracts::sync::SqlStatement;
 use crate::{error::AppResult, ports::sync::SyncRepository};
 
-#[async_trait]
-pub trait CanalReplicacion: Send {
-    async fn enviar(&mut self, mensaje: Value) -> AppResult<()>;
-    /// None indica un vencimiento, no un cierre (el cierre devuelve error).
-    async fn recibir(&mut self, espera: Duration) -> AppResult<Option<Value>>;
-}
+pub use crate::ports::canal_nube::CanalNube as CanalReplicacion;
 
 #[async_trait]
 pub trait ContextoReplicacion: Send + Sync {

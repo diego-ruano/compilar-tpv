@@ -37,3 +37,5 @@ mod client;
 pub use client::{CloudClient, CLOUD_API_BASE};
 
 pub mod permisos;
+
+pub mod websocket;

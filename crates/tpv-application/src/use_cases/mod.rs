@@ -33,3 +33,5 @@ pub mod verifactu;
 pub mod replicacion;
 
 pub mod permisos;
+
+pub mod avisos_nube;

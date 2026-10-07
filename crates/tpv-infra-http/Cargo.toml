@@ -17,6 +17,10 @@ async-trait = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
+tokio = { workspace = true }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+
 [dev-dependencies]
 # Sólo para los tests: el adaptador no arranca ningún runtime, lo pone quien lo usa.
 tokio = { workspace = true }

@@ -32,3 +32,5 @@ pub mod verifactu;
 pub mod replicacion;
 
 pub mod permisos;
+
+pub mod canal_nube;
