@@ -67,7 +67,7 @@ fn decidir(leido: Result<Option<String>, ErrorSecreto>, que: &str) -> Lectura {
         Ok(Some(v)) if !v.trim().is_empty() => Lectura::Usar(v.trim().to_string()),
         Ok(_) => Lectura::Crear,
         Err(ErrorSecreto::Ilegible(e)) => {
-            log::warn!("[identidad] {que} guardado no se puede descifrar en este equipo ({e}): se genera otro");
+            tracing::warn!("[identidad] {que} guardado no se puede descifrar en este equipo ({e}): se genera otro");
             Lectura::Crear
         }
         Err(ErrorSecreto::NoDisponible(e)) => {

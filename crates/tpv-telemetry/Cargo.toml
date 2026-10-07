@@ -6,7 +6,9 @@ authors.workspace = true
 description = "Infraestructura de telemetría (logging) del TPV: subscriber `tracing` con consola (dev), fichero local rotado por días y una cola DURABLE en disco que un worker en segundo plano sube por lotes al worker tpv-api. Pieza HOJA del workspace: el resto de crates sólo emiten eventos con las macros estándar de `tracing` sin conocer el destino."
 
 [dependencies]
-tracing = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+tracing-log = "0.2"
+log = "0.4"
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 serde = { workspace = true }
@@ -23,3 +25,6 @@ ts-rs = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.14"

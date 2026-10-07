@@ -13,6 +13,14 @@ bytes o error, sin la ruta absoluta de AppData.
 
 Todo es **no-op** mientras falten los secretos: el código se puede desplegar sin configurar nada.
 
+El código propio, incluido licencias, emite con `tracing`. En Android, `JNI_OnLoad` inicializa
+el logger de plataforma antes de usar JNI: conserva el diagnóstico temprano en Logcat
+(`TPVRust`, INFO o superior). Cuando se instala el subscriber, el mismo logger pasa a conectar
+las dependencias que usan `log` con `tracing`; una capa escribe directamente a Logcat sin bucles
+ni duplicados. El subscriber se registra por separado del logger: un logger ya instalado no
+interrumpe la creación del guard, el estado y el worker. En escritorio se instala `LogTracer`
+si la fachada `log` está libre.
+
 ## El flujo
 
 ```

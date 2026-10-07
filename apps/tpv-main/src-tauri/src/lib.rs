@@ -493,7 +493,7 @@ fn field_cipher() -> Option<Arc<dyn tpv_application::ports::field_cipher::FieldC
         Ok(Some(d)) => d,
         Ok(None) => return None,
         Err(e) => {
-            log::warn!("no se pudo leer la field_dek del almacén de secretos: {e}");
+            tracing::warn!("no se pudo leer la field_dek del almacén de secretos: {e}");
             return None;
         }
     };
@@ -501,7 +501,7 @@ fn field_cipher() -> Option<Arc<dyn tpv_application::ports::field_cipher::FieldC
     match tpv_infra_licensing::field_crypto::FieldCipherAes::new(&dek) {
         Ok(c) => Some(Arc::new(c)),
         Err(e) => {
-            log::warn!("field_dek inválida, se opera sin cifrado de campo: {e}");
+            tracing::warn!("field_dek inválida, se opera sin cifrado de campo: {e}");
             None
         }
     }
@@ -1746,7 +1746,7 @@ fn updater_del_equipo(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, 
                 .map_err(|e| format!("cabecera del updater: {e}"))?;
         }
         Ok(None) => {}
-        Err(e) => log::warn!("[updater] sin la identidad del equipo, se pide el canal normal: {e}"),
+        Err(e) => tracing::warn!("[updater] sin la identidad del equipo, se pide el canal normal: {e}"),
     }
     builder
         .build()
@@ -1884,22 +1884,16 @@ pub extern "C" fn JNI_OnLoad(
     vm: *mut std::os::raw::c_void,
     _reserved: *mut std::os::raw::c_void,
 ) -> i32 {
+    tpv_telemetry::init_platform_logging();
     tpv_infra_licensing::init_java_vm(vm);
     0x0001_0006 // JNI_VERSION_1_6
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Diagnóstico en Android: enruta las macros `log` a logcat (tag "TPVRust"). Solo dispositivo.
-    #[cfg(target_os = "android")]
-    android_logger::init_once(
-        android_logger::Config::default()
-            // Info (no Trace): la crate `jni` loguea CADA llamada a nivel Trace/Debug; a Trace eso
-            // inunda logcat (miles de líneas) y ralentiza tanto la app que el sistema la mata.
-            .with_max_level(log::LevelFilter::Info)
-            .with_tag("TPVRust"),
-    );
-    log::warn!("[TPV] run() start");
+    // Logcat temprano y puente a tracing comparten un único propietario del logger global.
+    tpv_telemetry::init_platform_logging();
+    tracing::warn!("[TPV] run() start");
 
     // Sentry primero: captura panics y crashes nativos desde el arranque. El DSN (público) se embebe
     // en el build vía `TPV_SENTRY_DSN`; si no está, el cliente queda DESHABILITADO (no-op) pero el
@@ -1979,7 +1973,7 @@ pub fn run() {
                 .expect("Error obteniendo AppData");
 
             ensure_folders(&app_data_dir).expect("Error creando carpetas");
-            log::warn!("[TPV] setup: app_data_dir={:?}", app_data_dir);
+            tracing::warn!("[TPV] setup: app_data_dir={:?}", app_data_dir);
 
             let cfg = load_config(&app_data_dir);
             let mode = cfg.mode;
@@ -2049,7 +2043,7 @@ pub fn run() {
                     uc_pairing::device_identity(&PairingAdapter::new(app_data_dir.clone()))
                         .map(|d| d.device_id)
                         .unwrap_or_else(|_| "unknown".to_string());
-                log::warn!("[TPV] setup: device_id={device_id}");
+                tracing::warn!("[TPV] setup: device_id={device_id}");
                 tpv_telemetry::set_device_context(
                     device_id,
                     mode.and_then(|m| signing_mode(Some(m))).unwrap_or("unset"),

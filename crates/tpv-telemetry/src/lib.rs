@@ -29,9 +29,13 @@ mod scrub;
 mod spool;
 mod state;
 mod worker;
+#[cfg(target_os = "android")]
+mod android;
 
 #[cfg(test)]
 mod test_support;
+#[cfg(all(test, not(target_os = "android")))]
+mod init_tests;
 
 pub mod config;
 pub mod sentry;
@@ -71,12 +75,21 @@ impl std::fmt::Display for TelemetryError {
 
 impl std::error::Error for TelemetryError {}
 
+/// Diagnóstico previo a AppData/subscriber. Se llama desde JNI_OnLoad y run; idempotente.
+/// En Android el mismo logger sirve primero Logcat y después el puente log → tracing.
+pub fn init_platform_logging() {
+    #[cfg(target_os = "android")]
+    android::init();
+}
+
 /// Arranca la telemetría: monta el subscriber global y lanza el worker en segundo plano.
 /// Idempotente de facto: una segunda llamada falla al fijar el subscriber global y devuelve error
 /// (que el shell ignora).
 pub fn init(config: TelemetryConfig) -> Result<(), TelemetryError> {
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{fmt, EnvFilter};
+
+    init_platform_logging();
 
     let context = Context::new(
         config.app_version.clone(),
@@ -110,19 +123,34 @@ pub fn init(config: TelemetryConfig) -> Result<(), TelemetryError> {
         .console
         .then(|| fmt::layer().with_ansi(true).with_writer(std::io::stderr));
 
+    #[cfg(target_os = "android")]
+    let logcat_layer = Some(fmt::layer().with_ansi(false).with_target(true)
+        .with_writer(android::Logcat).with_filter(tracing_subscriber::filter::LevelFilter::INFO));
+    #[cfg(not(target_os = "android"))]
+    let logcat_layer = None::<tracing_subscriber::layer::Identity>;
+
     // ── Capa 3: reenvío a la cola durable de la nube. ──
     let forward_layer = forward::ForwardLayer::new(state.clone());
 
     // Capa puente tracing→Sentry: los eventos `error!` se convierten en eventos Sentry y el resto
     // en breadcrumbs. Es no-op si Sentry no está inicializado/está deshabilitado.
-    tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(env_filter)
         .with(file_layer)
         .with(console_layer)
+        .with(logcat_layer)
         .with(forward_layer)
-        .with(sentry_tracing::layer())
-        .try_init()
+        .with(sentry_tracing::layer());
+    // Registrar el subscriber y el logger por separado: try_init instala primero el
+    // subscriber y luego falla si Android/otro componente ya posee el logger de log.
+    tracing::subscriber::set_global_default(subscriber)
         .map_err(|e| TelemetryError::Init(format!("set_global_default: {e}")))?;
+
+    #[cfg(target_os = "android")]
+    android::activate();
+    #[cfg(not(target_os = "android"))]
+    // Una fachada log ya instalada no invalida nuestros destinos tracing.
+    let _ = tracing_log::LogTracer::init();
 
     // El guard y el estado deben sobrevivir todo el proceso.
     let _ = GUARD.set(guard);

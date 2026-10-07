@@ -5988,7 +5988,6 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 name = "tpv"
 version = "0.1.0"
 dependencies = [
- "android_logger",
  "async-trait",
  "base64 0.22.1",
  "chrono",
@@ -5996,7 +5995,6 @@ dependencies = [
  "image",
  "keyring",
  "libsql",
- "log",
  "password-hash",
  "pbkdf2",
  "qrcode",
@@ -6117,7 +6115,6 @@ dependencies = [
  "hmac",
  "jni 0.21.1",
  "keyring",
- "log",
  "rand 0.8.6",
  "reqwest 0.12.28",
  "serde",
@@ -6127,6 +6124,7 @@ dependencies = [
  "tpv-application",
  "tpv-contracts",
  "tpv-domain",
+ "tracing",
  "uuid",
 ]
 
@@ -6156,7 +6154,9 @@ dependencies = [
 name = "tpv-telemetry"
 version = "0.1.0"
 dependencies = [
+ "android_logger",
  "chrono",
+ "log",
  "regex",
  "reqwest 0.12.28",
  "sentry",
@@ -6166,6 +6166,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-appender",
+ "tracing-log",
  "tracing-subscriber",
  "ts-rs",
 ]
@@ -6176,6 +6177,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",

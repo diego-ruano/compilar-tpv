@@ -404,7 +404,7 @@ fn clasificar_error(http: u16, code: &str) -> FalloConsulta {
         // verdad llegan firmados (`leer_rechazo`); esto es sobre todo `license_not_found`, que con un
         // token válido sólo puede ser un fallo nuestro.
         "license_not_found" | "license_revoked" | "device_replaced" => {
-            log::warn!("[licencia] rechazo sin firmar del servidor: {code} (http {http})");
+            tracing::warn!("[licencia] rechazo sin firmar del servidor: {code} (http {http})");
             FalloConsulta::RechazoSinFirmar { code: code.to_string() }
         }
         // REV-10: el reloj de este equipo va más de 2 min desfasado, así que el worker no acepta
@@ -523,7 +523,7 @@ impl LicensingAdapter {
         // RI-72: la clave se LEE. Si el almacén no contesta, se vuelve a intentar en el siguiente
         // pulso; crear otra aquí era perder la identidad del equipo para siempre.
         let sk = leer_device_keypair(device_id).map_err(|e| {
-            log::warn!("[licencia] sin la clave del dispositivo: {e}");
+            tracing::warn!("[licencia] sin la clave del dispositivo: {e}");
             FalloConsulta::Inalcanzable
         })?;
         let r = peticion_con_prueba(Method::GET, PATH, token, &sk)
@@ -551,7 +551,7 @@ impl LicensingAdapter {
         const PATH: &str = "/v1/license/refresh";
 
         let sk = leer_device_keypair(device_id).map_err(|e| {
-            log::warn!("[licencia] sin la clave del dispositivo: {e}");
+            tracing::warn!("[licencia] sin la clave del dispositivo: {e}");
             FalloConsulta::Inalcanzable
         })?;
         let r = peticion_con_prueba(Method::POST, PATH, token, &sk)
@@ -695,7 +695,7 @@ impl LicensingService for LicensingAdapter {
         if let Some(dek) = ok.field_dek.as_deref().map(str::trim) {
             if !dek.is_empty() {
                 if let Err(e) = device::set_field_dek(dek) {
-                    log::warn!("no se pudo guardar la field_dek: {e}");
+                    tracing::warn!("no se pudo guardar la field_dek: {e}");
                 }
             }
         }

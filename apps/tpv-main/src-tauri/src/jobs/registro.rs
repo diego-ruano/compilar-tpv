@@ -382,7 +382,7 @@ async fn reconciliacion(app: AppHandle) -> Result<(), String> {
     let sync = state.sync_repo().await?;
     let backfill = uc_sync::backfill_estado(sync.as_ref()).await?;
     if backfill.tablas_pendientes > 0 {
-        log::info!(
+        tracing::info!(
             "reconciliacion: saltada, el histórico todavía se está descargando ({} tablas pendientes)",
             backfill.tablas_pendientes
         );
@@ -806,7 +806,7 @@ async fn cifrado_pii(app: AppHandle) -> Result<(), String> {
 
     let n = repo.cifrar_pii_pendiente().await?;
     if n > 0 {
-        log::info!("cifrado_pii: {n} fichas de personal convertidas a texto cifrado");
+        tracing::info!("cifrado_pii: {n} fichas de personal convertidas a texto cifrado");
     }
     Ok(())
 }

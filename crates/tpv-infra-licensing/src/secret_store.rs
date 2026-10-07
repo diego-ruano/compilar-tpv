@@ -98,7 +98,7 @@ mod imp {
 
     fn je<E: std::fmt::Display>(e: E) -> String {
         let s = format!("secret_store(android): {e}");
-        log::warn!("[secret_store] ERR {s}");
+        tracing::warn!("[secret_store] ERR {s}");
         s
     }
 
@@ -123,7 +123,7 @@ mod imp {
             Ok(vm) => {
                 let _ = JAVA_VM.set(vm);
             }
-            Err(e) => log::warn!("[secret_store] init_java_vm: from_raw falló: {e}"),
+            Err(e) => tracing::warn!("[secret_store] init_java_vm: from_raw falló: {e}"),
         }
     }
 
