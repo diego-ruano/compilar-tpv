@@ -1,5 +1,5 @@
 {
-  "_leeme": "Tabla de casos que comparten las TRES copias del filtro de datos personales: crates/tpv-telemetry/src/scrub.rs (Rust), apps/tpv-main/src/shared/observability/scrub.ts (Webview) y apps/cloud-worker-licensing/src/observability/scrub.ts (worker). Las tres la leen en sus tests, así que si una regla cambia en una copia, las otras fallan hasta que se igualen. 'redacta' son pares [entrada, salida exacta]; 'no_toca' son textos de diagnóstico que tienen que salir tal cual.",
+  "_leeme": "Tabla de casos que comparten las TRES copias del filtro de datos personales: crates/tpv-telemetry/src/scrub.rs (Rust), apps/tpv-main/src/shared/observability/scrub.ts (Webview) y apps/cloud-worker-licensing/src/observability/scrub.ts (worker). Las tres la leen en sus tests, así que si una regla cambia en una copia, las otras fallan hasta que se igualen. 'redacta' son pares [entrada, salida exacta]; 'no_toca' son textos de diagnóstico que tienen que salir tal cual. 'objetos' son pares de entrada/salida de valores JSON anidados.",
   "redacta": [
     ["cliente ana@example.com pidió", "cliente [email] pidió"],
     ["ANA.Perez+tpv@Bar-La-Plaza.ES", "[email]"],
@@ -36,13 +36,21 @@
     ["tel +34 612 345 678 fin", "tel [num] fin"],
     ["600 12 34 56", "[num]"],
     ["612.345.678", "[num]"],
-    ["(+34) 612345678", "(+34) [num]"],
+    ["(+34) 612345678", "[num]"],
     ["tarjeta 4111 1111 1111 1111", "tarjeta [num]"],
     ["4111-1111-1111-1111", "[num]"],
-    [
-      "fallo al guardar trabajador con DNI x1234567l e IBAN ES91 2100 0418 4502 0005 1332",
-      "fallo al guardar trabajador con DNI [id] e IBAN [iban]"
-    ]
+    ["fallo al guardar trabajador con DNI x1234567l e IBAN ES91 2100 0418 4502 0005 1332", "fallo al guardar trabajador con DNI [id] e IBAN [iban]"],
+    ["tel 0034 612 345 678 fin", "tel [num] fin"],
+    ["tel 34-912-345-678 fin", "tel [num] fin"],
+    ["tel 911222333 fin", "tel [num] fin"],
+    ["tarjeta 5555555555554444", "tarjeta [num]"],
+    ["tarjeta 378282246310005", "tarjeta [num]"],
+    ["op_id=01925678-1234-7123-8123-123456789012 tel=612345678", "op_id=01925678-1234-7123-8123-123456789012 tel=[num]"],
+    ["Last_Ok_Ms=1727450000002 token=secreto tel=612345678", "Last_Ok_Ms=1727450000002 token=[redacted] tel=[num]"],
+    ["token=01925678-1234-7123-8123-123456789012", "token=[redacted]"],
+    ["pin=1727450000002", "pin=[redacted]"],
+    ["fecha 2026-10-07 12:34:56 ana@example.com", "fecha 2026-10-07 12:34:56 [email]"],
+    ["op_id=01925678-1234-7123-8123-123456789012 NSS 281234567840", "op_id=01925678-1234-7123-8123-123456789012 NSS [nss]"]
   ],
   "no_toca": [
     "op 12 aplicada seq=34 en 5ms",
@@ -59,6 +67,85 @@
     "versión 1.2.3 de tauri",
     "Mesa 12 · comanda abierta desde las 21:30",
     "fecha 2026-09-15",
-    "[email] [iban] [id] [nss] [num] [jwt] [redacted]"
+    "[email] [iban] [id] [nss] [num] [jwt] [redacted]",
+    "Last_Ok_Ms=1727450000000",
+    "Last_Ok_Ms=1727450000002",
+    "last_run_ms=1727450000002",
+    "timestamp=1727450000002",
+    "ts=1727450000002",
+    "op_id=01925678-1234-7123-8123-123456789012",
+    "op_id=01925678-1234-7123-8123-abcdefabcdef",
+    "op_id=01925678-1234-7123-8123-ABCDEFABCDEF",
+    "fecha 2026-10-07 12:34:56",
+    "fecha 2026-10-07T12:34:56.123Z",
+    "fecha 2026-10-07T12:34:56+02:00",
+    "hash=abcdef1234567890abcdef",
+    "huella AB12123456781234567812345678123456",
+    "contador=12345678901234567890",
+    "numero=4111111111111112",
+    "numero=4111 1111 1111 1112",
+    "telefono extranjero +12025550123",
+    "CIF B61234567",
+    "importe=1234567890"
+  ],
+  "objetos": [
+    [
+      {
+        "last_ok_ms": "1727450000002",
+        "Last_Run_Ms": "1727450000002",
+        "op_id": "01925678-1234-7123-8123-123456789012",
+        "pin": "1234",
+        "nota": "token=secreto",
+        "n": 1727450000002
+      },
+      {
+        "last_ok_ms": "1727450000002",
+        "Last_Run_Ms": "1727450000002",
+        "op_id": "01925678-1234-7123-8123-123456789012",
+        "pin": "[redacted]",
+        "nota": "token=[redacted]",
+        "n": 1727450000002
+      }
+    ],
+    [
+      {
+        "last_ok_ms": "1727450000002 tel=612345678",
+        "lista": [
+          "ana@example.com",
+          {
+            "ts": "1727450000002"
+          }
+        ]
+      },
+      {
+        "last_ok_ms": "[num] tel=[num]",
+        "lista": [
+          "[email]",
+          {
+            "ts": "1727450000002"
+          }
+        ]
+      }
+    ],
+    [
+      {
+        "token": "01925678-1234-7123-8123-123456789012",
+        "pin": 1234
+      },
+      {
+        "token": "[redacted]",
+        "pin": "[redacted]"
+      }
+    ],
+    [
+      {
+        "huella": "AB12123456781234567812345678123456",
+        "token": "secreto"
+      },
+      {
+        "huella": "AB12123456781234567812345678123456",
+        "token": "[redacted]"
+      }
+    ]
   ]
 }

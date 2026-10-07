@@ -71,6 +71,14 @@ ASCII (`(?-u:\b)`, `[0-9]`) para que Rust y JavaScript decidan igual.
 
 No reconoce nombres ni direcciones: un mensaje de error no se compone con ellos. No toca el fichero local.
 
+RI-42: conserva UUIDs completos, fechas ISO, timestamps identificados por claves temporales
+(`*_ms`, `timestamp`, `epoch`, `ts`) y hashes identificados como tales. Las credenciales se
+ocultan antes de proteger esos intervalos; las claves estructuradas de secretos también se
+redactan. Detecta teléfonos españoles de nueve cifras con prefijo opcional `+34`, `0034`, `34`
+o `(+34)`, y candidatos a tarjeta de 13–19 cifras que pasan Luhn. No redacta cualquier número
+largo por su longitud. Rust preselecciona reglas con RegexSet y conserva cadenas prestadas sin
+reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idempotencia.
+
 ## Piezas
 
 | Capa | Archivo |

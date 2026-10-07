@@ -63,34 +63,34 @@ pub fn init_sentry(cfg: SentryConfig) -> SentryGuard {
 /// Lo que no se toca son los contextos tipados que rellena el SDK (sistema, dispositivo, traza): no
 /// llevan datos de nadie, y un identificador de traza redactado deja el evento inservible.
 fn scrub_event(event: &mut sentry::protocol::Event<'static>) {
-    use crate::scrub::{scrub, scrub_value};
+    use crate::scrub::{scrub, scrub_value, scrub_field, scrub_string_field};
     use sentry::protocol::Context;
 
     if let Some(msg) = event.message.as_mut() {
-        *msg = scrub(msg);
+        if let Cow::Owned(value) = scrub(msg) { *msg = value; }
     }
     if let Some(le) = event.logentry.as_mut() {
-        le.message = scrub(&le.message);
+        if let Cow::Owned(value) = scrub(&le.message) { le.message = value; }
         le.params.iter_mut().for_each(scrub_value);
     }
     for exc in event.exception.values.iter_mut() {
         if let Some(v) = exc.value.as_mut() {
-            *v = scrub(v);
+            if let Cow::Owned(value) = scrub(v) { *v = value; }
         }
     }
     for bc in event.breadcrumbs.values.iter_mut() {
         if let Some(m) = bc.message.as_mut() {
-            *m = scrub(m);
+            if let Cow::Owned(value) = scrub(m) { *m = value; }
         }
-        bc.data.values_mut().for_each(scrub_value);
+        for (key, value) in &mut bc.data { scrub_field(key, value); }
     }
-    event.extra.values_mut().for_each(scrub_value);
-    for v in event.tags.values_mut() {
-        *v = scrub(v);
+    for (key, value) in &mut event.extra { scrub_field(key, value); }
+    for (key, v) in &mut event.tags {
+        if let Cow::Owned(value) = scrub_string_field(key, v) { *v = value; }
     }
     for ctx in event.contexts.values_mut() {
         if let Context::Other(campos) = ctx {
-            campos.values_mut().for_each(scrub_value);
+            for (key, value) in campos { scrub_field(key, value); }
         }
     }
 }

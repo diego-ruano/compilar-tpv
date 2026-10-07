@@ -87,7 +87,7 @@ Lo que sale de esta revisión se concentra en cuatro frentes:
 | [RI-38](#ri-38) | 🔵 | bug | Errores que se tragan en silencio (estadísticas, outbox, compatibilidad de columnas) |
 | [RI-39](#ri-39) | 🔵 | bug | Guardas de estado fuera de la transacción (`actualizar_pago`) |
 | [RI-40](#ri-40) | 🔵 | bug | Pánicos por cortar cadenas por bytes (reservas) |
-| [RI-42](#ri-42) | 🔵 | deuda | El filtro de PII borra UUIDs y marcas de tiempo (diagnóstico perdido) |
+| [RI-42](#ri-42) | ✅ | resuelto | Filtro que conserva UUIDs y timestamps y valida tarjetas con Luhn |
 | [RI-44](#ri-44) | 🔵 | rendimiento | El worker gasta CPU re-serializando el catch-up y verificando Ed25519 en JS |
 | [RI-45](#ri-45) | 🔵 | tecnología | El Durable Object es «clásico»: Workers RPC quitaría el HMAC interno frágil |
 | [RI-46](#ri-46) | 🔵 | deuda | Configuración de wrangler: bindings duplicados, `remote: true`, fecha de compatibilidad |
@@ -159,22 +159,16 @@ directorio al estar inactivo. Los rechazos de cuerpo se dividen hasta aislar el 
 [observabilidad.md](../arquitectura/observabilidad.md).
 
 <a id="ri-42"></a>
-### RI-42 🔵 · El filtro de PII borra UUIDs y marcas de tiempo
+### RI-42 ✅ · Filtro de PII que conserva los datos de diagnóstico
 
-**Dónde:** [`scrub.rs`](../../crates/tpv-telemetry/src/scrub.rs) (regla `[num]`) y sus dos copias.
+**Implementado:** intervalos protegidos de UUIDs, fechas, timestamps con claves temporales y
+hashes identificados. Secretos redactados antes de proteger diagnóstico y también por su clave
+en objetos. Teléfonos españoles con prefijo opcional y tarjetas de 13–19 cifras validadas con
+Luhn. Las tres copias comparten pruebas de texto, objetos e idempotencia. Rust usa RegexSet
+para preseleccionar reglas y devuelve cadenas prestadas cuando no hay cambios.
 
-La última regla redacta cualquier secuencia de 9 a 19 cifras con separadores opcionales. Eso se
-lleva:
-
-- Las marcas de tiempo en milisegundos (`Last_Ok_Ms=1727450000000` → `[num]`), muy presentes en los
-  logs de sync y jobs.
-- Parte de algunos UUIDv7 cuyo prefijo de tiempo salga sólo con cifras decimales
-  (`01925678-1234-7…` → `[num]-7…`), justo los `op_id` con los que se diagnostica.
-
-Propuesta: añadir esos dos casos a `no_toca` de `scrub_casos.json` y afinar la regla (teléfonos
-españoles `[6789]\d{8}` con prefijo opcional, tarjetas validadas con Luhn) para que el resto de
-números pase. De paso, `scrub()` escanea dos veces cada regla que coincide (`is_match` +
-`replace_all`) y copia siempre la cadena; un `RegexSet` decide en una pasada qué reglas aplicar.
+**Dónde:** [`scrub.rs`](../../crates/tpv-telemetry/src/scrub.rs), sus dos copias TypeScript y
+[`scrub_casos.json`](../../crates/tpv-telemetry/src/scrub_casos.json).
 
 ### Otros de observabilidad
 

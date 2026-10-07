@@ -12,11 +12,19 @@
 import { describe, expect, it } from "vitest";
 
 import casosJson from "../../../crates/tpv-telemetry/src/scrub_casos.json?raw";
-import { scrub, scrubEvent } from "../src/shared/observability/scrub";
+import { scrub, scrubDeep, scrubEvent } from "../src/shared/observability/scrub";
 
-const casos = JSON.parse(casosJson) as { redacta: [string, string][]; no_toca: string[] };
+const casos = JSON.parse(casosJson) as { redacta: [string, string][]; no_toca: string[]; objetos: [unknown, unknown][] };
 
 describe("scrub, con la tabla que comparten las tres copias", () => {
+	it.each(casos.objetos)("filtra un objeto conservando timestamps e identificadores", (entrada, salida) => {
+		const value: unknown = structuredClone(entrada);
+		scrubDeep(value);
+		expect(value).toEqual(salida);
+		scrubDeep(value);
+		expect(value).toEqual(salida);
+	});
+
 	it.each(casos.redacta)("«%s» → «%s»", (entrada, salida) => {
 		expect(scrub(entrada)).toBe(salida);
 	});

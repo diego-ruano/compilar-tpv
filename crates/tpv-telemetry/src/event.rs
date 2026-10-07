@@ -67,7 +67,7 @@ impl SpoolEvent {
     /// identificadores propios y no se tocan. Se aplica en el worker de subida (hilo aparte), no en
     /// el camino de emisión, para no penalizar al POS.
     pub(crate) fn scrub_in_place(&mut self) {
-        self.message = scrub::scrub(&self.message);
+        if let std::borrow::Cow::Owned(message) = scrub::scrub(&self.message) { self.message = message; }
         scrub::scrub_map(&mut self.fields);
     }
 }
