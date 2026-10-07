@@ -2,7 +2,7 @@
 -- Esquema de la base CENTRAL (control-plane) de `tpv-api`, tal como está en producción.
 --
 -- Foto tomada el 2026-09-16, más los cambios de RI-52 (2026-10-04: varias licencias por compra) y
--- de RI-68 y RI-73 (2026-10-07: `license_otp_eventos` y `canario_cifrado`).
+-- de RI-68, RI-73 y RI-30 (2026-10-07: `license_otp_eventos`, `canario_cifrado` y `tenants.piloto`).
 -- Es la única referencia de esta base en el repo.
 --
 -- La estructura de esta base NO se toca desde el código: el worker no crea ni altera tablas. Se
@@ -34,7 +34,9 @@ CREATE TABLE tenants (
   notes            TEXT,
   created_at_ms    INTEGER NOT NULL DEFAULT (unixepoch()*1000),
   updated_at_ms    INTEGER NOT NULL DEFAULT (unixepoch()*1000)
-, field_dek TEXT);
+, field_dek TEXT
+-- RI-30 · Bar piloto: sus equipos reciben las versiones del canal `beta` antes que nadie.
+, piloto INTEGER NOT NULL DEFAULT 0 CHECK (piloto IN (0, 1)));
 
 CREATE INDEX idx_tenants_status ON tenants(status);
 

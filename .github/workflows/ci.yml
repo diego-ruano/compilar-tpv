@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # RI-30: `release.yml` lo llama antes de publicar, para que un tag cuyo commit no pasa no llegue a
+  # ningún equipo.
+  workflow_call:
 
 permissions:
   contents: read

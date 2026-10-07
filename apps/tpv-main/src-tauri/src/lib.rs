@@ -1739,9 +1739,7 @@ struct UpdateStatus {
 /// contra la clave pública embebida en `tauri.conf.json`.
 #[cfg(desktop)]
 async fn check_and_announce(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
-    let updater = app
-        .updater()
-        .map_err(|e| format!("updater no disponible: {e}"))?;
+    let updater = updater_del_equipo(app)?;
 
     let found = updater
         .check()
@@ -1760,6 +1758,29 @@ async fn check_and_announce(app: &AppHandle) -> Result<Option<UpdateInfo>, Strin
     let _ = app.emit("update:available", info.clone());
     notify_update_available(app, &info.version).await;
     Ok(Some(info))
+}
+
+/// RI-30 · El updater, con la identidad del equipo en la cabecera `X-Tpv-Device`: con ella el feed
+/// sabe si es de un bar piloto, que recibe las versiones del canal `beta` antes que nadie.
+///
+/// La identidad se LEE, nunca se crea (RI-72). Sin ella —equipo sin activar, o almacén que no
+/// contesta— sale sin cabecera y el feed le da el canal normal: buscar actualizaciones no puede
+/// fallar por esto.
+#[cfg(desktop)]
+fn updater_del_equipo(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    let mut builder = app.updater_builder();
+    match tpv_infra_licensing::device::leer_device_id() {
+        Ok(Some(id)) => {
+            builder = builder
+                .header("X-Tpv-Device", id)
+                .map_err(|e| format!("cabecera del updater: {e}"))?;
+        }
+        Ok(None) => {}
+        Err(e) => log::warn!("[updater] sin la identidad del equipo, se pide el canal normal: {e}"),
+    }
+    builder
+        .build()
+        .map_err(|e| format!("updater no disponible: {e}"))
 }
 
 /// Comprueba el feed y devuelve los metadatos de la nueva versión, o `None` si ya está al día.
@@ -1854,9 +1875,7 @@ async fn notify_update_available(app: &AppHandle, version: &str) {
 async fn updater_install(app: AppHandle) -> Result<(), AppErrorDto> {
     #[cfg(desktop)]
     {
-        let updater = app
-            .updater()
-            .map_err(|e| format!("updater no disponible: {e}"))?;
+        let updater = updater_del_equipo(&app)?;
 
         let update = updater
             .check()

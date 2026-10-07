@@ -189,10 +189,11 @@ Por orden de dependencia:
    hacerlos configurables al compilar (como `TPV_SENTRY_DSN`).
 7. Etiqueta de entorno: `tpv_telemetry::Environment` sólo tiene `Dev` y `Prod`, y el entorno de Sentry
    lo decide `lib.rs::entorno_de_sentry` (`e2e` / `dev` / `prod`).
-8. Canal de actualizaciones propio: el feed sólo sirve `channel = 'stable'`
-   (`domains/updates/updates.routes.ts`).
-9. Correo contenido: staging no puede mandar pedidos a proveedores reales.
-10. Un workflow que despliegue staging.
+8. Correo contenido: staging no puede mandar pedidos a proveedores reales.
+9. Un workflow que despliegue staging.
+
+El canal de actualizaciones ya existe: el TPV de staging se marca como bar piloto y recibe las versiones
+de `beta` antes que nadie ([publicar-version.md](guias/publicar-version.md#bares-piloto-y-promoción-ri-30)).
 
 Los puntos 1–4 ya bastan para probar el backend con `curl` o el CLI de licencias; el 6 es lo que hace
 falta para probar la aplicación.

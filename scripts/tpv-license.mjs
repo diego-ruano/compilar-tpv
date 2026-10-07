@@ -18,6 +18,14 @@
 //   pnpm interruptor:encender -- --id <interruptorId>
 //   pnpm interruptor:lista    -- [--historial]
 //
+// Y los bares piloto y la promoción de versiones de beta a estable (RI-30):
+//
+//   pnpm piloto:poner  -- --tenant <tenantId>      (recibe las versiones beta antes que nadie)
+//   pnpm piloto:quitar -- --tenant <tenantId>
+//   pnpm piloto:lista  -- [--todos]                 (--todos: todos los negocios, para ver su id)
+//   pnpm release:lista
+//   pnpm release:promocionar -- --version 1.4.0 [--arch x86_64]
+//
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
 //   2. Un fichero `.env` en la raíz del repo (gitignoreado) con la línea:
@@ -312,6 +320,48 @@ async function recifrar() {
 	}
 }
 
+/* ── Bares piloto y promoción de versiones (RI-30) ───────────────────────── */
+
+async function pilotoMarcar(args, piloto) {
+	const tenantId = String(args.tenant || "").trim();
+	if (!tenantId) fail("--tenant <tenantId> requerido (sácalo de `pnpm piloto:lista -- --todos`)");
+	await api("POST", "/v1/admin/pilotos", { tenantId, piloto });
+	console.log(
+		piloto
+			? `\n  ✔ ${tenantId} es bar piloto: recibe las versiones beta en su próxima comprobación.\n`
+			: `\n  ✔ ${tenantId} ya no es bar piloto: vuelve al canal estable.\n`,
+	);
+}
+
+async function pilotoLista(args) {
+	const res = await api("GET", `/v1/admin/pilotos${args.todos ? "?todos=1" : ""}`);
+	if (!res.negocios.length) {
+		console.log(args.todos ? "\n  (no hay negocios)\n" : "\n  (ningún bar piloto; --todos para ver todos los negocios)\n");
+		return;
+	}
+	console.table(res.negocios.map((n) => ({ negocio: n.nombre, piloto: n.piloto ? "sí" : "", tenant: n.tenantId })));
+	if (res.hayMas) console.log("  (hay más negocios de los que caben en la lista)\n");
+}
+
+async function releaseLista() {
+	const res = await api("GET", "/v1/admin/releases");
+	if (!res.releases.length) {
+		console.log("\n  (no hay versiones publicadas)\n");
+		return;
+	}
+	console.table(res.releases);
+}
+
+async function releasePromocionar(args) {
+	const version = String(args.version || "").trim();
+	if (!version) fail("--version <x.y.z> requerido (sácalo de `pnpm release:lista`)");
+	await api("POST", "/v1/admin/releases/promote", {
+		version,
+		...(args.arch ? { arch: String(args.arch) } : {}),
+	});
+	console.log(`\n  ✔ ${version} pasa a estable: todos los equipos la verán en su próxima comprobación.\n`);
+}
+
 /* ── Entrada ─────────────────────────────────────────────────────────────── */
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -337,6 +387,11 @@ const comandos = {
 	"interruptor-apagar": interruptorApagar,
 	"interruptor-encender": interruptorEncender,
 	"interruptor-lista": interruptorLista,
+	"piloto-poner": (a) => pilotoMarcar(a, true),
+	"piloto-quitar": (a) => pilotoMarcar(a, false),
+	"piloto-lista": pilotoLista,
+	"release-lista": releaseLista,
+	"release-promocionar": releasePromocionar,
 };
 
 if (!comandos[cmd]) {
@@ -356,6 +411,15 @@ if (!comandos[cmd]) {
     apagar    --nombre <interruptor> --horas <n> --motivo "…" [--tenant <id>] [--desde x.y.z] [--hasta x.y.z]
     encender  --id <interruptorId>
     lista     [--historial]
+
+  Bares piloto (pnpm piloto:<comando>):
+    poner     --tenant <tenantId>
+    quitar    --tenant <tenantId>
+    lista     [--todos]
+
+  Versiones (pnpm release:<comando>):
+    lista
+    promocionar --version <x.y.z> [--arch x86_64]   (de beta a estable)
 `);
 	process.exit(1);
 }

@@ -8,7 +8,13 @@
 // clave pública embebida en la app, así que el feed puede ser público sin riesgo.
 //
 // CONTROL REMOTO (el motivo de servirlo nosotros y no GitHub Releases):
-//   - Para PUBLICAR una versión: POST /v1/update/publish (token admin) inserta una fila activa.
+//   - Para PUBLICAR una versión: POST /v1/update/publish (token de release) inserta una fila activa.
+//     El workflow de release publica en el canal `beta`.
+//   - RI-30 · BARES PILOTO: los equipos de un negocio con `tenants.piloto = 1` reciben también el canal
+//     `beta` (el updater manda su `device_id` en `X-Tpv-Device`); los demás, sólo `stable`. Una versión
+//     nueva llega primero a los pilotos, y cuando lleva unos días sin problemas se PROMOCIONA a
+//     `stable` (`pnpm release:promocionar`, ruta de administración). Sin staging (INFRA-01), es lo
+//     más parecido a probar con clientes de verdad sin arriesgarlos a todos.
 //   - Para ROLLBACK instantáneo: POST /v1/update/deactivate desactiva la versión mala; el feed
 //     vuelve a servir la anterior activa. Sin tocar el equipo del cliente.
 //
@@ -49,8 +55,8 @@ const soloConTokenDeRelease: MiddlewareHandler<{ Bindings: Env }> = async (c, ne
  *
  * REV-23: el feed ordenaba por `created_at_ms`, o sea por **cuándo se insertó la fila**, no por
  * qué versión es. Casi siempre coinciden y por eso no se notaba; dejan de coincidir justo cuando
- * más duele, porque `publish` es un `INSERT OR REPLACE`: retocar la URL o las notas de una versión
- * vieja le pone la fecha de hoy y esa vuelve a ser «la última». El updater no la instalaría —no
+ * más duele, porque `publish` era un `INSERT OR REPLACE`: retocar la URL o las notas de una versión
+ * vieja le ponía la fecha de hoy y esa volvía a ser «la última». El updater no la instalaría —no
  * baja de versión— pero sí dejaría de ofrecer la buena, y un equipo recién instalado se queda
  * clavado en una versión antigua sin que nada lo diga.
  *
@@ -87,12 +93,39 @@ type Release = {
 	url: string;
 };
 
+/**
+ * RI-30 · ¿Es este equipo de un negocio piloto? El `device_id` llega sin firmar, y no hace falta más:
+ * quien se haga pasar por un piloto sólo consigue una versión antes, y el instalador va firmado igual.
+ *
+ * Cualquier fallo (sin cabecera, equipo desconocido, la columna aún sin crear en Turso) es «no»: el
+ * canal normal es siempre una respuesta segura.
+ */
+async function esPiloto(db: ReturnType<typeof getDb>, deviceId: string): Promise<boolean> {
+	if (!deviceId) return false;
+	try {
+		const r = await db.execute({
+			sql: `
+				SELECT t.piloto AS piloto
+				FROM devices d JOIN tenants t ON t.tenant_id = d.tenant_id
+				WHERE d.device_id = ? AND d.revoked_at_ms IS NULL
+				LIMIT 1
+			`,
+			args: [deviceId],
+		});
+		return Number((r.rows?.[0] as any)?.piloto ?? 0) === 1;
+	} catch (e: any) {
+		console.error("[update] no se pudo saber si el equipo es piloto:", String(e?.message || e));
+		return false;
+	}
+}
+
 updatesRoutes.get("/:target/:arch/:current", async (c) => {
 	const target = c.req.param("target"); // p. ej. "windows"
 	const arch = c.req.param("arch"); // p. ej. "x86_64"
 	const current = c.req.param("current"); // versión instalada (sólo para observabilidad)
 
 	const db = getDb(c.env);
+	const piloto = await esPiloto(db, String(c.req.header("X-Tpv-Device") || "").trim());
 
 	// REV-23: se filtra por `arch`, que antes se ignoraba —llegaba en la ruta, no entraba en la
 	// consulta y sólo servía para componer la clave de `platforms`—. O sea que un equipo aarch64
@@ -105,9 +138,10 @@ updatesRoutes.get("/:target/:arch/:current", async (c) => {
 		sql: `
 			SELECT version, notes, pub_date, signature, url
 			FROM app_releases
-			WHERE target = ? AND arch = ? AND channel = 'stable' AND is_active = 1
+			WHERE target = ? AND arch = ? AND is_active = 1
+			  AND (channel = 'stable' OR (?3 = 1 AND channel = 'beta'))
 		`,
-		args: [target, arch],
+		args: [target, arch, piloto ? 1 : 0],
 	});
 
 	const row = ((r.rows ?? []) as unknown as Release[]).reduce<Release | undefined>(
@@ -121,6 +155,7 @@ updatesRoutes.get("/:target/:arch/:current", async (c) => {
 		target,
 		arch,
 		current,
+		piloto,
 		serving: row?.version ?? null,
 	});
 
@@ -166,11 +201,20 @@ updatesRoutes.post("/publish", soloConTokenDeRelease, cuerpo(publishSchema), asy
 
 	const db = getDb(c.env);
 
+	// RI-30: `ON CONFLICT … DO UPDATE` y no `INSERT OR REPLACE`, que borra la fila y la vuelve a crear:
+	// retocar las notas de una versión le ponía la fecha de hoy (REV-23). Volver a publicar una versión
+	// la reactiva, que es lo que se espera de publicarla.
 	await db.execute({
 		sql: `
-			INSERT OR REPLACE INTO app_releases
+			INSERT INTO app_releases
 				(version, target, arch, channel, notes, pub_date, signature, url, is_active, created_at_ms)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, unixepoch()*1000)
+			ON CONFLICT(version, target, arch, channel) DO UPDATE SET
+				notes = excluded.notes,
+				pub_date = excluded.pub_date,
+				signature = excluded.signature,
+				url = excluded.url,
+				is_active = 1
 		`,
 		args: [
 			datos.version,
@@ -200,20 +244,27 @@ updatesRoutes.post("/deactivate", soloConTokenDeRelease, cuerpo(deactivateSchema
 	const datos = c.req.valid("json");
 
 	const target = datos.target || "windows";
-	const channel = datos.channel || "stable";
 
 	const db = getDb(c.env);
 
 	// Sin `arch` se desactiva la versión en TODOS los arch, que es lo que quiere un rollback: si
-	// una versión está mal, lo está en todas partes. Indicándolo se acota a uno.
+	// una versión está mal, lo está en todas partes. Indicándolo se acota a uno. Lo mismo con el
+	// canal (RI-30): una versión mala lo es en `beta` y en `stable`.
 	const arch = datos.arch;
+	const channel = datos.channel;
 	await db.execute({
 		sql: `
 			UPDATE app_releases SET is_active = 0
-			WHERE version = ? AND target = ? AND channel = ? AND (?4 IS NULL OR arch = ?4)
+			WHERE version = ?1 AND target = ?2 AND (?3 IS NULL OR channel = ?3) AND (?4 IS NULL OR arch = ?4)
 		`,
-		args: [datos.version, target, channel, arch ?? null],
+		args: [datos.version, target, channel ?? null, arch ?? null],
 	});
 
-	return c.json({ ok: true, deactivated: datos.version, target, arch: arch ?? "todos", channel });
+	return c.json({
+		ok: true,
+		deactivated: datos.version,
+		target,
+		arch: arch ?? "todos",
+		channel: channel ?? "todos",
+	});
 });

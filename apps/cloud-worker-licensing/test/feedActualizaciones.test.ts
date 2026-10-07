@@ -7,8 +7,8 @@
 //     `platforms`, así que un equipo aarch64 recibía el instalador x86_64 etiquetado como suyo.
 //   · el orden era `created_at_ms DESC`, o sea por cuándo se insertó la fila. Casi siempre coincide
 //     con «la versión más alta» y por eso no se notaba; deja de coincidir justo cuando duele,
-//     porque `publish` es un `INSERT OR REPLACE` y retocar una versión vieja le pone la fecha de
-//     hoy. El updater no la instalaría —no baja de versión— pero dejaría de ofrecer la buena, y un
+//     porque `publish` era un `INSERT OR REPLACE` y retocar una versión vieja le ponía la fecha de
+//     hoy (hoy es un upsert, RI-30, pero la fecha de una fila sigue sin decir qué versión es). El updater no la instalaría —no baja de versión— pero dejaría de ofrecer la buena, y un
 //     equipo recién instalado se queda clavado sin que nada lo diga.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -75,7 +75,8 @@ beforeEach(() => {
 
 describe("REV-23 · qué versión sirve el feed", () => {
 	it("la versión más ALTA, no la insertada más tarde", async () => {
-		// `publish` es un INSERT OR REPLACE: retocar las notas de la 1.2.0 le pone fecha de hoy.
+		// Una fila de la 1.2.0 más reciente que la de la 1.10.0 (lo que hacía retocarla con el viejo
+		// INSERT OR REPLACE).
 		// Con el orden por fecha, ésa pasaba a ser «la última» y la 1.10.0 dejaba de ofrecerse.
 		const { body } = await feed(
 			"por-version",

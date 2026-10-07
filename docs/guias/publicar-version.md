@@ -1,12 +1,14 @@
 # Publicar una versión
 
-Cómo sacar una versión de la aplicación de escritorio para que llegue sola a todos los equipos, y cómo
-retirarla si sale mal sin tocar ningún PC.
+Cómo sacar una versión de la aplicación de escritorio para que llegue sola a los equipos —primero a los
+bares piloto, después a todos—, y cómo retirarla si sale mal sin tocar ningún PC.
 
 ```
-git tag v1.2.0 ─► GitHub Actions (release.yml) ─► compila y firma ─► sube el .exe a R2
-                                                                  └► POST /v1/update/publish ─► app_releases
-TPV (al arrancar y cada 6 h) ─► GET /v1/update/{target}/{arch}/{versión} ─► tpv-api
+git tag v1.2.0 ─► GitHub Actions (release.yml) ─► CI completo ─► compila y firma ─► sube el .exe a R2
+                                                                                 └► POST /v1/update/publish (canal beta)
+pnpm release:promocionar -- --version 1.2.0 ─► la copia al canal stable
+TPV (al arrancar y cada 6 h) ─► GET /v1/update/{target}/{arch}/{versión} + X-Tpv-Device ─► tpv-api
+        └─ bar piloto: beta y stable; los demás: stable
         └─ si hay una más alta: banner + notificación ─► el usuario pulsa ─► descarga, verifica firma, instala, reinicia
 ```
 
@@ -39,11 +41,30 @@ pnpm --filter @tpv/main test:e2e
    git push origin v1.2.0
    ```
 
-`release.yml` (en `windows-latest`): instala, genera los tipos (`pnpm generate-types`), comprueba que el
-tag coincide con las dos versiones, comprueba que existe la clave de firma, compila y firma
-(`pnpm --filter @tpv/main tauri build`, con `TPV_SENTRY_DSN` si está), busca el instalador NSIS en
+`release.yml` corre antes el CI entero (`ci.yml`, como workflow reutilizable): un tag cuyo commit no lo
+pasa no se publica. Después, en `windows-latest`: instala, genera los tipos (`pnpm generate-types`),
+comprueba que el tag coincide con las dos versiones, comprueba que existe la clave de firma, compila y
+firma (`pnpm --filter @tpv/main tauri build`, con `TPV_SENTRY_DSN` si está), busca el instalador NSIS en
 `<raíz>/target/release/bundle/nsis/` (el workspace es virtual), sube el `.exe` a R2 y publica en el feed
-con el contenido del `.sig`.
+**en el canal `beta`**, con el contenido del `.sig`.
+
+## Bares piloto y promoción (RI-30)
+
+Una versión recién publicada sólo la ven los equipos de los negocios marcados como piloto
+(`tenants.piloto` en la base central). Cuando lleva unos días sin problemas en ellos, se promociona y la
+ven todos:
+
+```bash
+pnpm piloto:lista -- --todos                    # los negocios con su id
+pnpm piloto:poner -- --tenant <tenantId>        # o piloto:quitar
+pnpm release:lista                              # qué versión está en qué canal
+pnpm release:promocionar -- --version 1.2.0     # de beta a estable, con la misma firma y URL
+```
+
+Conviene elegir pilotos variados (con Handy, con varias impresoras, con mucho volumen) y que sepan que lo
+son. El TPV de staging, cuando exista (INFRA-01), será un piloto más. Marcar o quitar un piloto también se
+puede hacer con un `UPDATE tenants SET piloto = 1 WHERE tenant_id = '…'` en Turso: se nota en la
+siguiente comprobación de ese equipo.
 
 ### Secretos y variables de GitHub (Settings → Secrets and variables → Actions)
 
@@ -81,19 +102,22 @@ curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/publish \
         "signature": "<contenido del .exe.sig>", "notes": "…" }'
 ```
 
-`target` (`windows`), `arch` (`x86_64`) y `channel` (`stable`) tienen esos valores por defecto.
+`target` (`windows`), `arch` (`x86_64`) y `channel` (`stable`) tienen esos valores por defecto: a mano se
+publica directamente para todos. Para pasar antes por los pilotos, `"channel": "beta"`.
 
 ## El feed
 
 `apps/cloud-worker-licensing/src/domains/updates/updates.routes.ts`, tabla `app_releases` de la base
 central, clave `(version, target, arch, channel)`.
 
-- `GET /v1/update/:target/:arch/:current` sirve la versión **más alta** activa de ese `target` y `arch`
-  en `stable`, comparada con `compararVersiones` (numérica por tramos; una preliberación pierde contra su
-  versión final), no la última insertada: `publish` es un `INSERT OR REPLACE` y retocar una versión vieja
-  le pone la fecha de hoy. Sin nada que ofrecer, 204.
-- `POST /v1/update/publish` y `POST /v1/update/deactivate` exigen `RELEASE_ADMIN_TOKEN`.
-- El cliente sólo lee `stable`. Publicar en otro canal guarda la versión sin ofrecerla a nadie.
+- `GET /v1/update/:target/:arch/:current` sirve la versión **más alta** activa de ese `target` y `arch`,
+  comparada con `compararVersiones` (numérica por tramos; una preliberación pierde contra su versión
+  final), no la última insertada. A un equipo de un negocio piloto (lo dice la cabecera `X-Tpv-Device`)
+  le sirve la más alta de `beta` y `stable`; a los demás, sólo de `stable`. Sin cabecera, con un equipo
+  desconocido o revocado, o si falla la consulta, `stable`. Sin nada que ofrecer, 204.
+- `POST /v1/update/publish` y `POST /v1/update/deactivate` exigen `RELEASE_ADMIN_TOKEN`. Volver a
+  publicar una versión retoca su fila (`ON CONFLICT … DO UPDATE`) y la reactiva.
+- La lista de versiones, la promoción y los pilotos van por `/v1/admin/*` (`ADMIN_API_TOKEN`, el CLI).
 
 ## Retirar una versión
 
@@ -103,8 +127,8 @@ curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/deactivate \
   -d '{ "version": "1.2.0" }'
 ```
 
-Pone `is_active = 0` (sin `arch`, en todas las arquitecturas) y el feed vuelve a ofrecer la anterior
-activa. Quien ya instaló la mala necesita una versión nueva con el arreglo: el updater no baja de
+Pone `is_active = 0` (sin `arch`, en todas las arquitecturas; sin `channel`, en `beta` y en `stable`) y
+el feed vuelve a ofrecer la anterior activa. Quien ya instaló la mala necesita una versión nueva con el arreglo: el updater no baja de
 versión.
 
 ## En el TPV

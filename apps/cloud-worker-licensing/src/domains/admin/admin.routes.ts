@@ -12,6 +12,9 @@
 //   POST /v1/admin/licenses/:id/shorten  → resta meses (puede dejarla caducada)
 //   /v1/admin/interruptores               → interruptores remotos de emergencia (PROD-06, abajo)
 //   POST /v1/admin/store-key/recifrar    → termina una rotación de LICENSE_STORE_KEY (RI-73)
+//   GET|POST /v1/admin/pilotos            → qué negocios son bares piloto (RI-30, abajo)
+//   GET /v1/admin/releases                → las últimas versiones, con su canal
+//   POST /v1/admin/releases/promote       → pasa una versión de beta a stable
 //
 // La clave en claro se devuelve UNA sola vez, en la respuesta del issue: después ya solo existe
 // cifrada. Si el cliente la pierde, se reemite.
@@ -455,4 +458,121 @@ adminRoutes.get("/interruptores", async (c) => {
 			createdAt: new Date(Number(f.created_at_ms)).toISOString(),
 		})),
 	});
+});
+
+/* ── Bares piloto y canal beta de actualizaciones (RI-30) ─────────────────────
+ *
+ * Los equipos de un negocio piloto reciben las versiones del canal `beta` antes que nadie (ver
+ * `domains/updates/updates.routes.ts`). Aquí se marca qué negocios lo son y se promociona una versión
+ * de `beta` a `stable` cuando ha aguantado unos días en ellos.
+ */
+
+/** Cuántos negocios devuelve la lista, como mucho (el techo va en la respuesta). */
+const TECHO_NEGOCIOS = 500;
+
+adminRoutes.get("/pilotos", async (c) => {
+	const db = getDb(c.env);
+	const todos = c.req.query("todos") === "1";
+	const rs = await db.execute({
+		sql: `
+			SELECT tenant_id, display_name, legal_name, piloto
+			FROM tenants
+			WHERE status <> 'deleted' AND (?1 = 1 OR piloto = 1)
+			ORDER BY piloto DESC, display_name
+			LIMIT ?2;
+		`,
+		args: [todos ? 1 : 0, TECHO_NEGOCIOS + 1],
+	});
+	const filas = (rs.rows ?? []) as any[];
+	return c.json({
+		ok: true,
+		negocios: filas.slice(0, TECHO_NEGOCIOS).map((f) => ({
+			tenantId: String(f.tenant_id),
+			nombre: f.display_name ?? f.legal_name ?? null,
+			piloto: Number(f.piloto) === 1,
+		})),
+		hayMas: filas.length > TECHO_NEGOCIOS,
+	});
+});
+
+const pilotoSchema = z.object({
+	tenantId: z.string().min(1),
+	piloto: z.boolean(),
+});
+
+adminRoutes.post("/pilotos", cuerpo(pilotoSchema), async (c) => {
+	const { tenantId, piloto } = c.req.valid("json");
+	const db = getDb(c.env);
+	const r = await db.execute({
+		sql: `UPDATE tenants SET piloto = ?, updated_at_ms = ? WHERE tenant_id = ?;`,
+		args: [piloto ? 1 : 0, Date.now(), tenantId],
+	});
+	if (Number((r as any)?.rowsAffected ?? 0) === 0) {
+		return c.json({ ok: false, error: "not_found", message: "No hay ningún negocio con ese id." }, 404);
+	}
+	await auditAdmin(db, piloto ? "piloto_poner" : "piloto_quitar", null, { tenantId });
+	return c.json({ ok: true, tenantId, piloto });
+});
+
+/** Las últimas versiones publicadas, con su canal: lo que hace falta para decidir qué promocionar. */
+adminRoutes.get("/releases", async (c) => {
+	const db = getDb(c.env);
+	const rs = await db.execute(`
+		SELECT version, target, arch, channel, is_active, pub_date
+		FROM app_releases
+		ORDER BY created_at_ms DESC
+		LIMIT 50;
+	`);
+	return c.json({
+		ok: true,
+		releases: ((rs.rows ?? []) as any[]).map((f) => ({
+			version: String(f.version),
+			target: String(f.target),
+			arch: String(f.arch),
+			canal: String(f.channel),
+			activa: Number(f.is_active) === 1,
+			publicada: String(f.pub_date),
+		})),
+	});
+});
+
+const promocionarSchema = z.object({
+	version: z.string().min(1),
+	target: z.string().optional(),
+	arch: z.string().optional(),
+});
+
+/**
+ * Promociona una versión de `beta` a `stable`: la copia al canal estable con la misma firma y URL, y
+ * desde ese momento se la ofrece el feed a todos los equipos. Sin `arch`, en todos los que tenga.
+ */
+adminRoutes.post("/releases/promote", cuerpo(promocionarSchema), async (c) => {
+	const { version, target, arch } = c.req.valid("json");
+	const db = getDb(c.env);
+	// El `WHERE` del SELECT no sobra: sin él, SQLite no sabe si el `ON` es de un JOIN o del upsert.
+	const r = await db.execute({
+		sql: `
+			INSERT INTO app_releases
+				(version, target, arch, channel, notes, pub_date, signature, url, is_active, created_at_ms)
+			SELECT version, target, arch, 'stable', notes, pub_date, signature, url, 1, unixepoch()*1000
+			FROM app_releases
+			WHERE version = ?1 AND target = ?2 AND channel = 'beta' AND is_active = 1
+			  AND (?3 IS NULL OR arch = ?3)
+			ON CONFLICT(version, target, arch, channel) DO UPDATE SET
+				notes = excluded.notes,
+				pub_date = excluded.pub_date,
+				signature = excluded.signature,
+				url = excluded.url,
+				is_active = 1;
+		`,
+		args: [version, target || "windows", arch ?? null],
+	});
+	if (Number((r as any)?.rowsAffected ?? 0) === 0) {
+		return c.json(
+			{ ok: false, error: "not_found", message: "Esa versión no está activa en el canal beta." },
+			404,
+		);
+	}
+	await auditAdmin(db, "release_promocionar", null, { version, target: target || "windows", arch: arch ?? "todos" });
+	return c.json({ ok: true, version });
 });

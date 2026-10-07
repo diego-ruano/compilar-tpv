@@ -1488,7 +1488,10 @@ export async function auditAdmin(
 		| "shorten"
 		| "interruptor_apagar"
 		| "interruptor_encender"
-		| "recifrar",
+		| "recifrar"
+		| "piloto_poner"
+		| "piloto_quitar"
+		| "release_promocionar",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

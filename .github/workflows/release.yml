@@ -1,7 +1,8 @@
 name: Release
 
 # Se dispara al publicar un tag de versión, p. ej.:  git tag v1.0.0 && git push origin v1.0.0
-# Flujo: compila + FIRMA el instalador de Windows, lo sube a R2 y lo publica en el feed de tpv-api.
+# Flujo: pasa el CI, compila + FIRMA el instalador de Windows, lo sube a R2 y lo publica en el feed de
+# tpv-api en el canal beta (bares piloto). Se promociona a todos con `pnpm release:promocionar`.
 #
 # IMPORTANTE: sube la `version` en apps/tpv-main/src-tauri/tauri.conf.json y Cargo.toml ANTES de
 # tagear; deben coincidir con el tag (el updater compara esa versión).
@@ -25,7 +26,13 @@ permissions:
   contents: read
 
 jobs:
+  # RI-30: el CI entero antes de publicar. Sin esto, un tag sobre un commit que no pasaba los tests se
+  # compilaba y se ofrecía igual.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: ci
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -126,15 +133,18 @@ jobs:
         run: |
           $sig = (Get-Content -Raw "${{ steps.art.outputs.sig_path }}").Trim()
           $url = "${{ vars.R2_PUBLIC_BASE_URL }}/${{ steps.art.outputs.exe_name }}"
+          # RI-30: al canal beta, que sólo ven los bares piloto. A todos llega con
+          # `pnpm release:promocionar -- --version <x.y.z>` (docs/guias/publicar-version.md).
           $body = @{
             version   = "${{ steps.art.outputs.version }}"
             url       = $url
             signature = $sig
             notes     = "Release ${{ github.ref_name }}"
+            channel   = "beta"
           } | ConvertTo-Json -Compress
           Invoke-RestMethod -Method Post `
             -Uri "${{ vars.TPV_API_BASE }}/v1/update/publish" `
             -Headers @{ Authorization = "Bearer ${{ secrets.RELEASE_ADMIN_TOKEN }}" } `
             -ContentType "application/json" `
             -Body $body
-          Write-Host "Publicado $url en el feed."
+          Write-Host "Publicado $url en el canal beta del feed."
