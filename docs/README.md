@@ -55,6 +55,10 @@ Tres reglas:
 - [compatibilidad-windows-7.md](estudios/compatibilidad-windows-7.md)
 - [metricas-produccion.md](estudios/metricas-produccion.md)
 
+## Análisis
+
+- [Revisión integral del proyecto](analisis/REVISION_INTEGRAL_2026-09-27.md): hallazgos pendientes de la revisión; los resueltos se retiran.
+
 ## Datos
 
 - [sql/control-plane/esquema-actual.sql](sql/control-plane/esquema-actual.sql): la estructura de la base
