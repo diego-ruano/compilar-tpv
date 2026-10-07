@@ -14,7 +14,7 @@
 import { Hono } from "hono";
 
 import type { Env } from "../../env";
-import type { ActivateResponse, ApiError, TenantInfo } from "../../shared";
+import type { ActivateResponse, ApiError, SignedLicenseAssertion, TenantInfo } from "../../shared";
 import { enTransaccion, getDb } from "../../server/db";
 import { timingSafeEqualHex } from "../../server/utils/crypto";
 import {
@@ -85,6 +85,57 @@ function estaCaducada(lic: LicenseRow, nowMs: number): boolean {
 /** ¿La licencia está anulada? */
 function estaAnulada(lic: LicenseRow): boolean {
 	return lic.status === "revoked" || toBool01(lic.disabled);
+}
+
+/**
+ * RI-09 · Un rechazo de la licencia que lleva su aserción FIRMADA, la misma que daría `/status`.
+ *
+ * `/status` ya decía `revoked` o `device_replaced` firmados, pero `/refresh` y la readmisión de una
+ * Main contestaban un código suelto, que el cliente no puede comprobar y ya no se cree: lo trata como
+ * no haber podido preguntar (gracia offline). Así, a un equipo que llevaba más de 30 días apagado
+ * —con el token caducado, que es cuando pasa por aquí— una anulación de verdad le llega igual de
+ * firmada y le bloquea en el acto.
+ *
+ * Si la firma falla (falta la clave), sale el rechazo sin ella: el cliente seguirá con la gracia.
+ */
+async function rechazoFirmado(
+	c: any,
+	args: { lic: LicenseRow; claims: ClaimsSesion; error: string; status: 401 | 403 },
+) {
+	const now = Date.now();
+	let assertion: SignedLicenseAssertion | undefined;
+	try {
+		assertion = await buildSignedAssertion(c.env, {
+			lic: args.lic,
+			tenantId: args.claims.tenantId,
+			deviceId: args.claims.deviceId,
+			clientTs: Number(c.req.header("X-Device-Ts") || 0),
+			nowMs: now,
+		});
+	} catch (e: any) {
+		console.error("[license] no se pudo firmar el rechazo:", String(e?.message || e));
+	}
+	const cuerpo: ApiError & { assertion?: SignedLicenseAssertion; serverTime: number } = {
+		ok: false,
+		error: args.error,
+		assertion,
+		serverTime: now,
+	};
+	return c.json(cuerpo, args.status);
+}
+
+/** El rechazo de `readmitirMain`, firmado cuando es un traslado (la licencia existe). */
+async function rechazoDeReadmision(
+	c: any,
+	db: ReturnType<typeof getDb>,
+	claims: ClaimsSesion,
+	readmision: { status: 401 | 403; error: string },
+) {
+	if (readmision.error === "device_replaced") {
+		const lic = await getLicenseByHash(db, claims.licHash);
+		if (lic) return rechazoFirmado(c, { lic, claims, error: readmision.error, status: readmision.status });
+	}
+	return c.json({ ok: false, error: readmision.error } satisfies ApiError, readmision.status);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -503,7 +554,7 @@ licenseRoutes.get("/status", async (c) => {
 		// Una Main cuya fila pasó a otro negocio (se usó como Handy): se la vuelve a dar de alta.
 		const readmision = await readmitirMain(c.req.raw, db, claims, rawBody);
 		if (!readmision.ok) {
-			return c.json({ ok: false, error: readmision.error } satisfies ApiError, readmision.status);
+			return rechazoDeReadmision(c, db, claims, readmision);
 		}
 	} else if (!proof.ok) {
 		return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
@@ -587,7 +638,7 @@ licenseRoutes.post("/refresh", async (c) => {
 		// Una Main cuya fila pasó a otro negocio (se usó como Handy): se la vuelve a dar de alta.
 		const readmision = await readmitirMain(c.req.raw, db, claims, rawBody);
 		if (!readmision.ok) {
-			return c.json({ ok: false, error: readmision.error } satisfies ApiError, readmision.status);
+			return rechazoDeReadmision(c, db, claims, readmision);
 		}
 	} else if (!proof.ok) {
 		return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
@@ -596,7 +647,7 @@ licenseRoutes.post("/refresh", async (c) => {
 	const lic = await getLicenseByHash(db, claims.licHash);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
 	if (estaAnulada(lic)) {
-		return c.json({ ok: false, error: "license_revoked" } satisfies ApiError, 403);
+		return rechazoFirmado(c, { lic, claims, error: "license_revoked", status: 403 });
 	}
 
 	// El rol sale de la FILA, nunca del token (ver `tenant.ts`). Y hay que preguntarlo aquí porque
@@ -626,7 +677,7 @@ licenseRoutes.post("/refresh", async (c) => {
 
 	// Si la licencia ya se movió a otro Main, este equipo no merece un token nuevo.
 	if (computeLicenseState(lic, claims.deviceId, Date.now()) === "device_replaced") {
-		return c.json({ ok: false, error: "device_replaced" } satisfies ApiError, 403);
+		return rechazoFirmado(c, { lic, claims, error: "device_replaced", status: 403 });
 	}
 
 	const token = await firmarSesion(env, claims);

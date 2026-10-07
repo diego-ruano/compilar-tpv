@@ -189,9 +189,16 @@ El cliente verifica la firma con cualquiera de las claves de `LICENSE_SIGNING_PU
 frescura, y decide
 (`evaluar_estado` / `evaluar_fallo`):
 
+**El gate nunca borra la licencia local** (RI-09). Un `revoked` o `device_replaced` firmado bloquea con
+su motivo y la conserva. Si el servidor se corrige (se deshace la anulación, o era un error nuestro:
+una base equivocada, una copia restaurada), basta con reintentar. El único borrado es «Borrar y volver
+a activar» (`clear_state`), que anota el motivo para que la pantalla de activación lo explique.
+`/refresh` y la readmisión de una Main adjuntan a su rechazo la misma aserción firmada que daría
+`/status` cuando la licencia existe.
+
 | Fallo | Veredicto |
 |---|---|
-| `license_not_found`, `license_revoked`, `device_replaced` | Bloquea y **borra** el estado local |
+| `license_not_found`, `license_revoked`, `device_replaced` **sin aserción firmada** | No se puede comprobar: gracia sin conexión, con motivo `rejection_unverified` y un aviso a los administradores |
 | Firma inválida | Bloquea y conserva (`bad_signature`) |
 | Sin conexión, 5xx o token o proof rechazados | Gracia sin conexión |
 | `device_ts_out_of_range` (reloj desfasado) | Igual que sin conexión, con motivo `clock_skew_detected` |

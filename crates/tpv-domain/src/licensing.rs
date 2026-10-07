@@ -224,8 +224,14 @@ pub enum FalloConsulta {
     /// La respuesta llegó pero su firma no verifica (o no es de esta petición). Posible servidor
     /// falso / MITM: se bloquea, pero NO se borra la licencia (podría ser transitorio).
     FirmaInvalida,
-    /// El servidor dice que esta licencia ya no vale (no existe, revocada, movida a otro equipo).
-    Rechazada { code: String },
+    /// El servidor dice que esta licencia ya no vale (no existe, anulada, movida a otro equipo), pero
+    /// con un código de error SIN FIRMAR, así que no se puede comprobar que lo diga él (RI-09).
+    ///
+    /// Una anulación de verdad llega firmada, en la aserción de `/status` o en la que acompaña al
+    /// rechazo de `/refresh`. Lo que llega así es `license_not_found`, que con un token válido sólo
+    /// puede ser un fallo nuestro (el worker no borra licencias): una base equivocada, una copia
+    /// restaurada, una consulta rota. Por eso cuenta como no haber podido comprobar: gracia offline.
+    RechazoSinFirmar { code: String },
     /// Respuesta que no sabemos interpretar. Ni un sí ni un no.
     Ilegible { detalle: String },
 }
@@ -236,7 +242,7 @@ impl std::fmt::Display for FalloConsulta {
             FalloConsulta::Inalcanzable => write!(f, "license_status_unreachable"),
             FalloConsulta::RelojDesfasado => write!(f, "device_ts_out_of_range"),
             FalloConsulta::FirmaInvalida => write!(f, "bad_signature"),
-            FalloConsulta::Rechazada { code } => write!(f, "{code}"),
+            FalloConsulta::RechazoSinFirmar { code } => write!(f, "{code}"),
             FalloConsulta::Ilegible { detalle } => write!(f, "status_unreadable: {detalle}"),
         }
     }
@@ -257,8 +263,10 @@ pub enum Motivo {
     DeviceReplaced,
     BadSignature,
     NecesitaActivacion,
-    /// Rechazo del servidor con su código verbatim (p. ej. `license_not_found`).
-    Rechazada(String),
+    /// RI-09: el servidor ha dicho que no con un código sin firmar. Se sigue con la gracia offline,
+    /// pero con su propio motivo: no es falta de red, y quien está delante tiene que saber que algo
+    /// raro pasa y avisar a soporte.
+    RechazoSinVerificar,
     GraciaOffline,
     GraciaOfflineAgotada,
     RelojAtrasado,
@@ -277,7 +285,7 @@ impl Motivo {
             Motivo::DeviceReplaced => "device_replaced".to_string(),
             Motivo::BadSignature => "bad_signature".to_string(),
             Motivo::NecesitaActivacion => "needs_activation".to_string(),
-            Motivo::Rechazada(code) => code.clone(),
+            Motivo::RechazoSinVerificar => "rejection_unverified".to_string(),
             Motivo::GraciaOffline => "offline_grace".to_string(),
             Motivo::GraciaOfflineAgotada => "offline_expired".to_string(),
             Motivo::RelojAtrasado => "clock_rollback_detected".to_string(),
@@ -286,51 +294,42 @@ impl Motivo {
     }
 }
 
-/// Qué hacer con el estado local (`license_state.json`) tras el veredicto.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccionEstado {
-    Conservar,
-    Borrar,
-}
-
 /// Decisión del gate.
+///
+/// RI-09 · **El gate nunca borra la licencia local.** Antes, `revoked`, `device_replaced` y
+/// `license_not_found` la borraban, y eso convertía cualquier error NUESTRO en que el bar tuviera que
+/// volver a teclear la clave: una base equivocada, una copia restaurada de antes de un cambio de
+/// equipo (que firma un `device_replaced` con la clave buena)… Firmar el rechazo no lo arregla,
+/// porque el worker firmaría igual la respuesta equivocada. Ahora se bloquea con su motivo y se
+/// conserva: si el servidor se corrige, el equipo vuelve solo; si de verdad se acabó, quien está
+/// delante pulsa «Borrar y volver a activar» (`clear_state`).
 #[derive(Debug, Clone)]
 pub struct Veredicto {
     pub permitido: bool,
     pub motivo: Motivo,
-    pub accion: AccionEstado,
 }
 
 impl Veredicto {
     fn permitir(motivo: Motivo) -> Self {
-        Veredicto { permitido: true, motivo, accion: AccionEstado::Conservar }
+        Veredicto { permitido: true, motivo }
     }
 
-    /// Bloquea pero conserva el estado: el problema puede ser temporal (sin red, firma, caducidad
-    /// renovable), así que no se tira la licencia; el usuario reintenta.
     fn bloquear(motivo: Motivo) -> Self {
-        Veredicto { permitido: false, motivo, accion: AccionEstado::Conservar }
-    }
-
-    /// Bloquea y descarta el estado: el servidor ha dicho que esta licencia no vale en este equipo.
-    fn invalidar(motivo: Motivo) -> Self {
-        Veredicto { permitido: false, motivo, accion: AccionEstado::Borrar }
+        Veredicto { permitido: false, motivo }
     }
 }
 
-/// Traduce el estado firmado del servidor en un veredicto.
-///
-/// `Expired` bloquea pero **conserva** el estado: si el cliente renueva, el siguiente `/status`
-/// lo verá `active` y basta con reintentar, sin re-teclear la clave. `Revoked` y
-/// `DeviceReplaced` sí borran: en este equipo la licencia se acabó.
+/// Traduce el estado firmado del servidor en un veredicto. Los que no dejan trabajar bloquean y
+/// conservan: `Expired` se arregla renovando, y `Revoked` o `DeviceReplaced` deshaciendo el cambio en
+/// el servidor; en los tres casos basta con reintentar, sin volver a teclear la clave.
 pub fn evaluar_estado(estado: EstadoLicencia) -> Veredicto {
     match estado {
         EstadoLicencia::Active => Veredicto::permitir(Motivo::Ok),
         EstadoLicencia::Warn => Veredicto::permitir(Motivo::Warn),
         EstadoLicencia::ExpiryGrace => Veredicto::permitir(Motivo::ExpiryGrace),
         EstadoLicencia::Expired => Veredicto::bloquear(Motivo::Expired),
-        EstadoLicencia::Revoked => Veredicto::invalidar(Motivo::Revoked),
-        EstadoLicencia::DeviceReplaced => Veredicto::invalidar(Motivo::DeviceReplaced),
+        EstadoLicencia::Revoked => Veredicto::bloquear(Motivo::Revoked),
+        EstadoLicencia::DeviceReplaced => Veredicto::bloquear(Motivo::DeviceReplaced),
     }
 }
 
@@ -372,8 +371,14 @@ pub fn evaluar_fallo(
             Resolucion::Decidido(Veredicto::bloquear(Motivo::BadSignature))
         }
 
-        FalloConsulta::Rechazada { code } => {
-            Resolucion::Decidido(Veredicto::invalidar(Motivo::Rechazada(code.clone())))
+        // RI-09: un «no» sin firma no se puede comprobar, así que pesa lo mismo que no haber podido
+        // preguntar: la gracia offline. Con su motivo, para que se vea que no es la red.
+        FalloConsulta::RechazoSinFirmar { .. } => {
+            Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms) {
+                Gracia::Vigente => Veredicto::permitir(Motivo::RechazoSinVerificar),
+                Gracia::Agotada => Veredicto::bloquear(Motivo::RechazoSinVerificar),
+                Gracia::RelojAtrasado => Veredicto::bloquear(Motivo::RelojAtrasado),
+            })
         }
 
         FalloConsulta::Ilegible { .. } => {
@@ -468,17 +473,17 @@ mod tests {
 
     #[test]
     fn estados_que_permiten_usar_y_estados_que_bloquean() {
-        for (e, permite, borra) in [
-            (EstadoLicencia::Active, true, false),
-            (EstadoLicencia::Warn, true, false),
-            (EstadoLicencia::ExpiryGrace, true, false),
-            (EstadoLicencia::Expired, false, false),
-            (EstadoLicencia::Revoked, false, true),
-            (EstadoLicencia::DeviceReplaced, false, true),
+        for (e, permite, motivo) in [
+            (EstadoLicencia::Active, true, "ok"),
+            (EstadoLicencia::Warn, true, "warn"),
+            (EstadoLicencia::ExpiryGrace, true, "expiry_grace"),
+            (EstadoLicencia::Expired, false, "expired"),
+            (EstadoLicencia::Revoked, false, "revoked"),
+            (EstadoLicencia::DeviceReplaced, false, "device_replaced"),
         ] {
             let v = evaluar_estado(e);
             assert_eq!(v.permitido, permite, "{:?}", e);
-            assert_eq!(v.accion == AccionEstado::Borrar, borra, "{:?}", e);
+            assert_eq!(v.motivo.codigo(), motivo, "{:?}", e);
         }
     }
 
@@ -488,7 +493,6 @@ mod tests {
             Resolucion::Decidido(v) => {
                 assert!(!v.permitido);
                 assert_eq!(v.motivo.codigo(), "bad_signature");
-                assert_eq!(v.accion, AccionEstado::Conservar);
             }
             Resolucion::Indecidible => panic!("una firma inválida siempre decide: bloquea"),
         }
@@ -537,14 +541,23 @@ mod tests {
         }
     }
 
+    /// RI-09. Un `license_not_found` sin firmar —una base equivocada, una copia restaurada— dejaba a
+    /// todos los bares teniendo que volver a teclear la clave. Ahora sigue la gracia offline con su
+    /// propio motivo, y al agotarse bloquea sin echarle la culpa a la red.
     #[test]
-    fn un_rechazo_del_servidor_borra_y_conserva_su_codigo() {
-        let fallo = FalloConsulta::Rechazada { code: "license_not_found".into() };
-        match evaluar_fallo(&fallo, AHORA, AHORA, false) {
+    fn un_rechazo_sin_firmar_sigue_la_gracia_con_su_propio_motivo() {
+        let fallo = FalloConsulta::RechazoSinFirmar { code: "license_not_found".into() };
+        match evaluar_fallo(&fallo, AHORA - 1000, AHORA, false) {
+            Resolucion::Decidido(v) => {
+                assert!(v.permitido, "con gracia vigente se sigue vendiendo");
+                assert_eq!(v.motivo.codigo(), "rejection_unverified");
+            }
+            Resolucion::Indecidible => panic!("un rechazo siempre decide"),
+        }
+        match evaluar_fallo(&fallo, AHORA - GRACIA_OFFLINE_MS - 1, AHORA, false) {
             Resolucion::Decidido(v) => {
                 assert!(!v.permitido);
-                assert_eq!(v.motivo.codigo(), "license_not_found");
-                assert_eq!(v.accion, AccionEstado::Borrar);
+                assert_eq!(v.motivo.codigo(), "rejection_unverified");
             }
             Resolucion::Indecidible => panic!("un rechazo siempre decide"),
         }

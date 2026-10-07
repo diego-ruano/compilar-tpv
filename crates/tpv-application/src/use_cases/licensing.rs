@@ -9,7 +9,7 @@ use tpv_contracts::licensing::{
     LicenseLocalState,
 };
 use tpv_domain::licensing::{
-    self as dom, AccionEstado, Concesion, EstadoVerificado, Motivo, Resolucion,
+    self as dom, Concesion, EstadoLicencia, EstadoVerificado, Motivo, Resolucion,
     ResultadoActivacion, SolicitudActivacion, Veredicto,
 };
 use chrono::{Local, TimeZone};
@@ -37,10 +37,20 @@ pub fn get_state(svc: &dyn LicensingService) -> AppResult<Option<LicenseLocalSta
     svc.load_state()
 }
 
+/// «Borrar y volver a activar», desde la pantalla de bloqueo. Es el ÚNICO camino por el que se borra
+/// la licencia local: el gate ya no lo hace nunca por su cuenta (RI-09).
+///
+/// Si el servidor la había dado por anulada o trasladada (estado firmado que guardó el gate), el
+/// motivo se anota: la pantalla de activación lo explica, y lo que dice —que la misma clave vuelve a
+/// activar sin perder nada si se deshace— es justo lo que nadie adivina delante de un formulario vacío.
 pub fn clear_state(svc: &dyn LicensingService) -> AppResult<()> {
-    // Sin motivo: esto lo pide el usuario desde la pantalla de bloqueo, y no hay nada que
-    // explicarle después que no sepa ya.
-    svc.delete_state(None)
+    let motivo = svc
+        .load_state()?
+        .and_then(|s| s.status)
+        .and_then(|s| EstadoLicencia::from_code(&s))
+        .filter(|e| matches!(e, EstadoLicencia::Revoked | EstadoLicencia::DeviceReplaced))
+        .map(|e| e.codigo());
+    svc.delete_state(motivo)
 }
 
 /// Activa la licencia en este dispositivo. Si el servidor exige el código de cambio de equipo,
@@ -154,13 +164,15 @@ const CLAVE_POR_CADUCAR: &str = "licencia_warn";
 const CLAVE_CADUCADA: &str = "licencia_gracia";
 const CLAVE_GRACIA_OFFLINE: &str = "gracia_offline";
 const CLAVE_RELOJ: &str = "reloj_desfasado";
+const CLAVE_RECHAZO: &str = "rechazo_sin_verificar";
 
 /// Qué aviso corresponde a cada motivo del gate.
-const AVISOS: [(&str, &str); 4] = [
+const AVISOS: [(&str, &str); 5] = [
     ("warn", CLAVE_POR_CADUCAR),
     ("expiry_grace", CLAVE_CADUCADA),
     ("offline_grace", CLAVE_GRACIA_OFFLINE),
     ("clock_skew_detected", CLAVE_RELOJ),
+    ("rejection_unverified", CLAVE_RECHAZO),
 ];
 
 /// Emite (best-effort) avisos a los administradores según el veredicto del gate, y cierra los que
@@ -280,6 +292,29 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
                 })
                 .await;
         }
+        // RI-09: el servidor ha dicho que no, sin firmar. Se sigue trabajando con la gracia offline
+        // porque no se puede comprobar que lo diga él —y lo esperable es un fallo nuestro—, pero
+        // quien lleva el negocio tiene que saberlo HOY: es una llamada a soporte, no a su router.
+        "rejection_unverified" => {
+            let base = dom::base_gracia(state.last_check_ok_ms, state.activated_at_ms);
+            let horas = horas_ceil((dom::GRACIA_OFFLINE_MS - (ahora_ms - base)).max(0));
+            let _ = notifier
+                .emitir(NuevaNotificacion {
+                    tipo: "rechazo_sin_verificar".to_string(),
+                    severidad: Severidad::Error,
+                    titulo: format!("El servidor de licencias no reconoce este equipo: quedan ~{horas} h"),
+                    cuerpo: Some(
+                        "La respuesta no se ha podido verificar, así que de momento sigues trabajando. Contacta con soporte: si no se resuelve antes de que se acabe ese tiempo, la aplicación se bloqueará."
+                            .to_string(),
+                    ),
+                    destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                    accion: None,
+                    payload: None,
+                    clave_dedupe: Some(CLAVE_RECHAZO.to_string()),
+                    expira_en: None,
+                })
+                .await;
+        }
         _ => {}
     }
 }
@@ -353,32 +388,18 @@ fn actualizar(
     estado
 }
 
-/// Ejecuta la acción que dicta el veredicto y compone la respuesta para la UI.
+/// Guarda el estado y compone la respuesta para la UI. Nunca borra (RI-09, ver `Veredicto`).
 fn aplicar(
     svc: &dyn LicensingService,
     estado: LicenseLocalState,
     veredicto: Veredicto,
 ) -> AppResult<LicenseGateResult> {
-    let motivo = veredicto.motivo.codigo();
-
-    let state = match veredicto.accion {
-        AccionEstado::Conservar => {
-            svc.save_state(&estado)?;
-            Some(estado)
-        }
-        AccionEstado::Borrar => {
-            // El motivo se anota al borrar: es lo único que quedará cuando la app vuelva a
-            // arrancar y se encuentre sin licencia.
-            svc.delete_state(Some(&motivo))?;
-            None
-        }
-    };
-
+    svc.save_state(&estado)?;
     Ok(LicenseGateResult {
         allowed: veredicto.permitido,
-        reason: motivo,
-        last_rejection: if state.is_none() { svc.last_rejection()? } else { None },
-        state,
+        reason: veredicto.motivo.codigo(),
+        last_rejection: None,
+        state: Some(estado),
     })
 }
 
@@ -501,12 +522,15 @@ mod tests {
         avisar_estado_licencia(&n, &result("ok", state_con_expiry(None)), ahora, &zona).await;
         let mut r = n.resueltas.lock().unwrap().clone();
         r.sort();
-        assert_eq!(r, ["gracia_offline", "licencia_gracia", "licencia_warn", "reloj_desfasado"]);
+        assert_eq!(
+            r,
+            ["gracia_offline", "licencia_gracia", "licencia_warn", "rechazo_sin_verificar", "reloj_desfasado"]
+        );
 
         let n = FakeNotifier::default();
         avisar_estado_licencia(&n, &result("warn", state_con_expiry(Some(ahora + 3 * DAY_MS))), ahora, &zona).await;
         assert!(!n.resueltas.lock().unwrap().contains(&"licencia_warn".to_string()));
-        assert_eq!(n.resueltas.lock().unwrap().len(), 3);
+        assert_eq!(n.resueltas.lock().unwrap().len(), 4);
 
         let n = FakeNotifier::default();
         avisar_estado_licencia(&n, &result("offline_grace", state_con_expiry(None)), ahora, &zona).await;
@@ -634,6 +658,136 @@ mod tests {
         ) -> Result<EstadoVerificado, dom::FalloConsulta> {
             unreachable!("la activación no consulta el estado")
         }
+    }
+
+    /// Un servicio con una licencia guardada al que se le dice qué contesta el servidor.
+    struct ServicioDeGate {
+        guardado: Mutex<Option<LicenseLocalState>>,
+        borrado_con: Mutex<Option<Option<String>>>,
+        respuesta: Mutex<Option<Result<EstadoVerificado, dom::FalloConsulta>>>,
+    }
+
+    impl ServicioDeGate {
+        fn con(respuesta: Result<EstadoVerificado, dom::FalloConsulta>) -> Self {
+            let mut s = state_con_expiry(None);
+            s.activated_at_ms = now_ms();
+            ServicioDeGate {
+                guardado: Mutex::new(Some(s)),
+                borrado_con: Mutex::new(None),
+                respuesta: Mutex::new(Some(respuesta)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LicensingService for ServicioDeGate {
+        fn load_state(&self) -> AppResult<Option<LicenseLocalState>> {
+            Ok(self.guardado.lock().unwrap().clone())
+        }
+        fn save_state(&self, state: &LicenseLocalState) -> AppResult<()> {
+            *self.guardado.lock().unwrap() = Some(state.clone());
+            Ok(())
+        }
+        fn delete_state(&self, motivo: Option<&str>) -> AppResult<()> {
+            *self.guardado.lock().unwrap() = None;
+            *self.borrado_con.lock().unwrap() = Some(motivo.map(str::to_string));
+            Ok(())
+        }
+        fn last_rejection(&self) -> AppResult<Option<String>> {
+            Ok(None)
+        }
+        async fn activar_remoto(
+            &self,
+            _: &SolicitudActivacion,
+            _: Option<&str>,
+        ) -> AppResult<ResultadoActivacion> {
+            unreachable!("el gate no activa")
+        }
+        async fn solicitar_cambio_dispositivo(&self, _: &str) -> AppResult<()> {
+            Ok(())
+        }
+        async fn consultar_estado(
+            &self,
+            _: &LicenseLocalState,
+        ) -> Result<EstadoVerificado, dom::FalloConsulta> {
+            self.respuesta.lock().unwrap().take().expect("una consulta por test")
+        }
+    }
+
+    fn firmado(estado: EstadoLicencia) -> EstadoVerificado {
+        EstadoVerificado {
+            assertion: dom::AssertionVerificada {
+                version: 1,
+                tenant_id: "t".into(),
+                device_id: "d".into(),
+                license_id: "l".into(),
+                estado,
+                plan: "standard".into(),
+                expires_at_ms: None,
+                issued_at_ms: 0,
+                assertion_expires_at_ms: 0,
+                client_ts: 0,
+            },
+            server_time_ms: 0,
+        }
+    }
+
+    /// RI-09: ni siquiera una anulación firmada borra la licencia local. Bloquea con su motivo y la
+    /// conserva, para que el día que se deshaga —o que se vea que fue un error nuestro— el equipo
+    /// vuelva solo.
+    #[tokio::test]
+    async fn el_gate_nunca_borra_la_licencia() {
+        for estado in [EstadoLicencia::Revoked, EstadoLicencia::DeviceReplaced] {
+            let svc = ServicioDeGate::con(Ok(firmado(estado)));
+            let res = gate(&svc, None).await.unwrap();
+            assert!(!res.allowed);
+            assert_eq!(res.reason, estado.codigo());
+            assert!(res.state.is_some(), "{estado:?}");
+            assert!(svc.borrado_con.lock().unwrap().is_none(), "{estado:?}");
+            assert_eq!(
+                svc.guardado.lock().unwrap().as_ref().and_then(|s| s.status.clone()).as_deref(),
+                Some(estado.codigo())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn un_rechazo_sin_firmar_deja_trabajar_con_la_gracia_y_lo_dice() {
+        let svc = ServicioDeGate::con(Err(dom::FalloConsulta::RechazoSinFirmar {
+            code: "license_not_found".into(),
+        }));
+        let res = gate(&svc, None).await.unwrap();
+        assert!(res.allowed);
+        assert_eq!(res.reason, "rejection_unverified");
+        assert!(svc.borrado_con.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn el_aviso_del_rechazo_sin_verificar_va_a_los_administradores() {
+        let ahora = 1_000 * DAY_MS;
+        let n = FakeNotifier::default();
+        let mut s = state_con_expiry(None);
+        s.last_check_ok_ms = Some(ahora - HORA_MS);
+        avisar_estado_licencia(&n, &result("rejection_unverified", s), ahora, &chrono::Utc).await;
+        let e = n.emitidas.lock().unwrap();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].clave_dedupe.as_deref(), Some("rechazo_sin_verificar"));
+        assert!(e[0].titulo.contains("~71 h"), "{}", e[0].titulo);
+    }
+
+    /// Borrar a mano después de una anulación deja anotado el motivo, que es lo que la pantalla de
+    /// activación explica. Sin anulación de por medio, no se anota nada.
+    #[tokio::test]
+    async fn borrar_a_mano_anota_la_anulacion_que_habia() {
+        let svc = ServicioDeGate::con(Ok(firmado(EstadoLicencia::Revoked)));
+        gate(&svc, None).await.unwrap();
+        clear_state(&svc).unwrap();
+        assert_eq!(*svc.borrado_con.lock().unwrap(), Some(Some("revoked".to_string())));
+
+        let svc = ServicioDeGate::con(Ok(firmado(EstadoLicencia::Expired)));
+        gate(&svc, None).await.unwrap();
+        clear_state(&svc).unwrap();
+        assert_eq!(*svc.borrado_con.lock().unwrap(), Some(None));
     }
 
     fn activacion(respuesta: ResultadoActivacion) -> (ServicioQueActiva, LicenseActivateInput) {

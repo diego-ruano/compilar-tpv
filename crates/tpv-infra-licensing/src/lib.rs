@@ -394,13 +394,17 @@ fn verificar_assertion_con(
     Ok(assertion)
 }
 
-/// Clasifica el error del worker según lo que implica para el gate: un rechazo definitivo de la
-/// licencia (borra) vs. una incidencia de auth/reloj (se trata como offline, no borra).
+/// Clasifica el error del worker según lo que implica para el gate. Ninguno borra la licencia
+/// (RI-09): un rechazo sin firmar no se puede comprobar, y una incidencia de auth o de reloj tampoco
+/// dice nada de la licencia.
 fn clasificar_error(http: u16, code: &str) -> FalloConsulta {
     match code {
-        // La licencia ya no vale en este equipo: hay que borrar el estado local.
+        // El servidor dice que la licencia ya no vale, pero sin firma. Una anulación o un traslado de
+        // verdad llegan firmados (`leer_rechazo`); esto es sobre todo `license_not_found`, que con un
+        // token válido sólo puede ser un fallo nuestro.
         "license_not_found" | "license_revoked" | "device_replaced" => {
-            FalloConsulta::Rechazada { code: code.to_string() }
+            log::warn!("[licencia] rechazo sin firmar del servidor: {code} (http {http})");
+            FalloConsulta::RechazoSinFirmar { code: code.to_string() }
         }
         // REV-10: el reloj de este equipo va más de 2 min desfasado, así que el worker no acepta
         // su firma. Se trataba como «no llego», y por eso el usuario veía una cuenta atrás de 72 h
@@ -415,6 +419,52 @@ fn clasificar_error(http: u16, code: &str) -> FalloConsulta {
             let _ = http;
             FalloConsulta::Inalcanzable
         }
+    }
+}
+
+/// Un rechazo del worker en `/status` o `/refresh`, ya leído.
+enum Rechazo {
+    /// RI-09: vino con la aserción firmada de esta petición (una licencia que existe pero está
+    /// anulada o trasladada). Es el estado de la licencia, tan de fiar como el de un `/status` bueno.
+    Firmado(EstadoVerificado),
+    Fallo(FalloConsulta),
+}
+
+impl From<FalloConsulta> for Rechazo {
+    fn from(f: FalloConsulta) -> Self {
+        Rechazo::Fallo(f)
+    }
+}
+
+/// Cuerpo de un rechazo: el `error` y, cuando la licencia existe, la aserción firmada.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RechazoBody {
+    #[serde(default)]
+    error: String,
+    assertion: Option<SignedAssertionDto>,
+    server_time: Option<i64>,
+}
+
+/// Lee un rechazo. Si trae aserción, manda ella —verificada como cualquier otra, contra las claves
+/// pineadas y el `client_ts` de esta petición—; si no, el código de error, que va sin firmar.
+fn leer_rechazo(r: &Respondida) -> Rechazo {
+    leer_rechazo_con(LICENSE_SIGNING_PUBLIC_KEYS_B64, r)
+}
+
+fn leer_rechazo_con(claves: &[&str], r: &Respondida) -> Rechazo {
+    let Ok(body) = serde_json::from_str::<RechazoBody>(&r.texto) else {
+        return Rechazo::Fallo(clasificar_error(r.http, ""));
+    };
+    match body.assertion {
+        Some(dto) => match verificar_assertion_con(claves, dto, r.ts, reloj::ahora_ms()) {
+            Ok(assertion) => Rechazo::Firmado(EstadoVerificado {
+                assertion,
+                server_time_ms: body.server_time.unwrap_or_else(reloj::ahora_ms),
+            }),
+            Err(fallo) => Rechazo::Fallo(fallo),
+        },
+        None => Rechazo::Fallo(clasificar_error(r.http, &body.error)),
     }
 }
 
@@ -446,7 +496,7 @@ impl LicensingAdapter {
         &self,
         token: &str,
         device_id: &str,
-    ) -> Result<(StatusOk, i64), FalloConsulta> {
+    ) -> Result<(StatusOk, i64), Rechazo> {
         const PATH: &str = "/v1/license/status";
 
         // Un fallo local (keyring, firma, cliente HTTP) es indistinguible de no tener red para el
@@ -462,8 +512,7 @@ impl LicensingAdapter {
             .map_err(|_| FalloConsulta::Inalcanzable)?;
 
         if !(200..300).contains(&r.http) {
-            let code = ApiErr::parse(&r.texto).map(|e| e.error).unwrap_or_default();
-            return Err(clasificar_error(r.http, &code));
+            return Err(leer_rechazo(&r));
         }
 
         let ok: StatusOk = serde_json::from_str(&r.texto).map_err(|e| FalloConsulta::Ilegible {
@@ -479,7 +528,7 @@ impl LicensingAdapter {
         &self,
         token: &str,
         device_id: &str,
-    ) -> Result<String, FalloConsulta> {
+    ) -> Result<String, Rechazo> {
         const PATH: &str = "/v1/license/refresh";
 
         let sk = leer_device_keypair(device_id).map_err(|e| {
@@ -491,13 +540,12 @@ impl LicensingAdapter {
             .map_err(|_| FalloConsulta::Inalcanzable)?;
 
         if !(200..300).contains(&r.http) {
-            let code = ApiErr::parse(&r.texto).map(|e| e.error).unwrap_or_default();
-            return Err(clasificar_error(r.http, &code));
+            return Err(leer_rechazo(&r));
         }
 
         serde_json::from_str::<RefreshOk>(&r.texto)
             .map(|r| r.token)
-            .map_err(|_| FalloConsulta::Inalcanzable)
+            .map_err(|_| Rechazo::Fallo(FalloConsulta::Inalcanzable))
     }
 }
 
@@ -670,9 +718,12 @@ impl LicensingService for LicensingAdapter {
         let token = get_license_token().map_err(|_| FalloConsulta::Inalcanzable)?;
 
         // 1er intento con el token actual.
+        // RI-09: un rechazo que trae la aserción firmada (licencia anulada o trasladada) ES el estado
+        // de la licencia: se devuelve como tal, y el dominio lo evalúa igual que un `/status` bueno.
         let (ok, ts) = match self.get_status(&token, &state.device_id).await {
             Ok(v) => v,
-            Err(fallo) => {
+            Err(Rechazo::Firmado(estado)) => return Ok(estado),
+            Err(Rechazo::Fallo(fallo)) => {
                 // Un token de sesión caducado NO debe borrar la licencia: se renueva por
                 // device-proof (`/refresh`) y se reintenta una vez. El worker devuelve
                 // `token_expired`, que `clasificar_error` mete en `Inalcanzable`; distinguimos ese
@@ -680,8 +731,16 @@ impl LicensingService for LicensingAdapter {
                 if !matches!(fallo, FalloConsulta::Inalcanzable) {
                     return Err(fallo);
                 }
-                let nuevo = self.refrescar_token(&token, &state.device_id).await?;
-                let (ok, ts) = self.get_status(&nuevo, &state.device_id).await?;
+                let nuevo = match self.refrescar_token(&token, &state.device_id).await {
+                    Ok(t) => t,
+                    Err(Rechazo::Firmado(estado)) => return Ok(estado),
+                    Err(Rechazo::Fallo(f)) => return Err(f),
+                };
+                let (ok, ts) = match self.get_status(&nuevo, &state.device_id).await {
+                    Ok(v) => v,
+                    Err(Rechazo::Firmado(estado)) => return Ok(estado),
+                    Err(Rechazo::Fallo(f)) => return Err(f),
+                };
                 let assertion = verificar_assertion(ok.assertion, ts, reloj::ahora_ms())?;
                 // Persistir el token efectivo (el que renovó /status, o el del refresh si no).
                 self.persistir_token(ok.token.as_deref(), &nuevo);
@@ -1348,9 +1407,13 @@ mod tests_clasificar_error {
 
     #[test]
     fn un_rechazo_de_la_licencia_no_se_toca() {
-        // Estos SÍ borran el estado local, así que confundirlos con el reloj sería mucho peor.
+        // RI-09: sin firma no borran nada, pero tienen su propio motivo; confundirlos con el reloj
+        // o con la red mandaría a quien está delante a mirar lo que no es.
         for code in ["license_not_found", "license_revoked", "device_replaced"] {
-            assert_eq!(codigo(403, code), code, "code={code}");
+            assert!(
+                matches!(clasificar_error(403, code), FalloConsulta::RechazoSinFirmar { .. }),
+                "code={code}"
+            );
         }
     }
 }
@@ -1375,17 +1438,26 @@ mod tests_firma_de_licencia {
 
     /// Una aserción `active` de esta petición, firmada con `sk`.
     fn firmada_por(sk: &SigningKey) -> SignedAssertionDto {
+        firmada(sk, EstadoLicencia::Active, AHORA, AHORA + 60_000)
+    }
+
+    fn firmada(
+        sk: &SigningKey,
+        estado: EstadoLicencia,
+        client_ts: i64,
+        caduca: i64,
+    ) -> SignedAssertionDto {
         let a = AssertionVerificada {
             version: 1,
             tenant_id: "t1".into(),
             device_id: "d1".into(),
             license_id: "l1".into(),
-            estado: EstadoLicencia::Active,
+            estado,
             plan: "standard".into(),
             expires_at_ms: None,
-            issued_at_ms: AHORA,
-            assertion_expires_at_ms: AHORA + 60_000,
-            client_ts: AHORA,
+            issued_at_ms: client_ts,
+            assertion_expires_at_ms: caduca,
+            client_ts,
         };
         let sig = sk.sign(dom::mensaje_canonico(&a).as_bytes());
         SignedAssertionDto {
@@ -1393,7 +1465,7 @@ mod tests_firma_de_licencia {
             tenant_id: a.tenant_id,
             device_id: a.device_id,
             license_id: a.license_id,
-            state: "active".into(),
+            state: a.estado.codigo().into(),
             plan: a.plan,
             expires_at_ms: a.expires_at_ms,
             issued_at_ms: a.issued_at_ms,
@@ -1401,6 +1473,68 @@ mod tests_firma_de_licencia {
             client_ts: a.client_ts,
             sig: B64.encode(sig.to_bytes()),
         }
+    }
+
+    /// El cuerpo de un rechazo de `/refresh` tal como lo manda el worker, con o sin aserción.
+    fn rechazo(error: &str, a: Option<&SignedAssertionDto>, ts: i64) -> Respondida {
+        let assertion = a.map(|a| {
+            serde_json::json!({
+                "v": a.v, "tenantId": a.tenant_id, "deviceId": a.device_id,
+                "licenseId": a.license_id, "state": a.state, "plan": a.plan,
+                "expiresAtMs": a.expires_at_ms, "issuedAtMs": a.issued_at_ms,
+                "assertionExpiresAtMs": a.assertion_expires_at_ms, "clientTs": a.client_ts,
+                "sig": a.sig,
+            })
+        });
+        let texto = serde_json::json!({ "ok": false, "error": error, "assertion": assertion, "serverTime": ts })
+            .to_string();
+        Respondida { http: 403, texto, ts }
+    }
+
+    /// RI-09: una anulación de un equipo que llevaba más de 30 días apagado (token caducado) llega
+    /// por `/refresh`. Con la aserción firmada se cree; con un código suelto, no.
+    #[test]
+    fn un_rechazo_con_asercion_firmada_es_el_estado_de_la_licencia() {
+        let sk = clave(1);
+        let claves = [publica(&sk)];
+        let claves: Vec<&str> = claves.iter().map(String::as_str).collect();
+        let ts = reloj::ahora_ms();
+        let a = firmada(&sk, EstadoLicencia::Revoked, ts, ts + 300_000);
+
+        match leer_rechazo_con(&claves, &rechazo("license_revoked", Some(&a), ts)) {
+            Rechazo::Firmado(v) => assert_eq!(v.assertion.estado, EstadoLicencia::Revoked),
+            Rechazo::Fallo(f) => panic!("debía creerse la aserción: {f}"),
+        }
+    }
+
+    #[test]
+    fn un_rechazo_con_asercion_de_otra_clave_o_de_otra_peticion_no_se_cree() {
+        let sk = clave(1);
+        let claves = [publica(&sk)];
+        let claves: Vec<&str> = claves.iter().map(String::as_str).collect();
+        let ts = reloj::ahora_ms();
+
+        let ajena = firmada(&clave(9), EstadoLicencia::Revoked, ts, ts + 300_000);
+        assert!(matches!(
+            leer_rechazo_con(&claves, &rechazo("license_revoked", Some(&ajena), ts)),
+            Rechazo::Fallo(FalloConsulta::FirmaInvalida)
+        ));
+
+        let vieja = firmada(&sk, EstadoLicencia::Revoked, ts - 1, ts + 300_000);
+        assert!(matches!(
+            leer_rechazo_con(&claves, &rechazo("license_revoked", Some(&vieja), ts)),
+            Rechazo::Fallo(FalloConsulta::FirmaInvalida)
+        ));
+    }
+
+    #[test]
+    fn un_rechazo_sin_asercion_queda_sin_firmar() {
+        let claves = [publica(&clave(1))];
+        let claves: Vec<&str> = claves.iter().map(String::as_str).collect();
+        assert!(matches!(
+            leer_rechazo_con(&claves, &rechazo("license_not_found", None, reloj::ahora_ms())),
+            Rechazo::Fallo(FalloConsulta::RechazoSinFirmar { .. })
+        ));
     }
 
     #[test]

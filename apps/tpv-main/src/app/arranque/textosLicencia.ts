@@ -20,19 +20,18 @@ export function textoBloqueo(motivo: string): Texto {
 			titulo: "Licencia caducada",
 			cuerpo: "Tu licencia ha caducado y se acabó el periodo de gracia. Renuévala con el mismo correo de compra y vuelve a intentarlo.",
 		};
-	// Este es el momento en que el TPV se entera, con la app abierta: lo enseña el pulso periódico
-	// de la licencia (job `licencia` → evento `license:changed`). Al reiniciar ya no se vuelve a
-	// ver, porque un rechazo borra el estado local y el equipo cae en la pantalla de activación —
-	// que lo explica por su cuenta (ver `textoRechazoPrevio`).
+	// RI-09: el gate ya no borra la licencia local, así que esta pantalla se queda (también al
+	// reiniciar) hasta que el servidor diga otra cosa o alguien pulse «Borrar y volver a activar».
+	// Por eso cada texto dice qué arregla cada botón.
 	if (motivo === "revoked")
 		return {
 			titulo: "Licencia anulada",
-			cuerpo: "Esta licencia ha sido anulada, así que este equipo no puede seguir trabajando. Si es un error, en cuanto se deshaga la anulación la misma clave vuelve a activarlo sin perder ningún dato.",
+			cuerpo: "Esta licencia ha sido anulada, así que este equipo no puede seguir trabajando. Si es un error, en cuanto se deshaga la anulación basta con reintentar: el equipo vuelve a funcionar sin perder ningún dato.",
 		};
 	if (motivo === "device_replaced")
 		return {
 			titulo: "Licencia trasladada",
-			cuerpo: "Esta licencia se ha activado en otro equipo, así que este ha dejado de tener acceso. Si no has sido tú, contacta con soporte cuanto antes.",
+			cuerpo: "Esta licencia se ha activado en otro equipo, así que este ha dejado de tener acceso. Si no has sido tú, contacta con soporte cuanto antes. Para usar aquí otra licencia, borra esta y vuelve a activar.",
 		};
 	if (motivo === "bad_signature")
 		return {
@@ -51,10 +50,12 @@ export function textoBloqueo(motivo: string): Texto {
 			titulo: "Sin conexión demasiado tiempo",
 			cuerpo: "Llevas demasiado tiempo sin conectar con el servidor de licencias. Conéctate a internet y reintenta la comprobación.",
 		};
-	if (motivo === "license_not_found")
+	// RI-09: el servidor dijo que no, pero sin firma, así que no se puede comprobar que fuera él. Lo
+	// esperable es un fallo nuestro: por eso no se manda a volver a teclear la clave, sino a soporte.
+	if (motivo === "rejection_unverified")
 		return {
-			titulo: "Licencia no encontrada",
-			cuerpo: "El servidor no reconoce esta licencia. Puede que se haya borrado o introducido mal. Vuelve a activar con tu clave.",
+			titulo: "El servidor de licencias no reconoce este equipo",
+			cuerpo: "Su respuesta no se ha podido verificar, así que este equipo ha seguido trabajando todo el tiempo que permite estar sin conexión. Contacta con soporte: no hace falta volver a teclear la clave, y en cuanto se resuelva basta con reintentar.",
 		};
 	return {
 		titulo: "Licencia bloqueada",
@@ -64,7 +65,9 @@ export function textoBloqueo(motivo: string): Texto {
 
 /**
  * El aviso de la pantalla de activación cuando este equipo YA tuvo licencia y el servidor la rechazó.
- * Sin esto, la pantalla es la misma que ve un TPV recién instalado y nadie sabe qué pasó.
+ * Sin esto, la pantalla es la misma que ve un TPV recién instalado y nadie sabe qué pasó. Se llega
+ * aquí sólo con «Borrar y volver a activar» desde una anulación o un traslado: el gate ya no borra
+ * nada por su cuenta (RI-09).
  *
  * Lo importante que dice cada caso no es el nombre del estado, es qué hacer: una anulación se puede
  * deshacer y entonces **la misma clave vuelve a activar sin perder ningún dato**, porque activar no
@@ -87,12 +90,6 @@ export function textoRechazoPrevio(motivo: string | null): Texto | null {
 			cuerpo:
 				"Al moverla, este ordenador dejó de tener acceso. Si no has sido tú, contacta con " +
 				"soporte cuanto antes; si sí, vuelve a activarla aquí con tu clave.",
-		},
-		license_not_found: {
-			titulo: "El servidor no reconoce la licencia que tenía este equipo",
-			cuerpo:
-				"Comprueba la clave antes de volver a intentarlo. Si estás seguro de que es " +
-				"correcta, contacta con soporte.",
 		},
 	};
 

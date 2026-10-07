@@ -125,7 +125,8 @@ describe("lo que se dice cuando la licencia bloquea", () => {
 			"device_replaced",
 			"bad_signature",
 			"offline_expired",
-			"license_not_found",
+			// RI-09: un «no» del servidor sin firma; no se manda a teclear la clave sino a soporte.
+			"rejection_unverified",
 			// REV-10: el reloj tiene su propio texto. Con el de «sin conexión» se mandaba a mirar
 			// el router a alguien cuyo problema era la hora del equipo.
 			"clock_skew_detected",
@@ -143,7 +144,7 @@ describe("lo que se dice cuando la licencia bloquea", () => {
 		expect(t.cuerpo).not.toContain("conexión");
 	});
 
-	it("una anulación dice que la misma clave vuelve a activar sin perder datos", () => {
+	it("una anulación dice que basta con reintentar cuando se deshaga, sin perder datos", () => {
 		expect(textoBloqueo("revoked").titulo).toBe("Licencia anulada");
 		expect(textoBloqueo("revoked").cuerpo).toContain("sin perder ningún dato");
 		expect(textoBloqueo("expired").titulo).toBe("Licencia caducada");
@@ -262,5 +263,13 @@ describe("el código con el que se vincula un Handy", () => {
 		expect(codigoParaVincular("basura", "222222")).toEqual({ pairCode: "222222", pairSecret: "" });
 		expect(codigoParaVincular("", "222222")).toEqual({ pairCode: "222222", pairSecret: "" });
 		expect(codigoParaVincular("basura", "")).toBeNull();
+	});
+});
+
+describe("RI-09 · el rechazo sin verificar", () => {
+	it("manda a soporte, no a volver a teclear la clave", () => {
+		const t = textoBloqueo("rejection_unverified");
+		expect(t.cuerpo).toContain("soporte");
+		expect(t.cuerpo).toContain("no hace falta volver a teclear la clave");
 	});
 });
