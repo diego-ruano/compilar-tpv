@@ -24,9 +24,10 @@ export interface Env {
 	LICENSE_STORE_KEY: string; // base64 32 bytes (AES-GCM): cifra la clave de licencia en reposo
 
 	// Firma ed25519 del estado de licencia (docs/arquitectura/licencias.md).
-	// Semilla de 32 bytes en base64. La PRIVADA vive SOLO aquí; la pública está pineada como
-	// constante en el binario Rust (LICENSE_SIGNING_PUBLIC_KEY_B64). Cambiarla invalida a todos
-	// los clientes desplegados. Configura con: wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
+	// Semilla de 32 bytes en base64. La PRIVADA vive SOLO aquí; su pública está pineada en el binario
+	// Rust (LICENSE_SIGNING_PUBLIC_KEYS_B64) junto a la de reserva, cuya privada se guarda fuera de
+	// línea (RI-09). Una privada cuya pública no esté en esa lista deja a todos los equipos en
+	// `bad_signature`. Configura con: wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
 	LICENSE_SIGNING_PRIVATE_KEY: string;
 
 	// Token del endpoint admin de licencias (/v1/admin/*): emitir, listar, revocar, extender.

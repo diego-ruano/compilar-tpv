@@ -170,7 +170,7 @@ Aplazado: exige primero acceso de lectura a la base del tenant.
 
 `http_client()` (`tpv-infra-licensing/src/lib.rs`) no fija el certificado del host. No habilita ningún
 bypass: el estado de licencia va firmado con ed25519 y la clave pública está fijada en el binario
-(`LICENSE_SIGNING_PUBLIC_KEY_B64`), y el emparejamiento firma con la clave del dispositivo. Queda como
+(`LICENSE_SIGNING_PUBLIC_KEYS_B64`), y el emparejamiento firma con la clave del dispositivo. Queda como
 extra opcional, a revisar al fijar el modelo de precios.
 
 ---
@@ -192,7 +192,7 @@ Por orden de dependencia:
 4. Otro bucket de R2, y la URL de imágenes configurable (`CDN_IMAGES_BASE` en `imageUrl.ts` y la CSP).
 5. Stripe en modo test, con su webhook y sus Prices.
 6. Cliente compilable contra staging: `CLOUD_API_BASE` (`tpv-infra-licensing/src/lib.rs`), `CLOUD_WS_URL`
-   (`shared/lib/cloudApi.ts`) y `LICENSE_SIGNING_PUBLIC_KEY_B64` están fijados en el código; hay que
+   (`shared/lib/cloudApi.ts`) y `LICENSE_SIGNING_PUBLIC_KEYS_B64` están fijados en el código; hay que
    hacerlos configurables al compilar (como `TPV_SENTRY_DSN`).
 7. Etiqueta de entorno: `tpv_telemetry::Environment` sólo tiene `Dev` y `Prod`, y el entorno de Sentry
    lo decide `lib.rs::entorno_de_sentry` (`e2e` / `dev` / `prod`).

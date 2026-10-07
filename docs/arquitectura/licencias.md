@@ -185,7 +185,8 @@ el PIN de un administrador podría cambiarlo y llevarse la licencia.
 - **Renueva el token sólo si el estado deja trabajar.** La respuesta llega siempre (es por donde el
   cliente se entera), pero un equipo anulado no recibe credencial nueva.
 
-El cliente verifica la firma con `LICENSE_SIGNING_PUBLIC_KEY_B64` y la frescura, y decide
+El cliente verifica la firma con cualquiera de las claves de `LICENSE_SIGNING_PUBLIC_KEYS_B64` y la
+frescura, y decide
 (`evaluar_estado` / `evaluar_fallo`):
 
 | Fallo | Veredicto |
@@ -274,12 +275,27 @@ gate y el updater la leen (`leer_*`) y nunca la crean. Al leer, el almacén dist
 
 | Secreto | Para qué |
 |---|---|
-| `LICENSE_SIGNING_PRIVATE_KEY` | Firmar la aserción. La pública va fija en `tpv-infra-licensing/src/lib.rs` (`pnpm license:keypair` genera el par) |
+| `LICENSE_SIGNING_PRIVATE_KEY` | Firmar la aserción. Su pública va fija en `LICENSE_SIGNING_PUBLIC_KEYS_B64` (`tpv-infra-licensing/src/lib.rs`) junto a la de reserva (`pnpm license:keypair` genera cada par) |
 | `LICENSE_JWT_SECRET` | Tokens de sesión |
 | `LICENSE_STORE_KEY` | Cifrar en reposo claves, DEK y tokens de Turso. Global y sin rotación ([SEC-02](../pendientes.md#sec-02--license_store_key-es-global)) |
 | `ADMIN_API_TOKEN` | Las rutas de administración |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Leer la sesión de checkout y verificar el webhook |
 | `CHECKOUT_URL` | El enlace de compra de los avisos de caducidad |
+
+### Rotar la clave de firma
+
+El cliente lleva pineadas **dos** claves públicas (RI-09): la **en uso**, cuya privada es
+`LICENSE_SIGNING_PRIVATE_KEY`, y la **de reserva**, cuya privada no está en Cloudflare: se guarda fuera
+de línea, en el gestor de contraseñas. Si la en uso se filtra:
+
+1. `pnpm exec wrangler secret put LICENSE_SIGNING_PRIVATE_KEY` con la privada **de reserva**. Todos los
+   equipos la aceptan desde la siguiente comprobación, sin actualizarse.
+2. En la versión siguiente: se genera un par nuevo con `pnpm license:keypair`, la lista pasa a ser
+   `[reserva actual, nueva reserva]` (se quita la filtrada) y la privada nueva va al gestor de
+   contraseñas.
+
+Subir al worker una privada cuya pública no esté en la lista deja a todos los equipos bloqueados con
+`bad_signature` (bloquea pero conserva la licencia: se arregla volviendo a poner la buena).
 
 Stripe: un producto con un Price *one-time* por duración, cada uno con `metadata.term_months`, el
 enlace de compra con «recopilar email», y el webhook en

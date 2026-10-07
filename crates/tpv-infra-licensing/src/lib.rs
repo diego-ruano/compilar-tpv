@@ -58,14 +58,26 @@ use device::{
 /// Es el **único** host de la nube: `tpv-infra-http` lo reexporta para el resto del backend.
 pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
 
-/// Clave pública ed25519 (base64) con la que el worker firma el estado de licencia. Va **pineada**
-/// en el binario: no se descarga de ningún sitio. Es lo que cierra LIC-01 —un servidor falso, un
-/// MITM con CA de confianza o un DNS envenenado no tienen la privada, así que no pueden forjar un
-/// `active`. La privada vive SOLO en el worker (secreto `LICENSE_SIGNING_PRIVATE_KEY`).
+/// Claves públicas ed25519 (base64) con las que el worker puede firmar el estado de licencia. Van
+/// **pineadas** en el binario: no se descargan de ningún sitio. Es lo que cierra LIC-01 —un servidor
+/// falso, un MITM con CA de confianza o un DNS envenenado no tienen la privada, así que no pueden
+/// forjar un `active`—. Una aserción vale si la verifica cualquiera de ellas.
 ///
-/// Rotarla invalida a todos los clientes con esta versión: para rotar sin cortar, pinear dos
-/// claves a la vez durante una ventana. Generada con `pnpm license:keypair`.
-pub const LICENSE_SIGNING_PUBLIC_KEY_B64: &str = "9/GH9g7BSTP2wu2lq6I99LZgsIHZFMPcrdU3IIKyZ6s=";
+/// RI-09 · Son dos para poder rotar sin cortar a nadie:
+/// - La **en uso**: su privada es el secreto `LICENSE_SIGNING_PRIVATE_KEY` del worker.
+/// - La **de reserva**: su privada NO está en Cloudflare, se guarda fuera de línea. Si la en uso se
+///   filtra, se sube la de reserva al worker y todos los equipos la aceptan al momento, sin esperar
+///   a que se actualicen. En la versión siguiente se quita la filtrada y se genera otra reserva.
+///
+/// Con una sola, cambiarla dejaba en `bad_signature` (bloqueado) a todo equipo que no se hubiera
+/// actualizado antes. El procedimiento está en `docs/arquitectura/licencias.md`. Se generan con
+/// `pnpm license:keypair`.
+pub const LICENSE_SIGNING_PUBLIC_KEYS_B64: &[&str] = &[
+    // En uso.
+    "9/GH9g7BSTP2wu2lq6I99LZgsIHZFMPcrdU3IIKyZ6s=",
+    // Reserva.
+    "Y1vpMISE5evp8q8iMJaNpoJmDg3uo3lW/Mh30xVNfcg=",
+];
 
 const HTTP_TIMEOUT_SECS: u64 = 20;
 
@@ -318,17 +330,33 @@ struct RefreshOk {
    Verificación de la firma (el control central del gate)
 ========================================================= */
 
-fn pinned_verifying_key() -> Result<VerifyingKey, FalloConsulta> {
-    let bytes = B64
-        .decode(LICENSE_SIGNING_PUBLIC_KEY_B64)
-        .map_err(|_| FalloConsulta::FirmaInvalida)?;
-    let arr: [u8; 32] = bytes.as_slice().try_into().map_err(|_| FalloConsulta::FirmaInvalida)?;
-    VerifyingKey::from_bytes(&arr).map_err(|_| FalloConsulta::FirmaInvalida)
+fn verifying_key(b64: &str) -> Option<VerifyingKey> {
+    let bytes = B64.decode(b64).ok()?;
+    let arr: [u8; 32] = bytes.as_slice().try_into().ok()?;
+    VerifyingKey::from_bytes(&arr).ok()
 }
 
-/// Verifica la firma ed25519 contra la clave pineada, comprueba que la aserción es de ESTA
+/// ¿Firma `sig` el mensaje con alguna de las claves? Una clave pineada que no se pueda leer no cuenta
+/// (y la prueba `las_claves_pineadas_son_validas` impide que llegue a compilarse una así).
+fn firmado_por_alguna(claves: &[&str], msg: &[u8], sig: &Signature) -> bool {
+    claves
+        .iter()
+        .filter_map(|c| verifying_key(c))
+        .any(|vk| vk.verify(msg, sig).is_ok())
+}
+
+/// Verifica la firma ed25519 contra las claves pineadas, comprueba que la aserción es de ESTA
 /// petición (`client_ts`) y que no ha caducado, y solo entonces construye el estado de fiar.
 fn verificar_assertion(
+    dto: SignedAssertionDto,
+    client_ts_enviado: i64,
+    ahora_ms: i64,
+) -> Result<AssertionVerificada, FalloConsulta> {
+    verificar_assertion_con(LICENSE_SIGNING_PUBLIC_KEYS_B64, dto, client_ts_enviado, ahora_ms)
+}
+
+fn verificar_assertion_con(
+    claves: &[&str],
     dto: SignedAssertionDto,
     client_ts_enviado: i64,
     ahora_ms: i64,
@@ -350,13 +378,13 @@ fn verificar_assertion(
         client_ts: dto.client_ts,
     };
 
-    let vk = pinned_verifying_key()?;
     let sig_bytes = B64.decode(&dto.sig).map_err(|_| FalloConsulta::FirmaInvalida)?;
     let sig = Signature::from_slice(&sig_bytes).map_err(|_| FalloConsulta::FirmaInvalida)?;
 
     let msg = dom::mensaje_canonico(&assertion);
-    vk.verify(msg.as_bytes(), &sig)
-        .map_err(|_| FalloConsulta::FirmaInvalida)?;
+    if !firmado_por_alguna(claves, msg.as_bytes(), &sig) {
+        return Err(FalloConsulta::FirmaInvalida);
+    }
 
     // Firma buena, pero ¿es de esta petición y sigue vigente? (anti-replay)
     if !dom::assertion_fresca(&assertion, client_ts_enviado, ahora_ms) {
@@ -1324,5 +1352,90 @@ mod tests_clasificar_error {
         for code in ["license_not_found", "license_revoked", "device_replaced"] {
             assert_eq!(codigo(403, code), code, "code={code}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_firma_de_licencia {
+    //! RI-09: las aserciones se verifican contra una LISTA de claves pineadas, para poder pasar a la
+    //! de reserva sin dejar bloqueado a ningún equipo.
+
+    use super::*;
+    use ed25519_dalek::Signer;
+
+    const AHORA: i64 = 1_790_000_000_000;
+
+    fn clave(semilla: u8) -> SigningKey {
+        SigningKey::from_bytes(&[semilla; 32])
+    }
+
+    fn publica(sk: &SigningKey) -> String {
+        B64.encode(sk.verifying_key().to_bytes())
+    }
+
+    /// Una aserción `active` de esta petición, firmada con `sk`.
+    fn firmada_por(sk: &SigningKey) -> SignedAssertionDto {
+        let a = AssertionVerificada {
+            version: 1,
+            tenant_id: "t1".into(),
+            device_id: "d1".into(),
+            license_id: "l1".into(),
+            estado: EstadoLicencia::Active,
+            plan: "standard".into(),
+            expires_at_ms: None,
+            issued_at_ms: AHORA,
+            assertion_expires_at_ms: AHORA + 60_000,
+            client_ts: AHORA,
+        };
+        let sig = sk.sign(dom::mensaje_canonico(&a).as_bytes());
+        SignedAssertionDto {
+            v: a.version,
+            tenant_id: a.tenant_id,
+            device_id: a.device_id,
+            license_id: a.license_id,
+            state: "active".into(),
+            plan: a.plan,
+            expires_at_ms: a.expires_at_ms,
+            issued_at_ms: a.issued_at_ms,
+            assertion_expires_at_ms: a.assertion_expires_at_ms,
+            client_ts: a.client_ts,
+            sig: B64.encode(sig.to_bytes()),
+        }
+    }
+
+    #[test]
+    fn vale_la_firma_de_cualquiera_de_las_claves_pineadas() {
+        let (en_uso, reserva) = (clave(1), clave(2));
+        let claves = [publica(&en_uso), publica(&reserva)];
+        let claves: Vec<&str> = claves.iter().map(String::as_str).collect();
+
+        assert!(verificar_assertion_con(&claves, firmada_por(&en_uso), AHORA, AHORA).is_ok());
+        assert!(
+            verificar_assertion_con(&claves, firmada_por(&reserva), AHORA, AHORA).is_ok(),
+            "el día que el worker pase a la de reserva, los equipos ya la aceptan"
+        );
+    }
+
+    #[test]
+    fn la_firma_de_una_clave_que_no_esta_pineada_no_vale() {
+        let claves = [publica(&clave(1))];
+        let claves: Vec<&str> = claves.iter().map(String::as_str).collect();
+        assert!(matches!(
+            verificar_assertion_con(&claves, firmada_por(&clave(9)), AHORA, AHORA),
+            Err(FalloConsulta::FirmaInvalida)
+        ));
+    }
+
+    /// Una clave mal copiada al pinearla no se notaría hasta el día que hiciera falta.
+    #[test]
+    fn las_claves_pineadas_son_validas_y_distintas() {
+        assert!(LICENSE_SIGNING_PUBLIC_KEYS_B64.len() >= 2, "en uso + reserva");
+        for c in LICENSE_SIGNING_PUBLIC_KEYS_B64 {
+            assert!(verifying_key(c).is_some(), "clave pineada ilegible: {c}");
+        }
+        let mut unicas = LICENSE_SIGNING_PUBLIC_KEYS_B64.to_vec();
+        unicas.sort();
+        unicas.dedup();
+        assert_eq!(unicas.len(), LICENSE_SIGNING_PUBLIC_KEYS_B64.len());
     }
 }

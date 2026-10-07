@@ -4,13 +4,14 @@
 //
 //   node scripts/generate-license-keypair.mjs
 //
-// Se ejecuta UNA vez, en local, y se reparte así:
-//   · la PRIVADA → secreto del worker:  wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
-//   · la PÚBLICA → constante PINEADA en el binario Rust (crates/tpv-infra-licensing/src/lib.rs)
+// Se ejecuta en local, una vez por cada par. El cliente pinea DOS públicas (RI-09):
+//   · la EN USO: su privada es el secreto del worker (wrangler secret put LICENSE_SIGNING_PRIVATE_KEY)
+//   · la DE RESERVA: su privada NO va a Cloudflare, sólo al gestor de contraseñas
+// y las dos van en LICENSE_SIGNING_PUBLIC_KEYS_B64 (crates/tpv-infra-licensing/src/lib.rs).
 //
-// La pública no es secreta, pero es INTEGRIDAD CRÍTICA: si se cambia, todos los TPVs ya
-// instalados dejan de validar la firma y se bloquean. Rotarla exige pinear dos claves a la vez
-// durante una ventana.
+// La pública no es secreta, pero es INTEGRIDAD CRÍTICA: el worker sólo puede firmar con una privada
+// cuya pública esté en esa lista, o todos los TPVs instalados se bloquean. Cómo rotar:
+// docs/arquitectura/licencias.md («Rotar la clave de firma»).
 //
 // La privada NO se guarda en el repo, ni en un fichero, ni en el historial del terminal:
 // cópiala directamente al `wrangler secret put`, y guárdala también en el gestor de
@@ -38,18 +39,18 @@ console.log(`
   Par de firma de licencia (ed25519)
   ─────────────────────────────────────────────────────────────────────
 
-  1) PRIVADA → secreto del worker. Pégala cuando te la pida el comando:
+  1) PRIVADA → al gestor de contraseñas. Si es la que va a estar EN USO, también al worker
+     (pégala cuando te la pida el comando); si es la DE RESERVA, a Cloudflare no:
 
        cd apps/cloud-worker-licensing
        pnpm exec wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
 
      ${b64(seed)}
 
-  2) PÚBLICA → constante pineada en el cliente Rust
-     (crates/tpv-infra-licensing/src/lib.rs):
+  2) PÚBLICA → a la lista pineada del cliente Rust
+     (LICENSE_SIGNING_PUBLIC_KEYS_B64 en crates/tpv-infra-licensing/src/lib.rs):
 
-       pub const LICENSE_SIGNING_PUBLIC_KEY_B64: &str =
-           "${b64(raw)}";
+       "${b64(raw)}",
 
   ─────────────────────────────────────────────────────────────────────
 `);
