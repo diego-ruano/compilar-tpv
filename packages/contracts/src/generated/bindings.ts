@@ -88,6 +88,8 @@ export type AsignacionRow = { ID_Asignacion: string, ID_Trabajador: string, Fech
 
 export type AsignacionUpdateInput = { id_asignacion: string, id_turno: string, area: string, hora_inicio?: string, hora_fin?: string, notas?: string, };
 
+export type AutorizacionUsuario = { rol: string, permisos: Array<string>, };
+
 /**
  * Estado del backfill del histórico, para el panel de Conectividad y para el aviso de las
  * estadísticas (mientras corre, un total de rango largo crece solo y parece un error de cálculo).
@@ -399,6 +401,8 @@ export type CompleteInitialSetupInput = { id_usuario: string, pin_nuevo: string,
  */
 export type ConfigPatchInput = { patch: Record<string, unknown>, };
 
+export type ConfiguracionPermisos = { catalogo: Array<PermisoDef>, roles: Array<RolPermisos>, };
+
 /**
  * Sólo el código: la dirección que queda confirmada es la que se pidió, guardada en la nube.
  */
@@ -692,6 +696,8 @@ export type FirmaDispositivo = { ts: number, sigB64: string, };
  * Es un subconjunto de [`PrintTicketPayload`]: la vista previa no necesita ni negocio ni líneas.
  */
 export type GeometriaTicket = { paper_width_mm: number, chars_per_line: number, margin_left_mm: number, margin_right_mm: number, };
+
+export type GuardarPermisosInput = { id_rol: string, permisos_vistos: Array<string>, permisos: Array<string>, };
 
 export type HandySetTokenArgs = { token: string, tenant_id: string, };
 
@@ -1110,6 +1116,8 @@ export type PedidosGetPageInput = { limit: number, offset: number, search?: stri
  * el filtro (para saber si quedan más páginas).
  */
 export type PedidosPageDto = { pedidos: Array<PedidoProveedorDto>, total: number, };
+
+export type PermisoDef = { codigo: string, nombre: string, grupo: string, };
 
 /**
  * Lo que la pantalla necesita saber **antes** de que nadie cuente nada.
@@ -1553,6 +1561,8 @@ export type ResumenCajaDto = { total_entradas: Dinero, total_salidas: Dinero, to
  * dato que no existía y que hace visible la sisa (CUENTA-07).
  */
 count_anuladas: number, total_anulado: Dinero, };
+
+export type RolPermisos = { id_rol: string, nombre: string, permisos: Array<string>, };
 
 export type RolRow = { ID_Rol: string, Nombre_Rol: string, };
 

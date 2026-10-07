@@ -75,6 +75,14 @@ const SQL_UPSERT_PRODUCTO = `
 		IVA_Percent = excluded.IVA_Percent;
 `;
 
+// RI-70: la edición sin precios sólo opera sobre un producto existente en la transacción.
+// Si se borró desde la lectura de la ruta, no se transforma en un alta con precio arbitrario.
+const SQL_UPSERT_SIN_PRECIOS = SQL_UPSERT_PRODUCTO
+    .replace("VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12 WHERE EXISTS (SELECT 1 FROM Productos WHERE ID_Producto=?1)")
+    .replace("Precio_Venta = excluded.Precio_Venta", "Precio_Venta = Productos.Precio_Venta")
+    .replace("IVA_Percent = excluded.IVA_Percent", "IVA_Percent = Productos.IVA_Percent");
+
 const SQL_UPSERT_CATEGORIA = `
 	INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Nombre_Imagen, Ruta_Imagen, Vendible, Pasa_Cocina)
 	VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -146,13 +154,14 @@ export function createCategoria(input: UpsertCategoriaInput): BuiltCommand {
 // RI-55: el stock suelto sólo se escribe al CREAR el producto, con su movimiento de alta; editando
 // la ficha se ignora (el formulario lo reescribía sin rastro). `esNuevo` lo decide la ruta leyendo.
 // Se cambia con `ajustarStockSuelto`.
-export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean, idUsuario: string): BuiltCommand {
+export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean, idUsuario: string, conservarPrecio = false): BuiltCommand {
 	const stockSuelto = esNuevo ? cantidadONull(input.stock_suelto) : null;
 	const steps: any[] = [
 		idStep(input.id_producto),
 		{
 			kind: "execute",
-			sql: SQL_UPSERT_PRODUCTO,
+			// RI-70: al editar sin permiso de precios se conserva el valor dentro de la escritura.
+            sql: conservarPrecio ? SQL_UPSERT_SIN_PRECIOS : SQL_UPSERT_PRODUCTO,
 			args: [
 				REF_ID,
 				input.id_categoria,

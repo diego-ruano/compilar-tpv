@@ -982,3 +982,31 @@ describe("guard de SQL replicable determinista (TRAB-08)", () => {
 		).toBe(false);
 	});
 });
+
+
+// RI-70: una edición de catálogo sin permiso de precios conserva el valor actual,
+// aunque el formulario de la Handy siga mostrando un precio anterior.
+describe("edición de catálogo sin cambiar precios", () => {
+    it("no crea un producto borrado desde la lectura de una ficha sin permiso de precios", async () => {
+        await enElHub("catalogo-producto-borrado", async (hub: any) => {
+            const sql = hub.state.storage.sql;
+            crearEsquemaTenant(sql);
+            sql.exec("INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Categoría')");
+            aplicar(hub, sql, upsertProducto({id_producto:'p',id_categoria:'cat',nombre:'Editado',precio_venta:100,iva_percent:10,ids_alergenos:[]}, false, 'actor', true));
+            const filas = await clienteSobre(sql).execute("SELECT ID_Producto FROM Productos WHERE ID_Producto='p'");
+            expect(filas.rows).toEqual([]);
+        });
+    });
+
+	it("conserva precio e IVA al editar la ficha desde un formulario antiguo", async () => {
+		await enElHub("catalogo-sin-precios", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			sql.exec("INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Categoría')");
+			sql.exec("INSERT INTO Productos (ID_Producto,ID_Categoria,Nombre,Precio_Venta,IVA_Percent) VALUES ('p','cat','Anterior',200,21)");
+			aplicar(hub, sql, upsertProducto({ id_producto:'p',id_categoria:'cat',nombre:'Editado',precio_venta:100,iva_percent:10,ids_alergenos:[] }, false, 'actor', true));
+			const filas = await clienteSobre(sql).execute("SELECT Nombre,Precio_Venta,IVA_Percent FROM Productos WHERE ID_Producto='p'");
+			expect(filas.rows).toEqual([{Nombre:'Editado',Precio_Venta:200,IVA_Percent:21}]);
+		});
+	});
+});

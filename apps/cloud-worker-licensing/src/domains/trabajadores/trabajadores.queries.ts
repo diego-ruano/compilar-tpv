@@ -382,3 +382,11 @@ export async function predeterminadoDesdeSemanaItems(
 				&& r.id_turno.trim().length > 0,
 		);
 }
+
+// RI-70: consulta de configuración para el gate nativo de la Handy; no autentica a la persona.
+export async function permisosUsuario(db: Client, id: string): Promise<import("@tpv/contracts").AutorizacionUsuario | null> {
+    const rs = await db.execute({sql:"SELECT r.Nombre_Rol, p.Permiso FROM Usuarios u JOIN Roles r ON r.ID_Rol=u.ID_Rol LEFT JOIN Roles_Permisos p ON p.ID_Rol=r.ID_Rol WHERE u.ID_Usuario=?1 AND u.Estado='Activo' ORDER BY p.Permiso",args:[id]});
+    const filas = rows(rs);
+    if (!filas.length) return null;
+    return {rol:String(filas[0].Nombre_Rol),permisos:filas.filter((f) => f.Permiso != null).map((f) => String(f.Permiso))};
+}

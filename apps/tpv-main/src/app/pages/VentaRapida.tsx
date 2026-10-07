@@ -1,3 +1,4 @@
+import { usePermisos } from "../../shared/lib/usePermisos";
 // src/pages/VentaRapida.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, ReceiptText, ArrowLeft } from "lucide-react";
@@ -285,6 +286,7 @@ export default function VentaRapida() {
   // lo único que se imprime es una precuenta.
   const [ultimoCobro, setUltimoCobro] = useState<CobroImprimible | null>(null);
   const [cashCount, setCashCount] = useState<Record<string, number>>({});
+  const { puede } = usePermisos();
   const [openAddProduct, setOpenAddProduct] = useState(false);
 
   const [openProductDetail, setOpenProductDetail] = useState(false);
@@ -2076,7 +2078,7 @@ export default function VentaRapida() {
                 onAddProducto={onAddProductoCb}
                 onRemoveProducto={onRemoveProductoCb}
                 onOpenProductDetail={onOpenProductDetailCb}
-                onOpenAddProduct={onOpenAddProductCb}
+                onOpenAddProduct={puede("catalogo.editar") && puede("catalogo.precios") ? onOpenAddProductCb : undefined}
               />
             )}
           </div>

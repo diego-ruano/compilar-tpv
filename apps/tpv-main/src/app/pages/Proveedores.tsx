@@ -1,3 +1,4 @@
+import { usePermisos } from "../../shared/lib/usePermisos";
 import { guardarImagen } from "../../shared/lib/guardarImagen";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -48,6 +49,7 @@ type Vista = "list" | "detail";
 
 
 export default function Proveedores() {
+  const { puede } = usePermisos();
   const [openAddProduct, setOpenAddProduct] = useState(false);
   const [productIdToEdit, setProductIdToEdit] = useState<string | null>(null);
 
@@ -533,6 +535,7 @@ export default function Proveedores() {
 
             <button
               type="button"
+              disabled={!puede("proveedores.gestionar")}
               onClick={abrirNuevoProveedorModal}
               className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center text-sm font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto xs:shrink-0"
             >
@@ -594,7 +597,7 @@ export default function Proveedores() {
             )}
           </div>
 
-          <PedidosSection proveedores={proveedores} />
+          {puede("pedidos.gestionar") && <PedidosSection proveedores={proveedores} />}
         </>
       )}
 
@@ -643,6 +646,7 @@ export default function Proveedores() {
               <div className="mt-2 grid w-full max-w-[560px] grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
+                  disabled={!puede("proveedores.gestionar")}
                   onClick={abrirEditarProveedorModal}
                 >
                   <Pencil className="size-4" aria-hidden />
@@ -651,6 +655,7 @@ export default function Proveedores() {
 
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface py-2 font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
+                  disabled={!puede("proveedores.gestionar")}
                   onClick={conAviso(abrirVincularProductos)}
                 >
                   <Link2 className="size-4" aria-hidden />
@@ -659,6 +664,7 @@ export default function Proveedores() {
 
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer xs:col-span-2"
+                  disabled={!puede("proveedores.gestionar")}
                   onClick={eliminarProveedor}
                 >
                   <Trash2 className="size-4" aria-hidden />
@@ -674,7 +680,8 @@ export default function Proveedores() {
 
               <button
                 type="button"
-                onClick={conAviso(abrirVincularProductos)}
+                disabled={!puede("proveedores.gestionar")}
+                  onClick={conAviso(abrirVincularProductos)}
                 className="inline-flex min-w-0 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl border border-border bg-surface px-3 py-2 text-center text-sm font-semibold leading-tight text-fg transition hover:bg-surface-2"
               >
                 <Link2 className="size-4" aria-hidden />
@@ -699,6 +706,7 @@ export default function Proveedores() {
 
                     <button
                       type="button"
+                      disabled={!puede("proveedores.gestionar")}
                       onClick={() => eliminarProductoDelProveedor(p.id_producto)}
                       className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer"
                     >

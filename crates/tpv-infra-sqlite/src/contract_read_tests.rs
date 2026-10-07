@@ -285,6 +285,7 @@ lecturas_de_contrato! {
     trabajadores__asignaciones_semana,
     trabajadores__asignaciones_semana_con_predeterminado,
     trabajadores__roles,
+    trabajadores__permisos_usuario,
     trabajadores__todos,
     trabajadores__detalle,
     trabajadores__id_por_usuario,
@@ -664,6 +665,11 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
                 .await
                 .expect("asignados tarea");
             serde_json::to_value(r).unwrap()
+        }
+        "trabajadores.permisos_usuario" => {
+            use tpv_application::ports::permisos::PermisosRepository;
+            let repo = crate::permisos::SqlitePermisosRepository::new(db.clone());
+            serde_json::to_value(repo.usuario(&s(&e["id_usuario"])).await.expect("permisos")).unwrap()
         }
         "trabajadores.roles" => {
             let repo = SqliteTrabajadoresRepository::new(db.clone());

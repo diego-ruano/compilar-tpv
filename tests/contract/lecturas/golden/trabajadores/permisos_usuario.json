@@ -1,0 +1,11 @@
+{
+  "permisos": [
+    "clientes.gestionar",
+    "cuentas.cobros",
+    "reservas.gestionar",
+    "servicio.cocina",
+    "servicio.vender",
+    "tareas.propias"
+  ],
+  "rol": "Camarero"
+}

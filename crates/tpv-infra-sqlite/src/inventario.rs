@@ -536,104 +536,11 @@ impl InventarioRepository for SqliteInventarioRepository {
         finish_tx(conn, res).await
     }
 
-    async fn upsert_producto(&self, id_usuario: &str, p: ProductoUpsert) -> AppResult<String> {
-        let g = self.db.write().await;
-        let conn = &g;
-        let id_producto = p.id.unwrap_or_else(new_id);
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
-            // RI-55: el stock suelto sólo se escribe al CREAR el producto, y con su movimiento de
-            // alta. Editando la ficha se ignora: el formulario llevaba el valor que había cargado y
-            // lo reescribía sin rastro, pisando lo vendido mientras estaba abierto. Se cambia con
-            // `ajustar_stock_suelto`.
-            let es_nuevo = conn
-                .query(
-                    "SELECT 1 FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
-                    vec![Value::Text(id_producto.to_string())],
-                )
-                .await
-                .map_err(db_err)?
-                .next()
-                .await
-                .map_err(db_err)?
-                .is_none();
-            let stock_suelto = if es_nuevo { p.stock_suelto.map(redondear_cantidad) } else { None };
-
-            conn.execute(
-                r#"
-                INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                ON CONFLICT(ID_Producto) DO UPDATE SET
-                  ID_Categoria = excluded.ID_Categoria,
-                  ID_Proveedor = excluded.ID_Proveedor,
-                  Nombre = excluded.Nombre,
-                  Precio_Venta = excluded.Precio_Venta,
-                  Stock_Minimo = excluded.Stock_Minimo,
-                  Unidad_Medida = excluded.Unidad_Medida,
-                  Nombre_Imagen = COALESCE(excluded.Nombre_Imagen, Productos.Nombre_Imagen),
-                  Ruta_Imagen = COALESCE(excluded.Ruta_Imagen, Productos.Ruta_Imagen),
-                  Cantidad_Pedido_Esperada = excluded.Cantidad_Pedido_Esperada,
-                  IVA_Percent = excluded.IVA_Percent;
-                "#,
-                vec![
-                    Value::Text(id_producto.to_string()),
-                    Value::Text(p.id_categoria),
-                    match p.id_proveedor {
-                        Some(v) => Value::Text(v),
-                        None => Value::Null,
-                    },
-                    Value::Text(p.nombre),
-                    opt_dinero(p.precio_venta),
-                    opt_real(p.stock_minimo),
-                    opt_text(p.unidad_medida),
-                    opt_text(p.nombre_imagen),
-                    opt_text(p.ruta_imagen),
-                    opt_real(p.cantidad_pedido_esperada),
-                    opt_real(stock_suelto),
-                    opt_real(p.iva_percent),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-
-            if let Some(stock) = stock_suelto {
-                conn.execute(
-                    r#"
-                    INSERT INTO Movimientos_Stock
-                      (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
-                    VALUES
-                      (?1, ?2, 'ALTA', ?3, ?3, 'Alta del producto', ?4, datetime('now','localtime'));
-                    "#,
-                    vec![
-                        Value::Text(new_id()),
-                        Value::Text(id_producto.to_string()),
-                        Value::Real(stock),
-                        Value::Text(id_usuario.to_string()),
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-
-            conn.execute(
-                "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
-                vec![Value::Text(id_producto.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-            for id_a in p.ids_alergenos {
-                conn.execute(
-                    "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
-                    vec![Value::Text(id_producto.to_string()), Value::Text(id_a)],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-            Ok(())
-        }
-        .await;
-        finish_tx(conn, res).await?;
-        Ok(id_producto)
+    async fn upsert_producto(&self, actor: &str, p: ProductoUpsert) -> AppResult<String> {
+        self.guardar_producto(actor, p, true, true).await
+    }
+    async fn upsert_producto_autorizado(&self, actor: &str, p: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String> {
+        self.guardar_producto(actor, p, precios, recibir).await
     }
 
     async fn create_lote(&self, id_usuario: &str, l: LoteNuevo) -> AppResult<()> {
@@ -910,6 +817,121 @@ async fn finish_tx<C: Writer>(conn: &C, res: AppResult<()>) -> AppResult<()> {
             Err(e)
         }
     }
+}
+
+impl SqliteInventarioRepository {
+    async fn guardar_producto(&self, id_usuario: &str, p: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String> {
+        let g = self.db.write().await;
+        let conn = &g;
+        let id_producto = p.id.unwrap_or_else(new_id);
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<()> = async {
+            // RI-55: el stock suelto sólo se escribe al CREAR el producto, y con su movimiento de
+            // alta. Editando la ficha se ignora: el formulario llevaba el valor que había cargado y
+            // lo reescribía sin rastro, pisando lo vendido mientras estaba abierto. Se cambia con
+            // `ajustar_stock_suelto`.
+            let es_nuevo = conn
+                .query(
+                    "SELECT 1 FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
+                    vec![Value::Text(id_producto.to_string())],
+                )
+                .await
+                .map_err(db_err)?
+                .next()
+                .await
+                .map_err(db_err)?
+                .is_none();
+            if !precios {
+                let mut filas = conn.query("SELECT Precio_Venta, IVA_Percent FROM Productos WHERE ID_Producto=?1", vec![Value::Text(id_producto.clone())]).await.map_err(db_err)?;
+                let fila = filas.next().await.map_err(db_err)?;
+                let coincide = match fila {
+                    Some(f) => f.get_value(0).map_err(db_err)? == opt_dinero(p.precio_venta) && f.get_value(1).map_err(db_err)? == opt_real(p.iva_percent),
+                    None => false,
+                };
+                if !coincide { return Err(AppError::coded(tpv_contracts::errors::ErrorCode::PermisoDenegado, "No puedes cambiar precios")); }
+            }
+            if es_nuevo && !recibir && p.stock_suelto.is_some_and(|v| v != 0.0) {
+                return Err(AppError::coded(tpv_contracts::errors::ErrorCode::PermisoDenegado, "No puedes dar de alta existencias"));
+            }
+            let stock_suelto = if es_nuevo { p.stock_suelto.map(redondear_cantidad) } else { None };
+
+            conn.execute(
+                r#"
+                INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                ON CONFLICT(ID_Producto) DO UPDATE SET
+                  ID_Categoria = excluded.ID_Categoria,
+                  ID_Proveedor = excluded.ID_Proveedor,
+                  Nombre = excluded.Nombre,
+                  Precio_Venta = excluded.Precio_Venta,
+                  Stock_Minimo = excluded.Stock_Minimo,
+                  Unidad_Medida = excluded.Unidad_Medida,
+                  Nombre_Imagen = COALESCE(excluded.Nombre_Imagen, Productos.Nombre_Imagen),
+                  Ruta_Imagen = COALESCE(excluded.Ruta_Imagen, Productos.Ruta_Imagen),
+                  Cantidad_Pedido_Esperada = excluded.Cantidad_Pedido_Esperada,
+                  IVA_Percent = excluded.IVA_Percent;
+                "#,
+                vec![
+                    Value::Text(id_producto.to_string()),
+                    Value::Text(p.id_categoria),
+                    match p.id_proveedor {
+                        Some(v) => Value::Text(v),
+                        None => Value::Null,
+                    },
+                    Value::Text(p.nombre),
+                    opt_dinero(p.precio_venta),
+                    opt_real(p.stock_minimo),
+                    opt_text(p.unidad_medida),
+                    opt_text(p.nombre_imagen),
+                    opt_text(p.ruta_imagen),
+                    opt_real(p.cantidad_pedido_esperada),
+                    opt_real(stock_suelto),
+                    opt_real(p.iva_percent),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            if let Some(stock) = stock_suelto {
+                conn.execute(
+                    r#"
+                    INSERT INTO Movimientos_Stock
+                      (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                    VALUES
+                      (?1, ?2, 'ALTA', ?3, ?3, 'Alta del producto', ?4, datetime('now','localtime'));
+                    "#,
+                    vec![
+                        Value::Text(new_id()),
+                        Value::Text(id_producto.to_string()),
+                        Value::Real(stock),
+                        Value::Text(id_usuario.to_string()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            conn.execute(
+                "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
+                vec![Value::Text(id_producto.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+            for id_a in p.ids_alergenos {
+                conn.execute(
+                    "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
+                    vec![Value::Text(id_producto.to_string()), Value::Text(id_a)],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+            Ok(())
+        }
+        .await;
+        finish_tx(conn, res).await?;
+        Ok(id_producto)
+    }
+
 }
 
 #[cfg(test)]

@@ -834,3 +834,5 @@ mod tests {
             .join("\n")
     }
 }
+
+// RI-70: el esquema compartido incluye Encargado y Roles_Permisos.

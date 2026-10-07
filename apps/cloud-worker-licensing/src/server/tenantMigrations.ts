@@ -127,3 +127,5 @@ export async function runTenantMigrations(client: Client): Promise<void> {
 		}
 	}
 }
+
+// RI-70: el esquema compartido incluye Encargado y Roles_Permisos.

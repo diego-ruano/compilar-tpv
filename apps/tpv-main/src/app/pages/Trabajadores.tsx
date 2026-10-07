@@ -20,6 +20,7 @@ import {
 
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../shared/stores/useAuth";
+import { usePermisos } from "../../shared/lib/usePermisos";
 import { esAdmin } from "../../shared/lib/permisos";
 import { useToast } from "../../shared/toast";
 
@@ -331,7 +332,7 @@ async function generarHorarioPDFPorEmpleado(args: {
 ========================= */
 function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const auth = useAuth();
-  const isAdmin = esAdmin(auth.role);
+  const isAdmin = usePermisos().puede("horarios.gestionar");
 
   const [error, setError] = useState<string | null>(null);
 
@@ -1129,7 +1130,7 @@ function Trabajadores() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
-  const isAdmin = esAdmin(auth.role);
+  const isAdmin = esAdmin(usePermisos().rol);
   const toast = useToast();
 
   // Lista de trabajadores vía TanStack Query (caché). Las mutaciones de horarios y el

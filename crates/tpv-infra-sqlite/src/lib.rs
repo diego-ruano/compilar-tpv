@@ -77,3 +77,5 @@ pub mod venta_rapida;
 pub mod verifactu;
 /// Exportacion de los registros de facturacion en ZIP (art. 8 RRSIF).
 pub mod verifactu_export;
+
+pub mod permisos;

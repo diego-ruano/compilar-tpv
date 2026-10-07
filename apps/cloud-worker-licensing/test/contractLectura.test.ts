@@ -73,6 +73,7 @@ import {
 	all as trabajadoresTodos,
 	detail as trabajadorDetalle,
 	idByUsuario,
+	permisosUsuario,
 	roles as trabajadoresRoles,
 	turnos as trabajadoresTurnos,
 } from "../src/domains/trabajadores/trabajadores.queries";
@@ -224,6 +225,8 @@ import casoTareaPorId from "../../../tests/contract/lecturas/casos/tareas/por_id
 import goldenTareaPorId from "../../../tests/contract/lecturas/golden/tareas/por_id.json";
 import casoTareaAsignados from "../../../tests/contract/lecturas/casos/tareas/asignados.json";
 import goldenTareaAsignados from "../../../tests/contract/lecturas/golden/tareas/asignados.json";
+import casoPermisos from "../../../tests/contract/lecturas/casos/trabajadores/permisos_usuario.json";
+import goldenPermisos from "../../../tests/contract/lecturas/golden/trabajadores/permisos_usuario.json";
 import casoTrabRoles from "../../../tests/contract/lecturas/casos/trabajadores/roles.json";
 import goldenTrabRoles from "../../../tests/contract/lecturas/golden/trabajadores/roles.json";
 import casoTrabTodos from "../../../tests/contract/lecturas/casos/trabajadores/todos.json";
@@ -336,6 +339,7 @@ const CASOS = [
 	{ nombre: "tareas_papelera", caso: casoTareaPapelera, golden: goldenTareaPapelera },
 	{ nombre: "tareas_por_id", caso: casoTareaPorId, golden: goldenTareaPorId },
 	{ nombre: "tareas_asignados", caso: casoTareaAsignados, golden: goldenTareaAsignados },
+	{ nombre: "trabajadores_permisos", caso:casoPermisos, golden:goldenPermisos },
 	{ nombre: "trabajadores_roles", caso: casoTrabRoles, golden: goldenTrabRoles },
 	{ nombre: "trabajadores_todos", caso: casoTrabTodos, golden: goldenTrabTodos },
 	{ nombre: "trabajadores_detalle", caso: casoTrabDetalle, golden: goldenTrabDetalle },
@@ -544,6 +548,8 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return getTareaById(db, e.id_tarea);
 		case "tareas.asignados":
 			return getTareaAsignados(db, e.id_tarea);
+		case "trabajadores.permisos_usuario":
+			return permisosUsuario(db, e.id_usuario);
 		case "trabajadores.roles":
 			return trabajadoresRoles(db);
 		case "trabajadores.todos":

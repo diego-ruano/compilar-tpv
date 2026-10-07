@@ -17,7 +17,7 @@ use tpv_contracts::email_config::EnviarPedidoEmailInput;
 use tpv_infra_licensing::PairingAdapter;
 use tpv_contracts::errors::AppErrorDto;
 
-use crate::{AppState, ADMIN};
+use crate::AppState;
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -38,7 +38,7 @@ pub async fn email_enviar_pedido(
     state: State<'_, AppState>,
     args: EnviarPedidoEmailInput,
 ) -> Result<(), AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
+    state.exigir_permiso("pedidos.gestionar").await?;
 
     let app_data_dir = app_data(&app)?;
     let svc = PairingAdapter::new(app_data_dir);

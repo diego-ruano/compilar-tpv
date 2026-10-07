@@ -73,6 +73,9 @@ En los dos casos:
   ([caja.md](caja.md#devolver-parte-de-un-cobro)).
 - **`Registros_Facturacion` y `Serie_Facturacion` no se purgan nunca** ([verifactu.md](verifactu.md)).
 
+`Roles_Permisos` es negocio replicable: las concesiones por rol viajan por el outbox.
+El rol Encargado y sus concesiones iniciales nacen de `0001`, igual en Main y Worker (RI-70).
+
 ## El andamiaje local (§16 del fichero)
 
 `_Sync_Outbox`, `_Sync_Applied_Ops`, `_Sync_State`, `_Sync_Failed`, `_Sync_Encoladas`, `_Jobs_State`,

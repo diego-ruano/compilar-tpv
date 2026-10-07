@@ -466,11 +466,7 @@ pub(crate) struct Sesion {
 
 /// El rol privilegiado. Está aquí y no repartido por los comandos para que renombrarlo sea un
 /// sitio, no una docena.
-pub(crate) const ADMIN: &str = "Administrador";
-
-/// El camarero. Sólo aparece en los gates que le abren algo que el resto de roles no hace: los
-/// cobros de Cuentas y sus bajas.
-pub(crate) const CAMARERO: &str = "Camarero";
+pub(crate) const ADMIN: &str = tpv_domain::permisos::ADMIN;
 
 pub(crate) fn permiso_denegado(detalle: impl Into<String>) -> AppErrorDto {
     AppErrorDto::new(tpv_contracts::errors::ErrorCode::PermisoDenegado, detalle)
@@ -550,11 +546,31 @@ impl AppState {
     /// La sesión actual, o `permiso_denegado` si no hay ninguna. Para lo que escribe algo
     /// **atribuible** pero que hace cualquiera (abrir el cajón para dar cambio).
     pub(crate) async fn sesion(&self) -> Result<Sesion, AppErrorDto> {
-        self.sesion
-            .lock()
-            .await
-            .clone()
-            .ok_or_else(|| permiso_denegado("Inicia sesión para hacer esto"))
+        Ok(self.autorizacion().await?.0)
+    }
+
+    async fn autorizacion(&self) -> Result<(Sesion, tpv_contracts::permisos::AutorizacionUsuario), AppErrorDto> {
+        let mut s = self.sesion.lock().await.clone().ok_or_else(|| permiso_denegado("Inicia sesión para hacer esto"))?;
+        let repo = self.permisos_repo().await?;
+        let permisos = tpv_application::use_cases::permisos::usuario(repo.as_ref(), &s.id_usuario).await?;
+        // Una consulta HTTP puede terminar después de un logout o un cambio de usuario.
+        if !self.sesion.lock().await.as_ref().is_some_and(|actual| actual.id_usuario == s.id_usuario && actual.iniciada_en == s.iniciada_en) {
+            return Err(permiso_denegado("La sesión ha cambiado"));
+        }
+        s.rol = permisos.rol.clone();
+        Ok((s, permisos))
+    }
+
+    pub(crate) async fn exigir_permiso(&self, permiso: &str) -> Result<Sesion, AppErrorDto> {
+        Ok(self.exigir_permiso_con_contexto(permiso).await?.0)
+    }
+
+    pub(crate) async fn exigir_permiso_con_contexto(&self, permiso: &str) -> Result<(Sesion, tpv_contracts::permisos::AutorizacionUsuario), AppErrorDto> {
+        let (s, u) = self.autorizacion().await?;
+        if !tpv_domain::permisos::permite(&u.rol, &u.permisos, permiso) {
+            return Err(permiso_denegado("No tienes permiso para esta acción"));
+        }
+        Ok((s, u))
     }
 
     /// La sesión actual si su rol está entre los permitidos; si no, error.
@@ -599,6 +615,8 @@ impl AppState {
         *self.sesion.lock().await = None;
     }
 
+    repo_accessor!(permisos_repo, tpv_application::ports::permisos::PermisosRepository,
+        tpv_infra_sqlite::permisos::SqlitePermisosRepository, tpv_infra_http::permisos::HttpPermisosRepository);
     repo_accessor!(
         clientes_repo,
         ClientesRepository,
@@ -899,6 +917,8 @@ async fn set_device_mode(
     state: State<'_, AppState>,
     args: SetDeviceModeArgs,
 ) -> Result<String, AppErrorDto> {
+    // RI-70: una sesión no se traslada entre SQLite y otro backend/tenant.
+    state.cerrar_sesion().await;
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -1000,6 +1020,8 @@ async fn device_reset_mode(
     // no hay con quién iniciar sesión.
     state.exigir_rol_si_hay_sesion(&[ADMIN]).await?;
 
+    state.cerrar_sesion().await;
+
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -1041,7 +1063,14 @@ async fn device_reset_mode(
 
 /// RI-07: reconstruye una imagen en su formato real y devuelve su ruta relativa.
 #[tauri::command]
-async fn save_image(app: AppHandle, args: SaveImageArgs) -> Result<String, AppErrorDto> {
+async fn save_image(app: AppHandle, state: State<'_, AppState>, args: SaveImageArgs) -> Result<String, AppErrorDto> {
+    match args.subfolder.as_str() {
+        "logo" => { state.exigir_rol(&[ADMIN]).await?; },
+        "productos" | "categorias" => { state.exigir_permiso("catalogo.editar").await?; },
+        "proveedores" => { state.exigir_permiso("proveedores.gestionar").await?; },
+        _ => { state.sesion().await?; },
+    }
+
     let subfolder = normalize_required(&args.subfolder, "subfolder")?;
     if !is_safe_image_rel_path(&format!("images/{subfolder}/validacion.jpg")) {
         return Err("Carpeta de imagen no válida".into());
@@ -2338,6 +2367,9 @@ pub fn run() {
             // sincronización Main → nube (outbox de escrituras locales)
 
             commands::sync::sync_health,
+            commands::permisos::permisos_sesion,
+            commands::permisos::permisos_configuracion,
+            commands::permisos::permisos_guardar,
             commands::sync::sync_estado,
             commands::sync::sync_reintentar,
             commands::sync::sync_backfill_estado,
@@ -2581,9 +2613,12 @@ mod tests_sesion_y_permisos {
 
     use super::*;
 
-    fn estado() -> AppState {
+    async fn estado() -> AppState {
+        let dir = std::env::temp_dir().join(format!("tpv-gate-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
         AppState {
-            db: Arc::new(Mutex::new(None)),
+            db: Arc::new(Mutex::new(Some(db))),
             cloud: Arc::new(Mutex::new(None)),
             mode: Arc::new(Mutex::new(Some(DeviceMode::Tpv))),
             mode_sync: Arc::new(std::sync::RwLock::new(Some(DeviceMode::Tpv))),
@@ -2601,12 +2636,41 @@ mod tests_sesion_y_permisos {
         }
     }
 
+    async fn iniciar(st: &AppState, rol: &str) {
+        let db = st.db.lock().await.as_ref().unwrap().clone();
+        let w = db.write().await;
+        w.raw().execute("INSERT INTO Roles (ID_Rol,Nombre_Rol) VALUES (?1,?1) ON CONFLICT(Nombre_Rol) DO NOTHING", [rol]).await.unwrap();
+        w.raw().execute("INSERT INTO Usuarios (ID_Usuario,ID_Rol,Email,Password_Hash,Nombre,Estado) VALUES ('u-1',(SELECT ID_Rol FROM Roles WHERE Nombre_Rol=?1),'gate@test','hash','Gate','Activo') ON CONFLICT(ID_Usuario) DO UPDATE SET ID_Rol=excluded.ID_Rol", [rol]).await.unwrap();
+        drop(w);
+        st.iniciar_sesion(sesion_de(rol)).await;
+    }
+
+    #[tokio::test]
+    async fn desactivar_o_quitar_el_rol_revoca_la_sesion_abierta() {
+        let st = estado().await; iniciar(&st, ADMIN).await;
+        let db = st.db.lock().await.as_ref().unwrap().clone();
+        db.write().await.raw().execute("UPDATE Usuarios SET Estado='Inactivo' WHERE ID_Usuario='u-1'", ()).await.unwrap();
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+        assert!(st.sesion().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn cambiar_el_rol_revoca_al_admin_sin_cerrar_la_sesion() {
+        let st = estado().await; iniciar(&st, ADMIN).await;
+        let db = st.db.lock().await.as_ref().unwrap().clone();
+        db.write().await.raw().execute("UPDATE Usuarios SET ID_Rol=(SELECT ID_Rol FROM Roles WHERE Nombre_Rol='Camarero') WHERE ID_Usuario='u-1'", ()).await.unwrap();
+        assert_eq!(st.sesion().await.unwrap().rol, "Camarero");
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+        assert!(st.exigir_permiso("cuentas.cobros").await.is_ok());
+        assert!(st.exigir_permiso("stock.ajustar").await.is_err());
+    }
+
     /// Sin sesión no se pasa, y el error tiene que llegar con el código por el que ramifica el
     /// frontend: con un `internal` genérico, la UI no podría distinguir "no puedes" de "ha
     /// fallado" y ofrecería reintentar donde no hay nada que reintentar.
     #[tokio::test]
     async fn sin_sesion_se_deniega_con_su_codigo() {
-        let st = estado();
+        let st = estado().await;
 
         let e = st.sesion().await.unwrap_err();
         assert_eq!(e.code, tpv_contracts::errors::ErrorCode::PermisoDenegado);
@@ -2618,10 +2682,10 @@ mod tests_sesion_y_permisos {
     /// El caso que motiva el plan entero: identificarse no es autorizarse.
     #[tokio::test]
     async fn un_rol_que_no_toca_no_pasa_aunque_haya_sesion() {
-        let st = estado();
+        let st = estado().await;
 
         for rol in ["Camarero", "Cocinero", "Limpieza"] {
-            st.iniciar_sesion(sesion_de(rol)).await;
+            iniciar(&st, rol).await;
 
             // Está identificado: lo atribuible sí lo puede hacer (abrir el cajón para dar cambio).
             assert!(st.sesion().await.is_ok(), "{rol} debería estar identificado");
@@ -2639,7 +2703,7 @@ mod tests_sesion_y_permisos {
     /// cualquier fila de `Roles` que alguien escribiera de otra manera.
     #[tokio::test]
     async fn el_rol_se_compara_exacto() {
-        let st = estado();
+        let st = estado().await;
 
         for parecido in [
             "administrador",
@@ -2647,7 +2711,7 @@ mod tests_sesion_y_permisos {
             " Administrador",
             "Administrador ",
         ] {
-            st.iniciar_sesion(sesion_de(parecido)).await;
+            iniciar(&st, parecido).await;
             assert!(
                 st.exigir_rol(&[ADMIN]).await.is_err(),
                 "{parecido:?} no es el rol Administrador"
@@ -2657,8 +2721,8 @@ mod tests_sesion_y_permisos {
 
     #[tokio::test]
     async fn con_el_rol_correcto_pasa_y_dice_quien_es() {
-        let st = estado();
-        st.iniciar_sesion(sesion_de(ADMIN)).await;
+        let st = estado().await;
+        iniciar(&st, ADMIN).await;
 
         let s = st.exigir_rol(&[ADMIN]).await.expect("un admin debe pasar");
 
@@ -2672,8 +2736,8 @@ mod tests_sesion_y_permisos {
     /// permiso de la anterior cuando el TPV se queda desatendido.
     #[tokio::test]
     async fn cerrar_sesion_devuelve_el_gate_a_cero() {
-        let st = estado();
-        st.iniciar_sesion(sesion_de(ADMIN)).await;
+        let st = estado().await;
+        iniciar(&st, ADMIN).await;
         assert!(st.exigir_rol(&[ADMIN]).await.is_ok());
 
         st.cerrar_sesion().await;
@@ -2686,7 +2750,7 @@ mod tests_sesion_y_permisos {
     /// no puede fallar ni resucitar nada.
     #[tokio::test]
     async fn cerrar_sesion_es_idempotente() {
-        let st = estado();
+        let st = estado().await;
         st.cerrar_sesion().await;
         st.cerrar_sesion().await;
         assert!(st.sesion().await.is_err());
@@ -2696,9 +2760,9 @@ mod tests_sesion_y_permisos {
     /// con el permiso del primero.
     #[tokio::test]
     async fn iniciar_sesion_reemplaza_a_la_anterior() {
-        let st = estado();
-        st.iniciar_sesion(sesion_de(ADMIN)).await;
-        st.iniciar_sesion(sesion_de("Camarero")).await;
+        let st = estado().await;
+        iniciar(&st, ADMIN).await;
+        iniciar(&st, "Camarero").await;
 
         assert_eq!(st.sesion().await.unwrap().rol, "Camarero");
         assert!(st.exigir_rol(&[ADMIN]).await.is_err());
@@ -2712,19 +2776,19 @@ mod tests_sesion_y_permisos {
     /// poder activarse jamás.
     #[tokio::test]
     async fn sin_sesion_el_gate_blando_deja_pasar() {
-        let st = estado();
+        let st = estado().await;
         assert!(st.exigir_rol_si_hay_sesion(&[ADMIN]).await.is_ok());
     }
 
     /// Y con sesión sí manda, que es lo que cierra el camino de Configuración → Dispositivo.
     #[tokio::test]
     async fn con_sesion_el_gate_blando_exige_el_rol() {
-        let st = estado();
+        let st = estado().await;
 
-        st.iniciar_sesion(sesion_de("Camarero")).await;
+        iniciar(&st, "Camarero").await;
         assert!(st.exigir_rol_si_hay_sesion(&[ADMIN]).await.is_err());
 
-        st.iniciar_sesion(sesion_de(ADMIN)).await;
+        iniciar(&st, ADMIN).await;
         assert!(st.exigir_rol_si_hay_sesion(&[ADMIN]).await.is_ok());
     }
 }
@@ -2761,7 +2825,7 @@ mod tests_exenciones_del_gate {
     ];
 
     /// Marcas de que alguien ha metido el gate donde no puede estar.
-    const SENALES_DE_GATE: &[&str] = &["exigir_rol", "state.sesion()"];
+    const SENALES_DE_GATE: &[&str] = &["exigir_rol", "exigir_permiso", "state.sesion()"];
 
     #[test]
     fn la_replica_y_las_credenciales_no_se_exponen_a_la_webview() {
@@ -2784,8 +2848,8 @@ mod tests_exenciones_del_gate {
         ] {
             for comando in comandos {
                 let cuerpo = fuente.split(&format!("pub async fn {comando}(" )).nth(1).unwrap().split("#[tauri::command]").next().unwrap();
-                assert!(cuerpo.contains("state.sesion().await?"), "{comando} debe obtener el actor del backend");
-                assert!(cuerpo.contains("sesion.id_") || cuerpo.contains("state.sesion().await?.id_"));
+                assert!((cuerpo.contains("state.sesion().await?") || cuerpo.contains("state.exigir_permiso")), "{comando} debe obtener el actor del backend");
+                assert!(cuerpo.contains("sesion.id_") || (cuerpo.contains("state.sesion().await?.id_") || cuerpo.contains(".await?.id_")));
             }
         }
     }
@@ -2991,7 +3055,7 @@ mod tests_exenciones_del_gate {
                 }
                 vistos += 1;
                 assert!(
-                    bloque.contains("state.sesion()"),
+                    (bloque.contains("state.sesion()") || bloque.contains(r#"state.exigir_permiso("servicio.vender")"#)),
                     "{fichero}::{nombre} no saca el cobrador de la sesión (SEC-01/REV-17).\n\
                      Quién cobra no puede llegar en los argumentos: es el rastro con el que se \
                      investiga un descuadre del cajón."
@@ -3070,7 +3134,7 @@ mod tests_exenciones_del_gate {
             "cuentas_devolver_lineas",
         ] {
             assert!(
-                cuerpo(nombre).contains("exigir_rol(&[ADMIN, CAMARERO])"),
+                cuerpo(nombre).contains(r#"exigir_permiso("cuentas.cobros")"#),
                 "{nombre} es de los cobros y sus bajas: lo hace también el camarero"
             );
         }
@@ -3084,15 +3148,15 @@ mod tests_exenciones_del_gate {
         ] {
             let c = cuerpo(nombre);
             assert!(
-                c.contains("exigir_rol(&[ADMIN])") && !c.contains("CAMARERO"),
+                c.contains(r#"exigir_permiso("cuentas.gastos")"#) && !c.contains(r#""cuentas.cobros""#),
                 "{nombre} es del administrador"
             );
         }
         let previsualizar = cuerpo("cuentas_previsualizar_cambio");
         assert!(
             previsualizar
-                .contains("CambioCajaInput::AnularPago { .. } => state.exigir_rol(&[ADMIN, CAMARERO])")
-                && previsualizar.contains("_ => state.exigir_rol(&[ADMIN])"),
+                .contains(r#"CambioCajaInput::AnularPago { .. } => state.exigir_permiso("cuentas.cobros")"#)
+                && previsualizar.contains(r#"_ => state.exigir_permiso("cuentas.gastos")"#),
             "el aviso previo lo pide el camarero sólo para una baja"
         );
     }

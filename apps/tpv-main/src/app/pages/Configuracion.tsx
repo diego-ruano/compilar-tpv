@@ -23,6 +23,7 @@ import { Badge } from "../../features/configuracion/ui/Badge";
 import { TextInput } from "../../features/configuracion/ui/Inputs";
 
 // Sections
+import { Permisos } from "../../features/configuracion/sections/Permisos";
 import { Negocio } from "../../features/configuracion/sections/Negocio";
 import { Fiscal } from "../../features/configuracion/sections/Fiscal";
 import { Contacto } from "../../features/configuracion/sections/Contacto";
@@ -210,6 +211,7 @@ export default function Configuracion() {
             ];
         return [
             ...baseNavItems,
+                { key:"PERMISOS", title:"Permisos", desc:"Acciones permitidas por rol", keywords:["roles", "encargado", "permisos"] },
             {
                 key: "CONECTIVIDAD",
                 title: "Conectividad",
@@ -686,7 +688,8 @@ export default function Configuracion() {
                                     </div>
 
                                     <div key={animKey} className="cfg-animate">
-                                        {section === "NEGOCIO" ? (
+                                        {section === "PERMISOS" && isMain && <Permisos />}
+                        {section === "NEGOCIO" ? (
                                             <Negocio
                                                 darkMode={darkMode}
                                                 inputTone={inputTone}

@@ -791,13 +791,9 @@ impl LicensingService for LicensingAdapter {
    PairingAdapter
 ========================================================= */
 
-/// Este adaptador **ya no guarda nada en disco**: sus dos credenciales —el token de sesión de la
-/// Main y el del Handy— viven en el almacén de secretos de la plataforma desde que se movieron ahí
-/// (`secret_store`), así que no le queda estado que llevar. Se quedó con una `app_data_dir` dentro
-/// que nadie leía, y eso es lo que ha cazado clippy.
-///
-/// El **parámetro** del constructor se conserva a propósito: lo pasan quince sitios y quitarlo sería
-/// tocarlos todos para no ganar nada. Si algún día vuelve a hacer falta la ruta, está ahí.
+/// Las credenciales Main/Handy y la clave del dispositivo viven en el almacén de secretos.
+/// El directorio de datos permite leer el tenant de la licencia y el reloj de la nube al
+/// construir mensajes de firma específicos; el contexto autorizado no lo aporta la webview.
 pub struct PairingAdapter { app_data_dir: PathBuf }
 
 impl PairingAdapter {

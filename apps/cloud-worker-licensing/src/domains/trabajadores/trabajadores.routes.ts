@@ -20,6 +20,12 @@ export const trabajadoresRoutes = new Hono<Ctx>();
 
 trabajadoresRoutes.use("*", tenantAuth);
 
+trabajadoresRoutes.get("/permisos/:id", async (c) => {
+    const id = parseId(c.req.param("id"));
+    if (id == null) return badRequest(c, "id_usuario invalido");
+    return c.json(await tenantQuery(c, (db) => q.permisosUsuario(db, id)));
+});
+
 trabajadoresRoutes.get("/roles", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.roles(db))),
 );

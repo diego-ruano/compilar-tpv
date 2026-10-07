@@ -23,3 +23,5 @@ export function crearEsquemaTenant(sql: any): void {
 		}
 	}
 }
+
+// RI-70: el esquema compartido incluye Encargado y Roles_Permisos.

@@ -1,3 +1,4 @@
+import { z } from "zod";
 // src/domains/inventario/inventario.routes.ts
 //
 // Subrouter Hono del módulo de inventario. Se monta en /v1/inventario (index.ts).
@@ -115,13 +116,14 @@ inventarioRoutes.post("/categorias", cuerpo(S.upsertCategoriaSchema), async (c) 
 	return c.json({ id_categoria: id });
 });
 
-inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema.extend({ id_usuario: S.autorStockSchema })), async (c) => {
+inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema.extend({ id_usuario: S.autorStockSchema, conservar_precio: z.boolean().optional() })), async (c) => {
 	const datos = c.req.valid("json");
 	// RI-55: el stock suelto sólo cuenta al crear; por eso hay que saber si existe.
 	const esNuevo =
 		!datos.id_producto ||
 		(await tenantQuery(c, (db) => q.getProductoStockSuelto(db, datos.id_producto!))) === undefined;
-	const id = await apply(c, cmd.upsertProducto(datos, esNuevo, datos.id_usuario));
+	if (datos.conservar_precio && esNuevo) return c.json({error:"permiso_denegado"},403);
+    const id = await apply(c, cmd.upsertProducto(datos, esNuevo, datos.id_usuario, datos.conservar_precio));
 	return c.json({ id_producto: id });
 });
 

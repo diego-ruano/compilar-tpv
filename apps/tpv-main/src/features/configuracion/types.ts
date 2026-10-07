@@ -9,6 +9,7 @@ export type LicenseInfo = {
 
 export type SectionKey =
 	| "NEGOCIO"
+	| "PERMISOS"
 	/** FISCAL-01 (Veri*factu): datos del obligado, certificado y estado del envío a la AEAT. */
 	| "FISCAL"
 	| "CONTACTO"

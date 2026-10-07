@@ -5,7 +5,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../shared/stores/useAuth";
 import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
-import { entraEnCuentas, esAdmin } from "../shared/lib/permisos";
+import { esAdmin } from "../shared/lib/permisos";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
 import { fetchRecoveryStatus, fetchSetupPendiente } from "../features/login/loginApi";
 import Login from "./pages/Login";
@@ -15,8 +15,12 @@ import RecuperarDatos from "./pages/RecuperarDatos";
 // ✅ importa tu provider
 import { ToastProvider } from "../shared/toast";
 
+import { usePermisos } from "../shared/lib/usePermisos";
+import { toAppError } from "@tpv/client";
+
 function AppInner() {
     const role = useAuth((s) => s.role);
+    const permisos = usePermisos();
     const requiresSetup = useAuth((s) => s.requiresSetup);
     const location = useLocation();
     const marcarDatosPerdidos = useEstadoSync((s) => s.marcarDatosPerdidos);
@@ -97,31 +101,26 @@ function AppInner() {
     }
 
     const path = location.pathname.toLowerCase();
-    if (role === "Cocinero" && (path === "/" || path === "/ventarapida")) {
-        return <Navigate to="/Comandas" replace />;
-    }
-
-    // Rutas de administrador. El menu ya no las enseña a los demas, pero un menu no es un
-    // permiso: sin esto bastaria con escribir la URL. El candado de verdad vive en los comandos
-    // Tauri (SEC-01) y, para la Handy, en el worker; esto solo evita que la pantalla se abra —y
-    // que quien llegue a ella la vea entera rota a base de "permiso denegado".
-    //
-    // Configuracion y las fichas de trabajador se añaden con SEC-01: sus comandos pasaron a exigir
-    // rol, asi que dejarlas abiertas era ofrecer una pantalla que no funciona. La ficha ademas es la
-    // unica que devuelve la PII del personal.
-    //
-    // Cuentas tiene su propio candado: entra tambien el camarero, que ve los cobros y sus bajas.
-    if (role && !entraEnCuentas(role) && path.startsWith("/cuentas")) {
-        return <Navigate to="/" replace />;
-    }
-    const RUTAS_DE_ADMIN = [
-        "/configuracion",
-        "/trabajadores/nuevo-trabajador",
-        "/trabajadores/editar",
+    if (permisos.isPending) return <p className="p-4">Cargando permisos…</p>;
+    if (permisos.isError) return <div className="p-4"><p>{toAppError(permisos.error).message}</p><button onClick={() => void permisos.refetch()}>Reintentar</button><button onClick={() => useAuth.getState().logout()}>Cerrar sesión</button></div>;
+    const destino = permisos.puede("servicio.vender") ? "/VentaRapida" : permisos.puede("servicio.cocina") ? "/Comandas" : permisos.puede("tareas.propias") ? "/Tareas" : "/Inventario";
+    if ((path === "/" || path === "/ventarapida") && !permisos.puede("servicio.vender")) return <Navigate to={destino} replace />;
+    const reglas: [string, boolean][] = [
+        ["/configuracion", esAdmin(permisos.rol)],
+        ["/trabajadores/nuevo-trabajador", esAdmin(permisos.rol)],
+        ["/trabajadores/editar", esAdmin(permisos.rol)],
+        ["/mesas/editar", permisos.puede("plano.gestionar")],
+        ["/mesas", permisos.puede("servicio.vender")],
+        ["/comandas", permisos.puede("servicio.cocina") || permisos.puede("servicio.vender")],
+        ["/reservas", permisos.puede("reservas.gestionar")],
+        ["/clientes", permisos.puede("clientes.gestionar")],
+        ["/proveedores", permisos.puede("proveedores.gestionar") || permisos.puede("pedidos.gestionar")],
+        ["/estadisticas", permisos.puede("estadisticas.ver")],
+        ["/cuentas", permisos.puede("cuentas.cobros") || permisos.puede("cuentas.gastos") || permisos.puede("caja.cerrar")],
+        ["/tareas", permisos.puede("tareas.propias") || permisos.puede("tareas.gestionar")],
     ];
-    if (role && !esAdmin(role) && RUTAS_DE_ADMIN.some((r) => path.startsWith(r))) {
-        return <Navigate to="/" replace />;
-    }
+    const regla = reglas.find(([ruta]) => path.startsWith(ruta));
+    if (regla && !regla[1]) return <Navigate to={destino} replace />;
 
     return (
         <Layout>

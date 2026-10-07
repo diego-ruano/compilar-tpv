@@ -1,3 +1,4 @@
+import { usePermisos } from "../../../shared/lib/usePermisos";
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -51,6 +52,7 @@ export default function AddProductModal({
   categoriaPreseleccionadaId: string | null;
 }) {
   const toast = useToast();
+  const { puede } = usePermisos();
 
   // Datos de referencia del formulario, cacheados (sólo se cargan con el modal abierto).
   const categoriasQuery = useCategorias();
@@ -176,7 +178,7 @@ export default function AddProductModal({
 
       const stockInicial = numeroOpcional(stockActual) ?? 0;
 
-      if (stockInicial > 0) {
+      if (stockInicial > 0 && puede("stock.recibir")) {
         await createLote.mutateAsync({
           id_producto: nuevoProductoId,
           codigo_lote: buildInitialLoteCode(nuevoProductoId),
@@ -290,7 +292,7 @@ export default function AddProductModal({
           value={stockActual}
           onChange={(e) => setStockActual(e.target.value)}
           className="border border-negro/20 rounded-xl px-3 py-2 sm:py-2.5 text-sm sm:text-base"
-          disabled={loading}
+          disabled={loading || !puede("stock.recibir")}
         />
 
         <input

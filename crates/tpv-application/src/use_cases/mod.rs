@@ -31,3 +31,5 @@ pub mod venta_rapida;
 pub mod verifactu;
 
 pub mod replicacion;
+
+pub mod permisos;

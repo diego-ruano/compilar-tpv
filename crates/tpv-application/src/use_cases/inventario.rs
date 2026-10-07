@@ -102,6 +102,7 @@ pub async fn upsert_producto(
     repo: &R,
     id_usuario: &str,
     input: UpsertProductoInput,
+    autorizacion: &tpv_contracts::permisos::AutorizacionUsuario,
 ) -> AppResult<UpsertProductoResult> {
     let producto = ProductoUpsert::validar(
         input.id_producto,
@@ -119,7 +120,14 @@ pub async fn upsert_producto(
         input.ids_alergenos,
     )
     .map_err(AppError::validation)?;
-    let id_producto = repo.upsert_producto(id_usuario, producto).await?;
+    let precios = tpv_domain::permisos::permite(&autorizacion.rol, &autorizacion.permisos, "catalogo.precios");
+    let recibir = tpv_domain::permisos::permite(&autorizacion.rol, &autorizacion.permisos, "stock.recibir");
+    let existente = match producto.id.as_deref() { Some(id) => repo.get_producto(id).await?, None => None };
+    let cambia_precio = existente.as_ref().is_none_or(|p| p.precio_venta != producto.precio_venta || p.iva_percent != producto.iva_percent);
+    if (!precios && cambia_precio) || (!recibir && existente.is_none() && producto.stock_suelto.is_some_and(|v| v != 0.0)) {
+        return Err(AppError::coded(tpv_contracts::errors::ErrorCode::PermisoDenegado, "No puedes cambiar precios o dar de alta estas existencias"));
+    }
+    let id_producto = repo.upsert_producto_autorizado(id_usuario, producto, precios, recibir).await?;
     Ok(UpsertProductoResult { id_producto })
 }
 

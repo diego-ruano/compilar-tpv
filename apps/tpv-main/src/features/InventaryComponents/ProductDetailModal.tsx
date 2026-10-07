@@ -1,3 +1,4 @@
+import { usePermisos } from "../../shared/lib/usePermisos";
 import React, { useEffect, useMemo, useState } from "react";
 import {
   X,
@@ -91,6 +92,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   // Carga de detalle y lotes vía TanStack Query (sólo activa con el modal abierto).
   const activeId = open ? productId : null;
   const detalleQuery = useProductoDetalle(activeId);
+  const { puede } = usePermisos();
   const lotesQuery = useLotesByProducto(activeId);
 
   const p: ProductoDetalleDto | null = detalleQuery.data ?? null;
@@ -322,6 +324,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     <button
                       type="button"
                       className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface transition text-xs font-extrabold cursor-pointer"
+                      disabled={!puede("stock.ajustar")}
                       onClick={() => setAjustando({ suelto: true })}
                     >
                       Ajustar
@@ -407,6 +410,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                       <button
                         type="button"
+                        disabled={!puede("stock.recibir")}
                         onClick={() => {
                           setEditingLote(null);
                           setAddLoteOpen(true);
@@ -447,14 +451,16 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                                   <button
                                     type="button"
                                     className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
-                                    onClick={() => setAjustando({ lote: l })}
+                                    disabled={!puede("stock.ajustar")}
+                      onClick={() => setAjustando({ lote: l })}
                                   >
                                     Ajustar
                                   </button>
                                   <button
                                     type="button"
                                     className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
-                                    onClick={() => {
+                                    disabled={!puede("stock.editar_lotes")}
+                        onClick={() => {
                                       setEditingLote(l);
                                       setAddLoteOpen(true);
                                     }}
@@ -477,6 +483,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
               <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
                 <button
                   type="button"
+                  disabled={!puede("catalogo.editar")}
                   onClick={() => onEdit?.(p.ID_Producto)}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-accent py-3 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                 >
@@ -486,7 +493,8 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                 <button
                   type="button"
-                  onClick={() => {
+                  disabled={!puede("stock.recibir")}
+                        onClick={() => {
                     setEditingLote(null);
                     setAddLoteOpen(true);
                   }}
@@ -498,6 +506,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                 <button
                   type="button"
+                  disabled={!puede("catalogo.borrar")}
                   onClick={() => setConfirmDelete(true)}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-danger/30 bg-danger-soft py-3 font-extrabold text-danger transition hover:opacity-90 cursor-pointer sm:col-span-2"
                 >

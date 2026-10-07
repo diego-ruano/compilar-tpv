@@ -65,6 +65,7 @@ pub async fn horarios_get_asignaciones_semana(
     state: State<'_, AppState>,
     args: HorariosSemanaArgs,
 ) -> Result<Vec<AsignacionRow>, AppErrorDto> {
+    state.sesion().await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_asignaciones_semana(repo.as_ref(), args).await?)
 }
@@ -98,6 +99,7 @@ pub async fn horarios_create_asignacion(
     state: State<'_, AppState>,
     args: AsignacionCreateInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("horarios.gestionar").await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::create_asignacion(repo.as_ref(), args).await?)
 }
@@ -107,6 +109,7 @@ pub async fn horarios_update_asignacion(
     state: State<'_, AppState>,
     args: AsignacionUpdateInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("horarios.gestionar").await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::update_asignacion(repo.as_ref(), args).await?)
 }
@@ -116,6 +119,7 @@ pub async fn horarios_delete_asignacion(
     state: State<'_, AppState>,
     args: AsignacionDeleteInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("horarios.gestionar").await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::delete_asignacion(repo.as_ref(), args).await?)
 }
@@ -125,6 +129,7 @@ pub async fn horarios_copy_semana_asignaciones(
     state: State<'_, AppState>,
     args: CopySemanaInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("horarios.gestionar").await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::copy_semana_asignaciones(repo.as_ref(), args).await?)
 }
@@ -134,6 +139,7 @@ pub async fn horarios_set_predeterminado_desde_semana(
     state: State<'_, AppState>,
     args: SetPredeterminadoInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("horarios.gestionar").await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::set_predeterminado_desde_semana(repo.as_ref(), args).await?)
 }

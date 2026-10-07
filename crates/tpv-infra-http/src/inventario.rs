@@ -138,32 +138,11 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
-    async fn upsert_producto(&self, id_usuario: &str, producto: ProductoUpsert) -> AppResult<String> {
-        let generado = producto.id.is_none().then_some("id_producto");
-        let id_producto = producto
-            .id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let body = json!({
-            "id_usuario": id_usuario,
-            "id_producto": id_producto,
-            "id_categoria": producto.id_categoria,
-            "id_proveedor": producto.id_proveedor,
-            "nombre": producto.nombre,
-            "precio_venta": producto.precio_venta,
-            "stock_minimo": producto.stock_minimo,
-            "unidad_medida": producto.unidad_medida,
-            "nombre_imagen": producto.nombre_imagen,
-            "ruta_imagen": producto.ruta_imagen,
-            "cantidad_pedido_esperada": producto.cantidad_pedido_esperada,
-            "ids_alergenos": producto.ids_alergenos,
-        });
-        // En el reintento de un alta incierta (RI-64) el id que vale es el del primer envío.
-        let (_, enviado): (JsonValue, _) = self
-            .client
-            .post_json_creando("/v1/inventario/productos", &body, generado)
-            .await?;
-        Ok(enviado.unwrap_or(id_producto))
+    async fn upsert_producto(&self, actor: &str, p: ProductoUpsert) -> AppResult<String> {
+        self.guardar_producto(actor,p,true,true).await
+    }
+    async fn upsert_producto_autorizado(&self, actor: &str, p: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String> {
+        self.guardar_producto(actor,p,precios,recibir).await
     }
 
     async fn create_lote(&self, id_usuario: &str, lote: LoteNuevo) -> AppResult<()> {
@@ -241,4 +220,39 @@ impl InventarioRepository for HttpInventarioRepository {
             .await?;
         Ok(())
     }
+}
+
+impl HttpInventarioRepository {
+    async fn guardar_producto(&self, id_usuario: &str, producto: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String> {
+        let generado = producto.id.is_none().then_some("id_producto");
+        let id_producto = producto
+            .id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+        let body = json!({
+            "id_usuario": id_usuario,
+            "conservar_precio": !precios,
+            "id_producto": id_producto,
+            "id_categoria": producto.id_categoria,
+            "id_proveedor": producto.id_proveedor,
+            "nombre": producto.nombre,
+            "precio_venta": producto.precio_venta,
+            "stock_minimo": producto.stock_minimo,
+            "unidad_medida": producto.unidad_medida,
+            "nombre_imagen": producto.nombre_imagen,
+            "ruta_imagen": producto.ruta_imagen,
+            "cantidad_pedido_esperada": producto.cantidad_pedido_esperada,
+            "iva_percent": producto.iva_percent,
+            // Sin capacidad de recepción tampoco se introduce stock si desapareció el producto.
+            "stock_suelto": if recibir { producto.stock_suelto } else { None },
+            "ids_alergenos": producto.ids_alergenos,
+        });
+        // En el reintento de un alta incierta (RI-64) el id que vale es el del primer envío.
+        let (_, enviado): (JsonValue, _) = self
+            .client
+            .post_json_creando("/v1/inventario/productos", &body, generado)
+            .await?;
+        Ok(enviado.unwrap_or(id_producto))
+    }
+
 }

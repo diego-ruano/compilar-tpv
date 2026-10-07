@@ -1,3 +1,4 @@
+import { usePermisos } from "../../shared/lib/usePermisos";
 // Mesas.tsx
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -33,9 +34,10 @@ export default function Mesas() {
 
     const { ref: mapBoxRef, size: mapSize } = useElementSize<HTMLDivElement>();
 
-    const { role, idUsuario } = useAuth();
-    const esCocinero = role === "Cocinero";
-    const canEditMesas = !(role === "Cocinero" || role === "Camarero");
+    const { idUsuario } = useAuth();
+    const { puede } = usePermisos();
+    const esCocinero = !puede("servicio.vender") && puede("servicio.cocina");
+    const canEditMesas = puede("plano.gestionar");
 
     // Layout/meta cacheados con TanStack Query (se recargan vía refetch).
     // Se deshabilitan mientras el modal del ticket está abierto: el floor view

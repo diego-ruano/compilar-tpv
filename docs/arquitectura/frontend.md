@@ -20,8 +20,7 @@ src/
 ## Hablar con el backend
 
 - **Todo pasa por `invokeClient`** de `@tpv/client` (`packages/client/src/invokeClient.ts`), que envuelve
-  `invoke()`. En la Main el frontend no hace `fetch` a la nube para datos de negocio; el único canal
-  directo es el WebSocket ([sincronizacion.md](sincronizacion.md)).
+  `invoke()`. En la Main el frontend no hace `fetch` a la nube para datos de negocio; el WebSocket Main vive también en Rust; la Handy escucha el WebSocket de avisos ([sincronizacion.md](sincronizacion.md)).
 - **Los tipos vienen de `@tpv/contracts`**, generados por ts-rs desde los DTO de
   `crates/tpv-contracts` ([../decisiones/0001-monorepo-y-arquitectura-hexagonal.md](../decisiones/0001-monorepo-y-arquitectura-hexagonal.md)).
 - **Un `*Apis.ts` no redeclara tipos ni «normaliza» lo que vuelve**: recibe el `Input` generado y devuelve
@@ -74,8 +73,8 @@ El dinero es un entero de céntimos de la base a la pantalla
 
 ## Permisos en la interfaz
 
-`ROL_ADMIN` vive en `shared/lib/permisos.ts`. La NavBar esconde lo que no toca y las rutas de
-administrador rebotan; el gate de verdad está en los comandos ([permisos.md](permisos.md)). La sesión se
+`usePermisos` consulta las concesiones efectivas de Rust. La NavBar, rutas y acciones reflejan esas
+capacidades; Configuración → Permisos edita roles desde Main. El gate de verdad está en los comandos ([permisos.md](permisos.md)). La sesión se
 cierra a los 10 minutos sin actividad (`useInactivityLogout`) y `AppBoot` hace `logout` al arrancar.
 
 ## CSP

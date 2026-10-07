@@ -54,6 +54,11 @@ function aplicar(env: any, command: any) {
 }
 
 describe("las tablas fiscales sólo las escribe la Main", () => {
+    it("RI-70: la API de la Handy no puede modificar concesiones", async () => {
+        const { env, seLlamo } = entorno();
+        await expect(aplicar(env,{type:"tenantDb.exec",payload:{sql:"DELETE FROM Roles_Permisos WHERE ID_Rol=?",args:["rol"]}})).rejects.toMatchObject({status:403});
+        expect(seLlamo()).toBe(false);
+    });
 	it("rechaza un INSERT en Registros_Facturacion (exec suelto)", async () => {
 		const { env, seLlamo } = entorno();
 		await expect(

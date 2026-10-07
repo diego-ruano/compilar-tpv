@@ -12,6 +12,7 @@ use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
 pub async fn reservas_get_meta(state: State<'_, AppState>) -> Result<ReservasMetaDto, AppErrorDto> {
+    state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
     Ok(uc::get_meta(repo.as_ref()).await?)
 }
@@ -21,6 +22,7 @@ pub async fn reservas_get_mes(
     state: State<'_, AppState>,
     args: ReservasGetMesArgs,
 ) -> Result<Vec<ReservaDto>, AppErrorDto> {
+    state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
     Ok(uc::get_mes(repo.as_ref(), args).await?)
 }
@@ -30,6 +32,7 @@ pub async fn reservas_save(
     state: State<'_, AppState>,
     args: ReservaSaveInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
     let notifier = state.notifier().await.ok();
     Ok(uc::guardar(repo.as_ref(), notifier.as_deref(), args).await?)
@@ -41,6 +44,7 @@ pub async fn reservas_buscar_cliente(
     state: State<'_, AppState>,
     args: ReservaBuscarClienteArgs,
 ) -> Result<Option<ClienteCoincidente>, AppErrorDto> {
+    state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
     Ok(uc::buscar_cliente(repo.as_ref(), args).await?)
 }
@@ -50,6 +54,7 @@ pub async fn reservas_delete(
     state: State<'_, AppState>,
     args: ReservaDeleteInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
     Ok(uc::eliminar(repo.as_ref(), args).await?)
 }

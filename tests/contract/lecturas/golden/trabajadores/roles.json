@@ -12,6 +12,10 @@
     "Nombre_Rol": "Cocinero"
   },
   {
+    "ID_Rol": "00000000-0000-7000-8000-000000000005",
+    "Nombre_Rol": "Encargado"
+  },
+  {
     "ID_Rol": "00000000-0000-7000-8000-000000000004",
     "Nombre_Rol": "Limpieza"
   },

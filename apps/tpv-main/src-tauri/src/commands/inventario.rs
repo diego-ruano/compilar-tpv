@@ -24,6 +24,7 @@ pub async fn inventario_create_categoria(
     state: State<'_, AppState>,
     args: UpsertCategoriaInput,
 ) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("catalogo.editar").await?;
     let repo = state.inventario_repo().await?;
     Ok(uc::create_categoria(repo.as_ref(), args).await?)
 }
@@ -76,6 +77,7 @@ pub async fn inventario_delete_producto(
     state: State<'_, AppState>,
     args: IdProductoArgs,
 ) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("catalogo.borrar").await?;
     let repo = state.inventario_repo().await?;
     Ok(uc::delete_producto(repo.as_ref(), args.id_producto).await?)
 }
@@ -85,9 +87,9 @@ pub async fn inventario_upsert_producto(
     state: State<'_, AppState>,
     args: UpsertProductoInput,
 ) -> Result<UpsertProductoResult, AppErrorDto> {
-    let sesion = state.sesion().await?;
+    let (sesion, permisos) = state.exigir_permiso_con_contexto("catalogo.editar").await?;
     let repo = state.inventario_repo().await?;
-    Ok(uc::upsert_producto(repo.as_ref(), &sesion.id_usuario, args).await?)
+    Ok(uc::upsert_producto(repo.as_ref(), &sesion.id_usuario, args, &permisos).await?)
 }
 
 #[tauri::command]
@@ -104,7 +106,7 @@ pub async fn inventario_create_lote(
     state: State<'_, AppState>,
     args: CreateLoteInput,
 ) -> Result<String, AppErrorDto> {
-    let sesion = state.sesion().await?;
+    let sesion = state.exigir_permiso("stock.recibir").await?;
     let repo = state.inventario_repo().await?;
     Ok(uc::create_lote(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
@@ -114,6 +116,7 @@ pub async fn inventario_update_lote(
     state: State<'_, AppState>,
     args: UpdateLoteInput,
 ) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("stock.editar_lotes").await?;
     let repo = state.inventario_repo().await?;
     Ok(uc::update_lote(repo.as_ref(), args).await?)
 }
@@ -123,7 +126,7 @@ pub async fn inventario_ajustar_lote(
     state: State<'_, AppState>,
     args: AjusteLoteInput,
 ) -> Result<String, AppErrorDto> {
-    let sesion = state.sesion().await?;
+    let sesion = state.exigir_permiso("stock.ajustar").await?;
     let repo = state.inventario_repo().await?;
     Ok(uc::ajustar_lote(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
@@ -134,7 +137,7 @@ pub async fn inventario_ajustar_stock_suelto(
     state: State<'_, AppState>,
     args: AjusteStockSueltoInput,
 ) -> Result<String, AppErrorDto> {
-    let sesion = state.sesion().await?;
+    let sesion = state.exigir_permiso("stock.ajustar").await?;
     let repo = state.inventario_repo().await?;
     Ok(uc::ajustar_stock_suelto(repo.as_ref(), &sesion.id_usuario, args).await?)
 }

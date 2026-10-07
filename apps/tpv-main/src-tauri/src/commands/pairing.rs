@@ -77,8 +77,9 @@ fn ruta_de_administracion(path: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn handy_set_token(app: AppHandle, args: HandySetTokenArgs) -> Result<String, AppErrorDto> {
+pub async fn handy_set_token(app: AppHandle, state: State<'_, AppState>, args: HandySetTokenArgs) -> Result<String, AppErrorDto> {
     let service = svc(&app)?;
+    state.cerrar_sesion().await;
     uc::handy_set_token(&service, args)?;
 
     // La etiqueta de Sentry sale del token, y `setup()` sólo la lee al arrancar: una Handy recién

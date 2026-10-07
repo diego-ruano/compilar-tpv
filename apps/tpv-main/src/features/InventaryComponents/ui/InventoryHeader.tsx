@@ -1,5 +1,6 @@
 // components/inventario/InventoryHeader.tsx
 import React from "react";
+import { usePermisos } from "../../../shared/lib/usePermisos";
 import { Package, ArrowLeft, Plus, FolderPlus } from "lucide-react";
 
 export default function InventoryHeader({
@@ -15,6 +16,7 @@ export default function InventoryHeader({
     onNewCategory: () => void;
     onNewProduct: () => void;
 }) {
+    const { puede } = usePermisos();
     return (
         <div className="flex w-full flex-col gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm sm:gap-4 sm:p-4">
             <div className="flex flex-col items-stretch gap-3 xs:flex-row xs:items-center xs:justify-between">
@@ -44,6 +46,7 @@ export default function InventoryHeader({
                 {!categoriaSeleccionada ? (
                     <button
                         type="button"
+                        disabled={!puede("catalogo.editar")}
                         onClick={onNewCategory}
                         className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto"
                     >
@@ -53,6 +56,7 @@ export default function InventoryHeader({
                 ) : (
                     <button
                         type="button"
+                        disabled={!puede("catalogo.editar") || !puede("catalogo.precios")}
                         onClick={onNewProduct}
                         className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto"
                     >

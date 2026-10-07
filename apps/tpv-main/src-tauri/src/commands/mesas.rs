@@ -25,6 +25,7 @@ pub async fn save_layout(
     state: State<'_, AppState>,
     args: MesasSaveLayoutInput,
 ) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("plano.gestionar").await?;
     let repo = state.mesas_repo().await?;
     uc::save_layout(repo.as_ref(), args).await?;
     Ok("OK".to_string())
@@ -43,6 +44,7 @@ pub async fn set_reserva_estado(
     state: State<'_, AppState>,
     args: MesasSetReservaEstadoInput,
 ) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.mesas_repo().await?;
     uc::set_reserva_estado(repo.as_ref(), args).await?;
     Ok("OK".to_string())
@@ -65,7 +67,7 @@ pub async fn abrir_comanda(
     mut args: MesasAbrirComandaInput,
 ) -> Result<Option<ComandaRow>, AppErrorDto> {
     // RI-28: la atribución procede de la sesión del backend.
-    let sesion = state.sesion().await?;
+    let sesion = state.exigir_permiso("servicio.vender").await?;
     args.id_usuario = Some(sesion.id_usuario);
     args.id_trabajador = sesion.id_trabajador;
     let repo = state.mesas_repo().await?;
@@ -78,7 +80,7 @@ pub async fn comanda_set_trabajador_if_null(
     mut args: MesasComandaSetTrabajadorInput,
 ) -> Result<bool, AppErrorDto> {
     // RI-28: la atribución procede de la sesión del backend.
-    let sesion = state.sesion().await?;
+    let sesion = state.exigir_permiso("servicio.vender").await?;
     args.id_usuario = Some(sesion.id_usuario);
     args.id_trabajador = sesion.id_trabajador;
     let repo = state.mesas_repo().await?;
@@ -100,7 +102,7 @@ pub async fn add_linea_comanda(
     mut args: MesasAddLineaComandaInput,
 ) -> Result<Vec<MesaLineaComandaRow>, AppErrorDto> {
     // RI-28: la atribución procede de la sesión del backend.
-    let sesion = state.sesion().await?;
+    let sesion = state.exigir_permiso("servicio.vender").await?;
     args.id_usuario = Some(sesion.id_usuario);
     args.id_trabajador = sesion.id_trabajador;
     let repo = state.mesas_repo().await?;
@@ -152,6 +154,7 @@ pub async fn remove_one_pending_detalle(
     state: State<'_, AppState>,
     args: MesasRemoveOnePendingDetalleInput,
 ) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
     let repo = state.mesas_repo().await?;
     uc::remove_one_pending_detalle(repo.as_ref(), args).await?;
     Ok("OK".to_string())
@@ -162,6 +165,7 @@ pub async fn delete_detalle(
     state: State<'_, AppState>,
     args: MesasDeleteDetalleInput,
 ) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
     let repo = state.mesas_repo().await?;
     uc::delete_detalle(repo.as_ref(), args).await?;
     Ok("OK".to_string())
@@ -172,6 +176,7 @@ pub async fn update_detalle_nota(
     state: State<'_, AppState>,
     args: MesasUpdateDetalleNotaInput,
 ) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
     let repo = state.mesas_repo().await?;
     uc::update_detalle_nota(repo.as_ref(), args).await?;
     Ok("OK".to_string())
@@ -183,7 +188,7 @@ pub async fn cobrar_detalles(
     args: MesasCobrarDetallesInput,
 ) -> Result<String, AppErrorDto> {
     // REV-17: quién cobra sale de la sesión. Ver `cobrar_venta_rapida`.
-    let sesion = state.sesion().await?;
+    let sesion = state.exigir_permiso("servicio.vender").await?;
     let repo = state.mesas_repo().await?;
     // Devuelve el id del pago: con él la pantalla pide su ticket (RI-29).
     Ok(uc::cobrar_detalles(repo.as_ref(), &sesion.id_usuario, args).await?)
@@ -195,6 +200,7 @@ pub async fn cobrar_detalles(
 pub async fn kitchen_list_today_pending(
     state: State<'_, AppState>,
 ) -> Result<Vec<KitchenRow>, AppErrorDto> {
+    state.exigir_permiso("servicio.cocina").await?;
     let repo = state.mesas_repo().await?;
     Ok(uc::kitchen_list_today_pending(repo.as_ref()).await?)
 }
@@ -205,7 +211,7 @@ pub async fn kitchen_set_line_state(
     mut args: MesasKitchenSetLineStateInput,
 ) -> Result<String, AppErrorDto> {
     // RI-28: la atribución procede de la sesión del backend.
-    let sesion = state.sesion().await?;
+    let sesion = state.exigir_permiso("servicio.cocina").await?;
     args.id_usuario_cocinero = sesion.id_usuario;
     let repo = state.mesas_repo().await?;
     uc::kitchen_set_line_state(repo.as_ref(), args).await?;

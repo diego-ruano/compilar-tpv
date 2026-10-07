@@ -1,12 +1,8 @@
 //! Comandos Tauri de cuentas/caja (capa fina hexagonal).
 //!
-//! SEC-01: **la sección es de administrador**, lecturas incluidas (`docs/arquitectura/permisos.md`):
-//! el gate va en la ruta del frontend y, sobre todo, en estos comandos. El libro de caja dice
-//! cuánto se factura y cuánto se gasta; esconderlo del menú no es esconderlo.
-//!
-//! La excepción son **los cobros y sus bajas**, que también hace el camarero: la lista de cobros,
-//! el aviso previo de una baja, la baja misma (por error o devolución) y devolver parte de un cobro. Es lo que pasa a mitad de
-//! servicio —el cliente que vuelve a por su dinero— sin el encargado delante.
+//! RI-70: cobros/devoluciones exigen `cuentas.cobros`; gastos, totales y correcciones de
+//! pagos, `cuentas.gastos`. Los cierres tienen su capacidad propia (`caja.cerrar`).
+//! El gate se comprueba en Rust con las concesiones vigentes; la interfaz refleja esas capacidades.
 //!
 //! CAJA-01: los que tocan un apunte ya no se niegan por fecha. Pasan por `rectificacion_caja`, que
 //! rectifica el cierre ya hecho al que pertenezca el apunte. El aviso previo lo pide la pantalla con
@@ -23,7 +19,7 @@ use tpv_contracts::cuentas::{
     DevolucionDto, DevolverLineasInput, PaginaEntradas, PaginaSalidas, ResumenCajaDto,
     UpdateGastoInput, UpdatePagoInput,
 };
-use crate::{AppState, ADMIN, CAMARERO};
+use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
@@ -31,7 +27,7 @@ pub async fn cuentas_get_entradas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
 ) -> Result<PaginaEntradas, AppErrorDto> {
-    state.exigir_rol(&[ADMIN, CAMARERO]).await?;
+    state.exigir_permiso("cuentas.cobros").await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_entradas(repo.as_ref(), args).await?)
 }
@@ -41,7 +37,7 @@ pub async fn cuentas_get_salidas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
 ) -> Result<PaginaSalidas, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
+    state.exigir_permiso("cuentas.gastos").await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_salidas(repo.as_ref(), args).await?)
 }
@@ -51,7 +47,7 @@ pub async fn cuentas_get_resumen(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
 ) -> Result<ResumenCajaDto, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
+    state.exigir_permiso("cuentas.gastos").await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_resumen(repo.as_ref(), args).await?)
 }
@@ -66,8 +62,8 @@ pub async fn cuentas_previsualizar_cambio(
     args: CambioCajaInput,
 ) -> Result<ImpactoCajaDto, AppErrorDto> {
     match args {
-        CambioCajaInput::AnularPago { .. } => state.exigir_rol(&[ADMIN, CAMARERO]).await?,
-        _ => state.exigir_rol(&[ADMIN]).await?,
+        CambioCajaInput::AnularPago { .. } => state.exigir_permiso("cuentas.cobros").await?,
+        _ => state.exigir_permiso("cuentas.gastos").await?,
     };
     let cierres = state.cierre_caja_repo().await?;
     Ok(rect::previsualizar(cierres.as_ref(), &args).await?)
@@ -80,7 +76,7 @@ pub async fn cuentas_create_gasto(
     motivo_rectificacion: Option<String>,
 ) -> Result<bool, AppErrorDto> {
     // Quién registra el gasto sale de la sesión: va al historial de caja (CUENTA-07).
-    let sesion = state.exigir_rol(&[ADMIN]).await?;
+    let sesion = state.exigir_permiso("cuentas.gastos").await?;
     let cuentas = state.cuentas_repo().await?;
     let cierres = state.cierre_caja_repo().await?;
     Ok(rect::crear_gasto(
@@ -99,7 +95,7 @@ pub async fn cuentas_update_gasto(
     args: UpdateGastoInput,
     motivo_rectificacion: Option<String>,
 ) -> Result<bool, AppErrorDto> {
-    let sesion = state.exigir_rol(&[ADMIN]).await?;
+    let sesion = state.exigir_permiso("cuentas.gastos").await?;
     let cuentas = state.cuentas_repo().await?;
     let cierres = state.cierre_caja_repo().await?;
     Ok(rect::editar_gasto(
@@ -118,7 +114,7 @@ pub async fn cuentas_delete_gasto(
     args: DeleteGastoInput,
     motivo_rectificacion: Option<String>,
 ) -> Result<bool, AppErrorDto> {
-    let sesion = state.exigir_rol(&[ADMIN]).await?;
+    let sesion = state.exigir_permiso("cuentas.gastos").await?;
     let cuentas = state.cuentas_repo().await?;
     let cierres = state.cierre_caja_repo().await?;
     Ok(rect::borrar_gasto(
@@ -137,7 +133,7 @@ pub async fn cuentas_update_pago(
     args: UpdatePagoInput,
     motivo_rectificacion: Option<String>,
 ) -> Result<bool, AppErrorDto> {
-    let sesion = state.exigir_rol(&[ADMIN]).await?;
+    let sesion = state.exigir_permiso("cuentas.gastos").await?;
     let cuentas = state.cuentas_repo().await?;
     let cierres = state.cierre_caja_repo().await?;
     Ok(rect::editar_pago(
@@ -157,7 +153,7 @@ pub async fn cuentas_lineas_devolubles(
     state: State<'_, AppState>,
     id_pago: String,
 ) -> Result<CobroDevolubleDto, AppErrorDto> {
-    state.exigir_rol(&[ADMIN, CAMARERO]).await?;
+    state.exigir_permiso("cuentas.cobros").await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::lineas_devolubles(repo.as_ref(), &id_pago).await?)
 }
@@ -171,7 +167,7 @@ pub async fn cuentas_devolver_lineas(
     state: State<'_, AppState>,
     args: DevolverLineasInput,
 ) -> Result<DevolucionDto, AppErrorDto> {
-    let sesion = state.exigir_rol(&[ADMIN, CAMARERO]).await?;
+    let sesion = state.exigir_permiso("cuentas.cobros").await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::devolver_lineas(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
@@ -190,7 +186,7 @@ pub async fn cuentas_anular_pago(
     state: State<'_, AppState>,
     args: AnularPagoInput,
 ) -> Result<bool, AppErrorDto> {
-    let sesion = state.exigir_rol(&[ADMIN, CAMARERO]).await?;
+    let sesion = state.exigir_permiso("cuentas.cobros").await?;
     let cuentas = state.cuentas_repo().await?;
     let cierres = state.cierre_caja_repo().await?;
     Ok(rect::anular_pago(cuentas.as_ref(), cierres.as_ref(), &sesion.id_usuario, args).await?)

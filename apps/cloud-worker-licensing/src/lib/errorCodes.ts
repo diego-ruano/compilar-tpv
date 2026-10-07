@@ -144,6 +144,7 @@ const SOLICITUD_CADUCADA = "La solicitud de vinculación ha caducado. Vuelve a p
 const SOLO_EN_LA_MAIN = "Esto sólo se puede hacer desde el TPV principal.";
 
 export const MENSAJES: Readonly<Record<string, string>> = {
+	permiso_denegado: "No tienes permiso para esta acción.",
 	// Emparejamiento de una Handy
 	invalid_pair_code: "El código de vinculación son 6 cifras.",
 	invalid_pair_secret: "El QR no es válido. Vuelve a escanearlo o escribe el código a mano.",

@@ -25,7 +25,7 @@ pub async fn clientes_get_overview(
     state: State<'_, AppState>,
     args: ClientesOverviewArgs,
 ) -> Result<Vec<ClienteOverview>, AppErrorDto> {
-    state.sesion().await?;
+    state.exigir_permiso("clientes.gestionar").await?;
     let repo = state.clientes_repo().await?;
     Ok(uc::listar_overview(repo.as_ref(), &args.ranking).await?)
 }
@@ -39,7 +39,7 @@ pub async fn clientes_recalcular_gasto(
     state: State<'_, AppState>,
     args: ClienteIdArgs,
 ) -> Result<Option<Dinero>, AppErrorDto> {
-    state.sesion().await?;
+    state.exigir_permiso("clientes.recalcular").await?;
     let repo = state.reconciliacion_repo().await?;
     Ok(uc_reconciliacion::recalcular_gasto_de_cliente(repo.as_ref(), &args.id_cliente).await?)
 }
@@ -49,7 +49,7 @@ pub async fn clientes_get_cliente_form(
     state: State<'_, AppState>,
     args: ClienteIdArgs,
 ) -> Result<Option<ClienteForm>, AppErrorDto> {
-    state.sesion().await?;
+    state.exigir_permiso("clientes.gestionar").await?;
     let repo = state.clientes_repo().await?;
     Ok(uc::obtener_form(repo.as_ref(), args.id_cliente).await?)
 }
@@ -59,7 +59,7 @@ pub async fn clientes_create_cliente(
     state: State<'_, AppState>,
     args: CreateClienteInput,
 ) -> Result<bool, AppErrorDto> {
-    state.sesion().await?;
+    state.exigir_permiso("clientes.gestionar").await?;
     let repo = state.clientes_repo().await?;
     Ok(uc::crear_cliente(repo.as_ref(), args).await?)
 }
@@ -69,7 +69,7 @@ pub async fn clientes_update_cliente(
     state: State<'_, AppState>,
     args: UpdateClienteInput,
 ) -> Result<bool, AppErrorDto> {
-    state.sesion().await?;
+    state.exigir_permiso("clientes.gestionar").await?;
     let repo = state.clientes_repo().await?;
     Ok(uc::actualizar_cliente(repo.as_ref(), args).await?)
 }

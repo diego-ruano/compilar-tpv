@@ -1,3 +1,4 @@
+import { usePermisos } from "../../shared/lib/usePermisos";
 // pages/Clientes.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import {
@@ -95,6 +96,7 @@ export default function Clientes() {
   // Datos vía TanStack Query (caché): la lista se recachea por `ranking` y las
   // mutaciones (crear/editar) invalidan la clave para refrescarla automáticamente.
   const overview = useClientesOverview(ranking);
+  const { puede } = usePermisos();
   const recalcularGasto = useRecalcularGasto();
   const createCliente = useCreateCliente();
   const updateCliente = useUpdateCliente();
@@ -602,7 +604,7 @@ export default function Clientes() {
                 <button
                   type="button"
                   onClick={() => recalcularGasto.mutate({ idCliente: clienteActivo.ID_Cliente })}
-                  disabled={recalcularGasto.isPending}
+                  disabled={recalcularGasto.isPending || !puede("clientes.recalcular")}
                   className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-fg-muted underline decoration-dotted underline-offset-2 hover:text-fg disabled:opacity-50"
                   title="Rehace el total desde los cobros de este cliente"
                 >

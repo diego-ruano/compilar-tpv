@@ -74,7 +74,7 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 import { conAviso } from "../../shared/lib/conAviso";
 import { CERO, eur, restar, sumar } from "../../shared/lib/dinero";
 import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
-import { useAuth } from "../../shared/stores/useAuth";
+import { usePermisos } from "../../shared/lib/usePermisos";
 import { esAdmin } from "../../shared/lib/permisos";
 
 function todayYMD() {
@@ -154,11 +154,13 @@ function CasillaTicket({ marcada, onClick }: { marcada: boolean; onClick: () => 
 
 function MiniIconButton({
     title,
+    disabled = false,
     children,
     onClick,
     variant = "neutral",
 }: {
     title?: string;
+    disabled?: boolean;
     children: React.ReactNode;
     onClick?: () => void;
     variant?: "neutral" | "danger";
@@ -167,6 +169,7 @@ function MiniIconButton({
         <button
             type="button"
             title={title}
+            disabled={disabled}
             onClick={onClick}
             className={[
                 "h-9 w-9 rounded-xl border shadow-sm transition active:scale-[0.98]",
@@ -247,8 +250,12 @@ function SelloDevolucion({ entrada }: { entrada: EntradaDto }) {
 export default function Cuentas() {
     // El camarero entra a los cobros y sus bajas; el resto de la caja (gastos, totales, cierre,
     // facturas con NIF, exportar) es del administrador y ni se pide ni se enseña.
-    const { role } = useAuth();
-    const admin = esAdmin(role);
+    const { puede, rol } = usePermisos();
+    const admin = puede("cuentas.gastos");
+    const cobrosPermitidos = puede("cuentas.cobros");
+    const exportarPermitido = admin && cobrosPermitidos;
+    const fiscal = esAdmin(rol);
+    const cierresPermitidos = puede("caja.cerrar");
 
     const [busqueda, setBusqueda] = useState("");
     const [del, setDel] = useState(() => todayYMD());
@@ -278,7 +285,7 @@ export default function Cuentas() {
     // Lecturas cacheadas (TanStack Query). Rango + búsqueda + página forman la queryKey.
     const entradasQuery = useCuentasEntradas(
         { del, al, q: qDebounced, cursor: paginasEntradas.cursor },
-        !rangoInvalido,
+        !rangoInvalido && cobrosPermitidos,
     );
     const salidasQuery = useCuentasSalidas(
         { del, al, q: qDebounced, cursor: paginasSalidas.cursor },
@@ -313,10 +320,10 @@ export default function Cuentas() {
         return m;
     }, [proveedores]);
 
-    const entradasDB = useMemo(() => entradasQuery.data?.filas ?? [], [entradasQuery.data]);
+    const entradasDB = useMemo(() => cobrosPermitidos ? entradasQuery.data?.filas ?? [] : [], [entradasQuery.data, cobrosPermitidos]);
     const loadingEntradas = entradasQuery.isFetching;
 
-    const salidasDB = useMemo(() => salidasQuery.data?.filas ?? [], [salidasQuery.data]);
+    const salidasDB = useMemo(() => admin ? salidasQuery.data?.filas ?? [] : [], [salidasQuery.data, admin]);
     const loadingSalidas = salidasQuery.isFetching;
 
     // Wrapper que conserva el nombre/uso previo: refresca proveedores bajo demanda.
@@ -399,14 +406,14 @@ export default function Cuentas() {
 
     const recargarCierres = React.useCallback(async () => {
         // El histórico de cierres es del administrador: el camarero ni lo pide.
-        if (!admin) return;
+        if (!cierresPermitidos) { setCierres([]); setCierresError(null); return; }
         try {
             setCierres(await cierreListar(50));
             setCierresError(null);
         } catch (e) {
             setCierresError(toAppError(e).message);
         }
-    }, [admin]);
+    }, [cierresPermitidos]);
 
     useEffect(() => {
         void recargarCierres();
@@ -486,7 +493,7 @@ export default function Cuentas() {
     const salidasFiltradas = salidasDB;
 
     // Totales de cabecera: del resumen agregado (todo el rango + búsqueda), no de la página visible.
-    const resumen = resumenQuery.data;
+    const resumen = admin ? resumenQuery.data : undefined;
     const totalEntradas = resumen?.total_entradas ?? CERO;
     const totalSalidas = resumen?.total_salidas ?? CERO;
     const balance = restar(totalEntradas, totalSalidas);
@@ -1386,6 +1393,7 @@ export default function Cuentas() {
                     {admin ? (
                         <>
                             <MiniIconButton
+                                disabled={!fiscal}
                                 title="Factura con NIF (emitir o corregir)"
                                 onClick={() => void abrirFactura(e)}
                             >
@@ -1501,12 +1509,12 @@ export default function Cuentas() {
             <div
                 className={cn(
                     "grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden",
-                    admin
+                    admin && cobrosPermitidos
                         ? "grid-rows-[repeat(2,minmax(0,1fr))] lg:grid-cols-2 lg:grid-rows-1"
                         : "grid-rows-[minmax(0,1fr)]",
                 )}
             >
-                        <section className="flex h-full min-h-0 overflow-hidden flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
+                        {cobrosPermitidos ? <section className="flex h-full min-h-0 overflow-hidden flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
                             <div className="flex items-start justify-between gap-3 flex-none">
                                 <div>
                                     <h2 className="text-lg font-semibold text-fg">Entradas</h2>
@@ -1518,6 +1526,7 @@ export default function Cuentas() {
                                 <div className="flex items-center gap-2">
                                     <button
                                         type="button"
+                                        disabled={!fiscal}
                                         onClick={() => setSeleccionTickets((s) => (s ? null : new Map()))}
                                         className="rounded-xl border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-fg hover:bg-surface-2"
                                         title="Elegir varios tickets del mismo cliente y emitir una sola factura con NIF"
@@ -1646,7 +1655,7 @@ export default function Cuentas() {
                                     </button>
                                 </div>
                             </div>
-                        </section>
+                        </section> : null}
 
                         {admin ? (
                         <section className="flex h-full min-h-0 overflow-hidden flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
@@ -1779,7 +1788,7 @@ export default function Cuentas() {
                         ) : null}
                     </div>
 
-            {admin ? (
+            {admin || cierresPermitidos ? (
             <>
             {/* FOOTER */}
             <div className="w-full rounded-2xl border border-border bg-surface p-4 shadow-sm">
@@ -1787,7 +1796,7 @@ export default function Cuentas() {
                     <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
                         <button
                             onClick={conAviso(guardarPdf)}
-                            disabled={savingPdf}
+                            disabled={savingPdf || !exportarPermitido}
                             className={cn(
                                 "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer",
                                 savingPdf && "opacity-60 cursor-not-allowed",
@@ -1807,6 +1816,7 @@ export default function Cuentas() {
 
                         <button
                             type="button"
+                            disabled={!cierresPermitidos}
                             onClick={() => setOpenCierre(true)}
                             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-accent bg-accent px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                         >
@@ -1817,7 +1827,7 @@ export default function Cuentas() {
 
                     <button
                         onClick={conAviso(sacarCuentaDelDia)}
-                        disabled={savingPdf}
+                        disabled={savingPdf || !exportarPermitido}
                         className={cn(
                             "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] sm:w-auto cursor-pointer",
                             savingPdf && "opacity-60 cursor-not-allowed",
@@ -1831,7 +1841,7 @@ export default function Cuentas() {
 
             {/* Histórico de arqueos. Es donde se investiga un descuadre pasado: sin esto, "faltaban
                 50 €" es un recuerdo, no un dato. */}
-            <div className="mt-4 rounded-2xl border border-border bg-surface p-4 sm:p-5">
+            {cierresPermitidos ? <div className="mt-4 rounded-2xl border border-border bg-surface p-4 sm:p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-base font-bold text-fg sm:text-lg">Cierres de caja</h3>
                     <span className="text-xs text-fg-muted">
@@ -1937,7 +1947,7 @@ export default function Cuentas() {
                         </table>
                     </div>
                 )}
-            </div>
+            </div> : null}
             </>
             ) : null}
 

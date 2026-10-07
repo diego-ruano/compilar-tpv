@@ -157,6 +157,10 @@ describe("bootstrap acotado · los maestros", () => {
 			expect(tabla(body, t)!.filas.length, t).toBe(1);
 			expect(tabla(body, t)!.parcial, t).toBe(false);
 		}
+        // RI-70: recuperar el equipo incluye las concesiones completas, sin backfill.
+        expect(tabla(body, "Roles_Permisos")!.filas.length).toBeGreaterThan(0);
+        expect(tabla(body, "Roles_Permisos")!.parcial).toBe(false);
+
 	});
 
 	it("`Serie_Facturacion` viaja SIEMPRE", async () => {
@@ -442,6 +446,7 @@ describe("bootstrap acotado · lo que la Main necesita para seguir", () => {
 			"Proveedores",
 			"Reservas",
 			"Roles",
+			"Roles_Permisos",
 			// FISCAL-01: el contador de la serie de facturación. Maestra a propósito, y son cuatro
 			// filas: si volviera recortado, el número siguiente podría repetir uno ya emitido y la
 			// AEAT lo rechazaría por duplicado (error 3000). Se falla hacia el hueco, nunca hacia

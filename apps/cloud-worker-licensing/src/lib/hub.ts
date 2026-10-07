@@ -43,7 +43,7 @@ export type ApplyParams = {
  * `Serie_Facturacion` va con ella por lo mismo: es el contador que reserva el número, y un número
  * repartido desde dos sitios acaba en una factura duplicada (error 3000 de la AEAT).
  */
-const TABLAS_SOLO_MAIN = ["Registros_Facturacion", "Serie_Facturacion"];
+const TABLAS_SOLO_MAIN = ["Registros_Facturacion", "Serie_Facturacion", "Roles_Permisos"];
 
 /**
  * ¿Alguna sentencia de este comando escribe en una tabla vetada?

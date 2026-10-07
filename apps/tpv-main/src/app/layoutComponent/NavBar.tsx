@@ -23,6 +23,7 @@ import Logo from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useNoLeidasCount } from "../../features/notificaciones/notificacionesQueries";
 import { cn } from "../../shared/lib/cn";
+import { usePermisos } from "../../shared/lib/usePermisos";
 
 type Props = {
   open?: boolean;
@@ -49,48 +50,9 @@ const ITEMS = {
   configuracion: { pagina: "Configuracion", nombre: "Configuración", icon: Settings },
 } satisfies Record<string, MenuItem>;
 
-// Menú por rol (mismos accesos que la versión anterior).
-const MENU_BY_ROLE: Record<string, { top: MenuItem[]; bottom: MenuItem[] }> = {
-  Administrador: {
-    top: [
-      ITEMS.ventaRapida,
-      ITEMS.mesas,
-      ITEMS.inventario,
-      ITEMS.reservas,
-      ITEMS.trabajadores,
-      ITEMS.proveedores,
-      ITEMS.clientes,
-      ITEMS.tareas,
-      ITEMS.cuentas,
-      ITEMS.estadisticas,
-    ],
-    bottom: [ITEMS.notificaciones, ITEMS.configuracion],
-  },
-  Camarero: {
-    top: [
-      ITEMS.ventaRapida,
-      ITEMS.mesas,
-      ITEMS.inventario,
-      ITEMS.reservas,
-      ITEMS.trabajadores,
-      ITEMS.tareas,
-      // Sólo los cobros y sus bajas: el resto de la caja es del administrador.
-      ITEMS.cuentas,
-    ],
-    bottom: [ITEMS.notificaciones],
-  },
-  Limpieza: {
-    top: [ITEMS.inventario, ITEMS.trabajadores, ITEMS.tareas],
-    bottom: [ITEMS.notificaciones],
-  },
-  Cocinero: {
-    top: [ITEMS.comandas, ITEMS.inventario, ITEMS.trabajadores, ITEMS.tareas],
-    bottom: [ITEMS.notificaciones],
-  },
-};
-
 function NavBar({ open: openProp, onToggle, onClose }: Props) {
-  const { role, nombre, logout, idUsuario } = useAuth();
+  const { nombre, logout, idUsuario } = useAuth();
+  const { puede, rol:role } = usePermisos();
   const navigate = useNavigate();
 
   // Badge de la campana: nº de notificaciones no leídas del usuario logueado.
@@ -145,8 +107,18 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
     closeIfMobile();
   };
 
-  const menu = MENU_BY_ROLE[role];
-  if (!menu) return null;
+  const menu: { top: MenuItem[]; bottom: MenuItem[] } = {
+    top:[
+      ...(puede("servicio.vender") ? [ITEMS.ventaRapida,ITEMS.mesas] : puede("servicio.cocina") ? [ITEMS.comandas] : []),
+      ITEMS.inventario,
+      ...(puede("reservas.gestionar") ? [ITEMS.reservas] : []), ITEMS.trabajadores,
+      ...(puede("proveedores.gestionar") || puede("pedidos.gestionar") ? [ITEMS.proveedores] : []),
+      ...(puede("clientes.gestionar") ? [ITEMS.clientes] : []),
+      ...(puede("tareas.propias") || puede("tareas.gestionar") ? [ITEMS.tareas] : []),
+      ...(puede("cuentas.cobros") || puede("cuentas.gastos") || puede("caja.cerrar") ? [ITEMS.cuentas] : []),
+      ...(puede("estadisticas.ver") ? [ITEMS.estadisticas] : []),
+    ], bottom:[ITEMS.notificaciones,...(role === "Administrador" ? [ITEMS.configuracion] : [])],
+  };
 
   const initial = (nombre?.[0] ?? "?").toUpperCase();
 

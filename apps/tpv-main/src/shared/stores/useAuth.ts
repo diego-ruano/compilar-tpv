@@ -8,6 +8,7 @@
 // con una sesión de administrador viva detrás.
 
 import { create } from "zustand";
+import { queryClient } from "../lib/queryClient";
 import { invokeClient } from "@tpv/client";
 
 export type AuthState = {
@@ -58,6 +59,7 @@ export const useAuth = create<AuthState>((set) => ({
         }),
 
     logout: () => {
+        queryClient.clear();
         set({
             role: "",
             idUsuario: null,

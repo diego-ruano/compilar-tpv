@@ -15,7 +15,7 @@ type Props = {
   productos?: ProductoDisplay[] | null;
   busqueda?: ProductoDisplay[] | null;
 
-  onOpenAddProduct: () => void;
+  onOpenAddProduct?: () => void;
   onSelectCategoria: (c: CategoriaDisplay) => void;
 
   onAddProducto: (p: ProductoDisplay) => void;
@@ -117,7 +117,7 @@ function CatalogGrid({
     return (
       <Wrapper>
         <div className={gridClass}>
-          <AddProductoCard onClick={onOpenAddProduct} />
+          {onOpenAddProduct && <AddProductoCard onClick={onOpenAddProduct} />}
 
           {search.map((p) => (
             <ProductCard
@@ -138,7 +138,7 @@ function CatalogGrid({
     return (
       <Wrapper>
         <div className={gridCats}>
-          <AddProductoCard onClick={onOpenAddProduct} />
+          {onOpenAddProduct && <AddProductoCard onClick={onOpenAddProduct} />}
 
           {cats.map((c) => (
             <CategoryCard key={c.ID_Categoria} c={c} onSelect={onSelectCategoria} />
@@ -160,7 +160,7 @@ function CatalogGrid({
     return (
       <Wrapper>
         <div className={gridClass}>
-          <AddProductoCard onClick={onOpenAddProduct} />
+          {onOpenAddProduct && <AddProductoCard onClick={onOpenAddProduct} />}
 
           <div className="flex items-center rounded-2xl border border-border bg-surface p-4 text-sm text-fg-muted">
             No hay productos en esta categoría.
@@ -173,7 +173,7 @@ function CatalogGrid({
   return (
     <Wrapper>
       <div className={gridClass}>
-        <AddProductoCard onClick={onOpenAddProduct} />
+        {onOpenAddProduct && <AddProductoCard onClick={onOpenAddProduct} />}
 
         {prods.map((p) => (
           <ProductCard

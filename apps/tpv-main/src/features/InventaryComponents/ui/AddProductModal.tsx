@@ -1,3 +1,4 @@
+import { usePermisos } from "../../../shared/lib/usePermisos";
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "../ui/Modal";
@@ -77,6 +78,7 @@ export function AddProductModal({
     const [nombre, setNombre] = useState("");
     const precio = useImporte();
     const ponerPrecio = precio.poner;
+    const { puede } = usePermisos();
     const [stockMinimo, setStockMinimo] = useState("");
     const [unidadMedida, setUnidadMedida] = useState("");
 
@@ -264,11 +266,11 @@ export function AddProductModal({
     };
 
     const loteInicialOk = useMemo(() => {
-        if (!crearLoteInicial) return true;
+        if (!crearLoteInicial || !puede("stock.recibir")) return true;
         if (!codigoLoteInicial.trim()) return false;
         const ci = Number(cantidadInicialLote.replace(",", "."));
         return Number.isFinite(ci) && ci >= 0;
-    }, [crearLoteInicial, codigoLoteInicial, cantidadInicialLote]);
+    }, [crearLoteInicial, codigoLoteInicial, cantidadInicialLote, puede]);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -339,7 +341,7 @@ export function AddProductModal({
                 }
             }
 
-            if (crearLoteInicial) {
+            if (crearLoteInicial && puede("stock.recibir")) {
                 const ci = Number(cantidadInicialLote.replace(",", "."));
 
                 await createLote.mutateAsync({
@@ -437,7 +439,7 @@ export function AddProductModal({
                             id="producto-precio-venta"
                             {...precio.campo}
                             className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            disabled={loading}
+                            disabled={loading || !puede("catalogo.precios")}
                         />
                     </div>
 
@@ -517,7 +519,7 @@ export function AddProductModal({
                             className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                             // RI-55: sólo al crear. Guardar la ficha reescribía el valor que había
                             // cargado y pisaba lo vendido mientras estaba abierta.
-                            disabled={loading || isEdit}
+                            disabled={loading || isEdit || !puede("stock.recibir")}
                         />
                         <p className="mt-1 text-xs text-fg-muted">
                             {isEdit
@@ -540,7 +542,7 @@ export function AddProductModal({
                             onChange={(e) => setIvaPercent(e.target.value)}
                             placeholder="Vacío = el del negocio"
                             className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            disabled={loading}
+                            disabled={loading || !puede("catalogo.precios")}
                         />
                         <p className="mt-1 text-xs text-fg-muted">
                             Déjalo vacío salvo que este producto tribute distinto al resto: lo que se
@@ -565,7 +567,7 @@ export function AddProductModal({
 
                             <button
                                 type="button"
-                                disabled={loading}
+                                disabled={loading || !puede("stock.recibir")}
                                 onClick={() => setCrearLoteInicial((v) => !v)}
                                 className={[
                                     "relative inline-flex h-8 w-14 items-center rounded-full transition",
@@ -583,7 +585,7 @@ export function AddProductModal({
                             </button>
                         </div>
 
-                        {crearLoteInicial && (
+                        {crearLoteInicial && puede("stock.recibir") && (
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
                                 <div>
                                     <label

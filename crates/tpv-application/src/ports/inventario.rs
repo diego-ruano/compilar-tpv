@@ -41,6 +41,8 @@ pub trait InventarioRepository: Send + Sync {
     /// El stock suelto sólo se escribe al **crear** (con su movimiento de alta); editando la ficha
     /// no se toca (RI-55).
     async fn upsert_producto(&self, id_usuario: &str, producto: ProductoUpsert) -> AppResult<String>;
+    /// Escritura interactiva con límites de precio y alta de existencias. SQLite valida bajo su cerrojo.
+    async fn upsert_producto_autorizado(&self, actor: &str, producto: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String>;
     async fn create_lote(&self, id_usuario: &str, lote: LoteNuevo) -> AppResult<()>;
     /// Los datos de un lote, sin tocar sus existencias (RI-55).
     async fn update_lote(&self, lote: LoteUpdate) -> AppResult<()>;

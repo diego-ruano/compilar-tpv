@@ -16,9 +16,8 @@ Lo que sí consiguen:
   pone el backend, no la pantalla.
 - Entre «la interfaz esconde el botón» y «el botón no hace nada» no queda hueco.
 
-El riesgo que cubre es **un camarero con el TPV delante**. Lo que de verdad importa —cobrar, la caja,
-el registro fiscal, revocar un dispositivo, la licencia— lo valida además el worker, que corre donde
-el usuario no manda. Y la licencia va firmada ([licencias.md](licencias.md)): un parche del binario la
+El riesgo que cubre es **un camarero con el TPV delante**. El Worker valida la licencia, el dispositivo y las reglas de negocio; la autorización personal de
+la Handy permanece en Rust hasta SEC-SESION. Y la licencia va firmada ([licencias.md](licencias.md)): un parche del binario la
 salta, un ataque de red no.
 
 ---
@@ -28,7 +27,7 @@ salta, un ataque de red no.
 | Pieza | Archivo | Rol |
 |---|---|---|
 | La sesión | `apps/tpv-main/src-tauri/src/lib.rs` (`Sesion`, `AppState::sesion`) | `Option<Sesion>` en memoria: `id_usuario`, `id_trabajador`, `rol` |
-| Los gates | `lib.rs` (`sesion`, `exigir_rol`, `exigir_rol_si_hay_sesion`) | Tres helpers |
+| Los gates | `lib.rs` (`sesion`, `exigir_permiso`, `exigir_rol`, `exigir_rol_si_hay_sesion`) | Identidad vigente y gates por capacidad |
 | El rol | `lib.rs::ADMIN` · `src/shared/lib/permisos.ts::ROL_ADMIN` | Uno por lado |
 | Código de error | `tpv-contracts::errors::ErrorCode::PermisoDenegado` (`permiso_denegado`) | La UI ramifica por él |
 | Cierre de sesión | `src/shared/stores/useAuth.ts`, `src/app/AppBoot.tsx`, `src/shared/lib/useInactivityLogout.ts` | Las dos sesiones se cierran juntas |
@@ -41,6 +40,7 @@ salta, un ataque de red no.
 | Arranque | `None`: al abrir la app siempre se pide PIN |
 | `login_user` correcto | Se pone, con el rol **que devuelve el repositorio** (SQLite en la Main, worker en la Handy) |
 | `logout` | Se quita |
+| Cambio de modo o sustitución del token Handy | Se quita antes de cambiar el backend/tenant |
 | 10 minutos sin tocar nada | El frontend cierra sesión (`useInactivityLogout`) |
 | Recarga del webview | `AppBoot` llama a `logout`, para no dejar una sesión de administrador viva detrás de una pantalla de PIN |
 
@@ -49,110 +49,83 @@ El rol y el usuario salen del repositorio y **nunca de los argumentos** de un co
 | Helper | Para qué |
 |---|---|
 | `sesion()` | Algo atribuible que hace cualquiera: exige estar identificado |
-| `exigir_rol(&[ADMIN])` | Lo de administrador: sesión y rol |
+| `exigir_permiso(codigo)` | Acción configurable: usuario activo y concesiones actuales |
+| `exigir_rol(&[ADMIN])` | Administración estructural: sesión y rol vigente |
 | `exigir_rol_si_hay_sesion(&[ADMIN])` | Lo que se alcanza también **antes** del login: sin sesión pasa, con sesión exige el rol |
 
 ---
 
-## Qué está gateado
+## Capacidades por rol (RI-70)
 
-**La lista es corta a propósito.** Antes de gatear algo la pregunta no es «¿es delicado?» sino «¿lo
-hace alguien a mitad de servicio?». Un gate que estorba acaba en que todo el mundo conoce el PIN del
-encargado.
+El catálogo estable vive en `tpv-domain::permisos::CATALOGO`. `Roles_Permisos` guarda una concesión
+por rol y acción; no hay permisos individuales, SQL configurable ni fallback cuando un rol está
+vacío. Una capacidad desconocida se deniega incluso al administrador. Los comandos solicitan
+`exigir_permiso`; el puerto se implementa en SQLite para Main y en HTTP para Handy.
 
-### Administrador
+`sesion()` relee el usuario activo y su rol vigente; `exigir_permiso` obtiene además las concesiones
+en la misma consulta. Desactivar una persona, cambiarle el rol o editar sus permisos afecta a las
+siguientes operaciones de su sesión abierta. Si se cierra o cambia la sesión mientras llega una
+consulta HTTP, su respuesta no autoriza al nuevo usuario. El proceso de réplica y los jobs no
+necesitan una sesión personal.
 
-| Área | Comandos |
+| Grupo | Capacidades configurables |
 |---|---|
-| Cuentas, lecturas incluidas (salvo los cobros y sus bajas, abajo) | `cuentas_get_salidas`, `cuentas_get_resumen`, `cuentas_previsualizar_cambio` (salvo el de una baja), `cuentas_create_gasto`, `cuentas_update_gasto`, `cuentas_delete_gasto`, `cuentas_update_pago` |
-| Cierre de caja | `cierre_preparar`, `cierre_confirmar`, `cierre_listar`, `cierre_detalle`, `cierre_reabrir` |
-| Veri\*factu | `verifactu_listar`, `verifactu_certificados`, `verifactu_set_certificado`, `verifactu_probar_conexion`, `verifactu_emitir_factura_de_tickets`, `verifactu_corregir_factura`, `verifactu_subsanar_rechazados`, `verifactu_reconocer_anomalias`, `verifactu_exportar`, `verifactu_set_modo_prueba` |
-| Personal | `trabajadores_create`, `trabajadores_update`, `trabajadores_get_detail` (la única lectura de personal gateada: devuelve la PII) |
-| Configuración | `config_patch_business_settings`, `config_patch_ticket_settings`, `config_patch_contact_settings` |
-| Correo de recuperación | `correo_recuperacion_estado`, `correo_recuperacion_usar_el_de_la_compra`; y `…_solicitar` / `…_confirmar`, que sin sesión sólo valen mientras el PIN inicial esté por elegir |
-| Proveedores | `email_enviar_pedido` |
-| Licencia | `license_sumar_clave` (gastar una clave pagada desde Configuración; el resto de `license_*` es del arranque y no pide sesión) |
-| Dispositivos | `pair_create`, y `tpv_server_post_json` para `/v1/pair/…`, `/v1/device/…` y `/v1/login/correo-recuperacion/…` |
-| Modo | `device_reset_mode` (gate blando) |
+| Servicio | Comandas/venta/cobro, cocina, reservas, tareas propias |
+| Inventario | Editar catálogo, precios e IVA, borrar/archivar productos, recibir mercancía, editar lotes, ajustar existencias |
+| Gestión | Proveedores, pedidos y su correo, administrar tareas, horarios, plano, estadísticas, clientes, recalcular gasto |
+| Caja | Cobros y devoluciones, gastos/totales/edición de pagos, cierre/reapertura de caja |
 
-`verifactu_estado` y `verifactu_declaracion_responsable` no piden rol: los leen la escalera de avisos
-y cualquiera que quiera ver la declaración.
+Editar una ficha requiere catálogo; cambiar su precio o IVA exige también precios. Crear un
+producto exige ambos, y dar de alta existencias requiere recibir mercancía. SQLite revalida el
+precio bajo el cerrojo de escritura; una edición Handy sin permiso de precios conserva precio e IVA
+en el SQL aplicado por el Worker, sin recrear el producto si se borró durante la edición. Ajustar existencias va por sus comandos con atribución, nunca
+por la ficha. Las tareas propias se consultan y finalizan con el trabajador de la sesión.
 
-**Siempre queda un administrador activo.** Editar una ficha no puede quitarle el rol ni desactivar
-al último (RI-62): sin ninguno, todo lo de esta tabla queda cerrado y no hay salida desde la
-aplicación, porque la recuperación del PIN por correo es para un administrador. La Main lo comprueba
-dentro de la transacción de `update_trabajador`. El worker lo comprueba antes de aplicar
-(`ultimo_administrador`), con el mismo SQL.
+Valores iniciales:
 
-### Administrador o camarero
+- **Administrador:** acceso completo. No se puede retirar su acceso ni modificarlo con el gestor.
+- **Encargado:** servicio y gestión operativa, estadísticas y cobros; gastos y cierre de caja quedan
+  desactivados inicialmente y se pueden conceder.
+- **Camarero:** venta, cocina, reservas, tareas propias, clientes y cobros/devoluciones.
+- **Cocinero:** cocina y tareas propias. **Limpieza:** tareas propias.
 
-**Los cobros de Cuentas y sus bajas**: `cuentas_get_entradas`, `cuentas_anular_pago` (las dos clases),
-`cuentas_previsualizar_cambio` de una baja, y devolver parte de un cobro (`cuentas_lineas_devolubles`,
-`cuentas_devolver_lineas`). El cliente que vuelve a por su dinero no espera al encargado, y lo que deja
-rastro es la firma de la sesión, no el rol. Al camarero la pantalla le enseña sólo el panel de cobros,
-con reimprimir, devolver y dar de baja; gastos, totales, cierre de caja, facturas con NIF y exportar ni
-se piden ni se enseñan. Lo vigila `el_camarero_solo_entra_en_los_cobros_de_cuentas`.
+El catálogo sigue disponible para el servicio y el horario del equipo requiere sesión. Administrar
+permisos, personal y PIN, configuración del negocio, fiscalidad, licencia y dispositivos exige
+siempre el administrador vigente. La última cuenta administradora activa no se puede desactivar ni
+despojar de su rol (RI-62); el chequeo vive dentro de la transacción local y también en el Worker.
 
-### Basta con estar identificado
+El gestor está en **Configuración → Permisos**, sólo en Main. Guarda una edición por rol en una
+transacción replicable y rechaza una lista desconocida o duplicada. Compara las concesiones que se
+vieron al empezar a editar con las actuales: una pantalla antigua no pisa cambios recientes.
+No existe una ruta REST para editar permisos y `applyViaHub` veta `Roles_Permisos` desde Handy.
 
-- **Cobrar**: `cobrar_detalles` (mesas) y `vr_cobrar_fraccionado` (venta rápida). El cobrador se
-  guarda con el pago y es el rastro de un descuadre, así que sale de la sesión; un administrador que
-  cobra queda registrado como él mismo. `VrCobrarFraccionadoInput` y
-  `MesasCobrarDetallesInput` no llevan cobrador. Lo vigila
-  `todo_comando_que_cobra_saca_el_cobrador_de_la_sesion`.
-- **El ticket de un cobro**: `printer_ticket_de_pago` y `printer_imprimir_pago`. Lo imprime quien
-  acaba de cobrar, a mitad de servicio; la reimpresión de un cobro antiguo está detrás del candado de
-  Cuentas.
-- **Abrir el cajón**: `printer_open_drawer`. Se anota en `Aperturas_Cajon` con quien tenga la sesión.
-- **Estadísticas y clientes**: todos los `stats_*` y `clientes_*`. Las estadísticas dicen cuánto se
-  factura y cuánto vende cada trabajador, y los clientes son datos personales. Toda pantalla de la app
-  está detrás del login, así que no estorba a nadie: cierra la puerta a quien llegue sin PIN.
+La interfaz consulta `permisos_sesion`; rutas, menú, botones de inventario y gestión usan esas
+capacidades. Se refrescan ante cambios replicados y cada 30 segundos; el backend consulta siempre
+el estado vigente. Al cerrar sesión se limpia la caché de consultas para no mostrar a la siguiente
+persona información de la sesión anterior.
 
-### Exentos, y por qué
+### Arranque y recuperación
 
-| Comandos | Por qué |
-|---|---|
-| `login_user`, `list_login_users`, `setup_pendiente`, `logout` | Son el login |
-| `complete_initial_setup` | Antes del primer login no hay con quién iniciar sesión (ver abajo) |
-| `punch` y fichajes | Se ficha antes de tener sesión |
-| `license_*` (salvo `license_sumar_clave`), `set_device_mode` | Las pantallas de arranque se pintan **en lugar** del router |
-| Lecturas de arranque (modo, licencia, configuración, sincronización) | Las piden `AppBoot` y los stores antes del login |
-| **Todo `commands/recovery.rs`** | ⚠️ La pantalla de recuperación existe para el caso de **cero usuarios**: un gate le cerraría la única salida, y en un equipo sano no se notaría. Tiene que tolerar `state.db == None` **y** `sesion == None` |
-| `login_recuperar_pin_solicitar` / `…_confirmar` | Quien recupera el PIN es quien no puede iniciar sesión |
+No piden sesión los comandos de login, setup inicial, fichaje, recuperación del PIN y recuperación
+de datos, ni las lecturas de arranque. La recuperación debe funcionar con `db == None` y cero
+usuarios. Los guardianes del fuente vigilan estas exenciones. `complete_initial_setup` sólo puede
+cambiar el PIN público mientras `Requiere_Setup = 1`, y sólo se ejecuta en Main.
 
-`los_comandos_de_recuperacion_no_pueden_exigir_sesion` y
-`el_login_no_puede_exigir_lo_que_todavia_no_existe` leen el fuente y fallan si alguien añade un gate
-ahí.
+### Proxy e identidad
 
-### El proxy firmado
+El proxy firmado del IPC sólo admite las rutas exactas de emparejamiento y administración de
+dispositivos. Claim/fetch/cancel admiten el modo anónimo; el ticket WebSocket sólo se expone para
+Handy. Las rutas de réplica Main no pasan por IPC. El saludo Handy usa `WS_HANDY_HELLO`, y el Worker
+lo contrasta con el rol central del dispositivo: cambiar el modo local no concede una firma Main.
+El JWT y la firma de mensajes arbitrarios no se exponen a JavaScript (RI-20/RI-57).
 
-`tpv_server_post_json` firma y manda lo que le den. Por él van el emparejamiento de una Handy (sin
-sesión) y la administración de dispositivos. La regla va **por prefijo y fallando cerrado**
-(`commands/pairing.rs::ruta_de_administracion`, normalizando la ruta antes): todo `/v1/pair/…`,
-`/v1/device/…` y `/v1/login/correo-recuperacion/…` exige Administrador, salvo
-`/v1/pair/claim`, `/v1/pair/fetch-token` y `/v1/pair/cancel` (`PAIRING_SIN_SESION`). Una ruta anónima
-nueva del emparejamiento hay que añadirla también ahí.
+### Alcance de la autorización en Handy
 
-### Lo que no está gateado
-
-Comandas, inventario, reservas, tareas, proveedores, turnos y horarios: es el trabajo del turno. Tampoco hay tabla de permisos (`Roles` sólo tiene nombre e id), sesión persistente ni caducidad
-de sesión en el backend.
-
-### La interfaz
-
-El gate del backend es la red, no el sustituto: la NavBar no enseña lo que no toca y las rutas de
-administrador (`/configuracion`, las fichas de trabajador) rebotan a quien no lo es; `/cuentas`, a quien
-no sea administrador ni camarero (`entraEnCuentas`). Al
-gatear un comando nuevo, su pantalla necesita también el candado de ruta. Ante un rechazo, el frontend
-ramifica por `permiso_denegado` para decir «esto es de administrador».
-
-### La Handy
-
-El worker autentica por **dispositivo** (device-proof + JWT), no por persona: el filtro por rol
-dentro de la Handy es de la aplicación. Lo que el worker sí sostiene es qué dispositivo puede escribir
-qué: cobrar, la caja y el registro fiscal sólo la Main (`cobro_solo_en_main`,
-`soloLaMainEscribeCaja`, `TABLAS_SOLO_MAIN`), con el veto como middleware delante de leer el cuerpo
-([worker.md](worker.md)).
+El Worker autentica **al dispositivo**, con JWT y device-proof. Rust valida la sesión personal y
+sus capacidades antes de llamar a los puertos HTTP. La consulta de concesiones del Worker devuelve
+configuración; no demuestra una sesión personal. Esa ampliación está aplazada en
+[SEC-SESION](../pendientes.md#sec-sesion--sesión-personal-verificable-en-el-worker).
+Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) siguen aplicándose.
 
 ---
 
@@ -160,7 +133,7 @@ qué: cobrar, la caja y el registro fiscal sólo la Main (`cobro_solo_en_main`,
 
 - **PBKDF2-HMAC-SHA256**, 100.000 iteraciones (el techo de `crypto.subtle` en Workers, y el worker
   también verifica), sal de 16 bytes, formato `$pbkdf2-sha256$i=…$<sal>$<derivada>` idéntico en Rust y
-  en el worker. Verificación en tiempo constante y rehash al iniciar sesión.
+  en el worker. Verificación en tiempo constante con `subtle`, parámetros acotados (1–100.000 iteraciones, sal de 16 bytes y derivada de 32), cálculo fuera del ejecutor async y rehash al iniciar sesión.
 - **Freno a la fuerza bruta (LOGIN-01)**: bloqueo escalado tras los fallos. Toda ruta del worker que
   verifique un PIN mira el freno antes y cuenta el fallo después; lo vigila
   `test/pinSiempreConFreno.test.ts`. El hash se replica a Turso; el riesgo de romperlo offline está en
@@ -208,7 +181,7 @@ qué: cobrar, la caja y el registro fiscal sólo la Main (`cobro_solo_en_main`,
   `<style>` inyectado en tiempo de ejecución ni librerías que se autoinyecten CSS; la CSP sólo se aplica
   al build empaquetado y en Android, no en `pnpm tauri dev` de escritorio. Detalle y cómo comprobarlo
   en [frontend.md](frontend.md#csp).
-- **La webview no escribe sobre los ficheros del equipo.** `fs:allow-write-file` existe para guardar
+- **La webview no lee AppData mediante el plugin `fs` ni escribe sobre los ficheros del equipo.** `fs:allow-write-file` existe para guardar
   donde la persona elija (el diálogo autoriza la ruta), con un `deny` para `data.db`, el estado de
   licencia, las copias y el resto de ficheros propios de AppData. Un fichero propio nuevo va a ese
   `deny`; lo vigila `la_webview_no_puede_escribir_sobre_los_ficheros_del_equipo`, que además rechaza
@@ -244,7 +217,7 @@ qué: cobrar, la caja y el registro fiscal sólo la Main (`cobro_solo_en_main`,
   Comparación de tiempo constante en tokens, códigos y firmas.
 - **Webhook de Stripe**: firma sobre el cuerpo crudo, ventana de 5 min e idempotencia
   ([licencias.md](licencias.md#comprar)).
-- **Device-proof**: firma de `ts`, método, ruta, hash del token y hash del cuerpo, con ±2 minutos.
+- **Device-proof**: firma con dominio `DEVICE_PROOF` de `ts`, método, ruta **y query**, hash del token y hash del cuerpo, con ±2 minutos.
   Sin nonce ([FABLE-E](../pendientes.md#fable-e--sin-nonce-en-el-device-proof)).
 - **El correo se acota por destinatario y por volumen**: sólo al email de un proveedor dado de alta y
   con un tope diario por negocio ([worker.md](worker.md#correo)).

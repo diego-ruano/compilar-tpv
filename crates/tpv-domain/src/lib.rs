@@ -37,3 +37,5 @@ pub mod verifactu;
 // pub mod venta_rapida;
 // pub mod inventario;
 // ...
+
+pub mod permisos;

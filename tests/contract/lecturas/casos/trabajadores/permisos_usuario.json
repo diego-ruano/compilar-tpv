@@ -1,0 +1,10 @@
+{
+  "descripcion": "RI-70: rol y concesiones del usuario activo en un único snapshot.",
+  "lectura": "trabajadores.permisos_usuario",
+  "seed": [
+    "INSERT INTO Usuarios (ID_Usuario,ID_Rol,Email,Password_Hash,Nombre) VALUES ('user-1','00000000-0000-7000-8000-000000000002','p@test','h','Permisos');"
+  ],
+  "entrada": {
+    "id_usuario": "user-1"
+  }
+}
