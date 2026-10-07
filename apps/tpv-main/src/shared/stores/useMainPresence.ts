@@ -10,7 +10,7 @@
 //   - `main_online`                      → cuando una Main se autentica.
 //   - `main_offline`                     → cuando la última Main se desconecta.
 //   - `main_volcando` { volcando }       → la Main está subiendo su atraso (SYNC-18).
-// `useHandySocket` traduce esos mensajes a este store, y `AppBoot` decide si deja pasar.
+// Rust interpreta esos mensajes y publica un estado atómico; `AppBoot` decide si deja pasar.
 //
 // Semántica de `mainOnline`:
 //   - null  → desconocido (WS aún conectando / sin confirmar). Fail-closed: se bloquea.
@@ -23,6 +23,7 @@
 // que se arregla solo es el primero.
 
 import { create } from "zustand";
+import type { ConexionHandy } from "@tpv/contracts";
 
 /**
  * Por qué la nube no deja entrar a este Handy. Son dos porque lo que hay que hacer es distinto:
@@ -32,12 +33,15 @@ import { create } from "zustand";
 export type MotivoRechazo = "dispositivo" | "licencia";
 
 type MainPresenceStore = {
+	generacion: number;
+	conexion: number;
+	tenantId: string | null;
+	estadoConexion: ConexionHandy;
 	mainOnline: boolean | null;
 	setMainOnline: (v: boolean | null) => void;
 	/**
-	 * La nube ha rechazado a este Handy (`null` = no ha pasado). Lo escribe `socketHandy` al
-	 * traducir el código del catálogo con el que el worker le niega el ticket, y se retira solo en
-	 * cuanto vuelve a dejarle entrar.
+	 * La nube ha rechazado a este Handy (`null` = no ha pasado). Rust clasifica el rechazo;
+	 * el puente publica ese estado y lo retira cuando vuelve a confirmarse la conexión.
 	 */
 	rechazo: MotivoRechazo | null;
 	setRechazo: (v: MotivoRechazo | null) => void;
@@ -49,14 +53,16 @@ type MainPresenceStore = {
 	 */
 	volcando: boolean;
 	setVolcando: (v: boolean) => void;
-	// Nonce para forzar una reconexión manual del WS del Handy (botón "Reintentar" en la pantalla de
-	// espera). `useHandySocket` lo incluye en las deps de su efecto: al incrementarlo, el efecto se
-	// re-ejecuta = conexión WS fresca (el equivalente a recargar la página en escritorio).
+	// Señal del botón Reintentar: el puente pide una reconexión a Rust sin recrear observadores.
 	retryTick: number;
 	requestReconnect: () => void;
 };
 
 export const useMainPresence = create<MainPresenceStore>((set) => ({
+	generacion: -1,
+	conexion: -1,
+	tenantId: null,
+	estadoConexion: "pausada",
 	mainOnline: null,
 	setMainOnline: (v) => set({ mainOnline: v }),
 	rechazo: null,

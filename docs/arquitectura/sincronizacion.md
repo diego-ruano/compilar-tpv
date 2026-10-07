@@ -47,6 +47,25 @@ sin nube no opera.
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar`, `/verificar-claves`, `/salud` |
 
+### Servicio de avisos de la Handy
+
+Arranca en el shell de Tauri y espera modo Handy y un vínculo válido. React sólo observa su estado
+actual y eventos pequeños; desmontar la interfaz no cierra la conexión. Al cambiar de modo o guardar
+un nuevo vínculo, Rust invalida la generación anterior y sustituye el transporte. La UI descarta los
+avisos antiguos, la sesión mostrada, las consultas y las cachés de ajustes e imágenes; las respuestas
+pendientes de los ajustes anteriores tampoco pueden repoblarlas.
+
+El saludo exige `hello_ok` con rol Handy y un `main_status` válido antes de confirmar presencia. Un
+corte de red conserva la presencia anterior durante cinco segundos; la gracia vence también si se
+está esperando un ticket o una reconexión. Sin Main o durante su volcado se mantiene el bloqueo.
+Rechazos de licencia y revocación se distinguen de la red, con reintentos cada cinco minutos.
+
+Cada conexión confirmada tiene un contador nativo. Al volver a observarla, reconectar o terminar el
+volcado se releen consultas, ajustes y ticket abierto: la Handy no conserva ni reproduce SQL perdido.
+Los cambios en vivo siguen invalidando sólo las áreas afectadas. Tauri avisa a Rust del foco y de la
+reanudación en Android; `online` en la webview es sólo una pista para el servicio. No se requiere un
+servicio Android en segundo plano: la conexión se recupera al volver si el sistema suspendió la app.
+
 ---
 
 ## Las reglas
@@ -118,8 +137,8 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   rechazo por la hora es `RelojDesfasado`, no falta de red.
 - **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong`, se cierra. Se reconecta al
   instante ante `online`, `focus` o `visibilitychange`, y si no, con espera creciente de 3 a 30 s.
-- **Un socket abandonado no toca nada**: quien reconecta suelta el anterior (`soltarSocket`) y el
-  el transporte anterior se cancela al sustituirse. El DO echa al socket anterior de un
+- **Un socket abandonado no toca nada**: sustituir el canal cancela su transporte y la generación
+  anterior deja de publicar estado o avisos. El DO echa al socket anterior de un
   dispositivo cuando conecta uno nuevo (`replaced`).
 - **Mientras faltan los datos, no se abre el socket** (`datosPerdidos` → `pausada`): un catch-up desde
   `Last_Seq = 0` no reconstruye nada ([recuperacion.md](recuperacion.md)).
@@ -268,8 +287,8 @@ línea. Con una respuesta clara la clave se olvida, y pedir dos veces lo mismo s
 El motor se inicia en el shell y sigue vivo al desmontar React. La webview sólo consulta
 `sync_estado`, pide un reintento o consulta salud/progreso. Aplicar SQL, confirmar el outbox,
 liberar encoladas y desbloquear la reconciliación son capacidades internas. El proxy HTTP
-admite sólo rutas concretas de emparejamiento/administración y el ticket Handy; no permite
-pedir un ticket Main ni usar las rutas de réplica. El saludo Handy lleva `WS_HANDY_HELLO` y
+admite sólo rutas concretas de emparejamiento/administración; los tickets y saludos de ambos
+modos permanecen en Rust y no permite usar las rutas de réplica. El saludo Handy lleva `WS_HANDY_HELLO` y
 no sirve para autenticar una Main, incluso si cambia el modo local.
 
 Las notificaciones llevan tablas y las comandas afectadas, sin sentencias ni argumentos.

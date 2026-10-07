@@ -30,6 +30,7 @@ const DEFAULTS: BusinessSettings = {
 type BusinessSettingsState = BusinessSettings & {
     ready: boolean;
     init: () => Promise<void>;
+    limpiarContexto: () => void;
 
     // UI instantánea + autoguardado
     setMany: (patch: Partial<BusinessSettings>) => void;
@@ -48,6 +49,7 @@ type BusinessSettingsState = BusinessSettings & {
 // debounce (module-level)
 let timer: number | null = null;
 let pending: Partial<BusinessSettings> = {};
+let contexto = 0;
 
 function clampIva(n: number) {
     if (!Number.isFinite(n)) return DEFAULTS.ivaPercent;
@@ -60,8 +62,10 @@ export const useBusinessSettings = create<BusinessSettingsState>(
         ready: false,
 
         init: async () => {
+            const vigente = contexto;
             try {
                 const s = await configGetBusinessSettings();
+                if (vigente !== contexto) return;
                 set({
                     ...DEFAULTS,
                     ...s,
@@ -69,9 +73,18 @@ export const useBusinessSettings = create<BusinessSettingsState>(
                     ready: true,
                 });
             } catch (e) {
+                if (vigente !== contexto) return;
                 console.error("useBusinessSettings.init error:", e);
                 set({ ...DEFAULTS, ready: true });
             }
+        },
+
+        limpiarContexto: () => {
+            contexto++;
+            if (timer) window.clearTimeout(timer);
+            timer = null;
+            pending = {};
+            set({ ...DEFAULTS, ready: false });
         },
 
         setMany: (patch) => {

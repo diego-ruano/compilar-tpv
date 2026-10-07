@@ -217,9 +217,9 @@ Por orden de dependencia:
    de clientes.
 4. Otro bucket de R2, y la URL de imágenes configurable (`CDN_IMAGES_BASE` en `imageUrl.ts` y la CSP).
 5. Stripe en modo test, con su webhook y sus Prices.
-6. Cliente compilable contra staging: `CLOUD_API_BASE` (`tpv-infra-licensing/src/lib.rs`), `CLOUD_WS_URL`
-   (`shared/lib/cloudApi.ts`) y `LICENSE_SIGNING_PUBLIC_KEYS_B64` están fijados en el código; hay que
-   hacerlos configurables al compilar (como `TPV_SENTRY_DSN`).
+6. Cliente compilable contra staging: `CLOUD_API_BASE` (`tpv-infra-licensing/src/lib.rs`) y
+   `LICENSE_SIGNING_PUBLIC_KEYS_B64` están fijados en el código; hay que hacerlos configurables al
+   compilar (como `TPV_SENTRY_DSN`). El WebSocket nativo deriva su URL de `CLOUD_API_BASE`.
 7. Etiqueta de entorno: `tpv_telemetry::Environment` sólo tiene `Dev` y `Prod`, y el entorno de Sentry
    lo decide `lib.rs::entorno_de_sentry` (`e2e` / `dev` / `prod`).
 8. Correo contenido: staging no puede mandar pedidos a proveedores reales.

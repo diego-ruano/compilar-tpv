@@ -14,6 +14,8 @@
 import { useEffect, useState } from "react";
 
 import { resolveImageUrl } from "./imageUrl";
+import { useMode } from "../stores/useMode";
+import { useMainPresence } from "../stores/useMainPresence";
 
 /**
  * Resuelve una `Ruta_Imagen` a una URL para `<img src>`. Devuelve `""` mientras resuelve o si no
@@ -21,9 +23,12 @@ import { resolveImageUrl } from "./imageUrl";
  */
 export function useImageUrl(ruta: string | null | undefined): string {
 	const [url, setUrl] = useState<string>("");
+	const modo = useMode((s) => s.mode);
+	const generacion = useMainPresence((s) => s.generacion);
 
 	useEffect(() => {
 		let vivo = true;
+		setUrl("");
 
 		resolveImageUrl(ruta)
 			.then((u) => vivo && setUrl(u))
@@ -32,7 +37,7 @@ export function useImageUrl(ruta: string | null | undefined): string {
 		return () => {
 			vivo = false;
 		};
-	}, [ruta]);
+	}, [ruta, modo, generacion]);
 
 	return url;
 }

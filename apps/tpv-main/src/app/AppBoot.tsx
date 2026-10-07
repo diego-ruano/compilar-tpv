@@ -70,8 +70,8 @@ export default function AppBoot({ router }: { router: any }) {
 	// real (conectado / reintentando / rechazado…) se publica en `useEstadoSync`.
 	useMainSocket();
 
-	// WebSocket del Handy: se abre cuando el dispositivo es Handy. Solo recibe `change` de la
-	// nube y refresca React Query + el tick del POS (no aplica SQL: no hay BD local).
+	// Observa el servicio nativo del Handy: presencia y avisos para refrescar React Query
+	// y el ticket abierto. Rust mantiene la conexión y el protocolo.
 	useHandySocket();
 
 	// SEC-01: barrer la sesión del backend al arrancar el webview.

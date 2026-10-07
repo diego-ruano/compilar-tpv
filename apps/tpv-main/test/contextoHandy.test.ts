@@ -1,0 +1,39 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const h = vi.hoisted(() => ({ business: vi.fn(), ticket: vi.fn(), contact: vi.fn(), patchBusiness: vi.fn(), patchTicket: vi.fn(), patchContact: vi.fn() }));
+vi.mock("../src/features/configuracion/api/configApis", () => ({
+    configGetBusinessSettings: h.business, configGetTicketSettings: h.ticket, configGetContactSettings: h.contact,
+    configPatchBusinessSettings: h.patchBusiness, configPatchTicketSettings: h.patchTicket, configPatchContactSettings: h.patchContact,
+}));
+import { useBusinessSettings } from "../src/shared/stores/useBusinessSettings";
+import { useTicketSettings } from "../src/shared/stores/useTicketSettings";
+import { useContactSettings } from "../src/shared/stores/useContactSettings";
+const casos = [
+    { nombre: "negocio", api: h.business, patch: h.patchBusiness, store: useBusinessSettings,
+        datoA: {businessName: "A", ivaPercent: 10}, datoB: {businessName: "B", ivaPercent: 10}, valor: () => useBusinessSettings.getState().businessName,
+        mutar: () => useBusinessSettings.getState().setMany({businessName: "A"}) },
+    { nombre: "ticket", api: h.ticket, patch: h.patchTicket, store: useTicketSettings,
+        datoA: {paperWidthMm: 58}, datoB: {paperWidthMm: 112}, valor: () => useTicketSettings.getState().settings.paperWidthMm,
+        mutar: () => useTicketSettings.getState().setSetting("paperWidthMm", 58) },
+    { nombre: "contacto", api: h.contact, patch: h.patchContact, store: useContactSettings,
+        datoA: {contactEmail: "a@ejemplo.test"}, datoB: {contactEmail: "b@ejemplo.test"}, valor: () => useContactSettings.getState().contactEmail,
+        mutar: () => useContactSettings.getState().setMany({contactEmail: "a@ejemplo.test"}) },
+];
+beforeEach(() => {
+    vi.useFakeTimers(); vi.stubGlobal("window", {setTimeout, clearTimeout}); vi.resetAllMocks();
+    for (const caso of casos) caso.store.getState().limpiarContexto();
+});
+afterEach(() => { for (const caso of casos) caso.store.getState().limpiarContexto(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+describe("cambiar de negocio con ajustes pendientes", () => {
+    it.each(casos)("una lectura tardía de $nombre no sustituye los valores del nuevo negocio", async ({api, store, datoA, datoB, valor}) => {
+        let resolver!: (dato: unknown) => void;
+        api.mockReturnValueOnce(new Promise((resolve) => { resolver = resolve; })).mockResolvedValue(datoB);
+        const anterior = store.getState().init();
+        store.getState().limpiarContexto(); await store.getState().init();
+        const esperado = valor(); resolver(datoA); await anterior;
+        expect(valor()).toBe(esperado); expect(store.getState().ready).toBe(true);
+    });
+    it.each(casos)("cancela el autoguardado de $nombre que pertenecía al vínculo anterior", async ({store, mutar, patch}) => {
+        mutar(); store.getState().limpiarContexto(); await vi.runAllTimersAsync();
+        expect(patch).not.toHaveBeenCalled(); expect(store.getState().ready).toBe(false);
+    });
+});

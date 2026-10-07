@@ -42,6 +42,14 @@ let handyTenantPromise: Promise<string> | null = null;
 // está (creada en otra Handy, pendiente de bajar de R2) NO se cachea, para reintentar la bajada en
 // la siguiente resolución.
 const urlCache = new Map<string, string>();
+let contexto = 0;
+
+/** Al cambiar de modo o negocio las mismas rutas relativas ya no identifican las mismas URLs. */
+export function limpiarCacheImagenes(): void {
+  contexto++;
+  handyTenantPromise = null;
+  urlCache.clear();
+}
 
 async function getHandyTenant(): Promise<string> {
   if (!handyTenantPromise) {
@@ -63,6 +71,7 @@ function isAbsoluteUrl(u: string): boolean {
 export async function resolveImageUrl(
   ruta: string | null | undefined,
 ): Promise<string> {
+  const vigente = contexto;
   const r = String(ruta ?? "").trim();
   if (!r) return "";
   if (isAbsoluteUrl(r)) return r;
@@ -72,7 +81,7 @@ export async function resolveImageUrl(
 
   if (useMode.getState().mode === "handy") {
     const tenant = await getHandyTenant();
-    if (!tenant) return "";
+    if (!tenant || vigente !== contexto) return "";
     const url = `${CDN_IMAGES_BASE}/${tenant}/${r}`;
     urlCache.set(r, url);
     return url;
@@ -101,6 +110,7 @@ export async function resolveImageUrl(
   }
   // Solo memoizamos cuando el fichero ya está en disco: así, si aún no estaba, la próxima
   // resolución vuelve a intentar `images_ensure_local` (bajada de R2).
+  if (vigente !== contexto) return "";
   if (present) urlCache.set(r, url);
   return url;
 }

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { invokeClient, toAppError } from "@tpv/client";
 
 import { queryClient } from "../../shared/lib/queryClient";
+import { limpiarCacheImagenes } from "../../shared/lib/imageUrl";
 import { useMode, type DeviceMode, type ModeStateValue } from "../../shared/stores/useMode";
 
 function isDeviceMode(value: unknown): value is DeviceMode | null {
@@ -28,6 +29,7 @@ export function useModoDispositivo(opciones: { alElegir: () => Promise<void> }) 
 		modoAnteriorRef.current = modo;
 		if (modo !== "loading" && anterior !== "loading" && anterior !== modo) {
 			queryClient.clear();
+			limpiarCacheImagenes();
 		}
 	}, [modo]);
 

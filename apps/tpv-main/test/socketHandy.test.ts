@@ -10,6 +10,8 @@ import { useSyncSignal } from "../src/shared/stores/useSyncSignal";
 import { queryClient } from "../src/shared/lib/queryClient";
 import { useBusinessSettings } from "../src/shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../src/shared/stores/useTicketSettings";
+import { useContactSettings } from "../src/shared/stores/useContactSettings";
+import { useAuth } from "../src/shared/stores/useAuth";
 const foto = (cambio: Partial<EstadoSocketHandy> = {}): EstadoSocketHandy => ({ revision: 0, generacion: 1, conexion: 1, tenant_id: "negocio-a", estado: "conectada", main_online: true, volcando: false, rechazo: null, ...cambio });
 const asentar = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
 beforeEach(() => {
@@ -20,8 +22,9 @@ beforeEach(() => {
     h.invoke.mockImplementation(async (nombre) => nombre === "handy_socket_estado" ? foto() : null);
     vi.spyOn(useBusinessSettings.getState(), "init").mockResolvedValue();
     vi.spyOn(useTicketSettings.getState(), "init").mockResolvedValue();
+    vi.spyOn(useContactSettings.getState(), "init").mockResolvedValue();
     vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
-    useMainPresence.setState({ mainOnline: null, volcando: false, rechazo: null });
+    useMainPresence.setState({ mainOnline: null, volcando: false, rechazo: null, generacion: -1, conexion: -1, tenantId: null, estadoConexion: "pausada" });
 });
 afterEach(() => { h.listeners.clear(); h.removes = []; h.invoke.mockReset(); h.listen.mockReset(); vi.restoreAllMocks(); });
 describe("presentación del socket Handy nativo", () => {
@@ -47,6 +50,7 @@ describe("presentación del socket Handy nativo", () => {
     });
     it("refresca las áreas y el ticket afectados a partir de metadatos", async () => {
         const socket = iniciarSocketHandy("handy")!; await asentar();
+        vi.mocked(queryClient.invalidateQueries).mockClear();
         const info = {ids: ["c1"], touchedComanda: true, uncertain: false, touchedCatalog: false};
         h.listeners.get("handy:cambio")!({payload: {generacion: 1, cambio: {tablas: ["detalle_comanda"], comanda: info}}});
         expect(vi.mocked(queryClient.invalidateQueries).mock.calls.map(([args]) => args?.queryKey)).toEqual([["mesas"], ["stats"]]);
@@ -54,11 +58,13 @@ describe("presentación del socket Handy nativo", () => {
     });
     it("ignora los avisos de una conexión que pertenece al vínculo anterior", async () => {
         const socket = iniciarSocketHandy("handy")!; await asentar();
+        vi.mocked(queryClient.invalidateQueries).mockClear();
         h.listeners.get("handy:cambio")!({payload: {generacion: 0, cambio: {tablas: null, comanda: {}}}});
         expect(queryClient.invalidateQueries).not.toHaveBeenCalled(); socket.detener();
     });
     it("los ajustes se releen y una tabla desconocida obliga al refresco completo", async () => {
         const socket = iniciarSocketHandy("handy")!; await asentar();
+        vi.mocked(useBusinessSettings.getState().init).mockClear(); vi.mocked(useTicketSettings.getState().init).mockClear();
         h.listeners.get("handy:cambio")!({payload: {generacion: 1, cambio: {tablas: null, comanda: {ids: [], touchedComanda: true, uncertain: true, touchedCatalog: true}}}});
         expect(queryClient.invalidateQueries).toHaveBeenCalledWith();
         expect(useBusinessSettings.getState().init).toHaveBeenCalledOnce(); expect(useTicketSettings.getState().init).toHaveBeenCalledOnce(); socket.detener();
@@ -72,8 +78,38 @@ describe("presentación del socket Handy nativo", () => {
         expect(h.listeners.size).toBe(0); expect(h.removes.every((quitar) => quitar.mock.calls.length === 1)).toBe(true); expect(h.invoke).not.toHaveBeenCalled();
     });
     it("un fallo parcial al registrar elimina el otro observador", async () => {
+        useMainPresence.setState({mainOnline: true});
         h.listen.mockImplementationOnce(async () => { throw new Error("fallo"); });
         const socket = iniciarSocketHandy("handy")!; await asentar();
-        expect(h.listeners.size).toBe(0); expect(h.invoke).not.toHaveBeenCalled(); socket.detener();
+        expect(h.listeners.size).toBe(0); expect(h.invoke).not.toHaveBeenCalled(); expect(useMainPresence.getState().mainOnline).toBeNull();
+        socket.reconectarSiHaceFalta(true); await asentar();
+        expect(h.listeners.size).toBe(2); expect(useMainPresence.getState().mainOnline).toBe(true); socket.detener();
+    });
+    it("recupera cambios perdidos al reconectar y al volver a observar el servicio", async () => {
+        let socket = iniciarSocketHandy("handy")!; await asentar();
+        vi.mocked(queryClient.invalidateQueries).mockClear();
+        const tick = useSyncSignal.getState().tick;
+        h.listeners.get("handy:estado")!({payload: foto({revision: 2, conexion: 2})});
+        expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+        expect(useSyncSignal.getState().tick).toBe(tick + 1); expect(useSyncSignal.getState().comanda.uncertain).toBe(true);
+        socket.detener(); socket = iniciarSocketHandy("handy")!; await asentar();
+        expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(2); socket.detener();
+    });
+    it("espera a que la Main termine el volcado antes de releer datos perdidos", async () => {
+        h.invoke.mockImplementation(async () => foto({volcando: true}));
+        const socket = iniciarSocketHandy("handy")!; await asentar();
+        expect(queryClient.invalidateQueries).not.toHaveBeenCalled();
+        h.listeners.get("handy:estado")!({payload: foto({revision: 1, volcando: false})});
+        expect(queryClient.invalidateQueries).toHaveBeenCalledOnce(); socket.detener();
+    });
+    it("cambiar de vínculo retira la sesión y las cachés anteriores sin otro logout nativo", async () => {
+        const socket = iniciarSocketHandy("handy")!; await asentar();
+        useAuth.setState({role: "Administrador", idUsuario: "usuario-a"});
+        queryClient.setQueryData(["clientes"], ["cliente-a"]);
+        useBusinessSettings.setState({businessName: "Negocio A"});
+        h.listeners.get("handy:estado")!({payload: foto({revision: 1, generacion: 2, tenant_id: null, estado: "pausada", main_online: null})});
+        expect(useAuth.getState().idUsuario).toBeNull(); expect(queryClient.getQueryData(["clientes"])).toBeUndefined();
+        expect(useBusinessSettings.getState().businessName).toBe("TPV"); expect(useMainPresence.getState().mainOnline).toBeNull();
+        expect(h.invoke.mock.calls.map(([nombre]) => nombre)).toEqual(["handy_socket_estado"]); socket.detener();
     });
 });

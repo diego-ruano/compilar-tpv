@@ -31,6 +31,7 @@ type TicketSettingsState = {
     settings: TicketSettings;
     ready: boolean;
     init: () => Promise<void>;
+    limpiarContexto: () => void;
 
     // UI instantánea + autoguardado
     setSetting: <K extends keyof TicketSettings>(
@@ -44,6 +45,7 @@ type TicketSettingsState = {
 // debounce (module-level)
 let timer: number | null = null;
 let pending: Partial<TicketSettings> = {};
+let contexto = 0;
 
 function clampPaperWidthMm(n: number) {
     return n === 58 || n === 80 || n === 112 ? n : 80;
@@ -79,8 +81,10 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
     ready: false,
 
     init: async () => {
+        const vigente = contexto;
         try {
             const s = await configGetTicketSettings();
+            if (vigente !== contexto) return;
 
             // ✅ merge + saneado
             const merged: TicketSettings = {
@@ -93,9 +97,18 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
 
             set({ settings: merged, ready: true });
         } catch (e) {
+            if (vigente !== contexto) return;
             console.error("useTicketSettings.init error:", e);
             set({ settings: DEFAULTS, ready: true });
         }
+    },
+
+    limpiarContexto: () => {
+        contexto++;
+        if (timer) window.clearTimeout(timer);
+        timer = null;
+        pending = {};
+        set({ settings: DEFAULTS, ready: false });
     },
 
     setSetting: (key, value) => {

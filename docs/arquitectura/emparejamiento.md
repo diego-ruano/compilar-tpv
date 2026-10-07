@@ -95,3 +95,5 @@ queda marcado en `devices` y todo lo que intente después le contesta `device_re
 
 El WebSocket de la Handy usa un ticket efímero. JavaScript sólo consulta el identificador del
 negocio (`handy_get_tenant`); el JWT permanece en el keyring.
+Guardar un nuevo token avisa al servicio nativo para sustituir el socket anterior inmediatamente;
+la sesión y las cachés de presentación del vínculo anterior se retiran, sin recargar la aplicación.

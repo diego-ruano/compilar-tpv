@@ -59,15 +59,7 @@ export const useAuth = create<AuthState>((set) => ({
         }),
 
     logout: () => {
-        queryClient.clear();
-        set({
-            role: "",
-            idUsuario: null,
-            nombre: null,
-            idTrabajador: null,
-            requiresSetup: false,
-            email: null,
-        });
+        limpiarSesionLocal();
 
         // El store se limpia SIEMPRE y primero: es lo que devuelve la UI al login, y no puede
         // quedar colgado esperando al IPC. El aviso al backend va detrás y sin `await` —quien
@@ -79,3 +71,9 @@ export const useAuth = create<AuthState>((set) => ({
         });
     },
 }));
+
+/** El cambio de vínculo ya cerró la sesión en Rust. Retira su presentación sin enviar otro logout. */
+export function limpiarSesionLocal(): void {
+    queryClient.clear();
+    useAuth.setState({ role: "", idUsuario: null, nombre: null, idTrabajador: null, requiresSetup: false, email: null });
+}
