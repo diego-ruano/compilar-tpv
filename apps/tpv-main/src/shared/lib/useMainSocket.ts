@@ -1,14 +1,4 @@
-// src/shared/lib/useMainSocket.ts
-//
-// El WebSocket de la Main, montado en React. Lo que hace el socket —conectar, ponerse al día, subir
-// el outbox, reconectar— vive en `socketMain.ts`, fuera de React, para poder probarlo sin montar
-// nada. Aquí sólo queda lo que depende de React y del navegador:
-//
-//   · arrancarlo de nuevo cuando cambia algo de lo que depende (modo, palanca, datos perdidos,
-//     recuperación pendiente);
-//   · avisarle de que conviene reconectar ya: vuelve la red, la ventana recupera el foco, o llega
-//     el `pulso`.
-
+// RI-31: observa la réplica nativa y comunica señales de conectividad del navegador.
 import { useEffect } from "react";
 
 import { useEstadoSync } from "../stores/useEstadoSync";

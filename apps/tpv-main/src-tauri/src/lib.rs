@@ -5,6 +5,7 @@
 mod commands;
 mod interruptores;
 mod imagenes;
+mod replicacion;
 mod jobs;
 mod printing;
 
@@ -480,6 +481,7 @@ pub(crate) fn permiso_denegado(detalle: impl Into<String>) -> AppErrorDto {
 pub(crate) fn configure_outbox_notifier(app: &AppHandle, db: &Arc<Db>) {
     let h = app.clone();
     db.set_outbox_notifier(move || {
+        if let Some(sync) = h.try_state::<replicacion::SyncNativo>() { sync.despertar.notify_one(); }
         let _ = h.emit("outbox:pending", ());
     });
 }
@@ -2105,6 +2107,7 @@ pub fn run() {
             // `jobs/registro.rs` y las corre el runner con una política común —vencimiento en reloj
             // de pared, jitter, backoff y gating por modo—. Va DESPUÉS de `app.manage` porque los
             // cuerpos resuelven sus repositorios desde el `AppState`.
+            replicacion::arrancar(handle.clone());
             jobs::arrancar(handle);
 
             Ok(())
@@ -2160,7 +2163,7 @@ pub fn run() {
             commands::recovery::recovery_export_backup,
             commands::recovery::recovery_import_backup,
             commands::recovery::recovery_restore_backup,
-            commands::recovery::recovery_complete,
+
             // mesass
             commands::mesas::save_layout,
             commands::mesas::load_layout,
@@ -2331,15 +2334,12 @@ pub fn run() {
             commands::pairing::pair_create,
             commands::pairing::config_upload_initial_setup,
             // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
-            commands::sync::sync_apply_changes,
-            commands::sync::sync_get_checkpoint,
+
             // sincronización Main → nube (outbox de escrituras locales)
-            commands::sync::sync_outbox_pending,
-            commands::sync::sync_outbox_mark_sent,
-            commands::sync::sync_outbox_mark_failed,
-            commands::sync::sync_outbox_mark_encolada,
-            commands::sync::sync_liberar_encoladas,
+
             commands::sync::sync_health,
+            commands::sync::sync_estado,
+            commands::sync::sync_reintentar,
             commands::sync::sync_backfill_estado,
             commands::sync::sync_bootstrap_desde_nube,
             commands::sync::sync_inicializar_tenant_vacio,
@@ -2762,6 +2762,17 @@ mod tests_exenciones_del_gate {
 
     /// Marcas de que alguien ha metido el gate donde no puede estar.
     const SENALES_DE_GATE: &[&str] = &["exigir_rol", "state.sesion()"];
+
+    #[test]
+    fn la_replica_y_las_credenciales_no_se_exponen_a_la_webview() {
+        let registro = include_str!("lib.rs").split("generate_handler!").nth(1).unwrap().split("])").next().unwrap();
+        for comando in ["sync_apply_changes", "sync_outbox_pending", "sync_outbox_mark_sent", "sync_outbox_mark_failed", "sync_outbox_mark_encolada", "sync_liberar_encoladas", "recovery_complete", "device_sign_b64", "handy_get_ws_auth"] {
+            assert!(!registro.contains(comando), "{comando} debe ser interno");
+        }
+        let proxy = include_str!("commands/pairing.rs");
+        assert!(proxy.contains("if !permitido"));
+        assert!(proxy.contains("Esta ruta no está disponible"));
+    }
 
     #[test]
     fn atribuciones_de_servicio_salen_de_la_sesion() {

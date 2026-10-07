@@ -1066,7 +1066,8 @@ impl PairingService for PairingAdapter {
         }.ok_or_else(|| AppError::not_found("Falta el negocio del dispositivo"))?;
         if tenant.is_empty() || tenant.contains(['\n', '\r']) { return Err(AppError::validation("Negocio inválido")); }
         let ts = reloj::ahora_ms();
-        let payload = format!("WS_HELLO\n{ts}\n{tenant}\n{device_id}\n{nonce_b64}");
+        let dominio = if mode == "handy" { "WS_HANDY_HELLO" } else { "WS_HELLO" };
+        let payload = format!("{dominio}\n{ts}\n{tenant}\n{device_id}\n{nonce_b64}");
         Ok(FirmaDispositivo { ts, sig_b64: sign_payload_b64(&sk, &payload).map_err(ext)? })
     }
 

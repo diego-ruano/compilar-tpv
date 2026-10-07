@@ -217,3 +217,19 @@ export function shouldReloadTicket(
 	if (!activeId) return false;
 	return info.ids.includes(activeId);
 }
+
+/** RI-31: la Main recibe sólo tablas; las sentencias se quedan en Rust. */
+export function featureKeysPorTablas(tablas: string[] | null): string[] | null {
+    if (tablas === null) return null;
+    const keys = new Set<string>();
+    for (const tabla of tablas) {
+        const features = TABLE_TO_FEATURES[tabla.toLowerCase()];
+        if (!features) return null;
+        for (const feature of features) keys.add(feature);
+    }
+    return Array.from(keys);
+}
+
+export function ajustesPorTablas(tablas: string[] | null): boolean {
+    return tablas === null || tablas.some((t) => TABLAS_DE_AJUSTES.has(t.toLowerCase()));
+}

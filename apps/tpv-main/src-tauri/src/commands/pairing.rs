@@ -48,6 +48,16 @@ fn svc(app: &AppHandle) -> Result<PairingAdapter, String> {
 /// clave del dispositivo que reclamó).
 const PAIRING_SIN_SESION: [&str; 3] = ["/v1/pair/claim", "/v1/pair/fetch-token", "/v1/pair/cancel"];
 
+
+fn ruta_permitida(modo: Option<crate::DeviceMode>, mode: &str, path: &str) -> bool {
+    match mode {
+        "anon" => PAIRING_SIN_SESION.contains(&path),
+        "handy" => modo == Some(crate::DeviceMode::Handy) && path == "/v1/ws/ticket",
+        "tpv" => modo == Some(crate::DeviceMode::Tpv) && ["/v1/pair/pending", "/v1/pair/approve", "/v1/pair/reject", "/v1/device/list", "/v1/device/revoke"].contains(&path),
+        _ => false,
+    }
+}
+
 /// ¿Esta ruta del proxy es administración de dispositivos?
 ///
 /// Normaliza antes de decidir (query, mayúsculas, barra final): la ruta la escribe quien llama,
@@ -94,7 +104,9 @@ pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, AppErrorDto
 
 #[tauri::command]
 pub async fn device_firmar_hello(app: AppHandle, state: State<'_, AppState>, args: DeviceFirmarHelloArgs) -> Result<FirmaDispositivo, AppErrorDto> {
-    let mode = crate::signing_mode(*state.mode.lock().await).ok_or("Modo no configurado")?;
+    // La Main firma únicamente dentro de su transporte nativo; el IPC sólo sirve a la Handy.
+    if *state.mode.lock().await != Some(crate::DeviceMode::Handy) { return Err(crate::permiso_denegado("Saludo no disponible por IPC en la Main")); }
+    let mode = "handy";
     Ok(uc::firmar_hello(&svc(&app)?, mode, &args.nonce_b64)?)
 }
 
@@ -118,6 +130,10 @@ pub async fn tpv_server_post_json(
     state: State<'_, AppState>,
     args: TpvServerPostJsonArgs,
 ) -> Result<JsonValue, AppErrorDto> {
+    // RI-57: lista exacta de capacidades UI. El modo y las rutas de réplica no los elige JS.
+    let modo = *state.mode.lock().await;
+    let permitido = ruta_permitida(modo, &args.mode, &args.path);
+    if !permitido { return Err(crate::permiso_denegado("Esta ruta no está disponible desde la interfaz")); }
     if ruta_de_administracion(&args.path) {
         state.exigir_rol(&[ADMIN]).await?;
     }
@@ -158,7 +174,17 @@ mod tests_gate_del_proxy {
     //! que sostienen la decisión: que el emparejamiento sin sesión siga pasando, y que no se
     //! pueda esquivar el candado escribiendo la ruta de otra manera.
 
-    use super::ruta_de_administracion;
+    use super::{ruta_de_administracion, ruta_permitida};
+
+    #[test]
+    fn el_proxy_no_da_acceso_a_replica_ni_a_rutas_reescritas() {
+        use crate::DeviceMode;
+        assert!(ruta_permitida(Some(DeviceMode::Handy), "handy", "/v1/ws/ticket"));
+        assert!(!ruta_permitida(Some(DeviceMode::Tpv), "handy", "/v1/ws/ticket"));
+        for p in ["/v1/sync/changes", "/v1/ws/ticket", "/v1/pair/pending?x=1", "/v1/pair/../sync/changes", "/v1/pair/%2e%2e/sync/changes"] {
+            assert!(!ruta_permitida(Some(DeviceMode::Tpv), "tpv", p));
+        }
+    }
 
     #[test]
     fn administrar_dispositivos_pide_permiso() {

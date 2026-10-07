@@ -15,7 +15,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LEGAL-02](#legal-02--reglamento-de-ciberresiliencia) | 🟠 | Reglamento de Ciberresiliencia | Sin empezar |
 | [FABLE-B](#fable-b--detalles-internos-en-las-respuestas-de-error) | 🟠 | El worker devuelve detalles internos en los 500 | Aplazado |
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
-| [RI-31](#ri-31--la-replicación-de-la-main-vive-en-la-webview) | 🔵 | La replicación de la Main vive en la webview | Sin decidir; se aborda aparte |
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
 | [RI-13](#ri-13--la-pii-del-personal-se-cifra-sin-normalizar-ni-validar) | 🟡 | DNI, IBAN y nº de la Seguridad Social se cifran sin normalizar ni validar | Pendiente de decidir si estos campos se quedan |
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
@@ -366,35 +365,6 @@ Opciones, de menos a más ambiciosas:
 
 Decisión: refactor gradual después del lanzamiento, por (2) y luego (3) si la duplicación sigue
 doliendo.
-
-### RI-31 · La replicación de la Main vive en la webview
-
-El núcleo de la replicación de la Main —WebSocket, drenado del outbox, catch-up, volcado y
-reconciliación— es JavaScript dentro de la webview (`src/shared/lib/socketMain.ts`, ~1.100 líneas, y
-`socketComun.ts`). Funciona y está probado (`test/socketMain.test.ts`), pero tiene tres costes:
-
-1. **Cada operación cruza el IPC dos veces como JSON.** Rust serializa el outbox, JS lo deserializa y
-   lo vuelve a serializar para el socket; a la vuelta, el cambio llega a JS y vuelve a Rust por
-   `sync_apply_changes`. Una página de catch-up de 500 cambios hace ese viaje entero.
-2. **La réplica depende de que la webview esté viva.** Si WebView2 se cuelga, se recarga o se queda
-   sin memoria, la venta sigue (es local), pero la réplica se para hasta que el frontend vuelve a
-   arrancar.
-3. **Obliga a exponer primitivas sensibles al IPC**: `sync_apply_changes` ejecuta el SQL que le pase
-   la webview, sin pasar por el outbox, y `sync_outbox_mark_sent` da por subida una operación.
-
-Lo que habría que hacer: llevar la conexión de la Main a Rust (`tokio-tungstenite`) como un actor
-propio junto al runner de jobs, y dejar a la webview como consumidora de eventos (`sync:estado`,
-`sync:aplicadas`). La máquina de estados ya está separada y documentada, así que se traslada más que
-se reescribe; los tests de política (`estadoSync`, `recoverySync`) pueden quedarse en TS si esa parte
-sigue en el frontend, o portarse. Con eso salen del `generate_handler!` `sync_apply_changes`,
-`sync_outbox_mark_sent` y el resto de comandos `sync_*` que sólo usa el socket.
-
-**No** salen `device_sign_b64` ni `handy_get_ws_auth`: los usan también el socket de la Handy
-(`socketHandy.ts`, `socketComun.ts`) y el emparejamiento (`app/arranque/emparejamiento.ts`). Para
-retirarlos habría que llevar a Rust también esos dos caminos.
-
-Decisión: no entra en un lote de arreglos. Es un cambio de arquitectura con su propio riesgo (es el
-camino por el que replica todo), y se aborda aparte, con su plan, cuando se retome.
 
 ### RELOJ-01 · La hora del negocio es la del equipo
 

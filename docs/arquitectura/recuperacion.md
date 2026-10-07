@@ -27,8 +27,8 @@ antigua crearía dos historiales que no hay forma de juntar.
 | Copia manual, exportar, importar | `commands/recovery.rs` (`recovery_create_backup`, `…_export_backup`, `…_import_backup`) | Sacar una copia del equipo y traerla de vuelta |
 | Base que no abre | `lib.rs::run` (arranque sin `Db`) + `commands/recovery.rs::asegurar_base_para_recuperar` | Arrancar igual y apartar el fichero ilegible |
 | Bloqueo del login | `_Recovery_State.Reconciliation_Pending` | Restaurado no es utilizable |
-| Reconciliar | `src/shared/lib/recoverySync.ts` + `socketMain.ts` | Catch-up → outbox → catch-up, hasta converger |
-| Desbloquear | `commands/recovery.rs::recovery_complete` | Outbox a 0 y checkpoint ≥ el final del log de la nube |
+| Reconciliar | `tpv-application/src/use_cases/replicacion.rs` + transporte nativo | Catch-up → outbox → catch-up, hasta converger |
+| Desbloquear | `commands/recovery.rs::completar` (interno) | Outbox a 0 y checkpoint ≥ el final del log de la nube |
 | Traslado de licencia | `commands/licensing.rs::license_activate` + `recovery.rs::marcar_traslado` | La base de antes del traslado no se usa |
 | Pantallas | `src/app/pages/RecuperarDatos.tsx` (restaurar) · `features/configuracion/sections/Conectividad.tsx` (ver y sacar copias) | |
 
@@ -114,7 +114,7 @@ esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_
   advierte, el daño se queda en local (restaurar no llena el outbox) y se deshace recuperando de la nube.
 - Una copia inservible se rechaza diciendo por qué.
 - Al restaurar se vacía `_Sync_Failed`: lo que registra son intentos contra la base que se reemplaza, y
-  `recovery_complete` exige que no haya ninguno.
+  `completar` exige que no haya ninguno.
 - **La guardia del outbox**: restaurar reemplaza, así que se niega si hay operaciones sin subir. La
   comprobación va **dentro** de la transacción (`bootstrap_restaurar` y
   `recovery::asegurar_reemplazo_seguro`), con dos excepciones: una base ya en reconciliación y una base
@@ -144,10 +144,10 @@ Tras restaurar, `_Recovery_State.Reconciliation_Pending = 1`, se reencolan los r
 ([verifactu.md](verifactu.md#tras-restaurar)) y el socket hace, en orden: **catch-up** (lo ocurrido
 después de la copia), **subir el outbox** (lo que la copia tenía) y **catch-up** otra vez hasta que el
 outbox esté a 0 y el checkpoint alcance el final del log de la nube (hasta 180 vueltas).
-`recovery_complete` vuelve a comprobarlo y desbloquea el login. Si `/v1/sync/changes` no informa del
+`completar` vuelve a comprobarlo y desbloquea el login. Si `/v1/sync/changes` no informa del
 final del log, **no se desbloquea**.
 
-Tras **5 ciclos seguidos fallidos** (`MAX_FALLOS_RECUPERACION`) la reconciliación queda `bloqueada`: deja
+Tras **5 ciclos seguidos fallidos** (contador del motor nativo) la reconciliación queda `bloqueada`: deja
 de reintentar sola y la pantalla vuelve a ofrecer las alternativas.
 
 ## Traslado de licencia

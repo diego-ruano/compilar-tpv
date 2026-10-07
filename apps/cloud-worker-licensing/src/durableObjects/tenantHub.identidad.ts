@@ -128,8 +128,10 @@ export async function verifyHelloSigned(params: {
 
 	if (!pubkeyB64) throw new Error("device_pubkey_not_registered");
 
+	// RI-57: una firma permitida a la webview Handy nunca abre un socket con privilegios Main.
+	const dominio = roleFinal === "handy" ? "WS_HANDY_HELLO" : "WS_HELLO";
 	const payload = new TextEncoder().encode(
-		`WS_HELLO\n${msg.ts}\n${tenantId}\n${deviceId}\n${msg.nonceB64}`,
+		`${dominio}\n${msg.ts}\n${tenantId}\n${deviceId}\n${msg.nonceB64}`,
 	);
 
 	const pub = nobleForceU8(b64ToBytes(pubkeyB64));

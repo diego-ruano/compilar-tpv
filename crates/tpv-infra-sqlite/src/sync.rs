@@ -474,16 +474,10 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> 
             Ok(_) => Ok(aplicacion),
             Err(e) => {
                 // Con `defer_foreign_keys`, las violaciones de FK saltan AQUÍ (en el COMMIT), no
-                // en la sentencia. Volcamos el op_id + sus sentencias para identificar qué fila
-                // hija quedó sin padre en la BD local.
+                // en la sentencia. OBS-02/RI-57: sólo operación y secuencia, nunca SQL ni args.
                 let _ = conn.execute_batch("ROLLBACK;").await;
-                let sqls: Vec<String> = ch
-                    .statements
-                    .iter()
-                    .map(|s| s.sql.split_whitespace().collect::<Vec<_>>().join(" "))
-                    .collect();
                 Err(AppError::repository(format!(
-                    "COMMIT op {} (seq {}) falló: {e} :: sentencias={sqls:?}",
+                    "COMMIT op {} (seq {}) falló: {e}",
                     ch.op_id, ch.seq
                 )))
             }

@@ -276,17 +276,17 @@ pub async fn recovery_restore_backup(
 /// Última barrera de seguridad del desbloqueo. Aunque el frontend se equivoque, no se limpia la
 /// marca persistente mientras quede outbox, falle una operación o el checkpoint no haya alcanzado
 /// el high-water que acaba de observar en la nube.
-#[tauri::command]
-pub async fn recovery_complete(
-    state: State<'_, AppState>,
+pub(crate) async fn completar(
+    state: &AppState,
     cloud_high_water: i64,
-) -> Result<(), AppErrorDto> {
-    let repo = state.sync_repo().await?;
+) -> Result<(), AppError> {
+    let repo = state.sync_repo().await.map_err(AppError::repository)?;
     let health = uc_sync::health(repo.as_ref()).await?;
     if health.outbox_pending != 0
         || health.last_seq < cloud_high_water
         || health.failing != 0
         || health.quarantined != 0
+        || health.subida_en_cuarentena != 0
     {
         return Err(AppError::conflict(format!(
             "La reconciliación aún no ha terminado (outbox={}, checkpoint={}, nube={}, fallos={}, cuarentena={})",
@@ -295,8 +295,7 @@ pub async fn recovery_complete(
             cloud_high_water,
             health.failing,
             health.quarantined,
-        ))
-        .into());
+        )));
     }
 
     let db = state
@@ -305,7 +304,7 @@ pub async fn recovery_complete(
         .await
         .as_ref()
         .cloned()
-        .ok_or_else(|| AppErrorDto::internal("DB no inicializada"))?;
+        .ok_or_else(|| AppError::internal("DB no inicializada"))?;
     tpv_infra_sqlite::recovery::complete_reconciliation(&db).await?;
     Ok(())
 }

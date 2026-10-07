@@ -32,7 +32,7 @@ sin nube no opera.
 | Repositorio de sync | `crates/tpv-infra-sqlite/src/sync.rs` | Outbox, aplicar cambios remotos, cuarentenas, catch-up, bootstrap, backfill, contraste con la nube |
 | Reparación por estado | `crates/tpv-infra-sqlite/src/sync_reparacion.rs` | Reencola la fila tal como está ahora |
 | Casos de uso y comandos | `tpv-application/src/use_cases/sync.rs` · `commands/sync.rs` | La interfaz Tauri |
-| Socket de la Main | `src/shared/lib/socketMain.ts` (lo arranca `useMainSocket.ts`) | Subir el outbox (o volcarlo), aplicar lo que llega, catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`). Fuera de React; se prueba en `test/socketMain.test.ts` |
+| Réplica de la Main | `src-tauri/src/replicacion.rs` · `tpv-application/src/use_cases/replicacion.rs` | Transporte nativo TLS, catch-up, outbox, confirmaciones, recuperación y estado de conexión. La UI observa `sync:estado` y `sync:cambio`, sin SQL ni credenciales (RI-31/RI-57) |
 | Socket de la Handy | `src/shared/lib/socketHandy.ts` (lo arranca `useHandySocket.ts`) | Recibe `change` y refresca; vigila la presencia de la Main. `test/socketHandy.test.ts` |
 | Común a los dos | `src/shared/lib/socketComun.ts` | Reconexión, latido con vigía, ticket y firma del saludo, rechazos |
 | Qué refrescar | `src/shared/lib/syncStatements.ts` | De las tablas tocadas a las claves de React Query |
@@ -114,12 +114,12 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 - **Un 403 es `rechazado`**: se espacian los reintentos y se lanza un `license_check_now`, que emite
   `license:changed` y tapa la aplicación. Anular una licencia cierra el socket desde el worker y eso es
   lo que hace que el equipo se entere en segundos ([licencias.md](licencias.md#anular-desde-la-administración)).
-- **Se firma con la hora de la nube** (`device_hora_para_firmar` para el saludo del WebSocket). Un
+- **Se firma con la hora de la nube** (Rust construye y firma el saludo). Un
   rechazo por la hora es `RelojDesfasado`, no falta de red.
 - **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong`, se cierra. Se reconecta al
   instante ante `online`, `focus` o `visibilitychange`, y si no, con espera creciente de 3 a 30 s.
 - **Un socket abandonado no toca nada**: quien reconecta suelta el anterior (`soltarSocket`) y el
-  `onclose` de un socket que ya no es el actual no hace nada. El DO echa al socket anterior de un
+  el transporte anterior se cancela al sustituirse. El DO echa al socket anterior de un
   dispositivo cuando conecta uno nuevo (`replaced`).
 - **Mientras faltan los datos, no se abre el socket** (`datosPerdidos` → `pausada`): un catch-up desde
   `Last_Seq = 0` no reconstruye nada ([recuperacion.md](recuperacion.md)).
@@ -133,7 +133,7 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   ninguno de los dos, que cuenta. **Se falla hacia transitorio**: apartar deja la nube divergente.
   El cliente no compara textos de error de libsql.
 - **El transporte no cuenta nunca** como intento de la operación: `socket_not_open`, `ack_timeout` y
-  `socket_soltado` (`ERRORES_DE_TRANSPORTE`, constantes del propio cliente). Cuando lo roto es el cable,
+  `socket_soltado` (un vencimiento o cierre del canal nativo nunca se trata como rechazo de aplicación). Cuando lo roto es el cable,
   apartar la cabeza de la cola no desatasca nada.
 - Una operación con **20 intentos** contados (`MAX_SUBIDA_ATTEMPTS`) o un rechazo permanente se
   **aparta** (`outbox_mark_failed`, SYNC-20): sale de la cola, se cuenta aparte de lo pendiente
@@ -262,3 +262,15 @@ resultado de la anterior quedó **incierto** (fallo de transporte, timeout o 5xx
 petición vuelve a salir con su clave y sus bytes durante 5 minutos, y el DO devuelve el resultado de
 la primera si se aplicó (RI-64). Así, el camarero que vuelve a pulsar tras un error no duplica la
 línea. Con una respuesta clara la clave se olvida, y pedir dos veces lo mismo son dos operaciones.
+
+### Frontera con la webview (RI-31/RI-57)
+
+El motor se inicia en el shell y sigue vivo al desmontar React. La webview sólo consulta
+`sync_estado`, pide un reintento o consulta salud/progreso. Aplicar SQL, confirmar el outbox,
+liberar encoladas y desbloquear la reconciliación son capacidades internas. El proxy HTTP
+admite sólo rutas concretas de emparejamiento/administración y el ticket Handy; no permite
+pedir un ticket Main ni usar las rutas de réplica. El saludo Handy lleva `WS_HANDY_HELLO` y
+no sirve para autenticar una Main, incluso si cambia el modo local.
+
+Las notificaciones llevan tablas y las comandas afectadas, sin sentencias ni argumentos.
+Una revisión creciente evita que un snapshot antiguo pise un evento reciente.

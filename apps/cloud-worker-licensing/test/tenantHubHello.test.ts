@@ -63,9 +63,10 @@ async function firmar(
 	tenantId: string,
 	deviceId: string,
 	nonceB64: string,
+    dominio = "WS_HELLO",
 ): Promise<string> {
 	const payload = new TextEncoder().encode(
-		`WS_HELLO\n${ts}\n${tenantId}\n${deviceId}\n${nonceB64}`,
+		`${dominio}\n${ts}\n${tenantId}\n${deviceId}\n${nonceB64}`,
 	);
 	const sig = await crypto.subtle.sign({ name: "Ed25519" }, kp.privateKey, payload);
 	return bytesToB64(new Uint8Array(sig));
@@ -106,13 +107,13 @@ async function verificarFalla(params: Parameters<typeof verificar>[0]): Promise<
 }
 
 /** Un hello legítimo, listo para que cada test lo estropee a su manera. */
-async function helloValido(over: Partial<HelloSignedMsg> = {}, nonce = "nonce-abc") {
+async function helloValido(over: Partial<HelloSignedMsg> = {}, nonce = "nonce-abc", dominio = "WS_HELLO") {
 	const ts = Date.now();
 	return {
 		type: "helloSigned" as const,
 		ts,
 		nonceB64: nonce,
-		sigB64: await firmar(claves, ts, TENANT, DEVICE, nonce),
+		sigB64: await firmar(claves, ts, TENANT, DEVICE, nonce, dominio),
 		...over,
 	};
 }
@@ -134,7 +135,7 @@ describe("verifyHelloSigned · camino legítimo", () => {
 
 	it("usa la clave registrada en la central aunque el cliente no mande pista", async () => {
 		const out = await verificar({
-			msg: await helloValido(),
+			msg: await helloValido({}, "nonce-abc", "WS_HANDY_HELLO"),
 			challenge: challengeVivo(),
 			pubkeyB64Hint: null,
 			central: { revoked: false, pubkeyB64: PUB, role: "handy" },
@@ -258,7 +259,7 @@ describe("verifyHelloSigned · escalada de privilegios", () => {
 	   se declararía "tpv" y tendría permiso de escritura sobre todo el negocio. */
 	it("el rol que pide el mensaje se ignora: manda la central", async () => {
 		const out = await verificar({
-			msg: await helloValido({ role: "tpv" }),
+			msg: await helloValido({ role: "tpv" }, "nonce-abc", "WS_HANDY_HELLO"),
 			challenge: challengeVivo(),
 			pubkeyB64Hint: PUB,
 			central: { revoked: false, pubkeyB64: PUB, role: "handy" },
@@ -443,4 +444,10 @@ describe("issueChallenge", () => {
 		expect(margen).toBeGreaterThan(0);
 		expect(margen).toBeLessThanOrEqual(5 * 60_000);
 	});
+});
+
+// Una Main no puede fabricar un saludo privilegiado con el comando de firma Handy (RI-57).
+it("rechaza una firma Handy cuando la base central concede privilegios Main", async () => {
+    const msg = await helloValido({}, "nonce-abc", "WS_HANDY_HELLO");
+    await expect(verificar({ msg, challenge: challengeVivo(), pubkeyB64Hint: PUB, central: CENTRAL_OK })).rejects.toThrow("bad_ws_signature");
 });

@@ -2,7 +2,7 @@
 //!
 //! El worker reenvía por WebSocket (y sirve por el catch-up) operaciones con sus sentencias
 //! SQL ya resueltas (los IDs/`MAX+1` viajan literales). La Main las aplica tal cual a su
-//! SQLite local mediante el comando `sync_apply_changes`.
+//! SQLite local mediante el motor nativo de replicación (RI-31/RI-57).
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -52,8 +52,7 @@ pub struct AplicacionSync {
     pub last_seq: i64,
 }
 
-/// Una operación pendiente en el outbox local de la Main (dirección Main → nube). El frontend
-/// la envía al worker por el WebSocket (`apply`) y, al recibir el `apply_ack`, la marca enviada.
+/// Una operación pendiente del outbox (Main → nube). La envía exclusivamente el motor nativo.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct OutboxEntry {
@@ -334,4 +333,34 @@ pub struct ClavesTabla {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VerificacionClaves {
     pub tablas: Vec<ClavesTabla>,
+}
+
+/// RI-31: estado de réplica para la UI, sin SQL ni credenciales.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct EstadoReplicacion {
+    #[ts(type = "number")]
+    pub revision: u64,
+    pub estado: String,
+    pub detalle: Option<String>,
+    pub fase_recuperacion: String,
+    pub fallos_recuperacion: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ComandaReplicada {
+    pub ids: Vec<String>,
+    pub touched_comanda: bool,
+    pub uncertain: bool,
+    pub touched_catalog: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct CambioReplicado {
+    /// None obliga a refrescar todas las consultas: una tabla sin clasificar nunca deja datos viejos.
+    pub tablas: Option<Vec<String>>,
+    pub comanda: ComandaReplicada,
 }
