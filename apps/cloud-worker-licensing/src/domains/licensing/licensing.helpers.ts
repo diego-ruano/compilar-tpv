@@ -46,6 +46,18 @@ const ASSERTION_TTL_MS = 5 * 60 * 1000;
 export const OTP_TTL_MS = 10 * 60 * 1000;
 export const OTP_MAX_ATTEMPTS = 5;
 
+/**
+ * RI-68 · Los topes de verdad del código de cambio de equipo, POR LICENCIA y en 24 h.
+ *
+ * Los 5 intentos de arriba son por código, y un código es de una pareja (licencia, equipo nuevo):
+ * con la clave de licencia, cada `deviceId` inventado abría su pareja, y pedir otro código volvía a
+ * dar 5 intentos. Eran intentos sin fin —y un correo al titular por cada uno—. Un dueño que cambia
+ * de PC de verdad pide uno o dos códigos y acierta, así que estos topes no le rozan.
+ */
+export const OTP_VENTANA_MS = 24 * 60 * 60 * 1000;
+export const OTP_CODIGOS_AL_DIA = 5;
+export const OTP_FALLOS_AL_DIA = 10;
+
 // ---------------- Env / utilidades genéricas ----------------
 
 export function assertEnv(env: Env, names: (keyof Env)[]): string | null {

@@ -24,6 +24,7 @@
 import type { Client } from "@libsql/client/web";
 
 import { exec } from "../../server/db";
+import { pasaElLimitador } from "../../lib/limitador";
 
 export const FALLOS_POR_TRAMO = 3;
 /** Pasado este tiempo sin fallar, la cuenta vuelve a empezar. */
@@ -116,15 +117,5 @@ export const PETICIONES_POR_MINUTO = 20;
  *     si desapareciera no habría ningún síntoma.
  */
 export async function pasaElFiltroExterior(env: { LIMITADOR_CLAIM?: RateLimit }, ip: string): Promise<boolean> {
-	const limitador = env?.LIMITADOR_CLAIM;
-	if (!limitador) return true;
-
-	try {
-		const { success } = await limitador.limit({ key: ip });
-		return success;
-	} catch (e: any) {
-		// Mismo motivo que la ausencia del binding: detrás hay un control exacto.
-		console.error("[pairing] el filtro exterior falló, se deja pasar:", String(e?.message || e));
-		return true;
-	}
+	return pasaElLimitador(env?.LIMITADOR_CLAIM, ip, "pairing");
 }

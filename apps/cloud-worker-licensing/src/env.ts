@@ -65,6 +65,11 @@ export interface Env {
 	// las lecturas de Turso que este filtro ahorra.
 	LIMITADOR_CLAIM?: RateLimit;
 
+	// RI-68 · Filtro por IP de `/v1/license/activate` y `/v1/license/device-change/request`
+	// (`licensing.routes.ts`). Igual que el anterior: opcional, y detrás están los topes exactos por
+	// licencia del código de cambio de equipo.
+	LIMITADOR_LICENCIA?: RateLimit;
+
 	// Durable Object (WebSocket hub por tenant)
 	TenantHub: DurableObjectNamespace;
 

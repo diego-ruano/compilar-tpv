@@ -887,6 +887,50 @@ export async function putDeviceOtp(
 	);
 }
 
+/**
+ * RI-68 · Reserva uno de los códigos del día de esta licencia: `true` si quedaba alguno.
+ *
+ * Contar y anotar van en UNA sentencia, para que dos peticiones a la vez no puedan pasar las dos con
+ * el último hueco.
+ */
+export async function reservarEnvioDeOtp(
+	db: Sql,
+	args: { licenseId: string; ahoraMs: number; ventanaMs: number; maximo: number },
+): Promise<boolean> {
+	const r = await exec(
+		db,
+		`
+    INSERT INTO license_otp_eventos (license_id, tipo, at_ms)
+    SELECT ?1, 'envio', ?2
+    WHERE (SELECT COUNT(*) FROM license_otp_eventos
+            WHERE license_id = ?1 AND tipo = 'envio' AND at_ms > ?3) < ?4;
+    `,
+		[args.licenseId, args.ahoraMs, args.ahoraMs - args.ventanaMs, args.maximo],
+	);
+	return Number((r as any)?.rowsAffected ?? 0) > 0;
+}
+
+/** RI-68 · Cuántos códigos incorrectos se han tecleado para esta licencia en la ventana. */
+export async function fallosDeOtpRecientes(
+	db: Sql,
+	args: { licenseId: string; ahoraMs: number; ventanaMs: number },
+): Promise<number> {
+	const r = await exec(
+		db,
+		`SELECT COUNT(*) AS n FROM license_otp_eventos WHERE license_id = ? AND tipo = 'fallo' AND at_ms > ?;`,
+		[args.licenseId, args.ahoraMs - args.ventanaMs],
+	);
+	return Number((r.rows?.[0] as any)?.n ?? 0);
+}
+
+/** RI-68 · Anota un código incorrecto contra la licencia (no contra la pareja). */
+export async function anotarFalloDeOtp(db: Sql, licenseId: string, ahoraMs: number): Promise<void> {
+	await exec(db, `INSERT INTO license_otp_eventos (license_id, tipo, at_ms) VALUES (?, 'fallo', ?);`, [
+		licenseId,
+		ahoraMs,
+	]);
+}
+
 export async function getDeviceOtp(
 	db: Sql,
 	licenseId: string,

@@ -2,8 +2,7 @@
 //
 // Recogida de basura de la base central. Lo llama el cron diario (`index.ts::programado`).
 //
-// Dos tablas crecían sin techo porque nadie las borraba nunca, y las dos las hace crecer alguien
-// de fuera:
+// Tablas que crecerían sin techo si nadie las borrara, y a las que hace crecer alguien de fuera:
 //
 //   · `pair_claim_fallos` — una fila por IP que falla un emparejamiento. Sólo se borraba al
 //     emparejar BIEN, así que un barrido de códigos dejaba su rastro para siempre. Con IPv6 una
@@ -12,6 +11,8 @@
 //     igual lo grande que sea): era almacenamiento sin límite a partir de una entrada que no
 //     controlamos.
 //   · `email_sends` — una fila por correo enviado, y el tope de REV-14 sólo mira las últimas 24 h.
+//   · `license_otp_eventos` (RI-68) — una fila por código de cambio de equipo enviado o fallado, y
+//     sus topes sólo miran las últimas 24 h.
 //
 // Lo que NO se purga, para que no parezca un olvido: `Ws_Tickets` ya se limpia sola al usarse
 // (`ws.routes.ts`), y `email_codes` está acotada por su clave (tenant, dispositivo, propósito),
@@ -19,6 +20,7 @@
 
 import type { Sql } from "./db";
 import { exec } from "./db";
+import { OTP_VENTANA_MS } from "../domains/licensing/licensing.helpers";
 
 /**
  * Cuánto se conserva un rastro de fallos de emparejamiento.
@@ -45,7 +47,11 @@ export const RETENCION_FALLOS_MS = 24 * 60 * 60 * 1000;
  */
 export const RETENCION_ENVIOS_MS = 90 * 24 * 60 * 60 * 1000;
 
-export type Purgado = { fallosDeEmparejamiento: number; trazasDeCorreo: number };
+export type Purgado = {
+	fallosDeEmparejamiento: number;
+	trazasDeCorreo: number;
+	eventosDeCodigo: number;
+};
 
 function borradas(r: any): number {
 	return Number(r?.rowsAffected ?? r?.rows_affected ?? 0);
@@ -59,7 +65,7 @@ function borradas(r: any): number {
  * al resto del cron (los avisos de caducidad sí le importan a alguien que está esperando).
  */
 export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): Promise<Purgado> {
-	const purgado: Purgado = { fallosDeEmparejamiento: 0, trazasDeCorreo: 0 };
+	const purgado: Purgado = { fallosDeEmparejamiento: 0, trazasDeCorreo: 0, eventosDeCodigo: 0 };
 
 	try {
 		const r = await exec(db, `DELETE FROM pair_claim_fallos WHERE ultimo_fallo_ms < ?1;`, [
@@ -77,6 +83,17 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		purgado.trazasDeCorreo = borradas(r);
 	} catch (e: any) {
 		console.error("[purga] email_sends falló:", String(e?.message || e));
+	}
+
+	// Igual que `pair_claim_fallos`: la ventana es la de los topes (`OTP_VENTANA_MS`), así que lo que
+	// se borra es lo que ya no cuenta para nada.
+	try {
+		const r = await exec(db, `DELETE FROM license_otp_eventos WHERE at_ms < ?1;`, [
+			ahoraMs - OTP_VENTANA_MS,
+		]);
+		purgado.eventosDeCodigo = borradas(r);
+	} catch (e: any) {
+		console.error("[purga] license_otp_eventos falló:", String(e?.message || e));
 	}
 
 	return purgado;

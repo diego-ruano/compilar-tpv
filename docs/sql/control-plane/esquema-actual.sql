@@ -1,7 +1,8 @@
 -- ============================================================================================
 -- Esquema de la base CENTRAL (control-plane) de `tpv-api`, tal como está en producción.
 --
--- Foto tomada el 2026-09-16, más los cambios de RI-52 (2026-10-04: varias licencias por compra).
+-- Foto tomada el 2026-09-16, más los cambios de RI-52 (2026-10-04: varias licencias por compra) y
+-- de RI-68 (2026-10-07: `license_otp_eventos`).
 -- Es la única referencia de esta base en el repo.
 --
 -- La estructura de esta base NO se toca desde el código: el worker no crea ni altera tablas. Se
@@ -184,6 +185,17 @@ CREATE TABLE license_device_otp (
   created_at_ms  INTEGER NOT NULL,
   PRIMARY KEY (license_id, new_device_id)
 );
+
+-- RI-68 · Lo que se cuenta del código de cambio de equipo POR LICENCIA en las últimas 24 h: cada
+-- código enviado ('envio') y cada código incorrecto ('fallo'). `license_device_otp` va por pareja
+-- (licencia, equipo nuevo) y cualquiera con la clave puede abrir parejas sin fin con `deviceId`
+-- inventados, así que el tope de verdad tiene que ir aquí. Lo vacía la purga diaria.
+CREATE TABLE license_otp_eventos (
+  license_id TEXT NOT NULL,
+  tipo       TEXT NOT NULL CHECK (tipo IN ('envio','fallo')),
+  at_ms      INTEGER NOT NULL
+);
+CREATE INDEX ix_license_otp_eventos ON license_otp_eventos (license_id, tipo, at_ms);
 
 CREATE TABLE license_device_swaps (
   swap_id        TEXT PRIMARY KEY,

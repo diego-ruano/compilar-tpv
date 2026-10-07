@@ -26,7 +26,8 @@ actualizaciones, el correo, las imágenes y la telemetría. El cliente Rust apun
 Cada dominio de negocio tiene `*.routes.ts` (rutas), `*.queries.ts` (lecturas), `*.commands.ts`
 (escrituras, que se aplican por el `TenantHub`) y `*.schemas.ts` (zod). Bindings (`wrangler.json`): el
 DO `TenantHub` (SQLite), R2 `tpv-images` (público por `r2.dev`) y `tpv-copias-control` (privado),
-`send_email` (`EMAIL`), el limitador `LIMITADOR_CLAIM` y el cron diario `0 7 * * *`.
+`send_email` (`EMAIL`), los limitadores por IP `LIMITADOR_CLAIM` y `LIMITADOR_LICENCIA` (`lib/limitador.ts`)
+y el cron diario `0 7 * * *`.
 
 ## Dos bases, y sólo una se migra desde el código
 
@@ -113,7 +114,8 @@ Handy no lee por esa ruta: lee del `r2.dev` del bucket (`src/shared/lib/imageUrl
 `scheduled` en `src/index.ts`. Cada tarea va en su `try` y ninguna propaga:
 
 1. **Avisos de caducidad** de licencias ([licencias.md](licencias.md#avisos-de-caducidad)).
-2. **Purga de la base central** (`server/purga.ts`): fallos de emparejamiento y trazas de correo.
+2. **Purga de la base central** (`server/purga.ts`): fallos de emparejamiento, trazas de correo y
+   eventos del código de cambio de equipo.
 3. **Copia de la base central a R2** (`server/copiaBaseCentral.ts`) y, sólo si se subió, su latido
    (`BETTERSTACK_HEARTBEAT_COPIAS_URL`).
 4. Al final y fuera de los `try`, el latido del cron (`BETTERSTACK_HEARTBEAT_URL`), aunque una tarea

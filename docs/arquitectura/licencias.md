@@ -143,6 +143,14 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
    `reassignMainDevice` cambia la Main (registro en `license_device_swaps`) **conservando el
    tenant**, y se avisa por correo al titular.
 
+**Los topes de verdad van por licencia** (RI-68, `license_otp_eventos`, ventana de 24 h):
+- como mucho **5 códigos enviados**; pasado el tope se contesta igual, sin enviar;
+- como mucho **10 códigos incorrectos**; después, ni el bueno entra hasta el día siguiente.
+
+Los 5 intentos de cada código no bastan: un `deviceId` inventado abre otra pareja, y pedir otro código
+los reinicia. Delante de las dos rutas hay además un filtro por IP (`LIMITADOR_LICENCIA`, 10 por
+minuto), que deja pasar si el binding falta (`lib/limitador.ts`).
+
 El traslado va siempre al correo de la compra, no al de recuperación: si siguiera a éste, quien sepa
 el PIN de un administrador podría cambiarlo y llevarse la licencia.
 

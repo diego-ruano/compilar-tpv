@@ -11,7 +11,7 @@
 // ningún tercero. Y el estado que decide el gate viaja firmado: el TLS deja de ser la única
 // barrera (docs/arquitectura/licencias.md).
 
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 
 import type { Env } from "../../env";
 import type { ActivateResponse, ApiError, SignedLicenseAssertion, TenantInfo } from "../../shared";
@@ -22,7 +22,10 @@ import {
 	canjearLicencia,
 	exigirLaClaveDeEsteEquipo,
 	extendLicense,
+	anotarFalloDeOtp,
 	bumpDeviceOtpAttempts,
+	fallosDeOtpRecientes,
+	reservarEnvioDeOtp,
 	consumeDeviceOtp,
 	ensureDevice,
 	ensureTenantExistsMinimal,
@@ -39,6 +42,8 @@ import {
 	type LicenseRow,
 } from "../../server/licenseStore";
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
+import { pasaElLimitador } from "../../lib/limitador";
+import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
 import {
 	sendDeviceChangeCodeEmail,
@@ -52,8 +57,11 @@ import {
 	emailHint,
 	generateOtpCode,
 	GRACE_DAYS,
+	OTP_CODIGOS_AL_DIA,
+	OTP_FALLOS_AL_DIA,
 	OTP_MAX_ATTEMPTS,
 	OTP_TTL_MS,
+	OTP_VENTANA_MS,
 	otpHash,
 	provisionTenantDatabase,
 	stateAllowsUse,
@@ -124,6 +132,24 @@ async function rechazoFirmado(
 	return c.json(cuerpo, args.status);
 }
 
+/**
+ * RI-68 · Filtro por IP delante de las dos rutas anónimas que aceptan una clave de licencia. Recorta
+ * el volumen de un barrido; los topes exactos (por licencia) están dentro. Ver `lib/limitador.ts`.
+ */
+const filtroExterior: MiddlewareHandler<Ctx> = async (c, next) => {
+	if (!(await pasaElLimitador(c.env.LIMITADOR_LICENCIA, ipDeLaPeticion(c.req.raw), "license"))) {
+		return c.json(
+			{
+				ok: false,
+				error: "too_many_attempts",
+				message: "Demasiadas peticiones desde esta red. Vuelve a intentarlo dentro de 1 minuto.",
+			} satisfies ApiError,
+			429,
+		);
+	}
+	await next();
+};
+
 /** El rechazo de `readmitirMain`, firmado cuando es un traslado (la licencia existe). */
 async function rechazoDeReadmision(
 	c: any,
@@ -142,7 +168,7 @@ async function rechazoDeReadmision(
 // POST /v1/license/activate
 // ──────────────────────────────────────────────────────────────────────────────
 
-licenseRoutes.post("/activate", async (c) => {
+licenseRoutes.post("/activate", filtroExterior, async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, [
 		"LICENSE_JWT_SECRET",
@@ -327,6 +353,24 @@ licenseRoutes.post("/activate", async (c) => {
 		if (otp.attempts >= OTP_MAX_ATTEMPTS) {
 			return c.json({ ok: false, error: "too_many_attempts" } satisfies ApiError, 429);
 		}
+		// RI-68: el tope de verdad es por LICENCIA, no por código: pedir otro código o inventarse otro
+		// `deviceId` daban intentos nuevos sin fin.
+		const fallosHoy = await fallosDeOtpRecientes(db, {
+			licenseId: lic.license_id,
+			ahoraMs: now,
+			ventanaMs: OTP_VENTANA_MS,
+		});
+		if (fallosHoy >= OTP_FALLOS_AL_DIA) {
+			return c.json(
+				{
+					ok: false,
+					error: "too_many_attempts",
+					message:
+						"Se han tecleado demasiados códigos incorrectos para esta licencia. Vuelve a intentarlo mañana o contacta con soporte.",
+				} satisfies ApiError,
+				429,
+			);
+		}
 		if (now > otp.expires_at_ms) {
 			return c.json({ ok: false, error: "code_expired" } satisfies ApiError, 401);
 		}
@@ -334,6 +378,7 @@ licenseRoutes.post("/activate", async (c) => {
 		const presentado = await otpHash(deviceChangeCode);
 		if (!timingSafeEqualHex(presentado, otp.code_hash)) {
 			await bumpDeviceOtpAttempts(db, lic.license_id, deviceId);
+			await anotarFalloDeOtp(db, lic.license_id, now);
 			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
 		}
 
@@ -458,7 +503,7 @@ licenseRoutes.post("/activate", async (c) => {
 // la clave: si contestara distinto, cualquiera podría usar este endpoint para averiguar qué
 // claves son válidas.
 
-licenseRoutes.post("/device-change/request", async (c) => {
+licenseRoutes.post("/device-change/request", filtroExterior, async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "EMAIL_FROM_ADDRESS"]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
@@ -492,6 +537,16 @@ licenseRoutes.post("/device-change/request", async (c) => {
 	if (previo && !previo.consumed_at_ms && now - previo.created_at_ms < 60_000) {
 		return respuestaConstante;
 	}
+
+	// RI-68: y como mucho OTP_CODIGOS_AL_DIA por licencia, vengan del equipo que vengan. El de arriba
+	// es por pareja, y un `deviceId` inventado abre otra. Pasado el tope se contesta igual, sin enviar.
+	const quedaCupo = await reservarEnvioDeOtp(db, {
+		licenseId: lic.license_id,
+		ahoraMs: now,
+		ventanaMs: OTP_VENTANA_MS,
+		maximo: OTP_CODIGOS_AL_DIA,
+	});
+	if (!quedaCupo) return respuestaConstante;
 
 	const code = generateOtpCode();
 	await putDeviceOtp(db, {

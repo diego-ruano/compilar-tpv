@@ -35,6 +35,14 @@
 				"limit": 20,
 				"period": 60
 			}
+		},
+		{
+			"name": "LIMITADOR_LICENCIA",
+			"namespace_id": "2",
+			"simple": {
+				"limit": 10,
+				"period": 60
+			}
 		}
 	],
 	"durable_objects": {
