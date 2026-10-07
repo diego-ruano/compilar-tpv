@@ -39,7 +39,7 @@ export function mensajeFirmado(
 	nonceB64: string,
 	deviceId: string,
 ): string {
-	return `${ts}\n${accion}\n${pairCode}\n${nonceB64}\n${deviceId}`;
+	return `${accion}\n${ts}\n${pairCode}\n${nonceB64}\n${deviceId}`;
 }
 
 /** Se mira lo primero: con el reloj del dispositivo mal, nada de lo demás va a salir. */

@@ -306,7 +306,7 @@ async function comprobarFirma(
 	// se llaman sin cuerpo, así que suele estar vacío — pero el tramo va SIEMPRE, para que el
 	// mensaje tenga la misma forma que el que firma el cliente (`sign_device_proof` en Rust).
 	const bodyHash = await sha256HexBytes(rawBody ?? new Uint8Array());
-	const msg = [ts, method, path, tokenHash, bodyHash].join("\n");
+	const msg = ["DEVICE_PROOF", ts, method, path, tokenHash, bodyHash].join("\n");
 
 	let pub: Uint8Array;
 	let sig: Uint8Array;

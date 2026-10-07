@@ -92,7 +92,7 @@ async function escenario<T>(
 async function renovar(deviceId: string, seed: Uint8Array): Promise<Response> {
 	const token = await firmarSesion(ENV as any, { tenantId: TENANT, deviceId, licHash: LIC_HASH });
 	const ts = Date.now();
-	const mensaje = [ts, "POST", "/refresh", await sha256HexStr(token), await sha256HexBytes(new Uint8Array())].join("\n");
+	const mensaje = ["DEVICE_PROOF", ts, "POST", "/refresh", await sha256HexStr(token), await sha256HexBytes(new Uint8Array())].join("\n");
 	const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), seed));
 
 	return licenseRoutes.request(

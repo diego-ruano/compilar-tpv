@@ -40,7 +40,7 @@ use tpv_application::ports::correo_recuperacion::CorreoRecuperacionService;
 use tpv_application::ports::recuperacion_pin::RecuperacionPinService;
 use tpv_contracts::errors::ErrorCode;
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
+    ApiSignedHeaders, DeviceIdentity,  LicenseLocalState, PairCreateResult, FirmaDispositivo, DeviceFirmarEmparejamientoArgs, AccionEmparejamiento,
 };
 use tpv_contracts::login::{CodigoEnviado, EstadoCorreoRecuperacion};
 use tpv_domain::licensing::{
@@ -798,11 +798,11 @@ impl LicensingService for LicensingAdapter {
 ///
 /// El **parámetro** del constructor se conserva a propósito: lo pasan quince sitios y quitarlo sería
 /// tocarlos todos para no ganar nada. Si algún día vuelve a hacer falta la ruta, está ahí.
-pub struct PairingAdapter;
+pub struct PairingAdapter { app_data_dir: PathBuf }
 
 impl PairingAdapter {
-    pub fn new(_app_data_dir: PathBuf) -> Self {
-        Self
+    pub fn new(app_data_dir: PathBuf) -> Self {
+        Self { app_data_dir }
     }
 
     /// Token de sesión de la Main (modo `tpv`), leído del **keyring** (ya no de
@@ -1056,10 +1056,27 @@ impl PairingService for PairingAdapter {
 
     /// Siempre va después de `device_identity` (el emparejamiento y el saludo del WebSocket la piden
     /// antes de firmar), así que aquí sólo se lee.
-    fn device_sign_b64(&self, payload: &str) -> AppResult<SigB64> {
-        let (_, sk) = leer_identidad().map_err(ext)?;
-        let sig_b64 = sign_payload_b64(&sk, payload).map_err(ext)?;
-        Ok(SigB64 { sig_b64 })
+    fn firmar_hello(&self, mode: &str, nonce_b64: &str) -> AppResult<FirmaDispositivo> {
+        device::validar_reto(nonce_b64).map_err(AppError::validation)?;
+        let (device_id, sk) = leer_identidad().map_err(ext)?;
+        let tenant = match mode {
+            "tpv" => load_state(&self.app_data_dir).map(|s| s.tenant_id),
+            "handy" => device::handy_get_tenant().map_err(ext)?,
+            _ => return Err(AppError::validation("Modo de dispositivo inválido")),
+        }.ok_or_else(|| AppError::not_found("Falta el negocio del dispositivo"))?;
+        if tenant.is_empty() || tenant.contains(['\n', '\r']) { return Err(AppError::validation("Negocio inválido")); }
+        let ts = reloj::ahora_ms();
+        let payload = format!("WS_HELLO\n{ts}\n{tenant}\n{device_id}\n{nonce_b64}");
+        Ok(FirmaDispositivo { ts, sig_b64: sign_payload_b64(&sk, &payload).map_err(ext)? })
+    }
+
+    fn firmar_emparejamiento(&self, args: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo> {
+        device::validar_reto(&args.nonce_b64).map_err(AppError::validation)?;
+        let (device_id, sk) = leer_identidad().map_err(ext)?;
+        let accion = match args.accion { AccionEmparejamiento::Consultar => "PAIR_FETCH", AccionEmparejamiento::Cancelar => "PAIR_CANCEL" };
+        let ts = reloj::ahora_ms();
+        let payload = format!("{accion}\n{ts}\n{}\n{}\n{device_id}", args.pair_code, args.nonce_b64);
+        Ok(FirmaDispositivo { ts, sig_b64: sign_payload_b64(&sk, &payload).map_err(ext)? })
     }
 
     fn hora_para_firmar(&self) -> i64 {
@@ -1078,13 +1095,6 @@ impl PairingService for PairingAdapter {
         device::handy_get_tenant().map_err(ext)
     }
 
-    fn handy_get_ws_auth(&self) -> AppResult<HandyWsAuth> {
-        let token = get_handy_token().map_err(ext)?;
-        let tenant_id = device::handy_get_tenant()
-            .map_err(ext)?
-            .ok_or_else(|| ext("handy_tenant_missing"))?;
-        Ok(HandyWsAuth { token, tenant_id })
-    }
 
     fn tpv_server_signed_headers(
         &self,

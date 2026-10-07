@@ -60,6 +60,7 @@ async function mensajeProof(
 	body: Uint8Array,
 ): Promise<string> {
 	return [
+		"DEVICE_PROOF",
 		ts,
 		method.toUpperCase(),
 		path,

@@ -33,7 +33,9 @@ y la Main aprueba.
 5. Cancelar en la Handy (`/v1/pair/cancel`, acción `PAIR_CANCEL`) suelta el código en la nube, para que
    la solicitud no siga en la lista de la Main. Lo ya aprobado no se deshace cancelando: eso es revocar.
 
-La acción va dentro de lo que se firma, para que la firma de una consulta no sirva para cancelar ni al
+Rust construye el mensaje y fija la hora y la identidad; el IPC acepta únicamente acción, código
+y reto, nunca texto libre (RI-20). La acción abre el mensaje como separación de dominio, distinta
+de `WS_HELLO` y `DEVICE_PROOF`. La acción va dentro de lo que se firma, para que la firma de una consulta no sirva para cancelar ni al
 revés.
 
 ## Las reglas
@@ -90,3 +92,6 @@ Sin ticket del WebSocket, un corte de red y un rechazo se ven igual; se distingu
 
 Configuración → dispositivos vinculados → revocar (`/v1/device/revoke`, Administrador). El dispositivo
 queda marcado en `devices` y todo lo que intente después le contesta `device_revoked`.
+
+El WebSocket de la Handy usa un ticket efímero. JavaScript sólo consulta el identificador del
+negocio (`handy_get_tenant`); el JWT permanece en el keyring.

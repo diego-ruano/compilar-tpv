@@ -93,8 +93,10 @@ function crearBackend() {
 				return b.licencia;
 			case "device_get_identity":
 				return { deviceId: b.deviceId };
-			case "device_sign_b64":
-				return { sigB64: `firma:${args.args.payload}` };
+			case "device_firmar_hello": {
+                const ts = b.horaNube ?? Date.now();
+                return { ts, sigB64: `firma:${ts}\nWS_HELLO\nt1\nd1\n${args.args.nonce_b64}` };
+            }
 			case "device_hora_para_firmar":
 				return b.horaNube;
 			case "tpv_server_post_json": {

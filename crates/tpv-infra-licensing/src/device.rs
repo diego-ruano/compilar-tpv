@@ -203,7 +203,7 @@ pub fn device_proof_message(
     body: &[u8],
 ) -> String {
     format!(
-        "{}\n{}\n{}\n{}\n{}",
+        "DEVICE_PROOF\n{}\n{}\n{}\n{}\n{}",
         ts_ms,
         method.to_uppercase(),
         path,
@@ -350,6 +350,15 @@ pub fn clear_field_dek() -> Result<(), String> {
     let _ = secret_store::delete(SVC_AUTH, KEY_FIELD_DEK);
     Ok(())
 }
+
+// RI-20: un reto es un campo base64 canónico de 32 bytes, nunca un mensaje libre.
+pub fn validar_reto(nonce: &str) -> Result<(), String> {
+    if nonce.len() != 44 { return Err("Reto inválido".into()); }
+    let bytes = B64.decode(nonce).map_err(|_| "Reto inválido")?;
+    if bytes.len() != 32 || B64.encode(bytes) != nonce { return Err("Reto inválido".into()); }
+    Ok(())
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -525,7 +534,9 @@ mod tests {
         let msg = device_proof_message(1700000000000, "post", "/v1/mesas/cobrar", "tok", b"{\"a\":1}");
 
         let lineas: Vec<&str> = msg.split('\n').collect();
-        assert_eq!(lineas.len(), 5, "el mensaje son 5 tramos separados por \\n");
+        assert_eq!(lineas.len(), 6);
+        assert_eq!(lineas[0], "DEVICE_PROOF");
+        let lineas = &lineas[1..];
         assert_eq!(lineas[0], "1700000000000");
         assert_eq!(lineas[1], "POST", "el método va en mayúsculas");
         assert_eq!(lineas[2], "/v1/mesas/cobrar");
@@ -556,11 +567,23 @@ mod tests {
     #[test]
     fn sin_cuerpo_se_firma_la_cadena_vacia() {
         let msg = device_proof_message(1, "GET", "/x", "tok", b"");
-        assert_eq!(msg.split('\n').count(), 5);
+        assert_eq!(msg.split('\n').count(), 6);
         assert_eq!(
-            msg.split('\n').nth(4).unwrap(),
+            msg.split('\n').nth(5).unwrap(),
             sha256_hex(""),
             "el último tramo es sha256(\"\")"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_retos {
+    use super::*;
+    #[test]
+    fn solo_acepta_un_reto_base64_canonico_de_32_bytes() {
+        assert!(validar_reto(&B64.encode([0u8; 32])).is_ok());
+        for n in ["", "DEVICE_PROOF\n1", "AAAA", &B64.encode([1u8; 33])] {
+            assert!(validar_reto(n).is_err());
+        }
     }
 }

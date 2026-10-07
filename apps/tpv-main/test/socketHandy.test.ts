@@ -38,12 +38,14 @@ function crearBackend() {
 	h.invoke.mockImplementation(async (cmd: string, args: any = {}) => {
 		b.llamadas.push({ cmd, args });
 		switch (cmd) {
-			case "handy_get_ws_auth":
-				return b.auth;
+			case "handy_get_tenant":
+				return b.auth?.tenantId ?? null;
 			case "device_get_identity":
 				return { deviceId: b.deviceId };
-			case "device_sign_b64":
-				return { sigB64: `firma:${args.args.payload}` };
+			case "device_firmar_hello": {
+                const ts = b.horaNube ?? Date.now();
+                return { ts, sigB64: `firma:${ts}\nWS_HELLO\n${b.auth?.tenantId}\n${b.deviceId}\n${args.args.nonce_b64}` };
+            }
 			case "device_hora_para_firmar":
 				return b.horaNube;
 			case "tpv_server_post_json":
@@ -111,9 +113,9 @@ describe("cuándo se intenta", () => {
 		expect(SocketFalso.creados).toHaveLength(0);
 		for (const [i, espera] of [3_000, 6_000, 12_000, 24_000, 30_000, 30_000].entries()) {
 			await avanzar(espera - 1);
-			expect(cuenta(b, "handy_get_ws_auth"), `el intento ${i + 2} llegó antes de tiempo`).toBe(i + 1);
+			expect(cuenta(b, "handy_get_tenant"), `el intento ${i + 2} llegó antes de tiempo`).toBe(i + 1);
 			await avanzar(1);
-			expect(cuenta(b, "handy_get_ws_auth"), `el intento ${i + 2} no llegó`).toBe(i + 2);
+			expect(cuenta(b, "handy_get_tenant"), `el intento ${i + 2} no llegó`).toBe(i + 2);
 		}
 		expect(SocketFalso.creados).toHaveLength(0);
 	});
@@ -126,7 +128,7 @@ describe("cuándo se intenta", () => {
 		await montar();
 		await avanzar(3_000);
 		expect(SocketFalso.creados).toHaveLength(0);
-		expect(cuenta(b, "handy_get_ws_auth")).toBe(2);
+		expect(cuenta(b, "handy_get_tenant")).toBe(2);
 	});
 });
 
@@ -468,7 +470,7 @@ describe("detener", () => {
 		s.cerrar();
 		const pingsAntes = s.pings();
 		await avanzar(10 * 60_000);
-		expect(cuenta(b, "handy_get_ws_auth")).toBe(1);
+		expect(cuenta(b, "handy_get_tenant")).toBe(1);
 		expect(s.pings()).toBe(pingsAntes);
 	});
 });

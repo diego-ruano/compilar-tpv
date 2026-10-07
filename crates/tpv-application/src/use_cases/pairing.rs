@@ -4,8 +4,8 @@
 use serde_json::Value as JsonValue;
 
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, HandyWsAuth,
-    PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
+    ApiSignedHeaders, DeviceIdentity, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs,
+    PairCreateResult, FirmaDispositivo, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
 };
 
 use crate::error::{AppError, AppResult};
@@ -39,9 +39,15 @@ pub fn device_identity(svc: &dyn PairingService) -> AppResult<DeviceIdentity> {
     svc.device_identity()
 }
 
-pub fn device_sign_b64(svc: &dyn PairingService, args: DeviceSignB64Args) -> AppResult<SigB64> {
-    let payload = requerido(&args.payload, "payload")?;
-    svc.device_sign_b64(&payload)
+pub fn firmar_hello(svc: &dyn PairingService, mode: &str, nonce: &str) -> AppResult<FirmaDispositivo> {
+    svc.firmar_hello(mode, nonce)
+}
+
+pub fn firmar_emparejamiento(svc: &dyn PairingService, args: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo> {
+    if args.pair_code.len() != 6 || !args.pair_code.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(AppError::validation("El código debe tener seis cifras"));
+    }
+    svc.firmar_emparejamiento(args)
 }
 
 pub fn hora_para_firmar(svc: &dyn PairingService) -> i64 {
@@ -62,10 +68,6 @@ pub fn handy_get_tenant(svc: &dyn PairingService) -> AppResult<Option<String>> {
     svc.handy_get_tenant()
 }
 
-/// Credenciales (token + tenant) para abrir el WebSocket del Handy.
-pub fn handy_get_ws_auth(svc: &dyn PairingService) -> AppResult<HandyWsAuth> {
-    svc.handy_get_ws_auth()
-}
 
 pub fn tpv_server_signed_headers(
     svc: &dyn PairingService,

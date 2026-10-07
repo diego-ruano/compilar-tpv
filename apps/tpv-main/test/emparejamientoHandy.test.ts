@@ -44,7 +44,10 @@ function crearDobles() {
 	const deps: DependenciasEmparejamiento = {
 		invoke: (async (comando: string, args?: Record<string, any>) => {
 			if (comando === "device_get_identity") return estado.identidad;
-			if (comando === "device_sign_b64") return { sigB64: `firma:${args?.args.payload}` };
+			if (comando === "device_firmar_emparejamiento") {
+                const ts = estado.horaNube ?? Date.now();
+                return { ts, sigB64: `firma:${ts}\n${args?.args.accion}\n${args?.args.pair_code}\n${args?.args.nonce_b64}\nh1` };
+            }
 			if (comando === "device_hora_para_firmar") return estado.horaNube;
 			if (comando === "handy_set_token") {
 				estado.tokenGuardado = args?.args;

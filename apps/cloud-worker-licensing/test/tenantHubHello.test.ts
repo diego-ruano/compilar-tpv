@@ -65,7 +65,7 @@ async function firmar(
 	nonceB64: string,
 ): Promise<string> {
 	const payload = new TextEncoder().encode(
-		`${ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${nonceB64}`,
+		`WS_HELLO\n${ts}\n${tenantId}\n${deviceId}\n${nonceB64}`,
 	);
 	const sig = await crypto.subtle.sign({ name: "Ed25519" }, kp.privateKey, payload);
 	return bytesToB64(new Uint8Array(sig));

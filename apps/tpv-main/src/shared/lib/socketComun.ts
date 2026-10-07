@@ -13,7 +13,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { toAppError } from "@tpv/client";
 
 import { cloudPost } from "./cloudApi";
-import { horaParaFirmar } from "./horaParaFirmar";
 
 // SYNC-09: backoff exponencial con tope + jitter. Empieza en 3 s y sube hasta 30 s ante cortes
 // prolongados (worker caído/sin red), en vez de martillear cada 3 s. Se reinicia al autenticarse.
@@ -103,14 +102,12 @@ export async function leerIdDispositivo(): Promise<string> {
  * ticket, que siempre llega antes que el `challenge`.
  */
 export async function firmarHello(
-	tenantId: string,
-	deviceId: string,
+	_tenantId: string,
+	_deviceId: string,
 	nonceB64: string,
 ): Promise<{ ts: number; sigB64: string }> {
-	const ts = await horaParaFirmar((comando) => invoke(comando));
-	const payload = `${ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${nonceB64}`;
-	const r = (await invoke<any>("device_sign_b64", { args: { payload } })) as any;
-	return { ts, sigB64: String(r?.sigB64 ?? r?.sig_b64 ?? "") };
+	const r = await invoke<{ ts: number; sigB64: string }>("device_firmar_hello", { args: { nonce_b64: nonceB64 } });
+	return r;
 }
 
 /** Resultado de pedir el ticket: hay que distinguir "no hay red" de "el worker dice que no". */

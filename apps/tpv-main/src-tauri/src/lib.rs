@@ -2322,9 +2322,10 @@ pub fn run() {
             // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
             commands::pairing::handy_set_token,
             commands::pairing::handy_get_tenant,
-            commands::pairing::handy_get_ws_auth,
+
             commands::pairing::device_get_identity,
-            commands::pairing::device_sign_b64,
+            commands::pairing::device_firmar_hello,
+            commands::pairing::device_firmar_emparejamiento,
             commands::pairing::device_hora_para_firmar,
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,

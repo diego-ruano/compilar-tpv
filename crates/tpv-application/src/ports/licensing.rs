@@ -12,7 +12,7 @@ use tpv_domain::licensing::{
 };
 
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
+    ApiSignedHeaders, DeviceIdentity,  LicenseLocalState, PairCreateResult, FirmaDispositivo, DeviceFirmarEmparejamientoArgs,
 };
 
 use crate::error::AppResult;
@@ -80,7 +80,8 @@ pub trait LicensingService: Send + Sync {
 #[async_trait]
 pub trait PairingService: Send + Sync {
     fn device_identity(&self) -> AppResult<DeviceIdentity>;
-    fn device_sign_b64(&self, payload: &str) -> AppResult<SigB64>;
+    fn firmar_hello(&self, mode: &str, nonce_b64: &str) -> AppResult<FirmaDispositivo>;
+    fn firmar_emparejamiento(&self, args: DeviceFirmarEmparejamientoArgs) -> AppResult<FirmaDispositivo>;
     /// PROD-04: la hora (ms) con la que hay que firmar lo que se manda a la nube: la del equipo
     /// corregida con la que trae cada respuesta del worker. Para lo que firma el frontend (el saludo
     /// del WebSocket, el emparejamiento); lo que firma Rust ya la usa por su cuenta.
@@ -88,8 +89,6 @@ pub trait PairingService: Send + Sync {
     fn handy_set_token(&self, token: &str, tenant_id: &str) -> AppResult<()>;
     fn handy_clear_token(&self) -> AppResult<()>;
     fn handy_get_tenant(&self) -> AppResult<Option<String>>;
-    /// Credenciales (token + tenant) para abrir el WebSocket del Handy. Error si no hay token.
-    fn handy_get_ws_auth(&self) -> AppResult<HandyWsAuth>;
     /// Cabeceras firmadas para tpv-server según el modo (anon|tpv|handy).
     ///
     /// `body` son los bytes exactos del cuerpo que se enviará (vacío si no hay). Entra en la firma

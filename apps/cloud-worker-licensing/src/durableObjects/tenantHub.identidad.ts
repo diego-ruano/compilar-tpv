@@ -129,7 +129,7 @@ export async function verifyHelloSigned(params: {
 	if (!pubkeyB64) throw new Error("device_pubkey_not_registered");
 
 	const payload = new TextEncoder().encode(
-		`${msg.ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${msg.nonceB64}`,
+		`WS_HELLO\n${msg.ts}\n${tenantId}\n${deviceId}\n${msg.nonceB64}`,
 	);
 
 	const pub = nobleForceU8(b64ToBytes(pubkeyB64));

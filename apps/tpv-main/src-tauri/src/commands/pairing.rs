@@ -11,8 +11,8 @@ use tauri::{AppHandle, Manager, State};
 use tpv_application::use_cases::cloud_sync as uc_sync;
 use tpv_application::use_cases::pairing as uc;
 use tpv_contracts::licensing::{
-    DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, HandyWsAuth,
-    PairCreateResult, SigB64, TpvServerPostJsonArgs, UploadInitialSetupArgs,
+    DeviceIdentity, DeviceFirmarHelloArgs, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs,
+    PairCreateResult, FirmaDispositivo, TpvServerPostJsonArgs, UploadInitialSetupArgs,
 };
 use tpv_infra_licensing::PairingAdapter;
 use tpv_contracts::errors::AppErrorDto;
@@ -86,11 +86,6 @@ pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
     Ok(uc::handy_get_tenant(&svc(&app)?)?)
 }
 
-/// Credenciales (token + tenant) para abrir el WebSocket del Handy (`/ws?token=`).
-#[tauri::command]
-pub fn handy_get_ws_auth(app: AppHandle) -> Result<HandyWsAuth, AppErrorDto> {
-    Ok(uc::handy_get_ws_auth(&svc(&app)?)?)
-}
 
 #[tauri::command]
 pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, AppErrorDto> {
@@ -98,13 +93,19 @@ pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, AppErrorDto
 }
 
 #[tauri::command]
-pub fn device_sign_b64(app: AppHandle, args: DeviceSignB64Args) -> Result<SigB64, AppErrorDto> {
-    Ok(uc::device_sign_b64(&svc(&app)?, args)?)
+pub async fn device_firmar_hello(app: AppHandle, state: State<'_, AppState>, args: DeviceFirmarHelloArgs) -> Result<FirmaDispositivo, AppErrorDto> {
+    let mode = crate::signing_mode(*state.mode.lock().await).ok_or("Modo no configurado")?;
+    Ok(uc::firmar_hello(&svc(&app)?, mode, &args.nonce_b64)?)
+}
+
+#[tauri::command]
+pub fn device_firmar_emparejamiento(app: AppHandle, args: DeviceFirmarEmparejamientoArgs) -> Result<FirmaDispositivo, AppErrorDto> {
+    Ok(uc::firmar_emparejamiento(&svc(&app)?, args)?)
 }
 
 /// PROD-04: la hora con la que el frontend firma el saludo del WebSocket y el emparejamiento. Es
 /// la de la nube, no la del equipo: con un reloj desfasado más de 2 min la nube rechaza la firma.
-/// Sin sesión, como `device_sign_b64`: se usa en el emparejamiento de la Handy, antes de que nadie
+/// Sin sesión, como los comandos de firma acotada: se usa en el emparejamiento de la Handy, antes de que nadie
 /// entre.
 #[tauri::command]
 pub fn device_hora_para_firmar(app: AppHandle) -> Result<i64, AppErrorDto> {

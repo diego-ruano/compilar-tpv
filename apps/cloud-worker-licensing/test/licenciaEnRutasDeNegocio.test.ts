@@ -117,6 +117,7 @@ async function pedir(
 	});
 	const ts = Date.now();
 	const mensaje = [
+		"DEVICE_PROOF",
 		ts,
 		metodo,
 		ruta,

@@ -119,7 +119,7 @@ export async function verifyDeviceProofOrThrow(
 	const url = new URL(req.url);
 	const tokenHash = await sha256HexStr(bearerToken);
 	const bodyHash = await sha256HexBytes(rawBody ?? new Uint8Array());
-	const msg = `${ts}\n${req.method.toUpperCase()}\n${url.pathname}${url.search}\n${tokenHash}\n${bodyHash}`;
+	const msg = `DEVICE_PROOF\n${ts}\n${req.method.toUpperCase()}\n${url.pathname}${url.search}\n${tokenHash}\n${bodyHash}`;
 
 	// por si llega con comillas
 	const sigB64 = sigB64Raw.replace(/^"+|"+$/g, "");

@@ -61,13 +61,10 @@ import {
 // `main_online`/`main_offline`) antes de este plazo, no se llega a bloquear.
 const BLOCK_GRACE_MS = 5000;
 
-async function loadAuth(): Promise<{ token: string; tenantId: string } | null> {
+async function loadAuth(): Promise<{ tenantId: string } | null> {
 	try {
-		const r = (await invoke<any>("handy_get_ws_auth")) as any;
-		const token = String(r?.token ?? "");
-		const tenantId = String(r?.tenantId ?? r?.tenant_id ?? "");
-		if (!token || !tenantId) return null;
-		return { token, tenantId };
+		const tenantId = await invoke<string | null>("handy_get_tenant");
+		return tenantId ? { tenantId } : null;
 	} catch {
 		return null;
 	}
