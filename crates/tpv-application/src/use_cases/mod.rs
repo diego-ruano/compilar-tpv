@@ -35,3 +35,6 @@ pub mod replicacion;
 pub mod permisos;
 
 pub mod avisos_nube;
+
+pub mod presencia_handy;
+pub mod saludo_socket;

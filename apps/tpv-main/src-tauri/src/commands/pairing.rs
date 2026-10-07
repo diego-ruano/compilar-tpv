@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager, State};
 use tpv_application::use_cases::cloud_sync as uc_sync;
 use tpv_application::use_cases::pairing as uc;
 use tpv_contracts::licensing::{
-    DeviceIdentity, DeviceFirmarHelloArgs, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs,
+    DeviceIdentity, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs,
     PairCreateResult, FirmaDispositivo, TpvServerPostJsonArgs, UploadInitialSetupArgs,
 };
 use tpv_infra_licensing::PairingAdapter;
@@ -52,7 +52,7 @@ const PAIRING_SIN_SESION: [&str; 3] = ["/v1/pair/claim", "/v1/pair/fetch-token",
 fn ruta_permitida(modo: Option<crate::DeviceMode>, mode: &str, path: &str) -> bool {
     match mode {
         "anon" => PAIRING_SIN_SESION.contains(&path),
-        "handy" => modo == Some(crate::DeviceMode::Handy) && path == "/v1/ws/ticket",
+
         "tpv" => modo == Some(crate::DeviceMode::Tpv) && ["/v1/pair/pending", "/v1/pair/approve", "/v1/pair/reject", "/v1/device/list", "/v1/device/revoke"].contains(&path),
         _ => false,
     }
@@ -81,6 +81,7 @@ pub async fn handy_set_token(app: AppHandle, state: State<'_, AppState>, args: H
     let service = svc(&app)?;
     state.cerrar_sesion().await;
     uc::handy_set_token(&service, args)?;
+    crate::socket_handy::contexto_cambiado(&app);
 
     // La etiqueta de Sentry sale del token, y `setup()` sólo la lee al arrancar: una Handy recién
     // vinculada mandaba sus errores sin negocio hasta el siguiente reinicio.
@@ -101,14 +102,6 @@ pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
 #[tauri::command]
 pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, AppErrorDto> {
     Ok(uc::device_identity(&svc(&app)?)?)
-}
-
-#[tauri::command]
-pub async fn device_firmar_hello(app: AppHandle, state: State<'_, AppState>, args: DeviceFirmarHelloArgs) -> Result<FirmaDispositivo, AppErrorDto> {
-    // La Main firma únicamente dentro de su transporte nativo; el IPC sólo sirve a la Handy.
-    if *state.mode.lock().await != Some(crate::DeviceMode::Handy) { return Err(crate::permiso_denegado("Saludo no disponible por IPC en la Main")); }
-    let mode = "handy";
-    Ok(uc::firmar_hello(&svc(&app)?, mode, &args.nonce_b64)?)
 }
 
 #[tauri::command]
@@ -180,7 +173,7 @@ mod tests_gate_del_proxy {
     #[test]
     fn el_proxy_no_da_acceso_a_replica_ni_a_rutas_reescritas() {
         use crate::DeviceMode;
-        assert!(ruta_permitida(Some(DeviceMode::Handy), "handy", "/v1/ws/ticket"));
+        assert!(!ruta_permitida(Some(DeviceMode::Handy), "handy", "/v1/ws/ticket"));
         assert!(!ruta_permitida(Some(DeviceMode::Tpv), "handy", "/v1/ws/ticket"));
         for p in ["/v1/sync/changes", "/v1/ws/ticket", "/v1/pair/pending?x=1", "/v1/pair/../sync/changes", "/v1/pair/%2e%2e/sync/changes"] {
             assert!(!ruta_permitida(Some(DeviceMode::Tpv), "tpv", p));

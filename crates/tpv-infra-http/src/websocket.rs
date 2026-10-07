@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::{sync::{mpsc, Notify}, time::{timeout, Instant}};
-use tokio_tungstenite::{connect_async_with_config, tungstenite::{Message, protocol::WebSocketConfig}};
+use tokio_tungstenite::{WebSocketStream, connect_async_with_config, tungstenite::{Message, protocol::WebSocketConfig}};
 use tpv_application::{error::{AppError, AppResult}, ports::canal_nube::CanalNube};
 use tpv_infra_licensing::CLOUD_API_BASE;
 
@@ -36,6 +36,11 @@ pub async fn conectar(ticket: &str, despertar: Arc<Notify>) -> AppResult<CanalWe
     let config = WebSocketConfig::default().max_message_size(Some(32 * 1024 * 1024)).max_frame_size(Some(32 * 1024 * 1024));
     // El ticket no entra nunca en logs ni errores de transporte.
     let (socket, _) = timeout(Duration::from_secs(20), connect_async_with_config(url.as_str(), Some(config), false)).await.map_err(|_| AppError::sin_conexion("Tiempo de conexión agotado"))?.map_err(|_| AppError::sin_conexion("No se pudo abrir el WebSocket"))?;
+    Ok(desde_socket(socket, despertar))
+}
+
+fn desde_socket<S>(socket: WebSocketStream<S>, despertar: Arc<Notify>) -> CanalWebSocket
+where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
     let (mut escritor, mut lector) = socket.split();
     // Buffer acotado: mientras se descarga catch-up, TCP aplica contrapresión a lo vivo.
     let (salida, mut pendientes) = mpsc::channel::<Value>(8);
@@ -72,6 +77,71 @@ pub async fn conectar(ticket: &str, despertar: Arc<Notify>) -> AppResult<CanalWe
         let _ = timeout(Duration::from_secs(5), escritor.close()).await;
         let _ = recibidos.send(Err(AppError::external("Se perdió la conexión con la nube"))).await;
     });
-    Ok(CanalWebSocket { salida, entrada, despertar, tarea })
+    CanalWebSocket { salida, entrada, despertar, tarea }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::DuplexStream;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    async fn pareja() -> (CanalWebSocket, WebSocketStream<DuplexStream>) {
+        let (cliente, servidor) = tokio::io::duplex(64 * 1024);
+        let cliente = WebSocketStream::from_raw_socket(cliente, Role::Client, None).await;
+        let servidor = WebSocketStream::from_raw_socket(servidor, Role::Server, None).await;
+        (desde_socket(cliente, Arc::new(Notify::new())), servidor)
+    }
+
+    #[tokio::test]
+    async fn conserva_el_orden_de_los_mensajes_del_protocolo() {
+        let (mut cliente, mut servidor) = pareja().await;
+        for tipo in ["challenge", "main_status", "change"] {
+            servidor.send(Message::Text(json!({"type":tipo}).to_string().into())).await.unwrap();
+        }
+        for tipo in ["challenge", "main_status", "change"] {
+            assert_eq!(cliente.recibir(Duration::from_secs(1)).await.unwrap().unwrap()["type"], tipo);
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sin_pong_cierra_una_conexion_medio_muerta() {
+        let (mut cliente, mut servidor) = pareja().await;
+        let mensaje = servidor.next().await.unwrap().unwrap();
+        assert_eq!(mensaje.into_text().unwrap(), r#"{"type":"ping"}"#);
+        tokio::time::advance(Duration::from_secs(90)).await;
+        assert!(cliente.recibir(Duration::from_secs(10)).await.is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn el_pong_json_sostiene_el_transporte_sin_llegar_a_la_aplicacion() {
+        let (mut cliente, mut servidor) = pareja().await;
+        for _ in 0..4 {
+            let ping = servidor.next().await.unwrap().unwrap();
+            assert_eq!(ping.into_text().unwrap(), r#"{"type":"ping"}"#);
+            servidor.send(Message::Text(r#"{"type":"pong"}"#.into())).await.unwrap();
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_secs(30)).await;
+        }
+        servidor.send(Message::Text(r#"{"type":"main_online"}"#.into())).await.unwrap();
+        assert_eq!(cliente.recibir(Duration::from_secs(1)).await.unwrap().unwrap()["type"], "main_online");
+    }
+
+    #[tokio::test]
+    async fn una_trama_invalida_cierra_sin_exponer_su_contenido() {
+        let (mut cliente, mut servidor) = pareja().await;
+        servidor.send(Message::Text("dato-secreto".into())).await.unwrap();
+        let error = cliente.recibir(Duration::from_secs(6)).await.unwrap_err();
+        assert!(!error.to_string().contains("dato-secreto"));
+    }
+
+    #[tokio::test]
+    async fn soltar_el_canal_cancela_el_lector_y_cierra_el_transporte_anterior() {
+        let (cliente, mut servidor) = pareja().await;
+        drop(cliente);
+        timeout(Duration::from_secs(1), async {
+            while let Some(Ok(_)) = servidor.next().await {}
+        }).await.unwrap();
+    }
 }
 

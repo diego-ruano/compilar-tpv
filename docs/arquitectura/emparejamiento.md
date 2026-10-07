@@ -78,13 +78,13 @@ revés.
 ## Cuando la nube dice que no
 
 Sin ticket del WebSocket, un corte de red y un rechazo se ven igual; se distinguen por el código
-(`socketComun.ts::pedirTicketWs`, lista `CODIGOS_RECHAZO`: `license_expired`, `license_not_found`,
+(`presencia_handy.rs::rechazar`: `license_expired`, `license_not_found`,
 `device_revoked`):
 
 - Un rechazo **se pinta, no se gira**: `useMainPresence.rechazo` separa «no hay Main» (una espera que
   acaba sola) de «la nube no te deja entrar», y `HandyEsperandoMain` dice cuál es y qué hacer.
-- Se reintenta cada **5 minutos** y no al volver a primer plano. «Reintentar» rearranca el socket
-  entero, y el aviso se retira solo cuando la nube vuelve a dejar entrar.
+- Se reintenta cada **5 minutos** y no al volver a primer plano. «Reintentar» avisa al servicio
+  Rust, que sustituye la conexión; el aviso se retira cuando la nube vuelve a dejar entrar.
 - Sin Main conectada, el DO congela a las Handy (`main_offline`); mientras la Main vuelca su atraso,
   esperan (`main_volcando`). Ver [sincronizacion.md](sincronizacion.md).
 

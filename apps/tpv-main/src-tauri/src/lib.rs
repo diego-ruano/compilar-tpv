@@ -6,6 +6,7 @@ mod commands;
 mod interruptores;
 mod imagenes;
 mod replicacion;
+mod socket_handy;
 mod jobs;
 mod printing;
 
@@ -956,6 +957,7 @@ async fn set_device_mode(
         }
     }
 
+    socket_handy::contexto_cambiado(&app);
     Ok("OK".into())
 }
 
@@ -1054,6 +1056,7 @@ async fn device_reset_mode(
         let _ = PairingAdapter::new(app_data_dir).handy_clear_token();
     }
 
+    socket_handy::contexto_cambiado(&app);
     Ok("OK".into())
 }
 
@@ -1959,6 +1962,14 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
     builder
+        .on_window_event(|window, event| {
+            let revisar = matches!(event, tauri::WindowEvent::Focused(true));
+            #[cfg(mobile)]
+            let revisar = revisar || matches!(event, tauri::WindowEvent::Resumed);
+            if revisar {
+                if let Some(handy) = window.app_handle().try_state::<socket_handy::HandyNativo>() { handy.reintentar(false); }
+            }
+        })
         .setup(|app| {
             let handle = app.handle();
 
@@ -2137,6 +2148,7 @@ pub fn run() {
             // de pared, jitter, backoff y gating por modo—. Va DESPUÉS de `app.manage` porque los
             // cuerpos resuelven sus repositorios desde el `AppState`.
             replicacion::arrancar(handle.clone());
+            socket_handy::arrancar(handle.clone());
             jobs::arrancar(handle);
 
             Ok(())
@@ -2356,7 +2368,6 @@ pub fn run() {
             commands::pairing::handy_get_tenant,
 
             commands::pairing::device_get_identity,
-            commands::pairing::device_firmar_hello,
             commands::pairing::device_firmar_emparejamiento,
             commands::pairing::device_hora_para_firmar,
             commands::pairing::tpv_server_post_json,
@@ -2370,6 +2381,8 @@ pub fn run() {
             commands::permisos::permisos_sesion,
             commands::permisos::permisos_configuracion,
             commands::permisos::permisos_guardar,
+            commands::socket_handy::handy_socket_estado,
+            commands::socket_handy::handy_socket_reintentar,
             commands::sync::sync_estado,
             commands::sync::sync_reintentar,
             commands::sync::sync_backfill_estado,
@@ -2813,6 +2826,11 @@ mod tests_exenciones_del_gate {
     /// Ficheros cuyos comandos se alcanzan sin sesión, y por qué.
     const EXENTOS: &[(&str, &str, &str)] = &[
         (
+            "commands/socket_handy.rs",
+            include_str!("commands/socket_handy.rs"),
+            "el estado de la Main debe conocerse antes de desbloquear el login de la Handy",
+        ),
+        (
             "commands/recovery.rs",
             include_str!("commands/recovery.rs"),
             "la recuperación existe para el caso de cero usuarios: no hay con quién iniciar sesión",
@@ -2830,12 +2848,25 @@ mod tests_exenciones_del_gate {
     #[test]
     fn la_replica_y_las_credenciales_no_se_exponen_a_la_webview() {
         let registro = include_str!("lib.rs").split("generate_handler!").nth(1).unwrap().split("])").next().unwrap();
-        for comando in ["sync_apply_changes", "sync_outbox_pending", "sync_outbox_mark_sent", "sync_outbox_mark_failed", "sync_outbox_mark_encolada", "sync_liberar_encoladas", "recovery_complete", "device_sign_b64", "handy_get_ws_auth"] {
+        for comando in ["sync_apply_changes", "sync_outbox_pending", "sync_outbox_mark_sent", "sync_outbox_mark_failed", "sync_outbox_mark_encolada", "sync_liberar_encoladas", "recovery_complete", "device_sign_b64", "handy_get_ws_auth", "device_firmar_hello"] {
             assert!(!registro.contains(comando), "{comando} debe ser interno");
         }
         let proxy = include_str!("commands/pairing.rs");
         assert!(proxy.contains("if !permitido"));
         assert!(proxy.contains("Esta ruta no está disponible"));
+    }
+
+    #[test]
+    fn la_webview_no_abre_sockets_y_la_csp_solo_admite_el_ipc_en_produccion() {
+        for fuente in [include_str!("../../src/shared/lib/socketHandy.ts"), include_str!("../../src/shared/lib/socketMain.ts")] {
+            assert!(!fuente.contains("new WebSocket"));
+        }
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        for campo in ["csp", "devCsp"] {
+            let csp = config["app"]["security"][campo].as_str().unwrap();
+            let connect = csp.split(';').find(|s| s.trim().starts_with("connect-src")).unwrap();
+            assert!(!connect.contains("workers.dev") && !connect.contains("wss:"));
+        }
     }
 
     #[test]

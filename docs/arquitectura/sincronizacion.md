@@ -33,9 +33,9 @@ sin nube no opera.
 | Reparación por estado | `crates/tpv-infra-sqlite/src/sync_reparacion.rs` | Reencola la fila tal como está ahora |
 | Casos de uso y comandos | `tpv-application/src/use_cases/sync.rs` · `commands/sync.rs` | La interfaz Tauri |
 | Réplica de la Main | `src-tauri/src/replicacion.rs` · `tpv-application/src/use_cases/replicacion.rs` | Transporte nativo TLS, catch-up, outbox, confirmaciones, recuperación y estado de conexión. La UI observa `sync:estado` y `sync:cambio`, sin SQL ni credenciales (RI-31/RI-57) |
-| Socket de la Handy | `src/shared/lib/socketHandy.ts` (lo arranca `useHandySocket.ts`) | Recibe `change` y refresca; vigila la presencia de la Main. `test/socketHandy.test.ts` |
-| Común a los dos | `src/shared/lib/socketComun.ts` | Reconexión, latido con vigía, ticket y firma del saludo, rechazos |
-| Qué refrescar | `src/shared/lib/syncStatements.ts` | De las tablas tocadas a las claves de React Query |
+| Socket de la Handy | `src-tauri/src/socket_handy.rs` · `tpv-application/src/use_cases/presencia_handy.rs` | Servicio nativo de presencia y avisos, independiente de React. La UI observa `handy:estado` y `handy:cambio` |
+| Transporte común | `tpv-infra-http/src/websocket.rs` · `tpv-application/src/use_cases/saludo_socket.rs` | TLS, latido, buffers y tiempos acotados; saludo firmado y rol confirmado. Main y Handy conservan casos de uso distintos |
+| Qué refrescar | `tpv-application/src/use_cases/avisos_nube.rs` · `src/shared/lib/syncStatements.ts` | Rust deriva tablas e IDs sin exponer SQL; React los traduce a sus cachés y al ticket abierto |
 | El DO | `apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts` | La clase: hibernación, presencia, purga, cola por `alarm` |
 | …lo que llega por WS | `tenantHub.mensajes.ts` | Una rama por mensaje |
 | …por HTTP | `tenantHub.rutas.ts` | `/internal/apply`, `/internal/revoke`… |

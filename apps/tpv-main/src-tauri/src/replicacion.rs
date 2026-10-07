@@ -3,12 +3,12 @@ use std::{sync::{Arc, Mutex}, time::Duration};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::{sync::Notify, time::Instant};
+use tokio::sync::Notify;
 use tpv_application::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{ContextoReplicacion}, sync::SyncRepository}, use_cases::replicacion as uc};
 use tpv_contracts::{errors::ErrorCode, recovery::RecoveryState, sync::{EstadoReplicacion, OutboxFallo, SqlStatement}};
 use tpv_infra_licensing::PairingAdapter;
 use tpv_infra_http::websocket::conectar;
-use tpv_application::{ports::canal_nube::CanalNube, use_cases::avisos_nube::aviso};
+use tpv_application::{use_cases::avisos_nube::aviso};
 use crate::{AppState, DeviceMode, ConnectivityMode};
 
 pub(crate) struct SyncNativo {
@@ -74,21 +74,7 @@ async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<()> {
     let ticket = nube.tpv_server_post_json("tpv", "/v1/ws/ticket", json!({})).await?;
     let ticket = ticket.get("ticket").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| AppError::external("Respuesta sin ticket"))?;
     let mut canal = conectar(ticket, app.state::<SyncNativo>().despertar.clone()).await?;
-    let fin = Instant::now() + Duration::from_secs(20);
-    loop {
-        if Instant::now() >= fin { return Err(AppError::external("El socket no confirmó la identidad")); }
-        let Some(m) = canal.recibir(fin.saturating_duration_since(Instant::now())).await? else { continue; };
-        match m.get("type").and_then(Value::as_str) {
-            Some("challenge") => {
-                let nonce = m.get("nonceB64").and_then(Value::as_str).unwrap_or("");
-                let firma = nube.firmar_hello("tpv", nonce)?;
-                canal.enviar(json!({"type":"helloSigned","ts":firma.ts,"sigB64":firma.sig_b64,"nonceB64":nonce,"recovering":recuperando})).await?;
-            }
-            Some("hello_ok") => break,
-            Some("hello_error") => return Err(AppError::external("La nube rechazó el saludo del dispositivo")),
-            _ => {}
-        }
-    }
+    tpv_application::use_cases::saludo_socket::saludar(&mut canal, |nonce| nube.firmar_hello("tpv", nonce), "tpv", recuperando).await?;
     app.state::<SyncNativo>().publicar(app, "conectado", None);
     if !recuperando {
         let h = app.clone();

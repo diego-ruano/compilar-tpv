@@ -22,5 +22,4 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["c
 futures-util = "0.3"
 
 [dev-dependencies]
-# Sólo para los tests: el adaptador no arranca ningún runtime, lo pone quien lo usa.
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

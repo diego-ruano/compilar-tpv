@@ -190,12 +190,6 @@ pub struct HandySetTokenArgs {
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct DeviceFirmarHelloArgs {
-    pub nonce_b64: String,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct DeviceFirmarEmparejamientoArgs {
     pub accion: AccionEmparejamiento,
     pub pair_code: String,

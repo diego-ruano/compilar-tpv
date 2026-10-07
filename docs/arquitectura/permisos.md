@@ -114,8 +114,8 @@ cambiar el PIN público mientras `Requiere_Setup = 1`, y sólo se ejecuta en Mai
 ### Proxy e identidad
 
 El proxy firmado del IPC sólo admite las rutas exactas de emparejamiento y administración de
-dispositivos. Claim/fetch/cancel admiten el modo anónimo; el ticket WebSocket sólo se expone para
-Handy. Las rutas de réplica Main no pasan por IPC. El saludo Handy usa `WS_HANDY_HELLO`, y el Worker
+dispositivos. Claim/fetch/cancel admiten el modo anónimo; los tickets y los saludos WebSocket de
+Main y Handy son internos de Rust. Las rutas de réplica Main no pasan por IPC. El saludo Handy usa `WS_HANDY_HELLO`, y el Worker
 lo contrasta con el rol central del dispositivo: cambiar el modo local no concede una firma Main.
 El JWT y la firma de mensajes arbitrarios no se exponen a JavaScript (RI-20/RI-57).
 
@@ -176,7 +176,7 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
 ## La superficie de la aplicación de escritorio
 
 - **CSP cerrada** (`tauri.conf.json`, `app.security`): `script-src 'self'`; `connect-src` sólo el IPC
-  y el WebSocket de `tpv-api`; `img-src` lo local y el bucket de imágenes de la Handy; `style-src
+  en producción; `img-src` lo local y el bucket de imágenes de la Handy; `style-src
   'self'`; `object-src` y `frame-src` `'none'`. Un origen nuevo va en `csp` **y** en `devCsp`. Nada de
   `<style>` inyectado en tiempo de ejecución ni librerías que se autoinyecten CSS; la CSP sólo se aplica
   al build empaquetado y en Android, no en `pnpm tauri dev` de escritorio. Detalle y cómo comprobarlo

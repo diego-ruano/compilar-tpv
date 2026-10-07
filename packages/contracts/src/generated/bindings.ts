@@ -90,6 +90,8 @@ export type AsignacionUpdateInput = { id_asignacion: string, id_turno: string, a
 
 export type AutorizacionUsuario = { rol: string, permisos: Array<string>, };
 
+export type AvisoSocketHandy = { generacion: number, cambio: CambioReplicado, };
+
 /**
  * Estado del backfill del histórico, para el panel de Conectividad y para el aviso de las
  * estadísticas (mientras corre, un total de rango largo crece solo y parece un error de cálculo).
@@ -396,6 +398,8 @@ export type ComandaRow = { id_comanda: string, id_mesa: string, id_trabajador: s
  */
 export type CompleteInitialSetupInput = { id_usuario: string, pin_nuevo: string, email_nuevo: string, };
 
+export type ConexionHandy = "pausada" | "sin_identidad" | "conectando" | "conectada" | "reintentando" | "rechazada";
+
 /**
  * Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).
  */
@@ -537,8 +541,6 @@ export type DestinatarioTicket = { nombre_razon: string, nif: string, domicilio?
 
 export type DeviceFirmarEmparejamientoArgs = { accion: AccionEmparejamiento, pair_code: string, nonce_b64: string, };
 
-export type DeviceFirmarHelloArgs = { nonce_b64: string, };
-
 export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
 
 /**
@@ -677,6 +679,8 @@ modo_prueba: boolean, };
  * RI-31: estado de réplica para la UI, sin SQL ni credenciales.
  */
 export type EstadoReplicacion = { revision: number, estado: string, detalle: string | null, fase_recuperacion: string, fallos_recuperacion: number, };
+
+export type EstadoSocketHandy = { revision: number, generacion: number, conexion: number, tenant_id: string | null, estado: ConexionHandy, main_online: boolean | null, volcando: boolean, rechazo: RechazoHandy | null, };
 
 /**
  * Una factura de un cobro, para elegir qué papel se imprime.
@@ -1402,6 +1406,8 @@ export type PunchStatus = { fecha: string, turno_partido: number, partes: Array<
 export type PunchStatusArgs = { id_usuario: string, };
 
 export type PuntualidadInfo = { puntual: boolean, programado: string, entrada: string, minutos_retraso: number, };
+
+export type RechazoHandy = "dispositivo" | "licencia";
 
 /**
  * Estado que decide si la aplicación puede abrir el login o debe permanecer bloqueada.

@@ -20,7 +20,7 @@ src/
 ## Hablar con el backend
 
 - **Todo pasa por `invokeClient`** de `@tpv/client` (`packages/client/src/invokeClient.ts`), que envuelve
-  `invoke()`. En la Main el frontend no hace `fetch` a la nube para datos de negocio; el WebSocket Main vive también en Rust; la Handy escucha el WebSocket de avisos ([sincronizacion.md](sincronizacion.md)).
+  `invoke()`. Los WebSocket de Main y Handy viven en Rust; el frontend observa estados y avisos de cambios sin abrir conexiones ni interpretar SQL ([sincronizacion.md](sincronizacion.md)).
 - **Los tipos vienen de `@tpv/contracts`**, generados por ts-rs desde los DTO de
   `crates/tpv-contracts` ([../decisiones/0001-monorepo-y-arquitectura-hexagonal.md](../decisiones/0001-monorepo-y-arquitectura-hexagonal.md)).
 - **Un `*Apis.ts` no redeclara tipos ni «normaliza» lo que vuelve**: recibe el `Input` generado y devuelve

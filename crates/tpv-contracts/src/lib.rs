@@ -41,3 +41,5 @@ pub mod verifactu;
 // ...
 
 pub mod permisos;
+
+pub mod socket_handy;

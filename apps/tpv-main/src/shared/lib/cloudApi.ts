@@ -12,13 +12,6 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-/**
- * Host del worker unificado `tpv-api`. Es el mismo que usa el backend Rust
- * (`CLOUD_API_BASE` en `crates/tpv-infra-licensing`); las peticiones REST no lo necesitan
- * (las compone Rust), pero el WebSocket sí lo abre el frontend.
- */
-export const CLOUD_WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
-
 /** Identidad con la que el backend firma la petición. */
 export type CloudMode = "anon" | "tpv" | "handy";
 

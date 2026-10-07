@@ -51,4 +51,19 @@ mod tests {
         let v = aviso(&[SqlStatement { sql:"WITH x AS (SELECT 1) UPDATE Productos SET Nombre='x'".into(), args:vec![] }]);
         assert!(v.tablas.is_none()); assert!(v.comanda.uncertain);
     }
+    #[test]
+    fn el_insert_identifica_la_comanda_y_el_lote_deduplica_ids() {
+        let v = aviso(&[
+            SqlStatement { sql: "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda) VALUES (?1, ?2)".into(), args: vec![json!("d1"), json!("c1")] },
+            SqlStatement { sql: "DELETE FROM Detalle_Comanda WHERE ID_Comanda=?1".into(), args: vec![json!("c1")] },
+        ]);
+        assert_eq!(v.comanda.ids, vec!["c1"]); assert!(!v.comanda.uncertain);
+    }
+    #[test]
+    fn borrar_por_detalle_refresca_por_seguridad_y_el_catalogo_no_toca_tickets() {
+        let v = aviso(&[SqlStatement { sql: "DELETE FROM Detalle_Comanda WHERE ID_Detalle=?1".into(), args: vec![json!("d1")] }]);
+        assert!(v.comanda.uncertain); assert!(v.comanda.touched_comanda);
+        let v = aviso(&[SqlStatement { sql: "UPDATE Lotes_Producto SET Stock_Disponible=5".into(), args: vec![] }]);
+        assert!(v.comanda.touched_catalog); assert!(!v.comanda.touched_comanda);
+    }
 }
