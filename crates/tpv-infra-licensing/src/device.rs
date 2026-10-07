@@ -8,7 +8,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::secret_store;
+use crate::secret_store::{self, ErrorSecreto};
 
 // Identificadores (service, key) del almacén de secretos. En escritorio son el par (service, user)
 // del keyring del SO; en Android son claves de las SharedPreferences cifradas. NO cambiar: cambiarlos
@@ -36,48 +36,136 @@ pub fn sha256_hex_bytes(bytes: &[u8]) -> String {
     out.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-/* ===== device-id + keypair (almacén de secretos) ===== */
+/* ===== device-id + keypair (almacén de secretos) =====
 
-pub fn get_or_create_device_id() -> Result<String, String> {
-    if let Ok(Some(v)) = secret_store::get(SVC_LICENSING, KEY_DEVICE_ID) {
-        let t = v.trim().to_string();
-        if !t.is_empty() {
-            return Ok(t);
-        }
-    }
+   RI-72 · LEER NO ES CREAR. Antes había una sola función por secreto, «dámelo o invéntalo», y la
+   llamaban todas las peticiones firmadas y el gate de la licencia. Como trataba cualquier error del
+   almacén igual que «no hay nada», un Administrador de credenciales que tardaba en contestar al
+   arrancar Windows bastaba para generar un `device-id` o una clave nuevos y escribirlos ENCIMA de los
+   buenos. Eso no tiene vuelta atrás: con otro `device-id` la nube ya no ve aquí a la Main de su
+   licencia (y salir exige el código del correo del titular), y con otra clave todas las firmas
+   salen `bad_device_signature` y reactivar da `device_key_mismatch`.
 
-    let id = Uuid::new_v4().to_string();
-    secret_store::set(SVC_LICENSING, KEY_DEVICE_ID, &id)?;
-    Ok(id)
+   Ahora sólo crean la activación y el emparejamiento (`get_or_create_*`), que es cuando un equipo
+   estrena identidad; firmar, comprobar la licencia y el updater sólo leen (`leer_*`). Y al leer:
+     · hay valor → se usa;
+     · no hay nada → se crea (si quien pregunta puede crear);
+     · no se ha podido preguntar → error, y se vuelve a intentar en la siguiente llamada;
+     · hay valor pero no se puede descifrar aquí (copia de Android restaurada en otro teléfono) → no
+       va a servir nunca, y regenerar es lo correcto. */
+
+/// Lo que hay que hacer con un secreto de identidad después de intentar leerlo.
+#[derive(Debug, PartialEq, Eq)]
+enum Lectura {
+    Usar(String),
+    Crear,
+    Fallo(String),
 }
 
-/// Devuelve `(SigningKey, pubkey_b64)` desde el almacén; si no existe, la crea y persiste.
-pub fn get_or_create_device_keypair(device_id: &str) -> Result<(SigningKey, String), String> {
-    if let Ok(Some(b64)) = secret_store::get(SVC_DEVICE_KEY, device_id) {
-        let bytes = B64.decode(b64.trim()).map_err(|e| e.to_string())?;
-
-        if bytes.len() != 32 {
-            return Err("bad_private_key_len".into());
+fn decidir(leido: Result<Option<String>, ErrorSecreto>, que: &str) -> Lectura {
+    match leido {
+        Ok(Some(v)) if !v.trim().is_empty() => Lectura::Usar(v.trim().to_string()),
+        Ok(_) => Lectura::Crear,
+        Err(ErrorSecreto::Ilegible(e)) => {
+            log::warn!("[identidad] {que} guardado no se puede descifrar en este equipo ({e}): se genera otro");
+            Lectura::Crear
         }
-
-        let arr: [u8; 32] = bytes[..]
-            .try_into()
-            .map_err(|_| "bad_private_key_len".to_string())?;
-
-        let sk = SigningKey::from_bytes(&arr);
-        let pub_b64 = B64.encode(sk.verifying_key().to_bytes());
-        return Ok((sk, pub_b64));
+        Err(ErrorSecreto::NoDisponible(e)) => {
+            Lectura::Fallo(format!("No se ha podido leer {que} del almacén de secretos: {e}"))
+        }
     }
+}
 
-    use rand::rngs::OsRng;
-    let mut rng = OsRng;
-    let sk = SigningKey::generate(&mut rng);
+/// El almacén, como algo que se le pasa a la lógica de identidad: así los tests pueden simular que no
+/// responde sin tocar el keyring de verdad.
+trait Almacen {
+    fn get(&self, service: &str, key: &str) -> Result<Option<String>, ErrorSecreto>;
+    fn set(&self, service: &str, key: &str, value: &str) -> Result<(), String>;
+}
 
-    let sk_b64 = B64.encode(sk.to_bytes());
-    secret_store::set(SVC_DEVICE_KEY, device_id, &sk_b64)?;
+struct DelSistema;
 
+impl Almacen for DelSistema {
+    fn get(&self, service: &str, key: &str) -> Result<Option<String>, ErrorSecreto> {
+        secret_store::get(service, key)
+    }
+    fn set(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
+        secret_store::set(service, key, value)
+    }
+}
+
+fn device_id_en(almacen: &impl Almacen, crear: bool) -> Result<Option<String>, String> {
+    match decidir(almacen.get(SVC_LICENSING, KEY_DEVICE_ID), "el device-id") {
+        Lectura::Usar(id) => Ok(Some(id)),
+        Lectura::Fallo(e) => Err(e),
+        Lectura::Crear if !crear => Ok(None),
+        Lectura::Crear => {
+            let id = Uuid::new_v4().to_string();
+            almacen.set(SVC_LICENSING, KEY_DEVICE_ID, &id)?;
+            Ok(Some(id))
+        }
+    }
+}
+
+fn keypair_en(
+    almacen: &impl Almacen,
+    device_id: &str,
+    crear: bool,
+) -> Result<Option<(SigningKey, String)>, String> {
+    match decidir(almacen.get(SVC_DEVICE_KEY, device_id), "la clave del dispositivo") {
+        Lectura::Usar(b64) => clave_desde_b64(&b64).map(Some),
+        Lectura::Fallo(e) => Err(e),
+        Lectura::Crear if !crear => Ok(None),
+        Lectura::Crear => {
+            use rand::rngs::OsRng;
+            let sk = SigningKey::generate(&mut OsRng);
+            almacen.set(SVC_DEVICE_KEY, device_id, &B64.encode(sk.to_bytes()))?;
+            let pub_b64 = B64.encode(sk.verifying_key().to_bytes());
+            Ok(Some((sk, pub_b64)))
+        }
+    }
+}
+
+/// Una clave guardada que no tiene el formato esperado es un error, no un motivo para crear otra:
+/// sobrescribirla es justo lo que RI-72 viene a impedir.
+fn clave_desde_b64(b64: &str) -> Result<(SigningKey, String), String> {
+    let bytes = B64.decode(b64.trim()).map_err(|e| e.to_string())?;
+    let arr: [u8; 32] = bytes[..]
+        .try_into()
+        .map_err(|_| "bad_private_key_len".to_string())?;
+    let sk = SigningKey::from_bytes(&arr);
     let pub_b64 = B64.encode(sk.verifying_key().to_bytes());
     Ok((sk, pub_b64))
+}
+
+/// El `device-id` de este equipo, creándolo si no tiene. Sólo para la activación y el emparejamiento.
+pub fn get_or_create_device_id() -> Result<String, String> {
+    device_id_en(&DelSistema, true)?.ok_or_else(|| "device_id_no_creado".to_string())
+}
+
+/// `(SigningKey, pubkey_b64)` de ese `device-id`, creándola si no tiene. Sólo para la activación y el
+/// emparejamiento.
+pub fn get_or_create_device_keypair(device_id: &str) -> Result<(SigningKey, String), String> {
+    keypair_en(&DelSistema, device_id, true)?.ok_or_else(|| "device_key_no_creada".to_string())
+}
+
+/// El `device-id` si este equipo ya tiene uno. Nunca lo crea.
+pub fn leer_device_id() -> Result<Option<String>, String> {
+    device_id_en(&DelSistema, false)
+}
+
+/// La clave privada de ese `device-id`. Nunca la crea: sin ella, quien firma no tiene nada que firmar.
+pub fn leer_device_keypair(device_id: &str) -> Result<SigningKey, String> {
+    keypair_en(&DelSistema, device_id, false)?
+        .map(|(sk, _)| sk)
+        .ok_or_else(|| "sin_clave_de_dispositivo".to_string())
+}
+
+/// `(device_id, clave)` para firmar. Nunca crea nada.
+pub fn leer_identidad() -> Result<(String, SigningKey), String> {
+    let device_id = leer_device_id()?.ok_or_else(|| "sin_identidad_de_dispositivo".to_string())?;
+    let sk = leer_device_keypair(&device_id)?;
+    Ok((device_id, sk))
 }
 
 /// Firma de proof: `{ts}\n{METHOD}\n{PATH}\n{sha256(token)}\n{sha256(body)}`.
@@ -246,7 +334,7 @@ pub fn get_field_dek() -> Result<Option<String>, String> {
             Ok(if v.is_empty() { None } else { Some(v) })
         }
         Ok(None) => Ok(None),
-        Err(e) => Err(e),
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -266,6 +354,122 @@ pub fn clear_field_dek() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    /// Almacén en memoria al que se le puede decir que falle al leer.
+    #[derive(Default)]
+    struct AlmacenFalso {
+        valores: RefCell<HashMap<(String, String), String>>,
+        fallo: RefCell<Option<ErrorSecreto>>,
+        escrituras: RefCell<u32>,
+    }
+
+    impl AlmacenFalso {
+        fn con(service: &str, key: &str, valor: &str) -> Self {
+            let a = Self::default();
+            a.valores
+                .borrow_mut()
+                .insert((service.into(), key.into()), valor.into());
+            a
+        }
+        fn fallando(self, e: ErrorSecreto) -> Self {
+            *self.fallo.borrow_mut() = Some(e);
+            self
+        }
+        fn valor(&self, service: &str, key: &str) -> Option<String> {
+            self.valores
+                .borrow()
+                .get(&(service.to_string(), key.to_string()))
+                .cloned()
+        }
+    }
+
+    impl Almacen for AlmacenFalso {
+        fn get(&self, service: &str, key: &str) -> Result<Option<String>, ErrorSecreto> {
+            if let Some(e) = self.fallo.borrow().clone() {
+                return Err(e);
+            }
+            Ok(self.valor(service, key))
+        }
+        fn set(&self, service: &str, key: &str, value: &str) -> Result<(), String> {
+            *self.escrituras.borrow_mut() += 1;
+            self.valores
+                .borrow_mut()
+                .insert((service.into(), key.into()), value.into());
+            Ok(())
+        }
+    }
+
+    fn no_disponible() -> ErrorSecreto {
+        ErrorSecreto::NoDisponible("el Administrador de credenciales no contesta".into())
+    }
+
+    fn ilegible() -> ErrorSecreto {
+        ErrorSecreto::Ilegible("AEADBadTagException".into())
+    }
+
+    /// RI-72. El caso que costaba la identidad para siempre: el almacén no contesta y se generaba
+    /// otra encima de la buena. Ahora es un error, y lo guardado sigue intacto para el siguiente
+    /// intento.
+    #[test]
+    fn si_el_almacen_no_contesta_no_se_escribe_nada_encima() {
+        let a = AlmacenFalso::con(SVC_LICENSING, KEY_DEVICE_ID, "el-bueno").fallando(no_disponible());
+        assert!(device_id_en(&a, true).is_err());
+        assert_eq!(*a.escrituras.borrow(), 0);
+        assert_eq!(a.valor(SVC_LICENSING, KEY_DEVICE_ID).as_deref(), Some("el-bueno"));
+
+        let sk = SigningKey::from_bytes(&[7u8; 32]);
+        let a = AlmacenFalso::con(SVC_DEVICE_KEY, "d1", &B64.encode(sk.to_bytes()))
+            .fallando(no_disponible());
+        assert!(keypair_en(&a, "d1", true).is_err());
+        assert_eq!(*a.escrituras.borrow(), 0);
+    }
+
+    #[test]
+    fn lo_guardado_se_usa_tal_cual() {
+        let a = AlmacenFalso::con(SVC_LICENSING, KEY_DEVICE_ID, "  el-bueno ");
+        assert_eq!(device_id_en(&a, true).unwrap().as_deref(), Some("el-bueno"));
+        assert_eq!(*a.escrituras.borrow(), 0);
+
+        let sk = SigningKey::from_bytes(&[7u8; 32]);
+        let a = AlmacenFalso::con(SVC_DEVICE_KEY, "d1", &B64.encode(sk.to_bytes()));
+        let (leida, _) = keypair_en(&a, "d1", true).unwrap().unwrap();
+        assert_eq!(leida.to_bytes(), sk.to_bytes());
+    }
+
+    #[test]
+    fn sin_nada_guardado_crea_solo_quien_puede_crear() {
+        let a = AlmacenFalso::default();
+        assert_eq!(device_id_en(&a, false).unwrap(), None, "leer no crea");
+        assert_eq!(*a.escrituras.borrow(), 0);
+
+        let id = device_id_en(&a, true).unwrap().unwrap();
+        assert_eq!(a.valor(SVC_LICENSING, KEY_DEVICE_ID), Some(id));
+
+        assert!(keypair_en(&a, "d1", false).unwrap().is_none(), "leer no crea");
+        assert!(keypair_en(&a, "d1", true).unwrap().is_some());
+        assert!(a.valor(SVC_DEVICE_KEY, "d1").is_some());
+    }
+
+    /// La copia de Android restaurada en otro teléfono: lo guardado no se va a poder descifrar
+    /// nunca, así que regenerar es lo correcto. Pero sólo si quien pregunta puede crear.
+    #[test]
+    fn un_secreto_ilegible_se_regenera_al_crear_y_al_leer_cuenta_como_ausente() {
+        let a = AlmacenFalso::default().fallando(ilegible());
+        assert_eq!(device_id_en(&a, false).unwrap(), None);
+        assert_eq!(*a.escrituras.borrow(), 0);
+        assert!(device_id_en(&a, true).unwrap().is_some());
+        assert_eq!(*a.escrituras.borrow(), 1);
+    }
+
+    /// Una clave con otro formato es un error, no un hueco que rellenar.
+    #[test]
+    fn una_clave_mal_formada_no_se_sobrescribe() {
+        let a = AlmacenFalso::con(SVC_DEVICE_KEY, "d1", "no-es-una-clave");
+        assert!(keypair_en(&a, "d1", true).is_err());
+        assert_eq!(*a.escrituras.borrow(), 0);
+    }
 
     /// Un JWT de mentira con el `exp` que se le pida. No lleva firma válida a propósito: quien
     /// comprueba la firma es el worker, y `token_caducado` sólo lee la fecha.

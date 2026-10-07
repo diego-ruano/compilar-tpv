@@ -49,8 +49,8 @@ use tpv_domain::licensing::{
 
 use device::{
     clear_license_token, get_handy_token, get_license_token, get_or_create_device_id,
-    get_or_create_device_keypair, set_license_token, sign_device_proof, sign_payload_b64,
-    token_caducado,
+    get_or_create_device_keypair, leer_device_keypair, leer_identidad, set_license_token,
+    sign_device_proof, sign_payload_b64, token_caducado,
 };
 
 /// Worker unificado `tpv-api` (fusión de los antiguos `tpv-licensing` + `tpv-server`): sirve
@@ -423,8 +423,12 @@ impl LicensingAdapter {
 
         // Un fallo local (keyring, firma, cliente HTTP) es indistinguible de no tener red para el
         // gate: en ambos casos no sabemos qué dice el servidor → `Inalcanzable` (gracia offline).
-        let (sk, _) =
-            get_or_create_device_keypair(device_id).map_err(|_| FalloConsulta::Inalcanzable)?;
+        // RI-72: la clave se LEE. Si el almacén no contesta, se vuelve a intentar en el siguiente
+        // pulso; crear otra aquí era perder la identidad del equipo para siempre.
+        let sk = leer_device_keypair(device_id).map_err(|e| {
+            log::warn!("[licencia] sin la clave del dispositivo: {e}");
+            FalloConsulta::Inalcanzable
+        })?;
         let r = peticion_con_prueba(Method::GET, PATH, token, &sk)
             .await
             .map_err(|_| FalloConsulta::Inalcanzable)?;
@@ -450,8 +454,10 @@ impl LicensingAdapter {
     ) -> Result<String, FalloConsulta> {
         const PATH: &str = "/v1/license/refresh";
 
-        let (sk, _) =
-            get_or_create_device_keypair(device_id).map_err(|_| FalloConsulta::Inalcanzable)?;
+        let sk = leer_device_keypair(device_id).map_err(|e| {
+            log::warn!("[licencia] sin la clave del dispositivo: {e}");
+            FalloConsulta::Inalcanzable
+        })?;
         let r = peticion_con_prueba(Method::POST, PATH, token, &sk)
             .await
             .map_err(|_| FalloConsulta::Inalcanzable)?;
@@ -705,8 +711,8 @@ impl PairingAdapter {
         path: &str,
         body: &[u8],
     ) -> AppResult<ApiSignedHeaders> {
-        let device_id = get_or_create_device_id().map_err(ext)?;
-        let (sk, _pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
+        // RI-72: firmar sólo lee la identidad; nunca la crea.
+        let (_, sk) = leer_identidad().map_err(ext)?;
 
         let token = if mode == "handy" {
             get_handy_token().map_err(AppError::external)?
@@ -816,8 +822,7 @@ impl PairingAdapter {
             .map_err(ext)?
             .ok_or_else(|| ext("handy_tenant_missing"))?;
 
-        let device_id = get_or_create_device_id().map_err(ext)?;
-        let (sk, _pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
+        let (_, sk) = leer_identidad().map_err(ext)?;
 
         // Mismo camino que el `/refresh` de la Main: sin cuerpo y con la hora de la nube.
         let r = peticion_con_prueba(Method::POST, PATH, token.trim(), &sk)
@@ -936,9 +941,10 @@ impl PairingService for PairingAdapter {
         })
     }
 
+    /// Siempre va después de `device_identity` (el emparejamiento y el saludo del WebSocket la piden
+    /// antes de firmar), así que aquí sólo se lee.
     fn device_sign_b64(&self, payload: &str) -> AppResult<SigB64> {
-        let device_id = get_or_create_device_id().map_err(ext)?;
-        let (sk, _pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
+        let (_, sk) = leer_identidad().map_err(ext)?;
         let sig_b64 = sign_payload_b64(&sk, payload).map_err(ext)?;
         Ok(SigB64 { sig_b64 })
     }

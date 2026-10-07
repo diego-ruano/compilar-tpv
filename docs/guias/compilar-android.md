@@ -28,7 +28,11 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
   (sin AndroidX, sin Kotlin, sin tocar `gen/android`). La `JavaVM` la entrega `JNI_OnLoad`, que tiene que
   estar en el cdylib (`lib.rs`), y el `Context` sale de `ActivityThread.currentApplication()`.
   `ndk_context` no sirve (Tauri no lo inicializa) ni `JNI_GetCreatedJavaVMs` (el linker de Android no lo
-  expone).
+  expone). Una excepción de Java que deja una llamada fallida se trata y se limpia en `with_env` antes de
+  soltar el hilo (RI-75): con una pendiente, la siguiente llamada JNI es ilegal.
+- **Comprobar que compila** sin el proyecto Android entero:
+  `cargo clippy -p tpv-infra-licensing --target aarch64-linux-android`, con `CC_aarch64_linux_android` y
+  `AR_aarch64_linux_android` apuntando al `clang` y al `llvm-ar` del NDK.
 - **Imprimir** no está disponible fuera de Windows (`printing.rs` tiene un stub `#[cfg(not(windows))]`
   que devuelve error).
 - **Logs**: `android_logger` con la etiqueta `TPVRust`, nivel Info (a Trace, la crate `jni` inunda logcat

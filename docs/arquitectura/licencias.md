@@ -261,6 +261,15 @@ no silencie el del siguiente.
 El device-proof firma `ts \n MÉTODO \n ruta \n sha256(token) \n sha256(cuerpo)` (`device.rs`), con ±2
 minutos de margen en el worker.
 
+**La identidad sólo se crea al activar y al emparejar** (`get_or_create_*` en `device.rs`). Firmar, el
+gate y el updater la leen (`leer_*`) y nunca la crean. Al leer, el almacén distingue tres casos
+(`ErrorSecreto`, RI-72):
+- **No hay nada**: se crea, si quien pregunta puede crear.
+- **No se ha podido preguntar** (`NoDisponible`): es un error y se reintenta en la siguiente llamada.
+  Escribir otra identidad encima perdería para siempre la que la nube conoce.
+- **Hay algo, pero no se puede descifrar** (`Ilegible`): sólo pasa en Android, con una copia restaurada en
+  otro teléfono. Se regenera. La app lleva además `allowBackup="false"`.
+
 ## Secretos del worker
 
 | Secreto | Para qué |

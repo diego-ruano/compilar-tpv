@@ -5,7 +5,10 @@
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- RI-72/RI-76: sin copia automática. El almacén de secretos viajaría cifrado con una clave del
+         Keystore que no viaja, y una Handy nueva se empareja: no se restaura. -->
     <application
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/Theme.tpv"
