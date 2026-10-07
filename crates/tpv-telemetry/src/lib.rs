@@ -30,6 +30,9 @@ mod spool;
 mod state;
 mod worker;
 
+#[cfg(test)]
+mod test_support;
+
 pub mod config;
 pub mod sentry;
 

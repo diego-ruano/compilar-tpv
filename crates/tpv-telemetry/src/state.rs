@@ -8,6 +8,8 @@
 
 use std::collections::VecDeque;
 use std::sync::{Mutex, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use tokio::sync::Notify;
 
 use crate::context::Context;
 use crate::event::SpoolEvent;
@@ -19,6 +21,8 @@ pub(crate) struct TelemetryState {
     staging: Mutex<VecDeque<SpoolEvent>>,
     /// Tope del anillo de staging (nº de eventos).
     staging_cap: usize,
+    pub(crate) changed: Notify,
+    dropped: AtomicU64,
 }
 
 impl TelemetryState {
@@ -27,6 +31,8 @@ impl TelemetryState {
             context: RwLock::new(context),
             staging: Mutex::new(VecDeque::with_capacity(256)),
             staging_cap,
+            changed: Notify::new(),
+            dropped: AtomicU64::new(0),
         }
     }
 
@@ -47,8 +53,13 @@ impl TelemetryState {
         };
         while q.len() >= self.staging_cap {
             q.pop_front();
+            self.dropped.fetch_add(1, Ordering::Relaxed);
         }
+        let was_empty = q.is_empty();
         q.push_back(ev);
+        if was_empty {
+            self.changed.notify_one();
+        }
     }
 
     /// Extrae todos los eventos acumulados (los toma el worker para volcarlos a disco).
@@ -58,5 +69,22 @@ impl TelemetryState {
             Err(p) => p.into_inner(),
         };
         q.drain(..).collect()
+    }
+
+    /// Devuelve lo no persistido al principio, conservando el orden y el límite del anillo.
+    pub(crate) fn restore(&self, events: Vec<SpoolEvent>) {
+        let mut q = self.staging.lock().unwrap_or_else(|p| p.into_inner());
+        for ev in events.into_iter().rev() {
+            q.push_front(ev);
+        }
+        while q.len() > self.staging_cap {
+            q.pop_front();
+            self.dropped.fetch_add(1, Ordering::Relaxed);
+        }
+        self.changed.notify_one();
+    }
+
+    pub(crate) fn take_dropped(&self) -> u64 {
+        self.dropped.swap(0, Ordering::Relaxed)
     }
 }

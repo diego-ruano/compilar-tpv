@@ -78,7 +78,7 @@ Lo que sale de esta revisión se concentra en cuatro frentes:
 | [RI-08](#ri-08) | 🟠 | deuda | La CI no ejecuta 249 tests, entre ellos todos los guardianes |
 | [RI-15](#ri-15) | 🟡 | rendimiento | Se construye un `reqwest::Client` por petición (sin reutilizar conexiones) |
 | [RI-16](#ri-16) | 🟡 | rendimiento | libsql local bloquea hilos del runtime async (restauración, estadísticas) |
-| [RI-19](#ri-19) | 🟡 | bug/rendimiento | La cola de telemetría escribe un fichero por segundo y sube uno cada 10 s: se atasca y poda |
+| [RI-19](#ri-19) | ✅ | resuelto | Cola por segmentos y lotes agrupados, con retención por bytes |
 | [RI-22](#ri-22) | 🟡 | deuda | Caminos enteros sin ningún llamante |
 | [RI-23](#ri-23) | 🟡 | rendimiento | Bundle de 2,5 MB sin división por rutas, logo de 940 KB e imágenes sin uso |
 | [RI-24](#ri-24) | 🟡 | deuda | Los source maps del frontend no llegan a Sentry (y la versión no cuadra) |
@@ -139,30 +139,24 @@ RI-77 para que no enseñe lo que no puede hacer.
 del canal a `main`.
 
 **Después, sin prisa:** el resto, empezando por el código muerto (RI-22), y siguiendo por las mejoras de
-coste (RI-15, RI-16, RI-19, RI-44). Los detalles de pantalla (RI-81 a RI-86) conviene hacerlos
+coste (RI-15, RI-16, RI-44). Los detalles de pantalla (RI-81 a RI-86) conviene hacerlos
 cuando se toque cada una, a la vez que se trocean los componentes grandes de RI-47.
 
 ## 12. Observabilidad
 
 <a id="ri-19"></a>
-### RI-19 🟡 · La cola de telemetría no da abasto y acaba podando
+### RI-19 ✅ · Cola por segmentos y lotes agrupados
 
-**Dónde:** [`tpv-telemetry/src/worker.rs`](../../crates/tpv-telemetry/src/worker.rs),
-[`spool.rs`](../../crates/tpv-telemetry/src/spool.rs).
+**Implementado:** persistencia de la antesala aproximadamente al segundo, segmento cerrado a
+60 s, 500 eventos o 512 KiB y subida que agrupa también los ficheros antiguos. El POST no detiene
+la persistencia. Retención de 256 MiB en Main y 64 MiB en Handy, con poda de lo más antiguo y
+registro local de descartes. Recuperación de temporales y cursores de confirmación parcial, sin
+fsync ni garantía ante cortes de corriente. Espera por notificaciones y plazos, sin sondeo del
+directorio al estar inactivo. Los rechazos de cuerpo se dividen hasta aislar el evento inválido.
 
-**Qué pasa.** Cada segundo, si hay eventos, el hilo escribe **un fichero nuevo** con lo drenado. La
-subida manda **un fichero cada 10 s**. El «lote de hasta 500 eventos» sólo se da en ráfagas; con un
-goteo de un evento `INFO` cada pocos segundos (jobs, socket, sync) se crean hasta 60 ficheros por
-minuto y se suben 6. La cola crece sin límite hasta los 4.000 ficheros y entonces **se poda por el
-principio**, o sea se pierde telemetría por diseño. Y cada fichero subido es una invocación del
-worker (facturable): unas 8.600 al día por equipo si el goteo es continuo.
-
-Además, cada vuelta de 1 s hace un `read_dir` + ordenación del directorio de la cola para podar,
-aunque no haya nada que hacer (despertar cada segundo también cuenta en la batería de la Handy).
-
-**Propuesta.** Que la subida junte ficheros hasta llegar a 500 eventos (o N KB) por petición; o
-escribir en un fichero «abierto» que se cierra al llegar a 500 eventos o a 60 s. Podar sólo tras
-escribir. Y dormir con un `Condvar`/canal en vez de despertar cada segundo.
+**Dónde:** [`worker.rs`](../../crates/tpv-telemetry/src/worker.rs),
+[`spool.rs`](../../crates/tpv-telemetry/src/spool.rs) y
+[observabilidad.md](../arquitectura/observabilidad.md).
 
 <a id="ri-42"></a>
 ### RI-42 🔵 · El filtro de PII borra UUIDs y marcas de tiempo

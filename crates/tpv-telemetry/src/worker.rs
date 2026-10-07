@@ -1,31 +1,22 @@
-//! Worker de telemetría: corre en un **hilo propio** con su mini-runtime tokio, aislado del runtime
-//! de la app (la telemetría jamás debe competir con la UI del POS).
-//!
-//! Ciclo:
-//! 1. Vacía la antesala en memoria → cola durable en disco (cada `DRAIN_INTERVAL`).
-//! 2. Poda de seguridad de la cola.
-//! 3. Si la subida está activa: sube **un lote (≤500) cada `UPLOAD_INTERVAL`** (throttling que evita
-//!    el "efecto DDoS" al reconectar tras estar offline), con **backoff exponencial** ante fallos.
+//! RI-19: persistencia y red comparten el runtime privado, pero no la misma espera.
+//! El drenado continúa durante un POST lento; en reposo no hay sondeo periódico ni read_dir.
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 use crate::config::IngestConfig;
-use crate::spool;
+use crate::spool::{self, Spool, UploadBatch, MAX_EVENTS_PER_BATCH};
 use crate::state::TelemetryState;
 
-/// Cada cuánto se vacía la antesala en memoria a disco.
 const DRAIN_INTERVAL: Duration = Duration::from_secs(1);
-/// Cadencia normal de subida: un lote (≤500 eventos) cada 10 s. Mantiene el goteo controlado.
 const UPLOAD_INTERVAL: Duration = Duration::from_secs(10);
-/// Backoff inicial y techo ante fallos de subida (offline, 5xx…).
 const BACKOFF_MIN: Duration = Duration::from_secs(10);
 const BACKOFF_MAX: Duration = Duration::from_secs(300);
-/// Tope de ficheros-lote en disco (≈ 500 eventos por fichero). Red de seguridad anti-llenado.
-const MAX_SPOOL_FILES: usize = 4000;
-/// Timeout de cada POST de subida.
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(20);
+const MAIN_SPOOL_BYTES: u64 = 256 * 1024 * 1024;
+const HANDY_SPOOL_BYTES: u64 = 64 * 1024 * 1024;
 
 pub(crate) struct WorkerConfig {
     pub spool_dir: PathBuf,
@@ -33,123 +24,174 @@ pub(crate) struct WorkerConfig {
     pub state: Arc<TelemetryState>,
 }
 
-/// Punto de entrada del hilo: monta un runtime current-thread y corre el ciclo para siempre.
 pub(crate) fn run(cfg: WorkerConfig) {
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
+    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
-        Err(_) => return, // sin runtime no hay worker; el fichero local sigue funcionando igual.
+        Err(_) => return,
     };
     rt.block_on(loop_forever(cfg));
 }
 
+fn spool_limit(state: &TelemetryState) -> u64 {
+    if cfg!(target_os = "android") || state.snapshot_context().device_mode == "handy" {
+        HANDY_SPOOL_BYTES
+    } else { MAIN_SPOOL_BYTES }
+}
+
 async fn loop_forever(cfg: WorkerConfig) {
-    let _ = spool::ensure_dir(&cfg.spool_dir);
-
-    let client = reqwest::Client::builder()
-        .timeout(UPLOAD_TIMEOUT)
-        .build()
-        .ok();
-
+    let mut spool = loop {
+        match Spool::open(&cfg.spool_dir) {
+            Ok(spool) => break spool,
+            Err(e) => {
+                spool::report_io("abrir", &e);
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        }
+    };
+    prune(&mut spool, &cfg.state, None);
+    let client = reqwest::Client::builder().timeout(UPLOAD_TIMEOUT).build().ok();
+    let mut drain_at = None;
     let mut next_upload = Instant::now();
     let mut backoff = BACKOFF_MIN;
+    let mut max_events = MAX_EVENTS_PER_BATCH;
+    let mut task: Option<tokio::task::JoinHandle<UploadOutcome>> = None;
+    let mut in_flight: Option<UploadBatch> = None;
+    let mut seal_retry = None;
 
     loop {
-        // 1) Antesala → disco (durable) + poda. Depuramos el contenido (OBS-01) aquí, en el hilo
-        //    del worker (fuera del camino de emisión), ANTES de persistir/subir: así el fichero de
-        //    spool y la subida a la nube ya salen redactados y nunca penalizamos al POS.
-        let mut drained = cfg.state.drain();
-        if !drained.is_empty() {
-            for ev in drained.iter_mut() {
-                ev.scrub_in_place();
+        let seal_at = seal_retry.or_else(|| spool.deadline());
+        let upload_at = (cfg.ingest.enabled && client.is_some() && task.is_none() && spool.has_pending())
+            .then_some(next_upload);
+        tokio::select! {
+            // Sólo notificamos al pasar de vacío a no vacío y coalescemos durante un segundo.
+            _ = cfg.state.changed.notified(), if drain_at.is_none() => {
+                drain_at = Some(Instant::now() + DRAIN_INTERVAL);
             }
-            let _ = spool::write_events(&cfg.spool_dir, &drained);
-        }
-        spool::prune(&cfg.spool_dir, MAX_SPOOL_FILES);
-
-        // 2) Subida (si procede y toca según el throttling).
-        if cfg.ingest.enabled && Instant::now() >= next_upload {
-            if let Some(client) = client.as_ref() {
-                match try_upload_one(client, &cfg.ingest, &cfg.spool_dir).await {
-                    UploadOutcome::Sent => {
-                        backoff = BACKOFF_MIN;
-                        next_upload = Instant::now() + UPLOAD_INTERVAL;
+            _ = wait_until(drain_at) => {
+                drain_at = None;
+                let events = cfg.state.drain();
+                let mut failed = None;
+                for (i, event) in events.iter().enumerate() {
+                    if let Err(e) = spool.append(event) {
+                        spool::report_io("escribir", &e);
+                        failed = Some(i);
+                        break;
                     }
-                    // Nada que subir o aún no se puede firmar: reintento tranquilo.
-                    UploadOutcome::Empty | UploadOutcome::CannotSign => {
-                        next_upload = Instant::now() + UPLOAD_INTERVAL;
-                    }
-                    UploadOutcome::Failed => {
-                        next_upload = Instant::now() + backoff;
-                        backoff = (backoff * 2).min(BACKOFF_MAX);
+                    prune(&mut spool, &cfg.state, in_flight.as_ref());
+                }
+                if let Some(i) = failed {
+                    cfg.state.restore(events.into_iter().skip(i).collect());
+                    drain_at = Some(Instant::now() + BACKOFF_MIN);
+                }
+                let dropped = cfg.state.take_dropped();
+                if dropped > 0 {
+                    tracing::warn!(target: "tpv::telemetry", descartados = dropped, "antesala de telemetría llena");
+                }
+            }
+            _ = wait_until(seal_at) => {
+                match spool.seal() {
+                    Ok(()) => seal_retry = None,
+                    Err(e) => {
+                        spool::report_io("sellar", &e);
+                        seal_retry = Some(Instant::now() + BACKOFF_MIN);
                     }
                 }
             }
+            _ = wait_until(upload_at) => {
+                match spool.prepare(max_events) {
+                    Ok(Some(mut batch)) => {
+                        let body = std::mem::take(&mut batch.body);
+                        in_flight = Some(batch);
+                        task = Some(tokio::spawn(upload(
+                            client.as_ref().unwrap().clone(), cfg.ingest.clone(), body,
+                        )));
+                    }
+                    Ok(None) => next_upload = Instant::now() + UPLOAD_INTERVAL,
+                    Err(e) => {
+                        spool::report_io("leer", &e);
+                        next_upload = Instant::now() + BACKOFF_MIN;
+                    }
+                }
+            }
+            result = finish(&mut task), if task.is_some() => {
+                task = None;
+                let batch = in_flight.take().unwrap();
+                match result {
+                    UploadOutcome::Sent => {
+                        if let Err(e) = spool.acknowledge(&batch) { spool::report_io("confirmar", &e); }
+                        backoff = BACKOFF_MIN;
+                        max_events = MAX_EVENTS_PER_BATCH;
+                        next_upload = Instant::now() + jitter(UPLOAD_INTERVAL);
+                    }
+                    UploadOutcome::Rejected => {
+                        // Sólo 400/413/422: dividir hasta aislar el evento inválido. Un 401/403,
+                        // 429 o 5xx conserva TODOS los eventos y activa backoff.
+                        if batch.events == 1 {
+                            tracing::warn!(target: "tpv::telemetry", descartados = 1, "evento de telemetría rechazado permanentemente");
+                            if let Err(e) = spool.acknowledge(&batch) { spool::report_io("aislar", &e); }
+                            max_events = MAX_EVENTS_PER_BATCH;
+                        } else { max_events = (batch.events / 2).max(1); }
+                        next_upload = Instant::now() + jitter(UPLOAD_INTERVAL);
+                    }
+                    UploadOutcome::CannotSign => next_upload = Instant::now() + Duration::from_secs(60),
+                    UploadOutcome::Failed => {
+                        next_upload = Instant::now() + jitter(backoff);
+                        backoff = (backoff * 2).min(BACKOFF_MAX);
+                    }
+                }
+                prune(&mut spool, &cfg.state, None);
+            }
         }
-
-        tokio::time::sleep(DRAIN_INTERVAL).await;
     }
 }
 
-enum UploadOutcome {
-    Sent,
-    Empty,
-    CannotSign,
-    Failed,
+fn prune(spool: &mut Spool, state: &TelemetryState, batch: Option<&UploadBatch>) {
+    match spool.prune(spool_limit(state), batch) {
+        Ok(bytes) if bytes > 0 => tracing::warn!(
+            target: "tpv::telemetry", bytes_descartados = bytes,
+            "cola de telemetría podada al superar el presupuesto de disco"
+        ),
+        Err(e) => spool::report_io("podar", &e),
+        _ => {}
+    }
 }
 
-/// Sube el lote pendiente más antiguo. Sólo borra el fichero tras un 2xx (entrega confirmada).
-async fn try_upload_one(
-    client: &reqwest::Client,
-    ingest: &IngestConfig,
-    spool_dir: &std::path::Path,
-) -> UploadOutcome {
-    let batches = spool::list_batches(spool_dir);
-    let Some(file) = batches.into_iter().next() else {
-        return UploadOutcome::Empty;
-    };
-
-    let events = match spool::read_batch(&file) {
-        Ok(e) if !e.is_empty() => e,
-        // Fichero vacío o ilegible: lo retiramos para no atascar la cola.
-        _ => {
-            let _ = std::fs::remove_file(&file);
-            return UploadOutcome::Empty;
-        }
-    };
-
-    // Firma device-proof inyectada por el shell. Si aún no se puede firmar, retenemos el lote.
-    let Some(signer) = ingest.signer.as_ref() else {
-        return UploadOutcome::CannotSign;
-    };
-
-    // El cuerpo se serializa una vez: se firma y se envía tal cual (FABLE-E). Si fallara la
-    // serialización el lote es basura, así que se descarta en vez de atascar la cola.
-    let body = serde_json::json!({ "events": events });
-    let Ok(body_bytes) = serde_json::to_vec(&body) else {
-        let _ = std::fs::remove_file(&file);
-        return UploadOutcome::Empty;
-    };
-
-    let Some(headers) = signer.sign("POST", &ingest.path, &body_bytes) else {
-        return UploadOutcome::CannotSign;
-    };
-
-    let mut req = client
-        .post(&ingest.url)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(body_bytes);
-    for (k, v) in headers {
-        req = req.header(k, v);
+async fn wait_until(at: Option<Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
     }
+}
+async fn finish(task: &mut Option<tokio::task::JoinHandle<UploadOutcome>>) -> UploadOutcome {
+    match task.as_mut() {
+        Some(task) => task.await.unwrap_or(UploadOutcome::Failed),
+        None => std::future::pending().await,
+    }
+}
 
-    match req.send().await {
-        Ok(resp) if resp.status().is_success() => {
-            let _ = std::fs::remove_file(&file);
-            UploadOutcome::Sent
-        }
+// Variación positiva de hasta 1 s, sin dependencia ni estado global aleatorio.
+fn jitter(duration: Duration) -> Duration {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().subsec_nanos();
+    duration + Duration::from_millis(u64::from(nanos % 1000))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum UploadOutcome { Sent, CannotSign, Rejected, Failed }
+
+async fn upload(client: reqwest::Client, ingest: IngestConfig, body: Vec<u8>) -> UploadOutcome {
+    let Some(signer) = ingest.signer.as_ref() else { return UploadOutcome::CannotSign; };
+    let Some(headers) = signer.sign("POST", &ingest.path, &body) else { return UploadOutcome::CannotSign; };
+    // FABLE-E: el cuerpo firmado es exactamente el que se envía.
+    let mut request = client.post(&ingest.url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json").body(body);
+    for (k, v) in headers { request = request.header(k, v); }
+    match request.send().await {
+        Ok(response) if response.status().is_success() => UploadOutcome::Sent,
+        Ok(response) if matches!(response.status().as_u16(), 400 | 413 | 422) => UploadOutcome::Rejected,
         _ => UploadOutcome::Failed,
     }
 }
+
+#[cfg(test)]
+mod tests;

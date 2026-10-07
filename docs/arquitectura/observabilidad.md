@@ -26,8 +26,23 @@ Better Stack     ── GET /health, latidos del cron
 - **El token de Axiom no está en el dispositivo**: es un secreto del worker. Los equipos suben a
   `/v1/telemetry` autenticados y el worker retransmite. El endpoint fija `tenant_id` y `device_id` desde
   el token, no desde el cliente.
-- **La cola a Axiom es durable**: un lote sólo se borra del equipo tras un 2xx del worker; si Axiom
-  falla, el worker contesta 5xx y el equipo reintenta. Va en su propio hilo, fuera del camino del POS.
+- **La cola a Axiom está en disco**: la antesala se persiste aproximadamente al segundo, en un
+  segmento JSONL que se cierra a los 60 s, 500 eventos o 512 KiB. El envío agrupa también ficheros
+  antiguos y respeta 500 eventos y 512 KiB de cuerpo JSON. Hay al menos 10 s entre peticiones
+  cuando hay atraso, con backoff hasta 5 min y jitter ante fallos. Un POST lento no detiene el
+  drenado; al quedar vacía, la cola espera una notificación sin sondear el disco.
+- Un 2xx confirma los eventos enviados; un cursor en disco conserva el progreso parcial tras un
+  reinicio. Los temporales se recuperan descartando únicamente la última línea incompleta. No hay
+  fsync ni garantía frente a cortes de corriente. Puede haber duplicados si la entrega llega al
+  servidor pero su confirmación no llega al dispositivo (entrega al menos una vez).
+- **Retención acotada (RI-19)**: 256 MiB en Main y 64 MiB en Handy, podando los segmentos más
+  antiguos. La antesala tiene un máximo de 20.000 eventos. Los descartes, errores de E/S y líneas
+  corruptas quedan en el log local con target `tpv::telemetry`, excluido del reenvío para evitar
+  realimentación. Los errores de escritura conservan los eventos no persistidos para reintentar.
+- El cliente recorta el texto conforme al schema del servidor y omite campos estructurados
+  excesivos con un marcador. Un 400/413/422 divide el lote hasta aislar el evento rechazado;
+  autenticación, rate limit, red y 5xx conservan el lote. El servidor limita el cuerpo antes de
+  autenticar y espera Axiom: si falla, responde 502. Sin token de Axiom, sigue siendo un no-op.
 - **Escritorio**: el DSN entra al compilar con `TPV_SENTRY_DSN` (`option_env!`, con
   `rerun-if-env-changed` en `build.rs`). Sólo lo pone el workflow de release: en `pnpm tauri dev` no hay
   Sentry, y como la Webview manda sus eventos por el cliente de Rust, tampoco del frontend. El entorno lo

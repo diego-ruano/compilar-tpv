@@ -20,3 +20,6 @@ regex = { workspace = true }
 # Genera el tipo TS de `SpoolEvent` (fuente única de verdad; ver event.rs) para el paquete
 # @tpv/contracts. Se dispara con `cargo test -p tpv-telemetry export_bindings`.
 ts-rs = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

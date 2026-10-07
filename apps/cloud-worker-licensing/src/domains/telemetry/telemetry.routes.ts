@@ -12,7 +12,8 @@
 //   - Se ESPERA la ingesta de Axiom: si falla, 5xx para que el dispositivo conserve el lote y
 //     reintente ("no perder ninguno"). La latencia no importa: el envío va en un hilo de fondo.
 
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 
 import type { SpoolEvent } from "@tpv/contracts";
@@ -32,7 +33,7 @@ type ClientEventKeys = Exclude<keyof SpoolEvent, ServerSetKeys>;
 const MAX_EVENTS = 500;
 // Tope del cuerpo (bytes): ~2 MB sobra para 500 eventos de log.
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
-// Recorte defensivo de campos de texto largos.
+// Límite de texto: el cliente recorta antes de firmar; zod rechaza el exceso.
 const MAX_MESSAGE_LEN = 4000;
 
 // Por defecto zod DESCARTA las claves desconocidas (allowlist de nivel superior). En particular
@@ -69,20 +70,14 @@ void _assertSchemaMatchesRust;
 
 export const telemetryRoutes = new Hono<Ctx>();
 
-telemetryRoutes.use("*", tenantAuth);
+// RI-19: limitar también cuerpos sin Content-Length ANTES de que tenantAuth lea los bytes
+// para verificar la firma. El chequeo de la cabecera después de autenticar llegaba tarde.
+telemetryRoutes.use("*", bodyLimit({
+	maxSize: MAX_BODY_BYTES,
+	onError: (c) => c.json({ error: "payload_too_large" }, 413),
+}), tenantAuth);
 
-/**
- * Guardarraíl de tamaño. Va como middleware y DELANTE del validador a propósito: si fuera parte
- * del handler, el cuerpo ya se habría leído y parseado entero antes de mirarlo.
- */
-const noPasarseDeTamano: MiddlewareHandler<Ctx> = async (c, next) => {
-	if (Number(c.req.header("content-length") || "0") > MAX_BODY_BYTES) {
-		return c.json({ error: "payload_too_large" }, 413);
-	}
-	await next();
-};
-
-telemetryRoutes.post("/", noPasarseDeTamano, cuerpo(batchSchema), async (c) => {
+telemetryRoutes.post("/", cuerpo(batchSchema), async (c) => {
 	const { events } = c.req.valid("json");
 
 	const tenantId = c.get("tenantId");

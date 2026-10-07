@@ -85,6 +85,11 @@ fn level_str(level: &Level) -> Option<&'static str> {
 impl<S: Subscriber> Layer<S> for ForwardLayer {
     fn on_event(&self, event: &Event<'_>, _ctx: LayerContext<'_, S>) {
         let meta = event.metadata();
+        // RI-19: los avisos de la propia cola quedan en el log local; reenviarlos realimentaría
+        // una cola llena o un disco averiado con más eventos por cada fallo.
+        if meta.target() == "tpv::telemetry" {
+            return;
+        }
         let Some(level) = level_str(meta.level()) else {
             return;
         };
