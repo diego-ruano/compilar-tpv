@@ -180,8 +180,8 @@ para preseleccionar reglas y devuelve cadenas prestadas cuando no hay cambios.
 - ✅ Licencias y shell unificados en `tracing`. Android conserva Logcat desde `JNI_OnLoad`
   y conecta `log` al subscriber después, con un único logger global. Se evita la inicialización
   parcial que provocaba `try_init()` al encontrar un logger previamente instalado.
-- `images.routes.ts` deja `console.log` en cada subida (ruta y clave de R2): ruido en los logs del
-  worker en producción.
+- ✅ Eliminados los tres `console.log` de depuración de la subida en `images.routes.ts`
+  (ruta, ruta inválida y clave de R2). Se conservan las validaciones y las respuestas HTTP.
 
 ---
 

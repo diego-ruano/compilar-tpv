@@ -100,9 +100,7 @@ function relPathFromUrl(url: string): string {
 
 imagesRoutes.put("/*", bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ error: "image_too_large" }, 413) }), tenantAuth, async (c) => {
 	const relPath = relPathFromUrl(c.req.url);
-	console.log("[images PUT] relPath:", relPath);
 	if (!REL_PATH_RE.test(relPath)) {
-		console.log("[images PUT] bad_image_path para:", relPath);
 		return c.json({ error: "bad_image_path" }, 400);
 	}
 
@@ -114,7 +112,6 @@ imagesRoutes.put("/*", bodyLimit({ maxSize: MAX_BYTES, onError: (c) => c.json({ 
 	if (!contentType || contentType !== contentTypeFor(relPath)) return c.json({ error: "bad_image_path" }, 400);
 	// El tenant SIEMPRE sale del token (no del cliente): aislamiento por tenant garantizado.
 	const key = `${c.get("tenantId")}/${relPath}`;
-	console.log("[images PUT] R2 key:", key);
 
 	await c.env.IMAGES.put(key, body, {
 		httpMetadata: { contentType, cacheControl: CACHE_CONTROL },
