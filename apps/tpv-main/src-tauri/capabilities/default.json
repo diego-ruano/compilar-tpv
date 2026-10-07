@@ -18,8 +18,6 @@
         "dialog:allow-confirm",
         "dialog:allow-message",
 
-        "fs:default",
-
         {
             "identifier": "fs:allow-write-file",
             "deny": [
@@ -31,7 +29,11 @@
                 { "path": "$APPDATA/license_state.json" },
                 { "path": "$APPDATA/traslado-pendiente" },
                 { "path": "$APPDATA/interruptores.json" },
-                { "path": "$APPDATA/backups/**" }
+                { "path": "$APPDATA/backups/**" },
+                { "path": "$APPDATA/image_uploads.json" },
+                { "path": "$APPDATA/telemetry-spool/**" },
+                { "path": "$APPDATA/logs/**" },
+                { "path": "$APPDATA/image_backfill_done" }
             ]
         }
     ]

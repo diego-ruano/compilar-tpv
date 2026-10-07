@@ -2950,7 +2950,19 @@ mod tests_exenciones_del_gate {
             "$APPDATA/traslado-pendiente",
             "$APPDATA/interruptores.json",
             "$APPDATA/backups/**",
+            "$APPDATA/image_uploads.json",
+            "$APPDATA/telemetry-spool/**",
+            "$APPDATA/logs/**",
+            "$APPDATA/image_backfill_done",
         ];
+
+        // RI-51: la interfaz solo exporta a ficheros autorizados por el diálogo; no lee AppData.
+        let capacidades: serde_json::Value = serde_json::from_str(CAPACIDADES).unwrap();
+        for permiso in capacidades["permissions"].as_array().unwrap() {
+            let id = permiso.as_str().or_else(|| permiso["identifier"].as_str()).unwrap();
+            assert!(!matches!(id, "fs:default" | "fs:read-all") && !id.starts_with("fs:allow-read"),
+                "La lectura de archivos desde la webview requiere revisar RI-51: {id}");
+        }
 
         // Un permiso de escritura suelto (una cadena, sin objeto) no lleva ámbito: eso es
         // exactamente lo que REV-24 encontró.
