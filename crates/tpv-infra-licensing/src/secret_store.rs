@@ -30,7 +30,9 @@ pub enum ErrorSecreto {
     NoDisponible(String),
     /// Hay algo guardado, pero no se puede descifrar con la clave de este equipo y no va a poder
     /// nunca: es una copia de Android restaurada en otro teléfono, cuya clave del Keystore no viajó
-    /// con ella (RI-76). Ese valor ya no sirve, y regenerarlo es lo correcto. En escritorio no pasa.
+    /// con ella (RI-76). Ese valor ya no sirve, y regenerarlo es lo correcto. En escritorio no pasa,
+    /// y por eso allí sólo la construyen los tests.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     Ilegible(String),
 }
 
