@@ -1,4 +1,5 @@
-import { invokeClient } from "@tpv/client";
+import { commands } from "@tpv/client";
+
 import type { EnviarPedidoEmailInput } from "@tpv/contracts";
 
 // El envío de correo lo hace SIEMPRE el worker (Cloudflare Email Service). Ya no hay configuración
@@ -6,5 +7,5 @@ import type { EnviarPedidoEmailInput } from "@tpv/contracts";
 // offline no se puede enviar (hace falta el worker).
 
 export async function emailEnviarPedido(args: EnviarPedidoEmailInput): Promise<void> {
-  await invokeClient<void>("email_enviar_pedido", { args });
+  await commands.emailEnviarPedido(args);
 }

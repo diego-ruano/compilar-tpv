@@ -21,6 +21,7 @@ use tpv_contracts::errors::AppErrorDto;
 /* ===== LAYOUT ===== */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn save_layout(
     state: State<'_, AppState>,
     args: MesasSaveLayoutInput,
@@ -32,6 +33,7 @@ pub async fn save_layout(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn load_layout(state: State<'_, AppState>) -> Result<Vec<SalonOut>, AppErrorDto> {
     let repo = state.mesas_repo().await?;
     Ok(uc::load_layout(repo.as_ref()).await?)
@@ -40,6 +42,7 @@ pub async fn load_layout(state: State<'_, AppState>) -> Result<Vec<SalonOut>, Ap
 /* ===== RESERVAS ===== */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn set_reserva_estado(
     state: State<'_, AppState>,
     args: MesasSetReservaEstadoInput,
@@ -53,6 +56,7 @@ pub async fn set_reserva_estado(
 /* ===== COMANDAS (mesa) ===== */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_comanda_abierta_by_mesa(
     state: State<'_, AppState>,
     args: MesasIdMesaArgs,
@@ -62,6 +66,7 @@ pub async fn get_comanda_abierta_by_mesa(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn abrir_comanda(
     state: State<'_, AppState>,
     mut args: MesasAbrirComandaInput,
@@ -75,6 +80,7 @@ pub async fn abrir_comanda(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn comanda_set_trabajador_if_null(
     state: State<'_, AppState>,
     mut args: MesasComandaSetTrabajadorInput,
@@ -88,6 +94,7 @@ pub async fn comanda_set_trabajador_if_null(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn get_lineas_comanda(
     state: State<'_, AppState>,
     args: MesasIdComandaArgs,
@@ -97,6 +104,7 @@ pub async fn get_lineas_comanda(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn add_linea_comanda(
     state: State<'_, AppState>,
     mut args: MesasAddLineaComandaInput,
@@ -114,6 +122,7 @@ pub async fn add_linea_comanda(
 /* ===== META + CATÁLOGO ===== */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn mesas_meta_all(
     state: State<'_, AppState>,
 ) -> Result<HashMap<String, MesaMetaOut>, AppErrorDto> {
@@ -122,6 +131,7 @@ pub async fn mesas_meta_all(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn list_categorias_vendibles(
     state: State<'_, AppState>,
 ) -> Result<Vec<CategoriaVendibleOut>, AppErrorDto> {
@@ -130,6 +140,7 @@ pub async fn list_categorias_vendibles(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn list_productos_by_categoria(
     state: State<'_, AppState>,
     args: MesasIdCategoriaArgs,
@@ -139,6 +150,7 @@ pub async fn list_productos_by_categoria(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn search_productos_by_nombre(
     state: State<'_, AppState>,
     args: MesasSearchProductosArgs,
@@ -150,6 +162,7 @@ pub async fn search_productos_by_nombre(
 /* ===== TICKET (detalles) ===== */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn remove_one_pending_detalle(
     state: State<'_, AppState>,
     args: MesasRemoveOnePendingDetalleInput,
@@ -161,6 +174,7 @@ pub async fn remove_one_pending_detalle(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn delete_detalle(
     state: State<'_, AppState>,
     args: MesasDeleteDetalleInput,
@@ -172,6 +186,7 @@ pub async fn delete_detalle(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn update_detalle_nota(
     state: State<'_, AppState>,
     args: MesasUpdateDetalleNotaInput,
@@ -183,6 +198,7 @@ pub async fn update_detalle_nota(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cobrar_detalles(
     state: State<'_, AppState>,
     args: MesasCobrarDetallesInput,
@@ -197,6 +213,7 @@ pub async fn cobrar_detalles(
 /* ===== COCINA ===== */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn kitchen_list_today_pending(
     state: State<'_, AppState>,
 ) -> Result<Vec<KitchenRow>, AppErrorDto> {
@@ -206,6 +223,7 @@ pub async fn kitchen_list_today_pending(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn kitchen_set_line_state(
     state: State<'_, AppState>,
     mut args: MesasKitchenSetLineStateInput,

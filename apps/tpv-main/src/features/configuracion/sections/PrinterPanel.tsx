@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/sections/PrinterPanel.tsx
 //
 // Panel de selección de impresora de tickets. Lista las impresoras del sistema (locales y de
@@ -9,14 +10,7 @@ import { useToast } from "../../../shared/toast";
 import { cn } from "../utils";
 import { Panel } from "../ui/Panel";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
-import {
-    printerGetSelected,
-    printerList,
-    printerOpenDrawer,
-    printerPrintTest,
-    printerSetSelected,
-    type PrinterInfo,
-} from "../api/printerApis";
+import { printerGetSelected, printerOpenDrawer, printerPrintTest, printerSetSelected, type PrinterInfo } from "../api/printerApis";
 import { conAviso } from "../../../shared/lib/conAviso";
 
 export function PrinterPanel() {
@@ -31,7 +25,7 @@ export function PrinterPanel() {
         setLoading(true);
         try {
             const [list, sel] = await Promise.all([
-                printerList(),
+                commands.printerList(),
                 printerGetSelected(),
             ]);
             setPrinters(list);

@@ -2,7 +2,7 @@ import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "./Modal";
 import { useToast } from "../../../shared/toast";
-import { invoke } from "@tauri-apps/api/core";
+
 import { useCreateCategoria } from "../inventarioQueries";
 import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 import { conAviso } from "../../../shared/lib/conAviso";

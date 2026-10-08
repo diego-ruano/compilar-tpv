@@ -332,7 +332,7 @@ export default function VentaRapida() {
 
      El límite no se comprueba en esta pantalla. Lo decide Rust dentro de la transacción del cobro,
      que es donde se conoce el importe exacto que se va a registrar. */
-  const limiteSimplif = useBusinessSettings((st) => st.limiteSimplif);
+  const limite_simplif = useBusinessSettings((st) => st.limite_simplif);
   const [quiereFactura, setQuiereFactura] = useState(false);
   /** Intents parados esperando un destinatario. Mientras estén aquí, el drenado los salta. */
   const esperandoDestinatarioRef = useRef<Set<string>>(new Set());
@@ -513,7 +513,7 @@ export default function VentaRapida() {
           categoriaNombre: getCategoriaNombreParaProducto(String(l.ID_Producto ?? "")),
           notas: l.Notas ?? null,
           // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
-          ivaPercent: l.IVA_Percent ?? null,
+          iva_percent: l.IVA_Percent ?? null,
         };
       });
 
@@ -2142,7 +2142,7 @@ export default function VentaRapida() {
         onClose={cancelarFactura}
         onConfirmar={confirmarFactura}
         importe={pideFactura?.importe ?? CERO}
-        limite={limiteSimplif}
+        limite={limite_simplif}
         obligatorio={pideFactura?.clase === "obligatorio"}
         error={errorFactura}
       />

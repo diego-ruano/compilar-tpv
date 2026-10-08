@@ -491,7 +491,7 @@ export default function VerTicketsModal({
                                   // flotante, asi que se redondea al centimo como hace el SQL.
                                   const importe = escalar(
                                     d.Precio_Unitario,
-                                    d.Cantidad,
+                                    d.Cantidad ?? 0,
                                   );
 
                                   return (

@@ -11,7 +11,8 @@
  * Redondea a milésimas con la mitad lejos del cero, como `f64::round` de Rust (`Math.round` lleva la
  * mitad hacia +infinito, así que se aplica al valor absoluto). El cero negativo sale como cero.
  */
-export function redondearCantidad(x: number): number {
+export function redondearCantidad(x: number | null): number {
+	if (x == null) return 0;
 	if (!Number.isFinite(x)) return 0;
 	const r = (Math.sign(x) * Math.round(Math.abs(x) * 1000)) / 1000;
 	return r || 0;

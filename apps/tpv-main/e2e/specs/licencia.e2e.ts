@@ -54,7 +54,7 @@ type Gate = { allowed: boolean; reason: string | null };
  * un título (o a otra pantalla entera), pero el motivo es lo que decide.
  */
 async function comprobarLicencia(): Promise<Gate> {
-    return leerDeLaApp<Gate>("license_check_now");
+    return leerDeLaApp("license_check_now");
 }
 
 describe("La licencia deja de valer", () => {

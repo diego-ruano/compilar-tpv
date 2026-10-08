@@ -9,14 +9,14 @@ import { useTicketSettings } from "../src/shared/stores/useTicketSettings";
 import { useContactSettings } from "../src/shared/stores/useContactSettings";
 const casos = [
     { nombre: "negocio", api: h.business, patch: h.patchBusiness, store: useBusinessSettings,
-        datoA: {businessName: "A", ivaPercent: 10}, datoB: {businessName: "B", ivaPercent: 10}, valor: () => useBusinessSettings.getState().businessName,
-        mutar: () => useBusinessSettings.getState().setMany({businessName: "A"}) },
+        datoA: {business_name: "A", iva_percent: 10}, datoB: {business_name: "B", iva_percent: 10}, valor: () => useBusinessSettings.getState().business_name,
+        mutar: () => useBusinessSettings.getState().setMany({business_name: "A"}) },
     { nombre: "ticket", api: h.ticket, patch: h.patchTicket, store: useTicketSettings,
-        datoA: {paperWidthMm: 58}, datoB: {paperWidthMm: 112}, valor: () => useTicketSettings.getState().settings.paperWidthMm,
-        mutar: () => useTicketSettings.getState().setSetting("paperWidthMm", 58) },
+        datoA: {paper_width_mm: 58}, datoB: {paper_width_mm: 112}, valor: () => useTicketSettings.getState().settings.paper_width_mm,
+        mutar: () => useTicketSettings.getState().setSetting("paper_width_mm", 58) },
     { nombre: "contacto", api: h.contact, patch: h.patchContact, store: useContactSettings,
-        datoA: {contactEmail: "a@ejemplo.test"}, datoB: {contactEmail: "b@ejemplo.test"}, valor: () => useContactSettings.getState().contactEmail,
-        mutar: () => useContactSettings.getState().setMany({contactEmail: "a@ejemplo.test"}) },
+        datoA: {contact_email: "a@ejemplo.test"}, datoB: {contact_email: "b@ejemplo.test"}, valor: () => useContactSettings.getState().contact_email,
+        mutar: () => useContactSettings.getState().setMany({contact_email: "a@ejemplo.test"}) },
 ];
 beforeEach(() => {
     vi.useFakeTimers(); vi.stubGlobal("window", {setTimeout, clearTimeout}); vi.resetAllMocks();

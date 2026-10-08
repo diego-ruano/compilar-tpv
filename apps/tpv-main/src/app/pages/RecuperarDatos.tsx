@@ -1,3 +1,5 @@
+import type { BootstrapResultado } from "@tpv/contracts";
+import { commands } from "@tpv/client";
 import { useEffect, useState } from "react";
 import type { AppErrorDto, LocalBackupInfo } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
@@ -11,14 +13,7 @@ import {
     HardDriveDownload,
     Loader2,
 } from "lucide-react";
-import {
-    importarCopiaLocal,
-    inicializarTenantVacio,
-    listarCopiasLocales,
-    recuperarDesdeCopiaLocal,
-    recuperarDesdeNube,
-    type BootstrapResultado,
-} from "../../features/login/loginApi";
+
 import { useEstadoSync } from "../../shared/stores/useEstadoSync";
 import { Badge, Button, Card } from "../../shared/ui";
 import Titlebar from "../layoutComponent/Titlebar";
@@ -68,7 +63,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
 
     useEffect(() => {
         let vivo = true;
-        listarCopiasLocales()
+        commands.recoveryListBackups()
             .then((items) => {
                 if (vivo) setBackups(items);
             })
@@ -109,8 +104,8 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
 
         const ruta = elegido;
         await ejecutar("local", async () => {
-            const copia = await importarCopiaLocal(ruta);
-            return recuperarDesdeCopiaLocal(copia.id);
+            const copia = await commands.recoveryImportBackup(ruta);
+            return commands.recoveryRestoreBackup(copia.id);
         });
     }
 
@@ -269,7 +264,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                                     variant="secondary"
                                                     disabled={operacion !== null}
                                                     onClick={() =>
-                                                        void ejecutar("local", () => recuperarDesdeCopiaLocal(backup.id))
+                                                        void ejecutar("local", () => commands.recoveryRestoreBackup(backup.id))
                                                     }
                                                 >
                                                     <HardDriveDownload className="size-4" aria-hidden />
@@ -302,7 +297,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                 <div className={trasladoPendiente ? "" : "border-t border-border pt-5"}>
                                     <Button
                                         disabled={operacion !== null}
-                                        onClick={() => void ejecutar("cloud", recuperarDesdeNube)}
+                                        onClick={() => void ejecutar("cloud", commands.syncBootstrapDesdeNube)}
                                     >
                                         <CloudDownload className="size-4" aria-hidden />
                                         Recuperar el estado actual de la nube
@@ -324,7 +319,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                         {puedeCrearVacia && (
                                             <Button
                                                 variant="secondary"
-                                                onClick={() => void ejecutar("empty", inicializarTenantVacio)}
+                                                onClick={() => void ejecutar("empty", commands.syncInicializarTenantVacio)}
                                             >
                                                 Crear una base de datos nueva y vacía
                                             </Button>

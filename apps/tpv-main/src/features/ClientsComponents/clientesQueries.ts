@@ -1,20 +1,15 @@
+import { commands } from "@tpv/client";
 // Hooks de TanStack Query para **clientes** (FEATURE DE REFERENCIA del patrón).
 //
 // Patrón a seguir en el resto de features:
 //  - Lecturas  -> useQuery con queryKey con el nombre de la feature como prefijo.
 //  - Escrituras -> useMutation que, en onSuccess, invalida la clave de la feature para
 //    que las listas en caché se refresquen solas (Local-First: el dato sólo cambia aquí).
-//  - El hook envuelve las funciones de `*Apis.ts` (invokeClient) sin tocar su firma.
+//  - El hook envuelve las funciones de `*Apis.ts` (commands) sin tocar su firma.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  clientesCreateCliente,
-  clientesGetOverview,
-  clientesRecalcularGasto,
-  clientesUpdateCliente,
-  type FiltroRanking,
-} from "./clientesApis";
+import { clientesGetOverview, clientesRecalcularGasto, type FiltroRanking } from "./clientesApis";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
 export const clientesKeys = {
@@ -34,7 +29,7 @@ export function useClientesOverview(ranking: FiltroRanking) {
 export function useCreateCliente() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: clientesCreateCliente,
+    mutationFn: commands.clientesCreateCliente,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: clientesKeys.all });
     },
@@ -45,7 +40,7 @@ export function useCreateCliente() {
 export function useUpdateCliente() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: clientesUpdateCliente,
+    mutationFn: commands.clientesUpdateCliente,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: clientesKeys.all });
     },

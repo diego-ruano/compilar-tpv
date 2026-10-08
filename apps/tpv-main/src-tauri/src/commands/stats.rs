@@ -16,6 +16,7 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stats_mesas_get(
     state: State<'_, AppState>,
     range: StatsRange,
@@ -26,6 +27,7 @@ pub async fn stats_mesas_get(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stats_productos_list_categorias(
     state: State<'_, AppState>,
 ) -> Result<Vec<StatsCategoriaRow>, AppErrorDto> {
@@ -35,6 +37,7 @@ pub async fn stats_productos_list_categorias(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stats_productos_resumen(
     state: State<'_, AppState>,
     args: ProductosStatsArgs,
@@ -45,6 +48,7 @@ pub async fn stats_productos_resumen(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stats_reservas_resumen(
     state: State<'_, AppState>,
     args: ReservasStatsArgs,
@@ -55,6 +59,7 @@ pub async fn stats_reservas_resumen(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stats_trabajadores_resumen(
     state: State<'_, AppState>,
     args: TrabajadoresStatsArgs,
@@ -65,6 +70,7 @@ pub async fn stats_trabajadores_resumen(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stats_clientes_resumen(
     state: State<'_, AppState>,
     args: ClientesStatsArgs,
@@ -75,6 +81,7 @@ pub async fn stats_clientes_resumen(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn stats_proveedores_resumen(
     state: State<'_, AppState>,
     args: ProveedoresStatsArgs,

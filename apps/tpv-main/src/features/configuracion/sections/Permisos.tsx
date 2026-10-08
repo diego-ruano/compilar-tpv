@@ -1,6 +1,7 @@
+import { commands } from "@tpv/client";
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { invokeClient, toAppError } from "@tpv/client";
+import { toAppError } from "@tpv/client";
 import type { ConfiguracionPermisos, GuardarPermisosInput } from "@tpv/contracts";
 import { queryClient } from "../../../shared/lib/queryClient";
 import { conAviso } from "../../../shared/lib/conAviso";
@@ -14,12 +15,12 @@ type Borrador = {
 export function Permisos() {
     const query = useQuery({
         queryKey: ["permisos", "configuracion"],
-        queryFn: () => invokeClient<ConfiguracionPermisos>("permisos_configuracion"),
+        queryFn: () => commands.permisosConfiguracion(),
     });
     const [seleccion, setSeleccion] = useState("");
     const [borrador, setBorrador] = useState<Borrador | null>(null);
     const guardar = useMutation({
-        mutationFn: (args: GuardarPermisosInput) => invokeClient("permisos_guardar", { args }),
+        mutationFn: (args: GuardarPermisosInput) => commands.permisosGuardar(args),
         onSuccess: async () => {
             setBorrador(null);
             await queryClient.invalidateQueries({ queryKey: ["permisos"] });

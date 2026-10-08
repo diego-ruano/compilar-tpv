@@ -1,110 +1,21 @@
+import { commands } from "@tpv/client";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { UserCog, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
-import { invokeClient, toAppError } from "@tpv/client";
+import type { RolRow as Rol, TrabajadorDetailRow as TrabajadorDetail } from "@tpv/contracts";
+import { toAppError } from "@tpv/client";
 import { esPermisoDenegado } from "../../../shared/lib/permisos";
 import { useMode } from "../../../shared/stores/useMode";
 import { conAviso } from "../../../shared/lib/conAviso";
-
-type Rol = {
-  ID_Rol: string;
-  Nombre_Rol: string;
-};
-
-type TrabajadorDetail = {
-  ID_Trabajador: string;
-  ID_Usuario: string;
-
-  ID_Rol: string;
-  Email: string;
-  Nombre: string;
-  Apellido: string | null;
-  Estado: "Activo" | "Inactivo";
-
-  DNI: string | null;
-  Telefono: string | null;
-  Puesto: string | null;
-
-  IBAN: string | null;
-  Numero_Seguridad_Social: string | null;
-
-  Fecha_Inicio_Contrato: string | null;
-  Fecha_Fin_Contrato: string | null;
-};
 
 function normalizeNullable(v: string) {
   const s = String(v ?? "").trim();
   return s ? s : null;
 }
 
-function unwrapMaybeOkEnvelope<T>(x: any): T {
-  if (!x || typeof x !== "object") return x as T;
-  if (!("ok" in x)) return x as T;
+const getRolesLocal = commands.trabajadoresGetRoles;
 
-  const ok = !!x.ok;
-  if (!ok) {
-    const msg = String(x.error ?? x.message ?? "remote_ok_false");
-    throw new Error(msg);
-  }
-
-  if ("result" in x) return x.result as T;
-  if ("user" in x) return x.user as T;
-  if ("status" in x) return x.status as T;
-  if ("data" in x) return x.data as T;
-
-  return x as T;
-}
-
-async function invokeLocalSmart<T>(
-  cmd: string,
-  payloadDirect?: Record<string, any>,
-  payloadArgsWrapper?: Record<string, any>,
-): Promise<T> {
-  if (payloadArgsWrapper) {
-    try {
-      return await invoke<T>(cmd, payloadArgsWrapper);
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      if (
-        !msg.includes("missing required key args") &&
-        !msg.includes("invalid args") &&
-        !msg.includes("unknown field")
-      ) {
-        throw e;
-      }
-    }
-  }
-
-  return await invoke<T>(cmd, payloadDirect ?? {});
-}
-
-async function getRolesLocal(): Promise<Rol[]> {
-  const raw = await invokeLocalSmart<Rol[]>(
-    "trabajadores_get_roles",
-    {},
-    { args: {} },
-  );
-
-  const data = unwrapMaybeOkEnvelope<any>(raw);
-  return Array.isArray(data) ? data : [];
-}
-
-async function getTrabajadorDetailLocal(idTrabajador: string): Promise<TrabajadorDetail | null> {
-  const body = {
-    idTrabajador,
-    id_trabajador: idTrabajador,
-  };
-
-  const raw = await invokeLocalSmart<TrabajadorDetail | null>(
-    "trabajadores_get_detail",
-    body,
-    { args: body },
-  );
-
-  const data = unwrapMaybeOkEnvelope<any>(raw);
-  return data ?? null;
-}
+const getTrabajadorDetailLocal = (idTrabajador: string) => commands.trabajadoresGetDetail({ id_trabajador: idTrabajador });
 
 function getErrorMessage(e: unknown) {
   // SEC-01 primero, y por CÓDIGO: es el único caso en el que reintentar no sirve de nada, así
@@ -223,8 +134,7 @@ async function updateTrabajadorRemote(payload: {
     body.pin = payload.pin;
   }
 
-  const ok = await invokeClient<boolean>("trabajadores_update", {
-    args: {
+  const ok = await commands.trabajadoresUpdate({
       id_trabajador: body.id_trabajador,
       id_usuario: body.id_usuario,
       id_rol: body.id_rol,
@@ -241,8 +151,7 @@ async function updateTrabajadorRemote(payload: {
       fecha_fin_contrato: body.fecha_fin_contrato,
       // RI-63: el PIN, no su hash: lo hashea el backend, que así exige la política del PIN.
       pin: body.pin,
-    },
-  });
+    });
 
   if (typeof ok !== "boolean") {
     throw new Error("invalid_remote_response");

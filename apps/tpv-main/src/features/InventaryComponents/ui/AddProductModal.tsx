@@ -1,9 +1,10 @@
+import { commands } from "@tpv/client";
 import { usePermisos } from "../../../shared/lib/usePermisos";
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
-import { invoke } from "@tauri-apps/api/core";
+
 
 import { resolveImageUrl, triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 
@@ -87,7 +88,7 @@ export function AddProductModal({
     const [stockSuelto, setStockSuelto] = useState("");
     // Tipo de IVA propio. Vacío = hereda el del negocio, que es lo normal: en hostelería el
     // consumo en el local va todo al tipo reducido. Se rellena solo en lo que tributa distinto.
-    const [ivaPercent, setIvaPercent] = useState("");
+    const [iva_percent, setIvaPercent] = useState("");
 
     const [image, setImage] = useState<File | null>(null);
     const [existingImageName, setExistingImageName] = useState<string | null>(null);
@@ -322,7 +323,7 @@ export function AddProductModal({
                     nombre_imagen: nombreArchivo ?? undefined,
                     ruta_imagen: rutaParaBD ?? undefined,
                     cantidad_pedido_esperada: numeroOpcional(cantidadPedidoEsperada),
-                    iva_percent: numeroOpcional(ivaPercent),
+                    iva_percent: numeroOpcional(iva_percent),
                     stock_suelto: numeroOpcional(stockSuelto),
                     ids_alergenos: alergIds,
                 })) || (isEdit ? productIdToEdit : null);
@@ -335,9 +336,7 @@ export function AddProductModal({
             if (image) {
                 triggerImageUploadDrain();
                 if (rutaAnterior && rutaAnterior !== rutaParaBD) {
-                    void invoke("images_delete", {
-                        args: { rel_path: rutaAnterior },
-                    }).catch(() => {});
+                    void commands.imagesDelete({ rel_path: rutaAnterior }).catch(() => {});
                 }
             }
 
@@ -538,7 +537,7 @@ export function AddProductModal({
                             step="0.1"
                             min="0"
                             max="100"
-                            value={ivaPercent}
+                            value={iva_percent}
                             onChange={(e) => setIvaPercent(e.target.value)}
                             placeholder="Vacío = el del negocio"
                             className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

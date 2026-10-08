@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/sections/AvisoInterruptores.tsx
 //
 // PROD-06 · Lo que soporte ha apagado desde la nube en este equipo.
@@ -7,7 +8,7 @@
 // el problema en su router. Se pinta sólo si hay algo apagado.
 
 import React from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import type { Interruptor, InterruptorApagado } from "@tpv/contracts";
 
 /** Exhaustivo a propósito: un interruptor nuevo sin etiqueta no compila. */
@@ -37,7 +38,7 @@ export function AvisoInterruptores({ solo }: { solo?: Interruptor[] }) {
 		let cancelado = false;
 		const leer = async () => {
 			try {
-				const lista = await invoke<InterruptorApagado[]>("interruptores_apagados");
+				const lista = await commands.interruptoresApagados();
 				if (!cancelado) setApagados(Array.isArray(lista) ? lista : []);
 			} catch {
 				// Si no se puede leer no se pinta nada: el aviso es una explicación, no un estado.

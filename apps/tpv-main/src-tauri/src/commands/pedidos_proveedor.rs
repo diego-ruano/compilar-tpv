@@ -12,6 +12,7 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn pedidos_proveedor_get_page(
     state: State<'_, AppState>,
     args: PedidosGetPageInput,
@@ -22,6 +23,7 @@ pub async fn pedidos_proveedor_get_page(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn pedidos_proveedor_crear(
     state: State<'_, AppState>,
     args: PedidosCrearInput,
@@ -35,6 +37,7 @@ pub async fn pedidos_proveedor_crear(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn pedidos_proveedor_actualizar(
     state: State<'_, AppState>,
     args: PedidosActualizarInput,
@@ -45,6 +48,7 @@ pub async fn pedidos_proveedor_actualizar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn pedidos_proveedor_cambiar_estado(
     state: State<'_, AppState>,
     args: PedidosCambiarEstadoInput,

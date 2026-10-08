@@ -230,7 +230,7 @@ export default function PedidoModal({
                 />
                 <input
                   type="number"
-                  value={l.cantidad}
+                  value={l.cantidad ?? ""}
                   onChange={(e) =>
                     updateLinea(l.id_linea, "cantidad", Number(e.target.value) || 0)
                   }

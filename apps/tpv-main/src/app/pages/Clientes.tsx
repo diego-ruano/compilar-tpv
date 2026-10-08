@@ -603,7 +603,7 @@ export default function Clientes() {
                 */}
                 <button
                   type="button"
-                  onClick={() => recalcularGasto.mutate({ idCliente: clienteActivo.ID_Cliente })}
+                  onClick={() => recalcularGasto.mutate({ id_cliente: clienteActivo.ID_Cliente })}
                   disabled={recalcularGasto.isPending || !puede("clientes.recalcular")}
                   className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-fg-muted underline decoration-dotted underline-offset-2 hover:text-fg disabled:opacity-50"
                   title="Rehace el total desde los cobros de este cliente"

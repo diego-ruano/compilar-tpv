@@ -35,24 +35,15 @@ use std::iter::Sum;
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 /// Un importe, en céntimos enteros.
 ///
 /// Cruza la frontera a TypeScript como un `number` **marcado**: un `number` corriente no se puede
 /// asignar a un `Dinero` sin decirlo, y cualquier aritmética sobre él pierde la marca. Eso es lo
 /// que convierte «se me ha olvidado convertir este importe» en un error de compilación en vez de
 /// en un precio de `4750 €` en pantalla.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, TS,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-// `export_to` SIN `export`: dice en que fichero vive el tipo, pero no genera aqui el test que lo
-// escribe. Quien escribe `bindings.ts` es `tpv-contracts`, en una sola pasada, y arrastra a
-// `Dinero` como dependencia de sus DTO. Con `export` en los dos sitios, cada tanda de tests es un
-// proceso distinto y el segundo trunca lo que escribio el primero.
-#[ts(export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-#[ts(type = "number & { readonly __centimos: unique symbol }")]
+// Specta exporta una definición nombrada con la marca de céntimos (RI-87).
 pub struct Dinero(i64);
 
 impl Dinero {
@@ -500,5 +491,21 @@ mod tests {
         assert_eq!(json, "4750");
         let vuelta: Dinero = serde_json::from_str("4750").unwrap();
         assert_eq!(vuelta, Dinero::de_centimos(4_750));
+    }
+}
+
+#[derive(specta::Type, serde::Serialize)]
+#[serde(rename = "Dinero", transparent)]
+struct DineroTipado(CentimosTypeScript);
+#[derive(serde::Serialize)]
+struct CentimosTypeScript;
+impl specta::Type for CentimosTypeScript {
+    fn definition(_: &mut specta::Types) -> specta::datatype::DataType {
+        specta_typescript::define("number & { readonly __centimos: unique symbol }").into()
+    }
+}
+impl specta::Type for Dinero {
+    fn definition(types: &mut specta::Types) -> specta::datatype::DataType {
+        <DineroTipado as specta::Type>::definition(types)
     }
 }

@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/cuentas/DevolverModal.tsx
 //
 // Devolver PARTE de un cobro: unas líneas, o unas unidades de una línea. Lo hacen el administrador y
@@ -17,7 +18,7 @@ import { ModalShell } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import { CERO, escalar, eur, restar, sumar } from "../../shared/lib/dinero";
 import { conAviso } from "../../shared/lib/conAviso";
-import { cuentasLineasDevolubles, type EntradaDto } from "./cuentasApis";
+import { type EntradaDto } from "./cuentasApis";
 import { useDevolverLineas } from "./cuentasQueries";
 
 type Metodo = "Efectivo" | "Tarjeta" | "Otro";
@@ -42,7 +43,7 @@ function milesimas(x: number): number {
 }
 
 function quedan(l: LineaDevolubleDto): number {
-    return milesimas(l.cantidad - l.devueltas);
+    return l.cantidad == null || l.devueltas == null ? 0 : milesimas(l.cantidad - l.devueltas);
 }
 
 /** Al peso (0,35 kg) no se cuentan unidades: se devuelve lo que queda o nada. */
@@ -54,8 +55,8 @@ function esAlPeso(l: LineaDevolubleDto): boolean {
 function importeDe(l: LineaDevolubleDto, unidades: number): Dinero {
     if (unidades <= 0) return CERO;
     return restar(
-        escalar(l.precio_unitario, milesimas(l.devueltas + unidades)),
-        escalar(l.precio_unitario, l.devueltas),
+        escalar(l.precio_unitario, milesimas((l.devueltas ?? 0) + unidades)),
+        escalar(l.precio_unitario, l.devueltas ?? 0),
     );
 }
 
@@ -71,7 +72,7 @@ export default function DevolverModal({ entrada, todo = false, onCerrar, onHecho
 
     useEffect(() => {
         let vivo = true;
-        cuentasLineasDevolubles(entrada.id)
+        commands.cuentasLineasDevolubles(entrada.id)
             .then((c) => {
                 if (!vivo) return;
                 setCobro(c);
@@ -185,7 +186,7 @@ export default function DevolverModal({ entrada, todo = false, onCerrar, onHecho
                                             <div className="truncate font-semibold text-fg">{l.nombre}</div>
                                             <div className="text-xs text-fg-muted">
                                                 {l.cantidad} × {eur(l.precio_unitario)}
-                                                {l.devueltas > 0 ? ` · devueltas ${l.devueltas}` : ""}
+                                                {(l.devueltas ?? 0) > 0 ? ` · devueltas ${l.devueltas}` : ""}
                                             </div>
                                         </div>
                                         {max <= 0 ? (

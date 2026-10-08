@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 import "../Global.css";
 import Layout from "./layouts/layout";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -7,7 +8,7 @@ import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
 import { esAdmin } from "../shared/lib/permisos";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
-import { fetchRecoveryStatus, fetchSetupPendiente } from "../features/login/loginApi";
+
 import Login from "./pages/Login";
 const SetupInicial = lazy(() => import("./pages/SetUpInicial"));
 const RecuperarDatos = lazy(() => import("./pages/RecuperarDatos"));
@@ -44,7 +45,7 @@ function AppInner() {
         if (role) return;
 
         let vivo = true;
-        Promise.all([fetchSetupPendiente(), fetchRecoveryStatus()])
+        Promise.all([commands.setupPendiente(), commands.recoveryStatus()])
             .then(([r, recovery]) => {
                 if (!vivo) return;
                 // El orden importa: la recuperación gana. Las dos son "no se puede entrar todavía",
@@ -80,7 +81,7 @@ function AppInner() {
                         marcarDatosPerdidos(false);
                         // Una base creada de cero trae el admin inicial con `Requiere_Setup=1`.
                         // Se vuelve a preguntar en vez de obligar a entrar con el PIN público.
-                        void fetchSetupPendiente()
+                        void commands.setupPendiente()
                             .then((r) => setPrimeraPantalla(r.pendiente ? "setup" : "login"))
                             .catch(() => setPrimeraPantalla("login"));
                     }}

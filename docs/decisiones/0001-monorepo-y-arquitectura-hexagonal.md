@@ -22,12 +22,11 @@ TypeScript no pueden escribirse dos veces a mano.
   - `tpv-contracts`: los DTO que cruzan a la interfaz.
   - `apps/tpv-main/src-tauri`: comandos Tauri **finos** que adaptan la entrada, llaman al caso de uso y
     devuelven el resultado. Sin SQL ni reglas.
-- **Tipos generados con ts-rs**: cada DTO lleva `#[derive(TS)]` con
-  `#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]` (tres `../` porque
-  ts-rs resuelve la ruta desde `<crate>/bindings/`). Todos se fusionan en un único `bindings.ts`, que el
-  frontend importa de `@tpv/contracts`. Se regenera con `pnpm generate-types` (`cargo test -p
-  tpv-contracts`). Los `i64` que son IDs o contadores llevan `#[ts(type = "number")]`; el dinero cruza
-  como `Dinero` ([0005](0005-dinero-en-centimos.md)).
+- **Contratos generados con Specta**: cada DTO deriva `specta::Type`, cada comando lleva
+  `#[specta::specta]` y el registro es `tauri_specta::Builder` en `lib.rs`. `pnpm generate-types`
+  exporta tipos (`@tpv/contracts`), funciones (`@tpv/client`) y metadatos para E2E desde el ejecutable
+  real con `--export-bindings`, sin abrir la aplicación. Los contadores se exportan como `number`, los
+  IDs siguen siendo UUID `string` y el dinero conserva `Dinero` ([0005](0005-dinero-en-centimos.md)).
 - **Los errores** de un caso de uso son `AppError`, que en la frontera se convierte en
   `AppErrorDto { code, message }` con `code` del catálogo cerrado `ErrorCode`.
 
@@ -37,6 +36,7 @@ TypeScript no pueden escribirse dos veces a mano.
   alrededor.
 - La Handy reutiliza los casos de uso cambiando el adaptador (`tpv-infra-http`); el worker, en cambio,
   tiene su propia implementación de las escrituras ([0003](0003-replicacion-por-sentencias-con-escritor-unico.md)).
-- El nombre de un comando Tauri sigue siendo una cadena: lo comprueba `scripts/check-comandos-tauri.mjs`.
+- TypeScript comprueba nombre, parámetros y respuesta de cada comando. ESLint impide saltarse el
+  cliente generado y CI comprueba que sus ficheros coinciden con las firmas Rust.
 - Un DTO con contrapartida en un schema zod del worker lleva un drift-guard de claves
   (`lib/typeGuards.ts`).

@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { commands } from "@tpv/client";
+
 
 export const MAX_IMAGEN_BYTES = 5 * 1024 * 1024;
 export const FORMATOS_IMAGEN = "image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp";
@@ -17,6 +18,6 @@ export async function guardarImagen(file: File, subfolder: string): Promise<{ no
         reader.onerror = () => reject(new Error("No se pudo leer la imagen"));
         reader.readAsDataURL(file);
     });
-    const ruta = await invoke<string>("save_image", { args: { subfolder, base64_data: base64 } });
+    const ruta = await commands.saveImage({ subfolder, base64_data: base64 });
     return { nombre: ruta.split("/").pop()!, ruta };
 }

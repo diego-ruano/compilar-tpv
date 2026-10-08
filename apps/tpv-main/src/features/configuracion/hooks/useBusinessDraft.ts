@@ -5,65 +5,65 @@ import { shallowEqualDraft } from "../types";
 import { clampIva } from "../utils";
 
 type BizLike = {
-    businessName: string;
-    logoDataUrl: string | null;
+    business_name: string;
+    logo_data_url: string | null;
     direccion: string;
     telefono: string;
     cif: string;
-    mensajeFooter: string;
-    ivaPercent: number;
-    razonSocial: string;
+    mensaje_footer: string;
+    iva_percent: number;
+    razon_social: string;
 };
 
 export function useBusinessDraft(biz: BizLike) {
     // 1) draft local inicial (copia del store)
     const [draft, setDraft] = useState<BusinessDraft>(() => ({
-        businessName: biz.businessName,
-        logoDataUrl: biz.logoDataUrl,
+        business_name: biz.business_name,
+        logo_data_url: biz.logo_data_url,
         direccion: biz.direccion,
         telefono: biz.telefono,
         cif: biz.cif,
-        mensajeFooter: biz.mensajeFooter,
-        ivaPercent: biz.ivaPercent,
-        razonSocial: biz.razonSocial,
+        mensaje_footer: biz.mensaje_footer,
+        iva_percent: biz.iva_percent,
+        razon_social: biz.razon_social,
     }));
 
     // 2) comparo contra estado actual del store (SIN hidratar)
     const dirty = useMemo(() => {
         const current: BusinessDraft = {
-            businessName: biz.businessName,
-            logoDataUrl: biz.logoDataUrl,
+            business_name: biz.business_name,
+            logo_data_url: biz.logo_data_url,
             direccion: biz.direccion,
             telefono: biz.telefono,
             cif: biz.cif,
-            mensajeFooter: biz.mensajeFooter,
-            ivaPercent: biz.ivaPercent,
-            razonSocial: biz.razonSocial,
+            mensaje_footer: biz.mensaje_footer,
+            iva_percent: biz.iva_percent,
+            razon_social: biz.razon_social,
         };
         return !shallowEqualDraft(draft, current);
     }, [
         draft,
-        biz.businessName,
-        biz.logoDataUrl,
+        biz.business_name,
+        biz.logo_data_url,
         biz.direccion,
         biz.telefono,
         biz.cif,
-        biz.mensajeFooter,
-        biz.ivaPercent,
-        biz.razonSocial,
+        biz.mensaje_footer,
+        biz.iva_percent,
+        biz.razon_social,
     ]);
 
     // 3) reset a lo que haya ahora en el store
     const resetDraft = () => {
         setDraft({
-            businessName: biz.businessName,
-            logoDataUrl: biz.logoDataUrl,
+            business_name: biz.business_name,
+            logo_data_url: biz.logo_data_url,
             direccion: biz.direccion,
             telefono: biz.telefono,
             cif: biz.cif,
-            mensajeFooter: biz.mensajeFooter,
-            ivaPercent: biz.ivaPercent,
-            razonSocial: biz.razonSocial,
+            mensaje_footer: biz.mensaje_footer,
+            iva_percent: biz.iva_percent,
+            razon_social: biz.razon_social,
         });
     };
 
@@ -72,7 +72,7 @@ export function useBusinessDraft(biz: BizLike) {
         const n = Number(String(raw).replace(",", "."));
         setDraft((d) => ({
             ...d,
-            ivaPercent: clampIva(Number.isFinite(n) ? n : 0),
+            iva_percent: clampIva(Number.isFinite(n) ? n : 0),
         }));
     };
 

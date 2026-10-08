@@ -18,6 +18,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+specta = { workspace = true }
+specta-typescript = { workspace = true }
+tauri-specta = { workspace = true }
 # ───────────── Tauri ─────────────
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-fs = "2"

@@ -3,9 +3,9 @@ import { Users, Plus } from "lucide-react";
 
 import {
   type TrabajadorRow,
-  type Turno,
-  type Asignacion,
-} from "../../features/trabajadores/trabajadoresApis";
+  type TurnoRow as Turno,
+  type AsignacionRow as Asignacion,
+} from "@tpv/contracts";
 import {
   useTrabajadores,
   useTurnos,
@@ -383,7 +383,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
   const [editIdAsignacion, setEditIdAsignacion] = useState<string | null>(null);
 
-  const [idTurno, setIdTurno] = useState<string>("");
+  const [id_turno, setIdTurno] = useState<string>("");
   const [area, setArea] = useState<string>("Sala");
   const [notas, setNotas] = useState<string>("");
 
@@ -444,18 +444,18 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const copiarSemanaAnterior = async () => {
     if (!isAdmin) return;
 
-    const toMonday = toYMD(weekStart);
-    const fromMonday = toYMD(addDays(weekStart, -7));
+    const to_monday = toYMD(weekStart);
+    const from_monday = toYMD(addDays(weekStart, -7));
 
     const ok = await confirmDialog(
-      `Esto copiara la semana ${fromMonday} a ${toMonday} y sobrescribira la semana destino. Continuar?`,
+      `Esto copiara la semana ${from_monday} a ${to_monday} y sobrescribira la semana destino. Continuar?`,
       { title: "Copiar semana anterior", kind: "warning" },
     );
     if (!ok) return;
 
     setError(null);
     try {
-      await copySemana.mutateAsync({ fromMonday, toMonday, overwrite: true });
+      await copySemana.mutateAsync({ from_monday, to_monday, overwrite: true });
     } catch (e) {
       console.error(e);
       setError("No se pudo copiar la semana anterior.");
@@ -581,7 +581,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
     if (!isAdmin) return;
     if (!selectedTrabajadorId || !selectedFecha) return;
-    if (!idTurno) return setError("Selecciona un turno");
+    if (!id_turno) return setError("Selecciona un turno");
 
     const err1 = validateRange(horaInicio1, horaFin1);
     if (err1) return setError(err1);
@@ -594,34 +594,34 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     try {
       if (modalMode === "create") {
         await createAsignacion.mutateAsync({
-          idTrabajador: selectedTrabajadorId,
+          id_trabajador: selectedTrabajadorId,
           fecha: selectedFecha,
-          idTurno: idTurno,
+          id_turno: id_turno,
           area,
-          horaInicio: horaInicio1,
-          horaFin: horaFin1,
+          hora_inicio: horaInicio1,
+          hora_fin: horaFin1,
           notas: notas ? notas : null,
         });
 
         if (turnoPartido) {
           await createAsignacion.mutateAsync({
-            idTrabajador: selectedTrabajadorId,
+            id_trabajador: selectedTrabajadorId,
             fecha: selectedFecha,
-            idTurno: idTurno,
+            id_turno: id_turno,
             area,
-            horaInicio: horaInicio2,
-            horaFin: horaFin2,
+            hora_inicio: horaInicio2,
+            hora_fin: horaFin2,
             notas: notas ? notas : null,
           });
         }
       } else {
         if (!editIdAsignacion) return;
         await updateAsignacion.mutateAsync({
-          idAsignacion: editIdAsignacion,
-          idTurno: idTurno,
+          id_asignacion: editIdAsignacion,
+          id_turno: id_turno,
           area,
-          horaInicio: horaInicio1,
-          horaFin: horaFin1,
+          hora_inicio: horaInicio1,
+          hora_fin: horaFin1,
           notas: notas ? notas : null,
         });
       }
@@ -633,16 +633,16 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     }
   };
 
-  const borrarAsignacion = async (idAsignacion: string) => {
+  const borrarAsignacion = async (id_asignacion: string) => {
     if (!isAdmin) return;
 
-    if (!idAsignacion) {
+    if (!id_asignacion) {
       toast.info("Predeterminado", "Este turno es predeterminado. Crea uno real y luego podrás borrarlo.");
       return;
     }
 
     try {
-      await deleteAsignacion.mutateAsync(idAsignacion);
+      await deleteAsignacion.mutateAsync(id_asignacion);
     } catch (e) {
       console.error(e);
       setError("No se pudo borrar la asignacion.");
@@ -1004,7 +1004,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium">Turno</label>
                 <select
-                  value={idTurno}
+                  value={id_turno}
                   onChange={(e) => setIdTurno(e.target.value || "")}
                   className="border border-border rounded-xl px-3 py-2 bg-surface outline-none focus:border-accent"
                 >

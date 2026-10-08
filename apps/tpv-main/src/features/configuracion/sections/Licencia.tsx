@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/sections/Licencia.tsx
 //
 // Estado real de la licencia (antes era un placeholder). Lee `license_get_state`, que es lo que
@@ -8,8 +9,8 @@
 // y cuánto queda. Ni el plan (sólo hay uno) ni el UUID del dispositivo pintaban nada aquí.
 
 import React, { useCallback, useEffect, useState } from "react";
-import { invokeClient, toAppError } from "@tpv/client";
-import type { LicenseActivateOutcome, LicenseLocalState } from "@tpv/contracts";
+import { toAppError } from "@tpv/client";
+import type { LicenseActivateOutcome_Serialize as LicenseActivateOutcome, LicenseLocalState_Serialize as LicenseLocalState } from "@tpv/contracts";
 
 import { Button, Input } from "../../../shared/ui";
 import { conAviso } from "../../../shared/lib/conAviso";
@@ -78,9 +79,7 @@ function AnadirClave({ onSumada }: { onSumada: () => void }) {
 		setError(null);
 		setSumada(null);
 		try {
-			const r = await invokeClient<LicenseActivateOutcome>("license_sumar_clave", {
-				args: { activation_key: clave.trim() },
-			});
+			const r = await commands.licenseSumarClave({ activation_key: clave.trim() });
 			const hasta = r.state?.expires_at ? new Date(r.state.expires_at) : null;
 			setSumada(
 				hasta && !Number.isNaN(hasta.getTime())
@@ -140,7 +139,7 @@ export function Licencia({ darkMode }: { darkMode: boolean }) {
 	const [state, setState] = useState<LicenseLocalState | null | "loading">("loading");
 
 	const leerEstado = useCallback(() => {
-		invokeClient<LicenseLocalState | null>("license_get_state")
+		commands.licenseGetState()
 			.then(setState)
 			.catch(() => setState(null));
 	}, []);

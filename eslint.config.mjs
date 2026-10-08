@@ -32,7 +32,7 @@
 //
 // ── Alcance ──────────────────────────────────────────────────────────────────────────────────
 //
-// Sólo el código que se escribe a mano. Queda fuera lo generado (`bindings.ts` lo produce ts-rs,
+// Sólo el código que se escribe a mano. Queda fuera lo generado (contratos y cliente de Specta,
 // `worker-configuration.d.ts` lo produce wrangler) y todo lo compilado.
 
 import js from "@eslint/js";
@@ -49,9 +49,10 @@ export default tseslint.config(
             "**/.turbo/**",
             "**/.wrangler/**",
             "apps/tpv-main/src-tauri/gen/**",
-            // Generados: `bindings.ts` sale de ts-rs y `worker-configuration.d.ts` de wrangler.
+            // Generados: los contratos y el cliente salen de Specta; el Worker, de wrangler.
             // Avisar sobre ellos es avisar sobre un fichero que nadie va a editar.
             "packages/contracts/src/generated/**",
+            "packages/client/src/generated/**",
             "apps/cloud-worker-licensing/src/server/worker-configuration.d.ts",
         ],
     },
@@ -100,6 +101,17 @@ export default tseslint.config(
             // rellena es un idioma legible y deliberado. La regla pide quitar el valor inicial; TS
             // ya garantiza que no se lee sin asignar, así que sólo se gana ruido.
             "no-useless-assignment": "off",
+        },
+    },
+
+    // RI-87: el único transporte por nombre vive en @tpv/client, detrás de las firmas generadas.
+    {
+        files: ["apps/tpv-main/src/**/*.ts", "apps/tpv-main/src/**/*.tsx"],
+        rules: {
+            "no-restricted-imports": ["error", { paths: [
+                { name: "@tauri-apps/api/core", importNames: ["invoke"], message: "Usa commands de @tpv/client: nombre, argumentos y respuesta proceden de Rust." },
+                { name: "@tpv/client", importNames: ["invokeClient", "rawInvoke"], message: "Usa las funciones commands generadas." },
+            ] }],
         },
     },
 

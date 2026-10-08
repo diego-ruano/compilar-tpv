@@ -15,20 +15,11 @@
 # no lo que hace el TPV. Medido: 200 creaciones seguidas revientan ~la mitad de las veces; una sola
 # creación, 0 de 100; y una base con 6.000 sentencias encima, 0 de 10.
 
-# `tpv-contracts` queda FUERA de nextest, y no es una preferencia: sus 236 "tests" no comprueban
-# nada, son el generador de tipos de ts-rs. Los 236 escriben en el MISMO `bindings.ts` y ts-rs
-# acumula los tipos DENTRO del proceso y vuelca el fichero entero al final. Con un proceso por test
-# cada uno trunca el fichero y escribe sólo el suyo: el último gana y `bindings.ts` se queda con
-# UN tipo (comprobado: pasó de 900 líneas a 3, con los 236 en verde). Serializarlos no arregla
-# nada, porque el problema no es la concurrencia sino que cada proceso empieza de cero.
-#
-# Se generan como siempre, en un solo proceso: `pnpm generate-types` (o `cargo test -p tpv-contracts`).
+# Specta exporta desde el ejecutable Tauri; los tests de contratos ya son pruebas puras.
 [profile.default]
 retries = 2
-default-filter = 'not package(tpv-contracts)'
 
 # En CI conviene ver cuántos han sido flaky sin que el runner se pare en el primero.
 [profile.ci]
 retries = 2
 fail-fast = false
-default-filter = 'not package(tpv-contracts)'

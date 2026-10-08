@@ -1166,8 +1166,7 @@ pub async fn emitir_baja_de_pago(
     let altas = altas_del_pago(db, id_pago).await?;
     let Some(original) = altas
         .iter()
-        .filter(|a| a.tipo_factura == "F1" || a.tipo_factura == "F2")
-        .next_back()
+        .rfind(|a| a.tipo_factura == "F1" || a.tipo_factura == "F2")
         .cloned()
     else {
         tracing::warn!(
@@ -1331,8 +1330,7 @@ pub async fn emitir_devolucion_parcial(
     let del_cobro = altas_del_pago(db, id_pago_origen).await?;
     let Some(original) = del_cobro
         .iter()
-        .filter(|a| a.tipo_factura == "F1" || a.tipo_factura == "F2")
-        .next_back()
+        .rfind(|a| a.tipo_factura == "F1" || a.tipo_factura == "F2")
         .cloned()
     else {
         tracing::warn!(

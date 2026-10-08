@@ -1,6 +1,7 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/api/printerApis.ts
 //
-// API de impresión (host/Windows) — Local-First (invokeClient). Habla con los comandos
+// API de impresión (host/Windows) — Local-First (commands). Habla con los comandos
 // `printer_*` del backend (ver `apps/tpv-main/src-tauri/src/printing.rs` + `main.rs`):
 //   - listar impresoras del sistema (locales + red/WiFi)
 //   - leer/guardar la impresora seleccionada (preferencia LOCAL del dispositivo)
@@ -11,8 +12,8 @@
 // La impresora seleccionada NO va en la BD (no se sincroniza): está físicamente conectada a
 // esta máquina, así que se persiste en `device_config.json` por el backend.
 
-import { invokeClient } from "@tpv/client";
-import type { PrinterInfo, PrintTicketPayload, TicketDePagoInput } from "@tpv/contracts";
+
+import type { PrinterInfo, PrintTicketPayload_Serialize as PrintTicketPayload, TicketDePagoInput } from "@tpv/contracts";
 
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../../shared/stores/useTicketSettings";
@@ -21,10 +22,6 @@ import { agruparLineas, type LineaEntrada } from "../../../shared/ticket/ticketM
 export type { PrinterInfo };
 
 /* ── API ── */
-
-export async function printerList(): Promise<PrinterInfo[]> {
-    return await invokeClient<PrinterInfo[]>("printer_list");
-}
 
 /**
  * Destino de impresión. Hoy solo se usa `caja`; `cocina` está declarado para que añadir la comanda
@@ -37,9 +34,7 @@ export async function printerGetSelected(
     destino: DestinoImpresion = "caja",
 ): Promise<string | null> {
     return (
-        (await invokeClient<string | null>("printer_get_selected", {
-            args: { destino },
-        })) ?? null
+        (await commands.printerGetSelected({ destino })) ?? null
     );
 }
 
@@ -47,7 +42,7 @@ export async function printerSetSelected(
     name: string,
     destino: DestinoImpresion = "caja",
 ): Promise<void> {
-    await invokeClient<string>("printer_set_selected", { args: { name, destino } });
+    await commands.printerSetSelected({ name, destino });
 }
 
 /**
@@ -62,13 +57,11 @@ export async function printerSetSelected(
  * quién dijo alguien que abrió el cajón, no quién lo abrió.
  */
 export async function printerOpenDrawer(): Promise<void> {
-    await invokeClient<string>("printer_open_drawer");
+    await commands.printerOpenDrawer();
 }
 
 export async function printerPrintTest(name?: string): Promise<void> {
-    await invokeClient<string>("printer_print_test", {
-        args: name ? { name } : null,
-    });
+    await commands.printerPrintTest(name ? { name } : null);
 }
 
 /**
@@ -85,7 +78,7 @@ export async function printerTicketDePago(
         es_copia: esCopia,
         num_factura: numFactura ?? undefined,
     };
-    return await invokeClient<PrintTicketPayload>("printer_ticket_de_pago", { args });
+    return await commands.printerTicketDePago(args);
 }
 
 /**
@@ -102,12 +95,12 @@ export async function printerImprimirPago(
         es_copia: esCopia,
         num_factura: numFactura ?? undefined,
     };
-    await invokeClient<string>("printer_imprimir_pago", { args });
+    await commands.printerImprimirPago(args);
 }
 
 /** Imprime una precuenta. Aunque el payload trajera un número o un QR, Rust se los quita. */
 export async function printerImprimirPrecuenta(payload: PrintTicketPayload): Promise<void> {
-    await invokeClient<string>("printer_imprimir_precuenta", { payload });
+    await commands.printerImprimirPrecuenta(payload);
 }
 
 /* ── La precuenta: se compone con los ajustes de la pantalla ── */
@@ -127,30 +120,30 @@ export function payloadDePrecuenta(items: LineaEntrada[], printerName?: string):
     return {
         printer_name: printerName,
 
-        business_name: biz.businessName,
+        business_name: biz.business_name,
         direccion: biz.direccion,
         telefono: biz.telefono,
         cif: biz.cif,
-        razon_social: biz.razonSocial,
-        mensaje_footer: biz.mensajeFooter,
-        iva_percent: biz.ivaPercent,
+        razon_social: biz.razon_social,
+        mensaje_footer: biz.mensaje_footer,
+        iva_percent: biz.iva_percent,
 
-        show_logo: t.showLogo,
-        logo_path: biz.logoDataUrl ?? undefined,
-        show_business_name: t.showBusinessName,
-        show_address: t.showAddress,
-        show_phone: t.showPhone,
-        show_footer_message: t.showFooterMessage,
+        show_logo: t.show_logo,
+        logo_path: biz.logo_data_url ?? undefined,
+        show_business_name: t.show_business_name,
+        show_address: t.show_address,
+        show_phone: t.show_phone,
+        show_footer_message: t.show_footer_message,
 
-        paper_width_mm: t.paperWidthMm,
+        paper_width_mm: t.paper_width_mm,
 
-        paper_dpi: t.paperDpi,
-        chars_per_line: t.charsPerLine,
-        margin_top_mm: t.marginTopMm,
-        margin_bottom_mm: t.marginBottomMm,
-        margin_left_mm: t.marginLeftMm,
-        margin_right_mm: t.marginRightMm,
-        font_scale: t.fontScale,
+        paper_dpi: t.paper_dpi,
+        chars_per_line: t.chars_per_line,
+        margin_top_mm: t.margin_top_mm,
+        margin_bottom_mm: t.margin_bottom_mm,
+        margin_left_mm: t.margin_left_mm,
+        margin_right_mm: t.margin_right_mm,
+        font_scale: t.font_scale,
 
         qr_pruebas: false,
         es_copia: false,
@@ -163,7 +156,7 @@ export function payloadDePrecuenta(items: LineaEntrada[], printerName?: string):
             nombre: g.nombre,
             cantidad: g.qty,
             precio_unitario: g.precio,
-            iva_percent: g.ivaPercent ?? undefined,
+            iva_percent: g.iva_percent ?? undefined,
         })),
     };
 }

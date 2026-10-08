@@ -16,17 +16,20 @@ use tpv_contracts::errors::AppErrorDto;
 
 /// Sólo lectura/control de transporte: ningún comando acepta SQL ni confirmaciones.
 #[tauri::command]
+#[specta::specta]
 pub fn sync_estado(app: AppHandle) -> tpv_contracts::sync::EstadoReplicacion {
     app.state::<crate::replicacion::SyncNativo>().estado()
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn sync_reintentar(app: AppHandle) {
     app.state::<crate::replicacion::SyncNativo>().reintentar();
 }
 
 /// El checkpoint es diagnóstico, no permite modificar el cursor.
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_health(state: State<'_, AppState>) -> Result<SyncHealth, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::health(repo.as_ref()).await?)
@@ -39,6 +42,7 @@ pub async fn sync_health(state: State<'_, AppState>) -> Result<SyncHealth, AppEr
 /// devuelve todo a cero, que es lo que hace que quien lo consulte no tenga que preguntar antes si
 /// hay recuperación en curso.
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_backfill_estado(state: State<'_, AppState>) -> Result<BackfillEstado, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::backfill_estado(repo.as_ref()).await?)
@@ -52,6 +56,7 @@ pub async fn sync_backfill_estado(state: State<'_, AppState>) -> Result<Backfill
 /// frontend y devolverlo: son las tablas enteras del negocio, y cruzarlas dos veces por el puente
 /// IPC sólo para reenviarlas es copiar megabytes a cambio de nada.
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_bootstrap_desde_nube(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -70,6 +75,7 @@ pub async fn sync_bootstrap_desde_nube(
 /// Inicialización destructiva sólo para el caso explícito `tenant_db_not_provisioned`. El servidor
 /// vuelve a comprobarlo antes de crear nada; una respuesta ambigua nunca llega a esta rama.
 #[tauri::command]
+#[specta::specta]
 pub async fn sync_inicializar_tenant_vacio(
     app: AppHandle,
     state: State<'_, AppState>,

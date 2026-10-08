@@ -34,7 +34,7 @@ export const notificacionesKeys = {
 export function useNotificaciones(idUsuario: string | null, soloNoLeidas = false) {
   return useQuery({
     queryKey: notificacionesKeys.lista(idUsuario ?? "", soloNoLeidas),
-    queryFn: () => notificacionesListar({ idUsuario: idUsuario as string, soloNoLeidas }),
+    queryFn: () => notificacionesListar({ id_usuario: idUsuario as string, solo_no_leidas: soloNoLeidas }),
     enabled: !!idUsuario,
   });
 }
@@ -43,7 +43,7 @@ export function useNotificaciones(idUsuario: string | null, soloNoLeidas = false
 export function useNoLeidasCount(idUsuario: string | null) {
   return useQuery({
     queryKey: notificacionesKeys.noLeidas(idUsuario ?? ""),
-    queryFn: () => notificacionesNoLeidas({ idUsuario: idUsuario as string }),
+    queryFn: () => notificacionesNoLeidas({ id_usuario: idUsuario as string }),
     enabled: !!idUsuario,
   });
 }
@@ -70,7 +70,7 @@ export function useMarcarTodasLeidas() {
 export function usePapelera(idUsuario: string | null, activa: boolean) {
   return useQuery({
     queryKey: notificacionesKeys.papelera(idUsuario ?? ""),
-    queryFn: () => notificacionesPapelera({ idUsuario: idUsuario as string }),
+    queryFn: () => notificacionesPapelera({ id_usuario: idUsuario as string }),
     enabled: !!idUsuario && activa,
   });
 }

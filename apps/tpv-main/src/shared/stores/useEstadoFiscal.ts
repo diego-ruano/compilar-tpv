@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/shared/stores/useEstadoFiscal.ts
 //
 // El escalón de la escalera de avisos de Veri*factu (FISCAL-01), disponible en toda la aplicación.
@@ -16,7 +17,7 @@
 
 import { create } from "zustand";
 
-import { verifactuEstado } from "../../features/configuracion/api/verifactuApis";
+
 
 /** Los peldaños, tal como los nombra `tpv_infra_sqlite::verifactu::escalon_aviso`. */
 export type EscalonFiscal =
@@ -124,7 +125,7 @@ export const useEstadoFiscal = create<Estado>((set, get) => ({
 
     refrescar: async () => {
         try {
-            const e = await verifactuEstado();
+            const e = await commands.verifactuEstado();
             const escalon = (e.escalon_aviso ?? "ninguno") as EscalonFiscal;
             const antes = get().escalon;
             set({

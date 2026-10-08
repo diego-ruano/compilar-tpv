@@ -15,6 +15,7 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notificaciones_listar(
     state: State<'_, AppState>,
     args: NotificacionesListArgs,
@@ -24,6 +25,7 @@ pub async fn notificaciones_listar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notificaciones_no_leidas(
     state: State<'_, AppState>,
     args: NotificacionesUsuarioArgs,
@@ -35,6 +37,7 @@ pub async fn notificaciones_no_leidas(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notificaciones_marcar_leida(
     state: State<'_, AppState>,
     args: MarcarLeidaInput,
@@ -46,6 +49,7 @@ pub async fn notificaciones_marcar_leida(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notificaciones_marcar_todas_leidas(
     state: State<'_, AppState>,
     args: MarcarTodasLeidasInput,
@@ -57,6 +61,7 @@ pub async fn notificaciones_marcar_todas_leidas(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notificaciones_descartar(
     state: State<'_, AppState>,
     args: NotificacionIdInput,
@@ -68,6 +73,7 @@ pub async fn notificaciones_descartar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notificaciones_papelera(
     state: State<'_, AppState>,
     args: NotificacionesUsuarioArgs,
@@ -79,6 +85,7 @@ pub async fn notificaciones_papelera(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notificaciones_restaurar(
     state: State<'_, AppState>,
     args: NotificacionIdInput,
@@ -90,6 +97,7 @@ pub async fn notificaciones_restaurar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn notificaciones_eliminar(
     state: State<'_, AppState>,
     args: NotificacionIdInput,

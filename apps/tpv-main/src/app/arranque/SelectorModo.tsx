@@ -14,13 +14,13 @@ import FondoDecorado from "./FondoDecorado";
 
 export default function SelectorModo({
 	logoSrc,
-	businessName,
+	business_name,
 	ocupado,
 	error,
 	onElegir,
 }: {
 	logoSrc: string;
-	businessName: string | null;
+	business_name: string | null;
 	ocupado: boolean;
 	error: string | null;
 	onElegir: (modo: DeviceMode) => Promise<void>;
@@ -36,7 +36,7 @@ export default function SelectorModo({
 							<img src={logoSrc || LogoAltaria} className="size-8 rounded-lg object-cover" alt="" />
 						</div>
 						<div className="min-w-0">
-							<p className="truncate text-sm font-bold text-fg">{businessName || "TPV"}</p>
+							<p className="truncate text-sm font-bold text-fg">{business_name || "TPV"}</p>
 							<p className="text-xs text-fg-muted">Configuración del dispositivo</p>
 						</div>
 					</div>

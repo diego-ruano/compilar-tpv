@@ -1,22 +1,13 @@
+import { commands } from "@tpv/client";
 // src/features/estadisticas/statsQueries.ts
 //
 // Hooks TanStack Query co-locados para la feature "estadisticas".
 // Todo son LECTURAS (read-only): solo useQuery, sin mutaciones.
 // El rango de fechas (y otros filtros) forma parte de la queryKey para cachear por rango/filtro.
-// No cambia ninguna firma de statsApis (siguen llamando a invokeClient).
+// Nombre, argumentos y respuesta proceden de los comandos Rust.
 
 import { useQuery } from "@tanstack/react-query";
-import {
-    clientesStatsResumen,
-    mesasStatsGet,
-    productosStatsListCategorias,
-    productosStatsResumen,
-    proveedoresStatsResumen,
-    reservasStatsResumen,
-    trabajadoresStatsResumen,
-    type StatsRange,
-    type StatsTurno,
-} from "./statsApis";
+import type { StatsRange, StatsTurno } from "@tpv/contracts";
 
 export const statsKeys = {
     all: ["stats"] as const,
@@ -26,8 +17,8 @@ export const statsKeys = {
     productosCategorias: () => ["stats", "productos", "categorias"] as const,
     productosResumen: (
         range: StatsRange,
-        categoriaTopId: number | null,
-        categoriaWorstId: number | null,
+        categoriaTopId: string | null,
+        categoriaWorstId: string | null,
     ) =>
         [
             "stats",
@@ -55,7 +46,7 @@ export const statsKeys = {
 export function useMesasStats(range: StatsRange) {
     return useQuery({
         queryKey: statsKeys.mesas(range),
-        queryFn: () => mesasStatsGet(range),
+        queryFn: () => commands.statsMesasGet(range),
     });
 }
 
@@ -65,14 +56,14 @@ export function useMesasStats(range: StatsRange) {
 export function useProductosCategorias() {
     return useQuery({
         queryKey: statsKeys.productosCategorias(),
-        queryFn: () => productosStatsListCategorias(),
+        queryFn: () => commands.statsProductosListCategorias(),
     });
 }
 
 export function useProductosResumen(
     range: StatsRange,
-    categoriaTopId: number | null,
-    categoriaWorstId: number | null,
+    categoriaTopId: string | null,
+    categoriaWorstId: string | null,
 ) {
     return useQuery({
         queryKey: statsKeys.productosResumen(
@@ -81,7 +72,7 @@ export function useProductosResumen(
             categoriaWorstId,
         ),
         queryFn: () =>
-            productosStatsResumen({ range, categoriaTopId, categoriaWorstId }),
+            commands.statsProductosResumen({ range, categoria_top_id: categoriaTopId, categoria_worst_id: categoriaWorstId }),
     });
 }
 
@@ -91,7 +82,7 @@ export function useProductosResumen(
 export function useReservasStats(range: StatsRange, turno: StatsTurno) {
     return useQuery({
         queryKey: statsKeys.reservas(range, turno),
-        queryFn: () => reservasStatsResumen({ range, turno }),
+        queryFn: () => commands.statsReservasResumen({ range, turno }),
     });
 }
 
@@ -101,7 +92,7 @@ export function useReservasStats(range: StatsRange, turno: StatsTurno) {
 export function useTrabajadoresStats(range: StatsRange) {
     return useQuery({
         queryKey: statsKeys.trabajadores(range),
-        queryFn: () => trabajadoresStatsResumen({ range }),
+        queryFn: () => commands.statsTrabajadoresResumen({ range }),
     });
 }
 
@@ -111,7 +102,7 @@ export function useTrabajadoresStats(range: StatsRange) {
 export function useClientesStats(range: StatsRange) {
     return useQuery({
         queryKey: statsKeys.clientes(range),
-        queryFn: () => clientesStatsResumen({ range }),
+        queryFn: () => commands.statsClientesResumen({ range }),
     });
 }
 
@@ -121,6 +112,6 @@ export function useClientesStats(range: StatsRange) {
 export function useProveedoresStats(range: StatsRange) {
     return useQuery({
         queryKey: statsKeys.proveedores(range),
-        queryFn: () => proveedoresStatsResumen({ range }),
+        queryFn: () => commands.statsProveedoresResumen({ range }),
     });
 }

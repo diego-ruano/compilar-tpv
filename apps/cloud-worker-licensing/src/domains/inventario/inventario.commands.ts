@@ -123,7 +123,7 @@ const SQL_INSERT_MOVIMIENTO_PRODUCTO = `
 
 // UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno aquí.
 // Queda en `id` para que viaje en el broadcast y la Main lo aplique con el mismo id.
-function idStep(provided?: string) {
+function idStep(provided?: string | null) {
 	const id = (provided ?? "").trim() || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
@@ -191,7 +191,7 @@ export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean, idU
 						args: [nuevoId(), REF_ID, "ALTA", stockSuelto, stockSuelto, "Alta del producto", idUsuario],
 					},
 				]),
-		...normalizeIds(input.ids_alergenos).map((idA) => ({
+		...normalizeIds(input.ids_alergenos ?? []).map((idA) => ({
 			kind: "execute",
 			sql: "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
 			args: [REF_ID, idA],
@@ -241,7 +241,7 @@ export function setAlergenosProducto(
 	idProducto: string,
 	input: SetAlergenosInput,
 ): BuiltCommand {
-	const ids = normalizeIds(input.ids_alergenos);
+	const ids = normalizeIds(input.ids_alergenos ?? []);
 	const steps: any[] = [
 		{
 			kind: "execute",

@@ -21,6 +21,7 @@ use crate::{AppState, ADMIN};
 /// cada cobro, que salen a quien esté delante, y el objetivo de la escalera es justamente que **no
 /// se pueda ignorar**.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_estado(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -83,6 +84,7 @@ fn dias_hasta(fecha: &str) -> Option<i64> {
 /// de facturación, no se remite nada y no hacen falta NIF ni certificado. Se quita entero antes de
 /// que Veri*factu sea obligatorio: `grep -rn MODO-PRUEBA` lista todo lo que hay que borrar.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_set_modo_prueba(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -111,6 +113,7 @@ pub async fn verifactu_set_modo_prueba(
 /// que lo arregla; si era otra cosa, hace falta mirarla. Lo que se automatiza aquí es lo que no
 /// puede fallar dos veces igual, no lo que ya falló.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_subsanar_rechazados(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -133,6 +136,7 @@ pub async fn verifactu_subsanar_rechazados(
 /// equipo le pasó algo y eso no deja de ser cierto porque alguien pulse un botón. Lo único que
 /// cambia es que dejan de gritarlo.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_reconocer_anomalias(
     state: State<'_, AppState>,
 ) -> Result<usize, AppErrorDto> {
@@ -150,6 +154,7 @@ pub async fn verifactu_reconocer_anomalias(
 ///
 /// Este sí es de Administrador: es el libro de facturación del negocio.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_listar(
     state: State<'_, AppState>,
     limite: Option<i64>,
@@ -169,6 +174,7 @@ pub async fn verifactu_listar(
 ///
 /// Es de Administrador, como el resto de Cuentas: emite un documento fiscal nuevo.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_emitir_factura_de_tickets(
     state: State<'_, AppState>,
     id_pagos: Vec<String>,
@@ -182,6 +188,7 @@ pub async fn verifactu_emitir_factura_de_tickets(
 /// Corrige los datos del cliente de una factura completa ya expedida (una `F3` o una `F1`).
 /// Devuelve la factura nueva, que es la que se imprime. Administrador, como emitirla.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_corregir_factura(
     state: State<'_, AppState>,
     num_factura: String,
@@ -209,7 +216,7 @@ fn app_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, AppErrorDto> {
 ///
 /// **No lleva nada de dentro del certificado más allá de lo que hace falta para reconocerlo.** La
 /// huella identifica pero no abre; la clave privada no sale nunca del almacén de Windows.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct CertificadoDto {
     pub huella: String,
     pub sujeto: String,
@@ -246,6 +253,7 @@ fn a_dto(c: CertificadoDisponible, elegido: Option<&str>) -> CertificadoDto {
 /// clics en una conversación fiscal. Quien lo tenga lo elige como cualquier otro; el tipo sólo
 /// decide el endpoint, que es una cuenta interna.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_certificados(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -264,6 +272,7 @@ pub async fn verifactu_certificados(
 /// Se guarda **sólo la huella**, en `device_config.json`. Pasar una vacía lo desconfigura, que es
 /// una acción legítima (por ejemplo antes de reinstalar uno renovado).
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_set_certificado(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -296,6 +305,7 @@ pub async fn verifactu_set_certificado(
 /// silencio—, sale **ahí, con el usuario delante**, y no a las tres de la mañana con la cola
 /// creciendo.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_probar_conexion(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -357,6 +367,7 @@ pub async fn verifactu_probar_conexion(
 /// El destino lo elige el usuario (`destino` es una ruta absoluta, fuera de AppData), como en las
 /// copias de seguridad. Devuelve cuántos registros entraron — un rango vacío no es un error.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_exportar(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -413,6 +424,7 @@ pub async fn verifactu_exportar(
 /// Sin exigir rol: la declaración es pública por definición — su objeto es que cualquiera pueda
 /// leerla, incluido un inspector que se siente en la barra.
 #[tauri::command]
+#[specta::specta]
 pub async fn verifactu_declaracion_responsable(
     app: AppHandle,
 ) -> Result<DeclaracionResponsableDto, AppErrorDto> {
@@ -435,7 +447,7 @@ pub async fn verifactu_declaracion_responsable(
 }
 
 /// La declaración responsable tal como la enseña la pantalla.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
 pub struct DeclaracionResponsableDto {
     pub productor_nombre_razon: String,
     pub productor_nif: String,

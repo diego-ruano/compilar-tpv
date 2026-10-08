@@ -13,6 +13,7 @@ use tpv_contracts::errors::AppErrorDto;
 /* Lecturas */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_get_trabajadores(
     state: State<'_, AppState>,
 ) -> Result<Vec<TrabajadorUI>, AppErrorDto> {
@@ -22,6 +23,7 @@ pub async fn tareas_get_trabajadores(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_get_tareas_admin(
     state: State<'_, AppState>,
 ) -> Result<Vec<TareaAdminRow>, AppErrorDto> {
@@ -31,6 +33,7 @@ pub async fn tareas_get_tareas_admin(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_get_tarea_by_id(
     state: State<'_, AppState>,
     args: TareaIdArgs,
@@ -41,6 +44,7 @@ pub async fn tareas_get_tarea_by_id(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_get_tarea_asignados(
     state: State<'_, AppState>,
     args: TareaIdArgs,
@@ -51,6 +55,7 @@ pub async fn tareas_get_tarea_asignados(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_get_mis_tareas(
     state: State<'_, AppState>,
     mut args: MisTareasArgs,
@@ -63,6 +68,7 @@ pub async fn tareas_get_mis_tareas(
 /* Escrituras */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_create_tarea(
     state: State<'_, AppState>,
     args: CreateTareaInput,
@@ -76,6 +82,7 @@ pub async fn tareas_create_tarea(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_update_tarea(
     state: State<'_, AppState>,
     args: UpdateTareaInput,
@@ -87,6 +94,7 @@ pub async fn tareas_update_tarea(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_set_asignaciones_tarea(
     state: State<'_, AppState>,
     args: SetAsignacionesTareaInput,
@@ -98,6 +106,7 @@ pub async fn tareas_set_asignaciones_tarea(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_delete_tarea(
     state: State<'_, AppState>,
     args: TareaIdArgs,
@@ -110,6 +119,7 @@ pub async fn tareas_delete_tarea(
 /// Papelera (TAR-05). El borrado manda a la papelera; estos tres comandos son el resto del ciclo:
 /// verla, sacar una tarea de ella y vaciarla (lo único que borra de verdad).
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_get_papelera(
     state: State<'_, AppState>,
 ) -> Result<Vec<TareaAdminRow>, AppErrorDto> {
@@ -119,6 +129,7 @@ pub async fn tareas_get_papelera(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_restaurar_tarea(
     state: State<'_, AppState>,
     args: TareaIdArgs,
@@ -129,6 +140,7 @@ pub async fn tareas_restaurar_tarea(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_vaciar_papelera(state: State<'_, AppState>) -> Result<i64, AppErrorDto> {
     state.exigir_permiso("tareas.gestionar").await?;
     let repo = state.tareas_repo().await?;
@@ -136,6 +148,7 @@ pub async fn tareas_vaciar_papelera(state: State<'_, AppState>) -> Result<i64, A
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tareas_marcar_tarea_finalizada(
     state: State<'_, AppState>,
     mut args: FinalizarTareaInput,

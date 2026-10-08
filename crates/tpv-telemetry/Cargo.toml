@@ -6,6 +6,8 @@ authors.workspace = true
 description = "Infraestructura de telemetría (logging) del TPV: subscriber `tracing` con consola (dev), fichero local rotado por días y una cola DURABLE en disco que un worker en segundo plano sube por lotes al worker tpv-api. Pieza HOJA del workspace: el resto de crates sólo emiten eventos con las macros estándar de `tracing` sin conocer el destino."
 
 [dependencies]
+specta = { workspace = true }
+specta-typescript = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 tracing-log = "0.2"
 log = "0.4"
@@ -21,7 +23,6 @@ sentry-tracing = { workspace = true }
 regex = { workspace = true }
 # Genera el tipo TS de `SpoolEvent` (fuente única de verdad; ver event.rs) para el paquete
 # @tpv/contracts. Se dispara con `cargo test -p tpv-telemetry export_bindings`.
-ts-rs = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

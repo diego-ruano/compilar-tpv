@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/sections/Dispositivo.tsx
 //
 // Sección de Configuración para el Handy: desvincular este dispositivo. Hace un "reset de
@@ -6,7 +7,7 @@
 // la app vuelve al selector Main/Handy.
 
 import React, { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 
 import { Panel } from "../ui/Panel";
@@ -33,7 +34,7 @@ export function Dispositivo({ darkMode }: { darkMode: boolean }) {
 		try {
 			// device_reset_mode: persiste modo=None, suelta backends y borra el token Handy del
 			// keyring (la identidad ed25519 / device_id NO se tocan).
-			await invoke("device_reset_mode");
+			await commands.deviceResetMode();
 			setMode(null); // AppBoot vuelve al selector de modo.
 		} catch (e: any) {
 			setErr(String(e?.message || e));

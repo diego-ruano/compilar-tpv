@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/cuentas/cuentasQueries.ts
 //
 // Hooks TanStack Query co-locados para la feature "cuentas" (caja). Envuelven las
@@ -7,21 +8,7 @@
 
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-    cuentasAnularPago,
-    cuentasCreateGasto,
-    cuentasDeleteGasto,
-    cuentasDevolverLineas,
-    cuentasGetEntradas,
-    cuentasGetResumen,
-    cuentasGetSalidas,
-    cuentasListProveedoresMini,
-    cuentasUpdateGasto,
-    cuentasUpdatePago,
-    CUENTAS_PAGE_SIZE,
-    type CuentasListParams,
-    type CursorCuentas,
-} from "./cuentasApis";
+import { cuentasAnularPago, cuentasCreateGasto, cuentasDeleteGasto, cuentasGetEntradas, cuentasGetResumen, cuentasGetSalidas, cuentasUpdateGasto, cuentasUpdatePago, CUENTAS_PAGE_SIZE, type CuentasListParams, type CursorCuentas } from "./cuentasApis";
 
 type Rango = { del?: string | null; al?: string | null; q?: string | null };
 /** `cursor`: dónde empieza la página (el `siguiente` de la anterior); `null` = la primera. */
@@ -117,7 +104,7 @@ export function useCuentasResumen(rango: Rango, enabled = true) {
 export function useCuentasProveedoresMini() {
     return useQuery({
         queryKey: cuentasKeys.proveedores(),
-        queryFn: () => cuentasListProveedoresMini(),
+        queryFn: () => commands.inventarioListProveedoresMini(),
     });
 }
 
@@ -168,7 +155,7 @@ export function useUpdatePago() {
 export function useDevolverLineas() {
     const qc = useQueryClient();
     return useMutation({
-        mutationFn: cuentasDevolverLineas,
+        mutationFn: commands.cuentasDevolverLineas,
         onSuccess: () => {
             void qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },

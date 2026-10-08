@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: dtolnay/rust-toolchain@1.93.1
 
       # Acción oficial de RustSec: instala y ejecuta cargo-audit sobre el Cargo.lock de la raíz
       # (el único del workspace).

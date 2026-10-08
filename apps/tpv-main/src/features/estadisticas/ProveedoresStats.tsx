@@ -6,7 +6,7 @@ import { APEX_CHART_BASE } from "./apexBase";
 import {
   type ProveedoresStatsResponse,
   type StatsRange,
-} from "./statsApis";
+} from "@tpv/contracts";
 import { useProveedoresStats } from "./statsQueries";
 import { CERO, deCentimos, entre, eur } from "../../shared/lib/dinero";
 

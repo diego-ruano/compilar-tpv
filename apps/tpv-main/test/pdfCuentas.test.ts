@@ -24,7 +24,7 @@ describe("PDF de cuentas (RI-82)", () => {
         const entradas = Array.from({ length: 180 }, (_, i) => ({ id: `pago-${i}`, fecha_hora: "2026-10-08 12:00",
             cliente: "Señor Muñoz 😀", metodo: "Tarjeta", importe: deCentimos(300), estado: i % 2 ? "ACTIVO" : "ANULADO",
             es_devolucion: false,
-            devuelto: deCentimos(0) }));
+            devuelto: deCentimos(0), anulado_en: null, anulado_por: null, motivo_anulacion: null }));
         const bytes = await generarPdfCuentas({ del: "2026-10-08", al: "2026-10-08", entradas,
             salidas: [{ id: "gasto", fecha_hora: "2026-10-08", tipo_gasto: "Proveedor", concepto: "Piñones", importe: deCentimos(700), proveedor_id: "p", pagado_con_caja: false }],
             proveedores: new Map([["p", "Almacén Peña"]]) });

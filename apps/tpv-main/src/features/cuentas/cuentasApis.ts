@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/cuentas/cuentasApis.ts
 //
 // API de cuentas (caja): una función por comando Tauri, con los tipos que genera ts-rs desde Rust.
@@ -5,7 +6,7 @@
 // escribe es el `Input` generado, con el dinero como `Dinero` (RI-53). Aquí quedan además las
 // denominaciones del cajón y el recuento, que son sólo de la pantalla.
 
-import { invokeClient } from "@tpv/client";
+
 import type {
     AnularPagoInput,
     CambioCajaInput,
@@ -72,10 +73,6 @@ export const DEFAULT_DENOMS: Denom[] = [
    Proveedores mini
 ========================= */
 
-export function cuentasListProveedoresMini(): Promise<ProveedorMiniDto[]> {
-    return invokeClient<ProveedorMiniDto[]>("inventario_list_proveedores_mini");
-}
-
 /* =========================
    GET
 ========================= */
@@ -90,15 +87,15 @@ function rango(params: CuentasRangoArgs): CuentasRangoArgs {
 /** Sin `page_size` vuelve todo el rango en una página (el PDF); con él, `siguiente` dice dónde
  *  empieza la próxima (RI-18). */
 export function cuentasGetEntradas(params: CuentasRangoArgs): Promise<PaginaEntradas> {
-    return invokeClient<PaginaEntradas>("cuentas_get_entradas", { args: rango(params) });
+    return commands.cuentasGetEntradas(rango(params));
 }
 
 export function cuentasGetSalidas(params: CuentasRangoArgs): Promise<PaginaSalidas> {
-    return invokeClient<PaginaSalidas>("cuentas_get_salidas", { args: rango(params) });
+    return commands.cuentasGetSalidas(rango(params));
 }
 
 export function cuentasGetResumen(params: CuentasRangoArgs): Promise<ResumenCajaDto> {
-    return invokeClient<ResumenCajaDto>("cuentas_get_resumen", { args: rango(params) });
+    return commands.cuentasGetResumen(rango(params));
 }
 
 /* =========================
@@ -112,29 +109,21 @@ export function cuentasGetResumen(params: CuentasRangoArgs): Promise<ResumenCaja
  */
 export type ConMotivo<T> = { args: T; motivoRectificacion?: string | null };
 
-async function escribir<T>(comando: string, { args, motivoRectificacion }: ConMotivo<T>) {
-    const r = await invokeClient<boolean>(comando, {
-        args,
-        motivoRectificacion: motivoRectificacion?.trim() || null,
-    });
-    return r !== false;
-}
-
 export function cuentasCreateGasto(p: ConMotivo<CreateGastoInput>): Promise<boolean> {
-    return escribir("cuentas_create_gasto", p);
+    return commands.cuentasCreateGasto(p.args, p.motivoRectificacion?.trim() || null);
 }
 
 export function cuentasUpdateGasto(p: ConMotivo<UpdateGastoInput>): Promise<boolean> {
-    return escribir("cuentas_update_gasto", p);
+    return commands.cuentasUpdateGasto(p.args, p.motivoRectificacion?.trim() || null);
 }
 
 export function cuentasDeleteGasto(p: ConMotivo<{ id_gasto: string }>): Promise<boolean> {
-    return escribir("cuentas_delete_gasto", p);
+    return commands.cuentasDeleteGasto(p.args, p.motivoRectificacion?.trim() || null);
 }
 
 /** El importe del cobro no se edita (CUENTA-02): el backend lo recalcula desde las líneas. */
 export function cuentasUpdatePago(p: ConMotivo<UpdatePagoInput>): Promise<boolean> {
-    return escribir("cuentas_update_pago", p);
+    return commands.cuentasUpdatePago(p.args, p.motivoRectificacion?.trim() || null);
 }
 
 /**
@@ -145,23 +134,19 @@ export function cuentasUpdatePago(p: ConMotivo<UpdatePagoInput>): Promise<boolea
  * `clase` es una `ClaseBaja`; ausente = `"ERROR"`.
  */
 export async function cuentasAnularPago(args: AnularPagoInput): Promise<boolean> {
-    const r = await invokeClient<boolean>("cuentas_anular_pago", { args });
+    const r = await commands.cuentasAnularPago(args);
     return r !== false;
 }
 
 /** Las líneas de un cobro con lo que queda por devolver de cada una. */
-export function cuentasLineasDevolubles(idPago: string): Promise<CobroDevolubleDto> {
-    return invokeClient<CobroDevolubleDto>("cuentas_lineas_devolubles", { idPago });
-}
+
 
 /** Devuelve parte de un cobro: un pago negativo con su factura rectificativa. */
-export function cuentasDevolverLineas(args: DevolverLineasInput): Promise<DevolucionDto> {
-    return invokeClient<DevolucionDto>("cuentas_devolver_lineas", { args });
-}
+
 
 /** Una devolución de parte de otro cobro: un pago negativo. Se reimprime y nada más. */
 export function esDevolucion(e: EntradaDto): boolean {
-    return e.es_devolucion;
+    return e.es_devolucion ?? false;
 }
 
 /**
@@ -188,9 +173,7 @@ export type ClaseBaja = "ERROR" | "DEVOLUCION";
  * la pantalla lo pide antes de guardar para avisar. Si `cierres` viene vacío, el apunte es del
  * periodo abierto y no hay nada que avisar.
  */
-export function cuentasPrevisualizarCambio(cambio: CambioCajaInput): Promise<ImpactoCajaDto> {
-    return invokeClient<ImpactoCajaDto>("cuentas_previsualizar_cambio", { args: cambio });
-}
+
 
 /* =========================================================
    Recuento de efectivo (lo usa el cierre de caja). El total no

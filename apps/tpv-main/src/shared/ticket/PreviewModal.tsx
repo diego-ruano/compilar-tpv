@@ -73,7 +73,7 @@ export default function TicketPreviewModal({
 	titulo?: string;
 	onPrint?: () => void;
 }) {
-	const { ivaPercent } = useBusinessSettings();
+	const { iva_percent } = useBusinessSettings();
 	const { settings } = useTicketSettings();
 	// Se recompone en cada render: los dos hooks de arriba suscriben el modal a los stores, así que
 	// tocar una casilla repinta la previa al momento. Es una precuenta: lo que imprime «Imprimir».
@@ -110,7 +110,7 @@ export default function TicketPreviewModal({
 					</button>
 
 					<div className="text-xs text-black/50">
-						Ancho: {settings.paperWidthMm}mm · IVA: {ivaPercent}%
+						Ancho: {settings.paper_width_mm}mm · IVA: {iva_percent}%
 					</div>
 				</div>
 			</div>

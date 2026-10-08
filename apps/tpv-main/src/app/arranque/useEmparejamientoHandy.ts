@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/app/arranque/useEmparejamientoHandy.ts
 //
 // El estado de la vinculación de un Handy con su Main durante el arranque: si ya está emparejado, la
@@ -5,7 +6,7 @@
 // emparejamiento vive en `emparejamiento.ts`; esto la conecta con React y con el IPC.
 
 import { useEffect, useRef, useState } from "react";
-import { invokeClient } from "@tpv/client";
+
 
 import { cloudPost } from "../../shared/lib/cloudApi";
 import { deviceFingerprint } from "../../shared/lib/deviceFingerprint";
@@ -16,7 +17,7 @@ import {
 	emparejarHandy,
 	identidadDelDispositivo,
 	type CodigoDeVinculacion,
-	type Invocar,
+
 	type PedirALaNube,
 } from "./emparejamiento";
 
@@ -31,7 +32,6 @@ export type EstadoEmparejamiento =
 	  }
 	| { step: "paired"; tenantId: string; token: string; deviceId: string };
 
-const invocar: Invocar = (comando, args) => invokeClient(comando, args);
 const pedirALaNube: PedirALaNube = (ruta, cuerpo) => cloudPost("anon", ruta, cuerpo);
 
 export function useEmparejamientoHandy(modo: ModeStateValue) {
@@ -50,7 +50,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 		let alive = true;
 		void (async () => {
 			try {
-				const ident = await identidadDelDispositivo(invocar);
+				const ident = await identidadDelDispositivo(commands);
 				const fp = await deviceFingerprint(ident.devicePubKeyB64);
 				if (alive) setHuella(fp);
 			} catch {
@@ -71,7 +71,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 
 	async function cargarEmparejamientoExistente() {
 		try {
-			const tenantIdRaw = await invokeClient<string | null>("handy_get_tenant");
+			const tenantIdRaw = await commands.handyGetTenant();
 			const tenantId = String(tenantIdRaw || "").trim();
 
 			if (!tenantId) {
@@ -79,7 +79,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 				return;
 			}
 
-			const ident = await identidadDelDispositivo(invocar);
+			const ident = await identidadDelDispositivo(commands);
 
 			setEstado({ step: "paired", tenantId, token: "", deviceId: ident.deviceId });
 		} catch {
@@ -101,7 +101,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 
 		try {
 			const emparejado = await emparejarHandy(codigo, {
-				invoke: invocar,
+				commands,
 				pedirALaNube,
 				sigueVivo: esElActual,
 				alQuedarPendiente: (p) => {
@@ -146,7 +146,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 			// Sin aviso a propósito: la pantalla ya ha vuelto a la vinculación, que es lo que se pidió.
 			// Si no llega, lo único que pasa es que la solicitud sigue en la lista de la Main hasta que
 			// caduque el código, y aprobarla entonces no le da acceso a nadie: la Handy ya no la espera.
-			cancelarEmparejamiento(espera, { invoke: invocar, pedirALaNube }).catch((e: unknown) =>
+			cancelarEmparejamiento(espera, { commands, pedirALaNube }).catch((e: unknown) =>
 				console.warn("[emparejamiento] no se ha podido soltar el código en la nube:", e),
 			);
 		}

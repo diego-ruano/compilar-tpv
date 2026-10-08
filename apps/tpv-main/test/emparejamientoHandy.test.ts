@@ -25,7 +25,7 @@ const CADUCA_EN_MS = 30_000;
 /** Un IPC y una nube en memoria. La Main aprueba tras `pendientesAntesDeAprobar` consultas. */
 function crearDobles() {
 	const estado = {
-		identidad: { deviceId: "h1", devicePubkeyB64: CLAVE } as Record<string, unknown>,
+		identidad: { deviceId: "h1", devicePubkeyB64: CLAVE },
 		respuestaClaim: { nonceB64: "bm9uY2U=", nonceExpiresAtMs: 999, caducaEnMs: CADUCA_EN_MS } as Record<string, unknown>,
 		respuestaToken: { tenantId: "t1", token: "jwt" } as Record<string, unknown>,
 		pendientesAntesDeAprobar: 2,
@@ -42,19 +42,14 @@ function crearDobles() {
 		vivo: true,
 	};
 	const deps: DependenciasEmparejamiento = {
-		invoke: (async (comando: string, args?: Record<string, any>) => {
-			if (comando === "device_get_identity") return estado.identidad;
-			if (comando === "device_firmar_emparejamiento") {
+		commands: {
+            deviceGetIdentity: async () => estado.identidad,
+            deviceFirmarEmparejamiento: async (args) => {
                 const ts = estado.horaNube ?? Date.now();
-                return { ts, sigB64: `firma:${ts}\n${args?.args.accion}\n${args?.args.pair_code}\n${args?.args.nonce_b64}\nh1` };
-            }
-			if (comando === "device_hora_para_firmar") return estado.horaNube;
-			if (comando === "handy_set_token") {
-				estado.tokenGuardado = args?.args;
-				return null;
-			}
-			throw new Error(`comando inesperado ${comando}`);
-		}) as DependenciasEmparejamiento["invoke"],
+                return { ts, sigB64: `firma:${ts}\n${args.accion}\n${args.pair_code}\n${args.nonce_b64}\nh1` };
+            },
+            handySetToken: async (args) => { estado.tokenGuardado = args; return "OK"; },
+        },
 		pedirALaNube: (async (ruta: string, cuerpo: Record<string, unknown>) => {
 			if (ruta === "/v1/pair/claim") {
 				estado.claims.push(cuerpo);
@@ -328,9 +323,9 @@ h1`,
 		expect(mensajes[0]).toContain("TPV principal");
 	});
 
-	it("entiende los nombres de campo en snake_case que manda Rust o el worker", async () => {
+	it("acepta el contrato del IPC y del proxy de emparejamiento", async () => {
 		const { estado, deps } = crearDobles();
-		estado.identidad = { device_id: "h1", device_pubkey_b64: CLAVE };
+		estado.identidad = { deviceId: "h1", devicePubkeyB64: CLAVE };
 		estado.respuestaClaim = { nonce_b64: "bm9uY2U=", nonce_expires_at_ms: 999, caducaEnMs: CADUCA_EN_MS };
 		estado.respuestaToken = { tenant_id: "t1", token: "jwt" };
 		estado.pendientesAntesDeAprobar = 0;

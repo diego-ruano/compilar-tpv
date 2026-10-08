@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 import React, { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
@@ -8,11 +9,7 @@ import {
     ShieldCheck,
     UserRound,
 } from "lucide-react";
-import {
-    completeInitialSetup,
-    fetchSetupPendiente,
-    uploadInitialSetupToCloud,
-} from "../../features/login/loginApi";
+
 import ConfirmarCorreoRecuperacion from "../../features/login/ConfirmarCorreoRecuperacion";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useCorreoRecuperacionPendiente } from "../../shared/stores/useCorreoRecuperacionPendiente";
@@ -64,7 +61,7 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
         if (idUsuarioSesion) return;
 
         let vivo = true;
-        fetchSetupPendiente()
+        commands.setupPendiente()
             .then((r) => {
                 if (!vivo) return;
                 setPendiente({
@@ -128,18 +125,18 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
         setSaving(true);
 
         try {
-            await completeInitialSetup({
-                idUsuario,
-                pinNuevo,
-                emailNuevo: cleanEmail,
+            await commands.completeInitialSetup({
+                id_usuario: idUsuario,
+                pin_nuevo: pinNuevo,
+                email_nuevo: cleanEmail,
             });
 
             // Subimos el setup a la nube para que la Handy haga login con datos reales.
             // No es bloqueante: si la nube falla, el TPV local ya quedó configurado y debe
             // poder continuar (solo se resentiría el login de la Handy hasta reintentarlo).
             try {
-                await uploadInitialSetupToCloud({
-                    idUsuario,
+                await commands.configUploadInitialSetup({
+                    id_usuario: idUsuario,
                     email: cleanEmail,
                     pin: pinNuevo,
                 });

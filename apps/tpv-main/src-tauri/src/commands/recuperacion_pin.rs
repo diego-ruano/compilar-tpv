@@ -35,6 +35,7 @@ fn nube(app: &AppHandle) -> Result<PairingAdapter, AppErrorDto> {
 
 /// Manda un código al correo del titular de la licencia.
 #[tauri::command]
+#[specta::specta]
 pub async fn login_recuperar_pin_solicitar(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -47,6 +48,7 @@ pub async fn login_recuperar_pin_solicitar(
 
 /// Verifica el código y, sólo si vale, guarda el PIN nuevo. Las dos cosas aquí dentro.
 #[tauri::command]
+#[specta::specta]
 pub async fn login_recuperar_pin_confirmar(
     app: AppHandle,
     state: State<'_, AppState>,

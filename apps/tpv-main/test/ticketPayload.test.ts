@@ -14,8 +14,8 @@ import { deCentimos, deEuros, redondear } from "../src/shared/lib/dinero";
 // El módulo llama a `invokeClient` en las funciones de impresora; los tests de payload no lo tocan,
 // pero importar el módulo arrastra el cliente de Tauri, que en node no existe.
 const invocaciones: Array<{ cmd: string; args: unknown }> = [];
-vi.mock("@tpv/client", () => ({
-	invokeClient: async (cmd: string, args: unknown) => {
+vi.mock("@tauri-apps/api/core", () => ({
+	invoke: async (cmd: string, args: unknown) => {
 		invocaciones.push({ cmd, args });
 		return null;
 	},
@@ -34,8 +34,8 @@ const { useTicketSettings } = await import("../src/shared/stores/useTicketSettin
 
 /** Una unidad suelta, como la manda el POS. */
 /** Los supuestos se escriben en EUROS; lo que se compara son céntimos. */
-function unidad(nombre: string, precio: number, ivaPercent?: number | null) {
-	return { nombre, precio: deEuros(precio), ivaPercent };
+function unidad(nombre: string, precio: number, iva_percent?: number | null) {
+	return { nombre, precio: deEuros(precio), iva_percent };
 }
 
 /** Total del payload, que es lo que acaba imprimiéndose como TOTAL. */
@@ -46,14 +46,14 @@ function total(items: Array<{ cantidad: number; precio_unitario: number }>) {
 beforeEach(() => {
 	invocaciones.length = 0;
 	useBusinessSettings.setState({
-		businessName: "Bar Pepe",
-		logoDataUrl: null,
+		business_name: "Bar Pepe",
+		logo_data_url: null,
 		direccion: "Calle Mayor 1",
 		telefono: "600123456",
 		cif: "B12345678",
-		razonSocial: "Pepe Hosteleria SL",
-		mensajeFooter: "Gracias",
-		ivaPercent: 10,
+		razon_social: "Pepe Hosteleria SL",
+		mensaje_footer: "Gracias",
+		iva_percent: 10,
 	});
 });
 
@@ -174,21 +174,21 @@ describe("personalización y datos del cobro", () => {
 	it("el logo viaja como ruta, no como imagen", () => {
 		// Rust lo lee del disco: mandar el data URL entero por el IPC en cada ticket es tirar
 		// megas por una imagen que ya está guardada.
-		useBusinessSettings.setState({ logoDataUrl: "images/logo.png" });
+		useBusinessSettings.setState({ logo_data_url: "images/logo.png" });
 		expect(payloadDePrecuenta([]).logo_path).toBe("images/logo.png");
 
-		useBusinessSettings.setState({ logoDataUrl: null });
+		useBusinessSettings.setState({ logo_data_url: null });
 		expect(payloadDePrecuenta([]).logo_path).toBeUndefined();
 	});
 
 	it("las cinco casillas del panel llegan al payload", () => {
 		// Si una se quedara por el camino, la configuración del usuario se ignoraría en silencio.
 		const apagado = {
-			showLogo: false,
-			showBusinessName: false,
-			showAddress: false,
-			showPhone: false,
-			showFooterMessage: false,
+			show_logo: false,
+			show_business_name: false,
+			show_address: false,
+			show_phone: false,
+			show_footer_message: false,
 		};
 		useTicketSettings.setState({
 			settings: { ...useTicketSettings.getState().settings, ...apagado },
@@ -211,11 +211,11 @@ describe("personalización y datos del cobro", () => {
 		useTicketSettings.setState({
 			settings: {
 				...useTicketSettings.getState().settings,
-				paperWidthMm: 58,
-				charsPerLine: 32,
-				marginLeftMm: 2,
-				marginRightMm: 3,
-				paperDpi: 300,
+				paper_width_mm: 58,
+				chars_per_line: 32,
+				margin_left_mm: 2,
+				margin_right_mm: 3,
+				paper_dpi: 300,
 			},
 		});
 

@@ -7,8 +7,8 @@ import {
 import { conAviso } from "../lib/conAviso";
 
 const DEFAULTS: ContactSettings = {
-    contactEmail: "",
-    contactPhone: "",
+    contact_email: "",
+    contact_phone: "",
 };
 
 type ContactSettingsState = ContactSettings & {

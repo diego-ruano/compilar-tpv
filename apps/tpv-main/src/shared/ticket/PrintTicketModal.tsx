@@ -13,7 +13,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
-import type { FacturaDelCobro, PrintTicketPayload } from "@tpv/contracts";
+import type { FacturaDelCobro, PrintTicketPayload_Serialize as PrintTicketPayload } from "@tpv/contracts";
 import { useToast } from "../toast";
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
@@ -38,7 +38,7 @@ export type PrintableLine = {
      * Tipo de IVA con el que se vendió la línea. `null`/ausente = el general del negocio.
      * Viene congelado de la línea, no del producto.
      */
-    ivaPercent?: number | null;
+    iva_percent?: number | null;
     /** Unidades de la línea. Ausente = 1, que es como el POS manda la comanda. */
     cantidad?: number;
 };

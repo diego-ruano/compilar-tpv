@@ -7,43 +7,33 @@
 use tpv_domain::dinero::Dinero;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use crate::verifactu::DestinatarioInput;
 
 /* =========================================================
    LAYOUT
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RoomPoly {
     #[serde(rename = "type")]
     pub kind: String,
     pub points: Vec<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TableInput {
     pub id: String,
     pub name: String,
-    #[ts(type = "number")]
     pub x: i64,
-    #[ts(type = "number")]
     pub y: i64,
-    #[ts(type = "number")]
     pub width: i64,
-    #[ts(type = "number")]
     pub height: i64,
-    #[ts(type = "number | null")]
     pub radius: Option<i64>,
-    #[ts(type = "number")]
     pub seats: i64,
     pub shape: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SalonInput {
     pub id: String,
     pub name: String,
@@ -51,28 +41,20 @@ pub struct SalonInput {
     pub tables: Vec<TableInput>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TableOut {
     pub id: String,
     pub name: String,
-    #[ts(type = "number")]
     pub x: i64,
-    #[ts(type = "number")]
     pub y: i64,
-    #[ts(type = "number")]
     pub width: i64,
-    #[ts(type = "number")]
     pub height: i64,
-    #[ts(type = "number | null")]
     pub radius: Option<i64>,
-    #[ts(type = "number")]
     pub seats: i64,
     pub shape: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SalonOut {
     pub id: String,
     pub name: String,
@@ -84,8 +66,7 @@ pub struct SalonOut {
    COMANDAS (mesa)
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ComandaRow {
     pub id_comanda: String,
     pub id_mesa: String,
@@ -98,8 +79,7 @@ pub struct ComandaRow {
 }
 
 /// Línea de comanda de mesa. (`Mesa`-prefijo para no colisionar con la de venta_rapida.)
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct MesaLineaComandaRow {
     #[serde(rename = "ID_Detalle")]
@@ -115,7 +95,6 @@ pub struct MesaLineaComandaRow {
     /// Tipo de IVA con el que se vendió la línea (congelado al añadirla). `None` = el general
     /// del negocio. Va al ticket para desglosar por tipo.
     #[serde(rename = "IVA_Percent")]
-    #[ts(optional)]
     pub iva_percent: Option<f64>,
     #[serde(rename = "Notas")]
     pub notas: Option<String>,
@@ -124,24 +103,19 @@ pub struct MesaLineaComandaRow {
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Pasa_Cocina")]
-    #[ts(type = "number")]
     pub pasa_cocina: i64,
     #[serde(rename = "Pagado")]
-    #[ts(type = "number")]
     pub pagado: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ComandaBarraListItem {
     pub id_comanda: String,
     pub fecha_hora_apertura: String,
     pub estado: String,
     pub total_pendiente: Dinero,
     pub total_comanda: Dinero,
-    #[ts(type = "number")]
     pub pendientes_cocina: i64,
-    #[ts(type = "number")]
     pub pendientes_pago: i64,
 }
 
@@ -149,8 +123,7 @@ pub struct ComandaBarraListItem {
    META MESAS
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct ReservaMesaOut {
     #[serde(rename = "idReserva")]
@@ -162,25 +135,20 @@ pub struct ReservaMesaOut {
     pub hora: String,
     pub estado: String,
     #[serde(rename = "minutosPara")]
-    #[ts(type = "number")]
     pub minutos_para: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct MesaMetaOut {
     pub ocupada: bool,
     pub id_comanda: String,
     pub idComanda: String,
     pub totalPendiente: Dinero,
-    #[ts(type = "number")]
     pub pendientesPago: i64,
-    #[ts(type = "number")]
     pub pendientesCocina: i64,
     pub estado: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub reserva: Option<ReservaMesaOut>,
 }
 
@@ -188,8 +156,7 @@ pub struct MesaMetaOut {
    CATÁLOGO
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct CategoriaVendibleOut {
     #[serde(rename = "ID_Categoria")]
@@ -199,12 +166,10 @@ pub struct CategoriaVendibleOut {
     #[serde(rename = "Ruta_Imagen")]
     pub ruta_imagen: Option<String>,
     #[serde(rename = "Pasa_Cocina")]
-    #[ts(type = "number")]
     pub pasa_cocina: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct ProductoVendibleOut {
     #[serde(rename = "ID_Producto")]
@@ -223,8 +188,7 @@ pub struct ProductoVendibleOut {
    COCINA
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct KitchenRow {
     #[serde(rename = "ID_Comanda")]
@@ -245,7 +209,6 @@ pub struct KitchenRow {
     #[serde(rename = "Estado_Cocina")]
     pub estado_cocina: Option<String>,
     #[serde(rename = "Pagado")]
-    #[ts(type = "number")]
     pub pagado: i64,
 }
 
@@ -253,152 +216,120 @@ pub struct KitchenRow {
    Args / Inputs — Local-First (sin op_id/outbox/remote_id)
 ========================================================= */
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasSaveLayoutInput {
     pub salons: Vec<SalonInput>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasSetReservaEstadoInput {
     pub id_reserva: String,
     pub estado: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasIdMesaArgs {
     pub id_mesa: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasIdComandaArgs {
     pub id_comanda: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasAbrirComandaInput {
     pub id_mesa: String,
     #[serde(default)]
-    #[ts(optional)]
     pub id_trabajador: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub id_usuario: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub id_reserva: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasComandaSetTrabajadorInput {
     pub id_comanda: String,
     #[serde(default)]
-    #[ts(optional)]
     pub id_usuario: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub id_trabajador: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasCerrarComandaInput {
     pub id_comanda: String,
     pub total: Dinero,
 }
 
 /// RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasAddLineaComandaInput {
     pub id_comanda: String,
     pub id_producto: String,
     pub cantidad: f64,
     #[serde(default)]
-    #[ts(optional)]
     pub id_usuario: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub id_trabajador: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasGetOrCreateComandaBarraInput {
     #[serde(default)]
-    #[ts(optional)]
     pub id_trabajador: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasCreateComandaBarraInput {
     #[serde(default)]
-    #[ts(optional)]
     pub id_trabajador: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasListComandasBarraArgs {
     #[serde(default)]
-    #[ts(optional)]
     pub include_pagadas: Option<bool>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasDeleteComandaBarraIfSafeInput {
     pub id_comanda: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasIdCategoriaArgs {
     pub id_categoria: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasSearchProductosArgs {
     #[serde(default)]
-    #[ts(optional)]
     pub q: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub query: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub texto: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasRemoveOnePendingDetalleInput {
     pub id_comanda: String,
     pub id_producto: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasDeleteDetalleInput {
     pub id_detalle: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasUpdateDetalleNotaInput {
     pub id_detalle: String,
     #[serde(default)]
-    #[ts(optional)]
     pub nota: Option<String>,
 }
 
@@ -410,8 +341,7 @@ pub struct MesasUpdateDetalleNotaInput {
 /// IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
 /// ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
 /// pasando el login.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasCobrarDetallesInput {
     pub id_comanda: String,
     pub metodo: String,
@@ -423,12 +353,10 @@ pub struct MesasCobrarDetallesInput {
     /// límite de la simplificada y entonces no hay alternativa. Si pasa del límite y esto va vacío,
     /// el cobro se rechaza con `factura_completa_requerida` y la pantalla pide los datos.
     #[serde(default)]
-    #[ts(optional)]
     pub destinatario: Option<DestinatarioInput>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasKitchenSetLineStateInput {
     pub id_detalle: String,
     pub id_usuario_cocinero: String,

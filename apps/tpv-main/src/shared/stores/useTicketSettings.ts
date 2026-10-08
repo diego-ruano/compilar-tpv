@@ -8,23 +8,23 @@ import {
 import { conAviso } from "../lib/conAviso";
 
 const DEFAULTS: TicketSettings = {
-    showLogo: true,
-    showBusinessName: true,
-    showAddress: true,
-    showPhone: true,
-    showFooterMessage: true,
+    show_logo: true,
+    show_business_name: true,
+    show_address: true,
+    show_phone: true,
+    show_footer_message: true,
 
     // ✅ NUEVO (schema): ancho del papel en mm
-    paperWidthMm: 80,
+    paper_width_mm: 80,
 
     // Parámetros finos de impresión (respetados por el renderizado ESC/POS).
-    paperDpi: 203,
-    charsPerLine: 42,
-    marginTopMm: 0,
-    marginBottomMm: 0,
-    marginLeftMm: 0,
-    marginRightMm: 0,
-    fontScale: 1,
+    paper_dpi: 203,
+    chars_per_line: 42,
+    margin_top_mm: 0,
+    margin_bottom_mm: 0,
+    margin_left_mm: 0,
+    margin_right_mm: 0,
+    font_scale: 1,
 };
 
 type TicketSettingsState = {
@@ -52,11 +52,11 @@ function clampPaperWidthMm(n: number) {
 }
 
 function sanitizePatch(p: Partial<TicketSettings>): Partial<TicketSettings> {
-    // Asegura que si llega paperWidthMm, vaya normalizado
-    if ("paperWidthMm" in p && p.paperWidthMm != null) {
+    // Asegura que si llega paper_width_mm, vaya normalizado
+    if ("paper_width_mm" in p && p.paper_width_mm != null) {
         return {
             ...p,
-            paperWidthMm: clampPaperWidthMm(Number(p.paperWidthMm)),
+            paper_width_mm: clampPaperWidthMm(Number(p.paper_width_mm)),
         };
     }
     return p;
@@ -90,8 +90,8 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
             const merged: TicketSettings = {
                 ...DEFAULTS,
                 ...s,
-                paperWidthMm: clampPaperWidthMm(
-                    Number((s as any)?.paperWidthMm ?? DEFAULTS.paperWidthMm),
+                paper_width_mm: clampPaperWidthMm(
+                    Number((s as any)?.paper_width_mm ?? DEFAULTS.paper_width_mm),
                 ),
             };
 
@@ -117,8 +117,8 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
         const next = { ...cur, [key]: value } as TicketSettings;
 
         // normaliza el ancho si es ese campo
-        if (key === "paperWidthMm") {
-            next.paperWidthMm = clampPaperWidthMm(Number(value));
+        if (key === "paper_width_mm") {
+            next.paper_width_mm = clampPaperWidthMm(Number(value));
         }
 
         set({ settings: next });
@@ -137,8 +137,8 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
         const merged: TicketSettings = {
             ...DEFAULTS,
             ...next,
-            paperWidthMm: clampPaperWidthMm(
-                Number((next as any)?.paperWidthMm ?? DEFAULTS.paperWidthMm),
+            paper_width_mm: clampPaperWidthMm(
+                Number((next as any)?.paper_width_mm ?? DEFAULTS.paper_width_mm),
             ),
         };
 

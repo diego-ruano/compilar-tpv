@@ -33,6 +33,7 @@ fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
 /// firmado con el correo del negocio; «Proveedores y Pedidos» ya era una sección suya en el
 /// menú, y esto es el candado que le faltaba detrás.
 #[tauri::command]
+#[specta::specta]
 pub async fn email_enviar_pedido(
     app: AppHandle,
     state: State<'_, AppState>,

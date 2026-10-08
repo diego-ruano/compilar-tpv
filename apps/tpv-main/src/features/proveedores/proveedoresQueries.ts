@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // Hooks de TanStack Query para **proveedores** (sigue el patrón de `clientesQueries.ts`).
 //
 // Patrón:
@@ -12,14 +13,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  proveedoresGetAll,
-  proveedoresGetCategorias,
-  proveedoresGetProductos,
-  proveedoresSave,
-  proveedoresDelete,
-  proveedoresSetVinculos,
-} from "./proveedoresApis";
+import { proveedoresGetProductos, proveedoresSave, proveedoresDelete, proveedoresSetVinculos } from "./proveedoresApis";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
 export const proveedoresKeys = {
@@ -33,7 +27,7 @@ export const proveedoresKeys = {
 export function useProveedoresAll() {
   return useQuery({
     queryKey: proveedoresKeys.list(),
-    queryFn: () => proveedoresGetAll(),
+    queryFn: () => commands.proveedoresGetAll(),
   });
 }
 
@@ -41,7 +35,7 @@ export function useProveedoresAll() {
 export function useProveedoresCategorias() {
   return useQuery({
     queryKey: proveedoresKeys.categorias(),
-    queryFn: () => proveedoresGetCategorias(),
+    queryFn: () => commands.proveedoresGetCategorias(),
   });
 }
 

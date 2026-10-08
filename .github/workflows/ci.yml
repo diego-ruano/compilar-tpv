@@ -35,7 +35,7 @@ jobs:
       # paso de clippy de más abajo estuvo sin llegar a ejecutarse porque el de tests ya fallaba
       # antes; en cuanto los tests pasaron, CI llegó a él y reventó con «cargo-clippy is not
       # installed». Si se quita esta línea, el job vuelve a romperse en ese paso.
-      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: dtolnay/rust-toolchain@1.93.1
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -59,7 +59,7 @@ jobs:
       # ⚠️ nextest NO ejecuta doctests. Hoy no hay ninguno en estas crates; si alguien añade uno,
       # hace falta un paso `cargo test --doc -p …` aparte o no lo comprobará nadie.
       - name: Tests de dominio, casos de uso y persistencia
-        run: cargo nextest run --profile ci -p tpv-domain -p tpv-application -p tpv-infra-sqlite
+        run: cargo nextest run --profile ci -p tpv-contracts -p tpv-domain -p tpv-application -p tpv-infra-sqlite
 
       # INFRA-04. Va aquí y no en un job propio porque este ya compila estas crates y tiene la
       # caché caliente: en uno aparte se pagaría el build entero otra vez para lo mismo.
@@ -120,10 +120,23 @@ jobs:
       - name: Tests del frontend
         run: pnpm --filter @tpv/main test
 
-      # El nombre de un comando Tauri es una cadena: renombrarlo compila en Rust y en TypeScript,
-      # y revienta en tiempo de ejecución en el equipo del cliente. Esto lo caza aquí.
-      - name: Anti-drift de los nombres de comando Tauri
-        run: node scripts/check-comandos-tauri.mjs
+  # RI-87: exportar usa las firmas reales del ejecutable Tauri, sin arrancar la aplicación.
+  contratos-tauri:
+    name: Contratos IPC generados al día
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@1.93.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Comprobar contratos y comandos
+        run: node scripts/generate-types.mjs --check
 
   # Worker: typecheck, suite de tests (corre dentro de workerd con el pool de Cloudflare) y que el
   # registro manual de migraciones (tenantMigrations.ts) no se desincronice de la carpeta

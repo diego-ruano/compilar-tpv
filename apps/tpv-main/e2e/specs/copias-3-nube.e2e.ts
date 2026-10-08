@@ -71,15 +71,15 @@ describe("Copias de seguridad · volver sólo con la nube", () => {
         // Lo que se comprueba no es que la app arranque, sino que ha vuelto el CONTENIDO: la
         // categoría se creó antes de la primera avería y no ha vuelto a tocarse desde entonces, así
         // que si está aquí es porque la nube la ha devuelto.
-        const categorias = await leerDeLaApp<Array<{ Nombre?: string; nombre?: string }>>(
+        const categorias = await leerDeLaApp(
             "list_categorias_vendibles",
         );
-        const nombres = categorias.map((c) => c.Nombre ?? c.nombre ?? "");
+        const nombres = categorias.map((c) => c.Nombre);
         expect(nombres).toContain(CATEGORIA);
 
         // Y el equipo queda operativo de verdad, no sólo desbloqueado: sin cuarentenas y sin nada
         // pendiente de subir. Un login abierto sobre una base a medias sería peor que el bloqueo.
-        const salud = await leerDeLaApp<{ quarantined: number; failing: number }>("sync_health");
+        const salud = await leerDeLaApp("sync_health");
         expect(salud.quarantined).toBe(0);
         expect(salud.failing).toBe(0);
     });

@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // shared/ui/UpdateBanner.tsx
 //
 // Aviso de actualización disponible. La DETECCIÓN la hace el backend (Rust) y es la fuente de
@@ -10,7 +11,7 @@
 // no pinta nada. Es tolerante a fallos: en modo dev o sin feed, los errores se ignoran.
 
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen } from "@tauri-apps/api/event";
 import { conAviso } from "../lib/conAviso";
 
@@ -30,7 +31,7 @@ export default function UpdateBanner() {
         let alive = true;
 
         // 1) Comprobación propia al montar (cubre el caso de montarse tras el evento de arranque).
-        invoke<UpdateInfo | null>("updater_check")
+        commands.updaterCheck()
             .then((info) => {
                 if (alive && info) setUpdate(info);
             })
@@ -57,7 +58,7 @@ export default function UpdateBanner() {
         try {
             // Descarga + verifica firma + instala + reinicia. Si todo va bien, la app se reinicia
             // y este componente desaparece con ella; por eso no hay un "éxito" que pintar.
-            await invoke("updater_install");
+            await commands.updaterInstall();
         } catch (e: any) {
             setError(String(e?.message || e));
             setInstalling(false);

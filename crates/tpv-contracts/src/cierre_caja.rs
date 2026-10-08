@@ -3,29 +3,22 @@
 use tpv_domain::dinero::Dinero;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 /// Una moneda o billete del recuento.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DenominacionDto {
     pub valor: Dinero,
-    #[ts(type = "number")]
     pub unidades: i64,
 }
 
 /// Una corrección de un apunte que cambió los números de un cierre ya hecho (CAJA-01).
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RectificacionDto {
     pub id_rectificacion: String,
     pub fecha_hora: String,
     /// Nombre de quien corrigió, resuelto al leer.
-    #[ts(optional)]
     pub usuario_nombre: Option<String>,
     /// Qué se tocó, en una frase: «Cobro 2026/000045 de 12,50 €: Efectivo → Tarjeta».
     pub descripcion: String,
-    #[ts(optional)]
     pub motivo: Option<String>,
     pub esperado_antes: Dinero,
     pub esperado_despues: Dinero,
@@ -37,15 +30,12 @@ pub struct RectificacionDto {
 ///
 /// Las columnas de siempre son la **foto de esa noche** y no cambian nunca. Si después se corrige un
 /// apunte de su periodo, lo que el cierre marca hoy va en los `rect_*` (CAJA-01).
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct CierreDto {
     pub id_cierre: String,
     pub fecha_hora: String,
-    #[ts(optional)]
     pub id_usuario: Option<String>,
     /// Nombre de quien cerró, resuelto al leer (la fila sólo guarda el id).
-    #[ts(optional)]
     pub usuario_nombre: Option<String>,
     pub fondo_inicial: Dinero,
     pub ventas_efectivo: Dinero,
@@ -54,29 +44,21 @@ pub struct CierreDto {
     pub descuadre: Dinero,
     pub dejado: Dinero,
     pub retirado: Dinero,
-    #[ts(optional)]
     pub motivo: Option<String>,
     /// `None` = el cierre sigue en pie (no se ha deshecho).
-    #[ts(optional)]
     pub reabierto_en: Option<String>,
-    #[ts(optional)]
     pub reabierto_por: Option<String>,
     /// Desde cuándo cuenta este cierre (exclusivo): la hora del cierre anterior. `None` en el
     /// primero. Es lo que dice a qué cierre pertenece un apunte que se corrige después.
-    #[ts(optional)]
     pub periodo_desde: Option<String>,
     /// Gastos pagados con dinero del cajón durante el periodo, tal como estaban al cerrar.
     #[serde(default)]
     pub gastos_caja: Dinero,
     /// Lo que el cierre marca hoy tras corregir apuntes de su periodo. `None` = nunca se ha
     /// rectificado.
-    #[ts(optional)]
     pub rect_ventas_efectivo: Option<Dinero>,
-    #[ts(optional)]
     pub rect_gastos_caja: Option<Dinero>,
-    #[ts(optional)]
     pub rect_esperado: Option<Dinero>,
-    #[ts(optional)]
     pub rect_descuadre: Option<Dinero>,
     pub contado_denoms: Vec<DenominacionDto>,
     pub dejado_denoms: Vec<DenominacionDto>,
@@ -86,35 +68,27 @@ pub struct CierreDto {
 }
 
 /// Una fila del histórico. Sin el desglose por denominación, que sólo se pide al abrir la ficha.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct CierreResumenDto {
     pub id_cierre: String,
     pub fecha_hora: String,
-    #[ts(optional)]
     pub usuario_nombre: Option<String>,
     pub esperado: Dinero,
     pub contado: Dinero,
     pub descuadre: Dinero,
     pub retirado: Dinero,
-    #[ts(optional)]
     pub motivo: Option<String>,
-    #[ts(optional)]
     pub reabierto_en: Option<String>,
     /// CAJA-01: lo que marca hoy si se ha rectificado.
-    #[ts(optional)]
     pub rect_esperado: Option<Dinero>,
-    #[ts(optional)]
     pub rect_descuadre: Option<Dinero>,
 }
 
 /// Lo que la pantalla necesita saber **antes** de que nadie cuente nada.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PreparacionCierreDto {
     /// Desde cuándo está abierto el periodo. `None` = no hay ningún cierre previo, así que éste es
     /// el primero y la pantalla tiene que pedir además el fondo de partida.
-    #[ts(optional)]
     pub desde: Option<String>,
     /// `true` en el primer cierre de la vida del negocio.
     pub es_primer_cierre: bool,
@@ -125,21 +99,18 @@ pub struct PreparacionCierreDto {
     pub gastos_caja: Dinero,
     pub esperado: Dinero,
     /// Comandas sin cobrar ahora mismo. No impide cerrar: se avisa y se sigue.
-    #[ts(type = "number")]
     pub comandas_abiertas: i64,
     /// A partir de cuánto descuadre hay que escribir un motivo.
     pub umbral_descuadre: Dinero,
     /// Cobros anulados durante este periodo. **No entran en el cálculo** (el esperado sale de los
     /// cobros activos, como siempre): es una línea informativa. Y es justo el dato que no existía
     /// antes de CUENTA-07 — un descuadre de 40 € junto a "3 anulaciones por 40 €" se explica solo.
-    #[ts(type = "number")]
     pub anulaciones: i64,
     pub anulaciones_importe: Dinero,
 }
 
 /// Cómo quedaría un cierre ya hecho si se hace un cambio (CAJA-01).
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ImpactoCierreDto {
     pub id_cierre: String,
     pub fecha_hora: String,
@@ -151,8 +122,7 @@ pub struct ImpactoCierreDto {
 }
 
 /// A qué cierres ya hechos afectaría un cambio de caja, para avisar antes de hacerlo.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ImpactoCajaDto {
     /// Vacío = el apunte es del periodo abierto: no hay nada que avisar.
     pub cierres: Vec<ImpactoCierreDto>,
@@ -164,16 +134,13 @@ pub struct ImpactoCajaDto {
    Entrada (args/inputs)
 ========================================================= */
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct DenominacionInput {
     pub valor: Dinero,
-    #[ts(type = "number")]
     pub unidades: i64,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ConfirmarCierreInput {
     /// El id del cierre, un UUID que genera la pantalla al abrir el arqueo (RI-58).
     ///
@@ -183,26 +150,21 @@ pub struct ConfirmarCierreInput {
     /// Sólo se usa en el primer cierre; en los demás manda el `dejado` del anterior y esto se
     /// ignora, para que nadie pueda reescribir el punto de partida a posteriori.
     #[serde(default)]
-    #[ts(optional)]
     pub fondo_inicial: Option<Dinero>,
     pub contado: Vec<DenominacionInput>,
     pub dejado: Vec<DenominacionInput>,
     #[serde(default)]
-    #[ts(optional)]
     pub motivo: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct CierreIdInput {
     pub id_cierre: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct CierreListarArgs {
     #[serde(default)]
-    #[ts(optional)]
     pub limite: Option<i64>,
 }
 
@@ -210,8 +172,7 @@ pub struct CierreListarArgs {
 ///
 /// Lleva sólo lo que le importa al arqueo de cada apunte: la fecha, el método y el importe, y si un
 /// gasto salió del cajón. El concepto o el proveedor no mueven ningún número.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(tag = "tipo", rename_all = "snake_case")]
 pub enum CambioCajaInput {
     EditarPago {
@@ -225,7 +186,6 @@ pub enum CambioCajaInput {
         /// es lo que la pantalla enseña antes de confirmar. Ausente = `"ERROR"`, como en
         /// `AnularPagoInput`.
         #[serde(default)]
-        #[ts(optional)]
         clase: Option<String>,
     },
     CrearGasto {

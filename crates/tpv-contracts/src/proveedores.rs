@@ -4,10 +4,7 @@
 use tpv_domain::dinero::Dinero;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ProveedorDto {
     pub id_proveedor: String,
     pub nombre_empresa: String,
@@ -20,8 +17,7 @@ pub struct ProveedorDto {
     pub ruta_imagen: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct CategoriaProveedorDto {
     pub id_categoria: String,
     pub nombre: String,
@@ -29,8 +25,7 @@ pub struct CategoriaProveedorDto {
     pub ruta_imagen: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ProductoProveedorDto {
     pub id_producto: String,
     pub id_categoria: Option<String>,
@@ -49,50 +44,38 @@ pub struct ProductoProveedorDto {
 
 /* ── Args/Inputs ── */
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ProveedoresGetProductosArgs {
     pub id_proveedor: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ProveedorSaveInput {
     #[serde(default)]
-    #[ts(optional)]
     pub id_proveedor: Option<String>,
     pub nombre_empresa: String,
     #[serde(default)]
-    #[ts(optional)]
     pub contacto: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub telefono: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub email: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub cif: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub informacion_adicional: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub nombre_imagen: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub ruta_imagen: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ProveedoresDeleteInput {
     pub id_proveedor: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ProveedoresSetVinculosInput {
     pub id_proveedor: String,
     pub producto_ids: Vec<String>,

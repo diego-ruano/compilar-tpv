@@ -65,6 +65,7 @@ fn nube(app: &AppHandle) -> Result<PairingAdapter, AppErrorDto> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn correo_recuperacion_estado(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -75,6 +76,7 @@ pub async fn correo_recuperacion_estado(
 
 /// Manda un código al correo nuevo. Hasta confirmarlo no cambia nada.
 #[tauri::command]
+#[specta::specta]
 pub async fn correo_recuperacion_solicitar(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -85,6 +87,7 @@ pub async fn correo_recuperacion_solicitar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn correo_recuperacion_confirmar(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -95,6 +98,7 @@ pub async fn correo_recuperacion_confirmar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn correo_recuperacion_usar_el_de_la_compra(
     app: AppHandle,
     state: State<'_, AppState>,

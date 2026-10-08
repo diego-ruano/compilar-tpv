@@ -9,7 +9,6 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "//generate-types": "Provisional: dispara la exportación ts-rs desde crates/tpv-contracts. El comando exacto se fija en el paso de migración de contratos tras la verificación empírica de ts-rs (single-file vs per-type+barrel).",
-    "generate-types": "cargo test -p tpv-contracts -p tpv-telemetry --quiet export_bindings"
+    "generate-types": "node ../../scripts/generate-types.mjs"
   }
 }

@@ -14,7 +14,7 @@
 //   · Un Handy al que la nube rechaza no está «conectando»: se le dice qué pasa y qué hacer. Es
 //     la diferencia entre una espera que termina sola y una que no va a terminar nunca.
 
-import type { LicenseGateResult } from "@tpv/contracts";
+import type { LicenseGateResult_Serialize as LicenseGateResult } from "@tpv/contracts";
 
 import type { MotivoRechazo } from "../../shared/stores/useMainPresence";
 import type { ModeStateValue } from "../../shared/stores/useMode";

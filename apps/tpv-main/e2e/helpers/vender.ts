@@ -94,7 +94,7 @@ export async function crearZonaConMesa(zona: string, mesa: string): Promise<stri
     // abrir en el plano.
     const salones = await browser.waitUntil(
         async () => {
-            const s = await leerDeLaApp<Salon[]>("load_layout");
+            const s = await leerDeLaApp("load_layout");
             return s.length && s[0].tables.length ? s : false;
         },
         { timeout: 30_000, timeoutMsg: "El layout guardado no volvió con la mesa" },
@@ -126,12 +126,12 @@ export async function abrirMesa(mesa: string): Promise<void> {
     const lienzo = $("canvas");
     await lienzo.waitForDisplayed({ timeout: 30_000 });
 
-    const salones = await leerDeLaApp<Salon[]>("load_layout");
+    const salones = await leerDeLaApp("load_layout");
     const salon = salones[0];
     const figura = salon.tables.find((t) => t.name === mesa) ?? salon.tables[0];
 
     const { width, height } = await lienzo.getSize();
-    const vista = fitTransform(salon, width, height, 26);
+    const vista = fitTransform({ ...salon, room: { ...salon.room, points: salon.room.points.map(punto => { if (punto == null) throw new Error("Coordenada inválida"); return punto; }) } }, width, height, 26);
 
     // El nodo de la mesa se dibuja con su origen en (x, y) y la figura de (0,0) a (ancho, alto).
     const centroX = vista.x + (figura.x + figura.width / 2) * vista.scale;
@@ -236,7 +236,7 @@ export async function cobrarTodoEnEfectivo(billete: string): Promise<void> {
  */
 export async function estadoDeMesa(idMesa: string): Promise<string> {
     try {
-        const mapa = await leerDeLaApp<Record<string, { estado?: string }>>("mesas_meta_all");
+        const mapa = await leerDeLaApp("mesas_meta_all");
         // La clave puede venir como UUID o como `db-mesa-<uuid>`: `mesasLoadMesaMeta` normaliza las
         // dos, así que aquí se aceptan las dos también.
         const meta = mapa[idMesa] ?? mapa[`db-mesa-${idMesa}`];
@@ -272,7 +272,7 @@ export async function esperarMesaLibre(idMesa: string): Promise<void> {
 export async function entradasDeCaja(): Promise<
     Array<{ id: string; importe: number; metodo: string }>
 > {
-    const pagina = await leerDeLaApp<{ filas: Array<{ id: string; importe: number; metodo: string }> }>(
+    const pagina = await leerDeLaApp(
         "cuentas_get_entradas",
         { args: { del: null, al: null, q: null, page_size: null } },
     );

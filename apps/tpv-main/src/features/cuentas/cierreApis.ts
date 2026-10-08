@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/cuentas/cierreApis.ts
 //
 // Cierre de caja (arqueo). CUENTA-06 · CAJA-01.
@@ -7,7 +8,7 @@
 // La traducción vive aquí y no en el componente para que la pantalla no tenga que saber en qué
 // forma se guarda un arqueo.
 
-import { invokeClient } from "@tpv/client";
+
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import type {
@@ -35,9 +36,7 @@ export function aDenominaciones(
 }
 
 /** Lo que hace falta saber antes de contar: desde cuándo, cuánto se espera y qué avisar. */
-export function cierrePreparar(): Promise<PreparacionCierreDto> {
-    return invokeClient<PreparacionCierreDto>("cierre_preparar");
-}
+
 
 /**
  * Cierra el periodo de caja.
@@ -61,17 +60,11 @@ export function cierreConfirmar(payload: {
         dejado: payload.dejado,
         motivo: payload.motivo?.trim() || undefined,
     };
-    return invokeClient<CierreDto>("cierre_confirmar", { args });
+    return commands.cierreConfirmar(args);
 }
 
 export function cierreListar(limite = 50): Promise<CierreResumenDto[]> {
-    return invokeClient<CierreResumenDto[]>("cierre_listar", {
-        args: { limite },
-    });
-}
-
-export function cierreDetalle(idCierre: string): Promise<CierreDto> {
-    return invokeClient<CierreDto>("cierre_detalle", { idCierre });
+    return commands.cierreListar({ limite });
 }
 
 /**
@@ -79,9 +72,7 @@ export function cierreDetalle(idCierre: string): Promise<CierreDto> {
  * de cuando esto se llamaba «reabrir»: renombrarlo rompería en tiempo de ejecución sin avisar.
  */
 export function cierreReabrir(idCierre: string): Promise<boolean> {
-    return invokeClient<boolean>("cierre_reabrir", {
-        args: { id_cierre: idCierre },
-    });
+    return commands.cierreReabrir({ id_cierre: idCierre });
 }
 
 /**
@@ -98,7 +89,7 @@ export function cierreImprimir(c: CierreDto): Promise<string> {
     const t = useTicketSettings.getState().settings;
     const b = useBusinessSettings.getState();
     const payload: PrintArqueoPayload = {
-        business_name: b.businessName ?? "",
+        business_name: b.business_name ?? "",
         fecha_hora: c.fecha_hora,
         desde: c.periodo_desde,
         usuario: c.usuario_nombre,
@@ -119,13 +110,13 @@ export function cierreImprimir(c: CierreDto): Promise<string> {
             descripcion: r.descripcion,
             motivo: r.motivo,
         })),
-        paper_width_mm: t.paperWidthMm,
-        paper_dpi: t.paperDpi,
-        chars_per_line: t.charsPerLine,
-        margin_top_mm: t.marginTopMm,
-        margin_bottom_mm: t.marginBottomMm,
-        margin_left_mm: t.marginLeftMm,
-        margin_right_mm: t.marginRightMm,
+        paper_width_mm: t.paper_width_mm,
+        paper_dpi: t.paper_dpi,
+        chars_per_line: t.chars_per_line,
+        margin_top_mm: t.margin_top_mm,
+        margin_bottom_mm: t.margin_bottom_mm,
+        margin_left_mm: t.margin_left_mm,
+        margin_right_mm: t.margin_right_mm,
     };
-    return invokeClient<string>("printer_print_arqueo", { payload });
+    return commands.printerPrintArqueo(payload);
 }

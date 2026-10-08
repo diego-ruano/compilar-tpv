@@ -18,7 +18,7 @@ function cleanOrNull(s: unknown): string | null {
 }
 
 // Local-First/UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno.
-function idStep(provided?: string) {
+function idStep(provided?: string | null) {
 	const id = (provided ?? "").trim() || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }

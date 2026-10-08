@@ -1,3 +1,5 @@
+import { commands } from "@tpv/client";
+import type { UserListItem as DbUser, CodigoEnviado } from "@tpv/contracts";
 // src/features/login/RecuperarPinModal.tsx
 //
 // Recuperar el PIN de un administrador por correo (LOGIN-07).
@@ -16,7 +18,7 @@ import { toAppError } from "@tpv/client";
 import { Button, Input, ModalShell } from "../../shared/ui";
 import { conAviso } from "../../shared/lib/conAviso";
 import { formatoCuentaAtras, useCuentaAtras } from "../../shared/lib/useCuentaAtras";
-import { confirmarCodigoPin, solicitarCodigoPin, type DbUser } from "./loginApi";
+
 
 type Props = {
     usuario: DbUser;
@@ -27,7 +29,7 @@ type Props = {
 const soloCifras = (v: string, max: number) => v.replace(/\D/g, "").slice(0, max);
 
 export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: Props) {
-    const [enviado, setEnviado] = useState<{ emailHint: string; minutos: number } | null>(null);
+    const [enviado, setEnviado] = useState<CodigoEnviado | null>(null);
     const [codigo, setCodigo] = useState("");
     const [pin, setPin] = useState("");
     const [pin2, setPin2] = useState("");
@@ -44,9 +46,9 @@ export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: P
         setOcupado(true);
         setError(null);
         try {
-            const r = await solicitarCodigoPin(usuario.id_usuario);
+            const r = await commands.loginRecuperarPinSolicitar({ id_usuario: usuario.id_usuario });
             setEnviado(r);
-            setReenvioHasta(Date.now() + r.reenvioSegundos * 1000);
+            setReenvioHasta(Date.now() + (r.reenvio_segundos ?? 0) * 1000);
             setCodigo("");
         } catch (e) {
             setError(toAppError(e).message);
@@ -64,10 +66,10 @@ export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: P
         setOcupado(true);
         setError(null);
         try {
-            await confirmarCodigoPin({
-                idUsuario: usuario.id_usuario,
+            await commands.loginRecuperarPinConfirmar({
+                id_usuario: usuario.id_usuario,
                 codigo,
-                pinNuevo: pin,
+                pin_nuevo: pin,
             });
             onRecuperado();
         } catch (e) {
@@ -122,7 +124,7 @@ export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: P
                             <Mail className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
                             <span>
                                 Hemos enviado un código a{" "}
-                                <span className="font-semibold text-fg">{enviado.emailHint}</span>.
+                                <span className="font-semibold text-fg">{enviado.email_hint}</span>.
                                 Caduca en {enviado.minutos} minutos.
                             </span>
                         </div>

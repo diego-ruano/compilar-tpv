@@ -24,7 +24,7 @@
 
 mod context;
 mod capture;
-mod event;
+pub mod event;
 mod forward;
 mod scrub;
 mod spool;

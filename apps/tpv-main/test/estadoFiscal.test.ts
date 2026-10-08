@@ -20,8 +20,8 @@ import { useEstadoFiscal, _resetEstadoFiscal, alMenos } from "../src/shared/stor
 // doble para poder decidir qué contesta cada caso.
 const respuesta = vi.hoisted(() => ({ valor: null as unknown, falla: false }));
 
-vi.mock("../src/features/configuracion/api/verifactuApis", () => ({
-	verifactuEstado: async () => {
+vi.mock("@tauri-apps/api/core", () => ({
+	invoke: async () => {
 		if (respuesta.falla) throw new Error("una Handy no tiene registros de facturación");
 		return respuesta.valor;
 	},

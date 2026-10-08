@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // shared/lib/cloudApi.ts
 //
 // Helper único para las peticiones autenticadas al worker `tpv-api` desde el frontend.
@@ -8,9 +9,9 @@
 // de modo que el patrón de petición vive en un único sitio.
 //
 // Para operaciones de pairing tipadas (p. ej. crear código) usa el comando hexagonal
-// dedicado (`invokeClient("pair_create")`), no este proxy genérico.
+// dedicado (`commands.pairCreate`), no este proxy genérico.
 
-import { invoke } from "@tauri-apps/api/core";
+
 
 /** Identidad con la que el backend firma la petición. */
 export type CloudMode = "anon" | "tpv" | "handy";
@@ -23,10 +24,10 @@ export type CloudMode = "anon" | "tpv" | "handy";
  * @param path Ruta del worker, debe empezar por `/` (p. ej. `/v1/pair/pending`).
  * @param body Cuerpo JSON plano (por defecto `{}`).
  */
-export async function cloudPost<T = unknown>(
+export async function cloudPost(
 	mode: CloudMode,
 	path: string,
 	body: unknown = {},
-): Promise<T> {
-	return invoke<T>("tpv_server_post_json", { args: { mode, path, body } });
+): Promise<unknown> {
+	return commands.tpvServerPostJson({ mode, path, body });
 }

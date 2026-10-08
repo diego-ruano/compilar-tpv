@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/shared/ticket/TicketPaper.tsx
 //
 // "Papel" del ticket: el render visual del recibo, espejo de `build_ticket` en `printing.rs`.
@@ -14,9 +15,9 @@
 // cortan donde de verdad se van a cortar.
 
 import React, { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 
-import type { PrintTicketPayload } from "@tpv/contracts";
+
+import type { PrintTicketPayload_Serialize as PrintTicketPayload } from "@tpv/contracts";
 import { resolveImageUrl } from "../lib/imageUrl";
 import {
     desgloseIva,
@@ -49,14 +50,12 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
     const [cols, setCols] = useState<number>(COLS_POR_DEFECTO);
     useEffect(() => {
         let vivo = true;
-        invoke<number>("printer_ticket_cols", {
-            args: {
+        commands.printerTicketCols({
                 paper_width_mm: p.paper_width_mm,
                 chars_per_line: p.chars_per_line,
                 margin_left_mm: p.margin_left_mm,
                 margin_right_mm: p.margin_right_mm,
-            },
-        })
+            })
             .then((n) => vivo && setCols(Number(n) || COLS_POR_DEFECTO))
             .catch(() => vivo && setCols(COLS_POR_DEFECTO));
         return () => {
@@ -75,7 +74,7 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
                 nombre: l.nombre,
                 precio: l.precio_unitario,
                 qty: l.cantidad,
-                ivaPercent: l.iva_percent ?? null,
+                iva_percent: l.iva_percent ?? null,
             })),
         [p.items],
     );

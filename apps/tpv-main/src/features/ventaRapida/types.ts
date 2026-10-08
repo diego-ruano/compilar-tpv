@@ -14,7 +14,7 @@ export type TicketItem = {
     seleccionado: boolean;
     categoriaNombre?: string | null;
     /** Tipo de IVA con el que se vendió la línea; `null` = el general del negocio. */
-    ivaPercent?: number | null;
+    iva_percent?: number | null;
 
     notas?: string | null;
 };

@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/InventaryComponents/api/inventarioAPI.ts
 //
 // API de inventario: una función por comando Tauri, con los tipos que genera ts-rs desde Rust.
@@ -7,7 +8,7 @@
 // devuelve una forma fija, y una capa que la "arregla" sólo puede esconder un error de contrato
 // —y era la que dejaba entrar un `number` en un campo de dinero—.
 
-import { invokeClient } from "@tpv/client";
+
 import type {
     AjusteLoteInput,
     AjusteStockSueltoInput,
@@ -28,46 +29,42 @@ import type {
 
 export const inventarioAPI = {
     listCategorias(): Promise<CategoriaInvDto[]> {
-        return invokeClient<CategoriaInvDto[]>("inventario_list_categorias");
+        return commands.inventarioListCategorias();
     },
 
     async createCategoria(args: UpsertCategoriaInput): Promise<void> {
-        await invokeClient("inventario_create_categoria", { args });
+        await commands.inventarioCreateCategoria(args);
     },
 
     listProveedoresMini(): Promise<ProveedorMiniDto[]> {
-        return invokeClient<ProveedorMiniDto[]>("inventario_list_proveedores_mini");
+        return commands.inventarioListProveedoresMini();
     },
 
     listProductosByCategoria(id_categoria: string): Promise<ProductoListDto[]> {
-        return invokeClient<ProductoListDto[]>("inventario_list_productos_by_categoria", {
-            args: { id_categoria },
-        });
+        return commands.inventarioListProductosByCategoria({ id_categoria });
     },
 
     async deleteProducto(id_producto: string): Promise<void> {
-        await invokeClient("inventario_delete_producto", { args: { id_producto } });
+        await commands.inventarioDeleteProducto({ id_producto });
     },
 
     /** Alta o edición; devuelve el id del producto. */
     async upsertProducto(args: UpsertProductoInput): Promise<string> {
-        const r = await invokeClient<UpsertProductoResult>("inventario_upsert_producto", { args });
+        const r = await commands.inventarioUpsertProducto(args);
         return r.id_producto;
     },
 
     getResumen(): Promise<InventarioResumenResponse> {
-        return invokeClient<InventarioResumenResponse>("inventario_get_resumen", { args: {} });
+        return commands.inventarioGetResumen({});
     },
 
     listAlergenos(): Promise<AlergenoInvDto[]> {
-        return invokeClient<AlergenoInvDto[]>("inventario_list_alergenos");
+        return commands.inventarioListAlergenos();
     },
 
     /** El producto con sus alérgenos. Falla si no existe: quien lo pide viene de una lista. */
     async getProductoDetalle(id_producto: string): Promise<ProductoDetalleDto> {
-        const r = await invokeClient<ProductDetailResponse>("inventario_get_product_detail", {
-            args: { id_producto },
-        });
+        const r = await commands.inventarioGetProductDetail({ id_producto });
         if (!r.producto) throw new Error("Producto no encontrado");
         return {
             ...r.producto,
@@ -80,24 +77,22 @@ export const inventarioAPI = {
     },
 
     listLotesByProducto(id_producto: string): Promise<LoteDto[]> {
-        return invokeClient<LoteDto[]>("inventario_list_lotes_by_producto", {
-            args: { id_producto },
-        });
+        return commands.inventarioListLotesByProducto({ id_producto });
     },
 
     async createLote(args: CreateLoteInput): Promise<void> {
-        await invokeClient("inventario_create_lote", { args });
+        await commands.inventarioCreateLote(args);
     },
 
     async updateLote(args: UpdateLoteInput): Promise<void> {
-        await invokeClient("inventario_update_lote", { args });
+        await commands.inventarioUpdateLote(args);
     },
 
     async ajustarLote(args: AjusteLoteInput): Promise<void> {
-        await invokeClient("inventario_ajustar_lote", { args });
+        await commands.inventarioAjustarLote(args);
     },
 
     async ajustarStockSuelto(args: AjusteStockSueltoInput): Promise<void> {
-        await invokeClient("inventario_ajustar_stock_suelto", { args });
+        await commands.inventarioAjustarStockSuelto(args);
     },
 };

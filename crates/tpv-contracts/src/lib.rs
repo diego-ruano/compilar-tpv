@@ -4,11 +4,11 @@
 //!
 //! Aquí viven los DTOs (Data Transfer Objects) que cruzan la frontera Tauri: lo que
 //! los comandos reciben como argumentos y devuelven como resultado. Cada DTO deriva
-//! `Serialize`/`Deserialize` (serde) y `TS` (ts-rs) para autogenerar su equivalente
+//! `Serialize`/`Deserialize` (serde) y `specta::Type` para autogenerar su equivalente
 //! TypeScript en `packages/contracts/src/generated/bindings.ts`.
 //!
 //! Regla: el dominio (`tpv-domain`) permanece puro; los tipos que se exponen a la UI
-//! se definen o se re-exportan aquí con la macro `#[derive(TS)]`.
+//! se definen o se re-exportan aquí con la macro `#[derive(specta::Type)]`.
 
 pub mod cierre_caja;
 pub mod clientes;
@@ -35,13 +35,10 @@ pub mod trabajadores;
 pub mod venta_rapida;
 pub mod verifactu;
 
-// Los módulos de contratos por dominio se añaden durante la migración:
-// pub mod mesas;
-// pub mod venta_rapida;
-// ...
-
 pub mod permisos;
 
 pub mod socket_handy;
 
 pub mod imagenes;
+
+pub mod json;

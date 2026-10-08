@@ -85,7 +85,7 @@ function assignmentSteps(idTarea: string | typeof REF_ID_TAREA, idsRaw: string[]
 }
 
 export function createTarea(input: CreateTareaInput): BuiltCommand {
-	const ids = normalizeIds(input.ids_trabajadores);
+	const ids = normalizeIds(input.ids_trabajadores ?? []);
 	const cloudPayload = {
 		titulo: input.titulo.trim(),
 		descripcion: cleanOrNull(input.descripcion),
@@ -166,7 +166,7 @@ export function setAsignacionesTarea(
 	idTarea: string,
 	input: SetAsignacionesTareaInput,
 ): BuiltCommand {
-	const ids = normalizeIds(input.ids_trabajadores);
+	const ids = normalizeIds(input.ids_trabajadores ?? []);
 	const steps = assignmentSteps(idTarea, ids);
 
 	return {

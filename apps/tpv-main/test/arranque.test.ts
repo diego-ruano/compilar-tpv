@@ -11,7 +11,7 @@
 process.env.TZ = "Europe/Madrid";
 
 import { describe, expect, it } from "vitest";
-import type { LicenseGateResult, LicenseLocalState } from "@tpv/contracts";
+import type { LicenseGateResult_Serialize as LicenseGateResult, LicenseLocalState_Serialize as LicenseLocalState } from "@tpv/contracts";
 
 import { activacionCompleta, correoValido, FORMULARIO_VACIO } from "../src/app/arranque/activacion";
 import { codigoParaVincular, leerCodigoDeVinculacion } from "../src/app/arranque/emparejamiento";
@@ -22,6 +22,7 @@ const gate = (allowed: boolean, reason: string, extra: Partial<LicenseGateResult
 	allowed,
 	reason,
 	state: null,
+	last_rejection: null,
 	...extra,
 });
 

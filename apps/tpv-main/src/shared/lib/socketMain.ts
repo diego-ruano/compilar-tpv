@@ -1,5 +1,6 @@
+import { commands } from "@tpv/client";
 // RI-31/RI-57: puente de presentación. El transporte, SQL y confirmaciones viven en Rust.
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen } from "@tauri-apps/api/event";
 import type { CambioReplicado, EstadoReplicacion } from "@tpv/contracts";
 import { useEstadoSync, type EstadoSync, type FaseRecuperacion, type PreferenciaSync } from "../stores/useEstadoSync";
@@ -59,12 +60,12 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
         const fallo = resultados.find((r) => r.status === "rejected");
         if (detenido || fallo) { for (const quitar of registros) quitar(); if (fallo?.status === "rejected") throw fallo.reason; return; }
         quitar.push(...registros);
-        publicar(await invoke<EstadoReplicacion>("sync_estado"));
-        await invoke("sync_reintentar");
+        publicar(await commands.syncEstado());
+        await commands.syncReintentar();
     };
     void observar().catch((e) => { if (!detenido) captureException(e, { fase: "observar_sync_nativo" }); });
     return {
-        reconectarSiHaceFalta: () => { void invoke("sync_reintentar").catch((e) => captureException(e, { fase: "reintentar_sync_nativo" })); },
+        reconectarSiHaceFalta: () => { void commands.syncReintentar().catch((e) => captureException(e, { fase: "reintentar_sync_nativo" })); },
         // Desmontar la UI no interrumpe una transacción ni detiene la réplica.
         detener: () => { detenido = true; for (const unlisten of quitar) unlisten(); },
     };

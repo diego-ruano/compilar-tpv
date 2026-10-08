@@ -2,6 +2,7 @@
 
 import type { Dinero } from "@tpv/contracts";
 import { nuevoId } from "../../lib/ids";
+import { HubError } from "../../lib/errorHttp";
 import type { ApplyCommand } from "../../lib/hub";
 import { pasosConsumo } from "../inventario/consumo";
 import type { CobroDetallesPlan } from "./mesas.queries";
@@ -49,10 +50,11 @@ function parseDbId(raw: string, prefix: string): string | null {
  * `mesas__save_layout`; aquí se conforma el worker, que es la regla del harness (canónico = Rust,
  * el escritor único). Si algún día Rust deja de usar `serde_json` para esto, esto sobra.
  */
-function puntosComoRust(points: number[] | undefined | null): string {
-	const partes = (points ?? []).map((n) =>
-		Number.isFinite(n) && Number.isInteger(n) ? n.toFixed(1) : String(n),
-	);
+function puntosComoRust(points: Array<number | null> | undefined | null): string {
+	const partes = (points ?? []).map((n) => {
+		if (n == null || !Number.isFinite(n)) throw new HubError("validation_error", 400, { message: "El plano contiene una coordenada inválida" });
+		return Number.isInteger(n) ? n.toFixed(1) : String(n);
+	});
 	return `[${partes.join(",")}]`;
 }
 

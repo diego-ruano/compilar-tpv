@@ -6,7 +6,7 @@ import type { ConfiguracionPermisos } from "@tpv/contracts";
 import { Permisos } from "../../src/features/configuracion/sections/Permisos";
 import { queryClient } from "../../src/shared/lib/queryClient";
 const { invoke } = vi.hoisted(() => ({ invoke:vi.fn() }));
-vi.mock("@tpv/client", () => ({invokeClient:invoke,toAppError:(e: Error) => e}));
+vi.mock("@tauri-apps/api/core", () => ({invoke}));
 const matriz: ConfiguracionPermisos = {
     catalogo:[{codigo:"catalogo.editar",nombre:"Editar catálogo",grupo:"Inventario"}],
     roles:[{id_rol:"admin",nombre:"Administrador",permisos:[]},{id_rol:"encargado",nombre:"Encargado",permisos:["catalogo.editar"]}],

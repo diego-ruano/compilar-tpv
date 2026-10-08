@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/sections/CorreoRecuperacion.tsx
 //
 // El correo de recuperación (LOGIN-08): a dónde llegan los códigos para recuperar el PIN de un
@@ -16,13 +17,7 @@ import { Button, Input } from "../../../shared/ui";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { formatoCuentaAtras, useCuentaAtras } from "../../../shared/lib/useCuentaAtras";
 import { Panel } from "../ui/Panel";
-import {
-	correoRecuperacionConfirmar,
-	correoRecuperacionEstado,
-	correoRecuperacionSolicitar,
-	correoRecuperacionUsarElDeLaCompra,
-	type EstadoCorreoRecuperacion,
-} from "../api/correoRecuperacionApis";
+import { correoRecuperacionConfirmar, correoRecuperacionSolicitar, type EstadoCorreoRecuperacion } from "../api/correoRecuperacionApis";
 
 type Paso = "ver" | "escribir" | "codigo";
 
@@ -41,7 +36,7 @@ export function CorreoRecuperacion() {
 
 	useEffect(() => {
 		let vivo = true;
-		correoRecuperacionEstado()
+		commands.correoRecuperacionEstado()
 			.then((e) => {
 				if (vivo) setEstado(e);
 			})
@@ -105,7 +100,7 @@ export function CorreoRecuperacion() {
 
 	const volverAlDeLaCompra = () =>
 		ejecutar(async () => {
-			setEstado(await correoRecuperacionUsarElDeLaCompra());
+			setEstado(await commands.correoRecuperacionUsarElDeLaCompra());
 			setHecho("Los códigos vuelven a llegar al correo de la compra.");
 		});
 

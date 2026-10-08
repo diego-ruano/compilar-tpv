@@ -9,18 +9,18 @@ import { TextInput } from "../ui/Inputs";
 
 export function Contacto({
 	inputTone,
-	contactEmail,
+	contact_email,
 	setContactEmail,
-	contactPhone,
+	contact_phone,
 	setContactPhone,
 	loading,
 	saving,
 	onSave,
 }: {
 	inputTone: string;
-	contactEmail: string;
+	contact_email: string;
 	setContactEmail: (v: string) => void;
-	contactPhone: string;
+	contact_phone: string;
 	setContactPhone: (v: string) => void;
 	loading: boolean;
 	saving: boolean;
@@ -37,14 +37,14 @@ export function Contacto({
 							<TextInput
 								type="email"
 								maxLength={254}
-								value={contactEmail}
+								value={contact_email}
 								onChange={(e) => setContactEmail(e.target.value)}
 								className={inputTone}
 							/>
 						</Field>
 						<Field label="Teléfono de contacto">
 							<TextInput
-								value={contactPhone}
+								value={contact_phone}
 								onChange={(e) => setContactPhone(e.target.value)}
 								className={inputTone}
 							/>

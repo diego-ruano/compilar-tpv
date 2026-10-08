@@ -1,9 +1,10 @@
+import { commands } from "@tpv/client";
 // src/pages/Configuracion.tsx
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { message as messageDialog } from "@tauri-apps/plugin-dialog";
-import { invokeClient } from "@tpv/client";
+
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import { useMode } from "../../shared/stores/useMode";
@@ -65,8 +66,8 @@ export default function Configuracion() {
     const contactReady = useContactSettings((s) => s.ready);
     const contactInit = useContactSettings((s) => s.init);
 
-    const [contactEmail, setContactEmail] = useState("");
-    const [contactPhone, setContactPhone] = useState("");
+    const [contact_email, setContactEmail] = useState("");
+    const [contact_phone, setContactPhone] = useState("");
     const [savingContact, setSavingContact] = useState(false);
 
     // Conectado al tema global real: el switch de Apariencia cambia toda la app.
@@ -96,8 +97,8 @@ export default function Configuracion() {
     useEffect(() => {
         if (!contactReady || contactSyncedRef.current) return;
         contactSyncedRef.current = true;
-        setContactEmail(contact.contactEmail);
-        setContactPhone(contact.contactPhone);
+        setContactEmail(contact.contact_email);
+        setContactPhone(contact.contact_phone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [contactReady]);
 
@@ -299,26 +300,24 @@ export default function Configuracion() {
         try {
             setSavingBiz(true);
             // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2).
-            const prevLogo = biz.logoDataUrl;
+            const prevLogo = biz.logo_data_url;
             await (biz as any).setMany({
-                businessName: draft.businessName,
-                logoDataUrl: draft.logoDataUrl,
+                business_name: draft.business_name,
+                logo_data_url: draft.logo_data_url,
                 direccion: draft.direccion,
                 telefono: draft.telefono,
                 cif: draft.cif,
-                mensajeFooter: draft.mensajeFooter,
-                ivaPercent: draft.ivaPercent,
-                razonSocial: draft.razonSocial,
+                mensaje_footer: draft.mensaje_footer,
+                iva_percent: draft.iva_percent,
+                razon_social: draft.razon_social,
             });
             // Best-effort: si el logo anterior era una ruta relativa (canal R2) y cambió, borrarlo.
             if (
                 prevLogo &&
                 prevLogo.startsWith("images/logo/") &&
-                prevLogo !== draft.logoDataUrl
+                prevLogo !== draft.logo_data_url
             ) {
-                void invokeClient("images_delete", {
-                    args: { rel_path: prevLogo },
-                }).catch(() => {});
+                void commands.imagesDelete({ rel_path: prevLogo }).catch(() => {});
             }
             await messageDialog("Guardado");
         } catch {
@@ -335,7 +334,7 @@ export default function Configuracion() {
     const onSaveContact = async () => {
         try {
             setSavingContact(true);
-            contact.setMany({ contactEmail, contactPhone });
+            contact.setMany({ contact_email, contact_phone });
             await messageDialog("Guardado");
         } catch {
             await messageDialog("No se pudo guardar. Revisa la consola.", {
@@ -533,7 +532,7 @@ export default function Configuracion() {
                                                 : "text-fg",
                                         )}
                                     >
-                                        {draft.businessName || "TPV"}
+                                        {draft.business_name || "TPV"}
                                     </div>
                                     <div
                                         className={cn(
@@ -543,7 +542,7 @@ export default function Configuracion() {
                                                 : "text-fg-muted",
                                         )}
                                     >
-                                        {contactEmail}
+                                        {contact_email}
                                     </div>
                                 </div>
                             </div>
@@ -706,11 +705,11 @@ export default function Configuracion() {
                                         {section === "FISCAL" ? (
                                             <Fiscal
                                                 inputTone={inputTone}
-                                                razonSocial={draft.razonSocial}
+                                                razon_social={draft.razon_social}
                                                 setRazonSocial={(v) =>
                                                     setDraft((d) => ({
                                                         ...d,
-                                                        razonSocial: v,
+                                                        razon_social: v,
                                                     }))
                                                 }
                                                 cif={draft.cif}
@@ -726,9 +725,9 @@ export default function Configuracion() {
                                         {section === "CONTACTO" ? (
                                             <Contacto
                                                 inputTone={inputTone}
-                                                contactEmail={contactEmail}
+                                                contact_email={contact_email}
                                                 setContactEmail={setContactEmail}
-                                                contactPhone={contactPhone}
+                                                contact_phone={contact_phone}
                                                 setContactPhone={setContactPhone}
                                                 loading={!contactReady}
                                                 saving={savingContact}
@@ -774,17 +773,17 @@ export default function Configuracion() {
                                             <Ticket
                                                 inputTone={inputTone}
                                                 draftIvaPercent={
-                                                    draft.ivaPercent
+                                                    draft.iva_percent
                                                 }
                                                 onIvaChange={setIvaFromRaw}
                                                 // ✅ nuevo
                                                 footerMessage={
-                                                    draft.mensajeFooter
+                                                    draft.mensaje_footer
                                                 }
                                                 onFooterMessageChange={(v) =>
                                                     setDraft((d) => ({
                                                         ...d,
-                                                        mensajeFooter: v,
+                                                        mensaje_footer: v,
                                                     }))
                                                 }
                                                 ticket={ticket}

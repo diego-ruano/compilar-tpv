@@ -8,52 +8,8 @@ import { $, browser } from "@wdio/globals";
 
 import { escribir, irA, leerDeLaApp, literalXPath, pulsarXPath } from "./ui.js";
 
-/** Lo que el recorrido mira de `verifactu_estado`. */
-export type EstadoFiscal = {
-    datos_fiscales_completos: boolean;
-    nif?: string;
-    razon_social?: string;
-    entorno_pruebas: boolean;
-    total_registros: number;
-    pendientes: number;
-    aceptados: number;
-    rechazados: number;
-    escalon_aviso: string;
-    certificado_ok: boolean;
-    motivo_no_remite?: string;
-    anomalias_sin_reconocer: number;
-    /** MODO-PRUEBA (temporal). */
-    modo_prueba: boolean;
-};
-
-/** Una fila del libro de registros de facturación. */
-export type RegistroFiscal = {
-    id_registro: string;
-    orden: number;
-    /** `ALTA` | `ANULACION`. */
-    tipo: string;
-    num_serie_factura: string;
-    fecha_expedicion: string;
-    tipo_factura?: string;
-    importe_total?: string;
-    cuota_total?: string;
-    huella: string;
-    id_pago?: string;
-    estado_envio?: string;
-};
-
-/** Lo fiscal del papel de un cobro, tal como lo compone Rust (`PrintTicketPayload`, RI-29). */
-export type TicketDelCobro = {
-    numero_ticket?: string;
-    fecha?: string;
-    qr_url?: string;
-    qr_pruebas: boolean;
-    cif: string;
-    razon_social: string;
-    es_copia: boolean;
-    total?: number;
-    items: Array<{ nombre: string; cantidad: number; precio_unitario: number }>;
-};
+export type { EstadoFiscal, RegistroFiscal, PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
+import type { EstadoFiscal, RegistroFiscal, PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
 
 /**
  * El aviso que sale al entrar cuando faltan el NIF y la razón social (FIS-01).
@@ -133,10 +89,10 @@ export async function irASeccionFiscal(): Promise<void> {
  * estrenar un equipo tanto como elegir el PIN. Lo que aquí se comprueba es que la pantalla es
  * suficiente para salir de ese estado.
  */
-export async function declararDatosFiscales(razonSocial: string, nif: string): Promise<void> {
+export async function declararDatosFiscales(razon_social: string, nif: string): Promise<void> {
     await irASeccionFiscal();
 
-    await escribir(`${PANEL_OBLIGADO}//label[.//span[normalize-space(text())="Razón social"]]//input`, razonSocial);
+    await escribir(`${PANEL_OBLIGADO}//label[.//span[normalize-space(text())="Razón social"]]//input`, razon_social);
     await escribir(`${PANEL_OBLIGADO}//label[.//span[normalize-space(text())="NIF / CIF"]]//input`, nif);
 
     await pulsarXPath(
@@ -192,7 +148,7 @@ export async function avisoDeDatosFiscalesVisible(): Promise<boolean> {
 
 /** Resumen fiscal: datos del obligado, cola de envío y escalón de aviso. */
 export async function verifactuEstado(): Promise<EstadoFiscal> {
-    return await leerDeLaApp<EstadoFiscal>("verifactu_estado");
+    return await leerDeLaApp("verifactu_estado");
 }
 
 /** El libro de registros, del más reciente al más antiguo (es como lo pinta el panel). */
@@ -200,7 +156,7 @@ export async function verifactuListar(limite = 50): Promise<RegistroFiscal[]> {
     // ⚠️ Los argumentos van PLANOS (`{ limite }`), no envueltos en `{ args: {…} }`: el comando
     // declara parámetros sueltos. Equivocarse no da un error legible — un `Option<…>` llega como
     // `None` y el comando se queda con su valor por defecto.
-    return await leerDeLaApp<RegistroFiscal[]>("verifactu_listar", {
+    return await leerDeLaApp("verifactu_listar", {
         limite,
         desplazamiento: 0,
     });
@@ -213,7 +169,7 @@ export async function verifactuListar(limite = 50): Promise<RegistroFiscal[]> {
  * devuelve es lo que sale en el papel. Si no trae QR, el ticket sale sin QR.
  */
 export async function ticketDelCobro(idPago: string, esCopia = false): Promise<TicketDelCobro> {
-    return await leerDeLaApp<TicketDelCobro>("printer_ticket_de_pago", {
+    return await leerDeLaApp("printer_ticket_de_pago", {
         args: { id_pago: idPago, es_copia: esCopia },
     });
 }

@@ -1,72 +1,18 @@
+import { commands } from "@tpv/client";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { UserPlus, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
-import { invokeClient, toAppError } from "@tpv/client";
+import type { RolRow as Rol, TrabajadorDetailRow as TrabajadorDetail } from "@tpv/contracts";
+import { toAppError } from "@tpv/client";
 import { useMode } from "../../../shared/stores/useMode";
 import { conAviso } from "../../../shared/lib/conAviso";
-
-type Rol = {
-  ID_Rol: string;
-  Nombre_Rol: string;
-};
 
 function normalizeNullable(v: string) {
   const s = String(v ?? "").trim();
   return s ? s : null;
 }
 
-function unwrapMaybeOkEnvelope<T>(x: any): T {
-  if (!x || typeof x !== "object") return x as T;
-  if (!("ok" in x)) return x as T;
-
-  const ok = !!x.ok;
-  if (!ok) {
-    const msg = String(x.error ?? x.message ?? "remote_ok_false");
-    throw new Error(msg);
-  }
-
-  if ("result" in x) return x.result as T;
-  if ("user" in x) return x.user as T;
-  if ("status" in x) return x.status as T;
-  if ("data" in x) return x.data as T;
-
-  return x as T;
-}
-
-async function invokeLocalSmart<T>(
-  cmd: string,
-  payloadDirect?: Record<string, any>,
-  payloadArgsWrapper?: Record<string, any>,
-): Promise<T> {
-  if (payloadArgsWrapper) {
-    try {
-      return await invoke<T>(cmd, payloadArgsWrapper);
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      if (
-        !msg.includes("missing required key args") &&
-        !msg.includes("invalid args") &&
-        !msg.includes("unknown field")
-      ) {
-        throw e;
-      }
-    }
-  }
-
-  return await invoke<T>(cmd, payloadDirect ?? {});
-}
-
-async function getRolesLocal(): Promise<Rol[]> {
-  const raw = await invokeLocalSmart<Rol[]>(
-    "trabajadores_get_roles",
-    {},
-    { args: {} },
-  );
-
-  const data = unwrapMaybeOkEnvelope<any>(raw);
-  return Array.isArray(data) ? data : [];
-}
+const getRolesLocal = commands.trabajadoresGetRoles;
 
 function getErrorMessage(e: unknown) {
   const msg = String((e as any)?.message ?? e ?? "").toLowerCase();
@@ -164,8 +110,7 @@ async function createTrabajadorRemote(payload: {
     fecha_fin_contrato: payload.fechaFinContrato ?? null,
   };
 
-  const ok = await invokeClient<boolean>("trabajadores_create", {
-    args: {
+  const ok = await commands.trabajadoresCreate({
       id_rol: body.id_rol,
       email: body.email,
       // RI-63: el PIN, no su hash: lo hashea el backend, que así exige la política del PIN.
@@ -180,8 +125,7 @@ async function createTrabajadorRemote(payload: {
       numero_seguridad_social: body.numero_seguridad_social,
       fecha_inicio_contrato: body.fecha_inicio_contrato,
       fecha_fin_contrato: body.fecha_fin_contrato,
-    },
-  });
+    });
 
   if (typeof ok !== "boolean") {
     throw new Error("invalid_remote_response");

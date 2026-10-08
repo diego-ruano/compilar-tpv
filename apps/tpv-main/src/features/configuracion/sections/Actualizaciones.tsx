@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/sections/Actualizaciones.tsx
 //
 // Sección de Configuración para ver el estado de las actualizaciones: qué versión hay instalada,
@@ -10,7 +11,7 @@
 // cerrar caja), porque reiniciar el TPV en mitad de un servicio sería peor que esperar.
 
 import React, { useCallback, useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { DownloadCloud, RefreshCw } from "lucide-react";
 
@@ -52,7 +53,7 @@ export function Actualizaciones({ darkMode }: { darkMode: boolean }) {
 		setChecking(true);
 		setInstallError(null);
 		try {
-			const s = await invoke<UpdateStatus>("updater_status");
+			const s = await commands.updaterStatus();
 			setStatus(s);
 			setCheckedAt(new Date());
 		} catch (e) {
@@ -89,7 +90,7 @@ export function Actualizaciones({ darkMode }: { darkMode: boolean }) {
 		try {
 			// Descarga + verifica firma + instala + reinicia. Si va bien, la app se reinicia sola:
 			// por eso no hay estado de "éxito" que pintar aquí.
-			await invoke("updater_install");
+			await commands.updaterInstall();
 		} catch (e) {
 			setInstallError(String((e as any)?.message ?? e ?? ""));
 			setInstalling(false);

@@ -15,14 +15,11 @@ import {
   Trash2,
   Clock,
 } from "lucide-react";
-import {
-  reservasBuscarCliente,
-  type Turno as TurnoApi,
-} from "../../features/reservas/reservasApis";
-import { esError, toAppError } from "@tpv/client";
+
+import { commands, esError, toAppError } from "@tpv/client";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { etiquetaDuracion, horaFin, opcionesDuracion } from "../../features/reservas/duracion";
-import type { ClienteCoincidente } from "@tpv/contracts";
+import type { ReservaDto as ReservaUI, ZonaDto as Zona, MesaDto as Mesa, ClienteCoincidente } from "@tpv/contracts";
 import {
   useReservasMeta,
   useReservasMes,
@@ -44,42 +41,6 @@ import { conAviso } from "../../shared/lib/conAviso";
    Tipos
 ========================= */
 type Turno = "DESAYUNO" | "COMIDA" | "CAFE" | "CENA";
-
-type Zona = { idZona: string; nombre: string };
-type Mesa = {
-  idMesa: string;
-  idZona: string;
-  nombre: string;
-  capacidad: number;
-};
-
-type ReservaUI = {
-  id: string;
-  diaYMD: string;
-  hora: string;
-
-  /** `null` si la reserva no tiene cliente (RI-61). */
-  idCliente: string | null;
-  nombre: string;
-  telefono: string;
-  email: string;
-
-  comensales: number;
-  /** Minutos que ocupa la mesa; `null` = la duración por defecto del negocio (RI-61). */
-  duracionMin: number | null;
-  nota: string;
-
-  turno: Turno;
-
-  idZona: string;
-  zonaNombre: string;
-
-  idMesa: string;
-  mesaNombre: string;
-  capacidadMesa: number;
-
-  estado: string;
-};
 
 /** RI-61: la respuesta a «este teléfono es de Ana, ¿la reserva es para ella?». */
 type DecisionCliente = "asignar" | "nuevo" | "ninguno" | "cancelar";
@@ -318,7 +279,7 @@ function turnoPorHora(hhmm: string): Turno {
   return "CENA";
 }
 
-function turnoLabel(t: Turno) {
+function turnoLabel(t: string | null) {
   return t === "CAFE" ? "CAFÉ" : t;
 }
 
@@ -406,39 +367,7 @@ export default function Reservas() {
   const zonas = useMemo<Zona[]>(() => metaQuery.data?.zonas ?? [], [metaQuery.data]);
   const mesas = useMemo<Mesa[]>(() => metaQuery.data?.mesas ?? [], [metaQuery.data]);
 
-  // Reservas del mes derivadas de la query (mismo mapeo que antes).
-  const reservasMes = useMemo<ReservaUI[]>(() => {
-    const rows = reservasMesQuery.data ?? [];
-    return rows.map((r: any) => {
-      const hora = normalizarHora(String(r?.Hora ?? "00:00"));
-      const turno: Turno = turnoPorHora(hora);
-
-      return {
-        id: String(r?.ID_Reserva ?? ""),
-        diaYMD: String(r?.Dia_YMD ?? ""),
-        hora,
-
-        idCliente: r?.ID_Cliente ? String(r.ID_Cliente) : null,
-        nombre: String(r?.Nombre_Cliente ?? ""),
-        telefono: String(r?.Telefono_Cliente ?? ""),
-        email: String(r?.Email_Cliente ?? ""),
-
-        comensales: Number(r?.Comensales ?? 1),
-        duracionMin: r?.Duracion_Min == null ? null : Number(r.Duracion_Min),
-        nota: String(r?.Nota ?? ""),
-        turno,
-
-        idZona: String(r?.ID_Zona ?? ""),
-        zonaNombre: String(r?.Nombre_Zona ?? ""),
-
-        idMesa: String(r?.ID_Mesa ?? ""),
-        mesaNombre: String(r?.Numero_Mesa ?? ""),
-        capacidadMesa: Number(r?.Capacidad ?? 0),
-
-        estado: String(r?.Estado ?? "ACTIVA"),
-      };
-    });
-  }, [reservasMesQuery.data]);
+  const reservasMes = reservasMesQuery.data ?? [];
 
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [reservaEditandoId, setReservaEditandoId] = useState<string | null>(null);
@@ -485,7 +414,7 @@ export default function Reservas() {
     mensaje: string;
     responder: (guardar: boolean) => void;
   } | null>(null);
-  const duracionDefecto = useBusinessSettings((s) => s.reservaDuracionMin);
+  const duracionDefecto = useBusinessSettings((s) => s.reserva_duracion_min);
 
   const [confirmBorrar, setConfirmBorrar] = useState<{
     open: boolean;
@@ -540,7 +469,7 @@ export default function Reservas() {
   ========================================================= */
   useEffect(() => {
     if (zonas.length > 0 && !form.idZona) {
-      setForm((p) => ({ ...p, idZona: zonas[0].idZona, idMesa: "" }));
+      setForm((p) => ({ ...p, idZona: zonas[0].id_zona, idMesa: "" }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zonas]);
@@ -569,7 +498,7 @@ export default function Reservas() {
   ========================================================= */
   const reservasDelDia = useMemo(() => {
     return reservasMes
-      .filter((r) => r.diaYMD === seleccionadoClave)
+      .filter((r) => r.dia_ymd === seleccionadoClave)
       .sort((a, b) => a.hora.localeCompare(b.hora));
   }, [reservasMes, seleccionadoClave]);
 
@@ -577,18 +506,18 @@ export default function Reservas() {
     const map = new Map<string, number>();
     for (const r of reservasMes) {
       if (!estadoBloqueaMesa(r.estado)) continue;
-      map.set(r.diaYMD, (map.get(r.diaYMD) ?? 0) + 1);
+      map.set(r.dia_ymd, (map.get(r.dia_ymd) ?? 0) + 1);
     }
     return map;
   }, [reservasMes]);
 
   const zonaSeleccionada = useMemo(
-    () => zonas.find((z) => z.idZona === form.idZona) ?? null,
+    () => zonas.find((z) => z.id_zona === form.idZona) ?? null,
     [zonas, form.idZona],
   );
 
   const mesaSeleccionada = useMemo(
-    () => mesas.find((m) => m.idMesa === form.idMesa) ?? null,
+    () => mesas.find((m) => m.id_mesa === form.idMesa) ?? null,
     [mesas, form.idMesa],
   );
 
@@ -633,27 +562,27 @@ export default function Reservas() {
 
   function abrirFormulario(reserva?: ReservaUI) {
     if (reserva) {
-      setReservaEditandoId(reserva.id);
+      setReservaEditandoId(reserva.id_reserva);
       setClienteAsignado(
-        reserva.idCliente
+        reserva.id_cliente
           ? {
-              id: reserva.idCliente,
-              nombre: reserva.nombre,
-              telefono: reserva.telefono,
-              email: reserva.email ?? "",
+              id: reserva.id_cliente,
+              nombre: reserva.nombre_cliente,
+              telefono: reserva.telefono_cliente ?? "",
+              email: reserva.email_cliente ?? "",
             }
           : null,
       );
       setForm({
-        nombreCliente: reserva.nombre,
-        telefono: reserva.telefono,
-        email: reserva.email ?? "",
+        nombreCliente: reserva.nombre_cliente,
+        telefono: reserva.telefono_cliente ?? "",
+        email: reserva.email_cliente ?? "",
         hora: reserva.hora,
         comensales: reserva.comensales,
-        duracionMin: reserva.duracionMin,
+        duracionMin: reserva.duracion_min,
         nota: reserva.nota ?? "",
-        idZona: reserva.idZona,
-        idMesa: reserva.idMesa,
+        idZona: reserva.id_zona,
+        idMesa: reserva.id_mesa,
       });
     } else {
       setReservaEditandoId(null);
@@ -719,7 +648,7 @@ export default function Reservas() {
     if (!nombre && !telefono && !email) return SIN_CLIENTE;
 
     if (telefono || email) {
-      const c = await reservasBuscarCliente(escrito);
+      const c = await commands.reservasBuscarCliente(escrito);
       if (c) {
         // El mismo cliente (o el que ya tenía la reserva): no hay nada que preguntar.
         if (c.id_cliente === clienteAsignado?.id || (nombre && mismoNombre(c.nombre, nombre))) {
@@ -770,23 +699,23 @@ export default function Reservas() {
       // cerrada desde la mesa ("el cliente abandona la mesa") en cuanto alguien la modificaba,
       // y de paso volvia a bloquear el hueco. En un alta va null: el backend fuerza PROXIMA.
       const estadoActual = reservaEditandoId
-        ? (reservasMes.find((r) => r.id === reservaEditandoId)?.estado ?? null)
+        ? (reservasMes.find((r) => r.id_reserva === reservaEditandoId)?.estado ?? null)
         : null;
 
       const datos = {
-        idReserva: reservaEditandoId,
-        diaYMD: seleccionadoClave,
+        id_reserva: reservaEditandoId,
+        dia_ymd: seleccionadoClave,
         hora: horaSql,
-        turno: turno as TurnoApi,
+        turno: turno as Turno,
         comensales: Number(form.comensales),
-        duracionMin: form.duracionMin,
+        duracion_min: form.duracionMin,
         nota: notaTrim ? notaTrim : null,
         estado: estadoActual,
 
-        idMesa: form.idMesa || null,
+        id_mesa: form.idMesa || null,
 
-        idCliente: cliente.idCliente,
-        nombreCliente: cliente.nombreCliente,
+        id_cliente: cliente.idCliente,
+        nombre_cliente: cliente.nombreCliente,
         telefono: cliente.telefono,
         email: cliente.email,
       };
@@ -799,7 +728,7 @@ export default function Reservas() {
         // Con los solapes prohibidos llega como un conflicto normal y cae al aviso de abajo.
         if (!esError(err, "reserva_solapada")) throw err;
         if (!(await confirmarSolape(toAppError(err).message))) return;
-        ok = await saveReserva.mutateAsync({ ...datos, forzarSolape: true });
+        ok = await saveReserva.mutateAsync({ ...datos, forzar_solape: true });
       }
 
       if (!ok) return toast.error("Error", "No se pudo guardar la reserva.");
@@ -816,7 +745,7 @@ export default function Reservas() {
 
   async function borrarReserva(idReserva: string) {
     try {
-      const ok = await deleteReserva.mutateAsync({ idReserva });
+      const ok = await deleteReserva.mutateAsync({ id_reserva: idReserva });
       // `false` es que no había nada que borrar: otro equipo la borró antes.
       if (!ok) return toast.error("No se pudo borrar la reserva", "Esa reserva ya no existe.");
 
@@ -1080,8 +1009,8 @@ export default function Reservas() {
                           className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent sm:max-w-[14rem]"
                         >
                           {zonas.map((z) => (
-                            <option key={z.idZona} value={z.idZona}>
-                              {z.nombre}
+                            <option key={z.id_zona} value={z.id_zona}>
+                              {z.nombre_zona}
                             </option>
                           ))}
                         </select>
@@ -1094,7 +1023,7 @@ export default function Reservas() {
                         <div className="flex flex-col gap-2 xs:flex-row">
                           <input
                             readOnly
-                            value={mesaSeleccionada ? mesaSeleccionada.nombre : ""}
+                            value={mesaSeleccionada ? mesaSeleccionada.numero_mesa : ""}
                             placeholder="Sin mesa asignada"
                             onClick={() => setMostrarMapaMesas(true)}
                             className="w-full cursor-pointer rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-fg-muted outline-none"
@@ -1120,7 +1049,7 @@ export default function Reservas() {
                         </div>
 
                         <div className="mt-1 text-[11px] text-fg-muted">
-                          Salón: <b>{form.idMesa ? (zonaSeleccionada?.nombre ?? "-") : "sin mesa"}</b>{" "}
+                          Salón: <b>{form.idMesa ? (zonaSeleccionada?.nombre_zona ?? "-") : "sin mesa"}</b>{" "}
                           · Turno: <b>{turnoLabel(turnoPorHora(form.hora))}</b>
                         </div>
                       </div>
@@ -1176,7 +1105,7 @@ export default function Reservas() {
                 <div className="h-full overflow-y-auto space-y-3 pr-2">
                   {reservasDelDia.map((r) => (
                     <div
-                      key={r.id}
+                      key={r.id_reserva}
                       className="flex flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm md:flex-row md:justify-between md:gap-4 md:p-4"
                     >
                       <div className="flex min-w-0 flex-col gap-3 xs:flex-row xs:gap-4">
@@ -1186,7 +1115,7 @@ export default function Reservas() {
                           </div>
                           <div className="text-lg font-extrabold tracking-wide">{r.hora}</div>
                           <div className="text-[11px] font-semibold text-white/80">
-                            hasta {horaFin(r.hora, r.duracionMin ?? duracionDefecto)}
+                            hasta {horaFin(r.hora, r.duracion_min ?? duracionDefecto)}
                           </div>
                           <div className="mt-1 rounded-md border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-extrabold tracking-widest text-white">
                             {turnoLabel(r.turno)}
@@ -1195,7 +1124,7 @@ export default function Reservas() {
 
                         <div className="min-w-0 py-0.5">
                           <div className="truncate text-lg font-extrabold text-fg">
-                            {r.nombre}
+                            {r.nombre_cliente}
                           </div>
 
                           <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1204,23 +1133,23 @@ export default function Reservas() {
                               {r.comensales} comensales
                             </span>
 
-                            {r.telefono ? (
+                            {r.telefono_cliente ? (
                               <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
                                 <Phone className="mr-1.5 size-4 text-fg-muted" aria-hidden />
-                                {r.telefono}
+                                {r.telefono_cliente}
                               </span>
                             ) : null}
 
-                            {r.email ? (
+                            {r.email_cliente ? (
                               <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
                                 <Mail className="mr-1.5 size-4 text-fg-muted" aria-hidden />
-                                {r.email}
+                                {r.email_cliente}
                               </span>
                             ) : null}
 
                             <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
                               <Armchair className="mr-1.5 size-4 text-fg-muted" aria-hidden />
-                              {r.idMesa ? `${r.zonaNombre} · ${r.mesaNombre}` : "Sin mesa"}
+                              {r.id_mesa ? `${r.nombre_zona} · ${r.numero_mesa}` : "Sin mesa"}
                             </span>
                           </div>
 
@@ -1375,7 +1304,7 @@ export default function Reservas() {
                 {confirmBorrar.reserva && (
                   <div className="mt-4 space-y-2 rounded-xl border border-border bg-surface-2 p-3">
                     <div className="text-sm font-bold text-fg truncate">
-                      {confirmBorrar.reserva.nombre}
+                      {confirmBorrar.reserva.nombre_cliente}
                     </div>
                     <div className="flex flex-wrap gap-2 text-xs font-semibold text-fg-muted">
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
@@ -1384,7 +1313,7 @@ export default function Reservas() {
                       </span>
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
                         <Armchair className="size-3.5" aria-hidden />
-                        {confirmBorrar.reserva.zonaNombre} · {confirmBorrar.reserva.mesaNombre}
+                        {confirmBorrar.reserva.nombre_zona} · {confirmBorrar.reserva.numero_mesa}
                       </span>
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
                         <Users className="size-3.5" aria-hidden />
@@ -1413,7 +1342,7 @@ export default function Reservas() {
 
                       setBorrando(true);
                       try {
-                        await borrarReserva(res.id);
+                        await borrarReserva(res.id_reserva);
                         setConfirmBorrar({ open: false, reserva: null });
                       } finally {
                         setBorrando(false);

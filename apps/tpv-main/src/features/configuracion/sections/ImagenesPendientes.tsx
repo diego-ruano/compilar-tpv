@@ -1,7 +1,8 @@
+import { commands } from "@tpv/client";
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
-import { invokeClient, toAppError } from "@tpv/client";
+import { toAppError } from "@tpv/client";
 import type { EstadoColaImagenes, ImagenApartada, ReintentarImagenArgs } from "@tpv/contracts";
 import { useMode } from "../../../shared/stores/useMode";
 import { useImageUrl } from "../../../shared/lib/useImageUrl";
@@ -35,7 +36,7 @@ export function ImagenesPendientes() {
 	const [errorAccion, setErrorAccion] = useState("");
 	const estado = useQuery({
 		queryKey: ["images", "uploads", modo],
-		queryFn: () => invokeClient<EstadoColaImagenes>("images_upload_status"),
+		queryFn: () => commands.imagesUploadStatus(),
 		retry: false,
 	});
 	useEffect(() => {
@@ -52,7 +53,7 @@ export function ImagenesPendientes() {
 		setErrorAccion("");
 		try {
 			const args: ReintentarImagenArgs = { rel_path: ruta };
-			await invokeClient<void>("images_retry_upload", { args });
+			await commands.imagesRetryUpload(args);
 			triggerImageUploadDrain();
 			await estado.refetch();
 		} catch (error) {

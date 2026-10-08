@@ -6,28 +6,21 @@
 use tpv_domain::dinero::Dinero;
 
 use serde::Deserialize;
-use ts_rs::TS;
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct LineaEmailInput {
     pub nombre_producto: String,
     pub cantidad: f64,
     #[serde(default)]
-    #[ts(optional)]
     pub precio_unitario: Option<Dinero>,
     #[serde(default)]
-    #[ts(optional)]
     pub unidad: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct EnviarPedidoEmailInput {
     pub email_destino: String,
     pub nombre_proveedor: String,
     #[serde(default)]
-    #[ts(optional)]
     pub notas: Option<String>,
     pub lineas: Vec<LineaEmailInput>,
 }

@@ -19,6 +19,7 @@ fn app_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, AppErrorDto> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn recovery_status(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -48,6 +49,7 @@ pub async fn recovery_status(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn recovery_list_backups(app: AppHandle) -> Result<Vec<LocalBackupInfo>, AppErrorDto> {
     Ok(tpv_infra_sqlite::recovery::list_backups(&app_data_dir(
         &app,
@@ -58,6 +60,7 @@ pub async fn recovery_list_backups(app: AppHandle) -> Result<Vec<LocalBackupInfo
 /// actualización o de tocar el catálogo entero se quiere una copia de AHORA, no la de esta
 /// madrugada.
 #[tauri::command]
+#[specta::specta]
 pub async fn recovery_create_backup(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -91,6 +94,7 @@ pub async fn recovery_create_backup(
 /// que esa PII **sí vuelve** de la nube, y esta copia no es lo único que la conserva. Lo que no
 /// vuelve es cualquier fila que nunca llegara a subir, que es el motivo de sacar copias.
 #[tauri::command]
+#[specta::specta]
 pub async fn recovery_export_backup(
     app: AppHandle,
     backup_id: String,
@@ -104,6 +108,7 @@ pub async fn recovery_export_backup(
 /// Trae una copia de fuera al almacén local. No restaura: deja la copia disponible para que la
 /// restauración siga siendo el mismo camino guardado que las demás.
 #[tauri::command]
+#[specta::specta]
 pub async fn recovery_import_backup(
     app: AppHandle,
     origen: String,
@@ -158,6 +163,7 @@ pub(crate) async fn asegurar_base_para_recuperar(
 /// tomado desde que se comprueba que se puede reemplazar hasta que la base nueva está abierta:
 /// ningún comando ni job puede adquirir una conexión nueva en ese intervalo (REV-18).
 #[tauri::command]
+#[specta::specta]
 pub async fn recovery_restore_backup(
     app: AppHandle,
     state: State<'_, AppState>,

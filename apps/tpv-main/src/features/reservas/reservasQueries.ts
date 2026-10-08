@@ -3,16 +3,11 @@
 //  - Lecturas  -> useQuery con queryKey con el nombre de la feature como prefijo.
 //  - Escrituras -> useMutation que, en onSuccess, invalida la clave de la feature para
 //    que las listas en caché se refresquen solas (Local-First: el dato sólo cambia aquí).
-//  - El hook envuelve las funciones de `reservasApis.ts` (invokeClient) sin tocar su firma.
+//  - El hook envuelve las funciones de `reservasApis.ts` (commands) sin tocar su firma.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  reservasGetMeta,
-  reservasGetMes,
-  reservasSave,
-  reservasDelete,
-} from "./reservasApis";
+import { commands } from "@tpv/client";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
 export const reservasKeys = {
@@ -25,7 +20,7 @@ export const reservasKeys = {
 export function useReservasMeta() {
   return useQuery({
     queryKey: reservasKeys.meta(),
-    queryFn: () => reservasGetMeta(),
+    queryFn: () => commands.reservasGetMeta(),
   });
 }
 
@@ -33,7 +28,7 @@ export function useReservasMeta() {
 export function useReservasMes(desde: string, hasta: string) {
   return useQuery({
     queryKey: reservasKeys.mes(desde, hasta),
-    queryFn: () => reservasGetMes({ desde, hasta }),
+    queryFn: () => commands.reservasGetMes({ desde, hasta }),
   });
 }
 
@@ -41,7 +36,7 @@ export function useReservasMes(desde: string, hasta: string) {
 export function useSaveReserva() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: reservasSave,
+    mutationFn: commands.reservasSave,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: reservasKeys.all });
     },
@@ -52,7 +47,7 @@ export function useSaveReserva() {
 export function useDeleteReserva() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: reservasDelete,
+    mutationFn: commands.reservasDelete,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: reservasKeys.all });
     },

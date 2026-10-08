@@ -24,15 +24,15 @@ import {
 } from "../src/shared/ticket/ticketMath";
 
 /** Los supuestos se escriben en EUROS, que es como se lee un ticket; se comparan en céntimos. */
-function unidad(nombre: string, precio: number, ivaPercent?: number | null): LineaEntrada {
-	return { nombre, precio: deEuros(precio), ivaPercent };
+function unidad(nombre: string, precio: number, iva_percent?: number | null): LineaEntrada {
+	return { nombre, precio: deEuros(precio), iva_percent };
 }
 
 describe("agrupación", () => {
 	it("junta unidades idénticas", () => {
 		const g = agruparLineas([unidad("Cafe", 1.1), unidad("Cafe", 1.1)]);
 		expect(g).toEqual([
-			{ nombre: "Cafe", precio: 110, qty: 2, ivaPercent: null },
+			{ nombre: "Cafe", precio: 110, qty: 2, iva_percent: null },
 		]);
 	});
 
@@ -96,7 +96,7 @@ describe("desglose de IVA", () => {
 		const t = desgloseIva(
 			agruparLineas([
 				{ nombre: "Cafe", precio: deEuros(11) },
-				{ nombre: "Vino", precio: deEuros(12.1), ivaPercent: 21 },
+				{ nombre: "Vino", precio: deEuros(12.1), iva_percent: 21 },
 			]),
 			10,
 		);

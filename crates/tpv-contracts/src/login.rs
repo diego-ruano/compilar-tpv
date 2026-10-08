@@ -3,14 +3,11 @@
 //! al backend antiguo (compat frontend).
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 /* =========================================================
    Salida
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct UserListItem {
     pub id_usuario: String,
     pub nombre: String,
@@ -18,8 +15,7 @@ pub struct UserListItem {
     pub nombre_rol: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LoginOk {
     pub id_usuario: String,
     pub id_trabajador: Option<String>,
@@ -27,25 +23,20 @@ pub struct LoginOk {
     pub apellido: Option<String>,
     pub rol: String,
     pub email: String,
-    #[ts(type = "number")]
     pub requiere_setup: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PunchParte {
-    #[ts(type = "number")]
     pub parte: i64,
     pub entrada: Option<String>,
     pub salida: Option<String>,
     pub estado: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PunchStatus {
     pub fecha: String,
-    #[ts(type = "number")]
     pub turno_partido: i64,
     pub partes: Vec<PunchParte>,
 }
@@ -54,31 +45,26 @@ pub struct PunchStatus {
    Entrada (args/inputs) — Local-First
 ========================================================= */
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct LoginUserArgs {
     pub id_usuario: String,
     pub pin: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct PunchStatusArgs {
     pub id_usuario: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct SetTurnoPartidoInput {
     pub id_usuario: String,
     pub turno_partido: bool,
     #[serde(default)]
-    #[ts(optional)]
     pub fecha: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 /// El setup inicial NO lleva PIN actual (REV-06). Ocurre antes del primer login, así que no hay
 /// ninguno que confirmar —el que hay es el del seed, que es público—: quien autoriza es
 /// `Requiere_Setup = 1`. Llegó a viajar un `pin_actual` para el camino de la Handy, que la pantalla
@@ -91,8 +77,7 @@ pub struct CompleteInitialSetupInput {
 
 /// ¿Queda por hacer el setup inicial? Se consulta SIN sesión, al arrancar, para decidir cuál es la
 /// primera pantalla: elegir PIN, recuperar los datos, o el login de siempre.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SetupPendiente {
     pub pendiente: bool,
     /// La BD local no tiene NI UN usuario. En una instalación nueva es imposible (el arranque
@@ -101,11 +86,8 @@ pub struct SetupPendiente {
     /// recuperación, que reconstruye la BD desde la nube.
     #[serde(default)]
     pub requiere_recuperacion: bool,
-    #[ts(optional)]
     pub id_usuario: Option<String>,
-    #[ts(optional)]
     pub nombre: Option<String>,
-    #[ts(optional)]
     pub email: Option<String>,
 }
 
@@ -113,24 +95,20 @@ pub struct SetupPendiente {
    Recuperar el PIN de un administrador (LOGIN-07)
 ========================================================= */
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct SolicitarCodigoPinInput {
     pub id_usuario: String,
 }
 
 /// Un código por correo ya va de camino (recuperar el PIN o confirmar un correo de recuperación).
 /// Sólo la pista del correo: el correo entero no sale de la nube.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct CodigoEnviado {
     /// `a***@bar.com`.
     pub email_hint: String,
-    #[ts(type = "number")]
     pub minutos: i64,
     /// Segundos hasta poder pedir otro. La pantalla cuenta atrás con esto; quien manda es el worker.
     #[serde(default)]
-    #[ts(type = "number")]
     pub reenvio_segundos: i64,
     /// Sólo al cambiar el correo de recuperación: el pedido ya era el actual, así que no se ha
     /// enviado nada ni hay que confirmar.
@@ -140,8 +118,7 @@ pub struct CodigoEnviado {
 
 /// Código y PIN nuevo van JUNTOS, en un solo comando: si verificar el código y guardar el PIN
 /// fueran dos llamadas, cualquiera con el IPC podría hacer sólo la segunda.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ConfirmarCodigoPinInput {
     pub id_usuario: String,
     pub codigo: String,
@@ -153,8 +130,7 @@ pub struct ConfirmarCodigoPinInput {
 ========================================================= */
 
 /// A dónde llegan los códigos para recuperar el PIN.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct EstadoCorreoRecuperacion {
     /// `a***@bar.com`.
     pub email_hint: String,
@@ -162,21 +138,18 @@ pub struct EstadoCorreoRecuperacion {
     pub es_el_de_la_compra: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct SolicitarCambioCorreoInput {
     pub correo: String,
 }
 
 /// Sólo el código: la dirección que queda confirmada es la que se pidió, guardada en la nube.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct ConfirmarCambioCorreoInput {
     pub codigo: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 /// El fichaje NO lleva fecha ni hora: las pone el equipo que ficha — la Main con su reloj, y la
 /// Handy con el suyo vía `X-Client-Now` (CFG-04/REV-03). Estuvieron aquí, el TPV las calculaba y
 /// las mandaba en cada fichaje, y los cuatro sitios que las recibían las descartaban. Un campo que

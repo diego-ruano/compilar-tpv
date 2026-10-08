@@ -19,16 +19,23 @@ src/
 
 ## Hablar con el backend
 
-- **Todo pasa por `invokeClient`** de `@tpv/client` (`packages/client/src/invokeClient.ts`), que envuelve
-  `invoke()`. Los WebSocket de Main y Handy viven en Rust; el frontend observa estados y avisos de cambios sin abrir conexiones ni interpretar SQL ([sincronizacion.md](sincronizacion.md)).
-- **Los tipos vienen de `@tpv/contracts`**, generados por ts-rs desde los DTO de
+- **Todo pasa por `commands`** de `@tpv/client`, generado con tauri-specta desde las firmas Rust.
+  El transporte interno conserva `AppErrorDto` en los rechazos. Los WebSocket de Main y Handy viven
+  en Rust; el frontend observa estados y avisos de cambios sin abrir conexiones ni interpretar SQL ([sincronizacion.md](sincronizacion.md)).
+- **Los tipos vienen de `@tpv/contracts`**, generados por Specta desde los DTO de
   `crates/tpv-contracts` ([../decisiones/0001-monorepo-y-arquitectura-hexagonal.md](../decisiones/0001-monorepo-y-arquitectura-hexagonal.md)).
 - **Un `*Apis.ts` no redeclara tipos ni «normaliza» lo que vuelve**: recibe el `Input` generado y devuelve
   el DTO tal cual, sin tipos propios con el dinero como `number`, sin `pick(row, […])` ni mappers a
   camelCase. Lo que cruza la frontera y no tiene DTO se crea en `tpv-contracts`.
-- **El nombre de un comando no lo comprueba el compilador.** `scripts/check-comandos-tauri.mjs` rompe CI
-  si el frontend o el E2E invocan por nombre algo que no está en el `generate_handler!`, y lista las
-  invocaciones cuyo nombre es una variable.
+- **El compilador comprueba nombre, argumentos y respuesta.** Los hooks llaman al comando generado;
+  los helpers que quedan aportan orquestación, paginación o presentación. ESLint impide importar
+  `invoke` en las pantallas. El lector IPC de E2E usa nombres y argumentos de `@tpv/client/metadata`.
+  `pnpm generate-types:check` comprueba en CI las firmas exportadas por el ejecutable Tauri real.
+- **Los patch de configuración son DTOs específicos.** Ausente significa conservar; el logo admite
+  `null` para borrarlo. Se rechazan claves desconocidas y tipos incorrectos tanto en IPC como en la
+  Handy. Los stores usan los nombres del DTO; los controles numéricos tienen valores de presentación
+  definidos. Cuando serde diferencia lectura y escritura, se usan las variantes generadas
+  `_Serialize` para respuestas y `_Deserialize` para entradas.
 - **Los errores** se normalizan con `toAppError(e)` y se ramifica con `esError(e, "código")`, nunca por
   el texto. Lo que se enseña es `message`.
 - **`void` marca un «fuego y olvido» a sabiendas.** Si lo que va detrás puede fallar de una forma que el

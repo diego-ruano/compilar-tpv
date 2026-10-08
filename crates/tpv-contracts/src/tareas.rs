@@ -4,14 +4,11 @@
 //! entrada NO llevan op_id/outbox/remote_id.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 /* =========================================================
    Salida (read models)
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TrabajadorUI {
     #[serde(rename = "ID_Trabajador")]
     pub id_trabajador: String,
@@ -27,8 +24,7 @@ pub struct TrabajadorUI {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TareaAdminRow {
     #[serde(rename = "ID_Tarea")]
     pub id_tarea: String,
@@ -41,15 +37,12 @@ pub struct TareaAdminRow {
     #[serde(rename = "Fecha_Limite")]
     pub fecha_limite: Option<String>,
     #[serde(rename = "Total_Asignados")]
-    #[ts(type = "number")]
     pub total_asignados: i64,
     #[serde(rename = "Total_Finalizadas")]
-    #[ts(type = "number")]
     pub total_finalizadas: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TareaRow {
     #[serde(rename = "ID_Tarea")]
     pub id_tarea: String,
@@ -63,8 +56,7 @@ pub struct TareaRow {
     pub fecha_limite: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TareaAsignadoRow {
     #[serde(rename = "ID_Trabajador")]
     pub id_trabajador: String,
@@ -82,8 +74,7 @@ pub struct TareaAsignadoRow {
     pub finalizada_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct MisTareasRow {
     #[serde(rename = "ID_Tarea")]
     pub id_tarea: String,
@@ -105,58 +96,48 @@ pub struct MisTareasRow {
    Entrada (args/inputs) — Local-First
 ========================================================= */
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct CreateTareaInput {
     pub titulo: String,
     #[serde(default)]
-    #[ts(optional)]
     pub descripcion: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub fecha_limite: Option<String>,
     #[serde(default)]
     pub ids_trabajadores: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct UpdateTareaInput {
     pub id_tarea: String,
     pub titulo: String,
     #[serde(default)]
-    #[ts(optional)]
     pub descripcion: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub fecha_limite: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct SetAsignacionesTareaInput {
     pub id_tarea: String,
     #[serde(default)]
     pub ids_trabajadores: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct FinalizarTareaInput {
     pub id_tarea: String,
     pub id_trabajador: String,
 }
 
 /// Argumento con sólo el id de tarea (get por id, asignados, borrar).
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TareaIdArgs {
     pub id_tarea: String,
 }
 
 /// Argumento con sólo el id de trabajador (mis tareas).
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MisTareasArgs {
     pub id_trabajador: String,
 }

@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/proveedores/proveedoresApis.ts
 //
 // API de proveedores: una función por comando Tauri, con los tipos que genera ts-rs desde Rust.
@@ -7,7 +8,7 @@
 // declaraban el precio como `number`, que es por donde un producto dado de alta a «3» se guardaba a
 // 3 céntimos.
 
-import { invokeClient } from "@tpv/client";
+
 import type {
     CategoriaProveedorDto,
     ProductoProveedorDto,
@@ -22,22 +23,8 @@ export type { CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto };
    API lectura
 ========================= */
 
-export function proveedoresGetAll(): Promise<ProveedorDto[]> {
-    return invokeClient<ProveedorDto[]>("proveedores_get_all");
-}
-
 export function proveedoresGetProductos(idProveedor: string): Promise<ProductoProveedorDto[]> {
-    return invokeClient<ProductoProveedorDto[]>("proveedores_get_productos", {
-        args: { id_proveedor: idProveedor },
-    });
-}
-
-export function proveedoresGetCategorias(): Promise<CategoriaProveedorDto[]> {
-    return invokeClient<CategoriaProveedorDto[]>("proveedores_get_categorias");
-}
-
-export function proveedoresGetProductosAll(): Promise<ProductoProveedorDto[]> {
-    return invokeClient<ProductoProveedorDto[]>("proveedores_get_productos_all");
+    return commands.proveedoresGetProductos({ id_proveedor: idProveedor });
 }
 
 /* =========================
@@ -45,16 +32,14 @@ export function proveedoresGetProductosAll(): Promise<ProductoProveedorDto[]> {
 ========================= */
 
 export async function proveedoresSave(args: ProveedorSaveInput): Promise<boolean> {
-    return (await invokeClient<boolean>("proveedores_save", { args })) !== false;
+    return (await commands.proveedoresSave(args)) !== false;
 }
 
 export async function proveedoresDelete(idProveedor: string): Promise<boolean> {
-    const r = await invokeClient<boolean>("proveedores_delete", {
-        args: { id_proveedor: idProveedor },
-    });
+    const r = await commands.proveedoresDelete({ id_proveedor: idProveedor });
     return r !== false;
 }
 
 export async function proveedoresSetVinculos(args: ProveedoresSetVinculosInput): Promise<boolean> {
-    return (await invokeClient<boolean>("proveedores_set_vinculos", { args })) !== false;
+    return (await commands.proveedoresSetVinculos(args)) !== false;
 }

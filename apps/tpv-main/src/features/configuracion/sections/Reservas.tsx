@@ -10,8 +10,8 @@ import { etiquetaDuracion, opcionesDuracion } from "../../reservas/duracion";
 
 export function Reservas({ inputTone }: { inputTone: string }) {
 	const ready = useBusinessSettings((s) => s.ready);
-	const duracion = useBusinessSettings((s) => s.reservaDuracionMin);
-	const solape = useBusinessSettings((s) => s.reservaSolape);
+	const duracion = useBusinessSettings((s) => s.reserva_duracion_min);
+	const solape = useBusinessSettings((s) => s.reserva_solape);
 	const setMany = useBusinessSettings((s) => s.setMany);
 
 	return (
@@ -27,7 +27,7 @@ export function Reservas({ inputTone }: { inputTone: string }) {
 						>
 							<select
 								value={duracion}
-								onChange={(e) => setMany({ reservaDuracionMin: Number(e.target.value) })}
+								onChange={(e) => setMany({ reserva_duracion_min: Number(e.target.value) })}
 								className={`w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none ${inputTone}`}
 							>
 								{opcionesDuracion(duracion).map((m) => (
@@ -54,7 +54,7 @@ export function Reservas({ inputTone }: { inputTone: string }) {
 											type="radio"
 											name="reserva-solape"
 											checked={solape === valor}
-											onChange={() => setMany({ reservaSolape: valor })}
+											onChange={() => setMany({ reserva_solape: valor })}
 											className="accent-accent"
 										/>
 										{texto}

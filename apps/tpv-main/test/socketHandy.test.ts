@@ -106,10 +106,10 @@ describe("presentación del socket Handy nativo", () => {
         const socket = iniciarSocketHandy("handy")!; await asentar();
         useAuth.setState({role: "Administrador", idUsuario: "usuario-a"});
         queryClient.setQueryData(["clientes"], ["cliente-a"]);
-        useBusinessSettings.setState({businessName: "Negocio A"});
+        useBusinessSettings.setState({business_name: "Negocio A"});
         h.listeners.get("handy:estado")!({payload: foto({revision: 1, generacion: 2, tenant_id: null, estado: "pausada", main_online: null})});
         expect(useAuth.getState().idUsuario).toBeNull(); expect(queryClient.getQueryData(["clientes"])).toBeUndefined();
-        expect(useBusinessSettings.getState().businessName).toBe("TPV"); expect(useMainPresence.getState().mainOnline).toBeNull();
+        expect(useBusinessSettings.getState().business_name).toBe("TPV"); expect(useMainPresence.getState().mainOnline).toBeNull();
         expect(h.invoke.mock.calls.map(([nombre]) => nombre)).toEqual(["handy_socket_estado"]); socket.detener();
     });
 });

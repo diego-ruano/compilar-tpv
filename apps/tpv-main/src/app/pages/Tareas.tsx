@@ -1,6 +1,6 @@
 // src/pages/Tareas.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { tareasApi } from "../../features/tareas/tareasApis";
+import { commands } from "@tpv/client";
 import {
   useCreateTarea,
   useDeleteTarea,
@@ -162,14 +162,14 @@ function Modal({
 }
 
 export default function Tareas() {
-  const { idTrabajador } = useAuth();
+  const { idTrabajador: id_trabajador } = useAuth();
   const isAdmin = usePermisos().puede("tareas.gestionar");
 
   // Lecturas cacheadas (TanStack Query). El admin necesita trabajadores + tareas de admin;
   // el no-admin sólo sus tareas. Cada query se habilita según el rol.
   const trabajadoresQuery = useTrabajadores(isAdmin);
   const tareasAdminQuery = useTareasAdmin(isAdmin);
-  const misTareasQuery = useMisTareas(idTrabajador, !isAdmin);
+  const misTareasQuery = useMisTareas(id_trabajador, !isAdmin);
 
   // Escrituras como mutaciones (invalidan la caché de "tareas" en onSuccess).
   const createTareaM = useCreateTarea();
@@ -222,7 +222,7 @@ export default function Tareas() {
 
   const [titulo, setTitulo] = useState("");
   const [descripcion, setDescripcion] = useState("");
-  const [fechaLimite, setFechaLimite] = useState<string>("");
+  const [fecha_limite, setFechaLimite] = useState<string>("");
   const [idsAsignados, setIdsAsignados] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -302,8 +302,8 @@ export default function Tareas() {
       const ok = await createTareaM.mutateAsync({
         titulo: titulo.trim(),
         descripcion: descripcion.trim() || null,
-        fechaLimite: fechaLimite?.trim() || null,
-        idsTrabajadores: idsAsignados,
+        fecha_limite: fecha_limite?.trim() || null,
+        ids_trabajadores: idsAsignados,
       });
 
       if (ok) {
@@ -321,11 +321,11 @@ export default function Tareas() {
 
   const finalizar = async () => {
     if (!selected) return;
-    if (!idTrabajador) return;
+    if (!id_trabajador) return;
 
     await marcarFinalizadaM.mutateAsync({
-      idTarea: selected.ID_Tarea,
-      idTrabajador,
+      id_tarea: selected.ID_Tarea,
+      id_trabajador,
     });
 
     setModalDetalle(false);
@@ -345,9 +345,9 @@ export default function Tareas() {
       // detalle (no cacheadas): se dejan como llamada directa. La lista de trabajadores ya
       // está cacheada, así que sólo refrescamos esa query.
       const [tarea, , asigs] = await Promise.all([
-        tareasApi.getTareaById(t.ID_Tarea),
+        commands.tareasGetTareaById({ id_tarea: t.ID_Tarea }),
         trabajadoresQuery.refetch(),
-        tareasApi.getTareaAsignados(t.ID_Tarea),
+        commands.tareasGetTareaAsignados({ id_tarea: t.ID_Tarea }),
       ]);
 
       setAdminDetalleAsignados(asigs as any);
@@ -387,15 +387,15 @@ export default function Tareas() {
     setAdminSaving(true);
     try {
       await updateTareaM.mutateAsync({
-        idTarea: selected.ID_Tarea,
+        id_tarea: selected.ID_Tarea,
         titulo: adminEditTitulo.trim(),
         descripcion: adminEditDescripcion.trim() || null,
-        fechaLimite: adminEditFechaLimite?.trim() || null,
+        fecha_limite: adminEditFechaLimite?.trim() || null,
       });
 
       await setAsignacionesM.mutateAsync({
-        idTarea: selected.ID_Tarea,
-        idsTrabajadores: adminEditIdsAsignados,
+        id_tarea: selected.ID_Tarea,
+        ids_trabajadores: adminEditIdsAsignados,
       });
 
       setModalDetalle(false);
@@ -558,7 +558,7 @@ export default function Tareas() {
             <p className="mb-1 text-sm text-fg-muted">Fecha límite</p>
             <input
               type="date"
-              value={fechaLimite}
+              value={fecha_limite}
               onChange={(e) => setFechaLimite(e.target.value)}
               className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:w-auto sm:rounded-2xl sm:text-base"
             />
@@ -666,7 +666,7 @@ export default function Tareas() {
                     <button
                       onClick={conAviso(finalizar)}
                       className="w-full rounded-xl bg-accent px-4 py-2.5 text-white hover:opacity-90 sm:w-auto sm:rounded-2xl"
-                      disabled={!idTrabajador}
+                      disabled={!id_trabajador}
                     >
                       Marcar como finalizada
                     </button>

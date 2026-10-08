@@ -16,15 +16,9 @@
 //! con su drift-guard) y en la tabla `interruptores` de la base central.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 /// Catálogo cerrado de lo que se puede apagar desde la nube.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(
-    export,
-    export_to = "../../../packages/contracts/src/generated/bindings.ts"
-)]
 pub enum Interruptor {
     /// Remisión de registros de facturación a la AEAT (job `verifactu_remitir`). Los registros se
     /// quedan `PENDIENTE`. Es una obligación tributaria: apagarlo es para no generar rechazos que
@@ -46,17 +40,12 @@ pub enum Interruptor {
 }
 
 /// Un interruptor apagado ahora mismo para este equipo, tal como lo devuelve el worker.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(
-    export,
-    export_to = "../../../packages/contracts/src/generated/bindings.ts"
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct InterruptorApagado {
     pub interruptor: Interruptor,
     /// Por qué se apagó. Se enseña en pantalla: lo escribe soporte, no es un identificador.
     pub motivo: String,
     /// Hasta cuándo (epoch ms). Pasada esta hora vuelve a estar encendido aunque no se sepa nada
     /// más de la nube: todo interruptor se enciende solo.
-    #[ts(type = "number")]
     pub hasta_ms: i64,
 }

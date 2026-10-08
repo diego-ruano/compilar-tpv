@@ -10,7 +10,7 @@ import {
     type StatsRange,
     type TrabajadoresStatsResponse,
     type TrabajadorCardStats,
-} from "./statsApis";
+} from "@tpv/contracts";
 import { useTrabajadoresStats } from "./statsQueries";
 import { CERO, deCentimos, eur } from "../../shared/lib/dinero";
 

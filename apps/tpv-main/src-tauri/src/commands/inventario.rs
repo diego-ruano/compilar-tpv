@@ -12,6 +12,7 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_list_categorias(
     state: State<'_, AppState>,
 ) -> Result<Vec<CategoriaInvDto>, AppErrorDto> {
@@ -20,6 +21,7 @@ pub async fn inventario_list_categorias(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_create_categoria(
     state: State<'_, AppState>,
     args: UpsertCategoriaInput,
@@ -30,6 +32,7 @@ pub async fn inventario_create_categoria(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_list_proveedores_mini(
     state: State<'_, AppState>,
 ) -> Result<Vec<ProveedorMiniDto>, AppErrorDto> {
@@ -38,6 +41,7 @@ pub async fn inventario_list_proveedores_mini(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_list_productos_by_categoria(
     state: State<'_, AppState>,
     args: IdCategoriaArgs,
@@ -47,6 +51,7 @@ pub async fn inventario_list_productos_by_categoria(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_get_resumen(
     state: State<'_, AppState>,
     args: SummaryArgs,
@@ -56,6 +61,7 @@ pub async fn inventario_get_resumen(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_list_alergenos(
     state: State<'_, AppState>,
 ) -> Result<Vec<AlergenoInvDto>, AppErrorDto> {
@@ -64,6 +70,7 @@ pub async fn inventario_list_alergenos(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_get_product_detail(
     state: State<'_, AppState>,
     args: IdProductoArgs,
@@ -73,6 +80,7 @@ pub async fn inventario_get_product_detail(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_delete_producto(
     state: State<'_, AppState>,
     args: IdProductoArgs,
@@ -83,6 +91,7 @@ pub async fn inventario_delete_producto(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_upsert_producto(
     state: State<'_, AppState>,
     args: UpsertProductoInput,
@@ -93,6 +102,7 @@ pub async fn inventario_upsert_producto(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_list_lotes_by_producto(
     state: State<'_, AppState>,
     args: IdProductoArgs,
@@ -102,6 +112,7 @@ pub async fn inventario_list_lotes_by_producto(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_create_lote(
     state: State<'_, AppState>,
     args: CreateLoteInput,
@@ -112,6 +123,7 @@ pub async fn inventario_create_lote(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_update_lote(
     state: State<'_, AppState>,
     args: UpdateLoteInput,
@@ -122,6 +134,7 @@ pub async fn inventario_update_lote(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_ajustar_lote(
     state: State<'_, AppState>,
     args: AjusteLoteInput,
@@ -133,6 +146,7 @@ pub async fn inventario_ajustar_lote(
 
 /// RI-55: el stock suelto de un producto se cambia aquí, con su movimiento, y no al guardar la ficha.
 #[tauri::command]
+#[specta::specta]
 pub async fn inventario_ajustar_stock_suelto(
     state: State<'_, AppState>,
     args: AjusteStockSueltoInput,

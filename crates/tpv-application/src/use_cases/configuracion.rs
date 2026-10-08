@@ -1,5 +1,6 @@
 //! Casos de uso de configuración (Local-First).
 
+#[cfg(test)]
 use serde_json::Value as JsonValue;
 
 use tpv_contracts::configuracion::{BusinessSettings, ContactSettings, TicketSettings};
@@ -19,8 +20,9 @@ pub async fn get_ticket(repo: &dyn ConfiguracionRepository) -> AppResult<TicketS
 
 pub async fn patch_business(
     repo: &dyn ConfiguracionRepository,
-    patch: JsonValue,
+    patch: impl serde::Serialize,
 ) -> AppResult<String> {
+    let patch = serde_json::to_value(patch).map_err(|e| AppError::internal(e.to_string()))?;
     // Si el patch trae `iva_percent`, validarlo antes de persistir: un IVA fuera de
     // rango o no numérico corromperia el cálculo de todos los tickets y precios.
     if let Some(iva) = patch.get("iva_percent") {
@@ -38,8 +40,9 @@ pub async fn patch_business(
 
 pub async fn patch_ticket(
     repo: &dyn ConfiguracionRepository,
-    patch: JsonValue,
+    patch: impl serde::Serialize,
 ) -> AppResult<String> {
+    let patch = serde_json::to_value(patch).map_err(|e| AppError::internal(e.to_string()))?;
     repo.patch_ticket(&patch).await?;
     Ok("OK".to_string())
 }
@@ -50,8 +53,9 @@ pub async fn get_contact(repo: &dyn ConfiguracionRepository) -> AppResult<Contac
 
 pub async fn patch_contact(
     repo: &dyn ConfiguracionRepository,
-    patch: JsonValue,
+    patch: impl serde::Serialize,
 ) -> AppResult<String> {
+    let patch = serde_json::to_value(patch).map_err(|e| AppError::internal(e.to_string()))?;
     // RI-60: puede quedar vacío si no se envían pedidos, pero nunca guardar un correo inválido.
     if let Some(value) = patch.get("contact_email") {
         let email = value.as_str().ok_or_else(|| AppError::validation("Correo de contacto inválido"))?.trim();

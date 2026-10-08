@@ -12,6 +12,7 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn proveedores_get_all(state: State<'_, AppState>) -> Result<Vec<ProveedorDto>, AppErrorDto> {
     state.sesion().await?;
     let repo = state.proveedores_repo().await?;
@@ -19,6 +20,7 @@ pub async fn proveedores_get_all(state: State<'_, AppState>) -> Result<Vec<Prove
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn proveedores_get_productos(
     state: State<'_, AppState>,
     args: ProveedoresGetProductosArgs,
@@ -29,6 +31,7 @@ pub async fn proveedores_get_productos(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn proveedores_get_categorias(
     state: State<'_, AppState>,
 ) -> Result<Vec<CategoriaProveedorDto>, AppErrorDto> {
@@ -38,6 +41,7 @@ pub async fn proveedores_get_categorias(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn proveedores_get_productos_all(
     state: State<'_, AppState>,
 ) -> Result<Vec<ProductoProveedorDto>, AppErrorDto> {
@@ -47,6 +51,7 @@ pub async fn proveedores_get_productos_all(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn proveedores_save(
     state: State<'_, AppState>,
     args: ProveedorSaveInput,
@@ -57,6 +62,7 @@ pub async fn proveedores_save(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn proveedores_delete(
     state: State<'_, AppState>,
     args: ProveedoresDeleteInput,
@@ -67,6 +73,7 @@ pub async fn proveedores_delete(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn proveedores_set_vinculos(
     state: State<'_, AppState>,
     args: ProveedoresSetVinculosInput,

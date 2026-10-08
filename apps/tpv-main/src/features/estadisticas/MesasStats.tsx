@@ -3,7 +3,7 @@ import React, { useMemo } from "react";
 import Chart from "react-apexcharts";
 
 import { APEX_CHART_BASE } from "./apexBase";
-import type { MesasStatsResponse } from "./statsApis";
+import type { MesasStatsResponse } from "@tpv/contracts";
 import { useMesasStats } from "./statsQueries";
 import { CERO, deCentimos, eur } from "../../shared/lib/dinero";
 

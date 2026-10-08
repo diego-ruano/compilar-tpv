@@ -1,7 +1,8 @@
+import { commands } from "@tpv/client";
 // src/features/mesasComponents/mesasApi.ts
 //
 // API de mesas / comandas / ticket / cocina: una función por comando Tauri, con los tipos que genera
-// ts-rs desde Rust. Aquí no se redeclaran tipos ni se normaliza lo que vuelve (RI-53): el precio de
+// Specta desde Rust. Aquí no se redeclaran tipos ni se normaliza lo que vuelve (RI-53): el precio de
 // una línea y el pendiente de una mesa llegan como `Dinero`.
 //
 // El plano (`Salon`/`Table`, en `./types`) sigue con su tipo de la pantalla: es la geometría del
@@ -9,7 +10,7 @@
 //
 // UUIDv7: todos los IDs de negocio son `string` (idénticos en local y nube).
 
-import { invokeClient } from "@tpv/client";
+
 import type {
     CategoriaVendibleOut,
     ComandaRow,
@@ -43,8 +44,11 @@ function parseAnyMesaId(k: string): string | null {
 ========================= */
 
 export async function mesasLoadLayout(): Promise<Salon[]> {
-    const rows = await invokeClient<Salon[]>("load_layout");
-    return rows ?? [];
+    const rows = await commands.loadLayout();
+    return rows.map(salon => ({ ...salon, room: { ...salon.room, points: salon.room.points.map(punto => {
+        if (punto == null || !Number.isFinite(punto)) throw new Error("El plano contiene una coordenada inválida");
+        return punto;
+    }) } }));
 }
 
 export async function mesasSaveLayout(salons: Salon[]): Promise<void> {
@@ -61,13 +65,11 @@ export async function mesasSaveLayout(salons: Salon[]): Promise<void> {
             y: Math.round(t.y),
             width: Math.round(t.width),
             height: Math.round(t.height),
-            radius: t.radius == null ? t.radius : Math.round(t.radius),
+            radius: t.radius == null ? null : Math.round(t.radius),
         })),
     }));
 
-    await invokeClient<string>("save_layout", {
-        args: { salons: safe },
-    });
+    await commands.saveLayout({ salons: safe });
 }
 
 /**
@@ -77,7 +79,7 @@ export async function mesasSaveLayout(salons: Salon[]): Promise<void> {
  */
 export async function mesasLoadMesaMeta(): Promise<Record<string, MesaMetaOut>> {
     const out: Record<string, MesaMetaOut> = {};
-    const raw = await invokeClient<Record<string, MesaMetaOut>>("mesas_meta_all");
+    const raw = await commands.mesasMetaAll();
     for (const [k, v] of Object.entries(raw)) {
         const idMesa = parseAnyMesaId(k);
         // `parseAnyMesaId` normaliza la clave a UUID puro, que es la que usan los lookups
@@ -98,9 +100,7 @@ async function reservaSetEstado(
     const id = idReserva.trim();
     if (!id) throw new Error("id_reserva inválido");
 
-    await invokeClient<string>("set_reserva_estado", {
-        args: { id_reserva: id, estado },
-    });
+    await commands.setReservaEstado({ id_reserva: id, estado });
 }
 
 export async function reservaMarcarActivaAhora(
@@ -126,16 +126,12 @@ export async function mesasEnsureOpenComanda(params: {
     if (!idMesa) throw new Error("id_mesa inválido");
     const idUsuario = params.idUsuario?.trim() || undefined;
 
-    const abierta = await invokeClient<ComandaRow | null>("get_comanda_abierta_by_mesa", {
-        args: { id_mesa: idMesa },
-    });
+    const abierta = await commands.getComandaAbiertaByMesa({ id_mesa: idMesa });
 
     if (abierta?.id_comanda) {
         if (idUsuario) {
             try {
-                await invokeClient<boolean>("comanda_set_trabajador_if_null", {
-                    args: { id_comanda: abierta.id_comanda, id_usuario: idUsuario },
-                });
+                await commands.comandaSetTrabajadorIfNull({ id_comanda: abierta.id_comanda, id_usuario: idUsuario });
             } catch {
                 // No bloqueamos cargar/abrir la comanda por esto.
             }
@@ -148,7 +144,7 @@ export async function mesasEnsureOpenComanda(params: {
         id_usuario: idUsuario,
         id_reserva: params.idReserva?.trim() || undefined,
     };
-    const creada = await invokeClient<ComandaRow | null>("abrir_comanda", { args });
+    const creada = await commands.abrirComanda(args);
 
     if (!creada?.id_comanda) throw new Error("ID_Comanda inválido");
     return creada.id_comanda;
@@ -158,9 +154,7 @@ export async function mesasLoadTicket(idComanda: string): Promise<MesaLineaComan
     const id = idComanda.trim();
     if (!id) return [];
 
-    return invokeClient<MesaLineaComandaRow[]>("get_lineas_comanda", {
-        args: { id_comanda: id },
-    });
+    return commands.getLineasComanda({ id_comanda: id });
 }
 
 /**
@@ -182,33 +176,25 @@ export async function mesasAddDetalle(params: {
     if (!args.id_comanda) throw new Error("id_comanda inválido");
     if (!args.id_producto) throw new Error("id_producto inválido");
 
-    return invokeClient<MesaLineaComandaRow[]>("add_linea_comanda", { args });
+    return commands.addLineaComanda(args);
 }
 
 /* =========================
    Productos / Catálogo vendible
 ========================= */
 
-export function productosListCategoriasVendibles(): Promise<CategoriaVendibleOut[]> {
-    return invokeClient<CategoriaVendibleOut[]>("list_categorias_vendibles");
-}
-
 export async function productosListByCategoria(idCategoria: string): Promise<ProductoVendibleOut[]> {
     const idCat = idCategoria.trim();
     if (!idCat) throw new Error("id_categoria inválido");
 
-    return invokeClient<ProductoVendibleOut[]>("list_productos_by_categoria", {
-        args: { id_categoria: idCat },
-    });
+    return commands.listProductosByCategoria({ id_categoria: idCat });
 }
 
 export async function productosSearchByNombre(q: string): Promise<ProductoVendibleOut[]> {
     const query = q.trim();
     if (!query) return [];
 
-    return invokeClient<ProductoVendibleOut[]>("search_productos_by_nombre", {
-        args: { query },
-    });
+    return commands.searchProductosByNombre({ query });
 }
 
 /* =========================
@@ -223,18 +209,14 @@ export async function mesasRemoveOnePendingDetalle(params: {
     const idProducto = params.idProducto.trim();
     if (!idComanda || !idProducto) return;
 
-    await invokeClient<string>("remove_one_pending_detalle", {
-        args: { id_comanda: idComanda, id_producto: idProducto },
-    });
+    await commands.removeOnePendingDetalle({ id_comanda: idComanda, id_producto: idProducto });
 }
 
 export async function mesasDeleteDetalle(idDetalle: string): Promise<void> {
     const id = idDetalle.trim();
     if (!id) return;
 
-    await invokeClient<string>("delete_detalle", {
-        args: { id_detalle: id },
-    });
+    await commands.deleteDetalle({ id_detalle: id });
 }
 
 export async function mesasUpdateDetalleNota(params: {
@@ -244,9 +226,7 @@ export async function mesasUpdateDetalleNota(params: {
     const id = params.idDetalle.trim();
     if (!id) return;
 
-    await invokeClient<string>("update_detalle_nota", {
-        args: { id_detalle: id, nota: params.nota ?? undefined },
-    });
+    await commands.updateDetalleNota({ id_detalle: id, nota: params.nota ?? undefined });
 }
 
 export async function mesasCobrarDetalles(params: {
@@ -277,16 +257,12 @@ export async function mesasCobrarDetalles(params: {
         // REV-17: quién cobra lo pone el backend desde la sesión (SEC-01).
         destinatario: params.destinatario,
     };
-    return invokeClient<string>("cobrar_detalles", { args });
+    return commands.cobrarDetalles(args);
 }
 
 /* =========================
    Cocina / KitchenBoard
 ========================= */
-
-export function cocinaListHoyPendientes(): Promise<KitchenRow[]> {
-    return invokeClient<KitchenRow[]>("kitchen_list_today_pending");
-}
 
 export async function cocinaSetLineaEstado(params: {
     idDetalle: string;
@@ -298,11 +274,9 @@ export async function cocinaSetLineaEstado(params: {
 
     if (!idDetalle || !idUsuarioCocinero) return;
 
-    await invokeClient<string>("kitchen_set_line_state", {
-        args: {
+    await commands.kitchenSetLineState({
             id_detalle: idDetalle,
             estado: params.estado,
             id_usuario_cocinero: idUsuarioCocinero,
-        },
-    });
+        });
 }

@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // SYNC-19 · Progreso del backfill del histórico (la fase 2 de una recuperación).
 //
 // Tras perder la `data.db`, la nube devuelve lo imprescindible para volver a vender —los maestros
@@ -11,7 +12,7 @@
 // Vive en `shared/` y no co-locado en una feature justamente porque lo miran las dos.
 
 import { useQuery } from "@tanstack/react-query";
-import { invokeClient } from "@tpv/client";
+
 import type { BackfillEstado } from "@tpv/contracts";
 
 export const backfillKeys = {
@@ -29,7 +30,7 @@ const REFRESCO_MS = 20_000;
 export function useBackfillHistorico() {
 	return useQuery({
 		queryKey: backfillKeys.estado,
-		queryFn: () => invokeClient<BackfillEstado>("sync_backfill_estado"),
+		queryFn: () => commands.syncBackfillEstado(),
 		refetchInterval: (q) => (q.state.data?.tablas_pendientes ? REFRESCO_MS : false),
 		// El comando falla en Handy (no hay BD local) y mientras la base no está abierta. No es una
 		// condición de error que haya que enseñar: es "aquí no aplica".

@@ -1,14 +1,10 @@
+import { commands } from "@tpv/client";
 import {
   useInfiniteQuery,
   useMutation,
   useQueryClient,
 } from "@tanstack/react-query";
-import {
-  pedidosCambiarEstado,
-  pedidosActualizar,
-  pedidosCrear,
-  pedidosGetPage,
-} from "./pedidosApis";
+import { pedidosGetPage } from "./pedidosApis";
 import type {
   PedidosActualizarInput,
   PedidosCambiarEstadoInput,
@@ -42,7 +38,7 @@ export function usePedidosPage(search: string) {
 export function useCrearPedido() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: PedidosCrearInput) => pedidosCrear(input),
+    mutationFn: (input: PedidosCrearInput) => commands.pedidosProveedorCrear(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: pedidosKeys.all }),
   });
 }
@@ -50,7 +46,7 @@ export function useCrearPedido() {
 export function useActualizarPedido() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: PedidosActualizarInput) => pedidosActualizar(input),
+    mutationFn: (input: PedidosActualizarInput) => commands.pedidosProveedorActualizar(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: pedidosKeys.all }),
   });
 }
@@ -59,7 +55,7 @@ export function useCancelarPedido() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (idPedido: string) =>
-      pedidosCambiarEstado({ id_pedido: idPedido, estado: "cancelado" }),
+      commands.pedidosProveedorCambiarEstado({ id_pedido: idPedido, estado: "cancelado" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: pedidosKeys.all }),
   });
 }
@@ -67,7 +63,7 @@ export function useCancelarPedido() {
 export function useEnviarPedido() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: PedidosCambiarEstadoInput) => pedidosCambiarEstado(input),
+    mutationFn: (input: PedidosCambiarEstadoInput) => commands.pedidosProveedorCambiarEstado(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: pedidosKeys.all }),
   });
 }

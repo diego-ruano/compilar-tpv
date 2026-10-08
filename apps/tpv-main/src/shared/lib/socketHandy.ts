@@ -1,5 +1,6 @@
+import { commands } from "@tpv/client";
 // RI-31: puente de presentación. Rust conserva el socket, los tiempos y la identidad.
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen } from "@tauri-apps/api/event";
 import type { AvisoSocketHandy, EstadoSocketHandy } from "@tpv/contracts";
 import { useMainPresence } from "../stores/useMainPresence";
@@ -81,7 +82,7 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
             }
             quitar.push(...listeners);
             observada = true;
-            publicar(await invoke<EstadoSocketHandy>("handy_socket_estado"));
+            publicar(await commands.handySocketEstado());
         } finally { observando = false; }
     };
     const falloObservacion = (e: unknown) => {
@@ -93,7 +94,7 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
     return {
         reconectarSiHaceFalta: (forzar = false) => {
             if (!detenido && !observada) void observar().catch(falloObservacion);
-            if (!detenido) void invoke("handy_socket_reintentar", { forzar }).catch((e) => captureException(e, { fase: "reintentar_handy_nativo" }));
+            if (!detenido) void commands.handySocketReintentar(forzar).catch((e) => captureException(e, { fase: "reintentar_handy_nativo" }));
         },
         // Desmontar una vista no detiene el servicio de la aplicación.
         detener: () => { detenido = true; for (const unlisten of quitar) unlisten(); },

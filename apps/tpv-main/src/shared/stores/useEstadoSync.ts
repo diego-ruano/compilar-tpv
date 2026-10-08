@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/shared/stores/useEstadoSync.ts
 //
 // SYNC-17: estado de la sincronización con la nube. **Derivado, no elegido.**
@@ -16,7 +17,7 @@
 //                     `set_connection_mode`. Por defecto `auto`.
 
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+
 import type { RecoveryState } from "@tpv/contracts";
 
 export type FaseRecuperacion =
@@ -146,8 +147,8 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 	hidratar: async () => {
 		try {
 			const [p, recovery] = await Promise.all([
-				invoke<PreferenciaSync | null>("get_connection_mode"),
-				invoke<{ state: RecoveryState }>("recovery_status"),
+				commands.getConnectionMode(),
+				commands.recoveryStatus(),
 			]);
 			// Cualquier cosa que no sea explícitamente `off` es `auto`: el valor ausente (nunca se
 			// tocó) y el legado ("offline"/"online", que Rust ya normaliza a `null`) conectan.

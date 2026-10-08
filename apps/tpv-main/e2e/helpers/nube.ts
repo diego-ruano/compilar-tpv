@@ -42,7 +42,7 @@ export async function esperarNubeAlDia(timeout = 180_000): Promise<Salud> {
     const alDia = await browser
         .waitUntil(
             async () => {
-                ultima = await leerDeLaApp<Salud>("sync_health");
+                ultima = await leerDeLaApp("sync_health");
                 return (
                     ultima.outbox_pending === 0 &&
                     ultima.quarantined === 0 &&

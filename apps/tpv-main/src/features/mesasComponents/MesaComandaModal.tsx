@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // components/mesasComponents/MesaComandaModal.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -19,20 +20,7 @@ import { useToast } from "../../shared/toast";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { esError, toAppError } from "@tpv/client";
 
-import {
-    mesasEnsureOpenComanda,
-    mesasLoadTicket,
-    mesasAddDetalle,
-    mesasRemoveOnePendingDetalle,
-    mesasDeleteDetalle,
-    mesasUpdateDetalleNota,
-    mesasCobrarDetalles,
-    productosListCategoriasVendibles,
-    productosListByCategoria,
-    productosSearchByNombre,
-    reservaMarcarActivaAhora,
-    reservaFinalizar,
-} from "./mesasApi";
+import { mesasEnsureOpenComanda, mesasLoadTicket, mesasAddDetalle, mesasRemoveOnePendingDetalle, mesasDeleteDetalle, mesasUpdateDetalleNota, mesasCobrarDetalles, productosListByCategoria, productosSearchByNombre, reservaMarcarActivaAhora, reservaFinalizar } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
 import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
 import { CERO, abs, eur } from "../../shared/lib/dinero";
@@ -68,7 +56,7 @@ type TicketItem = {
     pasaCocina: boolean;
     notas: string | null;
     /** Tipo de IVA con el que se vendió la línea; `null` = el general del negocio. */
-    ivaPercent: number | null;
+    iva_percent: number | null;
 };
 
 type Paso = "categorias" | "productos" | "metodo" | "efectivo";
@@ -245,7 +233,7 @@ function mapTicketRows(rows: MesaLineaComandaRow[]): TicketItem[] {
             pasaCocina: pasa,
             notas: r.Notas,
             // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
-            ivaPercent: r.IVA_Percent ?? null,
+            iva_percent: r.IVA_Percent ?? null,
         };
     });
     const hayPendientes = mapped.some((t) => !t.pagado);
@@ -542,7 +530,7 @@ export default function MesaComandaModal({
         let cancelado = false;
         const cargarCategorias = async () => {
             try {
-                const rows = await productosListCategoriasVendibles();
+                const rows = await commands.listCategoriasVendibles();
 
                 const procesadas: CategoriaDisplay[] = await Promise.all(
                     (rows ?? []).map(async (cat) => ({
@@ -551,10 +539,10 @@ export default function MesaComandaModal({
                     })),
                 );
 
-                !cancelado && setCategorias(procesadas);
+                if (!cancelado) setCategorias(procesadas);
             } catch (e) {
                 console.error("Fallo al cargar categorías", e);
-                !cancelado && setCategorias([]);
+                if (!cancelado) setCategorias([]);
             }
         };
 
@@ -655,12 +643,12 @@ export default function MesaComandaModal({
                     })),
                 );
 
-                !cancelado && setProductos(procesados);
+                if (!cancelado) setProductos(procesados);
             } catch (e) {
                 console.error("Fallo al cargar productos", e);
-                !cancelado && setProductos([]);
+                if (!cancelado) setProductos([]);
             } finally {
-                !cancelado && setLoadingProductos(false);
+                if (!cancelado) setLoadingProductos(false);
             }
         };
 
@@ -675,7 +663,7 @@ export default function MesaComandaModal({
         const run = async () => {
             if (!q) {
                 setLoadingBusqueda(false);
-                !cancelado && setBusqueda([]);
+                if (!cancelado) setBusqueda([]);
                 return;
             }
             setLoadingBusqueda(true);
@@ -689,12 +677,12 @@ export default function MesaComandaModal({
                     })),
                 );
 
-                !cancelado && setBusqueda(procesados);
+                if (!cancelado) setBusqueda(procesados);
             } catch (e) {
                 console.error("Fallo búsqueda", e);
-                !cancelado && setBusqueda([]);
+                if (!cancelado) setBusqueda([]);
             } finally {
-                !cancelado && setLoadingBusqueda(false);
+                if (!cancelado) setLoadingBusqueda(false);
             }
         };
 
@@ -797,7 +785,7 @@ export default function MesaComandaModal({
        El límite no se comprueba aquí. Lo decide Rust dentro de la transacción del cobro, que es
        donde se conoce el importe exacto que se va a registrar; la pantalla sólo reacciona a su
        rechazo. Comprobarlo en los dos lados sería tener dos criterios para la misma cifra. */
-    const limiteSimplif = useBusinessSettings((st) => st.limiteSimplif);
+    const limite_simplif = useBusinessSettings((st) => st.limite_simplif);
     const [quiereFactura, setQuiereFactura] = useState(false);
     const [pideFactura, setPideFactura] = useState<{
         metodo: "tarjeta" | "efectivo";
@@ -1013,7 +1001,7 @@ export default function MesaComandaModal({
                     await cobrar(metodo, d);
                 }}
                 importe={totalSeleccionado}
-                limite={limiteSimplif}
+                limite={limite_simplif}
                 obligatorio={pideFactura?.obligatorio ?? false}
                 guardando={cobrandoFactura}
                 error={errorFactura}

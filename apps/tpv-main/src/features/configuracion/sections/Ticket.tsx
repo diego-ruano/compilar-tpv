@@ -106,7 +106,7 @@ export function Ticket({
 
     // ✅ ancho guardado en Ticket_Settings (si aún no existe, cae a 80)
     const ticketWidthMm: 58 | 80 | 112 = normalizeTicketWidthMm(
-        ticket?.paperWidthMm ?? ticket?.paper_width_mm ?? 80,
+        ticket?.paper_width_mm ?? ticket?.paper_width_mm ?? 80,
     );
 
     const previewItems = useMemo(
@@ -168,7 +168,7 @@ export function Ticket({
                                 const mm = normalizeTicketWidthMm(
                                     e.target.value,
                                 );
-                                setSetting("paperWidthMm", mm);
+                                setSetting("paper_width_mm", mm);
                             }}
                         >
                             {TICKET_WIDTHS.map((o) => (
@@ -184,10 +184,10 @@ export function Ticket({
                         hint="Según el modelo de impresora térmica"
                     >
                         <SelectInput
-                            value={String(ticket?.paperDpi ?? 203)}
+                            value={String(ticket?.paper_dpi ?? 203)}
                             className={inputTone}
                             onChange={(e) =>
-                                setSetting("paperDpi", Number(e.target.value))
+                                setSetting("paper_dpi", Number(e.target.value))
                             }
                         >
                             <option value="203">203 dpi (estándar)</option>
@@ -201,9 +201,9 @@ export function Ticket({
                     >
                         <TextInput
                             inputMode="numeric"
-                            value={String(ticket?.charsPerLine ?? 42)}
+                            value={String(ticket?.chars_per_line ?? 42)}
                             onChange={(e) =>
-                                setSetting("charsPerLine", Number(e.target.value))
+                                setSetting("chars_per_line", Number(e.target.value))
                             }
                             placeholder="42"
                             className={inputTone}
@@ -216,9 +216,9 @@ export function Ticket({
                     >
                         <TextInput
                             inputMode="decimal"
-                            value={String(ticket?.fontScale ?? 1)}
+                            value={String(ticket?.font_scale ?? 1)}
                             onChange={(e) =>
-                                setSetting("fontScale", Number(e.target.value))
+                                setSetting("font_scale", Number(e.target.value))
                             }
                             placeholder="1.0"
                             className={inputTone}
@@ -229,10 +229,10 @@ export function Ticket({
                 <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                     {(
                         [
-                            ["marginTopMm", "Margen superior (mm)"],
-                            ["marginBottomMm", "Margen inferior (mm)"],
-                            ["marginLeftMm", "Margen izquierdo (mm)"],
-                            ["marginRightMm", "Margen derecho (mm)"],
+                            ["margin_top_mm", "Margen superior (mm)"],
+                            ["margin_bottom_mm", "Margen inferior (mm)"],
+                            ["margin_left_mm", "Margen izquierdo (mm)"],
+                            ["margin_right_mm", "Margen derecho (mm)"],
                         ] as const
                     ).map(([key, label]) => (
                         <Field key={key} label={label}>
@@ -253,28 +253,28 @@ export function Ticket({
             <Panel id="ticket-elementos" title="Elementos del ticket">
                 <div className="grid grid-cols-1 gap-2">
                     <Checkbox
-                        checked={ticket.showLogo}
-                        onChange={(v) => setSetting("showLogo", v)}
+                        checked={ticket.show_logo}
+                        onChange={(v) => setSetting("show_logo", v)}
                         label="Mostrar logo"
                     />
                     <Checkbox
-                        checked={ticket.showBusinessName}
-                        onChange={(v) => setSetting("showBusinessName", v)}
+                        checked={ticket.show_business_name}
+                        onChange={(v) => setSetting("show_business_name", v)}
                         label="Mostrar nombre del negocio"
                     />
                     <Checkbox
-                        checked={ticket.showAddress}
-                        onChange={(v) => setSetting("showAddress", v)}
+                        checked={ticket.show_address}
+                        onChange={(v) => setSetting("show_address", v)}
                         label="Mostrar dirección"
                     />
                     <Checkbox
-                        checked={ticket.showPhone}
-                        onChange={(v) => setSetting("showPhone", v)}
+                        checked={ticket.show_phone}
+                        onChange={(v) => setSetting("show_phone", v)}
                         label="Mostrar teléfono"
                     />
                     <Checkbox
-                        checked={ticket.showFooterMessage}
-                        onChange={(v) => setSetting("showFooterMessage", v)}
+                        checked={ticket.show_footer_message}
+                        onChange={(v) => setSetting("show_footer_message", v)}
                         label="Mostrar mensaje final"
                     />
                 </div>
@@ -296,10 +296,10 @@ export function Ticket({
                             }
                             placeholder="Ej: Gracias por su visita"
                             className={inputTone}
-                            disabled={!ticket.showFooterMessage}
+                            disabled={!ticket.show_footer_message}
                         />
                     </Field>
-                    {!ticket.showFooterMessage ? (
+                    {!ticket.show_footer_message ? (
                         <div className="mt-2 text-xs text-fg-muted">
                             Activa “Mostrar mensaje final” para editarlo.
                         </div>

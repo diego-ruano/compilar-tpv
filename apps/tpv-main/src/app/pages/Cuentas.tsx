@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     Wallet,
@@ -29,7 +30,7 @@ import type {
     ImpactoCajaDto,
     ProveedorMiniDto,
 } from "@tpv/contracts";
-import { invokeClient, toAppError } from "@tpv/client";
+import { toAppError } from "@tpv/client";
 import { ModalShell, SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import {
@@ -45,13 +46,7 @@ import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
 import ReabrirCierreModal from "../../features/cuentas/ReabrirCierreModal";
 import DevolverModal from "../../features/cuentas/DevolverModal";
 import ImpactoCierreModal from "../../features/cuentas/ImpactoCierreModal";
-import {
-    cierreDetalle,
-    cierreImprimir,
-    cierreListar,
-    cierreReabrir,
-    type CierreResumenDto,
-} from "../../features/cuentas/cierreApis";
+import { cierreImprimir, cierreListar, cierreReabrir, type CierreResumenDto } from "../../features/cuentas/cierreApis";
 import {
     useCuentasEntradas,
     useCuentasSalidas,
@@ -64,7 +59,7 @@ import {
     useAnularPago,
     usePilaDeCursores,
 } from "../../features/cuentas/cuentasQueries";
-import { cuentasPrevisualizarCambio } from "../../features/cuentas/cuentasApis";
+
 
 // PDF
 import { generarPdfCuentas } from "../../features/cuentas/generarPdfCuentas";
@@ -231,8 +226,8 @@ function SelloDevolucion({ entrada }: { entrada: EntradaDto }) {
             </div>
         );
     }
-    if (entrada.devuelto > 0) {
-        return <div className="mt-1 text-xs text-warning">Devuelto {eur(entrada.devuelto)}</div>;
+    if ((entrada.devuelto ?? CERO) > 0) {
+        return <div className="mt-1 text-xs text-warning">Devuelto {eur((entrada.devuelto ?? CERO))}</div>;
     }
     return null;
 }
@@ -411,7 +406,7 @@ export default function Cuentas() {
 
     const imprimirCierre = async (idCierre: string) => {
         try {
-            await cierreImprimir(await cierreDetalle(idCierre));
+            await cierreImprimir(await commands.cierreDetalle(idCierre));
         } catch (e) {
             setCierresError(toAppError(e).message);
         }
@@ -438,7 +433,7 @@ export default function Cuentas() {
         hacer: (motivo: string | null) => Promise<void>,
         motivoYaDado = false,
     ) => {
-        const impacto = await cuentasPrevisualizarCambio(cambio);
+        const impacto = await commands.cuentasPrevisualizarCambio(cambio);
         if (impacto.cierres.length === 0) {
             await hacer(null);
             return;
@@ -516,7 +511,7 @@ export default function Cuentas() {
         // guardar sin tocar nada multiplicaba el gasto por 100.
         egImporte.poner(s.importe);
         setEgProveedorId(s.proveedor_id ?? "");
-        setEgPagadoConCaja(s.pagado_con_caja);
+        setEgPagadoConCaja(s.pagado_con_caja ?? false);
         await ensureProveedores();
         setOpenEditGasto(true);
     };
@@ -610,7 +605,7 @@ export default function Cuentas() {
     const ofrecerRectificativa = async (idPago: string) => {
         try {
             const t = await printerTicketDePago(idPago);
-            const rectificativa = t.facturas_del_cobro.find((f) => f.tipo_factura.startsWith("R"));
+            const rectificativa = (t.facturas_del_cobro ?? []).find((f) => f.tipo_factura.startsWith("R"));
             if (rectificativa) setReimpresion({ idPago, numFactura: rectificativa.num_serie });
         } catch (err) {
             console.error("no se pudo preparar la rectificativa para imprimir:", err);
@@ -631,7 +626,7 @@ export default function Cuentas() {
 
        Si el cobro YA tiene factura completa (una F3, o la F1 de cuando se cobró), el mismo botón la
        corrige: el formulario sale con los datos actuales y se emite la factura que la corrige. */
-    const limiteSimplif = useBusinessSettings((st) => st.limiteSimplif);
+    const limite_simplif = useBusinessSettings((st) => st.limite_simplif);
     const [facturaDe, setFacturaDe] = useState<{
         /** Los cobros cuyos tickets se facturan (uno, o varios del mismo cliente). */
         entradas: EntradaDto[];
@@ -661,7 +656,7 @@ export default function Cuentas() {
             const t = await printerTicketDePago(e.id);
             // La factura completa vigente: la última con cliente y en positivo (una F3 corregida
             // deja detrás la errónea y su negativa; una F1 corregida, su rectificativa).
-            const vigente = [...t.facturas_del_cobro]
+            const vigente = [...(t.facturas_del_cobro ?? [])]
                 .reverse()
                 .find((f) => ["F1", "F3", "R1", "R2", "R3", "R4"].includes(f.tipo_factura) && f.importe > 0);
             if (!vigente) {
@@ -686,14 +681,8 @@ export default function Cuentas() {
         setF3Error(null);
         try {
             const bloque = facturaDe.corregir
-                ? await invokeClient<BloqueFiscal>("verifactu_corregir_factura", {
-                      numFactura: facturaDe.corregir,
-                      destinatario: d,
-                  })
-                : await invokeClient<BloqueFiscal>("verifactu_emitir_factura_de_tickets", {
-                      idPagos: facturaDe.entradas.map((x) => x.id),
-                      destinatario: d,
-                  });
+                ? await commands.verifactuCorregirFactura(facturaDe.corregir, d)
+                : await commands.verifactuEmitirFacturaDeTickets(facturaDe.entradas.map((x) => x.id), d);
             const primera = facturaDe.entradas[0];
             setFacturaDe(null);
             setSeleccionTickets(null);
@@ -1989,7 +1978,7 @@ export default function Cuentas() {
                                             clase: "DEVOLUCION" as ClaseBaja,
                                             titulo: "Le devuelvo todo el dinero al cliente",
                                             detalle:
-                                                confirmAccion.entrada.devuelto > 0
+                                                (confirmAccion.entrada.devuelto ?? CERO) > 0
                                                     ? "Ya tiene devoluciones: se devuelve lo que queda, eligiendo cómo sale el dinero."
                                                     : "La venta ocurrió. Se emite una factura rectificativa por el importe en negativo. Los artículos NO vuelven a la comanda, y el stock se repone. Para devolver sólo una parte, usa «Devolver».",
                                         },
@@ -2012,7 +2001,7 @@ export default function Cuentas() {
                                                 // devolver lo que queda: por la pantalla de devolver.
                                                 if (
                                                     op.clase === "DEVOLUCION" &&
-                                                    confirmAccion.entrada.devuelto > 0
+                                                    (confirmAccion.entrada.devuelto ?? CERO) > 0
                                                 ) {
                                                     setDevolverDe({ entrada: confirmAccion.entrada, todo: true });
                                                     setConfirmAccion(null);
@@ -2142,7 +2131,7 @@ export default function Cuentas() {
                 importe={sumar(...(facturaDe?.entradas ?? []).map((x) => x.importe))}
                 inicial={facturaDe?.inicial ?? null}
                 corrigiendo={facturaDe?.corregir ?? null}
-                limite={limiteSimplif}
+                limite={limite_simplif}
                 obligatorio={false}
                 guardando={f3Guardando}
                 error={f3Error}

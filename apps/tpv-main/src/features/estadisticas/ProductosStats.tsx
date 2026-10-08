@@ -9,15 +9,15 @@ import { APEX_CHART_BASE } from "./apexBase";
 import {
   type StatsRange,
   type StatsCategoriaRow,
-  type ProductosStatsResumen,
-} from "./statsApis";
+  type ProductosStatsResponse as ProductosStatsResumen,
+} from "@tpv/contracts";
 import { useProductosCategorias, useProductosResumen } from "./statsQueries";
 
 export default function ProductosStats({ range }: { range: StatsRange }) {
   const toast = useToast();
 
-  const [catTopId, setCatTopId] = useState<number | null>(null);
-  const [catWorstId, setCatWorstId] = useState<number | null>(null);
+  const [catTopId, setCatTopId] = useState<string | null>(null);
+  const [catWorstId, setCatWorstId] = useState<string | null>(null);
 
   const categoriasQuery = useProductosCategorias();
   const resumenQuery = useProductosResumen(range, catTopId, catWorstId);
@@ -121,8 +121,8 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
     onChange,
     disabled,
   }: {
-    value: number | null;
-    onChange: (v: number | null) => void;
+    value: string | null;
+    onChange: (v: string | null) => void;
     disabled?: boolean;
   }) => (
     <select
@@ -135,7 +135,7 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
       value={value ?? ""}
       onChange={(e) => {
         const v = e.target.value;
-        onChange(v === "" ? null : Number(v));
+        onChange(v === "" ? null : v);
       }}
     >
       <option value="">Todas las categorías</option>

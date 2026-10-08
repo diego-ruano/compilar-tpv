@@ -6,27 +6,23 @@
 use tpv_domain::dinero::Dinero;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 use crate::verifactu::DestinatarioInput;
 
 /* =========================================================
    Salida (read models)
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct CategoriaRow {
     pub ID_Categoria: String,
     pub Nombre: String,
     pub Nombre_Imagen: Option<String>,
     pub Ruta_Imagen: Option<String>,
-    #[ts(type = "number | null")]
     pub Vendible: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct ProductoRow {
     pub ID_Producto: String,
@@ -40,8 +36,7 @@ pub struct ProductoRow {
     pub Ruta_Imagen: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct ComandaBarraRow {
     pub ID_Comanda: String,
@@ -49,14 +44,11 @@ pub struct ComandaBarraRow {
     pub Estado: String,
     pub Total_Pendiente: Dinero,
     pub Total_Comanda: Dinero,
-    #[ts(type = "number")]
     pub Pendientes_Cocina: i64,
-    #[ts(type = "number")]
     pub Pendientes_Pago: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct LineaComandaRow {
     pub ID_Detalle: String,
@@ -65,17 +57,14 @@ pub struct LineaComandaRow {
     pub Cantidad: f64,
     pub Precio_Unitario: Dinero,
     /// Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
-    #[ts(optional)]
     pub IVA_Percent: Option<f64>,
     pub Notas: Option<String>,
     pub Estado_Cocina: Option<String>,
-    #[ts(type = "number")]
     pub Pagado: i64,
     pub Nombre: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct VerTicketsDetalleRow {
     pub ID_Detalle: String,
@@ -84,21 +73,17 @@ pub struct VerTicketsDetalleRow {
     pub Cantidad: f64,
     pub Precio_Unitario: Dinero,
     /// Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
-    #[ts(optional)]
     pub IVA_Percent: Option<f64>,
     pub Estado_Cocina: String,
-    #[ts(type = "number")]
     pub Pagado: i64,
     pub Notas: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]
 pub struct IndexRow {
     pub ID_Comanda: String,
     pub Productos: Option<String>,
-    #[ts(type = "number")]
     pub NumLineas: i64,
     pub Unidades: f64,
 }
@@ -107,56 +92,45 @@ pub struct IndexRow {
    Entrada (args/inputs) — Local-First
 ========================================================= */
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrListComandasArgs {
     pub include_pagadas: bool,
     #[serde(default)]
-    #[ts(optional, type = "number")]
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrIdCategoriaArgs {
     pub id_categoria: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrSearchProductosArgs {
     pub query: String,
-    #[ts(type = "number")]
     pub limit: i64,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrIdComandaArgs {
     pub id_comanda: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrIdsArgs {
     pub ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrCreateComandaBarraInput {
     #[serde(default)]
-    #[ts(optional)]
     pub id_trabajador: Option<String>,
     /// Si es `true`, reutiliza la comanda de barra abierta si existe (get-or-create).
     #[serde(default)]
-    #[ts(optional)]
     pub get_or_create: Option<bool>,
 }
 
 /// RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrAddLineaComandaInput {
     pub id_comanda: String,
     pub id_producto: String,
@@ -165,37 +139,32 @@ pub struct VrAddLineaComandaInput {
 
 /// La línea recién añadida, con el precio que se le ha puesto: el del catálogo en ese momento, que
 /// puede no ser el de la carta en caché de la pantalla (RI-27).
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct VrLineaAnadida {
     pub id_detalle: String,
     pub precio_unitario: Dinero,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrRemoveLastUnpaidLineaInput {
     pub id_comanda: String,
     pub id_producto: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrDeleteLineaIfUnpaidInput {
     pub id_comanda: String,
     pub id_detalle: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrUpdateNotaDetalleInput {
     pub id_detalle: String,
     #[serde(default)]
-    #[ts(optional)]
     pub nota: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 /// REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
 ///
 /// Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
@@ -204,7 +173,6 @@ pub struct VrUpdateNotaDetalleInput {
 /// IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
 /// ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
 /// pasando el login.
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrCobrarFraccionadoInput {
     /// El id del cobro (`Pagos.ID_Pago`), un UUID que genera la pantalla al encolarlo.
     ///
@@ -222,12 +190,10 @@ pub struct VrCobrarFraccionadoInput {
     /// límite de la simplificada y entonces no hay alternativa. Si pasa del límite y esto va vacío,
     /// el cobro se rechaza con `factura_completa_requerida` y la pantalla pide los datos.
     #[serde(default)]
-    #[ts(optional)]
     pub destinatario: Option<DestinatarioInput>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrDeleteComandaIfSafeInput {
     pub id_comanda: String,
 }

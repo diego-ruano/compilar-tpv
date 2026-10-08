@@ -1,3 +1,4 @@
+import type { commands } from "@tpv/client";
 // src/app/arranque/emparejamiento.ts
 //
 // Cómo se vincula un Handy a su Main, sin React: leer el código que se escribe o se escanea, el
@@ -67,14 +68,14 @@ export type Emparejamiento = { tenantId: string; token: string; deviceId: string
 /** Lo que queda pendiente mientras se espera la aprobación: con esto se puede cancelar. */
 export type EsperaDeAprobacion = CodigoDeVinculacion & { nonceB64: string; nonceExpiresAtMs: number };
 
-/** El IPC con Rust (`invokeClient`). */
-export type Invocar = <T>(comando: string, args?: Record<string, unknown>) => Promise<T>;
+/** Las funciones generadas del IPC con Rust. */
+export type ComandosEmparejamiento = Pick<typeof commands, "deviceGetIdentity" | "deviceFirmarEmparejamiento" | "handySetToken">;
 
 /** Una petición anónima al worker (`cloudPost("anon", …)`). */
-export type PedirALaNube = <T>(ruta: string, cuerpo: unknown) => Promise<T>;
+export type PedirALaNube = (ruta: string, cuerpo: unknown) => Promise<unknown>;
 
 export type DependenciasEmparejamiento = {
-	invoke: Invocar;
+	commands: ComandosEmparejamiento;
 	pedirALaNube: PedirALaNube;
 	/** `false` en cuanto la espera deja de interesar (pantalla cerrada, o cancelada): el bucle para. */
 	sigueVivo: () => boolean;
@@ -85,12 +86,12 @@ export type DependenciasEmparejamiento = {
 export type Identidad = { deviceId: string; devicePubKeyB64: string };
 
 /** La identidad del equipo con la que se reclama el emparejamiento. Falla si está incompleta. */
-export async function identidadDelDispositivo(invoke: Invocar): Promise<Identidad> {
-	const r = (await invoke("device_get_identity")) as any;
+export async function identidadDelDispositivo(commands: ComandosEmparejamiento): Promise<Identidad> {
+	const r = await commands.deviceGetIdentity();
 
-	const deviceId = String(r.deviceId || r.device_id || "");
+	const deviceId = r.deviceId;
 	const pub = String(
-		r.devicePubkeyB64 ?? r.device_pubkey_b64 ?? r.devicePubKeyB64 ?? r.device_pub_key_b64 ?? "",
+		r.devicePubkeyB64,
 	).trim();
 
 	if (!deviceId || !pub || pub.length < 40) throw new Error(SIN_IDENTIDAD);
@@ -103,7 +104,7 @@ export async function identidadDelDispositivo(invoke: Invocar): Promise<Identida
  * firma de una consulta no sirva para cancelar, ni al revés (`pairing.firma.ts` en el worker).
  */
 async function firmar(
-	invoke: Invocar,
+	commands: ComandosEmparejamiento,
 	accion: "PAIR_FETCH" | "PAIR_CANCEL",
 	pairCode: string,
 	nonceB64: string,
@@ -111,9 +112,9 @@ async function firmar(
 ): Promise<{ ts: number; sigB64: string }> {
 	// PROD-04: la hora de la nube, que Rust ya tiene de la respuesta al `claim`. Con la del equipo,
 	// una Handy con el reloj desfasado más de 2 minutos no conseguiría vincularse nunca.
-	const r = (await invoke("device_firmar_emparejamiento", { args: { accion, pair_code: pairCode, nonce_b64: nonceB64 } })) as any;
+	const r = await commands.deviceFirmarEmparejamiento({ accion, pair_code: pairCode, nonce_b64: nonceB64 });
 	const ts = Number(r.ts);
-	const sigB64 = String(r.sigB64 ?? r.sig_b64 ?? r.signature ?? "").trim();
+	const sigB64 = String(r.sigB64).trim();
 	if (!sigB64) throw new Error(SIN_IDENTIDAD);
 	return { ts, sigB64 };
 }
@@ -131,7 +132,7 @@ export async function emparejarHandy(
 	deps: DependenciasEmparejamiento,
 ): Promise<Emparejamiento | null> {
 	const { pairCode, pairSecret } = codigo;
-	const ident = await identidadDelDispositivo(deps.invoke);
+	const ident = await identidadDelDispositivo(deps.commands);
 
 	const claim = (await deps.pedirALaNube("/v1/pair/claim", {
 		pairCode,
@@ -161,7 +162,7 @@ export async function emparejarHandy(
 		await new Promise((r) => setTimeout(r, ESPERA_ENTRE_CONSULTAS_MS));
 		if (!deps.sigueVivo()) return null;
 
-		const { ts, sigB64 } = await firmar(deps.invoke, "PAIR_FETCH", pairCode, nonceB64, ident.deviceId);
+		const { ts, sigB64 } = await firmar(deps.commands, "PAIR_FETCH", pairCode, nonceB64, ident.deviceId);
 
 		try {
 			const ft = (await deps.pedirALaNube("/v1/pair/fetch-token", {
@@ -183,7 +184,7 @@ export async function emparejarHandy(
 			// pantalla de vinculación, no un Handy vinculado a sus espaldas.
 			if (!deps.sigueVivo()) return null;
 
-			await deps.invoke("handy_set_token", { args: { token, tenant_id: tenantId } });
+			await deps.commands.handySetToken({ token, tenant_id: tenantId });
 
 			return { tenantId, token, deviceId: ident.deviceId };
 		} catch (e: unknown) {
@@ -207,10 +208,10 @@ export async function emparejarHandy(
  */
 export async function cancelarEmparejamiento(
 	espera: EsperaDeAprobacion,
-	deps: Pick<DependenciasEmparejamiento, "invoke" | "pedirALaNube">,
+	deps: Pick<DependenciasEmparejamiento, "commands" | "pedirALaNube">,
 ): Promise<void> {
-	const ident = await identidadDelDispositivo(deps.invoke);
-	const { ts, sigB64 } = await firmar(deps.invoke, "PAIR_CANCEL", espera.pairCode, espera.nonceB64, ident.deviceId);
+	const ident = await identidadDelDispositivo(deps.commands);
+	const { ts, sigB64 } = await firmar(deps.commands, "PAIR_CANCEL", espera.pairCode, espera.nonceB64, ident.deviceId);
 
 	await deps.pedirALaNube("/v1/pair/cancel", {
 		pairCode: espera.pairCode,

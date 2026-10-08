@@ -31,6 +31,7 @@ async fn umbral(state: &State<'_, AppState>) -> Dinero {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cierre_preparar(
     state: State<'_, AppState>,
 ) -> Result<PreparacionCierreDto, AppErrorDto> {
@@ -41,6 +42,7 @@ pub async fn cierre_preparar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cierre_confirmar(
     state: State<'_, AppState>,
     args: ConfirmarCierreInput,
@@ -58,6 +60,7 @@ pub async fn cierre_confirmar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cierre_listar(
     state: State<'_, AppState>,
     args: Option<CierreListarArgs>,
@@ -68,6 +71,7 @@ pub async fn cierre_listar(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cierre_detalle(
     state: State<'_, AppState>,
     id_cierre: String,
@@ -78,6 +82,7 @@ pub async fn cierre_detalle(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cierre_reabrir(
     state: State<'_, AppState>,
     args: CierreIdInput,

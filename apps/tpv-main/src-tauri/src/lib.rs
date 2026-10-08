@@ -79,7 +79,7 @@ use tpv_infra_sqlite::{
 // Device mode (TPV / HANDY) + config persistente
 // ──────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 enum DeviceMode {
     Tpv,
@@ -95,7 +95,7 @@ enum DeviceMode {
 /// `Auto` (por defecto, y lo que se asume si el campo falta): intentar conectar siempre.
 /// `Off`: no abrir el WebSocket. La Main sigue siendo Local-First y el outbox sigue capturando,
 /// así que al volver a `Auto` se drena lo acumulado.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "lowercase")]
 enum ConnectivityMode {
     Auto,
@@ -120,7 +120,7 @@ where
     })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, specta::Type)]
 struct DeviceConfig {
     mode: Option<DeviceMode>,
     #[serde(default, deserialize_with = "connectivity_tolerante")]
@@ -177,42 +177,42 @@ pub(crate) fn certificado_verifactu(app_data_dir: &Path) -> Option<String> {
    Args
 ========================================================= */
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 struct SetDeviceModeArgs {
     mode: DeviceMode,
 }
 
 /// Destino de impresión (`caja` | `cocina`). Ausente = `caja`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 struct DestinoArgs {
     #[serde(default)]
     destino: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 struct SetConnectionModeArgs {
     mode: ConnectivityMode,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 struct SaveImageArgs {
     subfolder: String,
     base64_data: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 struct DeleteImageArgs {
     /// Ruta relativa tal cual se guarda en BD: `images/{subcarpeta}/{archivo}`.
     rel_path: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 struct EnsureImageArgs {
     /// Ruta relativa tal cual se guarda en BD: `images/{subcarpeta}/{archivo}`.
     rel_path: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 struct SetPrinterArgs {
     name: String,
     /// Destino al que se asigna (`caja` | `cocina`). Ausente = `caja`.
@@ -834,6 +834,7 @@ impl AppState {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, AppErrorDto> {
     let app_data_dir = app
         .path()
@@ -848,6 +849,7 @@ fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, AppErrorDto> {
 /// Lee la palanca de conectividad de `device_config.json`. `None` = nunca se tocó = `Auto`
 /// (el frontend asume `auto`): SYNC-17, conectar es el comportamiento por defecto.
 #[tauri::command]
+#[specta::specta]
 fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppErrorDto> {
     let app_data_dir = app
         .path()
@@ -868,6 +870,7 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppEr
 /// entera si la licencia no deja pasar. Duplicar la comprobación aquí solo añadía una llamada de
 /// red a un camino que no la necesita.
 #[tauri::command]
+#[specta::specta]
 fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
@@ -882,6 +885,7 @@ fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<St
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn set_device_mode(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -931,6 +935,7 @@ async fn set_device_mode(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppErrorDto> {
     let mode = *state.mode.lock().await;
 
@@ -981,6 +986,7 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 /// selector Main/Handy. La licencia local (modo Main) NO se toca: si se vuelve a elegir Main,
 /// el gate de licencia sigue resolviéndose con el estado guardado.
 #[tauri::command]
+#[specta::specta]
 async fn device_reset_mode(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1035,6 +1041,7 @@ async fn device_reset_mode(
 
 /// RI-07: reconstruye una imagen en su formato real y devuelve su ruta relativa.
 #[tauri::command]
+#[specta::specta]
 async fn save_image(app: AppHandle, state: State<'_, AppState>, args: SaveImageArgs) -> Result<String, AppErrorDto> {
     match args.subfolder.as_str() {
         "logo" => { state.exigir_rol(&[ADMIN]).await?; },
@@ -1143,6 +1150,7 @@ pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn images_drain_pending(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1153,6 +1161,7 @@ async fn images_drain_pending(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn images_upload_status(app: AppHandle, state: State<'_, AppState>)
     -> Result<tpv_contracts::imagenes::EstadoColaImagenes, AppErrorDto> {
     state.exigir_rol(&[tpv_domain::permisos::ADMIN]).await?;
@@ -1161,6 +1170,7 @@ async fn images_upload_status(app: AppHandle, state: State<'_, AppState>)
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn images_retry_upload(app: AppHandle, state: State<'_, AppState>, args: tpv_contracts::imagenes::ReintentarImagenArgs)
     -> Result<(), AppErrorDto> {
     state.exigir_rol(&[tpv_domain::permisos::ADMIN]).await?;
@@ -1174,6 +1184,7 @@ async fn images_retry_upload(app: AppHandle, state: State<'_, AppState>, args: t
 /// Borra una imagen: del disco local y (best-effort) del bucket R2. Se usa al reemplazar la
 /// imagen de un producto/categoría/proveedor para no dejar huérfanos ni servir caché obsoleta.
 #[tauri::command]
+#[specta::specta]
 async fn images_delete(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1213,6 +1224,7 @@ async fn images_delete(
 /// si no se pudo (sin modo, aún no está en R2, u offline). Nunca es un error "duro": el UI
 /// degrada al placeholder y reintenta en la siguiente recarga.
 #[tauri::command]
+#[specta::specta]
 async fn images_ensure_local(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1260,6 +1272,7 @@ async fn images_ensure_local(
 /// Pensado para Mains que ya tenían imágenes antes de existir R2. Se protege con un marcador
 /// para no re-escanear en cada arranque. La subida real la hace `images_drain_pending`.
 #[tauri::command]
+#[specta::specta]
 async fn images_backfill(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1321,6 +1334,7 @@ fn app_data_dir_of(app: &AppHandle) -> Result<PathBuf, String> {
 /// Lista las impresoras visibles por el SO (locales + conexiones de red/WiFi). Se ejecuta en un
 /// hilo bloqueante para no congelar el runtime async (la API de Windows es síncrona).
 #[tauri::command]
+#[specta::specta]
 async fn printer_list() -> Result<Vec<printing::PrinterInfo>, AppErrorDto> {
     tokio::task::spawn_blocking(printing::list_printers)
         .await
@@ -1355,6 +1369,7 @@ fn impresora_de(cfg: &DeviceConfig, destino: &str) -> Option<String> {
 
 /// Devuelve la impresora seleccionada para un destino (o `None`).
 #[tauri::command]
+#[specta::specta]
 fn printer_get_selected(
     app: AppHandle,
     args: Option<DestinoArgs>,
@@ -1366,6 +1381,7 @@ fn printer_get_selected(
 
 /// Persiste la impresora de un destino en `device_config.json` (nombre vacío => deselecciona).
 #[tauri::command]
+#[specta::specta]
 fn printer_set_selected(app: AppHandle, args: SetPrinterArgs) -> Result<String, AppErrorDto> {
     let dir = app_data_dir_of(&app)?;
     let mut cfg = load_config(&dir);
@@ -1439,6 +1455,7 @@ async fn imprimir_ticket(
 /// pantalla. Sale sin número, sin QR y sin marca de copia aunque la pantalla los mande
 /// (`como_precuenta`, RI-29): el ticket de un cobro sólo sale de `printer_imprimir_pago`.
 #[tauri::command]
+#[specta::specta]
 async fn printer_imprimir_precuenta(
     app: AppHandle,
     payload: printing::PrintTicketPayload,
@@ -1451,6 +1468,7 @@ async fn printer_imprimir_precuenta(
 ///
 /// Basta con estar identificado: lo imprime quien acaba de cobrar, a mitad de servicio.
 #[tauri::command]
+#[specta::specta]
 async fn printer_ticket_de_pago(
     state: State<'_, AppState>,
     args: tpv_contracts::impresion::TicketDePagoInput,
@@ -1479,6 +1497,7 @@ fn copia_si_ya_salio(
 /// Imprime el ticket de un cobro. No recibe el papel: lo vuelve a componer desde la base, así que
 /// lo que sale es siempre lo que dice la factura.
 #[tauri::command]
+#[specta::specta]
 async fn printer_imprimir_pago(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1507,6 +1526,7 @@ async fn printer_imprimir_pago(
 /// de contar-. Va aparte del ticket de venta a proposito: compartir el camino del ticket de
 /// venta invitaria a que un cambio en uno se colara en el otro.
 #[tauri::command]
+#[specta::specta]
 async fn printer_print_arqueo(
     app: AppHandle,
     payload: printing::PrintArqueoPayload,
@@ -1526,6 +1546,7 @@ async fn printer_print_arqueo(
 /// porque es la MISMA cuenta que usa el builder ESC/POS: dos copias acabarían discrepando, que es
 /// justo lo que hace que una previsualización deje de servir para nada.
 #[tauri::command]
+#[specta::specta]
 fn printer_ticket_cols(args: printing::GeometriaTicket) -> Result<u32, AppErrorDto> {
     Ok(printing::cols_efectivas(
         args.paper_width_mm,
@@ -1605,6 +1626,7 @@ fn ruta_dentro_de(dir: &std::path::Path, ruta: &str) -> Option<std::path::PathBu
 /// cambio de un cliente porque no se pudo escribir una fila de auditoría sería peor que la falta
 /// de esa fila. El gate NO es best-effort: sin sesión no se abre.
 #[tauri::command]
+#[specta::specta]
 async fn printer_open_drawer(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1630,6 +1652,7 @@ async fn printer_open_drawer(
 
 /// Imprime un ticket de prueba en la impresora indicada (o la seleccionada) para verificarla.
 #[tauri::command]
+#[specta::specta]
 async fn printer_print_test(
     app: AppHandle,
     args: Option<SetPrinterArgs>,
@@ -1653,7 +1676,7 @@ async fn printer_print_test(
 // el rollback) se controla desde `tpv-api` sin tocar el equipo del cliente.
 
 /// Metadatos de una actualización disponible (lo que la UI necesita para avisar).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 struct UpdateInfo {
     /// Versión nueva publicada en el feed (p. ej. "0.2.0").
     version: String,
@@ -1666,7 +1689,7 @@ struct UpdateInfo {
 /// Estado completo para la pantalla Configuración → Actualizaciones. A diferencia de
 /// `updater_check`, NUNCA falla: quedarse sin internet o un feed caído se reportan en `error`, para
 /// que la pantalla siga pudiendo pintar la versión instalada en vez de quedarse en blanco.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 struct UpdateStatus {
     /// Versión instalada en este equipo (siempre disponible, haya feed o no).
     current_version: String,
@@ -1733,6 +1756,7 @@ fn updater_del_equipo(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, 
 
 /// Comprueba el feed y devuelve los metadatos de la nueva versión, o `None` si ya está al día.
 #[tauri::command]
+#[specta::specta]
 async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, AppErrorDto> {
     #[cfg(desktop)]
     {
@@ -1749,6 +1773,7 @@ async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, AppErrorDto
 /// Comprueba de verdad (no devuelve nada cacheado), así que el botón "Buscar actualizaciones"
 /// también dispara el aviso si aparece una versión nueva.
 #[tauri::command]
+#[specta::specta]
 async fn updater_status(app: AppHandle) -> Result<UpdateStatus, AppErrorDto> {
     let current_version = app.package_info().version.to_string();
 
@@ -1820,6 +1845,7 @@ async fn notify_update_available(app: &AppHandle, version: &str) {
 /// feed antes de instalar (no se fía de un estado cacheado). Pensado para invocarse cuando el
 /// usuario lo decida (p. ej. al cerrar caja), no en automático.
 #[tauri::command]
+#[specta::specta]
 async fn updater_install(app: AppHandle) -> Result<(), AppErrorDto> {
     #[cfg(desktop)]
     {
@@ -1849,6 +1875,301 @@ async fn updater_install(app: AppHandle) -> Result<(), AppErrorDto> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+/// RI-87: este registro genera tanto el IPC como sus funciones y DTO TypeScript.
+pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::<tauri::Wry>::new()
+        .commands(tauri_specta::collect_commands![
+            // device
+            get_device_mode,
+            set_device_mode,
+            get_connection_mode,
+            set_connection_mode,
+            init_main,
+            device_reset_mode,
+            // genéricos
+            save_image,
+            images_drain_pending,
+            images_upload_status,
+            images_retry_upload,
+            images_delete,
+            images_ensure_local,
+            images_backfill,
+            // auto-actualización (updater)
+            updater_check,
+            updater_status,
+            updater_install,
+            // impresión (host/Windows — printing.rs)
+            printer_list,
+            printer_get_selected,
+            printer_set_selected,
+            printer_imprimir_precuenta,
+            printer_ticket_de_pago,
+            printer_imprimir_pago,
+            printer_print_arqueo,
+            printer_ticket_cols,
+            printer_open_drawer,
+            printer_print_test,
+            // auth / login
+            commands::login::list_login_users,
+            commands::login::setup_pendiente,
+            commands::login::login_user,
+            commands::login::logout,
+            commands::login::get_today_punch_status,
+            commands::login::punch,
+            commands::login::complete_initial_setup,
+            commands::login::set_turno_partido_hoy,
+            commands::recuperacion_pin::login_recuperar_pin_solicitar,
+            commands::recuperacion_pin::login_recuperar_pin_confirmar,
+            commands::correo_recuperacion::correo_recuperacion_estado,
+            commands::correo_recuperacion::correo_recuperacion_solicitar,
+            commands::correo_recuperacion::correo_recuperacion_confirmar,
+            commands::correo_recuperacion::correo_recuperacion_usar_el_de_la_compra,
+            // recuperación local
+            commands::recovery::recovery_status,
+            commands::recovery::recovery_list_backups,
+            commands::recovery::recovery_create_backup,
+            commands::recovery::recovery_export_backup,
+            commands::recovery::recovery_import_backup,
+            commands::recovery::recovery_restore_backup,
+
+            // mesass
+            commands::mesas::save_layout,
+            commands::mesas::load_layout,
+            commands::mesas::set_reserva_estado,
+            commands::mesas::get_comanda_abierta_by_mesa,
+            commands::mesas::abrir_comanda,
+            commands::mesas::comanda_set_trabajador_if_null,
+            commands::mesas::get_lineas_comanda,
+            commands::mesas::add_linea_comanda,
+            commands::mesas::mesas_meta_all,
+            commands::mesas::list_categorias_vendibles,
+            commands::mesas::list_productos_by_categoria,
+            commands::mesas::search_productos_by_nombre,
+            commands::mesas::remove_one_pending_detalle,
+            commands::mesas::delete_detalle,
+            commands::mesas::update_detalle_nota,
+            commands::mesas::cobrar_detalles,
+            commands::mesas::kitchen_list_today_pending,
+            commands::mesas::kitchen_set_line_state,
+            // inventario (migrado a arquitectura hexagonal — commands/inventario.rs)
+            commands::inventario::inventario_list_categorias,
+            commands::inventario::inventario_create_categoria,
+            commands::inventario::inventario_list_proveedores_mini,
+            commands::inventario::inventario_list_productos_by_categoria,
+            commands::inventario::inventario_get_resumen,
+            commands::inventario::inventario_list_alergenos,
+            commands::inventario::inventario_get_product_detail,
+            commands::inventario::inventario_delete_producto,
+            commands::inventario::inventario_upsert_producto,
+            commands::inventario::inventario_list_lotes_by_producto,
+            commands::inventario::inventario_create_lote,
+            commands::inventario::inventario_update_lote,
+            commands::inventario::inventario_ajustar_lote,
+            commands::inventario::inventario_ajustar_stock_suelto,
+            // tareas
+            commands::tareas::tareas_get_trabajadores,
+            commands::tareas::tareas_create_tarea,
+            commands::tareas::tareas_get_tareas_admin,
+            commands::tareas::tareas_get_tarea_by_id,
+            commands::tareas::tareas_update_tarea,
+            commands::tareas::tareas_get_tarea_asignados,
+            commands::tareas::tareas_set_asignaciones_tarea,
+            commands::tareas::tareas_delete_tarea,
+            commands::tareas::tareas_get_papelera,
+            commands::tareas::tareas_restaurar_tarea,
+            commands::tareas::tareas_vaciar_papelera,
+            commands::tareas::tareas_get_mis_tareas,
+            commands::tareas::tareas_marcar_tarea_finalizada,
+            // trabajadores
+            commands::trabajadores::trabajadores_get_roles,
+            commands::trabajadores::trabajadores_get_all,
+            commands::trabajadores::trabajadores_get_detail,
+            commands::trabajadores::trabajadores_get_trabajador_id_by_usuario,
+            commands::trabajadores::trabajadores_create,
+            commands::trabajadores::trabajadores_update,
+            commands::trabajadores::turnos_get_all,
+            commands::trabajadores::horarios_get_asignaciones_semana,
+            commands::trabajadores::horarios_create_asignacion,
+            commands::trabajadores::horarios_update_asignacion,
+            commands::trabajadores::horarios_delete_asignacion,
+            commands::trabajadores::horarios_copy_semana_asignaciones,
+            commands::trabajadores::horarios_set_predeterminado_desde_semana,
+            // cuentas (migrado a arquitectura hexagonal — commands/cuentas.rs)
+            commands::cuentas::cuentas_get_entradas,
+            commands::cuentas::cuentas_get_salidas,
+            commands::cuentas::cuentas_get_resumen,
+            commands::cuentas::cuentas_create_gasto,
+            commands::cuentas::cuentas_update_gasto,
+            commands::cuentas::cuentas_delete_gasto,
+            commands::cuentas::cuentas_update_pago,
+            commands::cuentas::cuentas_anular_pago,
+            commands::cuentas::cuentas_lineas_devolubles,
+            commands::cuentas::cuentas_devolver_lineas,
+            commands::cuentas::cuentas_previsualizar_cambio,
+            commands::cierre_caja::cierre_preparar,
+            commands::cierre_caja::cierre_confirmar,
+            commands::cierre_caja::cierre_listar,
+            commands::cierre_caja::cierre_detalle,
+            commands::cierre_caja::cierre_reabrir,
+            // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
+            commands::clientes::clientes_get_overview,
+            commands::clientes::clientes_get_cliente_form,
+            commands::clientes::clientes_create_cliente,
+            commands::clientes::clientes_update_cliente,
+            commands::clientes::clientes_recalcular_gasto,
+            // reservas (migrado a arquitectura hexagonal — commands/reservas.rs)
+            commands::reservas::reservas_get_meta,
+            commands::reservas::reservas_get_mes,
+            commands::reservas::reservas_save,
+            commands::reservas::reservas_buscar_cliente,
+            commands::reservas::reservas_delete,
+            // proveedores (migrado a arquitectura hexagonal — commands/proveedores.rs)
+            commands::proveedores::proveedores_get_all,
+            commands::proveedores::proveedores_save,
+            commands::proveedores::proveedores_delete,
+            commands::proveedores::proveedores_get_productos,
+            commands::proveedores::proveedores_get_categorias,
+            commands::proveedores::proveedores_get_productos_all,
+            commands::proveedores::proveedores_set_vinculos,
+            // pedidos a proveedores (Local-First, modo Main)
+            commands::pedidos_proveedor::pedidos_proveedor_get_page,
+            commands::pedidos_proveedor::pedidos_proveedor_crear,
+            commands::pedidos_proveedor::pedidos_proveedor_actualizar,
+            commands::pedidos_proveedor::pedidos_proveedor_cambiar_estado,
+            // notificaciones (Local-First, modo Main)
+            commands::notificaciones::notificaciones_listar,
+            commands::notificaciones::notificaciones_no_leidas,
+            commands::notificaciones::notificaciones_marcar_leida,
+            commands::notificaciones::notificaciones_marcar_todas_leidas,
+            commands::notificaciones::notificaciones_descartar,
+            commands::notificaciones::notificaciones_papelera,
+            commands::notificaciones::notificaciones_restaurar,
+            commands::notificaciones::notificaciones_eliminar,
+            // venta rápida
+            commands::venta_rapida::vr_list_categorias_vendibles,
+            commands::venta_rapida::vr_list_productos_by_categoria,
+            commands::venta_rapida::vr_search_productos,
+            commands::venta_rapida::vr_create_comanda_barra,
+            commands::venta_rapida::vr_list_comandas_barra,
+            commands::venta_rapida::vr_get_lineas_comanda,
+            commands::venta_rapida::vr_add_linea_comanda,
+            commands::venta_rapida::vr_remove_last_unpaid_linea,
+            commands::venta_rapida::vr_delete_linea_if_unpaid,
+            commands::venta_rapida::vr_update_nota_detalle,
+            commands::venta_rapida::vr_cobrar_fraccionado,
+            commands::venta_rapida::vr_delete_comanda_if_safe,
+            commands::venta_rapida::vr_get_index_rows,
+            commands::venta_rapida::vr_get_detalles_ver_ticket,
+            // verifactu (FISCAL-01). Sólo LECTURAS: la emisión ocurre dentro de la transacción
+            // del cobro, no por un comando propio.
+            commands::verifactu::verifactu_estado,
+            commands::verifactu::verifactu_listar,
+            commands::verifactu::verifactu_certificados,
+            commands::verifactu::verifactu_set_certificado,
+            commands::verifactu::verifactu_probar_conexion,
+            commands::verifactu::verifactu_emitir_factura_de_tickets,
+            commands::verifactu::verifactu_corregir_factura,
+            commands::verifactu::verifactu_subsanar_rechazados,
+            commands::verifactu::verifactu_set_modo_prueba,
+            commands::verifactu::verifactu_reconocer_anomalias,
+            commands::verifactu::verifactu_exportar,
+            commands::verifactu::verifactu_declaracion_responsable,
+            // stats
+            commands::stats::stats_mesas_get,
+            commands::stats::stats_productos_list_categorias,
+            commands::stats::stats_productos_resumen,
+            commands::stats::stats_reservas_resumen,
+            commands::stats::stats_trabajadores_resumen,
+            commands::stats::stats_clientes_resumen,
+            commands::stats::stats_proveedores_resumen,
+            // licensing (migrado a arquitectura hexagonal — commands/licensing.rs)
+            commands::licensing::license_get_state,
+            commands::licensing::license_activate,
+            commands::licensing::license_sumar_clave,
+            commands::licensing::license_request_device_change,
+            commands::licensing::license_clear_state,
+            commands::licensing::license_gate,
+            commands::licensing::license_check_now,
+            // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
+            commands::pairing::handy_set_token,
+            commands::pairing::handy_get_tenant,
+
+            commands::pairing::device_get_identity,
+            commands::pairing::device_firmar_emparejamiento,
+            commands::pairing::device_hora_para_firmar,
+            commands::pairing::tpv_server_post_json,
+            commands::pairing::pair_create,
+            commands::pairing::config_upload_initial_setup,
+            // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
+
+            // sincronización Main → nube (outbox de escrituras locales)
+
+            commands::sync::sync_health,
+            commands::permisos::permisos_sesion,
+            commands::permisos::permisos_configuracion,
+            commands::permisos::permisos_guardar,
+            commands::socket_handy::handy_socket_estado,
+            commands::socket_handy::handy_socket_reintentar,
+            commands::sync::sync_estado,
+            commands::sync::sync_reintentar,
+            commands::sync::sync_backfill_estado,
+            commands::sync::sync_bootstrap_desde_nube,
+            commands::sync::sync_inicializar_tenant_vacio,
+            // tareas periódicas de fondo (runner de jobs)
+            commands::jobs::jobs_status,
+            commands::jobs::interruptores_apagados,
+            // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
+            commands::configuracion::config_get_business_settings,
+            commands::configuracion::config_patch_business_settings,
+            commands::configuracion::config_get_ticket_settings,
+            commands::configuracion::config_patch_ticket_settings,
+            commands::configuracion::config_get_contact_settings,
+            commands::configuracion::config_patch_contact_settings,
+            // correo electrónico (envío vía worker; ya no hay config SMTP local — DB-04)
+            commands::email_config::email_enviar_pedido,
+        ])
+        .typ::<tpv_contracts::inventario::AlergenoMiniDto>()
+        .typ::<tpv_contracts::inventario::ProductoDetalleDto>()
+        .typ::<tpv_contracts::inventario::SetProductoAlergenosInput>()
+        .typ::<tpv_contracts::licensing::ApiSignedHeaders>()
+        .typ::<tpv_contracts::licensing::TpvServerSignedHeadersArgs>()
+        .typ::<tpv_contracts::mesas::ComandaBarraListItem>()
+        .typ::<tpv_contracts::mesas::MesasCerrarComandaInput>()
+        .typ::<tpv_contracts::mesas::MesasGetOrCreateComandaBarraInput>()
+        .typ::<tpv_contracts::mesas::MesasCreateComandaBarraInput>()
+        .typ::<tpv_contracts::mesas::MesasListComandasBarraArgs>()
+        .typ::<tpv_contracts::mesas::MesasDeleteComandaBarraIfSafeInput>()
+        .typ::<tpv_contracts::notificaciones::CrearNotificacionInput>()
+        .typ::<tpv_contracts::socket_handy::AvisoSocketHandy>()
+        .typ::<tpv_contracts::sync::SqlStatement>()
+        .typ::<tpv_contracts::sync::SyncChange>()
+        .typ::<tpv_contracts::sync::ApplySyncChangesArgs>()
+        .typ::<tpv_contracts::sync::AplicacionSync>()
+        .typ::<tpv_contracts::sync::OutboxEntry>()
+        .typ::<tpv_contracts::sync::OutboxFallo>()
+        .typ::<tpv_contracts::sync::BootstrapTabla>()
+        .typ::<tpv_contracts::sync::BootstrapSnapshot>()
+        .typ::<tpv_contracts::sync::HistoricoPagina>()
+        .typ::<tpv_contracts::sync::ConteoTabla>()
+        .typ::<tpv_contracts::sync::VerificacionNube>()
+        .typ::<tpv_contracts::sync::DescuadreTabla>()
+        .typ::<tpv_contracts::sync::ResultadoVerificacion>()
+        .typ::<tpv_contracts::sync::TablaAExaminar>()
+        .typ::<tpv_contracts::sync::ClavesTabla>()
+        .typ::<tpv_contracts::sync::VerificacionClaves>()
+        .typ::<tpv_contracts::sync::ComandaReplicada>()
+        .typ::<tpv_contracts::sync::CambioReplicado>()
+        .error_handling(tauri_specta::ErrorHandlingMode::Throw)
+        .dangerously_cast_bigints_to_number()
+        .typ::<tpv_telemetry::event::SpoolEvent>()
+}
+
+/// Sólo genera ficheros; no inicia la aplicación, abre bases ni conecta a servicios.
+pub fn exportar_contratos(destino: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    command_builder().export(specta_typescript::Typescript::default(), destino)?;
+    Ok(())
+}
+
 // Builder (único) + registro de comandos
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -2125,256 +2446,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            // device
-            get_device_mode,
-            set_device_mode,
-            get_connection_mode,
-            set_connection_mode,
-            init_main,
-            device_reset_mode,
-            // genéricos
-            save_image,
-            images_drain_pending,
-            images_upload_status,
-            images_retry_upload,
-            images_delete,
-            images_ensure_local,
-            images_backfill,
-            // auto-actualización (updater)
-            updater_check,
-            updater_status,
-            updater_install,
-            // impresión (host/Windows — printing.rs)
-            printer_list,
-            printer_get_selected,
-            printer_set_selected,
-            printer_imprimir_precuenta,
-            printer_ticket_de_pago,
-            printer_imprimir_pago,
-            printer_print_arqueo,
-            printer_ticket_cols,
-            printer_open_drawer,
-            printer_print_test,
-            // auth / login
-            commands::login::list_login_users,
-            commands::login::setup_pendiente,
-            commands::login::login_user,
-            commands::login::logout,
-            commands::login::get_today_punch_status,
-            commands::login::punch,
-            commands::login::complete_initial_setup,
-            commands::login::set_turno_partido_hoy,
-            commands::recuperacion_pin::login_recuperar_pin_solicitar,
-            commands::recuperacion_pin::login_recuperar_pin_confirmar,
-            commands::correo_recuperacion::correo_recuperacion_estado,
-            commands::correo_recuperacion::correo_recuperacion_solicitar,
-            commands::correo_recuperacion::correo_recuperacion_confirmar,
-            commands::correo_recuperacion::correo_recuperacion_usar_el_de_la_compra,
-            // recuperación local
-            commands::recovery::recovery_status,
-            commands::recovery::recovery_list_backups,
-            commands::recovery::recovery_create_backup,
-            commands::recovery::recovery_export_backup,
-            commands::recovery::recovery_import_backup,
-            commands::recovery::recovery_restore_backup,
-
-            // mesass
-            commands::mesas::save_layout,
-            commands::mesas::load_layout,
-            commands::mesas::set_reserva_estado,
-            commands::mesas::get_comanda_abierta_by_mesa,
-            commands::mesas::abrir_comanda,
-            commands::mesas::comanda_set_trabajador_if_null,
-            commands::mesas::get_lineas_comanda,
-            commands::mesas::add_linea_comanda,
-            commands::mesas::mesas_meta_all,
-            commands::mesas::list_categorias_vendibles,
-            commands::mesas::list_productos_by_categoria,
-            commands::mesas::search_productos_by_nombre,
-            commands::mesas::remove_one_pending_detalle,
-            commands::mesas::delete_detalle,
-            commands::mesas::update_detalle_nota,
-            commands::mesas::cobrar_detalles,
-            commands::mesas::kitchen_list_today_pending,
-            commands::mesas::kitchen_set_line_state,
-            // inventario (migrado a arquitectura hexagonal — commands/inventario.rs)
-            commands::inventario::inventario_list_categorias,
-            commands::inventario::inventario_create_categoria,
-            commands::inventario::inventario_list_proveedores_mini,
-            commands::inventario::inventario_list_productos_by_categoria,
-            commands::inventario::inventario_get_resumen,
-            commands::inventario::inventario_list_alergenos,
-            commands::inventario::inventario_get_product_detail,
-            commands::inventario::inventario_delete_producto,
-            commands::inventario::inventario_upsert_producto,
-            commands::inventario::inventario_list_lotes_by_producto,
-            commands::inventario::inventario_create_lote,
-            commands::inventario::inventario_update_lote,
-            commands::inventario::inventario_ajustar_lote,
-            commands::inventario::inventario_ajustar_stock_suelto,
-            // tareas
-            commands::tareas::tareas_get_trabajadores,
-            commands::tareas::tareas_create_tarea,
-            commands::tareas::tareas_get_tareas_admin,
-            commands::tareas::tareas_get_tarea_by_id,
-            commands::tareas::tareas_update_tarea,
-            commands::tareas::tareas_get_tarea_asignados,
-            commands::tareas::tareas_set_asignaciones_tarea,
-            commands::tareas::tareas_delete_tarea,
-            commands::tareas::tareas_get_papelera,
-            commands::tareas::tareas_restaurar_tarea,
-            commands::tareas::tareas_vaciar_papelera,
-            commands::tareas::tareas_get_mis_tareas,
-            commands::tareas::tareas_marcar_tarea_finalizada,
-            // trabajadores
-            commands::trabajadores::trabajadores_get_roles,
-            commands::trabajadores::trabajadores_get_all,
-            commands::trabajadores::trabajadores_get_detail,
-            commands::trabajadores::trabajadores_get_trabajador_id_by_usuario,
-            commands::trabajadores::trabajadores_create,
-            commands::trabajadores::trabajadores_update,
-            commands::trabajadores::turnos_get_all,
-            commands::trabajadores::horarios_get_asignaciones_semana,
-            commands::trabajadores::horarios_create_asignacion,
-            commands::trabajadores::horarios_update_asignacion,
-            commands::trabajadores::horarios_delete_asignacion,
-            commands::trabajadores::horarios_copy_semana_asignaciones,
-            commands::trabajadores::horarios_set_predeterminado_desde_semana,
-            // cuentas (migrado a arquitectura hexagonal — commands/cuentas.rs)
-            commands::cuentas::cuentas_get_entradas,
-            commands::cuentas::cuentas_get_salidas,
-            commands::cuentas::cuentas_get_resumen,
-            commands::cuentas::cuentas_create_gasto,
-            commands::cuentas::cuentas_update_gasto,
-            commands::cuentas::cuentas_delete_gasto,
-            commands::cuentas::cuentas_update_pago,
-            commands::cuentas::cuentas_anular_pago,
-            commands::cuentas::cuentas_lineas_devolubles,
-            commands::cuentas::cuentas_devolver_lineas,
-            commands::cuentas::cuentas_previsualizar_cambio,
-            commands::cierre_caja::cierre_preparar,
-            commands::cierre_caja::cierre_confirmar,
-            commands::cierre_caja::cierre_listar,
-            commands::cierre_caja::cierre_detalle,
-            commands::cierre_caja::cierre_reabrir,
-            // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
-            commands::clientes::clientes_get_overview,
-            commands::clientes::clientes_get_cliente_form,
-            commands::clientes::clientes_create_cliente,
-            commands::clientes::clientes_update_cliente,
-            commands::clientes::clientes_recalcular_gasto,
-            // reservas (migrado a arquitectura hexagonal — commands/reservas.rs)
-            commands::reservas::reservas_get_meta,
-            commands::reservas::reservas_get_mes,
-            commands::reservas::reservas_save,
-            commands::reservas::reservas_buscar_cliente,
-            commands::reservas::reservas_delete,
-            // proveedores (migrado a arquitectura hexagonal — commands/proveedores.rs)
-            commands::proveedores::proveedores_get_all,
-            commands::proveedores::proveedores_save,
-            commands::proveedores::proveedores_delete,
-            commands::proveedores::proveedores_get_productos,
-            commands::proveedores::proveedores_get_categorias,
-            commands::proveedores::proveedores_get_productos_all,
-            commands::proveedores::proveedores_set_vinculos,
-            // pedidos a proveedores (Local-First, modo Main)
-            commands::pedidos_proveedor::pedidos_proveedor_get_page,
-            commands::pedidos_proveedor::pedidos_proveedor_crear,
-            commands::pedidos_proveedor::pedidos_proveedor_actualizar,
-            commands::pedidos_proveedor::pedidos_proveedor_cambiar_estado,
-            // notificaciones (Local-First, modo Main)
-            commands::notificaciones::notificaciones_listar,
-            commands::notificaciones::notificaciones_no_leidas,
-            commands::notificaciones::notificaciones_marcar_leida,
-            commands::notificaciones::notificaciones_marcar_todas_leidas,
-            commands::notificaciones::notificaciones_descartar,
-            commands::notificaciones::notificaciones_papelera,
-            commands::notificaciones::notificaciones_restaurar,
-            commands::notificaciones::notificaciones_eliminar,
-            // venta rápida
-            commands::venta_rapida::vr_list_categorias_vendibles,
-            commands::venta_rapida::vr_list_productos_by_categoria,
-            commands::venta_rapida::vr_search_productos,
-            commands::venta_rapida::vr_create_comanda_barra,
-            commands::venta_rapida::vr_list_comandas_barra,
-            commands::venta_rapida::vr_get_lineas_comanda,
-            commands::venta_rapida::vr_add_linea_comanda,
-            commands::venta_rapida::vr_remove_last_unpaid_linea,
-            commands::venta_rapida::vr_delete_linea_if_unpaid,
-            commands::venta_rapida::vr_update_nota_detalle,
-            commands::venta_rapida::vr_cobrar_fraccionado,
-            commands::venta_rapida::vr_delete_comanda_if_safe,
-            commands::venta_rapida::vr_get_index_rows,
-            commands::venta_rapida::vr_get_detalles_ver_ticket,
-            // verifactu (FISCAL-01). Sólo LECTURAS: la emisión ocurre dentro de la transacción
-            // del cobro, no por un comando propio.
-            commands::verifactu::verifactu_estado,
-            commands::verifactu::verifactu_listar,
-            commands::verifactu::verifactu_certificados,
-            commands::verifactu::verifactu_set_certificado,
-            commands::verifactu::verifactu_probar_conexion,
-            commands::verifactu::verifactu_emitir_factura_de_tickets,
-            commands::verifactu::verifactu_corregir_factura,
-            commands::verifactu::verifactu_subsanar_rechazados,
-            commands::verifactu::verifactu_set_modo_prueba,
-            commands::verifactu::verifactu_reconocer_anomalias,
-            commands::verifactu::verifactu_exportar,
-            commands::verifactu::verifactu_declaracion_responsable,
-            // stats
-            commands::stats::stats_mesas_get,
-            commands::stats::stats_productos_list_categorias,
-            commands::stats::stats_productos_resumen,
-            commands::stats::stats_reservas_resumen,
-            commands::stats::stats_trabajadores_resumen,
-            commands::stats::stats_clientes_resumen,
-            commands::stats::stats_proveedores_resumen,
-            // licensing (migrado a arquitectura hexagonal — commands/licensing.rs)
-            commands::licensing::license_get_state,
-            commands::licensing::license_activate,
-            commands::licensing::license_sumar_clave,
-            commands::licensing::license_request_device_change,
-            commands::licensing::license_clear_state,
-            commands::licensing::license_gate,
-            commands::licensing::license_check_now,
-            // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
-            commands::pairing::handy_set_token,
-            commands::pairing::handy_get_tenant,
-
-            commands::pairing::device_get_identity,
-            commands::pairing::device_firmar_emparejamiento,
-            commands::pairing::device_hora_para_firmar,
-            commands::pairing::tpv_server_post_json,
-            commands::pairing::pair_create,
-            commands::pairing::config_upload_initial_setup,
-            // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
-
-            // sincronización Main → nube (outbox de escrituras locales)
-
-            commands::sync::sync_health,
-            commands::permisos::permisos_sesion,
-            commands::permisos::permisos_configuracion,
-            commands::permisos::permisos_guardar,
-            commands::socket_handy::handy_socket_estado,
-            commands::socket_handy::handy_socket_reintentar,
-            commands::sync::sync_estado,
-            commands::sync::sync_reintentar,
-            commands::sync::sync_backfill_estado,
-            commands::sync::sync_bootstrap_desde_nube,
-            commands::sync::sync_inicializar_tenant_vacio,
-            // tareas periódicas de fondo (runner de jobs)
-            commands::jobs::jobs_status,
-            commands::jobs::interruptores_apagados,
-            // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
-            commands::configuracion::config_get_business_settings,
-            commands::configuracion::config_patch_business_settings,
-            commands::configuracion::config_get_ticket_settings,
-            commands::configuracion::config_patch_ticket_settings,
-            commands::configuracion::config_get_contact_settings,
-            commands::configuracion::config_patch_contact_settings,
-            // correo electrónico (envío vía worker; ya no hay config SMTP local — DB-04)
-            commands::email_config::email_enviar_pedido,
-        ])
+        .invoke_handler(command_builder().invoke_handler())
         .run(context)
         .expect("error while running tauri application");
 }
@@ -2821,7 +2893,7 @@ mod tests_exenciones_del_gate {
 
     #[test]
     fn la_replica_y_las_credenciales_no_se_exponen_a_la_webview() {
-        let registro = include_str!("lib.rs").split("generate_handler!").nth(1).unwrap().split("])").next().unwrap();
+        let registro = include_str!("lib.rs").split("collect_commands!").nth(1).unwrap().split("])").next().unwrap();
         for comando in ["sync_apply_changes", "sync_outbox_pending", "sync_outbox_mark_sent", "sync_outbox_mark_failed", "sync_outbox_mark_encolada", "sync_liberar_encoladas", "recovery_complete", "device_sign_b64", "handy_get_ws_auth", "device_firmar_hello"] {
             assert!(!registro.contains(comando), "{comando} debe ser interno");
         }
@@ -2914,7 +2986,7 @@ mod tests_exenciones_del_gate {
         // comandos— se contaría como una reaparición.
         const FUENTE_COMPLETA: &str = include_str!("lib.rs");
         let desde = FUENTE_COMPLETA
-            .find("generate_handler![")
+            .find("collect_commands![")
             .expect("no se encuentra el registro de comandos");
         let hasta = FUENTE_COMPLETA[desde..]
             .find("])")

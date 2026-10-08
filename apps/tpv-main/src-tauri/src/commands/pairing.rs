@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use serde_json::Value as JsonValue;
+use tpv_contracts::json::JsonDinamico;
 use tauri::{AppHandle, Manager, State};
 
 use tpv_application::use_cases::cloud_sync as uc_sync;
@@ -77,6 +77,7 @@ fn ruta_de_administracion(path: &str) -> bool {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn handy_set_token(app: AppHandle, state: State<'_, AppState>, args: HandySetTokenArgs) -> Result<String, AppErrorDto> {
     let service = svc(&app)?;
     state.cerrar_sesion().await;
@@ -94,17 +95,20 @@ pub async fn handy_set_token(app: AppHandle, state: State<'_, AppState>, args: H
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
     Ok(uc::handy_get_tenant(&svc(&app)?)?)
 }
 
 
 #[tauri::command]
+#[specta::specta]
 pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, AppErrorDto> {
     Ok(uc::device_identity(&svc(&app)?)?)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn device_firmar_emparejamiento(app: AppHandle, args: DeviceFirmarEmparejamientoArgs) -> Result<FirmaDispositivo, AppErrorDto> {
     Ok(uc::firmar_emparejamiento(&svc(&app)?, args)?)
 }
@@ -114,16 +118,18 @@ pub fn device_firmar_emparejamiento(app: AppHandle, args: DeviceFirmarEmparejami
 /// Sin sesión, como los comandos de firma acotada: se usa en el emparejamiento de la Handy, antes de que nadie
 /// entre.
 #[tauri::command]
+#[specta::specta]
 pub fn device_hora_para_firmar(app: AppHandle) -> Result<i64, AppErrorDto> {
     Ok(uc::hora_para_firmar(&svc(&app)?))
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn tpv_server_post_json(
     app: AppHandle,
     state: State<'_, AppState>,
     args: TpvServerPostJsonArgs,
-) -> Result<JsonValue, AppErrorDto> {
+) -> Result<JsonDinamico, AppErrorDto> {
     // RI-57: lista exacta de capacidades UI. El modo y las rutas de réplica no los elige JS.
     let modo = *state.mode.lock().await;
     let permitido = ruta_permitida(modo, &args.mode, &args.path);
@@ -131,7 +137,7 @@ pub async fn tpv_server_post_json(
     if ruta_de_administracion(&args.path) {
         state.exigir_rol(&[ADMIN]).await?;
     }
-    Ok(uc::tpv_server_post_json(&svc(&app)?, args).await?)
+    Ok(JsonDinamico(uc::tpv_server_post_json(&svc(&app)?, args).await?))
 }
 
 /// Genera un nuevo código de emparejamiento (lo pide al worker) y lo devuelve tipado a la UI.
@@ -140,6 +146,7 @@ pub async fn tpv_server_post_json(
 /// Configuración → Vincular Handy—, así que va con el mismo candado que las rutas de
 /// `/v1/pair/…` del proxy. Repartir un código de emparejamiento es dar acceso al negocio.
 #[tauri::command]
+#[specta::specta]
 pub async fn pair_create(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -151,6 +158,7 @@ pub async fn pair_create(
 /// Sube a la nube el setup inicial del admin tras completarlo en local (panel de
 /// configuración inicial). El `PairingAdapter` firma la petición como dispositivo TPV.
 #[tauri::command]
+#[specta::specta]
 pub async fn config_upload_initial_setup(
     app: AppHandle,
     args: UploadInitialSetupArgs,

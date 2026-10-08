@@ -22,12 +22,14 @@ use tpv_contracts::errors::AppErrorDto;
 /* Lecturas */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn trabajadores_get_roles(state: State<'_, AppState>) -> Result<Vec<RolRow>, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_roles(repo.as_ref()).await?)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn trabajadores_get_all(
     state: State<'_, AppState>,
 ) -> Result<Vec<TrabajadorRow>, AppErrorDto> {
@@ -36,6 +38,7 @@ pub async fn trabajadores_get_all(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn trabajadores_get_detail(
     state: State<'_, AppState>,
     args: TrabajadorDetailArgs,
@@ -46,6 +49,7 @@ pub async fn trabajadores_get_detail(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn trabajadores_get_trabajador_id_by_usuario(
     state: State<'_, AppState>,
     args: TrabajadorIdByUsuarioArgs,
@@ -55,12 +59,14 @@ pub async fn trabajadores_get_trabajador_id_by_usuario(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn turnos_get_all(state: State<'_, AppState>) -> Result<Vec<TurnoRow>, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::turnos_get_all(repo.as_ref()).await?)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn horarios_get_asignaciones_semana(
     state: State<'_, AppState>,
     args: HorariosSemanaArgs,
@@ -73,6 +79,7 @@ pub async fn horarios_get_asignaciones_semana(
 /* Alta / edición de trabajador */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn trabajadores_create(
     state: State<'_, AppState>,
     args: TrabajadorCreateInput,
@@ -83,6 +90,7 @@ pub async fn trabajadores_create(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn trabajadores_update(
     state: State<'_, AppState>,
     args: TrabajadorUpdateInput,
@@ -95,6 +103,7 @@ pub async fn trabajadores_update(
 /* Escrituras */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn horarios_create_asignacion(
     state: State<'_, AppState>,
     args: AsignacionCreateInput,
@@ -105,6 +114,7 @@ pub async fn horarios_create_asignacion(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn horarios_update_asignacion(
     state: State<'_, AppState>,
     args: AsignacionUpdateInput,
@@ -115,6 +125,7 @@ pub async fn horarios_update_asignacion(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn horarios_delete_asignacion(
     state: State<'_, AppState>,
     args: AsignacionDeleteInput,
@@ -125,6 +136,7 @@ pub async fn horarios_delete_asignacion(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn horarios_copy_semana_asignaciones(
     state: State<'_, AppState>,
     args: CopySemanaInput,
@@ -135,6 +147,7 @@ pub async fn horarios_copy_semana_asignaciones(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn horarios_set_predeterminado_desde_semana(
     state: State<'_, AppState>,
     args: SetPredeterminadoInput,

@@ -12,8 +12,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const invocaciones: Array<{ cmd: string; args: unknown }> = [];
 let fallaElComando = false;
 
-vi.mock("@tpv/client", () => ({
-	invokeClient: async (cmd: string, args: unknown) => {
+vi.mock("@tauri-apps/api/core", () => ({
+	invoke: async (cmd: string, args: unknown) => {
 		invocaciones.push({ cmd, args });
 		if (fallaElComando) throw { code: "internal", message: "IPC caído" };
 		return null;

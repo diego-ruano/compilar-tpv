@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/cuentas/CierreCajaModal.tsx
 //
 // El cierre de caja (arqueo). CUENTA-06.
@@ -19,13 +20,7 @@ import { cn } from "../../shared/lib/cn";
 import { toAppError } from "@tpv/client";
 
 import DenomsGrid from "./DenomsGrid";
-import {
-    aDenominaciones,
-    cierreConfirmar,
-    cierrePreparar,
-    type CierreDto,
-    type PreparacionCierreDto,
-} from "./cierreApis";
+import { aDenominaciones, cierreConfirmar, type CierreDto, type PreparacionCierreDto } from "./cierreApis";
 import {
     decCash,
     DEFAULT_DENOMS,
@@ -78,7 +73,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         setMotivo("");
         setIdCierre(crypto.randomUUID());
         ponerFondo(null);
-        cierrePreparar()
+        commands.cierrePreparar()
             .then((p) => {
                 if (vivo) setPrep(p);
             })

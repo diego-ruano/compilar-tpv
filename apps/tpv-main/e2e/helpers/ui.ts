@@ -1,3 +1,5 @@
+import { nombresComandos } from "@tpv/client/metadata";
+import type { NombreComando, ArgsComando, RetornoComando } from "@tpv/client/metadata";
 // Utilidades de selección para el E2E.
 //
 // La app no tiene `data-testid` en ninguna parte y no se los añade este test: los elementos que
@@ -172,10 +174,12 @@ export async function escribir(selector: string, valor: string): Promise<void> {
  * en `window` para recogerlo después: así basta con `Execute Script`, sin depender de que el
  * driver implemente la variante asíncrona.
  */
-export async function leerDeLaApp<T>(
-    comando: string,
-    args: Record<string, unknown> = {},
-): Promise<T> {
+export async function leerDeLaApp<N extends NombreComando>(
+    comando: N,
+    ...parametros: keyof ArgsComando<N> extends never ? [args?: ArgsComando<N>] : [args: ArgsComando<N>]
+): Promise<RetornoComando<N>> {
+    if (!(comando in nombresComandos)) throw new Error("Comando fuera del contrato generado");
+    const args = parametros[0] ?? {};
     const marca = `__e2e_${Math.random().toString(36).slice(2)}`;
 
     await browser.execute(
@@ -201,7 +205,7 @@ export async function leerDeLaApp<T>(
             );
         },
         marca,
-        comando,
+        String(comando),
         args,
     );
 
@@ -221,5 +225,5 @@ export async function leerDeLaApp<T>(
     }, marca);
 
     if (resultado.error) throw new Error(`${comando}: ${resultado.error}`);
-    return resultado.valor as T;
+    return resultado.valor as RetornoComando<N>;
 }

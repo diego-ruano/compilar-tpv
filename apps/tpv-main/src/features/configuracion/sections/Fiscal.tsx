@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/sections/Fiscal.tsx
 //
 // Configuración → Fiscal (FISCAL-01, Veri*factu).
@@ -24,7 +25,7 @@
 //      «en el propio sistema informático, visible en cada una de sus versiones».
 
 import React, { useCallback, useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { toAppError } from "@tpv/client";
@@ -37,15 +38,7 @@ import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
 import { useToast } from "../../../shared/toast";
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
-import {
-    verifactuDeclaracionResponsable,
-    verifactuEstado,
-    verifactuExportar,
-    verifactuReconocerAnomalias,
-    verifactuSetModoPrueba,
-    verifactuSubsanarRechazados,
-    type DeclaracionResponsable,
-} from "../api/verifactuApis";
+import type { DeclaracionResponsableDto as DeclaracionResponsable } from "@tpv/contracts";
 import type { EstadoFiscal } from "@tpv/contracts";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { AvisoInterruptores } from "./AvisoInterruptores";
@@ -112,7 +105,7 @@ function antiguedadLegible(min: number | null | undefined): string {
 
 export function Fiscal({
     inputTone,
-    razonSocial,
+    razon_social,
     setRazonSocial,
     cif,
     setCif,
@@ -121,7 +114,7 @@ export function Fiscal({
     onSave,
 }: {
     inputTone: string;
-    razonSocial: string;
+    razon_social: string;
     setRazonSocial: (v: string) => void;
     cif: string;
     setCif: (v: string) => void;
@@ -146,14 +139,14 @@ export function Fiscal({
     // El entorno NO va por el `draft` de la pantalla de negocio con el resto de los campos, y es a
     // propósito: no es un dato que se teclea y se guarda junto a los demás, es un interruptor con
     // consecuencias inmediatas sobre lo que sale impreso. Se aplica en el momento y se confirma.
-    const entorno = useBusinessSettings((st) => st.verifactuEntorno);
+    const entorno = useBusinessSettings((st) => st.verifactu_entorno);
     const setMany = useBusinessSettings((st) => st.setMany);
     const [confirmandoEntorno, setConfirmandoEntorno] = useState<
         "produccion" | "pruebas" | null
     >(null);
 
     const refrescarEstado = useCallback(() => {
-        verifactuEstado()
+        commands.verifactuEstado()
             .then(setEstado)
             .catch(() => setEstado(null));
 
@@ -186,7 +179,7 @@ export function Fiscal({
         async (encendido: boolean) => {
             setCambiandoModoPrueba(true);
             try {
-                await verifactuSetModoPrueba(encendido);
+                await commands.verifactuSetModoPrueba(encendido);
                 refrescarEstado();
                 toast.info(
                     encendido ? "Modo prueba activado" : "Modo prueba desactivado",
@@ -236,7 +229,7 @@ export function Fiscal({
     // vez y se queda. No se esconde tras un botón «cargar»: la norma pide que esté visible.
     useEffect(() => {
         let vivo = true;
-        verifactuDeclaracionResponsable()
+        commands.verifactuDeclaracionResponsable()
             .then((d) => {
                 if (vivo) setDr(d);
             })
@@ -260,7 +253,7 @@ export function Fiscal({
             });
             if (!destino) return;
 
-            const n = await verifactuExportar(destino, desde, hasta);
+            const n = await commands.verifactuExportar(destino, desde, hasta);
             if (n === 0) {
                 toast.info(
                     "No hay registros en ese rango",
@@ -282,7 +275,7 @@ export function Fiscal({
     const cargarCertificados = useCallback(async () => {
         setCargandoCerts(true);
         try {
-            const lista = await invoke<Certificado[]>("verifactu_certificados");
+            const lista = await commands.verifactuCertificados();
             setCerts(lista);
         } catch (e) {
             console.error("verifactu_certificados:", e);
@@ -295,7 +288,7 @@ export function Fiscal({
 
     const elegir = async (huella: string) => {
         try {
-            await invoke("verifactu_set_certificado", { huella });
+            await commands.verifactuSetCertificado(huella);
             toast.success("Certificado", "Elegido para enviar a la AEAT.");
             await cargarCertificados();
             refrescarEstado();
@@ -308,9 +301,7 @@ export function Fiscal({
         setProbando(true);
         setResultadoPrueba("");
         try {
-            const r = await invoke<string>("verifactu_probar_conexion", {
-                huella: huella ?? null,
-            });
+            const r = await commands.verifactuProbarConexion(huella ?? null);
             setResultadoPrueba(r);
             toast.success("Conexión con la AEAT", "El certificado funciona.");
         } catch (e) {
@@ -350,7 +341,7 @@ export function Fiscal({
                     <div className="mt-3">
                         <GhostButton
                             onClick={() => {
-                                void verifactuReconocerAnomalias()
+                                void commands.verifactuReconocerAnomalias()
                                     .then(() => {
                                         refrescarEstado();
                                         toast.info(
@@ -385,7 +376,7 @@ export function Fiscal({
                         hint="Quien factura: «Francisco García SL». No es el rótulo del bar."
                     >
                         <TextInput
-                            value={razonSocial}
+                            value={razon_social}
                             onChange={(e) => setRazonSocial(e.target.value)}
                             placeholder="Nombre o razón social del obligado"
                             className={inputTone}
@@ -484,7 +475,7 @@ export function Fiscal({
                                 <div className="mt-2">
                                     <GhostButton
                                         onClick={() => {
-                                            void verifactuSubsanarRechazados()
+                                            void commands.verifactuSubsanarRechazados()
                                                 .then((n) => {
                                                     refrescarEstado();
                                                     toast.success(
@@ -618,7 +609,7 @@ export function Fiscal({
                         <div className="mt-3 flex gap-2">
                             <PrimaryButton
                                 onClick={() => {
-                                    setMany({ verifactuEntorno: "pruebas" });
+                                    setMany({ verifactu_entorno: "pruebas" });
                                     setConfirmandoEntorno(null);
                                     refrescarEstado();
                                     toast.info(
@@ -658,7 +649,7 @@ export function Fiscal({
                         <div className="mt-3 flex gap-2">
                             <PrimaryButton
                                 onClick={() => {
-                                    setMany({ verifactuEntorno: "produccion" });
+                                    setMany({ verifactu_entorno: "produccion" });
                                     setConfirmandoEntorno(null);
                                     refrescarEstado();
                                     toast.success(

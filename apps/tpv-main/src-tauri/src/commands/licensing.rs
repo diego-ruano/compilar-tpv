@@ -27,17 +27,20 @@ pub(crate) fn svc(app: &AppHandle) -> Result<LicensingAdapter, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn license_get_state(app: AppHandle) -> Result<Option<LicenseLocalState>, AppErrorDto> {
     Ok(uc::get_state(&svc(&app)?)?)
 }
 
 #[tauri::command]
+#[specta::specta]
 pub fn license_clear_state(app: AppHandle) -> Result<String, AppErrorDto> {
     uc::clear_state(&svc(&app)?)?;
     Ok("OK".into())
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn license_gate(app: AppHandle) -> Result<LicenseGateResult, AppErrorDto> {
     // Notifier (mode-switched) para avisar de licencia por caducar / caducada-en-gracia / gracia
     // offline. `None` si aún no hay modo/BD → no se avisa. La decisión del gate NO depende de esto.
@@ -52,6 +55,7 @@ pub async fn license_gate(app: AppHandle) -> Result<LicenseGateResult, AppErrorD
 /// haga cualquiera a mitad de servicio. Después se comprueba la licencia contra el servidor, como
 /// `license_check_now`, para que la caducidad nueva llegue firmada y la vea toda la interfaz.
 #[tauri::command]
+#[specta::specta]
 pub async fn license_sumar_clave(
     app: AppHandle,
     args: LicenseSumarClaveInput,
@@ -74,6 +78,7 @@ pub async fn license_sumar_clave(
 /// sin el evento el veredicto se quedaba en el fichero de estado mientras la interfaz seguía
 /// vendiendo tan tranquila hasta la siguiente vuelta del job, seis horas después.
 #[tauri::command]
+#[specta::specta]
 pub async fn license_check_now(app: AppHandle) -> Result<LicenseGateResult, AppErrorDto> {
     let res = uc::check_now(&svc(&app)?).await?;
 
@@ -89,6 +94,7 @@ pub async fn license_check_now(app: AppHandle) -> Result<LicenseGateResult, AppE
 /// antes del traslado: se marca para reconstruirla desde la nube (`recovery::marcar_traslado`) y se
 /// cierran ya las escrituras de negocio, antes de que la aplicación arranque nada encima.
 #[tauri::command]
+#[specta::specta]
 pub async fn license_activate(
     app: AppHandle,
     args: LicenseActivateInput,
@@ -122,6 +128,7 @@ pub async fn license_activate(
 
 /// Pide al servidor que envíe el OTP de cambio de dispositivo al email de la licencia.
 #[tauri::command]
+#[specta::specta]
 pub async fn license_request_device_change(
     app: AppHandle,
     args: LicenseDeviceChangeInput,

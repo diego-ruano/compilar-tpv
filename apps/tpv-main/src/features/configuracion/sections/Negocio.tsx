@@ -1,7 +1,7 @@
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 // src/features/configuracion/sections/Negocio.tsx
 import React, { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/Inputs";
@@ -40,12 +40,12 @@ export function Negocio({
     const toast = useToast();
     const [uploadingLogo, setUploadingLogo] = useState(false);
 
-    // `draft.logoDataUrl` puede ser una ruta relativa (`images/logo/…`, nuevo canal R2) o un
+    // `draft.logo_data_url` puede ser una ruta relativa (`images/logo/…`, nuevo canal R2) o un
     // data URL heredado; `resolveImageUrl` maneja ambos y devuelve una URL para el <img>.
     const [logoSrc, setLogoSrc] = useState<string>("");
     useEffect(() => {
         let alive = true;
-        resolveImageUrl(draft.logoDataUrl)
+        resolveImageUrl(draft.logo_data_url)
             .then((u) => {
                 if (alive) setLogoSrc(u);
             })
@@ -55,7 +55,7 @@ export function Negocio({
         return () => {
             alive = false;
         };
-    }, [draft.logoDataUrl]);
+    }, [draft.logo_data_url]);
 
     const onPickLogo = () => fileInputRef.current?.click();
 
@@ -67,7 +67,7 @@ export function Negocio({
         setUploadingLogo(true);
         try {
             const guardada = await guardarImagen(f, "logo");
-            setDraft((d) => ({ ...d, logoDataUrl: guardada.ruta }));
+            setDraft((d) => ({ ...d, logo_data_url: guardada.ruta }));
             triggerImageUploadDrain();
         } catch (e) {
             console.error("save_image (logo) error:", e);
@@ -95,7 +95,7 @@ export function Negocio({
                         </GhostButton>
                         <GhostButton
                             onClick={() =>
-                                setDraft((d) => ({ ...d, logoDataUrl: null }))
+                                setDraft((d) => ({ ...d, logo_data_url: null }))
                             }
                             disabled={!bizHydrated}
                         >
@@ -128,7 +128,7 @@ export function Negocio({
                                 : "border-border bg-surface",
                         )}
                     >
-                        {draft.logoDataUrl && logoSrc ? (
+                        {draft.logo_data_url && logoSrc ? (
                             <img
                                 src={logoSrc}
                                 alt="logo"
@@ -155,7 +155,7 @@ export function Negocio({
                                 darkMode ? "text-white" : "text-fg",
                             )}
                         >
-                            {draft.businessName || "TPV"}
+                            {draft.business_name || "TPV"}
                         </div>
                         <div
                             className={cn(
@@ -177,11 +177,11 @@ export function Negocio({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <Field label="Nombre">
                         <TextInput
-                            value={draft.businessName}
+                            value={draft.business_name}
                             onChange={(e) =>
                                 setDraft((d) => ({
                                     ...d,
-                                    businessName: e.target.value,
+                                    business_name: e.target.value,
                                 }))
                             }
                             placeholder="Ej: Bar La Plaza"

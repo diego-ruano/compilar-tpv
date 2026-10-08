@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/app/AppBoot.tsx
 //
 // El arranque: decide qué pantalla se enseña hasta que la aplicación puede trabajar, y pone en marcha
@@ -11,7 +12,7 @@
 
 import React, { useEffect } from "react";
 import { RouterProvider } from "react-router-dom";
-import { invokeClient } from "@tpv/client";
+
 
 import { cn } from "../shared/lib/cn";
 import { conAviso } from "../shared/lib/conAviso";
@@ -38,10 +39,10 @@ import { useModoDispositivo } from "./arranque/useModoDispositivo";
 import Titlebar from "./layoutComponent/Titlebar";
 
 export default function AppBoot({ router }: { router: any }) {
-	const businessName = useBusinessSettings((s) => s.businessName);
-	const logoDataUrl = useBusinessSettings((s) => s.logoDataUrl);
+	const business_name = useBusinessSettings((s) => s.business_name);
+	const logo_data_url = useBusinessSettings((s) => s.logo_data_url);
 	// Ruta relativa → URL utilizable (ver `useImageUrl`).
-	const logoSrc = useImageUrl(logoDataUrl);
+	const logoSrc = useImageUrl(logo_data_url);
 
 	const bizInit = useBusinessSettings((s) => s.init);
 	const ticketInit = useTicketSettings((s) => s.init);
@@ -82,7 +83,7 @@ export default function AppBoot({ router }: { router: any }) {
 	// que perder —al arrancar SIEMPRE se pide PIN, no hay sesión persistente que respetar—, así
 	// que cerrar es lo correcto aunque no venga de un F5.
 	useEffect(() => {
-		void invokeClient("logout").catch((e: unknown) => {
+		void commands.logout().catch((e: unknown) => {
 			console.warn("[AppBoot] no se pudo limpiar la sesión del backend:", e);
 		});
 	}, []);
@@ -108,8 +109,8 @@ export default function AppBoot({ router }: { router: any }) {
 	// no hay nada o si está offline (se reintentará por el WebSocket cuando haya conexión).
 	useEffect(() => {
 		if (modo !== "tpv") return;
-		void invokeClient("images_backfill")
-			.then(() => invokeClient("images_drain_pending"))
+		void commands.imagesBackfill()
+			.then(() => commands.imagesDrainPending())
 			.catch((e: unknown) => {
 				console.warn("[AppBoot] images_drain_pending falló:", e);
 			});
@@ -144,7 +145,7 @@ export default function AppBoot({ router }: { router: any }) {
 				return (
 					<SelectorModo
 						logoSrc={logoSrc}
-						businessName={businessName}
+						business_name={business_name}
 						ocupado={dispositivo.ocupado}
 						error={dispositivo.error}
 						onElegir={dispositivo.elegir}

@@ -9,22 +9,23 @@ import { conAviso } from "../lib/conAviso";
 import { deCentimos } from "../lib/dinero";
 
 const DEFAULTS: BusinessSettings = {
-    businessName: "TPV",
-    logoDataUrl: null,
+    business_name: "TPV",
+    logo_data_url: null,
     direccion: "",
     telefono: "",
     cif: "",
-    mensajeFooter: "¡Gracias por su visita!",
-    ivaPercent: 10,
-    // FISCAL-01. `razonSocial` arranca VACÍA a propósito: no hay defecto razonable para quién
+    mensaje_footer: "¡Gracias por su visita!",
+    iva_percent: 10,
+    umbral_descuadre: deCentimos(500),
+    // FISCAL-01. `razon_social` arranca VACÍA a propósito: no hay defecto razonable para quién
     // factura, y que esté vacía es precisamente lo que impide cobrar hasta que alguien la escriba.
-    razonSocial: "",
-    descripcionOp: "Servicios de hosteleria y restauracion",
-    limiteSimplif: deCentimos(300_000),
-    verifactuEntorno: "produccion",
+    razon_social: "",
+    descripcion_op: "Servicios de hosteleria y restauracion",
+    limite_simplif: deCentimos(300_000),
+    verifactu_entorno: "produccion",
     // RI-61: los mismos valores por defecto que el esquema.
-    reservaDuracionMin: 120,
-    reservaSolape: "avisar",
+    reserva_duracion_min: 120,
+    reserva_solape: "avisar",
 };
 
 type BusinessSettingsState = BusinessSettings & {
@@ -52,7 +53,7 @@ let pending: Partial<BusinessSettings> = {};
 let contexto = 0;
 
 function clampIva(n: number) {
-    if (!Number.isFinite(n)) return DEFAULTS.ivaPercent;
+    if (!Number.isFinite(n)) return DEFAULTS.iva_percent;
     return Math.max(0, Math.min(30, n));
 }
 
@@ -69,7 +70,7 @@ export const useBusinessSettings = create<BusinessSettingsState>(
                 set({
                     ...DEFAULTS,
                     ...s,
-                    ivaPercent: clampIva(s.ivaPercent),
+                    iva_percent: clampIva(s.iva_percent),
                     ready: true,
                 });
             } catch (e) {
@@ -90,8 +91,8 @@ export const useBusinessSettings = create<BusinessSettingsState>(
         setMany: (patch) => {
             // Normaliza IVA si viene
             const nextPatch: Partial<BusinessSettings> = { ...patch };
-            if ("ivaPercent" in nextPatch && nextPatch.ivaPercent != null) {
-                nextPatch.ivaPercent = clampIva(Number(nextPatch.ivaPercent));
+            if ("iva_percent" in nextPatch && nextPatch.iva_percent != null) {
+                nextPatch.iva_percent = clampIva(Number(nextPatch.iva_percent));
             }
 
             // 1) UI instantánea
@@ -115,13 +116,13 @@ export const useBusinessSettings = create<BusinessSettingsState>(
             );
         },
 
-        setBusinessName: (v) => get().setMany({ businessName: v }),
-        setLogoDataUrl: (v) => get().setMany({ logoDataUrl: v }),
+        setBusinessName: (v) => get().setMany({ business_name: v }),
+        setLogoDataUrl: (v) => get().setMany({ logo_data_url: v }),
         setDireccion: (v) => get().setMany({ direccion: v }),
         setTelefono: (v) => get().setMany({ telefono: v }),
         setCif: (v) => get().setMany({ cif: v }),
-        setMensajeFooter: (v) => get().setMany({ mensajeFooter: v }),
-        setIvaPercent: (v) => get().setMany({ ivaPercent: clampIva(v) }),
-        setRazonSocial: (v) => get().setMany({ razonSocial: v }),
+        setMensajeFooter: (v) => get().setMany({ mensaje_footer: v }),
+        setIvaPercent: (v) => get().setMany({ iva_percent: clampIva(v) }),
+        setRazonSocial: (v) => get().setMany({ razon_social: v }),
     }),
 );

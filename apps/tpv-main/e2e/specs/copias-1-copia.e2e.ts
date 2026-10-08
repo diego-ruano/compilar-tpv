@@ -76,7 +76,7 @@ describe("Copias de seguridad · antes de la avería", () => {
         // carpeta— es lo que prueba que el panel llama a quien tiene que llamar.
         await conTexto("button", "Guardar fuera…").waitForDisplayed({ timeout: 60_000 });
 
-        const copias = await leerDeLaApp<Array<{ id: string }>>("recovery_list_backups");
+        const copias = await leerDeLaApp("recovery_list_backups");
         expect(copias.length).toBeGreaterThan(0);
     });
 });

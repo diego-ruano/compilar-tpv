@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/shared/stores/usePairCode.ts
 //
 // Código de emparejamiento vigente de esta Main (el que pinta el QR de Configuración →
@@ -14,7 +15,7 @@
 
 import { create } from "zustand";
 
-import { invokeClient, toAppError } from "@tpv/client";
+import { toAppError } from "@tpv/client";
 import type { PairCreateResult } from "@tpv/contracts";
 
 type PairCodeStore = {
@@ -49,7 +50,7 @@ export const usePairCode = create<PairCodeStore>((set, get) => {
 		try {
 			// Comando hexagonal dedicado: pide al worker un código nuevo (firma device-proof en
 			// modo TPV) y devuelve el DTO tipado generado desde Rust.
-			const j = await invokeClient<PairCreateResult>("pair_create");
+			const j = await commands.pairCreate();
 
 			set({
 				code: String(j.pairCode || ""),

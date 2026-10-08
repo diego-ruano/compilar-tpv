@@ -1,11 +1,12 @@
+import { commands } from "@tpv/client";
 // src/app/arranque/ActivacionLicencia.tsx
 //
 // Activar la licencia de la Main: la clave, los datos del negocio, el correo de recuperación y, si la
 // licencia ya está en otro equipo, el código que llega al correo para moverla.
 
 import React, { useState } from "react";
-import { invokeClient, toAppError } from "@tpv/client";
-import type { LicenseActivateOutcome } from "@tpv/contracts";
+import { toAppError } from "@tpv/client";
+import type { LicenseActivateOutcome_Serialize as LicenseActivateOutcome } from "@tpv/contracts";
 import { Building2, KeyRound, MapPin, Phone, ShieldCheck, Store } from "lucide-react";
 
 import { conAviso } from "../../shared/lib/conAviso";
@@ -86,9 +87,7 @@ export default function ActivacionLicencia({
 		setOtpSending(true);
 		setError(null);
 		try {
-			await invokeClient("license_request_device_change", {
-				args: { activation_key: act.licenseKey },
-			});
+			await commands.licenseRequestDeviceChange({ activation_key: act.licenseKey });
 		} catch (e: any) {
 			setError(toAppError(e).message);
 		} finally {
@@ -105,16 +104,14 @@ export default function ActivacionLicencia({
 		setError(null);
 
 		try {
-			const outcome = await invokeClient<LicenseActivateOutcome>("license_activate", {
-				args: {
+			const outcome = await commands.licenseActivate({
 					activation_key: act.licenseKey,
 					business_name: act.business_name,
 					legal_name: act.legal_name,
 					phone: act.phone,
 					country: act.country,
 					device_change_code: enDeviceChange ? deviceChangeCode.trim() : undefined,
-				},
-			});
+				});
 
 			// La licencia ya está en otro equipo: entramos en el paso de cambio de dispositivo y
 			// disparamos el envío del código al email de la licencia.

@@ -1,25 +1,21 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para imprimir: el ticket y el papel del arqueo.
 //!
-//! Vivían en `src-tauri/src/printing.rs` sin `#[derive(TS)]`, así que el frontend los redeclaraba
+//! Vivían en `src-tauri/src/printing.rs` sin `#[derive(specta::Type)]`, así que el frontend los redeclaraba
 //! a mano, con el dinero como `number` (RI-53). El generador ESC/POS sigue allí; lo que cruza la
 //! frontera vive aquí, como el resto de DTOs, y llega a TypeScript por ts-rs.
 
 use tpv_domain::dinero::Dinero;
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 /// Una impresora detectada por el sistema.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PrinterInfo {
     pub name: String,
     pub is_default: bool,
 }
 
 /// Una línea (producto agrupado) del ticket.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PrintTicketLine {
     pub nombre: String,
     pub cantidad: u32,
@@ -28,13 +24,11 @@ pub struct PrintTicketLine {
     /// Viene congelado de `Detalle_Comanda`, no del producto: una reimpresión tiene que enseñar
     /// el tipo del día de la venta.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub iva_percent: Option<f64>,
 }
 
 /// Un tramo del desglose de IVA tal como sale en el papel. Gemelo de `tpv_domain::ticket::TramoIva`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct TramoTicket {
     pub tipo: f64,
     pub base: Dinero,
@@ -42,13 +36,11 @@ pub struct TramoTicket {
 }
 
 /// El cliente de una factura completa (`F1`/`F3`), tal como sale en el papel.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DestinatarioTicket {
     pub nombre_razon: String,
     pub nif: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub domicilio: Option<String>,
 }
 
@@ -59,12 +51,10 @@ pub struct DestinatarioTicket {
 /// facturación. La pantalla lo recibe sólo para enseñarlo. Lo único que la pantalla compone es la
 /// **precuenta**, y el comando que la imprime le quita todo lo fiscal (`como_precuenta`): un papel
 /// con número no puede salir de lo que diga la pantalla.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PrintTicketPayload {
     /// Impresora destino; si es `None`, el comando resuelve la seleccionada en `device_config.json`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub printer_name: Option<String>,
 
     // ── Datos del negocio ──
@@ -95,7 +85,6 @@ pub struct PrintTicketPayload {
     /// Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
     /// no el builder: aquí dentro no se toca el disco.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub logo_path: Option<String>,
     #[serde(default)]
     pub show_business_name: bool,
@@ -114,7 +103,6 @@ pub struct PrintTicketPayload {
     /// Vacío o ausente = este papel no lleva QR. Es el caso de la **precuenta**, que no es una
     /// factura, y el de un cobro de modo prueba.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub qr_url: Option<String>,
     /// `true` si el registro se emitió contra el entorno de **pruebas**. El QR apunta entonces a
     /// `prewww2.aeat.es` y el papel lo dice: un ticket de pruebas que parece real es peor que uno
@@ -148,20 +136,16 @@ pub struct PrintTicketPayload {
     /// Número correlativo del ticket. `None` = **precuenta**: lo que se le enseña al cliente antes
     /// de cobrar, que no es un ticket de venta y se marca como tal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub numero_ticket: Option<String>,
     /// La fecha que se imprime (`DD/MM/AAAA HH:MM`). En una factura es la de expedición, leída
     /// del registro: una copia de mañana dice el día de la venta. `None` = ahora (la precuenta).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub fecha: Option<String>,
     /// Cómo se cobró (`Efectivo` | `Tarjeta`). `None` en una precuenta.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub metodo_pago: Option<String>,
     /// De dónde sale la venta: `Mesa 5`, `Barra`… Ayuda a localizar el cobro después.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub origen: Option<String>,
     /// Reimpresión de un ticket ya emitido: sale el MISMO número, marcado como copia para que dos
     /// papeles iguales no parezcan dos ventas.
@@ -184,20 +168,16 @@ pub struct PrintTicketPayload {
     /// El desglose de IVA de la factura, leído de su `Desglose_Json`. Es el hecho fiscal: el papel
     /// dice lo que se declaró, no un recálculo. `None` = se calcula de las líneas (la precuenta).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub desglose: Option<Vec<TramoTicket>>,
     /// El `Importe_Total` de la factura. `None` = la suma de las líneas (la precuenta).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub total: Option<Dinero>,
 
     /// `F1` | `F2` | `F3`. Una completa (`F1`/`F3`) sale titulada FACTURA y con su cliente.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub tipo_factura: Option<String>,
     /// El cliente de una factura completa, leído de su registro.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub destinatario: Option<DestinatarioTicket>,
     /// En una `F3`, los números de las facturas que sustituye: el ticket que canjea, los de un
     /// canje de varios o, tras una devolución, la rectificativa.
@@ -206,11 +186,9 @@ pub struct PrintTicketPayload {
     /// En una rectificativa, el número de la factura que rectifica (art. 7.1.h y 15.4 del RD
     /// 1619/2012: la referencia «expresa e inequívoca» de la factura rectificada).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub rectifica: Option<String>,
     /// La fecha de expedición de la factura rectificada (`DD/MM/AAAA`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub rectifica_fecha: Option<String>,
     /// Todas las facturas del cobro. **No se imprime**: la pantalla lo usa para ofrecer cada papel
     /// (el ticket, la `F3` del canje, la rectificativa de una devolución…).
@@ -219,8 +197,7 @@ pub struct PrintTicketPayload {
 }
 
 /// Una factura de un cobro, para elegir qué papel se imprime.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct FacturaDelCobro {
     pub num_serie: String,
     /// `F1` | `F2` | `F3` | `R1`..`R5`.
@@ -229,8 +206,7 @@ pub struct FacturaDelCobro {
 }
 
 /// Qué ticket de cobro se pide (RI-29): el de un pago, leído entero de la base.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TicketDePagoInput {
     pub id_pago: String,
     /// Reimpresión: el papel sale marcado COPIA, con el mismo número.
@@ -238,14 +214,12 @@ pub struct TicketDePagoInput {
     pub es_copia: bool,
     /// Otra factura del mismo pago: la `F3` que canjeó su ticket. `None` = la del número del pago.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
     pub num_factura: Option<String>,
 }
 
 /// Geometría del papel para preguntar por las columnas desde el frontend (previsualización).
 /// Es un subconjunto de [`PrintTicketPayload`]: la vista previa no necesita ni negocio ni líneas.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct GeometriaTicket {
     #[serde(default = "default_paper_width")]
     pub paper_width_mm: u32,
@@ -271,34 +245,28 @@ fn default_font_scale() -> f64 {
 }
 
 /// Una corrección de un cierre ya hecho, tal como sale en el papel (CAJA-01).
-#[derive(Debug, Clone, Default, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Default, Deserialize, specta::Type)]
 pub struct RectificacionArqueo {
     #[serde(default)]
     pub fecha_hora: String,
     #[serde(default)]
     pub descripcion: String,
     #[serde(default)]
-    #[ts(optional)]
     pub motivo: Option<String>,
 }
 
 /// Lo que hace falta para imprimir un arqueo. CUENTA-06.
-#[derive(Debug, Clone, Default, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Default, Deserialize, specta::Type)]
 pub struct PrintArqueoPayload {
     #[serde(default)]
-    #[ts(optional)]
     pub printer_name: Option<String>,
     #[serde(default)]
     pub business_name: String,
     #[serde(default)]
     pub fecha_hora: String,
     #[serde(default)]
-    #[ts(optional)]
     pub desde: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub usuario: Option<String>,
     #[serde(default)]
     pub fondo_inicial: Dinero,
@@ -315,24 +283,20 @@ pub struct PrintArqueoPayload {
     #[serde(default)]
     pub retirado: Dinero,
     #[serde(default)]
-    #[ts(optional)]
     pub motivo: Option<String>,
     /// Gastos pagados con dinero del cajón (CAJA-01). Restan del esperado.
     #[serde(default)]
     pub gastos_caja: Dinero,
     /// Lo que el cierre marca hoy, si se corrigió un apunte de su periodo (CAJA-01).
     #[serde(default)]
-    #[ts(optional)]
     pub rect_esperado: Option<Dinero>,
     #[serde(default)]
-    #[ts(optional)]
     pub rect_descuadre: Option<Dinero>,
     #[serde(default)]
     pub rectificaciones: Vec<RectificacionArqueo>,
     /// `(valor, unidades)` de lo contado, para el desglose. Las unidades de un recuento no pasan
     /// de 2^53, así que viajan como `number` y no como `bigint` (§4.3).
     #[serde(default)]
-    #[ts(type = "Array<[Dinero, number]>")]
     pub contado_denoms: Vec<(Dinero, i64)>,
     // ── Formato del papel: los mismos ajustes que el ticket ──
     #[serde(default = "default_paper_width")]

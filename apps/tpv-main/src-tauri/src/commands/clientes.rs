@@ -21,6 +21,7 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn clientes_get_overview(
     state: State<'_, AppState>,
     args: ClientesOverviewArgs,
@@ -35,6 +36,7 @@ pub async fn clientes_get_overview(
 /// Acción MANUAL: el job de reconciliación solo avisa del descuadre; corregirlo es una decisión
 /// de quien lleva el negocio, y este comando es el botón que la ejecuta.
 #[tauri::command]
+#[specta::specta]
 pub async fn clientes_recalcular_gasto(
     state: State<'_, AppState>,
     args: ClienteIdArgs,
@@ -45,6 +47,7 @@ pub async fn clientes_recalcular_gasto(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn clientes_get_cliente_form(
     state: State<'_, AppState>,
     args: ClienteIdArgs,
@@ -55,6 +58,7 @@ pub async fn clientes_get_cliente_form(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn clientes_create_cliente(
     state: State<'_, AppState>,
     args: CreateClienteInput,
@@ -65,6 +69,7 @@ pub async fn clientes_create_cliente(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn clientes_update_cliente(
     state: State<'_, AppState>,
     args: UpdateClienteInput,

@@ -13,10 +13,10 @@ import { conAviso } from "../../shared/lib/conAviso";
  */
 function Titlebar() {
     const ventana = getCurrentWindow();
-    const { businessName, logoDataUrl } = useBusinessSettings();
-    // `logoDataUrl` es una ruta relativa (el nombre es herencia de cuando sí era un data URL):
+    const { business_name, logo_data_url } = useBusinessSettings();
+    // `logo_data_url` es una ruta relativa (el nombre es herencia de cuando sí era un data URL):
     // hay que resolverla, no meterla tal cual en el `src`.
-    const logoSrc = useImageUrl(logoDataUrl);
+    const logoSrc = useImageUrl(logo_data_url);
 
     return (
         <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface">
@@ -34,7 +34,7 @@ function Titlebar() {
                     data-tauri-drag-region
                     className="max-w-[45vw] truncate text-sm font-semibold text-fg sm:max-w-60"
                 >
-                    {businessName || "TPV"}
+                    {business_name || "TPV"}
                 </p>
             </div>
 

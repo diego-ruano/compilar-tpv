@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/shared/lib/imageUrl.ts
 //
 // Resolución ÚNICA de URLs de imagen para toda la app. Según el modo del dispositivo la imagen
@@ -16,7 +17,7 @@
 // La SUBIDA sigue yendo firmada por el worker (PUT /v1/images). Si en el futuro conectas un
 // dominio propio al bucket, basta con cambiar `CDN_IMAGES_BASE` por ese dominio.
 
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 
 import { useMode } from "../stores/useMode";
@@ -53,7 +54,7 @@ export function limpiarCacheImagenes(): void {
 
 async function getHandyTenant(): Promise<string> {
   if (!handyTenantPromise) {
-    handyTenantPromise = invoke<string | null>("handy_get_tenant")
+    handyTenantPromise = commands.handyGetTenant()
       .then((t) => String(t ?? "").trim())
       .catch(() => "");
   }
@@ -92,7 +93,7 @@ export async function resolveImageUrl(
   // best-effort: si no se puede (offline / aún no subida), seguimos y el <img> hará fallback.
   let present = false;
   try {
-    present = await invoke<boolean>("images_ensure_local", { args: { rel_path: r } });
+    present = await commands.imagesEnsureLocal({ rel_path: r });
   } catch {
     /* ignorado: el UI degrada al placeholder y reintenta en la próxima recarga */
   }
@@ -120,7 +121,7 @@ export async function resolveImageUrl(
  * Se llama tras guardar una imagen; en la Main online el WebSocket además lo reintenta.
  */
 export function triggerImageUploadDrain(): void {
-  invoke<string>("images_drain_pending")
+  commands.imagesDrainPending()
     .catch((e) => {
       console.error("[images_drain] Tauri error:", e);
       captureException(e, { fase: "images_drain_pending" });

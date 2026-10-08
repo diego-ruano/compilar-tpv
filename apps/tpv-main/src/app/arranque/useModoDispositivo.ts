@@ -1,10 +1,11 @@
+import { commands } from "@tpv/client";
 // src/app/arranque/useModoDispositivo.ts
 //
 // El modo del dispositivo (TPV principal o Handy): leerlo al arrancar, elegirlo en el primer inicio y
 // volver al selector.
 
 import { useEffect, useRef, useState } from "react";
-import { invokeClient, toAppError } from "@tpv/client";
+import { toAppError } from "@tpv/client";
 
 import { queryClient } from "../../shared/lib/queryClient";
 import { limpiarCacheImagenes } from "../../shared/lib/imageUrl";
@@ -36,7 +37,7 @@ export function useModoDispositivo(opciones: { alElegir: () => Promise<void> }) 
 	useEffect(() => {
 		void (async () => {
 			try {
-				const rawMode = await invokeClient("get_device_mode");
+				const rawMode = await commands.getDeviceMode();
 				setMode(isDeviceMode(rawMode) ? rawMode : null);
 			} catch (e: any) {
 				setError(toAppError(e).message);
@@ -51,10 +52,10 @@ export function useModoDispositivo(opciones: { alElegir: () => Promise<void> }) 
 		setError(null);
 
 		try {
-			await invokeClient("set_device_mode", { args: { mode: m } });
+			await commands.setDeviceMode({ mode: m });
 
 			if (m === "tpv") {
-				await invokeClient("init_main");
+				await commands.initMain();
 			}
 
 			setMode(m);
@@ -75,7 +76,7 @@ export function useModoDispositivo(opciones: { alElegir: () => Promise<void> }) 
 			// Reversibilidad real: persiste mode=None, suelta los backends y, si veníamos de
 			// Handy, desvincula el token. Tras esto, al reiniciar la app vuelve a salir el
 			// selector de modo (no solo es un cambio visual).
-			await invokeClient("device_reset_mode");
+			await commands.deviceResetMode();
 			setMode(null);
 		} catch (e: any) {
 			setError(toAppError(e).message);

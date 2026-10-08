@@ -23,6 +23,7 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_get_entradas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
@@ -33,6 +34,7 @@ pub async fn cuentas_get_entradas(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_get_salidas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
@@ -43,6 +45,7 @@ pub async fn cuentas_get_salidas(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_get_resumen(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
@@ -57,6 +60,7 @@ pub async fn cuentas_get_resumen(
 /// El de una baja lo pide también el camarero, porque la pantalla lo enseña antes de darla; el
 /// resto de cambios son del administrador.
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_previsualizar_cambio(
     state: State<'_, AppState>,
     args: CambioCajaInput,
@@ -70,6 +74,7 @@ pub async fn cuentas_previsualizar_cambio(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_create_gasto(
     state: State<'_, AppState>,
     args: CreateGastoInput,
@@ -90,6 +95,7 @@ pub async fn cuentas_create_gasto(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_update_gasto(
     state: State<'_, AppState>,
     args: UpdateGastoInput,
@@ -109,6 +115,7 @@ pub async fn cuentas_update_gasto(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_delete_gasto(
     state: State<'_, AppState>,
     args: DeleteGastoInput,
@@ -128,6 +135,7 @@ pub async fn cuentas_delete_gasto(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_update_pago(
     state: State<'_, AppState>,
     args: UpdatePagoInput,
@@ -149,6 +157,7 @@ pub async fn cuentas_update_pago(
 /// Las líneas de un cobro con lo que queda por devolver de cada una: lo que enseña la pantalla
 /// de devolver.
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_lineas_devolubles(
     state: State<'_, AppState>,
     id_pago: String,
@@ -163,6 +172,7 @@ pub async fn cuentas_lineas_devolubles(
 /// Quién devuelve sale de la **sesión** (SEC-01), como al anular. No pasa por la rectificación de
 /// cierres: la devolución cae ahora, en el periodo abierto, que es donde sale el dinero.
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_devolver_lineas(
     state: State<'_, AppState>,
     args: DevolverLineasInput,
@@ -182,6 +192,7 @@ pub async fn cuentas_devolver_lineas(
 /// La hace también el camarero, las dos clases: el cliente que vuelve a por su dinero no espera
 /// al encargado, y lo que deja rastro es la firma de la sesión, no el rol.
 #[tauri::command]
+#[specta::specta]
 pub async fn cuentas_anular_pago(
     state: State<'_, AppState>,
     args: AnularPagoInput,

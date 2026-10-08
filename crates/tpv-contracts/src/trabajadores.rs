@@ -3,14 +3,11 @@
 //! Local-First: los args de entrada NO llevan op_id/outbox/remote_id.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 /* =========================================================
    Salida (read models)
 ========================================================= */
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct RolRow {
     #[serde(rename = "ID_Rol")]
     pub id_rol: String,
@@ -18,8 +15,7 @@ pub struct RolRow {
     pub nombre_rol: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TrabajadorRow {
     #[serde(rename = "ID_Trabajador")]
     pub id_trabajador: String,
@@ -41,8 +37,7 @@ pub struct TrabajadorRow {
     pub puesto: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TrabajadorDetailRow {
     #[serde(rename = "ID_Trabajador")]
     pub id_trabajador: String,
@@ -74,8 +69,7 @@ pub struct TrabajadorDetailRow {
     pub fecha_fin_contrato: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TurnoRow {
     #[serde(rename = "ID_Turno")]
     pub id_turno: String,
@@ -83,8 +77,7 @@ pub struct TurnoRow {
     pub nombre_turno: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AsignacionRow {
     #[serde(rename = "ID_Asignacion")]
     pub id_asignacion: String,
@@ -110,77 +103,62 @@ pub struct AsignacionRow {
    Entrada (args/inputs) — Local-First
 ========================================================= */
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TrabajadorDetailArgs {
     pub id_trabajador: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TrabajadorIdByUsuarioArgs {
     pub id_usuario: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct HorariosSemanaArgs {
     pub fecha_lunes: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct AsignacionCreateInput {
     pub id_trabajador: String,
     pub fecha: String,
     pub id_turno: String,
     pub area: String,
     #[serde(default)]
-    #[ts(optional)]
     pub hora_inicio: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub hora_fin: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub notas: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct AsignacionUpdateInput {
     pub id_asignacion: String,
     pub id_turno: String,
     pub area: String,
     #[serde(default)]
-    #[ts(optional)]
     pub hora_inicio: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub hora_fin: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub notas: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct AsignacionDeleteInput {
     pub id_asignacion: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct CopySemanaInput {
     pub from_monday: String,
     pub to_monday: String,
     #[serde(default)]
-    #[ts(optional)]
     pub overwrite: Option<bool>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct SetPredeterminadoInput {
     pub fecha_lunes: String,
 }
@@ -189,45 +167,35 @@ pub struct SetPredeterminadoInput {
 ///
 /// RI-63: llega el PIN, no su hash. Lo hashea quien lo guarda (la Main o el worker), que así puede
 /// exigir la política del PIN y no guarda un hash con las iteraciones que alguien quiera.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TrabajadorCreateInput {
     pub id_rol: String,
     pub email: String,
     pub pin: String,
     pub nombre: String,
     #[serde(default)]
-    #[ts(optional)]
     pub apellido: Option<String>,
     pub estado: String,
     #[serde(default)]
-    #[ts(optional)]
     pub dni: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub telefono: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub puesto: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub iban: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub numero_seguridad_social: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub fecha_inicio_contrato: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub fecha_fin_contrato: Option<String>,
 }
 
 /// Edición de trabajador (actualiza Usuario + Trabajador). `pin` opcional: si viene, cambia el
 /// PIN; si no, se mantiene el actual. Como en el alta, llega el PIN y no su hash (RI-63).
 /// Local-First.
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TrabajadorUpdateInput {
     pub id_trabajador: String,
     pub id_usuario: String,
@@ -235,31 +203,22 @@ pub struct TrabajadorUpdateInput {
     pub email: String,
     pub nombre: String,
     #[serde(default)]
-    #[ts(optional)]
     pub apellido: Option<String>,
     pub estado: String,
     #[serde(default)]
-    #[ts(optional)]
     pub dni: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub telefono: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub puesto: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub iban: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub numero_seguridad_social: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub fecha_inicio_contrato: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub fecha_fin_contrato: Option<String>,
     #[serde(default)]
-    #[ts(optional)]
     pub pin: Option<String>,
 }

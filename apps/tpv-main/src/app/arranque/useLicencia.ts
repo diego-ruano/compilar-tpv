@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/app/arranque/useLicencia.ts
 //
 // El estado de la licencia de la Main durante el arranque: lo que hay guardado en el equipo, el último
@@ -9,8 +10,8 @@
 
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { invokeClient, toAppError } from "@tpv/client";
-import type { LicenseGateResult, LicenseLocalState } from "@tpv/contracts";
+import { toAppError } from "@tpv/client";
+import type { LicenseGateResult_Serialize as LicenseGateResult, LicenseLocalState_Serialize as LicenseLocalState } from "@tpv/contracts";
 
 import type { ModeStateValue } from "../../shared/stores/useMode";
 
@@ -21,7 +22,7 @@ export function useLicencia(modo: ModeStateValue) {
 
 	async function refrescarLicencia() {
 		try {
-			const st = await invokeClient<LicenseLocalState | null>("license_get_state");
+			const st = await commands.licenseGetState();
 			setLic(st);
 		} catch {
 			setLic(null);
@@ -32,7 +33,7 @@ export function useLicencia(modo: ModeStateValue) {
 		try {
 			setGate("loading");
 
-			const r = await invokeClient<LicenseGateResult>(forzar ? "license_check_now" : "license_gate");
+			const r = await (forzar ? commands.licenseCheckNow() : commands.licenseGate());
 
 			setGate(r);
 			setLic(r.state);
@@ -40,7 +41,7 @@ export function useLicencia(modo: ModeStateValue) {
 			setGate({
 				allowed: false,
 				reason: `gate_error:${toAppError(e).code}`,
-				state: null,
+				state: null, last_rejection: null,
 			});
 			setLic(null);
 		}
@@ -53,7 +54,7 @@ export function useLicencia(modo: ModeStateValue) {
 	 */
 	function borrarYVolverAActivar() {
 		setErrorAlBorrar(null);
-		invokeClient("license_clear_state")
+		commands.licenseClearState()
 			.catch((e: unknown) => setErrorAlBorrar(toAppError(e).message))
 			.finally(() => {
 				void refrescarLicencia().finally(() => refrescarGate(false));

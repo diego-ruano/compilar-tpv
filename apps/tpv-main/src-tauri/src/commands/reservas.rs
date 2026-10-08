@@ -11,6 +11,7 @@ use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn reservas_get_meta(state: State<'_, AppState>) -> Result<ReservasMetaDto, AppErrorDto> {
     state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
@@ -18,6 +19,7 @@ pub async fn reservas_get_meta(state: State<'_, AppState>) -> Result<ReservasMet
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn reservas_get_mes(
     state: State<'_, AppState>,
     args: ReservasGetMesArgs,
@@ -28,6 +30,7 @@ pub async fn reservas_get_mes(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn reservas_save(
     state: State<'_, AppState>,
     args: ReservaSaveInput,
@@ -40,6 +43,7 @@ pub async fn reservas_save(
 
 /// RI-61: el cliente que ya tiene ese teléfono o ese email, para preguntar antes de asignárselo.
 #[tauri::command]
+#[specta::specta]
 pub async fn reservas_buscar_cliente(
     state: State<'_, AppState>,
     args: ReservaBuscarClienteArgs,
@@ -50,6 +54,7 @@ pub async fn reservas_buscar_cliente(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn reservas_delete(
     state: State<'_, AppState>,
     args: ReservaDeleteInput,

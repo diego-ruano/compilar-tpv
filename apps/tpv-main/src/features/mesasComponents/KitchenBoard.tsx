@@ -1,9 +1,6 @@
+import { commands } from "@tpv/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-    cocinaListHoyPendientes,
-    cocinaSetLineaEstado,
-    type KitchenRow,
-} from "./mesasApi";
+import { cocinaSetLineaEstado, type KitchenRow } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
 
 type KitchenLine = {
@@ -79,7 +76,7 @@ export default function KitchenBoard({
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const r = await cocinaListHoyPendientes();
+            const r = await commands.kitchenListTodayPending();
             setRows(r ?? []);
         } catch (e) {
             console.error("KitchenBoard load error:", e);

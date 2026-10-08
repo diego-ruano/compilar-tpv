@@ -63,17 +63,17 @@ function fmtFecha(s: string): string {
 }
 
 export default function Notificaciones() {
-  const idUsuario = useAuth((s) => s.idUsuario);
+  const id_usuario = useAuth((s) => s.idUsuario);
   const navigate = useNavigate();
 
-  const notificaciones = useNotificaciones(idUsuario);
+  const notificaciones = useNotificaciones(id_usuario);
   const marcarLeida = useMarcarLeida();
   const marcarTodas = useMarcarTodasLeidas();
   const descartar = useDescartar();
 
   const [papeleraAbierta, setPapeleraAbierta] = useState(false);
   // Sólo se consulta con el modal abierto: es una lista que casi nunca se mira.
-  const papelera = usePapelera(idUsuario, papeleraAbierta);
+  const papelera = usePapelera(id_usuario, papeleraAbierta);
   const restaurar = useRestaurar();
   const eliminar = useEliminar();
 
@@ -88,8 +88,8 @@ export default function Notificaciones() {
   const borradas: NotificacionRow[] = papelera.data ?? [];
 
   function onCardClick(n: NotificacionRow) {
-    if (idUsuario && !n.leida) {
-      marcarLeida.mutate({ idNotificacion: n.id_notificacion, idUsuario });
+    if (id_usuario && !n.leida) {
+      marcarLeida.mutate({ id_notificacion: n.id_notificacion, id_usuario });
     }
     // Navegar es lo último: la mutación (y su invalidación en `onSuccess`) sobrevive al desmontaje
     // de esta pantalla, así que el marcado se completa aunque salgamos de aquí al instante.
@@ -105,12 +105,12 @@ export default function Notificaciones() {
       { title: "Eliminar notificación", kind: "warning" },
     );
     if (!ok) return;
-    eliminar.mutate({ idNotificacion: n.id_notificacion });
+    eliminar.mutate({ id_notificacion: n.id_notificacion });
   }
 
   function onMarcarTodas() {
-    if (!idUsuario || noLeidas === 0) return;
-    marcarTodas.mutate({ idUsuario });
+    if (!id_usuario || noLeidas === 0) return;
+    marcarTodas.mutate({ id_usuario });
   }
 
   return (
@@ -250,11 +250,11 @@ export default function Notificaciones() {
                 <button
                   type="button"
                   onClick={() =>
-                    descartar.mutate({ idNotificacion: n.id_notificacion })
+                    descartar.mutate({ id_notificacion: n.id_notificacion })
                   }
                   disabled={
                     descartar.isPending &&
-                    descartar.variables?.idNotificacion === n.id_notificacion
+                    descartar.variables?.id_notificacion === n.id_notificacion
                   }
                   aria-label="Borrar notificación"
                   title="Borrar (va a la papelera)"
@@ -317,8 +317,8 @@ export default function Notificaciones() {
                   const a = aspecto(n.severidad);
                   const Icon = a.icon;
                   const ocupada =
-                    (restaurar.isPending && restaurar.variables?.idNotificacion === n.id_notificacion) ||
-                    (eliminar.isPending && eliminar.variables?.idNotificacion === n.id_notificacion);
+                    (restaurar.isPending && restaurar.variables?.id_notificacion === n.id_notificacion) ||
+                    (eliminar.isPending && eliminar.variables?.id_notificacion === n.id_notificacion);
 
                   return (
                     <div
@@ -355,7 +355,7 @@ export default function Notificaciones() {
                         <button
                           type="button"
                           onClick={() =>
-                            restaurar.mutate({ idNotificacion: n.id_notificacion })
+                            restaurar.mutate({ id_notificacion: n.id_notificacion })
                           }
                           disabled={ocupada}
                           aria-label="Restaurar"

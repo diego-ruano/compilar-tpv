@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 // src/features/ventaRapida/ventaRapidaAPI.ts
 //
 // API de venta rápida (barra): una función por comando Tauri, con los tipos que genera ts-rs desde
@@ -7,7 +8,7 @@
 // El antiguo "get-or-create" se codificaba en el op_id; ahora se expresa con un flag
 // explícito `get_or_create` en el comando `vr_create_comanda_barra`.
 
-import { invokeClient } from "@tpv/client";
+
 import type {
     CategoriaRow,
     ComandaBarraRow,
@@ -66,48 +67,40 @@ export async function vrBootstrap(
 ========================================================= */
 
 export function vrListCategoriasVendibles(): Promise<CategoriaRow[]> {
-    return invokeClient<CategoriaRow[]>("vr_list_categorias_vendibles");
+    return commands.vrListCategoriasVendibles();
 }
 
 export function vrListProductosByCategoria(idCategoria: string): Promise<ProductoRow[]> {
-    return invokeClient<ProductoRow[]>("vr_list_productos_by_categoria", {
-        args: { id_categoria: idCategoria },
-    });
+    return commands.vrListProductosByCategoria({ id_categoria: idCategoria });
 }
 
 export async function vrSearchProductos(q: string, limit = 60): Promise<ProductoRow[]> {
     const query = q.trim();
     if (!query) return [];
 
-    return invokeClient<ProductoRow[]>("vr_search_productos", { args: { query, limit } });
+    return commands.vrSearchProductos({ query, limit });
 }
 
 export function vrListComandasBarra(opts: {
     includePagadas: boolean;
     limit?: number;
 }): Promise<ComandaBarraRow[]> {
-    return invokeClient<ComandaBarraRow[]>("vr_list_comandas_barra", {
-        args: { include_pagadas: opts.includePagadas, limit: opts.limit },
-    });
+    return commands.vrListComandasBarra({ include_pagadas: opts.includePagadas, limit: opts.limit });
 }
 
 export function vrGetLineasComanda(idComanda: string): Promise<LineaComandaRow[]> {
-    return invokeClient<LineaComandaRow[]>("vr_get_lineas_comanda", {
-        args: { id_comanda: idComanda },
-    });
+    return commands.vrGetLineasComanda({ id_comanda: idComanda });
 }
 
 export async function vrGetIndexRows(idsHoy: string[]): Promise<IndexRow[]> {
     const ids = idsHoy.map((v) => v.trim()).filter((s) => s.length > 0);
     if (ids.length === 0) return [];
 
-    return invokeClient<IndexRow[]>("vr_get_index_rows", { args: { ids } });
+    return commands.vrGetIndexRows({ ids });
 }
 
 export function vrGetDetallesVerTicket(idComanda: string): Promise<VerTicketsDetalleRow[]> {
-    return invokeClient<VerTicketsDetalleRow[]>("vr_get_detalles_ver_ticket", {
-        args: { id_comanda: idComanda },
-    });
+    return commands.vrGetDetallesVerTicket({ id_comanda: idComanda });
 }
 
 /* =========================================================
@@ -122,7 +115,7 @@ async function crearComandaBarra(
         id_trabajador: idTrabajador ?? undefined,
         get_or_create: getOrCreate,
     };
-    const id = await invokeClient<string>("vr_create_comanda_barra", { args });
+    const id = await commands.vrCreateComandaBarra(args);
     if (!id) throw new Error("id_comanda_missing");
     return id;
 }
@@ -145,7 +138,7 @@ export async function vrAddLineaComanda(
         id_producto: idProducto,
         cantidad,
     };
-    const linea = await invokeClient<VrLineaAnadida>("vr_add_linea_comanda", { args });
+    const linea = await commands.vrAddLineaComanda(args);
 
     return {
         ok: true,
@@ -158,36 +151,30 @@ export async function vrRemoveLastUnpaidLinea(
     idComanda: string,
     idProducto: string,
 ): Promise<boolean> {
-    return await invokeClient<boolean>("vr_remove_last_unpaid_linea", {
-        args: {
+    return await commands.vrRemoveLastUnpaidLinea({
             id_comanda: idComanda,
             id_producto: idProducto,
-        },
-    });
+        });
 }
 
 export async function vrDeleteLineaIfUnpaid(
     idComanda: string,
     idDetalle: string,
 ): Promise<boolean> {
-    return await invokeClient<boolean>("vr_delete_linea_if_unpaid", {
-        args: {
+    return await commands.vrDeleteLineaIfUnpaid({
             id_comanda: idComanda,
             id_detalle: idDetalle,
-        },
-    });
+        });
 }
 
 export async function vrUpdateNotaDetalle(
     idDetalle: string,
     nota: string,
 ): Promise<boolean> {
-    return await invokeClient<boolean>("vr_update_nota_detalle", {
-        args: {
+    return await commands.vrUpdateNotaDetalle({
             id_detalle: idDetalle,
             nota,
-        },
-    });
+        });
 }
 
 export async function vrCobrarFraccionado(argsInput: {
@@ -221,7 +208,7 @@ export async function vrCobrarFraccionado(argsInput: {
     };
     // Devuelve el número del ticket, pero la pantalla no lo necesita: el ticket se pide por el
     // pago, cuyo id ya se conoce (RI-29).
-    await invokeClient<string>("vr_cobrar_fraccionado", { args });
+    await commands.vrCobrarFraccionado(args);
 
     return { ok: true };
 }
@@ -229,7 +216,5 @@ export async function vrCobrarFraccionado(argsInput: {
 export async function vrDeleteComandaIfSafe(
     idComanda: string,
 ): Promise<boolean> {
-    return await invokeClient<boolean>("vr_delete_comanda_if_safe", {
-        args: { id_comanda: idComanda },
-    });
+    return await commands.vrDeleteComandaIfSafe({ id_comanda: idComanda });
 }

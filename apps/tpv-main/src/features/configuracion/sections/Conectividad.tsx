@@ -1,14 +1,11 @@
+import { commands } from "@tpv/client";
 // src/features/configuracion/sections/Conectividad.tsx
 import React from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import { save } from "@tauri-apps/plugin-dialog";
 import { toAppError } from "@tpv/client";
 import type { JobStatus, LocalBackupInfo, SyncHealth } from "@tpv/contracts";
-import {
-	crearCopiaLocal,
-	exportarCopiaLocal,
-	listarCopiasLocales,
-} from "../../login/loginApi";
+
 import { useToast } from "../../../shared/toast";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { Panel } from "../ui/Panel";
@@ -184,7 +181,7 @@ function SaludSync({ darkMode }: { darkMode: boolean }) {
 		let cancelled = false;
 		const tick = async () => {
 			try {
-				const h = await invoke<SyncHealth>("sync_health");
+				const h = await commands.syncHealth();
 				if (!cancelled) {
 					setHealth(h);
 					setErr(null);
@@ -332,7 +329,7 @@ function CopiasSeguridad({ darkMode }: { darkMode: boolean }) {
 
 	const recargar = React.useCallback(async () => {
 		try {
-			setCopias(await listarCopiasLocales());
+			setCopias(await commands.recoveryListBackups());
 			setErr(null);
 		} catch (e) {
 			setErr(toAppError(e).message);
@@ -346,7 +343,7 @@ function CopiasSeguridad({ darkMode }: { darkMode: boolean }) {
 	async function crear() {
 		setOcupado(true);
 		try {
-			const copia = await crearCopiaLocal();
+			const copia = await commands.recoveryCreateBackup();
 			toast.success("Copia creada", fechaCopia(copia.created_at_ms));
 			await recargar();
 		} catch (e) {
@@ -368,7 +365,7 @@ function CopiasSeguridad({ darkMode }: { darkMode: boolean }) {
 				],
 			});
 			if (!destino) return;
-			await exportarCopiaLocal(copia.id, destino);
+			await commands.recoveryExportBackup(copia.id, destino);
 			toast.success("Copia guardada", "Ya tienes un respaldo fuera de este ordenador.");
 		} catch (e) {
 			toast.error("No se pudo guardar la copia", toAppError(e).message);
@@ -459,7 +456,7 @@ function TareasFondo({ darkMode }: { darkMode: boolean }) {
 		let cancelled = false;
 		const tick = async () => {
 			try {
-				const j = await invoke<JobStatus[]>("jobs_status");
+				const j = await commands.jobsStatus();
 				if (!cancelled) {
 					setJobs(j);
 					setErr(null);

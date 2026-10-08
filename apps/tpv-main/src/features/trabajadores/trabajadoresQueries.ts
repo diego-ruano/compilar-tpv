@@ -5,21 +5,11 @@
 //  - Escrituras -> useMutation que, en onSuccess, invalida la clave de la feature para
 //    que las listas en caché (trabajadores, turnos, asignaciones de la semana) se
 //    refresquen solas (Local-First: el dato sólo cambia aquí).
-//  - El hook envuelve las funciones de `trabajadoresApis.ts` (invokeClient) sin tocar su firma.
+//  - Las firmas del transporte se generan desde los comandos Rust.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import {
-  trabajadoresGetAll,
-  trabajadoresGetTrabajadorIdByUsuario,
-  turnosGetAll,
-  horariosGetAsignacionesSemana,
-  horariosCreateAsignacion,
-  horariosUpdateAsignacion,
-  horariosDeleteAsignacion,
-  horariosCopySemanaAsignaciones,
-  horariosSetPredeterminadoDesdeSemana,
-} from "./trabajadoresApis";
+import { commands } from "@tpv/client";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
 export const trabajadoresKeys = {
@@ -40,7 +30,7 @@ export const trabajadoresKeys = {
 export function useTrabajadores() {
   return useQuery({
     queryKey: trabajadoresKeys.lista(),
-    queryFn: () => trabajadoresGetAll(),
+    queryFn: () => commands.trabajadoresGetAll(),
   });
 }
 
@@ -48,7 +38,7 @@ export function useTrabajadores() {
 export function useTurnos() {
   return useQuery({
     queryKey: trabajadoresKeys.turnos(),
-    queryFn: () => turnosGetAll(),
+    queryFn: () => commands.turnosGetAll(),
   });
 }
 
@@ -62,7 +52,7 @@ export function useTrabajadorIdByUsuario(
 ) {
   return useQuery({
     queryKey: trabajadoresKeys.trabajadorIdByUsuario(idUsuario),
-    queryFn: () => trabajadoresGetTrabajadorIdByUsuario(String(idUsuario ?? "")),
+    queryFn: () => commands.trabajadoresGetTrabajadorIdByUsuario({ id_usuario: String(idUsuario ?? "") }),
     enabled: enabled && idUsuario != null,
   });
 }
@@ -71,7 +61,7 @@ export function useTrabajadorIdByUsuario(
 export function useAsignacionesSemana(fechaLunes: string) {
   return useQuery({
     queryKey: trabajadoresKeys.asignacionesSemana(fechaLunes),
-    queryFn: () => horariosGetAsignacionesSemana(fechaLunes),
+    queryFn: () => commands.horariosGetAsignacionesSemana({ fecha_lunes: fechaLunes }),
   });
 }
 
@@ -83,7 +73,7 @@ export function useAsignacionesSemana(fechaLunes: string) {
 export function useCreateAsignacion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: horariosCreateAsignacion,
+    mutationFn: commands.horariosCreateAsignacion,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
@@ -94,7 +84,7 @@ export function useCreateAsignacion() {
 export function useUpdateAsignacion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: horariosUpdateAsignacion,
+    mutationFn: commands.horariosUpdateAsignacion,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
@@ -105,7 +95,7 @@ export function useUpdateAsignacion() {
 export function useDeleteAsignacion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: horariosDeleteAsignacion,
+    mutationFn: (id_asignacion: string) => commands.horariosDeleteAsignacion({ id_asignacion }),
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
@@ -116,7 +106,7 @@ export function useDeleteAsignacion() {
 export function useCopySemanaAsignaciones() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: horariosCopySemanaAsignaciones,
+    mutationFn: commands.horariosCopySemanaAsignaciones,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
@@ -127,7 +117,7 @@ export function useCopySemanaAsignaciones() {
 export function useSetPredeterminadoDesdeSemana() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: horariosSetPredeterminadoDesdeSemana,
+    mutationFn: (fecha_lunes: string) => commands.horariosSetPredeterminadoDesdeSemana({ fecha_lunes }),
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },

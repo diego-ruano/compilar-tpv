@@ -19,7 +19,7 @@ export type LineaEntrada = {
 	nombre: string;
 	precio: Dinero;
 	/** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
-	ivaPercent?: number | null;
+	iva_percent?: number | null;
 	/** Unidades de la línea. Ausente = 1. */
 	cantidad?: number;
 };
@@ -29,7 +29,7 @@ export type LineaAgrupada = {
 	nombre: string;
 	precio: Dinero;
 	qty: number;
-	ivaPercent: number | null;
+	iva_percent: number | null;
 };
 
 /** Un tramo del desglose del pie: todo lo vendido a un tipo. Gemelo de `TramoIva` en `tpv_domain::ticket`. */
@@ -82,7 +82,7 @@ export function recortar(texto: string, importe: string, cols: number): string {
 export function agruparLineas(items: LineaEntrada[]): LineaAgrupada[] {
 	const map = new Map<string, LineaAgrupada>();
 	for (const it of items) {
-		const iva = it.ivaPercent ?? null;
+		const iva = it.iva_percent ?? null;
 		const entera = Number.isInteger(it.cantidad);
 		const unidades = entera ? (it.cantidad as number) : 1;
 		// Céntimos por una cantidad fraccionaria vuelve a ser flotante: se redondea al
@@ -90,7 +90,7 @@ export function agruparLineas(items: LineaEntrada[]): LineaAgrupada[] {
 		const precio = entera ? it.precio : redondear(it.precio * (it.cantidad ?? 1));
 		const key = `${it.nombre}__${precio}__${iva ?? "neg"}`;
 		const cur = map.get(key);
-		if (!cur) map.set(key, { nombre: it.nombre, precio, qty: unidades, ivaPercent: iva });
+		if (!cur) map.set(key, { nombre: it.nombre, precio, qty: unidades, iva_percent: iva });
 		else cur.qty += unidades;
 	}
 	return Array.from(map.values());
@@ -117,7 +117,7 @@ export function totalDe(lineas: LineaAgrupada[]): Dinero {
 export function desgloseIva(lineas: LineaAgrupada[], ivaNegocio: number | null): TramoIva[] {
 	const porTipo = new Map<number, Dinero>();
 	for (const g of lineas) {
-		const tipo = g.ivaPercent ?? ivaNegocio ?? 0;
+		const tipo = g.iva_percent ?? ivaNegocio ?? 0;
 		porTipo.set(tipo, sumar(porTipo.get(tipo) ?? CERO, por(g.precio, g.qty)));
 	}
 

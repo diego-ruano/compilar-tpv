@@ -8,7 +8,7 @@ import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 
 import * as cmd from "./configuracion.commands";
 import * as q from "./configuracion.queries";
-import { configPatchSchema } from "./configuracion.schemas";
+import { negocioPatchSchema, ticketPatchSchema, contactoPatchSchema } from "./configuracion.schemas";
 import { cuerpo } from "../../lib/validacion";
 import { apply } from "../../lib/rutas";
 
@@ -22,7 +22,7 @@ configuracionRoutes.get("/contact", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.getContact(db))),
 );
 
-configuracionRoutes.patch("/contact", cuerpo(configPatchSchema), async (c) => {
+configuracionRoutes.patch("/contact", cuerpo(contactoPatchSchema), async (c) => {
 	const datos = c.req.valid("json");
 	await apply(c, cmd.patchContact(datos.patch));
 	return c.json({ ok: true });
@@ -36,13 +36,13 @@ configuracionRoutes.get("/ticket", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.getTicket(db))),
 );
 
-configuracionRoutes.patch("/business", cuerpo(configPatchSchema), async (c) => {
+configuracionRoutes.patch("/business", cuerpo(negocioPatchSchema), async (c) => {
 	const datos = c.req.valid("json");
 	await apply(c, cmd.patchBusiness(datos.patch));
 	return c.json({ ok: true });
 });
 
-configuracionRoutes.patch("/ticket", cuerpo(configPatchSchema), async (c) => {
+configuracionRoutes.patch("/ticket", cuerpo(ticketPatchSchema), async (c) => {
 	const datos = c.req.valid("json");
 	await apply(c, cmd.patchTicket(datos.patch));
 	return c.json({ ok: true });

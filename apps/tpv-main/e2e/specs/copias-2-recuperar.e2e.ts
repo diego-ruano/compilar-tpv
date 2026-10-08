@@ -34,7 +34,7 @@ describe("Copias de seguridad · la avería y la vuelta", () => {
     });
 
     it("2 · la copia de antes de la avería sigue estando", async () => {
-        const copias = await leerDeLaApp<Array<{ id: string; importada: boolean }>>(
+        const copias = await leerDeLaApp(
             "recovery_list_backups",
         );
         expect(copias.length).toBeGreaterThan(0);
@@ -101,10 +101,10 @@ describe("Copias de seguridad · la avería y la vuelta", () => {
 
         // La categoría creada antes de la avería tiene que seguir ahí: es lo que demuestra que se
         // recuperó el contenido y no sólo que la app arranca.
-        const categorias = await leerDeLaApp<Array<{ Nombre?: string; nombre?: string }>>(
+        const categorias = await leerDeLaApp(
             "list_categorias_vendibles",
         );
-        const nombres = categorias.map((c) => c.Nombre ?? c.nombre ?? "");
+        const nombres = categorias.map((c) => c.Nombre);
         expect(nombres).toContain(CATEGORIA);
     });
 });

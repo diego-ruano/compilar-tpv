@@ -31,14 +31,14 @@ crates/
   tpv-infra-licensing            licencia, identidad del dispositivo, secretos, hora de la nube
   tpv-infra-aeat                 Veri*factu: SOAP, XML, TLS mutuo con WinHTTP
   tpv-telemetry                  Sentry, spool a Axiom, filtro de datos personales
-  tpv-contracts                  DTOs con ts-rs → packages/contracts
+  tpv-contracts                  DTOs con Specta → packages/contracts
 packages/
   database                       migrations/*.sql (esquema único) + schema.snapshot.sql
   contracts                      @tpv/contracts (bindings.ts generado)
-  client                         @tpv/client (invokeClient)
+  client                         @tpv/client (commands generados + errores)
 docs/                            arquitectura, decisiones, guías, estudios, pendientes
 tests/contract/                  arneses de contrato Rust ↔ worker
-scripts/                         check-comandos-tauri, check-migration-registry, check-contract-coverage,
+scripts/                         generate-types, check-migration-registry, check-contract-coverage,
                                  tpv-license (CLI de administración), generate-license-keypair,
                                  verifactu-validar-xml
 ```
@@ -74,7 +74,8 @@ Lo pendiente y lo detectado sin decidir está en [docs/pendientes.md](docs/pendi
 pnpm install                  # tras clonar (raíz)
 pnpm tauri dev                # la app de escritorio
 pnpm tauri build              # empaquetar
-pnpm generate-types           # regenerar bindings.ts desde los DTO de Rust
+pnpm generate-types           # regenerar DTOs y funciones de comandos desde Rust
+pnpm generate-types:check     # comprobar que los tres ficheros generados están al día
 pnpm lint                     # ESLint;   pnpm lint:rust → clippy del workspace
 
 cargo build
@@ -88,8 +89,8 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 
 - **Los tests de Rust se corren con `cargo nextest`**, nunca con `cargo test`: libsql tiene un crash nativo
   al crear muchas bases en un proceso y nextest aísla cada test (con dos reintentos que lo marcan
-  `FLAKY`). El porqué está en `.config/nextest.toml`. La excepción es `tpv-contracts`, cuyos «tests» son el
-  generador de ts-rs: se corren con `pnpm generate-types` (o `cargo test -p tpv-contracts`).
+  `FLAKY`). El porqué está en `.config/nextest.toml`. Los tests de contratos también van por nextest;
+  la generación usa el ejecutable Tauri con `--export-bindings`, sin arrancar la aplicación.
 - **Windows: `Failed("Are you sure you have RC.EXE in your $PATH…")`** no es el código: `embed-resource`
   busca `rc.exe` por una clave de registro que puede apuntar mal. Se arregla con
   `setx RC "C:\Program Files (x86)\Windows Kits\10\bin\<versión>\x64\rc.exe"` y una terminal nueva. Sólo
@@ -119,15 +120,18 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 - `tpv-domain`: reglas puras, sin BD, red ni Tauri. `tpv-application`: puertos y casos de uso.
   `tpv-infra-*`: el SQL y lo que sale fuera. **Un comando Tauri no lleva SQL ni reglas**: adapta, llama al
   caso de uso y devuelve.
-- Un DTO que cruza a la interfaz vive en `tpv-contracts` con `#[derive(TS)]` y
-  `#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]` (tres `../`). Los IDs
-  `i64` llevan `#[ts(type = "number")]`. Tras cambiar uno, `pnpm generate-types`.
+- Un DTO que cruza a la interfaz vive en `tpv-contracts` con `#[derive(specta::Type)]` y serde.
+  Cada comando lleva `#[specta::specta]` y se registra en `command_builder()` de `lib.rs`.
+  Tras cambiar una firma o DTO, `pnpm generate-types`: tipos en `@tpv/contracts`, funciones en
+  `@tpv/client` y metadatos sin runtime Tauri para E2E. `Dinero` conserva su marca de céntimos.
 - **Errores**: `AppError` → `AppErrorDto { code, message }` con `code` del catálogo `ErrorCode`
   (`tpv-contracts/src/errors.rs`). **Se ramifica sólo por `code`**; un código nuevo sólo si alguien tiene que
   hacer algo distinto. Lo que se enseña es `message`, nunca un identificador. En el frontend,
   `toAppError(e)` / `esError(e, "…")`.
-- **El nombre de un comando Tauri no lo comprueba el compilador**: `scripts/check-comandos-tauri.mjs` lo hace
-  en CI. Un comando que nadie invoca no se registra.
+- **Nombre, argumentos y respuesta están tipados**: usar `commands.*` de `@tpv/client`, nunca
+  `invoke`/`invokeClient` ni elegir `{ args }` a mano. TanStack Query llama al comando generado;
+  sólo conservar helpers de orquestación o estado de presentación. CI comprueba la exportación real.
+  Un comando que nadie invoca no se registra.
 
 ### Dinero ([0005](docs/decisiones/0005-dinero-en-centimos.md))
 
@@ -219,7 +223,7 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 
 ### Frontend ([frontend.md](docs/arquitectura/frontend.md))
 
-- En la Main los datos de negocio van por `invokeClient` (`@tpv/client`), nunca por `fetch`.
+- En la Main los datos de negocio van por `commands` (`@tpv/client`), nunca por `fetch`.
 - React Query con hooks en `features/<x>/<x>Queries.ts` (referencia: `clientesQueries.ts`). La parte
   transaccional del POS, la configuración y el login van sin él.
 - **Prohibido inyectar `<style>` en tiempo de ejecución** (`style-src 'self'`): todo CSS por el bundle. Un

@@ -22,15 +22,9 @@
 //! frontend, para que el contrato sea uno solo en las tres capas.
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
-
 /// Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
-#[ts(
-    export,
-    export_to = "../../../packages/contracts/src/generated/bindings.ts"
-)]
 pub enum ErrorCode {
     // ── Genéricos: CLASIFICAN el fallo, no lo identifican ──────────────────────
     /// Entrada inválida o regla de dominio incumplida. El detalle va en `message`.
@@ -254,11 +248,7 @@ impl ErrorCode {
 }
 
 /// Error tal y como lo recibe el frontend. Es el `Err` de **todos** los comandos Tauri.
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(
-    export,
-    export_to = "../../../packages/contracts/src/generated/bindings.ts"
-)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AppErrorDto {
     /// Código estable. Es lo único por lo que se debe ramificar.
     pub code: ErrorCode,

@@ -1,3 +1,6 @@
+import { commands } from "@tpv/client";
+import { todayLocalYmd } from "../../features/login/fechaJornada";
+import type { UserListItem as DbUser, PunchStatus } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -26,16 +29,7 @@ import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
 import { Button, IconButton, ThemeToggle } from "../../shared/ui";
 
-import {
-    listLoginUsers,
-    loginUser,
-    getTodayPunchStatus,
-    punch as punchApi,
-    setTurnoPartidoHoy,
-    todayLocalYmd,
-    type DbUser,
-    type PunchStatus,
-} from "../../features/login/loginApi";
+
 import RecuperarPinModal from "../../features/login/RecuperarPinModal";
 import { conAviso } from "../../shared/lib/conAviso";
 import { ROL_ADMIN } from "../../shared/lib/permisos";
@@ -81,9 +75,9 @@ export default function Login() {
     const navigate = useNavigate();
     const toast = useToast();
     const deviceMode = useMode((s) => s.mode);
-    const { businessName, logoDataUrl } = useBusinessSettings();
+    const { business_name, logo_data_url } = useBusinessSettings();
     // Ruta relativa → URL utilizable (ver `useImageUrl`).
-    const logoSrc = useImageUrl(logoDataUrl);
+    const logoSrc = useImageUrl(logo_data_url);
 
     const [users, setUsers] = useState<DbUser[]>([]);
     const [loadingUsers, setLoadingUsers] = useState(true);
@@ -179,7 +173,7 @@ export default function Login() {
     const showBottomBlock = Boolean(selectedUser);
 
     const refreshPunch = async (uid: string) => {
-        const st = await getTodayPunchStatus({ idUsuario: uid });
+        const st = await commands.getTodayPunchStatus({ id_usuario: uid });
         setPunchStatus(st);
     };
 
@@ -189,7 +183,7 @@ export default function Login() {
         void (async () => {
             try {
                 setLoadingUsers(true);
-                const arr = await listLoginUsers();
+                const arr = await commands.listLoginUsers();
                 if (!mounted) return;
                 setUsers(arr ?? []);
             } catch (e) {
@@ -221,8 +215,8 @@ export default function Login() {
         void (async () => {
             try {
                 setLoadingPunch(true);
-                const st = await getTodayPunchStatus({
-                    idUsuario: selectedUserId,
+                const st = await commands.getTodayPunchStatus({
+                    id_usuario: selectedUserId,
                 });
                 if (!mounted) return;
                 setPunchStatus(st);
@@ -288,9 +282,9 @@ export default function Login() {
         accionEnCursoRef.current = true;
         try {
             setLoadingPunch(true);
-            await setTurnoPartidoHoy({
-                idUsuario: selectedUserId,
-                turnoPartido: checked,
+            await commands.setTurnoPartidoHoy({
+                id_usuario: selectedUserId,
+                turno_partido: checked,
                 fecha: punchStatus?.fecha,
             });
             await refreshPunch(selectedUserId);
@@ -337,8 +331,8 @@ export default function Login() {
         setLoadingPunch(true);
 
         try {
-            const st = await punchApi({
-                idUsuario: selectedUserId!,
+            const st = await commands.punch({
+                id_usuario: selectedUserId!,
                 pin: currentPin,
                 tipo,
             });
@@ -388,8 +382,8 @@ export default function Login() {
         setIsSubmitting(true);
 
         try {
-            const ok = await loginUser({
-                idUsuario: selectedUserId!,
+            const ok = await commands.loginUser({
+                id_usuario: selectedUserId!,
                 pin: currentPin,
             });
 
@@ -544,7 +538,7 @@ export default function Login() {
                         data-tauri-drag-region
                         className="min-w-0 max-w-[35vw] truncate text-sm font-semibold text-fg sm:max-w-60"
                     >
-                        {businessName || "TPV"}
+                        {business_name || "TPV"}
                     </p>
                 </div>
                 <div className="flex w-fit items-center gap-1 p-1 px-1.5">
@@ -586,7 +580,7 @@ export default function Login() {
                                 <div className="min-w-0">
                                     <h1 className="truncate text-base font-bold text-fg sm:text-xl">
                                         Bienvenido a{" "}
-                                        <span className="text-accent">{businessName || "TPV"}</span>
+                                        <span className="text-accent">{business_name || "TPV"}</span>
                                     </h1>
                                     <p className="mt-0.5 text-[11px] text-fg-muted sm:text-sm">
                                         Selecciona tu usuario e inicia sesión para continuar.

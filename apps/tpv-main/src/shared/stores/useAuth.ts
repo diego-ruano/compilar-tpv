@@ -1,3 +1,4 @@
+import { commands } from "@tpv/client";
 //shared/stores/useAuth.ts
 //
 // La sesión del frontend. SEC-01: **ya no es la única que existe**. El backend guarda la suya
@@ -9,7 +10,7 @@
 
 import { create } from "zustand";
 import { queryClient } from "../lib/queryClient";
-import { invokeClient } from "@tpv/client";
+
 
 export type AuthState = {
     // Estado de sesión
@@ -66,7 +67,7 @@ export const useAuth = create<AuthState>((set) => ({
         // llama a `logout()` (incluido el cierre por inactividad) no tiene nada que hacer con
         // el resultado— pero su fallo no se traga en silencio: una sesión que no se cierra en
         // el backend es exactamente lo que este comando existe para evitar.
-        void invokeClient("logout").catch((e: unknown) => {
+        void commands.logout().catch((e: unknown) => {
             console.error("[useAuth] no se pudo cerrar la sesión del backend:", e);
         });
     },

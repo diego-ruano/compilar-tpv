@@ -8,11 +8,12 @@
 use tauri::State;
 
 use tpv_application::use_cases::configuracion as uc;
-use tpv_contracts::configuracion::{BusinessSettings, ConfigPatchInput, ContactSettings, TicketSettings};
+use tpv_contracts::configuracion::{BusinessSettings, BusinessSettingsPatchInput, ContactSettings, ContactSettingsPatchInput, TicketSettings, TicketSettingsPatchInput};
 use crate::{AppState, ADMIN};
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
+#[specta::specta]
 pub async fn config_get_business_settings(
     state: State<'_, AppState>,
 ) -> Result<BusinessSettings, AppErrorDto> {
@@ -21,6 +22,7 @@ pub async fn config_get_business_settings(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn config_get_ticket_settings(
     state: State<'_, AppState>,
 ) -> Result<TicketSettings, AppErrorDto> {
@@ -29,9 +31,10 @@ pub async fn config_get_ticket_settings(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn config_patch_business_settings(
     state: State<'_, AppState>,
-    args: ConfigPatchInput,
+    args: BusinessSettingsPatchInput,
 ) -> Result<String, AppErrorDto> {
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.configuracion_repo().await?;
@@ -39,9 +42,10 @@ pub async fn config_patch_business_settings(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn config_patch_ticket_settings(
     state: State<'_, AppState>,
-    args: ConfigPatchInput,
+    args: TicketSettingsPatchInput,
 ) -> Result<String, AppErrorDto> {
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.configuracion_repo().await?;
@@ -49,6 +53,7 @@ pub async fn config_patch_ticket_settings(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn config_get_contact_settings(
     state: State<'_, AppState>,
 ) -> Result<ContactSettings, AppErrorDto> {
@@ -57,9 +62,10 @@ pub async fn config_get_contact_settings(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn config_patch_contact_settings(
     state: State<'_, AppState>,
-    args: ConfigPatchInput,
+    args: ContactSettingsPatchInput,
 ) -> Result<String, AppErrorDto> {
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.configuracion_repo().await?;

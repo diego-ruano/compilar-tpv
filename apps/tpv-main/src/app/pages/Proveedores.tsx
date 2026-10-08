@@ -1,7 +1,8 @@
+import { commands } from "@tpv/client";
 import { usePermisos } from "../../shared/lib/usePermisos";
 import { guardarImagen } from "../../shared/lib/guardarImagen";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import {
   Truck,
   Plus,
@@ -25,12 +26,7 @@ import PedidosSection from "../../features/proveedores/PedidosSection";
 import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
 import { AddProductModal } from "../../features/InventaryComponents/ui/AddProductModal";
 
-import {
-  proveedoresGetProductosAll,
-  type CategoriaProveedorDto,
-  type ProductoProveedorDto,
-  type ProveedorDto,
-} from "../../features/proveedores/proveedoresApis";
+import { type CategoriaProveedorDto, type ProductoProveedorDto, type ProveedorDto } from "../../features/proveedores/proveedoresApis";
 import {
   useProveedoresAll,
   useProveedoresCategorias,
@@ -343,7 +339,7 @@ export default function Proveedores() {
       // Subir la imagen nueva a R2 y limpiar la anterior (reemplazo o eliminación).
       if (fotoNuevaFile) triggerImageUploadDrain();
       if (rutaAnterior && rutaAnterior !== rutaImagen) {
-        void invoke("images_delete", { args: { rel_path: rutaAnterior } }).catch(() => {});
+        void commands.imagesDelete({ rel_path: rutaAnterior }).catch(() => {});
       }
 
       // La invalidación en onSuccess recachea la lista; el efecto re-deriva y re-sincroniza el activo.
@@ -444,7 +440,7 @@ export default function Proveedores() {
 
     try {
       const idProv = proveedorActivo.id_proveedor;
-      const rows = await proveedoresGetProductosAll();
+      const rows = await commands.proveedoresGetProductosAll();
       const ui = await mapProductosUI(rows);
 
       setProductosDisponibles(ui);

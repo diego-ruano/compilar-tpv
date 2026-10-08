@@ -11,6 +11,7 @@
     "lint:fix": "eslint . --fix",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
     "generate-types": "turbo run generate-types",
+    "generate-types:check": "node scripts/generate-types.mjs --check",
     "tauri": "pnpm --filter @tpv/main tauri",
     "license:issue": "node scripts/tpv-license.mjs issue",
     "license:list": "node scripts/tpv-license.mjs list",

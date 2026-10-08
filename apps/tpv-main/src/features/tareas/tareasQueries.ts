@@ -4,23 +4,23 @@
 //  - Lecturas que alimentan listas -> useQuery con queryKey prefijado por "tareas".
 //  - Escrituras (CRUD + completar) -> useMutation que, en onSuccess, invalida la clave de la
 //    feature para que las listas en caché se refresquen solas (Local-First).
-//  - Los hooks envuelven los métodos de `tareasApi` (invokeClient) sin tocar sus firmas.
+//  - Los hooks envuelven los métodos de `commands` (commands) sin tocar sus firmas.
 //
 // NOTA: `getTareaById` y `getTareaAsignados` se usan on-demand al abrir el detalle (dentro de
 // un Promise.all que rellena estado local del formulario). No aportan caché y se dejan como
-// llamada directa a `tareasApi` en el consumidor (regla 7).
+// llamada directa a `commands` en el consumidor (regla 7).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { tareasApi } from "./tareasApis";
+import { commands } from "@tpv/client";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
 export const tareasKeys = {
   all: ["tareas"] as const,
   trabajadores: () => ["tareas", "trabajadores"] as const,
   admin: () => ["tareas", "admin"] as const,
-  mias: (idTrabajador: string | null | undefined) =>
-    ["tareas", "mias", idTrabajador ?? null] as const,
+  mias: (id_trabajador: string | null | undefined) =>
+    ["tareas", "mias", id_trabajador ?? null] as const,
   papelera: () => ["tareas", "papelera"] as const,
 };
 
@@ -28,7 +28,7 @@ export const tareasKeys = {
 export function useTrabajadores(enabled = true) {
   return useQuery({
     queryKey: tareasKeys.trabajadores(),
-    queryFn: () => tareasApi.getTrabajadores(),
+    queryFn: () => commands.tareasGetTrabajadores(),
     enabled,
   });
 }
@@ -37,17 +37,17 @@ export function useTrabajadores(enabled = true) {
 export function useTareasAdmin(enabled = true) {
   return useQuery({
     queryKey: tareasKeys.admin(),
-    queryFn: () => tareasApi.getTareasAdmin(),
+    queryFn: () => commands.tareasGetTareasAdmin(),
     enabled,
   });
 }
 
 /** Tareas asignadas al trabajador autenticado (vista no-admin). */
-export function useMisTareas(idTrabajador: string | null | undefined, enabled = true) {
+export function useMisTareas(id_trabajador: string | null | undefined, enabled = true) {
   return useQuery({
-    queryKey: tareasKeys.mias(idTrabajador),
-    queryFn: () => tareasApi.getMisTareas(String(idTrabajador ?? "")),
-    enabled: enabled && !!idTrabajador,
+    queryKey: tareasKeys.mias(id_trabajador),
+    queryFn: () => commands.tareasGetMisTareas({ id_trabajador: String(id_trabajador ?? "") }),
+    enabled: enabled && !!id_trabajador,
   });
 }
 
@@ -55,7 +55,7 @@ export function useMisTareas(idTrabajador: string | null | undefined, enabled = 
 export function useCreateTarea() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: tareasApi.createTarea,
+    mutationFn: commands.tareasCreateTarea,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
@@ -66,7 +66,7 @@ export function useCreateTarea() {
 export function useUpdateTarea() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: tareasApi.updateTarea,
+    mutationFn: commands.tareasUpdateTarea,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
@@ -77,7 +77,7 @@ export function useUpdateTarea() {
 export function useSetAsignacionesTarea() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: tareasApi.setAsignacionesTarea,
+    mutationFn: commands.tareasSetAsignacionesTarea,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
@@ -88,7 +88,7 @@ export function useSetAsignacionesTarea() {
 export function useDeleteTarea() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: tareasApi.deleteTarea,
+    mutationFn: (id_tarea: string) => commands.tareasDeleteTarea({ id_tarea }),
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
@@ -99,7 +99,7 @@ export function useDeleteTarea() {
 export function usePapelera(enabled = true) {
   return useQuery({
     queryKey: tareasKeys.papelera(),
-    queryFn: () => tareasApi.getPapelera(),
+    queryFn: () => commands.tareasGetPapelera(),
     enabled,
   });
 }
@@ -108,7 +108,7 @@ export function usePapelera(enabled = true) {
 export function useRestaurarTarea() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: tareasApi.restaurarTarea,
+    mutationFn: (id_tarea: string) => commands.tareasRestaurarTarea({ id_tarea }),
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
@@ -119,7 +119,7 @@ export function useRestaurarTarea() {
 export function useVaciarPapelera() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: tareasApi.vaciarPapelera,
+    mutationFn: commands.tareasVaciarPapelera,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
@@ -130,7 +130,7 @@ export function useVaciarPapelera() {
 export function useMarcarTareaFinalizada() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: tareasApi.marcarTareaFinalizada,
+    mutationFn: commands.tareasMarcarTareaFinalizada,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },

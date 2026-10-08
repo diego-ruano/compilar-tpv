@@ -16,6 +16,7 @@ use tpv_contracts::errors::AppErrorDto;
 /* Lecturas */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_list_categorias_vendibles(
     state: State<'_, AppState>,
 ) -> Result<Vec<CategoriaRow>, AppErrorDto> {
@@ -25,6 +26,7 @@ pub async fn vr_list_categorias_vendibles(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_list_productos_by_categoria(
     state: State<'_, AppState>,
     args: VrIdCategoriaArgs,
@@ -35,6 +37,7 @@ pub async fn vr_list_productos_by_categoria(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_search_productos(
     state: State<'_, AppState>,
     args: VrSearchProductosArgs,
@@ -45,6 +48,7 @@ pub async fn vr_search_productos(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_list_comandas_barra(
     state: State<'_, AppState>,
     args: VrListComandasArgs,
@@ -55,6 +59,7 @@ pub async fn vr_list_comandas_barra(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_get_lineas_comanda(
     state: State<'_, AppState>,
     args: VrIdComandaArgs,
@@ -65,6 +70,7 @@ pub async fn vr_get_lineas_comanda(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_get_index_rows(
     state: State<'_, AppState>,
     args: VrIdsArgs,
@@ -75,6 +81,7 @@ pub async fn vr_get_index_rows(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_get_detalles_ver_ticket(
     state: State<'_, AppState>,
     args: VrIdComandaArgs,
@@ -87,6 +94,7 @@ pub async fn vr_get_detalles_ver_ticket(
 /* Escrituras */
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_create_comanda_barra(
     state: State<'_, AppState>,
     mut args: VrCreateComandaBarraInput,
@@ -98,6 +106,7 @@ pub async fn vr_create_comanda_barra(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_add_linea_comanda(
     state: State<'_, AppState>,
     args: VrAddLineaComandaInput,
@@ -108,6 +117,7 @@ pub async fn vr_add_linea_comanda(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_remove_last_unpaid_linea(
     state: State<'_, AppState>,
     args: VrRemoveLastUnpaidLineaInput,
@@ -118,6 +128,7 @@ pub async fn vr_remove_last_unpaid_linea(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_delete_linea_if_unpaid(
     state: State<'_, AppState>,
     args: VrDeleteLineaIfUnpaidInput,
@@ -128,6 +139,7 @@ pub async fn vr_delete_linea_if_unpaid(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_update_nota_detalle(
     state: State<'_, AppState>,
     args: VrUpdateNotaDetalleInput,
@@ -138,6 +150,7 @@ pub async fn vr_update_nota_detalle(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_cobrar_fraccionado(
     state: State<'_, AppState>,
     args: VrCobrarFraccionadoInput,
@@ -162,6 +175,7 @@ pub async fn vr_cobrar_fraccionado(
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn vr_delete_comanda_if_safe(
     state: State<'_, AppState>,
     args: VrDeleteComandaIfSafeInput,

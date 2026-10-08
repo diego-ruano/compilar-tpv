@@ -11,7 +11,7 @@ import {
     type StatsRange,
     type StatsTurno,
     type ReservasStatsResponse,
-} from "./statsApis";
+} from "@tpv/contracts";
 import { useReservasStats } from "./statsQueries";
 
 export default function ReservasStats({ range }: { range: StatsRange }) {

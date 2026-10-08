@@ -374,7 +374,7 @@ describe("El camino del dinero", () => {
         await conTexto("h3", "Cierres de caja").waitForDisplayed({ timeout: 30_000 });
         await browser.waitUntil(
             async () => {
-                const cierres = await leerDeLaApp<Array<{ descuadre: number }>>("cierre_listar", {
+                const cierres = await leerDeLaApp("cierre_listar", {
                     args: { limite: 10 },
                 });
                 return cierres.length === 1 && Math.abs(cierres[0].descuadre) < 0.005;

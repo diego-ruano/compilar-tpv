@@ -1,7 +1,7 @@
 import { usePermisos } from "../../../shared/lib/usePermisos";
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+
 import { useToast } from "../../../shared/toast";
 import Modal from "../ui/Modal";
 import { cn } from "../utils";
