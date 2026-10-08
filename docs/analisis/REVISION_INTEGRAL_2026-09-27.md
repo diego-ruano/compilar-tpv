@@ -34,7 +34,6 @@
 - [Tabla de hallazgos](#tabla-de-hallazgos)
 - [Orden sugerido](#orden-sugerido)
 - Por grupos:
-  12. [Observabilidad](#12-observabilidad)
   13. [Worker de Cloudflare](#13-worker-de-cloudflare)
   14. [Frontend](#14-frontend)
   15. [Rust: idioma, runtime y estructura](#15-rust-idioma-runtime-y-estructura)
@@ -78,7 +77,6 @@ Lo que sale de esta revisión se concentra en cuatro frentes:
 | [RI-08](#ri-08) | 🟠 | deuda | La CI no ejecuta 249 tests, entre ellos todos los guardianes |
 | [RI-15](#ri-15) | 🟡 | rendimiento | Se construye un `reqwest::Client` por petición (sin reutilizar conexiones) |
 | [RI-16](#ri-16) | 🟡 | rendimiento | libsql local bloquea hilos del runtime async (restauración, estadísticas) |
-| [RI-19](#ri-19) | ✅ | resuelto | Cola por segmentos y lotes agrupados, con retención por bytes |
 | [RI-22](#ri-22) | 🟡 | deuda | Caminos enteros sin ningún llamante |
 | [RI-23](#ri-23) | 🟡 | rendimiento | Bundle de 2,5 MB sin división por rutas, logo de 940 KB e imágenes sin uso |
 | [RI-24](#ri-24) | 🟡 | deuda | Los source maps del frontend no llegan a Sentry (y la versión no cuadra) |
@@ -87,7 +85,6 @@ Lo que sale de esta revisión se concentra en cuatro frentes:
 | [RI-38](#ri-38) | 🔵 | bug | Errores que se tragan en silencio (estadísticas, outbox, compatibilidad de columnas) |
 | [RI-39](#ri-39) | 🔵 | bug | Guardas de estado fuera de la transacción (`actualizar_pago`) |
 | [RI-40](#ri-40) | 🔵 | bug | Pánicos por cortar cadenas por bytes (reservas) |
-| [RI-42](#ri-42) | ✅ | resuelto | Filtro que conserva UUIDs y timestamps y valida tarjetas con Luhn |
 | [RI-44](#ri-44) | 🔵 | rendimiento | El worker gasta CPU re-serializando el catch-up y verificando Ed25519 en JS |
 | [RI-45](#ri-45) | 🔵 | tecnología | El Durable Object es «clásico»: Workers RPC quitaría el HMAC interno frágil |
 | [RI-46](#ri-46) | 🔵 | deuda | Configuración de wrangler: bindings duplicados, `remote: true`, fecha de compatibilidad |
@@ -141,49 +138,6 @@ del canal a `main`.
 **Después, sin prisa:** el resto, empezando por el código muerto (RI-22), y siguiendo por las mejoras de
 coste (RI-15, RI-16, RI-44). Los detalles de pantalla (RI-81 a RI-86) conviene hacerlos
 cuando se toque cada una, a la vez que se trocean los componentes grandes de RI-47.
-
-## 12. Observabilidad
-
-<a id="ri-19"></a>
-### RI-19 ✅ · Cola por segmentos y lotes agrupados
-
-**Implementado:** persistencia de la antesala aproximadamente al segundo, segmento cerrado a
-60 s, 500 eventos o 512 KiB y subida que agrupa también los ficheros antiguos. El POST no detiene
-la persistencia. Retención de 256 MiB en Main y 64 MiB en Handy, con poda de lo más antiguo y
-registro local de descartes. Recuperación de temporales y cursores de confirmación parcial, sin
-fsync ni garantía ante cortes de corriente. Espera por notificaciones y plazos, sin sondeo del
-directorio al estar inactivo. Los rechazos de cuerpo se dividen hasta aislar el evento inválido.
-
-**Dónde:** [`worker.rs`](../../crates/tpv-telemetry/src/worker.rs),
-[`spool.rs`](../../crates/tpv-telemetry/src/spool.rs) y
-[observabilidad.md](../arquitectura/observabilidad.md).
-
-<a id="ri-42"></a>
-### RI-42 ✅ · Filtro de PII que conserva los datos de diagnóstico
-
-**Implementado:** intervalos protegidos de UUIDs, fechas, timestamps con claves temporales y
-hashes identificados. Secretos redactados antes de proteger diagnóstico y también por su clave
-en objetos. Teléfonos españoles con prefijo opcional y tarjetas de 13–19 cifras validadas con
-Luhn. Las tres copias comparten pruebas de texto, objetos e idempotencia. Rust usa RegexSet
-para preseleccionar reglas y devuelve cadenas prestadas cuando no hay cambios.
-
-**Dónde:** [`scrub.rs`](../../crates/tpv-telemetry/src/scrub.rs), sus dos copias TypeScript y
-[`scrub_casos.json`](../../crates/tpv-telemetry/src/scrub_casos.json).
-
-### Otros de observabilidad
-
-- ✅ Copia previa a migrar y migración aplicada: `tracing::info!` y `tracing::warn!` en
-  [`connection.rs`](../../crates/tpv-infra-sqlite/src/connection.rs) y
-  [`migrations.rs`](../../crates/tpv-infra-sqlite/src/migrations.rs), con target `tpv::migrations`.
-  La copia informa del nombre y los bytes, sin ruta absoluta; la migración se registra tras el
-  COMMIT. Estos eventos también quedan en el fichero local de release.
-- ✅ Licencias y shell unificados en `tracing`. Android conserva Logcat desde `JNI_OnLoad`
-  y conecta `log` al subscriber después, con un único logger global. Se evita la inicialización
-  parcial que provocaba `try_init()` al encontrar un logger previamente instalado.
-- ✅ Eliminados los tres `console.log` de depuración de la subida en `images.routes.ts`
-  (ruta, ruta inválida y clave de R2). Se conservan las validaciones y las respuestas HTTP.
-
----
 
 ## 13. Worker de Cloudflare
 
