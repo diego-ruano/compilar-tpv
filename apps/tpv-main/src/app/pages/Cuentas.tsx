@@ -42,6 +42,7 @@ import {
     type ClaseBaja,
 } from "../../features/cuentas/cuentasApis";
 import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
+import ReabrirCierreModal from "../../features/cuentas/ReabrirCierreModal";
 import DevolverModal from "../../features/cuentas/DevolverModal";
 import ImpactoCierreModal from "../../features/cuentas/ImpactoCierreModal";
 import {
@@ -66,7 +67,7 @@ import {
 import { cuentasPrevisualizarCambio } from "../../features/cuentas/cuentasApis";
 
 // PDF
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { generarPdfCuentas } from "../../features/cuentas/generarPdfCuentas";
 
 // Tauri: guardar en ruta elegida por el usuario
 import { save } from "@tauri-apps/plugin-dialog";
@@ -83,17 +84,6 @@ function todayYMD() {
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
-}
-
-function asciiSafe(s: string) {
-    return (s ?? "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/ñ/g, "n")
-        .replace(/Ñ/g, "N")
-        // jsPDF sólo lleva WinAnsi: lo que no sea ASCII imprimible hay que quitarlo antes.
-        // eslint-disable-next-line no-control-regex -- el rango es a propósito, no un descuido.
-        .replace(/[^\x00-\x7F]/g, "");
 }
 
 function Badge({ children }: { children: React.ReactNode }) {
@@ -431,13 +421,11 @@ export default function Cuentas() {
     // (CAJA-01): el de hace tres días ya no se puede contar otra vez. Corregir un apunte de un cierre
     // ya hecho no necesita deshacer nada: se rectifica solo. Queda registrado quién y cuándo.
     const idUltimoCierre = cierres.find((c) => !c.reabierto_en)?.id_cierre ?? null;
+    const [cierreAReabrir, setCierreAReabrir] = useState<string | null>(null);
     const deshacerCierre = async (idCierre: string) => {
-        try {
-            await cierreReabrir(idCierre);
-            await recargarCierres();
-        } catch (e) {
-            setCierresError(toAppError(e).message);
-        }
+        await cierreReabrir(idCierre);
+        setCierreAReabrir(null);
+        await recargarCierres();
     };
 
     /**
@@ -873,502 +861,32 @@ export default function Cuentas() {
         }
     };
 
-    const guardarPdf = async () => {
+    const exportarPdf = async (tipo: "rango" | "dia") => {
         try {
             setPdfError(null);
             setSavingPdf(true);
-
-            const defaultName = `cuentas_${del || "inicio"}_${al || "fin"}.pdf`;
-
+            const inicio = tipo === "dia" ? todayYMD() : del;
+            const fin = tipo === "dia" ? inicio : al;
             const filePath = await save({
-                title: "Guardar PDF de Cuentas",
-                defaultPath: defaultName,
+                title: tipo === "dia" ? "Sacar cuenta del día (PDF)" : "Guardar PDF de Cuentas",
+                defaultPath: tipo === "dia" ? `cuenta_dia_${inicio}.pdf` : `cuentas_${inicio || "inicio"}_${fin || "fin"}.pdf`,
                 filters: [{ name: "PDF", extensions: ["pdf"] }],
             });
-
             if (!filePath) return;
-
-            // El PDF refleja TODO el rango (no la página visible): traemos todas las filas sin
-            // paginar (sin page_size ⇒ el backend devuelve el conjunto completo en una página).
-            const [entradasRaw, salidasRaw] = await Promise.all([
-                cuentasGetEntradas({ del, al, q: qDebounced }),
-                cuentasGetSalidas({ del, al, q: qDebounced }),
-            ]);
-            const entradasFull = entradasRaw.filas;
-            const salidasFull = salidasRaw.filas;
-            // Un cobro anulado no es una venta: no suma (CUENTA-07). Sale en el listado igual, y
-            // marcado, porque este PDF es el documento con el que se cuadra la caja y una salida
-            // de dinero que no aparece es exactamente lo que no se puede explicar después.
-            const totalEntradasPdf = sumar(
-                ...entradasFull.map((e) => (esAnulado(e) ? CERO : e.importe)),
-            );
-            const totalSalidasPdf = sumar(...salidasFull.map((s) => s.importe));
-            const balancePdf = restar(totalEntradasPdf, totalSalidasPdf);
-
-            const pdfDoc = await PDFDocument.create();
-            const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-            const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-            const PAGE_W = 595.28;
-            const PAGE_H = 841.89;
-            const M = 50;
-
-            const mkPage = () => {
-                const page = pdfDoc.addPage([PAGE_W, PAGE_H]);
-                return { page, y: PAGE_H - M };
-            };
-
-            const gray = rgb(0.35, 0.35, 0.35);
-            const black = rgb(0.1, 0.1, 0.1);
-
-
-            const safeText = (t: any) =>
-                asciiSafe(
-                    String(t ?? "")
-                        .replace(/\s+/g, " ")
-                        .trim(),
-                );
-
-            const drawLine = (ctx: any) => {
-                if (ctx.y < M + 20) ctx = mkPage();
-                ctx.page.drawLine({
-                    start: { x: M, y: ctx.y },
-                    end: { x: PAGE_W - M, y: ctx.y },
-                    thickness: 1,
-                    color: rgb(0.9, 0.9, 0.9),
-                });
-                ctx.y -= 10;
-                return ctx;
-            };
-
-            const write = (
-                ctx: any,
-                text: string,
-                opts?: { size?: number; bold?: boolean; color?: any },
-            ) => {
-                const size = opts?.size ?? 11;
-                const usedFont = opts?.bold ? fontBold : font;
-                const color = opts?.color ?? black;
-
-                if (ctx.y < M + 40) ctx = mkPage();
-
-                ctx.page.drawText(safeText(text), {
-                    x: M,
-                    y: ctx.y,
-                    size,
-                    font: usedFont,
-                    color,
-                });
-                ctx.y -= size + 6;
-                return ctx;
-            };
-
-            const writeRow = (
-                ctx: any,
-                cols: Array<{
-                    text: string;
-                    x: number;
-                    w?: number;
-                    align?: "left" | "right";
-                }>,
-                opts?: { size?: number; bold?: boolean; color?: any },
-            ) => {
-                const size = opts?.size ?? 10;
-                const usedFont = opts?.bold ? fontBold : font;
-                const color = opts?.color ?? black;
-
-                if (ctx.y < M + 30) ctx = mkPage();
-
-                for (const c of cols) {
-                    const t = safeText(c.text);
-                    let x = c.x;
-
-                    if (c.align === "right") {
-                        const w = usedFont.widthOfTextAtSize(t, size);
-                        x = c.x + (c.w ?? 0) - w;
-                    }
-
-                    ctx.page.drawText(t, {
-                        x,
-                        y: ctx.y,
-                        size,
-                        font: usedFont,
-                        color,
-                    });
-                }
-
-                ctx.y -= size + 6;
-                return ctx;
-            };
-
-            let ctx = mkPage();
-
-            ctx = write(ctx, "Cuentas", { size: 20, bold: true });
-            ctx = write(ctx, `Rango: ${del || "-"}  a  ${al || "-"}`, {
-                size: 11,
-                color: gray,
-            });
-            ctx = write(
-                ctx,
-                `Entradas: ${eur(totalEntradasPdf)} | Salidas: ${eur(
-                    totalSalidasPdf,
-                )} | Balance: ${eur(balancePdf)}`,
-                { size: 12, bold: true },
-            );
-            ctx.y -= 6;
-            ctx = drawLine(ctx);
-
-            ctx.y -= 16;
-            ctx = write(ctx, "Entradas", { size: 14, bold: true });
-            ctx = writeRow(
-                ctx,
-                [
-                    { text: "Fecha/Hora", x: M },
-                    { text: "Cliente", x: M + 140 },
-                    { text: "Metodo", x: M + 380 },
-                    {
-                        text: "Importe",
-                        x: M + 460,
-                        w: PAGE_W - M - (M + 460),
-                        align: "right",
-                    },
-                ],
-                { bold: true, color: gray },
-            );
-            ctx = drawLine(ctx);
-            ctx.y -= 8;
-
-            if (!entradasFull.length) {
-                ctx = write(ctx, "Sin entradas para este rango/filtro.", { color: gray });
-            } else {
-                for (const e of entradasFull) {
-                    ctx = writeRow(ctx, [
-                        { text: e.fecha_hora, x: M },
-                        { text: e.cliente, x: M + 140 },
-                        { text: esAnulado(e) ? `${e.metodo} · ANULADO` : e.metodo, x: M + 380 },
-                        {
-                            text: eur(e.importe),
-                            x: M + 460,
-                            w: PAGE_W - M - (M + 460),
-                            align: "right",
-                        },
-                    ]);
-                }
-            }
-
-            ctx.y -= 8;
-            ctx = drawLine(ctx);
-
-            ctx.y -= 16;
-            ctx = write(ctx, "Salidas", { size: 14, bold: true });
-            ctx = writeRow(
-                ctx,
-                [
-                    { text: "Fecha", x: M },
-                    { text: "Tipo", x: M + 110 },
-                    { text: "Concepto", x: M + 230 },
-                    {
-                        text: "Importe",
-                        x: M + 460,
-                        w: PAGE_W - M - (M + 460),
-                        align: "right",
-                    },
-                ],
-                { bold: true, color: gray },
-            );
-            ctx = drawLine(ctx);
-            ctx.y -= 8;
-
-            if (!salidasFull.length) {
-                ctx = write(ctx, "Sin salidas para este rango/filtro.", { color: gray });
-            } else {
-                for (const s of salidasFull) {
-                    const provName = s.proveedor_id ? proveedoresMap.get(s.proveedor_id) : null;
-
-                    const conceptoPdf =
-                        s.tipo_gasto === "Proveedor" && (provName || s.proveedor_id)
-                            ? `${s.concepto} (Prov: ${provName ?? s.proveedor_id})`
-                            : s.concepto;
-
-                    ctx = writeRow(ctx, [
-                        { text: s.fecha_hora, x: M },
-                        { text: s.tipo_gasto, x: M + 110 },
-                        { text: conceptoPdf, x: M + 230 },
-                        {
-                            text: eur(s.importe),
-                            x: M + 460,
-                            w: PAGE_W - M - (M + 460),
-                            align: "right",
-                        },
-                    ]);
-                }
-            }
-
-            if (ctx.y < M + 60) ctx = mkPage();
-            ctx.y = M;
-            ctx.page.drawText(safeText(`Generado: ${new Date().toLocaleString("es-ES")}`), {
-                x: M,
-                y: ctx.y,
-                size: 9,
-                font,
-                color: gray,
-            });
-
-            const bytes = await pdfDoc.save();
-            await writeFile(filePath, new Uint8Array(bytes));
-        } catch (e: any) {
-            console.error("Error guardando PDF:", e);
-            setPdfError(String(e?.message ?? "Error guardando PDF"));
+            // Todo el rango, independiente de la página visible y de su cursor.
+            const filtro = { del: inicio, al: fin, ...(tipo === "rango" ? { q: qDebounced } : {}) };
+            const [entradas, salidas] = await Promise.all([cuentasGetEntradas(filtro), cuentasGetSalidas(filtro)]);
+            const bytes = await generarPdfCuentas({ del: inicio, al: fin, tipo,
+                entradas: entradas.filas, salidas: salidas.filas, proveedores: proveedoresMap });
+            await writeFile(filePath, bytes);
+        } catch (e) {
+            setPdfError(toAppError(e).message);
         } finally {
             setSavingPdf(false);
         }
     };
-
-    const sacarCuentaDelDia = async () => {
-        try {
-            setPdfError(null);
-            setSavingPdf(true);
-
-            const hoy = todayYMD();
-
-            const entradasHoy = await cuentasGetEntradas({ del: hoy, al: hoy });
-            const salidasHoy = await cuentasGetSalidas({ del: hoy, al: hoy });
-
-            const entradasHoyF = entradasHoy?.filas ?? [];
-            const salidasHoyF = salidasHoy?.filas ?? [];
-
-            const totalEntradasHoy = sumar(
-                ...entradasHoyF.map((e) => (esAnulado(e) ? CERO : e.importe)),
-            );
-            const totalSalidasHoy = sumar(...salidasHoyF.map((s) => s.importe));
-            const balanceHoy = restar(totalEntradasHoy, totalSalidasHoy);
-
-            const defaultName = `cuenta_dia_${hoy}.pdf`;
-            const filePath = await save({
-                title: "Sacar cuenta del dia (PDF)",
-                defaultPath: defaultName,
-                filters: [{ name: "PDF", extensions: ["pdf"] }],
-            });
-            if (!filePath) return;
-
-            const pdfDoc = await PDFDocument.create();
-            const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-            const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-            const PAGE_W = 595.28;
-            const PAGE_H = 841.89;
-            const M = 50;
-
-            const mkPage = () => {
-                const page = pdfDoc.addPage([PAGE_W, PAGE_H]);
-                return { page, y: PAGE_H - M };
-            };
-
-            const gray = rgb(0.35, 0.35, 0.35);
-            const black = rgb(0.1, 0.1, 0.1);
-            const safeText = (t: any) =>
-                asciiSafe(
-                    String(t ?? "")
-                        .replace(/\s+/g, " ")
-                        .trim(),
-                );
-
-            const drawLine = (ctx: any) => {
-                if (ctx.y < M + 20) ctx = mkPage();
-                ctx.page.drawLine({
-                    start: { x: M, y: ctx.y },
-                    end: { x: PAGE_W - M, y: ctx.y },
-                    thickness: 1,
-                    color: rgb(0.9, 0.9, 0.9),
-                });
-                ctx.y -= 10;
-                return ctx;
-            };
-
-            const write = (
-                ctx: any,
-                text: string,
-                opts?: { size?: number; bold?: boolean; color?: any },
-            ) => {
-                const size = opts?.size ?? 11;
-                const usedFont = opts?.bold ? fontBold : font;
-                const color = opts?.color ?? black;
-
-                if (ctx.y < M + 40) ctx = mkPage();
-
-                ctx.page.drawText(safeText(text), {
-                    x: M,
-                    y: ctx.y,
-                    size,
-                    font: usedFont,
-                    color,
-                });
-                ctx.y -= size + 6;
-                return ctx;
-            };
-
-            const writeRow = (
-                ctx: any,
-                cols: Array<{
-                    text: string;
-                    x: number;
-                    w?: number;
-                    align?: "left" | "right";
-                }>,
-                opts?: { size?: number; bold?: boolean; color?: any },
-            ) => {
-                const size = opts?.size ?? 10;
-                const usedFont = opts?.bold ? fontBold : font;
-                const color = opts?.color ?? black;
-
-                if (ctx.y < M + 30) ctx = mkPage();
-
-                for (const c of cols) {
-                    const t = safeText(c.text);
-                    let x = c.x;
-                    if (c.align === "right") {
-                        const w = usedFont.widthOfTextAtSize(t, size);
-                        x = c.x + (c.w ?? 0) - w;
-                    }
-                    ctx.page.drawText(t, {
-                        x,
-                        y: ctx.y,
-                        size,
-                        font: usedFont,
-                        color,
-                    });
-                }
-
-                ctx.y -= size + 6;
-                return ctx;
-            };
-
-            let ctx = mkPage();
-
-            ctx = write(ctx, "Cuenta del dia", { size: 20, bold: true });
-            ctx = write(ctx, `Fecha: ${hoy}`, { size: 11, color: gray });
-            ctx = write(
-                ctx,
-                `Entradas: ${eur(totalEntradasHoy)} | Salidas: ${eur(
-                    totalSalidasHoy,
-                )} | Balance: ${eur(balanceHoy)}`,
-                { size: 12, bold: true },
-            );
-            ctx.y -= 6;
-            ctx = drawLine(ctx);
-
-            ctx.y -= 16;
-            ctx = write(ctx, "Entradas", { size: 14, bold: true });
-            ctx = writeRow(
-                ctx,
-                [
-                    { text: "Fecha/Hora", x: M },
-                    { text: "Cliente", x: M + 140 },
-                    { text: "Metodo", x: M + 380 },
-                    {
-                        text: "Importe",
-                        x: M + 460,
-                        w: PAGE_W - M - (M + 460),
-                        align: "right",
-                    },
-                ],
-                { bold: true, color: gray },
-            );
-            ctx = drawLine(ctx);
-            ctx.y -= 8;
-
-            if (!entradasHoyF.length) {
-                ctx = write(ctx, "Sin entradas hoy.", { color: gray });
-            } else {
-                for (const e of entradasHoyF) {
-                    ctx = writeRow(ctx, [
-                        { text: e.fecha_hora, x: M },
-                        { text: e.cliente, x: M + 140 },
-                        {
-                            text: esAnulado(e) ? `${e.metodo} · ANULADO` : e.metodo,
-                            x: M + 380,
-                        },
-                        {
-                            text: eur(e.importe),
-                            x: M + 460,
-                            w: PAGE_W - M - (M + 460),
-                            align: "right",
-                        },
-                    ]);
-                }
-            }
-
-            ctx.y -= 8;
-            ctx = drawLine(ctx);
-
-            ctx.y -= 16;
-            ctx = write(ctx, "Salidas", { size: 14, bold: true });
-            ctx = writeRow(
-                ctx,
-                [
-                    { text: "Fecha", x: M },
-                    { text: "Tipo", x: M + 110 },
-                    { text: "Concepto", x: M + 230 },
-                    {
-                        text: "Importe",
-                        x: M + 460,
-                        w: PAGE_W - M - (M + 460),
-                        align: "right",
-                    },
-                ],
-                { bold: true, color: gray },
-            );
-            ctx = drawLine(ctx);
-            ctx.y -= 8;
-
-            if (!salidasHoyF.length) {
-                ctx = write(ctx, "Sin salidas hoy.", { color: gray });
-            } else {
-                for (const s of salidasHoyF) {
-                    const fecha = s.fecha_hora;
-                    const tipo = s.tipo_gasto;
-                    const conceptoBase = s.concepto;
-                    const provId = s.proveedor_id;
-                    const provName = provId ? proveedoresMap.get(provId) : null;
-
-                    const concepto =
-                        tipo === "Proveedor" && (provName || provId)
-                            ? `${conceptoBase} (Prov: ${provName ?? provId})`
-                            : conceptoBase;
-
-                    ctx = writeRow(ctx, [
-                        { text: fecha.slice(0, 10), x: M },
-                        { text: tipo, x: M + 110 },
-                        { text: concepto, x: M + 230 },
-                        {
-                            text: eur(s.importe),
-                            x: M + 460,
-                            w: PAGE_W - M - (M + 460),
-                            align: "right",
-                        },
-                    ]);
-                }
-            }
-
-            if (ctx.y < M + 60) ctx = mkPage();
-            ctx.y = M;
-            ctx.page.drawText(safeText(`Generado: ${new Date().toLocaleString("es-ES")}`), {
-                x: M,
-                y: ctx.y,
-                size: 9,
-                font,
-                color: gray,
-            });
-
-            const bytes = await pdfDoc.save();
-            await writeFile(filePath, new Uint8Array(bytes));
-        } catch (e: any) {
-            console.error("Error sacar cuenta del dia:", e);
-            setPdfError(String(e?.message ?? "Error sacar cuenta del dia"));
-        } finally {
-            setSavingPdf(false);
-        }
-    };
+    const guardarPdf = () => exportarPdf("rango");
+    const sacarCuentaDelDia = () => exportarPdf("dia");
 
     const proveedorLabel = (id: string | null | undefined) => {
         if (!id) return "";
@@ -1931,7 +1449,7 @@ export default function Cuentas() {
                                                 {c.id_cierre === idUltimoCierre ? (
                                                     <button
                                                         type="button"
-                                                        onClick={() => void deshacerCierre(c.id_cierre)}
+                                                        onClick={() => setCierreAReabrir(c.id_cierre)}
                                                         title="Deshacer el cierre para volver a contar el cajón"
                                                         className="h-8 cursor-pointer rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-fg transition hover:bg-surface-2"
                                                     >
@@ -2363,6 +1881,10 @@ export default function Cuentas() {
                     </div>
             </ModalShell>
 
+            {cierreAReabrir && <ReabrirCierreModal
+                onCancelar={() => setCierreAReabrir(null)}
+                onConfirmar={() => deshacerCierre(cierreAReabrir)}
+            />}
             <CierreCajaModal
                 open={openCierre}
                 onClose={() => setOpenCierre(false)}
