@@ -91,6 +91,8 @@ o `(+34)`, incluidos varios teléfonos consecutivos separados por espacios, y ca
 de 13–19 cifras que pasan Luhn. Reconoce claves de credenciales entre comillas en texto JSON y
 variantes explícitas como `access_token`, `refreshToken`, `id-token` y `client_secret`, también
 en objetos anidados. Los valores entre comillas se redactan completos, incluidos espacios y escapes.
+La autorización consume el esquema Bearer/Basic y su credencial, sin borrar el texto siguiente;
+las pasadas posteriores conservan los marcadores y el diagnóstico.
 No redacta cualquier número
 largo por su longitud. Rust preselecciona reglas con RegexSet y conserva cadenas prestadas sin
 reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idempotencia.

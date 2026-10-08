@@ -29,8 +29,8 @@ const CLAVE_SECRETA = new RegExp(`^(${SECRET_KEYS})$`, "i");
 
 // El orden importa: primero lo específico, para que una regla genérica no se quede media coincidencia.
 const REGLAS: Regla[] = [
-	// Cabecera de autorización: consume el valor entero, incluido el esquema (`Bearer <tok>`).
-	{ re: /\b(authorization|auth)\b\s*[:=]\s*\S+(?:\s+\S+)?/gi, con: "$1=[redacted]" },
+	// RI-42: sólo Bearer/Basic añaden una segunda palabra. El marcador no consume diagnóstico.
+	{ re: /\b(authorization|auth)\b\s*[:=]\s*(?:(?:bearer|basic)\s+)?[^\s,;&}"']+/gi, con: "$1=[redacted]" },
 	// Esquemas de credencial sueltos (`Bearer <tok>` / `Basic <tok>`).
 	{ re: /\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}/gi, con: "[redacted]" },
 	// RI-42: claves JSON o entre comillas y valores con espacios/escapes.

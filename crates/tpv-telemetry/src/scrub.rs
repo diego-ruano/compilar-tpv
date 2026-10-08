@@ -54,9 +54,9 @@ fn rules() -> &'static Rules {
         // El orden importa: primero lo específico, para que una regla genérica no se quede media
         // coincidencia.
         let rules = vec![
-            // Cabecera de autorización: consume el valor entero, incluido el esquema (`Bearer <tok>`),
-            // no sólo el primer token (si no, se redactaría "Bearer" y el token quedaría en claro).
-            regla(r"(?i)(?-u:\b)(authorization|auth)(?-u:\b)\s*[:=]\s*\S+(?:\s+\S+)?", "$1=[redacted]"),
+            // RI-42: una segunda palabra sólo pertenece al valor si la primera es un esquema.
+            // [redacted] nunca consume el diagnóstico que viene después en otra pasada.
+            regla(r#"(?i)(?-u:\b)(authorization|auth)(?-u:\b)\s*[:=]\s*(?:(?:bearer|basic)\s+)?[^\s,;&}"']+"#, "$1=[redacted]"),
             // Esquemas de credencial sueltos (`Bearer <tok>` / `Basic <tok>`) sin clave delante.
             regla(r"(?i)(?-u:\b)(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}", "[redacted]"),
             // RI-42: claves JSON o entre comillas; consumir también valores con espacios/escapes.
@@ -288,7 +288,11 @@ mod tests {
         let casos = casos();
         for par in casos["redacta"].as_array().unwrap() {
             let una = scrub(texto(&par[0]));
-            assert_eq!(scrub(&una), una, "{:?}", texto(&par[0]));
+            let mut siguiente = una.to_string();
+            for _ in 0..3 {
+                siguiente = scrub(&siguiente).into_owned();
+                assert_eq!(siguiente, una, "{:?}", texto(&par[0]));
+            }
         }
     }
 

@@ -34,6 +34,14 @@ describe("scrub, con la tabla que comparten las tres copias", () => {
 	it.each(casos.no_toca)("«%s» sale tal cual", (texto) => {
 		expect(scrub(texto)).toBe(texto);
 	});
+
+	it.each(casos.redacta)("varias pasadas conservan el diagnóstico de «%s»", (entrada, salida) => {
+		let value = entrada;
+		for (let i = 0; i < 4; i++) {
+			value = scrub(value);
+			expect(value).toBe(salida);
+		}
+	});
 });
 
 describe("las opciones de Sentry del worker filtran antes de enviar", () => {

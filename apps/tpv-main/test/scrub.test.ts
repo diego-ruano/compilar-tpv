@@ -36,7 +36,11 @@ describe("scrub, con la tabla que comparten las tres copias", () => {
 	it("aplicarlo dos veces da lo mismo: un marcador no vuelve a disparar ninguna regla", () => {
 		for (const [entrada] of casos.redacta) {
 			const una = scrub(entrada);
-			expect(scrub(una), entrada).toBe(una);
+			let siguiente = una;
+			for (let i = 0; i < 3; i++) {
+				siguiente = scrub(siguiente);
+				expect(siguiente, entrada).toBe(una);
+			}
 		}
 	});
 
