@@ -273,6 +273,30 @@ las congela al irse la Main. **Caducar no empuja**: se nota en la siguiente comp
 Todas exigen `ADMIN_API_TOKEN` (comparación de tiempo constante; sin el secreto la ruta responde 503)
 y quedan en `admin_audit`. El CLI lee el token de la variable de entorno `ADMIN_API_TOKEN`.
 
+### Rotar el token de administración
+
+`ADMIN_API_TOKEN` autoriza el plano de control: licencias, interruptores remotos, recifrado del
+almacén, pilotos y promoción de releases. Es un secreto técnico de quien opera el CLI. La
+publicación de binarios usa el secreto independiente `RELEASE_ADMIN_TOKEN`.
+
+Se rota ante una filtración, al retirar un equipo o una persona autorizada y según la política
+de mantenimiento. El procedimiento afecta a las herramientas de administración; los TPV siguen
+usando sus tokens de dispositivo.
+
+1. Generar un valor aleatorio de al menos 32 bytes en el gestor de secretos y guardarlo allí.
+2. Desde `apps/cloud-worker-licensing/`, ejecutar `pnpm exec wrangler secret put ADMIN_API_TOKEN`
+   e introducir el nuevo valor en la entrada interactiva. Esto publica una nueva versión del
+   Worker con el secreto actualizado: coordinarlo con los operadores del CLI.
+3. Actualizar el `.env` local ignorado por Git y las variables de los equipos o automatizaciones
+   autorizados. La variable de entorno tiene prioridad sobre `.env`: sustituir también cualquier
+   valor antiguo cargado en una terminal abierta.
+4. Comprobar con `pnpm license:list` desde la raíz que el nuevo token funciona. Verificar que una
+   petición de lectura con el token antiguo recibe 401 y retirar sus copias del gestor de secretos
+   y de las máquinas autorizadas. Registrar fecha y responsable, sin guardar el valor en logs.
+
+Solo se acepta el token vigente. Ante una filtración no se recupera el acceso restaurando el
+secreto antiguo: se distribuye uno nuevo. Un rollback de código debe conservar el secreto vigente.
+
 ## Avisos de caducidad
 
 El cron diario manda un correo a 30 y a 7 días de caducar, **el peldaño más urgente que toque** y uno
