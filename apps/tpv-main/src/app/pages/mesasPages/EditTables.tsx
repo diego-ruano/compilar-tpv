@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Rect, Line, Group, Text, Circle } from "react-konva";
+import { Stage, Layer, Rect, Group, Text } from "react-konva";
 import { toAppError } from "@tpv/client";
 import {
     mesasLoadLayout,
@@ -10,288 +10,10 @@ import { queryClient } from "../../../shared/lib/queryClient";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../../../shared/stores/useTheme";
 import { conAviso } from "../../../shared/lib/conAviso";
-
-/**
- * Tipos
- */
-type RoomPoly = { type: "poly"; points: number[] };
-
-type TableShape = "rect" | "rounded" | "circle";
-type TableSize = "S" | "M" | "L";
-
-type Table = {
-    id: string;
-    name: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    radius?: number;
-    seats: number;
-    shape: TableShape;
-};
-
-type Salon = {
-    id: string;
-    name: string;
-    room: RoomPoly;
-    tables: Table[];
-};
-
-/**
- * Utils geom
- */
-const COLLISION_SKIN = 0.6;
-
-function pointsToXY(points: number[]) {
-    const out: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < points.length; i += 2) {
-        out.push({ x: points[i], y: points[i + 1] });
-    }
-    return out;
-}
-
-function clamp(n: number, min: number, max: number) {
-    return Math.max(min, Math.min(n, max));
-}
-
-function polygonBBox(points: number[]) {
-    const xy = pointsToXY(points);
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    for (const p of xy) {
-        minX = Math.min(minX, p.x);
-        minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x);
-        maxY = Math.max(maxY, p.y);
-    }
-
-    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-}
-
-function isPointInPolygon(
-    point: { x: number; y: number },
-    polygon: Array<{ x: number; y: number }>,
-) {
-    let inside = false;
-
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const xi = polygon[i].x;
-        const yi = polygon[i].y;
-        const xj = polygon[j].x;
-        const yj = polygon[j].y;
-
-        const intersect =
-            yi > point.y !== yj > point.y &&
-            point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + 1e-12) + xi;
-
-        if (intersect) inside = !inside;
-    }
-
-    return inside;
-}
-
-function getTableBBox(table: Table) {
-    const rawW =
-        table.shape === "circle" ? (table.radius ?? 40) * 2 : table.width;
-    const rawH =
-        table.shape === "circle" ? (table.radius ?? 40) * 2 : table.height;
-    return { rawW, rawH };
-}
-
-function tableProbePointsAt(pos: { x: number; y: number }, table: Table) {
-    if (table.shape === "circle") {
-        const r0 = table.radius ?? 40;
-        const r = Math.max(4, r0 - COLLISION_SKIN);
-        const cx = pos.x + r0;
-        const cy = pos.y + r0;
-        const d = r / Math.SQRT2;
-
-        return [
-            { x: cx + r, y: cy },
-            { x: cx - r, y: cy },
-            { x: cx, y: cy + r },
-            { x: cx, y: cy - r },
-            { x: cx + d, y: cy + d },
-            { x: cx + d, y: cy - d },
-            { x: cx - d, y: cy + d },
-            { x: cx - d, y: cy - d },
-        ];
-    }
-
-    const { rawW, rawH } = getTableBBox(table);
-    const inset = COLLISION_SKIN;
-    const x = pos.x + inset;
-    const y = pos.y + inset;
-    const w = Math.max(8, rawW - inset * 2);
-    const h = Math.max(8, rawH - inset * 2);
-
-    const cx = x + w / 2;
-    const cy = y + h / 2;
-
-    return [
-        { x, y },
-        { x: x + w, y },
-        { x, y: y + h },
-        { x: x + w, y: y + h },
-        { x: cx, y },
-        { x: cx, y: y + h },
-        { x, y: cy },
-        { x: x + w, y: cy },
-    ];
-}
-
-function isTableInsidePolygon(
-    pos: { x: number; y: number },
-    table: Table,
-    polyPoints: number[],
-) {
-    const poly = pointsToXY(polyPoints);
-    const probes = tableProbePointsAt(pos, table);
-    return probes.every((p) => isPointInPolygon(p, poly));
-}
-
-function clampToRect(
-    pos: { x: number; y: number },
-    rect: { x: number; y: number; width: number; height: number },
-    table: Table,
-) {
-    const { rawW: w, rawH: h } = getTableBBox(table);
-    return {
-        x: clamp(pos.x, rect.x, rect.x + rect.width - w),
-        y: clamp(pos.y, rect.y, rect.y + rect.height - h),
-    };
-}
-
-function constrainToPolygonSmooth(
-    desired: { x: number; y: number },
-    lastValid: { x: number; y: number },
-    polyPoints: number[],
-    table: Table,
-) {
-    const bbox = polygonBBox(polyPoints);
-    const approx = clampToRect(desired, bbox, table);
-
-    if (isTableInsidePolygon(approx, table, polyPoints)) return approx;
-
-    const candX = { x: approx.x, y: lastValid.y };
-    if (isTableInsidePolygon(candX, table, polyPoints)) return candX;
-
-    const candY = { x: lastValid.x, y: approx.y };
-    if (isTableInsidePolygon(candY, table, polyPoints)) return candY;
-
-    let lo = 0;
-    let hi = 1;
-    let best = lastValid;
-
-    for (let iter = 0; iter < 34; iter++) {
-        const mid = (lo + hi) / 2;
-        const cand = {
-            x: lastValid.x + (approx.x - lastValid.x) * mid,
-            y: lastValid.y + (approx.y - lastValid.y) * mid,
-        };
-        if (isTableInsidePolygon(cand, table, polyPoints)) {
-            best = cand;
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-
-    return best;
-}
-
-function findInsidePosition(
-    polyPoints: number[],
-    table: Table,
-    worldW: number,
-    worldH: number,
-) {
-    const bbox = polygonBBox(polyPoints);
-    const { rawW: w, rawH: h } = getTableBBox(table);
-
-    const start = {
-        x: clamp(bbox.x + bbox.width / 2 - w / 2, 20, worldW - w - 20),
-        y: clamp(bbox.y + bbox.height / 2 - h / 2, 20, worldH - h - 20),
-    };
-
-    if (isTableInsidePolygon(start, table, polyPoints)) return start;
-
-    const step = 20;
-    for (let r = 1; r <= 40; r++) {
-        const d = r * step;
-        const candidates = [
-            { x: start.x + d, y: start.y },
-            { x: start.x - d, y: start.y },
-            { x: start.x, y: start.y + d },
-            { x: start.x, y: start.y - d },
-            { x: start.x + d, y: start.y + d },
-            { x: start.x + d, y: start.y - d },
-            { x: start.x - d, y: start.y + d },
-            { x: start.x - d, y: start.y - d },
-        ].map((p) => ({
-            x: clamp(p.x, 20, worldW - w - 20),
-            y: clamp(p.y, 20, worldH - h - 20),
-        }));
-
-        for (const c of candidates) {
-            if (isTableInsidePolygon(c, table, polyPoints)) return c;
-        }
-    }
-
-    return start;
-}
-
-function distPointToSegmentSquared(
-    p: { x: number; y: number },
-    a: { x: number; y: number },
-    b: { x: number; y: number },
-) {
-    const abx = b.x - a.x;
-    const aby = b.y - a.y;
-    const apx = p.x - a.x;
-    const apy = p.y - a.y;
-
-    const abLen2 = abx * abx + aby * aby + 1e-9;
-    let t = (apx * abx + apy * aby) / abLen2;
-    t = clamp(t, 0, 1);
-
-    const cx = a.x + t * abx;
-    const cy = a.y + t * aby;
-
-    const dx = p.x - cx;
-    const dy = p.y - cy;
-    return dx * dx + dy * dy;
-}
-
-function insertPointAtNearestEdge(points: number[], p: { x: number; y: number }) {
-    const verts = pointsToXY(points);
-    if (verts.length < 3) return { next: points, insertedVertexIndex: -1 };
-
-    let bestIdx = 0;
-    let bestD = Infinity;
-
-    for (let i = 0; i < verts.length; i++) {
-        const a = verts[i];
-        const b = verts[(i + 1) % verts.length];
-        const d = distPointToSegmentSquared(p, a, b);
-        if (d < bestD) {
-            bestD = d;
-            bestIdx = i;
-        }
-    }
-
-    const insertedVertexIndex = bestIdx + 1;
-    const insertPos = insertedVertexIndex * 2;
-    const next = points
-        .slice(0, insertPos)
-        .concat([p.x, p.y], points.slice(insertPos));
-
-    return { next, insertedVertexIndex };
-}
+import { useToast } from "../../../shared/toast";
+import { TableNode, RoomEditor, type ContextoEditor } from "../../../features/mesas/editor/NodosEditor";
+import { clamp, getTableBBox, isTableInsidePolygon, findInsidePosition, insertPointAtNearestEdge,
+    type Salon, type Table, type TableShape, type TableSize, type RoomPoly } from "../../../features/mesas/editor/geometria";
 
 /**
  * UI helpers
@@ -515,6 +237,7 @@ function useUnsavedGuard(enabled: boolean) {
  * Componente principal
  */
 export default function EditTables() {
+    const toast = useToast();
     const dark = useTheme((s) => s.theme === "dark");
     const PADDING = 12;
     const WORLD_W = 4000;
@@ -873,7 +596,7 @@ export default function EditTables() {
         return p ? { x: p.x, y: p.y } : null;
     }
 
-    function onBgMouseDown(e: any) {
+    function onBgPointerDown(e: any) {
         if (isDraggingSomethingRef.current) return;
         if (addPointArmed || placeTableByClick || deleteTableArmed) return;
 
@@ -887,7 +610,7 @@ export default function EditTables() {
         viewStartPosRef.current = { ...viewPos };
     }
 
-    function onStageMouseMove() {
+    function onStagePointerMove() {
         if (!isPanningRef.current) return;
         if (isDraggingSomethingRef.current) return;
 
@@ -903,7 +626,7 @@ export default function EditTables() {
         });
     }
 
-    function onStageMouseUp() {
+    function onStagePointerUp() {
         isPanningRef.current = false;
         panStartRef.current = null;
         viewStartPosRef.current = null;
@@ -933,7 +656,7 @@ export default function EditTables() {
         setViewPos(newPos);
     }
 
-    function handleStageMouseDown() {
+    function handleStagePointerDown() {
         if (!activeRoom) return;
         const pointer = getStagePointerScreen();
         if (!pointer) return;
@@ -1003,226 +726,9 @@ export default function EditTables() {
         );
     }
 
-    function TableNode({ table }: { table: Table }) {
-        if (!activeRoom) return null;
-        const roomPts =
-            roomPointsDraftRef.current[activeSalonId] ?? activeRoom.points;
-
-        return (
-            <Group
-                x={table.x}
-                y={table.y}
-                draggable={!deleteTableArmed}
-                onMouseDown={(e) => {
-                    if (deleteTableArmed) {
-                        e.cancelBubble = true;
-                        deleteTableById(table.id);
-                    }
-                }}
-                onDragStart={(e) => {
-                    if (deleteTableArmed) return;
-                    e.cancelBubble = true;
-                    isDraggingSomethingRef.current = true;
-                    isPanningRef.current = false;
-                    pushHistory(salonsRef.current);
-                }}
-                dragBoundFunc={(posScreen: { x: number; y: number }) => {
-                    if (deleteTableArmed) return posScreen as any;
-
-                    const key = `${activeSalonId}:table:${table.id}`;
-                    const lastValidWorld =
-                        lastValidTableWorldRef.current[key] ?? {
-                            x: table.x,
-                            y: table.y,
-                        };
-
-                    const desiredWorld = screenToWorld(posScreen);
-                    const nextWorld = constrainToPolygonSmooth(
-                        desiredWorld,
-                        lastValidWorld,
-                        roomPts,
-                        table,
-                    );
-
-                    lastValidTableWorldRef.current[key] = nextWorld;
-                    return worldToScreen(nextWorld);
-                }}
-                onDragEnd={(e) => {
-                    if (deleteTableArmed) return;
-
-                    const abs = e.target.getAbsolutePosition();
-                    const world = screenToWorld({ x: abs.x, y: abs.y });
-                    updateTablePos(table.id, { x: world.x, y: world.y });
-                    isDraggingSomethingRef.current = false;
-                    setDirty(true);
-                }}
-            >
-                {table.shape === "circle" ? (
-                    <>
-                        <Circle
-                            x={table.radius ?? 45}
-                            y={table.radius ?? 45}
-                            radius={table.radius ?? 45}
-                            fill={dark ? "rgba(71,85,105,0.95)" : "rgba(15,23,42,0.92)"}
-                            stroke="rgba(148,163,184,0.95)"
-                            strokeWidth={1}
-                            shadowBlur={10}
-                            shadowOpacity={0.12}
-                        />
-                        <Text
-                            text={table.name}
-                            x={0}
-                            y={(table.radius ?? 45) - 18}
-                            width={(table.radius ?? 45) * 2}
-                            align="center"
-                            fontSize={14}
-                            fill="#e5e7eb"
-                        />
-                        <Text
-                            text={`${table.seats} pax`}
-                            x={0}
-                            y={table.radius ?? 45}
-                            width={(table.radius ?? 45) * 2}
-                            align="center"
-                            fontSize={12}
-                            fill="#cbd5e1"
-                        />
-                    </>
-                ) : (
-                    <>
-                        <Rect
-                            width={table.width}
-                            height={table.height}
-                            cornerRadius={table.shape === "rounded" ? 14 : 2}
-                            fill={dark ? "rgba(71,85,105,0.95)" : "rgba(15,23,42,0.92)"}
-                            stroke="rgba(148,163,184,0.95)"
-                            strokeWidth={1}
-                            shadowBlur={10}
-                            shadowOpacity={0.12}
-                        />
-                        <Text
-                            text={table.name}
-                            x={10}
-                            y={10}
-                            fontSize={14}
-                            fill="#e5e7eb"
-                        />
-                        <Text
-                            text={`${table.seats} pax`}
-                            x={10}
-                            y={30}
-                            fontSize={12}
-                            fill="#cbd5e1"
-                        />
-                    </>
-                )}
-            </Group>
-        );
-    }
-
-    function RoomEditor() {
-        if (!activeRoom) return null;
-        const draftPoints =
-            roomPointsDraftRef.current[activeSalonId] ?? activeRoom.points;
-        const verts = pointsToXY(draftPoints);
-
-        return (
-            <Group>
-                <Line
-                    ref={roomStrokeLineRef}
-                    points={draftPoints}
-                    closed
-                    stroke={dark ? "rgba(148,163,184,0.5)" : "rgba(15,23,42,0.55)"}
-                    strokeWidth={2}
-                    lineJoin="round"
-                />
-
-                {verts.map((v, idx) => (
-                    <Circle
-                        key={idx}
-                        x={v.x}
-                        y={v.y}
-                        radius={7}
-                        fill={dark ? "rgba(148,163,184,0.95)" : "rgba(15,23,42,0.9)"}
-                        stroke="rgba(148,163,184,0.95)"
-                        strokeWidth={2}
-                        draggable={!deleteTableArmed}
-                        hitStrokeWidth={18}
-                        onDragStart={(e) => {
-                            if (deleteTableArmed) return;
-                            e.cancelBubble = true;
-                            isDraggingSomethingRef.current = true;
-                            isPanningRef.current = false;
-                            pushHistory(salonsRef.current);
-                        }}
-                        dragBoundFunc={(posScreen: { x: number; y: number }) => {
-                            if (deleteTableArmed) return posScreen as any;
-
-                            const key = `${activeSalonId}:v:${idx}`;
-                            const lastValidWorld =
-                                lastValidVertexWorldRef.current[key] ?? {
-                                    x: v.x,
-                                    y: v.y,
-                                };
-
-                            const desiredWorld = screenToWorld(posScreen);
-                            const clampedWorld = {
-                                x: clamp(desiredWorld.x, PADDING, WORLD_W - PADDING),
-                                y: clamp(desiredWorld.y, PADDING, WORLD_H - PADDING),
-                            };
-
-                            const current =
-                                roomPointsDraftRef.current[activeSalonId] ??
-                                draftPoints;
-                            const nextPts = current.slice();
-                            nextPts[idx * 2] = clampedWorld.x;
-                            nextPts[idx * 2 + 1] = clampedWorld.y;
-
-                            if (!wouldKeepAllTablesInside(nextPts)) {
-                                return worldToScreen(lastValidWorld);
-                            }
-
-                            lastValidVertexWorldRef.current[key] = clampedWorld;
-                            return worldToScreen(clampedWorld);
-                        }}
-                        onDragMove={(e) => {
-                            if (deleteTableArmed) return;
-
-                            const abs = e.target.getAbsolutePosition();
-                            const world = screenToWorld({ x: abs.x, y: abs.y });
-
-                            const current =
-                                roomPointsDraftRef.current[activeSalonId] ??
-                                draftPoints;
-                            const next = current.slice();
-                            next[idx * 2] = world.x;
-                            next[idx * 2 + 1] = world.y;
-
-                            roomPointsDraftRef.current[activeSalonId] = next;
-                            syncRoomLines(next);
-                        }}
-                        onDragEnd={(e) => {
-                            if (deleteTableArmed) return;
-
-                            const abs = e.target.getAbsolutePosition();
-                            const world = screenToWorld({ x: abs.x, y: abs.y });
-
-                            const current =
-                                roomPointsDraftRef.current[activeSalonId] ??
-                                draftPoints;
-                            const next = current.slice();
-                            next[idx * 2] = world.x;
-                            next[idx * 2 + 1] = world.y;
-
-                            commitRoomPoints(next);
-                            isDraggingSomethingRef.current = false;
-                            setDirty(true);
-                        }}
-                    />
-                ))}
-            </Group>
-        );
-    }
+    const contextoEditor: ContextoEditor = {
+        activeRoom, activeSalonId, roomPointsDraftRef, deleteTableArmed, deleteTableById, isDraggingSomethingRef, isPanningRef, pushHistory, salonsRef, lastValidTableWorldRef, screenToWorld, worldToScreen, updateTablePos, setDirty, dark, roomStrokeLineRef, lastValidVertexWorldRef, PADDING, WORLD_W, WORLD_H, wouldKeepAllTablesInside, syncRoomLines, commitRoomPoints
+    };
 
     return (
         <div className="h-full w-full touch-pan-y overflow-y-auto overscroll-contain bg-surface-2 lg:overflow-hidden">
@@ -1474,9 +980,7 @@ export default function EditTables() {
                                         );
                                         if (sinNombre) {
                                             setActiveSalonId(sinNombre.id);
-                                            alert(
-                                                "Cada zona necesita un nombre antes de guardar.",
-                                            );
+                                            toast.warning("Cada zona necesita un nombre antes de guardar.");
                                             return;
                                         }
 
@@ -1502,7 +1006,7 @@ export default function EditTables() {
                                         setDirty(false);
                                     } catch (e) {
                                         console.error("No se pudo guardar el layout:", e);
-                                        alert(`No se pudo guardar el layout:\n${toAppError(e).message}`);
+                                        toast.error("No se pudo guardar el plano", toAppError(e).message);
                                     }
                                 })}
                             >
@@ -1573,7 +1077,7 @@ export default function EditTables() {
                     <div className="flex h-full w-full min-h-0 flex-col p-2 sm:p-3">
                         <div
                             ref={canvasBoxRef}
-                            className="min-h-0 w-full flex-1 overflow-hidden rounded-2xl border border-border bg-surface"
+                            className="min-h-0 w-full flex-1 touch-none overflow-hidden rounded-2xl border border-border bg-surface"
                         >
                             {!activeSalon ? (
                                 <div className="w-full h-full grid place-items-center text-fg-muted">
@@ -1587,10 +1091,11 @@ export default function EditTables() {
                                     width={canvasSize.width}
                                     height={canvasSize.height}
                                     onWheel={handleWheel}
-                                    onMouseDown={handleStageMouseDown}
-                                    onMouseMove={onStageMouseMove}
-                                    onMouseUp={onStageMouseUp}
-                                    onMouseLeave={onStageMouseUp}
+                                    onPointerDown={handleStagePointerDown}
+                                    onPointerMove={onStagePointerMove}
+                                    onPointerUp={onStagePointerUp}
+                                    onPointerLeave={onStagePointerUp}
+                                    onPointerCancel={onStagePointerUp}
                                     style={{
                                         cursor:
                                             addPointArmed ||
@@ -1616,7 +1121,7 @@ export default function EditTables() {
                                                 width={WORLD_W}
                                                 height={WORLD_H}
                                                 fill={dark ? "#17191f" : "#ffffff"}
-                                                onMouseDown={onBgMouseDown}
+                                                onPointerDown={onBgPointerDown}
                                             />
 
                                             <Text
@@ -1637,9 +1142,9 @@ export default function EditTables() {
                                                 fill="#64748b"
                                             />
 
-                                            <RoomEditor />
+                                            <RoomEditor contexto={contextoEditor} />
                                             {activeTables.map((t) => (
-                                                <TableNode key={t.id} table={t} />
+                                                <TableNode key={t.id} table={t} contexto={contextoEditor} />
                                             ))}
                                         </Group>
                                     </Layer>
