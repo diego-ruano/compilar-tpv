@@ -34,7 +34,6 @@
 - [Tabla de hallazgos](#tabla-de-hallazgos)
 - [Orden sugerido](#orden-sugerido)
 - Por grupos:
-  13. [Worker de Cloudflare](#13-worker-de-cloudflare)
   14. [Frontend](#14-frontend)
   15. [Rust: idioma, runtime y estructura](#15-rust-idioma-runtime-y-estructura)
   16. [CI, build y herramientas](#16-ci-build-y-herramientas)
@@ -58,7 +57,7 @@ entre lenguajes) que casi ningún producto de este tamaño tiene.
 
 Lo que sale de esta revisión se concentra en cuatro frentes:
 
-1. **Bugs funcionales concretos**: el correo de pedido no dice qué bar pide (RI-60). En venta rápida, **el «−» de un producto sólo lo quita de la
+1. **Bugs funcionales concretos**: en venta rápida, **el «−» de un producto sólo lo quita de la
    pantalla** y no se pueden poner notas de línea desde junio, porque se pregunta si un UUID es
    mayor que cero (RI-71).
 2. **CI**: no ejecuta 249 tests
@@ -85,14 +84,9 @@ Lo que sale de esta revisión se concentra en cuatro frentes:
 | [RI-38](#ri-38) | 🔵 | bug | Errores que se tragan en silencio (estadísticas, outbox, compatibilidad de columnas) |
 | [RI-39](#ri-39) | 🔵 | bug | Guardas de estado fuera de la transacción (`actualizar_pago`) |
 | [RI-40](#ri-40) | 🔵 | bug | Pánicos por cortar cadenas por bytes (reservas) |
-| [RI-44](#ri-44) | 🔵 | rendimiento | El worker gasta CPU re-serializando el catch-up y verificando Ed25519 en JS |
-| [RI-45](#ri-45) | 🔵 | tecnología | El Durable Object es «clásico»: Workers RPC quitaría el HMAC interno frágil |
-| [RI-46](#ri-46) | 🔵 | deuda | Configuración de wrangler: bindings duplicados, `remote: true`, fecha de compatibilidad |
 | [RI-47](#ri-47) | 🔵 | deuda | Frontend: componentes gigantes y adaptadores de la época `dualCall` |
 | [RI-48](#ri-48) | 🔵 | deuda | Dominio: duplicación, tipos como cadenas y constructores de trece argumentos |
 | [RI-49](#ri-49) | 🔵 | deuda | Build: `include_dir!` sin `rerun-if-changed`, `Cargo.lock` anidado y dependencias sin uso |
-| [RI-60](#ri-60) | 🟡 | bug | El correo de pedido no dice qué negocio pide ni a quién responder |
-| [RI-67](#ri-67) | 🔵 | bug/rendimiento | Imágenes: un fallo permanente atasca la cola y la query fragmenta la caché pública |
 | [RI-71](#ri-71) | 🟠 | bug | Venta rápida: el «−» de un producto sólo lo quita de la pantalla, y no se pueden poner notas |
 | [RI-74](#ri-74) | 🟡 | deuda | Windows 7: la rama es anterior a ARQ-01 y su canal del feed no está desplegado |
 | [RI-75](#ri-75) | 🔵 | deuda | Android: el `Context` sale de una API no pública |
@@ -126,7 +120,6 @@ desarrollo; después cada cosa será una migración nueva que hay que mantener e
 **Antes de cobrar por el producto:**
 
 - RI-08.
-- RI-60: un bug que un bar real vería.
 - La primera mitad de RI-78 (igualar las cuatro validaciones) y RI-80 si los TPV son táctiles.
 
 **Antes de repartir la Handy de Android:** RI-75 y RI-76 (firma, márgenes), y
@@ -136,93 +129,8 @@ RI-77 para que no enseñe lo que no puede hacer.
 del canal a `main`.
 
 **Después, sin prisa:** el resto, empezando por el código muerto (RI-22), y siguiendo por las mejoras de
-coste (RI-15, RI-16, RI-44). Los detalles de pantalla (RI-81 a RI-86) conviene hacerlos
+coste (RI-15, RI-16). Los detalles de pantalla (RI-81 a RI-86) conviene hacerlos
 cuando se toque cada una, a la vez que se trocean los componentes grandes de RI-47.
-
-## 13. Worker de Cloudflare
-
-<a id="ri-60"></a>
-### RI-60 🟡 · El correo de pedido no dice qué negocio pide ni a quién responder
-
-**Dónde:** [`email.routes.ts:85-110`](../../apps/cloud-worker-licensing/src/domains/email/email.routes.ts#L85-L110)
-(`EMAIL.send` con `from` genérico y sin `replyTo`) y `buildHtml`/`buildText`.
-
-**Qué pasa.** El asunto es «Pedido a {proveedor}» y el cuerpo lleva las líneas y las notas. No lleva
-el nombre del bar, ni su dirección, ni su teléfono, ni su correo, y el remitente es nuestra
-dirección genérica. El proveedor recibe un pedido sin saber de quién es y, si responde, la
-respuesta va a nuestro buzón y no al del bar.
-
-**Propuesta.** Incluir `Business_Name` y el contacto (`Contact_Settings`) en el asunto («Pedido de
-{bar}») y en el cuerpo, y poner `Reply-To` al correo de contacto del bar (a verificar que el binding
-de Cloudflare Email Service lo admite). El worker ya consulta la base del tenant para autorizar el
-destinatario, así que puede leer esos datos él mismo en vez de fiarse de lo que mande el cliente.
-
-<a id="ri-67"></a>
-### RI-67 🔵 · Imágenes: un fallo permanente atasca la cola y la query fragmenta la caché pública
-
-- **La cola se para en el primer fallo** ([`lib.rs:1170-1202`](../../apps/tpv-main/src-tauri/src/lib.rs#L1170-L1202),
-  `drenar_imagenes`): al fallar una imagen, el resto se queda para la próxima vuelta, que vuelve a
-  empezar por la misma. Una imagen que el worker rechaza siempre (413, 400) bloquea todas las de
-  detrás para siempre, en silencio. Es el mismo patrón que SYNC-20 arregló en el outbox, y se
-  arregla igual: distinguir rechazo permanente de transitorio y apartar el permanente.
-- **La caché del GET público usa la URL con la query**: una query distinta en cada petición fuerza
-  lecturas de R2. Normalizar la clave de caché sin parámetros que no afectan a la imagen.
-
-<a id="ri-44"></a>
-### RI-44 🔵 · El worker gasta CPU re-serializando y verificando en JS
-
-- **Catch-up** ([`sync.routes.ts:64-120`](../../apps/cloud-worker-licensing/src/domains/sync/sync.routes.ts#L64-L120)):
-  cada `Statements_Json` se parsea (`safeJsonParse`, línea 91) para volver a serializarse en
-  `c.json`. Con páginas de 500 operaciones es trabajo puro de CPU (que Workers factura). Se puede
-  construir la respuesta pegando el texto guardado (`"statements":` + `Statements_Json`) sin
-  parsearlo.
-- **Ed25519 con `@noble/ed25519`** en cada petición autenticada. El runtime de Workers implementa
-  Ed25519 nativo en WebCrypto (`crypto.subtle.verify("Ed25519", …)`): más rápido, en tiempo
-  constante, y una dependencia menos. `LICENSE_SIGNING_PRIVATE_KEY` también podría firmar por
-  WebCrypto importándola como PKCS#8.
-- Cada petición de tenant hace varios viajes seguidos a la base central en `aws-eu-west-1`
-  (JWT, dispositivo, licencia —con cachés de 60 s por isolate— y credenciales). Evaluar **Smart
-  Placement** (`"placement": { "mode": "smart" }`), que ejecuta el worker cerca del backend cuando
-  hace varios viajes por petición. Medir antes y después con los tiempos que ya mandáis a Axiom.
-
-<a id="ri-45"></a>
-### RI-45 🔵 · El Durable Object es «clásico»: Workers RPC quitaría el HMAC interno
-
-**Dónde:** [`index.ts`](../../apps/cloud-worker-licensing/src/index.ts) (`TenantHubClass as any`),
-[`tenantHub.rutas.ts`](../../apps/cloud-worker-licensing/src/durableObjects/tenantHub.rutas.ts),
-[`lib/hub.ts`](../../apps/cloud-worker-licensing/src/lib/hub.ts).
-
-`TenantHub` es una clase con `fetch` y rutas internas (`/internal/apply`, `/internal/revoke`,
-`/internal/pair-request`) firmadas con HMAC. CLAUDE.md dedica un párrafo a lo frágil que es esa
-firma («desalinear cualquiera de los tres da un 401 en el DO en silencio»). Con `extends
-DurableObject` y **RPC** (llamadas a métodos del stub, tipadas), esas rutas pasan a ser métodos: sin
-serializar a mano, sin HMAC (sólo el propio worker puede obtener un stub), con tipos de extremo a
-extremo, y el SDK de Sentry deja de necesitar el `as any`. El WebSocket sigue entrando por `fetch`.
-Es un cambio sólo del worker, desplegable con rollback, y los tests existentes lo cubren.
-
-<a id="ri-46"></a>
-### RI-46 🔵 · Configuración de wrangler
-
-**Dónde:** [`wrangler.json`](../../apps/cloud-worker-licensing/wrangler.json).
-
-- **Bindings duplicados sin uso**: `tpv_images` y `tpv_copias_control` apuntan a los mismos
-  buckets que `IMAGES` y `COPIAS` y no los usa ningún código (comprobado). El segundo está sólo en
-  el cambio sin commitear de `wrangler.json`, pero **ya está desplegado**: los dos despliegues del
-  28/09 se hicieron desde esa copia de trabajo. Tienen pinta de los que añade `wrangler r2 bucket create` al preguntar.
-  Además llevan `remote: true`, que en `wrangler dev` significa **tocar los buckets de producción**.
-  Borrarlos.
-- `send_email` con `remote: true`: `wrangler dev` envía correo real.
-- `compatibility_date: 2025-10-08`: casi un año atrás. Subirla (y alinear la de
-  `vitest-pool-workers`) para no ir acumulando diferencias de runtime.
-
-### Otros del worker
-
-- Las rutas de licencia (`/activate`, `/device-change/request`) leen su cuerpo a mano
-  (`c.req.json()`), cuando ARQ-03 dice que ninguna ruta lee su propio cuerpo. Son anteriores a esa
-  regla; migrarlas a `cuerpo(schema)` las deja validadas igual que el resto.
-- El token de administración (`ADMIN_API_TOKEN`) es un único secreto de larga vida que emite y
-  anula licencias y, desde PROD-06, apaga interruptores remotos. Merece la misma nota que SEC-02:
-  rotación documentada, y quizá Cloudflare Access delante de `/v1/admin`.
 
 ---
 
@@ -796,11 +704,9 @@ relación beneficio/esfuerzo.
 | Propuesta | Para qué | Esfuerzo |
 |---|---|---|
 | **`strum`** | Genera `TODOS`, `wire()` y `from_code` de `ErrorCode` y los enums de estado (RI-48) | Bajo |
-| **WebCrypto Ed25519** en el worker | Sustituye `@noble/ed25519`: nativo, más rápido, una dependencia menos (RI-44) | Bajo |
 | **`knip`** (TS) y **`cargo-machete`** (Rust) en CI | Código y dependencias sin uso (RI-22, RI-49) | Bajo |
 | **React Router `lazy`** | División del bundle por rutas (RI-23) | Bajo |
 | **`tauri-specta`** ([RI-87](#ri-87), decidido adoptarlo) | Genera funciones TS **tipadas por comando** (nombre, argumentos y retorno) desde las firmas de Rust. Es lo que habría impedido que se colaran euros en los campos de céntimos, cierra de raíz el hueco que hoy cubre `check-comandos-tauri.mjs` y la trampa documentada en §11-bis («argumentos planos vs `{ args }`… un `Option` llega como `None`»), y sustituye los `*Apis.ts` escritos a mano. Convive con los DTO actuales si se deriva `specta::Type` junto a `TS` | Medio |
-| **Workers RPC** (DO moderno) | Quita el HMAC interno y tipa las llamadas al DO (RI-45) | Medio |
 | **`zod` 4** | Validación bastante más rápida y más ligera en el worker (CPU facturable). `@hono/zod-validator` ya la soporta. Revisar la API de `z.coerce` y los mensajes | Medio |
 | **`rusqlite`** en lugar de **`libsql`** (evaluar) | En la Main sólo se usa SQLite local (`features = ["core"]`). `rusqlite` es la opción madura: transacciones RAII (`conn.transaction()` hace rollback al soltarse, RI-32), caché de sentencias preparadas (`prepare_cached`; hoy cada consulta se prepara de nuevo), API de backup en caliente, y ninguna de las rarezas documentadas (el crash nativo al crear muchas bases, la API async que bloquea, RI-16). Con un hilo propio para el escritor encaja con el diseño de escritor único. Coste: reescribir `db.rs`/`mapping.rs` y adaptar los repositorios (los `Reader`/`Writer` ya aíslan buena parte). Merece una prueba de concepto sobre un repositorio antes de decidir | Alto |
 | **Mantenimiento**: `thiserror` 2, `rand` 0.9, `keyring` 3, `@vitejs/plugin-react` 5, TypeScript alineado entre app (`~5.8`) y worker (`^5.9`) | Mantenerse dentro de las versiones soportadas; Dependabot ya abre los PR menores | Bajo |
@@ -1073,9 +979,6 @@ casos que tocan cada hallazgo); los recorridos E2E, que se han mirado por encima
 contenido de los documentos de plan (`PLAN_*.md`), salvo donde el código los cita. Tampoco se ha
 **ejecutado** nada en Android ni en Windows 7: lo marcado «a verificar» en RI-74, RI-76 y RI-80 hay
 que comprobarlo en el emulador, en la máquina virtual o en una pantalla táctil.
-
-**Lo que no se ha podido comprobar desde el repo**, y está marcado como tal: si el binding de correo
-admite `Reply-To` (RI-60).
 
 ---
 
