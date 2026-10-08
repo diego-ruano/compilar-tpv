@@ -1,4 +1,4 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cocinaSetLineaEstado, type KitchenRow } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
@@ -41,6 +41,15 @@ export default function KitchenBoard({
     const [loading, setLoading] = useState(true);
     const [rows, setRows] = useState<KitchenRow[]>([]);
     const [refreshTick, setRefreshTick] = useState(0);
+    const [error, setError] = useState<string | null>(null);
+    const [ocupadas, setOcupadas] = useState<Set<string>>(() => new Set());
+    const enCurso = useRef(new Set<string>());
+    const lecturas = useRef({ version: 0, activo: true });
+    useEffect(() => {
+        const vista = lecturas.current;
+        vista.activo = true;
+        return () => { vista.activo = false; ++vista.version; };
+    }, []);
 
     // ✅ Evitar auto-recarga del propio evento vr:changed que emite KitchenBoard
     const ignoreNextChanged = useRef(false);
@@ -74,17 +83,20 @@ export default function KitchenBoard({
     }
 
     const load = useCallback(async () => {
+        const lectura = ++lecturas.current.version;
         setLoading(true);
         try {
             const r = await commands.kitchenListTodayPending();
-            setRows(r ?? []);
+            if (!lecturas.current.activo || lectura !== lecturas.current.version) return;
+            setRows(r);
+            setError(null);
         } catch (e) {
-            console.error("KitchenBoard load error:", e);
-            setRows([]);
+            if (lecturas.current.activo && lectura === lecturas.current.version) setError(toAppError(e).message);
         } finally {
-            setLoading(false);
-            // ✅ si veníamos de una recarga/refresh, restauramos scroll
-            restoreScroll();
+            if (lecturas.current.activo && lectura === lecturas.current.version) {
+                setLoading(false);
+                restoreScroll();
+            }
         }
     }, []);
 
@@ -146,26 +158,23 @@ export default function KitchenBoard({
 
     const marcarLinea = useCallback(
         async (idDetalle: string, next: "PREPARADO" | "PENDIENTE") => {
+            if (!idUsuarioCocinero || enCurso.current.has(idDetalle)) return;
+            enCurso.current.add(idDetalle);
+            setOcupadas(new Set(enCurso.current));
+            ++lecturas.current.version;
             try {
-                if (!idUsuarioCocinero) return;
-
-                // ✅ evitar salto: guardamos scroll antes de tocar estado/DOM
+                await cocinaSetLineaEstado({ idDetalle, idUsuarioCocinero, estado: next });
+                if (!lecturas.current.activo) return;
+                ++lecturas.current.version;
+                // La respuesta confirma esta transición; no desaparece nada antes del acuse.
                 rememberScroll();
-
-                // ✅ optimistic update: NO recargamos toda la lista, así no “sube arriba”
                 setRows((prev) =>
                     prev.map((r) =>
-                        String(r.ID_Detalle ?? "") === idDetalle
+                        r.ID_Detalle === idDetalle
                             ? { ...r, Estado_Cocina: next }
                             : r,
                     ),
                 );
-
-                await cocinaSetLineaEstado({
-                    idDetalle,
-                    idUsuarioCocinero,
-                    estado: next,
-                });
 
                 // ✅ avisar al resto de la app, pero sin auto-refresh de KitchenBoard
                 ignoreNextChanged.current = true;
@@ -174,10 +183,14 @@ export default function KitchenBoard({
                 // ✅ por si el reflow mueve algo
                 restoreScroll();
             } catch (e) {
-                console.error("Error marcando cocina:", e);
-                // fallback opcional:
-                // rememberScroll();
-                // setRefreshTick((x) => x + 1);
+                if (lecturas.current.activo) setError(toAppError(e).message);
+                throw e;
+            } finally {
+                enCurso.current.delete(idDetalle);
+                if (lecturas.current.activo) {
+                    setOcupadas(new Set(enCurso.current));
+                    setLoading(false);
+                }
             }
         },
         [idUsuarioCocinero],
@@ -210,6 +223,8 @@ export default function KitchenBoard({
                 </button>
             </div>
 
+            {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+
             {/* ✅ si el scroll real lo hace un contenedor interno, este ref lo preserva */}
             <div ref={scrollRef} className="mt-6">
                 {loading ? (
@@ -218,7 +233,7 @@ export default function KitchenBoard({
                     </div>
                 ) : comandas.length === 0 ? (
                     <div className="w-full grid place-items-center text-fg-muted py-20">
-                        No hay comandas pendientes de cocina.
+                        {error ? "No se pudo cargar la cocina. Pulsa Recargar para reintentar." : "No hay comandas pendientes de cocina."}
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -273,8 +288,9 @@ export default function KitchenBoard({
                                                     key={l.idDetalle}
                                                     type="button"
                                                     disabled={
-                                                        !idUsuarioCocinero
+                                                        !idUsuarioCocinero || ocupadas.has(l.idDetalle)
                                                     }
+                                                    aria-busy={ocupadas.has(l.idDetalle)}
                                                     onClick={conAviso(() =>
                                                         marcarLinea(
                                                             l.idDetalle,
@@ -340,7 +356,7 @@ export default function KitchenBoard({
                                                                             : "text-fg-subtle",
                                                                     )}
                                                                 >
-                                                                    {preparado
+                                                                    {ocupadas.has(l.idDetalle) ? "Guardando…" : preparado
                                                                         ? "Preparado"
                                                                         : "Pendiente"}
                                                                 </span>
