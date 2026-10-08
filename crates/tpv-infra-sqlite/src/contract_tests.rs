@@ -350,6 +350,7 @@ casos_de_contrato! {
     login__punch_salida_turno_noche,
     horarios__copiar_semana,
     horarios__create_asignacion,
+    horarios__guardar_asignacion,
     horarios__update_asignacion,
     horarios__delete_asignacion,
 }
@@ -858,6 +859,15 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             )
             .await
             .expect("copiar semana");
+        }
+        "horarios.guardar_asignacion" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            tpv_application::use_cases::trabajadores::guardar_asignacion(
+                &repo,
+                serde_json::from_value(e.clone()).expect("entrada de horario agrupado"),
+            )
+            .await
+            .expect("guardar los dos tramos");
         }
         "horarios.create_asignacion" => {
             let repo = SqliteTrabajadoresRepository::new(db.clone());

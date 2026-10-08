@@ -46,6 +46,7 @@ import {
 import {
 	copySemana,
 	createAsignacion,
+	guardarAsignacion,
 	deleteAsignacion,
 	updateAsignacion,
 } from "../src/domains/trabajadores/trabajadores.commands";
@@ -278,6 +279,8 @@ import casoLoginTurno from "../../../tests/contract/casos/login/set_turno_partid
 import goldenLoginTurno from "../../../tests/contract/golden/login/set_turno_partido.json";
 import casoHorCreate from "../../../tests/contract/casos/horarios/create_asignacion.json";
 import goldenHorCreate from "../../../tests/contract/golden/horarios/create_asignacion.json";
+import casoHorGuardar from "../../../tests/contract/casos/horarios/guardar_asignacion.json";
+import goldenHorGuardar from "../../../tests/contract/golden/horarios/guardar_asignacion.json";
 import casoHorUpdate from "../../../tests/contract/casos/horarios/update_asignacion.json";
 import goldenHorUpdate from "../../../tests/contract/golden/horarios/update_asignacion.json";
 import casoHorDelete from "../../../tests/contract/casos/horarios/delete_asignacion.json";
@@ -392,6 +395,7 @@ const CASOS = [
 	},
 	{ nombre: "login_set_turno_partido", caso: casoLoginTurno, golden: goldenLoginTurno },
 	{ nombre: "horarios_create_asignacion", caso: casoHorCreate, golden: goldenHorCreate },
+	{ nombre: "horarios_guardar_asignacion", caso: casoHorGuardar, golden: goldenHorGuardar },
 	{ nombre: "horarios_update_asignacion", caso: casoHorUpdate, golden: goldenHorUpdate },
 	{ nombre: "horarios_delete_asignacion", caso: casoHorDelete, golden: goldenHorDelete },
 ];
@@ -899,6 +903,10 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			// comando (cada copia con su ID ya resuelto).
 			const filas = await filasSemana(db, caso.entrada.from_monday);
 			aplicar(hub, sql, copySemana(caso.entrada as any, filas));
+			return;
+		}
+		case "horarios.guardar_asignacion": {
+			aplicar(hub, sql, guardarAsignacion(caso.entrada as any));
 			return;
 		}
 		case "horarios.create_asignacion": {
