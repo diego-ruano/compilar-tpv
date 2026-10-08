@@ -46,6 +46,12 @@ salta, un ataque de red no.
 
 El rol y el usuario salen del repositorio y **nunca de los argumentos** de un comando.
 
+RI-83: el caso de uso verifica el fichaje **antes** de devolver el acceso y establecer la sesión.
+Hace falta la primera entrada de la jornada. Si se ha marcado jornada partida y cerrado la primera
+parte, hace falta la segunda entrada. Después de la salida final se puede acceder: el login no
+registra horas ni crea un tramo nuevo. Ningún rol está exento. La casilla de jornada partida es
+manual; una segunda parte registrada impide desmarcarla, tanto en la Main como en la Handy.
+
 | Helper | Para qué |
 |---|---|
 | `sesion()` | Algo atribuible que hace cualquiera: exige estar identificado |

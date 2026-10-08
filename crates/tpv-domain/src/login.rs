@@ -58,6 +58,56 @@ pub fn validate_email_basic(email: &str) -> bool {
     e.len() >= 6 && e.contains('@') && e.contains('.') && !e.contains(' ')
 }
 
+/// RI-83: haber fichado la entrada permite acceder también después de la salida final.
+/// La pausa de un turno partido requiere su segunda entrada; iniciar sesión nunca ficha.
+pub fn validar_acceso_por_fichaje(
+    entrada_1: bool,
+    salida_1: bool,
+    turno_partido: bool,
+    entrada_2: bool,
+) -> Result<(), String> {
+    if !entrada_1 {
+        return Err("Debes fichar entrada antes de entrar".into());
+    }
+    if turno_partido && salida_1 && !entrada_2 {
+        return Err("Debes fichar la segunda entrada antes de entrar".into());
+    }
+    Ok(())
+}
+
+/// Una segunda parte registrada no puede ocultarse desmarcando la jornada partida.
+pub fn validar_cambio_turno_partido(partido: bool, hay_segunda_parte: bool) -> Result<(), String> {
+    if !partido && hay_segunda_parte {
+        return Err("No puedes quitar el turno partido: ya hay un segundo tramo registrado".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests_acceso_por_fichaje {
+    use super::*;
+
+    #[test]
+    fn no_abre_acceso_sin_entrada_ni_durante_la_pausa_partida() {
+        assert!(validar_acceso_por_fichaje(false, false, false, false).is_err());
+        assert!(validar_acceso_por_fichaje(true, true, true, false).is_err());
+    }
+
+    #[test]
+    fn permite_acceder_durante_el_trabajo_y_tras_la_salida_final() {
+        assert!(validar_acceso_por_fichaje(true, false, false, false).is_ok());
+        assert!(validar_acceso_por_fichaje(true, true, false, false).is_ok());
+        assert!(validar_acceso_por_fichaje(true, true, true, true).is_ok());
+    }
+
+    #[test]
+    fn una_segunda_parte_no_se_puede_ocultar() {
+        assert!(validar_cambio_turno_partido(false, true).is_err());
+        assert!(validar_cambio_turno_partido(false, false).is_ok());
+        assert!(validar_cambio_turno_partido(true, true).is_ok());
+    }
+}
+
 /* =========================================================
    Anti brute-force (LOGIN-01): política de bloqueo por intentos
 ========================================================= */

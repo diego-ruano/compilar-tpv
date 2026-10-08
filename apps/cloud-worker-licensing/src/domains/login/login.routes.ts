@@ -82,7 +82,10 @@ loginRoutes.get("/:id/punch-status", async (c) => {
 
 loginRoutes.post("/turno-partido", cuerpo(S.setTurnoPartidoSchema), async (c) => {
 	const datos = c.req.valid("json");
-	await apply(c, cmd.setTurnoPartido(datos));
+	const cambiados = await apply(c, cmd.setTurnoPartido(datos));
+    if (Number(cambiados) === 0) {
+        return c.json({ ok: false, code: "conflict", error: "No puedes quitar el turno partido: ya hay un segundo tramo registrado" }, 409);
+    }
 	return c.json({ ok: true });
 });
 

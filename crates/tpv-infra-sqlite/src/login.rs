@@ -859,6 +859,15 @@ impl LoginRepository for SqliteLoginRepository {
         let db = self.db.write().await;
         let fecha = fecha.unwrap_or_else(today_ymd);
 
+        // El WriteGuard excluye cualquier otra escritura hasta guardar el cambio.
+        let mut partes = db.query(
+            "SELECT 1 FROM Fichajes WHERE ID_Usuario=?1 AND Fecha=?2 AND Parte=2 LIMIT 1;",
+            vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.clone())],
+        ).await.map_err(db_err)?;
+        let hay_segunda = partes.next().await.map_err(db_err)?.is_some();
+        tpv_domain::login::validar_cambio_turno_partido(turno_partido, hay_segunda)
+            .map_err(AppError::conflict)?;
+
         db.execute(
             r#"
             INSERT INTO Fichaje_Dia (ID_Usuario, Fecha, Turno_Partido)
@@ -902,6 +911,46 @@ mod tests_fichajes_colgados {
                 .unwrap();
         }
         (db, dir)
+    }
+
+    #[tokio::test]
+    async fn acceso_exige_entrada_sin_abrir_sesion_durante_la_pausa_y_permite_salidas_finales() {
+        use tpv_contracts::login::LoginUserArgs;
+        let (db, _dir) = db_con_usuario().await;
+        {
+            let w = db.write().await;
+            w.raw().execute("UPDATE Usuarios SET Password_Hash=?1 WHERE ID_Usuario='u1';",
+                vec![Value::Text(hash_pin("1234").unwrap())]).await.unwrap();
+        }
+        let repo = SqliteLoginRepository::new(db.clone());
+        let acceder = || tpv_application::use_cases::login::login_user(&repo, None,
+            LoginUserArgs { id_usuario: "u1".into(), pin: "1234".into() });
+        assert!(matches!(acceder().await, Err(AppError::Validation(_))));
+        {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "entrada").await.unwrap();
+        }
+        assert!(acceder().await.is_ok());
+        {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "salida").await.unwrap();
+        }
+        assert!(acceder().await.is_ok(), "la jornada continua cerrada permite acceder");
+        repo.set_turno_partido("u1", None, true).await.unwrap();
+        assert!(matches!(acceder().await, Err(AppError::Validation(_))), "la pausa requiere la segunda entrada");
+        {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "entrada").await.unwrap();
+        }
+        assert!(acceder().await.is_ok());
+        assert!(matches!(repo.set_turno_partido("u1", None, false).await, Err(AppError::Conflict(_))));
+        {
+            let w = db.write().await;
+            exec_punch(&w, "u1", "salida").await.unwrap();
+        }
+        assert!(acceder().await.is_ok(), "la jornada partida cerrada permite acceder");
+        assert!(repo.set_turno_partido("u1", None, false).await.is_err());
+        assert_eq!(repo.get_today_punch_status("u1").await.unwrap().partes.len(), 2, "el login no ficha");
     }
 
     /// Un fichaje abierto que entró hace `horas` horas. La hora se calcula en SQL, relativa a

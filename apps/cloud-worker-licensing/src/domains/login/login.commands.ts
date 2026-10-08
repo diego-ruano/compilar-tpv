@@ -21,7 +21,11 @@ export function setTurnoPartido(input: {
 			payload: {
 				sql: `
 					INSERT INTO Fichaje_Dia (ID_Usuario, Fecha, Turno_Partido)
-					VALUES (?1, COALESCE(?2, date('now','localtime')), ?3)
+					SELECT ?1, COALESCE(?2, date('now','localtime')), ?3
+                    WHERE ?3=1 OR NOT EXISTS (
+                        SELECT 1 FROM Fichajes
+                        WHERE ID_Usuario=?1 AND Fecha=COALESCE(?2, date('now','localtime')) AND Parte=2
+                    )
 					ON CONFLICT(ID_Usuario, Fecha) DO UPDATE SET
 						Turno_Partido = excluded.Turno_Partido;
 				`,

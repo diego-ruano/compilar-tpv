@@ -57,7 +57,19 @@ pub async fn login_user(
         }
     }
 
-    res
+    let ok = res?;
+    // El comando establece la sesión sólo cuando este caso de uso termina correctamente.
+    // Se consulta tras verificar el PIN, también si el frontend invoca directamente por IPC.
+    let estado = repo.get_today_punch_status(&ok.id_usuario).await?;
+    let primera = estado.partes.iter().find(|p| p.parte == 1);
+    let segunda = estado.partes.iter().find(|p| p.parte == 2);
+    tpv_domain::login::validar_acceso_por_fichaje(
+        primera.is_some_and(|p| p.entrada.is_some()),
+        primera.is_some_and(|p| p.salida.is_some()),
+        estado.turno_partido == 1,
+        segunda.is_some_and(|p| p.entrada.is_some()),
+    ).map_err(AppError::validation)?;
+    Ok(ok)
 }
 
 pub async fn get_today_punch_status(

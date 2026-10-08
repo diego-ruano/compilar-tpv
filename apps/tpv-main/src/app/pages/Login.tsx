@@ -1,3 +1,4 @@
+import { toAppError } from "@tpv/client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -170,7 +171,9 @@ export default function Login() {
     const ficharDisabled =
         !selectedUser || isSubmitting || loadingPunch || !pinOk || fichajeCompleto;
 
-    const canEnter = canType && hasEntrada1 && pinOk;
+    const faltaSegundaEntrada = turnoPartido && hasSalida1 && !hasEntrada2;
+    const canEnter = canType && !loadingPunch && hasEntrada1 && !faltaSegundaEntrada && pinOk;
+    const accionEnCursoRef = useRef(false);
 
     const ventana = getCurrentWindow();
     const showBottomBlock = Boolean(selectedUser);
@@ -281,8 +284,8 @@ export default function Login() {
     };
 
     const handleTurnoPartidoToggle = async (checked: boolean) => {
-        if (!selectedUserId) return;
-
+        if (!selectedUserId || accionEnCursoRef.current || loadingPunch || hasEntrada2) return;
+        accionEnCursoRef.current = true;
         try {
             setLoadingPunch(true);
             await setTurnoPartidoHoy({
@@ -297,14 +300,15 @@ export default function Login() {
             );
         } catch (e) {
             console.error("setTurnoPartidoHoy error:", e);
-            toast.error("No se pudo guardar turno partido", "Inténtalo de nuevo.");
+            toast.error("No se pudo guardar turno partido", toAppError(e).message);
         } finally {
+            accionEnCursoRef.current = false;
             setLoadingPunch(false);
         }
     };
 
     const handlePunch = async () => {
-        if (isSubmitting) return;
+        if (accionEnCursoRef.current || loadingPunch) return;
         if (!requireUserOrWarn()) return;
 
         const currentPin = pinRef.current.trim();
@@ -328,6 +332,7 @@ export default function Login() {
             return;
         }
 
+        accionEnCursoRef.current = true;
         setIsSubmitting(true);
         setLoadingPunch(true);
 
@@ -359,13 +364,14 @@ export default function Login() {
 
             toast.error("Error al fichar", msg);
         } finally {
+            accionEnCursoRef.current = false;
             setIsSubmitting(false);
             setLoadingPunch(false);
         }
     };
 
     const handleSubmit = async () => {
-        if (isSubmitting) return;
+        if (accionEnCursoRef.current || loadingPunch) return;
         if (!requireUserOrWarn()) return;
 
         const currentPin = pinRef.current.trim();
@@ -374,6 +380,11 @@ export default function Login() {
             return;
         }
 
+        if (!hasEntrada1 || faltaSegundaEntrada) {
+            toast.warning(faltaSegundaEntrada ? "Debes fichar la segunda entrada antes de entrar" : "Debes fichar entrada antes de entrar");
+            return;
+        }
+        accionEnCursoRef.current = true;
         setIsSubmitting(true);
 
         try {
@@ -404,16 +415,6 @@ export default function Login() {
                 return;
             }
 
-            if (!hasEntrada1) {
-                toast.warning(
-                    "Debes fichar entrada antes de entrar",
-                    "Pulsa “Fichar entrada” e introduce tu PIN.",
-                );
-                pinRef.current = "";
-                setPin("");
-                return;
-            }
-
             setSession({
                 role: ok.rol,
                 idUsuario: ok.id_usuario,
@@ -436,6 +437,7 @@ export default function Login() {
             pinRef.current = "";
             setPin("");
         } finally {
+            accionEnCursoRef.current = false;
             setIsSubmitting(false);
         }
     };
@@ -630,6 +632,7 @@ export default function Login() {
                                             <button
                                                 key={u.id_usuario}
                                                 type="button"
+                                                disabled={isSubmitting || loadingPunch}
                                                 onClick={() => setSelectedUserId(u.id_usuario)}
                                                 className={cn(
                                                     "shrink-0 w-[118px] xs:w-[126px]",
@@ -699,6 +702,7 @@ export default function Login() {
                                             <button
                                                 key={u.id_usuario}
                                                 type="button"
+                                                disabled={isSubmitting || loadingPunch}
                                                 onClick={() => setSelectedUserId(u.id_usuario)}
                                                 className={cn(
                                                     "group relative rounded-2xl border p-3.5 text-left transition active:scale-[0.99] cursor-pointer",
@@ -754,7 +758,7 @@ export default function Login() {
                                             className="h-4 w-4 rounded border-border accent-accent"
                                             checked={turnoPartido}
                                             onChange={conAviso((e) => handleTurnoPartidoToggle(e.target.checked))}
-                                            disabled={!selectedUserId}
+                                            disabled={!selectedUserId || loadingPunch || isSubmitting || hasEntrada2}
                                         />
                                         <span className="text-xs text-fg-muted">Partido</span>
                                     </label>
@@ -804,7 +808,7 @@ export default function Login() {
                                                     className="h-4 w-4 rounded border-border accent-accent"
                                                     checked={turnoPartido}
                                                     onChange={conAviso((e) => handleTurnoPartidoToggle(e.target.checked))}
-                                                    disabled={!selectedUserId}
+                                                    disabled={!selectedUserId || loadingPunch || isSubmitting || hasEntrada2}
                                                 />
                                                 <span className="text-sm text-fg-muted">
                                                     {jornadaDeAyer ? "Ayer tenías turno partido" : "Hoy tienes turno partido"}
@@ -866,9 +870,9 @@ export default function Login() {
                                                     </div>
                                                 ) : null}
 
-                                                {!hasEntrada1 ? (
+                                                {(!hasEntrada1 || faltaSegundaEntrada) ? (
                                                     <p className="text-warning">
-                                                        Debes fichar entrada para poder entrar.
+                                                        {faltaSegundaEntrada ? "Debes fichar la segunda entrada para poder entrar." : "Debes fichar entrada para poder entrar."}
                                                     </p>
                                                 ) : null}
                                             </div>
@@ -891,6 +895,7 @@ export default function Login() {
                                         <p className="mt-2 text-xs text-fg-muted">
                                             {!hasEntrada1
                                                 ? "Para entrar en la app, primero ficha entrada."
+                                                : faltaSegundaEntrada ? "Para volver a entrar, ficha la segunda entrada."
                                                 : "Puedes entrar. Si terminas tu jornada, ficha salida."}
                                         </p>
                                     ) : null}
@@ -933,7 +938,7 @@ export default function Login() {
                             <Button
                                 variant="secondary"
                                 onClick={() => setSelectedUserId(null)}
-                                disabled={!selectedUser || isSubmitting}
+                                disabled={!selectedUser || isSubmitting || loadingPunch}
                                 title="Cambiar usuario"
                                 leftIcon={<RotateCw className="size-4" aria-hidden />}
                                 className="w-full shrink-0 xs:w-auto"
