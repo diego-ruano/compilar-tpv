@@ -25,3 +25,20 @@ it("conserva la copia antigua y el destinatario si SQLite no confirma la importa
 it("no descarta ni rebaja a ticket una factura incompleta", () => {
     expect(() => leerCobroLegado({ ...cobro, destinatario: { nombre_razon: "Ana" } })).toThrow("Factura antigua incompleta");
 });
+
+it("una copia ilegible o un cobro incompleto no bloquea los de otros operadores", async () => {
+    const storage = almacen();
+    const roto = "tpv:ventaRapida:pendingCobros:v1:roto";
+    const mixto = "tpv:ventaRapida:pendingCobros:v1:mixto";
+    const otro = "tpv:ventaRapida:pendingCobros:v1:otro";
+    const incompleto = { ...cobro, destinatario: { nombre_razon: "Ana" } };
+    storage.setItem(roto, "{JSON ilegible");
+    storage.setItem(mixto, JSON.stringify([incompleto, cobro]));
+    storage.setItem(otro, JSON.stringify([{ ...cobro, idPago: "otro-pago" }]));
+    guardar.mockResolvedValue(undefined);
+    await expect(importarCobrosLegados(storage)).rejects.toThrow();
+    expect(guardar).toHaveBeenCalledTimes(2);
+    expect(storage.getItem(roto)).toBe("{JSON ilegible");
+    expect(JSON.parse(storage.getItem(mixto)!)).toEqual([incompleto]);
+    expect(storage.getItem(otro)).toBeNull();
+});

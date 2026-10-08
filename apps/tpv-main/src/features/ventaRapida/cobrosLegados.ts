@@ -29,16 +29,26 @@ export function leerCobroLegado(valor: unknown): VrCobrarFraccionadoInput {
 
 export async function importarCobrosLegados(almacen: Storage = window.localStorage): Promise<void> {
     const claves = Array.from({ length: almacen.length }, (_, i) => almacen.key(i)).filter((k): k is string => !!k?.startsWith(prefijo));
+    let primerError: unknown;
     for (const clave of claves) {
-        const valor: unknown = JSON.parse(almacen.getItem(clave) ?? "[]");
-        if (!Array.isArray(valor)) throw new Error("La copia antigua de cobros no se puede leer");
+        let valor: unknown;
+        try {
+            valor = JSON.parse(almacen.getItem(clave) ?? "[]");
+            if (!Array.isArray(valor)) throw new Error("La copia antigua de cobros no se puede leer");
+        } catch (e) { primerError ??= e; continue; }
+        if (!Array.isArray(valor)) continue;
         const restantes = [...valor];
-        while (restantes.length) {
-            await commands.vrGuardarCobroPendiente(leerCobroLegado(restantes[0]));
-            restantes.shift();
+        let indice = 0;
+        while (indice < restantes.length) {
+            try { await commands.vrGuardarCobroPendiente(leerCobroLegado(restantes[indice])); }
+            catch (e) { primerError ??= e; ++indice; continue; }
+            restantes.splice(indice, 1);
             // Se borra únicamente después de la confirmación duradera de SQLite.
-            if (restantes.length) almacen.setItem(clave, JSON.stringify(restantes));
-            else almacen.removeItem(clave);
+            try {
+                if (restantes.length) almacen.setItem(clave, JSON.stringify(restantes));
+                else almacen.removeItem(clave);
+            } catch (e) { primerError ??= e; break; }
         }
     }
+    if (primerError !== undefined) throw primerError;
 }
