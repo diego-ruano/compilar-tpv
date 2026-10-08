@@ -23,10 +23,8 @@ import { runTenantMigrations } from "../src/server/tenantMigrations";
 function clienteConMigraciones(sql: any) {
 	const base = clienteSobre(sql);
 	const ejecutarVarias = async (texto: string) => {
-		const sinComentarios = texto.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
-		for (const s of sinComentarios.split(";")) {
-			if (s.trim()) await base.execute(s);
-		}
+		// SQLite interpreta el bloque completo, incluidos los ; internos de los triggers.
+		sql.exec(texto);
 	};
 	return {
 		execute: base.execute,
@@ -74,7 +72,7 @@ describe("migraciones del tenant", () => {
 			const sql = hub.state.storage.sql;
 			await runTenantMigrations(clienteConMigraciones(sql));
 
-			for (const tabla of ["Applied_Operations", "Sync_Changes", "Sync_Main_Checkpoints"]) {
+			for (const tabla of ["Applied_Operations", "Sync_Changes", "Sync_Main_Checkpoints", "_Cobros_Pendientes"]) {
 				const n = sql
 					.exec("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=?", tabla)
 					.toArray()[0].n;
@@ -83,6 +81,11 @@ describe("migraciones del tenant", () => {
 			// Las dos consultas con las que `/v1/sync/changes` lee el log y su final.
 			expect(sql.exec("SELECT COUNT(*) AS n FROM Sync_Changes WHERE Seq > 0;").toArray()[0].n).toBe(0);
 			expect(sql.exec("SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;").toArray()[0].seq).toBe(0);
+			expect(sql.exec("PRAGMA table_info(Asignacion_Turnos)").toArray().some((c: any) => c.name === "ID_Grupo")).toBe(true);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(3);
+			// Volver a ejecutar el runner conserva el esquema y no duplica sus registros.
+			await runTenantMigrations(clienteConMigraciones(sql));
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(3);
 		});
 	});
 });
