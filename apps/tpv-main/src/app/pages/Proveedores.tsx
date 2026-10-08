@@ -122,14 +122,11 @@ export default function Proveedores() {
   const [categoriaActivaId, setCategoriaActivaId] = useState<string | null>(null);
 
   async function mapProveedoresUI(rows: ProveedorDto[]): Promise<ProveedorUI[]> {
-    const out: ProveedorUI[] = [];
-    for (const r of rows) {
-      out.push({
+    // RI-86: resolverlas en paralelo evita sumar la descarga de cada foto en la Main.
+    return Promise.all(rows.map(async (r) => ({
         ...r,
         urlImagen: await resolveImageUrl(r.ruta_imagen),
-      });
-    }
-    return out;
+    })));
   }
 
   async function mapProductosUI(rows: ProductoProveedorDto[]): Promise<ProductoUI[]> {
