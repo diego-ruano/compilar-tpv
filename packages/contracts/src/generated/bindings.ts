@@ -612,6 +612,8 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
  */
 export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos" | "factura_completa_requerida" | "reserva_solapada";
 
+export type EstadoColaImagenes = { pendientes: number, total_apartadas: number, apartadas: Array<ImagenApartada>, };
+
 /**
  * A dónde llegan los códigos para recuperar el PIN.
  */
@@ -720,6 +722,8 @@ export type HorariosSemanaArgs = { fecha_lunes: string, };
 export type IdCategoriaArgs = { id_categoria: string, };
 
 export type IdProductoArgs = { id_producto: string, };
+
+export type ImagenApartada = { rel_path: string, motivo: string, };
 
 /**
  * A qué cierres ya hechos afectaría un cambio de caja, para avisar antes de hacerlo.
@@ -1467,6 +1471,8 @@ estado_envio?: string, intentos: number, codigo_error?: string, descripcion_erro
  * posterior**, así que se guarda en el momento del alta o se pierde.
  */
 csv?: string, };
+
+export type ReintentarImagenArgs = { rel_path: string, };
 
 /**
  * RI-61: ¿el teléfono o el email que se acaban de escribir ya son de un cliente? Se pregunta antes

@@ -10,6 +10,7 @@
 //!
 //! NO depende de Tauri: el directorio de datos (AppData) lo inyecta el comando al construirlo.
 
+pub mod cola_imagenes;
 pub mod device;
 pub mod field_crypto;
 pub mod reloj;
@@ -35,7 +36,7 @@ use serde_json::Value as JsonValue;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cloud_sync::CloudSyncService;
-use tpv_application::ports::licensing::{LicensingService, PairingService};
+use tpv_application::ports::licensing::{LicensingService, PairingService, ResultadoSubidaImagen};
 use tpv_application::ports::correo_recuperacion::CorreoRecuperacionService;
 use tpv_application::ports::recuperacion_pin::RecuperacionPinService;
 use tpv_contracts::errors::ErrorCode;
@@ -1172,7 +1173,7 @@ impl PairingService for PairingAdapter {
         path: &str,
         content_type: &str,
         bytes: Vec<u8>,
-    ) -> AppResult<()> {
+    ) -> AppResult<ResultadoSubidaImagen> {
         // PUT firmado (device-proof sobre el path canónico, sin query). El tenant lo deriva el
         // worker del token: aislamiento por tenant garantizado. NO usa idempotency-key: es una
         // escritura directa a R2 (no pasa por el hub), y subir dos veces el mismo fichero al mismo
@@ -1181,10 +1182,7 @@ impl PairingService for PairingAdapter {
             .enviar_firmado(mode, Method::PUT, path, &bytes, Some(content_type))
             .await?;
 
-        if (200..300).contains(&status) {
-            return Ok(());
-        }
-        Err(AppError::from_api_body(status, &String::from_utf8_lossy(&cuerpo)))
+        clasificar_subida_imagen(status, &cuerpo)
     }
 
     async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()> {
@@ -1376,6 +1374,31 @@ mod tests_respuesta_de_activar {
     fn sin_el_campo_no_es_un_traslado() {
         let ok: ActivateOk = serde_json::from_str(&format!("{RESPUESTA}}}")).unwrap();
         assert!(!ok.cambio_de_equipo);
+    }
+}
+
+fn clasificar_subida_imagen(status: u16, cuerpo: &[u8]) -> AppResult<ResultadoSubidaImagen> {
+    if (200..300).contains(&status) { return Ok(ResultadoSubidaImagen::Subida); }
+    let error = AppError::from_api_body(status, &String::from_utf8_lossy(cuerpo));
+    if matches!(status, 400 | 413 | 415 | 422) {
+        return Ok(ResultadoSubidaImagen::Rechazada { motivo: error.to_string() });
+    }
+    Err(error)
+}
+
+#[cfg(test)]
+mod tests_subida_imagen {
+    use super::*;
+    #[test]
+    fn credenciales_limites_y_servidor_no_apartan_una_imagen_valida() {
+        for status in [401, 403, 408, 429, 500, 502, 503] {
+            assert!(clasificar_subida_imagen(status, br#"{"error":"fallo"}"#).is_err());
+        }
+        for status in [400, 413, 415, 422] {
+            assert!(matches!(clasificar_subida_imagen(status, br#"{"error":"bad_image_path"}"#),
+                Ok(ResultadoSubidaImagen::Rechazada { .. })));
+        }
+        assert!(matches!(clasificar_subida_imagen(204, b""), Ok(ResultadoSubidaImagen::Subida)));
     }
 }
 

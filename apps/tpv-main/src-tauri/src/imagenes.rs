@@ -7,6 +7,15 @@ const MAX_LADO_ENTRADA: u32 = 8192;
 const MAX_PIXELES: u64 = 24_000_000;
 const MAX_MEMORIA: u64 = 128 * 1024 * 1024;
 
+/// RI-67: un archivo antiguo o alterado no debe ocupar memoria sin límite antes del 413.
+pub fn leer_para_subida(ruta: &Path) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read;
+    let fichero = fs::File::open(ruta)?;
+    let mut bytes = Vec::new();
+    fichero.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes)?;
+    Ok((bytes.len() <= MAX_BYTES).then_some(bytes))
+}
+
 pub fn ruta_segura(rel: &str) -> bool {
     let partes: Vec<_> = rel.split('/').collect();
     if partes.len() != 3 || partes[0] != "images" || !matches!(partes[1], "productos" | "categorias" | "proveedores" | "alergenos" | "logo") { return false; }
@@ -72,6 +81,15 @@ pub fn procesar(bytes: &[u8]) -> Result<(Vec<u8>, &'static str), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn subida_lee_como_maximo_el_limite_y_detecta_un_archivo_grande() {
+        let ruta = std::env::temp_dir().join(format!("tpv-imagen-{}", uuid::Uuid::new_v4()));
+        fs::File::create(&ruta).unwrap().set_len((MAX_BYTES + 1) as u64).unwrap();
+        assert!(leer_para_subida(&ruta).unwrap().is_none());
+        fs::write(&ruta, b"imagen").unwrap();
+        assert_eq!(leer_para_subida(&ruta).unwrap().unwrap(), b"imagen");
+        fs::remove_file(ruta).unwrap();
+    }
     #[test]
     fn rechaza_rutas_absolutas_traversal_y_nombres_especiales() {
         for rel in ["images/../data.db", "images/logo/../a.jpg", "images/logo/C:/a.jpg", "images/logo/a.jpg:datos", "images/logo/CON.jpg", "images/logo/a.svg", "images/logo/a.jpg/otro"] { assert!(!ruta_segura(rel), "{rel}"); }

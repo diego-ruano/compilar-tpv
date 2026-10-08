@@ -20,6 +20,7 @@ import {
 import { useMode } from "../../../shared/stores/useMode";
 import { useBackfillHistorico } from "../../../shared/lib/backfillQueries";
 import { AvisoInterruptores } from "./AvisoInterruptores";
+import { ImagenesPendientes } from "./ImagenesPendientes";
 
 /**
  * SYNC-17: cómo se cuenta cada estado. Ya no hay nada que elegir aquí —la Main se conecta sola—,
@@ -597,6 +598,7 @@ export function Conectividad({ darkMode }: { darkMode: boolean }) {
 
 	return (
 		<div className="flex flex-col gap-4">
+			<ImagenesPendientes />
 			{/* SYNC-17: estado real de la conexión (antes aquí vivía el selector offline/online). */}
 			{deviceMode === "tpv" && <EstadoConexion darkMode={darkMode} />}
 

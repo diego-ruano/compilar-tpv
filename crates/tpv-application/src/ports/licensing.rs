@@ -17,6 +17,12 @@ use tpv_contracts::licensing::{
 
 use crate::error::AppResult;
 
+/// Un rechazo del contenido se aparta; fallos de red, credenciales y servidor siguen siendo Err.
+pub enum ResultadoSubidaImagen {
+    Subida,
+    Rechazada { motivo: String },
+}
+
 /// Servicio de licenciamiento: **transporte y almacén**, sin política.
 ///
 /// El adaptador trae datos del servidor (incluida la verificación ed25519 de la firma, que es
@@ -120,7 +126,7 @@ pub trait PairingService: Send + Sync {
         path: &str,
         content_type: &str,
         bytes: Vec<u8>,
-    ) -> AppResult<()>;
+    ) -> AppResult<ResultadoSubidaImagen>;
 
     /// Borra una imagen del bucket R2 (DELETE firmado). `path` igual que en `upload_image`.
     async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()>;

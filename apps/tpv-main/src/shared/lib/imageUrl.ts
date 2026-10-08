@@ -121,16 +121,6 @@ export async function resolveImageUrl(
  */
 export function triggerImageUploadDrain(): void {
   invoke<string>("images_drain_pending")
-    .then((r) => {
-      if (r && r !== "vacio" && r !== "sin_modo") {
-        if (r.includes("error=")) {
-          console.warn("[images_drain]", r);
-          captureException(new Error("images_drain_con_errores"), { resultado: r });
-        } else {
-          console.log("[images_drain]", r);
-        }
-      }
-    })
     .catch((e) => {
       console.error("[images_drain] Tauri error:", e);
       captureException(e, { fase: "images_drain_pending" });

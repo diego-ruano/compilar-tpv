@@ -9,7 +9,7 @@ use tpv_contracts::licensing::{
 };
 
 use crate::error::{AppError, AppResult};
-use crate::ports::licensing::PairingService;
+use crate::ports::licensing::{PairingService, ResultadoSubidaImagen};
 
 fn requerido(input: &str, field: &str) -> AppResult<String> {
     let out = input.trim().to_string();
@@ -102,7 +102,7 @@ pub async fn upload_image(
     path: &str,
     content_type: &str,
     bytes: Vec<u8>,
-) -> AppResult<()> {
+) -> AppResult<ResultadoSubidaImagen> {
     let mode = normalize_mode(mode)?;
     let path = normalize_path(path)?;
     let content_type = requerido(content_type, "content_type")?;

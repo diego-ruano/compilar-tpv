@@ -31,6 +31,7 @@
                 { "path": "$APPDATA/interruptores.json" },
                 { "path": "$APPDATA/backups/**" },
                 { "path": "$APPDATA/image_uploads.json" },
+                { "path": "$APPDATA/image_uploads.json.tmp" },
                 { "path": "$APPDATA/telemetry-spool/**" },
                 { "path": "$APPDATA/logs/**" },
                 { "path": "$APPDATA/image_backfill_done" }

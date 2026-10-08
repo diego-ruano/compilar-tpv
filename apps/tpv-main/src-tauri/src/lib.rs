@@ -59,6 +59,8 @@ use tpv_infra_http::{
     CLOUD_API_BASE,
 };
 use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
+use tpv_infra_licensing::cola_imagenes::ColaImagenes;
+use tpv_application::ports::licensing::ResultadoSubidaImagen;
 use tpv_infra_sqlite::{
     avisos::SqliteAvisosScanRepository, cierre_caja::SqliteCierreCajaRepository,
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
@@ -327,44 +329,11 @@ fn normalize_required(input: &str, field: &str) -> Result<String, String> {
    Imágenes: procesado (resize + recompresión JPEG) + cola de subida a R2
 ========================================================= */
 
-/// Lado máximo (px) al que se redimensiona la imagen antes de guardarla/subirla. Las fotos de
-/// móviles modernos (varios MB / 4000px) se reducen a algo razonable para un catálogo de TPV.
-/// Una imagen pendiente de subir al bucket R2. `rel_path` es la ruta relativa idéntica a la de
-/// BD (`images/{subcarpeta}/{archivo}`); los bytes se leen del disco en el momento de subir.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PendingImage {
-    rel_path: String,
-    content_type: String,
-}
+// RI-67: solo un drenaje a la vez; encolar no espera a las subidas HTTP.
+static DRENAJE_IMAGENES: Mutex<()> = Mutex::const_new(());
 
-fn image_queue_path(app_data_dir: &Path) -> PathBuf {
-    app_data_dir.join("image_uploads.json")
-}
-
-fn read_image_queue(app_data_dir: &Path) -> Vec<PendingImage> {
-    let Ok(txt) = fs::read_to_string(image_queue_path(app_data_dir)) else {
-        return Vec::new();
-    };
-    serde_json::from_str::<Vec<PendingImage>>(&txt).unwrap_or_default()
-}
-
-fn write_image_queue(app_data_dir: &Path, queue: &[PendingImage]) -> Result<(), String> {
-    let p = image_queue_path(app_data_dir);
-    let txt = serde_json::to_string_pretty(queue).map_err(|e| e.to_string())?;
-    fs::write(&p, txt).map_err(|e| format!("Error escribiendo cola de imágenes {:?}: {e}", p))
-}
-
-/// Encola una imagen para subir (dedup por `rel_path`).
 fn enqueue_image(app_data_dir: &Path, rel_path: &str, content_type: &str) -> Result<(), String> {
-    let mut queue = read_image_queue(app_data_dir);
-    if queue.iter().any(|q| q.rel_path == rel_path) {
-        return Ok(());
-    }
-    queue.push(PendingImage {
-        rel_path: rel_path.to_string(),
-        content_type: content_type.to_string(),
-    });
-    write_image_queue(app_data_dir, &queue)
+    ColaImagenes::new(app_data_dir).encolar(rel_path, content_type)
 }
 
 /// Valida que una ruta relativa de imagen tenga la forma esperada y no escape de `images/`
@@ -1090,6 +1059,7 @@ async fn save_image(app: AppHandle, state: State<'_, AppState>, args: SaveImageA
     let file_path = imagenes::destino(&app_data_dir, &rel_path, true)?;
     fs::write(file_path, processed).map_err(|e| format!("No se ha podido guardar la imagen: {e}"))?;
     enqueue_image(&app_data_dir, &rel_path, content_type_for(&rel_path))?;
+    let _ = app.emit("images:queue_changed", ());
     Ok(rel_path)
 }
 
@@ -1118,70 +1088,57 @@ pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result
         return Ok("apagado".into());
     }
 
-    let pending = read_image_queue(&app_data_dir);
-    if pending.is_empty() {
-        return Ok("vacio".into());
-    }
-
+    let Ok(_guard) = DRENAJE_IMAGENES.try_lock() else { return Ok("en_curso".into()); };
+    let cola = ColaImagenes::new(&app_data_dir);
+    let pendientes = cola.pendientes()?;
     let svc = PairingAdapter::new(app_data_dir.clone());
-    let mut remaining: Vec<PendingImage> = Vec::new();
-    let mut failed = false;
     let mut subidas = 0u32;
-    let mut ultimo_error: Option<String> = None;
-
-    tracing::debug!(target: "tpv::imagenes", modo = %mode_str, en_cola = pending.len(), "drenando cola de imágenes");
-
-    for item in &pending {
-        tracing::debug!(target: "tpv::imagenes", ruta = %item.rel_path, tipo = %item.content_type, "pendiente");
-    }
-
-    for item in pending {
-        if failed {
-            remaining.push(item);
-            continue;
-        }
-
-        let file_path = app_data_dir.join(&item.rel_path);
-        let bytes = match fs::read(&file_path) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(target: "tpv::imagenes", ruta = %item.rel_path, error = %e, "no se pudo leer el fichero a subir");
-                continue;
-            }
-        };
-
-        let path = format!("/v1/images/{}", item.rel_path);
-        tracing::debug!(target: "tpv::imagenes", ruta = %item.rel_path, %path, "subiendo");
-        match uc_pairing::upload_image(&svc, mode_str, &path, &item.content_type, bytes).await {
-            Ok(_) => {
-                tracing::debug!(target: "tpv::imagenes", ruta = %item.rel_path, "subida OK");
-                subidas += 1;
-            }
-            Err(e) => {
-                let msg = format!("{e:?}");
-                tracing::warn!(target: "tpv::imagenes", ruta = %item.rel_path, error = %msg, "fallo subiendo imagen a R2");
-                if ultimo_error.is_none() {
-                    ultimo_error = Some(msg);
+    let mut apartadas = 0u32;
+    let mut ultimo_error = None;
+    for imagen in pendientes {
+        let rechazo = match imagenes::destino(&app_data_dir, &imagen.rel_path, false) {
+            Ok(ruta) => match imagenes::leer_para_subida(&ruta) {
+                Ok(Some(bytes)) => {
+                    let path = format!("/v1/images/{}", imagen.rel_path);
+                    match uc_pairing::upload_image(&svc, mode_str, &path, &imagen.content_type, bytes).await {
+                        Ok(ResultadoSubidaImagen::Subida) => {
+                            cola.terminar(&imagen, None)?;
+                            subidas += 1;
+                            let _ = app.emit("images:queue_changed", ());
+                            continue;
+                        }
+                        Ok(ResultadoSubidaImagen::Rechazada { motivo }) => motivo,
+                        Err(error) => {
+                            // Red, credenciales o servidor: conservar y esperar al siguiente disparador.
+                            ultimo_error = Some(error.to_string());
+                            break;
+                        }
+                    }
                 }
-                failed = true;
-                remaining.push(item);
-            }
+                Ok(None) => "La imagen supera 5 MB. Sustitúyela desde su ficha.".to_string(),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound =>
+                    "No se encuentra el archivo. Sustituye la imagen en su ficha.".to_string(),
+                Err(error) => {
+                    ultimo_error = Some(format!("No se pudo leer la imagen: {error}"));
+                    continue;
+                }
+            },
+            Err(error) => error,
+        };
+        if cola.terminar(&imagen, Some(&rechazo))? {
+            apartadas += 1;
+            // La capa tracing -> Sentry ya existe: avisar una vez, tras persistir el rechazo.
+            tracing::error!(target: "tpv::imagenes", ruta = %imagen.rel_path, motivo = %rechazo,
+                "image_upload_rejected");
+            let _ = app.emit("images:queue_changed", ());
         }
+        // Una imagen rechazada no impide subir la siguiente.
     }
-
-    write_image_queue(&app_data_dir, &remaining)?;
-    let resultado = match &ultimo_error {
-        Some(err) => format!(
-            "subidas={subidas} pendientes={} error={err}",
-            remaining.len()
-        ),
-        None => format!("subidas={subidas} pendientes={}", remaining.len()),
-    };
-    tracing::debug!(target: "tpv::imagenes", %resultado, "fin del drenado");
-    if ultimo_error.is_some() {
-        Err(resultado)
-    } else {
-        Ok(resultado)
+    let estado = cola.estado()?;
+    let resumen = format!("subidas={subidas} apartadas={apartadas} pendientes={}", estado.pendientes);
+    match ultimo_error {
+        Some(error) => Err(format!("{resumen}: {error}")),
+        None => Ok(resumen),
     }
 }
 
@@ -1193,6 +1150,25 @@ async fn images_drain_pending(
     drenar_imagenes(&app, &state)
         .await
         .map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+async fn images_upload_status(app: AppHandle, state: State<'_, AppState>)
+    -> Result<tpv_contracts::imagenes::EstadoColaImagenes, AppErrorDto> {
+    state.exigir_rol(&[tpv_domain::permisos::ADMIN]).await?;
+    let carpeta = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    ColaImagenes::new(&carpeta).estado().map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+async fn images_retry_upload(app: AppHandle, state: State<'_, AppState>, args: tpv_contracts::imagenes::ReintentarImagenArgs)
+    -> Result<(), AppErrorDto> {
+    state.exigir_rol(&[tpv_domain::permisos::ADMIN]).await?;
+    let carpeta = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    imagenes::destino(&carpeta, &args.rel_path, false)?;
+    ColaImagenes::new(&carpeta).reintentar(&args.rel_path)?;
+    let _ = app.emit("images:queue_changed", ());
+    Ok(())
 }
 
 /// Borra una imagen: del disco local y (best-effort) del bucket R2. Se usa al reemplazar la
@@ -1213,6 +1189,8 @@ async fn images_delete(
         return Err("rel_path inválido".into());
     }
 
+    ColaImagenes::new(&app_data_dir).descartar(&rel_path)?;
+    let _ = app.emit("images:queue_changed", ());
     // Borrado local (ignoramos si ya no existe).
     let _ = fs::remove_file(imagenes::destino(&app_data_dir, &rel_path, false)?);
 
@@ -2158,6 +2136,8 @@ pub fn run() {
             // genéricos
             save_image,
             images_drain_pending,
+            images_upload_status,
+            images_retry_upload,
             images_delete,
             images_ensure_local,
             images_backfill,
@@ -3014,6 +2994,7 @@ mod tests_exenciones_del_gate {
             "$APPDATA/interruptores.json",
             "$APPDATA/backups/**",
             "$APPDATA/image_uploads.json",
+            "$APPDATA/image_uploads.json.tmp",
             "$APPDATA/telemetry-spool/**",
             "$APPDATA/logs/**",
             "$APPDATA/image_backfill_done",

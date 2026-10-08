@@ -121,7 +121,7 @@ async fn upload_image(
         _path: &str,
         _content_type: &str,
         _bytes: Vec<u8>,
-    ) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
+    ) -> AppResult<crate::ports::licensing::ResultadoSubidaImagen> { panic!("Capacidad ajena a esta prueba") }
 async fn delete_image(&self, _mode: &str, _path: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 async fn download_image(&self, _mode: &str, _rel_path: &str) -> AppResult<Option<Vec<u8>>> { panic!("Capacidad ajena a esta prueba") }
 }

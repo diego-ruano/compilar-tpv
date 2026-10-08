@@ -38,6 +38,13 @@ const REL_PATH_RE =
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB (la Main ya comprime antes de subir)
 const CACHE_CONTROL = "public, max-age=31536000, immutable";
 
+/** RI-67: la query no transforma la imagen; todas sus variantes comparten entrada de caché. */
+export function claveCacheImagen(request: Request): Request {
+	const url = new URL(request.url);
+	url.search = "";
+	return new Request(url, { method: "GET", headers: request.headers });
+}
+
 function contentTypeFor(relPath: string): string {
     const ext = relPath.split(".").pop()?.toLowerCase();
     return ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
@@ -55,13 +62,15 @@ export function tipoImagen(bytes: Uint8Array): string | null {
 
 imagesRoutes.get("/:tenant/*", async (c) => {
 	const tenant = (c.req.param("tenant") || "").trim();
-	const relPath = (c.req.param("*") || "").trim();
+	// Hono no registra `*` como parámetro con nombre. Derivar la ruta del pathname montado.
+	const relPath = relPathFromUrl(c.req.url).split("/").slice(1).join("/");
 	if (!tenant || !REL_PATH_RE.test(relPath)) {
 		return c.json({ error: "bad_image_path" }, 400);
 	}
 
 	const cache = caches.default;
-	const cached = await cache.match(c.req.raw);
+	const cacheKey = claveCacheImagen(c.req.raw);
+	const cached = await cache.match(cacheKey);
 	if (cached) return cached;
 
 	const key = `${tenant}/${relPath}`;
@@ -80,7 +89,7 @@ imagesRoutes.get("/:tenant/*", async (c) => {
 
 	const res = new Response(obj.body, { headers });
 	// Sólo cacheamos las respuestas 200 (nunca los 404).
-	c.executionCtx.waitUntil(cache.put(c.req.raw, res.clone()));
+	c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()));
 	return res;
 });
 

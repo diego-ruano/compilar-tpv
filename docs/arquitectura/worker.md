@@ -128,6 +128,20 @@ pero **sólo del centro de datos que atiende la petición** (barrer los demás p
 Handy no lee por esa ruta: lee del `r2.dev` del bucket (`src/shared/lib/imageUrl.ts`,
 [INFRA-03](../pendientes.md#infra-03--imágenes-por-r2dev)).
 
+La clave de la Cache API omite la query: no hay transformaciones por parámetros, así que distintas
+queries reutilizan la misma imagen y el borrado usa esa misma URL. No requiere opciones del plan
+de Cloudflare; `ignoreSearch` no está soportado por esta API. Esto no modifica las cachés TanStack
+del cliente ni la lectura directa de la Handy desde `r2.dev`.
+
+Main y Handy guardan su cola local en `image_uploads.json`, con escritura temporal y sustitución
+atómica. Solo hay un drenaje activo; cada confirmación modifica su propia revisión, conservando
+las entradas añadidas durante una subida. Los rechazos de contenido (400/413/415/422) y archivos
+locales ausentes o inválidos se apartan, sin detener las siguientes imágenes. Los errores de red,
+credenciales y servidor conservan la entrada para reintentar. Una cola ilegible devuelve un error:
+no se trata como vacía ni se sobrescribe. Configuración → Conectividad muestra el estado y permite
+reintentar; sustituir una imagen desde su ficha elimina su entrada anterior. Cada rechazo nuevo
+se registra a nivel ERROR, que la integración existente con Sentry captura una sola vez.
+
 ## Salud y vigilancia externa
 
 - **`/health` toca la base central** (`server/salud.ts`) y contesta 200 o 503. El cuerpo no cuenta por
