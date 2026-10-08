@@ -55,15 +55,12 @@ está escrito junto al código, los caminos del dinero y de la factura están pe
 la caja, y hay redes (contrato Main↔worker, anti-drift de migraciones, tablas golden compartidas
 entre lenguajes) que casi ningún producto de este tamaño tiene.
 
-Lo que sale de esta revisión se concentra en cuatro frentes:
+Lo que sale de esta revisión se concentra en tres frentes:
 
-1. **Bugs funcionales concretos**: en venta rápida, **el «−» de un producto sólo lo quita de la
-   pantalla** y no se pueden poner notas de línea desde junio, porque se pregunta si un UUID es
-   mayor que cero (RI-71).
-2. **CI**: no ejecuta 249 tests
+1. **CI**: no ejecuta 249 tests
    —entre ellos todos los guardianes que CLAUDE.md cita como red— (RI-08).
-3. **Código muerto**: casos de uso y ficheros sin ningún llamante (RI-22).
-4. **Plataformas** (segunda pasada). La rama de Windows 7 es anterior a ARQ-01 y su canal
+2. **Código muerto**: casos de uso y ficheros sin ningún llamante (RI-22).
+3. **Plataformas** (segunda pasada). La rama de Windows 7 es anterior a ARQ-01 y su canal
    del feed no está desplegado (RI-74). Y el harness de contrato compara efectos pero no la
    validación, donde hay cuatro divergencias entre la Main y la Handy (RI-78).
 
@@ -77,50 +74,41 @@ Lo que sale de esta revisión se concentra en cuatro frentes:
 | [RI-15](#ri-15) | 🟡 | rendimiento | Se construye un `reqwest::Client` por petición (sin reutilizar conexiones) |
 | [RI-16](#ri-16) | 🟡 | rendimiento | libsql local bloquea hilos del runtime async (restauración, estadísticas) |
 | [RI-22](#ri-22) | 🟡 | deuda | Caminos enteros sin ningún llamante |
-| [RI-23](#ri-23) | 🟡 | rendimiento | Bundle de 2,5 MB sin división por rutas, logo de 940 KB e imágenes sin uso |
+| [RI-23](#ri-23) | 🟡 | rendimiento | Optimización y limpieza de imágenes aplazada |
 | [RI-24](#ri-24) | 🟡 | deuda | Los source maps del frontend no llegan a Sentry (y la versión no cuadra) |
 | [RI-25](#ri-25) | 🟡 | seguridad | Acciones de GitHub sin fijar por SHA en un job con la clave de firma del updater |
 | [RI-32](#ri-32) | 🔵 | deuda | Transacciones escritas a mano (`"BEGIN;"`) y helpers duplicados por repositorio |
 | [RI-38](#ri-38) | 🔵 | bug | Errores que se tragan en silencio (estadísticas, outbox, compatibilidad de columnas) |
 | [RI-39](#ri-39) | 🔵 | bug | Guardas de estado fuera de la transacción (`actualizar_pago`) |
 | [RI-40](#ri-40) | 🔵 | bug | Pánicos por cortar cadenas por bytes (reservas) |
-| [RI-47](#ri-47) | 🔵 | deuda | Frontend: componentes gigantes y adaptadores de la época `dualCall` |
 | [RI-48](#ri-48) | 🔵 | deuda | Dominio: duplicación, tipos como cadenas y constructores de trece argumentos |
 | [RI-49](#ri-49) | 🔵 | deuda | Build: `include_dir!` sin `rerun-if-changed`, `Cargo.lock` anidado y dependencias sin uso |
-| [RI-71](#ri-71) | 🟠 | bug | Venta rápida: el «−» de un producto sólo lo quita de la pantalla, y no se pueden poner notas |
 | [RI-74](#ri-74) | 🟡 | deuda | Windows 7: la rama es anterior a ARQ-01 y su canal del feed no está desplegado |
 | [RI-75](#ri-75) | 🔵 | deuda | Android: el `Context` sale de una API no pública |
 | [RI-76](#ri-76) | 🔵 | deuda | Android: restos de la plantilla, márgenes seguros y release sin firmar |
 | [RI-77](#ri-77) | 🔵 | bug | La Handy enseña pantallas que en ella no funcionan (pedidos, caja, ticket, licencia) |
 | [RI-78](#ri-78) | 🟡 | bug/arquitectura | El harness no ve la validación de entrada, y ahí hay cuatro divergencias |
-| [RI-79](#ri-79) | 🔵 | deuda | Cobertura del harness: exclusión obsoleta, un motivo que no se sostiene y cifras viejas |
-| [RI-80](#ri-80) | 🟡 | bug | Editor de mesas: componentes recreados en cada render y sólo eventos de ratón |
-| [RI-81](#ri-81) | 🔵 | bug/rendimiento | Modal de comanda: memo anulado, respuestas fuera de orden y doble pulsación |
-| [RI-82](#ri-82) | 🔵 | bug | Cuentas: botón sin acción, «Deshacer» sin confirmar y PDF sin eñes ni euros |
-| [RI-83](#ri-83) | 🔵 | seguridad | Login: con el PIN bueno pero sin fichar, la sesión del backend se queda abierta |
-| [RI-85](#ri-85) | 🔵 | bug | Turno partido: dos escrituras sueltas y sin comprobar solapes |
-| [RI-86](#ri-86) | 🔵 | rendimiento | Proveedores resuelve las imágenes de una en una |
-| [RI-87](#ri-87) | 🟡 | arquitectura | La frontera webview → Rust no está tipada: adoptar `tauri-specta` |
+| [RI-79](#ri-79) | 🔵 | deuda | Cobertura del harness: falta contrastar el horario predeterminado |
+| [RI-82](#ri-82) | 🔵 | feature | «Enviar a gestoría»: decisión de funcionamiento aplazada |
 
 ---
 
 ## Orden sugerido
 
-**Ya, antes que nada:** RI-71: son cinco comparaciones y un helper, y hoy deja líneas «quitadas»
-dentro de la comanda. Y **lanzar el E2E**, que no se ha lanzado desde que el dinero pasó a céntimos
-(21/09). Después, RI-87 (`tauri-specta`): cierra para todos los comandos el hueco por el que se
-colaron euros en campos de céntimos, y hace desaparecer los `*Apis.ts` que quedan con tipos propios.
+**Antes de publicar:** lanzar el E2E sobre la aplicación compilada. Las correcciones del
+frontend tienen regresiones automatizadas; el recorrido completo y la comprobación táctil en el
+TPV real siguen siendo validaciones de la release.
 
-**Antes de congelar `0001_inicial.sql`** (mientras editarlo sólo obliga a resetear las bases de
-desarrollo; después cada cosa será una migración nueva que hay que mantener en dos runners):
+**Migraciones:** `0001_inicial.sql` ya está congelada. Las mejoras pendientes se añaden mediante
+una migración nueva, registrada en los dos runners:
 
-- Los comentarios desfasados de dentro del propio `0001` ([§18](#18-documentación-desfasada)).
+- Revisar los comentarios desfasados de `0001` ([§18](#18-documentación-desfasada)) sin alterar su SQL aplicado.
 - Si se decide, los `CHECK` de RI-48 (`Metodo_Pago`, estados).
 
 **Antes de cobrar por el producto:**
 
 - RI-08.
-- La primera mitad de RI-78 (igualar las cuatro validaciones) y RI-80 si los TPV son táctiles.
+- La primera mitad de RI-78 (igualar las cuatro validaciones).
 
 **Antes de repartir la Handy de Android:** RI-75 y RI-76 (firma, márgenes), y
 RI-77 para que no enseñe lo que no puede hacer.
@@ -129,289 +117,36 @@ RI-77 para que no enseñe lo que no puede hacer.
 del canal a `main`.
 
 **Después, sin prisa:** el resto, empezando por el código muerto (RI-22), y siguiendo por las mejoras de
-coste (RI-15, RI-16). Los detalles de pantalla (RI-81 a RI-86) conviene hacerlos
-cuando se toque cada una, a la vez que se trocean los componentes grandes de RI-47.
+coste (RI-15, RI-16).
 
 ---
 
 ## 14. Frontend
 
 <a id="ri-23"></a>
-### RI-23 🟡 · Bundle de 2,5 MB sin división por rutas y activos pesados
+### RI-23 🟡 · Optimización de imágenes aplazada
 
-**Dónde:** [`Router.tsx`](../../apps/tpv-main/src/app/Router.tsx), `dist/assets`,
-[`public/`](../../apps/tpv-main/public), [`src/assets/img`](../../apps/tpv-main/src/assets/img).
+La división por rutas está resuelta: Venta rápida y Mesas, con sus componentes de servicio,
+se cargan al arrancar; las demás pantallas se cargan al acceder. Queda la optimización de
+imágenes, aplazada por decisión del propietario el 09/10/2026.
 
-- **Un único `index-*.js` de 2,55 MB** (medido en `dist/`). Todas las páginas se importan de forma
-  estática, así que el arranque parsea ApexCharts (Estadísticas), Konva (editor de mesas), pdf-lib
-  (Cuentas) y el resto aunque se abra la venta rápida. En un TPV con un Celeron se nota en el
-  arranque y en cada recarga de la webview. React Router 7 admite `lazy` por ruta; con dividir
-  Estadísticas, EditTables, Cuentas y Configuración basta para la mayor parte.
-- **El logo que se usa pesa 940 KB** (`logo-altaria-azul-transparente.png`): un logo en SVG o WebP
-  a su tamaño de pantalla son pocos KB.
-- **Activos sin ninguna referencia** (comprobado): `public/comidas.png`, `public/bebidas.webp`, las
-  dos fotos `.avif` de `public/`, `src/assets/img/logo-azul-cuadrado.png` (896 KB),
-  `logo-altaria-azul.jpeg`, `logo-morado-cuadrado.png`, `img/logo.png`. Los de `public/` se copian
-  al instalador. Las dos `.avif` tienen nombre de banco de imágenes (`…_632498-25445.avif`): si
-  se quedaran, conviene comprobar su licencia.
-- En la copia de trabajo hay `public/Adobe Express - file (2).png` (6,9 MB) sin versionar: un build
-  local lo mete en el instalador.
+**Dónde:** [`public/`](../../apps/tpv-main/public), [`src/assets/img`](../../apps/tpv-main/src/assets/img).
 
-<a id="ri-47"></a>
-### RI-47 🔵 · Frontend: componentes gigantes y adaptadores de la época `dualCall`
-
-- **Componentes de miles de líneas**: [`Cuentas.tsx`](../../apps/tpv-main/src/app/pages/Cuentas.tsx)
-  (2.559 líneas, 50 `useState`), [`VentaRapida.tsx`](../../apps/tpv-main/src/app/pages/VentaRapida.tsx)
-  (2.212, 34), `EditTables.tsx` (1.844), `MesaComandaModal.tsx` (1.714). Cada cambio de estado
-  vuelve a renderizar la página entera, y son los más difíciles de modificar sin romper algo.
-  Extraer secciones y agrupar el estado relacionado en `useReducer` (o stores de Zustand, que ya
-  usáis) antes de que crezcan más.
-- **Adaptadores de forma heredados**: quedan en los `*Apis.ts` que no llevan dinero (la lista está en
-  [RI-87](#ri-87)): `pick(row, [...])` con varios nombres por campo, `r?.a ?? r?.A`, mappers a
-  camelCase. Con los tipos generados por ts-rs cada comando devuelve una forma fija; ese código ya
-  sólo puede esconder un error de contrato. Se resuelve con RI-87.
-- **Cola de cobros pendientes en `localStorage`**, con nombre y NIF del cliente cuando pide factura
-  (el propio comentario lo asume como coste). Está bien protegida (`try` en lectura y escritura),
-  pero la fuente de verdad del cobro ya es local e idempotente por `ID_Pago`; si la cola hace
-  falta, su sitio es SQLite (un `_Cobros_Pendientes` por `raw()`), no el almacenamiento de la
-  webview.
-- `features/` mezcla convenciones (`ClientsComponents`, `InventaryComponents`, `mesasComponents`,
-  `ventaRapida`, `cuentas`). Uniformar el día que se toquen.
-- `main.tsx` importa `React` y `StrictMode` y no los usa.
-
-<a id="ri-87"></a>
-### RI-87 🟡 · La frontera webview → Rust no está tipada: adoptar `tauri-specta`
-
-**Dónde:** [`invokeClient.ts`](../../packages/client/src/invokeClient.ts)
-(`invokeClient<T>(command: string, args?: Record<string, unknown>)`), los `*Apis.ts` de cada
-feature, unos 20 ficheros que llaman a `invoke` de `@tauri-apps/api/core` directamente, los **218**
-`#[tauri::command]` de `src-tauri/src/commands/` y
-[`check-comandos-tauri.mjs`](../../scripts/check-comandos-tauri.mjs).
-
-**Qué pasa.** ts-rs genera los **tipos** que cruzan la frontera, pero no los **comandos**. Cada
-llamada es una cadena más un objeto sin tipo, así que nadie comprueba tres cosas:
-
-- **El nombre.** Renombrar o retirar un comando compila en los dos lados y revienta en el equipo
-  del cliente con *command not found*. Hoy lo cubre a medias `check-comandos-tauri.mjs`, que no ve
-  los nombres que viajan en una variable.
-- **La forma de los argumentos.** Conviven comandos con los argumentos planos y otros envueltos en
-  `{ args: {…} }`, y equivocarse no da error: un `Option` llega como `None` y el comando sigue con
-  su valor por defecto (la trampa que CLAUDE.md apunta en §11-bis).
-- **Los tipos que entran y salen.** Como `invokeClient` acepta cualquier objeto, los `*Apis.ts`
-  redeclaran sus propios tipos a mano —19 ficheros los tienen, con el dinero en `number`— y
-  normalizan lo que vuelve con alias heredados de `dualCall` (`pick(row, [...])`, `r?.a ?? r?.A`).
-  Por ese hueco se colaron euros en campos de céntimos en todos los formularios de dinero (un café
-  dado de alta a «3» se guardaba a 3 céntimos). Todos los comandos devuelven ya tipos concretos (el
-  único `serde_json::Value` es el proxy de emparejamiento, a propósito), así que esa normalización
-  sólo puede esconder un error de contrato.
-
-**Propuesta.** Adoptar [`tauri-specta`](https://github.com/specta-rs/tauri-specta): lee las firmas
-de los comandos y genera una función TypeScript tipada por cada uno
-(`commands.inventarioUpsertProducto(args: UpsertProductoInput)`), con su tipo de retorno y su error.
-
-1. **Comprobar antes el estado de la versión para Tauri 2** (estuvo mucho tiempo como *release
-   candidate*; no es un plugin oficial de Tauri) y que soporta lo que ya se usa: el tipo marcado de
-   `Dinero` (`number & { __centimos }`), `chrono`, `Result<T, AppErrorDto>` y los comandos `async`
-   con `State`.
-2. **Decidir un solo generador de tipos.** Puede convivir con ts-rs (derivar `specta::Type` junto a
-   `TS`), pero eso son dos generadores para los mismos DTO. Si specta cubre lo que hace ts-rs
-   (`#[ts(type = "number")]` en los ID, `optional`, el fichero único), pasar a specta sólo es lo más
-   limpio. Se decide con el punto 1 delante.
-3. **Rust:** `#[specta::specta]` en cada comando, `tauri_specta::Builder` en `lib.rs` en lugar de
-   `generate_handler!`, y la exportación de `bindings.ts` dentro de `pnpm generate-types`, con una
-   comprobación en CI de que el fichero generado está al día (como el snapshot del esquema).
-4. **Frontend:** sustituir `invokeClient`/`invoke` por las funciones generadas. Los `*Apis.ts` que
-   sólo envuelven un comando **desaparecen**; los hooks de TanStack Query (`*Queries.ts`) llaman
-   directamente a `commands.*`. Los componentes consumen los DTO generados, sin tipos propios ni
-   normalizadores. Conservar el contrato de errores: que la función lance el `AppErrorDto` y
-   `toAppError`/`esError` sigan valiendo tal cual (tauri-specta puede generar las funciones
-   devolviendo `Result` o lanzando; elegir lanzar evita tocar cada `catch`).
-5. **Retirar `check-comandos-tauri.mjs`**, salvo para lo que siga invocando por nombre: el E2E llama
-   por IPC con una cadena (`leerDeLaApp`, en `e2e/helpers/ui.ts`). Decidir si el E2E importa también
-   los nombres generados o si el script se queda sólo para él.
-6. **Documentación:** CLAUDE.md §4.3 (generación de tipos), §8 («el NOMBRE de un comando no lo
-   comprueba nadie») y la nota de §11-bis sobre los argumentos planos dejan de ser ciertas y hay que
-   reescribirlas; el patrón de §7 (paso 7, `*Apis.ts`) también.
-
-Absorbe la viñeta de «adaptadores de forma heredados» de RI-47.
-
-**Lo que ya está hecho, y lo que queda.** Los `*Apis.ts` que llevan dinero ya usan los tipos
-generados, sin normalizadores ni mappers a camelCase: inventario, venta rápida, proveedores,
-pedidos, cuentas, cierre de caja, mesas (salvo el plano), clientes, impresión y correo. Los
-*payloads* de impresión se movieron a `tpv-contracts` (`impresion.rs`), que era lo que faltaba para
-que tuvieran tipo en TypeScript. **Quedan por convertir**, y hay que hacerlo aquí:
-
-- `features/login/loginApi.ts`
-- `features/reservas/reservasApis.ts`
-- `features/tareas/tareasApis.ts`
-- `features/trabajadores/trabajadoresApis.ts`
-- `features/configuracion/api/verifactuApis.ts`
-- `features/estadisticas/statsApis.ts` (ya usa los DTO de respuesta; revisar el resto)
-- `app/arranque/emparejamiento.ts`
-- `features/configuracion/api/configApis.ts`: la entrada ya es el DTO generado, pero los stores de
-  Zustand (`useBusinessSettings`, `useTicketSettings`) guardan la configuración con nombres en
-  camelCase propios. Es estado de la aplicación, no un contrato; pasar los stores a los nombres
-  del DTO toca todas las pantallas que los leen.
-- `features/mesas/types.ts`: `Salon`/`Table`, la geometría del plano que usa el editor
-  de mesas, frente a los generados `SalonOut`/`TableOut`/`SalonInput`.
-- Las llamadas directas a `invoke` de `@tauri-apps/api/core` que quedan (unos 20 ficheros, entre
-  ellos `save_image` en los formularios de producto y `printer_ticket_cols` en la vista previa).
-
-<a id="ri-71"></a>
-### RI-71 🟠 · Venta rápida: el «−» de un producto sólo lo quita de la pantalla, y no se pueden poner notas
-
-**Dónde:** [`VentaRapida.tsx:1239`](../../apps/tpv-main/src/app/pages/VentaRapida.tsx#L1239)
-(`onGuardarNota`), [`:1480`](../../apps/tpv-main/src/app/pages/VentaRapida.tsx#L1480)
-(`removeProductoFromTicket`), [`TicketPanel.tsx:133`](../../apps/tpv-main/src/features/ventaRapida/ui/TicketPanel.tsx#L133)
-(`openNotaModal`), [`:151`](../../apps/tpv-main/src/features/ventaRapida/ui/TicketPanel.tsx#L151)
-(`saveNota`) y [`:309`](../../apps/tpv-main/src/features/ventaRapida/ui/TicketPanel.tsx#L309) →
-[`:395`](../../apps/tpv-main/src/features/ventaRapida/ui/TicketPanel.tsx#L395) (botón de nota).
-
-Las cinco comprobaciones deciden si una línea ya está guardada con `Number(detalleId) > 0`, que era
-lo correcto cuando los ID eran enteros. Desde `08ed9c6` (13/06, «frontend a UUIDv7») un `ID_Detalle`
-es un UUID, `Number(uuid)` es `NaN` y `NaN > 0` es `false` (comprobado). O sea que **ninguna línea
-cuenta nunca como guardada**:
-
-- **Notas.** El botón sale deshabilitado en todas las líneas. En venta rápida no se puede anotar
-  «sin hielo» o «sin gluten» desde hace tres meses. En mesas sí se puede, porque usa otra comprobación.
-- **«−» en la tarjeta del producto.** Entra por la rama de «la línea todavía se está insertando»:
-  la quita de la pantalla, apunta su id en `cancelledAddTempIdsRef` (donde nadie la buscará, porque
-  no hay ninguna inserción en curso con ese id) y **no llama al backend**. La línea sigue en la
-  comanda y vuelve a aparecer en cuanto el ticket se recarga (al cambiar de ticket, al reabrirlo o
-  en el listado de tickets, que escucha `vr:changed`). Hasta entonces, la pantalla y la comanda no
-  suman lo mismo. Quitarla desde el propio ticket (`eliminarLineaTicket`,
-  [`:1518`](../../apps/tpv-main/src/app/pages/VentaRapida.tsx#L1518)) sí funciona, porque pregunta
-  `!idDetalle`.
-
-**Propuesta.** Un helper `lineaGuardada(t)` en `features/ventaRapida/` que devuelva
-`Boolean(t.detalleId)` (una línea sin guardar lleva `detalleId: ""`,
-[`:1364`](../../apps/tpv-main/src/app/pages/VentaRapida.tsx#L1364)), usado en los cinco sitios. Un
-paso de E2E del tipo «añadir, quitar con −, recargar» lo habría cazado.
-
-<a id="ri-80"></a>
-### RI-80 🟡 · Editor de mesas: componentes que se recrean en cada render, y sólo eventos de ratón
-
-**Dónde:** [`EditTables.tsx`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx).
-
-- **`TableNode` ([`:1006`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1006)) y
-  `RoomEditor` ([`:1123`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1123)) se
-  definen dentro del componente** y se usan como `<TableNode/>` y `<RoomEditor/>`
-  ([`:1640-1642`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1640-L1642)). Cada
-  render crea un tipo de componente nuevo, y React desmonta y vuelve a montar todos los nodos de
-  Konva. Si durante un arrastre cambia cualquier estado (`setDirty`, el historial), el nodo que se
-  está arrastrando se recrea. Sacarlos fuera, pasándoles lo que necesiten por props, o llamarlos
-  como funciones (`{TableNode({table})}`) lo arregla.
-- **Sólo escucha eventos de ratón**: `onMouseDown` de la mesa en modo borrar
-  ([`:1016`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1016)), el paneo del
-  lienzo ([`:1590-1592`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1590-L1592))
-  y el añadir vértices ([`:1619`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1619)).
-  El plano de servicio sí escucha los toques: `onTap` en
-  [`features/mesas/TableNode.tsx:115`](../../apps/tpv-main/src/features/mesas/TableNode.tsx#L115).
-  Konva manda los toques como `touchstart`/`tap`, no como `mousedown`, y sobre una figura cancela
-  por defecto los eventos de ratón que el navegador emularía. **A verificar en una pantalla
-  táctil**: lo esperable es que arrastrar funcione (Konva lo gestiona internamente) y que borrar
-  tocando una mesa no. El paneo y los vértices, que caen sobre el fondo, dependerán de la emulación
-  del navegador. Con eventos `onPointer*` basta un solo juego de manejadores para ratón y dedo.
-- `alert()` para los errores
-  ([`:1477`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1477),
-  [`:1505`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1505)) en lugar del
-  `toast` del resto de la aplicación. En la webview bloquea y sale con otro aspecto.
-
-<a id="ri-81"></a>
-### RI-81 🔵 · Modal de comanda: memoización anulada, respuestas fuera de orden y doble pulsación
-
-**Dónde:** [`MesaComandaModal.tsx`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx).
-
-- **`React.memo` de `ProductCard` no sirve.** El comentario de
-  [`:496-498`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L496-L498)
-  estabiliza `notifyChanged` justo para eso, pero las tarjetas reciben
-  `onAdd={conAviso(addProductoToTicket)}` y `onRemove={conAviso(…)}` creados en cada render
-  ([`:1384-1385`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L1384-L1385),
-  [`:1429-1430`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L1429-L1430)).
-  Con memorizar los dos envoltorios con `useMemo` se consigue lo que el comentario pretende.
-- **Respuestas fuera de orden.** Cargar productos de una categoría y buscar por nombre
-  ([`:640-700`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L640-L700))
-  no descartan una respuesta que llega tarde: el `clearTimeout` cancela la búsqueda que aún no ha
-  empezado, no la que ya está en curso. Pulsando dos categorías seguidas, o escribiendo con la red
-  lenta, puede quedarse en pantalla lo de la anterior. Hace falta una bandera `cancelado` en el
-  `cleanup` del efecto.
-- **Añadir deprisa.** El id optimista es `opt-${Date.now()}`
-  ([`:709`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L709)), que se
-  repite con dos toques en el mismo milisegundo. Y la mezcla `[...t, ...enVuelo]`
-  ([`:734-737`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L734-L737))
-  da por hecho que las respuestas llegan en orden: si la segunda adición contesta antes que la
-  primera, la última respuesta en llegar es la más vieja, y la línea nueva desaparece hasta la
-  siguiente recarga. `crypto.randomUUID()` para el id, y quedarse con la respuesta más reciente
-  (o recargar al terminar la última petición en curso).
-- **Confirmar cobro dos veces.** `cobrar`
-  ([`:864`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L864)) no tiene
-  guardia mientras hay un cobro en curso, y el botón sólo se deshabilita si falta dinero
-  ([`:1292`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L1292)). No
-  cobra dos veces, porque el backend rechaza líneas ya cobradas
-  ([`mesas.rs:1980-1984`](../../crates/tpv-infra-sqlite/src/mesas.rs#L1980-L1984)), pero el
-  segundo toque enseña «No se pudo cobrar… ya están pagados» justo después de un cobro bueno.
-- `console.log` con el operador y el ticket en el camino del cobro
-  ([`:886`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L886),
-  [`:913`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L913)).
+- Reducir el logo `logo-altaria-azul-transparente.png` (940 KB) y revisar los activos de alérgenos
+  a su tamaño de pantalla.
+- Revisar y retirar, si siguen sin uso, `public/comidas.png`, `public/bebidas.webp`, las dos fotos
+  `.avif` de `public/`, `src/assets/img/logo-azul-cuadrado.png`, `logo-altaria-azul.jpeg`,
+  `logo-morado-cuadrado.png` e `img/logo.png`. Los de `public/` se copian al instalador.
+- Revisar el archivo local `public/Adobe Express - file (2).png` (6,9 MB), que entra en los builds
+  locales. Se ha conservado.
 
 <a id="ri-82"></a>
-### RI-82 🔵 · Cuentas: un botón que no hace nada, «Deshacer» sin confirmar y el PDF sin eñes
+### RI-82 🔵 · «Enviar a gestoría» aplazado
 
-**Dónde:** [`Cuentas.tsx`](../../apps/tpv-main/src/app/pages/Cuentas.tsx).
-
-- **«Enviar a gestoría»**
-  ([`:1740-1746`](../../apps/tpv-main/src/app/pages/Cuentas.tsx#L1740-L1746)) no tiene `onClick`.
-  O se quita, o se conecta al correo (con el tope y el destinatario acotado de REV-14).
-- **«Deshacer» un cierre de caja** actúa al primer clic
-  ([`:1864`](../../apps/tpv-main/src/app/pages/Cuentas.tsx#L1864) →
-  [`deshacerCierre`, `:436`](../../apps/tpv-main/src/app/pages/Cuentas.tsx#L436)). No se pierde
-  nada, porque el cierre queda marcado como reabierto, pero un clic equivocado obliga a volver a
-  contar el cajón. Un diálogo de confirmación, como el de anular un cobro.
-- **`asciiSafe`** ([`:87-96`](../../apps/tpv-main/src/app/pages/Cuentas.tsx#L87-L96)) quita todo lo
-  que no es ASCII porque «jsPDF sólo lleva WinAnsi». Los PDF los hace **pdf-lib**, y WinAnsi
-  (cp1252) sí incluye `ñ`, las tildes, `€`, `¿`, `¡`, `º` y `ª`: comprobado con la Helvetica de
-  pdf-lib (Anexo A). Hoy «Año» sale «Ano», «Señor» sale «Senor» y el signo del euro desaparece. Lo
-  único que de verdad no cabe son flechas, emojis y similares: basta con sustituir por `?` lo que
-  quede fuera de cp1252.
-- **Dos generadores de PDF casi iguales**: `guardarPdf`
-  ([`:846-1098`](../../apps/tpv-main/src/app/pages/Cuentas.tsx#L846-L1098)) y `sacarCuentaDelDia`
-  ([`:1100-1351`](../../apps/tpv-main/src/app/pages/Cuentas.tsx#L1100-L1351)), unas 250 líneas
-  cada uno, con la misma maquetación y distinto rango. Un `generarPdfCuentas(rango, datos)` fuera
-  del componente, que además se puede probar sin React (como `ticketMath.ts`).
-
-<a id="ri-83"></a>
-### RI-83 🔵 · Login: con el PIN bueno pero sin fichar, la sesión del backend se queda abierta
-
-**Dónde:** [`Login.tsx:376-412`](../../apps/tpv-main/src/app/pages/Login.tsx#L376-L412).
-
-`loginUser` abre la sesión del backend (`AppState::sesion`) en cuanto el PIN es correcto. Si la
-persona no ha fichado, la pantalla la frena («Debes fichar entrada antes de entrar») pero no cierra
-esa sesión. Queda abierta, con su rol, detrás de una pantalla que pide PIN: exactamente lo que
-[`AppBoot.tsx:77-88`](../../apps/tpv-main/src/app/AppBoot.tsx#L77-L88) dice que no puede pasar
-(SEC-01). Mientras tanto, por ejemplo, `device_reset_mode` pasa a exigir el rol de esa persona
-(`exigir_rol_si_hay_sesion`). La solución es comprobar el fichaje **antes** de `loginUser`, o
-llamar a `logout` en esa rama.
-
-<a id="ri-85"></a>
-### RI-85 🔵 · Turno partido: dos escrituras sueltas y sin comprobar que los tramos no se pisen
-
-**Dónde:** [`Trabajadores.tsx:571-614`](../../apps/tpv-main/src/app/pages/Trabajadores.tsx#L571-L614).
-
-Un turno partido se guarda como **dos** `createAsignacion` seguidas. Si la segunda falla, el primer
-tramo ya está guardado, la pantalla dice «No se pudo guardar la asignación» y el modal sigue
-abierto, así que el reintento **duplica el primer tramo**. Además `validateRange` mira cada tramo
-por separado: 10:00–16:00 y 12:00–18:00 se aceptan juntos. Lo arreglan un comando que reciba los
-dos tramos en una sola transacción y una comprobación de solape en el dominio (que es donde ya vive
-la validación de horarios).
-
-<a id="ri-86"></a>
-### RI-86 🔵 · Proveedores resuelve las imágenes de una en una
-
-**Dónde:** [`Proveedores.tsx:145-154`](../../apps/tpv-main/src/app/pages/Proveedores.tsx#L145-L154).
-
-`mapProveedoresUI` espera cada `resolveImageUrl` antes de la siguiente, y en la Main cada una puede
-suponer bajar el fichero de R2 (`images_ensure_local`). Con la red lenta, la lista tarda la suma de
-todas. La función de al lado, `mapProductosUI`, ya lo hace con `Promise.all`: es copiar ese patrón.
+El botón de [`Cuentas.tsx`](../../apps/tpv-main/src/app/pages/Cuentas.tsx) se conserva sin acción
+por decisión del propietario el 09/10/2026. Sigue pendiente decidir si se retira o se conecta al
+correo con el límite y el destinatario de REV-14. La confirmación para reabrir un cierre, los
+caracteres españoles del PDF y el generador compartido están resueltos.
 
 ---
 
@@ -564,8 +299,8 @@ job de Ubuntu (el `keyring` de Linux puede necesitar `libdbus-1-dev`) y ampliar 
 
 El E2E no va a CI por buenas razones (§16 de CLAUDE.md), pero eso lo deja sin red entre releases.
 Para el dinero ya hay otra: los `*Apis.ts` que lo llevan reciben los `Input` generados, así que un
-`number` en un campo `Dinero` no compila, y el `typecheck` sí corre en CI. RI-87 lo extiende a todos
-los comandos.
+`number` en un campo `Dinero` no compila. Los comandos generados por Specta comprueban también
+nombres, argumentos y respuestas; el `typecheck` y la comprobación de generación corren en CI.
 
 **`pnpm lint:rust` está rojo hoy**, con independencia de todo lo anterior: `select_one_f64`
 ([`mesas.rs:129`](../../crates/tpv-infra-sqlite/src/mesas.rs#L129)) no tiene uso y `-D warnings` lo
@@ -692,7 +427,6 @@ congelada, así que es ahora o nunca.
 | `secret_store.rs:12` | El `Context` de Android sale de `ndk_context` | Sale de `ActivityThread.currentApplication()`; el propio fichero lo explica en la línea 78 (RI-75) |
 | `docs/android/COMPILAR_ANDROID.md:359-363` | La Main sólo abre el WebSocket «en modo online», y arranca en `offline` | No hay ese ajuste desde SYNC-17 |
 | `tests/contract/README.md` | «63/67 comandos y 61/61 lecturas» | 63/66 y 64/64 (RI-79) |
-| `Cuentas.tsx:93` | «jsPDF sólo lleva WinAnsi» | Los PDF los hace pdf-lib, y WinAnsi incluye `ñ` y `€` (RI-82) |
 
 ---
 
@@ -705,8 +439,6 @@ relación beneficio/esfuerzo.
 |---|---|---|
 | **`strum`** | Genera `TODOS`, `wire()` y `from_code` de `ErrorCode` y los enums de estado (RI-48) | Bajo |
 | **`knip`** (TS) y **`cargo-machete`** (Rust) en CI | Código y dependencias sin uso (RI-22, RI-49) | Bajo |
-| **React Router `lazy`** | División del bundle por rutas (RI-23) | Bajo |
-| **`tauri-specta`** ([RI-87](#ri-87), decidido adoptarlo) | Genera funciones TS **tipadas por comando** (nombre, argumentos y retorno) desde las firmas de Rust. Es lo que habría impedido que se colaran euros en los campos de céntimos, cierra de raíz el hueco que hoy cubre `check-comandos-tauri.mjs` y la trampa documentada en §11-bis («argumentos planos vs `{ args }`… un `Option` llega como `None`»), y sustituye los `*Apis.ts` escritos a mano. Convive con los DTO actuales si se deriva `specta::Type` junto a `TS` | Medio |
 | **`zod` 4** | Validación bastante más rápida y más ligera en el worker (CPU facturable). `@hono/zod-validator` ya la soporta. Revisar la API de `z.coerce` y los mensajes | Medio |
 | **`rusqlite`** en lugar de **`libsql`** (evaluar) | En la Main sólo se usa SQLite local (`features = ["core"]`). `rusqlite` es la opción madura: transacciones RAII (`conn.transaction()` hace rollback al soltarse, RI-32), caché de sentencias preparadas (`prepare_cached`; hoy cada consulta se prepara de nuevo), API de backup en caliente, y ninguna de las rarezas documentadas (el crash nativo al crear muchas bases, la API async que bloquea, RI-16). Con un hilo propio para el escritor encaja con el diseño de escritor único. Coste: reescribir `db.rs`/`mapping.rs` y adaptar los repositorios (los `Reader`/`Writer` ya aíslan buena parte). Merece una prueba de concepto sobre un repositorio antes de decidir | Alto |
 | **Mantenimiento**: `thiserror` 2, `rand` 0.9, `keyring` 3, `@vitejs/plugin-react` 5, TypeScript alineado entre app (`~5.8`) y worker (`^5.9`) | Mantenerse dentro de las versiones soportadas; Dependabot ya abre los PR menores | Bajo |
@@ -866,22 +598,18 @@ y a mano sale esto:
    que le falta al harness, y es donde se han encontrado estas cuatro.
 
 <a id="ri-79"></a>
-### RI-79 🔵 · Cobertura del harness: una exclusión obsoleta, un motivo que no se sostiene y cifras viejas
+### RI-79 🔵 · Cobertura del harness: falta contrastar el horario predeterminado
 
 **Dónde:** [`tests/contract/cobertura.json`](../../tests/contract/cobertura.json) y
 [`tests/contract/README.md`](../../tests/contract/README.md).
 
-- `node scripts/check-contract-coverage.mjs` avisa de **«Exclusiones obsoletas:
-  login.completeInitialSetup»**: el comando se retiró con REV-06. Hay que quitar la entrada.
 - `trabajadores.setPredeterminadoDesdeSemana` se excluye con «mismo motivo que copySemana: los ID
   nuevos son asimétricos». Pero `copySemana` **sí** tiene caso (`casos/horarios/copiar_semana.json`),
   con la técnica de «snapshot con JOIN» que el README documenta precisamente para los ID que genera
   cada lado. Esa misma técnica sirve para este.
-- El README dice «63/67 comandos y 61/61 lecturas». El script dice hoy 63/66 y 64/64.
 
-**El E2E**, por completar: se ha mirado por encima (es un test, no código de producto). Lo que
-afecta a esta revisión está en RI-71, donde un paso de «añadir, quitar con −, recargar» habría
-cazado el fallo.
+**El E2E**, por completar: se ha añadido el recorrido «añadir, anotar, recargar, quitar con −,
+recargar». Sigue pendiente ejecutarlo sobre la aplicación compilada.
 
 ---
 
@@ -977,8 +705,9 @@ vigila el harness de contrato), `sync_reparacion.rs`, el emparejamiento y los sc
 **No revisado**: las suites de test en sí, salvo el harness de contrato (sólo su alcance en CI y los
 casos que tocan cada hallazgo); los recorridos E2E, que se han mirado por encima (RI-79); y el
 contenido de los documentos de plan (`PLAN_*.md`), salvo donde el código los cita. Tampoco se ha
-**ejecutado** nada en Android ni en Windows 7: lo marcado «a verificar» en RI-74, RI-76 y RI-80 hay
-que comprobarlo en el emulador, en la máquina virtual o en una pantalla táctil.
+**ejecutado** la interfaz en Android ni en Windows 7: lo marcado «a verificar» en RI-74 y RI-76
+hay que comprobarlo en el emulador o en la máquina virtual. Los nuevos contratos y el backend
+compilan para Android; el editor de mesas queda pendiente de prueba en una pantalla táctil.
 
 ---
 

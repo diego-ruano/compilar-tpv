@@ -1,17 +1,16 @@
 // apps/tpv-main/vitest.config.ts
 //
 // Tests del frontend. Config aparte de `vite.config.ts` a propósito: lo que se prueba aquí es
-// LÓGICA (módulos `.ts` que reciben datos y devuelven datos), no componentes, así que no hace
-// falta el plugin de React ni un DOM.
+// principalmente lógica (módulos `.ts` que reciben datos y devuelven datos). Las regresiones de
+// componentes usan jsdom sólo en los ficheros que lo declaran con @vitest-environment.
 //
 // Entorno **node**, no jsdom. Montar React en los tests es lento, frágil y acaba comprobando que
 // React funciona; y arrancar por ahí es lo que hace que una suite de frontend se abandone. El día
 // que haga falta probar un componente se añade jsdom para esos ficheros, no para todos.
 //
-// Qué entra aquí: funciones puras (`shared/lib/*`) y stores de Zustand, que se prueban sin React
-// (`store.getState()`). Qué NO: hooks con sockets, timers e `invoke` (useMainSocket y compañía).
-// De esos, lo que merece prueba es su POLÍTICA, y para eso primero hay que sacarla a una función
-// pura — igual que se hizo en Rust con `proxima_espera` del runner de jobs.
+// Funciones puras y stores se prueban sin React. Los casos de componentes comprueban efectos
+// de negocio observables: confirmar una escritura, descartar respuestas tardías y bloquear
+// dos cobros. Sus transportes se sustituyen por promesas controladas, sin conexiones reales.
 //
 // ⚠️ Si añades un test de componente: aquí `act()` NO vacía de forma síncrona. Testing Library
 // carga `react` por CommonJS y el grafo de Vite resuelve otra instancia del mismo 19.2.7, así que

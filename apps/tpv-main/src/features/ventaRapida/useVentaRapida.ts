@@ -71,6 +71,7 @@ function makeDetalleTicketId(idDetalle: string): string { return `detalle-${idDe
 
 const apiCatalogo = { categorias: vrListCategoriasVendibles, productos: vrListProductosByCategoria, buscar: vrSearchProductos };
 
+/** RI-47: controlador de venta; la vista consume exclusivamente datos confirmados. */
 export function useVentaRapida() {
   const { categorias, setCategorias, categoriaSeleccionada, setCategoriaSeleccionada, productos, loadingProductos,
     query, setQuery, q, busqueda, loadingBusqueda, cargarCategorias, cargarProductosDeCategoria, buscarProductosPorNombre } = useCatalogoServicio(true, apiCatalogo, false);

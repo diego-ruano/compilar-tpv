@@ -75,8 +75,3 @@ export function fmtReserva(res: NonNullable<MesaMetaOut["reserva"]>) {
     }
     return `Reserva en ${Math.max(0, min)} min`;
 }
-
-/* =========================
-   Tarjeta de producto (a nivel de módulo: evita que se desmonte/remonte
-   —y se recarguen sus imágenes— en cada re-render del modal de comanda)
-========================= */

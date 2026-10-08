@@ -166,7 +166,7 @@ export default function KitchenBoard({
                 await cocinaSetLineaEstado({ idDetalle, idUsuarioCocinero, estado: next });
                 if (!lecturas.current.activo) return;
                 ++lecturas.current.version;
-                // La respuesta confirma esta transición; no desaparece nada antes del acuse.
+                // RI-47: la respuesta confirma esta transición; no desaparece nada antes del acuse.
                 rememberScroll();
                 setRows((prev) =>
                     prev.map((r) =>

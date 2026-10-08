@@ -13,7 +13,7 @@ async function imagenes<T extends Imagen>(filas: T[]): Promise<ConImagen<T>[]> {
     return Promise.all(filas.map(async f => ({ ...f, urlImagen: await resolveImageUrl(f.Ruta_Imagen) })));
 }
 
-/** Catálogo de servicio: lecturas independientes, imágenes paralelas y respuestas obsoletas descartadas. */
+/** RI-47/RI-81: catálogo compartido con lecturas independientes y respuestas obsoletas descartadas. */
 export function useCatalogoServicio<C extends Categoria, P extends Imagen>(activo: boolean, api: {
     categorias: () => Promise<C[]>; productos: (id: string) => Promise<P[]>; buscar: (q: string) => Promise<P[]>;
 }, autoCategorias = true) {

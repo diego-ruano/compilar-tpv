@@ -115,8 +115,7 @@ jobs:
       - name: Typecheck frontend
         run: pnpm --filter @tpv/main typecheck
 
-      # Lógica del frontend (entorno node, sin DOM): funciones puras y stores. Los componentes NO
-      # se prueban aquí — ver el comentario de `apps/tpv-main/vitest.config.ts`.
+      # Funciones puras y stores en node; regresiones de componentes en jsdom por fichero.
       - name: Tests del frontend
         run: pnpm --filter @tpv/main test
 
