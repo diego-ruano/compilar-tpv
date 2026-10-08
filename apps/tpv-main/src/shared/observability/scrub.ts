@@ -20,15 +20,21 @@
 
 type Regla = { re: RegExp; con: string };
 
+const SECRET_KEYS = String.raw`authorization|auth|password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp|(?:access|refresh|id)[_-]?token|client[_-]?secret`;
+const SECRET_VALUE = String.raw`(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}"']+)`;
+const SENSITIVE_RULES = 6;
+const CLAVE_SECRETA = new RegExp(`^(${SECRET_KEYS})$`, "i");
+
 // El orden importa: primero lo específico, para que una regla genérica no se quede media coincidencia.
 const REGLAS: Regla[] = [
 	// Cabecera de autorización: consume el valor entero, incluido el esquema (`Bearer <tok>`).
 	{ re: /\b(authorization|auth)\b\s*[:=]\s*\S+(?:\s+\S+)?/gi, con: "$1=[redacted]" },
 	// Esquemas de credencial sueltos (`Bearer <tok>` / `Basic <tok>`).
 	{ re: /\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}/gi, con: "[redacted]" },
-	// Secretos con forma `clave = valor` / `clave: valor`. Se conserva la clave, que dice «qué».
+	// RI-42: claves JSON o entre comillas y valores con espacios/escapes.
+	{ re: new RegExp(String.raw`(["'])(${SECRET_KEYS})["']\s*[:=]\s*${SECRET_VALUE}`, "gi"), con: "$1$2$1:$1[redacted]$1" },
 	{
-		re: /\b(password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp)\b\s*[:=]\s*\S+/gi,
+		re: new RegExp(String.raw`\b(${SECRET_KEYS})\b\s*[:=]\s*${SECRET_VALUE}`, "gi"),
 		con: "$1=[redacted]",
 	},
 	// JWT (cabecera.carga.firma en base64url).
@@ -54,7 +60,7 @@ const TELEFONOS = /(?:(?:\+34|0034|34)[ .\-]?|\(\+34\)[ ]?)?[6789](?:[ .\-]?[0-9
 
 export function scrub(input: string): string {
 	let out = input;
-	for (const { re, con } of REGLAS.slice(0, 5)) out = out.replace(re, con);
+	for (const { re, con } of REGLAS.slice(0, SENSITIVE_RULES)) out = out.replace(re, con);
 	let result = "";
 	let last = 0;
 	for (const match of out.matchAll(DIAGNOSTICO)) {
@@ -66,19 +72,36 @@ export function scrub(input: string): string {
 
 function scrubFragment(input: string): string {
 	let out = input;
-	for (const { re, con } of REGLAS.slice(5)) out = out.replace(re, con);
+	for (const { re, con } of REGLAS.slice(SENSITIVE_RULES)) out = out.replace(re, con);
 	out = redactNumbers(out, TARJETAS, true);
 	return redactNumbers(out, TELEFONOS, false);
 }
 
 function redactNumbers(input: string, re: RegExp, card: boolean): string {
-	return input.replace(re, (match: string, offset: number) => {
-		const before = input.slice(0, offset);
-		const after = input.slice(offset + match.length);
-		if (/[A-Za-z0-9_+]/.test(before.slice(-1)) || /^[A-Za-z0-9_]/.test(after)) return match;
-		if (/[0-9]$/.test(before.replace(/[ .-]+$/, "")) || /^[0-9]/.test(after.replace(/^[ .-]+/, ""))) return match;
-		return !card || luhn(match) ? "[num]" : match;
-	});
+	const matches = [...input.matchAll(re)];
+	let result = "";
+	let last = 0;
+	for (let i = 0; i < matches.length; i++) {
+		const start = i;
+		// Validar juntos los teléfonos consecutivos, sin tomar fragmentos de un número mayor.
+		while (!card && i + 1 < matches.length) {
+			const gap = input.slice(matches[i].index + matches[i][0].length, matches[i + 1].index);
+			if (!/^ +$/.test(gap)) break;
+			i++;
+		}
+		const first = matches[start];
+		const finalMatch = matches[i];
+		const before = input.slice(0, first.index);
+		const after = input.slice(finalMatch.index + finalMatch[0].length);
+		if (/[A-Za-z0-9_+]/.test(before.slice(-1)) || /^[A-Za-z0-9_]/.test(after)) continue;
+		if (/[0-9]$/.test(before.replace(/[ .-]+$/, "")) || /^[0-9]/.test(after.replace(/^[ .-]+/, ""))) continue;
+		if (card && !luhn(first[0])) continue;
+		for (let n = start; n <= i; n++) {
+			result += input.slice(last, matches[n].index) + "[num]";
+			last = matches[n].index + matches[n][0].length;
+		}
+	}
+	return last === 0 ? input : result + input.slice(last);
 }
 
 function luhn(input: string): boolean {
@@ -111,7 +134,7 @@ export function scrubDeep(value: unknown): void {
 	const obj = value as Record<string, unknown>;
 	for (const k of Object.keys(obj)) {
 		const v = obj[k];
-		if (/^(authorization|auth|password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp)$/i.test(k)) obj[k] = "[redacted]";
+		if (CLAVE_SECRETA.test(k)) obj[k] = "[redacted]";
 		else if (typeof v === "string") { if (!diagnosticValue(k, v)) obj[k] = scrub(v); }
 		else scrubDeep(v);
 	}

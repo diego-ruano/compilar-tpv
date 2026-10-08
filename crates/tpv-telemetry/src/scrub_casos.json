@@ -4,6 +4,14 @@
     ["cliente ana@example.com pidió", "cliente [email] pidió"],
     ["ANA.Perez+tpv@Bar-La-Plaza.ES", "[email]"],
     ["SMTP password=Sup3rSecreta!", "SMTP password=[redacted]"],
+    ["{\"password\":\"hunter2\",\"seq\":34}", "{\"password\":\"[redacted]\",\"seq\":34}"],
+    ["{\"password\":\"hola \\\"mundo\\\" secreto\"}", "{\"password\":\"[redacted]\"}"],
+    ["{'client_secret': 'hola mundo', 'seq': 34}", "{'client_secret':'[redacted]', 'seq': 34}"],
+    ["password=\"hola mundo\" seq=34", "password=[redacted] seq=34"],
+    ["access_token=secreto&seq=34", "access_token=[redacted]&seq=34"],
+    ["refresh-token: secreto; seq=34", "refresh-token=[redacted]; seq=34"],
+    ["accessToken=secreto id_token=secreto client-secret=secreto", "accessToken=[redacted] id_token=[redacted] client-secret=[redacted]"],
+    ["{\"access_token\":\"01925678-1234-7123-8123-123456789012\"}", "{\"access_token\":\"[redacted]\"}"],
     ["contraseña: hunter2", "contraseña=[redacted]"],
     ["Authorization: Bearer abc.def", "Authorization=[redacted]"],
     ["bearer abcdef123456", "[redacted]"],
@@ -43,6 +51,10 @@
     ["tel 0034 612 345 678 fin", "tel [num] fin"],
     ["tel 34-912-345-678 fin", "tel [num] fin"],
     ["tel 911222333 fin", "tel [num] fin"],
+    ["tel=612345678 911222333", "tel=[num] [num]"],
+    ["tel=612 345 678 911 222 333", "tel=[num] [num]"],
+    ["tel=612345678 911222333 678901234", "tel=[num] [num] [num]"],
+    ["tel=+34 612345678 (+34) 911222333", "tel=[num] [num]"],
     ["tarjeta 5555555555554444", "tarjeta [num]"],
     ["tarjeta 378282246310005", "tarjeta [num]"],
     ["op_id=01925678-1234-7123-8123-123456789012 tel=612345678", "op_id=01925678-1234-7123-8123-123456789012 tel=[num]"],
@@ -86,9 +98,17 @@
     "numero=4111 1111 1111 1112",
     "telefono extranjero +12025550123",
     "CIF B61234567",
-    "importe=1234567890"
+    "importe=1234567890",
+    "contador=61234567891122233300",
+    "contador=612345678 911222333 00",
+    "contador=123 612345678",
+    "access_token_count=3 token_expired=true secret_version=2"
   ],
   "objetos": [
+    [
+      { "access_token": "secreto", "refresh-token": "secreto", "clientSecret": "secreto", "ID_TOKEN": "secreto", "lista": [{ "accessToken": "secreto" }], "access_token_count": 3 },
+      { "access_token": "[redacted]", "refresh-token": "[redacted]", "clientSecret": "[redacted]", "ID_TOKEN": "[redacted]", "lista": [{ "accessToken": "[redacted]" }], "access_token_count": 3 }
+    ],
     [
       {
         "last_ok_ms": "1727450000002",

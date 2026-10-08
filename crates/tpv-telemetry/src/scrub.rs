@@ -40,6 +40,10 @@ struct Rule {
 
 struct Rules { rules: Vec<Rule>, set: RegexSet }
 
+const SECRET_KEYS: &str = r"authorization|auth|password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp|(?:access|refresh|id)[_-]?token|client[_-]?secret";
+const SECRET_VALUE: &str = r#"(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}"']+)"#;
+const SENSITIVE_RULES: usize = 6;
+
 fn rules() -> &'static Rules {
     static RULES: OnceLock<Rules> = OnceLock::new();
     RULES.get_or_init(|| {
@@ -55,11 +59,9 @@ fn rules() -> &'static Rules {
             regla(r"(?i)(?-u:\b)(authorization|auth)(?-u:\b)\s*[:=]\s*\S+(?:\s+\S+)?", "$1=[redacted]"),
             // Esquemas de credencial sueltos (`Bearer <tok>` / `Basic <tok>`) sin clave delante.
             regla(r"(?i)(?-u:\b)(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}", "[redacted]"),
-            // Secretos con forma `clave = valor` / `clave: valor`. Se preserva la clave, que dice «qué».
-            regla(
-                r"(?i)(?-u:\b)(password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp)(?-u:\b)\s*[:=]\s*\S+",
-                "$1=[redacted]",
-            ),
+            // RI-42: claves JSON o entre comillas; consumir también valores con espacios/escapes.
+            regla(&format!(r#"(?i)(["'])({SECRET_KEYS})["']\s*[:=]\s*{SECRET_VALUE}"#), "$1$2$1:$1[redacted]$1"),
+            regla(&format!(r"(?i)(?-u:\b)({SECRET_KEYS})(?-u:\b)\s*[:=]\s*{SECRET_VALUE}"), "$1=[redacted]"),
             // JWT / tokens con forma cabecera.carga.firma (base64url).
             regla(r"(?-u:\b)eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "[jwt]"),
             // Correos.
@@ -86,7 +88,7 @@ fn rules() -> &'static Rules {
 /// RI-42: las credenciales y los correos se ocultan antes de proteger identificadores.
 /// Los intervalos de diagnóstico se conservan; el resto sigue pasando por TODAS las reglas.
 pub(crate) fn scrub(input: &str) -> Cow<'_, str> {
-    let mut out = apply_rules(input, 0..5);
+    let mut out = apply_rules(input, 0..SENSITIVE_RULES);
     let text = out.as_ref();
     let mut last = 0;
     let mut result: Option<String> = None;
@@ -135,7 +137,7 @@ fn diagnostic() -> &'static Regex {
 }
 
 fn scrub_fragment(input: &str) -> Cow<'_, str> {
-    let mut out = apply_rules(input, 5..9);
+    let mut out = apply_rules(input, SENSITIVE_RULES..rules().rules.len());
     static CARDS: OnceLock<Regex> = OnceLock::new();
     static PHONES: OnceLock<Regex> = OnceLock::new();
     let cards = CARDS.get_or_init(|| Regex::new(r"[0-9](?:[ .\-]?[0-9]){12,18}").unwrap());
@@ -149,18 +151,34 @@ fn scrub_fragment(input: &str) -> Cow<'_, str> {
 fn redact_numbers<'a>(input: &'a str, re: &Regex, card: bool) -> Cow<'a, str> {
     let mut out = String::new();
     let mut last = 0;
-    for m in re.find_iter(input) {
+    let matches: Vec<_> = re.find_iter(input).collect();
+    let mut i = 0;
+    while i < matches.len() {
+        let start = i;
+        // Dos teléfonos separados por espacios son dos candidatos, no un número mayor.
+        // Se valida el grupo completo para no redactar fragmentos de un número incompleto.
+        while !card && i + 1 < matches.len() {
+            let gap = &input[matches[i].end()..matches[i + 1].start()];
+            if gap.is_empty() || !gap.bytes().all(|b| b == b' ') { break; }
+            i += 1;
+        }
+        let end = i;
+        i += 1;
+        let first = matches[start];
+        let final_match = matches[end];
         let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-        let before = input.as_bytes()[..m.start()].last().copied();
-        let after = input.as_bytes().get(m.end()).copied();
+        let before = input.as_bytes()[..first.start()].last().copied();
+        let after = input.as_bytes().get(final_match.end()).copied();
         if before.is_some_and(|b| word(b) || b == b'+') || after.is_some_and(word) { continue; }
         // No tomar un trozo de un número mayor separado por espacios, puntos o guiones.
-        if input[..m.start()].trim_end_matches([' ', '.', '-']).as_bytes().last().is_some_and(u8::is_ascii_digit)
-            || input[m.end()..].trim_start_matches([' ', '.', '-']).as_bytes().first().is_some_and(u8::is_ascii_digit) { continue; }
-        if card && !luhn(m.as_str()) { continue; }
-        out.push_str(&input[last..m.start()]);
-        out.push_str("[num]");
-        last = m.end();
+        if input[..first.start()].trim_end_matches([' ', '.', '-']).as_bytes().last().is_some_and(u8::is_ascii_digit)
+            || input[final_match.end()..].trim_start_matches([' ', '.', '-']).as_bytes().first().is_some_and(u8::is_ascii_digit) { continue; }
+        if card && !luhn(first.as_str()) { continue; }
+        for m in &matches[start..=end] {
+            out.push_str(&input[last..m.start()]);
+            out.push_str("[num]");
+            last = m.end();
+        }
     }
     if last == 0 { Cow::Borrowed(input) }
     else { out.push_str(&input[last..]); Cow::Owned(out) }
@@ -185,7 +203,7 @@ fn timestamp_value(key: &str, value: &str) -> bool {
 
 fn secret_key(key: &str) -> bool {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)^(authorization|auth|password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp)$").unwrap()).is_match(key)
+    RE.get_or_init(|| Regex::new(&format!(r"(?i)^({SECRET_KEYS})$")).unwrap()).is_match(key)
 }
 
 pub(crate) fn scrub_string_field<'a>(key: &str, input: &'a str) -> Cow<'a, str> {

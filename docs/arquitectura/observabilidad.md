@@ -87,7 +87,11 @@ RI-42: conserva UUIDs completos, fechas ISO, timestamps identificados por claves
 (`*_ms`, `timestamp`, `epoch`, `ts`) y hashes identificados como tales. Las credenciales se
 ocultan antes de proteger esos intervalos; las claves estructuradas de secretos también se
 redactan. Detecta teléfonos españoles de nueve cifras con prefijo opcional `+34`, `0034`, `34`
-o `(+34)`, y candidatos a tarjeta de 13–19 cifras que pasan Luhn. No redacta cualquier número
+o `(+34)`, incluidos varios teléfonos consecutivos separados por espacios, y candidatos a tarjeta
+de 13–19 cifras que pasan Luhn. Reconoce claves de credenciales entre comillas en texto JSON y
+variantes explícitas como `access_token`, `refreshToken`, `id-token` y `client_secret`, también
+en objetos anidados. Los valores entre comillas se redactan completos, incluidos espacios y escapes.
+No redacta cualquier número
 largo por su longitud. Rust preselecciona reglas con RegexSet y conserva cadenas prestadas sin
 reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idempotencia.
 
