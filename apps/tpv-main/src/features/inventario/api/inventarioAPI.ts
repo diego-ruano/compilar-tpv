@@ -1,7 +1,7 @@
 import { commands } from "@tpv/client";
-// src/features/InventaryComponents/api/inventarioAPI.ts
+// src/features/inventario/api/inventarioAPI.ts
 //
-// API de inventario: una función por comando Tauri, con los tipos que genera ts-rs desde Rust.
+// API de inventario: una función por comando Tauri, con los tipos que genera Specta desde Rust.
 //
 // Aquí no se redeclaran tipos ni se normaliza lo que vuelve (RI-53). Lo hacía por herencia de
 // `dualCall`, cuando la misma fila podía llegar con tres nombres distintos; hoy cada comando

@@ -1,4 +1,3 @@
-import React, { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import AppErrorBoundary from "./pages/errorPages/AppErrorBoundary";

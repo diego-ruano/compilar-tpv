@@ -9,8 +9,8 @@ SQLite; la Handy pasa por los mismos comandos, que en ella van por HTTP al worke
 src/
 ├── app/        main.tsx, App.tsx, AppBoot.tsx, Router.tsx, arranque/ (pantallas previas al router),
 │               layouts/, layoutComponent/, pages/
-├── features/   un directorio por dominio: mesasComponents, ventaRapida, cuentas, InventaryComponents,
-│               ClientsComponents, reservas, proveedores, tareas, trabajadores, configuracion,
+├── features/   un directorio por dominio: mesas, ventaRapida, cuentas, inventario,
+│               clientes, reservas, proveedores, tareas, trabajadores, configuracion,
 │               estadisticas, login, notificaciones
 ├── shared/     lib/ (dinero, efectivo, sockets, permisos, queryClient…), stores/ (Zustand), ticket/,
 │               ui/, observability/, toast.tsx
@@ -53,7 +53,7 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
   porque en la Main el dato sólo cambia por mutaciones de esta aplicación o por un `change` del socket.
 - **Patrón**: cada feature expone sus hooks en `features/<x>/<x>Queries.ts`, con `useQuery` para lecturas
   (claves prefijadas por la feature, con rangos e ids dentro) y `useMutation` para escrituras, que
-  invalidan su clave en `onSuccess`. Referencia: `features/ClientsComponents/clientesQueries.ts`.
+  invalidan su clave en `onSuccess`. Referencia: `features/clientes/clientesQueries.ts`.
 - Lo usan clientes, inventario, cuentas, estadísticas, reservas, tareas, trabajadores, proveedores y
   pedidos, notificaciones, el emparejamiento (`configuracion/pairingQueries.ts`), el progreso del
   histórico (`shared/lib/backfillQueries.ts`) y, en mesas, sólo el catálogo de salones y la meta de
@@ -78,6 +78,18 @@ Descartar una preparación nunca anula un pago. Las colas antiguas de todos los 
 sin cambiar el identificador ni perder el destinatario; cada copia se elimina únicamente tras el
 acuse de SQLite. Al no tener firma de backend, esas preparaciones antiguas quedan atribuidas a la
 sesión que las importa. La recuperación exige una acción explícita, sin cobros automáticos al abrir.
+
+## Componentes y estado de servicio
+
+Las páginas coordinan secciones con estado propio: `FormularioGasto` concentra el borrador y las
+mutaciones de gastos; `useVentaRapida` separa el control transaccional de su vista; el modal de
+mesas comparte los elementos de comanda y `useCatalogoServicio`. Este último resuelve imágenes en
+paralelo y descarta categorías y búsquedas abandonadas. No comparte la selección entre ventas.
+
+El editor separa nodos Konva, controles y formulario de mesa. `useModoEditor` mantiene un solo
+modo activo: editar, añadir vértice, borrar o colocar una mesa. Sus borradores no son escrituras
+optimistas: sólo se persisten al guardar el plano. Los formularios conservan sus propios errores
+y bloquean envíos repetidos mientras esperan confirmación.
 
 ## El dinero en pantalla
 

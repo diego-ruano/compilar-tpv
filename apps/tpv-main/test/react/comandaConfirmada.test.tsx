@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import MesaComandaModal from "../../src/features/mesasComponents/MesaComandaModal";
+import MesaComandaModal from "../../src/features/mesas/MesaComandaModal";
 import { useAuth } from "../../src/shared/stores/useAuth";
 
 const api = vi.hoisted(() => ({
@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
     productosSearchByNombre: vi.fn(), mesasRemoveOnePendingDetalle: vi.fn(), mesasDeleteDetalle: vi.fn(),
     mesasUpdateDetalleNota: vi.fn(), reservaMarcarActivaAhora: vi.fn(), reservaFinalizar: vi.fn(),
 }));
-vi.mock("../../src/features/mesasComponents/mesasApi", () => api);
+vi.mock("../../src/features/mesas/mesasApi", () => api);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (comando: string) => {
     if (comando === "list_categorias_vendibles") return api.productosListCategoriasVendibles();
     throw new Error(`Comando inesperado en la prueba: ${comando}`);
@@ -21,7 +21,7 @@ vi.mock("../../src/shared/lib/conAviso", () => ({ conAviso: (fn: unknown) => fn 
 vi.mock("../../src/shared/stores/useMode", () => ({ useMode: (fn: (s: { mode: string }) => unknown) => fn({ mode: "tpv" }) }));
 vi.mock("../../src/shared/stores/useBusinessSettings", () => ({ useBusinessSettings: (fn: (s: { limite_simplif: number }) => unknown) => fn({ limite_simplif: 300000 }) }));
 vi.mock("../../src/shared/toast", () => ({ useToast: () => ({ error: vi.fn(), warning: vi.fn() }) }));
-vi.mock("../../src/features/InventaryComponents/ProductDetailModal", () => ({ default: () => null }));
+vi.mock("../../src/features/inventario/ProductDetailModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/PrintTicketModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/DatosFiscalesModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/AvisoFiscalModal", () => ({ anunciarCobro: () => {} }));

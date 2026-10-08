@@ -11,7 +11,7 @@ import {
   useCreateLote,
   useProveedoresMini,
   useUpsertProducto,
-} from "../../InventaryComponents/inventarioQueries";
+} from "../../inventario/inventarioQueries";
 import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 import { conAviso } from "../../../shared/lib/conAviso";
 

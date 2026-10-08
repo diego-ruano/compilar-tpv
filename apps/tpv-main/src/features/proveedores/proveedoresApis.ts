@@ -1,7 +1,7 @@
 import { commands } from "@tpv/client";
 // src/features/proveedores/proveedoresApis.ts
 //
-// API de proveedores: una función por comando Tauri, con los tipos que genera ts-rs desde Rust.
+// API de proveedores: una función por comando Tauri, con los tipos que genera Specta desde Rust.
 //
 // Aquí no se redeclaran tipos ni se normaliza lo que vuelve (RI-53). Los antiguos mappers
 // convertían los DTO a otros nombres (`precio_venta` → `Precio_Venta`) y los tipos a mano

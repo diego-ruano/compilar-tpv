@@ -1,128 +1,34 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Rect, Group, Text } from "react-konva";
 import { toAppError } from "@tpv/client";
+import { useEffect,useMemo,useRef,useState } from "react";
+import { Group,Layer,Rect,Stage,Text } from "react-konva";
+import { useLocation,useNavigate } from "react-router-dom";
+import { Chip,IconButton,Modal } from "../../../features/mesas/editor/ControlesEditor";
+import FormularioMesa from "../../../features/mesas/editor/FormularioMesa";
+import { RoomEditor,TableNode,type ContextoEditor } from "../../../features/mesas/editor/NodosEditor";
 import {
-    mesasLoadLayout,
-    mesasSaveLayout,
-} from "../../../features/mesasComponents/mesasApi";
-import { mesasKeys } from "../../../features/mesasComponents/mesasQueries";
-import { queryClient } from "../../../shared/lib/queryClient";
-import { useLocation, useNavigate } from "react-router-dom";
-import { useTheme } from "../../../shared/stores/useTheme";
+clamp,
+findInsidePosition,
+getTableBBox,
+insertPointAtNearestEdge,
+isTableInsidePolygon,
+type RoomPoly,
+type Salon,type Table
+} from "../../../features/mesas/editor/geometria";
+import { useModoEditor } from "../../../features/mesas/editor/useModoEditor";
+import {
+mesasLoadLayout,
+mesasSaveLayout,
+} from "../../../features/mesas/mesasApi";
+import { mesasKeys } from "../../../features/mesas/mesasQueries";
+import { cn } from "../../../shared/lib/cn";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { queryClient } from "../../../shared/lib/queryClient";
+import { useTheme } from "../../../shared/stores/useTheme";
 import { useToast } from "../../../shared/toast";
-import { TableNode, RoomEditor, type ContextoEditor } from "../../../features/mesas/editor/NodosEditor";
-import { clamp, getTableBBox, isTableInsidePolygon, findInsidePosition, insertPointAtNearestEdge,
-    type Salon, type Table, type TableShape, type TableSize, type RoomPoly } from "../../../features/mesas/editor/geometria";
 
 /**
  * UI helpers
  */
-function cn(...classes: Array<string | false | null | undefined>) {
-    return classes.filter(Boolean).join(" ");
-}
-
-type BtnVariant = "primary" | "danger" | "neutral" | "accent";
-
-function IconButton({
-    icon,
-    children,
-    onClick,
-    disabled,
-    variant = "neutral",
-}: {
-    icon?: React.ReactNode;
-    children: React.ReactNode;
-    onClick: () => void;
-    disabled?: boolean;
-    variant?: BtnVariant;
-}) {
-    const base =
-        "h-10 min-w-0 justify-center px-3 sm:px-4 rounded-xl border text-xs sm:text-sm font-semibold shadow-sm transition inline-flex items-center gap-2 select-none";
-    const variants: Record<BtnVariant, string> = {
-        neutral: disabled
-            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
-            : "border-border bg-surface text-fg hover:bg-surface-2 active:scale-[0.98]",
-        primary: disabled
-            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
-            : "border-accent bg-accent text-white hover:bg-accent-hover active:scale-[0.98]",
-        danger: disabled
-            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
-            : "border-danger/30 bg-danger-soft text-danger hover:bg-danger-soft active:scale-[0.98]",
-        accent: disabled
-            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
-            : "border-accent/30 bg-accent-soft text-accent hover:bg-accent-soft active:scale-[0.98]",
-    };
-
-    return (
-        <button
-            disabled={disabled}
-            onClick={onClick}
-            className={cn(base, variants[variant])}
-        >
-            {icon ? <span className="text-base leading-none">{icon}</span> : null}
-            <span className="min-w-0 truncate">{children}</span>
-        </button>
-    );
-}
-
-function Chip({
-    active,
-    children,
-    onClick,
-}: {
-    active?: boolean;
-    children: React.ReactNode;
-    onClick: () => void;
-}) {
-    return (
-        <button
-            onClick={onClick}
-            className={cn(
-                "h-9 px-3 rounded-xl border text-sm font-semibold shadow-sm transition inline-flex items-center gap-2",
-                active
-                    ? "border-accent bg-accent text-white"
-                    : "border-border bg-surface text-fg-muted hover:bg-surface-2",
-            )}
-        >
-            {children}
-        </button>
-    );
-}
-
-function Modal({
-    open,
-    title,
-    children,
-    onClose,
-}: {
-    open: boolean;
-    title: string;
-    children: React.ReactNode;
-    onClose: () => void;
-}) {
-    if (!open) return null;
-
-    return (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-2 sm:p-4">
-            <div className="max-h-[calc(100dvh-1rem)] w-full max-w-[520px] overflow-hidden rounded-2xl border border-border bg-surface shadow-xl sm:max-h-[calc(100dvh-2rem)]">
-                <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
-                    <div className="text-base font-bold text-fg">
-                        {title}
-                    </div>
-                    <button
-                        onClick={onClose}
-                        className="h-9 w-9 rounded-xl border border-border bg-surface text-fg-muted hover:bg-surface-2"
-                    >
-                        ✕
-                    </button>
-                </div>
-                <div className="max-h-[calc(100dvh-5.5rem)] overflow-y-auto p-3 sm:p-4">{children}</div>
-            </div>
-        </div>
-    );
-}
-
 function useElementSize<T extends HTMLElement>() {
     const ref = useRef<T | null>(null);
     const [size, setSize] = useState({ width: 600, height: 400 });
@@ -146,25 +52,6 @@ function useElementSize<T extends HTMLElement>() {
     }, []);
 
     return { ref, size };
-}
-
-function sizeToDims(shape: TableShape, size: TableSize) {
-    const rect = {
-        S: { w: 90, h: 60 },
-        M: { w: 120, h: 70 },
-        L: { w: 160, h: 90 },
-    }[size];
-
-    if (shape === "circle") {
-        const radius = { S: 38, M: 45, L: 58 }[size];
-        return { width: radius * 2, height: radius * 2, radius };
-    }
-
-    return {
-        width: rect.w,
-        height: rect.h,
-        radius: undefined as number | undefined,
-    };
 }
 
 /**
@@ -262,12 +149,10 @@ export default function EditTables() {
     const viewStartPosRef = useRef<{ x: number; y: number } | null>(null);
     const isDraggingSomethingRef = useRef(false);
 
-    const [addPointArmed, setAddPointArmed] = useState(false);
     const [addTableOpen, setAddTableOpen] = useState(false);
-    const [placeTableByClick, setPlaceTableByClick] = useState(false);
-    const [pendingTableDraft, setPendingTableDraft] = useState<Table | null>(null);
 
-    const [deleteTableArmed, setDeleteTableArmed] = useState(false);
+    const modoEditor = useModoEditor();
+    const { addPointArmed, deleteTableArmed, placeTableByClick, pendingTableDraft } = modoEditor;
 
     const historyRef = useRef<Salon[][]>([]);
 
@@ -494,8 +379,7 @@ export default function EditTables() {
     }
 
     function beginAddPoint() {
-        setDeleteTableArmed(false);
-        setAddPointArmed(true);
+        modoEditor.dispatch({ tipo: "vertice" });
     }
 
     function removeLastVertex() {
@@ -526,39 +410,8 @@ export default function EditTables() {
         setDirty(true);
     }
 
-    function defaultTableDraft(): Table {
-        return {
-            id: `table-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            name: `Mesa ${activeTables.length + 1}`,
-            x: 0,
-            y: 0,
-            width: 120,
-            height: 70,
-            seats: 4,
-            shape: "rounded",
-            radius: 45,
-        };
-    }
-
-    const [tableForm, setTableForm] = useState(() => ({
-        name: "Mesa 1",
-        seats: 4,
-        shape: "rounded" as TableShape,
-        size: "M" as TableSize,
-        placement: "auto" as "auto" | "click",
-    }));
-
     function openAddTableModal() {
-        setDeleteTableArmed(false);
-
-        const t = defaultTableDraft();
-        setTableForm({
-            name: t.name,
-            seats: t.seats,
-            shape: t.shape,
-            size: "M",
-            placement: "auto",
-        });
+        modoEditor.dispatch({ tipo: "cancelar" });
         setAddTableOpen(true);
     }
 
@@ -581,8 +434,7 @@ export default function EditTables() {
     }
 
     function finalizeAddTableByClick(t: Table) {
-        setPendingTableDraft(t);
-        setPlaceTableByClick(true);
+        modoEditor.dispatch({ tipo: "colocar", mesa: t });
     }
 
     function resetZoom() {
@@ -693,8 +545,7 @@ export default function EditTables() {
                 ),
             );
 
-            setPlaceTableByClick(false);
-            setPendingTableDraft(null);
+            modoEditor.dispatch({ tipo: "cancelar" });
             setDirty(true);
             return;
         }
@@ -714,7 +565,7 @@ export default function EditTables() {
             const { next } = insertPointAtNearestEdge(current, clamped);
             roomPointsDraftRef.current[activeSalonId] = next;
             commitRoomPoints(next);
-            setAddPointArmed(false);
+            modoEditor.dispatch({ tipo: "cancelar" });
             setDirty(true);
         }
     }
@@ -954,15 +805,7 @@ export default function EditTables() {
                                     !activeSalon || addPointArmed || placeTableByClick
                                 }
                                 onClick={() => {
-                                    setDeleteTableArmed((v) => {
-                                        const next = !v;
-                                        if (next) {
-                                            setAddPointArmed(false);
-                                            setPlaceTableByClick(false);
-                                            setPendingTableDraft(null);
-                                        }
-                                        return next;
-                                    });
+                                    modoEditor.dispatch({ tipo: "alternar_borrado" });
                                 }}
                             >
                                 {deleteTableArmed ? "Click mesa…" : "Borrar mesa"}
@@ -1022,8 +865,7 @@ export default function EditTables() {
                                         icon="✕"
                                         variant="danger"
                                         onClick={() => {
-                                            setPlaceTableByClick(false);
-                                            setPendingTableDraft(null);
+                                            modoEditor.dispatch({ tipo: "cancelar" });
                                         }}
                                     >
                                         Cancelar
@@ -1040,7 +882,7 @@ export default function EditTables() {
                                     <IconButton
                                         icon="✕"
                                         variant="danger"
-                                        onClick={() => setAddPointArmed(false)}
+                                        onClick={() => modoEditor.dispatch({ tipo: "cancelar" })}
                                     >
                                         Cancelar
                                     </IconButton>
@@ -1056,7 +898,7 @@ export default function EditTables() {
                                     <IconButton
                                         icon="✕"
                                         variant="danger"
-                                        onClick={() => setDeleteTableArmed(false)}
+                                        onClick={() => modoEditor.dispatch({ tipo: "cancelar" })}
                                     >
                                         Cancelar
                                     </IconButton>
@@ -1160,190 +1002,9 @@ export default function EditTables() {
                 </div>
             </div>
 
-            <Modal
-                open={addTableOpen}
-                title="Añadir mesa"
-                onClose={() => setAddTableOpen(false)}
-            >
-                <div className="grid grid-cols-2 gap-3">
-                    <div className="col-span-2">
-                        <div className="text-xs font-semibold text-fg-muted mb-1">
-                            Nombre / Nº mesa
-                        </div>
-                        <input
-                            value={tableForm.name}
-                            onChange={(e) =>
-                                setTableForm((p) => ({ ...p, name: e.target.value }))
-                            }
-                            className="h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
-                            placeholder="Ej: M12"
-                        />
-                    </div>
+            {addTableOpen && <FormularioMesa numeroMesa={activeTables.length + 1} onCerrar={() => setAddTableOpen(false)}
+                onCrear={(mesa, colocacion) => { if (colocacion === "click") finalizeAddTableByClick(mesa); else finalizeAddTableAuto(mesa); }} />}
 
-                    <div>
-                        <div className="text-xs font-semibold text-fg-muted mb-1">
-                            Comensales
-                        </div>
-                        <input
-                            type="number"
-                            value={tableForm.seats}
-                            onChange={(e) =>
-                                setTableForm((p) => ({
-                                    ...p,
-                                    seats: Number(e.target.value),
-                                }))
-                            }
-                            className="h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
-                            min={1}
-                        />
-                    </div>
-
-                    <div>
-                        <div className="text-xs font-semibold text-fg-muted mb-1">
-                            Forma
-                        </div>
-                        <select
-                            value={tableForm.shape}
-                            onChange={(e) =>
-                                setTableForm((p) => ({
-                                    ...p,
-                                    shape: e.target.value as TableShape,
-                                }))
-                            }
-                            className="h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
-                        >
-                            <option value="rounded">Rect redondeada</option>
-                            <option value="rect">Recta</option>
-                            <option value="circle">Circular</option>
-                        </select>
-                    </div>
-
-                    <div className="col-span-2">
-                        <div className="text-xs font-semibold text-fg-muted mb-1">
-                            Tamaño
-                        </div>
-                        <div className="flex gap-2">
-                            <Chip
-                                active={tableForm.size === "S"}
-                                onClick={() =>
-                                    setTableForm((p) => ({ ...p, size: "S" }))
-                                }
-                            >
-                                S
-                            </Chip>
-                            <Chip
-                                active={tableForm.size === "M"}
-                                onClick={() =>
-                                    setTableForm((p) => ({ ...p, size: "M" }))
-                                }
-                            >
-                                M
-                            </Chip>
-                            <Chip
-                                active={tableForm.size === "L"}
-                                onClick={() =>
-                                    setTableForm((p) => ({ ...p, size: "L" }))
-                                }
-                            >
-                                L
-                            </Chip>
-                        </div>
-
-                        <div className="mt-2 text-xs text-fg-muted">
-                            {(() => {
-                                const d = sizeToDims(
-                                    tableForm.shape,
-                                    tableForm.size,
-                                );
-                                return tableForm.shape === "circle"
-                                    ? `Radio aprox: ${Math.round(d.radius ?? 0)} px`
-                                    : `Dimensiones: ${d.width}×${d.height} px`;
-                            })()}
-                        </div>
-                    </div>
-
-                    <div className="col-span-2">
-                        <div className="text-xs font-semibold text-fg-muted mb-1">
-                            Colocación
-                        </div>
-                        <div className="flex gap-2">
-                            <Chip
-                                active={tableForm.placement === "auto"}
-                                onClick={() =>
-                                    setTableForm((p) => ({
-                                        ...p,
-                                        placement: "auto",
-                                    }))
-                                }
-                            >
-                                Automática
-                            </Chip>
-                            <Chip
-                                active={tableForm.placement === "click"}
-                                onClick={() =>
-                                    setTableForm((p) => ({
-                                        ...p,
-                                        placement: "click",
-                                    }))
-                                }
-                            >
-                                Elegir con click
-                            </Chip>
-                        </div>
-                    </div>
-
-                    <div className="col-span-2 pt-2 flex items-center justify-end gap-2 border-t border-border mt-1">
-                        <IconButton
-                            icon="✕"
-                            variant="danger"
-                            onClick={() => setAddTableOpen(false)}
-                        >
-                            Cancelar
-                        </IconButton>
-
-                        <IconButton
-                            icon="✅"
-                            variant="primary"
-                            onClick={() => {
-                                const dims = sizeToDims(
-                                    tableForm.shape,
-                                    tableForm.size,
-                                );
-
-                                const t: Table = {
-                                    id: `table-${Date.now()}-${Math.floor(
-                                        Math.random() * 1000,
-                                    )}`,
-                                    name:
-                                        tableForm.name.trim() ||
-                                        `Mesa ${activeTables.length + 1}`,
-                                    x: 0,
-                                    y: 0,
-                                    width: dims.width,
-                                    height: dims.height,
-                                    radius: dims.radius,
-                                    seats: Math.max(
-                                        1,
-                                        Number(tableForm.seats) || 4,
-                                    ),
-                                    shape: tableForm.shape,
-                                };
-
-                                setAddTableOpen(false);
-                                setDeleteTableArmed(false);
-
-                                if (tableForm.placement === "click") {
-                                    finalizeAddTableByClick(t);
-                                } else {
-                                    finalizeAddTableAuto(t);
-                                }
-                            }}
-                        >
-                            Crear mesa
-                        </IconButton>
-                    </div>
-                </div>
-            </Modal>
         </div>
     );
 }

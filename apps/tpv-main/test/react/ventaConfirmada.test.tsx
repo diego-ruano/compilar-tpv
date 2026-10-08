@@ -13,7 +13,7 @@ vi.mock("../../src/shared/lib/imageUrl", () => ({ resolveImageUrl: async () => "
 vi.mock("../../src/shared/toast", () => ({ useToast: () => ({ error: vi.fn(), info: vi.fn() }) }));
 vi.mock("../../src/shared/stores/useMode", () => ({ useMode: (fn: (s: { mode: string }) => unknown) => fn({ mode: "tpv" }) }));
 vi.mock("../../src/features/ventaRapida/ui/AddProductModal", () => ({ default: () => null }));
-vi.mock("../../src/features/InventaryComponents/ProductDetailModal", () => ({ default: () => null }));
+vi.mock("../../src/features/inventario/ProductDetailModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/PrintTicketModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/AvisoFiscalModal", () => ({ anunciarCobro: () => {} }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });

@@ -1,5 +1,5 @@
 import { commands } from "@tpv/client";
-// src/features/mesasComponents/mesasApi.ts
+// src/features/mesas/mesasApi.ts
 //
 // API de mesas / comandas / ticket / cocina: una función por comando Tauri, con los tipos que genera
 // Specta desde Rust. Aquí no se redeclaran tipos ni se normaliza lo que vuelve (RI-53): el precio de

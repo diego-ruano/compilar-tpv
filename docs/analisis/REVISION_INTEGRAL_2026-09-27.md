@@ -252,7 +252,7 @@ que tuvieran tipo en TypeScript. **Quedan por convertir**, y hay que hacerlo aqu
   Zustand (`useBusinessSettings`, `useTicketSettings`) guardan la configuración con nombres en
   camelCase propios. Es estado de la aplicación, no un contrato; pasar los stores a los nombres
   del DTO toca todas las pantallas que los leen.
-- `features/mesasComponents/types.ts`: `Salon`/`Table`, la geometría del plano que usa el editor
+- `features/mesas/types.ts`: `Salon`/`Table`, la geometría del plano que usa el editor
   de mesas, frente a los generados `SalonOut`/`TableOut`/`SalonInput`.
 - Las llamadas directas a `invoke` de `@tauri-apps/api/core` que quedan (unos 20 ficheros, entre
   ellos `save_image` en los formularios de producto y `printer_ticket_cols` en la vista previa).
@@ -306,7 +306,7 @@ paso de E2E del tipo «añadir, quitar con −, recargar» lo habría cazado.
   lienzo ([`:1590-1592`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1590-L1592))
   y el añadir vértices ([`:1619`](../../apps/tpv-main/src/app/pages/mesasPages/EditTables.tsx#L1619)).
   El plano de servicio sí escucha los toques: `onTap` en
-  [`features/mesasComponents/TableNode.tsx:115`](../../apps/tpv-main/src/features/mesasComponents/TableNode.tsx#L115).
+  [`features/mesas/TableNode.tsx:115`](../../apps/tpv-main/src/features/mesas/TableNode.tsx#L115).
   Konva manda los toques como `touchstart`/`tap`, no como `mousedown`, y sobre una figura cancela
   por defecto los eventos de ratón que el navegador emularía. **A verificar en una pantalla
   táctil**: lo esperable es que arrastrar funcione (Konva lo gestiona internamente) y que borrar
@@ -320,39 +320,39 @@ paso de E2E del tipo «añadir, quitar con −, recargar» lo habría cazado.
 <a id="ri-81"></a>
 ### RI-81 🔵 · Modal de comanda: memoización anulada, respuestas fuera de orden y doble pulsación
 
-**Dónde:** [`MesaComandaModal.tsx`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx).
+**Dónde:** [`MesaComandaModal.tsx`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx).
 
 - **`React.memo` de `ProductCard` no sirve.** El comentario de
-  [`:496-498`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L496-L498)
+  [`:496-498`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L496-L498)
   estabiliza `notifyChanged` justo para eso, pero las tarjetas reciben
   `onAdd={conAviso(addProductoToTicket)}` y `onRemove={conAviso(…)}` creados en cada render
-  ([`:1384-1385`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L1384-L1385),
-  [`:1429-1430`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L1429-L1430)).
+  ([`:1384-1385`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L1384-L1385),
+  [`:1429-1430`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L1429-L1430)).
   Con memorizar los dos envoltorios con `useMemo` se consigue lo que el comentario pretende.
 - **Respuestas fuera de orden.** Cargar productos de una categoría y buscar por nombre
-  ([`:640-700`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L640-L700))
+  ([`:640-700`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L640-L700))
   no descartan una respuesta que llega tarde: el `clearTimeout` cancela la búsqueda que aún no ha
   empezado, no la que ya está en curso. Pulsando dos categorías seguidas, o escribiendo con la red
   lenta, puede quedarse en pantalla lo de la anterior. Hace falta una bandera `cancelado` en el
   `cleanup` del efecto.
 - **Añadir deprisa.** El id optimista es `opt-${Date.now()}`
-  ([`:709`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L709)), que se
+  ([`:709`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L709)), que se
   repite con dos toques en el mismo milisegundo. Y la mezcla `[...t, ...enVuelo]`
-  ([`:734-737`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L734-L737))
+  ([`:734-737`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L734-L737))
   da por hecho que las respuestas llegan en orden: si la segunda adición contesta antes que la
   primera, la última respuesta en llegar es la más vieja, y la línea nueva desaparece hasta la
   siguiente recarga. `crypto.randomUUID()` para el id, y quedarse con la respuesta más reciente
   (o recargar al terminar la última petición en curso).
 - **Confirmar cobro dos veces.** `cobrar`
-  ([`:864`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L864)) no tiene
+  ([`:864`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L864)) no tiene
   guardia mientras hay un cobro en curso, y el botón sólo se deshabilita si falta dinero
-  ([`:1292`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L1292)). No
+  ([`:1292`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L1292)). No
   cobra dos veces, porque el backend rechaza líneas ya cobradas
   ([`mesas.rs:1980-1984`](../../crates/tpv-infra-sqlite/src/mesas.rs#L1980-L1984)), pero el
   segundo toque enseña «No se pudo cobrar… ya están pagados» justo después de un cobro bueno.
 - `console.log` con el operador y el ticket en el camino del cobro
-  ([`:886`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L886),
-  [`:913`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L913)).
+  ([`:886`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L886),
+  [`:913`](../../apps/tpv-main/src/features/mesas/MesaComandaModal.tsx#L913)).
 
 <a id="ri-82"></a>
 ### RI-82 🔵 · Cuentas: un botón que no hace nada, «Deshacer» sin confirmar y el PDF sin eñes
@@ -647,8 +647,8 @@ mantenerlos iguales en dos lenguajes aunque nadie los use.
 3. **`next_table_id`** ([`util.rs:14-26`](../../crates/tpv-infra-sqlite/src/util.rs#L14-L26)): el
    generador de ids `MAX+1` de antes de UUIDv7, sin ningún uso.
 4. **Frontend, ficheros que nadie importa**: `app/layoutComponent/Account.tsx`,
-   `features/ClientsComponents/{ClientesCard,ItemListClients,ListClients}.tsx`,
-   `features/InventaryComponents/ui/ConfirmDialog.tsx`,
+   `features/clientes/{ClientesCard,ItemListClients,ListClients}.tsx`,
+   `features/inventario/ui/ConfirmDialog.tsx`,
    `features/proveedores/{CategoriesColumn,Foto}.tsx`, `shared/ui/Carousel.tsx` (~700 líneas).
 5. **Frontend, exportaciones sin uso**: `statsApis.ts` (seis funciones, sustituidas por
    `statsQueries`), `useAjustarLote`, `useHistoricoIncompleto`, `makePairCode`, `LicenseInfo`.

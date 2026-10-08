@@ -1,7 +1,7 @@
 import { commands } from "@tpv/client";
 // src/features/ventaRapida/ventaRapidaAPI.ts
 //
-// API de venta rápida (barra): una función por comando Tauri, con los tipos que genera ts-rs desde
+// API de venta rápida (barra): una función por comando Tauri, con los tipos que genera Specta desde
 // Rust. Aquí no se redeclaran tipos ni se normaliza lo que vuelve (RI-53): cada comando devuelve una
 // forma fija, y el dinero llega y sale como `Dinero` (céntimos).
 //

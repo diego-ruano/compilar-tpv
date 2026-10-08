@@ -27,13 +27,13 @@ import {
   clientesGetClienteForm,
   type ClienteOverview,
   type FiltroRanking,
-} from "../../features/ClientsComponents/clientesApis";
+} from "../../features/clientes/clientesApis";
 import {
   useClientesOverview,
   useRecalcularGasto,
   useCreateCliente,
   useUpdateCliente,
-} from "../../features/ClientsComponents/clientesQueries";
+} from "../../features/clientes/clientesQueries";
 import { conAviso } from "../../shared/lib/conAviso";
 import type { Dinero } from "@tpv/contracts";
 import { eur } from "../../shared/lib/dinero";

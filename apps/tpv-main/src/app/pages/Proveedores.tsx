@@ -18,13 +18,13 @@ import { cn } from "../../shared/lib/cn";
 import { resolveImageUrl, triggerImageUploadDrain } from "../../shared/lib/imageUrl";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 
-import Product from "../../features/InventaryComponents/Product";
+import Product from "../../features/inventario/Product";
 import Modal from "../../features/proveedores/Modal";
 import Campo from "../../features/proveedores/Campo";
 import ProveedorCard from "../../features/proveedores/ProveedorCard";
 import PedidosSection from "../../features/proveedores/PedidosSection";
-import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
-import { AddProductModal } from "../../features/InventaryComponents/ui/AddProductModal";
+import ProductDetailModal from "../../features/inventario/ProductDetailModal";
+import { AddProductModal } from "../../features/inventario/ui/AddProductModal";
 
 import { type CategoriaProveedorDto, type ProductoProveedorDto, type ProveedorDto } from "../../features/proveedores/proveedoresApis";
 import {

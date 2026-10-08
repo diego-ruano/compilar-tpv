@@ -3,18 +3,18 @@ import React, { useState } from "react";
 import { toAppError } from "@tpv/client";
 import { useToast } from "../../shared/toast";
 
-import { useInventario } from "../../features/InventaryComponents/hooks/useInventario";
+import { useInventario } from "../../features/inventario/hooks/useInventario";
 
-import InventoryHeader from "../../features/InventaryComponents/ui/InventoryHeader";
-import CategoriesSection from "../../features/InventaryComponents/ui/CategoriesSection";
-import SummarySection from "../../features/InventaryComponents/ui/SummarySection";
-import ProductsSection from "../../features/InventaryComponents/ui/ProductsSection";
+import InventoryHeader from "../../features/inventario/ui/InventoryHeader";
+import CategoriesSection from "../../features/inventario/ui/CategoriesSection";
+import SummarySection from "../../features/inventario/ui/SummarySection";
+import ProductsSection from "../../features/inventario/ui/ProductsSection";
 
-import AddCategoryModal from "../../features/InventaryComponents/ui/AddCategoryModal";
-import { AddProductModal } from "../../features/InventaryComponents/ui/AddProductModal";
-import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
+import AddCategoryModal from "../../features/inventario/ui/AddCategoryModal";
+import { AddProductModal } from "../../features/inventario/ui/AddProductModal";
+import ProductDetailModal from "../../features/inventario/ProductDetailModal";
 
-import { useDeleteProducto } from "../../features/InventaryComponents/inventarioQueries";
+import { useDeleteProducto } from "../../features/inventario/inventarioQueries";
 import { conAviso } from "../../shared/lib/conAviso";
 
 export default function Inventario() {

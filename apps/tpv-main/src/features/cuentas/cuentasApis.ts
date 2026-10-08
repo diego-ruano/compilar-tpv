@@ -1,7 +1,7 @@
 import { commands } from "@tpv/client";
 // src/features/cuentas/cuentasApis.ts
 //
-// API de cuentas (caja): una función por comando Tauri, con los tipos que genera ts-rs desde Rust.
+// API de cuentas (caja): una función por comando Tauri, con los tipos que genera Specta desde Rust.
 // Lo que vuelve se entrega tal cual —sin convertirlo a camelCase ni «normalizarlo»— y lo que se
 // escribe es el `Input` generado, con el dinero como `Dinero` (RI-53). Aquí quedan además las
 // denominaciones del cajón y el recuento, que son sólo de la pantalla.

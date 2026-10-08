@@ -26,7 +26,7 @@ import {
   useSaveReserva,
   useDeleteReserva,
 } from "../../features/reservas/reservasQueries";
-import { mesasLoadLayout } from "../../features/mesasComponents/mesasApi";
+import { mesasLoadLayout } from "../../features/mesas/mesasApi";
 
 import { useAuth } from "../../shared/stores/useAuth";
 import { useToast } from "../../shared/toast";
@@ -34,7 +34,7 @@ import { useToast } from "../../shared/toast";
 // ✅ Modal + tipos del layout (MapCanvas)
 import ReservaMesaMapModal from "../../features/reservas/ReservaMesaMapModal";
 import type { MesaMetaOut } from "@tpv/contracts";
-import type { Salon } from "../../features/mesasComponents/types";
+import type { Salon } from "../../features/mesas/types";
 import { conAviso } from "../../shared/lib/conAviso";
 
 /* =========================

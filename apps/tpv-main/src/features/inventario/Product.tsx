@@ -1,4 +1,4 @@
-// src/features/InventaryComponents/Product.tsx
+// src/features/inventario/Product.tsx
 import React from "react";
 import { ChevronRight, ImageOff } from "lucide-react";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";

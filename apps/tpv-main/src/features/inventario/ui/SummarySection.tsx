@@ -1,4 +1,4 @@
-// src/features/InventaryComponents/ui/SummarySection.tsx
+// src/features/inventario/ui/SummarySection.tsx
 import React from "react";
 import ListProducts from "../ListProducts";
 import ItemListProduct from "../ItemListProduct";

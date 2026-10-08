@@ -1,10 +1,10 @@
 // components/reservas/ReservaMesaMapModal.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
-import MapCanvas from "../mesasComponents/MapCanvas";
-import SalonTabs from "../mesasComponents/SalonTabs";
+import MapCanvas from "../mesas/MapCanvas";
+import SalonTabs from "../mesas/SalonTabs";
 import type { MesaMetaOut } from "@tpv/contracts";
-import type { Salon } from "../mesasComponents/types";
+import type { Salon } from "../mesas/types";
 
 type Props = {
     open: boolean;

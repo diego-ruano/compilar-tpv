@@ -1,64 +1,61 @@
 import { commands } from "@tpv/client";
-import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-    Wallet,
-    Pencil,
-    Trash2,
-    X,
-    FileDown,
-    Send,
-    Calculator,
-    ReceiptText,
-    Printer,
-    FileText,
-    Check,
-    Undo2,
+Calculator,
+Check,
+FileDown,
+FileText,
+Pencil,
+Printer,
+ReceiptText,
+Send,
+Trash2,
+Undo2,
+Wallet,
+X,
 } from "lucide-react";
+import React,{ useEffect,useMemo,useState } from "react";
+import FormularioGasto from "../../features/cuentas/FormularioGasto";
 
-import PrintTicketModal, {
-    type CobroImprimible,
-} from "../../shared/ticket/PrintTicketModal";
-import { printerTicketDePago } from "../../features/configuracion/api/printerApis";
-import DatosFiscalesModal, {
-} from "../../shared/ticket/DatosFiscalesModal";
-import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
-import type {
-    BloqueFiscal,
-    CambioCajaInput,
-    DestinatarioInput,
-    Dinero,
-    ImpactoCajaDto,
-    ProveedorMiniDto,
-} from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
-import { ModalShell, SearchInput } from "../../shared/ui";
-import { cn } from "../../shared/lib/cn";
-import {
-    cuentasGetEntradas,
-    cuentasGetSalidas,
-    esAnulado,
-    esDevolucion,
-    type EntradaDto,
-    type SalidaDto,
-    type ClaseBaja,
-} from "../../features/cuentas/cuentasApis";
+import type {
+CambioCajaInput,
+DestinatarioInput,
+Dinero,
+ImpactoCajaDto,
+ProveedorMiniDto
+} from "@tpv/contracts";
+import { printerTicketDePago } from "../../features/configuracion/api/printerApis";
 import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
-import ReabrirCierreModal from "../../features/cuentas/ReabrirCierreModal";
 import DevolverModal from "../../features/cuentas/DevolverModal";
 import ImpactoCierreModal from "../../features/cuentas/ImpactoCierreModal";
-import { cierreImprimir, cierreListar, cierreReabrir, type CierreResumenDto } from "../../features/cuentas/cierreApis";
+import ReabrirCierreModal from "../../features/cuentas/ReabrirCierreModal";
+import { cierreImprimir,cierreListar,cierreReabrir,type CierreResumenDto } from "../../features/cuentas/cierreApis";
 import {
-    useCuentasEntradas,
-    useCuentasSalidas,
-    useCuentasResumen,
-    useCuentasProveedoresMini,
-    useCreateGasto,
-    useUpdateGasto,
-    useDeleteGasto,
-    useUpdatePago,
-    useAnularPago,
-    usePilaDeCursores,
+cuentasGetEntradas,
+cuentasGetSalidas,
+esAnulado,
+esDevolucion,
+type ClaseBaja,
+type EntradaDto,
+type SalidaDto,
+} from "../../features/cuentas/cuentasApis";
+import {
+useAnularPago,
+useCuentasEntradas,
+useCuentasProveedoresMini,
+useCuentasResumen,
+useCuentasSalidas,
+useDeleteGasto,
+usePilaDeCursores,
+useUpdatePago,
 } from "../../features/cuentas/cuentasQueries";
+import { cn } from "../../shared/lib/cn";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
+import DatosFiscalesModal from "../../shared/ticket/DatosFiscalesModal";
+import PrintTicketModal,{
+type CobroImprimible,
+} from "../../shared/ticket/PrintTicketModal";
+import { ModalShell,SearchInput } from "../../shared/ui";
 
 
 // PDF
@@ -68,10 +65,9 @@ import { generarPdfCuentas } from "../../features/cuentas/generarPdfCuentas";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { conAviso } from "../../shared/lib/conAviso";
-import { CERO, eur, restar, sumar } from "../../shared/lib/dinero";
-import { CampoDinero, useImporte } from "../../shared/ui/CampoDinero";
-import { usePermisos } from "../../shared/lib/usePermisos";
+import { CERO,eur,restar,sumar } from "../../shared/lib/dinero";
 import { esAdmin } from "../../shared/lib/permisos";
+import { usePermisos } from "../../shared/lib/usePermisos";
 
 function todayYMD() {
     const d = new Date();
@@ -281,8 +277,6 @@ export default function Cuentas() {
     const proveedoresQuery = useCuentasProveedoresMini();
 
     // Escrituras (mutaciones con invalidación en onSuccess).
-    const createGasto = useCreateGasto();
-    const updateGasto = useUpdateGasto();
     const deleteGasto = useDeleteGasto();
     const updatePago = useUpdatePago();
     const anularPago = useAnularPago();
@@ -336,30 +330,10 @@ export default function Cuentas() {
      */
     const [claseBaja, setClaseBaja] = useState<ClaseBaja | null>(null);
 
-    const [openAddGasto, setOpenAddGasto] = useState(false);
-    const [gFecha, setGFecha] = useState(() => todayYMD());
-    const [gTipo, setGTipo] = useState("Suministros");
-    const [gConcepto, setGConcepto] = useState("");
-    const gImporte = useImporte();
-    const [gProveedorId, setGProveedorId] = useState<string>("");
-    const [savingGasto, setSavingGasto] = useState(false);
-    const savingGastoRef = useRef(false);
-    const [errGasto, setErrGasto] = useState<string | null>(null);
-    const [gPagadoConCaja, setGPagadoConCaja] = useState(false);
+    const [formularioGasto, setFormularioGasto] = useState<{ gasto: SalidaDto | null } | null>(null);
 
     const [savingPdf, setSavingPdf] = useState(false);
     const [pdfError, setPdfError] = useState<string | null>(null);
-
-    const [openEditGasto, setOpenEditGasto] = useState(false);
-    const [editGastoId, setEditGastoId] = useState<string | null>(null);
-    const [egFecha, setEgFecha] = useState("");
-    const [egTipo, setEgTipo] = useState("Suministros");
-    const [egConcepto, setEgConcepto] = useState("");
-    const egImporte = useImporte();
-    const [egProveedorId, setEgProveedorId] = useState<string>("");
-    const [savingEditGasto, setSavingEditGasto] = useState(false);
-    const [errEditGasto, setErrEditGasto] = useState<string | null>(null);
-    const [egPagadoConCaja, setEgPagadoConCaja] = useState(false);
 
     const [openEditPago, setOpenEditPago] = useState(false);
     // Ticket que se está reimprimiendo (null = ninguno). Ver `reimprimirTicket`.
@@ -489,108 +463,14 @@ export default function Cuentas() {
     const hasNextEntradas = siguienteEntradas != null;
     const hasNextSalidas = siguienteSalidas != null;
 
-    const abrirModalGasto = async () => {
-        setErrGasto(null);
-        setGFecha(todayYMD());
-        setGTipo("Suministros");
-        setGConcepto("");
-        gImporte.poner(null);
-        setGProveedorId("");
-        setGPagadoConCaja(false);
-        await ensureProveedores();
-        setOpenAddGasto(true);
-    };
+    const abrirModalGasto = async () => { await ensureProveedores(); setFormularioGasto({ gasto: null }); };
+    const abrirEditarGasto = async (gasto: SalidaDto) => { await ensureProveedores(); setFormularioGasto({ gasto }); };
 
-    const abrirEditarGasto = async (s: SalidaDto) => {
-        setErrEditGasto(null);
-        setEditGastoId(s.id);
-        setEgFecha(s.fecha_hora);
-        setEgTipo(s.tipo_gasto || "Suministros");
-        setEgConcepto(s.concepto || "");
-        // RI-53: se rellenaba con los céntimos en crudo («1250») y se releía como euros, así que
-        // guardar sin tocar nada multiplicaba el gasto por 100.
-        egImporte.poner(s.importe);
-        setEgProveedorId(s.proveedor_id ?? "");
-        setEgPagadoConCaja(s.pagado_con_caja ?? false);
-        await ensureProveedores();
-        setOpenEditGasto(true);
-    };
-
-    const guardarEditarGasto = async () => {
-        try {
-            setErrEditGasto(null);
-            if (!editGastoId) return;
-
-            const fecha = (egFecha || "").trim();
-            const tipo = (egTipo || "").trim();
-            const concepto = (egConcepto || "").trim();
-            const importe = egImporte.valor ?? CERO;
-
-            const provRaw = (egProveedorId || "").trim();
-            const proveedorId = provRaw === "" ? null : provRaw;
-
-            if (!fecha) return setErrEditGasto("La fecha es obligatoria.");
-            if (!tipo) return setErrEditGasto("El tipo es obligatorio.");
-            if (!concepto) return setErrEditGasto("El concepto es obligatorio.");
-            if (!egImporte.legible) return setErrEditGasto("El importe no se entiende.");
-            if (importe <= 0) {
-                return setErrEditGasto("El importe debe ser mayor que 0.");
-            }
-
-            if (tipo === "Proveedor") {
-                if (!proveedorId) {
-                    return setErrEditGasto("Selecciona un proveedor.");
-                }
-            }
-
-            setSavingEditGasto(true);
-
-            const idGasto = editGastoId;
-            const pagadoConCaja = egPagadoConCaja;
-            await conAvisoDeCierre(
-                { tipo: "editar_gasto", id_gasto: idGasto, fecha, importe, pagado_con_caja: pagadoConCaja },
-                async (motivo) => {
-                    const ok = await updateGasto.mutateAsync({
-                        args: {
-                            id_gasto: idGasto,
-                            fecha,
-                            tipo_gasto: tipo,
-                            concepto,
-                            importe,
-                            proveedor_id: tipo === "Proveedor" ? (proveedorId ?? undefined) : undefined,
-                            pagado_con_caja: pagadoConCaja,
-                        },
-                        motivoRectificacion: motivo,
-                    });
-                    if (!ok) throw new Error("No se pudo actualizar el gasto.");
-                    setOpenEditGasto(false);
-                    void recargarCierres();
-                },
-            );
-        } catch (e: any) {
-            console.error(e);
-            setErrEditGasto(String(e?.message ?? "Error actualizando gasto"));
-        } finally {
-            setSavingEditGasto(false);
-        }
-    };
-
-    const borrarGasto = (s: SalidaDto) => {
+    const borrarGasto = (gasto: SalidaDto) => {
         setConfirmError(null);
-        setConfirmAccion({ tipo: "gasto", gasto: s });
+        setConfirmAccion({ tipo: "gasto", gasto });
     };
 
-    /**
-     * Vuelve a sacar un ticket ya cobrado.
-     *
-     * El papel lo compone Rust desde el cobro y su factura (RI-29) —número, fecha de expedición,
-     * líneas, desglose y QR—, así que la copia dice lo mismo que dijo el original aunque hoy hayan
-     * cambiado los precios o los tipos. Y sale marcada como COPIA: dos papeles idénticos parecerían
-     * dos ventas.
-     */
-    // Devolver parte de un cobro (o lo que queda de él). Al acabar se abre su rectificativa en el
-    // modal de impresión, sin imprimirla: casi nunca se pide, pero es una factura y tiene que poder
-    // entregarse.
     const [devolverDe, setDevolverDe] = useState<{ entrada: EntradaDto; todo: boolean } | null>(null);
 
     const reimprimirTicket = (e: EntradaDto) => {
@@ -788,65 +668,6 @@ export default function Cuentas() {
             setConfirmError(toAppError(e).message);
         } finally {
             setConfirmando(false);
-        }
-    };
-
-    const guardarGasto = async () => {
-        // Guard síncrono: evita doble-submit antes de que React repinte el estado.
-        if (savingGastoRef.current) return;
-        savingGastoRef.current = true;
-        setSavingGasto(true);
-        try {
-            setErrGasto(null);
-
-            const fecha = (gFecha || "").trim();
-            const tipo = (gTipo || "").trim();
-            const concepto = (gConcepto || "").trim();
-            const importe = gImporte.valor ?? CERO;
-
-            const provRaw = (gProveedorId || "").trim();
-            const proveedorId = provRaw === "" ? null : provRaw;
-
-            if (!fecha) { setErrGasto("La fecha es obligatoria."); return; }
-            if (!tipo) { setErrGasto("El tipo es obligatorio."); return; }
-            if (!concepto) { setErrGasto("El concepto es obligatorio."); return; }
-            if (!gImporte.legible) { setErrGasto("El importe no se entiende."); return; }
-            if (importe <= 0) {
-                setErrGasto("El importe debe ser un número mayor que 0.");
-                return;
-            }
-
-            if (tipo === "Proveedor" && !proveedorId) {
-                setErrGasto("Selecciona un proveedor.");
-                return;
-            }
-
-            const pagadoConCaja = gPagadoConCaja;
-            await conAvisoDeCierre(
-                { tipo: "crear_gasto", fecha, importe, pagado_con_caja: pagadoConCaja },
-                async (motivo) => {
-                    const ok = await createGasto.mutateAsync({
-                        args: {
-                            fecha,
-                            tipo_gasto: tipo,
-                            concepto,
-                            importe,
-                            proveedor_id: tipo === "Proveedor" ? (proveedorId ?? undefined) : undefined,
-                            pagado_con_caja: pagadoConCaja,
-                        },
-                        motivoRectificacion: motivo,
-                    });
-                    if (!ok) throw new Error("No se pudo guardar el gasto.");
-                    setOpenAddGasto(false);
-                    void recargarCierres();
-                },
-            );
-        } catch (e: any) {
-            console.error(e);
-            setErrGasto(String(e?.message ?? "Error guardando gasto"));
-        } finally {
-            savingGastoRef.current = false;
-            setSavingGasto(false);
         }
     };
 
@@ -1458,315 +1279,11 @@ export default function Cuentas() {
             </>
             ) : null}
 
-            <ModalShell
-                open={openAddGasto}
-                onClose={() => { if (!savingGasto) setOpenAddGasto(false); }}
-            >
-                    <div
-                        className="absolute inset-0 bg-black/40"
-                        onClick={() => (savingGasto ? null : setOpenAddGasto(false))}
-                    />
-                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-border bg-surface shadow-xl p-6">
-                        <div className="flex items-start justify-between gap-3">
-                            <div>
-                                <h3 className="text-lg font-semibold text-fg">Agregar gasto</h3>
-                                <p className="text-sm text-fg-muted">
-                                    Registra luz, agua, pedidos, alquiler, etc.
-                                </p>
-                            </div>
-
-                            <button
-                                type="button"
-                                className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-                                onClick={() => (savingGasto ? null : setOpenAddGasto(false))}
-                                title="Cerrar"
-                            >
-                                <X className="size-4" aria-hidden />
-                            </button>
-                        </div>
-
-                        <div className="mt-5 grid grid-cols-1 gap-3">
-                            <label className="text-xs font-semibold text-fg-muted">
-                                Fecha
-                                <input
-                                    type="date"
-                                    value={gFecha}
-                                    onChange={(e) => setGFecha(e.target.value)}
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
-                                />
-                            </label>
-
-                            <label className="text-xs font-semibold text-fg-muted">
-                                Tipo
-                                <select
-                                    value={gTipo}
-                                    onChange={(e) => {
-                                        const v = e.target.value;
-                                        setGTipo(v);
-                                        if (v !== "Proveedor") setGProveedorId("");
-                                    }}
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
-                                >
-                                    <option value="Suministros">Suministros</option>
-                                    <option value="Luz">Luz</option>
-                                    <option value="Agua">Agua</option>
-                                    <option value="Alquiler">Alquiler</option>
-                                    <option value="Nomina">Nomina</option>
-                                    <option value="Proveedor">Proveedor</option>
-                                    <option value="Mantenimiento">Mantenimiento</option>
-                                    <option value="Otros">Otros</option>
-                                </select>
-                            </label>
-
-                            {gTipo === "Proveedor" ? (
-                                <label className="text-xs font-semibold text-fg-muted">
-                                    Proveedor
-                                    <select
-                                        value={gProveedorId}
-                                        onChange={(e) => setGProveedorId(e.target.value)}
-                                        className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
-                                    >
-                                        <option value="">
-                                            {loadingProveedores ? "Cargando..." : "Selecciona proveedor"}
-                                        </option>
-                                        {proveedores.map((p) => (
-                                            <option key={p.ID_Proveedor} value={p.ID_Proveedor}>
-                                                {p.Nombre_Empresa}
-                                            </option>
-                                        ))}
-                                    </select>
-
-                                    {errProveedores ? (
-                                        <p className="mt-1 text-[11px] text-danger">{errProveedores}</p>
-                                    ) : (
-                                        <p className="mt-1 text-[11px] text-fg-muted">
-                                            Se vinculará el gasto con el proveedor seleccionado.
-                                        </p>
-                                    )}
-                                </label>
-                            ) : null}
-
-                            <label className="text-xs font-semibold text-fg-muted">
-                                Concepto
-                                <input
-                                    value={gConcepto}
-                                    onChange={(e) => setGConcepto(e.target.value)}
-                                    placeholder="Ej: Pedido cocacolas, Luz enero, Agua..."
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle"
-                                />
-                            </label>
-
-                            <label className="text-xs font-semibold text-fg-muted">
-                                Importe (EUR)
-                                <CampoDinero
-                                    {...gImporte.campo}
-                                    placeholder="Ej: 120,50"
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle"
-                                />
-                            </label>
-                            <label className="flex cursor-pointer items-start gap-2 rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg">
-                                <input
-                                    type="checkbox"
-                                    checked={gPagadoConCaja}
-                                    onChange={(e) => setGPagadoConCaja(e.target.checked)}
-                                    className="mt-0.5 size-4 accent-accent"
-                                />
-                                <span>
-                                    <span className="font-semibold">Pagado con dinero del cajón</span>
-                                    <span className="block text-xs text-fg-muted">
-                                        Resta de lo que debería haber en el cierre de caja. Déjalo sin marcar si se pagó por banco o con tarjeta.
-                                    </span>
-                                </span>
-                            </label>
-
-                            {errGasto ? (
-                                <div className="rounded-2xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
-                                    {errGasto}
-                                </div>
-                            ) : null}
-                        </div>
-
-                        <div className="mt-6 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                disabled={savingGasto}
-                                onClick={() => setOpenAddGasto(false)}
-                                className={[
-                                    "h-10 px-4 rounded-xl border border-border bg-surface text-sm font-semibold text-fg shadow-sm",
-                                    "hover:bg-surface-2 active:scale-[0.97]",
-                                    savingGasto ? "opacity-60 cursor-not-allowed" : "",
-                                ].join(" ")}
-                            >
-                                Cancelar
-                            </button>
-
-                            <button
-                                type="button"
-                                disabled={savingGasto}
-                                onClick={conAviso(guardarGasto)}
-                                className={[
-                                    "h-10 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm",
-                                    "hover:bg-accent-hover active:scale-[0.97]",
-                                    savingGasto ? "opacity-60 cursor-not-allowed" : "",
-                                ].join(" ")}
-                            >
-                                {savingGasto ? "Guardando..." : "Guardar gasto"}
-                            </button>
-                        </div>
-                    </div>
-            </ModalShell>
-
-            <ModalShell
-                open={openEditGasto}
-                onClose={() => { if (!savingEditGasto) setOpenEditGasto(false); }}
-            >
-                    <div
-                        className="absolute inset-0 bg-black/40"
-                        onClick={() => (savingEditGasto ? null : setOpenEditGasto(false))}
-                    />
-                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-border bg-surface shadow-xl p-6">
-                        <div className="flex items-start justify-between gap-3">
-                            <div>
-                                <h3 className="text-lg font-semibold text-fg">Editar gasto</h3>
-                                <p className="text-sm text-fg-muted">
-                                    Modifica fecha, tipo, concepto e importe.
-                                </p>
-                            </div>
-
-                            <button
-                                type="button"
-                                className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-                                onClick={() => (savingEditGasto ? null : setOpenEditGasto(false))}
-                                title="Cerrar"
-                            >
-                                <X className="size-4" aria-hidden />
-                            </button>
-                        </div>
-
-                        <div className="mt-5 grid grid-cols-1 gap-3">
-                            <label className="text-xs font-semibold text-fg-muted">
-                                Fecha
-                                <input
-                                    type="date"
-                                    value={egFecha}
-                                    onChange={(e) => setEgFecha(e.target.value)}
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
-                                />
-                            </label>
-
-                            <label className="text-xs font-semibold text-fg-muted">
-                                Tipo
-                                <select
-                                    value={egTipo}
-                                    onChange={(e) => {
-                                        const v = e.target.value;
-                                        setEgTipo(v);
-                                        if (v !== "Proveedor") setEgProveedorId("");
-                                    }}
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
-                                >
-                                    <option value="Suministros">Suministros</option>
-                                    <option value="Luz">Luz</option>
-                                    <option value="Agua">Agua</option>
-                                    <option value="Alquiler">Alquiler</option>
-                                    <option value="Nomina">Nomina</option>
-                                    <option value="Proveedor">Proveedor</option>
-                                    <option value="Mantenimiento">Mantenimiento</option>
-                                    <option value="Otros">Otros</option>
-                                </select>
-                            </label>
-
-                            {egTipo === "Proveedor" ? (
-                                <label className="text-xs font-semibold text-fg-muted">
-                                    Proveedor
-                                    <select
-                                        value={egProveedorId}
-                                        onChange={(e) => setEgProveedorId(e.target.value)}
-                                        className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
-                                    >
-                                        <option value="">
-                                            {loadingProveedores ? "Cargando..." : "Selecciona proveedor"}
-                                        </option>
-                                        {proveedores.map((p) => (
-                                            <option key={p.ID_Proveedor} value={p.ID_Proveedor}>
-                                                {p.Nombre_Empresa}
-                                            </option>
-                                        ))}
-                                    </select>
-
-                                    {errProveedores ? (
-                                        <p className="mt-1 text-[11px] text-danger">{errProveedores}</p>
-                                    ) : null}
-                                </label>
-                            ) : null}
-
-                            <label className="text-xs font-semibold text-fg-muted">
-                                Concepto
-                                <input
-                                    value={egConcepto}
-                                    onChange={(e) => setEgConcepto(e.target.value)}
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
-                                />
-                            </label>
-
-                            <label className="text-xs font-semibold text-fg-muted">
-                                Importe (EUR)
-                                <CampoDinero
-                                    {...egImporte.campo}
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
-                                />
-                            </label>
-                            <label className="flex cursor-pointer items-start gap-2 rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg">
-                                <input
-                                    type="checkbox"
-                                    checked={egPagadoConCaja}
-                                    onChange={(e) => setEgPagadoConCaja(e.target.checked)}
-                                    className="mt-0.5 size-4 accent-accent"
-                                />
-                                <span>
-                                    <span className="font-semibold">Pagado con dinero del cajón</span>
-                                    <span className="block text-xs text-fg-muted">
-                                        Resta de lo que debería haber en el cierre de caja. Déjalo sin marcar si se pagó por banco o con tarjeta.
-                                    </span>
-                                </span>
-                            </label>
-
-                            {errEditGasto ? (
-                                <div className="rounded-2xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
-                                    {errEditGasto}
-                                </div>
-                            ) : null}
-                        </div>
-
-                        <div className="mt-6 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                disabled={savingEditGasto}
-                                onClick={() => setOpenEditGasto(false)}
-                                className={[
-                                    "h-10 px-4 rounded-xl border border-border bg-surface text-sm font-semibold text-fg shadow-sm",
-                                    "hover:bg-surface-2 active:scale-[0.97]",
-                                    savingEditGasto ? "opacity-60 cursor-not-allowed" : "",
-                                ].join(" ")}
-                            >
-                                Cancelar
-                            </button>
-
-                            <button
-                                type="button"
-                                disabled={savingEditGasto}
-                                onClick={conAviso(guardarEditarGasto)}
-                                className={[
-                                    "h-10 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm",
-                                    "hover:bg-accent-hover active:scale-[0.97]",
-                                    savingEditGasto ? "opacity-60 cursor-not-allowed" : "",
-                                ].join(" ")}
-                            >
-                                {savingEditGasto ? "Guardando..." : "Guardar cambios"}
-                            </button>
-                        </div>
-                    </div>
-            </ModalShell>
+            {formularioGasto && <FormularioGasto
+                key={formularioGasto.gasto?.id ?? "nuevo"} gasto={formularioGasto.gasto} fechaInicial={todayYMD()}
+                proveedores={proveedores} errorProveedores={errProveedores} conAvisoDeCierre={conAvisoDeCierre}
+                onCerrar={() => setFormularioGasto(null)} onGuardado={() => void recargarCierres()}
+            />}
 
             <ModalShell
                 open={openEditPago}

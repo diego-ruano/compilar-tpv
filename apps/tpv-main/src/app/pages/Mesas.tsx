@@ -2,24 +2,24 @@ import { usePermisos } from "../../shared/lib/usePermisos";
 // Mesas.tsx
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import MesaComandaModal from "../../features/mesasComponents/MesaComandaModal";
+import MesaComandaModal from "../../features/mesas/MesaComandaModal";
 
-import TopBar from "../../features/mesasComponents/TopBar";
-import SalonTabs from "../../features/mesasComponents/SalonTabs";
-import MapCanvas from "../../features/mesasComponents/MapCanvas";
-import Legend from "../../features/mesasComponents/Legend";
-import KitchenBoard from "../../features/mesasComponents/KitchenBoard";
+import TopBar from "../../features/mesas/TopBar";
+import SalonTabs from "../../features/mesas/SalonTabs";
+import MapCanvas from "../../features/mesas/MapCanvas";
+import Legend from "../../features/mesas/Legend";
+import KitchenBoard from "../../features/mesas/KitchenBoard";
 
-import { fitTransform } from "../../features/mesasComponents/geometry";
-import { useElementSize } from "../../features/mesasComponents/useElementSize";
+import { fitTransform } from "../../features/mesas/geometry";
+import { useElementSize } from "../../features/mesas/useElementSize";
 import type { MesaMetaOut } from "@tpv/contracts";
-import type { Salon } from "../../features/mesasComponents/types";
+import type { Salon } from "../../features/mesas/types";
 import { useAuth } from "../../shared/stores/useAuth";
 
 import {
     useMesasLayout,
     useMesasMesaMeta,
-} from "../../features/mesasComponents/mesasQueries";
+} from "../../features/mesas/mesasQueries";
 
 type MesaMetaMap = Record<number, MesaMetaOut> & Record<string, MesaMetaOut>;
 

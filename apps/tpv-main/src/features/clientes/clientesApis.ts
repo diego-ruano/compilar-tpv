@@ -1,7 +1,7 @@
 import { commands } from "@tpv/client";
-// src/features/ClientsComponents/clientesApis.ts
+// src/features/clientes/clientesApis.ts
 //
-// API de clientes: una función por comando Tauri, con los tipos que genera ts-rs desde Rust. Sin
+// API de clientes: una función por comando Tauri, con los tipos que genera Specta desde Rust. Sin
 // tipos propios ni mappers a otros nombres (RI-53): el gasto acumulado llega como `Dinero`.
 
 

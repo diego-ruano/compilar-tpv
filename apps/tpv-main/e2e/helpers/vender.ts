@@ -10,8 +10,8 @@
 
 import { $, browser } from "@wdio/globals";
 
-import { fitTransform } from "../../src/features/mesasComponents/geometry.js";
-import type { Salon } from "../../src/features/mesasComponents/types.js";
+import { fitTransform } from "../../src/features/mesas/geometry.js";
+import type { Salon } from "../../src/features/mesas/types.js";
 import { conTexto, escribir, irA, leerDeLaApp, literalXPath, pulsar, pulsarXPath } from "./ui.js";
 
 /** Un producto de la carta del test. */

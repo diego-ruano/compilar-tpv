@@ -1,4 +1,4 @@
-// src/features/InventaryComponents/hooks/useInventario.ts
+// src/features/inventario/hooks/useInventario.ts
 //
 // Carga de datos vía TanStack Query (ver ../inventarioQueries.ts). El estado de selección
 // (categoriaSeleccionada) sigue siendo local; las listas se derivan de las queries cacheadas.

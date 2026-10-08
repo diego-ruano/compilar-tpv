@@ -1,386 +1,47 @@
 import { commands } from "@tpv/client";
+import { cn } from "../../shared/lib/cn";
+import { useCatalogoServicio } from "../../shared/lib/useCatalogoServicio";
+import { Modal,NotaLineaModal,ProductCard } from "./ComandaElementos";
+import { addDetalle,deleteDetalleById,ensureOpenComanda,fmtReserva,loadTicketForComanda,removeOnePendingDetalle } from "./comanda";
+import type { Paso,ProductoDisplay,TicketItem } from "./tiposComanda";
 // components/mesasComponents/MesaComandaModal.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Printer, X, ImageOff } from "lucide-react";
-import { resolveImageUrl } from "../../shared/lib/imageUrl";
-import ImageWithFallback from "../../shared/ui/ImageWithFallback";
+import { ImageOff,Printer } from "lucide-react";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
-import { shouldReloadTicket } from "../../shared/lib/syncStatements";
+import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 import { reservasKeys } from "../reservas/reservasQueries";
 
-import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
-import PrintTicketModal, { type CobroImprimible } from "../../shared/ticket/PrintTicketModal";
-import DatosFiscalesModal, {
-} from "../../shared/ticket/DatosFiscalesModal";
-import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
-import { useMode } from "../../shared/stores/useMode";
-import { useToast } from "../../shared/toast";
+import { esError,toAppError } from "@tpv/client";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
-import { esError, toAppError } from "@tpv/client";
+import { useMode } from "../../shared/stores/useMode";
+import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
+import DatosFiscalesModal from "../../shared/ticket/DatosFiscalesModal";
+import PrintTicketModal,{ type CobroImprimible } from "../../shared/ticket/PrintTicketModal";
+import { useToast } from "../../shared/toast";
+import ProductDetailModal from "../inventario/ProductDetailModal";
 
-import { mesasEnsureOpenComanda, mesasLoadTicket, mesasAddDetalle, mesasRemoveOnePendingDetalle, mesasDeleteDetalle, mesasUpdateDetalleNota, mesasCobrarDetalles, productosListByCategoria, productosSearchByNombre, reservaMarcarActivaAhora, reservaFinalizar } from "./mesasApi";
-import { conAviso } from "../../shared/lib/conAviso";
-import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
-import { CERO, abs, eur } from "../../shared/lib/dinero";
 import type {
-    CategoriaVendibleOut,
-    DestinatarioInput,
-    Dinero,
-    MesaLineaComandaRow,
-    MesaMetaOut,
-    ProductoVendibleOut,
+DestinatarioInput,
+MesaMetaOut
 } from "@tpv/contracts";
+import { conAviso } from "../../shared/lib/conAviso";
+import { abs,CERO,eur } from "../../shared/lib/dinero";
 import {
-    cambioDelCobro,
-    DENOMS_COBRO,
-    sumaImportes,
-    totalRecuento,
+cambioDelCobro,
+DENOMS_COBRO,
+sumaImportes,
+totalRecuento,
 } from "../../shared/lib/efectivo";
+import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
+import { mesasCobrarDetalles,mesasUpdateDetalleNota,productosListByCategoria,productosSearchByNombre,reservaFinalizar,reservaMarcarActivaAhora } from "./mesasApi";
 
 /* =========================
    Tipos
 ========================= */
-type CategoriaDisplay = CategoriaVendibleOut & { urlImagen: string };
-type ProductoDisplay = ProductoVendibleOut & { urlImagen: string };
-
-type TicketItem = {
-    id: string; // ID_Detalle
-    productoId: string;
-    nombre: string;
-    precio: Dinero;
-    pagado: boolean;
-    seleccionado: boolean;
-    estadoCocina: "PENDIENTE" | "PREPARADO" | string;
-    pasaCocina: boolean;
-    notas: string | null;
-    /** Tipo de IVA con el que se vendió la línea; `null` = el general del negocio. */
-    iva_percent: number | null;
-};
-
-type Paso = "categorias" | "productos" | "metodo" | "efectivo";
-
-function cn(...classes: Array<string | false | undefined | null>) {
-    return classes.filter(Boolean).join(" ");
-}
-
-
-
-function Modal({
-    open,
-    title,
-    children,
-    onClose,
-    headerRight,
-}: {
-    open: boolean;
-    title: string;
-    children: React.ReactNode;
-    onClose: () => void;
-    headerRight?: React.ReactNode;
-}) {
-    if (!open) return null;
-    return (
-        <div className="fixed inset-0 z-[9999] grid place-items-center bg-black/50 p-1.5 sm:p-2">
-            {/* El ancho se declara con `--modal-width`, no sólo con `max-w-375`: el sistema común
-                de modales de Global.css fuerza `width`/`max-width` con `!important` sobre todo
-                `.fixed.inset-0 > .bg-surface`, así que una utilidad de Tailwind aquí no gana. Sin
-                esto, esta modal se queda en los 42rem del resto y su contenido no cabe: el panel
-                del ticket sale cortado y los botones del contador de efectivo se aplastan a 12 px.
-                Este no es un diálogo de formulario, es la pantalla de trabajo de la comanda. */}
-            <div className="flex h-[calc(100dvh-0.75rem)] w-full max-w-375 [--modal-width:93.75rem] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl sm:h-[min(90dvh,900px)]">
-                <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
-                    <div className="text-lg font-extrabold text-fg">
-                        {title}
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {headerRight}
-                        <button
-                            onClick={onClose}
-                            aria-label="Cerrar"
-                            className="grid size-10 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-                        >
-                            <X className="size-4" aria-hidden />
-                        </button>
-                    </div>
-                </div>
-
-                <div className="min-h-0 flex-1 p-2 sm:p-4">{children}</div>
-            </div>
-        </div>
-    );
-}
-
-/* =========================
-   Modal para nota por línea
-========================= */
-function NotaLineaModal({
-    open,
-    productoNombre,
-    initialValue,
-    onCancel,
-    onSave,
-}: {
-    open: boolean;
-    productoNombre: string;
-    initialValue: string;
-    onCancel: () => void;
-    onSave: (nota: string) => void | Promise<void>;
-}) {
-    const [value, setValue] = useState(initialValue);
-
-    useEffect(() => {
-        if (open) setValue(initialValue);
-    }, [open, initialValue]);
-
-    if (!open) return null;
-
-    return (
-        <div className="fixed inset-0 z-[10000] grid place-items-center bg-black/50 p-2 sm:p-4">
-            <div className="w-full max-w-[520px] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden">
-                <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
-                    <div className="min-w-0">
-                        <p className="text-sm text-fg-subtle font-semibold">
-                            Nota de producto
-                        </p>
-                        <p className="text-lg font-extrabold text-fg truncate">
-                            {productoNombre}
-                        </p>
-                    </div>
-
-                    <button
-                        type="button"
-                        onClick={onCancel}
-                        title="Cerrar"
-                        aria-label="Cerrar"
-                        className="grid size-10 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-                    >
-                        <X className="size-4" aria-hidden />
-                    </button>
-                </div>
-
-                <div className="p-3 sm:p-4">
-                    <textarea
-                        value={value}
-                        onChange={(e) => setValue(e.target.value)}
-                        onKeyDown={(e) => {
-                            const isEnter = e.key === "Enter";
-                            const isModifier = e.ctrlKey || e.metaKey;
-                            if (isEnter && isModifier) {
-                                e.preventDefault();
-                                void onSave(value);
-                            }
-                        }}
-                        placeholder='Ej: "Sin queso", "Muy hecho", "Sin sal"...'
-                        className="w-full min-h-[140px] resize-none rounded-xl border border-border bg-surface px-3 py-3 outline-none focus:ring-2 focus:ring-ring"
-                    />
-                    <p className="mt-2 text-xs text-fg-subtle">
-                        Tip: pulsa <span className="font-semibold">Ctrl + Enter</span> para
-                        guardar rápidamente
-                    </p>
-
-                    <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
-                        <button
-                            type="button"
-                            onClick={onCancel}
-                            className="px-4 py-2 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
-                        >
-                            Cancelar
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={conAviso(() => onSave(value))}
-                            className="px-4 py-2 rounded-xl bg-accent text-white hover:bg-accent-hover text-sm font-semibold"
-                        >
-                            Guardar
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-/* =========================
-   Helpers ticket (sin SQL)
-========================= */
-
-async function ensureOpenComanda(
-    idMesa: string,
-    idUsuario: string | null,
-    reservaActiva?: { idReserva: string } | null,
-): Promise<string> {
-    return await mesasEnsureOpenComanda({
-        idMesa,
-        idUsuario,
-        idReserva: reservaActiva?.idReserva ?? null,
-    });
-}
-
-function mapTicketRows(rows: MesaLineaComandaRow[]): TicketItem[] {
-    const mapped: TicketItem[] = rows.map((r) => {
-        const pasa = r.Pasa_Cocina === 1;
-        return {
-            id: r.ID_Detalle,
-            productoId: r.ID_Producto,
-            nombre: r.Nombre,
-            precio: r.Precio_Unitario,
-            pagado: r.Pagado === 1,
-            seleccionado: false,
-            estadoCocina: pasa ? r.Estado_Cocina || "PENDIENTE" : "NO_COCINA",
-            pasaCocina: pasa,
-            notas: r.Notas,
-            // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
-            iva_percent: r.IVA_Percent ?? null,
-        };
-    });
-    const hayPendientes = mapped.some((t) => !t.pagado);
-    if (!hayPendientes) return [];
-    return mapped;
-}
-
-async function loadTicketForComanda(idComanda: string): Promise<TicketItem[]> {
-    const rows = await mesasLoadTicket(idComanda);
-    return mapTicketRows(rows);
-}
-
-async function addDetalle(
-    idComanda: string,
-    p: ProductoDisplay,
-    operadorId: string | null,
-): Promise<TicketItem[]> {
-    const rows = await mesasAddDetalle({
-        idComanda,
-        idProducto: p.ID_Producto,
-        cantidad: 1,
-        idUsuario: operadorId,
-    });
-    return mapTicketRows(rows);
-}
-
-async function removeOnePendingDetalle(idComanda: string, productoId: string) {
-    await mesasRemoveOnePendingDetalle({ idComanda, idProducto: productoId });
-}
-
-async function deleteDetalleById(idDetalle: string) {
-    await mesasDeleteDetalle(idDetalle);
-}
-
-function fmtReserva(res: NonNullable<MesaMetaOut["reserva"]>) {
-    const min = res.minutosPara;
-    if (res.estado === "ACTIVA") {
-        if (min < 0) return `Reserva activa · llegó hace ${Math.abs(min)} min`;
-        return `Reserva activa · es ahora`;
-    }
-    return `Reserva en ${Math.max(0, min)} min`;
-}
-
-/* =========================
-   Tarjeta de producto (a nivel de módulo: evita que se desmonte/remonte
-   —y se recarguen sus imágenes— en cada re-render del modal de comanda)
-========================= */
-const ProductCard = React.memo(function ProductCard({
-    p,
-    qty,
-    onAdd,
-    onRemove,
-    onInfo,
-    bloqueado,
-}: {
-    bloqueado: boolean;
-    p: ProductoDisplay;
-    qty: number;
-    onAdd: (p: ProductoDisplay) => void;
-    onRemove: (productoId: string) => void;
-    onInfo: (p: ProductoDisplay) => void;
-}) {
-    return (
-        <div className="rounded-xl border border-border bg-surface p-3 text-left">
-            <div
-                role="button"
-                tabIndex={bloqueado ? -1 : 0}
-                aria-disabled={bloqueado}
-                onClick={() => { if (!bloqueado) onAdd(p); }}
-                onKeyDown={(e) => {
-                    if (!bloqueado && (e.key === "Enter" || e.key === " ")) {
-                        e.preventDefault();
-                        onAdd(p);
-                    }
-                }}
-                className="w-full text-left hover:opacity-95 transition cursor-pointer outline-none"
-            >
-                <div className="relative">
-                    <ImageWithFallback
-                        src={p.urlImagen}
-                        alt={p.Nombre}
-                        className="w-full h-28 object-cover rounded-lg border border-border"
-                        fallback={
-                            <div className="flex h-28 w-full items-center justify-center rounded-lg border border-border bg-surface-2 text-fg-subtle">
-                                <ImageOff className="size-6" aria-hidden />
-                            </div>
-                        }
-                    />
-
-                    <button
-                        type="button"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onInfo(p);
-                        }}
-                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-surface/90 border border-border shadow-sm flex items-center justify-center text-fg-muted hover:bg-surface transition"
-                        title="Info"
-                        aria-label={`Info de ${p.Nombre}`}
-                    >
-                        ℹ️
-                    </button>
-
-                    {qty > 0 ? (
-                        <div className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-sm font-bold border-2 border-border">
-                            {qty}
-                        </div>
-                    ) : null}
-                </div>
-
-                <div className="mt-2 flex items-start justify-between gap-2">
-                    <p className="font-semibold leading-tight">{p.Nombre}</p>
-                    <span className="text-sm font-bold">
-                        {eur(p.Precio_Venta)}
-                    </span>
-                </div>
-            </div>
-
-            <div className="mt-3 flex items-center justify-between gap-2">
-                <button
-                    type="button"
-                    onClick={() => onRemove(p.ID_Producto)}
-                    className={cn(
-                        "w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold",
-                        qty === 0 && "opacity-40 cursor-not-allowed",
-                    )}
-                    disabled={qty === 0 || bloqueado}
-                >
-                    −
-                </button>
-
-                <div className="flex-1 text-center rounded-xl border border-border bg-surface-2 py-2">
-                    <p className="text-xs text-fg-muted">Cantidad</p>
-                    <p className="text-lg font-bold">{qty}</p>
-                </div>
-
-                <button
-                    type="button"
-                    onClick={() => { if (!bloqueado) onAdd(p); }}
-                    disabled={bloqueado}
-                    className="w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold"
-                >
-                    +
-                </button>
-            </div>
-        </div>
-    );
-});
+const apiCatalogo = { categorias: () => commands.listCategoriasVendibles(), productos: productosListByCategoria, buscar: productosSearchByNombre };
 
 export default function MesaComandaModal({
     open,
@@ -397,29 +58,20 @@ export default function MesaComandaModal({
     mesaMeta?: MesaMetaOut | null;
     onChanged?: () => void;
 }) {
-    const [categorias, setCategorias] = useState<CategoriaDisplay[]>([]);
-    const [categoriaSeleccionada, setCategoriaSeleccionada] =
-        useState<CategoriaDisplay | null>(null);
-
-    const [productos, setProductos] = useState<ProductoDisplay[]>([]);
-    const [loadingProductos, setLoadingProductos] = useState(false);
-
-    const [query, setQuery] = useState("");
-    const q = query.trim();
-    const [busqueda, setBusqueda] = useState<ProductoDisplay[]>([]);
-    const [loadingBusqueda, setLoadingBusqueda] = useState(false);
+    const { categorias, categoriaSeleccionada, setCategoriaSeleccionada, productos, loadingProductos, query, setQuery, q, busqueda, loadingBusqueda } = useCatalogoServicio(open, apiCatalogo);
 
     const [idComanda, setIdComanda] = useState<string | null>(null);
     const [ticket, setTicket] = useState<TicketItem[]>([]);
     const [loadingTicket, setLoadingTicket] = useState(false);
     const { cola, pendientes: escriturasPendientes } = useColaOperaciones();
     const comandaActualRef = useRef<string | null>(null);
-    const lecturaTicketRef = useRef(0);
+    const lecturaTicketRef = useRef({ version: 0 });
     const cobroEnCursoRef = useRef(false);
     useEffect(() => {
+        const lecturas = lecturaTicketRef.current;
         comandaActualRef.current = open ? idComanda : null;
-        ++lecturaTicketRef.current;
-        return () => { comandaActualRef.current = null; ++lecturaTicketRef.current; };
+        ++lecturaTicketRef.current.version;
+        return () => { comandaActualRef.current = null; ++lecturas.version; };
     }, [open, mesaId, idComanda]);
 
 
@@ -502,7 +154,7 @@ export default function MesaComandaModal({
     const guardarNotaLinea = async (idDetalle: string, nota: string) => {
         if (!idComanda || cobroEnCursoRef.current) return;
         const cId = idComanda;
-        ++lecturaTicketRef.current;
+        ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
             await mesasUpdateDetalleNota({ idDetalle, nota: nota.trim() || null });
             await leerTicket(cId);
@@ -526,35 +178,10 @@ export default function MesaComandaModal({
 
     useEffect(() => {
         if (!open) return;
-
         let cancelado = false;
-        const cargarCategorias = async () => {
-            try {
-                const rows = await commands.listCategoriasVendibles();
-
-                const procesadas: CategoriaDisplay[] = await Promise.all(
-                    (rows ?? []).map(async (cat) => ({
-                        ...cat,
-                        urlImagen: await resolveImageUrl(cat.Ruta_Imagen),
-                    })),
-                );
-
-                if (!cancelado) setCategorias(procesadas);
-            } catch (e) {
-                console.error("Fallo al cargar categorías", e);
-                if (!cancelado) setCategorias([]);
-            }
-        };
-
-        void cargarCategorias();
-        return () => { cancelado = true; };
-    }, [open]);
-
-    useEffect(() => {
-        if (!open) return;
-        let cancelado = false;
+        const lecturas = lecturaTicketRef.current;
         comandaActualRef.current = null;
-        ++lecturaTicketRef.current;
+        ++lecturaTicketRef.current.version;
         setTicket([]);
         setIdComanda(null);
         setLoadingTicket(true);
@@ -579,7 +206,7 @@ export default function MesaComandaModal({
                 if (!cancelado) setLoadingTicket(false);
             }
         })();
-        return () => { cancelado = true; comandaActualRef.current = null; ++lecturaTicketRef.current; };
+        return () => { cancelado = true; comandaActualRef.current = null; ++lecturas.version; };
         // La foto de la reserva sólo cambia al abrir o al cambiar de mesa.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, mesaId, idUsuario, reservaMeta?.estado, reservaMeta?.idReserva]);
@@ -593,10 +220,36 @@ export default function MesaComandaModal({
     }, []);
 
     const leerTicket = useCallback(async (cId: string) => {
-        const lectura = ++lecturaTicketRef.current;
+        const lectura = ++lecturaTicketRef.current.version;
         const t = await loadTicketForComanda(cId);
-        if (lectura === lecturaTicketRef.current) aplicarTicket(cId, t);
+        if (lectura === lecturaTicketRef.current.version) aplicarTicket(cId, t);
     }, [aplicarTicket]);
+
+    const cicloVista = useRef({ valor: 0 });
+    useEffect(() => {
+        const ciclo = cicloVista.current;
+        ++ciclo.valor;
+        return () => { ++ciclo.valor; };
+    }, [open, mesaId]);
+    const marcarLlegada = useCallback(async () => {
+        if (!reserva || cola.pendientes() || cobroEnCursoRef.current) return;
+        const ciclo = cicloVista.current.valor;
+        setLoadingTicket(true);
+        ++lecturaTicketRef.current.version;
+        try {
+            await cola.ejecutar(async () => {
+                await reservaMarcarActivaAhora(reserva.idReserva);
+                invalidarReservas(); notifyChanged();
+                if (ciclo !== cicloVista.current.valor) return;
+                setEstadoReserva("ACTIVA");
+                const cId = await ensureOpenComanda(mesaId, operador, { idReserva: reserva.idReserva });
+                if (ciclo !== cicloVista.current.valor) return;
+                comandaActualRef.current = cId;
+                setIdComanda(cId);
+                await leerTicket(cId);
+            });
+        } finally { if (ciclo === cicloVista.current.valor) setLoadingTicket(false); }
+    }, [reserva, cola, mesaId, operador, invalidarReservas, notifyChanged, leerTicket]);
 
     const reloadTicket = useCallback(async () => {
         if (!idComanda) return;
@@ -624,78 +277,12 @@ export default function MesaComandaModal({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [syncTick]);
 
-    useEffect(() => {
-        let cancelado = false;
-        const cargarProductos = async () => {
-            if (!open) return;
-            if (!categoriaSeleccionada) return;
-
-            setLoadingProductos(true);
-            try {
-                const idCat = String(categoriaSeleccionada.ID_Categoria ?? "");
-
-                const rows = await productosListByCategoria(idCat);
-
-                const procesados: ProductoDisplay[] = await Promise.all(
-                    (rows ?? []).map(async (p) => ({
-                        ...p,
-                        urlImagen: await resolveImageUrl(p.Ruta_Imagen),
-                    })),
-                );
-
-                if (!cancelado) setProductos(procesados);
-            } catch (e) {
-                console.error("Fallo al cargar productos", e);
-                if (!cancelado) setProductos([]);
-            } finally {
-                if (!cancelado) setLoadingProductos(false);
-            }
-        };
-
-        void cargarProductos();
-        return () => { cancelado = true; };
-    }, [open, categoriaSeleccionada]);
-
-    useEffect(() => {
-        if (!open) return;
-
-        let cancelado = false;
-        const run = async () => {
-            if (!q) {
-                setLoadingBusqueda(false);
-                if (!cancelado) setBusqueda([]);
-                return;
-            }
-            setLoadingBusqueda(true);
-            try {
-                const rows = await productosSearchByNombre(q);
-
-                const procesados: ProductoDisplay[] = await Promise.all(
-                    (rows ?? []).map(async (p) => ({
-                        ...p,
-                        urlImagen: await resolveImageUrl(p.Ruta_Imagen),
-                    })),
-                );
-
-                if (!cancelado) setBusqueda(procesados);
-            } catch (e) {
-                console.error("Fallo búsqueda", e);
-                if (!cancelado) setBusqueda([]);
-            } finally {
-                if (!cancelado) setLoadingBusqueda(false);
-            }
-        };
-
-        const t = window.setTimeout(() => void run(), 180);
-        return () => { cancelado = true; window.clearTimeout(t); };
-    }, [open, q]);
-
     const addProductoToTicket = useCallback(async (p: ProductoDisplay) => {
         if (!idComanda || loadingTicket || cobroEnCursoRef.current || (!isAdmin && operador == null)) return;
-        ++lecturaTicketRef.current;
+        ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
             const t = await addDetalle(idComanda, p, operador);
-            ++lecturaTicketRef.current;
+            ++lecturaTicketRef.current.version;
             aplicarTicket(idComanda, t);
             notifyChanged();
         });
@@ -703,7 +290,7 @@ export default function MesaComandaModal({
 
     const removeProductoFromTicket = useCallback(async (productoId: string) => {
         if (!idComanda || loadingTicket || cobroEnCursoRef.current) return;
-        ++lecturaTicketRef.current;
+        ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
             await removeOnePendingDetalle(idComanda, productoId);
             await leerTicket(idComanda);
@@ -761,7 +348,7 @@ export default function MesaComandaModal({
     const eliminarLineaTicket = async (idDetalle: string) => {
         if (!idComanda || cobroEnCursoRef.current || !ticket.some(t => t.id === idDetalle && !t.pagado)) return;
         const cId = idComanda;
-        ++lecturaTicketRef.current;
+        ++lecturaTicketRef.current.version;
         try {
             await cola.ejecutar(async () => {
                 await deleteDetalleById(idDetalle);
@@ -816,7 +403,7 @@ export default function MesaComandaModal({
         }
         cobroEnCursoRef.current = true;
         setCobrandoFactura(true);
-        ++lecturaTicketRef.current;
+        ++lecturaTicketRef.current.version;
 
         try {
             const idPago = await mesasCobrarDetalles({
@@ -845,7 +432,6 @@ export default function MesaComandaModal({
             setPaso("categorias");
             setCategoriaSeleccionada(null);
             setQuery("");
-            setBusqueda([]);
             window.dispatchEvent(new CustomEvent("mesas:changed"));
             notifyChanged();
             // FISCAL-01: se ha cobrado. Si el equipo lleva tres días sin remitir, el aviso sale
@@ -935,10 +521,11 @@ export default function MesaComandaModal({
     }, [paso, showingSearch, categoriaSeleccionada]);
 
     useEffect(() => {
-        if (categoriaSeleccionada && !showingSearch && paso !== "efectivo")
-            setPaso("productos");
-        if (!categoriaSeleccionada && !showingSearch && paso === "productos")
-            setPaso("categorias");
+        setPaso(actual => {
+            if (categoriaSeleccionada && !showingSearch && actual === "categorias") return "productos";
+            if (!categoriaSeleccionada && !showingSearch && actual === "productos") return "categorias";
+            return actual;
+        });
     }, [categoriaSeleccionada, showingSearch]);
 
     const modalTitle = useMemo(() => {
@@ -972,8 +559,7 @@ export default function MesaComandaModal({
                 setPaso("categorias");
                 setCategoriaSeleccionada(null);
                 setQuery("");
-                setBusqueda([]);
-                setCashCount({});
+                    setCashCount({});
                 limpiarSeleccion();
                 cerrarNota();
                 cerrarDetalleProducto();
@@ -1065,32 +651,8 @@ export default function MesaComandaModal({
                             <button
                                 type="button"
                                 className="shrink-0 px-4 py-2 rounded-xl font-semibold border-2 border-blue-600 text-blue-700 bg-surface hover:bg-blue-600 hover:text-white transition"
-                                onClick={conAviso(async () => {
-                                    try {
-                                        await reservaMarcarActivaAhora(reserva.idReserva);
-                                        setEstadoReserva("ACTIVA");
-                                        invalidarReservas();
-                                        notifyChanged();
-
-                                        setLoadingTicket(true);
-
-                                        const cId = await ensureOpenComanda(
-                                            mesaId,
-                                            operador,
-                                            { idReserva: reserva.idReserva },
-                                        );
-
-                                        setIdComanda(cId);
-                                        const t = await loadTicketForComanda(cId);
-                                        setTicket(t);
-
-                                        notifyChanged();
-                                    } catch (e) {
-                                        console.error(e);
-                                    } finally {
-                                        setLoadingTicket(false);
-                                    }
-                                })}
+                                disabled={escriturasPendientes > 0 || cobrandoFactura}
+                                onClick={conAviso(marcarLlegada)}
                             >
                                 ✅ Ha llegado ya el cliente
                             </button>
