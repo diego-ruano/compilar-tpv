@@ -69,19 +69,21 @@ async fn loop_forever(cfg: WorkerConfig) {
             }
             _ = wait_until(drain_at) => {
                 drain_at = None;
-                let events = cfg.state.drain();
-                let mut failed = None;
-                for (i, event) in events.iter().enumerate() {
-                    if let Err(e) = spool.append(event) {
+                // Acotar la vuelta aunque lleguen eventos continuamente. No extraer todo el
+                // anillo a otro Vec: el evento en escritura sigue contando dentro del presupuesto.
+                for _ in 0..cfg.state.pending_len() {
+                    let Some(event) = cfg.state.take() else { break; };
+                    if let Err(e) = spool.append(event.event()) {
                         spool::report_io("escribir", &e);
-                        failed = Some(i);
+                        event.retry();
+                        drain_at = Some(Instant::now() + BACKOFF_MIN);
                         break;
                     }
+                    drop(event);
                     prune(&mut spool, &cfg.state, in_flight.as_ref());
                 }
-                if let Some(i) = failed {
-                    cfg.state.restore(events.into_iter().skip(i).collect());
-                    drain_at = Some(Instant::now() + BACKOFF_MIN);
+                if drain_at.is_none() && cfg.state.pending_len() > 0 {
+                    drain_at = Some(Instant::now() + DRAIN_INTERVAL);
                 }
                 let dropped = cfg.state.take_dropped();
                 if dropped > 0 {

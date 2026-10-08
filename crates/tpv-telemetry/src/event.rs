@@ -41,6 +41,15 @@ pub struct SpoolEvent {
 }
 
 impl SpoolEvent {
+    /// Estimación conservadora de memoria retenida: struct, capacidades y nodos de los campos.
+    pub(crate) fn memory_bytes(&self) -> usize {
+        std::mem::size_of::<Self>() + crate::capture::ALLOCATION_MARGIN + [&self.ts, &self.level, &self.target, &self.message,
+            &self.device_id, &self.device_mode, &self.tenant_id, &self.app_version, &self.environment]
+            .into_iter().map(|text| text.capacity() + crate::capture::ALLOCATION_MARGIN).sum::<usize>()
+            + self.fields.iter().map(|(key, value)| crate::capture::MAP_ENTRY_BYTES
+                + key.capacity() + crate::capture::value_memory(value)).sum::<usize>()
+    }
+
     pub(crate) fn new(
         level: &'static str,
         target: &str,

@@ -21,7 +21,8 @@
 type Regla = { re: RegExp; con: string };
 
 const SECRET_KEYS = String.raw`authorization|auth|password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp|(?:access|refresh|id)[_-]?token|client[_-]?secret`;
-const SECRET_VALUE = String.raw`(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}"']+)`;
+// Una captura acotada puede terminar en mitad del valor o de un escape.
+const SECRET_VALUE = String.raw`(?:"(?:\\[\s\S]|[^"\\])*(?:"|\\?$)|'(?:\\[\s\S]|[^'\\])*(?:'|\\?$)|[^\s,;&}"']+)`;
 const SENSITIVE_RULES = 6;
 const CLAVE_SECRETA = new RegExp(`^(${SECRET_KEYS})$`, "i");
 

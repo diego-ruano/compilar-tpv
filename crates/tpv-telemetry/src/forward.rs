@@ -15,6 +15,7 @@ use tracing_subscriber::Layer;
 
 use crate::event::SpoolEvent;
 use crate::state::TelemetryState;
+use crate::capture::{self, CapturedText};
 
 pub(crate) struct ForwardLayer {
     state: Arc<TelemetryState>,
@@ -31,6 +32,8 @@ impl ForwardLayer {
 struct FieldVisitor {
     message: String,
     fields: Map<String, Value>,
+    bytes: usize,
+    truncated: bool,
 }
 
 impl FieldVisitor {
@@ -38,6 +41,8 @@ impl FieldVisitor {
         Self {
             message: String::new(),
             fields: Map::new(),
+            bytes: 0,
+            truncated: false,
         }
     }
 
@@ -49,17 +54,31 @@ impl FieldVisitor {
                 self.message = value.to_string();
             }
         } else {
+            let bytes = capture::MAP_ENTRY_BYTES + field.name().len() + capture::value_memory(&value);
+            if field.name().len() > 256 || self.fields.len() >= capture::MAX_FIELDS
+                || self.bytes + bytes > capture::FIELDS_BYTES {
+                self.truncated = true;
+                return;
+            }
+            self.bytes += bytes;
             self.fields.insert(field.name().to_string(), value);
         }
+    }
+
+    fn text(&mut self, field: &Field, args: std::fmt::Arguments<'_>) {
+        let limit = if field.name() == "message" { capture::MESSAGE_BYTES } else { capture::FIELD_BYTES };
+        let captured = CapturedText::format(args, limit);
+        self.truncated |= captured.truncated;
+        self.put(field, Value::String(captured.text));
     }
 }
 
 impl Visit for FieldVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        self.put(field, Value::String(format!("{value:?}")));
+        self.text(field, format_args!("{value:?}"));
     }
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.put(field, Value::String(value.to_string()));
+        self.text(field, format_args!("{value}"));
     }
     fn record_i64(&mut self, field: &Field, value: i64) {
         self.put(field, Value::from(value));
@@ -96,9 +115,15 @@ impl<S: Subscriber> Layer<S> for ForwardLayer {
 
         let mut visitor = FieldVisitor::new();
         event.record(&mut visitor);
+        if visitor.truncated {
+            visitor.fields.insert("telemetry_captura_recortada".into(), true.into());
+        }
 
         let ctx = self.state.snapshot_context();
         let ev = SpoolEvent::new(level, meta.target(), visitor.message, visitor.fields, &ctx);
         self.state.push(ev);
     }
 }
+
+#[cfg(test)]
+mod tests;

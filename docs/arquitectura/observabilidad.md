@@ -48,13 +48,23 @@ Better Stack     ── GET /health, latidos del cron
   fsync ni garantía frente a cortes de corriente. Puede haber duplicados si la entrega llega al
   servidor pero su confirmación no llega al dispositivo (entrega al menos una vez).
 - **Retención acotada (RI-19)**: 256 MiB en Main y 64 MiB en Handy, podando los segmentos más
-  antiguos. La antesala tiene un máximo de 20.000 eventos. Los descartes, errores de E/S y líneas
+  antiguos. La antesala tiene un máximo de 20.000 eventos y un presupuesto conservador de memoria
+  de 16 MiB en Main y 4 MiB en Handy (también en Android antes de conocer el modo). Se contabilizan
+  las capacidades de las cadenas, los nodos de campos y el máximo de huecos del anillo. Un evento
+  extraído sigue contando hasta terminar su escritura: no se vacía el anillo a una segunda cola.
+  Se descarta lo más antiguo que no esté en escritura; si ese evento ocupa el presupuesto restante,
+  se descarta la nueva entrada. Los descartes, errores de E/S y líneas
   corruptas quedan en el log local con target `tpv::telemetry`, excluido del reenvío para evitar
   realimentación. Los errores de escritura conservan los eventos no persistidos para reintentar.
 - El cliente recorta el texto conforme al schema del servidor y omite campos estructurados
   excesivos con un marcador. Un 400/413/422 divide el lote hasta aislar el evento rechazado;
   autenticación, rate limit, red y 5xx conservan el lote. El servidor limita el cuerpo antes de
   autenticar y espera Axiom: si falla, responde 502. Sin token de Axiom, sigue siendo un no-op.
+- La captura a la antesala limita el mensaje a 4.000 bytes y cada campo de texto a 4 KiB, sin
+  construir antes su representación completa. Los campos se limitan conjuntamente a 32 KiB de
+  memoria estimada y 64 entradas, más el marcador `telemetry_captura_recortada` cuando se recortan
+  u omiten datos. Un evento de más de 64 KiB de memoria estimada no entra en la antesala. Estos
+  límites se aplican sólo al reenvío; el fichero local conserva el diagnóstico completo.
 - **Escritorio**: el DSN entra al compilar con `TPV_SENTRY_DSN` (`option_env!`, con
   `rerun-if-env-changed` en `build.rs`). Sólo lo pone el workflow de release: en `pnpm tauri dev` no hay
   Sentry, y como la Webview manda sus eventos por el cliente de Rust, tampoco del frontend. El entorno lo
@@ -77,7 +87,7 @@ automático de Sentry, no las cadenas que compone el código.
 Hay **tres copias** porque no pueden compartir código: la Webview (`src/shared/observability/scrub.ts`),
 el core de Rust (`crates/tpv-telemetry/src/scrub.rs`, que vuelve a filtrar todo lo que sale de la Main)
 y el worker (`apps/cloud-worker-licensing/src/observability/scrub.ts`, en el `beforeSend` de Sentry).
-que sale a Axiom se filtra también en `ingestToAxiom`, sobre una copia del lote: cubre los eventos
+Lo que sale a Axiom se filtra también en `ingestToAxiom`, sobre una copia del lote: cubre los eventos
 generados por el worker/DO sin modificar el estado del llamante. Si copiar, filtrar o serializar falla,
 no se envía el lote y la ingesta del dispositivo responde 502 para conservarlo.
 Lo que las mantiene iguales es `crates/tpv-telemetry/src/scrub_casos.json`, la tabla que leen los tests de
@@ -94,10 +104,10 @@ o `(+34)`, incluidos varios teléfonos consecutivos separados por espacios, y ca
 de 13–19 cifras que pasan Luhn. Reconoce claves de credenciales entre comillas en texto JSON y
 variantes explícitas como `access_token`, `refreshToken`, `id-token` y `client_secret`, también
 en objetos anidados. Los valores entre comillas se redactan completos, incluidos espacios y escapes.
+Si la captura termina dentro de un valor entre comillas, se redacta hasta el final del texto.
 La autorización consume el esquema Bearer/Basic y su credencial, sin borrar el texto siguiente;
 las pasadas posteriores conservan los marcadores y el diagnóstico.
-No redacta cualquier número
-largo por su longitud. Rust preselecciona reglas con RegexSet y conserva cadenas prestadas sin
+No redacta cualquier número largo por su longitud. Rust preselecciona reglas con RegexSet y conserva cadenas prestadas sin
 reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idempotencia.
 
 ## Piezas

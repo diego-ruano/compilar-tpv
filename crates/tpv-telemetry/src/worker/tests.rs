@@ -90,6 +90,35 @@ fn handy_tiene_su_presupuesto_incluso_en_escritorio() {
     assert_eq!(spool_limit(&state), 64 * 1024 * 1024);
 }
 
+#[tokio::test(start_paused = true)]
+async fn reintenta_una_escritura_fallida_con_eventos_nuevos_sin_perder_el_orden() {
+    let dir = TestDir::new();
+    let state = state();
+    let task = tokio::spawn(loop_forever(WorkerConfig {
+        spool_dir: dir.0.clone(), ingest: IngestConfig::default(), state: state.clone(),
+    }));
+    tokio::task::yield_now().await;
+    let moved = dir.0.with_extension("moved");
+    std::fs::rename(&dir.0, &moved).unwrap();
+    state.push(event("primero"));
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(1)).await;
+    tokio::task::yield_now().await;
+    let pending_after_error = state.pending_len();
+    state.push(event("segundo"));
+    std::fs::rename(moved, &dir.0).unwrap();
+    assert_eq!(pending_after_error, 1);
+    tokio::time::advance(BACKOFF_MIN).await;
+    tokio::task::yield_now().await;
+    assert_eq!(state.pending_len(), 0);
+    let active = std::fs::read_dir(&dir.0).unwrap().next().unwrap().unwrap().path();
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(active).unwrap().lines()
+        .map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert_eq!(events.iter().map(|e| e["message"].as_str().unwrap()).collect::<Vec<_>>(), ["primero", "segundo"]);
+    task.abort();
+    let _ = task.await;
+}
+
 #[tokio::test]
 async fn solo_los_rechazos_del_cuerpo_son_permanentes_y_se_envian_los_bytes_firmados() {
     struct ExactSigner;

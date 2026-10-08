@@ -23,6 +23,7 @@
 //! `init` NUNCA debe tumbar la app: si falla, el shell registra el error y continúa sin telemetría.
 
 mod context;
+mod capture;
 mod event;
 mod forward;
 mod scrub;

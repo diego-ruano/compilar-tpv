@@ -41,7 +41,8 @@ struct Rule {
 struct Rules { rules: Vec<Rule>, set: RegexSet }
 
 const SECRET_KEYS: &str = r"authorization|auth|password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp|(?:access|refresh|id)[_-]?token|client[_-]?secret";
-const SECRET_VALUE: &str = r#"(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}"']+)"#;
+// Una captura acotada puede terminar en mitad del valor o de un escape: redactarlo hasta el final.
+const SECRET_VALUE: &str = r#"(?:"(?:\\[\s\S]|[^"\\])*(?:"|\\?$)|'(?:\\[\s\S]|[^'\\])*(?:'|\\?$)|[^\s,;&}"']+)"#;
 const SENSITIVE_RULES: usize = 6;
 
 fn rules() -> &'static Rules {
