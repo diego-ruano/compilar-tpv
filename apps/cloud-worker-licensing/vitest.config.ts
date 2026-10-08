@@ -15,9 +15,8 @@ export default defineConfig({
 	plugins: [
 		cloudflareTest({
 			wrangler: { configPath: "./wrangler.json" },
-			// `wrangler.json` declara bindings con `remote: true` (R2 e email). Sin esto
-			// el pool abre conexión con Cloudflare y los tests exigirían credenciales:
-			// dejarían de correr en CI y en cualquier máquina sin `wrangler login`.
+			// RI-46: aunque se habilite un binding remoto para una prueba manual, la suite
+			// siempre usa recursos locales y no requiere credenciales de Cloudflare.
 			remoteBindings: false,
 			miniflare: {
 				bindings: {

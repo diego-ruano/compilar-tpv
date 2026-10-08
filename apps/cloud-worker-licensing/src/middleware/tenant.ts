@@ -21,7 +21,7 @@ import { reportarRechazoDeDispositivo } from "../observability/axiom";
  * El `try` es por los tests y por cualquier contexto sin `executionCtx`: ahí `c.executionCtx`
  * lanza. Perder un aviso nunca puede tumbar una petición.
  */
-function retenerEnvio(c: { executionCtx: ExecutionContext }, p: Promise<unknown>): void {
+function retenerEnvio(c: { executionCtx: Pick<ExecutionContext, "waitUntil"> }, p: Promise<unknown>): void {
 	try {
 		c.executionCtx.waitUntil(p);
 	} catch {

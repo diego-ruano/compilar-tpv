@@ -1,7 +1,7 @@
 {
 	"name": "tpv-api",
 	"main": "src/index.ts",
-	"compatibility_date": "2025-10-08",
+	"compatibility_date": "2026-05-29",
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
@@ -55,8 +55,7 @@
 	},
 	"send_email": [
 		{
-			"name": "EMAIL",
-			"remote": true
+			"name": "EMAIL"
 		}
 	],
 	"r2_buckets": [
@@ -65,18 +64,8 @@
 			"bucket_name": "tpv-images"
 		},
 		{
-			"bucket_name": "tpv-images",
-			"binding": "tpv_images",
-			"remote": true
-		},
-		{
 			"binding": "COPIAS",
 			"bucket_name": "tpv-copias-control"
-		},
-		{
-			"bucket_name": "tpv-copias-control",
-			"binding": "tpv_copias_control",
-			"remote": true
 		}
 	],
 	"triggers": {

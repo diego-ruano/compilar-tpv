@@ -29,6 +29,11 @@ DO `TenantHub` (SQLite), R2 `tpv-images` (público por `r2.dev`) y `tpv-copias-c
 `send_email` (`EMAIL`), los limitadores por IP `LIMITADOR_CLAIM` y `LIMITADOR_LICENCIA` (`lib/limitador.ts`)
 y el cron diario `0 7 * * *`.
 
+RI-46: los bindings de R2 son exclusivamente `IMAGES` y `COPIAS`. En desarrollo local, R2 y
+`EMAIL` se simulan; no llevan `remote: true`. Turso conserva la configuración externa existente.
+La fecha de compatibilidad (`2026-05-29`) coincide con el runtime instalado; los tests reutilizan
+el mismo `wrangler.json` y los tipos se regeneran con `pnpm cf-typegen`.
+
 ## Dos bases, y sólo una se migra desde el código
 
 - **La base de cada tenant** (Turso, una por negocio) se construye con las migraciones de
