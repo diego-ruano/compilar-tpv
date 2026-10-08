@@ -6,9 +6,8 @@
 // licencias o de trabajadores puede llevar un correo, un DNI o un IBAN dentro. Un registro de errores
 // no necesita ninguno, así que lo que tenga forma de dato personal se sustituye por un marcador.
 //
-// Lo que se reenvía a Axiom no pasa por aquí porque no lo necesita: los lotes de los equipos llegan
-// ya filtrados desde el core de Rust, y los eventos propios del worker sólo llevan identificadores y
-// agregados.
+// La salida común a Axiom también aplica este filtro: los lotes del dispositivo llegan filtrados,
+// pero los eventos del worker/DO pueden incluir texto libre de errores.
 //
 // ⚠️ Hay TRES copias de estas reglas, porque no pueden compartir código: ésta, la del core de Rust
 // (`crates/tpv-telemetry/src/scrub.rs`) y la de la Webview (`apps/tpv-main/src/shared/observability/

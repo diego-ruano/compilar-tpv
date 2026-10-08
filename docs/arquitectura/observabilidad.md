@@ -76,8 +76,11 @@ automático de Sentry, no las cadenas que compone el código.
 
 Hay **tres copias** porque no pueden compartir código: la Webview (`src/shared/observability/scrub.ts`),
 el core de Rust (`crates/tpv-telemetry/src/scrub.rs`, que vuelve a filtrar todo lo que sale de la Main)
-y el worker (`apps/cloud-worker-licensing/src/observability/scrub.ts`, en el `beforeSend` de Sentry). Lo
-que las mantiene iguales es `crates/tpv-telemetry/src/scrub_casos.json`, la tabla que leen los tests de
+y el worker (`apps/cloud-worker-licensing/src/observability/scrub.ts`, en el `beforeSend` de Sentry).
+que sale a Axiom se filtra también en `ingestToAxiom`, sobre una copia del lote: cubre los eventos
+generados por el worker/DO sin modificar el estado del llamante. Si copiar, filtrar o serializar falla,
+no se envía el lote y la ingesta del dispositivo responde 502 para conservarlo.
+Lo que las mantiene iguales es `crates/tpv-telemetry/src/scrub_casos.json`, la tabla que leen los tests de
 las tres: **una regla nueva lleva su caso ahí**, o las otras copias no se enteran. Usa fronteras y dígitos
 ASCII (`(?-u:\b)`, `[0-9]`) para que Rust y JavaScript decidan igual.
 

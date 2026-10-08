@@ -8,6 +8,7 @@
 // worker los retransmite. Si `AXIOM_TOKEN` no está configurado, el reenvío es un no-op silencioso.
 
 import type { Env } from "../env";
+import { scrub, scrubDeep } from "./scrub";
 
 /*
  * ⚠️ REGLA DE ESTE FICHERO: los reporteros DEVUELVEN la promesa de la entrega, y quien los llama
@@ -54,25 +55,29 @@ export async function ingestToAxiom(
 	const dominio = env.AXIOM_DOMAIN || "eu-central-1.aws.edge.axiom.co";
 	const url = `https://${dominio}/v1/ingest/${encodeURIComponent(dataset)}`;
 	try {
+		// OBS-01: cubrir también los errores producidos en el worker/DO. Filtrar una copia
+		// evita modificar objetos que todavía utiliza el llamante. Si falla, no se envía.
+		const payload = structuredClone(events);
+		scrubDeep(payload);
 		const resp = await fetch(url, {
 			method: "POST",
 			headers: {
 				Authorization: `Bearer ${env.AXIOM_TOKEN}`,
 				"Content-Type": "application/json",
 			},
-			body: JSON.stringify(events),
+			body: JSON.stringify(payload),
 		});
 		if (!resp.ok) {
 			console.warn(
-				`[axiom] ingest ${dataset} respondió ${resp.status}: ${await resp
+				scrub(`[axiom] ingest ${dataset} respondió ${resp.status}: ${await resp
 					.text()
-					.catch(() => "")}`,
+					.catch(() => "")}`),
 			);
 			return false;
 		}
 		return true;
 	} catch (e) {
-		console.warn(`[axiom] ingest ${dataset} falló: ${String(e)}`);
+		console.warn(scrub(`[axiom] ingest ${dataset} falló: ${String(e)}`));
 		return false;
 	}
 }
