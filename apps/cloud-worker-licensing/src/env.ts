@@ -1,3 +1,4 @@
+import type { TenantHub } from "./durableObjects/tenantHub";
 // src/env.ts
 //
 // Env unificado del worker `tpv-api` (antes `tpv-licensing`).
@@ -76,7 +77,7 @@ export interface Env {
 	LIMITADOR_LICENCIA?: RateLimit;
 
 	// Durable Object (WebSocket hub por tenant)
-	TenantHub: DurableObjectNamespace;
+	TenantHub: DurableObjectNamespace<TenantHub>;
 
 	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).
 	// Las claves replican la ruta de la Main: `{tenantId}/images/{subcarpeta}/{uuid}.jpg`.

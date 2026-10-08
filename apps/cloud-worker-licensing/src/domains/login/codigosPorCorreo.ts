@@ -22,7 +22,7 @@
 import type { Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
-import { hmacSha256Hex } from "../../lib/internalAuth";
+import { hmacSha256Hex } from "../../server/utils/hmac";
 import { timingSafeEqualHex } from "../../server/utils/crypto";
 import {
 	consumeEmailCode,

@@ -105,6 +105,15 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 
 ## Sincronización y firmas
 
+El binding `TenantHub` está tipado y llama por RPC a `aplicar`, `revocarDispositivo` y
+`avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los helpers y credenciales
+permanecen en un motor interno que no pertenece al prototipo RPC. No se publican rutas
+`/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con otro Worker
+ni convertirse en un proxy público. La autenticación del cliente y los gates de cada ruta siguen
+ejecutándose antes de llamar al DO. Sentry instrumenta también las llamadas RPC, con tracing de
+rendimiento desactivado. Los errores de negocio cruzan como un resultado tipado y los inesperados
+como excepciones. WebSockets, attachments, alarmas y almacenamiento conservan su funcionamiento.
+
 RI-44: `/v1/sync/changes` valida en SQLite que las sentencias guardadas sean un array JSON y
 conserva ese fragmento en la respuesta. Un registro inválido falla explícitamente; no se sustituye
 por una operación vacía. Ed25519 firma y verifica exclusivamente con WebCrypto en producción;

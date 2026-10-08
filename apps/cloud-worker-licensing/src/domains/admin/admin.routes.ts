@@ -227,7 +227,6 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	// activarse no hay `main_device_id` ni socket que cerrar.
 	await cerrarSocketsDelDispositivo(
 		c.env.TenantHub,
-		String(c.env.LICENSE_JWT_SECRET || ""),
 		String(lic.tenant_id || ""),
 		String(lic.main_device_id || ""),
 	);

@@ -1,9 +1,8 @@
 // src/lib/sesion.ts
 //
 // El JWT de sesión con el que un dispositivo —la Main o una Handy— se identifica ante el worker.
-// Hermano de `deviceAuth.ts` (la firma ed25519 del dispositivo) y de `internalAuth.ts` (el HMAC
-// entre el worker y el Durable Object): tres primitivas de autenticación, una por módulo, cada
-// una la única fuente de su formato.
+// Hermano de `deviceAuth.ts` (la firma Ed25519 del dispositivo). Las llamadas al Durable Object
+// usan el binding RPC del worker; no llevan un segundo protocolo de autenticación HTTP.
 //
 // ── UNA SOLA IMPLEMENTACIÓN (ARQ-02) ─────────────────────────────────────────────────────
 //

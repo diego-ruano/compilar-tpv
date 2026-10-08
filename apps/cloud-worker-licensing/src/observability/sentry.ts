@@ -18,6 +18,7 @@ export function sentryOptions(env: Env) {
 		// División de responsabilidades: Sentry = errores; el tracing de rendimiento se desactiva
 		// (0) para no duplicar coste con Axiom. Se puede subir si hace falta perfilar.
 		tracesSampleRate: 0,
+		enableRpcTracePropagation: true,
 		// Nunca enviar PII por defecto (datos de clientes/ventas). GDPR.
 		sendDefaultPii: false,
 		// OBS-01: `sendDefaultPii` no llega al mensaje de una excepción ni a los breadcrumbs. Esto

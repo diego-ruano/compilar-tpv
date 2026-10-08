@@ -2,31 +2,21 @@
 //
 // Puente con el Durable Object TenantHub para las ESCRITURAS de la API.
 //
-// Toda escritura va al MISMO motor del DO (`/internal/apply`): aplica en Turso
+// Toda escritura va al MISMO motor del DO (RPC `aplicar`): aplica en Turso
 // dentro de una transacción, registra idempotencia por `Op_Id` y, tras confirmar,
 // hace broadcast del cambio por WebSocket al resto de dispositivos. El DO también
 // rechaza la escritura con `main_offline` si no hay una Main conectada.
 
 import type { Env } from "../env";
 import { HubError } from "./errorHttp";
-import { signInternalWorkerRequest } from "./internalAuth";
+import type { ApplyParams, ResultadoAplicacion } from "../durableObjects/tenantHub.rpc";
+export type { ApplyParams } from "../durableObjects/tenantHub.rpc";
 
 export { HubError } from "./errorHttp";
 
 export type ApplyCommand = {
 	type: "tenantDb.exec" | "tenantDb.transaction";
 	payload: any;
-};
-
-export type ApplyParams = {
-	tenantId: string;
-	deviceId: string;
-	opId: string;
-	commandName: string;
-	command: ApplyCommand;
-	cloudPayload?: any;
-	/** Hora local del dispositivo emisor (`YYYY-MM-DD HH:MM:SS`) para resolver `datetime('now')`. */
-	clientNow?: string;
 };
 
 /**
@@ -77,8 +67,7 @@ function escrituraVetada(command: ApplyCommand): string | null {
 }
 
 export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
-	const { tenantId, deviceId, opId, commandName, command, cloudPayload, clientNow } =
-		params;
+	const { tenantId, command } = params;
 
 	// FISCAL-01. Este es el camino de la API REST, o sea el de la Handy: el outbox de la Main
 	// entra por el WebSocket del DO y no pasa por aquí. Una regla que sólo viviera en la interfaz
@@ -91,45 +80,9 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 	const id = env.TenantHub.idFromName(tenantId);
 	const stub = env.TenantHub.get(id);
 
-	const rawBody = JSON.stringify({
-		type: command.type,
-		payload: command.payload,
-		opId,
-		commandName,
-		deviceId,
-		cloud_payload: cloudPayload ?? null,
-		client_now: clientNow ?? null,
-	});
-
-	// Firma HMAC del worker → el DO verifica que la escritura proviene de `tpv-api`
-	// legítimo. `pathname`/`body` deben coincidir con los que verá el verificador.
-	const sigHeaders = await signInternalWorkerRequest(
-		String(env.LICENSE_JWT_SECRET || ""),
-		"POST",
-		"/internal/apply",
-		rawBody,
-	);
-
-	const res = await stub.fetch("https://do/internal/apply", {
-		method: "POST",
-		headers: {
-			"content-type": "application/json",
-			"x-tenant-id": tenantId,
-			"x-device-id": deviceId,
-			...(clientNow ? { "x-client-now": clientNow } : {}),
-			...sigHeaders,
-		},
-		body: rawBody,
-	});
-
-	const json: any = await res.json().catch(() => ({}));
-
-	if (!res.ok || !json?.ok) {
-		const code = String(json?.error || "apply_failed");
-		throw new HubError(code, res.status || 500);
-	}
-
-	return json.data;
+	const respuesta: ResultadoAplicacion = await stub.aplicar(params);
+	if (!respuesta.ok) throw new HubError(respuesta.error, respuesta.status, respuesta.details);
+	return respuesta.data;
 }
 
 /**
@@ -147,8 +100,7 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
  * reconnect o en la siguiente vuelta del job. Un fallo aquí nunca puede tumbar la operación.
  */
 export async function cerrarSocketsDelDispositivo(
-	hubNs: DurableObjectNamespace,
-	jwtSecret: string,
+	hubNs: Env["TenantHub"],
 	tenantId: string,
 	deviceId: string,
 ): Promise<void> {
@@ -157,22 +109,7 @@ export async function cerrarSocketsDelDispositivo(
 	try {
 		const stub = hubNs.get(hubNs.idFromName(tenantId));
 
-		const rawBody = JSON.stringify({ deviceId });
-
-		// FABLE-F: misma firma HMAC que `/internal/apply`. `pathname` y `rawBody` tienen que
-		// coincidir EXACTAMENTE con los que verá el verificador del DO.
-		const sigHeaders = await signInternalWorkerRequest(
-			jwtSecret,
-			"POST",
-			"/internal/revoke",
-			rawBody,
-		);
-
-		await stub.fetch("https://do/internal/revoke", {
-			method: "POST",
-			headers: { "content-type": "application/json", ...sigHeaders },
-			body: rawBody,
-		});
+		await stub.revocarDispositivo(deviceId);
 	} catch {
 		// Ver arriba: si falla, el dispositivo se bloquea en el próximo reconnect.
 	}

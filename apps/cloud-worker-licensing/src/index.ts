@@ -66,13 +66,10 @@ import { completarErrores } from "./middleware/completarErrores";
 
 // El Durable Object vive ahora en este worker (antes en `tpv-server`). Se instrumenta con Sentry
 // para capturar las excepciones de su ciclo de vida (apply idempotente, WebSocket, broadcast).
-// `TenantHub` es un DO de estilo CLÁSICO (clase con método `fetch`, no `extends DurableObject`):
-// la instrumentación funciona en runtime con cualquier DO, pero la firma de tipos del SDK espera
-// la clase base moderna, de ahí el cast acotado.
 import { TenantHub as TenantHubClass } from "./durableObjects/tenantHub";
 export const TenantHub = Sentry.instrumentDurableObjectWithSentry(
 	sentryOptions,
-	TenantHubClass as any,
+	TenantHubClass,
 );
 
 const app = new Hono<{ Bindings: Env }>();

@@ -21,7 +21,6 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
-import { verifyInternalWorkerRequest } from "../src/lib/internalAuth";
 import {
 	activateLicenseFirstTime,
 	getLicenseById,
@@ -47,7 +46,7 @@ vi.mock("../src/server/db", async (importOriginal) => {
 });
 
 /** Una llamada que la ruta le hizo al `TenantHub`, tal cual salió. */
-type LlamadaAlHub = { nombreDO: string; request: Request; rawBody: string };
+type LlamadaAlHub = { nombreDO: string; deviceId: string };
 
 type Escenario = {
 	/** Golpea una ruta de admin con el token bueno. */
@@ -67,7 +66,7 @@ type Escenario = {
  *
  * No se puede usar el binding de verdad: `enElHub` ya está *dentro* de un Durable Object y lo que
  * interesa comprobar no es lo que el DO hace con el aviso (eso es cosa suya y de sus tests) sino
- * que la ruta se lo manda —al DO correcto, en la ruta correcta y con la firma correcta—, que es lo
+ * que la ruta se lo manda —al DO correcto, con el dispositivo correcto por RPC—, que es lo
  * único que puede romperse desde aquí sin que nadie se entere.
  */
 function hubDeMentira() {
@@ -77,11 +76,9 @@ function hubDeMentira() {
 	const ns = {
 		idFromName: (nombre: string) => ({ nombre }),
 		get: ({ nombre }: { nombre: string }) => ({
-			fetch: async (url: string, init: RequestInit) => {
+			revocarDispositivo: async (deviceId: string) => {
 				if (roto) throw new Error("el DO no contesta");
-				const request = new Request(url, init);
-				llamadas.push({ nombreDO: nombre, request, rawBody: String(init.body ?? "") });
-				return new Response("OK", { status: 200 });
+				llamadas.push({ nombreDO: nombre, deviceId });
 			},
 		}),
 	} as unknown as DurableObjectNamespace;
@@ -164,9 +161,9 @@ describe("admin · anular corta el socket de la Main", () => {
 	// reconecta a los 3 s, `/v1/ws/ticket` le contesta 403 y `useMainSocket` traduce ese rechazo en
 	// un `license_check_now`, que emite `license:changed` y tapa la aplicación. La pieza frágil, y
 	// por tanto lo que se fija aquí, es que el aviso salga bien formado: al DO del tenant correcto,
-	// a `/internal/revoke`, con el `deviceId` de la Main y con la firma que ese endpoint verifica.
+	// a `revocarDispositivo`, con el `deviceId` de la Main.
 
-	it("avisa al TenantHub del tenant, firmado y con el dispositivo de la Main", async () => {
+	it("avisa por RPC al TenantHub del tenant con el dispositivo de la Main", async () => {
 		await escenario(async (e) => {
 			const lic = await e.emitir();
 			await e.activar(lic.license_id);
@@ -179,16 +176,7 @@ describe("admin · anular corta el socket de la Main", () => {
 
 			// El DO se direcciona por `tenantId`: uno distinto sería avisar a otro negocio.
 			expect(llamada.nombreDO).toBe("tenant-1");
-			expect(new URL(llamada.request.url).pathname).toBe("/internal/revoke");
-			expect(JSON.parse(llamada.rawBody)).toEqual({ deviceId: "device-main" });
-
-			// Y la firma tiene que pasar el MISMO verificador que corre en el DO. Comprobar que
-			// los headers "están" no prueba nada: el payload firmado incluye el método, el
-			// pathname y el cuerpo, así que basta desalinear cualquiera de los tres para que el
-			// DO conteste 401 y el corte no ocurra — en silencio, porque es best-effort.
-			await expect(
-				verifyInternalWorkerRequest(llamada.request, JWT_SECRET, llamada.rawBody),
-			).resolves.toBeUndefined();
+			expect(llamada.deviceId).toBe("device-main");
 		});
 	});
 

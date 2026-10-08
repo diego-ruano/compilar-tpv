@@ -17,11 +17,7 @@
 // outbox de la Main entra por el WebSocket del DO y no pasa por ahí. Está en el código y no en la
 // revisión de quien añada la próxima ruta, que es lo que se olvida.
 
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("../src/lib/internalAuth", () => ({
-	signInternalWorkerRequest: async () => ({}),
-}));
+import { describe, it, expect } from "vitest";
 
 const { applyViaHub, HubError } = await import("../src/lib/hub");
 
@@ -33,9 +29,9 @@ function entorno() {
 		TenantHub: {
 			idFromName: () => "id",
 			get: () => ({
-				fetch: async () => {
+				aplicar: async () => {
 					llamado = true;
-					return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200 });
+					return { ok: true, data: {} };
 				},
 			}),
 		},

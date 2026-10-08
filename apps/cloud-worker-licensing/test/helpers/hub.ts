@@ -6,10 +6,8 @@
 
 import { env, runInDurableObject } from "cloudflare:test";
 
-// `runInDurableObject` está declarado como `<O extends DurableObject | Rpc.DurableObject, R>`.
-// El binding `TenantHub` no lleva parámetro de tipo, así que `O` cae a esa unión y tsc aborta
-// (TS2589) expandiendo el stub RPC de todos sus métodos. No hay tipo que darle —
-// `DurableObjectStub<any>` explota igual—, de modo que aquí se aplana la firma una sola vez.
+// El binding RPC es tipado; este arnes local accede al campo de instancia del motor
+// para inyectar dobles en los helpers privados. Esa instancia no se devuelve por RPC.
 const ejecutar = runInDurableObject as unknown as (
 	stub: unknown,
 	callback: (hub: any) => unknown,
@@ -27,5 +25,5 @@ export async function enElHub<R>(
 ): Promise<R> {
 	const ns = (env as any).TenantHub as DurableObjectNamespace;
 	const stub = ns.get(ns.idFromName(nombre));
-	return (await ejecutar(stub, callback)) as R;
+	return (await ejecutar(stub, (hub) => callback(hub.motor))) as R;
 }

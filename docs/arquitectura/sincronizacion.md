@@ -14,7 +14,7 @@ sin nube no opera.
 │ _Sync_State          │◄── catch-up ──────────────────│ · difunde a los demás      │
 └──────────────────────┘                               └─────────────┬──────────────┘
 ┌──────────────────────┐   REST /v1/<dominio>                        │
-│ HANDY (sin base)     │── escrituras ──► lib/hub.ts → /internal/apply
+│ HANDY (sin base)     │── escrituras ──► lib/hub.ts → RPC aplicar
 │ lee por REST         │◄── change (WS): vuelve a pedir lo que cambió
 └──────────────────────┘                                             ▼
                                                            ┌──────────────────┐
@@ -36,9 +36,9 @@ sin nube no opera.
 | Socket de la Handy | `src-tauri/src/socket_handy.rs` · `tpv-application/src/use_cases/presencia_handy.rs` | Servicio nativo de presencia y avisos, independiente de React. La UI observa `handy:estado` y `handy:cambio` |
 | Transporte común | `tpv-infra-http/src/websocket.rs` · `tpv-application/src/use_cases/saludo_socket.rs` | TLS, latido, buffers y tiempos acotados; saludo firmado y rol confirmado. Main y Handy conservan casos de uso distintos |
 | Qué refrescar | `tpv-application/src/use_cases/avisos_nube.rs` · `src/shared/lib/syncStatements.ts` | Rust deriva tablas e IDs sin exponer SQL; React los traduce a sus cachés y al ticket abierto |
-| El DO | `apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts` | La clase: hibernación, presencia, purga, cola por `alarm` |
+| El DO | `apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts` | Adaptador RPC y callbacks del runtime; motor interno en `tenantHub.motor.ts` |
 | …lo que llega por WS | `tenantHub.mensajes.ts` | Una rama por mensaje |
-| …por HTTP | `tenantHub.rutas.ts` | `/internal/apply`, `/internal/revoke`… |
+| …el transporte | `tenantHub.rutas.ts`, `tenantHub.rpc.ts` | Upgrade WebSocket y contratos de aplicar, revocar y avisar |
 | …el saludo | `tenantHub.identidad.ts` | Quién llama y qué puede hacer |
 | …la cola | `tenantHub.cola.ts` | `_Cola_Entrada`, `_Cola_Estado`, `_Cola_Muerta` |
 | …el lote | `tenantHub.lote.ts`, `tenantHub.sentencias.ts`, `tenantHub.envelope.ts` | De un comando a sentencias; el sobre que se guarda en `Sync_Changes` |
@@ -270,7 +270,7 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 ## Las escrituras de la Handy
 
 Cada dominio del worker tiene su `*.commands.ts`, que construye la transacción (`BuiltCommand`) y la
-aplica por `lib/hub.ts` → `/internal/apply` del DO, que la ejecuta en Turso y la difunde. Sólo el rol
+aplica por `lib/hub.ts` → RPC `aplicar` del DO, que la ejecuta en Turso y la difunde. Sólo el rol
 `tpv` puede ejecutar SQL por el WebSocket, y el rol lo dicta la base central, no el cliente. Lo que la
 Handy no puede hacer, lo veta un middleware antes de leer el cuerpo ([worker.md](worker.md)). La lógica
 duplicada entre Rust y estos comandos la sujetan los arneses de contrato

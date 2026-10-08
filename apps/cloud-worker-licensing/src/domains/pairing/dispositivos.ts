@@ -6,6 +6,7 @@
 // Como el resto del dominio, aquí sólo se decide: quién pregunta lo resuelven `tenantAuth` y
 // `soloLaMain` en la ruta.
 
+import type { Env } from "../../env";
 import type { Client } from "@libsql/client/web";
 
 import { SQL_DEVICE_ACTIVO } from "../../lib/deviceAuth";
@@ -42,7 +43,7 @@ export async function listarDispositivos(db: Client, tenantId: string): Promise<
 export async function revocarDispositivo(
 	db: Client,
 	env: any,
-	hubNs: DurableObjectNamespace,
+	hubNs: Env["TenantHub"],
 	tenantId: string,
 	quienPide: string,
 	objetivo: string,
@@ -67,7 +68,6 @@ export async function revocarDispositivo(
 	// Best-effort: si falla, el dispositivo quedará bloqueado en el próximo reconnect.
 	await cerrarSocketsDelDispositivo(
 		hubNs,
-		String(env.LICENSE_JWT_SECRET || ""),
 		tenantId,
 		objetivo,
 	);
