@@ -1,3 +1,4 @@
+import { toAppError } from "@tpv/client";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Users, Plus } from "lucide-react";
 
@@ -11,14 +12,13 @@ import {
   useTurnos,
   useTrabajadorIdByUsuario,
   useAsignacionesSemana,
-  useCreateAsignacion,
-  useUpdateAsignacion,
+  useGuardarAsignacion,
   useDeleteAsignacion,
   useCopySemanaAsignaciones,
   useSetPredeterminadoDesdeSemana,
 } from "../../features/trabajadores/trabajadoresQueries";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../shared/stores/useAuth";
 import { usePermisos } from "../../shared/lib/usePermisos";
 import { esAdmin } from "../../shared/lib/permisos";
@@ -350,8 +350,8 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   );
   const asignacionesQuery = useAsignacionesSemana(lunesYMD);
 
-  const createAsignacion = useCreateAsignacion();
-  const updateAsignacion = useUpdateAsignacion();
+  const guardarAsignacion = useGuardarAsignacion();
+  const guardandoRef = useRef(false);
   const deleteAsignacion = useDeleteAsignacion();
   const copySemana = useCopySemanaAsignaciones();
   const setPredeterminado = useSetPredeterminadoDesdeSemana();
@@ -370,8 +370,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     turnosQuery.isFetching ||
     asignacionesQuery.isFetching ||
     trabajadorIdQuery.isFetching ||
-    createAsignacion.isPending ||
-    updateAsignacion.isPending ||
+    guardarAsignacion.isPending ||
     deleteAsignacion.isPending ||
     copySemana.isPending ||
     setPredeterminado.isPending;
@@ -558,16 +557,18 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     setArea(a.Area || "Sala");
     setNotas(a.Notas ?? "");
 
-    setTurnoPartido(false);
-    setHoraInicio1(hhmm(a.Hora_Inicio));
-    setHoraFin1(hhmm(a.Hora_Fin));
-    setHoraInicio2("");
-    setHoraFin2("");
+    const grupo = a.ID_Grupo ? asignaciones.filter(it => it.ID_Grupo === a.ID_Grupo).sort((x, y) => (x.Hora_Inicio ?? "").localeCompare(y.Hora_Inicio ?? "")) : [a];
+    setEditIdAsignacion(grupo[0].ID_Asignacion);
+    setTurnoPartido(grupo.length === 2);
+    setHoraInicio1(hhmm(grupo[0].Hora_Inicio));
+    setHoraFin1(hhmm(grupo[0].Hora_Fin));
+    setHoraInicio2(hhmm(grupo[1]?.Hora_Inicio));
+    setHoraFin2(hhmm(grupo[1]?.Hora_Fin));
 
     setModalOpen(true);
   };
 
-  const closeModal = () => setModalOpen(false);
+  const closeModal = () => { if (!guardandoRef.current) setModalOpen(false); };
 
   const validateRange = (ini: string, fin: string) => {
     if (!ini || !fin) return "Debes indicar hora inicio y hora fin.";
@@ -577,6 +578,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   };
 
   const guardarModal = async () => {
+    if (guardandoRef.current) return;
     setError(null);
 
     if (!isAdmin) return;
@@ -591,45 +593,25 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
       if (err2) return setError(`Tramo 2: ${err2}`);
     }
 
+    guardandoRef.current = true;
     try {
-      if (modalMode === "create") {
-        await createAsignacion.mutateAsync({
-          id_trabajador: selectedTrabajadorId,
-          fecha: selectedFecha,
-          id_turno: id_turno,
-          area,
-          hora_inicio: horaInicio1,
-          hora_fin: horaFin1,
-          notas: notas ? notas : null,
-        });
-
-        if (turnoPartido) {
-          await createAsignacion.mutateAsync({
-            id_trabajador: selectedTrabajadorId,
-            fecha: selectedFecha,
-            id_turno: id_turno,
-            area,
-            hora_inicio: horaInicio2,
-            hora_fin: horaFin2,
-            notas: notas ? notas : null,
-          });
-        }
-      } else {
-        if (!editIdAsignacion) return;
-        await updateAsignacion.mutateAsync({
-          id_asignacion: editIdAsignacion,
-          id_turno: id_turno,
-          area,
-          hora_inicio: horaInicio1,
-          hora_fin: horaFin1,
-          notas: notas ? notas : null,
-        });
-      }
-
-      closeModal();
+      await guardarAsignacion.mutateAsync({
+        id_asignacion: modalMode === "edit" ? editIdAsignacion : null,
+        id_trabajador: selectedTrabajadorId,
+        fecha: selectedFecha,
+        id_turno,
+        area,
+        notas: notas || null,
+        tramos: [
+          { hora_inicio: horaInicio1, hora_fin: horaFin1 },
+          ...(turnoPartido ? [{ hora_inicio: horaInicio2, hora_fin: horaFin2 }] : []),
+        ],
+      });
+      setModalOpen(false);
     } catch (e) {
-      console.error(e);
-      setError("No se pudo guardar la asignacion.");
+      setError(toAppError(e).message);
+    } finally {
+      guardandoRef.current = false;
     }
   };
 
@@ -1036,7 +1018,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                   checked={turnoPartido}
                   onChange={(e) => setTurnoPartido(e.target.checked)}
                   className="w-4 h-4"
-                  disabled={modalMode === "edit"}
+                  disabled={loading}
                 />
                 <label htmlFor="partido" className="text-sm font-medium">
                   Turno partido (2 tramos)
@@ -1063,7 +1045,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 />
               </div>
 
-              {turnoPartido && modalMode === "create" && (
+              {turnoPartido && (
                 <>
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium">Hora inicio (tramo 2)</label>
@@ -1098,6 +1080,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               </div>
             </div>
 
+            {error && <p role="alert" className="rounded-xl bg-danger-soft p-3 text-sm text-danger">{error}</p>}
             <div className="grid grid-cols-2 gap-2 pt-2 sm:flex sm:items-center sm:justify-end">
               <button
                 type="button"

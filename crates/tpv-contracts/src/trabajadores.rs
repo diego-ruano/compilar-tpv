@@ -79,6 +79,8 @@ pub struct TurnoRow {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct AsignacionRow {
+    #[serde(rename = "ID_Grupo", default)]
+    pub id_grupo: Option<String>,
     #[serde(rename = "ID_Asignacion")]
     pub id_asignacion: String,
     #[serde(rename = "ID_Trabajador")]
@@ -116,6 +118,28 @@ pub struct TrabajadorIdByUsuarioArgs {
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct HorariosSemanaArgs {
     pub fecha_lunes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct TramoHorarioInput {
+    pub hora_inicio: String,
+    pub hora_fin: String,
+}
+
+/// RI-85: crear o sustituir el conjunto de tramos en una única transacción.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct AsignacionGuardarInput {
+    #[serde(default)]
+    pub id_asignacion: Option<String>,
+    pub id_trabajador: String,
+    pub fecha: String,
+    pub id_turno: String,
+    pub area: String,
+    #[serde(default)]
+    pub notas: Option<String>,
+    pub tramos: Vec<TramoHorarioInput>,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]

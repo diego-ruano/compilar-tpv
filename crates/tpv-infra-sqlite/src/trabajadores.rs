@@ -196,7 +196,14 @@ impl SqliteTrabajadoresRepository {
 }
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
+    let mensaje = e.to_string();
+    if mensaje.contains("horario_solapado") {
+        AppError::conflict("Ese horario se solapa con otro tramo del trabajador. Corrige las horas antes de guardar.")
+    } else if mensaje.contains("horario_invalido") {
+        AppError::validation("El horario contiene una fecha o unas horas inválidas.")
+    } else {
+        AppError::repository(mensaje)
+    }
 }
 
 fn weekday_1_to_7_from_ymd(ymd: &str) -> Option<i64> {
@@ -416,7 +423,8 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             a.Hora_Inicio,
             a.Hora_Fin,
             a.Notas,
-            t.Nombre_Turno
+            t.Nombre_Turno,
+            a.ID_Grupo
           FROM Asignacion_Turnos a
           JOIN Turnos t ON t.ID_Turno = a.ID_Turno
           WHERE a.Fecha >= date(?1)
@@ -433,6 +441,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(AsignacionRow {
+                id_grupo: v_string(row.get_value(9).map_err(db_err)?),
                 id_asignacion: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 id_trabajador: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 fecha: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
@@ -538,6 +547,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
                     for it in list.iter() {
                         out.push(AsignacionRow {
+                            id_grupo: None,
                             // Cadena vacía = fila de horario predeterminado (no es una
                             // asignación real persistida). Antes era id 0.
                             id_asignacion: String::new(),
@@ -743,6 +753,49 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         }
     }
 
+    async fn guardar_asignacion(&self, id_asignacion: Option<String>, tramos: Vec<AsignacionNueva>) -> AppResult<bool> {
+        use tpv_domain::trabajadores::{intervalo_horario, validar_tramos};
+        validar_tramos(&tramos).map_err(AppError::validation)?;
+        let db = self.db.write().await;
+        let primero = &tramos[0];
+        let mut ids = Vec::new();
+        let grupo = if let Some(id) = id_asignacion {
+            let mut rows = db.query("SELECT COALESCE(ID_Grupo, ID_Asignacion), ID_Trabajador, Fecha FROM Asignacion_Turnos WHERE ID_Asignacion = ?1;", vec![Value::Text(id)]).await.map_err(db_err)?;
+            let fila = rows.next().await.map_err(db_err)?.ok_or_else(|| AppError::not_found("Asignación no encontrada"))?;
+            if v_string(fila.get_value(1).map_err(db_err)?).as_deref() != Some(&primero.id_trabajador)
+                || v_string(fila.get_value(2).map_err(db_err)?).as_deref() != Some(&primero.fecha) {
+                return Err(AppError::validation("No se puede mover un horario a otro trabajador o jornada"));
+            }
+            let grupo = v_string(fila.get_value(0).map_err(db_err)?).unwrap_or_default();
+            let mut miembros = db.query("SELECT ID_Asignacion FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = ?1 ORDER BY Hora_Inicio, ID_Asignacion;", vec![Value::Text(grupo.clone())]).await.map_err(db_err)?;
+            while let Some(fila) = miembros.next().await.map_err(db_err)? { ids.push(v_string(fila.get_value(0).map_err(db_err)?).unwrap_or_default()); }
+            grupo
+        } else { new_id() };
+        let nuevos: Vec<_> = tramos.iter().filter_map(|t| intervalo_horario(&t.fecha, t.hora_inicio.as_deref(), t.hora_fin.as_deref()).transpose()).collect::<Result<_, _>>().map_err(AppError::validation)?;
+        let mut existentes = db.query("SELECT Fecha, Hora_Inicio, Hora_Fin FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha BETWEEN date(?2, '-1 day') AND date(?2, '+1 day') AND COALESCE(ID_Grupo, ID_Asignacion) <> ?3;", vec![Value::Text(primero.id_trabajador.clone()), Value::Text(primero.fecha.clone()), Value::Text(grupo.clone())]).await.map_err(db_err)?;
+        while let Some(fila) = existentes.next().await.map_err(db_err)? {
+            let fecha = v_string(fila.get_value(0).map_err(db_err)?).unwrap_or_default();
+            let inicio = v_string(fila.get_value(1).map_err(db_err)?);
+            let fin = v_string(fila.get_value(2).map_err(db_err)?);
+            if let Some(intervalo) = intervalo_horario(&fecha, inicio.as_deref(), fin.as_deref()).map_err(AppError::validation)? {
+                if nuevos.iter().any(|nuevo| nuevo.solapa(&intervalo)) { return Err(AppError::conflict("Ese horario se solapa con otro tramo del trabajador. Corrige las horas antes de guardar.")); }
+            }
+        }
+        db.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let resultado: AppResult<bool> = async {
+            db.execute("DELETE FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = ?1;", vec![Value::Text(grupo.clone())]).await.map_err(db_err)?;
+            for (indice, tramo) in tramos.into_iter().enumerate() {
+                let id = ids.get(indice).cloned().unwrap_or_else(new_id);
+                db.execute("INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);", vec![Value::Text(id), Value::Text(grupo.clone()), Value::Text(tramo.id_trabajador), Value::Text(tramo.fecha), Value::Text(tramo.id_turno), Value::Text(tramo.area), opt_text(tramo.hora_inicio), opt_text(tramo.hora_fin), opt_text(tramo.notas)]).await.map_err(db_err)?;
+            }
+            Ok(true)
+        }.await;
+        match resultado {
+            Ok(ok) => { db.execute_batch("COMMIT;").await.map_err(db_err)?; Ok(ok) }
+            Err(error) => { let _ = db.execute_batch("ROLLBACK;").await; Err(error) }
+        }
+    }
+
     async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool> {
         let db = self.db.write().await;
 
@@ -813,6 +866,13 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     ) -> AppResult<bool> {
         let db = self.db.write().await;
 
+        let mut miembros = db.query("SELECT COUNT(*) FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1);", vec![Value::Text(id_asignacion.to_owned())]).await.map_err(db_err)?;
+        if let Some(fila) = miembros.next().await.map_err(db_err)? {
+            if v_i64(fila.get_value(0).map_err(db_err)?).unwrap_or(0) > 1 {
+                return Err(AppError::conflict("Edita los dos tramos del horario como un conjunto."));
+            }
+        }
+
         let affected = db
             .execute(
                 r#"
@@ -849,7 +909,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
         let affected = db
             .execute(
-                "DELETE FROM Asignacion_Turnos WHERE ID_Asignacion = ?1;",
+                "DELETE FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1);",
                 vec![Value::Text(id_asignacion.to_string())],
             )
             .await
@@ -880,6 +940,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         // Leemos las asignaciones origen en Rust para poder asignar a cada copia un UUIDv7
         // propio (un INSERT…SELECT no puede generar ids deterministas que sincronicen).
         struct SrcRow {
+            id_grupo: Option<String>,
             id_trabajador: String,
             fecha: String,
             id_turno: String,
@@ -891,7 +952,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         let mut srows = db
             .query(
                 r#"
-                SELECT ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas
+                SELECT ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas, ID_Grupo
                 FROM Asignacion_Turnos
                 WHERE Fecha >= date(?1) AND Fecha < date(?1, '+7 day');
                 "#,
@@ -902,6 +963,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         let mut origen: Vec<SrcRow> = Vec::new();
         while let Some(r) = srows.next().await.map_err(db_err)? {
             origen.push(SrcRow {
+                id_grupo: v_string(r.get_value(7).map_err(db_err)?),
                 id_trabajador: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 fecha: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 id_turno: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
@@ -928,6 +990,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             }
 
             let mut inserted = 0u64;
+            let mut grupos: BTreeMap<String, String> = BTreeMap::new();
             for s in origen.iter() {
                 let src_date = match NaiveDate::parse_from_str(&s.fecha, "%Y-%m-%d") {
                     Ok(d) => d,
@@ -937,9 +1000,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 db.execute(
                     r#"
                     INSERT INTO Asignacion_Turnos (
-                      ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas
+                      ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas, ID_Grupo
                     )
-                    VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8);
+                    VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8, ?9);
                     "#,
                     vec![
                         Value::Text(new_id()),
@@ -950,6 +1013,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                         opt_text(s.hora_inicio.clone()),
                         opt_text(s.hora_fin.clone()),
                         opt_text(s.notas.clone()),
+                        opt_text(s.id_grupo.as_ref().map(|g| grupos.entry(g.clone()).or_insert_with(new_id).clone())),
                     ],
                 )
                 .await
@@ -1104,6 +1168,76 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_horarios_agrupados {
+    use super::*;
+    use tpv_contracts::trabajadores::{AsignacionGuardarInput, TramoHorarioInput};
+    use tpv_application::use_cases::trabajadores::guardar_asignacion;
+
+    async fn preparar() -> (Arc<Db>, SqliteTrabajadoresRepository) {
+        let dir = crate::test_temp::dir_temporal("horarios_agrupados");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        db.write().await.raw().execute_batch("INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) SELECT 'u', ID_Rol, 'u@bar.test', 'h', 'Ana', 'Activo' FROM Roles WHERE Nombre_Rol = 'Administrador'; INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('t', 'u');").await.unwrap();
+        let repo = SqliteTrabajadoresRepository::new(db.clone());
+        (db, repo)
+    }
+
+    fn entrada(horas: &[(&str, &str)]) -> AsignacionGuardarInput {
+        AsignacionGuardarInput { id_asignacion: None, id_trabajador: "t".into(), fecha: "2026-10-09".into(), id_turno: "00000000-0000-7000-8000-000000000102".into(), area: "Sala".into(), notas: None, tramos: horas.iter().map(|(i, f)| TramoHorarioInput { hora_inicio: (*i).into(), hora_fin: (*f).into() }).collect() }
+    }
+
+    #[tokio::test]
+    async fn crear_editar_copiar_y_borrar_conserva_el_conjunto() {
+        let (_db, repo) = preparar().await;
+        guardar_asignacion(&repo, entrada(&[("09:00", "14:00"), ("17:00", "22:00")])).await.unwrap();
+        let filas = repo.get_asignaciones_semana("2026-10-05".into()).await.unwrap();
+        assert_eq!(filas.len(), 2);
+        assert!(filas[0].id_grupo.is_some());
+        assert_eq!(filas[0].id_grupo, filas[1].id_grupo);
+        let mut cambio = entrada(&[("10:00", "15:00"), ("18:00", "23:00")]);
+        cambio.id_asignacion = Some(filas[0].id_asignacion.clone());
+        guardar_asignacion(&repo, cambio).await.unwrap();
+        repo.copy_semana("2026-10-05".into(), "2026-10-12".into(), false).await.unwrap();
+        let copia = repo.get_asignaciones_semana("2026-10-12".into()).await.unwrap();
+        assert_eq!(copia.len(), 2);
+        assert_eq!(copia[0].id_grupo, copia[1].id_grupo);
+        assert_ne!(copia[0].id_grupo, filas[0].id_grupo);
+        repo.delete_asignacion(&filas[0].id_asignacion).await.unwrap();
+        assert!(repo.get_asignaciones_semana("2026-10-05".into()).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fallo_del_segundo_tramo_revierte_las_filas_y_el_outbox() {
+        let (db, repo) = preparar().await;
+        guardar_asignacion(&repo, entrada(&[("09:00", "14:00"), ("17:00", "22:00")])).await.unwrap();
+        let antes = repo.get_asignaciones_semana("2026-10-05".into()).await.unwrap();
+        let outbox = async || {
+            let guardia = db.read().await;
+            let mut filas = guardia.query("SELECT COUNT(*) FROM _Sync_Outbox;", ()).await.unwrap();
+            v_i64(filas.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap()
+        };
+        let cuenta = outbox().await;
+        db.write().await.raw().execute_batch("CREATE TRIGGER fallo_segundo BEFORE INSERT ON Asignacion_Turnos WHEN NEW.Hora_Inicio = '18:00' BEGIN SELECT RAISE(ABORT, 'fallo_segundo'); END;").await.unwrap();
+        let mut cambio = entrada(&[("10:00", "15:00"), ("18:00", "23:00")]);
+        cambio.id_asignacion = Some(antes[0].id_asignacion.clone());
+        assert!(guardar_asignacion(&repo, cambio).await.is_err());
+        assert_eq!(serde_json::to_value(repo.get_asignaciones_semana("2026-10-05".into()).await.unwrap()).unwrap(), serde_json::to_value(antes).unwrap());
+        assert_eq!(outbox().await, cuenta);
+    }
+
+    #[tokio::test]
+    async fn impide_solapes_de_otras_asignaciones_incluido_el_dia_siguiente() {
+        let (_db, repo) = preparar().await;
+        guardar_asignacion(&repo, entrada(&[("22:00", "02:00")])).await.unwrap();
+        let mut siguiente = entrada(&[("01:00", "03:00")]);
+        siguiente.fecha = "2026-10-10".into();
+        assert!(guardar_asignacion(&repo, siguiente).await.is_err());
+        let mut siguiente = entrada(&[("02:00", "03:00")]);
+        siguiente.fecha = "2026-10-10".into();
+        guardar_asignacion(&repo, siguiente).await.unwrap();
     }
 }
 

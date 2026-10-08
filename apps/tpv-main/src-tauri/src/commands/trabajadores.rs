@@ -11,7 +11,7 @@ use tauri::State;
 
 use tpv_application::use_cases::trabajadores as uc;
 use tpv_contracts::trabajadores::{
-    AsignacionCreateInput, AsignacionDeleteInput, AsignacionRow, AsignacionUpdateInput,
+    AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput,
     CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
     TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow,
     TrabajadorUpdateInput, TurnoRow,
@@ -101,6 +101,14 @@ pub async fn trabajadores_update(
 }
 
 /* Escrituras */
+
+#[tauri::command]
+#[specta::specta]
+pub async fn horarios_guardar_asignacion(state: State<'_, AppState>, args: AsignacionGuardarInput) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("horarios.gestionar").await?;
+    let repo = state.trabajadores_repo().await?;
+    Ok(uc::guardar_asignacion(repo.as_ref(), args).await?)
+}
 
 #[tauri::command]
 #[specta::specta]

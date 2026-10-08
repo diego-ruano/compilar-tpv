@@ -1,13 +1,14 @@
 # Esquema de base de datos y migraciones
 
 Hay **un solo esquema** para la base local de la Main (`data.db`, libsql) y para la base de cada tenant
-en Turso: los ficheros `.sql` de `packages/database/migrations/`, aplicados en orden. Hoy sólo existe
-`0001_inicial.sql`. (La base central de licencias es otra cosa y no se migra desde el código:
+en Turso: los ficheros `.sql` de `packages/database/migrations/`, aplicados en orden.
+`0001_inicial.sql` define la base y `0002_horarios_agrupados.sql` añade los conjuntos de turnos
+partidos y las guardas de solape. (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 
 | Pieza | Archivo | Rol |
 |---|---|---|
-| El esquema | `packages/database/migrations/0001_inicial.sql` | Fuente única |
+| El esquema | `packages/database/migrations/*.sql` | Fuente única |
 | Runner de la Main | `crates/tpv-infra-sqlite/src/migrations.rs` | Embebe las migraciones con `include_dir!`, controla `_migrations (name, hash, applied_at)` |
 | Runner de la nube | `apps/cloud-worker-licensing/src/server/tenantMigrations.ts` | El mismo control sobre cada base de tenant; registro a mano |
 | Foto anti-deriva | `packages/database/schema.snapshot.sql` | El esquema resultante, comparado en un test |
@@ -24,11 +25,9 @@ alrededor de la tanda y comprueba `foreign_key_check` antes de confirmar.
 
 ## Cambiar el esquema
 
-**Mientras no haya clientes en producción** (hoy), un cambio se edita en `0001_inicial.sql` y se
-resetean **la `data.db` y los tenants de Turso de desarrollo** que ya tengan el hash viejo: un esquema
-se lee de arriba abajo, una cadena de `ALTER` hay que ejecutarla mentalmente.
-
-**Desde el lanzamiento**, todo cambio va en una migración **nueva** (`0002…`) y `0001` queda congelada.
+Los cambios que deban conservar las bases de trabajo se añaden en una migración **nueva**.
+No se modifica el hash de una migración aplicada ni se resetean bases como parte de una corrección.
+Una consolidación del esquema de desarrollo requiere decidir expresamente el reset de sus datos.
 
 En los dos casos:
 

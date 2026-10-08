@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	AsignacionCreateInput as ContractAsignacionCreateInput,
+	AsignacionGuardarInput,
 	AsignacionUpdateInput as ContractAsignacionUpdateInput,
 	CopySemanaInput as ContractCopySemanaInput,
 	TrabajadorCreateInput as ContractTrabajadorCreateInput,
@@ -165,6 +166,34 @@ export const copySemanaSchema = z.object({
 export const fechaLunesSchema = z.object({
 	fecha_lunes: z.any().transform((v) => normalizeYmd(v)),
 });
+
+// RI-85: espejo de intervalo_horario del dominio; el solape con filas existentes
+// lo vuelve a comprobar SQLite dentro de la transacción.
+const horaTramo = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Hora inválida (usa HH:mm)");
+export const asignacionGuardarSchema = z.object({
+	id_asignacion: z.string().trim().min(1).nullable().optional(),
+	id_trabajador: requiredString("id_trabajador"),
+	fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v => {
+		const t = Date.parse(`${v}T00:00:00Z`);
+		return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v;
+	}, "La fecha del horario no es válida"),
+	id_turno: requiredString("id_turno"),
+	area: requiredString("area"),
+	notas: z.string().nullable().optional(),
+	tramos: z.array(z.object({ hora_inicio: horaTramo, hora_fin: horaTramo }).strict()).min(1).max(2),
+}).strict().superRefine((input, ctx) => {
+	const intervalos = input.tramos.map(t => {
+		const inicio = Number(t.hora_inicio.slice(0, 2)) * 60 + Number(t.hora_inicio.slice(3));
+		const fin = Number(t.hora_fin.slice(0, 2)) * 60 + Number(t.hora_fin.slice(3));
+		if (inicio === fin) ctx.addIssue({ code: "custom", message: "Inicio y fin no pueden ser iguales", path: ["tramos"] });
+		return { inicio, fin: fin < inicio ? fin + 1440 : fin };
+	});
+	if (intervalos.length === 2 && intervalos[0].inicio < intervalos[1].fin && intervalos[1].inicio < intervalos[0].fin) {
+		ctx.addIssue({ code: "custom", message: "Los tramos del horario se solapan. Corrige las horas antes de guardar", path: ["tramos"] });
+	}
+});
+
+type _GAsignacionGuardar = Assert<SameKeys<z.infer<typeof asignacionGuardarSchema>, AsignacionGuardarInput>>;
 
 /**
  * TRAB-03: campos que el worker **no gestiona**. Van cifrados con una clave que sólo tiene la

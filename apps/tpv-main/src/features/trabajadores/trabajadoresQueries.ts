@@ -69,25 +69,12 @@ export function useAsignacionesSemana(fechaLunes: string) {
    Writes (mutations)
 ========================================================= */
 
-/** Crea una asignación de horario; invalida la feature si el backend confirma. */
-export function useCreateAsignacion() {
+/** RI-85: crea o sustituye el conjunto completo en una transacción. */
+export function useGuardarAsignacion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: commands.horariosCreateAsignacion,
-    onSuccess: (ok) => {
-      if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
-    },
-  });
-}
-
-/** Edita una asignación de horario; invalida la feature si el backend confirma. */
-export function useUpdateAsignacion() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: commands.horariosUpdateAsignacion,
-    onSuccess: (ok) => {
-      if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
-    },
+    mutationFn: commands.horariosGuardarAsignacion,
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: trabajadoresKeys.all }); },
   });
 }
 

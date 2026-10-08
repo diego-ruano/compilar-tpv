@@ -172,8 +172,8 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 
 ### Esquema ([esquema.md](docs/arquitectura/esquema.md))
 
-- Hoy sólo existe `0001_inicial.sql`, y **mientras no haya clientes en producción un cambio se edita ahí** y
-  se resetean la `data.db` y los tenants de Turso de desarrollo. Desde el lanzamiento, migración nueva.
+- Las migraciones aplicadas quedan congeladas. Los cambios que conserven las bases de trabajo van en
+  una migración nueva; consolidar el esquema de desarrollo y resetear sus datos requiere decidirlo expresamente.
 - En los dos casos: registrarla en `tenantMigrations.ts` **y** en `test/helpers/esquemaTenant.ts`, tocar
   `migrations.rs` (para que `include_dir!` no sirva la copia vieja), regenerar la foto con
   `BLESS_SCHEMA_SNAPSHOT=1 cargo nextest run -p tpv-infra-sqlite schema_snapshot`, y **redesplegar el worker

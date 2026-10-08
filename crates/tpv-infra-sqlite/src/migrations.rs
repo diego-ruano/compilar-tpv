@@ -1,4 +1,4 @@
-//! RI-60: eliminado el campo antiguo de correo de recuperaci?n.
+//! RI-85: horarios agrupados y guardas de solape en una migración aditiva.
 //! Sistema de migraciones del esquema de la **BD local (SQLite/libsql)**.
 //!
 //! ## Modelo (fuente única de verdad)

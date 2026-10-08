@@ -67,6 +67,12 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
 
 ## El dinero en pantalla
 
+Los horarios se guardan con `horariosGuardarAsignacion`: uno o dos tramos forman un conjunto
+con `ID_Grupo`. Editar y borrar afectan al conjunto, y copiar una semana genera un grupo nuevo.
+La validación del dominio y las guardas SQL rechazan solapes del mismo trabajador, incluidos los
+que cruzan medianoche; dos tramos pueden tocarse en su límite. La escritura y su outbox se confirman
+en una sola transacción. Un error conserva el formulario para corregirlo.
+
 El dinero es un entero de céntimos de la base a la pantalla
 ([../decisiones/0005-dinero-en-centimos.md](../decisiones/0005-dinero-en-centimos.md)). En el frontend:
 

@@ -125,6 +125,16 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
         Ok(true)
     }
 
+    async fn guardar_asignacion(&self, id_asignacion: Option<String>, tramos: Vec<AsignacionNueva>) -> AppResult<bool> {
+        let primero = &tramos[0];
+        let body = json!({ "id_asignacion": id_asignacion, "id_trabajador": primero.id_trabajador,
+            "fecha": primero.fecha, "id_turno": primero.id_turno, "area": primero.area,
+            "notas": primero.notas, "tramos": tramos.iter().map(|t| json!({
+                "hora_inicio": t.hora_inicio, "hora_fin": t.hora_fin })).collect::<Vec<_>>() });
+        let _: JsonValue = self.client.post_json("/v1/trabajadores/horarios/guardar", &body).await?;
+        Ok(true)
+    }
+
     async fn update_asignacion(
         &self,
         id_asignacion: &str,

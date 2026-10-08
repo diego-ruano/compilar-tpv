@@ -193,6 +193,10 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 
 	// Operativa
 	email_duplicado: "Ya hay un cliente con ese correo.",
+	horario_solapado: "Ese horario se solapa con otro tramo del trabajador. Corrige las horas antes de guardar.",
+	horario_editar_conjunto: "Edita los dos tramos del horario como un conjunto.",
+	horario_invalido: "El horario contiene una fecha o unas horas inválidas.",
+	asignacion_no_encontrada: "Asignación no encontrada.",
 	asignacion_duplicada: "Ese trabajador ya tiene ese turno asignado ese día.",
 	// RI-62: el mismo texto que da la Main (`MSG_ULTIMO_ADMINISTRADOR`).
 	ultimo_administrador:

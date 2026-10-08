@@ -2,8 +2,9 @@
 
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
-import type { FilaSemanaOrigen } from "./trabajadores.queries";
+import type { FilaSemanaOrigen, GrupoAsignacion } from "./trabajadores.queries";
 import type { PredeterminadoItem } from "./trabajadores.queries";
+import type { AsignacionGuardarInput } from "@tpv/contracts";
 import type {
 	AsignacionCreateInput,
 	AsignacionUpdateInput,
@@ -249,6 +250,27 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 	};
 }
 
+/** RI-85: resuelve el grupo y lo sustituye dentro de la misma transacción. */
+export function guardarAsignacion(input: AsignacionGuardarInput, existente: GrupoAsignacion | null = null): BuiltCommand {
+	const grupo = existente?.id_grupo ?? nuevoId();
+	const idPrincipal = input.id_asignacion ?? nuevoId();
+	const condicion = "EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Asignacion = ?10 AND COALESCE(ID_Grupo, ID_Asignacion) = ?2 AND ID_Trabajador = ?3 AND Fecha = ?4)";
+	const steps: any[] = [];
+	if (input.id_asignacion) {
+		// Conservamos el miembro principal: sirve de guarda en cada sentencia del batch.
+		// Si desapareció desde la lectura previa, no se borra ni se crea ninguna fila.
+		steps.push({ kind: "execute", sql: `DELETE FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = ?1 AND ID_Asignacion <> ?2 AND EXISTS (SELECT 1 FROM Asignacion_Turnos WHERE ID_Asignacion = ?2 AND COALESCE(ID_Grupo, ID_Asignacion) = ?1 AND ID_Trabajador = ?3 AND Fecha = ?4);`, args: [grupo, idPrincipal, input.id_trabajador, input.fecha] });
+	}
+	input.tramos.forEach((tramo, i) => {
+		const id = i === 0 ? idPrincipal : existente?.ids.find(id => id !== idPrincipal) ?? nuevoId();
+		steps.push({ kind: "execute", ...(i === 0 ? { saveAs: "guardado" } : {}),
+			sql: `INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9 WHERE ${input.id_asignacion ? condicion : "1"} ON CONFLICT(ID_Asignacion) DO UPDATE SET ID_Grupo = excluded.ID_Grupo, ID_Turno = excluded.ID_Turno, Area = excluded.Area, Hora_Inicio = excluded.Hora_Inicio, Hora_Fin = excluded.Hora_Fin, Notas = excluded.Notas;`,
+			args: [id, grupo, input.id_trabajador, input.fecha, input.id_turno, input.area, tramo.hora_inicio, tramo.hora_fin, input.notas ?? null, ...(input.id_asignacion ? [idPrincipal] : [])],
+		});
+	});
+	return { commandName: "horarios_guardar_asignacion", command: { type: "tenantDb.transaction", payload: { steps, resultKey: "guardado" } }, cloudPayload: input };
+}
+
 export function updateAsignacion(
 	idAsignacion: string,
 	input: AsignacionUpdateInput,
@@ -266,7 +288,7 @@ export function updateAsignacion(
 						Hora_Inicio = ?4,
 						Hora_Fin = ?5,
 						Notas = ?6
-					WHERE ID_Asignacion = ?1;
+					WHERE ID_Asignacion = ?1 AND (SELECT COUNT(*) FROM Asignacion_Turnos a WHERE COALESCE(a.ID_Grupo, a.ID_Asignacion) = COALESCE(Asignacion_Turnos.ID_Grupo, Asignacion_Turnos.ID_Asignacion)) = 1;
 				`,
 				args: [
 					idAsignacion,
@@ -288,7 +310,7 @@ export function deleteAsignacion(idAsignacion: string): BuiltCommand {
 		command: {
 			type: "tenantDb.exec",
 			payload: {
-				sql: "DELETE FROM Asignacion_Turnos WHERE ID_Asignacion = ?1;",
+				sql: "DELETE FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1);",
 				args: [idAsignacion],
 			},
 		},
@@ -322,19 +344,25 @@ export function copySemana(
 
 	const shift = diasEntre(input.from_monday, input.to_monday);
 	let insertadas = 0;
+	const grupos = new Map<string, string>();
 
 	for (const f of filas) {
 		const destino = sumaDias(f.fecha, shift);
 		// Espejo del `continue` de Rust: una fecha que no se puede leer se salta, no revienta.
 		if (destino === null) continue;
+		let grupo: string | null = null;
+		if (f.id_grupo) {
+			grupo = grupos.get(f.id_grupo) ?? nuevoId();
+			grupos.set(f.id_grupo, grupo);
+		}
 
 		steps.push({
 			kind: "execute",
 			sql: `
 				INSERT INTO Asignacion_Turnos (
-					ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas
+					ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas, ID_Grupo
 				)
-				VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8);
+				VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8, ?9);
 			`,
 			args: [
 				nuevoId(),
@@ -345,6 +373,7 @@ export function copySemana(
 				f.hora_inicio,
 				f.hora_fin,
 				f.notas,
+				grupo,
 			],
 		});
 		insertadas++;

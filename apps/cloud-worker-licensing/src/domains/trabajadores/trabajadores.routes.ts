@@ -102,11 +102,21 @@ trabajadoresRoutes.post("/horarios/asignaciones", cuerpo(S.asignacionCreateSchem
 	return c.json({ ok: true, id_asignacion: id });
 });
 
+trabajadoresRoutes.post("/horarios/guardar", cuerpo(S.asignacionGuardarSchema), async (c) => {
+	const datos = c.req.valid("json");
+	const existente = datos.id_asignacion ? await tenantQuery(c, db => q.grupoAsignacion(db, datos.id_asignacion!)) : null;
+	if (datos.id_asignacion && !existente) return c.json({ error: "asignacion_no_encontrada", message: "Asignación no encontrada" }, 404);
+	const guardado = await apply(c, cmd.guardarAsignacion(datos, existente));
+	if (!guardado) return c.json({ error: "asignacion_no_encontrada", message: "Asignación no encontrada" }, 404);
+	return c.json({ ok: true });
+});
+
 trabajadoresRoutes.put("/horarios/asignaciones/:id", cuerpo(S.asignacionUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_asignacion invalido");
 	const datos = c.req.valid("json");
-	await apply(c, cmd.updateAsignacion(id, datos));
+	const afectadas = await apply(c, cmd.updateAsignacion(id, datos));
+	if (afectadas === 0) return c.json({ error: "horario_editar_conjunto", message: "Edita los dos tramos del horario como un conjunto." }, 409);
 	return c.json({ ok: true });
 });
 

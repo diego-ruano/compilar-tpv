@@ -1,6 +1,7 @@
 // Adaptadores de WebSocket y operaciones internas del motor (RI-45).
 
 import { HubError } from "../lib/errorHttp";
+import { errorHorario } from "./tenantHub.errores";
 import type { ApplyParams, ResultadoAplicacion } from "./tenantHub.rpc";
 import { issueChallenge, roleNormalize } from "./tenantHub.identidad";
 import { buildInternalPayloadForHash, readCloudPayloadJson, readRequestPayloadJson } from "./tenantHub.envelope";
@@ -70,6 +71,8 @@ export async function aplicar(ctx: ContextoDeRutas, params: ApplyParams): Promis
 		});
 		return { ok: true, data: result };
 	} catch (error) {
+		const horario = errorHorario(error);
+		if (horario) return { ok: false, error: horario.error, status: horario.status, details: { message: horario.message } };
 		if (error instanceof HubError) {
 			return { ok: false, error: error.code, status: error.status, details: error.details as { message: string } | undefined };
 		}

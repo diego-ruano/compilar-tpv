@@ -2,7 +2,7 @@
 //! e invocan el puerto.
 
 use tpv_contracts::trabajadores::{
-    AsignacionCreateInput, AsignacionDeleteInput, AsignacionRow, AsignacionUpdateInput,
+    AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput,
     CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
     TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow,
     TrabajadorUpdateInput, TurnoRow,
@@ -59,6 +59,21 @@ pub async fn get_asignaciones_semana(
 }
 
 /* Escrituras */
+
+pub async fn guardar_asignacion(repo: &dyn TrabajadoresRepository, input: AsignacionGuardarInput) -> AppResult<bool> {
+    let id_trabajador = requerido(&input.id_trabajador, "id_trabajador").map_err(AppError::validation)?;
+    let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
+    let id_turno = requerido(&input.id_turno, "id_turno").map_err(AppError::validation)?;
+    let area = requerido(&input.area, "area").map_err(AppError::validation)?;
+    let notas = limpiar_opcional(input.notas);
+    let tramos: Vec<_> = input.tramos.into_iter().map(|tramo| AsignacionNueva {
+        id_trabajador: id_trabajador.clone(), fecha: fecha.clone(), id_turno: id_turno.clone(),
+        area: area.clone(), notas: notas.clone(),
+        hora_inicio: Some(tramo.hora_inicio), hora_fin: Some(tramo.hora_fin),
+    }).collect();
+    tpv_domain::trabajadores::validar_tramos(&tramos).map_err(AppError::validation)?;
+    repo.guardar_asignacion(input.id_asignacion, tramos).await
+}
 
 pub async fn create_asignacion(
     repo: &dyn TrabajadoresRepository,

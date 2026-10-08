@@ -8,7 +8,7 @@
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-1', 'trab-1', '2026-03-02', '00000000-0000-7000-8000-000000000104', 'Sala', '09:00', '17:00', 'Turno largo');",
-    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-2', 'trab-2', '2026-03-04', '00000000-0000-7000-8000-000000000105', 'Barra', '20:00', NULL, NULL);",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-2', 'trab-2', '2026-03-04', '00000000-0000-7000-8000-000000000105', 'Barra', '20:00', '02:00', NULL);",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-3', 'trab-1', '2026-03-08', '00000000-0000-7000-8000-000000000103', 'Cocina', '10:00', '14:00', 'Domingo');",
     "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-vieja', 'trab-2', '2026-03-10', '00000000-0000-7000-8000-000000000103', 'Sala', '08:00', '12:00', 'La pisa el overwrite');"
   ],

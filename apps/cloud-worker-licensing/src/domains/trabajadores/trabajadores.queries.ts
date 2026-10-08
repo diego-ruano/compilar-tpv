@@ -26,7 +26,16 @@ function rows(rs: any): any[] {
 // porque el ID de cada copia NO puede salir de la propia sentencia: lo que se replica es el texto
 // SQL, así que un `randomblob()` dentro del INSERT se evalúa otra vez en la Main y deja claves
 // distintas a cada lado. El ID tiene que ser un literal antes de escribir.
+export type GrupoAsignacion = { id_grupo: string; ids: string[] };
+
+export async function grupoAsignacion(db: Client, id: string): Promise<GrupoAsignacion | null> {
+	const resultado = await db.execute({ sql: "SELECT ID_Asignacion, COALESCE(ID_Grupo, ID_Asignacion) AS ID_Grupo FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = (SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1) ORDER BY Hora_Inicio, ID_Asignacion;", args: [id] });
+	const miembros = rows(resultado);
+	return miembros.length ? { id_grupo: String(miembros[0].ID_Grupo), ids: miembros.map(m => String(m.ID_Asignacion)) } : null;
+}
+
 export type FilaSemanaOrigen = {
+	id_grupo?: string | null;
 	id_trabajador: string;
 	fecha: string;
 	id_turno: string;
@@ -44,6 +53,7 @@ export async function filasSemana(
 		sql: `
 			SELECT
 				ID_Trabajador AS id_trabajador,
+				ID_Grupo AS id_grupo,
 				Fecha AS fecha,
 				ID_Turno AS id_turno,
 				Area AS area,
@@ -250,6 +260,7 @@ export async function asignacionesSemana(
 		sql: `
 			SELECT
 				a.ID_Asignacion AS ID_Asignacion,
+				a.ID_Grupo AS ID_Grupo,
 				a.ID_Trabajador AS ID_Trabajador,
 				a.Fecha AS Fecha,
 				a.ID_Turno AS ID_Turno,
@@ -304,6 +315,7 @@ export async function asignacionesSemana(
 				Fecha: fecha,
 				ID_Turno: String(d.ID_Turno ?? ""),
 				Area: String(d.Area ?? "Sala"),
+				ID_Grupo: null,
 				Hora_Inicio: d.Hora_Inicio ?? null,
 				Hora_Fin: d.Hora_Fin ?? null,
 				Notas: d.Notas ?? null,

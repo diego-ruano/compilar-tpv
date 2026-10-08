@@ -1,0 +1,10 @@
+[
+  { "nombre": "partido", "fecha": "2026-10-09", "tramos": [["09:00", "14:00"], ["17:00", "22:00"]], "valido": true },
+  { "nombre": "solape", "fecha": "2026-10-09", "tramos": [["10:00", "16:00"], ["12:00", "18:00"]], "valido": false },
+  { "nombre": "adyacentes", "fecha": "2026-10-09", "tramos": [["09:00", "14:00"], ["14:00", "18:00"]], "valido": true },
+  { "nombre": "noche", "fecha": "2026-10-09", "tramos": [["22:00", "02:00"]], "valido": true },
+  { "nombre": "noche_solapada", "fecha": "2026-10-09", "tramos": [["22:00", "02:00"], ["23:00", "03:00"]], "valido": false },
+  { "nombre": "hora_invalida", "fecha": "2026-10-09", "tramos": [["25:00", "14:00"]], "valido": false },
+  { "nombre": "duracion_cero", "fecha": "2026-10-09", "tramos": [["09:00", "09:00"]], "valido": false },
+  { "nombre": "fecha_inexistente", "fecha": "2026-02-30", "tramos": [["09:00", "14:00"]], "valido": false }
+]

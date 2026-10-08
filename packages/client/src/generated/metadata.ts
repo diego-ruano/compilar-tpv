@@ -103,6 +103,7 @@ export const nombresComandos = {
     "turnos_get_all": "turnosGetAll",
     "horarios_get_asignaciones_semana": "horariosGetAsignacionesSemana",
     "horarios_create_asignacion": "horariosCreateAsignacion",
+    "horarios_guardar_asignacion": "horariosGuardarAsignacion",
     "horarios_update_asignacion": "horariosUpdateAsignacion",
     "horarios_delete_asignacion": "horariosDeleteAsignacion",
     "horarios_copy_semana_asignaciones": "horariosCopySemanaAsignaciones",
@@ -324,6 +325,7 @@ type Argumentos = {
     "turnos_get_all": {  };
     "horarios_get_asignaciones_semana": { args: Parameters<Comandos["horariosGetAsignacionesSemana"]>[0] };
     "horarios_create_asignacion": { args: Parameters<Comandos["horariosCreateAsignacion"]>[0] };
+    "horarios_guardar_asignacion": { args: Parameters<Comandos["horariosGuardarAsignacion"]>[0] };
     "horarios_update_asignacion": { args: Parameters<Comandos["horariosUpdateAsignacion"]>[0] };
     "horarios_delete_asignacion": { args: Parameters<Comandos["horariosDeleteAsignacion"]>[0] };
     "horarios_copy_semana_asignaciones": { args: Parameters<Comandos["horariosCopySemanaAsignaciones"]>[0] };

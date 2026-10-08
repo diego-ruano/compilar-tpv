@@ -33,6 +33,8 @@ pub trait TrabajadoresRepository: Send + Sync {
 
     /* Escrituras (Local-First, sin outbox) */
     async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool>;
+    /// RI-85: sustituye el grupo completo; las asignaciones antiguas son grupos de un tramo.
+    async fn guardar_asignacion(&self, id_asignacion: Option<String>, tramos: Vec<AsignacionNueva>) -> AppResult<bool>;
     async fn update_asignacion(
         &self,
         id_asignacion: &str,

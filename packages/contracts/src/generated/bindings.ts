@@ -108,7 +108,19 @@ export type AsignacionDeleteInput = {
 	id_asignacion: string,
 };
 
+/**  RI-85: crear o sustituir el conjunto de tramos en una única transacción. */
+export type AsignacionGuardarInput = {
+	id_asignacion?: string | null,
+	id_trabajador: string,
+	fecha: string,
+	id_turno: string,
+	area: string,
+	notas?: string | null,
+	tramos: TramoHorarioInput[],
+};
+
 export type AsignacionRow = {
+	ID_Grupo?: string | null,
 	ID_Asignacion: string,
 	ID_Trabajador: string,
 	Fecha: string,
@@ -3307,6 +3319,11 @@ export type TrabajadoresStatsResponse_Serialize = {
 	camareros: TrabajadorCardStats_Serialize[],
 	limpieza: TrabajadorCardStats_Serialize[],
 	ranking_ventas: ChartSerieDinero,
+};
+
+export type TramoHorarioInput = {
+	hora_inicio: string,
+	hora_fin: string,
 };
 
 /**  Un tramo del desglose de IVA tal como sale en el papel. Gemelo de `tpv_domain::ticket::TramoIva`. */

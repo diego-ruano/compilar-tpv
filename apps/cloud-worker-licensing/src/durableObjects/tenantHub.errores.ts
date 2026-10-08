@@ -28,6 +28,8 @@ const PERMANENTES = [
 	"not null constraint failed",
 	"foreign key constraint failed",
 	"check constraint failed",
+	"horario_solapado",
+	"horario_invalido",
 	"datatype mismatch",
 	"syntax error",
 	"too many sql variables",
@@ -42,6 +44,14 @@ const PERMANENTES = [
 	// duda, el atraso que va detrás no avanza.
 	"missing_client_now",
 ] as const;
+
+/** RI-85: señales propias del esquema, con el mismo mensaje en Main y Handy. */
+export function errorHorario(error: unknown): { error: string; status: number; message: string } | null {
+	const texto = String((error as { message?: string })?.message ?? error);
+	if (texto.includes("horario_solapado")) return { error: "horario_solapado", status: 409, message: "Ese horario se solapa con otro tramo del trabajador. Corrige las horas antes de guardar." };
+	if (texto.includes("horario_invalido")) return { error: "horario_invalido", status: 400, message: "El horario contiene una fecha o unas horas inválidas." };
+	return null;
+}
 
 /**
  * Firmas que SÍ se arreglan solas: la nube no estaba disponible o estaba ocupada en ese instante.

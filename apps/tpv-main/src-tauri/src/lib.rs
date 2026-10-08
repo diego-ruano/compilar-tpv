@@ -1990,6 +1990,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::trabajadores::turnos_get_all,
             commands::trabajadores::horarios_get_asignaciones_semana,
             commands::trabajadores::horarios_create_asignacion,
+            commands::trabajadores::horarios_guardar_asignacion,
             commands::trabajadores::horarios_update_asignacion,
             commands::trabajadores::horarios_delete_asignacion,
             commands::trabajadores::horarios_copy_semana_asignaciones,
