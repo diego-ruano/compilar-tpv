@@ -44,6 +44,8 @@ import {
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 import { pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
+import { cuerpo } from "../../lib/validacion";
+import { activarSchema, pedirCambioSchema } from "./licensing.schemas";
 import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
 import {
 	sendDeviceChangeCodeEmail,
@@ -168,7 +170,7 @@ async function rechazoDeReadmision(
 // POST /v1/license/activate
 // ──────────────────────────────────────────────────────────────────────────────
 
-licenseRoutes.post("/activate", filtroExterior, async (c) => {
+licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, [
 		"LICENSE_JWT_SECRET",
@@ -183,26 +185,14 @@ licenseRoutes.post("/activate", filtroExterior, async (c) => {
 	]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
-	const ct = c.req.header("content-type") || "";
-	if (!ct.toLowerCase().includes("application/json")) {
-		return c.json({ ok: false, error: "Content-Type must be application/json" }, 415);
-	}
-
-	const body = await c.req.json<any>().catch(() => ({}));
-
-	const activationKey = normalizeLicenseKey(String(body?.activationKey || ""));
+	const body = c.req.valid("json");
+	const activationKey = normalizeLicenseKey(body.activationKey);
 	if (!activationKey) {
 		return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
 	}
-
-	const deviceId = String(body?.deviceId || "").trim() || crypto.randomUUID();
-	const devicePubKey = String(body?.devicePubKey || "").trim();
-	if (!devicePubKey) {
-		return c.json({ ok: false, error: "devicePubKey required" } satisfies ApiError, 400);
-	}
-
-	const deviceChangeCode = String(body?.deviceChangeCode || "").trim();
-	const tenantInfo: TenantInfo = body?.tenantInfo || {};
+	const { deviceId, devicePubKey } = body;
+	const deviceChangeCode = body.deviceChangeCode ?? "";
+	const tenantInfo: TenantInfo = body.tenantInfo ?? {};
 
 	const db = getDb(env);
 	const now = Date.now();
@@ -503,14 +493,14 @@ licenseRoutes.post("/activate", filtroExterior, async (c) => {
 // la clave: si contestara distinto, cualquiera podría usar este endpoint para averiguar qué
 // claves son válidas.
 
-licenseRoutes.post("/device-change/request", filtroExterior, async (c) => {
+licenseRoutes.post("/device-change/request", filtroExterior, cuerpo(pedirCambioSchema), async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "EMAIL_FROM_ADDRESS"]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
-	const body = await c.req.json<any>().catch(() => ({}));
-	const activationKey = normalizeLicenseKey(String(body?.activationKey || ""));
-	const deviceId = String(body?.deviceId || "").trim();
+	const body = c.req.valid("json");
+	const activationKey = normalizeLicenseKey(body.activationKey);
+	const deviceId = body.deviceId;
 
 	const respuestaConstante = c.json({ ok: true });
 	if (!activationKey || !deviceId) return respuestaConstante;

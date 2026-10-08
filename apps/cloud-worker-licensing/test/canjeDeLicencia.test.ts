@@ -58,7 +58,7 @@ const ENV = {
 
 const DIA = 24 * 60 * 60 * 1000;
 const EQUIPO = "equipo-del-bar";
-const CLAVE_EQUIPO = "clave-publica-del-equipo";
+const CLAVE_EQUIPO = btoa(String.fromCharCode(...new Uint8Array(32).fill(1)));
 
 type Escenario = {
 	sql: any;
@@ -258,7 +258,7 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 			const antes = await e.leer(viejaId);
 			const nueva = await e.emitir(12);
 
-			const res = await e.activar(nueva.clave, EQUIPO, "otra-clave-publica");
+			const res = await e.activar(nueva.clave, EQUIPO, btoa(String.fromCharCode(...new Uint8Array(32).fill(2))));
 			return { res, final: await e.leer(viejaId), clave: await e.leer(nueva.id) };
 		});
 
@@ -272,7 +272,7 @@ describe("REV-13 · el equipo NO tiene licencia: se estrena", () => {
 	it("un equipo nuevo estrena su propio negocio", async () => {
 		const r = await escenario("estrena", async (e) => {
 			const nueva = await e.emitir(12);
-			const res = await e.activar(nueva.clave, "equipo-recien-comprado", "su-clave");
+			const res = await e.activar(nueva.clave, "equipo-recien-comprado", CLAVE_EQUIPO);
 			return { res, lic: await e.leer(nueva.id) };
 		});
 
@@ -291,7 +291,7 @@ describe("REV-13 · el equipo NO tiene licencia: se estrena", () => {
 			const antes = await e.leer(primeraId);
 			const nueva = await e.emitir(12);
 
-			const res = await e.activar(nueva.clave, "equipo-del-otro-bar", "clave-del-otro-bar");
+			const res = await e.activar(nueva.clave, "equipo-del-otro-bar", CLAVE_EQUIPO);
 			return { res, primera: await e.leer(primeraId), segunda: await e.leer(nueva.id), antes };
 		});
 

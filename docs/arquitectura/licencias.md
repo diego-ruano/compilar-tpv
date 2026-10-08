@@ -98,6 +98,12 @@ días que llevaba activada.
 ## Activar
 
 `POST /v1/license/activate { activationKey, deviceId, devicePubKey, tenantInfo, deviceChangeCode? }`.
+
+La activación y la solicitud de traslado validan el JSON con el middleware común antes de
+consultar licencias. `deviceId` es obligatorio: el servidor no inventa otra identidad. La clave
+pública debe contener exactamente 32 bytes Ed25519 en base64 estándar. Los cuerpos inválidos
+devuelven `validation_error` (400); pedir un traslado con una clave bien formada pero desconocida
+sigue devolviendo `{ ok: true }`, para no revelar qué licencias existen.
 No existe o no se reconoce → `license_not_found`; revocada → `license_revoked`; caducada **y pasada la
 gracia** → `license_expired`. Después, uno de tres caminos según `main_device_id`:
 

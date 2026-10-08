@@ -48,8 +48,8 @@ const CLAVE = generateLicenseKey();
 const VICTIMA = "equipo-de-la-victima";
 const BAR_VICTIMA = "tenant-victima";
 const BAR_ATACANTE = "tenant-atacante";
-const PUB_VICTIMA = "clave-publica-de-la-victima";
-const PUB_ATACANTE = "clave-publica-del-atacante";
+const PUB_VICTIMA = btoa(String.fromCharCode(...new Uint8Array(32).fill(1)));
+const PUB_ATACANTE = btoa(String.fromCharCode(...new Uint8Array(32).fill(2)));
 
 /** El bar de la víctima con su equipo dado de alta, y una licencia libre en manos del atacante. */
 async function escenario<T>(nombre: string, prueba: (sql: any) => Promise<T>): Promise<T> {
@@ -222,7 +222,7 @@ describe("REV-15 · dos equipos activando la misma clave a la vez", () => {
 					body: JSON.stringify({
 						activationKey: CLAVE,
 						deviceId: "equipo-segundo",
-						devicePubKey: "clave-del-segundo",
+						devicePubKey: btoa(String.fromCharCode(...new Uint8Array(32).fill(3))),
 					}),
 				},
 				ENV,
