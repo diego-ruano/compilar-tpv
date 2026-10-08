@@ -34,6 +34,7 @@ import {
     reservaFinalizar,
 } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
+import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
 import { CERO, abs, eur } from "../../shared/lib/dinero";
 import type {
     CategoriaVendibleOut,
@@ -298,7 +299,9 @@ const ProductCard = React.memo(function ProductCard({
     onAdd,
     onRemove,
     onInfo,
+    bloqueado,
 }: {
+    bloqueado: boolean;
     p: ProductoDisplay;
     qty: number;
     onAdd: (p: ProductoDisplay) => void;
@@ -309,10 +312,11 @@ const ProductCard = React.memo(function ProductCard({
         <div className="rounded-xl border border-border bg-surface p-3 text-left">
             <div
                 role="button"
-                tabIndex={0}
-                onClick={() => onAdd(p)}
+                tabIndex={bloqueado ? -1 : 0}
+                aria-disabled={bloqueado}
+                onClick={() => { if (!bloqueado) onAdd(p); }}
                 onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
+                    if (!bloqueado && (e.key === "Enter" || e.key === " ")) {
                         e.preventDefault();
                         onAdd(p);
                     }
@@ -367,7 +371,7 @@ const ProductCard = React.memo(function ProductCard({
                         "w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold",
                         qty === 0 && "opacity-40 cursor-not-allowed",
                     )}
-                    disabled={qty === 0}
+                    disabled={qty === 0 || bloqueado}
                 >
                     −
                 </button>
@@ -379,7 +383,8 @@ const ProductCard = React.memo(function ProductCard({
 
                 <button
                     type="button"
-                    onClick={() => onAdd(p)}
+                    onClick={() => { if (!bloqueado) onAdd(p); }}
+                    disabled={bloqueado}
                     className="w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold"
                 >
                     +
@@ -419,6 +424,16 @@ export default function MesaComandaModal({
     const [idComanda, setIdComanda] = useState<string | null>(null);
     const [ticket, setTicket] = useState<TicketItem[]>([]);
     const [loadingTicket, setLoadingTicket] = useState(false);
+    const { cola, pendientes: escriturasPendientes } = useColaOperaciones();
+    const comandaActualRef = useRef<string | null>(null);
+    const lecturaTicketRef = useRef(0);
+    const cobroEnCursoRef = useRef(false);
+    useEffect(() => {
+        comandaActualRef.current = open ? idComanda : null;
+        ++lecturaTicketRef.current;
+        return () => { comandaActualRef.current = null; ++lecturaTicketRef.current; };
+    }, [open, mesaId, idComanda]);
+
 
     const [paso, setPaso] = useState<Paso>("categorias");
     const [cashCount, setCashCount] = useState<Record<string, number>>({});
@@ -497,19 +512,14 @@ export default function MesaComandaModal({
     };
 
     const guardarNotaLinea = async (idDetalle: string, nota: string) => {
-        const clean = nota.trim();
-        await mesasUpdateDetalleNota({
-            idDetalle,
-            nota: clean ? clean : null,
+        if (!idComanda || cobroEnCursoRef.current) return;
+        const cId = idComanda;
+        ++lecturaTicketRef.current;
+        await cola.ejecutar(async () => {
+            await mesasUpdateDetalleNota({ idDetalle, nota: nota.trim() || null });
+            await leerTicket(cId);
+            notifyChanged();
         });
-
-        setTicket((prev) =>
-            prev.map((t) =>
-                t.id === idDetalle ? { ...t, notas: clean || null } : t,
-            ),
-        );
-
-        notifyChanged();
     };
 
     const [openProductDetail, setOpenProductDetail] = useState(false);
@@ -529,6 +539,7 @@ export default function MesaComandaModal({
     useEffect(() => {
         if (!open) return;
 
+        let cancelado = false;
         const cargarCategorias = async () => {
             try {
                 const rows = await productosListCategoriasVendibles();
@@ -540,59 +551,72 @@ export default function MesaComandaModal({
                     })),
                 );
 
-                setCategorias(procesadas);
+                !cancelado && setCategorias(procesadas);
             } catch (e) {
                 console.error("Fallo al cargar categorías", e);
-                setCategorias([]);
+                !cancelado && setCategorias([]);
             }
         };
 
         void cargarCategorias();
+        return () => { cancelado = true; };
     }, [open]);
 
     useEffect(() => {
         if (!open) return;
-
+        let cancelado = false;
+        comandaActualRef.current = null;
+        ++lecturaTicketRef.current;
+        setTicket([]);
+        setIdComanda(null);
+        setLoadingTicket(true);
         void (async () => {
             try {
-                setLoadingTicket(true);
-
-                // A propósito la foto (`reservaMeta`) y no `reserva`: si dependiera del estado
-                // que se pinta, marcar la llegada relanzaría este efecto y abriría la comanda dos
-                // veces (el botón ya la abre él), y marcar la salida la reabriría sin reserva.
-                const reservaActiva =
-                    reservaMeta?.estado === "ACTIVA"
-                        ? { idReserva: reservaMeta.idReserva }
-                        : null;
-
-                const cId = await ensureOpenComanda(
-                    mesaId,
-                    operador,
-                    reservaActiva,
-                );
-                setIdComanda(cId);
-
+                const reservaActiva = reservaMeta?.estado === "ACTIVA" ? { idReserva: reservaMeta.idReserva } : null;
+                const cId = await ensureOpenComanda(mesaId, operador, reservaActiva);
+                if (cancelado) return;
                 const t = await loadTicketForComanda(cId);
+                if (cancelado) return;
+                comandaActualRef.current = cId;
+                setIdComanda(cId);
                 setTicket(t);
-
                 notifyChanged();
             } catch (e) {
-                console.error(e);
-                setIdComanda(null);
-                setTicket([]);
+                if (!cancelado) {
+                    toast.error("No se pudo abrir la comanda", toAppError(e).message);
+                    setIdComanda(null);
+                    setTicket([]);
+                }
             } finally {
-                setLoadingTicket(false);
+                if (!cancelado) setLoadingTicket(false);
             }
         })();
+        return () => { cancelado = true; comandaActualRef.current = null; ++lecturaTicketRef.current; };
+        // La foto de la reserva sólo cambia al abrir o al cambiar de mesa.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, mesaId, idUsuario, reservaMeta?.estado, reservaMeta?.idReserva]);
 
+    const aplicarTicket = useCallback((cId: string, t: TicketItem[]) => {
+        if (comandaActualRef.current !== cId) return;
+        setTicket(prev => {
+            const seleccion = new Set(prev.filter(l => l.seleccionado).map(l => l.id));
+            return t.map(l => ({ ...l, seleccionado: !l.pagado && seleccion.has(l.id) }));
+        });
+    }, []);
+
+    const leerTicket = useCallback(async (cId: string) => {
+        const lectura = ++lecturaTicketRef.current;
+        const t = await loadTicketForComanda(cId);
+        if (lectura === lecturaTicketRef.current) aplicarTicket(cId, t);
+    }, [aplicarTicket]);
+
     const reloadTicket = useCallback(async () => {
         if (!idComanda) return;
-        const t = await loadTicketForComanda(idComanda);
-        setTicket(t);
+        // Los refrescos remotos esperan a que las escrituras de la propia pantalla terminen.
+        await cola.esperar();
+        await leerTicket(idComanda);
         notifyChanged();
-    }, [idComanda, notifyChanged]);
+    }, [idComanda, cola, leerTicket, notifyChanged]);
 
     // Sincronización nube → Main: si llega un cambio por WebSocket mientras la comanda está
     // abierta, recargar el ticket SOLO si el cambio afecta a esta comanda (no a otra que edite
@@ -613,6 +637,7 @@ export default function MesaComandaModal({
     }, [syncTick]);
 
     useEffect(() => {
+        let cancelado = false;
         const cargarProductos = async () => {
             if (!open) return;
             if (!categoriaSeleccionada) return;
@@ -630,24 +655,27 @@ export default function MesaComandaModal({
                     })),
                 );
 
-                setProductos(procesados);
+                !cancelado && setProductos(procesados);
             } catch (e) {
                 console.error("Fallo al cargar productos", e);
-                setProductos([]);
+                !cancelado && setProductos([]);
             } finally {
-                setLoadingProductos(false);
+                !cancelado && setLoadingProductos(false);
             }
         };
 
         void cargarProductos();
+        return () => { cancelado = true; };
     }, [open, categoriaSeleccionada]);
 
     useEffect(() => {
         if (!open) return;
 
+        let cancelado = false;
         const run = async () => {
             if (!q) {
-                setBusqueda([]);
+                setLoadingBusqueda(false);
+                !cancelado && setBusqueda([]);
                 return;
             }
             setLoadingBusqueda(true);
@@ -661,97 +689,42 @@ export default function MesaComandaModal({
                     })),
                 );
 
-                setBusqueda(procesados);
+                !cancelado && setBusqueda(procesados);
             } catch (e) {
                 console.error("Fallo búsqueda", e);
-                setBusqueda([]);
+                !cancelado && setBusqueda([]);
             } finally {
-                setLoadingBusqueda(false);
+                !cancelado && setLoadingBusqueda(false);
             }
         };
 
         const t = window.setTimeout(() => void run(), 180);
-        return () => window.clearTimeout(t);
+        return () => { cancelado = true; window.clearTimeout(t); };
     }, [open, q]);
 
-    const addProductoToTicket = useCallback(
-        async (p: ProductoDisplay) => {
-            if (!idComanda) return;
-            if (!isAdmin && operador == null) return;
+    const addProductoToTicket = useCallback(async (p: ProductoDisplay) => {
+        if (!idComanda || loadingTicket || cobroEnCursoRef.current || (!isAdmin && operador == null)) return;
+        ++lecturaTicketRef.current;
+        await cola.ejecutar(async () => {
+            const t = await addDetalle(idComanda, p, operador);
+            ++lecturaTicketRef.current;
+            aplicarTicket(idComanda, t);
+            notifyChanged();
+        });
+    }, [idComanda, loadingTicket, isAdmin, operador, cola, aplicarTicket, notifyChanged]);
 
-            // Actualización optimista: el ítem aparece al instante sin esperar la red
-            const optimisticId = `opt-${Date.now()}`;
-            setTicket((prev) => [
-                ...prev,
-                {
-                    id: optimisticId,
-                    productoId: p.ID_Producto,
-                    nombre: p.Nombre,
-                    precio: p.Precio_Venta,
-                    pagado: false,
-                    seleccionado: false,
-                    estadoCocina: "PENDIENTE",
-                    pasaCocina: false,
-                    notas: null,
-                    // La fila optimista todavía no tiene tipo congelado: lo fija el backend al
-                    // insertar y llega con la fila de verdad, que sustituye a esta en cuanto
-                    // responde. Hasta entonces vale el del negocio, que es lo que significa `null`.
-                    // Lo mismo el precio: el de verdad es el del catálogo al insertar (RI-27).
-                    ivaPercent: null,
-                },
-            ]);
+    const removeProductoFromTicket = useCallback(async (productoId: string) => {
+        if (!idComanda || loadingTicket || cobroEnCursoRef.current) return;
+        ++lecturaTicketRef.current;
+        await cola.ejecutar(async () => {
+            await removeOnePendingDetalle(idComanda, productoId);
+            await leerTicket(idComanda);
+            notifyChanged();
+        });
+    }, [idComanda, loadingTicket, cola, leerTicket, notifyChanged]);
 
-            try {
-                const t = await addDetalle(idComanda, p, operador);
-                // Mezclar los ítems reales con los optimistas todavía en vuelo
-                // (otras adiciones concurrentes que aún no tienen respuesta del servidor)
-                setTicket((prev) => {
-                    const enVuelo = prev.filter(
-                        (item) => item.id.startsWith("opt-") && item.id !== optimisticId,
-                    );
-                    return [...t, ...enVuelo];
-                });
-                notifyChanged();
-            } catch (e) {
-                // Revertir el ítem optimista si la escritura falló
-                setTicket((prev) => prev.filter((item) => item.id !== optimisticId));
-                console.error("Error añadiendo detalle:", e);
-            }
-        },
-        [idComanda, isAdmin, operador, notifyChanged],
-    );
-
-    const removeProductoFromTicket = useCallback(
-        async (productoId: string) => {
-            if (!idComanda) return;
-
-            // Optimistic: quitar el primer ítem pendiente que coincida
-            let removed: TicketItem | undefined;
-            setTicket((prev) => {
-                const idx = prev.findIndex(
-                    (t) => t.productoId === productoId && !t.pagado,
-                );
-                if (idx === -1) return prev;
-                removed = prev[idx];
-                return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
-            });
-
-            try {
-                await removeOnePendingDetalle(idComanda, productoId);
-                // HIG-04: el borrado ya salió bien. Si recargar falla se queda el estado optimista,
-                // que es el correcto, y sólo hace falta que el fallo no se pierda.
-                reloadTicket().catch((e) =>
-                    console.error("Línea quitada, pero no se pudo recargar el ticket", e),
-                );
-            } catch (e) {
-                if (removed !== undefined) {
-                    setTicket((prev) => [...prev, removed!]);
-                }
-                console.error("Error eliminando detalle:", e);
-            }
-        },
-        [idComanda, reloadTicket],
-    );
+    const anadirConAviso = useMemo(() => conAviso(addProductoToTicket), [addProductoToTicket]);
+    const quitarConAviso = useMemo(() => conAviso(removeProductoFromTicket), [removeProductoFromTicket]);
 
     const countEnTicket = (productoId: string) =>
         ticket.filter((t) => t.productoId === productoId && !t.pagado).length;
@@ -798,20 +771,18 @@ export default function MesaComandaModal({
     };
 
     const eliminarLineaTicket = async (idDetalle: string) => {
-        const line = ticket.find((t) => t.id === idDetalle);
-        if (!line) return;
-        if (line.pagado) return;
-        // HIG-04: la papelera de la línea llama a esto con `void`, así que un fallo no lo recogía
-        // nadie: la línea se quedaba en el ticket y el camarero no sabía por qué.
+        if (!idComanda || cobroEnCursoRef.current || !ticket.some(t => t.id === idDetalle && !t.pagado)) return;
+        const cId = idComanda;
+        ++lecturaTicketRef.current;
         try {
-            await deleteDetalleById(idDetalle);
+            await cola.ejecutar(async () => {
+                await deleteDetalleById(idDetalle);
+                await leerTicket(cId);
+                notifyChanged();
+            });
         } catch (e) {
             toast.error("No se pudo quitar la línea", toAppError(e).message);
-            return;
         }
-        await reloadTicket().catch((e) =>
-            console.error("Línea quitada, pero no se pudo recargar el ticket", e),
-        );
     };
 
     /* ── FISCAL-02: la factura completa ───────────────────────────────────────
@@ -840,7 +811,7 @@ export default function MesaComandaModal({
         metodo: "tarjeta" | "efectivo",
         destinatario?: DestinatarioInput | null,
     ) => {
-        if (!idComanda) return;
+        if (!idComanda || cobroEnCursoRef.current || cola.pendientes() > 0) return;
 
         const ids = ticket
             .filter((t) => !t.pagado && t.seleccionado)
@@ -855,16 +826,11 @@ export default function MesaComandaModal({
             setPideFactura({ metodo, obligatorio: false });
             return;
         }
-        if (destinatario) setCobrandoFactura(true);
+        cobroEnCursoRef.current = true;
+        setCobrandoFactura(true);
+        ++lecturaTicketRef.current;
 
         try {
-            console.log("Cobrando detalles:", {
-                idComanda,
-                ids,
-                metodo,
-                operador,
-            });
-
             const idPago = await mesasCobrarDetalles({
                 idComanda,
                 metodo: metodo === "tarjeta" ? "Tarjeta" : "Efectivo",
@@ -878,17 +844,20 @@ export default function MesaComandaModal({
 
             // El ticket de este cobro: imprimir saca el de su factura, con sus líneas y no las de
             // la mesa entera (RI-29).
-            if (idPago) setUltimoCobro({ idPago });
+            if (idPago && comandaActualRef.current === idComanda) setUltimoCobro({ idPago });
 
-            const t = await loadTicketForComanda(idComanda);
-            console.log("Ticket tras cobrar:", t);
+            // La escritura ya está confirmada: estos ids están pagados aunque falle el refresco.
+            if (comandaActualRef.current === idComanda) {
+                setTicket(prev => prev.map(l => ids.includes(l.id) ? { ...l, pagado: true, seleccionado: false } : l));
+            }
+            await leerTicket(idComanda).catch(e => toast.warning("Cobro guardado; no se pudo refrescar el ticket", toAppError(e).message));
+            if (comandaActualRef.current !== idComanda) { notifyChanged(); anunciarCobro(); return; }
 
             setCashCount({});
             setPaso("categorias");
             setCategoriaSeleccionada(null);
             setQuery("");
             setBusqueda([]);
-            setTicket(t);
             window.dispatchEvent(new CustomEvent("mesas:changed"));
             notifyChanged();
             // FISCAL-01: se ha cobrado. Si el equipo lleva tres días sin remitir, el aviso sale
@@ -899,6 +868,7 @@ export default function MesaComandaModal({
             setErrorFactura(null);
         } catch (e) {
             console.error("Error cobrando:", e);
+            if (comandaActualRef.current !== idComanda) { toast.error("No se pudo cobrar", toAppError(e).message); return; }
             // El importe pasa del límite de la simplificada: no es un fallo, es que falta un dato.
             // Se abre el formulario en modo obligatorio en vez de dejar al camarero sin salida.
             if (esError(e, "factura_completa_requerida")) {
@@ -925,6 +895,7 @@ export default function MesaComandaModal({
             // está cobrando tiene que ver.
             toast.error("No se pudo cobrar", toAppError(e).message);
         } finally {
+            cobroEnCursoRef.current = false;
             setCobrandoFactura(false);
         }
     };
@@ -1260,7 +1231,7 @@ export default function MesaComandaModal({
                                                         ? "bg-accent text-white hover:bg-accent-hover"
                                                         : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                                 )}
-                                                disabled={diferencia < 0}
+                                                disabled={diferencia < 0 || cobrandoFactura || escriturasPendientes > 0}
                                                 onClick={conAviso(() => cobrar("efectivo"))}
                                                 type="button"
                                                 title={
@@ -1352,8 +1323,9 @@ export default function MesaComandaModal({
                                                         key={p.ID_Producto}
                                                         p={p}
                                                         qty={countEnTicket(p.ID_Producto)}
-                                                        onAdd={conAviso(addProductoToTicket)}
-                                                        onRemove={conAviso(removeProductoFromTicket)}
+                                                        bloqueado={loadingTicket || cobrandoFactura}
+                                                        onAdd={anadirConAviso}
+                                                        onRemove={quitarConAviso}
                                                         onInfo={abrirDetalleProducto}
                                                     />
                                                 ))}
@@ -1397,8 +1369,9 @@ export default function MesaComandaModal({
                                                     key={p.ID_Producto}
                                                     p={p}
                                                     qty={countEnTicket(p.ID_Producto)}
-                                                    onAdd={conAviso(addProductoToTicket)}
-                                                    onRemove={conAviso(removeProductoFromTicket)}
+                                                        bloqueado={loadingTicket || cobrandoFactura}
+                                                    onAdd={anadirConAviso}
+                                                    onRemove={quitarConAviso}
                                                     onInfo={abrirDetalleProducto}
                                                 />
                                             ))}
@@ -1412,6 +1385,7 @@ export default function MesaComandaModal({
                     <div className="flex min-h-[32rem] w-full shrink-0 flex-col rounded-xl border border-border bg-surface p-3 sm:p-4 lg:min-h-0 lg:w-[420px]">
                         <div className="flex items-center justify-between">
                             <h3 className="text-lg font-bold text-fg">Ticket</h3>
+                            {(escriturasPendientes > 0 || cobrandoFactura) && <span role="status" className="text-sm text-fg-muted">Guardando…</span>}
                             <div className="text-sm font-semibold text-fg-muted">
                                 Total pendiente:{" "}
                                 <span className="text-fg">{eur(totalPendiente)}</span>
@@ -1426,7 +1400,7 @@ export default function MesaComandaModal({
                                         ? "bg-accent text-white hover:bg-accent-hover"
                                         : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                 )}
-                                disabled={!puedeCobrar || !ticket.some((t) => !t.pagado)}
+                                disabled={!puedeCobrar || loadingTicket || cobrandoFactura || escriturasPendientes > 0 || !ticket.some((t) => !t.pagado)}
                                 onClick={() => {
                                     seleccionaTodoPendiente();
                                     setPaso("metodo");
@@ -1443,7 +1417,7 @@ export default function MesaComandaModal({
                                         ? "bg-surface border border-border hover:bg-surface-2"
                                         : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                 )}
-                                disabled={!puedeCobrar || !haySeleccion}
+                                disabled={!puedeCobrar || loadingTicket || cobrandoFactura || escriturasPendientes > 0 || !haySeleccion}
                                 onClick={() => setPaso("metodo")}
                                 type="button"
                             >
@@ -1617,7 +1591,7 @@ export default function MesaComandaModal({
                                                 ? "bg-accent text-white hover:bg-accent-hover"
                                                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                         )}
-                                        disabled={!puedeCobrar || !haySeleccion}
+                                        disabled={!puedeCobrar || loadingTicket || cobrandoFactura || escriturasPendientes > 0 || !haySeleccion}
                                         onClick={conAviso(() => cobrar("tarjeta"))}
                                         type="button"
                                     >
@@ -1631,7 +1605,7 @@ export default function MesaComandaModal({
                                                 ? "bg-surface border border-border hover:bg-surface-2"
                                                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                         )}
-                                        disabled={!puedeCobrar || !haySeleccion}
+                                        disabled={!puedeCobrar || loadingTicket || cobrandoFactura || escriturasPendientes > 0 || !haySeleccion}
                                         onClick={() => {
                                             setPaso("efectivo");
                                             setCashCount({});
