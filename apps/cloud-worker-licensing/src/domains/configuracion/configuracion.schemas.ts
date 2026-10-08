@@ -6,7 +6,10 @@ import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type { ConfigPatchInput } from "@tpv/contracts";
 
 export const configPatchSchema = z.object({
-	patch: z.record(z.unknown()).default({}),
+	patch: z.record(z.unknown()).default({}).refine((patch) => {
+		if (!("contact_email" in patch)) return true;
+		return z.string().trim().max(254).email().or(z.literal("")).safeParse(patch.contact_email).success;
+	}, { message: "Correo de contacto inválido" }),
 });
 
 export type { ConfigPatchInput };

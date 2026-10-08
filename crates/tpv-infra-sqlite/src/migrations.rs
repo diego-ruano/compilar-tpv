@@ -1,3 +1,4 @@
+//! RI-60: eliminado el campo antiguo de correo de recuperaci?n.
 //! Sistema de migraciones del esquema de la **BD local (SQLite/libsql)**.
 //!
 //! ## Modelo (fuente única de verdad)

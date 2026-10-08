@@ -35,6 +35,8 @@ export function Contacto({
 					<div className="grid grid-cols-1 gap-4">
 						<Field label="Correo de contacto">
 							<TextInput
+								type="email"
+								maxLength={254}
 								value={contactEmail}
 								onChange={(e) => setContactEmail(e.target.value)}
 								className={inputTone}
@@ -50,6 +52,7 @@ export function Contacto({
 					</div>
 				)}
 			</Panel>
+			<p className="text-sm text-fg-muted">El correo es necesario para enviar pedidos y recibir las respuestas de los proveedores. El teléfono es opcional.</p>
 
 			<div className="flex justify-end">
 				<button

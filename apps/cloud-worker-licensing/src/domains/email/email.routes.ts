@@ -31,6 +31,7 @@ import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb, type Sql } from "../../server/db";
 import { cuerpo } from "../../lib/validacion";
+import { leerIdentidadPedido, type IdentidadPedido } from "./pedidoIdentidad";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -61,7 +62,7 @@ const enviarPedidoSchema = z
 	});
 
 emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
-	const { email_destino, nombre_proveedor, notas, lineas } = c.req.valid("json");
+	const { email_destino, notas, lineas } = c.req.valid("json");
 	const tenantId = c.get("tenantId");
 	const deviceId = c.get("deviceId");
 
@@ -73,32 +74,20 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 	// proveedor dado de alta en ESTE tenant. Sin esto, un token robado podía usar nuestro dominio
 	// (con su SPF/DKIM) para mandar correo a cualquier dirección del mundo. Es el control real de
 	// abuso: acota a quién se puede escribir, en vez de cuánto.
-	const autorizado = await tenantQuery(c, async (db) => {
-		const r = await db.execute({
-			sql: `SELECT 1 FROM Proveedores
-			      WHERE Email IS NOT NULL AND lower(trim(Email)) = lower(trim(?1))
-			      LIMIT 1`,
-			args: [email_destino],
-		});
-		return (r.rows?.length ?? 0) > 0;
-	});
-
-	if (!autorizado) {
-		return c.json({ error: "email_destino_no_autorizado" }, 403);
-	}
-
-	const html = buildHtml(nombre_proveedor, notas ?? null, lineas);
-	const text = buildText(nombre_proveedor, notas ?? null, lineas);
+	const identidad = await tenantQuery(c, (db) => leerIdentidadPedido(db, email_destino));
+	const html = buildHtml(identidad, notas ?? null, lineas);
+	const text = buildText(identidad, notas ?? null, lineas);
 
 	const fromAddress = c.env.EMAIL_FROM_ADDRESS;
 	if (!fromAddress) return c.json({ error: "missing_env_EMAIL_FROM_ADDRESS" }, 500);
-	const from: EmailAddress = { email: fromAddress, name: c.env.EMAIL_FROM_NAME || "TPV" };
+	const from: EmailAddress = { email: fromAddress, name: identidad.nombre };
 
 	try {
 		await c.env.EMAIL.send({
 			from,
 			to: email_destino,
-			subject: `Pedido a ${nombre_proveedor}`,
+			replyTo: identidad.correo,
+			subject: `Pedido de ${identidad.nombre}`,
 			html,
 			text,
 		});
@@ -106,12 +95,12 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 		// El binding lanza Error con `.code` (E_SENDER_NOT_VERIFIED, E_RATE_LIMIT_EXCEEDED, …).
 		const e = err as { code?: string; message?: string };
 		console.error("[email] Cloudflare Email Service error:", e.code ?? "", e.message ?? err);
-		await registrarEnvio(c.env, tenantId, deviceId, email_destino, nombre_proveedor, false, e.code ?? null);
+		await registrarEnvio(c.env, tenantId, deviceId, email_destino, identidad.proveedor, false, e.code ?? null);
 		// El código del binding va en `detalle`: `code` es el del catálogo compartido.
 		return c.json({ error: "email_send_failed", detalle: e.code ?? null }, 500);
 	}
 
-	await registrarEnvio(c.env, tenantId, deviceId, email_destino, nombre_proveedor, true, null);
+	await registrarEnvio(c.env, tenantId, deviceId, email_destino, identidad.proveedor, true, null);
 	return c.json({ ok: true });
 });
 
@@ -196,8 +185,11 @@ type Linea = {
 	unidad?: string | null;
 };
 
-function buildText(proveedor: string, notas: string | null, lineas: Linea[]): string {
-	let s = `Pedido a ${proveedor}\n\n`;
+export function buildText(negocio: IdentidadPedido, notas: string | null, lineas: Linea[]): string {
+	let s = `Pedido de ${negocio.nombre} a ${negocio.proveedor}\nCorreo: ${negocio.correo}\n`;
+	if (negocio.direccion) s += `Dirección: ${negocio.direccion}\n`;
+	if (negocio.telefono) s += `Teléfono: ${negocio.telefono}\n`;
+	s += "\n";
 	// Sin líneas (pedido solo con notas) no pintamos la tabla: una cabecera con nada debajo parece
 	// un correo roto.
 	if (lineas.length > 0) {
@@ -215,7 +207,7 @@ function buildText(proveedor: string, notas: string | null, lineas: Linea[]): st
 	return s;
 }
 
-function buildHtml(proveedor: string, notas: string | null, lineas: Linea[]): string {
+export function buildHtml(negocio: IdentidadPedido, notas: string | null, lineas: Linea[]): string {
 	const rows = lineas
 		.map((l) => {
 			const precio = l.precio_unitario != null ? enEuros(l.precio_unitario) : "—";
@@ -255,7 +247,10 @@ function buildHtml(proveedor: string, notas: string | null, lineas: Linea[]): st
 <html lang="es">
 <head><meta charset="utf-8"><title>Pedido</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111827">
-  <h2 style="color:#111827;margin-bottom:4px">Pedido a ${esc(proveedor)}</h2>
+  <h2 style="color:#111827;margin-bottom:4px">Pedido de ${esc(negocio.nombre)}</h2>
+  <p>Para ${esc(negocio.proveedor)} · Contacto: ${esc(negocio.correo)}</p>
+  ${negocio.direccion ? `<p>Dirección: ${esc(negocio.direccion)}</p>` : ""}
+  ${negocio.telefono ? `<p>Teléfono: ${esc(negocio.telefono)}</p>` : ""}
   ${tablaHtml}
   ${notasHtml}
   <p style="margin-top:24px;font-size:12px;color:#9ca3af">Enviado desde TPV · Altaria Lights</p>

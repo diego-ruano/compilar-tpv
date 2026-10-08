@@ -98,6 +98,11 @@ por volumen**: `TOPE_DIARIO` (100) envíos por negocio en una ventana de 24 h, c
 Sólo cuentan los entregados (`ok = 1`), y si no se puede contar se deja pasar. Las trazas se purgan a
 los 90 días (`RETENCION_ENVIOS_MS`).
 
+RI-60: el envío exige nombre y correo comercial, leídos de la base del negocio junto con el
+proveedor. Sale desde nuestro dominio verificado, con el nombre del negocio y su correo en
+`Reply-To`. Dirección y teléfono son opcionales. Compra y recuperación del PIN conservan sus
+correos independientes; el esquema del negocio sólo guarda el contacto comercial.
+
 ## Imágenes
 
 Se guardan en R2 con prefijo por tenant y una expresión contra rutas con `..` (`REL_PATH_RE`). El GET

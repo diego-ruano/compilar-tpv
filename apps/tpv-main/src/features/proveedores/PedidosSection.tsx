@@ -13,6 +13,7 @@ import type {
   ProveedorDto,
 } from "@tpv/contracts";
 import { estadoDelPedido, type PedidoEstado } from "./pedidosApis";
+import { configGetBusinessSettings, configGetContactSettings } from "../configuracion/api/configApis";
 import { emailEnviarPedido } from "../configuracion/api/emailConfigApis";
 import {
   usePedidosPage,
@@ -170,6 +171,12 @@ export default function PedidosSection({ proveedores }: Props) {
 
     try {
       // Email primero: si falla aquí, la DB no se toca
+      // RI-60: aviso previo; el Worker también valida su copia del contacto comercial.
+      const [negocio, contacto] = await Promise.all([configGetBusinessSettings(), configGetContactSettings()]);
+      if (!negocio.businessName.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contacto.contactEmail.trim())) {
+        toast.error("Faltan datos del negocio", "Completa el nombre y un correo de contacto válido en Configuración antes de enviar pedidos.");
+        return;
+      }
       {
         await emailEnviarPedido({
           email_destino: updated.email_destino!,

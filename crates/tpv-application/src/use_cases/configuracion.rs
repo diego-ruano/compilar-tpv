@@ -52,6 +52,13 @@ pub async fn patch_contact(
     repo: &dyn ConfiguracionRepository,
     patch: JsonValue,
 ) -> AppResult<String> {
+    // RI-60: puede quedar vacío si no se envían pedidos, pero nunca guardar un correo inválido.
+    if let Some(value) = patch.get("contact_email") {
+        let email = value.as_str().ok_or_else(|| AppError::validation("Correo de contacto inválido"))?.trim();
+        if !email.is_empty() && (email.len() > 254 || !tpv_domain::login::validate_email_basic(email)) {
+            return Err(AppError::validation("Correo de contacto inválido"));
+        }
+    }
     repo.patch_contact(&patch).await?;
     Ok("OK".to_string())
 }
@@ -81,6 +88,13 @@ mod tests {
         }
         async fn patch_contact(&self, _: &JsonValue) -> AppResult<()> {
             panic!("repo llamado")
+        }
+    }
+
+    #[tokio::test]
+    async fn patch_contact_rechaza_correo_invalido_sin_persistir() {
+        for email in [serde_json::json!("no-es-correo"), serde_json::json!(true)] {
+            assert!(matches!(patch_contact(&RepoQueNoDebeLlamarse, serde_json::json!({"contact_email": email})).await, Err(AppError::Validation(_))));
         }
     }
 

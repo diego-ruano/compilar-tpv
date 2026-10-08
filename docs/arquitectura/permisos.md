@@ -168,7 +168,8 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
   correo **nuevo** y avisa al anterior y al de la compra; volver al de la compra no pide código.
 - **Cinco minutos entre códigos** (`REENVIO_MIN_MS`), con la cuenta atrás en pantalla.
 - El **traslado de la licencia** va siempre al correo de la compra ([licencias.md](licencias.md)).
-- `Contact_Settings.Recovery_Email` sigue en el esquema y no lo usa nada.
+- RI-60: el correo comercial vive en `Contact_Settings.Contact_Email`; la recuperación usa la base
+  central. No hay un segundo campo de recuperación en el esquema del negocio.
 - Sin internet no hay recuperación por correo: la salida es otro administrador.
 
 ---

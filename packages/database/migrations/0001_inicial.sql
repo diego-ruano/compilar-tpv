@@ -1255,7 +1255,6 @@ INSERT OR IGNORE INTO Ticket_Settings (ID) VALUES (1);
 -- Datos de contacto/recuperacion del negocio (singleton, ID=1).
 CREATE TABLE IF NOT EXISTS Contact_Settings (
   ID INTEGER PRIMARY KEY CHECK (ID = 1),
-  Recovery_Email TEXT NOT NULL DEFAULT '',
   Contact_Email TEXT NOT NULL DEFAULT '',
   Contact_Phone TEXT NOT NULL DEFAULT '',
   Updated_At TEXT
