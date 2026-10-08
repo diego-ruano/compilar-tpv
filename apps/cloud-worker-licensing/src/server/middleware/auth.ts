@@ -5,7 +5,7 @@ import { cargarDevice, estaRevocado } from "../../lib/deviceAuth";
 import { leerBearer, verificarSesion, type ClaimsSesion } from "../../lib/sesion";
 import { b64ToBytes } from "../utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../utils/crypto";
-import { ed25519Verify, nobleForceU8 } from "../utils/nobleEd25519";
+import { ed25519Verify, bytesExactos } from "../utils/ed25519";
 
 export type AuthClaims = ClaimsSesion;
 
@@ -125,9 +125,9 @@ export async function verifyDeviceProofOrThrow(
 	const sigB64 = sigB64Raw.replace(/^"+|"+$/g, "");
 
 	try {
-		const pubU8 = nobleForceU8(b64ToBytes(pubB64));
-		const sigU8 = nobleForceU8(b64ToBytes(sigB64));
-		const payloadU8 = nobleForceU8(new TextEncoder().encode(msg));
+		const pubU8 = bytesExactos(b64ToBytes(pubB64));
+		const sigU8 = bytesExactos(b64ToBytes(sigB64));
+		const payloadU8 = bytesExactos(new TextEncoder().encode(msg));
 
 		const ok = await ed25519Verify(sigU8, payloadU8, pubU8);
 		if (!ok) throw new Error("bad_device_signature");

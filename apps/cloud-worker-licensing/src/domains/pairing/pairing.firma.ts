@@ -10,7 +10,7 @@
 import type { Client } from "@libsql/client/web";
 
 import { b64ToBytes } from "../../server/utils/base64";
-import { ed25519Verify, nobleForceU8 } from "../../server/utils/nobleEd25519";
+import { ed25519Verify, bytesExactos } from "../../server/utils/ed25519";
 
 export type AccionFirmada = "PAIR_FETCH" | "PAIR_CANCEL";
 
@@ -84,8 +84,8 @@ export async function comprobarFirmaDelReclamante(
 	let pubU8: Uint8Array;
 
 	try {
-		sigU8 = nobleForceU8(b64ToBytes(sanitizeB64(datos.sigB64)));
-		pubU8 = nobleForceU8(b64ToBytes(sanitizeB64(datos.pubB64)));
+		sigU8 = bytesExactos(b64ToBytes(sanitizeB64(datos.sigB64)));
+		pubU8 = bytesExactos(b64ToBytes(sanitizeB64(datos.pubB64)));
 	} catch {
 		return { status: 401, error: "bad_b64" };
 	}
@@ -97,6 +97,6 @@ export async function comprobarFirmaDelReclamante(
 		mensajeFirmado(datos.accion, datos.ts, datos.pairCode, datos.nonceB64, datos.deviceId),
 	);
 
-	const ok = await ed25519Verify(sigU8, nobleForceU8(mensaje), pubU8);
+	const ok = await ed25519Verify(sigU8, bytesExactos(mensaje), pubU8);
 	return ok ? null : { status: 401, error: "bad_device_signature" };
 }

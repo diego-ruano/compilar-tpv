@@ -48,7 +48,7 @@ import {
 } from "../src/domains/pairing/pairing.intentos";
 import configuracionDelWorker from "../wrangler.json";
 import { mensajeFirmado, type AccionFirmada } from "../src/domains/pairing/pairing.firma";
-import { ensureEd25519Sha512 } from "../src/server/utils/nobleEd25519";
+import { ensureEd25519Sha512 } from "./helpers/ed25519";
 import { bytesToB64 } from "../src/server/utils/base64";
 
 const T0 = 1_800_000_000_000;

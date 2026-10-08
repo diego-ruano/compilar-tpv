@@ -15,7 +15,7 @@
 import type { Client } from "@libsql/client/web";
 
 import { b64ToBytes, bytesToB64 } from "../server/utils/base64";
-import { ed25519Verify, nobleForceU8 } from "../server/utils/nobleEd25519";
+import { ed25519Verify, bytesExactos } from "../server/utils/ed25519";
 import { estaRevocado } from "../lib/deviceAuth";
 import { nowMs } from "./tenantHub.tiempo";
 
@@ -134,8 +134,8 @@ export async function verifyHelloSigned(params: {
 		`${dominio}\n${msg.ts}\n${tenantId}\n${deviceId}\n${msg.nonceB64}`,
 	);
 
-	const pub = nobleForceU8(b64ToBytes(pubkeyB64));
-	const sig = nobleForceU8(b64ToBytes(msg.sigB64));
+	const pub = bytesExactos(b64ToBytes(pubkeyB64));
+	const sig = bytesExactos(b64ToBytes(msg.sigB64));
 
 	const ok = await ed25519Verify(sig, payload, pub);
 	if (!ok) throw new Error("bad_ws_signature");

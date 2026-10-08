@@ -21,7 +21,7 @@ import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
 import { firmarSesion, handyTokenTtlSeconds, verificarSesion } from "../src/lib/sesion";
-import { ensureEd25519Sha512 } from "../src/server/utils/nobleEd25519";
+import { ensureEd25519Sha512 } from "./helpers/ed25519";
 import { bytesToB64 } from "../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../src/server/utils/crypto";
 

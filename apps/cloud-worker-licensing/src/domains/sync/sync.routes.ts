@@ -8,6 +8,7 @@
 // Solo la Main (rol tpv) consume este endpoint: es quien tiene la BD local que mantener al día.
 
 import { Hono } from "hono";
+import { serializarCambios, type CambioGuardado } from "./cambiosJson";
 
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
@@ -51,14 +52,6 @@ function rows(rs: any): any[] {
 	});
 }
 
-function safeJsonParse(s: string): any {
-	try {
-		return JSON.parse(s);
-	} catch {
-		return null;
-	}
-}
-
 // POST /v1/sync/changes  { since?: number, limit?: number }
 // Devuelve las operaciones con Seq > since en orden ascendente.
 syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
@@ -71,7 +64,8 @@ syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
 			[
 				{
 					sql: `
-				SELECT Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms
+				SELECT Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms,
+                        CASE WHEN json_valid(Statements_Json) THEN json_type(Statements_Json) ELSE 'invalid' END AS Statements_Type
 				FROM Sync_Changes
 				WHERE Seq > ?1
 				ORDER BY Seq ASC
@@ -84,20 +78,13 @@ syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
 			"read",
 		);
 
-		const items = rows(rs).map((r: any) => ({
-			seq: Number(r.Seq ?? r.seq ?? 0),
-			opId: String(r.Op_Id ?? r.op_id ?? ""),
-			command: String(r.Command_Name ?? r.command_name ?? ""),
-			statements: safeJsonParse(String(r.Statements_Json ?? r.statements_json ?? "[]")) ?? [],
-			deviceId: r.Device_Id ? String(r.Device_Id) : null,
-			createdAtMs: Number(r.Created_At_Ms ?? r.created_at_ms ?? 0),
-		}));
+		const items = rows(rs) as unknown as CambioGuardado[];
 		const highWater = Number((rows(rsHighWater)[0] as any)?.seq ?? 0);
 		return { items, highWater };
 	});
 	const { items, highWater } = snapshot;
 
-	const nextSince = items.length ? items[items.length - 1].seq : since;
+	const responseJson = serializarCambios(items, since, highWater);
 
 	// SYNC-12: registramos el checkpoint (`since`, lo que la Main YA tiene confirmado) como suelo de
 	// la purga del log. Usamos `since` (no `nextSince`) porque es el límite inferior seguro: si la
@@ -120,7 +107,7 @@ syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
 		/* el registro del checkpoint es best-effort (solo alimenta la purga) */
 	}
 
-	return c.json({ ok: true, items, nextSince, highWater });
+	return c.body(responseJson, 200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
 });
 
 // ---------------------------------------------------------------------------

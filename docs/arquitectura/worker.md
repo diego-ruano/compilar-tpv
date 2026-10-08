@@ -103,6 +103,14 @@ proveedor. Sale desde nuestro dominio verificado, con el nombre del negocio y su
 `Reply-To`. Dirección y teléfono son opcionales. Compra y recuperación del PIN conservan sus
 correos independientes; el esquema del negocio sólo guarda el contacto comercial.
 
+## Sincronización y firmas
+
+RI-44: `/v1/sync/changes` valida en SQLite que las sentencias guardadas sean un array JSON y
+conserva ese fragmento en la respuesta. Un registro inválido falla explícitamente; no se sustituye
+por una operación vacía. Ed25519 firma y verifica exclusivamente con WebCrypto en producción;
+Noble sólo sirve de referencia independiente en tests. Placement sigue desactivado; véase
+[cómo medir antes de decidir](../guias/medir-worker.md).
+
 ## Imágenes
 
 Se guardan en R2 con prefijo por tenant y una expresión contra rutas con `..` (`REL_PATH_RE`). El GET

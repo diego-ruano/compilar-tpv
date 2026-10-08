@@ -10,7 +10,7 @@
 // Reutiliza las utilidades compartidas del worker (base64, crypto, credenciales del tenant) en
 // vez de mantener copias propias.
 
-import * as ed from "@noble/ed25519";
+import { ed25519Sign, ed25519Verify } from "../../server/utils/ed25519";
 import { createClient, type Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
@@ -154,7 +154,7 @@ export async function signLicenseAssertion(
 	if (seed.length !== 32) throw new Error("LICENSE_SIGNING_PRIVATE_KEY must decode to 32 bytes");
 
 	const msg = new TextEncoder().encode(licenseAssertionMessage(fields));
-	const sig = await ed.signAsync(msg, seed);
+	const sig = await ed25519Sign(msg, seed);
 
 	return { ...fields, sig: bytesToB64(sig) };
 }
@@ -317,7 +317,7 @@ async function comprobarFirma(
 		return { ok: false, error: "bad_b64" };
 	}
 
-	const ok = await ed.verifyAsync(sig, new TextEncoder().encode(msg), pub);
+	const ok = await ed25519Verify(sig, new TextEncoder().encode(msg), pub);
 	if (!ok) return { ok: false, error: "bad_device_signature" };
 
 	return { ok: true };
