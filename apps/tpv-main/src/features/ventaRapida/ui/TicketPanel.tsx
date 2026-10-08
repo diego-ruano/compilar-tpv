@@ -9,7 +9,7 @@ import {
   Printer,
 } from "lucide-react";
 import { Paso, TicketItem } from "../types";
-import { cn } from "../utils";
+import { cn, lineaGuardada } from "../utils";
 import PrintTicketModal, { type CobroImprimible } from "../../../shared/ticket/PrintTicketModal";
 import { useMode } from "../../../shared/stores/useMode";
 import { conAviso } from "../../../shared/lib/conAviso";
@@ -128,7 +128,7 @@ export default function TicketPanel({
   };
 
   const openNotaModal = (t: TicketItem) => {
-    if (!(Number(t.detalleId) > 0)) return;
+    if (!lineaGuardada(t)) return;
 
     setNotaTicketId(t.id);
     setNotaValue(String(t.notas ?? ""));
@@ -146,7 +146,7 @@ export default function TicketPanel({
 
   const saveNota = async () => {
     if (!currentItem) return;
-    if (!(Number(currentItem.detalleId) > 0)) return;
+    if (!lineaGuardada(currentItem)) return;
 
     setNotaSaving(true);
 
@@ -304,7 +304,7 @@ export default function TicketPanel({
                             const checked = t.seleccionado && !t.pagado;
                             const notas = String(t.notas ?? "").trim();
                             const tieneNota = Boolean(notas);
-                            const lineaGuardada = Number(t.detalleId) > 0;
+                            const guardada = lineaGuardada(t);
                             const disabledLine = t.pagado;
 
                             return (
@@ -390,15 +390,15 @@ export default function TicketPanel({
                                       e.stopPropagation();
                                       openNotaModal(t);
                                     }}
-                                    disabled={!lineaGuardada}
+                                    disabled={!guardada}
                                     className={cn(
                                       "grid size-8 place-items-center rounded-lg border transition",
-                                      !lineaGuardada
+                                      !guardada
                                         ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
                                         : "border-border text-fg-muted hover:bg-surface-2 hover:text-fg cursor-pointer",
                                     )}
                                     title={
-                                      lineaGuardada
+                                      guardada
                                         ? "Añadir/editar nota"
                                         : "La nota estará disponible cuando la línea esté confirmada"
                                     }

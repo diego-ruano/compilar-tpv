@@ -153,6 +153,32 @@ describe("El camino del dinero", () => {
         expect(idMesa.length).toBeGreaterThan(0);
     });
 
+    it("6c · guarda una nota y quitar con − persiste al volver al ticket (RI-71)", async () => {
+        await irA("/VentaRapida");
+        await pulsar(PRODUCTO.categoria);
+        const nombre = literalXPath(PRODUCTO.nombre);
+        const quitar = $(`//p[normalize-space(.)=${nombre}]/ancestor::div[.//button[@aria-label="Quitar uno"]][1]//button[@aria-label="Quitar uno"]`);
+        await pulsarXPath(`//div[@role="button"][.//p[normalize-space(.)=${nombre}]]`, "producto de venta rápida");
+        await quitar.waitForEnabled({ timeout: 20_000 });
+        await pulsarXPath('//button[@title="Añadir/editar nota"]', "nota de una línea guardada");
+        const nota = $("textarea");
+        await nota.waitForDisplayed();
+        await nota.setValue("Sin hielo");
+        await pulsar("Guardar nota");
+        await nota.waitForExist({ reverse: true });
+        await irA("/Inventario");
+        await irA("/VentaRapida");
+        await conTexto("p", "Sin hielo").waitForDisplayed({ timeout: 20_000 });
+        await pulsar(PRODUCTO.categoria);
+        await quitar.click();
+        await browser.waitUntil(async () => !(await quitar.isEnabled()), { timeout: 20_000 });
+        await irA("/Inventario");
+        await irA("/VentaRapida");
+        await pulsar(PRODUCTO.categoria);
+        await quitar.waitForDisplayed({ timeout: 20_000 });
+        expect(await quitar.isEnabled()).toBe(false);
+    });
+
     it("7 · abre la mesa y le añade dos líneas", async () => {
         await abrirMesa(MESA);
         await anadirLineas(PRODUCTO, UNIDADES);

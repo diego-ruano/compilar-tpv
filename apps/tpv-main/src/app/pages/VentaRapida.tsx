@@ -30,7 +30,7 @@ import {
   Paso,
   TicketItem,
 } from "../../features/ventaRapida/types";
-import { cn } from "../../features/ventaRapida/utils";
+import { cn, lineaGuardada } from "../../features/ventaRapida/utils";
 
 import {
   vrBootstrap,
@@ -1190,7 +1190,7 @@ export default function VentaRapida() {
         return;
       }
 
-      if (!(Number(detalleId) > 0)) {
+      if (!lineaGuardada({ detalleId })) {
         toast.info("Espera un momento", "Todavía se está guardando esta línea.");
         return;
       }
@@ -1434,7 +1434,7 @@ export default function VentaRapida() {
 
       if (!item) return;
 
-      if (!(Number(item.detalleId) > 0)) {
+      if (!lineaGuardada(item)) {
         cancelledAddTempIdsRef.current.add(item.id);
         removeTicketItemLocal(item.id);
         emitVrChanged();
