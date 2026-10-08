@@ -37,6 +37,11 @@ src/
 
 ## Datos: TanStack Query y Zustand
 
+Venta rápida y Mesas se importan desde el arranque, con sus componentes de servicio. Las demás
+rutas de negocio usan `lazy` del router; configuración inicial y recuperación usan `React.lazy`
+también cuando las presenta `App`. Login y la estructura de arranque permanecen disponibles.
+Durante una navegación diferida se conserva la pantalla actual y se indica la carga.
+
 - Un `QueryClient` (`shared/lib/queryClient.ts`): `staleTime` de 30 s y sin `refetchOnWindowFocus`,
   porque en la Main el dato sólo cambia por mutaciones de esta aplicación o por un `change` del socket.
 - **Patrón**: cada feature expone sus hooks en `features/<x>/<x>Queries.ts`, con `useQuery` para lecturas

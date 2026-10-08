@@ -2,54 +2,45 @@ import React from "react";
 import { createBrowserRouter } from "react-router-dom";
 
 import App from "./App";
-import SetupInicial from "./pages/SetUpInicial";
 import VentaRapida from "./pages/VentaRapida";
 import Mesas from "./pages/Mesas";
-import EditTables from "./pages/mesasPages/EditTables";
-import Inventario from "./pages/Inventario";
-import Reservas from "./pages/Reservas";
-import Trabajadores from "./pages/Trabajadores";
-import AddTrabajador from "./pages/trabajadoresPages/AddTrabajador";
-import EditTrabajador from "./pages/trabajadoresPages/EditTrabajador";
-import Proveedores from "./pages/Proveedores";
-import Clientes from "./pages/Clientes";
-import Estadisticas from "./pages/Estadisticas";
-import Configuracion from "./pages/Configuracion";
-import Cuentas from "./pages/Cuentas";
-import Tareas from "./pages/Tareas";
-import Notificaciones from "./pages/Notificaciones";
 import Logout from "./pages/Logout";
 import NotFound from "./pages/errorPages/NotFound";
+
+// RI-23: sólo las pantallas de servicio forman parte del arranque. Sus imports estáticos
+// incluyen también los modales, el catálogo, la cocina y el plano de Mesas.
+const pantalla = (cargar: () => Promise<{ default: React.ComponentType }>) =>
+    async () => ({ Component: (await cargar()).default });
 
 export const appRouter = createBrowserRouter([
     {
         path: "/",
         element: <App />,
         children: [
-            { path: "setup", element: <SetupInicial /> },
+            { path: "setup", lazy: pantalla(() => import("./pages/SetUpInicial")) },
 
             { index: true, element: <VentaRapida /> },
             { path: "VentaRapida", element: <VentaRapida /> },
 
             { path: "Mesas", element: <Mesas /> },
             { path: "Comandas", element: <Mesas /> },
-            { path: "Mesas/editar", element: <EditTables /> },
+            { path: "Mesas/editar", lazy: pantalla(() => import("./pages/mesasPages/EditTables")) },
 
-            { path: "Inventario", element: <Inventario /> },
-            { path: "Reservas", element: <Reservas /> },
+            { path: "Inventario", lazy: pantalla(() => import("./pages/Inventario")) },
+            { path: "Reservas", lazy: pantalla(() => import("./pages/Reservas")) },
 
-            { path: "Trabajadores", element: <Trabajadores /> },
-            { path: "Trabajadores/nuevo-trabajador", element: <AddTrabajador /> },
-            { path: "Trabajadores/editar/:id", element: <EditTrabajador /> },
+            { path: "Trabajadores", lazy: pantalla(() => import("./pages/Trabajadores")) },
+            { path: "Trabajadores/nuevo-trabajador", lazy: pantalla(() => import("./pages/trabajadoresPages/AddTrabajador")) },
+            { path: "Trabajadores/editar/:id", lazy: pantalla(() => import("./pages/trabajadoresPages/EditTrabajador")) },
 
-            { path: "Proveedores", element: <Proveedores /> },
-            { path: "Clientes", element: <Clientes /> },
-            { path: "Tareas", element: <Tareas /> },
+            { path: "Proveedores", lazy: pantalla(() => import("./pages/Proveedores")) },
+            { path: "Clientes", lazy: pantalla(() => import("./pages/Clientes")) },
+            { path: "Tareas", lazy: pantalla(() => import("./pages/Tareas")) },
 
-            { path: "Estadisticas", element: <Estadisticas /> },
-            { path: "Cuentas", element: <Cuentas /> },
-            { path: "Notificaciones", element: <Notificaciones /> },
-            { path: "Configuracion", element: <Configuracion /> },
+            { path: "Estadisticas", lazy: pantalla(() => import("./pages/Estadisticas")) },
+            { path: "Cuentas", lazy: pantalla(() => import("./pages/Cuentas")) },
+            { path: "Notificaciones", lazy: pantalla(() => import("./pages/Notificaciones")) },
+            { path: "Configuracion", lazy: pantalla(() => import("./pages/Configuracion")) },
 
             { path: "Logout", element: <Logout /> },
         ],

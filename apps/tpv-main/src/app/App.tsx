@@ -1,7 +1,7 @@
 import "../Global.css";
 import Layout from "./layouts/layout";
-import { useEffect, useState } from "react";
-import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Navigate, Outlet, useLocation, useNavigation } from "react-router-dom";
 import { useAuth } from "../shared/stores/useAuth";
 import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
@@ -9,8 +9,8 @@ import { esAdmin } from "../shared/lib/permisos";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
 import { fetchRecoveryStatus, fetchSetupPendiente } from "../features/login/loginApi";
 import Login from "./pages/Login";
-import SetupInicial from "./pages/SetUpInicial";
-import RecuperarDatos from "./pages/RecuperarDatos";
+const SetupInicial = lazy(() => import("./pages/SetUpInicial"));
+const RecuperarDatos = lazy(() => import("./pages/RecuperarDatos"));
 
 // ✅ importa tu provider
 import { ToastProvider } from "../shared/toast";
@@ -23,6 +23,7 @@ function AppInner() {
     const permisos = usePermisos();
     const requiresSetup = useAuth((s) => s.requiresSetup);
     const location = useLocation();
+    const navegacion = useNavigation();
     const marcarDatosPerdidos = useEstadoSync((s) => s.marcarDatosPerdidos);
     const configurarRecuperacion = useEstadoSync((s) => s.configurarRecuperacion);
 
@@ -124,6 +125,7 @@ function AppInner() {
 
     return (
         <Layout>
+            {navegacion.state !== "idle" && <p role="status" className="px-4 py-1">Cargando pantalla…</p>}
             <Outlet />
         </Layout>
     );
@@ -132,7 +134,9 @@ function AppInner() {
 export default function App() {
     return (
         <ToastProvider>
-            <AppInner />
+            <Suspense fallback={<p role="status" className="p-4">Cargando pantalla…</p>}>
+                <AppInner />
+            </Suspense>
         </ToastProvider>
     );
 }
