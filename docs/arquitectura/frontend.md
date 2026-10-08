@@ -65,6 +65,20 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
 - Otros stores (`shared/stores/`): `useAuth`, `useMode`, `useEstadoSync`, `useMainPresence`,
   `useEstadoFiscal`, `useSyncSignal`, `usePairCode`, `useTheme`, `useCorreoRecuperacionPendiente`.
 
+Las escrituras de servicio muestran únicamente respuestas confirmadas. Una cola por comanda
+ordena adiciones, retiradas y notas; los cobros tienen una guardia síncrona y feedback de espera.
+Main confirma contra SQLite sin esperar a la réplica. Handy confirma contra el Worker.
+Las lecturas tardías de una comanda anterior se descartan.
+
+La recuperación de venta rápida usa `_Cobros_Pendientes` en SQLite, escrita por `raw()` y ajena al
+outbox. El backend fija el operador al preparar; cualquier operador con `servicio.vender` puede
+resolver, corregir los datos de factura o descartar una preparación. La confirmación del pago
+elimina la preparación en la misma transacción. El `ID_Pago` hace idempotente el reintento.
+Descartar una preparación nunca anula un pago. Las colas antiguas de todos los usuarios se importan
+sin cambiar el identificador ni perder el destinatario; cada copia se elimina únicamente tras el
+acuse de SQLite. Al no tener firma de backend, esas preparaciones antiguas quedan atribuidas a la
+sesión que las importa. La recuperación exige una acción explícita, sin cobros automáticos al abrir.
+
 ## El dinero en pantalla
 
 Los horarios se guardan con `horariosGuardarAsignacion`: uno o dos tramos forman un conjunto

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use tpv_contracts::venta_rapida::{
     CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow,
-    VerTicketsDetalleRow, VrLineaAnadida,
+    VerTicketsDetalleRow, VrLineaAnadida, CobroPendienteDto, ResolverCobroPendienteInput,
 };
 use tpv_domain::venta_rapida::CobroFraccionado;
 
@@ -57,6 +57,15 @@ pub trait VentaRapidaRepository: Send + Sync {
     /// él, el papel saldría sin número o habría que volver a consultarlo. Y guardarlo con el pago
     /// es lo que permite que una reimpresión saque el mismo.
     async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String>;
+    /// Recuperación de cobros de la Main, compartida por operadores con permiso de vender.
+    async fn guardar_cobro_pendiente(&self, _data: CobroFraccionado) -> AppResult<()> {
+        Err(crate::error::AppError::validation("Los cobros se preparan en la Main"))
+    }
+    async fn listar_cobros_pendientes(&self) -> AppResult<Vec<CobroPendienteDto>> { Ok(vec![]) }
+    async fn resolver_cobro_pendiente(&self, _input: ResolverCobroPendienteInput) -> AppResult<String> {
+        Err(crate::error::AppError::validation("Los cobros se resuelven en la Main"))
+    }
+    async fn cancelar_cobro_pendiente(&self, _id_pago: &str) -> AppResult<bool> { Ok(false) }
     /// Borra una comanda si no tiene líneas pagadas. Error si tiene pagos o no existe.
     async fn delete_comanda_if_safe(&self, id_comanda: &str) -> AppResult<bool>;
 }

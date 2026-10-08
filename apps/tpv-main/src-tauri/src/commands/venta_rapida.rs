@@ -155,13 +155,8 @@ pub async fn vr_cobrar_fraccionado(
     state: State<'_, AppState>,
     args: VrCobrarFraccionadoInput,
 ) -> Result<String, AppErrorDto> {
-    // REV-17: quién cobra sale de aquí y no del input. Sin rol: cobrar lo hace cualquiera a mitad
-    // de servicio, como abrir el cajón — lo que hace falta es estar identificado.
-    //
-    // Un cobro que se reintenta desde la cola de la pantalla tras un cierre inesperado queda a
-    // nombre de quien tenga la sesión abierta cuando por fin entre — y es el mismo: esa cola se
-    // guarda bajo una clave de `localStorage` que ya lleva dentro el usuario y el trabajador
-    // (`PENDING_COBROS_STORAGE_PREFIX`), así que nadie drena los intents de otro.
+    // REV-17 / RI-47: la sesión firma la preparación inicial. La recuperación conserva esa
+    // atribución desde SQLite, aunque otro operador autorizado resuelva el cobro.
     let sesion = state.exigir_permiso("servicio.vender").await?;
     let repo = state.venta_rapida_repo().await?;
     // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
@@ -172,6 +167,35 @@ pub async fn vr_cobrar_fraccionado(
         args,
     )
     .await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn vr_guardar_cobro_pendiente(state: State<'_, AppState>, args: VrCobrarFraccionadoInput) -> Result<(), AppErrorDto> {
+    let sesion = state.exigir_permiso("servicio.vender").await?;
+    let repo = state.venta_rapida_repo().await?;
+    Ok(uc::guardar_cobro_pendiente(repo.as_ref(), &sesion.id_usuario, sesion.id_trabajador.as_deref(), args).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn vr_listar_cobros_pendientes(state: State<'_, AppState>) -> Result<Vec<tpv_contracts::venta_rapida::CobroPendienteDto>, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
+    Ok(state.venta_rapida_repo().await?.listar_cobros_pendientes().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn vr_resolver_cobro_pendiente(state: State<'_, AppState>, args: tpv_contracts::venta_rapida::ResolverCobroPendienteInput) -> Result<String, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
+    Ok(state.venta_rapida_repo().await?.resolver_cobro_pendiente(args).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn vr_cancelar_cobro_pendiente(state: State<'_, AppState>, id_pago: String) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
+    Ok(state.venta_rapida_repo().await?.cancelar_cobro_pendiente(&id_pago).await?)
 }
 
 #[tauri::command]

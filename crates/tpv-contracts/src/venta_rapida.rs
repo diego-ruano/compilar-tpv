@@ -164,7 +164,7 @@ pub struct VrUpdateNotaDetalleInput {
     pub nota: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 /// REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
 ///
 /// Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
@@ -196,4 +196,22 @@ pub struct VrCobrarFraccionadoInput {
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct VrDeleteComandaIfSafeInput {
     pub id_comanda: String,
+}
+
+/// RI-47: recuperación local compartida. La atribución la fija el backend al preparar el cobro.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct CobroPendienteDto {
+    pub cobro: VrCobrarFraccionadoInput,
+    pub id_usuario: Option<String>,
+    pub id_trabajador: Option<String>,
+    pub creado_en_ms: i64,
+    pub ultimo_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct ResolverCobroPendienteInput {
+    pub id_pago: String,
+    #[serde(default)]
+    pub destinatario: Option<DestinatarioInput>,
 }

@@ -3,7 +3,8 @@
 Hay **un solo esquema** para la base local de la Main (`data.db`, libsql) y para la base de cada tenant
 en Turso: los ficheros `.sql` de `packages/database/migrations/`, aplicados en orden.
 `0001_inicial.sql` define la base y `0002_horarios_agrupados.sql` añade los conjuntos de turnos
-partidos y las guardas de solape. (La base central de licencias es otra cosa y no se migra desde el código:
+partidos y las guardas de solape. `0003_cobros_pendientes.sql` añade la recuperación operativa local.
+(La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 
 | Pieza | Archivo | Rol |

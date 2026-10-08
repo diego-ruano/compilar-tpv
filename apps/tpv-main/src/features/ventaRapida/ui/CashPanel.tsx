@@ -7,6 +7,7 @@ import type { Dinero } from "@tpv/contracts";
 import { abs, eur } from "../../../shared/lib/dinero";
 
 export default function CashPanel({
+  ocupado = false,
   denoms,
   cashCount,
   totalACobrar,
@@ -18,6 +19,7 @@ export default function CashPanel({
   onConfirm,
   onCancel,
 }: {
+  ocupado?: boolean;
   denoms: readonly Denom[];
   cashCount: Record<string, number>;
   totalACobrar: Dinero;
@@ -30,7 +32,7 @@ export default function CashPanel({
   onCancel: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-3 sm:gap-4">
+    <fieldset disabled={ocupado} className="flex flex-col gap-3 sm:gap-4">
       <div className="rounded-2xl border border-border bg-surface p-3 sm:p-4">
         <div className="flex items-center justify-between">
           <p className="text-xs text-fg-muted sm:text-sm">Total a cobrar</p>
@@ -82,12 +84,12 @@ export default function CashPanel({
                 ? "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover cursor-pointer"
                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
             )}
-            disabled={diferencia < 0}
+            disabled={ocupado || diferencia < 0}
             onClick={onConfirm}
             type="button"
             title={diferencia < 0 ? "Falta dinero" : "Confirmar cobro en efectivo"}
           >
-            Confirmar cobro
+            {ocupado ? "Confirmando…" : "Confirmar cobro"}
           </button>
 
           <button
@@ -148,6 +150,6 @@ export default function CashPanel({
           );
         })}
       </div>
-    </div>
+    </fieldset>
   );
 }

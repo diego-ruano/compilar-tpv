@@ -605,6 +605,15 @@ export type CobroDevolubleDto = {
 	lineas: LineaDevolubleDto[],
 };
 
+/**  RI-47: recuperación local compartida. La atribución la fija el backend al preparar el cobro. */
+export type CobroPendienteDto = {
+	cobro: VrCobrarFraccionadoInput,
+	id_usuario: string | null,
+	id_trabajador: string | null,
+	creado_en_ms: number,
+	ultimo_error: string | null,
+};
+
 /**
  *  Un código por correo ya va de camino (recuperar el PIN o confirmar un correo de recuperación).
  *  Sólo la pista del correo: el correo entero no sale de la nube.
@@ -2769,6 +2778,11 @@ export type ReservasStatsResponse = {
 	reservas_por_bucket: ChartSeriesI64,
 	estado: ChartSeriesI64,
 	franjas: ChartSeriesI64,
+};
+
+export type ResolverCobroPendienteInput = {
+	id_pago: string,
+	destinatario?: DestinatarioInput | null,
 };
 
 /**  Lo que dejó una pasada de verificación. */

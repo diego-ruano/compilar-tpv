@@ -166,6 +166,19 @@ pub async fn cobrar_fraccionado(
     id_trabajador: Option<&str>,
     input: VrCobrarFraccionadoInput,
 ) -> AppResult<String> {
+    repo.cobrar_fraccionado(datos_cobro(id_usuario, id_trabajador, input)?).await
+}
+
+pub async fn guardar_cobro_pendiente(
+    repo: &dyn VentaRapidaRepository, id_usuario: &str, id_trabajador: Option<&str>,
+    input: VrCobrarFraccionadoInput,
+) -> AppResult<()> {
+    repo.guardar_cobro_pendiente(datos_cobro(id_usuario, id_trabajador, input)?).await
+}
+
+pub fn datos_cobro(
+    id_usuario: &str, id_trabajador: Option<&str>, input: VrCobrarFraccionadoInput,
+) -> AppResult<CobroFraccionado> {
     let Some(id_pago) = id_de_cobro(&input.id_pago) else {
         return Err(AppError::validation("id_pago invalid"));
     };
@@ -200,7 +213,7 @@ pub async fn cobrar_fraccionado(
         destinatario: destinatario_de(input.destinatario),
     };
 
-    repo.cobrar_fraccionado(data).await
+    Ok(data)
 }
 
 pub async fn delete_comanda_if_safe(

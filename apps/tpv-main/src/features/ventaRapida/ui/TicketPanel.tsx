@@ -17,6 +17,7 @@ import type { Dinero } from "@tpv/contracts";
 import { eur } from "../../../shared/lib/dinero";
 
 export default function TicketPanel({
+  ocupado = false,
   ticket,
   paso,
   totalPendiente,
@@ -40,6 +41,7 @@ export default function TicketPanel({
   onGuardarNota,
 
 }: {
+  ocupado?: boolean;
   ticket: TicketItem[];
   paso: Paso;
   totalPendiente: Dinero;
@@ -74,9 +76,9 @@ export default function TicketPanel({
   // dejaría al cliente sin ticket y el dinero sin registrar. El servidor también lo rechaza; esto
   // es para que no se llegue a intentar.
   const esMain = useMode((s) => s.mode) === "tpv";
-  const canCobrarTodo = esMain && hayPendientes;
-  const canCobrarFraccionado = esMain && haySeleccion;
-  const canCobrarMetodo = haySeleccion;
+  const canCobrarTodo = esMain && hayPendientes && !ocupado;
+  const canCobrarFraccionado = esMain && haySeleccion && !ocupado;
+  const canCobrarMetodo = haySeleccion && !ocupado;
 
   const [notaOpen, setNotaOpen] = useState(false);
   const [notaSaving, setNotaSaving] = useState(false);
@@ -390,7 +392,7 @@ export default function TicketPanel({
                                       e.stopPropagation();
                                       openNotaModal(t);
                                     }}
-                                    disabled={!guardada}
+                                    disabled={!guardada || ocupado}
                                     className={cn(
                                       "grid size-8 place-items-center rounded-lg border transition",
                                       !guardada
@@ -417,6 +419,7 @@ export default function TicketPanel({
                                       className="grid size-8 place-items-center rounded-lg border border-border text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer"
                                       title="Eliminar producto"
                                       aria-label="Eliminar"
+                                      disabled={ocupado}
                                     >
                                       <Trash2 className="size-4" aria-hidden />
                                     </button>
@@ -489,6 +492,7 @@ export default function TicketPanel({
 
             <button
               className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg cursor-pointer sm:col-span-2"
+              disabled={ocupado}
               onClick={onCancelarCobro}
               type="button"
             >

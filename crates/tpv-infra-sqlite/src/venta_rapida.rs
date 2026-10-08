@@ -29,6 +29,315 @@ impl SqliteVentaRapidaRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
+    async fn confirmar_pendiente(&self, g: &crate::db::WriteGuard<'_>, mut pendiente: tpv_contracts::venta_rapida::CobroPendienteDto) -> AppResult<String> {
+        let mut data = tpv_application::use_cases::venta_rapida::datos_cobro(pendiente.id_usuario.as_deref().unwrap_or_default(), pendiente.id_trabajador.as_deref(), pendiente.cobro.clone())?;
+        // El método ya se validó al preparar; conservar también los apuntes internos históricos.
+        data.metodo = pendiente.cobro.metodo.clone();
+        let resultado = self.ejecutar_cobro(g, data).await;
+        if let Err(ref error) = resultado {
+            pendiente.ultimo_error = Some(error.to_string());
+            crate::cobros_pendientes::escribir(g, &pendiente).await?;
+        }
+        resultado
+    }
+
+    async fn ejecutar_cobro(&self, g: &crate::db::WriteGuard<'_>, data: CobroFraccionado) -> AppResult<String> {
+        let db = g;
+
+        let id_pago_final = data.id_pago.clone();
+
+        let id_usuario = data
+            .id_usuario_cobrador
+            .filter(|s| !s.trim().is_empty());
+        let id_trabajador_from_user = trabajador_id_from_usuario(db, id_usuario.clone()).await?;
+        let id_trabajador_comanda = trabajador_id_from_comanda(db, &data.id_comanda).await?;
+        let id_trabajador_cobrador = data
+            .id_trabajador_cobrador
+            .filter(|s| !s.trim().is_empty())
+            .or(id_trabajador_from_user)
+            .or(id_trabajador_comanda);
+
+        let detalles = data.detalles.clone();
+
+        db.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<String> = async {
+            // Un cobro que ya existe no se repite: se devuelve su número. Pasa cuando la aplicación
+            // se cae después de este COMMIT y antes de que la pantalla quite el cobro de su cola: al
+            // volver lo reintenta con el mismo id y, sin esto, se encontraba las líneas ya cobradas,
+            // decía «No se pudo cobrar» y las devolvía a pendiente — con el cobro, la factura y el
+            // stock ya guardados. Va antes de reservar el número y dentro de la transacción, para
+            // que dos intentos a la vez no pasen los dos por aquí.
+            //
+            // Se devuelve aunque ese cobro se haya anulado después: el cobro ocurrió, y la anulación
+            // es un hecho posterior que ya tiene su propio rastro.
+            {
+                let mut rows = db
+                    .query(
+                        "SELECT ID_Comanda, Numero_Ticket FROM Pagos WHERE ID_Pago = ?1;",
+                        vec![Value::Text(id_pago_final.clone())],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                if let Some(r) = rows.next().await.map_err(db_err)? {
+                    let comanda = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+                    if comanda != data.id_comanda {
+                        return Err(AppError::conflict(
+                            "Ese id de cobro ya pertenece a un cobro de otra comanda",
+                        ));
+                    }
+                    crate::cobros_pendientes::quitar(g, &id_pago_final).await?;
+                    return Ok(v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default());
+                }
+            }
+
+            // FISCAL-01: el número se reserva DENTRO de la transacción. Antes se hacía fuera, y
+            // con un contador de tickets daba igual gastar uno en un cobro que acabara en
+            // ROLLBACK; ahora ese número es el de una factura, y un hueco tiene que ser un hueco
+            // de verdad y no un número emitido dos veces.
+            //
+            // `Pagos.Numero_Ticket` guarda este mismo valor: un solo número para el papel, el
+            // cobro y el registro.
+            let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
+            let numero_ticket = numero_reservado.0.clone();
+            // FISCAL-02: se captura aquí porque `data` se consume al construir los parámetros.
+            let destinatario = data.destinatario.clone();
+
+            if let Some(idt) = id_trabajador_cobrador.clone() {
+                db.execute(
+                    r#"
+                    UPDATE Comandas
+                    SET ID_Trabajador = ?2
+                    WHERE ID_Comanda = ?1
+                      AND ID_Trabajador IS NULL;
+                    "#,
+                    vec![Value::Text(data.id_comanda.clone()), Value::Text(idt)],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            let placeholders = detalles.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                r#"
+                SELECT
+                  IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0) AS Importe,
+                  COUNT(*) AS NumValid
+                FROM Detalle_Comanda dc
+                WHERE dc.ID_Comanda = ?1
+                  AND dc.ID_Detalle IN ({})
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                "#,
+                placeholders
+            );
+
+            let mut params: Vec<Value> = Vec::with_capacity(1 + detalles.len());
+            params.push(Value::Text(data.id_comanda.clone()));
+            for d in &detalles {
+                params.push(Value::Text(d.clone()));
+            }
+
+            let mut rows = db.query(&sql, params).await.map_err(db_err)?;
+            let (importe_total_db, num_valid) = match rows.next().await.map_err(db_err)? {
+                Some(r) => {
+                    let imp = v_dinero(r.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO);
+                    let n = v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0);
+                    (imp, n)
+                }
+                None => (Dinero::CERO, 0),
+            };
+
+            if num_valid <= 0 || num_valid as usize != detalles.len() {
+                return Err(AppError::conflict("No hay detalles válidos pendientes de pago"));
+            }
+
+            // Capturamos los detalles a cobrar (detalle, producto, cantidad) para validar
+            // stock y escribir Lote_Consumos por ID_Detalle (trazabilidad FEFO).
+            let mut charged: Vec<(String, String, f64)> = Vec::new();
+            {
+                let mut crows = db
+                    .query(
+                        &format!(
+                            r#"
+                            SELECT dc.ID_Detalle, dc.ID_Producto, CAST(COALESCE(dc.Cantidad,1) AS REAL)
+                            FROM Detalle_Comanda dc
+                            WHERE dc.ID_Comanda = ?1
+                              AND dc.ID_Detalle IN ({})
+                              AND NOT EXISTS (
+                                SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
+                              )
+                            ORDER BY dc.ID_Detalle;
+                            "#,
+                            placeholders
+                        ),
+                        {
+                            let mut p: Vec<Value> = Vec::with_capacity(1 + detalles.len());
+                            p.push(Value::Text(data.id_comanda.clone()));
+                            for d in &detalles {
+                                p.push(Value::Text(d.clone()));
+                            }
+                            p
+                        },
+                    )
+                    .await
+                    .map_err(db_err)?;
+
+                while let Some(r) = crows.next().await.map_err(db_err)? {
+                    let id_det = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+                    let id_prod = v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default();
+                    let qty = v_f64(r.get_value(2).map_err(db_err)?).unwrap_or(0.0);
+                    if !id_det.is_empty() && !id_prod.is_empty() && qty > 0.0 {
+                        charged.push((id_det, id_prod, qty));
+                    }
+                }
+            }
+
+            // VR-04: NO se valida suficiencia ni se bloquea el cobro por falta de stock. Los lotes
+            // se consumen FEFO sin tomar de ninguno más de lo que tiene aquí; lo que no cubran se
+            // descuenta del stock suelto del producto (que SÍ puede quedar negativo, como señal de
+            // sobreventa). Un lote sólo baja de cero si una Handy lo consumió a la vez: el
+            // descuento es relativo (VR-06) y los dos deltas se suman al replicar. Un
+            // producto sin lotes y sin stock suelto configurado se vende sin descontar (no
+            // inventariado). El exceso ya no aborta el cobro.
+
+            // Se clonan para poder anotarlos también en el historial de caja: los originales se
+            // consumen al construir los parámetros de aquí abajo.
+            let usuario_mov = id_usuario.clone();
+            let trabajador_mov = id_trabajador_cobrador.clone();
+
+            db.execute(
+                r#"
+                INSERT INTO Pagos (
+                  ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador, Numero_Ticket
+                )
+                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6, ?7);
+                "#,
+                vec![
+                    Value::Text(id_pago_final.clone()),
+                    Value::Text(data.id_comanda.clone()),
+                    Value::Text(data.metodo.clone()),
+                    dinero_val(importe_total_db),
+                    usuario_mov.clone().map(Value::Text).unwrap_or(Value::Null),
+                    trabajador_mov.clone().map(Value::Text).unwrap_or(Value::Null),
+                    Value::Text(numero_ticket.clone()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            // El cobro en el historial de caja (CUENTA-07), dentro de la misma transacción.
+            caja_movimientos::registrar(
+                db,
+                MovimientoCaja {
+                    tipo: caja_movimientos::TIPO_COBRO,
+                    id_pago: Some(id_pago_final.clone()),
+                    id_usuario: usuario_mov,
+                    id_trabajador: trabajador_mov,
+                    importe: importe_total_db,
+                    metodo_pago: Some(data.metodo.clone()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+            for det in &detalles {
+                db.execute(
+                    r#"
+                    INSERT OR IGNORE INTO Pago_Detalles (ID_Pago, ID_Detalle)
+                    SELECT ?1, dc.ID_Detalle
+                    FROM Detalle_Comanda dc
+                    WHERE dc.ID_Comanda = ?2
+                      AND dc.ID_Detalle = ?3
+                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                    "#,
+                    vec![
+                        Value::Text(id_pago_final.clone()),
+                        Value::Text(data.id_comanda.clone()),
+                        Value::Text(det.clone()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            // Consumo de stock (lotes FEFO, luego suelto) con su traza por cobro: el mismo que el
+            // cobro de mesa (RI-10). Sin validar suficiencia: ver VR-04 arriba.
+            crate::consumo_stock::consumir_stock(db, &id_pago_final, &charged).await?;
+
+            db.execute(update_total_comanda_sql(), vec![Value::Text(data.id_comanda.clone())])
+                .await
+                .map_err(db_err)?;
+
+            // FISCAL-01. Dentro de la transacción del cobro y después de enlazar `Pago_Detalles`,
+            // que es de donde sale el desglose de IVA del registro.
+            crate::verifactu::emitir_cobro(
+                db,
+                &id_pago_final,
+                numero_reservado,
+                importe_total_db,
+                // FISCAL-02: si el cliente dio sus datos sale una F1; si no, una F2 — y si el
+                // importe pasa del límite de la simplificada sin datos, esto corta el cobro con
+                // `factura_completa_requerida` y la pantalla los pide.
+                destinatario,
+            )
+            .await?;
+
+            let mut left = db
+                .query(
+                    r#"
+                    SELECT COUNT(*)
+                    FROM Detalle_Comanda dc
+                    WHERE dc.ID_Comanda = ?1
+                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                    "#,
+                    vec![Value::Text(data.id_comanda.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+
+            let pending_left = match left.next().await.map_err(db_err)? {
+                Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                None => 0,
+            };
+
+            if pending_left == 0 {
+                db.execute(
+                    r#"
+                    UPDATE Comandas
+                    SET
+                      Estado = 'Pagada',
+                      Total_Comanda = (
+                        SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
+                        FROM Detalle_Comanda
+                        WHERE ID_Comanda = ?1
+                      ),
+                      Fecha_Hora_Cierre = datetime('now','localtime')
+                    WHERE ID_Comanda = ?1;
+                    "#,
+                    vec![Value::Text(data.id_comanda.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            crate::cobros_pendientes::quitar(g, &id_pago_final).await?;
+            Ok(numero_ticket.clone())
+        }
+        .await;
+
+        match res {
+            Ok(v) => {
+                db.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = db.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
+
+
 }
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
@@ -766,297 +1075,34 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
     async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String> {
         let g = self.db.write().await;
-        let db = &g;
+        let pendiente = crate::cobros_pendientes::preparar(&g, data).await?;
+        self.confirmar_pendiente(&g, pendiente).await
+    }
 
-        let id_pago_final = data.id_pago.clone();
+    async fn guardar_cobro_pendiente(&self, data: CobroFraccionado) -> AppResult<()> {
+        let g = self.db.write().await;
+        crate::cobros_pendientes::preparar(&g, data).await?;
+        Ok(())
+    }
 
-        let id_usuario = data
-            .id_usuario_cobrador
-            .filter(|s| !s.trim().is_empty());
-        let id_trabajador_from_user = trabajador_id_from_usuario(db, id_usuario.clone()).await?;
-        let id_trabajador_comanda = trabajador_id_from_comanda(db, &data.id_comanda).await?;
-        let id_trabajador_cobrador = data
-            .id_trabajador_cobrador
-            .filter(|s| !s.trim().is_empty())
-            .or(id_trabajador_from_user)
-            .or(id_trabajador_comanda);
+    async fn listar_cobros_pendientes(&self) -> AppResult<Vec<tpv_contracts::venta_rapida::CobroPendienteDto>> {
+        crate::cobros_pendientes::listar(&self.db.read().await).await
+    }
 
-        let detalles = data.detalles.clone();
-
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<String> = async {
-            // Un cobro que ya existe no se repite: se devuelve su número. Pasa cuando la aplicación
-            // se cae después de este COMMIT y antes de que la pantalla quite el cobro de su cola: al
-            // volver lo reintenta con el mismo id y, sin esto, se encontraba las líneas ya cobradas,
-            // decía «No se pudo cobrar» y las devolvía a pendiente — con el cobro, la factura y el
-            // stock ya guardados. Va antes de reservar el número y dentro de la transacción, para
-            // que dos intentos a la vez no pasen los dos por aquí.
-            //
-            // Se devuelve aunque ese cobro se haya anulado después: el cobro ocurrió, y la anulación
-            // es un hecho posterior que ya tiene su propio rastro.
-            {
-                let mut rows = db
-                    .query(
-                        "SELECT ID_Comanda, Numero_Ticket FROM Pagos WHERE ID_Pago = ?1;",
-                        vec![Value::Text(id_pago_final.clone())],
-                    )
-                    .await
-                    .map_err(db_err)?;
-                if let Some(r) = rows.next().await.map_err(db_err)? {
-                    let comanda = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
-                    if comanda != data.id_comanda {
-                        return Err(AppError::conflict(
-                            "Ese id de cobro ya pertenece a un cobro de otra comanda",
-                        ));
-                    }
-                    return Ok(v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default());
-                }
-            }
-
-            // FISCAL-01: el número se reserva DENTRO de la transacción. Antes se hacía fuera, y
-            // con un contador de tickets daba igual gastar uno en un cobro que acabara en
-            // ROLLBACK; ahora ese número es el de una factura, y un hueco tiene que ser un hueco
-            // de verdad y no un número emitido dos veces.
-            //
-            // `Pagos.Numero_Ticket` guarda este mismo valor: un solo número para el papel, el
-            // cobro y el registro.
-            let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
-            let numero_ticket = numero_reservado.0.clone();
-            // FISCAL-02: se captura aquí porque `data` se consume al construir los parámetros.
-            let destinatario = data.destinatario.clone();
-
-            if let Some(idt) = id_trabajador_cobrador.clone() {
-                db.execute(
-                    r#"
-                    UPDATE Comandas
-                    SET ID_Trabajador = ?2
-                    WHERE ID_Comanda = ?1
-                      AND ID_Trabajador IS NULL;
-                    "#,
-                    vec![Value::Text(data.id_comanda.clone()), Value::Text(idt)],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-
-            let placeholders = detalles.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!(
-                r#"
-                SELECT
-                  IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0) AS Importe,
-                  COUNT(*) AS NumValid
-                FROM Detalle_Comanda dc
-                WHERE dc.ID_Comanda = ?1
-                  AND dc.ID_Detalle IN ({})
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
-                "#,
-                placeholders
-            );
-
-            let mut params: Vec<Value> = Vec::with_capacity(1 + detalles.len());
-            params.push(Value::Text(data.id_comanda.clone()));
-            for d in &detalles {
-                params.push(Value::Text(d.clone()));
-            }
-
-            let mut rows = db.query(&sql, params).await.map_err(db_err)?;
-            let (importe_total_db, num_valid) = match rows.next().await.map_err(db_err)? {
-                Some(r) => {
-                    let imp = v_dinero(r.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO);
-                    let n = v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0);
-                    (imp, n)
-                }
-                None => (Dinero::CERO, 0),
-            };
-
-            if num_valid <= 0 {
-                return Err(AppError::conflict("No hay detalles válidos pendientes de pago"));
-            }
-
-            // Capturamos los detalles a cobrar (detalle, producto, cantidad) para validar
-            // stock y escribir Lote_Consumos por ID_Detalle (trazabilidad FEFO).
-            let mut charged: Vec<(String, String, f64)> = Vec::new();
-            {
-                let mut crows = db
-                    .query(
-                        &format!(
-                            r#"
-                            SELECT dc.ID_Detalle, dc.ID_Producto, CAST(COALESCE(dc.Cantidad,1) AS REAL)
-                            FROM Detalle_Comanda dc
-                            WHERE dc.ID_Comanda = ?1
-                              AND dc.ID_Detalle IN ({})
-                              AND NOT EXISTS (
-                                SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
-                              )
-                            ORDER BY dc.ID_Detalle;
-                            "#,
-                            placeholders
-                        ),
-                        {
-                            let mut p: Vec<Value> = Vec::with_capacity(1 + detalles.len());
-                            p.push(Value::Text(data.id_comanda.clone()));
-                            for d in &detalles {
-                                p.push(Value::Text(d.clone()));
-                            }
-                            p
-                        },
-                    )
-                    .await
-                    .map_err(db_err)?;
-
-                while let Some(r) = crows.next().await.map_err(db_err)? {
-                    let id_det = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
-                    let id_prod = v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default();
-                    let qty = v_f64(r.get_value(2).map_err(db_err)?).unwrap_or(0.0);
-                    if !id_det.is_empty() && !id_prod.is_empty() && qty > 0.0 {
-                        charged.push((id_det, id_prod, qty));
-                    }
-                }
-            }
-
-            // VR-04: NO se valida suficiencia ni se bloquea el cobro por falta de stock. Los lotes
-            // se consumen FEFO sin tomar de ninguno más de lo que tiene aquí; lo que no cubran se
-            // descuenta del stock suelto del producto (que SÍ puede quedar negativo, como señal de
-            // sobreventa). Un lote sólo baja de cero si una Handy lo consumió a la vez: el
-            // descuento es relativo (VR-06) y los dos deltas se suman al replicar. Un
-            // producto sin lotes y sin stock suelto configurado se vende sin descontar (no
-            // inventariado). El exceso ya no aborta el cobro.
-
-            // Se clonan para poder anotarlos también en el historial de caja: los originales se
-            // consumen al construir los parámetros de aquí abajo.
-            let usuario_mov = id_usuario.clone();
-            let trabajador_mov = id_trabajador_cobrador.clone();
-
-            db.execute(
-                r#"
-                INSERT INTO Pagos (
-                  ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
-                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador, Numero_Ticket
-                )
-                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6, ?7);
-                "#,
-                vec![
-                    Value::Text(id_pago_final.clone()),
-                    Value::Text(data.id_comanda.clone()),
-                    Value::Text(data.metodo.clone()),
-                    dinero_val(importe_total_db),
-                    usuario_mov.clone().map(Value::Text).unwrap_or(Value::Null),
-                    trabajador_mov.clone().map(Value::Text).unwrap_or(Value::Null),
-                    Value::Text(numero_ticket.clone()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-
-            // El cobro en el historial de caja (CUENTA-07), dentro de la misma transacción.
-            caja_movimientos::registrar(
-                db,
-                MovimientoCaja {
-                    tipo: caja_movimientos::TIPO_COBRO,
-                    id_pago: Some(id_pago_final.clone()),
-                    id_usuario: usuario_mov,
-                    id_trabajador: trabajador_mov,
-                    importe: importe_total_db,
-                    metodo_pago: Some(data.metodo.clone()),
-                    ..Default::default()
-                },
-            )
-            .await?;
-
-            for det in &detalles {
-                db.execute(
-                    r#"
-                    INSERT OR IGNORE INTO Pago_Detalles (ID_Pago, ID_Detalle)
-                    SELECT ?1, dc.ID_Detalle
-                    FROM Detalle_Comanda dc
-                    WHERE dc.ID_Comanda = ?2
-                      AND dc.ID_Detalle = ?3
-                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
-                    "#,
-                    vec![
-                        Value::Text(id_pago_final.clone()),
-                        Value::Text(data.id_comanda.clone()),
-                        Value::Text(det.clone()),
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-
-            // Consumo de stock (lotes FEFO, luego suelto) con su traza por cobro: el mismo que el
-            // cobro de mesa (RI-10). Sin validar suficiencia: ver VR-04 arriba.
-            crate::consumo_stock::consumir_stock(db, &id_pago_final, &charged).await?;
-
-            db.execute(update_total_comanda_sql(), vec![Value::Text(data.id_comanda.clone())])
-                .await
-                .map_err(db_err)?;
-
-            // FISCAL-01. Dentro de la transacción del cobro y después de enlazar `Pago_Detalles`,
-            // que es de donde sale el desglose de IVA del registro.
-            crate::verifactu::emitir_cobro(
-                db,
-                &id_pago_final,
-                numero_reservado,
-                importe_total_db,
-                // FISCAL-02: si el cliente dio sus datos sale una F1; si no, una F2 — y si el
-                // importe pasa del límite de la simplificada sin datos, esto corta el cobro con
-                // `factura_completa_requerida` y la pantalla los pide.
-                destinatario,
-            )
-            .await?;
-
-            let mut left = db
-                .query(
-                    r#"
-                    SELECT COUNT(*)
-                    FROM Detalle_Comanda dc
-                    WHERE dc.ID_Comanda = ?1
-                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
-                    "#,
-                    vec![Value::Text(data.id_comanda.clone())],
-                )
-                .await
-                .map_err(db_err)?;
-
-            let pending_left = match left.next().await.map_err(db_err)? {
-                Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-                None => 0,
-            };
-
-            if pending_left == 0 {
-                db.execute(
-                    r#"
-                    UPDATE Comandas
-                    SET
-                      Estado = 'Pagada',
-                      Total_Comanda = (
-                        SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
-                        FROM Detalle_Comanda
-                        WHERE ID_Comanda = ?1
-                      ),
-                      Fecha_Hora_Cierre = datetime('now','localtime')
-                    WHERE ID_Comanda = ?1;
-                    "#,
-                    vec![Value::Text(data.id_comanda.clone())],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-
-            Ok(numero_ticket.clone())
+    async fn resolver_cobro_pendiente(&self, input: tpv_contracts::venta_rapida::ResolverCobroPendienteInput) -> AppResult<String> {
+        let g = self.db.write().await;
+        let mut pendiente = crate::cobros_pendientes::listar(&g).await?.into_iter().find(|p| p.cobro.id_pago == input.id_pago)
+            .ok_or_else(|| AppError::not_found("Ese cobro pendiente ya se ha resuelto"))?;
+        if let Some(destinatario) = input.destinatario {
+            pendiente.cobro.destinatario = Some(destinatario);
+            crate::cobros_pendientes::escribir(&g, &pendiente).await?;
         }
-        .await;
+        self.confirmar_pendiente(&g, pendiente).await
+    }
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+    async fn cancelar_cobro_pendiente(&self, id_pago: &str) -> AppResult<bool> {
+        let g = self.db.write().await;
+        crate::cobros_pendientes::quitar(&g, id_pago).await
     }
 
     async fn delete_comanda_if_safe(&self, id_comanda: &str) -> AppResult<bool> {
@@ -1280,4 +1326,43 @@ mod tests_cobro_repetido {
             "la línea sigue pendiente, como la dejó la anulación"
         );
     }
+    #[tokio::test]
+    async fn pendiente_sobrevive_al_fallo_y_otro_operador_lo_resuelve_sin_cambiar_la_atribucion() {
+        let (db, _dir) = preparar().await;
+        let repo = SqliteVentaRapidaRepository::new(db.clone());
+        { let w = db.write().await; w.raw().execute("UPDATE Business_Settings SET CIF = NULL;", ()).await.unwrap(); }
+        assert!(cobrar(&db, ID, "com", "det").await.is_err());
+        let pendientes = repo.listar_cobros_pendientes().await.unwrap();
+        assert_eq!(pendientes.len(), 1);
+        assert_eq!(pendientes[0].id_usuario.as_deref(), Some("u1"));
+        assert!(pendientes[0].ultimo_error.is_some());
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Pagos;").await, 0.0);
+        { let w = db.write().await; w.raw().execute("UPDATE Business_Settings SET CIF = 'B12345674';", ()).await.unwrap(); }
+        let numero_ticket = repo.resolver_cobro_pendiente(tpv_contracts::venta_rapida::ResolverCobroPendienteInput { id_pago: ID.into(), destinatario: None }).await.unwrap();
+        assert!(!numero_ticket.is_empty());
+        assert!(repo.listar_cobros_pendientes().await.unwrap().is_empty());
+        let r = db.read().await;
+        let mut rows = r.query("SELECT ID_Usuario_Cobrador FROM Pagos WHERE ID_Pago = ?1;", vec![Value::Text(ID.into())]).await.unwrap();
+        assert_eq!(v_string(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).as_deref(), Some("u1"));
+    }
+
+    #[tokio::test]
+    async fn preparacion_no_replica_datos_personales_y_evitar_dos_intenciones_para_las_mismas_lineas() {
+        let (db, _dir) = preparar().await;
+        let repo = SqliteVentaRapidaRepository::new(db.clone());
+        let datos = |id: &str| CobroFraccionado {
+            id_pago: id.into(), id_comanda: "com".into(), metodo: "Efectivo".into(), importe_total: Dinero::de_centimos(300),
+            id_usuario_cobrador: Some("u1".into()), id_trabajador_cobrador: None, detalles: vec!["det".into()],
+            destinatario: Some(tpv_domain::verifactu::Destinatario { nombre_razon: "Señor Prueba".into(), nif: "12345678Z".into(), direccion: None }),
+        };
+        let antes = numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await;
+        repo.guardar_cobro_pendiente(datos(ID)).await.unwrap();
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, antes);
+        let restaurado = repo.listar_cobros_pendientes().await.unwrap();
+        assert_eq!(restaurado[0].cobro.destinatario.as_ref().unwrap().nombre_razon, "Señor Prueba");
+        assert!(repo.guardar_cobro_pendiente(datos("0192f7a4-3b1c-7d2e-8f00-123456789abd")).await.is_err());
+        assert!(repo.cancelar_cobro_pendiente(ID).await.unwrap());
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Pagos;").await, 0.0);
+    }
+
 }

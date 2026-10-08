@@ -1,4 +1,4 @@
-//! RI-85: horarios agrupados y guardas de solape en una migración aditiva.
+//! RI-85 / RI-47: horarios agrupados y recuperación de cobros en migraciones aditivas.
 //! Sistema de migraciones del esquema de la **BD local (SQLite/libsql)**.
 //!
 //! ## Modelo (fuente única de verdad)

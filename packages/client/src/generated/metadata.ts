@@ -164,6 +164,10 @@ export const nombresComandos = {
     "vr_delete_linea_if_unpaid": "vrDeleteLineaIfUnpaid",
     "vr_update_nota_detalle": "vrUpdateNotaDetalle",
     "vr_cobrar_fraccionado": "vrCobrarFraccionado",
+    "vr_guardar_cobro_pendiente": "vrGuardarCobroPendiente",
+    "vr_listar_cobros_pendientes": "vrListarCobrosPendientes",
+    "vr_resolver_cobro_pendiente": "vrResolverCobroPendiente",
+    "vr_cancelar_cobro_pendiente": "vrCancelarCobroPendiente",
     "vr_delete_comanda_if_safe": "vrDeleteComandaIfSafe",
     "vr_get_index_rows": "vrGetIndexRows",
     "vr_get_detalles_ver_ticket": "vrGetDetallesVerTicket",
@@ -386,6 +390,10 @@ type Argumentos = {
     "vr_delete_linea_if_unpaid": { args: Parameters<Comandos["vrDeleteLineaIfUnpaid"]>[0] };
     "vr_update_nota_detalle": { args: Parameters<Comandos["vrUpdateNotaDetalle"]>[0] };
     "vr_cobrar_fraccionado": { args: Parameters<Comandos["vrCobrarFraccionado"]>[0] };
+    "vr_guardar_cobro_pendiente": { args: Parameters<Comandos["vrGuardarCobroPendiente"]>[0] };
+    "vr_listar_cobros_pendientes": {  };
+    "vr_resolver_cobro_pendiente": { args: Parameters<Comandos["vrResolverCobroPendiente"]>[0] };
+    "vr_cancelar_cobro_pendiente": { idPago: Parameters<Comandos["vrCancelarCobroPendiente"]>[0] };
     "vr_delete_comanda_if_safe": { args: Parameters<Comandos["vrDeleteComandaIfSafe"]>[0] };
     "vr_get_index_rows": { args: Parameters<Comandos["vrGetIndexRows"]>[0] };
     "vr_get_detalles_ver_ticket": { args: Parameters<Comandos["vrGetDetallesVerTicket"]>[0] };

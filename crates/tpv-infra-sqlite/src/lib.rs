@@ -74,6 +74,7 @@ pub mod tareas;
 pub mod tickets;
 pub mod trabajadores;
 pub mod venta_rapida;
+pub(crate) mod cobros_pendientes;
 pub mod verifactu;
 /// Exportacion de los registros de facturacion en ZIP (art. 8 RRSIF).
 pub mod verifactu_export;
