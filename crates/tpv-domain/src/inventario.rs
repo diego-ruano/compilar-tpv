@@ -234,7 +234,9 @@ impl LoteNuevo {
         let fecha_entrada = limpia(fecha_entrada);
 
         // Validación de fechas (INV-03): formato ISO y coherencia temporal, para que el FEFO
-        // ordene bien. Fecha_Entrada puede venir vacía (la BD la fija a `now` por defecto).
+        // ordene bien. Fecha_Entrada es opcional en la entrada: al crear, el SQL del
+        // escritor usa la hora local si falta; al editar, conserva la fecha existente.
+        // La columna del esquema es NOT NULL y no tiene DEFAULT de hora.
         let cad_date = match &caducidad {
             Some(c) => match fecha_lote_valida(c) {
                 Some(d) => Some(d),
