@@ -323,8 +323,9 @@ cargar el secreto.
 
 - El plugin sólo sube source maps si hay `SENTRY_AUTH_TOKEN`, y `release.yml` no la pasa: en
   producción las trazas de la webview llegan **minificadas**.
-- El `release` del plugin es la versión de `apps/tpv-main/package.json` (`0.1.0`), mientras que
-  los eventos llevan la de Cargo/`tauri.conf.json`. `release.yml` comprueba que el tag coincida con
+- El `release` del plugin es `SENTRY_RELEASE` o la versión de `apps/tpv-main/package.json`, mientras
+  que los eventos usan `CARGO_PKG_VERSION` de `tpv`, fijado en `src-tauri/src/lib.rs`.
+  `release.yml` comprueba que el tag coincida con
   `tauri.conf.json` y `Cargo.toml`, pero no con `package.json`: en cuanto suban las primeras, los
   mapas se subirían a otra release y Sentry no simbolizaría. Pasar `SENTRY_RELEASE` desde el tag en
   el workflow (o leer la versión de `tauri.conf.json` en `vite.config.ts`).
@@ -359,27 +360,19 @@ cargar el secreto.
 
 ## 18. Documentación desfasada
 
-Comentarios y docs que dicen algo que el código ya no hace. Los dos primeros están **dentro de
-`0001_inicial.sql`**: corregirlos después del lanzamiento cambiaría el hash de una migración
-congelada, así que es ahora o nunca.
+Los comentarios y documentos editables de esta sección ya están contrastados con el código y
+corregidos. Sólo permanece el siguiente comentario histórico dentro de una migración aplicada:
 
 | Dónde | Qué dice | Qué pasa de verdad |
 |---|---|---|
-| `0001_inicial.sql` §10 (línea ~970) | `_Sync_Applied_Ops` «creada por `init_sync_tables` en `db.rs`, fuera de las migraciones» | Está en §16 del propio `0001` |
-| CLAUDE.md §10 (tabla) | `_Jobs_State` «tabla creada en `db.rs`» | En `0001` §16 |
-| CLAUDE.md §9 (tabla de bootstrap) | `_Backfill_Historico` «creada en `infra-sqlite/src/db.rs`» | En `0001` §16 |
-| `recovery.rs:365-369` | La PII del personal no vuelve con el volcado | Sí vuelve (CLAUDE.md §9, corregido el 02/09) |
-| `reconciliacion.rs` (`SQL_CLIENTES`) | «Redondeado a 2 decimales, como los incrementos» | El dinero es entero desde ARQ-01 |
-| `tpv-infra-sqlite/src/lib.rs:39` | Migraciones con `PRAGMA user_version` | Tabla `_migrations` con hash |
-| `mesas.rs:1-4` | «las creaciones usan autoincrement local (`last_insert_rowid`)» | UUIDv7 |
-| `reservas.rs` (`ReservaValidada`), `clientes.rs` (`NuevoCliente`), `proveedores.rs` | «id = None ⇒ autoincrement / siguiente ID libre» | UUIDv7 |
-| `inventario.rs` (`LoteNuevo::validar`) | «Fecha_Entrada… la BD la fija a `now` por defecto» | El esquema no tiene `DEFAULT` de hora (CFG-04) |
-| `verifactu.rs:3236` | «La fila la crea `init_sync_tables`» | La siembra el `0001` |
-| `mesas.rs:2032-2041` | El reintento del `INSERT INTO Pagos` cubre «FK inexistente» | `try_exec` sólo devuelve `false` con «no such column» (RI-32) |
-| `vite.config.ts` | El `release` debe coincidir con el de `main.rs` | Se toma de `package.json`, que no se sube de versión (RI-24) |
-| `secret_store.rs:12` | El `Context` de Android sale de `ndk_context` | Sale de `ActivityThread.currentApplication()`; el propio fichero lo explica en la línea 78 (RI-75) |
-| `docs/android/COMPILAR_ANDROID.md:359-363` | La Main sólo abre el WebSocket «en modo online», y arranca en `offline` | No hay ese ajuste desde SYNC-17 |
-| `tests/contract/README.md` | «63/67 comandos y 61/61 lecturas» | 63/66 y 64/64 (RI-79) |
+| `0001_inicial.sql` §10 | `_Sync_Applied_Ops` «creada por `init_sync_tables` en `db.rs`, fuera de las migraciones» | La crea §16 del propio `0001`; `Db::open` ejecuta el runner de migraciones |
+
+La aclaración vigente está en
+[esquema.md](../arquitectura/esquema.md#lo-que-hay-que-saber-de-los-comentarios-de-0001_inicialsql).
+El hash SHA-256 incluye los comentarios: corregir el texto del SQL alteraría la migración y las
+bases que ya la aplicaron fallarían con `migration_altered`, aunque no cambiara ninguna sentencia.
+Se conserva el fichero y su snapshot. Reescribirlos requiere decidir expresamente qué hacer con
+las bases y copias existentes; no forma parte de esta actualización de documentación.
 
 ---
 
@@ -433,12 +426,6 @@ entregue el `Context` a Rust una vez al arrancar.
 - **La versión de release no se firma**: `build.gradle.kts` no tiene `signingConfig`, así que
   `tauri android build` sale sin firma. O unas `signingConfigs` que lean el almacén de claves de
   variables de entorno, o dejarlo escrito en `COMPILAR_ANDROID.md`.
-- **Documentación desfasada.** En `COMPILAR_ANDROID.md`, el «gotcha» de la bitácora del 26/07
-  (líneas 359-363) dice que la Main sólo abre el WebSocket «en modo online» y que arranca en
-  `offline`. Desde SYNC-17 no hay ese ajuste. Y la cabecera de `secret_store.rs`
-  ([`:12`](../../crates/tpv-infra-licensing/src/secret_store.rs#L12)) sigue diciendo que el
-  `Context` sale de `ndk_context`, cuando el propio fichero explica más abajo
-  ([`:78`](../../crates/tpv-infra-licensing/src/secret_store.rs#L78)) que no.
 
 <a id="ri-77"></a>
 ### RI-77 🔵 · La Handy enseña pantallas que en ella no funcionan
