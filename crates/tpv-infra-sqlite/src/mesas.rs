@@ -1530,9 +1530,10 @@ impl MesasRepository for SqliteMesasRepository {
             .await?;
 
             if !ok {
-                // MESA-15: el INSERT con ID_Trabajador_Cobrador falló (típicamente FK
-                // inexistente). Reintentamos sin el cobrador para no perder el cobro, pero
-                // lo reportamos por telemetría en vez de degradar en silencio.
+                // MESA-15: `try_exec` devuelve false sólo si falta una tabla o columna.
+                // Se reintenta el INSERT sin ID_Trabajador_Cobrador y se emite un aviso.
+                // Un error de clave foránea se propaga con `?` y no llega a esta rama;
+                // si el segundo INSERT también falla, se intenta ROLLBACK y se devuelve el error.
                 tracing::warn!(
                     target: "tpv::mesas",
                     id_comanda = %data.id_comanda,
