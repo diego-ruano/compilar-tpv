@@ -232,15 +232,6 @@ Añadir `AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'` al `UPDATE` (en los dos lados
 Lo mismo, en pequeño, en `delete_producto` (la comprobación de «comanda abierta» va por el pool de
 lectura antes de coger el escritor).
 
-<a id="ri-40"></a>
-### RI-40 🔵 · Pánicos por cortar cadenas por bytes
-
-[`reservas.rs:27,34,47`](../../crates/tpv-domain/src/reservas.rs#L27) hacen `&s[..10]` y `&s[..5]`
-sobre texto del formulario. Si antes de esa posición hay un carácter de varios bytes (`2026-01-0é`),
-Rust **entra en pánico** en vez de devolver un error de validación, y el comando no responde. Usar
-`s.get(..10)`. (Revisados los demás cortes por bytes del backend: están protegidos por una
-comprobación ASCII previa.)
-
 <a id="ri-48"></a>
 ### RI-48 🔵 · Dominio: duplicación, tipos como cadenas y constructores de trece argumentos
 

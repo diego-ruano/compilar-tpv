@@ -23,18 +23,10 @@ fn is_ymd10(s: &str) -> bool {
 /// Normaliza un día a `YYYY-MM-DD` (acepta sufijos tras `T`/espacio).
 pub fn normalize_dia_ymd(raw: &str) -> Result<String, String> {
     let s = raw.trim();
-    if s.len() >= 10 {
-        let candidate = &s[..10];
+    // RI-40: el formulario puede contener UTF-8; un límite por bytes no siempre es un carácter.
+    if let Some(candidate) = s.get(..10) {
         if is_ymd10(candidate) {
             return Ok(candidate.to_string());
-        }
-    }
-    if let Some(pos) = s.find('T').or_else(|| s.find(' ')) {
-        if pos >= 10 {
-            let candidate = &s[..10];
-            if is_ymd10(candidate) {
-                return Ok(candidate.to_string());
-            }
         }
     }
     Err(format!("Formato de día inválido: '{s}'. Esperado YYYY-MM-DD."))
@@ -43,8 +35,7 @@ pub fn normalize_dia_ymd(raw: &str) -> Result<String, String> {
 /// Normaliza una hora a `HH:MM` validando rangos.
 pub fn normalize_hora_hhmm(raw: &str) -> Result<String, String> {
     let s = raw.trim();
-    if s.len() >= 5 {
-        let hhmm = &s[..5];
+    if let Some(hhmm) = s.get(..5) {
         let b = hhmm.as_bytes();
         if b[2] != b':' {
             return Err(format!("Formato de hora inválido: '{s}'. Esperado HH:MM."));
@@ -303,6 +294,16 @@ impl ReservaValidada {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn texto_unicode_invalido_devuelve_error_sin_panico() {
+        for dia in ["2026-01-0é", "2026-01-€T12:00", "🦀🦀🦀"] {
+            assert!(normalize_dia_ymd(dia).is_err());
+        }
+        for hora in ["12:0é", "12:€", "🦀🦀"] {
+            assert!(normalize_hora_hhmm(hora).is_err());
+        }
+    }
 
     #[test]
     fn dia_acepta_iso_y_timestamp() {
