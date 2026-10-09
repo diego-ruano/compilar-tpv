@@ -153,18 +153,18 @@ pub(crate) const SQL_QUITAR_PRODUCTO: &[&str] = &[
        EXISTS (SELECT 1 FROM Detalle_Comanda WHERE ID_Producto = ?1) \
        OR EXISTS (SELECT 1 FROM Suelto_Consumos WHERE ID_Producto = ?1) \
        OR EXISTS (SELECT 1 FROM Lote_Consumos lc JOIN Lotes_Producto l ON l.ID_Lote = lc.ID_Lote \
-                  WHERE l.ID_Producto = ?1));",
+                  WHERE l.ID_Producto = ?1)) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
     "DELETE FROM Movimientos_Stock \
      WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto = ?1) \
-       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);",
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
     // Y los de su stock suelto (RI-55).
     "DELETE FROM Movimientos_Stock WHERE ID_Producto = ?1 \
-       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);",
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
     "DELETE FROM Lotes_Producto WHERE ID_Producto = ?1 \
-       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);",
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
     "DELETE FROM Producto_Alergenos WHERE ID_Producto = ?1 \
-       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);",
-    "DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL;",
+       AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
+    "DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
 ];
 
 #[async_trait]
@@ -453,11 +453,13 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()> {
+        // RI-39: comprobar bajo el mismo escritor que retiene el borrado.
+        let g = self.db.write().await;
         // INV-05: lo único que impide quitar un producto es que esté EN USO ahora mismo, o sea en
         // una comanda todavía abierta. Quitarlo de la carta con una mesa a medias dejaría a la
         // línea sin precio ni cocina y al camarero sin saber por qué.
         {
-            let rg = self.db.read().await;
+            let rg = &g;
             let mut rows = rg
                 .query(
                     r#"
@@ -477,7 +479,6 @@ impl InventarioRepository for SqliteInventarioRepository {
                 ));
             }
         }
-        let g = self.db.write().await;
         let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
@@ -970,6 +971,23 @@ mod tests_borrado_de_producto {
         repo.delete_producto("nuevo").await.unwrap();
 
         assert!(!existe(&db, "nuevo").await);
+    }
+
+    #[tokio::test]
+    async fn el_sql_replicado_tampoco_quita_un_producto_en_uso() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_COMANDA_ABIERTA).await;
+        {
+            let w = db.write().await;
+            w.execute_batch("BEGIN;").await.unwrap();
+            for sql in SQL_QUITAR_PRODUCTO {
+                assert_eq!(w.execute(sql, vec![Value::Text("vendido".into())]).await.unwrap(), 0);
+            }
+            w.execute_batch("COMMIT;").await.unwrap();
+        }
+        let carta = SqliteInventarioRepository::new(db.clone()).list_productos_by_categoria("cat").await.unwrap();
+        assert!(carta.iter().any(|p| p.base.id_producto == "vendido"));
     }
 
     #[tokio::test]

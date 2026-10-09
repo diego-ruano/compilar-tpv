@@ -126,7 +126,8 @@ inventarioRoutes.delete("/productos/:id", async (c) => {
 	// y eso lo decide el propio comando.
 	const enUso = await tenantQuery(c, (db) => q.productoEnComandaAbierta(db, id));
 	if (enUso) return c.json({ ok: false, error: "producto_en_comanda_abierta" }, 409);
-	await apply(c, cmd.deleteProducto(id));
+	const resultado = await apply(c, cmd.deleteProducto(id));
+	if (Number(resultado?.en_uso) !== 0) return c.json({ ok: false, error: "producto_en_comanda_abierta" }, 409);
 	return c.json({ ok: true });
 });
 

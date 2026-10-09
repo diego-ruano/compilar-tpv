@@ -671,8 +671,14 @@ impl CuentasRepository for SqliteCuentasRepository {
         let db = self.db.write().await;
         // Una devolución no se edita: su importe no sale de `Pago_Detalles`, y recalcularlo como el
         // de un cobro la dejaría a cero.
-        if cobro_guardado(&db, id_pago).await?.is_some_and(|c| c.es_devolucion) {
-            return Err(AppError::conflict("Una devolución no se edita."));
+        if let Some(cobro) = cobro_guardado(&db, id_pago).await? {
+            if cobro.es_devolucion {
+                return Err(AppError::conflict("Una devolución no se edita."));
+            }
+            // RI-39: esta guarda usa el escritor, igual que el UPDATE posterior.
+            if cobro.anulado {
+                return Err(AppError::conflict("Un cobro anulado no se edita."));
+            }
         }
         let affected = db
             .execute(
@@ -686,7 +692,8 @@ impl CuentasRepository for SqliteCuentasRepository {
                         JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
                         WHERE pd.ID_Pago = ?1
                     )
-                WHERE ID_Pago = ?1 AND ID_Pago_Origen IS NULL;
+                WHERE ID_Pago = ?1 AND ID_Pago_Origen IS NULL
+                  AND COALESCE(Estado, 'ACTIVO') = 'ACTIVO';
                 "#,
                 vec![
                     Value::Text(id_pago.to_string()),
@@ -1453,6 +1460,12 @@ mod tests_anulacion {
         .await;
 
         assert!(repo(&db).anular_pago(args("pago")).await.unwrap());
+
+        // RI-39: aunque se haya leído ACTIVO antes de anular, el repositorio vuelve a comprobarlo.
+        let err = repo(&db).actualizar_pago("pago", PagoData {
+            fecha_hora: "2030-01-01 00:00:00".into(), metodo: "Tarjeta".into(), importe: Dinero::CERO,
+        }).await.unwrap_err();
+        assert!(matches!(err, AppError::Conflict(_)));
 
         assert_eq!(
             escalar(&db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote';").await,

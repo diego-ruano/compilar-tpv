@@ -191,17 +191,6 @@ dedicar un hilo propio al escritor (que además encaja con el escritor único).
 - `mapping::v_i64` trunca un `Real` (`n as i64`) mientras que `v_dinero` redondea: dos criterios en
   el mismo módulo.
 
-<a id="ri-39"></a>
-### RI-39 🔵 · Guardas de estado fuera de la transacción
-
-`cuentas::actualizar_pago` comprueba que el cobro no esté anulado leyendo por el pool de lectura y
-**luego** hace el `UPDATE` en otra toma del escritor, cuyo `WHERE` no mira el estado
-([`cuentas.rs:459-484`](../../crates/tpv-infra-sqlite/src/cuentas.rs#L459-L484)). El propio
-`anular_pago` explica por qué la comprobación que cuenta es la que está dentro de la transacción.
-Añadir `AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'` al `UPDATE` (en los dos lados) lo deja cerrado.
-Lo mismo, en pequeño, en `delete_producto` (la comprobación de «comanda abierta» va por el pool de
-lectura antes de coger el escritor).
-
 <a id="ri-48"></a>
 ### RI-48 🔵 · Dominio: duplicación, tipos como cadenas y constructores de trece argumentos
 

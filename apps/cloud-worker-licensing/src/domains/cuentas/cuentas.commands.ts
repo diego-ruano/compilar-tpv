@@ -174,7 +174,8 @@ export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand
 					      JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
 					      WHERE pd.ID_Pago = ?1
 					    )
-					WHERE ID_Pago = ?1 AND ID_Pago_Origen IS NULL;
+					WHERE ID_Pago = ?1 AND ID_Pago_Origen IS NULL
+					  AND COALESCE(Estado, 'ACTIVO') = 'ACTIVO';
 				`,
 				args: [idPago, input.fecha_hora, normalizeMetodo(input.metodo)],
 			},

@@ -214,24 +214,30 @@ const SQL_QUITAR_PRODUCTO = [
 			EXISTS (SELECT 1 FROM Detalle_Comanda WHERE ID_Producto = ?1)
 			OR EXISTS (SELECT 1 FROM Suelto_Consumos WHERE ID_Producto = ?1)
 			OR EXISTS (SELECT 1 FROM Lote_Consumos lc JOIN Lotes_Producto l ON l.ID_Lote = lc.ID_Lote
-				WHERE l.ID_Producto = ?1));`,
+				WHERE l.ID_Producto = ?1)) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
 	`DELETE FROM Movimientos_Stock
 		WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto = ?1)
-			AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);`,
+			AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
 	`DELETE FROM Movimientos_Stock WHERE ID_Producto = ?1
-		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);`,
+		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
 	`DELETE FROM Lotes_Producto WHERE ID_Producto = ?1
-		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);`,
+		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
 	`DELETE FROM Producto_Alergenos WHERE ID_Producto = ?1
-		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL);`,
-	"DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL;",
+		AND NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');`,
+	"DELETE FROM Productos WHERE ID_Producto = ?1 AND Archivado_En IS NULL AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta');",
 ];
 
 export function deleteProducto(idProducto: string): BuiltCommand {
-	const steps = SQL_QUITAR_PRODUCTO.map((sql) => ({ kind: "execute", sql, args: [idProducto] }));
+	// RI-39: el resultado y las guardas se evalúan en la misma transacción del DO.
+	const steps = [
+		{ kind: "row", saveAs: "enUso", sql: `SELECT EXISTS (
+			SELECT 1 FROM Detalle_Comanda dc JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda
+			WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta') AS en_uso;`, args: [idProducto] },
+		...SQL_QUITAR_PRODUCTO.map((sql) => ({ kind: "execute", sql, args: [idProducto] })),
+	];
 	return {
 		commandName: "inventario_delete_producto",
-		command: { type: "tenantDb.transaction", payload: { steps } },
+		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "enUso" } },
 		cloudPayload: { id_producto: idProducto },
 	};
 }
