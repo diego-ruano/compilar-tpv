@@ -284,7 +284,6 @@ casos_de_contrato! {
     inventario__create_lote,
     inventario__create_categoria,
     inventario__upsert_producto,
-    inventario__set_alergenos,
     inventario__delete_producto,
     inventario__update_lote,
     inventario__delete_producto_con_lote_vendido,
@@ -512,12 +511,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             })
             .await
             .expect("upsert producto");
-        }
-        "inventario.set_alergenos" => {
-            let repo = SqliteInventarioRepository::new(db.clone());
-            repo.set_alergenos_producto(&s(&e["id_producto"]), strings(&e["ids_alergenos"]))
-                .await
-                .expect("set alergenos");
         }
         "inventario.delete_producto" => {
             let repo = SqliteInventarioRepository::new(db.clone());

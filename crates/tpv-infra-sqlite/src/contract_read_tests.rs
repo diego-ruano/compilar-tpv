@@ -296,7 +296,6 @@ lecturas_de_contrato! {
     inventario__categorias,
     inventario__proveedores_mini,
     inventario__alergenos,
-    inventario__alergenos_producto,
     inventario__lotes_por_producto,
     inventario__product_detail,
     login__usuarios,
@@ -544,14 +543,6 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
         "inventario.alergenos" => {
             let repo = SqliteInventarioRepository::new(db.clone());
             serde_json::to_value(repo.list_alergenos().await.expect("alergenos")).unwrap()
-        }
-        "inventario.alergenos_producto" => {
-            let repo = SqliteInventarioRepository::new(db.clone());
-            let r = repo
-                .alergenos_producto(&s(&e["id_producto"]))
-                .await
-                .expect("alergenos producto");
-            serde_json::to_value(r).unwrap()
         }
         "inventario.lotes_por_producto" => {
             let repo = SqliteInventarioRepository::new(db.clone());

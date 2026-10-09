@@ -29,7 +29,6 @@ import {
 	ultimoCierre,
 } from "../src/domains/cuentas/cuentas.queries";
 import {
-	alergenosProducto,
 	listAlergenos,
 	listCategorias as listCategoriasInv,
 	listLotesByProducto,
@@ -185,8 +184,6 @@ import casoInvProvMini from "../../../tests/contract/lecturas/casos/inventario/p
 import goldenInvProvMini from "../../../tests/contract/lecturas/golden/inventario/proveedores_mini.json";
 import casoInvAlergenos from "../../../tests/contract/lecturas/casos/inventario/alergenos.json";
 import goldenInvAlergenos from "../../../tests/contract/lecturas/golden/inventario/alergenos.json";
-import casoInvAlergProd from "../../../tests/contract/lecturas/casos/inventario/alergenos_producto.json";
-import goldenInvAlergProd from "../../../tests/contract/lecturas/golden/inventario/alergenos_producto.json";
 import casoInvLotes from "../../../tests/contract/lecturas/casos/inventario/lotes_por_producto.json";
 import goldenInvLotes from "../../../tests/contract/lecturas/golden/inventario/lotes_por_producto.json";
 import casoInvDetalle from "../../../tests/contract/lecturas/casos/inventario/product_detail.json";
@@ -319,7 +316,6 @@ const CASOS = [
 	{ nombre: "inventario_categorias", caso: casoInvCategorias, golden: goldenInvCategorias },
 	{ nombre: "inventario_proveedores_mini", caso: casoInvProvMini, golden: goldenInvProvMini },
 	{ nombre: "inventario_alergenos", caso: casoInvAlergenos, golden: goldenInvAlergenos },
-	{ nombre: "inventario_alergenos_producto", caso: casoInvAlergProd, golden: goldenInvAlergProd },
 	{ nombre: "inventario_lotes_por_producto", caso: casoInvLotes, golden: goldenInvLotes },
 	{ nombre: "inventario_product_detail", caso: casoInvDetalle, golden: goldenInvDetalle },
 	{ nombre: "login_usuarios", caso: casoLoginUsuarios, golden: goldenLoginUsuarios },
@@ -510,8 +506,6 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return listProveedoresMini(db);
 		case "inventario.alergenos":
 			return listAlergenos(db);
-		case "inventario.alergenos_producto":
-			return alergenosProducto(db, e.id_producto);
 		case "inventario.lotes_por_producto":
 			return listLotesByProducto(db, e.id_producto);
 		case "inventario.product_detail":

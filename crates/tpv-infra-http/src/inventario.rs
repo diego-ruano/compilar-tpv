@@ -74,12 +74,6 @@ impl InventarioRepository for HttpInventarioRepository {
         self.client.get_json("/v1/inventario/alergenos").await
     }
 
-    async fn alergenos_producto(&self, id_producto: &str) -> AppResult<Vec<String>> {
-        self.client
-            .get_json(&format!("/v1/inventario/productos/{id_producto}/alergenos"))
-            .await
-    }
-
     async fn get_producto(&self, id_producto: &str) -> AppResult<Option<ProductoBaseDto>> {
         Ok(self.detalle(id_producto).await?.producto)
     }
@@ -117,15 +111,6 @@ impl InventarioRepository for HttpInventarioRepository {
         let _: (JsonValue, _) = self
             .client
             .post_json_creando("/v1/inventario/categorias", &body, generado)
-            .await?;
-        Ok(())
-    }
-
-    async fn set_alergenos_producto(&self, id_producto: &str, ids: Vec<String>) -> AppResult<()> {
-        let body = json!({ "ids_alergenos": ids });
-        let _: JsonValue = self
-            .client
-            .put_json(&format!("/v1/inventario/productos/{id_producto}/alergenos"), &body)
             .await?;
         Ok(())
     }

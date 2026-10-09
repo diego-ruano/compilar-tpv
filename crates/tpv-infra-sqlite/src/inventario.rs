@@ -341,25 +341,6 @@ impl InventarioRepository for SqliteInventarioRepository {
         Ok(out)
     }
 
-    async fn alergenos_producto(&self, id_producto: &str) -> AppResult<Vec<String>> {
-        let db = self.db.read().await;
-        let mut rows = db
-            .query(
-                "SELECT ID_Alergeno FROM Producto_Alergenos WHERE ID_Producto=?1 ORDER BY ID_Alergeno ASC;",
-                vec![Value::Text(id_producto.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-        let mut out = Vec::new();
-        while let Some(row) = rows.next().await.map_err(db_err)? {
-            let id_a = s(row.get_value(0).map_err(db_err)?);
-            if !id_a.is_empty() {
-                out.push(id_a);
-            }
-        }
-        Ok(out)
-    }
-
     async fn get_producto(&self, id_producto: &str) -> AppResult<Option<ProductoBaseDto>> {
         let db = self.db.read().await;
         fetch_producto(&db, id_producto).await
@@ -469,31 +450,6 @@ impl InventarioRepository for SqliteInventarioRepository {
             .await
             .map_err(db_err)?;
         Ok(())
-    }
-
-    async fn set_alergenos_producto(&self, id_producto: &str, ids: Vec<String>) -> AppResult<()> {
-        let g = self.db.write().await;
-        let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
-            conn.execute(
-                "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
-                vec![Value::Text(id_producto.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-            for id_a in ids {
-                conn.execute(
-                    "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
-                    vec![Value::Text(id_producto.to_string()), Value::Text(id_a)],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-            Ok(())
-        }
-        .await;
-        finish_tx(conn, res).await
     }
 
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()> {

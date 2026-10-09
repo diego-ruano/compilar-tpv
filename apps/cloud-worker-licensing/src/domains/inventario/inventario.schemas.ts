@@ -13,7 +13,6 @@ import type {
 	AjusteLoteInput as ContractAjusteLoteInput,
 	AjusteStockSueltoInput as ContractAjusteStockSueltoInput,
 	CreateLoteInput as ContractCreateLoteInput,
-	SetProductoAlergenosInput,
 	UpdateLoteInput as ContractUpdateLoteInput,
 	UpsertCategoriaInput as ContractUpsertCategoriaInput,
 	UpsertProductoInput as ContractUpsertProductoInput,
@@ -50,10 +49,6 @@ export const upsertProductoSchema = z.object({
 	cantidad_pedido_esperada: optNum,
 	stock_suelto: optNum,
 	iva_percent: optNum,
-	ids_alergenos: idList,
-});
-
-export const setAlergenosSchema = z.object({
 	ids_alergenos: idList,
 });
 
@@ -119,7 +114,6 @@ export type UpsertProductoInput = Omit<
 	iva_percent?: number | null;
 };
 
-export type SetAlergenosInput = Omit<SetProductoAlergenosInput, "id_producto">;
 
 export type CreateLoteInput = Omit<
 	ContractCreateLoteInput,
@@ -168,7 +162,6 @@ export type AjusteStockSueltoInput = Omit<
 // deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
 type _GUpsertCategoria = Assert<SameKeys<z.infer<typeof upsertCategoriaSchema>, UpsertCategoriaInput>>;
 type _GUpsertProducto = Assert<SameKeys<z.infer<typeof upsertProductoSchema>, UpsertProductoInput>>;
-type _GSetAlergenos = Assert<SameKeys<z.infer<typeof setAlergenosSchema>, SetAlergenosInput>>;
 type _GCreateLote = Assert<SameKeys<z.infer<typeof createLoteSchema>, CreateLoteInput>>;
 type _GUpdateLote = Assert<SameKeys<z.infer<typeof updateLoteSchema>, UpdateLoteInput>>;
 type _GAjusteLote = Assert<SameKeys<z.infer<typeof ajusteLoteSchema>, AjusteLoteInput>>;

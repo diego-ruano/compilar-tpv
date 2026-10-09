@@ -2870,11 +2870,6 @@ export type SetPrinterArgs = {
 	destino?: string | null,
 };
 
-export type SetProductoAlergenosInput = {
-	id_producto: string,
-	ids_alergenos: string[],
-};
-
 export type SetTurnoPartidoInput = {
 	id_usuario: string,
 	turno_partido: boolean,

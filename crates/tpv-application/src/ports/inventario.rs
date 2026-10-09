@@ -23,7 +23,6 @@ pub trait InventarioRepository: Send + Sync {
     ) -> AppResult<Vec<ProductoListDto>>;
     async fn resumen(&self, limit: i64) -> AppResult<InventarioResumenResponse>;
     async fn list_alergenos(&self) -> AppResult<Vec<AlergenoInvDto>>;
-    async fn alergenos_producto(&self, id_producto: &str) -> AppResult<Vec<String>>;
     async fn get_producto(&self, id_producto: &str) -> AppResult<Option<ProductoBaseDto>>;
     async fn product_detail(&self, id_producto: &str) -> AppResult<ProductDetailResponse>;
     async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>>;
@@ -34,7 +33,6 @@ pub trait InventarioRepository: Send + Sync {
     // (atómico con el read, sin TOCTOU). En el adaptador SQLite se hace localmente; en el HTTP lo
     // valida el worker en sus rutas.
     async fn create_categoria(&self, cat: CategoriaUpsert) -> AppResult<()>;
-    async fn set_alergenos_producto(&self, id_producto: &str, ids: Vec<String>) -> AppResult<()>;
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()>;
     /// Upsert de producto + alérgenos. Devuelve el id de producto.
     ///

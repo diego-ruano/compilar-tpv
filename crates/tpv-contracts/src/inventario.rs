@@ -193,12 +193,6 @@ pub struct UpsertCategoriaInput {
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct SetProductoAlergenosInput {
-    pub id_producto: String,
-    pub ids_alergenos: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct UpsertProductoInput {
     #[serde(default)]
     pub id_producto: Option<String>,

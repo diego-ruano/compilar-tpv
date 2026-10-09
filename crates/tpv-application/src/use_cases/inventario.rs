@@ -3,11 +3,11 @@
 use tpv_contracts::inventario::{
     AjusteLoteInput, AjusteStockSueltoInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, InventarioResumenResponse,
     LoteDto, ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto,
-    ProveedorMiniDto, SetProductoAlergenosInput, SummaryArgs, UpdateLoteInput,
+    ProveedorMiniDto, SummaryArgs, UpdateLoteInput,
     UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
 use tpv_domain::inventario::{
-    normalize_ids, AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+    AjusteLote, AjusteSuelto, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
 };
 
 use crate::error::{AppError, AppResult};
@@ -36,10 +36,6 @@ pub async fn get_resumen(repo: &R, args: SummaryArgs) -> AppResult<InventarioRes
 
 pub async fn list_alergenos(repo: &R) -> AppResult<Vec<AlergenoInvDto>> {
     repo.list_alergenos().await
-}
-
-pub async fn get_alergenos_producto(repo: &R, id_producto: String) -> AppResult<Vec<String>> {
-    repo.alergenos_producto(&id_producto).await
 }
 
 pub async fn get_producto(repo: &R, id_producto: String) -> AppResult<Option<ProductoBaseDto>> {
@@ -72,18 +68,6 @@ pub async fn create_categoria(repo: &R, input: UpsertCategoriaInput) -> AppResul
     )
     .map_err(AppError::validation)?;
     repo.create_categoria(cat).await?;
-    Ok("OK".to_string())
-}
-
-pub async fn set_alergenos_producto(
-    repo: &R,
-    input: SetProductoAlergenosInput,
-) -> AppResult<String> {
-    if input.id_producto.trim().is_empty() {
-        return Err(AppError::validation("id_producto inválido"));
-    }
-    let ids = normalize_ids(input.ids_alergenos);
-    repo.set_alergenos_producto(&input.id_producto, ids).await?;
     Ok("OK".to_string())
 }
 
@@ -189,6 +173,7 @@ pub async fn ajustar_stock_suelto(repo: &R, id_usuario: &str, input: AjusteStock
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tpv_domain::inventario::normalize_ids;
 
     #[test]
     fn ids_de_alergenos_se_normalizan_sin_vacios_ni_duplicados() {

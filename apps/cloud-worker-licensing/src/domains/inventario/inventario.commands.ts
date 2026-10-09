@@ -15,7 +15,6 @@ import type { ApplyCommand } from "../../lib/hub";
 import type {
 	UpsertCategoriaInput,
 	UpsertProductoInput,
-	SetAlergenosInput,
 	CreateLoteInput,
 	UpdateLoteInput,
 	AjusteLoteInput,
@@ -234,30 +233,6 @@ export function deleteProducto(idProducto: string): BuiltCommand {
 		commandName: "inventario_delete_producto",
 		command: { type: "tenantDb.transaction", payload: { steps } },
 		cloudPayload: { id_producto: idProducto },
-	};
-}
-
-export function setAlergenosProducto(
-	idProducto: string,
-	input: SetAlergenosInput,
-): BuiltCommand {
-	const ids = normalizeIds(input.ids_alergenos ?? []);
-	const steps: any[] = [
-		{
-			kind: "execute",
-			sql: "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
-			args: [idProducto],
-		},
-		...ids.map((idA) => ({
-			kind: "execute",
-			sql: "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
-			args: [idProducto, idA],
-		})),
-	];
-	return {
-		commandName: "inventario_set_alergenos_producto",
-		command: { type: "tenantDb.transaction", payload: { steps } },
-		cloudPayload: { id_producto: idProducto, ids_alergenos: ids },
 	};
 }
 

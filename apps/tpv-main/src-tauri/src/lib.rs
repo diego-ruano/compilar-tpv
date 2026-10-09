@@ -2135,7 +2135,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         ])
         .typ::<tpv_contracts::inventario::AlergenoMiniDto>()
         .typ::<tpv_contracts::inventario::ProductoDetalleDto>()
-        .typ::<tpv_contracts::inventario::SetProductoAlergenosInput>()
         .typ::<tpv_contracts::licensing::ApiSignedHeaders>()
         .typ::<tpv_contracts::licensing::TpvServerSignedHeadersArgs>()
         .typ::<tpv_contracts::notificaciones::CrearNotificacionInput>()

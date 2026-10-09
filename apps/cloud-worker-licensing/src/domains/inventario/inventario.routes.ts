@@ -86,14 +86,6 @@ inventarioRoutes.get("/alergenos", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.listAlergenos(db))),
 );
 
-inventarioRoutes.get("/productos/:id/alergenos", async (c) => {
-	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_producto inválido");
-	return c.json(
-		await tenantQuery(c, (db) => q.alergenosProducto(db, id)),
-	);
-});
-
 inventarioRoutes.get("/productos/:id/lotes", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto inválido");
@@ -135,14 +127,6 @@ inventarioRoutes.delete("/productos/:id", async (c) => {
 	const enUso = await tenantQuery(c, (db) => q.productoEnComandaAbierta(db, id));
 	if (enUso) return c.json({ ok: false, error: "producto_en_comanda_abierta" }, 409);
 	await apply(c, cmd.deleteProducto(id));
-	return c.json({ ok: true });
-});
-
-inventarioRoutes.put("/productos/:id/alergenos", cuerpo(S.setAlergenosSchema), async (c) => {
-	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_producto inválido");
-	const datos = c.req.valid("json");
-	await apply(c, cmd.setAlergenosProducto(id, datos));
 	return c.json({ ok: true });
 });
 

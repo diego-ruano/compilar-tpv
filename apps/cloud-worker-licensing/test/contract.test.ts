@@ -62,7 +62,6 @@ import {
 	createCategoria,
 	createLote,
 	deleteProducto,
-	setAlergenosProducto,
 	updateLote,
 	upsertProducto,
 } from "../src/domains/inventario/inventario.commands";
@@ -146,8 +145,6 @@ import casoInvCategoria from "../../../tests/contract/casos/inventario/create_ca
 import goldenInvCategoria from "../../../tests/contract/golden/inventario/create_categoria.json";
 import casoInvUpsertProd from "../../../tests/contract/casos/inventario/upsert_producto.json";
 import goldenInvUpsertProd from "../../../tests/contract/golden/inventario/upsert_producto.json";
-import casoInvSetAlerg from "../../../tests/contract/casos/inventario/set_alergenos.json";
-import goldenInvSetAlerg from "../../../tests/contract/golden/inventario/set_alergenos.json";
 import casoInvDeleteProd from "../../../tests/contract/casos/inventario/delete_producto.json";
 import goldenInvDeleteProd from "../../../tests/contract/golden/inventario/delete_producto.json";
 import casoInvDeleteLoteVendido from "../../../tests/contract/casos/inventario/delete_producto_con_lote_vendido.json";
@@ -302,7 +299,6 @@ const CASOS = [
 	{ nombre: "inventario_create_lote", caso: casoInvCreateLote, golden: goldenInvCreateLote },
 	{ nombre: "inventario_create_categoria", caso: casoInvCategoria, golden: goldenInvCategoria },
 	{ nombre: "inventario_upsert_producto", caso: casoInvUpsertProd, golden: goldenInvUpsertProd },
-	{ nombre: "inventario_set_alergenos", caso: casoInvSetAlerg, golden: goldenInvSetAlerg },
 	{ nombre: "inventario_delete_producto", caso: casoInvDeleteProd, golden: goldenInvDeleteProd },
 	{ nombre: "inventario_delete_producto_con_lote_vendido", caso: casoInvDeleteLoteVendido, golden: goldenInvDeleteLoteVendido },
 	{ nombre: "inventario_delete_producto_sin_historia", caso: casoInvDeleteSinHistoria, golden: goldenInvDeleteSinHistoria },
@@ -595,16 +591,6 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 				args: [caso.entrada.id_producto ?? ""],
 			});
 			aplicar(hub, sql, upsertProducto(caso.entrada as any, ex.rows.length === 0, caso.entrada.id_usuario));
-			return;
-		}
-		case "inventario.set_alergenos": {
-			aplicar(
-				hub,
-				sql,
-				setAlergenosProducto(caso.entrada.id_producto, {
-					ids_alergenos: caso.entrada.ids_alergenos,
-				} as any),
-			);
 			return;
 		}
 		case "inventario.delete_producto": {

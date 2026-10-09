@@ -147,27 +147,6 @@ export async function listAlergenos(db: Client): Promise<AlergenoInvDto[]> {
 	return rows(rs) as AlergenoInvDto[];
 }
 
-/**
- * Los alergenos de un producto, como lista de ids.
- *
- * Devolvia `number[]` y coercionaba cada id con `Number(...) > 0`, pero `ID_Alergeno` es un TEXT (un
- * UUID): la coercion daba NaN y el filtro los tiraba todos, asi que en la Handy la ficha de un
- * producto salia **siempre sin ningun alergeno**, aunque los tuviera marcados. Resto de un tiempo en
- * que los ids eran enteros.
- */
-export async function alergenosProducto(
-	db: Client,
-	idProducto: string,
-): Promise<string[]> {
-	const rs = await db.execute({
-		sql: "SELECT ID_Alergeno FROM Producto_Alergenos WHERE ID_Producto=?1 ORDER BY ID_Alergeno ASC;",
-		args: [idProducto],
-	});
-	return rows(rs)
-		.map((r: any) => String(r.ID_Alergeno ?? "").trim())
-		.filter((s: string) => s !== "");
-}
-
 export async function productDetail(
 	db: Client,
 	idProducto: string,
