@@ -163,19 +163,6 @@ la interfaz se congela. Sabéis hacerlo —impresión, imágenes, AEAT y las cop
 (`recovery::en_hilo_aparte`) ya van por `spawn_blocking`—: aplicar lo mismo a esas operaciones, o
 dedicar un hilo propio al escritor (que además encaja con el escritor único).
 
-<a id="ri-15"></a>
-### RI-15 🟡 · Se construye un cliente HTTP por petición
-
-**Dónde:** [`tpv-infra-licensing/src/lib.rs:134-139`](../../crates/tpv-infra-licensing/src/lib.rs#L134-L139)
-(`http_client()`, llamado en cada petición) y [`lib.rs:735-739`](../../crates/tpv-infra-licensing/src/lib.rs#L735-L739)
-(`enviar_post`).
-
-`reqwest::Client` mantiene el pool de conexiones; su documentación pide crear uno y reutilizarlo.
-Aquí se crea uno **en cada petición**, así que cada página de catch-up, de backfill, cada ticket de
-WebSocket, cada comprobación de licencia y cada subida de imagen paga un handshake TLS completo con
-Cloudflare (uno o dos viajes de ida y vuelta y CPU) y carga los certificados raíz. Un `static
-CLIENTE: LazyLock<Client>` lo resuelve. (`tpv-infra-http` sí lo hace bien: crea el suyo una vez.)
-
 <a id="ri-32"></a>
 ### RI-32 🔵 · Transacciones escritas a mano y helpers duplicados
 

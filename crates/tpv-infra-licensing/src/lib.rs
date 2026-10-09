@@ -23,7 +23,7 @@ pub use secret_store::init_java_vm;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -146,10 +146,14 @@ fn delete_rejection(dir: &Path) -> AppResult<()> {
 /* ===== HTTP ===== */
 
 fn http_client() -> AppResult<Client> {
-    Client::builder()
-        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| ext(format!("Error creando HTTP client: {e}")))
+    // RI-15: las copias comparten el pool; las credenciales y firmas siguen siendo por petición.
+    static CLIENTE: LazyLock<Result<Client, String>> = LazyLock::new(|| {
+        Client::builder()
+            .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| format!("Error creando HTTP client: {e}"))
+    });
+    CLIENTE.as_ref().cloned().map_err(|e| ext(e.clone()))
 }
 
 fn api_url(path: &str) -> String {
@@ -853,10 +857,7 @@ impl PairingAdapter {
     /// a firmar —la firma cubre el token, y el token es justo lo que ha cambiado—, así que no vale
     /// con reenviar las mismas cabeceras.
     async fn enviar_post(&self, mode: &str, path: &str, body_str: &str) -> AppResult<(u16, String)> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-            .build()
-            .map_err(|e| ext(format!("reqwest_build_failed:{e}")))?;
+        let client = http_client()?;
 
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
