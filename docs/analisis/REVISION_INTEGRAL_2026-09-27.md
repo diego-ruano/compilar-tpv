@@ -37,7 +37,6 @@
   14. [Frontend](#14-frontend)
   15. [Rust: idioma, runtime y estructura](#15-rust-idioma-runtime-y-estructura)
   16. [CI, build y herramientas](#16-ci-build-y-herramientas)
-  18. [Documentación desfasada](#18-documentación-desfasada)
   19. [Tecnologías y librerías](#19-tecnologías-y-librerías)
   20. [Plataformas: Android (Handy) y Windows 7](#20-plataformas-android-handy-y-windows-7)
   21. [Paridad Main ↔ worker](#21-paridad-main--worker)
@@ -97,10 +96,8 @@ frontend tienen regresiones automatizadas; el recorrido completo y la comprobaci
 TPV real siguen siendo validaciones de la release.
 
 **Migraciones:** `0001_inicial.sql` ya está congelada. Las mejoras pendientes se añaden mediante
-una migración nueva, registrada en los dos runners:
-
-- Revisar los comentarios desfasados de `0001` ([§18](#18-documentación-desfasada)) sin alterar su SQL aplicado.
-- Si se decide, los `CHECK` de RI-48 (`Metodo_Pago`, estados).
+una migración nueva, registrada en los dos runners. Quedan por decidir los `CHECK` de RI-48
+(`Metodo_Pago`, estados).
 
 **Antes de cobrar por el producto:**
 
@@ -355,24 +352,6 @@ cargar el secreto.
   Según la versión de `tauri-build`, la descripción puede acabar en los metadatos del `.exe`.
 - `packages/contracts/package.json` tiene un comentario «Provisional… tras la verificación empírica»
   que ya no lo es.
-
----
-
-## 18. Documentación desfasada
-
-Los comentarios y documentos editables de esta sección ya están contrastados con el código y
-corregidos. Sólo permanece el siguiente comentario histórico dentro de una migración aplicada:
-
-| Dónde | Qué dice | Qué pasa de verdad |
-|---|---|---|
-| `0001_inicial.sql` §10 | `_Sync_Applied_Ops` «creada por `init_sync_tables` en `db.rs`, fuera de las migraciones» | La crea §16 del propio `0001`; `Db::open` ejecuta el runner de migraciones |
-
-La aclaración vigente está en
-[esquema.md](../arquitectura/esquema.md#lo-que-hay-que-saber-de-los-comentarios-de-0001_inicialsql).
-El hash SHA-256 incluye los comentarios: corregir el texto del SQL alteraría la migración y las
-bases que ya la aplicaron fallarían con `migration_altered`, aunque no cambiara ninguna sentencia.
-Se conserva el fichero y su snapshot. Reescribirlos requiere decidir expresamente qué hacer con
-las bases y copias existentes; no forma parte de esta actualización de documentación.
 
 ---
 
