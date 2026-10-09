@@ -1,32 +1,8 @@
 //! Utilidades compartidas por los repositorios SQLite.
 
-use tpv_application::error::{AppError, AppResult};
-
-use crate::db::Reader;
-use crate::mapping::v_i64;
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
-
-/// Siguiente ID libre para `table.column` (= `MAX(col)+1`, mínimo 1).
-/// Reemplaza el patrón `next_table_id` que estaba duplicado por módulo.
-pub async fn next_table_id<C: Reader>(conn: &C, table: &str, column: &str) -> AppResult<i64> {
-    let sql = format!("SELECT COALESCE(MAX({column}), 0) + 1 FROM {table};");
-
-    let mut rows = conn.query(&sql, ()).await.map_err(db_err)?;
-
-    let Some(row) = rows.next().await.map_err(db_err)? else {
-        return Ok(1);
-    };
-
-    let v = row.get_value(0).map_err(db_err)?;
-    Ok(v_i64(v).unwrap_or(1).max(1))
-}
-
 /// Genera un identificador único global (UUIDv7, ordenable por tiempo) como `String`.
-/// Sustituye a `next_table_id` (MAX+1) para las claves primarias: al ser único en todos los
-/// dispositivos, evita la divergencia de ids entre la BD local de la Main y la nube.
+/// Al ser único en todos los dispositivos, evita la divergencia de claves primarias entre
+/// la BD local de la Main y la nube (RI-22).
 pub fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }

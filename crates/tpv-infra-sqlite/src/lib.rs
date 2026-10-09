@@ -29,7 +29,7 @@ mod planes;
 // Helpers de mapeo libsql::Value <-> tipos Rust:
 pub mod mapping;
 
-// Utilidades compartidas por repositorios (next_table_id, now_ms, …):
+// Utilidades compartidas por repositorios (new_id, now_ms, …):
 pub mod util;
 
 // Manejo de conexiones: escritor único serializado + pool de lectura (WAL).
