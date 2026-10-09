@@ -4,7 +4,8 @@ fn limpia(o: Option<String>) -> Option<String> {
     o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// Proveedor validado listo para upsert. `id = None` => se asigna el siguiente libre.
+/// Proveedor validado listo para upsert. `id = None` indica un alta nueva: la
+/// persistencia genera un UUIDv7 antes del INSERT; con id, hace upsert por esa clave.
 #[derive(Debug, Clone)]
 pub struct ProveedorValidado {
     pub id: Option<String>,

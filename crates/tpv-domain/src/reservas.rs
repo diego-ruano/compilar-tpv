@@ -231,7 +231,8 @@ impl ModoSolape {
 }
 
 /// Reserva ya normalizada y validada, lista para persistir.
-/// `id = Some` => upsert por id (edición); `None` => alta nueva (autoincrement).
+/// `id = Some` => upsert por id; `None` => alta nueva, con UUIDv7 generado por la
+/// persistencia antes del INSERT. El dominio sólo valida y normaliza el identificador.
 #[derive(Debug, Clone)]
 pub struct ReservaValidada {
     pub id: Option<String>,

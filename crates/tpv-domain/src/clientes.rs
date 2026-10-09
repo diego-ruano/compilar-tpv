@@ -32,8 +32,8 @@ pub struct Cliente {
     pub notas: Option<String>,
 }
 
-/// Datos para dar de alta un cliente. `id` es opcional: si falta, lo asigna la
-/// persistencia (siguiente ID libre).
+/// Datos para dar de alta un cliente. `id` es opcional: si falta, la persistencia
+/// genera un UUIDv7 antes del INSERT. El dominio sólo valida y normaliza los datos.
 #[derive(Debug, Clone)]
 pub struct NuevoCliente {
     pub id: Option<String>,
