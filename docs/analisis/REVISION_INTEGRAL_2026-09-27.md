@@ -59,7 +59,8 @@ Lo que sale de esta revisión se concentra en tres frentes:
 
 1. **CI**: no ejecuta 249 tests
    —entre ellos todos los guardianes que CLAUDE.md cita como red— (RI-08).
-2. **Código muerto**: casos de uso y ficheros sin ningún llamante (RI-22).
+2. **Código muerto (RI-22, resuelto)**: retirados los caminos obsoletos identificados y añadidos
+   analizadores informativos en CI. Otros candidatos que detecten las herramientas requieren revisión.
 3. **Plataformas** (segunda pasada). La rama de Windows 7 es anterior a ARQ-01 y su canal
    del feed no está desplegado (RI-74). Y el harness de contrato compara efectos pero no la
    validación, donde hay cuatro divergencias entre la Main y la Handy (RI-78).
@@ -73,7 +74,7 @@ Lo que sale de esta revisión se concentra en tres frentes:
 | [RI-08](#ri-08) | 🟠 | deuda | La CI no ejecuta 249 tests, entre ellos todos los guardianes |
 | [RI-15](#ri-15) | 🟡 | rendimiento | Se construye un `reqwest::Client` por petición (sin reutilizar conexiones) |
 | [RI-16](#ri-16) | 🟡 | rendimiento | libsql local bloquea hilos del runtime async (restauración, estadísticas) |
-| [RI-22](#ri-22) | 🟡 | deuda | Caminos enteros sin ningún llamante |
+| [RI-22](#ri-22) | ✅ | resuelto | Caminos obsoletos retirados y análisis informativo en CI |
 | [RI-23](#ri-23) | 🟡 | rendimiento | Optimización y limpieza de imágenes aplazada |
 | [RI-24](#ri-24) | 🟡 | deuda | Los source maps del frontend no llegan a Sentry (y la versión no cuadra) |
 | [RI-25](#ri-25) | 🟡 | seguridad | Acciones de GitHub sin fijar por SHA en un job con la clave de firma del updater |
@@ -116,8 +117,8 @@ RI-77 para que no enseñe lo que no puede hacer.
 **Antes de compilar otra versión de Windows 7:** RI-74. Integrar `main` en la rama, y pasar la ruta
 del canal a `main`.
 
-**Después, sin prisa:** el resto, empezando por el código muerto (RI-22), y siguiendo por las mejoras de
-coste (RI-15, RI-16).
+**Después, sin prisa:** el resto, incluidas las mejoras de coste (RI-15, RI-16). RI-22 ya está resuelto
+en el alcance descrito abajo.
 
 ---
 
@@ -364,41 +365,37 @@ cargar el secreto.
 
 ## 17. Código muerto
 
-Comprobado con dos análisis de sólo lectura (exportaciones sin ningún uso en otro fichero y
-ficheros que nadie importa) más búsquedas de llamantes en Rust. Borrar código muerto no es estética
-aquí: varios de estos caminos tocan dinero o autenticación, y el harness de contrato obliga a
-mantenerlos iguales en dos lenguajes aunque nadie los use.
-
 <a id="ri-22"></a>
-### RI-22 🟡 · Caminos enteros sin ningún llamante
+### RI-22 ✅ · Limpieza implementada y comprobada (2026-10-09)
 
-1. **La barra del módulo de mesas.** `use_cases::mesas::{get_or_create_comanda_barra,
-   create_comanda_barra, list_comandas_barra, delete_comanda_barra_if_safe, cerrar_comanda}` no los
-   llama ningún comando registrado, y su implementación SQLite sigue viva. La implementación HTTP ya
-   devuelve «endpoint_no_disponible_en_handy», y en el worker `PUT /v1/mesas/comandas/cerrar` no
-   tiene cliente.
-2. **`get_alergenos_producto`/`set_alergenos_producto`** de inventario: sin comando, pero con su
-   caso de uso.
-3. **`next_table_id`** ([`util.rs:14-26`](../../crates/tpv-infra-sqlite/src/util.rs#L14-L26)): el
-   generador de ids `MAX+1` de antes de UUIDv7, sin ningún uso.
-4. **Frontend, ficheros que nadie importa**: `app/layoutComponent/Account.tsx`,
-   `features/clientes/{ClientesCard,ItemListClients,ListClients}.tsx`,
-   `features/inventario/ui/ConfirmDialog.tsx`,
-   `features/proveedores/{CategoriesColumn,Foto}.tsx`, `shared/ui/Carousel.tsx` (~700 líneas).
-5. **Frontend, exportaciones sin uso**: `statsApis.ts` (seis funciones, sustituidas por
-   `statsQueries`), `useAjustarLote`, `useHistoricoIncompleto`, `makePairCode`, `LicenseInfo`.
-6. **Worker**: `rangoSchema`, `deleteDetalleSchema`,
-   `productoPasaCocina`, y los tipos `ActivateRequest`/`StatusResponse` de `shared.ts`.
-7. **`@tpv/database/src/index.ts`**: exporta `{}` con un comentario que ya no es cierto («el TPV…
-   no usa la nube para datos»). El paquete sólo existe por la carpeta de migraciones.
-8. **`#[allow(dead_code)]` que ya no aplican**: `Sesion::id_trabajador` («hoy nadie lo lee») se lee
-   desde REV-17; `exists_by_id` en `venta_rapida.rs` sí es muerto.
-9. Listas de módulos comentadas en `tpv-domain/src/lib.rs` y `tpv-contracts/src/lib.rs`
-   («se irán añadiendo… // pub mod mesas;»): la migración terminó.
+Retirados los cinco caminos antiguos de barra/cierre del módulo de mesas en casos de uso, puertos,
+adaptadores SQLite/HTTP, DTOs, registro Specta y worker. La barra activa de `venta_rapida` se conserva.
+El cierre se produce al completar el cobro: la ruta de cierre directo que podía marcar una comanda
+como pagada sin registrar pagos ya no existe, y una regresión comprueba que devuelve 404 sin escribir.
 
-Para que no vuelva a acumularse: `knip` para el monorepo TS (detecta ficheros, exportaciones y
-dependencias sin uso, entiende workspaces de pnpm) y `cargo-machete` para Rust, los dos en CI en
-modo informativo como `check-contract-coverage.mjs`.
+Los alérgenos se leen en el catálogo y la ficha de producto y se guardan con el producto desde
+inventario. Sólo se han retirado las operaciones aisladas de lectura/escritura, sus DTOs, endpoints
+y casos de contrato exclusivos. Se corrigió la conversión numérica de sus UUID al resolver los iconos;
+una regresión del formulario comprueba imágenes, selección, altas/bajas y recuperación de la ficha.
+
+También se retiraron `next_table_id`, los ocho componentes sin importadores, los exports obsoletos
+confirmados, schemas/consultas/tipos sin uso del worker y el helper `exists_by_id` de venta rápida.
+Se eliminaron la exención obsoleta de `Sesion::id_trabajador`, los comentarios de módulos futuros del
+dominio y la entrada JS vacía de `@tpv/database`, que conserva migraciones y snapshot del esquema.
+`useAjustarLote` tiene un consumidor activo y se conserva; `statsApis.ts` ya estaba retirado y
+`tpv-contracts/src/lib.rs` ya tenía sus módulos actualizados.
+
+Prevención: `pnpm check:dead-code` ejecuta Knip para el monorepo TS y cargo-machete para dependencias
+Rust. El job independiente de CI es informativo, publica avisos y resumen y distingue candidatos de
+fallos del analizador. La configuración contempla entradas de Tauri/Vite, worker, tests y E2E;
+las exportaciones generadas por Specta y las dependencias cargadas por configuración llevan su motivo.
+Los nuevos candidatos fuera de esta lista no se consideran automáticamente código muerto ni resueltos.
+
+Comprobación: 1.307 tests Rust, 957 del worker y 487 del frontend aprobados; TypeScript, Clippy,
+build del frontend, generación real de Specta y registro de migraciones comprobados. La cobertura
+de contrato no tiene huecos: 63/66 escrituras con tres exclusiones justificadas y 64/64 lecturas.
+La tanda Rust registró 27 tests con reintento en SQLite y avisos de acceso a memoria. El problema
+nativo preexistente de libsql está documentado en `.config/nextest.toml` y sigue fuera de esta limpieza.
 
 ---
 
@@ -422,8 +419,6 @@ congelada, así que es ahora o nunca.
 | `verifactu.rs:3236` | «La fila la crea `init_sync_tables`» | La siembra el `0001` |
 | `mesas.rs:2032-2041` | El reintento del `INSERT INTO Pagos` cubre «FK inexistente» | `try_exec` sólo devuelve `false` con «no such column» (RI-32) |
 | `vite.config.ts` | El `release` debe coincidir con el de `main.rs` | Se toma de `package.json`, que no se sube de versión (RI-24) |
-| `packages/database/src/index.ts` | «Esquema Drizzle… cuando se reactive la capa cloud» | La nube está activa y el esquema son los `.sql` |
-| `lib.rs` (`Sesion`) | `id_trabajador`: «hoy nadie lo lee» | Lo lee el cobro de venta rápida (REV-17) |
 | `secret_store.rs:12` | El `Context` de Android sale de `ndk_context` | Sale de `ActivityThread.currentApplication()`; el propio fichero lo explica en la línea 78 (RI-75) |
 | `docs/android/COMPILAR_ANDROID.md:359-363` | La Main sólo abre el WebSocket «en modo online», y arranca en `offline` | No hay ese ajuste desde SYNC-17 |
 | `tests/contract/README.md` | «63/67 comandos y 61/61 lecturas» | 63/66 y 64/64 (RI-79) |
@@ -438,7 +433,7 @@ relación beneficio/esfuerzo.
 | Propuesta | Para qué | Esfuerzo |
 |---|---|---|
 | **`strum`** | Genera `TODOS`, `wire()` y `from_code` de `ErrorCode` y los enums de estado (RI-48) | Bajo |
-| **`knip`** (TS) y **`cargo-machete`** (Rust) en CI | Código y dependencias sin uso (RI-22, RI-49) | Bajo |
+| **`knip`** (TS) y **`cargo-machete`** (Rust) en CI — incorporados | Informes de candidatos sin uso (RI-22 resuelto; RI-49 requiere revisar sus dependencias) | Hecho |
 | **`zod` 4** | Validación bastante más rápida y más ligera en el worker (CPU facturable). `@hono/zod-validator` ya la soporta. Revisar la API de `z.coerce` y los mensajes | Medio |
 | **`rusqlite`** en lugar de **`libsql`** (evaluar) | En la Main sólo se usa SQLite local (`features = ["core"]`). `rusqlite` es la opción madura: transacciones RAII (`conn.transaction()` hace rollback al soltarse, RI-32), caché de sentencias preparadas (`prepare_cached`; hoy cada consulta se prepara de nuevo), API de backup en caliente, y ninguna de las rarezas documentadas (el crash nativo al crear muchas bases, la API async que bloquea, RI-16). Con un hilo propio para el escritor encaja con el diseño de escritor único. Coste: reescribir `db.rs`/`mapping.rs` y adaptar los repositorios (los `Reader`/`Writer` ya aíslan buena parte). Merece una prueba de concepto sobre un repositorio antes de decidir | Alto |
 | **Mantenimiento**: `thiserror` 2, `rand` 0.9, `keyring` 3, `@vitejs/plugin-react` 5, TypeScript alineado entre app (`~5.8`) y worker (`^5.9`) | Mantenerse dentro de las versiones soportadas; Dependabot ya abre los PR menores | Bajo |
