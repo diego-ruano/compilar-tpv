@@ -397,5 +397,8 @@ tocado; están aquí para decidir.
 - **Los comentarios de `0001_inicial.sql` citan documentos y secciones que ya no existen**
   (`docs/PLAN_VERIFACTU.md`, `docs/VERIFACTU_PENDIENTES.md`, `BACKLOG.md DB-14`, «CLAUDE.md 9») y uno de
   `inventario.queries.ts`, dentro de un texto SQL, cita una «migración 0004». No se han tocado: el hash
-  de la migración incluye los comentarios, y cambiarla obliga a resetear las bases de desarrollo.
-  Conviene hacerlo en el próximo cambio de esquema. `schema.snapshot.sql` lleva el mismo texto.
+  de la migración incluye los comentarios y las bases que ya la aplicaron rechazarían el cambio.
+  Las referencias vigentes y la errata de `_Sync_Applied_Ops` están aclaradas en
+  [esquema.md](arquitectura/esquema.md#lo-que-hay-que-saber-de-los-comentarios-de-0001_inicialsql).
+  Una migración nueva no evita comprobar los hashes anteriores; reescribirlos exigiría decidir
+  expresamente qué hacer con las bases y copias existentes. El snapshot conserva su texto histórico.

@@ -39,8 +39,9 @@ pub mod db;
 // Conexión / inicialización de la BD local (schema, migraciones, seed):
 pub mod connection;
 
-// Migraciones versionadas del esquema (PRAGMA user_version): traen al día las BDs ya existentes
-// cuando una actualización modifica tablas. Ver `migrations.rs`.
+// Migraciones del esquema registradas en `_migrations` (nombre, hash SHA-256 y fecha de aplicación).
+// Construyen las BDs nuevas, aplican las pendientes y rechazan cambios en las ya aplicadas.
+// Ver `migrations.rs`.
 pub mod migrations;
 
 // Repositorios concretos (uno por agregado/módulo). Cada uno pide `db.read()` (pool de lectura)

@@ -89,6 +89,21 @@ vacías en la Main. Un volcado o una comparación que recorra tablas se las salt
 
 ## Lo que hay que saber de los comentarios de `0001_inicial.sql`
 
-Como el hash incluye los comentarios, cambiar uno equivale a cambiar la migración. Algunos citan
-documentos que ya no existen (están en [pendientes.md](../pendientes.md#detectado-al-revisar-la-documentación));
-se corrigen en el próximo cambio de esquema, con el reseteo que toque.
+Como el hash incluye los comentarios, cambiar uno equivale a cambiar la migración y las bases
+que ya la aplicaron fallarían con `migration_altered`. Las aclaraciones se documentan aquí sin
+reescribir el fichero aplicado ni su [snapshot](../../packages/database/schema.snapshot.sql).
+
+En **§10**, el comentario de `Applied_Operations` atribuye la creación de `_Sync_Applied_Ops` a
+`init_sync_tables`, fuera de las migraciones. La definición efectiva está en **§16 del propio
+`0001`**, junto con `_Jobs_State` y `_Backfill_Historico`. `Db::open` llama al runner de migraciones;
+no crea estas tablas mediante `init_sync_tables` o `init_jobs_table`.
+
+Algunos comentarios también conservan referencias históricas a documentos o secciones que ya no
+existen (`docs/PLAN_VERIFACTU.md`, `docs/VERIFACTU_PENDIENTES.md`, `BACKLOG.md DB-14`, «CLAUDE.md 9»).
+La documentación vigente es este documento para el esquema, [verifactu.md](verifactu.md) para lo
+fiscal, [sincronizacion.md](sincronizacion.md) para la réplica y [recuperacion.md](recuperacion.md)
+para el bootstrap y el histórico.
+
+Una migración nueva no permite modificar los comentarios de una anterior: el runner sigue
+verificando todos los hashes aplicados. Reescribir esos ficheros exigiría decidir expresamente
+qué hacer con las bases y copias que los aplicaron; no forma parte de una actualización documental.
