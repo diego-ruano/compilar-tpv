@@ -37,12 +37,3 @@ export function useBackfillHistorico() {
 		retry: false,
 	});
 }
-
-/**
- * ¿Hay histórico todavía bajando? Es la pregunta que hacen las pantallas; el resto de campos sólo
- * los usa el panel de diagnóstico.
- */
-export function useHistoricoIncompleto(): boolean {
-	const { data } = useBackfillHistorico();
-	return (data?.tablas_pendientes ?? 0) > 0;
-}

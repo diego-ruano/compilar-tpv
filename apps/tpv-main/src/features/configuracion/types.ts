@@ -1,12 +1,4 @@
 // src/pages/Configuracion/types.ts
-export type LicenseInfo = {
-	plan: "FREE" | "PRO";
-	status: "ACTIVA" | "EN_GRACIA" | "VENCIDA";
-	nextPaymentDate: string; // YYYY-MM-DD
-	seats: number;
-	devices: number;
-};
-
 export type SectionKey =
 	| "NEGOCIO"
 	| "PERMISOS"
