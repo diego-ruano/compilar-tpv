@@ -37,7 +37,6 @@
   14. [Frontend](#14-frontend)
   15. [Rust: idioma, runtime y estructura](#15-rust-idioma-runtime-y-estructura)
   16. [CI, build y herramientas](#16-ci-build-y-herramientas)
-  17. [Código muerto](#17-código-muerto)
   18. [Documentación desfasada](#18-documentación-desfasada)
   19. [Tecnologías y librerías](#19-tecnologías-y-librerías)
   20. [Plataformas: Android (Handy) y Windows 7](#20-plataformas-android-handy-y-windows-7)
@@ -55,13 +54,11 @@ está escrito junto al código, los caminos del dinero y de la factura están pe
 la caja, y hay redes (contrato Main↔worker, anti-drift de migraciones, tablas golden compartidas
 entre lenguajes) que casi ningún producto de este tamaño tiene.
 
-Lo que sale de esta revisión se concentra en tres frentes:
+Lo que queda de esta revisión se concentra en dos frentes:
 
 1. **CI**: no ejecuta 249 tests
    —entre ellos todos los guardianes que CLAUDE.md cita como red— (RI-08).
-2. **Código muerto (RI-22, resuelto)**: retirados los caminos obsoletos identificados y añadidos
-   analizadores informativos en CI. Otros candidatos que detecten las herramientas requieren revisión.
-3. **Plataformas** (segunda pasada). La rama de Windows 7 es anterior a ARQ-01 y su canal
+2. **Plataformas** (segunda pasada). La rama de Windows 7 es anterior a ARQ-01 y su canal
    del feed no está desplegado (RI-74). Y el harness de contrato compara efectos pero no la
    validación, donde hay cuatro divergencias entre la Main y la Handy (RI-78).
 
@@ -74,7 +71,6 @@ Lo que sale de esta revisión se concentra en tres frentes:
 | [RI-08](#ri-08) | 🟠 | deuda | La CI no ejecuta 249 tests, entre ellos todos los guardianes |
 | [RI-15](#ri-15) | 🟡 | rendimiento | Se construye un `reqwest::Client` por petición (sin reutilizar conexiones) |
 | [RI-16](#ri-16) | 🟡 | rendimiento | libsql local bloquea hilos del runtime async (restauración, estadísticas) |
-| [RI-22](#ri-22) | ✅ | resuelto | Caminos obsoletos retirados y análisis informativo en CI |
 | [RI-23](#ri-23) | 🟡 | rendimiento | Optimización y limpieza de imágenes aplazada |
 | [RI-24](#ri-24) | 🟡 | deuda | Los source maps del frontend no llegan a Sentry (y la versión no cuadra) |
 | [RI-25](#ri-25) | 🟡 | seguridad | Acciones de GitHub sin fijar por SHA en un job con la clave de firma del updater |
@@ -117,8 +113,7 @@ RI-77 para que no enseñe lo que no puede hacer.
 **Antes de compilar otra versión de Windows 7:** RI-74. Integrar `main` en la rama, y pasar la ruta
 del canal a `main`.
 
-**Después, sin prisa:** el resto, incluidas las mejoras de coste (RI-15, RI-16). RI-22 ya está resuelto
-en el alcance descrito abajo.
+**Después, sin prisa:** el resto, incluidas las mejoras de coste (RI-15, RI-16).
 
 ---
 
@@ -355,47 +350,10 @@ cargar el secreto.
     dos fuentes de versión para lo mismo.
   - `tokio = { features = ["full"] }` para todo el workspace; las crates de dominio/aplicación sólo
     lo usan en tests.
-  - `cargo-machete` (rápido, sin nightly) en CI lo mantiene a raya.
 - `src-tauri/Cargo.toml` conserva la plantilla: `description = "A Tauri App"`, `authors = ["you"]`.
   Según la versión de `tauri-build`, la descripción puede acabar en los metadatos del `.exe`.
 - `packages/contracts/package.json` tiene un comentario «Provisional… tras la verificación empírica»
   que ya no lo es.
-
----
-
-## 17. Código muerto
-
-<a id="ri-22"></a>
-### RI-22 ✅ · Limpieza implementada y comprobada (2026-10-09)
-
-Retirados los cinco caminos antiguos de barra/cierre del módulo de mesas en casos de uso, puertos,
-adaptadores SQLite/HTTP, DTOs, registro Specta y worker. La barra activa de `venta_rapida` se conserva.
-El cierre se produce al completar el cobro: la ruta de cierre directo que podía marcar una comanda
-como pagada sin registrar pagos ya no existe, y una regresión comprueba que devuelve 404 sin escribir.
-
-Los alérgenos se leen en el catálogo y la ficha de producto y se guardan con el producto desde
-inventario. Sólo se han retirado las operaciones aisladas de lectura/escritura, sus DTOs, endpoints
-y casos de contrato exclusivos. Se corrigió la conversión numérica de sus UUID al resolver los iconos;
-una regresión del formulario comprueba imágenes, selección, altas/bajas y recuperación de la ficha.
-
-También se retiraron `next_table_id`, los ocho componentes sin importadores, los exports obsoletos
-confirmados, schemas/consultas/tipos sin uso del worker y el helper `exists_by_id` de venta rápida.
-Se eliminaron la exención obsoleta de `Sesion::id_trabajador`, los comentarios de módulos futuros del
-dominio y la entrada JS vacía de `@tpv/database`, que conserva migraciones y snapshot del esquema.
-`useAjustarLote` tiene un consumidor activo y se conserva; `statsApis.ts` ya estaba retirado y
-`tpv-contracts/src/lib.rs` ya tenía sus módulos actualizados.
-
-Prevención: `pnpm check:dead-code` ejecuta Knip para el monorepo TS y cargo-machete para dependencias
-Rust. El job independiente de CI es informativo, publica avisos y resumen y distingue candidatos de
-fallos del analizador. La configuración contempla entradas de Tauri/Vite, worker, tests y E2E;
-las exportaciones generadas por Specta y las dependencias cargadas por configuración llevan su motivo.
-Los nuevos candidatos fuera de esta lista no se consideran automáticamente código muerto ni resueltos.
-
-Comprobación: 1.307 tests Rust, 957 del worker y 487 del frontend aprobados; TypeScript, Clippy,
-build del frontend, generación real de Specta y registro de migraciones comprobados. La cobertura
-de contrato no tiene huecos: 63/66 escrituras con tres exclusiones justificadas y 64/64 lecturas.
-La tanda Rust registró 27 tests con reintento en SQLite y avisos de acceso a memoria. El problema
-nativo preexistente de libsql está documentado en `.config/nextest.toml` y sigue fuera de esta limpieza.
 
 ---
 
@@ -433,7 +391,6 @@ relación beneficio/esfuerzo.
 | Propuesta | Para qué | Esfuerzo |
 |---|---|---|
 | **`strum`** | Genera `TODOS`, `wire()` y `from_code` de `ErrorCode` y los enums de estado (RI-48) | Bajo |
-| **`knip`** (TS) y **`cargo-machete`** (Rust) en CI — incorporados | Informes de candidatos sin uso (RI-22 resuelto; RI-49 requiere revisar sus dependencias) | Hecho |
 | **`zod` 4** | Validación bastante más rápida y más ligera en el worker (CPU facturable). `@hono/zod-validator` ya la soporta. Revisar la API de `z.coerce` y los mensajes | Medio |
 | **`rusqlite`** en lugar de **`libsql`** (evaluar) | En la Main sólo se usa SQLite local (`features = ["core"]`). `rusqlite` es la opción madura: transacciones RAII (`conn.transaction()` hace rollback al soltarse, RI-32), caché de sentencias preparadas (`prepare_cached`; hoy cada consulta se prepara de nuevo), API de backup en caliente, y ninguna de las rarezas documentadas (el crash nativo al crear muchas bases, la API async que bloquea, RI-16). Con un hilo propio para el escritor encaja con el diseño de escritor único. Coste: reescribir `db.rs`/`mapping.rs` y adaptar los repositorios (los `Reader`/`Writer` ya aíslan buena parte). Merece una prueba de concepto sobre un repositorio antes de decidir | Alto |
 | **Mantenimiento**: `thiserror` 2, `rand` 0.9, `keyring` 3, `@vitejs/plugin-react` 5, TypeScript alineado entre app (`~5.8`) y worker (`^5.9`) | Mantenerse dentro de las versiones soportadas; Dependabot ya abre los PR menores | Bajo |
