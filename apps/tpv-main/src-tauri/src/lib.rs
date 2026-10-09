@@ -425,8 +425,7 @@ pub(crate) struct AppState {
 #[derive(Clone, Debug)]
 pub(crate) struct Sesion {
     pub id_usuario: String,
-    /// Hoy nadie lo lee: lo que se firma en las filas (`Anulado_Por`, el cobrador…) es `id_usuario`.
-    #[allow(dead_code)]
+    /// Identidad de la ficha de trabajador para comandas y tareas propias (RI-22).
     pub id_trabajador: Option<String>,
     pub rol: String,
     /// Diagnóstico: desde cuándo está abierta la sesión que autorizó algo.

@@ -360,24 +360,6 @@ fn update_total_comanda_sql() -> &'static str {
     "#
 }
 
-#[allow(dead_code)]
-async fn exists_by_id<C: Reader>(
-    conn: &C,
-    table: &str,
-    column: &str,
-    id: &str,
-) -> AppResult<bool> {
-    if id.trim().is_empty() {
-        return Ok(false);
-    }
-    let sql = format!("SELECT 1 FROM {table} WHERE {column} = ?1 LIMIT 1;");
-    let mut rows = conn
-        .query(&sql, vec![Value::Text(id.to_string())])
-        .await
-        .map_err(db_err)?;
-    Ok(rows.next().await.map_err(db_err)?.is_some())
-}
-
 async fn trabajador_id_from_usuario<C: Reader>(
     db: &C,
     id_usuario: Option<String>,
