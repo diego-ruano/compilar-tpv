@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "check:dead-code": "node scripts/check-dead-code.mjs",
     "generate-types": "turbo run generate-types",
     "generate-types:check": "node scripts/generate-types.mjs --check",
     "tauri": "pnpm --filter @tpv/main tauri",
@@ -43,10 +44,11 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "knip": "6.41.0",
     "turbo": "^2",
     "typescript-eslint": "^8.70.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12.0"
   }
 }

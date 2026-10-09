@@ -17,6 +17,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # RI-22: informe independiente. Las herramientas sólo proponen candidatos, y sus propios
+  # fallos aparecen como avisos; ni unos ni otros bloquean el resto de la verificación.
+  codigo-muerto:
+    name: Código muerto (informativo)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@1.93.1
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.2
+      - name: Verificar que el informe distingue hallazgos de fallos
+        run: node --test scripts/check-dead-code.test.mjs
+      - name: Knip y cargo-machete
+        continue-on-error: true
+        run: pnpm check:dead-code
+
   # Tests de Rust: dominio (validaciones puras), casos de uso (con repos falsos) y persistencia.
   # El de persistencia incluye además el ANTI-DRIFT: el esquema que producen las migraciones sobre
   # una BD vacía debe coincidir con packages/database/schema.snapshot.sql. Si alguien cambia una

@@ -39,6 +39,7 @@ packages/
 docs/                            arquitectura, decisiones, guías, estudios, pendientes
 tests/contract/                  arneses de contrato Rust ↔ worker
 scripts/                         generate-types, check-migration-registry, check-contract-coverage,
+                                 check-dead-code,
                                  tpv-license (CLI de administración), generate-license-keypair,
                                  verifactu-validar-xml
 ```
@@ -77,6 +78,7 @@ pnpm tauri build              # empaquetar
 pnpm generate-types           # regenerar DTOs y funciones de comandos desde Rust
 pnpm generate-types:check     # comprobar que los tres ficheros generados están al día
 pnpm lint                     # ESLint;   pnpm lint:rust → clippy del workspace
+pnpm check:dead-code          # Knip + cargo-machete: informe, sin borrar ni bloquear
 
 cargo build
 cargo nextest run             # los tests de Rust van SIEMPRE por nextest
@@ -259,6 +261,14 @@ cuatro reglas:
 
 Antes de añadir una quinta: «¿habría cazado un bug que hemos tenido?». Lo apagado lleva su motivo en
 `eslint.config.mjs`. Los `packages/*` quedan fuera del análisis con tipos porque no tienen `tsconfig.json`.
+
+`pnpm check:dead-code` (RI-22) informa sobre ficheros, exportaciones y dependencias TS con Knip,
+y sobre dependencias Rust con cargo-machete. Necesita Node >=22.12, `pnpm install` y
+`cargo install cargo-machete --version 0.9.2 --locked` (CI instala esa versión). Se puede limitar
+con `pnpm check:dead-code --ts` o `--rust`. No borra ni bloquea: cada candidato se confirma buscando
+consumidores, carga por configuración, macros y contratos antes de retirarlo. Un fallo del analizador
+se muestra como error de análisis, nunca como cero hallazgos. `knip.jsonc` declara las entradas reales,
+los tests de tipos y las excepciones justificadas; no excluyas carpetas de negocio ni todos los tests.
 
 ## Tests que vigilan reglas
 
