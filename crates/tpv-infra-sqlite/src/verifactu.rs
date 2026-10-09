@@ -4112,7 +4112,8 @@ impl VerifactuRepository for SqliteVerifactuRepository {
                 v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(60),
                 v_i64(row.get_value(1).map_err(db_err)?).filter(|v| *v > 0),
             )),
-            // La fila la crea `init_sync_tables`; si no está, el valor inicial de la norma es 60.
+            // La migración `0001_inicial.sql` (§16) siembra la fila con ID = 1 y espera 60.
+            // Si falta, esta lectura devuelve ese valor inicial y ningún último envío.
             None => Ok((60, None)),
         }
     }
