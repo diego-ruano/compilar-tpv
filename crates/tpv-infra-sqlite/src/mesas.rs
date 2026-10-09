@@ -17,13 +17,13 @@ use crate::db::{Db, Reader, Writer};
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, ProductoVendibleOut, ReservaMesaOut, RoomPoly, SalonInput, SalonOut, TableOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
-use crate::util::{new_id, CANAL_BARRA};
+use crate::util::new_id;
 
 pub struct SqliteMesasRepository {
     db: Arc<Db>,
@@ -293,48 +293,6 @@ fn sql_quitar_mesas(filtro: &str) -> [String; 2] {
         ),
         format!("DELETE FROM Mesas WHERE {filtro} AND NOT {historia};"),
     ]
-}
-
-/// Get-or-create del ticket de barra abierto (Local-First: id UUIDv7 explícito). Los tickets de
-/// venta rápida no tienen mesa: se identifican por `Canal='BARRA'`.
-async fn get_or_create_comanda_barra_inner<C: Writer>(
-    db: &C,
-    id_trabajador: Option<String>,
-) -> AppResult<String> {
-    if let Some(idc) = select_one_string(
-        db,
-        r#"
-        SELECT ID_Comanda
-        FROM Comandas
-        WHERE Canal=?1 AND Estado='Abierta'
-        ORDER BY datetime(Fecha_Hora_Apertura) DESC
-        LIMIT 1;
-        "#,
-        vec![Value::Text(CANAL_BARRA.to_string())],
-    )
-    .await?
-    {
-        return Ok(idc);
-    }
-
-    let id_comanda = new_id();
-    db.execute(
-        r#"
-        INSERT INTO Comandas (
-          ID_Comanda, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado, Canal
-        )
-        VALUES (?1, NULL, ?2, datetime('now','localtime'), 0, 'Abierta', ?3);
-        "#,
-        vec![
-            Value::Text(id_comanda.clone()),
-            id_trabajador.map(Value::Text).unwrap_or(Value::Null),
-            Value::Text(CANAL_BARRA.to_string()),
-        ],
-    )
-    .await
-    .map_err(db_err)?;
-
-    Ok(id_comanda)
 }
 
 async fn read_comanda_by_id<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Option<ComandaRow>> {
@@ -1018,30 +976,6 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(changed > 0)
     }
 
-    async fn cerrar_comanda(&self, id_comanda: &str, _total: Dinero) -> AppResult<()> {
-        let g = self.db.write().await;
-        let db = &g;
-        // El Total_Comanda se recalcula server-side desde Detalle_Comanda (SUM), ignorando el
-        // total que envía el cliente: evita cierres con importes arbitrarios/manipulados (MESA-05).
-        db.execute(
-            r#"
-            UPDATE Comandas
-            SET Estado = 'Pagada',
-                Total_Comanda = (
-                  SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
-                  FROM Detalle_Comanda
-                  WHERE ID_Comanda = ?1
-                ),
-                Fecha_Hora_Cierre = datetime('now','localtime')
-            WHERE ID_Comanda = ?1;
-            "#,
-            vec![Value::Text(id_comanda.to_string())],
-        )
-        .await
-        .map_err(db_err)?;
-        Ok(())
-    }
-
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>> {
         let g = self.db.read().await;
         let db = &g;
@@ -1167,185 +1101,6 @@ impl MesasRepository for SqliteMesasRepository {
         }
         } // WriteGuard se suelta aquí → la pool de lectura puede actuar
         self.get_lineas_comanda(id_comanda).await
-    }
-
-    /* ===== BARRA ===== */
-
-    async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String> {
-        let db = self.db.write().await;
-        get_or_create_comanda_barra_inner(
-            &db,
-            id_trabajador.filter(|s| !s.trim().is_empty()),
-        )
-        .await
-    }
-
-    async fn create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String> {
-        let g = self.db.write().await;
-        let db = &g;
-        let id_trabajador = id_trabajador.filter(|s| !s.trim().is_empty());
-
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<String> = async {
-            let id_comanda = new_id();
-
-            db.execute(
-                r#"
-                INSERT INTO Comandas (
-                  ID_Comanda, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado, Canal
-                )
-                VALUES (?1, NULL, ?2, datetime('now','localtime'), 0, 'Abierta', ?3);
-                "#,
-                vec![
-                    Value::Text(id_comanda.clone()),
-                    id_trabajador.map(Value::Text).unwrap_or(Value::Null),
-                    Value::Text(CANAL_BARRA.to_string()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-
-            Ok(id_comanda)
-        }
-        .await;
-
-        match res {
-            Ok(id) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(id)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
-    }
-
-    async fn list_comandas_barra(
-        &self,
-        include_pagadas: bool,
-        limit: i64,
-    ) -> AppResult<Vec<ComandaBarraListItem>> {
-        let g = self.db.read().await;
-        let db = &g;
-
-        let sql = format!(
-            r#"
-            SELECT
-              c.ID_Comanda, c.Fecha_Hora_Apertura, c.Estado,
-              (
-                SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
-                FROM Detalle_Comanda dc
-                WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-              ) AS Total_Pendiente,
-              (
-                SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
-                FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda
-              ) AS Total_Comanda,
-              (
-                SELECT COUNT(*)
-                FROM Detalle_Comanda dc
-                JOIN Productos p ON p.ID_Producto = dc.ID_Producto
-                JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-                WHERE dc.ID_Comanda = c.ID_Comanda
-                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-                  AND COALESCE(cat.Pasa_Cocina, 0) = 1
-                  AND COALESCE(dc.Estado_Cocina,'PENDIENTE') <> 'PREPARADO'
-              ) AS Pendientes_Cocina,
-              (
-                SELECT COUNT(*)
-                FROM Detalle_Comanda dc
-                WHERE dc.ID_Comanda = c.ID_Comanda AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
-              ) AS Pendientes_Pago
-            FROM Comandas c
-            WHERE c.Canal = ?1
-              {estado_filter}
-              AND EXISTS (
-                SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda
-              )
-            ORDER BY datetime(c.Fecha_Hora_Apertura) DESC, c.ID_Comanda DESC
-            LIMIT ?2;
-            "#,
-            estado_filter = if include_pagadas {
-                ""
-            } else {
-                "AND c.Estado = 'Abierta'"
-            },
-        );
-
-        let mut rows = db
-            .query(
-                &sql,
-                vec![Value::Text(CANAL_BARRA.to_string()), Value::Integer(limit)],
-            )
-            .await
-            .map_err(db_err)?;
-
-        let mut out = vec![];
-        while let Some(r) = rows.next().await.map_err(db_err)? {
-            out.push(ComandaBarraListItem {
-                id_comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
-                fecha_hora_apertura: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
-                estado: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
-                total_pendiente: v_dinero(r.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
-                total_comanda: v_dinero(r.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO),
-                pendientes_cocina: v_i64(r.get_value(5).map_err(db_err)?).unwrap_or(0),
-                pendientes_pago: v_i64(r.get_value(6).map_err(db_err)?).unwrap_or(0),
-            });
-        }
-        Ok(out)
-    }
-
-    async fn delete_comanda_barra_if_safe(&self, id_comanda: &str) -> AppResult<bool> {
-        let g = self.db.write().await;
-        let db = &g;
-
-        // Basta con que la comanda tenga UN cobro, activo o anulado (CUENTA-07):
-        // `Pagos.ID_Comanda` va con `ON DELETE CASCADE`, así que borrarla se llevaría por delante
-        // la fila del cobro anulado — que es justo la prueba que ese cambio conserva.
-        let paid = select_one_i64(
-            db,
-            "SELECT 1 FROM Pagos WHERE ID_Comanda = ?1 LIMIT 1;",
-            vec![Value::Text(id_comanda.to_string())],
-        )
-        .await?
-        .is_some();
-
-        if paid {
-            return Ok(false);
-        }
-
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
-            db.execute(
-                "DELETE FROM Detalle_Comanda WHERE ID_Comanda = ?1;",
-                vec![Value::Text(id_comanda.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-
-            let affected = db
-                .execute(
-                    "DELETE FROM Comandas WHERE ID_Comanda = ?1;",
-                    vec![Value::Text(id_comanda.to_string())],
-                )
-                .await
-                .map_err(db_err)?;
-
-            Ok(affected > 0)
-        }
-        .await;
-
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
     }
 
     /* ===== META + CATÁLOGO ===== */

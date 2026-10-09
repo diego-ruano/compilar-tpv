@@ -403,32 +403,6 @@ export function setTrabajadorIfNull(
 	};
 }
 
-export function cerrarComanda(idComanda: string, total: number): BuiltCommand {
-	return {
-		commandName: "cerrar_comanda",
-		command: {
-			type: "tenantDb.exec",
-			payload: {
-				// Total_Comanda recalculado server-side desde Detalle_Comanda (SUM),
-				// ignorando el total del cliente (MESA-05). Paridad con la Main.
-				sql: `
-					UPDATE Comandas
-					SET Estado = 'Pagada',
-						Total_Comanda = (
-							SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
-							FROM Detalle_Comanda
-							WHERE ID_Comanda = ?1
-						),
-						Fecha_Hora_Cierre = datetime('now','localtime')
-					WHERE ID_Comanda = ?1;
-				`,
-				args: [idComanda],
-			},
-		},
-		cloudPayload: { id_comanda: idComanda, total },
-	};
-}
-
 export function addLinea(
 	input: AddLineaInput,
 	estadoCocina: string | null,

@@ -1,11 +1,4 @@
 //! Adaptador HTTP del repositorio de mesas/comandas/cocina (dominio `/v1/mesas` del worker).
-//!
-//! Los métodos de **barra** (`get_or_create_comanda_barra`,
-//! `create_comanda_barra`, `list_comandas_barra`,
-//! `delete_comanda_barra_if_safe`) NO tienen endpoint en el dominio `mesas` del worker: la
-//! barra se sirve bajo `venta_rapida`. Aquí devuelven un error explícito.
-
-use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -15,7 +8,7 @@ use serde_json::{json, Value as JsonValue};
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
@@ -30,12 +23,6 @@ impl HttpMesasRepository {
     pub fn new(client: Arc<CloudClient>) -> Self {
         Self { client }
     }
-}
-
-fn barra_no_disponible(metodo: &str) -> AppError {
-    AppError::external(format!(
-        "endpoint_no_disponible_en_handy: mesas::{metodo} (la barra se sirve bajo venta_rapida)"
-    ))
 }
 
 #[async_trait]
@@ -92,17 +79,6 @@ impl MesasRepository for HttpMesasRepository {
             .await
     }
 
-    async fn cerrar_comanda(&self, id_comanda: &str, total: Dinero) -> AppResult<()> {
-        let _: JsonValue = self
-            .client
-            .put_json(
-                "/v1/mesas/comandas/cerrar",
-                &json!({ "id_comanda": id_comanda, "total": total }),
-            )
-            .await?;
-        Ok(())
-    }
-
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>> {
         self.client
             .get_json(&format!("/v1/mesas/comandas/{id_comanda}/lineas"))
@@ -125,27 +101,6 @@ impl MesasRepository for HttpMesasRepository {
         let resp: JsonValue = self.client.post_json("/v1/mesas/lineas", &body).await?;
         serde_json::from_value(resp["lineas"].clone())
             .map_err(|e| AppError::external(format!("bad_lineas: {e}")))
-    }
-
-    /* Barra — sin endpoint en el dominio `mesas` del worker (lo cubre venta_rapida) */
-    async fn get_or_create_comanda_barra(&self, _id_trabajador: Option<String>) -> AppResult<String> {
-        Err(barra_no_disponible("get_or_create_comanda_barra"))
-    }
-
-    async fn create_comanda_barra(&self, _id_trabajador: Option<String>) -> AppResult<String> {
-        Err(barra_no_disponible("create_comanda_barra"))
-    }
-
-    async fn list_comandas_barra(
-        &self,
-        _include_pagadas: bool,
-        _limit: i64,
-    ) -> AppResult<Vec<ComandaBarraListItem>> {
-        Err(barra_no_disponible("list_comandas_barra"))
-    }
-
-    async fn delete_comanda_barra_if_safe(&self, _id_comanda: &str) -> AppResult<bool> {
-        Err(barra_no_disponible("delete_comanda_barra_if_safe"))
     }
 
     /* Meta + catálogo */

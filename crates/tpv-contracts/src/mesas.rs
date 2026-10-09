@@ -108,17 +108,6 @@ pub struct MesaLineaComandaRow {
     pub pagado: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct ComandaBarraListItem {
-    pub id_comanda: String,
-    pub fecha_hora_apertura: String,
-    pub estado: String,
-    pub total_pendiente: Dinero,
-    pub total_comanda: Dinero,
-    pub pendientes_cocina: i64,
-    pub pendientes_pago: i64,
-}
-
 /* =========================================================
    META MESAS
 ========================================================= */
@@ -257,12 +246,6 @@ pub struct MesasComandaSetTrabajadorInput {
     pub id_trabajador: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct MesasCerrarComandaInput {
-    pub id_comanda: String,
-    pub total: Dinero,
-}
-
 /// RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasAddLineaComandaInput {
@@ -273,31 +256,6 @@ pub struct MesasAddLineaComandaInput {
     pub id_usuario: Option<String>,
     #[serde(default)]
     pub id_trabajador: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct MesasGetOrCreateComandaBarraInput {
-    #[serde(default)]
-    pub id_trabajador: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct MesasCreateComandaBarraInput {
-    #[serde(default)]
-    pub id_trabajador: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct MesasListComandasBarraArgs {
-    #[serde(default)]
-    pub include_pagadas: Option<bool>,
-    #[serde(default)]
-    pub limit: Option<i64>,
-}
-
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct MesasDeleteComandaBarraIfSafeInput {
-    pub id_comanda: String,
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]

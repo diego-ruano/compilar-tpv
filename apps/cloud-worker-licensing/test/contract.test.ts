@@ -69,7 +69,6 @@ import {
 import {
 	abrirComanda,
 	addLinea as addLineaMesa,
-	cerrarComanda,
 	cobrarDetalles,
 	deleteDetalle,
 	kitchenSetLineState,
@@ -215,8 +214,6 @@ import casoMesaAbrir from "../../../tests/contract/casos/mesas/abrir_comanda.jso
 import goldenMesaAbrir from "../../../tests/contract/golden/mesas/abrir_comanda.json";
 import casoMesaSetTrab from "../../../tests/contract/casos/mesas/set_trabajador_if_null.json";
 import goldenMesaSetTrab from "../../../tests/contract/golden/mesas/set_trabajador_if_null.json";
-import casoMesaCerrar from "../../../tests/contract/casos/mesas/cerrar_comanda.json";
-import goldenMesaCerrar from "../../../tests/contract/golden/mesas/cerrar_comanda.json";
 import casoMesaAddLinea from "../../../tests/contract/casos/mesas/add_linea.json";
 import goldenMesaAddLinea from "../../../tests/contract/golden/mesas/add_linea.json";
 import casoMesaAddLineaSinPrecio from "../../../tests/contract/casos/mesas/add_linea_sin_precio.json";
@@ -343,7 +340,6 @@ const CASOS = [
 	{ nombre: "mesas_save_layout_archiva", caso: casoMesaSaveLayoutArchiva, golden: goldenMesaSaveLayoutArchiva },
 	{ nombre: "mesas_abrir_comanda", caso: casoMesaAbrir, golden: goldenMesaAbrir },
 	{ nombre: "mesas_set_trabajador_if_null", caso: casoMesaSetTrab, golden: goldenMesaSetTrab },
-	{ nombre: "mesas_cerrar_comanda", caso: casoMesaCerrar, golden: goldenMesaCerrar },
 	{ nombre: "mesas_add_linea", caso: casoMesaAddLinea, golden: goldenMesaAddLinea },
 	{ nombre: "mesas_add_linea_sin_precio", caso: casoMesaAddLineaSinPrecio, golden: goldenMesaAddLineaSinPrecio },
 	{ nombre: "mesas_remove_one_pending", caso: casoMesaRemoveOne, golden: goldenMesaRemoveOne },
@@ -806,10 +802,6 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					caso.entrada.id_trabajador_o_usuario,
 				),
 			);
-			return;
-		}
-		case "mesas.cerrar_comanda": {
-			aplicar(hub, sql, cerrarComanda(caso.entrada.id_comanda, caso.entrada.total));
 			return;
 		}
 		case "mesas.add_linea": {

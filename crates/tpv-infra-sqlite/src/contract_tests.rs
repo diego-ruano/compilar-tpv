@@ -319,7 +319,6 @@ casos_de_contrato! {
     mesas__set_reserva_estado,
     mesas__abrir_comanda,
     mesas__set_trabajador_if_null,
-    mesas__cerrar_comanda,
     mesas__add_linea,
     mesas__add_linea_sin_precio,
     mesas__remove_one_pending_detalle,
@@ -788,12 +787,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             )
             .await
             .expect("set trabajador if null");
-        }
-        "mesas.cerrar_comanda" => {
-            let repo = SqliteMesasRepository::new(db.clone());
-            repo.cerrar_comanda(&s(&e["id_comanda"]), dinero(&e["total"]).unwrap())
-                .await
-                .expect("cerrar comanda");
         }
         "mesas.add_linea" => {
             let repo = SqliteMesasRepository::new(db.clone());

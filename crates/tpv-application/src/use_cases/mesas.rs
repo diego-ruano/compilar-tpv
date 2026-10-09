@@ -4,12 +4,11 @@
 use std::collections::HashMap;
 
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCerrarComandaInput,
-    MesasCobrarDetallesInput, MesasComandaSetTrabajadorInput,
-    MesasCreateComandaBarraInput, MesasDeleteComandaBarraIfSafeInput, MesasDeleteDetalleInput,
-    MesasGetOrCreateComandaBarraInput, MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
-    MesasKitchenSetLineStateInput, MesasListComandasBarraArgs, MesasRemoveOnePendingDetalleInput,
+    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetTrabajadorInput,
+    MesasDeleteDetalleInput,
+    MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
+    MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
     MesasSaveLayoutInput, MesasSearchProductosArgs, MesasSetReservaEstadoInput,
     MesasUpdateDetalleNotaInput, ProductoVendibleOut, SalonOut,
 };
@@ -91,19 +90,6 @@ pub async fn comanda_set_trabajador_if_null(
         .await
 }
 
-pub async fn cerrar_comanda(
-    repo: &dyn MesasRepository,
-    input: MesasCerrarComandaInput,
-) -> AppResult<()> {
-    if input.id_comanda.trim().is_empty() {
-        return Err(AppError::validation("id_comanda inválido"));
-    }
-    if input.total.es_negativo() {
-        return Err(AppError::validation("total inválido"));
-    }
-    repo.cerrar_comanda(&input.id_comanda, input.total).await
-}
-
 pub async fn get_lineas_comanda(
     repo: &dyn MesasRepository,
     args: MesasIdComandaArgs,
@@ -128,42 +114,6 @@ pub async fn add_linea_comanda(
     let id = opt_id(input.id_usuario.or(input.id_trabajador));
     repo.add_linea_comanda(&input.id_comanda, &input.id_producto, input.cantidad, id)
         .await
-}
-
-/* Barra */
-
-pub async fn get_or_create_comanda_barra(
-    repo: &dyn MesasRepository,
-    input: MesasGetOrCreateComandaBarraInput,
-) -> AppResult<String> {
-    repo.get_or_create_comanda_barra(opt_id(input.id_trabajador))
-        .await
-}
-
-pub async fn create_comanda_barra(
-    repo: &dyn MesasRepository,
-    input: MesasCreateComandaBarraInput,
-) -> AppResult<String> {
-    repo.create_comanda_barra(opt_id(input.id_trabajador)).await
-}
-
-pub async fn list_comandas_barra(
-    repo: &dyn MesasRepository,
-    args: MesasListComandasBarraArgs,
-) -> AppResult<Vec<ComandaBarraListItem>> {
-    let include_pagadas = args.include_pagadas.unwrap_or(false);
-    let limit = args.limit.unwrap_or(50).clamp(1, 200);
-    repo.list_comandas_barra(include_pagadas, limit).await
-}
-
-pub async fn delete_comanda_barra_if_safe(
-    repo: &dyn MesasRepository,
-    input: MesasDeleteComandaBarraIfSafeInput,
-) -> AppResult<bool> {
-    if input.id_comanda.trim().is_empty() {
-        return Ok(false);
-    }
-    repo.delete_comanda_barra_if_safe(&input.id_comanda).await
 }
 
 /* Meta + catálogo */

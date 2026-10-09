@@ -111,13 +111,6 @@ export const setTrabajadorSchema = z
 			optIdStr(v.id_trabajador) ?? optIdStr(v.id_usuario),
 	}));
 
-export const cerrarComandaSchema = z.object({
-	id_comanda: idField("id_comanda"),
-	// Se ignora al cerrar (Total_Comanda se re-deriva del SQL, MESA-05), pero es dinero y entra
-	// como todo el dinero de la API: céntimos enteros. Aceptaba decimales y texto (RI-65).
-	total: zDineroNoNegativo,
-});
-
 export const addLineaSchema = z
 	.object({
 		id_comanda: idField("id_comanda"),

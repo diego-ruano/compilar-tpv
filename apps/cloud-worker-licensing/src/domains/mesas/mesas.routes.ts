@@ -80,12 +80,6 @@ mesasRoutes.put("/comandas/trabajador-if-null", cuerpo(S.setTrabajadorSchema), a
 	return c.json(true);
 });
 
-mesasRoutes.put("/comandas/cerrar", cuerpo(S.cerrarComandaSchema), async (c) => {
-	const datos = c.req.valid("json");
-	await apply(c, cmd.cerrarComanda(datos.id_comanda, datos.total));
-	return c.json({ ok: true });
-});
-
 mesasRoutes.get("/comandas/:id/lineas", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_comanda invalido");

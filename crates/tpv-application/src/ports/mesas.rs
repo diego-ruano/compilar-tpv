@@ -1,12 +1,11 @@
 //! Puerto de persistencia de mesas / salón / comandas / cocina.
 
-use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
 
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
@@ -30,7 +29,6 @@ pub trait MesasRepository: Send + Sync {
         id_comanda: &str,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<bool>;
-    async fn cerrar_comanda(&self, id_comanda: &str, total: Dinero) -> AppResult<()>;
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>>;
     async fn add_linea_comanda(
         &self,
@@ -39,17 +37,6 @@ pub trait MesasRepository: Send + Sync {
         cantidad: f64,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<Vec<MesaLineaComandaRow>>;
-
-    /* Barra */
-    async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>)
-        -> AppResult<String>;
-    async fn create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String>;
-    async fn list_comandas_barra(
-        &self,
-        include_pagadas: bool,
-        limit: i64,
-    ) -> AppResult<Vec<ComandaBarraListItem>>;
-    async fn delete_comanda_barra_if_safe(&self, id_comanda: &str) -> AppResult<bool>;
 
     /* Meta + catálogo */
     async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>>;

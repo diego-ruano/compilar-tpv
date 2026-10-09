@@ -631,16 +631,6 @@ export type CodigoEnviado = {
 	sin_cambios?: boolean,
 };
 
-export type ComandaBarraListItem = {
-	id_comanda: string,
-	fecha_hora_apertura: string,
-	estado: string,
-	total_pendiente: Dinero,
-	total_comanda: Dinero,
-	pendientes_cocina: number,
-	pendientes_pago: number,
-};
-
 export type ComandaBarraRow = {
 	ID_Comanda: string,
 	Fecha_Hora_Apertura: string,
@@ -1755,11 +1745,6 @@ export type MesasAddLineaComandaInput = {
 	id_trabajador?: string | null,
 };
 
-export type MesasCerrarComandaInput = {
-	id_comanda: string,
-	total: Dinero,
-};
-
 /**
  *  REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
  *
@@ -1791,20 +1776,8 @@ export type MesasComandaSetTrabajadorInput = {
 	id_trabajador?: string | null,
 };
 
-export type MesasCreateComandaBarraInput = {
-	id_trabajador?: string | null,
-};
-
-export type MesasDeleteComandaBarraIfSafeInput = {
-	id_comanda: string,
-};
-
 export type MesasDeleteDetalleInput = {
 	id_detalle: string,
-};
-
-export type MesasGetOrCreateComandaBarraInput = {
-	id_trabajador?: string | null,
 };
 
 export type MesasIdCategoriaArgs = {
@@ -1823,11 +1796,6 @@ export type MesasKitchenSetLineStateInput = {
 	id_detalle: string,
 	id_usuario_cocinero: string,
 	estado: string,
-};
-
-export type MesasListComandasBarraArgs = {
-	include_pagadas?: boolean | null,
-	limit?: number | null,
 };
 
 export type MesasRemoveOnePendingDetalleInput = {
