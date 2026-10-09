@@ -1,7 +1,7 @@
-//! Adaptador SQLite del repositorio de **mesas / salón / comandas / cocina**. Local-First:
-//! sin Applied_Operations, sin Outbox, sin idempotencia por op_id ni ramas remote_id.
-//! Todo el SQL del antiguo `mesas.rs` se reubica aquí; las creaciones usan autoincrement
-//! local (last_insert_rowid) en lugar de ids forzados desde remoto.
+//! Adaptador SQLite del repositorio de **mesas / salón / comandas / cocina**.
+//! Las altas generan UUIDv7 con `new_id()` antes del INSERT. Las escrituras de negocio pasan
+//! por `WriteGuard::execute`, que captura el SQL y sus parámetros en el outbox para replicarlos.
+//! `Applied_Operations` es el control idempotente del worker; la Main usa `_Sync_Applied_Ops`.
 
 use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
