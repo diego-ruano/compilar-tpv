@@ -72,6 +72,13 @@ servicio Android en segundo plano: la conexión se recupera al volver si el sist
 
 ### Escritor único y captura
 
+La ejecución local de SQLite pertenece a cinco hilos propios: uno para el escritor y cuatro para
+las conexiones de lectura (RI-16). Tokio espera sus respuestas; nunca ejecuta SQL ni avanza cursores
+nativos, tampoco por `raw()`. Cada ejecutor admite hasta 32 trabajos pendientes y entrega filas
+copiadas en lotes de 64. Una cancelación no interrumpe SQL ya iniciado: la limpieza del guard se
+encola antes del siguiente escritor. Para sustituir el fichero se espera el cierre confirmado de
+los ejecutores. Abrir, migrar y comprobar copias efímeras también ocurre fuera del runtime async.
+
 - **Toda escritura local de negocio pasa por `WriteGuard::execute`**, que la captura en el outbox. Qué
   es escritura lo decide la cabeza de la sentencia **sin los comentarios de delante**
   (`sin_comentarios_iniciales` → `is_write_sql`), y lo que sube va sin ellos. Un `WITH … INSERT` no se

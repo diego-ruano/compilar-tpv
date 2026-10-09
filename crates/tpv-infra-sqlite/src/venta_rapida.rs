@@ -1162,7 +1162,7 @@ mod tests_cobro_repetido {
     //! pudo cobrar» y devolvía las líneas a pendiente, con el cobro, la factura y el stock guardados.
 
     use super::*;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
 
     const ID: &str = "0192f7a4-3b1c-7d2e-8f00-123456789abc";
 

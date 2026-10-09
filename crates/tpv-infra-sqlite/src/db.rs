@@ -22,7 +22,8 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
-use libsql::{Builder, Connection, Database, Error as LibsqlError, Rows, Value};
+use libsql::{Builder, Database, Error as LibsqlError, Value};
+use crate::ejecutor::{Connection, Rows};
 use serde_json::json;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
@@ -366,7 +367,7 @@ async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), Libsq
 /// DEVUELVEN una fila con el valor resultante incluso al fijarlas, y enrutarlas por la vía de
 /// `execute` dispara `Execute returned rows` en libsql. `query` acepta sentencias que devuelven
 /// filas (las descartamos) y también las que no.
-pub(crate) async fn tune(conn: &Connection) -> Result<(), LibsqlError> {
+pub(crate) async fn tune(conn: &libsql::Connection) -> Result<(), LibsqlError> {
     for pragma in [
         "PRAGMA journal_mode = WAL;",
         "PRAGMA busy_timeout = 5000;",
@@ -545,6 +546,13 @@ impl<'a> WriteGuard<'a> {
     }
 }
 
+impl Drop for WriteGuard<'_> {
+    fn drop(&mut self) {
+        // RI-16: se encola antes de liberar el escritor, incluso tras cancelación o pánico.
+        self.conn.revertir_al_soltar();
+    }
+}
+
 impl<'a> Reader for WriteGuard<'a> {
     fn query(
         &self,
@@ -710,10 +718,16 @@ impl Db {
     /// las conexiones afinadas: WAL, etc.). El seed (admin inicial) lo hace el llamador con un
     /// `write()` guard tras abrir.
     pub async fn open(path: &str) -> Result<Arc<Db>, Box<dyn std::error::Error + Send + Sync>> {
+        let path = path.to_owned();
+        let rt = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || rt.block_on(Self::abrir(&path))).await?
+    }
+
+    async fn abrir(path: &str) -> Result<Arc<Db>, Box<dyn std::error::Error + Send + Sync>> {
         let database = Builder::new_local(path).build().await?;
 
         // Conexión de escritura: afinar, construir el esquema y crear tablas de control.
-        let write_conn = Arc::new(database.connect()?);
+        let write_conn = database.connect()?;
         tune(&write_conn).await?;
 
         // Esquema = migraciones embebidas (ya no hay schema.sql). Construye desde cero en BDs
@@ -727,15 +741,15 @@ impl Db {
 
         // Pool de lectura.
         let mut read_conns = Vec::with_capacity(READ_POOL_SIZE);
-        for _ in 0..READ_POOL_SIZE {
-            let c = Arc::new(database.connect()?);
+        for i in 0..READ_POOL_SIZE {
+            let c = database.connect()?;
             tune(&c).await?;
-            read_conns.push(c);
+            read_conns.push(Arc::new(Connection::nueva(c, &format!("tpv-sql-lectura-{i}"))?));
         }
 
         Ok(Arc::new(Db {
             write: WriteConn {
-                conn: write_conn,
+                conn: Arc::new(Connection::nueva(write_conn, "tpv-sql-escritor")?),
                 lock: Mutex::new(()),
             },
             reads: Arc::new(ReadPool::new(read_conns)),
@@ -787,6 +801,17 @@ impl Db {
         self.reads.acquire().await
     }
 
+    /// Cierre confirmado para intercambiar el fichero en Windows. El shell impide crear nuevos
+    /// repositorios antes de llamarlo. Espera a los préstamos y a las operaciones ya admitidas.
+    pub async fn cerrar(&self) -> Result<(), LibsqlError> {
+        let _writer = self.write.lock.lock().await;
+        let _lecturas = self.reads.sem.clone().acquire_many_owned(READ_POOL_SIZE as u32).await
+            .map_err(|_| LibsqlError::Misuse("El pool de lectura se ha cerrado".into()))?;
+        let conns = self.reads.free.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        for c in conns { c.cerrar().await?; }
+        self.write.conn.cerrar().await
+    }
+
     /// Toma acceso EXCLUSIVO a la conexión de escritura (espera a que termine la operación en
     /// curso). Mantén el guard vivo durante toda la transacción.
     pub async fn write(&self) -> WriteGuard<'_> {
@@ -798,8 +823,8 @@ impl Db {
         // transaction". `WriteGuard::Drop` no puede hacer rollback (es síncrono), así que lo
         // saneamos aquí: si no estamos en autocommit, hay una transacción colgada → la abortamos
         // para arrancar limpios.
-        if !self.write.conn.is_autocommit() {
-            let _ = self.write.conn.execute_batch("ROLLBACK;").await;
+        if let Err(e) = self.write.conn.sanear().await {
+            tracing::error!(error = %e, "No se pudo sanear el escritor de SQLite");
         }
         WriteGuard {
             conn: &self.write.conn,
@@ -818,6 +843,44 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn una_consulta_larga_y_sus_filas_no_bloquean_tokio() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let r = db.read().await;
+        let sql = "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<3000000) SELECT SUM(x) FROM n";
+        let consulta = r.query(sql, ());
+        tokio::pin!(consulta);
+        tokio::select! {
+            biased;
+            _ = &mut consulta => panic!("la consulta terminó antes de que Tokio pudiera atender su temporizador"),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+        }
+        let mut rows = consulta.await.unwrap();
+        assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 4_500_001_500_000);
+
+        // La primera fila es trivial; la segunda requiere SQLite al avanzar el cursor.
+        let mut rows = r.query(&format!("SELECT 0 UNION ALL SELECT * FROM ({sql})"), ()).await.unwrap();
+        let siguiente = rows.next();
+        tokio::pin!(siguiente);
+        tokio::select! {
+            biased;
+            _ = &mut siguiente => panic!("next ejecutó la consulta larga en Tokio"),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {}
+        }
+        assert_eq!(siguiente.await.unwrap().unwrap().get::<i64>(0).unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn las_filas_materializadas_conservan_sus_valores_y_propagan_errores() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let r = db.read().await;
+        let mut filas = r.query("WITH n(x) AS (VALUES(1),(2),(3),(4)) SELECT CASE WHEN x=3 THEN abs(-9223372036854775808) ELSE x END FROM n", ()).await.unwrap();
+        let primera = filas.next().await.unwrap().unwrap();
+        assert_eq!(filas.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 2);
+        assert_eq!(primera.get::<i64>(0).unwrap(), 1, "avanzar no altera una fila ya entregada");
+        assert!(filas.next().await.is_err(), "la estadística debe fallar, no devolver datos parciales");
+    }
 
     #[tokio::test]
     async fn un_pool_envenenado_conserva_conexiones_y_permisos() {

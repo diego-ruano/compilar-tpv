@@ -1133,7 +1133,7 @@ mod tests_setup_inicial {
     //! es la otra mitad del arreglo; ésta es la que queda.
 
     use super::*;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
 
     const ADMIN: &str = "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado, Requiere_Setup)
          VALUES ('admin', (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Administrador'),
@@ -1239,7 +1239,7 @@ mod tests_restablecer_pin {
     //! lo recupera siga bloqueado por los intentos fallidos que le trajeron hasta aquí.
 
     use super::*;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
 
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
         let dir = crate::test_temp::dir_temporal("login_pin");

@@ -223,6 +223,8 @@ pub async fn recovery_restore_backup(
             )
             .into());
         }
+        // RI-16: los hilos SQL confirman que han cerrado sus conexiones antes del rename.
+        db.cerrar().await.map_err(|e| AppError::repository(e.to_string()))?;
         drop(db);
     }
 

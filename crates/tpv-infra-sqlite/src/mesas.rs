@@ -2002,7 +2002,7 @@ mod tests_snapshot_de_la_linea {
 
     use super::*;
     use crate::db::Db;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
 
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
         let dir = crate::test_temp::dir_temporal("iva_linea");

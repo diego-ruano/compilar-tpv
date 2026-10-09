@@ -1324,7 +1324,7 @@ mod tests_comunes {
 
     use super::*;
     use crate::db::Db;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
 
     pub async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
         let dir = crate::test_temp::dir_temporal("cuentas");

@@ -14,7 +14,8 @@
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
-use libsql::{Builder, Connection, Value};
+use libsql::{Builder, Value};
+use crate::ejecutor::Connection;
 use tpv_application::error::{AppError, AppResult};
 use tpv_contracts::errors::ErrorCode;
 use tpv_contracts::recovery::{LocalBackupInfo, RecoveryState, RecoveryStatus};
@@ -416,8 +417,8 @@ async fn validar_copia(path: &Path) -> AppResult<()> {
         return Err(corrupta("La copia no superó la comprobación de integridad"));
     }
 
-    let users = scalar_i64(&conn, "SELECT COUNT(*) FROM Usuarios;")
-        .await
+    let mut usuarios = conn.query("SELECT COUNT(*) FROM Usuarios;", ()).await.map_err(db_err)?;
+    let users = usuarios.next().await.map_err(db_err)?.ok_or_else(|| corrupta("Sin respuesta de usuarios"))?.get::<i64>(0)
         .map_err(|e| corrupta(format!("La copia no contiene el esquema esperado: {e}")))?;
     if users == 0 {
         return Err(corrupta("La copia no contiene ningún usuario"));
@@ -826,6 +827,7 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf
             let w = db.write().await;
             let _ = w.raw().query("PRAGMA wal_checkpoint(TRUNCATE);", ()).await;
         }
+        db.cerrar().await.map_err(db_err)?;
         drop(db);
         validate_backup(&prepared).await
     }

@@ -14,7 +14,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::{Connection, Value};
+use libsql::Value;
+use crate::ejecutor::Connection;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
@@ -1412,7 +1413,7 @@ mod tests_encoladas {
 
     use super::*;
     use crate::db::Db;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
     use tpv_application::ports::sync::SyncRepository;
     use tpv_contracts::sync::{SqlStatement, SyncChange};
 
@@ -1763,7 +1764,7 @@ mod tests_bootstrap {
 
     use super::*;
     use crate::db::Db;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
     use serde_json::json;
     use tpv_application::ports::sync::SyncRepository;
     use tpv_contracts::sync::{BootstrapSnapshot, BootstrapTabla};
@@ -2537,7 +2538,8 @@ mod tests_reparacion {
 
     use std::sync::Arc;
 
-    use libsql::{Connection, Value};
+    use libsql::Value;
+use crate::ejecutor::Connection;
     use tpv_contracts::sync::SqlStatement;
 
     use super::*;

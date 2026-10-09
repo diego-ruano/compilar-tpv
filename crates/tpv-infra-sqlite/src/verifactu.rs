@@ -1910,7 +1910,7 @@ async fn estado_de_la_cadena<C: Reader>(conn: &C) -> AppResult<EstadoDeLaCadena>
         .await
         .map_err(db_err)?;
 
-    let t = |row: &libsql::Row, i: i32| -> AppResult<String> {
+    let t = |row: &crate::ejecutor::Row, i: i32| -> AppResult<String> {
         Ok(v_string(row.get_value(i).map_err(db_err)?).unwrap_or_default())
     };
 

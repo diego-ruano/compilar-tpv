@@ -35,6 +35,7 @@ pub mod util;
 // Manejo de conexiones: escritor único serializado + pool de lectura (WAL).
 // Incluye la captura de escrituras al outbox (antes en `recording.rs`).
 pub mod db;
+pub mod ejecutor;
 
 // Conexión / inicialización de la BD local (schema, migraciones, seed):
 pub mod connection;

@@ -145,24 +145,6 @@ caracteres españoles del PDF y el generador compartido están resueltos.
 
 ## 15. Rust: idioma, runtime y estructura
 
-<a id="ri-16"></a>
-### RI-16 🟡 · libsql local bloquea hilos del runtime async
-
-**Dónde:** [`db.rs`](../../crates/tpv-infra-sqlite/src/db.rs) y todos los repositorios.
-
-La API de `libsql` para ficheros locales es `async` en la firma pero **síncrona por dentro**: cada
-`query`/`execute`/`next()` ejecuta SQLite en el hilo que lo llama. Los repositorios se llaman desde
-comandos Tauri que corren en el runtime multihilo de tokio, así que una consulta larga **bloquea un
-hilo del runtime** (no cede). Para lo corriente da igual; para lo largo no:
-
-- La restauración desde la nube y las páginas del backfill.
-- Estadísticas de un año, y la verificación diaria contra la nube.
-
-Con pocos núcleos (un TPV de gama baja tiene 2–4), dos de estas a la vez dejan al IPC sin hilos y
-la interfaz se congela. Sabéis hacerlo —impresión, imágenes, AEAT y las copias locales
-(`recovery::en_hilo_aparte`) ya van por `spawn_blocking`—: aplicar lo mismo a esas operaciones, o
-dedicar un hilo propio al escritor (que además encaja con el escritor único).
-
 <a id="ri-32"></a>
 ### RI-32 🔵 · Transacciones escritas a mano y helpers duplicados
 

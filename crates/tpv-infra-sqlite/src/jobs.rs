@@ -36,7 +36,7 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 /// Columnas en el mismo orden en todas las consultas, para leer por índice sin sorpresas.
 const COLS: &str = "Nombre, Last_Run_Ms, Last_Ok_Ms, Last_Error, Fallos";
 
-fn fila_a_estado(row: &libsql::Row) -> AppResult<(String, EstadoJob)> {
+fn fila_a_estado(row: &crate::ejecutor::Row) -> AppResult<(String, EstadoJob)> {
     let nombre = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
     Ok((
         nombre,

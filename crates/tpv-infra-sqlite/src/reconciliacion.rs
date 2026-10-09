@@ -241,7 +241,7 @@ mod tests {
     }
 
     use super::*;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
 
     /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
     /// se compara son centimos.

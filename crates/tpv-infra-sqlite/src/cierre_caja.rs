@@ -8,7 +8,8 @@ use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::{Row, Value};
+use libsql::Value;
+use crate::ejecutor::Row;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cierre_caja::{
@@ -817,7 +818,7 @@ mod tests {
 
     use super::*;
     use crate::cuentas::SqliteCuentasRepository;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
     use tpv_application::use_cases::{cierre_caja as cierre_uc, rectificacion_caja as rect};
     use tpv_contracts::cierre_caja::CambioCajaInput;
     use tpv_contracts::cuentas::CreateGastoInput;

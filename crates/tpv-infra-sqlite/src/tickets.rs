@@ -327,7 +327,7 @@ mod tests {
     //! hasta el nombre del plato, y la copia tiene que seguir diciendo lo que se cobró.
 
     use super::*;
-    use libsql::Connection;
+    use crate::ejecutor::Connection;
 
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
         let dir = crate::test_temp::dir_temporal("tickets");

@@ -23,7 +23,8 @@
 //! `Command_Name`; si una acaba apartada, no se genera otra. Sin eso, una fila que la nube se niega
 //! a aceptar produciría una reparación nueva por cada intento, para siempre.
 
-use libsql::{Connection, Error as LibsqlError, Value};
+use libsql::{Error as LibsqlError, Value};
+use crate::ejecutor::Connection;
 use serde_json::json;
 
 use tpv_contracts::sync::SqlStatement;

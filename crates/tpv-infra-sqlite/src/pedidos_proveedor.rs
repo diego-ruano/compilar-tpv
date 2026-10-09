@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use libsql::{Row, Value};
+use libsql::Value;
+use crate::ejecutor::Row;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::pedidos_proveedor::PedidoProveedorRepository;

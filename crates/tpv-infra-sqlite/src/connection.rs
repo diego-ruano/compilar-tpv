@@ -9,7 +9,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use libsql::{Builder, Connection, Value};
+use libsql::{Builder, Value};
+use crate::ejecutor::Connection;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_domain::login::hash_pin;
@@ -144,6 +145,12 @@ async fn seed_admin_if_empty(conn: &Connection, aprovisionado: bool) -> AppResul
 /// Es best-effort: si la copia falla, se avisa por log pero NO se bloquea el arranque (mejor que
 /// dejar la app sin abrir). La comprobación usa una conexión efímera que se cierra antes de copiar.
 async fn backup_if_migration_pending(db_path: &Path) -> AppResult<()> {
+    let path = db_path.to_owned();
+    let rt = tokio::runtime::Handle::current();
+    tokio::task::spawn_blocking(move || rt.block_on(backup_antes_de_migrar(&path))).await.map_err(db_err)?
+}
+
+async fn backup_antes_de_migrar(db_path: &Path) -> AppResult<()> {
     // Instalación nueva: no hay nada que respaldar (la creará `Db::open`).
     if !db_path.exists() {
         return Ok(());
