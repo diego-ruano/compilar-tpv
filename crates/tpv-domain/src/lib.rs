@@ -5,8 +5,8 @@
 //! Contiene exclusivamente entidades puras, value objects y reglas de negocio.
 //! No depende de infraestructura (SQLite, red, sistema de archivos) ni de Tauri.
 //!
-//! Durante la migración, cada módulo de negocio (mesas, venta_rapida, inventario,
-//! caja, etc.) irá publicando aquí sus structs y validaciones puras.
+//! Cada módulo de negocio (mesas, venta rápida, inventario, caja…) publica sus
+//! entidades y validaciones puras.
 
 pub mod cierre_caja;
 pub mod clientes;
@@ -31,11 +31,5 @@ pub mod trabajadores;
 pub mod venta_rapida;
 /// Veri*factu (FISCAL-01): huella, importes, QR, NIF. Puro y con los vectores oficiales.
 pub mod verifactu;
-
-// Los submódulos de dominio se irán añadiendo módulo por módulo:
-// pub mod mesas;
-// pub mod venta_rapida;
-// pub mod inventario;
-// ...
 
 pub mod permisos;
