@@ -43,6 +43,18 @@ Proyecto Android: `apps/tpv-main/src-tauri/gen/android/` (`applicationId` `com.a
 `minSdk` 24, `compileSdk`/`targetSdk` 36, ABIs `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`). No hay job de
 Android en CI.
 
+## Conectividad al probar Main y Handy
+
+La Main intenta conectar automáticamente cuando está en modo `tpv`, tiene licencia aprovisionada
+y una base lista o en reconciliación. No hay que elegir «online» en la interfaz. La palanca técnica
+`connectivity: "off"` de `device_config.json` puede pausar esa conexión; si el campo falta, vale
+`auto`. Los valores antiguos `online` y `offline` también se interpretan como `auto`.
+
+La Handy emparejada accede al negocio por REST y recibe avisos por su servicio nativo de WebSocket.
+El transporte de ambos dispositivos vive en Rust; la UI observa los estados y refresca sus datos.
+Las condiciones de conexión y el papel de cada servicio están en
+[sincronizacion.md](../arquitectura/sincronizacion.md#conectividad).
+
 ## Preparar la máquina (una vez)
 
 - Android SDK y NDK (probado con NDK `29.0.13846066`) y el JDK de Android Studio (JBR).

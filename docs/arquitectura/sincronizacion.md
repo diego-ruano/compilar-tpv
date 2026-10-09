@@ -120,12 +120,17 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 
 ### Conectividad
 
-- **No hay ajuste online/offline.** La Main abre el WebSocket siempre que sea el dispositivo `tpv`. El
-  estado lo publica `useMainSocket` en `useEstadoSync` y lo pinta Configuración → Conectividad:
-  `conectado`, `reintentando`, `sin_identidad`, `rechazado` o `pausada`.
+- **No hay ajuste online/offline en la interfaz.** El motor nativo `src-tauri/src/replicacion.rs`
+  intenta conectar automáticamente en modo `tpv`, con licencia aprovisionada y la base lista o en
+  reconciliación, salvo que la palanca técnica esté en `off`. Publica `sync:estado`; la UI lo observa
+  con `iniciarSocketMain`, actualiza `useEstadoSync` y lo pinta en Configuración → Conectividad.
+  Entre sus estados están `conectando`, `conectado`, `reintentando`, `sin_identidad`, `rechazado` y
+  `pausada`. Desmontar la UI no detiene la réplica nativa.
 - **Palanca de emergencia sin interfaz**: `connectivity: "auto" | "off"` en `device_config.json`
-  (`get/set_connection_mode`). La captura del outbox no depende de ella. Para todos los equipos a la
-  vez están los interruptores remotos ([jobs-e-interruptores.md](jobs-e-interruptores.md)).
+  (`get/set_connection_mode`), con `auto` por defecto. Los antiguos valores `online`/`offline` y
+  cualquier valor desconocido se leen como ausencia del campo, que también implica `auto`.
+  La captura del outbox no depende de ella. Para todos los equipos a la vez están los interruptores
+  remotos ([jobs-e-interruptores.md](jobs-e-interruptores.md)).
 - **La autoridad es el worker.** El cliente no decide si puede conectarse: lo intenta y obedece. La
   licencia se comprueba en **todas** las rutas autenticadas (`tenantAuth` → `lib/licenciaEnUso.ts`,
   caché de 60 s), y se veta al rol `tpv` que ya no sea el `main_device_id`. No puede haber ninguna ruta
