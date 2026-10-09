@@ -1,7 +1,6 @@
 // src/domains/mesas/mesas.schemas.ts
 
 import { z } from "zod";
-import { zDineroNoNegativo } from "../../lib/dinero";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -134,10 +133,6 @@ export const addLineaSchema = z
 export const removeOneDetalleSchema = z.object({
 	id_comanda: idField("id_comanda"),
 	id_producto: idField("id_producto"),
-});
-
-export const deleteDetalleSchema = z.object({
-	id_detalle: idField("id_detalle"),
 });
 
 export const updateNotaSchema = z

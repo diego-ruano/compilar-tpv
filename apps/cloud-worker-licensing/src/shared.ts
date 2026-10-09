@@ -40,21 +40,6 @@ export type TenantInfo = {
 	country?: string;
 };
 
-export type ActivateRequest = {
-	activationKey: string;
-	deviceId: string;
-	devicePubKey: string;
-	instanceName?: string;
-	tenantInfo?: TenantInfo;
-	/** Código de 6 dígitos del email. Solo necesario al mover la licencia a otro Main. */
-	deviceChangeCode?: string;
-	/**
-	 * RI-52: sólo sumar tiempo (canje desde Configuración → Licencia). Con él, todo lo que no sea
-	 * canjear una clave sin estrenar en el equipo que ya tiene licencia se rechaza sin tocar nada.
-	 */
-	soloSumar?: boolean;
-};
-
 export type ActivateResponse = {
 	ok: true;
 	tenantId: string;
@@ -104,19 +89,4 @@ export type SignedLicenseAssertion = {
 	clientTs: number;
 	/** Firma ed25519 en base64 del mensaje canónico. */
 	sig: string;
-};
-
-export type StatusResponse = {
-	ok: true;
-	assertion: SignedLicenseAssertion;
-	/** Token de sesión renovado (elimina el muro de los 30 días). Ausente si no tocaba renovar. */
-	token?: string;
-	/** Datos no críticos para la UI (Configuración → Licencia). No van firmados. */
-	info: {
-		keyShort: string | null;
-		customerEmail: string;
-		termMonths: number;
-		origin: LicenseOrigin;
-	};
-	serverTime: number;
 };

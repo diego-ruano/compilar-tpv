@@ -345,23 +345,6 @@ export async function datosDeLinea(
 	};
 }
 
-export async function productoPasaCocina(
-	db: Client,
-	idProducto: string,
-): Promise<boolean> {
-	const rs = await db.execute({
-		sql: `
-			SELECT COALESCE(cat.Pasa_Cocina, 0) AS pasa
-			FROM Productos p
-			JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-			WHERE p.ID_Producto = ?1
-			LIMIT 1;
-		`,
-		args: [idProducto],
-	});
-	return Number(rows(rs)[0]?.pasa ?? 0) === 1;
-}
-
 export async function idComandaByDetalle(
 	db: Client,
 	idDetalle: string,

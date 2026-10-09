@@ -66,11 +66,6 @@ export const anularPagoSchema = z.object({
 		.transform((v) => v ?? "ERROR"),
 });
 
-export const rangoSchema = z.object({
-	del: z.string().nullish().transform(cleanOptional),
-	al: z.string().nullish().transform(cleanOptional),
-});
-
 const optInt = z
 	.union([z.string(), z.number()])
 	.nullish()
