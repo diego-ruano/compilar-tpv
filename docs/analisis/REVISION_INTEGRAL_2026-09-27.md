@@ -145,34 +145,6 @@ caracteres españoles del PDF y el generador compartido están resueltos.
 
 ## 15. Rust: idioma, runtime y estructura
 
-<a id="ri-32"></a>
-### RI-32 🔵 · Transacciones escritas a mano y helpers duplicados
-
-- **Cada método transaccional repite** `execute_batch("BEGIN;")` + `async {}` + `match res { Ok →
-  COMMIT, Err → ROLLBACK }`. Son decenas de copias, y un `?` entre medias deja la transacción
-  abierta hasta que otro `write()` la limpie. Con Rust 1.91 hay cierres asíncronos: un
-  `db.transaccion(async |tx| { … }).await` que haga `BEGIN`/`COMMIT`/`ROLLBACK` en un sitio elimina
-  el patrón y el riesgo. Y deja a la vista las escrituras multi-sentencia que hoy van **sin**
-  transacción.
-- **Helpers copiados por repositorio**: `db_err`, `select_one_i64/string/f64/dinero`, `try_exec`,
-  `exists_by_id`, `trabajador_id_from_usuario`, `resolve_trabajador_id_input`, `now_ms`,
-  `update_total_comanda_sql`. Un módulo
-  `consultas.rs` común.
-- **Compatibilidad con esquemas que ya no existen**: `try_exec` traga «no such column/table» (cobro,
-  [`mesas.rs:2032-2062`](../../crates/tpv-infra-sqlite/src/mesas.rs#L2032-L2062), y cocina,
-  [`mesas.rs:2269-2303`](../../crates/tpv-infra-sqlite/src/mesas.rs#L2269-L2303)), y
-  `list_categorias_vendibles` ([`mesas.rs:1779-1786`](../../crates/tpv-infra-sqlite/src/mesas.rs#L1779-L1786))
-  y `productos_query` ([`mesas.rs:2317-2325`](../../crates/tpv-infra-sqlite/src/mesas.rs#L2317-L2325))
-  reintentan con otra consulta si la primera falla **por cualquier motivo**. Con un esquema único
-  eso sólo puede ocultar un bug. En el cobro, además, el `if !ok` que reintenta el `INSERT INTO
-  Pagos` sin cobrador dice cubrir «FK inexistente», pero `try_exec` sólo devuelve `false` con «no
-  such column»: ante una FK rota devuelve `Err`. Es código inalcanzable con un comentario que
-  describe otra cosa.
-- `WriteGuard::tx_buf` es un `tokio::sync::Mutex` para un estado que sólo toca un guard a la vez;
-  basta un `std::sync::Mutex`.
-- `mapping::v_i64` trunca un `Real` (`n as i64`) mientras que `v_dinero` redondea: dos criterios en
-  el mismo módulo.
-
 <a id="ri-48"></a>
 ### RI-48 🔵 · Dominio: duplicación, tipos como cadenas y constructores de trece argumentos
 

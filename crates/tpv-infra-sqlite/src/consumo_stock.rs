@@ -33,17 +33,14 @@
 //! [`redondear_cantidad`] y cada `UPDATE` redondea su resultado con `ROUND(…, 3)`, en la Main y en la
 //! nube por igual.
 
+use crate::consultas::{db_err};
 use libsql::Value;
 
-use tpv_application::error::{AppError, AppResult};
+use tpv_application::error::AppResult;
 use tpv_domain::cantidad::redondear_cantidad;
 
 use crate::db::Writer;
 use crate::mapping::{v_f64, v_string};
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
 
 /// Consume el stock de las líneas de un cobro: `(id_detalle, id_producto, cantidad)`.
 ///
@@ -160,3 +157,4 @@ pub(crate) async fn consumir_stock<C: Writer>(
     }
     Ok(())
 }
+

@@ -6,19 +6,20 @@
 //! con su `ID_Usuario`, o `rol` con el `ID_Rol` de ese usuario (resuelto contra `Usuarios`). El
 //! estado "leída" es por usuario (tabla `Notificacion_Lecturas`).
 
+use crate::util::new_id;
+use crate::consultas::{db_err};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use libsql::Value;
 
-use tpv_application::error::{AppError, AppResult};
+use tpv_application::error::AppResult;
 use tpv_application::ports::notificaciones::{NotificacionesRepository, Notifier};
 use tpv_contracts::notificaciones::NotificacionRow;
 use tpv_domain::notificaciones::NuevaNotificacion;
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_text, v_i64, v_string};
-use crate::util::new_id;
 
 /// Predicado de visibilidad de una notificación **activa y no caducada** para el usuario `?1`.
 /// Se interpola en las consultas de lectura (nunca en escrituras replicables). `?1` = `ID_Usuario`.
@@ -162,10 +163,6 @@ impl SqliteNotificacionesRepository {
     }
 }
 
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
-
 #[async_trait]
 impl NotificacionesRepository for SqliteNotificacionesRepository {
     async fn listar(
@@ -238,9 +235,9 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
         }
 
         let db = self.db.write().await;
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
+        db.transaccion(async {
         for id in &ids {
-            if let Err(e) = db
+            db
                 .execute(
                     r#"
                     INSERT OR IGNORE INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En)
@@ -251,14 +248,10 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
                         Value::Text(id_usuario.to_string()),
                     ],
                 )
-                .await
-            {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                return Err(db_err(e));
-            }
+                .await.map_err(db_err)?;
         }
-        db.execute_batch("COMMIT;").await.map_err(db_err)?;
-        Ok(ids.len() as i64)
+            Ok(ids.len() as i64)
+        }).await
     }
 
     async fn descartar(&self, id_notificacion: &str) -> AppResult<bool> {
@@ -420,8 +413,7 @@ impl Notifier for SqliteNotificacionesRepository {
                 let mut valores = nuevo.valores();
                 valores.push(Value::Text(id.clone()));
 
-                db.execute_batch("BEGIN;").await.map_err(db_err)?;
-                let res: AppResult<()> = async {
+                return db.transaccion(async {
                     db.execute(
                         &format!(
                             "UPDATE Notificaciones SET Severidad = ?1, Titulo = ?2, Cuerpo = ?3, \
@@ -441,18 +433,7 @@ impl Notifier for SqliteNotificacionesRepository {
                         .map_err(db_err)?;
                     }
                     Ok(())
-                }
-                .await;
-                return match res {
-                    Ok(()) => {
-                        db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                        Ok(id)
-                    }
-                    Err(e) => {
-                        let _ = db.execute_batch("ROLLBACK;").await;
-                        Err(e)
-                    }
-                };
+                }).await.map(|_| id);
             }
         }
 
@@ -569,3 +550,4 @@ mod tests_emision_repetida {
         assert!(repo.resolver_por_clave("gracia_offline").await.unwrap());
     }
 }
+

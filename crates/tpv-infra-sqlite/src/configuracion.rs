@@ -1,5 +1,6 @@
 //! Adaptador SQLite del repositorio de configuración. Local-First (sin outbox/applied).
 
+use crate::consultas::{db_err};
 use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
@@ -33,10 +34,6 @@ impl SqliteConfiguracionRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 fn bool_to_i64(b: bool) -> i64 {
@@ -663,3 +660,4 @@ mod tests_dinero_del_patch {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+

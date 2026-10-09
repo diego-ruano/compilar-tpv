@@ -1,5 +1,7 @@
 //! Adaptador SQLite del repositorio de inventario. Local-First (sin outbox/applied).
 
+use crate::util::new_id;
+use crate::consultas::{db_err};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -21,7 +23,6 @@ use tpv_domain::inventario::{
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_i64, v_string, v_dinero, opt_dinero};
-use crate::util::new_id;
 
 pub struct SqliteInventarioRepository {
     db: Arc<Db>,
@@ -31,10 +32,6 @@ impl SqliteInventarioRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 fn s(v: Value) -> String {
@@ -481,17 +478,14 @@ impl InventarioRepository for SqliteInventarioRepository {
             }
         }
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        conn.transaccion(async {
             for sql in SQL_QUITAR_PRODUCTO {
                 conn.execute(sql, vec![Value::Text(id_producto.to_string())])
                     .await
                     .map_err(db_err)?;
             }
             Ok(())
-        }
-        .await;
-        finish_tx(conn, res).await
+        }).await
     }
 
     async fn upsert_producto(&self, actor: &str, p: ProductoUpsert) -> AppResult<String> {
@@ -509,8 +503,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         let motivo = l.notas.clone();
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        conn.transaccion(async {
             conn.execute(
                 r#"
                 -- Alta PURA (INV-02): un create con un ID_Lote existente es un no-op idempotente,
@@ -561,9 +554,7 @@ impl InventarioRepository for SqliteInventarioRepository {
             .await
             .map_err(db_err)?;
             Ok(())
-        }
-        .await;
-        finish_tx(conn, res).await
+        }).await
     }
 
     /// Edición de los **datos** de un lote: código, caducidad, coste, proveedor, notas. Las
@@ -619,8 +610,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         let id_mov = new_id();
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        conn.transaccion(async {
             let actual = {
                 let mut rows = conn
                     .query(
@@ -669,9 +659,7 @@ impl InventarioRepository for SqliteInventarioRepository {
             .await
             .map_err(db_err)?;
             Ok(())
-        }
-        .await;
-        finish_tx(conn, res).await
+        }).await
     }
 
     /// Ajuste del stock suelto de un producto, con su movimiento (RI-55). Mismo trato que un lote:
@@ -681,8 +669,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         let id_mov = new_id();
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        conn.transaccion(async {
             let actual = {
                 let mut rows = conn
                     .query(
@@ -740,9 +727,7 @@ impl InventarioRepository for SqliteInventarioRepository {
             .await
             .map_err(db_err)?;
             Ok(())
-        }
-        .await;
-        finish_tx(conn, res).await
+        }).await
     }
 }
 
@@ -764,26 +749,13 @@ fn stock_cambiado(actual: Option<f64>) -> AppError {
     ))
 }
 
-async fn finish_tx<C: Writer>(conn: &C, res: AppResult<()>) -> AppResult<()> {
-    match res {
-        Ok(()) => {
-            conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-            Ok(())
-        }
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK;").await;
-            Err(e)
-        }
-    }
-}
 
 impl SqliteInventarioRepository {
     async fn guardar_producto(&self, id_usuario: &str, p: ProductoUpsert, precios: bool, recibir: bool) -> AppResult<String> {
         let g = self.db.write().await;
         let conn = &g;
         let id_producto = p.id.unwrap_or_else(new_id);
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        conn.transaccion(async {
             // RI-55: el stock suelto sólo se escribe al CREAR el producto, y con su movimiento de
             // alta. Editando la ficha se ignora: el formulario llevaba el valor que había cargado y
             // lo reescribía sin rastro, pisando lo vendido mientras estaba abierto. Se cambia con
@@ -884,9 +856,7 @@ impl SqliteInventarioRepository {
                 .map_err(db_err)?;
             }
             Ok(())
-        }
-        .await;
-        finish_tx(conn, res).await?;
+        }).await?;
         Ok(id_producto)
     }
 
@@ -1196,3 +1166,4 @@ mod tests_borrado_de_producto {
         assert!(existe(&db, "vendido").await);
     }
 }
+

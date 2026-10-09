@@ -8,12 +8,13 @@
 //! normal se capturaría en `_Sync_Outbox` y cada tick de cada job generaría tráfico de
 //! sincronización hacia la nube.
 
+use crate::consultas::{db_err};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use libsql::Value;
 
-use tpv_application::error::{AppError, AppResult};
+use tpv_application::error::AppResult;
 use tpv_application::ports::jobs::{EstadoJob, JobsStateRepository};
 
 use crate::db::Db;
@@ -27,10 +28,6 @@ impl SqliteJobsStateRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 /// Columnas en el mismo orden en todas las consultas, para leer por índice sin sorpresas.
@@ -237,3 +234,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+

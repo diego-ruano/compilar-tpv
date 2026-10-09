@@ -4,6 +4,8 @@
 //! cualquier otro (ver la regla del escritor único en docs/arquitectura/sincronizacion.md). Las rectificaciones también:
 //! la Handy tiene que ver en un cierre lo mismo que la Main.
 
+use crate::util::new_id;
+use crate::consultas::{db_err};
 use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
@@ -23,7 +25,6 @@ use tpv_domain::cierre_caja::{TotalesCaja, HORA_DE_UN_GASTO};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{dinero_val, norm_opt_string, v_dinero, v_i64, v_string};
-use crate::util::new_id;
 
 pub struct SqliteCierreCajaRepository {
     db: Arc<Db>,
@@ -33,10 +34,6 @@ impl SqliteCierreCajaRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 fn texto_o_nulo(s: Option<&str>) -> Value {
@@ -224,8 +221,7 @@ async fn cerrar_periodo(db: &Db, id_cierre: &str, armar: ArmarCierre<'_>) -> App
     let inicio = chrono::Local::now();
     let ahora = inicio.format("%Y-%m-%d %H:%M:%S").to_string();
 
-    g.execute_batch("BEGIN;").await.map_err(db_err)?;
-    let res: AppResult<bool> = async {
+    let res: AppResult<bool> = g.transaccion(async {
         // Confirmar dos veces es confirmar una: el id lo genera la pantalla al abrir el arqueo.
         let ya_existe = g
             .query(
@@ -264,23 +260,11 @@ async fn cerrar_periodo(db: &Db, id_cierre: &str, armar: ArmarCierre<'_>) -> App
         let totales = totales_entre(&g, desde.as_deref(), Some(&ahora)).await?;
         let c = armar(PeriodoAbierto { desde, dejado_anterior, totales })?;
         insertar_cierre(&g, &c, &ahora).await?;
+        esperar_al_segundo_siguiente(inicio).await;
         Ok(true)
-    }
-    .await;
+    }).await;
 
-    match res {
-        Ok(guardado) => {
-            if guardado {
-                esperar_al_segundo_siguiente(inicio).await;
-            }
-            g.execute_batch("COMMIT;").await.map_err(db_err)?;
-            Ok(())
-        }
-        Err(e) => {
-            let _ = g.execute_batch("ROLLBACK;").await;
-            Err(e)
-        }
-    }
+    res.map(|_| ())
 }
 
 /// Espera, **con el escritor todavía tomado**, a que cambie el segundo.
@@ -749,8 +733,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
 
         // Las dos escrituras van juntas: un cierre que dice lo que marca hoy sin la fila que explica
         // por qué sería exactamente el número sin explicación que esto existe para evitar.
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<()> = conn.transaccion(async {
             conn.execute(
                 r#"
                 UPDATE Cierres_Caja
@@ -793,19 +776,9 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
             .await
             .map_err(db_err)?;
             Ok(())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(()) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(())
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 }
 
@@ -1411,3 +1384,4 @@ mod tests {
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 2);
     }
 }
+

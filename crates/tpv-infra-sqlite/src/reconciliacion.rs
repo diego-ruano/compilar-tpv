@@ -3,13 +3,14 @@
 //! Dos consultas que recalculan desde el origen lo que otras columnas guardan ya sumado. Solo
 //! leen: la decisión de qué hacer con un descuadre es de quien lleva el negocio, no del job.
 
+use crate::consultas::{db_err};
 use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use libsql::Value;
 
-use tpv_application::error::{AppError, AppResult};
+use tpv_application::error::AppResult;
 use tpv_application::ports::reconciliacion::{
     ClienteDescuadrado, LoteDescuadrado, ReconciliacionRepository,
 };
@@ -30,10 +31,6 @@ impl SqliteReconciliacionRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 /// El disponible que DEBERÍA tener cada lote según su historial.
@@ -645,3 +642,4 @@ mod tests {
         assert!(out.is_empty(), "{out:?}");
     }
 }
+

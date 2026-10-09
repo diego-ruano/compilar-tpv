@@ -11,6 +11,8 @@
 //! Las tablas de control (`_Sync_*`) las crea `Db::open` al arrancar, así que aquí no hace falta
 //! asegurarlas en cada llamada.
 
+use crate::consultas::{db_err};
+use crate::util::now_ms;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -25,7 +27,7 @@ use tpv_contracts::sync::{
     SyncChange, SyncHealth, TablaAExaminar, VerificacionClaves, VerificacionNube,
 };
 
-use crate::db::Db;
+use crate::db::{Db, Writer};
 use crate::mapping::v_i64;
 
 pub struct SqliteSyncRepository {
@@ -36,18 +38,6 @@ impl SqliteSyncRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
-
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(i64::MAX)
 }
 
 /// Margen (en nº de operaciones) que la purga por cursor deja SIN borrar por debajo del checkpoint.
@@ -405,11 +395,7 @@ enum Aplicacion {
 /// propio commit (RI-33). `defer_foreign_keys` evita fallos por orden dentro de la propia
 /// operación. Corre sobre la conexión CRUDA de escritura (sin captura).
 async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> {
-    conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
-        .await
-        .map_err(db_err)?;
-
-    let res: AppResult<Aplicacion> = async {
+    let res: AppResult<Aplicacion> = conn.transaccion(async {
         // SYNC-18: que un cambio VUELVA de la nube es la prueba de que allí se aplicó. Si era una
         // de las nuestras (encolada o simplemente sin ack), esta es su confirmación: se retira del
         // outbox y deja de estar pendiente. Cubre de una vez el camino de la cola y cualquier
@@ -467,27 +453,9 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> 
         clear_failure(conn, &ch.op_id).await?;
 
         Ok(Aplicacion::Aplicada)
-    }
-    .await;
+    }).await;
 
-    match res {
-        Ok(aplicacion) => match conn.execute_batch("COMMIT;").await {
-            Ok(_) => Ok(aplicacion),
-            Err(e) => {
-                // Con `defer_foreign_keys`, las violaciones de FK saltan AQUÍ (en el COMMIT), no
-                // en la sentencia. OBS-02/RI-57: sólo operación y secuencia, nunca SQL ni args.
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(AppError::repository(format!(
-                    "COMMIT op {} (seq {}) falló: {e}",
-                    ch.op_id, ch.seq
-                )))
-            }
-        },
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK;").await;
-            Err(e)
-        }
-    }
+    res
 }
 
 #[async_trait]
@@ -639,8 +607,7 @@ impl SyncRepository for SqliteSyncRepository {
         let w = self.db.write().await;
         let conn = w.raw();
 
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<()> = conn.transaccion(async {
             if seq > 0 {
                 conn.execute(
                     "UPDATE _Sync_Applied_Ops SET Seq = ?1 WHERE Op_Id = ?2 AND Seq = 0;",
@@ -671,16 +638,9 @@ impl SyncRepository for SqliteSyncRepository {
             .await
             .map_err(db_err)?;
             Ok(())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(()) => conn.execute_batch("COMMIT;").await.map(|_| ()).map_err(db_err),
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn outbox_mark_failed(
@@ -696,6 +656,7 @@ impl SyncRepository for SqliteSyncRepository {
         let conn = w.raw();
         let err_trunc: String = error.chars().take(500).collect();
 
+        conn.transaccion(async {
         // REV-04: anotar dos veces el mismo fallo tiene que ser inocuo. El camino en vivo no repite
         // (una apartada deja de ofrecerse), pero el aviso de la nube SÍ: el DO reofrece lo que no se
         // le ha acusado en cada conexión, y un acuse que se pierda traería el mismo `Op_Id` mañana.
@@ -779,6 +740,7 @@ impl SyncRepository for SqliteSyncRepository {
             command_name,
             reparadas,
         })
+        }).await
     }
 
     async fn contrastar_con_la_nube(
@@ -809,8 +771,7 @@ impl SyncRepository for SqliteSyncRepository {
         let conn = w.raw();
         let ahora = now_ms();
 
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<()> = conn.transaccion(async {
             for op_id in op_ids {
                 conn.execute(
                     "INSERT OR REPLACE INTO _Sync_Encoladas (Op_Id, Encolada_En_Ms) VALUES (?1, ?2);",
@@ -820,16 +781,9 @@ impl SyncRepository for SqliteSyncRepository {
                 .map_err(db_err)?;
             }
             Ok(())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(()) => conn.execute_batch("COMMIT;").await.map(|_| ()).map_err(db_err),
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn liberar_encoladas_caducadas(&self, antiguedad_ms: i64) -> AppResult<i64> {
@@ -962,11 +916,7 @@ impl SyncRepository for SqliteSyncRepository {
         // `defer_foreign_keys` deja que el orden entre tablas dé igual: se comprueban las FK al
         // COMMIT, cuando ya está todo dentro. Sin esto habría que ordenar 41 tablas por sus
         // dependencias y mantener ese orden a mano en cada cambio de esquema.
-        conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
-            .await
-            .map_err(db_err)?;
-
-        let res: AppResult<i64> = async {
+        let res: AppResult<i64> = conn.transaccion(async {
             // Restaurar VACÍA las tablas: una operación local aún sin subir se perdería sin dejar
             // rastro y sin que nadie lo supiera. Va DENTRO de la transacción a propósito —
             // comprobarlo antes dejaría una ventana por la que puede colarse una venta entre el
@@ -1144,12 +1094,9 @@ impl SyncRepository for SqliteSyncRepository {
             }
 
             Ok(filas)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(filas) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
+        let filas = res?;
                 // La base queda restaurada pero pendiente de reconciliar: hasta que converja no
                 // admite escrituras de negocio (aquí no se reabre el `Db`, así que el cerrojo no
                 // lo recalcula nadie más).
@@ -1175,12 +1122,6 @@ impl SyncRepository for SqliteSyncRepository {
                     tablas_restauradas: restaurables.iter().map(|t| t.nombre.clone()).collect(),
                     tablas_desconocidas: desconocidas,
                 })
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1244,9 +1185,7 @@ impl SyncRepository for SqliteSyncRepository {
             return Ok(0);
         }
 
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-
-        let res: AppResult<i64> = async {
+        let res: AppResult<i64> = conn.transaccion(async {
             let n_cols = pagina.columnas.len();
             let mut insertadas = 0i64;
 
@@ -1314,19 +1253,9 @@ impl SyncRepository for SqliteSyncRepository {
             .map_err(db_err)?;
 
             Ok(insertadas)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(n) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(n)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn backfill_marcar_error(&self, tabla: &str, error: &str) -> AppResult<()> {
@@ -4222,3 +4151,5 @@ mod tests_main_atrasada {
         assert_eq!(r.reparadas, 1);
     }
 }
+
+

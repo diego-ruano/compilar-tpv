@@ -32,8 +32,8 @@
 //!   `CREATE INDEX`. Evita renombrar/eliminar columnas mientras haya apps viejas en producción.
 //! - **Nunca edites una migración ya publicada** (cambiaría su hash → error). Crea una nueva.
 
+use crate::util::now_ms;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use include_dir::{include_dir, Dir};
 use libsql::{Connection, Error as LibsqlError, Value};
@@ -49,15 +49,6 @@ use sha2::{Digest, Sha256};
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../packages/database/migrations");
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        // Reloj corrupto (antes de epoch): i64::MAX evita que entradas aparezcan "muy antiguas"
-        // y sean eliminadas prematuramente por lógica de purga.
-        .unwrap_or(i64::MAX)
-}
 
 /// Lista de migraciones `(nombre, contenido)` ordenada por nombre (0001, 0002, …).
 fn migration_files() -> Vec<(String, String)> {
@@ -837,3 +828,4 @@ mod tests {
 }
 
 // RI-70: el esquema compartido incluye Encargado y Roles_Permisos.
+

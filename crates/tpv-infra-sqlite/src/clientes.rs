@@ -3,6 +3,8 @@
 //! Local-First puro: las escrituras son INSERT/UPDATE directos contra la BD local.
 //! NO hay outbox ni Applied_Operations (eso era de la antigua sincronización dual).
 
+use crate::util::new_id;
+use crate::consultas::{db_err};
 use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
@@ -16,7 +18,6 @@ use tpv_domain::clientes::{Cliente, ClienteRanking, NuevoCliente};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_text, v_dinero, v_i64, v_string};
-use crate::util::new_id;
 
 pub struct SqliteClientesRepository {
     db: Arc<Db>,
@@ -26,10 +27,6 @@ impl SqliteClientesRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 /// Traduce errores de las escrituras de cliente. Una violación del índice único de email
@@ -264,3 +261,4 @@ impl ClientesRepository for SqliteClientesRepository {
         Ok(affected > 0)
     }
 }
+

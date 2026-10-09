@@ -3,6 +3,8 @@
 //! por `WriteGuard::execute`, que captura el SQL y sus parámetros en el outbox para replicarlos.
 //! `Applied_Operations` es el control idempotente del worker; la Main usa `_Sync_Applied_Ops`.
 
+use crate::util::new_id;
+use crate::consultas::{db_err, select_one_i64, select_one_string, select_one_dinero, resolve_trabajador_id_input, update_total_comanda_sql};
 use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,7 +25,6 @@ use tpv_contracts::mesas::{
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
-use crate::util::new_id;
 
 pub struct SqliteMesasRepository {
     db: Arc<Db>,
@@ -33,10 +34,6 @@ impl SqliteMesasRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 /// Extrae el id (UUID) embebido en un id de UI con prefijo (`db-mesa-<uuid>`).
@@ -57,38 +54,6 @@ fn build_in_placeholders(start: i64, count: usize) -> String {
         .join(", ")
 }
 
-fn update_total_comanda_sql() -> &'static str {
-    r#"
-    UPDATE Comandas
-    SET Total_Comanda = (
-      SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
-      FROM Detalle_Comanda
-      WHERE ID_Comanda = ?1
-    )
-    WHERE ID_Comanda = ?1;
-    "#
-}
-
-async fn select_one_i64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> AppResult<Option<i64>> {
-    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
-    if let Some(row) = rows.next().await.map_err(db_err)? {
-        return Ok(v_i64(row.get_value(0).map_err(db_err)?));
-    }
-    Ok(None)
-}
-
-/// Igual que `select_one_i64` pero para columnas de id (TEXT/UUID).
-async fn select_one_string<C: Reader>(
-    conn: &C,
-    sql: &str,
-    args: Vec<Value>,
-) -> AppResult<Option<String>> {
-    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
-    if let Some(row) = rows.next().await.map_err(db_err)? {
-        return Ok(norm_opt_string(row.get_value(0).map_err(db_err)?));
-    }
-    Ok(None)
-}
 
 /// Lo que se congela del producto al vender: nombre, tipo de IVA y precio.
 ///
@@ -147,72 +112,6 @@ pub(crate) struct ProductoEnLinea {
     pub precio: Dinero,
 }
 
-/// Una columna de DINERO (`INTEGER` de centimos).
-async fn select_one_dinero<C: Reader>(
-    conn: &C,
-    sql: &str,
-    args: Vec<Value>,
-) -> AppResult<Option<Dinero>> {
-    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
-    if let Some(row) = rows.next().await.map_err(db_err)? {
-        return Ok(v_dinero(row.get_value(0).map_err(db_err)?));
-    }
-    Ok(None)
-}
-
-/// Ejecuta tolerando columnas/tablas inexistentes (devuelve false en ese caso).
-async fn try_exec<C: Writer>(db: &C, sql: &str, args: Vec<Value>) -> AppResult<bool> {
-    match db.execute(sql, args).await {
-        Ok(_) => Ok(true),
-        Err(e) => {
-            let msg = e.to_string().to_lowercase();
-            if msg.contains("no such column") || msg.contains("no such table") {
-                Ok(false)
-            } else {
-                Err(db_err(e))
-            }
-        }
-    }
-}
-
-async fn exists_by_id<C: Reader>(conn: &C, table: &str, id_col: &str, id: &str) -> AppResult<bool> {
-    if id.trim().is_empty() {
-        return Ok(false);
-    }
-    let sql = format!("SELECT 1 FROM {table} WHERE {id_col}=?1 LIMIT 1;");
-    Ok(select_one_i64(conn, &sql, vec![Value::Text(id.to_string())])
-        .await?
-        .is_some())
-}
-
-async fn trabajador_id_from_usuario<C: Reader>(
-    db: &C,
-    id_usuario: Option<String>,
-) -> AppResult<Option<String>> {
-    let Some(idu) = id_usuario.filter(|s| !s.trim().is_empty()) else {
-        return Ok(None);
-    };
-    select_one_string(
-        db,
-        "SELECT ID_Trabajador FROM Trabajadores WHERE ID_Usuario=?1 LIMIT 1;",
-        vec![Value::Text(idu)],
-    )
-    .await
-}
-
-async fn resolve_trabajador_id_input<C: Reader>(
-    db: &C,
-    id_maybe: Option<String>,
-) -> AppResult<Option<String>> {
-    let Some(x) = id_maybe.filter(|s| !s.trim().is_empty()) else {
-        return Ok(None);
-    };
-    if exists_by_id(db, "Trabajadores", "ID_Trabajador", &x).await? {
-        return Ok(Some(x));
-    }
-    trabajador_id_from_usuario(db, Some(x)).await
-}
-
 async fn sumar_gasto_cliente_por_comanda<C: Writer>(
     db: &C,
     id_comanda: &str,
@@ -248,27 +147,21 @@ async fn sumar_gasto_cliente_por_comanda<C: Writer>(
             // RI-61: el cliente se queda en la comanda al cobrar. Antes el gasto colgaba de la
             // reserva, y borrarla o reasignarla después le quitaba el gasto al cliente; ahora la
             // anulación y la reconciliación leen la comanda, como esto.
-            try_exec(
-                db,
-                "UPDATE Comandas SET ID_Cliente = ?2 WHERE ID_Comanda = ?1 AND ID_Cliente IS NULL;",
+            db.execute("UPDATE Comandas SET ID_Cliente = ?2 WHERE ID_Comanda = ?1 AND ID_Cliente IS NULL;",
                 vec![Value::Text(id_comanda.to_string()), Value::Text(id.clone())],
-            )
-            .await?;
+            ).await.map_err(db_err)?;
             id
         }
         (None, None) => return Ok(()),
     };
 
-    let _ = try_exec(
-        db,
-        r#"
+    db.execute(r#"
         UPDATE Clientes
         SET Total_Gastado = COALESCE(Total_Gastado,0) + ?2
         WHERE ID_Cliente = ?1;
         "#,
         vec![Value::Text(id_cliente), dinero_val(importe)],
-    )
-    .await?;
+    ).await.map_err(db_err)?;
 
     Ok(())
 }
@@ -460,8 +353,7 @@ impl MesasRepository for SqliteMesasRepository {
         let g = self.db.write().await;
         let db = &g;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<()> = db.transaccion(async {
             // ── 1. Quitar las zonas borradas en el editor (las que ya no llegan) ─────────
             // RI-54: primero sus mesas (archivadas si tienen historia, borradas si no), y luego la
             // zona: archivada si le quedan mesas archivadas, borrada si no le queda ninguna. Una
@@ -677,19 +569,9 @@ impl MesasRepository for SqliteMesasRepository {
                 }
             }
             Ok(())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(numero) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(numero)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn load_layout(&self) -> AppResult<Vec<SalonOut>> {
@@ -814,8 +696,7 @@ impl MesasRepository for SqliteMesasRepository {
         let g = self.db.write().await;
         let db = &g;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<()> = db.transaccion(async {
             db.execute(
                 "UPDATE Reservas SET Estado=?2 WHERE ID_Reserva=?1;",
                 vec![Value::Text(id_reserva.to_string()), Value::Text(estado.clone())],
@@ -832,19 +713,9 @@ impl MesasRepository for SqliteMesasRepository {
                 .map_err(db_err)?;
             }
             Ok(())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(numero) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(numero)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     /* ===== COMANDAS (mesa) ===== */
@@ -1021,8 +892,7 @@ impl MesasRepository for SqliteMesasRepository {
         let g = self.db.write().await;
         let db = &g;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<()> = db.transaccion(async {
             let id_trabajador_real = resolve_trabajador_id_input(db, id_trab_o_usuario).await?;
             if let Some(idt) = id_trabajador_real {
                 db.execute(
@@ -1087,18 +957,9 @@ impl MesasRepository for SqliteMesasRepository {
                 .await
                 .map_err(db_err)?;
             Ok(())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(()) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                return Err(e);
-            }
-        }
+        res?;
         } // WriteGuard se suelta aquí → la pool de lectura puede actuar
         self.get_lineas_comanda(id_comanda).await
     }
@@ -1272,15 +1133,8 @@ impl MesasRepository for SqliteMesasRepository {
             SELECT ID_Categoria, Nombre, Ruta_Imagen, COALESCE(Pasa_Cocina,0)
             FROM Categorias_Producto ORDER BY Nombre ASC;
         "#;
-        let sql2 = r#"
-            SELECT ID_Categoria, Nombre, NULL as Ruta_Imagen, 0 as Pasa_Cocina
-            FROM Categorias_Producto ORDER BY Nombre ASC;
-        "#;
 
-        let mut rows = match db.query(sql1, ()).await {
-            Ok(r) => r,
-            Err(_) => db.query(sql2, ()).await.map_err(db_err)?,
-        };
+        let mut rows = db.query(sql1, ()).await.map_err(db_err)?;
 
         let mut out = vec![];
         while let Some(r) = rows.next().await.map_err(db_err)? {
@@ -1304,11 +1158,7 @@ impl MesasRepository for SqliteMesasRepository {
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), Ruta_Imagen
             FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC;
         "#;
-        let sql2 = r#"
-            SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), NULL as Ruta_Imagen
-            FROM Productos WHERE ID_Categoria = ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC;
-        "#;
-        productos_query(db, sql1, sql2, vec![Value::Text(id_categoria.to_string())]).await
+        productos_query(db, sql1, vec![Value::Text(id_categoria.to_string())]).await
     }
 
     async fn search_productos_by_nombre(&self, q: String) -> AppResult<Vec<ProductoVendibleOut>> {
@@ -1319,11 +1169,7 @@ impl MesasRepository for SqliteMesasRepository {
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), Ruta_Imagen
             FROM Productos WHERE LOWER(Nombre) LIKE ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC LIMIT 200;
         "#;
-        let sql2 = r#"
-            SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), NULL as Ruta_Imagen
-            FROM Productos WHERE LOWER(Nombre) LIKE ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC LIMIT 200;
-        "#;
-        productos_query(db, sql1, sql2, vec![Value::Text(needle)]).await
+        productos_query(db, sql1, vec![Value::Text(needle)]).await
     }
 
     /* ===== TICKET (detalles) ===== */
@@ -1336,8 +1182,7 @@ impl MesasRepository for SqliteMesasRepository {
         let g = self.db.write().await;
         let db = &g;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<()> = db.transaccion(async {
             // RI-59: «la última» es la de clave mayor (UUIDv7, también las del worker), pero antes
             // una que cocina no haya preparado: quitar una ya hecha descuadra lo que hay en el pase.
             db.execute(
@@ -1361,27 +1206,16 @@ impl MesasRepository for SqliteMesasRepository {
                 .await
                 .map_err(db_err)?;
             Ok(())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(numero) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(numero)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn delete_detalle(&self, id_detalle: &str) -> AppResult<()> {
         let g = self.db.write().await;
         let db = &g;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<()> = db.transaccion(async {
             // RI-11: el id es un UUID de texto. Leído como entero daba `None` y el total no se
             // recalculaba nunca; lo vigila el caso de contrato `mesas__delete_detalle`.
             let id_comanda = select_one_string(
@@ -1410,19 +1244,9 @@ impl MesasRepository for SqliteMesasRepository {
                     .map_err(db_err)?;
             }
             Ok(())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(numero) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(numero)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn update_detalle_nota(&self, id_detalle: &str, nota: Option<String>) -> AppResult<()> {
@@ -1452,8 +1276,7 @@ impl MesasRepository for SqliteMesasRepository {
         let db = &g;
         let ids = data.detalle_ids.clone();
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<String> = async {
+        let res: AppResult<String> = db.transaccion(async {
             let id_trabajador_cobrador = resolve_trabajador_id_input(db, data.id_usuario.clone()).await?;
 
             let in_sql = build_in_placeholders(2, ids.len());
@@ -1507,9 +1330,7 @@ impl MesasRepository for SqliteMesasRepository {
             let destinatario = data.destinatario.clone();
             let id_pago = new_id();
             let trabajador_mov = id_trabajador_cobrador.clone();
-            let ok = try_exec(
-                db,
-                r#"
+            db.execute(r#"
                 INSERT INTO Pagos (
                   ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
                   ID_Usuario_Cobrador, ID_Trabajador_Cobrador, Numero_Ticket
@@ -1526,41 +1347,8 @@ impl MesasRepository for SqliteMesasRepository {
                     id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
                     Value::Text(numero_ticket.clone()),
                 ],
-            )
-            .await?;
+            ).await.map_err(db_err)?;
 
-            if !ok {
-                // MESA-15: `try_exec` devuelve false sólo si falta una tabla o columna.
-                // Se reintenta el INSERT sin ID_Trabajador_Cobrador y se emite un aviso.
-                // Un error de clave foránea se propaga con `?` y no llega a esta rama;
-                // si el segundo INSERT también falla, se intenta ROLLBACK y se devuelve el error.
-                tracing::warn!(
-                    target: "tpv::mesas",
-                    id_comanda = %data.id_comanda,
-                    id_pago = %id_pago,
-                    "cobro (detalles) registrado sin ID_Trabajador_Cobrador: el cobrador no resolvió como FK válida"
-                );
-                db.execute(
-                    r#"
-                    INSERT INTO Pagos (
-                      ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
-                      ID_Usuario_Cobrador, Numero_Ticket
-                    )
-                    VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6, ?7);
-                    "#,
-                    vec![
-                        Value::Text(id_pago.clone()),
-                        Value::Text(data.id_comanda.clone()),
-                        Value::Text(data.metodo.clone()),
-                        dinero_val(total),
-                        Value::Text(data.tipo.clone()),
-                        data.id_usuario.clone().map(Value::Text).unwrap_or(Value::Null),
-                        Value::Text(numero_ticket.clone()),
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-            }
 
             // El cobro en el historial de caja (CUENTA-07). A diferencia del gasto del cliente
             // de aquí abajo, esto NO es best-effort: un cobro cuyo movimiento no se anota es
@@ -1571,7 +1359,7 @@ impl MesasRepository for SqliteMesasRepository {
                     tipo: caja_movimientos::TIPO_COBRO,
                     id_pago: Some(id_pago.clone()),
                     id_usuario: data.id_usuario.clone(),
-                    id_trabajador: if ok { trabajador_mov } else { None },
+                    id_trabajador: trabajador_mov,
                     importe: total,
                     metodo_pago: Some(data.metodo.clone()),
                     ..Default::default()
@@ -1686,19 +1474,9 @@ impl MesasRepository for SqliteMesasRepository {
             }
             // RI-29: la pantalla pide el ticket por el pago, no por el número.
             Ok(id_pago)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(id_pago) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(id_pago)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     /* ===== COCINA ===== */
@@ -1741,9 +1519,7 @@ impl MesasRepository for SqliteMesasRepository {
         let db = &g;
 
         if estado == "PREPARADO" {
-            let ok = try_exec(
-                db,
-                r#"
+            db.execute(r#"
                 UPDATE Detalle_Comanda
                 SET
                   Estado_Cocina = 'PREPARADO',
@@ -1752,53 +1528,29 @@ impl MesasRepository for SqliteMesasRepository {
                 WHERE ID_Detalle = ?1;
                 "#,
                 vec![Value::Text(id_detalle.to_string()), Value::Text(id_usuario_cocinero.to_string())],
-            )
-            .await?;
+            ).await.map_err(db_err)?;
 
-            if !ok {
-                db.execute(
-                    "UPDATE Detalle_Comanda SET Estado_Cocina = 'PREPARADO' WHERE ID_Detalle = ?1;",
-                    vec![Value::Text(id_detalle.to_string())],
-                )
-                .await
-                .map_err(db_err)?;
-            }
         } else {
-            let ok = try_exec(
-                db,
-                r#"
+            db.execute(r#"
                 UPDATE Detalle_Comanda
                 SET Estado_Cocina = 'PENDIENTE', ID_Usuario_Cocinero = NULL, Fecha_Hora_Cocina = NULL
                 WHERE ID_Detalle = ?1;
                 "#,
                 vec![Value::Text(id_detalle.to_string())],
-            )
-            .await?;
+            ).await.map_err(db_err)?;
 
-            if !ok {
-                db.execute(
-                    "UPDATE Detalle_Comanda SET Estado_Cocina = 'PENDIENTE' WHERE ID_Detalle = ?1;",
-                    vec![Value::Text(id_detalle.to_string())],
-                )
-                .await
-                .map_err(db_err)?;
-            }
         }
         Ok(())
     }
 }
 
-/// Helper de catálogo con fallback de columna `Ruta_Imagen` inexistente.
+/// Helper de catálogo del esquema vigente.
 async fn productos_query<C: Reader>(
     db: &C,
     sql1: &str,
-    sql2: &str,
     args: Vec<Value>,
 ) -> AppResult<Vec<ProductoVendibleOut>> {
-    let mut rows = match db.query(sql1, args.clone()).await {
-        Ok(r) => r,
-        Err(_) => db.query(sql2, args).await.map_err(db_err)?,
-    };
+    let mut rows = db.query(sql1, args).await.map_err(db_err)?;
 
     let mut out = vec![];
     while let Some(r) = rows.next().await.map_err(db_err)? {
@@ -2102,3 +1854,4 @@ mod tests_snapshot_de_la_linea {
         );
     }
 }
+

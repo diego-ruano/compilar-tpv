@@ -1,12 +1,13 @@
 //! Adaptador SQLite del **escáner de avisos** (`AvisosScanRepository`). Lecturas puras (pool de
 //! lectura) de condiciones de tiempo/estado; no escribe (las emisiones las hace el `Notifier`).
 
+use crate::consultas::{db_err};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use libsql::Value;
 
-use tpv_application::error::{AppError, AppResult};
+use tpv_application::error::AppResult;
 use tpv_application::ports::avisos::{AvisosScanRepository, ReservaProxima, TareaVencida};
 
 use crate::db::{Db, Reader};
@@ -20,10 +21,6 @@ impl SqliteAvisosScanRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 #[async_trait]
@@ -87,3 +84,4 @@ impl AvisosScanRepository for SqliteAvisosScanRepository {
         Ok(out)
     }
 }
+

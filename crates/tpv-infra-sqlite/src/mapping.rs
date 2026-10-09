@@ -7,7 +7,9 @@ use tpv_domain::dinero::Dinero;
 pub fn v_i64(v: Value) -> Option<i64> {
     match v {
         Value::Integer(n) => Some(n),
-        Value::Real(n) => Some(n as i64),
+        // RI-32: una cantidad fraccionaria no es un entero. Dinero tiene su propio redondeo.
+        Value::Real(n) if n.is_finite() && n.fract() == 0.0 && n >= i64::MIN as f64 && n < -(i64::MIN as f64) => Some(n as i64),
+        Value::Real(_) => None,
         Value::Text(s) => s.parse::<i64>().ok(),
         _ => None,
     }
@@ -87,3 +89,17 @@ pub fn opt_dinero(o: Option<Dinero>) -> Value {
         None => Value::Null,
     }
 }
+
+#[cfg(test)]
+mod tests_enteros {
+    use super::*;
+    #[test]
+    fn solo_reales_enteros_y_representables_se_convierten_en_entero() {
+        assert_eq!(v_i64(Value::Real(3.0)), Some(3));
+        for n in [3.5, f64::NAN, f64::INFINITY, i64::MAX as f64] {
+            assert_eq!(v_i64(Value::Real(n)), None);
+        }
+        assert_eq!(v_dinero(Value::Real(3.5)), Some(Dinero::de_centimos(4)));
+    }
+}
+

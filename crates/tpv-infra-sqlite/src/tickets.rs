@@ -2,6 +2,7 @@
 //!
 //! Sólo lectura. El papel entero sale de aquí: la pantalla no aporta ni las líneas ni el número.
 
+use crate::consultas::{db_err};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -16,10 +17,6 @@ use tpv_domain::ticket::LineaVendida;
 
 use crate::db::{Db, Reader};
 use crate::mapping::{v_dinero, v_f64, v_i64, v_string};
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
 
 pub struct SqliteTicketsRepository {
     db: Arc<Db>,
@@ -684,3 +681,4 @@ mod tests {
         assert!(repo(&db).ticket_de_pago("otro", Some("F-000001")).await.is_err());
     }
 }
+

@@ -9,6 +9,7 @@
 //! (el cobro de mesa, el de venta rápida, el gasto y la anulación) y una sentencia copiada cuatro
 //! veces es una sentencia que dentro de un año dice cuatro cosas distintas.
 
+use crate::util::new_id;
 use crate::mapping::dinero_val;
 use tpv_domain::dinero::Dinero;
 use libsql::Value;
@@ -16,7 +17,6 @@ use libsql::Value;
 use tpv_application::error::{AppError, AppResult};
 
 use crate::db::Writer;
-use crate::util::new_id;
 
 /// Los tipos que admite el `CHECK` de la tabla. Ampliarlo (devoluciones de VENTA-01, Veri*factu)
 /// es tocar el `CHECK` y añadir aquí la constante.

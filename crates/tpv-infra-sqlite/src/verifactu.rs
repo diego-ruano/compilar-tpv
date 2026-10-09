@@ -17,6 +17,8 @@
 //! **control de flujo** entre envíos, así que remitir no puede ser una llamada HTTP dentro del
 //! cobro aunque se quisiera.
 
+use crate::util::{new_id, now_ms};
+use crate::consultas::{db_err};
 use tpv_domain::dinero::Dinero;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
@@ -31,11 +33,6 @@ use tpv_domain::verifactu as vf;
 
 use crate::db::{Reader, WriteGuard, Writer};
 use crate::mapping::{opt_text, v_f64, v_i64, v_string, v_dinero};
-use crate::util::{new_id, now_ms};
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // El bloque `SistemaInformatico`, inyectado por el shell
@@ -4142,9 +4139,9 @@ impl VerifactuRepository for SqliteVerifactuRepository {
         // no tiene nada que capturar en el outbox.
         let g = self.db.write().await;
         let ahora = now_ms();
-        g.execute_batch("BEGIN;").await.map_err(db_err)?;
+        g.transaccion(async {
         for r in resultados {
-            let res = g
+            g
                 .raw()
                 .execute(
                     // El CSV se guarda con `COALESCE(?, CSV)`: la propia documentación avisa de que
@@ -4163,14 +4160,10 @@ impl VerifactuRepository for SqliteVerifactuRepository {
                         opt_text(r.csv.clone()),
                     ],
                 )
-                .await;
-            if let Err(e) = res {
-                let _ = g.execute_batch("ROLLBACK;").await;
-                return Err(db_err(e));
-            }
+                .await.map_err(db_err)?;
         }
-        g.execute_batch("COMMIT;").await.map_err(db_err)?;
-        Ok(())
+            Ok(())
+        }).await
     }
 
     async fn marcar_intento(&self, ids: &[String]) -> AppResult<()> {
@@ -4206,22 +4199,10 @@ impl VerifactuRepository for SqliteVerifactuRepository {
         // En su propia transacción: la `F3` gasta número y entra en la cadena, así que o se escribe
         // entera o no se escribe.
         let g = self.db.write().await;
-        g.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res = async {
+        g.transaccion(async {
             let nums = numeros_de_ticket(&g, id_pagos).await?;
             emitir_sustitutiva(&g, &nums, destinatario).await
-        }
-        .await;
-        match res {
-            Ok(v) => {
-                g.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = g.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        }).await
     }
 
     async fn corregir_factura(
@@ -4231,17 +4212,7 @@ impl VerifactuRepository for SqliteVerifactuRepository {
     ) -> AppResult<BloqueFiscal> {
         // Las dos facturas de una corrección de F3 (la negativa y la nueva) van juntas o no van.
         let g = self.db.write().await;
-        g.execute_batch("BEGIN;").await.map_err(db_err)?;
-        match corregir_factura(&g, num_factura, destinatario).await {
-            Ok(v) => {
-                g.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = g.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        g.transaccion(corregir_factura(&g, num_factura, destinatario)).await
     }
 
     async fn obligado(&self) -> AppResult<Option<(String, String, bool)>> {
@@ -4269,17 +4240,7 @@ impl CanjePorNumero {
         destinatario: vf::Destinatario,
     ) -> AppResult<BloqueFiscal> {
         let g = self.0.write().await;
-        g.execute_batch("BEGIN;").await.map_err(db_err)?;
-        match emitir_sustitutiva(&g, &[num.to_string()], destinatario).await {
-            Ok(v) => {
-                g.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = g.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        g.transaccion(emitir_sustitutiva(&g, &[num.to_string()], destinatario)).await
     }
 }
 
@@ -4446,3 +4407,4 @@ mod tests_cola_de_envio {
         assert_eq!(fila(&db, "c").await.1, 1);
     }
 }
+

@@ -4,6 +4,8 @@
 //! estado vive en `Intentos_Login` (esquema compartido) pero es DEVICE-LOCAL: se escribe con la
 //! conexión `raw` (sin outbox), así que no se replica a la nube.
 
+use crate::consultas::{db_err};
+use crate::util::now_ms;
 use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
@@ -11,18 +13,6 @@ use tpv_domain::login::login_bloqueo_ms;
 
 use crate::db::{Db, Reader};
 use crate::mapping::v_i64;
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
-
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
 
 /// Rechaza si el usuario está bloqueado por intentos fallidos (LOGIN-01).
 pub async fn throttle_check(db: &Db, id_usuario: &str) -> AppResult<()> {
@@ -98,3 +88,5 @@ pub async fn throttle_registrar(db: &Db, id_usuario: &str, exito: bool) -> AppRe
     .map_err(db_err)?;
     Ok(())
 }
+
+

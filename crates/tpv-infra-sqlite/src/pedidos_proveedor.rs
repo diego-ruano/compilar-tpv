@@ -1,5 +1,7 @@
 //! Adaptador SQLite del repositorio de pedidos a proveedores. Local-First (sin outbox).
 
+use crate::util::{now_local_datetime, patron_contiene};
+use crate::consultas::{db_err};
 use std::sync::Arc;
 use std::collections::HashMap;
 
@@ -7,14 +9,13 @@ use async_trait::async_trait;
 use libsql::Value;
 use crate::ejecutor::Row;
 
-use tpv_application::error::{AppError, AppResult};
+use tpv_application::error::AppResult;
 use tpv_application::ports::pedidos_proveedor::PedidoProveedorRepository;
 use tpv_contracts::pedidos_proveedor::{LineaPedidoDto, PedidoProveedorDto, PedidosPageDto};
 use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_dinero, opt_text, v_dinero, v_f64, v_string};
-use crate::util::{now_local_datetime, patron_contiene};
 
 pub struct SqlitePedidoProveedorRepository {
     db: Arc<Db>,
@@ -24,10 +25,6 @@ impl SqlitePedidoProveedorRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 fn s(v: Value) -> String {
@@ -157,9 +154,8 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
     ) -> AppResult<String> {
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let id = pedido.id_pedido.clone();
-        let res: AppResult<String> = async {
+        conn.transaccion(async {
             let fecha = now_local_datetime();
             conn.execute(
                 r#"INSERT INTO Pedidos_Proveedor
@@ -194,18 +190,7 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
                 .map_err(db_err)?;
             }
             Ok(id.clone())
-        }
-        .await;
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        }).await
     }
 
     async fn actualizar(
@@ -219,8 +204,7 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         let id = id_pedido.to_string();
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = conn.transaccion(async {
             // PROV-01: el guard `Estado='borrador'` debe cubrir TODA la operación, no solo el
             // header. Si el UPDATE no afecta filas, el pedido no existe o ya no es borrador
             // (enviado/cancelado = inmutable): abortamos sin tocar las líneas y devolvemos un
@@ -269,18 +253,9 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
                 .map_err(db_err)?;
             }
             Ok(true)
-        }
-        .await;
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        }).await;
+
+        res
     }
 
     async fn cambiar_estado(
@@ -352,3 +327,4 @@ mod tests_busqueda {
         assert_eq!(ids(&repo, "50").await, vec!["p-50", "p-500"]);
     }
 }
+

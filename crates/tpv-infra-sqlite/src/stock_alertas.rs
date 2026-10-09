@@ -4,12 +4,13 @@
 //! de los que se recuperaron, los IDs de producto que hoy tienen una notificación de stock negativo
 //! activa. Solo lee: emitir/resolver es cosa del `Notifier`.
 
+use crate::consultas::{db_err};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use libsql::Value;
 
-use tpv_application::error::{AppError, AppResult};
+use tpv_application::error::AppResult;
 use tpv_application::ports::stock_alertas::{ProductoNegativo, StockAlertasRepository};
 
 use crate::db::{Db, Reader};
@@ -62,10 +63,6 @@ impl SqliteStockAlertasRepository {
     }
 }
 
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
-
 #[async_trait]
 impl StockAlertasRepository for SqliteStockAlertasRepository {
     async fn productos_en_negativo(&self) -> AppResult<Vec<ProductoNegativo>> {
@@ -109,3 +106,4 @@ impl StockAlertasRepository for SqliteStockAlertasRepository {
         Ok(out)
     }
 }
+

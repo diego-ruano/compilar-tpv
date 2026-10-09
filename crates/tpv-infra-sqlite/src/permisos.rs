@@ -41,8 +41,7 @@ impl PermisosRepository for SqlitePermisosRepository {
     async fn guardar(&self, actor: &str, input: GuardarPermisosInput) -> AppResult<()> {
         tpv_domain::permisos::validar_lista(&input.permisos).map_err(AppError::validation)?;
         let db = self.db.write().await;
-        db.execute_batch("BEGIN;").await.map_err(err)?;
-        let resultado: AppResult<()> = async {
+        db.transaccion(async {
             let mut filas = db.query("SELECT 1 FROM Usuarios u JOIN Roles r ON r.ID_Rol=u.ID_Rol WHERE u.ID_Usuario=?1 AND u.Estado='Activo' AND r.Nombre_Rol='Administrador'", vec![Value::Text(actor.into())]).await.map_err(err)?;
             if filas.next().await.map_err(err)?.is_none() { return Err(AppError::coded(ErrorCode::PermisoDenegado, "Sólo un administrador puede cambiar permisos")); }
             let mut filas = db.query("SELECT Nombre_Rol FROM Roles WHERE ID_Rol=?1", vec![Value::Text(input.id_rol.clone())]).await.map_err(err)?;
@@ -56,8 +55,7 @@ impl PermisosRepository for SqlitePermisosRepository {
                 db.execute("INSERT INTO Roles_Permisos (ID_Rol_Permiso, ID_Rol, Permiso) VALUES (?1,?2,?3)", vec![Value::Text(new_id()),Value::Text(input.id_rol.clone()),Value::Text(permiso)]).await.map_err(err)?;
             }
             Ok(())
-        }.await;
-        match resultado { Ok(()) => { db.execute_batch("COMMIT;").await.map_err(err)?; Ok(()) }, Err(e) => { let _ = db.execute_batch("ROLLBACK;").await; Err(e) } }
+        }).await
     }
 }
 

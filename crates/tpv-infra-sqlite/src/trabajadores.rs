@@ -1,6 +1,8 @@
 //! Adaptador SQLite del repositorio de **trabajadores / horarios**. Local-First:
 //! sin Applied_Operations, sin Outbox, sin idempotencia por op_id ni rama remota.
 
+use crate::util::new_id;
+use crate::consultas::{db_err};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
@@ -21,7 +23,6 @@ use tpv_domain::trabajadores::{
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_i64, v_string};
-use crate::util::new_id;
 
 /// RI-62: ¿este cambio deja el negocio sin ningún administrador activo? Sí cuando el usuario que se
 /// edita es administrador activo, deja de serlo (otro rol, o `Inactivo`) y no queda ningún otro.
@@ -192,17 +193,6 @@ impl SqliteTrabajadoresRepository {
         }
 
         Ok(convertidas)
-    }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    let mensaje = e.to_string();
-    if mensaje.contains("horario_solapado") {
-        AppError::conflict("Ese horario se solapa con otro tramo del trabajador. Corrige las horas antes de guardar.")
-    } else if mensaje.contains("horario_invalido") {
-        AppError::validation("El horario contiene una fecha o unas horas inválidas.")
-    } else {
-        AppError::repository(mensaje)
     }
 }
 
@@ -581,9 +571,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         let password_hash = hash_pin(&data.pin).map_err(AppError::validation)?;
         let db = self.db.write().await;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = db.transaccion(async {
             // UUIDv7 explícitos (la BD ya no autoincrementa).
             let id_usuario = new_id();
             db.execute(
@@ -628,19 +616,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             .map_err(db_err)?;
 
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn update_trabajador(
@@ -655,9 +633,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         };
         let db = self.db.write().await;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = db.transaccion(async {
             // RI-62: dentro de la transacción y con el cerrojo de escritura, así que nadie puede
             // degradar al otro administrador entre la comprobación y el UPDATE.
             if dejaria_sin_administrador(&db, &cambios).await? {
@@ -738,19 +714,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             }
 
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn guardar_asignacion(&self, id_asignacion: Option<String>, tramos: Vec<AsignacionNueva>) -> AppResult<bool> {
@@ -781,19 +747,16 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 if nuevos.iter().any(|nuevo| nuevo.solapa(&intervalo)) { return Err(AppError::conflict("Ese horario se solapa con otro tramo del trabajador. Corrige las horas antes de guardar.")); }
             }
         }
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let resultado: AppResult<bool> = async {
+        let resultado: AppResult<bool> = db.transaccion(async {
             db.execute("DELETE FROM Asignacion_Turnos WHERE COALESCE(ID_Grupo, ID_Asignacion) = ?1;", vec![Value::Text(grupo.clone())]).await.map_err(db_err)?;
             for (indice, tramo) in tramos.into_iter().enumerate() {
                 let id = ids.get(indice).cloned().unwrap_or_else(new_id);
                 db.execute("INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Grupo, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);", vec![Value::Text(id), Value::Text(grupo.clone()), Value::Text(tramo.id_trabajador), Value::Text(tramo.fecha), Value::Text(tramo.id_turno), Value::Text(tramo.area), opt_text(tramo.hora_inicio), opt_text(tramo.hora_fin), opt_text(tramo.notas)]).await.map_err(db_err)?;
             }
             Ok(true)
-        }.await;
-        match resultado {
-            Ok(ok) => { db.execute_batch("COMMIT;").await.map_err(db_err)?; Ok(ok) }
-            Err(error) => { let _ = db.execute_batch("ROLLBACK;").await; Err(error) }
-        }
+        }).await;
+
+        resultado
     }
 
     async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool> {
@@ -974,8 +937,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             });
         }
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = db.transaccion(async {
             if overwrite {
                 db.execute(
                     r#"
@@ -1022,19 +984,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             }
 
             Ok(inserted > 0 || overwrite)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn set_predeterminado_desde_semana(&self, fecha_lunes: String) -> AppResult<bool> {
@@ -1103,8 +1055,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         }
 
         // 2) Aplicar el mapa: borra el predeterminado de cada trabajador implicado e inserta.
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = db.transaccion(async {
             let mut trabajadores: Vec<String> = map.keys().map(|(t, _)| t.clone()).collect();
             trabajadores.sort_unstable();
             trabajadores.dedup();
@@ -1155,19 +1106,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             }
 
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 }
 
@@ -1704,3 +1645,4 @@ mod tests_cifrado {
         assert!(segundo.is_err(), "un DNI repetido debe seguir siendo un error");
     }
 }
+

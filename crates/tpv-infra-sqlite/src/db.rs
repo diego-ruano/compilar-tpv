@@ -15,9 +15,10 @@
 //!
 //! Los repositorios piden `db.read()` (→ `ReadGuard`) en sus métodos de solo-lectura y
 //! `db.write()` (→ `WriteGuard`) en los de escritura/transacción. Ambos guards implementan los
-//! traits `Reader` / `Writer`, de modo que los helpers (`select_one_*`, `try_exec`, …) son
+//! traits `Reader` / `Writer`, de modo que los helpers (`select_one_*`, …) son
 //! genéricos y los cuerpos de los métodos apenas cambian.
 
+use crate::util::now_ms;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
@@ -80,21 +81,58 @@ pub trait Writer: Reader {
     ) -> impl Future<Output = Result<u64, LibsqlError>> + Send;
 
     fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), LibsqlError>> + Send;
+
+    /// RI-32: todo el control transaccional en un sitio, incluida cancelación y COMMIT fallido.
+    fn abandonar_transaccion(&self);
+
+    fn transaccion<T: Send, F: Future<Output = tpv_application::error::AppResult<T>> + Send>(
+        &self, trabajo: F,
+    ) -> impl Future<Output = tpv_application::error::AppResult<T>> + Send {
+        async move {
+            use crate::consultas::db_err;
+            // Crear la guarda ANTES de esperar BEGIN: éste puede ejecutarse aunque se cancele.
+            let mut guarda = Reversion { writer: self, armada: true };
+            self.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;").await.map_err(db_err)?;
+            let resultado = match trabajo.await {
+                Ok(v) => self.execute_batch("COMMIT;").await.map(|_| v).map_err(db_err),
+                Err(e) => Err(e),
+            };
+            if resultado.is_err() {
+                if let Err(e) = self.execute_batch("ROLLBACK;").await {
+                    self.abandonar_transaccion();
+                    tracing::error!(error = %e, "No se pudo revertir la transacción");
+                }
+            }
+            guarda.armada = false;
+            resultado
+        }
+    }
+}
+
+struct Reversion<'a, W: Writer + ?Sized> { writer: &'a W, armada: bool }
+impl<W: Writer + ?Sized> Drop for Reversion<'_, W> {
+    fn drop(&mut self) { if self.armada { self.writer.abandonar_transaccion(); } }
+}
+
+// La conexión raw comparte control transaccional, pero nunca captura negocio en el outbox.
+impl Reader for Connection {
+    fn query(&self, sql: &str, params: impl Bindable + Send) -> impl Future<Output = Result<Rows, LibsqlError>> + Send {
+        Connection::query(self, sql, params.into_values())
+    }
+}
+impl Writer for Connection {
+    fn execute(&self, sql: &str, params: impl Bindable + Send) -> impl Future<Output = Result<u64, LibsqlError>> + Send {
+        Connection::execute(self, sql, params.into_values())
+    }
+    fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), LibsqlError>> + Send {
+        Connection::execute_batch(self, sql)
+    }
+    fn abandonar_transaccion(&self) { self.revertir_al_soltar(); }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers de captura (antes en recording.rs)
 // ──────────────────────────────────────────────────────────────────────────────
-
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        // Reloj corrupto (antes de epoch): i64::MAX evita que las entradas del outbox aparezcan
-        // "muy antiguas" y sean eliminadas prematuramente por lógica de purga.
-        .unwrap_or(i64::MAX)
-}
 
 fn value_to_json(v: &Value) -> Result<serde_json::Value, LibsqlError> {
     Ok(match v {
@@ -479,7 +517,9 @@ pub struct WriteGuard<'a> {
     bloqueadas: &'a AtomicBool,
     /// Buffer de la transacción en curso (Some entre BEGIN y COMMIT/ROLLBACK). Es LOCAL a este
     /// guard (solo hay uno vivo), así que no hay estado global compartido ni carreras.
-    tx_buf: Mutex<Option<Vec<SqlStatement>>>,
+    tx_buf: StdMutex<Option<Vec<SqlStatement>>>,
+    /// Serializa llamadas concurrentes hechas a través de un mismo guard, sin retener mutex std.
+    operacion: Mutex<()>,
     /// El instante de la transacción en curso (Some entre BEGIN y COMMIT/ROLLBACK): todas sus
     /// escrituras se fijan con él (CFG-04).
     instante: StdMutex<Option<Instante>>,
@@ -504,19 +544,13 @@ impl<'a> WriteGuard<'a> {
 
     /// El instante de la operación en curso: el de su transacción, o uno nuevo si es suelta.
     fn instante(&self) -> Instante {
-        self.instante
-            .lock()
-            .ok()
-            .and_then(|t| *t)
-            .unwrap_or_else(Instante::ahora)
+        self.instante.lock().unwrap_or_else(|p| p.into_inner()).unwrap_or_else(Instante::ahora)
     }
 
     /// Fija (o suelta, con `None`) el instante de la transacción. Es síncrono a propósito: el
     /// cerrojo no puede quedar vivo a través de un `await`.
     fn fijar_instante(&self, instante: Option<Instante>) {
-        if let Ok(mut t) = self.instante.lock() {
-            *t = instante;
-        }
+        *self.instante.lock().unwrap_or_else(|p| p.into_inner()) = instante;
     }
 
     /// Construye la escritura tal como se ejecuta en local y tal como sube a la nube: la misma
@@ -566,6 +600,12 @@ impl<'a> Reader for WriteGuard<'a> {
 }
 
 impl<'a> Writer for WriteGuard<'a> {
+    fn abandonar_transaccion(&self) {
+        *self.tx_buf.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        self.fijar_instante(None);
+        self.conn.revertir_al_soltar();
+    }
+
     fn execute(
         &self,
         sql: &str,
@@ -573,6 +613,7 @@ impl<'a> Writer for WriteGuard<'a> {
     ) -> impl Future<Output = Result<u64, LibsqlError>> + Send {
         let values = params.into_values();
         async move {
+            let _operacion = self.operacion.lock().await;
             let sql = sin_comentarios_iniciales(sql);
             // Sentencias que no capturamos (no son escritura replicable): directas.
             if !is_write_sql(sql) {
@@ -593,9 +634,9 @@ impl<'a> Writer for WriteGuard<'a> {
                 ));
             }
 
-            let mut buf = self.tx_buf.lock().await;
-            match buf.as_mut() {
-                Some(v) => {
+            let en_transaccion = self.tx_buf.lock().unwrap_or_else(|p| p.into_inner()).is_some();
+            match en_transaccion {
+                true => {
                     // Dentro de una transacción (BEGIN..COMMIT): ejecutamos el negocio y
                     // ACUMULAMOS la captura en el buffer; se vuelca en el COMMIT dentro de la
                     // misma transacción → ya es atómico (negocio + outbox commitean juntos).
@@ -604,15 +645,15 @@ impl<'a> Writer for WriteGuard<'a> {
                     // queda en local exactamente lo que sube (CFG-04).
                     let stmt = self.build_stmt(sql, &values)?;
                     let affected = self.conn.execute(&stmt.sql, values).await?;
-                    v.push(stmt);
+                    self.tx_buf.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
+                        .ok_or_else(|| LibsqlError::Misuse("Transacción abandonada".into()))?.push(stmt);
                     Ok(affected)
                 }
-                None => {
+                false => {
                     // Escritura suelta (autocommit). SYNC-02: envolvemos la escritura de negocio
                     // Y su registro en el outbox (`write_op`) en UNA sola transacción, para que un
                     // crash entre ambas no deje la fila escrita sin su entrada en el outbox (que
                     // nunca se replicaría). Todo o nada.
-                    drop(buf);
                     let stmt = self.build_stmt(sql, &values)?;
                     self.conn.execute_batch("BEGIN;").await?;
                     let res: Result<u64, LibsqlError> = async {
@@ -623,7 +664,10 @@ impl<'a> Writer for WriteGuard<'a> {
                     .await;
                     match res {
                         Ok(affected) => {
-                            self.conn.execute_batch("COMMIT;").await?;
+                            if let Err(e) = self.conn.execute_batch("COMMIT;").await {
+                                self.conn.revertir_al_soltar();
+                                return Err(e);
+                            }
                             // Outbox confirmado (autocommit): drenar la nube ya.
                             self.fire_outbox_notify();
                             Ok(affected)
@@ -641,18 +685,20 @@ impl<'a> Writer for WriteGuard<'a> {
     fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), LibsqlError>> + Send {
         let sql = sql.to_string();
         async move {
+            let _operacion = self.operacion.lock().await;
             match batch_kind(&sql) {
                 BatchKind::Begin => {
-                    *self.tx_buf.lock().await = Some(Vec::new());
+                    self.conn.execute_batch(&sql).await?;
+                    *self.tx_buf.lock().unwrap_or_else(|p| p.into_inner()) = Some(Vec::new());
                     // Una operación, un instante: todas las escrituras de esta transacción se fijan
                     // con la hora de ahora, aunque la transacción dure más de un segundo (CFG-04).
                     self.fijar_instante(Some(Instante::ahora()));
                     // libsql 0.9 devuelve `BatchRows` (las filas de cada sentencia del lote). Aquí
                     // no interesan: `execute_batch` se usa para DDL y control de transacción.
-                    self.conn.execute_batch(&sql).await.map(|_| ())
+                    Ok(())
                 }
                 BatchKind::Commit => {
-                    let buffered = self.tx_buf.lock().await.take();
+                    let buffered = self.tx_buf.lock().unwrap_or_else(|p| p.into_inner()).take();
                     self.fijar_instante(None);
                     let had_writes = buffered.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
                     // Registrar la operación en el outbox DENTRO de la misma transacción (BEGIN
@@ -671,6 +717,7 @@ impl<'a> Writer for WriteGuard<'a> {
                             if r.is_ok() && had_writes {
                                 self.fire_outbox_notify();
                             }
+                            if r.is_err() { self.conn.revertir_al_soltar(); }
                             r
                         }
                         Err(e) => {
@@ -681,7 +728,7 @@ impl<'a> Writer for WriteGuard<'a> {
                     }
                 }
                 BatchKind::Rollback => {
-                    *self.tx_buf.lock().await = None;
+                    *self.tx_buf.lock().unwrap_or_else(|p| p.into_inner()) = None;
                     self.fijar_instante(None);
                     self.conn.execute_batch(&sql).await.map(|_| ())
                 }
@@ -829,7 +876,8 @@ impl Db {
         WriteGuard {
             conn: &self.write.conn,
             bloqueadas: &self.escrituras_bloqueadas,
-            tx_buf: Mutex::new(None),
+            tx_buf: StdMutex::new(None),
+            operacion: Mutex::new(()),
             instante: StdMutex::new(None),
             outbox_notify: self.outbox_notify.clone(),
             _lock: lock,
@@ -843,6 +891,42 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancelar_una_transaccion_revierte_antes_de_reutilizar_el_guard() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let w = db.write().await;
+        let resultado = tokio::time::timeout(std::time::Duration::from_millis(30), w.transaccion(async {
+            w.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('cancelada', 'Cancelada')", ()).await.map_err(crate::consultas::db_err)?;
+            std::future::pending::<tpv_application::error::AppResult<()>>().await
+        })).await;
+        assert!(resultado.is_err());
+        w.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('valida', 'Valida')", ()).await.unwrap();
+        let mut r = w.query("SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'cancelada'", ()).await.unwrap();
+        assert_eq!(r.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 0);
+        let mut r = w.query("SELECT COUNT(*) FROM _Sync_Outbox", ()).await.unwrap();
+        assert_eq!(r.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn un_commit_con_fk_invalida_revierte_negocio_y_outbox() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let w = db.write().await;
+        w.raw().execute_batch("CREATE TABLE prueba_fk (z TEXT REFERENCES Zonas(ID_Zona) DEFERRABLE INITIALLY DEFERRED)").await.unwrap();
+        let res = w.transaccion(async {
+            w.execute("INSERT INTO prueba_fk VALUES ('no-existe')", ()).await.map_err(crate::consultas::db_err)?;
+            Ok(())
+        }).await;
+        assert!(res.is_err());
+        let mut r = w.query("SELECT (SELECT COUNT(*) FROM prueba_fk), (SELECT COUNT(*) FROM _Sync_Outbox)", ()).await.unwrap();
+        let fila = r.next().await.unwrap().unwrap();
+        assert_eq!(fila.get::<i64>(0).unwrap(), 0);
+        assert_eq!(fila.get::<i64>(1).unwrap(), 0);
+        w.transaccion(async {
+            w.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('tras-error', 'Valida')", ()).await.map_err(crate::consultas::db_err)?;
+            Ok(())
+        }).await.unwrap();
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn una_consulta_larga_y_sus_filas_no_bloquean_tokio() {
@@ -1350,3 +1434,4 @@ mod tests {
         );
     }
 }
+

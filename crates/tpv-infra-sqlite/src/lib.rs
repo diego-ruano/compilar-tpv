@@ -82,3 +82,5 @@ pub mod verifactu;
 pub mod verifactu_export;
 
 pub mod permisos;
+
+pub(crate) mod consultas;

@@ -28,6 +28,7 @@
 //! transacciones y no se apoya en ninguna tabla de control: si falta `_Verifactu_Envios` (una base
 //! restaurada a medias), el estado del envío sale vacío y los registros salen igual.
 
+use crate::consultas::{db_err};
 use std::io::Write;
 use std::path::Path;
 
@@ -37,10 +38,6 @@ use tpv_application::error::{AppError, AppResult};
 
 use crate::db::{Db, Reader};
 use crate::mapping::{v_i64, v_string};
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
 
 /// Una fila, con todo lo que hace falta para los cuatro ficheros.
 struct Fila {
@@ -529,3 +526,4 @@ mod tests {
         assert!(json.contains("\"primer_numero\":null"));
     }
 }
+

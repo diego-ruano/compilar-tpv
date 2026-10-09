@@ -163,9 +163,10 @@ pub struct Rows {
     id: u64,
     lote: VecDeque<Result<Row, Error>>,
     terminadas: bool,
-    pendiente: Option<std::pin::Pin<Box<dyn std::future::Future<Output = Result<Lote, Error>> + Send>>>,
+    pendiente: Option<PeticionLote>,
 }
 type Lote = (VecDeque<Result<Row, Error>>, bool);
+type PeticionLote = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Lote, Error>> + Send>>;
 
 impl Rows {
     pub async fn next(&mut self) -> Result<Option<Row>, Error> {

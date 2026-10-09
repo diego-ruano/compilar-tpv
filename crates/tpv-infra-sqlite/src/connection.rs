@@ -6,6 +6,9 @@
 //! (`packages/database/migrations/`, ver `migrations.rs`) y siembra el administrador inicial
 //! si la BD está vacía.
 
+use crate::util::ADMIN_USUARIO_ID;
+use crate::consultas::{db_err};
+use crate::util::now_ms;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -16,20 +19,6 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_domain::login::hash_pin;
 
 use crate::db::Db;
-use crate::util::ADMIN_USUARIO_ID;
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
-
-/// Marca de tiempo (ms desde epoch) para nombrar la copia de seguridad de la BD.
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(i64::MAX)
-}
 
 fn value_to_i64(v: Value) -> Option<i64> {
     match v {
@@ -231,3 +220,5 @@ pub async fn init_main_db(app_data_dir: &Path, aprovisionado: bool) -> AppResult
 
     Ok(db)
 }
+
+

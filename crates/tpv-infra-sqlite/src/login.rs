@@ -5,6 +5,8 @@
 //! Aquí se hace en local con la cripto del dominio (`verify_pin`/`hash_pin`); las consultas
 //! finas (registro, hash, setup, email) son funciones privadas que componen esas operaciones.
 
+use crate::util::new_id;
+use crate::consultas::{db_err};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -20,7 +22,6 @@ use tpv_domain::login::{
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::v_i64;
-use crate::util::new_id;
 
 pub struct SqliteLoginRepository {
     db: Arc<Db>,
@@ -31,10 +32,6 @@ impl SqliteLoginRepository {
         Self { db }
     }
 
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 /// ¿Hay AL MENOS un usuario en la BD? Ver `setup_pendiente`: cero usuarios no es un estado
@@ -451,9 +448,7 @@ pub(crate) async fn exec_punch<C: Writer>(
     let fecha = today_ymd();
     let hora_evento = now_iso();
 
-    conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-
-    let res: AppResult<PunchStatus> = async {
+    let res: AppResult<PunchStatus> = conn.transaccion(async {
         if tipo == "entrada" {
             // RI-05: el abierto que bloquea puede ser de ayer (un turno de noche sin cerrar).
             if fichaje_en_curso(conn, id_usuario).await?.is_some() {
@@ -567,19 +562,9 @@ pub(crate) async fn exec_punch<C: Writer>(
 
             build_punch_status(conn, id_usuario, &fecha_jornada).await
         }
-    }
-    .await;
+    }).await;
 
-    match res {
-        Ok(status) => {
-            conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-            Ok(status)
-        }
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK;").await;
-            Err(e)
-        }
-    }
+    res
 }
 
 #[async_trait]
@@ -1331,3 +1316,4 @@ async fn verificar_pin_sin_bloquear(pin: &str, hash: &str) -> AppResult<Result<(
     tokio::task::spawn_blocking(move || verify_pin(&pin, &hash)).await
         .map_err(|e| AppError::validation(format!("No se ha podido comprobar el PIN: {e}")))
 }
+

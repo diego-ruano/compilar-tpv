@@ -1,5 +1,7 @@
 //! Adaptador SQLite del repositorio de cuentas (caja). Local-First (sin outbox/applied).
 
+use crate::util::new_id;
+use crate::consultas::{db_err};
 use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
@@ -24,7 +26,6 @@ use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
 use tpv_domain::cantidad::redondear_cantidad;
-use crate::util::new_id;
 
 pub struct SqliteCuentasRepository {
     db: Arc<Db>,
@@ -34,10 +35,6 @@ impl SqliteCuentasRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 /// La cláusula WHERE de un listado de caja: el rango de días y, si lo hay, el cursor de la página.
@@ -779,10 +776,7 @@ impl CuentasRepository for SqliteCuentasRepository {
         } = args;
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
-            .await
-            .map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = conn.transaccion(async {
             // 1) Comanda, importe y ESTADO del pago, antes de tocar nada.
             let Some(cobro) = cobro_guardado(conn, &id_pago).await? else {
                 // El pago no existe: nada que revertir.
@@ -1040,18 +1034,9 @@ impl CuentasRepository for SqliteCuentasRepository {
             }
 
             Ok(affected > 0)
-        }
-        .await;
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        }).await;
+
+        res
     }
 
     async fn lineas_devolubles(&self, id_pago: &str) -> AppResult<Option<CobroDevolubleDto>> {
@@ -1098,10 +1083,7 @@ impl CuentasRepository for SqliteCuentasRepository {
         } = args;
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
-            .await
-            .map_err(db_err)?;
-        let res: AppResult<DevolucionDto> = async {
+        let res: AppResult<DevolucionDto> = conn.transaccion(async {
             let cobro = cobro_guardado(conn, &id_pago)
                 .await?
                 .ok_or_else(|| AppError::not_found("Ese cobro no existe."))?;
@@ -1302,18 +1284,9 @@ impl CuentasRepository for SqliteCuentasRepository {
                 importe: -total,
                 num_factura,
             })
-        }
-        .await;
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        }).await;
+
+        res
     }
 }
 
@@ -5156,3 +5129,4 @@ mod tests_devolucion_parcial {
         assert_cadena_sana(&db).await;
     }
 }
+

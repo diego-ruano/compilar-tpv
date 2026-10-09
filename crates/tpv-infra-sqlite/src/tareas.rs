@@ -1,7 +1,8 @@
-//! Adaptador SQLite del repositorio de **tareas**. Local-First: sin Applied_Operations,
-//! sin Outbox, sin idempotencia por op_id. Las escrituras multi-sentencia van en una
-//! transacción explícita (BEGIN/COMMIT/ROLLBACK), igual que el resto de repositorios.
+//! Adaptador SQLite de tareas. Las escrituras se capturan en el outbox;
+//! las operaciones con varias sentencias usan Writer::transaccion (RI-32).
 
+use crate::util::new_id;
+use crate::consultas::{db_err, select_one_i64};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -16,7 +17,6 @@ use tpv_domain::tareas::TareaData;
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_i64, v_string};
-use crate::util::new_id;
 
 pub struct SqliteTareasRepository {
     db: Arc<Db>,
@@ -28,27 +28,11 @@ impl SqliteTareasRepository {
     }
 }
 
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
-
 fn build_in_placeholders(start: i64, count: usize) -> String {
     (0..count)
         .map(|i| format!("?{}", start + i as i64))
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-async fn select_one_i64<C: Reader>(
-    conn: &C,
-    sql: &str,
-    args: Vec<Value>,
-) -> AppResult<Option<i64>> {
-    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
-    if let Some(row) = rows.next().await.map_err(db_err)? {
-        return Ok(v_i64(row.get_value(0).map_err(db_err)?));
-    }
-    Ok(None)
 }
 
 async fn exists_tarea<C: Reader>(conn: &C, id_tarea: &str) -> AppResult<bool> {
@@ -369,8 +353,7 @@ impl TareasRepository for SqliteTareasRepository {
         let g = self.db.write().await;
         let conn = &g;
 
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = conn.transaccion(async {
             // UUIDv7 explícito (la BD ya no autoincrementa el id).
             let id_tarea = new_id();
             conn.execute(
@@ -397,19 +380,9 @@ impl TareasRepository for SqliteTareasRepository {
             apply_set_asignaciones_core(conn, &id_tarea, &ids_trabajadores).await?;
 
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn update_tarea(&self, id_tarea: &str, data: TareaData) -> AppResult<bool> {
@@ -455,23 +428,12 @@ impl TareasRepository for SqliteTareasRepository {
             return Err(AppError::not_found("Tarea no encontrada"));
         }
 
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = conn.transaccion(async {
             apply_set_asignaciones_core(conn, id_tarea, &ids_trabajadores).await?;
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     /// TAR-05: el borrado es **reversible**. En vez de perder la fila (y sus asignaciones por
@@ -578,8 +540,7 @@ impl TareasRepository for SqliteTareasRepository {
         let g = self.db.write().await;
         let conn = &g;
 
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<i64> = async {
+        let res: AppResult<i64> = conn.transaccion(async {
             conn.execute(
                 r#"
                 DELETE FROM Tarea_Asignaciones
@@ -601,19 +562,9 @@ impl TareasRepository for SqliteTareasRepository {
                 .map_err(db_err)?;
 
             Ok(borradas as i64)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn marcar_finalizada(&self, id_tarea: &str, id_trabajador: &str) -> AppResult<bool> {
@@ -642,3 +593,4 @@ impl TareasRepository for SqliteTareasRepository {
         Ok(true)
     }
 }
+

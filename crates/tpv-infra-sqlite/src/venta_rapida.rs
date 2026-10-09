@@ -2,6 +2,8 @@
 //! sin Applied_Operations, sin Outbox, sin idempotencia por op_id ni ramas remote_id. El cobro sí es
 //! idempotente, por su `ID_Pago`, que genera la pantalla (ver `cobrar_fraccionado`).
 
+use crate::util::{new_id, CANAL_BARRA};
+use crate::consultas::{db_err, trabajador_id_from_usuario, resolve_trabajador_id_input, update_total_comanda_sql};
 use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
@@ -19,7 +21,6 @@ use tpv_domain::venta_rapida::CobroFraccionado;
 use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
-use crate::util::{new_id, CANAL_BARRA};
 
 pub struct SqliteVentaRapidaRepository {
     db: Arc<Db>,
@@ -59,8 +60,7 @@ impl SqliteVentaRapidaRepository {
 
         let detalles = data.detalles.clone();
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<String> = async {
+        let res: AppResult<String> = db.transaccion(async {
             // Un cobro que ya existe no se repite: se devuelve su número. Pasa cuando la aplicación
             // se cae después de este COMMIT y antes de que la pantalla quite el cobro de su cola: al
             // volver lo reintenta con el mismo id y, sin esto, se encontraba las líneas ya cobradas,
@@ -322,82 +322,16 @@ impl SqliteVentaRapidaRepository {
 
             crate::cobros_pendientes::quitar(g, &id_pago_final).await?;
             Ok(numero_ticket.clone())
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
 
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 fn clamp_pending_sql(expr: &str) -> String {
     format!("CASE WHEN ({e}) < 0 THEN 0 ELSE ({e}) END", e = expr)
-}
-
-fn update_total_comanda_sql() -> &'static str {
-    r#"
-    UPDATE Comandas
-    SET Total_Comanda = (
-      SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
-      FROM Detalle_Comanda
-      WHERE ID_Comanda = ?1
-    )
-    WHERE ID_Comanda = ?1;
-    "#
-}
-
-async fn trabajador_id_from_usuario<C: Reader>(
-    db: &C,
-    id_usuario: Option<String>,
-) -> AppResult<Option<String>> {
-    let Some(idu) = id_usuario.filter(|s| !s.trim().is_empty()) else {
-        return Ok(None);
-    };
-    let mut rows = db
-        .query(
-            "SELECT ID_Trabajador FROM Trabajadores WHERE ID_Usuario=?1 LIMIT 1;",
-            vec![Value::Text(idu)],
-        )
-        .await
-        .map_err(db_err)?;
-    if let Some(r) = rows.next().await.map_err(db_err)? {
-        return Ok(norm_opt_string(r.get_value(0).map_err(db_err)?));
-    }
-    Ok(None)
-}
-
-async fn resolve_trabajador_id_input<C: Reader>(
-    db: &C,
-    id_maybe: Option<String>,
-) -> AppResult<Option<String>> {
-    let Some(x) = id_maybe.filter(|s| !s.trim().is_empty()) else {
-        return Ok(None);
-    };
-    let mut rows = db
-        .query(
-            "SELECT 1 FROM Trabajadores WHERE ID_Trabajador=?1 LIMIT 1;",
-            vec![Value::Text(x.clone())],
-        )
-        .await
-        .map_err(db_err)?;
-    if rows.next().await.map_err(db_err)?.is_some() {
-        return Ok(Some(x));
-    }
-    trabajador_id_from_usuario(db, Some(x)).await
 }
 
 async fn trabajador_id_from_comanda<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Option<String>> {
@@ -830,8 +764,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let id_trabajador_real = resolve_trabajador_id_input(db, id_trabajador).await?;
         let id_comanda_final = new_id();
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<String> = async {
+        let res: AppResult<String> = db.transaccion(async {
             // Ticket de venta rápida: SIN mesa (Canal='BARRA'). Ya no compite con otros tickets
             // abiertos, así que tampoco hace falta la antigua purga de comandas de barra vacías
             // (existía solo para esquivar el índice único que compartían todas por la mesa BARRA).
@@ -858,19 +791,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             .map_err(db_err)?;
 
             Ok(id_comanda_final)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(id) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(id)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn add_linea_comanda(
@@ -893,9 +816,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             crate::mesas::snapshot_del_producto(&r, id_producto).await?
         };
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let precio = producto.precio;
-        let res: AppResult<String> = async {
+        let res: AppResult<String> = db.transaccion(async {
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda
@@ -930,19 +852,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 .map_err(db_err)?;
 
             Ok(id_detalle_final)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(id_detalle) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(VrLineaAnadida { id_detalle, precio_unitario: precio })
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res.map(|id_detalle| VrLineaAnadida { id_detalle, precio_unitario: precio })
     }
 
     async fn remove_last_unpaid_linea(
@@ -953,8 +865,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let g = self.db.write().await;
         let db = &g;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = db.transaccion(async {
             // RI-59: la última por clave (UUIDv7), pero antes una que cocina no haya preparado.
             db.execute(
                 r#"
@@ -979,27 +890,16 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 .map_err(db_err)?;
 
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn delete_linea_if_unpaid(&self, id_comanda: &str, id_detalle: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let db = &g;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = db.transaccion(async {
             db.execute(
                 r#"
                 DELETE FROM Detalle_Comanda
@@ -1019,19 +919,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 .map_err(db_err)?;
 
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     async fn update_nota_detalle(&self, id_detalle: &str, nota: Option<String>) -> AppResult<bool> {
@@ -1091,8 +981,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let g = self.db.write().await;
         let db = &g;
 
-        db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = db.transaccion(async {
             // Basta con que la comanda tenga UN cobro, activo o anulado (CUENTA-07). Y no es una
             // sutileza: `Pagos.ID_Comanda` va con `ON DELETE CASCADE`, así que borrar la comanda
             // se llevaría por delante la fila del cobro anulado — que es justo la prueba que este
@@ -1136,19 +1025,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             }
 
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 }
 
@@ -1348,3 +1227,4 @@ mod tests_cobro_repetido {
     }
 
 }
+

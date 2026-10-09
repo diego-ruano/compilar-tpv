@@ -12,6 +12,8 @@
 //! contenido, no por el nombre.
 
 use std::io::{BufReader, BufWriter, Read, Write};
+use crate::consultas::db_err;
+use crate::util::now_ms;
 use std::path::{Path, PathBuf};
 
 use libsql::{Builder, Value};
@@ -52,20 +54,8 @@ const ANTES_DE_TRASLADO_PREFIX: &str = "antes-de-traslado-";
 /// no puede borrarla, porque esa copia también es de antes del traslado.
 const MARCA_TRASLADO: &str = "traslado-pendiente";
 
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
-}
-
 fn corrupta(e: impl std::fmt::Display) -> AppError {
     AppError::coded(ErrorCode::BackupCorrupt, e.to_string())
-}
-
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(i64::MAX)
 }
 
 fn valor_i64(value: Value) -> Option<i64> {
@@ -1667,3 +1657,5 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+

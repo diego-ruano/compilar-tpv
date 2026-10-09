@@ -1,5 +1,7 @@
 //! Adaptador SQLite del repositorio de reservas. Local-First puro (sin outbox/applied).
 
+use crate::util::new_id;
+use crate::consultas::{db_err, select_one_i64};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,7 +16,6 @@ use tpv_domain::reservas::{ClienteReserva, ModoSolape, ReservaValidada, DURACION
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_text, v_i64, v_string};
-use crate::util::new_id;
 
 pub struct SqliteReservasRepository {
     db: Arc<Db>,
@@ -24,10 +25,6 @@ impl SqliteReservasRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 fn s(v: Value) -> String {
@@ -40,18 +37,6 @@ fn i(v: Value) -> i64 {
 
 fn opt_int(o: Option<i64>) -> Value {
     o.map(Value::Integer).unwrap_or(Value::Null)
-}
-
-async fn select_one_i64<C: Reader>(
-    conn: &C,
-    sql: &str,
-    args: Vec<Value>,
-) -> AppResult<Option<i64>> {
-    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
-    let Some(row) = rows.next().await.map_err(db_err)? else {
-        return Ok(None);
-    };
-    Ok(v_i64(row.get_value(0).map_err(db_err)?))
 }
 
 /// Un cliente tal y como está guardado (para el merge «sólo rellenar huecos» y para la búsqueda).
@@ -371,9 +356,7 @@ impl ReservasRepository for SqliteReservasRepository {
     async fn guardar(&self, r: ReservaValidada, forzar_solape: bool) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = conn.transaccion(async {
             // UUIDv7 explícito: si no viene id (alta), lo generamos. Upsert por id.
             let id_reserva = r.id.clone().unwrap_or_else(new_id);
 
@@ -444,19 +427,9 @@ impl ReservasRepository for SqliteReservasRepository {
             }
 
             Ok(true)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 
     /// RI-61: primero por email, que identifica; luego por teléfono. Espejo de `buscarCliente` en el
@@ -486,9 +459,7 @@ impl ReservasRepository for SqliteReservasRepository {
     async fn eliminar(&self, id_reserva: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = conn.transaccion(async {
             // La comanda pierde la reserva pero conserva su cliente (`ID_Cliente`, fijado al
             // cobrar): el gasto del cliente no se descuadra por borrar la reserva (RI-61).
             conn.execute(
@@ -507,19 +478,9 @@ impl ReservasRepository for SqliteReservasRepository {
                 .map_err(db_err)?;
 
             Ok(affected > 0)
-        }
-        .await;
+        }).await;
 
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        res
     }
 }
 
@@ -765,3 +726,4 @@ mod tests_solape {
         assert!(repo.guardar(sin_mesa, false).await.unwrap());
     }
 }
+

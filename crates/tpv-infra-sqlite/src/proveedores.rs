@@ -1,5 +1,7 @@
 //! Adaptador SQLite del repositorio de proveedores. Local-First (sin outbox/applied).
 
+use crate::util::new_id;
+use crate::consultas::{db_err};
 use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
@@ -14,7 +16,6 @@ use tpv_domain::proveedores::ProveedorValidado;
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_text, v_dinero, v_f64, v_string};
-use crate::util::new_id;
 
 pub struct SqliteProveedoresRepository {
     db: Arc<Db>,
@@ -24,10 +25,6 @@ impl SqliteProveedoresRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn db_err(e: impl std::fmt::Display) -> AppError {
-    AppError::repository(e.to_string())
 }
 
 /// Traduce errores de escritura de proveedor. Las columnas `Email` y `CIF` son `UNIQUE`
@@ -217,8 +214,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
     async fn eliminar(&self, id_proveedor: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = conn.transaccion(async {
             conn.execute(
                 "UPDATE Lotes_Producto SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
                 vec![Value::Text(id_proveedor.to_string())],
@@ -256,25 +252,15 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                 .await
                 .map_err(db_err)?;
             Ok(affected > 0)
-        }
-        .await;
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        }).await;
+
+        res
     }
 
     async fn set_vinculos(&self, id_proveedor: &str, producto_ids: Vec<String>) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<bool> = conn.transaccion(async {
             conn.execute(
                 "UPDATE Productos SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
                 vec![Value::Text(id_proveedor.to_string())],
@@ -290,17 +276,9 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                 .map_err(db_err)?;
             }
             Ok(true)
-        }
-        .await;
-        match res {
-            Ok(v) => {
-                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(v)
-            }
-            Err(e) => {
-                let _ = conn.execute_batch("ROLLBACK;").await;
-                Err(e)
-            }
-        }
+        }).await;
+
+        res
     }
 }
+

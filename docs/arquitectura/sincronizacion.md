@@ -79,6 +79,11 @@ copiadas en lotes de 64. Una cancelación no interrumpe SQL ya iniciado: la limp
 encola antes del siguiente escritor. Para sustituir el fichero se espera el cierre confirmado de
 los ejecutores. Abrir, migrar y comprobar copias efímeras también ocurre fuera del runtime async.
 
+Las operaciones con varias sentencias usan `Writer::transaccion(async { … })` (RI-32), también
+para lotes locales y remotos sin captura. El helper confirma negocio y outbox juntos y revierte
+si falla el cuerpo, el outbox o el COMMIT. Una guarda encola la reversión al cancelar o entrar en
+pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esperar una operación.
+
 - **Toda escritura local de negocio pasa por `WriteGuard::execute`**, que la captura en el outbox. Qué
   es escritura lo decide la cabeza de la sentencia **sin los comentarios de delante**
   (`sin_comentarios_iniciales` → `is_write_sql`), y lo que sube va sin ellos. Un `WITH … INSERT` no se
