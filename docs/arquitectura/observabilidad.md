@@ -125,11 +125,25 @@ reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idem
 | Salud | `apps/cloud-worker-licensing/src/server/salud.ts` |
 | Esquema de evento | `crates/tpv-telemetry/src/event.rs` → `packages/contracts/src/generated/telemetry.ts` (ts-rs) |
 
+## Release de Sentry y source maps
+
+El cliente de Sentry se inicializa en `apps/tpv-main/src-tauri/src/lib.rs` con la versión de la
+crate `tpv` (`CARGO_PKG_VERSION`). El plugin de Vite sólo genera y sube source maps cuando el build
+recibe `SENTRY_AUTH_TOKEN`; los asocia a `SENTRY_RELEASE` o, si falta, a la versión de
+`apps/tpv-main/package.json`. Esa variable no cambia la release de los eventos nativos.
+
+El workflow `release.yml` pasa `TPV_SENTRY_DSN`, pero no pasa `SENTRY_AUTH_TOKEN` ni `SENTRY_RELEASE`.
+Además comprueba tag, `tauri.conf.json` y `src-tauri/Cargo.toml`, sin comprobar la versión del paquete
+frontend. Por tanto, la subida de mapas y la coherencia automática de ambas releases siguen
+pendientes (RI-24); cambiar esta documentación no configura esas variables ni corrige el workflow.
+
 ## Configuración
 
 | Variable | Dónde | Qué |
 |---|---|---|
 | `TPV_SENTRY_DSN` | Entorno del build de escritorio (release) | DSN de `tpv-desktop` |
+| `SENTRY_AUTH_TOKEN` | Entorno del build Vite (hoy no lo pasa `release.yml`) | Habilita la generación y subida de source maps |
+| `SENTRY_RELEASE` | Entorno del build Vite (opcional; hoy no lo pasa `release.yml`) | Release de los mapas; por defecto, versión de `apps/tpv-main/package.json` |
 | `SENTRY_DSN` | Secreto del worker | DSN de `tpv-api` |
 | `ENVIRONMENT` | `vars` del worker (hoy ausente) | Entorno en Sentry |
 | `AXIOM_TOKEN` | Secreto del worker | Ingesta |

@@ -48,6 +48,19 @@ firma (`pnpm --filter @tpv/main tauri build`, con `TPV_SENTRY_DSN` si está), bu
 `<raíz>/target/release/bundle/nsis/` (el workspace es virtual), sube el `.exe` a R2 y publica en el feed
 **en el canal `beta`**, con el contenido del `.sig`.
 
+### Versiones y mapas de Sentry
+
+El workflow comprueba las dos versiones del paso 1 frente al tag; no comprueba
+`apps/tpv-main/package.json`. Esa versión se usa como release de los mapas de Vite cuando falta
+`SENTRY_RELEASE`, mientras que los eventos usan `CARGO_PKG_VERSION` de la crate `tpv`.
+Si se habilita la subida de mapas, su release debe coincidir con la de los eventos: el valor de
+`SENTRY_RELEASE` sólo afecta al plugin de Vite.
+
+Actualmente `release.yml` no pasa `SENTRY_AUTH_TOKEN` ni `SENTRY_RELEASE`, por lo que no genera ni
+sube source maps. Es una limitación pendiente de RI-24; el paso que compila con `TPV_SENTRY_DSN`
+no habilita esa subida. Detalles en
+[observabilidad.md](../arquitectura/observabilidad.md#release-de-sentry-y-source-maps).
+
 ## Bares piloto y promoción (RI-30)
 
 Una versión recién publicada sólo la ven los equipos de los negocios marcados como piloto

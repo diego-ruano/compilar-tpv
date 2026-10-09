@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
-// Versión de la app (para nombrar el release de Sentry). Ver nota de coherencia más abajo.
+// Versión del paquete frontend, usada como release de los source maps si no hay SENTRY_RELEASE.
 const version = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf8"),
 ).version;
@@ -17,10 +17,11 @@ const version = JSON.parse(
 // (build de release / CI). En dev o en un build local sin token es un no-op total: ni sube
 // nada ni falla, así que es seguro dejarlo cableado siempre.
 //
-// ⚠️ El `release` DEBE coincidir con el que llevan los eventos, que es el CARGO_PKG_VERSION
-// del crate `tpv` (lo fija main.rs). Si divergen, Sentry recibe la traza pero no sabe
-// symbolicarla. CI puede forzarlo con SENTRY_RELEASE; por defecto usamos la versión del
-// package.json (hoy 0.1.0, igual que Cargo).
+// RI-24: los eventos usan CARGO_PKG_VERSION de `tpv`, fijado en `src-tauri/src/lib.rs`.
+// La subida de mapas usa SENTRY_RELEASE o la versión de este package.json; esa variable
+// no cambia la release de los eventos nativos. Ambas deben coincidir para simbolizar.
+// El workflow actual sólo valida tag/tauri.conf.json/Cargo.toml y no configura la subida
+// de mapas: no pasa SENTRY_AUTH_TOKEN ni SENTRY_RELEASE.
 const sentryPlugins = process.env.SENTRY_AUTH_TOKEN
   ? [
       sentryVitePlugin({
