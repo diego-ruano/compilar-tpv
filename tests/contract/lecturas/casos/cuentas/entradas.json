@@ -13,7 +13,7 @@
     "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-suelta', 'BARRA', '2026-05-13 12:00:00', 'Pagada');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-a', 'com-mesa-cli', '2026-05-10 13:05:30', 'Efectivo', 2450, 'total');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-b', 'com-mesa-sin', '2026-05-11 13:05:30', 'Tarjeta', 1000, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-c', 'com-barra', '2026-05-12 20:00:00', 'Bizum', 725, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-c', 'com-barra', '2026-05-12 20:00:00', 'Efectivo', 725, 'total');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-d', 'com-suelta', '2026-05-12 20:00:00', 'Efectivo', 300, 'total');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion) VALUES ('pago-e', 'com-suelta', '2026-05-09 10:00:00', 'Efectivo', 4000, 'total', 'ANULADO', '2026-05-14 09:00:00', 'user-1', 'se lo llevo puesto');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion) VALUES ('pago-f', 'com-mesa-cli', '2026-05-15 11:00:00', 'Otro', -450, 'DEVOLUCION', 'pago-a', 'la tarta estaba fria');",

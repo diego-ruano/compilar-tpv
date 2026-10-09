@@ -19,7 +19,7 @@ pub trait MesasRepository: Send + Sync {
     async fn load_layout(&self) -> AppResult<Vec<SalonOut>>;
 
     /* Reservas */
-    async fn set_reserva_estado(&self, id_reserva: &str, estado: String) -> AppResult<()>;
+    async fn set_reserva_estado(&self, id_reserva: &str, estado: tpv_domain::estados::EstadoReserva) -> AppResult<()>;
 
     /* Comandas de mesa */
     async fn get_comanda_abierta_by_mesa(&self, id_mesa: &str) -> AppResult<Option<ComandaRow>>;
@@ -65,6 +65,6 @@ pub trait MesasRepository: Send + Sync {
         &self,
         id_detalle: &str,
         id_usuario_cocinero: &str,
-        estado: String,
+        estado: tpv_domain::estados::EstadoCocina,
     ) -> AppResult<()>;
 }

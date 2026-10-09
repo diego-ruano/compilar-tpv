@@ -1,37 +1,18 @@
 //! Dominio de **mesas / salón / comandas / cocina**: validaciones y value objects puros.
 
 /// Texto obligatorio: recorta y exige no vacío.
-pub fn requerido(input: &str, field: &str) -> Result<String, String> {
-    let out = input.trim().to_string();
-    if out.is_empty() {
-        return Err(format!("{field} required"));
-    }
-    Ok(out)
-}
+pub use crate::texto::requerido;
 
 /// Texto opcional normalizado: recorta y descarta vacíos.
-pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
-    input.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t)
-        }
-    })
-}
+pub use crate::texto::limpiar_opcional;
 
 /// Normalización del método de pago: reexporta la única implementación compartida
 /// (case-insensitive) para evitar divergencias entre dominios (CUENTA-03).
 pub use crate::pago::normalize_metodo;
 
 /// Normaliza el estado de cocina de una línea: "PREPARADO" o "PENDIENTE".
-pub fn normalize_estado_cocina(input: &str) -> String {
-    if input.trim().to_uppercase() == "PREPARADO" {
-        "PREPARADO".to_string()
-    } else {
-        "PENDIENTE".to_string()
-    }
+pub fn normalize_estado_cocina(input: &str) -> Result<crate::estados::EstadoCocina, String> {
+    crate::estados::EstadoCocina::desde_texto(input)
 }
 
 /// Datos para abrir una comanda de mesa (ya validados).
@@ -47,7 +28,7 @@ pub struct AbrirComandaData {
 #[derive(Debug, Clone)]
 pub struct CobroDetalles {
     pub id_comanda: String,
-    pub metodo: String,
+    pub metodo: crate::pago::MetodoPago,
     pub tipo: String,
     pub detalle_ids: Vec<String>,
     pub id_usuario: Option<String>,
@@ -74,14 +55,15 @@ mod tests {
     }
 
     #[test]
-    fn cocina_solo_reconoce_preparado() {
-        assert_eq!(normalize_estado_cocina(" preparado "), "PREPARADO");
-        for estado in ["", "pendiente", "cocinando", "servido"] { assert_eq!(normalize_estado_cocina(estado), "PENDIENTE"); }
+    fn cocina_admite_estados_conocidos_y_rechaza_desconocidos() {
+        assert_eq!(normalize_estado_cocina(" preparado ").unwrap().como_texto(), "PREPARADO");
+        assert_eq!(normalize_estado_cocina("pendiente").unwrap().como_texto(), "PENDIENTE");
+        for estado in ["", "cocinando", "servido"] { assert!(normalize_estado_cocina(estado).is_err()); }
     }
 
     #[test]
     fn metodo_de_pago_usa_normalizador_compartido() {
-        assert_eq!(normalize_metodo("TaRjEtA"), "Tarjeta");
-        assert_eq!(normalize_metodo("otro"), "Efectivo");
+        assert_eq!(normalize_metodo("TaRjEtA").unwrap().como_texto(), "Tarjeta");
+        assert!(normalize_metodo("otro").is_err());
     }
 }

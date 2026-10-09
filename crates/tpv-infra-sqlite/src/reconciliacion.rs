@@ -368,7 +368,7 @@ mod tests {
                 // El cobro ocurrió: el pago está, pero el gasto del cliente se quedó a 0 (el
                 // incremento es best-effort y el pago commitea igual si falla).
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                   VALUES ('pago', 'com', '2026-01-02 14:00:00', 'EFECTIVO', 2550, 'TOTAL');",
+                   VALUES ('pago', 'com', '2026-01-02 14:00:00', 'Efectivo', 2550, 'TOTAL');",
             ],
         )
         .await;
@@ -420,7 +420,7 @@ mod tests {
                 "INSERT INTO Comandas (ID_Comanda, ID_Mesa, ID_Cliente, Canal, Fecha_Hora_Apertura, Estado)
                    VALUES ('com', 'mesa', 'cli', 'MESA', '2026-01-02 13:00:00', 'Pagada');",
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                   VALUES ('pago', 'com', '2026-01-02 14:00:00', 'EFECTIVO', 2550, 'TOTAL');",
+                   VALUES ('pago', 'com', '2026-01-02 14:00:00', 'Efectivo', 2550, 'TOTAL');",
             ],
         )
         .await;

@@ -1,37 +1,13 @@
 //! Dominio de **tareas**: validaciones y value objects puros.
 
 /// Texto obligatorio: recorta y exige no vacío.
-pub fn requerido(input: &str, field: &str) -> Result<String, String> {
-    let out = input.trim().to_string();
-    if out.is_empty() {
-        return Err(format!("{field} required"));
-    }
-    Ok(out)
-}
+pub use crate::texto::requerido;
 
 /// Texto opcional normalizado: recorta y descarta vacíos.
-pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
-    input.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t)
-        }
-    })
-}
+pub use crate::texto::limpiar_opcional;
 
 /// Normaliza una lista de IDs: recorta, descarta vacíos, ordena y deduplica.
-pub fn normalizar_ids(ids: Vec<String>) -> Vec<String> {
-    let mut ids: Vec<String> = ids
-        .into_iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
-}
+pub use crate::texto::normalizar_ids;
 
 /// Datos de una tarea (sin id de creación; el id lo gestiona la persistencia).
 #[derive(Debug, Clone)]

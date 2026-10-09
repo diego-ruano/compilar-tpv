@@ -363,7 +363,7 @@ mod tests {
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent)
            VALUES ('d2', 'com', 'p2', 'Tostada', 1, 250, 21);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket)
-           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'EFECTIVO', 510, 'TOTAL', 'T-000007');",
+           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 510, 'TOTAL', 'T-000007');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd1');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd2');",
     ];
@@ -389,7 +389,7 @@ mod tests {
         let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
 
         assert_eq!(t.numero_ticket, "T-000007");
-        assert_eq!(t.metodo_pago, "EFECTIVO");
+        assert_eq!(t.metodo_pago, "Efectivo");
     }
 
     #[tokio::test]
@@ -462,7 +462,7 @@ mod tests {
             &[
                 "DELETE FROM Pago_Detalles WHERE ID_Pago = 'pago' AND ID_Detalle = 'd2';",
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket)
-                   VALUES ('pago2', 'com', '2026-01-02 12:31:00', 'TARJETA', 250, 'PARCIAL', 'T-000008');",
+                   VALUES ('pago2', 'com', '2026-01-02 12:31:00', 'Tarjeta', 250, 'PARCIAL', 'T-000008');",
                 "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago2', 'd2');",
             ],
         )
@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(uno.lineas[0].nombre, "Cafe con leche");
         assert_eq!(otro.lineas.len(), 1);
         assert_eq!(otro.lineas[0].nombre, "Tostada");
-        assert_eq!(otro.metodo_pago, "TARJETA");
+        assert_eq!(otro.metodo_pago, "Tarjeta");
     }
 
     #[tokio::test]
@@ -674,7 +674,7 @@ mod tests {
         sembrar(
             &db,
             &["INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket)
-                 VALUES ('otro', 'com', '2026-01-02 12:40:00', 'TARJETA', 100, 'PARCIAL', 'T-000008');"],
+                 VALUES ('otro', 'com', '2026-01-02 12:40:00', 'Tarjeta', 100, 'PARCIAL', 'T-000008');"],
         )
         .await;
 

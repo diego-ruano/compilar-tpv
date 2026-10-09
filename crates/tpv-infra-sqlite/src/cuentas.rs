@@ -158,7 +158,7 @@ fn entradas_inner(
             END
           ) AS cliente,
           -- «Otro» sólo lo lleva una devolución (una transferencia): no es efectivo.
-          CASE WHEN p.Metodo_Pago IN ('Tarjeta', 'Otro') THEN p.Metodo_Pago ELSE 'Efectivo' END AS metodo,
+          p.Metodo_Pago AS metodo,
           IFNULL(p.Importe_Total, 0) AS importe,
           COALESCE(p.Estado, 'ACTIVO') AS estado,
           p.Anulado_En AS anuladoEn,
@@ -695,7 +695,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                 vec![
                     Value::Text(id_pago.to_string()),
                     Value::Text(p.fecha_hora),
-                    Value::Text(p.metodo),
+                    Value::Text(p.metodo.to_string()),
                 ],
             )
             .await
@@ -1150,7 +1150,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                 vec![
                     Value::Text(id_devolucion.clone()),
                     Value::Text(cobro.id_comanda.clone()),
-                    Value::Text(metodo.clone()),
+                    Value::Text(metodo.to_string()),
                     dinero_val(-total),
                     Value::Text(TIPO_DEVOLUCION.to_string()),
                     Value::Text(id_usuario.clone()),
@@ -1251,7 +1251,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                     id_pago: Some(id_devolucion.clone()),
                     id_usuario: Some(id_usuario.clone()),
                     importe: total,
-                    metodo_pago: Some(metodo.clone()),
+                    metodo_pago: Some(metodo.to_string()),
                     motivo: Some(motivo.clone()),
                     ..Default::default()
                 },
@@ -1436,7 +1436,7 @@ mod tests_anulacion {
 
         // RI-39: aunque se haya leído ACTIVO antes de anular, el repositorio vuelve a comprobarlo.
         let err = repo(&db).actualizar_pago("pago", PagoData {
-            fecha_hora: "2030-01-01 00:00:00".into(), metodo: "Tarjeta".into(), importe: Dinero::CERO,
+            fecha_hora: "2030-01-01 00:00:00".into(), metodo: tpv_domain::pago::MetodoPago::Tarjeta, importe: Dinero::CERO,
         }).await.unwrap_err();
         assert!(matches!(err, AppError::Conflict(_)));
 
@@ -1751,7 +1751,7 @@ mod tests_anulacion {
             .cobrar_detalles(tpv_domain::mesas::CobroDetalles {
                 id_comanda: "com".into(),
                 detalle_ids: vec!["det-pendiente".into()],
-                metodo: "Efectivo".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
                 tipo: "PARCIAL".into(),
                 id_usuario: Some("u1".into()),
                 // FISCAL-02: una venta normal es un ticket (F2), sin datos de cliente.
@@ -2304,7 +2304,7 @@ mod tests_factura_completa {
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
-                metodo: "Efectivo".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
                 importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
@@ -2451,7 +2451,7 @@ mod tests_factura_completa {
             repo.cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
-                metodo: "Efectivo".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
                 importe_total: Dinero::CERO,
                 id_usuario_cobrador: None,
                 id_trabajador_cobrador: None,
@@ -2702,7 +2702,7 @@ mod tests_anular_vs_devolver {
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
-                metodo: "Efectivo".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
                 importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
@@ -3368,7 +3368,7 @@ mod tests_baja_de_un_ticket_canjeado {
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
                 id_pago: id_pago.clone(),
                 id_comanda: comanda.into(),
-                metodo: "Efectivo".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
                 importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
@@ -3741,7 +3741,7 @@ mod tests_baja_de_un_ticket_canjeado {
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
                 id_pago: id_pago.clone(),
                 id_comanda: comanda.into(),
-                metodo: "Tarjeta".into(),
+                metodo: tpv_domain::pago::MetodoPago::Tarjeta,
                 importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
@@ -4530,7 +4530,7 @@ mod tests_devolucion_parcial {
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
                 id_pago: id_pago.clone(),
                 id_comanda: "com".into(),
-                metodo: "Efectivo".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
                 importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
@@ -4553,7 +4553,7 @@ mod tests_devolucion_parcial {
                 id_pago: id_pago.into(),
                 id_usuario: "u1".into(),
                 motivo: "estaba caliente".into(),
-                metodo: metodo.into(),
+                metodo: tpv_domain::pago::normalize_metodo_devolucion(metodo).unwrap(),
                 lineas: lineas.iter().map(|(d, n)| (d.to_string(), *n)).collect(),
             })
             .await
@@ -4835,7 +4835,7 @@ mod tests_devolucion_parcial {
         let d = una_cana(&db, &id_pago).await;
         let datos = || PagoData {
             fecha_hora: "2027-01-15 13:00:00".into(),
-            metodo: "Tarjeta".into(),
+            metodo: tpv_domain::pago::MetodoPago::Tarjeta,
             importe: Dinero::CERO,
         };
 

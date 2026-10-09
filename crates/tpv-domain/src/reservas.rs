@@ -58,17 +58,8 @@ pub fn normalize_hora_hhmm(raw: &str) -> Result<String, String> {
 }
 
 /// Normaliza el estado de una reserva (valores conocidos; por defecto PROXIMA).
-pub fn normalize_estado(raw: Option<String>) -> String {
-    let s = raw.unwrap_or_else(|| "PROXIMA".to_string());
-    match s.trim().to_uppercase().as_str() {
-        "PROXIMA" => "PROXIMA",
-        "ACTIVA" => "ACTIVA",
-        "FINALIZADA" => "FINALIZADA",
-        "CANCELADA" => "CANCELADA",
-        "NO_SHOW" => "NO_SHOW",
-        _ => "PROXIMA",
-    }
-    .to_string()
+pub fn normalize_estado(raw: Option<String>) -> Result<crate::estados::EstadoReserva, String> {
+    crate::estados::EstadoReserva::desde_texto(raw.as_deref().unwrap_or("PROXIMA"))
 }
 
 fn turno_por_hora(hhmm: &str) -> String {
@@ -100,9 +91,7 @@ pub fn normalize_turno(raw: Option<String>, hora_hhmm: &str) -> String {
     }
 }
 
-fn limpia(o: Option<String>) -> Option<String> {
-    o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
+use crate::texto::limpiar_opcional as limpia;
 
 /// Igual que `limpia` pero **pasando a minúsculas**: el email identifica al cliente y la unicidad
 /// es case-insensitive (índice `ux_clientes_email` sobre `lower(Email)`, y el dominio de clientes
@@ -235,27 +224,45 @@ pub struct ReservaValidada {
     /// Minutos que ocupa la mesa; `None` = la duración por defecto del negocio (RI-61).
     pub duracion_min: Option<i64>,
     pub nota: Option<String>,
-    pub estado: String,
+    pub estado: crate::estados::EstadoReserva,
     pub cliente: ClienteReserva,
 }
 
+/// Datos crudos con campos nombrados (RI-48); validar produce el objeto de dominio.
+#[derive(Debug, Clone)]
+pub struct ReservaEntrada<'a> {
+    pub id_reserva: Option<String>,
+    pub dia_ymd: &'a str,
+    pub hora: &'a str,
+    pub turno: Option<String>,
+    pub comensales: i64,
+    pub duracion_min: Option<i64>,
+    pub nota: Option<String>,
+    pub estado: Option<String>,
+    pub id_mesa: Option<String>,
+    pub id_cliente: Option<String>,
+    pub nombre_cliente: Option<String>,
+    pub telefono: Option<String>,
+    pub email: Option<String>,
+}
+
 impl ReservaValidada {
-    #[allow(clippy::too_many_arguments)]
-    pub fn validar(
-        id_reserva: Option<String>,
-        dia_ymd: &str,
-        hora: &str,
-        turno: Option<String>,
-        comensales: i64,
-        duracion_min: Option<i64>,
-        nota: Option<String>,
-        estado: Option<String>,
-        id_mesa: Option<String>,
-        id_cliente: Option<String>,
-        nombre_cliente: Option<String>,
-        telefono: Option<String>,
-        email: Option<String>,
-    ) -> Result<Self, String> {
+    pub fn validar(input: ReservaEntrada<'_>) -> Result<Self, String> {
+        let ReservaEntrada {
+            id_reserva,
+            dia_ymd,
+            hora,
+            turno,
+            comensales,
+            duracion_min,
+            nota,
+            estado,
+            id_mesa,
+            id_cliente,
+            nombre_cliente,
+            telefono,
+            email,
+        } = input;
         let dia = normalize_dia_ymd(dia_ymd)?;
         let hora = normalize_hora_hhmm(hora)?;
 
@@ -270,9 +277,9 @@ impl ReservaValidada {
 
         let id = id_reserva.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         let estado = if id.is_none() {
-            "PROXIMA".to_string()
+            crate::estados::EstadoReserva::Proxima
         } else {
-            normalize_estado(estado)
+            normalize_estado(estado)?
         };
         let turno = normalize_turno(turno, &hora);
 
@@ -334,12 +341,12 @@ mod tests {
     }
 
     #[test]
-    fn estados_conocidos_se_normalizan_y_desconocido_va_a_proxima() {
+    fn estados_conocidos_se_normalizan_y_desconocidos_se_rechazan() {
         for (raw, esperado) in [("proxima", "PROXIMA"), (" ACTIVA ", "ACTIVA"), ("finalizada", "FINALIZADA"), ("cancelada", "CANCELADA"), ("no_show", "NO_SHOW")] {
-            assert_eq!(normalize_estado(Some(raw.into())), esperado);
+            assert_eq!(normalize_estado(Some(raw.into())).unwrap().como_texto(), esperado);
         }
-        assert_eq!(normalize_estado(None), "PROXIMA");
-        assert_eq!(normalize_estado(Some("otro".into())), "PROXIMA");
+        assert_eq!(normalize_estado(None).unwrap().como_texto(), "PROXIMA");
+        assert!(normalize_estado(Some("otro".into())).is_err());
     }
 
     #[test]
@@ -356,7 +363,21 @@ mod tests {
     }
 
     fn reserva_base(id: Option<String>, comensales: i64, mesa: Option<&str>, nombre: &str) -> Result<ReservaValidada, String> {
-        ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, None, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.map(str::to_string), None, Some(nombre.into()), Some(" 600 ".into()), Some(" a@b.es ".into()))
+        ReservaValidada::validar(crate::reservas::ReservaEntrada {
+            id_reserva: id,
+            dia_ymd: "2026-07-22",
+            hora: "14:30",
+            turno: None,
+            comensales,
+            duracion_min: None,
+            nota: Some(" terraza ".into()),
+            estado: Some("CANCELADA".into()),
+            id_mesa: mesa.map(str::to_string),
+            id_cliente: None,
+            nombre_cliente: Some(nombre.into()),
+            telefono: Some(" 600 ".into()),
+            email: Some(" a@b.es ".into()),
+        })
     }
 
     fn email_de(r: &ReservaValidada) -> Option<String> {
@@ -373,10 +394,21 @@ mod tests {
     /// no encuentra al cliente guardado como `juan@mail.com` y el alta choca contra el índice.
     #[test]
     fn email_del_cliente_se_normaliza_a_minusculas() {
-        let r = ReservaValidada::validar(
-            None, "2026-07-22", "14:30", None, 2, None, None, None,
-            Some("m1".into()), None, Some("Ana".into()), None, Some("  Juan@Mail.COM  ".into()),
-        )
+        let r = ReservaValidada::validar(crate::reservas::ReservaEntrada {
+            id_reserva: None,
+            dia_ymd: "2026-07-22",
+            hora: "14:30",
+            turno: None,
+            comensales: 2,
+            duracion_min: None,
+            nota: None,
+            estado: None,
+            id_mesa: Some("m1".into()),
+            id_cliente: None,
+            nombre_cliente: Some("Ana".into()),
+            telefono: None,
+            email: Some("  Juan@Mail.COM  ".into()),
+        })
         .unwrap();
         assert_eq!(email_de(&r).as_deref(), Some("juan@mail.com"));
     }
@@ -384,10 +416,21 @@ mod tests {
     #[test]
     fn email_vacio_o_ausente_queda_en_none() {
         for valor in [None, Some("".to_string()), Some("   ".to_string())] {
-            let r = ReservaValidada::validar(
-                None, "2026-07-22", "14:30", None, 2, None, None, None,
-                Some("m1".into()), None, Some("Ana".into()), None, valor,
-            )
+            let r = ReservaValidada::validar(crate::reservas::ReservaEntrada {
+                id_reserva: None,
+                dia_ymd: "2026-07-22",
+                hora: "14:30",
+                turno: None,
+                comensales: 2,
+                duracion_min: None,
+                nota: None,
+                estado: None,
+                id_mesa: Some("m1".into()),
+                id_cliente: None,
+                nombre_cliente: Some("Ana".into()),
+                telefono: None,
+                email: valor,
+            })
             .unwrap();
             assert_eq!(email_de(&r), None);
         }
@@ -399,7 +442,7 @@ mod tests {
         assert!(r.id.is_none());
         assert_eq!(r.id_mesa.as_deref(), Some("m1"));
         assert_eq!(r.turno, "COMIDA");
-        assert_eq!(r.estado, "PROXIMA");
+        assert_eq!(r.estado.como_texto(), "PROXIMA");
         assert_eq!(r.nota.as_deref(), Some("terraza"));
         assert_eq!(
             r.cliente,
@@ -415,7 +458,7 @@ mod tests {
     fn reserva_editada_conserva_estado_normalizado() {
         let r = reserva_base(Some(" r1 ".into()), 2, Some("m1"), "Ana").unwrap();
         assert_eq!(r.id.as_deref(), Some("r1"));
-        assert_eq!(r.estado, "CANCELADA");
+        assert_eq!(r.estado.como_texto(), "CANCELADA");
     }
 
     #[test]

@@ -78,7 +78,7 @@ function normalizeTurno(raw: unknown, hora: string): string {
 
 function normalizeEstado(raw: unknown): string {
 	const e = String(raw ?? "PROXIMA").trim().toUpperCase();
-	return ESTADOS.has(e) ? e : "PROXIMA";
+	return e;
 }
 
 function positiveInt(name: string) {
@@ -118,6 +118,9 @@ export const reservaSaveSchema = z
 		email: z.any().optional().nullable(),
 	})
 	.superRefine((v, ctx) => {
+        if (v.id_reserva?.trim() && !ESTADOS.has(normalizeEstado(v.estado))) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["estado"], message: "Estado no admitido" });
+        }
 		const sinFicha = !cleanOrNull(v.id_cliente) && !cleanOrNull(v.nombre_cliente);
 		if (sinFicha && (cleanOrNull(v.telefono) || cleanOrNull(v.email))) {
 			ctx.addIssue({

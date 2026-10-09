@@ -6,6 +6,7 @@ authors.workspace = true
 description = "Núcleo de dominio TPV: entidades puras, value objects y reglas de negocio. No conoce DB, red ni Tauri."
 
 [dependencies]
+strum = { workspace = true }
 specta = { workspace = true }
 specta-typescript = { workspace = true }
 serde = { workspace = true }

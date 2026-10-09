@@ -42,9 +42,7 @@ pub async fn set_reserva_estado(
     repo: &dyn MesasRepository,
     input: MesasSetReservaEstadoInput,
 ) -> AppResult<()> {
-    let estado = requerido(&input.estado, "estado")
-        .map_err(AppError::validation)?
-        .to_uppercase();
+    let estado = tpv_domain::estados::EstadoReserva::desde_texto(&input.estado).map_err(AppError::validation)?;
     if input.id_reserva.trim().is_empty() {
         return Err(AppError::validation("ID_Reserva inválido"));
     }
@@ -201,7 +199,7 @@ pub async fn cobrar_detalles(
         return Ok(String::new());
     }
 
-    let metodo = requerido(&input.metodo, "metodo").map_err(AppError::validation)?;
+    let metodo = tpv_domain::pago::normalize_metodo(&input.metodo).map_err(AppError::validation)?;
     let tipo = requerido(&input.tipo, "tipo").map_err(AppError::validation)?;
 
     let data = CobroDetalles {
@@ -233,7 +231,7 @@ pub async fn kitchen_set_line_state(
     }
     // Fidelidad con el monolito: estado vacío/espacios es error (no se normaliza a PENDIENTE).
     let estado_raw = requerido(&input.estado, "estado").map_err(AppError::validation)?;
-    let estado = normalize_estado_cocina(&estado_raw);
+    let estado = normalize_estado_cocina(&estado_raw).map_err(AppError::validation)?;
     repo.kitchen_set_line_state(&input.id_detalle, &input.id_usuario_cocinero, estado)
         .await
 }

@@ -189,7 +189,7 @@ async fn planificar(
             let antes = guardado.as_ref().and_then(posicion_guardada);
             let despues = Posicion {
                 momento,
-                aporte: TotalesCaja::de_cobro(activo, &normalize_metodo(metodo), importe),
+                aporte: TotalesCaja::de_cobro(activo, normalize_metodo(metodo).map_err(AppError::validation)?.como_texto(), importe),
             };
             Ok((afectados(repo, antes, Some(despues)).await?, guardado))
         }
@@ -377,7 +377,7 @@ fn nombre_de_cobro(numero: Option<&str>) -> String {
     }
 }
 
-fn describir_edicion_de_cobro(guardado: Option<&ApunteGuardado>, input: &UpdatePagoInput) -> String {
+fn describir_edicion_de_cobro(guardado: Option<&ApunteGuardado>, input: &UpdatePagoInput) -> AppResult<String> {
     let Some(ApunteGuardado::Cobro {
         fecha_hora,
         importe,
@@ -386,11 +386,11 @@ fn describir_edicion_de_cobro(guardado: Option<&ApunteGuardado>, input: &UpdateP
         ..
     }) = guardado
     else {
-        return "Cobro editado".to_string();
+        return Ok("Cobro editado".to_string());
     };
-    let metodo_nuevo = normalize_metodo(&input.metodo);
+    let metodo_nuevo = normalize_metodo(&input.metodo).map_err(AppError::validation)?.como_texto();
     let mut cambios = Vec::new();
-    if metodo_nuevo != *metodo {
+    if metodo_nuevo != metodo {
         cambios.push(format!("{metodo} → {metodo_nuevo}"));
     }
     if fecha_de_apunte(fecha_hora) != fecha_de_apunte(&input.fecha_hora) {
@@ -405,11 +405,11 @@ fn describir_edicion_de_cobro(guardado: Option<&ApunteGuardado>, input: &UpdateP
     } else {
         cambios.join(", ")
     };
-    format!(
+    Ok(format!(
         "{} de {}: {que}",
         nombre_de_cobro(numero_ticket.as_deref()),
         euros(*importe)
-    )
+    ))
 }
 
 fn describir_edicion_de_gasto(guardado: Option<&ApunteGuardado>, input: &UpdateGastoInput) -> String {
@@ -473,7 +473,7 @@ pub async fn editar_pago(
     let (afectados, guardado) = planificar(cierres, &cambio).await?;
     let motivo = limpio(motivo);
     exigir_motivo(&afectados, &motivo)?;
-    let descripcion = describir_edicion_de_cobro(guardado.as_ref(), &input);
+    let descripcion = describir_edicion_de_cobro(guardado.as_ref(), &input)?;
 
     let ok = cuentas_uc::update_pago(cuentas, input).await?;
     if ok {

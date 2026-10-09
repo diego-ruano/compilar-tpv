@@ -14,7 +14,7 @@
     "comensales": 3,
     "duracion_min": 90,
     "nota": null,
-    "estado": "confirmada",
+    "estado": "PROXIMA",
     "id_cliente": null,
     "nombre_cliente": null,
     "email": null,

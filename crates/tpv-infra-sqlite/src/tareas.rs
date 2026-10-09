@@ -282,8 +282,7 @@ impl TareasRepository for SqliteTareasRepository {
                 apellido: v_string(row.get_value(2).map_err(db_err)?),
                 puesto: v_string(row.get_value(3).map_err(db_err)?),
                 asignada_at: v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default(),
-                estado: v_string(row.get_value(5).map_err(db_err)?)
-                    .unwrap_or_else(|| "PENDIENTE".into()),
+                estado: tpv_domain::estados::EstadoAsignacion::desde_texto(&v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default()).map_err(db_err)?.como_texto().to_string(),
                 finalizada_at: v_string(row.get_value(6).map_err(db_err)?),
             });
         }
@@ -336,8 +335,7 @@ impl TareasRepository for SqliteTareasRepository {
                 descripcion: v_string(row.get_value(2).map_err(db_err)?),
                 fecha_limite: v_string(row.get_value(3).map_err(db_err)?),
                 asignada_at: v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default(),
-                estado: v_string(row.get_value(5).map_err(db_err)?)
-                    .unwrap_or_else(|| "PENDIENTE".into()),
+                estado: tpv_domain::estados::EstadoAsignacion::desde_texto(&v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default()).map_err(db_err)?.como_texto().to_string(),
                 finalizada_at: v_string(row.get_value(6).map_err(db_err)?),
             });
         }
@@ -448,11 +446,11 @@ impl TareasRepository for SqliteTareasRepository {
             .execute(
                 r#"
                 UPDATE Tareas
-                SET Estado = 'ELIMINADA'
+                SET Estado = ?2
                 WHERE ID_Tarea = ?1
                   AND COALESCE(Estado, 'ABIERTA') <> 'ELIMINADA';
                 "#,
-                vec![Value::Text(id_tarea.to_string())],
+                vec![Value::Text(id_tarea.to_string()), Value::Text(tpv_domain::estados::EstadoTarea::Eliminada.como_texto().into())],
             )
             .await
             .map_err(db_err)?;
@@ -517,11 +515,11 @@ impl TareasRepository for SqliteTareasRepository {
             .execute(
                 r#"
                 UPDATE Tareas
-                SET Estado = 'ABIERTA'
+                SET Estado = ?2
                 WHERE ID_Tarea = ?1
                   AND COALESCE(Estado, 'ABIERTA') = 'ELIMINADA';
                 "#,
-                vec![Value::Text(id_tarea.to_string())],
+                vec![Value::Text(id_tarea.to_string()), Value::Text(tpv_domain::estados::EstadoTarea::Abierta.como_texto().into())],
             )
             .await
             .map_err(db_err)?;

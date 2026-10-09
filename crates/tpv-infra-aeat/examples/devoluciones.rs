@@ -235,7 +235,7 @@ mod windows {
                 .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
                     id_pago: id_pago.clone(),
                     id_comanda,
-                    metodo: "Efectivo".into(),
+                    metodo: tpv_domain::pago::MetodoPago::Efectivo,
                     importe_total: Dinero::CERO,
                     id_usuario_cobrador: Some("pruebas-u1".into()),
                     id_trabajador_cobrador: None,
@@ -257,7 +257,7 @@ mod windows {
                     id_pago: cobro.id_pago.clone(),
                     id_usuario: "pruebas-u1".into(),
                     motivo: "prueba AEAT".into(),
-                    metodo: "Efectivo".into(),
+                    metodo: tpv_domain::pago::MetodoDevolucion::Efectivo,
                     lineas: lineas.iter().map(|(i, n)| (cobro.detalles[*i].clone(), *n)).collect(),
                 })
                 .await;

@@ -1,68 +1,45 @@
-//! Dominio de **pago**: normalización compartida del método de pago.
-//!
-//! Única fuente de verdad para clasificar `Metodo_Pago`. Antes existían dos implementaciones
-//! divergentes (`cuentas` case-sensitive vs `mesas` case-insensitive), lo que clasificaba de
-//! forma incoherente un mismo valor (`"tarjeta"`) según la ruta (CUENTA-03). Ambos módulos
-//! reexportan esta función.
+//! Métodos de pago cerrados y compartidos por todos los caminos de cobro (RI-48).
+use serde::{Deserialize, Serialize};
 
-/// Normaliza el método de pago a exactamente `"Tarjeta"` o `"Efectivo"` (case-insensitive).
-pub fn normalize_metodo(input: &str) -> String {
-    if input.trim().eq_ignore_ascii_case("tarjeta") {
-        "Tarjeta".to_string()
-    } else {
-        "Efectivo".to_string()
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MetodoPago { Efectivo, Tarjeta }
+impl MetodoPago {
+    pub fn como_texto(self) -> &'static str { match self { Self::Efectivo => "Efectivo", Self::Tarjeta => "Tarjeta" } }
 }
-
-/// El tercer método, que sólo existe para devolver: una transferencia, un Bizum. Es dinero que no
-/// sale del cajón ni pasa por el datáfono.
+impl std::fmt::Display for MetodoPago {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.como_texto()) }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MetodoDevolucion { Efectivo, Tarjeta, Otro }
+impl MetodoDevolucion {
+    pub fn como_texto(self) -> &'static str { match self { Self::Efectivo => "Efectivo", Self::Tarjeta => "Tarjeta", Self::Otro => "Otro" } }
+}
+impl std::fmt::Display for MetodoDevolucion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.como_texto()) }
+}
 pub const METODO_OTRO: &str = "Otro";
-
-/// Normaliza el método por el que se devuelve el dinero de una devolución: los dos de un cobro y
-/// [`METODO_OTRO`].
-pub fn normalize_metodo_devolucion(input: &str) -> String {
-    if input.trim().eq_ignore_ascii_case(METODO_OTRO) {
-        METODO_OTRO.to_string()
-    } else {
-        normalize_metodo(input)
+pub fn normalize_metodo(input: &str) -> Result<MetodoPago, String> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "efectivo" => Ok(MetodoPago::Efectivo), "tarjeta" => Ok(MetodoPago::Tarjeta),
+        _ => Err(format!("Método de pago no admitido: '{input}'")),
     }
 }
-
-/// ¿Ese dinero pasa por el cajón? Todo lo que no sea tarjeta ni «Otro»: un método desconocido
-/// cuenta como efectivo (CUENTA-03). Es la regla del arqueo, y en SQL se escribe
-/// `COALESCE(Metodo_Pago,'') NOT IN ('Tarjeta','Otro')`.
-pub fn es_efectivo(metodo: &str) -> bool {
-    metodo != "Tarjeta" && metodo != METODO_OTRO
+pub fn normalize_metodo_devolucion(input: &str) -> Result<MetodoDevolucion, String> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "efectivo" => Ok(MetodoDevolucion::Efectivo), "tarjeta" => Ok(MetodoDevolucion::Tarjeta), "otro" => Ok(MetodoDevolucion::Otro),
+        _ => Err(format!("Método de devolución no admitido: '{input}'")),
+    }
 }
-
+/// El arqueo cuenta sólo dinero identificado expresamente como efectivo, igual que SQL.
+pub fn es_efectivo(metodo: &str) -> bool { metodo == "Efectivo" }
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tarjeta_se_normaliza_sin_importar_caso_o_espacios() {
-        for valor in ["tarjeta", "Tarjeta", "TARJETA", "  TaRjEtA  "] { assert_eq!(normalize_metodo(valor), "Tarjeta"); }
-    }
-
-    #[test]
-    fn cualquier_otro_valor_es_efectivo() {
-        for valor in ["", " ", "efectivo", "bizum", "card", "tarjetas"] { assert_eq!(normalize_metodo(valor), "Efectivo"); }
-    }
-
-    #[test]
-    fn una_devolucion_admite_ademas_otro() {
-        assert_eq!(normalize_metodo_devolucion(" otro "), "Otro");
-        assert_eq!(normalize_metodo_devolucion("TARJETA"), "Tarjeta");
-        assert_eq!(normalize_metodo_devolucion("bizum"), "Efectivo");
-        // Un cobro no: «Otro» sólo existe para devolver.
-        assert_eq!(normalize_metodo("Otro"), "Efectivo");
-    }
-
-    #[test]
-    fn solo_tarjeta_y_otro_no_pasan_por_el_cajon() {
-        assert!(es_efectivo("Efectivo"));
-        assert!(es_efectivo(""));
-        assert!(!es_efectivo("Tarjeta"));
-        assert!(!es_efectivo("Otro"));
+    #[test] fn los_metodos_desconocidos_no_se_convierten_en_efectivo() {
+        for v in ["", " ", "bizum", "card", "tarjetas", "Otro"] { assert!(normalize_metodo(v).is_err()); assert!(!es_efectivo(v)); }
+        assert_eq!(normalize_metodo(" TARJETA ").unwrap(), MetodoPago::Tarjeta);
+        assert_eq!(normalize_metodo(" efectivo ").unwrap(), MetodoPago::Efectivo);
+        assert_eq!(normalize_metodo_devolucion(" otro ").unwrap(), MetodoDevolucion::Otro);
+        assert!(normalize_metodo_devolucion("bizum").is_err());
     }
 }

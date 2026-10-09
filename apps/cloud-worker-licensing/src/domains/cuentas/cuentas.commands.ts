@@ -1,5 +1,6 @@
 // src/domains/cuentas/cuentas.commands.ts
 
+import { zMetodoPago } from "../../lib/pago";
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
@@ -18,9 +19,7 @@ export type BuiltCommand = {
 const REF_ID = { $ref: "id" } as const;
 
 /// Normaliza el método de pago a "Tarjeta" o "Efectivo" (paridad con `tpv_domain::pago`, CUENTA-03).
-function normalizeMetodo(input: string): string {
-	return input.trim().toLowerCase() === "tarjeta" ? "Tarjeta" : "Efectivo";
-}
+
 
 // UUIDv7: el id lo genera el cliente y lo envía; si faltara, generamos uno.
 function idStep(provided?: string | null) {
@@ -177,7 +176,7 @@ export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand
 					WHERE ID_Pago = ?1 AND ID_Pago_Origen IS NULL
 					  AND COALESCE(Estado, 'ACTIVO') = 'ACTIVO';
 				`,
-				args: [idPago, input.fecha_hora, normalizeMetodo(input.metodo)],
+				args: [idPago, input.fecha_hora, zMetodoPago.parse(input.metodo)],
 			},
 		},
 		cloudPayload,

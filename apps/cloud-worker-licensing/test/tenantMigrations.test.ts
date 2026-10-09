@@ -82,10 +82,27 @@ describe("migraciones del tenant", () => {
 			expect(sql.exec("SELECT COUNT(*) AS n FROM Sync_Changes WHERE Seq > 0;").toArray()[0].n).toBe(0);
 			expect(sql.exec("SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;").toArray()[0].seq).toBe(0);
 			expect(sql.exec("PRAGMA table_info(Asignacion_Turnos)").toArray().some((c: any) => c.name === "ID_Grupo")).toBe(true);
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(3);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(4);
 			// Volver a ejecutar el runner conserva el esquema y no duplica sus registros.
 			await runTenantMigrations(clienteConMigraciones(sql));
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(3);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(4);
 		});
 	});
+    it("RI-48 impone los valores de dominio en el SQL de la nube", async () => {
+        await enElHub("ri48-valores-dominio", async (hub: any) => {
+            const sql = hub.state.storage.sql;
+            await runTenantMigrations(clienteConMigraciones(sql));
+            for (const [tabla, columna] of [["Pagos", "Metodo_Pago"], ["Detalle_Comanda", "Estado_Cocina"],
+                ["Reservas", "Estado"], ["Tareas", "Estado"], ["Tarea_Asignaciones", "Estado"],
+                ["Fichajes", "Estado"], ["Movimientos_Caja", "Metodo_Pago"]]) {
+                expect(() => sql.exec(`INSERT INTO ${tabla} (${columna}) VALUES ('DESCONOCIDO');`)).toThrow(/RI48/);
+            }
+            sql.exec("INSERT INTO Comandas (ID_Comanda, Fecha_Hora_Apertura, Canal) VALUES ('com', '2030-01-01', 'BARRA');");
+            sql.exec("INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('p', 'com', '2030-01-01', 'Efectivo', 100, 'COBRO');");
+            expect(() => sql.exec("UPDATE Pagos SET Metodo_Pago = 'Otro' WHERE ID_Pago = 'p';")).toThrow(/RI48/);
+            sql.exec("INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion) VALUES ('dev', 'com', '2030-01-01', 'Otro', -50, 'DEVOLUCION', 'p', 'Devuelto');");
+            expect(sql.exec("SELECT COUNT(*) AS n FROM Pagos;").toArray()[0].n).toBe(2);
+        });
+    });
+
 });

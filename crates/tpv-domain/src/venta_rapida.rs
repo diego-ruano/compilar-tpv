@@ -3,25 +3,10 @@
 use crate::dinero::Dinero;
 
 /// Normaliza el método de pago: sólo "Tarjeta" o "Efectivo".
-pub fn normalize_metodo(input: &str) -> String {
-    if input.trim().eq_ignore_ascii_case("tarjeta") {
-        "Tarjeta".to_string()
-    } else {
-        "Efectivo".to_string()
-    }
-}
+pub use crate::pago::normalize_metodo;
 
 /// Texto opcional normalizado: recorta y descarta vacíos.
-pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
-    input.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t)
-        }
-    })
-}
+pub use crate::texto::limpiar_opcional;
 
 /// El id de un cobro, tal como lo manda la pantalla: un UUID, en su forma canónica.
 ///
@@ -41,7 +26,7 @@ pub struct CobroFraccionado {
     /// `Pagos.ID_Pago`. Ya pasado por `id_de_cobro`.
     pub id_pago: String,
     pub id_comanda: String,
-    pub metodo: String,
+    pub metodo: crate::pago::MetodoPago,
     pub importe_total: Dinero,
     pub id_usuario_cobrador: Option<String>,
     pub id_trabajador_cobrador: Option<String>,
@@ -61,9 +46,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn metodo_normaliza_tarjeta_y_fallback_efectivo() {
-        for valor in ["tarjeta", " TARJETA ", "TaRjEtA"] { assert_eq!(normalize_metodo(valor), "Tarjeta"); }
-        for valor in ["", "efectivo", "bizum", "card"] { assert_eq!(normalize_metodo(valor), "Efectivo"); }
+    fn metodo_normaliza_y_rechaza_desconocidos() {
+        for valor in ["tarjeta", " TARJETA ", "TaRjEtA"] { assert_eq!(normalize_metodo(valor).unwrap().como_texto(), "Tarjeta"); }
+        assert_eq!(normalize_metodo("efectivo").unwrap().como_texto(), "Efectivo");
+        for valor in ["", "bizum", "card"] { assert!(normalize_metodo(valor).is_err()); }
     }
 
     #[test]

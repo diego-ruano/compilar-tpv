@@ -7,10 +7,9 @@
 //! Tanto una instalación nueva como una existente convergen aplicando las migraciones que aún no
 //! tengan registradas.
 //!
-//! Hoy solo hay `0001_inicial.sql`: antes del lanzamiento las incrementales se consolidaron ahí,
-//! porque un esquema se lee de arriba abajo y una cadena de `ALTER` hay que ejecutarla mentalmente
-//! para saber cómo acaba una tabla. Desde el lanzamiento eso deja de poder hacerse: editar una
-//! migración ya aplicada cambia su hash y ambos runners fallan en duro (`migration_altered`).
+//! `0001` contiene el esquema inicial; las siguientes migraciones son incrementales.
+//! No se modifica una migración aplicada: cambiaría su hash y ambos runners fallarían
+//! con `migration_altered`.
 //!
 //! ## Control por tabla `_migrations`
 //! Cada BD lleva una tabla `_migrations (name, hash, applied_at)` con las migraciones ya aplicadas.
@@ -303,6 +302,45 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn ri48_una_base_incompatible_se_rechaza_sin_modificar_sus_datos() {
+        let (_base, conn, _dir) = open_temp().await;
+        ensure_table(&conn).await.unwrap();
+        for (name, content) in migration_files().into_iter().take(3) {
+            let normalized = normalize(&content);
+            conn.execute_batch(&strip_block_comments(&normalized)).await.unwrap();
+            conn.execute("INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, 1);",
+                vec![Value::Text(name), Value::Text(sha256_hex(&normalized))]).await.unwrap();
+        }
+        conn.execute_batch("INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion, Estado) VALUES ('t', 'Tarea', '2030-01-01', 'INVENTADO');").await.unwrap();
+        assert!(run(&conn).await.is_err());
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Tareas WHERE Estado = 'INVENTADO';").await, 1);
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations WHERE name = '0004_valores_dominio.sql';").await, 0);
+        assert!(!table_exists(&conn, "_RI48_Validacion").await.unwrap());
+        assert_eq!(scalar_i64(&conn, "PRAGMA foreign_keys;").await, 1);
+    }
+
+    #[tokio::test]
+    async fn ri48_rechaza_valores_desconocidos_y_otro_en_cobros() {
+        let (_base, conn, _dir) = open_temp().await;
+        run(&conn).await.unwrap();
+        for (tabla, columna) in [("Pagos", "Metodo_Pago"), ("Detalle_Comanda", "Estado_Cocina"),
+            ("Reservas", "Estado"), ("Tareas", "Estado"), ("Tarea_Asignaciones", "Estado"),
+            ("Fichajes", "Estado"), ("Movimientos_Caja", "Metodo_Pago")] {
+            let error = conn.execute(&format!("INSERT INTO {tabla} ({columna}) VALUES ('DESCONOCIDO');"), ()).await.unwrap_err();
+            assert!(error.to_string().contains("RI48"), "{tabla}: {error}");
+        }
+        conn.execute_batch("INSERT INTO Comandas (ID_Comanda, Fecha_Hora_Apertura, Canal) VALUES ('com', '2030-01-01', 'BARRA');
+            INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+            VALUES ('pago', 'com', '2030-01-01', 'Efectivo', 100, 'COBRO');").await.unwrap();
+        for metodo in ["Otro", "bizum", ""] {
+            assert!(conn.execute("UPDATE Pagos SET Metodo_Pago = ?1 WHERE ID_Pago = 'pago';", vec![Value::Text(metodo.into())]).await.is_err());
+        }
+        conn.execute_batch("INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Pago_Origen, Motivo_Devolucion)
+            VALUES ('dev', 'com', '2030-01-01', 'Otro', -50, 'DEVOLUCION', 'pago', 'Devuelto');").await.unwrap();
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Pagos;").await, 2);
+    }
+
     /// 1) Creación limpia: BD vacía → se construye el esquema y quedan registradas todas las
     ///    migraciones, cada una con su hash SHA-256 y timestamp > 0.
     #[tokio::test]
@@ -497,7 +535,7 @@ mod tests {
 
     /// ANTI-DRIFT: el esquema que producen TODAS las migraciones sobre una BD vacía debe coincidir
     /// con `packages/database/schema.snapshot.sql`. Si cambias el esquema a propósito, regenera el
-    /// snapshot:  `BLESS_SCHEMA_SNAPSHOT=1 cargo test -p tpv-infra-sqlite schema_snapshot`.
+    /// snapshot:  `BLESS_SCHEMA_SNAPSHOT=1 cargo nextest run -p tpv-infra-sqlite -E test(schema_snapshot)`.
     #[tokio::test]
     async fn schema_snapshot_no_drift() {
         let (_db, conn, dir) = open_temp().await;
@@ -512,7 +550,7 @@ mod tests {
             let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
                 panic!(
                     "Falta el snapshot {:?}. Regenéralo con: \
-                     BLESS_SCHEMA_SNAPSHOT=1 cargo test -p tpv-infra-sqlite schema_snapshot",
+                     BLESS_SCHEMA_SNAPSHOT=1 cargo nextest run -p tpv-infra-sqlite -E test(schema_snapshot)",
                     path
                 )
             });
@@ -520,7 +558,7 @@ mod tests {
                 dump.replace("\r\n", "\n").trim(),
                 expected.replace("\r\n", "\n").trim(),
                 "El esquema generado por las migraciones difiere del snapshot. Si es intencionado, \
-                 regenera: BLESS_SCHEMA_SNAPSHOT=1 cargo test -p tpv-infra-sqlite schema_snapshot"
+                 regenera: BLESS_SCHEMA_SNAPSHOT=1 cargo nextest run -p tpv-infra-sqlite -E test(schema_snapshot)"
             );
         }
 
@@ -829,3 +867,5 @@ mod tests {
 
 // RI-70: el esquema compartido incluye Encargado y Roles_Permisos.
 
+
+// RI-48: 0004 valida metodos y estados sin reconstruir tablas.

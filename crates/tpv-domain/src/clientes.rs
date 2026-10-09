@@ -44,9 +44,7 @@ pub struct NuevoCliente {
 }
 
 /// Limpia un opcional de texto: trim + descarta vacíos.
-fn limpia_opcional(v: Option<String>) -> Option<String> {
-    v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
+use crate::texto::limpiar_opcional as limpia_opcional;
 
 /// Normaliza y valida un email opcional (CLI-04): trim + minúsculas; vacío => `None`.
 /// Si hay un valor no vacío, debe tener formato de email válido. Se pasa a minúsculas

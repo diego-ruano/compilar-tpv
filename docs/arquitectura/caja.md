@@ -231,8 +231,9 @@ Es dinero que sale por una venta real, así que **va como un pago, no como una b
 
 Reglas:
 
-- **Sólo el efectivo pasa por el cajón.** El arqueo cuenta todo lo que no sea `Tarjeta` ni `Otro`
-  (`pago::es_efectivo`, y `NOT IN ('Tarjeta','Otro')` en SQL). `Otro` sólo lo lleva una devolución.
+- **Sólo el efectivo pasa por el cajón.** El arqueo cuenta expresamente `Efectivo`
+  (`pago::es_efectivo`, y `Metodo_Pago = 'Efectivo'` en SQL). Los cobros admiten efectivo y tarjeta;
+  `Otro` sólo lo lleva una devolución. Rust y el Worker rechazan cualquier método desconocido (RI-48).
 - **Se devuelve por líneas, así que el cobro tiene que ser la suma de sus líneas.** Uno que no lo es
   (un cobro prorrateado) no dice cuánto se pagó de cada una: queda la devolución entera.
 - **No se devuelve más de lo que queda**, ni de un cobro dado de baja, ni una devolución, ni lo que se

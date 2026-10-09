@@ -12,7 +12,7 @@
     {
       "Comensales": 2,
       "Dia_YMD": "2026-02-02",
-      "Estado": "confirmada",
+      "Estado": "PROXIMA",
       "Hora": "21:00",
       "ID_Cliente": "cliente-1",
       "ID_Mesa": "mesa-1",

@@ -1,8 +1,6 @@
 //! Dominio de **proveedores**: entidades y validaciones puras.
 
-fn limpia(o: Option<String>) -> Option<String> {
-    o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
+use crate::texto::limpiar_opcional as limpia;
 
 /// Proveedor validado listo para upsert. `id = None` indica un alta nueva: la
 /// persistencia genera un UUIDv7 antes del INSERT; con id, hace upsert por esa clave.
@@ -19,19 +17,33 @@ pub struct ProveedorValidado {
     pub ruta_imagen: Option<String>,
 }
 
+/// Datos crudos con campos nombrados (RI-48); validar produce el objeto de dominio.
+#[derive(Debug, Clone)]
+pub struct ProveedorEntrada {
+    pub id_proveedor: Option<String>,
+    pub nombre_empresa: String,
+    pub contacto: Option<String>,
+    pub telefono: Option<String>,
+    pub email: Option<String>,
+    pub cif: Option<String>,
+    pub informacion_adicional: Option<String>,
+    pub nombre_imagen: Option<String>,
+    pub ruta_imagen: Option<String>,
+}
+
 impl ProveedorValidado {
-    #[allow(clippy::too_many_arguments)]
-    pub fn validar(
-        id_proveedor: Option<String>,
-        nombre_empresa: String,
-        contacto: Option<String>,
-        telefono: Option<String>,
-        email: Option<String>,
-        cif: Option<String>,
-        informacion_adicional: Option<String>,
-        nombre_imagen: Option<String>,
-        ruta_imagen: Option<String>,
-    ) -> Result<Self, String> {
+    pub fn validar(input: ProveedorEntrada) -> Result<Self, String> {
+        let ProveedorEntrada {
+            id_proveedor,
+            nombre_empresa,
+            contacto,
+            telefono,
+            email,
+            cif,
+            informacion_adicional,
+            nombre_imagen,
+            ruta_imagen,
+        } = input;
         let nombre = nombre_empresa.trim().to_string();
         if nombre.is_empty() {
             return Err("nombre_empresa required".into());
@@ -51,16 +63,7 @@ impl ProveedorValidado {
 }
 
 /// Normaliza una lista de IDs de producto: descarta vacíos, ordena y deduplica.
-pub fn normalizar_producto_ids(ids: Vec<String>) -> Vec<String> {
-    let mut v: Vec<String> = ids
-        .into_iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    v.sort_unstable();
-    v.dedup();
-    v
-}
+pub use crate::texto::normalizar_ids as normalizar_producto_ids;
 
 #[cfg(test)]
 mod tests {
@@ -68,8 +71,28 @@ mod tests {
 
     #[test]
     fn proveedor_exige_nombre_y_limpia_campos() {
-        assert!(ProveedorValidado::validar(None, " ".into(), None, None, None, None, None, None, None).is_err());
-        let p = ProveedorValidado::validar(Some(" pr1 ".into()), " Mercado ".into(), Some(" Ana ".into()), Some(" ".into()), Some(" a@b.es ".into()), None, None, None, None).unwrap();
+        assert!(ProveedorValidado::validar(crate::proveedores::ProveedorEntrada {
+            id_proveedor: None,
+            nombre_empresa: " ".into(),
+            contacto: None,
+            telefono: None,
+            email: None,
+            cif: None,
+            informacion_adicional: None,
+            nombre_imagen: None,
+            ruta_imagen: None,
+        }).is_err());
+        let p = ProveedorValidado::validar(crate::proveedores::ProveedorEntrada {
+            id_proveedor: Some(" pr1 ".into()),
+            nombre_empresa: " Mercado ".into(),
+            contacto: Some(" Ana ".into()),
+            telefono: Some(" ".into()),
+            email: Some(" a@b.es ".into()),
+            cif: None,
+            informacion_adicional: None,
+            nombre_imagen: None,
+            ruta_imagen: None,
+        }).unwrap();
         assert_eq!(p.id.as_deref(), Some("pr1"));
         assert_eq!(p.nombre_empresa, "Mercado");
         assert_eq!(p.contacto.as_deref(), Some("Ana"));

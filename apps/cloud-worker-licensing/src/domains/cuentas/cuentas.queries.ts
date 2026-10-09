@@ -115,7 +115,7 @@ const entradasInner = (whereRango: string) => `
 				ELSE ''
 			END
 		) AS cliente,
-		CASE WHEN p.Metodo_Pago IN ('Tarjeta', 'Otro') THEN p.Metodo_Pago ELSE 'Efectivo' END AS metodo,
+		p.Metodo_Pago AS metodo,
 		IFNULL(p.Importe_Total, 0) AS importe,
 		COALESCE(p.Estado, 'ACTIVO') AS estado,
 		p.Anulado_En AS anulado_en,

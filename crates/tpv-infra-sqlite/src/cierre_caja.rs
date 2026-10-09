@@ -168,14 +168,14 @@ async fn totales_entre<C: Reader>(
         SELECT
             COALESCE((
               SELECT SUM(Importe_Total) FROM Pagos
-              WHERE COALESCE(Metodo_Pago,'') NOT IN ('Tarjeta', 'Otro')
+              WHERE Metodo_Pago = 'Efectivo'
                 AND Estado = 'ACTIVO'
                 AND (?1 IS NULL OR Fecha_Hora > ?1)
                 AND (?2 IS NULL OR Fecha_Hora <= ?2)
             ), 0)
             - COALESCE((
               SELECT SUM(Importe_Total) FROM Pagos
-              WHERE COALESCE(Metodo_Pago,'') NOT IN ('Tarjeta', 'Otro')
+              WHERE Metodo_Pago = 'Efectivo'
                 AND Estado = 'ANULADO'
                 AND Motivo_Baja = 'DEVOLUCION'
                 AND ?1 IS NOT NULL

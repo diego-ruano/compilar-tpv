@@ -22,24 +22,9 @@ const DK_LEN: usize = 32;
    Validaciones
 ========================================================= */
 
-pub fn requerido(input: &str, field: &str) -> Result<String, String> {
-    let out = input.trim().to_string();
-    if out.is_empty() {
-        return Err(format!("{field} required"));
-    }
-    Ok(out)
-}
+pub use crate::texto::requerido;
 
-pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
-    input.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t)
-        }
-    })
-}
+pub use crate::texto::limpiar_opcional;
 
 /// El PIN que se puede teclear en el login: de 4 a 6 cifras. El teclado del login sólo tiene
 /// cifras y no admite más de 6, así que un PIN fuera de eso deja a su dueño sin poder entrar

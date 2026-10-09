@@ -13,7 +13,7 @@
     "turno": "cena",
     "comensales": 2,
     "nota": null,
-    "estado": "confirmada",
+    "estado": "PROXIMA",
     "id_cliente": null,
     "nombre_cliente": null,
     "email": null,

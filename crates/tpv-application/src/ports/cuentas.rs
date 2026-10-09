@@ -34,7 +34,7 @@ pub struct DevolverLineasArgs {
     pub id_usuario: String,
     pub motivo: String,
     /// `Efectivo`, `Tarjeta` u `Otro`, ya normalizado.
-    pub metodo: String,
+    pub metodo: tpv_domain::pago::MetodoDevolucion,
     /// `(ID_Detalle, unidades)`, una vez cada línea.
     pub lineas: Vec<(String, f64)>,
 }

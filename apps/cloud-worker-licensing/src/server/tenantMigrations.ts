@@ -28,11 +28,13 @@ import { HubError } from "../lib/errorHttp";
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
 import m0002 from "../../../../packages/database/migrations/0002_horarios_agrupados.sql";
 import m0003 from "../../../../packages/database/migrations/0003_cobros_pendientes.sql";
+import m0004 from "../../../../packages/database/migrations/0004_valores_dominio.sql";
 
 const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
 	{ name: "0002_horarios_agrupados.sql", sql: m0002 },
 	{ name: "0003_cobros_pendientes.sql", sql: m0003 },
+	{ name: "0004_valores_dominio.sql", sql: m0004 },
 ];
 
 /** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */

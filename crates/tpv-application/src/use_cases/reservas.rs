@@ -38,21 +38,21 @@ pub async fn guardar(
     let dia = input.dia_ymd.trim().to_string();
     let hora = input.hora.trim().to_string();
 
-    let validada = ReservaValidada::validar(
-        input.id_reserva,
-        &input.dia_ymd,
-        &input.hora,
-        input.turno,
-        input.comensales,
-        input.duracion_min,
-        input.nota,
-        input.estado,
-        input.id_mesa,
-        input.id_cliente,
-        input.nombre_cliente.clone(),
-        input.telefono,
-        input.email,
-    )
+    let validada = ReservaValidada::validar(tpv_domain::reservas::ReservaEntrada {
+        id_reserva: input.id_reserva,
+        dia_ymd: &input.dia_ymd,
+        hora: &input.hora,
+        turno: input.turno,
+        comensales: input.comensales,
+        duracion_min: input.duracion_min,
+        nota: input.nota,
+        estado: input.estado,
+        id_mesa: input.id_mesa,
+        id_cliente: input.id_cliente,
+        nombre_cliente: input.nombre_cliente.clone(),
+        telefono: input.telefono,
+        email: input.email,
+    })
     .map_err(AppError::validation)?;
 
     let ok = repo.guardar(validada, input.forzar_solape.unwrap_or(false)).await?;

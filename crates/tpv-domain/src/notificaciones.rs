@@ -93,26 +93,39 @@ pub struct NuevaNotificacion {
 }
 
 /// Limpia un opcional de texto: trim + descarta vacíos.
-fn limpia_opcional(v: Option<String>) -> Option<String> {
-    v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+use crate::texto::limpiar_opcional as limpia_opcional;
+
+/// Datos crudos con campos nombrados (RI-48); validar produce el objeto de dominio.
+#[derive(Debug, Clone)]
+pub struct NotificacionEntrada<'a> {
+    pub tipo: String,
+    pub severidad: &'a str,
+    pub titulo: String,
+    pub cuerpo: Option<String>,
+    pub destino_tipo: &'a str,
+    pub destino_valor: Option<String>,
+    pub accion: Option<String>,
+    pub payload: Option<String>,
+    pub clave_dedupe: Option<String>,
+    pub expira_en: Option<String>,
 }
 
 impl NuevaNotificacion {
     /// Normaliza y valida los datos crudos (los que llegan de la UI). `tipo` y `titulo` son
     /// obligatorios; el destino debe ser coherente.
-    #[allow(clippy::too_many_arguments)]
-    pub fn validar(
-        tipo: String,
-        severidad: &str,
-        titulo: String,
-        cuerpo: Option<String>,
-        destino_tipo: &str,
-        destino_valor: Option<String>,
-        accion: Option<String>,
-        payload: Option<String>,
-        clave_dedupe: Option<String>,
-        expira_en: Option<String>,
-    ) -> Result<Self, String> {
+    pub fn validar(input: NotificacionEntrada<'_>) -> Result<Self, String> {
+        let NotificacionEntrada {
+            tipo,
+            severidad,
+            titulo,
+            cuerpo,
+            destino_tipo,
+            destino_valor,
+            accion,
+            payload,
+            clave_dedupe,
+            expira_en,
+        } = input;
         let tipo = tipo.trim().to_string();
         if tipo.is_empty() {
             return Err("tipo requerido".to_string());
@@ -167,18 +180,18 @@ mod tests {
 
     #[test]
     fn nueva_notificacion_normaliza_y_exige_tipo_y_titulo() {
-        let n = NuevaNotificacion::validar(
-            " stock_bajo ".into(),
-            "aviso",
-            " Falta stock ".into(),
-            Some("  ".into()),
-            "rol",
-            Some(" r1 ".into()),
-            Some(" aprobar_pedido ".into()),
-            Some("{\"id\":1}".into()),
-            Some(" stock_bajo:p1 ".into()),
-            None,
-        )
+        let n = NuevaNotificacion::validar(crate::notificaciones::NotificacionEntrada {
+            tipo: " stock_bajo ".into(),
+            severidad: "aviso",
+            titulo: " Falta stock ".into(),
+            cuerpo: Some("  ".into()),
+            destino_tipo: "rol",
+            destino_valor: Some(" r1 ".into()),
+            accion: Some(" aprobar_pedido ".into()),
+            payload: Some("{\"id\":1}".into()),
+            clave_dedupe: Some(" stock_bajo:p1 ".into()),
+            expira_en: None,
+        })
         .unwrap();
         assert_eq!(n.tipo, "stock_bajo");
         assert_eq!(n.titulo, "Falta stock");
@@ -189,13 +202,31 @@ mod tests {
         assert_eq!(n.payload.as_deref(), Some("{\"id\":1}"));
         assert_eq!(n.clave_dedupe.as_deref(), Some("stock_bajo:p1"));
 
-        assert!(NuevaNotificacion::validar(
-            " ".into(), "info", "x".into(), None, "todos", None, None, None, None, None
-        )
+        assert!(NuevaNotificacion::validar(crate::notificaciones::NotificacionEntrada {
+            tipo: " ".into(),
+            severidad: "info",
+            titulo: "x".into(),
+            cuerpo: None,
+            destino_tipo: "todos",
+            destino_valor: None,
+            accion: None,
+            payload: None,
+            clave_dedupe: None,
+            expira_en: None,
+        })
         .is_err());
-        assert!(NuevaNotificacion::validar(
-            "t".into(), "info", " ".into(), None, "todos", None, None, None, None, None
-        )
+        assert!(NuevaNotificacion::validar(crate::notificaciones::NotificacionEntrada {
+            tipo: "t".into(),
+            severidad: "info",
+            titulo: " ".into(),
+            cuerpo: None,
+            destino_tipo: "todos",
+            destino_valor: None,
+            accion: None,
+            payload: None,
+            clave_dedupe: None,
+            expira_en: None,
+        })
         .is_err());
     }
 }

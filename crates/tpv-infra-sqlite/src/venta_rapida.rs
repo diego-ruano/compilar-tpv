@@ -33,7 +33,7 @@ impl SqliteVentaRapidaRepository {
     async fn confirmar_pendiente(&self, g: &crate::db::WriteGuard<'_>, mut pendiente: tpv_contracts::venta_rapida::CobroPendienteDto) -> AppResult<String> {
         let mut data = tpv_application::use_cases::venta_rapida::datos_cobro(pendiente.id_usuario.as_deref().unwrap_or_default(), pendiente.id_trabajador.as_deref(), pendiente.cobro.clone())?;
         // El método ya se validó al preparar; conservar también los apuntes internos históricos.
-        data.metodo = pendiente.cobro.metodo.clone();
+        data.metodo = tpv_domain::pago::normalize_metodo(&pendiente.cobro.metodo).map_err(AppError::validation)?;
         let resultado = self.ejecutar_cobro(g, data).await;
         if let Err(ref error) = resultado {
             pendiente.ultimo_error = Some(error.to_string());
@@ -215,7 +215,7 @@ impl SqliteVentaRapidaRepository {
                 vec![
                     Value::Text(id_pago_final.clone()),
                     Value::Text(data.id_comanda.clone()),
-                    Value::Text(data.metodo.clone()),
+                    Value::Text(data.metodo.to_string()),
                     dinero_val(importe_total_db),
                     usuario_mov.clone().map(Value::Text).unwrap_or(Value::Null),
                     trabajador_mov.clone().map(Value::Text).unwrap_or(Value::Null),
@@ -234,7 +234,7 @@ impl SqliteVentaRapidaRepository {
                     id_usuario: usuario_mov,
                     id_trabajador: trabajador_mov,
                     importe: importe_total_db,
-                    metodo_pago: Some(data.metodo.clone()),
+                    metodo_pago: Some(data.metodo.to_string()),
                     ..Default::default()
                 },
             )
@@ -1084,7 +1084,7 @@ mod tests_cobro_repetido {
             .cobrar_fraccionado(CobroFraccionado {
                 id_pago: id_pago.into(),
                 id_comanda: comanda.into(),
-                metodo: "Efectivo".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
                 importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
@@ -1212,7 +1212,7 @@ mod tests_cobro_repetido {
         let (db, _dir) = preparar().await;
         let repo = SqliteVentaRapidaRepository::new(db.clone());
         let datos = |id: &str| CobroFraccionado {
-            id_pago: id.into(), id_comanda: "com".into(), metodo: "Efectivo".into(), importe_total: Dinero::de_centimos(300),
+            id_pago: id.into(), id_comanda: "com".into(), metodo: tpv_domain::pago::MetodoPago::Efectivo, importe_total: Dinero::de_centimos(300),
             id_usuario_cobrador: Some("u1".into()), id_trabajador_cobrador: None, detalles: vec!["det".into()],
             destinatario: Some(tpv_domain::verifactu::Destinatario { nombre_razon: "Señor Prueba".into(), nif: "12345678Z".into(), direccion: None }),
         };

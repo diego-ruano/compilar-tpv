@@ -32,7 +32,7 @@ pub async fn quitar(g: &WriteGuard<'_>, id: &str) -> AppResult<bool> {
 pub async fn preparar(g: &WriteGuard<'_>, data: CobroFraccionado) -> AppResult<CobroPendienteDto> {
     let existentes = listar(g).await?;
     if let Some(p) = existentes.iter().find(|p| p.cobro.id_pago == data.id_pago) {
-        if p.cobro.id_comanda != data.id_comanda || p.cobro.detalles != data.detalles || p.cobro.metodo != data.metodo {
+        if p.cobro.id_comanda != data.id_comanda || p.cobro.detalles != data.detalles || p.cobro.metodo != data.metodo.como_texto() {
             return Err(AppError::conflict("Ese identificador pertenece a otro cobro pendiente"));
         }
         // Recuperar nunca cambia el operador original ni pierde una factura solicitada.
@@ -43,7 +43,7 @@ pub async fn preparar(g: &WriteGuard<'_>, data: CobroFraccionado) -> AppResult<C
     }
     let pendiente = CobroPendienteDto {
         cobro: VrCobrarFraccionadoInput {
-            id_pago: data.id_pago, id_comanda: data.id_comanda, metodo: data.metodo,
+            id_pago: data.id_pago, id_comanda: data.id_comanda, metodo: data.metodo.to_string(),
             importe_total: data.importe_total, detalles: data.detalles,
             destinatario: data.destinatario.map(|d| DestinatarioInput { nombre_razon: d.nombre_razon, nif: d.nif, domicilio: d.direccion }),
         },

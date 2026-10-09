@@ -26,7 +26,7 @@
       "ID_Trabajador": null,
       "ID_Usuario": null,
       "Importe": 600,
-      "Metodo_Pago": "TARJETA",
+      "Metodo_Pago": "Tarjeta",
       "Tipo": "COBRO"
     }
   ],
@@ -41,7 +41,7 @@
       "ID_Trabajador_Cobrador": null,
       "ID_Usuario_Cobrador": null,
       "Importe_Total": 600,
-      "Metodo_Pago": "TARJETA",
+      "Metodo_Pago": "Tarjeta",
       "Tipo": "TOTAL"
     }
   ]

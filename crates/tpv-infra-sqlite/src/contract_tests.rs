@@ -363,7 +363,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             repo.cobrar_fraccionado(CobroFraccionado {
                 id_pago: crate::util::new_id(),
                 id_comanda: e["id_comanda"].as_str().unwrap().to_string(),
-                metodo: e["metodo"].as_str().unwrap().to_string(),
+                metodo: tpv_domain::pago::normalize_metodo(e["metodo"].as_str().unwrap()).unwrap(),
                 // El importe lo recalcula el comando desde la BD (se ignora el de entrada).
                 importe_total: Dinero::CERO,
                 id_usuario_cobrador: None,
@@ -379,7 +379,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             let repo = SqliteMesasRepository::new(db.clone());
             repo.cobrar_detalles(CobroDetalles {
                 id_comanda: e["id_comanda"].as_str().unwrap().to_string(),
-                metodo: e["metodo"].as_str().unwrap().to_string(),
+                metodo: tpv_domain::pago::normalize_metodo(e["metodo"].as_str().unwrap()).unwrap(),
                 tipo: e["tipo"].as_str().unwrap().to_string(),
                 detalle_ids: strings(&e["detalle_ids"]),
                 id_usuario: None,
@@ -604,7 +604,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 comensales: e["comensales"].as_i64().unwrap(),
                 duracion_min: e["duracion_min"].as_i64(),
                 nota: opt_str(&e["nota"]),
-                estado: s(&e["estado"]),
+                estado: tpv_domain::estados::EstadoReserva::desde_texto(&s(&e["estado"])).unwrap(),
                 // RI-61: el mismo reparto que hace la validación (y el schema del worker).
                 cliente: ClienteReserva::desde(
                     opt_str(&e["id_cliente"]),
@@ -669,7 +669,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "mesas.set_reserva_estado" => {
             let repo = SqliteMesasRepository::new(db.clone());
-            repo.set_reserva_estado(&s(&e["id_reserva"]), s(&e["estado"]))
+            repo.set_reserva_estado(&s(&e["id_reserva"]), tpv_domain::estados::EstadoReserva::desde_texto(&s(&e["estado"])).unwrap())
                 .await
                 .expect("set reserva estado");
         }
@@ -699,7 +699,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                     // repositorio, y el otro lado la aplica en su builder: hay que entrar a la
                     // misma altura o el test compararía dos caminos distintos y cantaría una
                     // divergencia que no existe.
-                    metodo: normalize_metodo(&s(&e["metodo"])),
+                    metodo: normalize_metodo(&s(&e["metodo"])).unwrap(),
                     // El importe del formulario se IGNORA a propósito (CUENTA-02): el comando lo
                     // recalcula desde las líneas cobradas. Se manda un valor absurdo para que, si
                     // algún día dejara de ignorarse, el golden lo cante.
@@ -729,18 +729,18 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             let repo = SqliteNotificacionesRepository::new(db.clone());
             // `validar` es parte del camino real (normaliza severidad/textos): el fixture entrega
             // los datos crudos, como los entrega la UI.
-            let nueva = NuevaNotificacion::validar(
-                s(&e["tipo"]),
-                &s(&e["severidad"]),
-                s(&e["titulo"]),
-                opt_str(&e["cuerpo"]),
-                &s(&e["destino_tipo"]),
-                opt_str(&e["destino_valor"]),
-                opt_str(&e["accion"]),
-                opt_str(&e["payload"]),
-                opt_str(&e["clave_dedupe"]),
-                opt_str(&e["expira_en"]),
-            )
+            let nueva = NuevaNotificacion::validar(tpv_domain::notificaciones::NotificacionEntrada {
+                tipo: s(&e["tipo"]),
+                severidad: &s(&e["severidad"]),
+                titulo: s(&e["titulo"]),
+                cuerpo: opt_str(&e["cuerpo"]),
+                destino_tipo: &s(&e["destino_tipo"]),
+                destino_valor: opt_str(&e["destino_valor"]),
+                accion: opt_str(&e["accion"]),
+                payload: opt_str(&e["payload"]),
+                clave_dedupe: opt_str(&e["clave_dedupe"]),
+                expira_en: opt_str(&e["expira_en"]),
+            })
             .expect("notificacion valida");
             repo.emitir(nueva).await.expect("emitir notificacion");
         }
@@ -813,7 +813,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             repo.kitchen_set_line_state(
                 &s(&e["id_detalle"]),
                 &s(&e["id_usuario_cocinero"]),
-                s(&e["estado"]),
+                tpv_domain::estados::EstadoCocina::desde_texto(&s(&e["estado"])).unwrap(),
             )
             .await
             .expect("kitchen set line state");

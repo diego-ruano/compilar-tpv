@@ -2,9 +2,7 @@
 
 use crate::dinero::Dinero;
 
-fn limpia(o: Option<String>) -> Option<String> {
-    o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
+use crate::texto::limpiar_opcional as limpia;
 
 /// Valida la parte de fecha de un valor de lote y la devuelve como `NaiveDate`.
 ///
@@ -17,16 +15,7 @@ fn fecha_lote_valida(s: &str) -> Option<chrono::NaiveDate> {
 }
 
 /// Normaliza una lista de IDs: recorta, descarta vacíos, ordena y deduplica.
-pub fn normalize_ids(ids: Vec<String>) -> Vec<String> {
-    let mut v: Vec<String> = ids
-        .into_iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    v.sort_unstable();
-    v.dedup();
-    v
-}
+pub use crate::texto::normalizar_ids as normalize_ids;
 
 /// Categoría a crear/upsertar.
 #[derive(Debug, Clone)]
@@ -84,23 +73,41 @@ pub struct ProductoUpsert {
     pub ids_alergenos: Vec<String>,
 }
 
+/// Datos crudos con campos nombrados (RI-48); validar produce el objeto de dominio.
+#[derive(Debug, Clone)]
+pub struct ProductoEntrada {
+    pub id_producto: Option<String>,
+    pub id_categoria: String,
+    pub id_proveedor: Option<String>,
+    pub nombre: String,
+    pub precio_venta: Option<Dinero>,
+    pub stock_minimo: Option<f64>,
+    pub unidad_medida: Option<String>,
+    pub nombre_imagen: Option<String>,
+    pub ruta_imagen: Option<String>,
+    pub cantidad_pedido_esperada: Option<f64>,
+    pub stock_suelto: Option<f64>,
+    pub iva_percent: Option<f64>,
+    pub ids_alergenos: Vec<String>,
+}
+
 impl ProductoUpsert {
-    #[allow(clippy::too_many_arguments)]
-    pub fn validar(
-        id_producto: Option<String>,
-        id_categoria: String,
-        id_proveedor: Option<String>,
-        nombre: String,
-        precio_venta: Option<Dinero>,
-        stock_minimo: Option<f64>,
-        unidad_medida: Option<String>,
-        nombre_imagen: Option<String>,
-        ruta_imagen: Option<String>,
-        cantidad_pedido_esperada: Option<f64>,
-        stock_suelto: Option<f64>,
-        iva_percent: Option<f64>,
-        ids_alergenos: Vec<String>,
-    ) -> Result<Self, String> {
+    pub fn validar(input: ProductoEntrada) -> Result<Self, String> {
+        let ProductoEntrada {
+            id_producto,
+            id_categoria,
+            id_proveedor,
+            nombre,
+            precio_venta,
+            stock_minimo,
+            unidad_medida,
+            nombre_imagen,
+            ruta_imagen,
+            cantidad_pedido_esperada,
+            stock_suelto,
+            iva_percent,
+            ids_alergenos,
+        } = input;
         let nombre = nombre.trim().to_string();
         if nombre.is_empty() {
             return Err("nombre required".into());
@@ -161,34 +168,47 @@ pub struct LoteUpdate {
     pub notas: Option<String>,
 }
 
+/// Datos crudos con campos nombrados (RI-48); validar produce el objeto de dominio.
+#[derive(Debug, Clone)]
+pub struct LoteEdicionEntrada {
+    pub id_lote: String,
+    pub id_producto: String,
+    pub codigo_lote: String,
+    pub caducidad: Option<String>,
+    pub fecha_entrada: Option<String>,
+    pub coste_unitario: Option<Dinero>,
+    pub id_proveedor: Option<String>,
+    pub notas: Option<String>,
+}
+
 impl LoteUpdate {
-    #[allow(clippy::too_many_arguments)]
-    pub fn validar(
-        id_lote: String,
-        id_producto: String,
-        codigo_lote: String,
-        caducidad: Option<String>,
-        fecha_entrada: Option<String>,
-        coste_unitario: Option<Dinero>,
-        id_proveedor: Option<String>,
-        notas: Option<String>,
-    ) -> Result<Self, String> {
+    pub fn validar(input: LoteEdicionEntrada) -> Result<Self, String> {
+        let LoteEdicionEntrada {
+            id_lote,
+            id_producto,
+            codigo_lote,
+            caducidad,
+            fecha_entrada,
+            coste_unitario,
+            id_proveedor,
+            notas,
+        } = input;
         let id_lote = id_lote.trim().to_string();
         if id_lote.is_empty() {
             return Err("id_lote inválido".into());
         }
         // Las mismas reglas que el alta para todo lo demás; la cantidad no entra.
-        let lote = LoteNuevo::validar(
-            Some(id_lote.clone()),
+        let lote = LoteNuevo::validar(crate::inventario::LoteEntrada {
+            id_lote: Some(id_lote.clone()),
             id_producto,
             codigo_lote,
             caducidad,
-            0.0,
+            stock_disponible: 0.0,
             fecha_entrada,
             coste_unitario,
             id_proveedor,
             notas,
-        )?;
+        })?;
         Ok(LoteUpdate {
             id_lote,
             id_producto: lote.id_producto,
@@ -202,19 +222,33 @@ impl LoteUpdate {
     }
 }
 
+/// Datos crudos con campos nombrados (RI-48); validar produce el objeto de dominio.
+#[derive(Debug, Clone)]
+pub struct LoteEntrada {
+    pub id_lote: Option<String>,
+    pub id_producto: String,
+    pub codigo_lote: String,
+    pub caducidad: Option<String>,
+    pub stock_disponible: f64,
+    pub fecha_entrada: Option<String>,
+    pub coste_unitario: Option<Dinero>,
+    pub id_proveedor: Option<String>,
+    pub notas: Option<String>,
+}
+
 impl LoteNuevo {
-    #[allow(clippy::too_many_arguments)]
-    pub fn validar(
-        id_lote: Option<String>,
-        id_producto: String,
-        codigo_lote: String,
-        caducidad: Option<String>,
-        stock_disponible: f64,
-        fecha_entrada: Option<String>,
-        coste_unitario: Option<Dinero>,
-        id_proveedor: Option<String>,
-        notas: Option<String>,
-    ) -> Result<Self, String> {
+    pub fn validar(input: LoteEntrada) -> Result<Self, String> {
+        let LoteEntrada {
+            id_lote,
+            id_producto,
+            codigo_lote,
+            caducidad,
+            stock_disponible,
+            fecha_entrada,
+            coste_unitario,
+            id_proveedor,
+            notas,
+        } = input;
         let id_producto = id_producto.trim().to_string();
         if id_producto.is_empty() {
             return Err("id_producto inválido".into());
@@ -390,7 +424,21 @@ mod tests {
     }
 
     fn producto_con_iva(nombre: &str, categoria: &str, stock_suelto: Option<f64>, iva: Option<f64>, alergenos: Vec<String>) -> Result<ProductoUpsert, String> {
-        ProductoUpsert::validar(Some(" p1 ".into()), categoria.into(), Some(" prov1 ".into()), nombre.into(), Some(Dinero::de_euros(2.5)), Some(1.0), Some(" unidad ".into()), Some(" ".into()), None, Some(3.0), stock_suelto, iva, alergenos)
+        ProductoUpsert::validar(crate::inventario::ProductoEntrada {
+            id_producto: Some(" p1 ".into()),
+            id_categoria: categoria.into(),
+            id_proveedor: Some(" prov1 ".into()),
+            nombre: nombre.into(),
+            precio_venta: Some(Dinero::de_euros(2.5)),
+            stock_minimo: Some(1.0),
+            unidad_medida: Some(" unidad ".into()),
+            nombre_imagen: Some(" ".into()),
+            ruta_imagen: None,
+            cantidad_pedido_esperada: Some(3.0),
+            stock_suelto,
+            iva_percent: iva,
+            ids_alergenos: alergenos,
+        })
     }
 
     #[test]
@@ -438,7 +486,17 @@ mod tests {
     }
 
     fn lote(cantidad: f64, caducidad: Option<&str>, entrada: Option<&str>) -> Result<LoteNuevo, String> {
-        LoteNuevo::validar(Some(" l1 ".into()), " p1 ".into(), " L-001 ".into(), caducidad.map(str::to_string), cantidad, entrada.map(str::to_string), Some(Dinero::de_euros(1.25)), Some(" prov1 ".into()), Some(" fresco ".into()))
+        LoteNuevo::validar(crate::inventario::LoteEntrada {
+            id_lote: Some(" l1 ".into()),
+            id_producto: " p1 ".into(),
+            codigo_lote: " L-001 ".into(),
+            caducidad: caducidad.map(str::to_string),
+            stock_disponible: cantidad,
+            fecha_entrada: entrada.map(str::to_string),
+            coste_unitario: Some(Dinero::de_euros(1.25)),
+            id_proveedor: Some(" prov1 ".into()),
+            notas: Some(" fresco ".into()),
+        })
     }
 
     #[test]
@@ -470,15 +528,62 @@ mod tests {
 
     #[test]
     fn lote_exige_producto_y_codigo() {
-        assert!(LoteNuevo::validar(None, " ".into(), "x".into(), None, 1.0, None, None, None, None).is_err());
-        assert!(LoteNuevo::validar(None, "p".into(), " ".into(), None, 1.0, None, None, None, None).is_err());
+        assert!(LoteNuevo::validar(crate::inventario::LoteEntrada {
+            id_lote: None,
+            id_producto: " ".into(),
+            codigo_lote: "x".into(),
+            caducidad: None,
+            stock_disponible: 1.0,
+            fecha_entrada: None,
+            coste_unitario: None,
+            id_proveedor: None,
+            notas: None,
+        }).is_err());
+        assert!(LoteNuevo::validar(crate::inventario::LoteEntrada {
+            id_lote: None,
+            id_producto: "p".into(),
+            codigo_lote: " ".into(),
+            caducidad: None,
+            stock_disponible: 1.0,
+            fecha_entrada: None,
+            coste_unitario: None,
+            id_proveedor: None,
+            notas: None,
+        }).is_err());
     }
 
     #[test]
     fn update_exige_id_y_reutiliza_reglas_de_lote_pero_no_lleva_cantidad() {
-        assert!(LoteUpdate::validar(" ".into(), "p".into(), "l".into(), None, None, None, None, None).is_err());
-        assert!(LoteUpdate::validar("l1".into(), " ".into(), "l".into(), None, None, None, None, None).is_err());
-        let l = LoteUpdate::validar(" l1 ".into(), " p1 ".into(), " lote ".into(), None, None, None, None, Some(" nota ".into())).unwrap();
+        assert!(LoteUpdate::validar(crate::inventario::LoteEdicionEntrada {
+            id_lote: " ".into(),
+            id_producto: "p".into(),
+            codigo_lote: "l".into(),
+            caducidad: None,
+            fecha_entrada: None,
+            coste_unitario: None,
+            id_proveedor: None,
+            notas: None,
+        }).is_err());
+        assert!(LoteUpdate::validar(crate::inventario::LoteEdicionEntrada {
+            id_lote: "l1".into(),
+            id_producto: " ".into(),
+            codigo_lote: "l".into(),
+            caducidad: None,
+            fecha_entrada: None,
+            coste_unitario: None,
+            id_proveedor: None,
+            notas: None,
+        }).is_err());
+        let l = LoteUpdate::validar(crate::inventario::LoteEdicionEntrada {
+            id_lote: " l1 ".into(),
+            id_producto: " p1 ".into(),
+            codigo_lote: " lote ".into(),
+            caducidad: None,
+            fecha_entrada: None,
+            coste_unitario: None,
+            id_proveedor: None,
+            notas: Some(" nota ".into()),
+        }).unwrap();
         assert_eq!(l.id_lote, "l1");
         assert_eq!(l.notas.as_deref(), Some("nota"));
     }

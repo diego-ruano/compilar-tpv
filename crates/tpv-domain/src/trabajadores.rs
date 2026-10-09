@@ -54,25 +54,10 @@ pub fn validar_tramos(tramos: &[AsignacionNueva]) -> Result<(), String> {
 }
 
 /// Texto obligatorio: recorta y exige no vacío.
-pub fn requerido(input: &str, field: &str) -> Result<String, String> {
-    let out = input.trim().to_string();
-    if out.is_empty() {
-        return Err(format!("{field} required"));
-    }
-    Ok(out)
-}
+pub use crate::texto::requerido;
 
 /// Texto opcional normalizado: recorta y descarta vacíos.
-pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
-    input.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t)
-        }
-    })
-}
+pub use crate::texto::limpiar_opcional;
 
 /// Datos para crear una asignación de turno (ya validados/normalizados).
 #[derive(Debug, Clone)]

@@ -88,21 +88,21 @@ pub async fn upsert_producto(
     input: UpsertProductoInput,
     autorizacion: &tpv_contracts::permisos::AutorizacionUsuario,
 ) -> AppResult<UpsertProductoResult> {
-    let producto = ProductoUpsert::validar(
-        input.id_producto,
-        input.id_categoria,
-        input.id_proveedor,
-        input.nombre,
-        input.precio_venta,
-        input.stock_minimo,
-        input.unidad_medida,
-        input.nombre_imagen,
-        input.ruta_imagen,
-        input.cantidad_pedido_esperada,
-        input.stock_suelto,
-        input.iva_percent,
-        input.ids_alergenos,
-    )
+    let producto = ProductoUpsert::validar(tpv_domain::inventario::ProductoEntrada {
+        id_producto: input.id_producto,
+        id_categoria: input.id_categoria,
+        id_proveedor: input.id_proveedor,
+        nombre: input.nombre,
+        precio_venta: input.precio_venta,
+        stock_minimo: input.stock_minimo,
+        unidad_medida: input.unidad_medida,
+        nombre_imagen: input.nombre_imagen,
+        ruta_imagen: input.ruta_imagen,
+        cantidad_pedido_esperada: input.cantidad_pedido_esperada,
+        stock_suelto: input.stock_suelto,
+        iva_percent: input.iva_percent,
+        ids_alergenos: input.ids_alergenos,
+    })
     .map_err(AppError::validation)?;
     let precios = tpv_domain::permisos::permite(&autorizacion.rol, &autorizacion.permisos, "catalogo.precios");
     let recibir = tpv_domain::permisos::permite(&autorizacion.rol, &autorizacion.permisos, "stock.recibir");
@@ -116,33 +116,33 @@ pub async fn upsert_producto(
 }
 
 pub async fn create_lote(repo: &R, id_usuario: &str, input: CreateLoteInput) -> AppResult<String> {
-    let lote = LoteNuevo::validar(
-        input.id_lote,
-        input.id_producto,
-        input.codigo_lote,
-        input.caducidad,
-        input.stock_disponible,
-        input.fecha_entrada,
-        input.coste_unitario,
-        input.id_proveedor,
-        input.notas,
-    )
+    let lote = LoteNuevo::validar(tpv_domain::inventario::LoteEntrada {
+        id_lote: input.id_lote,
+        id_producto: input.id_producto,
+        codigo_lote: input.codigo_lote,
+        caducidad: input.caducidad,
+        stock_disponible: input.stock_disponible,
+        fecha_entrada: input.fecha_entrada,
+        coste_unitario: input.coste_unitario,
+        id_proveedor: input.id_proveedor,
+        notas: input.notas,
+    })
     .map_err(AppError::validation)?;
     repo.create_lote(id_usuario, lote).await?;
     Ok("OK".to_string())
 }
 
 pub async fn update_lote(repo: &R, input: UpdateLoteInput) -> AppResult<String> {
-    let lote = LoteUpdate::validar(
-        input.id_lote,
-        input.id_producto,
-        input.codigo_lote,
-        input.caducidad,
-        input.fecha_entrada,
-        input.coste_unitario,
-        input.id_proveedor,
-        input.notas,
-    )
+    let lote = LoteUpdate::validar(tpv_domain::inventario::LoteEdicionEntrada {
+        id_lote: input.id_lote,
+        id_producto: input.id_producto,
+        codigo_lote: input.codigo_lote,
+        caducidad: input.caducidad,
+        fecha_entrada: input.fecha_entrada,
+        coste_unitario: input.coste_unitario,
+        id_proveedor: input.id_proveedor,
+        notas: input.notas,
+    })
     .map_err(AppError::validation)?;
     repo.update_lote(lote).await?;
     Ok("OK".to_string())

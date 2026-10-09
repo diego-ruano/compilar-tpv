@@ -40,17 +40,17 @@ pub async fn guardar(
     repo: &dyn ProveedoresRepository,
     input: ProveedorSaveInput,
 ) -> AppResult<bool> {
-    let proveedor = ProveedorValidado::validar(
-        input.id_proveedor,
-        input.nombre_empresa,
-        input.contacto,
-        input.telefono,
-        input.email,
-        input.cif,
-        input.informacion_adicional,
-        input.nombre_imagen,
-        input.ruta_imagen,
-    )
+    let proveedor = ProveedorValidado::validar(tpv_domain::proveedores::ProveedorEntrada {
+        id_proveedor: input.id_proveedor,
+        nombre_empresa: input.nombre_empresa,
+        contacto: input.contacto,
+        telefono: input.telefono,
+        email: input.email,
+        cif: input.cif,
+        informacion_adicional: input.informacion_adicional,
+        nombre_imagen: input.nombre_imagen,
+        ruta_imagen: input.ruta_imagen,
+    })
     .map_err(AppError::validation)?;
     repo.guardar(proveedor).await
 }

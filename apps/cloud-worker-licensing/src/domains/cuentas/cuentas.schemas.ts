@@ -1,6 +1,7 @@
 // src/domains/cuentas/cuentas.schemas.ts
 
 import { z } from "zod";
+import { zMetodoPago } from "../../lib/pago";
 
 import { zDineroNoNegativo } from "../../lib/dinero";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
@@ -39,7 +40,7 @@ export const updateGastoSchema = createGastoSchema.omit({ id_gasto: true });
 
 export const updatePagoSchema = z.object({
 	fecha_hora: z.string().transform(clean).refine(Boolean, "fecha_hora required"),
-	metodo: z.string().transform((v) => (v.trim() === "Tarjeta" ? "Tarjeta" : "Efectivo")),
+	metodo: zMetodoPago,
 	importe: money,
 });
 

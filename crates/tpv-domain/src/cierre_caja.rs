@@ -51,11 +51,8 @@ impl TotalesCaja {
     /// Lo que aporta un cobro: su importe a las ventas en efectivo, si sigue activo y no fue con
     /// tarjeta.
     ///
-    /// Es **la misma regla** que el SQL que suma un periodo: todo lo que no sea exactamente
-    /// `Tarjeta` u `Otro` cuenta como efectivo (CUENTA-03, `pago::es_efectivo`), y un cobro
-    /// anulado no cuenta (CUENTA-07). Una devolución es un cobro negativo y resta igual. Si se
-    /// separaran, lo que la pantalla enseña antes de confirmar un cambio y la rectificación que se
-    /// guarda al hacerlo dirían cifras distintas.
+    /// Igual que SQL, sólo `Efectivo` aporta al cajón; los desconocidos se rechazan al validar.
+    /// Un cobro anulado no cuenta. Una devolución en efectivo es un cobro negativo y resta.
     pub fn de_cobro(activo: bool, metodo: &str, importe: Dinero) -> Self {
         let efectivo = activo && crate::pago::es_efectivo(metodo);
         TotalesCaja {
@@ -387,9 +384,8 @@ mod tests {
             Dinero::CERO,
             "un cobro anulado no es una venta"
         );
-        // Como el SQL: sólo `Tarjeta` exacto va al banco; cualquier otra cosa entra en el cajón,
-        // que es el lado seguro (saldría como descuadre en vez de desaparecer).
-        assert_eq!(TotalesCaja::de_cobro(true, "Bizum", eur(12.5)).ventas_efectivo, eur(12.5));
+        // RI-48: un método desconocido no se cuenta como efectivo.
+        assert_eq!(TotalesCaja::de_cobro(true, "Bizum", eur(12.5)).ventas_efectivo, Dinero::CERO);
     }
 
     #[test]

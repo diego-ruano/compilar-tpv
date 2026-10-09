@@ -692,19 +692,19 @@ impl MesasRepository for SqliteMesasRepository {
 
     /* ===== RESERVAS ===== */
 
-    async fn set_reserva_estado(&self, id_reserva: &str, estado: String) -> AppResult<()> {
+    async fn set_reserva_estado(&self, id_reserva: &str, estado: tpv_domain::estados::EstadoReserva) -> AppResult<()> {
         let g = self.db.write().await;
         let db = &g;
 
         let res: AppResult<()> = db.transaccion(async {
             db.execute(
                 "UPDATE Reservas SET Estado=?2 WHERE ID_Reserva=?1;",
-                vec![Value::Text(id_reserva.to_string()), Value::Text(estado.clone())],
+                vec![Value::Text(id_reserva.to_string()), Value::Text(estado.como_texto().to_string())],
             )
             .await
             .map_err(db_err)?;
 
-            if estado == "FINALIZADA" || estado == "CANCELADA" || estado == "NO_SHOW" {
+            if matches!(estado, tpv_domain::estados::EstadoReserva::Finalizada | tpv_domain::estados::EstadoReserva::Cancelada | tpv_domain::estados::EstadoReserva::NoShow) {
                 db.execute(
                     "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
                     vec![Value::Text(id_reserva.to_string())],
@@ -1340,7 +1340,7 @@ impl MesasRepository for SqliteMesasRepository {
                 vec![
                     Value::Text(id_pago.clone()),
                     Value::Text(data.id_comanda.clone()),
-                    Value::Text(data.metodo.clone()),
+                    Value::Text(data.metodo.to_string()),
                     dinero_val(total),
                     Value::Text(data.tipo.clone()),
                     data.id_usuario.clone().map(Value::Text).unwrap_or(Value::Null),
@@ -1361,7 +1361,7 @@ impl MesasRepository for SqliteMesasRepository {
                     id_usuario: data.id_usuario.clone(),
                     id_trabajador: trabajador_mov,
                     importe: total,
-                    metodo_pago: Some(data.metodo.clone()),
+                    metodo_pago: Some(data.metodo.to_string()),
                     ..Default::default()
                 },
             )
@@ -1513,12 +1513,12 @@ impl MesasRepository for SqliteMesasRepository {
         &self,
         id_detalle: &str,
         id_usuario_cocinero: &str,
-        estado: String,
+        estado: tpv_domain::estados::EstadoCocina,
     ) -> AppResult<()> {
         let g = self.db.write().await;
         let db = &g;
 
-        if estado == "PREPARADO" {
+        if estado == tpv_domain::estados::EstadoCocina::Preparado {
             db.execute(r#"
                 UPDATE Detalle_Comanda
                 SET

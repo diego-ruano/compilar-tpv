@@ -1,3 +1,4 @@
+import { zMetodoPago } from "../../lib/pago";
 // src/domains/venta_rapida/venta_rapida.commands.ts
 
 import type { Dinero } from "@tpv/contracts";
@@ -288,7 +289,7 @@ export function cobrarFraccionado(
 		args: [
 			plan.id_pago,
 			input.id_comanda,
-			input.metodo,
+			zMetodoPago.parse(input.metodo),
 			plan.importe_total,
 			plan.id_usuario_cobrador,
 			plan.id_trabajador_cobrador,
@@ -323,7 +324,7 @@ export function cobrarFraccionado(
 			plan.id_usuario_cobrador,
 			plan.id_trabajador_cobrador,
 			plan.importe_total,
-			input.metodo,
+			zMetodoPago.parse(input.metodo),
 		],
 	});
 

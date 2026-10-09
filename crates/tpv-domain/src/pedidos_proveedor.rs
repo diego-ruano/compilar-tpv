@@ -2,9 +2,7 @@
 
 use crate::dinero::Dinero;
 
-fn limpia(o: Option<String>) -> Option<String> {
-    o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
+use crate::texto::limpiar_opcional as limpia;
 
 #[derive(Debug, Clone)]
 pub struct LineaPedidoNueva {

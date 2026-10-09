@@ -41,7 +41,7 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     /* Reservas */
-    async fn set_reserva_estado(&self, id_reserva: &str, estado: String) -> AppResult<()> {
+    async fn set_reserva_estado(&self, id_reserva: &str, estado: tpv_domain::estados::EstadoReserva) -> AppResult<()> {
         let _: JsonValue = self
             .client
             .put_json(
@@ -184,7 +184,7 @@ impl MesasRepository for HttpMesasRepository {
         &self,
         id_detalle: &str,
         id_usuario_cocinero: &str,
-        estado: String,
+        estado: tpv_domain::estados::EstadoCocina,
     ) -> AppResult<()> {
         let body = json!({
             "id_detalle": id_detalle,

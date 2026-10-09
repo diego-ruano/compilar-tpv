@@ -122,7 +122,7 @@ function sembrarVenta(
 	if (estado === "Pagada") {
 		sql.exec(
 			`INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-			 VALUES ('p-${sufijo}', 'c-${sufijo}', ?, 'efectivo', 250, 'TOTAL');`,
+			 VALUES ('p-${sufijo}', 'c-${sufijo}', ?, 'Efectivo', 250, 'TOTAL');`,
 			fechaPago,
 		);
 		sql.exec(
@@ -255,7 +255,7 @@ describe("bootstrap acotado · la ventana de los transaccionales", () => {
 			sembrarVenta(sql, "vieja", ANTIGUO);
 			sql.exec(
 				`INSERT INTO Movimientos_Caja (ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, Importe, Metodo_Pago)
-				 VALUES ('m1', ?, 'COBRO', 'p-vieja', 250, 'efectivo');`,
+				 VALUES ('m1', ?, 'COBRO', 'p-vieja', 250, 'Efectivo');`,
 				RECIENTE,
 			);
 			sql.exec(

@@ -234,8 +234,8 @@ async fn build_punch_status<C: Reader>(
             _ => None,
         };
         let estado = match row.get_value(3).map_err(db_err)? {
-            Value::Text(s) => s,
-            _ => "ABIERTO".into(),
+            Value::Text(s) => tpv_domain::estados::EstadoFichaje::desde_texto(&s).map_err(db_err)?.como_texto().to_string(),
+            _ => tpv_domain::estados::EstadoFichaje::Abierto.como_texto().into(),
         };
 
         partes.push(PunchParte {

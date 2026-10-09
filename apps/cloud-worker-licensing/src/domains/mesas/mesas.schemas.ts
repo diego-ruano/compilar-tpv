@@ -1,6 +1,7 @@
 // src/domains/mesas/mesas.schemas.ts
 
 import { z } from "zod";
+import { zMetodoPago, zEstadoCocina } from "../../lib/pago";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -25,15 +26,7 @@ function cleanOrNull(v: unknown): string | null {
 	return s.length ? s : null;
 }
 
-function metodo(v: unknown): string {
-	return String(v ?? "").trim().toLowerCase() === "tarjeta" ? "Tarjeta" : "Efectivo";
-}
 
-function cocina(v: unknown): string {
-	return String(v ?? "").trim().toUpperCase() === "PREPARADO"
-		? "PREPARADO"
-		: "PENDIENTE";
-}
 
 function idArray(values: unknown): string[] {
 	if (!Array.isArray(values)) return [];
@@ -145,14 +138,14 @@ export const updateNotaSchema = z
 export const cobrarDetallesSchema = z
 	.object({
 		id_comanda: idField("id_comanda"),
-		metodo: z.any(),
+		metodo: zMetodoPago,
 		tipo: z.any(),
 		detalle_ids: z.any(),
 		id_usuario: z.any().optional().nullable(),
 	})
 	.transform((v) => ({
 		id_comanda: v.id_comanda,
-		metodo: metodo(v.metodo),
+		metodo: v.metodo,
 		tipo: String(v.tipo ?? "TOTAL").trim().toUpperCase() === "FRACCIONADO"
 			? "FRACCIONADO"
 			: "TOTAL",
@@ -167,7 +160,7 @@ export const cobrarDetallesSchema = z
 export const kitchenStateSchema = z.object({
 	id_detalle: idField("id_detalle"),
 	id_usuario_cocinero: idField("id_usuario_cocinero"),
-	estado: z.any().transform(cocina),
+	estado: zEstadoCocina,
 });
 
 export const searchSchema = z.object({

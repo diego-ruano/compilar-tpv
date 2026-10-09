@@ -1,6 +1,7 @@
 // src/domains/venta_rapida/venta_rapida.schemas.ts
 
 import { z } from "zod";
+import { zMetodoPago } from "../../lib/pago";
 import { zDineroNoNegativo } from "../../lib/dinero";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
@@ -55,11 +56,6 @@ function normalizeIds(values: unknown): string[] {
 	).sort();
 }
 
-function normalizeMetodo(v: unknown): string {
-	return String(v ?? "").trim().toLowerCase() === "tarjeta"
-		? "Tarjeta"
-		: "Efectivo";
-}
 
 export const listComandasSchema = z.object({
 	include_pagadas: z
@@ -125,7 +121,7 @@ export const updateNotaSchema = z
 export const cobrarFraccionadoSchema = z
 	.object({
 		id_comanda: idField("id_comanda"),
-		metodo: z.any(),
+		metodo: zMetodoPago,
 		importe_total: zDineroNoNegativo,
 		id_usuario_cobrador: z.any().optional().nullable(),
 		id_trabajador_cobrador: z.any().optional().nullable(),
@@ -133,7 +129,7 @@ export const cobrarFraccionadoSchema = z
 	})
 	.transform((v) => ({
 		id_comanda: v.id_comanda,
-		metodo: normalizeMetodo(v.metodo),
+		metodo: v.metodo,
 		importe_total: v.importe_total,
 		id_usuario_cobrador: optIdStr(v.id_usuario_cobrador),
 		id_trabajador_cobrador: optIdStr(v.id_trabajador_cobrador),

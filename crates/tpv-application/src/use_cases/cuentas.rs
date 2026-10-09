@@ -127,7 +127,7 @@ pub async fn delete_gasto(
 
 pub async fn update_pago(repo: &dyn CuentasRepository, input: UpdatePagoInput) -> AppResult<bool> {
     let fecha_hora = requerido(&input.fecha_hora, "fecha_hora").map_err(AppError::validation)?;
-    let metodo = normalize_metodo(&input.metodo);
+    let metodo = normalize_metodo(&input.metodo).map_err(AppError::validation)?;
 
     // El importe del input se ignora a propósito (CUENTA-02): el repositorio lo recalcula desde los
     // `Pago_Detalles` cobrados. Sólo se permite cambiar método y fecha.
@@ -263,7 +263,7 @@ pub async fn devolver_lineas(
         id_pago,
         id_usuario: id_usuario.to_string(),
         motivo,
-        metodo: normalize_metodo_devolucion(&input.metodo),
+        metodo: normalize_metodo_devolucion(&input.metodo).map_err(AppError::validation)?,
         lineas,
     })
     .await

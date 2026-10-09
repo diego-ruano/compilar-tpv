@@ -21,7 +21,7 @@
     "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-barra', 'BARRA', '2099-01-01 13:30:00', 'Abierta');",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina) VALUES ('det-a', 'com-pronto', 'prod-tortilla', 2, 900, 'sin cebolla', 'PENDIENTE');",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-b', 'com-pronto', 'prod-cerveza', 1, 300);",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-c', 'com-tarde', 'prod-croquetas', 1, 750, 'EN_PREPARACION');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-c', 'com-tarde', 'prod-croquetas', 1, 750, 'PENDIENTE');",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-d', 'com-toda-lista', 'prod-tortilla', 1, 900, 'PREPARADO');",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-e', 'com-barra', 'prod-croquetas', 1, 750, 'PENDIENTE');"
   ],

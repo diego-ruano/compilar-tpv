@@ -19,7 +19,7 @@
       "ID_Trabajador": null,
       "ID_Usuario": null,
       "Importe": 600,
-      "Metodo_Pago": "EFECTIVO",
+      "Metodo_Pago": "Efectivo",
       "Tipo": "COBRO"
     }
   ],
@@ -34,7 +34,7 @@
       "ID_Trabajador_Cobrador": null,
       "ID_Usuario_Cobrador": null,
       "Importe_Total": 600,
-      "Metodo_Pago": "EFECTIVO",
+      "Metodo_Pago": "Efectivo",
       "Tipo": "FRACCIONADO"
     }
   ]

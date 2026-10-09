@@ -35,7 +35,6 @@
 - [Orden sugerido](#orden-sugerido)
 - Por grupos:
   14. [Frontend](#14-frontend)
-  15. [Rust: idioma, runtime y estructura](#15-rust-idioma-runtime-y-estructura)
   16. [CI, build y herramientas](#16-ci-build-y-herramientas)
   19. [Tecnologías y librerías](#19-tecnologías-y-librerías)
   20. [Plataformas: Android (Handy) y Windows 7](#20-plataformas-android-handy-y-windows-7)
@@ -68,16 +67,9 @@ Lo que queda de esta revisión se concentra en dos frentes:
 | ID | Sev | Tipo | Hallazgo |
 |----|-----|------|----------|
 | [RI-08](#ri-08) | 🟠 | deuda | La CI no ejecuta 249 tests, entre ellos todos los guardianes |
-| [RI-15](#ri-15) | 🟡 | rendimiento | Se construye un `reqwest::Client` por petición (sin reutilizar conexiones) |
-| [RI-16](#ri-16) | 🟡 | rendimiento | libsql local bloquea hilos del runtime async (restauración, estadísticas) |
 | [RI-23](#ri-23) | 🟡 | rendimiento | Optimización y limpieza de imágenes aplazada |
 | [RI-24](#ri-24) | 🟡 | deuda | Los source maps del frontend no llegan a Sentry (y la versión no cuadra) |
 | [RI-25](#ri-25) | 🟡 | seguridad | Acciones de GitHub sin fijar por SHA en un job con la clave de firma del updater |
-| [RI-32](#ri-32) | 🔵 | deuda | Transacciones escritas a mano (`"BEGIN;"`) y helpers duplicados por repositorio |
-| [RI-38](#ri-38) | 🔵 | bug | Errores que se tragan en silencio (estadísticas, outbox, compatibilidad de columnas) |
-| [RI-39](#ri-39) | 🔵 | bug | Guardas de estado fuera de la transacción (`actualizar_pago`) |
-| [RI-40](#ri-40) | 🔵 | bug | Pánicos por cortar cadenas por bytes (reservas) |
-| [RI-48](#ri-48) | 🔵 | deuda | Dominio: duplicación, tipos como cadenas y constructores de trece argumentos |
 | [RI-49](#ri-49) | 🔵 | deuda | Build: `include_dir!` sin `rerun-if-changed`, `Cargo.lock` anidado y dependencias sin uso |
 | [RI-74](#ri-74) | 🟡 | deuda | Windows 7: la rama es anterior a ARQ-01 y su canal del feed no está desplegado |
 | [RI-75](#ri-75) | 🔵 | deuda | Android: el `Context` sale de una API no pública |
@@ -96,8 +88,7 @@ frontend tienen regresiones automatizadas; el recorrido completo y la comprobaci
 TPV real siguen siendo validaciones de la release.
 
 **Migraciones:** `0001_inicial.sql` ya está congelada. Las mejoras pendientes se añaden mediante
-una migración nueva, registrada en los dos runners. Quedan por decidir los `CHECK` de RI-48
-(`Metodo_Pago`, estados).
+una migración nueva, registrada en los dos runners.
 
 **Antes de cobrar por el producto:**
 
@@ -110,7 +101,7 @@ RI-77 para que no enseñe lo que no puede hacer.
 **Antes de compilar otra versión de Windows 7:** RI-74. Integrar `main` en la rama, y pasar la ruta
 del canal a `main`.
 
-**Después, sin prisa:** el resto, incluidas las mejoras de coste (RI-15, RI-16).
+**Después, sin prisa:** el resto.
 
 ---
 
@@ -140,29 +131,6 @@ El botón de [`Cuentas.tsx`](../../apps/tpv-main/src/app/pages/Cuentas.tsx) se c
 por decisión del propietario el 09/10/2026. Sigue pendiente decidir si se retira o se conecta al
 correo con el límite y el destinatario de REV-14. La confirmación para reabrir un cierre, los
 caracteres españoles del PDF y el generador compartido están resueltos.
-
----
-
-## 15. Rust: idioma, runtime y estructura
-
-<a id="ri-48"></a>
-### RI-48 🔵 · Dominio: duplicación, tipos como cadenas y constructores de trece argumentos
-
-- **`normalize_metodo` sigue duplicado**: [`pago.rs:9`](../../crates/tpv-domain/src/pago.rs#L9) se
-  declara «única fuente de verdad» (CUENTA-03), pero
-  [`venta_rapida.rs:6`](../../crates/tpv-domain/src/venta_rapida.rs#L6) tiene su propia copia y es la
-  que usa el caso de uso de venta rápida.
-- **El método de pago es una cadena** y todo lo que no sea exactamente `"tarjeta"` es efectivo (un
-  test lo fija con `"bizum" → "Efectivo"`). El día que se añada Bizum, contará como efectivo en el
-  arqueo sin que nada falle. Un `enum MetodoPago` en el dominio + `CHECK (Metodo_Pago IN
-  ('Efectivo','Tarjeta'))` en el esquema convierte ese día en un error de compilación. Lo mismo para
-  `Estado_Cocina`, `Reservas.Estado`, `Tareas.Estado`, `Fichajes.Estado`, que no tienen `CHECK`.
-- **Constructores `validar(…)` con 9–13 argumentos posicionales** del mismo tipo
-  (`Option<String>`), con `#[allow(clippy::too_many_arguments)]`: intercambiar `telefono` y `email`
-  compila. Recibir el DTO de entrada (o un struct) en vez de la lista.
-- `requerido` (5 copias), `limpiar_opcional` (≥ 9), `normalizar_ids` (3): un `texto.rs` común.
-- `ErrorCode::TODOS` y `wire()` escritos a mano (con un test que los vigila): `strum`
-  (`EnumIter`, `IntoStaticStr` con `serialize_all = "snake_case"`) los genera.
 
 ---
 
@@ -198,10 +166,6 @@ El E2E no va a CI por buenas razones (§16 de CLAUDE.md), pero eso lo deja sin r
 Para el dinero ya hay otra: los `*Apis.ts` que lo llevan reciben los `Input` generados, así que un
 `number` en un campo `Dinero` no compila. Los comandos generados por Specta comprueban también
 nombres, argumentos y respuestas; el `typecheck` y la comprobación de generación corren en CI.
-
-**`pnpm lint:rust` está rojo hoy**, con independencia de todo lo anterior: `select_one_f64`
-([`mesas.rs:129`](../../crates/tpv-infra-sqlite/src/mesas.rs#L129)) no tiene uso y `-D warnings` lo
-convierte en error. Es una línea, pero mientras esté así el clippy de CI no protege nada.
 
 <a id="ri-25"></a>
 ### RI-25 🟡 · Acciones de GitHub sin fijar por SHA con acceso a la clave del updater
@@ -266,9 +230,8 @@ relación beneficio/esfuerzo.
 
 | Propuesta | Para qué | Esfuerzo |
 |---|---|---|
-| **`strum`** | Genera `TODOS`, `wire()` y `from_code` de `ErrorCode` y los enums de estado (RI-48) | Bajo |
 | **`zod` 4** | Validación bastante más rápida y más ligera en el worker (CPU facturable). `@hono/zod-validator` ya la soporta. Revisar la API de `z.coerce` y los mensajes | Medio |
-| **`rusqlite`** en lugar de **`libsql`** (evaluar) | En la Main sólo se usa SQLite local (`features = ["core"]`). `rusqlite` es la opción madura: transacciones RAII (`conn.transaction()` hace rollback al soltarse, RI-32), caché de sentencias preparadas (`prepare_cached`; hoy cada consulta se prepara de nuevo), API de backup en caliente, y ninguna de las rarezas documentadas (el crash nativo al crear muchas bases, la API async que bloquea, RI-16). Con un hilo propio para el escritor encaja con el diseño de escritor único. Coste: reescribir `db.rs`/`mapping.rs` y adaptar los repositorios (los `Reader`/`Writer` ya aíslan buena parte). Merece una prueba de concepto sobre un repositorio antes de decidir | Alto |
+| **`rusqlite`** en lugar de **`libsql`** (evaluar) | En la Main sólo se usa SQLite local (`features = ["core"]`). `rusqlite` es la opción madura: transacciones RAII (`conn.transaction()` hace rollback al soltarse), caché de sentencias preparadas (`prepare_cached`; hoy cada consulta se prepara de nuevo), API de backup en caliente, y ninguna de las rarezas documentadas (el crash nativo al crear muchas bases, la API async que bloquea). Todas las conexiones locales ya se ejecutan en hilos propios; el cambio conservaría esa separación. Coste: reescribir `db.rs`/`mapping.rs` y adaptar los repositorios (los `Reader`/`Writer` ya aíslan buena parte). Merece una prueba de concepto sobre un repositorio antes de decidir | Alto |
 | **Mantenimiento**: `thiserror` 2, `rand` 0.9, `keyring` 3, `@vitejs/plugin-react` 5, TypeScript alineado entre app (`~5.8`) y worker (`^5.9`) | Mantenerse dentro de las versiones soportadas; Dependabot ya abre los PR menores | Bajo |
 | **`pdf-lib`** | No publica versión desde 2021. Si da problemas, `@cantoo/pdf-lib` es un fork mantenido con la misma API | Bajo, si hace falta |
 

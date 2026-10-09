@@ -23,8 +23,9 @@
 
 use serde::{Deserialize, Serialize};
 /// Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, strum::VariantArray, strum::IntoStaticStr)]
 #[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum ErrorCode {
     // ── Genéricos: CLASIFICAN el fallo, no lo identifican ──────────────────────
     /// Entrada inválida o regla de dominio incumplida. El detalle va en `message`.
@@ -98,35 +99,8 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
-    /// Todos los códigos del catálogo, en el orden en que se declaran.
-    ///
-    /// Es la ÚNICA lista de variantes escrita a mano, y la vigila un test que la compara con la
-    /// declaración del enum (`todos_coincide_con_la_declaracion_del_enum`). Antes había cuatro
-    /// copias —la búsqueda de `from_code` y tres tests— y a las cuatro les faltaban los dos
-    /// códigos fiscales, así que un `factura_completa_requerida` del worker llegaba como
-    /// `external` y los tests que debían cazarlo recorrían la misma lista incompleta.
-    pub const TODOS: [ErrorCode; 20] = [
-        ErrorCode::Validation,
-        ErrorCode::NotFound,
-        ErrorCode::Conflict,
-        ErrorCode::Repository,
-        ErrorCode::External,
-        ErrorCode::Internal,
-        ErrorCode::NotApproved,
-        ErrorCode::MainOffline,
-        ErrorCode::DeviceRevoked,
-        ErrorCode::LicenseExpired,
-        ErrorCode::LicenseNotFound,
-        ErrorCode::InvalidPin,
-        ErrorCode::TenantDbNotProvisioned,
-        ErrorCode::BootstrapTooLarge,
-        ErrorCode::TenantMigrationAltered,
-        ErrorCode::BackupCorrupt,
-        ErrorCode::PermisoDenegado,
-        ErrorCode::DatosFiscalesIncompletos,
-        ErrorCode::FacturaCompletaRequerida,
-        ErrorCode::ReservaSolapada,
-    ];
+    /// Catálogo generado desde el enum; no hay listas paralelas (RI-48).
+    pub const TODOS: &'static [ErrorCode] = <Self as strum::VariantArray>::VARIANTS;
 
     /// Mensaje por defecto, para cuando no hay detalle que añadir.
     pub fn default_message(self) -> &'static str {
@@ -162,32 +136,8 @@ impl ErrorCode {
         }
     }
 
-    /// Valor serializado del código. Espejo explícito de lo que produce serde; hay un test
-    /// que comprueba que no se separan.
-    pub fn wire(self) -> &'static str {
-        match self {
-            ErrorCode::Validation => "validation",
-            ErrorCode::NotFound => "not_found",
-            ErrorCode::Conflict => "conflict",
-            ErrorCode::Repository => "repository",
-            ErrorCode::External => "external",
-            ErrorCode::Internal => "internal",
-            ErrorCode::NotApproved => "not_approved",
-            ErrorCode::MainOffline => "main_offline",
-            ErrorCode::DeviceRevoked => "device_revoked",
-            ErrorCode::LicenseExpired => "license_expired",
-            ErrorCode::LicenseNotFound => "license_not_found",
-            ErrorCode::InvalidPin => "invalid_pin",
-            ErrorCode::TenantDbNotProvisioned => "tenant_db_not_provisioned",
-            ErrorCode::BootstrapTooLarge => "bootstrap_too_large",
-            ErrorCode::TenantMigrationAltered => "tenant_migration_altered",
-            ErrorCode::BackupCorrupt => "backup_corrupt",
-            ErrorCode::PermisoDenegado => "permiso_denegado",
-            ErrorCode::DatosFiscalesIncompletos => "datos_fiscales_incompletos",
-            ErrorCode::FacturaCompletaRequerida => "factura_completa_requerida",
-            ErrorCode::ReservaSolapada => "reserva_solapada",
-        }
-    }
+    /// Valor del cable derivado del enum; se verifica su paridad con serde.
+    pub fn wire(self) -> &'static str { self.into() }
 
     /// Parsea un valor del **propio catálogo** (`{ "code": … }` de una respuesta del worker).
     ///
@@ -199,7 +149,7 @@ impl ErrorCode {
     /// (`"no_active_license_for_tenant"`), ésta lee el código ya resuelto (`"license_not_found"`).
     pub fn from_code(s: &str) -> Option<Self> {
         let s = s.trim().to_ascii_lowercase();
-        ErrorCode::TODOS.into_iter().find(|c| c.wire() == s)
+        ErrorCode::TODOS.iter().copied().find(|c| c.wire() == s)
     }
 
     /// Resuelve el código a partir del string que devuelve el worker en `{ "error": … }`.
@@ -446,7 +396,7 @@ mod tests {
         ];
 
         let f = fixture();
-        for code in ErrorCode::TODOS {
+        for &code in ErrorCode::TODOS {
             if genericos.contains(&code) {
                 continue;
             }
@@ -458,8 +408,7 @@ mod tests {
         }
     }
 
-    /// `TODOS` es una lista escrita a mano, así que se compara con lo único que no puede
-    /// quedarse corto: la declaración del propio enum, leída de este mismo fichero.
+    /// Comprueba que la lista derivada conserva todas las variantes y su orden.
     #[test]
     fn todos_coincide_con_la_declaracion_del_enum() {
         let fuente = include_str!("errors.rs");
@@ -485,7 +434,7 @@ mod tests {
     /// reconocerlo para TODOS los códigos, o uno nuevo del worker se degrada a genérico.
     #[test]
     fn from_code_reconoce_cada_codigo_del_catalogo() {
-        for code in ErrorCode::TODOS {
+        for &code in ErrorCode::TODOS {
             assert_eq!(ErrorCode::from_code(&wire_de(code)), Some(code), "{code:?}");
             assert_eq!(code.wire(), wire_de(code), "{code:?}: wire() y serde se separan");
         }
@@ -494,7 +443,7 @@ mod tests {
     #[test]
     fn ningun_codigo_se_queda_sin_mensaje_legible() {
 
-        for code in ErrorCode::TODOS {
+        for &code in ErrorCode::TODOS {
             let msg = code.default_message();
             assert!(!msg.trim().is_empty(), "{code:?} sin mensaje");
             // Un mensaje por defecto es para enseñárselo a alguien: no puede ser el propio

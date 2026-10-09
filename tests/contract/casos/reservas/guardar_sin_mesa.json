@@ -10,7 +10,7 @@
     "turno": "cena",
     "comensales": 2,
     "nota": null,
-    "estado": "confirmada",
+    "estado": "PROXIMA",
     "nombre_cliente": "Ana",
     "email": "ana@x.com",
     "telefono": "600100200"

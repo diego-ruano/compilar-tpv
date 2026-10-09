@@ -399,7 +399,7 @@ impl ReservasRepository for SqliteReservasRepository {
                         Value::Text(r.turno.clone()),
                         Value::Integer(r.comensales),
                         opt_text(r.nota.clone()),
-                        Value::Text(r.estado.clone()),
+                        Value::Text(r.estado.como_texto().to_string()),
                         Value::Text(id_reserva.clone()),
                         opt_int(r.duracion_min),
                     ],
@@ -418,7 +418,7 @@ impl ReservasRepository for SqliteReservasRepository {
                         Value::Text(r.turno.clone()),
                         Value::Integer(r.comensales),
                         opt_text(r.nota.clone()),
-                        Value::Text(r.estado.clone()),
+                        Value::Text(r.estado.como_texto().to_string()),
                         opt_int(r.duracion_min),
                     ],
                 )
@@ -522,7 +522,7 @@ mod tests_cliente {
             comensales: 2,
             duracion_min: None,
             nota: None,
-            estado: "PROXIMA".into(),
+            estado: tpv_domain::estados::EstadoReserva::Proxima,
             cliente,
         }
     }
@@ -627,7 +627,7 @@ mod tests_solape {
             comensales: 2,
             duracion_min: duracion,
             nota: None,
-            estado: "PROXIMA".into(),
+            estado: tpv_domain::estados::EstadoReserva::Proxima,
             cliente: ClienteReserva::Ninguno,
         }
     }

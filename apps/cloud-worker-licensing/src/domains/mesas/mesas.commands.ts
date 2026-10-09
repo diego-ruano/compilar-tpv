@@ -1,3 +1,4 @@
+import { zMetodoPago } from "../../lib/pago";
 // src/domains/mesas/mesas.commands.ts
 
 import type { Dinero } from "@tpv/contracts";
@@ -591,7 +592,7 @@ export function cobrarDetalles(
 						args: [
 							REF_ID_PAGO,
 							input.id_comanda,
-							input.metodo,
+							zMetodoPago.parse(input.metodo),
 							plan.total,
 							input.tipo,
 							input.id_usuario,
@@ -626,7 +627,7 @@ export function cobrarDetalles(
 							input.id_usuario,
 							plan.id_trabajador,
 							plan.total,
-							input.metodo,
+							zMetodoPago.parse(input.metodo),
 						],
 					},
 					// RI-61: el cliente se queda en la comanda al cobrar (el de su reserva, si aún no

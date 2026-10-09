@@ -108,18 +108,18 @@ fn id_no_vacio(id: &str) -> AppResult<&str> {
 
 /// Emite una notificación manual (validando en el dominio). Devuelve su `ID_Notificacion`.
 pub async fn crear(notifier: &dyn Notifier, input: CrearNotificacionInput) -> AppResult<String> {
-    let nueva = NuevaNotificacion::validar(
-        input.tipo,
-        input.severidad.as_deref().unwrap_or("info"),
-        input.titulo,
-        input.cuerpo,
-        &input.destino_tipo,
-        input.destino_valor,
-        input.accion,
-        input.payload,
-        input.clave_dedupe,
-        input.expira_en,
-    )
+    let nueva = NuevaNotificacion::validar(tpv_domain::notificaciones::NotificacionEntrada {
+        tipo: input.tipo,
+        severidad: input.severidad.as_deref().unwrap_or("info"),
+        titulo: input.titulo,
+        cuerpo: input.cuerpo,
+        destino_tipo: &input.destino_tipo,
+        destino_valor: input.destino_valor,
+        accion: input.accion,
+        payload: input.payload,
+        clave_dedupe: input.clave_dedupe,
+        expira_en: input.expira_en,
+    })
     .map_err(AppError::validation)?;
 
     notifier.emitir(nueva).await

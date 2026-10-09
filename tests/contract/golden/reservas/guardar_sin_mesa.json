@@ -11,7 +11,7 @@
     {
       "Comensales": 2,
       "Dia_YMD": "2026-02-01",
-      "Estado": "confirmada",
+      "Estado": "PROXIMA",
       "Hora": "20:30",
       "ID_Mesa": null,
       "ID_Reserva": "reserva-1",

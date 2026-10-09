@@ -205,7 +205,7 @@ pub fn datos_cobro(
     let data = CobroFraccionado {
         id_pago,
         id_comanda: input.id_comanda,
-        metodo: normalize_metodo(&input.metodo),
+        metodo: normalize_metodo(&input.metodo).map_err(AppError::validation)?,
         importe_total: input.importe_total,
         id_usuario_cobrador: limpio(Some(id_usuario)),
         id_trabajador_cobrador: limpio(id_trabajador),
@@ -276,8 +276,8 @@ mod tests {
 
     #[test]
     fn metodo_de_cobro_se_normaliza() {
-        assert_eq!(normalize_metodo(" tarjeta "), "Tarjeta");
-        assert_eq!(normalize_metodo("otro"), "Efectivo");
+        assert_eq!(normalize_metodo(" tarjeta ").unwrap().como_texto(), "Tarjeta");
+        assert!(normalize_metodo("otro").is_err());
     }
 
     #[test]
@@ -291,8 +291,8 @@ mod tests {
 
     #[test]
     fn metodo_tarjeta_es_insensible_a_mayusculas() {
-        assert_eq!(normalize_metodo("TARJETA"), "Tarjeta");
-        assert_eq!(normalize_metodo("  TaRjEtA  "), "Tarjeta");
+        assert_eq!(normalize_metodo("TARJETA").unwrap().como_texto(), "Tarjeta");
+        assert_eq!(normalize_metodo("  TaRjEtA  ").unwrap().como_texto(), "Tarjeta");
     }
 
     #[test]
@@ -317,7 +317,7 @@ mod tests {
         let calls = repo.cobros.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].id_pago, "0192f7a4-3b1c-7d2e-8f00-123456789abc");
-        assert_eq!(calls[0].metodo, "Tarjeta");
+        assert_eq!(calls[0].metodo.como_texto(), "Tarjeta");
         // REV-17: el cobrador es el de la sesión, recortado; un trabajador en blanco no se inventa.
         assert_eq!(calls[0].id_usuario_cobrador.as_deref(), Some("usuario-1"));
         assert!(calls[0].id_trabajador_cobrador.is_none());

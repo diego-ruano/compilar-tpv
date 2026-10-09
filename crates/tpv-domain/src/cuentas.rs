@@ -2,13 +2,7 @@
 
 use crate::dinero::Dinero;
 
-pub fn requerido(input: &str, field: &str) -> Result<String, String> {
-    let out = input.trim().to_string();
-    if out.is_empty() {
-        return Err(format!("{field} required"));
-    }
-    Ok(out)
-}
+pub use crate::texto::requerido;
 
 /// Normalización del método de pago: reexporta la única implementación compartida
 /// (case-insensitive) para evitar divergencias entre dominios (CUENTA-03).
@@ -32,7 +26,7 @@ pub struct GastoData {
 #[derive(Debug, Clone)]
 pub struct PagoData {
     pub fecha_hora: String,
-    pub metodo: String,
+    pub metodo: crate::pago::MetodoPago,
     pub importe: Dinero,
 }
 
@@ -228,9 +222,9 @@ mod tests {
 
     #[test]
     fn metodo_compartido_es_insensible_a_mayusculas() {
-        assert_eq!(normalize_metodo(" TARJETA "), "Tarjeta");
-        assert_eq!(normalize_metodo("efectivo"), "Efectivo");
-        assert_eq!(normalize_metodo("bizum"), "Efectivo");
+        assert_eq!(normalize_metodo(" TARJETA ").unwrap().como_texto(), "Tarjeta");
+        assert_eq!(normalize_metodo("efectivo").unwrap().como_texto(), "Efectivo");
+        assert!(normalize_metodo("bizum").is_err());
     }
 
     #[test]

@@ -449,9 +449,7 @@ pub fn evaluar_gracia(base_ms: i64, ahora_ms: i64, consumido_ms: i64) -> Gracia 
     }
 }
 
-fn limpia_opcional(v: Option<String>) -> Option<String> {
-    v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
+use crate::texto::limpiar_opcional as limpia_opcional;
 
 #[cfg(test)]
 mod tests {
