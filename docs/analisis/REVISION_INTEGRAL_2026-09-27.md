@@ -191,23 +191,6 @@ dedicar un hilo propio al escritor (que además encaja con el escritor único).
 - `mapping::v_i64` trunca un `Real` (`n as i64`) mientras que `v_dinero` redondea: dos criterios en
   el mismo módulo.
 
-<a id="ri-38"></a>
-### RI-38 🔵 · Errores que se tragan en silencio
-
-- **Estadísticas**: 19 bucles `while let Ok(Some(r)) = rows.next().await` en
-  [`stats.rs`](../../crates/tpv-infra-sqlite/src/stats.rs#L270). Un error de lectura a mitad corta el
-  bucle y la pantalla enseña una estadística **parcial como si fuera completa**. Debe ser
-  `while let Some(r) = rows.next().await.map_err(…)?`.
-- **`write_op`** ([`db.rs:333`](../../crates/tpv-infra-sqlite/src/db.rs#L333)): si serializar las
-  sentencias fallara, guarda `"[]"` en el outbox y la escritura de negocio se confirma igual: una
-  operación que **no replica nada** sin avisar. Hoy no puede fallar en la práctica, pero en el
-  camino más crítico del producto lo correcto es devolver el error y abortar la transacción.
-- `value_to_json(Value::Blob) → Null`: hoy no hay columnas BLOB; un `debug_assert!` evitaría que
-  una futura se replicara vacía sin que nadie lo viera.
-- **Pool de lectura**: si su `std::Mutex` se envenenara, `ReadGuard::drop` deja de devolver la
-  conexión y la siguiente `acquire` hace `expect("invariante del pool…")`: pánico en cadena en todas
-  las lecturas. `lock().unwrap_or_else(|p| p.into_inner())`, como ya hace la telemetría.
-
 <a id="ri-39"></a>
 ### RI-39 🔵 · Guardas de estado fuera de la transacción
 

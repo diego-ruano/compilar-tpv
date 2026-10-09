@@ -95,14 +95,16 @@ fn now_ms() -> i64 {
         .unwrap_or(i64::MAX)
 }
 
-fn value_to_json(v: &Value) -> serde_json::Value {
-    match v {
+fn value_to_json(v: &Value) -> Result<serde_json::Value, LibsqlError> {
+    Ok(match v {
         Value::Null => serde_json::Value::Null,
         Value::Integer(i) => json!(i),
-        Value::Real(f) => json!(f),
+        Value::Real(f) if f.is_finite() => json!(f),
         Value::Text(s) => json!(s),
-        Value::Blob(_) => serde_json::Value::Null, // los blobs no se sincronizan (v1)
-    }
+        // RI-38: rechazar antes de escribir; nunca replicar un BLOB como NULL.
+        Value::Blob(_) => return Err(LibsqlError::Misuse("No se admiten BLOB en escrituras replicables".into())),
+        Value::Real(_) => return Err(LibsqlError::Misuse("Número no finito en escritura replicable".into())),
+    })
 }
 
 /// El instante de una operación (CFG-04). Se toma UNO —al abrir la transacción, o al ejecutar una
@@ -332,7 +334,8 @@ async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), Libsq
     // `_Sync_Outbox`, `_Sync_Applied_Ops` y `Applied_Operations` y no en un sitio cualquiera.
     let op_id = uuid::Uuid::now_v7().to_string();
     let now = now_ms();
-    let statements_json = serde_json::to_string(stmts).unwrap_or_else(|_| "[]".to_string());
+    let statements_json = serde_json::to_string(stmts)
+        .map_err(|e| LibsqlError::Misuse(format!("No se pudo serializar la operación del outbox: {e}")))?;
 
     conn.execute(
         "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
@@ -405,7 +408,7 @@ impl ReadPool {
         let conn = self
             .free
             .lock()
-            .expect("mutex del pool de lectura envenenado")
+            .unwrap_or_else(|p| p.into_inner())
             .pop()
             .expect("invariante del pool: hay tantas conexiones libres como permisos");
         ReadGuard {
@@ -433,9 +436,7 @@ impl ReadGuard {
 impl Drop for ReadGuard {
     fn drop(&mut self) {
         if let Some(conn) = self.conn.take() {
-            if let Ok(mut free) = self.pool.free.lock() {
-                free.push(conn);
-            }
+            self.pool.free.lock().unwrap_or_else(|p| p.into_inner()).push(conn);
         }
         // El permiso se libera al soltar `_permit`.
     }
@@ -519,7 +520,7 @@ impl<'a> WriteGuard<'a> {
 
     /// Construye la escritura tal como se ejecuta en local y tal como sube a la nube: la misma
     /// sentencia, con la hora ya fijada (CFG-04), y sus args serializados a JSON.
-    fn build_stmt(&self, sql: &str, values: &[Value]) -> SqlStatement {
+    fn build_stmt(&self, sql: &str, values: &[Value]) -> Result<SqlStatement, LibsqlError> {
         let sql = rewrite_now_literals(sql, &self.instante());
         if let Some(token) = tiempo_sin_fijar(&sql) {
             // No se bloquea la escritura: podría ser un cobro, y nada de lo que rodea a una venta
@@ -537,10 +538,10 @@ impl<'a> WriteGuard<'a> {
                 "escritura con una hora que la nube convertiría a su zona horaria"
             );
         }
-        SqlStatement {
+        Ok(SqlStatement {
             sql,
-            args: values.iter().map(value_to_json).collect(),
-        }
+            args: values.iter().map(value_to_json).collect::<Result<_, _>>()?,
+        })
     }
 }
 
@@ -593,7 +594,7 @@ impl<'a> Writer for WriteGuard<'a> {
                     //
                     // Lo que se ejecuta es la sentencia con la hora ya fijada, no la original: así
                     // queda en local exactamente lo que sube (CFG-04).
-                    let stmt = self.build_stmt(sql, &values);
+                    let stmt = self.build_stmt(sql, &values)?;
                     let affected = self.conn.execute(&stmt.sql, values).await?;
                     v.push(stmt);
                     Ok(affected)
@@ -604,7 +605,7 @@ impl<'a> Writer for WriteGuard<'a> {
                     // crash entre ambas no deje la fila escrita sin su entrada en el outbox (que
                     // nunca se replicaría). Todo o nada.
                     drop(buf);
-                    let stmt = self.build_stmt(sql, &values);
+                    let stmt = self.build_stmt(sql, &values)?;
                     self.conn.execute_batch("BEGIN;").await?;
                     let res: Result<u64, LibsqlError> = async {
                         let affected = self.conn.execute(&stmt.sql, values.clone()).await?;
@@ -817,6 +818,47 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn un_pool_envenenado_conserva_conexiones_y_permisos() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let guard = db.read().await;
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _lock = db.reads.free.lock().unwrap();
+            panic!("simular fallo con el mutex tomado");
+        })).is_err());
+        drop(guard);
+        let mut guards = Vec::new();
+        for _ in 0..READ_POOL_SIZE {
+            let r = db.read().await;
+            assert!(r.query("SELECT 1", ()).await.is_ok());
+            guards.push(r);
+        }
+        drop(guards);
+        assert_eq!(db.reads.free.lock().unwrap_or_else(|p| p.into_inner()).len(), READ_POOL_SIZE);
+    }
+
+    #[tokio::test]
+    async fn una_operacion_no_replicable_no_escribe_ni_encola() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let w = db.write().await;
+        assert!(w.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('blob', ?1)",
+            vec![Value::Blob(vec![1, 2, 3])]).await.is_err());
+        let mut rows = w.query("SELECT (SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'blob'), (SELECT COUNT(*) FROM _Sync_Outbox)", ()).await.unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert_eq!(row.get::<i64>(0).unwrap(), 0);
+        assert_eq!(row.get::<i64>(1).unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn fallo_del_outbox_revierte_la_escritura_de_negocio() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let w = db.write().await;
+        w.raw().execute_batch("CREATE TEMP TRIGGER fallo_outbox BEFORE INSERT ON _Sync_Outbox BEGIN SELECT RAISE(ABORT, 'fallo simulado'); END;").await.unwrap();
+        assert!(w.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-error', 'Error')", ()).await.is_err());
+        let mut rows = w.query("SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z-error'", ()).await.unwrap();
+        assert_eq!(rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 0);
+    }
 
     /// Un instante fijo: el 14 de septiembre de 2026 a las 14:04:43 UTC. La hora local depende de la
     /// zona del equipo que corre el test, así que se compara contra `local()` y no contra un texto.

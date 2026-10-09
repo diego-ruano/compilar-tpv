@@ -270,7 +270,7 @@ impl SqliteStatsRepository {
         let mut labels: Vec<String> = Vec::new();
         let mut values: Vec<i64> = Vec::new();
 
-        while let Ok(Some(r)) = rows_serv.next().await {
+        while let Some(r) = rows_serv.next().await.map_err(|e| e.to_string())? {
             let b = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let n = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
 
@@ -306,7 +306,7 @@ impl SqliteStatsRepository {
             .map_err(|e| e.to_string())?;
         let mut top_mesas_ingresos: Vec<MesaIngresoRow> = Vec::new();
 
-        while let Ok(Some(r)) = rows_tm.next().await {
+        while let Some(r) = rows_tm.next().await.map_err(|e| e.to_string())? {
             top_mesas_ingresos.push(MesaIngresoRow {
                 mesa: v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default(),
                 zona: v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_default(),
@@ -343,7 +343,7 @@ impl SqliteStatsRepository {
 
         let mut out: Vec<StatsCategoriaRow> = Vec::new();
 
-        while let Ok(Some(r)) = rows.next().await {
+        while let Some(r) = rows.next().await.map_err(|e| e.to_string())? {
             out.push(StatsCategoriaRow {
                 ID_Categoria: v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_default(),
@@ -506,7 +506,7 @@ impl SqliteStatsRepository {
         let mut top_labels: Vec<String> = Vec::new();
         let mut top_values: Vec<i64> = Vec::new();
 
-        while let Ok(Some(r)) = rows_top.next().await {
+        while let Some(r) = rows_top.next().await.map_err(|e| e.to_string())? {
             top_labels
                 .push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
             top_values.push(v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0));
@@ -564,7 +564,7 @@ impl SqliteStatsRepository {
         let mut w_labels: Vec<String> = Vec::new();
         let mut w_values: Vec<i64> = Vec::new();
 
-        while let Ok(Some(r)) = rows_w.next().await {
+        while let Some(r) = rows_w.next().await.map_err(|e| e.to_string())? {
             w_labels.push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
             w_values.push(v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0));
         }
@@ -720,7 +720,7 @@ impl SqliteStatsRepository {
         let mut bar_labels: Vec<String> = Vec::new();
         let mut bar_values: Vec<i64> = Vec::new();
 
-        while let Ok(Some(r)) = rows_bar.next().await {
+        while let Some(r) = rows_bar.next().await.map_err(|e| e.to_string())? {
             bar_labels
                 .push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
             bar_values.push(v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0));
@@ -857,7 +857,7 @@ impl SqliteStatsRepository {
             .await
             .map_err(|e| e.to_string())?;
 
-        while let Ok(Some(r)) = rows_w.next().await {
+        while let Some(r) = rows_w.next().await.map_err(|e| e.to_string())? {
             let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let id_user = v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_default();
 
@@ -940,7 +940,7 @@ impl SqliteStatsRepository {
 
         let mut rows_t = db.query(&sql_tareas, ()).await.map_err(|e| e.to_string())?;
 
-        while let Ok(Some(r)) = rows_t.next().await {
+        while let Some(r) = rows_t.next().await.map_err(|e| e.to_string())? {
             let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
 
             if id_trab.is_empty() {
@@ -973,7 +973,7 @@ impl SqliteStatsRepository {
 
         let mut rows_c = db.query(&sql_coc, ()).await.map_err(|e| e.to_string())?;
 
-        while let Ok(Some(r)) = rows_c.next().await {
+        while let Some(r) = rows_c.next().await.map_err(|e| e.to_string())? {
             let id_user = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let n = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
 
@@ -1003,7 +1003,7 @@ impl SqliteStatsRepository {
             .await
             .map_err(|e| e.to_string())?;
 
-        while let Ok(Some(r)) = rows_cc.next().await {
+        while let Some(r) = rows_cc.next().await.map_err(|e| e.to_string())? {
             let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let n = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
 
@@ -1037,7 +1037,7 @@ impl SqliteStatsRepository {
 
         let mut rows_p = db.query(&sql_cobros, ()).await.map_err(|e| e.to_string())?;
 
-        while let Ok(Some(r)) = rows_p.next().await {
+        while let Some(r) = rows_p.next().await.map_err(|e| e.to_string())? {
             let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let n = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
 
@@ -1086,7 +1086,7 @@ impl SqliteStatsRepository {
 
         let mut rows_s = db.query(&sql_sales, ()).await.map_err(|e| e.to_string())?;
 
-        while let Ok(Some(r)) = rows_s.next().await {
+        while let Some(r) = rows_s.next().await.map_err(|e| e.to_string())? {
             let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let ventas = v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO);
             let ticket = v_dinero(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO);
@@ -1142,7 +1142,7 @@ impl SqliteStatsRepository {
 
             let mut rows_h = db.query(&sql_horas, ()).await.map_err(|e| e.to_string())?;
 
-            while let Ok(Some(r)) = rows_h.next().await {
+            while let Some(r) = rows_h.next().await.map_err(|e| e.to_string())? {
                 let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
                 let horas = v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0);
 
@@ -1221,7 +1221,7 @@ impl SqliteStatsRepository {
             .await
             .map_err(|e| e.to_string())?;
 
-        while let Ok(Some(r)) = rows_pt.next().await {
+        while let Some(r) = rows_pt.next().await.map_err(|e| e.to_string())? {
             let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
 
             if id_trab.is_empty() {
@@ -1395,7 +1395,7 @@ impl SqliteStatsRepository {
 
             let mut rows_e = db.query(&sql_evo, ()).await.map_err(|e| e.to_string())?;
 
-            while let Ok(Some(r)) = rows_e.next().await {
+            while let Some(r) = rows_e.next().await.map_err(|e| e.to_string())? {
                 let b = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
                 let n = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
 
@@ -1506,7 +1506,7 @@ impl SqliteStatsRepository {
 
             let mut rows_t = db.query(&sql_top, ()).await.map_err(|e| e.to_string())?;
 
-            while let Ok(Some(r)) = rows_t.next().await {
+            while let Some(r) = rows_t.next().await.map_err(|e| e.to_string())? {
                 let name = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
                 let total = v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO);
 
@@ -1685,7 +1685,7 @@ impl SqliteStatsRepository {
         let mut evo_labels: Vec<String> = vec![];
         let mut evo_values: Vec<Dinero> = vec![];
 
-        while let Ok(Some(r)) = rows_e.next().await {
+        while let Some(r) = rows_e.next().await.map_err(|e| e.to_string())? {
             evo_labels
                 .push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
             evo_values
@@ -1722,7 +1722,7 @@ impl SqliteStatsRepository {
         let mut bar_labels: Vec<String> = vec![];
         let mut bar_values: Vec<Dinero> = vec![];
 
-        while let Ok(Some(r)) = rows_b.next().await {
+        while let Some(r) = rows_b.next().await.map_err(|e| e.to_string())? {
             bar_labels
                 .push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
             bar_values
@@ -1761,7 +1761,7 @@ impl SqliteStatsRepository {
         let mut rows_last = db.query(&sql_last, ()).await.map_err(|e| e.to_string())?;
         let mut ultimos_gastos: Vec<UltimoGastoProveedor> = vec![];
 
-        while let Ok(Some(r)) = rows_last.next().await {
+        while let Some(r) = rows_last.next().await.map_err(|e| e.to_string())? {
             let fecha = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let proveedor =
                 v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_else(|| "—".into());
