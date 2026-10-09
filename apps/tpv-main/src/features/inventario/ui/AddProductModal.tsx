@@ -147,9 +147,10 @@ export function AddProductModal({
             const urlMap: Record<string, string> = {};
             await Promise.all(
                 (alergenos ?? []).map(async (a) => {
-                    const id = toNum(a.ID_Alergeno, 0);
+                    // RI-22: los alérgenos usan UUID; convertirlos a número descartaba sus iconos.
+                    const id = a.ID_Alergeno.trim();
                     const url = await toImageUrlMaybe(a.Ruta_Imagen);
-                    if (id > 0 && url) urlMap[id] = url;
+                    if (id && url) urlMap[id] = url;
                 }),
             );
             if (cancelled) return;
