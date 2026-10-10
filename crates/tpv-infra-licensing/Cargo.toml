@@ -23,8 +23,8 @@ hmac = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
 
-# keyring (keychain del SO) solo en escritorio; en Android su backend seria mock (no persistente),
-# asi que alli se sustituye por el almacen JNI Android Keystore + SharedPreferences (secret_store.rs).
+# keyring (almacén del SO) sólo en escritorio: en Android no tiene almacén propio, así que allí se
+# sustituye por el almacén JNI Android Keystore + SharedPreferences (secret_store.rs).
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = { workspace = true }
 

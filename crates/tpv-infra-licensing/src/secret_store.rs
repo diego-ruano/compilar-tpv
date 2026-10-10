@@ -73,11 +73,43 @@ mod imp {
 
     pub fn delete(service: &str, key: &str) -> Result<(), String> {
         let entry = Entry::new(service, key).map_err(|e| e.to_string())?;
-        match entry.delete_password() {
+        match entry.delete_credential() {
             Ok(()) => Ok(()),
             Err(Error::NoEntry) => Ok(()),
             Err(e) => Err(e.to_string()),
         }
+    }
+}
+
+/// Lo que hace que un equipo ya instalado siga encontrando su identidad tras actualizar `keyring`.
+///
+/// keyring 2 guardaba cada secreto como credencial genérica de Windows llamada `{key}.{service}`,
+/// con persistencia `ENTERPRISE` y el texto en UTF-16LE sin terminador. Si una versión nueva cambia
+/// cualquiera de las tres cosas, compila y funciona en un equipo limpio, pero los instalados dejan de
+/// encontrar su `device-id` y su clave al actualizar. La 4.2 se comprobó contra la 2.3.3 en los dos
+/// sentidos (escribir con una y leer con la otra); este test vigila que siga siendo así.
+#[cfg(all(test, windows))]
+mod tests_credencial_windows {
+    #[test]
+    fn la_credencial_se_guarda_donde_la_buscan_los_equipos_instalados() {
+        let (servicio, clave, secreto) = ("tpv-test-formato-credencial", "prueba", "ñ-€-123");
+        let entrada = keyring::Entry::new(servicio, clave).expect("almacén de credenciales de Windows");
+        if let Err(e) = entrada.set_password(secreto) {
+            // Sin sesión de usuario (un servicio, un runner sin perfil) no hay almacén al que escribir.
+            eprintln!("se omite: el almacén de credenciales no admite escrituras aquí ({e})");
+            return;
+        }
+        let atributos = entrada.inner.get_attributes();
+        let bruto = entrada.get_secret();
+        let leido = entrada.get_password();
+        let _ = entrada.delete_credential();
+
+        let atributos = atributos.expect("atributos de la credencial");
+        assert_eq!(atributos.get("target_name").map(String::as_str), Some("prueba.tpv-test-formato-credencial"));
+        assert_eq!(atributos.get("persistence").map(String::as_str), Some("Enterprise"));
+        let utf16: Vec<u8> = secreto.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        assert_eq!(bruto.expect("secreto en bruto"), utf16);
+        assert_eq!(leido.expect("secreto como texto"), secreto);
     }
 }
 
