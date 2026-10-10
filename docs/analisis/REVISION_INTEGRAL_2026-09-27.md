@@ -34,7 +34,6 @@
 - [Tabla de hallazgos](#tabla-de-hallazgos)
 - [Orden sugerido](#orden-sugerido)
 - Por grupos:
-  14. [Frontend](#14-frontend)
   19. [Tecnologías y librerías](#19-tecnologías-y-librerías)
   20. [Plataformas: Android (Handy) y Windows 7](#20-plataformas-android-handy-y-windows-7)
   21. [Paridad Main ↔ worker](#21-paridad-main--worker)
@@ -63,14 +62,12 @@ entre la Main y la Handy (RI-78).
 
 | ID | Sev | Tipo | Hallazgo |
 |----|-----|------|----------|
-| [RI-23](#ri-23) | 🟡 | rendimiento | Optimización y limpieza de imágenes aplazada |
 | [RI-74](#ri-74) | 🟡 | deuda | Windows 7: la rama es anterior a ARQ-01 y su canal del feed no está desplegado |
 | [RI-75](#ri-75) | 🔵 | deuda | Android: el `Context` sale de una API no pública |
 | [RI-76](#ri-76) | 🔵 | deuda | Android: restos de la plantilla, márgenes seguros y release sin firmar |
 | [RI-77](#ri-77) | 🔵 | bug | La Handy enseña pantallas que en ella no funcionan (pedidos, caja, ticket, licencia) |
 | [RI-78](#ri-78) | 🟡 | bug/arquitectura | El harness no ve la validación de entrada, y ahí hay cuatro divergencias |
 | [RI-79](#ri-79) | 🔵 | deuda | Cobertura del harness: falta contrastar el horario predeterminado |
-| [RI-82](#ri-82) | 🔵 | feature | «Enviar a gestoría»: decisión de funcionamiento aplazada |
 
 ---
 
@@ -94,35 +91,6 @@ RI-77 para que no enseñe lo que no puede hacer.
 del canal a `main`.
 
 **Después, sin prisa:** el resto.
-
----
-
-## 14. Frontend
-
-<a id="ri-23"></a>
-### RI-23 🟡 · Optimización de imágenes aplazada
-
-La división por rutas está resuelta: Venta rápida y Mesas, con sus componentes de servicio,
-se cargan al arrancar; las demás pantallas se cargan al acceder. Queda la optimización de
-imágenes, aplazada por decisión del propietario el 09/10/2026.
-
-**Dónde:** [`public/`](../../apps/tpv-main/public), [`src/assets/img`](../../apps/tpv-main/src/assets/img).
-
-- Reducir el logo `logo-altaria-azul-transparente.png` (940 KB) y revisar los activos de alérgenos
-  a su tamaño de pantalla.
-- Revisar y retirar, si siguen sin uso, `public/comidas.png`, `public/bebidas.webp`, las dos fotos
-  `.avif` de `public/`, `src/assets/img/logo-azul-cuadrado.png`, `logo-altaria-azul.jpeg`,
-  `logo-morado-cuadrado.png` e `img/logo.png`. Los de `public/` se copian al instalador.
-- Revisar el archivo local `public/Adobe Express - file (2).png` (6,9 MB), que entra en los builds
-  locales. Se ha conservado.
-
-<a id="ri-82"></a>
-### RI-82 🔵 · «Enviar a gestoría» aplazado
-
-El botón de [`Cuentas.tsx`](../../apps/tpv-main/src/app/pages/Cuentas.tsx) se conserva sin acción
-por decisión del propietario el 09/10/2026. Sigue pendiente decidir si se retira o se conecta al
-correo con el límite y el destinatario de REV-14. La confirmación para reabrir un cierre, los
-caracteres españoles del PDF y el generador compartido están resueltos.
 
 ---
 
