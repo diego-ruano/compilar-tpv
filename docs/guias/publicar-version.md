@@ -42,11 +42,21 @@ pnpm --filter @tpv/main test:e2e
    ```
 
 `release.yml` corre antes el CI entero (`ci.yml`, como workflow reutilizable): un tag cuyo commit no lo
-pasa no se publica. Después, en `windows-latest`: instala, genera los tipos (`pnpm generate-types`),
-comprueba que el tag coincide con las dos versiones, comprueba que existe la clave de firma, compila y
-firma (`pnpm --filter @tpv/main tauri build`, con `TPV_SENTRY_DSN` si está), busca el instalador NSIS en
-`<raíz>/target/release/bundle/nsis/` (el workspace es virtual), sube el `.exe` a R2 y publica en el feed
-**en el canal `beta`**, con el contenido del `.sig`.
+pasa no se publica. Después se ejecutan tres jobs en runners nuevos (RI-25):
+
+- **Build**: comprueba versiones y contratos, compila NSIS sin la clave del updater y guarda el
+  instalador junto a su versión, nombre y SHA-256 en un artefacto inmutable del mismo workflow.
+- **Firma**: descarga ese artefacto e instala sólo un firmante Tauri con versión e integridades
+  bloqueadas en `.github/tools/updater-signer/`, sin scripts de instalación ni caché del build.
+  Sólo el paso de firma recibe la clave. Verifica el hash y la firma contra la clave pública de
+  `tauri.conf.json` antes de entregar el instalador firmado.
+- **Publicación**: vuelve a verificar hash y firma, sube el instalador a R2 y publica el feed **beta**.
+  Sólo este job recibe las credenciales de R2 y del feed.
+
+Las acciones externas de los workflows están fijadas por SHA completo; Dependabot mantiene esas
+referencias. La separación evita que código que se haya ejecutado al compilar pueda permanecer en
+el runner que recibe la clave. No elimina la necesidad de revisar las dependencias y los cambios
+al workflow o al firmante.
 
 ### Versiones y mapas de Sentry
 

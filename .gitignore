@@ -2,9 +2,11 @@
 node_modules/
 .pnpm-store/
 
-# El ÚNICO lock válido es el `pnpm-lock.yaml` de la raíz (el workspace se instala desde ahí con
+# El lock de las apps es el `pnpm-lock.yaml` de la raíz (el workspace se instala desde ahí con
 # --frozen-lockfile). Un lock dentro de apps/ o packages/ no lo lee nadie y se queda viejo: si
 # alguien instala dentro de esa carpeta, se lleva un árbol de dependencias distinto al desplegado.
+# Excepción RI-25: .github/tools/updater-signer tiene un lock independiente porque el runner de
+# firma no instala ni ejecuta las dependencias de la aplicación.
 # Los `package-lock.json` de npm, además, están prohibidos por CLAUDE.md.
 **/package-lock.json
 apps/*/pnpm-lock.yaml

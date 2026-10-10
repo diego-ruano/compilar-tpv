@@ -1,0 +1,8 @@
+{
+  "name": "tpv-updater-signer",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "dependencies": {
+    "@tauri-apps/cli": "2.11.2"
+  }
+}
