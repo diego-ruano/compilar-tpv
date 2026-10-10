@@ -175,7 +175,7 @@ pnpm exec wrangler deploy
 
 | Workflow | Cuándo | Qué |
 |---|---|---|
-| `ci.yml` | push y PR | Tests de Rust con `cargo nextest` (`tpv-domain`, `tpv-application`, `tpv-infra-sqlite`, con el anti-drift del esquema) y clippy; ESLint; typecheck y tests del frontend y `check-comandos-tauri.mjs`; typecheck y tests del worker, `check-migration-registry.mjs` y la cobertura de los arneses de contrato (informativa) |
+| `ci.yml` | push y PR | Tests de todo el workspace Rust con `cargo nextest --workspace --profile ci --locked` y clippy en Windows (incluidos guardianes y anti-drift del esquema); exportación real de contratos IPC con `generate-types.mjs --check`; ESLint; typecheck y tests del frontend; typecheck y tests del worker, `check-migration-registry.mjs` y la cobertura de los arneses de contrato (informativa) |
 | `release.yml` | tag `v*` | Lo de arriba |
 | `audit.yml` | PR y los lunes | `cargo audit` y `pnpm audit --prod --audit-level moderate` |
 

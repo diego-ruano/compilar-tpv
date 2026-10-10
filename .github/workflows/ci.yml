@@ -42,59 +42,6 @@ jobs:
         continue-on-error: true
         run: pnpm check:dead-code
 
-  # Tests de Rust: dominio (validaciones puras), casos de uso (con repos falsos) y persistencia.
-  # El de persistencia incluye además el ANTI-DRIFT: el esquema que producen las migraciones sobre
-  # una BD vacía debe coincidir con packages/database/schema.snapshot.sql. Si alguien cambia una
-  # migración sin regenerar el snapshot (o introduce una desviación silenciosa), este job falla.
-  #
-  # Se listan las crates una a una en vez de usar --workspace: el workspace incluye
-  # apps/tpv-main/src-tauri, que necesita las librerías de sistema de Tauri (GTK/webkit2gtk) y no
-  # compila en un runner Ubuntu pelado.
-  migrations-rust:
-    name: Tests Rust + anti-drift de migraciones
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # `components: clippy` NO es opcional: esta acción instala el perfil mínimo, sin clippy. El
-      # paso de clippy de más abajo estuvo sin llegar a ejecutarse porque el de tests ya fallaba
-      # antes; en cuanto los tests pasaron, CI llegó a él y reventó con «cargo-clippy is not
-      # installed». Si se quita esta línea, el job vuelve a romperse en ese paso.
-      - uses: dtolnay/rust-toolchain@1.93.1
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-
-      # Por `cargo nextest` y NO por `cargo test`, que es lo que manda CLAUDE.md y lo que este
-      # job no hacía. Con `cargo test` todos los tests comparten UN proceso, y eso rompe dos cosas:
-      #
-      # - Los tests que dependen de estado global de proceso. `tests_identidad_del_productor` inyecta
-      #   el bloque del productor en un `OnceLock`, así que el test que lo quiere VACÍO falla si el que
-      #   lo rellena corre antes en el mismo proceso. Pasaba o fallaba según el orden de los hilos:
-      #   medido, 3 de cada 5 tandas en rojo. Añadir tests a la crate cambia ese orden, y así saltó.
-      # - El crash nativo de libsql al crear muchas bases en un proceso, que tumba la tanda entera
-      #   sin decir en qué test.
-      #
-      # `--profile ci` es el de `.config/nextest.toml`: reintentos para el crash de libsql (salen
-      # como FLAKY, no desaparecen) y `fail-fast = false` para ver todos los rojos de una vez.
-      #
-      # ⚠️ nextest NO ejecuta doctests. Hoy no hay ninguno en estas crates; si alguien añade uno,
-      # hace falta un paso `cargo test --doc -p …` aparte o no lo comprobará nadie.
-      - name: Tests de dominio, casos de uso y persistencia
-        run: cargo nextest run --profile ci -p tpv-contracts -p tpv-domain -p tpv-application -p tpv-infra-sqlite
-
-      # INFRA-04. Va aquí y no en un job propio porque este ya compila estas crates y tiene la
-      # caché caliente: en uno aparte se pagaría el build entero otra vez para lo mismo.
-      #
-      # ⚠️ La lista de crates es la MISMA que la de los tests, y por el mismo motivo: en un runner
-      # Ubuntu pelado no compilan ni `apps/tpv-main/src-tauri` (GTK/webkit2gtk) ni `tpv-infra-aeat`
-      # (WinHTTP). El workspace completo se pasa en local con `pnpm lint:rust`, en Windows.
-      - name: Clippy (sin avisos)
-        run: cargo clippy -p tpv-domain -p tpv-application -p tpv-infra-sqlite -p tpv-contracts -p tpv-telemetry --all-targets -- -D warnings
-
   # ESLint del monorepo (INFRA-04). Tres reglas de ANÁLISIS, no de estilo: hooks mal colocados,
   # dependencias de efecto incompletas y promesas sin gestionar. El criterio de por qué son tan
   # pocas está en `eslint.config.mjs` y conviene leerlo antes de añadir la cuarta.
@@ -148,6 +95,7 @@ jobs:
   contratos-tauri:
     name: Contratos IPC generados al día
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -158,7 +106,18 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@1.93.1
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      # nextest aísla cada test: evita contaminar los OnceLock y limita los crashes de libsql.
+      # El perfil CI reintenta y muestra FLAKY, y no corta la tanda al primer fallo.
+      - name: Tests de todas las crates (incluidos guardianes y anti-drift)
+        run: cargo nextest run --workspace --profile ci --locked
+      - name: Clippy de todas las crates (sin avisos)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Comprobar contratos y comandos
         run: node scripts/generate-types.mjs --check
 
@@ -193,7 +152,7 @@ jobs:
 
       # ARCH-01 / CLI-05: qué comandos (escritura) y qué lecturas con doble implementación se han
       # quedado sin test de contrato. Los tests en sí ya corren arriba —los de Rust en el job de
-      # `cargo nextest` de migrations-rust, los del worker en `pnpm --filter tpv-api test`—; esto sólo
+      # `cargo nextest` de contratos-tauri, los del worker en `pnpm --filter tpv-api test`—; esto sólo
       # mide el hueco.
       # AVISA, NO ROMPE: el script sale siempre con 0 y deja anotaciones `::warning::` + una tabla
       # en el resumen del job. `continue-on-error` es el cinturón sobre los tirantes, para que ni
