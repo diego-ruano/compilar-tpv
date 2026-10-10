@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 // src/domains/inventario/inventario.routes.ts
 //
 // Subrouter Hono del módulo de inventario. Se monta en /v1/inventario (index.ts).

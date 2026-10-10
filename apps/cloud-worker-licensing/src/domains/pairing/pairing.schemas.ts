@@ -17,7 +17,7 @@
 // así que aquí no hay drift-guard contra `@tpv/contracts` como en los dominios de negocio. No es
 // un olvido: no hay contraparte que comparar.
 
-import { z } from "zod";
+import * as z from "zod";
 
 import { textoObligatorio } from "../../lib/validacion";
 import { sanitizeB64 } from "./pairing.firma";

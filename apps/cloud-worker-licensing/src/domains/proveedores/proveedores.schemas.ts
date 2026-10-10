@@ -1,6 +1,6 @@
 // src/domains/proveedores/proveedores.schemas.ts
 
-import { z } from "zod";
+import * as z from "zod";
 import { zDineroOpcional } from "../../lib/dinero";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";

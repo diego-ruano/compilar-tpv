@@ -1,5 +1,5 @@
 import type { Client } from "@libsql/client/web";
-import { z } from "zod";
+import * as z from "zod";
 import { HubError } from "../../lib/errorHttp";
 
 export type IdentidadPedido = {

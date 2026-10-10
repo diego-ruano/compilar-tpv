@@ -1,6 +1,6 @@
 // src/domains/reservas/reservas.schemas.ts
 
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -95,8 +95,8 @@ function idField(name: string) {
 export const reservaSaveSchema = z
 	.object({
 		id_reserva: z.coerce.string().trim().min(1).nullable().optional(),
-		dia_ymd: z.any(),
-		hora: z.any(),
+		dia_ymd: z.any().optional(),
+		hora: z.any().optional(),
 		turno: z.any().optional().nullable(),
 		comensales: positiveInt("comensales"),
 		// RI-61: minutos que ocupa la mesa (sin ella, la del negocio) y «guardar aunque se pise».

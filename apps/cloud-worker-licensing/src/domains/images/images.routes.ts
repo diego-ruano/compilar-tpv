@@ -20,7 +20,7 @@
 
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";

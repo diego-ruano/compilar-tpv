@@ -14,7 +14,7 @@
 
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { z } from "zod";
+import * as z from "zod";
 
 import type { SpoolEvent } from "@tpv/contracts";
 import type { Env } from "../../env";
@@ -43,7 +43,7 @@ const eventSchema = z.object({
 	level: z.string().max(16).optional(),
 	target: z.string().max(256).optional(),
 	message: z.string().max(MAX_MESSAGE_LEN).optional(),
-	fields: z.record(z.unknown()).optional(),
+	fields: z.record(z.string(), z.unknown()).optional(),
 	device_mode: z.string().max(16).optional(),
 	app_version: z.string().max(64).optional(),
 	environment: z.string().max(32).optional(),

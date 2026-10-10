@@ -22,7 +22,7 @@
 import { zValidator } from "@hono/zod-validator";
 import type { Context } from "hono";
 import type { MiddlewareHandler } from "hono";
-import { z } from "zod";
+import * as z from "zod";
 
 import { badRequest } from "../server/utils/response";
 import { registrarCuerpoValidado } from "../observability/requestContext";

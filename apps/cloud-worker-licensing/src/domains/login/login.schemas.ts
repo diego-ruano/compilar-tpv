@@ -1,6 +1,6 @@
 // src/domains/login/login.schemas.ts
 
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {

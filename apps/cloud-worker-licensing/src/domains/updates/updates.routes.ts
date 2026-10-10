@@ -22,7 +22,7 @@
 // URL y la firma. La fuente de versiones es la tabla `app_releases` de la Turso central.
 
 import { Hono, type MiddlewareHandler } from "hono";
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";

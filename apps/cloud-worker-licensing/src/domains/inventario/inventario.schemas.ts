@@ -5,7 +5,7 @@
 // cantidades finitas y no negativas. La normalización fina (trim→null, dedup de
 // ids, default de stock) la hace el constructor de comandos.
 
-import { z } from "zod";
+import * as z from "zod";
 import { zDineroOpcional } from "../../lib/dinero";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";

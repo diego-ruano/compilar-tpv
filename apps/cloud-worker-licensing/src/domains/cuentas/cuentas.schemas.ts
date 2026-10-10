@@ -1,6 +1,6 @@
 // src/domains/cuentas/cuentas.schemas.ts
 
-import { z } from "zod";
+import * as z from "zod";
 import { zMetodoPago } from "../../lib/pago";
 
 import { zDineroNoNegativo } from "../../lib/dinero";

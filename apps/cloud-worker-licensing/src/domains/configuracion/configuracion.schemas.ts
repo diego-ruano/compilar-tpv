@@ -1,6 +1,6 @@
 // src/domains/configuracion/configuracion.schemas.ts
 
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type { BusinessSettingsPatch, TicketSettingsPatch, ContactSettingsPatch } from "@tpv/contracts";

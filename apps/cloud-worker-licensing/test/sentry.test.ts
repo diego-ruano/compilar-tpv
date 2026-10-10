@@ -7,7 +7,7 @@ import { seleccionarCuerpo } from "../src/observability/requestContext";
 import { capturarError, esRechazoEsperado } from "../src/observability/errors";
 import type { Env } from "../src/env";
 import { Hono } from "hono";
-import { z } from "zod";
+import * as z from "zod";
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { cuerpo } from "../src/lib/validacion";
 

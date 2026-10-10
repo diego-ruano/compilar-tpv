@@ -1,6 +1,6 @@
 // src/domains/mesas/mesas.schemas.ts
 
-import { z } from "zod";
+import * as z from "zod";
 import { zMetodoPago, zEstadoCocina } from "../../lib/pago";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
@@ -139,8 +139,8 @@ export const cobrarDetallesSchema = z
 	.object({
 		id_comanda: idField("id_comanda"),
 		metodo: zMetodoPago,
-		tipo: z.any(),
-		detalle_ids: z.any(),
+		tipo: z.any().optional(),
+		detalle_ids: z.any().optional(),
 		id_usuario: z.any().optional().nullable(),
 	})
 	.transform((v) => ({

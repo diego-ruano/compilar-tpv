@@ -4,7 +4,7 @@
 // titulo requerido, textos opcionales trim -> null, ids positivos y crear con
 // al menos un trabajador asignado.
 
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {

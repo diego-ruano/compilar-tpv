@@ -4,7 +4,7 @@
 // TOTALES a propósito: aquí un campo extraño cae a su default o se descarta, nunca bloquea vender.
 // `cuerpoTolerante` conserva además el comportamiento histórico del JSON ausente o mal formado.
 
-import { z } from "zod";
+import * as z from "zod";
 
 import { esTablaDeNegocio } from "./bootstrap.ventana";
 

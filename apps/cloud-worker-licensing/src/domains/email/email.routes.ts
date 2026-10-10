@@ -24,7 +24,7 @@
 import { Hono } from "hono";
 import type { Dinero } from "@tpv/contracts";
 import { enEuros, zDineroOpcional } from "../../lib/dinero";
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";

@@ -4,7 +4,7 @@
 // (tpv-domain/src/notificaciones.rs): tipo/titulo requeridos, destino coherente,
 // textos opcionales trim -> null.
 
-import { z } from "zod";
+import * as z from "zod";
 
 import type { CrearNotificacionInput as ContractCrearNotificacionInput } from "@tpv/contracts";
 import type { Assert, SameKeys } from "../../lib/typeGuards";

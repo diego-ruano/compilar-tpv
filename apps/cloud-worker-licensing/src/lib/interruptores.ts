@@ -20,7 +20,7 @@
 //   · **Se cachea por isolate y poco tiempo**, como la licencia (`licenciaEnUso.ts`): el TPV
 //     pregunta cada pocos minutos y el DO en cada vuelta de su cola.
 
-import { z } from "zod";
+import * as z from "zod";
 import type { Interruptor, InterruptorApagado } from "@tpv/contracts";
 
 import { compararVersiones } from "../domains/updates/updates.routes";

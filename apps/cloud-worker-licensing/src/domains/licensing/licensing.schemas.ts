@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod";
 
 const identificador = z.string().trim().min(1).max(200);
 const clave = z.string().trim().min(1).max(256);

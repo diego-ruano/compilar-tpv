@@ -1,6 +1,6 @@
 // src/domains/trabajadores/trabajadores.schemas.ts
 
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -69,7 +69,7 @@ export const trabajadorCreateSchema = z
 			.refine((s) => PIN_DE_TECLADO.test(s), MSG_PIN),
 		nombre: requiredString("nombre"),
 		apellido: z.any().optional().nullable(),
-		estado: z.any(),
+		estado: z.any().optional(),
 		// TRAB-03: dni / iban / numero_seguridad_social NO se aceptan aquí. Van cifrados con una
 		// clave que sólo tiene la Main; si la Handy los mandara, se escribirían en claro en la
 		// nube. Rechazarlos en el borde es mejor que aceptarlos y tirarlos en silencio: quien
@@ -97,7 +97,7 @@ export const trabajadorUpdateSchema = z
 		email: requiredString("email"),
 		nombre: requiredString("nombre"),
 		apellido: z.any().optional().nullable(),
-		estado: z.any(),
+		estado: z.any().optional(),
 		// TRAB-03: dni / iban / numero_seguridad_social NO se aceptan aquí. Van cifrados con una
 		// clave que sólo tiene la Main; si la Handy los mandara, se escribirían en claro en la
 		// nube. Rechazarlos en el borde es mejor que aceptarlos y tirarlos en silencio: quien

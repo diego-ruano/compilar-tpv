@@ -17,7 +17,7 @@
 // Y una división NO es una multiplicación por el recíproco: la base de 0,91 € al 4 % sale 87
 // multiplicando por `1/1.04` y 88 dividiendo por `1.04`. Por eso `entre` divide.
 
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Dinero } from "@tpv/contracts";
 

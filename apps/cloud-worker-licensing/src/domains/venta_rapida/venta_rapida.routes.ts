@@ -1,7 +1,7 @@
 // src/domains/venta_rapida/venta_rapida.routes.ts
 
 import { Hono } from "hono";
-import { z } from "zod";
+import * as z from "zod";
 
 import type { Env } from "../../env";
 import { HubError } from "../../lib/hub";

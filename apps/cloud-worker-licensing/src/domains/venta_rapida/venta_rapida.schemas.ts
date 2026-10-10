@@ -1,6 +1,6 @@
 // src/domains/venta_rapida/venta_rapida.schemas.ts
 
-import { z } from "zod";
+import * as z from "zod";
 import { zMetodoPago } from "../../lib/pago";
 import { zDineroNoNegativo } from "../../lib/dinero";
 
@@ -79,7 +79,7 @@ export const searchProductosSchema = z
 	.transform((v) => ({ query: String(v.query ?? v.q ?? "").trim(), limit: v.limit }));
 
 export const idsSchema = z
-	.object({ ids: z.any() })
+	.object({ ids: z.any().optional() })
 	.transform((v) => ({ ids: normalizeIds(v.ids) }));
 
 export const createComandaBarraSchema = z
@@ -125,7 +125,7 @@ export const cobrarFraccionadoSchema = z
 		importe_total: zDineroNoNegativo,
 		id_usuario_cobrador: z.any().optional().nullable(),
 		id_trabajador_cobrador: z.any().optional().nullable(),
-		detalles: z.any(),
+		detalles: z.any().optional(),
 	})
 	.transform((v) => ({
 		id_comanda: v.id_comanda,
