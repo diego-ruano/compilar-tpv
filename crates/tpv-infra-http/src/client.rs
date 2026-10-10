@@ -121,6 +121,7 @@ impl CloudClient {
     /// para que `PairingAdapter` localice la clave/identidad). No hace red.
     pub fn new(base_url: impl Into<String>, app_data_dir: PathBuf) -> AppResult<Self> {
         let http = Client::builder()
+            .default_headers(tpv_infra_licensing::cabeceras_version())
             .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
             .build()
             .map_err(|e| AppError::external(format!("http_build_failed: {e}")))?;

@@ -11,17 +11,20 @@ export function applicationVersion(env = process.env, tag) {
   const cargo = readFileSync(new URL("apps/tpv-main/src-tauri/Cargo.toml", root), "utf8")
     .match(/^version\s*=\s*"([^"]+)"/m)?.[1];
   if (conf.version !== cargo || conf.version !== pkg.version ||
-      (tag && tag.replace(/^v/, "") !== conf.version) ||
-      (env.SENTRY_RELEASE && env.SENTRY_RELEASE !== conf.version)) {
-    throw new Error("La versión de Tauri, Cargo, package.json, el tag y SENTRY_RELEASE deben coincidir");
+      (tag && tag.replace(/^(?:win7-)?v/, "") !== conf.version)) {
+    throw new Error("La versión de Tauri, Cargo, package.json y el tag deben coincidir");
   }
   return conf.version;
 }
 
 export function sentryBuildConfig(env = process.env, tag) {
-  const release = applicationVersion(env, tag);
+  const version = applicationVersion(env, tag);
+  const variant = env.TPV_BUILD_VARIANT ?? (tag?.startsWith("win7-") ? "win7" : "windows-modern");
+  if (!["windows-modern", "win7"].includes(variant)) throw new Error("Variante de escritorio inválida");
+  const release = `${variant === "win7" ? "tpv-desktop-win7" : "tpv-desktop"}@${version}`;
+  if (env.SENTRY_RELEASE && env.SENTRY_RELEASE !== release) throw new Error("SENTRY_RELEASE debe coincidir con la versión y variante compiladas");
   const required = env.TPV_RELEASE_BUILD === "1" || Boolean(env.SENTRY_AUTH_TOKEN);
-  if (!required) return { enabled: false, release };
+  if (!required) return { enabled: false, release, version, variant };
   for (const name of ["SENTRY_AUTH_TOKEN", "SENTRY_ORG", "SENTRY_PROJECT", "TPV_SENTRY_DSN"]) {
     if (!env[name]?.trim()) throw new Error(`Falta ${name}: configúralo en Secrets/Variables de GitHub Actions`);
   }
@@ -32,7 +35,7 @@ export function sentryBuildConfig(env = process.env, tag) {
   if (dsn.protocol !== "https:" || !dsn.username || dsn.password || !/^\/\d+$/.test(dsn.pathname) || dsn.search || dsn.hash) {
     throw new Error("TPV_SENTRY_DSN no es un DSN HTTPS válido");
   }
-  return { enabled: true, release, org: env.SENTRY_ORG, project: env.SENTRY_PROJECT,
+  return { enabled: true, release, version, variant, org: env.SENTRY_ORG, project: env.SENTRY_PROJECT,
     authToken: env.SENTRY_AUTH_TOKEN, dsn };
 }
 
@@ -92,7 +95,7 @@ async function uploadedMapNames(config) {
   return new Set(files.map(file => file.name ?? file.filePath));
 }
 
-async function sentryPages(config, initialPath, field) {
+export async function sentryPages(config, initialPath, field) {
   const files = [];
   let path = initialPath;
   while (path) {
@@ -111,7 +114,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   if (mode === "validate") {
     await validateSentryTarget(config);
     console.log(`Sentry: DSN activo de ${config.org}/${config.project}; versión ${config.release}`);
-    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `version=${config.release}\n`);
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `version=${config.version}\nsentry_release=${config.release}\n`);
   } else if (mode === "maps") {
     console.log(`Sentry: ${await verifyUploadedMaps(config, arg)} scripts con sus mapas subidos; no se distribuyen .map ni Debug IDs`);
   } else throw new Error("Uso: sentry-config.mjs validate [tag] | maps <dist>");

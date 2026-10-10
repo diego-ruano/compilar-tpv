@@ -145,10 +145,27 @@ fn delete_rejection(dir: &Path) -> AppResult<()> {
 
 /* ===== HTTP ===== */
 
+// El shell conoce la versión de la aplicación; la versión de esta crate puede ser distinta.
+static METADATOS_CLIENTE: std::sync::OnceLock<(&'static str, &'static str)> = std::sync::OnceLock::new();
+pub fn configurar_metadatos_cliente(version: &'static str, variante: &'static str) {
+    let _ = METADATOS_CLIENTE.set((version, variante));
+}
+pub fn cabeceras_version() -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+    if let Some((version, variante)) = METADATOS_CLIENTE.get() {
+        if let (Ok(v), Ok(p)) = (version.parse(), variante.parse()) {
+            headers.insert("x-tpv-version", v);
+            headers.insert("x-tpv-variant", p);
+        }
+    }
+    headers
+}
+
 fn http_client() -> AppResult<Client> {
     // RI-15: las copias comparten el pool; las credenciales y firmas siguen siendo por petición.
     static CLIENTE: LazyLock<Result<Client, String>> = LazyLock::new(|| {
         Client::builder()
+            .default_headers(cabeceras_version())
             .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
             .build()
             .map_err(|e| format!("Error creando HTTP client: {e}"))

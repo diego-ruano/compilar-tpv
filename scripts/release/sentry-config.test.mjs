@@ -6,15 +6,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const version = applicationVersion({});
+const release = `tpv-desktop@${version}`;
 const env = { TPV_RELEASE_BUILD: "1", SENTRY_AUTH_TOKEN: "token-de-prueba", SENTRY_ORG: "altaria-lights",
-  SENTRY_PROJECT: "tpv-desktop", TPV_SENTRY_DSN: "https://public@ingest.de.sentry.io/123", SENTRY_RELEASE: version };
+  SENTRY_PROJECT: "tpv-desktop", TPV_SENTRY_DSN: "https://public@ingest.de.sentry.io/123", SENTRY_RELEASE: release };
 
 test("un build local sin token funciona; una release sin cualquier dato requerido se bloquea", () => {
   assert.equal(sentryBuildConfig({}).enabled, false);
   for (const name of ["SENTRY_AUTH_TOKEN", "SENTRY_ORG", "SENTRY_PROJECT", "TPV_SENTRY_DSN"]) {
     assert.throws(() => sentryBuildConfig({ ...env, [name]: "" }), new RegExp(name));
   }
-  assert.equal(sentryBuildConfig(env, `v${version}`).release, version);
+  assert.equal(sentryBuildConfig(env, `v${version}`).release, release);
+  assert.equal(sentryBuildConfig({ ...env, SENTRY_RELEASE: undefined }, `win7-v${version}`).release, `tpv-desktop-win7@${version}`);
+  assert.throws(() => sentryBuildConfig({ ...env, TPV_BUILD_VARIANT: "win7" }, `win7-v${version}`));
 });
 
 test("la verificación lee artifact bundles paginados y rechaza mapas ausentes o Debug IDs", async t => {
@@ -24,7 +27,7 @@ test("la verificación lee artifact bundles paginados y rechaza mapas ausentes o
     writeFileSync(join(directory, "assets/app.js"), "const ids = window._sentryDebugIds;");
     t.mock.method(globalThis, "fetch", async url => {
       if (url.includes("artifact-bundles/?")) return new Response(JSON.stringify([
-        { bundleId: "bundle", associations: [{ release: version }] },
+        { bundleId: "bundle", associations: [{ release }] },
       ]));
       if (url.includes("/bundle/files/")) {
         return new Response(JSON.stringify({ files: [{ filePath: url.includes("cursor") ? "~/assets/app.js.map" : "~/assets/app.js" }] }), {

@@ -23,6 +23,8 @@ pub struct SentryConfig {
     pub environment: String,
     /// Release (versión) para agrupar regresiones.
     pub release: Option<String>,
+    pub build_variant: String,
+    pub commit: Option<String>,
 }
 
 /// Inicializa Sentry y devuelve el guard. Instala además el hook de panics (feature `panic`).
@@ -46,7 +48,12 @@ pub fn init_sentry(cfg: SentryConfig) -> SentryGuard {
         ..Default::default()
     };
 
-    sentry::init((dsn, options))
+    let guard = sentry::init((dsn, options));
+    sentry::configure_scope(|scope| {
+        scope.set_tag("build_variant", cfg.build_variant);
+        if let Some(commit) = cfg.commit { scope.set_tag("build_commit", commit); }
+    });
+    guard
 }
 
 /// Redacta el contenido libre de un evento Sentry antes de enviarlo (OBS-01). Reutiliza el mismo

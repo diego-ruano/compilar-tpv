@@ -2202,8 +2202,11 @@ pub fn run() {
         dsn: option_env!("TPV_SENTRY_DSN").map(|s| s.to_string()),
         environment: entorno_de_sentry(&context.config().identifier, cfg!(debug_assertions))
             .to_string(),
-        release: Some(env!("CARGO_PKG_VERSION").to_string()),
+        release: Some(env!("TPV_SENTRY_RELEASE").to_string()),
+        build_variant: env!("TPV_BUILD_VARIANT").to_string(),
+        commit: option_env!("TPV_BUILD_COMMIT").map(str::to_string),
     });
+    tpv_infra_licensing::configurar_metadatos_cliente(env!("CARGO_PKG_VERSION"), env!("TPV_BUILD_VARIANT"));
     // Minidumps (crashes nativos) sólo con DSN real, para no lanzar el proceso crash-handler en vano.
     // El minidump lanza un proceso helper de crashes nativos → solo escritorio. En Android/iOS los
     // crashes nativos los captura el SDK de Sentry por plataforma (Gradle), no este mecanismo.
