@@ -25,7 +25,8 @@ import { esAdmin } from "../../shared/lib/permisos";
 import { useToast } from "../../shared/toast";
 
 // PDF
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+import { textoPdf } from "../../shared/lib/textoPdf";
 
 // Tauri: guardar en ruta elegida por el usuario
 import { save, confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
@@ -92,20 +93,8 @@ function crossesMidnight(inicio: string, fin: string) {
   return fin < inicio;
 }
 
-// Para evitar errores de encoding raros en PDF: quitamos tildes/acentos/ñ
-function asciiSafe(s: string) {
-  return (s ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/ñ/g, "n")
-    .replace(/Ñ/g, "N")
-    // jsPDF sólo lleva WinAnsi: lo que no sea ASCII imprimible hay que quitarlo antes.
-    // eslint-disable-next-line no-control-regex -- el rango es a propósito, no un descuido.
-    .replace(/[^\x00-\x7F]/g, "");
-}
-
-function labelDayAscii(i: number) {
-  return ["LUN", "MAR", "MIE", "JUE", "VIE", "SAB", "DOM"][i] ?? "DIA";
+function etiquetaDia(i: number) {
+  return ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"][i] ?? "DÍA";
 }
 
 /* =========================
@@ -152,7 +141,7 @@ async function generarHorarioPDFPorEmpleado(args: {
   const border = rgb(0.85, 0.85, 0.85);
 
   const title = `HORARIO SEMANAL ${weekStartYMD} - ${weekEndYMD}`;
-  const subtitle = "Resumen listo para compartir (1 pagina por empleado)";
+  const subtitle = "Resumen listo para compartir (1 página por empleado)";
 
   const drawText = (
     page: any,
@@ -163,17 +152,20 @@ async function generarHorarioPDFPorEmpleado(args: {
     bold = false,
     color = gray,
   ) => {
-    page.drawText(asciiSafe(text), {
+    // Como el PDF de cuentas (RI-82): Helvetica admite ñ, tildes y €, y sólo se sustituye lo que
+    // no puede escribir. Quitar tildes y eñes a todo dejaba «Peña» en «Pena».
+    const font = bold ? fontBold : fontRegular;
+    page.drawText(textoPdf(text, font), {
       x,
       y,
       size,
-      font: bold ? fontBold : fontRegular,
+      font,
       color,
     });
   };
 
-  const wrapLines = (text: string, maxWidth: number, font: any, size: number) => {
-    const words = asciiSafe(text).split(/\s+/).filter(Boolean);
+  const wrapLines = (text: string, maxWidth: number, font: PDFFont, size: number) => {
+    const words = textoPdf(text, font).split(/\s+/).filter(Boolean);
     const lines: string[] = [];
     let line = "";
 
@@ -207,7 +199,7 @@ async function generarHorarioPDFPorEmpleado(args: {
     const fullName = `${t.Nombre} ${t.Apellido ?? ""}`.trim();
     drawText(page, `EMPLEADO: ${fullName}`, M, PAGE_H - 100, 12, true);
     drawText(page, `PUESTO: ${t.Puesto ?? "-"}`, M, PAGE_H - 118, 10, false, rgb(0.35, 0.35, 0.35));
-    drawText(page, `TELEFONO: ${t.Telefono ?? "-"}`, M + 260, PAGE_H - 118, 10, false, rgb(0.35, 0.35, 0.35));
+    drawText(page, `TELÉFONO: ${t.Telefono ?? "-"}`, M + 260, PAGE_H - 118, 10, false, rgb(0.35, 0.35, 0.35));
 
     const headY = tableTop;
     page.drawRectangle({
@@ -218,8 +210,8 @@ async function generarHorarioPDFPorEmpleado(args: {
       color: rgb(0.1, 0.1, 0.1),
     });
 
-    drawText(page, "DIA", tableLeft + 10, headY + 9, 10, true, rgb(1, 1, 1));
-    drawText(page, "TURNO / AREA", tableLeft + col0W + 10, headY + 9, 10, true, rgb(1, 1, 1));
+    drawText(page, "DÍA", tableLeft + 10, headY + 9, 10, true, rgb(1, 1, 1));
+    drawText(page, "TURNO / ÁREA", tableLeft + col0W + 10, headY + 9, 10, true, rgb(1, 1, 1));
     drawText(page, "HORAS / NOTAS", tableLeft + col0W + colW + 10, headY + 9, 10, true, rgb(1, 1, 1));
 
     const baseParts = weekStartYMD.split("-").map(Number);
@@ -262,7 +254,7 @@ async function generarHorarioPDFPorEmpleado(args: {
         color: border,
       });
 
-      drawText(page, labelDayAscii(i), tableLeft + 10, y + rowH - 22, 11, true);
+      drawText(page, etiquetaDia(i), tableLeft + 10, y + rowH - 22, 11, true);
       drawText(page, ymd, tableLeft + 10, y + rowH - 40, 9, false, rgb(0.45, 0.45, 0.45));
 
       const list = byCell.get(`${t.ID_Trabajador}|${ymd}`) ?? [];
@@ -305,7 +297,7 @@ async function generarHorarioPDFPorEmpleado(args: {
         }
 
         if (list.length > 3) {
-          drawText(page, `(+${list.length - 3} mas)`, tableLeft + col0W + 10, y + 10, 9, false, rgb(0.45, 0.45, 0.45));
+          drawText(page, `(+${list.length - 3} más)`, tableLeft + col0W + 10, y + 10, 9, false, rgb(0.45, 0.45, 0.45));
         }
       }
 
@@ -314,7 +306,7 @@ async function generarHorarioPDFPorEmpleado(args: {
 
     drawText(
       page,
-      "Nota: Si la hora FIN es menor que INICIO, el turno acaba al dia siguiente (+1).",
+      "Nota: Si la hora FIN es menor que INICIO, el turno acaba al día siguiente (+1).",
       M,
       M - 5,
       9,
