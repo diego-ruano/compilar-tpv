@@ -88,7 +88,7 @@ export default function Proveedores() {
   const [productosProveedor, setProductosProveedor] = useState<ProductoUI[]>([]);
 
   // Categorías: derivadas directamente de la query (no requieren mapeo async de imágenes).
-  const categorias: CategoriaProveedorDto[] = categoriasQuery.data ?? [];
+  const categorias = useMemo<CategoriaProveedorDto[]>(() => categoriasQuery.data ?? [], [categoriasQuery.data]);
 
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false);
   const [modalProveedorModo, setModalProveedorModo] = useState<"nuevo" | "editar">("nuevo");

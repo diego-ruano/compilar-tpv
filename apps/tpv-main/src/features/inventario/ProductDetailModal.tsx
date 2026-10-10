@@ -96,7 +96,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   const lotesQuery = useLotesByProducto(activeId);
 
   const p: ProductoDetalleDto | null = detalleQuery.data ?? null;
-  const lotes: LoteDto[] = lotesQuery.data ?? [];
+  const lotes = useMemo<LoteDto[]>(() => lotesQuery.data ?? [], [lotesQuery.data]);
   const loading = detalleQuery.isFetching || lotesQuery.isFetching;
 
   // Resuelve URLs de imagen (producto + alérgenos) cuando llega el detalle cacheado.

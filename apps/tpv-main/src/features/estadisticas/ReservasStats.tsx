@@ -45,20 +45,20 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
     }, [mesasReservadas, totalMesasTurno]);
 
     // Bar: reservas por bucket
-    const barLabels = data?.reservas_por_bucket?.labels ?? [];
-    const barValues = data?.reservas_por_bucket?.values ?? [];
+    const barLabels = useMemo(() => data?.reservas_por_bucket?.labels ?? [], [data?.reservas_por_bucket?.labels]);
+    const barValues = useMemo(() => data?.reservas_por_bucket?.values ?? [], [data?.reservas_por_bucket?.values]);
     const barHeight = useMemo(
         () => Math.max(380, Math.min(680, barLabels.length * 30)),
         [barLabels.length],
     );
 
     // Donut: estado reservas
-    const estadoLabels = data?.estado?.labels ?? [];
-    const estadoValues = data?.estado?.values ?? [];
+    const estadoLabels = useMemo(() => data?.estado?.labels ?? [], [data?.estado?.labels]);
+    const estadoValues = useMemo(() => data?.estado?.values ?? [], [data?.estado?.values]);
 
     // Donut: franjas horarias
-    const franjaLabels = data?.franjas?.labels ?? [];
-    const franjaValues = data?.franjas?.values ?? [];
+    const franjaLabels = useMemo(() => data?.franjas?.labels ?? [], [data?.franjas?.labels]);
+    const franjaValues = useMemo(() => data?.franjas?.values ?? [], [data?.franjas?.values]);
     const totalFranjas = useMemo(
         () => franjaValues.reduce((a, b) => a + Number(b || 0), 0),
         [franjaValues],

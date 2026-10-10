@@ -367,7 +367,7 @@ export default function Reservas() {
   const zonas = useMemo<Zona[]>(() => metaQuery.data?.zonas ?? [], [metaQuery.data]);
   const mesas = useMemo<Mesa[]>(() => metaQuery.data?.mesas ?? [], [metaQuery.data]);
 
-  const reservasMes = reservasMesQuery.data ?? [];
+  const reservasMes = useMemo(() => reservasMesQuery.data ?? [], [reservasMesQuery.data]);
 
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [reservaEditandoId, setReservaEditandoId] = useState<string | null>(null);

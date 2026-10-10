@@ -46,10 +46,10 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
   const worstName = resumen?.peor_producto_vendible ?? null;
 
   const topLabels = resumen?.top10_mejores?.labels ?? [];
-  const topValues = resumen?.top10_mejores?.values ?? [];
+  const topValues = useMemo(() => resumen?.top10_mejores?.values ?? [], [resumen?.top10_mejores?.values]);
 
   const worstLabels = resumen?.top10_peores?.labels ?? [];
-  const worstValues = resumen?.top10_peores?.values ?? [];
+  const worstValues = useMemo(() => resumen?.top10_peores?.values ?? [], [resumen?.top10_peores?.values]);
 
   const heightTop = useMemo(
     () => Math.max(380, Math.min(680, topLabels.length * 30)),

@@ -283,8 +283,8 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
     const legendClean = useLegendClean();
 
     // ✅ Ranking ventas: mismo azul Mesas
-    const rankingLabels = data?.ranking_ventas?.labels ?? [];
-    const rankingValues = data?.ranking_ventas?.values ?? [];
+    const rankingLabels = useMemo(() => data?.ranking_ventas?.labels ?? [], [data?.ranking_ventas?.labels]);
+    const rankingValues = useMemo(() => data?.ranking_ventas?.values ?? [], [data?.ranking_ventas?.values]);
 
     const rankingHeight = useMemo(
         () => Math.max(260, Math.min(560, rankingLabels.length * 28)),

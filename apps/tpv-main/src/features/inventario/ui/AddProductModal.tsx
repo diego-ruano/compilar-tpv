@@ -71,7 +71,7 @@ export function AddProductModal({
         [categoriasQuery.data],
     );
     const proveedores: ProveedorMiniDto[] = proveedoresQuery.data ?? [];
-    const alergenos: AlergenoInvDto[] = alergenosQuery.data ?? [];
+    const alergenos = useMemo<AlergenoInvDto[]>(() => alergenosQuery.data ?? [], [alergenosQuery.data]);
 
     const [idCategoria, setIdCategoria] = useState<string>("");
     const [idProveedor, setIdProveedor] = useState<string>("");

@@ -216,8 +216,8 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
     );
 
     /* ---------- Línea: nuevos por bucket ---------- */
-    const bucketLabels = data?.nuevos_por_bucket?.labels ?? [];
-    const bucketValues = data?.nuevos_por_bucket?.values ?? [];
+    const bucketLabels = useMemo(() => data?.nuevos_por_bucket?.labels ?? [], [data?.nuevos_por_bucket?.labels]);
+    const bucketValues = useMemo(() => data?.nuevos_por_bucket?.values ?? [], [data?.nuevos_por_bucket?.values]);
 
     const lineSeries = useMemo(
         () => [{ name: "Clientes nuevos", data: bucketValues }],
@@ -255,8 +255,8 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
     );
 
     /* ---------- Barras: top clientes por gasto ---------- */
-    const topLabels = data?.top_clientes_gasto?.labels ?? [];
-    const topValues = data?.top_clientes_gasto?.values ?? [];
+    const topLabels = useMemo(() => data?.top_clientes_gasto?.labels ?? [], [data?.top_clientes_gasto?.labels]);
+    const topValues = useMemo(() => data?.top_clientes_gasto?.values ?? [], [data?.top_clientes_gasto?.values]);
 
     const topHeight = useMemo(() => {
         const estimated = topLabels.length * 34 + 110;

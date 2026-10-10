@@ -118,11 +118,11 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
     return clamp(Math.round((topProvTotal / total) * 100), 0, 100);
   }, [topProvTotal, total]);
 
-  const evoLabels = data?.gastos_evolucion?.labels ?? [];
-  const evoValues = data?.gastos_evolucion?.values ?? [];
+  const evoLabels = useMemo(() => data?.gastos_evolucion?.labels ?? [], [data?.gastos_evolucion?.labels]);
+  const evoValues = useMemo(() => data?.gastos_evolucion?.values ?? [], [data?.gastos_evolucion?.values]);
 
-  const provLabels = data?.gasto_por_proveedor?.labels ?? [];
-  const provValues = data?.gasto_por_proveedor?.values ?? [];
+  const provLabels = useMemo(() => data?.gasto_por_proveedor?.labels ?? [], [data?.gasto_por_proveedor?.labels]);
+  const provValues = useMemo(() => data?.gasto_por_proveedor?.values ?? [], [data?.gasto_por_proveedor?.values]);
 
   const evoSeries = useMemo(() => [{ name: "Gasto proveedores", data: evoValues }], [evoValues]);
 

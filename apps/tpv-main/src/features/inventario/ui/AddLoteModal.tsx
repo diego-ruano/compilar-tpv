@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
 import type { LoteDto } from "@tpv/contracts";
@@ -40,6 +40,15 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
 
     const [loading, setLoading] = useState(false);
 
+    const reset = useCallback(() => {
+        setCodigoLote("");
+        setCaducidad("");
+        setCantidad("");
+        ponerCoste(null);
+        setNotas("");
+        setLoading(false);
+    }, [ponerCoste]);
+
     useEffect(() => {
         if (!open) return;
 
@@ -54,7 +63,7 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
         ponerCoste(loteToEdit.Coste_Unitario);
         setNotas(loteToEdit.Notas ?? "");
         setLoading(false);
-    }, [open, loteToEdit, ponerCoste]);
+    }, [open, loteToEdit, ponerCoste, reset]);
 
     const ok = useMemo(() => {
         if (!productId) return false;
@@ -68,15 +77,6 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
 
         return coste.legible;
     }, [productId, codigoLote, cantidad, coste.legible, isEdit]);
-
-    const reset = () => {
-        setCodigoLote("");
-        setCaducidad("");
-        setCantidad("");
-        ponerCoste(null);
-        setNotas("");
-        setLoading(false);
-    };
 
     async function guardar(e: React.FormEvent) {
         e.preventDefault();
