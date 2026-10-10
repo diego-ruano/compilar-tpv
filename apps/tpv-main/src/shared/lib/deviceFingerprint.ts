@@ -10,7 +10,9 @@
 // huella coincida en ambos lados aunque la codificación base64 difiera (estándar vs url-safe,
 // padding, etc.).
 
-function b64ToBytes(b64: string): Uint8Array {
+// Sobre un `ArrayBuffer` y no `ArrayBufferLike`: `crypto.subtle.digest` no admite vistas de un
+// `SharedArrayBuffer`, y desde TypeScript 5.9 los tipos lo distinguen.
+function b64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
 	let s = String(b64 || "").trim();
 	s = s.replace(/-/g, "+").replace(/_/g, "/").replace(/\s+/g, "");
 	const mod = s.length % 4;

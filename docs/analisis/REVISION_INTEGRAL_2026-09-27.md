@@ -103,7 +103,6 @@ relación beneficio/esfuerzo.
 |---|---|---|
 | **`zod` 4** | Validación bastante más rápida y más ligera en el worker (CPU facturable). `@hono/zod-validator` ya la soporta. Revisar la API de `z.coerce` y los mensajes | Medio |
 | **`rusqlite`** en lugar de **`libsql`** (evaluar) | En la Main sólo se usa SQLite local (`features = ["core"]`). `rusqlite` es la opción madura: transacciones RAII (`conn.transaction()` hace rollback al soltarse), caché de sentencias preparadas (`prepare_cached`; hoy cada consulta se prepara de nuevo), API de backup en caliente, y ninguna de las rarezas documentadas (el crash nativo al crear muchas bases, la API async que bloquea). Todas las conexiones locales ya se ejecutan en hilos propios; el cambio conservaría esa separación. Coste: reescribir `db.rs`/`mapping.rs` y adaptar los repositorios (los `Reader`/`Writer` ya aíslan buena parte). Merece una prueba de concepto sobre un repositorio antes de decidir | Alto |
-| **Mantenimiento**: TypeScript alineado entre app (`~5.8`) y worker (`^5.9`) | Mantenerse dentro de las versiones soportadas; Dependabot ya abre los PR menores | Bajo |
 | **`pdf-lib`** | No publica versión desde 2021. Si da problemas, `@cantoo/pdf-lib` es un fork mantenido con la misma API | Bajo, si hace falta |
 
 ---
