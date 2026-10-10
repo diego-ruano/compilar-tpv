@@ -13,10 +13,12 @@ name: Release
 #   R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY   token de API de R2 (S3-compatible)
 #   R2_ACCOUNT_ID                        id de cuenta Cloudflare (para el endpoint de R2)
 #   RELEASE_ADMIN_TOKEN                  el mismo secreto que en el worker (POST /v1/update/publish)
+#   TPV_SENTRY_DSN / SENTRY_AUTH_TOKEN    DSN de escritorio y token interno de Sentry
 # Variables requeridas (… → Variables):
 #   R2_BUCKET                            p. ej. tpv-releases
 #   R2_PUBLIC_BASE_URL                   p. ej. https://releases.altarialights.com
 #   TPV_API_BASE                         https://tpv-api.altarialights.workers.dev
+#   SENTRY_ORG / SENTRY_PROJECT          altaria-lights / tpv-desktop
 
 on:
   push:
@@ -53,27 +55,38 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
-      - name: Validar coherencia de versiones
+      - name: Validar versiones, token y DSN activo de Sentry
         id: version
-        shell: pwsh
-        run: |
-          $version = $env:GITHUB_REF_NAME -replace '^v',''
-          $conf = Get-Content apps/tpv-main/src-tauri/tauri.conf.json | ConvertFrom-Json
-          $cargo = Select-String -Path apps/tpv-main/src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"'
-          if ($conf.version -ne $version -or $cargo.Matches.Groups[1].Value -ne $version) {
-            throw "El tag, tauri.conf.json y Cargo.toml deben tener la misma versión"
-          }
-          "version=$version" >> $env:GITHUB_OUTPUT
+        env:
+          TPV_RELEASE_BUILD: "1"
+          TPV_SENTRY_DSN: ${{ secrets.TPV_SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        run: node scripts/release/sentry-config.mjs validate $env:GITHUB_REF_NAME
       - name: Comprobar contratos IPC
         run: pnpm generate-types:check
       - name: Compilar instalador sin la clave del updater
         env:
+          TPV_RELEASE_BUILD: "1"
           TPV_SENTRY_DSN: ${{ secrets.TPV_SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_RELEASE: ${{ steps.version.outputs.version }}
         shell: pwsh
         run: |
           $config = Join-Path $env:GITHUB_WORKSPACE '.github/tauri-unsigned.json'
           pnpm --filter @tpv/main tauri build --config $config -- --locked
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Comprobar mapas subidos y ausencia de mapas en el instalador
+        env:
+          TPV_SENTRY_DSN: ${{ secrets.TPV_SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+          SENTRY_RELEASE: ${{ steps.version.outputs.version }}
+        run: node scripts/release/sentry-config.mjs maps apps/tpv-main/dist
       - name: Preparar instalador y hash
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}

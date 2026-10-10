@@ -33,8 +33,8 @@ pnpm --filter @tpv/main test:e2e
 
 ## Sacar la versión (CI)
 
-1. Subir `version` en `apps/tpv-main/src-tauri/tauri.conf.json` **y** en
-   `apps/tpv-main/src-tauri/Cargo.toml` (SemVer; el updater compara este número).
+1. Subir `version` en `apps/tpv-main/src-tauri/tauri.conf.json`,
+   `apps/tpv-main/src-tauri/Cargo.toml` y `apps/tpv-main/package.json` (SemVer).
 2. Commit y tag:
    ```bash
    git tag v1.2.0
@@ -60,15 +60,13 @@ al workflow o al firmante.
 
 ### Versiones y mapas de Sentry
 
-El workflow comprueba las dos versiones del paso 1 frente al tag; no comprueba
-`apps/tpv-main/package.json`. Esa versión se usa como release de los mapas de Vite cuando falta
-`SENTRY_RELEASE`, mientras que los eventos usan `CARGO_PKG_VERSION` de la crate `tpv`.
-Si se habilita la subida de mapas, su release debe coincidir con la de los eventos: el valor de
-`SENTRY_RELEASE` sólo afecta al plugin de Vite.
+El workflow exige que las tres versiones coincidan con el tag y valida por API el token y el DSN
+activo de `altaria-lights/tpv-desktop`. Pasa esa versión como `SENTRY_RELEASE` al build de Vite;
+los eventos usan la misma mediante `CARGO_PKG_VERSION` de `tpv`.
 
-Actualmente `release.yml` no pasa `SENTRY_AUTH_TOKEN` ni `SENTRY_RELEASE`, por lo que no genera ni
-sube source maps. Es una limitación pendiente de RI-24; el paso que compila con `TPV_SENTRY_DSN`
-no habilita esa subida. Detalles en
+Vite sube los mapas por release/ruta, sin Debug IDs incompatibles con el puente actual de Tauri.
+Tras compilar, CI comprueba que cada JS tiene su mapa en Sentry y que no quedan `.map` en el bundle.
+**Cualquier fallo bloquea la firma y la publicación**, también cuando el destino sea staging. Detalles en
 [observabilidad.md](../arquitectura/observabilidad.md#release-de-sentry-y-source-maps).
 
 ## Bares piloto y promoción (RI-30)
@@ -93,7 +91,11 @@ siguiente comprobación de ese equipo.
 
 | Secretos | Variables |
 |---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` (contenido de `updater.key`), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`, `TPV_SENTRY_DSN` (opcional) | `R2_BUCKET`, `R2_PUBLIC_BASE_URL`, `TPV_API_BASE` (`https://tpv-api.altarialights.workers.dev`) |
+| `TAURI_SIGNING_PRIVATE_KEY` (contenido de `updater.key`), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`, `TPV_SENTRY_DSN`, `SENTRY_AUTH_TOKEN` | `R2_BUCKET`, `R2_PUBLIC_BASE_URL`, `TPV_API_BASE` (`https://tpv-api.altarialights.workers.dev`), `SENTRY_ORG` (`altaria-lights`), `SENTRY_PROJECT` (`tpv-desktop`) |
+
+Crear el token en Sentry → Settings de la organización → Developer Settings → Internal Integrations:
+**Release → Admin**, **Organization → Read**, **Project → Read**. No fijar `SENTRY_RELEASE` en GitHub:
+el workflow lo calcula desde el tag.
 
 En el worker, `RELEASE_ADMIN_TOKEN` con el mismo valor (`pnpm exec wrangler secret put
 RELEASE_ADMIN_TOKEN`); sin él, publicar y retirar están deshabilitados.
@@ -193,6 +195,6 @@ pnpm exec wrangler deploy
 
 - [ ] E2E en verde
 - [ ] Worker desplegado si cambió el esquema o la base central
-- [ ] `version` subida en `tauri.conf.json` y `Cargo.toml`
+- [ ] `version` subida en `tauri.conf.json`, `Cargo.toml` y `package.json`
 - [ ] Tag pusheado y `release.yml` en verde
 - [ ] Probado en un equipo piloto

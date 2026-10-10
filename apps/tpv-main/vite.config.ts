@@ -3,34 +3,30 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import svgr from '@svgr/rollup'
 import { sentryVitePlugin } from "@sentry/vite-plugin";
-import { readFileSync } from "node:fs";
+import { sentryBuildConfig } from "../../scripts/release/sentry-config.mjs";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
-// Versión del paquete frontend, usada como release de los source maps si no hay SENTRY_RELEASE.
-const version = JSON.parse(
-  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
-).version;
-
-// Source maps → Sentry (proyecto tpv-desktop). SÓLO se activa cuando hay auth token
-// (build de release / CI). En dev o en un build local sin token es un no-op total: ni sube
-// nada ni falla, así que es seguro dejarlo cableado siempre.
-//
-// RI-24: los eventos usan CARGO_PKG_VERSION de `tpv`, fijado en `src-tauri/src/lib.rs`.
-// La subida de mapas usa SENTRY_RELEASE o la versión de este package.json; esa variable
-// no cambia la release de los eventos nativos. Ambas deben coincidir para simbolizar.
-// El workflow actual sólo valida tag/tauri.conf.json/Cargo.toml y no configura la subida
-// de mapas: no pasa SENTRY_AUTH_TOKEN ni SENTRY_RELEASE.
-const sentryPlugins = process.env.SENTRY_AUTH_TOKEN
+// RI-24: una release necesita configuración completa y la misma versión que los eventos de Rust.
+// En desarrollo, sin token, no se generan ni se suben mapas.
+const sentry = sentryBuildConfig();
+const sentryPlugins = sentry.enabled
   ? [
       sentryVitePlugin({
-        org: process.env.SENTRY_ORG ?? "altarialights",
-        project: process.env.SENTRY_PROJECT ?? "tpv-desktop",
-        authToken: process.env.SENTRY_AUTH_TOKEN,
-        release: { name: process.env.SENTRY_RELEASE ?? version },
-        // Borra los .map del bundle tras subirlos, para no shippearlos en el instalador.
-        sourcemaps: { filesToDeleteAfterUpload: ["./dist/**/*.map"] },
+        org: sentry.org,
+        project: sentry.project,
+        authToken: sentry.authToken,
+        release: {
+          name: sentry.release,
+          inject: false,
+          setCommits: false,
+          // El puente de tauri-plugin-sentry 0.5 deserializa con sentry-rust 0.42, que no
+          // acepta debug_meta.images de tipo sourcemap. Asociar por release/ruta evita que
+          // esos eventos se descarten antes de llegar a Sentry.
+          uploadLegacySourcemaps: [{ paths: ["./dist/assets"], urlPrefix: "~/assets", validate: true }],
+        },
+        sourcemaps: { disable: true, filesToDeleteAfterUpload: ["./dist/**/*.map"] },
         telemetry: false,
       }),
     ]
@@ -43,7 +39,7 @@ export default defineConfig(async () => ({
 
   build: {
     // Genera source maps sólo cuando vamos a subirlos (hay token); si no, build más ligero.
-    sourcemap: !!process.env.SENTRY_AUTH_TOKEN,
+    sourcemap: sentry.enabled ? "hidden" : false,
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

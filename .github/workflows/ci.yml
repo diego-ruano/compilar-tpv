@@ -28,8 +28,8 @@ jobs:
           node-version: 22
       - name: Instalar el firmante aislado
         run: pnpm --dir .github/tools/updater-signer install --ignore-workspace --frozen-lockfile --ignore-scripts
-      - name: Firma válida y rechazo de artefactos manipulados
-        run: node --test scripts/release/artifact.test.mjs
+      - name: Firma, configuración de Sentry y bloqueos de release
+        run: node --test scripts/release/*.test.mjs
 
   # RI-22: informe independiente. Las herramientas sólo proponen candidatos, y sus propios
   # fallos aparecen como avisos; ni unos ni otros bloquean el resto de la verificación.

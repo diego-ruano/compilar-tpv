@@ -2245,7 +2245,9 @@ pub fn run() {
     // Sentry (bridge webview+core) es solo escritorio: el plugin arrastra el minidump (proceso
     // helper) y native-tls. En móvil el crate `sentry` (rustls) sigue capturando panics de Rust.
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_sentry::init(&sentry_guard));
+    // La Webview inicializa su SDK en initSentry(), con el filtro de datos personales.
+    // La inyección automática añadiría otro cliente y otros listeners sin ese filtro.
+    let builder = builder.plugin(tauri_plugin_sentry::init_with_no_injection(&sentry_guard));
 
     // El updater es solo escritorio (el plugin no cross-compila a móvil).
     #[cfg(desktop)]

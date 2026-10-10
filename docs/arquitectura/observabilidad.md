@@ -127,24 +127,49 @@ reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idem
 
 ## Release de Sentry y source maps
 
-El cliente de Sentry se inicializa en `apps/tpv-main/src-tauri/src/lib.rs` con la versión de la
-crate `tpv` (`CARGO_PKG_VERSION`). El plugin de Vite sólo genera y sube source maps cuando el build
-recibe `SENTRY_AUTH_TOKEN`; los asocia a `SENTRY_RELEASE` o, si falta, a la versión de
-`apps/tpv-main/package.json`. Esa variable no cambia la release de los eventos nativos.
+El cliente se inicializa en `lib.rs` con `CARGO_PKG_VERSION` de `tpv`. La release de los mapas
+usa esa misma versión: `sentry-config.mjs` comprueba Cargo, `tauri.conf.json`, `package.json`, el tag
+y `SENTRY_RELEASE` antes de construir. Sin variable explícita, Vite lee la versión de Tauri.
 
-El workflow `release.yml` pasa `TPV_SENTRY_DSN`, pero no pasa `SENTRY_AUTH_TOKEN` ni `SENTRY_RELEASE`.
-Además comprueba tag, `tauri.conf.json` y `src-tauri/Cargo.toml`, sin comprobar la versión del paquete
-frontend. Por tanto, la subida de mapas y la coherencia automática de ambas releases siguen
-pendientes (RI-24); cambiar esta documentación no configura esas variables ni corrige el workflow.
+RI-24: `release.yml` exige DSN y token, comprueba por API que el DSN es una Client Key activa de
+`altaria-lights/tpv-desktop` y pasa la versión del tag al build. Si falla la configuración, la subida
+o la comprobación de los artefactos remotos, no llega a los jobs de firma y publicación.
+
+Los mapas se generan como `hidden`, se suben con el JavaScript a `~/assets/` y se borran del bundle.
+Se usa `release.uploadLegacySourcemaps`, sin inyección de Debug IDs: `tauri-plugin-sentry 0.5` pasa
+el sobre a `sentry-rust 0.42`, cuyo deserializador no acepta imágenes `sourcemap` en `debug_meta`.
+Inyectarlas haría que el puente descartase el evento. Las rutas relativas permiten simbolizar
+tanto `http://tauri.localhost/assets/…` como el protocolo de Tauri.
+
+El plugin nativo usa `init_with_no_injection`: la Webview ya inicializa su SDK con el filtro de
+datos personales. Así no hay un segundo SDK inyectado que capture eventos sin ese filtro.
+
+El token interno de CI necesita **Release → Admin**, **Organization → Read** y **Project → Read**:
+el último permite comprobar el DSN activo y leer un evento controlado para verificar su traza.
+No se embebe el token en el frontend ni en Rust. En builds locales sin token Sentry sigue siendo
+opcional; una release oficial se marca con `TPV_RELEASE_BUILD=1` y no permite omitirlo.
+
+Para verificar una traza controlada, guardar un JSON con `eventId`, `source` (sufijo del archivo
+original) y `line`, y ejecutar `node scripts/release/check-sentry-event.mjs <json>` con las variables
+de build. El script espera la recepción y exige la versión, plataforma, archivo y línea correctos.
+
+El worker tiene su propio proyecto y su propia versión (`SENTRY_RELEASE` del worker, no la versión
+de escritorio). `upload_source_maps` de Wrangler sube mapas a Cloudflare; no los entrega al SDK
+de Sentry. Para simbolizar sus eventos también hay que subir a su proyecto el bundle y sus mapas
+exactos al desplegar, con una versión compartida por esa subida y el runtime. La comprobación real
+del 10-10-2026 confirmó recepción en `node-cloudflare-workers`, entorno `prod`, pero sin release
+ni simbolización TypeScript; esto requiere completar el despliegue del worker.
 
 ## Configuración
 
 | Variable | Dónde | Qué |
 |---|---|---|
 | `TPV_SENTRY_DSN` | Entorno del build de escritorio (release) | DSN de `tpv-desktop` |
-| `SENTRY_AUTH_TOKEN` | Entorno del build Vite (hoy no lo pasa `release.yml`) | Habilita la generación y subida de source maps |
-| `SENTRY_RELEASE` | Entorno del build Vite (opcional; hoy no lo pasa `release.yml`) | Release de los mapas; por defecto, versión de `apps/tpv-main/package.json` |
-| `SENTRY_DSN` | Secreto del worker | DSN de `tpv-api` |
+| `SENTRY_AUTH_TOKEN` | Secret de GitHub; sólo validación/build Vite | Token interno para subir mapas y comprobar la configuración |
+| `SENTRY_ORG`, `SENTRY_PROJECT` | Variables de GitHub | `altaria-lights`, `tpv-desktop` |
+| `SENTRY_RELEASE` | Lo calcula el workflow desde el tag | Versión compartida de eventos y mapas; por defecto, versión de Tauri |
+| `TPV_RELEASE_BUILD` | Lo fija el workflow a `1` | Bloquea la release si faltan los datos de Sentry |
+| `SENTRY_DSN` | Secreto del worker | DSN de su proyecto (`node-cloudflare-workers` en la cuenta actual) |
 | `ENVIRONMENT` | `vars` del worker (hoy ausente) | Entorno en Sentry |
 | `AXIOM_TOKEN` | Secreto del worker | Ingesta |
 | `AXIOM_DATASET` | `wrangler.json` (`tpv-device-logs`) | Logs de dispositivo |
@@ -153,7 +178,8 @@ pendientes (RI-24); cambiar esta documentación no configura esas variables ni c
 | `BETTERSTACK_HEARTBEAT_URL` | Secreto del worker | Latido del cron (suena siempre al acabar) |
 | `BETTERSTACK_HEARTBEAT_COPIAS_URL` | Secreto del worker | Latido de la copia de la base central (sólo si se subió) |
 
-Sentry: dos proyectos (`tpv-desktop` y `tpv-api`), región UE, sin Session Replay. Axiom: tres datasets
+Sentry: dos proyectos para este sistema (`tpv-desktop` y `node-cloudflare-workers`), región UE,
+sin Session Replay. Axiom: tres datasets
 (`cloudflare-logpush`, `tpv-sync`, `tpv-device-logs`), separados por la **retención**, que es propiedad
 del dataset y no se aplica hacia atrás; cada evento lleva `service` (`tpv-device`, `tpv-sync`,
 `tpv-api`). Retención sugerida: 30 días para `tpv-sync`, 30–90 para `tpv-device-logs`.
