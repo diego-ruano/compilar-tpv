@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -27,6 +27,7 @@ test("se rechaza cualquier cambio o archivo añadido después de subir los mapas
     }
     writeFileSync(join(dir, "manifest.json"), JSON.stringify({ worker: "tpv-api", ...identity, commit: "commit", files }));
     readWorkerArtifact(dir, identity);
+    assert.throws(() => readWorkerArtifact(dir, { ...identity, commit: "otro-commit" }), /commit/);
     writeFileSync(join(dir, "index.js"), "cambio");
     assert.throws(() => readWorkerArtifact(dir, identity), /Hash/);
     writeFileSync(join(dir, "index.js"), contents["index.js"]);

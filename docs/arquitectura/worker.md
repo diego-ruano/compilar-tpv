@@ -195,10 +195,9 @@ Una ruta que depende de un secreto ausente responde 503 o 500 (fail-closed).
 
 ## Desplegar
 
-```bash
-cd apps/cloud-worker-licensing
-pnpm exec wrangler deploy
-```
+Producción se despliega desde GitHub con un tag `v<versión>`. El workflow comprueba la misma versión
+en worker y escritorio, sube los mapas a Sentry y verifica un error real antes de desplegar los mismos
+bytes. Los tags `win7-v<versión>` publican únicamente el escritorio de Windows 7.
 
 El worker lleva el esquema del tenant compilado dentro: **con un cambio de esquema, se despliega antes
 de que los TPV escriban la columna nueva**, o la primera escritura se rechaza. Y cualquier tabla o

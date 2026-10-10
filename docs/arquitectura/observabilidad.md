@@ -202,10 +202,11 @@ ni simbolización TypeScript; esto requiere completar el despliegue del worker.
 | `TPV_SENTRY_DSN` | Entorno del build de escritorio (release) | DSN de `tpv-desktop` |
 | `SENTRY_AUTH_TOKEN` | Secret de GitHub; sólo validación/build Vite | Token interno para subir mapas y comprobar la configuración |
 | `SENTRY_ORG`, `SENTRY_PROJECT` | Variables de GitHub | `altaria-lights`, `tpv-desktop` |
-| `SENTRY_RELEASE` | Lo calcula el workflow desde el tag | Versión compartida de eventos y mapas; por defecto, versión de Tauri |
+| `SENTRY_RELEASE` | Lo calcula el workflow desde el tag | Nombre del componente/variante y versión compartidos por eventos y mapas |
 | `TPV_RELEASE_BUILD` | Lo fija el workflow a `1` | Bloquea la release si faltan los datos de Sentry |
 | `SENTRY_DSN` | Secreto del worker | DSN de su proyecto (`node-cloudflare-workers` en la cuenta actual) |
-| `ENVIRONMENT` | `vars` del worker (hoy ausente) | Entorno en Sentry |
+| `SENTRY_WORKER_PROJECT` | Variable de GitHub | Slug del proyecto del worker (`node-cloudflare-workers`) |
+| `ENVIRONMENT` | Lo fija el artefacto del worker | `prod`; la comprobación local usa `sentry-verification` |
 | `AXIOM_TOKEN` | Secreto del worker | Ingesta |
 | `AXIOM_DATASET` | `wrangler.json` (`tpv-device-logs`) | Logs de dispositivo |
 | `AXIOM_DATASET_SYNC` | `wrangler.json` (`tpv-sync`) | Eventos del worker y del DO |
@@ -231,8 +232,10 @@ Devuelve 401 y en `tpv-sync` debe aparecer el evento con `motivo: invalid_jwt`.
 
 ## Correlación
 
-Cada evento y error lleva `tenant_id`, `device_id`, `device_mode` (tpv/handy), `app_version` y
-`environment`: tags en Sentry, campos en Axiom. Los eventos del DO añaden `connected_devices` y
+La telemetría de dispositivos y sync lleva `tenant_id`, `device_id`, `device_mode` (tpv/handy),
+`app_version` y `environment`. En Sentry, la release identifica el componente y su versión;
+`build_variant` y `build_commit` identifican el escritorio, y los errores HTTP del worker añaden
+`client_version` y `client_variant` cuando el cliente los envía. Los eventos del DO en Axiom añaden `connected_devices` y
 `main_connected`. `connected_devices` cuenta los sockets autenticados de `state.getWebSockets()`; el
 `last_seen_at_ms` de un dispositivo se refresca al conectar y con su actividad, no con el latido (que no
 despierta al DO): la presencia real la dan `main_online` / `main_offline`.

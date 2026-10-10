@@ -188,23 +188,22 @@ el esquema, la aplicación copia `data.db` a `data.db.bak.<ms>` (se conservan la
 - **Base central**: las tablas y columnas nuevas se crean **a mano en Turso antes** de desplegar el
   worker que las usa, y se reflejan en `docs/sql/control-plane/esquema-actual.sql`.
 
-```bash
-cd apps/cloud-worker-licensing
-pnpm exec wrangler deploy
-```
+El job `deploy-worker` del tag hace ese despliegue antes de publicar el instalador; no se vuelve
+a compilar ni se publica con un `wrangler deploy` manual que omita las comprobaciones de Sentry.
 
 ## Qué corre en CI
 
 | Workflow | Cuándo | Qué |
 |---|---|---|
 | `ci.yml` | push y PR | Tests de todo el workspace Rust con `cargo nextest --workspace --profile ci --locked` y clippy en Windows (incluidos guardianes y anti-drift del esquema); exportación real de contratos IPC con `generate-types.mjs --check`; ESLint; typecheck y tests del frontend; typecheck y tests del worker, `check-migration-registry.mjs` y la cobertura de los arneses de contrato (informativa) |
-| `release.yml` | tag `v*` | Lo de arriba |
+| `release.yml` | tag `v*` | CI completo, mapas de escritorio/worker y evento real de Sentry; firma aislada; despliegue del worker y publicación del instalador |
+| `verify-sentry.yml` | manual | Verifica ambos proyectos y mapas; prueba el envío del worker y, opcionalmente, sube una versión sin activarla |
 | `audit.yml` | PR y los lunes | `cargo audit` y `pnpm audit --prod --audit-level moderate` |
 
 ## Lista
 
 - [ ] E2E en verde
 - [ ] Worker desplegado si cambió el esquema o la base central
-- [ ] `version` subida en `tauri.conf.json`, `Cargo.toml` y `package.json`
+- [ ] `version` subida en `tauri.conf.json`, `Cargo.toml` y los dos `package.json`
 - [ ] Tag pusheado y `release.yml` en verde
 - [ ] Probado en un equipo piloto

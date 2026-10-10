@@ -35,7 +35,6 @@
 - [Orden sugerido](#orden-sugerido)
 - Por grupos:
   14. [Frontend](#14-frontend)
-  16. [CI, build y herramientas](#16-ci-build-y-herramientas)
   19. [Tecnologías y librerías](#19-tecnologías-y-librerías)
   20. [Plataformas: Android (Handy) y Windows 7](#20-plataformas-android-handy-y-windows-7)
   21. [Paridad Main ↔ worker](#21-paridad-main--worker)
@@ -52,13 +51,11 @@ está escrito junto al código, los caminos del dinero y de la factura están pe
 la caja, y hay redes (contrato Main↔worker, anti-drift de migraciones, tablas golden compartidas
 entre lenguajes) que casi ningún producto de este tamaño tiene.
 
-Lo que queda de esta revisión se concentra en dos frentes:
+Lo que queda de esta revisión se concentra en las plataformas y la paridad Main ↔ worker.
 
-1. **CI**: no ejecuta 249 tests
-   —entre ellos todos los guardianes que CLAUDE.md cita como red— (RI-08).
-2. **Plataformas** (segunda pasada). La rama de Windows 7 es anterior a ARQ-01 y su canal
-   del feed no está desplegado (RI-74). Y el harness de contrato compara efectos pero no la
-   validación, donde hay cuatro divergencias entre la Main y la Handy (RI-78).
+La rama de Windows 7 es anterior a ARQ-01 y su canal del feed no está desplegado (RI-74).
+El harness de contrato compara efectos pero no la validación, donde hay cuatro divergencias
+entre la Main y la Handy (RI-78).
 
 ---
 
@@ -66,11 +63,7 @@ Lo que queda de esta revisión se concentra en dos frentes:
 
 | ID | Sev | Tipo | Hallazgo |
 |----|-----|------|----------|
-| [RI-08](#ri-08) | 🟠 | deuda | La CI no ejecuta 249 tests, entre ellos todos los guardianes |
 | [RI-23](#ri-23) | 🟡 | rendimiento | Optimización y limpieza de imágenes aplazada |
-| [RI-24](#ri-24) | 🟡 | deuda | Los source maps del frontend no llegan a Sentry (y la versión no cuadra) |
-| [RI-25](#ri-25) | 🟡 | seguridad | Acciones de GitHub sin fijar por SHA en un job con la clave de firma del updater |
-| [RI-49](#ri-49) | 🔵 | deuda | Build: `include_dir!` sin `rerun-if-changed`, `Cargo.lock` anidado y dependencias sin uso |
 | [RI-74](#ri-74) | 🟡 | deuda | Windows 7: la rama es anterior a ARQ-01 y su canal del feed no está desplegado |
 | [RI-75](#ri-75) | 🔵 | deuda | Android: el `Context` sale de una API no pública |
 | [RI-76](#ri-76) | 🔵 | deuda | Android: restos de la plantilla, márgenes seguros y release sin firmar |
@@ -92,7 +85,6 @@ una migración nueva, registrada en los dos runners.
 
 **Antes de cobrar por el producto:**
 
-- RI-08.
 - La primera mitad de RI-78 (igualar las cuatro validaciones).
 
 **Antes de repartir la Handy de Android:** RI-75 y RI-76 (firma, márgenes), y
@@ -131,95 +123,6 @@ El botón de [`Cuentas.tsx`](../../apps/tpv-main/src/app/pages/Cuentas.tsx) se c
 por decisión del propietario el 09/10/2026. Sigue pendiente decidir si se retira o se conecta al
 correo con el límite y el destinatario de REV-14. La confirmación para reabrir un cierre, los
 caracteres españoles del PDF y el generador compartido están resueltos.
-
----
-
-## 16. CI, build y herramientas
-
-<a id="ri-08"></a>
-### RI-08 🟠 · La CI no ejecuta 249 tests, entre ellos todos los guardianes
-
-**Dónde:** [`ci.yml`](../../.github/workflows/ci.yml) (paso «Tests de dominio, casos de uso y
-persistencia»).
-
-Sólo se ejecutan `tpv-domain`, `tpv-application` y `tpv-infra-sqlite`. Contados en el repo, quedan
-fuera:
-
-| Crate | Tests | Qué vigilan |
-|---|---|---|
-| `apps/tpv-main/src-tauri` | 180 | `tests_exenciones_del_gate` (REV-17 cobrador de la sesión, REV-24 `deny` de escritura, REV-26 comandos retirados, «ningún interruptor toca el cobro», `recovery` sin sesión), tablas golden del ticket ESC/POS |
-| `tpv-infra-licensing` | 37 | formato del device-proof, reloj (PROD-04), cifrado de campo |
-| `tpv-infra-aeat` | 26 | construcción del XML y lectura de la respuesta de la AEAT |
-| `tpv-telemetry` | 5 | la mitad Rust de `scrub_casos.json` y el filtro de Sentry |
-| `tpv-infra-http` | 1 | — |
-
-CLAUDE.md presenta varios de ellos como la red de una regla («lo vigila `tests_exenciones_del_gate`
-…»), pero esa red sólo existe cuando alguien los lanza a mano. La paridad de `scrub_casos.json` y de
-las tablas golden del ticket se comprueba en CI por el lado TypeScript y no por el de Rust.
-
-**Propuesta.** Un job `windows-latest` con `cargo nextest run --workspace` (en Windows compilan
-`src-tauri` y `tpv-infra-aeat`, y es la única plataforma que se distribuye). Si el coste de minutos
-de Windows preocupa, al menos añadir `tpv-telemetry`, `tpv-infra-licensing` y `tpv-infra-http` al
-job de Ubuntu (el `keyring` de Linux puede necesitar `libdbus-1-dev`) y ampliar clippy a ellos.
-
-El E2E no va a CI por buenas razones (§16 de CLAUDE.md), pero eso lo deja sin red entre releases.
-Para el dinero ya hay otra: los `*Apis.ts` que lo llevan reciben los `Input` generados, así que un
-`number` en un campo `Dinero` no compila. Los comandos generados por Specta comprueban también
-nombres, argumentos y respuestas; el `typecheck` y la comprobación de generación corren en CI.
-
-<a id="ri-25"></a>
-### RI-25 🟡 · Acciones de GitHub sin fijar por SHA con acceso a la clave del updater
-
-**Dónde:** [`release.yml`](../../.github/workflows/release.yml).
-
-El job de release tiene en el entorno `TAURI_SIGNING_PRIVATE_KEY` —la clave con la que **todos**
-los equipos aceptan una actualización— y ejecuta acciones de terceros por etiqueta mutable
-(`dtolnay/rust-toolchain@1.91.1`, `Swatinem/rust-cache@v2`, `pnpm/action-setup@v4`, …). Si una de
-esas etiquetas se reescribe (ha pasado: `tj-actions/changed-files`, marzo de 2025), el código
-inyectado puede leer la clave y firmar una actualización maliciosa para todos los bares. Fijar cada
-acción por SHA completo (Dependabot las mantiene igual, ya tenéis el ecosistema `github-actions`
-configurado) y, si es posible, mover la firma a un paso que no ejecute nada de terceros después de
-cargar el secreto.
-
-<a id="ri-24"></a>
-### RI-24 🟡 · Los source maps del frontend no llegan a Sentry
-
-**Dónde:** [`vite.config.ts`](../../apps/tpv-main/vite.config.ts), [`release.yml`](../../.github/workflows/release.yml).
-
-- El plugin sólo sube source maps si hay `SENTRY_AUTH_TOKEN`, y `release.yml` no la pasa: en
-  producción las trazas de la webview llegan **minificadas**.
-- El `release` del plugin es `SENTRY_RELEASE` o la versión de `apps/tpv-main/package.json`, mientras
-  que los eventos usan `CARGO_PKG_VERSION` de `tpv`, fijado en `src-tauri/src/lib.rs`.
-  `release.yml` comprueba que el tag coincida con
-  `tauri.conf.json` y `Cargo.toml`, pero no con `package.json`: en cuanto suban las primeras, los
-  mapas se subirían a otra release y Sentry no simbolizaría. Pasar `SENTRY_RELEASE` desde el tag en
-  el workflow (o leer la versión de `tauri.conf.json` en `vite.config.ts`).
-
-<a id="ri-49"></a>
-### RI-49 🔵 · Build: `include_dir!` sin `rerun-if-changed`, `Cargo.lock` anidado y dependencias sin uso
-
-- **`include_dir!` no vigila la carpeta de migraciones**, y por eso CLAUDE.md pide «tocar
-  `migrations.rs`» tras editar un `.sql`. Un `build.rs` en `tpv-infra-sqlite` con
-  `println!("cargo:rerun-if-changed=../../packages/database/migrations")` hace que Cargo recompile
-  solo y quita esa regla manual.
-- **`apps/tpv-main/src-tauri/Cargo.lock` está versionado y muerto**: en un workspace sólo cuenta el
-  de la raíz. El anidado es de junio (commit inicial) y todavía fija `libsql 0.3.5`. Confunde a
-  herramientas de auditoría y a quien lo lea. Borrarlo.
-- **Dependencias declaradas sin uso** (buscado cada nombre de crate en el código de cada crate):
-  - `apps/tpv-main/src-tauri`: `libsql`, `uuid`, `pbkdf2`, `password-hash`, `ed25519-dalek`,
-    `sha2`, `reqwest`, `keyring` (sólo aparece en comentarios; y además no está limitado a
-    escritorio, al contrario que en `tpv-infra-licensing`).
-  - `thiserror` en `tpv-domain`, `tpv-infra-licensing` y `tpv-infra-sqlite`; `chrono` en
-    `tpv-contracts`; `serde` y `tracing` en `tpv-infra-aeat`.
-  - En `[workspace.dependencies]`: `anyhow` y `password-hash` no los usa ninguna crate.
-  - `src-tauri` no usa `{ workspace = true }` para `tokio`, `serde`, `chrono`, `rand`, `base64`…:
-    dos fuentes de versión para lo mismo.
-  - `tokio = { features = ["full"] }` para todo el workspace; las crates de dominio/aplicación sólo
-    lo usan en tests.
-- `src-tauri/Cargo.toml` conserva la plantilla: `description = "A Tauri App"`, `authors = ["you"]`.
-  Según la versión de `tauri-build`, la descripción puede acabar en los metadatos del `.exe`.
-- `packages/contracts/package.json` tiene un comentario «Provisional… tras la verificación empírica»
-  que ya no lo es.
 
 ---
 

@@ -26,7 +26,7 @@ export function workerSentryConfig(env = process.env, tag) {
     if (!env[key]?.trim()) throw new Error(`Falta ${key} en Secrets/Variables de GitHub`);
   }
   if (![env.SENTRY_ORG, env.SENTRY_WORKER_PROJECT].every(v => /^[a-z0-9_-]+$/.test(v))) throw new Error("Usa los slugs de Sentry");
-  return { ...identity, org: env.SENTRY_ORG, project: env.SENTRY_WORKER_PROJECT, authToken: env.SENTRY_AUTH_TOKEN };
+  return { ...identity, org: env.SENTRY_ORG, project: env.SENTRY_WORKER_PROJECT, authToken: env.SENTRY_AUTH_TOKEN, commit: env.GITHUB_SHA };
 }
 
 export async function validateWorkerTarget(config) {
@@ -45,6 +45,7 @@ function cli(tool, args, env = process.env) {
 export function readWorkerArtifact(directory, expected = workerVersion()) {
   const manifest = JSON.parse(readFileSync(join(directory, "manifest.json"), "utf8"));
   if (manifest.version !== expected.version || manifest.release !== expected.release || manifest.worker !== "tpv-api") throw new Error("El artefacto no corresponde a esta release");
+  if (expected.commit && manifest.commit !== expected.commit) throw new Error("El artefacto no corresponde al commit de este workflow");
   const actual = readdirSync(directory).filter(f => f !== "manifest.json").sort();
   if (JSON.stringify(actual) !== JSON.stringify(Object.keys(manifest.files).sort())) throw new Error("Faltan archivos o hay archivos ajenos en el artefacto");
   for (const [file, digest] of Object.entries(manifest.files)) {
@@ -86,7 +87,7 @@ export async function verifyWorkerMaps(directory, config) {
     const bundles = await sentryPages(config, `projects/${config.org}/${config.project}/files/artifact-bundles/?query=${encodeURIComponent(config.release)}&per_page=100`);
     for (const bundle of bundles.filter(b => b.associations?.some(a => a.release === config.release))) {
       const files = await sentryPages(config, `projects/${config.org}/${config.project}/artifact-bundles/${bundle.bundleId}/files/?per_page=100`, "files");
-      if (files.some(f => (f.filePath ?? f.name)?.endsWith("/index.js.map") && (f.debugId === debugId || f.debug_id === debugId))) return;
+      if (["/index.js", "/index.js.map"].every(suffix => files.some(f => (f.filePath ?? f.name)?.endsWith(suffix) && (f.debugId === debugId || f.debug_id === debugId)))) return;
     }
     if (attempt < 23) await new Promise(r => setTimeout(r, 5000));
   }

@@ -5,7 +5,6 @@
 	"type": "module",
 	"scripts": {
 		"dev": "wrangler dev",
-		"deploy": "wrangler deploy",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
 		"cf-typegen": "wrangler types ./src/server/worker-configuration.d.ts"
