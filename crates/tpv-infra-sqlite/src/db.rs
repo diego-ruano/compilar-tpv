@@ -407,8 +407,8 @@ async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), Libsq
 /// filas (las descartamos) y también las que no.
 pub(crate) async fn tune(conn: &libsql::Connection) -> Result<(), LibsqlError> {
     for pragma in [
-        "PRAGMA journal_mode = WAL;",
         "PRAGMA busy_timeout = 5000;",
+        "PRAGMA journal_mode = WAL;",
         "PRAGMA foreign_keys = ON;",
         "PRAGMA synchronous = NORMAL;",
     ] {
@@ -891,6 +891,26 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn las_conexiones_locales_se_cierran_sin_abortar_y_respetan_los_cursores() {
+        // libsql #2251: el cierre doble accedía a memoria liberada y abortaba en Windows.
+        let database = Builder::new_local(":memory:").build().await.unwrap();
+        for i in 0..2000 {
+            let conn = database.connect().unwrap();
+            let mut filas = conn.query("SELECT 42", ()).await.unwrap();
+            if i % 2 == 0 {
+                // El cursor conserva la conexión nativa después de soltar la fachada.
+                drop(conn);
+                assert_eq!(filas.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 42);
+                assert!(filas.next().await.unwrap().is_none());
+            } else {
+                assert_eq!(filas.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 42);
+                drop(filas);
+                drop(conn);
+            }
+        }
+    }
 
     #[tokio::test]
     async fn cancelar_una_transaccion_revierte_antes_de_reutilizar_el_guard() {

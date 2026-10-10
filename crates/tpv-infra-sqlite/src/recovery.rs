@@ -960,12 +960,15 @@ mod tests {
     #[tokio::test]
     async fn abrir_una_base_con_traslado_pendiente_cierra_las_escrituras() {
         let dir = test_dir("traslado_abrir");
-        drop(db_operativa(&dir).await);
+        let db = db_operativa(&dir).await;
+        db.cerrar().await.unwrap();
+        drop(db);
 
         marcar_traslado(&dir).unwrap();
         let db = crate::connection::init_main_db(&dir, true).await.unwrap();
         assert!(db.escrituras_de_negocio_bloqueadas());
 
+        db.cerrar().await.unwrap();
         drop(db);
         let _ = std::fs::remove_dir_all(dir);
     }

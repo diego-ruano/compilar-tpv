@@ -151,6 +151,8 @@ async fn backup_antes_de_migrar(db_path: &Path) -> AppResult<()> {
 
     let database = Builder::new_local(db_path_str).build().await.map_err(db_err)?;
     let conn = database.connect().map_err(db_err)?;
+    // Esta conexión auxiliar también puede coincidir con la limpieza del WAL al cerrar.
+    conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(db_err)?;
 
     let pending = crate::migrations::has_pending(&conn).await.map_err(db_err)?;
 

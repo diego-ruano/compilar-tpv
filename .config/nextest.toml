@@ -1,19 +1,13 @@
 # Configuración de cargo-nextest (runner de los tests de Rust).
 #
-# Por qué nextest y no `cargo test`: nextest corre CADA test en su propio proceso. Con `cargo test`
-# los 224 comparten uno, y el crash nativo de libsql (ver abajo) se llevaba por delante la tanda
-# entera: el proceso moría con STATUS_ACCESS_VIOLATION, sin decir en qué test ni dejar veredicto de
-# los demás. Aislado, ese mismo fallo aborta un test y los otros 223 siguen dando su respuesta.
+# Nextest corre cada test en su propio proceso: aísla los OnceLock y permite identificar
+# cualquier aborto nativo sin perder el resultado del resto de la tanda.
 #
-# Los reintentos NO están para tapar tests inestables nuestros: un fallo de aserción es
-# determinista y se reintentará igual de rojo. Están para un crash nativo de libsql al CREAR bases
-# de datos, que no depende del test y que **no se arregla actualizando**: se comprobó subiendo de
-# 0.3.5 a 0.9.30 y sigue igual (el código que lo provoca no ha cambiado en dos años). Nextest los
-# marca como FLAKY, así que siguen viéndose en la salida en vez de desaparecer.
-#
-# Lo que dispara el fallo es crear MUCHAS bases en un proceso, que es justo lo que hace un suite y
-# no lo que hace el TPV. Medido: 200 creaciones seguidas revientan ~la mitad de las veces; una sola
-# creación, 0 de 100; y una base con 6.000 sentencias encima, 0 de 10.
+# libsql 0.9.30 cerraba dos veces las conexiones locales (#2251), provocando
+# STATUS_ACCESS_VIOLATION en Windows. Cargo aplica el cierre idempotente de vendor/libsql;
+# las reaperturas deben esperar además a Db::cerrar(). Los reintentos se conservan para
+# mostrar cualquier fallo transitorio como FLAKY. Al verificar estas correcciones se usa
+# --retries 0, de modo que un fallo no quede oculto por otro intento.
 
 # Specta exporta desde el ejecutable Tauri; los tests de contratos ya son pruebas puras.
 [profile.default]

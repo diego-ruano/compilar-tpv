@@ -89,9 +89,10 @@ pnpm --filter @tpv/main typecheck    # pnpm --filter tpv-api typecheck
 pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, antes de cada versión
 ```
 
-- **Los tests de Rust se corren con `cargo nextest`**, nunca con `cargo test`: libsql tiene un crash nativo
-  al crear muchas bases en un proceso y nextest aísla cada test (con dos reintentos que lo marcan
-  `FLAKY`). El porqué está en `.config/nextest.toml`. Los tests de contratos también van por nextest;
+- **Los tests de Rust se corren con `cargo nextest`**, nunca con `cargo test`: nextest aísla cada test y
+  sus OnceLock (con dos reintentos que marcan los fallos transitorios como `FLAKY`). El cierre doble de
+  libsql está corregido en `vendor/libsql`; para verificar su estabilidad se usa `--retries 0`.
+  El porqué está en `.config/nextest.toml`. Los tests de contratos también van por nextest;
   la generación usa el ejecutable Tauri con `--export-bindings`, sin arrancar la aplicación.
 - **Windows: `Failed("Are you sure you have RC.EXE in your $PATH…")`** no es el código: `embed-resource`
   busca `rc.exe` por una clave de registro que puede apuntar mal. Se arregla con

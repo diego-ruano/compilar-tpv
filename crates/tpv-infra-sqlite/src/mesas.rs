@@ -1651,6 +1651,8 @@ mod tests_numero_ticket {
             let g = db.write().await;
             crate::verifactu::reservar_numero_factura(&g).await.unwrap();
             crate::verifactu::reservar_numero_factura(&g).await.unwrap();
+            drop(g);
+            db.cerrar().await.unwrap();
         }
 
         let db = Db::open(&ruta).await.unwrap();
