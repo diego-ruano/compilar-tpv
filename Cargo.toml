@@ -36,7 +36,8 @@ tpv-contracts = { path = "crates/tpv-contracts" }
 tpv-telemetry = { path = "crates/tpv-telemetry" }
 
 # ── Async / Runtime ──
-tokio = { version = "1", features = ["full"] }
+# Cada crate declara las features que necesita; los tests las amplían en dev-dependencies.
+tokio = "1"
 async-trait = "0.1"
 
 # ── Serde / JSON ──
@@ -63,14 +64,12 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # ── Errores ──
 thiserror = "1"
 strum = { version = "0.28", features = ["derive"] }
-anyhow = "1"
 
 # ── Utils / Cripto / Auth ──
 regex = "1"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4", "v7"] }
 pbkdf2 = "0.12"
-password-hash = "0.5"
 rand = "0.8"
 keyring = "2"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
@@ -78,10 +77,6 @@ sha2 = "0.10"
 # Cifrado de campo de la PII del personal (TRAB-03, ver ports/field_cipher.rs).
 aes-gcm = "0.10"
 hmac = "0.12"
-
-# ── Generación de tipos TS (Specta) ──
-# serde-compat va activo por defecto; chrono-impl añade soporte para tipos chrono.
-Specta = { version = "12", features = ["chrono-impl"] }
 
 # ── Exportacion de los registros de facturacion (art. 8 RRSIF) ──
 # Sin default-features y solo `deflate`: el ZIP lleva cuatro ficheros de texto, asi que no hacen
@@ -132,5 +127,4 @@ sentry-tracing = "0.42"
 
 specta = { version = "=2.0.0-rc.25", features = ["derive", "function", "chrono", "serde_json", "uuid"] }
 specta-typescript = "=0.0.12"
-specta-serde = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["typescript"] }

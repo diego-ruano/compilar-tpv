@@ -38,10 +38,12 @@ En los dos casos:
 
 1. Registrar el fichero en `tenantMigrations.ts` y en `test/helpers/esquemaTenant.ts` (el script de CI
    sólo vigila el primero).
-2. Tocar `migrations.rs` para que `include_dir!` no sirva la copia vieja.
-3. Regenerar la foto: `BLESS_SCHEMA_SNAPSHOT=1 cargo nextest run -p tpv-infra-sqlite schema_snapshot`.
-4. **Redesplegar el worker antes** de que una Main escriba la columna nueva: lleva el esquema compilado
+2. Regenerar la foto: `BLESS_SCHEMA_SNAPSHOT=1 cargo nextest run -p tpv-infra-sqlite schema_snapshot`.
+3. **Redesplegar el worker antes** de que una Main escriba la columna nueva: lleva el esquema compilado
    dentro, y uno por detrás rechaza esa escritura (y la operación acaba apartada).
+
+Cargo vigila la carpeta de migraciones mediante `tpv-infra-sqlite/build.rs`: al editar, añadir o
+eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.rs`.
 
 ## Reglas del esquema
 

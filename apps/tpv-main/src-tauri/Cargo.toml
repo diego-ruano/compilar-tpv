@@ -1,9 +1,9 @@
 [package]
 name = "tpv"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-edition = "2021"
+description = "Terminal punto de venta de Altaria Lights"
+authors.workspace = true
+edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -27,22 +27,19 @@ tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2.6"
 
 # ───────────── Async / Runtime ─────────────
-tokio = { version = "1", features = ["full"] }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 async-trait = { workspace = true }
 
-# ───────────── DB ─────────────
-libsql = { workspace = true }
-
 # ───────────── Serde ─────────────
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # ───────────── Chrono ─────────────
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 
 # ───────────── Utils ─────────────
-base64 = "0.22"
-uuid = { version = "1", features = ["v4"] }
+base64 = { workspace = true }
+uuid = { workspace = true }
 
 # ───────────── Imágenes (resize + recompresión JPEG antes de subir a R2) ─────────────
 image = { workspace = true }
@@ -51,17 +48,7 @@ image = { workspace = true }
 qrcode = { workspace = true }
 
 # ───────────── Seguridad / Auth ─────────────
-pbkdf2 = "0.12"
-password-hash = "0.5"
-rand = "0.8"
-
-# ✅ NUEVO (anti-copia: keychain + firma ed25519 + hash)
-keyring = "2"
-ed25519-dalek = { version = "2", features = ["rand_core"] }
-sha2 = "0.10"
-
-# ───────────── HTTP ─────────────
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rand = { workspace = true }
 
 # ───────────── Crates internas (arquitectura hexagonal) ─────────────
 tpv-domain = { workspace = true }

@@ -17,7 +17,7 @@ async-trait = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "rt", "sync", "time"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 

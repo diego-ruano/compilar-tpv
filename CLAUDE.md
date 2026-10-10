@@ -176,10 +176,11 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 
 - Las migraciones aplicadas quedan congeladas. Los cambios que conserven las bases de trabajo van en
   una migración nueva; consolidar el esquema de desarrollo y resetear sus datos requiere decidirlo expresamente.
-- En los dos casos: registrarla en `tenantMigrations.ts` **y** en `test/helpers/esquemaTenant.ts`, tocar
-  `migrations.rs` (para que `include_dir!` no sirva la copia vieja), regenerar la foto con
+- En los dos casos: registrarla en `tenantMigrations.ts` **y** en `test/helpers/esquemaTenant.ts`,
+  regenerar la foto con
   `BLESS_SCHEMA_SNAPSHOT=1 cargo nextest run -p tpv-infra-sqlite schema_snapshot`, y **redesplegar el worker
   antes** de que una Main escriba la columna nueva.
+- `tpv-infra-sqlite/build.rs` vigila la carpeta de migraciones: Cargo reembebe los SQL automáticamente.
 - ⚠️ El hash de la migración incluye sus comentarios: tocar un comentario de `0001_inicial.sql` es cambiar la
   migración.
 - **La base central del worker no se migra desde el código**: se cambia a mano en Turso antes de desplegar y

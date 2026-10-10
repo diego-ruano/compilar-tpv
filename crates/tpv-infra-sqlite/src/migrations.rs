@@ -41,10 +41,8 @@ use sha2::{Digest, Sha256};
 /// Ficheros de migración embebidos en el binario en tiempo de compilación.
 /// Ruta relativa al directorio del crate (`crates/tpv-infra-sqlite`).
 ///
-/// ⚠️ Cargo no vigila ese directorio, así que **editar una migración no basta para que se recompile
-/// esto**: hay que tocar además este fichero, o `include_dir!` seguirá sirviendo la copia vieja y
-/// los tests pasarán contra un esquema que ya no existe. Última vez: la devolución de parte de un
-/// cobro (`Pagos.ID_Pago_Origen`, `Devolucion_Lineas`, `v_unidades_devueltas`).
+/// build.rs registra el directorio con rerun-if-changed: Cargo reembebe los SQL cuando cambian,
+/// se añaden o se eliminan, también en builds incrementales (RI-49).
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../packages/database/migrations");
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;

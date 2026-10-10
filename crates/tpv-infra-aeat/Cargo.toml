@@ -7,12 +7,10 @@ description = "Adaptador de remisión a la AEAT (Veri*factu): SOAP, XML y TLS mu
 
 [dependencies]
 async-trait = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 quick-xml = "0.39"
-tokio = { workspace = true }
-tracing = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
 
 tpv-application = { workspace = true }
 tpv-domain = { workspace = true }
@@ -29,5 +27,6 @@ windows-sys = { workspace = true }
 # remitirlos. No entra en el binario: `tpv-infra-sqlite` no depende de esta crate, así que no hay
 # ciclo — es esta la que, para probarse, necesita a la otra.
 [dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 tpv-infra-sqlite = { workspace = true }
 libsql = { workspace = true }

@@ -10,12 +10,10 @@ tpv-domain = { workspace = true }
 tpv-application = { workspace = true }
 tpv-contracts = { workspace = true }
 libsql = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 async-trait = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
-thiserror = { workspace = true }
 uuid = { workspace = true }
 # Migraciones: embeber packages/database/migrations + hash de integridad.
 include_dir = { workspace = true }
