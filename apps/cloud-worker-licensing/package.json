@@ -1,5 +1,6 @@
 {
 	"name": "tpv-api",
+	"version": "0.1.0",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -19,8 +20,9 @@
 		"zod": "^3.24.1"
 	},
 	"devDependencies": {
-		"@noble/ed25519": "^3.0.0",
 		"@cloudflare/vitest-pool-workers": "^0.21.3",
+		"@noble/ed25519": "^3.0.0",
+		"@sentry/cli": "2.58.6",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.10",
 		"wrangler": "^4.56.0"

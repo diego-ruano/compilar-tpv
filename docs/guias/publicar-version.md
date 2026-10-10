@@ -34,7 +34,8 @@ pnpm --filter @tpv/main test:e2e
 ## Sacar la versión (CI)
 
 1. Subir `version` en `apps/tpv-main/src-tauri/tauri.conf.json`,
-   `apps/tpv-main/src-tauri/Cargo.toml` y `apps/tpv-main/package.json` (SemVer).
+   `apps/tpv-main/src-tauri/Cargo.toml`, `apps/tpv-main/package.json` y
+   `apps/cloud-worker-licensing/package.json` (SemVer). Las cuatro deben coincidir.
 2. Commit y tag:
    ```bash
    git tag v1.2.0
@@ -42,7 +43,7 @@ pnpm --filter @tpv/main test:e2e
    ```
 
 `release.yml` corre antes el CI entero (`ci.yml`, como workflow reutilizable): un tag cuyo commit no lo
-pasa no se publica. Después se ejecutan tres jobs en runners nuevos (RI-25):
+pasa no se publica. Después se ejecutan jobs con credenciales separadas (RI-25):
 
 - **Build**: comprueba versiones y contratos, compila NSIS sin la clave del updater y guarda el
   instalador junto a su versión, nombre y SHA-256 en un artefacto inmutable del mismo workflow.
@@ -60,9 +61,14 @@ al workflow o al firmante.
 
 ### Versiones y mapas de Sentry
 
-El workflow exige que las tres versiones coincidan con el tag y valida por API el token y el DSN
-activo de `altaria-lights/tpv-desktop`. Pasa esa versión como `SENTRY_RELEASE` al build de Vite;
-los eventos usan la misma mediante `CARGO_PKG_VERSION` de `tpv`.
+El workflow exige versiones coherentes con el tag y valida el token y el DSN activo de
+`altaria-lights/tpv-desktop`. Vite y Rust comparten `tpv-desktop@<versión>`. Windows 7 usa
+`tpv-desktop-win7@<versión>` y el tag `win7-v<versión>` en su rama.
+
+El worker se compila en otro job con `tpv-api@<versión>`, inyecta Debug IDs, sube sus mapas y
+comprueba un evento real con traza TypeScript. Una vez listos ambos builds y la firma del
+escritorio, otro runner despliega ese mismo artefacto del worker. El instalador sólo se publica
+cuando ese despliegue termina correctamente. El tag de Windows 7 no despliega el worker.
 
 Vite sube los mapas por release/ruta, sin Debug IDs incompatibles con el puente actual de Tauri.
 Tras compilar, CI comprueba que cada JS tiene su mapa en Sentry y que no quedan `.map` en el bundle.
@@ -91,7 +97,11 @@ siguiente comprobación de ese equipo.
 
 | Secretos | Variables |
 |---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` (contenido de `updater.key`), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`, `TPV_SENTRY_DSN`, `SENTRY_AUTH_TOKEN` | `R2_BUCKET`, `R2_PUBLIC_BASE_URL`, `TPV_API_BASE` (`https://tpv-api.altarialights.workers.dev`), `SENTRY_ORG` (`altaria-lights`), `SENTRY_PROJECT` (`tpv-desktop`) |
+| `TAURI_SIGNING_PRIVATE_KEY` (contenido de `updater.key`), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`, `TPV_SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `CLOUDFLARE_API_TOKEN` | `R2_BUCKET`, `R2_PUBLIC_BASE_URL`, `TPV_API_BASE` (`https://tpv-api.altarialights.workers.dev`), `SENTRY_ORG` (`altaria-lights`), `SENTRY_PROJECT` (`tpv-desktop`), `SENTRY_WORKER_PROJECT` (`node-cloudflare-workers`), `CLOUDFLARE_ACCOUNT_ID` |
+
+El token de Cloudflare necesita Workers Editor en la cuenta que contiene `tpv-api`. El DSN del
+worker sigue siendo el secreto `SENTRY_DSN` de Cloudflare; el token de Sentry sólo entra en el build.
+Las migraciones de la base central siguen siendo manuales y deben estar aplicadas antes de tagear.
 
 Crear el token en Sentry → Settings de la organización → Developer Settings → Internal Integrations:
 **Release → Admin**, **Organization → Read**, **Project → Read**. No fijar `SENTRY_RELEASE` en GitHub:

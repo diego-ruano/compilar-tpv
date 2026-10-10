@@ -11,7 +11,8 @@ La copia previa a migrar y las migraciones confirmadas se registran con `tracing
 `tpv::migrations`): éxitos a INFO y copia fallida a WARN. Incluyen nombre de fichero/migración,
 bytes o error, sin la ruta absoluta de AppData.
 
-Todo es **no-op** mientras falten los secretos: el código se puede desplegar sin configurar nada.
+En desarrollo la captura es **no-op** si faltan los secretos. Una publicación exige la configuración
+de Sentry completa y sus mapas verificados; no se despliega sin esa comprobación.
 
 El código propio, incluido licencias, emite con `tracing`. En Android, `JNI_OnLoad` inicializa
 el logger de plataforma antes de usar JNI: conserva el diagnóstico temprano en Logcat
@@ -71,8 +72,8 @@ Better Stack     ── GET /health, latidos del cron
   decide el identificador de la app (`lib.rs::entorno_de_sentry`: `e2e`, `dev` o `prod`), así que la
   tanda E2E no se mezcla con los clientes. Los minidumps se inicializan sólo con DSN y sólo en
   escritorio.
-- **Worker**: `SENTRY_DSN` es un secreto; el entorno es `ENVIRONMENT`, que no está en `wrangler.json`,
-  así que todo entra como `prod`. `nodejs_compat` está activado (lo exige `@sentry/cloudflare`).
+- **Worker**: `SENTRY_DSN` es un secreto de Cloudflare. El artefacto de release fija `ENVIRONMENT=prod`,
+  `SENTRY_RELEASE=tpv-api@<versión>` y `BUILD_COMMIT`. `nodejs_compat` está activado (lo exige `@sentry/cloudflare`).
   `instrumentDurableObjectWithSentry` cubre los handlers del WebSocket del DO.
 - **Logpush** está activado en el worker (`"logpush": true`); el destino se configura en el panel de
   Cloudflare.
@@ -127,12 +128,14 @@ reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idem
 
 ## Release de Sentry y source maps
 
-El cliente se inicializa en `lib.rs` con `CARGO_PKG_VERSION` de `tpv`. La release de los mapas
-usa esa misma versión: `sentry-config.mjs` comprueba Cargo, `tauri.conf.json`, `package.json`, el tag
-y `SENTRY_RELEASE` antes de construir. Sin variable explícita, Vite lee la versión de Tauri.
+El cliente usa la release que fija `build.rs` a partir de la versión de `tpv` y del target.
+`sentry-config.mjs` comprueba Cargo, `tauri.conf.json`, `package.json`, el tag y la identidad de
+Sentry. Vite y Rust usan `tpv-desktop@<versión>`; Windows 7 usa `tpv-desktop-win7@<versión>`.
+Comparten proyecto, con releases distintas. Los eventos nativos llevan `build_variant` y, en CI,
+`build_commit`.
 
 RI-24: `release.yml` exige DSN y token, comprueba por API que el DSN es una Client Key activa de
-`altaria-lights/tpv-desktop` y pasa la versión del tag al build. Si falla la configuración, la subida
+`altaria-lights/tpv-desktop` y pasa la identidad derivada del tag al build. Si falla la configuración, la subida
 o la comprobación de los artefactos remotos, no llega a los jobs de firma y publicación.
 
 Los mapas se generan como `hidden`, se suben con el JavaScript a `~/assets/` y se borran del bundle.
@@ -146,6 +149,38 @@ datos personales. Así no hay un segundo SDK inyectado que capture eventos sin e
 
 El token interno de CI necesita **Release → Admin**, **Organization → Read** y **Project → Read**:
 el último permite comprobar el DSN activo y leer un evento controlado para verificar su traza.
+
+### Worker: mapas, captura y datos seleccionados
+
+El tag moderno `v<versión>` publica escritorio y API con una misma versión. El worker lleva
+`tpv-api@<versión>`, en su propio proyecto. `win7-v<versión>` sólo publica Windows 7: una rama
+congelada nunca reemplaza el backend compartido con código antiguo.
+
+`worker.mjs` compila con Wrangler, inyecta Debug IDs y sube los mapas con la CLI oficial. Un
+manifiesto guarda hashes del JS, mapas, módulos SQL y configuración. Antes de desplegar se
+comprueban los hashes y el Debug ID remoto. Wrangler recibe `no_bundle`, para ejecutar los mismos
+bytes que se subieron. `verify-worker-sentry.mjs` ejecuta ese artefacto en workerd local sin
+credenciales de Turso y exige que Sentry reciba el fallo con archivo, línea y contexto TypeScript.
+Las pruebas van a `sentry-verification` y fallan antes de abrir una conexión o escribir datos.
+
+Los `catch` de correo, Stripe, aprovisionamiento, cron y sincronización notifican errores técnicos
+y conservan su respuesta o reintento. Se filtran rechazos HTTP tipados de entrada/autorización y
+rechazos de negocio de `HubError`, incluido `main_offline`. Los fallos desconocidos se notifican.
+Una caída de red o una cuota agotada puede impedir recibir un evento; Better Stack conserva la
+vigilancia externa.
+
+La recogida automática de cuerpo, cabeceras, cookies, IP y query está desactivada. Después de
+autenticar y validar, `requestContext.ts` selecciona campos por operación: importes en céntimos,
+stock, IVA, booleanos y enums cerrados. En pedidos sólo guarda cantidad de líneas y longitud de
+notas. Una ruta o campo nuevo no envía su cuerpo hasta incorporarlo expresamente a la lista.
+No se envían nombres, notas, destinatarios, PIN, JWT ni identificadores de personas. El filtro
+final elimina usuario, extras libres y consola; el filtro común redacta patrones reconocibles en
+los mensajes de error. La revisión de proveedores y retención sigue en
+[LEGAL-01](../pendientes.md#legal-01--rgpd).
+
+Los transportes Rust añaden `X-TPV-Version` y `X-TPV-Variant`, obtenidas del shell. El worker
+guarda valores con formato de versión y variantes conocidas como `client_version` y
+`client_variant`. Son contexto diagnóstico, no autorización.
 No se embebe el token en el frontend ni en Rust. En builds locales sin token Sentry sigue siendo
 opcional; una release oficial se marca con `TPV_RELEASE_BUILD=1` y no permite omitirlo.
 
