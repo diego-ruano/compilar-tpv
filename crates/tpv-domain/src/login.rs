@@ -3,8 +3,8 @@
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use pbkdf2::pbkdf2_hmac;
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::rngs::SysRng;
+use rand::TryRng as _;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 
@@ -182,7 +182,9 @@ pub fn hash_pin(pin: &str) -> Result<String, String> {
     }
 
     let mut salt = [0u8; SALT_LEN];
-    OsRng.fill_bytes(&mut salt);
+    SysRng
+        .try_fill_bytes(&mut salt)
+        .map_err(|e| format!("No se pudo obtener azar del sistema: {e}"))?;
 
     let mut dk = [0u8; DK_LEN];
     pbkdf2_hmac::<Sha256>(p.as_bytes(), &salt, PBKDF2_ITERS, &mut dk);

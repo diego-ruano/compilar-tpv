@@ -44,7 +44,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rand::Rng;
 use tauri::{AppHandle, Manager};
 
 use tpv_application::ports::jobs::{EstadoJob, JobsStateRepository};
@@ -316,7 +315,7 @@ fn jitter(cada: Duration) -> Duration {
     if techo.is_zero() {
         return Duration::ZERO;
     }
-    Duration::from_millis(rand::thread_rng().gen_range(0..=techo.as_millis() as u64))
+    Duration::from_millis(rand::random_range(0..=techo.as_millis() as u64))
 }
 
 async fn repo(app: &AppHandle) -> Option<Arc<dyn JobsStateRepository>> {

@@ -117,8 +117,14 @@ fn keypair_en(
         Lectura::Fallo(e) => Err(e),
         Lectura::Crear if !crear => Ok(None),
         Lectura::Crear => {
-            use rand::rngs::OsRng;
-            let sk = SigningKey::generate(&mut OsRng);
+            // 32 bytes del generador del sistema, que es lo que hace `SigningKey::generate`. Así la
+            // clave no depende de que ed25519-dalek y `rand` compartan versión de `rand_core`.
+            use rand::TryRng as _;
+            let mut semilla = ed25519_dalek::SecretKey::default();
+            rand::rngs::SysRng
+                .try_fill_bytes(&mut semilla)
+                .map_err(|e| format!("No se pudo obtener azar del sistema: {e}"))?;
+            let sk = SigningKey::from_bytes(&semilla);
             almacen.set(SVC_DEVICE_KEY, device_id, &B64.encode(sk.to_bytes()))?;
             let pub_b64 = B64.encode(sk.verifying_key().to_bytes());
             Ok(Some((sk, pub_b64)))
