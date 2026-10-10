@@ -20,6 +20,7 @@ if (!dsn) throw new Error("Falta una Client Key activa del worker");
 const taskRoot = resolve(root, "target");
 mkdirSync(taskRoot, { recursive: true });
 const temporary = mkdtempSync(join(taskRoot, "sentry-local-"));
+if (!resolve(temporary).startsWith(taskRoot + sep)) throw new Error("Ruta temporal fuera de target");
 const local = JSON.parse(readFileSync(join(artifact, "wrangler.json"), "utf8"));
 local.main = join(artifact, "index.js");
 local.base_dir = artifact;
@@ -79,6 +80,5 @@ try {
   if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
   else child.kill("SIGTERM");
   await Promise.race([stopped, delay(5000)]);
-  if (!resolve(temporary).startsWith(taskRoot + sep)) throw new Error("Ruta temporal fuera de target");
   rmSync(temporary, { recursive: true, force: true });
 }
