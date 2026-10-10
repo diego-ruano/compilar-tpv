@@ -16,7 +16,7 @@ use crate::util::now_ms;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::Value;
+use crate::ejecutor::Value;
 use crate::ejecutor::Connection;
 
 use tpv_application::error::{AppError, AppResult};
@@ -2467,7 +2467,7 @@ mod tests_reparacion {
 
     use std::sync::Arc;
 
-    use libsql::Value;
+    use crate::ejecutor::Value;
 use crate::ejecutor::Connection;
     use tpv_contracts::sync::SqlStatement;
 
@@ -3516,7 +3516,7 @@ mod tests_claves {
 
     use std::sync::Arc;
 
-    use libsql::Value;
+    use crate::ejecutor::Value;
     use tpv_contracts::sync::{ClavesTabla, ConteoTabla, VerificacionClaves, VerificacionNube};
 
     use super::*;
@@ -3798,7 +3798,7 @@ mod tests_cascada {
 
     use std::sync::Arc;
 
-    use libsql::Value;
+    use crate::ejecutor::Value;
 
     use super::*;
     use crate::db::Db;
@@ -4053,7 +4053,7 @@ mod tests_main_atrasada {
 
     use std::sync::Arc;
 
-    use libsql::Value;
+    use crate::ejecutor::Value;
     use tpv_contracts::sync::{BootstrapTabla, VerificacionNube};
 
     use super::*;

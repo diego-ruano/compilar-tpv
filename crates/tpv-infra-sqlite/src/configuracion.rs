@@ -5,7 +5,7 @@ use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::Value;
+use crate::ejecutor::Value;
 use serde_json::Value as JsonValue;
 
 use tpv_application::error::{AppError, AppResult};
@@ -501,7 +501,7 @@ mod tests_lecturas_no_escriben {
 
     use std::sync::Arc;
 
-    use libsql::Value;
+    use crate::ejecutor::Value;
     use tpv_application::ports::configuracion::ConfiguracionRepository;
 
     use super::SqliteConfiguracionRepository;
@@ -576,7 +576,7 @@ mod tests_dinero_del_patch {
     //! guardaba como `REAL`; y `patch_dinero` redondeaba un decimal en vez de rechazarlo, así que un
     //! cliente que mandara euros (`12.5`) guardaba 13 céntimos sin que nadie se enterase.
 
-    use libsql::Value;
+    use crate::ejecutor::Value;
     use tpv_application::error::AppError;
     use tpv_application::ports::configuracion::ConfiguracionRepository;
 

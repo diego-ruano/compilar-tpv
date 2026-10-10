@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{Datelike, Duration, Local, NaiveDate, Weekday};
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::field_cipher::FieldCipher;
@@ -1189,7 +1189,7 @@ mod tests_edicion {
 
     use std::sync::Arc;
 
-    use libsql::Value;
+    use crate::ejecutor::Value;
     use tpv_application::error::AppError;
     use tpv_application::ports::trabajadores::TrabajadoresRepository;
     use tpv_domain::trabajadores::{TrabajadorCambios, TrabajadorNuevo};
@@ -1426,7 +1426,7 @@ mod tests_cifrado {
 
     use std::sync::Arc;
 
-    use libsql::Value;
+    use crate::ejecutor::Value;
     use tpv_application::error::AppResult;
     use tpv_application::ports::field_cipher::FieldCipher;
     use tpv_application::ports::trabajadores::TrabajadoresRepository;

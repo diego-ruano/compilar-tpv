@@ -1,6 +1,6 @@
 //! RI-32: consultas compartidas y errores del adaptador, sin compatibilidad con esquemas antiguos.
 
-use libsql::Value;
+use crate::ejecutor::Value;
 use tpv_application::error::{AppError, AppResult};
 use tpv_domain::dinero::Dinero;
 use crate::db::Reader;

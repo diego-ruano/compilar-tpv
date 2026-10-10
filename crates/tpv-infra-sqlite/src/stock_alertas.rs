@@ -8,7 +8,7 @@ use crate::consultas::{db_err};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::AppResult;
 use tpv_application::ports::stock_alertas::{ProductoNegativo, StockAlertasRepository};

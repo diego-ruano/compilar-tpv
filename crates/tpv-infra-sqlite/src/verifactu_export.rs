@@ -32,7 +32,7 @@ use crate::consultas::{db_err};
 use std::io::Write;
 use std::path::Path;
 
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 

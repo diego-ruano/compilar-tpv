@@ -12,7 +12,7 @@
 use crate::util::new_id;
 use crate::mapping::dinero_val;
 use tpv_domain::dinero::Dinero;
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 

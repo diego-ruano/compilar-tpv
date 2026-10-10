@@ -23,7 +23,7 @@ use tpv_domain::dinero::Dinero;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_contracts::errors::ErrorCode;

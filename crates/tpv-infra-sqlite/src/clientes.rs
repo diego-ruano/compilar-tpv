@@ -9,7 +9,7 @@ use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::clientes::ClientesRepository;

@@ -23,8 +23,8 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
-use libsql::{Builder, Database, Error as LibsqlError, Value};
-use crate::ejecutor::{Connection, Rows};
+use libsql::{Builder, Database};
+use crate::ejecutor::{Connection, ErrorSql, Rows, Value};
 use serde_json::json;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
@@ -37,24 +37,7 @@ const MAIN_COMMAND_NAME: &str = "main_op";
 /// Nº de conexiones del pool de lectura. 4 da concurrencia de sobra para un TPV.
 const READ_POOL_SIZE: usize = 4;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Parámetros aceptados por query/execute (igual que el antiguo TrackedConnection)
-// ──────────────────────────────────────────────────────────────────────────────
-
-/// Las dos formas que usan los repos: `()` (sin args) y `Vec<Value>`.
-pub trait Bindable {
-    fn into_values(self) -> Vec<Value>;
-}
-impl Bindable for Vec<Value> {
-    fn into_values(self) -> Vec<Value> {
-        self
-    }
-}
-impl Bindable for () {
-    fn into_values(self) -> Vec<Value> {
-        Vec::new()
-    }
-}
+pub use crate::ejecutor::Bindable;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Traits que usan los repos y sus helpers
@@ -68,7 +51,7 @@ pub trait Reader: Sync {
         &self,
         sql: &str,
         params: impl Bindable + Send,
-    ) -> impl Future<Output = Result<Rows, LibsqlError>> + Send;
+    ) -> impl Future<Output = Result<Rows, ErrorSql>> + Send;
 }
 
 /// Capacidad de ESCRITURA (solo `WriteGuard`). `execute` captura la escritura en el outbox;
@@ -78,9 +61,9 @@ pub trait Writer: Reader {
         &self,
         sql: &str,
         params: impl Bindable + Send,
-    ) -> impl Future<Output = Result<u64, LibsqlError>> + Send;
+    ) -> impl Future<Output = Result<u64, ErrorSql>> + Send;
 
-    fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), LibsqlError>> + Send;
+    fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), ErrorSql>> + Send;
 
     /// RI-32: todo el control transaccional en un sitio, incluida cancelación y COMMIT fallido.
     fn abandonar_transaccion(&self);
@@ -116,15 +99,15 @@ impl<W: Writer + ?Sized> Drop for Reversion<'_, W> {
 
 // La conexión raw comparte control transaccional, pero nunca captura negocio en el outbox.
 impl Reader for Connection {
-    fn query(&self, sql: &str, params: impl Bindable + Send) -> impl Future<Output = Result<Rows, LibsqlError>> + Send {
+    fn query(&self, sql: &str, params: impl Bindable + Send) -> impl Future<Output = Result<Rows, ErrorSql>> + Send {
         Connection::query(self, sql, params.into_values())
     }
 }
 impl Writer for Connection {
-    fn execute(&self, sql: &str, params: impl Bindable + Send) -> impl Future<Output = Result<u64, LibsqlError>> + Send {
+    fn execute(&self, sql: &str, params: impl Bindable + Send) -> impl Future<Output = Result<u64, ErrorSql>> + Send {
         Connection::execute(self, sql, params.into_values())
     }
-    fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), LibsqlError>> + Send {
+    fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), ErrorSql>> + Send {
         Connection::execute_batch(self, sql)
     }
     fn abandonar_transaccion(&self) { self.revertir_al_soltar(); }
@@ -134,15 +117,15 @@ impl Writer for Connection {
 // Helpers de captura (antes en recording.rs)
 // ──────────────────────────────────────────────────────────────────────────────
 
-fn value_to_json(v: &Value) -> Result<serde_json::Value, LibsqlError> {
+fn value_to_json(v: &Value) -> Result<serde_json::Value, ErrorSql> {
     Ok(match v {
         Value::Null => serde_json::Value::Null,
         Value::Integer(i) => json!(i),
         Value::Real(f) if f.is_finite() => json!(f),
         Value::Text(s) => json!(s),
         // RI-38: rechazar antes de escribir; nunca replicar un BLOB como NULL.
-        Value::Blob(_) => return Err(LibsqlError::Misuse("No se admiten BLOB en escrituras replicables".into())),
-        Value::Real(_) => return Err(LibsqlError::Misuse("Número no finito en escritura replicable".into())),
+        Value::Blob(_) => return Err(ErrorSql::Misuse("No se admiten BLOB en escrituras replicables".into())),
+        Value::Real(_) => return Err(ErrorSql::Misuse("Número no finito en escritura replicable".into())),
     })
 }
 
@@ -368,13 +351,13 @@ fn batch_kind(sql: &str) -> BatchKind {
 
 /// Persiste una operación (lista de sentencias resueltas) en `_Sync_Outbox` y la auto-marca en
 /// `_Sync_Applied_Ops` (anti-eco). Usa la conexión cruda (no recursivo).
-async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), LibsqlError> {
+async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), ErrorSql> {
     // RI-33: v7 y no v4, para que cada `Op_Id` nuevo entre al final de los índices de
     // `_Sync_Outbox`, `_Sync_Applied_Ops` y `Applied_Operations` y no en un sitio cualquiera.
     let op_id = uuid::Uuid::now_v7().to_string();
     let now = now_ms();
     let statements_json = serde_json::to_string(stmts)
-        .map_err(|e| LibsqlError::Misuse(format!("No se pudo serializar la operación del outbox: {e}")))?;
+        .map_err(|e| ErrorSql::Misuse(format!("No se pudo serializar la operación del outbox: {e}")))?;
 
     conn.execute(
         "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
@@ -405,7 +388,7 @@ async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), Libsq
 /// DEVUELVEN una fila con el valor resultante incluso al fijarlas, y enrutarlas por la vía de
 /// `execute` dispara `Execute returned rows` en libsql. `query` acepta sentencias que devuelven
 /// filas (las descartamos) y también las que no.
-pub(crate) async fn tune(conn: &libsql::Connection) -> Result<(), LibsqlError> {
+pub(crate) async fn tune(conn: &libsql::Connection) -> Result<(), ErrorSql> {
     for pragma in [
         "PRAGMA busy_timeout = 5000;",
         "PRAGMA journal_mode = WAL;",
@@ -486,7 +469,7 @@ impl Reader for ReadGuard {
         &self,
         sql: &str,
         params: impl Bindable + Send,
-    ) -> impl Future<Output = Result<Rows, LibsqlError>> + Send {
+    ) -> impl Future<Output = Result<Rows, ErrorSql>> + Send {
         let conn = self.conn.as_ref().expect("read guard con conexión").clone();
         let values = params.into_values();
         async move { conn.query(sql, values).await }
@@ -555,7 +538,7 @@ impl<'a> WriteGuard<'a> {
 
     /// Construye la escritura tal como se ejecuta en local y tal como sube a la nube: la misma
     /// sentencia, con la hora ya fijada (CFG-04), y sus args serializados a JSON.
-    fn build_stmt(&self, sql: &str, values: &[Value]) -> Result<SqlStatement, LibsqlError> {
+    fn build_stmt(&self, sql: &str, values: &[Value]) -> Result<SqlStatement, ErrorSql> {
         let sql = rewrite_now_literals(sql, &self.instante());
         if let Some(token) = tiempo_sin_fijar(&sql) {
             // No se bloquea la escritura: podría ser un cobro, y nada de lo que rodea a una venta
@@ -592,7 +575,7 @@ impl<'a> Reader for WriteGuard<'a> {
         &self,
         sql: &str,
         params: impl Bindable + Send,
-    ) -> impl Future<Output = Result<Rows, LibsqlError>> + Send {
+    ) -> impl Future<Output = Result<Rows, ErrorSql>> + Send {
         let conn = self.conn.clone();
         let values = params.into_values();
         async move { conn.query(sql, values).await }
@@ -610,7 +593,7 @@ impl<'a> Writer for WriteGuard<'a> {
         &self,
         sql: &str,
         params: impl Bindable + Send,
-    ) -> impl Future<Output = Result<u64, LibsqlError>> + Send {
+    ) -> impl Future<Output = Result<u64, ErrorSql>> + Send {
         let values = params.into_values();
         async move {
             let _operacion = self.operacion.lock().await;
@@ -628,7 +611,7 @@ impl<'a> Writer for WriteGuard<'a> {
             // Se rechaza en vez de dejarla pasar en silencio: quien escriba tiene que enterarse.
             // La maquinaria de la recuperación no se ve afectada porque va toda por `raw()`.
             if self.bloqueadas.load(Ordering::Relaxed) {
-                return Err(LibsqlError::Misuse(
+                return Err(ErrorSql::Misuse(
                     "Este equipo está recuperando sus datos: no admite escrituras todavía."
                         .to_string(),
                 ));
@@ -646,7 +629,7 @@ impl<'a> Writer for WriteGuard<'a> {
                     let stmt = self.build_stmt(sql, &values)?;
                     let affected = self.conn.execute(&stmt.sql, values).await?;
                     self.tx_buf.lock().unwrap_or_else(|p| p.into_inner()).as_mut()
-                        .ok_or_else(|| LibsqlError::Misuse("Transacción abandonada".into()))?.push(stmt);
+                        .ok_or_else(|| ErrorSql::Misuse("Transacción abandonada".into()))?.push(stmt);
                     Ok(affected)
                 }
                 false => {
@@ -656,7 +639,7 @@ impl<'a> Writer for WriteGuard<'a> {
                     // nunca se replicaría). Todo o nada.
                     let stmt = self.build_stmt(sql, &values)?;
                     self.conn.execute_batch("BEGIN;").await?;
-                    let res: Result<u64, LibsqlError> = async {
+                    let res: Result<u64, ErrorSql> = async {
                         let affected = self.conn.execute(&stmt.sql, values.clone()).await?;
                         write_op(self.conn, std::slice::from_ref(&stmt)).await?;
                         Ok(affected)
@@ -682,7 +665,7 @@ impl<'a> Writer for WriteGuard<'a> {
         }
     }
 
-    fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), LibsqlError>> + Send {
+    fn execute_batch(&self, sql: &str) -> impl Future<Output = Result<(), ErrorSql>> + Send {
         let sql = sql.to_string();
         async move {
             let _operacion = self.operacion.lock().await;
@@ -704,7 +687,7 @@ impl<'a> Writer for WriteGuard<'a> {
                     // Registrar la operación en el outbox DENTRO de la misma transacción (BEGIN
                     // ya enviado, COMMIT no aún). La captura es incondicional: el outbox acumula
                     // también en offline y se drena al activar online.
-                    let mut pre: Result<(), LibsqlError> = Ok(());
+                    let mut pre: Result<(), ErrorSql> = Ok(());
                     if let Some(stmts) = buffered {
                         if !stmts.is_empty() {
                             pre = write_op(self.conn, &stmts).await;
@@ -850,10 +833,10 @@ impl Db {
 
     /// Cierre confirmado para intercambiar el fichero en Windows. El shell impide crear nuevos
     /// repositorios antes de llamarlo. Espera a los préstamos y a las operaciones ya admitidas.
-    pub async fn cerrar(&self) -> Result<(), LibsqlError> {
+    pub async fn cerrar(&self) -> Result<(), ErrorSql> {
         let _writer = self.write.lock.lock().await;
         let _lecturas = self.reads.sem.clone().acquire_many_owned(READ_POOL_SIZE as u32).await
-            .map_err(|_| LibsqlError::Misuse("El pool de lectura se ha cerrado".into()))?;
+            .map_err(|_| ErrorSql::Misuse("El pool de lectura se ha cerrado".into()))?;
         let conns = self.reads.free.lock().unwrap_or_else(|p| p.into_inner()).clone();
         for c in conns { c.cerrar().await?; }
         self.write.conn.cerrar().await

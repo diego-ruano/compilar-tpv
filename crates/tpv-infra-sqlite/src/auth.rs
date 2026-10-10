@@ -6,7 +6,7 @@
 
 use crate::consultas::{db_err};
 use crate::util::now_ms;
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_domain::login::login_bloqueo_ms;

@@ -9,7 +9,7 @@
 
 #[cfg(test)]
 mod tests {
-    use libsql::Value;
+    use crate::ejecutor::Value;
 
     use crate::contract_comun::db_temporal;
     use crate::db::Reader;

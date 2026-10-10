@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use libsql::Value;
+use crate::ejecutor::Value;
 use crate::ejecutor::Connection;
 use serde_json::Value as Json;
 

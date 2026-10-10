@@ -1,7 +1,7 @@
 //! RI-70: concesiones replicables y autorización leída de la base vigente.
 use std::sync::Arc;
 use async_trait::async_trait;
-use libsql::Value;
+use crate::ejecutor::Value;
 use tpv_application::{error::{AppError, AppResult}, ports::permisos::PermisosRepository};
 use tpv_contracts::{errors::ErrorCode, permisos::*};
 use crate::{db::{Db, Reader, Writer}, util::new_id};

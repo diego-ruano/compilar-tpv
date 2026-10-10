@@ -6,7 +6,7 @@ use crate::consultas::{db_err, select_one_i64};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::tareas::TareasRepository;

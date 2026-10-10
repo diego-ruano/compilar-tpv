@@ -34,7 +34,7 @@
 //! nube por igual.
 
 use crate::consultas::{db_err};
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use tpv_application::error::AppResult;
 use tpv_domain::cantidad::redondear_cantidad;

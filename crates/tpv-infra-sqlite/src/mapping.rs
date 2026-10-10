@@ -1,7 +1,7 @@
 //! Helpers de conversión entre `libsql::Value` y tipos Rust. Reutilizables por todos
 //! los repositorios. Replican los antiguos helpers `v_*` que estaban duplicados por módulo.
 
-use libsql::Value;
+use crate::ejecutor::Value;
 use tpv_domain::dinero::Dinero;
 
 pub fn v_i64(v: Value) -> Option<i64> {

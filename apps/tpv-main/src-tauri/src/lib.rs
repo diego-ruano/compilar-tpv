@@ -2673,6 +2673,7 @@ mod tests_sesion_y_permisos {
     //! que se prueba aquí es lo que un comando gateado hereda al llamarlos.
 
     use super::*;
+    use tpv_infra_sqlite::ejecutor::Value;
 
     async fn estado() -> AppState {
         let dir = std::env::temp_dir().join(format!("tpv-gate-{}", uuid::Uuid::new_v4()));
@@ -2700,8 +2701,8 @@ mod tests_sesion_y_permisos {
     async fn iniciar(st: &AppState, rol: &str) {
         let db = st.db.lock().await.as_ref().unwrap().clone();
         let w = db.write().await;
-        w.raw().execute("INSERT INTO Roles (ID_Rol,Nombre_Rol) VALUES (?1,?1) ON CONFLICT(Nombre_Rol) DO NOTHING", [rol]).await.unwrap();
-        w.raw().execute("INSERT INTO Usuarios (ID_Usuario,ID_Rol,Email,Password_Hash,Nombre,Estado) VALUES ('u-1',(SELECT ID_Rol FROM Roles WHERE Nombre_Rol=?1),'gate@test','hash','Gate','Activo') ON CONFLICT(ID_Usuario) DO UPDATE SET ID_Rol=excluded.ID_Rol", [rol]).await.unwrap();
+        w.raw().execute("INSERT INTO Roles (ID_Rol,Nombre_Rol) VALUES (?1,?1) ON CONFLICT(Nombre_Rol) DO NOTHING", vec![Value::Text(rol.into())]).await.unwrap();
+        w.raw().execute("INSERT INTO Usuarios (ID_Usuario,ID_Rol,Email,Password_Hash,Nombre,Estado) VALUES ('u-1',(SELECT ID_Rol FROM Roles WHERE Nombre_Rol=?1),'gate@test','hash','Gate','Activo') ON CONFLICT(ID_Usuario) DO UPDATE SET ID_Rol=excluded.ID_Rol", vec![Value::Text(rol.into())]).await.unwrap();
         drop(w);
         st.iniciar_sesion(sesion_de(rol)).await;
     }

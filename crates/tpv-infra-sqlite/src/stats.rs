@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use crate::db::{Db, Reader};
 

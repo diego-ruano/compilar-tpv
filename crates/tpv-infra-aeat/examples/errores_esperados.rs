@@ -57,7 +57,7 @@ fn main() {
 
     #[cfg(windows)]
     {
-        use libsql::Value;
+        use tpv_infra_sqlite::ejecutor::Value;
         use tpv_application::use_cases::verifactu as uc;
         use tpv_domain::ticket::LineaTicket;
         use tpv_infra_sqlite::db::{Db, Reader};
@@ -337,7 +337,7 @@ fn main() {
 /// Con esto, el registro es internamente coherente y la validación de negocio llega a ejecutarse.
 #[cfg(windows)]
 async fn recomputar_huella(db: &std::sync::Arc<tpv_infra_sqlite::db::Db>, id: &str) {
-    use libsql::Value;
+    use tpv_infra_sqlite::ejecutor::Value;
     use tpv_infra_sqlite::db::Reader;
 
     let (emisor, num, fecha, tipo, cuota, importe, ant, fhh) = {
@@ -387,7 +387,7 @@ async fn leer(
     db: &std::sync::Arc<tpv_infra_sqlite::db::Db>,
     num_serie: &str,
 ) -> (String, Option<i64>, String) {
-    use libsql::Value;
+    use tpv_infra_sqlite::ejecutor::Value;
     use tpv_infra_sqlite::db::Reader;
     let r = db.read().await;
     let mut rows = r

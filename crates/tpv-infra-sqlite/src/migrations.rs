@@ -35,7 +35,8 @@ use crate::util::now_ms;
 use std::collections::HashMap;
 
 use include_dir::{include_dir, Dir};
-use libsql::{Connection, Error as LibsqlError, Value};
+use libsql::Connection;
+use crate::ejecutor::{ErrorSql, Value};
 use sha2::{Digest, Sha256};
 
 /// Ficheros de migración embebidos en el binario en tiempo de compilación.
@@ -98,7 +99,7 @@ fn sha256_hex(s: &str) -> String {
         .collect()
 }
 
-async fn table_exists(conn: &Connection, name: &str) -> Result<bool, LibsqlError> {
+async fn table_exists(conn: &Connection, name: &str) -> Result<bool, ErrorSql> {
     let mut rows = conn
         .query(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1 LIMIT 1;",
@@ -108,7 +109,7 @@ async fn table_exists(conn: &Connection, name: &str) -> Result<bool, LibsqlError
     Ok(rows.next().await?.is_some())
 }
 
-async fn ensure_table(conn: &Connection) -> Result<(), LibsqlError> {
+async fn ensure_table(conn: &Connection) -> Result<(), ErrorSql> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (\
             name TEXT PRIMARY KEY, \
@@ -121,7 +122,7 @@ async fn ensure_table(conn: &Connection) -> Result<(), LibsqlError> {
 }
 
 /// Mapa `name -> hash` de las migraciones ya aplicadas (vacío si la tabla aún no existe).
-async fn applied_map(conn: &Connection) -> Result<HashMap<String, String>, LibsqlError> {
+async fn applied_map(conn: &Connection) -> Result<HashMap<String, String>, ErrorSql> {
     if !table_exists(conn, "_migrations").await? {
         return Ok(HashMap::new());
     }
@@ -251,7 +252,7 @@ async fn comprobar_integridad_fk(conn: &Connection, name: &str) -> Result<(), Bo
 /// `true` si hay migraciones pendientes sobre una BD que **ya tiene datos** (tiene al menos una
 /// migración registrada en `_migrations`). Lo usa la copia de seguridad previa a migrar. Una BD
 /// nueva sin migraciones devuelve `false`: no hay nada que respaldar.
-pub async fn has_pending(conn: &Connection) -> Result<bool, LibsqlError> {
+pub async fn has_pending(conn: &Connection) -> Result<bool, ErrorSql> {
     let applied = applied_map(conn).await?;
     // BD nueva (nunca migrada): nada que respaldar.
     if applied.is_empty() {

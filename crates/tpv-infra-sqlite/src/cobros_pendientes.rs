@@ -1,5 +1,5 @@
 //! RI-47: intenciones duraderas locales. Nunca se confunden con un pago confirmado.
-use libsql::Value;
+use crate::ejecutor::Value;
 use tpv_application::error::{AppError, AppResult};
 use tpv_contracts::venta_rapida::{CobroPendienteDto, VrCobrarFraccionadoInput};
 use tpv_contracts::verifactu::DestinatarioInput;

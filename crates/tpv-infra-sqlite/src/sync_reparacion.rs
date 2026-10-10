@@ -23,7 +23,7 @@
 //! `Command_Name`; si una acaba apartada, no se genera otra. Sin eso, una fila que la nube se niega
 //! a aceptar produciría una reparación nueva por cada intento, para siempre.
 
-use libsql::{Error as LibsqlError, Value};
+use crate::ejecutor::{ErrorSql, Value};
 use crate::ejecutor::Connection;
 use serde_json::json;
 
@@ -263,7 +263,7 @@ fn valor_en_igualdad(donde: &str, col: &str, st: &SqlStatement) -> Option<String
 }
 
 /// Columnas de la clave primaria de una tabla, en su orden declarado.
-pub async fn claves_primarias(conn: &Connection, tabla: &str) -> Result<Vec<String>, LibsqlError> {
+pub async fn claves_primarias(conn: &Connection, tabla: &str) -> Result<Vec<String>, ErrorSql> {
     if !nombre_aceptable(tabla) {
         return Ok(Vec::new());
     }
@@ -296,7 +296,7 @@ pub async fn claves_primarias(conn: &Connection, tabla: &str) -> Result<Vec<Stri
 pub async fn sentencia_de_reparacion(
     conn: &Connection,
     fila: &FilaAfectada,
-) -> Result<Option<SqlStatement>, LibsqlError> {
+) -> Result<Option<SqlStatement>, ErrorSql> {
     if !nombre_aceptable(&fila.tabla) || fila.clave.is_empty() {
         return Ok(None);
     }
@@ -467,7 +467,7 @@ pub async fn fila_difiere(
     columnas: &[String],
     valores: &[serde_json::Value],
     claves: &[String],
-) -> Result<Option<bool>, LibsqlError> {
+) -> Result<Option<bool>, ErrorSql> {
     if !nombre_aceptable(tabla) || claves.is_empty() {
         return Ok(None);
     }

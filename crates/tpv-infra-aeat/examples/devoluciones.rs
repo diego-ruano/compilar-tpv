@@ -46,7 +46,7 @@ mod windows {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use libsql::Value;
+    use tpv_infra_sqlite::ejecutor::Value;
     use tpv_application::ports::cuentas::{AnularPagoArgs, ClaseBaja, CuentasRepository, DevolverLineasArgs};
     use tpv_application::ports::venta_rapida::VentaRapidaRepository;
     use tpv_application::ports::verifactu::VerifactuRepository;

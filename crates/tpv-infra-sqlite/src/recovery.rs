@@ -16,7 +16,8 @@ use crate::consultas::db_err;
 use crate::util::now_ms;
 use std::path::{Path, PathBuf};
 
-use libsql::{Builder, Value};
+use libsql::Builder;
+use crate::ejecutor::Value;
 use crate::ejecutor::Connection;
 use tpv_application::error::{AppError, AppResult};
 use tpv_contracts::errors::ErrorCode;

@@ -30,7 +30,7 @@ use tpv_domain::dinero::Dinero;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use libsql::Value;
+use crate::ejecutor::Value;
 use serde_json::{Map, Value as Json};
 
 use tpv_application::ports::clientes::ClientesRepository;

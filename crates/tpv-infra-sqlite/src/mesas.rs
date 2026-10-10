@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::{Local, NaiveDate, NaiveTime, TimeZone};
-use libsql::Value;
+use crate::ejecutor::Value;
 
 use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};

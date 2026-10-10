@@ -4,9 +4,27 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{mpsc, Arc};
 use std::sync::atomic::{AtomicU64, Ordering};
-use libsql::{Error, Value};
 use tokio::runtime::Handle;
 use tokio::sync::{oneshot, Semaphore};
+
+/// El valor de una columna o de un parámetro, y el error de la base. Son los del motor: el resto
+/// de la crate los toma de aquí y no de él, así que cambiar de motor sólo toca este módulo.
+pub use libsql::{Error as ErrorSql, Value};
+
+/// Lo que aceptan `query` y `execute` como parámetros: `()` (ninguno) o `Vec<Value>`.
+pub trait Bindable {
+    fn into_values(self) -> Vec<Value>;
+}
+impl Bindable for Vec<Value> {
+    fn into_values(self) -> Vec<Value> {
+        self
+    }
+}
+impl Bindable for () {
+    fn into_values(self) -> Vec<Value> {
+        Vec::new()
+    }
+}
 
 const MAX_PENDIENTES: usize = 32;
 const FILAS_POR_LOTE: usize = 64;
@@ -24,10 +42,10 @@ struct Ejecutor {
     siguiente: AtomicU64,
 }
 
-fn cerrado() -> Error { Error::Misuse("El ejecutor de SQLite se ha cerrado".into()) }
+fn cerrado() -> ErrorSql { ErrorSql::Misuse("El ejecutor de SQLite se ha cerrado".into()) }
 
 impl Ejecutor {
-    async fn pedir<T: Send + 'static>(&self, f: impl FnOnce(&mut Estado, &Handle) -> Result<T, Error> + Send + 'static) -> Result<T, Error> {
+    async fn pedir<T: Send + 'static>(&self, f: impl FnOnce(&mut Estado, &Handle) -> Result<T, ErrorSql> + Send + 'static) -> Result<T, ErrorSql> {
         // El permiso acompaña al trabajo, incluso si el solicitante cancela su Future.
         let permiso = self.admision.clone().acquire_owned().await.map_err(|_| cerrado())?;
         let (tx, rx) = oneshot::channel();
@@ -80,20 +98,20 @@ impl Connection {
         Ok(Self { ejecutor: Arc::new(Ejecutor { cola, admision: Arc::new(Semaphore::new(MAX_PENDIENTES)), siguiente: AtomicU64::new(1) }) })
     }
 
-    pub async fn execute(&self, sql: &str, params: impl libsql::params::IntoParams) -> Result<u64, Error> {
+    pub async fn execute(&self, sql: &str, params: impl Bindable) -> Result<u64, ErrorSql> {
         let sql = sql.to_owned();
-        let params = params.into_params()?;
+        let params = params.into_values();
         self.ejecutor.pedir(move |s, rt| rt.block_on(s.conn.execute(&sql, params))).await
     }
 
-    pub async fn execute_batch(&self, sql: &str) -> Result<(), Error> {
+    pub async fn execute_batch(&self, sql: &str) -> Result<(), ErrorSql> {
         let sql = sql.to_owned();
         self.ejecutor.pedir(move |s, rt| rt.block_on(s.conn.execute_batch(&sql)).map(|_| ())).await
     }
 
-    pub async fn query(&self, sql: &str, params: impl libsql::params::IntoParams) -> Result<Rows, Error> {
+    pub async fn query(&self, sql: &str, params: impl Bindable) -> Result<Rows, ErrorSql> {
         let sql = sql.to_owned();
-        let params = params.into_params()?;
+        let params = params.into_values();
         let ejecutor = self.ejecutor.clone();
         let id = ejecutor.siguiente.fetch_add(1, Ordering::Relaxed);
         self.ejecutor.pedir(move |s, rt| {
@@ -103,7 +121,7 @@ impl Connection {
         }).await
     }
 
-    pub(crate) async fn sanear(&self) -> Result<(), Error> {
+    pub(crate) async fn sanear(&self) -> Result<(), ErrorSql> {
         self.ejecutor.pedir(|s, rt| {
             if !s.conn.is_autocommit() { rt.block_on(s.conn.execute_batch("ROLLBACK;"))?; }
             Ok(())
@@ -120,7 +138,7 @@ impl Connection {
         });
     }
 
-    pub(crate) async fn cerrar(&self) -> Result<(), Error> {
+    pub(crate) async fn cerrar(&self) -> Result<(), ErrorSql> {
         self.ejecutor.admision.close();
         let (tx, rx) = oneshot::channel();
         self.ejecutor.cola.send(Mensaje::Cerrar(tx)).map_err(|_| cerrado())?;
@@ -133,27 +151,27 @@ impl Connection {
 pub struct Row { valores: Vec<Value> }
 
 impl Row {
-    pub fn get_value(&self, idx: i32) -> Result<Value, Error> {
-        self.valores.get(usize::try_from(idx).map_err(|_| Error::InvalidColumnIndex)?).cloned().ok_or(Error::InvalidColumnIndex)
+    pub fn get_value(&self, idx: i32) -> Result<Value, ErrorSql> {
+        self.valores.get(usize::try_from(idx).map_err(|_| ErrorSql::InvalidColumnIndex)?).cloned().ok_or(ErrorSql::InvalidColumnIndex)
     }
-    pub fn get<T: FromValue>(&self, idx: i32) -> Result<T, Error> { T::from_value(self.get_value(idx)?) }
+    pub fn get<T: FromValue>(&self, idx: i32) -> Result<T, ErrorSql> { T::from_value(self.get_value(idx)?) }
 }
 
 /// Conversiones usadas por los repositorios; tipos incorrectos son errores, nunca pánicos.
-pub trait FromValue: Sized { fn from_value(v: Value) -> Result<Self, Error>; }
+pub trait FromValue: Sized { fn from_value(v: Value) -> Result<Self, ErrorSql>; }
 impl FromValue for i64 {
-    fn from_value(v: Value) -> Result<Self, Error> {
-        match v { Value::Integer(n) => Ok(n), Value::Null => Err(Error::NullValue), _ => Err(Error::InvalidColumnType) }
+    fn from_value(v: Value) -> Result<Self, ErrorSql> {
+        match v { Value::Integer(n) => Ok(n), Value::Null => Err(ErrorSql::NullValue), _ => Err(ErrorSql::InvalidColumnType) }
     }
 }
 impl FromValue for f64 {
-    fn from_value(v: Value) -> Result<Self, Error> {
-        match v { Value::Real(n) => Ok(n), Value::Null => Err(Error::NullValue), _ => Err(Error::InvalidColumnType) }
+    fn from_value(v: Value) -> Result<Self, ErrorSql> {
+        match v { Value::Real(n) => Ok(n), Value::Null => Err(ErrorSql::NullValue), _ => Err(ErrorSql::InvalidColumnType) }
     }
 }
 impl FromValue for String {
-    fn from_value(v: Value) -> Result<Self, Error> {
-        match v { Value::Text(s) => Ok(s), Value::Null => Err(Error::NullValue), _ => Err(Error::InvalidColumnType) }
+    fn from_value(v: Value) -> Result<Self, ErrorSql> {
+        match v { Value::Text(s) => Ok(s), Value::Null => Err(ErrorSql::NullValue), _ => Err(ErrorSql::InvalidColumnType) }
     }
 }
 
@@ -161,15 +179,15 @@ impl FromValue for String {
 pub struct Rows {
     ejecutor: Arc<Ejecutor>,
     id: u64,
-    lote: VecDeque<Result<Row, Error>>,
+    lote: VecDeque<Result<Row, ErrorSql>>,
     terminadas: bool,
     pendiente: Option<PeticionLote>,
 }
-type Lote = (VecDeque<Result<Row, Error>>, bool);
-type PeticionLote = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Lote, Error>> + Send>>;
+type Lote = (VecDeque<Result<Row, ErrorSql>>, bool);
+type PeticionLote = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Lote, ErrorSql>> + Send>>;
 
 impl Rows {
-    pub async fn next(&mut self) -> Result<Option<Row>, Error> {
+    pub async fn next(&mut self) -> Result<Option<Row>, ErrorSql> {
         if self.lote.is_empty() && !self.terminadas {
             let id = self.id;
             if self.pendiente.is_none() {

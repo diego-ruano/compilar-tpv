@@ -12,7 +12,8 @@ use crate::util::now_ms;
 use std::path::Path;
 use std::sync::Arc;
 
-use libsql::{Builder, Value};
+use libsql::Builder;
+use crate::ejecutor::Value;
 use crate::ejecutor::Connection;
 
 use tpv_application::error::{AppError, AppResult};

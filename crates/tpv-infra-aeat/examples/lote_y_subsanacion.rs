@@ -28,7 +28,7 @@ fn main() {
 
     #[cfg(windows)]
     {
-        use libsql::Value;
+        use tpv_infra_sqlite::ejecutor::Value;
         use tpv_application::use_cases::verifactu as uc;
         use tpv_domain::ticket::LineaTicket;
         use tpv_infra_sqlite::db::Db;
@@ -187,7 +187,7 @@ fn main() {
 
 #[cfg(windows)]
 async fn estado_de(db: &std::sync::Arc<tpv_infra_sqlite::db::Db>) {
-    use libsql::Value;
+    use tpv_infra_sqlite::ejecutor::Value;
     use tpv_infra_sqlite::db::Reader;
     let r = db.read().await;
     let mut rows = r
