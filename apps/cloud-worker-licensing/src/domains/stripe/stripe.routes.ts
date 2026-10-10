@@ -33,6 +33,7 @@
 //   · disputa GANADA    → se deshace la reversión
 
 import { Hono } from "hono";
+import { capturarError } from "../../observability/errors";
 
 import type { Env } from "../../env";
 import { enTransaccion, getDb, type Sql } from "../../server/db";
@@ -149,6 +150,7 @@ stripeRoutes.post("/webhook", async (c) => {
 			await markWebhookProcessed(db, eventId, true);
 			return c.json({ ok: true, received: true, ...resultado });
 		} catch (e: any) {
+			capturarError(e, "stripe.reversal");
 			const detalle = String(e?.message || e);
 			await markWebhookProcessed(db, eventId, false, detalle);
 			console.error("[stripe] reversión fallida:", detalle);
@@ -170,6 +172,7 @@ stripeRoutes.post("/webhook", async (c) => {
 		await markWebhookProcessed(db, eventId, true);
 		return c.json({ ok: true, received: true });
 	} catch (e: any) {
+		capturarError(e, "stripe.fulfillment");
 		const detalle = String(e?.message || e);
 		await markWebhookProcessed(db, eventId, false, detalle);
 		console.error("[stripe] fulfillment fallido:", detalle);

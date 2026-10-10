@@ -25,6 +25,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 
 import type { Env } from "../../env";
+import { capturarError } from "../../observability/errors";
 import { getDb } from "../../server/db";
 import { checkAdminToken } from "../../middleware/requireAdmin";
 import { cuerpo } from "../../lib/validacion";
@@ -114,6 +115,7 @@ async function esPiloto(db: ReturnType<typeof getDb>, deviceId: string): Promise
 		});
 		return Number((r.rows?.[0] as any)?.piloto ?? 0) === 1;
 	} catch (e: any) {
+		capturarError(e, "update.pilot_lookup");
 		console.error("[update] no se pudo saber si el equipo es piloto:", String(e?.message || e));
 		return false;
 	}

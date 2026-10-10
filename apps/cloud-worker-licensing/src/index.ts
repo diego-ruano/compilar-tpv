@@ -22,6 +22,8 @@ import * as Sentry from "@sentry/cloudflare";
 
 import type { Env } from "./env";
 import { sentryOptions } from "./observability/sentry";
+import { capturarError } from "./observability/errors";
+import { registrarPeticion } from "./observability/requestContext";
 import { getDb } from "./server/db";
 import { comprobarSalud } from "./server/salud";
 import { cargarDevice, estaRevocado } from "./lib/deviceAuth";
@@ -77,6 +79,10 @@ const app = new Hono<{ Bindings: Env }>();
 // Todas las respuestas de error salen con `code` y, si lo hay, `message` legible. Va el primero
 // para envolver también las que produce `onError`.
 app.use("*", completarErrores);
+app.use("*", async (c, next) => {
+	registrarPeticion(c);
+	await next();
+});
 
 // ---------------- CORS preflight ----------------
 app.options("*", (c) =>
@@ -155,6 +161,7 @@ app.get("/ws", async (c) => {
 
 		return await stub.fetch(new Request(doReq0, { headers: h }));
 	} catch (e: any) {
+		capturarError(e, "websocket.open");
 		return serverError(request, "internal_error", {
 			message: String(e?.message || e),
 			name: e?.name,
@@ -216,7 +223,7 @@ app.route("/v1/device", dispositivosRoutes);
 app.onError((err, c) => {
 	// Reporta a Sentry también los errores que aquí traducimos a JSON: Hono los captura antes de
 	// que lleguen al wrapper global de Sentry, así que hay que notificarlos explícitamente.
-	Sentry.captureException(err);
+	capturarError(err, `${c.req.method} ${c.req.routePath}`);
 	// Traza server-side: sin esto un 500 no deja NINGÚN rastro en `wrangler tail` (el detalle solo
 	// viajaba en el cuerpo de la respuesta al cliente), lo que hace imposible diagnosticar en vivo.
 	console.error(
@@ -260,6 +267,7 @@ async function programado(env: Env): Promise<void> {
 				`${r.fallidos} fallidos, de ${r.revisadas} revisadas`,
 		);
 	} catch (err) {
+		capturarError(err, "cron.license_expiry");
 		console.error("[cron] avisos de caducidad falló:", (err as any)?.message || err);
 	}
 
@@ -270,6 +278,7 @@ async function programado(env: Env): Promise<void> {
 				`${r.trazasDeCorreo} trazas de correo, ${r.eventosDeCodigo} eventos de código de cambio de equipo`,
 		);
 	} catch (err) {
+		capturarError(err, "cron.purge");
 		console.error("[cron] purga falló:", (err as any)?.message || err);
 	}
 
@@ -284,6 +293,7 @@ async function programado(env: Env): Promise<void> {
 		);
 		await latirA(env.BETTERSTACK_HEARTBEAT_COPIAS_URL, "el latido de la copia");
 	} catch (err) {
+		capturarError(err, "cron.backup");
 		console.error("[cron] copia de la base central falló:", (err as any)?.message || err);
 	}
 

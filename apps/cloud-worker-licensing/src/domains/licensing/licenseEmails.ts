@@ -8,6 +8,7 @@
 // registra y se sigue. Emitir una licencia y cobrarla es lo importante; el email es entrega.
 
 import type { Env } from "../../env";
+import { capturarError } from "../../observability/errors";
 
 type Enviar = {
 	to: string;
@@ -19,6 +20,7 @@ type Enviar = {
 async function enviar(env: Env, msg: Enviar): Promise<boolean> {
 	const fromAddress = String(env.EMAIL_FROM_ADDRESS || "").trim();
 	if (!fromAddress) {
+		capturarError(new Error("missing_env_EMAIL_FROM_ADDRESS"), "license_email.send");
 		console.error("[license-email] falta EMAIL_FROM_ADDRESS");
 		return false;
 	}
@@ -33,6 +35,7 @@ async function enviar(env: Env, msg: Enviar): Promise<boolean> {
 		});
 		return true;
 	} catch (err) {
+		capturarError(err, "license_email.send");
 		const e = err as { code?: string; message?: string };
 		console.error("[license-email] envío fallido:", msg.subject, e.code ?? "", e.message ?? err);
 		return false;

@@ -19,6 +19,7 @@
 // así que no crece con los intentos.
 
 import type { Sql } from "./db";
+import { capturarError } from "../observability/errors";
 import { exec } from "./db";
 import { OTP_VENTANA_MS } from "../domains/licensing/licensing.helpers";
 
@@ -73,6 +74,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		]);
 		purgado.fallosDeEmparejamiento = borradas(r);
 	} catch (e: any) {
+		capturarError(e, "purge.pair_claim_failures");
 		console.error("[purga] pair_claim_fallos falló:", String(e?.message || e));
 	}
 
@@ -82,6 +84,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		]);
 		purgado.trazasDeCorreo = borradas(r);
 	} catch (e: any) {
+		capturarError(e, "purge.email_audit");
 		console.error("[purga] email_sends falló:", String(e?.message || e));
 	}
 
@@ -93,6 +96,7 @@ export async function purgarBaseCentral(db: Sql, ahoraMs: number = Date.now()): 
 		]);
 		purgado.eventosDeCodigo = borradas(r);
 	} catch (e: any) {
+		capturarError(e, "purge.license_otp_events");
 		console.error("[purga] license_otp_eventos falló:", String(e?.message || e));
 	}
 

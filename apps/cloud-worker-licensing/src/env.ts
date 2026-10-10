@@ -114,6 +114,7 @@ export interface Env {
 	ENVIRONMENT?: string;
 	// Release opcional (p. ej. versión desplegada) para agrupar regresiones en Sentry.
 	SENTRY_RELEASE?: string;
+	BUILD_COMMIT?: string;
 
 	// Axiom (logs estructurados). El token es PRIVADO y vive sólo aquí (nunca en el dispositivo).
 	// Si falta, el reenvío a Axiom se omite silenciosamente. Configura con:

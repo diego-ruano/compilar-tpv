@@ -9,6 +9,7 @@
 
 import type { Env } from "../env";
 import { HubError } from "./errorHttp";
+import { capturarError } from "../observability/errors";
 import type { ApplyParams, ResultadoAplicacion } from "../durableObjects/tenantHub.rpc";
 export type { ApplyParams } from "../durableObjects/tenantHub.rpc";
 
@@ -110,7 +111,8 @@ export async function cerrarSocketsDelDispositivo(
 		const stub = hubNs.get(hubNs.idFromName(tenantId));
 
 		await stub.revocarDispositivo(deviceId);
-	} catch {
+	} catch (error) {
+		capturarError(error, "device.close_sockets");
 		// Ver arriba: si falla, el dispositivo se bloquea en el próximo reconnect.
 	}
 }

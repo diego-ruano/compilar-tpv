@@ -16,6 +16,7 @@
 import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 import { isEventAllowed } from "./tenantHub.identidad";
 import { nowMs } from "./tenantHub.tiempo";
+import { capturarError } from "../observability/errors";
 import {
 	buildInternalPayloadForHash,
 	getFirstOwnValue,
@@ -348,6 +349,7 @@ export async function atenderBulkApply(
 		const aceptadas = ctx.encolar(tenantId, ops);
 		ctx.send(ws, { type: "bulk_ack", ok: true, opIds: aceptadas });
 	} catch (e: any) {
+		capturarError(e, "sync.bulk_enqueue");
 		ctx.send(ws, {
 			type: "bulk_ack",
 			ok: false,
@@ -434,6 +436,7 @@ export async function atenderApply(
 			]);
 			ctx.send(ws, { type: "apply_ack", opId, ok: true, encolada: true });
 		} catch (e: any) {
+			capturarError(e, "sync.enqueue");
 			ctx.send(ws, {
 				type: "apply_ack",
 				opId,
@@ -467,6 +470,7 @@ export async function atenderApply(
 					seq,
 				});
 			} catch (e: any) {
+				capturarError(e, "sync.apply");
 				// SYNC-20: el ack dice de qué clase es el fallo. Quien tiene la excepción
 				// delante es este DO; el cliente no puede deducirlo del texto sin acabar
 				// comparando mensajes de libsql, que cambian de redacción entre versiones.
@@ -523,6 +527,7 @@ export async function atenderEvent(
 					});
 					ctx.send(ws, { type: "event_ack", name, ok: true });
 				} catch (e: any) {
+					capturarError(e, "sync.database_probe");
 					ctx.send(ws, {
 						type: "event_ack",
 						name,

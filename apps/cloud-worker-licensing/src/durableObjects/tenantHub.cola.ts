@@ -17,6 +17,7 @@ import type { Client } from "@libsql/client/web";
 
 import { esRechazoPermanente, isTursoAuthError } from "./tenantHub.errores";
 import { nowMs } from "./tenantHub.tiempo";
+import { capturarError } from "../observability/errors";
 
 import type { InternalApplyCommand, OpParaAplicar, Role } from "./tenantHub.types";
 
@@ -317,6 +318,7 @@ async function aplicarLote(
 			continue;
 		} catch (e: any) {
 			if (isTursoAuthError(e)) throw e;
+			capturarError(e, "sync.queue_apply");
 			const error = String(e?.message || e);
 
 			// Un rechazo permanente se aparta en el acto y la cola sigue por la de detrás: es la
@@ -536,6 +538,7 @@ export async function ciclo(ctx: ContextoDeCola): Promise<void> {
 	try {
 		await drenarCola(ctx);
 	} catch (e: any) {
+		capturarError(e, "sync.queue_cycle");
 		ctx.emitSyncEvent("cola_ciclo_error", {
 			error: String(e?.message || e).slice(0, 500),
 		});

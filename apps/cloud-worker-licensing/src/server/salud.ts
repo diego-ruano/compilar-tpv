@@ -14,6 +14,7 @@
 // para no decirlo por donde sabe leer cualquier sonda.
 
 import type { Sql } from "./db";
+import { capturarError } from "../observability/errors";
 import { cifrar, descifrar, type ClavesOClave } from "./crypto";
 
 /**
@@ -76,6 +77,7 @@ export async function comprobarSalud(
 		// El cuerpo de `/health` lo lee cualquiera: el error de libsql puede llevar dentro la URL
 		// de la base y el motivo exacto, y eso no se le cuenta a quien pregunte. El diagnóstico va
 		// al log, que sí es nuestro.
+		capturarError(err, "health.database");
 		console.error("[health] la base central no responde:", (err as any)?.message || err);
 		salud = { ok: false, db: "inalcanzable", cifrado: "sin_comprobar" };
 	}
@@ -95,6 +97,7 @@ async function comprobarCanario(
 		const r = await db.execute("SELECT valor FROM canario_cifrado WHERE id = 1;");
 		guardado = r.rows?.[0] ? String((r.rows[0] as any).valor) : null;
 	} catch (err) {
+		capturarError(err, "health.canary_read");
 		console.error("[health] no se puede leer canario_cifrado:", (err as any)?.message || err);
 		return "sin_comprobar";
 	}
@@ -118,6 +121,7 @@ async function comprobarCanario(
 		}
 		return "ok";
 	} catch (err) {
+		capturarError(err, "health.canary_decrypt");
 		console.error("[health] LICENSE_STORE_KEY no descifra el canario:", (err as any)?.message || err);
 		return "falla";
 	}

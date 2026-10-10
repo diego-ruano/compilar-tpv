@@ -8,6 +8,7 @@
 // Solo la Main (rol tpv) consume este endpoint: es quien tiene la BD local que mantener al día.
 
 import { Hono } from "hono";
+import { capturarError } from "../../observability/errors";
 import { serializarCambios, type CambioGuardado } from "./cambiosJson";
 
 import type { Env } from "../../env";
@@ -103,7 +104,8 @@ syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
 				args: [c.get("deviceId"), since, Date.now()],
 			});
 		});
-	} catch {
+	} catch (error) {
+		capturarError(error, "sync.checkpoint");
 		/* el registro del checkpoint es best-effort (solo alimenta la purga) */
 	}
 

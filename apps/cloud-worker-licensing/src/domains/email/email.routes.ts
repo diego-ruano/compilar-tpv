@@ -31,6 +31,7 @@ import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb, type Sql } from "../../server/db";
 import { cuerpo } from "../../lib/validacion";
+import { capturarError } from "../../observability/errors";
 import { leerIdentidadPedido, type IdentidadPedido } from "./pedidoIdentidad";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
@@ -79,7 +80,10 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 	const text = buildText(identidad, notas ?? null, lineas);
 
 	const fromAddress = c.env.EMAIL_FROM_ADDRESS;
-	if (!fromAddress) return c.json({ error: "missing_env_EMAIL_FROM_ADDRESS" }, 500);
+	if (!fromAddress) {
+		capturarError(new Error("missing_env_EMAIL_FROM_ADDRESS"), "email.send");
+		return c.json({ error: "missing_env_EMAIL_FROM_ADDRESS" }, 500);
+	}
 	const from: EmailAddress = { email: fromAddress, name: identidad.nombre };
 
 	try {
@@ -92,6 +96,7 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 			text,
 		});
 	} catch (err) {
+		capturarError(err, "email.send");
 		// El binding lanza Error con `.code` (E_SENDER_NOT_VERIFIED, E_RATE_LIMIT_EXCEEDED, …).
 		const e = err as { code?: string; message?: string };
 		console.error("[email] Cloudflare Email Service error:", e.code ?? "", e.message ?? err);
@@ -134,6 +139,7 @@ export async function pasaDelTope(db: Sql, tenantId: string): Promise<boolean> {
 		});
 		return Number((r.rows?.[0] as any)?.n ?? 0) >= TOPE_DIARIO;
 	} catch (e: any) {
+		capturarError(e, "email.quota");
 		console.error("[email] no se pudo contar el cupo diario:", String(e?.message || e));
 		return false;
 	}
@@ -172,6 +178,7 @@ async function registrarEnvio(
 			],
 		});
 	} catch (e: any) {
+		capturarError(e, "email.audit");
 		console.error("[email] no se pudo registrar el envío:", String(e?.message || e));
 	}
 }

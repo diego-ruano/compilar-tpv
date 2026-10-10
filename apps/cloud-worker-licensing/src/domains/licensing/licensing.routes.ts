@@ -14,6 +14,7 @@
 import { Hono, type MiddlewareHandler } from "hono";
 
 import type { Env } from "../../env";
+import { capturarError } from "../../observability/errors";
 import type { ActivateResponse, ApiError, SignedLicenseAssertion, TenantInfo } from "../../shared";
 import { enTransaccion, getDb } from "../../server/db";
 import { timingSafeEqualHex } from "../../server/utils/crypto";
@@ -123,6 +124,7 @@ async function rechazoFirmado(
 			nowMs: now,
 		});
 	} catch (e: any) {
+		capturarError(e, "license.sign_rejection");
 		console.error("[license] no se pudo firmar el rechazo:", String(e?.message || e));
 	}
 	const cuerpo: ApiError & { assertion?: SignedLicenseAssertion; serverTime: number } = {
@@ -407,6 +409,7 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 	try {
 		await provisionTenantDatabase(db, env, tenantId);
 	} catch (e: any) {
+		capturarError(e, "license.provision");
 		const detalle = String(e?.message || e);
 		// Al log (visible con `wrangler tail`): el detalle de Turso es la clave para diagnosticar
 		// (401 = token de plataforma malo, 404 = org/grupo inexistente, límite de plan, etc.).

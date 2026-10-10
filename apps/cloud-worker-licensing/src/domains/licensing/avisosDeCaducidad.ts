@@ -21,6 +21,7 @@
 //     reintente: un aviso que no ha salido no puede quedar contado como enviado.
 
 import type { Env } from "../../env";
+import { capturarError } from "../../observability/errors";
 import type { Sql } from "../../server/db";
 import {
 	licenciasPorCaducar,
@@ -64,6 +65,7 @@ export function enlaceDeCompra(env: Env, license: LicenseRow): string | null {
 		if (correo) url.searchParams.set("prefilled_email", correo);
 		return url.toString();
 	} catch {
+		capturarError(new Error("CHECKOUT_URL no es una URL válida"), "license_expiry.checkout_url");
 		console.error("[avisos] CHECKOUT_URL no es una URL válida:", base);
 		return null;
 	}
@@ -98,6 +100,7 @@ export async function avisarDeCaducidades(
 	};
 
 	if (resumen.sinEnlace) {
+		capturarError(new Error("Falta CHECKOUT_URL"), "license_expiry.checkout_url");
 		console.error("[avisos] falta CHECKOUT_URL: no se avisa de ninguna caducidad");
 		return resumen;
 	}

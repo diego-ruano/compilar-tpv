@@ -25,6 +25,7 @@ import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
 
 import { badRequest } from "../server/utils/response";
+import { registrarCuerpoValidado } from "../observability/requestContext";
 
 /** El mismo criterio que `hono/validator` usa para decidir si lee el cuerpo. */
 const ES_JSON = /^application\/([a-z-.]+\+)?json(;|$)/i;
@@ -33,7 +34,7 @@ const ES_JSON = /^application\/([a-z-.]+\+)?json(;|$)/i;
 const IDENTIFICADOR = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 type Fallo = { success: false; error: z.ZodError };
-type Resultado = { success: true } | Fallo;
+type Resultado = { success: true; data: unknown } | Fallo;
 
 function revisar(
 	r: Resultado,
@@ -43,7 +44,10 @@ function revisar(
 	if (!ES_JSON.test(c.req.header("Content-Type") ?? "")) {
 		return badRequest(c, "validation_error");
 	}
-	if (r.success) return undefined;
+	if (r.success) {
+		registrarCuerpoValidado(c, r.data);
+		return undefined;
+	}
 
 	const identificador = identificar(r.error);
 	// Los `issues` sólo acompañan al `validation_error` genérico. Cuando el fallo ya sale con su
@@ -94,6 +98,7 @@ export function cuerpoTolerante<T extends z.ZodType>(
 		}
 
 		c.req.addValidatedData("json", resultado.data as Record<string, unknown>);
+		registrarCuerpoValidado(c, resultado.data);
 		await next();
 	};
 }
