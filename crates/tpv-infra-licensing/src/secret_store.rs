@@ -6,12 +6,11 @@
 //! - **Android**: SharedPreferences **privadas** de la app con los **valores cifrados AES-256-GCM**
 //!   usando una clave maestra **no exportable** del **Android Keystore** (respaldo hardware TEE/
 //!   StrongBox cuando el dispositivo lo tiene). Equivale a `EncryptedSharedPreferences` de AndroidX
-//!   pero implementado con **solo clases del framework** vía JNI, para:
-//!   · no añadir dependencias AndroidX ni un plugin Kotlin, y
-//!   · no tocar `gen/android` (sobrevive a `tauri android init`, que regenera ese árbol).
-//!   La `JavaVM` la guarda `JNI_OnLoad` del cdylib de la app y el `Context` se obtiene con
-//!   `ActivityThread.currentApplication()` (no hace falta `AppHandle`), así las funciones libres de
-//!   `device.rs` no cambian de firma.
+//!   pero implementado con **solo clases del framework** vía JNI, para no añadir dependencias
+//!   AndroidX ni un plugin Kotlin.
+//!   La `JavaVM` la guarda `JNI_OnLoad` del cdylib de la app y el `Context` lo entrega
+//!   `MainActivity` al arrancar (`TpvNativo.entregarContexto`, RI-75), así las funciones libres de
+//!   `device.rs` no necesitan `AppHandle` ni cambian de firma.
 //!
 //! ⚠️ El backend Android compila pero su comportamiento en runtime debe validarse en un
 //!    dispositivo/emulador (los errores de firma JNI solo aparecen al ejecutar).
@@ -165,6 +164,37 @@ mod imp {
             .ok_or_else(|| je("JavaVM no inicializada (¿JNI_OnLoad no se llamó?)"))
     }
 
+    /// El `Context` de la aplicación, como referencia global: vale en cualquier hilo y vive lo que el
+    /// proceso.
+    static CONTEXTO: OnceLock<GlobalRef> = OnceLock::new();
+
+    /// RI-75: guarda el `Context` que entrega `MainActivity` (`TpvNativo.entregarContexto`) antes de
+    /// arrancar Tauri. Antes salía de `ActivityThread.currentApplication()`, una API no pública que
+    /// Android tolera con un aviso en logcat pero puede cerrar en cualquier versión.
+    pub fn init_contexto(raw_env: *mut c_void, raw_contexto: *mut c_void) {
+        if raw_env.is_null() || raw_contexto.is_null() {
+            tracing::warn!("[secret_store] init_contexto: llegó un puntero nulo");
+            return;
+        }
+        let resultado = unsafe { JNIEnv::from_raw(raw_env as *mut jni::sys::JNIEnv) }.and_then(|env| {
+            let contexto = unsafe { JObject::from_raw(raw_contexto as jni::sys::jobject) };
+            env.new_global_ref(&contexto)
+        });
+        match resultado {
+            Ok(global) => {
+                let _ = CONTEXTO.set(global);
+            }
+            Err(e) => tracing::warn!("[secret_store] init_contexto: {e}"),
+        }
+    }
+
+    fn contexto() -> Result<&'static JObject<'static>, String> {
+        CONTEXTO
+            .get()
+            .map(GlobalRef::as_obj)
+            .ok_or_else(|| je("Context no entregado (¿MainActivity no llamó a entregarContexto?)"))
+    }
+
     ///
     /// RI-75: es también el ÚNICO sitio donde se trata una excepción de Java. Cuando un método de
     /// Java lanza, el crate `jni` devuelve `Error::JavaException` pero la excepción sigue pendiente en
@@ -180,15 +210,9 @@ mod imp {
             .attach_current_thread()
             .map_err(|e| ErrorSecreto::NoDisponible(je(e)))?;
 
-        let context = match contexto(&mut env) {
-            Ok(c) => c,
-            Err(e) => {
-                limpiar_excepcion(&mut env);
-                return Err(ErrorSecreto::NoDisponible(e));
-            }
-        };
+        let context = contexto().map_err(ErrorSecreto::NoDisponible)?;
 
-        match f(&mut env, &context) {
+        match f(&mut env, context) {
             Ok(v) => Ok(v),
             Err(e) => {
                 // El descifrado que no cuadra llega como un fallo de JNI más: lo que lo distingue es
@@ -201,25 +225,6 @@ mod imp {
                 })
             }
         }
-    }
-
-    /// Context de la app sin que nadie nos lo pase: ActivityThread.currentApplication() devuelve la
-    /// Application (que es un Context). Suficiente para getSharedPreferences (el Keystore no lo usa).
-    fn contexto<'e>(env: &mut JNIEnv<'e>) -> Result<JObject<'e>, String> {
-        let context = env
-            .call_static_method(
-                "android/app/ActivityThread",
-                "currentApplication",
-                "()Landroid/app/Application;",
-                &[],
-            )
-            .map_err(je)?
-            .l()
-            .map_err(je)?;
-        if context.is_null() {
-            return Err(je("ActivityThread.currentApplication() devolvió null"));
-        }
-        Ok(context)
     }
 
     /// RI-75: si hay una excepción de Java pendiente, la manda al logcat y la limpia. Devuelve si era
@@ -613,6 +618,7 @@ mod imp {
 
 pub use imp::{delete, get, set};
 
-/// Guarda la `JavaVM` del proceso (la llama `JNI_OnLoad` del cdylib de la app). Solo Android.
+/// Guardan la `JavaVM` del proceso (la entrega `JNI_OnLoad`) y el `Context` de la app (lo entrega
+/// `MainActivity`), los dos desde el cdylib de la app. Solo Android.
 #[cfg(target_os = "android")]
-pub use imp::init_java_vm;
+pub use imp::{init_contexto, init_java_vm};

@@ -16,10 +16,11 @@ pub mod field_crypto;
 pub mod reloj;
 mod secret_store;
 
-/// Reexport para que el `JNI_OnLoad` del cdylib de la app pueda inicializar la `JavaVM` del proceso,
-/// que el almacén de secretos de Android (Keystore) necesita. En otras plataformas no existe.
+/// Reexport para que el cdylib de la app entregue la `JavaVM` del proceso (`JNI_OnLoad`) y el `Context`
+/// (`MainActivity`), que el almacén de secretos de Android (Keystore) necesita. En otras plataformas no
+/// existe.
 #[cfg(target_os = "android")]
-pub use secret_store::init_java_vm;
+pub use secret_store::{init_contexto, init_java_vm};
 
 use std::fs;
 use std::path::{Path, PathBuf};

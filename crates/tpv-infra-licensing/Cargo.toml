@@ -29,6 +29,6 @@ tracing = { workspace = true }
 keyring = { workspace = true }
 
 # Android: clases del framework (jni) para el almacen de secretos cifrado con Android Keystore. La
-# JavaVM la entrega JNI_OnLoad del cdylib de la app y el Context sale de ActivityThread. Ver secret_store.rs.
+# JavaVM la entrega JNI_OnLoad del cdylib de la app y el Context, MainActivity. Ver secret_store.rs.
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

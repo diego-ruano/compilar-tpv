@@ -25,10 +25,11 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
 - **El almacén de secretos** (`crates/tpv-infra-licensing/src/secret_store.rs`) tiene la misma API en las
   dos plataformas: `keyring` en escritorio; en Android, una clave AES-256-GCM no exportable en el
   **Android Keystore** y los valores cifrados en SharedPreferences privadas, por JNI a clases del framework
-  (sin AndroidX, sin Kotlin, sin tocar `gen/android`). La `JavaVM` la entrega `JNI_OnLoad`, que tiene que
-  estar en el cdylib (`lib.rs`), y el `Context` sale de `ActivityThread.currentApplication()`.
-  `ndk_context` no sirve (Tauri no lo inicializa) ni `JNI_GetCreatedJavaVMs` (el linker de Android no lo
-  expone). Una excepción de Java que deja una llamada fallida se trata y se limpia en `with_env` antes de
+  (sin AndroidX). La `JavaVM` la entrega `JNI_OnLoad` y el `Context`, `MainActivity` antes de arrancar
+  Tauri (`TpvNativo.entregarContexto`, RI-75); las dos funciones nativas tienen que estar en el cdylib
+  (`lib.rs`) para que se exporten. `ndk_context` no sirve (Tauri no lo inicializa), ni
+  `JNI_GetCreatedJavaVMs` (el linker de Android no lo expone), ni `ActivityThread.currentApplication()`
+  (API no pública). Una excepción de Java que deja una llamada fallida se trata y se limpia en `with_env` antes de
   soltar el hilo (RI-75): con una pendiente, la siguiente llamada JNI es ilegal.
 - **Comprobar que compila** sin el proyecto Android entero:
   `cargo clippy -p tpv-infra-licensing --target aarch64-linux-android`, con `CC_aarch64_linux_android` y

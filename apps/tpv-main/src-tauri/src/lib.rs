@@ -2185,6 +2185,19 @@ pub extern "C" fn JNI_OnLoad(
     0x0001_0006 // JNI_VERSION_1_6
 }
 
+/// RI-75: `MainActivity` entrega aquí el `Context` de la aplicación antes de arrancar Tauri
+/// (`TpvNativo.entregarContexto`, en `gen/android`). Como `JNI_OnLoad`, tiene que vivir en el cdylib
+/// para que el símbolo se exporte.
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub extern "system" fn Java_com_altarialights_tpv_TpvNativo_entregarContexto(
+    env: *mut std::os::raw::c_void,
+    _clase: *mut std::os::raw::c_void,
+    contexto: *mut std::os::raw::c_void,
+) {
+    tpv_infra_licensing::init_contexto(env, contexto);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Logcat temprano y puente a tracing comparten un único propietario del logger global.
