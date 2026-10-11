@@ -78,9 +78,8 @@ describe("La licencia deja de valer", () => {
         // Es lo único que separa "se entera en segundos" de "se entera dentro de seis horas", y
         // ninguna de esas piezas está probada por las otras: cada una vive en un proceso distinto.
         // Y ese título ES el motivo: `blockedCopy` ramifica por él, y una caducidad diría "Licencia
-        // caducada". Preguntarle al gate por segunda vez no serviría: la comprobación que acaba de
-        // hacer la aplicación ya borró el estado local —un rechazo definitivo lo borra a propósito—
-        // así que a partir de aquí contesta `needs_activation`, que es el paso siguiente y no éste.
+        // caducada". Por eso se mira la pantalla y no se le pregunta al gate: lo que se prueba es que
+        // el aviso llegó solo hasta ella.
         //
         // ⚠️ La espera es CORTA a propósito, y no se puede alargar sin romper lo que prueba. El job
         // `licencia` tiene `retardo_inicial` de 2 minutos, o sea que con una espera generosa el
@@ -90,11 +89,15 @@ describe("La licencia deja de valer", () => {
         // `TenantHub` en el worker: sin él, este paso falla.
         await conTexto("h1", "Licencia anulada").waitForDisplayed({ timeout: 45_000 });
 
-        // Al reiniciar ya no hay estado que bloquear: un rechazo definitivo (`revoked`,
-        // `device_replaced`, `license_not_found`) **borra el estado local** a propósito, así que el
-        // equipo cae en la pantalla de activar. Son dos pantallas distintas del mismo hecho y las
-        // dos tienen que contarlo.
+        // Al reiniciar sigue bloqueado: el gate ya no borra la licencia local por un rechazo (RI-09),
+        // para que una anulación por error se arregle con «Reintentar» sin volver a teclear nada.
         await browser.refresh();
+        await conTexto("h1", "Licencia anulada").waitForDisplayed({ timeout: 60_000 });
+
+        // Borrarla es cosa de quien está delante, con el botón de la pantalla de bloqueo, y lleva a
+        // la pantalla de activar. Son dos pantallas distintas del mismo hecho y las dos tienen que
+        // contarlo.
+        await pulsar("Borrar y volver a activar");
         await conTexto("h1", "Activa tu TPV").waitForDisplayed({ timeout: 60_000 });
 
         // Y esa segunda explica por qué se está ahí. Sin el aviso es idéntica a la de un TPV recién
@@ -125,8 +128,8 @@ describe("La licencia deja de valer", () => {
         expect(gate.allowed).toBe(false);
         expect(gate.reason).toBe("expired");
 
-        // Una caducidad NO borra el estado local —la licencia sigue siendo de este equipo, sólo que
-        // vencida—, así que aquí sí sale la pantalla de bloqueo con su explicación.
+        // Como con la anulación, el estado local se conserva —la licencia sigue siendo de este
+        // equipo, sólo que vencida—, así que sale la pantalla de bloqueo con su explicación.
         await conTexto("h1", "Licencia caducada").waitForDisplayed({ timeout: 60_000 });
     });
 
