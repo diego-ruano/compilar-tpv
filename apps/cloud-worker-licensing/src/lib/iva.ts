@@ -9,6 +9,6 @@
 
 import * as z from "zod";
 
-export const MSG_IVA = "El IVA tiene que ser un número entre 0 y 100";
+const MSG_IVA ="El IVA tiene que ser un número entre 0 y 100";
 
 export const zIva = z.number({ message: MSG_IVA }).min(0, MSG_IVA).max(100, MSG_IVA);
