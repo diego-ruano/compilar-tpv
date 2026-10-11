@@ -25,6 +25,14 @@ pub fn fecha_ymd(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
 }
 
+/// Un día `YYYY-MM-DD` a partir de lo que llegue: recorta los espacios y descarta lo que siga a los
+/// diez primeros caracteres (una hora). `None` si eso no es una fecha real.
+pub fn normalizar_dia(raw: &str) -> Option<String> {
+    // RI-40: el texto puede traer UTF-8; un límite por bytes no siempre es un carácter.
+    let candidato = raw.trim().get(..10)?;
+    fecha_ymd(candidato).map(|_| candidato.to_string())
+}
+
 /// La fecha de un instante: `YYYY-MM-DD HH:MM:SS` (la hora local canónica del esquema) o una fecha
 /// sola. `None` si no es ninguna de las dos cosas **entero**: mirar sólo los diez primeros
 /// caracteres dejaba pasar un `2026-12-31basura`, que se guardaba tal cual y para SQLite es `NULL`.
@@ -50,6 +58,15 @@ pub fn fecha_de_instante(s: &str) -> Option<NaiveDate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalizar_un_dia_recorta_y_se_queda_con_la_fecha() {
+        assert_eq!(normalizar_dia(" 2026-07-22 ").as_deref(), Some("2026-07-22"));
+        assert_eq!(normalizar_dia("2026-07-22T18:30:00Z").as_deref(), Some("2026-07-22"));
+        for valor in ["", "2026-7-2", "2026-02-31T18:30:00Z", "2026-01-0é", "🦀🦀🦀"] {
+            assert_eq!(normalizar_dia(valor), None, "deberia rechazar {valor:?}");
+        }
+    }
 
     #[test]
     fn un_instante_es_una_fecha_sola_o_con_su_hora_completa() {

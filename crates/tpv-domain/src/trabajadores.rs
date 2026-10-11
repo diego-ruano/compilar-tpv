@@ -53,6 +53,14 @@ pub fn validar_tramos(tramos: &[AsignacionNueva]) -> Result<(), String> {
     Ok(())
 }
 
+/// El día de un horario tal como llega (el de un turno, el lunes de una semana), normalizado a
+/// `YYYY-MM-DD`. Tiene que ser una fecha real (RI-78): el caso de uso sólo exigía que no viniera
+/// vacío, y el SQL lo pasaba por `date()`, que convierte un 31 de febrero en 3 de marzo y deja en
+/// `NULL` lo que no entiende. Mismo criterio en el worker (`zDia`).
+pub fn dia_de_horario(raw: &str, campo: &str) -> Result<String, String> {
+    crate::fechas::normalizar_dia(raw).ok_or_else(|| format!("{campo} inválido (YYYY-MM-DD)"))
+}
+
 /// Texto obligatorio: recorta y exige no vacío.
 pub use crate::texto::requerido;
 
@@ -155,6 +163,18 @@ mod tests {
         let despues = intervalo_horario("2026-10-10", Some("02:00"), Some("03:00")).unwrap().unwrap();
         assert!(noche.solapa(&madrugada));
         assert!(!noche.solapa(&despues));
+    }
+
+    #[test]
+    fn el_dia_de_un_horario_es_una_fecha_real() {
+        assert_eq!(dia_de_horario(" 2026-03-02 ", "fecha_lunes").unwrap(), "2026-03-02");
+        assert_eq!(dia_de_horario("2026-03-02T00:00:00", "fecha").unwrap(), "2026-03-02");
+        for valor in ["", "02/03/2026", "2026-02-31", "2026-3-2"] {
+            assert_eq!(
+                dia_de_horario(valor, "from_monday").unwrap_err(),
+                "from_monday inválido (YYYY-MM-DD)"
+            );
+        }
     }
 
     #[test]

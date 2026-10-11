@@ -1,17 +1,11 @@
 //! Dominio de **reservas**: normalización de fecha/hora/turno/estado y validación pura.
 
 /// Normaliza un día a `YYYY-MM-DD` (acepta sufijos tras `T`/espacio). Los diez primeros caracteres
-/// tienen que ser una fecha real (`fechas::fecha_ymd`): un mes o un día fuera de rango entraba tal
-/// cual en la BD y rompía el orden por fecha.
+/// tienen que ser una fecha real (`fechas::normalizar_dia`): un mes o un día fuera de rango entraba
+/// tal cual en la BD y rompía el orden por fecha.
 pub fn normalize_dia_ymd(raw: &str) -> Result<String, String> {
-    let s = raw.trim();
-    // RI-40: el formulario puede contener UTF-8; un límite por bytes no siempre es un carácter.
-    if let Some(candidate) = s.get(..10) {
-        if crate::fechas::fecha_ymd(candidate).is_some() {
-            return Ok(candidate.to_string());
-        }
-    }
-    Err(format!("Formato de día inválido: '{s}'. Esperado YYYY-MM-DD."))
+    crate::fechas::normalizar_dia(raw)
+        .ok_or_else(|| format!("Formato de día inválido: '{}'. Esperado YYYY-MM-DD.", raw.trim()))
 }
 
 /// Normaliza una hora a `HH:MM` validando rangos.

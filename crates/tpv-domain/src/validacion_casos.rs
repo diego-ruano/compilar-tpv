@@ -14,6 +14,7 @@ use crate::inventario::{
     LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate, ProductoEntrada, ProductoUpsert,
 };
 use crate::reservas::{ReservaEntrada, ReservaValidada};
+use crate::trabajadores::dia_de_horario;
 
 fn texto(e: &Value, campo: &str) -> String {
     e[campo].as_str().unwrap_or_default().to_string()
@@ -111,6 +112,16 @@ fn producto(e: &Value) -> Result<Value, String> {
     Ok(json!({ "iva_percent": p.iva_percent }))
 }
 
+/// Los días de un horario: cada campo de `campos` pasa por `dia_de_horario`, como en los casos de
+/// uso de trabajadores.
+fn dias_de_horario(e: &Value, campos: &[&str]) -> Result<Value, String> {
+    let mut normalizado = Map::new();
+    for campo in campos {
+        normalizado.insert((*campo).into(), dia_de_horario(&texto(e, campo), campo)?.into());
+    }
+    Ok(Value::Object(normalizado))
+}
+
 /// El validador de cada dominio de la tabla: devuelve los campos que normaliza, o el motivo del
 /// rechazo. Un dominio que no esté aquí hace fallar el test: no se queda sin comprobar en silencio.
 fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
@@ -120,6 +131,9 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "lote_edicion" => lote_edicion(entrada),
         "negocio" => negocio(entrada),
         "producto" => producto(entrada),
+        "horario_alta" => dias_de_horario(entrada, &["fecha"]),
+        "horario_copia" => dias_de_horario(entrada, &["from_monday", "to_monday"]),
+        "horario_semana" => dias_de_horario(entrada, &["fecha_lunes"]),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }

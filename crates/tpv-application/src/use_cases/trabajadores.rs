@@ -9,7 +9,7 @@ use tpv_contracts::trabajadores::{
 };
 use tpv_domain::login::pin_de_teclado;
 use tpv_domain::trabajadores::{
-    limpiar_opcional, normalizar_estado, requerido, AsignacionCambios, AsignacionNueva,
+    dia_de_horario, limpiar_opcional, normalizar_estado, requerido, AsignacionCambios, AsignacionNueva,
     TrabajadorCambios, TrabajadorNuevo,
 };
 
@@ -54,7 +54,7 @@ pub async fn get_asignaciones_semana(
     repo: &dyn TrabajadoresRepository,
     args: HorariosSemanaArgs,
 ) -> AppResult<Vec<AsignacionRow>> {
-    let fecha_lunes = requerido(&args.fecha_lunes, "fecha_lunes").map_err(AppError::validation)?;
+    let fecha_lunes = dia_de_horario(&args.fecha_lunes, "fecha_lunes").map_err(AppError::validation)?;
     repo.get_asignaciones_semana(fecha_lunes).await
 }
 
@@ -83,7 +83,9 @@ pub async fn create_asignacion(
         return Err(AppError::validation("id_trabajador/id_turno required"));
     }
 
-    let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
+    // RI-78: una fecha real. El caso de uso es la única validación que corre igual en la Main y
+    // en la Handy (el repositorio HTTP no comprueba nada).
+    let fecha = dia_de_horario(&input.fecha, "fecha").map_err(AppError::validation)?;
     let area = requerido(&input.area, "area").map_err(AppError::validation)?;
 
     let data = AsignacionNueva {
@@ -134,8 +136,8 @@ pub async fn copy_semana_asignaciones(
     repo: &dyn TrabajadoresRepository,
     input: CopySemanaInput,
 ) -> AppResult<bool> {
-    let from_monday = requerido(&input.from_monday, "from_monday").map_err(AppError::validation)?;
-    let to_monday = requerido(&input.to_monday, "to_monday").map_err(AppError::validation)?;
+    let from_monday = dia_de_horario(&input.from_monday, "from_monday").map_err(AppError::validation)?;
+    let to_monday = dia_de_horario(&input.to_monday, "to_monday").map_err(AppError::validation)?;
     // RI-63: sin decirlo no se borra la semana de destino. Era `true` aquí y `false` en el worker
     // (`copySemanaSchema`); la pantalla lo manda siempre explícito.
     let overwrite = input.overwrite.unwrap_or(false);
@@ -147,7 +149,7 @@ pub async fn set_predeterminado_desde_semana(
     repo: &dyn TrabajadoresRepository,
     input: SetPredeterminadoInput,
 ) -> AppResult<bool> {
-    let fecha_lunes = requerido(&input.fecha_lunes, "fecha_lunes").map_err(AppError::validation)?;
+    let fecha_lunes = dia_de_horario(&input.fecha_lunes, "fecha_lunes").map_err(AppError::validation)?;
     repo.set_predeterminado_desde_semana(fecha_lunes).await
 }
 

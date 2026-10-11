@@ -104,5 +104,38 @@
       { "nombre": "nombre en blanco", "cambios": { "nombre": "   " }, "acepta": false },
       { "nombre": "sin categoría", "cambios": { "id_categoria": "  " }, "acepta": false }
     ]
+  },
+  "horario_alta": {
+    "base": { "id_trabajador": "t1", "fecha": "2026-03-03", "id_turno": "turno-1", "area": "Sala" },
+    "casos": [
+      { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "fecha": "2026-03-03" } },
+      { "nombre": "31 de febrero: no pasa a ser 3 de marzo", "cambios": { "fecha": "2026-02-31" }, "acepta": false },
+      { "nombre": "fecha en formato español", "cambios": { "fecha": "03/03/2026" }, "acepta": false },
+      { "nombre": "fecha sin relleno de ceros", "cambios": { "fecha": "2026-3-3" }, "acepta": false },
+      { "nombre": "fecha vacía", "cambios": { "fecha": "" }, "acepta": false },
+      { "nombre": "fecha con espacios alrededor", "cambios": { "fecha": " 2026-03-03 " }, "acepta": true, "queda": { "fecha": "2026-03-03" } },
+      { "nombre": "fecha con hora detrás: se queda la fecha", "cambios": { "fecha": "2026-03-03T00:00:00" }, "acepta": true, "queda": { "fecha": "2026-03-03" } }
+    ]
+  },
+  "horario_copia": {
+    "base": { "from_monday": "2026-03-02", "to_monday": "2026-03-09", "overwrite": false },
+    "casos": [
+      { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "from_monday": "2026-03-02", "to_monday": "2026-03-09" } },
+      { "nombre": "origen el 31 de febrero", "cambios": { "from_monday": "2026-02-31" }, "acepta": false },
+      { "nombre": "destino en formato español", "cambios": { "to_monday": "09/03/2026" }, "acepta": false },
+      { "nombre": "destino en el mes 13", "cambios": { "to_monday": "2026-13-01" }, "acepta": false },
+      { "nombre": "origen vacío", "cambios": { "from_monday": "" }, "acepta": false },
+      { "nombre": "origen con hora detrás: se queda la fecha", "cambios": { "from_monday": "2026-03-02 00:00:00" }, "acepta": true, "queda": { "from_monday": "2026-03-02" } }
+    ]
+  },
+  "horario_semana": {
+    "base": { "fecha_lunes": "2026-03-02" },
+    "casos": [
+      { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "fecha_lunes": "2026-03-02" } },
+      { "nombre": "lunes en el mes 13", "cambios": { "fecha_lunes": "2026-13-01" }, "acepta": false },
+      { "nombre": "lunes que no es una fecha", "cambios": { "fecha_lunes": "lunes" }, "acepta": false },
+      { "nombre": "lunes el 30 de febrero", "cambios": { "fecha_lunes": "2026-02-30" }, "acepta": false },
+      { "nombre": "lunes con espacios alrededor", "cambios": { "fecha_lunes": " 2026-03-02 " }, "acepta": true, "queda": { "fecha_lunes": "2026-03-02" } }
+    ]
   }
 }

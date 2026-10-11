@@ -52,7 +52,6 @@ entre lenguajes) que casi ningún producto de este tamaño tiene.
 Lo que queda de esta revisión se concentra en las plataformas y la paridad Main ↔ worker.
 
 La rama de Windows 7 es anterior a ARQ-01 y su canal del feed no está desplegado (RI-74).
-Quedan divergencias en la validación de entrada entre la Main y el worker (RI-78).
 
 ---
 
@@ -64,7 +63,6 @@ Quedan divergencias en la validación de entrada entre la Main y el worker (RI-7
 | [RI-75](#ri-75) | 🔵 | deuda | Android: el `Context` sale de una API no pública |
 | [RI-76](#ri-76) | 🔵 | deuda | Android: restos de la plantilla, márgenes seguros y release sin firmar |
 | [RI-77](#ri-77) | 🔵 | bug | La Handy enseña pantallas que en ella no funcionan (pedidos, caja, ticket, licencia) |
-| [RI-78](#ri-78) | 🟡 | bug | La validación de entrada diverge entre la Main y el worker |
 | [RI-79](#ri-79) | 🔵 | deuda | Cobertura del harness: falta contrastar el horario predeterminado |
 
 ---
@@ -77,10 +75,6 @@ TPV real siguen siendo validaciones de la release.
 
 **Migraciones:** `0001_inicial.sql` ya está congelada. Las mejoras pendientes se añaden mediante
 una migración nueva, registrada en los dos runners.
-
-**Antes de cobrar por el producto:**
-
-- RI-78 (igualar las validaciones que quedan).
 
 **Antes de repartir la Handy de Android:** RI-75 y RI-76 (firma, márgenes), y
 RI-77 para que no enseñe lo que no puede hacer.
@@ -209,20 +203,6 @@ comando sobre las filas, con los dos lados leyendo el mismo *golden*, y
 `check-contract-coverage.mjs` da 63/66 comandos y 64/64 lecturas, sin pendientes. La validación de
 entrada, que el harness no ve porque entra por debajo de ella, la fija aparte la tabla
 [`validacion_casos.json`](../../crates/tpv-domain/src/validacion_casos.json).
-
-<a id="ri-78"></a>
-### RI-78 🟡 · La validación de entrada diverge entre la Main y el worker
-
-La Handy ejecuta los mismos casos de uso de Rust antes de llamar al worker, así que a estas
-divergencias sólo llega quien hable con la API directamente. El worker es la frontera de confianza y
-tiene que validar lo mismo. Quedan por igualar:
-
-| Dato | Main (Rust) | Worker | Consecuencia |
-|---|---|---|---|
-| Fechas de horarios (copiar semana, horario predeterminado, alta de un turno) | El caso de uso sólo exige que no venga vacía. Al copiar una semana la comprueba el repositorio SQLite (`NaiveDate`), o sea nadie en modo Handy; en el alta de un turno y en el predeterminado, nadie | Sólo la forma (`normalizeYmd`), y con un `throw` dentro del `transform`: una fecha mal formada contesta 500 | Un «2026-02-31» se copia como 3 de marzo |
-
-**Decidido.** Las fechas pasan todas por `tpv_domain::fechas` y `lib/fechas.ts`, y el arreglo añade
-sus casos a la tabla.
 
 <a id="ri-79"></a>
 ### RI-79 🔵 · Cobertura del harness: falta contrastar el horario predeterminado

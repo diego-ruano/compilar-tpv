@@ -2,6 +2,7 @@
 
 import * as z from "zod";
 
+import { esFechaYmd, zDia } from "../../lib/fechas";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	AsignacionCreateInput as ContractAsignacionCreateInput,
@@ -42,14 +43,11 @@ function normalizeEstado(v: unknown): string {
 		: "Activo";
 }
 
-function normalizeYmd(raw: unknown): string {
-	const s = String(raw ?? "").trim();
-	const candidate = s.length >= 10 ? s.slice(0, 10) : "";
-	if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) {
-		throw new Error("fecha invalida");
-	}
-	return candidate;
-}
+// RI-78: el día de un horario (el de un turno, el lunes de una semana) es una fecha real, como en
+// `dia_de_horario` de la Main. Antes era una expresión regular que dejaba pasar un 31 de febrero
+// —`Date.UTC` y el `date()` de SQLite lo convierten en 3 de marzo—, y lanzaba dentro del
+// `transform`: una fecha mal formada contestaba 500 en vez de un fallo de validación.
+const zDiaDeHorario = (campo: string) => zDia(`${campo} inválido (YYYY-MM-DD)`);
 
 function normalizeOptionalTime(raw: unknown): string | null {
 	const s = cleanOrNull(raw);
@@ -127,7 +125,7 @@ export const trabajadorUpdateSchema = z
 export const asignacionCreateSchema = z
 	.object({
 		id_trabajador: idField("id_trabajador"),
-		fecha: z.any().transform((v) => normalizeYmd(v)),
+		fecha: zDiaDeHorario("fecha"),
 		id_turno: idField("id_turno"),
 		area: requiredString("area"),
 		hora_inicio: z.any().optional().nullable(),
@@ -158,13 +156,13 @@ export const asignacionUpdateSchema = z
 	}));
 
 export const copySemanaSchema = z.object({
-	from_monday: z.any().transform((v) => normalizeYmd(v)),
-	to_monday: z.any().transform((v) => normalizeYmd(v)),
+	from_monday: zDiaDeHorario("from_monday"),
+	to_monday: zDiaDeHorario("to_monday"),
 	overwrite: z.boolean().optional().default(false),
 });
 
 export const fechaLunesSchema = z.object({
-	fecha_lunes: z.any().transform((v) => normalizeYmd(v)),
+	fecha_lunes: zDiaDeHorario("fecha_lunes"),
 });
 
 // RI-85: espejo de intervalo_horario del dominio; el solape con filas existentes
@@ -173,10 +171,7 @@ const horaTramo = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Hora inválid
 export const asignacionGuardarSchema = z.object({
 	id_asignacion: z.string().trim().min(1).nullable().optional(),
 	id_trabajador: requiredString("id_trabajador"),
-	fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v => {
-		const t = Date.parse(`${v}T00:00:00Z`);
-		return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v;
-	}, "La fecha del horario no es válida"),
+	fecha: z.string().refine(esFechaYmd, "La fecha del horario no es válida"),
 	id_turno: requiredString("id_turno"),
 	area: requiredString("area"),
 	notas: z.string().nullable().optional(),

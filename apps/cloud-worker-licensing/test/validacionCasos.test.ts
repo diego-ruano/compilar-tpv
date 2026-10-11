@@ -19,6 +19,11 @@ import {
 	upsertProductoSchema,
 } from "../src/domains/inventario/inventario.schemas";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
+import {
+	asignacionCreateSchema,
+	copySemanaSchema,
+	fechaLunesSchema,
+} from "../src/domains/trabajadores/trabajadores.schemas";
 
 type Entrada = Record<string, unknown>;
 type Caso = {
@@ -41,6 +46,9 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Resultado> = {
 	lote: (e) => createLoteSchema.safeParse(e),
 	lote_edicion: (e) => updateLoteSchema.safeParse(e),
 	producto: (e) => upsertProductoSchema.safeParse(e),
+	horario_alta: (e) => asignacionCreateSchema.safeParse(e),
+	horario_copia: (e) => copySemanaSchema.safeParse(e),
+	horario_semana: (e) => fechaLunesSchema.safeParse(e),
 	negocio: (e) => {
 		const r = negocioPatchSchema.safeParse({ patch: e });
 		return r.success ? { success: true, data: r.data.patch } : r;

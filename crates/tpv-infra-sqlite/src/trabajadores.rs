@@ -1150,6 +1150,53 @@ mod tests_horarios_agrupados {
         assert!(repo.get_asignaciones_semana("2026-10-05".into()).await.unwrap().is_empty());
     }
 
+    /// RI-78: la fecha de un horario la valida el caso de uso, que es lo que corre igual en la Main
+    /// y en la Handy. Antes sólo exigía que no viniera vacía, y el `date()` del SQL convertía un 31
+    /// de febrero en 3 de marzo sin decir nada.
+    #[tokio::test]
+    async fn una_fecha_que_no_existe_se_rechaza_en_vez_de_pasar_al_mes_siguiente() {
+        use tpv_application::use_cases::trabajadores as uc;
+        use tpv_contracts::trabajadores::{
+            AsignacionCreateInput, CopySemanaInput, HorariosSemanaArgs, SetPredeterminadoInput,
+        };
+        let (_db, repo) = preparar().await;
+        let alta = |fecha: &str| AsignacionCreateInput {
+            id_trabajador: "t".into(),
+            fecha: fecha.into(),
+            id_turno: "00000000-0000-7000-8000-000000000102".into(),
+            area: "Sala".into(),
+            hora_inicio: None,
+            hora_fin: None,
+            notas: None,
+        };
+        let copia = |desde: &str, hasta: &str| CopySemanaInput {
+            from_monday: desde.into(),
+            to_monday: hasta.into(),
+            overwrite: Some(true),
+        };
+        let es_validacion = |r: AppResult<_>| matches!(r, Err(AppError::Validation(_)));
+
+        assert!(es_validacion(uc::create_asignacion(&repo, alta("2026-02-31")).await));
+        assert!(
+            repo.get_asignaciones_semana("2026-03-02".into()).await.unwrap().is_empty(),
+            "el 31 de febrero no puede acabar guardado como 3 de marzo"
+        );
+        assert!(es_validacion(uc::copy_semana_asignaciones(&repo, copia("2026-02-31", "2026-03-09")).await));
+        assert!(es_validacion(uc::copy_semana_asignaciones(&repo, copia("2026-03-02", "09/03/2026")).await));
+        assert!(es_validacion(
+            uc::set_predeterminado_desde_semana(&repo, SetPredeterminadoInput { fecha_lunes: "lunes".into() }).await
+        ));
+        assert!(uc::get_asignaciones_semana(&repo, HorariosSemanaArgs { fecha_lunes: "2026-13-01".into() }).await.is_err());
+
+        // Y una fecha real sigue entrando, también con una hora detrás.
+        uc::create_asignacion(&repo, alta("2026-03-03T00:00:00")).await.unwrap();
+        let semana = uc::get_asignaciones_semana(&repo, HorariosSemanaArgs { fecha_lunes: " 2026-03-02 ".into() })
+            .await
+            .unwrap();
+        assert_eq!(semana.len(), 1);
+        assert_eq!(semana[0].fecha, "2026-03-03");
+    }
+
     #[tokio::test]
     async fn fallo_del_segundo_tramo_revierte_las_filas_y_el_outbox() {
         let (db, repo) = preparar().await;
