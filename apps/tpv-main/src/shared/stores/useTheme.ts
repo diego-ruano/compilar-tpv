@@ -58,6 +58,19 @@ function applyThemeClass(theme: Theme) {
     root.style.backgroundColor = dark ? "#0e0f13" : "#f3f8ff";
     root.style.colorScheme = dark ? "dark" : "light";
     applyNativeBackground(dark);
+    applyAndroidBars(dark);
+}
+
+/**
+ * RI-76: en Android la app no se dibuja bajo las barras del sistema, y lo que queda detrás de ellas
+ * lo pinta `MainActivity`. El puente sólo existe allí.
+ */
+function applyAndroidBars(dark: boolean) {
+    try {
+        (window as { TpvAndroid?: { tema(oscuro: boolean): void } }).TpvAndroid?.tema(dark);
+    } catch {
+        /* puente no disponible: ignoramos */
+    }
 }
 
 type ThemeState = {
