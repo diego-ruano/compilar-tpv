@@ -17,8 +17,9 @@
 //     de las que parecen delicadas: la siguiente que alguien añada tiene que quedar cubierta sola.
 //   · **Se cachea por isolate y por poco tiempo.** Sin caché serían dos consultas más al
 //     control-plane en CADA petición. Con ella, el peor retraso en enterarse de una anulación es de
-//     un minuto — y la anulación ya no depende de esto para llegar rápido: `revoke` le pide al
-//     TenantHub que cierre el socket del equipo en el acto (§9).
+//     un minuto. La anulación llega antes por otro lado: `revoke` le pide al TenantHub que cierre el
+//     socket del equipo (§9), y el ticket con el que reconecta se pide **sin caché** (`sinCache`):
+//     con ella, el «sí» de hace unos segundos le devolvía el socket y no se enteraba en horas.
 
 import {
 	computeLicenseState,
@@ -56,7 +57,10 @@ const cache = new Map<string, { hasta: number; veto: VetoLicencia | null }>();
  * aplicar —nunca es, ni puede ser, el `main_device_id`—, y por eso el estado se calcula con el
  * `main_device_id` de la licencia cuando quien pregunta no lo es.
  */
-export async function vetoDeLicencia(c: ContextoLicencia): Promise<VetoLicencia | null> {
+export async function vetoDeLicencia(
+	c: ContextoLicencia,
+	opciones: { sinCache?: boolean } = {},
+): Promise<VetoLicencia | null> {
 	const licHash = c.get("licHash");
 	const tenantId = c.get("tenantId");
 	const deviceId = c.get("deviceId");
@@ -64,7 +68,7 @@ export async function vetoDeLicencia(c: ContextoLicencia): Promise<VetoLicencia 
 	const clave = `${licHash}|${tenantId}|${deviceId}`;
 	const ahora = Date.now();
 	const guardado = cache.get(clave);
-	if (guardado && guardado.hasta > ahora) return guardado.veto;
+	if (!opciones.sinCache && guardado && guardado.hasta > ahora) return guardado.veto;
 
 	const veto = await calcular(c, licHash, tenantId, deviceId);
 

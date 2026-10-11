@@ -150,7 +150,7 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   remotos ([jobs-e-interruptores.md](jobs-e-interruptores.md)).
 - **La autoridad es el worker.** El cliente no decide si puede conectarse: lo intenta y obedece. La
   licencia se comprueba en **todas** las rutas autenticadas (`tenantAuth` → `lib/licenciaEnUso.ts`,
-  caché de 60 s), y se veta al rol `tpv` que ya no sea el `main_device_id`. No puede haber ninguna ruta
+  caché de 60 s; el ticket del WebSocket, sin ella), y se veta al rol `tpv` que ya no sea el `main_device_id`. No puede haber ninguna ruta
   autenticada que no pase por `tenantAuth`. La gracia por caducidad (`expiry_grace`) sincroniza.
 - **Un 403 es `rechazado`**: se espacian los reintentos y se lanza un `license_check_now`, que emite
   `license:changed` y tapa la aplicación. Anular una licencia cierra el socket desde el worker y eso es

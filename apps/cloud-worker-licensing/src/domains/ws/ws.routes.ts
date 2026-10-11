@@ -13,6 +13,8 @@ import type { Env } from "../../env";
 import { getDb } from "../../server/db";
 import { bytesToB64 } from "../../server/utils/base64";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { vetoDeLicencia } from "../../lib/licenciaEnUso";
+import { forbidden } from "../../server/utils/response";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -37,9 +39,11 @@ wsRoutes.post("/ticket", async (c) => {
 	// SYNC-17: la licencia manda, y se comprueba ANTES de emitir el ticket para no dar acceso al
 	// hub a un dispositivo que no debería estar replicando.
 	//
-	// REV-12: la comprobación ya la ha hecho `tenantAuth` para TODAS las rutas, así que aquí no
-	// queda nada que hacer. Se deja dicho porque este `use("*", tenantAuth)` de arriba es lo único
-	// que separa hoy al hub de un token con la licencia muerta.
+	// REV-12: `tenantAuth` ya la ha comprobado, pero con la caché de un minuto. Aquí se repite sin
+	// ella: es la petición con la que reconecta la Main a la que `revoke` acaba de cerrar el socket,
+	// y el «sí» guardado de hace unos segundos le devolvía el socket con la licencia ya anulada.
+	const veto = await vetoDeLicencia(c, { sinCache: true });
+	if (veto) return forbidden(c.req.raw, veto);
 
 	const db = getDb(c.env);
 	const tenantId = c.get("tenantId");

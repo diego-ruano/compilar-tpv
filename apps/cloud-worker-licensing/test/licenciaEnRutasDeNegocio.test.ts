@@ -38,6 +38,7 @@ vi.mock("../src/lib/tenantClient", () => ({
 
 const { loginRoutes } = await import("../src/domains/login/login.routes");
 const { licenseRoutes } = await import("../src/domains/licensing/licensing.routes");
+const { wsRoutes } = await import("../src/domains/ws/ws.routes");
 const { firmarSesion } = await import("../src/lib/sesion");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 
@@ -70,12 +71,14 @@ beforeEach(() => {
 async function escenario<R>(
 	nombre: string,
 	opciones: { caducaEnDias: Caducidad; anulada?: boolean; mainDeLaLicencia?: string; rol?: string },
-	prueba: (seed: Uint8Array) => Promise<R>,
+	prueba: (seed: Uint8Array, sql: any) => Promise<R>,
 ): Promise<R> {
 	return enElHub(`lic-negocio-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		prepararPlanoDeControl(sql);
 		for (const tabla of ["devices", "licenses", "tenants"]) sql.exec(`DELETE FROM ${tabla};`);
+		sql.exec(`CREATE TABLE IF NOT EXISTS Ws_Tickets (ticket TEXT PRIMARY KEY, tenant_id TEXT NOT NULL,
+		          device_id TEXT NOT NULL, expires_at_ms INTEGER NOT NULL);`);
 		dbDePruebas = clienteSobre(sql);
 
 		const { seed, pub } = await clave(1);
@@ -99,7 +102,7 @@ async function escenario<R>(
 			opciones.rol ?? "tpv",
 			pub,
 		);
-		return prueba(seed);
+		return prueba(seed, sql);
 	});
 }
 
@@ -208,6 +211,22 @@ describe("REV-12 · el token que reparte /status", () => {
 		await escenario("status-gracia", { caducaEnDias: -1 }, async (seed) => {
 			const cuerpo = (await (await pedir(licenseRoutes as any, "GET", "/status", seed)).json()) as any;
 			expect(typeof cuerpo.token).toBe("string");
+		});
+	});
+});
+
+describe("REV-12 · la Main a la que se le anula la licencia no recupera el socket", () => {
+	it("el ticket con el que reconecta mira la licencia sin la caché del minuto", async () => {
+		await escenario("reconecta", { caducaEnDias: 30 }, async (seed, sql) => {
+			// Conectada y replicando: el «sí» queda en la caché del isolate.
+			expect((await pedir(wsRoutes as any, "POST", "/ticket", seed)).status).toBe(200);
+			expect((await negocio(seed)).status).toBe(200);
+
+			// `revoke` anula y le cierra el socket; la Main reconecta a los pocos segundos.
+			sql.exec(`UPDATE licenses SET status = 'revoked';`);
+			const res = await pedir(wsRoutes as any, "POST", "/ticket", seed);
+			expect(res.status).toBe(403);
+			expect(((await res.json()) as any).error).toBe("license_revoked");
 		});
 	});
 });

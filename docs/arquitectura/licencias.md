@@ -233,7 +233,8 @@ El pulso es el job `licencia`, cada 6 h; usa `gate` (que aplica la gracia y emit
 administradores), no la comprobación manual del botón «Reintentar». Además de esto, el worker
 **comprueba la licencia en todas las rutas autenticadas** (`tenantAuth` → `lib/licenciaEnUso.ts`, con
 caché de 60 s), así que una licencia anulada deja sin correo, R2, volcado ni lecturas de la Handy
-aunque el equipo conserve un token. Detalle en [permisos.md](permisos.md).
+aunque el equipo conserve un token. El ticket del WebSocket la comprueba **sin** esa caché: es con
+lo que reconecta la Main a la que se acaba de anular la licencia. Detalle en [permisos.md](permisos.md).
 
 ### Renovar el token
 
