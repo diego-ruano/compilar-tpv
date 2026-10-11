@@ -29,5 +29,46 @@
       { "nombre": "teléfono sin nombre de cliente", "cambios": { "telefono": "600100200" }, "acepta": false },
       { "nombre": "cliente nuevo con nombre", "cambios": { "nombre_cliente": "Ana", "telefono": "600100200" }, "acepta": true }
     ]
+  },
+  "lote": {
+    "base": { "id_usuario": "u1", "id_producto": "p1", "codigo_lote": "L-001", "stock_disponible": 10 },
+    "casos": [
+      { "nombre": "la base es válida: sin caducidad ni fecha de entrada", "cambios": {}, "acepta": true },
+      { "nombre": "caducidad real", "cambios": { "caducidad": "2026-12-31" }, "acepta": true },
+      { "nombre": "caducidad vacía: no caduca", "cambios": { "caducidad": "" }, "acepta": true },
+      { "nombre": "caducidad con espacios alrededor", "cambios": { "caducidad": " 2026-12-31 " }, "acepta": true },
+      { "nombre": "caducidad en formato español", "cambios": { "caducidad": "31/12/2026" }, "acepta": false },
+      { "nombre": "caducidad el 30 de febrero", "cambios": { "caducidad": "2026-02-30" }, "acepta": false },
+      { "nombre": "caducidad sin relleno de ceros", "cambios": { "caducidad": "2026-1-5" }, "acepta": false },
+      { "nombre": "caducidad con texto detrás", "cambios": { "caducidad": "2026-12-31basura" }, "acepta": false },
+      { "nombre": "caducidad con hora: es una fecha sola", "cambios": { "caducidad": "2026-12-31 00:00:00" }, "acepta": false },
+      { "nombre": "entrada con su hora completa", "cambios": { "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": true },
+      { "nombre": "entrada con la fecha sola", "cambios": { "fecha_entrada": "2026-07-22" }, "acepta": true },
+      { "nombre": "entrada vacía: la pone quien escribe", "cambios": { "fecha_entrada": "" }, "acepta": true },
+      { "nombre": "entrada que no es una fecha", "cambios": { "fecha_entrada": "fecha mala" }, "acepta": false },
+      { "nombre": "entrada con texto detrás", "cambios": { "fecha_entrada": "2026-07-22 basura" }, "acepta": false },
+      { "nombre": "entrada con T en vez de espacio", "cambios": { "fecha_entrada": "2026-07-22T10:00:00" }, "acepta": false },
+      { "nombre": "entrada sin segundos", "cambios": { "fecha_entrada": "2026-07-22 10:00" }, "acepta": false },
+      { "nombre": "entrada a las 25 horas", "cambios": { "fecha_entrada": "2026-07-22 25:00:00" }, "acepta": false },
+      { "nombre": "entrada el 31 de febrero", "cambios": { "fecha_entrada": "2026-02-31 10:00:00" }, "acepta": false },
+      { "nombre": "caduca el mismo día que entra", "cambios": { "caducidad": "2026-07-22", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": true },
+      { "nombre": "caduca antes de entrar", "cambios": { "caducidad": "2026-07-21", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": false },
+      { "nombre": "lote agotado", "cambios": { "stock_disponible": 0 }, "acepta": true },
+      { "nombre": "cantidad negativa", "cambios": { "stock_disponible": -1 }, "acepta": false },
+      { "nombre": "código en blanco", "cambios": { "codigo_lote": "   " }, "acepta": false },
+      { "nombre": "sin producto", "cambios": { "id_producto": "  " }, "acepta": false }
+    ]
+  },
+  "lote_edicion": {
+    "base": { "id_lote": "l1", "id_producto": "p1", "codigo_lote": "L-001" },
+    "casos": [
+      { "nombre": "la base es válida", "cambios": {}, "acepta": true },
+      { "nombre": "caducidad real y la entrada que ya tenía", "cambios": { "caducidad": "2026-12-31", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": true },
+      { "nombre": "caducidad en formato español", "cambios": { "caducidad": "31/12/2026" }, "acepta": false },
+      { "nombre": "caducidad con texto detrás", "cambios": { "caducidad": "2026-12-31basura" }, "acepta": false },
+      { "nombre": "entrada con texto detrás", "cambios": { "fecha_entrada": "2026-07-22 basura" }, "acepta": false },
+      { "nombre": "caduca antes de entrar", "cambios": { "caducidad": "2026-07-21", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": false },
+      { "nombre": "sin lote", "cambios": { "id_lote": "  " }, "acepta": false }
+    ]
   }
 }

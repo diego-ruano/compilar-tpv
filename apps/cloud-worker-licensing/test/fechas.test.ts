@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import { mesQuerySchema } from "../src/domains/reservas/reservas.schemas";
-import { esFechaYmd, normalizarDia } from "../src/lib/fechas";
+import { diaDeInstante, esFechaYmd, normalizarDia } from "../src/lib/fechas";
 
 describe("fechas que llegan como texto", () => {
 	it("acepta fechas reales en forma canónica", () => {
@@ -30,6 +30,28 @@ describe("fechas que llegan como texto", () => {
 			"2026-01-0é",
 		]) {
 			expect(esFechaYmd(valor), JSON.stringify(valor)).toBe(false);
+		}
+	});
+
+	it("un instante es una fecha sola o con su hora completa", () => {
+		for (const valor of ["2026-07-22", "2026-07-22 00:00:00", "2026-07-22 23:59:59"]) {
+			expect(diaDeInstante(valor), valor).toBe("2026-07-22");
+		}
+		for (const valor of [
+			"",
+			"fecha mala",
+			"2026-07-22basura",
+			"2026-07-22 basura",
+			"2026-07-22T10:00:00",
+			"2026-07-22 10:00",
+			"2026-07-22 24:00:00",
+			"2026-07-22 10:60:00",
+			"2026-07-22 10:00:60",
+			"2026-07-22 10:00:00 ",
+			"2026-02-31 10:00:00",
+			"2026-07-22 1é:00:00",
+		]) {
+			expect(diaDeInstante(valor), JSON.stringify(valor)).toBeNull();
 		}
 	});
 

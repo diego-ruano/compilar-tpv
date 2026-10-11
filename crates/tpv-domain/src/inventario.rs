@@ -4,16 +4,6 @@ use crate::dinero::Dinero;
 
 use crate::texto::limpiar_opcional as limpia;
 
-/// Valida la parte de fecha de un valor de lote y la devuelve como `NaiveDate`.
-///
-/// Acepta `YYYY-MM-DD` (Caducidad) o `YYYY-MM-DD HH:MM:SS` (Fecha_Entrada); en el segundo
-/// caso toma los 10 primeros caracteres. Rechaza fechas imposibles (p. ej. `2025-02-30`),
-/// lo que mantiene ordenable el FEFO (`ORDER BY date(Caducidad)`).
-fn fecha_lote_valida(s: &str) -> Option<chrono::NaiveDate> {
-    let ymd = s.get(0..10)?;
-    chrono::NaiveDate::parse_from_str(ymd, "%Y-%m-%d").ok()
-}
-
 /// Normaliza una lista de IDs: recorta, descarta vacíos, ordena y deduplica.
 pub use crate::texto::normalizar_ids as normalize_ids;
 
@@ -135,6 +125,11 @@ impl ProductoUpsert {
         })
     }
 }
+
+// Los mismos textos en el worker (`inventario.schemas.ts`).
+pub const MSG_CADUCIDAD_INVALIDA: &str = "Caducidad con formato inválido (se espera YYYY-MM-DD)";
+pub const MSG_ENTRADA_INVALIDA: &str = "Fecha_Entrada con formato inválido";
+pub const MSG_CADUCIDAD_ANTERIOR: &str = "La caducidad no puede ser anterior a la fecha de entrada";
 
 /// Lote a crear/upsertar.
 #[derive(Debug, Clone)]
@@ -268,26 +263,24 @@ impl LoteNuevo {
         let fecha_entrada = limpia(fecha_entrada);
 
         // Validación de fechas (INV-03): formato ISO y coherencia temporal, para que el FEFO
-        // ordene bien. Fecha_Entrada es opcional en la entrada: al crear, el SQL del
-        // escritor usa la hora local si falta; al editar, conserva la fecha existente.
+        // ordene bien (`ORDER BY date(Caducidad)`: lo que SQLite no entiende es `NULL`, y un
+        // `NULL` va delante de todos). Fecha_Entrada es opcional en la entrada: al crear, el SQL
+        // del escritor usa la hora local si falta; al editar, conserva la fecha existente.
         // La columna del esquema es NOT NULL y no tiene DEFAULT de hora.
+        //
+        // RI-78: se valida el texto ENTERO, que es lo que se guarda. La caducidad es una fecha
+        // sola; la entrada, una fecha o un instante completo.
         let cad_date = match &caducidad {
-            Some(c) => match fecha_lote_valida(c) {
-                Some(d) => Some(d),
-                None => return Err("Caducidad con formato inválido (se espera YYYY-MM-DD)".into()),
-            },
+            Some(c) => Some(crate::fechas::fecha_ymd(c).ok_or(MSG_CADUCIDAD_INVALIDA)?),
             None => None,
         };
         let ent_date = match &fecha_entrada {
-            Some(f) => match fecha_lote_valida(f) {
-                Some(d) => Some(d),
-                None => return Err("Fecha_Entrada con formato inválido".into()),
-            },
+            Some(f) => Some(crate::fechas::fecha_de_instante(f).ok_or(MSG_ENTRADA_INVALIDA)?),
             None => None,
         };
         if let (Some(c), Some(e)) = (cad_date, ent_date) {
             if c < e {
-                return Err("La caducidad no puede ser anterior a la fecha de entrada".into());
+                return Err(MSG_CADUCIDAD_ANTERIOR.into());
             }
         }
 
@@ -524,6 +517,16 @@ mod tests {
         assert!(lote(1.0, None, Some("fecha mala")).is_err());
         assert!(lote(1.0, Some("2026-01-01"), Some("2026-02-01")).is_err());
         assert!(lote(1.0, Some("2024-02-29"), Some("2024-02-29")).is_ok());
+    }
+
+    /// RI-78: se guarda el texto entero, así que se valida entero. Con sólo los diez primeros
+    /// caracteres comprobados, lo que viniera detrás acababa en la columna.
+    #[test]
+    fn lote_rechaza_texto_sobrante_tras_la_fecha() {
+        assert!(lote(1.0, Some("2026-12-31basura"), None).is_err());
+        assert!(lote(1.0, Some("2026-12-31 00:00:00"), None).is_err(), "la caducidad es una fecha sola");
+        assert!(lote(1.0, None, Some("2026-07-22 basura")).is_err());
+        assert!(lote(1.0, None, Some("2026-07-22")).is_ok());
     }
 
     #[test]

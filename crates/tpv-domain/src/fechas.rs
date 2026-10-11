@@ -25,9 +25,55 @@ pub fn fecha_ymd(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
 }
 
+/// La fecha de un instante: `YYYY-MM-DD HH:MM:SS` (la hora local canónica del esquema) o una fecha
+/// sola. `None` si no es ninguna de las dos cosas **entero**: mirar sólo los diez primeros
+/// caracteres dejaba pasar un `2026-12-31basura`, que se guardaba tal cual y para SQLite es `NULL`.
+pub fn fecha_de_instante(s: &str) -> Option<NaiveDate> {
+    if let Some(fecha) = fecha_ymd(s) {
+        return Some(fecha);
+    }
+    let (dia, hora) = (s.get(..10)?, s.get(10..)?.as_bytes());
+    let dos = |i: usize| -> Option<u8> {
+        (hora[i].is_ascii_digit() && hora[i + 1].is_ascii_digit())
+            .then(|| (hora[i] - b'0') * 10 + (hora[i + 1] - b'0'))
+    };
+    if hora.len() != 9 || hora[0] != b' ' || hora[3] != b':' || hora[6] != b':' {
+        return None;
+    }
+    let (hh, mm, ss) = (dos(1)?, dos(4)?, dos(7)?);
+    if hh > 23 || mm > 59 || ss > 59 {
+        return None;
+    }
+    fecha_ymd(dia)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn un_instante_es_una_fecha_sola_o_con_su_hora_completa() {
+        let dia = fecha_ymd("2026-07-22");
+        for valor in ["2026-07-22", "2026-07-22 00:00:00", "2026-07-22 23:59:59"] {
+            assert_eq!(fecha_de_instante(valor), dia, "deberia aceptar {valor}");
+        }
+        for valor in [
+            "",
+            "fecha mala",
+            "2026-07-22basura",
+            "2026-07-22 basura",
+            "2026-07-22T10:00:00",
+            "2026-07-22 10:00",
+            "2026-07-22 24:00:00",
+            "2026-07-22 10:60:00",
+            "2026-07-22 10:00:60",
+            "2026-07-22 10:00:00 ",
+            "2026-02-31 10:00:00",
+            "2026-07-22 1é:00:00",
+        ] {
+            assert!(fecha_de_instante(valor).is_none(), "deberia rechazar {valor:?}");
+        }
+    }
 
     #[test]
     fn acepta_fechas_reales_en_forma_canonica() {

@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import type * as z from "zod";
 
 import casosJson from "../../../crates/tpv-domain/src/validacion_casos.json?raw";
+import { createLoteSchema, updateLoteSchema } from "../src/domains/inventario/inventario.schemas";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 
 type Caso = {
@@ -28,6 +29,8 @@ const { "//": _comentario, ...tabla } = JSON.parse(casosJson) as Record<string, 
 /** El schema que valida cada dominio de la tabla. */
 const SCHEMAS: Record<string, z.ZodType> = {
 	reserva: reservaSaveSchema,
+	lote: createLoteSchema,
+	lote_edicion: updateLoteSchema,
 };
 
 describe("la validación del worker cuadra con la tabla compartida", () => {

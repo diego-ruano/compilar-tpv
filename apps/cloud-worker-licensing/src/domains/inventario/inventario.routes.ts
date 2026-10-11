@@ -131,7 +131,7 @@ inventarioRoutes.delete("/productos/:id", async (c) => {
 	return c.json({ ok: true });
 });
 
-inventarioRoutes.post("/lotes", cuerpo(S.createLoteSchema.extend({ id_usuario: S.autorStockSchema })), async (c) => {
+inventarioRoutes.post("/lotes", cuerpo(S.createLoteSchema), async (c) => {
 	const datos = c.req.valid("json");
 	const id = await apply(c, cmd.createLote(datos, datos.id_usuario));
 	return c.json({ id_lote: id });

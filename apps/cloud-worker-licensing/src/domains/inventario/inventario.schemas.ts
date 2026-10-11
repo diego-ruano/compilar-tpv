@@ -7,6 +7,7 @@
 
 import * as z from "zod";
 import { zDineroOpcional } from "../../lib/dinero";
+import { diaDeInstante, esFechaYmd } from "../../lib/fechas";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -52,7 +53,45 @@ export const upsertProductoSchema = z.object({
 	ids_alergenos: idList,
 });
 
-export const createLoteSchema = z.object({
+// Los mismos textos que en la Main (`tpv-domain/src/inventario.rs`).
+const MSG_CADUCIDAD_INVALIDA = "Caducidad con formato inválido (se espera YYYY-MM-DD)";
+const MSG_ENTRADA_INVALIDA = "Fecha_Entrada con formato inválido";
+const MSG_CADUCIDAD_ANTERIOR = "La caducidad no puede ser anterior a la fecha de entrada";
+
+/**
+ * INV-03 / RI-78: las fechas de un lote, espejo de `LoteNuevo::validar`. La caducidad es una fecha
+ * sola y la entrada una fecha o un instante completo; las dos reales, y la caducidad no anterior a
+ * la entrada. Aquí entraba cualquier texto, y lo que SQLite no entiende como fecha es `NULL` en el
+ * `ORDER BY date(Caducidad)` del FEFO: ese lote se ponía delante de todos.
+ *
+ * Se miran recortadas, que es como las guarda el comando (`cleanOrNull`).
+ */
+function fechasDeLote(
+	v: { caducidad?: string | null; fecha_entrada?: string | null },
+	ctx: z.RefinementCtx,
+) {
+	const caducidad = (v.caducidad ?? "").trim();
+	const entrada = (v.fecha_entrada ?? "").trim();
+	const caducidadOk = !caducidad || esFechaYmd(caducidad);
+	const diaEntrada = entrada ? diaDeInstante(entrada) : null;
+
+	if (!caducidadOk) {
+		ctx.addIssue({ code: "custom", path: ["caducidad"], message: MSG_CADUCIDAD_INVALIDA });
+	}
+	if (entrada && diaEntrada === null) {
+		ctx.addIssue({ code: "custom", path: ["fecha_entrada"], message: MSG_ENTRADA_INVALIDA });
+	}
+	// Dos fechas `YYYY-MM-DD` se ordenan como texto.
+	if (caducidad && caducidadOk && diaEntrada !== null && caducidad < diaEntrada) {
+		ctx.addIssue({ code: "custom", path: ["caducidad"], message: MSG_CADUCIDAD_ANTERIOR });
+	}
+}
+
+// RI-28: contexto del adaptador Rust; la sesión personal del Worker está aplazada.
+export const autorStockSchema = z.string().trim().min(1);
+
+// Los campos del DTO, sin las reglas entre campos: es lo que compara el drift-guard de abajo.
+const createLoteCampos = z.object({
 	id_lote: optId,
 	id_producto: idStr,
 	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
@@ -64,7 +103,13 @@ export const createLoteSchema = z.object({
 	notas: optStr,
 });
 
-export const updateLoteSchema = z.object({
+// El cuerpo entero de la ruta, autor incluido: un schema con reglas entre campos ya no se puede
+// ampliar con `.extend()` sin perderlas, así que se compone aquí y no en la ruta.
+export const createLoteSchema = createLoteCampos
+	.extend({ id_usuario: autorStockSchema })
+	.superRefine(fechasDeLote);
+
+const updateLoteCampos = z.object({
 	id_lote: idStr,
 	id_producto: idStr,
 	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
@@ -74,6 +119,8 @@ export const updateLoteSchema = z.object({
 	id_proveedor: idStr.nullish(),
 	notas: optStr,
 });
+
+export const updateLoteSchema = updateLoteCampos.superRefine(fechasDeLote);
 
 // RI-55: lo que se vio y lo que hay. Lo visto puede ser negativo (una sobreventa); lo nuevo, no.
 export const ajusteLoteSchema = z.object({
@@ -162,10 +209,7 @@ export type AjusteStockSueltoInput = Omit<
 // deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
 type _GUpsertCategoria = Assert<SameKeys<z.infer<typeof upsertCategoriaSchema>, UpsertCategoriaInput>>;
 type _GUpsertProducto = Assert<SameKeys<z.infer<typeof upsertProductoSchema>, UpsertProductoInput>>;
-type _GCreateLote = Assert<SameKeys<z.infer<typeof createLoteSchema>, CreateLoteInput>>;
-type _GUpdateLote = Assert<SameKeys<z.infer<typeof updateLoteSchema>, UpdateLoteInput>>;
+type _GCreateLote = Assert<SameKeys<z.infer<typeof createLoteCampos>, CreateLoteInput>>;
+type _GUpdateLote = Assert<SameKeys<z.infer<typeof updateLoteCampos>, UpdateLoteInput>>;
 type _GAjusteLote = Assert<SameKeys<z.infer<typeof ajusteLoteSchema>, AjusteLoteInput>>;
 type _GAjusteSuelto = Assert<SameKeys<z.infer<typeof ajusteStockSueltoSchema>, AjusteStockSueltoInput>>;
-
-// RI-28: contexto del adaptador Rust; la sesión personal del Worker está aplazada.
-export const autorStockSchema = z.string().trim().min(1);

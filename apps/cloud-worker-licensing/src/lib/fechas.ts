@@ -20,6 +20,19 @@ export function esFechaYmd(s: string): boolean {
 	return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === s;
 }
 
+const FORMA_HORA = /^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
+
+/**
+ * El día de un instante: `YYYY-MM-DD HH:MM:SS` (la hora local canónica del esquema) o una fecha
+ * sola. `null` si `s` no es ninguna de las dos cosas **entero**. Espejo de `fecha_de_instante`.
+ */
+export function diaDeInstante(s: string): string | null {
+	if (esFechaYmd(s)) return s;
+	if (s.length !== 19 || s[10] !== " ") return null;
+	const dia = s.slice(0, 10);
+	return esFechaYmd(dia) && FORMA_HORA.test(s.slice(11)) ? dia : null;
+}
+
 /**
  * Un día `YYYY-MM-DD` a partir de lo que llegue: recorta los espacios y descarta lo que siga a los
  * diez primeros caracteres (una hora). `null` si eso no es una fecha real. Espejo de

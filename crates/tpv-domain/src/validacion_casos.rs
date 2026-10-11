@@ -8,6 +8,8 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::dinero::Dinero;
+use crate::inventario::{LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate};
 use crate::reservas::{ReservaEntrada, ReservaValidada};
 
 fn texto(e: &Value, campo: &str) -> String {
@@ -38,11 +40,46 @@ fn reserva(e: &Value) -> Result<Value, String> {
     Ok(json!({ "dia_ymd": r.dia_ymd, "hora": r.hora }))
 }
 
+fn dinero_opcional(e: &Value, campo: &str) -> Option<Dinero> {
+    e[campo].as_i64().map(Dinero::de_centimos)
+}
+
+fn lote(e: &Value) -> Result<Value, String> {
+    let l = LoteNuevo::validar(LoteEntrada {
+        id_lote: texto_opcional(e, "id_lote"),
+        id_producto: texto(e, "id_producto"),
+        codigo_lote: texto(e, "codigo_lote"),
+        caducidad: texto_opcional(e, "caducidad"),
+        stock_disponible: e["stock_disponible"].as_f64().unwrap_or(f64::NAN),
+        fecha_entrada: texto_opcional(e, "fecha_entrada"),
+        coste_unitario: dinero_opcional(e, "coste_unitario"),
+        id_proveedor: texto_opcional(e, "id_proveedor"),
+        notas: texto_opcional(e, "notas"),
+    })?;
+    Ok(json!({ "caducidad": l.caducidad, "fecha_entrada": l.fecha_entrada }))
+}
+
+fn lote_edicion(e: &Value) -> Result<Value, String> {
+    let l = LoteUpdate::validar(LoteEdicionEntrada {
+        id_lote: texto(e, "id_lote"),
+        id_producto: texto(e, "id_producto"),
+        codigo_lote: texto(e, "codigo_lote"),
+        caducidad: texto_opcional(e, "caducidad"),
+        fecha_entrada: texto_opcional(e, "fecha_entrada"),
+        coste_unitario: dinero_opcional(e, "coste_unitario"),
+        id_proveedor: texto_opcional(e, "id_proveedor"),
+        notas: texto_opcional(e, "notas"),
+    })?;
+    Ok(json!({ "caducidad": l.caducidad, "fecha_entrada": l.fecha_entrada }))
+}
+
 /// El validador de cada dominio de la tabla: devuelve los campos que normaliza, o el motivo del
 /// rechazo. Un dominio que no esté aquí hace fallar el test: no se queda sin comprobar en silencio.
 fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
     match dominio {
         "reserva" => reserva(entrada),
+        "lote" => lote(entrada),
+        "lote_edicion" => lote_edicion(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }
