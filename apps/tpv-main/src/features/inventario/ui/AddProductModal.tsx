@@ -20,6 +20,7 @@ import {
     useUpsertProducto,
 } from "../inventarioQueries";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { leerIva, MSG_IVA } from "../../../shared/lib/iva";
 
 type CategoriaMini = { ID_Categoria: string; Nombre: string };
 
@@ -30,7 +31,7 @@ function toNum(v: any, fallback = 0) {
     return Number.isFinite(n) ? n : fallback;
 }
 
-/** Una cantidad o un porcentaje escrito a mano; vacío o ilegible = sin informar. */
+/** Una cantidad escrita a mano; vacía o ilegible = sin informar. */
 function numeroOpcional(texto: string): number | undefined {
     if (!texto.trim()) return undefined;
     const n = Number(texto.replace(",", "."));
@@ -274,6 +275,8 @@ export function AddProductModal({
         return Number.isFinite(ci) && ci >= 0;
     }, [crearLoteInicial, codigoLoteInicial, cantidadInicialLote, puede]);
 
+    const ivaOk = !iva_percent.trim() || leerIva(iva_percent) !== null;
+
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
 
@@ -284,6 +287,14 @@ export function AddProductModal({
 
         if (!precio.legible) {
             toast.info("Validación", "El precio de venta no se entiende como importe.");
+            return;
+        }
+
+        // RI-78: vacío es «el del negocio»; lo demás tiene que ser un tipo válido. El `max` del
+        // campo no frena nada (aquí no hay envío nativo del formulario), y antes un «210» se
+        // guardaba como «el del negocio» con un aviso de que todo había ido bien.
+        if (!ivaOk) {
+            toast.info("Validación", `${MSG_IVA}. Déjalo vacío para usar el del negocio.`);
             return;
         }
 
@@ -324,7 +335,7 @@ export function AddProductModal({
                     nombre_imagen: nombreArchivo ?? undefined,
                     ruta_imagen: rutaParaBD ?? undefined,
                     cantidad_pedido_esperada: numeroOpcional(cantidadPedidoEsperada),
-                    iva_percent: numeroOpcional(iva_percent),
+                    iva_percent: leerIva(iva_percent) ?? undefined,
                     stock_suelto: numeroOpcional(stockSuelto),
                     ids_alergenos: alergIds,
                 })) || (isEdit ? productIdToEdit : null);
@@ -543,7 +554,13 @@ export function AddProductModal({
                             placeholder="Vacío = el del negocio"
                             className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading || !puede("catalogo.precios")}
+                            aria-invalid={!ivaOk}
                         />
+                        {!ivaOk && (
+                            <p role="alert" className="mt-1 text-xs text-danger">
+                                {MSG_IVA}.
+                            </p>
+                        )}
                         <p className="mt-1 text-xs text-fg-muted">
                             Déjalo vacío salvo que este producto tribute distinto al resto: lo que se
                             consume en el local va todo al mismo tipo. Se rellena para cosas como

@@ -106,6 +106,12 @@ impl ProductoUpsert {
         if id_categoria.is_empty() {
             return Err("id_categoria inválido".into());
         }
+        // RI-78: un tipo fuera de rango se rechaza. Antes caía en silencio a «hereda el del
+        // negocio»: quien tecleaba «210» por «21» guardaba el producto con otro IVA y un aviso de
+        // que todo había ido bien. Un tipo impositivo es un dato fiscal; no se elige por nadie.
+        if let Some(iva) = iva_percent {
+            crate::configuracion::validate_iva_percent(iva)?;
+        }
         Ok(ProductoUpsert {
             id: id_producto.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             id_categoria,
@@ -118,9 +124,7 @@ impl ProductoUpsert {
             ruta_imagen: limpia(ruta_imagen),
             cantidad_pedido_esperada,
             stock_suelto: stock_suelto.filter(|v| v.is_finite()),
-            // Un tipo negativo o absurdo no se guarda: cae a "hereda el del negocio", que es la
-            // opción segura (un IVA inventado en la fila acabaría en un ticket).
-            iva_percent: iva_percent.filter(|v| v.is_finite() && *v >= 0.0 && *v <= 100.0),
+            iva_percent,
             ids_alergenos: normalize_ids(ids_alergenos),
         })
     }
@@ -435,20 +439,22 @@ mod tests {
     }
 
     #[test]
-    fn el_iva_del_producto_solo_se_guarda_si_es_un_porcentaje_creible() {
+    fn el_iva_del_producto_es_un_porcentaje_o_se_rechaza() {
         // Sin tipo propio = hereda el del negocio, que es el caso normal en hostelería.
         assert_eq!(producto("Cafe", "c1", None, vec![]).unwrap().iva_percent, None);
-        assert_eq!(
-            producto_con_iva("Cafe", "c1", None, Some(21.0), vec![]).unwrap().iva_percent,
-            Some(21.0)
-        );
-        // Y lo que no es un porcentaje cae a "hereda", en vez de acabar en un ticket: un IVA
-        // inventado en la fila es peor que no tener ninguno.
-        for absurdo in [-1.0, 101.0, f64::NAN, f64::INFINITY] {
+        for valido in [0.0, 21.0, 100.0] {
             assert_eq!(
-                producto_con_iva("Cafe", "c1", None, Some(absurdo), vec![]).unwrap().iva_percent,
-                None,
-                "{absurdo} no deberia guardarse"
+                producto_con_iva("Cafe", "c1", None, Some(valido), vec![]).unwrap().iva_percent,
+                Some(valido)
+            );
+        }
+        // RI-78: lo que no es un porcentaje se rechaza. Ni acaba en un ticket ni se convierte por
+        // su cuenta en «hereda», que es otro IVA distinto del que alguien escribió.
+        for absurdo in [-1.0, 100.01, 210.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                producto_con_iva("Cafe", "c1", None, Some(absurdo), vec![]).unwrap_err(),
+                crate::configuracion::MSG_IVA,
+                "{absurdo} no deberia aceptarse"
             );
         }
     }

@@ -8,6 +8,7 @@
 import * as z from "zod";
 import { zDineroOpcional } from "../../lib/dinero";
 import { diaDeInstante, esFechaYmd } from "../../lib/fechas";
+import { zIva } from "../../lib/iva";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -49,7 +50,8 @@ export const upsertProductoSchema = z.object({
 	ruta_imagen: optStr,
 	cantidad_pedido_esperada: optNum,
 	stock_suelto: optNum,
-	iva_percent: optNum,
+	// RI-78: ausente o `null` es «el del negocio»; fuera de 0–100 se rechaza, como en la Main.
+	iva_percent: zIva.nullish(),
 	ids_alergenos: idList,
 });
 

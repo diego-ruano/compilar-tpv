@@ -13,7 +13,11 @@ import { describe, expect, it } from "vitest";
 
 import casosJson from "../../../crates/tpv-domain/src/validacion_casos.json?raw";
 import { negocioPatchSchema } from "../src/domains/configuracion/configuracion.schemas";
-import { createLoteSchema, updateLoteSchema } from "../src/domains/inventario/inventario.schemas";
+import {
+	createLoteSchema,
+	updateLoteSchema,
+	upsertProductoSchema,
+} from "../src/domains/inventario/inventario.schemas";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 
 type Entrada = Record<string, unknown>;
@@ -36,6 +40,7 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Resultado> = {
 	reserva: (e) => reservaSaveSchema.safeParse(e),
 	lote: (e) => createLoteSchema.safeParse(e),
 	lote_edicion: (e) => updateLoteSchema.safeParse(e),
+	producto: (e) => upsertProductoSchema.safeParse(e),
 	negocio: (e) => {
 		const r = negocioPatchSchema.safeParse({ patch: e });
 		return r.success ? { success: true, data: r.data.patch } : r;

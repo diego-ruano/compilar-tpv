@@ -23,6 +23,12 @@ function casosDeIva(dominio: string): [string, number, boolean][] {
 describe("el IVA de la webview cuadra con la tabla compartida", () => {
 	it("la tabla trae casos de IVA", () => {
 		expect(casosDeIva("negocio").length).toBeGreaterThan(0);
+		expect(casosDeIva("producto").length).toBeGreaterThan(0);
+	});
+
+	it.each(casosDeIva("producto"))("producto · %s", (_nombre, iva, acepta) => {
+		expect(ivaEnRango(iva)).toBe(acepta);
+		expect(leerIva(String(iva)) !== null).toBe(acepta);
 	});
 
 	it.each(casosDeIva("negocio"))("negocio · %s", (_nombre, iva, acepta) => {

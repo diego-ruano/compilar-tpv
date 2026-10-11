@@ -219,12 +219,10 @@ tiene que validar lo mismo. Quedan por igualar:
 
 | Dato | Main (Rust) | Worker | Consecuencia |
 |---|---|---|---|
-| IVA de un producto | Fuera de 0–100 pasa **en silencio** a `None`, o sea al del negocio (`ProductoUpsert::validar`) | Cualquier finito (`optNum`) | El worker guarda un 150 %. La Main convierte un «210» tecleado en lugar de «21» en el IVA del negocio sin decir nada. Ninguno de los dos lo rechaza |
 | Fechas de horarios (copiar semana, horario predeterminado, alta de un turno) | El caso de uso sólo exige que no venga vacía. Al copiar una semana la comprueba el repositorio SQLite (`NaiveDate`), o sea nadie en modo Handy; en el alta de un turno y en el predeterminado, nadie | Sólo la forma (`normalizeYmd`), y con un `throw` dentro del `transform`: una fecha mal formada contesta 500 | Un «2026-02-31» se copia como 3 de marzo |
 
-**Decidido.** El IVA es un porcentaje entre 0 y 100 en los tres sitios, y fuera de rango se
-**rechaza** en vez de sustituirlo o recortarlo: un tipo impositivo es un dato fiscal. Las fechas pasan
-todas por `tpv_domain::fechas` y `lib/fechas.ts`. Cada arreglo añade sus casos a la tabla.
+**Decidido.** Las fechas pasan todas por `tpv_domain::fechas` y `lib/fechas.ts`, y el arreglo añade
+sus casos a la tabla.
 
 <a id="ri-79"></a>
 ### RI-79 🔵 · Cobertura del harness: falta contrastar el horario predeterminado

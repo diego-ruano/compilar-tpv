@@ -87,5 +87,22 @@
       { "nombre": "IVA justo por debajo de cero", "cambios": { "iva_percent": -0.01 }, "acepta": false },
       { "nombre": "IVA negativo", "cambios": { "iva_percent": -21 }, "acepta": false }
     ]
+  },
+  "producto": {
+    "base": { "id_categoria": "c1", "nombre": "Café", "ids_alergenos": [] },
+    "casos": [
+      { "nombre": "sin IVA propio: el del negocio", "cambios": {}, "acepta": true },
+      { "nombre": "IVA nulo: el del negocio", "cambios": { "iva_percent": null }, "acepta": true },
+      { "nombre": "IVA cero", "cambios": { "iva_percent": 0 }, "acepta": true, "queda": { "iva_percent": 0 } },
+      { "nombre": "IVA general", "cambios": { "iva_percent": 21 }, "acepta": true, "queda": { "iva_percent": 21 } },
+      { "nombre": "IVA con decimales", "cambios": { "iva_percent": 10.5 }, "acepta": true, "queda": { "iva_percent": 10.5 } },
+      { "nombre": "IVA del cien por cien", "cambios": { "iva_percent": 100 }, "acepta": true },
+      { "nombre": "IVA justo por encima de cien", "cambios": { "iva_percent": 100.01 }, "acepta": false },
+      { "nombre": "IVA del 150", "cambios": { "iva_percent": 150 }, "acepta": false },
+      { "nombre": "210 tecleado por 21: se rechaza, no pasa a ser el del negocio", "cambios": { "iva_percent": 210 }, "acepta": false },
+      { "nombre": "IVA negativo", "cambios": { "iva_percent": -1 }, "acepta": false },
+      { "nombre": "nombre en blanco", "cambios": { "nombre": "   " }, "acepta": false },
+      { "nombre": "sin categoría", "cambios": { "id_categoria": "  " }, "acepta": false }
+    ]
   }
 }

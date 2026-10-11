@@ -10,7 +10,9 @@ use serde_json::{json, Map, Value};
 
 use crate::configuracion::validate_iva_percent;
 use crate::dinero::Dinero;
-use crate::inventario::{LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate};
+use crate::inventario::{
+    LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate, ProductoEntrada, ProductoUpsert,
+};
 use crate::reservas::{ReservaEntrada, ReservaValidada};
 
 fn texto(e: &Value, campo: &str) -> String {
@@ -74,7 +76,7 @@ fn lote_edicion(e: &Value) -> Result<Value, String> {
     Ok(json!({ "caducidad": l.caducidad, "fecha_entrada": l.fecha_entrada }))
 }
 
-/// Un tipo de IVA opcional: ausente es «no se toca» (negocio) o «el del negocio» (producto).
+/// El IVA de un parche del negocio: ausente es «no se toca».
 fn iva_opcional(e: &Value) -> Result<Option<f64>, String> {
     match e.get("iva_percent") {
         None | Some(Value::Null) => Ok(None),
@@ -90,6 +92,25 @@ fn negocio(e: &Value) -> Result<Value, String> {
     Ok(json!({ "iva_percent": iva_opcional(e)? }))
 }
 
+fn producto(e: &Value) -> Result<Value, String> {
+    let p = ProductoUpsert::validar(ProductoEntrada {
+        id_producto: texto_opcional(e, "id_producto"),
+        id_categoria: texto(e, "id_categoria"),
+        id_proveedor: texto_opcional(e, "id_proveedor"),
+        nombre: texto(e, "nombre"),
+        precio_venta: dinero_opcional(e, "precio_venta"),
+        stock_minimo: e["stock_minimo"].as_f64(),
+        unidad_medida: texto_opcional(e, "unidad_medida"),
+        nombre_imagen: texto_opcional(e, "nombre_imagen"),
+        ruta_imagen: texto_opcional(e, "ruta_imagen"),
+        cantidad_pedido_esperada: e["cantidad_pedido_esperada"].as_f64(),
+        stock_suelto: e["stock_suelto"].as_f64(),
+        iva_percent: e["iva_percent"].as_f64(),
+        ids_alergenos: Vec::new(),
+    })?;
+    Ok(json!({ "iva_percent": p.iva_percent }))
+}
+
 /// El validador de cada dominio de la tabla: devuelve los campos que normaliza, o el motivo del
 /// rechazo. Un dominio que no esté aquí hace fallar el test: no se queda sin comprobar en silencio.
 fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
@@ -98,7 +119,17 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "lote" => lote(entrada),
         "lote_edicion" => lote_edicion(entrada),
         "negocio" => negocio(entrada),
+        "producto" => producto(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
+    }
+}
+
+/// Los números se comparan como números: para `serde_json`, el `21` del JSON y un `21.0` no son
+/// iguales.
+fn mismo_valor(a: &Value, b: &Value) -> bool {
+    match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
     }
 }
 
@@ -122,7 +153,11 @@ fn la_validacion_cuadra_con_la_tabla_compartida() {
 
             if let (Ok(normalizado), Some(queda)) = (&resultado, caso["queda"].as_object()) {
                 for (campo, esperado) in queda {
-                    assert_eq!(&normalizado[campo], esperado, "{dominio} · {nombre} · {campo}");
+                    assert!(
+                        mismo_valor(&normalizado[campo], esperado),
+                        "{dominio} · {nombre} · {campo}: queda {} y se esperaba {esperado}",
+                        normalizado[campo]
+                    );
                 }
             }
         }
