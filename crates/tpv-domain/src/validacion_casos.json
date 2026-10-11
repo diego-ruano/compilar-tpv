@@ -1,0 +1,33 @@
+{
+  "//": "RI-78. Lo que ACEPTA o RECHAZA la validación de entrada, igual en la Main (los `validar` de tpv-domain) y en el worker (los schemas zod). La leen `crates/tpv-domain/src/validacion_casos.rs` y `apps/cloud-worker-licensing/test/validacionCasos.test.ts`. Cada dominio trae una entrada `base` válida, con la forma del DTO, y sus `casos`: `cambios` se superpone a la base, `acepta` dice si tiene que pasar y `queda` (opcional) qué valor normalizado tiene que salir en esos campos. Un criterio nuevo es un caso nuevo aquí; un dominio nuevo hay que cablearlo en los dos tests, que fallan si encuentran uno que no conocen.",
+  "reserva": {
+    "base": { "dia_ymd": "2026-07-22", "hora": "14:30", "comensales": 2 },
+    "casos": [
+      { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "dia_ymd": "2026-07-22", "hora": "14:30" } },
+      { "nombre": "29 de febrero de un año bisiesto", "cambios": { "dia_ymd": "2024-02-29" }, "acepta": true },
+      { "nombre": "29 de febrero de un año que no lo es", "cambios": { "dia_ymd": "2025-02-29" }, "acepta": false },
+      { "nombre": "30 de febrero", "cambios": { "dia_ymd": "2026-02-30" }, "acepta": false },
+      { "nombre": "31 de febrero", "cambios": { "dia_ymd": "2026-02-31" }, "acepta": false },
+      { "nombre": "31 de abril", "cambios": { "dia_ymd": "2026-04-31" }, "acepta": false },
+      { "nombre": "mes 13", "cambios": { "dia_ymd": "2026-13-01" }, "acepta": false },
+      { "nombre": "día 00", "cambios": { "dia_ymd": "2026-07-00" }, "acepta": false },
+      { "nombre": "día sin relleno de ceros", "cambios": { "dia_ymd": "2026-7-2" }, "acepta": false },
+      { "nombre": "día en formato español", "cambios": { "dia_ymd": "22/07/2026" }, "acepta": false },
+      { "nombre": "día vacío", "cambios": { "dia_ymd": "" }, "acepta": false },
+      { "nombre": "día con espacios alrededor", "cambios": { "dia_ymd": " 2026-07-22 " }, "acepta": true, "queda": { "dia_ymd": "2026-07-22" } },
+      { "nombre": "día con hora detrás: se queda la fecha", "cambios": { "dia_ymd": "2026-07-22T18:30:00Z" }, "acepta": true, "queda": { "dia_ymd": "2026-07-22" } },
+      { "nombre": "31 de febrero con hora detrás", "cambios": { "dia_ymd": "2026-02-31T18:30:00Z" }, "acepta": false },
+      { "nombre": "hora con segundos: se queda HH:MM", "cambios": { "hora": "14:35:59" }, "acepta": true, "queda": { "hora": "14:35" } },
+      { "nombre": "última hora del día", "cambios": { "hora": "23:59" }, "acepta": true },
+      { "nombre": "hora 24", "cambios": { "hora": "24:00" }, "acepta": false },
+      { "nombre": "minuto 60", "cambios": { "hora": "23:60" }, "acepta": false },
+      { "nombre": "hora sin relleno de ceros", "cambios": { "hora": "9:30" }, "acepta": false },
+      { "nombre": "sin comensales", "cambios": { "comensales": 0 }, "acepta": false },
+      { "nombre": "duración de un día entero", "cambios": { "duracion_min": 1440 }, "acepta": true },
+      { "nombre": "duración cero", "cambios": { "duracion_min": 0 }, "acepta": false },
+      { "nombre": "duración de más de un día", "cambios": { "duracion_min": 1441 }, "acepta": false },
+      { "nombre": "teléfono sin nombre de cliente", "cambios": { "telefono": "600100200" }, "acepta": false },
+      { "nombre": "cliente nuevo con nombre", "cambios": { "nombre_cliente": "Ana", "telefono": "600100200" }, "acepta": true }
+    ]
+  }
+}

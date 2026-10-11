@@ -2,6 +2,7 @@
 
 import * as z from "zod";
 
+import { normalizarDia, zDia } from "../../lib/fechas";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	ReservaBuscarClienteArgs,
@@ -38,14 +39,7 @@ function cleanEmailOrNull(v: unknown): string | null {
 	return s.length ? s : null;
 }
 
-function normalizeDia(raw: unknown): string {
-	const s = String(raw ?? "").trim();
-	const candidate = s.length >= 10 ? s.slice(0, 10) : "";
-	if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) {
-		throw new Error("dia_ymd invalido");
-	}
-	return candidate;
-}
+const MSG_DIA = "dia_ymd invalido";
 
 function normalizeHora(raw: unknown): string {
 	const s = String(raw ?? "").trim();
@@ -131,15 +125,14 @@ export const reservaSaveSchema = z
 		}
 	})
 	.transform((v, ctx) => {
-		let dia_ymd = "";
+		// RI-78: una fecha real, no sólo con forma de fecha (`lib/fechas.ts`).
+		const dia_ymd = normalizarDia(v.dia_ymd) ?? "";
 		let hora = "";
-		try {
-			dia_ymd = normalizeDia(v.dia_ymd);
-		} catch (e: any) {
+		if (!dia_ymd) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				path: ["dia_ymd"],
-				message: e.message,
+				message: MSG_DIA,
 			});
 		}
 		try {
@@ -187,8 +180,8 @@ export const buscarClienteSchema = z
 	}));
 
 export const mesQuerySchema = z.object({
-	desde: z.any().transform((v) => normalizeDia(v)),
-	hasta: z.any().transform((v) => normalizeDia(v)),
+	desde: zDia(MSG_DIA),
+	hasta: zDia(MSG_DIA),
 });
 
 type NullableReservaFields =

@@ -15,6 +15,8 @@ pub mod cantidad;
 pub mod cuentas;
 /// El tipo del dinero (ARQ-01): céntimos enteros de punta a punta.
 pub mod dinero;
+/// Fechas que llegan como texto: un único criterio de validez (RI-78).
+pub mod fechas;
 pub mod inventario;
 pub mod licensing;
 pub mod login;
@@ -36,3 +38,7 @@ pub mod permisos;
 
 pub mod texto;
 pub mod estados;
+
+/// Lo que cada validador acepta o rechaza, contra la tabla que comparte con el worker (RI-78).
+#[cfg(test)]
+mod validacion_casos;

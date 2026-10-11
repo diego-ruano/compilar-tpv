@@ -52,8 +52,7 @@ entre lenguajes) que casi ningún producto de este tamaño tiene.
 Lo que queda de esta revisión se concentra en las plataformas y la paridad Main ↔ worker.
 
 La rama de Windows 7 es anterior a ARQ-01 y su canal del feed no está desplegado (RI-74).
-El harness de contrato compara efectos pero no la validación, donde hay cuatro divergencias
-entre la Main y la Handy (RI-78).
+Quedan divergencias en la validación de entrada entre la Main y el worker (RI-78).
 
 ---
 
@@ -65,7 +64,7 @@ entre la Main y la Handy (RI-78).
 | [RI-75](#ri-75) | 🔵 | deuda | Android: el `Context` sale de una API no pública |
 | [RI-76](#ri-76) | 🔵 | deuda | Android: restos de la plantilla, márgenes seguros y release sin firmar |
 | [RI-77](#ri-77) | 🔵 | bug | La Handy enseña pantallas que en ella no funcionan (pedidos, caja, ticket, licencia) |
-| [RI-78](#ri-78) | 🟡 | bug/arquitectura | El harness no ve la validación de entrada, y ahí hay cuatro divergencias |
+| [RI-78](#ri-78) | 🟡 | bug | La validación de entrada diverge entre la Main y el worker |
 | [RI-79](#ri-79) | 🔵 | deuda | Cobertura del harness: falta contrastar el horario predeterminado |
 
 ---
@@ -81,7 +80,7 @@ una migración nueva, registrada en los dos runners.
 
 **Antes de cobrar por el producto:**
 
-- La primera mitad de RI-78 (igualar las cuatro validaciones).
+- RI-78 (igualar las validaciones que quedan).
 
 **Antes de repartir la Handy de Android:** RI-75 y RI-76 (firma, márgenes), y
 RI-77 para que no enseñe lo que no puede hacer.
@@ -207,36 +206,27 @@ desactiva con la *feature* `win7`, y el *nightly* está fijado en CI.
 Se ha revisado el harness de contrato (escritura y lectura) y, a mano, la validación de entrada de
 cada dominio en los dos lados. El harness hace bien lo que dice: compara el **efecto** de cada
 comando sobre las filas, con los dos lados leyendo el mismo *golden*, y
-`check-contract-coverage.mjs` da 63/66 comandos y 64/64 lecturas, sin pendientes. Lo que no mira es
-lo que viene a continuación.
+`check-contract-coverage.mjs` da 63/66 comandos y 64/64 lecturas, sin pendientes. La validación de
+entrada, que el harness no ve porque entra por debajo de ella, la fija aparte la tabla
+[`validacion_casos.json`](../../crates/tpv-domain/src/validacion_casos.json).
 
 <a id="ri-78"></a>
-### RI-78 🟡 · El harness no ve la validación de entrada, y ahí hay cuatro divergencias
+### RI-78 🟡 · La validación de entrada diverge entre la Main y el worker
 
-**Dónde:** el lado Rust
-([`contract_tests.rs:36-47`](../../crates/tpv-infra-sqlite/src/contract_tests.rs#L36-L47)) llama a
-los repositorios, y el lado del worker
-([`contract.test.ts:19-105`](../../apps/cloud-worker-licensing/test/contract.test.ts#L19-L105)) a los
-constructores de `*.commands.ts`. Los dos entran **por debajo** de la validación: el `validar` del
-dominio y los casos de uso en Rust, y `cuerpo(schema)` (zod) en el worker. Así que «hacen lo mismo»
-está comprobado sólo con una entrada válida. Lo que cada lado acepta o rechaza no lo compara nadie,
-y a mano sale esto:
+La Handy ejecuta los mismos casos de uso de Rust antes de llamar al worker, así que a estas
+divergencias sólo llega quien hable con la API directamente. El worker es la frontera de confianza y
+tiene que validar lo mismo. Quedan por igualar:
 
-| Dato | Main (Rust) | Handy (worker) | Consecuencia |
+| Dato | Main (Rust) | Worker | Consecuencia |
 |---|---|---|---|
-| Fecha de una reserva | Formato y fecha real (`NaiveDate`, [`reservas.rs:9-21`](../../crates/tpv-domain/src/reservas.rs#L9-L21)) | Sólo `^\d{4}-\d{2}-\d{2}$` ([`reservas.schemas.ts:34`](../../apps/cloud-worker-licensing/src/domains/reservas/reservas.schemas.ts#L34)) | Desde la Handy entra una reserva para el 31 de febrero, que ningún día del calendario enseña |
-| Fechas de un lote (INV-03) | ISO, y caducidad ≥ entrada ([`inventario.rs:230-253`](../../crates/tpv-domain/src/inventario.rs#L230-L253)) | Cualquier texto (`optStr`, [`inventario.schemas.ts:63-65`](../../apps/cloud-worker-licensing/src/domains/inventario/inventario.schemas.ts#L63-L65) y [`:75-77`](../../apps/cloud-worker-licensing/src/domains/inventario/inventario.schemas.ts#L75-L77)) | Con una caducidad «31/12/2026», `date(Caducidad)` es `NULL`, y en un `ORDER BY … ASC` el `NULL` va primero: el FEFO pone ese lote por delante de todos |
-| IVA del negocio | 0–100 ([`validate_iva_percent`](../../crates/tpv-domain/src/configuracion.rs#L13), aplicado en el caso de uso) | Sólo `Number.isFinite` ([`configuracion.commands.ts:110-113`](../../apps/cloud-worker-licensing/src/domains/configuracion/configuracion.commands.ts#L110-L113)) | Desde la Handy se puede guardar un IVA del 210 % o negativo, que se aplica a todo lo que no tenga tipo propio |
-| IVA de un producto | Fuera de 0–100 pasa **en silencio** a `None`, o sea al del negocio ([`inventario.rs:126`](../../crates/tpv-domain/src/inventario.rs#L126)) | Cualquier finito (`optNum`, [`inventario.schemas.ts:51`](../../apps/cloud-worker-licensing/src/domains/inventario/inventario.schemas.ts#L51)) | La Handy guarda un 150 %. La Main convierte un «210» tecleado en lugar de «21» en el IVA del negocio sin decir nada. Ninguno de los dos lo rechaza |
+| Fechas de un lote (INV-03) | Fecha real en los diez primeros caracteres, y caducidad ≥ entrada; pero guarda el texto entero, con lo que venga detrás (`fecha_lote_valida`, [`inventario.rs`](../../crates/tpv-domain/src/inventario.rs)) | Cualquier texto (`optStr`, [`inventario.schemas.ts`](../../apps/cloud-worker-licensing/src/domains/inventario/inventario.schemas.ts)) | Con una caducidad «31/12/2026», `date(Caducidad)` es `NULL`, y en un `ORDER BY … ASC` el `NULL` va primero: el FEFO pone ese lote por delante de todos |
+| IVA del negocio | 0–100 ([`validate_iva_percent`](../../crates/tpv-domain/src/configuracion.rs), aplicado en el caso de uso) | 0–30 ([`configuracion.schemas.ts`](../../apps/cloud-worker-licensing/src/domains/configuracion/configuracion.schemas.ts)) | Tres criterios: el formulario, además, recorta a 0–30 sin avisar (`clampIva`), así que un «210» tecleado se guarda como 30 |
+| IVA de un producto | Fuera de 0–100 pasa **en silencio** a `None`, o sea al del negocio (`ProductoUpsert::validar`) | Cualquier finito (`optNum`) | El worker guarda un 150 %. La Main convierte un «210» tecleado en lugar de «21» en el IVA del negocio sin decir nada. Ninguno de los dos lo rechaza |
+| Fechas de horarios (copiar semana, horario predeterminado, alta de un turno) | El caso de uso sólo exige que no venga vacía. Al copiar una semana la comprueba el repositorio SQLite (`NaiveDate`), o sea nadie en modo Handy; en el alta de un turno y en el predeterminado, nadie | Sólo la forma (`normalizeYmd`), y con un `throw` dentro del `transform`: una fecha mal formada contesta 500 | Un «2026-02-31» se copia como 3 de marzo |
 
-**Propuesta.**
-
-1. Igualar los cuatro al criterio de Rust, que es el más estricto. En el IVA del producto, además,
-   **rechazar** en vez de sustituir en silencio: un tipo impositivo es un dato fiscal.
-2. Una tabla de casos compartida, `validacion_casos.json` (`dominio`, `campo`, `valor`, `acepta`),
-   con el mismo patrón que `dinero_casos.json` y `scrub_casos.json`: la leen un test de Rust contra
-   los validadores del dominio y otro del worker contra los schemas (`safeParse`). Es la vertiente
-   que le falta al harness, y es donde se han encontrado estas cuatro.
+**Decidido.** El IVA es un porcentaje entre 0 y 100 en los tres sitios, y fuera de rango se
+**rechaza** en vez de sustituirlo o recortarlo: un tipo impositivo es un dato fiscal. Las fechas pasan
+todas por `tpv_domain::fechas` y `lib/fechas.ts`. Cada arreglo añade sus casos a la tabla.
 
 <a id="ri-79"></a>
 ### RI-79 🔵 · Cobertura del harness: falta contrastar el horario predeterminado
@@ -293,8 +283,8 @@ Para equilibrar: estas piezas se han revisado y no tienen nada que objetar, o s�
 - El filtro de `/ws` por ticket de un solo uso consumido con `DELETE … RETURNING`, y los mensajes del
   DO que comprueban el rol del `helloSigned`, nunca una cabecera del cliente.
 - **El harness de contrato**: compara el efecto y no el texto SQL, las lecturas como multiconjunto,
-  y el comprobador de cobertura convierte «no cubierto» en «decidido no cubrir». RI-78 es la
-  vertiente que le falta, no un fallo de lo que ya hace.
+  y el comprobador de cobertura convierte «no cubierto» en «decidido no cubrir». La validación de
+  entrada, que no mira, la fija `validacion_casos.json`.
 - **La variante de Windows 7** va bien encaminada en lo difícil: TLS por rustls, TLS 1.2 explícito
   en WinHTTP y canales del feed separados por ruta (RI-74 tiene el detalle). Lo pendiente es
   mantenerla al día, no rehacerla.

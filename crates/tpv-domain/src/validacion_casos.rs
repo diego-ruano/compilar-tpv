@@ -1,0 +1,75 @@
+//! La validación de entrada del dominio contra la tabla que comparte con el worker (RI-78).
+//!
+//! El arnés de contrato compara el **efecto** de un comando, y entra por debajo de la validación:
+//! lo que cada lado acepta o rechaza no lo miraba nadie, y habían divergido (un 31 de febrero, una
+//! caducidad «31/12/2026», un IVA del 210 %). `validacion_casos.json` lo fija: la misma entrada
+//! tiene que pasar o no pasar en los dos lados, y normalizarse al mismo valor. El espejo está en
+//! `apps/cloud-worker-licensing/test/validacionCasos.test.ts`.
+
+use serde_json::{json, Map, Value};
+
+use crate::reservas::{ReservaEntrada, ReservaValidada};
+
+fn texto(e: &Value, campo: &str) -> String {
+    e[campo].as_str().unwrap_or_default().to_string()
+}
+
+fn texto_opcional(e: &Value, campo: &str) -> Option<String> {
+    e[campo].as_str().map(str::to_string)
+}
+
+fn reserva(e: &Value) -> Result<Value, String> {
+    let (dia, hora) = (texto(e, "dia_ymd"), texto(e, "hora"));
+    let r = ReservaValidada::validar(ReservaEntrada {
+        id_reserva: texto_opcional(e, "id_reserva"),
+        dia_ymd: &dia,
+        hora: &hora,
+        turno: texto_opcional(e, "turno"),
+        comensales: e["comensales"].as_i64().unwrap_or(0),
+        duracion_min: e["duracion_min"].as_i64(),
+        nota: texto_opcional(e, "nota"),
+        estado: texto_opcional(e, "estado"),
+        id_mesa: texto_opcional(e, "id_mesa"),
+        id_cliente: texto_opcional(e, "id_cliente"),
+        nombre_cliente: texto_opcional(e, "nombre_cliente"),
+        telefono: texto_opcional(e, "telefono"),
+        email: texto_opcional(e, "email"),
+    })?;
+    Ok(json!({ "dia_ymd": r.dia_ymd, "hora": r.hora }))
+}
+
+/// El validador de cada dominio de la tabla: devuelve los campos que normaliza, o el motivo del
+/// rechazo. Un dominio que no esté aquí hace fallar el test: no se queda sin comprobar en silencio.
+fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
+    match dominio {
+        "reserva" => reserva(entrada),
+        otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
+    }
+}
+
+#[test]
+fn la_validacion_cuadra_con_la_tabla_compartida() {
+    let tabla: Map<String, Value> = serde_json::from_str(include_str!("validacion_casos.json"))
+        .expect("validacion_casos.json no es JSON valido");
+
+    for (dominio, bloque) in tabla.iter().filter(|(clave, _)| clave.as_str() != "//") {
+        let base = bloque["base"].as_object().expect("falta «base»");
+        for caso in bloque["casos"].as_array().expect("faltan los «casos»") {
+            let nombre = caso["nombre"].as_str().expect("un caso sin «nombre»");
+            let mut entrada = base.clone();
+            for (campo, valor) in caso["cambios"].as_object().expect("un caso sin «cambios»") {
+                entrada.insert(campo.clone(), valor.clone());
+            }
+
+            let resultado = validar(dominio, &Value::Object(entrada));
+            let acepta = caso["acepta"].as_bool().expect("un caso sin «acepta»");
+            assert_eq!(resultado.is_ok(), acepta, "{dominio} · {nombre}: {resultado:?}");
+
+            if let (Ok(normalizado), Some(queda)) = (&resultado, caso["queda"].as_object()) {
+                for (campo, esperado) in queda {
+                    assert_eq!(&normalizado[campo], esperado, "{dominio} · {nombre} · {campo}");
+                }
+            }
+        }
+    }
+}

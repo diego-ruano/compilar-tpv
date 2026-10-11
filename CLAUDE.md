@@ -198,7 +198,11 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   administración, filtro por IP). **Un `*.routes.ts` no resuelve roles.**
 - **Toda ruta autenticada pasa por `tenantAuth`** (que comprueba también la licencia). Tenant y dispositivo
   salen del token.
-- Un schema zod con contrapartida en Rust lleva su drift-guard (`Assert<SameKeys<…>>`).
+- Un schema zod con contrapartida en Rust lleva su drift-guard (`Assert<SameKeys<…>>`), y **lo que
+  acepta o rechaza es lo mismo que la Main**: un criterio de validación nuevo es un caso nuevo en
+  `crates/tpv-domain/src/validacion_casos.json`, que leen los dos lados.
+- Una fecha que llega como texto se valida con `lib/fechas.ts` (en Rust, `tpv_domain::fechas`), nunca
+  con una expresión regular suelta.
 - Una ruta que devuelve listas pone **el techo en la respuesta**, no en cada pieza.
 - Un identificador de error nuevo va a `MENSAJES` o a `SIN_MENSAJE_PROPIO` (`lib/errorCodes.ts`).
 - Toda ruta que verifique un PIN lleva el freno de LOGIN-01 (`test/pinSiempreConFreno.test.ts`).
@@ -287,3 +291,6 @@ lo que hay que revisar es el cambio, no el test:
   `pinSiempreConFreno`, `mensajesDeError`, `salud`, `lecturasEnHoraLocal`.
 - Los arneses de contrato ([tests/contract/README.md](tests/contract/README.md)) y
   `scripts/check-contract-coverage.mjs`.
+- Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `scrub_casos.json`,
+  `horarios_casos.json` y `validacion_casos.json` (la validación de entrada, que los arneses de
+  contrato no ven).

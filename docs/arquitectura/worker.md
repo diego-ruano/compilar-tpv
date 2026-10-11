@@ -71,6 +71,16 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
 - **Un schema con contrapartida en Rust lleva drift-guard**:
   `Assert<SameKeys<z.infer<typeof xSchema>, XInput>>` (`lib/typeGuards.ts`) compara las claves en las
   dos direcciones; los tipos de los valores los cubre el paso a los command builders.
+- **Lo que ese schema acepta o rechaza es lo mismo que acepta o rechaza la Main**, y lo fija la tabla
+  [`validacion_casos.json`](../../crates/tpv-domain/src/validacion_casos.json): una entrada base válida
+  por dominio y casos que la cambian, con `acepta` y, si hace falta, el valor normalizado que `queda`.
+  La leen `tpv-domain/src/validacion_casos.rs` contra los `validar` del dominio y
+  `test/validacionCasos.test.ts` contra los schemas. El arnés de contrato no lo ve: entra por debajo de
+  la validación.
+- **Una fecha que llega como texto se valida con `lib/fechas.ts`** (`zDia`, `normalizarDia`,
+  `esFechaYmd`; espejo de `tpv_domain::fechas`): forma `YYYY-MM-DD` y día real de calendario. Una
+  expresión regular deja pasar un 31 de febrero, y un `throw` dentro de un `transform` de zod no sale
+  como fallo de validación sino como un 500.
 - **El techo va en la respuesta, no en cada pieza**: una ruta que devuelve listas reparte un presupuesto
   común (como `leerClaves` en `/verificar-claves`, que marca `truncada` lo que no cabe). Un isolate
   tiene 128 MB.

@@ -1,31 +1,13 @@
 //! Dominio de **reservas**: normalización de fecha/hora/turno/estado y validación pura.
 
-/// ¿Es una cadena YYYY-MM-DD de 10 chars y **fecha de calendario real**?
-///
-/// La comprobación de forma (10 chars, guiones en su sitio, todo dígitos con relleno de ceros)
-/// descarta formatos no canónicos como `2026-7-2`. Además parseamos con `chrono` para rechazar
-/// fechas imposibles (`2026-13-01`, `2026-02-30`), igual que `inventario::fecha_lote_valida`. Sin
-/// esto, un mes/día fuera de rango entraba tal cual en la BD y rompía el orden por fecha.
-fn is_ymd10(s: &str) -> bool {
-    if s.len() != 10 {
-        return false;
-    }
-    let b = s.as_bytes();
-    if b[4] != b'-' || b[7] != b'-' {
-        return false;
-    }
-    let forma_ok = b[0..4].iter().all(|c| c.is_ascii_digit())
-        && b[5..7].iter().all(|c| c.is_ascii_digit())
-        && b[8..10].iter().all(|c| c.is_ascii_digit());
-    forma_ok && chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
-}
-
-/// Normaliza un día a `YYYY-MM-DD` (acepta sufijos tras `T`/espacio).
+/// Normaliza un día a `YYYY-MM-DD` (acepta sufijos tras `T`/espacio). Los diez primeros caracteres
+/// tienen que ser una fecha real (`fechas::fecha_ymd`): un mes o un día fuera de rango entraba tal
+/// cual en la BD y rompía el orden por fecha.
 pub fn normalize_dia_ymd(raw: &str) -> Result<String, String> {
     let s = raw.trim();
     // RI-40: el formulario puede contener UTF-8; un límite por bytes no siempre es un carácter.
     if let Some(candidate) = s.get(..10) {
-        if is_ymd10(candidate) {
+        if crate::fechas::fecha_ymd(candidate).is_some() {
             return Ok(candidate.to_string());
         }
     }

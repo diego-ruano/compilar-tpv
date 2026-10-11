@@ -12,6 +12,12 @@ igual. Estos dos arneses convierten una divergencia en un **test rojo** en CI. N
 
 El **golden lo bendice Rust** (el lado canónico) y el worker se conforma.
 
+Los dos arneses entran **por debajo de la validación de entrada**: el lado Rust llama a los repositorios
+y el del worker a los constructores de `*.commands.ts`, siempre con una entrada válida. Que los dos lados
+acepten y rechacen lo mismo lo fija aparte la tabla
+[`validacion_casos.json`](../../crates/tpv-domain/src/validacion_casos.json), que leen
+`crates/tpv-domain/src/validacion_casos.rs` y `apps/cloud-worker-licensing/test/validacionCasos.test.ts`.
+
 ```
 tests/contract/
 ├── casos/<modulo>/<caso>.json            # seed + entrada + snapshot (un SELECT por tabla)
