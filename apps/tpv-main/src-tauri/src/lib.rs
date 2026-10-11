@@ -761,7 +761,7 @@ impl AppState {
             .await
             .as_ref()
             .cloned()
-            .ok_or_else(|| "DB no inicializada (pedidos requieren modo Main)".to_string())?;
+            .ok_or_else(|| "Los pedidos a proveedores sólo se gestionan desde el TPV principal".to_string())?;
         Ok(Arc::new(SqlitePedidoProveedorRepository::new(conn))
             as Arc<dyn PedidoProveedorRepository>)
     }
