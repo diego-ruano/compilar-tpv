@@ -103,7 +103,9 @@ describe("RI-74 · cada sistema, lo suyo", () => {
 		await escenario("sin-cruces", async () => {
 			const respuesta = await feed("windows7", "main-piloto");
 			expect(respuesta.version).toBe("1.1.0");
-			expect(JSON.stringify(respuesta)).not.toContain("2.");
+			// Lo que se instala es lo que dicen las URLs: todas, de la 1.1.0 de Windows 7.
+			const urls = Object.values(respuesta.platforms).map((p: any) => p.url);
+			expect(new Set(urls)).toEqual(new Set(["https://cdn.test/1.1.0.exe"]));
 		});
 	});
 
