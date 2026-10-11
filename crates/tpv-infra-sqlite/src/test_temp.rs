@@ -1,9 +1,8 @@
 //! Raíz de los directorios temporales de los tests.
 //!
-//! Cada test abre su BD en un directorio propio de `%TEMP%` —cada uno el suyo, porque abrir muchas
-//! en el mismo proceso dispara un crash nativo de libsql en Windows (ver `contract_comun`)—, y
-//! nadie los borraba: cada pasada del suite dejaba ~150 carpetas con su `data.db` y su WAL. Se
-//! habían acumulado más de 18.000 (casi 4 GB).
+//! Cada test abre su BD en un directorio propio de `%TEMP%`, y nadie los borraba: cada pasada del
+//! suite dejaba ~150 carpetas con su `data.db` y su WAL. Se habían acumulado más de 18.000 (casi
+//! 4 GB).
 //!
 //! **Se limpian al EMPEZAR, no al terminar.** Borrarlos al acabar cada test no funciona: en
 //! `let (db, _dir) = …` el directorio se suelta ANTES que la BD, y Windows no deja borrar un

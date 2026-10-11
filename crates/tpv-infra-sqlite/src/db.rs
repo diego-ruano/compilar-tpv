@@ -1,4 +1,4 @@
-//! # Manejo de conexiones a la BD local (libsql): escritor único + pool de lectura
+//! # Manejo de conexiones a la BD local (SQLite): escritor único + pool de lectura
 //!
 //! Sustituye al antiguo `TrackedConnection` + "puerta de transacción". La realidad física de
 //! SQLite es **un solo escritor**: varias lecturas pueden ir en paralelo (modo WAL), pero las
@@ -23,7 +23,6 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
-use libsql::{Builder, Database};
 use crate::ejecutor::{Connection, ErrorSql, Rows, Value};
 use serde_json::json;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
@@ -384,18 +383,19 @@ async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), Error
 /// `busy_timeout`, `foreign_keys` y `synchronous` son por conexión; `journal_mode=WAL` es de
 /// fichero (persistente) pero repetirlo es inocuo.
 ///
-/// Se ejecutan vía `query` (no `execute_batch`): algunas PRAGMA (`journal_mode`, `busy_timeout`)
-/// DEVUELVEN una fila con el valor resultante incluso al fijarlas, y enrutarlas por la vía de
-/// `execute` dispara `Execute returned rows` en libsql. `query` acepta sentencias que devuelven
-/// filas (las descartamos) y también las que no.
-pub(crate) async fn tune(conn: &libsql::Connection) -> Result<(), ErrorSql> {
+/// Algunas PRAGMA (`journal_mode`, `busy_timeout`) DEVUELVEN una fila con el valor resultante
+/// incluso al fijarlas, y por la vía de `execute` darían `Execute returned rows`: se recorren sus
+/// filas y se descartan.
+pub(crate) fn tune(conn: &rusqlite::Connection) -> Result<(), ErrorSql> {
     for pragma in [
         "PRAGMA busy_timeout = 5000;",
         "PRAGMA journal_mode = WAL;",
         "PRAGMA foreign_keys = ON;",
         "PRAGMA synchronous = NORMAL;",
     ] {
-        let _ = conn.query(pragma, ()).await?;
+        let mut stmt = conn.prepare(pragma)?;
+        let mut filas = stmt.raw_query();
+        while filas.next()?.is_some() {}
     }
     Ok(())
 }
@@ -676,8 +676,6 @@ impl<'a> Writer for WriteGuard<'a> {
                     // Una operación, un instante: todas las escrituras de esta transacción se fijan
                     // con la hora de ahora, aunque la transacción dure más de un segundo (CFG-04).
                     self.fijar_instante(Some(Instante::ahora()));
-                    // libsql 0.9 devuelve `BatchRows` (las filas de cada sentencia del lote). Aquí
-                    // no interesan: `execute_batch` se usa para DDL y control de transacción.
                     Ok(())
                 }
                 BatchKind::Commit => {
@@ -738,8 +736,6 @@ pub struct Db {
     /// La carpeta del fichero (AppData en la Main). Ahí viven las señales que tienen que
     /// sobrevivir a la propia base, como la marca de traslado (`recovery::marcar_traslado`).
     carpeta: std::path::PathBuf,
-    /// Mantiene viva la `Database` mientras existan conexiones derivadas.
-    _database: Database,
 }
 
 impl Db {
@@ -749,16 +745,14 @@ impl Db {
     /// `write()` guard tras abrir.
     pub async fn open(path: &str) -> Result<Arc<Db>, Box<dyn std::error::Error + Send + Sync>> {
         let path = path.to_owned();
-        let rt = tokio::runtime::Handle::current();
-        tokio::task::spawn_blocking(move || rt.block_on(Self::abrir(&path))).await?
+        // Abrir y migrar es SQLite síncrono: fuera de los hilos del runtime.
+        tokio::task::spawn_blocking(move || Self::abrir(&path)).await?
     }
 
-    async fn abrir(path: &str) -> Result<Arc<Db>, Box<dyn std::error::Error + Send + Sync>> {
-        let database = Builder::new_local(path).build().await?;
-
+    fn abrir(path: &str) -> Result<Arc<Db>, Box<dyn std::error::Error + Send + Sync>> {
         // Conexión de escritura: afinar, construir el esquema y crear tablas de control.
-        let write_conn = database.connect()?;
-        tune(&write_conn).await?;
+        let write_conn = crate::ejecutor::abrir(path)?;
+        tune(&write_conn)?;
 
         // Esquema = migraciones embebidas (ya no hay schema.sql). Construye desde cero en BDs
         // nuevas y pone al día las existentes. Ver `migrations.rs`.
@@ -767,13 +761,13 @@ impl Db {
         // `_Jobs_State`, `_Verifactu_*`, `_Recovery_State`, `_Backfill_Historico`) vive en §16 del
         // `0001`, con el resto del esquema: dos funciones que creaban tablas por su cuenta eran un
         // segundo esquema, sin versión, sin hash y fuera del snapshot anti-drift.
-        crate::migrations::run(&write_conn).await?;
+        crate::migrations::run(&write_conn)?;
 
         // Pool de lectura.
         let mut read_conns = Vec::with_capacity(READ_POOL_SIZE);
         for i in 0..READ_POOL_SIZE {
-            let c = database.connect()?;
-            tune(&c).await?;
+            let c = crate::ejecutor::abrir(path)?;
+            tune(&c)?;
             read_conns.push(Arc::new(Connection::nueva(c, &format!("tpv-sql-lectura-{i}"))?));
         }
 
@@ -791,7 +785,6 @@ impl Db {
                 .parent()
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_default(),
-            _database: database,
         }))
     }
 
@@ -876,23 +869,173 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn las_conexiones_locales_se_cierran_sin_abortar_y_respetan_los_cursores() {
-        // libsql #2251: el cierre doble accedía a memoria liberada y abortaba en Windows.
-        let database = Builder::new_local(":memory:").build().await.unwrap();
-        for i in 0..2000 {
-            let conn = database.connect().unwrap();
-            let mut filas = conn.query("SELECT 42", ()).await.unwrap();
+    async fn un_cursor_sobrevive_a_su_fachada_y_las_conexiones_se_cierran() {
+        // El hilo de una conexión sigue vivo mientras le quede un cursor, aunque se suelte la
+        // fachada; y abrir y cerrar muchas, con cursores a medias, no deja nada colgado.
+        for i in 0..200 {
+            let nativa = crate::ejecutor::abrir(":memory:").unwrap();
+            let conn = Connection::nueva(nativa, "tpv-sql-prueba").unwrap();
+            let mut filas = conn.query("SELECT 42 UNION ALL SELECT 43", ()).await.unwrap();
             if i % 2 == 0 {
-                // El cursor conserva la conexión nativa después de soltar la fachada.
                 drop(conn);
                 assert_eq!(filas.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 42);
+                assert_eq!(filas.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 43);
                 assert!(filas.next().await.unwrap().is_none());
             } else {
                 assert_eq!(filas.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 42);
                 drop(filas);
-                drop(conn);
+                conn.cerrar().await.unwrap();
             }
         }
+    }
+
+    #[tokio::test]
+    async fn un_cursor_abandonado_a_medias_no_retiene_la_lectura() {
+        // Un cursor lee por lotes, así que su sentencia queda en curso entre uno y otro. Si al
+        // soltarlo no se reiniciara, su lectura seguiría abierta y el checkpoint del WAL no podría
+        // completarse nunca.
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw().execute_batch(
+                "CREATE TABLE prueba_cursor (n INTEGER);
+                 WITH RECURSIVE s(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM s WHERE x<500)
+                 INSERT INTO prueba_cursor SELECT x FROM s;",
+            ).await.unwrap();
+        }
+        let r = db.read().await;
+        let mut filas = r.query("SELECT n FROM prueba_cursor ORDER BY n", ()).await.unwrap();
+        assert_eq!(filas.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 1);
+        drop(filas);
+        // La limpieza del cursor va por la cola de su conexión: un trabajo detrás asegura que pasó.
+        r.conn().execute_batch("SELECT 1;").await.unwrap();
+
+        let w = db.write().await;
+        w.raw().execute_batch("INSERT INTO prueba_cursor VALUES (0);").await.unwrap();
+        let mut cp = w.raw().query("PRAGMA wal_checkpoint(TRUNCATE);", ()).await.unwrap();
+        let bloqueado = cp.next().await.unwrap().unwrap().get::<i64>(0).unwrap();
+        assert_eq!(bloqueado, 0, "un lector sigue reteniendo la base");
+    }
+
+    #[tokio::test]
+    async fn los_parametros_que_no_cuadran_se_toleran() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let r = db.read().await;
+        // Falta el ?2: vale NULL.
+        let mut filas = r.query("SELECT ?1, ?2", vec![Value::Integer(7)]).await.unwrap();
+        let fila = filas.next().await.unwrap().unwrap();
+        assert_eq!(fila.get_value(0).unwrap(), Value::Integer(7));
+        assert_eq!(fila.get_value(1).unwrap(), Value::Null);
+        // Sobra uno: se ignora.
+        let mut filas = r.query("SELECT ?1", vec![Value::Integer(7), Value::Integer(8)]).await.unwrap();
+        assert_eq!(filas.next().await.unwrap().unwrap().get_value(0).unwrap(), Value::Integer(7));
+    }
+
+    #[tokio::test]
+    async fn varias_sentencias_en_una_consulta_son_un_error() {
+        // Un texto con varias sentencias es un error, en vez de ejecutar la primera y perder el resto
+        // sin avisar. Varias seguidas van por `execute_batch`.
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let w = db.write().await;
+        assert!(w.raw().query("SELECT 1; SELECT 2;", ()).await.is_err());
+        assert!(w.raw().execute("UPDATE Zonas SET Nombre_Zona = Nombre_Zona; SELECT 1;", ()).await.is_err());
+        // Un `;` final, con espacios o comentarios detrás, no es otra sentencia.
+        assert!(w.raw().query("SELECT 1; -- fin\n", ()).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn un_texto_con_utf8_invalido_se_lee_con_sustituciones() {
+        // La columna se lee con sustituciones, y la consulta no falla por un texto mal codificado.
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let r = db.read().await;
+        let mut filas = r.query("SELECT CAST(x'ff41' AS TEXT)", ()).await.unwrap();
+        assert_eq!(filas.next().await.unwrap().unwrap().get::<String>(0).unwrap(), "\u{FFFD}A");
+    }
+
+    #[tokio::test]
+    async fn una_consulta_guardada_trae_las_columnas_de_ahora() {
+        // La conexión guarda sus sentencias preparadas. Si el esquema cambia, SQLite vuelve a
+        // preparar la guardada al ejecutarla, y la fila tiene que traer las columnas nuevas.
+        async fn columnas(c: &Connection) -> Vec<Value> {
+            let mut filas = c.query("SELECT * FROM prueba_columnas", ()).await.unwrap();
+            let fila = filas.next().await.unwrap().unwrap();
+            (0..).map_while(|i| fila.get_value(i).ok()).collect()
+        }
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let w = db.write().await;
+        w.raw().execute_batch("CREATE TABLE prueba_columnas (a INTEGER); INSERT INTO prueba_columnas VALUES (1);").await.unwrap();
+        assert_eq!(columnas(w.raw()).await, vec![Value::Integer(1)]);
+        w.raw().execute_batch("ALTER TABLE prueba_columnas ADD COLUMN b INTEGER DEFAULT 7;").await.unwrap();
+        assert_eq!(columnas(w.raw()).await, vec![Value::Integer(1), Value::Integer(7)]);
+    }
+
+    #[tokio::test]
+    async fn la_carga_concurrente_no_da_errores_ni_deja_la_base_a_medias() {
+        // Un escritor con transacciones, cuatro lectores (dos sueltan el cursor a medias) y copias en
+        // caliente, a la vez durante un rato. Al final: ningún error, la base íntegra y cada
+        // escritura con su operación en el outbox.
+        use std::sync::atomic::{AtomicI64, Ordering};
+        use std::time::{Duration, Instant};
+
+        let dir = crate::test_temp::dir_temporal("carga");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::connection::init_main_db(&dir, false).await.unwrap();
+        let fin = Instant::now() + Duration::from_millis(1500);
+        let escritas = Arc::new(AtomicI64::new(0));
+        let mut tareas = Vec::new();
+
+        let (escritor, cuenta) = (db.clone(), escritas.clone());
+        tareas.push(tokio::spawn(async move {
+            while Instant::now() < fin {
+                let w = escritor.write().await;
+                let id = crate::util::new_id();
+                w.transaccion(async {
+                    w.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, 'Carga ' || ?1);", vec![Value::Text(id.clone())])
+                        .await.map_err(crate::consultas::db_err)?;
+                    w.execute("UPDATE Zonas SET Nombre_Zona = 'Carga ñ ' || ?1 WHERE ID_Zona = ?1;", vec![Value::Text(id.clone())])
+                        .await.map_err(crate::consultas::db_err)?;
+                    Ok(())
+                }).await.unwrap();
+                cuenta.fetch_add(1, Ordering::Relaxed);
+            }
+        }));
+        for n in 0..4 {
+            let lector = db.clone();
+            tareas.push(tokio::spawn(async move {
+                while Instant::now() < fin {
+                    let r = lector.read().await;
+                    let mut filas = r.query("SELECT ID_Zona, Nombre_Zona FROM Zonas ORDER BY ID_Zona;", ()).await.unwrap();
+                    let tope = if n < 2 { 3 } else { usize::MAX };
+                    let mut leidas = 0;
+                    while leidas < tope && filas.next().await.unwrap().is_some() {
+                        leidas += 1;
+                    }
+                }
+            }));
+        }
+        let (copiador, carpeta) = (db.clone(), dir.clone());
+        tareas.push(tokio::spawn(async move {
+            while Instant::now() < fin {
+                crate::recovery::create_backup(&copiador, &carpeta).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+        }));
+        for t in tareas {
+            t.await.unwrap();
+        }
+
+        let escritas = escritas.load(Ordering::Relaxed);
+        assert!(escritas > 0);
+        let r = db.read().await;
+        let mut f = r.query("PRAGMA integrity_check;", ()).await.unwrap();
+        assert_eq!(f.next().await.unwrap().unwrap().get::<String>(0).unwrap(), "ok");
+        let mut f = r.query(
+            "SELECT (SELECT COUNT(*) FROM Zonas WHERE Nombre_Zona LIKE 'Carga ñ %'), (SELECT COUNT(*) FROM _Sync_Outbox);",
+            (),
+        ).await.unwrap();
+        let fila = f.next().await.unwrap().unwrap();
+        assert_eq!(fila.get::<i64>(0).unwrap(), escritas, "cada escritura confirmada está en la base");
+        assert_eq!(fila.get::<i64>(1).unwrap(), escritas, "y cada una tiene su operación en el outbox");
     }
 
     #[tokio::test]

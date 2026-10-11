@@ -17,9 +17,9 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
 - **Sus permisos van en `capabilities/desktop.json`**, con `"platforms": ["linux", "macOS", "windows"]`:
   en Android un permiso de un plugin que no está compilado rompe el build (`Permission updater:default
   not found`). Todo permiso de un plugin de escritorio va ahí.
-- **`libsql` se compila igual** (el `AppState` nombra los repositorios SQLite): `libsql = { version =
-  "0.9.30", default-features = false, features = ["core"] }` en el `Cargo.toml` raíz, sólo base de
-  fichero local.
+- **`rusqlite` se compila igual** (el `AppState` nombra los repositorios SQLite): con `bundled`
+  compila su propio SQLite con el `clang` del NDK, como el resto del código C. No depende del SQLite
+  del teléfono.
 - **Sin OpenSSL**: `sentry` va con `default-features = false` y `rustls`. Para encontrar quién activa una
   dependencia nativa: `cargo tree -p tpv --target aarch64-linux-android -i <crate> -e features`.
 - **El almacén de secretos** (`crates/tpv-infra-licensing/src/secret_store.rs`) tiene la misma API en las

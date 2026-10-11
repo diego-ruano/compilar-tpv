@@ -129,7 +129,7 @@ jobs:
       - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
         with:
           tool: cargo-nextest
-      # nextest aísla cada test: evita contaminar los OnceLock y limita los crashes de libsql.
+      # nextest aísla cada test en su proceso: los que fijan estado global (static, OnceLock) no se pisan.
       # El perfil CI reintenta y muestra FLAKY, y no corta la tanda al primer fallo.
       - name: Tests de todas las crates (incluidos guardianes y anti-drift)
         run: cargo nextest run --workspace --profile ci --locked

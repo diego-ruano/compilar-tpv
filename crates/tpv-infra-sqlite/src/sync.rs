@@ -64,7 +64,7 @@ const MAX_APPLY_ATTEMPTS: i64 = 5;
 /// vez por ciclo de catch-up. Con 5 se apartaría una operación por un bache de red de segundos.
 const MAX_SUBIDA_ATTEMPTS: i64 = 20;
 
-/// Convierte un escalar JSON al `Value` de libsql para enlazarlo como argumento.
+/// Convierte un escalar JSON al `Value` de la base para enlazarlo como argumento.
 fn json_to_value(v: &serde_json::Value) -> Value {
     use serde_json::Value as J;
     match v {
@@ -3217,7 +3217,7 @@ mod tests_verificacion {
 
 /// Forma canónica de una clave, para poder restar los dos conjuntos.
 ///
-/// Los dos lados llegan por caminos distintos —uno de libsql local, otro de JSON— y el mismo
+/// Los dos lados llegan por caminos distintos —uno de la base local, otro de JSON— y el mismo
 /// identificador puede venir como `"z1"` o, si alguna vez fuera numérico, como `1` o `1.0`. Se
 /// normaliza con la MISMA función en los dos sitios, que es lo único que garantiza que dos claves
 /// iguales se vean iguales.

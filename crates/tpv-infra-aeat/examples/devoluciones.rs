@@ -343,35 +343,28 @@ mod windows {
             .await
             .expect("esquema de referencia");
 
-        let vieja = libsql::Builder::new_local(ruta.to_str().unwrap())
-            .build()
-            .await
-            .expect("abriendo la copia")
-            .connect()
-            .expect("conectando a la copia");
+        // La copia se abre directamente, sin `Db`: abrirla con `Db` la migraría antes de tiempo.
+        let vieja = rusqlite::Connection::open(ruta).expect("abriendo la copia");
 
         let tablas = columna(&referencia, "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%';").await;
         for t in tablas {
-            let existe = {
-                let mut rs = vieja
-                    .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1;", vec![Value::Text(t.clone())])
-                    .await
-                    .expect("mirando la tabla");
-                rs.next().await.expect("fila").is_some()
-            };
+            let existe = vieja
+                .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1;")
+                .and_then(|mut st| st.exists([&t]))
+                .expect("mirando la tabla");
             if !existe {
                 continue; // la crea el 0001
             }
             let nuevas = columnas(&referencia, &t).await;
             let viejas: Vec<String> = {
-                let mut rs = vieja.query(&format!("PRAGMA table_info(\"{t}\");"), ()).await.expect("table_info");
-                let mut v = Vec::new();
-                while let Some(r) = rs.next().await.expect("fila") {
-                    if let Ok(Value::Text(n)) = r.get_value(1) {
-                        v.push(n);
-                    }
-                }
-                v
+                let mut st = vieja.prepare(&format!("PRAGMA table_info(\"{t}\");")).expect("table_info");
+                let filas = st.query_map([], |r| r.get::<_, Value>(1)).expect("table_info");
+                filas
+                    .filter_map(|f| match f {
+                        Ok(Value::Text(n)) => Some(n),
+                        _ => None,
+                    })
+                    .collect()
             };
             for (nombre, tipo, defecto) in nuevas {
                 if viejas.contains(&nombre) {
@@ -379,15 +372,13 @@ mod windows {
                 }
                 let def = defecto.map(|d| format!(" DEFAULT {d}")).unwrap_or_default();
                 vieja
-                    .execute(&format!("ALTER TABLE \"{t}\" ADD COLUMN \"{nombre}\" {tipo}{def};"), ())
-                    .await
+                    .execute(&format!("ALTER TABLE \"{t}\" ADD COLUMN \"{nombre}\" {tipo}{def};"), [])
                     .unwrap_or_else(|e| panic!("añadiendo {t}.{nombre}: {e}"));
                 println!("  esquema: + {t}.{nombre}");
             }
         }
         vieja
-            .execute("DELETE FROM _migrations WHERE name = '0001_inicial.sql';", ())
-            .await
+            .execute("DELETE FROM _migrations WHERE name = '0001_inicial.sql';", [])
             .expect("quitando el 0001");
     }
 

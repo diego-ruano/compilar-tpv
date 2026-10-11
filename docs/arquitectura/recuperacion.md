@@ -104,7 +104,7 @@ esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_
   bloquear al escritor ni los cobros), se valida y se guarda **comprimida con gzip** en
   `AppData/backups/data-*.db.gz`, conservando las 7 últimas. Lo que se valida y se restaura es siempre
   la base descomprimida en un fichero aparte; un `.db.gz` también lo abre 7-Zip.
-- **Fuera del runtime async**: libsql local ejecuta SQLite en el hilo que lo llama, así que el
+- **Fuera del runtime async**: SQLite trabaja sin ceder en el hilo que lo llama, así que el
   `VACUUM INTO`, el `quick_check`, comprimir y copiar la base entera van por `spawn_blocking`.
 - **Copia ahora / guardar fuera / traer**: `recovery_create_backup`, `recovery_export_backup` (a donde
   elija el usuario: un USB; sale comprimida, tal como está guardada) y `recovery_import_backup`, que la

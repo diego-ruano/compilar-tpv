@@ -39,7 +39,7 @@ BLESS_CONTRACT=1 cargo nextest run -p tpv-infra-sqlite contract_tests           
 BLESS_CONTRACT_READ=1 cargo nextest run -p tpv-infra-sqlite contract_read_tests  # ídem, lecturas
 ```
 
-- Rust abre un libsql local, siembra, corre el comando o la consulta y lee.
+- Rust abre una base SQLite local, siembra, corre el comando o la consulta y lee.
 - El worker corre **dentro de workerd** (`@cloudflare/vitest-pool-workers`): levanta el `TenantHub` real,
   construye el esquema con las mismas migraciones (`test/helpers/esquemaTenant.ts`), siembra, construye el
   comando y lo aplica con el mismo sobre que el DO (`PRAGMA defer_foreign_keys = ON` en una transacción),

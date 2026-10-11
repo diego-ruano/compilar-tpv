@@ -2979,10 +2979,6 @@ mod tests_subsanacion {
             )
             .await
             .unwrap();
-        // ⚠️ Cada fila se lee ENTERA antes de pedir la siguiente. Un `Row` de libsql deja de ser
-        // válido en cuanto se avanza el cursor, así que guardar dos y leerlos después devuelve dos
-        // veces el último — y el test compara algo consigo mismo y pasa siempre. Costó un rojo
-        // desconcertante ("huellas distintas: A vs A") descubrirlo.
         let a = rows.next().await.unwrap().unwrap();
         let h_a = v_string(a.get_value(1).unwrap()).unwrap_or_default();
 

@@ -34,7 +34,6 @@
 - [Tabla de hallazgos](#tabla-de-hallazgos)
 - [Orden sugerido](#orden-sugerido)
 - Por grupos:
-  19. [Tecnologías y librerías](#19-tecnologías-y-librerías)
   20. [Plataformas: Android (Handy) y Windows 7](#20-plataformas-android-handy-y-windows-7)
   21. [Paridad Main ↔ worker](#21-paridad-main--worker)
 - [Lo que está bien y conviene no tocar](#lo-que-está-bien-y-conviene-no-tocar)
@@ -91,17 +90,6 @@ RI-77 para que no enseñe lo que no puede hacer.
 del canal a `main`.
 
 **Después, sin prisa:** el resto.
-
----
-
-## 19. Tecnologías y librerías
-
-Propuestas de cambio o de incorporación, con el porqué. Ninguna es urgente; están ordenadas por
-relación beneficio/esfuerzo.
-
-| Propuesta | Para qué | Esfuerzo |
-|---|---|---|
-| **`rusqlite`** en lugar de **`libsql`** (evaluar) | En la Main sólo se usa SQLite local (`features = ["core"]`). `rusqlite` es la opción madura: transacciones RAII (`conn.transaction()` hace rollback al soltarse), caché de sentencias preparadas (`prepare_cached`; hoy cada consulta se prepara de nuevo), API de backup en caliente, y ninguna de las rarezas documentadas (el crash nativo al crear muchas bases, la API async que bloquea). Todas las conexiones locales ya se ejecutan en hilos propios; el cambio conservaría esa separación. Coste: reescribir `db.rs`/`mapping.rs` y adaptar los repositorios (los `Reader`/`Writer` ya aíslan buena parte). Merece una prueba de concepto sobre un repositorio antes de decidir | Alto |
 
 ---
 

@@ -1,7 +1,7 @@
 # TPV — instrucciones para trabajar en este repositorio
 
 TPV de escritorio para hostelería: **Tauri 2 + React 19 + TypeScript** con backend **Rust** sobre
-**SQLite local (libsql)**, y un **Cloudflare Worker** (`tpv-api`) con un Durable Object por negocio y
+**SQLite local (rusqlite)**, y un **Cloudflare Worker** (`tpv-api`) con un Durable Object por negocio y
 Turso. La Main (Windows) vende contra su base local y replica cuando hay red; la Handy (Android) trabaja
 contra la nube. Qué es cada pieza: [README.md](README.md). Cómo funciona por dentro: [docs/](docs/README.md).
 
@@ -26,7 +26,7 @@ apps/cloud-worker-licensing/     worker tpv-api (Hono + TenantHub + licencias + 
 crates/
   tpv-domain                     entidades y reglas puras
   tpv-application                puertos (ports/) y casos de uso (use_cases/)
-  tpv-infra-sqlite               persistencia libsql, outbox, migraciones
+  tpv-infra-sqlite               persistencia SQLite (rusqlite), outbox, migraciones
   tpv-infra-http                 los mismos puertos contra el worker (modo Handy)
   tpv-infra-licensing            licencia, identidad del dispositivo, secretos, hora de la nube
   tpv-infra-aeat                 Veri*factu: SOAP, XML, TLS mutuo con WinHTTP
@@ -89,10 +89,10 @@ pnpm --filter @tpv/main typecheck    # pnpm --filter tpv-api typecheck
 pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, antes de cada versión
 ```
 
-- **Los tests de Rust se corren con `cargo nextest`**, nunca con `cargo test`: nextest aísla cada test y
-  sus OnceLock (con dos reintentos que marcan los fallos transitorios como `FLAKY`). El cierre doble de
-  libsql está corregido en `vendor/libsql`; para verificar su estabilidad se usa `--retries 0`.
-  El porqué está en `.config/nextest.toml`. Los tests de contratos también van por nextest;
+- **Los tests de Rust se corren con `cargo nextest`**, nunca con `cargo test`: nextest corre cada test en
+  su propio proceso, y hay tests que fijan estado global (`static`, `OnceLock`) y se pisan si comparten uno.
+  Los dos reintentos marcan los fallos transitorios como `FLAKY`; para verificar estabilidad, `--retries
+  0`. El porqué está en `.config/nextest.toml`. Los tests de contratos también van por nextest;
   la generación usa el ejecutable Tauri con `--export-bindings`, sin arrancar la aplicación.
 - **Windows: `Failed("Are you sure you have RC.EXE in your $PATH…")`** no es el código: `embed-resource`
   busca `rc.exe` por una clave de registro que puede apuntar mal. Se arregla con
@@ -156,6 +156,8 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 - **Toda escritura de negocio de la Main pasa por `WriteGuard::execute`**, que la captura en el outbox. Lo
   que es estado local del equipo (`_Jobs_State`, `_Sync_*`, `_Verifactu_*`, `_Recovery_State`,
   `_Backfill_Historico`, el backfill) va por `raw()`. `is_write_sql` no reconoce un `WITH … INSERT`.
+- **Una sentencia por `query`/`execute`**: un texto con varias falla; varias seguidas van por
+  `execute_batch`.
 - **IDs deterministas**: toda `TEXT PRIMARY KEY` recibe su UUID antes del `INSERT`; en el worker, un paso
   `kind:"value"` con `nuevoId()` (`lib/ids.ts`, UUIDv7 como el `new_id()` de Rust). Nada de
   `randomblob()`/`random()` en una sentencia replicada. «Lo más reciente» se ordena por la columna de

@@ -8,7 +8,7 @@ sin nube no opera.
 ```
 ┌──────────────────────┐        WebSocket /ws          ┌────────────────────────────┐
 │ MAIN (Tauri + Rust)  │── apply / bulk_apply ────────►│ Durable Object TenantHub   │
-│ SQLite (libsql)      │◄── change (en vivo) ──────────│ · aplica idempotente       │
+│ SQLite (rusqlite)    │◄── change (en vivo) ──────────│ · aplica idempotente       │
 │ _Sync_Outbox         │                               │   (Applied_Operations)     │
 │ _Sync_Applied_Ops    │   REST /v1/sync/changes       │ · cola de entrada          │
 │ _Sync_State          │◄── catch-up ──────────────────│ · difunde a los demás      │
@@ -75,8 +75,13 @@ servicio Android en segundo plano: la conexión se recupera al volver si el sist
 La ejecución local de SQLite pertenece a cinco hilos propios: uno para el escritor y cuatro para
 las conexiones de lectura (RI-16). Tokio espera sus respuestas; nunca ejecuta SQL ni avanza cursores
 nativos, tampoco por `raw()`. Cada ejecutor admite hasta 32 trabajos pendientes y entrega filas
-copiadas en lotes de 64. Una cancelación no interrumpe SQL ya iniciado: la limpieza del guard se
-encola antes del siguiente escritor. Para sustituir el fichero se espera el cierre confirmado de
+copiadas en lotes de 64. El motor es rusqlite con su SQLite empaquetado, el mismo en Windows,
+Windows 7 y Android. `query` y `execute` ejecutan **una** sentencia: un texto con varias es un
+error, y varias seguidas van por `execute_batch`. Unos parámetros que no cuadran con los marcadores
+se toleran —los que faltan valen NULL, los de más se ignoran— y dejan un aviso. La sentencia va
+aparte, en `debug`, que no sube a la nube (OBS-02): se ve en el log local arrancando con
+`TPV_LOG=info,tpv::sql=debug`. Una cancelación no interrumpe SQL ya iniciado: la limpieza del guard
+se encola antes del siguiente escritor. Para sustituir el fichero se espera el cierre confirmado de
 los ejecutores. Abrir, migrar y comprobar copias efímeras también ocurre fuera del runtime async.
 
 Las operaciones con varias sentencias usan `Writer::transaccion(async { … })` (RI-32), también

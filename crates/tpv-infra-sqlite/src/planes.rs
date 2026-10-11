@@ -12,7 +12,6 @@ mod tests {
     use crate::ejecutor::Value;
 
     use crate::contract_comun::db_temporal;
-    use crate::db::Reader;
 
     /// Lo único que se puede recorrer: una fila constante, el índice parcial de las comandas
     /// abiertas (son pocas por definición) y las categorías (un puñado, no crecen con el uso).
@@ -23,18 +22,22 @@ mod tests {
     ];
 
     async fn plan(sql: &str) -> Vec<String> {
-        let (db, _dir) = db_temporal().await;
-        let r = db.read().await;
-        let mut rows = r
-            .query(&format!("EXPLAIN QUERY PLAN {sql}"), Vec::<Value>::new())
-            .await
-            .unwrap();
+        // `Db` deja la base con el esquema; el plan se pide por una conexión nativa aparte para no
+        // tener que enlazar los parámetros: EXPLAIN no ejecuta la sentencia, y sin enlazar valen NULL.
+        let (db, dir) = db_temporal().await;
+        let conn = crate::ejecutor::abrir(dir.join("data.db")).unwrap();
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let mut filas = stmt.raw_query();
         let mut out = Vec::new();
-        while let Some(row) = rows.next().await.unwrap() {
-            if let Value::Text(t) = row.get_value(3).unwrap() {
+        while let Some(fila) = filas.next().unwrap() {
+            if let Value::Text(t) = fila.get::<_, Value>(3).unwrap() {
                 out.push(t);
             }
         }
+        drop(filas);
+        drop(stmt);
+        drop(conn);
+        drop(db);
         out
     }
 

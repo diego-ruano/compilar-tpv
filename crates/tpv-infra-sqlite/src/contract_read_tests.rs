@@ -232,7 +232,7 @@ fn filtro_cuentas(e: &Json) -> CuentasFiltro {
 }
 
 /// Genera **un `#[tokio::test]` por lectura**, igual que en el harness de escritura y por el mismo
-/// motivo (una BD libsql por test: abrir muchas en uno solo revienta en Windows).
+/// motivo (una BD por test, que pasa o falla por su cuenta).
 ///
 /// Añadir una lectura: crear su fixture en `tests/contract/lecturas/casos/<modulo>/`, sumar su
 /// nombre aquí y en el test del worker (`test/contractLectura.test.ts`), y bendecir su golden.

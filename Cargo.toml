@@ -6,7 +6,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 [workspace]
 resolver = "2"
-exclude = ["vendor/libsql"]
 members = [
   "crates/tpv-domain",
   "crates/tpv-application",
@@ -49,10 +48,10 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 
 # ── DB ──
-# Sólo `core`: leemos un fichero SQLite local. Las features por defecto arrastran replication,
-# remote, hrana y tls (tonic, hyper, tower…) para hablar con un servidor Turso, que en la Main no
-# se usa nunca — el que habla con la nube es el worker.
-libsql = { version = "0.9.30", default-features = false, features = ["core"] }
+# SQLite local de la Main. `bundled` compila el SQLite que trae la crate: el mismo en Windows,
+# Windows 7 y Android, sin depender del que tenga el sistema. Con la nube no habla: eso es cosa del
+# worker.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 # ── HTTP ──
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -132,7 +131,3 @@ sentry-tracing = "0.42"
 specta = { version = "=2.0.0-rc.25", features = ["derive", "function", "chrono", "serde_json", "uuid"] }
 specta-typescript = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["typescript"] }
-
-[patch.crates-io]
-# libsql #2251: cerrar el handle local una sola vez (ver vendor/libsql/PATCH.md).
-libsql = { path = "vendor/libsql" }

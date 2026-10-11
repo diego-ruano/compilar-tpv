@@ -1,7 +1,7 @@
 //! Error común de la capa de aplicación.
 //!
 //! Los casos de uso devuelven `Result<T, AppError>`. Los adaptadores de infraestructura
-//! convierten sus errores concretos (libsql, reqwest, io, etc.) en estas variantes.
+//! convierten sus errores concretos (SQLite, reqwest, io, etc.) en estas variantes.
 //!
 //! En la frontera Tauri, los comandos devuelven `Result<T, AppErrorDto>` (ARCH-02/05):
 //! ya NO se aplana a `String`. Cada variante tiene un `ErrorCode` estable y el texto

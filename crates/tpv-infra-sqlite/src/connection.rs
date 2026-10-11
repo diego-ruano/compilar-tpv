@@ -1,4 +1,4 @@
-//! Conexión y arranque (schema + seed) de la base de datos **SQLite local (libsql)**.
+//! Conexión y arranque (schema + seed) de la base de datos **SQLite local**.
 //!
 //! Antes vivía en el shell Tauri (`main.rs`). El shell ahora sólo aporta la ruta de
 //! datos (AppData); este módulo abre la BD (`Db`: escritor único + pool de lectura, WAL),
@@ -12,9 +12,7 @@ use crate::util::now_ms;
 use std::path::Path;
 use std::sync::Arc;
 
-use libsql::Builder;
-use crate::ejecutor::Value;
-use crate::ejecutor::Connection;
+use crate::ejecutor::{Connection, ErrorSql, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_domain::login::hash_pin;
@@ -136,26 +134,21 @@ async fn seed_admin_if_empty(conn: &Connection, aprovisionado: bool) -> AppResul
 /// dejar la app sin abrir). La comprobación usa una conexión efímera que se cierra antes de copiar.
 async fn backup_if_migration_pending(db_path: &Path) -> AppResult<()> {
     let path = db_path.to_owned();
-    let rt = tokio::runtime::Handle::current();
-    tokio::task::spawn_blocking(move || rt.block_on(backup_antes_de_migrar(&path))).await.map_err(db_err)?
+    tokio::task::spawn_blocking(move || backup_antes_de_migrar(&path)).await.map_err(db_err)?
 }
 
-async fn backup_antes_de_migrar(db_path: &Path) -> AppResult<()> {
+fn backup_antes_de_migrar(db_path: &Path) -> AppResult<()> {
     // Instalación nueva: no hay nada que respaldar (la creará `Db::open`).
     if !db_path.exists() {
         return Ok(());
     }
 
-    let db_path_str = db_path
-        .to_str()
-        .ok_or_else(|| AppError::internal("Ruta de BD inválida"))?;
-
-    let database = Builder::new_local(db_path_str).build().await.map_err(db_err)?;
-    let conn = database.connect().map_err(db_err)?;
+    let conn = crate::ejecutor::abrir(db_path).map_err(db_err)?;
     // Esta conexión auxiliar también puede coincidir con la limpieza del WAL al cerrar.
-    conn.busy_timeout(std::time::Duration::from_secs(5)).map_err(db_err)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|e| db_err(ErrorSql::from(e)))?;
 
-    let pending = crate::migrations::has_pending(&conn).await.map_err(db_err)?;
+    let pending = crate::migrations::has_pending(&conn).map_err(db_err)?;
 
     // Ya está al día (o BD nueva sin datos): no se migrará nada → no hace falta copia.
     if !pending {
@@ -164,11 +157,8 @@ async fn backup_antes_de_migrar(db_path: &Path) -> AppResult<()> {
 
     // Volcar el WAL al fichero principal para que la copia esté completa, y cerrar la conexión
     // efímera antes de copiar (Windows bloquea el fichero mientras está abierto).
-    let _ = conn
-        .query("PRAGMA wal_checkpoint(TRUNCATE);", Vec::<Value>::new())
-        .await;
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE);", [], |_| Ok(()));
     drop(conn);
-    drop(database);
 
     let backup = db_path.with_file_name(format!("data.db.bak.{}", now_ms()));
     match std::fs::copy(db_path, &backup) {

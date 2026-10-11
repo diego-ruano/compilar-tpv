@@ -29,8 +29,8 @@ pub fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/contract")
 }
 
-/// BD libsql nueva en un directorio temporal propio. Cada test tiene la suya: abrir muchas en un
-/// mismo test dispara un crash nativo intermitente en Windows (`STATUS_ACCESS_VIOLATION`).
+/// BD nueva en un directorio temporal propio: cada test tiene la suya y ningún caso ve lo que
+/// dejó otro.
 pub async fn db_temporal() -> (Arc<Db>, PathBuf) {
     let dir = crate::test_temp::dir_temporal("contract");
     std::fs::create_dir_all(&dir).unwrap();
@@ -51,7 +51,7 @@ pub async fn sembrar(db: &Arc<Db>, sentencias: &[Json]) {
     }
 }
 
-/// `libsql::Value` → `serde_json::Value`. Los blobs no se replican, así que no aparecen aquí.
+/// `Value` → `serde_json::Value`. Los blobs no se replican, así que no aparecen aquí.
 pub fn cell_to_json(v: Value) -> Json {
     match v {
         Value::Null => Json::Null,

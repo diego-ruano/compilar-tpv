@@ -16,9 +16,7 @@ use crate::consultas::db_err;
 use crate::util::now_ms;
 use std::path::{Path, PathBuf};
 
-use libsql::Builder;
-use crate::ejecutor::Value;
-use crate::ejecutor::Connection;
+use crate::ejecutor::{Connection, ErrorSql, Value};
 use tpv_application::error::{AppError, AppResult};
 use tpv_contracts::errors::ErrorCode;
 use tpv_contracts::recovery::{LocalBackupInfo, RecoveryState, RecoveryStatus};
@@ -70,10 +68,9 @@ fn valor_i64(value: Value) -> Option<i64> {
 
 /// Corre `f` en un hilo de bloqueo, fuera del runtime async.
 ///
-/// RI-41 (y RI-16): libsql local es `async` en la firma pero ejecuta SQLite en el hilo que lo
-/// llama, sin ceder. `VACUUM INTO` y `PRAGMA quick_check` de una base grande, o copiar la base
-/// entera a un USB, tardan segundos; en un hilo del runtime dejan a la interfaz sin uno de sus
-/// pocos hilos (un TPV tiene 2–4 núcleos) todo ese rato.
+/// RI-41 (y RI-16): SQLite trabaja sin ceder. `VACUUM INTO` y `PRAGMA quick_check` de una base
+/// grande, o copiar la base entera a un USB, tardan segundos; en un hilo del runtime dejan a la
+/// interfaz sin uno de sus pocos hilos (un TPV tiene 2–4 núcleos) todo ese rato.
 async fn en_hilo_aparte<T, F, Fut>(f: F) -> AppResult<T>
 where
     F: FnOnce() -> Fut + Send + 'static,
@@ -377,28 +374,24 @@ pub fn list_backups(app_data_dir: &Path) -> AppResult<Vec<LocalBackupInfo>> {
 /// `quick_check` recorre la base entera (ver [`en_hilo_aparte`]).
 async fn validate_backup(path: &Path) -> AppResult<()> {
     let path = path.to_path_buf();
-    en_hilo_aparte(move || async move { validar_copia(&path).await }).await
+    en_hilo_aparte(move || async move { validar_copia(&path) }).await
 }
 
-async fn validar_copia(path: &Path) -> AppResult<()> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| corrupta("La ruta de la copia no es válida"))?;
-    let database = Builder::new_local(path_str)
-        .build()
-        .await
+fn validar_copia(path: &Path) -> AppResult<()> {
+    // Los errores del motor se dicen con los mismos textos que en el resto de la crate.
+    let sql = ErrorSql::from;
+    let conn = crate::ejecutor::abrir(path)
         .map_err(|e| corrupta(format!("No se puede abrir la copia: {e}")))?;
-    let conn = database
-        .connect()
-        .map_err(|e| corrupta(format!("No se puede leer la copia: {e}")))?;
 
-    let mut rows = conn
-        .query("PRAGMA quick_check;", ())
-        .await
-        .map_err(|e| corrupta(format!("Comprobación de integridad fallida: {e}")))?;
+    let mut integridad = conn
+        .prepare("PRAGMA quick_check;")
+        .map_err(|e| corrupta(format!("Comprobación de integridad fallida: {}", sql(e))))?;
+    let mut filas = integridad
+        .query([])
+        .map_err(|e| corrupta(format!("Comprobación de integridad fallida: {}", sql(e))))?;
     let mut vio_ok = false;
-    while let Some(row) = rows.next().await.map_err(|e| corrupta(e.to_string()))? {
-        match row.get_value(0).map_err(|e| corrupta(e.to_string()))? {
+    while let Some(fila) = filas.next().map_err(|e| corrupta(sql(e).to_string()))? {
+        match fila.get::<_, Value>(0).map_err(|e| corrupta(sql(e).to_string()))? {
             Value::Text(s) if s.eq_ignore_ascii_case("ok") => vio_ok = true,
             Value::Text(s) => return Err(corrupta(format!("SQLite informa: {s}"))),
             _ => return Err(corrupta("Respuesta de integridad ilegible")),
@@ -408,9 +401,14 @@ async fn validar_copia(path: &Path) -> AppResult<()> {
         return Err(corrupta("La copia no superó la comprobación de integridad"));
     }
 
-    let mut usuarios = conn.query("SELECT COUNT(*) FROM Usuarios;", ()).await.map_err(db_err)?;
-    let users = usuarios.next().await.map_err(db_err)?.ok_or_else(|| corrupta("Sin respuesta de usuarios"))?.get::<i64>(0)
-        .map_err(|e| corrupta(format!("La copia no contiene el esquema esperado: {e}")))?;
+    let mut usuarios = conn.prepare("SELECT COUNT(*) FROM Usuarios;").map_err(|e| db_err(sql(e)))?;
+    let mut filas = usuarios.query([]).map_err(|e| db_err(sql(e)))?;
+    let users = filas
+        .next()
+        .map_err(|e| db_err(sql(e)))?
+        .ok_or_else(|| corrupta("Sin respuesta de usuarios"))?
+        .get::<_, i64>(0)
+        .map_err(|e| corrupta(format!("La copia no contiene el esquema esperado: {}", sql(e))))?;
     if users == 0 {
         return Err(corrupta("La copia no contiene ningún usuario"));
     }
@@ -1013,27 +1011,17 @@ mod tests {
         let path = abrible(&dir, &backup.id).await;
         validate_backup(&path).await.unwrap();
 
-        let database = Builder::new_local(path.to_str().unwrap())
-            .build()
-            .await
-            .unwrap();
-        let conn = database.connect().unwrap();
-        let mut rows = conn
-            .query(
+        let conn = crate::ejecutor::abrir(&path).unwrap();
+        let nombre = conn
+            .query_row(
                 "SELECT Nombre FROM Usuarios WHERE ID_Usuario = ?1;",
-                vec![Value::Text(crate::util::ADMIN_USUARIO_ID.to_string())],
+                [crate::util::ADMIN_USUARIO_ID],
+                |fila| fila.get::<_, Value>(0),
             )
-            .await
             .unwrap();
-        let row = rows.next().await.unwrap().unwrap();
-        assert_eq!(
-            row.get_value(0).unwrap(),
-            Value::Text("Nombre sólo local".into())
-        );
+        assert_eq!(nombre, Value::Text("Nombre sólo local".into()));
 
-        drop(rows);
         drop(conn);
-        drop(database);
         drop(db);
         let _ = std::fs::remove_dir_all(dir);
     }

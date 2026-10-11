@@ -3,9 +3,9 @@
 //! Adaptador de **persistencia** de la arquitectura hexagonal del TPV.
 //!
 //! Implementa los puertos de repositorio definidos en `tpv-application::ports`
-//! ejecutando SQL real contra la base de datos SQLite local (libsql). Toda
-//! sentencia SQL del backend antiguo (`mesas.rs`, `inventario.rs`, ...) se reubica
-//! aquí, dentro de repositorios que reciben la `Connection` de libsql.
+//! ejecutando SQL real contra la base de datos SQLite local (rusqlite, por medio de
+//! `ejecutor`). Toda sentencia SQL del backend antiguo (`mesas.rs`, `inventario.rs`, ...) se
+//! reubica aquí, dentro de repositorios que reciben la `Connection` del ejecutor.
 
 // Tests de contrato Main(Rust)↔worker(TS). Son dos y fijan las dos mitades del contrato:
 //   · escritura → el EFECTO de un comando (las filas que deja) es el mismo en los dos lados.
@@ -26,7 +26,7 @@ mod contract_tests;
 #[cfg(test)]
 mod planes;
 
-// Helpers de mapeo libsql::Value <-> tipos Rust:
+// Helpers de mapeo `Value` <-> tipos Rust:
 pub mod mapping;
 
 // Utilidades compartidas por repositorios (new_id, now_ms, …):

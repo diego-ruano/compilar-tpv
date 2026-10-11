@@ -54,7 +54,7 @@ Rust superior a 1.77.2. Entre las relevantes se encuentran:
 | `sentry 0.42.0` | 1.81 | Observabilidad y minidumps |
 | `tauri 2.11.2` | 1.77.2 | Shell de escritorio |
 | `tauri-plugin-single-instance 2.4.4` | 1.77.2 | Una sola instancia en escritorio |
-| `libsql 0.9.30` (`core`) | — | Base local |
+| `rusqlite 0.40.2` (`bundled`) | — | Base local |
 
 Aunque Tauri declara un MSRV compatible, el conjunto completo actual no compila con Rust 1.77.2.
 El lockfile también usa el formato 4, por lo que debería regenerarse con la versión de Cargo elegida
@@ -70,7 +70,7 @@ y las dependencias transitivas. Como mínimo habría que resolver versiones comp
 - Tauri y sus utilidades transitivas.
 - `tauri-plugin-updater` y su cliente HTTP.
 - `tauri-plugin-sentry` (0.5.0), `sentry` y el helper de minidumps.
-- `tauri-plugin-single-instance` y `libsql`.
+- `tauri-plugin-single-instance` y `rusqlite`.
 - `image`, `time`, `serde_with` y sus macros.
 
 El resultado debería quedar fijado mediante un lockfile propio y no recibir actualizaciones
@@ -124,7 +124,7 @@ Referencia: [cambios de compatibilidad de Vite 7](https://v7.vite.dev/guide/migr
 
 No se han encontrado incompatibilidades estructurales en los siguientes componentes:
 
-- SQLite/libsql y el almacenamiento local en AppData.
+- SQLite (rusqlite, con su SQLite empaquetado) y el almacenamiento local en AppData.
 - Windows Credential Manager utilizado mediante `keyring`.
 - Las APIs de impresión `winspool` empleadas para enumerar impresoras y enviar datos ESC/POS.
 - Las comunicaciones HTTPS y WebSocket con el backend remoto (reqwest con rustls).

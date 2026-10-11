@@ -1,4 +1,4 @@
-//! Helpers de conversión entre `libsql::Value` y tipos Rust. Reutilizables por todos
+//! Helpers de conversión entre `Value` (ver `ejecutor`) y tipos Rust. Reutilizables por todos
 //! los repositorios. Replican los antiguos helpers `v_*` que estaban duplicados por módulo.
 
 use crate::ejecutor::Value;

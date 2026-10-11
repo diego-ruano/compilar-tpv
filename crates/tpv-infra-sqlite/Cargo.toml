@@ -3,13 +3,13 @@ name = "tpv-infra-sqlite"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-description = "Adaptador de persistencia TPV: implementa los puertos de repositorio de tpv-application contra SQLite local (libsql)."
+description = "Adaptador de persistencia TPV: implementa los puertos de repositorio de tpv-application contra SQLite local (rusqlite)."
 
 [dependencies]
 tpv-domain = { workspace = true }
 tpv-application = { workspace = true }
 tpv-contracts = { workspace = true }
-libsql = { workspace = true }
+rusqlite = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 async-trait = { workspace = true }
 serde_json = { workspace = true }

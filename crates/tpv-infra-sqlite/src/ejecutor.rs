@@ -1,15 +1,73 @@
-//! RI-16: libsql local ejecuta SQLite sin ceder. Cada conexión pertenece a un hilo;
-//! Tokio sólo espera respuestas. Los cursores nativos nunca salen de ese hilo.
+//! RI-16: SQLite es síncrono y trabaja sin ceder, así que cada conexión vive en su propio hilo y
+//! Tokio sólo espera respuestas. La conexión, sus sentencias y sus cursores nunca salen de ese hilo.
+//!
+//! El motor es rusqlite, con el SQLite que trae empaquetado: el mismo en Windows, en Windows 7 y en
+//! Android. Este módulo es lo único de la crate que lo conoce; el resto trabaja con `Value`,
+//! `ErrorSql`, `Rows` y `Row`.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{mpsc, Arc};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::runtime::Handle;
+use std::sync::{mpsc, Arc};
+
 use tokio::sync::{oneshot, Semaphore};
 
-/// El valor de una columna o de un parámetro, y el error de la base. Son los del motor: el resto
-/// de la crate los toma de aquí y no de él, así que cambiar de motor sólo toca este módulo.
-pub use libsql::{Error as ErrorSql, Value};
+/// El valor de una columna o de un parámetro. El resto de la crate lo toma de aquí y no del motor.
+pub use rusqlite::types::Value;
+
+/// Error de la base local.
+///
+/// Sus textos (`SQLite failure: …`) se ven y se buscan: `db_err` los lleva al mensaje del
+/// `AppError`, y hay quien comprueba un `UNIQUE` o el `RAISE(ABORT, 'RI48: …')` de un trigger.
+#[derive(Debug)]
+pub enum ErrorSql {
+    /// SQLite rechazó la sentencia: su código extendido y el texto del motor.
+    SqliteFailure(i32, String),
+    /// Uso indebido: la base está cerrada, una escritura no replicable…
+    Misuse(String),
+    /// `execute` con una sentencia que devuelve filas.
+    ExecuteReturnedRows,
+    NullValue,
+    InvalidColumnIndex,
+    InvalidColumnType,
+}
+
+impl std::fmt::Display for ErrorSql {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorSql::SqliteFailure(_, m) => write!(f, "SQLite failure: `{m}`"),
+            ErrorSql::Misuse(m) => write!(f, "API misuse: `{m}`"),
+            ErrorSql::ExecuteReturnedRows => f.write_str("Execute returned rows"),
+            ErrorSql::NullValue => f.write_str("Null value"),
+            ErrorSql::InvalidColumnIndex => f.write_str("invalid column index"),
+            ErrorSql::InvalidColumnType => f.write_str("invalid column type"),
+        }
+    }
+}
+
+impl std::error::Error for ErrorSql {}
+
+impl From<rusqlite::Error> for ErrorSql {
+    fn from(e: rusqlite::Error) -> Self {
+        match e {
+            rusqlite::Error::SqliteFailure(c, m) => {
+                ErrorSql::SqliteFailure(c.extended_code, m.unwrap_or_else(|| c.to_string()))
+            }
+            rusqlite::Error::SqlInputError { error, msg, .. } => ErrorSql::SqliteFailure(error.extended_code, msg),
+            rusqlite::Error::ExecuteReturnedResults => ErrorSql::ExecuteReturnedRows,
+            otro => ErrorSql::Misuse(otro.to_string()),
+        }
+    }
+}
+
+/// Abre una conexión de lectura y escritura, creando el fichero si no existe y sin interpretar la
+/// ruta como URI. Cada conexión es de un solo hilo a la vez (`NO_MUTEX`): las de la `Db` viven en
+/// el suyo, y las demás son locales a una función.
+pub(crate) fn abrir(ruta: impl AsRef<Path>) -> Result<rusqlite::Connection, ErrorSql> {
+    use rusqlite::OpenFlags;
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    Ok(rusqlite::Connection::open_with_flags(ruta, flags)?)
+}
 
 /// Lo que aceptan `query` y `execute` como parámetros: `()` (ninguno) o `Vec<Value>`.
 pub trait Bindable {
@@ -26,14 +84,92 @@ impl Bindable for () {
     }
 }
 
+/// Enlaza los valores por posición (`?1`, `?2`…).
+///
+/// Tolera que no cuadren con los marcadores: los que faltan quedan `NULL` y los de más se ignoran.
+/// Rechazarlo podría tumbar un camino que funciona —y nada que rodee a un cobro puede impedirlo—,
+/// así que se tolera, pero se anota: una sentencia que recibe otros parámetros de los que espera
+/// suele ser un error.
+fn enlazar(stmt: &mut rusqlite::Statement<'_>, valores: &[Value], sql: &str) -> Result<(), ErrorSql> {
+    let esperados = stmt.parameter_count();
+    if valores.len() != esperados {
+        // El aviso sube a la telemetría; la sentencia, no (OBS-02): va a `debug`, que no se
+        // reenvía, y se ve en el log local arrancando con `TPV_LOG=info,tpv::sql=debug`.
+        tracing::warn!(target: "tpv::sql", esperados, recibidos = valores.len(),
+            "una sentencia no recibe los parámetros que espera");
+        let sql: String = sql.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect();
+        tracing::debug!(target: "tpv::sql", sql = %sql, "la sentencia del aviso anterior");
+    }
+    for (i, v) in valores.iter().take(esperados).enumerate() {
+        stmt.raw_bind_parameter(i + 1, v)?;
+    }
+    Ok(())
+}
+
 const MAX_PENDIENTES: usize = 32;
 const FILAS_POR_LOTE: usize = 64;
-type Trabajo = Box<dyn FnOnce(&mut Estado, &Handle) + Send>;
+
+/// Lo que vive en el hilo de una conexión. Las sentencias de los cursores toman prestada la conexión,
+/// así que los dos son locales del hilo y los cursores se sueltan antes que ella.
+struct Estado<'c> {
+    conn: &'c rusqlite::Connection,
+    cursores: HashMap<u64, Cursor<'c>>,
+}
+
+type Trabajo = Box<dyn for<'c> FnOnce(&mut Estado<'c>) + Send>;
 enum Mensaje { Trabajo(Trabajo), Cerrar(oneshot::Sender<()>) }
 
-struct Estado {
-    conn: libsql::Connection,
-    cursores: HashMap<u64, libsql::Rows>,
+/// Una consulta abierta. Sus filas se calculan al pedirlas, por lotes: una consulta que devuelve
+/// muchas no se carga de golpe, y una lenta no bloquea el hilo más de lo que tarda cada lote.
+struct Cursor<'c> {
+    stmt: rusqlite::CachedStatement<'c>,
+    /// El primer paso se da al abrir la consulta (ver `query`); su resultado espera aquí al primer lote.
+    primero: Option<Result<Option<Vec<Value>>, ErrorSql>>,
+}
+
+impl Cursor<'_> {
+    /// Avanza una fila.
+    ///
+    /// El `Rows` de rusqlite reinicia la sentencia al soltarse, y aquí la siguiente llamada tiene que
+    /// seguir donde iba: por eso el `Rows` de cada paso se olvida en vez de soltarse. Al llegar al
+    /// final, o al fallar, rusqlite ya la ha reiniciado.
+    fn paso(&mut self) -> Result<Option<Vec<Value>>, ErrorSql> {
+        let mut filas = self.stmt.raw_query();
+        let r = match filas.next() {
+            Ok(Some(f)) => {
+                // Las columnas se cuentan en cada fila: una sentencia de la caché que SQLite vuelve a
+                // preparar porque cambió el esquema puede no tener las mismas que al prepararla.
+                let columnas = f.as_ref().column_count();
+                (0..columnas).map(|i| f.get_ref(i).map(valor)).collect::<Result<Vec<_>, _>>().map(Some).map_err(ErrorSql::from)
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(e.into()),
+        };
+        std::mem::forget(filas);
+        r
+    }
+}
+
+/// Copia el valor de una columna. Un texto con UTF-8 inválido se lee con sustituciones (`U+FFFD`):
+/// no hace fallar la consulta entera.
+fn valor(v: rusqlite::types::ValueRef<'_>) -> Value {
+    use rusqlite::types::ValueRef;
+    match v {
+        ValueRef::Null => Value::Null,
+        ValueRef::Integer(n) => Value::Integer(n),
+        ValueRef::Real(n) => Value::Real(n),
+        ValueRef::Text(t) => Value::Text(String::from_utf8_lossy(t).into_owned()),
+        ValueRef::Blob(b) => Value::Blob(b.to_vec()),
+    }
+}
+
+impl Drop for Cursor<'_> {
+    fn drop(&mut self) {
+        // Un cursor que se suelta a medias tiene la sentencia en curso, y con ella una lectura
+        // abierta. Soltar un `Rows` nuevo la reinicia antes de que vuelva a la caché; si ya estaba
+        // reiniciada, no hace nada.
+        drop(self.stmt.raw_query());
+    }
 }
 
 struct Ejecutor {
@@ -45,18 +181,21 @@ struct Ejecutor {
 fn cerrado() -> ErrorSql { ErrorSql::Misuse("El ejecutor de SQLite se ha cerrado".into()) }
 
 impl Ejecutor {
-    async fn pedir<T: Send + 'static>(&self, f: impl FnOnce(&mut Estado, &Handle) -> Result<T, ErrorSql> + Send + 'static) -> Result<T, ErrorSql> {
+    async fn pedir<T: Send + 'static>(
+        &self,
+        f: impl for<'c> FnOnce(&mut Estado<'c>) -> Result<T, ErrorSql> + Send + 'static,
+    ) -> Result<T, ErrorSql> {
         // El permiso acompaña al trabajo, incluso si el solicitante cancela su Future.
         let permiso = self.admision.clone().acquire_owned().await.map_err(|_| cerrado())?;
         let (tx, rx) = oneshot::channel();
-        self.cola.send(Mensaje::Trabajo(Box::new(move |estado, rt| {
+        self.cola.send(Mensaje::Trabajo(Box::new(move |estado: &mut Estado<'_>| {
             let _permiso = permiso;
-            let _ = tx.send(f(estado, rt));
+            let _ = tx.send(f(estado));
         }))).map_err(|_| cerrado())?;
         rx.await.map_err(|_| cerrado())?
     }
 
-    fn limpiar(&self, f: impl FnOnce(&mut Estado, &Handle) + Send + 'static) {
+    fn limpiar(&self, f: impl for<'c> FnOnce(&mut Estado<'c>) + Send + 'static) {
         // Control de vida: no puede esperar ni perderse por saturación durante un Drop.
         // Sólo los trabajos admitidos y sus cursores generan estas limpiezas.
         let _ = self.cola.send(Mensaje::Trabajo(Box::new(f)));
@@ -68,70 +207,82 @@ impl Ejecutor {
 pub struct Connection { ejecutor: Arc<Ejecutor> }
 
 impl Connection {
-    pub(crate) fn nueva(conn: libsql::Connection, nombre: &str) -> Result<Self, std::io::Error> {
-        let rt = Handle::current();
+    pub(crate) fn nueva(conn: rusqlite::Connection, nombre: &str) -> Result<Self, std::io::Error> {
         let (cola, entrada) = mpsc::channel::<Mensaje>();
         std::thread::Builder::new().name(nombre.into()).spawn(move || {
-            let mut estado = Estado { conn, cursores: HashMap::new() };
+            let conn = conn;
+            let mut estado = Estado { conn: &conn, cursores: HashMap::new() };
             let mut cierre = None;
             while let Ok(mensaje) = entrada.recv() {
                 let trabajo = match mensaje {
                     Mensaje::Trabajo(t) => t,
                     Mensaje::Cerrar(tx) => { cierre = Some(tx); break; }
                 };
-                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trabajo(&mut estado, &rt))).is_err() {
+                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| trabajo(&mut estado))).is_err() {
                     // No reutilizar una conexión cuyo trabajo haya entrado en pánico.
                     tracing::error!("El ejecutor de SQLite terminó por un pánico");
                     break;
                 }
             }
-            estado.cursores.clear();
-            if !estado.conn.is_autocommit() {
-                if let Err(e) = rt.block_on(estado.conn.execute_batch("ROLLBACK;")) {
+            // Los cursores antes que la conexión: sus sentencias la necesitan para finalizarse.
+            drop(estado);
+            if !conn.is_autocommit() {
+                if let Err(e) = conn.execute_batch("ROLLBACK;") {
                     tracing::error!(error = %e, "No se pudo revertir al cerrar SQLite");
                 }
             }
-            // Conexión y sentencias se destruyen aquí, fuera del runtime async.
-            drop(estado);
+            drop(conn);
             if let Some(tx) = cierre { let _ = tx.send(()); }
         })?;
         Ok(Self { ejecutor: Arc::new(Ejecutor { cola, admision: Arc::new(Semaphore::new(MAX_PENDIENTES)), siguiente: AtomicU64::new(1) }) })
     }
 
+    /// Una sentencia que no devuelve filas. Devuelve las filas que cambió.
     pub async fn execute(&self, sql: &str, params: impl Bindable) -> Result<u64, ErrorSql> {
         let sql = sql.to_owned();
-        let params = params.into_values();
-        self.ejecutor.pedir(move |s, rt| rt.block_on(s.conn.execute(&sql, params))).await
+        let valores = params.into_values();
+        self.ejecutor.pedir(move |s| {
+            let mut stmt = s.conn.prepare_cached(&sql)?;
+            enlazar(&mut stmt, &valores, &sql)?;
+            Ok(stmt.raw_execute()? as u64)
+        }).await
     }
 
+    /// Varias sentencias seguidas, sin parámetros. Las filas que devuelva alguna se descartan.
     pub async fn execute_batch(&self, sql: &str) -> Result<(), ErrorSql> {
         let sql = sql.to_owned();
-        self.ejecutor.pedir(move |s, rt| rt.block_on(s.conn.execute_batch(&sql)).map(|_| ())).await
+        self.ejecutor.pedir(move |s| Ok(s.conn.execute_batch(&sql)?)).await
     }
 
+    /// Una consulta. El primer paso se da aquí: una consulta lenta tarda en `query`, el error de
+    /// prepararla sale aquí y el de ejecutarla, en el primer `next()`.
     pub async fn query(&self, sql: &str, params: impl Bindable) -> Result<Rows, ErrorSql> {
         let sql = sql.to_owned();
-        let params = params.into_values();
+        let valores = params.into_values();
         let ejecutor = self.ejecutor.clone();
         let id = ejecutor.siguiente.fetch_add(1, Ordering::Relaxed);
-        self.ejecutor.pedir(move |s, rt| {
-            let cursor = rt.block_on(s.conn.query(&sql, params))?;
+        self.ejecutor.pedir(move |s| {
+            let conn = s.conn;
+            let mut stmt = conn.prepare_cached(&sql)?;
+            enlazar(&mut stmt, &valores, &sql)?;
+            let mut cursor = Cursor { stmt, primero: None };
+            cursor.primero = Some(cursor.paso());
             s.cursores.insert(id, cursor);
             Ok(Rows { ejecutor, id, lote: VecDeque::new(), terminadas: false, pendiente: None })
         }).await
     }
 
     pub(crate) async fn sanear(&self) -> Result<(), ErrorSql> {
-        self.ejecutor.pedir(|s, rt| {
-            if !s.conn.is_autocommit() { rt.block_on(s.conn.execute_batch("ROLLBACK;"))?; }
+        self.ejecutor.pedir(|s| {
+            if !s.conn.is_autocommit() { s.conn.execute_batch("ROLLBACK;")?; }
             Ok(())
         }).await
     }
 
     pub(crate) fn revertir_al_soltar(&self) {
-        self.ejecutor.limpiar(|s, rt| {
+        self.ejecutor.limpiar(|s| {
             if !s.conn.is_autocommit() {
-                if let Err(e) = rt.block_on(s.conn.execute_batch("ROLLBACK;")) {
+                if let Err(e) = s.conn.execute_batch("ROLLBACK;") {
                     tracing::error!(error = %e, "No se pudo revertir la operación abandonada");
                 }
             }
@@ -186,30 +337,35 @@ pub struct Rows {
 type Lote = (VecDeque<Result<Row, ErrorSql>>, bool);
 type PeticionLote = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Lote, ErrorSql>> + Send>>;
 
+/// Mete en el lote lo que dio un paso del cursor. Devuelve si el cursor ha terminado.
+fn meter(lote: &mut VecDeque<Result<Row, ErrorSql>>, paso: Result<Option<Vec<Value>>, ErrorSql>) -> bool {
+    match paso {
+        Ok(Some(valores)) => { lote.push_back(Ok(Row { valores })); false }
+        Ok(None) => true,
+        Err(e) => { lote.push_back(Err(e)); true }
+    }
+}
+
 impl Rows {
     pub async fn next(&mut self) -> Result<Option<Row>, ErrorSql> {
         if self.lote.is_empty() && !self.terminadas {
             let id = self.id;
             if self.pendiente.is_none() {
                 let ejecutor = self.ejecutor.clone();
-                self.pendiente = Some(Box::pin(async move { ejecutor.pedir(move |s, rt| {
-                let mut lote = VecDeque::new();
-                let mut terminadas = false;
-                if let Some(cursor) = s.cursores.get_mut(&id) {
-                    for _ in 0..FILAS_POR_LOTE {
-                        let fila = rt.block_on(cursor.next()).and_then(|r| r.map(|r| {
-                            let valores = (0..r.column_count()).map(|i| r.get_value(i)).collect::<Result<Vec<_>, _>>()?;
-                            Ok(Row { valores })
-                        }).transpose());
-                        match fila {
-                            Ok(Some(r)) => lote.push_back(Ok(r)),
-                            Ok(None) => { terminadas = true; break; }
-                            Err(e) => { lote.push_back(Err(e)); terminadas = true; break; }
+                self.pendiente = Some(Box::pin(async move { ejecutor.pedir(move |s| {
+                    let mut lote = VecDeque::new();
+                    let mut terminadas = true;
+                    if let Some(cursor) = s.cursores.get_mut(&id) {
+                        terminadas = match cursor.primero.take() {
+                            Some(primero) => meter(&mut lote, primero),
+                            None => false,
+                        };
+                        while !terminadas && lote.len() < FILAS_POR_LOTE {
+                            terminadas = meter(&mut lote, cursor.paso());
                         }
                     }
-                } else { terminadas = true; }
-                if terminadas { s.cursores.remove(&id); }
-                Ok((lote, terminadas))
+                    if terminadas { s.cursores.remove(&id); }
+                    Ok((lote, terminadas))
                 }).await }));
             }
             // Conservar la petición en el cursor hace next() seguro frente a select!/cancelación.
@@ -226,6 +382,6 @@ impl Rows {
 impl Drop for Rows {
     fn drop(&mut self) {
         let id = self.id;
-        self.ejecutor.limpiar(move |s, _| { s.cursores.remove(&id); });
+        self.ejecutor.limpiar(move |s| { s.cursores.remove(&id); });
     }
 }

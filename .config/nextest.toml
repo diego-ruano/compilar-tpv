@@ -1,13 +1,11 @@
 # Configuración de cargo-nextest (runner de los tests de Rust).
 #
-# Nextest corre cada test en su propio proceso: aísla los OnceLock y permite identificar
-# cualquier aborto nativo sin perder el resultado del resto de la tanda.
+# Nextest corre cada test en su propio proceso: los que fijan estado global (`static`, `OnceLock`;
+# por ejemplo, el bloque `SistemaInformatico` de Veri*factu) no se pisan entre sí, y un aborto
+# nativo no se lleva el resultado del resto de la tanda. Con `cargo test` todos comparten proceso.
 #
-# libsql 0.9.30 cerraba dos veces las conexiones locales (#2251), provocando
-# STATUS_ACCESS_VIOLATION en Windows. Cargo aplica el cierre idempotente de vendor/libsql;
-# las reaperturas deben esperar además a Db::cerrar(). Los reintentos se conservan para
-# mostrar cualquier fallo transitorio como FLAKY. Al verificar estas correcciones se usa
-# --retries 0, de modo que un fallo no quede oculto por otro intento.
+# Los reintentos muestran cualquier fallo transitorio como FLAKY. Para verificar que algo es
+# estable se usa --retries 0, de modo que un fallo no quede oculto por otro intento.
 
 # Specta exporta desde el ejecutable Tauri; los tests de contratos ya son pruebas puras.
 [profile.default]

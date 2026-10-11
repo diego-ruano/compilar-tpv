@@ -9,7 +9,7 @@ remite a la AEAT con el certificado del bar.
 | Pieza | Tecnología | Dónde |
 |---|---|---|
 | Aplicación (Main y Handy) | Tauri 2, React 19, TypeScript, Vite | `apps/tpv-main/` |
-| Backend local | Rust, arquitectura hexagonal, SQLite (libsql) | `crates/*`, `apps/tpv-main/src-tauri/` |
+| Backend local | Rust, arquitectura hexagonal, SQLite (rusqlite) | `crates/*`, `apps/tpv-main/src-tauri/` |
 | Nube | Cloudflare Worker (Hono), Durable Objects, Turso, R2 | `apps/cloud-worker-licensing/` (desplegado como `tpv-api`) |
 | Código compartido | Esquema SQL, tipos generados, cliente de invoke | `packages/*` |
 

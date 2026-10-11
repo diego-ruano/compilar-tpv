@@ -418,7 +418,7 @@ pub async fn sentencia_de_reparacion(
 /// ¿Son el mismo valor?
 ///
 /// Comparar el JSON tal cual daría descuadres falsos a mansalva: la nube devuelve un entero como
-/// `1` y libsql local puede devolverlo como `1.0`, y un `4.0` frente a un `4` no es un descuadre,
+/// `1` y la base local puede devolverlo como `1.0`, y un `4.0` frente a un `4` no es un descuadre,
 /// es la misma cifra escrita de dos maneras. Los números se comparan **como números**; el resto,
 /// por texto.
 ///

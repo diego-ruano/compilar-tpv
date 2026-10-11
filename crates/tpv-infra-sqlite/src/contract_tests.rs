@@ -85,7 +85,7 @@ fn ruta_caso(base: &str, nombre: &str) -> PathBuf {
 /// propósito (sin `*`, sin subconsultas), así que este parseo simple basta.
 ///
 /// Tiene que dar **el mismo nombre que devolvería SQLite**, porque el lado worker no parsea nada:
-/// lee las claves de la fila que le da libsql y las compara contra este golden. Por eso:
+/// lee las claves de la fila que le devuelve SQLite y las compara contra este golden. Por eso:
 /// `X AS Y` → `Y` (manda el alias) y `M.Numero_Mesa` → `Numero_Mesa` (SQLite quita el prefijo de
 /// tabla). Sin esto, un snapshot con JOIN —necesario cuando el ID de la fila lo genera cada lado
 /// por su cuenta y hay que anclarse a otra columna— compararía claves distintas y saldría rojo por
@@ -246,10 +246,9 @@ fn s(v: &Json) -> String {
     v.as_str().unwrap().to_string()
 }
 
-/// Genera **un `#[tokio::test]` por caso** (en vez de un solo bucle). Abrir muchas BD libsql en un
-/// mismo test dispara un crash nativo intermitente en Windows (`STATUS_ACCESS_VIOLATION`); un test
-/// por caso —cada uno con su propia BD— es el patrón estable del resto de la suite. El identificador
-/// del test **es** el nombre del caso (`<modulo>__<caso>`), que también es la ruta de su fixture.
+/// Genera **un `#[tokio::test]` por caso** (en vez de un solo bucle): cada caso con su propia BD,
+/// que pasa o falla por su cuenta sin arrastrar a los demás. El identificador del test **es** el
+/// nombre del caso (`<modulo>__<caso>`), que también es la ruta de su fixture.
 ///
 /// Añadir un caso: crear su fixture en `tests/contract/casos/<modulo>/`, sumar su nombre aquí y en el
 /// test del worker (`test/contract.test.ts`), y bendecir su golden.
