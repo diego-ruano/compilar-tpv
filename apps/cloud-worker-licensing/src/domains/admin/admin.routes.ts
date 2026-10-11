@@ -43,6 +43,7 @@ import {
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import { cuerpo } from "../../lib/validacion";
+import { TARGETS } from "../updates/updates.routes";
 import {
 	maxHoras,
 	olvidarInterruptoresCacheados,
@@ -537,13 +538,15 @@ adminRoutes.get("/releases", async (c) => {
 
 const promocionarSchema = z.object({
 	version: z.string().min(1),
-	target: z.string().optional(),
+	// Por defecto, Windows 10/11; la variante de Windows 7 se promociona con `windows7`.
+	target: z.enum(TARGETS).optional(),
 	arch: z.string().optional(),
 });
 
 /**
  * Promociona una versión de `beta` a `stable`: la copia al canal estable con la misma firma y URL, y
- * desde ese momento se la ofrece el feed a todos los equipos. Sin `arch`, en todos los que tenga.
+ * desde ese momento se la ofrece el feed a todos los equipos de ese `target`. Sin `arch`, en todos
+ * los que tenga.
  */
 adminRoutes.post("/releases/promote", cuerpo(promocionarSchema), async (c) => {
 	const { version, target, arch } = c.req.valid("json");

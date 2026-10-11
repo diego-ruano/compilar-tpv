@@ -24,7 +24,7 @@
 //   pnpm piloto:quitar -- --tenant <tenantId>
 //   pnpm piloto:lista  -- [--todos]                 (--todos: todos los negocios, para ver su id)
 //   pnpm release:lista
-//   pnpm release:promocionar -- --version 1.4.0 [--arch x86_64]
+//   pnpm release:promocionar -- --version 1.4.0 [--target windows7] [--arch x86_64]
 //
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
@@ -355,11 +355,14 @@ async function releaseLista() {
 async function releasePromocionar(args) {
 	const version = String(args.version || "").trim();
 	if (!version) fail("--version <x.y.z> requerido (sácalo de `pnpm release:lista`)");
+	const target = args.target ? String(args.target) : "windows";
 	await api("POST", "/v1/admin/releases/promote", {
 		version,
+		target,
 		...(args.arch ? { arch: String(args.arch) } : {}),
 	});
-	console.log(`\n  ✔ ${version} pasa a estable: todos los equipos la verán en su próxima comprobación.\n`);
+	const quien = target === "windows7" ? "los equipos con Windows 7" : "todos los equipos";
+	console.log(`\n  ✔ ${version} (${target}) pasa a estable: ${quien} la verán en su próxima comprobación.\n`);
 }
 
 /* ── Entrada ─────────────────────────────────────────────────────────────── */
@@ -419,7 +422,7 @@ if (!comandos[cmd]) {
 
   Versiones (pnpm release:<comando>):
     lista
-    promocionar --version <x.y.z> [--arch x86_64]   (de beta a estable)
+    promocionar --version <x.y.z> [--target windows7] [--arch x86_64]   (de beta a estable)
 `);
 	process.exit(1);
 }

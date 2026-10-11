@@ -86,6 +86,7 @@ pnpm piloto:lista -- --todos                    # los negocios con su id
 pnpm piloto:poner -- --tenant <tenantId>        # o piloto:quitar
 pnpm release:lista                              # qué versión está en qué canal
 pnpm release:promocionar -- --version 1.2.0     # de beta a estable, con la misma firma y URL
+pnpm release:promocionar -- --version 1.0.3 --target windows7   # lo mismo, para la variante de Windows 7
 ```
 
 Conviene elegir pilotos variados (con Handy, con varias impresoras, con mucho volumen) y que sepan que lo
@@ -138,12 +139,21 @@ curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/publish \
 ```
 
 `target` (`windows`), `arch` (`x86_64`) y `channel` (`stable`) tienen esos valores por defecto: a mano se
-publica directamente para todos. Para pasar antes por los pilotos, `"channel": "beta"`.
+publica directamente para todos. Para pasar antes por los pilotos, `"channel": "beta"`. `target` sólo admite
+`windows` y `windows7`, y `channel` sólo `stable` y `beta`: otro valor es un 400, en vez de una versión
+publicada que ningún equipo vería.
 
 ## El feed
 
 `apps/cloud-worker-licensing/src/domains/updates/updates.routes.ts`, tabla `app_releases` de la base
 central, clave `(version, target, arch, channel)`.
+
+**Sistema y canal son dos cosas distintas** (RI-74). El sistema va en el `target`: `windows` es Windows 10/11
+y `windows7` la variante de Windows 7, que se lo fija ella misma al updater (`.target("windows7")`). El
+canal dice a quién le llega antes. Así cada sistema tiene su estable y su beta con sus pilotos, y un Windows
+7 no puede recibir el instalador de Windows 10/11, que instala bien y luego no arranca. Con un target
+fijado, el updater busca en `platforms` la clave tal cual (`windows7`), no `<target>-<arch>`: el
+manifiesto lleva las dos.
 
 - `GET /v1/update/:target/:arch/:current` sirve la versión **más alta** activa de ese `target` y `arch`,
   comparada con `compararVersiones` (numérica por tramos; una preliberación pierde contra su versión

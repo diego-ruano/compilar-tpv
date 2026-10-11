@@ -20,6 +20,12 @@
 //
 // Los binarios (instalador + .sig) se hospedan donde quieras (R2, etc.); aquí solo guardamos su
 // URL y la firma. La fuente de versiones es la tabla `app_releases` de la Turso central.
+//
+// QUÉ SISTEMA Y QUÉ CANAL son dos cosas distintas. El sistema va en el `target`: `windows` es el de
+// Windows 10/11 y `windows7` la variante de Windows 7, que se lo fija ella misma al updater. El canal
+// (`stable`/`beta`) es a quién le llega antes. Así cada variante tiene su estable y su beta con sus
+// pilotos, y un Windows 7 no puede recibir nunca un instalador de Windows 10/11, que instala bien y
+// luego no arranca.
 
 import { Hono, type MiddlewareHandler } from "hono";
 import * as z from "zod";
@@ -31,6 +37,14 @@ import { checkAdminToken } from "../../middleware/requireAdmin";
 import { cuerpo } from "../../lib/validacion";
 
 export const updatesRoutes = new Hono<{ Bindings: Env }>();
+
+/**
+ * Lo único que se puede publicar. Una lista cerrada porque el feed sólo encuentra lo que se publicó
+ * con el nombre exacto: un `windows-7` o un `Beta` dejaría la versión publicada sin que ningún equipo
+ * la viera nunca, y sin un solo error.
+ */
+export const TARGETS = ["windows", "windows7"] as const;
+export const CANALES = ["stable", "beta"] as const;
 
 // Verifica el token admin del header `Authorization: Bearer <token>`. Si el secreto no está
 // configurado, la publicación queda DESHABILITADA (fail-safe: nadie puede publicar por accidente).
@@ -164,16 +178,17 @@ updatesRoutes.get("/:target/:arch/:current", async (c) => {
 	// Sin release publicada para esta plataforma → 204: el plugin entiende "estás al día".
 	if (!row) return new Response(null, { status: 204 });
 
-	// Formato estático del updater de Tauri. La clave de `platforms` es "<target>-<arch>".
+	// Formato estático del updater de Tauri. Por defecto el plugin busca su plataforma como
+	// "<target>-<arch>"; con un target fijado por la app (`windows7`) busca la clave tal cual, sin la
+	// arquitectura. Van las dos: a cada equipo le sobra una y no le estorba.
+	const plataforma = { signature: row.signature, url: row.url };
 	const manifest = {
 		version: row.version,
 		notes: row.notes || "",
 		pub_date: row.pub_date,
 		platforms: {
-			[`${target}-${arch}`]: {
-				signature: row.signature,
-				url: row.url,
-			},
+			[`${target}-${arch}`]: plataforma,
+			[target]: plataforma,
 		},
 	};
 
@@ -188,9 +203,9 @@ const publishSchema = z.object({
 	url: z.string().url(), // URL pública del instalador (R2, etc.)
 	notes: z.string().nullable().optional(),
 	pub_date: z.string().optional(), // ISO; si falta, ahora
-	target: z.string().optional(), // por defecto "windows"
+	target: z.enum(TARGETS).optional(), // por defecto "windows"
 	arch: z.string().optional(), // por defecto "x86_64" (REV-23: forma parte de la identidad)
-	channel: z.string().optional(), // por defecto "stable"
+	channel: z.enum(CANALES).optional(), // por defecto "stable"
 });
 
 updatesRoutes.post("/publish", soloConTokenDeRelease, cuerpo(publishSchema), async (c) => {
@@ -237,9 +252,9 @@ updatesRoutes.post("/publish", soloConTokenDeRelease, cuerpo(publishSchema), asy
 
 const deactivateSchema = z.object({
 	version: z.string().min(1),
-	target: z.string().optional(),
+	target: z.enum(TARGETS).optional(),
 	arch: z.string().optional(),
-	channel: z.string().optional(),
+	channel: z.enum(CANALES).optional(),
 });
 
 updatesRoutes.post("/deactivate", soloConTokenDeRelease, cuerpo(deactivateSchema), async (c) => {
