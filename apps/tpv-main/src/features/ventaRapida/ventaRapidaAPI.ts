@@ -52,7 +52,9 @@ export type VrBootstrapResult = {
 export async function vrBootstrap(
     idTrabajador: string | null,
 ): Promise<VrBootstrapResult> {
-    const idComanda = await crearComandaBarra(idTrabajador, false);
+    // Volver a la pantalla retoma el último ticket abierto; sólo se estrena uno si no hay ninguno.
+    // Un ticket nuevo es lo que hace «Nuevo ticket» (`vrCreateComandaBarra`).
+    const idComanda = await crearComandaBarra(idTrabajador, true);
 
     const [categorias, lineas] = await Promise.all([
         vrListCategoriasVendibles(),
