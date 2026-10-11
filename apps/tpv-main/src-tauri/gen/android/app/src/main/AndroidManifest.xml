@@ -2,8 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- AndroidTV support -->
-    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <!-- RI-76: sin el soporte de Android TV de la plantilla (la app salía en el lanzador de una tele)
+         ni su FileProvider. wry sólo lo usa para hacer una foto con un <input capture>, que la app no
+         tiene; si alguna pantalla lo añade, hay que volver a declararlo (con res/xml/file_paths.xml)
+         y pedir el permiso de cámara. -->
 
     <!-- RI-72/RI-76: sin copia automática. El almacén de secretos viajaría cifrado con una clave del
          Keystore que no viaja, y una Handy nueva se empareja: no se restaura. -->
@@ -22,19 +24,7 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-                <!-- AndroidTV support -->
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <provider
-          android:name="androidx.core.content.FileProvider"
-          android:authorities="${applicationId}.fileprovider"
-          android:exported="false"
-          android:grantUriPermissions="true">
-          <meta-data
-            android:name="android.support.FILE_PROVIDER_PATHS"
-            android:resource="@xml/file_paths" />
-        </provider>
     </application>
 </manifest>
