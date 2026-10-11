@@ -278,10 +278,13 @@ describe("El camino del dinero", () => {
         // El parámetro que la especificación prohíbe expresamente en el QR de una factura.
         expect(qr).not.toContain("formato=json");
 
-        // La copia es el mismo papel con la marca: todo se LEE de la fila, nada se recalcula.
+        // La copia es el mismo papel con la marca: todo se LEE de la fila, nada se recalcula. Lo
+        // único que no repite es abrir el cajón: eso sólo lo hace el original de un cobro en efectivo.
         const copia = await ticketDelCobro(idPago, true);
         expect(copia.es_copia).toBe(true);
-        expect({ ...copia, es_copia: false }).toEqual(ticket);
+        expect(ticket.abre_cajon).toBe(true);
+        expect(copia.abre_cajon).toBe(false);
+        expect({ ...copia, es_copia: false, abre_cajon: true }).toEqual(ticket);
     });
 
     it("11 · la segunda venta avanza la cadena, y la cadena está sana", async () => {
