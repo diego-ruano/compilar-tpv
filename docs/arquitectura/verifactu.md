@@ -419,8 +419,7 @@ XML, pero ningún camino la rellena.
 - **Lo usa Windows, no el programa.** El TLS mutuo va por **WinHTTP** (schannel), al que se le pasa
   el `CERT_CONTEXT` del almacén. La clave privada no sale nunca del almacén, no hay `.p12` que leer
   ni contraseña que guardar. Sirve un certificado con clave en un KSP de CNG, en un **CSP heredado**
-  (como queda un `.p12` importado con doble clic) o en una tarjeta. `rustls-cng` no valdría: habla
-  NCrypt, que no ve los CSP heredados.
+  (como queda un `.p12` importado con doble clic) o en una tarjeta, y toma el proxy del sistema.
 - **Se guarda sólo la huella**, en `device_config.json` (`verifactu_cert`). No es un secreto. Al
   elegirlo se comprueba que exista en el almacén.
 - **Dos almacenes**: `CurrentUser\My` y `LocalMachine\My`. Sólo aparecen certificados con clave

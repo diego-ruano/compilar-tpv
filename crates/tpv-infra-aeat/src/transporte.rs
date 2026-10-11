@@ -1,28 +1,18 @@
 //! Transporte HTTPS con **certificado de cliente**, por WinHTTP.
 //!
-//! # Por qué WinHTTP y no `rustls-cng` (corrección al diseño original)
+//! # Por qué WinHTTP
 //!
-//! El plan elegía `rustls-cng` para que la clave privada no saliera nunca del almacén. La idea es
-//! la correcta y aquí se conserva entera; lo que no se sostiene es el mecanismo, y se descubrió
-//! mirando los certificados que hay instalados de verdad:
+//! El plan elegía `rustls-cng` para que la clave privada no saliera nunca del almacén. Se descartó
+//! pensando que NCrypt, la API de CNG por la que habla, no vería las claves de los certificados de
+//! la FNMT importados desde un `.p12`, que quedan en un **CSP heredado** (`Microsoft Enhanced
+//! Cryptographic Provider v1.0`, `dwProvType = 1`). En Windows 11 no es así (comprobado el
+//! 2026-10-11): `CryptAcquireCertificatePrivateKey` con `CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG` abre
+//! esa clave y `NCryptSignHash` firma con ella.
 //!
-//! `rustls-cng` habla por **NCrypt**, que es la API de CNG y sólo abre claves guardadas en un
-//! *Key Storage Provider*. Los certificados de la FNMT importados desde un `.p12` —que es como los
-//! instala todo el mundo, y como estaban los dos de la máquina de desarrollo— quedan en un **CSP
-//! heredado** (`Microsoft Enhanced Cryptographic Provider v1.0`, `dwProvType = 1`). NCrypt no los
-//! ve. Con `rustls-cng`, el certificado que el bar tiene instalado sencillamente no aparecería, y
-//! la única salida sería pedirle que lo reimporte con `certutil -importpfx -csp "Microsoft
-//! Software Key Storage Provider"` — o sea, un paso manual con la contraseña del `.p12` delante de
-//! cada cliente.
-//!
-//! WinHTTP va por debajo a **schannel**, la pila TLS del propio Windows, que es la que usan el
-//! navegador y Autofirma. Y schannel sirve las tres formas por igual:
-//!
-//! | Cómo está la clave | `rustls-cng` (NCrypt) | WinHTTP (schannel) |
-//! |---|---|---|
-//! | KSP moderno (CNG) | ✅ | ✅ |
-//! | CSP heredado (`.p12` importado) | ❌ **no la ve** | ✅ |
-//! | Tarjeta / DNIe / token | ✅ | ✅ |
+//! Se queda WinHTTP porque funciona y no hay que sostener nada: va por debajo a **schannel**, la
+//! pila TLS del propio Windows (la que usan el navegador y Autofirma), toma el proxy del sistema y
+//! sirve igual una clave de un KSP, de un CSP heredado o de una tarjeta. (La variante de Windows 7
+//! no puede: su schannel no tiene los cifrados que exige la AEAT, y allí el TLS lo hace rustls.)
 //!
 //! Lo que motivaba la decisión original se mantiene intacto: **la clave privada no sale del
 //! almacén**, no se parsea ningún formato, no hay contraseña que pedir ni que guardar, y lo único
