@@ -59,6 +59,9 @@ como **multiconjunto** (sin orden), con números comparados como números (toler
 
 - Los `snapshot` **omiten** las columnas no deterministas (UUIDs generados, fechas): queda el efecto
   determinista (importes, stock por lote, consumos, qué líneas se cobraron).
+- Que cada lado genere sus propios IDs no impide contrastar un comando: el snapshot los deja fuera y
+  comprueba aparte que ninguno viene vacío y que no se repiten (`Tiene_Id`, `Ids_Unicos` en
+  `horarios/copiar_semana.json` y `horarios/set_predeterminado_desde_semana.json`).
 - Cuando el comando crea filas con un ID nuevo y hace falta saber a qué fila pertenecen, se ancla con un
   `LEFT JOIN` por una columna estable (el nombre), **con alias `AS`** en las columnas cualificadas (Rust
   parsea los nombres del texto del SELECT y el worker los lee de SQLite). `LEFT` para que una fila
@@ -128,8 +131,6 @@ y cuáles faltan.
 
 - **`trabajadores.createTrabajador` / `updateTrabajador`**: escriben PII cifrada (que el worker ni escribe)
   y `Password_Hash` con sal aleatoria; sólo las columnas no sensibles serían comparables.
-- **`trabajadores.setPredeterminadoDesdeSemana`**: genera los IDs nuevos con `new_id` en Rust y
-  `nuevoId` en el worker; sólo el resto de columnas sería comparable.
 
 ### Fuera por construcción
 

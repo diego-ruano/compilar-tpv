@@ -390,9 +390,6 @@ tocado; están aquí para decidir.
 - **El test `migracion_0003_conserva_hijas_y_permite_stock_negativo`** (`migrations.rs`) aplica las dos
   primeras migraciones a mano y espera que el runner aplique la tercera; con una sola migración, el
   runner no aplica nada y el test ya no comprueba lo que dice su nombre.
-- **`tests/contract/cobertura.json`** excluye `login.completeInitialSetup`, que ya no existe en el
-  worker (el script de cobertura lo marca como exclusión obsoleta), y da para
-  `trabajadores.setPredeterminadoDesdeSemana` el motivo de `copySemana`, que ya tiene caso.
 - **`descartarAvisoDatosFiscales`** (`e2e/helpers/fiscal.ts`) no la llama ningún recorrido.
 - **Los comentarios de `0001_inicial.sql` citan documentos y secciones que ya no existen**
   (`docs/PLAN_VERIFACTU.md`, `docs/VERIFACTU_PENDIENTES.md`, `BACKLOG.md DB-14`, «CLAUDE.md 9») y uno de

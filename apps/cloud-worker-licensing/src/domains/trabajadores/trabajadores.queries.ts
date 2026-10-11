@@ -140,6 +140,13 @@ function currentMonday(): string {
 	return dateToYmd(utc);
 }
 
+/** Un texto opcional recortado; vacío es `null`. Espejo de `limpiar_opcional` (tpv-domain). */
+function limpiarOpcional(v: unknown): string | null {
+	if (v == null) return null;
+	const t = String(v).trim();
+	return t.length ? t : null;
+}
+
 function weekday1To7(ymd: string): number {
 	const d = ymdToDate(ymd);
 	return d.getUTCDay() || 7;
@@ -381,9 +388,11 @@ export async function predeterminadoDesdeSemanaItems(
 				orden,
 				id_turno: String(r.id_turno ?? ""),
 				area: String(r.area ?? "Sala"),
-				hora_inicio: r.hora_inicio ?? null,
-				hora_fin: r.hora_fin ?? null,
-				notas: r.notas ?? null,
+				// RI-79: limpias, como `limpiar_opcional` en la Main. Copiadas tal cual, una nota
+				// vacía se guardaba como '' aquí y como NULL allí.
+				hora_inicio: limpiarOpcional(r.hora_inicio),
+				hora_fin: limpiarOpcional(r.hora_fin),
+				notas: limpiarOpcional(r.notas),
 			};
 		})
 		.filter(

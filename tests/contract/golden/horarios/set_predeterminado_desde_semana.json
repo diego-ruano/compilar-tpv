@@ -1,0 +1,65 @@
+{
+  "Horario_Predeterminado": [
+    {
+      "Area": "Barra",
+      "Hora_Fin": "23:00",
+      "Hora_Inicio": "16:00",
+      "ID_Trabajador": "trab-3",
+      "ID_Turno": "00000000-0000-7000-8000-000000000104",
+      "Notas": "No esta en la semana: se queda",
+      "Orden": 1,
+      "Tiene_Id": 1,
+      "Weekday": 1
+    },
+    {
+      "Area": "Sala",
+      "Hora_Fin": "14:00",
+      "Hora_Inicio": "09:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "00000000-0000-7000-8000-000000000102",
+      "Notas": "Mediodia",
+      "Orden": 1,
+      "Tiene_Id": 1,
+      "Weekday": 1
+    },
+    {
+      "Area": "Sala",
+      "Hora_Fin": "22:00",
+      "Hora_Inicio": "17:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "00000000-0000-7000-8000-000000000102",
+      "Notas": null,
+      "Orden": 2,
+      "Tiene_Id": 1,
+      "Weekday": 1
+    },
+    {
+      "Area": "Cocina",
+      "Hora_Fin": "14:00",
+      "Hora_Inicio": "10:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "00000000-0000-7000-8000-000000000103",
+      "Notas": "Domingo",
+      "Orden": 1,
+      "Tiene_Id": 1,
+      "Weekday": 7
+    },
+    {
+      "Area": "Barra",
+      "Hora_Fin": "02:00",
+      "Hora_Inicio": "20:00",
+      "ID_Trabajador": "trab-2",
+      "ID_Turno": "00000000-0000-7000-8000-000000000105",
+      "Notas": null,
+      "Orden": 1,
+      "Tiene_Id": 1,
+      "Weekday": 3
+    }
+  ],
+  "Ids_Unicos": [
+    {
+      "Filas": 5,
+      "Ids_Distintos": 5
+    }
+  ]
+}

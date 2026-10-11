@@ -48,9 +48,13 @@ import {
 	createAsignacion,
 	guardarAsignacion,
 	deleteAsignacion,
+	setPredeterminadoDesdeSemana,
 	updateAsignacion,
 } from "../src/domains/trabajadores/trabajadores.commands";
-import { filasSemana } from "../src/domains/trabajadores/trabajadores.queries";
+import {
+	filasSemana,
+	predeterminadoDesdeSemanaItems,
+} from "../src/domains/trabajadores/trabajadores.queries";
 import {
 	patchBusiness,
 	patchContact,
@@ -263,6 +267,8 @@ import casoNotifResolver from "../../../tests/contract/casos/notificaciones/reso
 import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/resolver_por_clave.json";
 import casoHorariosCopiar from "../../../tests/contract/casos/horarios/copiar_semana.json";
 import goldenHorariosCopiar from "../../../tests/contract/golden/horarios/copiar_semana.json";
+import casoHorariosPredeterminado from "../../../tests/contract/casos/horarios/set_predeterminado_desde_semana.json";
+import goldenHorariosPredeterminado from "../../../tests/contract/golden/horarios/set_predeterminado_desde_semana.json";
 import casoLoginPunchEntrada from "../../../tests/contract/casos/login/punch_entrada.json";
 import goldenLoginPunchEntrada from "../../../tests/contract/golden/login/punch_entrada.json";
 import casoLoginPunchSalida from "../../../tests/contract/casos/login/punch_salida.json";
@@ -378,6 +384,11 @@ const CASOS = [
 	{ nombre: "notificaciones_restaurar", caso: casoNotifRestaurar, golden: goldenNotifRestaurar },
 	{ nombre: "notificaciones_eliminar", caso: casoNotifEliminar, golden: goldenNotifEliminar },
 	{ nombre: "horarios_copiar_semana", caso: casoHorariosCopiar, golden: goldenHorariosCopiar },
+	{
+		nombre: "horarios_set_predeterminado_desde_semana",
+		caso: casoHorariosPredeterminado,
+		golden: goldenHorariosPredeterminado,
+	},
 	{ nombre: "login_punch_entrada", caso: casoLoginPunchEntrada, golden: goldenLoginPunchEntrada },
 	{ nombre: "login_punch_salida", caso: casoLoginPunchSalida, golden: goldenLoginPunchSalida },
 	{
@@ -881,6 +892,12 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			// comando (cada copia con su ID ya resuelto).
 			const filas = await filasSemana(db, caso.entrada.from_monday);
 			aplicar(hub, sql, copySemana(caso.entrada as any, filas));
+			return;
+		}
+		case "horarios.set_predeterminado_desde_semana": {
+			// Igual que la ruta: la semana se lee antes, y con sus filas se construye el comando.
+			const items = await predeterminadoDesdeSemanaItems(db, caso.entrada.fecha_lunes);
+			aplicar(hub, sql, setPredeterminadoDesdeSemana(caso.entrada.fecha_lunes, items));
 			return;
 		}
 		case "horarios.guardar_asignacion": {

@@ -35,7 +35,6 @@
 - [Orden sugerido](#orden-sugerido)
 - Por grupos:
   20. [Plataformas: Android (Handy) y Windows 7](#20-plataformas-android-handy-y-windows-7)
-  21. [Paridad Main ↔ worker](#21-paridad-main--worker)
 - [Lo que está bien y conviene no tocar](#lo-que-está-bien-y-conviene-no-tocar)
 - [Alcance y límites de esta revisión](#alcance-y-límites-de-esta-revisión)
 - [Anexo A · Mediciones y reproducciones](#anexo-a--mediciones)
@@ -49,7 +48,7 @@ está escrito junto al código, los caminos del dinero y de la factura están pe
 la caja, y hay redes (contrato Main↔worker, anti-drift de migraciones, tablas golden compartidas
 entre lenguajes) que casi ningún producto de este tamaño tiene.
 
-Lo que queda de esta revisión se concentra en las plataformas y la paridad Main ↔ worker.
+Lo que queda de esta revisión se concentra en las plataformas.
 
 La rama de Windows 7 es anterior a ARQ-01 y su canal del feed no está desplegado (RI-74).
 
@@ -63,7 +62,6 @@ La rama de Windows 7 es anterior a ARQ-01 y su canal del feed no está desplegad
 | [RI-75](#ri-75) | 🔵 | deuda | Android: el `Context` sale de una API no pública |
 | [RI-76](#ri-76) | 🔵 | deuda | Android: restos de la plantilla, márgenes seguros y release sin firmar |
 | [RI-77](#ri-77) | 🔵 | bug | La Handy enseña pantallas que en ella no funcionan (pedidos, caja, ticket, licencia) |
-| [RI-79](#ri-79) | 🔵 | deuda | Cobertura del harness: falta contrastar el horario predeterminado |
 
 ---
 
@@ -195,31 +193,6 @@ desactiva con la *feature* `win7`, y el *nightly* está fijado en CI.
 
 ---
 
-## 21. Paridad Main ↔ worker
-
-Se ha revisado el harness de contrato (escritura y lectura) y, a mano, la validación de entrada de
-cada dominio en los dos lados. El harness hace bien lo que dice: compara el **efecto** de cada
-comando sobre las filas, con los dos lados leyendo el mismo *golden*, y
-`check-contract-coverage.mjs` da 63/66 comandos y 64/64 lecturas, sin pendientes. La validación de
-entrada, que el harness no ve porque entra por debajo de ella, la fija aparte la tabla
-[`validacion_casos.json`](../../crates/tpv-domain/src/validacion_casos.json).
-
-<a id="ri-79"></a>
-### RI-79 🔵 · Cobertura del harness: falta contrastar el horario predeterminado
-
-**Dónde:** [`tests/contract/cobertura.json`](../../tests/contract/cobertura.json) y
-[`tests/contract/README.md`](../../tests/contract/README.md).
-
-- `trabajadores.setPredeterminadoDesdeSemana` se excluye con «mismo motivo que copySemana: los ID
-  nuevos son asimétricos». Pero `copySemana` **sí** tiene caso (`casos/horarios/copiar_semana.json`),
-  con la técnica de «snapshot con JOIN» que el README documenta precisamente para los ID que genera
-  cada lado. Esa misma técnica sirve para este.
-
-**El E2E**, por completar: se ha añadido el recorrido «añadir, anotar, recargar, quitar con −,
-recargar». Sigue pendiente ejecutarlo sobre la aplicación compilada.
-
----
-
 ## Lo que está bien y conviene no tocar
 
 Para equilibrar: estas piezas se han revisado y no tienen nada que objetar, o sólo detalles.
@@ -310,7 +283,7 @@ frontend, las consultas del worker de estadísticas, mesas y venta rápida (cuya
 vigila el harness de contrato), `sync_reparacion.rs`, el emparejamiento y los scripts.
 
 **No revisado**: las suites de test en sí, salvo el harness de contrato (sólo su alcance en CI y los
-casos que tocan cada hallazgo); los recorridos E2E, que se han mirado por encima (RI-79); y el
+casos que tocan cada hallazgo); los recorridos E2E, que se han mirado por encima; y el
 contenido de los documentos de plan (`PLAN_*.md`), salvo donde el código los cita. Tampoco se ha
 **ejecutado** la interfaz en Android ni en Windows 7: lo marcado «a verificar» en RI-74 y RI-76
 hay que comprobarlo en el emulador o en la máquina virtual. Los nuevos contratos y el backend

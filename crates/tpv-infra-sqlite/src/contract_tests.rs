@@ -346,6 +346,7 @@ casos_de_contrato! {
     login__punch_salida,
     login__punch_salida_turno_noche,
     horarios__copiar_semana,
+    horarios__set_predeterminado_desde_semana,
     horarios__create_asignacion,
     horarios__guardar_asignacion,
     horarios__update_asignacion,
@@ -844,6 +845,12 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             )
             .await
             .expect("copiar semana");
+        }
+        "horarios.set_predeterminado_desde_semana" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            repo.set_predeterminado_desde_semana(s(&e["fecha_lunes"]))
+                .await
+                .expect("predeterminado desde semana");
         }
         "horarios.guardar_asignacion" => {
             let repo = SqliteTrabajadoresRepository::new(db.clone());
