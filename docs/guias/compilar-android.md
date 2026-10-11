@@ -34,6 +34,11 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
 - **Comprobar que compila** sin el proyecto Android entero:
   `cargo clippy -p tpv-infra-licensing --target aarch64-linux-android`, con `CC_aarch64_linux_android` y
   `AR_aarch64_linux_android` apuntando al `clang` y al `llvm-ar` del NDK.
+- **Las barras del sistema** (RI-76): con `targetSdk` 36 la app se dibuja detrás de la barra de estado, la
+  de navegación y la muesca. `MainActivity` le da a la vista esos márgenes y el del teclado
+  (`adjustResize` en el manifiesto), y pinta lo que queda detrás con el fondo del tema de la app: se
+  lo dice `useTheme` por el puente `window.TpvAndroid.tema(oscuro)`. En Android la barra de título
+  no lleva minimizar/maximizar/cerrar (`ControlesVentana`, `import.meta.env.TAURI_ENV_PLATFORM`).
 - **Imprimir** no está disponible fuera de Windows (`printing.rs` tiene un stub `#[cfg(not(windows))]`
   que devuelve error).
 - **Logs**: `android_logger` con la etiqueta `TPVRust`, nivel Info (a Trace, la crate `jni` inunda logcat

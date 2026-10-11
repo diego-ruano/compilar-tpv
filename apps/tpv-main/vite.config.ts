@@ -37,6 +37,10 @@ export default defineConfig(async () => ({
   // El plugin de Sentry debe ir el último de la lista.
   plugins: [svgr(), react(), tailwindcss(), ...sentryPlugins],
 
+  // `TAURI_ENV_*` las pone Tauri al compilar el frontend; `TAURI_ENV_PLATFORM` dice si es Android
+  // (`shared/lib/plataforma.ts`).
+  envPrefix: ["VITE_", "TAURI_ENV_"],
+
   build: {
     // Genera source maps sólo cuando vamos a subirlos (hay token); si no, build más ligero.
     sourcemap: sentry.enabled ? "hidden" : false,

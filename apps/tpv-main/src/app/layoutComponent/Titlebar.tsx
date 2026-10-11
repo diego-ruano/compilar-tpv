@@ -1,18 +1,15 @@
 // src/app/layoutComponent/Titlebar.tsx
-import { Minus, Square, X } from "lucide-react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useImageUrl } from "../../shared/lib/useImageUrl";
-import { IconButton, ThemeToggle } from "../../shared/ui";
-import { conAviso } from "../../shared/lib/conAviso";
+import { ThemeToggle } from "../../shared/ui";
+import ControlesVentana from "./ControlesVentana";
 
 /**
  * Barra de título reutilizable: zona de arrastre (logo + nombre del negocio),
- * toggle de tema y controles de ventana de Tauri.
+ * toggle de tema y controles de ventana de Tauri (que en Android no salen).
  */
 function Titlebar() {
-    const ventana = getCurrentWindow();
     const { business_name, logo_data_url } = useBusinessSettings();
     // `logo_data_url` es una ruta relativa (el nombre es herencia de cuando sí era un data URL):
     // hay que resolverla, no meterla tal cual en el `src`.
@@ -40,20 +37,7 @@ function Titlebar() {
 
             <div className="flex w-fit items-center gap-1 p-1 px-1.5">
                 <ThemeToggle size="sm" />
-                <IconButton size="sm" label="Minimizar" onClick={conAviso(() => ventana.minimize())}>
-                    <Minus className="size-4" aria-hidden />
-                </IconButton>
-                <IconButton size="sm" label="Maximizar" onClick={conAviso(() => ventana.toggleMaximize())}>
-                    <Square className="size-3.5" aria-hidden />
-                </IconButton>
-                <IconButton
-                    size="sm"
-                    label="Cerrar"
-                    onClick={conAviso(() => ventana.close())}
-                    className="hover:bg-danger-soft hover:text-danger"
-                >
-                    <X className="size-4" aria-hidden />
-                </IconButton>
+                <ControlesVentana />
             </div>
         </div>
     );

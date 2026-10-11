@@ -3,11 +3,7 @@ import { todayLocalYmd } from "../../features/login/fechaJornada";
 import type { UserListItem as DbUser, PunchStatus } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-    Minus,
-    Square,
-    X,
     Delete,
     LogIn,
     Users,
@@ -32,6 +28,7 @@ import { Button, IconButton, ThemeToggle } from "../../shared/ui";
 
 import RecuperarPinModal from "../../features/login/RecuperarPinModal";
 import { conAviso } from "../../shared/lib/conAviso";
+import ControlesVentana from "../layoutComponent/ControlesVentana";
 import { ROL_ADMIN } from "../../shared/lib/permisos";
 
 function cn(...classes: Array<string | false | undefined | null>) {
@@ -169,7 +166,6 @@ export default function Login() {
     const canEnter = canType && !loadingPunch && hasEntrada1 && !faltaSegundaEntrada && pinOk;
     const accionEnCursoRef = useRef(false);
 
-    const ventana = getCurrentWindow();
     const showBottomBlock = Boolean(selectedUser);
 
     const refreshPunch = async (uid: string) => {
@@ -543,20 +539,7 @@ export default function Login() {
                 </div>
                 <div className="flex w-fit items-center gap-1 p-1 px-1.5">
                     <ThemeToggle size="sm" />
-                    <IconButton size="sm" label="Minimizar" onClick={conAviso(() => ventana.minimize())}>
-                        <Minus className="size-4" aria-hidden />
-                    </IconButton>
-                    <IconButton size="sm" label="Maximizar" onClick={conAviso(() => ventana.toggleMaximize())}>
-                        <Square className="size-3.5" aria-hidden />
-                    </IconButton>
-                    <IconButton
-                        size="sm"
-                        label="Cerrar"
-                        onClick={conAviso(() => ventana.close())}
-                        className="hover:bg-danger-soft hover:text-danger"
-                    >
-                        <X className="size-4" aria-hidden />
-                    </IconButton>
+                    <ControlesVentana />
                 </div>
             </div>
 
