@@ -203,7 +203,8 @@ describe("El camino del dinero", () => {
         const entradas = await entradasDeCaja();
         expect(entradas.length).toBe(1);
         expect(entradas[0].metodo).toBe("Efectivo");
-        expect(entradas[0].importe).toBeCloseTo(10, 2);
+        // En céntimos, como todo el dinero que cruza el IPC: 10,00 €.
+        expect(entradas[0].importe).toBe(1000);
     });
 
     it("9 · el cobro expidió su factura, y su número ES el número del ticket", async () => {
