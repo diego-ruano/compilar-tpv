@@ -43,7 +43,8 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
   que devuelve error).
 - **Logs**: `android_logger` con la etiqueta `TPVRust`, nivel Info (a Trace, la crate `jni` inunda logcat
   y el sistema mata la app). `adb logcat -d -s TPVRust`.
-- **Actualizaciones**: por Google Play, no por el updater.
+- **Actualizaciones**: el updater de Tauri es sólo de escritorio. En Android se instala el APK nuevo
+  encima del anterior (o lo hace Google Play), siempre firmado con la misma clave (abajo).
 
 Proyecto Android: `apps/tpv-main/src-tauri/gen/android/` (`applicationId` `com.altarialights.tpv`,
 `minSdk` 24, `compileSdk`/`targetSdk` 36, ABIs `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`). No hay job de
@@ -88,8 +89,53 @@ pnpm tauri android build --debug --apk --target aarch64     # APK debug arm64, a
 pnpm tauri android dev                                       # sobre emulador o dispositivo
 ```
 
-El APK queda en `gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`. Un
-release o un AAB para Play necesita un keystore propio.
+El APK queda en `gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`. La
+versión de release (`pnpm tauri android build --apk`, o `--aab` para Play) necesita la clave de firma.
+
+## La clave de firma de la versión de release (RI-76)
+
+Android sólo instala una actualización firmada con **la misma clave** que la versión instalada. Sin
+ella, cada Handy tendría que desinstalarse —y volver a emparejarse— para recibir una versión nueva, y en
+Google Play no se podría publicar otra versión de la app. Es lo mismo que la clave del updater de
+escritorio ([publicar-version.md](publicar-version.md#la-clave-de-firma-del-updater)), pero es otra.
+
+**Generarla, una sola vez** (el `keytool` viene con el JDK de Android Studio; pide una contraseña):
+
+```powershell
+& "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -genkeypair -v `
+  -keystore tpv-android.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+```
+
+**Guardarla.** El `.jks` es un fichero pequeño; se guarda como texto en base64:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("tpv-android.jks")) | Set-Clipboard
+```
+
+- En **Bitwarden**, una nota segura con ese texto, la contraseña y el alias (`upload`). Es la copia que
+  se puede recuperar: un secreto de GitHub se usa, pero no se vuelve a leer.
+- En **GitHub** (Settings → Secrets and variables → Actions), `TPV_ANDROID_KEYSTORE_BASE64` con ese texto
+  y `TPV_ANDROID_KEYSTORE_PASSWORD`, para cuando haya un job de Android en CI.
+
+Después se puede borrar el `.jks` del disco. Para recuperarlo desde el texto:
+`[IO.File]::WriteAllBytes("tpv-android.jks", [Convert]::FromBase64String((Get-Clipboard -Raw)))`.
+
+**Usarla.** `app/build.gradle.kts` la busca primero en `gen/android/keystore.properties` (fuera de git):
+
+```properties
+storeFile=C:/ruta/a/tpv-android.jks
+password=…
+keyAlias=upload
+```
+
+y si no está, en las variables de entorno `TPV_ANDROID_KEYSTORE` (ruta) o `TPV_ANDROID_KEYSTORE_BASE64`,
+`TPV_ANDROID_KEYSTORE_PASSWORD`, `TPV_ANDROID_KEY_ALIAS` (por defecto `upload`) y
+`TPV_ANDROID_KEY_PASSWORD` (por defecto, la del almacén). Sin ninguna de las dos, la versión de release
+sale **sin firmar** (Gradle lo avisa) y Android no la instala. Para comprobar con qué clave salió:
+`apksigner verify --print-certs <apk>` (en `build-tools` del SDK).
+
+Si la app pasa a Google Play con *Play App Signing*, esta clave es la **de subida**: Google firma lo que
+llega a los teléfonos con otra que guarda él, y una clave de subida perdida se puede reponer.
 
 Para aislar un fallo de compilación, compilar una crate suelta:
 
