@@ -37,6 +37,7 @@ import { Dispositivo } from "../../features/configuracion/sections/Dispositivo";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
 import { Actualizaciones } from "../../features/configuracion/sections/Actualizaciones";
 import { conAviso } from "../../shared/lib/conAviso";
+import { MSG_IVA } from "../../shared/lib/iva";
 
 
 export default function Configuracion() {
@@ -291,12 +292,18 @@ export default function Configuracion() {
     }, [isMain]);
 
     // Draft + dirty (hook) (tu hook ya no depende de hydrate)
-    const { draft, setDraft, dirty, resetDraft, setIvaFromRaw } =
+    const { draft, setDraft, dirty, resetDraft, setIvaFromRaw, ivaTexto, ivaValido } =
         useBusinessDraft(biz);
 
     // Save negocio
     const [savingBiz, setSavingBiz] = useState(false);
     const onSaveBusiness = async () => {
+        // RI-78: el borrador se guarda entero desde varias secciones. Con un IVA tecleado que no
+        // vale, guardar el último válido sería guardar otro número sin decirlo.
+        if (!ivaValido) {
+            await messageDialog(`${MSG_IVA}. Corrígelo en la sección Ticket.`, { kind: "error" });
+            return;
+        }
         try {
             setSavingBiz(true);
             // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2).
@@ -772,9 +779,8 @@ export default function Configuracion() {
                                         {section === "TICKET" ? (
                                             <Ticket
                                                 inputTone={inputTone}
-                                                draftIvaPercent={
-                                                    draft.iva_percent
-                                                }
+                                                ivaTexto={ivaTexto}
+                                                ivaValido={ivaValido}
                                                 onIvaChange={setIvaFromRaw}
                                                 // ✅ nuevo
                                                 footerMessage={

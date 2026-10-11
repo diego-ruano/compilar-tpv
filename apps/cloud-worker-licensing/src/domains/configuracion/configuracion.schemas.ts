@@ -5,13 +5,14 @@ import * as z from "zod";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type { BusinessSettingsPatch, TicketSettingsPatch, ContactSettingsPatch } from "@tpv/contracts";
 import { zDinero, zDineroNoNegativo } from "../../lib/dinero";
+import { zIva } from "../../lib/iva";
 
 // RI-87: la Handy valida las mismas claves y tipos que el IPC de la Main.
 // Ausente conserva; null sólo borra el logo. strict impide ignorar una clave mal escrita.
 const negocio = z.object({
     business_name: z.string().optional(), logo_data_url: z.string().nullable().optional(),
     direccion: z.string().optional(), telefono: z.string().optional(), cif: z.string().optional(),
-    mensaje_footer: z.string().optional(), iva_percent: z.number().finite().min(0).max(30).optional(),
+    mensaje_footer: z.string().optional(), iva_percent: zIva.optional(),
     umbral_descuadre: zDineroNoNegativo.optional(), razon_social: z.string().optional(),
     descripcion_op: z.string().optional(), limite_simplif: zDinero.optional(),
     verifactu_entorno: z.string().optional(), reserva_duracion_min: z.number().int().optional(),

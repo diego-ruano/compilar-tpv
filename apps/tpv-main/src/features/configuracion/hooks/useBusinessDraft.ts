@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import type { BusinessDraft } from "../types";
 import { shallowEqualDraft } from "../types";
-import { clampIva } from "../utils";
+import { leerIva } from "../../../shared/lib/iva";
 
 type BizLike = {
     business_name: string;
@@ -53,8 +53,14 @@ export function useBusinessDraft(biz: BizLike) {
         biz.razon_social,
     ]);
 
+    // Lo tecleado en el campo del IVA, tal cual. El borrador guarda el número, y sólo cambia
+    // cuando lo tecleado es un tipo válido.
+    const [ivaTexto, setIvaTexto] = useState(() => String(biz.iva_percent));
+    const ivaValido = leerIva(ivaTexto) !== null;
+
     // 3) reset a lo que haya ahora en el store
     const resetDraft = () => {
+        setIvaTexto(String(biz.iva_percent));
         setDraft({
             business_name: biz.business_name,
             logo_data_url: biz.logo_data_url,
@@ -67,14 +73,14 @@ export function useBusinessDraft(biz: BizLike) {
         });
     };
 
-    // 4) IVA desde input string
+    // 4) IVA desde input string. RI-78: no se recorta. Antes un «210» tecleado por «21» pasaba a
+    // ser 30 delante de quien escribía, y como el campo enseñaba el número ya convertido tampoco
+    // se podía teclear un decimal. Lo que no vale se queda en el campo, con su aviso.
     const setIvaFromRaw = (raw: string): void => {
-        const n = Number(String(raw).replace(",", "."));
-        setDraft((d) => ({
-            ...d,
-            iva_percent: clampIva(Number.isFinite(n) ? n : 0),
-        }));
+        setIvaTexto(raw);
+        const n = leerIva(raw);
+        if (n !== null) setDraft((d) => ({ ...d, iva_percent: n }));
     };
 
-    return { draft, setDraft, dirty, resetDraft, setIvaFromRaw };
+    return { draft, setDraft, dirty, resetDraft, setIvaFromRaw, ivaTexto, ivaValido };
 }

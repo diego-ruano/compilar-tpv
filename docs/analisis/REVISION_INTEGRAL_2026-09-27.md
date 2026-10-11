@@ -219,7 +219,6 @@ tiene que validar lo mismo. Quedan por igualar:
 
 | Dato | Main (Rust) | Worker | Consecuencia |
 |---|---|---|---|
-| IVA del negocio | 0–100 ([`validate_iva_percent`](../../crates/tpv-domain/src/configuracion.rs), aplicado en el caso de uso) | 0–30 ([`configuracion.schemas.ts`](../../apps/cloud-worker-licensing/src/domains/configuracion/configuracion.schemas.ts)) | Tres criterios: el formulario, además, recorta a 0–30 sin avisar (`clampIva`), así que un «210» tecleado se guarda como 30 |
 | IVA de un producto | Fuera de 0–100 pasa **en silencio** a `None`, o sea al del negocio (`ProductoUpsert::validar`) | Cualquier finito (`optNum`) | El worker guarda un 150 %. La Main convierte un «210» tecleado en lugar de «21» en el IVA del negocio sin decir nada. Ninguno de los dos lo rechaza |
 | Fechas de horarios (copiar semana, horario predeterminado, alta de un turno) | El caso de uso sólo exige que no venga vacía. Al copiar una semana la comprueba el repositorio SQLite (`NaiveDate`), o sea nadie en modo Handy; en el alta de un turno y en el predeterminado, nadie | Sólo la forma (`normalizeYmd`), y con un `throw` dentro del `transform`: una fecha mal formada contesta 500 | Un «2026-02-31» se copia como 3 de marzo |
 

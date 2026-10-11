@@ -52,11 +52,6 @@ let timer: number | null = null;
 let pending: Partial<BusinessSettings> = {};
 let contexto = 0;
 
-function clampIva(n: number) {
-    if (!Number.isFinite(n)) return DEFAULTS.iva_percent;
-    return Math.max(0, Math.min(30, n));
-}
-
 export const useBusinessSettings = create<BusinessSettingsState>(
     (set, get) => ({
         ...DEFAULTS,
@@ -67,12 +62,7 @@ export const useBusinessSettings = create<BusinessSettingsState>(
             try {
                 const s = await configGetBusinessSettings();
                 if (vigente !== contexto) return;
-                set({
-                    ...DEFAULTS,
-                    ...s,
-                    iva_percent: clampIva(s.iva_percent),
-                    ready: true,
-                });
+                set({ ...DEFAULTS, ...s, ready: true });
             } catch (e) {
                 if (vigente !== contexto) return;
                 console.error("useBusinessSettings.init error:", e);
@@ -89,11 +79,9 @@ export const useBusinessSettings = create<BusinessSettingsState>(
         },
 
         setMany: (patch) => {
-            // Normaliza IVA si viene
+            // RI-78: el IVA no se recorta aquí. Lo valida el formulario antes de llegar y lo
+            // rechaza el backend; recortarlo guardaba un tipo que nadie había escrito.
             const nextPatch: Partial<BusinessSettings> = { ...patch };
-            if ("iva_percent" in nextPatch && nextPatch.iva_percent != null) {
-                nextPatch.iva_percent = clampIva(Number(nextPatch.iva_percent));
-            }
 
             // 1) UI instantánea
             set({ ...get(), ...nextPatch });
@@ -122,7 +110,7 @@ export const useBusinessSettings = create<BusinessSettingsState>(
         setTelefono: (v) => get().setMany({ telefono: v }),
         setCif: (v) => get().setMany({ cif: v }),
         setMensajeFooter: (v) => get().setMany({ mensaje_footer: v }),
-        setIvaPercent: (v) => get().setMany({ iva_percent: clampIva(v) }),
+        setIvaPercent: (v) => get().setMany({ iva_percent: v }),
         setRazonSocial: (v) => get().setMany({ razon_social: v }),
     }),
 );

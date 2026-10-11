@@ -11,6 +11,7 @@ import { PrinterPanel } from "./PrinterPanel";
 import { payloadDePrecuenta, printerImprimirPrecuenta } from "../api/printerApis";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { deCentimos } from "../../../shared/lib/dinero";
+import { MSG_IVA } from "../../../shared/lib/iva";
 
 type TicketWidthOpt = {
     value: 58 | 80 | 112; // mm (lo que se guarda en Ticket_Settings)
@@ -59,7 +60,8 @@ function normalizeTicketWidthMm(v: any): 58 | 80 | 112 {
 
 export function Ticket({
     inputTone,
-    draftIvaPercent,
+    ivaTexto,
+    ivaValido,
     onIvaChange,
 
     // ✅ NUEVO: mensaje final (sale del draft del negocio)
@@ -73,7 +75,9 @@ export function Ticket({
     canSaveBusiness,
 }: {
     inputTone: string;
-    draftIvaPercent: number;
+    /** Lo tecleado en el campo del IVA, tal cual, y si es un tipo válido (RI-78). */
+    ivaTexto: string;
+    ivaValido: boolean;
     onIvaChange: (raw: string) => void;
 
     footerMessage: string;
@@ -134,11 +138,17 @@ export function Ticket({
                     >
                         <TextInput
                             inputMode="decimal"
-                            value={String(draftIvaPercent)}
+                            value={ivaTexto}
                             onChange={(e) => onIvaChange(e.target.value)}
                             placeholder="10"
                             className={inputTone}
+                            aria-invalid={!ivaValido}
                         />
+                        {!ivaValido && (
+                            <p role="alert" className="mt-1 text-xs text-danger">
+                                {MSG_IVA}.
+                            </p>
+                        )}
                     </Field>
 
                     <div className="rounded-xl border border-border bg-surface-2 px-4 py-3">

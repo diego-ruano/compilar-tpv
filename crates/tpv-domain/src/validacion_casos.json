@@ -70,5 +70,22 @@
       { "nombre": "caduca antes de entrar", "cambios": { "caducidad": "2026-07-21", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": false },
       { "nombre": "sin lote", "cambios": { "id_lote": "  " }, "acepta": false }
     ]
+  },
+  "negocio": {
+    "base": {},
+    "casos": [
+      { "nombre": "un parche sin IVA no lo toca", "cambios": {}, "acepta": true },
+      { "nombre": "IVA cero", "cambios": { "iva_percent": 0 }, "acepta": true },
+      { "nombre": "IVA superreducido", "cambios": { "iva_percent": 4 }, "acepta": true },
+      { "nombre": "IVA reducido", "cambios": { "iva_percent": 10 }, "acepta": true },
+      { "nombre": "IVA general", "cambios": { "iva_percent": 21 }, "acepta": true },
+      { "nombre": "IVA con decimales", "cambios": { "iva_percent": 10.5 }, "acepta": true },
+      { "nombre": "IVA por encima de 30: sigue siendo un porcentaje", "cambios": { "iva_percent": 35 }, "acepta": true },
+      { "nombre": "IVA del cien por cien", "cambios": { "iva_percent": 100 }, "acepta": true },
+      { "nombre": "IVA justo por encima de cien", "cambios": { "iva_percent": 100.01 }, "acepta": false },
+      { "nombre": "210 tecleado por 21", "cambios": { "iva_percent": 210 }, "acepta": false },
+      { "nombre": "IVA justo por debajo de cero", "cambios": { "iva_percent": -0.01 }, "acepta": false },
+      { "nombre": "IVA negativo", "cambios": { "iva_percent": -21 }, "acepta": false }
+    ]
   }
 }

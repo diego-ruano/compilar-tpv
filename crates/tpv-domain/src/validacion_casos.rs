@@ -8,6 +8,7 @@
 
 use serde_json::{json, Map, Value};
 
+use crate::configuracion::validate_iva_percent;
 use crate::dinero::Dinero;
 use crate::inventario::{LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate};
 use crate::reservas::{ReservaEntrada, ReservaValidada};
@@ -73,6 +74,22 @@ fn lote_edicion(e: &Value) -> Result<Value, String> {
     Ok(json!({ "caducidad": l.caducidad, "fecha_entrada": l.fecha_entrada }))
 }
 
+/// Un tipo de IVA opcional: ausente es «no se toca» (negocio) o «el del negocio» (producto).
+fn iva_opcional(e: &Value) -> Result<Option<f64>, String> {
+    match e.get("iva_percent") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            let iva = v.as_f64().ok_or("el IVA no es un número")?;
+            validate_iva_percent(iva)?;
+            Ok(Some(iva))
+        }
+    }
+}
+
+fn negocio(e: &Value) -> Result<Value, String> {
+    Ok(json!({ "iva_percent": iva_opcional(e)? }))
+}
+
 /// El validador de cada dominio de la tabla: devuelve los campos que normaliza, o el motivo del
 /// rechazo. Un dominio que no esté aquí hace fallar el test: no se queda sin comprobar en silencio.
 fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
@@ -80,6 +97,7 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "reserva" => reserva(entrada),
         "lote" => lote(entrada),
         "lote_edicion" => lote_edicion(entrada),
+        "negocio" => negocio(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }

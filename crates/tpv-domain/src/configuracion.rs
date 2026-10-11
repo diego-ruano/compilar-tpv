@@ -8,13 +8,20 @@ pub fn clamp_paper_width_mm(n: i64) -> i64 {
     }
 }
 
-/// Valida el porcentaje de IVA: debe ser finito y estar en el rango [0, 100].
+/// Mismo texto en el worker (`lib/iva.ts`) y en la webview (`shared/lib/iva.ts`).
+pub const MSG_IVA: &str = "El IVA tiene que ser un número entre 0 y 100";
+
+/// Valida un tipo de IVA —el del negocio o el propio de un producto—: finito y en [0, 100].
 /// Un IVA inválido afectaría al cálculo de **todos** los tickets y precios.
+///
+/// RI-78: el mismo rango en la Main, en el worker y en la webview (antes eran 0–100, 0–30 y un
+/// recorte silencioso a 0–30), con sus casos en `validacion_casos.json`. Fuera de rango se
+/// **rechaza**: un tipo impositivo distinto del que se tecleó no lo ha decidido nadie.
 pub fn validate_iva_percent(iva: f64) -> Result<(), String> {
     if iva.is_finite() && (0.0..=100.0).contains(&iva) {
         Ok(())
     } else {
-        Err(format!("IVA inválido: {iva} (debe ser un número entre 0 y 100)"))
+        Err(MSG_IVA.into())
     }
 }
 
