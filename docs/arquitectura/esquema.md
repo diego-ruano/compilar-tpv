@@ -2,12 +2,7 @@
 
 Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada tenant
 en Turso: los ficheros `.sql` de `packages/database/migrations/`, aplicados en orden.
-`0001_inicial.sql` define la base y `0002_horarios_agrupados.sql` añade los conjuntos de turnos
-partidos y las guardas de solape. `0003_cobros_pendientes.sql` añade la recuperación operativa local.
-`0004_valores_dominio.sql` cierra los métodos de pago y los estados de cocina, reservas, tareas
-y fichajes (RI-48). Primero valida los datos existentes y luego instala triggers de inserción
-y actualización: aplican la restricción sin reconstruir tablas ni desactivar las FK de la nube.
-Conserva la nulabilidad de cocina (líneas que no pasan por ella), fichajes y movimientos de caja.
+Hoy hay uno solo, `0001_inicial.sql`, con el esquema completo.
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 
@@ -72,6 +67,10 @@ eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.
   sale de la carta, del inventario, del plano y de las reservas nuevas, y sigue en estadísticas,
   tickets y reconciliación. Sus `UNIQUE` de nombre sólo cuentan entre los activos (índices parciales,
   y los `ON CONFLICT` llevan su `WHERE`). Una lista nueva de catálogo filtra `Archivado_En IS NULL`.
+- **Los valores de dominio cerrados son triggers, no `CHECK`** (RI-48): métodos de pago y estados de
+  cocina, reservas, tareas y fichajes. Un `RAISE(ABORT)` corta también un `INSERT OR IGNORE`, que ante
+  un `CHECK` se saltaría la fila en silencio. Cocina (líneas que no pasan por ella), fichajes y
+  movimientos de caja admiten `NULL`. Las guardas de solape de `Asignacion_Turnos` (RI-85) van igual.
 - **«Línea cobrada»** se lee por la vista `v_lineas_cobradas` (pagos activos), no por `Pago_Detalles`
   ([caja.md](caja.md#dar-de-baja-un-cobro)).
 - **Lo devuelto de una línea** se lee por la vista `v_unidades_devueltas` (devoluciones vigentes), no

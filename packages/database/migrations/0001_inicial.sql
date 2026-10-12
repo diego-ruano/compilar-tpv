@@ -190,6 +190,7 @@ CREATE TABLE IF NOT EXISTS Turnos (
   Nombre_Turno TEXT NOT NULL UNIQUE
 );
 
+-- `ID_Grupo` (RI-85): los tramos de un turno partido comparten grupo.
 CREATE TABLE IF NOT EXISTS Asignacion_Turnos (
   ID_Asignacion TEXT NOT NULL PRIMARY KEY,
   ID_Trabajador TEXT NOT NULL,
@@ -199,12 +200,50 @@ CREATE TABLE IF NOT EXISTS Asignacion_Turnos (
   Hora_Inicio TIME,
   Hora_Fin TIME,
   Notas TEXT,
+  ID_Grupo TEXT,
   FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador),
   FOREIGN KEY (ID_Turno) REFERENCES Turnos(ID_Turno)
 );
 
 CREATE INDEX IF NOT EXISTS idx_asig_fecha ON Asignacion_Turnos(Fecha);
 CREATE INDEX IF NOT EXISTS idx_asig_trab_fecha ON Asignacion_Turnos(ID_Trabajador, Fecha);
+CREATE INDEX IF NOT EXISTS idx_asig_grupo ON Asignacion_Turnos(ID_Grupo);
+
+-- RI-85: la regla se comprueba tambien en dominio. Esta guarda la aplica dentro de la
+-- transaccion, incluida la replica, sin una lectura previa que pueda quedarse vieja.
+CREATE TRIGGER IF NOT EXISTS asig_validar_insert BEFORE INSERT ON Asignacion_Turnos
+BEGIN
+  SELECT RAISE(ABORT, 'horario_invalido') WHERE
+    date(NEW.Fecha) IS NULL OR date(NEW.Fecha) <> NEW.Fecha OR
+    (NEW.Hora_Inicio IS NULL) <> (NEW.Hora_Fin IS NULL) OR
+    (NEW.Hora_Inicio IS NOT NULL AND (time(NEW.Hora_Inicio) IS NULL OR
+      time(NEW.Hora_Fin) IS NULL OR time(NEW.Hora_Inicio) = time(NEW.Hora_Fin)));
+  SELECT RAISE(ABORT, 'horario_solapado') WHERE NEW.Hora_Inicio IS NOT NULL AND EXISTS (
+    SELECT 1 FROM Asignacion_Turnos a WHERE a.ID_Trabajador = NEW.ID_Trabajador
+      AND a.ID_Asignacion <> NEW.ID_Asignacion AND a.Hora_Inicio IS NOT NULL
+      AND datetime(a.Fecha || ' ' || a.Hora_Inicio) < datetime(NEW.Fecha || ' ' || NEW.Hora_Fin,
+        CASE WHEN time(NEW.Hora_Fin) < time(NEW.Hora_Inicio) THEN '+1 day' ELSE '+0 day' END)
+      AND datetime(NEW.Fecha || ' ' || NEW.Hora_Inicio) < datetime(a.Fecha || ' ' || a.Hora_Fin,
+        CASE WHEN time(a.Hora_Fin) < time(a.Hora_Inicio) THEN '+1 day' ELSE '+0 day' END)
+  );
+END;
+
+CREATE TRIGGER IF NOT EXISTS asig_validar_update BEFORE UPDATE ON Asignacion_Turnos
+BEGIN
+  SELECT RAISE(ABORT, 'horario_invalido') WHERE
+    date(NEW.Fecha) IS NULL OR date(NEW.Fecha) <> NEW.Fecha OR
+    (NEW.Hora_Inicio IS NULL) <> (NEW.Hora_Fin IS NULL) OR
+    (NEW.Hora_Inicio IS NOT NULL AND (time(NEW.Hora_Inicio) IS NULL OR
+      time(NEW.Hora_Fin) IS NULL OR time(NEW.Hora_Inicio) = time(NEW.Hora_Fin)));
+  SELECT RAISE(ABORT, 'horario_solapado') WHERE NEW.Hora_Inicio IS NOT NULL AND EXISTS (
+    SELECT 1 FROM Asignacion_Turnos a WHERE a.ID_Trabajador = NEW.ID_Trabajador
+      AND a.ID_Asignacion <> NEW.ID_Asignacion AND a.Hora_Inicio IS NOT NULL
+      AND datetime(a.Fecha || ' ' || a.Hora_Inicio) < datetime(NEW.Fecha || ' ' || NEW.Hora_Fin,
+        CASE WHEN time(NEW.Hora_Fin) < time(NEW.Hora_Inicio) THEN '+1 day' ELSE '+0 day' END)
+      AND datetime(NEW.Fecha || ' ' || NEW.Hora_Inicio) < datetime(a.Fecha || ' ' || a.Hora_Fin,
+        CASE WHEN time(a.Hora_Fin) < time(a.Hora_Inicio) THEN '+1 day' ELSE '+0 day' END)
+  );
+END;
 
 INSERT OR IGNORE INTO Turnos (ID_Turno, Nombre_Turno) VALUES
   ('00000000-0000-7000-8000-000000000101', 'LIBRE'),
@@ -1547,6 +1586,113 @@ CREATE INDEX IF NOT EXISTS idx_regfact_pago
 ON Registros_Facturacion(ID_Pago);
 
 /* =========================================================
+   Valores de dominio cerrados (RI-48)
+
+   Metodos de pago y estados de cocina, reservas, tareas y fichajes. Cocina, fichajes y
+   movimientos de caja admiten NULL.
+
+   Son triggers y no CHECK: un RAISE(ABORT) corta tambien un INSERT OR IGNORE, que ante
+   un CHECK se saltaria la fila en silencio, y el codigo reconoce el texto 'RI48'.
+========================================================= */
+CREATE TRIGGER IF NOT EXISTS ri48_pagos_metodo_pago_insert
+BEFORE INSERT ON Pagos
+WHEN NOT (NEW.Metodo_Pago IN ('Efectivo','Tarjeta') OR (NEW.Metodo_Pago = 'Otro' AND NEW.Tipo = 'DEVOLUCION'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Pagos.Metodo_Pago no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_pagos_metodo_pago_update
+BEFORE UPDATE ON Pagos
+WHEN NOT (NEW.Metodo_Pago IN ('Efectivo','Tarjeta') OR (NEW.Metodo_Pago = 'Otro' AND NEW.Tipo = 'DEVOLUCION'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Pagos.Metodo_Pago no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_detalle_comanda_estado_cocina_insert
+BEFORE INSERT ON Detalle_Comanda
+WHEN NOT (NEW.Estado_Cocina IS NULL OR NEW.Estado_Cocina IN ('PENDIENTE','PREPARADO'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Detalle_Comanda.Estado_Cocina no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_detalle_comanda_estado_cocina_update
+BEFORE UPDATE ON Detalle_Comanda
+WHEN NOT (NEW.Estado_Cocina IS NULL OR NEW.Estado_Cocina IN ('PENDIENTE','PREPARADO'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Detalle_Comanda.Estado_Cocina no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_reservas_estado_insert
+BEFORE INSERT ON Reservas
+WHEN NOT (NEW.Estado IN ('PROXIMA','ACTIVA','FINALIZADA','CANCELADA','NO_SHOW'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Reservas.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_reservas_estado_update
+BEFORE UPDATE ON Reservas
+WHEN NOT (NEW.Estado IN ('PROXIMA','ACTIVA','FINALIZADA','CANCELADA','NO_SHOW'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Reservas.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_tareas_estado_insert
+BEFORE INSERT ON Tareas
+WHEN NOT (NEW.Estado IN ('ABIERTA','ELIMINADA'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Tareas.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_tareas_estado_update
+BEFORE UPDATE ON Tareas
+WHEN NOT (NEW.Estado IN ('ABIERTA','ELIMINADA'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Tareas.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_tarea_asignaciones_estado_insert
+BEFORE INSERT ON Tarea_Asignaciones
+WHEN NOT (NEW.Estado IN ('PENDIENTE','FINALIZADA'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Tarea_Asignaciones.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_tarea_asignaciones_estado_update
+BEFORE UPDATE ON Tarea_Asignaciones
+WHEN NOT (NEW.Estado IN ('PENDIENTE','FINALIZADA'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Tarea_Asignaciones.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_fichajes_estado_insert
+BEFORE INSERT ON Fichajes
+WHEN NOT (NEW.Estado IS NULL OR NEW.Estado IN ('ABIERTO','CERRADO'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Fichajes.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_fichajes_estado_update
+BEFORE UPDATE ON Fichajes
+WHEN NOT (NEW.Estado IS NULL OR NEW.Estado IN ('ABIERTO','CERRADO'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Fichajes.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_movimientos_caja_metodo_pago_insert
+BEFORE INSERT ON Movimientos_Caja
+WHEN NOT (NEW.Metodo_Pago IS NULL OR NEW.Metodo_Pago IN ('Efectivo','Tarjeta','Otro'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Movimientos_Caja.Metodo_Pago no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_movimientos_caja_metodo_pago_update
+BEFORE UPDATE ON Movimientos_Caja
+WHEN NOT (NEW.Metodo_Pago IS NULL OR NEW.Metodo_Pago IN ('Efectivo','Tarjeta','Otro'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Movimientos_Caja.Metodo_Pago no admitido');
+END;
+
+/* =========================================================
    15. Seeds (UUID fijos: identicos en local y nube)
 ========================================================= */
 INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen) VALUES
@@ -1669,6 +1815,13 @@ CREATE TABLE IF NOT EXISTS _Recovery_State (
     Reconciliation_Pending INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO _Recovery_State (Id, Reconciliation_Pending) VALUES (1, 0);
+
+-- RI-47: intenciones de cobro duraderas, para recuperar un cobro a medias. Nunca se
+-- confunden con un pago confirmado. Estado local, escrito por raw(): no se replica.
+CREATE TABLE IF NOT EXISTS _Cobros_Pendientes (
+    ID_Pago TEXT PRIMARY KEY NOT NULL,
+    Datos_Json TEXT NOT NULL CHECK (json_valid(Datos_Json))
+);
 
 -- SYNC-19 - fase 2: el historico que la ventana del bootstrap dejo fuera. La siembra
 -- `bootstrap_restaurar` (una fila por tabla que el worker marco `parcial`) y la va

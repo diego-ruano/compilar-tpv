@@ -387,9 +387,6 @@ tocado; están aquí para decidir.
 - **`Registros_Facturacion.Sin_Registro_Previo`** se lee y viaja al XML, pero ningún camino la rellena.
 - **La pantalla Fiscal dice que el NIF «no es algo que se haga desde esta pantalla»** cuando ya hay
   registros, pero el campo sigue siendo editable y se guarda.
-- **El test `migracion_0003_conserva_hijas_y_permite_stock_negativo`** (`migrations.rs`) aplica las dos
-  primeras migraciones a mano y espera que el runner aplique la tercera; con una sola migración, el
-  runner no aplica nada y el test ya no comprueba lo que dice su nombre.
 - **`descartarAvisoDatosFiscales`** (`e2e/helpers/fiscal.ts`) no la llama ningún recorrido.
 - **Los comentarios de `0001_inicial.sql` citan documentos y secciones que ya no existen**
   (`docs/PLAN_VERIFACTU.md`, `docs/VERIFACTU_PENDIENTES.md`, `BACKLOG.md DB-14`, «CLAUDE.md 9») y uno de

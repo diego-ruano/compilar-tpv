@@ -1,4 +1,4 @@
-//! RI-85 / RI-47: horarios agrupados y recuperación de cobros en migraciones aditivas.
+//! RI-85 / RI-47: los horarios agrupados y la recuperación de cobros van en `0001`.
 //! Sistema de migraciones del esquema de la **BD local (SQLite)**.
 //!
 //! ## Modelo (fuente única de verdad)
@@ -7,7 +7,7 @@
 //! Tanto una instalación nueva como una existente convergen aplicando las migraciones que aún no
 //! tengan registradas.
 //!
-//! `0001` contiene el esquema inicial; las siguientes migraciones son incrementales.
+//! `0001` contiene el esquema completo; las que se añadan después son incrementales.
 //! No se modifica una migración aplicada: cambiaría su hash y ambos runners fallarían
 //! con `migration_altered`.
 //!
@@ -287,24 +287,6 @@ mod tests {
     }
 
     #[test]
-    fn ri48_una_base_incompatible_se_rechaza_sin_modificar_sus_datos() {
-        let (conn, _dir) = open_temp();
-        ensure_table(&conn).unwrap();
-        for (name, content) in migration_files().into_iter().take(3) {
-            let normalized = normalize(&content);
-            conn.execute_batch(&strip_block_comments(&normalized)).unwrap();
-            conn.execute("INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, 1);",
-                params![name, sha256_hex(&normalized)]).unwrap();
-        }
-        conn.execute_batch("INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion, Estado) VALUES ('t', 'Tarea', '2030-01-01', 'INVENTADO');").unwrap();
-        assert!(run(&conn).is_err());
-        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Tareas WHERE Estado = 'INVENTADO';"), 1);
-        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations WHERE name = '0004_valores_dominio.sql';"), 0);
-        assert!(!table_exists(&conn, "_RI48_Validacion").unwrap());
-        assert_eq!(scalar_i64(&conn, "PRAGMA foreign_keys;"), 1);
-    }
-
-    #[test]
     fn ri48_rechaza_valores_desconocidos_y_otro_en_cobros() {
         let (conn, _dir) = open_temp();
         run(&conn).unwrap();
@@ -409,70 +391,6 @@ mod tests {
         let msg = format!("{err}").to_lowercase();
         assert!(msg.contains("0001_inicial.sql"), "el error debe nombrar la migración: {msg}");
         assert!(msg.contains("modificada"), "el error debe indicar manipulación: {msg}");
-
-        drop(conn);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// 4) Rebuild de tabla (0003): el runner corre con las FK apagadas, así que el DROP+recreate de
-    ///    `Lotes_Producto` NO borra por cascada sus hijas (`Movimientos_Stock`), y el
-    ///    `CHECK (Stock_Disponible >= 0)` desaparece (ya se admite stock negativo). Es la red de
-    ///    seguridad del cambio más delicado de todo el refactor.
-    #[test]
-    fn migracion_0003_conserva_hijas_y_permite_stock_negativo() {
-        let (conn, dir) = open_temp();
-
-        // Aplica a mano 0001 y 0002 (dejando 0003 pendiente) para sembrar datos ANTES del rebuild y
-        // comprobar que sobreviven.
-        ensure_table(&conn).unwrap();
-        for (name, content) in migration_files().into_iter().take(2) {
-            let normalized = normalize(&content);
-            let body = strip_block_comments(&normalized);
-            conn.execute_batch(&body).unwrap();
-            conn.execute(
-                "INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, 1);",
-                params![name, sha256_hex(&normalized)],
-            )
-            .unwrap();
-        }
-
-        // Semilla mínima consistente: categoría → producto → lote (stock 3) → movimiento de ALTA.
-        // El movimiento es hija de Lotes_Producto con ON DELETE CASCADE: es justo la fila que un
-        // DROP de la tabla con las FK activas borraría.
-        conn.execute_batch(
-            "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('c1','Bebidas');
-             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-               VALUES ('p1','c1','Cerveza',250);
-             INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
-               VALUES ('l1','p1','L-1',3, '2026-01-01 10:00:00');
-             INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha)
-               VALUES ('m1','l1','ALTA',10,10,'2026-01-01 00:00:00');",
-        )
-        .unwrap();
-
-        // Runner: ahora solo 0003 está pendiente.
-        run(&conn).expect("0003 debe aplicarse sin romper nada");
-
-        // La hija ON DELETE CASCADE sobrevive al rebuild, y el lote sigue con su stock.
-        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Movimientos_Stock;"), 1);
-        assert_eq!(
-            scalar_i64(&conn, "SELECT COUNT(*) FROM Lotes_Producto WHERE ID_Lote='l1';"),
-            1,
-        );
-
-        // El CHECK se fue: el disponible ya puede bajar de cero (antes esto lo rechazaba el CHECK).
-        conn.execute(
-            "UPDATE Lotes_Producto SET Stock_Disponible = -5 WHERE ID_Lote='l1';",
-            [],
-        )
-        .expect("el stock ya puede ser negativo");
-
-        // Integridad referencial intacta tras el rebuild.
-        let huerfano = conn
-            .query_row("PRAGMA foreign_key_check;", [], |_| Ok(()))
-            .optional()
-            .unwrap();
-        assert!(huerfano.is_none(), "no debe haber huérfanos tras el rebuild");
 
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
@@ -840,4 +758,4 @@ mod tests {
 // RI-70: el esquema compartido incluye Encargado y Roles_Permisos.
 
 
-// RI-48: 0004 valida metodos y estados sin reconstruir tablas.
+// RI-48: los triggers de `0001` cierran métodos y estados.
