@@ -63,7 +63,7 @@ export default function VentaRapida() {
         </div>
       </div>
 
-      {escriturasPendientes > 0 || cobrando ? <p role="status" className="px-4 text-sm text-fg-muted">{cobrando ? "Confirmando cobro…" : "Guardando ticket…"}</p> : null}
+      {cobrando ? <p role="status" className="px-4 text-sm text-fg-muted">Confirmando cobro…</p> : null}
       {recuperacion.main && (recuperacion.pendientes.length > 0 || recuperacion.error) ? <button onClick={() => setOpenPendientes(true)} className="px-4 py-2 text-left text-sm text-danger">Cobros pendientes ({recuperacion.pendientes.length}){recuperacion.error ? ` · ${recuperacion.error}` : ""}</button> : null}
       <div className="grid min-h-0 flex-1 touch-pan-y auto-rows-max grid-cols-1 content-start gap-3 overflow-y-scroll overscroll-contain p-3 [scrollbar-gutter:stable] lg:auto-rows-auto lg:content-stretch lg:grid-cols-[minmax(0,1fr)_minmax(360px,38vw)] lg:overflow-hidden xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="flex h-[clamp(20rem,58dvh,44rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface md:h-[clamp(24rem,62dvh,44rem)] lg:h-auto">
