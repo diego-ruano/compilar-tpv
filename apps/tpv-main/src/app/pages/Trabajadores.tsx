@@ -32,6 +32,7 @@ import { textoPdf } from "../../shared/lib/textoPdf";
 import { save, confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { conAviso } from "../../shared/lib/conAviso";
+import { CampoHora, esHora } from "../../shared/ui/CampoHora";
 
 /* =========================
    Helpers runtime
@@ -529,6 +530,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     setHoraInicio2("");
     setHoraFin2("");
 
+    setError(null);
     setModalOpen(true);
   };
 
@@ -557,6 +559,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     setHoraInicio2(hhmm(grupo[1]?.Hora_Inicio));
     setHoraFin2(hhmm(grupo[1]?.Hora_Fin));
 
+    setError(null);
     setModalOpen(true);
   };
 
@@ -564,7 +567,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
   const validateRange = (ini: string, fin: string) => {
     if (!ini || !fin) return "Debes indicar hora inicio y hora fin.";
-    if (ini.length !== 5 || fin.length !== 5) return "Hora invalida (usa HH:mm).";
+    if (!esHora(ini) || !esHora(fin)) return "Hora invalida (usa HH:mm).";
     if (ini === fin) return "Inicio y fin no pueden ser iguales.";
     return null;
   };
@@ -1019,44 +1022,24 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium">Hora inicio (tramo 1)</label>
-                <input
-                  type="time"
-                  value={horaInicio1}
-                  onChange={(e) => setHoraInicio1(e.target.value)}
-                  className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                />
+                <CampoHora aria-label="Hora inicio (tramo 1)" valor={horaInicio1} onCambio={setHoraInicio1} />
               </div>
 
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium">Hora fin (tramo 1)</label>
-                <input
-                  type="time"
-                  value={horaFin1}
-                  onChange={(e) => setHoraFin1(e.target.value)}
-                  className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                />
+                <CampoHora aria-label="Hora fin (tramo 1)" valor={horaFin1} onCambio={setHoraFin1} />
               </div>
 
               {turnoPartido && (
                 <>
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium">Hora inicio (tramo 2)</label>
-                    <input
-                      type="time"
-                      value={horaInicio2}
-                      onChange={(e) => setHoraInicio2(e.target.value)}
-                      className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                    />
+                    <CampoHora aria-label="Hora inicio (tramo 2)" valor={horaInicio2} onCambio={setHoraInicio2} />
                   </div>
 
                   <div className="flex flex-col gap-1">
                     <label className="text-sm font-medium">Hora fin (tramo 2)</label>
-                    <input
-                      type="time"
-                      value={horaFin2}
-                      onChange={(e) => setHoraFin2(e.target.value)}
-                      className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                    />
+                    <CampoHora aria-label="Hora fin (tramo 2)" valor={horaFin2} onCambio={setHoraFin2} />
                   </div>
                 </>
               )}
