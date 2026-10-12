@@ -148,15 +148,7 @@ function CatalogGrid({
     );
   }
 
-  if (loading) {
-    return (
-      <Wrapper>
-        <p className="text-sm text-fg-muted">Cargando productos…</p>
-      </Wrapper>
-    );
-  }
-
-  if (prods.length === 0) {
+  if (!loading && prods.length === 0) {
     return (
       <Wrapper>
         <div className={gridClass}>
