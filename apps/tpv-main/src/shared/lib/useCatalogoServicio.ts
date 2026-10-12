@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { resolveImageUrl } from "./imageUrl";
 
 type Imagen = { Ruta_Imagen: string | null };
@@ -61,7 +61,9 @@ export function useCatalogoServicio<C extends Categoria, P extends Imagen>(activ
         const contadores = generaciones.current;
         return () => { ++contadores.categorias; ++contadores.productos; ++contadores.busqueda; vigencia.current.activo = false; };
     }, [activo, autoCategorias, cargarCategorias]);
-    useEffect(() => {
+    // Antes de pintar: con `useEffect` se llegaba a ver un fotograma de la categoría recién elegida
+    // sin productos y sin `cargando`, es decir, «No hay productos» en una que sí los tiene.
+    useLayoutEffect(() => {
         if (activo) void cargarProductosDeCategoria(categoriaSeleccionada).catch(console.error);
         const contadores = generaciones.current;
         return () => { ++contadores.productos; };
