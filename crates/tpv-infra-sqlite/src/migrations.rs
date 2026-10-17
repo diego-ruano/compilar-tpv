@@ -307,6 +307,59 @@ mod tests {
         assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Pagos;"), 2);
     }
 
+    /// El origen de una reserva es un valor cerrado también al editarla, y un `INSERT OR IGNORE`
+    /// no se lo salta (que es por lo que RI-48 usa triggers y no CHECK).
+    #[test]
+    fn ri48_el_origen_de_una_reserva_no_admite_otro_valor_ni_al_editar() {
+        let (conn, _dir) = open_temp();
+        run(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Estado, Origen) \
+             VALUES ('r1', '2030-01-01', '21:00', 'CENA', 'PROXIMA', 'WEB');",
+        )
+        .unwrap();
+
+        let al_editar = conn.execute("UPDATE Reservas SET Origen = 'APP' WHERE ID_Reserva = 'r1';", []);
+        assert!(al_editar.unwrap_err().to_string().contains("RI48"));
+        let sin_ruido = conn.execute(
+            "INSERT OR IGNORE INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Estado, Origen) \
+             VALUES ('r2', '2030-01-01', '21:00', 'CENA', 'PROXIMA', 'web');",
+            [],
+        );
+        assert!(sin_ruido.unwrap_err().to_string().contains("RI48"));
+
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Reservas;"), 1);
+        assert_eq!(
+            scalar_i64(&conn, "SELECT COUNT(*) FROM Reservas WHERE Origen = 'WEB';"),
+            1,
+            "la reserva web conserva su origen"
+        );
+    }
+
+    /// Borrar una mesa se lleva su configuración de la reserva web: es la cascada de la base, y por
+    /// eso la Handy puede borrar una mesa aunque tenga vetadas esas tablas (`TABLAS_SOLO_MAIN`).
+    #[test]
+    fn borrar_una_mesa_se_lleva_su_configuracion_de_la_reserva_web() {
+        let (conn, _dir) = open_temp();
+        run(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Salon'); \
+             INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) \
+               VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 10, 10), ('m2', 'z1', '2', 2, 0, 0, 'rect', 10, 10); \
+             INSERT INTO Reserva_Web_Mesas (ID_Mesa, Activa) VALUES ('m1', 1), ('m2', 1); \
+             INSERT INTO Reserva_Web_Franjas (ID_Franja, ID_Mesa, Hora_Desde, Hora_Hasta) \
+               VALUES ('f1', 'm1', '13:00', '16:00'), ('f2', 'm2', '13:00', '16:00');",
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM Mesas WHERE ID_Mesa = 'm1';", []).unwrap();
+
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Reserva_Web_Mesas WHERE ID_Mesa = 'm1';"), 0);
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Reserva_Web_Franjas WHERE ID_Mesa = 'm1';"), 0);
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Reserva_Web_Mesas;"), 1, "la otra mesa no se toca");
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Reserva_Web_Franjas;"), 1);
+    }
+
     /// 1) Creación limpia: BD vacía → se construye el esquema y quedan registradas todas las
     ///    migraciones, cada una con su hash SHA-256 y timestamp > 0.
     #[test]
