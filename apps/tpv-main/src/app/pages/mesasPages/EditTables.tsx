@@ -1081,7 +1081,10 @@ export default function EditTables() {
                         onCerrar={() => setMesaWebAbierta(null)}
                         onGuardada={(mesa) => {
                             mesasWeb.guardada(mesa);
-                            setMesaWebAbierta(null);
+                            // Cierra sólo si sigue abierta ESA mesa.
+                            setMesaWebAbierta((abierta) =>
+                                abierta && parseMesaId(abierta.id) === mesa.id_mesa ? null : abierta,
+                            );
                         }}
                     />
                 );

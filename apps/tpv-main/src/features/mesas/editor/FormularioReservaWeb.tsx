@@ -71,8 +71,14 @@ export default function FormularioReservaWeb({
         }
     }
 
+    // Mientras se guarda no se cierra: así no se puede abrir otra mesa a medias y que la respuesta de
+    // esta cierre aquella.
+    const cerrar = () => {
+        if (!guardando) onCerrar();
+    };
+
     return (
-        <Modal open title={`${nombreMesa} · Reservas desde la web`} onClose={onCerrar}>
+        <Modal open title={`${nombreMesa} · Reservas desde la web`} onClose={cerrar}>
             {!idMesa ? (
                 <div className="space-y-3 text-sm text-fg">
                     <p>Guarda el plano antes de configurar esta mesa para la web.</p>
@@ -142,7 +148,7 @@ export default function FormularioReservaWeb({
                     {error ? <p className="text-sm text-danger">{error}</p> : null}
 
                     <div className="flex justify-end gap-2">
-                        <IconButton onClick={onCerrar}>Cancelar</IconButton>
+                        <IconButton disabled={guardando} onClick={cerrar}>Cancelar</IconButton>
                         <IconButton
                             variant="primary"
                             disabled={guardando}
