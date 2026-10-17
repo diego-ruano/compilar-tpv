@@ -74,8 +74,11 @@ const AVISOS_INTERVAL_SECS: u64 = 10 * 60;
 /// sin machacar la BD (es un par de lecturas agregadas).
 const STOCK_NEGATIVO_INTERVAL_SECS: u64 = 10 * 60;
 
-/// Cada cuánto se comprueba la zona horaria del negocio (reservas desde la web).
-const ZONA_HORARIA_INTERVAL_SECS: u64 = 24 * 60 * 60;
+/// Cada cuánto se comprueba la zona horaria del negocio (reservas desde la web). Corto a propósito:
+/// el `retardo_inicial` sólo vale la primera vez, así que tras un reinicio el job espera lo que le
+/// quede del intervalo, y un equipo que cambia de zona tiene que contárselo a la nube enseguida. Es
+/// una lectura; sólo escribe (y sube a la nube) si la zona cambia.
+const ZONA_HORARIA_INTERVAL_SECS: u64 = 10 * 60;
 
 /// Cada cuánto se reintenta subir a R2 lo que quedó pendiente. No hace falta más a menudo: el
 /// camino normal es el evento (tras guardar la imagen y al reconectar el WS); esto es la red.
@@ -239,8 +242,8 @@ pub(crate) fn catalogo() -> Vec<Job> {
         },
         Job {
             // Reservas desde la web: la agenda de la nube necesita la zona horaria del negocio
-            // para saber qué es «hoy». Cambia casi nunca (un TPV que se lleva a Canarias), así
-            // que basta con mirarla al arrancar y una vez al día.
+            // para saber qué es «hoy». Cambia casi nunca (un TPV que se lleva a Canarias), pero
+            // cuando cambia tiene que llegar pronto: ver `ZONA_HORARIA_INTERVAL_SECS`.
             nombre: "zona_horaria",
             cada: Duration::from_secs(ZONA_HORARIA_INTERVAL_SECS),
             retardo_inicial: Duration::from_secs(30),
