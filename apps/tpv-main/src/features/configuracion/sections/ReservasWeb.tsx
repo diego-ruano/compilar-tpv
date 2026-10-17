@@ -32,6 +32,7 @@ export function ReservasWeb({ inputTone }: { inputTone: string }) {
 	const [dia, setDia] = useState("");
 	const [motivo, setMotivo] = useState("");
 	const [guardando, setGuardando] = useState(false);
+	const [cambiandoActiva, setCambiandoActiva] = useState(false);
 
 	// Captura su propio error y lo enseña en el panel: por eso se puede lanzar con `void`.
 	const cargar = useCallback(async () => {
@@ -50,13 +51,18 @@ export function ReservasWeb({ inputTone }: { inputTone: string }) {
 		void cargar();
 	}, [cargar]);
 
+	// Una pulsación cada vez: hasta que no se guarda la anterior, el interruptor no acepta otra. Así
+	// lo que queda en la base es la última elección, en el orden en que se hizo.
 	async function cambiarActiva(valor: boolean) {
+		setCambiandoActiva(true);
 		setActiva(valor);
 		try {
 			await commands.reservaWebActivar({ activa: valor });
 		} catch (e) {
 			setActiva(!valor);
 			throw e;
+		} finally {
+			setCambiandoActiva(false);
 		}
 	}
 
@@ -101,6 +107,7 @@ export function ReservasWeb({ inputTone }: { inputTone: string }) {
 				<div className="grid grid-cols-1 gap-5">
 					<Switch
 						checked={activa}
+						disabled={cambiandoActiva}
 						onChange={conAviso(cambiarActiva, "No se ha podido cambiar la reserva desde la web")}
 						label="Aceptar reservas desde la web"
 						description="Apagado, no entra ninguna reserva desde la web."

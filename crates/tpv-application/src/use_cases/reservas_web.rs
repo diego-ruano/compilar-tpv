@@ -34,11 +34,10 @@ pub async fn ajustes(repo: &dyn ReservasWebRepository) -> AppResult<AjustesReser
     Ok(AjustesReservaWebDto { activa: repo.activa().await?, cierres: repo.cierres().await? })
 }
 
-/// Enciende o apaga la reserva desde la web. Sólo escribe si cambia: cada escritura viaja a la nube.
+/// Enciende o apaga la reserva desde la web. La comparación con lo que hay va dentro del
+/// repositorio, bajo su cerrojo de escritura (ver `fijar_activa`).
 pub async fn activar(repo: &dyn ReservasWebRepository, input: ReservaWebActivarInput) -> AppResult<()> {
-    if repo.activa().await? != input.activa {
-        repo.fijar_activa(input.activa).await?;
-    }
+    repo.fijar_activa(input.activa).await?;
     Ok(())
 }
 
@@ -99,10 +98,14 @@ mod tests {
         async fn activa(&self) -> AppResult<bool> {
             Ok(*self.activa.lock().unwrap())
         }
-        async fn fijar_activa(&self, activa: bool) -> AppResult<()> {
-            *self.activa.lock().unwrap() = activa;
+        async fn fijar_activa(&self, activa: bool) -> AppResult<bool> {
+            let mut actual = self.activa.lock().unwrap();
+            if *actual == activa {
+                return Ok(false);
+            }
+            *actual = activa;
             *self.escrituras.lock().unwrap() += 1;
-            Ok(())
+            Ok(true)
         }
         async fn cierres(&self) -> AppResult<Vec<CierreReservaWebDto>> {
             Ok(vec![])
@@ -145,14 +148,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activar_solo_escribe_si_cambia() {
+    async fn activar_deja_la_ultima_eleccion() {
         let repo = RepoFalso::default();
+        activar(&repo, ReservaWebActivarInput { activa: true }).await.unwrap();
         activar(&repo, ReservaWebActivarInput { activa: false }).await.unwrap();
-        assert_eq!(repo.escrituras(), 0);
-        activar(&repo, ReservaWebActivarInput { activa: true }).await.unwrap();
-        activar(&repo, ReservaWebActivarInput { activa: true }).await.unwrap();
-        assert!(*repo.activa.lock().unwrap());
-        assert_eq!(repo.escrituras(), 1);
+        assert!(!*repo.activa.lock().unwrap());
     }
 
     #[tokio::test]

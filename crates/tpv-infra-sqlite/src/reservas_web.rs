@@ -69,15 +69,31 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
         Ok(v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0) != 0)
     }
 
-    async fn fijar_activa(&self, activa: bool) -> AppResult<()> {
+    async fn fijar_activa(&self, activa: bool) -> AppResult<bool> {
+        // Comparar y escribir bajo el MISMO cerrojo de escritura: con la lectura fuera, dos
+        // pulsaciones seguidas podían leer las dos el valor viejo, y la segunda se saltaba su
+        // escritura aunque fuera la última elección.
         let g = self.db.write().await;
+        let mut rows = g
+            .query("SELECT Reserva_Web_Activa FROM Business_Settings WHERE ID = 1;", ())
+            .await
+            .map_err(db_err)?;
+        let ahora = match rows.next().await.map_err(db_err)? {
+            Some(row) => v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0) != 0,
+            None => return Err(AppError::not_found("No existe Business_Settings (ID=1)")),
+        };
+        drop(rows);
+        // Sólo se escribe si cambia: cada escritura viaja a la nube.
+        if ahora == activa {
+            return Ok(false);
+        }
         g.execute(
             "UPDATE Business_Settings SET Reserva_Web_Activa = ?1 WHERE ID = 1;",
             vec![Value::Integer(i64::from(activa))],
         )
         .await
         .map_err(db_err)?;
-        Ok(())
+        Ok(true)
     }
 
     async fn cierres(&self) -> AppResult<Vec<CierreReservaWebDto>> {
@@ -106,18 +122,11 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
     async fn cerrar_dia(&self, cierre: CierreValidado) -> AppResult<String> {
         let g = self.db.write().await;
         g.transaccion(async {
-            // Un día ya cerrado conserva su id: sólo cambia el motivo.
-            g.execute(
-                "INSERT INTO Reserva_Web_Cierres (ID_Cierre, Dia_YMD, Motivo) VALUES (?1, ?2, ?3) \
-                 ON CONFLICT(Dia_YMD) DO UPDATE SET Motivo = excluded.Motivo;",
-                vec![
-                    Value::Text(new_id()),
-                    Value::Text(cierre.dia_ymd.clone()),
-                    opt_text(cierre.motivo.clone()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
+            // Un día ya cerrado conserva su id, y es ESE id el que lleva la sentencia que se
+            // replica. Con uno nuevo en el VALUES y el ON CONFLICT sobre el día, la fila guardaba
+            // el viejo pero el outbox el nuevo: si la nube apartaba la operación, la reparación por
+            // estado (`sync_reparacion`, que lee la clave del VALUES) buscaba una fila que no existe
+            // y no reparaba nada.
             let mut rows = g
                 .query(
                     "SELECT ID_Cierre FROM Reserva_Web_Cierres WHERE Dia_YMD = ?1;",
@@ -125,12 +134,24 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
                 )
                 .await
                 .map_err(db_err)?;
-            let row = rows
-                .next()
-                .await
-                .map_err(db_err)?
-                .ok_or_else(|| AppError::internal("El día cerrado no ha quedado guardado"))?;
-            Ok(v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default())
+            let existente = match rows.next().await.map_err(db_err)? {
+                Some(row) => v_string(row.get_value(0).map_err(db_err)?),
+                None => None,
+            };
+            drop(rows);
+            let id = existente.unwrap_or_else(new_id);
+            g.execute(
+                "INSERT INTO Reserva_Web_Cierres (ID_Cierre, Dia_YMD, Motivo) VALUES (?1, ?2, ?3) \
+                 ON CONFLICT(ID_Cierre) DO UPDATE SET Dia_YMD = excluded.Dia_YMD, Motivo = excluded.Motivo;",
+                vec![
+                    Value::Text(id.clone()),
+                    Value::Text(cierre.dia_ymd.clone()),
+                    opt_text(cierre.motivo.clone()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(id)
         })
         .await
     }
@@ -191,10 +212,50 @@ mod tests {
         assert!(!repo.activa().await.unwrap());
         let antes = outbox(&db).await;
 
-        repo.fijar_activa(true).await.unwrap();
+        assert!(repo.fijar_activa(true).await.unwrap());
 
         assert!(repo.activa().await.unwrap());
         assert_eq!(outbox(&db).await, antes + 1);
+        drop(repo);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Lo que ya está no se vuelve a escribir (cada escritura sube a la nube), y la comparación va
+    /// bajo el cerrojo de escritura: pulsaciones simultáneas acaban todas aplicadas en orden y la
+    /// base dice lo mismo que la última sentencia que ha salido hacia la nube.
+    #[tokio::test]
+    async fn encender_o_apagar_solo_escribe_si_cambia_y_en_orden() {
+        let (db, repo, dir) = abrir().await;
+        let antes = outbox(&db).await;
+        assert!(!repo.fijar_activa(false).await.unwrap());
+        assert_eq!(outbox(&db).await, antes, "ya estaba apagada");
+
+        let repo = Arc::new(repo);
+        let mut tareas = Vec::new();
+        for i in 0..20 {
+            let repo = repo.clone();
+            tareas.push(tokio::spawn(async move { repo.fijar_activa(i % 2 == 0).await.unwrap() }));
+        }
+        for t in tareas {
+            t.await.unwrap();
+        }
+
+        let g = db.read().await;
+        let mut rows = g
+            .query("SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;", ())
+            .await
+            .unwrap();
+        let ultima = match rows.next().await.unwrap().unwrap().get_value(0).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("{otro:?}"),
+        };
+        drop(rows);
+        drop(g);
+        let en_la_base = repo.activa().await.unwrap();
+        let sentencias: Vec<tpv_contracts::sync::SqlStatement> = serde_json::from_str(&ultima).unwrap();
+        assert!(sentencias[0].sql.contains("Reserva_Web_Activa"));
+        assert_eq!(sentencias[0].args[0], serde_json::json!(i64::from(en_la_base)), "{ultima}");
         drop(repo);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
@@ -216,6 +277,32 @@ mod tests {
         assert_eq!(cierres.len(), 1);
         assert_eq!(cierres[0].motivo.as_deref(), Some("Cena de empresa"));
         drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// La sentencia que se replica lleva el id de la fila de verdad: es el que usa la reparación
+    /// por estado para encontrarla si la nube aparta la operación.
+    #[tokio::test]
+    async fn recerrar_un_dia_replica_con_su_id_de_siempre() {
+        let (db, repo, dir) = abrir().await;
+        let id = repo.cerrar_dia(cierre("2099-12-24", None)).await.unwrap();
+        repo.cerrar_dia(cierre("2099-12-24", Some("Nochebuena"))).await.unwrap();
+
+        let g = db.read().await;
+        let mut rows = g
+            .query("SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;", ())
+            .await
+            .unwrap();
+        let ultima = match rows.next().await.unwrap().unwrap().get_value(0).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("{otro:?}"),
+        };
+        assert!(ultima.contains("Nochebuena"));
+        assert!(ultima.contains(&id), "la sentencia replicada lleva el id de la fila: {ultima}");
+        drop(rows);
+        drop(g);
+        drop(repo);
+        drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

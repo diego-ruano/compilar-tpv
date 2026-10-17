@@ -7,11 +7,13 @@ export function Switch({
 	onChange,
 	label,
 	description,
+	disabled,
 }: {
 	checked: boolean;
 	onChange: (v: boolean) => void;
 	label: string;
 	description?: string;
+	disabled?: boolean;
 }) {
 	return (
 		<div className="flex items-start justify-between gap-4 rounded-xl border border-border bg-surface px-4 py-3">
@@ -23,9 +25,11 @@ export function Switch({
 			<button
 				type="button"
 				onClick={() => onChange(!checked)}
+				disabled={disabled}
 				className={cn(
 					"relative h-7 w-12 rounded-full border transition shrink-0",
-					checked ? "bg-accent border-accent" : "bg-surface-2 border-border"
+					checked ? "bg-accent border-accent" : "bg-surface-2 border-border",
+					disabled ? "opacity-60 cursor-wait" : ""
 				)}
 				aria-pressed={checked}
 			>

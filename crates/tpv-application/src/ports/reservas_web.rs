@@ -21,7 +21,10 @@ pub trait ReservasWebRepository: Send + Sync {
     /// El interruptor general (`Business_Settings.Reserva_Web_Activa`).
     async fn activa(&self) -> AppResult<bool>;
 
-    async fn fijar_activa(&self, activa: bool) -> AppResult<()>;
+    /// Lo enciende o apaga si no lo estaba ya, comparando y escribiendo bajo el mismo cerrojo de
+    /// escritura: dos pulsaciones seguidas quedan en el orden en que llegaron. Sólo escribe si
+    /// cambia, porque cada escritura viaja a la nube. Devuelve si ha cambiado.
+    async fn fijar_activa(&self, activa: bool) -> AppResult<bool>;
 
     /// Los días cerrados de hoy en adelante, por fecha. Los pasados ya no le importan a nadie.
     async fn cierres(&self) -> AppResult<Vec<CierreReservaWebDto>>;
