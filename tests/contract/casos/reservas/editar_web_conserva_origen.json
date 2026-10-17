@@ -1,0 +1,21 @@
+{
+  "descripcion": "Reservas desde la web (docs/estudios/reservas-web.md): editar en el TPV o en la Handy una reserva hecha desde la web no la convierte en una del TPV. Reservas.Origen lo fija el alta y los ON CONFLICT DO UPDATE de los dos lados no lo tocan.",
+  "comando": "reservas.guardar",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen) VALUES ('reserva-web', 'mesa-1', '2026-02-02', '21:00', 'CENA', 2, 'PROXIMA', 'WEB');"
+  ],
+  "entrada": {
+    "id_reserva": "reserva-web",
+    "id_mesa": "mesa-1",
+    "dia_ymd": "2026-02-02",
+    "hora": "21:30",
+    "turno": "cena",
+    "comensales": 3,
+    "estado": "PROXIMA"
+  },
+  "snapshot": {
+    "Reservas": "SELECT ID_Reserva, Hora, Comensales, Origen FROM Reservas"
+  }
+}

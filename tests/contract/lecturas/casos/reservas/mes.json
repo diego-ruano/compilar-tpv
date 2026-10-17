@@ -1,5 +1,5 @@
 {
-  "descripcion": "Las reservas de un rango de dias, que es lo que pinta el calendario. El rango es explicito (no depende de hoy), y hay una reserva de junio fuera del rango para comprobar que el corte es el mismo en los dos lados, mas dos el mismo dia en turnos distintos para fijar el orden. RI-61: una reserva sin cliente y otra sin mesa salen con id_cliente nulo y los textos vacios (no null: el DTO de Rust los lee como String, y un null tumbaba el calendario entero en la Handy).",
+  "descripcion": "Las reservas de un rango de dias, que es lo que pinta el calendario. El rango es explicito (no depende de hoy), y hay una reserva de junio fuera del rango para comprobar que el corte es el mismo en los dos lados, mas dos el mismo dia en turnos distintos para fijar el orden. RI-61: una reserva sin cliente y otra sin mesa salen con id_cliente nulo y los textos vacios (no null: el DTO de Rust los lee como String, y un null tumbaba el calendario entero en la Handy). Y una reserva hecha desde la web sale con su origen (WEB), y las demas con TPV.",
   "lectura": "reservas.mes",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
@@ -10,7 +10,8 @@
     "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-2', 'cli-1', 'mesa-2', '2026-05-10', '21:00', 'CENA', 2, 'FINALIZADA');",
     "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-fuera', 'cli-1', 'mesa-1', '2026-06-15', '13:30', 'COMIDA', 2, 'ACTIVA');",
     "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-sin-cliente', NULL, 'mesa-2', '2026-05-12', '20:00', 'CENA', 2, 'PROXIMA');",
-    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-sin-mesa', 'cli-1', NULL, '2026-05-13', '14:00', 'COMIDA', 3, 'PROXIMA');"
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-sin-mesa', 'cli-1', NULL, '2026-05-13', '14:00', 'COMIDA', 3, 'PROXIMA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen) VALUES ('res-web', 'cli-1', 'mesa-1', '2026-05-14', '21:00', 'CENA', 2, 'PROXIMA', 'WEB');"
   ],
   "entrada": {
     "desde": "2026-05-01",

@@ -66,6 +66,7 @@ export async function mes(
 				R.Duracion_Min AS duracion_min,
 				R.Nota AS nota,
 				R.Estado AS estado,
+				R.Origen AS origen,
 				C.ID_Cliente AS id_cliente,
 				COALESCE(C.Nombre, '') AS nombre_cliente,
 				C.Telefono AS telefono_cliente,

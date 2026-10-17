@@ -2682,6 +2682,11 @@ export type ReservaDto = {
 	duracion_min: number | null,
 	nota: string | null,
 	estado: string,
+	/**
+	 *  De dónde vino: `TPV` (la Main o una Handy) o `WEB` (la hizo el cliente desde el widget,
+	 *  docs/estudios/reservas-web.md). `Reservas.Origen`.
+	 */
+	origen: string,
 	/**  `None` si la reserva no tiene cliente (RI-61); entonces `nombre_cliente` llega vacío. */
 	id_cliente: string | null,
 	nombre_cliente: string,

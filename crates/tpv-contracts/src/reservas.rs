@@ -34,6 +34,9 @@ pub struct ReservaDto {
     pub duracion_min: Option<i64>,
     pub nota: Option<String>,
     pub estado: String,
+    /// De dónde vino: `TPV` (la Main o una Handy) o `WEB` (la hizo el cliente desde el widget,
+    /// docs/estudios/reservas-web.md). `Reservas.Origen`.
+    pub origen: String,
 
     /// `None` si la reserva no tiene cliente (RI-61); entonces `nombre_cliente` llega vacío.
     pub id_cliente: Option<String>,

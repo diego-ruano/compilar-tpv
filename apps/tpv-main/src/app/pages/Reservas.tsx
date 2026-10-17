@@ -14,6 +14,7 @@ import {
   Pencil,
   Trash2,
   Clock,
+  Globe,
 } from "lucide-react";
 
 import { commands, esError, toAppError } from "@tpv/client";
@@ -1123,8 +1124,17 @@ export default function Reservas() {
                         </div>
 
                         <div className="min-w-0 py-0.5">
-                          <div className="truncate text-lg font-extrabold text-fg">
-                            {r.nombre_cliente}
+                          <div className="flex min-w-0 items-center gap-2">
+                            <div className="truncate text-lg font-extrabold text-fg">
+                              {r.nombre_cliente}
+                            </div>
+                            {/* Reservas desde la web (docs/estudios/reservas-web.md): la hizo el cliente. */}
+                            {r.origen === "WEB" ? (
+                              <span className="inline-flex shrink-0 items-center rounded-full border border-accent/30 bg-accent-soft px-2.5 py-0.5 text-xs font-bold text-accent">
+                                <Globe className="mr-1 size-3.5" aria-hidden />
+                                Web
+                              </span>
+                            ) : null}
                           </div>
 
                           <div className="mt-2 flex flex-wrap items-center gap-2">

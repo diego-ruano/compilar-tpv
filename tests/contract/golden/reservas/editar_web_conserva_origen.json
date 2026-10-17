@@ -1,0 +1,10 @@
+{
+  "Reservas": [
+    {
+      "Comensales": 3,
+      "Hora": "21:30",
+      "ID_Reserva": "reserva-web",
+      "Origen": "WEB"
+    }
+  ]
+}

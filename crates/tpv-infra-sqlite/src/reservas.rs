@@ -307,7 +307,8 @@ impl ReservasRepository for SqliteReservasRepository {
             M.ID_Zona, M.Numero_Mesa, M.Capacidad,
             Z.Nombre_Zona,
             C.ID_Cliente,
-            R.Duracion_Min
+            R.Duracion_Min,
+            R.Origen
           -- RES-04: LEFT JOIN (no INNER). Una reserva cuyo cliente/mesa/zona ya no exista (borrado
           -- de layout, divergencia de sync) NO debe desaparecer del calendario: se muestra aunque
           -- falten esos datos (columnas quedan NULL → "" / 0 en el mapper) en vez de ocultarse.
@@ -337,6 +338,7 @@ impl ReservasRepository for SqliteReservasRepository {
                 comensales: i(g(5)?),
                 nota: norm_opt_string(g(6)?),
                 estado: s(g(7)?),
+                origen: s(g(17)?),
                 // Del cliente que existe, no de la columna de la reserva: una reserva cuyo cliente
                 // se borró sale sin cliente, igual que su nombre (RES-04).
                 id_cliente: norm_opt_string(g(15)?),
