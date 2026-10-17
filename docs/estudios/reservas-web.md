@@ -634,7 +634,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | Fase | Entrega | Hecho cuando |
 |---|---|---|
 | ✅ **0 · Previos** | FABLE-B. Turnstile dado de alta (§12) | Hecho el 2026-10-17 |
-| **1 · Esquema y configuración** | El esquema del §3.1 en `0001`, el reset de desarrollo, Configuración → Reservas (interruptor y días cerrados), «Editar mesa» con la sección web, la zona horaria, `origen` en el calendario, `TABLAS_SOLO_MAIN` | La configuración se guarda en la Main y llega a Turso; tests en verde |
+| ✅ **1 · Esquema y configuración** | El esquema del §3.1 en `0001`, el reset de desarrollo, Configuración → Reservas (interruptor y días cerrados), el modo «Reserva web» del editor del plano, la zona horaria, `origen` en el calendario, `TABLAS_SOLO_MAIN` | Código y tests hechos el 2026-10-17. Falta comprobarlo con el worker desplegado: que la configuración llega a Turso |
 | **2 · Agenda y API pública** | Tablas centrales, `POST /clave` y el código en Configuración, la puerta pública, las rutas públicas, `AgendaWeb`, los limitadores, el interruptor | Se reserva con `curl` y los tests; la agenda reparte bien con altas simultáneas |
 | **3 · Entrega a la Main** | `avisarReservasWeb`, `/pendientes` y `/recogidas`, la recogida en el motor, el caso de uso, las notificaciones, la cancelación entregada, la reoferta | E2E: web → Main, con la Main encendida y apagada |
 | **4 · Widget** | `packages/plano`, `packages/estilos`, `apps/reservas-web`, `embed.js`, los assets en el worker y la CSP | Funciona incrustado en una página de prueba en `localhost` dada de alta |
