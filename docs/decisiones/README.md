@@ -12,6 +12,7 @@ documento de [arquitectura](../arquitectura/).
 | [0004](0004-la-hora-la-pone-quien-escribe.md) | La hora la pone quien escribe |
 | [0005](0005-dinero-en-centimos.md) | El dinero es un entero de céntimos |
 | [0006](0006-un-solo-worker.md) | Un solo worker para toda la nube |
+| [0007](0007-la-reserva-web-no-escribe-en-la-base-del-negocio.md) | La reserva web no escribe en la base del negocio |
 
 ## Cómo se escribe uno
 

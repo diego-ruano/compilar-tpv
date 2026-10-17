@@ -78,6 +78,9 @@ El TPV guarda datos de clientes (nombre, teléfono, email, notas) y PII del pers
 la nube: somos **encargado del tratamiento**. Falta el contrato de encargado, la política de
 privacidad, el ejercicio de derechos (exportar y borrar un cliente) y la política de retención.
 
+La reserva web ([plan](estudios/reservas-web.md)) recoge esos datos directamente del público: su
+formulario necesita el texto informativo, con el negocio como responsable, antes del piloto.
+
 El cifrado de la PII del personal no la pone fuera de nuestro alcance: el texto cifrado está en Turso
 y la DEK en el control-plane ([arquitectura/licencias.md](arquitectura/licencias.md)). Hay que
 declararlo así.

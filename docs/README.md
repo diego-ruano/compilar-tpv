@@ -54,6 +54,8 @@ Tres reglas:
 
 - [compatibilidad-windows-7.md](estudios/compatibilidad-windows-7.md)
 - [metricas-produccion.md](estudios/metricas-produccion.md)
+- [reservas-web.md](estudios/reservas-web.md): plan de las reservas desde la web (widget, agenda y
+  entrega a la Main), sin implementar.
 
 ## Análisis
 
