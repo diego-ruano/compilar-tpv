@@ -162,7 +162,13 @@ export default function EditTables() {
     // cuándo. Sólo en la Main: es su configuración, y la Handy no la escribe.
     const esMain = useMode((s) => s.mode) === "tpv";
     const mesasWeb = useMesasWeb(esMain);
-    const [mesaWebAbierta, setMesaWebAbierta] = useState<Table | null>(null);
+
+    // Si la configuración deja de estar leída (se vuelve a leer al guardar el plano, o falla), el
+    // modo «Reserva web» se desarma: no puede abrir el formulario de una mesa con datos viejos.
+    const despacharModo = modoEditor.dispatch;
+    useEffect(() => {
+        if (webTableArmed && mesasWeb.estado !== "listo") despacharModo({ tipo: "cancelar" });
+    }, [webTableArmed, mesasWeb.estado, despacharModo]);
 
     const historyRef = useRef<Salon[][]>([]);
 
@@ -591,7 +597,9 @@ export default function EditTables() {
         webTableArmed,
         abrirReservaWeb: (table) => {
             modoEditor.dispatch({ tipo: "cancelar" });
-            setMesaWebAbierta(table);
+            if (!mesasWeb.abrir(table)) {
+                toast.warning("Todavía no se ha leído qué mesas se reservan desde la web. Prueba otra vez en un momento.");
+            }
         },
         esReservableWeb: (table) => {
             const id = parseMesaId(table.id);
@@ -1071,21 +1079,16 @@ export default function EditTables() {
             {addTableOpen && <FormularioMesa numeroMesa={activeTables.length + 1} onCerrar={() => setAddTableOpen(false)}
                 onCrear={(mesa, colocacion) => { if (colocacion === "click") finalizeAddTableByClick(mesa); else finalizeAddTableAuto(mesa); }} />}
 
-            {mesaWebAbierta && (() => {
-                const idMesa = parseMesaId(mesaWebAbierta.id);
+            {mesasWeb.abierta && (() => {
+                const idMesa = parseMesaId(mesasWeb.abierta.id);
                 return (
                     <FormularioReservaWeb
-                        nombreMesa={mesaWebAbierta.name}
+                        key={mesasWeb.abierta.id}
+                        nombreMesa={mesasWeb.abierta.name}
                         idMesa={idMesa}
                         actual={idMesa ? mesasWeb.mesas[idMesa] : undefined}
-                        onCerrar={() => setMesaWebAbierta(null)}
-                        onGuardada={(mesa) => {
-                            mesasWeb.guardada(mesa);
-                            // Cierra sólo si sigue abierta ESA mesa.
-                            setMesaWebAbierta((abierta) =>
-                                abierta && parseMesaId(abierta.id) === mesa.id_mesa ? null : abierta,
-                            );
-                        }}
+                        onCerrar={mesasWeb.cerrar}
+                        onGuardada={mesasWeb.guardada}
                     />
                 );
             })()}

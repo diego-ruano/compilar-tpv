@@ -16,6 +16,9 @@ const mesa = (id: string): ReservaWebMesaDto => ({
     hora_desde: "12:00", hora_hasta: "16:00",
 });
 
+/** Una mesa del editor ya guardada en el plano (su id de pantalla lleva el prefijo). */
+const enPlano = (id: string) => ({ id: `db-mesa-${id}`, name: id, x: 0, y: 0, width: 80, height: 80, seats: 4, shape: "rect" as const });
+
 /** Una lectura que contesta cuando el test quiere. */
 function pendiente() {
     let contestar!: (lista: ReservaWebMesaDto[]) => void;
@@ -61,6 +64,42 @@ it("una respuesta vieja no pisa a la más reciente", async () => {
 
     expect(result.current.estado).toBe("listo");
     expect(Object.keys(result.current.mesas)).toEqual(["nueva"]);
+});
+
+/** Con el modo armado, guardar el plano vuelve a leer: mientras tanto, o si falla, no se abre nada. */
+it("no abre el formulario de una mesa mientras vuelve a leer ni si la lectura falla", async () => {
+    const segunda = pendiente();
+    api.leer.mockResolvedValueOnce([mesa("m1")]).mockReturnValueOnce(segunda.promesa);
+    const { result } = renderHook(() => useMesasWeb(true));
+    await waitFor(() => expect(result.current.estado).toBe("listo"));
+
+    let recarga!: Promise<void>;
+    act(() => { recarga = result.current.recargar(); });
+    let abierto = true;
+    act(() => { abierto = result.current.abrir(enPlano("m1")); });
+    expect(abierto).toBe(false);
+    expect(result.current.abierta).toBeNull();
+
+    await act(async () => { segunda.fallar(new Error("Sin conexión")); await recarga; });
+    act(() => { abierto = result.current.abrir(enPlano("m1")); });
+    expect(abierto).toBe(false);
+    expect(result.current.abierta).toBeNull();
+});
+
+/** Si mientras se guardaba la mesa A se abrió la B, la respuesta de A no cierra B. */
+it("al guardar sólo cierra el formulario si sigue abierto el de esa mesa", async () => {
+    api.leer.mockResolvedValue([mesa("a"), mesa("b")]);
+    const { result } = renderHook(() => useMesasWeb(true));
+    await waitFor(() => expect(result.current.estado).toBe("listo"));
+
+    act(() => { result.current.abrir(enPlano("a")); });
+    act(() => { result.current.guardada(mesa("a")); });
+    expect(result.current.abierta).toBeNull();
+
+    act(() => { result.current.abrir(enPlano("b")); });
+    act(() => { result.current.guardada({ ...mesa("a"), hora_hasta: "17:00" }); });
+    expect(result.current.abierta?.id).toBe("db-mesa-b");
+    expect(result.current.mesas.a?.hora_hasta).toBe("17:00");
 });
 
 it("en la Handy no pide nada", () => {
