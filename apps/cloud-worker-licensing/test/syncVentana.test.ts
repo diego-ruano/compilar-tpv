@@ -444,6 +444,10 @@ describe("bootstrap acotado · lo que la Main necesita para seguir", () => {
 			"Producto_Alergenos",
 			"Productos",
 			"Proveedores",
+			// La configuración de la reserva web: unas pocas filas que la Main necesita enteras.
+			"Reserva_Web_Cierres",
+			"Reserva_Web_Franjas",
+			"Reserva_Web_Mesas",
 			"Reservas",
 			"Roles",
 			"Roles_Permisos",

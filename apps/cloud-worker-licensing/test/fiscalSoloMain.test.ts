@@ -103,6 +103,28 @@ describe("las tablas fiscales sólo las escribe la Main", () => {
 		expect(seLlamo()).toBe(true);
 	});
 
+	it("la configuración de la reserva web sólo la escribe la Main", async () => {
+		for (const sql of [
+			"INSERT INTO Reserva_Web_Mesas (ID_Mesa, Activa) VALUES (?, 1);",
+			"DELETE FROM Reserva_Web_Franjas WHERE ID_Mesa = ?;",
+			"UPDATE Reserva_Web_Cierres SET Motivo = ? WHERE Dia_YMD = '2026-12-24';",
+		]) {
+			const { env, seLlamo } = entorno();
+			await expect(aplicar(env, { type: "tenantDb.exec", payload: { sql, args: ["x"] } }))
+				.rejects.toMatchObject({ status: 403 });
+			expect(seLlamo()).toBe(false);
+		}
+	});
+
+	it("borrar una mesa desde la Handy no choca con el veto de la reserva web", async () => {
+		const { env, seLlamo } = entorno();
+		await aplicar(env, {
+			type: "tenantDb.exec",
+			payload: { sql: "DELETE FROM Mesas WHERE ID_Mesa = ?;", args: ["m1"] },
+		});
+		expect(seLlamo()).toBe(true);
+	});
+
 	it("el veto no depende de la capitalización del SQL", async () => {
 		const { env } = entorno();
 		await expect(

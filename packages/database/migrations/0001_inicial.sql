@@ -522,6 +522,10 @@ WHERE Email IS NOT NULL AND Email <> '';
 -- (Business_Settings.Reserva_Duracion_Min): asi, cambiar la duracion por defecto cambia la de
 -- todas las reservas que no eligieron la suya. Dos reservas de la misma mesa se pisan si se cruzan
 -- [Dia_YMD Hora, + Duracion_Min).
+-- Origen: 'TPV' (apuntada en la Main o en una Handy) o 'WEB' (hecha por el cliente desde el widget,
+-- ver docs/estudios/reservas-web.md). Lo fija el alta y nadie lo cambia despues: los ON CONFLICT DO
+-- UPDATE de la Main y del worker no lo tocan, asi que editar una reserva web no la convierte en una
+-- del TPV. Sus valores los cierra un trigger (RI-48).
 CREATE TABLE IF NOT EXISTS Reservas (
   ID_Reserva TEXT NOT NULL PRIMARY KEY,
   ID_Cliente TEXT,
@@ -534,6 +538,7 @@ CREATE TABLE IF NOT EXISTS Reservas (
   Nota TEXT,
   Estado TEXT NOT NULL DEFAULT 'ACTIVA',
   Created_At TEXT,
+  Origen TEXT NOT NULL DEFAULT 'TPV',
   FOREIGN KEY (ID_Cliente) REFERENCES Clientes(ID_Cliente),
   FOREIGN KEY (ID_Mesa) REFERENCES Mesas(ID_Mesa)
 );
@@ -543,6 +548,49 @@ ON Reservas(ID_Mesa, Dia_YMD, Hora);
 
 CREATE INDEX IF NOT EXISTS idx_reservas_cliente
 ON Reservas(ID_Cliente);
+
+-- Reservas desde la web (docs/estudios/reservas-web.md): que mesas se pueden reservar desde la web
+-- y cuando. Solo las escribe la Main (la Handy las tiene vetadas en lib/hub.ts::TABLAS_SOLO_MAIN);
+-- borrar una mesa se lleva su configuracion por la cascada, y archivarla la saca de las reservables
+-- porque la web solo ofrece mesas activas.
+--
+-- Reserva_Web_Mesas: la casilla «Se puede reservar desde la web» de cada mesa. Sin fila, no.
+CREATE TABLE IF NOT EXISTS Reserva_Web_Mesas (
+  ID_Mesa TEXT NOT NULL PRIMARY KEY,
+  Activa INTEGER NOT NULL DEFAULT 0,
+  CHECK (Activa IN (0, 1)),
+  FOREIGN KEY (ID_Mesa) REFERENCES Mesas(ID_Mesa) ON DELETE CASCADE
+);
+
+-- Reserva_Web_Franjas: cuando se puede reservar cada mesa. Una franja vale para un dia si su dia de
+-- la semana esta en Dias_Semana (mascara: 1 lunes, 2 martes, 4 miercoles, 8 jueves, 16 viernes,
+-- 32 sabado, 64 domingo; 127 = todos) y, si las tiene, el dia cae entre Fecha_Desde y Fecha_Hasta
+-- (YYYY-MM-DD, las dos incluidas). Las horas son 'HH:MM': la reserva entera tiene que caber entre
+-- ellas, con la tolerancia de Business_Settings.Reserva_Web_Margen_Min por cada extremo. El esquema
+-- admite varias por mesa; la pantalla edita una.
+CREATE TABLE IF NOT EXISTS Reserva_Web_Franjas (
+  ID_Franja TEXT NOT NULL PRIMARY KEY,
+  ID_Mesa TEXT NOT NULL,
+  Dias_Semana INTEGER NOT NULL DEFAULT 127,
+  Fecha_Desde TEXT,
+  Fecha_Hasta TEXT,
+  Hora_Desde TEXT NOT NULL,
+  Hora_Hasta TEXT NOT NULL,
+  CHECK (Dias_Semana BETWEEN 1 AND 127),
+  CHECK (Hora_Desde < Hora_Hasta),
+  CHECK (Fecha_Desde IS NULL OR Fecha_Hasta IS NULL OR Fecha_Desde <= Fecha_Hasta),
+  FOREIGN KEY (ID_Mesa) REFERENCES Mesas(ID_Mesa) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_reserva_web_franjas_mesa
+ON Reserva_Web_Franjas(ID_Mesa);
+
+-- Reserva_Web_Cierres: los dias en que la web no acepta ninguna reserva (festivos, vacaciones).
+CREATE TABLE IF NOT EXISTS Reserva_Web_Cierres (
+  ID_Cierre TEXT NOT NULL PRIMARY KEY,
+  Dia_YMD TEXT NOT NULL UNIQUE,
+  Motivo TEXT
+);
 
 /* =========================================================
    6. Comandas / Detalles / Cuentas
@@ -1257,9 +1305,27 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- 'prohibir'. Una comanda abierta en la mesa cuenta como ocupada desde que se abrio.
   Reserva_Duracion_Min INTEGER NOT NULL DEFAULT 120 CHECK (Reserva_Duracion_Min > 0),
   Reserva_Solape TEXT NOT NULL DEFAULT 'avisar',
+  -- Reservas desde la web (docs/estudios/reservas-web.md). Reserva_Web_Activa es el interruptor
+  -- general. Dias_Min / Dias_Max: desde cuantos dias vista y hasta cuantos se puede reservar (1 =
+  -- desde manana: hoy ya no se reserva para hoy). Margen_Min: la tolerancia, en minutos, de la
+  -- franja de una mesa por cada extremo. Margen_Plazas: para N personas se ofrecen mesas de N a
+  -- N + Margen_Plazas plazas. De momento solo el interruptor tiene pantalla; el resto son ajustes
+  -- con su valor por defecto, para que hacerlos configurables no necesite otra migracion.
+  Reserva_Web_Activa INTEGER NOT NULL DEFAULT 0,
+  Reserva_Web_Dias_Min INTEGER NOT NULL DEFAULT 1,
+  Reserva_Web_Dias_Max INTEGER NOT NULL DEFAULT 30,
+  Reserva_Web_Margen_Min INTEGER NOT NULL DEFAULT 20,
+  Reserva_Web_Margen_Plazas INTEGER NOT NULL DEFAULT 2,
+  -- Zona horaria IANA del negocio ('Europe/Madrid', 'Atlantic/Canary'…). La escribe la Main con la
+  -- de su sistema: la nube la necesita para saber que es «hoy» cuando no hay un dispositivo que se
+  -- lo diga (las reservas desde la web).
+  Zona_Horaria TEXT NOT NULL DEFAULT 'Europe/Madrid',
   Updated_At TEXT,
   CHECK (Verifactu_Entorno IN ('produccion','pruebas')),
-  CHECK (Reserva_Solape IN ('avisar','prohibir'))
+  CHECK (Reserva_Solape IN ('avisar','prohibir')),
+  CHECK (Reserva_Web_Activa IN (0, 1)),
+  CHECK (Reserva_Web_Dias_Min >= 0 AND Reserva_Web_Dias_Max >= Reserva_Web_Dias_Min),
+  CHECK (Reserva_Web_Margen_Min >= 0 AND Reserva_Web_Margen_Plazas >= 0)
 );
 
 INSERT OR IGNORE INTO Business_Settings (ID) VALUES (1);
@@ -1588,8 +1654,8 @@ ON Registros_Facturacion(ID_Pago);
 /* =========================================================
    Valores de dominio cerrados (RI-48)
 
-   Metodos de pago y estados de cocina, reservas, tareas y fichajes. Cocina, fichajes y
-   movimientos de caja admiten NULL.
+   Metodos de pago, estados de cocina, reservas, tareas y fichajes, y el origen de una
+   reserva. Cocina, fichajes y movimientos de caja admiten NULL.
 
    Son triggers y no CHECK: un RAISE(ABORT) corta tambien un INSERT OR IGNORE, que ante
    un CHECK se saltaria la fila en silencio, y el codigo reconoce el texto 'RI48'.
@@ -1634,6 +1700,20 @@ BEFORE UPDATE ON Reservas
 WHEN NOT (NEW.Estado IN ('PROXIMA','ACTIVA','FINALIZADA','CANCELADA','NO_SHOW'))
 BEGIN
   SELECT RAISE(ABORT, 'RI48: Reservas.Estado no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_reservas_origen_insert
+BEFORE INSERT ON Reservas
+WHEN NOT (NEW.Origen IN ('TPV','WEB'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Reservas.Origen no admitido');
+END;
+
+CREATE TRIGGER IF NOT EXISTS ri48_reservas_origen_update
+BEFORE UPDATE ON Reservas
+WHEN NOT (NEW.Origen IN ('TPV','WEB'))
+BEGIN
+  SELECT RAISE(ABORT, 'RI48: Reservas.Origen no admitido');
 END;
 
 CREATE TRIGGER IF NOT EXISTS ri48_tareas_estado_insert
@@ -1896,6 +1976,19 @@ CREATE TABLE IF NOT EXISTS _Verifactu_Flujo (
     Ultimo_Envio_Ms  INTEGER
 );
 INSERT OR IGNORE INTO _Verifactu_Flujo (ID, Espera_Segundos) VALUES (1, 60);
+
+-- Reservas desde la web (docs/estudios/reservas-web.md): los correos al cliente que esta Main ha
+-- pedido al cambiar o cancelar una reserva web y todavia no ha entregado al worker. Los saca el
+-- job `avisos_reserva_web` cuando hay conexion: un cambio hecho sin internet avisa al volver.
+CREATE TABLE IF NOT EXISTS _Reservas_Web_Avisos (
+    ID_Aviso TEXT NOT NULL PRIMARY KEY,
+    ID_Reserva TEXT NOT NULL,
+    Tipo TEXT NOT NULL,
+    Datos_Json TEXT NOT NULL CHECK (json_valid(Datos_Json)),
+    Creado_Ms INTEGER NOT NULL,
+    Intentos INTEGER NOT NULL DEFAULT 0,
+    Ultimo_Error TEXT
+);
 
 -- Estado de los jobs periodicos (jobs/mod.rs). `Last_Ok_Ms` es su razon de ser: permite
 -- decidir el vencimiento en reloj de pared (si ha pasado el intervalo desde el ultimo

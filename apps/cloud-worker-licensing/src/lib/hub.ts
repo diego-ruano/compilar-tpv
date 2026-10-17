@@ -33,8 +33,20 @@ export type ApplyCommand = {
  *
  * `Serie_Facturacion` va con ella por lo mismo: es el contador que reserva el número, y un número
  * repartido desde dos sitios acaba en una factura duplicada (error 3000 de la AEAT).
+ *
+ * La configuración de las reservas desde la web (qué mesas, cuándo y qué días se cierra,
+ * docs/estudios/reservas-web.md) es de administración y sólo tiene pantalla en la Main. Borrar una
+ * mesa desde la Handy sigue llevándose su configuración: eso es la cascada de la base, no una
+ * sentencia de la Handy.
  */
-const TABLAS_SOLO_MAIN = ["Registros_Facturacion", "Serie_Facturacion", "Roles_Permisos"];
+const TABLAS_SOLO_MAIN = [
+	"Registros_Facturacion",
+	"Serie_Facturacion",
+	"Roles_Permisos",
+	"Reserva_Web_Mesas",
+	"Reserva_Web_Franjas",
+	"Reserva_Web_Cierres",
+];
 
 /**
  * ¿Alguna sentencia de este comando escribe en una tabla vetada?

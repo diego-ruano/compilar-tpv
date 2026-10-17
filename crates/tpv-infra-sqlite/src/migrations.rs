@@ -291,7 +291,7 @@ mod tests {
         let (conn, _dir) = open_temp();
         run(&conn).unwrap();
         for (tabla, columna) in [("Pagos", "Metodo_Pago"), ("Detalle_Comanda", "Estado_Cocina"),
-            ("Reservas", "Estado"), ("Tareas", "Estado"), ("Tarea_Asignaciones", "Estado"),
+            ("Reservas", "Estado"), ("Reservas", "Origen"), ("Tareas", "Estado"), ("Tarea_Asignaciones", "Estado"),
             ("Fichajes", "Estado"), ("Movimientos_Caja", "Metodo_Pago")] {
             let error = conn.execute(&format!("INSERT INTO {tabla} ({columna}) VALUES ('DESCONOCIDO');"), []).unwrap_err();
             assert!(error.to_string().contains("RI48"), "{tabla}: {error}");
@@ -503,7 +503,13 @@ mod tests {
     /// Las tablas locales del dispositivo (`_…`) no guardan dinero y no se miran.
     const INTEGER_QUE_NO_ES_DINERO: &[(&str, &[&str])] = &[
         ("Applied_Operations", &["Created_At_Ms", "Applied_At_Ms", "Updated_At_Ms"]),
-        ("Business_Settings", &["Modo_Prueba", "Reserva_Duracion_Min"]),
+        (
+            "Business_Settings",
+            &[
+                "Modo_Prueba", "Reserva_Duracion_Min", "Reserva_Web_Activa", "Reserva_Web_Dias_Min",
+                "Reserva_Web_Dias_Max", "Reserva_Web_Margen_Min", "Reserva_Web_Margen_Plazas",
+            ],
+        ),
         ("Categorias_Producto", &["Vendible", "Pasa_Cocina"]),
         ("Cierre_Denominaciones", &["Unidades"]),
         ("Cuentas_Gastos", &["Pagado_Con_Caja"]),
@@ -513,6 +519,8 @@ mod tests {
         ("Intentos_Login", &["Intentos_Fallidos", "Bloqueado_Hasta_Ms", "Ultimo_Intento_Ms"]),
         ("Mesas", &["Capacidad", "Ubicacion_X", "Ubicacion_Y", "Width", "Height", "Radius"]),
         ("Registros_Facturacion", &["Orden", "Numero"]),
+        ("Reserva_Web_Franjas", &["Dias_Semana"]),
+        ("Reserva_Web_Mesas", &["Activa"]),
         ("Reservas", &["Comensales", "Duracion_Min"]),
         ("Serie_Facturacion", &["Ultimo"]),
         ("Sync_Changes", &["Created_At_Ms"]),
