@@ -470,9 +470,24 @@ mod tests {
         }
     }
 
-    /// Guardar deja la casilla y una sola franja, y viaja a la nube como cualquier otra escritura.
+    /// Las sentencias de la última operación del outbox.
+    async fn ultima_operacion(db: &Db) -> Vec<tpv_contracts::sync::SqlStatement> {
+        let g = db.read().await;
+        let mut rows = g
+            .query("SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;", ())
+            .await
+            .unwrap();
+        match rows.next().await.unwrap().unwrap().get_value(0).unwrap() {
+            Value::Text(t) => serde_json::from_str(&t).unwrap(),
+            otro => panic!("{otro:?}"),
+        }
+    }
+
+    /// Guardar deja la casilla y una sola franja, y sale hacia la nube como UNA operación con las
+    /// tres sentencias: aplicada en otra base, por el mismo camino que la Main aplica lo que llega
+    /// de fuera, deja exactamente la misma configuración.
     #[tokio::test]
-    async fn guardar_una_mesa_deja_su_casilla_y_una_franja() {
+    async fn guardar_una_mesa_deja_su_casilla_y_una_franja_y_se_replica_entera() {
         let (db, repo, dir) = abrir().await;
         sembrar_mesas(&db).await;
         let antes = outbox(&db).await;
@@ -487,13 +502,45 @@ mod tests {
         assert_eq!(m1.dias_semana, 31);
         assert_eq!(m1.fecha_desde.as_deref(), Some("2026-11-01"));
         assert_eq!((m1.hora_desde.as_deref(), m1.hora_hasta.as_deref()), (Some("13:00"), Some("17:00")));
-        assert!(outbox(&db).await > antes);
+        assert_eq!(outbox(&db).await, antes + 2, "una operación por guardado");
 
-        let w = db.read().await;
-        let mut rows = w.query("SELECT COUNT(*) FROM Reserva_Web_Franjas WHERE ID_Mesa = 'm1';", ()).await.unwrap();
-        assert_eq!(rows.next().await.unwrap().unwrap().get_value(0).unwrap(), Value::Integer(1));
-        drop(rows);
-        drop(w);
+        let sentencias = ultima_operacion(&db).await;
+        let cabezas: Vec<&str> = sentencias.iter().map(|s| s.sql.split_whitespace().take(3).last().unwrap_or("")).collect();
+        assert_eq!(cabezas, ["Reserva_Web_Mesas", "Reserva_Web_Franjas", "Reserva_Web_Franjas"], "{sentencias:?}");
+
+        // La otra base: el mismo plano y lo que ha salido, aplicado como un cambio remoto.
+        let (db2, repo2, dir2) = abrir().await;
+        sembrar_mesas(&db2).await;
+        let sync = crate::sync::SqliteSyncRepository::new(db2.clone());
+        tpv_application::ports::sync::SyncRepository::apply_changes(
+            &sync,
+            vec![tpv_contracts::sync::SyncChange { op_id: "op-de-la-main".into(), seq: 1, statements: sentencias }],
+        )
+        .await
+        .unwrap();
+        assert_eq!(format!("{:?}", repo2.mesas().await.unwrap()), format!("{mesas:?}"));
+
+        drop((repo, repo2, sync));
+        drop((db, db2));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    /// Si algo falla a mitad (aquí, una franja que el CHECK del esquema rechaza después de haber
+    /// borrado la anterior), no queda nada a medias: ni en la base ni en el outbox.
+    #[tokio::test]
+    async fn un_fallo_a_mitad_deja_la_configuracion_anterior() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        repo.guardar_mesa(mesa_web("m1", true, Some(("12:00", "16:00")))).await.unwrap();
+        let antes = outbox(&db).await;
+        let como_estaba = format!("{:?}", repo.mesas().await.unwrap());
+
+        let al_reves = mesa_web("m1", false, Some(("16:00", "12:00")));
+        assert!(repo.guardar_mesa(al_reves).await.is_err());
+
+        assert_eq!(format!("{:?}", repo.mesas().await.unwrap()), como_estaba);
+        assert_eq!(outbox(&db).await, antes);
         drop(repo);
         drop(db);
         let _ = std::fs::remove_dir_all(&dir);
