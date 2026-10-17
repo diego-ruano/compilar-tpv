@@ -244,8 +244,9 @@ impl ApiErr {
     }
 
     /// Lo que se enseña: la frase del worker si la trae y, si no, su identificador (que
-    /// `AppErrorDto` convierte en la frase genérica de su código). El `details` va detrás, entre
-    /// paréntesis, para diagnosticar: p. ej. el error de Turso de `tenant_db_provision_failed`.
+    /// `AppErrorDto` convierte en la frase genérica de su código). El `details`, si lo trae, va
+    /// detrás, entre paréntesis, para diagnosticar. Sólo lo llevan los errores de negocio: un 5xx
+    /// del worker no cuenta su detalle interno (FABLE-B).
     fn texto(&self) -> String {
         let base = self
             .message
@@ -1447,8 +1448,8 @@ mod tests_error_del_worker {
     #[test]
     fn el_detalle_se_conserva_detras() {
         assert_eq!(
-            texto(r#"{"ok":false,"error":"tenant_db_provision_failed","message":"No se ha podido preparar la base.","details":"turso 503"}"#),
-            "No se ha podido preparar la base. (turso 503)"
+            texto(r#"{"ok":false,"error":"x","message":"No se ha podido completar.","details":"diagnóstico"}"#),
+            "No se ha podido completar. (diagnóstico)"
         );
     }
 }

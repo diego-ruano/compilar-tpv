@@ -228,7 +228,7 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
   Sin nonce ([FABLE-E](../pendientes.md#fable-e--sin-nonce-en-el-device-proof)).
 - **El correo se acota por destinatario y por volumen**: sólo al email de un proveedor dado de alta y
   con un tope diario por negocio ([worker.md](worker.md#correo)).
-- Pendiente: los 500 todavía devuelven detalles internos
-  ([FABLE-B](../pendientes.md#fable-b--detalles-internos-en-las-respuestas-de-error)).
+- **Los errores no cuentan cómo está hecho el worker**: un 500 no lleva traza ni texto de Turso
+  ([worker.md](worker.md#errores)).
 - Dependencias: `.github/workflows/audit.yml` (`cargo audit` y `pnpm audit --prod`, en cada PR y los
   lunes) y Dependabot. Un aviso no es un fallo explotable: hay que mirar si el camino vulnerable se usa.

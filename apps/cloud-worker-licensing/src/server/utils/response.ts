@@ -41,31 +41,22 @@ export function json(data: any, status = 200, req?: Request) {
 
 // ARCH-05: toda respuesta de error lleva `code` del catálogo compartido, además del
 // `error` de siempre. Se ramifica por `code`; `error` queda como diagnóstico.
+//
+// FABLE-B: estas tres no aceptan detalles. Lo que cuenta por dentro un fallo (la traza, el texto de
+// Turso, que lleva la URL de la base) le servía a quien quisiera saber cómo está hecho el worker, no
+// al cliente, que ramifica por `code`. El detalle se registra donde se captura el error
+// (`capturarError` y `console.error`), y la firma impide volver a mandarlo.
 
-export function unauthorized(req: Request, error: string, details?: any) {
-	return json({ ok: false, code: wireToCode(error, 401), error, details }, 401, req);
+export function unauthorized(req: Request, error: string) {
+	return json({ ok: false, code: wireToCode(error, 401), error }, 401, req);
 }
 
-export function forbidden(req: Request, error: string, details?: any) {
-	return json({ ok: false, code: wireToCode(error, 403), error, details }, 403, req);
+export function forbidden(req: Request, error: string) {
+	return json({ ok: false, code: wireToCode(error, 403), error }, 403, req);
 }
 
-export function serverError(req: Request, error: string, details?: any) {
-	const d =
-		details && typeof details === "object"
-			? details
-			: { message: String(details ?? "") };
-
-	return json(
-		{
-			ok: false,
-			code: wireToCode(error, 500),
-			error,
-			details: d,
-		},
-		500,
-		req,
-	);
+export function serverError(req: Request, error: string) {
+	return json({ ok: false, code: wireToCode(error, 500), error }, 500, req);
 }
 
 /**

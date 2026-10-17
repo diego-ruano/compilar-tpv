@@ -13,7 +13,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [VF-MODO-PRUEBA](#quitar-el-modo-prueba) | 🔴 | Quitar el modo prueba antes del 1-1-2027 | Sin empezar |
 | [LEGAL-01](#legal-01--rgpd) | 🟠 | Papeleo RGPD de encargado del tratamiento | Sin empezar |
 | [LEGAL-02](#legal-02--reglamento-de-ciberresiliencia) | 🟠 | Reglamento de Ciberresiliencia | Sin empezar |
-| [FABLE-B](#fable-b--detalles-internos-en-las-respuestas-de-error) | 🟠 | El worker devuelve detalles internos en los 500 | Aplazado |
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
 | [RI-13](#ri-13--la-pii-del-personal-se-cifra-sin-normalizar-ni-validar) | 🟡 | DNI, IBAN y nº de la Seguridad Social se cifran sin normalizar ni validar | Pendiente de decidir si estos campos se quedan |
@@ -117,21 +116,6 @@ antes de redactar esa información.
 ---
 
 ## Seguridad
-
-### FABLE-B · Detalles internos en las respuestas de error
-
-`serverError(req, code, details)` (`apps/cloud-worker-licensing/src/server/utils/response.ts`)
-serializa `details` en el cuerpo, y lo mismo `unauthorized` y `forbidden`. Hoy lo usan dos sitios de
-`src/index.ts`: el `catch` de la ruta `/ws`, que pasa `{ message, name, stack }`, y el `onError`
-global, que pasa el `message`. Quien llama a la API recibe la traza o el texto crudo de Turso.
-
-Aplazado mientras no haya clientes en producción. Cuando se haga, en tres partes:
-
-1. `serverError` deja de serializar `details`.
-2. Cada `catch` lo registra en el servidor (`console.error` y `Sentry.captureException`), para no
-   perder información al quitarlo de la respuesta.
-3. Opcional: seguir devolviéndolo cuando `ENVIRONMENT !== "prod"`, añadiendo `ENVIRONMENT` a las
-   `vars` de `wrangler.json` (`env.ts` ya lo declara; `sentry.ts` usa `"prod"` si falta).
 
 ### RI-28-AUD · Ampliar la autoría y la administración de tareas
 

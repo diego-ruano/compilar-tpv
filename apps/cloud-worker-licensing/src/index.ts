@@ -162,11 +162,11 @@ app.get("/ws", async (c) => {
 		return await stub.fetch(new Request(doReq0, { headers: h }));
 	} catch (e: any) {
 		capturarError(e, "websocket.open");
-		return serverError(request, "internal_error", {
-			message: String(e?.message || e),
-			name: e?.name,
-			stack: e?.stack,
-		});
+		// FABLE-B: la traza se queda aquí (`wrangler tail`) y en Sentry; la respuesta no la lleva.
+		console.error(
+			`[ws] no se pudo abrir el WebSocket → ${e?.name || "Error"}: ${e?.message || e}\n${e?.stack || ""}`,
+		);
+		return serverError(request, "internal_error");
 	}
 });
 
@@ -219,13 +219,13 @@ app.route("/v1/update", updatesRoutes);
 app.route("/v1/device", dispositivosRoutes);
 
 // Traduce los errores con status (p. ej. HubError del DO: main_offline,
-// idempotency_*) a JSON; el resto cae a un 500 con detalle.
+// idempotency_*) a JSON; el resto cae a un 500 sin detalle (FABLE-B).
 app.onError((err, c) => {
 	// Reporta a Sentry también los errores que aquí traducimos a JSON: Hono los captura antes de
 	// que lleguen al wrapper global de Sentry, así que hay que notificarlos explícitamente.
 	capturarError(err, `${c.req.method} ${c.req.routePath}`);
-	// Traza server-side: sin esto un 500 no deja NINGÚN rastro en `wrangler tail` (el detalle solo
-	// viajaba en el cuerpo de la respuesta al cliente), lo que hace imposible diagnosticar en vivo.
+	// Traza server-side: es el único sitio, junto con Sentry, donde queda el detalle de un 500. La
+	// respuesta no lo lleva (FABLE-B), así que sin esto no habría forma de diagnosticarlo en vivo.
 	console.error(
 		`[onError] ${c.req.method} ${new URL(c.req.url).pathname} → ${(err as any)?.name || "Error"}: ` +
 		`${(err as any)?.message || err}\n${(err as any)?.stack || ""}`,
@@ -241,10 +241,7 @@ app.onError((err, c) => {
 		// ARQ-07: el error ya llega clasificado; no se vuelve a deducir mirando su prosa.
 		return c.json(cuerpoDeErrorConStatus(err), status as any);
 	}
-	const message = String((err as any)?.message || err);
-	return serverError(c.req.raw, "internal_error", {
-		message,
-	});
+	return serverError(c.req.raw, "internal_error");
 });
 
 /**

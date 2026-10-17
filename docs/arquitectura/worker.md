@@ -97,8 +97,11 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
   `test/mensajesDeError.test.ts` falla. No se añade al enum `ErrorCode` lo que sólo se enseña.
 - La aplica un middleware a todas las respuestas (`middleware/completarErrores.ts`); un `message`
   escrito en la llamada gana a la tabla.
-- Pendiente: los 500 devuelven detalles internos
-  ([FABLE-B](../pendientes.md#fable-b--detalles-internos-en-las-respuestas-de-error)).
+- **Un error no cuenta su detalle interno** (FABLE-B): `serverError`, `unauthorized` y `forbidden`
+  no aceptan detalles, y un 500 inesperado sale como `internal_error` sin más. La traza y el texto
+  de Turso quedan en el log (`wrangler tail`) y en Sentry, donde se captura el error. Los `details`
+  de un `HubError` sí viajan: los escribe quien lo lanza y son parte del contrato
+  (`test/sinDetalleInterno.test.ts`).
 
 ## Correo
 

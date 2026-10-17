@@ -412,12 +412,10 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 		capturarError(e, "license.provision");
 		const detalle = String(e?.message || e);
 		// Al log (visible con `wrangler tail`): el detalle de Turso es la clave para diagnosticar
-		// (401 = token de plataforma malo, 404 = org/grupo inexistente, límite de plan, etc.).
+		// (401 = token de plataforma malo, 404 = org/grupo inexistente, límite de plan, etc.). A la
+		// respuesta no va (FABLE-B): es el texto crudo de la API de plataforma de Turso.
 		console.error("[activate] tenant_db_provision_failed:", detalle);
-		return c.json(
-			{ ok: false, error: "tenant_db_provision_failed", details: detalle } satisfies ApiError,
-			500,
-		);
+		return c.json({ ok: false, error: "tenant_db_provision_failed" } satisfies ApiError, 500);
 	}
 
 	await upsertTenantInfo(db, tenantId, {
