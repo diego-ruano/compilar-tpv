@@ -26,6 +26,8 @@ pub mod pago;
 pub mod pedidos_proveedor;
 pub mod proveedores;
 pub mod reservas;
+/// Reservas desde la web: las reglas de su configuración (docs/estudios/reservas-web.md).
+pub mod reservas_web;
 pub mod tareas;
 /// Desglose de IVA: un unico calculo para el papel, la vista previa y el registro fiscal.
 pub mod ticket;

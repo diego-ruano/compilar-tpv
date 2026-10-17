@@ -47,6 +47,7 @@ un fallo parcial.
 | `fichajes_colgados` | 1 h | 30 s | MainOperativa | — | Cierra como incidencia, sin hora de salida, las jornadas abiertas que entraron hace más de 16 h. Hasta entonces son la jornada en curso, aunque sean de ayer: un turno de noche ficha la salida al día siguiente |
 | `caja_sin_cerrar` | 1 h | 2 min | MainOperativa | — | Avisa si la caja lleva más de 20 h abierta ([caja.md](caja.md)) |
 | `stock_negativo` | 10 min | 90 s | MainOperativa | — | Avisa de productos con stock total negativo |
+| `zona_horaria` | 24 h | 30 s | MainOperativa | — | Deja en `Business_Settings.Zona_Horaria` la zona del reloj del equipo, deducida de sus desfases con UTC en enero y en julio (la necesita la reserva desde la web) |
 | `imagenes` | 15 min | 3 min | Siempre | — | Red de seguridad de la subida de imágenes a R2 (el camino normal es el evento) |
 | `purga_sync` | 24 h | 5 min | MainOperativa | — | Poda `_Sync_Applied_Ops` (TTL 72 h) |
 | `reconciliacion` | 24 h | 10 min | MainOperativa | — | Comprueba el stock por lote y el stock suelto de cada producto contra sus movimientos y consumos, y el gasto por cliente contra sus cobros, y avisa; se calla con el histórico a medias |

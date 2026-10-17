@@ -68,6 +68,7 @@ pub mod proveedores;
 pub mod reconciliacion;
 pub mod recovery;
 pub mod reservas;
+pub mod reservas_web;
 pub mod stats;
 pub mod stock_alertas;
 pub mod sync;

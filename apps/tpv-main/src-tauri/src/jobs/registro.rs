@@ -22,6 +22,7 @@ use tpv_application::use_cases::avisos as uc_avisos;
 use tpv_application::use_cases::cierre_caja as uc_cierre_caja;
 use tpv_application::use_cases::licensing as uc_licensing;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
+use tpv_application::use_cases::reservas_web as uc_reservas_web;
 use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
 use tpv_application::use_cases::sync as uc_sync;
 use tpv_infra_licensing::PairingAdapter;
@@ -72,6 +73,9 @@ const AVISOS_INTERVAL_SECS: u64 = 10 * 60;
 /// negativos entran por ventas de la Handy replicadas a la Main, 10 min da un aviso casi inmediato
 /// sin machacar la BD (es un par de lecturas agregadas).
 const STOCK_NEGATIVO_INTERVAL_SECS: u64 = 10 * 60;
+
+/// Cada cuánto se comprueba la zona horaria del negocio (reservas desde la web).
+const ZONA_HORARIA_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
 /// Cada cuánto se reintenta subir a R2 lo que quedó pendiente. No hace falta más a menudo: el
 /// camino normal es el evento (tras guardar la imagen y al reconectar el WS); esto es la red.
@@ -232,6 +236,17 @@ pub(crate) fn catalogo() -> Vec<Job> {
             requiere: Requiere::MainOperativa,
             interruptor: None,
             ejecutar: tarea(stock_negativo),
+        },
+        Job {
+            // Reservas desde la web: la agenda de la nube necesita la zona horaria del negocio
+            // para saber qué es «hoy». Cambia casi nunca (un TPV que se lleva a Canarias), así
+            // que basta con mirarla al arrancar y una vez al día.
+            nombre: "zona_horaria",
+            cada: Duration::from_secs(ZONA_HORARIA_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(30),
+            requiere: Requiere::MainOperativa,
+            interruptor: None,
+            ejecutar: tarea(zona_horaria),
         },
         Job {
             nombre: "imagenes",
@@ -420,6 +435,34 @@ async fn avisos(app: AppHandle) -> Result<(), String> {
         uc_avisos::VENTANA_RESERVA_MIN,
     )
     .await?;
+    Ok(())
+}
+
+/// Deja en la base la zona horaria del reloj de este equipo (reservas desde la web). Se deduce de
+/// lo que el reloj se separa de UTC en enero y en julio: el nombre de la zona del sistema sólo se
+/// puede leer en Windows con WinRT, que no existe en Windows 7 (ver
+/// `tpv_domain::reservas_web::zona_por_desfases`).
+async fn zona_horaria(app: AppHandle) -> Result<(), String> {
+    use chrono::{Datelike, Local, Offset, TimeZone};
+
+    let anio = Local::now().year();
+    let desfase = |mes: u32| {
+        Local
+            .with_ymd_and_hms(anio, mes, 15, 12, 0, 0)
+            .single()
+            .map(|d| d.offset().fix().local_minus_utc() / 60)
+    };
+    let desfases = desfase(1).zip(desfase(7));
+
+    let repo = app.state::<AppState>().reservas_web_repo().await?;
+    match uc_reservas_web::sincronizar_zona_horaria(repo.as_ref(), desfases).await? {
+        Some(zona) => tracing::info!(target: "tpv::reservas_web", zona, "zona horaria del negocio actualizada"),
+        None if desfases.is_some_and(|(i, v)| tpv_domain::reservas_web::zona_por_desfases(i, v).is_none()) => {
+            // No es una avería: un PC en UTC o fuera de España. La nube sigue con la que hubiera.
+            tracing::warn!(target: "tpv::reservas_web", ?desfases, "zona horaria no reconocida; se deja la guardada");
+        }
+        None => {}
+    }
     Ok(())
 }
 

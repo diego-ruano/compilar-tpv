@@ -826,6 +826,16 @@ impl AppState {
         })?;
         Ok(Arc::new(SqliteStockAlertasRepository::new(conn)) as Arc<dyn StockAlertasRepository>)
     }
+
+    /// La reserva desde la web (docs/estudios/reservas-web.md): su configuración es de la Main.
+    pub(crate) async fn reservas_web_repo(
+        &self,
+    ) -> Result<Arc<dyn tpv_application::ports::reservas_web::ReservasWebRepository>, String> {
+        let conn = self.db.lock().await.as_ref().cloned().ok_or_else(|| {
+            "DB no inicializada (la reserva web se configura en el TPV principal)".to_string()
+        })?;
+        Ok(Arc::new(tpv_infra_sqlite::reservas_web::SqliteReservasWebRepository::new(conn)))
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

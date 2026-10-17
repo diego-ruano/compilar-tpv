@@ -21,6 +21,7 @@ pub mod reconciliacion;
 pub mod rectificacion_caja;
 pub mod recuperacion_pin;
 pub mod reservas;
+pub mod reservas_web;
 pub mod stats;
 pub mod stock_alertas;
 pub mod sync;
