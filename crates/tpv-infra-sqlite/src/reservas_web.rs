@@ -362,6 +362,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// El fallo que motivó comparar bajo el cerrojo, reproducido a propósito: con otra escritura en
+    /// curso, «encender» y luego «apagar» esperan su turno. Antes, las dos leían «apagado» fuera
+    /// del cerrojo y «apagar» se saltaba su escritura: quedaba encendido. Ahora se aplican las dos,
+    /// en orden, y la última elección es la que queda. (El cerrojo de escritura atiende por orden de
+    /// llegada.)
+    #[tokio::test]
+    async fn encender_y_apagar_seguidos_dejan_la_ultima_eleccion() {
+        use tpv_application::use_cases::reservas_web::activar;
+        use tpv_contracts::reservas_web::ReservaWebActivarInput;
+
+        let (db, repo, dir) = abrir().await;
+        let repo = Arc::new(repo);
+        let antes = outbox(&db).await;
+
+        // Por el caso de uso, que es por donde entra la pantalla: ahí estaba la lectura de más.
+        let otra_escritura = db.write().await;
+        let encender = tokio::spawn({
+            let repo = repo.clone();
+            async move { activar(repo.as_ref(), ReservaWebActivarInput { activa: true }).await.unwrap() }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let apagar = tokio::spawn({
+            let repo = repo.clone();
+            async move { activar(repo.as_ref(), ReservaWebActivarInput { activa: false }).await.unwrap() }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        drop(otra_escritura);
+        encender.await.unwrap();
+        apagar.await.unwrap();
+
+        assert!(!repo.activa().await.unwrap(), "queda la última elección: apagada");
+        assert_eq!(outbox(&db).await, antes + 2);
+        drop(repo);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// La sentencia que se replica lleva el id de la fila de verdad: es el que usa la reparación
     /// por estado para encontrarla si la nube aparta la operación.
     #[tokio::test]
