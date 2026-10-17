@@ -1,6 +1,5 @@
-import { commands, toAppError } from "@tpv/client";
-import type { ReservaWebMesaDto } from "@tpv/contracts";
-import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { toAppError } from "@tpv/client";
+import { useEffect,useMemo,useRef,useState } from "react";
 import { Group,Layer,Rect,Stage,Text } from "react-konva";
 import { useLocation,useNavigate } from "react-router-dom";
 import { Chip,IconButton,Modal } from "../../../features/mesas/editor/ControlesEditor";
@@ -19,6 +18,7 @@ type RoomPoly,
 type Salon,type Table
 } from "../../../features/mesas/editor/geometria";
 import { useModoEditor } from "../../../features/mesas/editor/useModoEditor";
+import { useMesasWeb } from "../../../features/mesas/editor/useMesasWeb";
 import {
 mesasLoadLayout,
 mesasSaveLayout,
@@ -161,23 +161,8 @@ export default function EditTables() {
     // Reservas desde la web (docs/estudios/reservas-web.md): qué mesas se pueden reservar y
     // cuándo. Sólo en la Main: es su configuración, y la Handy no la escribe.
     const esMain = useMode((s) => s.mode) === "tpv";
-    const [mesasWeb, setMesasWeb] = useState<Record<string, ReservaWebMesaDto>>({});
+    const mesasWeb = useMesasWeb(esMain);
     const [mesaWebAbierta, setMesaWebAbierta] = useState<Table | null>(null);
-
-    // Captura su propio error: la marca de las mesas reservables no puede impedir editar el plano.
-    const cargarMesasWeb = useCallback(async () => {
-        if (!esMain) return;
-        try {
-            const mesas = await commands.reservaWebMesas();
-            setMesasWeb(Object.fromEntries(mesas.map((m) => [m.id_mesa, m])));
-        } catch (e) {
-            toast.error("No se ha podido cargar qué mesas se reservan desde la web", toAppError(e).message);
-        }
-    }, [esMain, toast]);
-
-    useEffect(() => {
-        void cargarMesasWeb();
-    }, [cargarMesasWeb]);
 
     const historyRef = useRef<Salon[][]>([]);
 
@@ -610,7 +595,7 @@ export default function EditTables() {
         },
         esReservableWeb: (table) => {
             const id = parseMesaId(table.id);
-            return Boolean(id && mesasWeb[id]?.activa);
+            return Boolean(id && mesasWeb.mesas[id]?.activa);
         },
         activeRoom, activeSalonId, roomPointsDraftRef, deleteTableArmed, deleteTableById, isDraggingSomethingRef, isPanningRef, pushHistory, salonsRef, lastValidTableWorldRef, screenToWorld, worldToScreen, updateTablePos, setDirty, dark, roomStrokeLineRef, lastValidVertexWorldRef, PADDING, WORLD_W, WORLD_H, wouldKeepAllTablesInside, syncRoomLines, commitRoomPoints
     };
@@ -850,7 +835,8 @@ export default function EditTables() {
                                     icon="🌐"
                                     variant={webTableArmed ? "accent" : "neutral"}
                                     disabled={
-                                        !activeSalon || addPointArmed || placeTableByClick || deleteTableArmed
+                                        !activeSalon || addPointArmed || placeTableByClick || deleteTableArmed ||
+                                        mesasWeb.estado !== "listo"
                                     }
                                     onClick={() => modoEditor.dispatch({ tipo: "alternar_web" })}
                                 >
@@ -895,7 +881,7 @@ export default function EditTables() {
 
                                         setDirty(false);
                                         // Una mesa borrada se lleva su configuración web (cascada).
-                                        void cargarMesasWeb();
+                                        void mesasWeb.recargar();
                                     } catch (e) {
                                         console.error("No se pudo guardar el layout:", e);
                                         toast.error("No se pudo guardar el plano", toAppError(e).message);
@@ -954,6 +940,18 @@ export default function EditTables() {
                                 </div>
                             </div>
                         )}
+
+                        {esMain && mesasWeb.estado === "error" ? (
+                            <div className="mt-2 rounded-2xl border border-border bg-surface-2 p-3 text-sm text-fg">
+                                <b>🌐 Reserva web:</b> no se ha podido leer qué mesas se reservan
+                                desde la web ({mesasWeb.error}).
+                                <div className="mt-2">
+                                    <IconButton icon="↻" onClick={() => void mesasWeb.recargar()}>
+                                        Reintentar
+                                    </IconButton>
+                                </div>
+                            </div>
+                        ) : null}
 
                         {webTableArmed && (
                             <div className="mt-2 rounded-2xl border border-accent/30 bg-accent-soft p-3 text-sm text-fg">
@@ -1079,10 +1077,10 @@ export default function EditTables() {
                     <FormularioReservaWeb
                         nombreMesa={mesaWebAbierta.name}
                         idMesa={idMesa}
-                        actual={idMesa ? mesasWeb[idMesa] : undefined}
+                        actual={idMesa ? mesasWeb.mesas[idMesa] : undefined}
                         onCerrar={() => setMesaWebAbierta(null)}
                         onGuardada={(mesa) => {
-                            setMesasWeb((prev) => ({ ...prev, [mesa.id_mesa]: mesa }));
+                            mesasWeb.guardada(mesa);
                             setMesaWebAbierta(null);
                         }}
                     />
