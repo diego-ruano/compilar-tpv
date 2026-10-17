@@ -28,6 +28,7 @@ pub mod pedidos_proveedor;
 pub mod proveedores;
 pub mod recovery;
 pub mod reservas;
+pub mod reservas_web;
 pub mod stats;
 pub mod sync;
 pub mod tareas;

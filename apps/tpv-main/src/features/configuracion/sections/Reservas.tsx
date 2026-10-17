@@ -2,13 +2,14 @@
 //
 // RI-61: lo que dura una reserva que no elige su duración, y qué pasa cuando dos reservas de la
 // misma mesa se pisan (o una se pisa con una comanda abierta en ella). Se guarda solo, como el resto
-// de los datos del negocio (`useBusinessSettings`).
+// de los datos del negocio (`useBusinessSettings`). Debajo, en la Main, las reservas desde la web.
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
 import { etiquetaDuracion, opcionesDuracion } from "../../reservas/duracion";
+import { ReservasWeb } from "./ReservasWeb";
 
-export function Reservas({ inputTone }: { inputTone: string }) {
+export function Reservas({ inputTone, isMain }: { inputTone: string; isMain: boolean }) {
 	const ready = useBusinessSettings((s) => s.ready);
 	const duracion = useBusinessSettings((s) => s.reserva_duracion_min);
 	const solape = useBusinessSettings((s) => s.reserva_solape);
@@ -70,6 +71,8 @@ export function Reservas({ inputTone }: { inputTone: string }) {
 					</div>
 				)}
 			</Panel>
+
+			{isMain ? <ReservasWeb inputTone={inputTone} /> : null}
 		</div>
 	);
 }

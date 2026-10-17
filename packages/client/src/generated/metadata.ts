@@ -134,6 +134,10 @@ export const nombresComandos = {
     "reservas_save": "reservasSave",
     "reservas_buscar_cliente": "reservasBuscarCliente",
     "reservas_delete": "reservasDelete",
+    "reserva_web_ajustes": "reservaWebAjustes",
+    "reserva_web_activar": "reservaWebActivar",
+    "reserva_web_cerrar_dia": "reservaWebCerrarDia",
+    "reserva_web_quitar_cierre": "reservaWebQuitarCierre",
     "proveedores_get_all": "proveedoresGetAll",
     "proveedores_save": "proveedoresSave",
     "proveedores_delete": "proveedoresDelete",
@@ -360,6 +364,10 @@ type Argumentos = {
     "reservas_save": { args: Parameters<Comandos["reservasSave"]>[0] };
     "reservas_buscar_cliente": { args: Parameters<Comandos["reservasBuscarCliente"]>[0] };
     "reservas_delete": { args: Parameters<Comandos["reservasDelete"]>[0] };
+    "reserva_web_ajustes": {  };
+    "reserva_web_activar": { args: Parameters<Comandos["reservaWebActivar"]>[0] };
+    "reserva_web_cerrar_dia": { args: Parameters<Comandos["reservaWebCerrarDia"]>[0] };
+    "reserva_web_quitar_cierre": { args: Parameters<Comandos["reservaWebQuitarCierre"]>[0] };
     "proveedores_get_all": {  };
     "proveedores_save": { args: Parameters<Comandos["proveedoresSave"]>[0] };
     "proveedores_delete": { args: Parameters<Comandos["proveedoresDelete"]>[0] };

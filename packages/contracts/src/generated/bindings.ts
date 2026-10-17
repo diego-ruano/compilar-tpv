@@ -25,6 +25,14 @@ export type AjusteStockSueltoInput = {
 	motivo?: string | null,
 };
 
+/**  Lo que se configura en Configuración → Reservas, en el bloque de la web. */
+export type AjustesReservaWebDto = {
+	/**  El interruptor general (`Business_Settings.Reserva_Web_Activa`). */
+	activa: boolean,
+	/**  Los días cerrados de hoy en adelante, por fecha. */
+	cierres: CierreReservaWebDto[],
+};
+
 export type AlergenoInvDto = {
 	ID_Alergeno: string,
 	Nombre: string,
@@ -504,6 +512,13 @@ export type CierreIdInput = {
 
 export type CierreListarArgs = {
 	limite?: number | null,
+};
+
+/**  Un día en que la web no acepta reservas. */
+export type CierreReservaWebDto = {
+	id_cierre: string,
+	dia_ymd: string,
+	motivo: string | null,
 };
 
 /**  Una fila del histórico. Sin el desglose por denominación, que sólo se pide al abrir la ficha. */
@@ -2715,6 +2730,19 @@ export type ReservaSaveInput = {
 	nombre_cliente?: string | null,
 	telefono?: string | null,
 	email?: string | null,
+};
+
+export type ReservaWebActivarInput = {
+	activa: boolean,
+};
+
+export type ReservaWebCierreInput = {
+	dia_ymd: string,
+	motivo: string | null,
+};
+
+export type ReservaWebQuitarCierreInput = {
+	id_cierre: string,
 };
 
 /**  Argumentos del rango mensual. */

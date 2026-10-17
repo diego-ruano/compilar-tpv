@@ -19,9 +19,46 @@ pub fn zona_por_desfases(invierno_min: i32, verano_min: i32) -> Option<&'static 
     }
 }
 
+/// Lo más largo que puede ser el motivo de un día cerrado: es una nota para el propio negocio.
+pub const MOTIVO_CIERRE_MAX: usize = 100;
+
+/// Un día en que la web no acepta reservas, ya normalizado.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CierreValidado {
+    pub dia_ymd: String,
+    pub motivo: Option<String>,
+}
+
+impl CierreValidado {
+    pub fn validar(dia_ymd: &str, motivo: Option<String>) -> Result<Self, String> {
+        let dia_ymd = crate::fechas::normalizar_dia(dia_ymd).ok_or_else(|| {
+            format!("Formato de día inválido: '{}'. Esperado YYYY-MM-DD.", dia_ymd.trim())
+        })?;
+        let motivo = crate::texto::limpiar_opcional(motivo);
+        if motivo.as_deref().is_some_and(|m| m.chars().count() > MOTIVO_CIERRE_MAX) {
+            return Err(format!("El motivo no puede pasar de {MOTIVO_CIERRE_MAX} caracteres"));
+        }
+        Ok(CierreValidado { dia_ymd, motivo })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn un_dia_cerrado_es_una_fecha_real_con_un_motivo_opcional() {
+        assert_eq!(
+            CierreValidado::validar(" 2026-12-24 ", Some("  Nochebuena ".into())),
+            Ok(CierreValidado { dia_ymd: "2026-12-24".into(), motivo: Some("Nochebuena".into()) })
+        );
+        assert_eq!(CierreValidado::validar("2026-12-31", Some("   ".into())).unwrap().motivo, None);
+        for malo in ["", "24/12/2026", "2026-02-30"] {
+            assert!(CierreValidado::validar(malo, None).is_err(), "{malo}");
+        }
+        assert!(CierreValidado::validar("2026-12-24", Some("x".repeat(MOTIVO_CIERRE_MAX + 1))).is_err());
+        assert!(CierreValidado::validar("2026-12-24", Some("ñ".repeat(MOTIVO_CIERRE_MAX))).is_ok());
+    }
 
     #[test]
     fn la_peninsula_y_canarias_se_distinguen_por_sus_desfases() {

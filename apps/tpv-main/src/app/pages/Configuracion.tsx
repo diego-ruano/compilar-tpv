@@ -157,8 +157,8 @@ export default function Configuracion() {
         {
             key: "RESERVAS",
             title: "Reservas",
-            desc: "Duración de una reserva y qué hacer si dos se pisan",
-            keywords: ["reservas", "duración", "solape", "mesa ocupada", "doble reserva"],
+            desc: "Duración, solapes y reservas desde la web",
+            keywords: ["reservas", "duración", "solape", "mesa ocupada", "doble reserva", "web", "online", "días cerrados", "festivos"],
         },
         {
             key: "TICKET",
@@ -743,7 +743,7 @@ export default function Configuracion() {
                                         ) : null}
 
                                         {section === "RESERVAS" ? (
-                                            <Reservas inputTone={inputTone} />
+                                            <Reservas inputTone={inputTone} isMain={isMain} />
                                         ) : null}
 
                                         {section === "APARIENCIA" ? (

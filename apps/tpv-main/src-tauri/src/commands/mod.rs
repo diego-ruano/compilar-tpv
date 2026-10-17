@@ -20,6 +20,7 @@ pub mod proveedores;
 pub mod recovery;
 pub mod recuperacion_pin;
 pub mod reservas;
+pub mod reservas_web;
 pub mod stats;
 pub mod sync;
 pub mod tareas;

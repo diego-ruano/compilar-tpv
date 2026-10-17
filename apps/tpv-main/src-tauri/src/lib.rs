@@ -2033,6 +2033,10 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::reservas::reservas_save,
             commands::reservas::reservas_buscar_cliente,
             commands::reservas::reservas_delete,
+            commands::reservas_web::reserva_web_ajustes,
+            commands::reservas_web::reserva_web_activar,
+            commands::reservas_web::reserva_web_cerrar_dia,
+            commands::reservas_web::reserva_web_quitar_cierre,
             // proveedores (migrado a arquitectura hexagonal — commands/proveedores.rs)
             commands::proveedores::proveedores_get_all,
             commands::proveedores::proveedores_save,

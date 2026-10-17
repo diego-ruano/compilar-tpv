@@ -5,6 +5,9 @@
 
 use async_trait::async_trait;
 
+use tpv_contracts::reservas_web::CierreReservaWebDto;
+use tpv_domain::reservas_web::CierreValidado;
+
 use crate::error::AppResult;
 
 #[async_trait]
@@ -14,4 +17,18 @@ pub trait ReservasWebRepository: Send + Sync {
 
     /// La cambia. Se replica: la nube la lee de su copia de la base.
     async fn fijar_zona_horaria(&self, zona: &str) -> AppResult<()>;
+
+    /// El interruptor general (`Business_Settings.Reserva_Web_Activa`).
+    async fn activa(&self) -> AppResult<bool>;
+
+    async fn fijar_activa(&self, activa: bool) -> AppResult<()>;
+
+    /// Los días cerrados de hoy en adelante, por fecha. Los pasados ya no le importan a nadie.
+    async fn cierres(&self) -> AppResult<Vec<CierreReservaWebDto>>;
+
+    /// Cierra un día. Si ya lo estaba, sólo cambia el motivo. Devuelve su id.
+    async fn cerrar_dia(&self, cierre: CierreValidado) -> AppResult<String>;
+
+    /// Vuelve a abrir un día. Devuelve si estaba cerrado.
+    async fn quitar_cierre(&self, id_cierre: &str) -> AppResult<bool>;
 }
