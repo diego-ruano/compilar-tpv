@@ -1,10 +1,10 @@
 //! Casos de uso de la reserva desde la web (docs/estudios/reservas-web.md).
 
 use tpv_contracts::reservas_web::{
-    AjustesReservaWebDto, ReservaWebActivarInput, ReservaWebCierreInput,
-    ReservaWebQuitarCierreInput,
+    AjustesReservaWebDto, ReservaWebActivarInput, ReservaWebCierreInput, ReservaWebMesaDto,
+    ReservaWebMesaInput, ReservaWebQuitarCierreInput,
 };
-use tpv_domain::reservas_web::{zona_por_desfases, CierreValidado};
+use tpv_domain::reservas_web::{zona_por_desfases, CierreValidado, MesaWebEntrada, MesaWebValidada};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::reservas_web::ReservasWebRepository;
@@ -59,6 +59,26 @@ pub async fn quitar_cierre(
     repo.quitar_cierre(id).await
 }
 
+/// La configuración web de las mesas del plano.
+pub async fn mesas(repo: &dyn ReservasWebRepository) -> AppResult<Vec<ReservaWebMesaDto>> {
+    repo.mesas().await
+}
+
+/// Guarda cómo se puede reservar una mesa desde la web.
+pub async fn guardar_mesa(repo: &dyn ReservasWebRepository, input: ReservaWebMesaInput) -> AppResult<()> {
+    let mesa = MesaWebValidada::validar(MesaWebEntrada {
+        id_mesa: input.id_mesa,
+        activa: input.activa,
+        dias_semana: input.dias_semana,
+        fecha_desde: input.fecha_desde,
+        fecha_hasta: input.fecha_hasta,
+        hora_desde: input.hora_desde,
+        hora_hasta: input.hora_hasta,
+    })
+    .map_err(AppError::validation)?;
+    repo.guardar_mesa(mesa).await
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -74,6 +94,7 @@ mod tests {
         activa: Mutex<bool>,
         escrituras: Mutex<u32>,
         cierres: Mutex<Vec<CierreValidado>>,
+        mesas_guardadas: Mutex<Vec<MesaWebValidada>>,
     }
 
     impl RepoFalso {
@@ -117,6 +138,32 @@ mod tests {
         async fn quitar_cierre(&self, _id_cierre: &str) -> AppResult<bool> {
             Ok(true)
         }
+        async fn mesas(&self) -> AppResult<Vec<tpv_contracts::reservas_web::ReservaWebMesaDto>> {
+            Ok(vec![])
+        }
+        async fn guardar_mesa(&self, mesa: MesaWebValidada) -> AppResult<()> {
+            self.mesas_guardadas.lock().unwrap().push(mesa);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn una_mesa_se_valida_antes_de_llegar_al_repositorio() {
+        let repo = RepoFalso::default();
+        let input = |activa: bool, desde: Option<&str>| ReservaWebMesaInput {
+            id_mesa: "m1".into(),
+            activa,
+            dias_semana: 127,
+            fecha_desde: None,
+            fecha_hasta: None,
+            hora_desde: desde.map(str::to_string),
+            hora_hasta: Some("16:00".into()),
+        };
+        assert!(matches!(guardar_mesa(&repo, input(true, Some("17:00"))).await, Err(AppError::Validation(_))));
+        assert!(repo.mesas_guardadas.lock().unwrap().is_empty());
+
+        guardar_mesa(&repo, input(true, Some("12:00"))).await.unwrap();
+        assert_eq!(repo.mesas_guardadas.lock().unwrap()[0].franja.as_ref().unwrap().hora_desde, "12:00");
     }
 
     #[tokio::test]

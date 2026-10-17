@@ -138,6 +138,8 @@ export const nombresComandos = {
     "reserva_web_activar": "reservaWebActivar",
     "reserva_web_cerrar_dia": "reservaWebCerrarDia",
     "reserva_web_quitar_cierre": "reservaWebQuitarCierre",
+    "reserva_web_mesas": "reservaWebMesas",
+    "reserva_web_guardar_mesa": "reservaWebGuardarMesa",
     "proveedores_get_all": "proveedoresGetAll",
     "proveedores_save": "proveedoresSave",
     "proveedores_delete": "proveedoresDelete",
@@ -368,6 +370,8 @@ type Argumentos = {
     "reserva_web_activar": { args: Parameters<Comandos["reservaWebActivar"]>[0] };
     "reserva_web_cerrar_dia": { args: Parameters<Comandos["reservaWebCerrarDia"]>[0] };
     "reserva_web_quitar_cierre": { args: Parameters<Comandos["reservaWebQuitarCierre"]>[0] };
+    "reserva_web_mesas": {  };
+    "reserva_web_guardar_mesa": { args: Parameters<Comandos["reservaWebGuardarMesa"]>[0] };
     "proveedores_get_all": {  };
     "proveedores_save": { args: Parameters<Comandos["proveedoresSave"]>[0] };
     "proveedores_delete": { args: Parameters<Comandos["proveedoresDelete"]>[0] };

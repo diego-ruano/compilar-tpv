@@ -11,6 +11,11 @@ export interface ContextoEditor {
     roomPointsDraftRef: RefObject<Record<string, number[]>>;
     deleteTableArmed: boolean;
     deleteTableById: (id: string) => void;
+    /** Modo «Reserva web»: pulsar una mesa abre su configuración en vez de arrastrarla. */
+    webTableArmed: boolean;
+    abrirReservaWeb: (table: Table) => void;
+    /** Las mesas que se pueden reservar desde la web llevan una marca. */
+    esReservableWeb: (table: Table) => boolean;
     isDraggingSomethingRef: RefObject<boolean>;
     isPanningRef: RefObject<boolean>;
     pushHistory: (salons: Salon[]) => void;
@@ -31,21 +36,28 @@ export interface ContextoEditor {
     commitRoomPoints: (points: number[]) => void;
 }
 
+/** El color de acento de la app (`--accent`): Konva necesita el literal. */
+const ACENTO = "#016ffc";
+
 export function TableNode({ table, contexto }: { table: Table; contexto: ContextoEditor }) {
-    const { activeRoom, activeSalonId, roomPointsDraftRef, deleteTableArmed, deleteTableById, isDraggingSomethingRef, isPanningRef, pushHistory, salonsRef, lastValidTableWorldRef, screenToWorld, worldToScreen, updateTablePos, setDirty, dark } = contexto;
+    const { activeRoom, activeSalonId, roomPointsDraftRef, deleteTableArmed, deleteTableById, webTableArmed, abrirReservaWeb, esReservableWeb, isDraggingSomethingRef, isPanningRef, pushHistory, salonsRef, lastValidTableWorldRef, screenToWorld, worldToScreen, updateTablePos, setDirty, dark } = contexto;
     if (!activeRoom) return null;
     const roomPts =
         roomPointsDraftRef.current[activeSalonId] ?? activeRoom.points;
+    const ancho = table.shape === "circle" ? (table.radius ?? 45) * 2 : table.width;
 
     return (
         <Group
             x={table.x}
             y={table.y}
-            draggable={!deleteTableArmed}
+            draggable={!deleteTableArmed && !webTableArmed}
             onPointerDown={(e) => {
                 if (deleteTableArmed) {
                     e.cancelBubble = true;
                     deleteTableById(table.id);
+                } else if (webTableArmed) {
+                    e.cancelBubble = true;
+                    abrirReservaWeb(table);
                 }
             }}
             onDragStart={(e) => {
@@ -145,6 +157,9 @@ export function TableNode({ table, contexto }: { table: Table; contexto: Context
                     />
                 </>
             )}
+            {esReservableWeb(table) ? (
+                <Circle x={ancho - 9} y={9} radius={5} fill={ACENTO} stroke="#ffffff" strokeWidth={1.5} listening={false} />
+            ) : null}
         </Group>
     );
 }

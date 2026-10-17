@@ -2037,6 +2037,8 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::reservas_web::reserva_web_activar,
             commands::reservas_web::reserva_web_cerrar_dia,
             commands::reservas_web::reserva_web_quitar_cierre,
+            commands::reservas_web::reserva_web_mesas,
+            commands::reservas_web::reserva_web_guardar_mesa,
             // proveedores (migrado a arquitectura hexagonal — commands/proveedores.rs)
             commands::proveedores::proveedores_get_all,
             commands::proveedores::proveedores_save,

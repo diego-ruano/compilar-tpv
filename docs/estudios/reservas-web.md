@@ -411,8 +411,8 @@ La zona horaria no se enseña.
 
 ### 5.2 Editor del plano
 
-Hoy el editor sólo añade y borra mesas. Se añade **«Editar mesa»** al pulsar una mesa (fuera de los
-modos de colocar y borrar), con la sección de la web:
+Hoy el editor sólo añade y borra mesas. Se añade un modo **«Reserva web»**, como el de borrar: con él
+armado, pulsar una mesa abre su configuración (y la mesa no se arrastra). Sólo en la Main:
 
 ```
 ┌ Mesa 5 ────────────────────────────────────────┐
@@ -426,11 +426,12 @@ modos de colocar y borrar), con la sección de la web:
 └────────────────────────────────────────────────┘
 ```
 
-- Se guarda con el «Guardar» del plano, con un comando propio (`reserva_web_guardar_mesas`) que va
-  detrás del guardado del plano, sólo en la Main.
+- Se guarda al pulsar «Guardar» en el modal (`reserva_web_guardar_mesa`), aparte del «Guardar
+  layout»: no es la forma del plano. Lo puede quien edita el plano (`plano.gestionar`); el
+  interruptor general y los días cerrados son del administrador.
 - Una mesa recién añadida se configura después de guardar el plano: hasta entonces no tiene
-  `ID_Mesa`, y la sección lo dice.
-- Las mesas reservables llevan una marca discreta en el editor.
+  `ID_Mesa`, y el modal lo dice.
+- Las mesas reservables llevan un punto del color de acento en el editor.
 
 ### 5.3 La zona horaria
 

@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::reservas_web::ReservasWebRepository;
-use tpv_contracts::reservas_web::CierreReservaWebDto;
-use tpv_domain::reservas_web::CierreValidado;
+use tpv_contracts::reservas_web::{CierreReservaWebDto, ReservaWebMesaDto};
+use tpv_domain::reservas_web::{CierreValidado, MesaWebValidada, TODOS_LOS_DIAS};
 
 use crate::consultas::db_err;
 use crate::db::{Db, Reader, Writer};
@@ -167,6 +167,88 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
             .map_err(db_err)?;
         Ok(borradas > 0)
     }
+
+    async fn mesas(&self) -> AppResult<Vec<ReservaWebMesaDto>> {
+        let g = self.db.read().await;
+        // La pantalla edita una franja por mesa: si hubiera varias, la primera del día.
+        let mut rows = g
+            .query(
+                "SELECT W.ID_Mesa, W.Activa, F.Dias_Semana, F.Fecha_Desde, F.Fecha_Hasta, \
+                        F.Hora_Desde, F.Hora_Hasta \
+                 FROM Reserva_Web_Mesas W \
+                 JOIN Mesas M ON M.ID_Mesa = W.ID_Mesa AND M.Archivada_En IS NULL \
+                 LEFT JOIN Reserva_Web_Franjas F ON F.ID_Franja = ( \
+                   SELECT F2.ID_Franja FROM Reserva_Web_Franjas F2 WHERE F2.ID_Mesa = W.ID_Mesa \
+                   ORDER BY F2.Hora_Desde, F2.ID_Franja LIMIT 1) \
+                 ORDER BY W.ID_Mesa;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        let mut mesas = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            let g = |i: i32| row.get_value(i).map_err(db_err);
+            mesas.push(ReservaWebMesaDto {
+                id_mesa: v_string(g(0)?).unwrap_or_default(),
+                activa: v_i64(g(1)?).unwrap_or(0) != 0,
+                dias_semana: v_i64(g(2)?).unwrap_or(TODOS_LOS_DIAS),
+                fecha_desde: v_string(g(3)?),
+                fecha_hasta: v_string(g(4)?),
+                hora_desde: v_string(g(5)?),
+                hora_hasta: v_string(g(6)?),
+            });
+        }
+        Ok(mesas)
+    }
+
+    async fn guardar_mesa(&self, mesa: MesaWebValidada) -> AppResult<()> {
+        let g = self.db.write().await;
+        g.transaccion(async {
+            let mut rows = g
+                .query(
+                    "SELECT 1 FROM Mesas WHERE ID_Mesa = ?1 AND Archivada_En IS NULL;",
+                    vec![Value::Text(mesa.id_mesa.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            if rows.next().await.map_err(db_err)?.is_none() {
+                return Err(AppError::not_found("Esa mesa ya no está en el plano"));
+            }
+            g.execute(
+                "INSERT INTO Reserva_Web_Mesas (ID_Mesa, Activa) VALUES (?1, ?2) \
+                 ON CONFLICT(ID_Mesa) DO UPDATE SET Activa = excluded.Activa;",
+                vec![Value::Text(mesa.id_mesa.clone()), Value::Integer(i64::from(mesa.activa))],
+            )
+            .await
+            .map_err(db_err)?;
+            g.execute(
+                "DELETE FROM Reserva_Web_Franjas WHERE ID_Mesa = ?1;",
+                vec![Value::Text(mesa.id_mesa.clone())],
+            )
+            .await
+            .map_err(db_err)?;
+            if let Some(f) = &mesa.franja {
+                g.execute(
+                    "INSERT INTO Reserva_Web_Franjas \
+                       (ID_Franja, ID_Mesa, Dias_Semana, Fecha_Desde, Fecha_Hasta, Hora_Desde, Hora_Hasta) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
+                    vec![
+                        Value::Text(new_id()),
+                        Value::Text(mesa.id_mesa.clone()),
+                        Value::Integer(f.dias_semana),
+                        opt_text(f.fecha_desde.clone()),
+                        opt_text(f.fecha_hasta.clone()),
+                        Value::Text(f.hora_desde.clone()),
+                        Value::Text(f.hora_hasta.clone()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+            Ok(())
+        })
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +402,95 @@ mod tests {
         assert!(!repo.quitar_cierre(&navidad).await.unwrap(), "ya no estaba cerrado");
         assert_eq!(repo.cierres().await.unwrap().len(), 1);
         drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    async fn sembrar_mesas(db: &Db) {
+        let w = db.write().await;
+        w.raw()
+            .execute_batch(
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Salon'); \
+                 INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) \
+                   VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 10, 10), ('m2', 'z1', '2', 2, 0, 0, 'rect', 10, 10); \
+                 INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Archivada_En) \
+                   VALUES ('vieja', 'z1', '3', 2, 0, 0, 'rect', 10, 10, '2026-01-01 00:00:00');",
+            )
+            .await
+            .unwrap();
+    }
+
+    fn mesa_web(id: &str, activa: bool, horas: Option<(&str, &str)>) -> MesaWebValidada {
+        MesaWebValidada {
+            id_mesa: id.into(),
+            activa,
+            franja: horas.map(|(desde, hasta)| tpv_domain::reservas_web::FranjaValidada {
+                dias_semana: 31,
+                fecha_desde: Some("2026-11-01".into()),
+                fecha_hasta: None,
+                hora_desde: desde.into(),
+                hora_hasta: hasta.into(),
+            }),
+        }
+    }
+
+    /// Guardar deja la casilla y una sola franja, y viaja a la nube como cualquier otra escritura.
+    #[tokio::test]
+    async fn guardar_una_mesa_deja_su_casilla_y_una_franja() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        let antes = outbox(&db).await;
+
+        repo.guardar_mesa(mesa_web("m1", true, Some(("12:00", "16:00")))).await.unwrap();
+        repo.guardar_mesa(mesa_web("m1", true, Some(("13:00", "17:00")))).await.unwrap();
+
+        let mesas = repo.mesas().await.unwrap();
+        assert_eq!(mesas.len(), 1);
+        let m1 = &mesas[0];
+        assert!(m1.activa);
+        assert_eq!(m1.dias_semana, 31);
+        assert_eq!(m1.fecha_desde.as_deref(), Some("2026-11-01"));
+        assert_eq!((m1.hora_desde.as_deref(), m1.hora_hasta.as_deref()), (Some("13:00"), Some("17:00")));
+        assert!(outbox(&db).await > antes);
+
+        let w = db.read().await;
+        let mut rows = w.query("SELECT COUNT(*) FROM Reserva_Web_Franjas WHERE ID_Mesa = 'm1';", ()).await.unwrap();
+        assert_eq!(rows.next().await.unwrap().unwrap().get_value(0).unwrap(), Value::Integer(1));
+        drop(rows);
+        drop(w);
+        drop(repo);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Apagada sin horas se queda sin franja, y una mesa sin franja sale con todos los días.
+    #[tokio::test]
+    async fn apagar_una_mesa_sin_horas_le_quita_la_franja() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        repo.guardar_mesa(mesa_web("m2", true, Some(("12:00", "16:00")))).await.unwrap();
+
+        repo.guardar_mesa(mesa_web("m2", false, None)).await.unwrap();
+
+        let m2 = repo.mesas().await.unwrap().into_iter().find(|m| m.id_mesa == "m2").unwrap();
+        assert!(!m2.activa);
+        assert_eq!(m2.hora_desde, None);
+        assert_eq!(m2.dias_semana, TODOS_LOS_DIAS);
+        drop(repo);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn una_mesa_que_ya_no_esta_en_el_plano_no_se_configura() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        for id in ["vieja", "no-existe"] {
+            let error = repo.guardar_mesa(mesa_web(id, true, Some(("12:00", "16:00")))).await.unwrap_err();
+            assert!(matches!(error, AppError::NotFound(_)), "{id}: {error:?}");
+        }
+        assert!(repo.mesas().await.unwrap().is_empty());
+        drop(repo);
+        drop(db);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,9 +1,13 @@
-import { toAppError } from "@tpv/client";
-import { useEffect,useMemo,useRef,useState } from "react";
+import { commands, toAppError } from "@tpv/client";
+import type { ReservaWebMesaDto } from "@tpv/contracts";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import { Group,Layer,Rect,Stage,Text } from "react-konva";
 import { useLocation,useNavigate } from "react-router-dom";
 import { Chip,IconButton,Modal } from "../../../features/mesas/editor/ControlesEditor";
 import FormularioMesa from "../../../features/mesas/editor/FormularioMesa";
+import FormularioReservaWeb from "../../../features/mesas/editor/FormularioReservaWeb";
+import { parseMesaId } from "../../../features/mesas/ParseMesaId";
+import { useMode } from "../../../shared/stores/useMode";
 import { RoomEditor,TableNode,type ContextoEditor } from "../../../features/mesas/editor/NodosEditor";
 import {
 clamp,
@@ -152,7 +156,28 @@ export default function EditTables() {
     const [addTableOpen, setAddTableOpen] = useState(false);
 
     const modoEditor = useModoEditor();
-    const { addPointArmed, deleteTableArmed, placeTableByClick, pendingTableDraft } = modoEditor;
+    const { addPointArmed, deleteTableArmed, webTableArmed, placeTableByClick, pendingTableDraft } = modoEditor;
+
+    // Reservas desde la web (docs/estudios/reservas-web.md): qué mesas se pueden reservar y
+    // cuándo. Sólo en la Main: es su configuración, y la Handy no la escribe.
+    const esMain = useMode((s) => s.mode) === "tpv";
+    const [mesasWeb, setMesasWeb] = useState<Record<string, ReservaWebMesaDto>>({});
+    const [mesaWebAbierta, setMesaWebAbierta] = useState<Table | null>(null);
+
+    // Captura su propio error: la marca de las mesas reservables no puede impedir editar el plano.
+    const cargarMesasWeb = useCallback(async () => {
+        if (!esMain) return;
+        try {
+            const mesas = await commands.reservaWebMesas();
+            setMesasWeb(Object.fromEntries(mesas.map((m) => [m.id_mesa, m])));
+        } catch (e) {
+            toast.error("No se ha podido cargar qué mesas se reservan desde la web", toAppError(e).message);
+        }
+    }, [esMain, toast]);
+
+    useEffect(() => {
+        void cargarMesasWeb();
+    }, [cargarMesasWeb]);
 
     const historyRef = useRef<Salon[][]>([]);
 
@@ -578,6 +603,15 @@ export default function EditTables() {
     }
 
     const contextoEditor: ContextoEditor = {
+        webTableArmed,
+        abrirReservaWeb: (table) => {
+            modoEditor.dispatch({ tipo: "cancelar" });
+            setMesaWebAbierta(table);
+        },
+        esReservableWeb: (table) => {
+            const id = parseMesaId(table.id);
+            return Boolean(id && mesasWeb[id]?.activa);
+        },
         activeRoom, activeSalonId, roomPointsDraftRef, deleteTableArmed, deleteTableById, isDraggingSomethingRef, isPanningRef, pushHistory, salonsRef, lastValidTableWorldRef, screenToWorld, worldToScreen, updateTablePos, setDirty, dark, roomStrokeLineRef, lastValidVertexWorldRef, PADDING, WORLD_W, WORLD_H, wouldKeepAllTablesInside, syncRoomLines, commitRoomPoints
     };
 
@@ -802,7 +836,7 @@ export default function EditTables() {
                                 icon="🗑️"
                                 variant={deleteTableArmed ? "danger" : "neutral"}
                                 disabled={
-                                    !activeSalon || addPointArmed || placeTableByClick
+                                    !activeSalon || addPointArmed || placeTableByClick || webTableArmed
                                 }
                                 onClick={() => {
                                     modoEditor.dispatch({ tipo: "alternar_borrado" });
@@ -810,6 +844,19 @@ export default function EditTables() {
                             >
                                 {deleteTableArmed ? "Click mesa…" : "Borrar mesa"}
                             </IconButton>
+
+                            {esMain ? (
+                                <IconButton
+                                    icon="🌐"
+                                    variant={webTableArmed ? "accent" : "neutral"}
+                                    disabled={
+                                        !activeSalon || addPointArmed || placeTableByClick || deleteTableArmed
+                                    }
+                                    onClick={() => modoEditor.dispatch({ tipo: "alternar_web" })}
+                                >
+                                    {webTableArmed ? "Click mesa…" : "Reserva web"}
+                                </IconButton>
+                            ) : null}
 
                             <IconButton
                                 icon="💾"
@@ -847,6 +894,8 @@ export default function EditTables() {
                                         }
 
                                         setDirty(false);
+                                        // Una mesa borrada se lleva su configuración web (cascada).
+                                        void cargarMesasWeb();
                                     } catch (e) {
                                         console.error("No se pudo guardar el layout:", e);
                                         toast.error("No se pudo guardar el plano", toAppError(e).message);
@@ -906,6 +955,23 @@ export default function EditTables() {
                             </div>
                         )}
 
+                        {webTableArmed && (
+                            <div className="mt-2 rounded-2xl border border-accent/30 bg-accent-soft p-3 text-sm text-fg">
+                                <b>🌐 Reserva web:</b> haz click en una mesa para elegir si se
+                                puede reservar desde la web y cuándo. Las que ya se pueden llevan
+                                un punto azul.
+                                <div className="mt-2">
+                                    <IconButton
+                                        icon="✕"
+                                        variant="danger"
+                                        onClick={() => modoEditor.dispatch({ tipo: "cancelar" })}
+                                    >
+                                        Cancelar
+                                    </IconButton>
+                                </div>
+                            </div>
+                        )}
+
                         {dirty && (
                             <div className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                                 <b>⚠️ Cambios sin guardar</b> — pulsa{" "}
@@ -942,7 +1008,8 @@ export default function EditTables() {
                                         cursor:
                                             addPointArmed ||
                                                 placeTableByClick ||
-                                                deleteTableArmed
+                                                deleteTableArmed ||
+                                                webTableArmed
                                                 ? "crosshair"
                                                 : isPanningRef.current
                                                     ? "grabbing"
@@ -997,6 +1064,7 @@ export default function EditTables() {
                         <div className="mt-2 text-[11px] text-fg-muted sm:mt-3 sm:text-xs">
                             • Zoom con rueda. • Mover mapa arrastrando el fondo. •
                             Deshacer revierte mesas y paredes.
+                            {esMain ? " • Punto azul: se puede reservar desde la web." : null}
                         </div>
                     </div>
                 </div>
@@ -1004,6 +1072,22 @@ export default function EditTables() {
 
             {addTableOpen && <FormularioMesa numeroMesa={activeTables.length + 1} onCerrar={() => setAddTableOpen(false)}
                 onCrear={(mesa, colocacion) => { if (colocacion === "click") finalizeAddTableByClick(mesa); else finalizeAddTableAuto(mesa); }} />}
+
+            {mesaWebAbierta && (() => {
+                const idMesa = parseMesaId(mesaWebAbierta.id);
+                return (
+                    <FormularioReservaWeb
+                        nombreMesa={mesaWebAbierta.name}
+                        idMesa={idMesa}
+                        actual={idMesa ? mesasWeb[idMesa] : undefined}
+                        onCerrar={() => setMesaWebAbierta(null)}
+                        onGuardada={(mesa) => {
+                            setMesasWeb((prev) => ({ ...prev, [mesa.id_mesa]: mesa }));
+                            setMesaWebAbierta(null);
+                        }}
+                    />
+                );
+            })()}
 
         </div>
     );

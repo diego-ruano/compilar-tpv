@@ -2741,6 +2741,34 @@ export type ReservaWebCierreInput = {
 	motivo: string | null,
 };
 
+/**
+ *  Cómo se puede reservar una mesa desde la web: la casilla y su franja. La pantalla edita una
+ *  franja por mesa aunque el esquema admita varias.
+ *
+ *  `dias_semana` es la máscara de `Reserva_Web_Franjas` (1 lunes … 64 domingo; 127 = todos). Sin
+ *  franja guardada, las horas llegan vacías.
+ */
+export type ReservaWebMesaDto = {
+	id_mesa: string,
+	activa: boolean,
+	dias_semana: number,
+	fecha_desde: string | null,
+	fecha_hasta: string | null,
+	hora_desde: string | null,
+	hora_hasta: string | null,
+};
+
+/**  Lo que guarda la pantalla para una mesa. Mismos campos que [`ReservaWebMesaDto`]. */
+export type ReservaWebMesaInput = {
+	id_mesa: string,
+	activa: boolean,
+	dias_semana: number,
+	fecha_desde: string | null,
+	fecha_hasta: string | null,
+	hora_desde: string | null,
+	hora_hasta: string | null,
+};
+
 export type ReservaWebQuitarCierreInput = {
 	id_cierre: string,
 };

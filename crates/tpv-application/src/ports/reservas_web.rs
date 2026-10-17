@@ -5,8 +5,8 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::reservas_web::CierreReservaWebDto;
-use tpv_domain::reservas_web::CierreValidado;
+use tpv_contracts::reservas_web::{CierreReservaWebDto, ReservaWebMesaDto};
+use tpv_domain::reservas_web::{CierreValidado, MesaWebValidada};
 
 use crate::error::AppResult;
 
@@ -34,4 +34,12 @@ pub trait ReservasWebRepository: Send + Sync {
 
     /// Vuelve a abrir un día. Devuelve si estaba cerrado.
     async fn quitar_cierre(&self, id_cierre: &str) -> AppResult<bool>;
+
+    /// La configuración web de las mesas del plano que la tienen, encendida o no. Las archivadas
+    /// no salen: ya no están en el plano.
+    async fn mesas(&self) -> AppResult<Vec<ReservaWebMesaDto>>;
+
+    /// Guarda la de una mesa del plano y deja una sola franja, la de la pantalla. `NotFound` si la
+    /// mesa ya no está en el plano.
+    async fn guardar_mesa(&self, mesa: MesaWebValidada) -> AppResult<()>;
 }
