@@ -157,21 +157,30 @@ export function ocupacionPendiente(sql: SqlStorage, dia: string, duracion: numbe
 	return filas.map((f) => ({ id_mesa: String(f.id_mesa), ...intervalo(String(f.dia_ymd), String(f.hora), duracion) }));
 }
 
-/** Por dónde va la alarma recorriendo lo que espera: la última alta que miró. */
+/** Por dónde va la alarma recorriendo lo que espera de un tipo: la última petición que miró. */
 export type CursorAlarma = { creada_ms: number; id_reserva: string };
 
+type TipoPeticion = FilaPeticion["tipo"];
+
 /**
- * Las altas que esperan a aparecer en Turso, de las más viejas a las más nuevas y a partir de
- * `despues` (sin incluirla): lo que mira la alarma, por lotes.
+ * Lo que espera a verse en Turso, de un tipo, de lo más viejo a lo más nuevo y a partir de
+ * `despues` (sin incluirlo): lo que mira la alarma, por lotes. Un alta espera a que la reserva
+ * aparezca; una cancelación, a que aparezca cancelada.
  */
-export function altasEsperando(sql: SqlStorage, max: number, despues: CursorAlarma | null): CursorAlarma[] {
+export function esperando(
+	sql: SqlStorage,
+	tipo: TipoPeticion,
+	max: number,
+	despues: CursorAlarma | null,
+): CursorAlarma[] {
 	const desde = despues ?? { creada_ms: -1, id_reserva: "" };
 	return (
 		sql
 			.exec(
 				`SELECT creada_ms, id_reserva FROM peticiones
-				 WHERE tipo = 'alta' AND estado IN ('pendiente', 'entregada') AND (creada_ms, id_reserva) > (?, ?)
+				 WHERE tipo = ? AND estado IN ('pendiente', 'entregada') AND (creada_ms, id_reserva) > (?, ?)
 				 ORDER BY creada_ms, id_reserva LIMIT ?;`,
+				tipo,
 				desde.creada_ms,
 				desde.id_reserva,
 				max,
@@ -180,22 +189,43 @@ export function altasEsperando(sql: SqlStorage, max: number, despues: CursorAlar
 	).map((f) => ({ creada_ms: Number(f.creada_ms), id_reserva: String(f.id_reserva) }));
 }
 
-export function cursorDeLaAlarma(sql: SqlStorage): CursorAlarma | null {
-	const fila = sql.exec(`SELECT valor FROM estado WHERE clave = 'cursor_alarma';`).toArray()[0] as any;
+export function cursorDeLaAlarma(sql: SqlStorage, tipo: TipoPeticion): CursorAlarma | null {
+	const fila = sql.exec(`SELECT valor FROM estado WHERE clave = ?;`, `cursor_${tipo}`).toArray()[0] as any;
 	return fila ? (JSON.parse(String(fila.valor)) as CursorAlarma) : null;
 }
 
-/** `null` vuelve a empezar por la más vieja. */
-export function guardarCursorDeLaAlarma(sql: SqlStorage, cursor: CursorAlarma | null): void {
+/** `null` vuelve a empezar por lo más viejo. */
+export function guardarCursorDeLaAlarma(sql: SqlStorage, tipo: TipoPeticion, cursor: CursorAlarma | null): void {
 	if (cursor) {
 		sql.exec(
-			`INSERT INTO estado (clave, valor) VALUES ('cursor_alarma', ?)
+			`INSERT INTO estado (clave, valor) VALUES (?, ?)
 			 ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor;`,
+			`cursor_${tipo}`,
 			JSON.stringify(cursor),
 		);
 	} else {
-		sql.exec(`DELETE FROM estado WHERE clave = 'cursor_alarma';`);
+		sql.exec(`DELETE FROM estado WHERE clave = ?;`, `cursor_${tipo}`);
 	}
+}
+
+/**
+ * Las cancelaciones cuya reserva ya está cancelada (o terminada) en Turso están hechas: pasan a
+ * `vista`. Antes no: que la Main diga que la ha cancelado no basta, porque hasta que su outbox sube
+ * la cancelación sólo existe en su base. Devuelve cuántas.
+ */
+export function cancelacionesHechas(sql: SqlStorage, ids: Iterable<string>, ahoraMs: number): number {
+	const lista = [...new Set(ids)];
+	if (!lista.length) return 0;
+	return sql
+		.exec(
+			`UPDATE peticiones SET estado = 'vista', cerrada_ms = ?
+			 WHERE tipo = 'cancelacion' AND estado IN ('pendiente', 'entregada')
+			   AND id_reserva IN (SELECT value FROM json_each(?))
+			 RETURNING id_peticion;`,
+			ahoraMs,
+			JSON.stringify(lista),
+		)
+		.toArray().length;
 }
 
 /** Altas apuntadas desde `desdeMs`, en cualquier estado: el tope por negocio. */
@@ -369,8 +399,9 @@ export type ResultadoDeLaMain = {
  * Lo que la Main contesta de lo que se le entregó. Sólo cuenta para lo que está `entregada`: una
  * respuesta repetida, tardía o de algo que no existe no cambia nada.
  *
- *   · Un alta registrada o solapada sigue `entregada` hasta verse en Turso (o se vuelve a ofrecer).
- *   · Una cancelación registrada ya está hecha: pasa a `vista`.
+ *   · Lo registrado (o solapado) sigue `entregada` hasta verse en Turso: un alta, al aparecer la
+ *     reserva; una cancelación, al aparecer cancelada. Si no, se vuelve a ofrecer. La palabra de la
+ *     Main no basta: hasta que su outbox lo sube, sólo existe en su base.
  *   · Lo `fallida` se cierra. De un alta queda sólo el correo, para avisar al cliente.
  *
  * Devuelve cuántas ha apuntado y las altas fallidas.
@@ -400,13 +431,6 @@ export function apuntarResultados(
 				r.id_peticion,
 			);
 			if (fila.tipo === "alta") fallidas.push({ ...fila, codigo: r.codigo });
-		} else if (fila.tipo === "cancelacion") {
-			sql.exec(
-				`UPDATE peticiones SET estado = 'vista', cerrada_ms = ?, resultado = ? WHERE id_peticion = ?;`,
-				ahoraMs,
-				r.resultado,
-				r.id_peticion,
-			);
 		} else {
 			sql.exec(`UPDATE peticiones SET resultado = ? WHERE id_peticion = ?;`, r.resultado, r.id_peticion);
 		}

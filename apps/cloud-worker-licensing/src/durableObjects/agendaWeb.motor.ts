@@ -45,7 +45,8 @@ import {
 import type { AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
 import {
 	altasDesde,
-	altasEsperando,
+	cancelacionesHechas,
+	esperando,
 	cursorDeLaAlarma,
 	guardarCursorDeLaAlarma,
 	anularAlta,
@@ -78,6 +79,11 @@ const CADA_ALARMA_MS = 60 * 60_000;
 const REOFRECER_TRAS_MS = 60 * 60_000;
 /** Una petición que sigue sin recoger tanto tiempo es una anomalía que mirar (§9). */
 const ATASCADA_TRAS_MS = 72 * 60 * 60_000;
+// Lo que se pregunta a Turso para dar por hecho lo que espera: un alta, si la reserva está; una
+// cancelación, si está y ya no se puede usar (cancelada, terminada o no presentada).
+const SQL_ESTAN_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`;
+const SQL_CANCELADAS_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas
+	WHERE ID_Reserva IN (SELECT value FROM json_each(?1)) AND Estado NOT IN ('PROXIMA', 'ACTIVA');`;
 /** Cuántas peticiones se entregan a la Main de una vez. */
 const MAX_ENTREGA = 50;
 /**
@@ -546,30 +552,41 @@ export class MotorAgendaWeb {
 	private async reconciliarConTurso(): Promise<void> {
 		const tenantId = negocioRecordado(this.sql);
 		if (!tenantId) return;
-		// Por lotes y avanzando aunque un lote no encuentre nada: si las más viejas no llegan nunca a
-		// Turso, no pueden tapar a las de detrás.
-		let cursor = cursorDeLaAlarma(this.sql);
+		const vistas = await this.reconciliarTipo(tenantId, "alta", SQL_ESTAN_EN_TURSO, darPorVistas);
+		if (vistas > 0) this.anotar({ event: "reserva_web_vista", tenant_id: tenantId, cuantas: vistas });
+		await this.reconciliarTipo(tenantId, "cancelacion", SQL_CANCELADAS_EN_TURSO, cancelacionesHechas);
+	}
+
+	/**
+	 * Por lotes y avanzando aunque un lote no encuentre nada: si las más viejas no llegan nunca a
+	 * Turso, no pueden tapar a las de detrás. Lo que no da tiempo sigue en la siguiente vez.
+	 */
+	private async reconciliarTipo(
+		tenantId: string,
+		tipo: "alta" | "cancelacion",
+		sqlTurso: string,
+		cerrar: (sql: SqlStorage, ids: string[], ahoraMs: number) => number,
+	): Promise<number> {
+		let cerradas = 0;
+		let cursor = cursorDeLaAlarma(this.sql, tipo);
 		for (let lote = 0; lote < LOTES_POR_ALARMA; lote++) {
-			const altas = altasEsperando(this.sql, MAX_RECONCILIAR, cursor);
-			if (!altas.length) {
+			const grupo = esperando(this.sql, tipo, MAX_RECONCILIAR, cursor);
+			if (!grupo.length) {
 				cursor = null;
 				break;
 			}
-			const ids = altas.map((a) => a.id_reserva);
+			const ids = grupo.map((a) => a.id_reserva);
 			const enTurso = await this.leer(tenantId, async (db) => {
-				const rs = await db.execute({
-					sql: `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`,
-					args: [JSON.stringify(ids)],
-				});
+				const rs = await db.execute({ sql: sqlTurso, args: [JSON.stringify(ids)] });
 				return (rs.rows ?? []).map((r: any) => String(r.id));
 			});
-			const vistas = darPorVistas(this.sql, enTurso, Date.now());
-			if (vistas > 0) this.anotar({ event: "reserva_web_vista", tenant_id: tenantId, cuantas: vistas });
-			// Un lote incompleto es el último: la siguiente alarma vuelve a empezar por la más vieja.
-			cursor = altas.length < MAX_RECONCILIAR ? null : altas[altas.length - 1];
+			cerradas += cerrar(this.sql, enTurso, Date.now());
+			// Un lote incompleto es el último: la siguiente vez se empieza otra vez por lo más viejo.
+			cursor = grupo.length < MAX_RECONCILIAR ? null : grupo[grupo.length - 1];
 			if (!cursor) break;
 		}
-		guardarCursorDeLaAlarma(this.sql, cursor);
+		guardarCursorDeLaAlarma(this.sql, tipo, cursor);
+		return cerradas;
 	}
 
 	/** Sólo para diagnóstico y tests: de qué negocio es esta agenda. */

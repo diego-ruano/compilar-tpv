@@ -458,7 +458,7 @@ describe("la agenda de reservas web", () => {
 			await motor.alarm();
 			expect(estado("r2550")).toBe("vista");
 			// Terminada la vuelta, la siguiente empieza otra vez por la más vieja.
-			expect(sql.exec(`SELECT COUNT(*) AS n FROM estado WHERE clave = 'cursor_alarma';`).toArray()[0]).toEqual({ n: 0 });
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM estado WHERE clave = 'cursor_alta';`).toArray()[0]).toEqual({ n: 0 });
 		});
 	});
 
@@ -626,18 +626,32 @@ describe("la entrega a la Main", () => {
 		});
 	});
 
-	it("una cancelación registrada por la Main queda hecha", async () => {
-		await conAgenda("entrega-cancelacion", async (motor, sql) => {
+	it("una cancelación no está hecha porque la Main lo diga, sino cuando Turso la tiene cancelada", async () => {
+		await conAgenda("entrega-cancelacion", async (motor, sql, state) => {
 			espiar(motor);
 			const a = await motor.reservar({ tenantId: T, alta: alta() });
 			await motor.pendientes({ tenantId: T });
+			enTurso(sql, a.id_reserva, "m2");
 			await motor.cancelar({ tenantId: T, token: a.token });
 			const [c] = (await motor.pendientes({ tenantId: T })).peticiones;
 			await motor.recogidas({
 				tenantId: T,
 				resultados: [{ id_peticion: c.id_peticion, resultado: "registrada", codigo: null }],
 			});
-			expect(filas(sql).find((f) => f.tipo === "cancelacion")).toMatchObject({ estado: "vista", resultado: "registrada" });
+			const cancelacion = () => filas(sql).find((f) => f.tipo === "cancelacion");
+			// La Main la ha cancelado en su base, pero su outbox aún no lo ha subido.
+			expect(cancelacion()).toMatchObject({ estado: "entregada", resultado: "registrada" });
+
+			// Si no llega en una hora, se le vuelve a ofrecer.
+			sql.exec(`UPDATE peticiones SET entregada_ms = ? WHERE tipo = 'cancelacion';`, Date.now() - 61 * 60_000);
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(cancelacion().estado).toBe("pendiente");
+
+			// Llega a Turso: hecha.
+			sql.exec(`UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?;`, a.id_reserva);
+			await motor.pendientes({ tenantId: T });
+			expect(cancelacion().estado).toBe("vista");
 		});
 	});
 
