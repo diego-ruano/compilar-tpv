@@ -9,7 +9,8 @@
 // las dos la comprobación.
 //
 // Los datos personales (`datos_json`) sólo están mientras la reserva espera a la Main: se borran al
-// verla en Turso, al anularla o al fallar.
+// verla en Turso o al anularla. De una fallida queda sólo el correo, para avisar al cliente, hasta
+// que se purga.
 
 import type { Ocupacion } from "../domains/reservas_web/disponibilidad";
 import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";
@@ -35,6 +36,8 @@ export type FilaPeticion = {
 	creada_ms: number;
 	estado: EstadoPeticion;
 	cerrada_ms?: number | null;
+	resultado?: string | null;
+	codigo?: string | null;
 };
 
 const ESQUEMA = [
@@ -43,6 +46,7 @@ const ESQUEMA = [
 		valor TEXT NOT NULL
 	);`,
 	// `cerrada_ms`: cuándo pasó a vista, anulada o fallida. De ahí cuenta la retención.
+	// `resultado` y `codigo`: lo que contestó la Main al entregársela (§5.4).
 	`CREATE TABLE IF NOT EXISTS peticiones (
 		id_peticion  TEXT NOT NULL PRIMARY KEY,
 		tipo         TEXT NOT NULL CHECK (tipo IN ('alta', 'cancelacion')),
@@ -58,7 +62,9 @@ const ESQUEMA = [
 		estado       TEXT NOT NULL CHECK (estado IN ('pendiente', 'entregada', 'vista', 'fallida', 'anulada')),
 		entregada_ms INTEGER,
 		intentos     INTEGER NOT NULL DEFAULT 0,
-		cerrada_ms   INTEGER
+		cerrada_ms   INTEGER,
+		resultado    TEXT CHECK (resultado IS NULL OR resultado IN ('registrada', 'solapada', 'fallida')),
+		codigo       TEXT
 	);`,
 	// Un alta y, como mucho, una cancelación por reserva.
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_peticiones_tipo_reserva ON peticiones(tipo, id_reserva);`,
@@ -104,13 +110,15 @@ export function negocioRecordado(sql: SqlStorage): string | null {
 export function darPorVistas(sql: SqlStorage, ids: Iterable<string>, ahoraMs: number): number {
 	const lista = [...new Set(ids)];
 	if (!lista.length) return 0;
+	// Se cuentan las filas devueltas: `rowsWritten` suma también las entradas de los índices.
 	return sql.exec(
 		`UPDATE peticiones SET estado = 'vista', datos_json = NULL, cerrada_ms = ?
 		 WHERE tipo = 'alta' AND estado IN ('pendiente', 'entregada')
-		   AND id_reserva IN (SELECT value FROM json_each(?));`,
+		   AND id_reserva IN (SELECT value FROM json_each(?))
+		 RETURNING id_peticion;`,
 		ahoraMs,
 		JSON.stringify(lista),
-	).rowsWritten;
+	).toArray().length;
 }
 
 /**
@@ -254,14 +262,7 @@ export function peticion(sql: SqlStorage, tipo: "alta" | "cancelacion", idReserv
 	const fila = sql
 		.exec(`SELECT * FROM peticiones WHERE tipo = ? AND id_reserva = ?;`, tipo, idReserva)
 		.toArray()[0] as any;
-	return fila
-		? ({
-				...fila,
-				comensales: Number(fila.comensales),
-				creada_ms: Number(fila.creada_ms),
-				cerrada_ms: fila.cerrada_ms === null ? null : Number(fila.cerrada_ms),
-			} as FilaPeticion)
-		: null;
+	return fila ? conTipos(fila) : null;
 }
 
 /** Un alta que la Main todavía no tiene se anula aquí mismo: deja libre la mesa y olvida los datos. */
@@ -314,4 +315,119 @@ export function purgar(sql: SqlStorage, ahoraMs: number): boolean {
 		.exec(`SELECT (SELECT COUNT(*) FROM peticiones) + (SELECT COUNT(*) FROM enlaces) AS n;`)
 		.toArray()[0] as any;
 	return Number(quedan?.n ?? 0) > 0;
+}
+
+// ── La entrega a la Main (§5.4) ─────────────────────────────────────────────────────────────────
+
+function conTipos(f: any): FilaPeticion {
+	return {
+		...f,
+		comensales: Number(f.comensales),
+		creada_ms: Number(f.creada_ms),
+		cerrada_ms: f.cerrada_ms === null ? null : Number(f.cerrada_ms),
+	} as FilaPeticion;
+}
+
+/**
+ * Las peticiones `pendiente` para la Main, por orden de llegada (un alta siempre antes que su
+ * cancelación), que pasan a `entregada`. Como mucho `max`; `hayMas` dice si quedan.
+ */
+export function entregarPendientes(
+	sql: SqlStorage,
+	max: number,
+	ahoraMs: number,
+): { peticiones: FilaPeticion[]; hayMas: boolean } {
+	const filas = (
+		sql
+			.exec(`SELECT * FROM peticiones WHERE estado = 'pendiente' ORDER BY creada_ms, id_peticion LIMIT ?;`, max + 1)
+			.toArray() as any[]
+	).map(conTipos);
+	const entregar = filas.slice(0, max);
+	if (entregar.length) {
+		sql.exec(
+			`UPDATE peticiones SET estado = 'entregada', entregada_ms = ?, intentos = intentos + 1
+			 WHERE id_peticion IN (SELECT value FROM json_each(?));`,
+			ahoraMs,
+			JSON.stringify(entregar.map((f) => f.id_peticion)),
+		);
+	}
+	return { peticiones: entregar, hayMas: filas.length > max };
+}
+
+export type ResultadoDeLaMain = {
+	id_peticion: string;
+	resultado: "registrada" | "solapada" | "fallida";
+	codigo: string | null;
+};
+
+/**
+ * Lo que la Main contesta de lo que se le entregó. Sólo cuenta para lo que está `entregada`: una
+ * respuesta repetida, tardía o de algo que no existe no cambia nada.
+ *
+ *   · Un alta registrada o solapada sigue `entregada` hasta verse en Turso (o se vuelve a ofrecer).
+ *   · Una cancelación registrada ya está hecha: pasa a `vista`.
+ *   · Lo `fallida` se cierra. De un alta queda sólo el correo, para avisar al cliente.
+ *
+ * Devuelve cuántas ha apuntado y las altas fallidas.
+ */
+export function apuntarResultados(
+	sql: SqlStorage,
+	resultados: ResultadoDeLaMain[],
+	ahoraMs: number,
+): { apuntadas: number; fallidas: FilaPeticion[] } {
+	let apuntadas = 0;
+	const fallidas: FilaPeticion[] = [];
+	for (const r of resultados) {
+		const crudo = sql
+			.exec(`SELECT * FROM peticiones WHERE id_peticion = ? AND estado = 'entregada';`, r.id_peticion)
+			.toArray()[0];
+		if (!crudo) continue;
+		const fila = conTipos(crudo);
+		if (r.resultado === "fallida") {
+			sql.exec(
+				`UPDATE peticiones
+				 SET estado = 'fallida', cerrada_ms = ?, resultado = 'fallida', codigo = ?,
+				     datos_json = CASE WHEN datos_json IS NULL THEN NULL
+				                       ELSE json_object('email', json_extract(datos_json, '$.email')) END
+				 WHERE id_peticion = ?;`,
+				ahoraMs,
+				r.codigo,
+				r.id_peticion,
+			);
+			if (fila.tipo === "alta") fallidas.push({ ...fila, codigo: r.codigo });
+		} else if (fila.tipo === "cancelacion") {
+			sql.exec(
+				`UPDATE peticiones SET estado = 'vista', cerrada_ms = ?, resultado = ? WHERE id_peticion = ?;`,
+				ahoraMs,
+				r.resultado,
+				r.id_peticion,
+			);
+		} else {
+			sql.exec(`UPDATE peticiones SET resultado = ? WHERE id_peticion = ?;`, r.resultado, r.id_peticion);
+		}
+		apuntadas++;
+	}
+	return { apuntadas, fallidas };
+}
+
+/**
+ * Lo entregado hace más de una hora que no se ha visto en Turso (un alta) o del que la Main no ha
+ * contestado (una cancelación) vuelve a `pendiente`. Cubre una Main que perdió su base o un outbox
+ * atascado: registrarla otra vez no la duplica (el `INSERT` es idempotente por `ID_Reserva`).
+ * Devuelve cuántas.
+ */
+export function reofrecer(sql: SqlStorage, entregadasAntesDeMs: number): number {
+	return sql.exec(
+		`UPDATE peticiones SET estado = 'pendiente' WHERE estado = 'entregada' AND entregada_ms < ?
+		 RETURNING id_peticion;`,
+		entregadasAntesDeMs,
+	).toArray().length;
+}
+
+/** Las que siguen `pendiente` desde antes de `antesDeMs`: la Main lleva tiempo sin recogerlas. */
+export function pendientesDesde(sql: SqlStorage, antesDeMs: number): number {
+	const fila = sql
+		.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE estado = 'pendiente' AND creada_ms < ?;`, antesDeMs)
+		.toArray()[0] as any;
+	return Number(fila?.n ?? 0);
 }

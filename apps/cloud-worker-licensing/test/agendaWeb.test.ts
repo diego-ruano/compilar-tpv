@@ -86,7 +86,7 @@ function sinDatosPersonales(respuesta: unknown) {
 describe("la agenda de reservas web", () => {
 	it("sólo expone por RPC lo que llaman las rutas, y la alarma (RI-45)", () => {
 		expect(Object.getOwnPropertyNames(AgendaWeb.prototype).sort()).toEqual(
-			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "alarm"].sort(),
+			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "pendientes", "recogidas", "alarm"].sort(),
 		);
 	});
 
@@ -489,6 +489,207 @@ describe("la agenda de reservas web", () => {
 			await state.storage.deleteAlarm();
 			await motor.alarm();
 			expect(await state.storage.getAlarm()).toBeNull();
+		});
+	});
+});
+
+describe("la entrega a la Main", () => {
+	/** El aviso al TenantHub y los eventos de Axiom, apuntados en vez de mandados. */
+	function espiar(motor: any) {
+		const avisos: string[] = [];
+		const eventos: any[] = [];
+		motor.avisarALaMain = (t: string) => avisos.push(t);
+		motor.anotar = (e: any) => eventos.push(e);
+		return { avisos, eventos };
+	}
+
+	const filas = (sql: SqlStorage) =>
+		sql
+			.exec(`SELECT tipo, id_reserva, estado, resultado, codigo, datos_json FROM peticiones ORDER BY creada_ms, id_peticion;`)
+			.toArray() as any[];
+
+	function enTurso(sql: SqlStorage, idReserva: string, mesa: string) {
+		sql.exec(
+			`INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+			 VALUES (?, ?, ?, '21:00', 'CENA', 2, 'PROXIMA', 'WEB');`,
+			idReserva,
+			mesa,
+			DIA,
+		);
+	}
+
+	it("lo nuevo avisa a la Main, y se le entrega por orden de llegada con los datos del alta", async () => {
+		await conAgenda("entrega-orden", async (motor, sql) => {
+			const { avisos } = espiar(motor);
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			const b = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4", email: "otro@correo.es", nota: null }) });
+			expect(avisos).toEqual([T, T]);
+
+			const primera = await motor.pendientes({ tenantId: T });
+			expect(primera.hay_mas).toBe(false);
+			expect(primera.peticiones.map((p: any) => p.id_reserva)).toEqual([a.id_reserva, b.id_reserva]);
+			expect(primera.peticiones[0]).toEqual({
+				id_peticion: expect.any(String),
+				tipo: "alta",
+				id_reserva: a.id_reserva,
+				id_mesa: "m2",
+				dia_ymd: DIA,
+				hora: "21:00",
+				personas: 2,
+				creada_local: AHORA,
+				datos: { nombre: "Ana Pérez", email: "ana@correo.es", telefono: "600112233", nota: "Silla para bebé" },
+			});
+			expect(primera.peticiones[1].datos.nota).toBeNull();
+			expect(filas(sql).map((f) => f.estado)).toEqual(["entregada", "entregada"]);
+			// Lo entregado no se vuelve a entregar.
+			expect((await motor.pendientes({ tenantId: T })).peticiones).toEqual([]);
+
+			// Cancelar una entregada deja una cancelación para la Main, que también la avisa.
+			expect(await motor.cancelar({ tenantId: T, token: a.token })).toEqual({ ok: true });
+			expect(avisos).toEqual([T, T, T]);
+			const cancelacion = await motor.pendientes({ tenantId: T });
+			expect(cancelacion.peticiones).toEqual([
+				expect.objectContaining({ tipo: "cancelacion", id_reserva: a.id_reserva, id_mesa: "m2", datos: null }),
+			]);
+		});
+	});
+
+	it("no entrega lo que ya está en Turso", async () => {
+		await conAgenda("entrega-ya-en-turso", async (motor, sql) => {
+			espiar(motor);
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			enTurso(sql, a.id_reserva, "m2");
+			expect((await motor.pendientes({ tenantId: T })).peticiones).toEqual([]);
+			expect(filas(sql)[0]).toMatchObject({ estado: "vista", datos_json: null });
+		});
+	});
+
+	it("de 50 en 50, con `hay_mas` mientras quede", async () => {
+		await conAgenda("entrega-lotes", async (motor, sql) => {
+			for (let i = 0; i < 51; i++) {
+				sql.exec(
+					`INSERT INTO peticiones (id_peticion, tipo, id_reserva, id_mesa, dia_ymd, hora, comensales, datos_json,
+					                         creada_local, creada_ms, estado)
+					 VALUES (?, 'alta', ?, 'm2', ?, '21:00', 2, ?, ?, ?, 'pendiente');`,
+					`p${i}`,
+					`r${i}`,
+					DIA,
+					JSON.stringify({ nombre: "x", email: "x@y.es", telefono: "600000000", nota: null }),
+					AHORA,
+					1000 + i,
+				);
+			}
+			const una = await motor.pendientes({ tenantId: T });
+			expect([una.peticiones.length, una.hay_mas]).toEqual([50, true]);
+			const otra = await motor.pendientes({ tenantId: T });
+			expect([otra.peticiones.length, otra.hay_mas]).toEqual([1, false]);
+		});
+	});
+
+	it("apunta lo que contesta la Main; de una fallida sólo queda el correo", async () => {
+		await conAgenda("entrega-resultados", async (motor, sql) => {
+			const { eventos } = espiar(motor);
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			const b = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4", email: "b@correo.es" }) });
+			const entregadas = (await motor.pendientes({ tenantId: T })).peticiones;
+			const id = (r: any) => entregadas.find((p: any) => p.id_reserva === r.id_reserva).id_peticion;
+
+			const r = await motor.recogidas({
+				tenantId: T,
+				resultados: [
+					{ id_peticion: id(a), resultado: "solapada", codigo: null },
+					{ id_peticion: id(b), resultado: "fallida", codigo: "validation" },
+					{ id_peticion: "no-existe", resultado: "registrada", codigo: null },
+				],
+			});
+			expect(r).toEqual({ ok: true, apuntadas: 2 });
+			const [fa, fb] = filas(sql);
+			// La solapada espera a verse en Turso, con sus datos.
+			expect(fa).toMatchObject({ estado: "entregada", resultado: "solapada" });
+			expect(JSON.parse(fa.datos_json).nombre).toBe("Ana Pérez");
+			expect(fb).toMatchObject({ estado: "fallida", resultado: "fallida", codigo: "validation" });
+			expect(JSON.parse(fb.datos_json)).toEqual({ email: "b@correo.es" });
+			expect(eventos).toContainEqual({
+				event: "reserva_web_fallida",
+				tenant_id: T,
+				id_reserva: b.id_reserva,
+				motivo: "validation",
+			});
+			// Una respuesta repetida no cambia nada: la fallida ya no está entregada.
+			const otra = await motor.recogidas({
+				tenantId: T,
+				resultados: [{ id_peticion: id(b), resultado: "registrada", codigo: null }],
+			});
+			expect(otra.apuntadas).toBe(0);
+			// Y quien la consulta la ve cancelada.
+			expect((await motor.consultarEnlace({ tenantId: T, token: b.token })).estado).toBe("cancelada");
+		});
+	});
+
+	it("una cancelación registrada por la Main queda hecha", async () => {
+		await conAgenda("entrega-cancelacion", async (motor, sql) => {
+			espiar(motor);
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			await motor.pendientes({ tenantId: T });
+			await motor.cancelar({ tenantId: T, token: a.token });
+			const [c] = (await motor.pendientes({ tenantId: T })).peticiones;
+			await motor.recogidas({
+				tenantId: T,
+				resultados: [{ id_peticion: c.id_peticion, resultado: "registrada", codigo: null }],
+			});
+			expect(filas(sql).find((f) => f.tipo === "cancelacion")).toMatchObject({ estado: "vista", resultado: "registrada" });
+		});
+	});
+
+	it("lo entregado que no llega a Turso en una hora se vuelve a ofrecer, y se avisa a la Main", async () => {
+		await conAgenda("entrega-reoferta", async (motor, sql, state) => {
+			const { avisos, eventos } = espiar(motor);
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			const b = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4", email: "b@correo.es" }) });
+			await motor.pendientes({ tenantId: T });
+			avisos.length = 0;
+			// Entregadas hace más de una hora; b ya llegó a Turso.
+			sql.exec(`UPDATE peticiones SET entregada_ms = ?;`, Date.now() - 61 * 60_000);
+			enTurso(sql, b.id_reserva, "m4");
+
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(filas(sql).map((f) => [f.id_reserva, f.estado])).toEqual([
+				[a.id_reserva, "pendiente"],
+				[b.id_reserva, "vista"],
+			]);
+			expect(avisos).toEqual([T]);
+			expect(eventos, JSON.stringify(eventos)).toContainEqual({ event: "reserva_web_reofrecida", tenant_id: T, cuantas: 1 });
+			const otra = await motor.pendientes({ tenantId: T });
+			expect(otra.peticiones.map((p: any) => p.id_reserva)).toEqual([a.id_reserva]);
+		});
+	});
+
+	it("sin Turso la alarma no vuelve a ofrecer nada: no sabría qué ha llegado", async () => {
+		await conAgenda("entrega-reoferta-sin-turso", async (motor, sql, state) => {
+			const { avisos } = espiar(motor);
+			await motor.reservar({ tenantId: T, alta: alta() });
+			await motor.pendientes({ tenantId: T });
+			avisos.length = 0;
+			sql.exec(`UPDATE peticiones SET entregada_ms = ?;`, Date.now() - 61 * 60_000);
+			motor.leer = async () => {
+				throw new Error("sin red");
+			};
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(filas(sql)[0].estado).toBe("entregada");
+			expect(avisos).toEqual([]);
+		});
+	});
+
+	it("lo que lleva tres días sin recoger sale en Axiom", async () => {
+		await conAgenda("entrega-atascada", async (motor, sql, state) => {
+			const { eventos } = espiar(motor);
+			await motor.reservar({ tenantId: T, alta: alta() });
+			sql.exec(`UPDATE peticiones SET creada_ms = ?;`, Date.now() - 73 * 60 * 60_000);
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(eventos).toContainEqual({ event: "reserva_web_atascada", tenant_id: T, cuantas: 1 });
 		});
 	});
 });

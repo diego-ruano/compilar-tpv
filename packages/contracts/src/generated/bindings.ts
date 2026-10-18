@@ -874,6 +874,14 @@ export type CursorCuentas = {
 	id: string,
 };
 
+/**  Los datos de quien reserva. Sólo en un alta, y sólo mientras la Main no la ha registrado. */
+export type DatosAltaWebDto = {
+	nombre: string,
+	email: string,
+	telefono: string,
+	nota: string | null,
+};
+
 /**  La declaración responsable tal como la enseña la pantalla. */
 export type DeclaracionResponsableDto = {
 	productor_nombre_razon: string,
@@ -2029,10 +2037,34 @@ export type PedidosPageDto = {
 	total: number,
 };
 
+/**  La respuesta de `POST /v1/reservas-web/pendientes`. */
+export type PendientesReservaWebDto = {
+	peticiones: PeticionReservaWebDto[],
+	/**  Quedan más: la Main vuelve a pedir después de contestar éstas. */
+	hay_mas: boolean,
+};
+
 export type PermisoDef = {
 	codigo: string,
 	nombre: string,
 	grupo: string,
+};
+
+/**
+ *  Una petición de la agenda para la Main: un alta (con el `ID_Reserva` que puso la agenda) o la
+ *  cancelación de una que ya le entregó.
+ */
+export type PeticionReservaWebDto = {
+	id_peticion: string,
+	tipo: TipoPeticionWeb,
+	id_reserva: string,
+	id_mesa: string | null,
+	dia_ymd: string,
+	hora: string,
+	personas: number,
+	/**  El instante del alta en la hora del negocio: el `Created_At` que escribe la Main. */
+	creada_local: string,
+	datos: DatosAltaWebDto | null,
 };
 
 /**  Lo que la pantalla necesita saber **antes** de que nadie cuente nada. */
@@ -2591,6 +2623,19 @@ export type PuntualidadInfo = {
 
 export type RechazoHandy = "dispositivo" | "licencia";
 
+/**  Una línea de `POST /v1/reservas-web/recogidas`. */
+export type RecogidaReservaWebDto = {
+	id_peticion: string,
+	resultado: ResultadoRecogidaWeb,
+	/**  En una `fallida`, el código del error (nunca su texto, que podría llevar datos). */
+	codigo: string | null,
+};
+
+/**  El cuerpo de `POST /v1/reservas-web/recogidas`. */
+export type RecogidasReservaWebInput = {
+	resultados: RecogidaReservaWebDto[],
+};
+
 /**  Estado que decide si la aplicación puede abrir el login o debe permanecer bloqueada. */
 export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending" |
 /**
@@ -2841,6 +2886,18 @@ export type ResolverCobroPendienteInput = {
 	id_pago: string,
 	destinatario?: DestinatarioInput | null,
 };
+
+/**  Cómo le ha ido a la Main con una petición. */
+export type ResultadoRecogidaWeb =
+/**  Guardada (o ya lo estaba). */
+"registrada" |
+/**
+ *  Guardada, pero pisa otra reserva o una comanda, o su mesa ya no está: el restaurante la
+ *  tiene que mover. Una reserva web confirmada nunca se rechaza.
+ */
+"solapada" |
+/**  No se ha podido guardar: al cliente se le avisa por correo. */
+"fallida";
 
 /**  Lo que dejó una pasada de verificación. */
 export type ResultadoVerificacion = {
@@ -3228,6 +3285,9 @@ export type TicketSettingsPatch_Serialize = {
 	margin_right_mm?: number,
 	font_scale?: number,
 };
+
+/**  Qué pide una petición de la agenda. */
+export type TipoPeticionWeb = "alta" | "cancelacion";
 
 export type TpvServerPostJsonArgs = {
 	mode: string,

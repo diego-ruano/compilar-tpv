@@ -7,7 +7,10 @@
 import { DurableObject } from "cloudflare:workers";
 
 import type { Env } from "../env";
+import type { PendientesReservaWebDto } from "@tpv/contracts";
+
 import type { AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
+import type { ResultadoDeLaMain } from "./agendaWeb.almacen";
 import {
 	MotorAgendaWeb,
 	type ResultadoCancelar,
@@ -40,6 +43,15 @@ export class AgendaWeb extends DurableObject<Env> {
 
 	cancelar(p: { tenantId: string; token: string }): Promise<ResultadoCancelar> {
 		return this.motor.cancelar(p);
+	}
+
+	// La entrega a la Main (§4.5): sólo desde sus rutas, detrás de `soloLaMain`.
+	pendientes(p: { tenantId: string }): Promise<{ ok: true } & PendientesReservaWebDto> {
+		return this.motor.pendientes(p);
+	}
+
+	recogidas(p: { tenantId: string; resultados: ResultadoDeLaMain[] }): Promise<{ ok: true; apuntadas: number }> {
+		return this.motor.recogidas(p);
 	}
 
 	alarm(): Promise<void> {

@@ -54,6 +54,15 @@ export function avisoDePairing(ctx: ContextoDeRutas): void {
 	ctx.broadcastRol("tpv", { type: "pair_request" });
 }
 
+/**
+ * Reservas desde la web (docs/estudios/reservas-web.md §4.4): la agenda del negocio tiene algo para
+ * la Main. Sólo el empujón: la Main lo pide por REST (`/v1/reservas-web/pendientes`). No se guarda
+ * nada, y sin Main conectada no pasa nada: lo recoge al conectar.
+ */
+export function avisoDeReservasWeb(ctx: ContextoDeRutas): void {
+	ctx.broadcastRol("tpv", { type: "reservas_web" });
+}
+
 export async function aplicar(ctx: ContextoDeRutas, params: ApplyParams): Promise<ResultadoAplicacion> {
 	const { tenantId, deviceId, opId, commandName, command, cloudPayload, clientNow } = params;
 	if (!tenantId) return { ok: false, error: "missing_tenant_id", status: 400 };

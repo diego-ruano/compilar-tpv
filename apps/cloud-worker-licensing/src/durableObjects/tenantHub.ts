@@ -26,6 +26,11 @@ export class TenantHub extends DurableObject<Env> {
 		this.motor.avisarEmparejamiento();
 	}
 
+	/** La agenda de reservas web tiene algo para la Main (docs/estudios/reservas-web.md §4.4). */
+	avisarReservasWeb(): void {
+		this.motor.avisarReservasWeb();
+	}
+
 	fetch(request: Request): Promise<Response> {
 		return this.motor.fetch(request);
 	}

@@ -7,7 +7,7 @@
 // `validacion_casos.json` (dominio `reserva_web`). Un criterio nuevo es un caso nuevo ahí.
 
 import * as z from "zod";
-import type { ReservaWebAltaInput } from "@tpv/contracts";
+import type { RecogidaReservaWebDto, RecogidasReservaWebInput, ReservaWebAltaInput } from "@tpv/contracts";
 
 import { normalizarDia, zDia } from "../../lib/fechas";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
@@ -138,3 +138,23 @@ export const disponiblesQuerySchema = z.object({
 
 /** El cuerpo de `/reserva` y `/cancelar`: el token del enlace del correo. */
 export const tokenEnlaceSchema = z.object({ token: z.unknown().transform((v) => texto(v).trim().slice(0, 64)) });
+
+/** Una línea de lo que contesta la Main (`POST /v1/reservas-web/recogidas`). */
+const recogidaSchema = z.object({
+	id_peticion: z.string().trim().min(1).max(64),
+	resultado: z.enum(["registrada", "solapada", "fallida"]),
+	// Un código de error, nunca su texto (podría llevar datos de alguien).
+	codigo: z
+		.string()
+		.trim()
+		.max(64)
+		.regex(/^[a-z0-9_]*$/, "El código de error es un identificador")
+		.nullish()
+		.transform((v) => (v ? v : null)),
+});
+
+/** Lo que la Main ha hecho con lo entregado. Un techo por petición, como toda lista que llega. */
+export const recogidasSchema = z.object({ resultados: z.array(recogidaSchema).max(100) });
+
+type _GRecogida = Assert<SameKeys<z.infer<typeof recogidaSchema>, RecogidaReservaWebDto>>;
+type _GRecogidas = Assert<SameKeys<z.infer<typeof recogidasSchema>, RecogidasReservaWebInput>>;

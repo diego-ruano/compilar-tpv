@@ -35,6 +35,7 @@ import {
 	abrirWebSocket,
 	aplicar,
 	avisoDePairing,
+	avisoDeReservasWeb,
 	esUpgradeDeWebSocket,
 	revocar,
 } from "./tenantHub.rutas";
@@ -993,6 +994,10 @@ export class MotorTenantHub {
 
 	avisarEmparejamiento(): void {
 		avisoDePairing(this.ctxRutas());
+	}
+
+	avisarReservasWeb(): void {
+		avisoDeReservasWeb(this.ctxRutas());
 	}
 
 	/** ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Ver `ctxCola`. */

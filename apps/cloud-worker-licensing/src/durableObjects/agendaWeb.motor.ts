@@ -13,11 +13,13 @@
 //   · Las respuestas no llevan datos personales de ninguna reserva.
 
 import type { Client } from "@libsql/client/web";
+import type { PendientesReservaWebDto, PeticionReservaWebDto } from "@tpv/contracts";
 
 import type { Env } from "../env";
 import { nuevoId } from "../lib/ids";
 import { lecturaConHora } from "../lib/tenantClient";
 import { sha256HexStr } from "../server/utils/crypto";
+import { reportarReservaWeb } from "../observability/axiom";
 import {
 	alternativas,
 	horaEnTramos,
@@ -49,15 +51,21 @@ import {
 	anularAlta,
 	apuntarAlta,
 	apuntarCancelacion,
+	apuntarResultados,
 	darPorVistas,
+	entregarPendientes,
 	negocioRecordado,
 	ocupacionPendiente,
+	pendientesDesde,
 	peticion,
 	prepararAlmacen,
 	purgar,
 	recordarNegocio,
+	reofrecer,
 	reservaDelEnlace,
 	vivasDelCorreoEnLaAgenda,
+	type FilaPeticion,
+	type ResultadoDeLaMain,
 } from "./agendaWeb.almacen";
 
 /** Reservas vivas por correo, contando las de Turso y las que esperan aquí. */
@@ -66,6 +74,12 @@ export const MAX_RESERVAS_POR_CORREO = 10;
 export const MAX_ALTAS_DIA_NEGOCIO = 200;
 /** Cada cuánto despierta la alarma mientras haya algo guardado. */
 const CADA_ALARMA_MS = 60 * 60_000;
+/** Lo entregado a la Main que no se ve en Turso (ni contesta) en este tiempo se le vuelve a ofrecer. */
+const REOFRECER_TRAS_MS = 60 * 60_000;
+/** Una petición que sigue sin recoger tanto tiempo es una anomalía que mirar (§9). */
+const ATASCADA_TRAS_MS = 72 * 60 * 60_000;
+/** Cuántas peticiones se entregan a la Main de una vez. */
+const MAX_ENTREGA = 50;
 /**
  * Cuánto antes de empezar a leer Turso se mira si otra petición dio un alta por vista
  * (`agendaWeb.almacen.ts::Lectura`). Cubre que la lectura de Turso llegue con algo de retraso.
@@ -168,10 +182,29 @@ export class MotorAgendaWeb {
 
 	constructor(
 		private readonly ctx: DurableObjectState,
-		env: Env,
+		private readonly env: Env,
 	) {
 		prepararAlmacen(ctx.storage.sql);
 		this.leer = (tenantId, fn) => lecturaConHora(env, tenantId, horaDelNegocio, fn);
+	}
+
+	/**
+	 * El empujón a la Main: que venga a recoger (`TenantHub.avisarReservasWeb`). Sin esperarlo y sin
+	 * fallar si no contesta: lo que hay que entregar ya está guardado, y la Main lo recoge igual al
+	 * conectar o cuando la alarma se lo vuelve a ofrecer.
+	 */
+	private avisarALaMain(tenantId: string): void {
+		const hub = this.env.TenantHub.get(this.env.TenantHub.idFromName(tenantId));
+		this.ctx.waitUntil(
+			Promise.resolve()
+				.then(() => hub.avisarReservasWeb())
+				.catch((e: any) => console.warn("[agenda-web] no se ha podido avisar a la Main:", String(e?.message || e))),
+		);
+	}
+
+	/** Un evento a Axiom, retenido más allá de la respuesta (`observability/axiom.ts`). */
+	private anotar(campos: Parameters<typeof reportarReservaWeb>[1]): void {
+		this.ctx.waitUntil(reportarReservaWeb(this.env, campos));
 	}
 
 	private get sql(): SqlStorage {
@@ -309,6 +342,7 @@ export class MotorAgendaWeb {
 		);
 		// ── Fin del bloque ──
 
+		this.avisarALaMain(p.tenantId);
 		await this.asegurarAlarma();
 		return {
 			ok: true,
@@ -378,8 +412,41 @@ export class MotorAgendaWeb {
 			creada_local: ahora,
 			creada_ms: ahoraMs,
 		});
+		this.avisarALaMain(p.tenantId);
 		await this.asegurarAlarma();
 		return { ok: true };
+	}
+
+	/**
+	 * Lo que la Main tiene que registrar, por orden de llegada; pasa a `entregada`. Antes se da por
+	 * visto lo que ya está en Turso, para no volver a entregarlo. Si Turso no contesta se entrega
+	 * igual: registrarlo dos veces no lo duplica.
+	 */
+	async pendientes(p: { tenantId: string }): Promise<{ ok: true } & PendientesReservaWebDto> {
+		recordarNegocio(this.sql, p.tenantId);
+		try {
+			await this.reconciliarConTurso();
+		} catch (e: any) {
+			console.warn("[agenda-web] no se ha podido mirar Turso antes de entregar:", String(e?.message || e));
+		}
+		const { peticiones, hayMas } = entregarPendientes(this.sql, MAX_ENTREGA, Date.now());
+		if (peticiones.length) {
+			this.anotar({ event: "reserva_web_entregada", tenant_id: p.tenantId, cuantas: peticiones.length });
+			// La alarma es la que las vuelve a ofrecer si no llegan a Turso.
+			await this.asegurarAlarma();
+		}
+		return { ok: true, peticiones: peticiones.map(paraLaMain), hay_mas: hayMas };
+	}
+
+	/** Lo que la Main contesta de lo entregado (`agendaWeb.almacen.ts::apuntarResultados`). */
+	async recogidas(p: { tenantId: string; resultados: ResultadoDeLaMain[] }): Promise<{ ok: true; apuntadas: number }> {
+		recordarNegocio(this.sql, p.tenantId);
+		const { apuntadas, fallidas } = apuntarResultados(this.sql, p.resultados, Date.now());
+		for (const f of fallidas) {
+			// El correo al cliente es de la fase 5 (§4.8); hasta entonces queda en el log.
+			this.anotar({ event: "reserva_web_fallida", tenant_id: p.tenantId, id_reserva: f.id_reserva, motivo: f.codigo ?? undefined });
+		}
+		return { ok: true, apuntadas };
 	}
 
 	/** Lo que ve quien abre el enlace. Síncrono. */
@@ -447,13 +514,27 @@ export class MotorAgendaWeb {
 	}
 
 	async alarm(): Promise<void> {
+		let turso = true;
 		try {
 			await this.reconciliarConTurso();
 		} catch (e: any) {
 			// Sin Turso se purga igual; lo que espera se vuelve a mirar en la próxima.
+			turso = false;
 			console.warn("[agenda-web] la alarma no ha podido mirar Turso:", String(e?.message || e));
 		}
-		const quedaAlgo = purgar(this.sql, Date.now());
+		const tenantId = negocioRecordado(this.sql);
+		const ahoraMs = Date.now();
+		// Sólo con lo visto en Turso al día: sin él, se volvería a ofrecer lo que ya llegó.
+		if (turso && tenantId) {
+			const reofrecidas = reofrecer(this.sql, ahoraMs - REOFRECER_TRAS_MS);
+			if (reofrecidas > 0) {
+				this.anotar({ event: "reserva_web_reofrecida", tenant_id: tenantId, cuantas: reofrecidas });
+				this.avisarALaMain(tenantId);
+			}
+			const atascadas = pendientesDesde(this.sql, ahoraMs - ATASCADA_TRAS_MS);
+			if (atascadas > 0) this.anotar({ event: "reserva_web_atascada", tenant_id: tenantId, cuantas: atascadas });
+		}
+		const quedaAlgo = purgar(this.sql, ahoraMs);
 		if (quedaAlgo) await this.ctx.storage.setAlarm(Date.now() + CADA_ALARMA_MS);
 	}
 
@@ -482,7 +563,8 @@ export class MotorAgendaWeb {
 				});
 				return (rs.rows ?? []).map((r: any) => String(r.id));
 			});
-			darPorVistas(this.sql, enTurso, Date.now());
+			const vistas = darPorVistas(this.sql, enTurso, Date.now());
+			if (vistas > 0) this.anotar({ event: "reserva_web_vista", tenant_id: tenantId, cuantas: vistas });
 			// Un lote incompleto es el último: la siguiente alarma vuelve a empezar por la más vieja.
 			cursor = altas.length < MAX_RECONCILIAR ? null : altas[altas.length - 1];
 			if (!cursor) break;
@@ -494,4 +576,24 @@ export class MotorAgendaWeb {
 	negocio(): string | null {
 		return negocioRecordado(this.sql);
 	}
+}
+
+/** Una petición tal como se le entrega a la Main. Sin el hash del correo ni lo interno. */
+function paraLaMain(f: FilaPeticion): PeticionReservaWebDto {
+	let datos: PeticionReservaWebDto["datos"] = null;
+	if (f.tipo === "alta" && f.datos_json) {
+		const d = JSON.parse(f.datos_json);
+		datos = { nombre: d.nombre, email: d.email, telefono: d.telefono, nota: d.nota ?? null };
+	}
+	return {
+		id_peticion: f.id_peticion,
+		tipo: f.tipo,
+		id_reserva: f.id_reserva,
+		id_mesa: f.id_mesa,
+		dia_ymd: f.dia_ymd,
+		hora: f.hora,
+		personas: f.comensales,
+		creada_local: f.creada_local,
+		datos,
+	};
 }

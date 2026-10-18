@@ -21,7 +21,7 @@ describe("TenantHub RPC", () => {
 
 	it("limita el prototipo RPC a las operaciones y callbacks previstos", () => {
 		expect(Object.getOwnPropertyNames(TenantHub.prototype).sort()).toEqual([
-			"constructor", "aplicar", "revocarDispositivo", "avisarEmparejamiento", "fetch", "alarm",
+			"constructor", "aplicar", "revocarDispositivo", "avisarEmparejamiento", "avisarReservasWeb", "fetch", "alarm",
 			"webSocketMessage", "webSocketClose", "webSocketError",
 		].sort());
 	});
@@ -29,6 +29,7 @@ describe("TenantHub RPC", () => {
 	it("revoca y avisa aunque no haya conexiones", async () => {
 		await expect(stub("rpc-sin-sockets").revocarDispositivo("equipo")).resolves.toBeUndefined();
 		await expect(stub("rpc-sin-sockets").avisarEmparejamiento()).resolves.toBeUndefined();
+		await expect(stub("rpc-sin-sockets").avisarReservasWeb()).resolves.toBeUndefined();
 	});
 
 	it("conserva los códigos de rechazo de negocio al cruzar RPC", async () => {

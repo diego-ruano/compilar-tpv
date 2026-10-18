@@ -175,18 +175,29 @@ export function reportarSaludDeSync(
 }
 
 /** Los eventos de la reserva desde la web (docs/estudios/reservas-web.md §9). */
-type EventoReservaWeb = "reserva_web_alta" | "reserva_web_rechazo" | "reserva_web_cancelada";
+type EventoReservaWeb =
+	| "reserva_web_alta"
+	| "reserva_web_rechazo"
+	| "reserva_web_cancelada"
+	// La entrega a la Main, desde la agenda.
+	| "reserva_web_entregada"
+	| "reserva_web_vista"
+	| "reserva_web_reofrecida"
+	| "reserva_web_fallida"
+	| "reserva_web_atascada";
 
 /**
  * Lo que pasa en las rutas públicas de la reserva web. **Sólo ids y motivos**: ni el correo, ni el
  * nombre, ni el teléfono de quien reserva, que no tienen por qué salir de la agenda.
  *
- * La alerta que habilita: muchos `reserva_web_rechazo` con `tope_reservas_negocio` o
- * `limite_reservas_correo` en un negocio es alguien intentando llenarle las mesas.
+ * Las alertas que habilita: muchos `reserva_web_rechazo` con `tope_reservas_negocio` o
+ * `limite_reservas_correo` en un negocio es alguien intentando llenarle las mesas; un
+ * `reserva_web_atascada` es una Main que lleva días sin recoger, y un `reserva_web_fallida`, una
+ * reserva confirmada que el restaurante no tiene.
  */
 export function reportarReservaWeb(
 	env: Env,
-	campos: { event: EventoReservaWeb; tenant_id: string; motivo?: string; id_reserva?: string },
+	campos: { event: EventoReservaWeb; tenant_id: string; motivo?: string; id_reserva?: string; cuantas?: number },
 ): Promise<unknown> {
 	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
 	if (!env.AXIOM_TOKEN || !dataset) return Promise.resolve();
