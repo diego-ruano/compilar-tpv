@@ -67,11 +67,16 @@ async fn recoger(app: &AppHandle) -> AppResult<()> {
     let notifier = state.notifier().await.ok();
     let nube = PairingAdapter::new(dir);
 
-    let resumen = uc::recoger(&nube, repo.as_ref(), notifier.as_deref()).await?;
-    let algo = resumen.registradas + resumen.solapadas + resumen.canceladas + resumen.fallidas;
-    if algo == 0 {
-        return Ok(());
+    let mut resumen = uc::ResumenRecogida::default();
+    let resultado = uc::recoger(&nube, repo.as_ref(), notifier.as_deref(), &mut resumen).await;
+    // Aunque haya fallado a mitad: lo apuntado ya está en la base.
+    if resumen.hay_cambios() {
+        avisar_de_lo_recogido(app, &resumen);
     }
+    resultado
+}
+
+fn avisar_de_lo_recogido(app: &AppHandle, resumen: &uc::ResumenRecogida) {
     tracing::info!(
         target: "tpv::reservas_web",
         registradas = resumen.registradas,
@@ -90,5 +95,4 @@ async fn recoger(app: &AppHandle) -> AppResult<()> {
     );
     // …y que el motor suba ya lo registrado: hasta que llega a Turso, la agenda no lo da por visto.
     app.state::<crate::replicacion::SyncNativo>().despertar.notify_one();
-    Ok(())
 }

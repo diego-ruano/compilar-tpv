@@ -48,13 +48,22 @@ enum Entrada {
     Rota(String),
 }
 
-/// Pide lo pendiente, lo registra y contesta, tanda a tanda.
+impl ResumenRecogida {
+    /// ¿Se ha escrito algo en la base? Entonces hay que refrescar la pantalla y subir el outbox.
+    pub fn hay_cambios(&self) -> bool {
+        self.registradas + self.solapadas + self.canceladas + self.fallidas > 0
+    }
+}
+
+/// Pide lo pendiente, lo registra y contesta, tanda a tanda. Lo hecho se va apuntando en `resumen`
+/// según se guarda: si algo falla a mitad, lo apuntado ya está en la base y quien llama tiene que
+/// enterarse igual (refrescar la pantalla, subir el outbox).
 pub async fn recoger(
     nube: &dyn PairingService,
     repo: &dyn ReservasWebRepository,
     notifier: Option<&dyn Notifier>,
-) -> AppResult<ResumenRecogida> {
-    let mut resumen = ResumenRecogida::default();
+    resumen: &mut ResumenRecogida,
+) -> AppResult<()> {
     for _ in 0..MAX_TANDAS {
         let bruto = nube.tpv_server_post_json("tpv", "/v1/reservas-web/pendientes", json!({})).await?;
         let (entradas, hay_mas) = leer_pendientes(&bruto)?;
@@ -70,7 +79,7 @@ pub async fn recoger(
                     resumen.fallidas += 1;
                     resultados.push(contestar(id, ResultadoRecogidaWeb::Fallida, Some("peticion_invalida")));
                 }
-                Entrada::Valida(p) => match registrar(repo, notifier, &p, &mut resumen).await {
+                Entrada::Valida(p) => match registrar(repo, notifier, &p, resumen).await {
                     Ok(r) => resultados.push(r),
                     Err(e) => {
                         corte = Some(e);
@@ -95,7 +104,7 @@ pub async fn recoger(
             break;
         }
     }
-    Ok(resumen)
+    Ok(())
 }
 
 /// Interpreta `{ ok, peticiones, hay_mas }`, petición a petición: una mal formada no impide
@@ -307,6 +316,7 @@ mod tests {
     struct Nube {
         respuestas: Mutex<VecDeque<Value>>,
         llamadas: Mutex<Vec<(String, Value)>>,
+        falla_al_contestar: bool,
     }
     impl Nube {
         fn con(respuestas: Vec<Value>) -> Self {
@@ -351,6 +361,9 @@ mod tests {
         async fn tpv_server_post_json(&self, _mode: &str, ruta: &str, cuerpo: Value) -> AppResult<Value> {
             self.llamadas.lock().unwrap().push((ruta.to_string(), cuerpo));
             if ruta == "/v1/reservas-web/recogidas" {
+                if self.falla_al_contestar {
+                    return Err(AppError::external("sin red"));
+                }
                 return Ok(json!({ "ok": true }));
             }
             self.respuestas.lock().unwrap().pop_front().ok_or_else(|| AppError::external("sin red"))
@@ -475,7 +488,8 @@ mod tests {
         })));
         let avisos = Avisos::default();
 
-        let resumen = recoger(&nube, &repo, Some(&avisos)).await.unwrap();
+        let mut resumen = ResumenRecogida::default();
+        recoger(&nube, &repo, Some(&avisos), &mut resumen).await.unwrap();
 
         assert_eq!(resumen, ResumenRecogida { registradas: 1, solapadas: 1, canceladas: 1, fallidas: 0 });
         assert_eq!(
@@ -509,7 +523,7 @@ mod tests {
         repo.altas.lock().unwrap().push_back(Ok(AltaWebRegistrada::YaEstaba));
         let avisos = Avisos::default();
 
-        recoger(&nube, &repo, Some(&avisos)).await.unwrap();
+        recoger(&nube, &repo, Some(&avisos), &mut ResumenRecogida::default()).await.unwrap();
 
         assert_eq!(nube.recogidas(), vec![resultado("p-r1", "registrada", None)]);
         assert!(avisos.tipos().is_empty());
@@ -527,7 +541,8 @@ mod tests {
         let repo = Repo::default();
         let avisos = Avisos::default();
 
-        let resumen = recoger(&nube, &repo, Some(&avisos)).await.unwrap();
+        let mut resumen = ResumenRecogida::default();
+        recoger(&nube, &repo, Some(&avisos), &mut resumen).await.unwrap();
 
         assert_eq!(resumen.fallidas, 3);
         assert_eq!(
@@ -559,10 +574,31 @@ mod tests {
             Err(AppError::repository("disco lleno")),
         ]);
 
-        assert!(recoger(&nube, &repo, None).await.is_err());
+        let mut resumen = ResumenRecogida::default();
+        assert!(recoger(&nube, &repo, None, &mut resumen).await.is_err());
 
         assert_eq!(nube.recogidas(), vec![resultado("p-r1", "registrada", None)]);
+        // Lo guardado antes del corte queda apuntado: quien llama refresca la pantalla igual.
+        assert_eq!(resumen.registradas, 1);
+        assert!(resumen.hay_cambios());
         assert_eq!(repo.registradas.lock().unwrap().len(), 2);
+    }
+
+    /// Lo guardado está guardado aunque la respuesta a la agenda no llegue: quien llama tiene que
+    /// saberlo para refrescar la pantalla y subir el outbox.
+    #[tokio::test]
+    async fn si_no_se_puede_contestar_lo_guardado_queda_apuntado() {
+        let nube = Nube { falla_al_contestar: true, ..Nube::con(vec![tanda(vec![alta("r1")], false)]) };
+        let repo = Repo::default();
+        repo.altas.lock().unwrap().push_back(Ok(AltaWebRegistrada::Nueva { solapada: true, mesa: None }));
+        let avisos = Avisos::default();
+
+        let mut resumen = ResumenRecogida::default();
+        assert!(recoger(&nube, &repo, Some(&avisos), &mut resumen).await.is_err());
+
+        assert_eq!(resumen.solapadas, 1);
+        assert!(resumen.hay_cambios());
+        assert_eq!(avisos.tipos(), ["reserva_web_solapada"]);
     }
 
     #[tokio::test]
@@ -575,7 +611,7 @@ mod tests {
             .extend([Ok(CancelacionWeb::NoExiste), Ok(CancelacionWeb::YaNoEstabaViva)]);
         let avisos = Avisos::default();
 
-        recoger(&nube, &repo, Some(&avisos)).await.unwrap();
+        recoger(&nube, &repo, Some(&avisos), &mut ResumenRecogida::default()).await.unwrap();
 
         assert_eq!(
             nube.recogidas(),
@@ -593,16 +629,16 @@ mod tests {
         let repo = Repo::default();
         repo.altas.lock().unwrap().extend([Ok(AltaWebRegistrada::YaEstaba), Ok(AltaWebRegistrada::YaEstaba)]);
 
-        recoger(&nube, &repo, None).await.unwrap();
+        recoger(&nube, &repo, None, &mut ResumenRecogida::default()).await.unwrap();
         assert_eq!(nube.recogidas().len(), 2);
 
         // Sin nada pendiente, ni contesta.
         let vacia = Nube::con(vec![tanda(vec![], false)]);
-        recoger(&vacia, &repo, None).await.unwrap();
+        recoger(&vacia, &repo, None, &mut ResumenRecogida::default()).await.unwrap();
         assert!(vacia.recogidas().is_empty());
 
         // Una respuesta sin lista es un error de la nube, no una lista vacía.
         let rota = Nube::con(vec![json!({ "ok": true })]);
-        assert!(recoger(&rota, &repo, None).await.is_err());
+        assert!(recoger(&rota, &repo, None, &mut ResumenRecogida::default()).await.is_err());
     }
 }
