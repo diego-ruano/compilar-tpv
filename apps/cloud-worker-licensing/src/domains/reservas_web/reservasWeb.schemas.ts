@@ -24,11 +24,18 @@ export const PERSONAS_MAX = 50;
 const largo = (s: string) => [...s].length;
 
 /**
+ * Lo que no es texto cuenta como vacío, igual que en Rust (`as_str()` → vacío). Nunca `String(x)`:
+ * esta entrada viene de internet, y un `{"toString": null}` hace que `String()` lance — un 500 en
+ * vez de un rechazo.
+ */
+const texto = (x: unknown): string => (typeof x === "string" ? x : "");
+
+/**
  * El teléfono sólo con sus cifras (y el `+` del prefijo internacional), o `null` si no lo parece.
  * Espejo de `tpv_domain::reservas_web::normalizar_telefono`.
  */
 export function normalizarTelefono(raw: unknown): string | null {
-	const t = String(raw ?? "").trim();
+	const t = texto(raw).trim();
 	const mas = t.startsWith("+") ? "+" : "";
 	const resto = mas ? t.slice(1) : t;
 	if (!/^[0-9 \-.()]*$/.test(resto)) return null;
@@ -59,10 +66,10 @@ export const altaReservaWebSchema = z
 		const fallo = (campo: string, message: string) =>
 			ctx.addIssue({ code: "custom", path: [campo], message });
 
-		const dia_ymd = normalizarDia(v.dia_ymd);
+		const dia_ymd = normalizarDia(texto(v.dia_ymd));
 		if (!dia_ymd) fallo("dia_ymd", "Formato de día inválido. Esperado YYYY-MM-DD.");
 
-		const hora = horaHHMM(v.hora);
+		const hora = horaHHMM(texto(v.hora));
 		if (!hora) fallo("hora", "Hora inválida. Esperado HH:MM.");
 
 		const personas = typeof v.personas === "number" && Number.isInteger(v.personas) ? v.personas : 0;
@@ -70,20 +77,20 @@ export const altaReservaWebSchema = z
 			fallo("personas", `El número de personas tiene que estar entre 1 y ${PERSONAS_MAX}`);
 		}
 
-		const id_mesa = String(v.id_mesa ?? "").trim();
+		const id_mesa = texto(v.id_mesa).trim();
 		if (!id_mesa) fallo("id_mesa", "Elige una mesa");
 
-		const nombre = String(v.nombre ?? "").trim();
+		const nombre = texto(v.nombre).trim();
 		if (!nombre) fallo("nombre", "Escribe tu nombre");
 		else if (largo(nombre) > NOMBRE_MAX) fallo("nombre", `El nombre no puede pasar de ${NOMBRE_MAX} caracteres`);
 
-		const email = String(v.email ?? "").trim().toLowerCase();
+		const email = texto(v.email).trim().toLowerCase();
 		if (largo(email) > EMAIL_MAX || !isValidEmail(email)) fallo("email", "El correo no es válido");
 
 		const telefono = normalizarTelefono(v.telefono);
 		if (!telefono) fallo("telefono", "El teléfono no es válido");
 
-		const notaLimpia = String(v.nota ?? "").trim();
+		const notaLimpia = texto(v.nota).trim();
 		const nota = notaLimpia.length ? notaLimpia : null;
 		if (nota && largo(nota) > NOTA_MAX) fallo("nota", `La nota no puede pasar de ${NOTA_MAX} caracteres`);
 

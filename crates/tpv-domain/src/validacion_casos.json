@@ -162,6 +162,11 @@
       { "nombre": "teléfono de cinco cifras", "cambios": { "telefono": "12345" }, "acepta": false },
       { "nombre": "sin teléfono", "cambios": { "telefono": "" }, "acepta": false },
       { "nombre": "nota en blanco: sin nota", "cambios": { "nota": "   " }, "acepta": true, "queda": { "nota": null } },
+      { "nombre": "nombre que no es texto (un objeto con toString roto)", "cambios": { "nombre": { "toString": null } }, "acepta": false },
+      { "nombre": "teléfono como número", "cambios": { "telefono": 600112233 }, "acepta": false },
+      { "nombre": "día como objeto", "cambios": { "dia_ymd": { "toString": null } }, "acepta": false },
+      { "nombre": "hora como objeto", "cambios": { "hora": { "toString": null } }, "acepta": false },
+      { "nombre": "nota que no es texto: sin nota", "cambios": { "nota": { "toString": null } }, "acepta": true, "queda": { "nota": null } },
       { "nombre": "nota de 201 letras", "cambios": { "nota": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, "acepta": false }
     ]
   }
