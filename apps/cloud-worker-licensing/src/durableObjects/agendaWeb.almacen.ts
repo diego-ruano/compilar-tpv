@@ -15,7 +15,14 @@
 import type { Ocupacion } from "../domains/reservas_web/disponibilidad";
 import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";
 
-const VERSION_AGENDA = 1;
+/**
+ * La versión del SQLite de la agenda. Una agenda recién creada nace con la última (`ESQUEMA`); a una
+ * que ya existía, `migrar` le añade lo que le falte sin tocar lo que guarda.
+ *
+ *   1. Las tablas de la fase 2: peticiones, enlaces y estado.
+ *   2. `peticiones.resultado` y `peticiones.codigo`: lo que contesta la Main (§5.4).
+ */
+const VERSION_AGENDA = 2;
 
 /** Lo que se queda una petición cerrada (vista, anulada o fallida) antes de borrarse. */
 const RETENCION_CERRADAS_MS = 7 * 86_400_000;
@@ -77,11 +84,31 @@ const ESQUEMA = [
 	`CREATE INDEX IF NOT EXISTS idx_enlaces_reserva ON enlaces(id_reserva);`,
 ];
 
-/** Crea lo que falte. Idempotente: se llama al construir el Durable Object. */
+/** Crea lo que falte y pone al día lo que ya había. Idempotente: se llama al construir el objeto. */
 export function prepararAlmacen(sql: SqlStorage): void {
 	for (const s of ESQUEMA) sql.exec(s);
+	migrar(sql);
+}
+
+function migrar(sql: SqlStorage): void {
+	const fila = sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0] as any;
+	// Sin versión apuntada es una agenda que acaba de nacer con `ESQUEMA`: ya está al día.
+	const version = fila ? Number(fila.valor) : VERSION_AGENDA;
+	if (version < 2) {
+		const columnas = new Set(
+			sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => String(c.name)),
+		);
+		if (!columnas.has("resultado")) {
+			sql.exec(
+				`ALTER TABLE peticiones ADD COLUMN resultado TEXT
+				 CHECK (resultado IS NULL OR resultado IN ('registrada', 'solapada', 'fallida'));`,
+			);
+		}
+		if (!columnas.has("codigo")) sql.exec(`ALTER TABLE peticiones ADD COLUMN codigo TEXT;`);
+	}
 	sql.exec(
-		`INSERT INTO estado (clave, valor) VALUES ('version', ?) ON CONFLICT(clave) DO NOTHING;`,
+		`INSERT INTO estado (clave, valor) VALUES ('version', ?)
+		 ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor WHERE valor <> excluded.valor;`,
 		String(VERSION_AGENDA),
 	);
 }

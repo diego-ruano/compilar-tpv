@@ -18,6 +18,7 @@ import { enLaAgenda, lectorConBarrera, lectorSobre, stubDeLaAgenda } from "./hel
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 import { AgendaWeb } from "../src/durableObjects/agendaWeb";
+import { prepararAlmacen } from "../src/durableObjects/agendaWeb.almacen";
 import { MAX_ALTAS_DIA_NEGOCIO, MAX_RESERVAS_POR_CORREO, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
 
 // Fechas relativas al reloj de verdad: la agenda mira `Date.now()` para caducar los enlaces.
@@ -721,6 +722,44 @@ describe("la entrega a la Main", () => {
 			// Y se le entregan las dos, el alta primero.
 			const entregadas = (await motor.pendientes({ tenantId: T })).peticiones.map((p: any) => p.tipo);
 			expect(entregadas).toEqual(["alta", "cancelacion"]);
+		});
+	});
+	it("una agenda de antes de la entrega se pone al día sin perder lo que guardaba", async () => {
+		await conAgenda("entrega-migracion", async (motor, sql) => {
+			espiar(motor);
+			// La tabla tal como la creaba la versión 1, con una petición ya entregada.
+			sql.exec(`DROP TABLE peticiones;`);
+			sql.exec(
+				`CREATE TABLE peticiones (
+					id_peticion TEXT NOT NULL PRIMARY KEY, tipo TEXT NOT NULL, id_reserva TEXT NOT NULL, id_mesa TEXT,
+					dia_ymd TEXT NOT NULL, hora TEXT NOT NULL, comensales INTEGER NOT NULL, email_hash TEXT, datos_json TEXT,
+					creada_local TEXT NOT NULL, creada_ms INTEGER NOT NULL, estado TEXT NOT NULL, entregada_ms INTEGER,
+					intentos INTEGER NOT NULL DEFAULT 0, cerrada_ms INTEGER
+				);`,
+			);
+			sql.exec(
+				`INSERT INTO peticiones (id_peticion, tipo, id_reserva, id_mesa, dia_ymd, hora, comensales, datos_json,
+				                         creada_local, creada_ms, estado, entregada_ms, intentos)
+				 VALUES ('p1', 'alta', 'r1', 'm2', ?, '21:00', 2, '{"email":"a@b.es"}', ?, 1, 'entregada', 1, 1);`,
+				DIA,
+				AHORA,
+			);
+			sql.exec(`UPDATE estado SET valor = '1' WHERE clave = 'version';`);
+
+			prepararAlmacen(sql);
+			const columnas = sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => c.name);
+			expect(columnas).toEqual(expect.arrayContaining(["resultado", "codigo"]));
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "2" });
+			// Lo que guardaba sigue ahí, y la Main ya puede contestar de ello.
+			const r = await motor.recogidas({
+				tenantId: T,
+				resultados: [{ id_peticion: "p1", resultado: "fallida", codigo: "validation" }],
+			});
+			expect(r.apuntadas).toBe(1);
+			expect(filas(sql)[0]).toMatchObject({ estado: "fallida", codigo: "validation" });
+			// Y volver a prepararla no cambia nada.
+			prepararAlmacen(sql);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
 		});
 	});
 });
