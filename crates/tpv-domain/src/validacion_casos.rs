@@ -14,6 +14,7 @@ use crate::inventario::{
     LoteEdicionEntrada, LoteEntrada, LoteNuevo, LoteUpdate, ProductoEntrada, ProductoUpsert,
 };
 use crate::reservas::{ReservaEntrada, ReservaValidada};
+use crate::reservas_web::{AltaWebEntrada, AltaWebValidada};
 use crate::trabajadores::dia_de_horario;
 
 fn texto(e: &Value, campo: &str) -> String {
@@ -42,6 +43,24 @@ fn reserva(e: &Value) -> Result<Value, String> {
         email: texto_opcional(e, "email"),
     })?;
     Ok(json!({ "dia_ymd": r.dia_ymd, "hora": r.hora }))
+}
+
+/// Reservas desde la web: el alta que manda el widget (docs/estudios/reservas-web.md).
+fn reserva_web(e: &Value) -> Result<Value, String> {
+    let a = AltaWebValidada::validar(AltaWebEntrada {
+        dia_ymd: texto(e, "dia_ymd"),
+        hora: texto(e, "hora"),
+        personas: e["personas"].as_i64().unwrap_or(0),
+        id_mesa: texto(e, "id_mesa"),
+        nombre: texto(e, "nombre"),
+        email: texto(e, "email"),
+        telefono: texto(e, "telefono"),
+        nota: texto_opcional(e, "nota"),
+    })?;
+    Ok(json!({
+        "dia_ymd": a.dia_ymd, "hora": a.hora, "nombre": a.nombre,
+        "email": a.email, "telefono": a.telefono, "nota": a.nota,
+    }))
 }
 
 fn dinero_opcional(e: &Value, campo: &str) -> Option<Dinero> {
@@ -134,6 +153,7 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "horario_alta" => dias_de_horario(entrada, &["fecha"]),
         "horario_copia" => dias_de_horario(entrada, &["from_monday", "to_monday"]),
         "horario_semana" => dias_de_horario(entrada, &["fecha_lunes"]),
+        "reserva_web" => reserva_web(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }

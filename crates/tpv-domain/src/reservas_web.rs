@@ -133,9 +133,103 @@ impl MesaWebValidada {
     }
 }
 
+/// Topes de lo que escribe el visitante en el formulario público: son datos para el restaurante, y
+/// un formulario abierto a internet no puede meter un libro en la base.
+pub const NOMBRE_MAX: usize = 80;
+pub const NOTA_MAX: usize = 200;
+pub const EMAIL_MAX: usize = 254;
+/// Más que esto no es una mesa: es un grupo, y se llama por teléfono.
+pub const PERSONAS_MAX: i64 = 50;
+
+/// El alta de una reserva desde la web, tal como llega del widget.
+#[derive(Debug, Clone)]
+pub struct AltaWebEntrada {
+    pub dia_ymd: String,
+    pub hora: String,
+    pub personas: i64,
+    pub id_mesa: String,
+    pub nombre: String,
+    pub email: String,
+    pub telefono: String,
+    pub nota: Option<String>,
+}
+
+/// El alta ya normalizada. La valida el worker antes de guardarla en la agenda y otra vez la Main al
+/// registrarla, con el mismo criterio (`validacion_casos.json`, dominio `reserva_web`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AltaWebValidada {
+    pub dia_ymd: String,
+    pub hora: String,
+    pub personas: i64,
+    pub id_mesa: String,
+    pub nombre: String,
+    /// En minúsculas: identifica al cliente (`ux_clientes_email`).
+    pub email: String,
+    /// Sólo las cifras, con el `+` delante si lo llevaba.
+    pub telefono: String,
+    pub nota: Option<String>,
+}
+
+/// El teléfono sólo con sus cifras (y el `+` del prefijo internacional), o `None` si no lo parece:
+/// entre 6 y 15 cifras, y como separadores sólo espacios, guiones, puntos y paréntesis.
+pub fn normalizar_telefono(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    let (mas, resto) = match t.strip_prefix('+') {
+        Some(r) => ("+", r),
+        None => ("", t),
+    };
+    if !resto.chars().all(|c| c.is_ascii_digit() || " -.()".contains(c)) {
+        return None;
+    }
+    let cifras: String = resto.chars().filter(char::is_ascii_digit).collect();
+    (6..=15).contains(&cifras.len()).then(|| format!("{mas}{cifras}"))
+}
+
+impl AltaWebValidada {
+    pub fn validar(e: AltaWebEntrada) -> Result<Self, String> {
+        let dia_ymd = crate::fechas::normalizar_dia(&e.dia_ymd).ok_or_else(|| {
+            format!("Formato de día inválido: '{}'. Esperado YYYY-MM-DD.", e.dia_ymd.trim())
+        })?;
+        let hora = crate::reservas::normalize_hora_hhmm(&e.hora)?;
+        if !(1..=PERSONAS_MAX).contains(&e.personas) {
+            return Err(format!("El número de personas tiene que estar entre 1 y {PERSONAS_MAX}"));
+        }
+        let id_mesa = e.id_mesa.trim().to_string();
+        if id_mesa.is_empty() {
+            return Err("Elige una mesa".into());
+        }
+        let nombre = e.nombre.trim().to_string();
+        if nombre.is_empty() {
+            return Err("Escribe tu nombre".into());
+        }
+        if nombre.chars().count() > NOMBRE_MAX {
+            return Err(format!("El nombre no puede pasar de {NOMBRE_MAX} caracteres"));
+        }
+        let email = e.email.trim().to_lowercase();
+        if email.chars().count() > EMAIL_MAX || !crate::login::validate_email_basic(&email) {
+            return Err("El correo no es válido".into());
+        }
+        let telefono = normalizar_telefono(&e.telefono).ok_or("El teléfono no es válido")?;
+        let nota = crate::texto::limpiar_opcional(e.nota);
+        if nota.as_deref().is_some_and(|n| n.chars().count() > NOTA_MAX) {
+            return Err(format!("La nota no puede pasar de {NOTA_MAX} caracteres"));
+        }
+        Ok(AltaWebValidada { dia_ymd, hora, personas: e.personas, id_mesa, nombre, email, telefono, nota })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn el_telefono_se_queda_con_sus_cifras_y_el_prefijo() {
+        assert_eq!(normalizar_telefono(" 600 11 22 33 ").as_deref(), Some("600112233"));
+        assert_eq!(normalizar_telefono("+34 (600) 112-233").as_deref(), Some("+34600112233"));
+        for malo in ["", "12345", "600abc111", "+", "1234567890123456", "600+112233"] {
+            assert_eq!(normalizar_telefono(malo), None, "{malo}");
+        }
+    }
 
     fn entrada(activa: bool, desde: Option<&str>, hasta: Option<&str>) -> MesaWebEntrada {
         MesaWebEntrada {

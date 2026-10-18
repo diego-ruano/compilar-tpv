@@ -41,7 +41,7 @@ function cleanEmailOrNull(v: unknown): string | null {
 
 const MSG_DIA = "dia_ymd invalido";
 
-function normalizeHora(raw: unknown): string {
+export function normalizeHora(raw: unknown): string {
 	const s = String(raw ?? "").trim();
 	const hhmm = s.length >= 5 ? s.slice(0, 5) : "";
 	if (!/^\d{2}:\d{2}$/.test(hhmm)) {

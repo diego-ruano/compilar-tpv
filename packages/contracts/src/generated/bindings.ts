@@ -2741,6 +2741,22 @@ export type ReservaWebActivarInput = {
 	activa: boolean,
 };
 
+/**
+ *  El alta de una reserva desde el widget (`POST /v1/publico/reservas/:clave/reservas`). La valida
+ *  el worker y, al registrarla, la Main: `tpv_domain::reservas_web::AltaWebValidada`, con la tabla
+ *  de casos compartida (`validacion_casos.json`, dominio `reserva_web`).
+ */
+export type ReservaWebAltaInput = {
+	dia_ymd: string,
+	hora: string,
+	personas: number,
+	id_mesa: string,
+	nombre: string,
+	email: string,
+	telefono: string,
+	nota: string | null,
+};
+
 export type ReservaWebCierreInput = {
 	dia_ymd: string,
 	motivo: string | null,

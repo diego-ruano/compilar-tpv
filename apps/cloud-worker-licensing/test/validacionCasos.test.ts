@@ -19,6 +19,7 @@ import {
 	upsertProductoSchema,
 } from "../src/domains/inventario/inventario.schemas";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
+import { altaReservaWebSchema } from "../src/domains/reservas_web/reservasWeb.schemas";
 import {
 	asignacionCreateSchema,
 	copySemanaSchema,
@@ -49,6 +50,7 @@ const VALIDADORES: Record<string, (entrada: Entrada) => Resultado> = {
 	horario_alta: (e) => asignacionCreateSchema.safeParse(e),
 	horario_copia: (e) => copySemanaSchema.safeParse(e),
 	horario_semana: (e) => fechaLunesSchema.safeParse(e),
+	reserva_web: (e) => altaReservaWebSchema.safeParse(e),
 	negocio: (e) => {
 		const r = negocioPatchSchema.safeParse({ patch: e });
 		return r.success ? { success: true, data: r.data.patch } : r;

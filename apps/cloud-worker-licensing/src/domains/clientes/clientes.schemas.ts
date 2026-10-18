@@ -19,7 +19,7 @@ const optStr = z.string().nullish().transform(cleanOptional);
 
 // Misma regla que el dominio Rust (`validate_email_basic`): longitud mínima, contiene
 // '@' y '.', sin espacios. Se mantiene idéntica para no divergir entre Main y worker.
-function isValidEmail(e: string): boolean {
+export function isValidEmail(e: string): boolean {
 	return e.length >= 6 && e.includes("@") && e.includes(".") && !e.includes(" ");
 }
 

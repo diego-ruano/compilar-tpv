@@ -51,6 +51,21 @@ pub struct ReservaWebMesaDto {
     pub hora_hasta: Option<String>,
 }
 
+/// El alta de una reserva desde el widget (`POST /v1/publico/reservas/:clave/reservas`). La valida
+/// el worker y, al registrarla, la Main: `tpv_domain::reservas_web::AltaWebValidada`, con la tabla
+/// de casos compartida (`validacion_casos.json`, dominio `reserva_web`).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ReservaWebAltaInput {
+    pub dia_ymd: String,
+    pub hora: String,
+    pub personas: i64,
+    pub id_mesa: String,
+    pub nombre: String,
+    pub email: String,
+    pub telefono: String,
+    pub nota: Option<String>,
+}
+
 /// Lo que guarda la pantalla para una mesa. Mismos campos que [`ReservaWebMesaDto`].
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ReservaWebMesaInput {

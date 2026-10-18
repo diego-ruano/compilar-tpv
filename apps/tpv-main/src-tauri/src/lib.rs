@@ -2153,6 +2153,8 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         .typ::<tpv_contracts::licensing::ApiSignedHeaders>()
         .typ::<tpv_contracts::licensing::TpvServerSignedHeadersArgs>()
         .typ::<tpv_contracts::notificaciones::CrearNotificacionInput>()
+        // Reservas desde la web: el alta que manda el widget al worker (lo usa su drift-guard).
+        .typ::<tpv_contracts::reservas_web::ReservaWebAltaInput>()
         .typ::<tpv_contracts::socket_handy::AvisoSocketHandy>()
         .typ::<tpv_contracts::sync::SqlStatement>()
         .typ::<tpv_contracts::sync::SyncChange>()

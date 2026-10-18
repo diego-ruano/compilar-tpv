@@ -137,5 +137,32 @@
       { "nombre": "lunes el 30 de febrero", "cambios": { "fecha_lunes": "2026-02-30" }, "acepta": false },
       { "nombre": "lunes con espacios alrededor", "cambios": { "fecha_lunes": " 2026-03-02 " }, "acepta": true, "queda": { "fecha_lunes": "2026-03-02" } }
     ]
+  },
+  "reserva_web": {
+    "base": { "dia_ymd": "2026-11-20", "hora": "21:00", "personas": 2, "id_mesa": "m1", "nombre": "Ana", "email": "ana@correo.es", "telefono": "600 112 233", "nota": null },
+    "casos": [
+      { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "dia_ymd": "2026-11-20", "hora": "21:00", "nombre": "Ana", "email": "ana@correo.es", "telefono": "600112233", "nota": null } },
+      { "nombre": "día imposible", "cambios": { "dia_ymd": "2026-02-30" }, "acepta": false },
+      { "nombre": "día con hora detrás", "cambios": { "dia_ymd": "2026-11-20T21:00:00Z" }, "acepta": true, "queda": { "dia_ymd": "2026-11-20" } },
+      { "nombre": "hora 24:00", "cambios": { "hora": "24:00" }, "acepta": false },
+      { "nombre": "hora con segundos", "cambios": { "hora": "21:00:59" }, "acepta": true, "queda": { "hora": "21:00" } },
+      { "nombre": "cero personas", "cambios": { "personas": 0 }, "acepta": false },
+      { "nombre": "cincuenta personas", "cambios": { "personas": 50 }, "acepta": true },
+      { "nombre": "cincuenta y una personas", "cambios": { "personas": 51 }, "acepta": false },
+      { "nombre": "sin mesa", "cambios": { "id_mesa": "  " }, "acepta": false },
+      { "nombre": "nombre con espacios alrededor", "cambios": { "nombre": "  Ana López " }, "acepta": true, "queda": { "nombre": "Ana López" } },
+      { "nombre": "sin nombre", "cambios": { "nombre": "   " }, "acepta": false },
+      { "nombre": "nombre de 80 letras", "cambios": { "nombre": "ññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññ" }, "acepta": true },
+      { "nombre": "nombre de 81 letras", "cambios": { "nombre": "ñññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññ" }, "acepta": false },
+      { "nombre": "correo en mayúsculas y con espacios", "cambios": { "email": " Ana@Correo.ES " }, "acepta": true, "queda": { "email": "ana@correo.es" } },
+      { "nombre": "correo sin arroba", "cambios": { "email": "ana.correo.es" }, "acepta": false },
+      { "nombre": "sin correo", "cambios": { "email": "" }, "acepta": false },
+      { "nombre": "teléfono con prefijo y guiones", "cambios": { "telefono": "+34 600-112-233" }, "acepta": true, "queda": { "telefono": "+34600112233" } },
+      { "nombre": "teléfono con letras", "cambios": { "telefono": "600abc233" }, "acepta": false },
+      { "nombre": "teléfono de cinco cifras", "cambios": { "telefono": "12345" }, "acepta": false },
+      { "nombre": "sin teléfono", "cambios": { "telefono": "" }, "acepta": false },
+      { "nombre": "nota en blanco: sin nota", "cambios": { "nota": "   " }, "acepta": true, "queda": { "nota": null } },
+      { "nombre": "nota de 201 letras", "cambios": { "nota": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, "acepta": false }
+    ]
   }
 }
