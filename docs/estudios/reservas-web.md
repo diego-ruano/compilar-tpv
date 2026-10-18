@@ -183,9 +183,11 @@ A mano en Turso antes de desplegar la fase 2, y reflejado en
 | `reserva_web_dominios` | `tenant_id`, `origen TEXT` (esquema + host + puerto, p. ej. `https://www.barpepe.es`), `created_at_ms`, `PRIMARY KEY (tenant_id, origen)` |
 | `email_sends` | Columna nueva `tipo TEXT NOT NULL DEFAULT 'pedido'` (`pedido` o `reserva_web`). El tope de 100 diarios de los pedidos cuenta sólo los suyos. Los correos públicos llevan `device_id = 'web'` |
 
-La administración va por `/v1/admin/reservas-web/*` (token de administración, todo a `admin_audit`)
-y por comandos nuevos de `scripts/tpv-license.mjs`: añadir, quitar y listar dominios de un negocio,
-y revocar su clave.
+La administración va por `/v1/admin/reservas-web/:tenantId` (token de administración, todo a
+`admin_audit`; `domains/reservas_web/admin.routes.ts`) y por `pnpm reservas-web:ver`,
+`reservas-web:dominio-poner`, `reservas-web:dominio-quitar` y `reservas-web:revocar-clave`
+(`scripts/tpv-license.mjs`, `--tenant <id> [--origen https://…]`). Un origen es esquema, host y
+puerto, sin ruta: `https`, o `http://localhost` / `http://127.0.0.1` para desarrollar.
 
 ### 3.3 Almacén de la agenda
 

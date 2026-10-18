@@ -26,6 +26,14 @@
 //   pnpm release:lista
 //   pnpm release:promocionar -- --version 1.4.0 [--target windows7] [--arch x86_64]
 //
+// Y la reserva desde la web (docs/estudios/reservas-web.md): las webs donde se puede incrustar el
+// widget de un negocio, y su clave:
+//
+//   pnpm reservas-web:ver            -- --tenant <tenantId>
+//   pnpm reservas-web:dominio-poner  -- --tenant <tenantId> --origen https://www.su-web.es
+//   pnpm reservas-web:dominio-quitar -- --tenant <tenantId> --origen https://www.su-web.es
+//   pnpm reservas-web:revocar-clave  -- --tenant <tenantId>
+//
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
 //   2. Un fichero `.env` en la raíz del repo (gitignoreado) con la línea:
@@ -365,6 +373,41 @@ async function releasePromocionar(args) {
 	console.log(`\n  ✔ ${version} (${target}) pasa a estable: ${quien} la verán en su próxima comprobación.\n`);
 }
 
+/* ── Reservas desde la web: dominios y clave (docs/estudios/reservas-web.md) ── */
+
+function tenantDe(args) {
+	const tenantId = String(args.tenant || "").trim();
+	if (!tenantId) fail("--tenant <tenantId> requerido (sácalo de `pnpm piloto:lista -- --todos`)");
+	return encodeURIComponent(tenantId);
+}
+
+function pintarReservasWeb(res) {
+	console.log(`\n  Negocio  ${res.tenantId}`);
+	if ("clave" in res) console.log(`  Clave    ${res.clave ?? "(ninguna: la crea la Main al pedir el código)"}`);
+	console.log(`  Webs     ${res.dominios.length ? res.dominios.join("\n           ") : "(ninguna: el widget no se puede incrustar)"}\n`);
+}
+
+async function reservasWebVer(args) {
+	pintarReservasWeb(await api("GET", `/v1/admin/reservas-web/${tenantDe(args)}`));
+}
+
+async function reservasWebDominio(args, poner) {
+	const origen = String(args.origen || "").trim();
+	if (!origen) fail("--origen https://www.su-web.es requerido (o http://localhost:<puerto> para desarrollar)");
+	const ruta = `/v1/admin/reservas-web/${tenantDe(args)}/dominios${poner ? "" : "/quitar"}`;
+	const res = await api("POST", ruta, { origen });
+	console.log(poner ? `\n  ✔ ${res.origen} puede incrustar el widget.` : `\n  ✔ ${res.origen} ya no puede incrustarlo.`);
+	pintarReservasWeb(res);
+}
+
+async function reservasWebRevocarClave(args) {
+	const res = await api("POST", `/v1/admin/reservas-web/${tenantDe(args)}/revocar-clave`);
+	console.log(
+		`\n  ✔ Clave ${res.revocada} revocada. En un minuto deja de funcionar en todas partes.\n` +
+			"    El restaurante tiene que volver a pedir el código en Configuración → Reservas y cambiarlo en su web.\n",
+	);
+}
+
 /* ── Entrada ─────────────────────────────────────────────────────────────── */
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -395,6 +438,10 @@ const comandos = {
 	"piloto-lista": pilotoLista,
 	"release-lista": releaseLista,
 	"release-promocionar": releasePromocionar,
+	"reservas-web-ver": reservasWebVer,
+	"reservas-web-dominio-poner": (a) => reservasWebDominio(a, true),
+	"reservas-web-dominio-quitar": (a) => reservasWebDominio(a, false),
+	"reservas-web-revocar-clave": reservasWebRevocarClave,
 };
 
 if (!comandos[cmd]) {
@@ -423,6 +470,12 @@ if (!comandos[cmd]) {
   Versiones (pnpm release:<comando>):
     lista
     promocionar --version <x.y.z> [--target windows7] [--arch x86_64]   (de beta a estable)
+
+  Reservas desde la web (pnpm reservas-web:<comando>):
+    ver             --tenant <tenantId>
+    dominio-poner   --tenant <tenantId> --origen https://www.su-web.es
+    dominio-quitar  --tenant <tenantId> --origen https://www.su-web.es
+    revocar-clave   --tenant <tenantId>
 `);
 	process.exit(1);
 }

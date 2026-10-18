@@ -20,7 +20,7 @@ export function generarClave(): string {
 /** La forma de una clave: el resto no se pregunta a la base. */
 export const CLAVE_RE = /^rw_[A-Za-z0-9_-]{22}$/;
 
-async function claveActivaDelNegocio(db: Sql, tenantId: string): Promise<string | null> {
+export async function claveActivaDelNegocio(db: Sql, tenantId: string): Promise<string | null> {
 	const rs = await db.execute({
 		sql: "SELECT clave FROM reserva_web_claves WHERE tenant_id = ? AND revoked_at_ms IS NULL LIMIT 1;",
 		args: [tenantId],
@@ -87,6 +87,56 @@ export async function dominiosDelNegocio(db: Sql, tenantId: string): Promise<str
 		args: [tenantId],
 	});
 	return (rs.rows ?? []).map((r: any) => String(r.origen));
+}
+
+/**
+ * La clave activa de un negocio, revocada; o `null` si no tenía. La siguiente vez que la Main la
+ * pida se crea otra, y la línea pegada en su web deja de funcionar: hay que cambiarla.
+ */
+export async function revocarClave(db: Sql, tenantId: string, ahoraMs: number): Promise<string | null> {
+	const rs = await db.execute({
+		sql: `UPDATE reserva_web_claves SET revoked_at_ms = ?
+		      WHERE tenant_id = ? AND revoked_at_ms IS NULL RETURNING clave;`,
+		args: [ahoraMs, tenantId],
+	});
+	// En este isolate se nota en el acto; en los demás, al caducar su caché (un minuto).
+	cache.clear();
+	return ((rs.rows?.[0] as any)?.clave as string | undefined) ?? null;
+}
+
+/**
+ * Un origen donde se puede incrustar el widget, como lo compara el navegador en `frame-ancestors`:
+ * esquema, host y puerto, sin ruta. Sólo `https`, salvo `http://localhost` y `http://127.0.0.1`
+ * para desarrollar. `null` si no lo es.
+ */
+export function normalizarOrigen(raw: string): string | null {
+	let url: URL;
+	try {
+		url = new URL(raw.trim());
+	} catch {
+		return null;
+	}
+	const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+	if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return null;
+	if (url.username || url.password || url.search || url.hash || url.pathname !== "/") return null;
+	return url.origin;
+}
+
+export async function ponerDominio(db: Sql, tenantId: string, origen: string, ahoraMs: number): Promise<void> {
+	await db.execute({
+		sql: `INSERT INTO reserva_web_dominios (tenant_id, origen, created_at_ms) VALUES (?, ?, ?)
+		      ON CONFLICT (tenant_id, origen) DO NOTHING;`,
+		args: [tenantId, origen, ahoraMs],
+	});
+}
+
+/** ¿Estaba? */
+export async function quitarDominio(db: Sql, tenantId: string, origen: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `DELETE FROM reserva_web_dominios WHERE tenant_id = ? AND origen = ? RETURNING origen;`,
+		args: [tenantId, origen],
+	});
+	return (rs.rows?.length ?? 0) > 0;
 }
 
 /** Sólo para los tests: un isolate de vitest se reutiliza entre casos. */

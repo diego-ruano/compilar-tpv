@@ -15,6 +15,7 @@
 //   GET|POST /v1/admin/pilotos            → qué negocios son bares piloto (RI-30, abajo)
 //   GET /v1/admin/releases                → las últimas versiones, con su canal
 //   POST /v1/admin/releases/promote       → pasa una versión de beta a stable
+//   /v1/admin/reservas-web/:tenantId      → dominios y clave de la reserva web (`reservas_web/admin.routes.ts`)
 //
 // La clave en claro se devuelve UNA sola vez, en la respuesta del issue: después ya solo existe
 // cifrada. Si el cliente la pierde, se reemite.
@@ -44,6 +45,7 @@ import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import { cuerpo } from "../../lib/validacion";
 import { TARGETS } from "../updates/updates.routes";
+import { reservasWebAdminRoutes } from "../reservas_web/admin.routes";
 import {
 	maxHoras,
 	olvidarInterruptoresCacheados,
@@ -55,6 +57,9 @@ import {
 export const adminRoutes = new Hono<{ Bindings: Env }>();
 
 adminRoutes.use("*", requireAdmin);
+
+// Detrás del mismo `requireAdmin`: el `use("*")` de arriba cubre también lo que se monta aquí.
+adminRoutes.route("/reservas-web", reservasWebAdminRoutes);
 
 /** Las tres duraciones del producto. Un plazo fuera de aquí es un error de tecleo. */
 const TERMS = [1, 3, 12] as const;
