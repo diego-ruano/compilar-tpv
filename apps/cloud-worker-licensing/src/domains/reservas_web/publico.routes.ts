@@ -23,6 +23,7 @@ import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import type { RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
 import { lecturaConHora } from "../../lib/tenantClient";
+import { reportarReservaWeb } from "../../observability/axiom";
 import { consulta, cuerpo } from "../../lib/validacion";
 import { diasAbiertos, horizonte, maxPersonas, motivoDelDia, tramosDelDia } from "./disponibilidad";
 import { horaDelNegocio } from "./horaDelNegocio";
@@ -41,6 +42,17 @@ export const reservasWebPublicoRoutes = new Hono<Ctx>();
 
 function rechazada(c: any, r: RechazoAgenda) {
 	return c.json({ ok: false, error: r.error }, r.status);
+}
+
+/** El evento a Axiom, retenido más allá de la respuesta (ver `observability/axiom.ts`). */
+function anotar(c: any, campos: Parameters<typeof reportarReservaWeb>[1]): void {
+	const envio = reportarReservaWeb(c.env, campos);
+	try {
+		c.executionCtx.waitUntil(envio);
+	} catch {
+		// Sin contexto de ejecución (los tests): perder un evento no tumba la petición.
+		void envio;
+	}
 }
 
 reservasWebPublicoRoutes.get("/:clave/negocio", puertaPublica, async (c) => {
@@ -115,8 +127,13 @@ reservasWebPublicoRoutes.post(
 	cuerpo(altaReservaWebSchema),
 	async (c) => {
 		const alta = c.req.valid("json");
-		const r = await agendaDe(c.env, c.get("tenantId")).reservar({ tenantId: c.get("tenantId"), alta });
-		if (!r.ok) return rechazada(c, r);
+		const tenantId = c.get("tenantId");
+		const r = await agendaDe(c.env, tenantId).reservar({ tenantId, alta });
+		if (!r.ok) {
+			anotar(c, { event: "reserva_web_rechazo", tenant_id: tenantId, motivo: r.error });
+			return rechazada(c, r);
+		}
+		anotar(c, { event: "reserva_web_alta", tenant_id: tenantId, id_reserva: r.id_reserva });
 		// El token del enlace de cancelar NO va en la respuesta: sólo en el correo (fase 5).
 		return c.json({ ok: true, codigo: r.codigo, dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa });
 	},
@@ -131,7 +148,9 @@ reservasWebPublicoRoutes.post("/:clave/reserva", puertaPublica, cuerpo(tokenEnla
 
 reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, cuerpo(tokenEnlaceSchema), async (c) => {
 	const { token } = c.req.valid("json");
-	const r = await agendaDe(c.env, c.get("tenantId")).cancelar({ tenantId: c.get("tenantId"), token });
+	const tenantId = c.get("tenantId");
+	const r = await agendaDe(c.env, tenantId).cancelar({ tenantId, token });
 	if (!r.ok) return rechazada(c, r);
+	anotar(c, { event: "reserva_web_cancelada", tenant_id: tenantId });
 	return c.json({ ok: true });
 });

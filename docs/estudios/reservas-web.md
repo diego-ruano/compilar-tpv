@@ -625,7 +625,9 @@ de su propio origen. No deja variables globales y no hace nada si se carga dos v
 
 - **Eventos en Axiom** (dataset de sync, `service: "tpv-reservas-web"`): `reserva_web_alta`,
   `reserva_web_rechazo` (con el motivo), `reserva_web_entregada`, `reserva_web_vista`,
-  `reserva_web_reofrecida`, `reserva_web_fallida` y `reserva_web_cancelada`.
+  `reserva_web_reofrecida`, `reserva_web_fallida` y `reserva_web_cancelada`. Sólo ids y motivos
+  (`observability/axiom.ts::reportarReservaWeb`). Los de las rutas públicas (alta, rechazo,
+  cancelada) ya salen; los de la entrega llegan con ella (fase 3).
 - **Sentry** en la agenda y en las rutas públicas.
 - **Una anomalía que mirar**: una petición `pendiente` de más de 72 h en un negocio cuya Main se ha
   conectado en las últimas 24 h.

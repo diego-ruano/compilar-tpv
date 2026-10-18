@@ -173,3 +173,30 @@ export function reportarSaludDeSync(
 		return Promise.resolve();
 	}
 }
+
+/** Los eventos de la reserva desde la web (docs/estudios/reservas-web.md §9). */
+type EventoReservaWeb = "reserva_web_alta" | "reserva_web_rechazo" | "reserva_web_cancelada";
+
+/**
+ * Lo que pasa en las rutas públicas de la reserva web. **Sólo ids y motivos**: ni el correo, ni el
+ * nombre, ni el teléfono de quien reserva, que no tienen por qué salir de la agenda.
+ *
+ * La alerta que habilita: muchos `reserva_web_rechazo` con `tope_reservas_negocio` o
+ * `limite_reservas_correo` en un negocio es alguien intentando llenarle las mesas.
+ */
+export function reportarReservaWeb(
+	env: Env,
+	campos: { event: EventoReservaWeb; tenant_id: string; motivo?: string; id_reserva?: string },
+): Promise<unknown> {
+	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
+	if (!env.AXIOM_TOKEN || !dataset) return Promise.resolve();
+
+	try {
+		return ingestToAxiom(env, dataset, [
+			{ _time: new Date().toISOString(), service: "tpv-reservas-web", ...campos },
+		]);
+	} catch {
+		/* nunca afecta a la respuesta */
+		return Promise.resolve();
+	}
+}

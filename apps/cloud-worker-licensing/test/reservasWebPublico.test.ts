@@ -38,6 +38,20 @@ vi.mock("../src/lib/tenantClient", async (importOriginal) => {
 	return { ...original, lecturaConHora: (_env: any, t: string, _hora: any, fn: any) => enCurso!.leer(t, fn) };
 });
 
+/** Los eventos que se mandarían a Axiom. */
+const eventos: any[] = [];
+
+vi.mock("../src/observability/axiom", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/observability/axiom")>();
+	return {
+		...original,
+		reportarReservaWeb: (_env: any, campos: any) => {
+			eventos.push(campos);
+			return Promise.resolve();
+		},
+	};
+});
+
 vi.mock("../src/durableObjects/agendaWeb", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/durableObjects/agendaWeb")>();
 	return { ...original, agendaDe: () => enCurso!.motor };
@@ -218,12 +232,18 @@ describe("las rutas públicas de la reserva web", () => {
 			expect(Object.keys(json).sort()).toEqual(["codigo", "dia", "hora", "mesa", "ok", "personas"]);
 			expect(json).toMatchObject({ ok: true, dia: DIA, hora: "21:00", personas: 2, mesa: "2" });
 			expect(json.codigo).toMatch(/^[0-9A-F]{6}$/);
+			// A Axiom, el id y nada de quien reserva.
+			const alta = eventos.find((e) => e.event === "reserva_web_alta");
+			expect(Object.keys(alta).sort()).toEqual(["event", "id_reserva", "tenant_id"]);
+			for (const p of PERSONALES) expect(JSON.stringify(eventos)).not.toContain(p);
 
 			expect((await pedir(`/disponibles?dia=${DIA}&hora=21:00&personas=2`)).json.mesas).toEqual(["m4"]);
+			eventos.length = 0;
 			expect(await pedir("/reservas", { ...ALTA, email: "otro@correo.es" })).toMatchObject({
 				status: 409,
 				json: { ok: false, error: "mesa_no_disponible" },
 			});
+			expect(eventos).toEqual([{ event: "reserva_web_rechazo", tenant_id: "t1", motivo: "mesa_no_disponible" }]);
 		});
 	});
 
