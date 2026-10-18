@@ -4,14 +4,15 @@
 //! Configuración: exigen Administrador. Las mesas, quien edita el plano. Sólo existe en la Main
 //! (`reservas_web_repo`).
 
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use tpv_application::use_cases::reservas_web as uc;
 use tpv_contracts::errors::AppErrorDto;
 use tpv_contracts::reservas_web::{
-    AjustesReservaWebDto, ReservaWebActivarInput, ReservaWebCierreInput, ReservaWebMesaDto,
-    ReservaWebMesaInput, ReservaWebQuitarCierreInput,
+    AjustesReservaWebDto, ClaveReservaWebDto, ReservaWebActivarInput, ReservaWebCierreInput,
+    ReservaWebMesaDto, ReservaWebMesaInput, ReservaWebQuitarCierreInput,
 };
+use tpv_infra_licensing::PairingAdapter;
 
 use crate::{AppState, ADMIN};
 
@@ -54,6 +55,21 @@ pub async fn reserva_web_quitar_cierre(
     state.exigir_rol(&[ADMIN]).await?;
     let repo = state.reservas_web_repo().await?;
     Ok(uc::quitar_cierre(repo.as_ref(), args).await?)
+}
+
+/// La línea que se pega en la web del negocio, con su clave pública (la crea el worker si no
+/// tiene). Hace falta conexión: la clave vive en la nube.
+#[tauri::command]
+#[specta::specta]
+pub async fn reserva_web_clave(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ClaveReservaWebDto, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+    // Sólo en la Main: la clave se pide con la firma del equipo principal.
+    state.reservas_web_repo().await?;
+    let dir = app.path().app_data_dir().map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    Ok(uc::clave_para_la_web(&PairingAdapter::new(dir)).await?)
 }
 
 /// Qué mesas se pueden reservar desde la web y cuándo. Se configura en el editor del plano, así

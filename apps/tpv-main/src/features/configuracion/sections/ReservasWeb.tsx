@@ -24,6 +24,67 @@ function fechaLarga(ymd: string): string {
 	});
 }
 
+/**
+ * La línea que se pega en la web del negocio. Se pide a la nube al pulsar (la clave vive allí, y
+ * la crea si el negocio todavía no tiene): sin conexión no hay código.
+ */
+function CodigoParaLaWeb() {
+	const [codigo, setCodigo] = useState<string | null>(null);
+	const [pidiendo, setPidiendo] = useState(false);
+	const [copiado, setCopiado] = useState(false);
+
+	async function pedir() {
+		setPidiendo(true);
+		try {
+			setCodigo((await commands.reservaWebClave()).codigo);
+		} finally {
+			setPidiendo(false);
+		}
+	}
+
+	async function copiar() {
+		if (!codigo) return;
+		await navigator.clipboard.writeText(codigo);
+		setCopiado(true);
+	}
+
+	return (
+		<div>
+			<div className="text-sm font-semibold text-fg">Código para tu web</div>
+			<p className="mt-1 text-xs text-fg-muted">
+				Se pega una vez en la página de reservas de la web. Lo que cambies aquí llega a la web
+				solo, sin tocarla.
+			</p>
+			{codigo ? (
+				<div className="mt-3 flex flex-col gap-2">
+					<textarea
+						readOnly
+						aria-label="Código para tu web"
+						value={codigo}
+						rows={3}
+						onFocus={(e) => e.currentTarget.select()}
+						className="w-full resize-none rounded-xl border border-border bg-surface-2 px-3 py-2 font-mono text-xs text-fg outline-none"
+					/>
+					<div>
+						<PrimaryButton onClick={conAviso(copiar, "No se ha podido copiar el código")}>
+							{copiado ? "Copiado" : "Copiar"}
+						</PrimaryButton>
+					</div>
+				</div>
+			) : (
+				<div className="mt-3">
+					<GhostButton
+						onClick={conAviso(pedir, "No se ha podido obtener el código para la web")}
+						disabled={pidiendo}
+					>
+						{pidiendo ? "Pidiendo…" : "Ver el código"}
+					</GhostButton>
+				</div>
+			)}
+		</div>
+	);
+}
+
 export function ReservasWeb({ inputTone }: { inputTone: string }) {
 	const [estado, setEstado] = useState<"cargando" | "listo" | "error">("cargando");
 	const [error, setError] = useState("");
@@ -112,6 +173,8 @@ export function ReservasWeb({ inputTone }: { inputTone: string }) {
 						label="Aceptar reservas desde la web"
 						description="Apagado, no entra ninguna reserva desde la web."
 					/>
+
+					<CodigoParaLaWeb />
 
 					<div>
 						<div className="text-sm font-semibold text-fg">Días cerrados</div>

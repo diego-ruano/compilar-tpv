@@ -1,9 +1,12 @@
 //! Casos de uso de la reserva desde la web (docs/estudios/reservas-web.md).
 
+use serde_json::{json, Value as JsonValue};
 use tpv_contracts::reservas_web::{
-    AjustesReservaWebDto, ReservaWebActivarInput, ReservaWebCierreInput, ReservaWebMesaDto,
-    ReservaWebMesaInput, ReservaWebQuitarCierreInput,
+    AjustesReservaWebDto, ClaveReservaWebDto, ReservaWebActivarInput, ReservaWebCierreInput,
+    ReservaWebMesaDto, ReservaWebMesaInput, ReservaWebQuitarCierreInput,
 };
+
+use crate::ports::licensing::PairingService;
 use tpv_domain::reservas_web::{zona_por_desfases, CierreValidado, MesaWebEntrada, MesaWebValidada};
 
 use crate::error::{AppError, AppResult};
@@ -57,6 +60,24 @@ pub async fn quitar_cierre(
         return Err(AppError::validation("Falta el día que se quiere abrir"));
     }
     repo.quitar_cierre(id).await
+}
+
+/// La clave pública del negocio y la línea que se pega en su web. La da el worker, que la crea si el
+/// negocio todavía no tiene (`POST /v1/reservas-web/clave`, firmada con la clave de este equipo).
+pub async fn clave_para_la_web(nube: &dyn PairingService) -> AppResult<ClaveReservaWebDto> {
+    let bruto = nube.tpv_server_post_json("tpv", "/v1/reservas-web/clave", json!({})).await?;
+    leer_clave(&bruto)
+}
+
+/// Interpreta `{ ok, clave, codigo }`.
+pub fn leer_clave(bruto: &JsonValue) -> AppResult<ClaveReservaWebDto> {
+    let campo = |k: &str| {
+        bruto.get(k).and_then(JsonValue::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+    };
+    match (campo("clave"), campo("codigo")) {
+        (Some(clave), Some(codigo)) => Ok(ClaveReservaWebDto { clave, codigo }),
+        _ => Err(AppError::external("La nube no ha devuelto el código para la web")),
+    }
 }
 
 /// La configuración web de las mesas del plano.
@@ -192,6 +213,15 @@ mod tests {
         }
         assert_eq!(*repo.zona.lock().unwrap(), "Atlantic/Canary");
         assert_eq!(repo.escrituras(), 0);
+    }
+
+    #[test]
+    fn la_clave_se_lee_de_la_respuesta_del_worker() {
+        let ok = leer_clave(&json!({ "ok": true, "clave": "rw_x", "codigo": "<div></div>" })).unwrap();
+        assert_eq!((ok.clave.as_str(), ok.codigo.as_str()), ("rw_x", "<div></div>"));
+        for mala in [json!({ "ok": true }), json!({ "clave": "rw_x", "codigo": "  " }), json!(null)] {
+            assert!(matches!(leer_clave(&mala), Err(AppError::External(_))), "{mala}");
+        }
     }
 
     #[tokio::test]

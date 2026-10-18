@@ -537,6 +537,12 @@ export type CierreResumenDto = {
 	rect_descuadre: Dinero | null,
 };
 
+/**  La clave pública del negocio y la línea que se pega en su web (`POST /v1/reservas-web/clave`). */
+export type ClaveReservaWebDto = {
+	clave: string,
+	codigo: string,
+};
+
 /**  Las claves de una tabla en la nube (SYNC-25). */
 export type ClavesTabla = {
 	nombre: string,

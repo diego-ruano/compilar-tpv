@@ -50,6 +50,7 @@ import { mesasRoutes } from "./domains/mesas/mesas.routes";
 import { notificacionesRoutes } from "./domains/notificaciones/notificaciones.routes";
 import { proveedoresRoutes } from "./domains/proveedores/proveedores.routes";
 import { reservasRoutes } from "./domains/reservas/reservas.routes";
+import { reservasWebMainRoutes } from "./domains/reservas_web/main.routes";
 import { statsRoutes } from "./domains/stats/stats.routes";
 import { syncRoutes } from "./domains/sync/sync.routes";
 import { wsRoutes } from "./domains/ws/ws.routes";
@@ -184,6 +185,8 @@ app.route("/v1/mesas", mesasRoutes);
 app.route("/v1/notificaciones", notificacionesRoutes);
 app.route("/v1/proveedores", proveedoresRoutes);
 app.route("/v1/reservas", reservasRoutes);
+// Reservas desde la web (docs/estudios/reservas-web.md): lo que pide la Main.
+app.route("/v1/reservas-web", reservasWebMainRoutes);
 app.route("/v1/stats", statsRoutes);
 app.route("/v1/sync", syncRoutes);
 app.route("/v1/ws", wsRoutes);

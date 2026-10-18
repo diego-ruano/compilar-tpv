@@ -51,6 +51,13 @@ pub struct ReservaWebMesaDto {
     pub hora_hasta: Option<String>,
 }
 
+/// La clave pública del negocio y la línea que se pega en su web (`POST /v1/reservas-web/clave`).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ClaveReservaWebDto {
+    pub clave: String,
+    pub codigo: String,
+}
+
 /// El alta de una reserva desde el widget (`POST /v1/publico/reservas/:clave/reservas`). La valida
 /// el worker y, al registrarla, la Main: `tpv_domain::reservas_web::AltaWebValidada`, con la tabla
 /// de casos compartida (`validacion_casos.json`, dominio `reserva_web`).

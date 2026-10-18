@@ -1,8 +1,10 @@
 -- ============================================================================================
 -- Esquema de la base CENTRAL (control-plane) de `tpv-api`, tal como está en producción.
 --
--- Foto tomada el 2026-09-16, más los cambios de RI-52 (2026-10-04: varias licencias por compra) y
--- de RI-68, RI-73 y RI-30 (2026-10-07: `license_otp_eventos`, `canario_cifrado` y `tenants.piloto`).
+-- Foto tomada el 2026-09-16, más los cambios de RI-52 (2026-10-04: varias licencias por compra), de
+-- RI-68, RI-73 y RI-30 (2026-10-07: `license_otp_eventos`, `canario_cifrado` y `tenants.piloto`) y
+-- de la reserva web (2026-10-18: `reserva_web_claves` y `reserva_web_dominios`; hay que crearlas en
+-- Turso antes de desplegar el worker que las usa).
 -- Es la única referencia de esta base en el repo.
 --
 -- La estructura de esta base NO se toca desde el código: el worker no crea ni altera tablas. Se
@@ -358,4 +360,32 @@ CREATE TABLE canario_cifrado (
   id         INTEGER PRIMARY KEY CHECK (id = 1),
   valor      TEXT NOT NULL,
   creado_ms  INTEGER NOT NULL
+);
+
+
+-- ── Reservas desde la web (docs/estudios/reservas-web.md) ─────────────────────────────────────
+-- La clave pública de cada negocio: la que va en la línea que se pega en su web. Es pública a
+-- propósito (sólo deja ver huecos y reservar) y se puede revocar; una activa por negocio, que es lo
+-- que fija el índice único parcial. La genera la Main (`POST /v1/reservas-web/clave`).
+
+CREATE TABLE reserva_web_claves (
+  clave          TEXT PRIMARY KEY,
+  tenant_id      TEXT NOT NULL,
+  created_at_ms  INTEGER NOT NULL,
+  revoked_at_ms  INTEGER,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX ux_reserva_web_claves_activa ON reserva_web_claves(tenant_id) WHERE revoked_at_ms IS NULL;
+
+-- Las webs donde se puede incrustar el widget de cada negocio (`frame-ancestors`): el origen tal
+-- como lo manda el navegador (esquema, host y puerto, sin barra final). Las gestiona el proveedor,
+-- no el bar.
+
+CREATE TABLE reserva_web_dominios (
+  tenant_id      TEXT NOT NULL,
+  origen         TEXT NOT NULL,
+  created_at_ms  INTEGER NOT NULL,
+  PRIMARY KEY (tenant_id, origen),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id) ON DELETE CASCADE
 );
