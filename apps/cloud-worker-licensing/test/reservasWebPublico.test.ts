@@ -188,6 +188,7 @@ describe("las rutas públicas de la reserva web", () => {
 		await conNegocio("publico-plano", async () => {
 			const { json, res } = await pedir("/plano");
 			expect(res.headers.get("Cache-Control")).toBe("public, max-age=60");
+			expect(json.completo).toBe(true);
 			expect(json.salones).toEqual([{ id: "z1", nombre: "Salon", puntos: "[[0,0],[10,0]]" }]);
 			expect(json.mesas.map((m: any) => [m.id, m.reservable])).toEqual([
 				["m2", true],
@@ -207,6 +208,22 @@ describe("las rutas públicas de la reserva web", () => {
 				capacidad: 2,
 				reservable: true,
 			});
+		});
+	});
+
+	it("GET /plano: con más mesas de las que caben, lo dice en vez de cortar en silencio", async () => {
+		await conNegocio("publico-plano-techo", async (sql) => {
+			for (let i = 0; i < 500; i++) {
+				sql.exec(
+					`INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+					 VALUES (?, 'z1', ?, 2, 0, 0, 'rect', 80, 80);`,
+					`x${i}`,
+					`x${i}`,
+				);
+			}
+			const { json } = await pedir("/plano");
+			expect(json.completo).toBe(false);
+			expect(json.mesas).toHaveLength(500);
 		});
 	});
 

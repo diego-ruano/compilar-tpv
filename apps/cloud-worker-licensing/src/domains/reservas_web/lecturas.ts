@@ -202,8 +202,16 @@ export async function reservasVivasDelCorreo(db: Client, email: string, hoy: str
 	return new Set(filas(rs).map((r) => String(r.id_reserva)));
 }
 
+/**
+ * El techo del plano, en la respuesta entera (CLAUDE.md, «Worker»): es una ruta anónima. Ningún bar
+ * se acerca; si alguno pasa, `completo` lo dice en vez de cortar el plano en silencio.
+ */
+const TECHO_SALONES = 50;
+const TECHO_MESAS = 500;
+
 /** El plano tal como lo dibuja el widget: salones y mesas, sin nada de las reservas. */
 export type PlanoPublico = {
+	completo: boolean;
 	salones: { id: string; nombre: string; puntos: string }[];
 	mesas: {
 		id: string;
@@ -224,7 +232,7 @@ export async function planoPublico(db: Client): Promise<PlanoPublico> {
 	const [rsZonas, rsMesas] = await db.batch(
 		[
 			`SELECT ID_Zona AS id, Nombre_Zona AS nombre, Room_Points AS puntos
-			 FROM Zonas WHERE Archivada_En IS NULL ORDER BY Nombre_Zona, ID_Zona;`,
+			 FROM Zonas WHERE Archivada_En IS NULL ORDER BY Nombre_Zona, ID_Zona LIMIT ${TECHO_SALONES + 1};`,
 			`SELECT M.ID_Mesa AS id, M.ID_Zona AS id_salon, M.Numero_Mesa AS numero, M.Shape AS forma,
 			        M.Ubicacion_X AS x, M.Ubicacion_Y AS y, M.Width AS ancho, M.Height AS alto,
 			        M.Radius AS radio, M.Capacidad AS capacidad,
@@ -232,13 +240,16 @@ export async function planoPublico(db: Client): Promise<PlanoPublico> {
 			          AND EXISTS (SELECT 1 FROM Reserva_Web_Franjas F WHERE F.ID_Mesa = M.ID_Mesa) AS reservable
 			 FROM Mesas M JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona
 			 WHERE M.Archivada_En IS NULL AND Z.Archivada_En IS NULL
-			 ORDER BY M.ID_Zona, M.ID_Mesa;`,
+			 ORDER BY M.ID_Zona, M.ID_Mesa LIMIT ${TECHO_MESAS + 1};`,
 		],
 		"read",
 	);
+	const zonas = filas(rsZonas);
+	const mesas = filas(rsMesas);
 	return {
-		salones: filas(rsZonas).map((z) => ({ id: String(z.id), nombre: String(z.nombre), puntos: String(z.puntos ?? "[]") })),
-		mesas: filas(rsMesas).map((m) => ({
+		completo: zonas.length <= TECHO_SALONES && mesas.length <= TECHO_MESAS,
+		salones: zonas.slice(0, TECHO_SALONES).map((z) => ({ id: String(z.id), nombre: String(z.nombre), puntos: String(z.puntos ?? "[]") })),
+		mesas: mesas.slice(0, TECHO_MESAS).map((m) => ({
 			id: String(m.id),
 			id_salon: String(m.id_salon),
 			numero: String(m.numero),

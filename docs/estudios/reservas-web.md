@@ -257,7 +257,7 @@ necesitan cabeceras CORS y no hay que abrirlas a ningún origen.
 |---|---|---|
 | `GET /negocio` | Turso | Nombre, dirección, teléfono y logo; responsable para el aviso de privacidad (`Razon_Social`, `CIF`); hoy en la hora del negocio; primer y último día reservables; días abiertos del horizonte (con alguna franja y sin cierre); máximo de personas (la mayor capacidad reservable); duración; la clave pública de Turnstile |
 | `GET /dia?dia=` | Turso | Los tramos de hora de llegada válidos ese día (la unión de las franjas, con la tolerancia y la duración) |
-| `GET /plano` | Turso | Salones (id, nombre, `Room_Points`) y mesas (id, número, forma, posición, tamaño, capacidad, si es reservable). Caché corta |
+| `GET /plano` | Turso | Salones (id, nombre, `Room_Points`) y mesas (id, número, forma, posición, tamaño, capacidad, si es reservable). Caché corta. Con techo (50 salones, 500 mesas) y `completo` para decir si lo ha alcanzado |
 | `GET /disponibles?dia=&hora=&personas=` | Agenda | Las mesas libres y adecuadas. Si no hay ninguna, `alternativas`: hasta 4 horas a ±15, 30, 45 y 60 minutos que sí tienen mesa |
 | `POST /reservas` | Agenda | `{ codigo, dia, hora, personas, mesa }`. El token del enlace sólo viaja en el correo |
 | `POST /reserva` `{ token }` | Agenda y Turso | El resumen para la página de cancelar: día, hora, personas, mesa, estado y si aún se puede cancelar |
@@ -289,7 +289,10 @@ mismo.
   `pendientes` y `recogidas` (para las rutas de la Main). Los errores de negocio cruzan como resultado
   tipado, igual que `ResultadoAplicacion`.
 - **Lee Turso** con el mismo resolutor de credenciales que el REST, y fija `'now'` con la hora local
-  del negocio (`Zona_Horaria`), con la misma reescritura que `tenantQuery`.
+  del negocio (`Zona_Horaria`), con la misma reescritura que `tenantQuery` (`lecturaConHora`). Como
+  toda lectura REST, pasa por el guard de migraciones (`ensureTenantMigrated`): si el esquema del
+  negocio va atrasado, lo pone al día quien llegue primero. Eso es esquema, no datos del negocio, y
+  no rompe la regla de que la agenda no escribe en Turso.
 - **Sin estado en campos de instancia que importe ni variables de módulo con estado**, por las mismas
   razones que el `TenantHub` ([sincronizacion.md](../arquitectura/sincronizacion.md#hibernación-del-durable-object-sync-16)).
 - **Una sola alarma**, que se reprograma mientras haya algo que hacer: volver a ofrecer las
