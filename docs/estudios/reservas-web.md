@@ -196,7 +196,7 @@ pasa por las migraciones).
 
 | Tabla | Columnas |
 |---|---|
-| `peticiones` | `id_peticion` (UUIDv7), `tipo` (`alta` o `cancelacion`; una de cada como mucho por reserva), `id_reserva`, `id_mesa`, `dia_ymd`, `hora`, `comensales`, `email_hash` (SHA-256 del correo en minúsculas, para contar sin leer `datos_json`), `datos_json` (nombre, correo, teléfono y nota; sólo en un alta), `creada_local` (instante del negocio, §4.3), `creada_ms`, `estado` (`pendiente`, `entregada`, `vista`, `fallida`, `anulada`), `entregada_ms`, `intentos`, `cerrada_ms` (cuándo pasó a `vista`, `fallida` o `anulada`; de ahí cuentan los 7 días) |
+| `peticiones` | `id_peticion` (UUIDv7), `tipo` (`alta` o `cancelacion`; una de cada como mucho por reserva), `id_reserva`, `id_mesa`, `dia_ymd`, `hora`, `comensales`, `email_hash` (SHA-256 del correo en minúsculas, para contar sin leer `datos_json`), `datos_json` (nombre, correo, teléfono y nota; sólo en un alta), `creada_local` (instante del negocio, §4.3), `creada_ms`, `estado` (`pendiente`, `entregada`, `vista`, `fallida`, `anulada`), `entregada_ms`, `intentos`, `cerrada_ms` (cuándo pasó a `vista`, `fallida` o `anulada`; de ahí cuentan los 7 días), `resultado` y `codigo` (lo que contestó la Main, §5.4) |
 | `enlaces` | `token_hash` (SHA-256 del token del enlace de cancelar), `id_reserva`, `caduca_ms` |
 | `estado` | Clave y valor: la versión del esquema de la agenda |
 
@@ -207,8 +207,20 @@ Ciclo de una petición:
   `pendientes` y en la alarma). Al pasar a `vista` se borra `datos_json` y, a los 7 días, la fila.
 - `entregada` sin aparecer en Turso en una hora → vuelve a `pendiente`. La Main la registra otra vez
   sin duplicarla (el `INSERT` es idempotente por `ID_Reserva`); cubre una Main que perdió su base o
-  un outbox atascado.
-- `fallida` (la Main no pudo registrarla) → correo al cliente y se borra `datos_json`.
+  un outbox atascado. Sólo si la alarma ha podido mirar Turso: sin él no sabría qué ha llegado.
+- Una cancelación sigue el mismo ciclo, pero está hecha (`vista`) cuando Turso tiene la reserva
+  cancelada (o terminada), no cuando la Main dice que la ha cancelado: hasta que su outbox sube, eso
+  sólo existe en su base. Se entrega con su alta delante mientras el alta no se haya visto en Turso
+  (la Main pudo no recibirla).
+- `fallida` (la Main no pudo registrarla) → de `datos_json` queda sólo el correo, para el correo al
+  cliente (fase 5), y se va con la fila a los 7 días.
+- Un alta sólo se anula en la agenda si nunca se entregó (`intentos = 0`); una que vuelve a estar
+  `pendiente` porque se reofrece puede estar ya en la Main, y lleva una cancelación.
+- La alarma, cada hora mientras quede algo: da por visto lo que ya está en Turso (por lotes, con un
+  cursor por tipo en `estado`), reofrece, vuelve a avisar a la Main si queda algo `pendiente`, apunta
+  en Axiom lo que lleva tres días sin recoger y purga.
+- El SQLite de la agenda tiene su versión en `estado` (`VERSION_AGENDA`, hoy la 2): una agenda vieja
+  se pone al día al construirse el objeto (`agendaWeb.almacen.ts::migrar`).
 - `pendiente` → `anulada` si el cliente la cancela antes de que la Main la recoja: se borra
   `datos_json` y la mesa queda libre en el acto.
 - Los enlaces caducan un día después de la reserva (con margen por la zona: 36 h desde su hora).
@@ -474,8 +486,19 @@ En el motor de réplica (`use_cases/replicacion.rs`), no como job periódico:
 - Al recibir `{"type":"reservas_web"}` en `atender`.
 
 Cada vez: `POST /v1/reservas-web/pendientes` → registrar cada petición en orden (§5.5) →
-`POST /v1/reservas-web/recogidas`. Las escrituras salen por el outbox en la vuelta siguiente del
-motor. Durante una recuperación no se recoge nada (el cerrojo de `Db` lo impediría igualmente).
+`POST /v1/reservas-web/recogidas`, de 50 en 50 mientras haya más. Durante una recuperación no se
+recoge nada (el cerrojo de `Db` lo impediría igualmente).
+
+El motor sólo la pide (`ContextoReplicacion::reservas_web`): corre en segundo plano y de una en una
+(`src-tauri/src/reservas_web.rs`), sin retener el bucle del socket. Al acabar, aunque sea con un
+error a mitad, recarga en la pantalla las reservas, los clientes y los avisos (`sync:cambio`) y
+despierta al motor para que suba ya lo registrado. El caso de uso es
+`tpv-application/src/use_cases/reservas_web_recogida.rs`.
+
+Un fallo de la base (ocupada, en recuperación, el disco) corta la tanda **sin dar nada por
+fallido**: se contesta lo hecho y el resto se lo vuelve a ofrecer la agenda. `fallida` es sólo lo
+que no se puede guardar por sí mismo (un dato imposible, `validation`; sin datos, `sin_datos`; una
+petición mal formada, `peticion_invalida`), porque le manda un correo al cliente.
 
 ### 5.5 Registrar una reserva web
 
@@ -493,7 +516,9 @@ Un caso de uso propio (`tpv-application/src/use_cases/reservas_web.rs`), no `res
     prohibidos los solapes, y el resultado es `solapada`.
   - Vuelve a validar con `tpv-domain`. Lo que no pase (un bug, un dato imposible) es `fallida`, con su
     código.
-- **Cancelación:** `Estado = 'CANCELADA'` si estaba `PROXIMA` o `ACTIVA`. Idempotente.
+- **Cancelación:** `Estado = 'CANCELADA'` si estaba `PROXIMA` o `ACTIVA`, sólo en una de
+  `Origen = 'WEB'`. Idempotente: una ya cancelada o terminada es `registrada`; una que la Main no
+  tiene es `fallida` (`reserva_inexistente`), para que no se le vuelva a ofrecer cada hora.
 
 Notificaciones (a los administradores, como la de «Nueva reserva»):
 
@@ -629,12 +654,13 @@ de su propio origen. No deja variables globales y no hace nada si se carga dos v
 
 - **Eventos en Axiom** (dataset de sync, `service: "tpv-reservas-web"`): `reserva_web_alta`,
   `reserva_web_rechazo` (con el motivo), `reserva_web_entregada`, `reserva_web_vista`,
-  `reserva_web_reofrecida`, `reserva_web_fallida` y `reserva_web_cancelada`. Sólo ids y motivos
-  (`observability/axiom.ts::reportarReservaWeb`). Los de las rutas públicas (alta, rechazo,
-  cancelada) ya salen; los de la entrega llegan con ella (fase 3).
+  `reserva_web_reofrecida`, `reserva_web_fallida`, `reserva_web_cancelada` y
+  `reserva_web_atascada`. Sólo ids, cuántas y motivos (`observability/axiom.ts::reportarReservaWeb`):
+  los de las rutas públicas salen de ellas y los de la entrega, de la agenda.
 - **Sentry** en la agenda y en las rutas públicas.
-- **Una anomalía que mirar**: una petición `pendiente` de más de 72 h en un negocio cuya Main se ha
-  conectado en las últimas 24 h.
+- **Una anomalía que mirar**: `reserva_web_atascada`, que la alarma apunta cuando algo lleva más de
+  72 h `pendiente`. Cruzado con la última conexión de la Main (`devices.last_seen_at_ms`) dice si es
+  un negocio cerrado o una Main que no recoge.
 
 ---
 
@@ -664,7 +690,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | ✅ **0 · Previos** | FABLE-B. Turnstile dado de alta (§12) | Hecho el 2026-10-17 |
 | ✅ **1 · Esquema y configuración** | El esquema del §3.1 en `0001`, el reset de desarrollo, Configuración → Reservas (interruptor y días cerrados), el modo «Reserva web» del editor del plano, la zona horaria, `origen` en el calendario, `TABLAS_SOLO_MAIN` | Código y tests hechos el 2026-10-17. Falta comprobarlo con el worker desplegado: que la configuración llega a Turso |
 | ✅ **2 · Agenda y API pública** | Tablas centrales, `POST /clave` y el código en Configuración, la puerta pública, las rutas públicas, `AgendaWeb`, los limitadores, el interruptor, la administración de dominios y claves | Código y tests hechos el 2026-10-18 (las altas simultáneas, también). Falta crear las tablas centrales en Turso, desplegar el worker y reservar con `curl` |
-| **3 · Entrega a la Main** | `avisarReservasWeb`, `/pendientes` y `/recogidas`, la recogida en el motor, el caso de uso, las notificaciones, la cancelación entregada, la reoferta | E2E: web → Main, con la Main encendida y apagada |
+| ✅ **3 · Entrega a la Main** | `avisarReservasWeb`, `/pendientes` y `/recogidas`, la recogida en el motor, el caso de uso, las notificaciones, la cancelación entregada, la reoferta | Código y tests hechos el 2026-10-18. Falta el E2E (web → Main, con la Main encendida y apagada): necesita el worker desplegado y pasar Turnstile, que contra producción sólo se puede con el secreto de pruebas puesto mientras dura la tanda |
 | **4 · Widget** | `packages/plano`, `packages/estilos`, `apps/reservas-web`, `embed.js`, los assets en el worker y la CSP | Funciona incrustado en una página de prueba en `localhost` dada de alta |
 | **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, borrar = cancelar, la cola de avisos y su job | Llegan los cinco correos y se cancela desde el enlace |
 | **6 · Piloto** | Los textos de LEGAL-01, `arquitectura/reservas-web.md` y la primera web propia con un bar | Un bar recibe reservas reales |
