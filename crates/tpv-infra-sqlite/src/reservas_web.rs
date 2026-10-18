@@ -300,6 +300,14 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
                 None => false,
             };
 
+            // La hora del alta la puso quien la hizo (0004). Si no llegó una válida, la de la Main, ya
+            // como literal: un `COALESCE(?, datetime('now', …))` dejaría la sentencia sin poder
+            // leerse cuando hay que repararla (`sync_reparacion::analizar` parte los VALUES por comas).
+            let creada = a
+                .creada_local
+                .clone()
+                .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+
             // El cliente es el de ese correo (`ux_clientes_email`). Si ya existe, lo escrito sólo
             // rellena sus huecos (RES-01); si no, uno nuevo con el UUID antes del INSERT.
             let id_cliente = match cliente_por(conn, POR_EMAIL, &a.alta.email).await? {
@@ -318,13 +326,13 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
                     let id = new_id();
                     conn.execute(
                         "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Created_At) \
-                         VALUES (?1, ?2, ?3, ?4, COALESCE(?5, datetime('now','localtime')));",
+                         VALUES (?1, ?2, ?3, ?4, ?5);",
                         vec![
                             Value::Text(id.clone()),
                             Value::Text(a.alta.nombre.clone()),
                             Value::Text(a.alta.telefono.clone()),
                             Value::Text(a.alta.email.clone()),
-                            opt_text(a.creada_local.clone()),
+                            Value::Text(creada.clone()),
                         ],
                     )
                     .await
@@ -338,8 +346,7 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
             conn.execute(
                 "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, \
                                        Estado, Duracion_Min, Created_At, Origen) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'PROXIMA', NULL, \
-                         COALESCE(?9, datetime('now','localtime')), 'WEB') \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'PROXIMA', NULL, ?9, 'WEB') \
                  ON CONFLICT(ID_Reserva) DO NOTHING;",
                 vec![
                     Value::Text(a.id_reserva.clone()),
@@ -350,7 +357,7 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
                     Value::Text(a.turno.clone()),
                     Value::Integer(a.alta.personas),
                     opt_text(a.alta.nota.clone()),
-                    opt_text(a.creada_local.clone()),
+                    Value::Text(creada),
                 ],
             )
             .await
@@ -765,6 +772,15 @@ mod tests {
             .collect()
     }
 
+    /// Las claves primarias de las tablas que escribe el alta, para el analizador de la reparación.
+    fn claves(tabla: &str) -> Vec<String> {
+        match tabla {
+            "Clientes" => vec!["ID_Cliente".into()],
+            "Reservas" => vec!["ID_Reserva".into()],
+            _ => vec![],
+        }
+    }
+
     async fn contar(db: &Db, sql: &str) -> i64 {
         fila(db, sql).await[0].parse().unwrap()
     }
@@ -791,6 +807,15 @@ mod tests {
         let sentencias = ultima_operacion(&db).await;
         assert_eq!(sentencias.len(), 2);
         assert!(sentencias[1].sql.contains("ON CONFLICT(ID_Reserva) DO NOTHING"));
+        // Y si esa operación hubiera que repararla, se saben leer las dos filas: el cliente y la
+        // reserva, con sus claves.
+        let id_cliente = fila(&db, "SELECT ID_Cliente FROM Reservas WHERE ID_Reserva = 'r1';").await.remove(0);
+        let analisis = crate::sync_reparacion::analizar(&sentencias, &claves);
+        assert!(!analisis.incierto, "{analisis:?}");
+        assert_eq!(
+            analisis.filas.iter().map(|f| (f.tabla.as_str(), f.clave[0].1.as_str())).collect::<Vec<_>>(),
+            [("Clientes", id_cliente.as_str()), ("Reservas", "r1")]
+        );
         drop(repo);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -832,6 +857,13 @@ mod tests {
             ["Ana de siempre", "600112233", "ANA@correo.es"]
         );
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM Clientes;").await, 1);
+        // También se sabe reparar: rellenar el teléfono y la reserva.
+        let analisis = crate::sync_reparacion::analizar(&ultima_operacion(&db).await, &claves);
+        assert!(!analisis.incierto, "{analisis:?}");
+        assert_eq!(
+            analisis.filas.iter().map(|f| (f.tabla.as_str(), f.clave[0].1.as_str())).collect::<Vec<_>>(),
+            [("Clientes", "c1"), ("Reservas", "r1")]
+        );
         drop(repo);
         let _ = std::fs::remove_dir_all(&dir);
     }
