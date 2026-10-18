@@ -218,6 +218,75 @@ impl AltaWebValidada {
     }
 }
 
+// ── La entrega a la Main (docs/estudios/reservas-web.md §5.5) ────────────────────────────────────
+
+/// Un alta de la web lista para guardarse en la Main: validada otra vez (con el mismo criterio que
+/// el worker), con el `ID_Reserva` que puso la agenda, el turno que le toca por la hora y el
+/// instante en que se hizo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AltaWebParaRegistrar {
+    pub id_reserva: String,
+    pub alta: AltaWebValidada,
+    pub turno: String,
+    /// `YYYY-MM-DD HH:MM:SS` en la hora del negocio: el `Created_At` de la reserva y, si es nuevo,
+    /// del cliente. `None` si la agenda no mandó uno válido; entonces cuenta «ahora» de la Main.
+    pub creada_local: Option<String>,
+}
+
+impl AltaWebParaRegistrar {
+    pub fn validar(id_reserva: &str, entrada: AltaWebEntrada, creada_local: &str) -> Result<Self, String> {
+        let id_reserva = id_reserva.trim();
+        if id_reserva.is_empty() || id_reserva.len() > 64 {
+            return Err("La reserva web llega sin identificador".into());
+        }
+        let alta = AltaWebValidada::validar(entrada)?;
+        let turno = crate::reservas::normalize_turno(None, &alta.hora);
+        let creada = creada_local.trim();
+        let creada_local = (creada.len() == 19 && crate::fechas::fecha_de_instante(creada).is_some())
+            .then(|| creada.to_string());
+        Ok(Self { id_reserva: id_reserva.to_string(), alta, turno, creada_local })
+    }
+}
+
+/// Lo que se enseña de una reserva web en un aviso al restaurante.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReservaWebResumen {
+    pub nombre: Option<String>,
+    pub dia_ymd: String,
+    pub hora: String,
+    /// El número de la mesa, si la tiene.
+    pub mesa: Option<String>,
+}
+
+/// Cómo ha quedado un alta de la web en la base de la Main.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AltaWebRegistrada {
+    /// Ya estaba (se ha recibido dos veces): no se toca nada.
+    YaEstaba,
+    /// Guardada. `solapada` si pisa otra reserva o una comanda, o si su mesa ya no está en el
+    /// plano: se guarda igual y el restaurante la mueve.
+    Nueva { solapada: bool, mesa: Option<String> },
+}
+
+/// Cómo ha quedado la cancelación de una reserva web pedida por el cliente.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CancelacionWeb {
+    /// Estaba viva y ya no.
+    Cancelada(ReservaWebResumen),
+    /// Ya estaba cancelada, terminada o el cliente no se presentó: no hay nada que hacer.
+    YaNoEstabaViva,
+    /// La Main no la tiene (por ejemplo, porque su alta no se pudo registrar).
+    NoExiste,
+}
+
+/// `24/10` a partir de `2026-10-24`, para los avisos. Si no lo parece, tal cual.
+pub fn dia_corto(dia_ymd: &str) -> String {
+    match crate::fechas::fecha_ymd(dia_ymd) {
+        Some(_) => format!("{}/{}", &dia_ymd[8..10], &dia_ymd[5..7]),
+        None => dia_ymd.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +379,44 @@ mod tests {
         for (invierno, verano) in [(0, 0), (60, 60), (-300, -240), (120, 180)] {
             assert_eq!(zona_por_desfases(invierno, verano), None, "{invierno}/{verano}");
         }
+    }
+    fn alta_web(email: &str) -> AltaWebEntrada {
+        AltaWebEntrada {
+            dia_ymd: "2026-11-20".into(),
+            hora: "21:00".into(),
+            personas: 2,
+            id_mesa: "m1".into(),
+            nombre: "Ana".into(),
+            email: email.into(),
+            telefono: "600 112 233".into(),
+            nota: None,
+        }
+    }
+
+    #[test]
+    fn un_alta_para_registrar_se_vuelve_a_validar_y_lleva_su_turno() {
+        let a = AltaWebParaRegistrar::validar(" r1 ", alta_web("Ana@Correo.es"), "2026-11-10 12:30:05").unwrap();
+        assert_eq!(a.id_reserva, "r1");
+        assert_eq!(a.alta.email, "ana@correo.es");
+        assert_eq!(a.alta.telefono, "600112233");
+        assert_eq!(a.turno, "CENA");
+        assert_eq!(a.creada_local.as_deref(), Some("2026-11-10 12:30:05"));
+        assert!(AltaWebParaRegistrar::validar("", alta_web("ana@correo.es"), "2026-11-10 12:30:05").is_err());
+        assert!(AltaWebParaRegistrar::validar("r1", alta_web("no-es-correo"), "2026-11-10 12:30:05").is_err());
+    }
+
+    /// Un instante mal escrito no tumba el alta: cuenta el «ahora» de la Main.
+    #[test]
+    fn un_instante_de_alta_que_no_vale_no_se_usa() {
+        for malo in ["", "2026-11-10", "2026-11-10T12:30:05", "2026-02-30 12:00:00", "ayer"] {
+            let a = AltaWebParaRegistrar::validar("r1", alta_web("ana@correo.es"), malo).unwrap();
+            assert_eq!(a.creada_local, None, "{malo}");
+        }
+    }
+
+    #[test]
+    fn el_dia_corto_de_los_avisos() {
+        assert_eq!(dia_corto("2026-10-24"), "24/10");
+        assert_eq!(dia_corto("raro"), "raro");
     }
 }

@@ -58,6 +58,7 @@ async fn atender(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion
     match mensaje.get("type").and_then(Value::as_str) {
         Some("change") => aplicar(ctx, vec![cambio(mensaje)?]).await?,
         Some("pair_request") => ctx.solicitud_emparejamiento(),
+        Some("reservas_web") => ctx.reservas_web(),
         Some("cola_apartada") => {
             let ops = mensaje.get("ops").and_then(Value::as_array).ok_or_else(|| AppError::external("Cola apartada inválida"))?;
             let mut acusadas = Vec::new();
@@ -150,6 +151,8 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
                 ctx.completar_recuperacion(high_water).await?;
                 canal.enviar(json!({"type":"recovery_ready"})).await?;
                 ctx.fase_recuperacion("completada");
+                // Lo que se reservó en la web mientras tanto.
+                ctx.reservas_web();
                 completada = true;
                 break;
             }
@@ -160,6 +163,8 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
         if !completada { return Err(AppError::external("La nube no confirmó la convergencia")); }
     } else {
         vacio = subir_pendientes(ctx, canal, volcado, false).await?;
+        // Al conectar, lo que se haya reservado en la web mientras esta Main no estaba.
+        ctx.reservas_web();
     }
     let mut ultimo_sondeo = Instant::now();
     loop {

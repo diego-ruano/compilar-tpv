@@ -166,6 +166,15 @@ mod tests {
             self.mesas_guardadas.lock().unwrap().push(mesa);
             Ok(())
         }
+        async fn registrar_alta(
+            &self,
+            _alta: tpv_domain::reservas_web::AltaWebParaRegistrar,
+        ) -> AppResult<tpv_domain::reservas_web::AltaWebRegistrada> {
+            unreachable!("la recogida tiene sus pruebas en reservas_web_recogida.rs")
+        }
+        async fn cancelar_desde_la_web(&self, _id: &str) -> AppResult<tpv_domain::reservas_web::CancelacionWeb> {
+            unreachable!("la recogida tiene sus pruebas en reservas_web_recogida.rs")
+        }
     }
 
     #[tokio::test]

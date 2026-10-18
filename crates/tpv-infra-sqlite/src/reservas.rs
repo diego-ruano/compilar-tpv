@@ -40,11 +40,11 @@ fn opt_int(o: Option<i64>) -> Value {
 }
 
 /// Un cliente tal y como está guardado (para el merge «sólo rellenar huecos» y para la búsqueda).
-struct ClienteExistente {
-    id: String,
+pub(crate) struct ClienteExistente {
+    pub(crate) id: String,
     nombre: Option<String>,
     email: Option<String>,
-    telefono: Option<String>,
+    pub(crate) telefono: Option<String>,
 }
 
 fn cliente_existente(row: &Row) -> AppResult<ClienteExistente> {
@@ -59,12 +59,12 @@ fn cliente_existente(row: &Row) -> AppResult<ClienteExistente> {
 /// Por email, sin distinguir mayúsculas: es el criterio del índice único `ux_clientes_email` (sobre
 /// `lower(Email)`), así que se busca por lo mismo por lo que luego rechazaría el INSERT. El
 /// `Email IS NOT NULL AND Email <> ''` replica el predicado del índice parcial para que pueda usarlo.
-const POR_EMAIL: &str = "Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1";
+pub(crate) const POR_EMAIL: &str = "Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1";
 const POR_TELEFONO: &str = "Telefono = ?1";
 const POR_ID: &str = "ID_Cliente = ?1";
 
 /// El cliente más reciente que cumple `filtro` (uno de los de arriba, con `?1`).
-async fn cliente_por<C: Reader>(
+pub(crate) async fn cliente_por<C: Reader>(
     conn: &C,
     filtro: &str,
     valor: &str,
@@ -161,7 +161,7 @@ async fn resolver_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<
 }
 
 /// RI-61: la duración por defecto y el modo de solape del negocio.
-async fn ajustes_de_reserva<C: Reader>(conn: &C) -> AppResult<(i64, ModoSolape)> {
+pub(crate) async fn ajustes_de_reserva<C: Reader>(conn: &C) -> AppResult<(i64, ModoSolape)> {
     let mut rows = conn
         .query(
             "SELECT Reserva_Duracion_Min, Reserva_Solape FROM Business_Settings WHERE ID = 1;",
@@ -228,18 +228,19 @@ const MSG_SOLAPE_PROHIBIDO: &str =
 
 /// RI-61: con qué choca la reserva en su mesa, como frase para quien reserva, o `None`. Sin nombres
 /// de cliente: un mensaje de error puede acabar en la telemetría.
-async fn choque_en_la_mesa<C: Reader>(
+/// También lo usa el alta desde la web (`reservas_web.rs`), que se guarda aunque choque.
+pub(crate) async fn choque_en_la_mesa<C: Reader>(
     conn: &C,
     id_mesa: &str,
-    r: &ReservaValidada,
+    (dia_ymd, hora, duracion_min): (&str, &str, Option<i64>),
     id_reserva: &str,
     duracion_def: i64,
 ) -> AppResult<Option<String>> {
-    let duracion = r.duracion_min.unwrap_or(duracion_def);
+    let duracion = duracion_min.unwrap_or(duracion_def);
     let base = vec![
         Value::Text(id_mesa.to_string()),
-        Value::Text(r.dia_ymd.clone()),
-        Value::Text(r.hora.clone()),
+        Value::Text(dia_ymd.to_string()),
+        Value::Text(hora.to_string()),
         Value::Integer(duracion),
         Value::Integer(duracion_def),
     ];
@@ -366,7 +367,14 @@ impl ReservasRepository for SqliteReservasRepository {
             // transacción, así que dos reservas a la vez no se cuelan la una a la otra.
             if let Some(ref id_mesa) = r.id_mesa {
                 let (duracion_def, modo) = ajustes_de_reserva(conn).await?;
-                let choque = choque_en_la_mesa(conn, id_mesa, &r, &id_reserva, duracion_def).await?;
+                let choque = choque_en_la_mesa(
+                    conn,
+                    id_mesa,
+                    (&r.dia_ymd, &r.hora, r.duracion_min),
+                    &id_reserva,
+                    duracion_def,
+                )
+                .await?;
                 if let Some(choque) = choque {
                     match modo {
                         ModoSolape::Prohibir => {

@@ -10,9 +10,13 @@ use async_trait::async_trait;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::reservas_web::ReservasWebRepository;
 use tpv_contracts::reservas_web::{CierreReservaWebDto, ReservaWebMesaDto};
-use tpv_domain::reservas_web::{CierreValidado, MesaWebValidada, TODOS_LOS_DIAS};
+use tpv_domain::reservas_web::{
+    AltaWebParaRegistrar, AltaWebRegistrada, CancelacionWeb, CierreValidado, MesaWebValidada, ReservaWebResumen,
+    TODOS_LOS_DIAS,
+};
 
-use crate::consultas::db_err;
+use crate::consultas::{db_err, select_one_i64};
+use crate::reservas::{ajustes_de_reserva, choque_en_la_mesa, cliente_por, POR_EMAIL};
 use crate::db::{Db, Reader, Writer};
 use crate::ejecutor::Value;
 use crate::mapping::{opt_text, v_i64, v_string};
@@ -246,6 +250,153 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
                 .map_err(db_err)?;
             }
             Ok(())
+        })
+        .await
+    }
+
+    async fn registrar_alta(&self, a: AltaWebParaRegistrar) -> AppResult<AltaWebRegistrada> {
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.transaccion(async {
+            // Recibirla dos veces (la agenda la vuelve a ofrecer si no la ve en Turso) no la duplica
+            // ni vuelve a avisar.
+            let ya = select_one_i64(
+                conn,
+                "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1;",
+                vec![Value::Text(a.id_reserva.clone())],
+            )
+            .await?;
+            if ya.is_some() {
+                return Ok(AltaWebRegistrada::YaEstaba);
+            }
+
+            // La mesa que eligió. Si ya no existe, la reserva se guarda sin mesa; si se archivó, en
+            // ella. Las dos cosas son «muévela», como un choque.
+            let mut rows = conn
+                .query(
+                    "SELECT Numero_Mesa, Archivada_En IS NOT NULL FROM Mesas WHERE ID_Mesa = ?1;",
+                    vec![Value::Text(a.alta.id_mesa.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            let (id_mesa, numero, mesa_fuera) = match rows.next().await.map_err(db_err)? {
+                Some(row) => (
+                    Some(a.alta.id_mesa.clone()),
+                    v_string(row.get_value(0).map_err(db_err)?),
+                    v_i64(row.get_value(1).map_err(db_err)?) == Some(1),
+                ),
+                None => (None, None, true),
+            };
+
+            // RI-61: el mismo criterio que una reserva del TPV, pero aquí nunca se rechaza: la
+            // reserva ya está confirmada al cliente (regla 3 del plan).
+            let choca = match &id_mesa {
+                Some(m) => {
+                    let (duracion_def, _) = ajustes_de_reserva(conn).await?;
+                    choque_en_la_mesa(conn, m, (&a.alta.dia_ymd, &a.alta.hora, None), &a.id_reserva, duracion_def)
+                        .await?
+                        .is_some()
+                }
+                None => false,
+            };
+
+            // El cliente es el de ese correo (`ux_clientes_email`). Si ya existe, lo escrito sólo
+            // rellena sus huecos (RES-01); si no, uno nuevo con el UUID antes del INSERT.
+            let id_cliente = match cliente_por(conn, POR_EMAIL, &a.alta.email).await? {
+                Some(existente) => {
+                    if existente.telefono.is_none() {
+                        conn.execute(
+                            "UPDATE Clientes SET Telefono = ?1 WHERE ID_Cliente = ?2;",
+                            vec![Value::Text(a.alta.telefono.clone()), Value::Text(existente.id.clone())],
+                        )
+                        .await
+                        .map_err(db_err)?;
+                    }
+                    existente.id
+                }
+                None => {
+                    let id = new_id();
+                    conn.execute(
+                        "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Created_At) \
+                         VALUES (?1, ?2, ?3, ?4, COALESCE(?5, datetime('now','localtime')));",
+                        vec![
+                            Value::Text(id.clone()),
+                            Value::Text(a.alta.nombre.clone()),
+                            Value::Text(a.alta.telefono.clone()),
+                            Value::Text(a.alta.email.clone()),
+                            opt_text(a.creada_local.clone()),
+                        ],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                    id
+                }
+            };
+
+            // Con el id de la agenda, `Origen = 'WEB'`, la duración del negocio (NULL) y la hora del
+            // alta, que la puso quien la hizo (0004).
+            conn.execute(
+                "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, \
+                                       Estado, Duracion_Min, Created_At, Origen) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'PROXIMA', NULL, \
+                         COALESCE(?9, datetime('now','localtime')), 'WEB') \
+                 ON CONFLICT(ID_Reserva) DO NOTHING;",
+                vec![
+                    Value::Text(a.id_reserva.clone()),
+                    Value::Text(id_cliente),
+                    opt_text(id_mesa),
+                    Value::Text(a.alta.dia_ymd.clone()),
+                    Value::Text(a.alta.hora.clone()),
+                    Value::Text(a.turno.clone()),
+                    Value::Integer(a.alta.personas),
+                    opt_text(a.alta.nota.clone()),
+                    opt_text(a.creada_local.clone()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            Ok(AltaWebRegistrada::Nueva { solapada: choca || mesa_fuera, mesa: numero })
+        })
+        .await
+    }
+
+    async fn cancelar_desde_la_web(&self, id_reserva: &str) -> AppResult<CancelacionWeb> {
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.transaccion(async {
+            let mut rows = conn
+                .query(
+                    "SELECT R.Estado, R.Dia_YMD, R.Hora, M.Numero_Mesa, C.Nombre \
+                     FROM Reservas R \
+                     LEFT JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa \
+                     LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente \
+                     WHERE R.ID_Reserva = ?1 AND R.Origen = 'WEB';",
+                    vec![Value::Text(id_reserva.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            let Some(row) = rows.next().await.map_err(db_err)? else {
+                return Ok(CancelacionWeb::NoExiste);
+            };
+            let estado = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
+            if !matches!(estado.as_str(), "PROXIMA" | "ACTIVA") {
+                return Ok(CancelacionWeb::YaNoEstabaViva);
+            }
+            let resumen = ReservaWebResumen {
+                dia_ymd: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                hora: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
+                mesa: v_string(row.get_value(3).map_err(db_err)?),
+                nombre: v_string(row.get_value(4).map_err(db_err)?),
+            };
+            conn.execute(
+                "UPDATE Reservas SET Estado = 'CANCELADA' \
+                 WHERE ID_Reserva = ?1 AND Estado IN ('PROXIMA', 'ACTIVA');",
+                vec![Value::Text(id_reserva.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(CancelacionWeb::Cancelada(resumen))
         })
         .await
     }
@@ -575,6 +726,213 @@ mod tests {
         assert!(repo.mesas().await.unwrap().is_empty());
         drop(repo);
         drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    // ── Registrar lo que llega de la web (§5.5) ──────────────────────────────────────────────────
+
+    fn alta(id: &str, email: &str, mesa: &str, hora: &str) -> AltaWebParaRegistrar {
+        AltaWebParaRegistrar::validar(
+            id,
+            tpv_domain::reservas_web::AltaWebEntrada {
+                dia_ymd: "2026-11-20".into(),
+                hora: hora.into(),
+                personas: 2,
+                id_mesa: mesa.into(),
+                nombre: "Ana Pérez".into(),
+                email: email.into(),
+                telefono: "600 112 233".into(),
+                nota: Some("Silla para bebé".into()),
+            },
+            "2026-11-10 12:30:05",
+        )
+        .unwrap()
+    }
+
+    /// Una fila como texto, columna a columna, para comparar sin pelearse con los tipos.
+    async fn fila(db: &Db, sql: &str) -> Vec<String> {
+        let g = db.read().await;
+        let mut rows = g.query(sql, ()).await.unwrap();
+        let row = rows.next().await.unwrap().expect("sin fila");
+        // Hasta la primera columna que no existe.
+        (0..)
+            .map_while(|i| row.get_value(i).ok())
+            .map(|v| match v {
+                Value::Null => "NULL".to_string(),
+                Value::Integer(n) => n.to_string(),
+                Value::Text(t) => t,
+                otro => format!("{otro:?}"),
+            })
+            .collect()
+    }
+
+    async fn contar(db: &Db, sql: &str) -> i64 {
+        fila(db, sql).await[0].parse().unwrap()
+    }
+
+    #[tokio::test]
+    async fn un_alta_web_crea_su_cliente_y_su_reserva_con_la_hora_del_alta_y_se_replica() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        let antes = outbox(&db).await;
+
+        let r = repo.registrar_alta(alta("r1", "ana@correo.es", "m1", "21:00")).await.unwrap();
+
+        assert_eq!(r, AltaWebRegistrada::Nueva { solapada: false, mesa: Some("1".into()) });
+        assert_eq!(
+            fila(&db, "SELECT ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado, Duracion_Min, Created_At, Origen FROM Reservas WHERE ID_Reserva = 'r1';").await,
+            ["m1", "2026-11-20", "21:00", "CENA", "2", "Silla para bebé", "PROXIMA", "NULL", "2026-11-10 12:30:05", "WEB"]
+        );
+        assert_eq!(
+            fila(&db, "SELECT C.Nombre, C.Telefono, C.Email, C.Created_At FROM Reservas R JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente WHERE R.ID_Reserva = 'r1';").await,
+            ["Ana Pérez", "600112233", "ana@correo.es", "2026-11-10 12:30:05"]
+        );
+        // Una sola operación hacia la nube, con el cliente y la reserva.
+        assert_eq!(outbox(&db).await, antes + 1);
+        let sentencias = ultima_operacion(&db).await;
+        assert_eq!(sentencias.len(), 2);
+        assert!(sentencias[1].sql.contains("ON CONFLICT(ID_Reserva) DO NOTHING"));
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn recibirla_dos_veces_no_la_duplica_ni_escribe_nada() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        repo.registrar_alta(alta("r1", "ana@correo.es", "m1", "21:00")).await.unwrap();
+        let antes = outbox(&db).await;
+
+        assert_eq!(repo.registrar_alta(alta("r1", "ana@correo.es", "m1", "21:00")).await.unwrap(), AltaWebRegistrada::YaEstaba);
+
+        assert_eq!(outbox(&db).await, antes);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Reservas;").await, 1);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Clientes;").await, 1);
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// RES-01: el cliente de ese correo se queda la reserva, y lo que trae sólo rellena sus huecos.
+    #[tokio::test]
+    async fn el_cliente_de_ese_correo_se_queda_la_reserva_y_sus_datos_no_se_pisan() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('c1', 'Ana de siempre', 'ANA@correo.es');")
+                .await
+                .unwrap();
+        }
+
+        repo.registrar_alta(alta("r1", "ana@correo.es", "m1", "21:00")).await.unwrap();
+
+        assert_eq!(fila(&db, "SELECT ID_Cliente FROM Reservas WHERE ID_Reserva = 'r1';").await, ["c1"]);
+        assert_eq!(
+            fila(&db, "SELECT Nombre, Telefono, Email FROM Clientes WHERE ID_Cliente = 'c1';").await,
+            ["Ana de siempre", "600112233", "ANA@correo.es"]
+        );
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Clientes;").await, 1);
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Una reserva web confirmada no se rechaza nunca: aunque el negocio prohíba los solapes, se
+    /// guarda y se dice que choca.
+    #[tokio::test]
+    async fn si_choca_se_guarda_igual_y_dice_que_choca() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "UPDATE Business_Settings SET Reserva_Solape = 'prohibir' WHERE ID = 1; \
+                     INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) \
+                       VALUES ('tpv', 'm1', '2026-11-20', '20:30', 'CENA', 4, 'PROXIMA');",
+                )
+                .await
+                .unwrap();
+        }
+
+        let r = repo.registrar_alta(alta("r1", "ana@correo.es", "m1", "21:00")).await.unwrap();
+
+        assert_eq!(r, AltaWebRegistrada::Nueva { solapada: true, mesa: Some("1".into()) });
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Reservas WHERE ID_Mesa = 'm1';").await, 2);
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sin_su_mesa_se_guarda_sin_mesa_y_en_una_archivada_se_guarda_en_ella_y_las_dos_hay_que_moverlas() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+
+        let borrada = repo.registrar_alta(alta("r1", "ana@correo.es", "ya-no-esta", "21:00")).await.unwrap();
+        let archivada = repo.registrar_alta(alta("r2", "otra@correo.es", "vieja", "21:00")).await.unwrap();
+
+        assert_eq!(borrada, AltaWebRegistrada::Nueva { solapada: true, mesa: None });
+        assert_eq!(fila(&db, "SELECT ID_Mesa FROM Reservas WHERE ID_Reserva = 'r1';").await, ["NULL"]);
+        assert_eq!(archivada, AltaWebRegistrada::Nueva { solapada: true, mesa: Some("3".into()) });
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Sin un instante válido de la agenda cuenta el «ahora» de la Main, como literal: lo que sale
+    /// hacia la nube no puede llevar un `'now'` que cada base calcularía a su manera.
+    #[tokio::test]
+    async fn sin_la_hora_del_alta_cuenta_la_de_la_main_y_viaja_como_literal() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        let mut a = alta("r1", "ana@correo.es", "m1", "21:00");
+        a.creada_local = None;
+
+        repo.registrar_alta(a).await.unwrap();
+
+        let creada = fila(&db, "SELECT Created_At FROM Reservas WHERE ID_Reserva = 'r1';").await;
+        assert_eq!(creada[0].len(), 19, "{creada:?}");
+        for s in ultima_operacion(&db).await {
+            assert!(!s.sql.contains("'now'"), "{}", s.sql);
+        }
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn la_cancelacion_del_cliente_cancela_una_viva_una_sola_vez() {
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        repo.registrar_alta(alta("r1", "ana@correo.es", "m1", "21:00")).await.unwrap();
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) \
+                       VALUES ('del-tpv', 'm2', '2026-11-20', '21:00', 'CENA', 2, 'PROXIMA');",
+                )
+                .await
+                .unwrap();
+        }
+        let antes = outbox(&db).await;
+
+        let r = repo.cancelar_desde_la_web("r1").await.unwrap();
+
+        assert_eq!(
+            r,
+            CancelacionWeb::Cancelada(ReservaWebResumen {
+                nombre: Some("Ana Pérez".into()),
+                dia_ymd: "2026-11-20".into(),
+                hora: "21:00".into(),
+                mesa: Some("1".into()),
+            })
+        );
+        assert_eq!(fila(&db, "SELECT Estado FROM Reservas WHERE ID_Reserva = 'r1';").await, ["CANCELADA"]);
+        assert_eq!(outbox(&db).await, antes + 1);
+        assert_eq!(repo.cancelar_desde_la_web("r1").await.unwrap(), CancelacionWeb::YaNoEstabaViva);
+        assert_eq!(repo.cancelar_desde_la_web("no-existe").await.unwrap(), CancelacionWeb::NoExiste);
+        // Una del TPV no se cancela por esta puerta.
+        assert_eq!(repo.cancelar_desde_la_web("del-tpv").await.unwrap(), CancelacionWeb::NoExiste);
+        assert_eq!(outbox(&db).await, antes + 1);
+        drop(repo);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

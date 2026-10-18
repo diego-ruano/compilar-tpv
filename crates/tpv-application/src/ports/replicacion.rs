@@ -13,6 +13,10 @@ pub trait ContextoReplicacion: Send + Sync {
     fn cambios(&self, sentencias: &[SqlStatement]);
     fn fase_recuperacion(&self, fase: &str);
     fn solicitud_emparejamiento(&self);
+    /// Que se recojan las reservas web de la agenda (docs/estudios/reservas-web.md §5.4). Sin
+    /// esperar: la recogida va por REST, fuera del bucle del socket, y escribe por el outbox que el
+    /// motor sube en su vuelta siguiente.
+    fn reservas_web(&self);
     fn fallo_subida(&self, op_id: &str, fallo: &tpv_contracts::sync::OutboxFallo);
     async fn completar_recuperacion(&self, high_water: i64) -> AppResult<()>;
     async fn sigue_disponible(&self, recuperando: bool) -> AppResult<bool>;

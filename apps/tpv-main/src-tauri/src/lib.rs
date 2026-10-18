@@ -6,6 +6,7 @@ mod commands;
 mod interruptores;
 mod imagenes;
 mod replicacion;
+mod reservas_web;
 mod socket_handy;
 mod jobs;
 mod printing;

@@ -46,6 +46,7 @@ impl ContextoReplicacion for Contexto {
         let _ = self.app.emit("sync:estado", foto.clone());
     }
     fn solicitud_emparejamiento(&self) { let _ = self.app.emit("sync:pair-request", ()); }
+    fn reservas_web(&self) { crate::reservas_web::pedir_recogida(&self.app); }
     fn fallo_subida(&self, op_id: &str, fallo: &OutboxFallo) {
         if fallo.apartada { tracing::error!(target:"tpv::sync", op_id, comando = %fallo.command_name, reparadas = fallo.reparadas, "operación apartada de la subida"); }
     }
@@ -90,6 +91,7 @@ async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<()> {
 
 pub(crate) fn arrancar(app: AppHandle) {
     app.manage(SyncNativo::default());
+    app.manage(crate::reservas_web::RecogidaWeb::default());
     tauri::async_runtime::spawn(async move {
         let ctx = Contexto { app: app.clone() };
         let mut retardo = 3u64;

@@ -6,7 +6,9 @@
 use async_trait::async_trait;
 
 use tpv_contracts::reservas_web::{CierreReservaWebDto, ReservaWebMesaDto};
-use tpv_domain::reservas_web::{CierreValidado, MesaWebValidada};
+use tpv_domain::reservas_web::{
+    AltaWebParaRegistrar, AltaWebRegistrada, CancelacionWeb, CierreValidado, MesaWebValidada,
+};
 
 use crate::error::AppResult;
 
@@ -42,4 +44,12 @@ pub trait ReservasWebRepository: Send + Sync {
     /// Guarda la de una mesa del plano y deja una sola franja, la de la pantalla. `NotFound` si la
     /// mesa ya no está en el plano.
     async fn guardar_mesa(&self, mesa: MesaWebValidada) -> AppResult<()>;
+
+    /// Registra un alta de la web (§5.5), en una transacción: la reserva con el id de la agenda y su
+    /// cliente, el que ya tenga ese correo o uno nuevo. **Nunca la rechaza por chocar**: la guarda y
+    /// dice que choca. Recibirla dos veces no la duplica.
+    async fn registrar_alta(&self, alta: AltaWebParaRegistrar) -> AppResult<AltaWebRegistrada>;
+
+    /// Cancela una reserva web porque lo pide el cliente desde su enlace. Idempotente.
+    async fn cancelar_desde_la_web(&self, id_reserva: &str) -> AppResult<CancelacionWeb>;
 }

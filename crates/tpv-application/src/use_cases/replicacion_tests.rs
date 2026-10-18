@@ -125,13 +125,14 @@ async fn upload_image(
 async fn delete_image(&self, _mode: &str, _path: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 async fn download_image(&self, _mode: &str, _rel_path: &str) -> AppResult<Option<Vec<u8>>> { panic!("Capacidad ajena a esta prueba") }
 }
-struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>> }
+struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize> }
 #[async_trait]
 impl ContextoReplicacion for Contexto {
     async fn repositorio(&self) -> AppResult<Arc<dyn SyncRepository>> { Ok(self.repo.clone()) }
     fn cambios(&self, _: &[SqlStatement]) { *self.avisos.lock().unwrap() += 1; }
     fn fase_recuperacion(&self, fase:&str) { self.fases.lock().unwrap().push(fase.into()); }
     fn solicitud_emparejamiento(&self) {}
+    fn reservas_web(&self) { *self.recogidas.lock().unwrap() += 1; }
     fn fallo_subida(&self, _: &str, _: &OutboxFallo) {}
     async fn completar_recuperacion(&self, h:i64)->AppResult<()> { *self.completa.lock().unwrap()=Some(h);Ok(()) }
     async fn sigue_disponible(&self,_:bool)->AppResult<bool> { Ok(false) }
@@ -145,7 +146,7 @@ impl CanalReplicacion for Canal {
 }
 fn contexto(ops:Vec<OutboxEntry>)->Contexto {
     let repo=Arc::new(FakeRepo::default());*repo.pending.lock().unwrap()=ops;
-    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None)}
+    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0)}
 }
 fn op(id:&str)->OutboxEntry {OutboxEntry{seq:1,op_id:id.into(),command_name:"venta".into(),statements:vec![SqlStatement{sql:"INSERT INTO Productos (Nombre) VALUES (?1)".into(),args:vec![json!("Producto")]}]}}
 fn nube(respuestas:Vec<Value>)->Nube {Nube{responses:Mutex::new(respuestas.into()),calls:Mutex::new(vec![])}}
@@ -200,4 +201,23 @@ async fn recuperar_descarga_sube_y_verifica_antes_de_desbloquear() {
 async fn sin_high_water_la_recuperacion_falla_cerrada() {
     let ctx=contexto(vec![]);let n=nube(vec![json!({"items":[],"nextSince":0})]);let mut c=canal(vec![]);
     assert!(ejecutar(&ctx,&n,&mut c,true).await.is_err());assert!(ctx.completa.lock().unwrap().is_none());
+}
+// Reservas desde la web (docs/estudios/reservas-web.md §5.4): cuándo pide el motor que se recojan.
+#[tokio::test]
+async fn al_conectar_se_recogen_las_reservas_web() {
+    let ctx=contexto(vec![]);let n=nube(vec![pagina(vec![],0)]);let mut c=canal(vec![]);
+    ejecutar(&ctx,&n,&mut c,false).await.unwrap();
+    assert_eq!(*ctx.recogidas.lock().unwrap(),1);
+}
+#[tokio::test]
+async fn al_terminar_una_recuperacion_se_recogen_las_reservas_web() {
+    let ctx=contexto(vec![]);let n=nube(vec![pagina(vec![],0),pagina(vec![],0)]);let mut c=canal(vec![]);
+    ejecutar(&ctx,&n,&mut c,true).await.unwrap();
+    assert_eq!(*ctx.recogidas.lock().unwrap(),1);
+}
+#[tokio::test]
+async fn el_aviso_de_la_agenda_pide_recogerlas_aunque_llegue_esperando_una_confirmacion() {
+    let ctx=contexto(vec![op("a")]);let mut c=canal(vec![json!({"type":"reservas_web"}),json!({"type":"apply_ack","opId":"a","seq":3,"ok":true})]);
+    assert!(subir_pendientes(&ctx,&mut c,false,false).await.unwrap());
+    assert_eq!(*ctx.recogidas.lock().unwrap(),1);
 }
