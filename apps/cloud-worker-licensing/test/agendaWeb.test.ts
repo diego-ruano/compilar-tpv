@@ -549,7 +549,9 @@ describe("la entrega a la Main", () => {
 			expect(await motor.cancelar({ tenantId: T, token: a.token })).toEqual({ ok: true });
 			expect(avisos).toEqual([T, T, T]);
 			const cancelacion = await motor.pendientes({ tenantId: T });
+			// Con su alta delante, que aún no se ha visto en Turso.
 			expect(cancelacion.peticiones).toEqual([
+				expect.objectContaining({ tipo: "alta", id_reserva: a.id_reserva }),
 				expect.objectContaining({ tipo: "cancelacion", id_reserva: a.id_reserva, id_mesa: "m2", datos: null }),
 			]);
 		});
@@ -777,6 +779,30 @@ describe("la entrega a la Main", () => {
 			await state.storage.deleteAlarm();
 			await motor.alarm();
 			expect(avisos).toEqual([]);
+		});
+	});
+	it("una cancelación va con su alta si ésta no se ha visto en Turso: la Main pudo no recibirla", async () => {
+		await conAgenda("entrega-cancelacion-con-su-alta", async (motor, sql) => {
+			espiar(motor);
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			// Se entrega, pero la respuesta no llega a la Main.
+			await motor.pendientes({ tenantId: T });
+			await motor.cancelar({ tenantId: T, token: a.token });
+
+			const tanda = (await motor.pendientes({ tenantId: T })).peticiones;
+			expect(tanda.map((p: any) => [p.tipo, p.id_reserva])).toEqual([
+				["alta", a.id_reserva],
+				["cancelacion", a.id_reserva],
+			]);
+			expect(tanda[0].datos.nombre).toBe("Ana Pérez");
+
+			// Ya en Turso, la cancelación va sola.
+			const b = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4", email: "b@correo.es" }) });
+			await motor.pendientes({ tenantId: T });
+			enTurso(sql, b.id_reserva, "m4");
+			await motor.cancelar({ tenantId: T, token: b.token });
+			const sola = (await motor.pendientes({ tenantId: T })).peticiones;
+			expect(sola.map((p: any) => p.tipo)).toEqual(["cancelacion"]);
 		});
 	});
 });

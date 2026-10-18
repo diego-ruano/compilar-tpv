@@ -392,7 +392,8 @@ function conTipos(f: any): FilaPeticion {
 
 /**
  * Las peticiones `pendiente` para la Main, por orden de llegada (un alta siempre antes que su
- * cancelación), que pasan a `entregada`. Como mucho `max`; `hayMas` dice si quedan.
+ * cancelación), que pasan a `entregada`. Como mucho `max` pendientes, más las altas que acompañan
+ * a sus cancelaciones; `hayMas` dice si quedan.
  */
 export function entregarPendientes(
 	sql: SqlStorage,
@@ -404,7 +405,22 @@ export function entregarPendientes(
 			.exec(`SELECT * FROM peticiones WHERE estado = 'pendiente' ORDER BY creada_ms, id_peticion LIMIT ?;`, max + 1)
 			.toArray() as any[]
 	).map(conTipos);
-	const entregar = filas.slice(0, max);
+	const tanda = filas.slice(0, max);
+	// Una cancelación lleva delante su alta si todavía no se ha visto en Turso. Si la respuesta con el
+	// alta se perdió por el camino, la Main no la tiene: le llegaría sólo la cancelación, diría que esa
+	// reserva no existe, y al volver a ofrecerle el alta la registraría viva. Juntas, el alta se
+	// registra (o ya estaba) y en seguida se cancela.
+	const entregar: FilaPeticion[] = [];
+	const enLaTanda = new Set(tanda.map((f) => f.id_peticion));
+	for (const f of tanda) {
+		if (f.tipo === "cancelacion") {
+			const suAlta = sql
+				.exec(`SELECT * FROM peticiones WHERE tipo = 'alta' AND id_reserva = ? AND estado = 'entregada';`, f.id_reserva)
+				.toArray()[0];
+			if (suAlta && !enLaTanda.has(String((suAlta as any).id_peticion))) entregar.push(conTipos(suAlta));
+		}
+		entregar.push(f);
+	}
 	if (entregar.length) {
 		sql.exec(
 			`UPDATE peticiones SET estado = 'entregada', entregada_ms = ?, intentos = intentos + 1
