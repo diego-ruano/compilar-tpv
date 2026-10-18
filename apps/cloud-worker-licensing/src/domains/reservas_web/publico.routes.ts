@@ -28,7 +28,7 @@ import { consulta, cuerpo } from "../../lib/validacion";
 import { diasAbiertos, horizonte, maxPersonas, motivoDelDia, tramosDelDia } from "./disponibilidad";
 import { horaDelNegocio } from "./horaDelNegocio";
 import { ajustesWeb, cierresEntre, mesasYFranjas, negocioPublico, planoPublico } from "./lecturas";
-import { limitadorAltas, puertaPublica, verificacionHumana, type PublicoVars } from "./puerta";
+import { limitadorAltas, puertaPublica, topeDelCuerpo, verificacionHumana, type PublicoVars } from "./puerta";
 import {
 	altaReservaWebSchema,
 	diaQuerySchema,
@@ -124,6 +124,7 @@ reservasWebPublicoRoutes.post(
 	puertaPublica,
 	limitadorAltas,
 	verificacionHumana,
+	topeDelCuerpo,
 	cuerpo(altaReservaWebSchema),
 	async (c) => {
 		const alta = c.req.valid("json");
@@ -139,14 +140,14 @@ reservasWebPublicoRoutes.post(
 	},
 );
 
-reservasWebPublicoRoutes.post("/:clave/reserva", puertaPublica, cuerpo(tokenEnlaceSchema), async (c) => {
+reservasWebPublicoRoutes.post("/:clave/reserva", puertaPublica, topeDelCuerpo, cuerpo(tokenEnlaceSchema), async (c) => {
 	const { token } = c.req.valid("json");
 	const r = await agendaDe(c.env, c.get("tenantId")).consultarEnlace({ tenantId: c.get("tenantId"), token });
 	if (!r.ok) return rechazada(c, r);
 	return c.json(r);
 });
 
-reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, cuerpo(tokenEnlaceSchema), async (c) => {
+reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, cuerpo(tokenEnlaceSchema), async (c) => {
 	const { token } = c.req.valid("json");
 	const tenantId = c.get("tenantId");
 	const r = await agendaDe(c.env, tenantId).cancelar({ tenantId, token });

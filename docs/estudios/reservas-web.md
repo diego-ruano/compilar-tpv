@@ -237,6 +237,7 @@ del camino (`:clave`), y todo lo que decide va en middlewares **delante** del va
 5. **En el alta, su limitador** `LIMITADOR_RESERVA_WEB_ALTA` **y Turnstile**: el token viaja en la
    cabecera `X-Turnstile-Token`, para comprobarlo antes de leer el cuerpo; se verifica contra
    `siteverify` con la IP del cliente. Sin `TURNSTILE_SECRET_KEY`, el alta queda cerrada (503).
+6. **En lo que lleva cuerpo, un tope de 8 KB** (`topeDelCuerpo`, 413): son rutas anónimas.
 
 Del 2 al 4 el rechazo es siempre el mismo `reserva_web_no_disponible` (404): al widget le basta con
 «ahora no se puede reservar online» y el motivo queda en el log. Todo está en

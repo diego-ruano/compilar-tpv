@@ -30,9 +30,9 @@ const PRIMITIVAS_DE_ROL = /\b(isTpvDevice|tieneRol|rolDelDispositivo)\s*\(/g;
 
 /**
  * Los middlewares que vetan, sea por rol, por IP o, en las rutas públicas de la reserva web, por la
- * clave del negocio y por Turnstile (`domains/reservas_web/puerta.ts`).
+ * clave del negocio, por Turnstile y por el tamaño del cuerpo (`domains/reservas_web/puerta.ts`).
  */
-const VETOS = /\b(soloLaMain\w*|filtroExterior|puertaPublica|limitadorAltas|verificacionHumana)\b/g;
+const VETOS = /\b(soloLaMain\w*|filtroExterior|puertaPublica|limitadorAltas|verificacionHumana|topeDelCuerpo)\b/g;
 
 /** Dónde empieza el ÚLTIMO veto: con varios en la cadena, todos van delante del validador. */
 function ultimoVeto(bloque: string): number {

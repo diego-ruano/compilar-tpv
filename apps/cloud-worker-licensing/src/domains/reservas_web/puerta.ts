@@ -12,7 +12,9 @@
 //   2. la clave existe y no está revocada;
 //   3. el negocio tiene una licencia en vigor;
 //   4. el interruptor remoto `reservas_web` no está apagado;
-//   5. en el alta, además, su limitador y Turnstile.
+//   5. en el alta, además, su limitador y Turnstile;
+//   6. en lo que lleva cuerpo, un tope de tamaño (`topeDelCuerpo`): son rutas anónimas, y sin él
+//      cualquiera haría al worker leer y parsear un JSON de megas.
 //
 // Por qué el rechazo de 2-4 es siempre el mismo `reserva_web_no_disponible`: quien llama no
 // necesita saber si la clave no existe, si al negocio se le acabó la licencia o si soporte ha
@@ -20,6 +22,7 @@
 // queda en el log.
 
 import type { MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 
 import type { Env } from "../../env";
 import { estaApagado } from "../../lib/interruptores";
@@ -63,6 +66,15 @@ export const limitadorAltas: MiddlewareHandler<Ctx> = async (c, next) => {
 	}
 	await next();
 };
+
+/**
+ * Paso 6: lo más largo que manda el widget es un alta, con la nota de 200 caracteres. 8 KB sobra
+ * con mucho; lo que pase de ahí no es el widget.
+ */
+export const topeDelCuerpo = bodyLimit({
+	maxSize: 8 * 1024,
+	onError: (c) => c.json({ ok: false, error: "validation_error" }, 413),
+});
 
 const SITEVERIFY = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 

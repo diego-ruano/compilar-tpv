@@ -25,7 +25,7 @@ vi.mock("../src/server/db", async (importOriginal) => {
 const { claveDelNegocio, olvidarClavesCacheadas } = await import("../src/domains/reservas_web/claves");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 const { olvidarInterruptoresCacheados } = await import("../src/lib/interruptores");
-const { puertaPublica, limitadorAltas, verificacionHumana, turnstileValido } = await import(
+const { puertaPublica, limitadorAltas, verificacionHumana, turnstileValido, topeDelCuerpo } = await import(
 	"../src/domains/reservas_web/puerta"
 );
 
@@ -34,6 +34,7 @@ app.get("/p/:clave/negocio", puertaPublica, (c) => c.json({ ok: true, tenant: c.
 app.post("/p/:clave/reservas", puertaPublica, limitadorAltas, verificacionHumana, (c) =>
 	c.json({ ok: true, tenant: c.get("tenantId") }),
 );
+app.post("/p/:clave/cancelar", puertaPublica, topeDelCuerpo, async (c) => c.json({ ok: true, leido: (await c.req.text()).length }));
 
 const DIA = 86_400_000;
 
@@ -160,6 +161,17 @@ describe("la puerta pública de la reserva web", () => {
 				{ LIMITADOR_RESERVA_WEB_ALTA: lleno, TURNSTILE_SECRET_KEY: "s" },
 			);
 			expect(res.status).toBe(429);
+		});
+	});
+
+	it("un cuerpo de más de 8 KB no se lee", async () => {
+		await escenario("tope-cuerpo", async (clave) => {
+			const enviar = (n: number) =>
+				app.request(`/p/${clave}/cancelar`, { method: "POST", headers: { "content-type": "application/json" }, body: "x".repeat(n) }, {});
+			expect((await enviar(8 * 1024)).status).toBe(200);
+			const grande = await enviar(8 * 1024 + 1);
+			expect(grande.status).toBe(413);
+			expect(((await grande.json()) as any).error).toBe("validation_error");
 		});
 	});
 
