@@ -762,4 +762,21 @@ describe("la entrega a la Main", () => {
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
 		});
 	});
+	it("mientras quede algo sin recoger, la alarma vuelve a avisar a la Main", async () => {
+		await conAgenda("entrega-reaviso", async (motor, sql, state) => {
+			const { avisos } = espiar(motor);
+			await motor.reservar({ tenantId: T, alta: alta() });
+			// Como si el aviso del alta se hubiera perdido.
+			avisos.length = 0;
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(avisos).toEqual([T]);
+			// Recogida, ya no hay nada que avisar.
+			await motor.pendientes({ tenantId: T });
+			avisos.length = 0;
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(avisos).toEqual([]);
+		});
+	});
 });

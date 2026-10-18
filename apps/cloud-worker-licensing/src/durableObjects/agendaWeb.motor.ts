@@ -535,11 +535,13 @@ export class MotorAgendaWeb {
 			const reofrecidas = reofrecer(this.sql, ahoraMs - REOFRECER_TRAS_MS);
 			if (reofrecidas > 0) {
 				this.anotar({ event: "reserva_web_reofrecida", tenant_id: tenantId, cuantas: reofrecidas });
-				this.avisarALaMain(tenantId);
 			}
 			const atascadas = pendientesDesde(this.sql, ahoraMs - ATASCADA_TRAS_MS);
 			if (atascadas > 0) this.anotar({ event: "reserva_web_atascada", tenant_id: tenantId, cuantas: atascadas });
 		}
+		// Mientras quede algo sin recoger, se vuelve a avisar: el aviso del alta pudo perderse (la Main
+		// conectada no vuelve a pedir si nadie la avisa), y no cuesta nada si no hay Main.
+		if (tenantId && pendientesDesde(this.sql, ahoraMs + 1) > 0) this.avisarALaMain(tenantId);
 		const quedaAlgo = purgar(this.sql, ahoraMs);
 		if (quedaAlgo) await this.ctx.storage.setAlarm(Date.now() + CADA_ALARMA_MS);
 	}
