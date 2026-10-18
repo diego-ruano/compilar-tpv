@@ -4,7 +4,7 @@
 //
 // Es la que va en la línea que se pega en la web del restaurante, así que la ve cualquiera: sólo
 // identifica al negocio, no protege nada. Lo que protege la puerta pública es lo demás
-// (`publico.ts`): Turnstile, los limitadores, la licencia y los dominios autorizados. Por eso no se
+// (`puerta.ts`): Turnstile, los limitadores, la licencia y los dominios autorizados. Por eso no se
 // usa el `tenant_id` directamente: una clave aparte se revoca sin tocar el negocio y no expone un
 // identificador interno.
 
@@ -20,7 +20,7 @@ export function generarClave(): string {
 /** La forma de una clave: el resto no se pregunta a la base. */
 export const CLAVE_RE = /^rw_[A-Za-z0-9_-]{22}$/;
 
-export async function claveActivaDelNegocio(db: Sql, tenantId: string): Promise<string | null> {
+async function claveActivaDelNegocio(db: Sql, tenantId: string): Promise<string | null> {
 	const rs = await db.execute({
 		sql: "SELECT clave FROM reserva_web_claves WHERE tenant_id = ? AND revoked_at_ms IS NULL LIMIT 1;",
 		args: [tenantId],

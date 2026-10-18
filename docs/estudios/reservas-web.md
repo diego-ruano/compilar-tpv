@@ -194,7 +194,7 @@ pasa por las migraciones).
 
 | Tabla | Columnas |
 |---|---|
-| `peticiones` | `id_peticion` (UUIDv7), `tipo` (`alta` o `cancelacion`), `id_reserva`, `id_mesa`, `dia_ymd`, `hora`, `comensales`, `email_hash` (SHA-256 del correo en minúsculas, para contar sin leer `datos_json`), `datos_json` (nombre, correo, teléfono y nota; sólo en un alta), `creada_local` (instante del negocio, §4.3), `creada_ms`, `estado` (`pendiente`, `entregada`, `vista`, `fallida`), `entregada_ms`, `intentos` |
+| `peticiones` | `id_peticion` (UUIDv7), `tipo` (`alta` o `cancelacion`; una de cada como mucho por reserva), `id_reserva`, `id_mesa`, `dia_ymd`, `hora`, `comensales`, `email_hash` (SHA-256 del correo en minúsculas, para contar sin leer `datos_json`), `datos_json` (nombre, correo, teléfono y nota; sólo en un alta), `creada_local` (instante del negocio, §4.3), `creada_ms`, `estado` (`pendiente`, `entregada`, `vista`, `fallida`, `anulada`), `entregada_ms`, `intentos`, `cerrada_ms` (cuándo pasó a `vista`, `fallida` o `anulada`; de ahí cuentan los 7 días) |
 | `enlaces` | `token_hash` (SHA-256 del token del enlace de cancelar), `id_reserva`, `caduca_ms` |
 | `estado` | Clave y valor: la versión del esquema de la agenda |
 
@@ -207,7 +207,10 @@ Ciclo de una petición:
   sin duplicarla (el `INSERT` es idempotente por `ID_Reserva`); cubre una Main que perdió su base o
   un outbox atascado.
 - `fallida` (la Main no pudo registrarla) → correo al cliente y se borra `datos_json`.
-- Los enlaces caducan un día después de la reserva.
+- `pendiente` → `anulada` si el cliente la cancela antes de que la Main la recoja: se borra
+  `datos_json` y la mesa queda libre en el acto.
+- Los enlaces caducan un día después de la reserva (con margen por la zona: 36 h desde su hora).
+- Todo está en `durableObjects/agendaWeb.almacen.ts`, síncrono a propósito.
 
 Los datos personales sólo están en la agenda mientras la reserva espera.
 
@@ -263,6 +266,10 @@ Identificadores de error nuevos, todos en `MENSAJES` (`lib/errorCodes.ts`) con s
 `reserva_web_no_disponible`, `reserva_web_demasiadas`, `reserva_web_cerrada`, `dia_no_reservable`, `hora_fuera_de_franja`,
 `mesa_no_disponible` (409; el widget vuelve a pedir las disponibles), `limite_reservas_correo`,
 `tope_reservas_negocio`, `verificacion_humana_fallida`, `reserva_no_cancelable` y `enlace_no_valido`.
+Los de la agenda salen con su estado (`agendaWeb.motor.ts::STATUS`): 400 el día o la hora que no
+valen, 409 lo que choca con el estado (`reserva_web_cerrada`, la mesa, el tope por correo, la que ya
+no se puede cancelar), 429 el tope del negocio y 404 el enlace. El `codigo` del alta son los seis
+últimos caracteres del `ID_Reserva`: una referencia corta para hablar con el restaurante.
 
 La entrada del alta tiene su dominio en
 [validacion_casos.json](../../crates/tpv-domain/src/validacion_casos.json) (`reserva_web`): el schema
@@ -311,6 +318,12 @@ mismo.
    comprobar el punto 5 e insertar la petición y el enlace. Dos altas a la vez para la misma mesa:
    gana una y la otra recibe `mesa_no_disponible`. Lo que se lee de Turso puede tener un segundo de
    retraso respecto a la Main; eso es el riesgo aceptado del §2.
+
+   Las altas de la agenda que cuentan son las que la lectura de Turso de esa petición no trae, y
+   también las que otra petición dio por `vista` desde un minuto antes de empezar a leer
+   (`Lectura` en `agendaWeb.almacen.ts`): sin eso, una petición que leyó Turso antes de que llegara
+   un alta, y que se resuelve después de que otra la viera, no la encontraría en ningún sitio y se
+   llevaría su mesa. Lo mismo para el tope por correo.
 5. `creada_local` es el instante del alta en la zona del negocio: es el `Created_At` que escribirá
    la Main. La hora la pone quien escribe, y el instante de una reserva web ocurre aquí.
 6. Avisar al `TenantHub` (sin esperar respuesta ni fallar si no contesta) y devolver el resultado.

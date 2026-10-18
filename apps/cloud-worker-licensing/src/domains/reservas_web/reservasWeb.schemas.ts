@@ -15,10 +15,10 @@ import { isValidEmail } from "../clientes/clientes.schemas";
 import { normalizeHora } from "../reservas/reservas.schemas";
 
 /** Los mismos topes que `tpv_domain::reservas_web`. */
-export const NOMBRE_MAX = 80;
-export const NOTA_MAX = 200;
-export const EMAIL_MAX = 254;
-export const PERSONAS_MAX = 50;
+const NOMBRE_MAX = 80;
+const NOTA_MAX = 200;
+const EMAIL_MAX = 254;
+const PERSONAS_MAX = 50;
 
 /** Cuántos caracteres (no unidades UTF-16): la «ñ» cuenta uno, como en Rust. */
 const largo = (s: string) => [...s].length;
@@ -34,7 +34,7 @@ const texto = (x: unknown): string => (typeof x === "string" ? x : "");
  * El teléfono sólo con sus cifras (y el `+` del prefijo internacional), o `null` si no lo parece.
  * Espejo de `tpv_domain::reservas_web::normalizar_telefono`.
  */
-export function normalizarTelefono(raw: unknown): string | null {
+function normalizarTelefono(raw: unknown): string | null {
 	const t = texto(raw).trim();
 	const mas = t.startsWith("+") ? "+" : "";
 	const resto = mas ? t.slice(1) : t;
@@ -113,3 +113,28 @@ export const diaQuerySchema = z.object({ dia: zDia("Formato de día inválido. E
 
 // ── Drift-guard con el DTO de Rust (ARCH-03) ─────────────────────────────────
 type _GAlta = Assert<SameKeys<AltaReservaWeb, ReservaWebAltaInput>>;
+
+/** `?dia=&hora=&personas=` de `/disponibles`. Llega como texto: es una consulta. */
+export const disponiblesQuerySchema = z.object({
+	dia: zDia("Formato de día inválido. Esperado YYYY-MM-DD."),
+	hora: z.unknown().transform((v, ctx) => {
+		const hora = horaHHMM(texto(v));
+		if (!hora) {
+			ctx.addIssue({ code: "custom", message: "Hora inválida. Esperado HH:MM." });
+			return z.NEVER;
+		}
+		return hora;
+	}),
+	personas: z.unknown().transform((v, ctx) => {
+		const t = texto(v).trim();
+		const n = /^\d{1,3}$/.test(t) ? Number(t) : 0;
+		if (n < 1 || n > PERSONAS_MAX) {
+			ctx.addIssue({ code: "custom", message: `El número de personas tiene que estar entre 1 y ${PERSONAS_MAX}` });
+			return z.NEVER;
+		}
+		return n;
+	}),
+});
+
+/** El cuerpo de `/reserva` y `/cancelar`: el token del enlace del correo. */
+export const tokenEnlaceSchema = z.object({ token: z.unknown().transform((v) => texto(v).trim().slice(0, 64)) });

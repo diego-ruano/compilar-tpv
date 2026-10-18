@@ -1,3 +1,4 @@
+import type { AgendaWeb } from "./durableObjects/agendaWeb";
 import type { TenantHub } from "./durableObjects/tenantHub";
 // src/env.ts
 //
@@ -88,6 +89,10 @@ export interface Env {
 
 	// Durable Object (WebSocket hub por tenant)
 	TenantHub: DurableObjectNamespace<TenantHub>;
+
+	// La agenda de reservas web, una por negocio (docs/estudios/reservas-web.md §4.3). Nunca escribe
+	// en Turso: guarda en su SQLite lo que espera a la Main.
+	AgendaWeb: DurableObjectNamespace<AgendaWeb>;
 
 	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).
 	// Las claves replican la ruta de la Main: `{tenantId}/images/{subcarpeta}/{uuid}.jpg`.

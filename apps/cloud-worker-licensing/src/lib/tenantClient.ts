@@ -147,15 +147,35 @@ export async function tenantQuery<T>(
 	c: ContextoDeLectura,
 	fn: (db: Client) => Promise<T>,
 ): Promise<T> {
-	const env = c.env;
-	const tenantId = c.get("tenantId");
 	// REV-03: la hora local del emisor, validada igual que en las escrituras (formato y deriva).
 	const ahoraLocal = parseClientNow(c.req.header("X-Client-Now"));
-	const conLaHora = (db: Client) => (ahoraLocal ? conLaHoraDeQuienPregunta(db, ahoraLocal) : db);
+	return conElClienteDelTenant(c.env, c.get("tenantId"), (db) =>
+		fn(ahoraLocal ? conLaHoraDeQuienPregunta(db, ahoraLocal) : db),
+	);
+}
 
+/**
+ * Lo mismo que `tenantQuery` para quien no tiene un dispositivo que diga su hora: la reserva desde
+ * la web, que pregunta desde un navegador cualquiera. «Ahora» lo calcula `hora` con el propio
+ * cliente (la zona del negocio) y se fija igual en todas las sentencias de `fn`, que lo recibe
+ * también para no tener que volver a calcularlo.
+ */
+export async function lecturaConHora<T>(
+	env: Env,
+	tenantId: string,
+	hora: (db: Client) => Promise<string>,
+	fn: (db: Client, ahoraLocal: string) => Promise<T>,
+): Promise<T> {
+	return conElClienteDelTenant(env, tenantId, async (db) => {
+		const ahoraLocal = await hora(db);
+		return fn(conLaHoraDeQuienPregunta(db, ahoraLocal), ahoraLocal);
+	});
+}
+
+async function conElClienteDelTenant<T>(env: Env, tenantId: string, fn: (db: Client) => Promise<T>): Promise<T> {
 	try {
 		const db = await getTenantClient(env, tenantId);
-		return await fn(conLaHora(db));
+		return await fn(db);
 	} catch (e) {
 		if (!isTursoAuthError(e)) throw e;
 		cache.delete(tenantId);
@@ -163,6 +183,6 @@ export async function tenantQuery<T>(
 		// Si el 401 vino del guard de migración, su entrada ya se invalidó al fallar: hay que
 		// reintentarlo con el token nuevo antes de la query (si ya estaba migrado, es un no-op).
 		await ensureTenantMigrated(fresh, tenantId);
-		return await fn(conLaHora(fresh));
+		return await fn(fresh);
 	}
 }

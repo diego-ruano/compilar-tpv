@@ -102,6 +102,8 @@ describe("ningún identificador del worker se queda sin clasificar", () => {
 		/\bmessage:\s*"([^"]+)"/g,
 		/textoObligatorio\(\s*"([^"]+)"/g,
 		/soloLaMain\(\s*"([^"]+)"/g,
+		// La agenda de reservas web (`agendaWeb.motor.ts`): sus rechazos cruzan el RPC como resultado.
+		/rechazo\(\s*"([^"]+)"/g,
 	];
 	// Un identificador de máquina; las frases («Lote no encontrado») ya se leen bien tal cual.
 	const IDENTIFICADOR = /^[A-Za-z][A-Za-z0-9_]*$/;

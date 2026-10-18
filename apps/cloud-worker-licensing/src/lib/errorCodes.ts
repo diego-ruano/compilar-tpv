@@ -266,6 +266,17 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	verificacion_humana_fallida:
 		"No hemos podido comprobar que no eres un robot. Recarga la página y vuelve a intentarlo.",
 	reserva_web_demasiadas: "Demasiadas peticiones seguidas. Espera un minuto y vuelve a intentarlo.",
+	reserva_web_cerrada: "Este restaurante no admite reservas por internet ahora mismo. Llama para reservar.",
+	dia_no_reservable: "Ese día no se puede reservar por internet. Elige otro.",
+	hora_fuera_de_franja: "A esa hora no se puede reservar. Elige una de las horas que se ofrecen.",
+	mesa_no_disponible: "Esa mesa acaba de ocuparse. Elige otra de las que quedan libres.",
+	limite_reservas_correo:
+		"Ya tienes muchas reservas activas con este correo. Cancela alguna o llama al restaurante.",
+	tope_reservas_negocio:
+		"Este restaurante ha recibido muchas reservas por internet hoy. Llama para reservar.",
+	reserva_no_cancelable:
+		"Esta reserva ya no se puede cancelar por internet. Si lo necesitas, llama al restaurante.",
+	enlace_no_valido: "Este enlace no es válido o ha caducado.",
 };
 
 export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([

@@ -1,0 +1,137 @@
+// src/domains/reservas_web/publico.routes.ts
+//
+// Reservas desde la web (docs/estudios/reservas-web.md §4.2): lo que llama el widget, montado en
+// `/v1/publico/reservas/:clave/…`. Sin `tenantAuth`: el negocio sale de la clave y todo lo que
+// decide si se pasa es la puerta (`puerta.ts`), delante del validador.
+//
+//   GET  /negocio                         lo del negocio y el calendario: qué días se pueden reservar
+//   GET  /dia?dia=                        las horas de llegada de ese día
+//   GET  /plano                           salones y mesas, para dibujar
+//   GET  /disponibles?dia=&hora=&personas= las mesas libres (o horas cercanas que tienen)
+//   POST /reservas                        reservar (Turnstile en `X-Turnstile-Token`)
+//   POST /reserva  { token }              el resumen para la página de cancelar
+//   POST /cancelar { token }              cancelar desde el enlace del correo
+//
+// Lo que no depende de lo pendiente se lee directamente de Turso; lo que sí (qué mesas están
+// libres, reservar, cancelar), lo decide la agenda del negocio. Ninguna respuesta lleva datos
+// personales de una reserva, y el token del enlace sólo viaja en el correo (§4.8): `/reserva` va
+// por POST para que no salga en ninguna URL ni en ningún log.
+
+import { Hono } from "hono";
+
+import type { Env } from "../../env";
+import { agendaDe } from "../../durableObjects/agendaWeb";
+import type { RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
+import { lecturaConHora } from "../../lib/tenantClient";
+import { consulta, cuerpo } from "../../lib/validacion";
+import { diasAbiertos, horizonte, maxPersonas, motivoDelDia, tramosDelDia } from "./disponibilidad";
+import { horaDelNegocio } from "./horaDelNegocio";
+import { ajustesWeb, cierresEntre, mesasYFranjas, negocioPublico, planoPublico } from "./lecturas";
+import { limitadorAltas, puertaPublica, verificacionHumana, type PublicoVars } from "./puerta";
+import {
+	altaReservaWebSchema,
+	diaQuerySchema,
+	disponiblesQuerySchema,
+	tokenEnlaceSchema,
+} from "./reservasWeb.schemas";
+
+type Ctx = { Bindings: Env; Variables: PublicoVars };
+
+export const reservasWebPublicoRoutes = new Hono<Ctx>();
+
+function rechazada(c: any, r: RechazoAgenda) {
+	return c.json({ ok: false, error: r.error }, r.status);
+}
+
+reservasWebPublicoRoutes.get("/:clave/negocio", puertaPublica, async (c) => {
+	const d = await lecturaConHora(c.env, c.get("tenantId"), horaDelNegocio, async (db, ahora) => {
+		const ajustes = await ajustesWeb(db);
+		const hoy = ahora.slice(0, 10);
+		const { primero, ultimo } = horizonte(hoy, ajustes);
+		const [negocio, { mesas, franjas }, cierres] = await Promise.all([
+			negocioPublico(db),
+			mesasYFranjas(db),
+			cierresEntre(db, primero, ultimo),
+		]);
+		return { ajustes, hoy, primero, ultimo, negocio, mesas, franjas, cierres };
+	});
+
+	// El interruptor general del negocio. Con el nombre y el teléfono, para que el widget diga a
+	// quién llamar.
+	if (!d.ajustes.activa) {
+		return c.json(
+			{ ok: false, error: "reserva_web_cerrada", negocio: { nombre: d.negocio.nombre, telefono: d.negocio.telefono } },
+			409,
+		);
+	}
+	return c.json({
+		ok: true,
+		negocio: d.negocio,
+		hoy: d.hoy,
+		primer_dia: d.primero,
+		ultimo_dia: d.ultimo,
+		dias_abiertos: diasAbiertos(d.hoy, d.ajustes, d.cierres, d.mesas, d.franjas),
+		max_personas: maxPersonas(d.mesas, d.franjas),
+		duracion_min: d.ajustes.duracion,
+		turnstile: c.env.TURNSTILE_SITE_KEY ?? null,
+	});
+});
+
+reservasWebPublicoRoutes.get("/:clave/dia", puertaPublica, consulta(diaQuerySchema), async (c) => {
+	const { dia } = c.req.valid("query");
+	const d = await lecturaConHora(c.env, c.get("tenantId"), horaDelNegocio, async (db, ahora) => {
+		const ajustes = await ajustesWeb(db);
+		const [cierres, { mesas, franjas }] = await Promise.all([cierresEntre(db, dia, dia), mesasYFranjas(db)]);
+		return { ajustes, hoy: ahora.slice(0, 10), cierres, mesas, franjas };
+	});
+	const motivo = motivoDelDia(dia, d.hoy, d.ajustes, d.cierres);
+	if (motivo) return c.json({ ok: false, error: motivo }, motivo === "reserva_web_cerrada" ? 409 : 400);
+	return c.json({ ok: true, dia, tramos: tramosDelDia(d.mesas, d.franjas, dia, d.ajustes) });
+});
+
+reservasWebPublicoRoutes.get("/:clave/plano", puertaPublica, async (c) => {
+	const plano = await lecturaConHora(c.env, c.get("tenantId"), horaDelNegocio, (db) => planoPublico(db));
+	c.header("Cache-Control", "public, max-age=60");
+	return c.json({ ok: true, ...plano });
+});
+
+reservasWebPublicoRoutes.get(
+	"/:clave/disponibles",
+	puertaPublica,
+	consulta(disponiblesQuerySchema),
+	async (c) => {
+		const q = c.req.valid("query");
+		const r = await agendaDe(c.env, c.get("tenantId")).disponibles({ tenantId: c.get("tenantId"), ...q });
+		if (!r.ok) return rechazada(c, r);
+		return c.json({ ok: true, mesas: r.mesas, alternativas: r.alternativas });
+	},
+);
+
+reservasWebPublicoRoutes.post(
+	"/:clave/reservas",
+	puertaPublica,
+	limitadorAltas,
+	verificacionHumana,
+	cuerpo(altaReservaWebSchema),
+	async (c) => {
+		const alta = c.req.valid("json");
+		const r = await agendaDe(c.env, c.get("tenantId")).reservar({ tenantId: c.get("tenantId"), alta });
+		if (!r.ok) return rechazada(c, r);
+		// El token del enlace de cancelar NO va en la respuesta: sólo en el correo (fase 5).
+		return c.json({ ok: true, codigo: r.codigo, dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa });
+	},
+);
+
+reservasWebPublicoRoutes.post("/:clave/reserva", puertaPublica, cuerpo(tokenEnlaceSchema), async (c) => {
+	const { token } = c.req.valid("json");
+	const r = await agendaDe(c.env, c.get("tenantId")).consultarEnlace({ tenantId: c.get("tenantId"), token });
+	if (!r.ok) return rechazada(c, r);
+	return c.json(r);
+});
+
+reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, cuerpo(tokenEnlaceSchema), async (c) => {
+	const { token } = c.req.valid("json");
+	const r = await agendaDe(c.env, c.get("tenantId")).cancelar({ tenantId: c.get("tenantId"), token });
+	if (!r.ok) return rechazada(c, r);
+	return c.json({ ok: true });
+});
