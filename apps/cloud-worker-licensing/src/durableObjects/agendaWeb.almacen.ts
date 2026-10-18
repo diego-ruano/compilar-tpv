@@ -149,17 +149,45 @@ export function ocupacionPendiente(sql: SqlStorage, dia: string, duracion: numbe
 	return filas.map((f) => ({ id_mesa: String(f.id_mesa), ...intervalo(String(f.dia_ymd), String(f.hora), duracion) }));
 }
 
-/** Las altas que esperan a aparecer en Turso, las más viejas primero: lo que mira la alarma. */
-export function altasEsperando(sql: SqlStorage, max: number): string[] {
+/** Por dónde va la alarma recorriendo lo que espera: la última alta que miró. */
+export type CursorAlarma = { creada_ms: number; id_reserva: string };
+
+/**
+ * Las altas que esperan a aparecer en Turso, de las más viejas a las más nuevas y a partir de
+ * `despues` (sin incluirla): lo que mira la alarma, por lotes.
+ */
+export function altasEsperando(sql: SqlStorage, max: number, despues: CursorAlarma | null): CursorAlarma[] {
+	const desde = despues ?? { creada_ms: -1, id_reserva: "" };
 	return (
 		sql
 			.exec(
-				`SELECT id_reserva FROM peticiones WHERE tipo = 'alta' AND estado IN ('pendiente', 'entregada')
+				`SELECT creada_ms, id_reserva FROM peticiones
+				 WHERE tipo = 'alta' AND estado IN ('pendiente', 'entregada') AND (creada_ms, id_reserva) > (?, ?)
 				 ORDER BY creada_ms, id_reserva LIMIT ?;`,
+				desde.creada_ms,
+				desde.id_reserva,
 				max,
 			)
 			.toArray() as any[]
-	).map((f) => String(f.id_reserva));
+	).map((f) => ({ creada_ms: Number(f.creada_ms), id_reserva: String(f.id_reserva) }));
+}
+
+export function cursorDeLaAlarma(sql: SqlStorage): CursorAlarma | null {
+	const fila = sql.exec(`SELECT valor FROM estado WHERE clave = 'cursor_alarma';`).toArray()[0] as any;
+	return fila ? (JSON.parse(String(fila.valor)) as CursorAlarma) : null;
+}
+
+/** `null` vuelve a empezar por la más vieja. */
+export function guardarCursorDeLaAlarma(sql: SqlStorage, cursor: CursorAlarma | null): void {
+	if (cursor) {
+		sql.exec(
+			`INSERT INTO estado (clave, valor) VALUES ('cursor_alarma', ?)
+			 ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor;`,
+			JSON.stringify(cursor),
+		);
+	} else {
+		sql.exec(`DELETE FROM estado WHERE clave = 'cursor_alarma';`);
+	}
 }
 
 /** Altas apuntadas desde `desdeMs`, en cualquier estado: el tope por negocio. */

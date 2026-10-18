@@ -44,6 +44,8 @@ import type { AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas
 import {
 	altasDesde,
 	altasEsperando,
+	cursorDeLaAlarma,
+	guardarCursorDeLaAlarma,
 	anularAlta,
 	apuntarAlta,
 	apuntarCancelacion,
@@ -69,8 +71,12 @@ const CADA_ALARMA_MS = 60 * 60_000;
  * (`agendaWeb.almacen.ts::Lectura`). Cubre que la lectura de Turso llegue con algo de retraso.
  */
 const MARGEN_LECTURA_MS = 60_000;
-/** Cuántas altas que esperan mira la alarma en Turso cada vez. */
+/**
+ * Cuántas altas que esperan mira la alarma en Turso por consulta, y cuántas consultas hace cada vez.
+ * Lo que no le dé tiempo lo sigue en la siguiente, desde donde lo dejó (`cursor_alarma`).
+ */
 const MAX_RECONCILIAR = 500;
+const LOTES_POR_ALARMA = 5;
 
 type ErrorAgenda =
 	| "reserva_web_cerrada"
@@ -458,16 +464,30 @@ export class MotorAgendaWeb {
 	 */
 	private async reconciliarConTurso(): Promise<void> {
 		const tenantId = negocioRecordado(this.sql);
-		const ids = altasEsperando(this.sql, MAX_RECONCILIAR);
-		if (!tenantId || !ids.length) return;
-		const enTurso = await this.leer(tenantId, async (db) => {
-			const rs = await db.execute({
-				sql: `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`,
-				args: [JSON.stringify(ids)],
+		if (!tenantId) return;
+		// Por lotes y avanzando aunque un lote no encuentre nada: si las más viejas no llegan nunca a
+		// Turso, no pueden tapar a las de detrás.
+		let cursor = cursorDeLaAlarma(this.sql);
+		for (let lote = 0; lote < LOTES_POR_ALARMA; lote++) {
+			const altas = altasEsperando(this.sql, MAX_RECONCILIAR, cursor);
+			if (!altas.length) {
+				cursor = null;
+				break;
+			}
+			const ids = altas.map((a) => a.id_reserva);
+			const enTurso = await this.leer(tenantId, async (db) => {
+				const rs = await db.execute({
+					sql: `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`,
+					args: [JSON.stringify(ids)],
+				});
+				return (rs.rows ?? []).map((r: any) => String(r.id));
 			});
-			return (rs.rows ?? []).map((r: any) => String(r.id));
-		});
-		darPorVistas(this.sql, enTurso, Date.now());
+			darPorVistas(this.sql, enTurso, Date.now());
+			// Un lote incompleto es el último: la siguiente alarma vuelve a empezar por la más vieja.
+			cursor = altas.length < MAX_RECONCILIAR ? null : altas[altas.length - 1];
+			if (!cursor) break;
+		}
+		guardarCursorDeLaAlarma(this.sql, cursor);
 	}
 
 	/** Sólo para diagnóstico y tests: de qué negocio es esta agenda. */

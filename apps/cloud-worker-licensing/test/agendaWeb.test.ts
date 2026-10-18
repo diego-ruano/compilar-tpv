@@ -421,6 +421,47 @@ describe("la agenda de reservas web", () => {
 		});
 	});
 
+	it("la alarma recorre lo que espera por lotes: las más viejas no tapan a las de detrás", async () => {
+		await conAgenda("agenda-alarma-lotes", async (motor, sql, state) => {
+			// 2600 altas que esperan; en Turso, la 600 (segundo lote) y la 2550 (más allá de lo que mira
+			// una alarma: 5 lotes de 500). Apuntadas a mano, sin pasar por el motor: el negocio también.
+			sql.exec(`INSERT INTO estado (clave, valor) VALUES ('tenant_id', ?);`, T);
+			for (let i = 0; i < 2600; i++) {
+				sql.exec(
+					`INSERT INTO peticiones (id_peticion, tipo, id_reserva, id_mesa, dia_ymd, hora, comensales, datos_json,
+					                         creada_local, creada_ms, estado)
+					 VALUES (?, 'alta', ?, 'm2', ?, '21:00', 2, '{"nombre":"x"}', ?, ?, 'pendiente');`,
+					`p${i}`,
+					`r${String(i).padStart(4, "0")}`,
+					DIA,
+					AHORA,
+					1000 + i,
+				);
+			}
+			for (const id of ["r0600", "r2550"]) {
+				sql.exec(
+					`INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+					 VALUES (?, 'm2', ?, '21:00', 'CENA', 2, 'PROXIMA', 'WEB');`,
+					id,
+					DIA,
+				);
+			}
+			const estado = (id: string) =>
+				(sql.exec(`SELECT estado FROM peticiones WHERE id_reserva = ?;`, id).toArray()[0] as any).estado;
+
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(estado("r0600")).toBe("vista");
+			expect(estado("r2550")).toBe("pendiente");
+
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(estado("r2550")).toBe("vista");
+			// Terminada la vuelta, la siguiente empieza otra vez por la más vieja.
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM estado WHERE clave = 'cursor_alarma';`).toArray()[0]).toEqual({ n: 0 });
+		});
+	});
+
 	it("la alarma purga lo cerrado hace más de una semana y los enlaces caducados", async () => {
 		await conAgenda("agenda-alarma", async (motor, sql, state) => {
 			const r = await motor.reservar({ tenantId: T, alta: alta() });
