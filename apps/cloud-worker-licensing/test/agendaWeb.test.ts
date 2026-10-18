@@ -161,6 +161,43 @@ describe("la agenda de reservas web", () => {
 		});
 	});
 
+	it("cancelar con una lectura vieja de Turso no confunde un alta recién vista con una borrada", async () => {
+		// El mismo cruce, en el enlace: la Main ya tiene el alta; /cancelar lee Turso antes de que
+		// llegue y, mientras espera, otra petición la ve y la da por vista. Para esa lectura no está en
+		// Turso y está vista: parece borrada (cancelada) y se respondería `ok` sin cancelar nada.
+		await conAgenda("agenda-cancelar-lectura-vieja", async (motor, sql, state) => {
+			const x = await motor.reservar({ tenantId: T, alta: alta() });
+			sql.exec(`UPDATE peticiones SET estado = 'entregada' WHERE id_reserva = ?;`, x.id_reserva);
+
+			let avisarLeido!: () => void;
+			const leido = new Promise<void>((r) => (avisarLeido = r));
+			let soltar!: () => void;
+			const suelta = new Promise<void>((r) => (soltar = r));
+			const normal = lectorSobre(state, () => AHORA);
+			motor.leer = async (tenantId: string, fn: any) => {
+				const resultado = await normal(tenantId, fn);
+				avisarLeido();
+				await suelta;
+				return resultado;
+			};
+			const cancelando = motor.cancelar({ tenantId: T, token: x.token });
+			await leido;
+
+			motor.leer = normal;
+			sql.exec(
+				`INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+				 VALUES (?, 'm2', ?, '21:00', 'CENA', 2, 'PROXIMA', 'WEB');`,
+				x.id_reserva,
+				DIA,
+			);
+			await motor.disponibles({ tenantId: T, dia: DIA, hora: "21:00", personas: 2 });
+
+			soltar();
+			expect(await cancelando).toEqual({ ok: true });
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE tipo = 'cancelacion';`).toArray()[0]).toEqual({ n: 1 });
+		});
+	});
+
 	it("una reserva de Turso ocupa la mesa; si no queda ninguna, propone horas cercanas", async () => {
 		await conAgenda("agenda-alternativas", async (motor, sql) => {
 			for (const m of ["m2", "m4"]) {

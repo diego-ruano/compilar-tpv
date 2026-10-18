@@ -319,12 +319,12 @@ export class MotorAgendaWeb {
 		const idReserva = await this.reservaDelToken(p.token);
 		if (!idReserva) return rechazo("enlace_no_valido");
 
-		const { ahora, enTurso, numero } = await this.leerReserva(p.tenantId, idReserva);
+		const { leidaMs, ahora, enTurso, numero } = await this.leerReserva(p.tenantId, idReserva);
 		const alta = peticion(this.sql, "alta", idReserva);
 		const datos = enTurso ?? (alta ? { dia: alta.dia_ymd, hora: alta.hora, personas: alta.comensales, id_mesa: alta.id_mesa } : null);
 		if (!datos) return rechazo("enlace_no_valido");
 
-		const estado = this.estadoPublico(idReserva, enTurso, ahora, datos);
+		const estado = this.estadoPublico(idReserva, enTurso, ahora, datos, leidaMs);
 		return {
 			ok: true,
 			dia: datos.dia,
@@ -346,7 +346,7 @@ export class MotorAgendaWeb {
 		const idReserva = await this.reservaDelToken(p.token);
 		if (!idReserva) return rechazo("enlace_no_valido");
 
-		const { ahora, enTurso } = await this.leerReserva(p.tenantId, idReserva);
+		const { leidaMs, ahora, enTurso } = await this.leerReserva(p.tenantId, idReserva);
 		// ── Síncrono hasta el final ──
 		const ahoraMs = Date.now();
 		if (enTurso) darPorVistas(this.sql, [idReserva], ahoraMs);
@@ -354,7 +354,7 @@ export class MotorAgendaWeb {
 		const datos = enTurso ?? (alta ? { dia: alta.dia_ymd, hora: alta.hora, personas: alta.comensales, id_mesa: alta.id_mesa } : null);
 		if (!datos) return rechazo("enlace_no_valido");
 
-		const estado = this.estadoPublico(idReserva, enTurso, ahora, datos);
+		const estado = this.estadoPublico(idReserva, enTurso, ahora, datos, leidaMs);
 		if (estado === "cancelada") return { ok: true };
 		if (estado === "pasada") return rechazo("reserva_no_cancelable");
 
@@ -379,15 +379,20 @@ export class MotorAgendaWeb {
 		enTurso: ReservaEnTurso | null,
 		ahora: string,
 		datos: { dia: string; hora: string },
+		leidaMs: number,
 	): EstadoPublico {
 		const alta = peticion(this.sql, "alta", idReserva);
+		// Que no esté en esta lectura de Turso sólo quiere decir que se borró si se dio por vista antes
+		// de empezar a leerla: si fue mientras, la lectura es simplemente más vieja (`Lectura`).
+		const borrada =
+			!enTurso && alta?.estado === "vista" && Number(alta.cerrada_ms ?? 0) < leidaMs - MARGEN_LECTURA_MS;
 		const cancelada =
 			enTurso?.estado === "CANCELADA" ||
 			alta?.estado === "anulada" ||
 			// La Main no pudo registrarla: al cliente se le avisa por correo y deja de valer.
 			alta?.estado === "fallida" ||
 			// Estuvo en Turso y ya no está: el restaurante la borró, que es cancelarla.
-			(!enTurso && alta?.estado === "vista") ||
+			borrada ||
 			peticion(this.sql, "cancelacion", idReserva) !== null;
 		if (cancelada) return "cancelada";
 		// Sentados (ACTIVA), terminada o no se presentaron: ya no es una reserva por venir.
@@ -406,7 +411,8 @@ export class MotorAgendaWeb {
 	private async leerReserva(
 		tenantId: string,
 		idReserva: string,
-	): Promise<{ ahora: string; enTurso: ReservaEnTurso | null; numero: string | null }> {
+	): Promise<{ leidaMs: number; ahora: string; enTurso: ReservaEnTurso | null; numero: string | null }> {
+		const leidaMs = Date.now();
 		return this.leer(tenantId, async (db, ahora) => {
 			const rs = await db.execute({
 				sql: `SELECT R.Dia_YMD AS dia, R.Hora AS hora, R.Comensales AS personas, R.ID_Mesa AS id_mesa,
@@ -420,7 +426,7 @@ export class MotorAgendaWeb {
 				: null;
 			const idMesa = enTurso?.id_mesa ?? peticion(this.sql, "alta", idReserva)?.id_mesa ?? null;
 			const numero = idMesa ? await numeroDeMesa(db, idMesa) : null;
-			return { ahora, enTurso, numero };
+			return { leidaMs, ahora, enTurso, numero };
 		});
 	}
 

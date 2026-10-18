@@ -34,6 +34,7 @@ export type FilaPeticion = {
 	creada_local: string;
 	creada_ms: number;
 	estado: EstadoPeticion;
+	cerrada_ms?: number | null;
 };
 
 const ESQUEMA = [
@@ -212,7 +213,14 @@ export function peticion(sql: SqlStorage, tipo: "alta" | "cancelacion", idReserv
 	const fila = sql
 		.exec(`SELECT * FROM peticiones WHERE tipo = ? AND id_reserva = ?;`, tipo, idReserva)
 		.toArray()[0] as any;
-	return fila ? ({ ...fila, comensales: Number(fila.comensales), creada_ms: Number(fila.creada_ms) } as FilaPeticion) : null;
+	return fila
+		? ({
+				...fila,
+				comensales: Number(fila.comensales),
+				creada_ms: Number(fila.creada_ms),
+				cerrada_ms: fila.cerrada_ms === null ? null : Number(fila.cerrada_ms),
+			} as FilaPeticion)
+		: null;
 }
 
 /** Un alta que la Main todavía no tiene se anula aquí mismo: deja libre la mesa y olvida los datos. */
