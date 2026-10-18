@@ -102,6 +102,12 @@ importers:
       '@tpv/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@tpv/estilos':
+        specifier: workspace:*
+        version: link:../../packages/estilos
+      '@tpv/plano':
+        specifier: workspace:*
+        version: link:../../packages/plano
       apexcharts:
         specifier: ^5.3.6
         version: 5.13.0
@@ -227,6 +233,20 @@ importers:
   packages/contracts: {}
 
   packages/database: {}
+
+  packages/estilos: {}
+
+  packages/plano:
+    devDependencies:
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.2.16
+      react:
+        specifier: ^19.1.0
+        version: 19.2.7
+      react-konva:
+        specifier: ^19.2.1
+        version: 19.2.4(@types/react@19.2.16)(konva@10.3.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
 
 packages:
 

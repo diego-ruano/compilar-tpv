@@ -1,9 +1,11 @@
-// components/mesasComponents/MapCanvas.tsx
+// La sala: el marco y los mensajes de la Main alrededor del plano compartido (`@tpv/plano`).
 import React from "react";
-import { Stage, Layer, Rect, Line, Group } from "react-konva";
 import type { MesaMetaOut } from "@tpv/contracts";
+import { Lienzo } from "@tpv/plano";
+
 import type { Salon } from "./types";
-import TableNode from "./TableNode";
+import { aspectoDeMesa } from "./aspectoMesa";
+import { parseMesaId } from "./ParseMesaId";
 import { useTheme } from "../../shared/stores/useTheme";
 
 export default function MapCanvas({
@@ -31,59 +33,24 @@ export default function MapCanvas({
 
     return (
         <div className="mt-3 min-h-0 w-full flex-1 overflow-hidden rounded-2xl border border-border bg-surface sm:mt-4">
-            <div
-                ref={mapBoxRef}
-                className="h-full min-h-0 w-full"
-            >
+            <div ref={mapBoxRef} className="h-full min-h-0 w-full">
                 {loading ? (
-                    <div className="grid h-full w-full place-items-center text-fg-muted">
-                        Cargando…
-                    </div>
+                    <div className="grid h-full w-full place-items-center text-fg-muted">Cargando…</div>
                 ) : !activeSalon ? (
-                    <div className="grid h-full w-full place-items-center text-fg-muted">
-                        No hay salones guardados.
-                    </div>
-                ) : !mapSize.width || !mapSize.height ? null : (
-                    <Stage
-                        width={mapSize.width}
-                        height={mapSize.height}
-                        style={{ background: canvasBg }}
-                    >
-                        <Layer>
-                            <Rect
-                                x={0}
-                                y={0}
-                                width={mapSize.width}
-                                height={mapSize.height}
-                                fill={canvasBg}
-                            />
-
-                            <Group
-                                x={view.x}
-                                y={view.y}
-                                scaleX={view.scale}
-                                scaleY={view.scale}
-                            >
-                                <Line
-                                    points={activeSalon.room.points}
-                                    closed
-                                    stroke={roomStroke}
-                                    strokeWidth={2}
-                                    lineJoin="round"
-                                />
-
-                                {activeSalon.tables.map((t) => (
-                                    <TableNode
-                                        key={t.id}
-                                        table={t}
-                                        mesaMetaById={mesaMetaById}
-                                        onOpenMesa={onOpenMesa}
-                                        dark={dark}
-                                    />
-                                ))}
-                            </Group>
-                        </Layer>
-                    </Stage>
+                    <div className="grid h-full w-full place-items-center text-fg-muted">No hay salones guardados.</div>
+                ) : (
+                    <Lienzo
+                        salon={activeSalon}
+                        tamano={mapSize}
+                        vista={view}
+                        fondo={canvasBg}
+                        bordeSalon={roomStroke}
+                        aspecto={(t) => aspectoDeMesa(t, mesaMetaById as any, dark)}
+                        onPulsarMesa={(t) => {
+                            const idMesa = parseMesaId(t.id);
+                            if (idMesa) onOpenMesa(idMesa, t.name);
+                        }}
+                    />
                 )}
             </div>
         </div>

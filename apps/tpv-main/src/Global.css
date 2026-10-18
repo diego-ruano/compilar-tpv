@@ -19,134 +19,15 @@
 @import "apexcharts/dist/apexcharts.css";
 @import "apexcharts/dist/apexcharts-legend.css";
 
+/* Los tokens de color (fondos, bordes, texto, acento, semáforos) y su mapeo a utilidades: viven en
+   @tpv/estilos, compartidos con el widget de reservas web. */
+@import "@tpv/estilos/tokens.css";
+
 /* =========================================================================
    Variante dark basada en clase (.dark en <html>), no en prefers-color-scheme.
    El tema lo controla el store useTheme (persistido en localStorage).
    ========================================================================= */
 @custom-variant dark (&:where(.dark, .dark *));
-
-/* =========================================================================
-   TOKENS SEMÁNTICOS (cambian de valor entre claro/oscuro).
-   Los componentes deben usar las utilidades derivadas (bg-surface, text-fg,
-   border-border, etc.) en lugar de colores literales, para que el dark mode
-   funcione sin salpicar `dark:` por todas partes.
-   ========================================================================= */
-:root {
-    /* Fondos */
-    --bg: #f3f8ff;        /* azul muy claro para el fondo general */
-    --surface: #ffffff;   /* tarjetas / paneles */
-    --surface-2: #eaf3ff; /* hover suave / inputs */
-    --surface-3: #dceaff; /* hover más marcado / zonas hundidas */
-
-    /* Bordes */
-    --border: rgba(43, 129, 212, 0.12);
-    --border-strong: rgba(15, 44, 86, 0.22);
-
-    /* Texto */
-    --fg: #1e2128;        /* texto principal */
-    --fg-muted: #5b6573;  /* texto secundario */
-    --fg-subtle: #8a93a2; /* texto terciario / placeholders */
-
-    /* Acento azul corporativo */
-    --accent: #016ffc;
-    --accent-hover: #2b81d4;
-    --accent-soft: rgba(1, 111, 252, 0.12); /* fondos suaves de acento */
-    --accent-fg: #ffffff;
-
-    /* Semáforos */
-    --success: #0fb968;
-    --success-fg: #ffffff;
-    --success-soft: rgba(15, 185, 104, 0.12);
-    --danger: #ef4444;
-    --danger-fg: #ffffff;
-    --danger-soft: rgba(239, 68, 68, 0.12);
-    --warning: #f59e0b;
-    --warning-fg: #1e2128;
-    --warning-soft: rgba(245, 158, 11, 0.14);
-
-    /* Foco */
-    --ring: rgba(1, 111, 252, 0.45);
-
-    /* Sombra (suave en claro) */
-    --shadow-color: rgba(15, 23, 42, 0.08);
-}
-
-.dark {
-    /* Fondos (graphite / charcoal) */
-    --bg: #0e0f13;
-    --surface: #17191f;
-    --surface-2: #1e2128;
-    --surface-3: #262a33;
-
-    /* Bordes (sutiles, claros sobre oscuro) */
-    --border: rgba(255, 255, 255, 0.08);
-    --border-strong: rgba(255, 255, 255, 0.16);
-
-    /* Texto */
-    --fg: #e7e9ee;
-    --fg-muted: #a3abb8;
-    --fg-subtle: #6f7886;
-
-    /* Acento azul corporativo */
-    --accent: #2b81d4;
-    --accent-hover: #016ffc;
-    --accent-soft: rgba(43, 129, 212, 0.18);
-    --accent-fg: #ffffff;
-
-    /* Semáforos */
-    --success: #22c97a;
-    --success-fg: #07120c;
-    --success-soft: rgba(34, 201, 122, 0.16);
-    --danger: #f56565;
-    --danger-fg: #18090a;
-    --danger-soft: rgba(245, 101, 101, 0.16);
-    --warning: #f7b955;
-    --warning-fg: #1a1304;
-    --warning-soft: rgba(247, 185, 85, 0.18);
-
-    /* Foco (glow más visible) */
-    --ring: rgba(43, 129, 212, 0.55);
-
-    /* Sombra casi nula en oscuro (nos apoyamos en bordes/ring) */
-    --shadow-color: rgba(0, 0, 0, 0.45);
-}
-
-/* =========================================================================
-   Mapeo de tokens a utilidades Tailwind v4 (`inline` => las utilidades
-   referencian var() y heredan el cambio claro/oscuro automáticamente).
-   Genera: bg-bg, bg-surface, bg-surface-2, text-fg, text-fg-muted,
-   border-border, ring-ring, bg-accent, text-accent, etc.
-   ========================================================================= */
-@theme inline {
-    --color-bg: var(--bg);
-    --color-surface: var(--surface);
-    --color-surface-2: var(--surface-2);
-    --color-surface-3: var(--surface-3);
-
-    --color-border: var(--border);
-    --color-border-strong: var(--border-strong);
-
-    --color-fg: var(--fg);
-    --color-fg-muted: var(--fg-muted);
-    --color-fg-subtle: var(--fg-subtle);
-
-    --color-accent: var(--accent);
-    --color-accent-hover: var(--accent-hover);
-    --color-accent-soft: var(--accent-soft);
-    --color-accent-fg: var(--accent-fg);
-
-    --color-success: var(--success);
-    --color-success-fg: var(--success-fg);
-    --color-success-soft: var(--success-soft);
-    --color-danger: var(--danger);
-    --color-danger-fg: var(--danger-fg);
-    --color-danger-soft: var(--danger-soft);
-    --color-warning: var(--warning);
-    --color-warning-fg: var(--warning-fg);
-    --color-warning-soft: var(--warning-soft);
-
-    --color-ring: var(--ring);
-}
 
 /* =========================================================================
    TOKENS LEGACY (se conservan tal cual para no romper el código existente:
