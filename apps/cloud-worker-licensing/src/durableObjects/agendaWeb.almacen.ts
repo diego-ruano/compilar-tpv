@@ -265,12 +265,17 @@ export function peticion(sql: SqlStorage, tipo: "alta" | "cancelacion", idReserv
 	return fila ? conTipos(fila) : null;
 }
 
-/** Un alta que la Main todavía no tiene se anula aquí mismo: deja libre la mesa y olvida los datos. */
+/**
+ * Un alta que la Main todavía no tiene se anula aquí mismo: deja libre la mesa y olvida los datos.
+ * Sólo si **nunca** se le entregó (`intentos = 0`): una que vuelve a estar `pendiente` porque se le
+ * vuelve a ofrecer puede estar ya en la Main, esperando en su outbox, y anularla aquí la dejaría
+ * viva allí. Ésa necesita una cancelación.
+ */
 export function anularAlta(sql: SqlStorage, idReserva: string, ahoraMs: number): boolean {
 	return (
 		sql.exec(
 			`UPDATE peticiones SET estado = 'anulada', datos_json = NULL, cerrada_ms = ?
-			 WHERE tipo = 'alta' AND id_reserva = ? AND estado = 'pendiente';`,
+			 WHERE tipo = 'alta' AND id_reserva = ? AND estado = 'pendiente' AND intentos = 0;`,
 			ahoraMs,
 			idReserva,
 		).rowsWritten > 0

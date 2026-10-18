@@ -692,4 +692,21 @@ describe("la entrega a la Main", () => {
 			expect(eventos).toContainEqual({ event: "reserva_web_atascada", tenant_id: T, cuantas: 1 });
 		});
 	});
+	it("cancelar un alta que se vuelve a ofrecer no la anula aquí: la Main puede tenerla ya", async () => {
+		await conAgenda("entrega-cancelar-reofrecida", async (motor, sql) => {
+			espiar(motor);
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			await motor.pendientes({ tenantId: T });
+			// Vuelta a ofrecer: otra vez pendiente, pero ya se entregó una vez.
+			sql.exec(`UPDATE peticiones SET estado = 'pendiente';`);
+			expect(await motor.cancelar({ tenantId: T, token: a.token })).toEqual({ ok: true });
+			expect(filas(sql).map((f) => [f.tipo, f.estado])).toEqual([
+				["alta", "pendiente"],
+				["cancelacion", "pendiente"],
+			]);
+			// Y se le entregan las dos, el alta primero.
+			const entregadas = (await motor.pendientes({ tenantId: T })).peticiones.map((p: any) => p.tipo);
+			expect(entregadas).toEqual(["alta", "cancelacion"]);
+		});
+	});
 });
