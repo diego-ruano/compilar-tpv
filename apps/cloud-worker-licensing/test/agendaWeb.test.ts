@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { enLaAgenda, lectorSobre, stubDeLaAgenda } from "./helpers/agenda";
+import { enLaAgenda, lectorConBarrera, lectorSobre, stubDeLaAgenda } from "./helpers/agenda";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 import { AgendaWeb } from "../src/durableObjects/agendaWeb";
@@ -52,12 +52,12 @@ function sembrarNegocio(sql: SqlStorage): void {
 async function conAgenda(
 	nombre: string,
 	prueba: (motor: any, sql: SqlStorage, state: DurableObjectState) => Promise<void>,
-	opciones: { ahora?: () => string; espera?: number } = {},
+	opciones: { ahora?: () => string; lector?: (state: DurableObjectState) => any } = {},
 ) {
 	await enLaAgenda(nombre, async (motor, state) => {
 		const sql = state.storage.sql;
 		sembrarNegocio(sql);
-		motor.leer = lectorSobre(state, opciones.ahora ?? (() => AHORA), opciones.espera ?? 0);
+		motor.leer = opciones.lector ? opciones.lector(state) : lectorSobre(state, opciones.ahora ?? (() => AHORA));
 		await prueba(motor, sql, state);
 	});
 }
@@ -108,9 +108,9 @@ describe("la agenda de reservas web", () => {
 
 	it("dos altas a la vez para la misma mesa: gana una y la otra sabe que se ha ocupado", async () => {
 		const nombre = "agenda-simultaneas";
-		await conAgenda(nombre, async () => {}, { espera: 5 });
-		// Por RPC, como en producción: las dos entran en el objeto a la vez y cada lectura de Turso
-		// cede el turno, así que las dos leen la mesa libre antes de que ninguna la apunte.
+		await conAgenda(nombre, async () => {}, { lector: (state) => lectorConBarrera(state, () => AHORA, 3) });
+		// Por RPC, como en producción. La barrera hace que las tres terminen de leer Turso, con las
+		// mesas libres, antes de que ninguna decida: lo que reparte es el bloque síncrono de la agenda.
 		const stub = stubDeLaAgenda(nombre);
 		const resultados = await Promise.all([
 			stub.reservar({ tenantId: T, alta: alta({ email: "uno@correo.es" }) }),

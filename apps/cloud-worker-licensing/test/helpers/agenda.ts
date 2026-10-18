@@ -40,3 +40,21 @@ export function lectorSobre(state: DurableObjectState, ahora: () => string, espe
 		return fn(conLaHoraDeQuienPregunta(db, a), a);
 	};
 }
+
+/**
+ * Un lector que no deja seguir a nadie hasta que `n` peticiones han terminado de leer: así todas
+ * deciden con una lectura en la que la mesa estaba libre, que es el cruce que la agenda tiene que
+ * aguantar. Sin barrera, la primera podría leer, decidir y apuntar antes de que la segunda leyera.
+ */
+export function lectorConBarrera(state: DurableObjectState, ahora: () => string, n: number) {
+	const leer = lectorSobre(state, ahora);
+	let leidas = 0;
+	let soltar!: () => void;
+	const todas = new Promise<void>((r) => (soltar = r));
+	return async <T>(tenantId: string, fn: (db: any, ahora: string) => Promise<T>): Promise<T> => {
+		const resultado = await leer(tenantId, fn);
+		if (++leidas >= n) soltar();
+		await todas;
+		return resultado;
+	};
+}
