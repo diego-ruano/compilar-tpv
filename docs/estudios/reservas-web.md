@@ -221,14 +221,21 @@ Las rutas públicas no llevan `tenantAuth`: no hay dispositivo ni token. El nego
 del camino (`:clave`), y todo lo que decide va en middlewares **delante** del validador del cuerpo
 ([worker.md](../arquitectura/worker.md#cómo-se-escribe-una-ruta)):
 
-1. **Resolver la clave** en `reserva_web_claves` (caché de 60 s por isolate). Sin clave o revocada:
+1. **Limitador por IP** `LIMITADOR_RESERVA_WEB`, el primero: es lo más barato y frena un barrido
+   de claves inventadas antes de que llegue a la base central (`reserva_web_demasiadas`, 429).
+2. **Resolver la clave** en `reserva_web_claves` (caché de 60 s por isolate). Sin clave o revocada:
    `reserva_web_no_disponible`.
-2. **El negocio está activo y tiene una licencia en vigor.** Un helper nuevo por tenant con el mismo
-   criterio que `vetoDeLicencia`, que hoy parte del token.
-3. **El interruptor `reservas_web`** no está apagado para ese negocio ni para todos (§4.7).
-4. **Limitador por IP** `LIMITADOR_RESERVA_WEB` (lecturas) y, en el alta, `LIMITADOR_RESERVA_WEB_ALTA`.
-5. **En el alta, Turnstile**: el token viaja en la cabecera `X-Turnstile-Token`, para comprobarlo
-   antes de leer el cuerpo; se verifica contra `siteverify` con la IP del cliente.
+3. **El negocio está activo (`tenants.status`) y tiene una licencia en vigor**:
+   `licenciaEnUso.ts::negocioConLicenciaEnVigor`, con el mismo criterio que `vetoDeLicencia` (la
+   gracia por caducidad pasa) y la licencia vista desde su Main.
+4. **El interruptor `reservas_web`** no está apagado para ese negocio ni para todos (§4.7).
+5. **En el alta, su limitador** `LIMITADOR_RESERVA_WEB_ALTA` **y Turnstile**: el token viaja en la
+   cabecera `X-Turnstile-Token`, para comprobarlo antes de leer el cuerpo; se verifica contra
+   `siteverify` con la IP del cliente. Sin `TURNSTILE_SECRET_KEY`, el alta queda cerrada (503).
+
+Del 2 al 4 el rechazo es siempre el mismo `reserva_web_no_disponible` (404): al widget le basta con
+«ahora no se puede reservar online» y el motivo queda en el log. Todo está en
+`domains/reservas_web/puerta.ts`.
 
 Después, `cuerpo(schema)` / `consulta(schema)` como en todas las rutas. Los nombres de estos
 middlewares se añaden a `VETOS` en `test/vetoAntesDelCuerpo.test.ts`. El interruptor general del
@@ -253,7 +260,7 @@ necesitan cabeceras CORS y no hay que abrirlas a ningún origen.
 `/reserva` va por POST para que el token no aparezca en ninguna URL ni en ningún log.
 
 Identificadores de error nuevos, todos en `MENSAJES` (`lib/errorCodes.ts`) con su frase:
-`reserva_web_no_disponible`, `reserva_web_cerrada`, `dia_no_reservable`, `hora_fuera_de_franja`,
+`reserva_web_no_disponible`, `reserva_web_demasiadas`, `reserva_web_cerrada`, `dia_no_reservable`, `hora_fuera_de_franja`,
 `mesa_no_disponible` (409; el widget vuelve a pedir las disponibles), `limite_reservas_correo`,
 `tope_reservas_negocio`, `verificacion_humana_fallida`, `reserva_no_cancelable` y `enlace_no_valido`.
 

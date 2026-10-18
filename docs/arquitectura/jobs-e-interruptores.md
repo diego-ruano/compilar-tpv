@@ -97,6 +97,7 @@ pnpm interruptor:lista    -- [--historial]
 | `backfill_historico` | motor de jobs | Bajar el histórico tras una recuperación |
 | `cifrado_pii` | motor de jobs | Convertir la PII del personal a cifrado |
 | `imagenes` | `lib.rs::drenar_imagenes` | Subir imágenes a R2 |
+| `reservas_web` | `domains/reservas_web/puerta.ts` (worker) | Las rutas públicas de la reserva desde la web: el widget dice que ahora no se puede reservar online. Lo ya reservado sigue en la agenda |
 
 ### Reglas
 

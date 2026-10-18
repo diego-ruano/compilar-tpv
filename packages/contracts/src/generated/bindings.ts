@@ -1333,7 +1333,13 @@ export type Interruptor =
 /**  La conversión de la PII del personal a texto cifrado (TRAB-03). */
 "cifrado_pii" |
 /**  La subida de imágenes pendientes a R2. */
-"imagenes";
+"imagenes" |
+/**
+ *  Las rutas públicas de la reserva desde la web (docs/estudios/reservas-web.md): el widget dice
+ *  que ahora no se puede reservar online. Sólo lo mira el worker; lo ya reservado sigue en la
+ *  agenda y se entrega a la Main igual.
+ */
+"reservas_web";
 
 /**  Un interruptor apagado ahora mismo para este equipo, tal como lo devuelve el worker. */
 export type InterruptorApagado = {

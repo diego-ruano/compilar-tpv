@@ -76,6 +76,16 @@ export interface Env {
 	// licencia del código de cambio de equipo.
 	LIMITADOR_LICENCIA?: RateLimit;
 
+	// Reservas desde la web (docs/estudios/reservas-web.md): filtros por IP de las rutas públicas
+	// (`domains/reservas_web/puerta.ts`), uno para las lecturas y otro, mucho más estrecho, para el
+	// alta. Opcionales como los de arriba: detrás están los topes exactos de la agenda.
+	LIMITADOR_RESERVA_WEB?: RateLimit;
+	LIMITADOR_RESERVA_WEB_ALTA?: RateLimit;
+	// Turnstile del widget. La clave pública va en `vars`; el secreto, con
+	// `wrangler secret put TURNSTILE_SECRET_KEY`. Sin secreto el alta queda cerrada (503).
+	TURNSTILE_SITE_KEY?: string;
+	TURNSTILE_SECRET_KEY?: string;
+
 	// Durable Object (WebSocket hub por tenant)
 	TenantHub: DurableObjectNamespace<TenantHub>;
 

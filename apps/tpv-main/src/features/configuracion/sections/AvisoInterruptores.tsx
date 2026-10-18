@@ -20,6 +20,7 @@ const ETIQUETA: Record<Interruptor, string> = {
 	backfill_historico: "La descarga del histórico",
 	cifrado_pii: "El cifrado de los datos del personal",
 	imagenes: "La subida de imágenes",
+	reservas_web: "Las reservas desde la web",
 };
 
 function hasta(ms: number): string {

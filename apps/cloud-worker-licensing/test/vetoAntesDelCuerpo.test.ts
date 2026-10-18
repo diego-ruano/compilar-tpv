@@ -28,8 +28,16 @@ const fuentes = import.meta.glob("../src/domains/**/*.routes.ts", {
 /** Las primitivas que resuelven un rol. Su sitio es el middleware, no el handler. */
 const PRIMITIVAS_DE_ROL = /\b(isTpvDevice|tieneRol|rolDelDispositivo)\s*\(/g;
 
-/** Los middlewares que vetan, sea por rol o por IP. */
-const VETOS = /\b(soloLaMain\w*|filtroExterior)\b/;
+/**
+ * Los middlewares que vetan, sea por rol, por IP o, en las rutas públicas de la reserva web, por la
+ * clave del negocio y por Turnstile (`domains/reservas_web/puerta.ts`).
+ */
+const VETOS = /\b(soloLaMain\w*|filtroExterior|puertaPublica|limitadorAltas|verificacionHumana)\b/g;
+
+/** Dónde empieza el ÚLTIMO veto: con varios en la cadena, todos van delante del validador. */
+function ultimoVeto(bloque: string): number {
+	return Math.max(-1, ...[...bloque.matchAll(VETOS)].map((m) => m.index!));
+}
 
 /** Lo que lee el cuerpo de la petición. */
 const VALIDADORES = /\b(cuerpo|cuerpoConIdentificador|cuerpoTolerante)\s*\(/;
@@ -73,7 +81,7 @@ describe("el veto va delante del validador del cuerpo", () => {
 
 		for (const [fichero, fuente] of Object.entries(fuentes)) {
 			for (const { ruta, bloque } of registrosDeRuta(fuente)) {
-				const veto = bloque.search(VETOS);
+				const veto = ultimoVeto(bloque);
 				const validador = bloque.search(VALIDADORES);
 				if (veto === -1 || validador === -1) continue;
 				if (veto > validador) culpables.push(`${fichero.replace("../src/", "")} → ${ruta}`);
@@ -88,7 +96,7 @@ describe("el veto va delante del validador del cuerpo", () => {
 		// permanente — que es exactamente el fallo mudo que vienen a evitar.
 		const conVetoYValidador = Object.values(fuentes).flatMap((fuente) =>
 			registrosDeRuta(fuente).filter(
-				({ bloque }) => bloque.search(VETOS) !== -1 && bloque.search(VALIDADORES) !== -1,
+				({ bloque }) => ultimoVeto(bloque) !== -1 && bloque.search(VALIDADORES) !== -1,
 			),
 		);
 

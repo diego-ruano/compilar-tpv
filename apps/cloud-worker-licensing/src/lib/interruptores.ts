@@ -35,6 +35,7 @@ export const INTERRUPTORES = [
 	"backfill_historico",
 	"cifrado_pii",
 	"imagenes",
+	"reservas_web",
 ] as const;
 
 export const zInterruptor = z.enum(INTERRUPTORES);

@@ -25,8 +25,8 @@ import {
 	computeLicenseState,
 	stateAllowsUse,
 } from "../domains/licensing/licensing.helpers";
-import { getDb } from "../server/db";
-import { getLicenseByHash } from "../server/licenseStore";
+import { getDb, type Sql } from "../server/db";
+import { getLicenseByHash, type LicenseRow } from "../server/licenseStore";
 
 /**
  * Lo que hace falta del contexto, y sólo eso: se lee con `get`, así que un contexto con más
@@ -107,7 +107,38 @@ async function calcular(
 	return estado === "revoked" ? "license_revoked" : "license_expired";
 }
 
+const cacheNegocio = new Map<string, { hasta: number; enVigor: boolean }>();
+
+/**
+ * ¿Está activo este negocio y tiene una licencia con la que se pueda trabajar? Para lo que no tiene
+ * dispositivo ni token: la puerta pública de la reserva desde la web (docs/estudios/reservas-web.md),
+ * donde el negocio sale de su clave pública. Mismo criterio que arriba —la gracia por caducidad
+ * pasa— con la licencia vista desde su propia Main, y la misma caché de un minuto.
+ */
+export async function negocioConLicenciaEnVigor(db: Sql, tenantId: string): Promise<boolean> {
+	const ahora = Date.now();
+	const guardado = cacheNegocio.get(tenantId);
+	if (guardado && guardado.hasta > ahora) return guardado.enVigor;
+
+	const rs = await db.execute({
+		// Un negocio suspendido o dado de baja no atiende reservas aunque su licencia siga en vigor.
+		sql: `SELECT l.* FROM licenses l JOIN tenants t ON t.tenant_id = l.tenant_id
+		      WHERE l.tenant_id = ? AND t.status = 'active'
+		        AND l.disabled = 0 AND l.status IN ('active', 'expired') AND l.main_device_id IS NOT NULL;`,
+		args: [tenantId],
+	});
+	const licencias = (rs.rows ?? []) as unknown as LicenseRow[];
+	const enVigor = licencias.some((lic) =>
+		stateAllowsUse(computeLicenseState(lic, lic.main_device_id ?? "", ahora)),
+	);
+
+	if (cacheNegocio.size >= CACHE_MAX) cacheNegocio.clear();
+	cacheNegocio.set(tenantId, { hasta: ahora + CACHE_MS, enVigor });
+	return enVigor;
+}
+
 /** Sólo para los tests: un isolate de vitest se reutiliza entre casos. */
 export function olvidarLicenciasCacheadas(): void {
 	cache.clear();
+	cacheNegocio.clear();
 }

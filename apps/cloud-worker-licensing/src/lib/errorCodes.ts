@@ -258,6 +258,14 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	// intentar creyendo que no se aplicó.
 	license_already_used:
 		"Ese código ya se ha usado. Si acabas de canjearlo, el tiempo ya está sumado a tu licencia.",
+
+	// Reserva desde la web: lo lee quien reserva, en el widget, que pinta `message` tal cual.
+	// Sin detalles a propósito (domains/reservas_web/puerta.ts): el motivo queda en el log.
+	reserva_web_no_disponible:
+		"Ahora mismo no se puede reservar por internet en este restaurante. Llama para reservar.",
+	verificacion_humana_fallida:
+		"No hemos podido comprobar que no eres un robot. Recarga la página y vuelve a intentarlo.",
+	reserva_web_demasiadas: "Demasiadas peticiones seguidas. Espera un minuto y vuelve a intentarlo.",
 };
 
 export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
