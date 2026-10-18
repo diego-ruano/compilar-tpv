@@ -368,11 +368,13 @@ describe("la agenda de reservas web", () => {
 			);
 			sql.exec(`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES ('h-viejo', 'r-vieja', ?);`, viejo);
 
+			// Como al dispararse: la alarma que la ha despertado ya no está programada.
+			await state.storage.deleteAlarm();
 			await motor.alarm();
 			const ids = sql.exec(`SELECT id_reserva FROM peticiones;`).toArray().map((f: any) => f.id_reserva);
 			expect(ids).toEqual([r.id_reserva]);
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM enlaces;`).toArray()[0]).toEqual({ n: 1 });
-			// Queda la reserva viva: la alarma sigue programada.
+			// Queda la reserva viva: la alarma se ha vuelto a programar.
 			expect(await state.storage.getAlarm()).not.toBeNull();
 
 			sql.exec(`DELETE FROM peticiones; DELETE FROM enlaces;`);
