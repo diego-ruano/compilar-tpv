@@ -391,6 +391,36 @@ describe("la agenda de reservas web", () => {
 		});
 	});
 
+	it("la alarma da por vistas las que ya están en Turso aunque nadie pregunte por su día", async () => {
+		await conAgenda("agenda-alarma-turso", async (motor, sql, state) => {
+			const llega = await motor.reservar({ tenantId: T, alta: alta() });
+			const espera = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4" }) });
+			sql.exec(
+				`INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+				 VALUES (?, 'm2', ?, '21:00', 'CENA', 2, 'PROXIMA', 'WEB');`,
+				llega.id_reserva,
+				DIA,
+			);
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			const estados = sql
+				.exec(`SELECT id_reserva, estado, datos_json IS NULL AS sin_datos FROM peticiones ORDER BY creada_ms, id_reserva;`)
+				.toArray();
+			expect(estados).toEqual([
+				{ id_reserva: llega.id_reserva, estado: "vista", sin_datos: 1 },
+				{ id_reserva: espera.id_reserva, estado: "pendiente", sin_datos: 0 },
+			]);
+
+			// Si Turso no contesta, purga igual y vuelve a programarse.
+			motor.leer = async () => {
+				throw new Error("sin red");
+			};
+			await state.storage.deleteAlarm();
+			await motor.alarm();
+			expect(await state.storage.getAlarm()).not.toBeNull();
+		});
+	});
+
 	it("la alarma purga lo cerrado hace más de una semana y los enlaces caducados", async () => {
 		await conAgenda("agenda-alarma", async (motor, sql, state) => {
 			const r = await motor.reservar({ tenantId: T, alta: alta() });

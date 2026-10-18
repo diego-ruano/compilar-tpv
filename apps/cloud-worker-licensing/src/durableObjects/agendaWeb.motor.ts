@@ -43,6 +43,7 @@ import {
 import type { AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
 import {
 	altasDesde,
+	altasEsperando,
 	anularAlta,
 	apuntarAlta,
 	apuntarCancelacion,
@@ -68,6 +69,8 @@ const CADA_ALARMA_MS = 60 * 60_000;
  * (`agendaWeb.almacen.ts::Lectura`). Cubre que la lectura de Turso llegue con algo de retraso.
  */
 const MARGEN_LECTURA_MS = 60_000;
+/** Cuántas altas que esperan mira la alarma en Turso cada vez. */
+const MAX_RECONCILIAR = 500;
 
 type ErrorAgenda =
 	| "reserva_web_cerrada"
@@ -438,8 +441,33 @@ export class MotorAgendaWeb {
 	}
 
 	async alarm(): Promise<void> {
+		try {
+			await this.reconciliarConTurso();
+		} catch (e: any) {
+			// Sin Turso se purga igual; lo que espera se vuelve a mirar en la próxima.
+			console.warn("[agenda-web] la alarma no ha podido mirar Turso:", String(e?.message || e));
+		}
 		const quedaAlgo = purgar(this.sql, Date.now());
 		if (quedaAlgo) await this.ctx.storage.setAlarm(Date.now() + CADA_ALARMA_MS);
+	}
+
+	/**
+	 * Las altas que esperan y ya están en Turso pasan a `vista` y olvidan sus datos personales, aunque
+	 * nadie vuelva a preguntar por ese día. Sin esto, una reserva cuyo día nadie consulta guardaría
+	 * nombre, correo y teléfono hasta que se purgase.
+	 */
+	private async reconciliarConTurso(): Promise<void> {
+		const tenantId = negocioRecordado(this.sql);
+		const ids = altasEsperando(this.sql, MAX_RECONCILIAR);
+		if (!tenantId || !ids.length) return;
+		const enTurso = await this.leer(tenantId, async (db) => {
+			const rs = await db.execute({
+				sql: `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`,
+				args: [JSON.stringify(ids)],
+			});
+			return (rs.rows ?? []).map((r: any) => String(r.id));
+		});
+		darPorVistas(this.sql, enTurso, Date.now());
 	}
 
 	/** Sólo para diagnóstico y tests: de qué negocio es esta agenda. */

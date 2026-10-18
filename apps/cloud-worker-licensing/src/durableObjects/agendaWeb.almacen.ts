@@ -149,6 +149,19 @@ export function ocupacionPendiente(sql: SqlStorage, dia: string, duracion: numbe
 	return filas.map((f) => ({ id_mesa: String(f.id_mesa), ...intervalo(String(f.dia_ymd), String(f.hora), duracion) }));
 }
 
+/** Las altas que esperan a aparecer en Turso, las más viejas primero: lo que mira la alarma. */
+export function altasEsperando(sql: SqlStorage, max: number): string[] {
+	return (
+		sql
+			.exec(
+				`SELECT id_reserva FROM peticiones WHERE tipo = 'alta' AND estado IN ('pendiente', 'entregada')
+				 ORDER BY creada_ms, id_reserva LIMIT ?;`,
+				max,
+			)
+			.toArray() as any[]
+	).map((f) => String(f.id_reserva));
+}
+
 /** Altas apuntadas desde `desdeMs`, en cualquier estado: el tope por negocio. */
 export function altasDesde(sql: SqlStorage, desdeMs: number): number {
 	const fila = sql
