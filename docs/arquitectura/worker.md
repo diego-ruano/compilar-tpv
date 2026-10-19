@@ -108,8 +108,16 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
 `/v1/email` manda pedidos a proveedores con el binding `EMAIL` (Cloudflare Email Service) desde
 `EMAIL_FROM_ADDRESS`. Se acota **por destinatario** (sólo al `Email` de un proveedor dado de alta) **y
 por volumen**: `TOPE_DIARIO` (100) envíos por negocio en una ventana de 24 h, contados en `email_sends`.
-Sólo cuentan los entregados (`ok = 1`), y si no se puede contar se deja pasar. Las trazas se purgan a
-los 90 días (`RETENCION_ENVIOS_MS`).
+Sólo cuentan los pedidos entregados (`tipo = 'pedido'`, `ok = 1`), y si no se puede contar se deja
+pasar. Las trazas se purgan a los 90 días (`RETENCION_ENVIOS_MS`).
+
+Los correos al cliente de una reserva web salen de `domains/reservas_web/correos.ts`, desde
+`EMAIL_RESERVAS_FROM_ADDRESS` con el nombre del negocio y su correo de contacto como `Reply-To`. Sólo
+llevan datos estructurados (nada que haya escrito el visitante), van a la dirección del alta o al
+cliente de la reserva web en la nube, y tienen sus topes: 600 al día por negocio y 10 por
+destinatario, sobre lo entregado (`tipo = 'reserva_web'`). Cada uno lleva su id en `email_sends`, así
+que el mismo no sale dos veces y uno que falló se puede repetir. Qué correo y cuándo:
+[reservas-web.md](../estudios/reservas-web.md#48-correos).
 
 RI-60: el envío exige nombre y correo comercial, leídos de la base del negocio junto con el
 proveedor. Sale desde nuestro dominio verificado, con el nombre del negocio y su correo en

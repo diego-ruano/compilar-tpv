@@ -4,7 +4,8 @@
 -- Foto tomada el 2026-09-16, más los cambios de RI-52 (2026-10-04: varias licencias por compra), de
 -- RI-68, RI-73 y RI-30 (2026-10-07: `license_otp_eventos`, `canario_cifrado` y `tenants.piloto`) y
 -- de la reserva web (2026-10-18: `reserva_web_claves` y `reserva_web_dominios`; hay que crearlas en
--- Turso antes de desplegar el worker que las usa).
+-- Turso antes de desplegar el worker que las usa) y de sus correos (2026-10-19: `email_sends.tipo` y
+-- `idx_email_sends_to_ts`, antes de desplegar la fase 5).
 -- Es la única referencia de esta base en el repo.
 --
 -- La estructura de esta base NO se toca desde el código: el worker no crea ni altera tablas. Se

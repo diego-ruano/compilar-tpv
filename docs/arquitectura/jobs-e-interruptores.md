@@ -48,6 +48,7 @@ un fallo parcial.
 | `caja_sin_cerrar` | 1 h | 2 min | MainOperativa | — | Avisa si la caja lleva más de 20 h abierta ([caja.md](caja.md)) |
 | `stock_negativo` | 10 min | 90 s | MainOperativa | — | Avisa de productos con stock total negativo |
 | `zona_horaria` | 10 min | 30 s | MainOperativa | — | Deja en `Business_Settings.Zona_Horaria` la zona del reloj del equipo, deducida de sus desfases con UTC en enero y en julio (la necesita la reserva desde la web). Corto porque el primer intento sólo se adelanta la primera vez: así un cambio de zona llega pronto tras un reinicio. Sólo escribe si cambia |
+| `avisos_reserva_web` | 60 s | 45 s | MainOperativa | — | Manda al worker los correos al cliente de las reservas web que el restaurante ha cambiado o cancelado (`_Reservas_Web_Avisos`, [reservas-web.md](../estudios/reservas-web.md#57-avisar-al-cliente-de-un-cambio)). Con la conectividad apagada no manda nada; lo que lleva más de un día sin salir se descarta |
 | `imagenes` | 15 min | 3 min | Siempre | — | Red de seguridad de la subida de imágenes a R2 (el camino normal es el evento) |
 | `purga_sync` | 24 h | 5 min | MainOperativa | — | Poda `_Sync_Applied_Ops` (TTL 72 h) |
 | `reconciliacion` | 24 h | 10 min | MainOperativa | — | Comprueba el stock por lote y el stock suelto de cada producto contra sus movimientos y consumos, y el gasto por cliente contra sus cobros, y avisa; se calla con el histórico a medias |
