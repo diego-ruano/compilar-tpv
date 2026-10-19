@@ -143,12 +143,17 @@ fn entradas_inner(
           --
           -- Una devolución de parte de un cobro lo dice delante: es la fila que se busca cuando falta
           -- dinero, y así se encuentra escribiendo «devolución».
+          --
+          -- La mesa va con su nombre, que en la Main ya suele ser «Mesa 5»: sólo a un número a secas se
+          -- le antepone «Mesa» (la regla de `@tpv/plano/nombre`).
           (
             CASE WHEN p.ID_Pago_Origen IS NOT NULL THEN 'Devolución · ' ELSE '' END
             ||
             CASE
               WHEN c.Canal = 'BARRA' THEN 'Barra'
-              WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
+              WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' AND m.Numero_Mesa NOT GLOB '*[^0-9]*'
+                THEN 'Mesa ' || m.Numero_Mesa
+              WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN m.Numero_Mesa
               ELSE 'Venta'
             END
             ||

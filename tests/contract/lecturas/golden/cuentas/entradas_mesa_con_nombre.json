@@ -1,0 +1,47 @@
+{
+  "filas": [
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Terraza 2",
+      "devuelto": 0,
+      "es_devolucion": false,
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-10 12:00",
+      "id": "pago-nom",
+      "importe": 3000,
+      "metodo": "Efectivo",
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
+    },
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Mesa 3",
+      "devuelto": 0,
+      "es_devolucion": false,
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-10 11:00",
+      "id": "pago-def",
+      "importe": 2000,
+      "metodo": "Tarjeta",
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
+    },
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Mesa 7",
+      "devuelto": 0,
+      "es_devolucion": false,
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-10 10:00",
+      "id": "pago-num",
+      "importe": 1000,
+      "metodo": "Efectivo",
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
+    }
+  ],
+  "siguiente": null
+}

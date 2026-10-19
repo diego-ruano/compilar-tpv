@@ -121,6 +121,8 @@ import casoCtaEntradasPag from "../../../tests/contract/lecturas/casos/cuentas/e
 import goldenCtaEntradasPag from "../../../tests/contract/lecturas/golden/cuentas/entradas_busqueda_paginada.json";
 import casoCtaEntradasPag1 from "../../../tests/contract/lecturas/casos/cuentas/entradas_primera_pagina.json";
 import goldenCtaEntradasPag1 from "../../../tests/contract/lecturas/golden/cuentas/entradas_primera_pagina.json";
+import casoCtaEntradasMesa from "../../../tests/contract/lecturas/casos/cuentas/entradas_mesa_con_nombre.json";
+import goldenCtaEntradasMesa from "../../../tests/contract/lecturas/golden/cuentas/entradas_mesa_con_nombre.json";
 import casoCtaSalidas from "../../../tests/contract/lecturas/casos/cuentas/salidas.json";
 import goldenCtaSalidas from "../../../tests/contract/lecturas/golden/cuentas/salidas.json";
 import casoCtaCierreUltimo from "../../../tests/contract/lecturas/casos/cuentas/cierre_ultimo.json";
@@ -264,6 +266,11 @@ const CASOS = [
 		nombre: "cuentas_entradas_primera_pagina",
 		caso: casoCtaEntradasPag1,
 		golden: goldenCtaEntradasPag1,
+	},
+	{
+		nombre: "cuentas_entradas_mesa_con_nombre",
+		caso: casoCtaEntradasMesa,
+		golden: goldenCtaEntradasMesa,
 	},
 	{ nombre: "cuentas_salidas", caso: casoCtaSalidas, golden: goldenCtaSalidas },
 	{ nombre: "cuentas_resumen", caso: casoCtaResumen, golden: goldenCtaResumen },

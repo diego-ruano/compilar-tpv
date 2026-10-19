@@ -255,6 +255,7 @@ lecturas_de_contrato! {
     cuentas__entradas,
     cuentas__entradas_busqueda_paginada,
     cuentas__entradas_primera_pagina,
+    cuentas__entradas_mesa_con_nombre,
     cuentas__salidas,
     cuentas__resumen,
     cuentas__cierre_ultimo,
