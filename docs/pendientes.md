@@ -27,6 +27,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
+| [MESAS-01](#mesas-01--el-plano-que-guarda-una-handy-no-pasa-la-validación-de-la-main) | 🔵 | El plano que guarda una Handy no pasa la validación de la Main | Sin empezar |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
@@ -381,6 +382,18 @@ La ventana es de segundos y necesita una Handy editando esa misma fila. Opciones
 cambio remoto se respete la escritura local pendiente de la misma fila (aplicar otra vez lo del
 outbox encima, o saltarse la fila y reencolarla), o decidir que el orden de la nube manda y que la
 Main se ajuste a él en vez de repararlo con lo suyo. Afecta al motor de réplica entero: sin decidir.
+
+### MESAS-01 · El plano que guarda una Handy no pasa la validación de la Main
+
+Al guardar el plano, la Main (`tpv-infra-sqlite/src/mesas.rs::save_layout`) rechaza un salón o una
+mesa sin nombre y dos salones con el mismo nombre. El worker (`saveLayoutSchema` en
+`domains/mesas/mesas.schemas.ts` y `saveLayout`), que es por donde guarda la Handy, recorta los
+nombres pero no rechaza ninguna de las tres cosas. Una mesa sin nombre sale distinta en cada sitio:
+«Venta» en Cuentas, y vacía en el ticket, la cocina, el widget y el aviso de una reserva web.
+
+Falta lo que pide RI-78: sacar esas reglas a un `validar` de `tpv-domain`, añadir el dominio del plano
+a `validacion_casos.json` con sus casos (nombre vacío, sólo espacios, salón repetido) y cablearlo en
+`validacion_casos.rs` y `validacionCasos.test.ts`, para que el schema del worker rechace lo mismo.
 
 ---
 
