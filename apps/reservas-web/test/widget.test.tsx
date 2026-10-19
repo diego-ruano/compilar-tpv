@@ -232,12 +232,13 @@ describe("reservar desde la web", () => {
 		expect(planos.map((l) => l.init?.cache ?? null)).toEqual([null, "no-cache"]);
 	});
 
-	it("sin mesas a esa hora, ofrece las horas cercanas que tienen", async () => {
-		const llamadas = simular({
+	it("sin mesas a esa hora, ofrece las horas cercanas que tienen; elegir una enseña sus mesas", async () => {
+		simular({
 			[`${BASE}/negocio`]: () => INFO,
 			[`${BASE}/dia?dia=2026-11-20`]: () => ({ ok: true, dia: "2026-11-20", tramos: [{ desde: "19:40", hasta: "21:50" }] }),
 			[`${BASE}/plano`]: () => PLANO,
-			[`${BASE}/disponibles`]: () => ({ ok: true, mesas: [], alternativas: ["21:30", "21:45"] }),
+			[`${BASE}/disponibles?dia=2026-11-20&hora=19%3A40`]: () => ({ ok: true, mesas: [], alternativas: ["21:30", "21:45"] }),
+			[`${BASE}/disponibles?dia=2026-11-20&hora=21%3A30`]: () => ({ ok: true, mesas: ["m4"], alternativas: [] }),
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 
@@ -246,7 +247,38 @@ describe("reservar desde la web", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Ver mesas" }));
 		expect(await screen.findByText("No quedan mesas para 2 personas a las 19:40.")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "21:30" }));
-		await waitFor(() => expect(llamadas.some((l) => l.url.includes("hora=21%3A30"))).toBe(true));
+		fireEvent.click(await screen.findByRole("button", { name: "Mesa 4 · 4 plazas" }));
+		expect(screen.getByRole("heading", { name: /21:30/ })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled();
+	});
+
+	it("si vuelve atrás mientras busca una hora cercana, lo que llegue no le devuelve al plano", async () => {
+		let soltar!: () => void;
+		const espera = new Promise<void>((r) => (soltar = r));
+		simular({
+			[`${BASE}/negocio`]: () => INFO,
+			[`${BASE}/dia?dia=2026-11-20`]: () => ({ ok: true, dia: "2026-11-20", tramos: [{ desde: "19:40", hasta: "21:50" }] }),
+			[`${BASE}/plano`]: () => PLANO,
+			[`${BASE}/disponibles?dia=2026-11-20&hora=19%3A40`]: () => ({ ok: true, mesas: [], alternativas: ["21:30"] }),
+			[`${BASE}/disponibles?dia=2026-11-20&hora=21%3A30`]: async () => {
+				await espera;
+				return { ok: true, mesas: ["m4"], alternativas: [] };
+			},
+		});
+		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
+
+		fireEvent.click(await screen.findByRole("button", { name: "2026-11-20" }));
+		await screen.findByDisplayValue("19:40");
+		fireEvent.click(screen.getByRole("button", { name: "Ver mesas" }));
+		fireEvent.click(await screen.findByRole("button", { name: "21:30" }));
+		fireEvent.click(screen.getByRole("button", { name: "Atrás" }));
+		expect(await screen.findByRole("heading", { name: "¿Qué día?" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Ver mesas" })).toBeEnabled();
+
+		soltar();
+		await new Promise((r) => setTimeout(r, 10));
+		expect(screen.getByRole("heading", { name: "¿Qué día?" })).toBeInTheDocument();
+		expect(screen.getByDisplayValue("19:40")).toBeInTheDocument();
 	});
 
 	it("con las reservas cerradas, dice a quién llamar", async () => {

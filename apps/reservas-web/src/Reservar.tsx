@@ -299,7 +299,14 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 						</div>
 					) : null}
 					<div className="flex justify-between gap-3">
-						<Boton variante="secundario" onClick={() => setPaso("cuando")}>
+						<Boton
+							variante="secundario"
+							onClick={() => {
+								// Si estaba buscando una hora cercana, lo que llegue ya no le devuelve aquí.
+								olvidarBusqueda();
+								setPaso("cuando");
+							}}
+						>
 							Atrás
 						</Boton>
 						<Boton
