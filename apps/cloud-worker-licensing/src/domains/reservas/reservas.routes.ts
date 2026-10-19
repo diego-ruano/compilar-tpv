@@ -36,6 +36,15 @@ reservasRoutes.get("/buscar-cliente", consulta(S.buscarClienteSchema), async (c)
 	return c.json(await tenantQuery(c, (db) => q.buscarCliente(db, telefono, email)));
 });
 
+// Una reserva, o `null`: la Handy la mira antes de cambiarla o borrarla, para saber si hay que
+// avisar a su cliente (docs/estudios/reservas-web.md §5.7). Después de `/meta`, `/mes` y
+// `/buscar-cliente`, que si no se los comería.
+reservasRoutes.get("/:id", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_reserva invalido");
+	return c.json(await tenantQuery(c, (db) => q.reserva(db, id)));
+});
+
 reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 	const datos = c.req.valid("json");
 

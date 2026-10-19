@@ -120,6 +120,9 @@ mod tests {
         async fn mes(&self, _: &str, _: &str) -> AppResult<Vec<ReservaDto>> {
             panic!("repo llamado")
         }
+        async fn reserva(&self, _: &str) -> AppResult<Option<ReservaDto>> {
+            panic!("repo llamado")
+        }
         async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<bool> {
             panic!("repo llamado")
         }
@@ -144,6 +147,9 @@ mod tests {
         }
         async fn mes(&self, _: &str, _: &str) -> AppResult<Vec<ReservaDto>> {
             Ok(vec![])
+        }
+        async fn reserva(&self, _: &str) -> AppResult<Option<ReservaDto>> {
+            Ok(None)
         }
         async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<bool> {
             Ok(true)

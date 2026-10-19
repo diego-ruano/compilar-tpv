@@ -1,0 +1,20 @@
+{
+  "capacidad": 4,
+  "comensales": 2,
+  "dia_ymd": "2026-05-14",
+  "duracion_min": null,
+  "email_cliente": "ana@correo.es",
+  "estado": "PROXIMA",
+  "hora": "21:00",
+  "id_cliente": "cli-1",
+  "id_mesa": "mesa-1",
+  "id_reserva": "res-web",
+  "id_zona": "zona-1",
+  "nombre_cliente": "Ana Gomez",
+  "nombre_zona": "Salon",
+  "nota": "terraza",
+  "numero_mesa": "Mesa 1",
+  "origen": "WEB",
+  "telefono_cliente": "600100200",
+  "turno": "CENA"
+}

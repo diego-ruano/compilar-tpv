@@ -310,6 +310,7 @@ lecturas_de_contrato! {
     proveedores__productos_todos,
     reservas__meta,
     reservas__mes,
+    reservas__una,
     reservas__buscar_cliente,
     reservas__buscar_cliente_por_telefono,
     stats__categorias,
@@ -628,6 +629,10 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
                 .await
                 .expect("reservas mes");
             serde_json::to_value(r).unwrap()
+        }
+        "reservas.una" => {
+            let repo = SqliteReservasRepository::new(db.clone());
+            serde_json::to_value(repo.reserva(&s(&e["id_reserva"])).await.expect("reservas una")).unwrap()
         }
         "reservas.buscar_cliente" => {
             let repo = SqliteReservasRepository::new(db.clone());

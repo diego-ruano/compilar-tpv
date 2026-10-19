@@ -57,6 +57,7 @@ import {
 import {
 	buscarCliente as reservasBuscarCliente,
 	mes as reservasMes,
+	reserva as reservasUna,
 	meta as reservasMeta,
 } from "../src/domains/reservas/reservas.queries";
 import {
@@ -212,6 +213,8 @@ import casoResMeta from "../../../tests/contract/lecturas/casos/reservas/meta.js
 import goldenResMeta from "../../../tests/contract/lecturas/golden/reservas/meta.json";
 import casoResMes from "../../../tests/contract/lecturas/casos/reservas/mes.json";
 import goldenResMes from "../../../tests/contract/lecturas/golden/reservas/mes.json";
+import casoResUna from "../../../tests/contract/lecturas/casos/reservas/una.json";
+import goldenResUna from "../../../tests/contract/lecturas/golden/reservas/una.json";
 import casoResBuscar from "../../../tests/contract/lecturas/casos/reservas/buscar_cliente.json";
 import goldenResBuscar from "../../../tests/contract/lecturas/golden/reservas/buscar_cliente.json";
 import casoResBuscarTel from "../../../tests/contract/lecturas/casos/reservas/buscar_cliente_por_telefono.json";
@@ -336,6 +339,7 @@ const CASOS = [
 	{ nombre: "proveedores_productos_todos", caso: casoProvProductosTodos, golden: goldenProvProductosTodos },
 	{ nombre: "reservas_meta", caso: casoResMeta, golden: goldenResMeta },
 	{ nombre: "reservas_mes", caso: casoResMes, golden: goldenResMes },
+	{ nombre: "reservas_una", caso: casoResUna, golden: goldenResUna },
 	{ nombre: "reservas_buscar_cliente", caso: casoResBuscar, golden: goldenResBuscar },
 	{ nombre: "reservas_buscar_cliente_por_telefono", caso: casoResBuscarTel, golden: goldenResBuscarTel },
 	{ nombre: "tareas_trabajadores", caso: casoTareaTrab, golden: goldenTareaTrab },
@@ -539,6 +543,8 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return reservasMeta(db);
 		case "reservas.mes":
 			return reservasMes(db, e.desde, e.hasta);
+		case "reservas.una":
+			return reservasUna(db, e.id_reserva);
 		case "reservas.buscar_cliente":
 			return reservasBuscarCliente(db, e.telefono ?? null, e.email ?? null);
 		case "tareas.trabajadores":

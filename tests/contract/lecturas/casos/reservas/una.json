@@ -1,0 +1,14 @@
+{
+  "descripcion": "Una reserva sola, como la pinta el calendario: es lo que mira el caso de uso antes de cambiarla o borrarla para saber si hay que avisar a su cliente (docs/estudios/reservas-web.md 5.7). Una reserva web con su cliente y su mesa; las demas del seed no salen.",
+  "lectura": "reservas.una",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', 'Mesa 1', 4, 0, 0, 'rect', 120, 70);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email) VALUES ('cli-1', 'Ana Gomez', '600100200', 'ana@correo.es');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Nota, Origen) VALUES ('res-web', 'cli-1', 'mesa-1', '2026-05-14', '21:00', 'CENA', 2, 'PROXIMA', 'terraza', 'WEB');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-otra', 'cli-1', 'mesa-1', '2026-05-14', '13:30', 'COMIDA', 4, 'PROXIMA');"
+  ],
+  "entrada": {
+    "id_reserva": "res-web"
+  }
+}

@@ -37,6 +37,10 @@ impl ReservasRepository for HttpReservasRepository {
             .await
     }
 
+    async fn reserva(&self, id_reserva: &str) -> AppResult<Option<ReservaDto>> {
+        self.client.get_json(&format!("/v1/reservas/{id_reserva}")).await
+    }
+
     async fn guardar(&self, reserva: ReservaValidada, forzar_solape: bool) -> AppResult<bool> {
         // RI-61: el cliente viaja decidido, en los mismos campos que la entrada de la pantalla, y el
         // worker lo resuelve igual que la Main (`resolverCliente`).

@@ -301,59 +301,31 @@ impl ReservasRepository for SqliteReservasRepository {
     }
 
     async fn mes(&self, desde: &str, hasta: &str) -> AppResult<Vec<ReservaDto>> {
-        let sql = r#"
-          SELECT
-            R.ID_Reserva, R.ID_Mesa, R.Dia_YMD, R.Hora, R.Turno, R.Comensales, R.Nota, R.Estado,
-            C.Nombre AS Nombre_Cliente, C.Telefono AS Telefono_Cliente, C.Email AS Email_Cliente,
-            M.ID_Zona, M.Numero_Mesa, M.Capacidad,
-            Z.Nombre_Zona,
-            C.ID_Cliente,
-            R.Duracion_Min,
-            R.Origen
-          -- RES-04: LEFT JOIN (no INNER). Una reserva cuyo cliente/mesa/zona ya no exista (borrado
-          -- de layout, divergencia de sync) NO debe desaparecer del calendario: se muestra aunque
-          -- falten esos datos (columnas quedan NULL → "" / 0 en el mapper) en vez de ocultarse.
-          FROM Reservas R
-          LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
-          LEFT JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa
-          LEFT JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona
-          WHERE R.Dia_YMD >= ?1 AND R.Dia_YMD <= ?2
-          ORDER BY R.Dia_YMD ASC, R.Hora ASC, R.ID_Reserva ASC;
-        "#;
-
+        let sql = format!(
+            "{SQL_SELECT_RESERVA} WHERE R.Dia_YMD >= ?1 AND R.Dia_YMD <= ?2 \
+             ORDER BY R.Dia_YMD ASC, R.Hora ASC, R.ID_Reserva ASC;"
+        );
         let db = self.db.read().await;
         let mut rows = db
-            .query(sql, vec![Value::Text(desde.to_string()), Value::Text(hasta.to_string())])
+            .query(&sql, vec![Value::Text(desde.to_string()), Value::Text(hasta.to_string())])
             .await
             .map_err(db_err)?;
 
         let mut out: Vec<ReservaDto> = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
-            let g = |idx: i32| row.get_value(idx).map_err(db_err);
-            out.push(ReservaDto {
-                id_reserva: s(g(0)?),
-                id_mesa: s(g(1)?),
-                dia_ymd: s(g(2)?),
-                hora: s(g(3)?),
-                turno: norm_opt_string(g(4)?),
-                comensales: i(g(5)?),
-                nota: norm_opt_string(g(6)?),
-                estado: s(g(7)?),
-                origen: s(g(17)?),
-                // Del cliente que existe, no de la columna de la reserva: una reserva cuyo cliente
-                // se borró sale sin cliente, igual que su nombre (RES-04).
-                id_cliente: norm_opt_string(g(15)?),
-                duracion_min: v_i64(g(16)?),
-                nombre_cliente: s(g(8)?),
-                telefono_cliente: norm_opt_string(g(9)?),
-                email_cliente: norm_opt_string(g(10)?),
-                id_zona: s(g(11)?),
-                numero_mesa: s(g(12)?),
-                capacidad: i(g(13)?),
-                nombre_zona: s(g(14)?),
-            });
+            out.push(fila_de_reserva(&row)?);
         }
         Ok(out)
+    }
+
+    async fn reserva(&self, id_reserva: &str) -> AppResult<Option<ReservaDto>> {
+        let sql = format!("{SQL_SELECT_RESERVA} WHERE R.ID_Reserva = ?1;");
+        let db = self.db.read().await;
+        let mut rows = db.query(&sql, vec![Value::Text(id_reserva.to_string())]).await.map_err(db_err)?;
+        match rows.next().await.map_err(db_err)? {
+            Some(row) => Ok(Some(fila_de_reserva(&row)?)),
+            None => Ok(None),
+        }
     }
 
     async fn guardar(&self, r: ReservaValidada, forzar_solape: bool) -> AppResult<bool> {
@@ -482,6 +454,52 @@ impl ReservasRepository for SqliteReservasRepository {
 
         res
     }
+}
+
+/// Una reserva como la pinta el calendario (`mes` y `reserva`). Espejo de `SELECT_RESERVA` en el
+/// worker (`reservas.queries.ts`).
+///
+/// RES-04: LEFT JOIN (no INNER). Una reserva cuyo cliente/mesa/zona ya no exista (borrado de
+/// layout, divergencia de sync) NO debe desaparecer del calendario: se muestra aunque falten esos
+/// datos (columnas quedan NULL → "" / 0 en el mapper) en vez de ocultarse.
+const SQL_SELECT_RESERVA: &str = "SELECT \
+       R.ID_Reserva, R.ID_Mesa, R.Dia_YMD, R.Hora, R.Turno, R.Comensales, R.Nota, R.Estado, \
+       C.Nombre AS Nombre_Cliente, C.Telefono AS Telefono_Cliente, C.Email AS Email_Cliente, \
+       M.ID_Zona, M.Numero_Mesa, M.Capacidad, \
+       Z.Nombre_Zona, \
+       C.ID_Cliente, \
+       R.Duracion_Min, \
+       R.Origen \
+     FROM Reservas R \
+     LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente \
+     LEFT JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa \
+     LEFT JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona";
+
+/// Una fila de `SQL_SELECT_RESERVA`.
+fn fila_de_reserva(row: &Row) -> AppResult<ReservaDto> {
+    let g = |idx: i32| row.get_value(idx).map_err(db_err);
+    Ok(ReservaDto {
+        id_reserva: s(g(0)?),
+        id_mesa: s(g(1)?),
+        dia_ymd: s(g(2)?),
+        hora: s(g(3)?),
+        turno: norm_opt_string(g(4)?),
+        comensales: i(g(5)?),
+        nota: norm_opt_string(g(6)?),
+        estado: s(g(7)?),
+        origen: s(g(17)?),
+        // Del cliente que existe, no de la columna de la reserva: una reserva cuyo cliente se borró
+        // sale sin cliente, igual que su nombre (RES-04).
+        id_cliente: norm_opt_string(g(15)?),
+        duracion_min: v_i64(g(16)?),
+        nombre_cliente: s(g(8)?),
+        telefono_cliente: norm_opt_string(g(9)?),
+        email_cliente: norm_opt_string(g(10)?),
+        id_zona: s(g(11)?),
+        numero_mesa: s(g(12)?),
+        capacidad: i(g(13)?),
+        nombre_zona: s(g(14)?),
+    })
 }
 
 // Borrar una reserva. Una reserva web que aún está por venir (`Origen = 'WEB' AND Estado =

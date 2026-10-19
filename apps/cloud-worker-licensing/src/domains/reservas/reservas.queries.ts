@@ -46,45 +46,61 @@ export async function meta(db: Client): Promise<ReservasMetaDto> {
 	};
 }
 
+/**
+ * Una reserva como la pinta el calendario. Los textos van con COALESCE, como el `s()` de la Main: el
+ * DTO de Rust que lee esto en la Handy los tiene como `String`, y un null de una reserva sin mesa o
+ * sin cliente (RI-61) no se dejaba deserializar y tumbaba el calendario entero.
+ */
+const SELECT_RESERVA = `
+	SELECT
+		R.ID_Reserva AS id_reserva,
+		COALESCE(R.ID_Mesa, '') AS id_mesa,
+		R.Dia_YMD AS dia_ymd,
+		R.Hora AS hora,
+		R.Turno AS turno,
+		R.Comensales AS comensales,
+		R.Duracion_Min AS duracion_min,
+		R.Nota AS nota,
+		R.Estado AS estado,
+		R.Origen AS origen,
+		C.ID_Cliente AS id_cliente,
+		COALESCE(C.Nombre, '') AS nombre_cliente,
+		C.Telefono AS telefono_cliente,
+		C.Email AS email_cliente,
+		COALESCE(M.ID_Zona, '') AS id_zona,
+		COALESCE(M.Numero_Mesa, '') AS numero_mesa,
+		COALESCE(M.Capacidad, 0) AS capacidad,
+		COALESCE(Z.Nombre_Zona, '') AS nombre_zona
+	FROM Reservas R
+	LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
+	LEFT JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa
+	LEFT JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona
+`;
+
 export async function mes(
 	db: Client,
 	desde: string,
 	hasta: string,
 ): Promise<ReservaDto[]> {
-	// Los textos van con COALESCE, como el `s()` de la Main: el DTO de Rust que lee esto en la Handy
-	// los tiene como `String`, y un null de una reserva sin mesa o sin cliente (RI-61) no se dejaba
-	// deserializar y tumbaba el calendario entero.
 	const rs = await db.execute({
 		sql: `
-			SELECT
-				R.ID_Reserva AS id_reserva,
-				COALESCE(R.ID_Mesa, '') AS id_mesa,
-				R.Dia_YMD AS dia_ymd,
-				R.Hora AS hora,
-				R.Turno AS turno,
-				R.Comensales AS comensales,
-				R.Duracion_Min AS duracion_min,
-				R.Nota AS nota,
-				R.Estado AS estado,
-				R.Origen AS origen,
-				C.ID_Cliente AS id_cliente,
-				COALESCE(C.Nombre, '') AS nombre_cliente,
-				C.Telefono AS telefono_cliente,
-				C.Email AS email_cliente,
-				COALESCE(M.ID_Zona, '') AS id_zona,
-				COALESCE(M.Numero_Mesa, '') AS numero_mesa,
-				COALESCE(M.Capacidad, 0) AS capacidad,
-				COALESCE(Z.Nombre_Zona, '') AS nombre_zona
-			FROM Reservas R
-			LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
-			LEFT JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa
-			LEFT JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona
+			${SELECT_RESERVA}
 			WHERE R.Dia_YMD >= ?1 AND R.Dia_YMD <= ?2
 			ORDER BY R.Dia_YMD ASC, R.Hora ASC, R.ID_Reserva ASC;
 		`,
 		args: [desde, hasta],
 	});
 	return rows(rs) as ReservaDto[];
+}
+
+/**
+ * Una reserva, como la pinta el calendario, o `null`. Es lo que mira la Handy antes de cambiarla o
+ * borrarla, para saber si al cliente de una reserva web hay que avisarle (espejo de
+ * `SqliteReservasRepository::reserva`).
+ */
+export async function reserva(db: Client, idReserva: string): Promise<ReservaDto | null> {
+	const rs = await db.execute({ sql: `${SELECT_RESERVA} WHERE R.ID_Reserva = ?1;`, args: [idReserva] });
+	return (rows(rs)[0] as ReservaDto | undefined) ?? null;
 }
 
 /** RI-61: la duración por defecto y el modo de solape del negocio. Espejo de `ajustes_de_reserva`. */

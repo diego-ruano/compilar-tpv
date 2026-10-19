@@ -15,6 +15,11 @@ pub trait ReservasRepository: Send + Sync {
     /// Reservas en el rango `[desde, hasta]` (ambos YYYY-MM-DD ya normalizados).
     async fn mes(&self, desde: &str, hasta: &str) -> AppResult<Vec<ReservaDto>>;
 
+    /// Una reserva, como en el calendario, o `None`. Es cómo estaba antes de cambiarla o borrarla:
+    /// lo que dice si al cliente de una reserva web hay que avisarle (docs/estudios/reservas-web.md
+    /// §5.7).
+    async fn reserva(&self, id_reserva: &str) -> AppResult<Option<ReservaDto>>;
+
     /// Crea o actualiza una reserva con su cliente (ninguno, uno existente o uno nuevo, RI-61).
     /// Devuelve `true` si quedó persistida.
     ///
