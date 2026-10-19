@@ -98,7 +98,7 @@ describe("reservar desde la web", () => {
 			[`${BASE}/reservas`]: () =>
 				altas++ === 0
 					? respuesta(409, { ok: false, error: "mesa_no_disponible", message: "Esa mesa acaba de ocuparse. Elige otra de las que quedan libres." })
-					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "20:07", personas: 2, mesa: "Mesa 4" },
+					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "20:07", personas: 2, mesa: "Mesa 4", correo: true },
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 
@@ -145,6 +145,9 @@ describe("reservar desde la web", () => {
 		expect(await screen.findByText("✓ Reserva confirmada")).toBeInTheDocument();
 		expect(screen.getByText("ABC123")).toBeInTheDocument();
 		expect(screen.getByText("2 personas · Mesa 4")).toBeInTheDocument();
+		expect(
+			screen.getByText("Te hemos enviado los detalles a ana@correo.es, con un enlace para cancelarla si no puedes ir."),
+		).toBeInTheDocument();
 		await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "✓ Reserva confirmada" })));
 
 		const envios = llamadas.filter((l) => l.url === `${BASE}/reservas`);
@@ -336,7 +339,7 @@ describe("reservar desde la web", () => {
 			[`${BASE}/reservas`]: () =>
 				altas++ === 0
 					? respuesta(403, { ok: false, error: "verificacion_humana_fallida", message: "No hemos podido comprobar que no eres un robot." })
-					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "Mesa 2" },
+					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "Mesa 2", correo: false },
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 
@@ -357,6 +360,12 @@ describe("reservar desde la web", () => {
 		await waitFor(() => expect(screen.getByRole("button", { name: "Confirmar" })).toBeEnabled());
 		fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
 		expect(await screen.findByText("✓ Reserva confirmada")).toBeInTheDocument();
+		// Sin el correo, la reserva vale igual: lo dice y deja el código y a quién llamar.
+		expect(
+			screen.getByText(
+				"No hemos podido enviarte el correo con los detalles. Apunta el código: si necesitas cancelarla, llama al restaurante (950 000 000).",
+			),
+		).toBeInTheDocument();
 
 		const tokens = llamadas
 			.filter((l) => l.url === `${BASE}/reservas`)

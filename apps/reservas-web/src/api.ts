@@ -53,7 +53,11 @@ export type Alta = {
 	nota: string | null;
 };
 
-export type Confirmada = { codigo: string; dia: string; hora: string; personas: number; mesa: string };
+/**
+ * Lo que contesta un alta. `correo`: si ha salido el de confirmación; `null` cuando el alta es la
+ * repetición de una cuya respuesta se perdió, que no vuelve a mandarlo.
+ */
+export type Confirmada = { codigo: string; dia: string; hora: string; personas: number; mesa: string; correo: boolean | null };
 
 export type Resumen = {
 	dia: string;

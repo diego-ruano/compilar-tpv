@@ -405,6 +405,13 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 					<div className="text-sm text-fg-muted">
 						Tu código de reserva: <strong className="text-fg">{hecha.codigo}</strong>
 					</div>
+					<p className="text-sm text-fg-muted">
+						{hecha.correo === true
+							? `Te hemos enviado los detalles a ${email.trim()}, con un enlace para cancelarla si no puedes ir.`
+							: hecha.correo === false
+								? `No hemos podido enviarte el correo con los detalles. Apunta el código: si necesitas cancelarla, llama al restaurante${info.negocio.telefono ? ` (${info.negocio.telefono})` : ""}.`
+								: "Si no te llega el correo con los detalles, apunta el código."}
+					</p>
 				</section>
 			) : null}
 		</div>
