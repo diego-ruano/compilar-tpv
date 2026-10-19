@@ -329,6 +329,42 @@ describe("reservar desde la web", () => {
 		expect(screen.queryByRole("button", { name: "Mesa 2 · 2 plazas" })).toBeNull();
 		expect(screen.getByRole("button", { name: "Ver mesas" })).toBeEnabled();
 	});
+	it("el paso 4 dice el correo con el que se hizo la reserva, aunque se toque el campo mientras se envía", async () => {
+		let soltar!: () => void;
+		const espera = new Promise<void>((r) => (soltar = r));
+		simular({
+			[`${BASE}/negocio`]: () => INFO,
+			[`${BASE}/dia?dia=2026-11-20`]: () => ({ ok: true, dia: "2026-11-20", tramos: [{ desde: "19:40", hasta: "21:50" }] }),
+			[`${BASE}/plano`]: () => PLANO,
+			[`${BASE}/disponibles`]: () => ({ ok: true, mesas: ["m2"], alternativas: [] }),
+			[`${BASE}/reservas`]: async () => {
+				await espera;
+				return { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "Mesa 2", correo: true };
+			},
+		});
+		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
+
+		fireEvent.click(await screen.findByRole("button", { name: "2026-11-20" }));
+		await screen.findByDisplayValue("19:40");
+		fireEvent.click(screen.getByRole("button", { name: "Ver mesas" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Mesa 2 · 2 plazas" }));
+		fireEvent.click(screen.getByRole("button", { name: "Continuar" }));
+		fireEvent.change(await screen.findByLabelText("Nombre"), { target: { value: "Ana" } });
+		fireEvent.change(screen.getByLabelText("Correo"), { target: { value: "ana@correo.es" } });
+		fireEvent.change(screen.getByLabelText("Teléfono"), { target: { value: "600112233" } });
+		fireEvent.click(screen.getByLabelText("He leído la información sobre privacidad"));
+		await waitFor(() => expect(screen.getByRole("button", { name: "Confirmar" })).toBeEnabled());
+		fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+		// Mientras se envía, lo corrige.
+		fireEvent.change(screen.getByLabelText("Correo"), { target: { value: "otra@correo.es" } });
+		soltar();
+
+		expect(await screen.findByText("✓ Reserva confirmada")).toBeInTheDocument();
+		expect(
+			screen.getByText("Te hemos enviado los detalles a ana@correo.es, con un enlace para cancelarla si no puedes ir."),
+		).toBeInTheDocument();
+	});
+
 	it("si Turnstile no da por buena la verificación, no se reenvía su token: hace falta uno nuevo", async () => {
 		let altas = 0;
 		const llamadas = simular({

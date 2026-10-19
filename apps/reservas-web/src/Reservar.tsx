@@ -75,7 +75,8 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	const [intento] = useState(() => crypto.randomUUID());
 
 	// Paso 4
-	const [hecha, setHecha] = useState<Confirmada | null>(null);
+	// Con el correo con el que se hizo: el campo se puede tocar mientras se envía.
+	const [hecha, setHecha] = useState<(Confirmada & { email: string }) | null>(null);
 
 	const mensajeDe = (e: unknown) => (e instanceof ErrorApi ? e.message : "Algo ha fallado. Vuelve a intentarlo.");
 	const fallo = (e: unknown) => setError(mensajeDe(e));
@@ -133,6 +134,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 		if (!dia || !mesa || !token || !plano) return;
 		// Un token de Turnstile vale para un intento: se da por gastado al enviarlo, pase lo que pase.
 		const gastado = token;
+		const conCorreo = email.trim();
 		setToken(null);
 		setOcupado(true);
 		setError(null);
@@ -142,7 +144,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 				gastado,
 				intento,
 			);
-			setHecha(r);
+			setHecha({ ...r, email: conCorreo });
 			setPaso("hecho");
 		} catch (e) {
 			// El token de Turnstile ya se ha gastado: hace falta otro para volver a intentarlo.
@@ -407,7 +409,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 					</div>
 					<p className="text-sm text-fg-muted">
 						{hecha.correo === true
-							? `Te hemos enviado los detalles a ${email.trim()}, con un enlace para cancelarla si no puedes ir.`
+							? `Te hemos enviado los detalles a ${hecha.email}, con un enlace para cancelarla si no puedes ir.`
 							: hecha.correo === false
 								? `No hemos podido enviarte el correo con los detalles. Apunta el código: si necesitas cancelarla, llama al restaurante${info.negocio.telefono ? ` (${info.negocio.telefono})` : ""}.`
 								: "Si no te llega el correo con los detalles, apunta el código."}
