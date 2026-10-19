@@ -54,21 +54,33 @@ impl AvisosReservaWeb for SqliteAvisosReservaWeb {
         };
         let (tipo, json) = texto_de(&cuerpo)?;
         let g = self.db.write().await;
-        let r = g
-            .raw()
-            .execute(
-                "INSERT INTO _Reservas_Web_Avisos (ID_Aviso, ID_Reserva, Tipo, Datos_Json, Creado_Ms) \
-                 VALUES (?1, ?2, ?3, ?4, ?5);",
-                vec![
-                    Value::Text(cuerpo.id_aviso.clone()),
-                    Value::Text(cuerpo.id_reserva.clone()),
-                    Value::Text(tipo),
-                    Value::Text(json),
-                    Value::Integer(now_ms()),
-                ],
-            )
-            .await
-            .map_err(db_err);
+        // El último aviso de una reserva dice cómo queda: los que esperaban de esa reserva sobran
+        // (y uno a un cliente o un correo que ya no son los suyos no saldría nunca). Así hay como
+        // mucho uno por reserva, y nunca llegan desordenados.
+        let r = async {
+            g.raw()
+                .execute(
+                    "DELETE FROM _Reservas_Web_Avisos WHERE ID_Reserva = ?1;",
+                    vec![Value::Text(cuerpo.id_reserva.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            g.raw()
+                .execute(
+                    "INSERT INTO _Reservas_Web_Avisos (ID_Aviso, ID_Reserva, Tipo, Datos_Json, Creado_Ms) \
+                     VALUES (?1, ?2, ?3, ?4, ?5);",
+                    vec![
+                        Value::Text(cuerpo.id_aviso.clone()),
+                        Value::Text(cuerpo.id_reserva.clone()),
+                        Value::Text(tipo),
+                        Value::Text(json),
+                        Value::Integer(now_ms()),
+                    ],
+                )
+                .await
+                .map_err(db_err)
+        }
+        .await;
         if let Err(e) = &r {
             tracing::warn!(target: "tpv::reservas_web", codigo = ?e.code(), "no se ha podido encolar el aviso al cliente");
         }
@@ -86,7 +98,7 @@ impl ColaAvisosReservaWeb for SqliteAvisosReservaWeb {
             let mut rows = db
                 .query(
                     "SELECT ID_Aviso, Datos_Json, Creado_Ms, Intentos FROM _Reservas_Web_Avisos \
-                     ORDER BY Creado_Ms, ID_Aviso LIMIT ?1;",
+                     ORDER BY Intentos, Creado_Ms, ID_Aviso LIMIT ?1;",
                     vec![Value::Integer(max)],
                 )
                 .await
@@ -156,6 +168,33 @@ mod tests {
             id_cliente: Some("c1".into()),
             huella_correo: None,
         }
+    }
+
+    #[tokio::test]
+    async fn el_ultimo_aviso_de_una_reserva_sustituye_a_los_que_esperaban() {
+        let (db, _dir) = abrir().await;
+        let cola = SqliteAvisosReservaWeb::new(db);
+        cola.encolar(aviso("r1")).await.unwrap();
+        cola.encolar(AvisoAlCliente { tipo: TipoAvisoReservaWeb::Cancelada, ..aviso("r1") }).await.unwrap();
+        let p = cola.pendientes(10).await.unwrap();
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].cuerpo.tipo, TipoAvisoReservaWeb::Cancelada);
+    }
+
+    #[tokio::test]
+    async fn los_que_no_salen_van_rotando_detras() {
+        let (db, _dir) = abrir().await;
+        let cola = SqliteAvisosReservaWeb::new(db);
+        for i in 0..3 {
+            cola.encolar(aviso(&format!("r{i}"))).await.unwrap();
+        }
+        let primero = cola.pendientes(1).await.unwrap().remove(0);
+        assert_eq!(primero.cuerpo.id_reserva, "r0");
+        cola.apuntar_fallo(&primero.cuerpo.id_aviso, "not_found").await.unwrap();
+        // Con uno por vuelta, el siguiente ya no es el que falló.
+        let p = cola.pendientes(3).await.unwrap();
+        assert_eq!(p.iter().map(|a| a.cuerpo.id_reserva.as_str()).collect::<Vec<_>>(), ["r1", "r2", "r0"]);
+        assert_eq!(p[2].intentos, 1);
     }
 
     #[tokio::test]

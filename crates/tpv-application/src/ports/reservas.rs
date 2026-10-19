@@ -81,7 +81,9 @@ pub struct AvisoEnCola {
 /// no se replica.
 #[async_trait]
 pub trait ColaAvisosReservaWeb: Send + Sync {
-    /// Los más viejos primero, como mucho `max`.
+    /// Primero los menos intentados y, entre ellos, los más viejos, como mucho `max`: los que no
+    /// salen van rotando detrás y no tapan a los demás. Como mucho uno por reserva: encolar el aviso
+    /// de una reserva quita los que esperaban de ella, porque el último dice cómo queda.
     async fn pendientes(&self, max: i64) -> AppResult<Vec<AvisoEnCola>>;
     /// Enviado, o descartado.
     async fn quitar(&self, id_aviso: &str) -> AppResult<()>;
