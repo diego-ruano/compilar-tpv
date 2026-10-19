@@ -30,6 +30,14 @@ it("espera confirmación antes de ocultar una comanda y evita dos pulsaciones", 
     await waitFor(() => expect(screen.queryByText("1× Tostada")).not.toBeInTheDocument());
 });
 
+it("la comanda lleva el nombre de la mesa, sin otro «Mesa» delante", async () => {
+    api.leer.mockResolvedValue([fila, { ...fila, ID_Detalle: "d2", ID_Comanda: "otra", Numero_Mesa: "Mesa 2" }]);
+    vi.stubGlobal("scrollTo", vi.fn());
+    render(<KitchenBoard idUsuarioCocinero="cocinero" />);
+    expect(await screen.findByText("Mesa 1 · Comanda #comanda")).toBeInTheDocument();
+    expect(screen.getByText("Mesa 2 · Comanda #otra")).toBeInTheDocument();
+});
+
 it("un fallo conserva la comanda pendiente y permite reintentar", async () => {
     api.marcar.mockRejectedValue(new Error("Sin conexión"));
     const linea = await abrir();

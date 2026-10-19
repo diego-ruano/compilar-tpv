@@ -1,5 +1,6 @@
 import { commands, toAppError } from "@tpv/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { nombreDeMesa } from "@tpv/plano/nombre";
 import { cocinaSetLineaEstado, type KitchenRow } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
 
@@ -250,7 +251,7 @@ export default function KitchenBoard({
                                     <div className="flex items-center justify-between gap-3">
                                         <div className="min-w-0">
                                             <p className="text-lg font-extrabold">
-                                                {c.mesa !== null ? `Mesa ${c.mesa}` : "Barra"} · Comanda #
+                                                {c.mesa !== null ? nombreDeMesa(c.mesa) : "Barra"} · Comanda #
                                                 {c.idComanda}
                                             </p>
                                             <p className="text-sm text-fg-muted">
