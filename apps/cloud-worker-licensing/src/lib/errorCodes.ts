@@ -299,6 +299,7 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	// lee el job de la Main, que reintenta o descarta; no llegan a nadie.
 	"reserva_inexistente",
 	"reserva_no_web",
+	"reserva_no_al_dia",
 	// Internos: sólo salen si hay un bug, un cliente manipulado o una configuración rota.
 	"admin_disabled",
 	"interruptor_not_found",

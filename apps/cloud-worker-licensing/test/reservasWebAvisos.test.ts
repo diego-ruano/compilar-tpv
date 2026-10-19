@@ -67,6 +67,7 @@ function aviso(extra: Record<string, unknown> = {}) {
 		hora: "22:00",
 		personas: 4,
 		mesa: "Mesa 7",
+		id_cliente: "c1",
 		...extra,
 	};
 }
@@ -142,6 +143,20 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 		});
 	});
 
+	it("si la nube aún tiene otro cliente en la reserva, espera: no le cuenta la reserva a otra persona", async () => {
+		await conNegocio("otro-cliente", async (sql) => {
+			sql.exec(`INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('c2', 'Luis', 'luis@correo.es');`);
+			reserva(sql, "WEB");
+			// La Main ya se la ha pasado a Luis (c2), pero eso aún no ha subido.
+			expect(await mandar(aviso({ id_cliente: "c2" }))).toMatchObject({ status: 404, json: { error: "reserva_no_al_dia" } });
+			expect(enviados).toEqual([]);
+			// Cuando sube, sale, y a Luis.
+			sql.exec(`UPDATE Reservas SET ID_Cliente = 'c2' WHERE ID_Reserva = ?;`, ID);
+			expect((await mandar(aviso({ id_cliente: "c2" }))).json).toEqual({ ok: true, enviado: true });
+			expect(enviados.map((m) => m.to)).toEqual(["luis@correo.es"]);
+		});
+	});
+
 	it("una reserva del TPV no se avisa: no hay correo de nadie que haya reservado por la web", async () => {
 		await conNegocio("del-tpv", async (sql) => {
 			reserva(sql, "TPV");
@@ -153,7 +168,7 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 	it("sin correo del cliente no hay a quién decírselo, y no es un error", async () => {
 		await conNegocio("sin-correo", async (sql) => {
 			reserva(sql, "WEB", null);
-			expect(await mandar(aviso())).toEqual({ status: 200, json: { ok: true, enviado: false } });
+			expect(await mandar(aviso({ id_cliente: null }))).toEqual({ status: 200, json: { ok: true, enviado: false } });
 		});
 	});
 

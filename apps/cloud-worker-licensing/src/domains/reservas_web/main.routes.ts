@@ -68,17 +68,27 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 	const aviso = c.req.valid("json");
 	const leido = await tenantQuery(c, async (db) => {
 		const rs = await db.execute({
-			sql: `SELECT R.Origen AS origen, NULLIF(TRIM(C.Email), '') AS email
+			sql: `SELECT R.Origen AS origen, C.ID_Cliente AS id_cliente, NULLIF(TRIM(C.Email), '') AS email
 			      FROM Reservas R LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
 			      WHERE R.ID_Reserva = ?1;`,
 			args: [aviso.id_reserva],
 		});
 		const r: any = rs.rows?.[0];
-		return r ? { origen: String(r.origen), email: typeof r.email === "string" ? r.email : null, negocio: await negocioDelCorreo(db) } : null;
+		return r
+			? {
+					origen: String(r.origen),
+					idCliente: typeof r.id_cliente === "string" ? r.id_cliente : null,
+					email: typeof r.email === "string" ? r.email : null,
+					negocio: await negocioDelCorreo(db),
+				}
+			: null;
 	});
 	// Aún no ha subido (la Main lo hizo sin conexión, o su outbox va detrás): se repite más tarde.
 	if (!leido) return c.json({ ok: false, error: "reserva_inexistente" }, 404);
 	if (leido.origen !== "WEB") return c.json({ ok: false, error: "reserva_no_web" }, 409);
+	// La nube aún tiene otro cliente en esa reserva (la Main lo cambió y no ha subido): escribirle al
+	// de aquí sería contarle a otra persona la reserva. Se repite cuando esté al día.
+	if (leido.idCliente !== aviso.id_cliente) return c.json({ ok: false, error: "reserva_no_al_dia" }, 404);
 	// Sin correo no hay a quién decírselo: hecho.
 	if (!leido.email) return c.json({ ok: true, enviado: false });
 

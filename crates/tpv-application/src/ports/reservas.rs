@@ -52,6 +52,8 @@ pub struct AvisoAlCliente {
     pub personas: i64,
     /// El nombre de la mesa, o `None` sin mesa.
     pub mesa: Option<String>,
+    /// El cliente que tiene la reserva tras el cambio: a ése, y sólo a ése, le escribe la nube.
+    pub id_cliente: Option<String>,
 }
 
 /// El correo al cliente de una reserva web por un cambio del restaurante. Lo envía el worker

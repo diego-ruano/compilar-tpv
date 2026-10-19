@@ -169,6 +169,11 @@ export type AvisoReservaWebInput = {
 	personas: number,
 	/**  El nombre de la mesa en la Main; `None` si no tiene. */
 	mesa: string | null,
+	/**
+	 *  El cliente de la reserva en la Main tras el cambio. La nube sólo le escribe al de su copia si
+	 *  es éste: si aún tiene otro (el cambio no ha subido), contesta 404 y se repite más tarde.
+	 */
+	id_cliente: string | null,
 };
 
 export type AvisoSocketHandy = {

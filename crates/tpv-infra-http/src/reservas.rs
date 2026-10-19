@@ -125,6 +125,7 @@ impl AvisosReservaWeb for HttpAvisosReservaWeb {
             hora: aviso.hora,
             personas: aviso.personas,
             mesa: aviso.mesa,
+            id_cliente: aviso.id_cliente,
         };
         let _: JsonValue = self.client.post_json("/v1/reservas-web/avisos", &cuerpo).await?;
         Ok(())

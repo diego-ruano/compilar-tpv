@@ -192,6 +192,13 @@ export const avisoReservaWebSchema = z.object({
 		.refine((s) => !/[\r\n]/.test(s), "mesa inválida")
 		.nullish()
 		.transform((v) => (v ? v : null)),
+	// El cliente de la reserva en la Main tras el cambio: la nube sólo le escribe al suyo si es éste.
+	id_cliente: z
+		.string()
+		.trim()
+		.max(64)
+		.nullish()
+		.transform((v) => (v ? v : null)),
 });
 
 type _GAviso = Assert<SameKeys<z.infer<typeof avisoReservaWebSchema>, AvisoReservaWebInput>>;

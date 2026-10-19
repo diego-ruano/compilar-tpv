@@ -151,6 +151,7 @@ pub fn aviso_al_cliente(antes: &ReservaDto, despues: Option<&ReservaDto>) -> Opt
         hora: r.hora.clone(),
         personas: r.comensales,
         mesa: (!r.id_mesa.is_empty() && !r.numero_mesa.is_empty()).then(|| r.numero_mesa.clone()),
+        id_cliente: r.id_cliente.clone(),
     };
     match despues {
         None => Some(aviso(TipoAvisoReservaWeb::Cancelada, antes)),
@@ -431,6 +432,7 @@ mod tests {
                     hora: "22:00".into(),
                     personas: 2,
                     mesa: Some("Mesa 1".into()),
+                    id_cliente: Some("c1".into()),
                 },
                 AvisoAlCliente {
                     id_reserva: "r1".into(),
@@ -439,6 +441,7 @@ mod tests {
                     hora: "22:00".into(),
                     personas: 2,
                     mesa: Some("Terraza 2".into()),
+                    id_cliente: Some("c1".into()),
                 },
             ]
         );

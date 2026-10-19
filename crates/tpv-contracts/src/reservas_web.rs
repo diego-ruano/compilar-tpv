@@ -186,4 +186,7 @@ pub struct AvisoReservaWebInput {
     pub personas: i64,
     /// El nombre de la mesa en la Main; `None` si no tiene.
     pub mesa: Option<String>,
+    /// El cliente de la reserva en la Main tras el cambio. La nube sólo le escribe al de su copia si
+    /// es éste: si aún tiene otro (el cambio no ha subido), contesta 404 y se repite más tarde.
+    pub id_cliente: Option<String>,
 }

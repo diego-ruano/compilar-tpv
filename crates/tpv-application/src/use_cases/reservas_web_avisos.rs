@@ -183,6 +183,7 @@ mod tests {
                 hora: "21:00".into(),
                 personas: 2,
                 mesa: None,
+                id_cliente: Some("c1".into()),
             },
             creado_ms,
         }
