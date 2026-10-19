@@ -1,0 +1,8 @@
+{
+	"//": "Los tests quedan fuera del `include` de la app, así que sin esto sus errores de tipos no los vería nadie. Mismo patrón que la Main.",
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"types": ["node"]
+	},
+	"include": ["./**/*.ts", "./**/*.tsx", "../src/**/*.ts", "../src/**/*.tsx"]
+}

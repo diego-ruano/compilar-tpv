@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  Página de prueba del widget de reservas web: una web cualquiera que lo incrusta, como la de un
+  restaurante. `pnpm --filter @tpv/reservas-web prueba` la sirve en http://localhost:5174, que hay
+  que dar de alta para el negocio (pnpm reservas-web:dominio-poner -- --tenant <id> --origen
+  http://localhost:5174): si no, el widget no se deja incrustar.
+-->
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prueba del widget de reservas</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; background: #f6f1e9; color: #2b2118; }
+      label { display: block; margin: .5rem 0 .25rem; font-weight: 600; }
+      input { width: 100%; padding: .5rem; box-sizing: border-box; }
+      button { margin-top: .75rem; padding: .5rem 1rem; }
+      .widget { margin-top: 2rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Restaurante de prueba</h1>
+    <p>Así se ve el widget dentro de una web ajena.</p>
+    <form id="formulario">
+      <label for="clave">Clave del negocio (Configuración → Reservas → «Ver el código»)</label>
+      <input id="clave" name="clave" placeholder="rw_…" required />
+      <label for="origen">Worker</label>
+      <input id="origen" name="origen" value="https://tpv-api.altarialights.workers.dev" />
+      <button type="submit">Cargar el widget</button>
+    </form>
+
+    <div class="widget" id="hueco"></div>
+
+    <script>
+      // Lo mismo que hace la línea que se pega en una web, con la clave y el worker de la URL.
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var clave = params.get("clave");
+        var origen = params.get("origen") || "https://tpv-api.altarialights.workers.dev";
+        if (!clave) return;
+        document.getElementById("clave").value = clave;
+        document.getElementById("origen").value = origen;
+        var div = document.createElement("div");
+        div.setAttribute("data-negocio", clave);
+        document.getElementById("hueco").appendChild(div);
+        var script = document.createElement("script");
+        script.src = origen.replace(/\/$/, "") + "/reservas-web/v1/embed.js";
+        script.async = true;
+        document.body.appendChild(script);
+      })();
+    </script>
+  </body>
+</html>

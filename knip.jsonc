@@ -15,9 +15,22 @@
       "entry": ["src/app/main.tsx", "test/**/*.test.{ts,tsx}", "test/react/setup.ts", "test/**/*.types.ts", "e2e/wdio.conf.ts", "e2e/construir.ts", "e2e/specs/**/*.ts"],
       "project": ["src/**/*.{ts,tsx}", "test/**/*.{ts,tsx}", "e2e/**/*.ts", "*.config.ts"],
       "webdriver-io": { "config": ["e2e/wdio.conf.ts"] },
-      // Tailwind se importa en Global.css; WDIO carga runner/servicio por configuración
-      // y sus tipos son ambientales. No son imports TS que Knip pueda resolver.
-      "ignoreDependencies": ["tailwindcss", "@wdio/local-runner", "@wdio/tauri-service", "@wdio/types"]
+      // Tailwind y los tokens de @tpv/estilos se importan en Global.css; WDIO carga
+      // runner/servicio por configuración y sus tipos son ambientales. No son imports TS que
+      // Knip pueda resolver.
+      "ignoreDependencies": ["tailwindcss", "@tpv/estilos", "@wdio/local-runner", "@wdio/tauri-service", "@wdio/types"]
+    },
+    "apps/reservas-web": {
+      // embed.js va tal cual a la web del restaurante (sale de public/); la página de prueba
+      // la sirve `pnpm prueba`.
+      "entry": ["src/main.tsx", "public/v1/embed.js", "test/**/*.test.{ts,tsx}", "test/setup.ts"],
+      "project": ["src/**/*.{ts,tsx}", "test/**/*.{ts,tsx}", "public/**/*.js", "*.config.ts"],
+      // Tailwind y los tokens se importan en estilos.css; Konva lo usa @tpv/plano por debajo.
+      "ignoreDependencies": ["tailwindcss", "@tpv/estilos", "react-konva"]
+    },
+    "packages/plano": {
+      "entry": ["src/index.ts", "src/geometria.ts"],
+      "project": ["src/**/*.{ts,tsx}"]
     },
     "apps/cloud-worker-licensing": {
       // No ejecutar cloudflareTest al analizar: inicializa el pool nativo de workerd.

@@ -123,7 +123,7 @@ export default tseslint.config(
     // sólo quedan las reglas que se deducen del texto. Si algún día esos paquetes ganan su
     // `tsconfig.json`, muévelos al bloque de arriba y ganarán la regla de las promesas.
     {
-        files: ["packages/*/src/**/*.ts", "scripts/**/*.mjs", "*.config.mjs"],
+        files: ["packages/*/src/**/*.{ts,tsx}", "scripts/**/*.mjs", "*.config.mjs"],
         extends: [tseslint.configs.recommended],
         languageOptions: {
             globals: { process: "readonly", console: "readonly", Buffer: "readonly" },
@@ -135,6 +135,16 @@ export default tseslint.config(
             "no-empty": "off",
             "no-useless-escape": "off",
             "no-useless-assignment": "off",
+        },
+    },
+
+    // `embed.js` del widget de reservas web: JavaScript de navegador tal cual, sin compilar (se
+    // pega en webs ajenas). Sólo las reglas recomendadas, con lo que existe en una página.
+    {
+        files: ["apps/reservas-web/public/**/*.js"],
+        languageOptions: {
+            sourceType: "script",
+            globals: { window: "readonly", document: "readonly", URL: "readonly" },
         },
     },
 );

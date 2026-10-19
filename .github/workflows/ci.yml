@@ -107,6 +107,14 @@ jobs:
       - name: Tests del frontend
         run: pnpm --filter @tpv/main test
 
+      # El widget de reservas web: tipos, tests y que compila. El worker lo sirve desde su `dist/`
+      # (Workers Static Assets): un widget que no compila es un worker que no se puede desplegar.
+      - name: Widget de reservas web
+        run: |
+          pnpm --filter @tpv/reservas-web typecheck
+          pnpm --filter @tpv/reservas-web test
+          pnpm --filter @tpv/reservas-web build
+
   # RI-87: exportar usa las firmas reales del ejecutable Tauri, sin arrancar la aplicación.
   contratos-tauri:
     name: Contratos IPC generados al día

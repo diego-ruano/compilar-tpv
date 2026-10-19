@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/* Los colores de la aplicación, los mismos de la Main (@tpv/estilos). El widget usa el tema claro. */
+@import "@tpv/estilos/tokens.css";
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    /* Transparente: se ve el fondo de la web donde va incrustado. */
+    background: transparent;
+    color: var(--fg);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+:root {
+    color-scheme: light;
+}
