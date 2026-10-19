@@ -306,6 +306,8 @@ casos_de_contrato! {
     reservas__guardar_otra_persona_mismo_telefono,
     reservas__editar_web_conserva_origen,
     reservas__eliminar,
+    reservas__eliminar_web_por_venir,
+    reservas__eliminar_web_pasada,
     venta_rapida__create_comanda_barra,
     venta_rapida__add_linea,
     venta_rapida__add_linea_sin_precio,

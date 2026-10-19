@@ -1,0 +1,15 @@
+{
+  "Comandas": [
+    {
+      "ID_Comanda": "com-1",
+      "ID_Reserva": "reserva-1"
+    }
+  ],
+  "Reservas": [
+    {
+      "Estado": "CANCELADA",
+      "ID_Reserva": "reserva-1",
+      "Origen": "WEB"
+    }
+  ]
+}

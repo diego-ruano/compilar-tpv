@@ -195,6 +195,10 @@ import casoResOtraPersona from "../../../tests/contract/casos/reservas/guardar_o
 import goldenResOtraPersona from "../../../tests/contract/golden/reservas/guardar_otra_persona_mismo_telefono.json";
 import casoResEliminar from "../../../tests/contract/casos/reservas/eliminar.json";
 import goldenResEliminar from "../../../tests/contract/golden/reservas/eliminar.json";
+import casoResEliminarWeb from "../../../tests/contract/casos/reservas/eliminar_web_por_venir.json";
+import goldenResEliminarWeb from "../../../tests/contract/golden/reservas/eliminar_web_por_venir.json";
+import casoResEliminarWebPasada from "../../../tests/contract/casos/reservas/eliminar_web_pasada.json";
+import goldenResEliminarWebPasada from "../../../tests/contract/golden/reservas/eliminar_web_pasada.json";
 import casoVrCrearComanda from "../../../tests/contract/casos/venta_rapida/create_comanda_barra.json";
 import goldenVrCrearComanda from "../../../tests/contract/golden/venta_rapida/create_comanda_barra.json";
 import casoVrAddLinea from "../../../tests/contract/casos/venta_rapida/add_linea.json";
@@ -334,6 +338,8 @@ const CASOS = [
 		golden: goldenResOtraPersona,
 	},
 	{ nombre: "reservas_eliminar", caso: casoResEliminar, golden: goldenResEliminar },
+	{ nombre: "reservas_eliminar_web_por_venir", caso: casoResEliminarWeb, golden: goldenResEliminarWeb },
+	{ nombre: "reservas_eliminar_web_pasada", caso: casoResEliminarWebPasada, golden: goldenResEliminarWebPasada },
 	{ nombre: "vr_create_comanda_barra", caso: casoVrCrearComanda, golden: goldenVrCrearComanda },
 	{ nombre: "vr_add_linea", caso: casoVrAddLinea, golden: goldenVrAddLinea },
 	{ nombre: "vr_add_linea_sin_precio", caso: casoVrAddLineaSinPrecio, golden: goldenVrAddLineaSinPrecio },

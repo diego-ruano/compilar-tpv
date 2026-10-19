@@ -214,6 +214,13 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 	};
 }
 
+/** Una reserva web que aún está por venir: borrarla la cancela (como `SQL_CANCELAR_WEB` en la Main). */
+const WEB_POR_VENIR = "Origen = 'WEB' AND Estado = 'PROXIMA'";
+
+/**
+ * Borra una reserva y desvincula sus comandas. Una reserva web que está por venir no se borra: se
+ * cancela (docs/estudios/reservas-web.md §5.6) y su comanda sigue con ella. Igual que la Main.
+ */
 export function deleteReserva(idReserva: string): BuiltCommand {
 	const cloudPayload = { id_reserva: idReserva };
 	return {
@@ -224,13 +231,19 @@ export function deleteReserva(idReserva: string): BuiltCommand {
 				steps: [
 					{
 						kind: "execute",
-						sql: "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
+						sql: `UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1
+						      AND NOT EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND ${WEB_POR_VENIR});`,
 						args: [idReserva],
 					},
 					{
 						kind: "execute",
 						saveAs: "deleted",
-						sql: "DELETE FROM Reservas WHERE ID_Reserva = ?1;",
+						sql: `DELETE FROM Reservas WHERE ID_Reserva = ?1 AND NOT (${WEB_POR_VENIR});`,
+						args: [idReserva],
+					},
+					{
+						kind: "execute",
+						sql: `UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1 AND ${WEB_POR_VENIR};`,
 						args: [idReserva],
 					},
 				],

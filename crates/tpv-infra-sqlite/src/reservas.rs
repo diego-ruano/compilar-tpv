@@ -470,29 +470,30 @@ impl ReservasRepository for SqliteReservasRepository {
         let g = self.db.write().await;
         let conn = &g;
         let res: AppResult<bool> = conn.transaccion(async {
+            let id = || vec![Value::Text(id_reserva.to_string())];
             // La comanda pierde la reserva pero conserva su cliente (`ID_Cliente`, fijado al
-            // cobrar): el gasto del cliente no se descuadra por borrar la reserva (RI-61).
-            conn.execute(
-                "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
-                vec![Value::Text(id_reserva.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-
-            let affected = conn
-                .execute(
-                    "DELETE FROM Reservas WHERE ID_Reserva = ?1;",
-                    vec![Value::Text(id_reserva.to_string())],
-                )
-                .await
-                .map_err(db_err)?;
-
-            Ok(affected > 0)
+            // cobrar): el gasto del cliente no se descuadra por borrar la reserva (RI-61). Sólo si
+            // la reserva se borra de verdad.
+            conn.execute(SQL_DESVINCULAR_COMANDAS, id()).await.map_err(db_err)?;
+            let borradas = conn.execute(SQL_BORRAR, id()).await.map_err(db_err)?;
+            let canceladas = conn.execute(SQL_CANCELAR_WEB, id()).await.map_err(db_err)?;
+            Ok(borradas + canceladas > 0)
         }).await;
 
         res
     }
 }
+
+// Borrar una reserva. Una reserva web que aún está por venir (`Origen = 'WEB' AND Estado =
+// 'PROXIMA'`) no se borra: se cancela (docs/estudios/reservas-web.md §5.6). Queda constancia, la
+// agenda libera la mesa al verla cancelada y el correo al cliente se puede leer de ella; su comanda
+// sigue con la reserva. Lo mismo hace el worker (`reservas.commands.ts::deleteReserva`).
+const SQL_DESVINCULAR_COMANDAS: &str = "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1 \
+     AND NOT EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Origen = 'WEB' AND Estado = 'PROXIMA');";
+const SQL_BORRAR: &str =
+    "DELETE FROM Reservas WHERE ID_Reserva = ?1 AND NOT (Origen = 'WEB' AND Estado = 'PROXIMA');";
+const SQL_CANCELAR_WEB: &str =
+    "UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1 AND Origen = 'WEB' AND Estado = 'PROXIMA';";
 
 #[cfg(test)]
 mod tests_cliente {
