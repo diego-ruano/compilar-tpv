@@ -24,7 +24,7 @@ import { Hono } from "hono";
 
 import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
-import type { RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
+import { codigoDeReserva, type RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
 import { lecturaConHora } from "../../lib/tenantClient";
 import { reportarReservaWeb } from "../../observability/axiom";
 import { consulta, cuerpo } from "../../lib/validacion";
@@ -192,5 +192,18 @@ reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, 
 	const r = await agendaDe(c.env, tenantId).cancelar({ tenantId, token });
 	if (!r.ok) return rechazada(c, r);
 	anotar(c, { event: "reserva_web_cancelada", tenant_id: tenantId });
+	// «Has cancelado tu reserva», a su cliente. Sólo si se acaba de cancelar: la segunda vez no.
+	if (r.aviso) {
+		const a = r.aviso;
+		await enviarCorreoReservaWeb(c.env, {
+			tenantId,
+			id: `rw:cancelacion:${a.id_reserva}`,
+			tipo: "cancelacion",
+			para: a.email,
+			negocio: await negocioParaElCorreo(c, tenantId),
+			reserva: { dia: a.dia, hora: a.hora, personas: a.personas, mesa: a.mesa, codigo: codigoDeReserva(a.id_reserva) },
+			dispositivo: "web",
+		});
+	}
 	return c.json({ ok: true });
 });

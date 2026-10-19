@@ -153,7 +153,21 @@ export type ResultadoConsulta =
 	| { ok: true; dia: string; hora: string; personas: number; mesa: string; estado: EstadoPublico; cancelable: boolean }
 	| RechazoAgenda;
 
-export type ResultadoCancelar = { ok: true } | RechazoAgenda;
+/**
+ * Lo que necesita el correo de «has cancelado tu reserva» (`domains/reservas_web/correos.ts`). Sólo
+ * cruza el RPC hasta la ruta, que no lo devuelve: la respuesta pública sigue sin datos personales.
+ */
+export type AvisoDeCancelacion = {
+	id_reserva: string;
+	email: string;
+	dia: string;
+	hora: string;
+	personas: number;
+	mesa: string | null;
+};
+
+/** `aviso`, si se acaba de cancelar y se sabe a quién decírselo; `null` si ya lo estaba. */
+export type ResultadoCancelar = { ok: true; aviso: AvisoDeCancelacion | null } | RechazoAgenda;
 
 /** Una referencia corta para hablar con el restaurante: el final aleatorio del `ID_Reserva`. */
 export function codigoDeReserva(idReserva: string): string {
@@ -182,8 +196,8 @@ type DiaLeido = {
 	idsEnTurso: Set<string>;
 };
 
-/** El estado de una reserva en Turso, para el enlace de cancelar. */
-type ReservaEnTurso = { dia: string; hora: string; personas: number; id_mesa: string | null; estado: string };
+/** El estado de una reserva en Turso, para el enlace de cancelar, con el correo de su cliente. */
+type ReservaEnTurso = { dia: string; hora: string; personas: number; id_mesa: string | null; estado: string; email: string | null };
 
 export type Lector = <T>(tenantId: string, fn: (db: Client, ahora: string) => Promise<T>) => Promise<T>;
 
@@ -417,7 +431,7 @@ export class MotorAgendaWeb {
 		const idReserva = await this.reservaDelToken(p.token);
 		if (!idReserva) return rechazo("enlace_no_valido");
 
-		const { leidaMs, ahora, enTurso } = await this.leerReserva(p.tenantId, idReserva);
+		const { leidaMs, ahora, enTurso, numero } = await this.leerReserva(p.tenantId, idReserva);
 		// ── Síncrono hasta el final ──
 		const ahoraMs = Date.now();
 		if (enTurso) darPorVistas(this.sql, [idReserva], ahoraMs);
@@ -426,10 +440,18 @@ export class MotorAgendaWeb {
 		if (!datos) return rechazo("enlace_no_valido");
 
 		const estado = this.estadoPublico(idReserva, enTurso, ahora, datos, leidaMs);
-		if (estado === "cancelada") return { ok: true };
+		// Ya cancelada: ya se le dijo, no se le vuelve a escribir.
+		if (estado === "cancelada") return { ok: true, aviso: null };
 		if (estado === "pasada") return rechazo("reserva_no_cancelable");
 
-		if (!enTurso && anularAlta(this.sql, idReserva, ahoraMs)) return { ok: true };
+		// A quién decírselo: al cliente de la reserva en Turso o, si aún no está, al correo del alta.
+		// Antes de anularla, que se lleva los datos del alta.
+		const email = enTurso?.email ?? correoDelAlta(alta);
+		const aviso: AvisoDeCancelacion | null = email
+			? { id_reserva: idReserva, email, dia: datos.dia, hora: datos.hora, personas: datos.personas, mesa: numero }
+			: null;
+
+		if (!enTurso && anularAlta(this.sql, idReserva, ahoraMs)) return { ok: true, aviso };
 		apuntarCancelacion(this.sql, {
 			id_peticion: nuevoId(),
 			id_reserva: idReserva,
@@ -442,7 +464,7 @@ export class MotorAgendaWeb {
 		});
 		this.avisarALaMain(p.tenantId);
 		await this.asegurarAlarma();
-		return { ok: true };
+		return { ok: true, aviso };
 	}
 
 	/**
@@ -520,13 +542,21 @@ export class MotorAgendaWeb {
 		return this.leer(tenantId, async (db, ahora) => {
 			const rs = await db.execute({
 				sql: `SELECT R.Dia_YMD AS dia, R.Hora AS hora, R.Comensales AS personas, R.ID_Mesa AS id_mesa,
-				             R.Estado AS estado
-				      FROM Reservas R WHERE R.ID_Reserva = ?1;`,
+				             R.Estado AS estado, NULLIF(TRIM(C.Email), '') AS email
+				      FROM Reservas R LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
+				      WHERE R.ID_Reserva = ?1;`,
 				args: [idReserva],
 			});
 			const r: any = rs.rows?.[0];
 			const enTurso: ReservaEnTurso | null = r
-				? { dia: String(r.dia), hora: String(r.hora), personas: Number(r.personas), id_mesa: r.id_mesa ?? null, estado: String(r.estado) }
+				? {
+						dia: String(r.dia),
+						hora: String(r.hora),
+						personas: Number(r.personas),
+						id_mesa: r.id_mesa ?? null,
+						estado: String(r.estado),
+						email: typeof r.email === "string" ? r.email : null,
+					}
 				: null;
 			const idMesa = enTurso?.id_mesa ?? peticion(this.sql, "alta", idReserva)?.id_mesa ?? null;
 			const numero = idMesa ? await numeroDeMesa(db, idMesa) : null;
@@ -616,6 +646,17 @@ export class MotorAgendaWeb {
 	/** Sólo para diagnóstico y tests: de qué negocio es esta agenda. */
 	negocio(): string | null {
 		return negocioRecordado(this.sql);
+	}
+}
+
+/** El correo de un alta, mientras la agenda guarda sus datos. */
+function correoDelAlta(alta: FilaPeticion | null): string | null {
+	if (!alta?.datos_json) return null;
+	try {
+		const email = JSON.parse(alta.datos_json).email;
+		return typeof email === "string" && email ? email : null;
+	} catch {
+		return null;
 	}
 }
 

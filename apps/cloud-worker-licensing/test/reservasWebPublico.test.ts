@@ -19,6 +19,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
+import { codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
 
 const AHORA = horaLocalEn("Europe/Madrid", Date.now());
 const HOY = AHORA.slice(0, 10);
@@ -368,6 +369,12 @@ describe("las rutas públicas de la reserva web", () => {
 
 			expect((await pedir("/cancelar", { token: hecha.token })).json).toEqual({ ok: true });
 			expect((await pedir("/reserva", { token: hecha.token })).json.estado).toBe("cancelada");
+			// El correo de «has cancelado», a su dirección; cancelar otra vez no lo repite.
+			expect(enviados.map((m) => [m.to, m.subject])).toEqual([["ana@correo.es", "Reserva cancelada en Bar Pepe"]]);
+			expect(enviados[0].text).toContain(codigoDeReserva(hecha.id_reserva));
+			expect(enviados[0].text).not.toContain("600112233");
+			await pedir("/cancelar", { token: hecha.token });
+			expect(enviados).toHaveLength(1);
 			expect(await pedir("/cancelar", { token: "inventado" })).toMatchObject({ status: 404, json: { error: "enlace_no_valido" } });
 			// Sin token, la petición está mal hecha.
 			expect((await pedir("/cancelar", {})).status).toBe(400);

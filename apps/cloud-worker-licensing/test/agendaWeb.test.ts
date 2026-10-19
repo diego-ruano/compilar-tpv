@@ -255,7 +255,9 @@ describe("la agenda de reservas web", () => {
 			await motor.disponibles({ tenantId: T, dia: DIA, hora: "21:00", personas: 2 });
 
 			soltar();
-			expect(await cancelando).toEqual({ ok: true });
+			// Cancelada. Sin correo: la lectura no trae al cliente de Turso y el alta, ya vista, olvidó el
+			// suyo. Es este cruce y nada más; la página de cancelar ya le dice que está cancelada.
+			expect(await cancelando).toEqual({ ok: true, aviso: null });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE tipo = 'cancelacion';`).toArray()[0]).toEqual({ n: 1 });
 		});
 	});
@@ -375,9 +377,13 @@ describe("la agenda de reservas web", () => {
 			expect(consulta).toEqual({ ok: true, dia: DIA, hora: "21:00", personas: 2, mesa: "2", estado: "confirmada", cancelable: true });
 			sinDatosPersonales(consulta);
 
-			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({ ok: true });
-			// Dos veces es lo mismo.
-			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({ ok: true });
+			// Con lo que necesita el correo de «has cancelado»: la dirección del alta y su reserva.
+			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({
+				ok: true,
+				aviso: { id_reserva: r.id_reserva, email: "ana@correo.es", dia: DIA, hora: "21:00", personas: 2, mesa: "2" },
+			});
+			// Dos veces es lo mismo, pero el correo ya salió.
+			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({ ok: true, aviso: null });
 			const fila = sql.exec(`SELECT estado, datos_json FROM peticiones WHERE id_reserva = ?;`, r.id_reserva).toArray()[0] as any;
 			expect(fila).toEqual({ estado: "anulada", datos_json: null });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE tipo = 'cancelacion';`).toArray()[0]).toEqual({ n: 0 });
@@ -386,11 +392,31 @@ describe("la agenda de reservas web", () => {
 		});
 	});
 
+	it("cancelar una que ya está en Turso avisa al correo de su cliente allí, aunque la agenda ya no guarde el del alta", async () => {
+		await conAgenda("agenda-cancelar-correo-turso", async (motor, sql) => {
+			const r = await motor.reservar({ tenantId: T, alta: alta() });
+			sql.exec(`INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('c1', 'Ana', 'ana.nueva@correo.es');`);
+			sql.exec(
+				`INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+				 VALUES (?, 'c1', 'm4', ?, '21:30', 'CENA', 3, 'PROXIMA', 'WEB');`,
+				r.id_reserva,
+				DIA,
+			);
+			// Vista en Turso: la agenda olvida los datos del alta.
+			sql.exec(`UPDATE peticiones SET estado = 'vista', datos_json = NULL WHERE id_reserva = ?;`, r.id_reserva);
+			// Lo que dice Turso, que es lo que el restaurante haya cambiado.
+			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({
+				ok: true,
+				aviso: { id_reserva: r.id_reserva, email: "ana.nueva@correo.es", dia: DIA, hora: "21:30", personas: 3, mesa: "4" },
+			});
+		});
+	});
+
 	it("cancelar cuando la Main ya la tiene deja una cancelación para entregarle", async () => {
 		await conAgenda("agenda-cancelar-entregada", async (motor, sql) => {
 			const r = await motor.reservar({ tenantId: T, alta: alta() });
 			sql.exec(`UPDATE peticiones SET estado = 'entregada' WHERE id_reserva = ?;`, r.id_reserva);
-			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({ ok: true });
+			expect((await motor.cancelar({ tenantId: T, token: r.token })).aviso.email).toBe("ana@correo.es");
 
 			const cancelacion = sql
 				.exec(`SELECT tipo, estado, id_mesa, dia_ymd, hora, comensales, datos_json FROM peticiones WHERE tipo = 'cancelacion';`)
@@ -407,7 +433,7 @@ describe("la agenda de reservas web", () => {
 				r.id_reserva,
 				DIA,
 			);
-			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({ ok: true });
+			expect(await motor.cancelar({ tenantId: T, token: r.token })).toEqual({ ok: true, aviso: null });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE tipo = 'cancelacion';`).toArray()[0]).toEqual({ n: 1 });
 			expect(sql.exec(`SELECT estado FROM peticiones WHERE tipo = 'alta';`).toArray()[0]).toEqual({ estado: "vista" });
 		});
@@ -609,7 +635,7 @@ describe("la entrega a la Main", () => {
 			expect((await motor.pendientes({ tenantId: T })).peticiones).toEqual([]);
 
 			// Cancelar una entregada deja una cancelación para la Main, que también la avisa.
-			expect(await motor.cancelar({ tenantId: T, token: a.token })).toEqual({ ok: true });
+			expect(await motor.cancelar({ tenantId: T, token: a.token })).toMatchObject({ ok: true });
 			expect(avisos).toEqual([T, T, T]);
 			const cancelacion = await motor.pendientes({ tenantId: T });
 			// Con su alta delante, que aún no se ha visto en Turso.
@@ -779,7 +805,7 @@ describe("la entrega a la Main", () => {
 			await motor.pendientes({ tenantId: T });
 			// Vuelta a ofrecer: otra vez pendiente, pero ya se entregó una vez.
 			sql.exec(`UPDATE peticiones SET estado = 'pendiente';`);
-			expect(await motor.cancelar({ tenantId: T, token: a.token })).toEqual({ ok: true });
+			expect(await motor.cancelar({ tenantId: T, token: a.token })).toMatchObject({ ok: true });
 			expect(filas(sql).map((f) => [f.tipo, f.estado])).toEqual([
 				["alta", "pendiente"],
 				["cancelacion", "pendiente"],
