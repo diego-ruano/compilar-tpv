@@ -50,13 +50,14 @@ const INFO = {
 	turnstile: "0xT",
 };
 
+// Las mesas, con el nombre que propone la Main al crearlas: ningún texto puede decir «Mesa Mesa 2».
 const PLANO = {
 	ok: true,
 	completo: true,
 	salones: [{ id: "z1", nombre: "Salón", puntos: "[0,0,400,0,400,300,0,300]" }],
 	mesas: [
-		{ id: "m2", id_salon: "z1", numero: "2", forma: "rect", x: 10, y: 10, ancho: 80, alto: 80, radio: null, capacidad: 2, reservable: true },
-		{ id: "m4", id_salon: "z1", numero: "4", forma: "rect", x: 110, y: 10, ancho: 80, alto: 80, radio: null, capacidad: 4, reservable: true },
+		{ id: "m2", id_salon: "z1", numero: "Mesa 2", forma: "rect", x: 10, y: 10, ancho: 80, alto: 80, radio: null, capacidad: 2, reservable: true },
+		{ id: "m4", id_salon: "z1", numero: "Mesa 4", forma: "rect", x: 110, y: 10, ancho: 80, alto: 80, radio: null, capacidad: 4, reservable: true },
 	],
 };
 
@@ -97,7 +98,7 @@ describe("reservar desde la web", () => {
 			[`${BASE}/reservas`]: () =>
 				altas++ === 0
 					? respuesta(409, { ok: false, error: "mesa_no_disponible", message: "Esa mesa acaba de ocuparse. Elige otra de las que quedan libres." })
-					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "20:07", personas: 2, mesa: "4" },
+					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "20:07", personas: 2, mesa: "Mesa 4" },
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 
@@ -121,10 +122,12 @@ describe("reservar desde la web", () => {
 		const pasoMesa = await screen.findByRole("region", { name: "Mesa" });
 		await waitFor(() => expect(document.activeElement).toBe(within(pasoMesa).getByRole("heading")));
 		fireEvent.click(await screen.findByRole("button", { name: "Mesa 2 · 2 plazas" }));
+		expect(within(pasoMesa).getByText("Mesa 2 · 2 plazas", { selector: "div" })).toBeInTheDocument();
 		expect(llamadas.some((l) => l.url.includes("/disponibles?dia=2026-11-20&hora=20%3A07&personas=2"))).toBe(true);
 		fireEvent.click(screen.getByRole("button", { name: "Continuar" }));
 
 		fireEvent.change(await screen.findByLabelText("Nombre"), { target: { value: "Ana Pérez" } });
+		expect(screen.getByRole("heading", { name: /· 20:07 · Mesa 2 · 2 personas$/ })).toBeInTheDocument();
 		fireEvent.change(screen.getByLabelText("Correo"), { target: { value: "ana@correo.es" } });
 		fireEvent.change(screen.getByLabelText("Teléfono"), { target: { value: "600 112 233" } });
 		fireEvent.click(screen.getByLabelText("He leído la información sobre privacidad"));
@@ -210,7 +213,7 @@ describe("reservar desde la web", () => {
 
 	it("si lo libre trae una mesa que no está en el plano guardado, se vuelve a pedir el plano", async () => {
 		let buscadas = 0;
-		const conLaNueve = { ...PLANO, mesas: [...PLANO.mesas, { ...PLANO.mesas[1], id: "m9", numero: "9", x: 210 }] };
+		const conLaNueve = { ...PLANO, mesas: [...PLANO.mesas, { ...PLANO.mesas[1], id: "m9", numero: "Mesa 9", x: 210 }] };
 		const llamadas = simular({
 			[`${BASE}/negocio`]: () => INFO,
 			[`${BASE}/dia?dia=2026-11-20`]: () => ({ ok: true, dia: "2026-11-20", tramos: [{ desde: "20:00", hasta: "21:00" }] }),
@@ -333,7 +336,7 @@ describe("reservar desde la web", () => {
 			[`${BASE}/reservas`]: () =>
 				altas++ === 0
 					? respuesta(403, { ok: false, error: "verificacion_humana_fallida", message: "No hemos podido comprobar que no eres un robot." })
-					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "2" },
+					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "Mesa 2" },
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 

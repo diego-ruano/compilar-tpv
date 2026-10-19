@@ -6,6 +6,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { AspectoMesa, MesaPlano, SalonPlano } from "@tpv/plano";
+
 import PlanoWidget from "../src/PlanoWidget";
 import type { PlanoPublico } from "../src/api";
 
@@ -13,6 +15,18 @@ vi.mock("react-konva", () => {
 	const Nada = () => null;
 	return { Stage: Nada, Layer: Nada, Rect: Nada, Line: Nada, Group: Nada, Text: Nada, Circle: Nada };
 });
+
+// Lo que se le pide dibujar al lienzo: el salón y el aspecto de cada mesa.
+const lienzo = vi.hoisted(() => ({
+	ultimo: null as null | { salon: SalonPlano; aspecto: (mesa: MesaPlano) => AspectoMesa },
+}));
+vi.mock("@tpv/plano", async (original) => ({
+	...(await original<typeof import("@tpv/plano")>()),
+	Lienzo: (p: { salon: SalonPlano; aspecto: (mesa: MesaPlano) => AspectoMesa }) => {
+		lienzo.ultimo = p;
+		return null;
+	},
+}));
 
 afterEach(cleanup);
 
@@ -66,10 +80,15 @@ describe("las mesas libres del plano", () => {
 	it("llevan el nombre que tienen en la Main, sin otro «Mesa» delante", async () => {
 		const conNombre: PlanoPublico = {
 			...PLANO,
-			mesas: [mesa("i1", "dentro", "Mesa 7"), mesa("i2", "dentro", "Ventana")],
+			mesas: [mesa("i1", "dentro", "Mesa 7"), mesa("i2", "dentro", "Ventana"), mesa("i3", "dentro", "12")],
 		};
-		render(<PlanoWidget plano={conNombre} libres={["i1", "i2"]} elegida={null} onElegir={() => {}} />);
+		render(<PlanoWidget plano={conNombre} libres={["i1", "i2", "i3"]} elegida={null} onElegir={() => {}} />);
 		expect(await screen.findByRole("button", { name: "Mesa 7 · 4 plazas" })).toBeInTheDocument();
 		expect(screen.getByRole("button", { name: "Ventana · 4 plazas" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Mesa 12 · 4 plazas" })).toBeInTheDocument();
+
+		// En el dibujo, el nombre tal cual, como en la sala de la Main.
+		const { salon, aspecto } = lienzo.ultimo!;
+		expect(salon.tables.map((t) => aspecto(t).etiqueta)).toEqual(["Mesa 7", "Ventana", "12"]);
 	});
 });
