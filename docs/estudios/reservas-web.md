@@ -783,6 +783,8 @@ en la fase 1.
   borrado llega a la nube antes que el aviso (lo normal si se hizo todo sin conexión), la nube ya no
   sabe a quién escribir y el aviso acaba descartado: el cliente no recibe el correo de cancelación.
   Evitarlo obligaría a impedir el segundo borrado o a guardar el destinatario fuera de la nube.
+- **Un correo puede salir dos veces** si sale, fallan los tres intentos de apuntarlo en la base
+  central, se pierde además la respuesta y quien lo mandó lo repite pasados cinco minutos.
 - **El enlace de cancelar es de quien hizo la reserva.** Si el restaurante se la pasa a otro cliente
   (o le corrige el correo), los avisos de cambios van al cliente nuevo, pero el enlace del correo de
   confirmación sigue cancelando esa reserva. Atarlo al cliente obligaría a invalidarlo y mandar uno
