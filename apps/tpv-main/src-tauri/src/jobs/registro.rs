@@ -497,10 +497,11 @@ async fn avisos_reserva_web(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let db = app.state::<AppState>().db.lock().await.as_ref().cloned().ok_or("DB no inicializada")?;
-    let cola = tpv_infra_sqlite::reservas_web_avisos::SqliteAvisosReservaWeb::new(db);
+    let cola = tpv_infra_sqlite::reservas_web_avisos::SqliteAvisosReservaWeb::new(db.clone());
+    let reservas = tpv_infra_sqlite::reservas::SqliteReservasRepository::new(db);
     // La hora del negocio es la del equipo (RELOJ-01), como el día y la hora de las reservas.
     let ahora_local = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-    let r = uc_reservas_web_avisos::enviar(&cola, &PairingAdapter::new(dir), &ahora_local).await?;
+    let r = uc_reservas_web_avisos::enviar(&cola, &PairingAdapter::new(dir), &reservas, &ahora_local).await?;
     if r.descartados > 0 {
         // Sin datos de nadie: cuántos. La reserva ya ha pasado, lleva un día sin poder salir o el
         // worker no lo acepta.

@@ -24,7 +24,8 @@ use tpv_contracts::errors::ErrorCode;
 
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::PairingService;
-use crate::ports::reservas::ColaAvisosReservaWeb;
+use crate::ports::reservas::{AvisoEnCola, ColaAvisosReservaWeb, ReservasRepository};
+use tpv_contracts::reservas_web::TipoAvisoReservaWeb;
 
 /// Cuántos avisos manda cada vuelta del job. Lo que quede, en la siguiente.
 pub const MAX_POR_VUELTA: i64 = 50;
@@ -42,6 +43,7 @@ pub struct ResumenAvisos {
 pub async fn enviar(
     cola: &dyn ColaAvisosReservaWeb,
     nube: &dyn PairingService,
+    reservas: &dyn ReservasRepository,
     // «Ahora» en la hora del negocio, `YYYY-MM-DD HH:MM`, como el día y la hora de una reserva.
     ahora_local: &str,
 ) -> AppResult<ResumenAvisos> {
@@ -54,7 +56,9 @@ pub async fn enviar(
         if apartadas.contains(&aviso.cuerpo.id_reserva) {
             continue;
         }
-        if format!("{} {}", aviso.cuerpo.dia_ymd, aviso.cuerpo.hora).as_str() <= ahora_local {
+        if format!("{} {}", aviso.cuerpo.dia_ymd, aviso.cuerpo.hora).as_str() <= ahora_local
+            || superado(reservas, &aviso).await
+        {
             cola.quitar(&id).await?;
             resumen.descartados += 1;
             continue;
@@ -89,6 +93,28 @@ pub async fn enviar(
     Ok(resumen)
 }
 
+/// ¿Ya no dice cómo está la reserva? Un «cambiada» que no coincide con la copia de la Main (hubo otro
+/// cambio después, también de una Handy, que ya ha llegado aquí y avisó él) o de una reserva que ya
+/// no está por venir está superado: «así queda ahora» sería falso. Si no se puede leer, se manda: la
+/// nube también compara lo que anuncia con lo que tiene.
+async fn superado(reservas: &dyn ReservasRepository, aviso: &AvisoEnCola) -> bool {
+    let a = &aviso.cuerpo;
+    if a.tipo != TipoAvisoReservaWeb::Modificada {
+        return false;
+    }
+    match reservas.reserva(&a.id_reserva).await {
+        Ok(None) => true,
+        Ok(Some(r)) => {
+            r.estado != "PROXIMA"
+                || r.dia_ymd != a.dia_ymd
+                || r.hora != a.hora
+                || r.comensales != a.personas
+                || crate::use_cases::reservas::mesa_de(&r) != a.mesa
+        }
+        Err(_) => false,
+    }
+}
+
 /// El código del error como identificador (`not_found`), nunca su texto.
 fn codigo_de(e: &AppError) -> String {
     serde_json::to_value(e.code())
@@ -109,7 +135,8 @@ mod tests {
     use tpv_contracts::reservas_web::{AvisoReservaWebInput, TipoAvisoReservaWeb};
 
     use crate::ports::licensing::ResultadoSubidaImagen;
-    use crate::ports::reservas::AvisoEnCola;
+    use tpv_contracts::reservas::{ClienteCoincidente, ReservaDto, ReservasMetaDto};
+    use tpv_domain::reservas::ReservaValidada;
 
     #[derive(Default)]
     struct Cola {
@@ -207,6 +234,37 @@ mod tests {
         }
     }
 
+    /// La copia de la Main: lo que devuelve `reserva`, o `None` y que no se puede leer.
+    struct Copia(Option<ReservaDto>, bool);
+    #[async_trait]
+    impl ReservasRepository for Copia {
+        async fn meta(&self) -> AppResult<ReservasMetaDto> {
+            panic!("ajeno a esta prueba")
+        }
+        async fn mes(&self, _: &str, _: &str) -> AppResult<Vec<ReservaDto>> {
+            panic!("ajeno a esta prueba")
+        }
+        async fn reserva(&self, _: &str) -> AppResult<Option<ReservaDto>> {
+            if self.1 {
+                return Err(AppError::internal("no se puede leer"));
+            }
+            Ok(self.0.clone())
+        }
+        async fn guardar(&self, _: ReservaValidada, _: bool) -> AppResult<bool> {
+            panic!("ajeno a esta prueba")
+        }
+        async fn buscar_cliente(&self, _: Option<&str>, _: Option<&str>) -> AppResult<Option<ClienteCoincidente>> {
+            panic!("ajeno a esta prueba")
+        }
+        async fn eliminar(&self, _: &str) -> AppResult<bool> {
+            panic!("ajeno a esta prueba")
+        }
+    }
+
+    fn sin_copia() -> Copia {
+        Copia(None, true)
+    }
+
     /// En la hora del negocio, días antes de la reserva de `aviso`.
     const AHORA: &str = "2026-10-20 12:00";
 
@@ -219,7 +277,7 @@ mod tests {
             Err(AppError::Coded(ErrorCode::NotFound, "reserva_inexistente".into())),
             Ok(serde_json::json!({ "ok": true, "enviado": false })),
         ]);
-        let r = enviar(&cola, &nube, AHORA).await.unwrap();
+        let r = enviar(&cola, &nube, &sin_copia(), AHORA).await.unwrap();
         assert_eq!(r, ResumenAvisos { enviados: 2, pendientes: 1, descartados: 0 });
         let quedan: Vec<_> = cola.avisos.lock().unwrap().iter().map(|a| a.cuerpo.id_aviso.clone()).collect();
         assert_eq!(quedan, ["a2"]);
@@ -237,7 +295,7 @@ mod tests {
             Err(AppError::Coded(ErrorCode::Conflict, "reserva_no_web".into())),
             Err(AppError::external("sin red")),
         ]);
-        let r = enviar(&cola, &nube, AHORA).await.unwrap();
+        let r = enviar(&cola, &nube, &sin_copia(), AHORA).await.unwrap();
         assert_eq!(r, ResumenAvisos { enviados: 0, pendientes: 1, descartados: 1 });
         // El tercero ni se intenta: sin red fallaría igual.
         assert_eq!(nube.recibidos.lock().unwrap().len(), 2);
@@ -259,7 +317,7 @@ mod tests {
             Err(AppError::Coded(ErrorCode::External, "email_limite_diario".into())),
             Ok(serde_json::json!({ "ok": true, "enviado": true })),
         ]);
-        let r = enviar(&cola, &nube, AHORA).await.unwrap();
+        let r = enviar(&cola, &nube, &sin_copia(), AHORA).await.unwrap();
         assert_eq!(r, ResumenAvisos { enviados: 1, pendientes: 1, descartados: 0 });
         // El de la otra reserva ha salido; el segundo de Ana no se ha intentado: espera al primero.
         let ids: Vec<_> = nube.recibidos.lock().unwrap().iter().map(|b| b["id_aviso"].clone()).collect();
@@ -273,7 +331,7 @@ mod tests {
         let cola = Cola::default();
         cola.avisos.lock().unwrap().push(aviso("viejo", MAX_INTENTOS - 1));
         let nube = Nube::con(vec![Err(AppError::Coded(ErrorCode::NotFound, "reserva_inexistente".into()))]);
-        let r = enviar(&cola, &nube, AHORA).await.unwrap();
+        let r = enviar(&cola, &nube, &sin_copia(), AHORA).await.unwrap();
         assert_eq!(r, ResumenAvisos { enviados: 0, pendientes: 0, descartados: 1 });
         assert!(cola.avisos.lock().unwrap().is_empty());
     }
@@ -283,7 +341,7 @@ mod tests {
         let cola = Cola::default();
         cola.avisos.lock().unwrap().push(aviso("pasada", 0));
         let nube = Nube::con(vec![]);
-        let r = enviar(&cola, &nube, "2026-10-24 21:00").await.unwrap();
+        let r = enviar(&cola, &nube, &sin_copia(), "2026-10-24 21:00").await.unwrap();
         assert_eq!(r, ResumenAvisos { enviados: 0, pendientes: 0, descartados: 1 });
         assert!(nube.recibidos.lock().unwrap().is_empty());
     }
@@ -294,7 +352,51 @@ mod tests {
         let cola = Cola::default();
         cola.avisos.lock().unwrap().push(AvisoEnCola { creado_ms: 1, ..aviso("de-hace-dias", 0) });
         let nube = Nube::con(vec![Ok(serde_json::json!({ "ok": true, "enviado": true }))]);
-        let r = enviar(&cola, &nube, AHORA).await.unwrap();
+        let r = enviar(&cola, &nube, &sin_copia(), AHORA).await.unwrap();
         assert_eq!(r, ResumenAvisos { enviados: 1, pendientes: 0, descartados: 0 });
+    }
+    #[tokio::test]
+    async fn un_cambiada_que_ya_no_dice_como_esta_la_reserva_en_la_main_se_descarta_sin_mandarlo() {
+        let modificada = |id: &str| {
+            let mut a = aviso(id, 0);
+            a.cuerpo.tipo = TipoAvisoReservaWeb::Modificada;
+            a.cuerpo.hora = "22:00".into();
+            a
+        };
+        let copia = |hora: &str, estado: &str| ReservaDto {
+            id_reserva: "r-a1".into(),
+            id_mesa: String::new(),
+            dia_ymd: "2026-10-24".into(),
+            hora: hora.into(),
+            turno: None,
+            comensales: 2,
+            duracion_min: None,
+            nota: None,
+            estado: estado.into(),
+            origen: "WEB".into(),
+            id_cliente: Some("c1".into()),
+            nombre_cliente: "Ana".into(),
+            telefono_cliente: None,
+            email_cliente: None,
+            id_zona: String::new(),
+            numero_mesa: String::new(),
+            capacidad: 0,
+            nombre_zona: String::new(),
+        };
+        // Una Handy la pasó después a las 23:00 (y ya avisó ella); este aviso dice las 22:00.
+        for repo in [Copia(Some(copia("23:00", "PROXIMA")), false), Copia(Some(copia("22:00", "CANCELADA")), false), Copia(None, false)] {
+            let cola = Cola::default();
+            cola.avisos.lock().unwrap().push(modificada("a1"));
+            let nube = Nube::con(vec![]);
+            let r = enviar(&cola, &nube, &repo, AHORA).await.unwrap();
+            assert_eq!(r, ResumenAvisos { enviados: 0, pendientes: 0, descartados: 1 });
+            assert!(nube.recibidos.lock().unwrap().is_empty());
+        }
+        // Si coincide, sale.
+        let cola = Cola::default();
+        cola.avisos.lock().unwrap().push(modificada("a1"));
+        let nube = Nube::con(vec![Ok(serde_json::json!({ "ok": true, "enviado": true }))]);
+        let r = enviar(&cola, &nube, &Copia(Some(copia("22:00", "PROXIMA")), false), AHORA).await.unwrap();
+        assert_eq!(r.enviados, 1);
     }
 }

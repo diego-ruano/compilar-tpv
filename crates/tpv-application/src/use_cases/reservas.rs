@@ -150,7 +150,7 @@ pub fn aviso_al_cliente(antes: &ReservaDto, despues: Option<&ReservaDto>) -> Opt
         dia_ymd: r.dia_ymd.clone(),
         hora: r.hora.clone(),
         personas: r.comensales,
-        mesa: (!r.id_mesa.is_empty() && !r.numero_mesa.is_empty()).then(|| r.numero_mesa.clone()),
+        mesa: mesa_de(r),
         id_cliente: r.id_cliente.clone(),
         huella_correo: tpv_domain::reservas_web::huella_de_correo(r.email_cliente.as_deref()),
     };
@@ -166,6 +166,11 @@ pub fn aviso_al_cliente(antes: &ReservaDto, despues: Option<&ReservaDto>) -> Opt
             cambia.then(|| aviso(TipoAvisoReservaWeb::Modificada, d))
         }
     }
+}
+
+/// El nombre de la mesa de una reserva, como va en el aviso; `None` sin mesa.
+pub(crate) fn mesa_de(r: &ReservaDto) -> Option<String> {
+    (!r.id_mesa.is_empty() && !r.numero_mesa.is_empty()).then(|| r.numero_mesa.clone())
 }
 
 /// Best-effort, como el aviso de «Nueva reserva»: el cambio ya está hecho, y lo que no se pueda
