@@ -25,6 +25,8 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	// Paso 1
 	const [dia, setDia] = useState<string | null>(null);
 	const [tramos, setTramos] = useState<Tramo[] | null>(null);
+	// Sin horario no se puede seguir: su fallo se enseña junto a las horas, con su «Reintentar».
+	const [errorDia, setErrorDia] = useState<string | null>(null);
 	// Cada vez que se elige un día se pide su horario; si llega tarde la respuesta de un día que ya
 	// no es el elegido, se tira (si no, se le pondrían a un día las horas de otro).
 	const peticionDia = useRef(0);
@@ -57,13 +59,15 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	// Paso 4
 	const [hecha, setHecha] = useState<Confirmada | null>(null);
 
-	const fallo = (e: unknown) => setError(e instanceof ErrorApi ? e.message : "Algo ha fallado. Vuelve a intentarlo.");
+	const mensajeDe = (e: unknown) => (e instanceof ErrorApi ? e.message : "Algo ha fallado. Vuelve a intentarlo.");
+	const fallo = (e: unknown) => setError(mensajeDe(e));
 
 	async function elegirDia(d: string) {
 		const esta = ++peticionDia.current;
 		olvidarBusqueda();
 		setDia(d);
 		setTramos(null);
+		setErrorDia(null);
 		setError(null);
 		try {
 			const r = await api.dia(d);
@@ -71,7 +75,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 			setTramos(r.tramos);
 			setHora((h) => horaInicial(r.tramos, h));
 		} catch (e) {
-			if (esta === peticionDia.current) fallo(e);
+			if (esta === peticionDia.current) setErrorDia(mensajeDe(e));
 		}
 	}
 
@@ -177,7 +181,14 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 						</div>
 					</div>
 
-					{dia ? (
+					{dia && tramos === null && errorDia ? (
+						<div className="space-y-2">
+							<Aviso>{errorDia}</Aviso>
+							<Boton variante="secundario" onClick={() => void elegirDia(dia)}>
+								Reintentar
+							</Boton>
+						</div>
+					) : dia ? (
 						<label className="block space-y-1">
 							<span className="text-sm font-semibold">Hora de llegada</span>
 							{tramos === null ? (

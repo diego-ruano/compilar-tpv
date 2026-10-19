@@ -12,23 +12,32 @@ import { Aviso, Boton, Cargando } from "./ui";
 export default function Cancelar({ api, token, negocio }: { api: Api; token: string | null; negocio: string }) {
 	const [resumen, setResumen] = useState<Resumen | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	// Si no se ha podido leer la reserva: un enlace que no vale no vale al segundo intento; un fallo de
+	// red o del servidor, quizá sí, y se ofrece «Reintentar» sin recargar la página.
+	const [errorCarga, setErrorCarga] = useState<{ mensaje: string; reintentable: boolean } | null>(null);
+	const [intento, setIntento] = useState(0);
 	const [confirmando, setConfirmando] = useState(false);
 	const [ocupado, setOcupado] = useState(false);
 
 	useEffect(() => {
 		if (!token) {
-			setError("Este enlace no es válido o ha caducado.");
+			setErrorCarga({ mensaje: "Este enlace no es válido o ha caducado.", reintentable: false });
 			return;
 		}
 		let vivo = true;
 		api.reserva(token).then(
 			(r) => vivo && setResumen(r),
-			(e) => vivo && setError(e instanceof ErrorApi ? e.message : "Algo ha fallado. Vuelve a intentarlo."),
+			(e) =>
+				vivo &&
+				setErrorCarga({
+					mensaje: e instanceof ErrorApi ? e.message : "Algo ha fallado. Vuelve a intentarlo.",
+					reintentable: !(e instanceof ErrorApi && e.codigo === "enlace_no_valido"),
+				}),
 		);
 		return () => {
 			vivo = false;
 		};
-	}, [api, token]);
+	}, [api, token, intento]);
 
 	async function cancelar() {
 		if (!token || !resumen) return;
@@ -45,7 +54,24 @@ export default function Cancelar({ api, token, negocio }: { api: Api; token: str
 		}
 	}
 
-	if (!resumen) return error ? <Aviso>{error}</Aviso> : <Cargando />;
+	if (!resumen) {
+		if (!errorCarga) return <Cargando />;
+		return (
+			<div className="space-y-3">
+				<Aviso>{errorCarga.mensaje}</Aviso>
+				{errorCarga.reintentable ? (
+					<Boton
+						onClick={() => {
+							setErrorCarga(null);
+							setIntento((n) => n + 1);
+						}}
+					>
+						Reintentar
+					</Boton>
+				) : null}
+			</div>
+		);
+	}
 
 	return (
 		<section aria-label="Tu reserva" className="space-y-3">

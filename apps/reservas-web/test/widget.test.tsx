@@ -178,6 +178,25 @@ describe("reservar desde la web", () => {
 		expect(screen.getByText(/de 20:00 a 21:00/)).toBeInTheDocument();
 	});
 
+	it("si no llega el horario del día, lo dice y deja reintentarlo", async () => {
+		let pedidas = 0;
+		simular({
+			[`${BASE}/negocio`]: () => INFO,
+			[`${BASE}/dia?dia=2026-11-20`]: () =>
+				pedidas++ === 0
+					? respuesta(503, { ok: false, error: "tenant_unavailable", message: "El servicio no está disponible ahora." })
+					: { ok: true, dia: "2026-11-20", tramos: [{ desde: "20:00", hasta: "21:00" }] },
+		});
+		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
+
+		fireEvent.click(await screen.findByRole("button", { name: "2026-11-20" }));
+		expect(await screen.findByText("El servicio no está disponible ahora.")).toBeInTheDocument();
+		expect(screen.queryByText("Buscando horas…")).not.toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+		expect(await screen.findByDisplayValue("20:00")).toBeInTheDocument();
+		expect(screen.queryByText("El servicio no está disponible ahora.")).not.toBeInTheDocument();
+	});
+
 	it("sin mesas a esa hora, ofrece las horas cercanas que tienen", async () => {
 		const llamadas = simular({
 			[`${BASE}/negocio`]: () => INFO,
@@ -307,5 +326,28 @@ describe("cancelar desde el enlace", () => {
 		simular({ [`${BASE}/negocio`]: () => INFO });
 		render(<App ruta={{ clave: CLAVE, vista: "cancelar", token: null }} />);
 		expect(await screen.findByText("Este enlace no es válido o ha caducado.")).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+	});
+
+	it("un enlace que no vale no se reintenta; un fallo del servidor, sí", async () => {
+		let pedidas = 0;
+		simular({
+			[`${BASE}/negocio`]: () => INFO,
+			[`${BASE}/reserva`]: (init) =>
+				JSON.parse(String(init?.body)).token === "MALO"
+					? respuesta(404, { ok: false, error: "enlace_no_valido", message: "Este enlace no es válido o ha caducado." })
+					: pedidas++ === 0
+						? respuesta(503, { ok: false, error: "tenant_unavailable", message: "El servicio no está disponible ahora." })
+						: { ok: true, dia: "2026-11-20", hora: "21:00", personas: 2, mesa: "2", estado: "confirmada", cancelable: true },
+		});
+		const { unmount } = render(<App ruta={{ clave: CLAVE, vista: "cancelar", token: "MALO" }} />);
+		expect(await screen.findByText("Este enlace no es válido o ha caducado.")).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+		unmount();
+
+		render(<App ruta={{ clave: CLAVE, vista: "cancelar", token: "TOKEN" }} />);
+		expect(await screen.findByText("El servicio no está disponible ahora.")).toBeInTheDocument();
+		fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+		expect(await screen.findByRole("button", { name: "Cancelar la reserva" })).toBeInTheDocument();
 	});
 });
