@@ -749,6 +749,36 @@ describe("la entrega a la Main", () => {
 		});
 	});
 
+	it("las fallidas cuyo correo no sale no tapan a las de detrás", async () => {
+		await conAgenda("entrega-fallidas-atascadas", async (motor, sql) => {
+			for (let i = 0; i < 25; i++) {
+				sql.exec(
+					`INSERT INTO peticiones (id_peticion, tipo, id_reserva, id_mesa, dia_ymd, hora, comensales, datos_json,
+					                         creada_local, creada_ms, estado, cerrada_ms, resultado, codigo)
+					 VALUES (?, 'alta', ?, 'm2', ?, '21:00', 2, ?, ?, ?, 'fallida', ?, 'fallida', 'validation');`,
+					`p${String(i).padStart(2, "0")}`,
+					`r${i}`,
+					DIA,
+					JSON.stringify({ email: `c${i}@correo.es` }),
+					AHORA,
+					1000 + i,
+					Date.now(),
+				);
+			}
+			// Las 22 más viejas no salen (su buzón está en el tope, o el binding las rechaza).
+			motor.enviarCorreo = async (c: any) => {
+				const n = Number(c.para.slice(1, c.para.indexOf("@")));
+				if (n < 22) return "tope";
+				motor.correos.push(c);
+				return "enviado";
+			};
+			expect(await motor.avisarFallidas(T)).toBe(3);
+			expect(motor.correos.map((c: any) => c.para)).toEqual(["c22@correo.es", "c23@correo.es", "c24@correo.es"]);
+			// Las que no salieron siguen guardadas para la alarma.
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones WHERE datos_json IS NOT NULL;`).toArray()[0]).toEqual({ n: 22 });
+		});
+	});
+
 	it("una fallida cuya hora ya ha pasado no se le dice al cliente: se olvida su correo", async () => {
 		let ahora = AHORA;
 		await conAgenda(

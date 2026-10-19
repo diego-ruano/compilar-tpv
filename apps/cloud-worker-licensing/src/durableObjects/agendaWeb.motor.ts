@@ -94,8 +94,13 @@ const ATASCADA_TRAS_MS = 72 * 60 * 60_000;
 const SQL_ESTAN_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`;
 const SQL_CANCELADAS_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas
 	WHERE ID_Reserva IN (SELECT value FROM json_each(?1)) AND Estado NOT IN ('PROXIMA', 'ACTIVA');`;
-/** Cuántos correos de «no se pudo registrar» se mandan de una vez. Lo que quede, en la alarma. */
+/**
+ * Cuántos correos de «no se pudo registrar» se mandan de una vez, y entre cuántas fallidas se
+ * buscan: las que no salen (un buzón en el tope, un correo que el binding rechaza) no pueden tapar a
+ * las de detrás. Lo que quede, en la alarma.
+ */
 const MAX_AVISOS_FALLIDAS = 20;
+const MAX_FALLIDAS_MIRADAS = 100;
 /** Cuántas peticiones se entregan a la Main de una vez. */
 const MAX_ENTREGA = 50;
 /**
@@ -528,7 +533,7 @@ export class MotorAgendaWeb {
 	 * olvida su correo. Pasada la hora de la reserva ya no se manda: no le sirve de nada.
 	 */
 	async avisarFallidas(tenantId: string): Promise<number> {
-		const pendientes = fallidasPorAvisar(this.sql, MAX_AVISOS_FALLIDAS);
+		const pendientes = fallidasPorAvisar(this.sql, MAX_FALLIDAS_MIRADAS);
 		if (!pendientes.length) return 0;
 		const { ahora, negocio, mesas } = await this.leer(tenantId, async (db, ahora) => {
 			const ids = [...new Set(pendientes.map((f) => f.id_mesa).filter((m): m is string => !!m))];
@@ -540,6 +545,7 @@ export class MotorAgendaWeb {
 		});
 		let enviados = 0;
 		for (const f of pendientes) {
+			if (enviados >= MAX_AVISOS_FALLIDAS) break;
 			const email = correoDelAlta(f);
 			if (!email || intervalo(f.dia_ymd, f.hora, 0).inicio <= ahora) {
 				olvidarCorreo(this.sql, f.id_peticion);
