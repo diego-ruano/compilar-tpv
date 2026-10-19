@@ -4,6 +4,7 @@
 
 import { useMemo, useState } from "react";
 import { Lienzo, fitTransform, useElementSize, type AspectoMesa, type MesaPlano, type SalonPlano } from "@tpv/plano";
+import { nombreDeMesa } from "@tpv/plano/nombre";
 
 import type { MesaPublica, PlanoPublico } from "./api";
 
@@ -84,7 +85,8 @@ export default function PlanoWidget({
 			grosorBorde: esElegida ? 4 : 1,
 			texto: esLibre || esElegida ? COLOR.textoClaro : COLOR.textoApagado,
 			subtexto: esLibre || esElegida ? COLOR.textoClaro : COLOR.textoApagado,
-			etiqueta: `Mesa ${t.name}`,
+			// En el dibujo, el nombre tal cual, como en la sala de la Main.
+			etiqueta: t.name,
 			subetiqueta: `${t.seats} plazas`,
 			pulsable: esLibre,
 		};
@@ -148,7 +150,7 @@ export default function PlanoWidget({
 								m.id === elegida ? "bg-success text-success-fg" : "bg-accent-soft text-accent hover:bg-accent hover:text-accent-fg"
 							}`}
 						>
-							Mesa {m.numero} · {m.capacidad} plazas
+							{nombreDeMesa(m.numero)} · {m.capacidad} plazas
 						</button>
 					))}
 				</div>

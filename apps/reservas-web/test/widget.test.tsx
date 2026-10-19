@@ -141,6 +141,7 @@ describe("reservar desde la web", () => {
 
 		expect(await screen.findByText("✓ Reserva confirmada")).toBeInTheDocument();
 		expect(screen.getByText("ABC123")).toBeInTheDocument();
+		expect(screen.getByText("2 personas · Mesa 4")).toBeInTheDocument();
 		await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "✓ Reserva confirmada" })));
 
 		const envios = llamadas.filter((l) => l.url === `${BASE}/reservas`);
@@ -366,12 +367,14 @@ describe("cancelar desde el enlace", () => {
 	it("enseña la reserva y sólo la cancela tras confirmarlo", async () => {
 		const llamadas = simular({
 			[`${BASE}/negocio`]: () => INFO,
-			[`${BASE}/reserva`]: () => ({ ok: true, dia: "2026-11-20", hora: "21:00", personas: 2, mesa: "2", estado: "confirmada", cancelable: true }),
+			// La mesa, con el nombre que propone la Main: no sale «Mesa Mesa 2».
+			[`${BASE}/reserva`]: () => ({ ok: true, dia: "2026-11-20", hora: "21:00", personas: 2, mesa: "Mesa 2", estado: "confirmada", cancelable: true }),
 			[`${BASE}/cancelar`]: () => ({ ok: true }),
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "cancelar", token: "TOKEN" }} />);
 
 		expect(await screen.findByText("Tu reserva en Bar Pepe")).toBeInTheDocument();
+		expect(screen.getByText("2 personas · Mesa 2")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "Cancelar la reserva" }));
 		expect(llamadas.some((l) => l.url.endsWith("/cancelar"))).toBe(false);
 		// El foco, en el «No»; al decir que no, vuelve a su botón.

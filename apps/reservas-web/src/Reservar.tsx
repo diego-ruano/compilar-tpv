@@ -2,6 +2,7 @@
 // lo dice el worker; aquí sólo se ofrece lo que él dice que se puede elegir.
 
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { nombreDeMesa } from "@tpv/plano/nombre";
 
 import type { Api, Confirmada, Disponibles, InfoNegocio, MesaPublica, PlanoPublico } from "./api";
 import { ErrorApi } from "./api";
@@ -295,7 +296,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 					)}
 					{mesa ? (
 						<div className="text-sm">
-							Mesa {mesa.numero} · {mesa.capacidad} plazas
+							{nombreDeMesa(mesa.numero)} · {mesa.capacidad} plazas
 						</div>
 					) : null}
 					<div className="flex justify-between gap-3">
@@ -325,7 +326,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 			{paso === "datos" && mesa && dia ? (
 				<section aria-label="Tus datos" className="space-y-3">
 					<h2 ref={titulo} tabIndex={-1} className="text-sm font-bold outline-none">
-						{diaCorto(dia)} · {hora} · Mesa {mesa.numero} · {personasTexto(personas)}
+						{diaCorto(dia)} · {hora} · {nombreDeMesa(mesa.numero)} · {personasTexto(personas)}
 					</h2>
 					<label className="block space-y-1">
 						<span className="text-sm font-semibold">Nombre</span>
@@ -399,7 +400,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 						{diaLargo(hecha.dia)} · {hecha.hora}
 					</div>
 					<div className="text-sm">
-						{personasTexto(hecha.personas)} · Mesa {hecha.mesa}
+						{personasTexto(hecha.personas)} · {nombreDeMesa(hecha.mesa)}
 					</div>
 					<div className="text-sm text-fg-muted">
 						Tu código de reserva: <strong className="text-fg">{hecha.codigo}</strong>

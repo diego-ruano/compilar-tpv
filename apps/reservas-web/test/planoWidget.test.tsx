@@ -62,4 +62,14 @@ describe("las mesas libres del plano", () => {
 		fireEvent.click(screen.getByRole("tab", { name: "Interior" }));
 		expect(await screen.findByText(/ninguna; hay en Terraza\./)).toBeInTheDocument();
 	});
+
+	it("llevan el nombre que tienen en la Main, sin otro «Mesa» delante", async () => {
+		const conNombre: PlanoPublico = {
+			...PLANO,
+			mesas: [mesa("i1", "dentro", "Mesa 7"), mesa("i2", "dentro", "Ventana")],
+		};
+		render(<PlanoWidget plano={conNombre} libres={["i1", "i2"]} elegida={null} onElegir={() => {}} />);
+		expect(await screen.findByRole("button", { name: "Mesa 7 · 4 plazas" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Ventana · 4 plazas" })).toBeInTheDocument();
+	});
 });

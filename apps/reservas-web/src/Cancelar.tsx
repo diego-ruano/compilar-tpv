@@ -3,6 +3,7 @@
 // enlaces, así que hay que pulsar un botón y confirmarlo.
 
 import { useEffect, useRef, useState } from "react";
+import { nombreDeMesa } from "@tpv/plano/nombre";
 
 import type { Api, Resumen } from "./api";
 import { ErrorApi } from "./api";
@@ -96,7 +97,7 @@ export default function Cancelar({ api, token, negocio }: { api: Api; token: str
 			</div>
 			<div className="text-sm">
 				{personasTexto(resumen.personas)}
-				{resumen.mesa ? ` · Mesa ${resumen.mesa}` : ""}
+				{resumen.mesa ? ` · ${nombreDeMesa(resumen.mesa)}` : ""}
 			</div>
 			{error ? <Aviso>{error}</Aviso> : null}
 			{/* Una región que ya estaba: lo que cambie dentro (también «Esta reserva está cancelada») se anuncia. */}
