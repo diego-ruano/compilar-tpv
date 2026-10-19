@@ -123,8 +123,10 @@ export const VENTANA_MS = 24 * 60 * 60 * 1000;
  * ¿Este negocio ya ha gastado su cupo de hoy?
  *
  * Dos decisiones que importan:
- *   · **Sólo cuentan los ENTREGADOS** (`ok = 1`). Un proveedor con el buzón lleno, o una caída de
- *     nuestro proveedor de correo, no pueden gastarle el cupo a un bar que no ha mandado nada.
+ *   · **Sólo cuentan los pedidos ENTREGADOS** (`tipo = 'pedido'`, `ok = 1`). Un proveedor con el
+ *     buzón lleno, o una caída de nuestro proveedor de correo, no pueden gastarle el cupo a un bar
+ *     que no ha mandado nada. Los correos de las reservas web tienen sus propios topes
+ *     (`domains/reservas_web/correos.ts`).
  *     Y lo que se protege es la reputación del dominio, que sólo sufre con lo que sale.
  *   · **Si no se puede contar, se deja pasar.** Es la misma regla que el registro de abajo: Turso
  *     caído no puede impedir que un bar mande su pedido. Un tope que convierte una caída nuestra
@@ -134,7 +136,7 @@ export async function pasaDelTope(db: Sql, tenantId: string): Promise<boolean> {
 	try {
 		const r = await db.execute({
 			sql: `SELECT COUNT(*) AS n FROM email_sends
-			      WHERE tenant_id = ?1 AND ok = 1 AND sent_at_ms > ?2`,
+			      WHERE tenant_id = ?1 AND tipo = 'pedido' AND ok = 1 AND sent_at_ms > ?2`,
 			args: [tenantId, Date.now() - VENTANA_MS],
 		});
 		return Number((r.rows?.[0] as any)?.n ?? 0) >= TOPE_DIARIO;

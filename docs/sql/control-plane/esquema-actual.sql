@@ -302,10 +302,16 @@ CREATE TABLE email_sends (
   proveedor  TEXT,
   ok         INTEGER NOT NULL,
   error_code TEXT,
-  sent_at_ms INTEGER NOT NULL
+  sent_at_ms INTEGER NOT NULL,
+  -- Reservas desde la web (docs/estudios/reservas-web.md §3.2): `pedido` o `reserva_web`. Cada uno
+  -- tiene sus topes, y el de los pedidos sólo cuenta los suyos. Los de la reserva web llevan su id
+  -- (el mismo correo no sale dos veces) y `device_id = 'web'` los que provoca el visitante.
+  tipo       TEXT NOT NULL DEFAULT 'pedido'
 );
 
 CREATE INDEX idx_email_sends_tenant_ts ON email_sends(tenant_id, sent_at_ms);
+-- El tope por destinatario de los correos de las reservas web.
+CREATE INDEX idx_email_sends_to_ts ON email_sends(to_email, sent_at_ms);
 
 
 -- ── Actualizaciones de la app ────────────────────────────────────────────────────────────────

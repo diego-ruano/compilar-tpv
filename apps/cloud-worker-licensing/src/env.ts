@@ -119,6 +119,9 @@ export interface Env {
 	// en Email Sending. Ejemplos: EMAIL_FROM_ADDRESS="pedidos@altarialights.com", EMAIL_FROM_NAME="TPV".
 	EMAIL_FROM_ADDRESS: string;
 	EMAIL_FROM_NAME?: string;
+	// Remitente de los correos de las reservas web (`domains/reservas_web/correos.ts`), con el nombre
+	// del negocio. Mismo dominio que el de los pedidos.
+	EMAIL_RESERVAS_FROM_ADDRESS?: string;
 
 	// Token admin para publicar/retirar releases del feed de auto-actualización
 	// (POST /v1/update/publish y /deactivate). Si NO está configurado, la publicación

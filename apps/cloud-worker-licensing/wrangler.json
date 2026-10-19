@@ -104,6 +104,7 @@
 		"TURSO_ORG_SLUG": "altarialights",
 		"EMAIL_FROM_ADDRESS": "pedidos@altarialights.com",
 		"EMAIL_FROM_NAME": "TPV",
+		"EMAIL_RESERVAS_FROM_ADDRESS": "reservas@altarialights.com",
 		"TURNSTILE_SITE_KEY": "0x4AAAAAAFZhNrJzycaxI4_h",
 		"AXIOM_DATASET": "tpv-device-logs",
 		"AXIOM_DATASET_SYNC": "tpv-sync",
