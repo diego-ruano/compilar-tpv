@@ -8,11 +8,13 @@ import { ErrorApi } from "./api";
 import Calendario from "./Calendario";
 import { diaCorto, diaLargo, horaEnTramos, horaInicial, personasTexto, textoDeTramos, type Tramo } from "./logica";
 import Turnstile, { type ControlTurnstile } from "./Turnstile";
+import { recargarPagina } from "./pagina";
 import { Aviso, Boton, Cargando, SiFalla } from "./ui";
 
 // El plano (React Konva) es lo que más pesa: se carga al llegar al paso 2, no al abrir el widget. Si
-// esa descarga falla, «Reintentar» la vuelve a pedir con un `lazy` nuevo (el de antes recuerda el fallo).
-const cargarPlano = () => import("./PlanoWidget");
+// esa descarga falla, volver a pedirla no sirve: el navegador guarda el fallo de un `import()` y lo
+// devuelve igual a cada intento. Lo que lo arregla es cargar otra vez la página del widget.
+const PlanoWidget = lazy(() => import("./PlanoWidget"));
 
 type Paso = "cuando" | "mesa" | "datos" | "hecho";
 
@@ -56,7 +58,6 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	const [plano, setPlano] = useState<PlanoPublico | null>(null);
 	const [disponibles, setDisponibles] = useState<Disponibles | null>(null);
 	const [mesa, setMesa] = useState<MesaPublica | null>(null);
-	const [PlanoWidget, setPlanoWidget] = useState(() => lazy(cargarPlano));
 
 	// Paso 3
 	const [nombre, setNombre] = useState("");
@@ -263,7 +264,11 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 							) : null}
 						</div>
 					) : (
-						<SiFalla aviso="No se ha podido cargar el plano." onReintentar={() => setPlanoWidget(() => lazy(cargarPlano))}>
+						<SiFalla
+							aviso="No se ha podido cargar el plano. Comprueba la conexión y vuelve a empezar."
+							boton="Volver a empezar"
+							onPulsar={recargarPagina}
+						>
 							<Suspense fallback={<Cargando texto="Cargando el plano…" />}>
 								<PlanoWidget plano={plano} libres={disponibles.mesas} elegida={mesa?.id ?? null} onElegir={setMesa} />
 							</Suspense>

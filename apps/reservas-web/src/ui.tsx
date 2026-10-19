@@ -44,8 +44,8 @@ export function Cargando({ texto = "Cargando…" }: { texto?: string }) {
 }
 
 /** Si lo de dentro falla al pintarse (el plano, que se descarga aparte, con mala cobertura), un aviso con
- * «Reintentar» en su sitio: sin esto, React desmonta el widget entero y queda en blanco. */
-export class SiFalla extends Component<{ aviso: string; onReintentar: () => void; children: ReactNode }, { fallo: boolean }> {
+ * su botón en su sitio: sin esto, React desmonta el widget entero y queda en blanco. */
+export class SiFalla extends Component<{ aviso: string; boton: string; onPulsar: () => void; children: ReactNode }, { fallo: boolean }> {
 	state = { fallo: false };
 
 	static getDerivedStateFromError() {
@@ -60,11 +60,11 @@ export class SiFalla extends Component<{ aviso: string; onReintentar: () => void
 				<Boton
 					variante="secundario"
 					onClick={() => {
-						this.props.onReintentar();
+						this.props.onPulsar();
 						this.setState({ fallo: false });
 					}}
 				>
-					Reintentar
+					{this.props.boton}
 				</Boton>
 			</div>
 		);
