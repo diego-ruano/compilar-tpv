@@ -12,8 +12,9 @@
 //!     detrás) → se repite la siguiente vez;
 //!   · un aviso que el worker no acepta (`validation`) o que no es de una reserva web (`conflict`)
 //!     → fuera: repetirlo daría lo mismo;
-//!   · cualquier otro fallo (la red, el correo) → se repite; y se para la vuelta, que si no hay red
-//!     los demás fallarían igual.
+//!   · otro error del worker (el buzón de ese cliente en su tope, el correo que no sale) → se repite,
+//!     y los demás avisos de esa reserva esperan detrás para no llegar desordenados;
+//!   · sin respuesta (la red) → se repite, y se para la vuelta: los demás fallarían igual.
 //!
 //! Se descarta, y queda en el log, el aviso de una reserva cuya hora ya ha pasado (ni se intenta: ya
 //! no le sirve al cliente) y el que lleva un día de intentos sin salir. Lo que lleva días en la cola
@@ -45,8 +46,14 @@ pub async fn enviar(
     ahora_local: &str,
 ) -> AppResult<ResumenAvisos> {
     let mut resumen = ResumenAvisos::default();
+    // Las reservas con un aviso que no ha salido en esta vuelta: los siguientes de la misma reserva
+    // esperan detrás, para que al cliente no le llegue el «cancelada» antes que el «cambiada».
+    let mut apartadas: std::collections::HashSet<String> = std::collections::HashSet::new();
     for aviso in cola.pendientes(MAX_POR_VUELTA).await? {
         let id = aviso.cuerpo.id_aviso.clone();
+        if apartadas.contains(&aviso.cuerpo.id_reserva) {
+            continue;
+        }
         if format!("{} {}", aviso.cuerpo.dia_ymd, aviso.cuerpo.hora).as_str() <= ahora_local {
             cola.quitar(&id).await?;
             resumen.descartados += 1;
@@ -69,11 +76,13 @@ pub async fn enviar(
             Err(e) => {
                 cola.apuntar_fallo(&id, &codigo_de(&e)).await?;
                 resumen.pendientes += 1;
-                // Una reserva que aún no ha subido no dice nada de las demás; un fallo de la red o
-                // del correo, sí.
-                if e.code() != ErrorCode::NotFound {
+                // El worker ha contestado: es cosa de este aviso (la reserva aún no está al día, el
+                // buzón de ese cliente en su tope, su correo saliendo por otro lado). Se aparta y se
+                // sigue con los demás. Sin respuesta (la red), los demás fallarían igual: se para.
+                if !matches!(e, AppError::Coded(..)) {
                     break;
                 }
+                apartadas.insert(aviso.cuerpo.id_reserva.clone());
             }
         }
     }
@@ -233,6 +242,30 @@ mod tests {
         // El tercero ni se intenta: sin red fallaría igual.
         assert_eq!(nube.recibidos.lock().unwrap().len(), 2);
         assert_eq!(cola.avisos.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn un_buzon_en_su_tope_no_para_a_los_demas_ni_desordena_los_suyos() {
+        let cola = Cola::default();
+        let mismo = |id: &str| {
+            let mut a = aviso(id, 0);
+            a.cuerpo.id_reserva = "r-ana".into();
+            a
+        };
+        // Dos de la reserva de Ana (cambiada y luego cancelada) y uno de otra, detrás.
+        cola.avisos.lock().unwrap().extend([mismo("a1"), mismo("a2"), aviso("b1", 0)]);
+        let nube = Nube::con(vec![
+            // 429: el buzón de Ana en su tope. El worker ha contestado: es cosa de ese aviso.
+            Err(AppError::Coded(ErrorCode::External, "email_limite_diario".into())),
+            Ok(serde_json::json!({ "ok": true, "enviado": true })),
+        ]);
+        let r = enviar(&cola, &nube, AHORA).await.unwrap();
+        assert_eq!(r, ResumenAvisos { enviados: 1, pendientes: 1, descartados: 0 });
+        // El de la otra reserva ha salido; el segundo de Ana no se ha intentado: espera al primero.
+        let ids: Vec<_> = nube.recibidos.lock().unwrap().iter().map(|b| b["id_aviso"].clone()).collect();
+        assert_eq!(ids, ["a1", "b1"]);
+        let quedan: Vec<_> = cola.avisos.lock().unwrap().iter().map(|a| a.cuerpo.id_aviso.clone()).collect();
+        assert_eq!(quedan, ["a1", "a2"]);
     }
 
     #[tokio::test]
