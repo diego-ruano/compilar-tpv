@@ -107,6 +107,22 @@ export async function prepareWorker(directory, config, env = process.env) {
   return manifest;
 }
 
+/**
+ * La configuración del artefacto para arrancarlo con `wrangler dev` desde otra carpeta (la
+ * verificación de Sentry): todo lo que apunta al artefacto, en absoluto. El widget de reservas web va
+ * en `assets/`; con la ruta relativa, Wrangler lo buscaría en la carpeta temporal y no arrancaría.
+ */
+export function configuracionLocal(desplegada, artifact) {
+  const local = { ...desplegada, vars: { ...desplegada.vars } };
+  local.main = join(artifact, "index.js");
+  local.base_dir = artifact;
+  if (local.assets?.directory) local.assets = { ...local.assets, directory: resolve(artifact, local.assets.directory) };
+  local.vars.ENVIRONMENT = "sentry-verification";
+  local.logpush = false;
+  delete local.triggers;
+  return local;
+}
+
 export async function verifyWorkerMaps(directory, config) {
   readWorkerArtifact(directory, config);
   const debugId = JSON.parse(readFileSync(join(directory, "index.js.map"), "utf8")).debug_id;

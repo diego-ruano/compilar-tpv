@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { workerVersion, workerSentryConfig, readWorkerArtifact, validateCloudflare } from "./worker.mjs";
+import { workerVersion, workerSentryConfig, readWorkerArtifact, validateCloudflare, configuracionLocal } from "./worker.mjs";
 
 test("Windows 7 nunca despliega el backend; tags y releases deben corresponder al producto", () => {
   const identity = workerVersion(undefined, {});
@@ -82,6 +82,17 @@ test("sin el widget de reservas web dentro, el artefacto no vale; y nada sale de
     montar(widget);
     readWorkerArtifact(dir, identity);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("arrancado desde otra carpeta, el artefacto sigue encontrando su JavaScript y el widget", () => {
+  const artefacto = resolve("target/worker-release");
+  const local = configuracionLocal({ main: "index.js", base_dir: ".", assets: { directory: "assets", binding: "ASSETS" }, triggers: { crons: ["0 7 * * *"] }, vars: { A: "1" } }, artefacto);
+  assert.equal(local.main, join(artefacto, "index.js"));
+  assert.equal(local.base_dir, artefacto);
+  assert.equal(local.assets.directory, join(artefacto, "assets"));
+  assert.equal(local.assets.binding, "ASSETS");
+  assert.equal(local.triggers, undefined);
+  assert.equal(local.vars.ENVIRONMENT, "sentry-verification");
 });
 
 test("un token inválido o la ausencia del DSN del worker bloquean el despliegue", async t => {

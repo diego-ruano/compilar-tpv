@@ -7,7 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { workerSentryConfig, readWorkerArtifact } from "./worker.mjs";
+import { workerSentryConfig, readWorkerArtifact, configuracionLocal } from "./worker.mjs";
 import { sentryRequest, sentryPages } from "./sentry-config.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -21,15 +21,7 @@ const taskRoot = resolve(root, "target");
 mkdirSync(taskRoot, { recursive: true });
 const temporary = mkdtempSync(join(taskRoot, "sentry-local-"));
 if (!resolve(temporary).startsWith(taskRoot + sep)) throw new Error("Ruta temporal fuera de target");
-const local = JSON.parse(readFileSync(join(artifact, "wrangler.json"), "utf8"));
-local.main = join(artifact, "index.js");
-local.base_dir = artifact;
-// El widget de reservas web va dentro del artefacto (`assets/`): desde la carpeta temporal, la ruta
-// relativa no lo encontraría y Wrangler no arrancaría.
-if (local.assets?.directory) local.assets.directory = resolve(artifact, local.assets.directory);
-local.vars.ENVIRONMENT = "sentry-verification";
-local.logpush = false;
-delete local.triggers;
+const local = configuracionLocal(JSON.parse(readFileSync(join(artifact, "wrangler.json"), "utf8")), artifact);
 writeFileSync(join(temporary, "wrangler.json"), JSON.stringify(local));
 writeFileSync(join(temporary, ".dev.vars"), `SENTRY_DSN=${dsn}\nSENTRY_DEBUG=true\nTURSO_AUTH_TOKEN=\n`);
 const server = createServer();
