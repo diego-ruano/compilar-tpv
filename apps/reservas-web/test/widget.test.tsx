@@ -236,6 +236,44 @@ describe("reservar desde la web", () => {
 		expect(screen.queryByRole("button", { name: "Mesa 2 · 2 plazas" })).toBeNull();
 		expect(screen.getByRole("button", { name: "Ver mesas" })).toBeEnabled();
 	});
+	it("si Turnstile no da por buena la verificación, no se reenvía su token: hace falta uno nuevo", async () => {
+		let altas = 0;
+		const llamadas = simular({
+			[`${BASE}/negocio`]: () => INFO,
+			[`${BASE}/dia?dia=2026-11-20`]: () => ({ ok: true, dia: "2026-11-20", tramos: [{ desde: "19:40", hasta: "21:50" }] }),
+			[`${BASE}/plano`]: () => PLANO,
+			[`${BASE}/disponibles`]: () => ({ ok: true, mesas: ["m2"], alternativas: [] }),
+			[`${BASE}/reservas`]: () =>
+				altas++ === 0
+					? respuesta(403, { ok: false, error: "verificacion_humana_fallida", message: "No hemos podido comprobar que no eres un robot." })
+					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "2" },
+		});
+		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
+
+		fireEvent.click(await screen.findByRole("button", { name: "2026-11-20" }));
+		await screen.findByDisplayValue("19:40");
+		fireEvent.click(screen.getByRole("button", { name: "Ver mesas" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Mesa 2 · 2 plazas" }));
+		fireEvent.click(screen.getByRole("button", { name: "Continuar" }));
+		fireEvent.change(await screen.findByLabelText("Nombre"), { target: { value: "Ana" } });
+		fireEvent.change(screen.getByLabelText("Correo"), { target: { value: "ana@correo.es" } });
+		fireEvent.change(screen.getByLabelText("Teléfono"), { target: { value: "600112233" } });
+		fireEvent.click(screen.getByLabelText("He leído la información sobre privacidad"));
+		await waitFor(() => expect(screen.getByRole("button", { name: "Confirmar" })).toBeEnabled());
+		fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+
+		// Sigue en sus datos, sin volver a montar Turnstile: el reinicio es lo que da otro token.
+		expect(await screen.findByText("No hemos podido comprobar que no eres un robot.")).toBeInTheDocument();
+		await waitFor(() => expect(screen.getByRole("button", { name: "Confirmar" })).toBeEnabled());
+		fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+		expect(await screen.findByText("✓ Reserva confirmada")).toBeInTheDocument();
+
+		const tokens = llamadas
+			.filter((l) => l.url === `${BASE}/reservas`)
+			.map((l) => (l.init?.headers as Record<string, string>)["X-Turnstile-Token"]);
+		expect(tokens).toHaveLength(2);
+		expect(tokens[1]).not.toBe(tokens[0]);
+	});
 });
 
 describe("cancelar desde el enlace", () => {

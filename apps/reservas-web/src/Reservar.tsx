@@ -97,12 +97,15 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 
 	async function confirmar() {
 		if (!dia || !mesa || !token) return;
+		// Un token de Turnstile vale para un intento: se da por gastado al enviarlo, pase lo que pase.
+		const gastado = token;
+		setToken(null);
 		setOcupado(true);
 		setError(null);
 		try {
 			const r = await api.reservar(
 				{ dia_ymd: dia, hora, personas, id_mesa: mesa.id, nombre, email, telefono, nota: nota.trim() ? nota : null },
-				token,
+				gastado,
 			);
 			setHecha(r);
 			setPaso("hecho");
@@ -314,7 +317,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 						<Aviso tono="warning">No se ha podido comprobar que no eres un robot. Recarga la página y vuelve a intentarlo.</Aviso>
 					) : null}
 					<div className="flex justify-between gap-3">
-						<Boton variante="secundario" onClick={() => setPaso("mesa")}>
+						<Boton variante="secundario" disabled={ocupado} onClick={() => setPaso("mesa")}>
 							Atrás
 						</Boton>
 						<Boton

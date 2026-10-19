@@ -80,6 +80,8 @@ export default function Turnstile({
 			vivo = false;
 			if (id.current && window.turnstile) window.turnstile.remove(id.current);
 			id.current = null;
+			// Sin el control, su token no vale para nada: al volver, hará falta uno nuevo.
+			avisos.current.onToken(null);
 		};
 	}, [clave]);
 
