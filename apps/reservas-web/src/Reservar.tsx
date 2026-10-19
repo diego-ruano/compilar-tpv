@@ -96,13 +96,25 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 		}
 	}
 
+	// El plano se pide una vez por visita. Si lo libre trae una mesa que no está en él, el restaurante ha
+	// cambiado la sala desde entonces: se pide otra vez, sin caché. Lo que siga sin estar (un plano que
+	// pasa del techo, `completo: false`) no se ofrece: no tendría botón, y «Continuar» no se podría pulsar.
+	async function alDia(p: PlanoPublico, d: Disponibles): Promise<[PlanoPublico, Disponibles]> {
+		const ids = (q: PlanoPublico) => new Set(q.mesas.map((m) => m.id));
+		if (d.mesas.every((id) => ids(p).has(id))) return [p, d];
+		const nuevo = await api.plano(true);
+		const conocidas = ids(nuevo);
+		return [nuevo, { ...d, mesas: d.mesas.filter((id) => conocidas.has(id)) }];
+	}
+
 	async function buscarMesas(h = hora) {
 		if (!dia || !h) return;
 		const esta = ++peticionMesas.current;
 		setOcupado(true);
 		setError(null);
 		try {
-			const [p, d] = await Promise.all([plano ? Promise.resolve(plano) : api.plano(), api.disponibles(dia, h, personas)]);
+			const [guardado, libres] = await Promise.all([plano ? Promise.resolve(plano) : api.plano(), api.disponibles(dia, h, personas)]);
+			const [p, d] = await alDia(guardado, libres);
 			if (esta !== peticionMesas.current) return;
 			setPlano(p);
 			setDisponibles(d);
@@ -117,7 +129,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	}
 
 	async function confirmar() {
-		if (!dia || !mesa || !token) return;
+		if (!dia || !mesa || !token || !plano) return;
 		// Un token de Turnstile vale para un intento: se da por gastado al enviarlo, pase lo que pase.
 		const gastado = token;
 		setToken(null);
@@ -137,7 +149,9 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 			if (e instanceof ErrorApi && e.codigo === "mesa_no_disponible") {
 				// Se la han quitado mientras rellenaba: vuelta al plano con lo que queda libre.
 				try {
-					setDisponibles(await api.disponibles(dia, hora, personas));
+					const [p, d] = await alDia(plano, await api.disponibles(dia, hora, personas));
+					setPlano(p);
+					setDisponibles(d);
 				} catch {
 					// Se ve el plano con lo de antes; al elegir, el worker volverá a decir.
 				}

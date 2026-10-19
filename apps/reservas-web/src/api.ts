@@ -113,7 +113,8 @@ export function apiDe(clave: string) {
 	return {
 		negocio: () => pedir<InfoNegocio>(`${base}/negocio`),
 		dia: (dia: string) => pedir<{ dia: string; tramos: Tramo[] }>(`${base}/dia?dia=${dia}`),
-		plano: () => pedir<PlanoPublico>(`${base}/plano`),
+		// `fresco`: sin la caché del navegador (la ruta la permite un minuto), cuando el que se tiene se ha quedado viejo.
+		plano: (fresco = false) => pedir<PlanoPublico>(`${base}/plano`, fresco ? { cache: "no-cache" } : undefined),
 		disponibles: (dia: string, hora: string, personas: number) =>
 			pedir<Disponibles>(`${base}/disponibles?dia=${dia}&hora=${encodeURIComponent(hora)}&personas=${personas}`),
 		reservar: (alta: Alta, tokenTurnstile: string, intento: string) =>

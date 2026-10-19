@@ -39,7 +39,11 @@ describe("si no llega el plano", () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		const api = {
 			dia: vi.fn(async () => ({ dia: "2026-11-20", tramos: [{ desde: "20:00", hasta: "21:00" }] })),
-			plano: vi.fn(async () => ({ completo: true, salones: [], mesas: [] })),
+			plano: vi.fn(async () => ({
+				completo: true,
+				salones: [{ id: "z1", nombre: "Salón", puntos: "[]" }],
+				mesas: [{ id: "m1", id_salon: "z1", numero: "1", forma: "rect", x: 0, y: 0, ancho: 80, alto: 80, radio: null, capacidad: 2, reservable: true }],
+			})),
 			disponibles: vi.fn(async () => ({ mesas: ["m1"], alternativas: [] })),
 		} as unknown as Api;
 		render(<Reservar api={api} info={INFO} />);

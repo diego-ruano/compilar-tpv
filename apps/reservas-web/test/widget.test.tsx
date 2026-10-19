@@ -207,6 +207,31 @@ describe("reservar desde la web", () => {
 		expect(screen.queryByText("El servicio no está disponible ahora.")).not.toBeInTheDocument();
 	});
 
+	it("si lo libre trae una mesa que no está en el plano guardado, se vuelve a pedir el plano", async () => {
+		let buscadas = 0;
+		const conLaNueve = { ...PLANO, mesas: [...PLANO.mesas, { ...PLANO.mesas[1], id: "m9", numero: "9", x: 210 }] };
+		const llamadas = simular({
+			[`${BASE}/negocio`]: () => INFO,
+			[`${BASE}/dia?dia=2026-11-20`]: () => ({ ok: true, dia: "2026-11-20", tramos: [{ desde: "20:00", hasta: "21:00" }] }),
+			[`${BASE}/plano`]: (init) => (init?.cache === "no-cache" ? conLaNueve : PLANO),
+			[`${BASE}/disponibles`]: () => ({ ok: true, mesas: buscadas++ === 0 ? ["m2"] : ["m9"], alternativas: [] }),
+		});
+		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
+
+		fireEvent.click(await screen.findByRole("button", { name: "2026-11-20" }));
+		await screen.findByDisplayValue("20:00");
+		fireEvent.click(screen.getByRole("button", { name: "Ver mesas" }));
+		expect(await screen.findByRole("button", { name: "Mesa 2 · 2 plazas" })).toBeInTheDocument();
+
+		// Mientras, el restaurante ha puesto la mesa 9: la segunda búsqueda la trae y el plano se renueva.
+		fireEvent.click(screen.getByRole("button", { name: "Atrás" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Ver mesas" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Mesa 9 · 4 plazas" }));
+		expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled();
+		const planos = llamadas.filter((l) => l.url === `${BASE}/plano`);
+		expect(planos.map((l) => l.init?.cache ?? null)).toEqual([null, "no-cache"]);
+	});
+
 	it("sin mesas a esa hora, ofrece las horas cercanas que tienen", async () => {
 		const llamadas = simular({
 			[`${BASE}/negocio`]: () => INFO,
