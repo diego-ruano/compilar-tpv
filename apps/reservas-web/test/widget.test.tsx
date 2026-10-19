@@ -8,7 +8,7 @@
 // shared-ui.test.tsx`: aquí React pinta de forma asíncrona). Konva no tiene canvas en jsdom: el plano
 // se prueba por su lista de mesas, que es la misma.
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect, useImperativeHandle } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -102,6 +102,8 @@ describe("reservar desde la web", () => {
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 
 		await screen.findByRole("heading", { name: "Bar Pepe" });
+		// Al abrirse no se lleva el foco: es de la web donde va incrustado.
+		expect(document.activeElement).toBe(document.body);
 		// Sólo se pueden pulsar los días abiertos.
 		expect(screen.getByRole("button", { name: "2026-11-19" })).toBeDisabled();
 		fireEvent.click(screen.getByRole("button", { name: "2026-11-20" }));
@@ -115,7 +117,9 @@ describe("reservar desde la web", () => {
 		await waitFor(() => expect(screen.getByRole("button", { name: "Ver mesas" })).toBeEnabled());
 		fireEvent.click(screen.getByRole("button", { name: "Ver mesas" }));
 
-		// El plano, con las libres en botones.
+		// El plano, con las libres en botones; el foco, en el título del paso nuevo.
+		const pasoMesa = await screen.findByRole("region", { name: "Mesa" });
+		await waitFor(() => expect(document.activeElement).toBe(within(pasoMesa).getByRole("heading")));
 		fireEvent.click(await screen.findByRole("button", { name: "Mesa 2 · 2 plazas" }));
 		expect(llamadas.some((l) => l.url.includes("/disponibles?dia=2026-11-20&hora=20%3A07&personas=2"))).toBe(true);
 		fireEvent.click(screen.getByRole("button", { name: "Continuar" }));
@@ -137,6 +141,7 @@ describe("reservar desde la web", () => {
 
 		expect(await screen.findByText("✓ Reserva confirmada")).toBeInTheDocument();
 		expect(screen.getByText("ABC123")).toBeInTheDocument();
+		await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "✓ Reserva confirmada" })));
 
 		const envios = llamadas.filter((l) => l.url === `${BASE}/reservas`);
 		// Un token de Turnstile es de un solo uso: el segundo intento no puede llevar el del primero.
@@ -307,8 +312,14 @@ describe("cancelar desde el enlace", () => {
 		expect(await screen.findByText("Tu reserva en Bar Pepe")).toBeInTheDocument();
 		fireEvent.click(screen.getByRole("button", { name: "Cancelar la reserva" }));
 		expect(llamadas.some((l) => l.url.endsWith("/cancelar"))).toBe(false);
+		// El foco, en el «No»; al decir que no, vuelve a su botón.
+		await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "No" })));
+		fireEvent.click(screen.getByRole("button", { name: "No" }));
+		await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancelar la reserva" })));
+		fireEvent.click(screen.getByRole("button", { name: "Cancelar la reserva" }));
 		fireEvent.click(await screen.findByRole("button", { name: "Sí, cancelarla" }));
 		expect(await screen.findByText("Esta reserva está cancelada.")).toBeInTheDocument();
+		await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Tu reserva en Bar Pepe" })));
 		const cancelar = llamadas.find((l) => l.url.endsWith("/cancelar"));
 		expect(JSON.parse(String(cancelar?.init?.body))).toEqual({ token: "TOKEN" });
 	});

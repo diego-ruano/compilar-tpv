@@ -1,7 +1,7 @@
 // Las piezas de interfaz del widget, con las mismas formas que la app (docs/estudios/reservas-web.md
 // §7.1): tarjetas `bg-surface` redondeadas, botón principal en el acento, texto secundario apagado.
 
-import { Component, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { Component, type ComponentProps, type ReactNode } from "react";
 
 export function Tarjeta({ children }: { children: ReactNode }) {
 	return <div className="w-full rounded-2xl border border-border bg-surface p-4 text-fg shadow-sm sm:p-5">{children}</div>;
@@ -11,7 +11,7 @@ export function Boton({
 	variante = "principal",
 	className = "",
 	...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variante?: "principal" | "secundario" | "peligro" }) {
+}: ComponentProps<"button"> & { variante?: "principal" | "secundario" | "peligro" }) {
 	const estilos = {
 		principal: "bg-accent text-accent-fg hover:bg-accent-hover",
 		secundario: "border border-border bg-surface-2 text-fg hover:bg-surface-3",

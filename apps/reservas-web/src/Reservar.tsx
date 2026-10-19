@@ -1,7 +1,7 @@
 // Reservar (docs/estudios/reservas-web.md §7.2): cuándo, mesa, tus datos y hecho. Lo que vale o no
 // lo dice el worker; aquí sólo se ofrece lo que él dice que se puede elegir.
 
-import { lazy, Suspense, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
 import type { Api, Confirmada, Disponibles, InfoNegocio, MesaPublica, PlanoPublico } from "./api";
 import { ErrorApi } from "./api";
@@ -20,6 +20,16 @@ const CAMPO = "w-full rounded-xl border border-border bg-surface-2 px-3 py-2 tex
 
 export default function Reservar({ api, info }: { api: Api; info: InfoNegocio }) {
 	const [paso, setPaso] = useState<Paso>("cuando");
+	// Al cambiar de paso desaparece el botón que tenía el foco: se lleva al título del paso nuevo, para
+	// que quien va con teclado o lector de pantalla sepa dónde está (y oiga «Reserva confirmada»). Al
+	// abrir el widget no: le quitaría el foco a la web donde va incrustado.
+	const titulo = useRef<HTMLHeadingElement | null>(null);
+	const pasoEnfocado = useRef(paso);
+	useEffect(() => {
+		if (pasoEnfocado.current === paso) return;
+		pasoEnfocado.current = paso;
+		titulo.current?.focus();
+	}, [paso]);
 	const [error, setError] = useState<string | null>(null);
 	const [ocupado, setOcupado] = useState(false);
 
@@ -144,7 +154,9 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 
 			{paso === "cuando" ? (
 				<section aria-label="Cuándo" className="space-y-4">
-					<h2 className="text-base font-bold">¿Qué día?</h2>
+					<h2 ref={titulo} tabIndex={-1} className="text-base font-bold outline-none">
+						¿Qué día?
+					</h2>
 					{info.dias_abiertos.length === 0 ? (
 						<Aviso tono="warning">No quedan días para reservar por internet. Llama al restaurante.</Aviso>
 					) : (
@@ -229,7 +241,9 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 
 			{paso === "mesa" && plano && disponibles ? (
 				<section aria-label="Mesa" className="space-y-4">
-					<div className="text-sm font-bold">{resumen}</div>
+					<h2 ref={titulo} tabIndex={-1} className="text-sm font-bold outline-none">
+						{resumen}
+					</h2>
 					{disponibles.mesas.length === 0 ? (
 						<div className="space-y-3">
 							<Aviso tono="warning">
@@ -279,9 +293,9 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 
 			{paso === "datos" && mesa && dia ? (
 				<section aria-label="Tus datos" className="space-y-3">
-					<div className="text-sm font-bold">
+					<h2 ref={titulo} tabIndex={-1} className="text-sm font-bold outline-none">
 						{diaCorto(dia)} · {hora} · Mesa {mesa.numero} · {personasTexto(personas)}
-					</div>
+					</h2>
 					<label className="block space-y-1">
 						<span className="text-sm font-semibold">Nombre</span>
 						<input className={CAMPO} value={nombre} maxLength={80} autoComplete="name" onChange={(e) => setNombre(e.target.value)} />
@@ -347,7 +361,9 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 
 			{paso === "hecho" && hecha ? (
 				<section aria-label="Hecho" className="space-y-2 text-center">
-					<div className="text-lg font-bold text-success">✓ Reserva confirmada</div>
+					<h2 ref={titulo} tabIndex={-1} className="text-lg font-bold text-success outline-none">
+						✓ Reserva confirmada
+					</h2>
 					<div className="text-sm font-semibold capitalize">
 						{diaLargo(hecha.dia)} · {hecha.hora}
 					</div>

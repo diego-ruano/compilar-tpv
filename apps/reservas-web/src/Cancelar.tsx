@@ -2,7 +2,7 @@
 // no manda a ningún servidor, y abrir la página no cancela nada: los filtros de correo abren los
 // enlaces, así que hay que pulsar un botón y confirmarlo.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Api, Resumen } from "./api";
 import { ErrorApi } from "./api";
@@ -18,6 +18,19 @@ export default function Cancelar({ api, token, negocio }: { api: Api; token: str
 	const [intento, setIntento] = useState(0);
 	const [confirmando, setConfirmando] = useState(false);
 	const [ocupado, setOcupado] = useState(false);
+	// Al pedir la confirmación, al decir que no y al cancelar desaparece el botón que tenía el foco: va al
+	// «No» (lo que no rompe nada si se pulsa sin querer), al botón de antes o al título.
+	const titulo = useRef<HTMLHeadingElement | null>(null);
+	const abrir = useRef<HTMLButtonElement | null>(null);
+	const no = useRef<HTMLButtonElement | null>(null);
+	const confirmandoEnfocado = useRef(confirmando);
+	const estado = resumen?.estado;
+	useEffect(() => {
+		if (confirmandoEnfocado.current === confirmando) return;
+		confirmandoEnfocado.current = confirmando;
+		if (confirmando) no.current?.focus();
+		else (estado === "cancelada" ? titulo.current : abrir.current)?.focus();
+	}, [confirmando, estado]);
 
 	useEffect(() => {
 		if (!token) {
@@ -75,7 +88,9 @@ export default function Cancelar({ api, token, negocio }: { api: Api; token: str
 
 	return (
 		<section aria-label="Tu reserva" className="space-y-3">
-			<h2 className="text-base font-bold">Tu reserva en {negocio}</h2>
+			<h2 ref={titulo} tabIndex={-1} className="text-base font-bold outline-none">
+				Tu reserva en {negocio}
+			</h2>
 			<div className="text-sm font-semibold capitalize">
 				{diaLargo(resumen.dia)} · {resumen.hora}
 			</div>
@@ -84,27 +99,30 @@ export default function Cancelar({ api, token, negocio }: { api: Api; token: str
 				{resumen.mesa ? ` · Mesa ${resumen.mesa}` : ""}
 			</div>
 			{error ? <Aviso>{error}</Aviso> : null}
-			{resumen.estado === "cancelada" ? (
-				<Aviso tono="success">Esta reserva está cancelada.</Aviso>
-			) : resumen.estado === "pasada" || !resumen.cancelable ? (
-				<Aviso tono="warning">Esta reserva ya no se puede cancelar por internet. Si lo necesitas, llama al restaurante.</Aviso>
-			) : confirmando ? (
-				<div className="space-y-2">
-					<div className="text-sm">¿Seguro que quieres cancelarla?</div>
-					<div className="flex gap-2">
-						<Boton variante="peligro" disabled={ocupado} onClick={() => void cancelar()}>
-							{ocupado ? "Cancelando…" : "Sí, cancelarla"}
-						</Boton>
-						<Boton variante="secundario" disabled={ocupado} onClick={() => setConfirmando(false)}>
-							No
-						</Boton>
+			{/* Una región que ya estaba: lo que cambie dentro (también «Esta reserva está cancelada») se anuncia. */}
+			<div aria-live="polite">
+				{resumen.estado === "cancelada" ? (
+					<Aviso tono="success">Esta reserva está cancelada.</Aviso>
+				) : resumen.estado === "pasada" || !resumen.cancelable ? (
+					<Aviso tono="warning">Esta reserva ya no se puede cancelar por internet. Si lo necesitas, llama al restaurante.</Aviso>
+				) : confirmando ? (
+					<div className="space-y-2">
+						<div className="text-sm">¿Seguro que quieres cancelarla?</div>
+						<div className="flex gap-2">
+							<Boton variante="peligro" disabled={ocupado} onClick={() => void cancelar()}>
+								{ocupado ? "Cancelando…" : "Sí, cancelarla"}
+							</Boton>
+							<Boton ref={no} variante="secundario" disabled={ocupado} onClick={() => setConfirmando(false)}>
+								No
+							</Boton>
+						</div>
 					</div>
-				</div>
-			) : (
-				<Boton variante="peligro" onClick={() => setConfirmando(true)}>
-					Cancelar la reserva
-				</Boton>
-			)}
+				) : (
+					<Boton ref={abrir} variante="peligro" onClick={() => setConfirmando(true)}>
+						Cancelar la reserva
+					</Boton>
+				)}
+			</div>
 		</section>
 	);
 }
