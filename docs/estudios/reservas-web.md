@@ -759,6 +759,11 @@ en la fase 1.
 - **El correo de un cambio hecho desde la Handy** se intenta una vez: si en ese momento falla la red
   o el correo, el cambio queda hecho y el cliente no se entera por correo. La Main lo reintenta
   desde su cola.
+- **Borrar dos veces seguidas una reserva web por venir** antes de que salga el aviso de la primera:
+  la primera la cancela y encola el correo; la segunda, ya cancelada, la borra de verdad. Si ese
+  borrado llega a la nube antes que el aviso (lo normal si se hizo todo sin conexión), la nube ya no
+  sabe a quién escribir y el aviso acaba descartado: el cliente no recibe el correo de cancelación.
+  Evitarlo obligaría a impedir el segundo borrado o a guardar el destinatario fuera de la nube.
 - **Cancelar desde el enlace en el segundo en que el alta se da por vista** cancela, pero puede no
   mandar el correo de «has cancelado»: la lectura de Turso no trae al cliente y la agenda ya olvidó
   el correo del alta. La página de cancelar ya se lo dice.
