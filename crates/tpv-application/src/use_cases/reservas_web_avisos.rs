@@ -15,8 +15,9 @@
 //!   · cualquier otro fallo (la red, el correo) → se repite; y se para la vuelta, que si no hay red
 //!     los demás fallarían igual.
 //!
-//! Lo que lleva más de un día sin salir se descarta y queda en el log: un correo de un cambio de
-//! hace días ya no le sirve al cliente.
+//! Se descarta, y queda en el log, el aviso de una reserva cuya hora ya ha pasado (ni se intenta: ya
+//! no le sirve al cliente) y el que lleva un día de intentos sin salir. Lo que lleva días en la cola
+//! porque la Main estuvo sin conexión sale igual, si la reserva está por venir.
 
 use tpv_contracts::errors::ErrorCode;
 
@@ -26,8 +27,8 @@ use crate::ports::reservas::ColaAvisosReservaWeb;
 
 /// Cuántos avisos manda cada vuelta del job. Lo que quede, en la siguiente.
 pub const MAX_POR_VUELTA: i64 = 50;
-/// Lo que lleva más que esto en la cola se descarta.
-pub const DESCARTAR_TRAS_MS: i64 = 24 * 60 * 60 * 1000;
+/// Tras tantos intentos fallidos se descarta: un día, a uno por minuto con la Main encendida.
+pub const MAX_INTENTOS: i64 = 24 * 60;
 
 /// Lo que ha hecho una vuelta. Sin datos de nadie: es lo que puede ir al log.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -40,11 +41,17 @@ pub struct ResumenAvisos {
 pub async fn enviar(
     cola: &dyn ColaAvisosReservaWeb,
     nube: &dyn PairingService,
-    ahora_ms: i64,
+    // «Ahora» en la hora del negocio, `YYYY-MM-DD HH:MM`, como el día y la hora de una reserva.
+    ahora_local: &str,
 ) -> AppResult<ResumenAvisos> {
     let mut resumen = ResumenAvisos::default();
     for aviso in cola.pendientes(MAX_POR_VUELTA).await? {
         let id = aviso.cuerpo.id_aviso.clone();
+        if format!("{} {}", aviso.cuerpo.dia_ymd, aviso.cuerpo.hora).as_str() <= ahora_local {
+            cola.quitar(&id).await?;
+            resumen.descartados += 1;
+            continue;
+        }
         let cuerpo = serde_json::to_value(&aviso.cuerpo).map_err(|e| AppError::internal(e.to_string()))?;
         match nube.tpv_server_post_json("tpv", "/v1/reservas-web/avisos", cuerpo).await {
             Ok(_) => {
@@ -55,7 +62,7 @@ pub async fn enviar(
                 cola.quitar(&id).await?;
                 resumen.descartados += 1;
             }
-            Err(_) if ahora_ms - aviso.creado_ms > DESCARTAR_TRAS_MS => {
+            Err(_) if aviso.intentos + 1 >= MAX_INTENTOS => {
                 cola.quitar(&id).await?;
                 resumen.descartados += 1;
             }
@@ -173,7 +180,7 @@ mod tests {
         }
     }
 
-    fn aviso(id: &str, creado_ms: i64) -> AvisoEnCola {
+    fn aviso(id: &str, intentos: i64) -> AvisoEnCola {
         AvisoEnCola {
             cuerpo: AvisoReservaWebInput {
                 id_aviso: id.into(),
@@ -185,16 +192,18 @@ mod tests {
                 mesa: None,
                 id_cliente: Some("c1".into()),
             },
-            creado_ms,
+            creado_ms: 0,
+            intentos,
         }
     }
 
-    const AHORA: i64 = 1_800_000_000_000;
+    /// En la hora del negocio, días antes de la reserva de `aviso`.
+    const AHORA: &str = "2026-10-20 12:00";
 
     #[tokio::test]
     async fn lo_enviado_sale_de_la_cola_y_lo_que_no_esta_en_la_nube_se_repite() {
         let cola = Cola::default();
-        cola.avisos.lock().unwrap().extend([aviso("a1", AHORA), aviso("a2", AHORA), aviso("a3", AHORA)]);
+        cola.avisos.lock().unwrap().extend([aviso("a1", 0), aviso("a2", 0), aviso("a3", 0)]);
         let nube = Nube::con(vec![
             Ok(serde_json::json!({ "ok": true, "enviado": true })),
             Err(AppError::Coded(ErrorCode::NotFound, "reserva_inexistente".into())),
@@ -213,7 +222,7 @@ mod tests {
     #[tokio::test]
     async fn lo_que_el_worker_no_acepta_se_descarta_y_un_fallo_de_red_para_la_vuelta() {
         let cola = Cola::default();
-        cola.avisos.lock().unwrap().extend([aviso("a1", AHORA), aviso("a2", AHORA), aviso("a3", AHORA)]);
+        cola.avisos.lock().unwrap().extend([aviso("a1", 0), aviso("a2", 0), aviso("a3", 0)]);
         let nube = Nube::con(vec![
             Err(AppError::Coded(ErrorCode::Conflict, "reserva_no_web".into())),
             Err(AppError::external("sin red")),
@@ -226,12 +235,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lo_que_lleva_mas_de_un_dia_sin_salir_se_descarta() {
+    async fn tras_un_dia_de_intentos_se_descarta() {
         let cola = Cola::default();
-        cola.avisos.lock().unwrap().push(aviso("viejo", AHORA - DESCARTAR_TRAS_MS - 1));
+        cola.avisos.lock().unwrap().push(aviso("viejo", MAX_INTENTOS - 1));
         let nube = Nube::con(vec![Err(AppError::Coded(ErrorCode::NotFound, "reserva_inexistente".into()))]);
         let r = enviar(&cola, &nube, AHORA).await.unwrap();
         assert_eq!(r, ResumenAvisos { enviados: 0, pendientes: 0, descartados: 1 });
         assert!(cola.avisos.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn el_de_una_reserva_que_ya_ha_pasado_ni_se_intenta() {
+        let cola = Cola::default();
+        cola.avisos.lock().unwrap().push(aviso("pasada", 0));
+        let nube = Nube::con(vec![]);
+        let r = enviar(&cola, &nube, "2026-10-24 21:00").await.unwrap();
+        assert_eq!(r, ResumenAvisos { enviados: 0, pendientes: 0, descartados: 1 });
+        assert!(nube.recibidos.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn uno_que_lleva_dias_en_la_cola_sin_intentarse_sale_si_la_reserva_esta_por_venir() {
+        // La Main estuvo días sin conexión: el aviso sale al volver, no se descarta por viejo.
+        let cola = Cola::default();
+        cola.avisos.lock().unwrap().push(AvisoEnCola { creado_ms: 1, ..aviso("de-hace-dias", 0) });
+        let nube = Nube::con(vec![Ok(serde_json::json!({ "ok": true, "enviado": true }))]);
+        let r = enviar(&cola, &nube, AHORA).await.unwrap();
+        assert_eq!(r, ResumenAvisos { enviados: 1, pendientes: 0, descartados: 0 });
     }
 }

@@ -568,7 +568,11 @@ Notificaciones (a los administradores, como la de «Nueva reserva»):
   y el job `avisos_reserva_web` (cada minuto; con la conectividad apagada, nada), que la manda a
   `POST /v1/reservas-web/avisos` (`use_cases/reservas_web_avisos.rs`): bien, fuera de la cola; un 404
   (la reserva aún no ha subido) se repite; lo que el worker no acepta (400, 409) se descarta; otro
-  fallo se repite y para la vuelta. Lo que lleva más de 24 h sin salir se descarta y queda en el log.
+  fallo se repite y para la vuelta. Se descarta, y queda en el log, el aviso de una reserva cuya hora
+  ya ha pasado (ni se intenta) y el que lleva un día de intentos (1440); lo que lleva días en la cola
+  porque la Main estuvo sin conexión sale igual. El aviso lleva el cliente de la reserva tras el
+  cambio (`id_cliente`): si la nube aún tiene otro, contesta 404 y se repite, para no contarle la
+  reserva a quien ya no la tiene.
 - **Handy:** la llamada directa, que siempre tiene red, con un `id_aviso` nuevo.
 
 ---

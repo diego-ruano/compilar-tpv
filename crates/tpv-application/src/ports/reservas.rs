@@ -71,6 +71,8 @@ pub trait AvisosReservaWeb: Send + Sync {
 pub struct AvisoEnCola {
     pub cuerpo: AvisoReservaWebInput,
     pub creado_ms: i64,
+    /// Cuántas veces se ha intentado sin que saliera.
+    pub intentos: i64,
 }
 
 /// La cola de avisos de la Main, que vacía el job `avisos_reserva_web`. Es estado local del equipo:

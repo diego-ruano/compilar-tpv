@@ -84,7 +84,7 @@ impl ColaAvisosReservaWeb for SqliteAvisosReservaWeb {
             let db = self.db.read().await;
             let mut rows = db
                 .query(
-                    "SELECT ID_Aviso, Datos_Json, Creado_Ms FROM _Reservas_Web_Avisos \
+                    "SELECT ID_Aviso, Datos_Json, Creado_Ms, Intentos FROM _Reservas_Web_Avisos \
                      ORDER BY Creado_Ms, ID_Aviso LIMIT ?1;",
                     vec![Value::Integer(max)],
                 )
@@ -94,8 +94,9 @@ impl ColaAvisosReservaWeb for SqliteAvisosReservaWeb {
                 let id = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
                 let json = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
                 let creado_ms = v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0);
+                let intentos = v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0);
                 match serde_json::from_str::<AvisoReservaWebInput>(&json) {
-                    Ok(cuerpo) => out.push(AvisoEnCola { cuerpo, creado_ms }),
+                    Ok(cuerpo) => out.push(AvisoEnCola { cuerpo, creado_ms, intentos }),
                     Err(_) => ilegibles.push(id),
                 }
             }
