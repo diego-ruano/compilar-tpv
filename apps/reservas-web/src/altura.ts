@@ -8,9 +8,12 @@ const MENSAJE_ALTURA = "tpv-reservas-altura";
 export function useAvisarAltura() {
 	useEffect(() => {
 		if (window.parent === window) return;
+		// Se mide el contenido, no el documento: `documentElement.scrollHeight` nunca baja de la altura
+		// que ya tiene el iframe, y el marco no encogería al pasar de un paso largo a uno corto.
+		const contenido = document.getElementById("raiz") ?? document.body;
 		let ultima = 0;
 		const avisar = () => {
-			const altura = Math.ceil(document.documentElement.scrollHeight);
+			const altura = Math.ceil(contenido.getBoundingClientRect().height);
 			if (altura === ultima) return;
 			ultima = altura;
 			// El destino no se conoce (es la web que lo incruste) y la altura no dice nada de nadie;
@@ -19,7 +22,7 @@ export function useAvisarAltura() {
 		};
 		avisar();
 		const ro = new ResizeObserver(avisar);
-		ro.observe(document.documentElement);
+		ro.observe(contenido);
 		return () => ro.disconnect();
 	}, []);
 }
