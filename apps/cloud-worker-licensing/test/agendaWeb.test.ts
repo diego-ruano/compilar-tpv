@@ -19,7 +19,7 @@ import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 import { AgendaWeb } from "../src/durableObjects/agendaWeb";
 import { prepararAlmacen } from "../src/durableObjects/agendaWeb.almacen";
-import { MAX_ALTAS_DIA_NEGOCIO, MAX_RESERVAS_POR_CORREO, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
+import { MAX_ALTAS_DIA_NEGOCIO, MAX_RESERVAS_POR_CORREO, caducidadDelEnlace, codigoDeReserva } from "../src/durableObjects/agendaWeb.motor";
 
 // Fechas relativas al reloj de verdad: la agenda mira `Date.now()` para caducar los enlaces.
 const AHORA = horaLocalEn("Europe/Madrid", Date.now());
@@ -93,7 +93,7 @@ function sinDatosPersonales(respuesta: unknown) {
 describe("la agenda de reservas web", () => {
 	it("sólo expone por RPC lo que llaman las rutas, y la alarma (RI-45)", () => {
 		expect(Object.getOwnPropertyNames(AgendaWeb.prototype).sort()).toEqual(
-			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "pendientes", "recogidas", "alarm"].sort(),
+			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "pendientes", "recogidas", "prolongarEnlace", "alarm"].sort(),
 		);
 	});
 
@@ -415,6 +415,26 @@ describe("la agenda de reservas web", () => {
 				ok: true,
 				aviso: { id_reserva: r.id_reserva, email: "ana.nueva@correo.es", dia: DIA, hora: "21:30", personas: 3, mesa: "4" },
 			});
+		});
+	});
+
+	it("si el restaurante mueve la reserva, su enlace de cancelar vale hasta la hora nueva; nunca se acorta", async () => {
+		await conAgenda("agenda-prolongar-enlace", async (motor, sql) => {
+			const r = await motor.reservar({ tenantId: T, alta: alta() });
+			const caduca = () => Number((sql.exec(`SELECT caduca_ms FROM enlaces;`).toArray()[0] as any).caduca_ms);
+			const original = caduca();
+			const otroDia = sumarDias(DIA, 10);
+			expect(await motor.prolongarEnlace({ tenantId: T, id_reserva: r.id_reserva, dia: otroDia, hora: "21:00" })).toEqual({
+				ok: true,
+				canceladaPorElCliente: false,
+			});
+			expect(caduca()).toBe(caducidadDelEnlace(otroDia, "21:00"));
+			// Moverla antes no le quita vigencia al enlace.
+			await motor.prolongarEnlace({ tenantId: T, id_reserva: r.id_reserva, dia: HOY, hora: "21:00" });
+			expect(caduca()).toBeGreaterThan(original);
+			// Cancelada desde el enlace, se dice: un «así queda ahora» ya no toca.
+			await motor.cancelar({ tenantId: T, token: r.token });
+			expect((await motor.prolongarEnlace({ tenantId: T, id_reserva: r.id_reserva, dia: otroDia, hora: "21:00" })).canceladaPorElCliente).toBe(true);
 		});
 	});
 

@@ -355,6 +355,14 @@ export function apuntarIntento(sql: SqlStorage, clave: string, respuesta: Respue
 	);
 }
 
+/**
+ * Que los enlaces de cancelar de una reserva valgan, al menos, hasta `caducaMs`: el restaurante la ha
+ * movido y el correo que se lo cuenta remite al enlace de la confirmación. Nunca los acorta.
+ */
+export function prolongarEnlaces(sql: SqlStorage, idReserva: string, caducaMs: number): void {
+	sql.exec(`UPDATE enlaces SET caduca_ms = MAX(caduca_ms, ?) WHERE id_reserva = ?;`, caducaMs, idReserva);
+}
+
 /** La reserva de un enlace de cancelar, si existe y no ha caducado. */
 export function reservaDelEnlace(sql: SqlStorage, tokenHash: string, ahoraMs: number): string | null {
 	const fila = sql

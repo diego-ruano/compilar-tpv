@@ -69,7 +69,7 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 	const aviso = c.req.valid("json");
 	const leido = await tenantQuery(c, async (db) => {
 		const rs = await db.execute({
-			sql: `SELECT R.Origen AS origen, C.ID_Cliente AS id_cliente, NULLIF(TRIM(C.Email), '') AS email
+			sql: `SELECT R.Origen AS origen, R.Estado AS estado, C.ID_Cliente AS id_cliente, NULLIF(TRIM(C.Email), '') AS email
 			      FROM Reservas R LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
 			      WHERE R.ID_Reserva = ?1;`,
 			args: [aviso.id_reserva],
@@ -78,6 +78,7 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 		return r
 			? {
 					origen: String(r.origen),
+					estado: String(r.estado),
 					idCliente: typeof r.id_cliente === "string" ? r.id_cliente : null,
 					email: typeof r.email === "string" ? r.email : null,
 					negocio: await negocioDelCorreo(db),
@@ -95,6 +96,25 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 	if (huella !== aviso.huella_correo) return c.json({ ok: false, error: "reserva_no_al_dia" }, 404);
 	// Sin correo no hay a quién decírselo: hecho.
 	if (!leido.email) return c.json({ ok: true, enviado: false });
+
+	if (aviso.tipo === "modificada") {
+		// Un cambio de una reserva que ya no está por venir (cancelada, sentada, terminada) está
+		// superado: «así queda ahora» le haría creer al cliente que sigue en pie. Se descarta (409).
+		if (leido.estado !== "PROXIMA") return c.json({ ok: false, error: "aviso_superado" }, 409);
+		// Su enlace de cancelar tiene que valer hasta la hora nueva: el correo remite a él. Y si el
+		// cliente ya la canceló desde ese enlace (la Main aún no lo tiene), también está superado.
+		try {
+			const agenda = await agendaDe(c.env, tenantId).prolongarEnlace({
+				tenantId,
+				id_reserva: aviso.id_reserva,
+				dia: aviso.dia_ymd,
+				hora: aviso.hora,
+			});
+			if (agenda.canceladaPorElCliente) return c.json({ ok: false, error: "aviso_superado" }, 409);
+		} catch (e: any) {
+			console.warn("[reservas-web] no se ha podido prolongar el enlace:", String(e?.message || e));
+		}
+	}
 
 	const r = await enviarCorreoReservaWeb(c.env, {
 		tenantId,

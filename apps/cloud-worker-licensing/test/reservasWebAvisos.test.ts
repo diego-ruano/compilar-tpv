@@ -37,6 +37,19 @@ vi.mock("../src/server/db", async (original) => ({
 	getDb: () => base,
 }));
 
+/** La agenda: apunta lo que se le pide prolongar y dice si el cliente la canceló desde su enlace. */
+const agenda = { prolongadas: [] as any[], canceladaPorElCliente: false };
+
+vi.mock("../src/durableObjects/agendaWeb", async (original) => ({
+	...(await (original as any)()),
+	agendaDe: () => ({
+		prolongarEnlace: async (p: any) => {
+			agenda.prolongadas.push(p);
+			return { ok: true, canceladaPorElCliente: agenda.canceladaPorElCliente };
+		},
+	}),
+}));
+
 const { reservasWebMainRoutes } = await import("../src/domains/reservas_web/main.routes");
 const { avisoReservaWebSchema } = await import("../src/domains/reservas_web/reservasWeb.schemas");
 const { codigoDeReserva } = await import("../src/durableObjects/agendaWeb.motor");
@@ -95,6 +108,8 @@ async function conNegocio(nombre: string, prueba: (sql: SqlStorage) => Promise<v
 		base = clienteSobre(sql, state.storage);
 		enviados.length = 0;
 		correoCaido = false;
+		agenda.prolongadas.length = 0;
+		agenda.canceladaPorElCliente = false;
 		try {
 			await prueba(sql);
 		} finally {
@@ -103,12 +118,13 @@ async function conNegocio(nombre: string, prueba: (sql: SqlStorage) => Promise<v
 	});
 }
 
-function reserva(sql: SqlStorage, origen: "WEB" | "TPV", cliente: string | null = "c1") {
+function reserva(sql: SqlStorage, origen: "WEB" | "TPV", cliente: string | null = "c1", estado = "PROXIMA") {
 	sql.exec(
 		`INSERT INTO Reservas (ID_Reserva, ID_Cliente, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
-		 VALUES (?, ?, '2026-10-24', '21:00', 'CENA', 2, 'PROXIMA', ?);`,
+		 VALUES (?, ?, '2026-10-24', '21:00', 'CENA', 2, ?, ?);`,
 		ID,
 		cliente,
+		estado,
 		origen,
 	);
 }
@@ -137,6 +153,29 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 				{ id: "rw:aviso:0199aa00-0000-7000-8000-0000000a0001", device_id: "dev-main", tipo: "reserva_web" },
 				{ id: "rw:aviso:0199aa00-0000-7000-8000-0000000a0002", device_id: "dev-main", tipo: "reserva_web" },
 			]);
+		});
+	});
+
+	it("un cambio de una reserva movida alarga su enlace de cancelar hasta la hora nueva", async () => {
+		await conNegocio("prolonga", async (sql) => {
+			reserva(sql, "WEB");
+			await mandar(aviso());
+			expect(agenda.prolongadas).toEqual([{ tenantId: "t1", id_reserva: ID, dia: "2026-10-24", hora: "22:00" }]);
+			// Una cancelación no la mueve.
+			await mandar(aviso({ id_aviso: "0199aa00-0000-7000-8000-0000000a0009", tipo: "cancelada" }));
+			expect(agenda.prolongadas).toHaveLength(1);
+		});
+	});
+
+	it("un cambio de una reserva que ya no está por venir, o que el cliente canceló, está superado: no se manda", async () => {
+		await conNegocio("superado", async (sql) => {
+			reserva(sql, "WEB", "c1", "CANCELADA");
+			expect(await mandar(aviso())).toMatchObject({ status: 409, json: { error: "aviso_superado" } });
+			sql.exec(`UPDATE Reservas SET Estado = 'PROXIMA';`);
+			// En la nube sigue en pie, pero el cliente la canceló desde su enlace y la Main aún no lo tiene.
+			agenda.canceladaPorElCliente = true;
+			expect(await mandar(aviso())).toMatchObject({ status: 409, json: { error: "aviso_superado" } });
+			expect(enviados).toEqual([]);
 		});
 	});
 

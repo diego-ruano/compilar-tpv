@@ -54,6 +54,16 @@ export class AgendaWeb extends DurableObject<Env> {
 		return this.motor.recogidas(p);
 	}
 
+	// Desde la ruta de los avisos al cliente (Main o Handy): la reserva se ha movido.
+	prolongarEnlace(p: {
+		tenantId: string;
+		id_reserva: string;
+		dia: string;
+		hora: string;
+	}): Promise<{ ok: true; canceladaPorElCliente: boolean }> {
+		return this.motor.prolongarEnlace(p);
+	}
+
 	alarm(): Promise<void> {
 		return this.motor.alarm();
 	}

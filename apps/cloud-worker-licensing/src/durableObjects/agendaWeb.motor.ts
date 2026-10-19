@@ -70,6 +70,7 @@ import {
 	pendientesDesde,
 	peticion,
 	prepararAlmacen,
+	prolongarEnlaces,
 	purgar,
 	recordarNegocio,
 	reofrecer,
@@ -194,6 +195,14 @@ export function codigoDeReserva(idReserva: string): string {
 function nuevoToken(): string {
 	const bytes = crypto.getRandomValues(new Uint8Array(16));
 	return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * Hasta cuándo vale el enlace de cancelar de una reserva: un día después de su hora. La hora es de
+ * pared del negocio y aquí se lee como UTC: un día y medio de margen cubre cualquier desfase.
+ */
+export function caducidadDelEnlace(dia: string, hora: string): number {
+	return Date.parse(`${dia}T${hora}:00Z`) + 36 * 3_600_000;
 }
 
 /** La forma de un token de enlace: lo demás no se busca. */
@@ -367,9 +376,7 @@ export class MotorAgendaWeb {
 		if (altasDesde(this.sql, ahoraMs - 86_400_000) >= MAX_ALTAS_DIA_NEGOCIO) return rechazo("tope_reservas_negocio");
 
 		const idReserva = nuevoId();
-		// El enlace vale hasta un día después de la reserva. La hora es de pared del negocio y aquí se
-		// lee como UTC: un día y medio de margen cubre cualquier desfase.
-		const caducaMs = Date.parse(`${alta.dia_ymd}T${alta.hora}:00Z`) + 36 * 3_600_000;
+		const caducaMs = caducidadDelEnlace(alta.dia_ymd, alta.hora);
 		const respuesta = {
 			id_reserva: idReserva,
 			codigo: codigoDeReserva(idReserva),
@@ -507,6 +514,26 @@ export class MotorAgendaWeb {
 			await this.asegurarAlarma();
 		}
 		return { ok: true, peticiones: peticiones.map(paraLaMain), hay_mas: hayMas };
+	}
+
+	/**
+	 * El restaurante ha movido la reserva: su enlace de cancelar vale hasta un día después de la hora
+	 * nueva. Lo pide la ruta de los avisos al mandar «tu reserva ha cambiado», que remite a ese enlace.
+	 */
+	async prolongarEnlace(p: {
+		tenantId: string;
+		id_reserva: string;
+		dia: string;
+		hora: string;
+	}): Promise<{ ok: true; canceladaPorElCliente: boolean }> {
+		recordarNegocio(this.sql, p.tenantId);
+		prolongarEnlaces(this.sql, p.id_reserva, caducidadDelEnlace(p.dia, p.hora));
+		// Si el cliente ya la canceló desde su enlace (aunque la Main aún no lo tenga), contarle cómo
+		// queda después de su «has cancelado» le haría creer que sigue en pie.
+		const canceladaPorElCliente =
+			peticion(this.sql, "cancelacion", p.id_reserva) !== null ||
+			peticion(this.sql, "alta", p.id_reserva)?.estado === "anulada";
+		return { ok: true, canceladaPorElCliente };
 	}
 
 	/** Lo que la Main contesta de lo entregado (`agendaWeb.almacen.ts::apuntarResultados`). */
