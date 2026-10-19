@@ -90,7 +90,9 @@ export default function PlanoWidget({
 		};
 	};
 
-	const libresDelSalon = plano.mesas.filter((m) => libre.has(m.id));
+	// Las del salón que se ve, como el plano: dos salones pueden tener una «Mesa 5» cada uno.
+	const libresDelSalon = plano.mesas.filter((m) => libre.has(m.id) && m.id_salon === salon?.id);
+	const otrosConSitio = salones.filter((s) => s.id !== salon?.id && s.tables.some((t) => libre.has(t.id)));
 
 	return (
 		<div>
@@ -131,7 +133,10 @@ export default function PlanoWidget({
 			</div>
 
 			<div className="mt-3">
-				<div className="mb-2 text-sm text-fg-muted">Mesas libres:</div>
+				<div className="mb-2 text-sm text-fg-muted">
+					{salones.length > 1 && salon ? `Mesas libres en ${salon.name}:` : "Mesas libres:"}
+					{libresDelSalon.length === 0 && otrosConSitio.length ? ` ninguna; hay en ${otrosConSitio.map((s) => s.name).join(", ")}.` : ""}
+				</div>
 				<div className="flex flex-wrap gap-2">
 					{libresDelSalon.map((m) => (
 						<button
