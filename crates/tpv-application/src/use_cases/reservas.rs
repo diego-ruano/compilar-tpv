@@ -4,12 +4,13 @@ use tpv_contracts::reservas::{
     ClienteCoincidente, ReservaBuscarClienteArgs, ReservaDeleteInput, ReservaDto,
     ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
 };
+use tpv_contracts::reservas_web::TipoAvisoReservaWeb;
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 use tpv_domain::reservas::{normalize_dia_ymd, ReservaValidada};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::notificaciones::Notifier;
-use crate::ports::reservas::ReservasRepository;
+use crate::ports::reservas::{AvisoAlCliente, AvisosReservaWeb, ReservasRepository};
 
 pub async fn get_meta(repo: &dyn ReservasRepository) -> AppResult<ReservasMetaDto> {
     repo.meta().await
@@ -27,14 +28,12 @@ pub async fn get_mes(
 pub async fn guardar(
     repo: &dyn ReservasRepository,
     notifier: Option<&dyn Notifier>,
+    avisos: Option<&dyn AvisosReservaWeb>,
     input: ReservaSaveInput,
 ) -> AppResult<bool> {
     // ¿Es un alta? (sin id -> el repo asigna uno). Se captura ANTES de `validar`, que consume input.
-    let es_nueva = input
-        .id_reserva
-        .as_deref()
-        .map(|s| s.trim().is_empty())
-        .unwrap_or(true);
+    let id_editada = input.id_reserva.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let es_nueva = id_editada.is_none();
     let dia = input.dia_ymd.trim().to_string();
     let hora = input.hora.trim().to_string();
 
@@ -55,7 +54,18 @@ pub async fn guardar(
     })
     .map_err(AppError::validation)?;
 
+    // Cómo estaba, para saber si al cliente de una reserva web hay que decirle algo (§5.7).
+    let antes = match (&id_editada, avisos) {
+        (Some(id), Some(_)) => antes_de_cambiarla(repo, id).await,
+        _ => None,
+    };
+
     let ok = repo.guardar(validada, input.forzar_solape.unwrap_or(false)).await?;
+
+    if let (true, Some(antes), Some(avisos)) = (ok, antes, avisos) {
+        let despues = repo.reserva(&antes.id_reserva).await.ok().flatten();
+        avisar_al_cliente(avisos, &antes, despues.as_ref()).await;
+    }
 
     // Aviso "nueva reserva" a los administradores (SOLO en altas, no al editar). Best-effort.
     if ok && es_nueva {
@@ -99,11 +109,71 @@ pub async fn buscar_cliente(
     repo.buscar_cliente(telefono.as_deref(), email.as_deref()).await
 }
 
-pub async fn eliminar(repo: &dyn ReservasRepository, input: ReservaDeleteInput) -> AppResult<bool> {
-    if input.id_reserva.trim().is_empty() {
+/// Borra una reserva. Una reserva web que está por venir no se borra: el repositorio la cancela, y
+/// a su cliente se le avisa (§5.6).
+pub async fn eliminar(
+    repo: &dyn ReservasRepository,
+    avisos: Option<&dyn AvisosReservaWeb>,
+    input: ReservaDeleteInput,
+) -> AppResult<bool> {
+    let id = input.id_reserva.trim();
+    if id.is_empty() {
         return Err(AppError::validation("ID_Reserva inválido"));
     }
-    repo.eliminar(&input.id_reserva).await
+    let antes = match avisos {
+        Some(_) => antes_de_cambiarla(repo, id).await,
+        None => None,
+    };
+    let ok = repo.eliminar(id).await?;
+    if let (true, Some(antes), Some(avisos)) = (ok, antes, avisos) {
+        let despues = repo.reserva(id).await.ok().flatten();
+        avisar_al_cliente(avisos, &antes, despues.as_ref()).await;
+    }
+    Ok(ok)
+}
+
+/// Cómo está una reserva antes de cambiarla, si es una reserva web por venir: las demás no avisan
+/// a nadie. Si no se puede leer se sigue sin aviso: el cambio es lo importante.
+async fn antes_de_cambiarla(repo: &dyn ReservasRepository, id: &str) -> Option<ReservaDto> {
+    repo.reserva(id)
+        .await
+        .ok()
+        .flatten()
+        .filter(|r| r.origen == "WEB" && r.estado == "PROXIMA")
+}
+
+/// Lo que le toca saber al cliente de una reserva web que estaba por venir, comparando cómo
+/// estaba con cómo ha quedado (`None` si ya no está). Cancelada: que se ha cancelado. Otro día,
+/// otra hora, otras personas u otra mesa: cómo queda. Nada más le importa (una nota, la duración).
+pub fn aviso_al_cliente(antes: &ReservaDto, despues: Option<&ReservaDto>) -> Option<AvisoAlCliente> {
+    let aviso = |tipo, r: &ReservaDto| AvisoAlCliente {
+        id_reserva: r.id_reserva.clone(),
+        tipo,
+        dia_ymd: r.dia_ymd.clone(),
+        hora: r.hora.clone(),
+        personas: r.comensales,
+        mesa: (!r.id_mesa.is_empty() && !r.numero_mesa.is_empty()).then(|| r.numero_mesa.clone()),
+    };
+    match despues {
+        None => Some(aviso(TipoAvisoReservaWeb::Cancelada, antes)),
+        Some(d) if d.estado == "CANCELADA" => Some(aviso(TipoAvisoReservaWeb::Cancelada, d)),
+        Some(d) if d.estado != "PROXIMA" => None,
+        Some(d) => {
+            let cambia = d.dia_ymd != antes.dia_ymd
+                || d.hora != antes.hora
+                || d.comensales != antes.comensales
+                || d.id_mesa != antes.id_mesa;
+            cambia.then(|| aviso(TipoAvisoReservaWeb::Modificada, d))
+        }
+    }
+}
+
+/// Best-effort, como el aviso de «Nueva reserva»: el cambio ya está hecho, y lo que no se pueda
+/// encolar lo apunta en el log la implementación del puerto.
+async fn avisar_al_cliente(avisos: &dyn AvisosReservaWeb, antes: &ReservaDto, despues: Option<&ReservaDto>) {
+    if let Some(aviso) = aviso_al_cliente(antes, despues) {
+        let _ = avisos.encolar(aviso).await;
+    }
 }
 
 #[cfg(test)]
@@ -203,7 +273,7 @@ mod tests {
     #[tokio::test]
     async fn guardar_alta_emite_aviso_a_admin() {
         let notifier = FakeNotifier::default();
-        assert!(guardar(&RepoOk, Some(&notifier), input_reserva(None)).await.unwrap());
+        assert!(guardar(&RepoOk, Some(&notifier), None, input_reserva(None)).await.unwrap());
 
         let emitidas = notifier.emitidas.lock().unwrap();
         assert_eq!(emitidas.len(), 1);
@@ -216,7 +286,7 @@ mod tests {
         // RI-61: sin cliente es un alta válida, no un «nombre_cliente required».
         let notifier = FakeNotifier::default();
         let input = ReservaSaveInput { nombre_cliente: None, ..input_reserva(None) };
-        assert!(guardar(&RepoOk, Some(&notifier), input).await.unwrap());
+        assert!(guardar(&RepoOk, Some(&notifier), None, input).await.unwrap());
 
         let emitidas = notifier.emitidas.lock().unwrap();
         assert_eq!(emitidas[0].cuerpo.as_deref(), Some("2026-07-25 20:30"));
@@ -231,7 +301,7 @@ mod tests {
     #[tokio::test]
     async fn guardar_edicion_no_emite() {
         let notifier = FakeNotifier::default();
-        assert!(guardar(&RepoOk, Some(&notifier), input_reserva(Some("r1"))).await.unwrap());
+        assert!(guardar(&RepoOk, Some(&notifier), None, input_reserva(Some("r1"))).await.unwrap());
         assert!(notifier.emitidas.lock().unwrap().is_empty());
     }
 
@@ -253,9 +323,173 @@ mod tests {
             id_reserva: " ".into(),
         };
         assert!(matches!(
-            eliminar(&RepoQueNoDebeLlamarse, input).await,
+            eliminar(&RepoQueNoDebeLlamarse, None, input).await,
             Err(AppError::Validation(_))
         ));
+    }
+
+    // ── El aviso al cliente de una reserva web (docs/estudios/reservas-web.md §5.7) ──
+
+    fn web(estado: &str) -> ReservaDto {
+        ReservaDto {
+            id_reserva: "r1".into(),
+            id_mesa: "m1".into(),
+            dia_ymd: "2026-07-25".into(),
+            hora: "20:30".into(),
+            turno: None,
+            comensales: 2,
+            duracion_min: None,
+            nota: None,
+            estado: estado.into(),
+            origen: "WEB".into(),
+            id_cliente: Some("c1".into()),
+            nombre_cliente: "Ana".into(),
+            telefono_cliente: None,
+            email_cliente: Some("ana@correo.es".into()),
+            id_zona: "z1".into(),
+            numero_mesa: "Mesa 1".into(),
+            capacidad: 4,
+            nombre_zona: "Salón".into(),
+        }
+    }
+
+    /// Una base con una reserva: `guardar` la cambia como lo haría el repo y `eliminar` cancela la
+    /// web que está por venir (y borra las demás).
+    struct RepoConUna(std::sync::Mutex<Option<ReservaDto>>);
+    #[async_trait]
+    impl ReservasRepository for RepoConUna {
+        async fn meta(&self) -> AppResult<ReservasMetaDto> {
+            unimplemented!("no usado en estos tests")
+        }
+        async fn mes(&self, _: &str, _: &str) -> AppResult<Vec<ReservaDto>> {
+            unimplemented!("no usado en estos tests")
+        }
+        async fn reserva(&self, _: &str) -> AppResult<Option<ReservaDto>> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+        async fn guardar(&self, v: ReservaValidada, _: bool) -> AppResult<bool> {
+            let mut r = self.0.lock().unwrap();
+            let r = r.as_mut().expect("hay reserva");
+            r.dia_ymd = v.dia_ymd;
+            r.hora = v.hora;
+            r.comensales = v.comensales;
+            r.nota = v.nota;
+            r.id_mesa = v.id_mesa.unwrap_or_default();
+            r.numero_mesa = if r.id_mesa == "m2" { "Terraza 2".into() } else { "Mesa 1".into() };
+            Ok(true)
+        }
+        async fn buscar_cliente(&self, _: Option<&str>, _: Option<&str>) -> AppResult<Option<ClienteCoincidente>> {
+            Ok(None)
+        }
+        async fn eliminar(&self, _: &str) -> AppResult<bool> {
+            let mut r = self.0.lock().unwrap();
+            match r.as_mut() {
+                Some(x) if x.origen == "WEB" && x.estado == "PROXIMA" => x.estado = "CANCELADA".into(),
+                _ => *r = None,
+            }
+            Ok(true)
+        }
+    }
+
+    #[derive(Default)]
+    struct Avisos(std::sync::Mutex<Vec<AvisoAlCliente>>);
+    #[async_trait]
+    impl AvisosReservaWeb for Avisos {
+        async fn encolar(&self, aviso: AvisoAlCliente) -> AppResult<()> {
+            self.0.lock().unwrap().push(aviso);
+            Ok(())
+        }
+    }
+
+    fn editar(cambio: impl FnOnce(&mut ReservaSaveInput)) -> ReservaSaveInput {
+        let mut i = input_reserva(Some("r1"));
+        i.id_cliente = Some("c1".into());
+        i.nombre_cliente = None;
+        cambio(&mut i);
+        i
+    }
+
+    #[tokio::test]
+    async fn cambiar_la_hora_o_la_mesa_de_una_reserva_web_por_venir_avisa_con_como_queda() {
+        let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
+        let avisos = Avisos::default();
+        guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into())).await.unwrap();
+        guardar(&repo, None, Some(&avisos), editar(|i| {
+            i.hora = "22:00".into();
+            i.id_mesa = Some("m2".into());
+        }))
+        .await
+        .unwrap();
+        let avisos = avisos.0.lock().unwrap();
+        assert_eq!(
+            *avisos,
+            vec![
+                AvisoAlCliente {
+                    id_reserva: "r1".into(),
+                    tipo: TipoAvisoReservaWeb::Modificada,
+                    dia_ymd: "2026-07-25".into(),
+                    hora: "22:00".into(),
+                    personas: 2,
+                    mesa: Some("Mesa 1".into()),
+                },
+                AvisoAlCliente {
+                    id_reserva: "r1".into(),
+                    tipo: TipoAvisoReservaWeb::Modificada,
+                    dia_ymd: "2026-07-25".into(),
+                    hora: "22:00".into(),
+                    personas: 2,
+                    mesa: Some("Terraza 2".into()),
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn lo_que_no_le_importa_al_cliente_no_le_avisa() {
+        // Sólo la nota: la hora, el día, las personas y la mesa siguen igual.
+        let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
+        let avisos = Avisos::default();
+        guardar(&repo, None, Some(&avisos), editar(|i| i.nota = Some("Junto a la ventana".into()))).await.unwrap();
+        assert!(avisos.0.lock().unwrap().is_empty());
+
+        // Una reserva del TPV, o una web que ya no está por venir, no avisa a nadie.
+        for r in [ReservaDto { origen: "TPV".into(), ..web("PROXIMA") }, web("ACTIVA"), web("CANCELADA")] {
+            let repo = RepoConUna(std::sync::Mutex::new(Some(r)));
+            guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into())).await.unwrap();
+        }
+        assert!(avisos.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn borrar_una_reserva_web_por_venir_la_cancela_y_avisa_una_pasada_no() {
+        let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
+        let avisos = Avisos::default();
+        let borrar = || ReservaDeleteInput { id_reserva: "r1".into() };
+        assert!(eliminar(&repo, Some(&avisos), borrar()).await.unwrap());
+        assert_eq!(repo.0.lock().unwrap().as_ref().map(|r| r.estado.clone()), Some("CANCELADA".into()));
+        assert_eq!(avisos.0.lock().unwrap().iter().map(|a| a.tipo).collect::<Vec<_>>(), [TipoAvisoReservaWeb::Cancelada]);
+
+        // Ya cancelada: borrarla otra vez la borra de verdad, y no se le vuelve a escribir.
+        assert!(eliminar(&repo, Some(&avisos), borrar()).await.unwrap());
+        assert!(repo.0.lock().unwrap().is_none());
+        assert_eq!(avisos.0.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn el_aviso_sale_de_como_estaba_y_como_queda() {
+        let antes = web("PROXIMA");
+        // Ya no está (se borró por otro lado): cancelada, con lo que tenía.
+        assert_eq!(aviso_al_cliente(&antes, None).map(|a| (a.tipo, a.hora)), Some((TipoAvisoReservaWeb::Cancelada, "20:30".into())));
+        // Sentados o no presentados: no es un cambio para el cliente.
+        assert_eq!(aviso_al_cliente(&antes, Some(&web("ACTIVA"))), None);
+        assert_eq!(aviso_al_cliente(&antes, Some(&web("NO_SHOW"))), None);
+        // Sin mesa, el aviso va sin mesa.
+        let sin_mesa = ReservaDto { id_mesa: String::new(), numero_mesa: String::new(), ..web("PROXIMA") };
+        assert_eq!(aviso_al_cliente(&antes, Some(&sin_mesa)).and_then(|a| a.mesa), None);
+        // Otras personas, otro día.
+        let mas = ReservaDto { comensales: 4, dia_ymd: "2026-07-26".into(), ..web("PROXIMA") };
+        let a = aviso_al_cliente(&antes, Some(&mas)).unwrap();
+        assert_eq!((a.tipo, a.personas, a.dia_ymd.as_str()), (TipoAvisoReservaWeb::Modificada, 4, "2026-07-26"));
     }
 
     #[test]

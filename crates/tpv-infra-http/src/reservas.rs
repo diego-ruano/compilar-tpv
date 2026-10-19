@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::AppResult;
-use tpv_application::ports::reservas::ReservasRepository;
+use tpv_application::ports::reservas::{AvisoAlCliente, AvisosReservaWeb, ReservasRepository};
+use tpv_contracts::reservas_web::AvisoReservaWebInput;
 use tpv_contracts::reservas::{ClienteCoincidente, ReservaDto, ReservasMetaDto};
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 
@@ -98,5 +99,34 @@ impl ReservasRepository for HttpReservasRepository {
             .delete_json(&format!("/v1/reservas/{id_reserva}"))
             .await?;
         Ok(true)
+    }
+}
+
+/// El aviso al cliente de una reserva web, desde la Handy: siempre tiene red, así que se manda ya
+/// (docs/estudios/reservas-web.md §5.7). En la Main va por la cola y su job.
+pub struct HttpAvisosReservaWeb {
+    client: Arc<CloudClient>,
+}
+
+impl HttpAvisosReservaWeb {
+    pub fn new(client: Arc<CloudClient>) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl AvisosReservaWeb for HttpAvisosReservaWeb {
+    async fn encolar(&self, aviso: AvisoAlCliente) -> AppResult<()> {
+        let cuerpo = AvisoReservaWebInput {
+            id_aviso: uuid::Uuid::now_v7().to_string(),
+            id_reserva: aviso.id_reserva,
+            tipo: aviso.tipo,
+            dia_ymd: aviso.dia_ymd,
+            hora: aviso.hora,
+            personas: aviso.personas,
+            mesa: aviso.mesa,
+        };
+        let _: JsonValue = self.client.post_json("/v1/reservas-web/avisos", &cuerpo).await?;
+        Ok(())
     }
 }

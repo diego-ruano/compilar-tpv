@@ -22,6 +22,7 @@ pub mod rectificacion_caja;
 pub mod recuperacion_pin;
 pub mod reservas;
 pub mod reservas_web;
+pub mod reservas_web_avisos;
 pub mod reservas_web_recogida;
 pub mod stats;
 pub mod stock_alertas;

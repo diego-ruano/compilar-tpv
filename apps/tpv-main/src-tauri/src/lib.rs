@@ -641,6 +641,14 @@ impl AppState {
         SqliteReservasRepository,
         HttpReservasRepository
     );
+    // El correo al cliente de una reserva web que el restaurante cambia (docs/estudios/reservas-web.md
+    // §5.7): la Main lo encola para su job; la Handy lo manda ya.
+    repo_accessor!(
+        avisos_reserva_web,
+        tpv_application::ports::reservas::AvisosReservaWeb,
+        tpv_infra_sqlite::reservas_web_avisos::SqliteAvisosReservaWeb,
+        tpv_infra_http::reservas::HttpAvisosReservaWeb
+    );
     repo_accessor!(
         stats_repo,
         StatsRepository,

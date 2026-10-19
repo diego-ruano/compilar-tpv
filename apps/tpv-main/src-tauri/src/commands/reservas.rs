@@ -38,7 +38,8 @@ pub async fn reservas_save(
     state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
     let notifier = state.notifier().await.ok();
-    Ok(uc::guardar(repo.as_ref(), notifier.as_deref(), args).await?)
+    let avisos = state.avisos_reserva_web().await.ok();
+    Ok(uc::guardar(repo.as_ref(), notifier.as_deref(), avisos.as_deref(), args).await?)
 }
 
 /// RI-61: el cliente que ya tiene ese teléfono o ese email, para preguntar antes de asignárselo.
@@ -61,5 +62,6 @@ pub async fn reservas_delete(
 ) -> Result<bool, AppErrorDto> {
     state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
-    Ok(uc::eliminar(repo.as_ref(), args).await?)
+    let avisos = state.avisos_reserva_web().await.ok();
+    Ok(uc::eliminar(repo.as_ref(), avisos.as_deref(), args).await?)
 }

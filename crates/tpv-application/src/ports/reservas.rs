@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 
 use tpv_contracts::reservas::{ClienteCoincidente, ReservaDto, ReservasMetaDto};
+use tpv_contracts::reservas_web::{AvisoReservaWebInput, TipoAvisoReservaWeb};
 use tpv_domain::reservas::ReservaValidada;
 
 use crate::error::AppResult;
@@ -35,6 +36,49 @@ pub trait ReservasRepository: Send + Sync {
         email: Option<&str>,
     ) -> AppResult<Option<ClienteCoincidente>>;
 
-    /// Elimina una reserva (desvinculando comandas). Devuelve `true` si borró alguna fila.
+    /// Elimina una reserva (desvinculando comandas). Una reserva web que está por venir no se borra:
+    /// se cancela. Devuelve `true` si borró o canceló alguna.
     async fn eliminar(&self, id_reserva: &str) -> AppResult<bool>;
+}
+
+/// Lo que se le dice al cliente de una reserva web que el restaurante ha cambiado o cancelado
+/// (docs/estudios/reservas-web.md §5.7): los datos de después del cambio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvisoAlCliente {
+    pub id_reserva: String,
+    pub tipo: TipoAvisoReservaWeb,
+    pub dia_ymd: String,
+    pub hora: String,
+    pub personas: i64,
+    /// El nombre de la mesa, o `None` sin mesa.
+    pub mesa: Option<String>,
+}
+
+/// El correo al cliente de una reserva web por un cambio del restaurante. Lo envía el worker
+/// (`POST /v1/reservas-web/avisos`); cada implementación le pone su id al aviso.
+#[async_trait]
+pub trait AvisosReservaWeb: Send + Sync {
+    /// En la Main lo encola, y un job lo manda cuando hay conexión (un cambio hecho sin internet
+    /// avisa al volver); en la Handy, que siempre tiene red, lo manda ya.
+    async fn encolar(&self, aviso: AvisoAlCliente) -> AppResult<()>;
+}
+
+/// Un aviso que espera en la cola de la Main (`_Reservas_Web_Avisos`): el cuerpo tal cual se
+/// manda, con su id, y cuándo se encoló.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AvisoEnCola {
+    pub cuerpo: AvisoReservaWebInput,
+    pub creado_ms: i64,
+}
+
+/// La cola de avisos de la Main, que vacía el job `avisos_reserva_web`. Es estado local del equipo:
+/// no se replica.
+#[async_trait]
+pub trait ColaAvisosReservaWeb: Send + Sync {
+    /// Los más viejos primero, como mucho `max`.
+    async fn pendientes(&self, max: i64) -> AppResult<Vec<AvisoEnCola>>;
+    /// Enviado, o descartado.
+    async fn quitar(&self, id_aviso: &str) -> AppResult<()>;
+    /// Un intento que no ha salido, con el código del error (nunca su texto).
+    async fn apuntar_fallo(&self, id_aviso: &str, codigo: &str) -> AppResult<()>;
 }

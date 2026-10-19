@@ -23,6 +23,7 @@ use tpv_application::use_cases::cierre_caja as uc_cierre_caja;
 use tpv_application::use_cases::licensing as uc_licensing;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_application::use_cases::reservas_web as uc_reservas_web;
+use tpv_application::use_cases::reservas_web_avisos as uc_reservas_web_avisos;
 use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
 use tpv_application::use_cases::sync as uc_sync;
 use tpv_infra_licensing::PairingAdapter;
@@ -79,6 +80,10 @@ const STOCK_NEGATIVO_INTERVAL_SECS: u64 = 10 * 60;
 /// quede del intervalo, y un equipo que cambia de zona tiene que contárselo a la nube enseguida. Es
 /// una lectura; sólo escribe (y sube a la nube) si la zona cambia.
 const ZONA_HORARIA_INTERVAL_SECS: u64 = 10 * 60;
+
+/// Cada cuánto salen los avisos al cliente de las reservas web que el restaurante ha cambiado. Un
+/// minuto: es un correo que el cliente espera ver pronto, y sin nada en la cola es una lectura.
+const AVISOS_RESERVA_WEB_INTERVAL_SECS: u64 = 60;
 
 /// Cada cuánto se reintenta subir a R2 lo que quedó pendiente. No hace falta más a menudo: el
 /// camino normal es el evento (tras guardar la imagen y al reconectar el WS); esto es la red.
@@ -250,6 +255,17 @@ pub(crate) fn catalogo() -> Vec<Job> {
             requiere: Requiere::MainOperativa,
             interruptor: None,
             ejecutar: tarea(zona_horaria),
+        },
+        Job {
+            // Reservas desde la web (docs/estudios/reservas-web.md §5.7): el correo al cliente de una
+            // reserva web que el restaurante cambia o cancela. La Main lo encola al cambiarla, y esto
+            // lo manda cuando hay conexión.
+            nombre: "avisos_reserva_web",
+            cada: Duration::from_secs(AVISOS_RESERVA_WEB_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(45),
+            requiere: Requiere::MainOperativa,
+            interruptor: None,
+            ejecutar: tarea(avisos_reserva_web),
         },
         Job {
             nombre: "imagenes",
@@ -465,6 +481,32 @@ async fn zona_horaria(app: AppHandle) -> Result<(), String> {
             tracing::warn!(target: "tpv::reservas_web", ?desfases, "zona horaria no reconocida; se deja la guardada");
         }
         None => {}
+    }
+    Ok(())
+}
+
+/// Manda al worker los avisos al cliente de las reservas web que esperan en la cola
+/// (`use_cases/reservas_web_avisos.rs`). Con la conectividad apagada no sale nada: se quedan para
+/// cuando vuelva.
+async fn avisos_reserva_web(app: AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    if crate::load_config(&dir).connectivity == Some(crate::ConnectivityMode::Off) {
+        return Ok(());
+    }
+    let db = app.state::<AppState>().db.lock().await.as_ref().cloned().ok_or("DB no inicializada")?;
+    let cola = tpv_infra_sqlite::reservas_web_avisos::SqliteAvisosReservaWeb::new(db);
+    let ahora_ms = chrono::Utc::now().timestamp_millis();
+    let r = uc_reservas_web_avisos::enviar(&cola, &PairingAdapter::new(dir), ahora_ms).await?;
+    if r.descartados > 0 {
+        // Sin datos de nadie: cuántos. Un correo de un cambio de hace un día ya no le sirve al
+        // cliente, o el worker no lo acepta.
+        tracing::warn!(target: "tpv::reservas_web", descartados = r.descartados, "avisos al cliente descartados sin enviar");
+    }
+    if r.enviados > 0 || r.pendientes > 0 {
+        tracing::info!(target: "tpv::reservas_web", enviados = r.enviados, pendientes = r.pendientes, "avisos al cliente");
     }
     Ok(())
 }
