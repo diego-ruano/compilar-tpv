@@ -34,6 +34,7 @@ import { useToast } from "../../shared/toast";
 
 // ✅ Modal + tipos del layout (MapCanvas)
 import ReservaMesaMapModal from "../../features/reservas/ReservaMesaMapModal";
+import { cambiaParaElCliente, esWebPorVenir } from "../../features/reservas/reservaWeb";
 import type { MesaMetaOut } from "@tpv/contracts";
 import type { Salon } from "../../features/mesas/types";
 import { conAviso } from "../../shared/lib/conAviso";
@@ -415,6 +416,9 @@ export default function Reservas() {
     mensaje: string;
     responder: (guardar: boolean) => void;
   } | null>(null);
+  // Reservas desde la web (docs/estudios/reservas-web.md §5.6): cambiar una que está por venir le
+  // manda un correo al cliente. Se pregunta antes.
+  const [avisoWeb, setAvisoWeb] = useState<{ responder: (seguir: boolean) => void } | null>(null);
   const duracionDefecto = useBusinessSettings((s) => s.reserva_duracion_min);
 
   const [confirmBorrar, setConfirmBorrar] = useState<{
@@ -423,6 +427,8 @@ export default function Reservas() {
   }>({ open: false, reserva: null });
 
   const [borrando, setBorrando] = useState(false);
+  // Una reserva web por venir no se borra: se cancela y se le avisa al cliente (§5.6).
+  const borrarWeb = confirmBorrar.reserva ? esWebPorVenir(confirmBorrar.reserva) : false;
 
   const hoyClave = ymdLocal(hoy);
   const seleccionadoClave = ymdLocal(diaSeleccionado);
@@ -614,6 +620,17 @@ export default function Reservas() {
     });
   }
 
+  function confirmarCambioWeb(): Promise<boolean> {
+    return new Promise((resolve) => {
+      setAvisoWeb({
+        responder: (seguir) => {
+          setAvisoWeb(null);
+          resolve(seguir);
+        },
+      });
+    });
+  }
+
   function preguntarCliente(coincidente: ClienteCoincidente): Promise<DecisionCliente> {
     return new Promise((resolve) => {
       setPreguntaCliente({
@@ -688,6 +705,13 @@ export default function Reservas() {
     const turno: Turno = turnoPorHora(form.hora);
     const horaSql = normalizarHora(form.hora);
 
+    // Una reserva web por venir: si cambia lo que le importa al cliente, le llega un correo.
+    const original = reservaEditandoId ? reservasMes.find((r) => r.id_reserva === reservaEditandoId) : undefined;
+    const cambio = { dia_ymd: seleccionadoClave, hora: horaSql, comensales: Number(form.comensales), id_mesa: form.idMesa || null };
+    if (original && esWebPorVenir(original) && cambiaParaElCliente(original, cambio) && !(await confirmarCambioWeb())) {
+      return;
+    }
+
     // RI-61: si la mesa ya está ocupada a esa hora lo decide el backend, con la duración de cada
     // reserva y el modo del negocio (avisar o prohibir). Aquí sólo se comprobaba la misma hora
     // exacta, y sin preguntar.
@@ -744,13 +768,17 @@ export default function Reservas() {
     }
   }
 
-  async function borrarReserva(idReserva: string) {
+  async function borrarReserva(reserva: ReservaUI) {
     try {
-      const ok = await deleteReserva.mutateAsync({ id_reserva: idReserva });
+      const ok = await deleteReserva.mutateAsync({ id_reserva: reserva.id_reserva });
       // `false` es que no había nada que borrar: otro equipo la borró antes.
       if (!ok) return toast.error("No se pudo borrar la reserva", "Esa reserva ya no existe.");
 
-      toast.success?.("OK", "Reserva borrada.");
+      // Una reserva web por venir no se borra: se cancela, y al cliente le llega un correo.
+      toast.success?.(
+        "OK",
+        esWebPorVenir(reserva) ? "Reserva cancelada. Se le avisará al cliente por correo." : "Reserva borrada.",
+      );
     } catch (err) {
       console.error(err);
       toast.error("No se pudo borrar la reserva", textoDelError(err));
@@ -1226,6 +1254,43 @@ export default function Reservas() {
             </div>
           )}
 
+          {avisoWeb && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4"
+              onClick={() => avisoWeb.responder(false)}
+            >
+              <div
+                role="alertdialog"
+                aria-labelledby="aviso-web-titulo"
+                className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-xl sm:p-5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div id="aviso-web-titulo" className="text-lg font-extrabold text-fg">
+                  Esta reserva se hizo desde la web
+                </div>
+                <div className="mt-2 text-sm text-fg-muted">
+                  Se enviará un correo al cliente con el cambio. ¿Seguro?
+                </div>
+                <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => avisoWeb.responder(false)}
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-bold text-fg hover:bg-surface-2"
+                  >
+                    VOLVER
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => avisoWeb.responder(true)}
+                    className="rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:opacity-90"
+                  >
+                    GUARDAR Y AVISAR
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {preguntaCliente && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4"
@@ -1304,11 +1369,13 @@ export default function Reservas() {
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="text-lg font-extrabold tracking-widest text-fg">
-                  ¿Borrar esta reserva?
+                  {borrarWeb ? "¿Cancelar esta reserva web?" : "¿Borrar esta reserva?"}
                 </div>
 
                 <div className="mt-2 text-sm text-fg-muted">
-                  Esta acción no se puede deshacer.
+                  {borrarWeb
+                    ? "Esta reserva se hizo desde la web. No se borra: queda cancelada y se le enviará un correo al cliente. ¿Seguro?"
+                    : "Esta acción no se puede deshacer."}
                 </div>
 
                 {confirmBorrar.reserva && (
@@ -1340,7 +1407,7 @@ export default function Reservas() {
                     onClick={() => setConfirmBorrar({ open: false, reserva: null })}
                     className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-bold text-fg hover:bg-surface-2 disabled:opacity-60"
                   >
-                    CANCELAR
+                    {borrarWeb ? "VOLVER" : "CANCELAR"}
                   </button>
 
                   <button
@@ -1352,7 +1419,7 @@ export default function Reservas() {
 
                       setBorrando(true);
                       try {
-                        await borrarReserva(res.id_reserva);
+                        await borrarReserva(res);
                         setConfirmBorrar({ open: false, reserva: null });
                       } finally {
                         setBorrando(false);
@@ -1360,7 +1427,7 @@ export default function Reservas() {
                     })}
                     className="rounded-lg bg-danger px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:bg-danger disabled:opacity-60"
                   >
-                    {borrando ? "BORRANDO..." : "BORRAR"}
+                    {borrarWeb ? (borrando ? "CANCELANDO..." : "CANCELAR RESERVA") : borrando ? "BORRANDO..." : "BORRAR"}
                   </button>
                 </div>
               </div>
