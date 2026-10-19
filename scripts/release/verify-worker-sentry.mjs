@@ -24,6 +24,9 @@ if (!resolve(temporary).startsWith(taskRoot + sep)) throw new Error("Ruta tempor
 const local = JSON.parse(readFileSync(join(artifact, "wrangler.json"), "utf8"));
 local.main = join(artifact, "index.js");
 local.base_dir = artifact;
+// El widget de reservas web va dentro del artefacto (`assets/`): desde la carpeta temporal, la ruta
+// relativa no lo encontraría y Wrangler no arrancaría.
+if (local.assets?.directory) local.assets.directory = resolve(artifact, local.assets.directory);
 local.vars.ENVIRONMENT = "sentry-verification";
 local.logpush = false;
 delete local.triggers;
