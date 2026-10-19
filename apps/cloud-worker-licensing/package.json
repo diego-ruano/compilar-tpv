@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "wrangler dev",
+		"desplegar": "pnpm --filter @tpv/reservas-web build && wrangler deploy",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
 		"cf-typegen": "wrangler types ./src/server/worker-configuration.d.ts"

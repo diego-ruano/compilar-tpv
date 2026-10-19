@@ -108,5 +108,12 @@
 		"AXIOM_DATASET": "tpv-device-logs",
 		"AXIOM_DATASET_SYNC": "tpv-sync",
 		"AXIOM_DOMAIN": "eu-central-1.aws.edge.axiom.co"
+	},
+	"assets": {
+		"directory": "../reservas-web/dist",
+		"binding": "ASSETS",
+		"html_handling": "none",
+		"not_found_handling": "none",
+		"run_worker_first": true
 	}
 }

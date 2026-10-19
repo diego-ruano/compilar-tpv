@@ -80,6 +80,23 @@ export async function negocioDeLaClave(db: Sql, clave: string): Promise<string |
 	return tenantId;
 }
 
+const cacheDominios = new Map<string, { hasta: number; dominios: string[] }>();
+
+/**
+ * Los de abajo, con la misma caché de un minuto por isolate que las claves: se piden cada vez que
+ * alguien abre el widget. Poner o quitar una web se nota en el acto en este isolate y en un minuto
+ * en los demás.
+ */
+export async function dominiosCacheados(db: Sql, tenantId: string): Promise<string[]> {
+	const ahora = Date.now();
+	const guardado = cacheDominios.get(tenantId);
+	if (guardado && guardado.hasta > ahora) return guardado.dominios;
+	const dominios = await dominiosDelNegocio(db, tenantId);
+	if (cacheDominios.size >= CACHE_MAX) cacheDominios.clear();
+	cacheDominios.set(tenantId, { hasta: ahora + CACHE_MS, dominios });
+	return dominios;
+}
+
 /** Los orígenes donde se puede incrustar el widget del negocio (`frame-ancestors`). */
 export async function dominiosDelNegocio(db: Sql, tenantId: string): Promise<string[]> {
 	const rs = await db.execute({
@@ -123,6 +140,7 @@ export function normalizarOrigen(raw: string): string | null {
 }
 
 export async function ponerDominio(db: Sql, tenantId: string, origen: string, ahoraMs: number): Promise<void> {
+	cacheDominios.delete(tenantId);
 	await db.execute({
 		sql: `INSERT INTO reserva_web_dominios (tenant_id, origen, created_at_ms) VALUES (?, ?, ?)
 		      ON CONFLICT (tenant_id, origen) DO NOTHING;`,
@@ -132,6 +150,7 @@ export async function ponerDominio(db: Sql, tenantId: string, origen: string, ah
 
 /** ¿Estaba? */
 export async function quitarDominio(db: Sql, tenantId: string, origen: string): Promise<boolean> {
+	cacheDominios.delete(tenantId);
 	const rs = await db.execute({
 		sql: `DELETE FROM reserva_web_dominios WHERE tenant_id = ? AND origen = ? RETURNING origen;`,
 		args: [tenantId, origen],
@@ -142,4 +161,5 @@ export async function quitarDominio(db: Sql, tenantId: string, origen: string): 
 /** Sólo para los tests: un isolate de vitest se reutiliza entre casos. */
 export function olvidarClavesCacheadas(): void {
 	cache.clear();
+	cacheDominios.clear();
 }

@@ -52,6 +52,7 @@ import { proveedoresRoutes } from "./domains/proveedores/proveedores.routes";
 import { reservasRoutes } from "./domains/reservas/reservas.routes";
 import { reservasWebMainRoutes } from "./domains/reservas_web/main.routes";
 import { reservasWebPublicoRoutes } from "./domains/reservas_web/publico.routes";
+import { reservasWebWidgetRoutes } from "./domains/reservas_web/widget.routes";
 import { statsRoutes } from "./domains/stats/stats.routes";
 import { syncRoutes } from "./domains/sync/sync.routes";
 import { wsRoutes } from "./domains/ws/ws.routes";
@@ -194,6 +195,8 @@ app.route("/v1/reservas", reservasRoutes);
 app.route("/v1/reservas-web", reservasWebMainRoutes);
 // Y lo que llama el widget, sin dispositivo ni token: la puerta va por la clave del negocio.
 app.route("/v1/publico/reservas", reservasWebPublicoRoutes);
+// Y el widget, que se incrusta en la web del restaurante (lo compilado de apps/reservas-web).
+app.route("/reservas-web", reservasWebWidgetRoutes);
 app.route("/v1/stats", statsRoutes);
 app.route("/v1/sync", syncRoutes);
 app.route("/v1/ws", wsRoutes);

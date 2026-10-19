@@ -87,6 +87,11 @@ export interface Env {
 	TURNSTILE_SITE_KEY?: string;
 	TURNSTILE_SECRET_KEY?: string;
 
+	// El widget de reservas web compilado (`apps/reservas-web/dist`), en Workers Static Assets. Pasa
+	// todo por el worker (`run_worker_first`): `domains/reservas_web/widget.routes.ts` le pone a cada
+	// fichero su caché y al widget su CSP.
+	ASSETS: Fetcher;
+
 	// Durable Object (WebSocket hub por tenant)
 	TenantHub: DurableObjectNamespace<TenantHub>;
 
