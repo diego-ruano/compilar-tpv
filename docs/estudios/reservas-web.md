@@ -416,9 +416,12 @@ Desde el worker, con el binding `EMAIL`:
   correo de nuestro dominio es una vía de spam.
 - La mesa, como en el widget: con el nombre que tiene en la Main, y «Mesa» delante sólo si ese
   nombre es un número a secas (`nombreDeMesa`, copiada en el worker). Si no, sale «Mesa Mesa 5».
-- Trazas en `email_sends` con `tipo = 'reserva_web'` y un id por correo (`rw:<tipo>:<id>`): el mismo
-  no sale dos veces y uno que falló se puede repetir. Topes sobre lo entregado en 24 h: 600 por
-  negocio y 10 por destinatario. Si no se pueden contar, se deja pasar, como en los pedidos.
+- Trazas en `email_sends` con `tipo = 'reserva_web'` y un id por correo (`rw:<tipo>:<id>`). Antes de
+  enviar se reservan, en una sola sentencia, el id y el sitio en los topes (600 por negocio y 10 por
+  destinatario en 24 h, sobre lo entregado y lo que está saliendo): el mismo correo no sale dos
+  veces, muchos a la vez no pasan de los topes, uno que falló se puede repetir y uno que está saliendo
+  por otro lado es «en curso», que se repite. Sin la base central no se envía: no se sabría si ya
+  salió.
 - **Un correo que falla no deshace la reserva**: se registra y la reserva sigue confirmada.
   `enviarCorreoReservaWeb` no lanza nunca.
 - Todo en `domains/reservas_web/correos.ts`.

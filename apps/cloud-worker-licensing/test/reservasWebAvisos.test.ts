@@ -183,6 +183,19 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 		});
 	});
 
+	it("si ese aviso está saliendo por otro lado, se dice para que se repita: no se da por hecho", async () => {
+		await conNegocio("en-curso", async (sql) => {
+			reserva(sql, "WEB");
+			sql.exec(
+				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo)
+				 VALUES ('rw:aviso:0199aa00-0000-7000-8000-0000000a0001', 't1', 'dev-main', 'ana@correo.es', 0, 'enviando', ?, 'reserva_web');`,
+				Date.now(),
+			);
+			expect(await mandar(aviso())).toMatchObject({ status: 503, json: { error: "correo_en_curso" } });
+			expect(enviados).toEqual([]);
+		});
+	});
+
 	it("lo que no tiene su forma no pasa", () => {
 		const bueno = avisoReservaWebSchema.safeParse(aviso({ mesa: null, hora: "21:30:00" }));
 		expect(bueno.success).toBe(true);

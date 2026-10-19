@@ -300,6 +300,7 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"reserva_inexistente",
 	"reserva_no_web",
 	"reserva_no_al_dia",
+	"correo_en_curso",
 	// Internos: sólo salen si hay un bug, un cliente manipulado o una configuración rota.
 	"admin_disabled",
 	"interruptor_not_found",

@@ -173,7 +173,8 @@ reservasWebPublicoRoutes.post(
 				enlace: enlaceDeCancelar(new URL(c.req.url).origin, c.req.param("clave"), r.token),
 				dispositivo: "web",
 			});
-			correo = enviado === "enviado" || enviado === "ya_enviado";
+			// En curso por otro lado no se sabe aún: lo mismo que una repetición.
+			correo = enviado === "en_curso" ? null : enviado === "enviado" || enviado === "ya_enviado";
 		}
 		return c.json({ ok: true, codigo: r.codigo, dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa, correo });
 	},

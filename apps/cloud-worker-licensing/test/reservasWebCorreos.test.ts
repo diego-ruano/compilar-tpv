@@ -174,7 +174,8 @@ describe("enviar", () => {
 		const r = await conBase("a-la-vez", async () =>
 			Promise.all([enviarCorreoReservaWeb(ENV(lento), correo()), enviarCorreoReservaWeb(ENV(lento), correo())]),
 		);
-		expect(r.sort()).toEqual(["enviado", "ya_enviado"]);
+		// El segundo lo ve saliendo: en curso, no «ya enviado» (aún no se sabe si saldrá).
+		expect(r.sort()).toEqual(["en_curso", "enviado"]);
 		expect(enviados).toHaveLength(1);
 	});
 
@@ -191,7 +192,7 @@ describe("enviar", () => {
 		expect(r).toEqual({ r: "ya_enviado", fila: { ok: 1, error_code: null } });
 	});
 
-	it("uno que se quedó a medias hace unos minutos se retoma; uno que está saliendo ahora, no", async () => {
+	it("uno que se quedó a medias hace unos minutos se retoma; uno que está saliendo ahora está en curso", async () => {
 		const falso = correoFalso();
 		const r = await conBase("a-medias", async (sql) => {
 			const apuntar = (id: string, hace: number) =>
@@ -208,8 +209,19 @@ describe("enviar", () => {
 				await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: "rw:confirmacion:ahora" })),
 			];
 		});
-		expect(r).toEqual(["enviado", "ya_enviado"]);
+		// En curso no es «ya enviado»: quien lo manda lo repite, por si el otro no llega a terminarlo.
+		expect(r).toEqual(["enviado", "en_curso"]);
 		expect(falso.enviados).toHaveLength(1);
+	});
+
+	it("sin la base central no se sabe si salió: no se envía, y es un fallo que se puede repetir", async () => {
+		const falso = correoFalso();
+		const r = await conBase("sin-base", async () => {
+			baseCentral = { execute: async () => { throw new Error("turso caído"); } };
+			return enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo());
+		});
+		expect(r).toBe("fallido");
+		expect(falso.enviados).toHaveLength(0);
 	});
 
 	it("uno que falló queda apuntado sin gastar cupo, y se puede volver a intentar", async () => {
@@ -273,6 +285,20 @@ describe("los topes", () => {
 		});
 		expect(r).toBe("tope");
 		expect(falso.enviados).toHaveLength(0);
+	});
+
+	it("muchos envíos a la vez no pasan del tope: cuenta también lo que está saliendo", async () => {
+		const enviados: any[] = [];
+		const lento = { EMAIL: { send: async (m: any) => { await new Promise((r) => setTimeout(r, 5)); enviados.push(m); } } };
+		const r = await conBase("tope-a-la-vez", async (sql) => {
+			apuntar(sql, TOPE_DIARIO_DESTINATARIO - 1, { to_email: "ana@correo.es" });
+			return Promise.all(
+				Array.from({ length: 12 }, (_, i) => enviarCorreoReservaWeb(ENV(lento), correo({ id: `rw:confirmacion:x${i}` }))),
+			);
+		});
+		expect(r.filter((x) => x === "enviado")).toHaveLength(1);
+		expect(r.filter((x) => x === "tope")).toHaveLength(11);
+		expect(enviados).toHaveLength(1);
 	});
 
 	it("no cuentan los que no salieron, los de ayer ni los pedidos", async () => {

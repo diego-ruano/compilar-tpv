@@ -108,7 +108,8 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 		dispositivo: c.get("deviceId"),
 	});
 	if (r === "tope") return c.json({ ok: false, error: "email_limite_diario" }, 429);
-	// Lo intenta otra vez quien lo manda.
+	// Lo intenta otra vez quien lo manda: no ha salido, o está saliendo por otro lado y aún no se sabe.
 	if (r === "fallido") return c.json({ ok: false, error: "correo_no_enviado" }, 502);
+	if (r === "en_curso") return c.json({ ok: false, error: "correo_en_curso" }, 503);
 	return c.json({ ok: true, enviado: true });
 });

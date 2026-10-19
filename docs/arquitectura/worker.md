@@ -115,8 +115,10 @@ Los correos al cliente de una reserva web salen de `domains/reservas_web/correos
 `EMAIL_RESERVAS_FROM_ADDRESS` con el nombre del negocio y su correo de contacto como `Reply-To`. Sólo
 llevan datos estructurados (nada que haya escrito el visitante), van a la dirección del alta o al
 cliente de la reserva web en la nube, y tienen sus topes: 600 al día por negocio y 10 por
-destinatario, sobre lo entregado (`tipo = 'reserva_web'`). Cada uno lleva su id en `email_sends`, así
-que el mismo no sale dos veces y uno que falló se puede repetir. Qué correo y cuándo:
+destinatario, sobre lo entregado y lo que está saliendo (`tipo = 'reserva_web'`). Cada uno lleva su
+id en `email_sends`, y el id y el cupo se reservan en una sola sentencia antes de enviar: el mismo
+no sale dos veces, muchos a la vez no pasan de los topes y uno que falló se puede repetir. Sin la
+base central no se envía (no se sabría si ya salió). Qué correo y cuándo:
 [reservas-web.md](../estudios/reservas-web.md#48-correos).
 
 RI-60: el envío exige nombre y correo comercial, leídos de la base del negocio junto con el

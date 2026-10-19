@@ -10,10 +10,11 @@
 //     texto libre en un correo de nuestro dominio es una vía de spam.
 //   · **A quién**: el correo del alta, o el del cliente de una reserva web en Turso. Nunca uno que
 //     llegue en un cuerpo. Eso lo garantiza quien llama; aquí sólo se envía.
-//   · **Cuánto**: un tope diario por negocio y otro por destinatario, contando sólo lo entregado,
-//     como el de los pedidos (REV-14). Si no se puede contar, se deja pasar.
+//   · **Cuánto**: un tope diario por negocio y otro por destinatario, sobre lo entregado y lo que está
+//     saliendo, reservados a la vez que el id (`reservar`): muchos envíos a la vez no los pasan.
 //   · **Un correo que falla no deshace nada**: se apunta en `email_sends` y quien llama decide.
-//   · Cada correo lleva su id (`email_sends.id`): uno que ya salió no vuelve a salir.
+//   · Cada correo lleva su id (`email_sends.id`): uno que ya salió no vuelve a salir. Sin la base
+//     central no se sabe si salió, así que no se envía: es un fallo, y quien puede lo repite.
 
 import * as z from "zod";
 import type { Client } from "@libsql/client/web";
@@ -50,7 +51,11 @@ export type Correo = {
 	dispositivo: string;
 };
 
-export type ResultadoCorreo = "enviado" | "ya_enviado" | "tope" | "fallido";
+/**
+ * `en_curso`: otro lo está enviando ahora mismo; no se sabe aún si saldrá, y quien pueda lo repite.
+ * `fallido`: no ha salido (el binding, o la base central sin responder); también se puede repetir.
+ */
+export type ResultadoCorreo = "enviado" | "ya_enviado" | "en_curso" | "tope" | "fallido";
 
 const correoValido = z.string().max(254).email();
 
@@ -99,13 +104,9 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 		capturarError(new Error("missing_env_EMAIL_RESERVAS_FROM_ADDRESS"), "reservas_web.correo");
 		return "fallido";
 	}
-	// Los topes son de lo entregado y se cuentan antes: dos envíos a la vez se los pueden pasar por
-	// uno. Lo que no puede pasar es que el mismo correo salga dos veces: eso lo para `reservar`.
-	if (await pasaDeLosTopes(db, correo.tenantId, para, Date.now())) {
-		console.warn("[reservas-web] correo sin enviar por el tope diario:", correo.tipo);
-		return "tope";
-	}
-	if ((await reservar(db, correo, para)) === "ya_salio") return "ya_enviado";
+	const reserva = await reservar(db, correo, para);
+	if (reserva === "tope") console.warn("[reservas-web] correo sin enviar por el tope diario:", correo.tipo);
+	if (reserva !== "mio") return reserva;
 
 	const { asunto, html, texto } = plantilla(correo);
 	try {
@@ -136,58 +137,63 @@ function nombreDelRemitente(nombre: string): string {
 	return limpio || "Reservas";
 }
 
-/**
- * Los dos topes, sobre lo entregado de las últimas 24 h. Si no se pueden contar se deja pasar, como
- * en los pedidos: una caída nuestra no puede dejar a un cliente sin el correo de su reserva.
- */
-export async function pasaDeLosTopes(db: Sql, tenantId: string, para: string, ahoraMs: number): Promise<boolean> {
-	try {
-		const desde = ahoraMs - VENTANA_MS;
-		const [delNegocio, delDestinatario] = await Promise.all([
-			db.execute({
-				sql: `SELECT COUNT(*) AS n FROM email_sends
-				      WHERE tenant_id = ?1 AND tipo = 'reserva_web' AND ok = 1 AND sent_at_ms > ?2;`,
-				args: [tenantId, desde],
-			}),
-			db.execute({
-				sql: `SELECT COUNT(*) AS n FROM email_sends
-				      WHERE to_email = ?1 AND tipo = 'reserva_web' AND ok = 1 AND sent_at_ms > ?2;`,
-				args: [para, desde],
-			}),
-		]);
-		const n = (rs: any) => Number(rs?.rows?.[0]?.n ?? 0);
-		return n(delNegocio) >= TOPE_DIARIO_NEGOCIO || n(delDestinatario) >= TOPE_DIARIO_DESTINATARIO;
-	} catch (e: any) {
-		capturarError(e, "reservas_web.correo.tope");
-		return false;
-	}
-}
-
 /** Lo que tarda como mucho un envío: una reserva más vieja sin terminar es de uno que murió a medias. */
 const ENVIANDO_MAX_MS = 5 * 60_000;
 
 /**
- * Reserva el id del correo en `email_sends` antes de enviarlo: de dos envíos a la vez del mismo
- * correo, sólo uno se queda con él. Uno que ya salió (`ok = 1`) no se vuelve a reservar nunca; uno
- * que falló, sí, y uno que se quedó a medias, pasados unos minutos. Si Turso no responde se envía
- * igual, sin esta garantía: mejor dos correos que ninguno. Nunca `INSERT OR REPLACE`.
+ * Reserva el correo en `email_sends` antes de enviarlo, en una sola sentencia: su id y su sitio en
+ * los dos topes. Así, de dos envíos a la vez del mismo correo sólo uno se queda con él, y muchos
+ * envíos a la vez no pasan de los topes, que cuentan lo entregado y lo que está saliendo.
+ *
+ *   · `mio`: se ha reservado; hay que enviarlo y apuntar cómo acabó (`terminar`).
+ *   · `ya_enviado`: salió (`ok = 1`); no se vuelve a reservar nunca.
+ *   · `en_curso`: otro lo está enviando ahora; quien llama lo puede repetir más tarde. Uno que se
+ *     quedó a medias se puede retomar pasados unos minutos.
+ *   · `tope`: no cabe en alguno de los dos topes.
+ *   · `fallido`: la base central no responde. Sin ella no se sabe si ya salió, así que no se envía:
+ *     quien llama lo repite si puede. Lo de negocio (la reserva, la cancelación) ya está hecho.
+ *
+ * Uno que falló (`ok = 0`) se puede volver a reservar. Nunca `INSERT OR REPLACE`.
  */
-async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | "ya_salio"> {
+async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | Exclude<ResultadoCorreo, "enviado">> {
 	const ahora = Date.now();
 	try {
 		const rs = await db.execute({
 			sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
-			      VALUES (?1, ?2, ?3, ?4, NULL, 0, 'enviando', ?5, 'reserva_web')
+			      SELECT ?1, ?2, ?3, ?4, NULL, 0, 'enviando', ?5, 'reserva_web'
+			      WHERE (SELECT COUNT(*) FROM email_sends
+			             WHERE tenant_id = ?2 AND tipo = 'reserva_web' AND id <> ?1 AND sent_at_ms > ?7
+			               AND (ok = 1 OR (error_code = 'enviando' AND sent_at_ms > ?6))) < ?8
+			        AND (SELECT COUNT(*) FROM email_sends
+			             WHERE to_email = ?4 AND tipo = 'reserva_web' AND id <> ?1 AND sent_at_ms > ?7
+			               AND (ok = 1 OR (error_code = 'enviando' AND sent_at_ms > ?6))) < ?9
 			      ON CONFLICT(id) DO UPDATE SET error_code = 'enviando', sent_at_ms = excluded.sent_at_ms
 			      WHERE email_sends.ok = 0
-			        AND (email_sends.error_code IS NULL OR email_sends.error_code <> 'enviando' OR email_sends.sent_at_ms < ?6);`,
-			args: [correo.id, correo.tenantId, correo.dispositivo, para, ahora, ahora - ENVIANDO_MAX_MS],
+			        AND (email_sends.error_code IS NULL OR email_sends.error_code <> 'enviando' OR email_sends.sent_at_ms <= ?6);`,
+			args: [
+				correo.id,
+				correo.tenantId,
+				correo.dispositivo,
+				para,
+				ahora,
+				ahora - ENVIANDO_MAX_MS,
+				ahora - VENTANA_MS,
+				TOPE_DIARIO_NEGOCIO,
+				TOPE_DIARIO_DESTINATARIO,
+			],
 		});
-		return rs.rowsAffected > 0 ? "mio" : "ya_salio";
+		if (rs.rowsAffected > 0) return "mio";
+		// No se ha reservado: por qué.
+		const fila: any = (
+			await db.execute({ sql: `SELECT ok, error_code, sent_at_ms FROM email_sends WHERE id = ?1;`, args: [correo.id] })
+		).rows?.[0];
+		if (Number(fila?.ok) === 1) return "ya_enviado";
+		if (fila?.error_code === "enviando" && Number(fila.sent_at_ms) > ahora - ENVIANDO_MAX_MS) return "en_curso";
+		return "tope";
 	} catch (e: any) {
 		capturarError(e, "reservas_web.correo.traza");
 		console.error("[reservas-web] no se ha podido reservar el correo:", String(e?.message || e));
-		return "mio";
+		return "fallido";
 	}
 }
 
