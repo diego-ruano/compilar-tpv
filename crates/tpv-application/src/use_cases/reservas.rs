@@ -152,6 +152,7 @@ pub fn aviso_al_cliente(antes: &ReservaDto, despues: Option<&ReservaDto>) -> Opt
         personas: r.comensales,
         mesa: (!r.id_mesa.is_empty() && !r.numero_mesa.is_empty()).then(|| r.numero_mesa.clone()),
         id_cliente: r.id_cliente.clone(),
+        huella_correo: tpv_domain::reservas_web::huella_de_correo(r.email_cliente.as_deref()),
     };
     match despues {
         None => Some(aviso(TipoAvisoReservaWeb::Cancelada, antes)),
@@ -433,6 +434,7 @@ mod tests {
                     personas: 2,
                     mesa: Some("Mesa 1".into()),
                     id_cliente: Some("c1".into()),
+                    huella_correo: tpv_domain::reservas_web::huella_de_correo(Some("ana@correo.es")),
                 },
                 AvisoAlCliente {
                     id_reserva: "r1".into(),
@@ -442,6 +444,7 @@ mod tests {
                     personas: 2,
                     mesa: Some("Terraza 2".into()),
                     id_cliente: Some("c1".into()),
+                    huella_correo: tpv_domain::reservas_web::huella_de_correo(Some("ana@correo.es")),
                 },
             ]
         );

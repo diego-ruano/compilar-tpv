@@ -191,6 +191,7 @@ mod tests {
                 personas: 2,
                 mesa: None,
                 id_cliente: Some("c1".into()),
+                huella_correo: None,
             },
             creado_ms: 0,
             intentos,

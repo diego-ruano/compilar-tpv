@@ -28,6 +28,7 @@ import { enviarCorreoReservaWeb, negocioDelCorreo } from "./correos";
 import { avisoReservaWebSchema, recogidasSchema } from "./reservasWeb.schemas";
 import { codigoDeReserva } from "../../durableObjects/agendaWeb.motor";
 import { tenantQuery } from "../../lib/tenantClient";
+import { sha256HexStr } from "../../server/utils/crypto";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -89,6 +90,9 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 	// La nube aún tiene otro cliente en esa reserva (la Main lo cambió y no ha subido): escribirle al
 	// de aquí sería contarle a otra persona la reserva. Se repite cuando esté al día.
 	if (leido.idCliente !== aviso.id_cliente) return c.json({ ok: false, error: "reserva_no_al_dia" }, 404);
+	// Lo mismo con su correo: si en la Main se corrigió y aún no ha subido, se escribiría al de antes.
+	const huella = leido.email ? await sha256HexStr(leido.email.trim().toLowerCase()) : null;
+	if (huella !== aviso.huella_correo) return c.json({ ok: false, error: "reserva_no_al_dia" }, 404);
 	// Sin correo no hay a quién decírselo: hecho.
 	if (!leido.email) return c.json({ ok: true, enviado: false });
 

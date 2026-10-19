@@ -287,9 +287,32 @@ pub fn dia_corto(dia_ymd: &str) -> String {
     }
 }
 
+/// La huella de un correo: SHA-256 en hexadecimal de la dirección recortada y en minúsculas. Viaja
+/// en el aviso al cliente de un cambio (docs/estudios/reservas-web.md §5.7) para que la nube sepa si
+/// su copia del cliente ya tiene el correo de la Main, sin que el correo viaje. La misma que
+/// `sha256HexStr(email.trim().toLowerCase())` en el worker. `None` si no hay correo.
+pub fn huella_de_correo(email: Option<&str>) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let e = email?.trim().to_lowercase();
+    if e.is_empty() {
+        return None;
+    }
+    Some(Sha256::digest(e.as_bytes()).iter().map(|b| format!("{b:02x}")).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_huella_de_un_correo_no_depende_de_mayusculas_ni_espacios() {
+        // SHA-256 de «ana@correo.es»: el mismo valor fija el test del worker (`reservasWebAvisos`).
+        let h = huella_de_correo(Some("ana@correo.es")).unwrap();
+        assert_eq!(h, "80ec301799f952e798d6387318dc4616444dc00c3963ed5c1845cf85c0e60758");
+        assert_eq!(huella_de_correo(Some("  ANA@correo.ES ")), Some(h));
+        assert_eq!(huella_de_correo(Some("  ")), None);
+        assert_eq!(huella_de_correo(None), None);
+    }
 
     #[test]
     fn el_telefono_se_queda_con_sus_cifras_y_el_prefijo() {

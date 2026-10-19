@@ -40,6 +40,7 @@ vi.mock("../src/server/db", async (original) => ({
 const { reservasWebMainRoutes } = await import("../src/domains/reservas_web/main.routes");
 const { avisoReservaWebSchema } = await import("../src/domains/reservas_web/reservasWeb.schemas");
 const { codigoDeReserva } = await import("../src/durableObjects/agendaWeb.motor");
+const { sha256HexStr } = await import("../src/server/utils/crypto");
 
 const app = new Hono();
 app.route("/v1/reservas-web", reservasWebMainRoutes);
@@ -57,6 +58,8 @@ const ENV = {
 };
 
 const ID = "0199aa00-0000-7000-8000-00000000abcd";
+/** SHA-256 de «ana@correo.es»: el mismo valor fija `tpv_domain::reservas_web::huella_de_correo`. */
+const HUELLA_ANA = "80ec301799f952e798d6387318dc4616444dc00c3963ed5c1845cf85c0e60758";
 
 function aviso(extra: Record<string, unknown> = {}) {
 	return {
@@ -68,6 +71,7 @@ function aviso(extra: Record<string, unknown> = {}) {
 		personas: 4,
 		mesa: "Mesa 7",
 		id_cliente: "c1",
+		huella_correo: HUELLA_ANA,
 		...extra,
 	};
 }
@@ -148,12 +152,28 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 			sql.exec(`INSERT INTO Clientes (ID_Cliente, Nombre, Email) VALUES ('c2', 'Luis', 'luis@correo.es');`);
 			reserva(sql, "WEB");
 			// La Main ya se la ha pasado a Luis (c2), pero eso aún no ha subido.
-			expect(await mandar(aviso({ id_cliente: "c2" }))).toMatchObject({ status: 404, json: { error: "reserva_no_al_dia" } });
+			const deLuis = { id_cliente: "c2", huella_correo: await sha256HexStr("luis@correo.es") };
+			expect(await mandar(aviso(deLuis))).toMatchObject({ status: 404, json: { error: "reserva_no_al_dia" } });
 			expect(enviados).toEqual([]);
 			// Cuando sube, sale, y a Luis.
 			sql.exec(`UPDATE Reservas SET ID_Cliente = 'c2' WHERE ID_Reserva = ?;`, ID);
-			expect((await mandar(aviso({ id_cliente: "c2" }))).json).toEqual({ ok: true, enviado: true });
+			expect((await mandar(aviso(deLuis))).json).toEqual({ ok: true, enviado: true });
 			expect(enviados.map((m) => m.to)).toEqual(["luis@correo.es"]);
+		});
+	});
+
+	it("si la nube aún tiene el correo de antes del cliente, espera: no escribe a una dirección que ya no es suya", async () => {
+		await conNegocio("otro-correo", async (sql) => {
+			reserva(sql, "WEB");
+			// En la Main se corrigió el correo de Ana, pero eso aún no ha subido.
+			const corregido = { huella_correo: await sha256HexStr("ana.bien@correo.es") };
+			expect(await mandar(aviso(corregido))).toMatchObject({ status: 404, json: { error: "reserva_no_al_dia" } });
+			// Y si la Main se lo quitó y aquí aún lo tiene, tampoco.
+			expect(await mandar(aviso({ huella_correo: null }))).toMatchObject({ status: 404 });
+			expect(enviados).toEqual([]);
+			sql.exec(`UPDATE Clientes SET Email = 'ana.bien@correo.es' WHERE ID_Cliente = 'c1';`);
+			expect((await mandar(aviso(corregido))).json).toEqual({ ok: true, enviado: true });
+			expect(enviados.map((m) => m.to)).toEqual(["ana.bien@correo.es"]);
 		});
 	});
 
@@ -168,7 +188,7 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 	it("sin correo del cliente no hay a quién decírselo, y no es un error", async () => {
 		await conNegocio("sin-correo", async (sql) => {
 			reserva(sql, "WEB", null);
-			expect(await mandar(aviso({ id_cliente: null }))).toEqual({ status: 200, json: { ok: true, enviado: false } });
+			expect(await mandar(aviso({ id_cliente: null, huella_correo: null }))).toEqual({ status: 200, json: { ok: true, enviado: false } });
 		});
 	});
 
@@ -210,6 +230,7 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 			aviso({ personas: "4" }),
 			aviso({ mesa: "Mesa 7\nVisita https://otra.web" }),
 			aviso({ mesa: "x".repeat(61) }),
+			aviso({ huella_correo: "ana@correo.es" }),
 		]) {
 			expect(avisoReservaWebSchema.safeParse(malo).success, JSON.stringify(malo).slice(0, 90)).toBe(false);
 		}

@@ -54,6 +54,8 @@ pub struct AvisoAlCliente {
     pub mesa: Option<String>,
     /// El cliente que tiene la reserva tras el cambio: a ése, y sólo a ése, le escribe la nube.
     pub id_cliente: Option<String>,
+    /// La huella de su correo en la Main: la nube espera a tener el mismo.
+    pub huella_correo: Option<String>,
 }
 
 /// El correo al cliente de una reserva web por un cambio del restaurante. Lo envía el worker

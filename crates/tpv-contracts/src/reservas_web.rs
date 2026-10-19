@@ -189,4 +189,7 @@ pub struct AvisoReservaWebInput {
     /// El cliente de la reserva en la Main tras el cambio. La nube sólo le escribe al de su copia si
     /// es éste: si aún tiene otro (el cambio no ha subido), contesta 404 y se repite más tarde.
     pub id_cliente: Option<String>,
+    /// La huella del correo de ese cliente en la Main (`tpv_domain::reservas_web::huella_de_correo`).
+    /// Lo mismo: si la copia de la nube tiene otro correo (se corrigió y no ha subido), espera.
+    pub huella_correo: Option<String>,
 }

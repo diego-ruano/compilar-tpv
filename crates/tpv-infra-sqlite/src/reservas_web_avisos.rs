@@ -50,6 +50,7 @@ impl AvisosReservaWeb for SqliteAvisosReservaWeb {
             personas: aviso.personas,
             mesa: aviso.mesa,
             id_cliente: aviso.id_cliente,
+            huella_correo: aviso.huella_correo,
         };
         let (tipo, json) = texto_de(&cuerpo)?;
         let g = self.db.write().await;
@@ -153,6 +154,7 @@ mod tests {
             personas: 4,
             mesa: Some("Mesa 7".into()),
             id_cliente: Some("c1".into()),
+            huella_correo: None,
         }
     }
 

@@ -199,6 +199,12 @@ export const avisoReservaWebSchema = z.object({
 		.max(64)
 		.nullish()
 		.transform((v) => (v ? v : null)),
+	// La huella (SHA-256) del correo de ese cliente en la Main: la nube espera a tener el mismo.
+	huella_correo: z
+		.string()
+		.regex(/^[0-9a-f]{64}$/, "huella_correo inválida")
+		.nullish()
+		.transform((v) => v ?? null),
 });
 
 type _GAviso = Assert<SameKeys<z.infer<typeof avisoReservaWebSchema>, AvisoReservaWebInput>>;

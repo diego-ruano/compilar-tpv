@@ -174,6 +174,11 @@ export type AvisoReservaWebInput = {
 	 *  es éste: si aún tiene otro (el cambio no ha subido), contesta 404 y se repite más tarde.
 	 */
 	id_cliente: string | null,
+	/**
+	 *  La huella del correo de ese cliente en la Main (`tpv_domain::reservas_web::huella_de_correo`).
+	 *  Lo mismo: si la copia de la nube tiene otro correo (se corrigió y no ha subido), espera.
+	 */
+	huella_correo: string | null,
 };
 
 export type AvisoSocketHandy = {
