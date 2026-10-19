@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, appendFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, appendFileSync, unlinkSync, cpSync, existsSync } from "node:fs";
 import { resolve, join, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -7,6 +7,25 @@ import { applicationVersion, sentryRequest, sentryPages } from "./sentry-config.
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const worker = join(root, "apps/cloud-worker-licensing");
+// El widget de reservas web va con el worker (Workers Static Assets): se compila aquí y viaja dentro
+// del artefacto, en `assets/`, cubierto por el manifiesto como lo demás.
+const widget = join(root, "apps/reservas-web");
+const ASSETS = "assets";
+const FICHEROS_DEL_WIDGET = ["reservas-web/index.html", "reservas-web/v1/embed.js"];
+
+/** Los ficheros de un directorio, con su ruta relativa y `/` como separador. */
+function listar(directory, base = "") {
+  return readdirSync(join(directory, base), { withFileTypes: true }).flatMap(e => {
+    const rel = base ? `${base}/${e.name}` : e.name;
+    return e.isDirectory() ? listar(directory, rel) : [rel];
+  });
+}
+
+/** Sólo `assets/` puede tener subcarpetas, y ninguna ruta sale del artefacto. */
+function rutaAceptable(file) {
+  if (!file.includes("/")) return basename(file) === file;
+  return file.startsWith(`${ASSETS}/`) && !file.split("/").some(p => p === ".." || p === "." || p === "");
+}
 const hash = data => createHash("sha256").update(data).digest("hex");
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
 
@@ -46,13 +65,15 @@ export function readWorkerArtifact(directory, expected = workerVersion()) {
   const manifest = JSON.parse(readFileSync(join(directory, "manifest.json"), "utf8"));
   if (manifest.version !== expected.version || manifest.release !== expected.release || manifest.worker !== "tpv-api") throw new Error("El artefacto no corresponde a esta release");
   if (expected.commit && manifest.commit !== expected.commit) throw new Error("El artefacto no corresponde al commit de este workflow");
-  const actual = readdirSync(directory).filter(f => f !== "manifest.json").sort();
+  const actual = listar(directory).filter(f => f !== "manifest.json").sort();
   if (JSON.stringify(actual) !== JSON.stringify(Object.keys(manifest.files).sort())) throw new Error("Faltan archivos o hay archivos ajenos en el artefacto");
   for (const [file, digest] of Object.entries(manifest.files)) {
-    if (basename(file) !== file || hash(readFileSync(join(directory, file))) !== digest) throw new Error(`Hash incorrecto: ${file}`);
+    if (!rutaAceptable(file) || hash(readFileSync(join(directory, file))) !== digest) throw new Error(`Hash incorrecto: ${file}`);
   }
   const config = JSON.parse(readFileSync(join(directory, "wrangler.json"), "utf8"));
   if (config.name !== "tpv-api" || config.main !== "index.js" || config.no_bundle !== true || config.vars.SENTRY_RELEASE !== expected.release || config.vars.BUILD_COMMIT !== manifest.commit) throw new Error("Configuración de despliegue incorrecta");
+  // Sin el widget dentro, el worker se desplegaría sin poder servirlo.
+  if (config.assets?.directory !== ASSETS || FICHEROS_DEL_WIDGET.some(f => !manifest.files[`${ASSETS}/${f}`])) throw new Error("Falta el widget de reservas web en el artefacto");
   const map = JSON.parse(readFileSync(join(directory, "index.js.map"), "utf8"));
   if (!UUID.test(map.debug_id ?? "") || !readFileSync(join(directory, "index.js"), "utf8").includes(map.debug_id)) throw new Error("El JavaScript y el mapa no comparten Debug ID");
   return manifest;
@@ -63,6 +84,11 @@ export async function prepareWorker(directory, config, env = process.env) {
   mkdirSync(directory, { recursive: true });
   if (readdirSync(directory).length) throw new Error("Usa un directorio de build vacío");
   await validateWorkerTarget(config);
+  // El widget primero: la configuración del worker lo declara (`assets`) y el despliegue lo lleva.
+  const vite = spawnSync(process.execPath, [join(widget, "node_modules/vite/bin/vite.js"), "build"], { cwd: widget, stdio: "inherit" });
+  if (vite.status !== 0) throw new Error(`El widget de reservas web no compila (${vite.status ?? vite.error?.code})`);
+  const compilado = join(widget, "dist");
+  if (FICHEROS_DEL_WIDGET.some(f => !existsSync(join(compilado, f)))) throw new Error("El widget compilado está incompleto");
   cli("wrangler", ["deploy", "--dry-run", "--outdir", directory]);
   // El README de Wrangler lleva la hora del build y no forma parte del programa.
   unlinkSync(join(directory, "README.md"));
@@ -70,9 +96,10 @@ export async function prepareWorker(directory, config, env = process.env) {
   cli("sentry-cli", ["sourcemaps", "upload", "--release", config.release, "--wait", directory], { ...env, SENTRY_PROJECT: config.project });
   const source = JSON.parse(readFileSync(join(worker, "wrangler.json"), "utf8"));
   // Nunca se vuelve a compilar después de subir los mapas: se despliegan estos mismos bytes.
-  const deploy = { ...source, main: "index.js", no_bundle: true, find_additional_modules: true, base_dir: ".", vars: { ...source.vars, ENVIRONMENT: "prod", SENTRY_RELEASE: config.release, BUILD_COMMIT: env.GITHUB_SHA } };
+  cpSync(compilado, join(directory, ASSETS), { recursive: true });
+  const deploy = { ...source, main: "index.js", no_bundle: true, find_additional_modules: true, base_dir: ".", assets: { ...source.assets, directory: ASSETS }, vars: { ...source.vars, ENVIRONMENT: "prod", SENTRY_RELEASE: config.release, BUILD_COMMIT: env.GITHUB_SHA } };
   writeFileSync(join(directory, "wrangler.json"), JSON.stringify(deploy, null, 2));
-  const files = Object.fromEntries(readdirSync(directory).filter(f => f !== "manifest.json").map(f => [f, hash(readFileSync(join(directory, f)))]));
+  const files = Object.fromEntries(listar(directory).filter(f => f !== "manifest.json").map(f => [f, hash(readFileSync(join(directory, f)))]));
   const manifest = { worker: "tpv-api", version: config.version, release: config.release, commit: env.GITHUB_SHA, files };
   writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest, null, 2));
   readWorkerArtifact(directory, config);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -19,9 +19,17 @@ test("se rechaza cualquier cambio o archivo añadido después de subir los mapas
   const identity = workerVersion(undefined, {});
   const id = "aabbccdd-1234-1234-1234-aabbccddeeff";
   try {
-    const contents = { "index.js": `// debugId=${id}`, "index.js.map": JSON.stringify({ debug_id: id }), "wrangler.json": JSON.stringify({ name: "tpv-api", main: "index.js", no_bundle: true, vars: { SENTRY_RELEASE: identity.release, BUILD_COMMIT: "commit" } }) };
+    const contents = {
+      "index.js": `// debugId=${id}`,
+      "index.js.map": JSON.stringify({ debug_id: id }),
+      "wrangler.json": JSON.stringify({ name: "tpv-api", main: "index.js", no_bundle: true, assets: { directory: "assets" }, vars: { SENTRY_RELEASE: identity.release, BUILD_COMMIT: "commit" } }),
+      // El widget de reservas web viaja dentro, en `assets/`.
+      "assets/reservas-web/index.html": "<!doctype html>",
+      "assets/reservas-web/v1/embed.js": "(function(){})();",
+    };
     const files = {};
     for (const [name, data] of Object.entries(contents)) {
+      mkdirSync(join(dir, name, ".."), { recursive: true });
       writeFileSync(join(dir, name), data);
       files[name] = createHash("sha256").update(data).digest("hex");
     }
@@ -33,6 +41,46 @@ test("se rechaza cualquier cambio o archivo añadido después de subir los mapas
     writeFileSync(join(dir, "index.js"), contents["index.js"]);
     writeFileSync(join(dir, "extra.sql"), "SELECT 1");
     assert.throws(() => readWorkerArtifact(dir, identity), /archivos/);
+    rmSync(join(dir, "extra.sql"));
+    // También dentro del widget: lo que no está en el manifiesto no se despliega.
+    writeFileSync(join(dir, "assets/reservas-web/otro.js"), "x");
+    assert.throws(() => readWorkerArtifact(dir, identity), /archivos/);
+    rmSync(join(dir, "assets/reservas-web/otro.js"));
+    readWorkerArtifact(dir, identity);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("sin el widget de reservas web dentro, el artefacto no vale; y nada sale de `assets/`", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tpv-worker-"));
+  const identity = workerVersion(undefined, {});
+  const id = "aabbccdd-1234-1234-1234-aabbccddeeff";
+  const montar = (extra, assets = { directory: "assets" }) => {
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    const contents = {
+      "index.js": `// debugId=${id}`,
+      "index.js.map": JSON.stringify({ debug_id: id }),
+      "wrangler.json": JSON.stringify({ name: "tpv-api", main: "index.js", no_bundle: true, assets, vars: { SENTRY_RELEASE: identity.release, BUILD_COMMIT: "commit" } }),
+      ...extra,
+    };
+    const files = {};
+    for (const [name, data] of Object.entries(contents)) {
+      mkdirSync(join(dir, name, ".."), { recursive: true });
+      writeFileSync(join(dir, name), data);
+      files[name] = createHash("sha256").update(data).digest("hex");
+    }
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify({ worker: "tpv-api", ...identity, commit: "commit", files }));
+  };
+  const widget = { "assets/reservas-web/index.html": "<!doctype html>", "assets/reservas-web/v1/embed.js": "x" };
+  try {
+    montar({});
+    assert.throws(() => readWorkerArtifact(dir, identity), /widget/);
+    montar(widget, { directory: "../reservas-web/dist" });
+    assert.throws(() => readWorkerArtifact(dir, identity), /widget/);
+    montar({ ...widget, "otra/carpeta.js": "x" });
+    assert.throws(() => readWorkerArtifact(dir, identity), /Hash/);
+    montar(widget);
+    readWorkerArtifact(dir, identity);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

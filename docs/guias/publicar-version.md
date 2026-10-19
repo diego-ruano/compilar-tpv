@@ -66,7 +66,9 @@ El workflow exige versiones coherentes con el tag y valida el token y el DSN act
 `tpv-desktop-win7@<versión>` y el tag `win7-v<versión>` en su rama.
 
 El worker se compila en otro job con `tpv-api@<versión>`, inyecta Debug IDs, sube sus mapas y
-comprueba un evento real con traza TypeScript. Una vez listos ambos builds y la firma del
+comprueba un evento real con traza TypeScript. El mismo job compila el widget de reservas web
+(`apps/reservas-web`) y lo mete en el artefacto, en `assets/`, cubierto por el manifiesto: un artefacto
+sin el widget no se despliega (`scripts/release/worker.mjs`). Una vez listos ambos builds y la firma del
 escritorio, otro runner despliega ese mismo artefacto del worker. El instalador sólo se publica
 cuando ese despliegue termina correctamente. El tag de Windows 7 no despliega el worker.
 
