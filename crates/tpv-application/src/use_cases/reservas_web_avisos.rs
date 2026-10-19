@@ -25,7 +25,7 @@ use tpv_contracts::errors::ErrorCode;
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::PairingService;
 use crate::ports::reservas::{AvisoEnCola, ColaAvisosReservaWeb, ReservasRepository};
-use tpv_contracts::reservas_web::TipoAvisoReservaWeb;
+use tpv_contracts::reservas_web::{AvisoReservaWebInput, TipoAvisoReservaWeb};
 
 /// Cuántos avisos manda cada vuelta del job. Lo que quede, en la siguiente.
 pub const MAX_POR_VUELTA: i64 = 50;
@@ -56,14 +56,17 @@ pub async fn enviar(
         if apartadas.contains(&aviso.cuerpo.id_reserva) {
             continue;
         }
-        if format!("{} {}", aviso.cuerpo.dia_ymd, aviso.cuerpo.hora).as_str() <= ahora_local
-            || superado(reservas, &aviso).await
-        {
+        let cuerpo = if format!("{} {}", aviso.cuerpo.dia_ymd, aviso.cuerpo.hora).as_str() <= ahora_local {
+            None
+        } else {
+            al_dia(reservas, &aviso).await
+        };
+        let Some(cuerpo) = cuerpo else {
             cola.quitar(&id).await?;
             resumen.descartados += 1;
             continue;
-        }
-        let cuerpo = serde_json::to_value(&aviso.cuerpo).map_err(|e| AppError::internal(e.to_string()))?;
+        };
+        let cuerpo = serde_json::to_value(&cuerpo).map_err(|e| AppError::internal(e.to_string()))?;
         match nube.tpv_server_post_json("tpv", "/v1/reservas-web/avisos", cuerpo).await {
             Ok(_) => {
                 cola.quitar(&id).await?;
@@ -93,25 +96,32 @@ pub async fn enviar(
     Ok(resumen)
 }
 
-/// ¿Ya no dice cómo está la reserva? Un «cambiada» que no coincide con la copia de la Main (hubo otro
-/// cambio después, también de una Handy, que ya ha llegado aquí y avisó él) o de una reserva que ya
-/// no está por venir está superado: «así queda ahora» sería falso. Si no se puede leer, se manda: la
-/// nube también compara lo que anuncia con lo que tiene.
-async fn superado(reservas: &dyn ReservasRepository, aviso: &AvisoEnCola) -> bool {
-    let a = &aviso.cuerpo;
-    if a.tipo != TipoAvisoReservaWeb::Modificada {
-        return false;
-    }
-    match reservas.reserva(&a.id_reserva).await {
-        Ok(None) => true,
+/// El cuerpo que se manda, al día con la copia de la Main, o `None` si el aviso está superado:
+///   · un «cambiada» que no coincide con la copia (hubo otro cambio después, también de una Handy, que
+///     ya ha llegado aquí y avisó él) o de una reserva que ya no está por venir: «así queda ahora»
+///     sería falso;
+///   · si sigue valiendo, el cliente y la huella de su correo salen de la copia de ahora: si se
+///     corrigió el correo después de encolarlo, la nube tiene que esperar al nuevo, no al de entonces;
+///   · si no se puede leer, el cuerpo tal cual: la nube también compara lo que anuncia con lo que tiene.
+async fn al_dia(reservas: &dyn ReservasRepository, aviso: &AvisoEnCola) -> Option<AvisoReservaWebInput> {
+    let mut cuerpo = aviso.cuerpo.clone();
+    let modificada = cuerpo.tipo == TipoAvisoReservaWeb::Modificada;
+    match reservas.reserva(&cuerpo.id_reserva).await {
         Ok(Some(r)) => {
-            r.estado != "PROXIMA"
-                || r.dia_ymd != a.dia_ymd
-                || r.hora != a.hora
-                || r.comensales != a.personas
-                || crate::use_cases::reservas::mesa_de(&r) != a.mesa
+            let distinta = r.estado != "PROXIMA"
+                || r.dia_ymd != cuerpo.dia_ymd
+                || r.hora != cuerpo.hora
+                || r.comensales != cuerpo.personas
+                || crate::use_cases::reservas::mesa_de(&r) != cuerpo.mesa;
+            if modificada && distinta {
+                return None;
+            }
+            cuerpo.id_cliente = r.id_cliente.clone();
+            cuerpo.huella_correo = tpv_domain::reservas_web::huella_de_correo(r.email_cliente.as_deref());
+            Some(cuerpo)
         }
-        Err(_) => false,
+        Ok(None) if modificada => None,
+        _ => Some(cuerpo),
     }
 }
 
@@ -398,5 +408,39 @@ mod tests {
         let nube = Nube::con(vec![Ok(serde_json::json!({ "ok": true, "enviado": true }))]);
         let r = enviar(&cola, &nube, &Copia(Some(copia("22:00", "PROXIMA")), false), AHORA).await.unwrap();
         assert_eq!(r.enviados, 1);
+    }
+    #[tokio::test]
+    async fn si_el_correo_del_cliente_se_corrigio_despues_de_encolarlo_sale_con_el_de_ahora() {
+        let cola = Cola::default();
+        // Encolado cuando el cliente aún tenía el correo mal escrito (y su huella va en el aviso).
+        let mut a = aviso("a1", 0);
+        a.cuerpo.huella_correo = tpv_domain::reservas_web::huella_de_correo(Some("ana@corero.es"));
+        cola.avisos.lock().unwrap().push(a);
+        let ahora = ReservaDto {
+            id_reserva: "r-a1".into(),
+            id_mesa: String::new(),
+            dia_ymd: "2026-10-24".into(),
+            hora: "21:00".into(),
+            turno: None,
+            comensales: 2,
+            duracion_min: None,
+            nota: None,
+            estado: "CANCELADA".into(),
+            origen: "WEB".into(),
+            id_cliente: Some("c1".into()),
+            nombre_cliente: "Ana".into(),
+            telefono_cliente: None,
+            email_cliente: Some("ana@correo.es".into()),
+            id_zona: String::new(),
+            numero_mesa: String::new(),
+            capacidad: 0,
+            nombre_zona: String::new(),
+        };
+        let nube = Nube::con(vec![Ok(serde_json::json!({ "ok": true, "enviado": true }))]);
+        enviar(&cola, &nube, &Copia(Some(ahora), false), AHORA).await.unwrap();
+        let mandado = nube.recibidos.lock().unwrap()[0].clone();
+        assert_eq!(mandado["huella_correo"], tpv_domain::reservas_web::huella_de_correo(Some("ana@correo.es")).unwrap());
+        assert_eq!(mandado["id_cliente"], "c1");
+        assert_eq!(mandado["id_aviso"], "a1");
     }
 }
