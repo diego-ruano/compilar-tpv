@@ -214,6 +214,24 @@ describe("enviar", () => {
 		expect(falso.enviados).toHaveLength(1);
 	});
 
+	it("si apuntar que salió falla una vez, se insiste: no se queda «enviando» y no se puede repetir", async () => {
+		const falso = correoFalso();
+		const r = await conBase("terminar-insiste", async (sql) => {
+			const real = baseCentral;
+			let fallos = 1;
+			baseCentral = {
+				execute: async (q: any) => {
+					if (String(q.sql).trimStart().startsWith("UPDATE email_sends") && fallos-- > 0) throw new Error("turso a ratos");
+					return real.execute(q);
+				},
+			};
+			const r = await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo());
+			return { r, fila: sql.exec(`SELECT ok, error_code FROM email_sends;`).toArray()[0] };
+		});
+		expect(r).toEqual({ r: "enviado", fila: { ok: 1, error_code: null } });
+		expect(falso.enviados).toHaveLength(1);
+	});
+
 	it("sin la base central no se sabe si salió: no se envía, y es un fallo que se puede repetir", async () => {
 		const falso = correoFalso();
 		const r = await conBase("sin-base", async () => {

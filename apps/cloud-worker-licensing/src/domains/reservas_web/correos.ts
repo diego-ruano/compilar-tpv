@@ -199,19 +199,34 @@ async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | 
 	}
 }
 
+/** Cuántas veces se intenta apuntar cómo acabó un envío, y cuánto se espera entre una y otra. */
+const INTENTOS_DE_TERMINAR = 3;
+const ESPERA_TERMINAR_MS = 200;
+
 /**
- * Cómo acabó el envío. Best-effort, como en los pedidos: que no se pueda apuntar no deshace un correo
- * que ya ha salido. Un `ok = 1` no se toca: un fallo posterior no lo convierte en reenviable.
+ * Cómo acabó el envío. Un `ok = 1` no se toca: un fallo posterior no lo convierte en reenviable.
+ *
+ * Se insiste unas veces, porque lo que se juega es que un correo que ya salió se quede en
+ * «enviando»: pasados unos minutos se podría volver a reservar, y un reintento del mismo correo (si
+ * además se perdió la respuesta) lo mandaría otra vez. Si aun así no se puede apuntar, queda en el
+ * log: que no se pueda apuntar no deshace un correo que ya ha salido.
  */
 async function terminar(db: Sql, id: string, ok: boolean, codigo: string | null): Promise<void> {
-	try {
-		await db.execute({
-			sql: `UPDATE email_sends SET ok = ?2, error_code = ?3, sent_at_ms = ?4 WHERE id = ?1 AND ok = 0;`,
-			args: [id, ok ? 1 : 0, codigo, Date.now()],
-		});
-	} catch (e: any) {
-		capturarError(e, "reservas_web.correo.traza");
-		console.error("[reservas-web] no se ha podido apuntar el correo:", String(e?.message || e));
+	for (let intento = 1; ; intento++) {
+		try {
+			await db.execute({
+				sql: `UPDATE email_sends SET ok = ?2, error_code = ?3, sent_at_ms = ?4 WHERE id = ?1 AND ok = 0;`,
+				args: [id, ok ? 1 : 0, codigo, Date.now()],
+			});
+			return;
+		} catch (e: any) {
+			if (intento >= INTENTOS_DE_TERMINAR) {
+				capturarError(e, "reservas_web.correo.traza");
+				console.error("[reservas-web] no se ha podido apuntar el correo:", String(e?.message || e));
+				return;
+			}
+			await new Promise((r) => setTimeout(r, ESPERA_TERMINAR_MS * intento));
+		}
 	}
 }
 
