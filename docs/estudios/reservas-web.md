@@ -769,6 +769,10 @@ en la fase 1.
   borrado llega a la nube antes que el aviso (lo normal si se hizo todo sin conexión), la nube ya no
   sabe a quién escribir y el aviso acaba descartado: el cliente no recibe el correo de cancelación.
   Evitarlo obligaría a impedir el segundo borrado o a guardar el destinatario fuera de la nube.
+- **El enlace de cancelar es de quien hizo la reserva.** Si el restaurante se la pasa a otro cliente
+  (o le corrige el correo), los avisos de cambios van al cliente nuevo, pero el enlace del correo de
+  confirmación sigue cancelando esa reserva. Atarlo al cliente obligaría a invalidarlo y mandar uno
+  nuevo en cada cambio de cliente; quien reservó puede cancelar lo que reservó.
 - **Cancelar desde el enlace en el segundo en que el alta se da por vista** cancela, pero puede no
   mandar el correo de «has cancelado»: la lectura de Turso no trae al cliente y la agenda ya olvidó
   el correo del alta. La página de cancelar ya se lo dice.
