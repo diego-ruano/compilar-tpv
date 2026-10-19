@@ -94,17 +94,19 @@ export async function enviarCorreoReservaWeb(env: Env, correo: Correo): Promise<
 async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 	const para = correo.para.trim().toLowerCase();
 	const db = getDb(env);
-	if (await yaSalio(db, correo.id)) return "ya_enviado";
-	if (await pasaDeLosTopes(db, correo.tenantId, para, Date.now())) {
-		console.warn("[reservas-web] correo sin enviar por el tope diario:", correo.tipo);
-		return "tope";
-	}
-
 	const remitente = String(env.EMAIL_RESERVAS_FROM_ADDRESS || "").trim();
 	if (!remitente) {
 		capturarError(new Error("missing_env_EMAIL_RESERVAS_FROM_ADDRESS"), "reservas_web.correo");
 		return "fallido";
 	}
+	// Los topes son de lo entregado y se cuentan antes: dos envíos a la vez se los pueden pasar por
+	// uno. Lo que no puede pasar es que el mismo correo salga dos veces: eso lo para `reservar`.
+	if (await pasaDeLosTopes(db, correo.tenantId, para, Date.now())) {
+		console.warn("[reservas-web] correo sin enviar por el tope diario:", correo.tipo);
+		return "tope";
+	}
+	if ((await reservar(db, correo, para)) === "ya_salio") return "ya_enviado";
+
 	const { asunto, html, texto } = plantilla(correo);
 	try {
 		await env.EMAIL.send({
@@ -121,10 +123,10 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 		// dirección en el log: es un dato personal.
 		const e = err as { code?: string };
 		console.error("[reservas-web] el correo no ha salido:", correo.tipo, e.code ?? "");
-		await apuntar(db, correo, para, false, e.code ?? "envio_fallido");
+		await terminar(db, correo.id, false, e.code ?? "envio_fallido");
 		return "fallido";
 	}
-	await apuntar(db, correo, para, true, null);
+	await terminar(db, correo.id, true, null);
 	return "enviado";
 }
 
@@ -132,17 +134,6 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 function nombreDelRemitente(nombre: string): string {
 	const limpio = nombre.replace(/[\r\n"<>]/g, " ").trim().slice(0, 100);
 	return limpio || "Reservas";
-}
-
-/** ¿Ese correo ya salió? Si no se puede mirar, no: mejor dos que ninguno. */
-async function yaSalio(db: Sql, id: string): Promise<boolean> {
-	try {
-		const rs = await db.execute({ sql: `SELECT 1 FROM email_sends WHERE id = ?1 AND ok = 1;`, args: [id] });
-		return (rs.rows?.length ?? 0) > 0;
-	} catch (e: any) {
-		capturarError(e, "reservas_web.correo.traza");
-		return false;
-	}
 }
 
 /**
@@ -172,19 +163,43 @@ export async function pasaDeLosTopes(db: Sql, tenantId: string, para: string, ah
 	}
 }
 
+/** Lo que tarda como mucho un envío: una reserva más vieja sin terminar es de uno que murió a medias. */
+const ENVIANDO_MAX_MS = 5 * 60_000;
+
 /**
- * La traza en `email_sends`, de donde salen los topes y lo de «ya salió». Best-effort, como en los
- * pedidos: que no se pueda apuntar no deshace un correo que ya se ha enviado. Un reintento del
- * mismo correo pisa su fila (`ON CONFLICT … DO UPDATE`, nunca `INSERT OR REPLACE`).
+ * Reserva el id del correo en `email_sends` antes de enviarlo: de dos envíos a la vez del mismo
+ * correo, sólo uno se queda con él. Uno que ya salió (`ok = 1`) no se vuelve a reservar nunca; uno
+ * que falló, sí, y uno que se quedó a medias, pasados unos minutos. Si Turso no responde se envía
+ * igual, sin esta garantía: mejor dos correos que ninguno. Nunca `INSERT OR REPLACE`.
  */
-async function apuntar(db: Sql, correo: Correo, para: string, ok: boolean, codigo: string | null): Promise<void> {
+async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | "ya_salio"> {
+	const ahora = Date.now();
+	try {
+		const rs = await db.execute({
+			sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
+			      VALUES (?1, ?2, ?3, ?4, NULL, 0, 'enviando', ?5, 'reserva_web')
+			      ON CONFLICT(id) DO UPDATE SET error_code = 'enviando', sent_at_ms = excluded.sent_at_ms
+			      WHERE email_sends.ok = 0
+			        AND (email_sends.error_code IS NULL OR email_sends.error_code <> 'enviando' OR email_sends.sent_at_ms < ?6);`,
+			args: [correo.id, correo.tenantId, correo.dispositivo, para, ahora, ahora - ENVIANDO_MAX_MS],
+		});
+		return rs.rowsAffected > 0 ? "mio" : "ya_salio";
+	} catch (e: any) {
+		capturarError(e, "reservas_web.correo.traza");
+		console.error("[reservas-web] no se ha podido reservar el correo:", String(e?.message || e));
+		return "mio";
+	}
+}
+
+/**
+ * Cómo acabó el envío. Best-effort, como en los pedidos: que no se pueda apuntar no deshace un correo
+ * que ya ha salido. Un `ok = 1` no se toca: un fallo posterior no lo convierte en reenviable.
+ */
+async function terminar(db: Sql, id: string, ok: boolean, codigo: string | null): Promise<void> {
 	try {
 		await db.execute({
-			sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
-			      VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, ?7, 'reserva_web')
-			      ON CONFLICT(id) DO UPDATE SET ok = excluded.ok, error_code = excluded.error_code,
-			                                    sent_at_ms = excluded.sent_at_ms;`,
-			args: [correo.id, correo.tenantId, correo.dispositivo, para, ok ? 1 : 0, codigo, Date.now()],
+			sql: `UPDATE email_sends SET ok = ?2, error_code = ?3, sent_at_ms = ?4 WHERE id = ?1 AND ok = 0;`,
+			args: [id, ok ? 1 : 0, codigo, Date.now()],
 		});
 	} catch (e: any) {
 		capturarError(e, "reservas_web.correo.traza");

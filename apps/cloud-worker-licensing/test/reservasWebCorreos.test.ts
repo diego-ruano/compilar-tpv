@@ -161,6 +161,57 @@ describe("enviar", () => {
 		expect(falso.enviados).toHaveLength(1);
 	});
 
+	it("dos envíos a la vez del mismo correo: sale uno", async () => {
+		const enviados: any[] = [];
+		const lento = {
+			EMAIL: {
+				send: async (m: any) => {
+					await new Promise((r) => setTimeout(r, 5));
+					enviados.push(m);
+				},
+			},
+		};
+		const r = await conBase("a-la-vez", async () =>
+			Promise.all([enviarCorreoReservaWeb(ENV(lento), correo()), enviarCorreoReservaWeb(ENV(lento), correo())]),
+		);
+		expect(r.sort()).toEqual(["enviado", "ya_enviado"]);
+		expect(enviados).toHaveLength(1);
+	});
+
+	it("uno que salió no se vuelve a enviar, ni lo deja reenviable un fallo después", async () => {
+		const r = await conBase("ya-salio", async (sql) => {
+			sql.exec(
+				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, sent_at_ms, tipo)
+				 VALUES ('rw:confirmacion:r1', 't1', 'web', 'ana@correo.es', 1, ?, 'reserva_web');`,
+				Date.now(),
+			);
+			const r = await enviarCorreoReservaWeb(ENV(correoFalso(true)), correo());
+			return { r, fila: sql.exec(`SELECT ok, error_code FROM email_sends;`).toArray()[0] };
+		});
+		expect(r).toEqual({ r: "ya_enviado", fila: { ok: 1, error_code: null } });
+	});
+
+	it("uno que se quedó a medias hace unos minutos se retoma; uno que está saliendo ahora, no", async () => {
+		const falso = correoFalso();
+		const r = await conBase("a-medias", async (sql) => {
+			const apuntar = (id: string, hace: number) =>
+				sql.exec(
+					`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo)
+					 VALUES (?, 't1', 'web', 'ana@correo.es', 0, 'enviando', ?, 'reserva_web');`,
+					id,
+					Date.now() - hace,
+				);
+			apuntar("rw:confirmacion:viejo", 10 * 60_000);
+			apuntar("rw:confirmacion:ahora", 1000);
+			return [
+				await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: "rw:confirmacion:viejo" })),
+				await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ id: "rw:confirmacion:ahora" })),
+			];
+		});
+		expect(r).toEqual(["enviado", "ya_enviado"]);
+		expect(falso.enviados).toHaveLength(1);
+	});
+
 	it("uno que falló queda apuntado sin gastar cupo, y se puede volver a intentar", async () => {
 		const bueno = correoFalso();
 		const r = await conBase("reintento", async (sql) => {
