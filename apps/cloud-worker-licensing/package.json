@@ -4,7 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "wrangler dev",
+		"dev": "pnpm --filter @tpv/reservas-web build && wrangler dev",
 		"desplegar": "pnpm --filter @tpv/reservas-web build && wrangler deploy",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
