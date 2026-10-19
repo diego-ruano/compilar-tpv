@@ -295,6 +295,10 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"validation_error",
 	"not_found",
 	"internal_error",
+	// Reservas desde la web: el aviso al cliente de un cambio (`POST /v1/reservas-web/avisos`). Los
+	// lee el job de la Main, que reintenta o descarta; no llegan a nadie.
+	"reserva_inexistente",
+	"reserva_no_web",
 	// Internos: sólo salen si hay un bug, un cliente manipulado o una configuración rota.
 	"admin_disabled",
 	"interruptor_not_found",
@@ -340,6 +344,7 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"missing_deviceId",
 	"missing_devicePubKey",
 	"missing_env_EMAIL_FROM_ADDRESS",
+	"missing_env_EMAIL_RESERVAS_FROM_ADDRESS",
 	"missing_env_LICENSE_JWT_SECRET",
 	"missing_env_TURSO_AUTH_TOKEN",
 	"missing_env_TURSO_DATABASE_URL",

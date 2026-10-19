@@ -2160,6 +2160,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
         // Y lo que viaja entre su agenda y la Main (la recogida, §5.4 del plan).
         .typ::<tpv_contracts::reservas_web::PendientesReservaWebDto>()
         .typ::<tpv_contracts::reservas_web::RecogidasReservaWebInput>()
+        .typ::<tpv_contracts::reservas_web::AvisoReservaWebInput>()
         .typ::<tpv_contracts::socket_handy::AvisoSocketHandy>()
         .typ::<tpv_contracts::sync::SqlStatement>()
         .typ::<tpv_contracts::sync::SyncChange>()

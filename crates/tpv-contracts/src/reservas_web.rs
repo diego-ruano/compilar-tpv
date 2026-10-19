@@ -159,3 +159,31 @@ pub struct RecogidaReservaWebDto {
 pub struct RecogidasReservaWebInput {
     pub resultados: Vec<RecogidaReservaWebDto>,
 }
+
+// ── Los avisos al cliente de un cambio del restaurante (§5.7) ────────────────────────────────────
+
+/// Qué le ha hecho el restaurante a una reserva web.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoAvisoReservaWeb {
+    /// Ha cambiado el día, la hora, las personas o la mesa.
+    Modificada,
+    /// La ha cancelado (o la ha borrado, que en una reserva web es cancelarla).
+    Cancelada,
+}
+
+/// El cuerpo de `POST /v1/reservas-web/avisos`: el correo al cliente por un cambio del restaurante.
+/// Los datos son los de después del cambio. El destinatario **no** viaja: es el cliente de esa
+/// reserva en la nube, y sólo si es una reserva web.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct AvisoReservaWebInput {
+    /// El id del aviso: el mismo aviso no manda dos correos.
+    pub id_aviso: String,
+    pub id_reserva: String,
+    pub tipo: TipoAvisoReservaWeb,
+    pub dia_ymd: String,
+    pub hora: String,
+    pub personas: i64,
+    /// El nombre de la mesa en la Main; `None` si no tiene.
+    pub mesa: Option<String>,
+}

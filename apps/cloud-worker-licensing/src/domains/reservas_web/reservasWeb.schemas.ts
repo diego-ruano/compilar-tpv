@@ -7,7 +7,12 @@
 // `validacion_casos.json` (dominio `reserva_web`). Un criterio nuevo es un caso nuevo ahí.
 
 import * as z from "zod";
-import type { RecogidaReservaWebDto, RecogidasReservaWebInput, ReservaWebAltaInput } from "@tpv/contracts";
+import type {
+	AvisoReservaWebInput,
+	RecogidaReservaWebDto,
+	RecogidasReservaWebInput,
+	ReservaWebAltaInput,
+} from "@tpv/contracts";
 
 import { normalizarDia, zDia } from "../../lib/fechas";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
@@ -158,3 +163,35 @@ export const recogidasSchema = z.object({ resultados: z.array(recogidaSchema).ma
 
 type _GRecogida = Assert<SameKeys<z.infer<typeof recogidaSchema>, RecogidaReservaWebDto>>;
 type _GRecogidas = Assert<SameKeys<z.infer<typeof recogidasSchema>, RecogidasReservaWebInput>>;
+
+/**
+ * El correo al cliente por un cambio del restaurante (`POST /v1/reservas-web/avisos`), con los datos
+ * de después del cambio. Lo manda la Main (o la Handy): no es una entrada pública, pero sale en un
+ * correo de nuestro dominio, así que todo tiene su forma y su tope. El destinatario no viene aquí.
+ */
+export const avisoReservaWebSchema = z.object({
+	id_aviso: z.string().trim().regex(/^[A-Za-z0-9_-]{8,64}$/, "id_aviso inválido"),
+	id_reserva: z.string().trim().min(1).max(64),
+	tipo: z.enum(["modificada", "cancelada"]),
+	dia_ymd: zDia("Formato de día inválido. Esperado YYYY-MM-DD."),
+	hora: z.unknown().transform((v, ctx) => {
+		const hora = horaHHMM(v);
+		if (!hora) {
+			ctx.addIssue({ code: "custom", message: "Hora inválida. Esperado HH:MM." });
+			return z.NEVER;
+		}
+		return hora;
+	}),
+	// Una reserva del TPV puede ser de un grupo grande: el tope es el de un dato sensato, no el de la web.
+	personas: z.number().int().min(1).max(1000),
+	// El nombre de la mesa en la Main, en una sola línea.
+	mesa: z
+		.string()
+		.trim()
+		.max(60)
+		.refine((s) => !/[\r\n]/.test(s), "mesa inválida")
+		.nullish()
+		.transform((v) => (v ? v : null)),
+});
+
+type _GAviso = Assert<SameKeys<z.infer<typeof avisoReservaWebSchema>, AvisoReservaWebInput>>;

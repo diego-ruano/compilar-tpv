@@ -154,6 +154,23 @@ export type AutorizacionUsuario = {
 	permisos: string[],
 };
 
+/**
+ *  El cuerpo de `POST /v1/reservas-web/avisos`: el correo al cliente por un cambio del restaurante.
+ *  Los datos son los de después del cambio. El destinatario **no** viaja: es el cliente de esa
+ *  reserva en la nube, y sólo si es una reserva web.
+ */
+export type AvisoReservaWebInput = {
+	/**  El id del aviso: el mismo aviso no manda dos correos. */
+	id_aviso: string,
+	id_reserva: string,
+	tipo: TipoAvisoReservaWeb,
+	dia_ymd: string,
+	hora: string,
+	personas: number,
+	/**  El nombre de la mesa en la Main; `None` si no tiene. */
+	mesa: string | null,
+};
+
 export type AvisoSocketHandy = {
 	generacion: number,
 	cambio: CambioReplicado,
@@ -3285,6 +3302,13 @@ export type TicketSettingsPatch_Serialize = {
 	margin_right_mm?: number,
 	font_scale?: number,
 };
+
+/**  Qué le ha hecho el restaurante a una reserva web. */
+export type TipoAvisoReservaWeb =
+/**  Ha cambiado el día, la hora, las personas o la mesa. */
+"modificada" |
+/**  La ha cancelado (o la ha borrado, que en una reserva web es cancelarla). */
+"cancelada";
 
 /**  Qué pide una petición de la agenda. */
 export type TipoPeticionWeb = "alta" | "cancelacion";
