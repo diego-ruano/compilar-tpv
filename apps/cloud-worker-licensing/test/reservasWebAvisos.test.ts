@@ -37,15 +37,17 @@ vi.mock("../src/server/db", async (original) => ({
 	getDb: () => base,
 }));
 
-/** La agenda: apunta lo que se le pide prolongar y dice si el cliente la canceló desde su enlace. */
-const agenda = { prolongadas: [] as any[], canceladaPorElCliente: false };
+/** La agenda: apunta los enlaces que se le piden, dice si el cliente la canceló, o no responde. */
+const agenda = { prolongadas: [] as any[], canceladaPorElCliente: false, caida: false };
 
 vi.mock("../src/durableObjects/agendaWeb", async (original) => ({
 	...(await (original as any)()),
 	agendaDe: () => ({
-		prolongarEnlace: async (p: any) => {
+		enlaceParaUnCambio: async (p: any) => {
+			if (agenda.caida) throw new Error("la agenda no contesta");
 			agenda.prolongadas.push(p);
-			return { ok: true, canceladaPorElCliente: agenda.canceladaPorElCliente };
+			const cancelada = agenda.canceladaPorElCliente;
+			return { ok: true, canceladaPorElCliente: cancelada, token: cancelada ? null : "TOKENNUEVO0123456789ab" };
 		},
 	}),
 }));
@@ -110,6 +112,9 @@ async function conNegocio(nombre: string, prueba: (sql: SqlStorage) => Promise<v
 		correoCaido = false;
 		agenda.prolongadas.length = 0;
 		agenda.canceladaPorElCliente = false;
+		agenda.caida = false;
+		sql.exec(`INSERT INTO tenants (tenant_id, display_name) VALUES ('t1', 'Bar Pepe');`);
+		sql.exec(`INSERT INTO reserva_web_claves (clave, tenant_id, created_at_ms) VALUES ('rw_CLAVE', 't1', 1);`);
 		try {
 			await prueba(sql);
 		} finally {
@@ -118,10 +123,18 @@ async function conNegocio(nombre: string, prueba: (sql: SqlStorage) => Promise<v
 	});
 }
 
+/** Una reserva como queda tras el cambio que anuncia `aviso()`: 24/10 a las 22:00, 4 personas, «Mesa 7». */
 function reserva(sql: SqlStorage, origen: "WEB" | "TPV", cliente: string | null = "c1", estado = "PROXIMA") {
 	sql.exec(
-		`INSERT INTO Reservas (ID_Reserva, ID_Cliente, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
-		 VALUES (?, ?, '2026-10-24', '21:00', 'CENA', 2, ?, ?);`,
+		`INSERT OR IGNORE INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Salon');`,
+	);
+	sql.exec(
+		`INSERT OR IGNORE INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+		 VALUES ('m7', 'z1', 'Mesa 7', 4, 0, 0, 'rect', 80, 80);`,
+	);
+	sql.exec(
+		`INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+		 VALUES (?, ?, 'm7', '2026-10-24', '22:00', 'CENA', 4, ?, ?);`,
 		ID,
 		cliente,
 		estado,
@@ -153,6 +166,38 @@ describe("el aviso al cliente de un cambio del restaurante", () => {
 				{ id: "rw:aviso:0199aa00-0000-7000-8000-0000000a0001", device_id: "dev-main", tipo: "reserva_web" },
 				{ id: "rw:aviso:0199aa00-0000-7000-8000-0000000a0002", device_id: "dev-main", tipo: "reserva_web" },
 			]);
+		});
+	});
+
+	it("el correo de un cambio lleva su propio enlace de cancelar", async () => {
+		await conNegocio("enlace-nuevo", async (sql) => {
+			reserva(sql, "WEB");
+			await mandar(aviso());
+			const linea = String(enviados[0].text)
+				.split("\n")
+				.find((l) => l.startsWith("Cancelar la reserva: "));
+			const enlace = new URL(linea!.slice("Cancelar la reserva: ".length));
+			expect(enlace.pathname).toBe("/reservas-web/v1/w/rw_CLAVE/cancelar");
+			expect(enlace.hash).toBe("#t=TOKENNUEVO0123456789ab");
+		});
+	});
+
+	it("si la nube no tiene la reserva como dice el aviso, espera: o no ha subido, o hubo otro cambio después", async () => {
+		await conNegocio("datos-distintos", async (sql) => {
+			reserva(sql, "WEB");
+			// La Handy la pasó a las 23:00 (y ya avisó); este aviso de la Main dice las 22:00.
+			sql.exec(`UPDATE Reservas SET Hora = '23:00';`);
+			expect(await mandar(aviso())).toMatchObject({ status: 404, json: { error: "reserva_no_al_dia" } });
+			expect(enviados).toEqual([]);
+		});
+	});
+
+	it("sin la agenda no se sabe si el cliente la canceló: se repite más tarde", async () => {
+		await conNegocio("sin-agenda", async (sql) => {
+			reserva(sql, "WEB");
+			agenda.caida = true;
+			expect(await mandar(aviso())).toMatchObject({ status: 503, json: { error: "agenda_no_disponible" } });
+			expect(enviados).toEqual([]);
 		});
 	});
 

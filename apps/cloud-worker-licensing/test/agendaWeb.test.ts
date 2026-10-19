@@ -93,7 +93,7 @@ function sinDatosPersonales(respuesta: unknown) {
 describe("la agenda de reservas web", () => {
 	it("sólo expone por RPC lo que llaman las rutas, y la alarma (RI-45)", () => {
 		expect(Object.getOwnPropertyNames(AgendaWeb.prototype).sort()).toEqual(
-			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "pendientes", "recogidas", "prolongarEnlace", "alarm"].sort(),
+			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "pendientes", "recogidas", "enlaceParaUnCambio", "alarm"].sort(),
 		);
 	});
 
@@ -418,23 +418,30 @@ describe("la agenda de reservas web", () => {
 		});
 	});
 
-	it("si el restaurante mueve la reserva, su enlace de cancelar vale hasta la hora nueva; nunca se acorta", async () => {
-		await conAgenda("agenda-prolongar-enlace", async (motor, sql) => {
+	it("un cambio del restaurante le da un enlace nuevo, hasta la hora nueva, y alarga el de la confirmación", async () => {
+		await conAgenda("agenda-enlace-cambio", async (motor, sql) => {
 			const r = await motor.reservar({ tenantId: T, alta: alta() });
-			const caduca = () => Number((sql.exec(`SELECT caduca_ms FROM enlaces;`).toArray()[0] as any).caduca_ms);
-			const original = caduca();
+			const original = Number((sql.exec(`SELECT caduca_ms FROM enlaces;`).toArray()[0] as any).caduca_ms);
 			const otroDia = sumarDias(DIA, 10);
-			expect(await motor.prolongarEnlace({ tenantId: T, id_reserva: r.id_reserva, dia: otroDia, hora: "21:00" })).toEqual({
-				ok: true,
-				canceladaPorElCliente: false,
-			});
-			expect(caduca()).toBe(caducidadDelEnlace(otroDia, "21:00"));
-			// Moverla antes no le quita vigencia al enlace.
-			await motor.prolongarEnlace({ tenantId: T, id_reserva: r.id_reserva, dia: HOY, hora: "21:00" });
-			expect(caduca()).toBeGreaterThan(original);
-			// Cancelada desde el enlace, se dice: un «así queda ahora» ya no toca.
+			const cambio = await motor.enlaceParaUnCambio({ tenantId: T, id_reserva: r.id_reserva, dia: otroDia, hora: "21:00" });
+			expect(cambio).toMatchObject({ ok: true, canceladaPorElCliente: false });
+			expect(cambio.token).toMatch(/^[A-Za-z0-9_-]{22}$/);
+			const caducas = sql.exec(`SELECT caduca_ms FROM enlaces;`).toArray().map((f: any) => Number(f.caduca_ms));
+			expect(caducas).toEqual([caducidadDelEnlace(otroDia, "21:00"), caducidadDelEnlace(otroDia, "21:00")]);
+			expect(caducas[0]).toBeGreaterThan(original);
+			// El enlace nuevo abre la misma reserva.
+			expect((await motor.consultarEnlace({ tenantId: T, token: cambio.token })).estado).toBe("confirmada");
+			// Moverla antes no le quita vigencia a los que ya tenía (el nuevo vale hasta la hora nueva).
+			await motor.enlaceParaUnCambio({ tenantId: T, id_reserva: r.id_reserva, dia: HOY, hora: "21:00" });
+			const largos = sql.exec(`SELECT COUNT(*) AS n FROM enlaces WHERE caduca_ms = ?;`, caducidadDelEnlace(otroDia, "21:00")).toArray()[0];
+			expect(largos).toEqual({ n: 2 });
+			// Cancelada desde un enlace, se dice, y ya no hay enlace que dar: un «así queda ahora» no toca.
 			await motor.cancelar({ tenantId: T, token: r.token });
-			expect((await motor.prolongarEnlace({ tenantId: T, id_reserva: r.id_reserva, dia: otroDia, hora: "21:00" })).canceladaPorElCliente).toBe(true);
+			expect(await motor.enlaceParaUnCambio({ tenantId: T, id_reserva: r.id_reserva, dia: otroDia, hora: "21:00" })).toEqual({
+				ok: true,
+				canceladaPorElCliente: true,
+				token: null,
+			});
 		});
 	});
 

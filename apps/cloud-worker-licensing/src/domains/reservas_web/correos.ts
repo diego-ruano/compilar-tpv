@@ -45,7 +45,7 @@ export type Correo = {
 	para: string;
 	negocio: NegocioDelCorreo;
 	reserva: ReservaDelCorreo;
-	/** Sólo en la confirmación: el enlace de cancelar, con el token en el fragmento. */
+	/** En la confirmación y en un cambio del restaurante: el enlace de cancelar, con el token en el fragmento. */
 	enlace?: string;
 	/** Quién lo provoca, para la traza: `web` el visitante, `agenda` la agenda, o el dispositivo. */
 	dispositivo: string;
@@ -285,7 +285,9 @@ function textos(c: Correo): Texto {
 				asunto: `Tu reserva en ${n} ha cambiado`,
 				titulo: "El restaurante ha cambiado tu reserva",
 				antes: "Así queda ahora:",
-				despues: `Si no te viene bien, cancélala con el enlace del correo de confirmación o ${contestar}.${c.negocio.correo ? llamar : ""}`,
+				despues: c.enlace
+					? `Si no te viene bien, cancélala con el botón, hasta la hora de la reserva, o ${contestar}.${c.negocio.correo ? llamar : ""}`
+					: `Si no te viene bien, ${contestar}.${c.negocio.correo ? llamar : ""}`,
 			};
 		case "cancelada_restaurante":
 			return {

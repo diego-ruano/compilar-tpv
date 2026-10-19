@@ -23,8 +23,8 @@ import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import { cuerpo } from "../../lib/validacion";
 import { getDb } from "../../server/db";
-import { claveDelNegocio, codigoParaLaWeb } from "./claves";
-import { enviarCorreoReservaWeb, negocioDelCorreo } from "./correos";
+import { claveActivaDelNegocio, claveDelNegocio, codigoParaLaWeb } from "./claves";
+import { enlaceDeCancelar, enviarCorreoReservaWeb, negocioDelCorreo } from "./correos";
 import { avisoReservaWebSchema, recogidasSchema } from "./reservasWeb.schemas";
 import { codigoDeReserva } from "../../durableObjects/agendaWeb.motor";
 import { tenantQuery } from "../../lib/tenantClient";
@@ -69,8 +69,11 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 	const aviso = c.req.valid("json");
 	const leido = await tenantQuery(c, async (db) => {
 		const rs = await db.execute({
-			sql: `SELECT R.Origen AS origen, R.Estado AS estado, C.ID_Cliente AS id_cliente, NULLIF(TRIM(C.Email), '') AS email
-			      FROM Reservas R LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
+			sql: `SELECT R.Origen AS origen, R.Estado AS estado, R.Dia_YMD AS dia, R.Hora AS hora, R.Comensales AS personas,
+			             M.Numero_Mesa AS mesa, C.ID_Cliente AS id_cliente, NULLIF(TRIM(C.Email), '') AS email
+			      FROM Reservas R
+			      LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
+			      LEFT JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa
 			      WHERE R.ID_Reserva = ?1;`,
 			args: [aviso.id_reserva],
 		});
@@ -79,6 +82,7 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 			? {
 					origen: String(r.origen),
 					estado: String(r.estado),
+					datos: { dia: String(r.dia), hora: String(r.hora), personas: Number(r.personas), mesa: typeof r.mesa === "string" ? r.mesa : null },
 					idCliente: typeof r.id_cliente === "string" ? r.id_cliente : null,
 					email: typeof r.email === "string" ? r.email : null,
 					negocio: await negocioDelCorreo(db),
@@ -97,23 +101,36 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 	// Sin correo no hay a quién decírselo: hecho.
 	if (!leido.email) return c.json({ ok: true, enviado: false });
 
+	let enlace: string | undefined;
 	if (aviso.tipo === "modificada") {
 		// Un cambio de una reserva que ya no está por venir (cancelada, sentada, terminada) está
 		// superado: «así queda ahora» le haría creer al cliente que sigue en pie. Se descarta (409).
 		if (leido.estado !== "PROXIMA") return c.json({ ok: false, error: "aviso_superado" }, 409);
-		// Su enlace de cancelar tiene que valer hasta la hora nueva: el correo remite a él. Y si el
-		// cliente ya la canceló desde ese enlace (la Main aún no lo tiene), también está superado.
+		// La nube no tiene la reserva como dice el aviso: o el cambio aún no ha subido, o después hubo
+		// otro (una Handy) cuyo correo ya salió. En los dos casos, esperar: si es lo primero, saldrá
+		// cuando suba; si es lo segundo, la Main lo verá superado al ver su copia y lo descartará.
+		const d = leido.datos;
+		if (d.dia !== aviso.dia_ymd || d.hora !== aviso.hora || d.personas !== aviso.personas || d.mesa !== aviso.mesa) {
+			return c.json({ ok: false, error: "reserva_no_al_dia" }, 404);
+		}
+		// Un enlace de cancelar nuevo para este correo, que valga hasta la hora nueva. Y si el cliente
+		// ya la canceló desde el suyo (la Main aún no lo tiene), también está superado. Sin la agenda no
+		// se sabe: se repite más tarde, que el cambio ya está hecho.
+		let agenda;
 		try {
-			const agenda = await agendaDe(c.env, tenantId).prolongarEnlace({
+			agenda = await agendaDe(c.env, tenantId).enlaceParaUnCambio({
 				tenantId,
 				id_reserva: aviso.id_reserva,
 				dia: aviso.dia_ymd,
 				hora: aviso.hora,
 			});
-			if (agenda.canceladaPorElCliente) return c.json({ ok: false, error: "aviso_superado" }, 409);
 		} catch (e: any) {
-			console.warn("[reservas-web] no se ha podido prolongar el enlace:", String(e?.message || e));
+			console.warn("[reservas-web] la agenda no responde para el aviso:", String(e?.message || e));
+			return c.json({ ok: false, error: "agenda_no_disponible" }, 503);
 		}
+		if (agenda.canceladaPorElCliente) return c.json({ ok: false, error: "aviso_superado" }, 409);
+		const clave = await claveActivaDelNegocio(getDb(c.env), tenantId).catch(() => null);
+		if (clave && agenda.token) enlace = enlaceDeCancelar(new URL(c.req.url).origin, clave, agenda.token);
 	}
 
 	const r = await enviarCorreoReservaWeb(c.env, {
@@ -129,6 +146,7 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 			mesa: aviso.mesa,
 			codigo: codigoDeReserva(aviso.id_reserva),
 		},
+		enlace,
 		dispositivo: c.get("deviceId"),
 	});
 	if (r === "tope") return c.json({ ok: false, error: "email_limite_diario" }, 429);

@@ -363,6 +363,11 @@ export function prolongarEnlaces(sql: SqlStorage, idReserva: string, caducaMs: n
 	sql.exec(`UPDATE enlaces SET caduca_ms = MAX(caduca_ms, ?) WHERE id_reserva = ?;`, caducaMs, idReserva);
 }
 
+/** Un enlace de cancelar más para una reserva (el del correo de un cambio del restaurante). */
+export function apuntarEnlace(sql: SqlStorage, idReserva: string, tokenHash: string, caducaMs: number): void {
+	sql.exec(`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES (?, ?, ?);`, tokenHash, idReserva, caducaMs);
+}
+
 /** La reserva de un enlace de cancelar, si existe y no ha caducado. */
 export function reservaDelEnlace(sql: SqlStorage, tokenHash: string, ahoraMs: number): string | null {
 	const fila = sql

@@ -71,6 +71,7 @@ import {
 	peticion,
 	prepararAlmacen,
 	prolongarEnlaces,
+	apuntarEnlace,
 	purgar,
 	recordarNegocio,
 	reofrecer,
@@ -517,23 +518,35 @@ export class MotorAgendaWeb {
 	}
 
 	/**
-	 * El restaurante ha movido la reserva: su enlace de cancelar vale hasta un día después de la hora
-	 * nueva. Lo pide la ruta de los avisos al mandar «tu reserva ha cambiado», que remite a ese enlace.
+	 * El restaurante ha cambiado la reserva y se lo va a contar al cliente («tu reserva ha cambiado»).
+	 * Lo pide la ruta de los avisos:
+	 *   · si el cliente ya la canceló desde su enlace (aunque la Main aún no lo tenga), lo dice: contarle
+	 *     cómo queda después de su «has cancelado» le haría creer que sigue en pie;
+	 *   · si no, le da un enlace de cancelar nuevo para ese correo, que vale hasta un día después de la
+	 *     hora nueva (el de la confirmación pudo caducar o purgarse si la reserva se movió lejos), y
+	 *     alarga hasta ahí los que ya tenía.
 	 */
-	async prolongarEnlace(p: {
+	async enlaceParaUnCambio(p: {
 		tenantId: string;
 		id_reserva: string;
 		dia: string;
 		hora: string;
-	}): Promise<{ ok: true; canceladaPorElCliente: boolean }> {
+	}): Promise<{ ok: true; canceladaPorElCliente: boolean; token: string | null }> {
 		recordarNegocio(this.sql, p.tenantId);
-		prolongarEnlaces(this.sql, p.id_reserva, caducidadDelEnlace(p.dia, p.hora));
-		// Si el cliente ya la canceló desde su enlace (aunque la Main aún no lo tenga), contarle cómo
-		// queda después de su «has cancelado» le haría creer que sigue en pie.
+		const token = nuevoToken();
+		const tokenHash = await sha256HexStr(token);
+		// ── Síncrono desde aquí ──
 		const canceladaPorElCliente =
 			peticion(this.sql, "cancelacion", p.id_reserva) !== null ||
 			peticion(this.sql, "alta", p.id_reserva)?.estado === "anulada";
-		return { ok: true, canceladaPorElCliente };
+		if (canceladaPorElCliente) return { ok: true, canceladaPorElCliente, token: null };
+		const caducaMs = caducidadDelEnlace(p.dia, p.hora);
+		this.ctx.storage.transactionSync(() => {
+			prolongarEnlaces(this.sql, p.id_reserva, caducaMs);
+			apuntarEnlace(this.sql, p.id_reserva, tokenHash, caducaMs);
+		});
+		await this.asegurarAlarma();
+		return { ok: true, canceladaPorElCliente: false, token };
 	}
 
 	/** Lo que la Main contesta de lo entregado (`agendaWeb.almacen.ts::apuntarResultados`). */
