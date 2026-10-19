@@ -11,7 +11,8 @@ remite a la AEAT con el certificado del bar.
 | Aplicación (Main y Handy) | Tauri 2, React 19, TypeScript, Vite | `apps/tpv-main/` |
 | Backend local | Rust, arquitectura hexagonal, SQLite (rusqlite) | `crates/*`, `apps/tpv-main/src-tauri/` |
 | Nube | Cloudflare Worker (Hono), Durable Objects, Turso, R2 | `apps/cloud-worker-licensing/` (desplegado como `tpv-api`) |
-| Código compartido | Esquema SQL, tipos generados, cliente de invoke | `packages/*` |
+| Widget de reservas web | React 19, Vite, servido por el worker | `apps/reservas-web/` |
+| Código compartido | Esquema SQL, tipos generados, cliente de invoke, colores y plano de mesas | `packages/*` |
 
 Dominios: mesas y comandas, venta rápida de barra, inventario con lotes, caja y cierre de caja, clientes,
 reservas, proveedores y pedidos, tareas, personal y fichajes, estadísticas, configuración, licencias,

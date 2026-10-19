@@ -390,6 +390,15 @@ dar de alta la web). Para desarrollar, se da de alta `http://localhost:<puerto>`
 
 Una clave que no existe da una página «Reservas no disponibles».
 
+Tal como ha quedado (`domains/reservas_web/widget.routes.ts`): `assets` con `run_worker_first: true`,
+para que todo pase por el worker y cada fichero salga con su caché; el `index.html` suelto no se sirve
+(404), sólo a través de `/w/:clave`. La página de cancelar lleva siempre `frame-ancestors 'none'`: se
+abre desde el correo. Además de lo de arriba, la CSP lleva `base-uri 'none'`, `form-action 'none'` y
+`object-src 'none'`. Las webs de cada negocio se cachean un minuto por isolate.
+
+El widget compilado tiene que existir antes de desplegar: `pnpm --filter tpv-api desplegar` lo compila
+y despliega (en `wrangler.json`, `assets.directory` apunta a `apps/reservas-web/dist`).
+
 ### 4.7 Interruptor remoto `reservas_web`
 
 Una variante nueva en `Interruptor` (`tpv-contracts/src/interruptores.rs`) y en `INTERRUPTORES`
@@ -606,14 +615,19 @@ el mismo origen.
 └──────────────────────────┘     └──────────────────────────┘
 ```
 
-- **Paso 1:** sólo se pueden pulsar los días abiertos del horizonte. La hora se limita a los tramos
-  válidos de ese día.
+- **Paso 1:** sólo se pueden pulsar los días abiertos del horizonte. La hora es un campo al minuto
+  que sólo vale dentro de los tramos de ese día (si no, lo dice y no deja seguir); la respuesta tardía
+  de un día elegido antes se descarta.
 - **Paso 2:** las mesas adecuadas y libres resaltadas en el acento; el resto, en gris y sin pulsar.
   Una pestaña por salón. Debajo, la misma lista de mesas libres en botones, que hace accesible lo que
   el lienzo no es y sirve en pantallas muy pequeñas. Sin mesas: «No quedan mesas para 4 personas a
   las 21:00» y las alternativas como botones.
 - **Paso 3:** el texto de privacidad nombra al negocio como responsable (el contenido lo fija
   LEGAL-01). Un `mesa_no_disponible` al confirmar vuelve al paso 2 con las mesas actualizadas.
+- **Paso 4:** hasta que estén los correos (fase 5), enseña el código de la reserva en vez de «te
+  hemos enviado un correo».
+- El plano (React Konva, lo que más pesa) se carga al llegar al paso 2: el arranque son unos 67 KB
+  comprimidos.
 - **Estados:** cargando; reservas cerradas o no disponibles («Ahora no se pueden hacer reservas
   online. Llama al 9xx xxx xxx», con el teléfono del negocio si se pudo leer); error de red con
   «Reintentar».
@@ -691,7 +705,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | ✅ **1 · Esquema y configuración** | El esquema del §3.1 en `0001`, el reset de desarrollo, Configuración → Reservas (interruptor y días cerrados), el modo «Reserva web» del editor del plano, la zona horaria, `origen` en el calendario, `TABLAS_SOLO_MAIN` | Código y tests hechos el 2026-10-17. Falta comprobarlo con el worker desplegado: que la configuración llega a Turso |
 | ✅ **2 · Agenda y API pública** | Tablas centrales, `POST /clave` y el código en Configuración, la puerta pública, las rutas públicas, `AgendaWeb`, los limitadores, el interruptor, la administración de dominios y claves | Código y tests hechos el 2026-10-18 (las altas simultáneas, también). Falta crear las tablas centrales en Turso, desplegar el worker y reservar con `curl` |
 | ✅ **3 · Entrega a la Main** | `avisarReservasWeb`, `/pendientes` y `/recogidas`, la recogida en el motor, el caso de uso, las notificaciones, la cancelación entregada, la reoferta | Código y tests hechos el 2026-10-18. Falta el E2E (web → Main, con la Main encendida y apagada): necesita el worker desplegado y pasar Turnstile, que contra producción sólo se puede con el secreto de pruebas puesto mientras dura la tanda |
-| **4 · Widget** | `packages/plano`, `packages/estilos`, `apps/reservas-web`, `embed.js`, los assets en el worker y la CSP | Funciona incrustado en una página de prueba en `localhost` dada de alta |
+| ✅ **4 · Widget** | `packages/plano`, `packages/estilos`, `apps/reservas-web`, `embed.js`, los assets en el worker y la CSP | Código y tests hechos el 2026-10-19. Falta verlo incrustado de verdad: desplegar, dar de alta `http://localhost:5174` y abrir la página de prueba (`pnpm --filter @tpv/reservas-web prueba`) |
 | **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, borrar = cancelar, la cola de avisos y su job | Llegan los cinco correos y se cancela desde el enlace |
 | **6 · Piloto** | Los textos de LEGAL-01, `arquitectura/reservas-web.md` y la primera web propia con un bar | Un bar recibe reservas reales |
 | **7 · WordPress** | El plugin: ajustes con la clave, shortcode y bloque, que imprimen la línea del §7.3 | Instalado en un WordPress de prueba |

@@ -14,8 +14,15 @@ src/
 │               estadisticas, login, notificaciones
 ├── shared/     lib/ (dinero, efectivo, sockets, permisos, queryClient…), stores/ (Zustand), ticket/,
 │               ui/, observability/, toast.tsx
-└── Global.css
+└── Global.css   importa los tokens de color de `@tpv/estilos`
 ```
+
+Dos paquetes los comparte con el widget de reservas web (`apps/reservas-web`, ver
+[el plan](../estudios/reservas-web.md#7-el-widget)): **`@tpv/estilos`** (`packages/estilos/tokens.css`),
+los colores claro y oscuro y su mapeo a utilidades de Tailwind, y **`@tpv/plano`** (`packages/plano`), el
+lienzo de Konva de la sala con su encaje (`fitTransform`). El plano sólo dibuja: el color y los textos
+de cada mesa los decide quien lo usa (en la sala, `features/mesas/aspectoMesa.ts`). Ninguno de los dos
+lleva clases de Tailwind, que sólo escanea dentro de cada app.
 
 ## Hablar con el backend
 
