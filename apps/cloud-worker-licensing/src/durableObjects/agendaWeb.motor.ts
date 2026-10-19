@@ -55,6 +55,7 @@ import {
 	esperando,
 	fallidasPorAvisar,
 	olvidarCorreo,
+	apuntarIntentoDeAviso,
 	cursorDeLaAlarma,
 	guardarCursorDeLaAlarma,
 	anularAlta,
@@ -569,6 +570,9 @@ export class MotorAgendaWeb {
 			if (r === "enviado" || r === "ya_enviado") {
 				olvidarCorreo(this.sql, f.id_peticion);
 				enviados++;
+			} else {
+				// No ha salido: a la cola, detrás de las que aún no se han intentado.
+				apuntarIntentoDeAviso(this.sql, f.id_peticion, Date.now());
 			}
 		}
 		return enviados;

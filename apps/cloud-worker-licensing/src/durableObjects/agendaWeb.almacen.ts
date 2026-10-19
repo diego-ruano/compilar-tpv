@@ -23,7 +23,7 @@ import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";
  *   2. `peticiones.resultado` y `peticiones.codigo`: lo que contesta la Main (§5.4).
  *   3. `intentos`: lo que contestó cada alta del widget, por su `Idempotency-Key` (la crea `ESQUEMA`).
  */
-const VERSION_AGENDA = 3;
+const VERSION_AGENDA = 4;
 
 /** Lo que se queda una petición cerrada (vista, anulada o fallida) antes de borrarse. */
 const RETENCION_CERRADAS_MS = 7 * 86_400_000;
@@ -75,7 +75,9 @@ const ESQUEMA = [
 		intentos     INTEGER NOT NULL DEFAULT 0,
 		cerrada_ms   INTEGER,
 		resultado    TEXT CHECK (resultado IS NULL OR resultado IN ('registrada', 'solapada', 'fallida')),
-		codigo       TEXT
+		codigo       TEXT,
+		-- El último intento del correo de una fallida que no salió: las que no salen van detrás.
+		aviso_ms     INTEGER
 	);`,
 	// Un alta y, como mucho, una cancelación por reserva.
 	`CREATE UNIQUE INDEX IF NOT EXISTS ux_peticiones_tipo_reserva ON peticiones(tipo, id_reserva);`,
@@ -106,10 +108,10 @@ function migrar(sql: SqlStorage): void {
 	const fila = sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0] as any;
 	// Sin versión apuntada es una agenda que acaba de nacer con `ESQUEMA`: ya está al día.
 	const version = fila ? Number(fila.valor) : VERSION_AGENDA;
+	const columnas = new Set(
+		sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => String(c.name)),
+	);
 	if (version < 2) {
-		const columnas = new Set(
-			sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => String(c.name)),
-		);
 		if (!columnas.has("resultado")) {
 			sql.exec(
 				`ALTER TABLE peticiones ADD COLUMN resultado TEXT
@@ -118,6 +120,7 @@ function migrar(sql: SqlStorage): void {
 		}
 		if (!columnas.has("codigo")) sql.exec(`ALTER TABLE peticiones ADD COLUMN codigo TEXT;`);
 	}
+	if (version < 4 && !columnas.has("aviso_ms")) sql.exec(`ALTER TABLE peticiones ADD COLUMN aviso_ms INTEGER;`);
 	sql.exec(
 		`INSERT INTO estado (clave, valor) VALUES ('version', ?)
 		 ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor WHERE valor <> excluded.valor;`,
@@ -533,18 +536,25 @@ export function apuntarResultados(
 
 /**
  * Las altas que la Main no pudo registrar y aún guardan el correo: falta decírselo al cliente
- * (§4.8). Las más viejas primero, como mucho `max`.
+ * (§4.8). Primero las que no se han intentado, y de ellas las más viejas; las que se intentaron sin
+ * éxito, detrás, de la que lleva más sin intentarse a la última: ninguna tapa a las demás. Como
+ * mucho `max`.
  */
 export function fallidasPorAvisar(sql: SqlStorage, max: number): FilaPeticion[] {
 	return (
 		sql
 			.exec(
 				`SELECT * FROM peticiones WHERE tipo = 'alta' AND estado = 'fallida' AND datos_json IS NOT NULL
-				 ORDER BY creada_ms, id_peticion LIMIT ?;`,
+				 ORDER BY COALESCE(aviso_ms, 0), creada_ms, id_peticion LIMIT ?;`,
 				max,
 			)
 			.toArray() as any[]
 	).map(conTipos);
+}
+
+/** Un correo de una fallida que no ha salido: va detrás de las que aún no se han intentado. */
+export function apuntarIntentoDeAviso(sql: SqlStorage, idPeticion: string, ahoraMs: number): void {
+	sql.exec(`UPDATE peticiones SET aviso_ms = ? WHERE id_peticion = ?;`, ahoraMs, idPeticion);
 }
 
 /** Ya se le dijo al cliente, o ya no sirve de nada decírselo: la agenda olvida su correo. */

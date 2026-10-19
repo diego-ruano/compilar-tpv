@@ -779,6 +779,34 @@ describe("la entrega a la Main", () => {
 		});
 	});
 
+	it("las que no salen van detrás: aunque haya cien atascadas, a la siguiente le llega su turno", async () => {
+		await conAgenda("entrega-fallidas-rotan", async (motor, sql) => {
+			for (let i = 0; i < 101; i++) {
+				sql.exec(
+					`INSERT INTO peticiones (id_peticion, tipo, id_reserva, id_mesa, dia_ymd, hora, comensales, datos_json,
+					                         creada_local, creada_ms, estado, cerrada_ms, resultado, codigo)
+					 VALUES (?, 'alta', ?, 'm2', ?, '21:00', 2, ?, ?, ?, 'fallida', ?, 'fallida', 'validation');`,
+					`p${String(i).padStart(3, "0")}`,
+					`r${i}`,
+					DIA,
+					JSON.stringify({ email: `c${i}@correo.es` }),
+					AHORA,
+					1000 + i,
+					Date.now(),
+				);
+			}
+			// Las cien más viejas no salen nunca; la 101, sí.
+			motor.enviarCorreo = async (c: any) => {
+				if (c.para !== "c100@correo.es") return "tope";
+				motor.correos.push(c);
+				return "enviado";
+			};
+			expect(await motor.avisarFallidas(T)).toBe(0);
+			expect(await motor.avisarFallidas(T)).toBe(1);
+			expect(motor.correos.map((c: any) => c.para)).toEqual(["c100@correo.es"]);
+		});
+	});
+
 	it("una fallida cuya hora ya ha pasado no se le dice al cliente: se olvida su correo", async () => {
 		let ahora = AHORA;
 		await conAgenda(
@@ -918,8 +946,8 @@ describe("la entrega a la Main", () => {
 
 			prepararAlmacen(sql);
 			const columnas = sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => c.name);
-			expect(columnas).toEqual(expect.arrayContaining(["resultado", "codigo"]));
-			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "3" });
+			expect(columnas).toEqual(expect.arrayContaining(["resultado", "codigo", "aviso_ms"]));
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "4" });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM intentos;`).toArray()[0]).toEqual({ n: 0 });
 			// Lo que guardaba sigue ahí, y la Main ya puede contestar de ello.
 			const r = await motor.recogidas({

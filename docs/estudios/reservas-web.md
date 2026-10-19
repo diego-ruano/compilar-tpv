@@ -196,7 +196,7 @@ pasa por las migraciones).
 
 | Tabla | Columnas |
 |---|---|
-| `peticiones` | `id_peticion` (UUIDv7), `tipo` (`alta` o `cancelacion`; una de cada como mucho por reserva), `id_reserva`, `id_mesa`, `dia_ymd`, `hora`, `comensales`, `email_hash` (SHA-256 del correo en minúsculas, para contar sin leer `datos_json`), `datos_json` (nombre, correo, teléfono y nota; sólo en un alta), `creada_local` (instante del negocio, §4.3), `creada_ms`, `estado` (`pendiente`, `entregada`, `vista`, `fallida`, `anulada`), `entregada_ms`, `intentos`, `cerrada_ms` (cuándo pasó a `vista`, `fallida` o `anulada`; de ahí cuentan los 7 días), `resultado` y `codigo` (lo que contestó la Main, §5.4) |
+| `peticiones` | `id_peticion` (UUIDv7), `tipo` (`alta` o `cancelacion`; una de cada como mucho por reserva), `id_reserva`, `id_mesa`, `dia_ymd`, `hora`, `comensales`, `email_hash` (SHA-256 del correo en minúsculas, para contar sin leer `datos_json`), `datos_json` (nombre, correo, teléfono y nota; sólo en un alta), `creada_local` (instante del negocio, §4.3), `creada_ms`, `estado` (`pendiente`, `entregada`, `vista`, `fallida`, `anulada`), `entregada_ms`, `intentos`, `cerrada_ms` (cuándo pasó a `vista`, `fallida` o `anulada`; de ahí cuentan los 7 días), `resultado` y `codigo` (lo que contestó la Main, §5.4), `aviso_ms` (el último intento del correo de una fallida que no salió: van detrás) |
 | `enlaces` | `token_hash` (SHA-256 del token del enlace de cancelar), `id_reserva`, `caduca_ms` |
 | `estado` | Clave y valor: la versión del esquema de la agenda |
 
@@ -213,13 +213,13 @@ Ciclo de una petición:
   sólo existe en su base. Se entrega con su alta delante mientras el alta no se haya visto en Turso
   (la Main pudo no recibirla).
 - `fallida` (la Main no pudo registrarla) → de `datos_json` queda sólo el correo, para el correo al
-  cliente (fase 5), y se va con la fila a los 7 días.
+  cliente, que lo olvida en cuanto sale (o pasada la hora de la reserva), y la fila se va a los 7 días.
 - Un alta sólo se anula en la agenda si nunca se entregó (`intentos = 0`); una que vuelve a estar
   `pendiente` porque se reofrece puede estar ya en la Main, y lleva una cancelación.
 - La alarma, cada hora mientras quede algo: da por visto lo que ya está en Turso (por lotes, con un
   cursor por tipo en `estado`), reofrece, vuelve a avisar a la Main si queda algo `pendiente`, apunta
   en Axiom lo que lleva tres días sin recoger y purga.
-- El SQLite de la agenda tiene su versión en `estado` (`VERSION_AGENDA`, hoy la 2): una agenda vieja
+- El SQLite de la agenda tiene su versión en `estado` (`VERSION_AGENDA`, hoy la 4): una agenda vieja
   se pone al día al construirse el objeto (`agendaWeb.almacen.ts::migrar`).
 - `pendiente` → `anulada` si el cliente la cancela antes de que la Main la recoja: se borra
   `datos_json` y la mesa queda libre en el acto.
