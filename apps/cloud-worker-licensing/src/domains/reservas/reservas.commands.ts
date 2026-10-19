@@ -214,42 +214,41 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 	};
 }
 
-/** Una reserva web que aún está por venir: borrarla la cancela (como `SQL_CANCELAR_WEB` en la Main). */
-const WEB_POR_VENIR = "Origen = 'WEB' AND Estado = 'PROXIMA'";
-
 /**
- * Borra una reserva y desvincula sus comandas. Una reserva web que está por venir no se borra: se
- * cancela (docs/estudios/reservas-web.md §5.6) y su comanda sigue con ella. Igual que la Main.
+ * Borra una reserva y desvincula sus comandas; o, si es una reserva web que está por venir, la
+ * cancela y su comanda sigue con ella (docs/estudios/reservas-web.md §5.6). Igual que la Main.
+ *
+ * Quién decide es la ruta, que lo lee antes (`reservas.queries.ts::esWebPorVenir`): las sentencias
+ * no llevan la condición porque se vuelven a evaluar en la Main al replicarse, que puede tener la
+ * reserva en otro estado, y una copia la cancelaría y la otra la borraría.
  */
-export function deleteReserva(idReserva: string): BuiltCommand {
+export function deleteReserva(idReserva: string, cancelarWeb: boolean): BuiltCommand {
 	const cloudPayload = { id_reserva: idReserva };
+	const steps = cancelarWeb
+		? [
+				{
+					kind: "execute" as const,
+					saveAs: "deleted",
+					sql: "UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;",
+					args: [idReserva],
+				},
+			]
+		: [
+				{
+					kind: "execute" as const,
+					sql: "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
+					args: [idReserva],
+				},
+				{
+					kind: "execute" as const,
+					saveAs: "deleted",
+					sql: "DELETE FROM Reservas WHERE ID_Reserva = ?1;",
+					args: [idReserva],
+				},
+			];
 	return {
 		commandName: "reservas_delete",
-		command: {
-			type: "tenantDb.transaction",
-			payload: {
-				steps: [
-					{
-						kind: "execute",
-						sql: `UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1
-						      AND NOT EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND ${WEB_POR_VENIR});`,
-						args: [idReserva],
-					},
-					{
-						kind: "execute",
-						saveAs: "deleted",
-						sql: `DELETE FROM Reservas WHERE ID_Reserva = ?1 AND NOT (${WEB_POR_VENIR});`,
-						args: [idReserva],
-					},
-					{
-						kind: "execute",
-						sql: `UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1 AND ${WEB_POR_VENIR};`,
-						args: [idReserva],
-					},
-				],
-				resultKey: "deleted",
-			},
-		},
+		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "deleted" } },
 		cloudPayload,
 	};
 }

@@ -81,6 +81,8 @@ reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 reservasRoutes.delete("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_reserva invalido");
-	await apply(c, cmd.deleteReserva(id));
+	// Una reserva web por venir se cancela en vez de borrarse: se decide aquí y se replica sólo eso.
+	const cancelarWeb = await tenantQuery(c, (db) => q.esWebPorVenir(db, id));
+	await apply(c, cmd.deleteReserva(id, cancelarWeb));
 	return c.json({ ok: true });
 });

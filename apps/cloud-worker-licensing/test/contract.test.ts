@@ -88,7 +88,7 @@ import {
 	setVinculos,
 } from "../src/domains/proveedores/proveedores.commands";
 import { deleteReserva, saveReserva } from "../src/domains/reservas/reservas.commands";
-import { resolverCliente } from "../src/domains/reservas/reservas.queries";
+import { esWebPorVenir, resolverCliente } from "../src/domains/reservas/reservas.queries";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 import {
 	createTarea,
@@ -671,7 +671,9 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "reservas.eliminar": {
-			aplicar(hub, sql, deleteReserva(caso.entrada.id_reserva));
+			// Como la ruta: decide antes si es una reserva web por venir.
+			const cancelarWeb = await esWebPorVenir(db, caso.entrada.id_reserva);
+			aplicar(hub, sql, deleteReserva(caso.entrada.id_reserva, cancelarWeb));
 			return;
 		}
 		case "venta_rapida.create_comanda_barra": {
