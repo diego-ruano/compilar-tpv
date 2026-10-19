@@ -240,7 +240,8 @@ async fn registrar(
     }
 }
 
-/// «Ana · 24/10 21:00 · Mesa 5».
+/// «Ana · 24/10 21:00 · Mesa 5». La mesa va con el nombre que tiene en la Main, que ya suele ser
+/// «Mesa 5»: sólo a un número a secas se le antepone «Mesa» (la regla de `@tpv/plano/nombre`).
 fn detalle(nombre: Option<&str>, dia_ymd: &str, hora: &str, mesa: Option<&str>) -> String {
     let mut partes = Vec::new();
     if let Some(n) = nombre.map(str::trim).filter(|n| !n.is_empty()) {
@@ -248,7 +249,8 @@ fn detalle(nombre: Option<&str>, dia_ymd: &str, hora: &str, mesa: Option<&str>) 
     }
     partes.push(format!("{} {}", dia_corto(dia_ymd), hora));
     partes.push(match mesa {
-        Some(m) => format!("Mesa {m}"),
+        Some(m) if !m.is_empty() && m.bytes().all(|b| b.is_ascii_digit()) => format!("Mesa {m}"),
+        Some(m) => m.to_string(),
         None => "sin mesa".to_string(),
     });
     partes.join(" · ")
@@ -484,7 +486,8 @@ mod tests {
             nombre: Some("Luis".into()),
             dia_ymd: "2026-10-25".into(),
             hora: "14:00".into(),
-            mesa: Some("2".into()),
+            // Con el nombre que propone la Main: no sale «Mesa Mesa 2».
+            mesa: Some("Mesa 2".into()),
         })));
         let avisos = Avisos::default();
 
@@ -514,6 +517,14 @@ mod tests {
         assert_eq!(notas[1].cuerpo.as_deref(), Some("Ana · 24/10 21:00 · sin mesa. Muévela a otra mesa."));
         assert_eq!(notas[2].cuerpo.as_deref(), Some("Luis · 25/10 14:00 · Mesa 2"));
         assert_eq!(notas[0].clave_dedupe.as_deref(), Some("reserva_web_nueva:r1"));
+    }
+
+    #[test]
+    fn la_mesa_va_con_su_nombre_y_mesa_delante_solo_si_es_un_numero() {
+        let con = |mesa: &str| detalle(Some("Ana"), "2026-10-24", "21:00", Some(mesa));
+        assert_eq!(con("5"), "Ana · 24/10 21:00 · Mesa 5");
+        assert_eq!(con("Mesa 1"), "Ana · 24/10 21:00 · Mesa 1");
+        assert_eq!(con("Terraza 3"), "Ana · 24/10 21:00 · Terraza 3");
     }
 
     #[tokio::test]
