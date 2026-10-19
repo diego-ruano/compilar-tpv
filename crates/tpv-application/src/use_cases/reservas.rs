@@ -63,8 +63,7 @@ pub async fn guardar(
     let ok = repo.guardar(validada, input.forzar_solape.unwrap_or(false)).await?;
 
     if let (true, Some(antes), Some(avisos)) = (ok, antes, avisos) {
-        let despues = repo.reserva(&antes.id_reserva).await.ok().flatten();
-        avisar_al_cliente(avisos, &antes, despues.as_ref()).await;
+        avisar_al_cliente(repo, avisos, &antes).await;
     }
 
     // Aviso "nueva reserva" a los administradores (SOLO en altas, no al editar). Best-effort.
@@ -126,8 +125,7 @@ pub async fn eliminar(
     };
     let ok = repo.eliminar(id).await?;
     if let (true, Some(antes), Some(avisos)) = (ok, antes, avisos) {
-        let despues = repo.reserva(id).await.ok().flatten();
-        avisar_al_cliente(avisos, &antes, despues.as_ref()).await;
+        avisar_al_cliente(repo, avisos, &antes).await;
     }
     Ok(ok)
 }
@@ -169,9 +167,11 @@ pub fn aviso_al_cliente(antes: &ReservaDto, despues: Option<&ReservaDto>) -> Opt
 }
 
 /// Best-effort, como el aviso de «Nueva reserva»: el cambio ya está hecho, y lo que no se pueda
-/// encolar lo apunta en el log la implementación del puerto.
-async fn avisar_al_cliente(avisos: &dyn AvisosReservaWeb, antes: &ReservaDto, despues: Option<&ReservaDto>) {
-    if let Some(aviso) = aviso_al_cliente(antes, despues) {
+/// encolar lo apunta en el log la implementación del puerto. Si no se puede leer cómo ha quedado no
+/// se avisa: «no la encuentro» no es «ya no está», y le diría al cliente que se ha cancelado.
+async fn avisar_al_cliente(repo: &dyn ReservasRepository, avisos: &dyn AvisosReservaWeb, antes: &ReservaDto) {
+    let Ok(despues) = repo.reserva(&antes.id_reserva).await else { return };
+    if let Some(aviso) = aviso_al_cliente(antes, despues.as_ref()) {
         let _ = avisos.encolar(aviso).await;
     }
 }
@@ -473,6 +473,47 @@ mod tests {
         assert!(eliminar(&repo, Some(&avisos), borrar()).await.unwrap());
         assert!(repo.0.lock().unwrap().is_none());
         assert_eq!(avisos.0.lock().unwrap().len(), 1);
+    }
+
+    /// Como `RepoConUna`, pero la lectura de después del cambio falla (la red de la Handy).
+    struct RepoQueNoRelee(RepoConUna, std::sync::atomic::AtomicUsize);
+    #[async_trait]
+    impl ReservasRepository for RepoQueNoRelee {
+        async fn meta(&self) -> AppResult<ReservasMetaDto> {
+            unimplemented!("no usado en estos tests")
+        }
+        async fn mes(&self, _: &str, _: &str) -> AppResult<Vec<ReservaDto>> {
+            unimplemented!("no usado en estos tests")
+        }
+        async fn reserva(&self, id: &str) -> AppResult<Option<ReservaDto>> {
+            if self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+                return Err(AppError::external("sin red"));
+            }
+            self.0.reserva(id).await
+        }
+        async fn guardar(&self, v: ReservaValidada, f: bool) -> AppResult<bool> {
+            self.0.guardar(v, f).await
+        }
+        async fn buscar_cliente(&self, t: Option<&str>, e: Option<&str>) -> AppResult<Option<ClienteCoincidente>> {
+            self.0.buscar_cliente(t, e).await
+        }
+        async fn eliminar(&self, id: &str) -> AppResult<bool> {
+            self.0.eliminar(id).await
+        }
+    }
+
+    #[tokio::test]
+    async fn si_no_se_puede_leer_como_ha_quedado_no_se_avisa_de_nada() {
+        // Guardado; lo que no se sabe es cómo ha quedado. No es «ya no está»: no se le dice al
+        // cliente que se ha cancelado.
+        let repo = RepoQueNoRelee(RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA")))), Default::default());
+        let avisos = Avisos::default();
+        assert!(guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into())).await.unwrap());
+        assert!(avisos.0.lock().unwrap().is_empty());
+
+        let repo = RepoQueNoRelee(RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA")))), Default::default());
+        assert!(eliminar(&repo, Some(&avisos), ReservaDeleteInput { id_reserva: "r1".into() }).await.unwrap());
+        assert!(avisos.0.lock().unwrap().is_empty());
     }
 
     #[test]
