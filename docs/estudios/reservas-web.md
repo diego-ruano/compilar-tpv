@@ -369,8 +369,22 @@ clave, su Main sabe recibirlas. No hace falta comprobar versiones.
 `/avisos` lleva `id_aviso`, `id_reserva`, `tipo` (`modificada` o `cancelada`) y los datos nuevos
 (día, hora, personas, mesa). El destinatario **no** viene en el cuerpo: es el correo del cliente de
 esa reserva en Turso, y sólo si es `Origen = 'WEB'` (acotado a quién, como los pedidos con
-FABLE-C). Es idempotente por `id_aviso` (`email_sends.id`). Si la reserva aún no está en Turso,
-contesta 404 y la Main reintenta.
+FABLE-C). Es idempotente por `id_aviso` (`email_sends.id`). Lleva también el cliente de la
+reserva y la huella de su correo (`id_cliente`, `huella_correo`) tal como los tiene quien la
+cambió. Qué contesta:
+
+- **404** (se repite): la reserva aún no está en Turso, o Turso no la tiene como dice el aviso (otro
+  cliente, otro correo, o, en un cambio, otro día, hora, personas o mesa): el cambio aún no ha subido,
+  o hubo otro después.
+- **409** (se descarta): no es una reserva web (`reserva_no_web`), o un cambio de una reserva que ya
+  no está por venir o que el cliente canceló desde su enlace (`aviso_superado`).
+- **503** (se repite): la agenda no responde, o ese correo está saliendo por otro lado.
+- En un cambio, la agenda da un enlace de cancelar nuevo para el correo (`enlaceParaUnCambio`), que
+  vale hasta un día después de la hora nueva, y alarga los que ya tenía.
+
+La Main, antes de mandarlo, compara el aviso con su copia: un «cambiada» que ya no coincide (hubo
+otro cambio, también de una Handy, que ya avisó) o de una reserva que ya no está por venir se
+descarta.
 
 ### 4.6 El widget, servido por el worker
 
