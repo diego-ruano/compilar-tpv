@@ -44,9 +44,17 @@ import {
 } from "../domains/reservas_web/lecturas";
 import type { AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
 import {
+	enviarCorreoReservaWeb,
+	negocioDelCorreo,
+	type Correo,
+	type ResultadoCorreo,
+} from "../domains/reservas_web/correos";
+import {
 	altasDesde,
 	cancelacionesHechas,
 	esperando,
+	fallidasPorAvisar,
+	olvidarCorreo,
 	cursorDeLaAlarma,
 	guardarCursorDeLaAlarma,
 	anularAlta,
@@ -86,6 +94,8 @@ const ATASCADA_TRAS_MS = 72 * 60 * 60_000;
 const SQL_ESTAN_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`;
 const SQL_CANCELADAS_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas
 	WHERE ID_Reserva IN (SELECT value FROM json_each(?1)) AND Estado NOT IN ('PROXIMA', 'ACTIVA');`;
+/** Cuántos correos de «no se pudo registrar» se mandan de una vez. Lo que quede, en la alarma. */
+const MAX_AVISOS_FALLIDAS = 20;
 /** Cuántas peticiones se entregan a la Main de una vez. */
 const MAX_ENTREGA = 50;
 /**
@@ -201,9 +211,13 @@ type ReservaEnTurso = { dia: string; hora: string; personas: number; id_mesa: st
 
 export type Lector = <T>(tenantId: string, fn: (db: Client, ahora: string) => Promise<T>) => Promise<T>;
 
+export type EnviarCorreo = (correo: Correo) => Promise<ResultadoCorreo>;
+
 export class MotorAgendaWeb {
 	/** Cómo se lee Turso. Los tests lo cambian por un cliente sobre SQLite. */
 	leer: Lector;
+	/** Cómo se manda un correo al cliente. Los tests lo cambian por uno que apunta. */
+	enviarCorreo: EnviarCorreo;
 
 	constructor(
 		private readonly ctx: DurableObjectState,
@@ -211,6 +225,7 @@ export class MotorAgendaWeb {
 	) {
 		prepararAlmacen(ctx.storage.sql);
 		this.leer = (tenantId, fn) => lecturaConHora(env, tenantId, horaDelNegocio, fn);
+		this.enviarCorreo = (correo) => enviarCorreoReservaWeb(env, correo);
 	}
 
 	/**
@@ -493,10 +508,64 @@ export class MotorAgendaWeb {
 		recordarNegocio(this.sql, p.tenantId);
 		const { apuntadas, fallidas } = apuntarResultados(this.sql, p.resultados, Date.now());
 		for (const f of fallidas) {
-			// El correo al cliente es de la fase 5 (§4.8); hasta entonces queda en el log.
 			this.anotar({ event: "reserva_web_fallida", tenant_id: p.tenantId, id_reserva: f.id_reserva, motivo: f.codigo ?? undefined });
 		}
+		// El correo al cliente. Una fallida es rara (un dato imposible) y la Main recoge en segundo
+		// plano: puede esperarlo. Lo que no salga, o no dé tiempo, lo repite la alarma.
+		if (fallidas.length) {
+			try {
+				await this.avisarFallidas(p.tenantId);
+			} catch (e: any) {
+				console.warn("[agenda-web] no se ha podido avisar de las fallidas:", String(e?.message || e));
+			}
+		}
 		return { ok: true, apuntadas };
+	}
+
+	/**
+	 * «No hemos podido registrar tu reserva», a cada cliente cuya alta no pudo guardar la Main: tiene
+	 * una reserva confirmada que el restaurante no tiene (§4.8). Hasta que sale; después la agenda
+	 * olvida su correo. Pasada la hora de la reserva ya no se manda: no le sirve de nada.
+	 */
+	async avisarFallidas(tenantId: string): Promise<number> {
+		const pendientes = fallidasPorAvisar(this.sql, MAX_AVISOS_FALLIDAS);
+		if (!pendientes.length) return 0;
+		const { ahora, negocio, mesas } = await this.leer(tenantId, async (db, ahora) => {
+			const ids = [...new Set(pendientes.map((f) => f.id_mesa).filter((m): m is string => !!m))];
+			const [negocio, nombres] = await Promise.all([
+				negocioDelCorreo(db),
+				Promise.all(ids.map(async (id) => [id, await numeroDeMesa(db, id)] as const)),
+			]);
+			return { ahora, negocio, mesas: new Map(nombres) };
+		});
+		let enviados = 0;
+		for (const f of pendientes) {
+			const email = correoDelAlta(f);
+			if (!email || intervalo(f.dia_ymd, f.hora, 0).inicio <= ahora) {
+				olvidarCorreo(this.sql, f.id_peticion);
+				continue;
+			}
+			const r = await this.enviarCorreo({
+				tenantId,
+				id: `rw:no_registrada:${f.id_reserva}`,
+				tipo: "no_registrada",
+				para: email,
+				negocio,
+				reserva: {
+					dia: f.dia_ymd,
+					hora: f.hora,
+					personas: f.comensales,
+					mesa: f.id_mesa ? (mesas.get(f.id_mesa) ?? null) : null,
+					codigo: codigoDeReserva(f.id_reserva),
+				},
+				dispositivo: "agenda",
+			});
+			if (r === "enviado" || r === "ya_enviado") {
+				olvidarCorreo(this.sql, f.id_peticion);
+				enviados++;
+			}
+		}
+		return enviados;
 	}
 
 	/** Lo que ve quien abre el enlace. Síncrono. */
@@ -594,6 +663,14 @@ export class MotorAgendaWeb {
 		// Mientras quede algo sin recoger, se vuelve a avisar: el aviso del alta pudo perderse (la Main
 		// conectada no vuelve a pedir si nadie la avisa), y no cuesta nada si no hay Main.
 		if (tenantId && pendientesDesde(this.sql, ahoraMs + 1) > 0) this.avisarALaMain(tenantId);
+		// Los correos de «no se pudo registrar» que no salieron al contestar la Main.
+		if (tenantId) {
+			try {
+				await this.avisarFallidas(tenantId);
+			} catch (e: any) {
+				console.warn("[agenda-web] la alarma no ha podido avisar de las fallidas:", String(e?.message || e));
+			}
+		}
 		const quedaAlgo = purgar(this.sql, ahoraMs);
 		if (quedaAlgo) await this.ctx.storage.setAlarm(Date.now() + CADA_ALARMA_MS);
 	}

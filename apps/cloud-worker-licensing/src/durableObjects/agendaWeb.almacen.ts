@@ -532,6 +532,27 @@ export function apuntarResultados(
 }
 
 /**
+ * Las altas que la Main no pudo registrar y aún guardan el correo: falta decírselo al cliente
+ * (§4.8). Las más viejas primero, como mucho `max`.
+ */
+export function fallidasPorAvisar(sql: SqlStorage, max: number): FilaPeticion[] {
+	return (
+		sql
+			.exec(
+				`SELECT * FROM peticiones WHERE tipo = 'alta' AND estado = 'fallida' AND datos_json IS NOT NULL
+				 ORDER BY creada_ms, id_peticion LIMIT ?;`,
+				max,
+			)
+			.toArray() as any[]
+	).map(conTipos);
+}
+
+/** Ya se le dijo al cliente, o ya no sirve de nada decírselo: la agenda olvida su correo. */
+export function olvidarCorreo(sql: SqlStorage, idPeticion: string): void {
+	sql.exec(`UPDATE peticiones SET datos_json = NULL WHERE id_peticion = ?;`, idPeticion);
+}
+
+/**
  * Lo entregado hace más de una hora que no se ha visto en Turso (un alta) o del que la Main no ha
  * contestado (una cancelación) vuelve a `pendiente`. Cubre una Main que perdió su base o un outbox
  * atascado: registrarla otra vez no la duplica (el `INSERT` es idempotente por `ID_Reserva`).

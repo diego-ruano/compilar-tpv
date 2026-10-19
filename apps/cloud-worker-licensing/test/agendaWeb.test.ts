@@ -59,6 +59,12 @@ async function conAgenda(
 		const sql = state.storage.sql;
 		sembrarNegocio(sql);
 		motor.leer = opciones.lector ? opciones.lector(state) : lectorSobre(state, opciones.ahora ?? (() => AHORA));
+		// Los correos al cliente no salen: se apuntan en `motor.correos`.
+		motor.correos = [];
+		motor.enviarCorreo = async (c: any) => {
+			motor.correos.push(c);
+			return "enviado";
+		};
 		await prueba(motor, sql, state);
 	});
 }
@@ -678,9 +684,11 @@ describe("la entrega a la Main", () => {
 		});
 	});
 
-	it("apunta lo que contesta la Main; de una fallida sólo queda el correo", async () => {
+	it("apunta lo que contesta la Main; de una fallida sólo queda el correo, hasta que se le dice al cliente", async () => {
 		await conAgenda("entrega-resultados", async (motor, sql) => {
 			const { eventos } = espiar(motor);
+			// El correo no sale a la primera: el de la fallida sigue guardado para la alarma.
+			motor.enviarCorreo = async () => "fallido";
 			const a = await motor.reservar({ tenantId: T, alta: alta() });
 			const b = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4", email: "b@correo.es" }) });
 			const entregadas = (await motor.pendientes({ tenantId: T })).peticiones;
@@ -715,7 +723,47 @@ describe("la entrega a la Main", () => {
 			expect(otra.apuntadas).toBe(0);
 			// Y quien la consulta la ve cancelada.
 			expect((await motor.consultarEnlace({ tenantId: T, token: b.token })).estado).toBe("cancelada");
+
+			// La alarma lo vuelve a intentar: sale «no hemos podido registrar tu reserva», a su correo y
+			// sin nada de lo que escribió, y la agenda lo olvida.
+			motor.correos = [];
+			motor.enviarCorreo = async (c: any) => {
+				motor.correos.push(c);
+				return "enviado";
+			};
+			await motor.alarm();
+			expect(motor.correos).toHaveLength(1);
+			expect(motor.correos[0]).toMatchObject({
+				tenantId: T,
+				id: `rw:no_registrada:${b.id_reserva}`,
+				tipo: "no_registrada",
+				para: "b@correo.es",
+				reserva: { dia: DIA, hora: "21:00", personas: 2, mesa: "4", codigo: codigoDeReserva(b.id_reserva) },
+				dispositivo: "agenda",
+			});
+			expect(motor.correos[0].negocio.nombre).toBeTypeOf("string");
+			expect(filas(sql)[1].datos_json).toBeNull();
+			// Dicho una vez: la siguiente alarma no lo repite.
+			await motor.alarm();
+			expect(motor.correos).toHaveLength(1);
 		});
+	});
+
+	it("una fallida cuya hora ya ha pasado no se le dice al cliente: se olvida su correo", async () => {
+		let ahora = AHORA;
+		await conAgenda(
+			"entrega-fallida-pasada",
+			async (motor, sql) => {
+				await motor.reservar({ tenantId: T, alta: alta() });
+				const [p] = (await motor.pendientes({ tenantId: T })).peticiones;
+				// La hora de la reserva pasa antes de que la Main conteste.
+				ahora = `${DIA} 22:00:00`;
+				await motor.recogidas({ tenantId: T, resultados: [{ id_peticion: p.id_peticion, resultado: "fallida", codigo: "validation" }] });
+				expect(motor.correos).toEqual([]);
+				expect(filas(sql)[0]).toMatchObject({ estado: "fallida", datos_json: null });
+			},
+			{ ahora: () => ahora },
+		);
 	});
 
 	it("una cancelación no está hecha porque la Main lo diga, sino cuando Turso la tiene cancelada", async () => {
