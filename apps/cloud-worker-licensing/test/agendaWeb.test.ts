@@ -153,6 +153,22 @@ describe("la agenda de reservas web", () => {
 		});
 	});
 
+	it("una clave de más de un día ya no cuenta, aunque la purga no la haya borrado: es un alta nueva", async () => {
+		await conAgenda("agenda-intento-caducado", async (motor, sql) => {
+			const viejo = Date.now() - 2 * 86_400_000;
+			sql.exec(
+				`INSERT INTO intentos (clave, respuesta_json, creado_ms) VALUES ('intento-0123456789', '{"id_reserva":"r-vieja"}', ?);`,
+				viejo,
+			);
+			const r = await motor.reservar({ tenantId: T, alta: alta(), intento: "intento-0123456789" });
+			expect(r).toMatchObject({ ok: true, repetida: false });
+			const fila = sql.exec(`SELECT respuesta_json, creado_ms FROM intentos;`).toArray() as any[];
+			expect(fila).toHaveLength(1);
+			expect(JSON.parse(fila[0].respuesta_json).id_reserva).toBe(r.id_reserva);
+			expect(Number(fila[0].creado_ms)).toBeGreaterThan(viejo);
+		});
+	});
+
 	it("el mismo intento dos veces a la vez da una sola reserva", async () => {
 		const nombre = "agenda-intento-simultaneo";
 		await conAgenda(nombre, async () => {}, { lector: (state) => lectorConBarrera(state, () => AHORA, 2) });

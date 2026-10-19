@@ -337,10 +337,15 @@ export function respuestaDelIntento(sql: SqlStorage, clave: string, ahoraMs: num
 	return fila ? (JSON.parse(String(fila.respuesta_json)) as RespuestaDelAlta) : null;
 }
 
-/** Apunta lo que contesta un intento de alta. Va en la misma transacción que `apuntarAlta`. */
+/**
+ * Apunta lo que contesta un intento de alta. Va en la misma transacción que `apuntarAlta`, y quien
+ * llama ya ha mirado que esa clave no tiene una respuesta viva: si la fila existe, es una caducada que
+ * la purga aún no ha borrado, y se pisa.
+ */
 export function apuntarIntento(sql: SqlStorage, clave: string, respuesta: RespuestaDelAlta, ahoraMs: number): void {
 	sql.exec(
-		`INSERT INTO intentos (clave, respuesta_json, creado_ms) VALUES (?, ?, ?);`,
+		`INSERT INTO intentos (clave, respuesta_json, creado_ms) VALUES (?, ?, ?)
+		 ON CONFLICT(clave) DO UPDATE SET respuesta_json = excluded.respuesta_json, creado_ms = excluded.creado_ms;`,
 		clave,
 		JSON.stringify(respuesta),
 		ahoraMs,
