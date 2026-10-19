@@ -177,6 +177,8 @@ export function reportarSaludDeSync(
 /** Los eventos de la reserva desde la web (docs/estudios/reservas-web.md §9). */
 type EventoReservaWeb =
 	| "reserva_web_alta"
+	// El widget repite un alta que ya había dado reserva: se contesta la misma.
+	| "reserva_web_alta_repetida"
 	| "reserva_web_rechazo"
 	| "reserva_web_cancelada"
 	// La entrega a la Main, desde la agenda.

@@ -119,6 +119,9 @@ reservasWebPublicoRoutes.get(
 	},
 );
 
+/** Una `Idempotency-Key` del widget: un UUID, o algo de su estilo. */
+const CLAVE_DE_INTENTO = /^[A-Za-z0-9_-]{16,64}$/;
+
 reservasWebPublicoRoutes.post(
 	"/:clave/reservas",
 	puertaPublica,
@@ -129,12 +132,16 @@ reservasWebPublicoRoutes.post(
 	async (c) => {
 		const alta = c.req.valid("json");
 		const tenantId = c.get("tenantId");
-		const r = await agendaDe(c.env, tenantId).reservar({ tenantId, alta });
+		// La clave del intento: la misma mientras el widget repite un alta cuya respuesta no le llegó.
+		// Una sin la forma esperada se ignora: el alta sigue, sólo que sin esa protección.
+		const clave = c.req.header("Idempotency-Key");
+		const intento = clave && CLAVE_DE_INTENTO.test(clave) ? clave : null;
+		const r = await agendaDe(c.env, tenantId).reservar({ tenantId, alta, intento });
 		if (!r.ok) {
 			anotar(c, { event: "reserva_web_rechazo", tenant_id: tenantId, motivo: r.error });
 			return rechazada(c, r);
 		}
-		anotar(c, { event: "reserva_web_alta", tenant_id: tenantId, id_reserva: r.id_reserva });
+		anotar(c, { event: r.repetida ? "reserva_web_alta_repetida" : "reserva_web_alta", tenant_id: tenantId, id_reserva: r.id_reserva });
 		// El token del enlace de cancelar NO va en la respuesta: sólo en el correo (fase 5).
 		return c.json({ ok: true, codigo: r.codigo, dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa });
 	},

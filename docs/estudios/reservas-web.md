@@ -271,7 +271,7 @@ necesitan cabeceras CORS y no hay que abrirlas a ningún origen.
 | `GET /dia?dia=` | Turso | Los tramos de hora de llegada válidos ese día (la unión de las franjas, con la tolerancia y la duración) |
 | `GET /plano` | Turso | Salones (id, nombre, `Room_Points`) y mesas (id, número, forma, posición, tamaño, capacidad, si es reservable). Caché corta. Con techo (50 salones, 500 mesas) y `completo` para decir si lo ha alcanzado |
 | `GET /disponibles?dia=&hora=&personas=` | Agenda | Las mesas libres y adecuadas. Si no hay ninguna, `alternativas`: hasta 4 horas a ±15, 30, 45 y 60 minutos que sí tienen mesa |
-| `POST /reservas` | Agenda | `{ codigo, dia, hora, personas, mesa }`. El token del enlace sólo viaja en el correo |
+| `POST /reservas` | Agenda | `{ codigo, dia, hora, personas, mesa }`. El token del enlace sólo viaja en el correo. Con `Idempotency-Key` (el widget manda la misma en todos los envíos de una reserva), un intento que ya dio reserva contesta la misma, durante un día, en vez de apuntar otra |
 | `POST /reserva` `{ token }` | Agenda y Turso | El resumen para la página de cancelar: día, hora, personas, mesa, estado y si aún se puede cancelar |
 | `POST /cancelar` `{ token }` | Agenda | `{ ok }` |
 
@@ -667,7 +667,7 @@ de su propio origen. No deja variables globales y no hace nada si se carga dos v
 ## 9. Observabilidad
 
 - **Eventos en Axiom** (dataset de sync, `service: "tpv-reservas-web"`): `reserva_web_alta`,
-  `reserva_web_rechazo` (con el motivo), `reserva_web_entregada`, `reserva_web_vista`,
+  `reserva_web_alta_repetida` (un intento que se repite y recibe su reserva), `reserva_web_rechazo` (con el motivo), `reserva_web_entregada`, `reserva_web_vista`,
   `reserva_web_reofrecida`, `reserva_web_fallida`, `reserva_web_cancelada` y
   `reserva_web_atascada`. Sólo ids, cuántas y motivos (`observability/axiom.ts::reportarReservaWeb`):
   los de las rutas públicas salen de ellas y los de la entrega, de la agenda.

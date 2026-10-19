@@ -149,6 +149,11 @@ describe("reservar desde la web", () => {
 		expect(tokens).toHaveLength(2);
 		expect(tokens[0]).toMatch(/^tok-/);
 		expect(tokens[1]).not.toBe(tokens[0]);
+		// La clave del intento, en cambio, es la misma: si el primero se hubiera guardado sin contestar,
+		// el worker devolvería esa reserva en vez de dar otra.
+		const intentos = envios.map((l) => (l.init?.headers as Record<string, string>)["Idempotency-Key"]);
+		expect(intentos[0]).toMatch(/^[0-9a-f-]{36}$/);
+		expect(intentos[1]).toBe(intentos[0]);
 		expect(JSON.parse(String(envios[1].init?.body))).toEqual({
 			dia_ymd: "2026-11-20",
 			hora: "20:07",

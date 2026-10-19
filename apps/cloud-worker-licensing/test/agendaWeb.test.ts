@@ -126,6 +126,51 @@ describe("la agenda de reservas web", () => {
 		});
 	});
 
+	it("el widget repite un alta cuya respuesta no le llegó: con su clave, la misma reserva y no otra", async () => {
+		await conAgenda("agenda-intento", async (motor, sql) => {
+			const primera = await motor.reservar({ tenantId: T, alta: alta(), intento: "intento-0123456789" });
+			expect(primera).toMatchObject({ ok: true, mesa: "2", repetida: false });
+
+			// La repite, quizá ya con otra mesa: la suya está ocupada por ella misma.
+			const repetida = await motor.reservar({ tenantId: T, alta: alta({ id_mesa: "m4" }), intento: "intento-0123456789" });
+			expect(repetida).toEqual({
+				ok: true,
+				id_reserva: primera.id_reserva,
+				codigo: primera.codigo,
+				dia: DIA,
+				hora: "21:00",
+				personas: 2,
+				mesa: "2",
+				token: null,
+				repetida: true,
+			});
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
+			sinDatosPersonales(sql.exec(`SELECT * FROM intentos;`).toArray());
+
+			// Otra clave es otra reserva: la mesa ya no está libre.
+			const otra = await motor.reservar({ tenantId: T, alta: alta({ email: "otro@correo.es" }), intento: "intento-otro-00000" });
+			expect(otra).toMatchObject({ ok: false, error: "mesa_no_disponible" });
+		});
+	});
+
+	it("el mismo intento dos veces a la vez da una sola reserva", async () => {
+		const nombre = "agenda-intento-simultaneo";
+		await conAgenda(nombre, async () => {}, { lector: (state) => lectorConBarrera(state, () => AHORA, 2) });
+		// Las dos leen Turso antes de que ninguna decida: lo que las separa es la segunda mirada, ya en el
+		// bloque síncrono.
+		const stub = stubDeLaAgenda(nombre);
+		const [a, b] = (await Promise.all([
+			stub.reservar({ tenantId: T, alta: alta(), intento: "intento-0123456789" }),
+			stub.reservar({ tenantId: T, alta: alta({ id_mesa: "m4" }), intento: "intento-0123456789" }),
+		])) as any[];
+		expect(a.ok && b.ok).toBe(true);
+		expect(a.id_reserva).toBe(b.id_reserva);
+		expect([a.repetida, b.repetida].sort()).toEqual([false, true]);
+		await enLaAgenda(nombre, (_motor, state) => {
+			expect(state.storage.sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
+		});
+	});
+
 	it("una lectura vieja de Turso no pierde el alta que otra petición acaba de dar por vista", async () => {
 		// El cruce: A lee Turso cuando la Main todavía no ha subido el alta X; mientras A espera la
 		// respuesta, X llega a Turso y otra petición (B) la ve y la da por vista. Para la lectura de A
@@ -476,6 +521,7 @@ describe("la agenda de reservas web", () => {
 				viejo,
 			);
 			sql.exec(`INSERT INTO enlaces (token_hash, id_reserva, caduca_ms) VALUES ('h-viejo', 'r-vieja', ?);`, viejo);
+			sql.exec(`INSERT INTO intentos (clave, respuesta_json, creado_ms) VALUES ('intento-viejo', '{}', ?);`, viejo);
 
 			// Como al dispararse: la alarma que la ha despertado ya no está programada.
 			await state.storage.deleteAlarm();
@@ -483,6 +529,7 @@ describe("la agenda de reservas web", () => {
 			const ids = sql.exec(`SELECT id_reserva FROM peticiones;`).toArray().map((f: any) => f.id_reserva);
 			expect(ids).toEqual([r.id_reserva]);
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM enlaces;`).toArray()[0]).toEqual({ n: 1 });
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM intentos;`).toArray()[0]).toEqual({ n: 0 });
 			// Queda la reserva viva: la alarma se ha vuelto a programar.
 			expect(await state.storage.getAlarm()).not.toBeNull();
 
@@ -729,8 +776,9 @@ describe("la entrega a la Main", () => {
 	it("una agenda de antes de la entrega se pone al día sin perder lo que guardaba", async () => {
 		await conAgenda("entrega-migracion", async (motor, sql) => {
 			espiar(motor);
-			// La tabla tal como la creaba la versión 1, con una petición ya entregada.
+			// La tabla tal como la creaba la versión 1, con una petición ya entregada, y sin `intentos`.
 			sql.exec(`DROP TABLE peticiones;`);
+			sql.exec(`DROP TABLE intentos;`);
 			sql.exec(
 				`CREATE TABLE peticiones (
 					id_peticion TEXT NOT NULL PRIMARY KEY, tipo TEXT NOT NULL, id_reserva TEXT NOT NULL, id_mesa TEXT,
@@ -751,7 +799,8 @@ describe("la entrega a la Main", () => {
 			prepararAlmacen(sql);
 			const columnas = sql.exec(`PRAGMA table_info(peticiones);`).toArray().map((c: any) => c.name);
 			expect(columnas).toEqual(expect.arrayContaining(["resultado", "codigo"]));
-			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "2" });
+			expect(sql.exec(`SELECT valor FROM estado WHERE clave = 'version';`).toArray()[0]).toEqual({ valor: "3" });
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM intentos;`).toArray()[0]).toEqual({ n: 0 });
 			// Lo que guardaba sigue ahí, y la Main ya puede contestar de ello.
 			const r = await motor.recogidas({
 				tenantId: T,

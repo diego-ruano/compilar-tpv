@@ -68,6 +68,10 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	const [token, setToken] = useState<string | null>(null);
 	const [sinTurnstile, setSinTurnstile] = useState(false);
 	const turnstile = useRef<ControlTurnstile | null>(null);
+	// Una clave para todos los envíos de esta reserva: si el alta se guardó pero no llegó la respuesta,
+	// al repetirla el worker contesta la misma reserva en vez de dar otra (o de decir que la mesa, que
+	// ocupa ella, ya no está libre).
+	const [intento] = useState(() => crypto.randomUUID());
 
 	// Paso 4
 	const [hecha, setHecha] = useState<Confirmada | null>(null);
@@ -123,6 +127,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 			const r = await api.reservar(
 				{ dia_ymd: dia, hora, personas, id_mesa: mesa.id, nombre, email, telefono, nota: nota.trim() ? nota : null },
 				gastado,
+				intento,
 			);
 			setHecha(r);
 			setPaso("hecho");

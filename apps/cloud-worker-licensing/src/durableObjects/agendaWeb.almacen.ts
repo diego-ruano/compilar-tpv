@@ -21,11 +21,15 @@ import { intervalo, sumarDias } from "../domains/reservas_web/disponibilidad";
  *
  *   1. Las tablas de la fase 2: peticiones, enlaces y estado.
  *   2. `peticiones.resultado` y `peticiones.codigo`: lo que contesta la Main (§5.4).
+ *   3. `intentos`: lo que contestó cada alta del widget, por su `Idempotency-Key` (la crea `ESQUEMA`).
  */
-const VERSION_AGENDA = 2;
+const VERSION_AGENDA = 3;
 
 /** Lo que se queda una petición cerrada (vista, anulada o fallida) antes de borrarse. */
 const RETENCION_CERRADAS_MS = 7 * 86_400_000;
+
+/** Lo que se queda la respuesta de un intento: el widget lo repite en minutos, no en días. */
+const RETENCION_INTENTOS_MS = 86_400_000;
 
 type EstadoPeticion = "pendiente" | "entregada" | "vista" | "fallida" | "anulada";
 
@@ -82,6 +86,14 @@ const ESQUEMA = [
 		caduca_ms  INTEGER NOT NULL
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_enlaces_reserva ON enlaces(id_reserva);`,
+	// Lo que contestó cada alta que acabó en reserva, por la clave del intento que manda el widget: si
+	// se pierde la respuesta y lo repite, se contesta lo mismo en vez de dar otra reserva. Sin datos
+	// personales: el código, el día, la hora, las personas y el número de mesa.
+	`CREATE TABLE IF NOT EXISTS intentos (
+		clave          TEXT NOT NULL PRIMARY KEY,
+		respuesta_json TEXT NOT NULL,
+		creado_ms      INTEGER NOT NULL
+	);`,
 ];
 
 /** Crea lo que falte y pone al día lo que ya había. Idempotente: se llama al construir el objeto. */
@@ -307,6 +319,34 @@ export function apuntarAlta(sql: SqlStorage, p: FilaPeticion, enlace: { tokenHas
 	);
 }
 
+/** Lo que se contesta de un alta que ha acabado en reserva. */
+export type RespuestaDelAlta = {
+	id_reserva: string;
+	codigo: string;
+	dia: string;
+	hora: string;
+	personas: number;
+	mesa: string;
+};
+
+/** Lo que contestó el intento de alta con esa clave, si acabó en reserva y no ha caducado. */
+export function respuestaDelIntento(sql: SqlStorage, clave: string, ahoraMs: number): RespuestaDelAlta | null {
+	const fila = sql
+		.exec(`SELECT respuesta_json FROM intentos WHERE clave = ? AND creado_ms > ?;`, clave, ahoraMs - RETENCION_INTENTOS_MS)
+		.toArray()[0] as any;
+	return fila ? (JSON.parse(String(fila.respuesta_json)) as RespuestaDelAlta) : null;
+}
+
+/** Apunta lo que contesta un intento de alta. Va en la misma transacción que `apuntarAlta`. */
+export function apuntarIntento(sql: SqlStorage, clave: string, respuesta: RespuestaDelAlta, ahoraMs: number): void {
+	sql.exec(
+		`INSERT INTO intentos (clave, respuesta_json, creado_ms) VALUES (?, ?, ?);`,
+		clave,
+		JSON.stringify(respuesta),
+		ahoraMs,
+	);
+}
+
 /** La reserva de un enlace de cancelar, si existe y no ha caducado. */
 export function reservaDelEnlace(sql: SqlStorage, tokenHash: string, ahoraMs: number): string | null {
 	const fila = sql
@@ -364,7 +404,8 @@ export function apuntarCancelacion(
 }
 
 /**
- * La limpieza de la alarma: las peticiones cerradas hace más de una semana y los enlaces caducados.
+ * La limpieza de la alarma: las peticiones cerradas hace más de una semana, los enlaces caducados y
+ * las respuestas de los intentos de más de un día.
  * Devuelve si queda algo por lo que volver a despertar.
  */
 export function purgar(sql: SqlStorage, ahoraMs: number): boolean {
@@ -373,8 +414,11 @@ export function purgar(sql: SqlStorage, ahoraMs: number): boolean {
 		ahoraMs - RETENCION_CERRADAS_MS,
 	);
 	sql.exec(`DELETE FROM enlaces WHERE caduca_ms <= ?;`, ahoraMs);
+	sql.exec(`DELETE FROM intentos WHERE creado_ms <= ?;`, ahoraMs - RETENCION_INTENTOS_MS);
 	const quedan = sql
-		.exec(`SELECT (SELECT COUNT(*) FROM peticiones) + (SELECT COUNT(*) FROM enlaces) AS n;`)
+		.exec(
+			`SELECT (SELECT COUNT(*) FROM peticiones) + (SELECT COUNT(*) FROM enlaces) + (SELECT COUNT(*) FROM intentos) AS n;`,
+		)
 		.toArray()[0] as any;
 	return Number(quedan?.n ?? 0) > 0;
 }

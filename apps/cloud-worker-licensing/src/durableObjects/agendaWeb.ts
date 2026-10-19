@@ -33,7 +33,7 @@ export class AgendaWeb extends DurableObject<Env> {
 		return this.motor.disponibles(p);
 	}
 
-	reservar(p: { tenantId: string; alta: AltaReservaWeb }): Promise<ResultadoReservar> {
+	reservar(p: { tenantId: string; alta: AltaReservaWeb; intento?: string | null }): Promise<ResultadoReservar> {
 		return this.motor.reservar(p);
 	}
 

@@ -116,8 +116,8 @@ export function apiDe(clave: string) {
 		plano: () => pedir<PlanoPublico>(`${base}/plano`),
 		disponibles: (dia: string, hora: string, personas: number) =>
 			pedir<Disponibles>(`${base}/disponibles?dia=${dia}&hora=${encodeURIComponent(hora)}&personas=${personas}`),
-		reservar: (alta: Alta, tokenTurnstile: string) =>
-			pedir<Confirmada>(`${base}/reservas`, enviar(alta, { "X-Turnstile-Token": tokenTurnstile })),
+		reservar: (alta: Alta, tokenTurnstile: string, intento: string) =>
+			pedir<Confirmada>(`${base}/reservas`, enviar(alta, { "X-Turnstile-Token": tokenTurnstile, "Idempotency-Key": intento })),
 		reserva: (token: string) => pedir<Resumen>(`${base}/reserva`, enviar({ token })),
 		cancelar: (token: string) => pedir<{ ok: true }>(`${base}/cancelar`, enviar({ token })),
 	};

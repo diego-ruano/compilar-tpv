@@ -52,6 +52,7 @@ import {
 	anularAlta,
 	apuntarAlta,
 	apuntarCancelacion,
+	apuntarIntento,
 	apuntarResultados,
 	darPorVistas,
 	entregarPendientes,
@@ -64,6 +65,7 @@ import {
 	recordarNegocio,
 	reofrecer,
 	reservaDelEnlace,
+	respuestaDelIntento,
 	vivasDelCorreoEnLaAgenda,
 	type FilaPeticion,
 	type ResultadoDeLaMain,
@@ -137,8 +139,11 @@ export type ResultadoReservar =
 			hora: string;
 			personas: number;
 			mesa: string;
-			/** El token del enlace de cancelar: sólo para el correo, nunca para la respuesta. */
-			token: string;
+			/** El token del enlace de cancelar: sólo para el correo, nunca para la respuesta. `null` en una
+			 * repetición: de él sólo queda el hash, y el correo es del alta de verdad. */
+			token: string | null;
+			/** La repetición de un intento que ya había dado esta reserva: no se ha apuntado otra. */
+			repetida: boolean;
 	  }
 	| RechazoAgenda;
 
@@ -266,9 +271,16 @@ export class MotorAgendaWeb {
 		return { ok: true, mesas: [], alternativas: otras };
 	}
 
-	async reservar(p: { tenantId: string; alta: AltaReservaWeb }): Promise<ResultadoReservar> {
+	/**
+	 * Un alta del widget. `intento` es su `Idempotency-Key`: la misma mientras repite el alta porque no
+	 * le llegó la respuesta. Si ese intento ya dio una reserva, se contesta la misma y no se apunta otra
+	 * (la mesa ya está ocupada por ella, y elegir otra la duplicaría).
+	 */
+	async reservar(p: { tenantId: string; alta: AltaReservaWeb; intento?: string | null }): Promise<ResultadoReservar> {
 		const { alta } = p;
 		recordarNegocio(this.sql, p.tenantId);
+		const repetida = this.repeticion(p.intento);
+		if (repetida) return repetida;
 
 		// Lo asíncrono, antes del bloque que decide.
 		const token = nuevoToken();
@@ -298,10 +310,14 @@ export class MotorAgendaWeb {
 		});
 		const d = leido.dia;
 
+		// ── Desde aquí, síncrono hasta apuntarla ──
+		// Otra vez: el mismo intento pudo apuntarse mientras éste leía Turso.
+		const repetidaAlLeer = this.repeticion(p.intento);
+		if (repetidaAlLeer) return repetidaAlLeer;
+
 		const motivo = this.motivo(d, alta.dia_ymd, alta.hora);
 		if (motivo) return motivo;
 
-		// ── Desde aquí, síncrono hasta apuntarla ──
 		const ahoraMs = Date.now();
 		darPorVistas(this.sql, [...d.idsEnTurso, ...leido.delCorreo], ahoraMs);
 
@@ -319,7 +335,15 @@ export class MotorAgendaWeb {
 		// El enlace vale hasta un día después de la reserva. La hora es de pared del negocio y aquí se
 		// lee como UTC: un día y medio de margen cubre cualquier desfase.
 		const caducaMs = Date.parse(`${alta.dia_ymd}T${alta.hora}:00Z`) + 36 * 3_600_000;
-		this.ctx.storage.transactionSync(() =>
+		const respuesta = {
+			id_reserva: idReserva,
+			codigo: codigoDeReserva(idReserva),
+			dia: alta.dia_ymd,
+			hora: alta.hora,
+			personas: alta.personas,
+			mesa: leido.numero,
+		};
+		this.ctx.storage.transactionSync(() => {
 			apuntarAlta(
 				this.sql,
 				{
@@ -344,22 +368,20 @@ export class MotorAgendaWeb {
 					estado: "pendiente",
 				},
 				{ tokenHash, caducaMs },
-			),
-		);
+			);
+			if (p.intento) apuntarIntento(this.sql, p.intento, respuesta, ahoraMs);
+		});
 		// ── Fin del bloque ──
 
 		this.avisarALaMain(p.tenantId);
 		await this.asegurarAlarma();
-		return {
-			ok: true,
-			id_reserva: idReserva,
-			codigo: codigoDeReserva(idReserva),
-			dia: alta.dia_ymd,
-			hora: alta.hora,
-			personas: alta.personas,
-			mesa: leido.numero,
-			token,
-		};
+		return { ok: true, ...respuesta, token, repetida: false };
+	}
+
+	/** Lo que contestó ya ese intento, si acabó en reserva. */
+	private repeticion(intento: string | null | undefined): ResultadoReservar | null {
+		const r = intento ? respuestaDelIntento(this.sql, intento, Date.now()) : null;
+		return r ? { ok: true, ...r, token: null, repetida: true } : null;
 	}
 
 	/** El resumen para la página de cancelar. */

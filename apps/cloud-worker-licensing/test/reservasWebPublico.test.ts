@@ -264,6 +264,30 @@ describe("las rutas públicas de la reserva web", () => {
 		});
 	});
 
+	it("POST /reservas: con la misma Idempotency-Key, la misma reserva; una mal formada no cuenta", async () => {
+		await conNegocio("publico-reservar-intento", async (sql) => {
+			const alta = (clave: string, cuerpo = ALTA) =>
+				app.request(
+					`${BASE}/reservas`,
+					{ method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": clave }, body: JSON.stringify(cuerpo) },
+					ENV,
+				);
+			const clave = "5b0e2f8c-6d1a-4c3e-9f7b-2a4d6e8f0a1c";
+			const primera = (await (await alta(clave)).json()) as any;
+			eventos.length = 0;
+			const res = await alta(clave, { ...ALTA, id_mesa: "m4" });
+			expect(res.status).toBe(200);
+			const repetida = (await res.json()) as any;
+			expect(Object.keys(repetida).sort()).toEqual(["codigo", "dia", "hora", "mesa", "ok", "personas"]);
+			expect(repetida).toEqual(primera);
+			expect(eventos.map((e) => e.event)).toEqual(["reserva_web_alta_repetida"]);
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
+
+			// Una clave que no tiene la forma de una se ignora: es un alta más, y la mesa ya no está libre.
+			expect((await alta("corta")).status).toBe(409);
+		});
+	});
+
 	it("POST /reservas: lo que no valida es un 400 y no llega a la agenda", async () => {
 		await conNegocio("publico-reservar-invalido", async (sql) => {
 			for (const malo of [{ ...ALTA, email: "no-es-correo" }, { ...ALTA, personas: "2" }, { ...ALTA, nombre: { toString: null } }]) {
