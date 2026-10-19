@@ -29,12 +29,17 @@ impl SqliteTicketsRepository {
 }
 
 /// La cabecera del cobro. El origen se arma aquí y no en la pantalla para que una copia diga
-/// exactamente lo mismo que el original.
+/// exactamente lo mismo que el original. La mesa va con su nombre, que en la Main ya suele ser
+/// «Mesa 5»: sólo a un número a secas se le antepone «Mesa» (la regla de `@tpv/plano/nombre`).
 const SQL_PAGO: &str = r#"
     SELECT
       COALESCE(p.Numero_Ticket, ''),
       COALESCE(p.Metodo_Pago, ''),
-      CASE WHEN m.Numero_Mesa IS NOT NULL THEN 'Mesa ' || m.Numero_Mesa ELSE 'Barra' END,
+      CASE
+        WHEN m.Numero_Mesa IS NULL THEN 'Barra'
+        WHEN m.Numero_Mesa <> '' AND m.Numero_Mesa NOT GLOB '*[^0-9]*' THEN 'Mesa ' || m.Numero_Mesa
+        ELSE m.Numero_Mesa
+      END,
       CASE WHEN COALESCE(p.Estado, 'ACTIVO') = 'ANULADO' THEN 1 ELSE 0 END,
       COALESCE(p.Fecha_Hora, ''),
       CASE WHEN p.ID_Pago_Origen IS NOT NULL THEN 1 ELSE 0 END
@@ -420,6 +425,13 @@ mod tests {
 
         let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
         assert_eq!(t.origen, "Mesa 4");
+
+        // Con el nombre que propone la Main, o uno propio, va tal cual: nada de «Mesa Mesa 4».
+        for (nombre, origen) in [("Mesa 4", "Mesa 4"), ("Ventana", "Ventana")] {
+            sembrar(&db, &[&format!("UPDATE Mesas SET Numero_Mesa = '{nombre}' WHERE ID_Mesa = 'mesa';")]).await;
+            let t = repo(&db).ticket_de_pago("pago", None).await.unwrap().unwrap();
+            assert_eq!(t.origen, origen);
+        }
     }
 
     #[tokio::test]

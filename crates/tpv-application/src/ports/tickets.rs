@@ -45,7 +45,7 @@ pub struct TicketDePago {
     /// `Pagos.Numero_Ticket`. Vacío en un cobro anterior a la numeración.
     pub numero_ticket: String,
     pub metodo_pago: String,
-    /// `Mesa 5` / `Barra`.
+    /// `Mesa 5` / `Terraza 3` / `Barra`.
     pub origen: String,
     pub anulado: bool,
     /// Es la devolución de parte de otro cobro (`Pagos.ID_Pago_Origen`): sus líneas son las
