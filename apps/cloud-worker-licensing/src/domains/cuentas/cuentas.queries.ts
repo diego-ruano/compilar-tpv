@@ -101,13 +101,15 @@ const entradasInner = (whereRango: string) => `
 		substr(p.Fecha_Hora, 1, 16) AS fecha_hora,
 		p.Fecha_Hora AS orden,
 		-- RI-52: un ticket de barra se reconoce por su canal (espejo de entradas_inner en la Main). La
-		-- mesa va con su nombre; sólo a un número a secas se le antepone «Mesa».
+		-- mesa va con su nombre; sólo a un número a secas se le antepone «Mesa» (GLOB deja de mirar en un
+		-- NUL: sin el instr, «7␀B» pasaría por número).
 		(
 			CASE WHEN p.ID_Pago_Origen IS NOT NULL THEN 'Devolución · ' ELSE '' END
 			||
 			CASE
 				WHEN c.Canal = 'BARRA' THEN 'Barra'
 				WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' AND m.Numero_Mesa NOT GLOB '*[^0-9]*'
+					AND instr(m.Numero_Mesa, char(0)) = 0
 					THEN 'Mesa ' || m.Numero_Mesa
 				WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN m.Numero_Mesa
 				ELSE 'Venta'

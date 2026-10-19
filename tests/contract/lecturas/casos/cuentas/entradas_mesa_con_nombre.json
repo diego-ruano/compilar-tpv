@@ -1,17 +1,20 @@
 {
-  "descripcion": "El origen de un cobro de mesa lleva el nombre de la mesa: a un numero a secas ('7') se le antepone 'Mesa'; el que propone la Main al crearla ('Mesa 3') y uno propio ('Terraza 2') van tal cual, sin salir 'Mesa Mesa 3'.",
+  "descripcion": "El origen de un cobro de mesa lleva el nombre de la mesa: a un numero a secas ('7') se le antepone 'Mesa'; el que propone la Main al crearla ('Mesa 3') y uno propio ('Terraza 2') van tal cual, sin salir 'Mesa Mesa 3'. Un nombre con un NUL dentro ('7', NUL, 'B') tampoco pasa por numero: GLOB deja de mirar en el NUL.",
   "lectura": "cuentas.entradas",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-num', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-def', 'zona-1', 'Mesa 3', 4, 100, 0, 'rect', 80, 80);",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-nom', 'zona-1', 'Terraza 2', 4, 200, 0, 'rect', 80, 80);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-nul', 'zona-1', '7' || char(0) || 'B', 4, 300, 0, 'rect', 80, 80);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-num', 'MESA', 'mesa-num', '2026-05-10 09:00:00', 'Pagada');",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-def', 'MESA', 'mesa-def', '2026-05-10 09:00:00', 'Pagada');",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-nom', 'MESA', 'mesa-nom', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-nul', 'MESA', 'mesa-nul', '2026-05-10 09:00:00', 'Pagada');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-num', 'com-num', '2026-05-10 10:00:00', 'Efectivo', 1000, 'total');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-def', 'com-def', '2026-05-10 11:00:00', 'Tarjeta', 2000, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-nom', 'com-nom', '2026-05-10 12:00:00', 'Efectivo', 3000, 'total');"
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-nom', 'com-nom', '2026-05-10 12:00:00', 'Efectivo', 3000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-nul', 'com-nul', '2026-05-10 13:00:00', 'Efectivo', 4000, 'total');"
   ],
   "entrada": { "del": "2026-05-01", "al": "2026-05-31", "q": null }
 }

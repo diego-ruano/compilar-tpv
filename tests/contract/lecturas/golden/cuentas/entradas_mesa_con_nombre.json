@@ -3,6 +3,20 @@
     {
       "anulado_en": null,
       "anulado_por": null,
+      "cliente": "7\u0000B",
+      "devuelto": 0,
+      "es_devolucion": false,
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-10 13:00",
+      "id": "pago-nul",
+      "importe": 4000,
+      "metodo": "Efectivo",
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
+    },
+    {
+      "anulado_en": null,
+      "anulado_por": null,
       "cliente": "Terraza 2",
       "devuelto": 0,
       "es_devolucion": false,
