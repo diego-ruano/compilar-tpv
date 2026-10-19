@@ -77,8 +77,21 @@ export function enlaceDeCancelar(origen: string, clave: string, token: string): 
 	return `${origen}/reservas-web/v1/w/${encodeURIComponent(clave)}/cancelar#t=${token}`;
 }
 
-/** Envía un correo de la reserva web, si no ha salido ya y no pasa de los topes. */
+/**
+ * Envía un correo de la reserva web, si no ha salido ya y no pasa de los topes. No lanza nunca: quien
+ * llama ya ha hecho lo importante (reservar, cancelar) y un correo no puede convertirlo en un error.
+ */
 export async function enviarCorreoReservaWeb(env: Env, correo: Correo): Promise<ResultadoCorreo> {
+	try {
+		return await enviar(env, correo);
+	} catch (e: any) {
+		capturarError(e, "reservas_web.correo");
+		console.error("[reservas-web] el correo no ha salido:", correo.tipo, String(e?.message || e));
+		return "fallido";
+	}
+}
+
+async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 	const para = correo.para.trim().toLowerCase();
 	const db = getDb(env);
 	if (await yaSalio(db, correo.id)) return "ya_enviado";

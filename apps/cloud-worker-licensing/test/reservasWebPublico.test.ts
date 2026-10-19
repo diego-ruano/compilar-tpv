@@ -5,7 +5,8 @@
 // puerta (`puerta.ts`) tiene sus propios tests (`reservasWebPuerta.test.ts`): aquí se deja pasar.
 // Lo que se fija:
 //   · lo que devuelve cada ruta, y que ninguna respuesta lleva datos personales de una reserva;
-//   · que el alta no devuelve el token del enlace de cancelar (sólo viaja en el correo);
+//   · que el alta no devuelve el token del enlace de cancelar (sólo viaja en el correo), y que el
+//     correo de confirmación va a la dirección del alta con un enlace que abre esa reserva;
 //   · los rechazos de la agenda salen con su identificador y su estado.
 
 import { env as entorno } from "cloudflare:test";
@@ -14,6 +15,8 @@ import { Hono } from "hono";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enLaAgenda, lectorSobre } from "./helpers/agenda";
+import { clienteSobre } from "./helpers/clienteSql";
+import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 
@@ -52,6 +55,14 @@ vi.mock("../src/observability/axiom", async (importOriginal) => {
 	};
 });
 
+/** La base central de la prueba en curso (`email_sends`), en el mismo SQLite de la agenda. */
+let baseCentral: any = null;
+
+vi.mock("../src/server/db", async (original) => ({
+	...(await (original as any)()),
+	getDb: () => baseCentral,
+}));
+
 vi.mock("../src/durableObjects/agendaWeb", async (importOriginal) => {
 	const original = await importOriginal<typeof import("../src/durableObjects/agendaWeb")>();
 	return { ...original, agendaDe: () => enCurso!.motor };
@@ -61,7 +72,20 @@ const { reservasWebPublicoRoutes } = await import("../src/domains/reservas_web/p
 
 const app = new Hono();
 app.route("/v1/publico/reservas", reservasWebPublicoRoutes);
-const ENV = { ...(entorno as any), TURNSTILE_SITE_KEY: "0xPRUEBA" };
+/** Los correos que han salido, y si el binding tiene que fallar. */
+const enviados: any[] = [];
+let correoCaido = false;
+const ENV = {
+	...(entorno as any),
+	TURNSTILE_SITE_KEY: "0xPRUEBA",
+	EMAIL_RESERVAS_FROM_ADDRESS: "reservas@altaria.test",
+	EMAIL: {
+		send: async (m: any) => {
+			if (correoCaido) throw Object.assign(new Error("caído"), { code: "E_INTERNAL" });
+			enviados.push(m);
+		},
+	},
+};
 
 const BASE = "/v1/publico/reservas/rw_AAAAAAAAAAAAAAAAAAAAAA";
 
@@ -112,10 +136,15 @@ async function conNegocio(nombre: string, prueba: (sql: SqlStorage, motor: any) 
 		const leer = lectorSobre(state, () => AHORA);
 		motor.leer = leer;
 		enCurso = { motor, leer };
+		prepararPlanoDeControl(sql);
+		baseCentral = clienteSobre(sql, state.storage);
+		enviados.length = 0;
+		correoCaido = false;
 		try {
 			await prueba(sql, motor);
 		} finally {
 			enCurso = null;
+			baseCentral = null;
 		}
 	});
 }
@@ -246,8 +275,8 @@ describe("las rutas públicas de la reserva web", () => {
 		await conNegocio("publico-reservar", async () => {
 			const { status, json } = await pedir("/reservas", ALTA);
 			expect(status).toBe(200);
-			expect(Object.keys(json).sort()).toEqual(["codigo", "dia", "hora", "mesa", "ok", "personas"]);
-			expect(json).toMatchObject({ ok: true, dia: DIA, hora: "21:00", personas: 2, mesa: "2" });
+			expect(Object.keys(json).sort()).toEqual(["codigo", "correo", "dia", "hora", "mesa", "ok", "personas"]);
+			expect(json).toMatchObject({ ok: true, dia: DIA, hora: "21:00", personas: 2, mesa: "2", correo: true });
 			expect(json.codigo).toMatch(/^[0-9A-F]{6}$/);
 			// A Axiom, el id y nada de quien reserva.
 			const alta = eventos.find((e) => e.event === "reserva_web_alta");
@@ -278,13 +307,47 @@ describe("las rutas públicas de la reserva web", () => {
 			const res = await alta(clave, { ...ALTA, id_mesa: "m4" });
 			expect(res.status).toBe(200);
 			const repetida = (await res.json()) as any;
-			expect(Object.keys(repetida).sort()).toEqual(["codigo", "dia", "hora", "mesa", "ok", "personas"]);
-			expect(repetida).toEqual(primera);
+			// La misma reserva; del correo no se sabe (salió con el alta de verdad) y no vuelve a salir.
+			expect(repetida).toEqual({ ...primera, correo: null });
+			expect(enviados).toHaveLength(1);
 			expect(eventos.map((e) => e.event)).toEqual(["reserva_web_alta_repetida"]);
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
 
 			// Una clave que no tiene la forma de una se ignora: es un alta más, y la mesa ya no está libre.
 			expect((await alta("corta")).status).toBe(409);
+		});
+	});
+
+	it("POST /reservas: la confirmación va a la dirección del alta, sin lo que escribió, con un enlace que abre su reserva", async () => {
+		await conNegocio("publico-reservar-correo", async () => {
+			const { json } = await pedir("/reservas", ALTA);
+			expect(enviados).toHaveLength(1);
+			const m = enviados[0];
+			expect(m).toMatchObject({ to: "ana@correo.es", from: { email: "reservas@altaria.test", name: "Bar Pepe" } });
+			expect(m.text).toContain(json.codigo);
+			// Ni el nombre, ni el teléfono, ni la nota: sólo datos estructurados.
+			for (const p of ["Ana", "600112233", "600 112 233", "bebé"]) {
+				expect(m.text, p).not.toContain(p);
+				expect(m.html, p).not.toContain(p);
+			}
+			// El enlace, con el token en el fragmento, abre la página de cancelar de esta reserva.
+			const linea = String(m.text)
+				.split("\n")
+				.find((l) => l.startsWith("Cancelar la reserva: "));
+			const enlace = new URL(linea!.slice("Cancelar la reserva: ".length));
+			expect(enlace.pathname).toBe("/reservas-web/v1/w/rw_AAAAAAAAAAAAAAAAAAAAAA/cancelar");
+			const token = enlace.hash.slice("#t=".length);
+			expect((await pedir("/reserva", { token })).json).toMatchObject({ ok: true, dia: DIA, hora: "21:00", estado: "confirmada" });
+		});
+	});
+
+	it("POST /reservas: si el correo no sale, la reserva sigue y la respuesta lo dice", async () => {
+		await conNegocio("publico-reservar-sin-correo", async (sql) => {
+			correoCaido = true;
+			const { status, json } = await pedir("/reservas", ALTA);
+			expect(status).toBe(200);
+			expect(json).toMatchObject({ ok: true, correo: false });
+			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
 		});
 	});
 

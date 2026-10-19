@@ -16,6 +16,9 @@
 // libres, reservar, cancelar), lo decide la agenda del negocio. Ninguna respuesta lleva datos
 // personales de una reserva, y el token del enlace sólo viaja en el correo (§4.8): `/reserva` va
 // por POST para que no salga en ninguna URL ni en ningún log.
+//
+// Los correos al cliente (`correos.ts`) salen de aquí al reservar y al cancelar, y van a la
+// dirección del alta: nunca a una que llegue en el cuerpo de otra cosa.
 
 import { Hono } from "hono";
 
@@ -27,6 +30,7 @@ import { reportarReservaWeb } from "../../observability/axiom";
 import { consulta, cuerpo } from "../../lib/validacion";
 import { diasAbiertos, horizonte, maxPersonas, motivoDelDia, tramosDelDia } from "./disponibilidad";
 import { horaDelNegocio } from "./horaDelNegocio";
+import { enlaceDeCancelar, enviarCorreoReservaWeb, negocioDelCorreo, type NegocioDelCorreo } from "./correos";
 import { ajustesWeb, cierresEntre, mesasYFranjas, negocioPublico, planoPublico } from "./lecturas";
 import { limitadorAltas, puertaPublica, topeDelCuerpo, verificacionHumana, type PublicoVars } from "./puerta";
 import {
@@ -119,6 +123,16 @@ reservasWebPublicoRoutes.get(
 	},
 );
 
+/** Lo del negocio para un correo. Si no se puede leer, el correo sale igual, sin ello. */
+async function negocioParaElCorreo(c: any, tenantId: string): Promise<NegocioDelCorreo> {
+	try {
+		return await lecturaConHora(c.env, tenantId, horaDelNegocio, (db) => negocioDelCorreo(db));
+	} catch (e: any) {
+		console.warn("[reservas-web] no se ha podido leer el negocio para el correo:", String(e?.message || e));
+		return { nombre: "", direccion: "", telefono: "", correo: null };
+	}
+}
+
 /** Una `Idempotency-Key` del widget: un UUID, o algo de su estilo. */
 const CLAVE_DE_INTENTO = /^[A-Za-z0-9_-]{16,64}$/;
 
@@ -142,8 +156,26 @@ reservasWebPublicoRoutes.post(
 			return rechazada(c, r);
 		}
 		anotar(c, { event: r.repetida ? "reserva_web_alta_repetida" : "reserva_web_alta", tenant_id: tenantId, id_reserva: r.id_reserva });
-		// El token del enlace de cancelar NO va en la respuesta: sólo en el correo (fase 5).
-		return c.json({ ok: true, codigo: r.codigo, dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa });
+
+		// La confirmación, con el enlace de cancelar: el token NO va en la respuesta, sólo aquí. Una
+		// repetición ya no lo tiene (de él sólo queda el hash): su correo fue el del alta de verdad, y
+		// `correo: null` dice que no se sabe si llegó. Un correo que falla no deshace la reserva: el
+		// widget lo dice y enseña el código.
+		let correo: boolean | null = null;
+		if (r.token) {
+			const enviado = await enviarCorreoReservaWeb(c.env, {
+				tenantId,
+				id: `rw:confirmacion:${r.id_reserva}`,
+				tipo: "confirmacion",
+				para: alta.email,
+				negocio: await negocioParaElCorreo(c, tenantId),
+				reserva: { dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa, codigo: r.codigo },
+				enlace: enlaceDeCancelar(new URL(c.req.url).origin, c.req.param("clave"), r.token),
+				dispositivo: "web",
+			});
+			correo = enviado === "enviado" || enviado === "ya_enviado";
+		}
+		return c.json({ ok: true, codigo: r.codigo, dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa, correo });
 	},
 );
 
