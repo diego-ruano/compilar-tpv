@@ -414,6 +414,8 @@ Desde el worker, con el binding `EMAIL`:
 - **Sólo datos estructurados**: negocio, dirección, teléfono, día, hora, personas y mesa. Nada que
   haya escrito el visitante, tampoco su nombre: un formulario público que mete texto libre en un
   correo de nuestro dominio es una vía de spam.
+- La mesa, como en el widget: con el nombre que tiene en la Main, y «Mesa» delante sólo si ese
+  nombre es un número a secas (`nombreDeMesa`, `@tpv/plano/nombre`). Si no, sale «Mesa Mesa 5».
 - Trazas en `email_sends` con `tipo = 'reserva_web'`; tope diario por negocio y por destinatario.
 - **Un correo que falla no deshace la reserva**: se registra y la reserva sigue confirmada.
 
