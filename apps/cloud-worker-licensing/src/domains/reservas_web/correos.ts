@@ -153,7 +153,8 @@ const ENVIANDO_MAX_MS = 5 * 60_000;
  *   · `fallido`: la base central no responde. Sin ella no se sabe si ya salió, así que no se envía:
  *     quien llama lo repite si puede. Lo de negocio (la reserva, la cancelación) ya está hecho.
  *
- * Uno que falló (`ok = 0`) se puede volver a reservar. Nunca `INSERT OR REPLACE`.
+ * Uno que falló (`ok = 0`) se puede volver a reservar, y entonces cuenta para el destinatario al que
+ * sale ahora (el cliente pudo corregir su correo entre un intento y otro). Nunca `INSERT OR REPLACE`.
  */
 async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | Exclude<ResultadoCorreo, "enviado">> {
 	const ahora = Date.now();
@@ -167,7 +168,8 @@ async function reservar(db: Sql, correo: Correo, para: string): Promise<"mio" | 
 			        AND (SELECT COUNT(*) FROM email_sends
 			             WHERE to_email = ?4 AND tipo = 'reserva_web' AND id <> ?1 AND sent_at_ms > ?7
 			               AND (ok = 1 OR (error_code = 'enviando' AND sent_at_ms > ?6))) < ?9
-			      ON CONFLICT(id) DO UPDATE SET error_code = 'enviando', sent_at_ms = excluded.sent_at_ms
+			      ON CONFLICT(id) DO UPDATE SET error_code = 'enviando', sent_at_ms = excluded.sent_at_ms,
+			                                    to_email = excluded.to_email, device_id = excluded.device_id
 			      WHERE email_sends.ok = 0
 			        AND (email_sends.error_code IS NULL OR email_sends.error_code <> 'enviando' OR email_sends.sent_at_ms <= ?6);`,
 			args: [

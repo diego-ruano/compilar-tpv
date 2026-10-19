@@ -301,6 +301,17 @@ describe("los topes", () => {
 		expect(enviados).toHaveLength(1);
 	});
 
+	it("un reintento a otra dirección cuenta para la dirección a la que sale", async () => {
+		const bueno = correoFalso();
+		const r = await conBase("reintento-otra", async (sql) => {
+			await enviarCorreoReservaWeb(ENV(correoFalso(true)), correo({ para: "vieja@correo.es" }));
+			await enviarCorreoReservaWeb(ENV({ EMAIL: bueno.EMAIL }), correo({ para: "nueva@correo.es" }));
+			return sql.exec(`SELECT to_email, ok FROM email_sends;`).toArray();
+		});
+		expect(r).toEqual([{ to_email: "nueva@correo.es", ok: 1 }]);
+		expect(bueno.enviados.map((m) => m.to)).toEqual(["nueva@correo.es"]);
+	});
+
 	it("no cuentan los que no salieron, los de ayer ni los pedidos", async () => {
 		const falso = correoFalso();
 		const r = await conBase("tope-no-cuentan", async (sql) => {
