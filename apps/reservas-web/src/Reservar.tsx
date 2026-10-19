@@ -28,6 +28,13 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	// Cada vez que se elige un día se pide su horario; si llega tarde la respuesta de un día que ya
 	// no es el elegido, se tira (si no, se le pondrían a un día las horas de otro).
 	const peticionDia = useRef(0);
+	// Lo mismo con la búsqueda de mesas: si mientras busca cambia el día, la hora o las personas, lo
+	// que llegue es de otra pregunta y no se aplica.
+	const peticionMesas = useRef(0);
+	const olvidarBusqueda = () => {
+		peticionMesas.current++;
+		setOcupado(false);
+	};
 	const [hora, setHora] = useState<string>("");
 	const maxPersonas = Math.max(1, info.max_personas);
 	const [personas, setPersonas] = useState(Math.min(2, maxPersonas));
@@ -54,6 +61,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 
 	async function elegirDia(d: string) {
 		const esta = ++peticionDia.current;
+		olvidarBusqueda();
 		setDia(d);
 		setTramos(null);
 		setError(null);
@@ -69,19 +77,21 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 
 	async function buscarMesas(h = hora) {
 		if (!dia || !h) return;
+		const esta = ++peticionMesas.current;
 		setOcupado(true);
 		setError(null);
 		try {
 			const [p, d] = await Promise.all([plano ? Promise.resolve(plano) : api.plano(), api.disponibles(dia, h, personas)]);
+			if (esta !== peticionMesas.current) return;
 			setPlano(p);
 			setDisponibles(d);
 			setHora(h);
 			setMesa(null);
 			setPaso("mesa");
 		} catch (e) {
-			fallo(e);
+			if (esta === peticionMesas.current) fallo(e);
 		} finally {
-			setOcupado(false);
+			if (esta === peticionMesas.current) setOcupado(false);
 		}
 	}
 
@@ -141,7 +151,10 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 					<div className="flex items-center justify-between gap-3">
 						<span className="text-sm font-semibold">Personas</span>
 						<div className="flex items-center gap-2">
-							<Boton variante="secundario" aria-label="Una persona menos" disabled={personas <= 1} onClick={() => setPersonas(personas - 1)}>
+							<Boton variante="secundario" aria-label="Una persona menos" disabled={personas <= 1} onClick={() => {
+									olvidarBusqueda();
+									setPersonas(personas - 1);
+								}}>
 								−
 							</Boton>
 							<span aria-live="polite" className="w-8 text-center text-base font-bold">
@@ -151,7 +164,10 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 								variante="secundario"
 								aria-label="Una persona más"
 								disabled={personas >= maxPersonas}
-								onClick={() => setPersonas(personas + 1)}
+								onClick={() => {
+									olvidarBusqueda();
+									setPersonas(personas + 1);
+								}}
 							>
 								+
 							</Boton>
@@ -173,7 +189,10 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 										className={CAMPO}
 										value={hora}
 										aria-invalid={!horaValida}
-										onChange={(e) => setHora(e.target.value)}
+										onChange={(e) => {
+											olvidarBusqueda();
+											setHora(e.target.value);
+										}}
 									/>
 									<span className={`block text-xs ${horaValida ? "text-fg-muted" : "text-danger"}`}>
 										{horaValida ? "Se puede llegar " : "A esa hora no se puede. Se puede llegar "}

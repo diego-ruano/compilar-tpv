@@ -209,6 +209,33 @@ describe("reservar desde la web", () => {
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 		expect(await screen.findByText("Reservas no disponibles.")).toBeInTheDocument();
 	});
+	it("si cambia las personas mientras busca mesas, lo que llegue de la búsqueda anterior no se aplica", async () => {
+		let soltar!: () => void;
+		const lenta = new Promise<void>((r) => (soltar = r));
+		simular({
+			[`${BASE}/negocio`]: () => INFO,
+			[`${BASE}/dia?dia=2026-11-20`]: () => ({ ok: true, dia: "2026-11-20", tramos: [{ desde: "19:40", hasta: "21:50" }] }),
+			[`${BASE}/plano`]: () => PLANO,
+			[`${BASE}/disponibles`]: async () => {
+				await lenta;
+				return { ok: true, mesas: ["m2"], alternativas: [] };
+			},
+		});
+		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
+
+		fireEvent.click(await screen.findByRole("button", { name: "2026-11-20" }));
+		await screen.findByDisplayValue("19:40");
+		fireEvent.click(screen.getByRole("button", { name: "Ver mesas" }));
+		await screen.findByRole("button", { name: "Buscando…" });
+		// Cambia de idea antes de que conteste.
+		fireEvent.click(screen.getByRole("button", { name: "Una persona más" }));
+		soltar();
+		await new Promise((r) => setTimeout(r, 20));
+		// Sigue en el primer paso, con 3 personas, sin el plano de la pregunta de 2.
+		expect(screen.getByText("3", { selector: "span[aria-live]" })).toBeInTheDocument();
+		expect(screen.queryByRole("button", { name: "Mesa 2 · 2 plazas" })).toBeNull();
+		expect(screen.getByRole("button", { name: "Ver mesas" })).toBeEnabled();
+	});
 });
 
 describe("cancelar desde el enlace", () => {
