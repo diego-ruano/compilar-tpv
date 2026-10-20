@@ -180,84 +180,91 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 					<h2 ref={titulo} tabIndex={-1} className="text-base font-bold outline-none">
 						¿Qué día?
 					</h2>
-					{info.dias_abiertos.length === 0 ? (
-						<Aviso tono="warning">No quedan días para reservar por internet. Llama al restaurante.</Aviso>
-					) : (
-						<Calendario
-							abiertos={info.dias_abiertos}
-							primerDia={info.primer_dia}
-							ultimoDia={info.ultimo_dia}
-							elegido={dia}
-							onElegir={(d) => void elegirDia(d)}
-						/>
-					)}
-
-					<div className="flex items-center justify-between gap-3">
-						<span className="text-sm font-semibold">Personas</span>
-						<div className="flex items-center gap-2">
-							<Boton variante="secundario" aria-label="Una persona menos" disabled={personas <= 1} onClick={() => {
-									olvidarBusqueda();
-									setPersonas(personas - 1);
-								}}>
-								−
-							</Boton>
-							<span aria-live="polite" className="w-8 text-center text-base font-bold">
-								{personas}
-							</span>
-							<Boton
-								variante="secundario"
-								aria-label="Una persona más"
-								disabled={personas >= maxPersonas}
-								onClick={() => {
-									olvidarBusqueda();
-									setPersonas(personas + 1);
-								}}
-							>
-								+
-							</Boton>
-						</div>
-					</div>
-
-					{dia && tramos === null && errorDia ? (
-						<div className="space-y-2">
-							<Aviso>{errorDia}</Aviso>
-							<Boton variante="secundario" onClick={() => void elegirDia(dia)}>
-								Reintentar
-							</Boton>
-						</div>
-					) : dia ? (
-						<label className="block space-y-1">
-							<span className="text-sm font-semibold">Hora de llegada</span>
-							{tramos === null ? (
-								<Cargando texto="Buscando horas…" />
-							) : tramos.length === 0 ? (
-								<Aviso tono="warning">Ese día no quedan horas para reservar.</Aviso>
+					{/* A lo ancho (el widget ocupa lo que le dé la web), el calendario a un lado y el resto al otro. */}
+					<div className="space-y-4 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0">
+						<div>
+							{info.dias_abiertos.length === 0 ? (
+								<Aviso tono="warning">No quedan días para reservar por internet. Llama al restaurante.</Aviso>
 							) : (
-								<>
-									<input
-										type="time"
-										step={60}
-										className={CAMPO}
-										value={hora}
-										aria-invalid={!horaValida}
-										onChange={(e) => {
-											olvidarBusqueda();
-											setHora(e.target.value);
-										}}
-									/>
-									<span className={`block text-xs ${horaValida ? "text-fg-muted" : "text-danger"}`}>
-										{horaValida ? "Se puede llegar " : "A esa hora no se puede. Se puede llegar "}
-										{textoDeTramos(tramos)}.
-									</span>
-								</>
+								<Calendario
+									abiertos={info.dias_abiertos}
+									primerDia={info.primer_dia}
+									ultimoDia={info.ultimo_dia}
+									elegido={dia}
+									onElegir={(d) => void elegirDia(d)}
+								/>
 							)}
-						</label>
-					) : null}
+						</div>
 
-					<div className="flex justify-end">
-						<Boton disabled={!dia || !horaValida || ocupado} onClick={() => void buscarMesas()}>
-							{ocupado ? "Buscando…" : "Ver mesas"}
-						</Boton>
+						<div className="space-y-4">
+							<div className="flex items-center justify-between gap-3">
+								<span className="text-sm font-semibold">Personas</span>
+								<div className="flex items-center gap-2">
+									<Boton variante="secundario" aria-label="Una persona menos" disabled={personas <= 1} onClick={() => {
+											olvidarBusqueda();
+											setPersonas(personas - 1);
+										}}>
+										−
+									</Boton>
+									<span aria-live="polite" className="w-8 text-center text-base font-bold">
+										{personas}
+									</span>
+									<Boton
+										variante="secundario"
+										aria-label="Una persona más"
+										disabled={personas >= maxPersonas}
+										onClick={() => {
+											olvidarBusqueda();
+											setPersonas(personas + 1);
+										}}
+									>
+										+
+									</Boton>
+								</div>
+							</div>
+
+							{dia && tramos === null && errorDia ? (
+								<div className="space-y-2">
+									<Aviso>{errorDia}</Aviso>
+									<Boton variante="secundario" onClick={() => void elegirDia(dia)}>
+										Reintentar
+									</Boton>
+								</div>
+							) : dia ? (
+								<label className="block space-y-1">
+									<span className="text-sm font-semibold">Hora de llegada</span>
+									{tramos === null ? (
+										<Cargando texto="Buscando horas…" />
+									) : tramos.length === 0 ? (
+										<Aviso tono="warning">Ese día no quedan horas para reservar.</Aviso>
+									) : (
+										<>
+											<input
+												type="time"
+												step={60}
+												className={CAMPO}
+												value={hora}
+												aria-invalid={!horaValida}
+												onChange={(e) => {
+													olvidarBusqueda();
+													setHora(e.target.value);
+												}}
+											/>
+											<span className={`block text-xs ${horaValida ? "text-fg-muted" : "text-danger"}`}>
+												{horaValida ? "Se puede llegar " : "A esa hora no se puede. Se puede llegar "}
+												{textoDeTramos(tramos)}.
+											</span>
+										</>
+									)}
+								</label>
+							) : null}
+
+							<div className="flex justify-end">
+								<Boton disabled={!dia || !horaValida || ocupado} onClick={() => void buscarMesas()}>
+									{ocupado ? "Buscando…" : "Ver mesas"}
+								</Boton>
+							</div>
+						</div>
 					</div>
 				</section>
 			) : null}
@@ -330,32 +337,34 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 					<h2 ref={titulo} tabIndex={-1} className="text-sm font-bold outline-none">
 						{diaCorto(dia)} · {hora} · {nombreDeMesa(mesa.numero)} · {personasTexto(personas)}
 					</h2>
-					<label className="block space-y-1">
-						<span className="text-sm font-semibold">Nombre</span>
-						<input className={CAMPO} value={nombre} maxLength={80} autoComplete="name" onChange={(e) => setNombre(e.target.value)} />
-					</label>
-					<label className="block space-y-1">
-						<span className="text-sm font-semibold">Correo</span>
-						<input
-							className={CAMPO}
-							type="email"
-							value={email}
-							maxLength={254}
-							autoComplete="email"
-							onChange={(e) => setEmail(e.target.value)}
-						/>
-					</label>
-					<label className="block space-y-1">
-						<span className="text-sm font-semibold">Teléfono</span>
-						<input
-							className={CAMPO}
-							type="tel"
-							value={telefono}
-							maxLength={25}
-							autoComplete="tel"
-							onChange={(e) => setTelefono(e.target.value)}
-						/>
-					</label>
+					<div className="space-y-3 md:grid md:grid-cols-2 md:gap-4 md:space-y-0">
+						<label className="block space-y-1">
+							<span className="text-sm font-semibold">Nombre</span>
+							<input className={CAMPO} value={nombre} maxLength={80} autoComplete="name" onChange={(e) => setNombre(e.target.value)} />
+						</label>
+						<label className="block space-y-1">
+							<span className="text-sm font-semibold">Correo</span>
+							<input
+								className={CAMPO}
+								type="email"
+								value={email}
+								maxLength={254}
+								autoComplete="email"
+								onChange={(e) => setEmail(e.target.value)}
+							/>
+						</label>
+						<label className="block space-y-1">
+							<span className="text-sm font-semibold">Teléfono</span>
+							<input
+								className={CAMPO}
+								type="tel"
+								value={telefono}
+								maxLength={25}
+								autoComplete="tel"
+								onChange={(e) => setTelefono(e.target.value)}
+							/>
+						</label>
+					</div>
 					<label className="block space-y-1">
 						<span className="text-sm font-semibold">Nota (opcional)</span>
 						<textarea className={CAMPO} value={nota} maxLength={200} rows={2} onChange={(e) => setNota(e.target.value)} />
