@@ -11,7 +11,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Prueba del widget de reservas</title>
     <style>
-      body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; background: #f6f1e9; color: #2b2118; }
+      body { font-family: system-ui, sans-serif; max-width: 1200px; margin: 2rem auto; padding: 0 1rem; background: #f6f1e9; color: #2b2118; }
+      form { max-width: 720px; }
       label { display: block; margin: .5rem 0 .25rem; font-weight: 600; }
       input { width: 100%; padding: .5rem; box-sizing: border-box; }
       button { margin-top: .75rem; padding: .5rem 1rem; }
@@ -26,6 +27,10 @@
       <input id="clave" name="clave" placeholder="rw_…" required />
       <label for="origen">Worker</label>
       <input id="origen" name="origen" value="https://tpv-api.altarialights.workers.dev" />
+      <label for="ancho">Ancho del hueco (CSS; vacío: todo el ancho)</label>
+      <input id="ancho" name="ancho" placeholder="p. ej. 900px o 100%" />
+      <label for="alto">Alto del hueco (CSS; vacío: crece con lo que ocupe)</label>
+      <input id="alto" name="alto" placeholder="p. ej. 700px" />
       <button type="submit">Cargar el widget</button>
     </form>
 
@@ -37,11 +42,19 @@
         var params = new URLSearchParams(location.search);
         var clave = params.get("clave");
         var origen = params.get("origen") || "https://tpv-api.altarialights.workers.dev";
+        var ancho = params.get("ancho") || "";
+        var alto = params.get("alto") || "";
         if (!clave) return;
         document.getElementById("clave").value = clave;
         document.getElementById("origen").value = origen;
+        document.getElementById("ancho").value = ancho;
+        document.getElementById("alto").value = alto;
         var div = document.createElement("div");
         div.setAttribute("data-negocio", clave);
+        // Como haría la web con su CSS: con alto, el widget lo llena y se desplaza por dentro.
+        if (ancho) div.style.width = ancho;
+        if (alto) div.style.height = alto;
+        div.style.outline = "1px dashed #b9a88f";
         document.getElementById("hueco").appendChild(div);
         var script = document.createElement("script");
         script.src = origen.replace(/\/$/, "") + "/reservas-web/v1/embed.js";

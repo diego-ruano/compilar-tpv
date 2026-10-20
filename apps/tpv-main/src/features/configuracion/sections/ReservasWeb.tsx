@@ -53,7 +53,8 @@ function CodigoParaLaWeb() {
 			<div className="text-sm font-semibold text-fg">Código para tu web</div>
 			<p className="mt-1 text-xs text-fg-muted">
 				Se pega una vez en la página de reservas de la web. Lo que cambies aquí llega a la web
-				solo, sin tocarla.
+				solo, sin tocarla. Ocupa todo el ancho de donde se pegue; para otro tamaño, dale al
+				`div` un ancho y un alto con CSS (por ejemplo `style="width: 900px; height: 700px"`).
 			</p>
 			{codigo ? (
 				<div className="mt-3 flex flex-col gap-2">

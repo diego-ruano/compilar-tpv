@@ -48,6 +48,45 @@ describe("embed.js", () => {
 		expect(Object.keys(window).filter((k) => !antes.has(k))).toEqual([]);
 	});
 
+	it("un hueco sin alto: el widget crece con lo que ocupe", () => {
+		document.body.innerHTML = `<div data-negocio="${CLAVE}"></div>`;
+		cargar();
+		const iframe = document.querySelector("iframe")!;
+		expect(iframe.style.position).toBe("");
+		expect(iframe.style.height).toBe("640px");
+	});
+
+	it("un hueco con alto en su CSS: el widget lo llena, y no hace caso a la altura del widget", () => {
+		document.body.innerHTML = `<div data-negocio="${CLAVE}" style="width: 900px; height: 700px"></div>`;
+		const hueco = document.querySelector("div")!;
+		// jsdom no maqueta: lo que mediría el navegador con ese CSS.
+		hueco.getBoundingClientRect = () => ({ width: 900, height: 700 }) as DOMRect;
+		cargar();
+		const iframe = document.querySelector("iframe")!;
+		expect(iframe.style.width).toBe("100%");
+		expect(iframe.style.height).toBe("100%");
+		expect(iframe.style.position).toBe("absolute");
+		// Encima del hueco: si no estaba posicionado, se posiciona para que el iframe cuente desde él.
+		expect(hueco.style.position).toBe("relative");
+
+		window.dispatchEvent(
+			new MessageEvent("message", {
+				origin: ORIGEN,
+				source: iframe.contentWindow as Window,
+				data: { tipo: "tpv-reservas-altura", altura: 1200 },
+			}),
+		);
+		expect(iframe.style.height).toBe("100%");
+	});
+
+	it("un hueco ya posicionado no se toca", () => {
+		document.body.innerHTML = `<div data-negocio="${CLAVE}" style="position: fixed; inset: 0"></div>`;
+		const hueco = document.querySelector("div")!;
+		hueco.getBoundingClientRect = () => ({ width: 1024, height: 768 }) as DOMRect;
+		cargar();
+		expect(hueco.style.position).toBe("fixed");
+	});
+
 	it("la altura sólo la cambia un mensaje de su origen y de su iframe, y con tope", () => {
 		document.body.innerHTML = `<div data-negocio="${CLAVE}"></div>`;
 		cargar();

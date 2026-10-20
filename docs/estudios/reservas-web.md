@@ -680,10 +680,21 @@ el mismo origen.
 <script src="https://tpv-api.altarialights.workers.dev/reservas-web/v1/embed.js" async></script>
 ```
 
-`embed.js` (vanilla, unos 2 KB) busca los `[data-negocio]`, mete en cada uno un iframe
-(`width: 100%`, sin borde, `title="Reservar mesa"`, `loading="lazy"`) y ajusta su altura con los
-mensajes `postMessage` que manda el widget (con un `ResizeObserver`), aceptando sólo los que vienen
-de su propio origen. No deja variables globales y no hace nada si se carga dos veces.
+`embed.js` (vanilla, unos 2 KB) busca los `[data-negocio]` y mete en cada uno un iframe (sin borde,
+`title="Reservar mesa"`, `loading="lazy"`). No deja variables globales y no hace nada si se carga dos
+veces. **El tamaño lo decide el `div`, con el CSS de la web:**
+
+- El ancho, siempre: el iframe ocupa el 100 % del `div`, y el widget usa todo ese ancho.
+- Sin alto (lo normal), crece con lo que ocupe cada paso: ajusta su altura con los mensajes
+  `postMessage` que manda el widget (con un `ResizeObserver`), aceptando sólo los de su propio origen
+  y de ese iframe.
+- Con alto (`height`, `min-height`, un flex que lo estira: lo que haga que el `div` vacío mida algo
+  al cargar el script), el iframe lo llena encima (`position: absolute`, y `relative` en el `div`
+  si no estaba posicionado) y el widget se desplaza por dentro.
+
+```html
+<div data-negocio="rw_…" style="width: 900px; height: 700px"></div>
+```
 
 ---
 
