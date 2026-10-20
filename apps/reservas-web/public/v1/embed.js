@@ -44,7 +44,14 @@
 		w.iframe.style.height = w.pedida + "px";
 		// Oculto (en una pestaña, en un menú cerrado): no se puede medir. Se mira al aparecer.
 		if (!w.hueco.getClientRects().length) return;
+		// Un ítem de flex o de grid no encoge por debajo de su contenido (`min-height: auto`): medido
+		// así, en una columna de alto fijo con `flex: 1` mediría lo que pide el widget y lo desbordaría.
+		// Mientras se mide, sin ese mínimo; uno puesto en el CSS (`min-height: 500px`) se respeta.
+		var minimoPropio = w.hueco.style.minHeight;
+		var sinMinimo = window.getComputedStyle(w.hueco).minHeight === "auto";
+		if (sinMinimo) w.hueco.style.minHeight = "0px";
 		var alto = Math.round(altoDelHueco(w.hueco));
+		if (sinMinimo) w.hueco.style.minHeight = minimoPropio;
 		if (alto > 0 && Math.abs(alto - w.pedida) > 1) w.iframe.style.height = alto + "px";
 	}
 

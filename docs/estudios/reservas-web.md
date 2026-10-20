@@ -694,8 +694,10 @@ veces. **El tamaño lo decide el `div`, con el CSS de la web:**
   manda con un `ResizeObserver`, aceptando sólo los de su propio origen y de ese iframe). Después se
   mide el contenido del `div`, sin padding ni bordes: si no mide lo mismo, es que su CSS le pone otro
   alto (`height`, `min-height`, `max-height`, un flex que lo estira), y el iframe lo llena y el
-  widget se desplaza por dentro. Se vuelve a mirar cada vez que el `div` cambia de tamaño (llega su
-  CSS, sale de una pestaña oculta); oculto, no se mide.
+  widget se desplaza por dentro. Mientras se mide, un `min-height: auto` (el de un ítem de flex o de
+  grid, que no encoge por debajo de su contenido) se deja a 0; uno puesto en el CSS se respeta. Se
+  vuelve a mirar cada vez que el `div` cambia de tamaño (llega su CSS, sale de una pestaña oculta);
+  oculto, no se mide.
 
 ```html
 <div data-negocio="rw_…" style="width: 900px; height: 700px"></div>

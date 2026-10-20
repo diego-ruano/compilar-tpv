@@ -37,14 +37,30 @@ const redimensionar = (el: Element) => avisar?.([{ target: el }]);
  * Lo que mediría el navegador: sin alto en el CSS, el contenido del hueco mide lo que el iframe que
  * lleva dentro; con él, lo que diga el CSS. `clientHeight` incluye el padding (no los bordes).
  */
-type Css = { alto?: number; minAlto?: number; maxAlto?: number; padding?: number; oculto?: boolean };
+type Css = {
+	alto?: number;
+	minAlto?: number;
+	maxAlto?: number;
+	padding?: number;
+	oculto?: boolean;
+	/**
+	 * Ítem de flex con `flex: 1` en una columna de este alto: con su `min-height: auto` no encoge por
+	 * debajo de su contenido; con `min-height: 0`, mide lo que le da la columna.
+	 */
+	enColumnaDe?: number;
+};
 function maquetar(hueco: HTMLElement, css: Css) {
 	hueco.style.padding = `${css.padding ?? 0}px`;
+	if (css.enColumnaDe !== undefined) hueco.style.minHeight = "auto";
 	Object.defineProperty(hueco, "clientHeight", {
 		configurable: true,
 		get: () => {
 			if (css.oculto) return 0;
 			const delIframe = parseInt(hueco.querySelector("iframe")?.style.height ?? "", 10) || 0;
+			if (css.enColumnaDe !== undefined) {
+				const minimoAuto = hueco.style.minHeight === "auto";
+				return minimoAuto ? Math.max(css.enColumnaDe, delIframe) : css.enColumnaDe;
+			}
 			let alto = css.alto ?? delIframe;
 			if (css.minAlto !== undefined) alto = Math.max(alto, css.minAlto);
 			if (css.maxAlto !== undefined) alto = Math.min(alto, css.maxAlto);
@@ -161,6 +177,16 @@ describe("el tamaño lo decide el hueco", () => {
 		expect(iframe.style.height).toBe("500px");
 		altura(iframe, 300);
 		expect(iframe.style.height).toBe("300px");
+	});
+
+	it("en una columna flex de alto fijo con `flex: 1`, coge lo que le da la columna", () => {
+		// Con su `min-height: auto`, medido con el iframe a lo que pide el widget, el hueco crecía con
+		// él y lo desbordaba.
+		const { hueco, iframe } = conHueco({ enColumnaDe: 300 });
+		altura(iframe, 900);
+		expect(iframe.style.height).toBe("300px");
+		// Y le deja su mínimo como estaba.
+		expect(hueco.style.minHeight).toBe("auto");
 	});
 
 	it("oculto (en una pestaña) no se queda a cero, y al aparecer coge su alto", () => {
