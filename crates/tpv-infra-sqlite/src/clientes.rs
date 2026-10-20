@@ -66,9 +66,11 @@ fn sql_overview_base() -> &'static str {
       SELECT
         r.ID_Cliente,
         COUNT(*) AS Total_Reservas,
+        -- Pendientes: las vivas (por llegar o con el cliente sentado) de hoy en adelante. Antes
+        -- contaba sólo ACTIVA, y toda reserva nace PROXIMA: casi siempre salía 0.
         SUM(
           CASE
-            WHEN UPPER(COALESCE(r.Estado,'')) = 'ACTIVA'
+            WHEN r.Estado IN ('PROXIMA','ACTIVA')
              AND date(r.Dia_YMD) >= date('now','localtime')
             THEN 1 ELSE 0
           END

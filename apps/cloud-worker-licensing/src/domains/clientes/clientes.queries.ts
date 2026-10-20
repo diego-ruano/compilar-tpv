@@ -42,7 +42,7 @@ function overviewBase(): string {
 				COUNT(*) AS total_reservas,
 				SUM(
 					CASE
-						WHEN UPPER(COALESCE(r.Estado,'')) = 'ACTIVA'
+						WHEN r.Estado IN ('PROXIMA','ACTIVA')
 							AND date(r.Dia_YMD) >= date('now','localtime')
 						THEN 1 ELSE 0
 					END
