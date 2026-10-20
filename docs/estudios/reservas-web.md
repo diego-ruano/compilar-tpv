@@ -699,9 +699,14 @@ veces. **El tamaño lo decide el `div`, con el CSS de la web:**
   los `div` se miden a la vez. Se vuelve a mirar cuando un `div` cambia de tamaño (llega su CSS,
   sale de una pestaña oculta), cuando cambian su `style` o su `class` (quitarle el alto no cambia
   ningún tamaño: el iframe ya medía eso), cuando cambia la ventana y al acabar de cargar la página;
-  oculto, no se mide. Lo único que no ve es que un antepasado cambie de clase y con ello le quite el
-  alto al `div` sin que cambie ningún tamaño: el widget se queda con el alto de antes, desplazándose
-  por dentro, hasta el próximo cambio de la ventana.
+  oculto, no se mide. Dos límites conocidos, sin arreglar a propósito:
+  - Que un antepasado cambie de clase y con ello le quite el alto al `div` sin que cambie ningún
+    tamaño: el widget se queda con el alto de antes, desplazándose por dentro, hasta el próximo cambio
+    de la ventana.
+  - Dos widgets con `flex: 1` en la misma columna de alto fijo se la reparten si los mete la misma
+    ejecución del script; si el segundo `div` se añade después y el script se vuelve a cargar para
+    él, cada ejecución mide sólo los suyos y pueden desbordarla. Coordinarlas obligaría a compartir
+    estado entre ejecuciones sin variables globales, y que se reajustaran entre sí podría no acabar.
 
 ```html
 <div data-negocio="rw_…" style="width: 900px; height: 700px"></div>
