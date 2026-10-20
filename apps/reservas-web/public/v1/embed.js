@@ -105,14 +105,39 @@
 	if (document.readyState !== "complete") window.addEventListener("load", ajustar);
 	ajustar();
 
+	/**
+	 * Una web justo al borde de su barra de desplazamiento: el widget crece, le sale la barra a la web,
+	 * el widget estrecha (el alto del plano sale del ancho; a 768 px cambia a una columna) y pide
+	 * menos, la barra se va, vuelve a pedir más… y parpadea sin fin. Si la altura vuelve a la de antes
+	 * en un momento, se queda con la mayor de las dos mientras siga yendo y viniendo entre ellas; otra
+	 * altura (otro paso, otro contenido) lo suelta.
+	 */
+	var VAIVEN_MS = 500;
+	function pedir(w, altura) {
+		var ahora = Date.now();
+		if (w.vaiven && (altura === w.vaiven[0] || altura === w.vaiven[1])) {
+			altura = Math.max(w.vaiven[0], w.vaiven[1]);
+		} else {
+			w.vaiven = null;
+			if (altura === w.anterior && altura !== w.pedida && ahora - w.cuando < VAIVEN_MS) {
+				w.vaiven = [altura, w.pedida];
+				altura = Math.max(altura, w.pedida);
+			}
+		}
+		if (altura === w.pedida) return;
+		w.anterior = w.pedida;
+		w.cuando = ahora;
+		w.pedida = altura;
+		ajustar();
+	}
+
 	window.addEventListener("message", function (e) {
 		if (e.origin !== origen) return;
 		var datos = e.data;
 		if (!datos || datos.tipo !== MENSAJE || typeof datos.altura !== "number") return;
 		for (var j = 0; j < widgets.length; j++) {
 			if (widgets[j].iframe.contentWindow === e.source) {
-				widgets[j].pedida = Math.min(Math.max(Math.round(datos.altura), 200), 4000);
-				ajustar();
+				pedir(widgets[j], Math.min(Math.max(Math.round(datos.altura), 200), 4000));
 			}
 		}
 	});

@@ -269,6 +269,44 @@ describe("el tamaño lo decide el hueco", () => {
 		expect(huecos.map((h) => h.style.minHeight)).toEqual(["auto", "auto"]);
 	});
 
+	it("si la altura va y viene entre dos valores (la barra de la web), se queda con la mayor", () => {
+		// La web, justo al borde de su barra: 900 la saca, el widget estrecha y pide 880, la barra se
+		// va, vuelve a pedir 900… Sin esto, parpadeaba sin fin.
+		const { iframe } = conHueco();
+		altura(iframe, 900);
+		altura(iframe, 880);
+		altura(iframe, 900);
+		expect(iframe.style.height).toBe("900px");
+		altura(iframe, 880);
+		expect(iframe.style.height).toBe("900px");
+		altura(iframe, 900);
+		expect(iframe.style.height).toBe("900px");
+		// Otra altura (otro paso) lo suelta.
+		altura(iframe, 600);
+		expect(iframe.style.height).toBe("600px");
+		altura(iframe, 640);
+		expect(iframe.style.height).toBe("640px");
+	});
+
+	it("volver a una altura de antes al cabo de un rato no es un vaivén", () => {
+		let ahora = 1_000_000;
+		const reloj = Date.now;
+		Date.now = () => ahora;
+		try {
+			const { iframe } = conHueco();
+			altura(iframe, 900);
+			ahora += 2000;
+			altura(iframe, 600);
+			ahora += 2000;
+			altura(iframe, 900);
+			ahora += 2000;
+			altura(iframe, 600);
+			expect(iframe.style.height).toBe("600px");
+		} finally {
+			Date.now = reloj;
+		}
+	});
+
 	it("sin ResizeObserver sigue funcionando con lo que mida al cargar", () => {
 		delete (globalThis as any).ResizeObserver;
 		const { iframe } = conHueco({ alto: 700 });

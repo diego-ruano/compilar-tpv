@@ -699,7 +699,10 @@ veces. **El tamaño lo decide el `div`, con el CSS de la web:**
   los `div` se miden a la vez. Se vuelve a mirar cuando un `div` cambia de tamaño (llega su CSS,
   sale de una pestaña oculta), cuando cambian su `style` o su `class` (quitarle el alto no cambia
   ningún tamaño: el iframe ya medía eso), cuando cambia la ventana y al acabar de cargar la página;
-  oculto, no se mide. Dos límites conocidos, sin arreglar a propósito:
+  oculto, no se mide. Si la altura que pide el widget va y vuelve entre dos valores en medio segundo
+  (una web justo al borde de su barra de desplazamiento: la barra estrecha el widget, el plano
+  encoge, la barra se va…), se queda con la mayor hasta que pida otra. Dos límites conocidos, sin
+  arreglar a propósito:
   - Que un antepasado cambie de clase y con ello le quite el alto al `div` sin que cambie ningún
     tamaño: el widget se queda con el alto de antes, desplazándose por dentro, hasta el próximo cambio
     de la ventana.
