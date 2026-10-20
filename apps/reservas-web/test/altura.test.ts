@@ -52,3 +52,15 @@ describe("la altura que pide el widget", () => {
 		expect(padre.postMessage).toHaveBeenCalledTimes(2);
 	});
 });
+
+describe("el ancho del widget no depende de su barra de desplazamiento", () => {
+	it("reserva siempre el hueco de la barra", async () => {
+		// Con un alto fijo en la web el widget se desplaza por dentro. Si la barra cambiase el ancho, el
+		// plano (cuyo alto sale del ancho) encogería, la barra se iría, volvería a crecer… y oscilaría.
+		// jsdom no maqueta: se comprueba que la regla sigue en la hoja de estilos.
+		const { readFileSync } = await import("node:fs");
+		const { resolve } = await import("node:path");
+		const css = readFileSync(resolve(process.cwd(), "src/estilos.css"), "utf8");
+		expect(css).toMatch(/:root\s*{[^}]*scrollbar-gutter:\s*stable/);
+	});
+});

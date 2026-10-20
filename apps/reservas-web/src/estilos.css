@@ -19,4 +19,11 @@ body {
 
 :root {
     color-scheme: light;
+    /*
+     * El hueco de la barra de desplazamiento, siempre, a los dos lados para que quede centrado. Con
+     * un alto fijo en la web el widget se desplaza por dentro, y una barra que aparece y desaparece
+     * cambia el ancho: el plano, cuyo alto sale del ancho, encogía, la barra se iba, volvía a crecer…
+     * y oscilaba. Con barras superpuestas (móviles, macOS) no ocupa nada.
+     */
+    scrollbar-gutter: stable both-edges;
 }
