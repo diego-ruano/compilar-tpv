@@ -564,10 +564,12 @@ Notificaciones (a los administradores, como la de «Nueva reserva»):
 ### 5.6 El calendario de reservas
 
 - Una etiqueta «Web» en las reservas con `origen = 'WEB'`.
-- Al cambiar día, hora, personas o mesa de una reserva web **que está por venir** (`PROXIMA`), una
-  doble confirmación: «Esta reserva se hizo desde la web. Se enviará un correo al cliente con el
-  cambio. ¿Seguro?». Una nota, la duración o una reserva ya sentada, terminada o cancelada no le
-  escriben al cliente, y no se pregunta (`features/reservas/reservaWeb.ts`).
+- Al cambiar día, hora, personas o mesa de una reserva web **que está por venir** (`PROXIMA` y con su
+  hora aún por llegar, la misma comparación con la que la cola descarta un aviso), una doble
+  confirmación: «Esta reserva se hizo desde la web. Se enviará un correo al cliente con el cambio.
+  ¿Seguro?». Al modificarla cuenta la hora nueva, que es la que lleva el correo. Una nota, la
+  duración o una reserva ya pasada, sentada, terminada o cancelada no le escriben al cliente, y no
+  se pregunta (`features/reservas/reservaWeb.ts`).
 - **Cancelar y borrar** son dos botones. Cancelar deja la reserva en la lista, atenuada, y sólo se
   cancela la que aún no ha llegado (`PROXIMA`); borrar la quita. **Una reserva web no se borra
   nunca**, ni por venir ni ya cerrada: queda constancia, la agenda libera la mesa al verla cancelada

@@ -1,8 +1,9 @@
 // Cliente único de TanStack Query (caché de lecturas del frontend).
 //
-// El TPV es **Local-First de un solo dispositivo**: los datos sólo cambian por mutaciones
-// de esta misma app, que invalidan las queries afectadas. Por eso:
-//  - `refetchOnWindowFocus: false` (la BD local no cambia "por detrás").
+// El TPV es **Local-First**: los datos cambian por mutaciones de esta misma app, que invalidan las
+// queries afectadas, o por lo que avisa Rust con `sync:cambio` (una Handy, las reservas web, un job),
+// que invalida por tablas (`syncStatements.ts`). Por eso:
+//  - `refetchOnWindowFocus: false` (nada cambia "por detrás" sin que se avise).
 //  - `staleTime` amplio: al navegar entre vistas la caché sirve los datos al instante y
 //    sólo se vuelve a consultar SQLite cuando una mutación invalida la clave.
 //  - `retry` bajo: un fallo contra el SQLite local es un error real, no un problema de red.

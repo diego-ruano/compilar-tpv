@@ -29,6 +29,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [MESAS-01](#mesas-01--el-plano-que-guarda-una-handy-no-pasa-la-validación-de-la-main) | 🔵 | El plano que guarda una Handy no pasa la validación de la Main | Sin empezar |
 | [MESAS-02](#mesas-02--el-plano-de-la-handy-no-enseña-las-reservas) | 🟡 | El plano de la Handy no enseña las reservas | Sin empezar |
+| [RES-05](#res-05--el-estado-por-defecto-de-una-reserva-es-activa) | 🔵 | El estado por defecto de una reserva en el esquema es `ACTIVA` | Sin empezar |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
@@ -409,6 +410,14 @@ Falta llevar la parte de las reservas al worker. Depende de «ahora», así que 
 salir de `X-Client-Now`, y el arnés de lectura no lo ve (siembra fechas fijas): necesita su propio
 test a los dos lados, o sacar el cálculo a `tpv-domain` con una tabla de casos compartida. Cuando
 esté, `useMesasMesaMeta` tiene que releer el plano cada minuto también en la Handy.
+
+### RES-05 · El estado por defecto de una reserva es ACTIVA
+
+`Reservas.Estado` lleva `DEFAULT 'ACTIVA'` en `0001_inicial.sql`, y `ACTIVA` es el cliente ya sentado:
+una reserva nueva es `PROXIMA`. Hoy no hace daño, porque todo `INSERT` de una reserva (la Main, el
+worker y el alta web) escribe el estado, pero una inserción que lo olvidara nacería sentada. Cambiarlo
+en SQLite obliga a reconstruir la tabla (no hay `ALTER COLUMN`), con sus triggers y sus índices, en
+una migración nueva.
 
 ---
 

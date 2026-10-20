@@ -57,7 +57,13 @@ también cuando las presenta `App`. Login y la estructura de arranque permanecen
 Durante una navegación diferida se conserva la pantalla actual y se indica la carga.
 
 - Un `QueryClient` (`shared/lib/queryClient.ts`): `staleTime` de 30 s y sin `refetchOnWindowFocus`,
-  porque en la Main el dato sólo cambia por mutaciones de esta aplicación o por un `change` del socket.
+  porque en la Main el dato sólo cambia por mutaciones de esta aplicación o por lo que avisa Rust con
+  `sync:cambio` (lo que llega de una Handy, las reservas web recogidas, un job que escribe). Ese
+  evento trae las tablas tocadas y `shared/lib/syncStatements.ts` las traduce a las claves que
+  invalidar: una tabla nueva que se enseñe en otra pantalla va ahí (`reservas` refresca también el
+  plano de `mesas`).
+- Lo que depende de la hora y no lo avisa nadie se relee solo: el plano de Mesas, cada minuto en la
+  Main (la reserva de una mesa sale una hora antes y se va al acabar su hueco).
 - **Patrón**: cada feature expone sus hooks en `features/<x>/<x>Queries.ts`, con `useQuery` para lecturas
   (claves prefijadas por la feature, con rangos e ids dentro) y `useMutation` para escrituras, que
   invalidan su clave en `onSuccess`. Referencia: `features/clientes/clientesQueries.ts`.
