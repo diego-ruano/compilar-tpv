@@ -264,9 +264,46 @@ impl ReservaValidada {
     }
 }
 
+/// Cuántos minutos antes de su hora sale una reserva en el plano de Mesas.
+pub const PLANO_ANTELACION_MIN: i64 = 60;
+
+/// Si una reserva sale en el plano de Mesas y con qué estado, según los minutos que faltan para su
+/// hora (`minutos_para`, negativo si ya ha pasado) y los que dura. Una sentada (`ACTIVA`) sale hasta
+/// que se va. Una que aún no ha llegado (`PROXIMA`), desde una hora antes hasta que acaba su hueco, y
+/// sigue siendo «por llegar»: con retraso, y con su «Ha llegado ya el cliente». Antes, pasada su hora
+/// se pintaba como sentada y se quedaba en la mesa para siempre, aunque nadie hubiera llegado.
+pub fn estado_en_el_plano(estado: &str, minutos_para: i64, duracion_min: i64) -> Option<&'static str> {
+    let estado = estado.trim();
+    if estado.eq_ignore_ascii_case("ACTIVA") {
+        return Some("ACTIVA");
+    }
+    let en_su_hueco = minutos_para <= PLANO_ANTELACION_MIN && minutos_para > -duracion_min;
+    (estado.eq_ignore_ascii_case("PROXIMA") && en_su_hueco).then_some("PROXIMA")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn en_el_plano_una_sentada_siempre_y_una_por_llegar_en_su_hueco() {
+        // Sentada: hasta que se va, sea la hora que sea.
+        assert_eq!(estado_en_el_plano("ACTIVA", 300, 120), Some("ACTIVA"));
+        assert_eq!(estado_en_el_plano("ACTIVA", -500, 120), Some("ACTIVA"));
+        // Por llegar: una hora antes…
+        assert_eq!(estado_en_el_plano("PROXIMA", 61, 120), None);
+        assert_eq!(estado_en_el_plano("PROXIMA", 60, 120), Some("PROXIMA"));
+        // …y pasada su hora sigue por llegar (con retraso), no sentada…
+        assert_eq!(estado_en_el_plano("PROXIMA", 0, 120), Some("PROXIMA"));
+        assert_eq!(estado_en_el_plano("PROXIMA", -119, 120), Some("PROXIMA"));
+        // …hasta que acaba su hueco.
+        assert_eq!(estado_en_el_plano("PROXIMA", -120, 120), None);
+        assert_eq!(estado_en_el_plano("PROXIMA", -30, 30), None);
+        // Las cerradas no salen.
+        for estado in ["FINALIZADA", "CANCELADA", "NO_SHOW"] {
+            assert_eq!(estado_en_el_plano(estado, 10, 120), None, "{estado}");
+        }
+    }
 
     #[test]
     fn texto_unicode_invalido_devuelve_error_sin_panico() {

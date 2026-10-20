@@ -41,12 +41,15 @@ export function aspectoDeMesa(table: Table, mesaMetaById: MesaMetaMap, dark: boo
     const texto = isPendiente ? "#1c1917" : "#e5e7eb";
     const subtexto = isPendiente ? "#44403c" : "#cbd5e1";
 
-    const etiqueta =
-        isReservaActiva && reserva?.clienteNombre ? `${table.name} · Reserva ${reserva.clienteNombre}` : table.name;
-    const subetiqueta =
-        isReservaProxima && reserva?.clienteNombre
-            ? `Reserva ${reserva.clienteNombre} en ${Math.max(0, reserva.minutosPara)} min`
-            : `${table.seats} pax`;
+    // Una reserva puede no tener cliente (RI-61): entonces «Reserva» a secas.
+    const quien = reserva?.clienteNombre ? `Reserva ${reserva.clienteNombre}` : "Reserva";
+    const etiqueta = isReservaActiva ? `${table.name} · ${quien}` : table.name;
+    // Pasada su hora, la que aún no ha llegado sigue por llegar, con retraso (`minutosPara < 0`).
+    const subetiqueta = !reserva || !isReservaProxima
+        ? `${table.seats} pax`
+        : reserva.minutosPara >= 0
+            ? `${quien} en ${reserva.minutosPara} min`
+            : `${quien} · ${-reserva.minutosPara} min tarde`;
 
     return { relleno, borde, grosorBorde, texto, subtexto, etiqueta, subetiqueta, pulsable: !!idMesa };
 }

@@ -629,7 +629,9 @@ export default function MesaComandaModal({
                             <p className={cn("font-extrabold", "text-blue-900")}>
                                 {reserva.estado === "ACTIVA"
                                     ? "🔵 Reserva activa"
-                                    : "🔷 Reserva próxima"}
+                                    : reserva.minutosPara < 0
+                                      ? `🔷 Reserva por llegar (${-reserva.minutosPara} min tarde)`
+                                      : "🔷 Reserva próxima"}
                             </p>
 
                             <p className="text-sm text-blue-900/80 mt-1">
