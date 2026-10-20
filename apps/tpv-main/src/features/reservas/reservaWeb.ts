@@ -22,6 +22,31 @@ export function esWebPorVenir(
     return r.origen === "WEB" && r.estado === "PROXIMA" && `${r.dia_ymd} ${r.hora}` > minutoLocal(ahora);
 }
 
+/**
+ * ¿Cancelarla le escribe al cliente? Si está por venir y su cliente tiene correo: sin correo no hay a
+ * quién (`/avisos` contesta `enviado: false`), y la pantalla no lo puede prometer.
+ */
+export function cancelarLeEscribe(
+    r: Pick<ReservaDto, "origen" | "estado" | "dia_ymd" | "hora" | "email_cliente">,
+    ahora: Date = new Date(),
+): boolean {
+    return esWebPorVenir(r, ahora) && !!r.email_cliente?.trim();
+}
+
+/**
+ * El correo al que irá el aviso de un cambio: el del cliente que lleve la reserva al guardarla. Uno
+ * que ya existe conserva el suyo, y lo escrito sólo rellena el hueco (RES-01); uno nuevo, el escrito;
+ * sin cliente, ninguno.
+ */
+export function correoTrasGuardar(
+    cliente: { idCliente: string | null; nombreCliente: string | null; email: string | null },
+    correoDelExistente: string | null,
+): string | null {
+    if (cliente.idCliente) return correoDelExistente?.trim() || cliente.email || null;
+    if (cliente.nombreCliente) return cliente.email || null;
+    return null;
+}
+
 /** Lo que el formulario va a guardar de lo que le importa al cliente. */
 export type CambioDeReserva = { dia_ymd: string; hora: string; comensales: number; id_mesa: string | null };
 

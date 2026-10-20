@@ -36,7 +36,12 @@ import { useToast } from "../../shared/toast";
 
 // ✅ Modal + tipos del layout (MapCanvas)
 import ReservaMesaMapModal from "../../features/reservas/ReservaMesaMapModal";
-import { cambiaParaElCliente, esWebPorVenir } from "../../features/reservas/reservaWeb";
+import {
+  cambiaParaElCliente,
+  cancelarLeEscribe,
+  correoTrasGuardar,
+  esWebPorVenir,
+} from "../../features/reservas/reservaWeb";
 import { etiquetaEstado, ocupaMesa, ordenarDelDia, resumenDelDia } from "../../features/reservas/estadoReserva";
 import { diaAlCambiarDeMes, mismoMes } from "../../features/reservas/calendario";
 import type { MesaMetaOut } from "@tpv/contracts";
@@ -51,12 +56,16 @@ type Turno = "DESAYUNO" | "COMIDA" | "CAFE" | "CENA";
 /** RI-61: la respuesta a «este teléfono es de Ana, ¿la reserva es para ella?». */
 type DecisionCliente = "asignar" | "nuevo" | "ninguno" | "cancelar";
 
-/** Los campos del cliente que viajan con la reserva (ver `ReservaSaveInput`). */
+/**
+ * Los campos del cliente que viajan con la reserva (ver `ReservaSaveInput`), y el correo que ya
+ * tiene el cliente asignado: con él se sabe a dónde irá el aviso de un cambio (`correoTrasGuardar`).
+ */
 type ClienteDeLaReserva = {
   idCliente: string | null;
   nombreCliente: string | null;
   telefono: string | null;
   email: string | null;
+  correoDelExistente: string | null;
 };
 
 const SIN_CLIENTE: ClienteDeLaReserva = {
@@ -64,6 +73,7 @@ const SIN_CLIENTE: ClienteDeLaReserva = {
   nombreCliente: null,
   telefono: null,
   email: null,
+  correoDelExistente: null,
 };
 
 /**
@@ -429,7 +439,8 @@ export default function Reservas() {
   // cancelar una que está por venir le escribe al cliente (docs/estudios/reservas-web.md §5.6).
   const [confirmar, setConfirmar] = useState<{ accion: "cancelar" | "borrar"; reserva: ReservaUI } | null>(null);
   const [confirmando, setConfirmando] = useState(false);
-  const avisaAlCliente = confirmar?.accion === "cancelar" && esWebPorVenir(confirmar.reserva);
+  const webPorVenir = confirmar?.accion === "cancelar" && esWebPorVenir(confirmar.reserva);
+  const avisaAlCliente = confirmar?.accion === "cancelar" && cancelarLeEscribe(confirmar.reserva);
 
   const hoyClave = ymdLocal(hoy);
   const seleccionadoClave = ymdLocal(diaSeleccionado);
@@ -664,7 +675,12 @@ export default function Reservas() {
       telefono === clienteAsignado.telefono.trim() &&
       email === clienteAsignado.email.trim()
     ) {
-      return { ...escrito, idCliente: clienteAsignado.id, nombreCliente: null };
+      return {
+        ...escrito,
+        idCliente: clienteAsignado.id,
+        nombreCliente: null,
+        correoDelExistente: clienteAsignado.email || null,
+      };
     }
     if (!nombre && !telefono && !email) return SIN_CLIENTE;
 
@@ -672,15 +688,14 @@ export default function Reservas() {
       const c = await commands.reservasBuscarCliente(escrito);
       if (c) {
         // El mismo cliente (o el que ya tenía la reserva): no hay nada que preguntar.
-        if (c.id_cliente === clienteAsignado?.id || (nombre && mismoNombre(c.nombre, nombre))) {
-          return { ...escrito, idCliente: c.id_cliente, nombreCliente: null };
-        }
+        const suyo = { ...escrito, idCliente: c.id_cliente, nombreCliente: null, correoDelExistente: c.email ?? null };
+        if (c.id_cliente === clienteAsignado?.id || (nombre && mismoNombre(c.nombre, nombre))) return suyo;
         const d = await preguntarCliente(c);
         if (d === "cancelar") return null;
         if (d === "ninguno") return SIN_CLIENTE;
-        if (d === "asignar") return { ...escrito, idCliente: c.id_cliente, nombreCliente: null };
+        if (d === "asignar") return suyo;
         // «Es otra persona»: sólo se ofrece por teléfono y con un nombre escrito.
-        return { ...escrito, idCliente: null, nombreCliente: nombre };
+        return { ...escrito, idCliente: null, nombreCliente: nombre, correoDelExistente: null };
       }
     }
 
@@ -691,7 +706,7 @@ export default function Reservas() {
       );
       return null;
     }
-    return { ...escrito, idCliente: null, nombreCliente: nombre };
+    return { ...escrito, idCliente: null, nombreCliente: nombre, correoDelExistente: null };
   }
 
   async function guardarReserva(e: React.FormEvent) {
@@ -708,18 +723,8 @@ export default function Reservas() {
     const turno: Turno = turnoPorHora(form.hora);
     const horaSql = normalizarHora(form.hora);
 
-    // Una reserva web por venir: si cambia lo que le importa al cliente, le llega un correo. El
-    // correo dice cómo queda, y sale si la hora nueva no ha pasado: con ésa se mira «por venir».
     const original = reservaEditandoId ? reservasMes.find((r) => r.id_reserva === reservaEditandoId) : undefined;
     const cambio = { dia_ymd: seleccionadoClave, hora: horaSql, comensales: Number(form.comensales), id_mesa: form.idMesa || null };
-    if (
-      original &&
-      esWebPorVenir({ ...original, dia_ymd: cambio.dia_ymd, hora: cambio.hora }) &&
-      cambiaParaElCliente(original, cambio) &&
-      !(await confirmarCambioWeb())
-    ) {
-      return;
-    }
 
     // RI-61: si la mesa ya está ocupada a esa hora lo decide el backend, con la duración de cada
     // reserva y el modo del negocio (avisar o prohibir). Aquí sólo se comprobaba la misma hora
@@ -727,6 +732,19 @@ export default function Reservas() {
     try {
       const cliente = await decidirCliente();
       if (!cliente) return;
+
+      // Una reserva web por venir: si cambia lo que le importa al cliente, le llega un correo. Dice
+      // cómo queda, sale si la hora nueva no ha pasado (con ésa se mira «por venir») y va al correo
+      // del cliente que lleve la reserva: sin correo no se promete.
+      if (
+        original &&
+        esWebPorVenir({ ...original, dia_ymd: cambio.dia_ymd, hora: cambio.hora }) &&
+        cambiaParaElCliente(original, cambio) &&
+        correoTrasGuardar(cliente, cliente.correoDelExistente) &&
+        !(await confirmarCambioWeb())
+      ) {
+        return;
+      }
       const notaTrim = form.nota?.trim() || "";
 
       // El estado no viaja: una nueva nace PROXIMA y una que se edita conserva el suyo en la base.
@@ -789,7 +807,7 @@ export default function Reservas() {
       if (!ok) return toast.error("No se pudo cancelar la reserva", "Esa reserva ya no existe.");
       toast.success?.(
         "OK",
-        esWebPorVenir(reserva) ? "Reserva cancelada. Se le avisará al cliente por correo." : "Reserva cancelada.",
+        cancelarLeEscribe(reserva) ? "Reserva cancelada. Se le avisará al cliente por correo." : "Reserva cancelada.",
       );
     } catch (err) {
       console.error(err);
@@ -1431,7 +1449,9 @@ export default function Reservas() {
                     ? "Desaparece del todo. Esta acción no se puede deshacer."
                     : avisaAlCliente
                       ? "Se queda en la lista como cancelada y deja libre la mesa. Se hizo desde la web: al cliente le llegará un correo diciéndole que se ha cancelado."
-                      : "Se queda en la lista como cancelada y deja libre la mesa."}
+                      : webPorVenir
+                        ? "Se queda en la lista como cancelada y deja libre la mesa. Se hizo desde la web, pero su cliente no tiene correo: no se le avisará."
+                        : "Se queda en la lista como cancelada y deja libre la mesa."}
                 </div>
 
                 <div className="mt-4 space-y-2 rounded-xl border border-border bg-surface-2 p-3">

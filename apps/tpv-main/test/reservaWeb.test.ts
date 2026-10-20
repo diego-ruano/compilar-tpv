@@ -3,7 +3,12 @@
 import { describe, expect, it } from "vitest";
 import type { ReservaDto } from "@tpv/contracts";
 
-import { cambiaParaElCliente, esWebPorVenir } from "../src/features/reservas/reservaWeb";
+import {
+    cambiaParaElCliente,
+    cancelarLeEscribe,
+    correoTrasGuardar,
+    esWebPorVenir,
+} from "../src/features/reservas/reservaWeb";
 
 const web = {
     id_reserva: "r1",
@@ -45,6 +50,27 @@ describe("una reserva web que está por venir", () => {
         expect(esWebPorVenir(web, new Date(2026, 9, 24, 20, 59))).toBe(true);
         expect(esWebPorVenir(web, new Date(2026, 9, 24, 21, 0))).toBe(false);
         expect(esWebPorVenir(web, new Date(2026, 9, 25, 9, 0))).toBe(false);
+    });
+
+    it("cancelarla sólo promete el correo si el cliente tiene a dónde", () => {
+        expect(cancelarLeEscribe(web, ahora)).toBe(true);
+        expect(cancelarLeEscribe({ ...web, email_cliente: null }, ahora)).toBe(false);
+        expect(cancelarLeEscribe({ ...web, email_cliente: "  " }, ahora)).toBe(false);
+        expect(cancelarLeEscribe({ ...web, origen: "TPV" }, ahora)).toBe(false);
+    });
+
+    it("el aviso de un cambio va al correo del cliente que lleve la reserva al guardar", () => {
+        const escrito = { idCliente: null, nombreCliente: null, email: null };
+        // Sin cliente (se le quitaron los datos), a nadie.
+        expect(correoTrasGuardar(escrito, null)).toBeNull();
+        // Uno que ya existe conserva el suyo; si no tiene, se queda con el escrito.
+        expect(correoTrasGuardar({ ...escrito, idCliente: "c1" }, "ana@correo.es")).toBe("ana@correo.es");
+        expect(correoTrasGuardar({ ...escrito, idCliente: "c1", email: "otro@correo.es" }, "ana@correo.es")).toBe("ana@correo.es");
+        expect(correoTrasGuardar({ ...escrito, idCliente: "c1", email: "nuevo@correo.es" }, null)).toBe("nuevo@correo.es");
+        expect(correoTrasGuardar({ ...escrito, idCliente: "c1" }, null)).toBeNull();
+        // Uno nuevo, el escrito.
+        expect(correoTrasGuardar({ ...escrito, nombreCliente: "Bea", email: "bea@correo.es" }, null)).toBe("bea@correo.es");
+        expect(correoTrasGuardar({ ...escrito, nombreCliente: "Bea" }, null)).toBeNull();
     });
 
     it("le cambia el día, la hora, las personas o la mesa; lo demás, no", () => {
