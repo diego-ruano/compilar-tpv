@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { MesaMetaOut } from "@tpv/contracts";
 
 import { aspectoDeMesa } from "../src/features/mesas/aspectoMesa";
+import { fmtReserva } from "../src/features/mesas/comanda";
 import type { Table } from "../src/features/mesas/types";
 
 const mesa = { id: "db-mesa-m1", name: "Mesa 1", seats: 4 } as Table;
@@ -36,5 +37,16 @@ describe("una mesa con reserva en el plano", () => {
     it("la sentada lleva el nombre en la etiqueta, y sin cliente dice «Reserva»", () => {
         expect(conReserva("ACTIVA", -40).etiqueta).toBe("Mesa 1 · Reserva Ana");
         expect(conReserva("PROXIMA", 5, "").subetiqueta).toBe("Reserva en 5 min");
+    });
+});
+
+describe("la reserva en la mesa abierta", () => {
+    const reserva = (estado: string, minutosPara: number) =>
+        ({ idReserva: "r1", clienteNombre: "Ana", diaYMD: "2026-10-20", hora: "21:00", estado, minutosPara }) as never;
+
+    it("la que llega tarde lo dice, y no «en 0 min»", () => {
+        expect(fmtReserva(reserva("PROXIMA", -30))).toBe("llega tarde: 30 min");
+        expect(fmtReserva(reserva("PROXIMA", 0))).toBe("Reserva en 0 min");
+        expect(fmtReserva(reserva("PROXIMA", 25))).toBe("Reserva en 25 min");
     });
 });

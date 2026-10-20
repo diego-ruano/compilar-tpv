@@ -638,7 +638,7 @@ export default function MesaComandaModal({
                                 {reserva.estado === "ACTIVA"
                                     ? "🔵 Reserva activa"
                                     : reserva.minutosPara < 0
-                                      ? `🔷 Reserva por llegar (${-reserva.minutosPara} min tarde)`
+                                      ? "🔷 Reserva por llegar"
                                       : "🔷 Reserva próxima"}
                             </p>
 

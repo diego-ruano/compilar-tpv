@@ -73,5 +73,7 @@ export function fmtReserva(res: NonNullable<MesaMetaOut["reserva"]>) {
         if (min < 0) return `Reserva activa · llegó hace ${Math.abs(min)} min`;
         return `Reserva activa · es ahora`;
     }
-    return `Reserva en ${Math.max(0, min)} min`;
+    // Pasada su hora, la que aún no ha llegado sigue por llegar, con retraso.
+    if (min < 0) return `llega tarde: ${-min} min`;
+    return `Reserva en ${min} min`;
 }
