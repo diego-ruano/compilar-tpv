@@ -3,7 +3,16 @@
 // mesas libres en botones: lo que el lienzo no hace accesible, y lo que sirve en un móvil pequeño.
 
 import { useMemo, useState } from "react";
-import { Lienzo, fitTransform, useElementSize, type AspectoMesa, type MesaPlano, type SalonPlano } from "@tpv/plano";
+import {
+	Lienzo,
+	fitTransform,
+	tamanoDelContenido,
+	useElementSize,
+	type AspectoMesa,
+	type MesaPlano,
+	type OpcionesEncaje,
+	type SalonPlano,
+} from "@tpv/plano";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 
 import type { MesaPublica, PlanoPublico } from "./api";
@@ -19,6 +28,26 @@ const COLOR = {
 	textoClaro: "#ffffff",
 	textoApagado: "#8a93a2",
 };
+
+/**
+ * El plano del widget se encaja a las mesas, no al contorno del salón, y con más zoom que la sala de
+ * la Main: con el salón entero y un tope de 1,15 en un hueco pequeño, las mesas salían diminutas.
+ */
+const ENCAJE: OpcionesEncaje = { soloMesas: true, escalaMaxima: 2.5 };
+const MARGEN = 16;
+const ALTO_MIN = 280;
+const ALTO_MAX = 640;
+
+/**
+ * Lo alto que tiene que ser el lienzo para que las mesas, encajadas a lo ancho, quepan: la forma del
+ * conjunto de mesas, entre un mínimo y un máximo. Se calcula del ancho y no de la ventana: la altura
+ * del iframe la decide su contenido, y un alto en `vh` crecería con él.
+ */
+export function altoDelPlano(salon: SalonPlano, ancho: number): number {
+	const { ancho: w, alto: h } = tamanoDelContenido(salon, ENCAJE.soloMesas);
+	const alto = 0.9 * Math.max(1, ancho - MARGEN * 2) * (h / w) + MARGEN * 2;
+	return Math.round(Math.min(Math.max(alto, ALTO_MIN), ALTO_MAX));
+}
 
 /** De lo que devuelve `/plano` a lo que dibuja el lienzo. Unos puntos rotos dejan la sala sin contorno. */
 function salonesDelPlano(plano: PlanoPublico): SalonPlano[] {
@@ -73,7 +102,11 @@ export default function PlanoWidget({
 	);
 	const salon = salones.find((s) => s.id === salonId) ?? salones[0] ?? null;
 	const { ref, size } = useElementSize<HTMLDivElement>();
-	const vista = useMemo(() => (salon ? fitTransform(salon, size.width, size.height, 16) : { x: 0, y: 0, scale: 1 }), [salon, size.width, size.height]);
+	const alto = salon ? altoDelPlano(salon, size.width) : ALTO_MIN;
+	const vista = useMemo(
+		() => (salon ? fitTransform(salon, size.width, alto, MARGEN, ENCAJE) : { x: 0, y: 0, scale: 1 }),
+		[salon, size.width, alto],
+	);
 	const porId = useMemo(() => new Map(plano.mesas.map((m) => [m.id, m])), [plano]);
 
 	const aspecto = (t: MesaPlano): AspectoMesa => {
@@ -117,11 +150,11 @@ export default function PlanoWidget({
 				</div>
 			) : null}
 
-			<div ref={ref} className="h-[clamp(14rem,45vh,22rem)] w-full overflow-hidden rounded-2xl border border-border bg-white" aria-hidden>
+			<div ref={ref} style={{ height: alto }} className="w-full overflow-hidden rounded-2xl border border-border bg-white" aria-hidden>
 				{salon ? (
 					<Lienzo
 						salon={salon}
-						tamano={size}
+						tamano={{ width: size.width, height: alto }}
 						vista={vista}
 						fondo={COLOR.fondo}
 						bordeSalon={COLOR.sala}

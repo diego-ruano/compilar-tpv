@@ -658,7 +658,10 @@ el mismo origen.
 - **Paso 1:** sólo se pueden pulsar los días abiertos del horizonte. La hora es un campo al minuto
   que sólo vale dentro de los tramos de ese día (si no, lo dice y no deja seguir); la respuesta tardía
   de un día elegido antes se descarta.
-- **Paso 2:** las mesas adecuadas y libres resaltadas en el acento; el resto, en gris y sin pulsar.
+- **Paso 2:** las mesas adecuadas y libres resaltadas en el acento; el resto, en gris y sin pulsar. El
+  plano se encaja a las mesas (no al contorno del salón) con un zoom de hasta 2,5, y el lienzo es tan
+  alto como pida la forma de las mesas a todo el ancho, entre 280 y 640 px
+  (`PlanoWidget.tsx::altoDelPlano`; la sala de la Main sigue encajando el salón entero).
   Una pestaña por salón. Debajo, la misma lista de mesas libres en botones, que hace accesible lo que
   el lienzo no es y sirve en pantallas muy pequeñas. Sin mesas: «No quedan mesas para 4 personas a
   las 21:00» y las alternativas como botones.

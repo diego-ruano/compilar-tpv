@@ -34,14 +34,46 @@ function unir(a: Caja, b: Caja): Caja {
     };
 }
 
+/** Cómo encajar el salón en el hueco. Lo de por defecto es lo de la sala de la Main. */
+export type OpcionesEncaje = {
+    /**
+     * Encajar sólo las mesas, no el contorno del salón. Un salón con mucho espacio libre alrededor
+     * deja las mesas diminutas; el widget de reservas web quiere las mesas grandes, y el contorno que
+     * se salga del hueco se corta.
+     */
+    soloMesas?: boolean;
+    /** El zoom máximo. Por defecto 1,15, para no «reventar» un salón pequeño en la sala. */
+    escalaMaxima?: number;
+};
+
+/** Lo que hay que encajar: el salón entero con sus mesas, o sólo las mesas (si las hay). */
+function cajaDelContenido(salon: SalonPlano, soloMesas: boolean): Caja {
+    const mesas = salon.tables ?? [];
+    if (soloMesas && mesas.length) return mesas.map(cajaDeMesa).reduce(unir);
+    let box = cajaDelSalon(salon.room.points);
+    for (const t of mesas) box = unir(box, cajaDeMesa(t));
+    return box;
+}
+
+/** El ancho y el alto de lo que se encaja, en las unidades del plano. */
+export function tamanoDelContenido(salon: SalonPlano, soloMesas = false): { ancho: number; alto: number } {
+    const box = cajaDelContenido(salon, soloMesas);
+    return { ancho: Math.max(1, box.maxX - box.minX), alto: Math.max(1, box.maxY - box.minY) };
+}
+
 /**
  * Encaja el salón entero en el hueco sin hacerlo enorme: escala para que se vea completo, un poco
  * menos, y con un tope (para no «reventar» un salón pequeño). Los E2E calculan con esta misma
  * función dónde pulsar una mesa.
  */
-export function fitTransform(salon: SalonPlano, viewW: number, viewH: number, padding = 24): Vista {
-    let box = cajaDelSalon(salon.room.points);
-    for (const t of salon.tables ?? []) box = unir(box, cajaDeMesa(t));
+export function fitTransform(
+    salon: SalonPlano,
+    viewW: number,
+    viewH: number,
+    padding = 24,
+    opciones: OpcionesEncaje = {},
+): Vista {
+    const box = cajaDelContenido(salon, opciones.soloMesas ?? false);
 
     const contentW = Math.max(1, box.maxX - box.minX);
     const contentH = Math.max(1, box.maxY - box.minY);
@@ -50,7 +82,7 @@ export function fitTransform(salon: SalonPlano, viewW: number, viewH: number, pa
     const usableH = Math.max(1, viewH - padding * 2);
 
     const rawScale = Math.min(usableW / contentW, usableH / contentH);
-    const scale = Math.max(0.2, Math.min(rawScale * 0.9, 1.15));
+    const scale = Math.max(0.2, Math.min(rawScale * 0.9, opciones.escalaMaxima ?? 1.15));
 
     const offsetX = padding + (usableW - contentW * scale) / 2;
     const offsetY = padding + (usableH - contentH * scale) / 2;

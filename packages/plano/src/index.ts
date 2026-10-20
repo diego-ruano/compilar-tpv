@@ -4,6 +4,6 @@
 
 export { default as Lienzo } from "./Lienzo";
 export { default as NodoMesa } from "./NodoMesa";
-export { fitTransform } from "./geometria";
+export { fitTransform, tamanoDelContenido, type OpcionesEncaje } from "./geometria";
 export { useElementSize } from "./useTamano";
 export type { AspectoMesa, FormaMesa, MesaPlano, SalonPlano, Vista } from "./tipos";
