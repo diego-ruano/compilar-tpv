@@ -35,7 +35,6 @@ fn reserva(e: &Value) -> Result<Value, String> {
         comensales: e["comensales"].as_i64().unwrap_or(0),
         duracion_min: e["duracion_min"].as_i64(),
         nota: texto_opcional(e, "nota"),
-        estado: texto_opcional(e, "estado"),
         id_mesa: texto_opcional(e, "id_mesa"),
         id_cliente: texto_opcional(e, "id_cliente"),
         nombre_cliente: texto_opcional(e, "nombre_cliente"),

@@ -79,8 +79,8 @@ pub struct ReservaSaveInput {
     pub forzar_solape: Option<bool>,
     #[serde(default)]
     pub nota: Option<String>,
-    #[serde(default)]
-    pub estado: Option<String>,
+    // El estado no viaja: una reserva nueva nace PROXIMA y una que se edita conserva el suyo. Lo
+    // cambian sólo sus acciones (llegar, irse, cancelar, no vino).
 
     #[serde(default)]
     pub id_mesa: Option<String>,

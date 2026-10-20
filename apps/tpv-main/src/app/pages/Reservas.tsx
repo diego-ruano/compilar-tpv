@@ -721,13 +721,8 @@ export default function Reservas() {
       if (!cliente) return;
       const notaTrim = form.nota?.trim() || "";
 
-      // El estado NO se toca al editar: mandarlo fijo a "ACTIVA" resucitaba una reserva ya
-      // cerrada desde la mesa ("el cliente abandona la mesa") en cuanto alguien la modificaba,
-      // y de paso volvia a bloquear el hueco. En un alta va null: el backend fuerza PROXIMA.
-      const estadoActual = reservaEditandoId
-        ? (reservasMes.find((r) => r.id_reserva === reservaEditandoId)?.estado ?? null)
-        : null;
-
+      // El estado no viaja: una nueva nace PROXIMA y una que se edita conserva el suyo en la base.
+      // Mandar el de la caché devolvía a «por venir» una reserva cancelada o sentada mientras tanto.
       const datos = {
         id_reserva: reservaEditandoId,
         dia_ymd: seleccionadoClave,
@@ -736,7 +731,6 @@ export default function Reservas() {
         comensales: Number(form.comensales),
         duracion_min: form.duracionMin,
         nota: notaTrim ? notaTrim : null,
-        estado: estadoActual,
 
         id_mesa: form.idMesa || null,
 

@@ -2815,7 +2815,6 @@ export type ReservaSaveInput = {
 	 */
 	forzar_solape?: boolean | null,
 	nota?: string | null,
-	estado?: string | null,
 	id_mesa?: string | null,
 	/**
 	 *  RI-61: el cliente es opcional y explícito. `id_cliente` asigna uno que ya existe (lo que se

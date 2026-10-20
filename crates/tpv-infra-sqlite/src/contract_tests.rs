@@ -305,6 +305,7 @@ casos_de_contrato! {
     reservas__guardar_con_duracion,
     reservas__guardar_otra_persona_mismo_telefono,
     reservas__editar_web_conserva_origen,
+    reservas__editar_conserva_estado,
     reservas__eliminar,
     reservas__cancelar_web,
     venta_rapida__create_comanda_barra,
@@ -606,7 +607,6 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 comensales: e["comensales"].as_i64().unwrap(),
                 duracion_min: e["duracion_min"].as_i64(),
                 nota: opt_str(&e["nota"]),
-                estado: tpv_domain::estados::EstadoReserva::desde_texto(&s(&e["estado"])).unwrap(),
                 // RI-61: el mismo reparto que hace la validación (y el schema del worker).
                 cliente: ClienteReserva::desde(
                     opt_str(&e["id_cliente"]),

@@ -14,7 +14,6 @@
     "turno": "cena",
     "comensales": 2,
     "nota": null,
-    "estado": "PROXIMA",
     "id_cliente": null,
     "nombre_cliente": "Luis",
     "telefono": "600100200",

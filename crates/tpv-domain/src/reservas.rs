@@ -33,11 +33,6 @@ pub fn normalize_hora_hhmm(raw: &str) -> Result<String, String> {
     Err(format!("Formato de hora inválido: '{s}'. Esperado HH:MM."))
 }
 
-/// Normaliza el estado de una reserva (valores conocidos; por defecto PROXIMA).
-pub fn normalize_estado(raw: Option<String>) -> Result<crate::estados::EstadoReserva, String> {
-    crate::estados::EstadoReserva::desde_texto(raw.as_deref().unwrap_or("PROXIMA"))
-}
-
 fn turno_por_hora(hhmm: &str) -> String {
     let parts: Vec<&str> = hhmm.trim().split(':').collect();
     let hh: i64 = parts.first().and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -189,6 +184,10 @@ impl ModoSolape {
 /// Reserva ya normalizada y validada, lista para persistir.
 /// `id = Some` => upsert por id; `None` => alta nueva, con UUIDv7 generado por la
 /// persistencia antes del INSERT. El dominio sólo valida y normaliza el identificador.
+///
+/// El estado no va aquí: una reserva nueva nace `PROXIMA` y una que se edita conserva el suyo. Lo
+/// cambian sólo sus acciones (llegar, irse, cancelar, no vino). Antes el formulario mandaba el que
+/// tenía en su caché, y una reserva cancelada o sentada mientras tanto volvía a estar por venir.
 #[derive(Debug, Clone)]
 pub struct ReservaValidada {
     pub id: Option<String>,
@@ -200,7 +199,6 @@ pub struct ReservaValidada {
     /// Minutos que ocupa la mesa; `None` = la duración por defecto del negocio (RI-61).
     pub duracion_min: Option<i64>,
     pub nota: Option<String>,
-    pub estado: crate::estados::EstadoReserva,
     pub cliente: ClienteReserva,
 }
 
@@ -214,7 +212,6 @@ pub struct ReservaEntrada<'a> {
     pub comensales: i64,
     pub duracion_min: Option<i64>,
     pub nota: Option<String>,
-    pub estado: Option<String>,
     pub id_mesa: Option<String>,
     pub id_cliente: Option<String>,
     pub nombre_cliente: Option<String>,
@@ -232,7 +229,6 @@ impl ReservaValidada {
             comensales,
             duracion_min,
             nota,
-            estado,
             id_mesa,
             id_cliente,
             nombre_cliente,
@@ -252,11 +248,6 @@ impl ReservaValidada {
         let id_mesa = limpia(id_mesa);
 
         let id = id_reserva.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        let estado = if id.is_none() {
-            crate::estados::EstadoReserva::Proxima
-        } else {
-            normalize_estado(estado)?
-        };
         let turno = normalize_turno(turno, &hora);
 
         Ok(ReservaValidada {
@@ -268,7 +259,6 @@ impl ReservaValidada {
             comensales,
             duracion_min,
             nota: limpia(nota),
-            estado,
             cliente,
         })
     }
@@ -317,15 +307,6 @@ mod tests {
     }
 
     #[test]
-    fn estados_conocidos_se_normalizan_y_desconocidos_se_rechazan() {
-        for (raw, esperado) in [("proxima", "PROXIMA"), (" ACTIVA ", "ACTIVA"), ("finalizada", "FINALIZADA"), ("cancelada", "CANCELADA"), ("no_show", "NO_SHOW")] {
-            assert_eq!(normalize_estado(Some(raw.into())).unwrap().como_texto(), esperado);
-        }
-        assert_eq!(normalize_estado(None).unwrap().como_texto(), "PROXIMA");
-        assert!(normalize_estado(Some("otro".into())).is_err());
-    }
-
-    #[test]
     fn turno_se_deriva_en_todos_los_limites_horarios() {
         for (hora, esperado) in [("00:00", "DESAYUNO"), ("12:59", "DESAYUNO"), ("13:00", "COMIDA"), ("15:59", "COMIDA"), ("16:00", "CAFE"), ("18:59", "CAFE"), ("19:00", "CENA"), ("23:59", "CENA")] {
             assert_eq!(normalize_turno(None, hora), esperado);
@@ -347,7 +328,6 @@ mod tests {
             comensales,
             duracion_min: None,
             nota: Some(" terraza ".into()),
-            estado: Some("CANCELADA".into()),
             id_mesa: mesa.map(str::to_string),
             id_cliente: None,
             nombre_cliente: Some(nombre.into()),
@@ -378,7 +358,6 @@ mod tests {
             comensales: 2,
             duracion_min: None,
             nota: None,
-            estado: None,
             id_mesa: Some("m1".into()),
             id_cliente: None,
             nombre_cliente: Some("Ana".into()),
@@ -400,7 +379,6 @@ mod tests {
                 comensales: 2,
                 duracion_min: None,
                 nota: None,
-                estado: None,
                 id_mesa: Some("m1".into()),
                 id_cliente: None,
                 nombre_cliente: Some("Ana".into()),
@@ -413,12 +391,11 @@ mod tests {
     }
 
     #[test]
-    fn reserva_nueva_normaliza_y_fuerza_estado_proxima() {
+    fn reserva_nueva_se_normaliza() {
         let r = reserva_base(None, 4, Some(" m1 "), " Ana ").unwrap();
         assert!(r.id.is_none());
         assert_eq!(r.id_mesa.as_deref(), Some("m1"));
         assert_eq!(r.turno, "COMIDA");
-        assert_eq!(r.estado.como_texto(), "PROXIMA");
         assert_eq!(r.nota.as_deref(), Some("terraza"));
         assert_eq!(
             r.cliente,
@@ -431,10 +408,9 @@ mod tests {
     }
 
     #[test]
-    fn reserva_editada_conserva_estado_normalizado() {
+    fn reserva_editada_conserva_su_id_normalizado() {
         let r = reserva_base(Some(" r1 ".into()), 2, Some("m1"), "Ana").unwrap();
         assert_eq!(r.id.as_deref(), Some("r1"));
-        assert_eq!(r.estado.como_texto(), "CANCELADA");
     }
 
     #[test]

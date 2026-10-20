@@ -195,6 +195,8 @@ import casoResOtraPersona from "../../../tests/contract/casos/reservas/guardar_o
 import goldenResOtraPersona from "../../../tests/contract/golden/reservas/guardar_otra_persona_mismo_telefono.json";
 import casoResEliminar from "../../../tests/contract/casos/reservas/eliminar.json";
 import goldenResEliminar from "../../../tests/contract/golden/reservas/eliminar.json";
+import casoResEditarEstado from "../../../tests/contract/casos/reservas/editar_conserva_estado.json";
+import goldenResEditarEstado from "../../../tests/contract/golden/reservas/editar_conserva_estado.json";
 import casoResCancelarWeb from "../../../tests/contract/casos/reservas/cancelar_web.json";
 import goldenResCancelarWeb from "../../../tests/contract/golden/reservas/cancelar_web.json";
 import casoVrCrearComanda from "../../../tests/contract/casos/venta_rapida/create_comanda_barra.json";
@@ -330,6 +332,7 @@ const CASOS = [
 	{ nombre: "reservas_guardar_sin_cliente", caso: casoResSinCliente, golden: goldenResSinCliente },
 	{ nombre: "reservas_guardar_con_duracion", caso: casoResConDuracion, golden: goldenResConDuracion },
 	{ nombre: "reservas_editar_web_conserva_origen", caso: casoResWebOrigen, golden: goldenResWebOrigen },
+	{ nombre: "reservas_editar_conserva_estado", caso: casoResEditarEstado, golden: goldenResEditarEstado },
 	{
 		nombre: "reservas_guardar_otra_persona_mismo_telefono",
 		caso: casoResOtraPersona,
@@ -664,7 +667,7 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			const datos = reservaSaveSchema.parse(caso.entrada);
 			const cliente = await resolverCliente(db, datos);
 			if ("error" in cliente) throw new Error(`reservas.guardar: ${cliente.error}`);
-			aplicar(hub, sql, saveReserva({ ...datos, turno: caso.entrada.turno, estado: caso.entrada.estado } as any, cliente));
+			aplicar(hub, sql, saveReserva({ ...datos, turno: caso.entrada.turno } as any, cliente));
 			return;
 		}
 		case "reservas.eliminar": {

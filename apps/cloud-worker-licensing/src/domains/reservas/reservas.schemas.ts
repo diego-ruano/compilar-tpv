@@ -9,14 +9,6 @@ import type {
 	ReservaSaveInput as ContractReservaSaveInput,
 } from "@tpv/contracts";
 
-const ESTADOS = new Set([
-	"PROXIMA",
-	"ACTIVA",
-	"FINALIZADA",
-	"CANCELADA",
-	"NO_SHOW",
-]);
-
 const TURNOS = new Set(["DESAYUNO", "COMIDA", "CAFE", "CENA"]);
 
 /** Mismo texto que `MSG_CLIENTE_SIN_NOMBRE` en la Main (`tpv-domain/src/reservas.rs`). */
@@ -70,11 +62,6 @@ function normalizeTurno(raw: unknown, hora: string): string {
 	return TURNOS.has(t) ? t : turnoPorHora(hora);
 }
 
-function normalizeEstado(raw: unknown): string {
-	const e = String(raw ?? "PROXIMA").trim().toUpperCase();
-	return e;
-}
-
 function positiveInt(name: string) {
 	return z.coerce
 		.number()
@@ -103,7 +90,8 @@ export const reservaSaveSchema = z
 			.nullable(),
 		forzar_solape: z.boolean().optional().nullable(),
 		nota: z.any().optional().nullable(),
-		estado: z.any().optional().nullable(),
+		// El estado no viaja (como en la Main): una nueva nace PROXIMA y una que se edita conserva el
+		// suyo. Una clave `estado` de una Handy antigua se descarta sin más.
 		id_mesa: z.any().optional().nullable(),
 		// RI-61: el cliente es opcional y explícito (ver `ClienteReserva::desde` en la Main).
 		id_cliente: z.any().optional().nullable(),
@@ -112,9 +100,6 @@ export const reservaSaveSchema = z
 		email: z.any().optional().nullable(),
 	})
 	.superRefine((v, ctx) => {
-        if (v.id_reserva?.trim() && !ESTADOS.has(normalizeEstado(v.estado))) {
-            ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["estado"], message: "Estado no admitido" });
-        }
 		const sinFicha = !cleanOrNull(v.id_cliente) && !cleanOrNull(v.nombre_cliente);
 		if (sinFicha && (cleanOrNull(v.telefono) || cleanOrNull(v.email))) {
 			ctx.addIssue({
@@ -147,7 +132,6 @@ export const reservaSaveSchema = z
 
 		const id_reserva =
 			v.id_reserva && v.id_reserva.trim().length > 0 ? v.id_reserva : null;
-		const estado = id_reserva ? normalizeEstado(v.estado) : "PROXIMA";
 		const turno = hora ? normalizeTurno(v.turno, hora) : "DESAYUNO";
 
 		return {
@@ -159,7 +143,6 @@ export const reservaSaveSchema = z
 			duracion_min: v.duracion_min ?? null,
 			forzar_solape: v.forzar_solape ?? false,
 			nota: cleanOrNull(v.nota),
-			estado,
 			id_mesa: cleanOrNull(v.id_mesa),
 			id_cliente: cleanOrNull(v.id_cliente),
 			nombre_cliente: cleanOrNull(v.nombre_cliente),
@@ -193,7 +176,6 @@ type NullableReservaFields =
 	| "nombre_cliente"
 	| "turno"
 	| "nota"
-	| "estado"
 	| "telefono"
 	| "email";
 

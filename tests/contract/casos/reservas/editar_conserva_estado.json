@@ -1,0 +1,20 @@
+{
+  "descripcion": "Editar una reserva no le toca el estado: lo cambian solo sus acciones (llegar, irse, cancelar, no vino). Antes la pantalla mandaba el que tenia en su cache, y una reserva sentada o cancelada mientras tanto volvia a estar por venir. Aqui, una sentada (ACTIVA) a la que se le cambian la hora y las personas sigue sentada.",
+  "comando": "reservas.guardar",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('reserva-sentada', 'mesa-1', '2026-02-02', '21:00', 'CENA', 2, 'ACTIVA');"
+  ],
+  "entrada": {
+    "id_reserva": "reserva-sentada",
+    "id_mesa": "mesa-1",
+    "dia_ymd": "2026-02-02",
+    "hora": "21:30",
+    "turno": "cena",
+    "comensales": 3
+  },
+  "snapshot": {
+    "Reservas": "SELECT ID_Reserva, Hora, Comensales, Estado FROM Reservas"
+  }
+}

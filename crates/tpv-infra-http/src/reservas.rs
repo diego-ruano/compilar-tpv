@@ -64,7 +64,6 @@ impl ReservasRepository for HttpReservasRepository {
             "duracion_min": reserva.duracion_min,
             "forzar_solape": forzar_solape,
             "nota": reserva.nota,
-            "estado": reserva.estado,
             "id_mesa": reserva.id_mesa,
             "id_cliente": id_cliente,
             "nombre_cliente": nombre,

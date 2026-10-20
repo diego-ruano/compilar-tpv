@@ -370,9 +370,10 @@ impl ReservasRepository for SqliteReservasRepository {
             .await?
             .is_some();
 
+            // El estado no se toca al editar: lo cambian sólo sus acciones. Una nueva nace PROXIMA.
             if exists {
                 conn.execute(
-                    r#"UPDATE Reservas SET ID_Cliente = ?1, ID_Mesa = ?2, Dia_YMD = ?3, Hora = ?4, Turno = ?5, Comensales = ?6, Nota = ?7, Estado = ?8, Duracion_Min = ?10 WHERE ID_Reserva = ?9;"#,
+                    r#"UPDATE Reservas SET ID_Cliente = ?1, ID_Mesa = ?2, Dia_YMD = ?3, Hora = ?4, Turno = ?5, Comensales = ?6, Nota = ?7, Duracion_Min = ?9 WHERE ID_Reserva = ?8;"#,
                     vec![
                         opt_text(id_cliente.clone()),
                         opt_text(r.id_mesa.clone()),
@@ -381,7 +382,6 @@ impl ReservasRepository for SqliteReservasRepository {
                         Value::Text(r.turno.clone()),
                         Value::Integer(r.comensales),
                         opt_text(r.nota.clone()),
-                        Value::Text(r.estado.como_texto().to_string()),
                         Value::Text(id_reserva.clone()),
                         opt_int(r.duracion_min),
                     ],
@@ -390,7 +390,7 @@ impl ReservasRepository for SqliteReservasRepository {
                 .map_err(db_err)?;
             } else {
                 conn.execute(
-                    r#"INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado, Duracion_Min, Created_At) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now','localtime'));"#,
+                    r#"INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado, Duracion_Min, Created_At) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'PROXIMA', ?9, datetime('now','localtime'));"#,
                     vec![
                         Value::Text(id_reserva.clone()),
                         opt_text(id_cliente.clone()),
@@ -400,7 +400,6 @@ impl ReservasRepository for SqliteReservasRepository {
                         Value::Text(r.turno.clone()),
                         Value::Integer(r.comensales),
                         opt_text(r.nota.clone()),
-                        Value::Text(r.estado.como_texto().to_string()),
                         opt_int(r.duracion_min),
                     ],
                 )
@@ -580,7 +579,6 @@ mod tests_cliente {
             comensales: 2,
             duracion_min: None,
             nota: None,
-            estado: tpv_domain::estados::EstadoReserva::Proxima,
             cliente,
         }
     }
@@ -755,7 +753,6 @@ mod tests_solape {
             comensales: 2,
             duracion_min: duracion,
             nota: None,
-            estado: tpv_domain::estados::EstadoReserva::Proxima,
             cliente: ClienteReserva::Ninguno,
         }
     }
