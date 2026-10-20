@@ -277,20 +277,6 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 	};
 }
 
-/**
- * ¿Se escribe lo que pide la mesa sobre la reserva tal como está ahora (`null` si ya no existe)?
- * Llegar, sólo la que aún no ha llegado; irse, sólo la sentada; lo que ya está así no se vuelve a
- * escribir. Lo demás es que ha cambiado con la mesa abierta, y no se pisa. Espejo de
- * `cambio_desde_la_mesa` en la Main (`tpv-domain/src/reservas.rs`).
- */
-export function cambioDesdeLaMesa(actual: string | null, nuevo: string): "escribir" | "nada" | "cambiada" {
-	if (actual === nuevo) return "nada";
-	if ((actual === "PROXIMA" && nuevo === "ACTIVA") || (actual === "ACTIVA" && nuevo === "FINALIZADA")) {
-		return "escribir";
-	}
-	return "cambiada";
-}
-
 /** Estados con los que la reserva deja de estar viva y hay que soltar la comanda que la apuntaba. */
 const ESTADOS_QUE_CIERRAN_RESERVA = new Set(["FINALIZADA", "CANCELADA", "NO_SHOW"]);
 

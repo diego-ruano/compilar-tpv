@@ -964,11 +964,8 @@ mod tests {
         assert_eq!(outbox(&db).await, antes + 1);
         // Se replica la cancelación por id, sin condición: la otra copia la aplica igual aunque
         // tenga la reserva en otro estado.
-        assert_eq!(
-            fila(&db, "SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;").await[0]
-                .contains("UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;"),
-            true
-        );
+        assert!(fila(&db, "SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;").await[0]
+            .contains("UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;"));
         assert_eq!(repo.cancelar_desde_la_web("r1").await.unwrap(), CancelacionWeb::YaNoEstabaViva);
         assert_eq!(repo.cancelar_desde_la_web("no-existe").await.unwrap(), CancelacionWeb::NoExiste);
         // Una del TPV no se cancela por esta puerta.
