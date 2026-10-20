@@ -35,6 +35,7 @@ import { useToast } from "../../shared/toast";
 // ✅ Modal + tipos del layout (MapCanvas)
 import ReservaMesaMapModal from "../../features/reservas/ReservaMesaMapModal";
 import { cambiaParaElCliente, esWebPorVenir } from "../../features/reservas/reservaWeb";
+import { etiquetaEstado, ocupaMesa, ordenarDelDia, resumenDelDia } from "../../features/reservas/estadoReserva";
 import type { MesaMetaOut } from "@tpv/contracts";
 import type { Salon } from "../../features/mesas/types";
 import { conAviso } from "../../shared/lib/conAviso";
@@ -298,13 +299,12 @@ function normalizarRolLabel(role: string) {
   return role;
 }
 
-/** ✅ IMPORTANTE: Reservas cerradas NO bloquean mesa */
-function estadoBloqueaMesa(estadoRaw: string | null | undefined) {
-  const e = String(estadoRaw ?? "ACTIVA").trim().toLowerCase();
-  if (e === "finalizada") return false;
-  if (e === "cancelada") return false;
-  if (e === "no_show" || e === "noshow") return false;
-  return true;
+/** La pastilla del estado: las vivas en color, las cerradas en gris salvo la cancelada. */
+function claseEstado(estado: string) {
+  if (estado === "PROXIMA") return "border-accent/30 bg-accent-soft text-accent";
+  if (estado === "ACTIVA") return "border-success/30 bg-success-soft text-success";
+  if (estado === "CANCELADA") return "border-danger/30 bg-danger-soft text-danger";
+  return "border-border bg-surface-2 text-fg-muted";
 }
 
 function parseDbZonaId(raw: unknown): string | null {
@@ -503,16 +503,17 @@ export default function Reservas() {
   /* =========================================================
      Reservas del día + badges
   ========================================================= */
-  const reservasDelDia = useMemo(() => {
-    return reservasMes
-      .filter((r) => r.dia_ymd === seleccionadoClave)
-      .sort((a, b) => a.hora.localeCompare(b.hora));
-  }, [reservasMes, seleccionadoClave]);
+  // Las canceladas, terminadas y de clientes que no vinieron siguen en la lista, atenuadas y al
+  // final; el calendario y el total cuentan sólo las vivas.
+  const reservasDelDia = useMemo(
+    () => ordenarDelDia(reservasMes.filter((r) => r.dia_ymd === seleccionadoClave)),
+    [reservasMes, seleccionadoClave],
+  );
 
   const reservasPorDia = useMemo(() => {
     const map = new Map<string, number>();
     for (const r of reservasMes) {
-      if (!estadoBloqueaMesa(r.estado)) continue;
+      if (!ocupaMesa(r.estado)) continue;
       map.set(r.dia_ymd, (map.get(r.dia_ymd) ?? 0) + 1);
     }
     return map;
@@ -877,7 +878,7 @@ export default function Reservas() {
                 <div className="font-extrabold tracking-widest">
                   RESERVAS {diaSeleccionado.toLocaleDateString("es-ES")}
                 </div>
-                <div className="text-xs text-fg-muted">Total: {reservasDelDia.length}</div>
+                <div className="text-xs text-fg-muted">{resumenDelDia(reservasDelDia)}</div>
               </div>
 
               {!mostrarFormulario ? (
@@ -1132,13 +1133,16 @@ export default function Reservas() {
                 <div className="text-sm text-fg-muted">No hay reservas para este día.</div>
               ) : (
                 <div className="h-full overflow-y-auto space-y-3 pr-2">
-                  {reservasDelDia.map((r) => (
+                  {reservasDelDia.map((r) => {
+                    // Cancelada, terminada o sin presentarse: se queda a la vista, atenuada.
+                    const viva = ocupaMesa(r.estado);
+                    return (
                     <div
                       key={r.id_reserva}
                       className="flex flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm md:flex-row md:justify-between md:gap-4 md:p-4"
                     >
-                      <div className="flex min-w-0 flex-col gap-3 xs:flex-row xs:gap-4">
-                        <div className="flex w-full shrink-0 flex-row items-center justify-between rounded-xl bg-accent px-3 py-2 text-white xs:w-[92px] xs:flex-col xs:justify-center">
+                      <div className={`flex min-w-0 flex-col gap-3 xs:flex-row xs:gap-4 ${viva ? "" : "opacity-60"}`}>
+                        <div className={`flex w-full shrink-0 flex-row items-center justify-between rounded-xl bg-accent px-3 py-2 text-white xs:w-[92px] xs:flex-col xs:justify-center ${viva ? "" : "grayscale"}`}>
                           <div className="text-[11px] font-semibold tracking-wider text-white/70">
                             HORA
                           </div>
@@ -1191,20 +1195,25 @@ export default function Reservas() {
                             </span>
                           </div>
 
-                          <div className="mt-2 text-xs font-semibold text-fg-muted">
-                            Estado: <span className="text-fg-muted">{r.estado}</span>
+                          <div className="mt-2">
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold ${claseEstado(r.estado)}`}>
+                              {etiquetaEstado(r.estado)}
+                            </span>
                           </div>
                         </div>
                       </div>
 
                       <div className="grid shrink-0 grid-cols-2 gap-2 md:flex md:items-center">
-                        <button
-                          onClick={() => abrirFormulario(r)}
-                          className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-extrabold tracking-widest text-fg transition hover:bg-surface-2 md:px-4"
-                        >
-                          <Pencil className="size-3.5" aria-hidden />
-                          MODIFICAR
-                        </button>
+                        {/* Una reserva cerrada ya no se cambia. */}
+                        {viva ? (
+                          <button
+                            onClick={() => abrirFormulario(r)}
+                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-extrabold tracking-widest text-fg transition hover:bg-surface-2 md:px-4"
+                          >
+                            <Pencil className="size-3.5" aria-hidden />
+                            MODIFICAR
+                          </button>
+                        ) : null}
 
                         <button
                           type="button"
@@ -1216,7 +1225,8 @@ export default function Reservas() {
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
