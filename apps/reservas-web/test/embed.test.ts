@@ -202,19 +202,48 @@ describe("el tamaño lo decide el hueco", () => {
 		expect(iframe.style.height).toBe("150px");
 	});
 
-	it("si su CSS le pone un alto después (llega tarde, cambia con el ancho), lo sigue", () => {
+	it("si su CSS le pone un alto después (llega tarde), lo sigue", () => {
 		const css: Css = {};
 		const { hueco, iframe } = conHueco(css);
 		altura(iframe, 900);
 		expect(iframe.style.height).toBe("900px");
 
+		// El hueco cambia de tamaño: lo dice su observador.
 		css.alto = 700;
 		redimensionar(hueco);
 		expect(iframe.style.height).toBe("700px");
+	});
 
-		delete css.alto;
-		redimensionar(hueco);
-		expect(iframe.style.height).toBe("900px");
+	it("dos huecos con `flex: 1` en la misma columna, cuando ésta pasa a tener alto, se la reparten", () => {
+		// Medidos de uno en uno, el mínimo automático del otro (su iframe aún a lo que pide su widget)
+		// no le dejaba sitio al primero: medía 0, no se le hacía caso, y los dos desbordaban la columna.
+		document.body.innerHTML = `<div data-negocio="${CLAVE}"></div><div data-negocio="${CLAVE}"></div>`;
+		const huecos = [...document.querySelectorAll("div")];
+		const iframeDe = (h: HTMLElement) => parseInt(h.querySelector("iframe")?.style.height ?? "", 10) || 0;
+		const minimo = (h: HTMLElement) => (h.style.minHeight === "auto" ? iframeDe(h) : 0);
+		// Sin alto, la columna mide lo que sus huecos; con él, se reparte a medias sin bajar de los mínimos.
+		let columna: number | null = null;
+		for (const h of huecos) {
+			h.style.minHeight = "auto";
+			Object.defineProperty(h, "clientHeight", {
+				configurable: true,
+				get: () => {
+					if (columna === null) return iframeDe(h);
+					const otro = huecos.find((x) => x !== h)!;
+					return Math.max(minimo(h), Math.min(columna / 2, columna - minimo(otro)), 0);
+				},
+			});
+			h.getClientRects = () => [{}] as unknown as DOMRectList;
+		}
+		cargar();
+		const iframes = [...document.querySelectorAll("iframe")];
+		for (const f of iframes) altura(f, 900);
+		expect(iframes.map((f) => f.style.height)).toEqual(["900px", "900px"]);
+
+		columna = 600;
+		for (const h of huecos) redimensionar(h);
+		expect(iframes.map((f) => f.style.height)).toEqual(["300px", "300px"]);
+		expect(huecos.map((h) => h.style.minHeight)).toEqual(["auto", "auto"]);
 	});
 
 	it("sin ResizeObserver sigue funcionando con lo que mida al cargar", () => {

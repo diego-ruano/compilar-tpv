@@ -36,35 +36,34 @@
 	}
 
 	/**
-	 * Se le da al iframe el alto que pide el widget y se mira cuánto mide entonces el hueco. Sin alto
-	 * en su CSS, el hueco mide lo mismo que el iframe; si mide otra cosa, es que su CSS se lo pone, y
-	 * el iframe lo llena. Todo en la misma vuelta: la web no llega a pintar el alto intermedio.
+	 * A cada iframe se le da el alto que pide su widget y se mira cuánto mide entonces su hueco. Sin
+	 * alto en su CSS, el hueco mide lo mismo que el iframe; si mide otra cosa, es que su CSS se lo
+	 * pone, y el iframe lo llena. Todos a la vez, y en la misma vuelta: la web no llega a pintar los
+	 * altos intermedios, y dos huecos en la misma columna no se estorban al medirse.
 	 */
-	function ajustar(w) {
-		w.iframe.style.height = w.pedida + "px";
-		// Oculto (en una pestaña, en un menú cerrado): no se puede medir. Se mira al aparecer.
-		if (!w.hueco.getClientRects().length) return;
+	function ajustar() {
+		var visibles = [];
+		for (var i = 0; i < widgets.length; i++) {
+			var w = widgets[i];
+			w.iframe.style.height = w.pedida + "px";
+			// Oculto (en una pestaña, en un menú cerrado): no se puede medir. Se mira al aparecer.
+			if (w.hueco.getClientRects().length) visibles.push(w);
+		}
 		// Un ítem de flex o de grid no encoge por debajo de su contenido (`min-height: auto`): medido
 		// así, en una columna de alto fijo con `flex: 1` mediría lo que pide el widget y lo desbordaría.
 		// Mientras se mide, sin ese mínimo; uno puesto en el CSS (`min-height: 500px`) se respeta.
-		var minimoPropio = w.hueco.style.minHeight;
-		var sinMinimo = window.getComputedStyle(w.hueco).minHeight === "auto";
-		if (sinMinimo) w.hueco.style.minHeight = "0px";
-		var alto = Math.round(altoDelHueco(w.hueco));
-		if (sinMinimo) w.hueco.style.minHeight = minimoPropio;
-		if (alto > 0 && Math.abs(alto - w.pedida) > 1) w.iframe.style.height = alto + "px";
+		for (i = 0; i < visibles.length; i++) {
+			visibles[i].minimoPropio = visibles[i].hueco.style.minHeight;
+			visibles[i].sinMinimo = window.getComputedStyle(visibles[i].hueco).minHeight === "auto";
+		}
+		for (i = 0; i < visibles.length; i++) if (visibles[i].sinMinimo) visibles[i].hueco.style.minHeight = "0px";
+		for (i = 0; i < visibles.length; i++) visibles[i].alto = Math.round(altoDelHueco(visibles[i].hueco));
+		for (i = 0; i < visibles.length; i++) if (visibles[i].sinMinimo) visibles[i].hueco.style.minHeight = visibles[i].minimoPropio;
+		for (i = 0; i < visibles.length; i++) {
+			w = visibles[i];
+			if (w.alto > 0 && Math.abs(w.alto - w.pedida) > 1) w.iframe.style.height = w.alto + "px";
+		}
 	}
-
-	var observador =
-		typeof ResizeObserver === "function"
-			? new ResizeObserver(function (cambios) {
-					for (var c = 0; c < cambios.length; c++) {
-						for (var k = 0; k < widgets.length; k++) {
-							if (widgets[k].hueco === cambios[c].target) ajustar(widgets[k]);
-						}
-					}
-				})
-			: null;
 
 	var huecos = document.querySelectorAll("[data-negocio]:not([" + MARCA + "])");
 	for (var i = 0; i < huecos.length; i++) {
@@ -81,15 +80,17 @@
 		iframe.style.border = "0";
 		iframe.style.display = "block";
 		hueco.appendChild(iframe);
-
-		var w = { hueco: hueco, iframe: iframe, pedida: 640 };
-		widgets.push(w);
-		ajustar(w);
-		// Si el hueco cambia de tamaño (llega su CSS, sale de una pestaña oculta, gira el móvil), se
-		// vuelve a mirar.
-		if (observador) observador.observe(hueco);
+		widgets.push({ hueco: hueco, iframe: iframe, pedida: 640 });
 	}
 	if (!widgets.length) return;
+
+	// Si el hueco cambia de tamaño (llega su CSS, sale de una pestaña oculta, gira el móvil), se
+	// vuelve a mirar.
+	if (typeof ResizeObserver === "function") {
+		var tamanos = new ResizeObserver(ajustar);
+		for (i = 0; i < widgets.length; i++) tamanos.observe(widgets[i].hueco);
+	}
+	ajustar();
 
 	window.addEventListener("message", function (e) {
 		if (e.origin !== origen) return;
@@ -98,7 +99,7 @@
 		for (var j = 0; j < widgets.length; j++) {
 			if (widgets[j].iframe.contentWindow === e.source) {
 				widgets[j].pedida = Math.min(Math.max(Math.round(datos.altura), 200), 4000);
-				ajustar(widgets[j]);
+				ajustar();
 			}
 		}
 	});
