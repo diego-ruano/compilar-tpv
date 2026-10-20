@@ -1140,6 +1140,22 @@ export default function Reservas() {
                     }}
                   />
                 </div>
+              ) : reservasMesQuery.data === undefined ? (
+                // Sin datos del mes todavía: cargando o sin poder leerlos. No es «no hay reservas».
+                reservasMesQuery.isError ? (
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-danger">
+                    No se han podido cargar las reservas.
+                    <button
+                      type="button"
+                      onClick={() => void reservasMesQuery.refetch()}
+                      className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-bold text-fg hover:bg-surface-2"
+                    >
+                      REINTENTAR
+                    </button>
+                  </div>
+                ) : (
+                  <div className="text-sm text-fg-muted">Cargando reservas…</div>
+                )
               ) : reservasDelDia.length === 0 ? (
                 <div className="text-sm text-fg-muted">No hay reservas para este día.</div>
               ) : (
