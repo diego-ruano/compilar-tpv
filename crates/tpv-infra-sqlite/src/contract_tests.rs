@@ -306,8 +306,7 @@ casos_de_contrato! {
     reservas__guardar_otra_persona_mismo_telefono,
     reservas__editar_web_conserva_origen,
     reservas__eliminar,
-    reservas__eliminar_web_por_venir,
-    reservas__eliminar_web_pasada,
+    reservas__cancelar_web,
     venta_rapida__create_comanda_barra,
     venta_rapida__add_linea,
     venta_rapida__add_linea_sin_precio,
@@ -623,6 +622,10 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "reservas.eliminar" => {
             let repo = SqliteReservasRepository::new(db.clone());
             repo.eliminar(&s(&e["id_reserva"])).await.expect("eliminar reserva");
+        }
+        "reservas.cancelar" => {
+            let repo = SqliteReservasRepository::new(db.clone());
+            assert!(repo.cancelar(&s(&e["id_reserva"])).await.expect("cancelar reserva"));
         }
         "venta_rapida.create_comanda_barra" => {
             let repo = SqliteVentaRapidaRepository::new(db.clone());

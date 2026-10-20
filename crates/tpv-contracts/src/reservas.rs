@@ -126,3 +126,10 @@ pub struct ClienteCoincidente {
 pub struct ReservaDeleteInput {
     pub id_reserva: String,
 }
+
+/// Cancelar una reserva que aún no ha llegado: se queda en la lista, cancelada, y deja libre la
+/// mesa. A la de una reserva web le llega un correo (docs/estudios/reservas-web.md §5.6).
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct ReservaCancelarInput {
+    pub id_reserva: String,
+}

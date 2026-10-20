@@ -134,6 +134,7 @@ export const nombresComandos = {
     "reservas_save": "reservasSave",
     "reservas_buscar_cliente": "reservasBuscarCliente",
     "reservas_delete": "reservasDelete",
+    "reservas_cancelar": "reservasCancelar",
     "reserva_web_ajustes": "reservaWebAjustes",
     "reserva_web_activar": "reservaWebActivar",
     "reserva_web_cerrar_dia": "reservaWebCerrarDia",
@@ -367,6 +368,7 @@ type Argumentos = {
     "reservas_save": { args: Parameters<Comandos["reservasSave"]>[0] };
     "reservas_buscar_cliente": { args: Parameters<Comandos["reservasBuscarCliente"]>[0] };
     "reservas_delete": { args: Parameters<Comandos["reservasDelete"]>[0] };
+    "reservas_cancelar": { args: Parameters<Comandos["reservasCancelar"]>[0] };
     "reserva_web_ajustes": {  };
     "reserva_web_activar": { args: Parameters<Comandos["reservaWebActivar"]>[0] };
     "reserva_web_cerrar_dia": { args: Parameters<Comandos["reservaWebCerrarDia"]>[0] };

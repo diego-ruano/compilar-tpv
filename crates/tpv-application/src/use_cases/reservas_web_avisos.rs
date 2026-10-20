@@ -269,6 +269,9 @@ mod tests {
         async fn eliminar(&self, _: &str) -> AppResult<bool> {
             panic!("ajeno a esta prueba")
         }
+        async fn cancelar(&self, _: &str) -> AppResult<bool> {
+            panic!("ajeno a esta prueba")
+        }
     }
 
     fn sin_copia() -> Copia {

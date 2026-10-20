@@ -36,9 +36,14 @@ pub trait ReservasRepository: Send + Sync {
         email: Option<&str>,
     ) -> AppResult<Option<ClienteCoincidente>>;
 
-    /// Elimina una reserva (desvinculando comandas). Una reserva web que está por venir no se borra:
-    /// se cancela. Devuelve `true` si borró o canceló alguna.
+    /// Borra una reserva (desvinculando sus comandas). Devuelve `true` si borró alguna. Una reserva
+    /// web no se borra nunca: es un `Conflict`, y lo que se hace con ella es cancelarla (§5.6).
     async fn eliminar(&self, id_reserva: &str) -> AppResult<bool>;
+
+    /// Cancela una reserva que aún no ha llegado (`PROXIMA`): se queda, cancelada. `false` si ya no
+    /// existe; `true` si ya estaba cancelada, sin volver a escribir. Sentada, terminada o sin
+    /// presentarse ya no se cancela: es un `Conflict`.
+    async fn cancelar(&self, id_reserva: &str) -> AppResult<bool>;
 }
 
 /// Lo que se le dice al cliente de una reserva web que el restaurante ha cambiado o cancelado

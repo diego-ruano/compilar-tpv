@@ -104,15 +104,20 @@ export async function reserva(db: Client, idReserva: string): Promise<ReservaDto
 }
 
 /**
- * ¿Es una reserva web que aún está por venir? Entonces borrarla la cancela (espejo de
- * `SQL_ES_WEB_POR_VENIR` en la Main, docs/estudios/reservas-web.md §5.6).
+ * Cómo está una reserva para borrarla o cancelarla, o `null` si no existe: una web no se borra y
+ * sólo se cancela la que aún no ha llegado (espejo de `eliminar`/`cancelar` en la Main,
+ * docs/estudios/reservas-web.md §5.6).
  */
-export async function esWebPorVenir(db: Client, idReserva: string): Promise<boolean> {
+export async function estadoYOrigen(
+	db: Client,
+	idReserva: string,
+): Promise<{ estado: string; origen: string } | null> {
 	const rs = await db.execute({
-		sql: "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Origen = 'WEB' AND Estado = 'PROXIMA';",
+		sql: "SELECT Estado AS estado, Origen AS origen FROM Reservas WHERE ID_Reserva = ?1;",
 		args: [idReserva],
 	});
-	return rows(rs).length > 0;
+	const r = rows(rs)[0];
+	return r ? { estado: String(r.estado), origen: String(r.origen) } : null;
 }
 
 /** RI-61: la duración por defecto y el modo de solape del negocio. Espejo de `ajustes_de_reserva`. */

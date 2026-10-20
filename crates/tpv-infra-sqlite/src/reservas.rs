@@ -1,7 +1,7 @@
 //! Adaptador SQLite del repositorio de reservas. Local-First puro (sin outbox/applied).
 
 use crate::util::new_id;
-use crate::consultas::{db_err, select_one_i64};
+use crate::consultas::{db_err, select_one_i64, select_one_string};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -443,18 +443,36 @@ impl ReservasRepository for SqliteReservasRepository {
         let conn = &g;
         let res: AppResult<bool> = conn.transaccion(async {
             let id = || vec![Value::Text(id_reserva.to_string())];
-            // Se decide aquí, al escribir, y se replica sólo lo elegido: una sentencia condicionada
-            // al estado se vuelve a evaluar en la otra copia, que puede tenerla en otro (una Handy
-            // la sentó), y una la cancelaría y la otra la borraría.
-            if select_one_i64(conn, SQL_ES_WEB_POR_VENIR, id()).await?.is_some() {
-                let canceladas = conn.execute(SQL_CANCELAR, id()).await.map_err(db_err)?;
-                return Ok(canceladas > 0);
+            if select_one_i64(conn, SQL_ES_WEB, id()).await?.is_some() {
+                return Err(AppError::conflict(MSG_WEB_NO_SE_BORRA));
             }
             // La comanda pierde la reserva pero conserva su cliente (`ID_Cliente`, fijado al
             // cobrar): el gasto del cliente no se descuadra por borrar la reserva (RI-61).
             conn.execute(SQL_DESVINCULAR_COMANDAS, id()).await.map_err(db_err)?;
             let borradas = conn.execute(SQL_BORRAR, id()).await.map_err(db_err)?;
             Ok(borradas > 0)
+        }).await;
+
+        res
+    }
+
+    async fn cancelar(&self, id_reserva: &str) -> AppResult<bool> {
+        let g = self.db.write().await;
+        let conn = &g;
+        let res: AppResult<bool> = conn.transaccion(async {
+            let id = || vec![Value::Text(id_reserva.to_string())];
+            // Se decide aquí, al escribir, y se replica sólo la sentencia, sin condición: la otra
+            // copia la vuelve a evaluar y puede tener la reserva en otro estado.
+            let estado = select_one_string(conn, "SELECT Estado FROM Reservas WHERE ID_Reserva = ?1;", id()).await?;
+            match estado.as_deref() {
+                None => Ok(false),
+                Some("CANCELADA") => Ok(true),
+                Some("PROXIMA") => {
+                    conn.execute(SQL_CANCELAR, id()).await.map_err(db_err)?;
+                    Ok(true)
+                }
+                Some(_) => Err(AppError::conflict(MSG_NO_PENDIENTE)),
+            }
         }).await;
 
         res
@@ -507,16 +525,22 @@ fn fila_de_reserva(row: &Row) -> AppResult<ReservaDto> {
     })
 }
 
-// Borrar una reserva. Una reserva web que aún está por venir (`Origen = 'WEB' AND Estado =
-// 'PROXIMA'`) no se borra: se cancela (docs/estudios/reservas-web.md §5.6). Queda constancia, la
-// agenda libera la mesa al verla cancelada y el correo al cliente se puede leer de ella; su comanda
-// sigue con la reserva. Lo mismo hace el worker (`reservas.commands.ts::deleteReserva`). Las
-// escrituras no llevan esa condición: se decide antes y se replica sólo una de las dos.
-const SQL_ES_WEB_POR_VENIR: &str =
-    "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Origen = 'WEB' AND Estado = 'PROXIMA';";
+// Borrar y cancelar (docs/estudios/reservas-web.md §5.6). Borrar quita la reserva; cancelar la deja,
+// cancelada, y sólo se cancela una que aún no ha llegado. Una reserva web no se borra nunca: queda
+// constancia, la agenda libera la mesa al verla cancelada y el correo al cliente se puede leer de
+// ella. Lo mismo hace el worker (`reservas.routes.ts`). Las escrituras no llevan condición: se
+// decide antes, al escribir, y se replica sólo lo elegido.
+const SQL_ES_WEB: &str = "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 AND Origen = 'WEB';";
 const SQL_CANCELAR: &str = "UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;";
 const SQL_DESVINCULAR_COMANDAS: &str = "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;";
 const SQL_BORRAR: &str = "DELETE FROM Reservas WHERE ID_Reserva = ?1;";
+
+/// Mismo texto en el worker (`reserva_web_no_se_borra`, `lib/errorCodes.ts`).
+const MSG_WEB_NO_SE_BORRA: &str =
+    "Una reserva hecha desde la web no se borra: se queda en la lista. Si aún no ha llegado, cancélala.";
+/// Mismo texto en el worker (`reserva_no_pendiente`, `lib/errorCodes.ts`).
+const MSG_NO_PENDIENTE: &str =
+    "Esa reserva ya no se puede cancelar: el cliente ya ha llegado o la reserva ya está cerrada.";
 
 #[cfg(test)]
 mod tests_cliente {
@@ -628,34 +652,67 @@ mod tests_cliente {
         sentencias.into_iter().map(|s| s.sql).collect()
     }
 
-    #[tokio::test]
-    async fn borrar_decide_al_escribir_y_replica_solo_lo_elegido_sin_condicion() {
-        // La otra copia puede tener la reserva en otro estado (una Handy la sentó): una sentencia
-        // condicionada al estado haría allí otra cosa. Se replica la cancelación o el borrado, sin más.
-        let (db, repo, _dir) = abrir().await;
-        {
-            let w = db.write().await;
+    async fn sembrar(db: &Arc<Db>, filas: &[(&str, &str, &str)]) {
+        let w = db.write().await;
+        for (id, estado, origen) in filas {
             w.raw()
-                .execute_batch(
+                .execute(
                     "INSERT INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Comensales, Estado, Origen) \
-                       VALUES ('web', '2026-05-10', '21:00', 'CENA', 2, 'PROXIMA', 'WEB'); \
-                     INSERT INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Comensales, Estado, Origen) \
-                       VALUES ('tpv', '2026-05-10', '21:00', 'CENA', 2, 'PROXIMA', 'TPV');",
+                     VALUES (?1, '2026-05-10', '21:00', 'CENA', 2, ?2, ?3);",
+                    vec![Value::Text((*id).into()), Value::Text((*estado).into()), Value::Text((*origen).into())],
                 )
                 .await
                 .unwrap();
         }
-        assert!(repo.eliminar("web").await.unwrap());
-        assert_eq!(replicado(&db).await, [SQL_CANCELAR]);
-        assert_eq!(texto(&db, "SELECT Estado FROM Reservas WHERE ID_Reserva = 'web';").await.as_deref(), Some("CANCELADA"));
+    }
 
+    async fn estado_de(db: &Arc<Db>, id: &str) -> Option<String> {
+        texto(db, &format!("SELECT Estado FROM Reservas WHERE ID_Reserva = '{id}';")).await
+    }
+
+    #[tokio::test]
+    async fn una_reserva_web_no_se_borra_nunca() {
+        // Ni por venir ni ya cerrada (§5.6): borrarla dejaba al cliente sin el correo de
+        // cancelación si se borraba dos veces seguidas. Se cancela, y se queda.
+        let (db, repo, _dir) = abrir().await;
+        sembrar(&db, &[("web", "PROXIMA", "WEB"), ("web-cancelada", "CANCELADA", "WEB"), ("tpv", "CANCELADA", "TPV")]).await;
+        for id in ["web", "web-cancelada"] {
+            let e = repo.eliminar(id).await.unwrap_err();
+            assert_eq!((e.code(), e.to_string().contains(MSG_WEB_NO_SE_BORRA)), (ErrorCode::Conflict, true), "{id}");
+        }
+        assert_eq!(texto(&db, "SELECT CAST(COUNT(*) AS TEXT) FROM Reservas;").await.as_deref(), Some("3"));
+
+        // Una del TPV se borra, cancelada o no, y se replica sólo el borrado.
         assert!(repo.eliminar("tpv").await.unwrap());
         assert_eq!(replicado(&db).await, [SQL_DESVINCULAR_COMANDAS, SQL_BORRAR]);
+        assert!(!repo.eliminar("tpv").await.unwrap());
+    }
 
-        // Ya cancelada, la web se borra de verdad.
-        assert!(repo.eliminar("web").await.unwrap());
-        assert_eq!(replicado(&db).await, [SQL_DESVINCULAR_COMANDAS, SQL_BORRAR]);
-        assert_eq!(texto(&db, "SELECT CAST(COUNT(*) AS TEXT) FROM Reservas;").await.as_deref(), Some("0"));
+    #[tokio::test]
+    async fn cancelar_decide_al_escribir_y_replica_solo_la_cancelacion() {
+        // La otra copia puede tener la reserva en otro estado (una Handy la sentó): una sentencia
+        // condicionada al estado haría allí otra cosa. Se replica la cancelación, sin más.
+        let (db, repo, _dir) = abrir().await;
+        sembrar(&db, &[("web", "PROXIMA", "WEB"), ("tpv", "PROXIMA", "TPV"), ("sentada", "ACTIVA", "TPV"), ("no-vino", "NO_SHOW", "WEB")]).await;
+        for id in ["web", "tpv"] {
+            assert!(repo.cancelar(id).await.unwrap(), "{id}");
+            assert_eq!(replicado(&db).await, [SQL_CANCELAR]);
+            assert_eq!(estado_de(&db, id).await.as_deref(), Some("CANCELADA"));
+        }
+
+        // Ya cancelada: no vuelve a escribir. Inexistente: `false`.
+        let antes = texto(&db, "SELECT CAST(COUNT(*) AS TEXT) FROM _Sync_Outbox;").await;
+        assert!(repo.cancelar("web").await.unwrap());
+        assert!(!repo.cancelar("no-existe").await.unwrap());
+        assert_eq!(texto(&db, "SELECT CAST(COUNT(*) AS TEXT) FROM _Sync_Outbox;").await, antes);
+
+        // Sentada o sin presentarse ya no se cancela.
+        for id in ["sentada", "no-vino"] {
+            let e = repo.cancelar(id).await.unwrap_err();
+            assert_eq!(e.code(), ErrorCode::Conflict, "{id}");
+        }
+        assert_eq!(estado_de(&db, "sentada").await.as_deref(), Some("ACTIVA"));
+        assert_eq!(estado_de(&db, "no-vino").await.as_deref(), Some("NO_SHOW"));
     }
 }
 

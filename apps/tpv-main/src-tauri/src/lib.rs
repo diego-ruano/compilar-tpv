@@ -2042,6 +2042,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::reservas::reservas_save,
             commands::reservas::reservas_buscar_cliente,
             commands::reservas::reservas_delete,
+            commands::reservas::reservas_cancelar,
             commands::reservas_web::reserva_web_ajustes,
             commands::reservas_web::reserva_web_activar,
             commands::reservas_web::reserva_web_cerrar_dia,

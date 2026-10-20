@@ -2750,6 +2750,14 @@ export type ReservaBuscarClienteArgs = {
 	email?: string | null,
 };
 
+/**
+ *  Cancelar una reserva que aún no ha llegado: se queda en la lista, cancelada, y deja libre la
+ *  mesa. A la de una reserva web le llega un correo (docs/estudios/reservas-web.md §5.6).
+ */
+export type ReservaCancelarInput = {
+	id_reserva: string,
+};
+
 /**  Entrada de borrado de reserva. */
 export type ReservaDeleteInput = {
 	id_reserva: string,

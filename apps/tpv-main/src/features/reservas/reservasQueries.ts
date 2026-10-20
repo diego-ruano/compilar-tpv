@@ -43,11 +43,22 @@ export function useSaveReserva() {
   });
 }
 
-/** Borrado de reserva; invalida la caché de reservas si el backend confirma. */
+/** Borrado de reserva: desaparece. Invalida la caché de reservas si el backend confirma. */
 export function useDeleteReserva() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: commands.reservasDelete,
+    onSuccess: (ok) => {
+      if (ok) void qc.invalidateQueries({ queryKey: reservasKeys.all });
+    },
+  });
+}
+
+/** Cancelar una reserva que aún no ha llegado: se queda, cancelada. Invalida como el borrado. */
+export function useCancelarReserva() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: commands.reservasCancelar,
     onSuccess: (ok) => {
       if (ok) void qc.invalidateQueries({ queryKey: reservasKeys.all });
     },

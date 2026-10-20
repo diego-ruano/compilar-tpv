@@ -15,6 +15,7 @@ import {
   Trash2,
   Clock,
   Globe,
+  Ban,
 } from "lucide-react";
 
 import { commands, esError, toAppError } from "@tpv/client";
@@ -26,6 +27,7 @@ import {
   useReservasMes,
   useSaveReserva,
   useDeleteReserva,
+  useCancelarReserva,
 } from "../../features/reservas/reservasQueries";
 import { mesasLoadLayout } from "../../features/mesas/mesasApi";
 
@@ -364,6 +366,7 @@ export default function Reservas() {
   // Escrituras vía mutaciones (la invalidación en onSuccess recachea las listas).
   const saveReserva = useSaveReserva();
   const deleteReserva = useDeleteReserva();
+  const cancelarReservaMut = useCancelarReserva();
 
   // Zonas + mesas derivadas de la meta cacheada.
   const zonas = useMemo<Zona[]>(() => metaQuery.data?.zonas ?? [], [metaQuery.data]);
@@ -421,14 +424,11 @@ export default function Reservas() {
   const [avisoWeb, setAvisoWeb] = useState<{ responder: (seguir: boolean) => void } | null>(null);
   const duracionDefecto = useBusinessSettings((s) => s.reserva_duracion_min);
 
-  const [confirmBorrar, setConfirmBorrar] = useState<{
-    open: boolean;
-    reserva: ReservaUI | null;
-  }>({ open: false, reserva: null });
-
-  const [borrando, setBorrando] = useState(false);
-  // Una reserva web por venir no se borra: se cancela y se le avisa al cliente (§5.6).
-  const borrarWeb = confirmBorrar.reserva ? esWebPorVenir(confirmBorrar.reserva) : false;
+  // Cancelar la deja en la lista, cancelada; borrar la quita. Una reserva web no se borra nunca, y
+  // cancelar una que está por venir le escribe al cliente (docs/estudios/reservas-web.md §5.6).
+  const [confirmar, setConfirmar] = useState<{ accion: "cancelar" | "borrar"; reserva: ReservaUI } | null>(null);
+  const [confirmando, setConfirmando] = useState(false);
+  const avisaAlCliente = confirmar?.accion === "cancelar" && esWebPorVenir(confirmar.reserva);
 
   const hoyClave = ymdLocal(hoy);
   const seleccionadoClave = ymdLocal(diaSeleccionado);
@@ -774,15 +774,24 @@ export default function Reservas() {
       const ok = await deleteReserva.mutateAsync({ id_reserva: reserva.id_reserva });
       // `false` es que no había nada que borrar: otro equipo la borró antes.
       if (!ok) return toast.error("No se pudo borrar la reserva", "Esa reserva ya no existe.");
-
-      // Una reserva web por venir no se borra: se cancela, y al cliente le llega un correo.
-      toast.success?.(
-        "OK",
-        esWebPorVenir(reserva) ? "Reserva cancelada. Se le avisará al cliente por correo." : "Reserva borrada.",
-      );
+      toast.success?.("OK", "Reserva borrada.");
     } catch (err) {
       console.error(err);
       toast.error("No se pudo borrar la reserva", textoDelError(err));
+    }
+  }
+
+  async function cancelarReserva(reserva: ReservaUI) {
+    try {
+      const ok = await cancelarReservaMut.mutateAsync({ id_reserva: reserva.id_reserva });
+      if (!ok) return toast.error("No se pudo cancelar la reserva", "Esa reserva ya no existe.");
+      toast.success?.(
+        "OK",
+        esWebPorVenir(reserva) ? "Reserva cancelada. Se le avisará al cliente por correo." : "Reserva cancelada.",
+      );
+    } catch (err) {
+      console.error(err);
+      toast.error("No se pudo cancelar la reserva", textoDelError(err));
     }
   }
 
@@ -1215,14 +1224,29 @@ export default function Reservas() {
                           </button>
                         ) : null}
 
-                        <button
-                          type="button"
-                          onClick={() => setConfirmBorrar({ open: true, reserva: r })}
-                          className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-extrabold tracking-widest text-danger transition hover:opacity-90 md:px-4"
-                        >
-                          <Trash2 className="size-3.5" aria-hidden />
-                          BORRAR
-                        </button>
+                        {/* Sólo se cancela la que aún no ha llegado. */}
+                        {r.estado === "PROXIMA" ? (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmar({ accion: "cancelar", reserva: r })}
+                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-extrabold tracking-widest text-fg transition hover:bg-surface-2 md:px-4"
+                          >
+                            <Ban className="size-3.5" aria-hidden />
+                            CANCELAR
+                          </button>
+                        ) : null}
+
+                        {/* Una reserva web no se borra nunca: se cancela, y se queda (§5.6). */}
+                        {r.origen !== "WEB" ? (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmar({ accion: "borrar", reserva: r })}
+                            className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-extrabold tracking-widest text-danger transition hover:opacity-90 md:px-4"
+                          >
+                            <Trash2 className="size-3.5" aria-hidden />
+                            BORRAR
+                          </button>
+                        ) : null}
                       </div>
                     </div>
                     );
@@ -1369,75 +1393,81 @@ export default function Reservas() {
             </div>
           )}
 
-          {confirmBorrar.open && (
+          {confirmar && (
             <div
               className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4"
-              onClick={() => (borrando ? null : setConfirmBorrar({ open: false, reserva: null }))}
+              onClick={() => (confirmando ? null : setConfirmar(null))}
             >
               <div
+                role="alertdialog"
+                aria-labelledby="confirmar-titulo"
                 className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-xl sm:p-5"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="text-lg font-extrabold tracking-widest text-fg">
-                  {borrarWeb ? "¿Cancelar esta reserva web?" : "¿Borrar esta reserva?"}
+                <div id="confirmar-titulo" className="text-lg font-extrabold tracking-widest text-fg">
+                  {confirmar.accion === "cancelar" ? "¿Cancelar esta reserva?" : "¿Borrar esta reserva?"}
                 </div>
 
                 <div className="mt-2 text-sm text-fg-muted">
-                  {borrarWeb
-                    ? "Esta reserva se hizo desde la web. No se borra: queda cancelada y se le enviará un correo al cliente. ¿Seguro?"
-                    : "Esta acción no se puede deshacer."}
+                  {confirmar.accion === "borrar"
+                    ? "Desaparece del todo. Esta acción no se puede deshacer."
+                    : avisaAlCliente
+                      ? "Se queda en la lista como cancelada y deja libre la mesa. Se hizo desde la web: al cliente le llegará un correo diciéndole que se ha cancelado."
+                      : "Se queda en la lista como cancelada y deja libre la mesa."}
                 </div>
 
-                {confirmBorrar.reserva && (
-                  <div className="mt-4 space-y-2 rounded-xl border border-border bg-surface-2 p-3">
-                    <div className="text-sm font-bold text-fg truncate">
-                      {confirmBorrar.reserva.nombre_cliente}
-                    </div>
-                    <div className="flex flex-wrap gap-2 text-xs font-semibold text-fg-muted">
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
-                        <Clock className="size-3.5" aria-hidden />
-                        {confirmBorrar.reserva.hora} · {turnoLabel(confirmBorrar.reserva.turno)}
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
-                        <Armchair className="size-3.5" aria-hidden />
-                        {confirmBorrar.reserva.nombre_zona} · {confirmBorrar.reserva.numero_mesa}
-                      </span>
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
-                        <Users className="size-3.5" aria-hidden />
-                        {confirmBorrar.reserva.comensales} comensales
-                      </span>
-                    </div>
+                <div className="mt-4 space-y-2 rounded-xl border border-border bg-surface-2 p-3">
+                  <div className="text-sm font-bold text-fg truncate">{confirmar.reserva.nombre_cliente}</div>
+                  <div className="flex flex-wrap gap-2 text-xs font-semibold text-fg-muted">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
+                      <Clock className="size-3.5" aria-hidden />
+                      {confirmar.reserva.hora} · {turnoLabel(confirmar.reserva.turno)}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
+                      <Armchair className="size-3.5" aria-hidden />
+                      {confirmar.reserva.id_mesa
+                        ? `${confirmar.reserva.nombre_zona} · ${confirmar.reserva.numero_mesa}`
+                        : "Sin mesa"}
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
+                      <Users className="size-3.5" aria-hidden />
+                      {confirmar.reserva.comensales} comensales
+                    </span>
                   </div>
-                )}
+                </div>
 
                 <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
                   <button
                     type="button"
-                    disabled={borrando}
-                    onClick={() => setConfirmBorrar({ open: false, reserva: null })}
+                    disabled={confirmando}
+                    onClick={() => setConfirmar(null)}
                     className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-bold text-fg hover:bg-surface-2 disabled:opacity-60"
                   >
-                    {borrarWeb ? "VOLVER" : "CANCELAR"}
+                    VOLVER
                   </button>
 
                   <button
                     type="button"
-                    disabled={borrando || !confirmBorrar.reserva}
+                    disabled={confirmando}
                     onClick={conAviso(async () => {
-                      const res = confirmBorrar.reserva;
-                      if (!res) return;
-
-                      setBorrando(true);
+                      const { accion, reserva } = confirmar;
+                      setConfirmando(true);
                       try {
-                        await borrarReserva(res);
-                        setConfirmBorrar({ open: false, reserva: null });
+                        await (accion === "cancelar" ? cancelarReserva(reserva) : borrarReserva(reserva));
+                        setConfirmar(null);
                       } finally {
-                        setBorrando(false);
+                        setConfirmando(false);
                       }
                     })}
                     className="rounded-lg bg-danger px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:bg-danger disabled:opacity-60"
                   >
-                    {borrarWeb ? (borrando ? "CANCELANDO..." : "CANCELAR RESERVA") : borrando ? "BORRANDO..." : "BORRAR"}
+                    {confirmar.accion === "cancelar"
+                      ? confirmando
+                        ? "CANCELANDO..."
+                        : "CANCELAR RESERVA"
+                      : confirmando
+                        ? "BORRANDO..."
+                        : "BORRAR"}
                   </button>
                 </div>
               </div>

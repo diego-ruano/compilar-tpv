@@ -215,40 +215,54 @@ export function saveReserva(input: ReservaSaveInput, cliente: ClienteResuelto): 
 }
 
 /**
- * Borra una reserva y desvincula sus comandas; o, si es una reserva web que está por venir, la
- * cancela y su comanda sigue con ella (docs/estudios/reservas-web.md §5.6). Igual que la Main.
- *
- * Quién decide es la ruta, que lo lee antes (`reservas.queries.ts::esWebPorVenir`): las sentencias
- * no llevan la condición porque se vuelven a evaluar en la Main al replicarse, que puede tener la
- * reserva en otro estado, y una copia la cancelaría y la otra la borraría.
+ * Borra una reserva y desvincula sus comandas. Igual que la Main. Una reserva web no se borra
+ * (docs/estudios/reservas-web.md §5.6): lo rechaza la ruta antes de construir esto.
  */
-export function deleteReserva(idReserva: string, cancelarWeb: boolean): BuiltCommand {
-	const cloudPayload = { id_reserva: idReserva };
-	const steps = cancelarWeb
-		? [
-				{
-					kind: "execute" as const,
-					saveAs: "deleted",
-					sql: "UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;",
-					args: [idReserva],
-				},
-			]
-		: [
-				{
-					kind: "execute" as const,
-					sql: "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
-					args: [idReserva],
-				},
-				{
-					kind: "execute" as const,
-					saveAs: "deleted",
-					sql: "DELETE FROM Reservas WHERE ID_Reserva = ?1;",
-					args: [idReserva],
-				},
-			];
+export function deleteReserva(idReserva: string): BuiltCommand {
+	const steps = [
+		{
+			kind: "execute" as const,
+			sql: "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
+			args: [idReserva],
+		},
+		{
+			kind: "execute" as const,
+			saveAs: "deleted",
+			sql: "DELETE FROM Reservas WHERE ID_Reserva = ?1;",
+			args: [idReserva],
+		},
+	];
 	return {
 		commandName: "reservas_delete",
 		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "deleted" } },
-		cloudPayload,
+		cloudPayload: { id_reserva: idReserva },
+	};
+}
+
+/**
+ * Cancela una reserva que aún no ha llegado: se queda, cancelada. Igual que la Main.
+ *
+ * Quién decide es la ruta, que la lee antes (`reservas.queries.ts::estadoYOrigen`): la sentencia no
+ * lleva la condición porque se vuelve a evaluar en la Main al replicarse, que puede tener la reserva
+ * en otro estado.
+ */
+export function cancelarReserva(idReserva: string): BuiltCommand {
+	return {
+		commandName: "reservas_cancelar",
+		command: {
+			type: "tenantDb.transaction",
+			payload: {
+				steps: [
+					{
+						kind: "execute",
+						saveAs: "canceladas",
+						sql: "UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;",
+						args: [idReserva],
+					},
+				],
+				resultKey: "canceladas",
+			},
+		},
+		cloudPayload: { id_reserva: idReserva },
 	};
 }

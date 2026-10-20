@@ -87,8 +87,8 @@ import {
 	guardarProveedor,
 	setVinculos,
 } from "../src/domains/proveedores/proveedores.commands";
-import { deleteReserva, saveReserva } from "../src/domains/reservas/reservas.commands";
-import { esWebPorVenir, resolverCliente } from "../src/domains/reservas/reservas.queries";
+import { cancelarReserva, deleteReserva, saveReserva } from "../src/domains/reservas/reservas.commands";
+import { estadoYOrigen, resolverCliente } from "../src/domains/reservas/reservas.queries";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 import {
 	createTarea,
@@ -195,10 +195,8 @@ import casoResOtraPersona from "../../../tests/contract/casos/reservas/guardar_o
 import goldenResOtraPersona from "../../../tests/contract/golden/reservas/guardar_otra_persona_mismo_telefono.json";
 import casoResEliminar from "../../../tests/contract/casos/reservas/eliminar.json";
 import goldenResEliminar from "../../../tests/contract/golden/reservas/eliminar.json";
-import casoResEliminarWeb from "../../../tests/contract/casos/reservas/eliminar_web_por_venir.json";
-import goldenResEliminarWeb from "../../../tests/contract/golden/reservas/eliminar_web_por_venir.json";
-import casoResEliminarWebPasada from "../../../tests/contract/casos/reservas/eliminar_web_pasada.json";
-import goldenResEliminarWebPasada from "../../../tests/contract/golden/reservas/eliminar_web_pasada.json";
+import casoResCancelarWeb from "../../../tests/contract/casos/reservas/cancelar_web.json";
+import goldenResCancelarWeb from "../../../tests/contract/golden/reservas/cancelar_web.json";
 import casoVrCrearComanda from "../../../tests/contract/casos/venta_rapida/create_comanda_barra.json";
 import goldenVrCrearComanda from "../../../tests/contract/golden/venta_rapida/create_comanda_barra.json";
 import casoVrAddLinea from "../../../tests/contract/casos/venta_rapida/add_linea.json";
@@ -338,8 +336,7 @@ const CASOS = [
 		golden: goldenResOtraPersona,
 	},
 	{ nombre: "reservas_eliminar", caso: casoResEliminar, golden: goldenResEliminar },
-	{ nombre: "reservas_eliminar_web_por_venir", caso: casoResEliminarWeb, golden: goldenResEliminarWeb },
-	{ nombre: "reservas_eliminar_web_pasada", caso: casoResEliminarWebPasada, golden: goldenResEliminarWebPasada },
+	{ nombre: "reservas_cancelar_web", caso: casoResCancelarWeb, golden: goldenResCancelarWeb },
 	{ nombre: "vr_create_comanda_barra", caso: casoVrCrearComanda, golden: goldenVrCrearComanda },
 	{ nombre: "vr_add_linea", caso: casoVrAddLinea, golden: goldenVrAddLinea },
 	{ nombre: "vr_add_linea_sin_precio", caso: casoVrAddLineaSinPrecio, golden: goldenVrAddLineaSinPrecio },
@@ -671,9 +668,14 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "reservas.eliminar": {
-			// Como la ruta: decide antes si es una reserva web por venir.
-			const cancelarWeb = await esWebPorVenir(db, caso.entrada.id_reserva);
-			aplicar(hub, sql, deleteReserva(caso.entrada.id_reserva, cancelarWeb));
+			aplicar(hub, sql, deleteReserva(caso.entrada.id_reserva));
+			return;
+		}
+		case "reservas.cancelar": {
+			// Como la ruta: sólo se cancela la que aún no ha llegado.
+			const r = await estadoYOrigen(db, caso.entrada.id_reserva);
+			if (r?.estado !== "PROXIMA") throw new Error("reservas.cancelar: no está por venir");
+			aplicar(hub, sql, cancelarReserva(caso.entrada.id_reserva));
 			return;
 		}
 		case "venta_rapida.create_comanda_barra": {

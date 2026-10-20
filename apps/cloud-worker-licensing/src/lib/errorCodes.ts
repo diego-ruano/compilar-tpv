@@ -214,6 +214,12 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	reserva_solapada: "Esa mesa ya está ocupada a esa hora.",
 	reserva_solapada_prohibida:
 		"Esa mesa ya está ocupada a esa hora, y en este negocio no se pueden solapar reservas.",
+	// Borrar y cancelar una reserva (docs/estudios/reservas-web.md §5.6): el mismo texto que da la
+	// Main (`MSG_WEB_NO_SE_BORRA`, `MSG_NO_PENDIENTE`).
+	reserva_web_no_se_borra:
+		"Una reserva hecha desde la web no se borra: se queda en la lista. Si aún no ha llegado, cancélala.",
+	reserva_no_pendiente:
+		"Esa reserva ya no se puede cancelar: el cliente ya ha llegado o la reserva ya está cerrada.",
 	// RI-61: el mismo texto que da la Main.
 	cliente_no_encontrado:
 		"Ese cliente ya no existe. Vuelve a buscarlo o guarda la reserva sin cliente.",

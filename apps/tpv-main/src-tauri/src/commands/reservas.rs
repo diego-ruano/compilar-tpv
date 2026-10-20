@@ -4,8 +4,8 @@ use tauri::State;
 
 use tpv_application::use_cases::reservas as uc;
 use tpv_contracts::reservas::{
-    ClienteCoincidente, ReservaBuscarClienteArgs, ReservaDeleteInput, ReservaDto,
-    ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
+    ClienteCoincidente, ReservaBuscarClienteArgs, ReservaCancelarInput, ReservaDeleteInput,
+    ReservaDto, ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
 };
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
@@ -62,6 +62,18 @@ pub async fn reservas_delete(
 ) -> Result<bool, AppErrorDto> {
     state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
+    Ok(uc::eliminar(repo.as_ref(), args).await?)
+}
+
+/// Cancela una reserva que aún no ha llegado; a la de una reserva web le llega un correo.
+#[tauri::command]
+#[specta::specta]
+pub async fn reservas_cancelar(
+    state: State<'_, AppState>,
+    args: ReservaCancelarInput,
+) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("reservas.gestionar").await?;
+    let repo = state.reservas_repo().await?;
     let avisos = state.avisos_reserva_web().await.ok();
-    Ok(uc::eliminar(repo.as_ref(), avisos.as_deref(), args).await?)
+    Ok(uc::cancelar(repo.as_ref(), avisos.as_deref(), args).await?)
 }

@@ -49,7 +49,7 @@ administración propio (mientras tanto, el CLI).
 | Cancelación por el cliente | Desde el enlace del correo, hasta la hora de la reserva. Pasada la hora, el bar la da por no presentada |
 | Mesa pisada al entregarla | La Main la guarda igualmente y avisa al restaurante para que la mueva |
 | La Main no puede registrarla | Correo al cliente; la solución la decide el restaurante |
-| El restaurante cambia una reserva web | Doble confirmación en el TPV y correo al cliente. Borrar una reserva web la **cancela** (§5.6) |
+| El restaurante cambia una reserva web | Doble confirmación en el TPV y correo al cliente. Una reserva web no se borra: se **cancela** (§5.6) |
 | Avisos al restaurante | Sólo las notificaciones de la app |
 | Main apagada o recuperándose | La web sigue aceptando; lo único que espera es la entrega |
 | Precio | Incluido en la licencia |
@@ -445,7 +445,7 @@ Desde el worker, con el binding `EMAIL`:
 | Confirmación, con el enlace de cancelar | Al reservar | `POST /reservas`; la respuesta dice si salió (`correo`), y una repetición del alta no lo repite (`null`) |
 | Cancelación confirmada | Al cancelar desde el enlace | `POST /cancelar`, al correo del cliente de la reserva en Turso o, si aún no está, al del alta |
 | Reserva modificada | El restaurante cambia día, hora, personas o mesa (§5.6) | `POST /v1/reservas-web/avisos` (§5.7) |
-| Reserva cancelada por el restaurante | El restaurante la cancela o la borra | `POST /v1/reservas-web/avisos` (§5.7) |
+| Reserva cancelada por el restaurante | El restaurante la cancela | `POST /v1/reservas-web/avisos` (§5.7) |
 | No se pudo registrar | La Main devuelve `fallida`: el restaurante se pondrá en contacto | La agenda, al contestar la Main; lo que no sale lo repite la alarma hasta la hora de la reserva, y después olvida el correo |
 
 El enlace de cancelar es `/reservas-web/v1/w/<clave>/cancelar#t=<token>`. El token va en el
@@ -568,15 +568,16 @@ Notificaciones (a los administradores, como la de «Nueva reserva»):
   doble confirmación: «Esta reserva se hizo desde la web. Se enviará un correo al cliente con el
   cambio. ¿Seguro?». Una nota, la duración o una reserva ya sentada, terminada o cancelada no le
   escriben al cliente, y no se pregunta (`features/reservas/reservaWeb.ts`).
-- **Borrar una reserva web por venir la cancela** (`Estado = 'CANCELADA'`) en vez de borrar la fila,
-  y el diálogo lo dice: queda constancia, la agenda libera la mesa al verlo en Turso y el correo del
-  cliente se sigue pudiendo leer de la reserva. Lo hacen el repositorio de la Main y el comando del
-  worker (la Handy borra por él), con dos casos de contrato. Una reserva web que ya no está por venir
-  se borra como cualquier otra: a su cliente no hay nada que decirle.
+- **Cancelar y borrar** son dos botones. Cancelar deja la reserva en la lista, atenuada, y sólo se
+  cancela la que aún no ha llegado (`PROXIMA`); borrar la quita. **Una reserva web no se borra
+  nunca**, ni por venir ni ya cerrada: queda constancia, la agenda libera la mesa al verla cancelada
+  en Turso y el correo del cliente se sigue pudiendo leer de ella. Lo deciden el repositorio de la
+  Main (`eliminar`, `cancelar`) y las rutas del worker (`DELETE /v1/reservas/:id`,
+  `POST /v1/reservas/:id/cancelar`), y se replica sólo la sentencia elegida, sin condición.
 
 ### 5.7 Avisar al cliente de un cambio
 
-- `reservas::guardar` y `reservas::eliminar` leen la reserva antes (`ReservasRepository::reserva`;
+- `reservas::guardar` y `reservas::cancelar` leen la reserva antes (`ReservasRepository::reserva`;
   en la Handy, `GET /v1/reservas/:id`) y después, y `aviso_al_cliente` decide: de una reserva web
   `PROXIMA`, `cancelada` si ha quedado cancelada o ya no está, `modificada` si ha cambiado lo del
   §5.6, con los datos de después. Llaman al puerto `AvisosReservaWeb::encolar`, con su implementación
@@ -742,7 +743,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | ✅ **2 · Agenda y API pública** | Tablas centrales, `POST /clave` y el código en Configuración, la puerta pública, las rutas públicas, `AgendaWeb`, los limitadores, el interruptor, la administración de dominios y claves | Código y tests hechos el 2026-10-18 (las altas simultáneas, también). Falta crear las tablas centrales en Turso, desplegar el worker y reservar con `curl` |
 | ✅ **3 · Entrega a la Main** | `avisarReservasWeb`, `/pendientes` y `/recogidas`, la recogida en el motor, el caso de uso, las notificaciones, la cancelación entregada, la reoferta | Código y tests hechos el 2026-10-18. Comprobado en producción el 2026-10-19 con la Main encendida: una reserva hecha desde el widget llega a la Main. Falta con la Main apagada (la recoge al conectar) |
 | ✅ **4 · Widget** | `packages/plano`, `packages/estilos`, `apps/reservas-web`, `embed.js`, los assets en el worker y la CSP | Código y tests hechos el 2026-10-19. Falta verlo incrustado de verdad: desplegar, dar de alta `http://localhost:5174` y abrir la página de prueba (`pnpm --filter @tpv/reservas-web prueba`); en ella, el marco tiene que crecer al llegar al plano y encoger al volver o al confirmar (jsdom no maqueta: el test de `altura.ts` simula el tamaño) |
-| ✅ **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, borrar = cancelar, la cola de avisos y su job | Código y tests hechos el 2026-10-19. Falta crear en la base central la columna y el índice de `email_sends` (§3.2), comprobar el remitente (§12), desplegar y ver llegar los cinco correos y cancelar desde el enlace |
+| ✅ **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, cancelar sin borrar, la cola de avisos y su job | Código y tests hechos el 2026-10-19. Falta crear en la base central la columna y el índice de `email_sends` (§3.2), comprobar el remitente (§12), desplegar y ver llegar los cinco correos y cancelar desde el enlace |
 | **6 · Piloto** | Los textos de LEGAL-01, `arquitectura/reservas-web.md` y la primera web propia con un bar | Un bar recibe reservas reales |
 | **7 · WordPress** | El plugin: ajustes con la clave, shortcode y bloque, que imprimen la línea del §7.3 | Instalado en un WordPress de prueba |
 
@@ -778,11 +779,6 @@ en la fase 1.
 - **El correo de un cambio hecho desde la Handy** se intenta una vez: si en ese momento falla la red
   o el correo, el cambio queda hecho y el cliente no se entera por correo. La Main lo reintenta
   desde su cola.
-- **Borrar dos veces seguidas una reserva web por venir** antes de que salga el aviso de la primera:
-  la primera la cancela y encola el correo; la segunda, ya cancelada, la borra de verdad. Si ese
-  borrado llega a la nube antes que el aviso (lo normal si se hizo todo sin conexión), la nube ya no
-  sabe a quién escribir y el aviso acaba descartado: el cliente no recibe el correo de cancelación.
-  Evitarlo obligaría a impedir el segundo borrado o a guardar el destinatario fuera de la nube.
 - **Un correo puede salir dos veces** si sale, fallan los tres intentos de apuntarlo en la base
   central, se pierde además la respuesta y quien lo mandó lo repite pasados cinco minutos.
 - **El enlace de cancelar es de quien hizo la reserva.** Si el restaurante se la pasa a otro cliente

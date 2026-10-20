@@ -1,8 +1,8 @@
 //! Casos de uso de reservas (Local-First).
 
 use tpv_contracts::reservas::{
-    ClienteCoincidente, ReservaBuscarClienteArgs, ReservaDeleteInput, ReservaDto,
-    ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
+    ClienteCoincidente, ReservaBuscarClienteArgs, ReservaCancelarInput, ReservaDeleteInput,
+    ReservaDto, ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
 };
 use tpv_contracts::reservas_web::TipoAvisoReservaWeb;
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
@@ -108,12 +108,22 @@ pub async fn buscar_cliente(
     repo.buscar_cliente(telefono.as_deref(), email.as_deref()).await
 }
 
-/// Borra una reserva. Una reserva web que está por venir no se borra: el repositorio la cancela, y
-/// a su cliente se le avisa (§5.6).
-pub async fn eliminar(
+/// Borra una reserva: desaparece. Una reserva web no se borra (el repositorio lo rechaza): se
+/// cancela, para que quede constancia y a su cliente le llegue el correo (§5.6).
+pub async fn eliminar(repo: &dyn ReservasRepository, input: ReservaDeleteInput) -> AppResult<bool> {
+    let id = input.id_reserva.trim();
+    if id.is_empty() {
+        return Err(AppError::validation("ID_Reserva inválido"));
+    }
+    repo.eliminar(id).await
+}
+
+/// Cancela una reserva que aún no ha llegado: se queda en la lista, cancelada. Si es una reserva
+/// web por venir, a su cliente se le avisa (§5.6).
+pub async fn cancelar(
     repo: &dyn ReservasRepository,
     avisos: Option<&dyn AvisosReservaWeb>,
-    input: ReservaDeleteInput,
+    input: ReservaCancelarInput,
 ) -> AppResult<bool> {
     let id = input.id_reserva.trim();
     if id.is_empty() {
@@ -123,7 +133,7 @@ pub async fn eliminar(
         Some(_) => antes_de_cambiarla(repo, id).await,
         None => None,
     };
-    let ok = repo.eliminar(id).await?;
+    let ok = repo.cancelar(id).await?;
     if let (true, Some(antes), Some(avisos)) = (ok, antes, avisos) {
         avisar_al_cliente(repo, avisos, &antes).await;
     }
@@ -213,6 +223,9 @@ mod tests {
         async fn eliminar(&self, _: &str) -> AppResult<bool> {
             panic!("repo llamado")
         }
+        async fn cancelar(&self, _: &str) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
     }
 
     /// Repo que acepta `guardar` (para probar la emisión sin tocar SQLite).
@@ -239,6 +252,9 @@ mod tests {
             Ok(None)
         }
         async fn eliminar(&self, _: &str) -> AppResult<bool> {
+            Ok(true)
+        }
+        async fn cancelar(&self, _: &str) -> AppResult<bool> {
             Ok(true)
         }
     }
@@ -325,12 +341,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn eliminar_exige_id() {
+    async fn eliminar_y_cancelar_exigen_id() {
         let input = ReservaDeleteInput {
             id_reserva: " ".into(),
         };
         assert!(matches!(
-            eliminar(&RepoQueNoDebeLlamarse, None, input).await,
+            eliminar(&RepoQueNoDebeLlamarse, input).await,
+            Err(AppError::Validation(_))
+        ));
+        let input = ReservaCancelarInput { id_reserva: " ".into() };
+        assert!(matches!(
+            cancelar(&RepoQueNoDebeLlamarse, None, input).await,
             Err(AppError::Validation(_))
         ));
     }
@@ -360,8 +381,8 @@ mod tests {
         }
     }
 
-    /// Una base con una reserva: `guardar` la cambia como lo haría el repo y `eliminar` cancela la
-    /// web que está por venir (y borra las demás).
+    /// Una base con una reserva: `guardar` la cambia como lo haría el repo, `eliminar` la borra y
+    /// `cancelar` cancela la que aún no ha llegado (la ya cancelada la deja como está).
     struct RepoConUna(std::sync::Mutex<Option<ReservaDto>>);
     #[async_trait]
     impl ReservasRepository for RepoConUna {
@@ -389,12 +410,18 @@ mod tests {
             Ok(None)
         }
         async fn eliminar(&self, _: &str) -> AppResult<bool> {
+            Ok(self.0.lock().unwrap().take().is_some())
+        }
+        async fn cancelar(&self, _: &str) -> AppResult<bool> {
             let mut r = self.0.lock().unwrap();
             match r.as_mut() {
-                Some(x) if x.origen == "WEB" && x.estado == "PROXIMA" => x.estado = "CANCELADA".into(),
-                _ => *r = None,
+                None => Ok(false),
+                Some(x) if x.estado == "PROXIMA" || x.estado == "CANCELADA" => {
+                    x.estado = "CANCELADA".into();
+                    Ok(true)
+                }
+                Some(_) => Err(AppError::conflict("ya no está pendiente")),
             }
-            Ok(true)
         }
     }
 
@@ -472,18 +499,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn borrar_una_reserva_web_por_venir_la_cancela_y_avisa_una_pasada_no() {
+    async fn cancelar_una_reserva_web_por_venir_avisa_una_sola_vez() {
         let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
         let avisos = Avisos::default();
-        let borrar = || ReservaDeleteInput { id_reserva: "r1".into() };
-        assert!(eliminar(&repo, Some(&avisos), borrar()).await.unwrap());
+        let cancela = || ReservaCancelarInput { id_reserva: "r1".into() };
+        assert!(cancelar(&repo, Some(&avisos), cancela()).await.unwrap());
         assert_eq!(repo.0.lock().unwrap().as_ref().map(|r| r.estado.clone()), Some("CANCELADA".into()));
         assert_eq!(avisos.0.lock().unwrap().iter().map(|a| a.tipo).collect::<Vec<_>>(), [TipoAvisoReservaWeb::Cancelada]);
 
-        // Ya cancelada: borrarla otra vez la borra de verdad, y no se le vuelve a escribir.
-        assert!(eliminar(&repo, Some(&avisos), borrar()).await.unwrap());
-        assert!(repo.0.lock().unwrap().is_none());
+        // Ya cancelada: cancelarla otra vez no hace nada, y no se le vuelve a escribir.
+        assert!(cancelar(&repo, Some(&avisos), cancela()).await.unwrap());
         assert_eq!(avisos.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelar_una_del_tpv_no_avisa_a_nadie() {
+        let repo = RepoConUna(std::sync::Mutex::new(Some(ReservaDto { origen: "TPV".into(), ..web("PROXIMA") })));
+        let avisos = Avisos::default();
+        assert!(cancelar(&repo, Some(&avisos), ReservaCancelarInput { id_reserva: "r1".into() }).await.unwrap());
+        assert_eq!(repo.0.lock().unwrap().as_ref().map(|r| r.estado.clone()), Some("CANCELADA".into()));
+        assert!(avisos.0.lock().unwrap().is_empty());
     }
 
     /// Como `RepoConUna`, pero la lectura de después del cambio falla (la red de la Handy).
@@ -511,6 +546,9 @@ mod tests {
         async fn eliminar(&self, id: &str) -> AppResult<bool> {
             self.0.eliminar(id).await
         }
+        async fn cancelar(&self, id: &str) -> AppResult<bool> {
+            self.0.cancelar(id).await
+        }
     }
 
     #[tokio::test]
@@ -523,7 +561,7 @@ mod tests {
         assert!(avisos.0.lock().unwrap().is_empty());
 
         let repo = RepoQueNoRelee(RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA")))), Default::default());
-        assert!(eliminar(&repo, Some(&avisos), ReservaDeleteInput { id_reserva: "r1".into() }).await.unwrap());
+        assert!(cancelar(&repo, Some(&avisos), ReservaCancelarInput { id_reserva: "r1".into() }).await.unwrap());
         assert!(avisos.0.lock().unwrap().is_empty());
     }
 

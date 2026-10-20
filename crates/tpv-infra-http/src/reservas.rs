@@ -100,6 +100,14 @@ impl ReservasRepository for HttpReservasRepository {
             .await?;
         Ok(true)
     }
+
+    async fn cancelar(&self, id_reserva: &str) -> AppResult<bool> {
+        let r: JsonValue = self
+            .client
+            .post_json(&format!("/v1/reservas/{id_reserva}/cancelar"), &json!({}))
+            .await?;
+        Ok(r.get("cancelada").and_then(JsonValue::as_bool).unwrap_or(false))
+    }
 }
 
 /// El aviso al cliente de una reserva web, desde la Handy: siempre tiene red, así que se manda ya
