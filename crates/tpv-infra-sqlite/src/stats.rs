@@ -737,28 +737,31 @@ impl SqliteStatsRepository {
             r#"
             {ctes}
             SELECT
+              SUM(CASE WHEN COALESCE(Estado,'')='PROXIMA' THEN 1 ELSE 0 END) AS proximas,
               SUM(CASE WHEN COALESCE(Estado,'')='ACTIVA' THEN 1 ELSE 0 END) AS activas,
               SUM(CASE WHEN COALESCE(Estado,'')='FINALIZADA' THEN 1 ELSE 0 END) AS finalizadas,
-              SUM(CASE WHEN COALESCE(Estado,'')='CANCELADA' THEN 1 ELSE 0 END) AS canceladas
+              SUM(CASE WHEN COALESCE(Estado,'')='CANCELADA' THEN 1 ELSE 0 END) AS canceladas,
+              SUM(CASE WHEN COALESCE(Estado,'')='NO_SHOW' THEN 1 ELSE 0 END) AS no_vinieron
             FROM res_rng;
             "#,
             ctes = ctes
         );
 
         let mut rows_es = db.query(&sql_estado, ()).await.map_err(|e| e.to_string())?;
-        let (activas, finalizadas, canceladas) =
-            match rows_es.next().await.map_err(|e| e.to_string())? {
-                Some(r) => (
-                    v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0),
-                    v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0),
-                    v_i64(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(0),
-                ),
-                None => (0, 0, 0),
-            };
+        // Los cinco estados de una reserva: antes sólo tres, y las que estaban por llegar (todas las
+        // del futuro) y las de clientes que no vinieron no salían en la gráfica.
+        let estado_valores = match rows_es.next().await.map_err(|e| e.to_string())? {
+            Some(r) => (0..5)
+                .map(|i| Ok(v_i64(r.get_value(i).map_err(|e| e.to_string())?).unwrap_or(0)))
+                .collect::<Result<Vec<_>, String>>()?,
+            None => vec![0; 5],
+        };
 
         let estado = ChartSeriesI64 {
-            labels: vec!["Activas".into(), "Finalizadas".into(), "Canceladas".into()],
-            values: vec![activas, finalizadas, canceladas],
+            labels: ["Por llegar", "En la mesa", "Terminadas", "Canceladas", "No vinieron"]
+                .map(String::from)
+                .to_vec(),
+            values: estado_valores,
         };
 
         let sql_franjas = format!(

@@ -156,7 +156,8 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
 
     // ✅ Donut estados (AHORA IGUAL: texto siempre visible + total en centro)
     const estadoOptions: ApexOptions = useMemo(() => {
-        const colors = ["#0ea5e9", "#10b981", "#94a3b8"];
+        // Por llegar, en la mesa, terminadas, canceladas y no vinieron.
+        const colors = ["#0ea5e9", "#10b981", "#94a3b8", "#ef4444", "#f59e0b"];
         const totalEstado = estadoValues.reduce((a, b) => a + Number(b || 0), 0);
 
         return {
@@ -360,7 +361,7 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
                 <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-[460px]">
                     <div className="min-w-0">
                         <h4 className="text-base font-bold text-fg truncate">Estado de las reservas</h4>
-                        <p className="text-sm text-fg-muted truncate">Activas · Finalizadas · Canceladas</p>
+                        <p className="text-sm text-fg-muted truncate">Por llegar · En la mesa · Terminadas · Canceladas · No vinieron</p>
                     </div>
 
                     <div className="mt-4 flex-1 min-h-0 flex items-center justify-center">

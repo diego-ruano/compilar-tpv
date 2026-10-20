@@ -356,9 +356,11 @@ export async function reservas(
 		db,
 		`${CTES}
 		 SELECT
+			SUM(CASE WHEN COALESCE(Estado,'')='PROXIMA' THEN 1 ELSE 0 END) AS proximas,
 			SUM(CASE WHEN COALESCE(Estado,'')='ACTIVA' THEN 1 ELSE 0 END) AS activas,
 			SUM(CASE WHEN COALESCE(Estado,'')='FINALIZADA' THEN 1 ELSE 0 END) AS finalizadas,
-			SUM(CASE WHEN COALESCE(Estado,'')='CANCELADA' THEN 1 ELSE 0 END) AS canceladas
+			SUM(CASE WHEN COALESCE(Estado,'')='CANCELADA' THEN 1 ELSE 0 END) AS canceladas,
+			SUM(CASE WHEN COALESCE(Estado,'')='NO_SHOW' THEN 1 ELSE 0 END) AS no_vinieron
 		 FROM res_rng;`,
 	);
 	const franjas = await one(
@@ -387,8 +389,15 @@ export async function reservas(
 			values: br.map((r) => num(r.value)),
 		},
 		estado: {
-			labels: ["Activas", "Finalizadas", "Canceladas"],
-			values: [num(estado.activas), num(estado.finalizadas), num(estado.canceladas)],
+			// Los cinco estados de una reserva, como la Main.
+			labels: ["Por llegar", "En la mesa", "Terminadas", "Canceladas", "No vinieron"],
+			values: [
+				num(estado.proximas),
+				num(estado.activas),
+				num(estado.finalizadas),
+				num(estado.canceladas),
+				num(estado.no_vinieron),
+			],
 		},
 		franjas: {
 			labels: ["00-11", "12-15", "16-19", "20-23"],
