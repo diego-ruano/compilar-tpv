@@ -35,6 +35,9 @@ pub struct BusinessSettings {
     pub reserva_duracion_min: i64,
     /// `"avisar"` | `"prohibir"`: qué pasa cuando dos reservas de la misma mesa se pisan.
     pub reserva_solape: String,
+    /// A los cuántos minutos de su hora se marca «No vino» una reserva a la que no ha llegado nadie;
+    /// 0 = nunca. Lo aplica el job `reservas_no_vino` de la Main.
+    pub reserva_no_vino_min: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -148,6 +151,9 @@ pub struct BusinessSettingsPatch {
     #[serde(default, skip_serializing_if = "CampoPatch::ausente")]
     #[specta(optional)]
     pub reserva_solape: CampoPatch<String>,
+    #[serde(default, skip_serializing_if = "CampoPatch::ausente")]
+    #[specta(optional)]
+    pub reserva_no_vino_min: CampoPatch<i64>,
 }
 
 #[derive(Debug, Deserialize, specta::Type)]

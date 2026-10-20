@@ -46,6 +46,16 @@ pub trait ReservasRepository: Send + Sync {
     async fn cancelar(&self, id_reserva: &str) -> AppResult<bool>;
 }
 
+/// «No vino» automático (`Business_Settings.Reserva_No_Vino_Min`): sólo la Main, desde el job
+/// `reservas_no_vino`.
+#[async_trait]
+pub trait NoVinoReservas: Send + Sync {
+    /// Marca `NO_SHOW` las reservas a las que no ha llegado nadie (`PROXIMA`) cuando han pasado los
+    /// minutos del negocio desde su hora, como mucho `max`. Con el ajuste a 0 no hace nada. Devuelve
+    /// cuántas ha marcado. `ahora_local` es «YYYY-MM-DD HH:MM», la hora del negocio.
+    async fn marcar_no_vino(&self, ahora_local: &str, max: i64) -> AppResult<usize>;
+}
+
 /// Lo que se le dice al cliente de una reserva web que el restaurante ha cambiado o cancelado
 /// (docs/estudios/reservas-web.md §5.7): los datos de después del cambio.
 #[derive(Debug, Clone, PartialEq, Eq)]

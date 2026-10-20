@@ -10,7 +10,7 @@ use tpv_domain::reservas::{normalize_dia_ymd, ReservaValidada};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::notificaciones::Notifier;
-use crate::ports::reservas::{AvisoAlCliente, AvisosReservaWeb, ReservasRepository};
+use crate::ports::reservas::{AvisoAlCliente, AvisosReservaWeb, NoVinoReservas, ReservasRepository};
 
 pub async fn get_meta(repo: &dyn ReservasRepository) -> AppResult<ReservasMetaDto> {
     repo.meta().await
@@ -137,6 +137,17 @@ pub async fn cancelar(
         avisar_al_cliente(repo, avisos, &antes).await;
     }
     Ok(ok)
+}
+
+/// Cuántas reservas marca «No vino» una pasada como mucho. Al encender el ajuste puede haber muchas
+/// viejas: cada una es una escritura que sube a la nube, así que van por tandas, una cada pasada.
+pub const MAX_NO_VINO_POR_VUELTA: i64 = 200;
+
+/// «No vino» automático: lo que lleva sin llegar los minutos del negocio pasa a `NO_SHOW` (deja de
+/// ocupar la mesa y sale atenuada en la lista). Al cliente de una reserva web no se le escribe:
+/// `aviso_al_cliente` no tiene nada que decirle de una reserva sin presentarse.
+pub async fn marcar_no_vino(repo: &dyn NoVinoReservas, ahora_local: &str) -> AppResult<usize> {
+    repo.marcar_no_vino(ahora_local, MAX_NO_VINO_POR_VUELTA).await
 }
 
 /// Cómo está una reserva antes de cambiarla, si es una reserva web por venir: las demás no avisan

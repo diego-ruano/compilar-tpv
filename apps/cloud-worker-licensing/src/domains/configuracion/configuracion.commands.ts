@@ -145,6 +145,10 @@ export function patchBusiness(patch: Record<string, unknown>): BuiltCommand {
 	if (patch.reserva_solape != null) {
 		add("Reserva_Solape", modoSolape(patch.reserva_solape));
 	}
+	// Ya validado por el schema (0 = nunca, hasta un día).
+	if (patch.reserva_no_vino_min != null) {
+		add("Reserva_No_Vino_Min", Number(patch.reserva_no_vino_min));
+	}
 
 	// FISCAL-01. Los datos fiscales (`Razon_Social`, `Descripcion_Op`, `Limite_Simplif`,
 	// `Verifactu_Entorno`) NO se escriben desde aquí, y esto es la decisión, no un olvido: quien

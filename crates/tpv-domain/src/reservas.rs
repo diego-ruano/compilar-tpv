@@ -264,6 +264,20 @@ impl ReservaValidada {
     }
 }
 
+/// Mismo texto en el worker (`configuracion.schemas.ts`).
+pub const MSG_NO_VINO: &str =
+    "«No vino» se marca entre 0 (nunca) y 24 horas después de la hora de la reserva";
+
+/// A los cuántos minutos de su hora se marca «No vino» una reserva a la que no ha llegado nadie
+/// (`Business_Settings.Reserva_No_Vino_Min`): de 0, que es nunca, a un día.
+pub fn no_vino_valido(minutos: i64) -> Result<i64, String> {
+    if (0..=24 * 60).contains(&minutos) {
+        Ok(minutos)
+    } else {
+        Err(MSG_NO_VINO.into())
+    }
+}
+
 /// Cuántos minutos antes de su hora sale una reserva en el plano de Mesas.
 pub const PLANO_ANTELACION_MIN: i64 = 60;
 

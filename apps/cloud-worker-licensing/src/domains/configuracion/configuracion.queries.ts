@@ -47,6 +47,12 @@ function clampFontScale(v: any): number {
 	return Number.isFinite(n) ? Math.min(2, Math.max(0.5, n)) : 1;
 }
 
+/** A los cuántos minutos se marca «No vino»; fuera de 0 a 24 h, nunca. Espejo de `get_business`. */
+function noVino(v: unknown): number {
+	const m = Number(v);
+	return Number.isInteger(m) && m >= 0 && m <= 24 * 60 ? m : 0;
+}
+
 export async function getBusiness(db: Client): Promise<BusinessSettings> {
 	const rs = await db.execute(`
 		SELECT
@@ -63,7 +69,8 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 			Limite_Simplif AS limite_simplif,
 			Verifactu_Entorno AS verifactu_entorno,
 			Reserva_Duracion_Min AS reserva_duracion_min,
-			Reserva_Solape AS reserva_solape
+			Reserva_Solape AS reserva_solape,
+			Reserva_No_Vino_Min AS reserva_no_vino_min
 		FROM Business_Settings
 		WHERE ID=1
 		LIMIT 1;
@@ -91,6 +98,7 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 		reserva_duracion_min:
 			Number(r.reserva_duracion_min) > 0 ? Number(r.reserva_duracion_min) : 120,
 		reserva_solape: r.reserva_solape === "prohibir" ? "prohibir" : "avisar",
+		reserva_no_vino_min: noVino(r.reserva_no_vino_min),
 	};
 }
 

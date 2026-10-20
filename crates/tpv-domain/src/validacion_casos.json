@@ -85,7 +85,13 @@
       { "nombre": "IVA justo por encima de cien", "cambios": { "iva_percent": 100.01 }, "acepta": false },
       { "nombre": "210 tecleado por 21", "cambios": { "iva_percent": 210 }, "acepta": false },
       { "nombre": "IVA justo por debajo de cero", "cambios": { "iva_percent": -0.01 }, "acepta": false },
-      { "nombre": "IVA negativo", "cambios": { "iva_percent": -21 }, "acepta": false }
+      { "nombre": "IVA negativo", "cambios": { "iva_percent": -21 }, "acepta": false },
+      { "nombre": "«No vino» nunca", "cambios": { "reserva_no_vino_min": 0 }, "acepta": true, "queda": { "reserva_no_vino_min": 0 } },
+      { "nombre": "«No vino» a la media hora", "cambios": { "reserva_no_vino_min": 30 }, "acepta": true, "queda": { "reserva_no_vino_min": 30 } },
+      { "nombre": "«No vino» al cabo de un día", "cambios": { "reserva_no_vino_min": 1440 }, "acepta": true, "queda": { "reserva_no_vino_min": 1440 } },
+      { "nombre": "«No vino» negativo", "cambios": { "reserva_no_vino_min": -1 }, "acepta": false },
+      { "nombre": "«No vino» a más de un día", "cambios": { "reserva_no_vino_min": 1441 }, "acepta": false },
+      { "nombre": "«No vino» con decimales", "cambios": { "reserva_no_vino_min": 2.5 }, "acepta": false }
     ]
   },
   "producto": {

@@ -357,6 +357,11 @@ export type BusinessSettings = {
 	reserva_duracion_min: number,
 	/**  `"avisar"` | `"prohibir"`: qué pasa cuando dos reservas de la misma mesa se pisan. */
 	reserva_solape: string,
+	/**
+	 *  A los cuántos minutos de su hora se marca «No vino» una reserva a la que no ha llegado nadie;
+	 *  0 = nunca. Lo aplica el job `reservas_no_vino` de la Main.
+	 */
+	reserva_no_vino_min: number,
 };
 
 export type BusinessSettingsPatch = BusinessSettingsPatch_Serialize | BusinessSettingsPatch_Deserialize;
@@ -386,6 +391,7 @@ export type BusinessSettingsPatch_Deserialize = {
 	verifactu_entorno?: string,
 	reserva_duracion_min?: number,
 	reserva_solape?: string,
+	reserva_no_vino_min?: number,
 };
 
 export type BusinessSettingsPatch_Serialize = {
@@ -403,6 +409,7 @@ export type BusinessSettingsPatch_Serialize = {
 	verifactu_entorno?: string,
 	reserva_duracion_min?: number,
 	reserva_solape?: string,
+	reserva_no_vino_min?: number,
 };
 
 /**

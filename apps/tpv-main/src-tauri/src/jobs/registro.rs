@@ -22,6 +22,7 @@ use tpv_application::use_cases::avisos as uc_avisos;
 use tpv_application::use_cases::cierre_caja as uc_cierre_caja;
 use tpv_application::use_cases::licensing as uc_licensing;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
+use tpv_application::use_cases::reservas as uc_reservas;
 use tpv_application::use_cases::reservas_web as uc_reservas_web;
 use tpv_application::use_cases::reservas_web_avisos as uc_reservas_web_avisos;
 use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
@@ -29,6 +30,7 @@ use tpv_application::use_cases::sync as uc_sync;
 use tpv_infra_licensing::PairingAdapter;
 
 use tpv_contracts::interruptores::Interruptor;
+use tpv_contracts::sync::{CambioReplicado, ComandaReplicada};
 
 use super::{tarea, Job, Requiere};
 use crate::AppState;
@@ -84,6 +86,11 @@ const ZONA_HORARIA_INTERVAL_SECS: u64 = 10 * 60;
 /// Cada cuánto salen los avisos al cliente de las reservas web que el restaurante ha cambiado. Un
 /// minuto: es un correo que el cliente espera ver pronto, y sin nada en la cola es una lectura.
 const AVISOS_RESERVA_WEB_INTERVAL_SECS: u64 = 60;
+
+/// Cada cuánto se marcan «No vino» las reservas a las que no ha llegado nadie (Configuración →
+/// Reservas). Cinco minutos sobran: el ajuste va en minutos tras la hora, y sin nada que marcar es
+/// una lectura.
+const RESERVAS_NO_VINO_INTERVAL_SECS: u64 = 5 * 60;
 
 /// Cada cuánto se reintenta subir a R2 lo que quedó pendiente. No hace falta más a menudo: el
 /// camino normal es el evento (tras guardar la imagen y al reconectar el WS); esto es la red.
@@ -266,6 +273,16 @@ pub(crate) fn catalogo() -> Vec<Job> {
             requiere: Requiere::MainOperativa,
             interruptor: None,
             ejecutar: tarea(avisos_reserva_web),
+        },
+        Job {
+            // «No vino» automático: lo que lleva sin llegar los minutos del negocio pasa a NO_SHOW.
+            // Con el ajuste a 0 (lo de siempre) no hace nada.
+            nombre: "reservas_no_vino",
+            cada: Duration::from_secs(RESERVAS_NO_VINO_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(2 * 60),
+            requiere: Requiere::MainOperativa,
+            interruptor: None,
+            ejecutar: tarea(reservas_no_vino),
         },
         Job {
             nombre: "imagenes",
@@ -509,6 +526,31 @@ async fn avisos_reserva_web(app: AppHandle) -> Result<(), String> {
     }
     if r.enviados > 0 || r.pendientes > 0 {
         tracing::info!(target: "tpv::reservas_web", enviados = r.enviados, pendientes = r.pendientes, "avisos al cliente");
+    }
+    Ok(())
+}
+
+/// Marca «No vino» las reservas a las que no ha llegado nadie a los minutos que diga el negocio
+/// (`use_cases/reservas.rs::marcar_no_vino`). Sin conexión también: es una escritura de la Main, y
+/// sube cuando vuelve.
+async fn reservas_no_vino(app: AppHandle) -> Result<(), String> {
+    let db = app.state::<AppState>().db.lock().await.as_ref().cloned().ok_or("DB no inicializada")?;
+    let repo = tpv_infra_sqlite::reservas::SqliteReservasRepository::new(db);
+    // La hora del negocio es la del equipo (RELOJ-01), como el día y la hora de las reservas.
+    let ahora_local = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+    let marcadas = uc_reservas::marcar_no_vino(&repo, &ahora_local).await?;
+    if marcadas > 0 {
+        tracing::info!(target: "tpv::reservas", marcadas, "reservas marcadas «No vino»");
+        // Que la pantalla recargue el calendario y el plano…
+        let _ = app.emit(
+            "sync:cambio",
+            CambioReplicado {
+                tablas: Some(vec!["reservas".into()]),
+                comanda: ComandaReplicada { ids: vec![], touched_comanda: false, uncertain: false, touched_catalog: false },
+            },
+        );
+        // …y que el motor lo suba ya.
+        app.state::<crate::replicacion::SyncNativo>().despertar.notify_one();
     }
     Ok(())
 }

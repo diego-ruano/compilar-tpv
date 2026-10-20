@@ -135,7 +135,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let conn = &g;
         let mut rows = conn
             .query(
-                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre, Razon_Social, Descripcion_Op, Limite_Simplif, Verifactu_Entorno, Reserva_Duracion_Min, Reserva_Solape FROM Business_Settings WHERE ID=1 LIMIT 1;",
+                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre, Razon_Social, Descripcion_Op, Limite_Simplif, Verifactu_Entorno, Reserva_Duracion_Min, Reserva_Solape, Reserva_No_Vino_Min FROM Business_Settings WHERE ID=1 LIMIT 1;",
                 (),
             )
             .await
@@ -173,6 +173,9 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             )
             .como_texto()
             .to_string(),
+            reserva_no_vino_min: v_i64(g(14)?)
+                .and_then(|m| tpv_domain::reservas::no_vino_valido(m).ok())
+                .unwrap_or(0),
         })
     }
 
@@ -353,6 +356,14 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
                 args.push(Value::Text(
                     tpv_domain::reservas::ModoSolape::desde(&v).como_texto().to_string(),
                 ));
+            }
+        }
+        if patch_has(patch, "reserva_no_vino_min") {
+            if let Some(v) = patch_i64(patch, "reserva_no_vino_min") {
+                // Como la duración: un valor fuera de rango se dice, no se guarda.
+                tpv_domain::reservas::no_vino_valido(v).map_err(AppError::validation)?;
+                sets.push("Reserva_No_Vino_Min = ?");
+                args.push(Value::Integer(v));
             }
         }
 

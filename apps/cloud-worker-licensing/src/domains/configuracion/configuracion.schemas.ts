@@ -7,6 +7,8 @@ import type { BusinessSettingsPatch, TicketSettingsPatch, ContactSettingsPatch }
 import { zDinero, zDineroNoNegativo } from "../../lib/dinero";
 import { zIva } from "../../lib/iva";
 
+const MSG_NO_VINO = "«No vino» se marca entre 0 (nunca) y 24 horas después de la hora de la reserva";
+
 // RI-87: la Handy valida las mismas claves y tipos que el IPC de la Main.
 // Ausente conserva; null sólo borra el logo. strict impide ignorar una clave mal escrita.
 const negocio = z.object({
@@ -17,6 +19,8 @@ const negocio = z.object({
     descripcion_op: z.string().optional(), limite_simplif: zDinero.optional(),
     verifactu_entorno: z.string().optional(), reserva_duracion_min: z.number().int().optional(),
     reserva_solape: z.string().optional(),
+    // Mismo texto y rango que `no_vino_valido` en la Main (`tpv-domain/src/reservas.rs`).
+    reserva_no_vino_min: z.number().int(MSG_NO_VINO).min(0, MSG_NO_VINO).max(24 * 60, MSG_NO_VINO).optional(),
 }).strict();
 const ticket = z.object({
     show_logo: z.boolean().optional(), show_business_name: z.boolean().optional(),

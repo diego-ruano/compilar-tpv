@@ -20,6 +20,15 @@ export function opcionesDuracion(actual: number | null | undefined): number[] {
   return [...DURACIONES_MIN, actual].sort((a, b) => a - b);
 }
 
+/** Lo que se ofrece para marcar «No vino» (minutos tras la hora de la reserva; 0, nunca, va aparte). */
+export const NO_VINO_MIN = [15, 30, 45, 60, 90, 120];
+
+/** Las de la lista y, si no está, la que ya tiene guardada; 0 (nunca) no entra. */
+export function opcionesNoVino(actual: number): number[] {
+  if (actual <= 0 || NO_VINO_MIN.includes(actual)) return NO_VINO_MIN;
+  return [...NO_VINO_MIN, actual].sort((a, b) => a - b);
+}
+
 /** «21:00» + 120 min → «23:00» (pasada la medianoche vuelve a empezar: «00:30»). */
 export function horaFin(hora: string, minutos: number): string {
   const [h, m] = hora.split(":").map(Number);

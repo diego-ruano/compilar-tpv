@@ -26,6 +26,8 @@ const DEFAULTS: BusinessSettings = {
     // RI-61: los mismos valores por defecto que el esquema.
     reserva_duracion_min: 120,
     reserva_solape: "avisar",
+    // 0 = nunca marcar «No vino» solo (el valor por defecto del esquema).
+    reserva_no_vino_min: 0,
 };
 
 type BusinessSettingsState = BusinessSettings & {

@@ -561,6 +561,7 @@ mod tests {
             &[
                 "Modo_Prueba", "Reserva_Duracion_Min", "Reserva_Web_Activa", "Reserva_Web_Dias_Min",
                 "Reserva_Web_Dias_Max", "Reserva_Web_Margen_Min", "Reserva_Web_Margen_Plazas",
+                "Reserva_No_Vino_Min",
             ],
         ),
         ("Categorias_Producto", &["Vendible", "Pasa_Cocina"]),

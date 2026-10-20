@@ -107,8 +107,19 @@ fn iva_opcional(e: &Value) -> Result<Option<f64>, String> {
     }
 }
 
+/// A los cuántos minutos se marca «No vino»: ausente es «no se toca».
+fn no_vino_opcional(e: &Value) -> Result<Option<i64>, String> {
+    match e.get("reserva_no_vino_min") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => {
+            let m = v.as_i64().ok_or(crate::reservas::MSG_NO_VINO)?;
+            crate::reservas::no_vino_valido(m).map(Some)
+        }
+    }
+}
+
 fn negocio(e: &Value) -> Result<Value, String> {
-    Ok(json!({ "iva_percent": iva_opcional(e)? }))
+    Ok(json!({ "iva_percent": iva_opcional(e)?, "reserva_no_vino_min": no_vino_opcional(e)? }))
 }
 
 fn producto(e: &Value) -> Result<Value, String> {

@@ -9,7 +9,7 @@ use crate::ejecutor::Value;
 use crate::ejecutor::Row;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::reservas::ReservasRepository;
+use tpv_application::ports::reservas::{NoVinoReservas, ReservasRepository};
 use tpv_contracts::reservas::{ClienteCoincidente, MesaDto, ReservaDto, ReservasMetaDto, ZonaDto};
 use tpv_contracts::errors::ErrorCode;
 use tpv_domain::reservas::{ClienteReserva, ModoSolape, ReservaValidada, DURACION_POR_DEFECTO_MIN};
@@ -478,6 +478,50 @@ impl ReservasRepository for SqliteReservasRepository {
     }
 }
 
+/// Las reservas a las que no ha llegado nadie y ya llevan `?1` minutos desde su hora a `?2` (la hora
+/// del negocio, «YYYY-MM-DD HH:MM»), como mucho `?3`.
+const SQL_NO_VINO_PENDIENTES: &str = "SELECT ID_Reserva FROM Reservas \
+     WHERE Estado = 'PROXIMA' \
+       AND datetime(Dia_YMD || ' ' || Hora, '+' || ?1 || ' minutes') <= datetime(?2) \
+     ORDER BY Dia_YMD, Hora, ID_Reserva LIMIT ?3;";
+const SQL_NO_VINO: &str = "UPDATE Reservas SET Estado = 'NO_SHOW' WHERE ID_Reserva = ?1;";
+
+#[async_trait]
+impl NoVinoReservas for SqliteReservasRepository {
+    async fn marcar_no_vino(&self, ahora_local: &str, max: i64) -> AppResult<usize> {
+        let g = self.db.write().await;
+        let conn = &g;
+        let res: AppResult<usize> = conn.transaccion(async {
+            let minutos = select_one_i64(conn, "SELECT Reserva_No_Vino_Min FROM Business_Settings WHERE ID = 1;", vec![])
+                .await?
+                .unwrap_or(0);
+            if minutos <= 0 {
+                return Ok(0);
+            }
+            // Se decide aquí, al escribir, y se replica una sentencia por reserva, sin condición: con
+            // la de la hora, la otra copia la volvería a evaluar con su propio «ahora».
+            let mut rows = conn
+                .query(
+                    SQL_NO_VINO_PENDIENTES,
+                    vec![Value::Integer(minutos), Value::Text(ahora_local.to_string()), Value::Integer(max)],
+                )
+                .await
+                .map_err(db_err)?;
+            let mut ids = Vec::new();
+            while let Some(r) = rows.next().await.map_err(db_err)? {
+                ids.push(s(r.get_value(0).map_err(db_err)?));
+            }
+            drop(rows);
+            for id in &ids {
+                conn.execute(SQL_NO_VINO, vec![Value::Text(id.clone())]).await.map_err(db_err)?;
+            }
+            Ok(ids.len())
+        }).await;
+
+        res
+    }
+}
+
 /// Una reserva como la pinta el calendario (`mes` y `reserva`). Espejo de `SELECT_RESERVA` en el
 /// worker (`reservas.queries.ts`).
 ///
@@ -666,6 +710,51 @@ mod tests_cliente {
 
     async fn estado_de(db: &Arc<Db>, id: &str) -> Option<String> {
         texto(db, &format!("SELECT Estado FROM Reservas WHERE ID_Reserva = '{id}';")).await
+    }
+
+    #[tokio::test]
+    async fn no_vino_marca_las_que_llevan_su_rato_sin_llegar_y_nada_con_el_ajuste_a_cero() {
+        let (db, repo, _dir) = abrir().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES \
+                       ('hace-una-hora', '2026-05-10', '20:00', 'CENA', 2, 'PROXIMA'), \
+                       ('justo', '2026-05-10', '20:30', 'CENA', 2, 'PROXIMA'), \
+                       ('aun-no', '2026-05-10', '20:31', 'CENA', 2, 'PROXIMA'), \
+                       ('de-ayer', '2026-05-09', '21:00', 'CENA', 2, 'PROXIMA'), \
+                       ('sentada', '2026-05-10', '19:00', 'CENA', 2, 'ACTIVA'), \
+                       ('cancelada', '2026-05-10', '19:00', 'CENA', 2, 'CANCELADA');",
+                )
+                .await
+                .unwrap();
+        }
+        let estado = |id: &'static str| {
+            let db = db.clone();
+            async move { texto(&db, &format!("SELECT Estado FROM Reservas WHERE ID_Reserva = '{id}';")).await }
+        };
+
+        // Con el ajuste a 0 (lo de siempre), nunca.
+        assert_eq!(repo.marcar_no_vino("2026-05-10 21:00", 200).await.unwrap(), 0);
+        assert_eq!(estado("de-ayer").await.as_deref(), Some("PROXIMA"));
+
+        // A la media hora: lo que lleva 30 minutos o más sin llegar, y nada más.
+        db.write().await.raw().execute("UPDATE Business_Settings SET Reserva_No_Vino_Min = 30;", ()).await.unwrap();
+        assert_eq!(repo.marcar_no_vino("2026-05-10 21:00", 200).await.unwrap(), 3);
+        for id in ["hace-una-hora", "justo", "de-ayer"] {
+            assert_eq!(estado(id).await.as_deref(), Some("NO_SHOW"), "{id}");
+        }
+        assert_eq!(estado("aun-no").await.as_deref(), Some("PROXIMA"));
+        assert_eq!(estado("sentada").await.as_deref(), Some("ACTIVA"));
+        assert_eq!(estado("cancelada").await.as_deref(), Some("CANCELADA"));
+        // Se replica una sentencia por reserva, sin la condición de la hora.
+        assert_eq!(replicado(&db).await, [SQL_NO_VINO; 3]);
+
+        // Por tandas: la que queda sale en la pasada siguiente.
+        assert_eq!(repo.marcar_no_vino("2026-05-10 21:01", 0).await.unwrap(), 0);
+        assert_eq!(repo.marcar_no_vino("2026-05-10 21:01", 200).await.unwrap(), 1);
+        assert_eq!(estado("aun-no").await.as_deref(), Some("NO_SHOW"));
     }
 
     #[tokio::test]

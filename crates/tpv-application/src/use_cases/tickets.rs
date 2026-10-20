@@ -189,6 +189,7 @@ mod tests {
             verifactu_entorno: "produccion".into(),
             reserva_duracion_min: 120,
             reserva_solape: "avisar".into(),
+            reserva_no_vino_min: 0,
         }
     }
 

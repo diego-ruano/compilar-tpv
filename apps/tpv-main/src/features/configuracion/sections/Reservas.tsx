@@ -1,18 +1,21 @@
 // src/features/configuracion/sections/Reservas.tsx
 //
 // RI-61: lo que dura una reserva que no elige su duración, y qué pasa cuando dos reservas de la
-// misma mesa se pisan (o una se pisa con una comanda abierta en ella). Se guarda solo, como el resto
-// de los datos del negocio (`useBusinessSettings`). Debajo, en la Main, las reservas desde la web.
+// misma mesa se pisan (o una se pisa con una comanda abierta en ella). Y cuándo una reserva a la que
+// no ha llegado nadie pasa sola a «No vino» (el job `reservas_no_vino` de la Main). Se guarda solo,
+// como el resto de los datos del negocio (`useBusinessSettings`). Debajo, en la Main, las reservas
+// desde la web.
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
-import { etiquetaDuracion, opcionesDuracion } from "../../reservas/duracion";
+import { etiquetaDuracion, opcionesDuracion, opcionesNoVino } from "../../reservas/duracion";
 import { ReservasWeb } from "./ReservasWeb";
 
 export function Reservas({ inputTone, isMain }: { inputTone: string; isMain: boolean }) {
 	const ready = useBusinessSettings((s) => s.ready);
 	const duracion = useBusinessSettings((s) => s.reserva_duracion_min);
 	const solape = useBusinessSettings((s) => s.reserva_solape);
+	const noVino = useBusinessSettings((s) => s.reserva_no_vino_min);
 	const setMany = useBusinessSettings((s) => s.setMany);
 
 	return (
@@ -68,6 +71,24 @@ export function Reservas({ inputTone, isMain }: { inputTone: string; isMain: boo
 								duración de arriba o hasta ahora si lleva más.
 							</p>
 						</div>
+
+						<Field
+							label="Si el cliente no llega"
+							hint="La reserva pasa a «No vino» y deja libre la mesa"
+						>
+							<select
+								value={noVino}
+								onChange={(e) => setMany({ reserva_no_vino_min: Number(e.target.value) })}
+								className={`w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none ${inputTone}`}
+							>
+								<option value={0}>No marcarla sola: se queda por llegar</option>
+								{opcionesNoVino(noVino).map((m) => (
+									<option key={m} value={m}>
+										Marcar «No vino» {etiquetaDuracion(m)} después de su hora
+									</option>
+								))}
+							</select>
+						</Field>
 					</div>
 				)}
 			</Panel>

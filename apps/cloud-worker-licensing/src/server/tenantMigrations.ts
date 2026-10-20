@@ -26,9 +26,11 @@ import type { Client } from "@libsql/client";
 
 import { HubError } from "../lib/errorHttp";
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
+import m0002 from "../../../../packages/database/migrations/0002_reserva_no_vino.sql";
 
 const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
+	{ name: "0002_reserva_no_vino.sql", sql: m0002 },
 ];
 
 /** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */

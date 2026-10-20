@@ -2,7 +2,8 @@
 
 Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada tenant
 en Turso: los ficheros `.sql` de `packages/database/migrations/`, aplicados en orden.
-Hoy hay uno solo, `0001_inicial.sql`, con el esquema completo.
+`0001_inicial.sql` lleva el esquema completo; `0002_reserva_no_vino.sql` añade a
+`Business_Settings` el ajuste del «No vino» automático de las reservas.
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 
