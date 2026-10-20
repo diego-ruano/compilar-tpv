@@ -690,12 +690,12 @@ veces. **El tamaño lo decide el `div`, con el CSS de la web:**
 - El ancho, siempre: el iframe ocupa el 100 % del `div`, y el widget usa todo ese ancho. A partir de
   768 px reparte los pasos en dos columnas: el calendario a un lado y las personas y la hora al otro;
   el nombre, el correo y el teléfono, de dos en dos.
-- Sin alto (lo normal), crece con lo que ocupe cada paso: ajusta su altura con los mensajes
-  `postMessage` que manda el widget (con un `ResizeObserver`), aceptando sólo los de su propio origen
-  y de ese iframe.
-- Con alto (`height`, `min-height`, un flex que lo estira: lo que haga que el `div` vacío mida algo
-  al cargar el script), el iframe lo llena encima (`position: absolute`, y `relative` en el `div`
-  si no estaba posicionado) y el widget se desplaza por dentro.
+- El alto: el iframe, en el flujo, toma la altura que pide el widget (los mensajes `postMessage` que
+  manda con un `ResizeObserver`, aceptando sólo los de su propio origen y de ese iframe). Después se
+  mide el contenido del `div`, sin padding ni bordes: si no mide lo mismo, es que su CSS le pone otro
+  alto (`height`, `min-height`, `max-height`, un flex que lo estira), y el iframe lo llena y el
+  widget se desplaza por dentro. Se vuelve a mirar cada vez que el `div` cambia de tamaño (llega su
+  CSS, sale de una pestaña oculta); oculto, no se mide.
 
 ```html
 <div data-negocio="rw_…" style="width: 900px; height: 700px"></div>
