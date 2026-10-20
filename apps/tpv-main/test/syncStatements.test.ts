@@ -8,9 +8,10 @@ describe("metadatos nativos y cachés de presentación", () => {
         expect(featureKeysPorTablas(["tabla_nueva"])).toBeNull();
         expect(featureKeysPorTablas(null)).toBeNull();
     });
-    it("una reserva que cambia en otro sitio refresca también el plano de mesas", () => {
-        // Una reserva web recogida o cancelada, o una de la Handy: el plano pinta la de cada mesa.
-        expect(featureKeysPorTablas(["reservas"])).toEqual(["reservas", "mesas", "stats"]);
+    it("una reserva que cambia en otro sitio refresca también el plano de mesas y los clientes", () => {
+        // Una reserva web recogida o cancelada, una de la Handy o el «No vino» automático: el plano
+        // pinta la de cada mesa y el resumen de Clientes cuenta las pendientes.
+        expect(featureKeysPorTablas(["reservas"])).toEqual(["reservas", "mesas", "clientes", "stats"]);
     });
     it("los tres ajustes y un cambio sin clasificación obligan a releer stores", () => {
         for (const tabla of ["business_settings", "ticket_settings", "contact_settings"]) expect(ajustesPorTablas([tabla])).toBe(true);
