@@ -28,13 +28,23 @@ const web = {
 
 const igual = { dia_ymd: "2026-10-24", hora: "21:00", comensales: 2, id_mesa: "m1" };
 
+/** El 20/10/2026 a las 17:30: la reserva de `web` (24/10 a las 21:00) aún está por venir. */
+const ahora = new Date(2026, 9, 20, 17, 30);
+
 describe("una reserva web que está por venir", () => {
     it("sólo la web y por venir avisa al cliente", () => {
-        expect(esWebPorVenir(web)).toBe(true);
-        expect(esWebPorVenir({ ...web, origen: "TPV" })).toBe(false);
+        expect(esWebPorVenir(web, ahora)).toBe(true);
+        expect(esWebPorVenir({ ...web, origen: "TPV" }, ahora)).toBe(false);
         for (const estado of ["ACTIVA", "FINALIZADA", "NO_SHOW", "CANCELADA"]) {
-            expect(esWebPorVenir({ ...web, estado }), estado).toBe(false);
+            expect(esWebPorVenir({ ...web, estado }, ahora), estado).toBe(false);
         }
+    });
+
+    it("una que ya pasó su hora no está por venir: su correo no saldría", () => {
+        // La cola descarta el aviso de una reserva cuya hora ya ha pasado (`dia hora <= ahora`).
+        expect(esWebPorVenir(web, new Date(2026, 9, 24, 20, 59))).toBe(true);
+        expect(esWebPorVenir(web, new Date(2026, 9, 24, 21, 0))).toBe(false);
+        expect(esWebPorVenir(web, new Date(2026, 9, 25, 9, 0))).toBe(false);
     });
 
     it("le cambia el día, la hora, las personas o la mesa; lo demás, no", () => {

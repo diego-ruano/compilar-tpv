@@ -708,10 +708,16 @@ export default function Reservas() {
     const turno: Turno = turnoPorHora(form.hora);
     const horaSql = normalizarHora(form.hora);
 
-    // Una reserva web por venir: si cambia lo que le importa al cliente, le llega un correo.
+    // Una reserva web por venir: si cambia lo que le importa al cliente, le llega un correo. El
+    // correo dice cómo queda, y sale si la hora nueva no ha pasado: con ésa se mira «por venir».
     const original = reservaEditandoId ? reservasMes.find((r) => r.id_reserva === reservaEditandoId) : undefined;
     const cambio = { dia_ymd: seleccionadoClave, hora: horaSql, comensales: Number(form.comensales), id_mesa: form.idMesa || null };
-    if (original && esWebPorVenir(original) && cambiaParaElCliente(original, cambio) && !(await confirmarCambioWeb())) {
+    if (
+      original &&
+      esWebPorVenir({ ...original, dia_ymd: cambio.dia_ymd, hora: cambio.hora }) &&
+      cambiaParaElCliente(original, cambio) &&
+      !(await confirmarCambioWeb())
+    ) {
       return;
     }
 

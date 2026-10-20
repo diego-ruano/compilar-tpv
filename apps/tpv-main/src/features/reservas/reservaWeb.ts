@@ -1,12 +1,25 @@
 // Reservas desde la web (docs/estudios/reservas-web.md §5.6): una reserva que hizo el cliente desde
-// la web y aún está por venir no se cambia ni se borra sin avisar, porque al cliente le llega un
+// la web y aún está por venir no se cambia ni se cancela sin avisar, porque al cliente le llega un
 // correo. La regla de qué le importa es la de `use_cases/reservas.rs::aviso_al_cliente`, que es la
 // que decide de verdad si sale el correo: aquí sólo se pregunta antes.
 import type { ReservaDto } from "@tpv/contracts";
 
-/** Una reserva web que aún está por venir: cambiarla o borrarla le escribe al cliente. */
-export function esWebPorVenir(r: Pick<ReservaDto, "origen" | "estado">): boolean {
-    return r.origen === "WEB" && r.estado === "PROXIMA";
+/** «2026-10-20 17:30»: como se comparan el día y la hora de una reserva. */
+function minutoLocal(d: Date): string {
+    const dos = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())} ${dos(d.getHours())}:${dos(d.getMinutes())}`;
+}
+
+/**
+ * Una reserva web que aún está por venir: cambiarla o cancelarla le escribe al cliente. Por venir es
+ * que no ha llegado (`PROXIMA`) y que su hora no ha pasado: el aviso de una que ya pasó lo descarta la
+ * cola sin mandarlo (`use_cases/reservas_web_avisos.rs`), y la pantalla no puede prometer el correo.
+ */
+export function esWebPorVenir(
+    r: Pick<ReservaDto, "origen" | "estado" | "dia_ymd" | "hora">,
+    ahora: Date = new Date(),
+): boolean {
+    return r.origen === "WEB" && r.estado === "PROXIMA" && `${r.dia_ymd} ${r.hora}` > minutoLocal(ahora);
 }
 
 /** Lo que el formulario va a guardar de lo que le importa al cliente. */
