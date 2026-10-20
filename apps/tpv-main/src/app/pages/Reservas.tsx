@@ -38,6 +38,7 @@ import { useToast } from "../../shared/toast";
 import ReservaMesaMapModal from "../../features/reservas/ReservaMesaMapModal";
 import { cambiaParaElCliente, esWebPorVenir } from "../../features/reservas/reservaWeb";
 import { etiquetaEstado, ocupaMesa, ordenarDelDia, resumenDelDia } from "../../features/reservas/estadoReserva";
+import { diaAlCambiarDeMes, mismoMes } from "../../features/reservas/calendario";
 import type { MesaMetaOut } from "@tpv/contracts";
 import type { Salon } from "../../features/mesas/types";
 import { conAviso } from "../../shared/lib/conAviso";
@@ -532,26 +533,27 @@ export default function Reservas() {
   /* =========================
      Acciones
   ========================= */
+  // El día elegido va siempre con el mes que se ve: la lista sale de las reservas del mes cargado.
   function seleccionarDia(fecha: Date) {
     setDiaSeleccionado(fecha);
+    // Un día gris es del mes de al lado: se salta a él.
+    if (!mismoMes(fecha, mesActual)) setMesActual(inicioMesLocal(fecha));
     setMostrarFormulario(false);
     setReservaEditandoId(null);
     setMostrarMapaMesas(false);
   }
 
-  function irMesAnterior() {
-    setMesActual((prev) => sumarMesesLocal(prev, -1));
+  function irAMes(delta: number) {
+    const mes = sumarMesesLocal(mesActual, delta);
+    setMesActual(mes);
+    setDiaSeleccionado(diaAlCambiarDeMes(mes, new Date()));
     setMostrarFormulario(false);
     setReservaEditandoId(null);
     setMostrarMapaMesas(false);
   }
 
-  function irMesSiguiente() {
-    setMesActual((prev) => sumarMesesLocal(prev, 1));
-    setMostrarFormulario(false);
-    setReservaEditandoId(null);
-    setMostrarMapaMesas(false);
-  }
+  const irMesAnterior = () => irAMes(-1);
+  const irMesSiguiente = () => irAMes(1);
 
   function resetFormulario() {
     setClienteAsignado(null);
