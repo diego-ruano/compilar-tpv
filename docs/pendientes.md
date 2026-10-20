@@ -28,6 +28,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [MESAS-01](#mesas-01--el-plano-que-guarda-una-handy-no-pasa-la-validación-de-la-main) | 🔵 | El plano que guarda una Handy no pasa la validación de la Main | Sin empezar |
+| [MESAS-02](#mesas-02--el-plano-de-la-handy-no-enseña-las-reservas) | 🟡 | El plano de la Handy no enseña las reservas | Sin empezar |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
@@ -394,6 +395,20 @@ nombres pero no rechaza ninguna de las tres cosas. Una mesa sin nombre sale dist
 Falta lo que pide RI-78: sacar esas reglas a un `validar` de `tpv-domain`, añadir el dominio del plano
 a `validacion_casos.json` con sus casos (nombre vacío, sólo espacios, salón repetido) y cablearlo en
 `validacion_casos.rs` y `validacionCasos.test.ts`, para que el schema del worker rechace lo mismo.
+
+### MESAS-02 · El plano de la Handy no enseña las reservas
+
+En la Main, `mesas_meta_all` (`tpv-infra-sqlite/src/mesas.rs`) le pone a cada mesa su reserva: la que
+está sentada y la que llega en la próxima hora o llega tarde, con su cliente y los minutos que faltan.
+Es lo que pinta la mesa en azul y lo que ofrece «Ha llegado ya el cliente» al abrirla. Su espejo del
+worker (`mesasMetaAll` en `domains/mesas/mesas.queries.ts`), que es el que lee la Handy, sólo trae
+las comandas abiertas: en la Handy ninguna mesa sale reservada y no se puede marcar la llegada desde
+el plano.
+
+Falta llevar la parte de las reservas al worker. Depende de «ahora», así que en la Handy tiene que
+salir de `X-Client-Now`, y el arnés de lectura no lo ve (siembra fechas fijas): necesita su propio
+test a los dos lados, o sacar el cálculo a `tpv-domain` con una tabla de casos compartida. Cuando
+esté, `useMesasMesaMeta` tiene que releer el plano cada minuto también en la Handy.
 
 ---
 
