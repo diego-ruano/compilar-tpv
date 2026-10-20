@@ -880,6 +880,26 @@ describe("la entrega a la Main", () => {
 		});
 	});
 
+	it("una cancelación también está hecha si Turso la tiene sentada: la Main ya no la cancela", async () => {
+		// La Main sólo cancela una que aún no ha llegado. Si la sentó antes de que le llegara la
+		// cancelación, la deja así; esperar a verla cancelada sería ofrecérsela cada hora.
+		await conAgenda("entrega-cancelacion-sentada", async (motor, sql) => {
+			espiar(motor);
+			const a = await motor.reservar({ tenantId: T, alta: alta() });
+			await motor.pendientes({ tenantId: T });
+			enTurso(sql, a.id_reserva, "m2");
+			await motor.cancelar({ tenantId: T, token: a.token });
+			const [c] = (await motor.pendientes({ tenantId: T })).peticiones;
+			await motor.recogidas({
+				tenantId: T,
+				resultados: [{ id_peticion: c.id_peticion, resultado: "registrada", codigo: null }],
+			});
+			sql.exec(`UPDATE Reservas SET Estado = 'ACTIVA' WHERE ID_Reserva = ?;`, a.id_reserva);
+			await motor.pendientes({ tenantId: T });
+			expect(filas(sql).find((f) => f.tipo === "cancelacion")?.estado).toBe("vista");
+		});
+	});
+
 	it("lo entregado que no llega a Turso en una hora se vuelve a ofrecer, y se avisa a la Main", async () => {
 		await conAgenda("entrega-reoferta", async (motor, sql, state) => {
 			const { avisos, eventos } = espiar(motor);

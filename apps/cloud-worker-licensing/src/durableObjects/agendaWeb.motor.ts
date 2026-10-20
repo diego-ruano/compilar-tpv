@@ -93,10 +93,12 @@ const REOFRECER_TRAS_MS = 60 * 60_000;
 /** Una petición que sigue sin recoger tanto tiempo es una anomalía que mirar (§9). */
 const ATASCADA_TRAS_MS = 72 * 60 * 60_000;
 // Lo que se pregunta a Turso para dar por hecho lo que espera: un alta, si la reserva está; una
-// cancelación, si está y ya no se puede usar (cancelada, terminada o no presentada).
+// cancelación, si está y ya no está por llegar (cancelada, sentada, terminada o no presentada). La
+// Main sólo cancela una que aún no ha llegado (`cancelar_desde_la_web`): con el cliente ya sentado la
+// deja, y esperar a verla cancelada sería volver a ofrecérsela cada hora.
 const SQL_ESTAN_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas WHERE ID_Reserva IN (SELECT value FROM json_each(?1));`;
 const SQL_CANCELADAS_EN_TURSO = `SELECT ID_Reserva AS id FROM Reservas
-	WHERE ID_Reserva IN (SELECT value FROM json_each(?1)) AND Estado NOT IN ('PROXIMA', 'ACTIVA');`;
+	WHERE ID_Reserva IN (SELECT value FROM json_each(?1)) AND Estado <> 'PROXIMA';`;
 /**
  * Cuántos correos de «no se pudo registrar» se mandan de una vez, y entre cuántas fallidas se
  * buscan: las que no salen (un buzón en el tope, un correo que el binding rechaza) no pueden tapar a

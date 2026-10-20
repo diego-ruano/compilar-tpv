@@ -209,7 +209,8 @@ Ciclo de una petición:
   sin duplicarla (el `INSERT` es idempotente por `ID_Reserva`); cubre una Main que perdió su base o
   un outbox atascado. Sólo si la alarma ha podido mirar Turso: sin él no sabría qué ha llegado.
 - Una cancelación sigue el mismo ciclo, pero está hecha (`vista`) cuando Turso tiene la reserva
-  cancelada (o terminada), no cuando la Main dice que la ha cancelado: hasta que su outbox sube, eso
+  fuera de `PROXIMA` (cancelada, sentada, terminada o no presentada), no cuando la Main dice que la
+  ha cancelado: hasta que su outbox sube, eso
   sólo existe en su base. Se entrega con su alta delante mientras el alta no se haya visto en Turso
   (la Main pudo no recibirla).
 - `fallida` (la Main no pudo registrarla) → de `datos_json` queda sólo el correo, para el correo al
@@ -548,8 +549,9 @@ Un caso de uso propio (`tpv-application/src/use_cases/reservas_web.rs`), no `res
     prohibidos los solapes, y el resultado es `solapada`.
   - Vuelve a validar con `tpv-domain`. Lo que no pase (un bug, un dato imposible) es `fallida`, con su
     código.
-- **Cancelación:** `Estado = 'CANCELADA'` si estaba `PROXIMA` o `ACTIVA`, sólo en una de
-  `Origen = 'WEB'`. Idempotente: una ya cancelada o terminada es `registrada`; una que la Main no
+- **Cancelación:** `Estado = 'CANCELADA'` si aún no ha llegado (`PROXIMA`), sólo en una de
+  `Origen = 'WEB'`, como al cancelar desde la pantalla. Se decide al escribir y se replica el
+  `UPDATE` por id, sin condición. Idempotente: una ya cancelada, sentada o terminada es `registrada`; una que la Main no
   tiene es `fallida` (`reserva_inexistente`), para que no se le vuelva a ofrecer cada hora.
 
 Notificaciones (a los administradores, como la de «Nueva reserva»):

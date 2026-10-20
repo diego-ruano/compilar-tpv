@@ -387,7 +387,9 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
                 return Ok(CancelacionWeb::NoExiste);
             };
             let estado = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
-            if !matches!(estado.as_str(), "PROXIMA" | "ACTIVA") {
+            // Como cancelar desde la pantalla: sólo la que aún no ha llegado. Con el cliente ya
+            // sentado (lo sentó la Main antes de subirlo), terminada o sin presentarse, se queda.
+            if estado != "PROXIMA" {
                 return Ok(CancelacionWeb::YaNoEstabaViva);
             }
             let resumen = ReservaWebResumen {
@@ -396,9 +398,10 @@ impl ReservasWebRepository for SqliteReservasWebRepository {
                 mesa: v_string(row.get_value(3).map_err(db_err)?),
                 nombre: v_string(row.get_value(4).map_err(db_err)?),
             };
+            // Se decide aquí, al escribir, y se replica sin condición: con la del estado, la otra
+            // copia la volvería a evaluar y, si tuviera la reserva en otro estado, no cancelaría.
             conn.execute(
-                "UPDATE Reservas SET Estado = 'CANCELADA' \
-                 WHERE ID_Reserva = ?1 AND Estado IN ('PROXIMA', 'ACTIVA');",
+                "UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;",
                 vec![Value::Text(id_reserva.to_string())],
             )
             .await
@@ -959,11 +962,40 @@ mod tests {
         );
         assert_eq!(fila(&db, "SELECT Estado FROM Reservas WHERE ID_Reserva = 'r1';").await, ["CANCELADA"]);
         assert_eq!(outbox(&db).await, antes + 1);
+        // Se replica la cancelación por id, sin condición: la otra copia la aplica igual aunque
+        // tenga la reserva en otro estado.
+        assert_eq!(
+            fila(&db, "SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;").await[0]
+                .contains("UPDATE Reservas SET Estado = 'CANCELADA' WHERE ID_Reserva = ?1;"),
+            true
+        );
         assert_eq!(repo.cancelar_desde_la_web("r1").await.unwrap(), CancelacionWeb::YaNoEstabaViva);
         assert_eq!(repo.cancelar_desde_la_web("no-existe").await.unwrap(), CancelacionWeb::NoExiste);
         // Una del TPV no se cancela por esta puerta.
         assert_eq!(repo.cancelar_desde_la_web("del-tpv").await.unwrap(), CancelacionWeb::NoExiste);
         assert_eq!(outbox(&db).await, antes + 1);
+        drop(repo);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn la_cancelacion_del_cliente_no_toca_una_reserva_ya_sentada() {
+        // La Main la sentó antes de subirlo, y la cancelación del enlace llega después: como al
+        // cancelar desde la pantalla, sólo se cancela la que aún no ha llegado.
+        let (db, repo, dir) = abrir().await;
+        sembrar_mesas(&db).await;
+        repo.registrar_alta(alta("r1", "ana@correo.es", "m1", "21:00")).await.unwrap();
+        db.write()
+            .await
+            .raw()
+            .execute("UPDATE Reservas SET Estado = 'ACTIVA' WHERE ID_Reserva = 'r1';", ())
+            .await
+            .unwrap();
+        let antes = outbox(&db).await;
+
+        assert_eq!(repo.cancelar_desde_la_web("r1").await.unwrap(), CancelacionWeb::YaNoEstabaViva);
+        assert_eq!(fila(&db, "SELECT Estado FROM Reservas WHERE ID_Reserva = 'r1';").await, ["ACTIVA"]);
+        assert_eq!(outbox(&db).await, antes);
         drop(repo);
         let _ = std::fs::remove_dir_all(&dir);
     }
