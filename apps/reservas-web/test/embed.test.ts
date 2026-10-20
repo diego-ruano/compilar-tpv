@@ -214,6 +214,29 @@ describe("el tamaño lo decide el hueco", () => {
 		expect(iframe.style.height).toBe("700px");
 	});
 
+	it("si la web le quita el alto cambiándole la clase, vuelve a crecer sin que cambie ningún tamaño", async () => {
+		// Con el alto quitado, el hueco sigue midiendo lo que el iframe (700): ningún tamaño cambia y
+		// su observador de tamaño no diría nada. Lo dice el cambio de clase.
+		const css: Css = { alto: 700 };
+		const { hueco, iframe } = conHueco(css);
+		altura(iframe, 900);
+		expect(iframe.style.height).toBe("700px");
+
+		delete css.alto;
+		hueco.className = "sin-alto";
+		await Promise.resolve();
+		expect(iframe.style.height).toBe("900px");
+	});
+
+	it("si cambia la ventana (otra media query), vuelve a mirar", () => {
+		const css: Css = { alto: 700 };
+		const { iframe } = conHueco(css);
+		altura(iframe, 900);
+		delete css.alto;
+		window.dispatchEvent(new Event("resize"));
+		expect(iframe.style.height).toBe("900px");
+	});
+
 	it("dos huecos con `flex: 1` en la misma columna, cuando ésta pasa a tener alto, se la reparten", () => {
 		// Medidos de uno en uno, el mínimo automático del otro (su iframe aún a lo que pide su widget)
 		// no le dejaba sitio al primero: medía 0, no se le hacía caso, y los dos desbordaban la columna.

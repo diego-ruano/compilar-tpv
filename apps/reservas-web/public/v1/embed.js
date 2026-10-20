@@ -28,6 +28,8 @@
 	var MENSAJE = "tpv-reservas-altura";
 	// Cada widget: su hueco, su iframe y la altura que pide su contenido.
 	var widgets = [];
+	// Los cambios de estilo o de clase de los huecos (ver abajo). Los suyos propios no cuentan.
+	var mutaciones = null;
 
 	/** El alto del contenido del hueco, sin su padding ni sus bordes. */
 	function altoDelHueco(hueco) {
@@ -63,6 +65,7 @@
 			w = visibles[i];
 			if (w.alto > 0 && Math.abs(w.alto - w.pedida) > 1) w.iframe.style.height = w.alto + "px";
 		}
+		if (mutaciones) mutaciones.takeRecords();
 	}
 
 	var huecos = document.querySelectorAll("[data-negocio]:not([" + MARCA + "])");
@@ -84,12 +87,22 @@
 	}
 	if (!widgets.length) return;
 
-	// Si el hueco cambia de tamaño (llega su CSS, sale de una pestaña oculta, gira el móvil), se
-	// vuelve a mirar.
+	// Se vuelve a mirar cuando puede haber cambiado el alto que pone la web: si el hueco cambia de
+	// tamaño (llega su CSS, sale de una pestaña oculta), si cambian su estilo o su clase (quitarle el
+	// alto no cambia ningún tamaño: el iframe ya medía eso), si cambia la ventana (otra media query)
+	// y al acabar de cargar la página (las hojas de estilo que faltaran).
+	if (typeof MutationObserver === "function") {
+		mutaciones = new MutationObserver(ajustar);
+		for (i = 0; i < widgets.length; i++) {
+			mutaciones.observe(widgets[i].hueco, { attributes: true, attributeFilter: ["style", "class"] });
+		}
+	}
 	if (typeof ResizeObserver === "function") {
 		var tamanos = new ResizeObserver(ajustar);
 		for (i = 0; i < widgets.length; i++) tamanos.observe(widgets[i].hueco);
 	}
+	window.addEventListener("resize", ajustar);
+	if (document.readyState !== "complete") window.addEventListener("load", ajustar);
 	ajustar();
 
 	window.addEventListener("message", function (e) {

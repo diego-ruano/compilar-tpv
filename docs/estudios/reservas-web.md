@@ -695,9 +695,13 @@ veces. **El tamaño lo decide el `div`, con el CSS de la web:**
   mide el contenido del `div`, sin padding ni bordes: si no mide lo mismo, es que su CSS le pone otro
   alto (`height`, `min-height`, `max-height`, un flex que lo estira), y el iframe lo llena y el
   widget se desplaza por dentro. Mientras se mide, un `min-height: auto` (el de un ítem de flex o de
-  grid, que no encoge por debajo de su contenido) se deja a 0; uno puesto en el CSS se respeta. Se
-  vuelve a mirar cada vez que el `div` cambia de tamaño (llega su CSS, sale de una pestaña oculta);
-  oculto, no se mide.
+  grid, que no encoge por debajo de su contenido) se deja a 0; uno puesto en el CSS se respeta. Todos
+  los `div` se miden a la vez. Se vuelve a mirar cuando un `div` cambia de tamaño (llega su CSS,
+  sale de una pestaña oculta), cuando cambian su `style` o su `class` (quitarle el alto no cambia
+  ningún tamaño: el iframe ya medía eso), cuando cambia la ventana y al acabar de cargar la página;
+  oculto, no se mide. Lo único que no ve es que un antepasado cambie de clase y con ello le quite el
+  alto al `div` sin que cambie ningún tamaño: el widget se queda con el alto de antes, desplazándose
+  por dentro, hasta el próximo cambio de la ventana.
 
 ```html
 <div data-negocio="rw_…" style="width: 900px; height: 700px"></div>
