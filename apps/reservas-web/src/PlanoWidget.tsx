@@ -159,6 +159,7 @@ export default function PlanoWidget({
 						fondo={COLOR.fondo}
 						bordeSalon={COLOR.sala}
 						aspecto={aspecto}
+						dejarDesplazar
 						onPulsarMesa={(t) => {
 							const m = porId.get(t.id);
 							if (m) onElegir(m);

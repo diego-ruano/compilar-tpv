@@ -18,11 +18,11 @@ vi.mock("react-konva", () => {
 
 // Lo que se le pide dibujar al lienzo: el salón y el aspecto de cada mesa.
 const lienzo = vi.hoisted(() => ({
-	ultimo: null as null | { salon: SalonPlano; aspecto: (mesa: MesaPlano) => AspectoMesa },
+	ultimo: null as null | { salon: SalonPlano; aspecto: (mesa: MesaPlano) => AspectoMesa; dejarDesplazar?: boolean },
 }));
 vi.mock("@tpv/plano", async (original) => ({
 	...(await original<typeof import("@tpv/plano")>()),
-	Lienzo: (p: { salon: SalonPlano; aspecto: (mesa: MesaPlano) => AspectoMesa }) => {
+	Lienzo: (p: { salon: SalonPlano; aspecto: (mesa: MesaPlano) => AspectoMesa; dejarDesplazar?: boolean }) => {
 		lienzo.ultimo = p;
 		return null;
 	},
@@ -90,5 +90,12 @@ describe("las mesas libres del plano", () => {
 		// En el dibujo, el nombre tal cual, como en la sala de la Main.
 		const { salon, aspecto } = lienzo.ultimo!;
 		expect(salon.tables.map((t) => aspecto(t).etiqueta)).toEqual(["Mesa 7", "Ventana", "12"]);
+	});
+});
+
+describe("el plano en una web con pantalla táctil", () => {
+	it("deja que un dedo sobre el plano desplace la página", () => {
+		render(<PlanoWidget plano={PLANO} libres={["i1"]} elegida={null} onElegir={vi.fn()} />);
+		expect(lienzo.ultimo?.dejarDesplazar).toBe(true);
 	});
 });

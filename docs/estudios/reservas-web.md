@@ -661,7 +661,9 @@ el mismo origen.
 - **Paso 2:** las mesas adecuadas y libres resaltadas en el acento; el resto, en gris y sin pulsar. El
   plano se encaja a las mesas (no al contorno del salón) con un zoom de hasta 2,5, y el lienzo es tan
   alto como pida la forma de las mesas a todo el ancho, entre 280 y 640 px
-  (`PlanoWidget.tsx::altoDelPlano`; la sala de la Main sigue encajando el salón entero).
+  (`PlanoWidget.tsx::altoDelPlano`; la sala de la Main sigue encajando el salón entero). Un dedo sobre
+  el plano desplaza la página: el widget le quita a sus figuras el `preventDefault` con el que Konva
+  cancela el toque (`Lienzo` con `dejarDesplazar`), y pulsar una mesa sigue funcionando.
   Una pestaña por salón. Debajo, la misma lista de mesas libres en botones, que hace accesible lo que
   el lienzo no es y sirve en pantallas muy pequeñas. Sin mesas: «No quedan mesas para 4 personas a
   las 21:00» y las alternativas como botones.

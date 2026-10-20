@@ -7,11 +7,15 @@ export default function NodoMesa({
     mesa,
     aspecto,
     onPulsar,
+    dejarDesplazar = false,
 }: {
     mesa: MesaPlano;
     aspecto: AspectoMesa;
     onPulsar?: (mesa: MesaPlano) => void;
+    /** Que un dedo sobre la mesa desplace la página (ver `Lienzo`). */
+    dejarDesplazar?: boolean;
 }) {
+    const tactil = dejarDesplazar ? { preventDefault: false } : {};
     const pulsar = aspecto.pulsable && onPulsar ? () => onPulsar(mesa) : undefined;
     const r = mesa.radius ?? 45;
 
@@ -28,6 +32,7 @@ export default function NodoMesa({
                         strokeWidth={aspecto.grosorBorde}
                         shadowBlur={10}
                         shadowOpacity={0.12}
+                        {...tactil}
                     />
                     <Text
                         text={aspecto.etiqueta}
@@ -37,6 +42,7 @@ export default function NodoMesa({
                         align="center"
                         fontSize={13}
                         fill={aspecto.texto}
+                        {...tactil}
                     />
                     <Text
                         text={aspecto.subetiqueta}
@@ -46,6 +52,7 @@ export default function NodoMesa({
                         align="center"
                         fontSize={11}
                         fill={aspecto.subtexto}
+                        {...tactil}
                     />
                 </>
             ) : (
@@ -59,9 +66,10 @@ export default function NodoMesa({
                         strokeWidth={aspecto.grosorBorde}
                         shadowBlur={10}
                         shadowOpacity={0.12}
+                        {...tactil}
                     />
-                    <Text text={aspecto.etiqueta} x={10} y={10} fontSize={13} fill={aspecto.texto} />
-                    <Text text={aspecto.subetiqueta} x={10} y={30} fontSize={11} fill={aspecto.subtexto} />
+                    <Text text={aspecto.etiqueta} x={10} y={10} fontSize={13} fill={aspecto.texto} {...tactil} />
+                    <Text text={aspecto.subetiqueta} x={10} y={30} fontSize={11} fill={aspecto.subtexto} {...tactil} />
                 </>
             )}
         </Group>
