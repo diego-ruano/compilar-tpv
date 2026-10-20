@@ -27,6 +27,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
+| [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
 | [MESAS-01](#mesas-01--el-plano-que-guarda-una-handy-no-pasa-la-validación-de-la-main) | 🔵 | El plano que guarda una Handy no pasa la validación de la Main | Sin empezar |
 | [MESAS-02](#mesas-02--el-plano-de-la-handy-no-enseña-las-reservas) | 🟡 | El plano de la Handy no enseña las reservas | Sin empezar |
 | [RES-05](#res-05--el-estado-por-defecto-de-una-reserva-es-activa) | 🔵 | El estado por defecto de una reserva en el esquema es `ACTIVA` | Sin empezar |
@@ -384,6 +385,25 @@ La ventana es de segundos y necesita una Handy editando esa misma fila. Opciones
 cambio remoto se respete la escritura local pendiente de la misma fila (aplicar otra vez lo del
 outbox encima, o saltarse la fila y reencolarla), o decidir que el orden de la nube manda y que la
 Main se ajuste a él en vez de repararlo con lo suyo. Afecta al motor de réplica entero: sin decidir.
+
+### SYNC-30 · Una ruta del worker decide con una lectura fuera de su transacción
+
+La Main decide dentro de la transacción que escribe: lee la fila y escribe con el cerrojo del
+escritor, y nadie se cuela en medio. Las rutas del worker no pueden: leen Turso con `tenantQuery`,
+deciden y luego mandan el comando al `TenantHub`, que lo aplica en otro momento. Entre la lectura y
+la escritura puede llegar otra (lo que sube la Main, otra Handy). El lote del `TenantHub`
+(`tenantHub.lote.ts`) sólo sabe ejecutar escrituras y lecturas que se devuelven: no tiene un paso
+que compruebe una condición y aborte el lote sin replicarse.
+
+Ejemplos: cancelar una reserva desde la Handy (`POST /v1/reservas/:id/cancelar`) comprueba que está
+`PROXIMA` y, si en esos milisegundos la Main la ha sentado, la cancela igual; marcar la llegada o la
+salida desde la mesa (`PUT /v1/mesas/reservas/:id/estado`), el borrado que rechaza una reserva web
+y el aviso de solape funcionan igual. Hay unas 120 lecturas así en las rutas. La ventana es de
+milisegundos y se suma a SYNC-29 (la Main puede tener la fila de otra forma sin subir).
+
+Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del Durable Object, con la misma
+serialización que el resto de escrituras del tenant, que no se replique y que devuelva un error de
+negocio si no se cumple; y pasar a él las comprobaciones que hoy hace la ruta.
 
 ### MESAS-01 · El plano que guarda una Handy no pasa la validación de la Main
 
