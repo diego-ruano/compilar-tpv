@@ -42,7 +42,8 @@ pub async fn set_reserva_estado(
     repo: &dyn MesasRepository,
     input: MesasSetReservaEstadoInput,
 ) -> AppResult<()> {
-    let estado = tpv_domain::estados::EstadoReserva::desde_texto(&input.estado).map_err(AppError::validation)?;
+    // Desde la mesa, sólo llegar o irse; si la reserva ha cambiado mientras tanto lo dice el repo.
+    let estado = tpv_domain::reservas::estado_desde_la_mesa(&input.estado).map_err(AppError::validation)?;
     if input.id_reserva.trim().is_empty() {
         return Err(AppError::validation("ID_Reserva inválido"));
     }

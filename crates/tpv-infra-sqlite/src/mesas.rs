@@ -697,6 +697,20 @@ impl MesasRepository for SqliteMesasRepository {
         let db = &g;
 
         let res: AppResult<()> = db.transaccion(async {
+            // Se decide aquí, con la reserva como está ahora: la mesa abierta enseña una foto, y
+            // mientras tanto el cliente pudo cancelarla o pasar a «No vino». Se replica la escritura
+            // sin condición, como siempre.
+            let actual = select_one_string(
+                db,
+                "SELECT Estado FROM Reservas WHERE ID_Reserva = ?1;",
+                vec![Value::Text(id_reserva.to_string())],
+            )
+            .await?;
+            let escribir = tpv_domain::reservas::cambio_desde_la_mesa(actual.as_deref(), estado)
+                .map_err(AppError::conflict)?;
+            if !escribir {
+                return Ok(());
+            }
             db.execute(
                 "UPDATE Reservas SET Estado=?2 WHERE ID_Reserva=?1;",
                 vec![Value::Text(id_reserva.to_string()), Value::Text(estado.como_texto().to_string())],
@@ -1905,5 +1919,66 @@ mod tests_reservas_en_el_plano {
         assert_eq!(reserva_de("m3"), Some(("sentada", "ACTIVA")));
         assert_eq!(reserva_de("m4"), Some(("pronto", "PROXIMA")));
         assert_eq!(reserva_de("m5"), None);
+    }
+}
+
+#[cfg(test)]
+mod tests_estado_desde_la_mesa {
+    //! La mesa abierta enseña una foto de la reserva. Si mientras tanto el cliente la canceló o pasó
+    //! a «No vino», marcar que ha llegado la resucitaba: ahora se decide con la reserva como está.
+
+    use super::*;
+    use crate::db::Db;
+    use tpv_contracts::errors::ErrorCode;
+    use tpv_domain::estados::EstadoReserva::{Activa, Finalizada};
+
+    async fn estado(db: &Db, id: &str) -> Option<String> {
+        let g = db.read().await;
+        let mut rows = g
+            .query("SELECT Estado FROM Reservas WHERE ID_Reserva = ?1;", vec![Value::Text(id.into())])
+            .await
+            .unwrap();
+        rows.next().await.unwrap().and_then(|r| v_string(r.get_value(0).unwrap()))
+    }
+
+    #[tokio::test]
+    async fn no_se_resucita_una_reserva_cancelada_ni_se_reescribe_lo_que_ya_esta() {
+        let dir = crate::test_temp::dir_temporal("estado_desde_la_mesa");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        db.write()
+            .await
+            .raw()
+            .execute_batch(
+                "INSERT INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES \
+                   ('por-llegar', '2026-05-10', '21:00', 'CENA', 2, 'PROXIMA'), \
+                   ('cancelada', '2026-05-10', '21:00', 'CENA', 2, 'CANCELADA'), \
+                   ('no-vino', '2026-05-10', '21:00', 'CENA', 2, 'NO_SHOW');",
+            )
+            .await
+            .unwrap();
+        let repo = SqliteMesasRepository::new(db.clone());
+
+        for id in ["cancelada", "no-vino", "no-existe"] {
+            let e = repo.set_reserva_estado(id, Activa).await.unwrap_err();
+            assert_eq!(e.code(), ErrorCode::Conflict, "{id}");
+        }
+        assert_eq!(estado(&db, "cancelada").await.as_deref(), Some("CANCELADA"));
+        assert_eq!(estado(&db, "no-vino").await.as_deref(), Some("NO_SHOW"));
+
+        repo.set_reserva_estado("por-llegar", Activa).await.unwrap();
+        assert_eq!(estado(&db, "por-llegar").await.as_deref(), Some("ACTIVA"));
+        // Otra vez: ya está, y no se vuelve a escribir.
+        let ops = |db: Arc<Db>| async move {
+            let g = db.read().await;
+            let mut rows = g.query("SELECT COUNT(*) FROM _Sync_Outbox;", ()).await.unwrap();
+            v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap()
+        };
+        let antes = ops(db.clone()).await;
+        repo.set_reserva_estado("por-llegar", Activa).await.unwrap();
+        assert_eq!(ops(db.clone()).await, antes);
+
+        repo.set_reserva_estado("por-llegar", Finalizada).await.unwrap();
+        assert_eq!(estado(&db, "por-llegar").await.as_deref(), Some("FINALIZADA"));
     }
 }

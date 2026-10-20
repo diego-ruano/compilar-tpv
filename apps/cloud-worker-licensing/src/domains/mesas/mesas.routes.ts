@@ -11,6 +11,7 @@ import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/t
 import * as cmd from "./mesas.commands";
 import * as q from "./mesas.queries";
 import * as S from "./mesas.schemas";
+import { estadoYOrigen } from "../reservas/reservas.queries";
 import { badRequest } from "../../server/utils/response";
 import { consulta, cuerpo } from "../../lib/validacion";
 import { apply, parseId } from "../../lib/rutas";
@@ -39,7 +40,12 @@ mesasRoutes.put("/reservas/:id/estado", cuerpo(S.setReservaEstadoSchema.omit({ i
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_reserva invalido");
 	const datos = c.req.valid("json");
-	await apply(c, cmd.setReservaEstado(id, datos.estado));
+	// Con la reserva como está ahora, como la Main: la mesa abierta enseña una foto, y mientras tanto
+	// el cliente pudo cancelarla o pasar a «No vino». Se replica la escritura sin condición.
+	const actual = await tenantQuery(c, (db) => estadoYOrigen(db, id));
+	const cambio = cmd.cambioDesdeLaMesa(actual?.estado ?? null, datos.estado);
+	if (cambio === "cambiada") return c.json({ error: "reserva_cambiada" }, 409);
+	if (cambio === "escribir") await apply(c, cmd.setReservaEstado(id, datos.estado));
 	return c.json({ ok: true });
 });
 

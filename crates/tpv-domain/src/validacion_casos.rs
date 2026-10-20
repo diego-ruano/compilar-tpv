@@ -164,6 +164,8 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "horario_copia" => dias_de_horario(entrada, &["from_monday", "to_monday"]),
         "horario_semana" => dias_de_horario(entrada, &["fecha_lunes"]),
         "reserva_web" => reserva_web(entrada),
+        "reserva_estado_mesa" => crate::reservas::estado_desde_la_mesa(&texto(entrada, "estado"))
+            .map(|e| json!({ "estado": e.como_texto() })),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }

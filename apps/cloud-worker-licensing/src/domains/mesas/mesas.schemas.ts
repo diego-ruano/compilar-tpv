@@ -69,12 +69,17 @@ export const saveLayoutSchema = z.object({
 	),
 });
 
+/** Mismo texto que `MSG_ESTADO_DESDE_LA_MESA` en la Main (`tpv-domain/src/reservas.rs`). */
+const MSG_ESTADO_DESDE_LA_MESA = "Desde la mesa sólo se marca que el cliente ha llegado o que se ha ido";
+
+// Desde la mesa, sólo llegar (ACTIVA) o irse (FINALIZADA), como `estado_desde_la_mesa` en la Main:
+// cancelar tiene su ruta (`POST /v1/reservas/:id/cancelar`) y «No vino» lo pone el job de la Main.
 export const setReservaEstadoSchema = z.object({
 	id_reserva: idField("id_reserva"),
 	estado: z
 		.string()
 		.transform((s) => s.trim().toUpperCase())
-		.refine((s) => ["PROXIMA", "ACTIVA", "FINALIZADA", "CANCELADA", "NO_SHOW"].includes(s)),
+		.refine((s) => s === "ACTIVA" || s === "FINALIZADA", MSG_ESTADO_DESDE_LA_MESA),
 });
 
 export const abrirComandaSchema = z

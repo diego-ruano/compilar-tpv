@@ -220,6 +220,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 		"Una reserva hecha desde la web no se borra: se queda en la lista. Si aún no ha llegado, cancélala.",
 	reserva_no_pendiente:
 		"Esa reserva ya no se puede cancelar: el cliente ya ha llegado o la reserva ya está cerrada.",
+	// El mismo texto que da la Main (`MSG_RESERVA_CAMBIADA`).
+	reserva_cambiada:
+		"Esa reserva ha cambiado mientras tanto: se ha cancelado, se ha marcado «No vino» o ya se ha cerrado. Cierra la mesa y vuelve a abrirla.",
 	// RI-61: el mismo texto que da la Main.
 	cliente_no_encontrado:
 		"Ese cliente ya no existe. Vuelve a buscarlo o guarda la reserva sin cliente.",

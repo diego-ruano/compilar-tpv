@@ -236,7 +236,15 @@ export default function MesaComandaModal({
         ++lecturaTicketRef.current.version;
         try {
             await cola.ejecutar(async () => {
-                await reservaMarcarActivaAhora(reserva.idReserva);
+                try {
+                    await reservaMarcarActivaAhora(reserva.idReserva);
+                } catch (e) {
+                    // La reserva ha cambiado con la mesa abierta (la canceló el cliente, pasó a «No
+                    // vino»): que el plano y Reservas la relean. El aviso, con el texto del backend,
+                    // lo da `conAviso`.
+                    invalidarReservas(); notifyChanged();
+                    throw e;
+                }
                 invalidarReservas(); notifyChanged();
                 if (ciclo !== cicloVista.current.valor) return;
                 setEstadoReserva("ACTIVA");
@@ -669,7 +677,11 @@ export default function MesaComandaModal({
                                         invalidarReservas();
                                         notifyChanged();
                                     } catch (e) {
-                                        console.error(e);
+                                        // Antes se tragaba el error. Si la reserva ha cambiado con la
+                                        // mesa abierta, que se relea y se diga (`conAviso`).
+                                        invalidarReservas();
+                                        notifyChanged();
+                                        throw e;
                                     }
                                 })}
                             >

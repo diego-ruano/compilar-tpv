@@ -175,5 +175,16 @@
       { "nombre": "nota que no es texto: sin nota", "cambios": { "nota": { "toString": null } }, "acepta": true, "queda": { "nota": null } },
       { "nombre": "nota de 201 letras", "cambios": { "nota": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, "acepta": false }
     ]
+  },
+  "reserva_estado_mesa": {
+    "base": { "id_reserva": "r1", "estado": "ACTIVA" },
+    "casos": [
+      { "nombre": "el cliente ha llegado", "cambios": {}, "acepta": true, "queda": { "estado": "ACTIVA" } },
+      { "nombre": "el cliente se ha ido, en minúsculas y con espacios", "cambios": { "estado": " finalizada " }, "acepta": true, "queda": { "estado": "FINALIZADA" } },
+      { "nombre": "cancelar tiene su propia acción", "cambios": { "estado": "CANCELADA" }, "acepta": false },
+      { "nombre": "«No vino» lo pone el job", "cambios": { "estado": "NO_SHOW" }, "acepta": false },
+      { "nombre": "volver a «por llegar»", "cambios": { "estado": "PROXIMA" }, "acepta": false },
+      { "nombre": "un estado que no existe", "cambios": { "estado": "SENTADA" }, "acepta": false }
+    ]
   }
 }

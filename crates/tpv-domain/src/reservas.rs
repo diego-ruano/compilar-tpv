@@ -264,6 +264,40 @@ impl ReservaValidada {
     }
 }
 
+/// Mismo texto en el worker (`mesas.schemas.ts`).
+pub const MSG_ESTADO_DESDE_LA_MESA: &str =
+    "Desde la mesa sólo se marca que el cliente ha llegado o que se ha ido";
+/// Mismo texto en el worker (`reserva_cambiada`, `lib/errorCodes.ts`).
+pub const MSG_RESERVA_CAMBIADA: &str = "Esa reserva ha cambiado mientras tanto: se ha cancelado, se ha \
+     marcado «No vino» o ya se ha cerrado. Cierra la mesa y vuelve a abrirla.";
+
+/// Lo que se marca desde la mesa: que el cliente ha llegado (`ACTIVA`) o que se ha ido
+/// (`FINALIZADA`). Cancelar tiene su acción (`reservas_cancelar`) y «No vino» lo pone el job.
+pub fn estado_desde_la_mesa(raw: &str) -> Result<crate::estados::EstadoReserva, String> {
+    use crate::estados::EstadoReserva;
+    match EstadoReserva::desde_texto(raw).map_err(|_| MSG_ESTADO_DESDE_LA_MESA.to_string())? {
+        e @ (EstadoReserva::Activa | EstadoReserva::Finalizada) => Ok(e),
+        _ => Err(MSG_ESTADO_DESDE_LA_MESA.into()),
+    }
+}
+
+/// ¿Se escribe lo que pide la mesa sobre la reserva tal como está ahora (`actual`; `None` si ya no
+/// existe)? Llegar, sólo la que aún no ha llegado; irse, sólo la sentada. Pedir el estado que ya
+/// tiene no escribe nada (`Ok(false)`). Lo demás es que la reserva ha cambiado con la mesa abierta
+/// (la canceló el cliente, pasó a «No vino»): no se pisa, que si no la resucitaría.
+pub fn cambio_desde_la_mesa(
+    actual: Option<&str>,
+    nuevo: crate::estados::EstadoReserva,
+) -> Result<bool, String> {
+    use crate::estados::EstadoReserva;
+    let nuevo_txt = nuevo.como_texto();
+    match (actual, nuevo) {
+        (Some(a), _) if a == nuevo_txt => Ok(false),
+        (Some("PROXIMA"), EstadoReserva::Activa) | (Some("ACTIVA"), EstadoReserva::Finalizada) => Ok(true),
+        _ => Err(MSG_RESERVA_CAMBIADA.into()),
+    }
+}
+
 /// Mismo texto en el worker (`configuracion.schemas.ts`).
 pub const MSG_NO_VINO: &str =
     "«No vino» se marca entre 0 (nunca) y 24 horas después de la hora de la reserva";
@@ -298,6 +332,26 @@ pub fn estado_en_el_plano(estado: &str, minutos_para: i64, duracion_min: i64) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desde_la_mesa_se_llega_a_una_por_llegar_y_se_va_de_una_sentada() {
+        use crate::estados::EstadoReserva::{Activa, Finalizada};
+        assert_eq!(cambio_desde_la_mesa(Some("PROXIMA"), Activa), Ok(true));
+        assert_eq!(cambio_desde_la_mesa(Some("ACTIVA"), Finalizada), Ok(true));
+        // Lo que ya está así no se vuelve a escribir.
+        assert_eq!(cambio_desde_la_mesa(Some("ACTIVA"), Activa), Ok(false));
+        assert_eq!(cambio_desde_la_mesa(Some("FINALIZADA"), Finalizada), Ok(false));
+        // Cambiada con la mesa abierta: no se pisa.
+        for actual in [Some("CANCELADA"), Some("NO_SHOW"), Some("FINALIZADA"), None] {
+            assert_eq!(cambio_desde_la_mesa(actual, Activa), Err(MSG_RESERVA_CAMBIADA.into()), "{actual:?}");
+        }
+        assert_eq!(cambio_desde_la_mesa(Some("PROXIMA"), Finalizada), Err(MSG_RESERVA_CAMBIADA.into()));
+        // Sólo llegar o irse.
+        assert!(estado_desde_la_mesa(" activa ").is_ok());
+        for raw in ["CANCELADA", "NO_SHOW", "PROXIMA", "otro"] {
+            assert_eq!(estado_desde_la_mesa(raw), Err(MSG_ESTADO_DESDE_LA_MESA.into()), "{raw}");
+        }
+    }
 
     #[test]
     fn en_el_plano_una_sentada_siempre_y_una_por_llegar_en_su_hueco() {
