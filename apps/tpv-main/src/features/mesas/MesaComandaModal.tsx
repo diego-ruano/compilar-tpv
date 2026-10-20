@@ -12,7 +12,7 @@ import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
-import { reservasKeys } from "../reservas/reservasQueries";
+import { refrescarTrasCambiarReservas } from "../reservas/reservasQueries";
 
 import { esError,toAppError } from "@tpv/client";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
@@ -105,9 +105,7 @@ export default function MesaComandaModal({
     // Marcar la llegada o la salida escribe en Reservas, y esa pantalla lee de su propia cache:
     // sin invalidarla podia seguir enseniando el estado viejo (staleTime 30 s) al navegar.
     const qc = useQueryClient();
-    const invalidarReservas = useCallback(() => {
-        void qc.invalidateQueries({ queryKey: reservasKeys.all });
-    }, [qc]);
+    const invalidarReservas = useCallback(() => refrescarTrasCambiarReservas(qc), [qc]);
 
     // Al abrir, o si se salta a otra mesa/reserva, vuelve a mandar el plano.
     useEffect(() => {

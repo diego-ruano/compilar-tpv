@@ -21,7 +21,8 @@ const TABLE_TO_FEATURES: Record<string, readonly string[]> = {
 	zonas: ["mesas"],
 	mesas: ["mesas"],
 	clientes: ["clientes", "reservas", "stats"],
-	reservas: ["reservas", "stats"],
+	// El plano enseña la reserva de cada mesa (`mesas_meta_all`).
+	reservas: ["reservas", "mesas", "stats"],
 	tareas: ["tareas"],
 	tarea_asignaciones: ["tareas"],
 	trabajadores: ["trabajadores", "tareas", "stats"],
