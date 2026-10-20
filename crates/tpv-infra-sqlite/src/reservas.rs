@@ -479,11 +479,13 @@ impl ReservasRepository for SqliteReservasRepository {
 }
 
 /// Las reservas a las que no ha llegado nadie y ya llevan `?1` minutos desde su hora a `?2` (la hora
-/// del negocio, «YYYY-MM-DD HH:MM»), como mucho `?3`.
+/// del negocio, «YYYY-MM-DD HH:MM»), como mucho `?3`. Las más recientes primero: al encender el
+/// ajuste con muchas viejas pendientes, las de hoy (las que se ven en el plano) no esperan a que se
+/// vacíe el histórico, que va saliendo en las pasadas siguientes.
 const SQL_NO_VINO_PENDIENTES: &str = "SELECT ID_Reserva FROM Reservas \
      WHERE Estado = 'PROXIMA' \
        AND datetime(Dia_YMD || ' ' || Hora, '+' || ?1 || ' minutes') <= datetime(?2) \
-     ORDER BY Dia_YMD, Hora, ID_Reserva LIMIT ?3;";
+     ORDER BY Dia_YMD DESC, Hora DESC, ID_Reserva DESC LIMIT ?3;";
 const SQL_NO_VINO: &str = "UPDATE Reservas SET Estado = 'NO_SHOW' WHERE ID_Reserva = ?1;";
 
 #[async_trait]
@@ -751,10 +753,47 @@ mod tests_cliente {
         // Se replica una sentencia por reserva, sin la condición de la hora.
         assert_eq!(replicado(&db).await, [SQL_NO_VINO; 3]);
 
-        // Por tandas: la que queda sale en la pasada siguiente.
-        assert_eq!(repo.marcar_no_vino("2026-05-10 21:01", 0).await.unwrap(), 0);
+        // A las 21:01 también le toca a «aun-no».
         assert_eq!(repo.marcar_no_vino("2026-05-10 21:01", 200).await.unwrap(), 1);
         assert_eq!(estado("aun-no").await.as_deref(), Some("NO_SHOW"));
+    }
+
+    #[tokio::test]
+    async fn no_vino_va_por_tandas_y_empieza_por_las_mas_recientes() {
+        // Al encender el ajuste con un histórico de reservas viejas sin cerrar, la de hoy no espera a
+        // que se vacíe: sale en la primera tanda, y las viejas en las siguientes.
+        let (db, repo, _dir) = abrir().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "UPDATE Business_Settings SET Reserva_No_Vino_Min = 30; \
+                     INSERT INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES \
+                       ('vieja-1', '2025-01-10', '21:00', 'CENA', 2, 'PROXIMA'), \
+                       ('vieja-2', '2025-01-11', '21:00', 'CENA', 2, 'PROXIMA'), \
+                       ('vieja-3', '2025-01-12', '21:00', 'CENA', 2, 'PROXIMA'), \
+                       ('de-hoy', '2026-05-10', '20:00', 'CENA', 2, 'PROXIMA');",
+                )
+                .await
+                .unwrap();
+        }
+        let por_llegar = || {
+            let db = db.clone();
+            async move {
+                texto(
+                    &db,
+                    "SELECT group_concat(ID_Reserva, ',') FROM \
+                     (SELECT ID_Reserva FROM Reservas WHERE Estado = 'PROXIMA' ORDER BY ID_Reserva);",
+                )
+                .await
+            }
+        };
+
+        assert_eq!(repo.marcar_no_vino("2026-05-10 21:00", 2).await.unwrap(), 2);
+        assert_eq!(por_llegar().await.as_deref(), Some("vieja-1,vieja-2"));
+        assert_eq!(repo.marcar_no_vino("2026-05-10 21:00", 2).await.unwrap(), 2);
+        assert_eq!(por_llegar().await, None);
+        assert_eq!(repo.marcar_no_vino("2026-05-10 21:00", 2).await.unwrap(), 0);
     }
 
     #[tokio::test]
