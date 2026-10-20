@@ -287,6 +287,14 @@ pub fn dia_corto(dia_ymd: &str) -> String {
     }
 }
 
+/// ¿Ya ha llegado la hora de una reserva? `ahora_local` es «YYYY-MM-DD HH:MM», la hora del negocio.
+/// Un aviso al cliente de una reserva que ya ha pasado no sale: ni la cola de la Main lo manda ni el
+/// caso de uso lo encola, desde la Main o desde la Handy. La pantalla lo mira igual
+/// (`features/reservas/reservaWeb.ts::esWebPorVenir`) antes de prometer el correo.
+pub fn ya_ha_pasado(dia_ymd: &str, hora: &str, ahora_local: &str) -> bool {
+    format!("{dia_ymd} {hora}").as_str() <= ahora_local
+}
+
 /// La huella de un correo: SHA-256 en hexadecimal de la dirección recortada y en minúsculas. Viaja
 /// en el aviso al cliente de un cambio (docs/estudios/reservas-web.md §5.7) para que la nube sepa si
 /// su copia del cliente ya tiene el correo de la Main, sin que el correo viaje. La misma que

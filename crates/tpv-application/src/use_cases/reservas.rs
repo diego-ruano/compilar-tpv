@@ -25,11 +25,14 @@ pub async fn get_mes(
     repo.mes(&desde, &hasta).await
 }
 
+/// `ahora_local` («YYYY-MM-DD HH:MM», la hora del negocio) decide si al cliente de una reserva web
+/// aún se le avisa: de una reserva que ya ha pasado, no.
 pub async fn guardar(
     repo: &dyn ReservasRepository,
     notifier: Option<&dyn Notifier>,
     avisos: Option<&dyn AvisosReservaWeb>,
     input: ReservaSaveInput,
+    ahora_local: &str,
 ) -> AppResult<bool> {
     // ¿Es un alta? (sin id -> el repo asigna uno). Se captura ANTES de `validar`, que consume input.
     let id_editada = input.id_reserva.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
@@ -62,7 +65,7 @@ pub async fn guardar(
     let ok = repo.guardar(validada, input.forzar_solape.unwrap_or(false)).await?;
 
     if let (true, Some(antes), Some(avisos)) = (ok, antes, avisos) {
-        avisar_al_cliente(repo, avisos, &antes).await;
+        avisar_al_cliente(repo, avisos, &antes, ahora_local).await;
     }
 
     // Aviso "nueva reserva" a los administradores (SOLO en altas, no al editar). Best-effort.
@@ -118,11 +121,12 @@ pub async fn eliminar(repo: &dyn ReservasRepository, input: ReservaDeleteInput) 
 }
 
 /// Cancela una reserva que aún no ha llegado: se queda en la lista, cancelada. Si es una reserva
-/// web por venir, a su cliente se le avisa (§5.6).
+/// web por venir (y su hora no ha pasado a `ahora_local`), a su cliente se le avisa (§5.6).
 pub async fn cancelar(
     repo: &dyn ReservasRepository,
     avisos: Option<&dyn AvisosReservaWeb>,
     input: ReservaCancelarInput,
+    ahora_local: &str,
 ) -> AppResult<bool> {
     let id = input.id_reserva.trim();
     if id.is_empty() {
@@ -134,7 +138,7 @@ pub async fn cancelar(
     };
     let ok = repo.cancelar(id).await?;
     if let (true, Some(antes), Some(avisos)) = (ok, antes, avisos) {
-        avisar_al_cliente(repo, avisos, &antes).await;
+        avisar_al_cliente(repo, avisos, &antes, ahora_local).await;
     }
     Ok(ok)
 }
@@ -196,17 +200,31 @@ pub(crate) fn mesa_de(r: &ReservaDto) -> Option<String> {
 /// Best-effort, como el aviso de «Nueva reserva»: el cambio ya está hecho, y lo que no se pueda
 /// encolar lo apunta en el log la implementación del puerto. Si no se puede leer cómo ha quedado no
 /// se avisa: «no la encuentro» no es «ya no está», y le diría al cliente que se ha cancelado.
-async fn avisar_al_cliente(repo: &dyn ReservasRepository, avisos: &dyn AvisosReservaWeb, antes: &ReservaDto) {
+///
+/// Tampoco de una reserva cuya hora (la de después del cambio, que es la que lleva el aviso) ya ha
+/// pasado: la cola de la Main lo descartaría, pero la Handy lo manda en el acto, y la pantalla ya no
+/// promete el correo.
+async fn avisar_al_cliente(
+    repo: &dyn ReservasRepository,
+    avisos: &dyn AvisosReservaWeb,
+    antes: &ReservaDto,
+    ahora_local: &str,
+) {
     let Ok(despues) = repo.reserva(&antes.id_reserva).await else { return };
-    if let Some(aviso) = aviso_al_cliente(antes, despues.as_ref()) {
-        let _ = avisos.encolar(aviso).await;
+    let Some(aviso) = aviso_al_cliente(antes, despues.as_ref()) else { return };
+    if tpv_domain::reservas_web::ya_ha_pasado(&aviso.dia_ymd, &aviso.hora, ahora_local) {
+        return;
     }
+    let _ = avisos.encolar(aviso).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
+
+    /// Antes que las reservas de estas pruebas (el 25/07/2026): todas están por venir.
+    const AHORA: &str = "2026-07-01 12:00";
 
     struct RepoQueNoDebeLlamarse;
     #[async_trait]
@@ -305,7 +323,7 @@ mod tests {
     #[tokio::test]
     async fn guardar_alta_emite_aviso_a_admin() {
         let notifier = FakeNotifier::default();
-        assert!(guardar(&RepoOk, Some(&notifier), None, input_reserva(None)).await.unwrap());
+        assert!(guardar(&RepoOk, Some(&notifier), None, input_reserva(None), AHORA).await.unwrap());
 
         let emitidas = notifier.emitidas.lock().unwrap();
         assert_eq!(emitidas.len(), 1);
@@ -318,7 +336,7 @@ mod tests {
         // RI-61: sin cliente es un alta válida, no un «nombre_cliente required».
         let notifier = FakeNotifier::default();
         let input = ReservaSaveInput { nombre_cliente: None, ..input_reserva(None) };
-        assert!(guardar(&RepoOk, Some(&notifier), None, input).await.unwrap());
+        assert!(guardar(&RepoOk, Some(&notifier), None, input, AHORA).await.unwrap());
 
         let emitidas = notifier.emitidas.lock().unwrap();
         assert_eq!(emitidas[0].cuerpo.as_deref(), Some("2026-07-25 20:30"));
@@ -333,7 +351,7 @@ mod tests {
     #[tokio::test]
     async fn guardar_edicion_no_emite() {
         let notifier = FakeNotifier::default();
-        assert!(guardar(&RepoOk, Some(&notifier), None, input_reserva(Some("r1"))).await.unwrap());
+        assert!(guardar(&RepoOk, Some(&notifier), None, input_reserva(Some("r1")), AHORA).await.unwrap());
         assert!(notifier.emitidas.lock().unwrap().is_empty());
     }
 
@@ -360,7 +378,7 @@ mod tests {
         ));
         let input = ReservaCancelarInput { id_reserva: " ".into() };
         assert!(matches!(
-            cancelar(&RepoQueNoDebeLlamarse, None, input).await,
+            cancelar(&RepoQueNoDebeLlamarse, None, input, AHORA).await,
             Err(AppError::Validation(_))
         ));
     }
@@ -456,11 +474,11 @@ mod tests {
     async fn cambiar_la_hora_o_la_mesa_de_una_reserva_web_por_venir_avisa_con_como_queda() {
         let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
         let avisos = Avisos::default();
-        guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into())).await.unwrap();
+        guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into()), AHORA).await.unwrap();
         guardar(&repo, None, Some(&avisos), editar(|i| {
             i.hora = "22:00".into();
             i.id_mesa = Some("m2".into());
-        }))
+        }), AHORA)
         .await
         .unwrap();
         let avisos = avisos.0.lock().unwrap();
@@ -496,13 +514,13 @@ mod tests {
         // Sólo la nota: la hora, el día, las personas y la mesa siguen igual.
         let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
         let avisos = Avisos::default();
-        guardar(&repo, None, Some(&avisos), editar(|i| i.nota = Some("Junto a la ventana".into()))).await.unwrap();
+        guardar(&repo, None, Some(&avisos), editar(|i| i.nota = Some("Junto a la ventana".into())), AHORA).await.unwrap();
         assert!(avisos.0.lock().unwrap().is_empty());
 
         // Una reserva del TPV, o una web que ya no está por venir, no avisa a nadie.
         for r in [ReservaDto { origen: "TPV".into(), ..web("PROXIMA") }, web("ACTIVA"), web("CANCELADA")] {
             let repo = RepoConUna(std::sync::Mutex::new(Some(r)));
-            guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into())).await.unwrap();
+            guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into()), AHORA).await.unwrap();
         }
         assert!(avisos.0.lock().unwrap().is_empty());
     }
@@ -512,20 +530,43 @@ mod tests {
         let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
         let avisos = Avisos::default();
         let cancela = || ReservaCancelarInput { id_reserva: "r1".into() };
-        assert!(cancelar(&repo, Some(&avisos), cancela()).await.unwrap());
+        assert!(cancelar(&repo, Some(&avisos), cancela(), AHORA).await.unwrap());
         assert_eq!(repo.0.lock().unwrap().as_ref().map(|r| r.estado.clone()), Some("CANCELADA".into()));
         assert_eq!(avisos.0.lock().unwrap().iter().map(|a| a.tipo).collect::<Vec<_>>(), [TipoAvisoReservaWeb::Cancelada]);
 
         // Ya cancelada: cancelarla otra vez no hace nada, y no se le vuelve a escribir.
-        assert!(cancelar(&repo, Some(&avisos), cancela()).await.unwrap());
+        assert!(cancelar(&repo, Some(&avisos), cancela(), AHORA).await.unwrap());
         assert_eq!(avisos.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn de_una_reserva_web_que_ya_ha_pasado_no_se_avisa() {
+        // La reserva es el 25/07 a las 20:30. La Handy manda el aviso en el acto: sin esto, cancelar
+        // o mover una que ya pasó le escribía al cliente aunque la pantalla no lo prometiera.
+        let avisos = Avisos::default();
+        let cancela = || ReservaCancelarInput { id_reserva: "r1".into() };
+
+        // A las 21:00 ya ha pasado: cancelarla no avisa.
+        let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
+        assert!(cancelar(&repo, Some(&avisos), cancela(), "2026-07-25 21:00").await.unwrap());
+        assert!(avisos.0.lock().unwrap().is_empty());
+
+        // Moverla a una hora que también ha pasado, tampoco.
+        let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
+        guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "20:00".into()), "2026-07-25 20:15").await.unwrap();
+        assert!(avisos.0.lock().unwrap().is_empty());
+
+        // Moverla a una hora que aún no ha llegado sí: el aviso lleva la hora nueva.
+        let repo = RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA"))));
+        guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into()), "2026-07-25 21:00").await.unwrap();
+        assert_eq!(avisos.0.lock().unwrap().iter().map(|a| a.hora.clone()).collect::<Vec<_>>(), ["22:00"]);
     }
 
     #[tokio::test]
     async fn cancelar_una_del_tpv_no_avisa_a_nadie() {
         let repo = RepoConUna(std::sync::Mutex::new(Some(ReservaDto { origen: "TPV".into(), ..web("PROXIMA") })));
         let avisos = Avisos::default();
-        assert!(cancelar(&repo, Some(&avisos), ReservaCancelarInput { id_reserva: "r1".into() }).await.unwrap());
+        assert!(cancelar(&repo, Some(&avisos), ReservaCancelarInput { id_reserva: "r1".into() }, AHORA).await.unwrap());
         assert_eq!(repo.0.lock().unwrap().as_ref().map(|r| r.estado.clone()), Some("CANCELADA".into()));
         assert!(avisos.0.lock().unwrap().is_empty());
     }
@@ -566,11 +607,11 @@ mod tests {
         // cliente que se ha cancelado.
         let repo = RepoQueNoRelee(RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA")))), Default::default());
         let avisos = Avisos::default();
-        assert!(guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into())).await.unwrap());
+        assert!(guardar(&repo, None, Some(&avisos), editar(|i| i.hora = "22:00".into()), AHORA).await.unwrap());
         assert!(avisos.0.lock().unwrap().is_empty());
 
         let repo = RepoQueNoRelee(RepoConUna(std::sync::Mutex::new(Some(web("PROXIMA")))), Default::default());
-        assert!(cancelar(&repo, Some(&avisos), ReservaCancelarInput { id_reserva: "r1".into() }).await.unwrap());
+        assert!(cancelar(&repo, Some(&avisos), ReservaCancelarInput { id_reserva: "r1".into() }, AHORA).await.unwrap());
         assert!(avisos.0.lock().unwrap().is_empty());
     }
 

@@ -10,6 +10,12 @@ use tpv_contracts::reservas::{
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
 
+/// La hora del negocio, «YYYY-MM-DD HH:MM»: la del equipo (RELOJ-01), como el día y la hora de las
+/// reservas. Decide si al cliente de una reserva web aún se le avisa de un cambio.
+fn ahora_local() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn reservas_get_meta(state: State<'_, AppState>) -> Result<ReservasMetaDto, AppErrorDto> {
@@ -39,7 +45,7 @@ pub async fn reservas_save(
     let repo = state.reservas_repo().await?;
     let notifier = state.notifier().await.ok();
     let avisos = state.avisos_reserva_web().await.ok();
-    Ok(uc::guardar(repo.as_ref(), notifier.as_deref(), avisos.as_deref(), args).await?)
+    Ok(uc::guardar(repo.as_ref(), notifier.as_deref(), avisos.as_deref(), args, &ahora_local()).await?)
 }
 
 /// RI-61: el cliente que ya tiene ese teléfono o ese email, para preguntar antes de asignárselo.
@@ -75,5 +81,5 @@ pub async fn reservas_cancelar(
     state.exigir_permiso("reservas.gestionar").await?;
     let repo = state.reservas_repo().await?;
     let avisos = state.avisos_reserva_web().await.ok();
-    Ok(uc::cancelar(repo.as_ref(), avisos.as_deref(), args).await?)
+    Ok(uc::cancelar(repo.as_ref(), avisos.as_deref(), args, &ahora_local()).await?)
 }

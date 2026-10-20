@@ -56,7 +56,7 @@ pub async fn enviar(
         if apartadas.contains(&aviso.cuerpo.id_reserva) {
             continue;
         }
-        let cuerpo = if format!("{} {}", aviso.cuerpo.dia_ymd, aviso.cuerpo.hora).as_str() <= ahora_local {
+        let cuerpo = if tpv_domain::reservas_web::ya_ha_pasado(&aviso.cuerpo.dia_ymd, &aviso.cuerpo.hora, ahora_local) {
             None
         } else {
             al_dia(reservas, &aviso).await
