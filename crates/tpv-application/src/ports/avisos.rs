@@ -27,6 +27,7 @@ pub trait AvisosScanRepository: Send + Sync {
     /// Tareas ABIERTAS con `Fecha_Limite` pasada y ≥1 asignación distinta de FINALIZADA.
     async fn tareas_vencidas(&self) -> AppResult<Vec<TareaVencida>>;
 
-    /// Reservas ACTIVAS que empiezan dentro de los próximos `ventana_min` minutos.
+    /// Reservas a las que aún no ha llegado nadie (`PROXIMA`) que empiezan dentro de los próximos
+    /// `ventana_min` minutos.
     async fn reservas_proximas(&self, ventana_min: i64) -> AppResult<Vec<ReservaProxima>>;
 }

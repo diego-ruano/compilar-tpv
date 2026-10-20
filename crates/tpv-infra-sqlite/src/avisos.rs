@@ -55,13 +55,15 @@ impl AvisosScanRepository for SqliteAvisosScanRepository {
 
     async fn reservas_proximas(&self, ventana_min: i64) -> AppResult<Vec<ReservaProxima>> {
         // El modificador de `datetime` va como parámetro (?1 = "+N minutes"): reserva cuyo inicio
-        // cae entre ahora y ahora+ventana.
+        // cae entre ahora y ahora+ventana. Las que aún no han llegado: `PROXIMA`. Antes miraba
+        // `ACTIVA`, que es el cliente ya sentado, y como las reservas nacen `PROXIMA` el aviso no
+        // salía nunca.
         let modif = format!("+{} minutes", ventana_min.max(0));
         let sql = r#"
             SELECT r.ID_Reserva, COALESCE(c.Nombre, '') AS Nombre, r.Dia_YMD, r.Hora
             FROM Reservas r
             LEFT JOIN Clientes c ON c.ID_Cliente = r.ID_Cliente
-            WHERE UPPER(COALESCE(r.Estado, '')) = 'ACTIVA'
+            WHERE r.Estado = 'PROXIMA'
               AND datetime(r.Dia_YMD || ' ' || r.Hora) >= datetime('now','localtime')
               AND datetime(r.Dia_YMD || ' ' || r.Hora) <= datetime('now','localtime', ?1)
             ORDER BY r.Dia_YMD ASC, r.Hora ASC;
@@ -85,3 +87,37 @@ impl AvisosScanRepository for SqliteAvisosScanRepository {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn reserva_proxima_avisa_de_las_que_aun_no_han_llegado() {
+        let dir = crate::test_temp::dir_temporal("avisos_reservas");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let en = |minutos: i64| {
+            let h = chrono::Local::now() + chrono::Duration::minutes(minutos);
+            (h.format("%Y-%m-%d").to_string(), h.format("%H:%M").to_string())
+        };
+        {
+            let w = db.write().await;
+            for (id, minutos, estado) in
+                [("por-llegar", 15, "PROXIMA"), ("sentada", 15, "ACTIVA"), ("cancelada", 15, "CANCELADA"), ("luego", 90, "PROXIMA")]
+            {
+                let (dia, hora) = en(minutos);
+                w.raw()
+                    .execute(
+                        "INSERT INTO Reservas (ID_Reserva, Dia_YMD, Hora, Turno, Comensales, Estado) \
+                         VALUES (?1, ?2, ?3, 'CENA', 2, ?4);",
+                        vec![Value::Text(id.into()), Value::Text(dia), Value::Text(hora), Value::Text(estado.into())],
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+        let proximas = SqliteAvisosScanRepository::new(db).reservas_proximas(30).await.unwrap();
+        assert_eq!(proximas.iter().map(|r| r.id_reserva.as_str()).collect::<Vec<_>>(), ["por-llegar"]);
+    }
+}
