@@ -91,14 +91,14 @@
 	// tamaño (llega su CSS, sale de una pestaña oculta), si cambian su estilo o su clase (quitarle el
 	// alto no cambia ningún tamaño: el iframe ya medía eso), si cambia la ventana (otra media query)
 	// y al acabar de cargar la página (las hojas de estilo que faltaran).
-	if (typeof MutationObserver === "function") {
-		mutaciones = new MutationObserver(ajustar);
+	if (typeof window.MutationObserver === "function") {
+		mutaciones = new window.MutationObserver(ajustar);
 		for (i = 0; i < widgets.length; i++) {
 			mutaciones.observe(widgets[i].hueco, { attributes: true, attributeFilter: ["style", "class"] });
 		}
 	}
-	if (typeof ResizeObserver === "function") {
-		var tamanos = new ResizeObserver(ajustar);
+	if (typeof window.ResizeObserver === "function") {
+		var tamanos = new window.ResizeObserver(ajustar);
 		for (i = 0; i < widgets.length; i++) tamanos.observe(widgets[i].hueco);
 	}
 	window.addEventListener("resize", ajustar);
