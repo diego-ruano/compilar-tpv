@@ -308,9 +308,11 @@ CREATE TABLE IF NOT EXISTS Productos (
   Ruta_Imagen TEXT,
   Cantidad_Pedido_Esperada REAL,
   -- VR-04: stock "suelto" fuera de lotes. Contador simple por producto, OPCIONAL (NULL = el producto
-  -- no usa stock suelto y se vende sin descontar de aqui). A diferencia de los lotes (que nunca bajan
-  -- de 0), este contador SI puede quedar negativo: es la senal honesta de sobreventa. El stock total
-  -- mostrado de un producto es SUM(lotes) + COALESCE(Stock_Suelto, 0).
+  -- no usa stock suelto y se vende sin descontar de aqui). Un cobro nunca toma de un lote mas de lo
+  -- que tiene y lo que los lotes no cubren se descuenta de aqui, asi que es este contador el que
+  -- queda negativo: la senal honesta de sobreventa. Un lote solo baja de 0 si dos cobros a la vez lo
+  -- consumen y se replican (VR-06). El stock total mostrado de un producto es
+  -- SUM(lotes) + COALESCE(Stock_Suelto, 0).
   Stock_Suelto REAL,
   -- Tipo de IVA propio del producto. NULL = "hereda el del negocio"
   -- (Business_Settings.IVA_Percent), que es el caso de casi todo: en hosteleria el consumo en el
@@ -683,10 +685,11 @@ ON Comandas(Fecha_Hora_Apertura);
 -- ano pasado lo sacaria con el nombre, el precio y el tipo de hoy, que es justo lo que una
 -- reimpresion no puede hacer.
 --
--- Y es lo que permite que el catalogo BORRE (INV-05): ID_Producto es nullable y su FK es ON DELETE
--- SET NULL, asi que quitar un producto que ya no se vende deja la venta intacta -con su nombre, su
--- precio y su tipo- y solo pierde el enlace a una ficha que ya no existe. Sin el snapshot, esa misma
--- FK dejaria las lineas historicas sin nombre.
+-- Un producto con lineas no se borra: se archiva (INV-05, RI-54, SQL_QUITAR_PRODUCTO en
+-- tpv-infra-sqlite/src/inventario.rs) y sus lineas siguen enlazadas. ID_Producto es nullable y su FK
+-- es ON DELETE SET NULL: si una ficha llegara a borrarse, la venta seguiria intacta -con su nombre,
+-- su precio y su tipo- y solo perderia el enlace. Sin el snapshot, esa misma FK dejaria las lineas
+-- historicas sin nombre.
 CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   ID_Detalle TEXT NOT NULL PRIMARY KEY,
   ID_Comanda TEXT NOT NULL,
@@ -773,8 +776,9 @@ CREATE INDEX IF NOT EXISTS idx_suelto_consumos_producto
 ON Suelto_Consumos(ID_Producto);
 
 -- (La tabla Facturas se retiro: nunca se escribia; el cobro vive integramente en Pagos +
---  Pago_Detalles, que es la fuente de verdad. Ver DB-13. Si algun dia hace falta facturacion
---  fiscal, se re-anade en una migracion nueva.)
+--  Pago_Detalles, que es la fuente de verdad. Ver DB-13. Lo fiscal va en el §14: cada factura
+--  expedida genera su registro de facturacion, y el papel se rehace con el y con los datos del
+--  cobro.)
 
 -- Importe >= 0: validado en la capa de aplicacion (ver nota en Detalle_Comanda, DB-06).
 --
@@ -1509,7 +1513,8 @@ LEFT JOIN lote_fefo f ON f.ID_Producto = p.ID_Producto;
    no se negocian:
      1. El registro se crea EN LA MISMA TRANSACCION que el cobro (art. 9 RRSIF: "de forma
         simultanea o inmediatamente anterior a la expedicion").
-     2. NO SE MODIFICA JAMAS. Una correccion es OTRA fila (subsanacion), nunca un UPDATE.
+     2. NO SE MODIFICA. Una correccion es OTRA fila (subsanacion), nunca un UPDATE (la unica
+        escritura posterior, en Sistema_Json, se explica en Registros_Facturacion).
      3. Nada de lo que rodea al envio puede impedir cobrar.
 
    Se replica a la nube por el outbox como el resto del esquema: es lo que permite que una Main que
@@ -1534,7 +1539,10 @@ CREATE TABLE IF NOT EXISTS Serie_Facturacion (
   Ultimo INTEGER NOT NULL DEFAULT 0
 );
 
--- El corazon. Append-only: se inserta y nunca se toca (sin UPDATE, sin DELETE, sin excepciones).
+-- El corazon. Append-only: se inserta y no se borra ni se corrige. La unica escritura posterior
+-- rellena en Sistema_Json la identidad del productor o el numero de instalacion que faltaban, y solo
+-- en registros que la AEAT no ha aceptado (asegurar_sistema_reparado en tpv-infra-sqlite/src/
+-- verifactu.rs): ese bloque no entra en la huella ni en los datos de la factura.
 --
 -- Tres decisiones que parecen detalles y no lo son:
 --
