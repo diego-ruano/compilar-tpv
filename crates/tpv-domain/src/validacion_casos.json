@@ -110,7 +110,7 @@
       { "nombre": "nombre en blanco", "cambios": { "nombre": "   " }, "acepta": false },
       { "nombre": "VALID-01: U+0085 es un espacio y se recorta", "cambios": { "nombre": "\u0085Café\u0085" }, "acepta": true, "queda": { "nombre": "Café" } },
       { "nombre": "VALID-01: un nombre que sólo es U+0085 está en blanco", "cambios": { "nombre": "\u0085" }, "acepta": false },
-      { "nombre": "VALID-01: U+FEFF no es un espacio y se queda", "cambios": { "nombre": "﻿Café" }, "acepta": true, "queda": { "nombre": "﻿Café" } },
+      { "nombre": "VALID-01: U+FEFF no es un espacio y se queda", "cambios": { "nombre": "\ufeffCafé" }, "acepta": true, "queda": { "nombre": "\ufeffCafé" } },
       { "nombre": "sin categoría", "cambios": { "id_categoria": "  " }, "acepta": false }
     ]
   },
@@ -151,7 +151,7 @@
     "base": { "dia_ymd": "2026-11-20", "hora": "21:00", "personas": 2, "id_mesa": "m1", "nombre": "Ana", "email": "ana@correo.es", "telefono": "600 112 233", "nota": null },
     "casos": [
       { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "dia_ymd": "2026-11-20", "hora": "21:00", "nombre": "Ana", "email": "ana@correo.es", "telefono": "600112233", "nota": null } },
-      { "nombre": "VALID-01: el nombre, el correo y la nota se recortan como en la Main", "cambios": { "nombre": "\u0085Ana\u0085", "email": " Ana@Correo.es\u0085", "nota": "\u0085Cumpleaños﻿" }, "acepta": true, "queda": { "nombre": "Ana", "email": "ana@correo.es", "nota": "Cumpleaños﻿" } },
+      { "nombre": "VALID-01: el nombre, el correo y la nota se recortan como en la Main", "cambios": { "nombre": "\u0085Ana\u0085", "email": " Ana@Correo.es\u0085", "nota": "\u0085Cumpleaños\ufeff" }, "acepta": true, "queda": { "nombre": "Ana", "email": "ana@correo.es", "nota": "Cumpleaños\ufeff" } },
       { "nombre": "VALID-01: un nombre que sólo es U+0085 está en blanco", "cambios": { "nombre": "\u0085" }, "acepta": false },
       { "nombre": "día imposible", "cambios": { "dia_ymd": "2026-02-30" }, "acepta": false },
       { "nombre": "día con hora detrás", "cambios": { "dia_ymd": "2026-11-20T21:00:00Z" }, "acepta": true, "queda": { "dia_ymd": "2026-11-20" } },
@@ -209,8 +209,8 @@
       { "nombre": "una zona con sólo espacios", "cambios": { "salons": [{ "id": "", "name": "   ", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
       { "nombre": "U+0085 también es un espacio", "cambios": { "salons": [{ "id": "", "name": "\u0085", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
       { "nombre": "U+FEFF no lo es: se queda en el nombre", "cambios": { "salons": [
-        { "id": "", "name": "﻿Barra", "room": { "points": [] }, "tables": [{ "id": "", "name": "﻿" }] }
-      ] }, "acepta": true, "queda": { "salons": [{ "name": "﻿Barra", "tables": [{ "name": "﻿" }] }] } },
+        { "id": "", "name": "\ufeffBarra", "room": { "points": [] }, "tables": [{ "id": "", "name": "\ufeff" }] }
+      ] }, "acepta": true, "queda": { "salons": [{ "name": "\ufeffBarra", "tables": [{ "name": "\ufeff" }] }] } },
       { "nombre": "dos zonas con el mismo nombre", "cambios": { "salons": [
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] },
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] }
