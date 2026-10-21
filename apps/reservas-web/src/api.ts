@@ -74,7 +74,7 @@ export class ErrorApi extends Error {
 		readonly codigo: string,
 		readonly estado: number,
 		mensaje: string,
-		/** El cuerpo entero, por si trae algo más (el negocio al estar cerradas, los `issues`). */
+		/** El cuerpo entero, por si trae algo más (el negocio al estar cerradas). */
 		readonly cuerpo: any = null,
 	) {
 		super(mensaje);
@@ -98,8 +98,9 @@ async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
 		// Sin cuerpo JSON: cuenta como fallo genérico abajo.
 	}
 	if (!res.ok || !cuerpo || cuerpo.ok === false) {
-		const primerIssue = Array.isArray(cuerpo?.issues) ? cuerpo.issues[0]?.message : undefined;
-		throw new ErrorApi(cuerpo?.error ?? "desconocido", res.status, cuerpo?.message ?? primerIssue ?? GENERICO, cuerpo);
+		// Un dato que no vale trae el texto de su regla en `message` (VALID-02); los `issues` sueltos
+		// son los de zod, en inglés, y no se enseñan.
+		throw new ErrorApi(cuerpo?.error ?? "desconocido", res.status, cuerpo?.message ?? GENERICO, cuerpo);
 	}
 	return cuerpo as T;
 }

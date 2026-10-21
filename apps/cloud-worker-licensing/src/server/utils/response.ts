@@ -62,10 +62,11 @@ export function serverError(req: Request, error: string) {
 /**
  * Error de validación de una ruta de dominio (400). Estaba duplicado **literalmente**
  * en los 12 `*.routes.ts`; ahora vive aquí para que el `code` se añada en un solo sitio.
+ * `message`, si lo hay, es lo que se le enseña a quien está delante (VALID-02).
  */
-export function badRequest(c: any, error: string, err?: { issues?: unknown }) {
+export function badRequest(c: any, error: string, err?: { issues?: unknown }, message?: string) {
 	return c.json(
-		{ ok: false, code: wireToCode(error, 400), error, issues: err?.issues },
+		{ ok: false, code: wireToCode(error, 400), error, ...(message ? { message } : {}), issues: err?.issues },
 		400,
 	);
 }

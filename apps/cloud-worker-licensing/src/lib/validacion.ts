@@ -33,8 +33,41 @@ const ES_JSON = /^application\/([a-z-.]+\+)?json(;|$)/i;
 /** Un identificador de máquina (`missing_deviceId`), no una frase. */
 const IDENTIFICADOR = /^[A-Za-z][A-Za-z0-9_]*$/;
 
-type Fallo = { success: false; error: z.ZodError };
+type Fallo = { success: false; error: z.ZodError; mensaje?: string };
 type Resultado = { success: true; data: unknown } | Fallo;
+
+/** El mensaje que zod pone a un issue que no trae el suyo: el de la configuración global. */
+function mensajePorDefecto(issue: Parameters<NonNullable<z.core.$ZodConfig["localeError"]>>[0]): string {
+	const config = z.config();
+	const m = config.customError?.(issue) ?? config.localeError?.(issue);
+	return typeof m === "string" ? m : (m?.message ?? "Invalid input");
+}
+
+/**
+ * VALID-02: valida y, si no pasa, dice el texto del primer fallo cuando lo escribimos nosotros en el
+ * schema (un `MSG_*`, el de un `refine`, el de un `.min(1, "…")`), que es el mismo que da la Main.
+ * Los de zod por defecto salen en inglés y sólo con un cuerpo mal formado: ésos no. zod pide el
+ * mensaje al `error` de la llamada sólo cuando el issue no trae el suyo, así que lo que pase por ahí
+ * es lo que no cuenta; se le devuelve el mismo texto que habría puesto, y los `issues` no cambian.
+ */
+async function validarConMensaje(schema: z.ZodType, valor: unknown) {
+	const porDefecto = new Set<string>();
+	const r = await schema.safeParseAsync(valor, {
+		error: (issue) => {
+			const m = mensajePorDefecto(issue);
+			porDefecto.add(m);
+			return m;
+		},
+	});
+	const primero = r.success ? undefined : r.error.issues[0]?.message;
+	// El validador de Hono pasa al gancho el resultado tal cual: el texto va en el mismo objeto.
+	if (primero && !porDefecto.has(primero)) Object.assign(r, { mensaje: primero });
+	return r;
+}
+
+// Para `zValidator`. El tipo de resultado que pide depende del schema concreto y TypeScript no lo
+// resuelve con uno genérico; lo que devuelve es el resultado de zod tal cual.
+const CON_MENSAJE = { validationFunction: validarConMensaje as (s: z.ZodType, v: unknown) => Promise<any> };
 
 function revisar(
 	r: Resultado,
@@ -54,7 +87,7 @@ function revisar(
 	// propio identificador, el cuerpo es el mismo que devolvían los `if` que esto sustituye — y
 	// estas rutas son anónimas: no hay por qué describirle el schema a quien no se ha presentado.
 	return identificador === "validation_error"
-		? badRequest(c, identificador, r.error)
+		? badRequest(c, identificador, r.error, r.mensaje)
 		: badRequest(c, identificador);
 }
 
@@ -62,10 +95,11 @@ function revisar(
  * Valida el cuerpo contra el schema y lo deja en `c.req.valid("json")`.
  *
  * Un fallo sale como `validation_error` con los `issues` de zod, que es lo que han estado
- * devolviendo todos los routers de dominio desde siempre.
+ * devolviendo todos los routers de dominio desde siempre, y con el texto de la regla como `message`
+ * cuando lo hay (VALID-02).
  */
 export function cuerpo<T extends z.ZodType>(schema: T) {
-	return zValidator("json", schema, (r, c) => revisar(r as Resultado, c, () => "validation_error"));
+	return zValidator("json", schema, (r, c) => revisar(r as Resultado, c, () => "validation_error"), CON_MENSAJE);
 }
 
 type EntradaJson<T extends z.ZodType> = {
@@ -92,9 +126,9 @@ export function cuerpoTolerante<T extends z.ZodType>(
 			// Fail-open deliberado: cuerpo ausente o JSON roto equivale a no mandar campos.
 		}
 
-		const resultado = await schema.safeParseAsync(valor);
+		const resultado = (await validarConMensaje(schema, valor)) as Resultado;
 		if (!resultado.success) {
-			return badRequest(c, "validation_error", resultado.error);
+			return badRequest(c, "validation_error", resultado.error, resultado.mensaje);
 		}
 
 		c.req.addValidatedData("json", resultado.data as Record<string, unknown>);
@@ -111,11 +145,16 @@ export function cuerpoTolerante<T extends z.ZodType>(
  * schema, así que la lista de parámetros deja de estar escrita dos veces.
  */
 export function consulta<T extends z.ZodType>(schema: T) {
-	return zValidator("query", schema, (r, c) => {
-		const f = r as Resultado;
-		if (!f.success) return badRequest(c, "validation_error", f.error);
-		return undefined;
-	});
+	return zValidator(
+		"query",
+		schema,
+		(r, c) => {
+			const f = r as Resultado;
+			if (!f.success) return badRequest(c, "validation_error", f.error, f.mensaje);
+			return undefined;
+		},
+		CON_MENSAJE,
+	);
 }
 
 /**

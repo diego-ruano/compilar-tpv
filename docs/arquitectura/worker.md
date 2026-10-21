@@ -97,6 +97,10 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
   `test/mensajesDeError.test.ts` falla. No se añade al enum `ErrorCode` lo que sólo se enseña.
 - La aplica un middleware a todas las respuestas (`middleware/completarErrores.ts`); un `message`
   escrito en la llamada gana a la tabla.
+- **Un dato que no vale sale con el texto de su regla** (VALID-02): `cuerpo`, `consulta` y
+  `cuerpoTolerante` ponen como `message` el del primer fallo cuando está escrito en el schema (un
+  `MSG_*`, un `refine`, un `.min(1, "…")`), que es el mismo que da la Main. Los de zod por defecto
+  salen en inglés y se quedan en los `issues`: la respuesta va sin `message` y se enseña el genérico.
 - **Un error no cuenta su detalle interno** (FABLE-B): `serverError`, `unauthorized` y `forbidden`
   no aceptan detalles, y un 500 inesperado sale como `internal_error` sin más. La traza y el texto
   de Turso quedan en el log (`wrangler tail`) y en Sentry, donde se captura el error. Los `details`
