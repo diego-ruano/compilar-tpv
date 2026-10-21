@@ -64,7 +64,7 @@ export async function listProductosByCategoria(
 				(SELECT l.Codigo_Lote FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Lote_Proximo,
 				p.Cantidad_Pedido_Esperada,
 				p.Stock_Suelto,
-				-- El IVA propio del producto (migracion 0004). Faltaba aqui, asi que la Handy veia
+				-- El IVA propio del producto. Faltaba aqui, asi que la Handy veia
 				-- todos los productos como si heredaran el IVA del negocio: editar uno desde la
 				-- Handy podia devolverle el tipo general sin que nadie lo pidiera.
 				p.IVA_Percent

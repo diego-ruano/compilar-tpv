@@ -79,10 +79,10 @@
 
 -- NOTA: aqui NO va `PRAGMA foreign_keys = ON`. Seria un no-op: (1) es un ajuste
 -- POR CONEXION que no persiste en el fichero, y (2) el runner aplica cada migracion
--- dentro de una transaccion, donde el PRAGMA se ignora. La aplicacion real de las FK
--- es responsabilidad de CADA runner de conexion, que lo fija al abrir la conexion:
---   * App local (Rust): `tune()` en crates/tpv-infra-sqlite/src/db.rs.
---   * Nube (worker):    `probeTenantDb()` en src/durableObjects/tenantHub.ts.
+-- dentro de una transaccion, donde el PRAGMA se ignora. Las FK se activan en cada conexion:
+--   * App local (Rust): `tune()` en crates/tpv-infra-sqlite/src/db.rs, al abrirla.
+--   * Nube (worker):    Turso las trae activadas en cada conexion y el worker no las toca
+--                       (RI-06, ver `probeTenantDb()` en src/durableObjects/tenantHub.motor.ts).
 
 /* =========================================================
    1. Seguridad y Usuarios
@@ -1161,7 +1161,7 @@ ON Aperturas_Cajon(Fecha);
 --
 -- ID_Movimiento es TEXT PRIMARY KEY, asi que el UUID se genera ANTES del INSERT (paso kind:"value"
 -- en el worker, new_id() en Rust) y nunca por DEFAULT ni trigger: si no, nube y Main acaban con
--- filas distintas para el mismo hecho (CLAUDE.md 9, "IDs deterministas").
+-- filas distintas para el mismo hecho (CLAUDE.md, "IDs deterministas").
 --
 -- ON DELETE SET NULL en las referencias aunque ya no borremos pagos: un movimiento es un hecho
 -- historico y no puede desaparecer porque desaparezca aquello a lo que apunta.
@@ -1203,13 +1203,13 @@ ON Movimientos_Caja(Tipo, ID_Gasto) WHERE ID_Gasto IS NOT NULL;
 /* =========================================================
    10. Idempotencia / Atomicidad (tabla de la NUBE)
    Applied_Operations la usa el WORKER (nube) como gate idempotente por Op_Id al
-   aplicar escrituras (ver TenantHub.applyInternalCommand): un Op_Id repetido viola
-   UNIQUE(Op_Id) y hace rollback del batch, evitando duplicar el trabajo.
+   aplicar escrituras (ver `applyInternalCommandIdempotent` en tenantHub.motor.ts):
+   un Op_Id repetido viola UNIQUE(Op_Id) y hace rollback del batch, evitando duplicar
+   el trabajo.
 
    Forma parte del esquema UNICO compartido, asi que TAMBIEN se crea en la BD local
    de la Main, pero AHI QUEDA VACIA a proposito: la Main lleva su propia idempotencia
-   en la tabla de control _Sync_Applied_Ops (creada por init_sync_tables en
-   crates/tpv-infra-sqlite/src/db.rs, fuera de las migraciones). Reparto:
+   en la tabla de control _Sync_Applied_Ops (en el andamiaje local, §16). Reparto:
      - NUBE  -> Applied_Operations (esta tabla).
      - MAIN  -> _Sync_Applied_Ops  (anti-eco de sus propias escrituras + catch-up).
    Se mantiene en ambos lados por la politica de esquema unico (no pasa nada si queda
@@ -1297,9 +1297,9 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   Verifactu_Entorno TEXT NOT NULL DEFAULT 'produccion',
   -- MODO-PRUEBA (temporal): con 1, los cobros numeran en la serie PRUEBA y NO emiten registro de
   -- facturacion: sin QR, sin envio a la AEAT y sin necesitar NIF ni certificado. Sirve para probar
-  -- el programa mientras Veri*factu no es obligatorio, y antes del 1-1-2027 se quita entero (ver
-  -- docs/VERIFACTU_PENDIENTES.md): un interruptor que deja de declarar ventas no puede existir en un
-  -- TPV que se venda.
+  -- el programa mientras Veri*factu no es obligatorio, y se quita entero antes de que lo sea (la
+  -- fecha, en docs/pendientes.md, VF-MODO-PRUEBA): un interruptor que deja de declarar ventas no
+  -- puede existir en un TPV que se venda.
   Modo_Prueba INTEGER NOT NULL DEFAULT 0,
   -- RI-61: lo que dura una reserva que no elige su duracion (minutos), y que pasa cuando dos
   -- reservas de la misma mesa se pisan: 'avisar' (se guarda si quien reserva lo confirma) o
@@ -1388,10 +1388,11 @@ INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);
    una notificacion "a todos"/"por rol" es una sola fila y cada usuario marca su propia lectura
    sin duplicar el mensaje (escala sin explosion de filas por destinatario).
 
-   Sincronizacion (ver §9 CLAUDE.md): son tablas del ESQUEMA COMPARTIDO (se replican a la nube
-   y a las Handy por el outbox/WS). Por eso el ID lo genera el repositorio en Rust ANTES del
-   INSERT (TEXT PRIMARY KEY sin DEFAULT ni trigger) y las marcas de tiempo se escriben con
-   datetime('now','localtime'), que el outbox/tenantHub congela a literal antes de replicar.
+   Sincronizacion (ver docs/arquitectura/sincronizacion.md): son tablas del ESQUEMA
+   COMPARTIDO (se replican a la nube y a las Handy por el outbox/WS). Por eso el ID lo genera
+   el repositorio en Rust ANTES del INSERT (TEXT PRIMARY KEY sin DEFAULT ni trigger) y las
+   marcas de tiempo se escriben con datetime('now','localtime'), que el outbox/tenantHub
+   congela a literal antes de replicar.
 ========================================================= */
 -- Destino_Tipo / Destino_Valor: a quien apunta ('todos' -> Valor NULL; 'usuario' -> ID_Usuario;
 --   'rol' -> ID_Rol, que es estable frente al renombrado del rol). El rol de un usuario vive en
@@ -1501,7 +1502,7 @@ LEFT JOIN lote_fefo f ON f.ID_Producto = p.ID_Producto;
 
 /* =========================================================
    14. Veri*factu / registros de facturacion (FISCAL-01, FISCAL-02)
-   RD 1007/2023 (RRSIF) + Orden HAC/1177/2024. Diseno y porques: docs/PLAN_VERIFACTU.md.
+   RD 1007/2023 (RRSIF) + Orden HAC/1177/2024. Diseno y porques: docs/arquitectura/verifactu.md.
 
    El principio que ordena todo lo demas: el REGISTRO DE FACTURACION es el hecho fiscal. El papel
    es una copia suya y el envio a la AEAT es una consecuencia diferida. De ahi las tres reglas que
@@ -1562,16 +1563,16 @@ CREATE TABLE IF NOT EXISTS Serie_Facturacion (
 -- NO entra en la cadena de huella, asi que informarlo no cambia ninguna huella ya calculada.
 --
 -- ID_Registro es TEXT PRIMARY KEY, asi que el UUID se genera ANTES del INSERT (nunca por DEFAULT ni
--- trigger): CLAUDE.md 9, "IDs deterministas". ON DELETE SET NULL en ID_Pago porque un registro
+-- trigger): CLAUDE.md, "IDs deterministas". ON DELETE SET NULL en ID_Pago porque un registro
 -- fiscal no puede desaparecer porque desaparezca aquello a lo que apunta (misma regla que
 -- Movimientos_Caja); ademas la fuente de verdad del dinero sigue siendo Pagos.
 --
 -- ESTA TABLA NO SE PURGA NUNCA (DB-14). El dia que se implemente el archivado de datos antiguos,
 -- esta y `Serie_Facturacion` quedan fuera: el art. 7 RRSIF exige conservarlos "sin que puedan ser
 -- modificados ni eliminados", y borrar una fila de `Serie_Facturacion` devolveria el contador a 1 y
--- reemitiria numeros ya usados. El detalle de BACKLOG.md DB-14 dice que SI se puede archivar y por
--- que: el importe, la base, la cuota y el desglose ya viven DENTRO del registro, no se derivan de
--- la comanda al leer.
+-- reemitiria numeros ya usados. La comanda, en cambio, SI se podra archivar (docs/pendientes.md,
+-- DB-14, si ningun registro la necesita para reimprimir el papel): el importe, la base, la cuota y
+-- el desglose ya viven DENTRO del registro, no se derivan de la comanda al leer.
 CREATE TABLE IF NOT EXISTS Registros_Facturacion (
   ID_Registro           TEXT NOT NULL PRIMARY KEY,
   Orden                 INTEGER NOT NULL,
@@ -1818,7 +1819,7 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
 
    Que estas tablas se creen tambien en el tenant de Turso es DELIBERADO y no molesta:
    se quedan vacias, como ya dice la cabecera de este fichero. El volcado de recuperacion
-   no las mira (`esRestaurable` descarta todo lo que empieza por `_`, ver
+   no las mira (`esTablaDeNegocio` descarta todo lo que empieza por `_`, ver
    domains/sync/bootstrap.ventana.ts), asi que no viajan ni de vuelta.
 ========================================================= */
 
@@ -1830,7 +1831,7 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
 -- la nube RECHAZA no es lo mismo que una que no ha podido salir. Sin estas columnas el
 -- drenado no sabia distinguirlas y hacia lo unico que podia: parar y reintentar, en
 -- silencio y para siempre, con todas las ventas de detras detenidas tambien. Es la misma
--- politica que el DO ya aplicaba a su cola de entrada (`_Cola_Muerta` en tenantHub.ts),
+-- politica que el DO ya aplicaba a su cola de entrada (`_Cola_Muerta` en tenantHub.cola.ts),
 -- traida al camino en vivo, que es por donde va un TPV al dia.
 CREATE TABLE IF NOT EXISTS _Sync_Outbox (
     Seq INTEGER PRIMARY KEY AUTOINCREMENT,

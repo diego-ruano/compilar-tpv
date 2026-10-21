@@ -432,11 +432,3 @@ tocado; están aquí para decidir.
 - **La pantalla Fiscal dice que el NIF «no es algo que se haga desde esta pantalla»** cuando ya hay
   registros, pero el campo sigue siendo editable y se guarda.
 - **`descartarAvisoDatosFiscales`** (`e2e/helpers/fiscal.ts`) no la llama ningún recorrido.
-- **Los comentarios de `0001_inicial.sql` citan documentos y secciones que ya no existen**
-  (`docs/PLAN_VERIFACTU.md`, `docs/VERIFACTU_PENDIENTES.md`, `BACKLOG.md DB-14`, «CLAUDE.md 9») y uno de
-  `inventario.queries.ts`, dentro de un texto SQL, cita una «migración 0004». No se han tocado: el hash
-  de la migración incluye los comentarios y las bases que ya la aplicaron rechazarían el cambio.
-  Las referencias vigentes y la errata de `_Sync_Applied_Ops` están aclaradas en
-  [esquema.md](arquitectura/esquema.md#lo-que-hay-que-saber-de-los-comentarios-de-0001_inicialsql).
-  Una migración nueva no evita comprobar los hashes anteriores; reescribirlos exigiría decidir
-  expresamente qué hacer con las bases y copias existentes. El snapshot conserva su texto histórico.
