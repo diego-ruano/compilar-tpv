@@ -28,6 +28,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
+| [VALID-03](#valid-03--mensajes-de-validación-que-no-son-una-frase) | 🔵 | Mensajes de validación que no son una frase | Sin empezar |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
@@ -407,6 +408,16 @@ identificadores o copia datos del catálogo. Lo que decide es poco más de una d
 Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico de Turso,
 que no se replique y que devuelva un error de negocio si no se cumple; y pasar a él esas
 comprobaciones.
+
+### VALID-03 · Mensajes de validación que no son una frase
+
+Una parte de lo que se enseña cuando un dato no vale es un identificador o está en inglés: «nombre
+required», «codigo_lote required», «id_mesa invalido», «dia_ymd invalido», «hora invalida». En la
+Main sale de `tpv_domain::texto::requerido` (`"{campo} required"`, unas 50 llamadas) y de algunos
+`validar`; en el worker, del mismo texto escrito en los schemas (unos 32), que desde VALID-02 llega
+también a la Handy. Lo normal es que la pantalla no deje mandar el campo vacío y no se vea, pero
+cuando se ve no dice qué hacer. Arreglarlo es una frase en español por regla, igual en los dos lados
+(«Escribe el nombre», «Falta el código del lote»), con sus casos en `validacion_casos.json`.
 
 ---
 
