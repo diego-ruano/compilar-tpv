@@ -35,8 +35,17 @@ describe("las entradas del negocio se recortan como en la Main", () => {
 	});
 
 	it("recortar quita U+0085 y deja U+FEFF, como str::trim", () => {
-		expect(recortar("\u0085 \t Ana 　\n")).toBe("Ana");
-		expect(recortar("﻿Ana")).toBe("﻿Ana");
+		expect(recortar("\u0085 \t Ana \u3000\n")).toBe("Ana");
+		expect(recortar("\ufeffAna")).toBe("\ufeffAna");
 		expect(recortar(" a b ")).toBe("a b");
+		expect(recortar(" \u0085 ")).toBe("");
+	});
+
+	it("con muchos espacios en medio tarda lo que tarda recorrerlo, no su cuadrado", () => {
+		const largo = "A" + " ".repeat(200_000) + "B";
+		const desde = Date.now();
+		expect(recortar(` ${largo} `)).toBe(largo);
+		// Con /\p{White_Space}+$/ eran segundos; recorriendo desde los extremos, milisegundos.
+		expect(Date.now() - desde).toBeLessThan(1000);
 	});
 });
