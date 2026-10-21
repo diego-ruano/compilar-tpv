@@ -29,6 +29,8 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
 | [RES-05](#res-05--el-estado-por-defecto-de-una-reserva-es-activa) | 🔵 | El estado por defecto de una reserva en el esquema es `ACTIVA` | Sin empezar |
+| [VALID-01](#valid-01--el-worker-y-la-main-no-recortan-los-mismos-espacios) | 🔵 | El worker y la Main no recortan los mismos espacios | Sin empezar |
+| [VALID-02](#valid-02--en-la-handy-un-dato-que-no-vale-se-cuenta-como-datos-no-válidos) | 🔵 | En la Handy, un dato que no vale se cuenta como «Datos no válidos» | Sin empezar |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
@@ -413,9 +415,30 @@ comprobaciones.
 
 `Reservas.Estado` lleva `DEFAULT 'ACTIVA'` en `0001_inicial.sql`, y `ACTIVA` es el cliente ya sentado:
 una reserva nueva es `PROXIMA`. Hoy no hace daño, porque todo `INSERT` de una reserva (la Main, el
-worker y el alta web) escribe el estado, pero una inserción que lo olvidara nacería sentada. Cambiarlo
-en SQLite obliga a reconstruir la tabla (no hay `ALTER COLUMN`), con sus triggers y sus índices, en
-una migración nueva.
+worker y el alta web) escribe el estado, pero una inserción que lo olvidara nacería sentada. Mientras
+no haya nadie en producción es cambiar la palabra en `0001_inicial.sql`, con lo que eso exige a las
+bases de desarrollo (recrearlas, o poner en `_migrations` el hash nuevo de `0001`). Después, SQLite
+obliga a reconstruir la tabla (no hay `ALTER COLUMN`), con sus triggers y sus índices, en una
+migración nueva.
+
+### VALID-01 · El worker y la Main no recortan los mismos espacios
+
+Los `validar` de la Main recortan con `str::trim` de Rust (la propiedad Unicode `White_Space`) y los
+schemas del worker con `.trim()` de JavaScript, que quita además U+FEFF y deja U+0085. Un texto que
+sólo sea uno de esos dos caracteres se acepta en un lado y se rechaza en el otro, y un nombre que
+empiece o acabe por ellos se guarda distinto. Son unos 95 `.trim()` en 15 ficheros de schemas. El
+del plano ya recorta como Rust (MESAS-01); con el resto, igual: una función compartida en `lib/` y
+los casos en `validacion_casos.json`. Sólo lo provoca un texto pegado con esos caracteres.
+
+### VALID-02 · En la Handy, un dato que no vale se cuenta como «Datos no válidos»
+
+Cuando un schema del worker rechaza un cuerpo, `cuerpo()` (`lib/validacion.ts`) contesta
+`validation_error` con los `issues` de zod y sin `message`, y la Handy enseña el genérico del código:
+«Datos no válidos (validation_error)». La Main, con la misma entrada, enseña el texto de la regla
+(«Cada mesa necesita un nombre»), que en el worker está escrito igual en el `refine` y no llega a
+nadie. Pasa con todas las reglas de los schemas, no sólo con las del plano. Arreglarlo sería que
+`cuerpo()` pase como `message` el de un issue propio (`code: "custom"`), que son los que llevan frase;
+los de zod salen en inglés.
 
 ---
 
