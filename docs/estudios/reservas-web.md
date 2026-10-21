@@ -1,6 +1,7 @@
 # Reservas desde la web
 
-**Estado:** plan aprobado el 2026-10-17, sin implementar.
+**Estado:** plan aprobado el 2026-10-17. Fases 0 a 5 hechas y en producción; faltan el piloto (fase 6)
+y el plugin de WordPress (fase 7). Lo que queda por comprobar de cada fase, en el §11.
 
 > Un widget de reservas que cualquier web incrusta con una línea, conectado al TPV, y que acepta
 > reservas aunque la Main esté apagada. La decisión de arquitectura y su porqué están en
@@ -775,11 +776,11 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | Fase | Entrega | Hecho cuando |
 |---|---|---|
 | ✅ **0 · Previos** | FABLE-B. Turnstile dado de alta (§12) | Hecho el 2026-10-17 |
-| ✅ **1 · Esquema y configuración** | El esquema del §3.1 en `0001`, el reset de desarrollo, Configuración → Reservas (interruptor y días cerrados), el modo «Reserva web» del editor del plano, la zona horaria, `origen` en el calendario, `TABLAS_SOLO_MAIN` | Código y tests hechos el 2026-10-17. Falta comprobarlo con el worker desplegado: que la configuración llega a Turso |
-| ✅ **2 · Agenda y API pública** | Tablas centrales, `POST /clave` y el código en Configuración, la puerta pública, las rutas públicas, `AgendaWeb`, los limitadores, el interruptor, la administración de dominios y claves | Código y tests hechos el 2026-10-18 (las altas simultáneas, también). Falta crear las tablas centrales en Turso, desplegar el worker y reservar con `curl` |
-| ✅ **3 · Entrega a la Main** | `avisarReservasWeb`, `/pendientes` y `/recogidas`, la recogida en el motor, el caso de uso, las notificaciones, la cancelación entregada, la reoferta | Código y tests hechos el 2026-10-18. Comprobado en producción el 2026-10-19 con la Main encendida: una reserva hecha desde el widget llega a la Main. Falta con la Main apagada (la recoge al conectar) |
-| ✅ **4 · Widget** | `packages/plano`, `packages/estilos`, `apps/reservas-web`, `embed.js`, los assets en el worker y la CSP | Código y tests hechos el 2026-10-19. Falta verlo incrustado de verdad: desplegar, dar de alta `http://localhost:5174` y abrir la página de prueba (`pnpm --filter @tpv/reservas-web prueba`); en ella, el marco tiene que crecer al llegar al plano y encoger al volver o al confirmar (jsdom no maqueta: el test de `altura.ts` simula el tamaño) |
-| ✅ **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, cancelar sin borrar, la cola de avisos y su job | Código y tests hechos el 2026-10-19. Falta crear en la base central la columna y el índice de `email_sends` (§3.2), comprobar el remitente (§12), desplegar y ver llegar los cinco correos y cancelar desde el enlace |
+| ✅ **1 · Esquema y configuración** | El esquema del §3.1 en `0001`, el reset de desarrollo, Configuración → Reservas (interruptor y días cerrados), el modo «Reserva web» del editor del plano, la zona horaria, `origen` en el calendario, `TABLAS_SOLO_MAIN` | Código y tests hechos el 2026-10-17. En producción, el widget ofrece la mesa y la franja que tiene la Main, y eso lo lee de Turso. Falta probar un día cerrado: no hay ninguno |
+| ✅ **2 · Agenda y API pública** | Tablas centrales, `POST /clave` y el código en Configuración, la puerta pública, las rutas públicas, `AgendaWeb`, los limitadores, el interruptor, la administración de dominios y claves | Código y tests hechos el 2026-10-18 (las altas simultáneas, también). Desplegado: del 19 al 21 de octubre entraron tres reservas desde el widget, con Turnstile. Las rutas públicas contestan a una clave que no existe sin detalles internos |
+| ✅ **3 · Entrega a la Main** | `avisarReservasWeb`, `/pendientes` y `/recogidas`, la recogida en el motor, el caso de uso, las notificaciones, la cancelación entregada, la reoferta | Código y tests hechos el 2026-10-18. Comprobado en producción con la Main encendida: las tres altas y dos cancelaciones llegaron, con sus avisos, sin ninguna fallida. Falta con la Main apagada (la recoge al conectar) |
+| ✅ **4 · Widget** | `packages/plano`, `packages/estilos`, `apps/reservas-web`, `embed.js`, los assets en el worker y la CSP | Código y tests hechos el 2026-10-19; el tamaño desde el CSS del `div` y el plano grande (§7.2 y §7.3), el 2026-10-21. Funciona incrustado en una web; las cabeceras (CSP, caché, `nosniff`) son las del plan. Falta ver en un navegador, con lo del 2026-10-21 desplegado, que el marco crece al llegar al plano y encoge al volver o al confirmar, con y sin alto en el `div`, y en un móvil |
+| ✅ **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, cancelar sin borrar, la cola de avisos y su job | Código y tests hechos el 2026-10-19. En producción llegan los correos y se cancela desde el enlace. Falta ver llegar los otros tres (cambio y cancelación por el restaurante, y el de «no se pudo registrar») |
 | **6 · Piloto** | Los textos de LEGAL-01, `arquitectura/reservas-web.md` y la primera web propia con un bar | Un bar recibe reservas reales |
 | **7 · WordPress** | El plugin: ajustes con la clave, shortcode y bloque, que imprimen la línea del §7.3 | Instalado en un WordPress de prueba |
 
