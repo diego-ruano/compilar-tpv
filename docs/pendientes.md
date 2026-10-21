@@ -28,7 +28,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
-| [RES-05](#res-05--el-estado-por-defecto-de-una-reserva-es-activa) | 🔵 | El estado por defecto de una reserva en el esquema es `ACTIVA` | Sin empezar |
 | [VALID-01](#valid-01--el-worker-y-la-main-no-recortan-los-mismos-espacios) | 🔵 | El worker y la Main no recortan los mismos espacios | Sin empezar |
 | [VALID-02](#valid-02--en-la-handy-un-dato-que-no-vale-se-cuenta-como-datos-no-válidos) | 🔵 | En la Handy, un dato que no vale se cuenta como «Datos no válidos» | Sin empezar |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
@@ -410,16 +409,6 @@ identificadores o copia datos del catálogo. Lo que decide es poco más de una d
 Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico de Turso,
 que no se replique y que devuelva un error de negocio si no se cumple; y pasar a él esas
 comprobaciones.
-
-### RES-05 · El estado por defecto de una reserva es ACTIVA
-
-`Reservas.Estado` lleva `DEFAULT 'ACTIVA'` en `0001_inicial.sql`, y `ACTIVA` es el cliente ya sentado:
-una reserva nueva es `PROXIMA`. Hoy no hace daño, porque todo `INSERT` de una reserva (la Main, el
-worker y el alta web) escribe el estado, pero una inserción que lo olvidara nacería sentada. Mientras
-no haya nadie en producción es cambiar la palabra en `0001_inicial.sql`, con lo que eso exige a las
-bases de desarrollo (recrearlas, o poner en `_migrations` el hash nuevo de `0001`). Después, SQLite
-obliga a reconstruir la tabla (no hay `ALTER COLUMN`), con sus triggers y sus índices, en una
-migración nueva.
 
 ### VALID-01 · El worker y la Main no recortan los mismos espacios
 

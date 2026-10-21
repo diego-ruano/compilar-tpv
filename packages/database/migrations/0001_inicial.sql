@@ -536,7 +536,8 @@ CREATE TABLE IF NOT EXISTS Reservas (
   Comensales INTEGER NOT NULL DEFAULT 1,
   Duracion_Min INTEGER CHECK (Duracion_Min IS NULL OR Duracion_Min > 0),
   Nota TEXT,
-  Estado TEXT NOT NULL DEFAULT 'ACTIVA',
+  -- RES-05: una reserva nace por llegar. ACTIVA es el cliente ya sentado.
+  Estado TEXT NOT NULL DEFAULT 'PROXIMA',
   Created_At TEXT,
   Origen TEXT NOT NULL DEFAULT 'TPV',
   FOREIGN KEY (ID_Cliente) REFERENCES Clientes(ID_Cliente),
