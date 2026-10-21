@@ -5,6 +5,7 @@ import type { Dinero } from "@tpv/contracts";
 import { deLaBase } from "../../lib/dinero";
 import { planConsumo, type PlanConsumo } from "../inventario/consumo";
 import {
+	ahoraEnZona,
 	DURACION_POR_DEFECTO_MIN,
 	horaLocalDeTexto,
 	instanteEnZona,
@@ -284,13 +285,15 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 		cliente: texto(r.Cliente_Nombre),
 		duracion_min: r.Duracion_Min === null || r.Duracion_Min === undefined ? null : Number(r.Duracion_Min),
 	}));
-	// «Ahora» es la hora local de la Handy; las dos se pasan a instantes con la zona del negocio, que
-	// es la que deja la Main (`Zona_Horaria`), como cuenta ella con la suya.
+	// «Ahora» es la hora local de la Handy; ella y la de cada reserva se pasan a instantes con la zona
+	// del negocio, que es la que deja la Main (`Zona_Horaria`), como cuenta ella con la suya.
 	const reloj = rows(rsAhora)[0] ?? {};
-	const instante = instanteEnZona(texto(reloj.zona));
+	const zona = texto(reloj.zona);
 	const local = horaLocalDeTexto(texto(reloj.ahora));
-	const ahora = local === null ? null : instante(local);
-	const deCadaMesa = ahora === null ? new Map<string, ReservaEnElPlano>() : reservaDeCadaMesa(reservas, ahora, instante);
+	const deCadaMesa =
+		local === null
+			? new Map<string, ReservaEnElPlano>()
+			: reservaDeCadaMesa(reservas, ahoraEnZona(zona, local), instanteEnZona(zona));
 	for (const [idMesa, r] of deCadaMesa) {
 		const reserva = {
 			idReserva: r.reserva.id_reserva,

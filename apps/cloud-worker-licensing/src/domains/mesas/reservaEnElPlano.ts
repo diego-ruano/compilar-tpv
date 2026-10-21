@@ -66,19 +66,37 @@ export function horaLocalDeTexto(texto: string): number | null {
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Las horas locales de `zona` a instantes, con su cambio de hora. El desfase de un instante sale de
- * `Intl`; el de una hora local, de los que hay un día antes y un día después, quedándose con los que
- * cuadran. Si cuadran dos (la hora que se repite al retrasar el reloj), el primero, como `earliest`
- * de chrono en la Main; si ninguno (la que se salta al adelantarlo), `null`.
+ * Los instantes de una hora local de `zona`: uno, dos si se repite al retrasar el reloj, ninguno si
+ * se salta al adelantarlo. El desfase de un instante sale de `Intl`; el de una hora local, de los
+ * que hay un día antes y un día después, quedándose con los que cuadran.
  */
-export function instanteEnZona(zona: string): Instante {
+function instantesEnZona(zona: string): (local: number) => number[] {
 	const desfase = (ms: number) => (horaLocalDeTexto(horaLocalEn(zona, ms)) ?? ms) - ms;
-	return (local) => {
-		const candidatos = [desfase(local - DIA_MS), desfase(local + DIA_MS)]
+	return (local) =>
+		[...new Set([desfase(local - DIA_MS), desfase(local + DIA_MS)])]
 			.map((d) => local - d)
 			.filter((t) => desfase(t) === local - t);
+}
+
+/** Las horas de las reservas: de una que se repite, la primera, como `earliest` de chrono en la Main. */
+export function instanteEnZona(zona: string): Instante {
+	const instantes = instantesEnZona(zona);
+	return (local) => {
+		const candidatos = instantes(local);
 		return candidatos.length ? Math.min(...candidatos) : null;
 	};
+}
+
+/**
+ * «Ahora», de la hora local de la Handy (`X-Client-Now`). Esa cabecera no lleva desfase, así que en
+ * la hora que se repite no dice en cuál de las dos está: de las dos, la más cercana al reloj del
+ * worker, que distan una hora y el de la Handy va con minutos. Sin ninguna (un reloj en la hora que
+ * se salta), el del worker.
+ */
+export function ahoraEnZona(zona: string, local: number, reloj = Date.now()): number {
+	const candidatos = instantesEnZona(zona)(local);
+	if (!candidatos.length) return reloj;
+	return candidatos.reduce((a, b) => (Math.abs(b - reloj) < Math.abs(a - reloj) ? b : a));
 }
 
 /**

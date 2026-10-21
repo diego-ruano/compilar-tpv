@@ -1,5 +1,5 @@
 {
-  "//": "MESAS-02. Qué reserva enseña cada mesa del plano, igual en la Main (`tpv_domain::reservas::reserva_de_cada_mesa`) y en la Handy (`domains/mesas/reservaEnElPlano.ts` del worker). La leen `crates/tpv-domain/src/reservas.rs` y `apps/cloud-worker-licensing/test/reservaEnElPlano.test.ts`. Cada caso trae «ahora» (la hora local de quien mira), las reservas vivas con mesa como salen de la base y lo que enseña cada mesa; una mesa que no está en «ensena» no enseña ninguna. Un criterio nuevo es un caso nuevo aquí.",
+  "//": "MESAS-02. Qué reserva enseña cada mesa del plano, igual en la Main (`tpv_domain::reservas::reserva_de_cada_mesa`) y en la Handy (`domains/mesas/reservaEnElPlano.ts` del worker). La leen `crates/tpv-domain/src/reservas.rs` y `apps/cloud-worker-licensing/test/reservaEnElPlano.test.ts`. Cada caso trae «ahora» (la hora local de quien mira, o «ahora_utc» si hay que fijar cuál de las dos veces que pasa una hora repetida), las reservas vivas con mesa como salen de la base y lo que enseña cada mesa; una mesa que no está en «ensena» no enseña ninguna. «cambio_de_hora» describe la zona: sin él, la hora local es la UTC. Un criterio nuevo es un caso nuevo aquí.",
   "casos": [
     {
       "nombre": "una por llegar sale una hora antes y no un minuto más",
@@ -125,6 +125,15 @@
         { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-25", "hora": "02:30", "estado": "ACTIVA", "duracion_min": null }
       ],
       "ensena": { "m2": { "id_reserva": "r2", "estado": "ACTIVA", "minutos_para": -100 } }
+    },
+    {
+      "nombre": "y ahora puede ser la segunda vez que pasa la hora repetida",
+      "cambio_de_hora": { "local": "2026-10-25 03:00:00", "antes_min": 120, "despues_min": 60 },
+      "ahora_utc": "2026-10-25 01:30:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-25", "hora": "03:00", "estado": "PROXIMA", "duracion_min": null }
+      ],
+      "ensena": { "m1": { "id_reserva": "r1", "estado": "PROXIMA", "minutos_para": 30 } }
     },
     {
       "nombre": "un día o una hora que no valen no salen; con segundos o con espacios, sí",

@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import casos from "../../../crates/tpv-domain/src/plano_reservas_casos.json";
 import { mesasMetaAll } from "../src/domains/mesas/mesas.queries";
 import {
+	ahoraEnZona,
 	horaLocalDeTexto,
 	instanteEnZona,
 	reservaDeCadaMesa,
@@ -42,8 +43,9 @@ function zonaDelCaso(cambio: Cambio | undefined): Instante {
 describe("la reserva de cada mesa cuadra con la tabla compartida", () => {
 	it.each(casos.casos)("$nombre", (caso) => {
 		const reservas: ReservaDeMesa[] = caso.reservas.map((r) => ({ ...r, cliente: "" }));
-		const instante = zonaDelCaso((caso as { cambio_de_hora?: Cambio }).cambio_de_hora);
-		const ahora = instante(horaLocalDeTexto(caso.ahora)!)!;
+		const { cambio_de_hora, ahora_utc } = caso as { cambio_de_hora?: Cambio; ahora_utc?: string };
+		const instante = zonaDelCaso(cambio_de_hora);
+		const ahora = ahora_utc ? horaLocalDeTexto(ahora_utc)! : instante(horaLocalDeTexto(caso.ahora!)!)!;
 		const ensena = Object.fromEntries(
 			[...reservaDeCadaMesa(reservas, ahora, instante)].map(([mesa, r]) => [
 				mesa,
@@ -75,6 +77,17 @@ describe("las horas locales de una zona, con su cambio de hora", () => {
 		// 25 de octubre de 2026: de las 03:00 se vuelve a las 02:00.
 		expect(madrid(local("2026-10-25 02:30:00"))).toBe(utc("2026-10-25 00:30:00"));
 		expect(madrid(local("2026-10-25 03:00:00"))).toBe(utc("2026-10-25 02:00:00"));
+	});
+
+	it("«ahora», en la hora que se repite, es la vez más cercana al reloj del worker", () => {
+		const dosYMedia = local("2026-10-25 02:30:00");
+		// La Handy manda las 02:30 sin desfase: la primera vez son las 00:30 UTC; la segunda, las 01:30.
+		expect(ahoraEnZona("Europe/Madrid", dosYMedia, utc("2026-10-25 00:31:00"))).toBe(utc("2026-10-25 00:30:00"));
+		expect(ahoraEnZona("Europe/Madrid", dosYMedia, utc("2026-10-25 01:29:00"))).toBe(utc("2026-10-25 01:30:00"));
+		// Fuera de esa hora sólo hay una, aunque el reloj del worker vaya con minutos de diferencia.
+		expect(ahoraEnZona("Europe/Madrid", local("2026-10-21 20:00:00"), utc("2026-10-21 18:03:00"))).toBe(utc("2026-10-21 18:00:00"));
+		// Un reloj en la hora que se salta no es ninguna: manda el del worker.
+		expect(ahoraEnZona("Europe/Madrid", local("2027-03-28 02:30:00"), utc("2027-03-28 00:31:00"))).toBe(utc("2027-03-28 00:31:00"));
 	});
 
 	it("una zona que no existe cuenta como la de por defecto", () => {

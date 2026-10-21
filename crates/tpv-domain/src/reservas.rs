@@ -494,7 +494,10 @@ mod tests {
                     .filter_map(|(t, vale)| vale.then_some(t))
                     .min()
             };
-            let ahora = instante(local(caso["ahora"].as_str().unwrap())).unwrap();
+            let ahora = match caso["ahora_utc"].as_str() {
+                Some(utc) => local(utc).and_utc().timestamp(),
+                None => instante(local(caso["ahora"].as_str().unwrap())).unwrap(),
+            };
             let ensena: std::collections::BTreeMap<String, serde_json::Value> = reserva_de_cada_mesa(reservas.collect(), ahora, instante)
                 .into_iter()
                 .map(|(mesa, r)| {
