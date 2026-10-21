@@ -795,8 +795,8 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
    prueba que publica la documentación de Turnstile.
 2. ✅ El secreto está guardado como `TURNSTILE_SECRET_KEY` (`wrangler secret put`), y la clave
    pública, que no es secreta, como `TURNSTILE_SITE_KEY` en las `vars` de `wrangler.json`.
-3. **Correo**: comprobar en Email Sending que se puede enviar desde `reservas@altarialights.com`
-   (el dominio ya está dado de alta por `pedidos@`).
+3. ✅ **Correo**: se envía desde `reservas@altarialights.com` (el dominio ya estaba dado de alta
+   por `pedidos@`). Comprobado con los correos de la fase 5, que llegan en producción.
 4. La clase nueva del DO y los dos limitadores van en `wrangler.json` y se crean al desplegar: no hay
    que tocar nada en el panel.
 
