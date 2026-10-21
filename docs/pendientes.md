@@ -395,13 +395,19 @@ que compruebe una condición y aborte el lote sin replicarse.
 
 Ejemplos: cancelar una reserva desde la Handy (`POST /v1/reservas/:id/cancelar`) comprueba que está
 `PROXIMA` y, si en esos milisegundos la Main la ha sentado, la cancela igual; marcar la llegada o la
-salida desde la mesa (`PUT /v1/mesas/reservas/:id/estado`), el borrado que rechaza una reserva web
-y el aviso de solape funcionan igual. Hay unas 120 lecturas así en las rutas. La ventana es de
-milisegundos y se suma a SYNC-29 (la Main puede tener la fila de otra forma sin subir).
+salida desde la mesa (`PUT /v1/mesas/reservas/:id/estado`), el solape con otra reserva en modo
+«prohibir», el último administrador, el turno repetido de un trabajador o una línea de un producto
+que se acaba de archivar funcionan igual. La ventana es de milisegundos y se suma a SYNC-29 (la Main
+puede tener la fila de otra forma sin subir), que es la más ancha de las dos.
 
-Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del Durable Object, con la misma
-serialización que el resto de escrituras del tenant, que no se replique y que devuelva un error de
-negocio si no se cumple; y pasar a él las comprobaciones que hoy hace la ruta.
+Lo que no puede romperse ya lo para la base con un índice único, también entre dos dispositivos a la
+vez: una comanda abierta por mesa, un cierre por periodo, nombres de zona, mesa y producto, correos
+de cliente. Y no todo lo que leen las rutas antes de escribir decide algo: la mayoría resuelve
+identificadores o copia datos del catálogo. Lo que decide es poco más de una decena de comprobaciones.
+
+Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico de Turso,
+que no se replique y que devuelva un error de negocio si no se cumple; y pasar a él esas
+comprobaciones.
 
 ### RES-05 · El estado por defecto de una reserva es ACTIVA
 
