@@ -82,12 +82,12 @@ describe("migraciones del tenant", () => {
 			expect(sql.exec("SELECT COUNT(*) AS n FROM Sync_Changes WHERE Seq > 0;").toArray()[0].n).toBe(0);
 			expect(sql.exec("SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;").toArray()[0].seq).toBe(0);
 			expect(sql.exec("PRAGMA table_info(Asignacion_Turnos)").toArray().some((c: any) => c.name === "ID_Grupo")).toBe(true);
-			// La 0002 deja el ajuste de «No vino», a 0 (nunca).
+			// El ajuste de «No vino» nace a 0 (nunca).
 			expect(sql.exec("SELECT Reserva_No_Vino_Min AS m FROM Business_Settings WHERE ID = 1;").toArray()[0].m).toBe(0);
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(2);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(1);
 			// Volver a ejecutar el runner conserva el esquema y no duplica sus registros.
 			await runTenantMigrations(clienteConMigraciones(sql));
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(2);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(1);
 		});
 	});
     it("RI-48 impone los valores de dominio en el SQL de la nube", async () => {
