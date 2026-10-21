@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import { hashPin, verifyPin } from "../src/domains/login/login.crypto";
+import { parseId } from "../src/lib/rutas";
 import { recortar } from "../src/lib/texto";
 
 const fuentes = import.meta.glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
@@ -22,7 +23,7 @@ const DOMINIOS = [
 const vigilados = Object.keys(fuentes).filter(
 	(ruta) =>
 		DOMINIOS.some((d) => new RegExp(`/domains/${d}/[^/]+\\.ts$`).test(ruta)) ||
-		/\/lib\/(fechas|pago)\.ts$/.test(ruta),
+		/\/lib\/(fechas|pago|rutas)\.ts$/.test(ruta),
 );
 
 describe("las entradas del negocio se recortan como en la Main", () => {
@@ -48,6 +49,12 @@ describe("las entradas del negocio se recortan como en la Main", () => {
 		expect(recortar(` ${largo} `)).toBe(largo);
 		// Con /\p{White_Space}+$/ eran segundos; recorriendo desde los extremos, milisegundos.
 		expect(Date.now() - desde).toBeLessThan(1000);
+	});
+
+	it("un id de la ruta se recorta igual que el del cuerpo", () => {
+		expect(parseId(" \u0085c1 ")).toBe("c1");
+		expect(parseId("\ufeffc1")).toBe("\ufeffc1");
+		expect(parseId(" \u0085 ")).toBeNull();
 	});
 
 	it("el PIN se recorta como en la Main: U+0085 sobra y U+FEFF forma parte de él", async () => {

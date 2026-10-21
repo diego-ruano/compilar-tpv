@@ -8,10 +8,14 @@
 // habría dejado un dominio replicando con la hora de Turso sin que nada fallara.
 
 import { applyViaHub, HubError, type ApplyCommand } from "./hub";
+import { recortar } from "./texto";
 
-/** Un identificador que viene en la ruta: `null` si no hay nada que mirar. */
+/**
+ * Un identificador que viene en la ruta: `null` si no hay nada que mirar. Se recorta igual que el
+ * que llega en un cuerpo (VALID-01): si no, un id dado de alta con U+FEFF delante se buscaba sin él.
+ */
 export function parseId(raw: string | undefined): string | null {
-	const t = (raw ?? "").trim();
+	const t = recortar(raw ?? "");
 	return t.length ? t : null;
 }
 
@@ -25,7 +29,7 @@ export async function apply(
 	c: any,
 	built: { commandName: string; command: ApplyCommand; cloudPayload: any },
 ): Promise<any> {
-	const opId = (c.req.header("X-Idempotency-Key") || "").trim();
+	const opId = recortar(c.req.header("X-Idempotency-Key") || "");
 	if (!opId) throw new HubError("missing_op_id", 400);
 
 	return applyViaHub(c.env, {
