@@ -28,7 +28,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
-| [MESAS-01](#mesas-01--el-plano-que-guarda-una-handy-no-pasa-la-validación-de-la-main) | 🔵 | El plano que guarda una Handy no pasa la validación de la Main | Sin empezar |
 | [RES-05](#res-05--el-estado-por-defecto-de-una-reserva-es-activa) | 🔵 | El estado por defecto de una reserva en el esquema es `ACTIVA` | Sin empezar |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -403,18 +402,6 @@ milisegundos y se suma a SYNC-29 (la Main puede tener la fila de otra forma sin 
 Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del Durable Object, con la misma
 serialización que el resto de escrituras del tenant, que no se replique y que devuelva un error de
 negocio si no se cumple; y pasar a él las comprobaciones que hoy hace la ruta.
-
-### MESAS-01 · El plano que guarda una Handy no pasa la validación de la Main
-
-Al guardar el plano, la Main (`tpv-infra-sqlite/src/mesas.rs::save_layout`) rechaza un salón o una
-mesa sin nombre y dos salones con el mismo nombre. El worker (`saveLayoutSchema` en
-`domains/mesas/mesas.schemas.ts` y `saveLayout`), que es por donde guarda la Handy, recorta los
-nombres pero no rechaza ninguna de las tres cosas. Una mesa sin nombre sale distinta en cada sitio:
-«Venta» en Cuentas, y vacía en el ticket, la cocina, el widget y el aviso de una reserva web.
-
-Falta lo que pide RI-78: sacar esas reglas a un `validar` de `tpv-domain`, añadir el dominio del plano
-a `validacion_casos.json` con sus casos (nombre vacío, sólo espacios, salón repetido) y cablearlo en
-`validacion_casos.rs` y `validacionCasos.test.ts`, para que el schema del worker rechace lo mismo.
 
 ### RES-05 · El estado por defecto de una reserva es ACTIVA
 

@@ -15,6 +15,37 @@ pub fn normalize_estado_cocina(input: &str) -> Result<crate::estados::EstadoCoci
     crate::estados::EstadoCocina::desde_texto(input)
 }
 
+/// Mismos textos en el worker (`mesas.schemas.ts`).
+pub const MSG_ZONA_SIN_NOMBRE: &str = "Cada zona necesita un nombre";
+pub const MSG_MESA_SIN_NOMBRE: &str = "Cada mesa necesita un nombre";
+
+/// Una zona del plano tal como llega para guardarse: su nombre y los de sus mesas.
+#[derive(Debug, Clone)]
+pub struct ZonaDelPlano<'a> {
+    pub nombre: &'a str,
+    pub mesas: Vec<&'a str>,
+}
+
+/// MESAS-01: lo que no se guarda del plano, venga de la Main o de la Handy: una zona sin nombre, dos
+/// zonas con el mismo nombre (la base no admite dos activas) o una mesa sin nombre. Los nombres se
+/// comparan recortados, como se guardan. Primero las zonas y luego sus mesas.
+pub fn validar_plano(zonas: &[ZonaDelPlano<'_>]) -> Result<(), String> {
+    let mut vistas = std::collections::HashSet::new();
+    for zona in zonas {
+        let nombre = zona.nombre.trim();
+        if nombre.is_empty() {
+            return Err(MSG_ZONA_SIN_NOMBRE.into());
+        }
+        if !vistas.insert(nombre) {
+            return Err(format!("Nombre de zona duplicado: «{nombre}»"));
+        }
+    }
+    if zonas.iter().flat_map(|z| &z.mesas).any(|m| m.trim().is_empty()) {
+        return Err(MSG_MESA_SIN_NOMBRE.into());
+    }
+    Ok(())
+}
+
 /// Datos para abrir una comanda de mesa (ya validados).
 #[derive(Debug, Clone)]
 pub struct AbrirComandaData {

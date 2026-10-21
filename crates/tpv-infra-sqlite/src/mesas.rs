@@ -332,21 +332,15 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== LAYOUT ===== */
 
     async fn save_layout(&self, salons: Vec<SalonInput>) -> AppResult<()> {
-        // Validación: nombres de zona no vacíos y únicos en el lote (la BD impone UNIQUE).
-        {
-            let mut seen = std::collections::HashSet::new();
-            for z in salons.iter() {
-                let name = z.name.trim();
-                if name.is_empty() {
-                    return Err(AppError::validation("zone_name required"));
-                }
-                if !seen.insert(name.to_string()) {
-                    return Err(AppError::validation(format!(
-                        "Nombre de zona duplicado: «{name}»"
-                    )));
-                }
-            }
-        }
+        // MESAS-01: la misma validación que el worker, por donde guarda la Handy.
+        let zonas: Vec<tpv_domain::mesas::ZonaDelPlano<'_>> = salons
+            .iter()
+            .map(|z| tpv_domain::mesas::ZonaDelPlano {
+                nombre: &z.name,
+                mesas: z.tables.iter().map(|t| t.name.as_str()).collect(),
+            })
+            .collect();
+        tpv_domain::mesas::validar_plano(&zonas).map_err(AppError::validation)?;
 
         // IDs de zonas existentes que el editor conserva (llegan con prefijo "db-zona-").
         let kept_zone_ids: Vec<String> = salons
@@ -501,9 +495,6 @@ impl MesasRepository for SqliteMesasRepository {
                 for t in z.tables.iter() {
                     let id_mesa_opt = parse_db_id(&t.id, "db-mesa-");
                     let numero_mesa = t.name.trim().to_string();
-                    if numero_mesa.is_empty() {
-                        return Err(AppError::validation("numero_mesa required"));
-                    }
                     let capacidad = if t.seats > 0 { t.seats } else { 4 };
                     let x = t.x;
                     let y = t.y;

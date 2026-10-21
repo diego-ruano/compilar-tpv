@@ -58,16 +58,39 @@ const tableSchema = z.object({
 	shape: z.string().default("rounded"),
 });
 
-export const saveLayoutSchema = z.object({
-	salons: z.array(
-		z.object({
-			id: z.string().default(""),
-			name: z.string().transform((s) => s.trim()),
-			room: roomSchema,
-			tables: z.array(tableSchema).optional().default([]),
-		}),
-	),
-});
+/** Mismos textos que `MSG_ZONA_SIN_NOMBRE` y `MSG_MESA_SIN_NOMBRE` en la Main (`tpv-domain/src/mesas.rs`). */
+const MSG_ZONA_SIN_NOMBRE = "Cada zona necesita un nombre";
+const MSG_MESA_SIN_NOMBRE = "Cada mesa necesita un nombre";
+
+/**
+ * MESAS-01: lo que no se guarda del plano, como `validar_plano` en la Main: una zona sin nombre, dos
+ * zonas con el mismo nombre o una mesa sin nombre. Los nombres ya llegan recortados. `null` si vale.
+ */
+function errorDelPlano(zonas: { name: string; tables: { name: string }[] }[]): string | null {
+	const vistas = new Set<string>();
+	for (const zona of zonas) {
+		if (!zona.name) return MSG_ZONA_SIN_NOMBRE;
+		if (vistas.has(zona.name)) return `Nombre de zona duplicado: «${zona.name}»`;
+		vistas.add(zona.name);
+	}
+	return zonas.some((z) => z.tables.some((t) => !t.name)) ? MSG_MESA_SIN_NOMBRE : null;
+}
+
+export const saveLayoutSchema = z
+	.object({
+		salons: z.array(
+			z.object({
+				id: z.string().default(""),
+				name: z.string().transform((s) => s.trim()),
+				room: roomSchema,
+				tables: z.array(tableSchema).optional().default([]),
+			}),
+		),
+	})
+	.superRefine((v, ctx) => {
+		const error = errorDelPlano(v.salons);
+		if (error) ctx.addIssue({ code: "custom", message: error });
+	});
 
 /** Mismo texto que `MSG_ESTADO_DESDE_LA_MESA` en la Main (`tpv-domain/src/reservas.rs`). */
 const MSG_ESTADO_DESDE_LA_MESA = "Desde la mesa sólo se marca que el cliente ha llegado o que se ha ido";

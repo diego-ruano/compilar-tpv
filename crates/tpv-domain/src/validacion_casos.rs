@@ -151,6 +151,25 @@ fn dias_de_horario(e: &Value, campos: &[&str]) -> Result<Value, String> {
     Ok(Value::Object(normalizado))
 }
 
+/// El plano que se guarda (MESAS-01): sus zonas y los nombres de sus mesas, recortados como se guardan.
+fn plano(e: &Value) -> Result<Value, String> {
+    let vistas: Vec<crate::mesas::ZonaDelPlano<'_>> = e["salons"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|z| crate::mesas::ZonaDelPlano {
+            nombre: z["name"].as_str().unwrap_or_default(),
+            mesas: z["tables"].as_array().into_iter().flatten().map(|t| t["name"].as_str().unwrap_or_default()).collect(),
+        })
+        .collect();
+    crate::mesas::validar_plano(&vistas)?;
+    let salons: Vec<Value> = vistas
+        .iter()
+        .map(|z| json!({ "name": z.nombre.trim(), "tables": z.mesas.iter().map(|m| json!({ "name": m.trim() })).collect::<Vec<_>>() }))
+        .collect();
+    Ok(json!({ "salons": salons }))
+}
+
 /// El validador de cada dominio de la tabla: devuelve los campos que normaliza, o el motivo del
 /// rechazo. Un dominio que no esté aquí hace fallar el test: no se queda sin comprobar en silencio.
 fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
@@ -166,6 +185,7 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "reserva_web" => reserva_web(entrada),
         "reserva_estado_mesa" => crate::reservas::estado_desde_la_mesa(&texto(entrada, "estado"))
             .map(|e| json!({ "estado": e.como_texto() })),
+        "plano" => plano(entrada),
         otro => panic!("validacion_casos.json trae el dominio «{otro}» y este test no sabe validarlo"),
     }
 }

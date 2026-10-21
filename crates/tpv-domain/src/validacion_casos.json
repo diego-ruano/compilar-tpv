@@ -186,5 +186,44 @@
       { "nombre": "volver a «por llegar»", "cambios": { "estado": "PROXIMA" }, "acepta": false },
       { "nombre": "un estado que no existe", "cambios": { "estado": "SENTADA" }, "acepta": false }
     ]
+  },
+  "plano": {
+    "base": { "salons": [
+      { "id": "db-zona-z1", "name": "Salón", "room": { "type": "poly", "points": [0, 0, 400, 0, 400, 300] }, "tables": [
+        { "id": "db-mesa-m1", "name": "1", "x": 10, "y": 20, "width": 120, "height": 70, "radius": null, "seats": 4, "shape": "rect" }
+      ] }
+    ] },
+    "casos": [
+      { "nombre": "la base es válida", "cambios": {}, "acepta": true },
+      { "nombre": "los nombres se recortan", "cambios": { "salons": [
+        { "id": "", "name": " Terraza ", "room": { "points": [] }, "tables": [{ "id": "", "name": " T1 " }] }
+      ] }, "acepta": true, "queda": { "salons": [{ "name": "Terraza", "tables": [{ "name": "T1" }] }] } },
+      { "nombre": "un plano sin zonas", "cambios": { "salons": [] }, "acepta": true },
+      { "nombre": "una zona sin mesas", "cambios": { "salons": [{ "id": "", "name": "Barra", "room": { "points": [] }, "tables": [] }] }, "acepta": true },
+      { "nombre": "una zona sin nombre", "cambios": { "salons": [{ "id": "", "name": "", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
+      { "nombre": "una zona con sólo espacios", "cambios": { "salons": [{ "id": "", "name": "   ", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
+      { "nombre": "dos zonas con el mismo nombre", "cambios": { "salons": [
+        { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] },
+        { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] }
+      ] }, "acepta": false },
+      { "nombre": "el mismo nombre con espacios alrededor es el mismo", "cambios": { "salons": [
+        { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] },
+        { "id": "", "name": " Terraza ", "room": { "points": [] }, "tables": [] }
+      ] }, "acepta": false },
+      { "nombre": "con otras mayúsculas es otra zona, como en la base", "cambios": { "salons": [
+        { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] },
+        { "id": "", "name": "terraza", "room": { "points": [] }, "tables": [] }
+      ] }, "acepta": true },
+      { "nombre": "una mesa sin nombre", "cambios": { "salons": [
+        { "id": "", "name": "Salón", "room": { "points": [] }, "tables": [{ "id": "", "name": "1" }, { "id": "", "name": "" }] }
+      ] }, "acepta": false },
+      { "nombre": "una mesa con sólo espacios, en la segunda zona", "cambios": { "salons": [
+        { "id": "", "name": "Salón", "room": { "points": [] }, "tables": [{ "id": "", "name": "1" }] },
+        { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [{ "id": "", "name": "  " }] }
+      ] }, "acepta": false },
+      { "nombre": "dos mesas con el mismo nombre en una zona: la base las junta", "cambios": { "salons": [
+        { "id": "", "name": "Salón", "room": { "points": [] }, "tables": [{ "id": "", "name": "1" }, { "id": "", "name": "1" }] }
+      ] }, "acepta": true }
+    ]
   }
 }
