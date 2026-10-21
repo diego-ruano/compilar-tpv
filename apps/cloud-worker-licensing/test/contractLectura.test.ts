@@ -476,7 +476,8 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 		case "mesas.layout":
 			return loadLayout(db);
 		case "mesas.meta_all":
-			return mesasMetaAll(db);
+			// Sin hora de la Handy: cuenta el reloj, como la Main con el suyo.
+			return mesasMetaAll(db, null);
 		case "mesas.comanda_abierta_by_mesa":
 			return comandaAbiertaByMesa(db, e.id_mesa);
 		case "mesas.categorias":

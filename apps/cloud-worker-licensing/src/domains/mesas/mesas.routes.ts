@@ -5,6 +5,7 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { HubError } from "../../lib/hub";
+import { parseClientNow } from "../../durableObjects/tenantHub.tiempo";
 import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
 
@@ -33,9 +34,11 @@ mesasRoutes.post("/layout", cuerpo(S.saveLayoutSchema), async (c) => {
 	return c.json({ ok: true });
 });
 
-mesasRoutes.get("/meta", async (c) =>
-	c.json(await tenantQuery(c, (db) => q.mesasMetaAll(db))),
-);
+mesasRoutes.get("/meta", async (c) => {
+	// MESAS-02: la hora local de la Handy, validada como la usa `tenantQuery`; sin ella, el reloj del worker.
+	const ahoraLocal = parseClientNow(c.req.header("X-Client-Now"));
+	return c.json(await tenantQuery(c, (db) => q.mesasMetaAll(db, ahoraLocal)));
+});
 
 mesasRoutes.put("/reservas/:id/estado", cuerpo(S.setReservaEstadoSchema.omit({ id_reserva: true })), async (c) => {
 	const id = parseId(c.req.param("id"));

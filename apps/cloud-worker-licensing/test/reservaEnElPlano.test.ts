@@ -2,9 +2,8 @@
 //
 // MESAS-02: el plano de la Handy enseña las reservas como el de la Main. La regla, contra la tabla
 // que comparte con Rust (`crates/tpv-domain/src/plano_reservas_casos.json`), y la lectura entera
-// (`mesasMetaAll`) contra el esquema de verdad, con «ahora» fijado como lo fija `tenantQuery` con el
-// `X-Client-Now` de la Handy. El arnés de lectura no lo ve: siembra fechas fijas y aquí todo depende
-// de la hora.
+// (`mesasMetaAll`) contra el esquema de verdad, con la hora de la Handy (su `X-Client-Now`) y el reloj
+// del worker fijados. El arnés de lectura sólo compara lo que no depende de la hora.
 
 import { describe, expect, it } from "vitest";
 
@@ -18,7 +17,6 @@ import {
 	type Instante,
 	type ReservaDeMesa,
 } from "../src/domains/mesas/reservaEnElPlano";
-import { conLaHoraDeQuienPregunta } from "../src/lib/tenantClient";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
@@ -118,9 +116,13 @@ describe("el plano de la Handy trae las reservas", () => {
 				INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado)
 				VALUES ('com-1', 'MESA', 'm3', '2026-10-21 15:05:00', 'Abierta');
 			`);
-			const db = conLaHoraDeQuienPregunta(clienteSobre(sql, hub.state.storage) as any, "2026-10-21 20:00:00");
+			const db = clienteSobre(sql, hub.state.storage) as any;
+			// Las 20:00 en Madrid, que son las 18:00 UTC.
+			const reloj = Date.UTC(2026, 9, 21, 18, 0, 0);
 
-			const meta = await mesasMetaAll(db);
+			const meta = await mesasMetaAll(db, "2026-10-21 20:00:00", reloj);
+			// Sin la hora de la Handy, la del worker: lo mismo, y no la de Turso leída como de Madrid.
+			expect(await mesasMetaAll(db, null, reloj)).toEqual(meta);
 
 			expect(meta.m1?.reserva).toEqual({
 				idReserva: "tarde", clienteNombre: "", diaYMD: "2026-10-21", hora: "19:30", estado: "PROXIMA", minutosPara: -30,

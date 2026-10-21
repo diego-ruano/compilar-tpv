@@ -11,7 +11,6 @@ import {
 	instanteEnZona,
 	reservaDeCadaMesa,
 	type ReservaDeMesa,
-	type ReservaEnElPlano,
 } from "./reservaEnElPlano";
 
 import type {
@@ -219,11 +218,16 @@ const SQL_RESERVAS_DEL_PLANO = `
 
 /**
  * El estado de cada mesa del plano de la Handy: lo pendiente de su comanda abierta y la reserva que
- * enseña (MESAS-02). «Ahora» es la hora local de la Handy: `tenantQuery` fija el
- * `datetime('now','localtime')` a su `X-Client-Now`.
+ * enseña (MESAS-02). `ahoraLocal` es la hora local de la Handy (su `X-Client-Now` validado); sin
+ * ella, cuenta el reloj del worker, que es un instante: la hora de Turso está en UTC y leída como la
+ * del negocio desplazaría las reservas una o dos horas.
  */
-export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaOut>> {
-	const [rs, rsReservas, rsAhora] = await db.batch(
+export async function mesasMetaAll(
+	db: Client,
+	ahoraLocal: string | null,
+	reloj = Date.now(),
+): Promise<Record<string, MesaMetaOut>> {
+	const [rs, rsReservas, rsZona] = await db.batch(
 		[
 			`
 		SELECT
@@ -253,7 +257,7 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 		WHERE c.Estado = 'Abierta';
 	`,
 			{ sql: SQL_RESERVAS_DEL_PLANO, args: [DURACION_POR_DEFECTO_MIN] },
-			"SELECT datetime('now','localtime') AS ahora, (SELECT Zona_Horaria FROM Business_Settings WHERE ID = 1) AS zona;",
+			"SELECT Zona_Horaria AS zona FROM Business_Settings WHERE ID = 1;",
 		],
 		"read",
 	);
@@ -285,16 +289,12 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 		cliente: texto(r.Cliente_Nombre),
 		duracion_min: r.Duracion_Min === null || r.Duracion_Min === undefined ? null : Number(r.Duracion_Min),
 	}));
-	// «Ahora» es la hora local de la Handy; ella y la de cada reserva se pasan a instantes con la zona
-	// del negocio, que es la que deja la Main (`Zona_Horaria`), como cuenta ella con la suya.
-	const reloj = rows(rsAhora)[0] ?? {};
-	const zona = texto(reloj.zona);
-	const local = horaLocalDeTexto(texto(reloj.ahora));
-	const deCadaMesa =
-		local === null
-			? new Map<string, ReservaEnElPlano>()
-			: reservaDeCadaMesa(reservas, ahoraEnZona(zona, local), instanteEnZona(zona));
-	for (const [idMesa, r] of deCadaMesa) {
+	// La hora de la Handy y la de cada reserva se pasan a instantes con la zona del negocio, que es la
+	// que deja la Main (`Zona_Horaria`), como cuenta ella con la suya.
+	const zona = texto(rows(rsZona)[0]?.zona);
+	const local = ahoraLocal === null ? null : horaLocalDeTexto(ahoraLocal);
+	const ahora = local === null ? reloj : ahoraEnZona(zona, local, reloj);
+	for (const [idMesa, r] of reservaDeCadaMesa(reservas, ahora, instanteEnZona(zona))) {
 		const reserva = {
 			idReserva: r.reserva.id_reserva,
 			clienteNombre: r.reserva.cliente,
