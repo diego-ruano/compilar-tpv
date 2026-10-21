@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Local;
+use chrono::{Local, TimeZone};
 use crate::ejecutor::Value;
 
 use crate::caja_movimientos::{self, MovimientoCaja};
@@ -1047,9 +1047,9 @@ impl MesasRepository for SqliteMesasRepository {
             });
         }
 
-        // MESAS-02: la misma regla que el plano de la Handy, con la hora local de este equipo.
-        let ahora = Local::now().naive_local();
-        for (id_mesa, r) in tpv_domain::reservas::reserva_de_cada_mesa(reservas, ahora) {
+        // MESAS-02: la misma regla que el plano de la Handy, con la zona de este equipo.
+        let instante = |local: chrono::NaiveDateTime| Local.from_local_datetime(&local).earliest().map(|d| d.timestamp());
+        for (id_mesa, r) in tpv_domain::reservas::reserva_de_cada_mesa(reservas, Local::now().timestamp(), instante) {
             let reserva = ReservaMesaOut {
                 id_reserva: r.reserva.id_reserva,
                 cliente_nombre: r.reserva.cliente,

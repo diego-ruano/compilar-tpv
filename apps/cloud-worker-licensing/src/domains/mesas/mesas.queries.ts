@@ -4,7 +4,14 @@ import type { Client } from "@libsql/client/web";
 import type { Dinero } from "@tpv/contracts";
 import { deLaBase } from "../../lib/dinero";
 import { planConsumo, type PlanConsumo } from "../inventario/consumo";
-import { DURACION_POR_DEFECTO_MIN, reservaDeCadaMesa, type ReservaDeMesa } from "./reservaEnElPlano";
+import {
+	DURACION_POR_DEFECTO_MIN,
+	horaLocalDeTexto,
+	instanteEnZona,
+	reservaDeCadaMesa,
+	type ReservaDeMesa,
+	type ReservaEnElPlano,
+} from "./reservaEnElPlano";
 
 import type {
 	CategoriaVendibleOut,
@@ -245,7 +252,7 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 		WHERE c.Estado = 'Abierta';
 	`,
 			{ sql: SQL_RESERVAS_DEL_PLANO, args: [DURACION_POR_DEFECTO_MIN] },
-			"SELECT datetime('now','localtime') AS ahora;",
+			"SELECT datetime('now','localtime') AS ahora, (SELECT Zona_Horaria FROM Business_Settings WHERE ID = 1) AS zona;",
 		],
 		"read",
 	);
@@ -277,7 +284,14 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 		cliente: texto(r.Cliente_Nombre),
 		duracion_min: r.Duracion_Min === null || r.Duracion_Min === undefined ? null : Number(r.Duracion_Min),
 	}));
-	for (const [idMesa, r] of reservaDeCadaMesa(reservas, texto(rows(rsAhora)[0]?.ahora))) {
+	// «Ahora» es la hora local de la Handy; las dos se pasan a instantes con la zona del negocio, que
+	// es la que deja la Main (`Zona_Horaria`), como cuenta ella con la suya.
+	const reloj = rows(rsAhora)[0] ?? {};
+	const instante = instanteEnZona(texto(reloj.zona));
+	const local = horaLocalDeTexto(texto(reloj.ahora));
+	const ahora = local === null ? null : instante(local);
+	const deCadaMesa = ahora === null ? new Map<string, ReservaEnElPlano>() : reservaDeCadaMesa(reservas, ahora, instante);
+	for (const [idMesa, r] of deCadaMesa) {
 		const reserva = {
 			idReserva: r.reserva.id_reserva,
 			clienteNombre: r.reserva.cliente,

@@ -10,30 +10,75 @@ import { describe, expect, it } from "vitest";
 
 import casos from "../../../crates/tpv-domain/src/plano_reservas_casos.json";
 import { mesasMetaAll } from "../src/domains/mesas/mesas.queries";
-import { reservaDeCadaMesa, type ReservaDeMesa } from "../src/domains/mesas/reservaEnElPlano";
+import {
+	horaLocalDeTexto,
+	instanteEnZona,
+	reservaDeCadaMesa,
+	type Instante,
+	type ReservaDeMesa,
+} from "../src/domains/mesas/reservaEnElPlano";
 import { conLaHoraDeQuienPregunta } from "../src/lib/tenantClient";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
+type Cambio = { local: string; antes_min: number; despues_min: number };
+
+/**
+ * La zona de un caso, como en el test de Rust: sin cambio de hora, la hora local es la UTC. Con uno,
+ * el desfase es `antes_min` hasta la hora local `local` y `despues_min` desde ahí.
+ */
+function zonaDelCaso(cambio: Cambio | undefined): Instante {
+	if (!cambio) return (local) => local;
+	const antes = cambio.antes_min * 60_000;
+	const despues = cambio.despues_min * 60_000;
+	const en = horaLocalDeTexto(cambio.local)! - antes;
+	return (local) => {
+		const vale = [local - antes].filter((t) => t < en).concat([local - despues].filter((t) => t >= en));
+		return vale.length ? Math.min(...vale) : null;
+	};
+}
+
 describe("la reserva de cada mesa cuadra con la tabla compartida", () => {
 	it.each(casos.casos)("$nombre", (caso) => {
 		const reservas: ReservaDeMesa[] = caso.reservas.map((r) => ({ ...r, cliente: "" }));
+		const instante = zonaDelCaso((caso as { cambio_de_hora?: Cambio }).cambio_de_hora);
+		const ahora = instante(horaLocalDeTexto(caso.ahora)!)!;
 		const ensena = Object.fromEntries(
-			[...reservaDeCadaMesa(reservas, caso.ahora)].map(([mesa, r]) => [
+			[...reservaDeCadaMesa(reservas, ahora, instante)].map(([mesa, r]) => [
 				mesa,
 				{ id_reserva: r.reserva.id_reserva, estado: r.estado, minutos_para: r.minutos_para },
 			]),
 		);
 		expect(ensena).toEqual(caso.ensena);
 	});
+});
 
-	it("sin una hora válida no enseña ninguna", () => {
-		const reserva: ReservaDeMesa = {
-			id_mesa: "m1", id_reserva: "r1", cliente: "", dia_ymd: "2026-10-21", hora: "20:00", estado: "ACTIVA", duracion_min: null,
-		};
-		expect(reservaDeCadaMesa([reserva], "").size).toBe(0);
-		expect(reservaDeCadaMesa([reserva], "2026-10-21T20:00:00").size).toBe(0);
+describe("las horas locales de una zona, con su cambio de hora", () => {
+	const madrid = instanteEnZona("Europe/Madrid");
+	const utc = (s: string) => Date.parse(s.replace(" ", "T") + "Z");
+	const local = (s: string) => horaLocalDeTexto(s)!;
+
+	it("en invierno y en verano, con su desfase", () => {
+		expect(madrid(local("2026-01-15 20:00:00"))).toBe(utc("2026-01-15 19:00:00"));
+		expect(madrid(local("2026-07-15 20:00:00"))).toBe(utc("2026-07-15 18:00:00"));
+	});
+
+	it("la hora que se salta al adelantar el reloj no existe", () => {
+		// 28 de marzo de 2027: de las 02:00 se pasa a las 03:00.
+		expect(madrid(local("2027-03-28 01:59:00"))).toBe(utc("2027-03-28 00:59:00"));
+		expect(madrid(local("2027-03-28 02:30:00"))).toBeNull();
+		expect(madrid(local("2027-03-28 03:00:00"))).toBe(utc("2027-03-28 01:00:00"));
+	});
+
+	it("la que se repite al retrasarlo es la primera", () => {
+		// 25 de octubre de 2026: de las 03:00 se vuelve a las 02:00.
+		expect(madrid(local("2026-10-25 02:30:00"))).toBe(utc("2026-10-25 00:30:00"));
+		expect(madrid(local("2026-10-25 03:00:00"))).toBe(utc("2026-10-25 02:00:00"));
+	});
+
+	it("una zona que no existe cuenta como la de por defecto", () => {
+		expect(instanteEnZona("Marte/Olympus")(local("2026-07-15 20:00:00"))).toBe(utc("2026-07-15 18:00:00"));
 	});
 });
 
@@ -48,7 +93,7 @@ describe("el plano de la Handy trae las reservas", () => {
 				VALUES ('m1', 'z1', '1', 4, 0, 0, 'rect', 80, 80), ('m2', 'z1', '2', 4, 0, 0, 'rect', 80, 80),
 				       ('m3', 'z1', '3', 4, 0, 0, 'rect', 80, 80), ('m4', 'z1', '4', 4, 0, 0, 'rect', 80, 80),
 				       ('m5', 'z1', '5', 4, 0, 0, 'rect', 80, 80), ('m6', 'z1', '6', 4, 0, 0, 'rect', 80, 80);
-				UPDATE Business_Settings SET Reserva_Duracion_Min = 60 WHERE ID = 1;
+				UPDATE Business_Settings SET Reserva_Duracion_Min = 60, Zona_Horaria = 'Europe/Madrid' WHERE ID = 1;
 				INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('c1', 'Ana');
 				INSERT INTO Reservas (ID_Reserva, ID_Mesa, ID_Cliente, Dia_YMD, Hora, Turno, Comensales, Estado, Duracion_Min) VALUES
 				  ('tarde', 'm1', NULL, '2026-10-21', '19:30', 'CENA', 2, 'PROXIMA', NULL),

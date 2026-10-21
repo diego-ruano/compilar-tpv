@@ -367,14 +367,17 @@ fn hora_del_dia(hora: &str) -> Option<chrono::NaiveTime> {
 }
 
 /// Los minutos que faltan para la hora de una reserva (negativos si ya ha pasado), truncados hacia
-/// cero. `ahora` es la hora local de quien mira el plano, sin zona: la Handy sólo manda la suya así
-/// (`X-Client-Now`), y la Main cuenta igual para que las dos enseñen lo mismo. Sólo difiere de
-/// contar con la zona si entre ahora y la reserva hay un cambio de hora. `None` si el día o la hora
-/// no son válidos.
-pub fn minutos_para(dia_ymd: &str, hora: &str, ahora: chrono::NaiveDateTime) -> Option<i64> {
+/// cero. `None` si el día o la hora no son válidos, o si esa hora no existe en la zona (la que se
+/// salta al adelantar el reloj).
+fn minutos_para(
+    dia_ymd: &str,
+    hora: &str,
+    ahora: i64,
+    instante: &impl Fn(chrono::NaiveDateTime) -> Option<i64>,
+) -> Option<i64> {
     let dia = crate::fechas::fecha_ymd(dia_ymd.trim())?;
     let hora = hora_del_dia(hora.trim())?;
-    Some((dia.and_time(hora) - ahora).num_minutes())
+    Some((instante(dia.and_time(hora))? - ahora) / 60)
 }
 
 /// MESAS-02: qué reserva enseña cada mesa del plano. Una mesa enseña una: la sentada antes que
@@ -382,9 +385,14 @@ pub fn minutos_para(dia_ymd: &str, hora: &str, ahora: chrono::NaiveDateTime) -> 
 /// en el plano (`estado_en_el_plano`). A la misma distancia, la de identificador menor: el orden
 /// en que llegan de la base no es el mismo en la Main que en Turso. Espejo de
 /// `domains/mesas/reservaEnElPlano.ts` en el worker, con sus casos en `plano_reservas_casos.json`.
+///
+/// `ahora` es un instante, en segundos desde 1970, e `instante` convierte a uno la hora local de una
+/// reserva: con la zona, para que una noche de cambio de hora falte el tiempo de verdad. Si esa hora
+/// se repite al retrasar el reloj, la primera; si no existe, `None` y la reserva no sale.
 pub fn reserva_de_cada_mesa(
     reservas: Vec<ReservaDeMesa>,
-    ahora: chrono::NaiveDateTime,
+    ahora: i64,
+    instante: impl Fn(chrono::NaiveDateTime) -> Option<i64>,
 ) -> std::collections::HashMap<String, ReservaEnElPlano> {
     let orden = |r: &ReservaEnElPlano| (r.estado != "ACTIVA", r.minutos_para.abs(), r.reserva.id_reserva.clone());
     let mut por_mesa: std::collections::HashMap<String, ReservaEnElPlano> = std::collections::HashMap::new();
@@ -392,7 +400,7 @@ pub fn reserva_de_cada_mesa(
         if reserva.id_mesa.is_empty() || reserva.id_reserva.is_empty() {
             continue;
         }
-        let Some(minutos) = minutos_para(&reserva.dia_ymd, &reserva.hora, ahora) else {
+        let Some(minutos) = minutos_para(&reserva.dia_ymd, &reserva.hora, ahora, &instante) else {
             continue;
         };
         let duracion = reserva.duracion_min.filter(|m| *m > 0).unwrap_or(DURACION_POR_DEFECTO_MIN);
@@ -470,8 +478,24 @@ mod tests {
                 estado: texto(r, "estado"),
                 duracion_min: r["duracion_min"].as_i64(),
             });
-            let ahora = chrono::NaiveDateTime::parse_from_str(caso["ahora"].as_str().unwrap(), "%Y-%m-%d %H:%M:%S").unwrap();
-            let ensena: std::collections::BTreeMap<String, serde_json::Value> = reserva_de_cada_mesa(reservas.collect(), ahora)
+            let local = |s: &str| chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap();
+            // La zona del caso: sin cambio de hora, la hora local es la UTC. Con uno, el desfase es
+            // `antes_min` hasta la hora local `local` y `despues_min` desde ahí.
+            let cambio = &caso["cambio_de_hora"];
+            let instante = |hora: chrono::NaiveDateTime| -> Option<i64> {
+                let sin_zona = hora.and_utc().timestamp();
+                if cambio.is_null() {
+                    return Some(sin_zona);
+                }
+                let (antes, despues) = (cambio["antes_min"].as_i64().unwrap() * 60, cambio["despues_min"].as_i64().unwrap() * 60);
+                let en = local(cambio["local"].as_str().unwrap()).and_utc().timestamp() - antes;
+                [(sin_zona - antes, sin_zona - antes < en), (sin_zona - despues, sin_zona - despues >= en)]
+                    .into_iter()
+                    .filter_map(|(t, vale)| vale.then_some(t))
+                    .min()
+            };
+            let ahora = instante(local(caso["ahora"].as_str().unwrap())).unwrap();
+            let ensena: std::collections::BTreeMap<String, serde_json::Value> = reserva_de_cada_mesa(reservas.collect(), ahora, instante)
                 .into_iter()
                 .map(|(mesa, r)| {
                     (mesa, serde_json::json!({ "id_reserva": r.reserva.id_reserva, "estado": r.estado, "minutos_para": r.minutos_para }))

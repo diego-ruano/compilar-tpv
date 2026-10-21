@@ -107,6 +107,26 @@
       "ensena": { "m1": { "id_reserva": "r1", "estado": "PROXIMA", "minutos_para": 45 } }
     },
     {
+      "nombre": "la noche que se adelanta la hora falta el tiempo de verdad, y la hora que se salta no existe",
+      "cambio_de_hora": { "local": "2027-03-28 02:00:00", "antes_min": 60, "despues_min": 120 },
+      "ahora": "2027-03-28 01:30:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2027-03-28", "hora": "03:15", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2027-03-28", "hora": "02:30", "estado": "ACTIVA", "duracion_min": null }
+      ],
+      "ensena": { "m1": { "id_reserva": "r1", "estado": "PROXIMA", "minutos_para": 45 } }
+    },
+    {
+      "nombre": "la noche que se retrasa la hora también, y la hora que se repite es la primera",
+      "cambio_de_hora": { "local": "2026-10-25 03:00:00", "antes_min": 120, "despues_min": 60 },
+      "ahora": "2026-10-25 03:10:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-25", "hora": "01:30", "estado": "PROXIMA", "duracion_min": 150 },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-25", "hora": "02:30", "estado": "ACTIVA", "duracion_min": null }
+      ],
+      "ensena": { "m2": { "id_reserva": "r2", "estado": "ACTIVA", "minutos_para": -100 } }
+    },
+    {
       "nombre": "un día o una hora que no valen no salen; con segundos o con espacios, sí",
       "ahora": "2026-10-21 20:00:00",
       "reservas": [

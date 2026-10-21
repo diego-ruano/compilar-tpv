@@ -6,6 +6,7 @@
 // nada: decide con lo leído.
 
 import { esFechaYmd } from "../../lib/fechas";
+import { horaLocalEn } from "../reservas_web/horaDelNegocio";
 
 /** Cuántos minutos antes de su hora sale una reserva en el plano. `PLANO_ANTELACION_MIN`. */
 const ANTELACION_MIN = 60;
@@ -31,6 +32,9 @@ export type ReservaEnElPlano = {
 	minutos_para: number;
 };
 
+/** Una hora local, en milisegundos como si fuera UTC, a un instante; `null` si no existe. */
+export type Instante = (local: number) => number | null;
+
 /**
  * Si una reserva sale en el plano y con qué estado. Una sentada sale hasta que se va; una que aún no
  * ha llegado, desde una hora antes hasta que acaba su hueco, y sigue siendo «por llegar».
@@ -43,38 +47,51 @@ function estadoEnElPlano(estado: string, minutosPara: number, duracionMin: numbe
 }
 
 const HORA = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
-const AHORA = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})$/;
+const FECHA_Y_HORA = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})$/;
 
-/** El instante de un día y una hora locales, en milisegundos y sin zona (como UTC). */
-function instante(dia: string, hora: string): number | null {
+/** Un día y una hora locales, en milisegundos como si fueran UTC; `null` si no valen. */
+function horaLocal(dia: string, hora: string): number | null {
 	const h = HORA.exec(hora);
 	if (!esFechaYmd(dia) || !h) return null;
 	const [a, m, d] = dia.split("-").map(Number);
 	return Date.UTC(a, m - 1, d, Number(h[1]), Number(h[2]), Number(h[3] ?? 0));
 }
 
+/** `YYYY-MM-DD HH:MM:SS` (la hora local de la Handy) como `horaLocal`; `null` si no lo es. */
+export function horaLocalDeTexto(texto: string): number | null {
+	const f = FECHA_Y_HORA.exec(texto);
+	return f ? horaLocal(f[1], f[2]) : null;
+}
+
+const DIA_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Los minutos que faltan para la hora de una reserva (negativos si ya ha pasado), truncados hacia
- * cero y sin zona: `ahora` es la hora local de la Handy (`X-Client-Now`). `null` si el día o la hora
- * no son válidos.
+ * Las horas locales de `zona` a instantes, con su cambio de hora. El desfase de un instante sale de
+ * `Intl`; el de una hora local, de los que hay un día antes y un día después, quedándose con los que
+ * cuadran. Si cuadran dos (la hora que se repite al retrasar el reloj), el primero, como `earliest`
+ * de chrono en la Main; si ninguno (la que se salta al adelantarlo), `null`.
  */
-function minutosPara(diaYmd: string, hora: string, ahora: number): number | null {
-	const t = instante(diaYmd.trim(), hora.trim());
-	// `|| 0`: un -0 es un 0.
-	return t === null ? null : Math.trunc((t - ahora) / 60_000) || 0;
+export function instanteEnZona(zona: string): Instante {
+	const desfase = (ms: number) => (horaLocalDeTexto(horaLocalEn(zona, ms)) ?? ms) - ms;
+	return (local) => {
+		const candidatos = [desfase(local - DIA_MS), desfase(local + DIA_MS)]
+			.map((d) => local - d)
+			.filter((t) => desfase(t) === local - t);
+		return candidatos.length ? Math.min(...candidatos) : null;
+	};
 }
 
 /**
  * La reserva que enseña cada mesa: la sentada antes que ninguna y, si no, la más cercana a ahora; a
- * la misma distancia, la de identificador menor. `ahora` es `YYYY-MM-DD HH:MM:SS`, la hora local de
- * quien mira; si no lo es, ninguna.
+ * la misma distancia, la de identificador menor. `ahora` es un instante en milisegundos, e
+ * `instante` pasa a uno la hora local de cada reserva. Los minutos se truncan hacia cero.
  */
-export function reservaDeCadaMesa(reservas: ReservaDeMesa[], ahora: string): Map<string, ReservaEnElPlano> {
+export function reservaDeCadaMesa(
+	reservas: ReservaDeMesa[],
+	ahora: number,
+	instante: Instante,
+): Map<string, ReservaEnElPlano> {
 	const porMesa = new Map<string, ReservaEnElPlano>();
-	const a = AHORA.exec(ahora);
-	const ahoraMs = a ? instante(a[1], a[2]) : null;
-	if (ahoraMs === null) return porMesa;
-
 	const antes = (x: ReservaEnElPlano, y: ReservaEnElPlano): boolean => {
 		const sx = x.estado === "ACTIVA";
 		const sy = y.estado === "ACTIVA";
@@ -87,8 +104,11 @@ export function reservaDeCadaMesa(reservas: ReservaDeMesa[], ahora: string): Map
 
 	for (const reserva of reservas) {
 		if (!reserva.id_mesa || !reserva.id_reserva) continue;
-		const minutos = minutosPara(reserva.dia_ymd, reserva.hora, ahoraMs);
-		if (minutos === null) continue;
+		const local = horaLocal(reserva.dia_ymd.trim(), reserva.hora.trim());
+		const t = local === null ? null : instante(local);
+		if (t === null) continue;
+		// `|| 0`: un -0 es un 0.
+		const minutos = Math.trunc((t - ahora) / 60_000) || 0;
 		const duracion = reserva.duracion_min !== null && reserva.duracion_min > 0 ? reserva.duracion_min : DURACION_POR_DEFECTO_MIN;
 		const estado = estadoEnElPlano(reserva.estado, minutos, duracion);
 		if (!estado) continue;
