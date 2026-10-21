@@ -6,6 +6,7 @@
 // nada: decide con lo leído.
 
 import { esFechaYmd } from "../../lib/fechas";
+import { recortar } from "../../lib/texto";
 import { horaLocalEn } from "../reservas_web/horaDelNegocio";
 
 /** Cuántos minutos antes de su hora sale una reserva en el plano. `PLANO_ANTELACION_MIN`. */
@@ -40,7 +41,7 @@ export type Instante = (local: number) => number | null;
  * ha llegado, desde una hora antes hasta que acaba su hueco, y sigue siendo «por llegar».
  */
 function estadoEnElPlano(estado: string, minutosPara: number, duracionMin: number): "ACTIVA" | "PROXIMA" | null {
-	const e = estado.trim().toUpperCase();
+	const e = recortar(estado).toUpperCase();
 	if (e === "ACTIVA") return "ACTIVA";
 	const enSuHueco = minutosPara <= ANTELACION_MIN && minutosPara > -duracionMin;
 	return e === "PROXIMA" && enSuHueco ? "PROXIMA" : null;
@@ -122,7 +123,7 @@ export function reservaDeCadaMesa(
 
 	for (const reserva of reservas) {
 		if (!reserva.id_mesa || !reserva.id_reserva) continue;
-		const local = horaLocal(reserva.dia_ymd.trim(), reserva.hora.trim());
+		const local = horaLocal(recortar(reserva.dia_ymd), recortar(reserva.hora));
 		const t = local === null ? null : instante(local);
 		if (t === null) continue;
 		// `|| 0`: un -0 es un 0.

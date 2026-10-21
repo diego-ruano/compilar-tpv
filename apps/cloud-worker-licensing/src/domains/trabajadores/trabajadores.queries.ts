@@ -1,6 +1,7 @@
 // src/domains/trabajadores/trabajadores.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 
 import type {
 	AsignacionRow,
@@ -143,7 +144,7 @@ function currentMonday(): string {
 /** Un texto opcional recortado; vacío es `null`. Espejo de `limpiar_opcional` (tpv-domain). */
 function limpiarOpcional(v: unknown): string | null {
 	if (v == null) return null;
-	const t = String(v).trim();
+	const t = recortar(String(v));
 	return t.length ? t : null;
 }
 
@@ -242,7 +243,7 @@ export async function idByUsuario(
 		`,
 		args: [idUsuario],
 	});
-	const id = String(rows(rs)[0]?.id ?? "").trim();
+	const id = recortar(String(rows(rs)[0]?.id ?? ""));
 	return id ? id : null;
 }
 
@@ -397,10 +398,10 @@ export async function predeterminadoDesdeSemanaItems(
 		})
 		.filter(
 			(r) =>
-				r.id_trabajador.trim().length > 0
+				recortar(r.id_trabajador).length > 0
 				&& r.weekday >= 1
 				&& r.weekday <= 7
-				&& r.id_turno.trim().length > 0,
+				&& recortar(r.id_turno).length > 0,
 		);
 }
 

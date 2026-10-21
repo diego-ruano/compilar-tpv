@@ -8,25 +8,26 @@
 
 import { describe, expect, it } from "vitest";
 
+import { hashPin, verifyPin } from "../src/domains/login/login.crypto";
 import { recortar } from "../src/lib/texto";
 
 const fuentes = import.meta.glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
-/** Los dominios del negocio, que tienen su `validar` en la Main; los de la base central, no. */
+/** Los dominios del negocio, los que tienen su espejo en la Main; los de la base central, no. */
 const DOMINIOS = [
 	"clientes", "configuracion", "cuentas", "inventario", "login", "mesas", "notificaciones",
-	"proveedores", "reservas", "reservas_web", "tareas", "trabajadores", "venta_rapida",
+	"proveedores", "reservas", "reservas_web", "stats", "tareas", "trabajadores", "venta_rapida",
 ];
 
 const vigilados = Object.keys(fuentes).filter(
 	(ruta) =>
-		DOMINIOS.some((d) => new RegExp(`/domains/${d}/[^/]+\\.(schemas|commands|routes)\\.ts$`).test(ruta)) ||
+		DOMINIOS.some((d) => new RegExp(`/domains/${d}/[^/]+\\.ts$`).test(ruta)) ||
 		/\/lib\/(fechas|pago)\.ts$/.test(ruta),
 );
 
 describe("las entradas del negocio se recortan como en la Main", () => {
 	it("encuentra los ficheros que vigila", () => {
-		expect(vigilados.length).toBeGreaterThan(30);
+		expect(vigilados.length).toBeGreaterThan(50);
 	});
 
 	it("ninguno usa el .trim() de JavaScript", () => {
@@ -47,5 +48,10 @@ describe("las entradas del negocio se recortan como en la Main", () => {
 		expect(recortar(` ${largo} `)).toBe(largo);
 		// Con /\p{White_Space}+$/ eran segundos; recorriendo desde los extremos, milisegundos.
 		expect(Date.now() - desde).toBeLessThan(1000);
+	});
+
+	it("el PIN se recorta como en la Main: U+0085 sobra y U+FEFF forma parte de él", async () => {
+		await expect(verifyPin("\u00851234\u0085", await hashPin("1234"))).resolves.toBeUndefined();
+		await expect(verifyPin("1234", await hashPin("\ufeff1234"))).rejects.toThrow("PIN incorrecto");
 	});
 });

@@ -20,6 +20,7 @@
 //     quien la hace cumplir es esto.
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 
 import type { Env } from "../../env";
 import { hmacSha256Hex } from "../../server/utils/hmac";
@@ -62,13 +63,13 @@ export function fallo(
 async function huella(env: Env, k: EmailCodeKey, sujeto: string, codigo: string): Promise<string> {
 	return hmacSha256Hex(
 		env.LICENSE_JWT_SECRET,
-		[k.purpose, k.tenantId, k.deviceId, sujeto, codigo.trim()].join("\n"),
+		[k.purpose, k.tenantId, k.deviceId, sujeto, recortar(codigo)].join("\n"),
 	);
 }
 
 function sinSecreto(env: Env): RespuestaCodigo | null {
 	// Con la clave vacía el HMAC se calcularía igual y cuadraría: fallar cerrado.
-	if (String(env.LICENSE_JWT_SECRET ?? "").trim()) return null;
+	if (recortar(String(env.LICENSE_JWT_SECRET ?? ""))) return null;
 	return fallo(500, "missing_env_LICENSE_JWT_SECRET", "Error de configuración del servidor.", "internal");
 }
 
@@ -162,7 +163,7 @@ export async function comprobarCodigo(
 	const mal = sinSecreto(env);
 	if (mal) return { ok: false, respuesta: mal };
 
-	const codigo = codigoEscrito.trim();
+	const codigo = recortar(codigoEscrito);
 	if (!/^\d{6}$/.test(codigo)) {
 		return { ok: false, respuesta: fallo(400, "invalid_code", "El código son 6 cifras.") };
 	}

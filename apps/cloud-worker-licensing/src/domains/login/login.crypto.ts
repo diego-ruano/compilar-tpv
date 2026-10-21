@@ -1,6 +1,7 @@
 // src/domains/login/login.crypto.ts
 
 import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
+import { recortar } from "../../lib/texto";
 
 const PREFIX = "$pbkdf2-sha256$";
 // Iteraciones para hashes NUEVOS. Espejo de `PBKDF2_ITERS` en crates/tpv-domain/src/login.rs.
@@ -42,7 +43,7 @@ async function derive(pin: string, salt: Uint8Array, iters: number, len: number)
 function parse(hash: string): { iters: number; salt: Uint8Array; dk: Uint8Array } {
 	// RI-37: el hash replicado no puede decidir un coste ni una reserva arbitrarios.
 	if (hash.length > 128) throw new Error("Hash almacenado mal formado");
-	const h = hash.trim();
+	const h = recortar(hash);
 	if (h.startsWith("$argon2") || h.startsWith("argon2")) {
 		throw new Error("HASH_ARGON2_NO_SOPORTADO: rehash Password_Hash a pbkdf2-sha256");
 	}
@@ -58,7 +59,7 @@ function parse(hash: string): { iters: number; salt: Uint8Array; dk: Uint8Array 
 }
 
 export async function verifyPin(pin: string, storedHash: string): Promise<void> {
-	const p = pin.trim();
+	const p = recortar(pin);
 	if (p.length < 4) throw new Error("PIN incorrecto");
 	const parsed = parse(storedHash);
 	const actual = await derive(p, parsed.salt, parsed.iters, parsed.dk.length);
@@ -66,7 +67,7 @@ export async function verifyPin(pin: string, storedHash: string): Promise<void> 
 }
 
 export async function hashPin(pin: string): Promise<string> {
-	const p = pin.trim();
+	const p = recortar(pin);
 	if (p.length < 4) throw new Error("PIN demasiado corto");
 	const salt = crypto.getRandomValues(new Uint8Array(SALT_LEN));
 	const dk = await derive(p, salt, DEFAULT_ITERS, DK_LEN);

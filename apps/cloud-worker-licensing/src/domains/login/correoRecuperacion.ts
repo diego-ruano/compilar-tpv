@@ -21,6 +21,7 @@
 //     conoce las sesiones. Por eso lo que de verdad cuenta aquí es el código y el aviso.
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 
 import type { Env } from "../../env";
 import {
@@ -54,11 +55,11 @@ export type ContextoCorreo = {
 /** A dónde van los códigos de recuperación de esta licencia ahora mismo. */
 export async function correoDeRecuperacion(db: Client, lic: LicenseRow): Promise<string> {
 	const propio = lic.tenant_id ? await getTenantRecoveryEmail(db, lic.tenant_id) : null;
-	return (propio ?? lic.customer_email ?? "").trim();
+	return recortar(propio ?? lic.customer_email ?? "");
 }
 
 function normalizar(correo: unknown): string {
-	return String(correo ?? "").trim().toLowerCase();
+	return recortar(String(correo ?? "")).toLowerCase();
 }
 
 function pareceCorreo(correo: string): boolean {
@@ -90,7 +91,7 @@ async function licenciaDelTenant(
 
 async function estado(db: Client, lic: LicenseRow): Promise<RespuestaCodigo> {
 	const propio = lic.tenant_id ? await getTenantRecoveryEmail(db, lic.tenant_id) : null;
-	const correo = (propio ?? lic.customer_email ?? "").trim();
+	const correo = recortar(propio ?? lic.customer_email ?? "");
 	return {
 		status: 200,
 		body: { ok: true, emailHint: emailHint(correo), esElDeLaCompra: !propio },

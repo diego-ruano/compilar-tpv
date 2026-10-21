@@ -1,6 +1,7 @@
 // src/domains/venta_rapida/venta_rapida.queries.ts
 
 import { nuevoId } from "../../lib/ids";
+import { recortar } from "../../lib/texto";
 import { planConsumo, type PlanConsumo } from "../inventario/consumo";
 import type { Client } from "@libsql/client/web";
 
@@ -101,7 +102,7 @@ export async function searchProductos(
 	query: string,
 	limit: number,
 ): Promise<ProductoRow[]> {
-	if (!query.trim()) return [];
+	if (!recortar(query)) return [];
 	const rs = await db.execute({
 		sql: productosSql("p.Nombre LIKE ?1", "LIMIT ?2"),
 		args: [`%${query}%`, limit],
@@ -136,7 +137,7 @@ export async function resolveTrabajadorId(
 	db: Client,
 	idMaybe: string | null,
 ): Promise<string | null> {
-	if (!idMaybe || !idMaybe.trim()) return null;
+	if (!idMaybe || !recortar(idMaybe)) return null;
 	const rs = await db.execute({
 		sql: `
 			SELECT COALESCE(
@@ -146,7 +147,7 @@ export async function resolveTrabajadorId(
 		`,
 		args: [idMaybe],
 	});
-	const id = String(rows(rs)[0]?.id ?? "").trim();
+	const id = recortar(String(rows(rs)[0]?.id ?? ""));
 	return id ? id : null;
 }
 
@@ -368,7 +369,7 @@ export async function cobrarPlan(
 		sql: "SELECT ID_Trabajador AS id FROM Comandas WHERE ID_Comanda = ?1 LIMIT 1;",
 		args: [input.id_comanda],
 	});
-	const idTrabComanda = String(rows(comandaRs)[0]?.id ?? "").trim() || null;
+	const idTrabComanda = recortar(String(rows(comandaRs)[0]?.id ?? "")) || null;
 
 	return {
 		ok: true,

@@ -1,6 +1,7 @@
 // src/domains/mesas/mesas.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 import type { Dinero } from "@tpv/contracts";
 import { deLaBase } from "../../lib/dinero";
 import { planConsumo, type PlanConsumo } from "../inventario/consumo";
@@ -50,7 +51,7 @@ export async function resolveTrabajadorId(
 	db: Client,
 	idMaybe: string | null,
 ): Promise<string | null> {
-	if (!idMaybe || !idMaybe.trim()) return null;
+	if (!idMaybe || !recortar(idMaybe)) return null;
 	const rs = await db.execute({
 		sql: `
 			SELECT COALESCE(
@@ -60,7 +61,7 @@ export async function resolveTrabajadorId(
 		`,
 		args: [idMaybe],
 	});
-	const id = String(rows(rs)[0]?.id ?? "").trim();
+	const id = recortar(String(rows(rs)[0]?.id ?? ""));
 	return id ? id : null;
 }
 
@@ -90,8 +91,8 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 
 	const byZona = new Map<string, any[]>();
 	for (const m of rows(mesasRs)) {
-		const idZona = String(m.ID_Zona ?? "").trim();
-		const idMesa = String(m.ID_Mesa ?? "").trim();
+		const idZona = recortar(String(m.ID_Zona ?? ""));
+		const idMesa = recortar(String(m.ID_Mesa ?? ""));
 		if (!idZona || !idMesa) continue;
 		const list = byZona.get(idZona) ?? [];
 		list.push({
@@ -109,7 +110,7 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 	}
 
 	return rows(zonasRs).map((z) => {
-		const idZona = String(z.ID_Zona ?? "").trim();
+		const idZona = recortar(String(z.ID_Zona ?? ""));
 		return {
 			id: `db-zona-${idZona}`,
 			name: String(z.Nombre_Zona ?? `Zona ${idZona}`),
@@ -144,8 +145,8 @@ export async function readComanda(
 }
 
 function stripMesaPrefix(id: string): string {
-	const s = String(id || "").trim();
-	return s.startsWith("db-mesa-") ? s.slice("db-mesa-".length).trim() : s;
+	const s = recortar(String(id || ""));
+	return s.startsWith("db-mesa-") ? recortar(s.slice("db-mesa-".length)) : s;
 }
 
 export async function comandaAbiertaByMesa(
@@ -164,7 +165,7 @@ export async function comandaAbiertaByMesa(
 		`,
 		args: [bareId],
 	});
-	const id = String(rows(rs)[0]?.id ?? "").trim();
+	const id = recortar(String(rows(rs)[0]?.id ?? ""));
 	return id ? readComanda(db, id) : null;
 }
 
@@ -357,7 +358,7 @@ export async function searchProductos(
 	db: Client,
 	query: string,
 ): Promise<ProductoVendibleOut[]> {
-	if (!query.trim()) return [];
+	if (!recortar(query)) return [];
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -434,7 +435,7 @@ export async function idComandaByDetalle(
 		`,
 		args: [idDetalle],
 	});
-	const id = String(rows(rs)[0]?.id ?? "").trim();
+	const id = recortar(String(rows(rs)[0]?.id ?? ""));
 	return id ? id : null;
 }
 

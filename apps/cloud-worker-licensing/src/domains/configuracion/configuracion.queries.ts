@@ -1,6 +1,7 @@
 // src/domains/configuracion/configuracion.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 import { deLaBase } from "../../lib/dinero";
 
 import type { BusinessSettings, ContactSettings, TicketSettings } from "@tpv/contracts";
@@ -21,7 +22,7 @@ function bool(v: any, fallback = true): boolean {
 	if (v == null) return fallback;
 	if (typeof v === "boolean") return v;
 	if (typeof v === "number") return v !== 0;
-	const s = String(v).trim().toLowerCase();
+	const s = recortar(String(v)).toLowerCase();
 	if (["1", "true", "yes", "si", "sí"].includes(s)) return true;
 	if (["0", "false", "no"].includes(s)) return false;
 	return fallback;

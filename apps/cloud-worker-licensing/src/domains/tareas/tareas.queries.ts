@@ -4,6 +4,7 @@
 // en PascalCase para encajar con los DTOs generados de @tpv/contracts.
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 
 import type {
 	MisTareasRow,
@@ -30,7 +31,7 @@ function rows(rs: any): any[] {
 // ya normalizado (limpio y sin duplicados).
 export async function trabajadoresExisten(db: Client, idsRaw: string[]): Promise<boolean> {
 	const ids = Array.from(
-		new Set((idsRaw ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0)),
+		new Set((idsRaw ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0)),
 	);
 	if (ids.length === 0) return true;
 	const placeholders = ids.map((_, i) => `?${i + 1}`).join(", ");

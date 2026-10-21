@@ -9,6 +9,7 @@
 // identificador interno.
 
 import type { Sql } from "../../server/db";
+import { recortar } from "../../lib/texto";
 
 /** `rw_` y 128 bits aleatorios en base64url: no se adivina ni se recorre. */
 export function generarClave(): string {
@@ -129,7 +130,7 @@ export async function revocarClave(db: Sql, tenantId: string, ahoraMs: number): 
 export function normalizarOrigen(raw: string): string | null {
 	let url: URL;
 	try {
-		url = new URL(raw.trim());
+		url = new URL(recortar(raw));
 	} catch {
 		return null;
 	}

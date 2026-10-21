@@ -1,6 +1,7 @@
 // src/domains/stats/stats.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 import { CERO, deLaBase, entre } from "../../lib/dinero";
 
 import type {
@@ -250,9 +251,9 @@ export async function productos(
 		ORDER BY value ASC, pr.Nombre ASC
 		LIMIT ${limite};`;
 
-	const topFilter = categoriaTopId && categoriaTopId.trim() ? "AND pr.ID_Categoria = ?1" : "";
+	const topFilter = categoriaTopId && recortar(categoriaTopId) ? "AND pr.ID_Categoria = ?1" : "";
 	const worstFilter =
-		categoriaWorstId && categoriaWorstId.trim() ? "AND pr.ID_Categoria = ?1" : "";
+		categoriaWorstId && recortar(categoriaWorstId) ? "AND pr.ID_Categoria = ?1" : "";
 
 	const best = await one(db, vendidoSql("", "DESC", 1));
 	const worst = await one(db, noVendidoSql("", 1));
@@ -456,8 +457,8 @@ export async function trabajadores(
 	`);
 	const base = rows(baseRs)
 		.map((r) => {
-			const nombre = String(r.nombre ?? "").trim();
-			const apellido = String(r.apellido ?? "").trim();
+			const nombre = recortar(String(r.nombre ?? ""));
+			const apellido = recortar(String(r.apellido ?? ""));
 			return {
 				id_trabajador: String(r.id_trabajador ?? ""),
 				id_usuario: String(r.id_usuario ?? ""),

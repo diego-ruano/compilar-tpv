@@ -80,8 +80,8 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
 - **Un texto que llega se recorta con `recortar`** (`lib/texto.ts`; en un schema,
   `.overwrite(recortar)`), que quita lo mismo que `str::trim` en la Main: lo que Unicode marca como
   espacio. El `.trim()` de JavaScript quita además U+FEFF y deja U+0085, y un texto valía en un lado y
-  no en el otro (VALID-01). `test/recortarComoLaMain.test.ts` lo vigila en los schemas, comandos y
-  rutas de los dominios del negocio.
+  no en el otro (VALID-01). `test/recortarComoLaMain.test.ts` lo vigila en todos los ficheros de los
+  dominios del negocio.
 - **Una fecha que llega como texto se valida con `lib/fechas.ts`** (`zDia`, `normalizarDia`,
   `esFechaYmd`; espejo de `tpv_domain::fechas`): forma `YYYY-MM-DD` y día real de calendario. Una
   expresión regular deja pasar un 31 de febrero, y un `throw` dentro de un `transform` de zod no sale

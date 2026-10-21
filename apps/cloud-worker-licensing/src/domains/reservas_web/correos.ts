@@ -17,6 +17,7 @@
 //     central no se sabe si salió, así que no se envía: es un fallo, y quien puede lo repite.
 
 import * as z from "zod";
+import { recortar } from "../../lib/texto";
 import type { Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
@@ -67,7 +68,7 @@ export async function negocioDelCorreo(db: Client): Promise<NegocioDelCorreo> {
 		FROM Business_Settings b LEFT JOIN Contact_Settings c ON c.ID = 1 WHERE b.ID = 1;
 	`);
 	const r: any = rs.rows?.[0] ?? {};
-	const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+	const s = (v: unknown) => (typeof v === "string" ? recortar(v) : "");
 	const correo = s(r.correo);
 	return {
 		nombre: s(r.nombre),
@@ -97,9 +98,9 @@ export async function enviarCorreoReservaWeb(env: Env, correo: Correo): Promise<
 }
 
 async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
-	const para = correo.para.trim().toLowerCase();
+	const para = recortar(correo.para).toLowerCase();
 	const db = getDb(env);
-	const remitente = String(env.EMAIL_RESERVAS_FROM_ADDRESS || "").trim();
+	const remitente = recortar(String(env.EMAIL_RESERVAS_FROM_ADDRESS || ""));
 	if (!remitente) {
 		capturarError(new Error("missing_env_EMAIL_RESERVAS_FROM_ADDRESS"), "reservas_web.correo");
 		return "fallido";
@@ -133,7 +134,7 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 
 /** El nombre del negocio como remitente: una línea, sin lo que rompería la cabecera. */
 function nombreDelRemitente(nombre: string): string {
-	const limpio = nombre.replace(/[\r\n"<>]/g, " ").trim().slice(0, 100);
+	const limpio = recortar(nombre.replace(/[\r\n"<>]/g, " ")).slice(0, 100);
 	return limpio || "Reservas";
 }
 

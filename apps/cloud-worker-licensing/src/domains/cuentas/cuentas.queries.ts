@@ -1,6 +1,7 @@
 // src/domains/cuentas/cuentas.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 import { deLaBase } from "../../lib/dinero";
 
 import type {
@@ -83,8 +84,8 @@ function applyFilters(
 	pageSize: number | null,
 ): { qClause: string; limitClause: string } {
 	let qClause = "";
-	if (q && q.trim()) {
-		args.push(q.trim());
+	if (q && recortar(q)) {
+		args.push(recortar(q));
 		qClause = `WHERE ${expr} LIKE '%' || lower(?${args.length}) || '%'`;
 	}
 	let limitClause = "";

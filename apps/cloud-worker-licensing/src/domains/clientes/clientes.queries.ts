@@ -1,6 +1,7 @@
 // src/domains/clientes/clientes.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { recortar } from "../../lib/texto";
 
 import type { ClienteForm, ClienteOverview } from "@tpv/contracts";
 
@@ -79,11 +80,11 @@ export async function overview(
 ): Promise<ClienteOverview[]> {
 	const base = overviewBase();
 	const sql =
-		ranking.trim() === "reservas"
+		recortar(ranking) === "reservas"
 			? `${base}
 				ORDER BY total_reservas DESC, total_gastado_stored DESC, c.ID_Cliente DESC
 				LIMIT 10;`
-			: ranking.trim() === "gasto"
+			: recortar(ranking) === "gasto"
 				? `${base}
 					ORDER BY total_gastado_stored DESC, total_reservas DESC, c.ID_Cliente DESC
 					LIMIT 10;`
