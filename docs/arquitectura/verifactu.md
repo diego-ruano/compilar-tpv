@@ -3,7 +3,9 @@
 Cada cobro expide una **factura** y produce un **registro de facturación** encadenado que se remite a
 la AEAT. Es la obligación del RD 1007/2023 (RRSIF) y de la Orden HAC/1177/2024, exigible desde el
 **1 de enero de 2027** a los contribuyentes del Impuesto sobre Sociedades y desde el 1 de julio de
-2027 al resto.
+2027 al resto (Real Decreto-ley 15/2025). Hacienda anunció el 5 de octubre de 2026 que lo aplazará
+hasta octubre de 2028; mientras no esté en el BOE valen esas fechas
+([pendientes.md](../pendientes.md#quitar-el-modo-prueba)).
 
 El TPV opera en modalidad **VERI\*FACTU** y sólo en ella (`TipoUsoPosibleSoloVerifactu = "S"`):
 remite todos los registros. Por eso no firma los registros (la firma XAdES es de la modalidad no
@@ -523,8 +525,8 @@ texto actual es un borrador.
 
 ## Modo prueba (temporal)
 
-Etiqueta `MODO-PRUEBA` en el código (`git grep -n MODO-PRUEBA`). Se quita entero antes del 1 de enero
-de 2027 ([pendientes.md](../pendientes.md#verifactu)).
+Etiqueta `MODO-PRUEBA` en el código (`git grep -n MODO-PRUEBA`). Se quita entero antes de que
+Veri\*factu sea obligatorio; la fecha está en [pendientes.md](../pendientes.md#quitar-el-modo-prueba).
 
 - `Business_Settings.Modo_Prueba = 1` (Configuración → Fiscal, Administrador).
 - Los cobros numeran en la serie `PRUEBA`, que se fija **antes** de reservar el número

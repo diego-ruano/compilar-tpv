@@ -10,7 +10,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 |---|---|---|---|
 | [VF-PRODUCTOR](#identidad-del-productor) | 🔴 | Identidad del productor del software | Aplazado a propósito; bloquea la remisión |
 | [VF-DECLARACION](#texto-de-la-declaración-responsable) | 🔴 | Texto definitivo de la declaración responsable | Borrador |
-| [VF-MODO-PRUEBA](#quitar-el-modo-prueba) | 🔴 | Quitar el modo prueba antes del 1-1-2027 | Sin empezar |
+| [VF-MODO-PRUEBA](#quitar-el-modo-prueba) | 🔴 | Quitar el modo prueba antes de octubre de 2028 (anunciado, aún sin BOE) | Sin empezar |
 | [LEGAL-01](#legal-01--rgpd) | 🟠 | Papeleo RGPD de encargado del tratamiento | Sin empezar |
 | [LEGAL-02](#legal-02--reglamento-de-ciberresiliencia) | 🟠 | Reglamento de Ciberresiliencia | Sin empezar |
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
@@ -68,8 +68,17 @@ que `PRODUCTOR_NIF` exista, la pantalla dice que la declaración está incomplet
 ### Quitar el modo prueba
 
 Todo lo que hay que borrar lleva la etiqueta `MODO-PRUEBA` (`git grep -n MODO-PRUEBA`), más la columna
-`Business_Settings.Modo_Prueba`, que para entonces irá en una migración nueva. **Antes del 1 de enero
-de 2027**: un interruptor que deja de declarar ventas no puede existir en un TPV que se venda.
+`Business_Settings.Modo_Prueba`, que para entonces irá en una migración nueva. **Antes de octubre de
+2028**: un interruptor que deja de declarar ventas no puede existir en un TPV que se venda.
+
+Esa fecha la anunció Hacienda el 5 de octubre de 2026
+([nota informativa](https://www.hacienda.gob.es/sgt/gabsehacienda/nota-informativa-verifactu.pdf)):
+aplazar Veri\*factu hasta octubre de 2028 para que coincida con la factura electrónica obligatoria
+de quien factura hasta 8 millones al año. **Todavía no está en el BOE.** Hasta que salga, lo vigente
+es el Real Decreto-ley 15/2025: 1 de enero de 2027 para los contribuyentes del Impuesto sobre
+Sociedades y 1 de julio de 2027 para el resto
+([AEAT](https://sede.agenciatributaria.gob.es/Sede/iva/sistemas-informaticos-facturacion-verifactu/nota-informativa-ampliacion-plazo-adaptacion-facturacion.html)).
+Si al acercarse el 1 de enero de 2027 no se ha publicado, la fecha que vale es esa.
 
 ---
 
