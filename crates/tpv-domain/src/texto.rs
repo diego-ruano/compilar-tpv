@@ -1,7 +1,11 @@
 //! Normalización compartida de texto e identificadores (RI-48).
-pub fn requerido(input: &str, field: &str) -> Result<String, String> {
+
+/// Recorta y exige que quede algo. Si no, el error es `mensaje`, que se le enseña a quien está
+/// delante: una frase que dice qué falta («Escribe el nombre del producto.»), no el nombre del
+/// campo (VALID-03).
+pub fn requerido(input: &str, mensaje: &str) -> Result<String, String> {
     let out = input.trim().to_string();
-    if out.is_empty() { return Err(format!("{field} required")); }
+    if out.is_empty() { return Err(mensaje.to_string()); }
     Ok(out)
 }
 pub fn limpiar_opcional(input: Option<String>) -> Option<String> {

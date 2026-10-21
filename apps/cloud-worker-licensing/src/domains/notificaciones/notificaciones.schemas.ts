@@ -17,9 +17,9 @@ const optStr = z.string().nullish().transform((v) => {
 
 export const crearNotificacionSchema = z
 	.object({
-		tipo: z.string().overwrite(recortar).min(1, "tipo required"),
+		tipo: z.string().overwrite(recortar).min(1, "Falta el tipo de aviso."),
 		severidad: z.string().overwrite(recortar).optional(),
-		titulo: z.string().overwrite(recortar).min(1, "titulo required"),
+		titulo: z.string().overwrite(recortar).min(1, "Escribe el título del aviso."),
 		cuerpo: optStr,
 		destino_tipo: z.enum(["todos", "usuario", "rol"]),
 		destino_valor: optStr,
@@ -29,7 +29,7 @@ export const crearNotificacionSchema = z
 		expira_en: optStr,
 	})
 	.refine((d) => d.destino_tipo === "todos" || !!d.destino_valor, {
-		message: "destino_valor requerido para usuario/rol",
+		message: "Elige a quién va el aviso.",
 		path: ["destino_valor"],
 	});
 

@@ -50,7 +50,7 @@ function mensajePorDefecto(issue: Parameters<NonNullable<z.core.$ZodConfig["loca
  * mensaje al `error` de la llamada sólo cuando el issue no trae el suyo, así que lo que pase por ahí
  * es lo que no cuenta; se le devuelve el mismo texto que habría puesto, y los `issues` no cambian.
  */
-async function validarConMensaje(schema: z.ZodType, valor: unknown) {
+export async function validarConMensaje(schema: z.ZodType, valor: unknown) {
 	const porDefecto = new Set<string>();
 	const r = await schema.safeParseAsync(valor, {
 		error: (issue) => {

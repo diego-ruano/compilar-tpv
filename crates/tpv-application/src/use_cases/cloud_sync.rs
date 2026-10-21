@@ -6,10 +6,10 @@ use tpv_contracts::licensing::UploadInitialSetupArgs;
 use crate::error::{AppError, AppResult};
 use crate::ports::cloud_sync::CloudSyncService;
 
-fn requerido(input: &str, field: &str) -> AppResult<String> {
+fn requerido(input: &str, mensaje: &str) -> AppResult<String> {
     let out = input.trim().to_string();
     if out.is_empty() {
-        return Err(AppError::validation(format!("{field} required")));
+        return Err(AppError::validation(mensaje));
     }
     Ok(out)
 }
@@ -19,9 +19,9 @@ pub async fn upload_initial_setup(
     svc: &dyn CloudSyncService,
     args: UploadInitialSetupArgs,
 ) -> AppResult<()> {
-    let id_usuario = requerido(&args.id_usuario, "id_usuario")?;
-    let email = requerido(&args.email, "email")?;
-    let pin = requerido(&args.pin, "pin")?;
+    let id_usuario = requerido(&args.id_usuario, "Falta el usuario.")?;
+    let email = requerido(&args.email, "Escribe el correo.")?;
+    let pin = requerido(&args.pin, "Escribe el PIN.")?;
     if pin.len() < 4 {
         return Err(AppError::validation("PIN demasiado corto"));
     }
@@ -43,8 +43,8 @@ mod tests {
     }
 
     #[test]
-    fn requerido_identifica_el_campo_que_falla() {
-        let error = requerido("\t\n", "email").unwrap_err().to_string();
-        assert!(error.contains("email required"));
+    fn requerido_dice_que_falta() {
+        let error = requerido("\t\n", "Escribe el correo.").unwrap_err().to_string();
+        assert_eq!(error, "Escribe el correo.");
     }
 }

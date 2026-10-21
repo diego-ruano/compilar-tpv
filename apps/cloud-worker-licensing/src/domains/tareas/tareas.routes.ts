@@ -39,7 +39,7 @@ tareasRoutes.get("/papelera", async (c) =>
 
 tareasRoutes.get("/mias", async (c) => {
 	const idTrabajador = parseId(c.req.query("trabajador"));
-	if (idTrabajador == null) return badRequest(c, "id_trabajador invalido");
+	if (idTrabajador == null) return badRequest(c, "id_trabajador_invalido");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.getMisTareas(db, idTrabajador),
@@ -49,7 +49,7 @@ tareasRoutes.get("/mias", async (c) => {
 
 tareasRoutes.get("/:id/asignados", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_tarea invalido");
+	if (id == null) return badRequest(c, "id_tarea_invalido");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.getTareaAsignados(db, id),
@@ -59,7 +59,7 @@ tareasRoutes.get("/:id/asignados", async (c) => {
 
 tareasRoutes.get("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_tarea invalido");
+	if (id == null) return badRequest(c, "id_tarea_invalido");
 	return c.json(await tenantQuery(c, (db) => q.getTareaById(db, id)));
 });
 
@@ -78,7 +78,7 @@ tareasRoutes.post("/", cuerpo(S.createTareaSchema), async (c) => {
 
 tareasRoutes.put("/:id", cuerpo(S.updateTareaSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_tarea invalido");
+	if (id == null) return badRequest(c, "id_tarea_invalido");
 	const datos = c.req.valid("json");
 	await apply(c, cmd.updateTarea(id, datos));
 	return c.json({ ok: true });
@@ -86,7 +86,7 @@ tareasRoutes.put("/:id", cuerpo(S.updateTareaSchema), async (c) => {
 
 tareasRoutes.put("/:id/asignaciones", cuerpo(S.setAsignacionesTareaSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_tarea invalido");
+	if (id == null) return badRequest(c, "id_tarea_invalido");
 	const datos = c.req.valid("json");
 	// TAR-03: validar que los trabajadores asignados existen antes de aplicar.
 	const okTrab = await tenantQuery(c, (db) =>
@@ -99,7 +99,7 @@ tareasRoutes.put("/:id/asignaciones", cuerpo(S.setAsignacionesTareaSchema), asyn
 
 tareasRoutes.post("/:id/restaurar", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_tarea invalido");
+	if (id == null) return badRequest(c, "id_tarea_invalido");
 	await apply(c, cmd.restaurarTarea(id));
 	return c.json({ ok: true });
 });
@@ -111,14 +111,14 @@ tareasRoutes.delete("/papelera", async (c) => {
 
 tareasRoutes.delete("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_tarea invalido");
+	if (id == null) return badRequest(c, "id_tarea_invalido");
 	await apply(c, cmd.deleteTarea(id));
 	return c.json({ ok: true });
 });
 
 tareasRoutes.post("/:id/finalizar", cuerpo(S.finalizarTareaSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_tarea invalido");
+	if (id == null) return badRequest(c, "id_tarea_invalido");
 	const datos = c.req.valid("json");
 	await apply(c, cmd.marcarFinalizada(id, datos));
 	return c.json({ ok: true });

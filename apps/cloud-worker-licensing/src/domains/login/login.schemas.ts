@@ -22,7 +22,7 @@ function cleanOptional(v: unknown): string | null {
 
 export const loginUserSchema = z.object({
 	id_usuario: idStr,
-	pin: z.string().overwrite(recortar).min(1, "pin required"),
+	pin: z.string().overwrite(recortar).min(1, "Escribe el PIN."),
 });
 
 export const setTurnoPartidoSchema = z.object({
@@ -36,7 +36,7 @@ export const setTurnoPartidoSchema = z.object({
 // device-proof + el chequeo de rol). El `pin` viaja para hashearlo aquí (como complete-setup).
 export const syncInitialSetupSchema = z.object({
 	id_usuario: idStr,
-	email: z.string().overwrite(recortar).email("email invalid"),
+	email: z.string().overwrite(recortar).email("El correo no es válido."),
 	pin: z.string().overwrite(recortar).min(4, "PIN demasiado corto"),
 });
 
@@ -49,17 +49,17 @@ export const solicitarCodigoPinSchema = z.object({
 
 export const verificarCodigoPinSchema = z.object({
 	id_usuario: idStr,
-	codigo: z.string().overwrite(recortar).min(1, "codigo required"),
+	codigo: z.string().overwrite(recortar).min(1, "El código son 6 cifras."),
 });
 
 // LOGIN-08: el correo de recuperación. Aquí sólo que llegue algo; la forma del correo la valida
 // `correoRecuperacion.ts`, con un mensaje que se pueda enseñar.
 export const solicitarCambioCorreoSchema = z.object({
-	correo: z.string().overwrite(recortar).min(1, "correo required"),
+	correo: z.string().overwrite(recortar).min(1, "Escribe el correo."),
 });
 
 export const confirmarCambioCorreoSchema = z.object({
-	codigo: z.string().overwrite(recortar).min(1, "codigo required"),
+	codigo: z.string().overwrite(recortar).min(1, "El código son 6 cifras."),
 });
 
 // El fichaje no lleva fecha ni hora: las pone el equipo que ficha (TRAB-02, con CFG-04/REV-03).
@@ -67,7 +67,7 @@ export const confirmarCambioCorreoSchema = z.object({
 // rompe contra esto: el schema no es `strict`, así que zod las descarta sin quejarse.
 export const punchSchema = z.object({
 	id_usuario: idStr,
-	pin: z.string().overwrite(recortar).min(1, "pin required"),
+	pin: z.string().overwrite(recortar).min(1, "Escribe el PIN."),
 	tipo: z.enum(["entrada", "salida"]),
 });
 

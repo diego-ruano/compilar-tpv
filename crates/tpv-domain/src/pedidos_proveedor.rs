@@ -23,14 +23,14 @@ impl LineaPedidoNueva {
     ) -> Result<Self, String> {
         let nombre = nombre_producto.trim().to_string();
         if nombre.is_empty() {
-            return Err("nombre_producto required".into());
+            return Err("Escribe el nombre del producto.".into());
         }
         if !cantidad.is_finite() || cantidad < 0.0 {
             return Err("cantidad inválida".into());
         }
         if let Some(p) = precio_unitario {
             if p.es_negativo() {
-                return Err("precio_unitario inválido".into());
+                return Err("El precio no puede ser negativo.".into());
             }
         }
         Ok(Self {
@@ -60,7 +60,7 @@ impl PedidoProveedorNuevo {
     ) -> Result<Self, String> {
         let id = id_pedido.trim().to_string();
         if id.is_empty() {
-            return Err("id_pedido required".into());
+            return Err("Falta el pedido.".into());
         }
         Ok(Self {
             id_pedido: id,

@@ -39,14 +39,14 @@ export const createClienteSchema = z.object({
 	// ID autogenerado por el backend: el cliente HTTP lo envía como `null` cuando no lo
 	// conoce. Lo aceptamos y lo normalizamos a `undefined` (compat con @tpv/contracts).
 	id_cliente: idStr.nullish().transform((v) => (v == null ? undefined : v)),
-	nombre: z.string().overwrite(recortar).min(1, "nombre required"),
+	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre del cliente."),
 	email: optEmail,
 	telefono: optStr,
 	notas: optStr,
 });
 
 export const updateClienteSchema = z.object({
-	nombre: z.string().overwrite(recortar).min(1, "nombre required"),
+	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre del cliente."),
 	email: optEmail,
 	telefono: optStr,
 	notas: optStr,

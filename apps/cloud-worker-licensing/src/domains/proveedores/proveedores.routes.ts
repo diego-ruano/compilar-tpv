@@ -33,7 +33,7 @@ proveedoresRoutes.get("/productos", async (c) =>
 
 proveedoresRoutes.get("/:id/productos", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_proveedor invalido");
+	if (id == null) return badRequest(c, "id_proveedor_invalido");
 	return c.json(
 		await tenantQuery(c, (db) => q.getProductos(db, id)),
 	);
@@ -47,14 +47,14 @@ proveedoresRoutes.post("/", cuerpo(S.proveedorSaveSchema), async (c) => {
 
 proveedoresRoutes.delete("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_proveedor invalido");
+	if (id == null) return badRequest(c, "id_proveedor_invalido");
 	await apply(c, cmd.eliminarProveedor(id));
 	return c.json({ ok: true });
 });
 
 proveedoresRoutes.put("/:id/vinculos", cuerpo(S.setVinculosSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_proveedor invalido");
+	if (id == null) return badRequest(c, "id_proveedor_invalido");
 	const datos = c.req.valid("json");
 	await apply(c, cmd.setVinculos(id, datos));
 	return c.json({ ok: true });

@@ -41,7 +41,7 @@ reservasRoutes.get("/buscar-cliente", consulta(S.buscarClienteSchema), async (c)
 // `/buscar-cliente`, que si no se los comería.
 reservasRoutes.get("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_reserva invalido");
+	if (id == null) return badRequest(c, "id_reserva_invalido");
 	return c.json(await tenantQuery(c, (db) => q.reserva(db, id)));
 });
 
@@ -82,7 +82,7 @@ reservasRoutes.post("/", cuerpo(S.reservaSaveSchema), async (c) => {
 // se replica sólo la sentencia elegida, sin condición.
 reservasRoutes.delete("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_reserva invalido");
+	if (id == null) return badRequest(c, "id_reserva_invalido");
 	// Una reserva web no se borra nunca: se cancela, y se queda.
 	const r = await tenantQuery(c, (db) => q.estadoYOrigen(db, id));
 	if (r?.origen === "WEB") return c.json({ error: "reserva_web_no_se_borra" }, 409);
@@ -95,7 +95,7 @@ reservasRoutes.delete("/:id", async (c) => {
 // (`POST /v1/reservas-web/avisos`), como con cualquier cambio suyo.
 reservasRoutes.post("/:id/cancelar", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_reserva invalido");
+	if (id == null) return badRequest(c, "id_reserva_invalido");
 	const r = await tenantQuery(c, (db) => q.estadoYOrigen(db, id));
 	if (!r) return c.json({ ok: true, cancelada: false });
 	if (r.estado === "CANCELADA") return c.json({ ok: true, cancelada: true });

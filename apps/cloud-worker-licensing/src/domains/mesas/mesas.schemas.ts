@@ -13,8 +13,9 @@ import type {
 	MesasSaveLayoutInput,
 } from "@tpv/contracts";
 
-function idField(field: string) {
-	return z.coerce.string().overwrite(recortar).min(1, `${field} invalido`);
+/** Un id que tiene que venir; si no, `mensaje` (el mismo texto que la Main, VALID-03). */
+function idField(mensaje: string) {
+	return z.coerce.string().overwrite(recortar).min(1, mensaje);
 }
 
 function optIdStr(v: unknown): string | null {
@@ -99,7 +100,7 @@ const MSG_ESTADO_DESDE_LA_MESA = "Desde la mesa sólo se marca que el cliente ha
 // Desde la mesa, sólo llegar (ACTIVA) o irse (FINALIZADA), como `estado_desde_la_mesa` en la Main:
 // cancelar tiene su ruta (`POST /v1/reservas/:id/cancelar`) y «No vino» lo pone el job de la Main.
 export const setReservaEstadoSchema = z.object({
-	id_reserva: idField("id_reserva"),
+	id_reserva: idField("Falta la reserva."),
 	estado: z
 		.string()
 		.transform((s) => recortar(s).toUpperCase())
@@ -108,7 +109,7 @@ export const setReservaEstadoSchema = z.object({
 
 export const abrirComandaSchema = z
 	.object({
-		id_mesa: idField("id_mesa"),
+		id_mesa: idField("Falta la mesa."),
 		id_trabajador: z.any().optional().nullable(),
 		id_usuario: z.any().optional().nullable(),
 		id_reserva: z.any().optional().nullable(),
@@ -122,7 +123,7 @@ export const abrirComandaSchema = z
 
 export const setTrabajadorSchema = z
 	.object({
-		id_comanda: idField("id_comanda"),
+		id_comanda: idField("Falta la comanda."),
 		id_usuario: z.any().optional().nullable(),
 		id_trabajador: z.any().optional().nullable(),
 	})
@@ -134,8 +135,8 @@ export const setTrabajadorSchema = z
 
 export const addLineaSchema = z
 	.object({
-		id_comanda: idField("id_comanda"),
-		id_producto: idField("id_producto"),
+		id_comanda: idField("Falta la comanda."),
+		id_producto: idField("Falta el producto."),
 		cantidad: z.coerce.number().positive(),
 		id_usuario: z.any().optional().nullable(),
 		id_trabajador: z.any().optional().nullable(),
@@ -153,20 +154,20 @@ export const addLineaSchema = z
 	}));
 
 export const removeOneDetalleSchema = z.object({
-	id_comanda: idField("id_comanda"),
-	id_producto: idField("id_producto"),
+	id_comanda: idField("Falta la comanda."),
+	id_producto: idField("Falta el producto."),
 });
 
 export const updateNotaSchema = z
 	.object({
-		id_detalle: idField("id_detalle"),
+		id_detalle: idField("Falta la línea de la comanda."),
 		nota: z.any().optional().nullable(),
 	})
 	.transform((v) => ({ ...v, nota: cleanOrNull(v.nota) }));
 
 export const cobrarDetallesSchema = z
 	.object({
-		id_comanda: idField("id_comanda"),
+		id_comanda: idField("Falta la comanda."),
 		metodo: zMetodoPago,
 		tipo: z.any().optional(),
 		detalle_ids: z.any().optional(),
@@ -183,12 +184,12 @@ export const cobrarDetallesSchema = z
 	}))
 	.refine((v) => v.detalle_ids.length > 0, {
 		path: ["detalle_ids"],
-		message: "detalle_ids required",
+		message: "Elige qué líneas se cobran.",
 	});
 
 export const kitchenStateSchema = z.object({
-	id_detalle: idField("id_detalle"),
-	id_usuario_cocinero: idField("id_usuario_cocinero"),
+	id_detalle: idField("Falta la línea de la comanda."),
+	id_usuario_cocinero: idField("Falta quién cocina la línea."),
 	estado: zEstadoCocina,
 });
 

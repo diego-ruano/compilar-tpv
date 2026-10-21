@@ -28,7 +28,7 @@ clientesRoutes.get("/overview", async (c) => {
 
 clientesRoutes.get("/:id/form", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_cliente invalido");
+	if (id == null) return badRequest(c, "id_cliente_invalido");
 	return c.json(await tenantQuery(c, (db) => q.form(db, id)));
 });
 
@@ -48,7 +48,7 @@ clientesRoutes.post("/", cuerpo(S.createClienteSchema), async (c) => {
 
 clientesRoutes.put("/:id", cuerpo(S.updateClienteSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_cliente invalido");
+	if (id == null) return badRequest(c, "id_cliente_invalido");
 	const datos = c.req.valid("json");
 	if (datos.email) {
 		const dup = await tenantQuery(c, (db) =>

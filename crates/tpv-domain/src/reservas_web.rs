@@ -31,9 +31,8 @@ pub struct CierreValidado {
 
 impl CierreValidado {
     pub fn validar(dia_ymd: &str, motivo: Option<String>) -> Result<Self, String> {
-        let dia_ymd = crate::fechas::normalizar_dia(dia_ymd).ok_or_else(|| {
-            format!("Formato de día inválido: '{}'. Esperado YYYY-MM-DD.", dia_ymd.trim())
-        })?;
+        let dia_ymd =
+            crate::fechas::normalizar_dia(dia_ymd).ok_or_else(|| crate::reservas::MSG_DIA.to_string())?;
         let motivo = crate::texto::limpiar_opcional(motivo);
         if motivo.as_deref().is_some_and(|m| m.chars().count() > MOTIVO_CIERRE_MAX) {
             return Err(format!("El motivo no puede pasar de {MOTIVO_CIERRE_MAX} caracteres"));
@@ -187,9 +186,8 @@ pub fn normalizar_telefono(raw: &str) -> Option<String> {
 
 impl AltaWebValidada {
     pub fn validar(e: AltaWebEntrada) -> Result<Self, String> {
-        let dia_ymd = crate::fechas::normalizar_dia(&e.dia_ymd).ok_or_else(|| {
-            format!("Formato de día inválido: '{}'. Esperado YYYY-MM-DD.", e.dia_ymd.trim())
-        })?;
+        let dia_ymd =
+            crate::fechas::normalizar_dia(&e.dia_ymd).ok_or_else(|| crate::reservas::MSG_DIA.to_string())?;
         let hora = crate::reservas::normalize_hora_hhmm(&e.hora)?;
         if !(1..=PERSONAS_MAX).contains(&e.personas) {
             return Err(format!("El número de personas tiene que estar entre 1 y {PERSONAS_MAX}"));

@@ -129,7 +129,7 @@ pub async fn request_device_change(
 ) -> AppResult<()> {
     let clave = input.activation_key.trim();
     if clave.is_empty() {
-        return Err(AppError::validation("activation_key required"));
+        return Err(AppError::validation("Escribe la clave de activación."));
     }
     svc.solicitar_cambio_dispositivo(clave).await
 }

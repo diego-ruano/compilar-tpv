@@ -287,7 +287,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         let db = self.db.read().await;
 
         if id_trabajador.trim().is_empty() {
-            return Err(AppError::validation("id_trabajador required"));
+            return Err(AppError::validation("Falta el trabajador."));
         }
 
         let mut rows = db
@@ -445,7 +445,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         }
 
         let req_monday = NaiveDate::parse_from_str(&fecha_lunes, "%Y-%m-%d")
-            .map_err(|_| AppError::validation("fecha_lunes invalida (esperado YYYY-MM-DD)"))?;
+            .map_err(|_| AppError::validation(tpv_domain::trabajadores::MSG_SEMANA))?;
 
         let today = Local::now().date_naive();
         let weekday_today = today.weekday().number_from_monday() as i64;
@@ -895,9 +895,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
         // Desplazamiento en días entre la semana origen y la destino.
         let from_d = NaiveDate::parse_from_str(&from_monday, "%Y-%m-%d")
-            .map_err(|_| AppError::validation("from_monday inválido (YYYY-MM-DD)"))?;
+            .map_err(|_| AppError::validation(tpv_domain::trabajadores::MSG_SEMANA_ORIGEN))?;
         let to_d = NaiveDate::parse_from_str(&to_monday, "%Y-%m-%d")
-            .map_err(|_| AppError::validation("to_monday inválido (YYYY-MM-DD)"))?;
+            .map_err(|_| AppError::validation(tpv_domain::trabajadores::MSG_SEMANA_DESTINO))?;
         let shift = (to_d - from_d).num_days();
 
         // Leemos las asignaciones origen en Rust para poder asignar a cada copia un UUIDv7

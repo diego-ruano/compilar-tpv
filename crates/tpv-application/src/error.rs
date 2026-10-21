@@ -452,3 +452,146 @@ mod tests_contrato {
         assert_eq!(vuelta.message, hostil);
     }
 }
+
+#[cfg(test)]
+mod tests_mensajes_en_espanol {
+    //! VALID-03: lo que se le dice a quien está delante cuando un dato no vale es una frase en
+    //! español que dice qué hacer («Escribe el nombre del producto.»), no el nombre de un campo ni
+    //! inglés («nombre required», «id_mesa inválido»). Se lee el fuente del dominio y de los casos
+    //! de uso, que es donde nacen; el espejo del worker es `test/mensajesEnEspanol.test.ts`. Si
+    //! salta, escribe la frase: la misma que da el worker para esa regla.
+    //!
+    //! Dos pasadas. Ningún texto puede estar en inglés ni llevar un campo junto a
+    //! «inválido»/«requerido». Y lo que va donde se escribe un mensaje (`AppError::validation(…)`,
+    //! `Err(…)`, `ok_or(…)`, `requerido(…, "…")`, `MSG_…: &str =`…) no puede llevar ningún nombre con
+    //! guion bajo ni dejar el campo para rellenarlo («{field} required»).
+
+    use std::path::{Path, PathBuf};
+    use std::sync::LazyLock;
+
+    use regex::Regex;
+
+    /// Un texto entre comillas; `(?s)` porque uno largo sigue en la línea siguiente tras un `\`.
+    static LITERAL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?s)"((?:[^"\\]|\\.)*)""#).unwrap());
+    /// Un identificador, solo o con su diagnóstico detrás (`insufficient_stock:12`).
+    static IDENTIFICADOR: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9_]*(?: \(.*\)|:.*)?$").unwrap());
+    static INGLES: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\b(?:required|invalid|missing)\b").unwrap());
+    static INVALIDO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)inv[aá]lid|requerid").unwrap());
+    static CAMPO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]*\b").unwrap());
+    /// Un campo que se rellena al componer el texto: «{field} required».
+    static CAMPO_INTERPOLADO: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\{[^}]*\}\s*(?:inv[aá]lid|requerid|required|invalid)").unwrap());
+    static HUECO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{[^}]*\}").unwrap());
+    /// Una sentencia, que no se le enseña a nadie.
+    static SQL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE)\b").unwrap());
+    /// Lo que precede a un texto que es un mensaje.
+    static POSICION_DE_MENSAJE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(concat!(
+            r"(?:AppError::validation\(\s*|\bErr\(\s*|\.ok_or\(\s*|\.ok_or_else\(\s*\|\|\s*)(?:format!\(\s*)?$",
+            r"|\b(?:requerido|dia_de_horario)\([^,]*,\s*$",
+            r"|\bMSG_[A-Z0-9_]+:\s*&str\s*=\s*$",
+        ))
+        .unwrap()
+    });
+
+    /// Lo que no puede decir un mensaje de validación de este fuente.
+    fn malos(fuente: &str) -> Vec<String> {
+        // Los comentarios no se le enseñan a nadie, y la comilla suelta de un `'"'` no abre un texto.
+        let codigo: String = fuente
+            .lines()
+            .map(|l| if l.trim_start().starts_with("//") { "" } else { l })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace("'\"'", "' '");
+        let mut out = Vec::new();
+        for m in LITERAL.captures_iter(&codigo) {
+            let todo = m.get(0).unwrap();
+            let s = &m[1];
+            if SQL.is_match(s) {
+                continue;
+            }
+            let sin_huecos = HUECO.replace_all(s, "");
+            let desde = codigo[..todo.start()].char_indices().rev().nth(119).map_or(0, |(i, _)| i);
+            let antes = codigo[desde..todo.start()].split_whitespace().collect::<Vec<_>>().join(" ");
+            let antes = if codigo[..todo.start()].ends_with(char::is_whitespace) { antes + " " } else { antes };
+            let malo = if POSICION_DE_MENSAJE.is_match(&antes) {
+                // Ahí va una frase: ni un nombre suelto («titulo»), ni uno con guion bajo, ni inglés.
+                IDENTIFICADOR.is_match(s)
+                    || INGLES.is_match(&sin_huecos)
+                    || CAMPO.is_match(&sin_huecos)
+                    || CAMPO_INTERPOLADO.is_match(s)
+            } else {
+                !IDENTIFICADOR.is_match(s)
+                    && (INGLES.is_match(&sin_huecos)
+                        || (INVALIDO.is_match(&sin_huecos) && CAMPO.is_match(&sin_huecos)))
+            };
+            if malo {
+                out.push(s.to_string());
+            }
+        }
+        out
+    }
+
+    fn ficheros(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entrada in std::fs::read_dir(dir).expect("no se puede leer el directorio") {
+            let ruta = entrada.expect("entrada ilegible").path();
+            if ruta.is_dir() {
+                ficheros(&ruta, out);
+            } else if ruta.extension().is_some_and(|x| x == "rs") {
+                out.push(ruta);
+            }
+        }
+    }
+
+    #[test]
+    fn caza_lo_que_no_es_una_frase_tambien_donde_va_un_mensaje() {
+        for fuente in [
+            r#"return Err(AppError::validation("id_tarea required"));"#,
+            r#"return Err(AppError::validation("required"));"#,
+            r#"return Err("id_mesa".into());"#,
+            r#"let x = requerido(&input.titulo, "titulo").map_err(AppError::validation)?;"#,
+            r#"return Err(AppError::validation(
+            "Falta el producto (id_producto).",
+        ));"#,
+            r#"return Err(AppError::validation(format!("{field} required")));"#,
+            r#"Err(format!("{campo} inválido (YYYY-MM-DD)"))"#,
+        ] {
+            assert!(!malos(fuente).is_empty(), "{fuente}");
+        }
+    }
+
+    #[test]
+    fn deja_pasar_las_frases() {
+        for fuente in [
+            r#"return Err(AppError::validation("Falta la tarea."));"#,
+            r#"let x = requerido(&input.titulo, "Escribe el título de la tarea.").map_err(AppError::validation)?;"#,
+            r#"return Err(format!("El número de personas tiene que estar entre 1 y {PERSONAS_MAX}"));"#,
+            r#"pub const MSG_HORA: &str = "Hora inválida. Esperado HH:MM.";"#,
+            r#"let sql = "SELECT 'invalid' FROM t";"#,
+        ] {
+            assert_eq!(malos(fuente), Vec::<String>::new(), "{fuente}");
+        }
+    }
+
+    #[test]
+    fn ningun_mensaje_del_dominio_ni_de_los_casos_de_uso_es_un_campo_o_esta_en_ingles() {
+        let raiz = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut rutas = Vec::new();
+        ficheros(&raiz.join("src"), &mut rutas);
+        ficheros(&raiz.join("../tpv-domain/src"), &mut rutas);
+        assert!(rutas.len() > 80, "sólo se han leído {} ficheros", rutas.len());
+
+        let mut encontrados = Vec::new();
+        for ruta in &rutas {
+            let texto = std::fs::read_to_string(ruta).expect("fichero ilegible");
+            // Lo de los tests no se le enseña a nadie.
+            let produccion = texto.split("#[cfg(test)]").next().unwrap_or_default();
+            for s in malos(produccion) {
+                encontrados.push(format!("{}  «{s}»", ruta.display()));
+            }
+        }
+        assert!(encontrados.is_empty(), "mensajes que no son una frase:\n{}", encontrados.join("\n"));
+    }
+}

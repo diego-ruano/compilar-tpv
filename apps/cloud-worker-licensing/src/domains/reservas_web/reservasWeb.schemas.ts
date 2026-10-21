@@ -171,7 +171,7 @@ type _GRecogidas = Assert<SameKeys<z.infer<typeof recogidasSchema>, RecogidasRes
  * correo de nuestro dominio, así que todo tiene su forma y su tope. El destinatario no viene aquí.
  */
 export const avisoReservaWebSchema = z.object({
-	id_aviso: z.string().overwrite(recortar).regex(/^[A-Za-z0-9_-]{8,64}$/, "id_aviso inválido"),
+	id_aviso: z.string().overwrite(recortar).regex(/^[A-Za-z0-9_-]{8,64}$/, "El aviso no tiene un identificador válido."),
 	id_reserva: z.string().overwrite(recortar).min(1).max(64),
 	tipo: z.enum(["modificada", "cancelada"]),
 	dia_ymd: zDia("Formato de día inválido. Esperado YYYY-MM-DD."),
@@ -203,7 +203,7 @@ export const avisoReservaWebSchema = z.object({
 	// La huella (SHA-256) del correo de ese cliente en la Main: la nube espera a tener el mismo.
 	huella_correo: z
 		.string()
-		.regex(/^[0-9a-f]{64}$/, "huella_correo inválida")
+		.regex(/^[0-9a-f]{64}$/, "La huella del correo no es válida.")
 		.nullish()
 		.transform((v) => v ?? null),
 });

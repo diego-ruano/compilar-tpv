@@ -64,10 +64,10 @@ impl Destino {
             "todos" => Ok(Destino::Todos),
             "usuario" => valor
                 .map(Destino::Usuario)
-                .ok_or_else(|| "destino 'usuario' requiere ID_Usuario".to_string()),
+                .ok_or_else(|| "Elige a quién va el aviso.".to_string()),
             "rol" => valor
                 .map(Destino::Rol)
-                .ok_or_else(|| "destino 'rol' requiere ID_Rol".to_string()),
+                .ok_or_else(|| "Elige a quién va el aviso.".to_string()),
             otro => Err(format!("destino desconocido: '{otro}'")),
         }
     }
@@ -128,11 +128,11 @@ impl NuevaNotificacion {
         } = input;
         let tipo = tipo.trim().to_string();
         if tipo.is_empty() {
-            return Err("tipo requerido".to_string());
+            return Err("Falta el tipo de aviso.".to_string());
         }
         let titulo = titulo.trim().to_string();
         if titulo.is_empty() {
-            return Err("titulo requerido".to_string());
+            return Err("Escribe el título del aviso.".to_string());
         }
         let destino = Destino::from_columns(destino_tipo, destino_valor)?;
         Ok(NuevaNotificacion {

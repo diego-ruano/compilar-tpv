@@ -11,26 +11,26 @@ use tpv_contracts::licensing::{
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::{PairingService, ResultadoSubidaImagen};
 
-fn requerido(input: &str, field: &str) -> AppResult<String> {
+fn requerido(input: &str, mensaje: &str) -> AppResult<String> {
     let out = input.trim().to_string();
     if out.is_empty() {
-        return Err(AppError::validation(format!("{field} required")));
+        return Err(AppError::validation(mensaje));
     }
     Ok(out)
 }
 
 fn normalize_mode(mode: &str) -> AppResult<String> {
-    let m = requerido(mode, "mode")?.to_lowercase();
+    let m = requerido(mode, "Falta el modo del dispositivo.")?.to_lowercase();
     match m.as_str() {
         "anon" | "tpv" | "handy" => Ok(m),
-        _ => Err(AppError::validation("bad_mode (use: anon|tpv|handy)")),
+        _ => Err(AppError::validation("Modo de dispositivo inválido.")),
     }
 }
 
 fn normalize_path(path: &str) -> AppResult<String> {
-    let out = requerido(path, "path")?;
+    let out = requerido(path, "Falta la ruta de la petición.")?;
     if !out.starts_with('/') {
-        return Err(AppError::validation("path debe empezar por '/'"));
+        return Err(AppError::validation("La ruta de la petición tiene que empezar por «/»."));
     }
     Ok(out)
 }
@@ -55,8 +55,8 @@ pub fn hora_para_firmar(svc: &dyn PairingService) -> i64 {
 }
 
 pub fn handy_set_token(svc: &dyn PairingService, args: HandySetTokenArgs) -> AppResult<()> {
-    let token = requerido(&args.token, "token")?;
-    let tenant_id = requerido(&args.tenant_id, "tenant_id")?;
+    let token = requerido(&args.token, "Falta el token de la Handy.")?;
+    let tenant_id = requerido(&args.tenant_id, "Falta el negocio de la Handy.")?;
     svc.handy_set_token(&token, &tenant_id)
 }
 
@@ -74,7 +74,7 @@ pub fn tpv_server_signed_headers(
     args: TpvServerSignedHeadersArgs,
 ) -> AppResult<ApiSignedHeaders> {
     let mode = normalize_mode(&args.mode)?;
-    let method = requerido(&args.method, "method")?;
+    let method = requerido(&args.method, "Falta el método de la petición.")?;
     let path = normalize_path(&args.path)?;
     let body = args.body.unwrap_or_default();
     svc.tpv_server_signed_headers(&mode, &method, &path, body.as_bytes())
@@ -105,7 +105,7 @@ pub async fn upload_image(
 ) -> AppResult<ResultadoSubidaImagen> {
     let mode = normalize_mode(mode)?;
     let path = normalize_path(path)?;
-    let content_type = requerido(content_type, "content_type")?;
+    let content_type = requerido(content_type, "Falta el tipo de la imagen.")?;
     svc.upload_image(&mode, &path, &content_type, bytes).await
 }
 
@@ -124,7 +124,7 @@ pub async fn download_image(
     rel_path: &str,
 ) -> AppResult<Option<Vec<u8>>> {
     let mode = normalize_mode(mode)?;
-    let rel_path = requerido(rel_path, "rel_path")?;
+    let rel_path = requerido(rel_path, "Falta la ruta de la imagen.")?;
     svc.download_image(&mode, &rel_path).await
 }
 

@@ -47,7 +47,7 @@ ventaRapidaRoutes.get("/productos/search", consulta(S.searchProductosSchema), as
 
 ventaRapidaRoutes.get("/productos/:idCategoria", async (c) => {
 	const id = parseId(c.req.param("idCategoria"));
-	if (id == null) return badRequest(c, "id_categoria invalido");
+	if (id == null) return badRequest(c, "id_categoria_invalido");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.productosByCategoria(db, id),
@@ -64,13 +64,13 @@ ventaRapidaRoutes.get("/comandas", consulta(S.listComandasSchema), async (c) => 
 
 ventaRapidaRoutes.get("/comandas/:id/lineas", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_comanda invalido");
+	if (id == null) return badRequest(c, "id_comanda_invalido");
 	return c.json(await tenantQuery(c, (db) => q.lineas(db, id)));
 });
 
 ventaRapidaRoutes.get("/comandas/:id/ticket-detalles", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_comanda invalido");
+	if (id == null) return badRequest(c, "id_comanda_invalido");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.detallesVerTicket(db, id),

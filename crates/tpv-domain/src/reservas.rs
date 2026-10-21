@@ -1,11 +1,15 @@
 //! Dominio de **reservas**: normalización de fecha/hora/turno/estado y validación pura.
 
+/// Lo que se dice de un día o una hora que no valen. Los mismos textos en el worker
+/// (`reservas.schemas.ts`, `reservasWeb.schemas.ts`) y en el widget (VALID-03).
+pub const MSG_DIA: &str = "Formato de día inválido. Esperado YYYY-MM-DD.";
+pub const MSG_HORA: &str = "Hora inválida. Esperado HH:MM.";
+
 /// Normaliza un día a `YYYY-MM-DD` (acepta sufijos tras `T`/espacio). Los diez primeros caracteres
 /// tienen que ser una fecha real (`fechas::normalizar_dia`): un mes o un día fuera de rango entraba
 /// tal cual en la BD y rompía el orden por fecha.
 pub fn normalize_dia_ymd(raw: &str) -> Result<String, String> {
-    crate::fechas::normalizar_dia(raw)
-        .ok_or_else(|| format!("Formato de día inválido: '{}'. Esperado YYYY-MM-DD.", raw.trim()))
+    crate::fechas::normalizar_dia(raw).ok_or_else(|| MSG_DIA.to_string())
 }
 
 /// Normaliza una hora a `HH:MM` validando rangos.
@@ -14,23 +18,23 @@ pub fn normalize_hora_hhmm(raw: &str) -> Result<String, String> {
     if let Some(hhmm) = s.get(..5) {
         let b = hhmm.as_bytes();
         if b[2] != b':' {
-            return Err(format!("Formato de hora inválido: '{s}'. Esperado HH:MM."));
+            return Err(MSG_HORA.into());
         }
         if !b[0].is_ascii_digit()
             || !b[1].is_ascii_digit()
             || !b[3].is_ascii_digit()
             || !b[4].is_ascii_digit()
         {
-            return Err(format!("Formato de hora inválido: '{s}'. Esperado HH:MM."));
+            return Err(MSG_HORA.into());
         }
         let hh: i64 = hhmm[0..2].parse().unwrap_or(-1);
         let mm: i64 = hhmm[3..5].parse().unwrap_or(-1);
         if !(0..=23).contains(&hh) || !(0..=59).contains(&mm) {
-            return Err(format!("Hora fuera de rango: '{s}'. Esperado 00:00..23:59."));
+            return Err(MSG_HORA.into());
         }
         return Ok(hhmm.to_string());
     }
-    Err(format!("Formato de hora inválido: '{s}'. Esperado HH:MM."))
+    Err(MSG_HORA.into())
 }
 
 fn turno_por_hora(hhmm: &str) -> String {

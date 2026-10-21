@@ -19,7 +19,7 @@ pub async fn get_productos(
 ) -> AppResult<Vec<ProductoProveedorDto>> {
     let id_proveedor = id_proveedor.trim();
     if id_proveedor.is_empty() {
-        return Err(AppError::validation("ID_Proveedor inválido"));
+        return Err(AppError::validation("Falta el proveedor."));
     }
     repo.get_productos(id_proveedor).await
 }
@@ -58,7 +58,7 @@ pub async fn guardar(
 pub async fn eliminar(repo: &dyn ProveedoresRepository, id_proveedor: String) -> AppResult<bool> {
     let id_proveedor = id_proveedor.trim();
     if id_proveedor.is_empty() {
-        return Err(AppError::validation("ID_Proveedor inválido"));
+        return Err(AppError::validation("Falta el proveedor."));
     }
     repo.eliminar(id_proveedor).await
 }
@@ -69,7 +69,7 @@ pub async fn set_vinculos(
 ) -> AppResult<bool> {
     let id_proveedor = input.id_proveedor.trim().to_string();
     if id_proveedor.is_empty() {
-        return Err(AppError::validation("ID_Proveedor inválido"));
+        return Err(AppError::validation("Falta el proveedor."));
     }
     let ids = normalizar_producto_ids(input.producto_ids);
     repo.set_vinculos(&id_proveedor, ids).await

@@ -107,14 +107,14 @@ pub async fn add_linea_comanda(
     repo: &dyn VentaRapidaRepository,
     input: VrAddLineaComandaInput,
 ) -> AppResult<VrLineaAnadida> {
-    if input.id_comanda.trim().is_empty()
-        || input.id_producto.trim().is_empty()
-        || !input.cantidad.is_finite()
-        || input.cantidad <= 0.0
-    {
-        return Err(AppError::validation(
-            "id_comanda/id_producto/cantidad invalid",
-        ));
+    if input.id_comanda.trim().is_empty() {
+        return Err(AppError::validation("Falta la comanda."));
+    }
+    if input.id_producto.trim().is_empty() {
+        return Err(AppError::validation("Falta el producto."));
+    }
+    if !input.cantidad.is_finite() || input.cantidad <= 0.0 {
+        return Err(AppError::validation("La cantidad tiene que ser mayor que cero."));
     }
     repo.add_linea_comanda(&input.id_comanda, &input.id_producto, input.cantidad)
         .await
@@ -124,8 +124,11 @@ pub async fn remove_last_unpaid_linea(
     repo: &dyn VentaRapidaRepository,
     input: VrRemoveLastUnpaidLineaInput,
 ) -> AppResult<bool> {
-    if input.id_comanda.trim().is_empty() || input.id_producto.trim().is_empty() {
-        return Err(AppError::validation("id_comanda/id_producto invalid"));
+    if input.id_comanda.trim().is_empty() {
+        return Err(AppError::validation("Falta la comanda."));
+    }
+    if input.id_producto.trim().is_empty() {
+        return Err(AppError::validation("Falta el producto."));
     }
     repo.remove_last_unpaid_linea(&input.id_comanda, &input.id_producto)
         .await
@@ -135,8 +138,11 @@ pub async fn delete_linea_if_unpaid(
     repo: &dyn VentaRapidaRepository,
     input: VrDeleteLineaIfUnpaidInput,
 ) -> AppResult<bool> {
-    if input.id_comanda.trim().is_empty() || input.id_detalle.trim().is_empty() {
-        return Err(AppError::validation("id_comanda/id_detalle invalid"));
+    if input.id_comanda.trim().is_empty() {
+        return Err(AppError::validation("Falta la comanda."));
+    }
+    if input.id_detalle.trim().is_empty() {
+        return Err(AppError::validation("Falta la línea de la comanda."));
     }
     repo.delete_linea_if_unpaid(&input.id_comanda, &input.id_detalle)
         .await
@@ -147,7 +153,7 @@ pub async fn update_nota_detalle(
     input: VrUpdateNotaDetalleInput,
 ) -> AppResult<bool> {
     if input.id_detalle.trim().is_empty() {
-        return Err(AppError::validation("id_detalle invalid"));
+        return Err(AppError::validation("Falta la línea de la comanda."));
     }
     repo.update_nota_detalle(&input.id_detalle, limpiar_opcional(input.nota))
         .await
@@ -180,13 +186,13 @@ pub fn datos_cobro(
     id_usuario: &str, id_trabajador: Option<&str>, input: VrCobrarFraccionadoInput,
 ) -> AppResult<CobroFraccionado> {
     let Some(id_pago) = id_de_cobro(&input.id_pago) else {
-        return Err(AppError::validation("id_pago invalid"));
+        return Err(AppError::validation("El cobro no tiene un identificador válido."));
     };
     if input.id_comanda.trim().is_empty() {
-        return Err(AppError::validation("id_comanda invalid"));
+        return Err(AppError::validation("Falta la comanda."));
     }
     if input.importe_total.es_negativo() {
-        return Err(AppError::validation("importe_total invalid"));
+        return Err(AppError::validation("El importe no puede ser negativo."));
     }
 
     let mut detalles: Vec<String> = input
@@ -199,7 +205,7 @@ pub fn datos_cobro(
     detalles.dedup();
 
     if detalles.is_empty() {
-        return Err(AppError::validation("detalles required"));
+        return Err(AppError::validation("Elige qué líneas se cobran."));
     }
 
     let data = CobroFraccionado {
@@ -221,7 +227,7 @@ pub async fn delete_comanda_if_safe(
     input: VrDeleteComandaIfSafeInput,
 ) -> AppResult<bool> {
     if input.id_comanda.trim().is_empty() {
-        return Err(AppError::validation("id_comanda invalid"));
+        return Err(AppError::validation("Falta la comanda."));
     }
     repo.delete_comanda_if_safe(&input.id_comanda).await
 }

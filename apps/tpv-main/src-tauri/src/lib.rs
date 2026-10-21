@@ -316,11 +316,11 @@ fn ensure_folders(app_data_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn normalize_required(input: &str, field: &str) -> Result<String, String> {
+fn normalize_required(input: &str, mensaje: &str) -> Result<String, String> {
     let out = input.trim().to_string();
 
     if out.is_empty() {
-        return Err(format!("{field} required"));
+        return Err(mensaje.to_string());
     }
 
     Ok(out)
@@ -1068,7 +1068,7 @@ async fn save_image(app: AppHandle, state: State<'_, AppState>, args: SaveImageA
         _ => { state.sesion().await?; },
     }
 
-    let subfolder = normalize_required(&args.subfolder, "subfolder")?;
+    let subfolder = normalize_required(&args.subfolder, "Falta la carpeta de la imagen.")?;
     if !is_safe_image_rel_path(&format!("images/{subfolder}/validacion.jpg")) {
         return Err("Carpeta de imagen no válida".into());
     }
@@ -1213,9 +1213,9 @@ async fn images_delete(
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
 
-    let rel_path = normalize_required(&args.rel_path, "rel_path")?;
+    let rel_path = normalize_required(&args.rel_path, "Falta la ruta de la imagen.")?;
     if !is_safe_image_rel_path(&rel_path) {
-        return Err("rel_path inválido".into());
+        return Err("La ruta de la imagen no es válida.".into());
     }
 
     ColaImagenes::new(&app_data_dir).descartar(&rel_path)?;
@@ -1253,9 +1253,9 @@ async fn images_ensure_local(
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
 
-    let rel_path = normalize_required(&args.rel_path, "rel_path")?;
+    let rel_path = normalize_required(&args.rel_path, "Falta la ruta de la imagen.")?;
     if !is_safe_image_rel_path(&rel_path) {
-        return Err("rel_path inválido".into());
+        return Err("La ruta de la imagen no es válida.".into());
     }
 
     let file_path = imagenes::destino(&app_data_dir, &rel_path, false)?;

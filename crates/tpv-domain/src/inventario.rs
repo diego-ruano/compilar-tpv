@@ -29,7 +29,7 @@ impl CategoriaUpsert {
     ) -> Result<Self, String> {
         let nombre = nombre.trim().to_string();
         if nombre.is_empty() {
-            return Err("nombre required".into());
+            return Err("Escribe el nombre de la categoría.".into());
         }
         Ok(CategoriaUpsert {
             id: id_categoria.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
@@ -100,11 +100,11 @@ impl ProductoUpsert {
         } = input;
         let nombre = nombre.trim().to_string();
         if nombre.is_empty() {
-            return Err("nombre required".into());
+            return Err("Escribe el nombre del producto.".into());
         }
         let id_categoria = id_categoria.trim().to_string();
         if id_categoria.is_empty() {
-            return Err("id_categoria inválido".into());
+            return Err("Elige la categoría del producto.".into());
         }
         // RI-78: un tipo fuera de rango se rechaza. Antes caía en silencio a «hereda el del
         // negocio»: quien tecleaba «210» por «21» guardaba el producto con otro IVA y un aviso de
@@ -132,7 +132,7 @@ impl ProductoUpsert {
 
 // Los mismos textos en el worker (`inventario.schemas.ts`).
 pub const MSG_CADUCIDAD_INVALIDA: &str = "Caducidad con formato inválido (se espera YYYY-MM-DD)";
-pub const MSG_ENTRADA_INVALIDA: &str = "Fecha_Entrada con formato inválido";
+pub const MSG_ENTRADA_INVALIDA: &str = "La fecha de entrada no tiene un formato válido.";
 pub const MSG_CADUCIDAD_ANTERIOR: &str = "La caducidad no puede ser anterior a la fecha de entrada";
 
 /// Lote a crear/upsertar.
@@ -194,7 +194,7 @@ impl LoteUpdate {
         } = input;
         let id_lote = id_lote.trim().to_string();
         if id_lote.is_empty() {
-            return Err("id_lote inválido".into());
+            return Err("Falta el lote.".into());
         }
         // Las mismas reglas que el alta para todo lo demás; la cantidad no entra.
         let lote = LoteNuevo::validar(crate::inventario::LoteEntrada {
@@ -250,11 +250,11 @@ impl LoteNuevo {
         } = input;
         let id_producto = id_producto.trim().to_string();
         if id_producto.is_empty() {
-            return Err("id_producto inválido".into());
+            return Err("Falta el producto.".into());
         }
         let codigo_lote = codigo_lote.trim().to_string();
         if codigo_lote.is_empty() {
-            return Err("codigo_lote required".into());
+            return Err("Escribe el código del lote.".into());
         }
         // Un lote tiene UNA cantidad, la que queda, y no tiene techo: manda el recuento. El par
         // (inicial, disponible) sólo servía para rechazar un disponible mayor que el inicial, o
@@ -338,7 +338,7 @@ impl AjusteLote {
     ) -> Result<Self, String> {
         let id_lote = id_lote.trim().to_string();
         if id_lote.is_empty() {
-            return Err("id_lote inválido".into());
+            return Err("Falta el lote.".into());
         }
         // Lo visto puede ser negativo (una sobreventa); lo que queda tras el recuento, no.
         if !stock_visto.is_finite() {
@@ -378,7 +378,7 @@ impl AjusteSuelto {
     ) -> Result<Self, String> {
         let id_producto = id_producto.trim().to_string();
         if id_producto.is_empty() {
-            return Err("id_producto inválido".into());
+            return Err("Falta el producto.".into());
         }
         if stock_visto.is_some_and(|v| !v.is_finite()) {
             return Err("Stock visto inválido".into());

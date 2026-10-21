@@ -73,7 +73,8 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
   dos direcciones; los tipos de los valores los cubre el paso a los command builders.
 - **Lo que ese schema acepta o rechaza es lo mismo que acepta o rechaza la Main**, y lo fija la tabla
   [`validacion_casos.json`](../../crates/tpv-domain/src/validacion_casos.json): una entrada base válida
-  por dominio y casos que la cambian, con `acepta` y, si hace falta, el valor normalizado que `queda`.
+  por dominio y casos que la cambian, con `acepta`, si hace falta el valor normalizado que `queda` y,
+  en los que se rechazan, el `mensaje` que se enseña (VALID-03).
   La leen `tpv-domain/src/validacion_casos.rs` contra los `validar` del dominio y
   `test/validacionCasos.test.ts` contra los schemas. El arnés de contrato no lo ve: entra por debajo de
   la validación.
@@ -106,6 +107,11 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
   `cuerpoTolerante` ponen como `message` el del primer fallo cuando está escrito en el schema (un
   `MSG_*`, un `refine`, un `.min(1, "…")`), que es el mismo que da la Main. Los de zod por defecto
   salen en inglés y se quedan en los `issues`: la respuesta va sin `message` y se enseña el genérico.
+- **Ese texto es una frase en español que dice qué hacer** (VALID-03): «Escribe el nombre del
+  producto.», «Falta la mesa.», nunca «nombre required» ni «id_mesa invalido». Un id que llega en
+  blanco en un parámetro de ruta (`parseId`) es un bug, no algo que corrija la persona: sale con un
+  identificador de máquina (`id_mesa_invalido`) en `SIN_MENSAJE_PROPIO`. Lo vigila
+  `test/mensajesEnEspanol.test.ts`.
 - **Un error no cuenta su detalle interno** (FABLE-B): `serverError`, `unauthorized` y `forbidden`
   no aceptan detalles, y un 500 inesperado sale como `internal_error` sin más. La traza y el texto
   de Turso quedan en el log (`wrangler tail`) y en Sentry, donde se captura el error. Los `details`

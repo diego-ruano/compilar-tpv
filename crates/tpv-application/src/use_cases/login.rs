@@ -84,7 +84,7 @@ pub async fn set_turno_partido_hoy(
     input: SetTurnoPartidoInput,
 ) -> AppResult<()> {
     if input.id_usuario.trim().is_empty() {
-        return Err(AppError::validation("id_usuario inválido"));
+        return Err(AppError::validation("Falta el usuario."));
     }
     repo.set_turno_partido(
         &input.id_usuario,
@@ -98,12 +98,12 @@ pub async fn complete_initial_setup(
     repo: &dyn LoginRepository,
     input: CompleteInitialSetupInput,
 ) -> AppResult<()> {
-    let email_nuevo = requerido(&input.email_nuevo, "email_nuevo").map_err(AppError::validation)?;
+    let email_nuevo = requerido(&input.email_nuevo, "Escribe el correo.").map_err(AppError::validation)?;
     // RI-63: el mismo PIN que se puede teclear en el login, no sólo «al menos 4».
     let pin_nuevo = pin_de_teclado(&input.pin_nuevo).map_err(AppError::validation)?;
 
     if input.id_usuario.trim().is_empty() {
-        return Err(AppError::validation("id_usuario inválido"));
+        return Err(AppError::validation("Falta el usuario."));
     }
     if !validate_email_basic(&email_nuevo) {
         return Err(AppError::validation("Email inválido"));
@@ -115,10 +115,10 @@ pub async fn complete_initial_setup(
 
 pub async fn punch(repo: &dyn LoginRepository, input: PunchInput) -> AppResult<PunchStatus> {
     if input.id_usuario.trim().is_empty() {
-        return Err(AppError::validation("id_usuario inválido"));
+        return Err(AppError::validation("Falta el usuario."));
     }
 
-    let tipo = requerido(&input.tipo, "tipo")
+    let tipo = requerido(&input.tipo, "Falta si es entrada o salida.")
         .map_err(AppError::validation)?
         .to_lowercase();
 

@@ -42,12 +42,12 @@ impl SolicitudActivacion {
     ) -> Result<Self, String> {
         let clave = clave.trim().to_string();
         if clave.is_empty() {
-            return Err("activation_key required".to_string());
+            return Err("Escribe la clave de activación.".to_string());
         }
 
         let business_name = business_name.trim().to_string();
         if business_name.is_empty() {
-            return Err("business_name required".to_string());
+            return Err("Escribe el nombre del negocio.".to_string());
         }
 
         Ok(SolicitudActivacion {

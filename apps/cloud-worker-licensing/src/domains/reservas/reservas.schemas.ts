@@ -32,8 +32,12 @@ function cleanEmailOrNull(v: unknown): string | null {
 	return s.length ? s : null;
 }
 
-const MSG_DIA = "dia_ymd invalido";
-const MSG_HORA = "hora invalida";
+/** Los mismos que `MSG_DIA` y `MSG_HORA` de la Main (`tpv-domain/src/reservas.rs`) y que el widget. */
+const MSG_DIA = "Formato de día inválido. Esperado YYYY-MM-DD.";
+const MSG_HORA = "Hora inválida. Esperado HH:MM.";
+
+/** Mismo texto que la Main (`ReservaValidada::validar`). */
+const MSG_COMENSALES = "Comensales inválidos";
 
 export function normalizeHora(raw: unknown): string {
 	const s = recortar(String(raw ?? ""));
@@ -64,16 +68,6 @@ function normalizeTurno(raw: unknown, hora: string): string {
 	return TURNOS.has(t) ? t : turnoPorHora(hora);
 }
 
-function positiveInt(name: string) {
-	return z.coerce
-		.number()
-		.int(`${name} invalido`)
-		.positive(`${name} invalido`);
-}
-
-function idField(name: string) {
-	return z.coerce.string().overwrite(recortar).min(1, `${name} invalido`);
-}
 
 export const reservaSaveSchema = z
 	.object({
@@ -81,7 +75,7 @@ export const reservaSaveSchema = z
 		dia_ymd: z.any().optional(),
 		hora: z.any().optional(),
 		turno: z.any().optional().nullable(),
-		comensales: positiveInt("comensales"),
+		comensales: z.coerce.number().int(MSG_COMENSALES).positive(MSG_COMENSALES),
 		// RI-61: minutos que ocupa la mesa (sin ella, la del negocio) y «guardar aunque se pise».
 		duracion_min: z.coerce
 			.number()

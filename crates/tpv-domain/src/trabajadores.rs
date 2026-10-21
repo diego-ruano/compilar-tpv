@@ -53,12 +53,19 @@ pub fn validar_tramos(tramos: &[AsignacionNueva]) -> Result<(), String> {
     Ok(())
 }
 
+/// Lo que se dice de un día de horario que no vale: cada uno con su frase (VALID-03), las mismas
+/// en el worker (`trabajadores.schemas.ts`).
+pub const MSG_DIA_DEL_TURNO: &str = "El día del turno no es válido.";
+pub const MSG_SEMANA: &str = "La semana no es válida.";
+pub const MSG_SEMANA_ORIGEN: &str = "La semana de origen no es válida.";
+pub const MSG_SEMANA_DESTINO: &str = "La semana de destino no es válida.";
+
 /// El día de un horario tal como llega (el de un turno, el lunes de una semana), normalizado a
 /// `YYYY-MM-DD`. Tiene que ser una fecha real (RI-78): el caso de uso sólo exigía que no viniera
 /// vacío, y el SQL lo pasaba por `date()`, que convierte un 31 de febrero en 3 de marzo y deja en
 /// `NULL` lo que no entiende. Mismo criterio en el worker (`zDia`).
-pub fn dia_de_horario(raw: &str, campo: &str) -> Result<String, String> {
-    crate::fechas::normalizar_dia(raw).ok_or_else(|| format!("{campo} inválido (YYYY-MM-DD)"))
+pub fn dia_de_horario(raw: &str, mensaje: &str) -> Result<String, String> {
+    crate::fechas::normalizar_dia(raw).ok_or_else(|| mensaje.to_string())
 }
 
 /// Texto obligatorio: recorta y exige no vacío.
@@ -171,16 +178,16 @@ mod tests {
         assert_eq!(dia_de_horario("2026-03-02T00:00:00", "fecha").unwrap(), "2026-03-02");
         for valor in ["", "02/03/2026", "2026-02-31", "2026-3-2"] {
             assert_eq!(
-                dia_de_horario(valor, "from_monday").unwrap_err(),
-                "from_monday inválido (YYYY-MM-DD)"
+                dia_de_horario(valor, "La semana de origen no es válida.").unwrap_err(),
+                "La semana de origen no es válida."
             );
         }
     }
 
     #[test]
-    fn requerido_recorta_y_reporta_campo() {
+    fn requerido_recorta_y_dice_que_falta() {
         assert_eq!(requerido(" Sala ", "area").unwrap(), "Sala");
-        assert_eq!(requerido("\t", "area").unwrap_err(), "area required");
+        assert_eq!(requerido("\t", "Elige el área.").unwrap_err(), "Elige el área.");
     }
 
     #[test]

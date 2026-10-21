@@ -24,6 +24,8 @@ import type {
 const optNum = z.number().finite().nullish();
 const optStr = z.string().nullish();
 const idStr = z.string().overwrite(recortar).min(1);
+/** Un id que tiene que venir y, si no, lo que dice la Main (VALID-03). */
+const idCon = (mensaje: string) => z.string().overwrite(recortar).min(1, mensaje);
 const idList = z.array(z.string().overwrite(recortar).min(1)).default([]);
 
 // UUIDv7: el id lo genera el cliente y lo envía. Si lo envía `null` (no lo conoce),
@@ -32,7 +34,7 @@ const optId = idStr.nullish().transform((v) => (v == null ? undefined : v));
 
 export const upsertCategoriaSchema = z.object({
 	id_categoria: optId,
-	nombre: z.string().overwrite(recortar).min(1, "nombre required"),
+	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre de la categoría."),
 	nombre_imagen: z.string().default(""),
 	ruta_imagen: z.string().default(""),
 	vendible: z.boolean(),
@@ -41,9 +43,9 @@ export const upsertCategoriaSchema = z.object({
 
 export const upsertProductoSchema = z.object({
 	id_producto: optId,
-	id_categoria: idStr,
+	id_categoria: idCon("Elige la categoría del producto."),
 	id_proveedor: idStr.nullish(),
-	nombre: z.string().overwrite(recortar).min(1, "nombre required"),
+	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre del producto."),
 	precio_venta: zDineroOpcional,
 	stock_minimo: optNum,
 	unidad_medida: optStr,
@@ -58,7 +60,7 @@ export const upsertProductoSchema = z.object({
 
 // Los mismos textos que en la Main (`tpv-domain/src/inventario.rs`).
 const MSG_CADUCIDAD_INVALIDA = "Caducidad con formato inválido (se espera YYYY-MM-DD)";
-const MSG_ENTRADA_INVALIDA = "Fecha_Entrada con formato inválido";
+const MSG_ENTRADA_INVALIDA = "La fecha de entrada no tiene un formato válido.";
 const MSG_CADUCIDAD_ANTERIOR = "La caducidad no puede ser anterior a la fecha de entrada";
 
 /**
@@ -96,8 +98,8 @@ export const autorStockSchema = z.string().overwrite(recortar).min(1);
 // Los campos del DTO, sin las reglas entre campos: es lo que compara el drift-guard de abajo.
 const createLoteCampos = z.object({
 	id_lote: optId,
-	id_producto: idStr,
-	codigo_lote: z.string().overwrite(recortar).min(1, "codigo_lote required"),
+	id_producto: idCon("Falta el producto."),
+	codigo_lote: z.string().overwrite(recortar).min(1, "Escribe el código del lote."),
 	caducidad: optStr,
 	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	fecha_entrada: optStr,
@@ -113,9 +115,9 @@ export const createLoteSchema = createLoteCampos
 	.superRefine(fechasDeLote);
 
 const updateLoteCampos = z.object({
-	id_lote: idStr,
-	id_producto: idStr,
-	codigo_lote: z.string().overwrite(recortar).min(1, "codigo_lote required"),
+	id_lote: idCon("Falta el lote."),
+	id_producto: idCon("Falta el producto."),
+	codigo_lote: z.string().overwrite(recortar).min(1, "Escribe el código del lote."),
 	caducidad: optStr,
 	fecha_entrada: optStr,
 	coste_unitario: zDineroOpcional,

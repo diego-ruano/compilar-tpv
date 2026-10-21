@@ -1,32 +1,32 @@
 {
-  "//": "RI-78. Lo que ACEPTA o RECHAZA la validación de entrada, igual en la Main (los `validar` de tpv-domain) y en el worker (los schemas zod). La leen `crates/tpv-domain/src/validacion_casos.rs` y `apps/cloud-worker-licensing/test/validacionCasos.test.ts`. Cada dominio trae una entrada `base` válida, con la forma del DTO, y sus `casos`: `cambios` se superpone a la base, `acepta` dice si tiene que pasar y `queda` (opcional) qué valor normalizado tiene que salir en esos campos. Un criterio nuevo es un caso nuevo aquí; un dominio nuevo hay que cablearlo en los dos tests, que fallan si encuentran uno que no conocen.",
+  "//": "RI-78. Lo que ACEPTA o RECHAZA la validación de entrada, igual en la Main (los `validar` de tpv-domain) y en el worker (los schemas zod). La leen `crates/tpv-domain/src/validacion_casos.rs` y `apps/cloud-worker-licensing/test/validacionCasos.test.ts`. Cada dominio trae una entrada `base` válida, con la forma del DTO, y sus `casos`: `cambios` se superpone a la base, `acepta` dice si tiene que pasar y `queda` (opcional) qué valor normalizado tiene que salir en esos campos. En los que se rechazan, `mensaje` es lo que se le dice a quien está delante: el mismo texto en los dos lados (VALID-03). Un criterio nuevo es un caso nuevo aquí; un dominio nuevo hay que cablearlo en los dos tests, que fallan si encuentran uno que no conocen.",
   "reserva": {
     "base": { "dia_ymd": "2026-07-22", "hora": "14:30", "comensales": 2 },
     "casos": [
       { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "dia_ymd": "2026-07-22", "hora": "14:30" } },
       { "nombre": "29 de febrero de un año bisiesto", "cambios": { "dia_ymd": "2024-02-29" }, "acepta": true },
-      { "nombre": "29 de febrero de un año que no lo es", "cambios": { "dia_ymd": "2025-02-29" }, "acepta": false },
-      { "nombre": "30 de febrero", "cambios": { "dia_ymd": "2026-02-30" }, "acepta": false },
-      { "nombre": "31 de febrero", "cambios": { "dia_ymd": "2026-02-31" }, "acepta": false },
-      { "nombre": "31 de abril", "cambios": { "dia_ymd": "2026-04-31" }, "acepta": false },
-      { "nombre": "mes 13", "cambios": { "dia_ymd": "2026-13-01" }, "acepta": false },
-      { "nombre": "día 00", "cambios": { "dia_ymd": "2026-07-00" }, "acepta": false },
-      { "nombre": "día sin relleno de ceros", "cambios": { "dia_ymd": "2026-7-2" }, "acepta": false },
-      { "nombre": "día en formato español", "cambios": { "dia_ymd": "22/07/2026" }, "acepta": false },
-      { "nombre": "día vacío", "cambios": { "dia_ymd": "" }, "acepta": false },
+      { "nombre": "29 de febrero de un año que no lo es", "cambios": { "dia_ymd": "2025-02-29" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "30 de febrero", "cambios": { "dia_ymd": "2026-02-30" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "31 de febrero", "cambios": { "dia_ymd": "2026-02-31" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "31 de abril", "cambios": { "dia_ymd": "2026-04-31" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "mes 13", "cambios": { "dia_ymd": "2026-13-01" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "día 00", "cambios": { "dia_ymd": "2026-07-00" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "día sin relleno de ceros", "cambios": { "dia_ymd": "2026-7-2" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "día en formato español", "cambios": { "dia_ymd": "22/07/2026" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "día vacío", "cambios": { "dia_ymd": "" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
       { "nombre": "día con espacios alrededor", "cambios": { "dia_ymd": " 2026-07-22 " }, "acepta": true, "queda": { "dia_ymd": "2026-07-22" } },
       { "nombre": "día con hora detrás: se queda la fecha", "cambios": { "dia_ymd": "2026-07-22T18:30:00Z" }, "acepta": true, "queda": { "dia_ymd": "2026-07-22" } },
-      { "nombre": "31 de febrero con hora detrás", "cambios": { "dia_ymd": "2026-02-31T18:30:00Z" }, "acepta": false },
+      { "nombre": "31 de febrero con hora detrás", "cambios": { "dia_ymd": "2026-02-31T18:30:00Z" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
       { "nombre": "hora con segundos: se queda HH:MM", "cambios": { "hora": "14:35:59" }, "acepta": true, "queda": { "hora": "14:35" } },
       { "nombre": "última hora del día", "cambios": { "hora": "23:59" }, "acepta": true },
-      { "nombre": "hora 24", "cambios": { "hora": "24:00" }, "acepta": false },
-      { "nombre": "minuto 60", "cambios": { "hora": "23:60" }, "acepta": false },
-      { "nombre": "hora sin relleno de ceros", "cambios": { "hora": "9:30" }, "acepta": false },
-      { "nombre": "sin comensales", "cambios": { "comensales": 0 }, "acepta": false },
+      { "nombre": "hora 24", "cambios": { "hora": "24:00" }, "acepta": false, "mensaje": "Hora inválida. Esperado HH:MM." },
+      { "nombre": "minuto 60", "cambios": { "hora": "23:60" }, "acepta": false, "mensaje": "Hora inválida. Esperado HH:MM." },
+      { "nombre": "hora sin relleno de ceros", "cambios": { "hora": "9:30" }, "acepta": false, "mensaje": "Hora inválida. Esperado HH:MM." },
+      { "nombre": "sin comensales", "cambios": { "comensales": 0 }, "acepta": false, "mensaje": "Comensales inválidos" },
       { "nombre": "duración de un día entero", "cambios": { "duracion_min": 1440 }, "acepta": true },
-      { "nombre": "duración cero", "cambios": { "duracion_min": 0 }, "acepta": false },
-      { "nombre": "duración de más de un día", "cambios": { "duracion_min": 1441 }, "acepta": false },
-      { "nombre": "teléfono sin nombre de cliente", "cambios": { "telefono": "600100200" }, "acepta": false },
+      { "nombre": "duración cero", "cambios": { "duracion_min": 0 }, "acepta": false, "mensaje": "La duración de la reserva tiene que estar entre 1 minuto y 24 horas" },
+      { "nombre": "duración de más de un día", "cambios": { "duracion_min": 1441 }, "acepta": false, "mensaje": "La duración de la reserva tiene que estar entre 1 minuto y 24 horas" },
+      { "nombre": "teléfono sin nombre de cliente", "cambios": { "telefono": "600100200" }, "acepta": false, "mensaje": "Para dar de alta al cliente hace falta su nombre. Si no quieres ficha de cliente, deja vacíos el teléfono y el email." },
       { "nombre": "cliente nuevo con nombre", "cambios": { "nombre_cliente": "Ana", "telefono": "600100200" }, "acepta": true }
     ]
   },
@@ -37,26 +37,26 @@
       { "nombre": "caducidad real", "cambios": { "caducidad": "2026-12-31" }, "acepta": true },
       { "nombre": "caducidad vacía: no caduca", "cambios": { "caducidad": "" }, "acepta": true },
       { "nombre": "caducidad con espacios alrededor", "cambios": { "caducidad": " 2026-12-31 " }, "acepta": true },
-      { "nombre": "caducidad en formato español", "cambios": { "caducidad": "31/12/2026" }, "acepta": false },
-      { "nombre": "caducidad el 30 de febrero", "cambios": { "caducidad": "2026-02-30" }, "acepta": false },
-      { "nombre": "caducidad sin relleno de ceros", "cambios": { "caducidad": "2026-1-5" }, "acepta": false },
-      { "nombre": "caducidad con texto detrás", "cambios": { "caducidad": "2026-12-31basura" }, "acepta": false },
-      { "nombre": "caducidad con hora: es una fecha sola", "cambios": { "caducidad": "2026-12-31 00:00:00" }, "acepta": false },
+      { "nombre": "caducidad en formato español", "cambios": { "caducidad": "31/12/2026" }, "acepta": false, "mensaje": "Caducidad con formato inválido (se espera YYYY-MM-DD)" },
+      { "nombre": "caducidad el 30 de febrero", "cambios": { "caducidad": "2026-02-30" }, "acepta": false, "mensaje": "Caducidad con formato inválido (se espera YYYY-MM-DD)" },
+      { "nombre": "caducidad sin relleno de ceros", "cambios": { "caducidad": "2026-1-5" }, "acepta": false, "mensaje": "Caducidad con formato inválido (se espera YYYY-MM-DD)" },
+      { "nombre": "caducidad con texto detrás", "cambios": { "caducidad": "2026-12-31basura" }, "acepta": false, "mensaje": "Caducidad con formato inválido (se espera YYYY-MM-DD)" },
+      { "nombre": "caducidad con hora: es una fecha sola", "cambios": { "caducidad": "2026-12-31 00:00:00" }, "acepta": false, "mensaje": "Caducidad con formato inválido (se espera YYYY-MM-DD)" },
       { "nombre": "entrada con su hora completa", "cambios": { "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": true },
       { "nombre": "entrada con la fecha sola", "cambios": { "fecha_entrada": "2026-07-22" }, "acepta": true },
       { "nombre": "entrada vacía: la pone quien escribe", "cambios": { "fecha_entrada": "" }, "acepta": true },
-      { "nombre": "entrada que no es una fecha", "cambios": { "fecha_entrada": "fecha mala" }, "acepta": false },
-      { "nombre": "entrada con texto detrás", "cambios": { "fecha_entrada": "2026-07-22 basura" }, "acepta": false },
-      { "nombre": "entrada con T en vez de espacio", "cambios": { "fecha_entrada": "2026-07-22T10:00:00" }, "acepta": false },
-      { "nombre": "entrada sin segundos", "cambios": { "fecha_entrada": "2026-07-22 10:00" }, "acepta": false },
-      { "nombre": "entrada a las 25 horas", "cambios": { "fecha_entrada": "2026-07-22 25:00:00" }, "acepta": false },
-      { "nombre": "entrada el 31 de febrero", "cambios": { "fecha_entrada": "2026-02-31 10:00:00" }, "acepta": false },
+      { "nombre": "entrada que no es una fecha", "cambios": { "fecha_entrada": "fecha mala" }, "acepta": false, "mensaje": "La fecha de entrada no tiene un formato válido." },
+      { "nombre": "entrada con texto detrás", "cambios": { "fecha_entrada": "2026-07-22 basura" }, "acepta": false, "mensaje": "La fecha de entrada no tiene un formato válido." },
+      { "nombre": "entrada con T en vez de espacio", "cambios": { "fecha_entrada": "2026-07-22T10:00:00" }, "acepta": false, "mensaje": "La fecha de entrada no tiene un formato válido." },
+      { "nombre": "entrada sin segundos", "cambios": { "fecha_entrada": "2026-07-22 10:00" }, "acepta": false, "mensaje": "La fecha de entrada no tiene un formato válido." },
+      { "nombre": "entrada a las 25 horas", "cambios": { "fecha_entrada": "2026-07-22 25:00:00" }, "acepta": false, "mensaje": "La fecha de entrada no tiene un formato válido." },
+      { "nombre": "entrada el 31 de febrero", "cambios": { "fecha_entrada": "2026-02-31 10:00:00" }, "acepta": false, "mensaje": "La fecha de entrada no tiene un formato válido." },
       { "nombre": "caduca el mismo día que entra", "cambios": { "caducidad": "2026-07-22", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": true },
-      { "nombre": "caduca antes de entrar", "cambios": { "caducidad": "2026-07-21", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": false },
+      { "nombre": "caduca antes de entrar", "cambios": { "caducidad": "2026-07-21", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": false, "mensaje": "La caducidad no puede ser anterior a la fecha de entrada" },
       { "nombre": "lote agotado", "cambios": { "stock_disponible": 0 }, "acepta": true },
-      { "nombre": "cantidad negativa", "cambios": { "stock_disponible": -1 }, "acepta": false },
-      { "nombre": "código en blanco", "cambios": { "codigo_lote": "   " }, "acepta": false },
-      { "nombre": "sin producto", "cambios": { "id_producto": "  " }, "acepta": false }
+      { "nombre": "cantidad negativa", "cambios": { "stock_disponible": -1 }, "acepta": false, "mensaje": "Cantidad inválida" },
+      { "nombre": "código en blanco", "cambios": { "codigo_lote": "   " }, "acepta": false, "mensaje": "Escribe el código del lote." },
+      { "nombre": "sin producto", "cambios": { "id_producto": "  " }, "acepta": false, "mensaje": "Falta el producto." }
     ]
   },
   "lote_edicion": {
@@ -64,11 +64,11 @@
     "casos": [
       { "nombre": "la base es válida", "cambios": {}, "acepta": true },
       { "nombre": "caducidad real y la entrada que ya tenía", "cambios": { "caducidad": "2026-12-31", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": true },
-      { "nombre": "caducidad en formato español", "cambios": { "caducidad": "31/12/2026" }, "acepta": false },
-      { "nombre": "caducidad con texto detrás", "cambios": { "caducidad": "2026-12-31basura" }, "acepta": false },
-      { "nombre": "entrada con texto detrás", "cambios": { "fecha_entrada": "2026-07-22 basura" }, "acepta": false },
-      { "nombre": "caduca antes de entrar", "cambios": { "caducidad": "2026-07-21", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": false },
-      { "nombre": "sin lote", "cambios": { "id_lote": "  " }, "acepta": false }
+      { "nombre": "caducidad en formato español", "cambios": { "caducidad": "31/12/2026" }, "acepta": false, "mensaje": "Caducidad con formato inválido (se espera YYYY-MM-DD)" },
+      { "nombre": "caducidad con texto detrás", "cambios": { "caducidad": "2026-12-31basura" }, "acepta": false, "mensaje": "Caducidad con formato inválido (se espera YYYY-MM-DD)" },
+      { "nombre": "entrada con texto detrás", "cambios": { "fecha_entrada": "2026-07-22 basura" }, "acepta": false, "mensaje": "La fecha de entrada no tiene un formato válido." },
+      { "nombre": "caduca antes de entrar", "cambios": { "caducidad": "2026-07-21", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": false, "mensaje": "La caducidad no puede ser anterior a la fecha de entrada" },
+      { "nombre": "sin lote", "cambios": { "id_lote": "  " }, "acepta": false, "mensaje": "Falta el lote." }
     ]
   },
   "negocio": {
@@ -82,16 +82,16 @@
       { "nombre": "IVA con decimales", "cambios": { "iva_percent": 10.5 }, "acepta": true },
       { "nombre": "IVA por encima de 30: sigue siendo un porcentaje", "cambios": { "iva_percent": 35 }, "acepta": true },
       { "nombre": "IVA del cien por cien", "cambios": { "iva_percent": 100 }, "acepta": true },
-      { "nombre": "IVA justo por encima de cien", "cambios": { "iva_percent": 100.01 }, "acepta": false },
-      { "nombre": "210 tecleado por 21", "cambios": { "iva_percent": 210 }, "acepta": false },
-      { "nombre": "IVA justo por debajo de cero", "cambios": { "iva_percent": -0.01 }, "acepta": false },
-      { "nombre": "IVA negativo", "cambios": { "iva_percent": -21 }, "acepta": false },
+      { "nombre": "IVA justo por encima de cien", "cambios": { "iva_percent": 100.01 }, "acepta": false, "mensaje": "El IVA tiene que ser un número entre 0 y 100" },
+      { "nombre": "210 tecleado por 21", "cambios": { "iva_percent": 210 }, "acepta": false, "mensaje": "El IVA tiene que ser un número entre 0 y 100" },
+      { "nombre": "IVA justo por debajo de cero", "cambios": { "iva_percent": -0.01 }, "acepta": false, "mensaje": "El IVA tiene que ser un número entre 0 y 100" },
+      { "nombre": "IVA negativo", "cambios": { "iva_percent": -21 }, "acepta": false, "mensaje": "El IVA tiene que ser un número entre 0 y 100" },
       { "nombre": "«No vino» nunca", "cambios": { "reserva_no_vino_min": 0 }, "acepta": true, "queda": { "reserva_no_vino_min": 0 } },
       { "nombre": "«No vino» a la media hora", "cambios": { "reserva_no_vino_min": 30 }, "acepta": true, "queda": { "reserva_no_vino_min": 30 } },
       { "nombre": "«No vino» al cabo de un día", "cambios": { "reserva_no_vino_min": 1440 }, "acepta": true, "queda": { "reserva_no_vino_min": 1440 } },
-      { "nombre": "«No vino» negativo", "cambios": { "reserva_no_vino_min": -1 }, "acepta": false },
-      { "nombre": "«No vino» a más de un día", "cambios": { "reserva_no_vino_min": 1441 }, "acepta": false },
-      { "nombre": "«No vino» con decimales", "cambios": { "reserva_no_vino_min": 2.5 }, "acepta": false }
+      { "nombre": "«No vino» negativo", "cambios": { "reserva_no_vino_min": -1 }, "acepta": false, "mensaje": "«No vino» se marca entre 0 (nunca) y 24 horas después de la hora de la reserva" },
+      { "nombre": "«No vino» a más de un día", "cambios": { "reserva_no_vino_min": 1441 }, "acepta": false, "mensaje": "«No vino» se marca entre 0 (nunca) y 24 horas después de la hora de la reserva" },
+      { "nombre": "«No vino» con decimales", "cambios": { "reserva_no_vino_min": 2.5 }, "acepta": false, "mensaje": "«No vino» se marca entre 0 (nunca) y 24 horas después de la hora de la reserva" }
     ]
   },
   "producto": {
@@ -103,25 +103,25 @@
       { "nombre": "IVA general", "cambios": { "iva_percent": 21 }, "acepta": true, "queda": { "iva_percent": 21 } },
       { "nombre": "IVA con decimales", "cambios": { "iva_percent": 10.5 }, "acepta": true, "queda": { "iva_percent": 10.5 } },
       { "nombre": "IVA del cien por cien", "cambios": { "iva_percent": 100 }, "acepta": true },
-      { "nombre": "IVA justo por encima de cien", "cambios": { "iva_percent": 100.01 }, "acepta": false },
-      { "nombre": "IVA del 150", "cambios": { "iva_percent": 150 }, "acepta": false },
-      { "nombre": "210 tecleado por 21: se rechaza, no pasa a ser el del negocio", "cambios": { "iva_percent": 210 }, "acepta": false },
-      { "nombre": "IVA negativo", "cambios": { "iva_percent": -1 }, "acepta": false },
-      { "nombre": "nombre en blanco", "cambios": { "nombre": "   " }, "acepta": false },
+      { "nombre": "IVA justo por encima de cien", "cambios": { "iva_percent": 100.01 }, "acepta": false, "mensaje": "El IVA tiene que ser un número entre 0 y 100" },
+      { "nombre": "IVA del 150", "cambios": { "iva_percent": 150 }, "acepta": false, "mensaje": "El IVA tiene que ser un número entre 0 y 100" },
+      { "nombre": "210 tecleado por 21: se rechaza, no pasa a ser el del negocio", "cambios": { "iva_percent": 210 }, "acepta": false, "mensaje": "El IVA tiene que ser un número entre 0 y 100" },
+      { "nombre": "IVA negativo", "cambios": { "iva_percent": -1 }, "acepta": false, "mensaje": "El IVA tiene que ser un número entre 0 y 100" },
+      { "nombre": "nombre en blanco", "cambios": { "nombre": "   " }, "acepta": false, "mensaje": "Escribe el nombre del producto." },
       { "nombre": "VALID-01: U+0085 es un espacio y se recorta", "cambios": { "nombre": "\u0085Café\u0085" }, "acepta": true, "queda": { "nombre": "Café" } },
-      { "nombre": "VALID-01: un nombre que sólo es U+0085 está en blanco", "cambios": { "nombre": "\u0085" }, "acepta": false },
+      { "nombre": "VALID-01: un nombre que sólo es U+0085 está en blanco", "cambios": { "nombre": "\u0085" }, "acepta": false, "mensaje": "Escribe el nombre del producto." },
       { "nombre": "VALID-01: U+FEFF no es un espacio y se queda", "cambios": { "nombre": "\ufeffCafé" }, "acepta": true, "queda": { "nombre": "\ufeffCafé" } },
-      { "nombre": "sin categoría", "cambios": { "id_categoria": "  " }, "acepta": false }
+      { "nombre": "sin categoría", "cambios": { "id_categoria": "  " }, "acepta": false, "mensaje": "Elige la categoría del producto." }
     ]
   },
   "horario_alta": {
     "base": { "id_trabajador": "t1", "fecha": "2026-03-03", "id_turno": "turno-1", "area": "Sala" },
     "casos": [
       { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "fecha": "2026-03-03" } },
-      { "nombre": "31 de febrero: no pasa a ser 3 de marzo", "cambios": { "fecha": "2026-02-31" }, "acepta": false },
-      { "nombre": "fecha en formato español", "cambios": { "fecha": "03/03/2026" }, "acepta": false },
-      { "nombre": "fecha sin relleno de ceros", "cambios": { "fecha": "2026-3-3" }, "acepta": false },
-      { "nombre": "fecha vacía", "cambios": { "fecha": "" }, "acepta": false },
+      { "nombre": "31 de febrero: no pasa a ser 3 de marzo", "cambios": { "fecha": "2026-02-31" }, "acepta": false, "mensaje": "El día del turno no es válido." },
+      { "nombre": "fecha en formato español", "cambios": { "fecha": "03/03/2026" }, "acepta": false, "mensaje": "El día del turno no es válido." },
+      { "nombre": "fecha sin relleno de ceros", "cambios": { "fecha": "2026-3-3" }, "acepta": false, "mensaje": "El día del turno no es válido." },
+      { "nombre": "fecha vacía", "cambios": { "fecha": "" }, "acepta": false, "mensaje": "El día del turno no es válido." },
       { "nombre": "fecha con espacios alrededor", "cambios": { "fecha": " 2026-03-03 " }, "acepta": true, "queda": { "fecha": "2026-03-03" } },
       { "nombre": "fecha con hora detrás: se queda la fecha", "cambios": { "fecha": "2026-03-03T00:00:00" }, "acepta": true, "queda": { "fecha": "2026-03-03" } }
     ]
@@ -130,10 +130,10 @@
     "base": { "from_monday": "2026-03-02", "to_monday": "2026-03-09", "overwrite": false },
     "casos": [
       { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "from_monday": "2026-03-02", "to_monday": "2026-03-09" } },
-      { "nombre": "origen el 31 de febrero", "cambios": { "from_monday": "2026-02-31" }, "acepta": false },
-      { "nombre": "destino en formato español", "cambios": { "to_monday": "09/03/2026" }, "acepta": false },
-      { "nombre": "destino en el mes 13", "cambios": { "to_monday": "2026-13-01" }, "acepta": false },
-      { "nombre": "origen vacío", "cambios": { "from_monday": "" }, "acepta": false },
+      { "nombre": "origen el 31 de febrero", "cambios": { "from_monday": "2026-02-31" }, "acepta": false, "mensaje": "La semana de origen no es válida." },
+      { "nombre": "destino en formato español", "cambios": { "to_monday": "09/03/2026" }, "acepta": false, "mensaje": "La semana de destino no es válida." },
+      { "nombre": "destino en el mes 13", "cambios": { "to_monday": "2026-13-01" }, "acepta": false, "mensaje": "La semana de destino no es válida." },
+      { "nombre": "origen vacío", "cambios": { "from_monday": "" }, "acepta": false, "mensaje": "La semana de origen no es válida." },
       { "nombre": "origen con hora detrás: se queda la fecha", "cambios": { "from_monday": "2026-03-02 00:00:00" }, "acepta": true, "queda": { "from_monday": "2026-03-02" } }
     ]
   },
@@ -141,9 +141,9 @@
     "base": { "fecha_lunes": "2026-03-02" },
     "casos": [
       { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "fecha_lunes": "2026-03-02" } },
-      { "nombre": "lunes en el mes 13", "cambios": { "fecha_lunes": "2026-13-01" }, "acepta": false },
-      { "nombre": "lunes que no es una fecha", "cambios": { "fecha_lunes": "lunes" }, "acepta": false },
-      { "nombre": "lunes el 30 de febrero", "cambios": { "fecha_lunes": "2026-02-30" }, "acepta": false },
+      { "nombre": "lunes en el mes 13", "cambios": { "fecha_lunes": "2026-13-01" }, "acepta": false, "mensaje": "La semana no es válida." },
+      { "nombre": "lunes que no es una fecha", "cambios": { "fecha_lunes": "lunes" }, "acepta": false, "mensaje": "La semana no es válida." },
+      { "nombre": "lunes el 30 de febrero", "cambios": { "fecha_lunes": "2026-02-30" }, "acepta": false, "mensaje": "La semana no es válida." },
       { "nombre": "lunes con espacios alrededor", "cambios": { "fecha_lunes": " 2026-03-02 " }, "acepta": true, "queda": { "fecha_lunes": "2026-03-02" } }
     ]
   },
@@ -152,33 +152,33 @@
     "casos": [
       { "nombre": "la base es válida", "cambios": {}, "acepta": true, "queda": { "dia_ymd": "2026-11-20", "hora": "21:00", "nombre": "Ana", "email": "ana@correo.es", "telefono": "600112233", "nota": null } },
       { "nombre": "VALID-01: el nombre, el correo y la nota se recortan como en la Main", "cambios": { "nombre": "\u0085Ana\u0085", "email": " Ana@Correo.es\u0085", "nota": "\u0085Cumpleaños\ufeff" }, "acepta": true, "queda": { "nombre": "Ana", "email": "ana@correo.es", "nota": "Cumpleaños\ufeff" } },
-      { "nombre": "VALID-01: un nombre que sólo es U+0085 está en blanco", "cambios": { "nombre": "\u0085" }, "acepta": false },
-      { "nombre": "día imposible", "cambios": { "dia_ymd": "2026-02-30" }, "acepta": false },
+      { "nombre": "VALID-01: un nombre que sólo es U+0085 está en blanco", "cambios": { "nombre": "\u0085" }, "acepta": false, "mensaje": "Escribe tu nombre" },
+      { "nombre": "día imposible", "cambios": { "dia_ymd": "2026-02-30" }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
       { "nombre": "día con hora detrás", "cambios": { "dia_ymd": "2026-11-20T21:00:00Z" }, "acepta": true, "queda": { "dia_ymd": "2026-11-20" } },
-      { "nombre": "hora 24:00", "cambios": { "hora": "24:00" }, "acepta": false },
+      { "nombre": "hora 24:00", "cambios": { "hora": "24:00" }, "acepta": false, "mensaje": "Hora inválida. Esperado HH:MM." },
       { "nombre": "hora con segundos", "cambios": { "hora": "21:00:59" }, "acepta": true, "queda": { "hora": "21:00" } },
-      { "nombre": "cero personas", "cambios": { "personas": 0 }, "acepta": false },
+      { "nombre": "cero personas", "cambios": { "personas": 0 }, "acepta": false, "mensaje": "El número de personas tiene que estar entre 1 y 50" },
       { "nombre": "cincuenta personas", "cambios": { "personas": 50 }, "acepta": true },
-      { "nombre": "cincuenta y una personas", "cambios": { "personas": 51 }, "acepta": false },
-      { "nombre": "sin mesa", "cambios": { "id_mesa": "  " }, "acepta": false },
+      { "nombre": "cincuenta y una personas", "cambios": { "personas": 51 }, "acepta": false, "mensaje": "El número de personas tiene que estar entre 1 y 50" },
+      { "nombre": "sin mesa", "cambios": { "id_mesa": "  " }, "acepta": false, "mensaje": "Elige una mesa" },
       { "nombre": "nombre con espacios alrededor", "cambios": { "nombre": "  Ana López " }, "acepta": true, "queda": { "nombre": "Ana López" } },
-      { "nombre": "sin nombre", "cambios": { "nombre": "   " }, "acepta": false },
+      { "nombre": "sin nombre", "cambios": { "nombre": "   " }, "acepta": false, "mensaje": "Escribe tu nombre" },
       { "nombre": "nombre de 80 letras", "cambios": { "nombre": "ññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññ" }, "acepta": true },
-      { "nombre": "nombre de 81 letras", "cambios": { "nombre": "ñññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññ" }, "acepta": false },
+      { "nombre": "nombre de 81 letras", "cambios": { "nombre": "ñññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññññ" }, "acepta": false, "mensaje": "El nombre no puede pasar de 80 caracteres" },
       { "nombre": "correo en mayúsculas y con espacios", "cambios": { "email": " Ana@Correo.ES " }, "acepta": true, "queda": { "email": "ana@correo.es" } },
-      { "nombre": "correo sin arroba", "cambios": { "email": "ana.correo.es" }, "acepta": false },
-      { "nombre": "sin correo", "cambios": { "email": "" }, "acepta": false },
+      { "nombre": "correo sin arroba", "cambios": { "email": "ana.correo.es" }, "acepta": false, "mensaje": "El correo no es válido" },
+      { "nombre": "sin correo", "cambios": { "email": "" }, "acepta": false, "mensaje": "El correo no es válido" },
       { "nombre": "teléfono con prefijo y guiones", "cambios": { "telefono": "+34 600-112-233" }, "acepta": true, "queda": { "telefono": "+34600112233" } },
-      { "nombre": "teléfono con letras", "cambios": { "telefono": "600abc233" }, "acepta": false },
-      { "nombre": "teléfono de cinco cifras", "cambios": { "telefono": "12345" }, "acepta": false },
-      { "nombre": "sin teléfono", "cambios": { "telefono": "" }, "acepta": false },
+      { "nombre": "teléfono con letras", "cambios": { "telefono": "600abc233" }, "acepta": false, "mensaje": "El teléfono no es válido" },
+      { "nombre": "teléfono de cinco cifras", "cambios": { "telefono": "12345" }, "acepta": false, "mensaje": "El teléfono no es válido" },
+      { "nombre": "sin teléfono", "cambios": { "telefono": "" }, "acepta": false, "mensaje": "El teléfono no es válido" },
       { "nombre": "nota en blanco: sin nota", "cambios": { "nota": "   " }, "acepta": true, "queda": { "nota": null } },
-      { "nombre": "nombre que no es texto (un objeto con toString roto)", "cambios": { "nombre": { "toString": null } }, "acepta": false },
-      { "nombre": "teléfono como número", "cambios": { "telefono": 600112233 }, "acepta": false },
-      { "nombre": "día como objeto", "cambios": { "dia_ymd": { "toString": null } }, "acepta": false },
-      { "nombre": "hora como objeto", "cambios": { "hora": { "toString": null } }, "acepta": false },
+      { "nombre": "nombre que no es texto (un objeto con toString roto)", "cambios": { "nombre": { "toString": null } }, "acepta": false, "mensaje": "Escribe tu nombre" },
+      { "nombre": "teléfono como número", "cambios": { "telefono": 600112233 }, "acepta": false, "mensaje": "El teléfono no es válido" },
+      { "nombre": "día como objeto", "cambios": { "dia_ymd": { "toString": null } }, "acepta": false, "mensaje": "Formato de día inválido. Esperado YYYY-MM-DD." },
+      { "nombre": "hora como objeto", "cambios": { "hora": { "toString": null } }, "acepta": false, "mensaje": "Hora inválida. Esperado HH:MM." },
       { "nombre": "nota que no es texto: sin nota", "cambios": { "nota": { "toString": null } }, "acepta": true, "queda": { "nota": null } },
-      { "nombre": "nota de 201 letras", "cambios": { "nota": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, "acepta": false }
+      { "nombre": "nota de 201 letras", "cambios": { "nota": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }, "acepta": false, "mensaje": "La nota no puede pasar de 200 caracteres" }
     ]
   },
   "reserva_estado_mesa": {
@@ -186,10 +186,10 @@
     "casos": [
       { "nombre": "el cliente ha llegado", "cambios": {}, "acepta": true, "queda": { "estado": "ACTIVA" } },
       { "nombre": "el cliente se ha ido, en minúsculas y con espacios", "cambios": { "estado": " finalizada " }, "acepta": true, "queda": { "estado": "FINALIZADA" } },
-      { "nombre": "cancelar tiene su propia acción", "cambios": { "estado": "CANCELADA" }, "acepta": false },
-      { "nombre": "«No vino» lo pone el job", "cambios": { "estado": "NO_SHOW" }, "acepta": false },
-      { "nombre": "volver a «por llegar»", "cambios": { "estado": "PROXIMA" }, "acepta": false },
-      { "nombre": "un estado que no existe", "cambios": { "estado": "SENTADA" }, "acepta": false }
+      { "nombre": "cancelar tiene su propia acción", "cambios": { "estado": "CANCELADA" }, "acepta": false, "mensaje": "Desde la mesa sólo se marca que el cliente ha llegado o que se ha ido" },
+      { "nombre": "«No vino» lo pone el job", "cambios": { "estado": "NO_SHOW" }, "acepta": false, "mensaje": "Desde la mesa sólo se marca que el cliente ha llegado o que se ha ido" },
+      { "nombre": "volver a «por llegar»", "cambios": { "estado": "PROXIMA" }, "acepta": false, "mensaje": "Desde la mesa sólo se marca que el cliente ha llegado o que se ha ido" },
+      { "nombre": "un estado que no existe", "cambios": { "estado": "SENTADA" }, "acepta": false, "mensaje": "Desde la mesa sólo se marca que el cliente ha llegado o que se ha ido" }
     ]
   },
   "plano": {
@@ -205,31 +205,31 @@
       ] }, "acepta": true, "queda": { "salons": [{ "name": "Terraza", "tables": [{ "name": "T1" }] }] } },
       { "nombre": "un plano sin zonas", "cambios": { "salons": [] }, "acepta": true },
       { "nombre": "una zona sin mesas", "cambios": { "salons": [{ "id": "", "name": "Barra", "room": { "points": [] }, "tables": [] }] }, "acepta": true },
-      { "nombre": "una zona sin nombre", "cambios": { "salons": [{ "id": "", "name": "", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
-      { "nombre": "una zona con sólo espacios", "cambios": { "salons": [{ "id": "", "name": "   ", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
-      { "nombre": "U+0085 también es un espacio", "cambios": { "salons": [{ "id": "", "name": "\u0085", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
+      { "nombre": "una zona sin nombre", "cambios": { "salons": [{ "id": "", "name": "", "room": { "points": [] }, "tables": [] }] }, "acepta": false, "mensaje": "Cada zona necesita un nombre" },
+      { "nombre": "una zona con sólo espacios", "cambios": { "salons": [{ "id": "", "name": "   ", "room": { "points": [] }, "tables": [] }] }, "acepta": false, "mensaje": "Cada zona necesita un nombre" },
+      { "nombre": "U+0085 también es un espacio", "cambios": { "salons": [{ "id": "", "name": "\u0085", "room": { "points": [] }, "tables": [] }] }, "acepta": false, "mensaje": "Cada zona necesita un nombre" },
       { "nombre": "U+FEFF no lo es: se queda en el nombre", "cambios": { "salons": [
         { "id": "", "name": "\ufeffBarra", "room": { "points": [] }, "tables": [{ "id": "", "name": "\ufeff" }] }
       ] }, "acepta": true, "queda": { "salons": [{ "name": "\ufeffBarra", "tables": [{ "name": "\ufeff" }] }] } },
       { "nombre": "dos zonas con el mismo nombre", "cambios": { "salons": [
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] },
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] }
-      ] }, "acepta": false },
+      ] }, "acepta": false, "mensaje": "Nombre de zona duplicado: «Terraza»" },
       { "nombre": "el mismo nombre con espacios alrededor es el mismo", "cambios": { "salons": [
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] },
         { "id": "", "name": " Terraza ", "room": { "points": [] }, "tables": [] }
-      ] }, "acepta": false },
+      ] }, "acepta": false, "mensaje": "Nombre de zona duplicado: «Terraza»" },
       { "nombre": "con otras mayúsculas es otra zona, como en la base", "cambios": { "salons": [
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] },
         { "id": "", "name": "terraza", "room": { "points": [] }, "tables": [] }
       ] }, "acepta": true },
       { "nombre": "una mesa sin nombre", "cambios": { "salons": [
         { "id": "", "name": "Salón", "room": { "points": [] }, "tables": [{ "id": "", "name": "1" }, { "id": "", "name": "" }] }
-      ] }, "acepta": false },
+      ] }, "acepta": false, "mensaje": "Cada mesa necesita un nombre" },
       { "nombre": "una mesa con sólo espacios, en la segunda zona", "cambios": { "salons": [
         { "id": "", "name": "Salón", "room": { "points": [] }, "tables": [{ "id": "", "name": "1" }] },
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [{ "id": "", "name": "  " }] }
-      ] }, "acepta": false },
+      ] }, "acepta": false, "mensaje": "Cada mesa necesita un nombre" },
       { "nombre": "dos mesas con el mismo nombre en una zona: la base las junta", "cambios": { "salons": [
         { "id": "", "name": "Salón", "room": { "points": [] }, "tables": [{ "id": "", "name": "1" }, { "id": "", "name": "1" }] }
       ] }, "acepta": true }

@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn textos_requeridos_y_opcionales_se_limpian() {
         assert_eq!(requerido(" admin ", "rol").unwrap(), "admin");
-        assert_eq!(requerido(" ", "rol").unwrap_err(), "rol required");
+        assert_eq!(requerido(" ", "Elige un rol.").unwrap_err(), "Elige un rol.");
         assert_eq!(limpiar_opcional(Some(" Ana ".into())), Some("Ana".into()));
         assert_eq!(limpiar_opcional(Some("\t".into())), None);
         assert_eq!(limpiar_opcional(None), None);

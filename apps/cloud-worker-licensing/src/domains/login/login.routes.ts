@@ -76,7 +76,7 @@ loginRoutes.post("/login", cuerpo(S.loginUserSchema), async (c) => {
 
 loginRoutes.get("/:id/punch-status", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_usuario invalido");
+	if (id == null) return badRequest(c, "id_usuario_invalido");
 	return c.json(await tenantQuery(c, (db) => q.punchStatus(db, id)));
 });
 

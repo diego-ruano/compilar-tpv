@@ -58,11 +58,11 @@ pub async fn create_tarea(
     notifier: Option<&dyn Notifier>,
     input: CreateTareaInput,
 ) -> AppResult<bool> {
-    let titulo = requerido(&input.titulo, "titulo").map_err(AppError::validation)?;
+    let titulo = requerido(&input.titulo, "Escribe el título de la tarea.").map_err(AppError::validation)?;
     let ids_trabajadores = normalizar_ids(input.ids_trabajadores);
 
     if ids_trabajadores.is_empty() {
-        return Err(AppError::validation("ids_trabajadores required"));
+        return Err(AppError::validation("Asigna la tarea a alguien."));
     }
 
     let data = TareaData {
@@ -142,10 +142,10 @@ pub async fn update_tarea(
     input: UpdateTareaInput,
 ) -> AppResult<bool> {
     if input.id_tarea.trim().is_empty() {
-        return Err(AppError::validation("id_tarea required"));
+        return Err(AppError::validation("Falta la tarea."));
     }
 
-    let titulo = requerido(&input.titulo, "titulo").map_err(AppError::validation)?;
+    let titulo = requerido(&input.titulo, "Escribe el título de la tarea.").map_err(AppError::validation)?;
 
     let data = TareaData {
         titulo: titulo.clone(),
@@ -187,7 +187,7 @@ pub async fn set_asignaciones(
     input: SetAsignacionesTareaInput,
 ) -> AppResult<bool> {
     if input.id_tarea.trim().is_empty() {
-        return Err(AppError::validation("id_tarea required"));
+        return Err(AppError::validation("Falta la tarea."));
     }
 
     let ids_nuevos = normalizar_ids(input.ids_trabajadores);
@@ -242,7 +242,7 @@ pub async fn set_asignaciones(
 
 pub async fn delete_tarea(repo: &dyn TareasRepository, args: TareaIdArgs) -> AppResult<bool> {
     if args.id_tarea.trim().is_empty() {
-        return Err(AppError::validation("id_tarea required"));
+        return Err(AppError::validation("Falta la tarea."));
     }
     repo.delete_tarea(&args.id_tarea).await
 }
@@ -254,7 +254,7 @@ pub async fn get_papelera(repo: &dyn TareasRepository) -> AppResult<Vec<TareaAdm
 
 pub async fn restaurar_tarea(repo: &dyn TareasRepository, args: TareaIdArgs) -> AppResult<bool> {
     if args.id_tarea.trim().is_empty() {
-        return Err(AppError::validation("id_tarea required"));
+        return Err(AppError::validation("Falta la tarea."));
     }
     repo.restaurar_tarea(&args.id_tarea).await
 }
@@ -267,8 +267,11 @@ pub async fn marcar_finalizada(
     repo: &dyn TareasRepository,
     input: FinalizarTareaInput,
 ) -> AppResult<bool> {
-    if input.id_tarea.trim().is_empty() || input.id_trabajador.trim().is_empty() {
-        return Err(AppError::validation("id_tarea/id_trabajador required"));
+    if input.id_tarea.trim().is_empty() {
+        return Err(AppError::validation("Falta la tarea."));
+    }
+    if input.id_trabajador.trim().is_empty() {
+        return Err(AppError::validation("Falta el trabajador."));
     }
     repo.marcar_finalizada(&input.id_tarea, &input.id_trabajador)
         .await

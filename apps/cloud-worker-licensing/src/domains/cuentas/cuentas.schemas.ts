@@ -28,9 +28,9 @@ function cleanOptional(v: unknown): string | null {
 
 export const createGastoSchema = z.object({
 	id_gasto: idStr.optional().nullish(),
-	fecha: z.string().transform(clean).refine(Boolean, "fecha required"),
-	tipo_gasto: z.string().transform(clean).refine(Boolean, "tipo_gasto required"),
-	concepto: z.string().transform(clean).refine(Boolean, "concepto required"),
+	fecha: z.string().transform(clean).refine(Boolean, "Indica la fecha del gasto."),
+	tipo_gasto: z.string().transform(clean).refine(Boolean, "Elige el tipo de gasto."),
+	concepto: z.string().transform(clean).refine(Boolean, "Escribe el concepto del gasto."),
 	importe: money,
 	proveedor_id: idStr.optional().nullish(),
 	// CAJA-01: el gasto se pagó con dinero del cajón. Ausente = no.
@@ -40,7 +40,7 @@ export const createGastoSchema = z.object({
 export const updateGastoSchema = createGastoSchema.omit({ id_gasto: true });
 
 export const updatePagoSchema = z.object({
-	fecha_hora: z.string().transform(clean).refine(Boolean, "fecha_hora required"),
+	fecha_hora: z.string().transform(clean).refine(Boolean, "Indica la fecha y la hora del cobro."),
 	metodo: zMetodoPago,
 	importe: money,
 });
@@ -55,7 +55,7 @@ export const updatePagoSchema = z.object({
 // vetada a todo lo que no sea la Main (`soloLaMainEscribeCaja`).
 export const anularPagoSchema = z.object({
 	id_usuario: idStr,
-	motivo: z.string().transform(clean).refine(Boolean, "motivo required"),
+	motivo: z.string().transform(clean).refine(Boolean, "Escribe el motivo de la anulación: queda registrado con tu nombre."),
 	// FISCAL-01: cuál de los dos instrumentos legales se usa. Ausente = "ERROR", que es lo que
 	// hacía el botón único antes de partirlo, así que un cliente antiguo sigue haciendo lo mismo.
 	//

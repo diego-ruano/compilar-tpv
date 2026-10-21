@@ -15,7 +15,9 @@ use crate::inventario::{
 };
 use crate::reservas::{ReservaEntrada, ReservaValidada};
 use crate::reservas_web::{AltaWebEntrada, AltaWebValidada};
-use crate::trabajadores::dia_de_horario;
+use crate::trabajadores::{
+    dia_de_horario, MSG_DIA_DEL_TURNO, MSG_SEMANA, MSG_SEMANA_DESTINO, MSG_SEMANA_ORIGEN,
+};
 
 fn texto(e: &Value, campo: &str) -> String {
     e[campo].as_str().unwrap_or_default().to_string()
@@ -141,12 +143,12 @@ fn producto(e: &Value) -> Result<Value, String> {
     Ok(json!({ "iva_percent": p.iva_percent, "nombre": p.nombre }))
 }
 
-/// Los días de un horario: cada campo de `campos` pasa por `dia_de_horario`, como en los casos de
+/// Los días de un horario: cada campo pasa por `dia_de_horario` con la frase que le da su caso de
 /// uso de trabajadores.
-fn dias_de_horario(e: &Value, campos: &[&str]) -> Result<Value, String> {
+fn dias_de_horario(e: &Value, campos: &[(&str, &str)]) -> Result<Value, String> {
     let mut normalizado = Map::new();
-    for campo in campos {
-        normalizado.insert((*campo).into(), dia_de_horario(&texto(e, campo), campo)?.into());
+    for (campo, mensaje) in campos {
+        normalizado.insert((*campo).into(), dia_de_horario(&texto(e, campo), mensaje)?.into());
     }
     Ok(Value::Object(normalizado))
 }
@@ -179,9 +181,12 @@ fn validar(dominio: &str, entrada: &Value) -> Result<Value, String> {
         "lote_edicion" => lote_edicion(entrada),
         "negocio" => negocio(entrada),
         "producto" => producto(entrada),
-        "horario_alta" => dias_de_horario(entrada, &["fecha"]),
-        "horario_copia" => dias_de_horario(entrada, &["from_monday", "to_monday"]),
-        "horario_semana" => dias_de_horario(entrada, &["fecha_lunes"]),
+        "horario_alta" => dias_de_horario(entrada, &[("fecha", MSG_DIA_DEL_TURNO)]),
+        "horario_copia" => dias_de_horario(
+            entrada,
+            &[("from_monday", MSG_SEMANA_ORIGEN), ("to_monday", MSG_SEMANA_DESTINO)],
+        ),
+        "horario_semana" => dias_de_horario(entrada, &[("fecha_lunes", MSG_SEMANA)]),
         "reserva_web" => reserva_web(entrada),
         "reserva_estado_mesa" => crate::reservas::estado_desde_la_mesa(&texto(entrada, "estado"))
             .map(|e| json!({ "estado": e.como_texto() })),
@@ -216,6 +221,11 @@ fn la_validacion_cuadra_con_la_tabla_compartida() {
             let resultado = validar(dominio, &Value::Object(entrada));
             let acepta = caso["acepta"].as_bool().expect("un caso sin «acepta»");
             assert_eq!(resultado.is_ok(), acepta, "{dominio} · {nombre}: {resultado:?}");
+
+            // VALID-03: lo que se le dice a quien está delante, el mismo texto en los dos lados.
+            if let (Err(motivo), Some(mensaje)) = (&resultado, caso["mensaje"].as_str()) {
+                assert_eq!(motivo, mensaje, "{dominio} · {nombre}: el mensaje");
+            }
 
             if let (Ok(normalizado), Some(queda)) = (&resultado, caso["queda"].as_object()) {
                 for (campo, esperado) in queda {

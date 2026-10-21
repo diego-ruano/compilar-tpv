@@ -10,7 +10,8 @@ use tpv_contracts::trabajadores::{
 use tpv_domain::login::pin_de_teclado;
 use tpv_domain::trabajadores::{
     dia_de_horario, limpiar_opcional, normalizar_estado, requerido, AsignacionCambios, AsignacionNueva,
-    TrabajadorCambios, TrabajadorNuevo,
+    TrabajadorCambios, TrabajadorNuevo, MSG_DIA_DEL_TURNO, MSG_SEMANA, MSG_SEMANA_DESTINO,
+    MSG_SEMANA_ORIGEN,
 };
 
 use crate::error::{AppError, AppResult};
@@ -31,7 +32,7 @@ pub async fn get_detail(
     args: TrabajadorDetailArgs,
 ) -> AppResult<Option<TrabajadorDetailRow>> {
     if args.id_trabajador.trim().is_empty() {
-        return Err(AppError::validation("id_trabajador required"));
+        return Err(AppError::validation("Falta el trabajador."));
     }
     repo.get_detail(&args.id_trabajador).await
 }
@@ -54,17 +55,18 @@ pub async fn get_asignaciones_semana(
     repo: &dyn TrabajadoresRepository,
     args: HorariosSemanaArgs,
 ) -> AppResult<Vec<AsignacionRow>> {
-    let fecha_lunes = dia_de_horario(&args.fecha_lunes, "fecha_lunes").map_err(AppError::validation)?;
+    let fecha_lunes = dia_de_horario(&args.fecha_lunes, MSG_SEMANA).map_err(AppError::validation)?;
     repo.get_asignaciones_semana(fecha_lunes).await
 }
 
 /* Escrituras */
 
 pub async fn guardar_asignacion(repo: &dyn TrabajadoresRepository, input: AsignacionGuardarInput) -> AppResult<bool> {
-    let id_trabajador = requerido(&input.id_trabajador, "id_trabajador").map_err(AppError::validation)?;
-    let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
-    let id_turno = requerido(&input.id_turno, "id_turno").map_err(AppError::validation)?;
-    let area = requerido(&input.area, "area").map_err(AppError::validation)?;
+    let id_trabajador = requerido(&input.id_trabajador, "Falta el trabajador.").map_err(AppError::validation)?;
+    // Vacía, la misma frase con la que `intervalo_horario` rechaza una fecha que no es un día real.
+    let fecha = requerido(&input.fecha, "La fecha del horario no es válida").map_err(AppError::validation)?;
+    let id_turno = requerido(&input.id_turno, "Elige un turno.").map_err(AppError::validation)?;
+    let area = requerido(&input.area, "Elige el área.").map_err(AppError::validation)?;
     let notas = limpiar_opcional(input.notas);
     let tramos: Vec<_> = input.tramos.into_iter().map(|tramo| AsignacionNueva {
         id_trabajador: id_trabajador.clone(), fecha: fecha.clone(), id_turno: id_turno.clone(),
@@ -79,14 +81,17 @@ pub async fn create_asignacion(
     repo: &dyn TrabajadoresRepository,
     input: AsignacionCreateInput,
 ) -> AppResult<bool> {
-    if input.id_trabajador.trim().is_empty() || input.id_turno.trim().is_empty() {
-        return Err(AppError::validation("id_trabajador/id_turno required"));
+    if input.id_trabajador.trim().is_empty() {
+        return Err(AppError::validation("Falta el trabajador."));
+    }
+    if input.id_turno.trim().is_empty() {
+        return Err(AppError::validation("Elige un turno."));
     }
 
     // RI-78: una fecha real. El caso de uso es la única validación que corre igual en la Main y
     // en la Handy (el repositorio HTTP no comprueba nada).
-    let fecha = dia_de_horario(&input.fecha, "fecha").map_err(AppError::validation)?;
-    let area = requerido(&input.area, "area").map_err(AppError::validation)?;
+    let fecha = dia_de_horario(&input.fecha, MSG_DIA_DEL_TURNO).map_err(AppError::validation)?;
+    let area = requerido(&input.area, "Elige el área.").map_err(AppError::validation)?;
 
     let data = AsignacionNueva {
         id_trabajador: input.id_trabajador,
@@ -105,11 +110,14 @@ pub async fn update_asignacion(
     repo: &dyn TrabajadoresRepository,
     input: AsignacionUpdateInput,
 ) -> AppResult<bool> {
-    if input.id_asignacion.trim().is_empty() || input.id_turno.trim().is_empty() {
-        return Err(AppError::validation("id_asignacion/id_turno required"));
+    if input.id_asignacion.trim().is_empty() {
+        return Err(AppError::validation("Falta la asignación."));
+    }
+    if input.id_turno.trim().is_empty() {
+        return Err(AppError::validation("Elige un turno."));
     }
 
-    let area = requerido(&input.area, "area").map_err(AppError::validation)?;
+    let area = requerido(&input.area, "Elige el área.").map_err(AppError::validation)?;
 
     let cambios = AsignacionCambios {
         id_turno: input.id_turno,
@@ -127,7 +135,7 @@ pub async fn delete_asignacion(
     input: AsignacionDeleteInput,
 ) -> AppResult<bool> {
     if input.id_asignacion.trim().is_empty() {
-        return Err(AppError::validation("id_asignacion required"));
+        return Err(AppError::validation("Falta la asignación."));
     }
     repo.delete_asignacion(&input.id_asignacion).await
 }
@@ -136,8 +144,8 @@ pub async fn copy_semana_asignaciones(
     repo: &dyn TrabajadoresRepository,
     input: CopySemanaInput,
 ) -> AppResult<bool> {
-    let from_monday = dia_de_horario(&input.from_monday, "from_monday").map_err(AppError::validation)?;
-    let to_monday = dia_de_horario(&input.to_monday, "to_monday").map_err(AppError::validation)?;
+    let from_monday = dia_de_horario(&input.from_monday, MSG_SEMANA_ORIGEN).map_err(AppError::validation)?;
+    let to_monday = dia_de_horario(&input.to_monday, MSG_SEMANA_DESTINO).map_err(AppError::validation)?;
     // RI-63: sin decirlo no se borra la semana de destino. Era `true` aquí y `false` en el worker
     // (`copySemanaSchema`); la pantalla lo manda siempre explícito.
     let overwrite = input.overwrite.unwrap_or(false);
@@ -149,7 +157,7 @@ pub async fn set_predeterminado_desde_semana(
     repo: &dyn TrabajadoresRepository,
     input: SetPredeterminadoInput,
 ) -> AppResult<bool> {
-    let fecha_lunes = dia_de_horario(&input.fecha_lunes, "fecha_lunes").map_err(AppError::validation)?;
+    let fecha_lunes = dia_de_horario(&input.fecha_lunes, MSG_SEMANA).map_err(AppError::validation)?;
     repo.set_predeterminado_desde_semana(fecha_lunes).await
 }
 
@@ -160,13 +168,13 @@ pub async fn create_trabajador(
     input: TrabajadorCreateInput,
 ) -> AppResult<bool> {
     if input.id_rol.trim().is_empty() {
-        return Err(AppError::validation("id_rol required"));
+        return Err(AppError::validation("Elige un rol."));
     }
 
-    let email = requerido(&input.email, "email").map_err(AppError::validation)?;
+    let email = requerido(&input.email, "Escribe el correo del trabajador.").map_err(AppError::validation)?;
     // RI-63: llega el PIN y se valida aquí; lo hashea el adaptador que lo guarda.
     let pin = pin_de_teclado(&input.pin).map_err(AppError::validation)?;
-    let nombre = requerido(&input.nombre, "nombre").map_err(AppError::validation)?;
+    let nombre = requerido(&input.nombre, "Escribe el nombre del trabajador.").map_err(AppError::validation)?;
 
     let data = TrabajadorNuevo {
         id_rol: input.id_rol,
@@ -191,17 +199,18 @@ pub async fn update_trabajador(
     repo: &dyn TrabajadoresRepository,
     input: TrabajadorUpdateInput,
 ) -> AppResult<bool> {
-    if input.id_trabajador.trim().is_empty()
-        || input.id_usuario.trim().is_empty()
-        || input.id_rol.trim().is_empty()
-    {
-        return Err(AppError::validation(
-            "id_trabajador/id_usuario/id_rol required",
-        ));
+    if input.id_trabajador.trim().is_empty() {
+        return Err(AppError::validation("Falta el trabajador."));
+    }
+    if input.id_usuario.trim().is_empty() {
+        return Err(AppError::validation("Falta el usuario."));
+    }
+    if input.id_rol.trim().is_empty() {
+        return Err(AppError::validation("Elige un rol."));
     }
 
-    let email = requerido(&input.email, "email").map_err(AppError::validation)?;
-    let nombre = requerido(&input.nombre, "nombre").map_err(AppError::validation)?;
+    let email = requerido(&input.email, "Escribe el correo del trabajador.").map_err(AppError::validation)?;
+    let nombre = requerido(&input.nombre, "Escribe el nombre del trabajador.").map_err(AppError::validation)?;
     // RI-63: un PIN vacío es «no se cambia»; uno que no se puede teclear en el login, un error.
     let pin = match limpiar_opcional(input.pin) {
         Some(p) => Some(pin_de_teclado(&p).map_err(AppError::validation)?),

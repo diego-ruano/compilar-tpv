@@ -33,16 +33,16 @@ const optStr = z.string().nullish().transform(cleanOptional);
 const idsTrabajadores = z.array(z.string()).default([]).transform(normalizeIds);
 
 export const createTareaSchema = z.object({
-	titulo: z.string().overwrite(recortar).min(1, "titulo required"),
+	titulo: z.string().overwrite(recortar).min(1, "Escribe el título de la tarea."),
 	descripcion: optStr,
 	fecha_limite: optStr,
 	ids_trabajadores: idsTrabajadores.refine((ids) => ids.length > 0, {
-		message: "ids_trabajadores required",
+		message: "Asigna la tarea a alguien.",
 	}),
 });
 
 export const updateTareaSchema = z.object({
-	titulo: z.string().overwrite(recortar).min(1, "titulo required"),
+	titulo: z.string().overwrite(recortar).min(1, "Escribe el título de la tarea."),
 	descripcion: optStr,
 	fecha_limite: optStr,
 });

@@ -296,7 +296,7 @@ pub fn get_handy_token() -> Result<String, String> {
         .ok_or_else(|| "handy_token_missing".to_string())?;
     let token = token.trim().to_string();
     if token.is_empty() {
-        return Err("handy_token required".into());
+        return Err("handy_token_missing".into());
     }
     Ok(token)
 }

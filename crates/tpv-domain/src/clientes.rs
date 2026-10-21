@@ -76,7 +76,7 @@ impl NuevoCliente {
     ) -> Result<Self, String> {
         let nombre = nombre.trim().to_string();
         if nombre.is_empty() {
-            return Err("nombre required".to_string());
+            return Err("Escribe el nombre del cliente.".to_string());
         }
         Ok(NuevoCliente {
             id: id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
@@ -99,11 +99,11 @@ impl Cliente {
     ) -> Result<Self, String> {
         let id = id.trim().to_string();
         if id.is_empty() {
-            return Err("ID_Cliente inválido.".to_string());
+            return Err("Falta el cliente.".to_string());
         }
         let nombre = nombre.trim().to_string();
         if nombre.is_empty() {
-            return Err("nombre required".to_string());
+            return Err("Escribe el nombre del cliente.".to_string());
         }
         Ok(Cliente {
             id,

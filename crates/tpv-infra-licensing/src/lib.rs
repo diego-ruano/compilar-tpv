@@ -849,9 +849,7 @@ impl PairingAdapter {
         } else if mode == "tpv" {
             self.license_token()?
         } else {
-            return Err(AppError::validation(
-                "bad_mode_for_signed_headers (use: tpv|handy)",
-            ));
+            return Err(AppError::validation("Modo de dispositivo inválido."));
         };
 
         // PROD-04: la hora de la nube, no la del equipo (ver `reloj`).

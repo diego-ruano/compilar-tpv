@@ -67,7 +67,7 @@ function porEstado(status: number): ErrorCode {
 /**
  * Resuelve el código a partir del string de siempre y del status HTTP.
  *
- * Los códigos ad-hoc que nadie ramifica (`id_mesa invalido`, `missing_tenant_id`…) caen
+ * Los códigos ad-hoc que nadie ramifica (`id_mesa_invalido`, `missing_tenant_id`…) caen
  * a la clasificación por estado **a propósito**: el catálogo sólo contiene aquello por lo
  * que alguien decide algo distinto. Su texto sigue viajando en `error`.
  */
@@ -312,6 +312,25 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"correo_en_curso",
 	"aviso_superado",
 	"agenda_no_disponible",
+	// El id de un parámetro de ruta que llega en blanco (`parseId`). La Handy no lo manda nunca:
+	// el caso de uso de la Main ya exige el id antes de llamar, con su frase (VALID-03).
+	"id_asignacion_invalido",
+	"id_categoria_invalido",
+	"id_cierre_invalido",
+	"id_cliente_invalido",
+	"id_comanda_invalido",
+	"id_detalle_invalido",
+	"id_gasto_invalido",
+	"id_lote_invalido",
+	"id_mesa_invalido",
+	"id_notificacion_invalido",
+	"id_pago_invalido",
+	"id_producto_invalido",
+	"id_proveedor_invalido",
+	"id_reserva_invalido",
+	"id_tarea_invalido",
+	"id_trabajador_invalido",
+	"id_usuario_invalido",
 	// Internos: sólo salen si hay un bug, un cliente manipulado o una configuración rota.
 	"admin_disabled",
 	"interruptor_not_found",

@@ -76,7 +76,7 @@ cuentasRoutes.post("/gastos", soloLaMainEscribeCaja, cuerpo(S.createGastoSchema)
 
 cuentasRoutes.put("/gastos/:id", soloLaMainEscribeCaja, cuerpo(S.updateGastoSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_gasto invalido");
+	if (id == null) return badRequest(c, "id_gasto_invalido");
 	const datos = c.req.valid("json");
 	await apply(c, cmd.updateGasto(id, datos));
 	return c.json({ ok: true });
@@ -84,14 +84,14 @@ cuentasRoutes.put("/gastos/:id", soloLaMainEscribeCaja, cuerpo(S.updateGastoSche
 
 cuentasRoutes.delete("/gastos/:id", soloLaMainEscribeCaja, async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_gasto invalido");
+	if (id == null) return badRequest(c, "id_gasto_invalido");
 	await apply(c, cmd.deleteGasto(id));
 	return c.json({ ok: true });
 });
 
 cuentasRoutes.put("/pagos/:id", soloLaMainEscribeCaja, cuerpo(S.updatePagoSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_pago invalido");
+	if (id == null) return badRequest(c, "id_pago_invalido");
 	const datos = c.req.valid("json");
 	await apply(c, cmd.updatePago(id, datos));
 	return c.json({ ok: true });
@@ -101,7 +101,7 @@ cuentasRoutes.put("/pagos/:id", soloLaMainEscribeCaja, cuerpo(S.updatePagoSchema
 // devuelve sus líneas a la comanda. Un `DELETE` diría lo contrario de lo que hace.
 cuentasRoutes.post("/pagos/:id/anular", soloLaMainEscribeCaja, cuerpo(S.anularPagoSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_pago invalido");
+	if (id == null) return badRequest(c, "id_pago_invalido");
 	const datos = c.req.valid("json");
 	await apply(c, cmd.anularPago(id, datos));
 	return c.json({ ok: true });
@@ -131,7 +131,7 @@ cuentasRoutes.get("/cierres", async (c) => {
 
 cuentasRoutes.get("/cierres/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_cierre invalido");
+	if (id == null) return badRequest(c, "id_cierre_invalido");
 	return c.json(
 		await tenantQuery(c, (db) => q.detalleCierre(db, id)),
 	);

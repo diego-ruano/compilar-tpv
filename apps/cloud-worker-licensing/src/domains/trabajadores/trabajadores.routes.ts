@@ -22,7 +22,7 @@ trabajadoresRoutes.use("*", tenantAuth);
 
 trabajadoresRoutes.get("/permisos/:id", async (c) => {
     const id = parseId(c.req.param("id"));
-    if (id == null) return badRequest(c, "id_usuario invalido");
+    if (id == null) return badRequest(c, "id_usuario_invalido");
     return c.json(await tenantQuery(c, (db) => q.permisosUsuario(db, id)));
 });
 
@@ -36,7 +36,7 @@ trabajadoresRoutes.get("/turnos", async (c) =>
 
 trabajadoresRoutes.get("/by-usuario/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_usuario invalido");
+	if (id == null) return badRequest(c, "id_usuario_invalido");
 	return c.json(await tenantQuery(c, (db) => q.idByUsuario(db, id)));
 });
 
@@ -54,7 +54,7 @@ trabajadoresRoutes.get("/", async (c) =>
 
 trabajadoresRoutes.get("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_trabajador invalido");
+	if (id == null) return badRequest(c, "id_trabajador_invalido");
 	return c.json(await tenantQuery(c, (db) => q.detail(db, id)));
 });
 
@@ -68,7 +68,7 @@ trabajadoresRoutes.post("/", cuerpo(S.trabajadorCreateSchema), async (c) => {
 
 trabajadoresRoutes.put("/:id", cuerpo(S.trabajadorUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_trabajador invalido");
+	if (id == null) return badRequest(c, "id_trabajador_invalido");
 	const datos = c.req.valid("json");
 	// RI-62: comprobación previa, como TRAB-04: los pasos de una transacción del DO no pueden
 	// abortarla según lo que lean. La Main la hace dentro de su transacción.
@@ -113,7 +113,7 @@ trabajadoresRoutes.post("/horarios/guardar", cuerpo(S.asignacionGuardarSchema), 
 
 trabajadoresRoutes.put("/horarios/asignaciones/:id", cuerpo(S.asignacionUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_asignacion invalido");
+	if (id == null) return badRequest(c, "id_asignacion_invalido");
 	const datos = c.req.valid("json");
 	const afectadas = await apply(c, cmd.updateAsignacion(id, datos));
 	if (afectadas === 0) return c.json({ error: "horario_editar_conjunto", message: "Edita los dos tramos del horario como un conjunto." }, 409);
@@ -122,7 +122,7 @@ trabajadoresRoutes.put("/horarios/asignaciones/:id", cuerpo(S.asignacionUpdateSc
 
 trabajadoresRoutes.delete("/horarios/asignaciones/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_asignacion invalido");
+	if (id == null) return badRequest(c, "id_asignacion_invalido");
 	await apply(c, cmd.deleteAsignacion(id));
 	return c.json({ ok: true });
 });

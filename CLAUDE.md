@@ -129,7 +129,9 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   `@tpv/client` y metadatos sin runtime Tauri para E2E. `Dinero` conserva su marca de céntimos.
 - **Errores**: `AppError` → `AppErrorDto { code, message }` con `code` del catálogo `ErrorCode`
   (`tpv-contracts/src/errors.rs`). **Se ramifica sólo por `code`**; un código nuevo sólo si alguien tiene que
-  hacer algo distinto. Lo que se enseña es `message`, nunca un identificador. En el frontend,
+  hacer algo distinto. Lo que se enseña es `message`, nunca un identificador. Un dato que no vale
+  dice qué hacer en español («Escribe el nombre del producto.», «Falta la mesa.»), sin nombres de
+  campo ni inglés, y con el mismo texto en la Main y en el worker. En el frontend,
   `toAppError(e)` / `esError(e, "…")`.
 - **Nombre, argumentos y respuesta están tipados**: usar `commands.*` de `@tpv/client`, nunca
   `invoke`/`invokeClient` ni elegir `{ args }` a mano. TanStack Query llama al comando generado;
@@ -200,7 +202,8 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   salen del token.
 - Un schema zod con contrapartida en Rust lleva su drift-guard (`Assert<SameKeys<…>>`), y **lo que
   acepta o rechaza es lo mismo que la Main**: un criterio de validación nuevo es un caso nuevo en
-  `crates/tpv-domain/src/validacion_casos.json`, que leen los dos lados.
+  `crates/tpv-domain/src/validacion_casos.json`, que leen los dos lados, con el `mensaje` que se enseña
+  si se rechaza.
 - Una fecha que llega como texto se valida con `lib/fechas.ts` (en Rust, `tpv_domain::fechas`), nunca
   con una expresión regular suelta.
 - Un texto que llega se recorta con `recortar` (`lib/texto.ts`), que quita lo mismo que `str::trim`;
@@ -289,10 +292,14 @@ lo que hay que revisar es el cambio, no el test:
   `fs` de la webview, ningún interruptor en el cobro).
 - `migrations.rs::todas_las_columnas_de_dinero_llevan_su_check`, `db.rs::ninguna_columna_del_esquema_elige_su_hora`
   y el snapshot del esquema.
+- `error.rs::tests_mensajes_en_espanol` (tpv-application): ningún mensaje del dominio ni de los casos de
+  uso es un nombre de campo o está en inglés.
 - En el worker: `vetoAntesDelCuerpo`, `anularSoloMain`, `fiscalSoloMain`, `cobroSoloMain`,
-  `pinSiempreConFreno`, `mensajesDeError`, `salud`, `lecturasEnHoraLocal`, `recortarComoLaMain`.
+  `pinSiempreConFreno`, `mensajesDeError`, `salud`, `lecturasEnHoraLocal`, `recortarComoLaMain`,
+  `mensajesEnEspanol`.
 - Los arneses de contrato ([tests/contract/README.md](tests/contract/README.md)) y
   `scripts/check-contract-coverage.mjs`.
 - Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `scrub_casos.json`,
   `horarios_casos.json`, `plano_reservas_casos.json` (la reserva de cada mesa, que depende de la
-  hora) y `validacion_casos.json` (la validación de entrada, que los arneses de contrato no ven).
+  hora) y `validacion_casos.json` (la validación de entrada y lo que dice al rechazar, que los arneses de
+  contrato no ven).

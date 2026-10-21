@@ -39,12 +39,15 @@ describe("campos que un cliente puede no mandar", () => {
 		expect(sinTipo.detalle_ids).toEqual(["d1"]);
 
 		const sinDetalles = cobrarDetallesSchema.safeParse({ id_comanda: "c1", metodo: "efectivo" });
-		expect(problemas(sinDetalles)).toEqual({ detalle_ids: "detalle_ids required" });
+		expect(problemas(sinDetalles)).toEqual({ detalle_ids: "Elige qué líneas se cobran." });
 	});
 
 	it("una reserva sin día ni hora conserva sus mensajes propios", () => {
 		const r = reservaSaveSchema.safeParse({ comensales: 2 });
-		expect(problemas(r)).toEqual({ dia_ymd: "dia_ymd invalido", hora: "hora invalida" });
+		expect(problemas(r)).toEqual({
+			dia_ymd: "Formato de día inválido. Esperado YYYY-MM-DD.",
+			hora: "Hora inválida. Esperado HH:MM.",
+		});
 	});
 
 	it("un trabajador sin `estado` queda Activo, al crearlo y al editarlo", () => {
@@ -57,7 +60,7 @@ describe("campos que un cliente puede no mandar", () => {
 
 	it("el cobro fraccionado sin `detalles` falla por su regla, y la consulta sin `ids` es una lista vacía", () => {
 		const base = { id_comanda: "c1", metodo: "tarjeta", importe_total: 1250 };
-		expect(problemas(cobrarFraccionadoSchema.safeParse(base))).toEqual({ detalles: "detalles required" });
+		expect(problemas(cobrarFraccionadoSchema.safeParse(base))).toEqual({ detalles: "Elige qué líneas se cobran." });
 		expect(cobrarFraccionadoSchema.parse({ ...base, detalles: ["d1"] }).detalles).toEqual(["d1"]);
 		expect(idsSchema.parse({})).toEqual({ ids: [] });
 	});

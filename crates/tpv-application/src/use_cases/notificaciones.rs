@@ -42,8 +42,11 @@ pub async fn marcar_leida(
 ) -> AppResult<bool> {
     let id_notificacion = input.id_notificacion.trim();
     let id_usuario = input.id_usuario.trim();
-    if id_notificacion.is_empty() || id_usuario.is_empty() {
-        return Err(AppError::validation("id_notificacion e id_usuario requeridos"));
+    if id_notificacion.is_empty() {
+        return Err(AppError::validation("Falta la notificación."));
+    }
+    if id_usuario.is_empty() {
+        return Err(AppError::validation("Falta el usuario."));
     }
     repo.marcar_leida(id_notificacion, id_usuario).await
 }
@@ -55,7 +58,7 @@ pub async fn marcar_todas_leidas(
 ) -> AppResult<i64> {
     let id_usuario = input.id_usuario.trim();
     if id_usuario.is_empty() {
-        return Err(AppError::validation("id_usuario requerido"));
+        return Err(AppError::validation("Falta el usuario."));
     }
     repo.marcar_todas_leidas(id_usuario).await
 }
@@ -101,7 +104,7 @@ pub async fn eliminar(
 fn id_no_vacio(id: &str) -> AppResult<&str> {
     let id = id.trim();
     if id.is_empty() {
-        return Err(AppError::validation("id_notificacion requerido"));
+        return Err(AppError::validation("Falta la notificación."));
     }
     Ok(id)
 }

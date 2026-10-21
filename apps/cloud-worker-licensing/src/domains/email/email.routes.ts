@@ -52,7 +52,7 @@ const lineaSchema = z.object({
 // legítimo de "pedido solo con notas" (p. ej. "mándame lo de siempre").
 const enviarPedidoSchema = z
 	.object({
-		email_destino: z.string().email("email_destino inválido"),
+		email_destino: z.string().email("El correo de destino no es válido."),
 		nombre_proveedor: z.string().min(1).max(200),
 		notas: z.string().max(2000).nullable().optional(),
 		lineas: z.array(lineaSchema).max(500).default([]),

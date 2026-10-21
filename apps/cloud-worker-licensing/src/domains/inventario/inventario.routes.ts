@@ -69,7 +69,7 @@ inventarioRoutes.get("/proveedores-mini", async (c) =>
 
 inventarioRoutes.get("/productos", async (c) => {
 	const idCategoria = parseId(c.req.query("categoria"));
-	if (idCategoria == null) return badRequest(c, "categoria inválida");
+	if (idCategoria == null) return badRequest(c, "id_categoria_invalido");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.listProductosByCategoria(db, idCategoria),
@@ -88,7 +88,7 @@ inventarioRoutes.get("/alergenos", async (c) =>
 
 inventarioRoutes.get("/productos/:id/lotes", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_producto inválido");
+	if (id == null) return badRequest(c, "id_producto_invalido");
 	return c.json(
 		await tenantQuery(c, (db) => q.listLotesByProducto(db, id)),
 	);
@@ -96,7 +96,7 @@ inventarioRoutes.get("/productos/:id/lotes", async (c) => {
 
 inventarioRoutes.get("/productos/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_producto inválido");
+	if (id == null) return badRequest(c, "id_producto_invalido");
 	return c.json(await tenantQuery(c, (db) => q.productDetail(db, id)));
 });
 
@@ -121,7 +121,7 @@ inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema.extend({ id_us
 
 inventarioRoutes.delete("/productos/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_producto inválido");
+	if (id == null) return badRequest(c, "id_producto_invalido");
 	// INV-05: sólo lo impide estar en una comanda abierta. Con ventas cerradas se archiva (RI-54),
 	// y eso lo decide el propio comando.
 	const enUso = await tenantQuery(c, (db) => q.productoEnComandaAbierta(db, id));
@@ -139,7 +139,7 @@ inventarioRoutes.post("/lotes", cuerpo(S.createLoteSchema), async (c) => {
 
 inventarioRoutes.put("/lotes/:id", cuerpo(S.updateLoteSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_lote inválido");
+	if (id == null) return badRequest(c, "id_lote_invalido");
 	const datos = c.req.valid("json");
 	const info = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
@@ -150,7 +150,7 @@ inventarioRoutes.put("/lotes/:id", cuerpo(S.updateLoteSchema), async (c) => {
 
 inventarioRoutes.patch("/lotes/:id", cuerpo(S.ajusteLoteSchema.extend({ id_usuario: S.autorStockSchema })), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_lote inválido");
+	if (id == null) return badRequest(c, "id_lote_invalido");
 	const datos = c.req.valid("json");
 	const info = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
@@ -173,7 +173,7 @@ inventarioRoutes.patch(
 	cuerpo(S.ajusteStockSueltoSchema.extend({ id_usuario: S.autorStockSchema })),
 	async (c) => {
 		const id = parseId(c.req.param("id"));
-		if (id == null) return badRequest(c, "id_producto inválido");
+		if (id == null) return badRequest(c, "id_producto_invalido");
 		const datos = c.req.valid("json");
 		const leido = await tenantQuery(c, (db) => q.getProductoStockSuelto(db, id));
 		if (leido === undefined) return c.json({ error: "Producto no encontrado" }, 404);

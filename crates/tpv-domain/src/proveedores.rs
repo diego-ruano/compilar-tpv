@@ -46,7 +46,7 @@ impl ProveedorValidado {
         } = input;
         let nombre = nombre_empresa.trim().to_string();
         if nombre.is_empty() {
-            return Err("nombre_empresa required".into());
+            return Err("Escribe el nombre del proveedor.".into());
         }
         Ok(ProveedorValidado {
             id: id_proveedor.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),

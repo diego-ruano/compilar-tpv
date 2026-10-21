@@ -45,7 +45,7 @@ pub async fn set_reserva_estado(
     // Desde la mesa, sólo llegar o irse; si la reserva ha cambiado mientras tanto lo dice el repo.
     let estado = tpv_domain::reservas::estado_desde_la_mesa(&input.estado).map_err(AppError::validation)?;
     if input.id_reserva.trim().is_empty() {
-        return Err(AppError::validation("ID_Reserva inválido"));
+        return Err(AppError::validation("Falta la reserva."));
     }
     repo.set_reserva_estado(&input.id_reserva, estado).await
 }
@@ -67,7 +67,7 @@ pub async fn abrir_comanda(
     input: MesasAbrirComandaInput,
 ) -> AppResult<Option<ComandaRow>> {
     if input.id_mesa.trim().is_empty() {
-        return Err(AppError::validation("id_mesa inválido"));
+        return Err(AppError::validation("Falta la mesa."));
     }
     let data = AbrirComandaData {
         id_mesa: input.id_mesa,
@@ -103,8 +103,11 @@ pub async fn add_linea_comanda(
     repo: &dyn MesasRepository,
     input: MesasAddLineaComandaInput,
 ) -> AppResult<Vec<tpv_contracts::mesas::MesaLineaComandaRow>> {
-    if input.id_comanda.trim().is_empty() || input.id_producto.trim().is_empty() {
-        return Err(AppError::validation("id_comanda/id_producto inválidos"));
+    if input.id_comanda.trim().is_empty() {
+        return Err(AppError::validation("Falta la comanda."));
+    }
+    if input.id_producto.trim().is_empty() {
+        return Err(AppError::validation("Falta el producto."));
     }
     if !input.cantidad.is_finite() || input.cantidad <= 0.0 {
         return Err(AppError::validation("cantidad inválida"));
@@ -201,7 +204,7 @@ pub async fn cobrar_detalles(
     }
 
     let metodo = tpv_domain::pago::normalize_metodo(&input.metodo).map_err(AppError::validation)?;
-    let tipo = requerido(&input.tipo, "tipo").map_err(AppError::validation)?;
+    let tipo = requerido(&input.tipo, "Falta el tipo de cobro.").map_err(AppError::validation)?;
 
     let data = CobroDetalles {
         id_comanda: input.id_comanda,
@@ -225,13 +228,13 @@ pub async fn kitchen_set_line_state(
     input: MesasKitchenSetLineStateInput,
 ) -> AppResult<()> {
     if input.id_detalle.trim().is_empty() {
-        return Err(AppError::validation("ID_Detalle inválido"));
+        return Err(AppError::validation("Falta la línea de la comanda."));
     }
     if input.id_usuario_cocinero.trim().is_empty() {
-        return Err(AppError::validation("ID_Usuario_Cocinero inválido"));
+        return Err(AppError::validation("Falta quién cocina la línea."));
     }
     // Fidelidad con el monolito: estado vacío/espacios es error (no se normaliza a PENDIENTE).
-    let estado_raw = requerido(&input.estado, "estado").map_err(AppError::validation)?;
+    let estado_raw = requerido(&input.estado, "Falta el estado de la línea.").map_err(AppError::validation)?;
     let estado = normalize_estado_cocina(&estado_raw).map_err(AppError::validation)?;
     repo.kitchen_set_line_state(&input.id_detalle, &input.id_usuario_cocinero, estado)
         .await

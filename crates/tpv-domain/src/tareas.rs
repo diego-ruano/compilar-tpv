@@ -27,7 +27,7 @@ mod tests {
         assert!(requerido("   ", "titulo").is_err());
         assert!(requerido("", "titulo").is_err());
         // El mensaje de error nombra el campo que faltó.
-        assert_eq!(requerido("", "titulo").unwrap_err(), "titulo required");
+        assert_eq!(requerido("", "Escribe el título de la tarea.").unwrap_err(), "Escribe el título de la tarea.");
     }
 
     #[test]

@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn requerido_recorta_y_nombra_el_campo_ausente() {
         assert_eq!(requerido("  concepto  ", "concepto").unwrap(), "concepto");
-        assert_eq!(requerido(" \t ", "fecha").unwrap_err(), "fecha required");
+        assert_eq!(requerido(" \t ", "Indica la fecha del gasto.").unwrap_err(), "Indica la fecha del gasto.");
     }
 
     #[test]

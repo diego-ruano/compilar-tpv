@@ -26,7 +26,7 @@ notificacionesRoutes.use("*", tenantAuth);
 
 notificacionesRoutes.get("/", async (c) => {
 	const uid = parseId(c.req.query("usuario"));
-	if (uid == null) return badRequest(c, "id_usuario invalido");
+	if (uid == null) return badRequest(c, "id_usuario_invalido");
 	const soloNoLeidas = c.req.query("solo_no_leidas") === "true";
 	return c.json(
 		await tenantQuery(c, (db) => q.listar(db, uid, soloNoLeidas)),
@@ -35,7 +35,7 @@ notificacionesRoutes.get("/", async (c) => {
 
 notificacionesRoutes.get("/papelera", async (c) => {
 	const uid = parseId(c.req.query("usuario"));
-	if (uid == null) return badRequest(c, "id_usuario invalido");
+	if (uid == null) return badRequest(c, "id_usuario_invalido");
 	return c.json(
 		await tenantQuery(c, (db) => q.listarPapelera(db, uid)),
 	);
@@ -43,7 +43,7 @@ notificacionesRoutes.get("/papelera", async (c) => {
 
 notificacionesRoutes.get("/count", async (c) => {
 	const uid = parseId(c.req.query("usuario"));
-	if (uid == null) return badRequest(c, "id_usuario invalido");
+	if (uid == null) return badRequest(c, "id_usuario_invalido");
 	const count = await tenantQuery(c, (db) =>
 		q.contarNoLeidas(db, uid),
 	);
@@ -95,28 +95,28 @@ notificacionesRoutes.post("/resolver", cuerpo(S.resolverSchema), async (c) => {
 
 notificacionesRoutes.post("/:id/descartar", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_notificacion invalido");
+	if (id == null) return badRequest(c, "id_notificacion_invalido");
 	await apply(c, cmd.descartar(id));
 	return c.json({ ok: true });
 });
 
 notificacionesRoutes.post("/:id/restaurar", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_notificacion invalido");
+	if (id == null) return badRequest(c, "id_notificacion_invalido");
 	await apply(c, cmd.restaurar(id));
 	return c.json({ ok: true });
 });
 
 notificacionesRoutes.delete("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_notificacion invalido");
+	if (id == null) return badRequest(c, "id_notificacion_invalido");
 	await apply(c, cmd.eliminar(id));
 	return c.json({ ok: true });
 });
 
 notificacionesRoutes.post("/:id/leer", cuerpo(S.marcarLeidaSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_notificacion invalido");
+	if (id == null) return badRequest(c, "id_notificacion_invalido");
 	const datos = c.req.valid("json");
 	await apply(c, cmd.marcarLeida(id, datos.id_usuario));
 	return c.json({ ok: true });

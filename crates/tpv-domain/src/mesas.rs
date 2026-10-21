@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn textos_obligatorios_y_opcionales_se_normalizan() {
         assert_eq!(requerido(" mesa-1 ", "mesa").unwrap(), "mesa-1");
-        assert!(requerido(" ", "mesa").unwrap_err().contains("mesa required"));
+        assert_eq!(requerido(" ", "Falta la mesa.").unwrap_err(), "Falta la mesa.");
         assert_eq!(limpiar_opcional(Some(" nota ".into())), Some("nota".into()));
         assert_eq!(limpiar_opcional(Some(" ".into())), None);
         assert_eq!(limpiar_opcional(None), None);

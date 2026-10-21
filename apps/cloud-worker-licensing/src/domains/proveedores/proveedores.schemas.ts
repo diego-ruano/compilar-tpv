@@ -29,7 +29,7 @@ const optStr = z.string().nullish().transform(cleanOptional);
 
 export const proveedorSaveSchema = z.object({
 	id_proveedor: idStr.optional().nullish(),
-	nombre_empresa: z.string().overwrite(recortar).min(1, "nombre_empresa required"),
+	nombre_empresa: z.string().overwrite(recortar).min(1, "Escribe el nombre del proveedor."),
 	contacto: optStr,
 	telefono: optStr,
 	email: optStr,

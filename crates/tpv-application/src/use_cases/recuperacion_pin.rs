@@ -30,7 +30,7 @@ const ROL_ADMIN: &str = "Administrador";
 fn id_usuario(input: &str) -> AppResult<String> {
     let id = input.trim();
     if id.is_empty() {
-        return Err(AppError::validation("id_usuario inválido"));
+        return Err(AppError::validation("Falta el usuario."));
     }
     Ok(id.to_string())
 }
@@ -38,7 +38,7 @@ fn id_usuario(input: &str) -> AppResult<String> {
 pub(crate) fn codigo_valido(input: &str) -> AppResult<String> {
     let c = input.trim();
     if c.len() != 6 || !c.chars().all(|ch| ch.is_ascii_digit()) {
-        return Err(AppError::validation("El código son 6 cifras"));
+        return Err(AppError::validation("El código son 6 cifras."));
     }
     Ok(c.to_string())
 }

@@ -43,7 +43,7 @@ mesasRoutes.get("/meta", async (c) => {
 
 mesasRoutes.put("/reservas/:id/estado", cuerpo(S.setReservaEstadoSchema.omit({ id_reserva: true })), async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_reserva invalido");
+	if (id == null) return badRequest(c, "id_reserva_invalido");
 	const datos = c.req.valid("json");
 	// Con la reserva como está ahora, como la Main: la mesa abierta enseña una foto, y mientras tanto
 	// el cliente pudo cancelarla o pasar a «No vino». Se replica la escritura sin condición.
@@ -56,7 +56,7 @@ mesasRoutes.put("/reservas/:id/estado", cuerpo(S.setReservaEstadoSchema.omit({ i
 
 mesasRoutes.get("/comandas/mesa/:idMesa/abierta", async (c) => {
 	const idMesa = parseId(c.req.param("idMesa"));
-	if (idMesa == null) return badRequest(c, "id_mesa invalido");
+	if (idMesa == null) return badRequest(c, "id_mesa_invalido");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.comandaAbiertaByMesa(db, idMesa),
@@ -93,7 +93,7 @@ mesasRoutes.put("/comandas/trabajador-if-null", cuerpo(S.setTrabajadorSchema), a
 
 mesasRoutes.get("/comandas/:id/lineas", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_comanda invalido");
+	if (id == null) return badRequest(c, "id_comanda_invalido");
 	return c.json(await tenantQuery(c, (db) => q.lineas(db, id)));
 });
 
@@ -130,7 +130,7 @@ mesasRoutes.post("/lineas/remove-one-pending", cuerpo(S.removeOneDetalleSchema),
 
 mesasRoutes.delete("/lineas/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
-	if (id == null) return badRequest(c, "id_detalle invalido");
+	if (id == null) return badRequest(c, "id_detalle_invalido");
 	const idComanda = await tenantQuery(c, (db) =>
 		q.idComandaByDetalle(db, id),
 	);
@@ -148,7 +148,7 @@ mesasRoutes.put(
 	),
 	async (c) => {
 		const id = parseId(c.req.param("id"));
-		if (id == null) return badRequest(c, "id_detalle invalido");
+		if (id == null) return badRequest(c, "id_detalle_invalido");
 		await apply(c, cmd.updateDetalleNota(id, c.req.valid("json").nota));
 		return c.json({ ok: true });
 	},
@@ -178,7 +178,7 @@ mesasRoutes.get("/productos/search", consulta(S.searchSchema), async (c) => {
 
 mesasRoutes.get("/productos/:idCategoria", async (c) => {
 	const id = parseId(c.req.param("idCategoria"));
-	if (id == null) return badRequest(c, "id_categoria invalido");
+	if (id == null) return badRequest(c, "id_categoria_invalido");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.productosByCategoria(db, id),

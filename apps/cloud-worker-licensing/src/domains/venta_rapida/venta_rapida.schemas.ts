@@ -15,8 +15,9 @@ import type {
 	VrUpdateNotaDetalleInput,
 } from "@tpv/contracts";
 
-function idField(field: string) {
-	return z.coerce.string().overwrite(recortar).min(1, `${field} invalido`);
+/** Un id que tiene que venir; si no, `mensaje` (el mismo texto que la Main, VALID-03). */
+function idField(mensaje: string) {
+	return z.coerce.string().overwrite(recortar).min(1, mensaje);
 }
 
 /**
@@ -32,8 +33,8 @@ const optionalIdField = z.coerce
 	.nullish()
 	.transform((v) => (v == null ? undefined : v));
 
-function positiveNumber(field: string) {
-	return z.coerce.number().positive(`${field} invalido`);
+function positiveNumber(mensaje: string) {
+	return z.coerce.number().positive(mensaje);
 }
 
 function optIdStr(v: unknown): string | null {
@@ -97,31 +98,31 @@ export const createComandaBarraSchema = z
 
 export const addLineaSchema = z.object({
 	id_detalle: optionalIdField,
-	id_comanda: idField("id_comanda"),
-	id_producto: idField("id_producto"),
-	cantidad: positiveNumber("cantidad"),
+	id_comanda: idField("Falta la comanda."),
+	id_producto: idField("Falta el producto."),
+	cantidad: positiveNumber("La cantidad tiene que ser mayor que cero."),
 });
 
 export const removeLastLineaSchema = z.object({
-	id_comanda: idField("id_comanda"),
-	id_producto: idField("id_producto"),
+	id_comanda: idField("Falta la comanda."),
+	id_producto: idField("Falta el producto."),
 });
 
 export const deleteLineaSchema = z.object({
-	id_comanda: idField("id_comanda"),
-	id_detalle: idField("id_detalle"),
+	id_comanda: idField("Falta la comanda."),
+	id_detalle: idField("Falta la línea de la comanda."),
 });
 
 export const updateNotaSchema = z
 	.object({
-		id_detalle: idField("id_detalle"),
+		id_detalle: idField("Falta la línea de la comanda."),
 		nota: z.any().optional().nullable(),
 	})
 	.transform((v) => ({ ...v, nota: cleanOrNull(v.nota) }));
 
 export const cobrarFraccionadoSchema = z
 	.object({
-		id_comanda: idField("id_comanda"),
+		id_comanda: idField("Falta la comanda."),
 		metodo: zMetodoPago,
 		importe_total: zDineroNoNegativo,
 		id_usuario_cobrador: z.any().optional().nullable(),
@@ -138,7 +139,7 @@ export const cobrarFraccionadoSchema = z
 	}))
 	.refine((v) => v.detalles.length > 0, {
 		path: ["detalles"],
-		message: "detalles required",
+		message: "Elige qué líneas se cobran.",
 	});
 
 // `id_comanda`/`id_detalle` NO están en los DTOs de `@tpv/contracts` a propósito: esos describen la

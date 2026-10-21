@@ -7,7 +7,9 @@
 // a los constructores de `*.commands.ts`, no a los schemas. Lo que cada lado acepta o rechaza no lo
 // miraba nadie, y habían divergido (un 31 de febrero, una caducidad «31/12/2026», un IVA del
 // 210 %). Aquí la misma entrada tiene que pasar o no pasar que en Rust
-// (`crates/tpv-domain/src/validacion_casos.rs`), y normalizarse al mismo valor.
+// (`crates/tpv-domain/src/validacion_casos.rs`), normalizarse al mismo valor y, si se rechaza,
+// decirle lo mismo a quien está delante (VALID-03): el `message` de la respuesta, que sale de
+// `validarConMensaje`, igual que en la ruta.
 
 import { describe, expect, it } from "vitest";
 
@@ -19,6 +21,7 @@ import {
 	upsertProductoSchema,
 } from "../src/domains/inventario/inventario.schemas";
 import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
+import { validarConMensaje } from "../src/lib/validacion";
 import { saveLayoutSchema, setReservaEstadoSchema } from "../src/domains/mesas/mesas.schemas";
 import { altaReservaWebSchema } from "../src/domains/reservas_web/reservasWeb.schemas";
 import {
@@ -33,9 +36,10 @@ type Caso = {
 	cambios: Entrada;
 	acepta: boolean;
 	queda?: Entrada;
+	mensaje?: string;
 };
 type Bloque = { base: Entrada; casos: Caso[] };
-type Resultado = { success: boolean; data?: unknown; error?: { issues: unknown[] } };
+type Resultado = { success: boolean; data?: unknown; error?: { issues: unknown[] }; mensaje?: string };
 
 const { "//": _comentario, ...tabla } = JSON.parse(casosJson) as Record<string, Bloque>;
 
@@ -43,20 +47,20 @@ const { "//": _comentario, ...tabla } = JSON.parse(casosJson) as Record<string, 
  * Lo que valida cada dominio de la tabla: el schema que lleva su ruta en `cuerpo(...)`, con la
  * entrada colocada como llega por la API. Devuelve lo validado con la forma de la entrada.
  */
-const VALIDADORES: Record<string, (entrada: Entrada) => Resultado> = {
-	reserva: (e) => reservaSaveSchema.safeParse(e),
-	lote: (e) => createLoteSchema.safeParse(e),
-	lote_edicion: (e) => updateLoteSchema.safeParse(e),
-	producto: (e) => upsertProductoSchema.safeParse(e),
-	horario_alta: (e) => asignacionCreateSchema.safeParse(e),
-	horario_copia: (e) => copySemanaSchema.safeParse(e),
-	horario_semana: (e) => fechaLunesSchema.safeParse(e),
-	reserva_web: (e) => altaReservaWebSchema.safeParse(e),
-	reserva_estado_mesa: (e) => setReservaEstadoSchema.safeParse(e),
-	plano: (e) => saveLayoutSchema.safeParse(e),
-	negocio: (e) => {
-		const r = negocioPatchSchema.safeParse({ patch: e });
-		return r.success ? { success: true, data: r.data.patch } : r;
+const VALIDADORES: Record<string, (entrada: Entrada) => Promise<Resultado>> = {
+	reserva: (e) => validarConMensaje(reservaSaveSchema, e),
+	lote: (e) => validarConMensaje(createLoteSchema, e),
+	lote_edicion: (e) => validarConMensaje(updateLoteSchema, e),
+	producto: (e) => validarConMensaje(upsertProductoSchema, e),
+	horario_alta: (e) => validarConMensaje(asignacionCreateSchema, e),
+	horario_copia: (e) => validarConMensaje(copySemanaSchema, e),
+	horario_semana: (e) => validarConMensaje(fechaLunesSchema, e),
+	reserva_web: (e) => validarConMensaje(altaReservaWebSchema, e),
+	reserva_estado_mesa: (e) => validarConMensaje(setReservaEstadoSchema, e),
+	plano: (e) => validarConMensaje(saveLayoutSchema, e),
+	negocio: async (e) => {
+		const r = await validarConMensaje(negocioPatchSchema, { patch: e });
+		return r.success ? { success: true, data: (r.data as { patch: unknown }).patch } : r;
 	},
 };
 
@@ -70,11 +74,14 @@ describe("la validación del worker cuadra con la tabla compartida", () => {
 		const validar = VALIDADORES[dominio];
 		if (!validar) continue;
 
-		it.each(bloque.casos)(`${dominio} · $nombre`, (caso) => {
-			const r = validar({ ...bloque.base, ...caso.cambios });
+		it.each(bloque.casos)(`${dominio} · $nombre`, async (caso) => {
+			const r = await validar({ ...bloque.base, ...caso.cambios });
 			expect(r.success, JSON.stringify(r.error?.issues)).toBe(caso.acepta);
 			if (r.success && caso.queda) {
 				expect(r.data).toMatchObject(caso.queda);
+			}
+			if (!r.success && caso.mensaje) {
+				expect(r.mensaje).toBe(caso.mensaje);
 			}
 		});
 	}

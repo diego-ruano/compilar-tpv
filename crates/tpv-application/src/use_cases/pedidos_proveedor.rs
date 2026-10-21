@@ -84,7 +84,7 @@ pub async fn actualizar(
 ) -> AppResult<bool> {
     let id = input.id_pedido.trim().to_string();
     if id.is_empty() {
-        return Err(AppError::validation("id_pedido required"));
+        return Err(AppError::validation("Falta el pedido."));
     }
 
     let lineas: Result<Vec<LineaPedidoNueva>, _> = input
@@ -119,7 +119,7 @@ pub async fn cambiar_estado(
 ) -> AppResult<bool> {
     let id = input.id_pedido.trim().to_string();
     if id.is_empty() {
-        return Err(AppError::validation("id_pedido required"));
+        return Err(AppError::validation("Falta el pedido."));
     }
     let estado = input.estado.trim().to_string();
     if !matches!(estado.as_str(), "cancelado" | "enviado") {

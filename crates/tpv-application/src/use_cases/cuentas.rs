@@ -66,9 +66,9 @@ pub async fn create_gasto(
     id_usuario: Option<&str>,
     input: CreateGastoInput,
 ) -> AppResult<bool> {
-    let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
-    let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
-    let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
+    let fecha = requerido(&input.fecha, "Indica la fecha del gasto.").map_err(AppError::validation)?;
+    let tipo_gasto = requerido(&input.tipo_gasto, "Elige el tipo de gasto.").map_err(AppError::validation)?;
+    let concepto = requerido(&input.concepto, "Escribe el concepto del gasto.").map_err(AppError::validation)?;
 
     if input.importe <= Dinero::CERO {
         return Ok(false);
@@ -94,9 +94,9 @@ pub async fn update_gasto(
     repo: &dyn CuentasRepository,
     input: UpdateGastoInput,
 ) -> AppResult<bool> {
-    let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
-    let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
-    let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
+    let fecha = requerido(&input.fecha, "Indica la fecha del gasto.").map_err(AppError::validation)?;
+    let tipo_gasto = requerido(&input.tipo_gasto, "Elige el tipo de gasto.").map_err(AppError::validation)?;
+    let concepto = requerido(&input.concepto, "Escribe el concepto del gasto.").map_err(AppError::validation)?;
 
     if input.id_gasto.trim().is_empty() || input.importe <= Dinero::CERO {
         return Ok(false);
@@ -126,7 +126,7 @@ pub async fn delete_gasto(
 }
 
 pub async fn update_pago(repo: &dyn CuentasRepository, input: UpdatePagoInput) -> AppResult<bool> {
-    let fecha_hora = requerido(&input.fecha_hora, "fecha_hora").map_err(AppError::validation)?;
+    let fecha_hora = requerido(&input.fecha_hora, "Indica la fecha y la hora del cobro.").map_err(AppError::validation)?;
     let metodo = normalize_metodo(&input.metodo).map_err(AppError::validation)?;
 
     // El importe del input se ignora a propósito (CUENTA-02): el repositorio lo recalcula desde los

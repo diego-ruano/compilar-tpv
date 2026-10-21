@@ -115,7 +115,7 @@ pub async fn buscar_cliente(
 pub async fn eliminar(repo: &dyn ReservasRepository, input: ReservaDeleteInput) -> AppResult<bool> {
     let id = input.id_reserva.trim();
     if id.is_empty() {
-        return Err(AppError::validation("ID_Reserva inválido"));
+        return Err(AppError::validation("Falta la reserva."));
     }
     repo.eliminar(id).await
 }
@@ -130,7 +130,7 @@ pub async fn cancelar(
 ) -> AppResult<bool> {
     let id = input.id_reserva.trim();
     if id.is_empty() {
-        return Err(AppError::validation("ID_Reserva inválido"));
+        return Err(AppError::validation("Falta la reserva."));
     }
     let antes = match avisos {
         Some(_) => antes_de_cambiarla(repo, id).await,
