@@ -46,9 +46,16 @@ const roomSchema = z
 	})
 	.transform((v) => ({ type: "poly", points: v.points }));
 
+/**
+ * Recorta como `str::trim` en la Main: la propiedad Unicode `White_Space`. El `trim` de JavaScript
+ * quita además U+FEFF y deja U+0085, y con eso un nombre del plano valía en un lado y no en el otro
+ * (MESAS-01).
+ */
+const recortar = (s: string) => s.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
+
 const tableSchema = z.object({
 	id: z.string().default(""),
-	name: z.string().transform((s) => s.trim()),
+	name: z.string().transform(recortar),
 	x: z.coerce.number().int().default(0),
 	y: z.coerce.number().int().default(0),
 	width: z.coerce.number().int().default(120),
@@ -81,7 +88,7 @@ export const saveLayoutSchema = z
 		salons: z.array(
 			z.object({
 				id: z.string().default(""),
-				name: z.string().transform((s) => s.trim()),
+				name: z.string().transform(recortar),
 				room: roomSchema,
 				tables: z.array(tableSchema).optional().default([]),
 			}),

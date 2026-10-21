@@ -202,6 +202,10 @@
       { "nombre": "una zona sin mesas", "cambios": { "salons": [{ "id": "", "name": "Barra", "room": { "points": [] }, "tables": [] }] }, "acepta": true },
       { "nombre": "una zona sin nombre", "cambios": { "salons": [{ "id": "", "name": "", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
       { "nombre": "una zona con sólo espacios", "cambios": { "salons": [{ "id": "", "name": "   ", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
+      { "nombre": "U+0085 también es un espacio", "cambios": { "salons": [{ "id": "", "name": "\u0085", "room": { "points": [] }, "tables": [] }] }, "acepta": false },
+      { "nombre": "U+FEFF no lo es: se queda en el nombre", "cambios": { "salons": [
+        { "id": "", "name": "﻿Barra", "room": { "points": [] }, "tables": [{ "id": "", "name": "﻿" }] }
+      ] }, "acepta": true, "queda": { "salons": [{ "name": "﻿Barra", "tables": [{ "name": "﻿" }] }] } },
       { "nombre": "dos zonas con el mismo nombre", "cambios": { "salons": [
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] },
         { "id": "", "name": "Terraza", "room": { "points": [] }, "tables": [] }
