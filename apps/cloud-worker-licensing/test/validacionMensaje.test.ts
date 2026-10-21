@@ -11,6 +11,7 @@ import * as z from "zod";
 
 import { consulta, cuerpo, cuerpoTolerante } from "../src/lib/validacion";
 import { saveLayoutSchema } from "../src/domains/mesas/mesas.schemas";
+import { reservaSaveSchema } from "../src/domains/reservas/reservas.schemas";
 import { zDia } from "../src/lib/fechas";
 
 const schema = z.object({
@@ -42,6 +43,13 @@ describe("el motivo de un rechazo llega a quien está delante", () => {
 
 		const tolerante = await enviar(app, { nombre: "Ana", personas: 2, turno: "COMIDA" }, "/tolerante");
 		expect(tolerante.cuerpo.message).toBe("Sólo hay turno de cena");
+	});
+
+	it("nunca el texto de una excepción", async () => {
+		const reservas = new Hono().post("/", cuerpo(reservaSaveSchema), (c) => c.json({ ok: true }));
+		const r = await enviar(reservas, { dia_ymd: "2026-07-22", hora: { toString: null }, comensales: 2 });
+		expect(r.status).toBe(400);
+		expect(r.cuerpo.message).toBe("hora invalida");
 	});
 
 	it("el de una regla del plano, con el mismo texto que la Main", async () => {

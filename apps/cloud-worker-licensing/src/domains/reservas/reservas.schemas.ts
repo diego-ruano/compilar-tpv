@@ -33,17 +33,18 @@ function cleanEmailOrNull(v: unknown): string | null {
 }
 
 const MSG_DIA = "dia_ymd invalido";
+const MSG_HORA = "hora invalida";
 
 export function normalizeHora(raw: unknown): string {
 	const s = recortar(String(raw ?? ""));
 	const hhmm = s.length >= 5 ? s.slice(0, 5) : "";
 	if (!/^\d{2}:\d{2}$/.test(hhmm)) {
-		throw new Error("hora invalida");
+		throw new Error(MSG_HORA);
 	}
 	const hh = Number(hhmm.slice(0, 2));
 	const mm = Number(hhmm.slice(3, 5));
 	if (hh < 0 || hh > 23 || mm < 0 || mm > 59) {
-		throw new Error("hora invalida");
+		throw new Error(MSG_HORA);
 	}
 	return hhmm;
 }
@@ -123,11 +124,13 @@ export const reservaSaveSchema = z
 		}
 		try {
 			hora = normalizeHora(v.hora);
-		} catch (e: any) {
+		} catch {
+			// El texto de la regla, nunca el de la excepción: con un objeto por hora, `String()` lanza
+			// un TypeError en inglés, y el mensaje llega a quien está delante (VALID-02).
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				path: ["hora"],
-				message: e.message,
+				message: MSG_HORA,
 			});
 		}
 
