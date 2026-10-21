@@ -1,6 +1,7 @@
 // src/domains/proveedores/proveedores.commands.ts
 
 import { nuevoId } from "../../lib/ids";
+import { recortar } from "../../lib/texto";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
 	ProveedorSaveInput,
@@ -16,7 +17,7 @@ export type BuiltCommand = {
 const REF_ID = { $ref: "id" } as const;
 
 function cleanOrNull(s: unknown): string | null {
-	const t = (s ?? "").toString().trim();
+	const t = recortar((s ?? "").toString());
 	return t.length ? t : null;
 }
 
@@ -28,21 +29,21 @@ function numOrNull(v: unknown): number | null {
 
 function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
+		(ids ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0),
 	);
 	return Array.from(set).sort();
 }
 
 // UUIDv7: el id lo genera el cliente y lo envía; si faltara, generamos uno.
 function idStep(provided?: string | null) {
-	const id = (provided ?? "").trim() || nuevoId();
+	const id = recortar(provided ?? "") || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
 export function guardarProveedor(input: ProveedorSaveInput): BuiltCommand {
 	const cloudPayload = {
 		id_proveedor: input.id_proveedor ?? null,
-		nombre_empresa: input.nombre_empresa.trim(),
+		nombre_empresa: recortar(input.nombre_empresa),
 		contacto: cleanOrNull(input.contacto),
 		telefono: cleanOrNull(input.telefono),
 		email: cleanOrNull(input.email),

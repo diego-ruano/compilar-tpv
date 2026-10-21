@@ -7,18 +7,19 @@
 import * as z from "zod";
 
 import type { CrearNotificacionInput as ContractCrearNotificacionInput } from "@tpv/contracts";
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 
 const optStr = z.string().nullish().transform((v) => {
-	const t = (v ?? "").toString().trim();
+	const t = recortar((v ?? "").toString());
 	return t.length ? t : null;
 });
 
 export const crearNotificacionSchema = z
 	.object({
-		tipo: z.string().trim().min(1, "tipo required"),
-		severidad: z.string().trim().optional(),
-		titulo: z.string().trim().min(1, "titulo required"),
+		tipo: z.string().overwrite(recortar).min(1, "tipo required"),
+		severidad: z.string().overwrite(recortar).optional(),
+		titulo: z.string().overwrite(recortar).min(1, "titulo required"),
 		cuerpo: optStr,
 		destino_tipo: z.enum(["todos", "usuario", "rol"]),
 		destino_valor: optStr,
@@ -33,15 +34,15 @@ export const crearNotificacionSchema = z
 	});
 
 export const marcarLeidaSchema = z.object({
-	id_usuario: z.string().trim().min(1),
+	id_usuario: z.string().overwrite(recortar).min(1),
 });
 
 export const marcarTodasSchema = z.object({
-	id_usuario: z.string().trim().min(1),
+	id_usuario: z.string().overwrite(recortar).min(1),
 });
 
 export const resolverSchema = z.object({
-	clave_dedupe: z.string().trim().min(1),
+	clave_dedupe: z.string().overwrite(recortar).min(1),
 });
 
 export type CrearNotificacionBody = z.infer<typeof crearNotificacionSchema>;

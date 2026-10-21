@@ -1,6 +1,7 @@
 // src/domains/clientes/clientes.commands.ts
 
 import { nuevoId } from "../../lib/ids";
+import { recortar } from "../../lib/texto";
 import type { ApplyCommand } from "../../lib/hub";
 import type { CreateClienteInput, UpdateClienteInput } from "./clientes.schemas";
 
@@ -13,13 +14,13 @@ export type BuiltCommand = {
 const REF_ID = { $ref: "id" } as const;
 
 function cleanOrNull(s: unknown): string | null {
-	const t = (s ?? "").toString().trim();
+	const t = recortar((s ?? "").toString());
 	return t.length ? t : null;
 }
 
 // Local-First/UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno.
 function idStep(provided?: string | null) {
-	const id = (provided ?? "").trim() || nuevoId();
+	const id = recortar(provided ?? "") || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
@@ -29,7 +30,7 @@ function idStep(provided?: string | null) {
 export function createCliente(input: CreateClienteInput): BuiltCommand {
 	const cloudPayload = {
 		id_cliente: input.id_cliente,
-		nombre: input.nombre.trim(),
+		nombre: recortar(input.nombre),
 		email: cleanOrNull(input.email),
 		telefono: cleanOrNull(input.telefono),
 		notas: cleanOrNull(input.notas),
@@ -82,7 +83,7 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 export function updateCliente(idCliente: string, input: UpdateClienteInput): BuiltCommand {
 	const cloudPayload = {
 		id_cliente: idCliente,
-		nombre: input.nombre.trim(),
+		nombre: recortar(input.nombre),
 		email: cleanOrNull(input.email),
 		telefono: cleanOrNull(input.telefono),
 		notas: cleanOrNull(input.notas),

@@ -1,6 +1,7 @@
 // src/domains/cuentas/cuentas.commands.ts
 
 import { zMetodoPago } from "../../lib/pago";
+import { recortar } from "../../lib/texto";
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
@@ -23,7 +24,7 @@ const REF_ID = { $ref: "id" } as const;
 
 // UUIDv7: el id lo genera el cliente y lo envía; si faltara, generamos uno.
 function idStep(provided?: string | null) {
-	const id = (provided ?? "").trim() || nuevoId();
+	const id = recortar(provided ?? "") || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
@@ -203,7 +204,7 @@ const yaRepuesto = (a: string) =>
 // vista `v_lineas_cobradas`, que sólo mira pagos activos. Paridad con
 // `SqliteCuentasRepository::anular_pago`. Todo en una transacción del DO.
 export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand {
-	const motivo = (input.motivo ?? "").trim();
+	const motivo = recortar(input.motivo ?? "");
 	const idUsuario = input.id_usuario;
 	// FISCAL-01: los dos instrumentos. Espejo de `ClaseBaja` en Rust.
 	//

@@ -8,6 +8,7 @@
 // convierten en 3 de marzo; el calendario de la pantalla no lo enseña en ningún día).
 
 import * as z from "zod";
+import { recortar } from "./texto";
 
 const FORMA_YMD = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -39,7 +40,7 @@ export function diaDeInstante(s: string): string | null {
  * `normalize_dia_ymd` en la Main.
  */
 export function normalizarDia(raw: unknown): string | null {
-	const candidato = String(raw ?? "").trim().slice(0, 10);
+	const candidato = recortar(String(raw ?? "")).slice(0, 10);
 	return esFechaYmd(candidato) ? candidato : null;
 }
 

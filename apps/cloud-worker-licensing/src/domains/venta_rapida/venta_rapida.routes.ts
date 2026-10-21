@@ -5,6 +5,7 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { HubError } from "../../lib/hub";
+import { recortar } from "../../lib/texto";
 import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
 
@@ -144,7 +145,7 @@ ventaRapidaRoutes.post("/cobrar-fraccionado", soloLaMainCobra, cuerpo(S.cobrarFr
 	return c.json({ ok: true, id_pago: plan.id_pago });
 });
 
-ventaRapidaRoutes.post("/comandas/delete-if-safe", cuerpo(z.object({ id_comanda: z.coerce.string().trim().min(1) })), async (c) => {
+ventaRapidaRoutes.post("/comandas/delete-if-safe", cuerpo(z.object({ id_comanda: z.coerce.string().overwrite(recortar).min(1) })), async (c) => {
 	const datos = c.req.valid("json");
 	const hasPaid = await tenantQuery(c, (db) =>
 		q.hasPaidLines(db, datos.id_comanda),

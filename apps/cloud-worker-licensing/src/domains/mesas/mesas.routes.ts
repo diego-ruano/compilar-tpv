@@ -5,6 +5,7 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { HubError } from "../../lib/hub";
+import { recortar } from "../../lib/texto";
 import { parseClientNow } from "../../durableObjects/tenantHub.tiempo";
 import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
@@ -141,7 +142,7 @@ mesasRoutes.put(
 	"/lineas/:id/nota",
 	cuerpo(
 		z.object({ nota: z.any().optional().nullable() }).transform((v) => {
-			const s = String(v.nota ?? "").trim();
+			const s = recortar(String(v.nota ?? ""));
 			return { nota: s ? s : null };
 		}),
 	),

@@ -3,23 +3,24 @@
 import * as z from "zod";
 import { zDineroOpcional } from "../../lib/dinero";
 
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	ProveedorSaveInput as ContractProveedorSaveInput,
 	ProveedoresSetVinculosInput,
 } from "@tpv/contracts";
 
-const idStr = z.string().trim().min(1);
+const idStr = z.string().overwrite(recortar).min(1);
 const optNum = z.number().finite().min(0).nullish();
 
 function cleanOptional(v: unknown): string | null {
-	const t = (v ?? "").toString().trim();
+	const t = recortar((v ?? "").toString());
 	return t.length ? t : null;
 }
 
 function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
+		(ids ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0),
 	);
 	return Array.from(set).sort();
 }
@@ -28,7 +29,7 @@ const optStr = z.string().nullish().transform(cleanOptional);
 
 export const proveedorSaveSchema = z.object({
 	id_proveedor: idStr.optional().nullish(),
-	nombre_empresa: z.string().trim().min(1, "nombre_empresa required"),
+	nombre_empresa: z.string().overwrite(recortar).min(1, "nombre_empresa required"),
 	contacto: optStr,
 	telefono: optStr,
 	email: optStr,

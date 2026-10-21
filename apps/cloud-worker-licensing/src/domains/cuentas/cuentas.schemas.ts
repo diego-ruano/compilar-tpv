@@ -4,6 +4,7 @@ import * as z from "zod";
 import { zMetodoPago } from "../../lib/pago";
 
 import { zDineroNoNegativo } from "../../lib/dinero";
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	AnularPagoInput as ContractAnularPagoInput,
@@ -12,12 +13,12 @@ import type {
 	UpdatePagoInput as ContractUpdatePagoInput,
 } from "@tpv/contracts";
 
-const idStr = z.string().trim().min(1);
+const idStr = z.string().overwrite(recortar).min(1);
 /** Un importe de la API: centimos enteros y no negativo (ARQ-01). */
 const money = zDineroNoNegativo;
 
 function clean(v: unknown): string {
-	return String(v ?? "").trim();
+	return recortar(String(v ?? ""));
 }
 
 function cleanOptional(v: unknown): string | null {

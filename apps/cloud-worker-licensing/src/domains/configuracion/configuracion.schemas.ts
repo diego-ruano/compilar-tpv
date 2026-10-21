@@ -2,6 +2,7 @@
 
 import * as z from "zod";
 
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type { BusinessSettingsPatch, TicketSettingsPatch, ContactSettingsPatch } from "@tpv/contracts";
 import { zDinero, zDineroNoNegativo } from "../../lib/dinero";
@@ -30,7 +31,7 @@ const ticket = z.object({
     margin_left_mm: z.number().finite().optional(), margin_right_mm: z.number().finite().optional(), font_scale: z.number().finite().optional(),
 }).strict();
 const contacto = z.object({
-    contact_email: z.string().trim().max(254).refine(s => s === "" || z.string().email().safeParse(s).success, "Correo de contacto inválido").optional(),
+    contact_email: z.string().overwrite(recortar).max(254).refine(s => s === "" || z.string().email().safeParse(s).success, "Correo de contacto inválido").optional(),
     contact_phone: z.string().optional(),
 }).strict();
 export const negocioPatchSchema = z.object({ patch: negocio }).strict();

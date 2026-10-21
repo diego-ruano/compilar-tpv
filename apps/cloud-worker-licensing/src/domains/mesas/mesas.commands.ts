@@ -1,4 +1,5 @@
 import { zMetodoPago } from "../../lib/pago";
+import { recortar } from "../../lib/texto";
 // src/domains/mesas/mesas.commands.ts
 
 import type { Dinero } from "@tpv/contracts";
@@ -35,9 +36,9 @@ const UPDATE_TOTAL = `
 `;
 
 function parseDbId(raw: string, prefix: string): string | null {
-	const s = String(raw || "").trim();
+	const s = recortar(String(raw || ""));
 	if (!s.startsWith(prefix)) return null;
-	const id = s.slice(prefix.length).trim();
+	const id = recortar(s.slice(prefix.length));
 	return id || null;
 }
 
@@ -183,7 +184,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 
 		for (const t of z.tables) {
 			const idMesa = parseDbId(t.id, "db-mesa-");
-			const shape = t.shape?.trim() || "rounded";
+			const shape = recortar(t.shape ?? "") || "rounded";
 			const width = t.width > 0 ? t.width : 120;
 			const height = t.height > 0 ? t.height : 70;
 			const seats = t.seats > 0 ? t.seats : 4;
@@ -309,8 +310,8 @@ export function setReservaEstado(idReserva: string, estado: string): BuiltComman
 }
 
 function stripPrefix(raw: string, prefix: string): string {
-	const s = String(raw || "").trim();
-	return s.startsWith(prefix) ? s.slice(prefix.length).trim() : s;
+	const s = recortar(String(raw || ""));
+	return s.startsWith(prefix) ? recortar(s.slice(prefix.length)) : s;
 }
 
 export function abrirComanda(

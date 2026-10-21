@@ -3,6 +3,7 @@
 import * as z from "zod";
 
 import { esFechaYmd, zDia } from "../../lib/fechas";
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	AsignacionCreateInput as ContractAsignacionCreateInput,
@@ -14,19 +15,19 @@ import type {
 } from "@tpv/contracts";
 
 function cleanOrNull(v: unknown): string | null {
-	const s = String(v ?? "").trim();
+	const s = recortar(String(v ?? ""));
 	return s.length ? s : null;
 }
 
 function requiredString(field: string) {
 	return z
 		.string()
-		.transform((s) => s.trim())
+		.transform(recortar)
 		.refine((s) => s.length > 0, `${field} required`);
 }
 
 function idField(field: string) {
-	return z.coerce.string().trim().min(1, `${field} invalido`);
+	return z.coerce.string().overwrite(recortar).min(1, `${field} invalido`);
 }
 
 /**
@@ -38,7 +39,7 @@ const PIN_DE_TECLADO = /^\d{4,6}$/;
 const MSG_PIN = "El PIN tiene que tener entre 4 y 6 cifras";
 
 function normalizeEstado(v: unknown): string {
-	return String(v ?? "").trim().toLowerCase() === "inactivo"
+	return recortar(String(v ?? "")).toLowerCase() === "inactivo"
 		? "Inactivo"
 		: "Activo";
 }
@@ -63,7 +64,7 @@ export const trabajadorCreateSchema = z
 		email: requiredString("email"),
 		pin: z
 			.string()
-			.transform((s) => s.trim())
+			.transform(recortar)
 			.refine((s) => PIN_DE_TECLADO.test(s), MSG_PIN),
 		nombre: requiredString("nombre"),
 		apellido: z.any().optional().nullable(),
@@ -169,7 +170,7 @@ export const fechaLunesSchema = z.object({
 // lo vuelve a comprobar SQLite dentro de la transacción.
 const horaTramo = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Hora inválida (usa HH:mm)");
 export const asignacionGuardarSchema = z.object({
-	id_asignacion: z.string().trim().min(1).nullable().optional(),
+	id_asignacion: z.string().overwrite(recortar).min(1).nullable().optional(),
 	id_trabajador: requiredString("id_trabajador"),
 	fecha: z.string().refine(esFechaYmd, "La fecha del horario no es válida"),
 	id_turno: requiredString("id_turno"),

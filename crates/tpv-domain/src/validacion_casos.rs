@@ -138,7 +138,7 @@ fn producto(e: &Value) -> Result<Value, String> {
         iva_percent: e["iva_percent"].as_f64(),
         ids_alergenos: Vec::new(),
     })?;
-    Ok(json!({ "iva_percent": p.iva_percent }))
+    Ok(json!({ "iva_percent": p.iva_percent, "nombre": p.nombre }))
 }
 
 /// Los días de un horario: cada campo de `campos` pasa por `dia_de_horario`, como en los casos de

@@ -1,6 +1,7 @@
 // src/domains/configuracion/configuracion.commands.ts
 
 import { zDinero } from "../../lib/dinero";
+import { recortar } from "../../lib/texto";
 import { HubError } from "../../lib/errorHttp";
 import type { ApplyCommand } from "../../lib/hub";
 
@@ -18,7 +19,7 @@ function cleanString(v: unknown): string | null {
 function cleanLogo(v: unknown): string | null {
 	const s = cleanString(v);
 	if (s == null) return null;
-	const t = s.trim();
+	const t = recortar(s);
 	return t.length ? s : null;
 }
 
@@ -26,7 +27,7 @@ function boolVal(v: unknown): boolean | null {
 	if (typeof v === "boolean") return v;
 	if (typeof v === "number") return v !== 0;
 	if (typeof v === "string") {
-		const s = v.trim().toLowerCase();
+		const s = recortar(v).toLowerCase();
 		if (["1", "true", "yes", "si", "sí"].includes(s)) return true;
 		if (["0", "false", "no"].includes(s)) return false;
 	}
@@ -93,7 +94,7 @@ export function patchContact(patch: Record<string, unknown>): BuiltCommand {
 
 /** RI-61: espejo de `ModoSolape::desde`: lo que no sea «prohibir» es avisar. */
 function modoSolape(v: unknown): "avisar" | "prohibir" {
-	return String(v ?? "").trim().toLowerCase() === "prohibir" ? "prohibir" : "avisar";
+	return recortar(String(v ?? "")).toLowerCase() === "prohibir" ? "prohibir" : "avisar";
 }
 
 export function patchBusiness(patch: Record<string, unknown>): BuiltCommand {

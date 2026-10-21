@@ -10,6 +10,7 @@ import { zDineroOpcional } from "../../lib/dinero";
 import { diaDeInstante, esFechaYmd } from "../../lib/fechas";
 import { zIva } from "../../lib/iva";
 
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	AjusteLoteInput as ContractAjusteLoteInput,
@@ -22,8 +23,8 @@ import type {
 
 const optNum = z.number().finite().nullish();
 const optStr = z.string().nullish();
-const idStr = z.string().trim().min(1);
-const idList = z.array(z.string().trim().min(1)).default([]);
+const idStr = z.string().overwrite(recortar).min(1);
+const idList = z.array(z.string().overwrite(recortar).min(1)).default([]);
 
 // UUIDv7: el id lo genera el cliente y lo envía. Si lo envía `null` (no lo conoce),
 // lo normalizamos a `undefined` para no romper los tipos de @tpv/contracts (string | undefined).
@@ -31,7 +32,7 @@ const optId = idStr.nullish().transform((v) => (v == null ? undefined : v));
 
 export const upsertCategoriaSchema = z.object({
 	id_categoria: optId,
-	nombre: z.string().trim().min(1, "nombre required"),
+	nombre: z.string().overwrite(recortar).min(1, "nombre required"),
 	nombre_imagen: z.string().default(""),
 	ruta_imagen: z.string().default(""),
 	vendible: z.boolean(),
@@ -42,7 +43,7 @@ export const upsertProductoSchema = z.object({
 	id_producto: optId,
 	id_categoria: idStr,
 	id_proveedor: idStr.nullish(),
-	nombre: z.string().trim().min(1, "nombre required"),
+	nombre: z.string().overwrite(recortar).min(1, "nombre required"),
 	precio_venta: zDineroOpcional,
 	stock_minimo: optNum,
 	unidad_medida: optStr,
@@ -72,8 +73,8 @@ function fechasDeLote(
 	v: { caducidad?: string | null; fecha_entrada?: string | null },
 	ctx: z.RefinementCtx,
 ) {
-	const caducidad = (v.caducidad ?? "").trim();
-	const entrada = (v.fecha_entrada ?? "").trim();
+	const caducidad = recortar(v.caducidad ?? "");
+	const entrada = recortar(v.fecha_entrada ?? "");
 	const caducidadOk = !caducidad || esFechaYmd(caducidad);
 	const diaEntrada = entrada ? diaDeInstante(entrada) : null;
 
@@ -90,13 +91,13 @@ function fechasDeLote(
 }
 
 // RI-28: contexto del adaptador Rust; la sesión personal del Worker está aplazada.
-export const autorStockSchema = z.string().trim().min(1);
+export const autorStockSchema = z.string().overwrite(recortar).min(1);
 
 // Los campos del DTO, sin las reglas entre campos: es lo que compara el drift-guard de abajo.
 const createLoteCampos = z.object({
 	id_lote: optId,
 	id_producto: idStr,
-	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
+	codigo_lote: z.string().overwrite(recortar).min(1, "codigo_lote required"),
 	caducidad: optStr,
 	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	fecha_entrada: optStr,
@@ -114,7 +115,7 @@ export const createLoteSchema = createLoteCampos
 const updateLoteCampos = z.object({
 	id_lote: idStr,
 	id_producto: idStr,
-	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
+	codigo_lote: z.string().overwrite(recortar).min(1, "codigo_lote required"),
 	caducidad: optStr,
 	fecha_entrada: optStr,
 	coste_unitario: zDineroOpcional,

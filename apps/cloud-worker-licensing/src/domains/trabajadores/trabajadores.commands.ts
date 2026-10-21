@@ -1,6 +1,7 @@
 // src/domains/trabajadores/trabajadores.commands.ts
 
 import { nuevoId } from "../../lib/ids";
+import { recortar } from "../../lib/texto";
 import type { ApplyCommand } from "../../lib/hub";
 import type { FilaSemanaOrigen, GrupoAsignacion } from "./trabajadores.queries";
 import type { PredeterminadoItem } from "./trabajadores.queries";
@@ -412,7 +413,7 @@ function sumaDias(fecha: string, dias: number): string | null {
 }
 
 function fechaUtc(s: unknown): number | null {
-	const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s ?? "").trim());
+	const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(recortar(String(s ?? "")));
 	if (!m) return null;
 	const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 	return Number.isFinite(t) ? t : null;

@@ -203,6 +203,8 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   `crates/tpv-domain/src/validacion_casos.json`, que leen los dos lados.
 - Una fecha que llega como texto se valida con `lib/fechas.ts` (en Rust, `tpv_domain::fechas`), nunca
   con una expresión regular suelta.
+- Un texto que llega se recorta con `recortar` (`lib/texto.ts`), que quita lo mismo que `str::trim`;
+  nunca con `.trim()`, que quita además U+FEFF y deja U+0085 (en un schema, `.overwrite(recortar)`).
 - Una ruta que devuelve listas pone **el techo en la respuesta**, no en cada pieza.
 - Un identificador de error nuevo va a `MENSAJES` o a `SIN_MENSAJE_PROPIO` (`lib/errorCodes.ts`).
 - Toda ruta que verifique un PIN lleva el freno de LOGIN-01 (`test/pinSiempreConFreno.test.ts`).
@@ -288,7 +290,7 @@ lo que hay que revisar es el cambio, no el test:
 - `migrations.rs::todas_las_columnas_de_dinero_llevan_su_check`, `db.rs::ninguna_columna_del_esquema_elige_su_hora`
   y el snapshot del esquema.
 - En el worker: `vetoAntesDelCuerpo`, `anularSoloMain`, `fiscalSoloMain`, `cobroSoloMain`,
-  `pinSiempreConFreno`, `mensajesDeError`, `salud`, `lecturasEnHoraLocal`.
+  `pinSiempreConFreno`, `mensajesDeError`, `salud`, `lecturasEnHoraLocal`, `recortarComoLaMain`.
 - Los arneses de contrato ([tests/contract/README.md](tests/contract/README.md)) y
   `scripts/check-contract-coverage.mjs`.
 - Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `scrub_casos.json`,

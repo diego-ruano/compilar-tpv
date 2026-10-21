@@ -10,6 +10,7 @@
 // y viaje en el broadcast (la Main lo aplica con ese mismo ID).
 
 import { redondearCantidad } from "../../lib/cantidad";
+import { recortar } from "../../lib/texto";
 import { nuevoId } from "../../lib/ids";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
@@ -30,7 +31,7 @@ export type BuiltCommand = {
 const REF_ID = { $ref: "id" } as const;
 
 function cleanOrNull(s: unknown): string | null {
-	const t = (s ?? "").toString().trim();
+	const t = recortar((s ?? "").toString());
 	return t.length ? t : null;
 }
 
@@ -47,13 +48,13 @@ function cantidadONull(v: unknown): number | null {
 }
 
 function idOrNull(v: unknown): string | null {
-	const s = (v ?? "").toString().trim();
+	const s = recortar((v ?? "").toString());
 	return s.length ? s : null;
 }
 
 function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
+		(ids ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0),
 	);
 	return Array.from(set).sort();
 }
@@ -123,7 +124,7 @@ const SQL_INSERT_MOVIMIENTO_PRODUCTO = `
 // UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno aquí.
 // Queda en `id` para que viaje en el broadcast y la Main lo aplique con el mismo id.
 function idStep(provided?: string | null) {
-	const id = (provided ?? "").trim() || nuevoId();
+	const id = recortar(provided ?? "") || nuevoId();
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
@@ -135,9 +136,9 @@ export function createCategoria(input: UpsertCategoriaInput): BuiltCommand {
 			sql: SQL_UPSERT_CATEGORIA,
 			args: [
 				REF_ID,
-				input.nombre.trim(),
-				(input.nombre_imagen ?? "").trim(),
-				(input.ruta_imagen ?? "").trim(),
+				recortar(input.nombre),
+				recortar(input.nombre_imagen ?? ""),
+				recortar(input.ruta_imagen ?? ""),
 				input.vendible ? 1 : 0,
 				input.pasa_cocina ? 1 : 0,
 			],
@@ -165,7 +166,7 @@ export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean, idU
 				REF_ID,
 				input.id_categoria,
 				idOrNull(input.id_proveedor),
-				input.nombre.trim(),
+				recortar(input.nombre),
 				numOrNull(input.precio_venta),
 				numOrNull(input.stock_minimo),
 				cleanOrNull(input.unidad_medida),
@@ -255,7 +256,7 @@ export function createLote(input: CreateLoteInput, idUsuario: string): BuiltComm
 			args: [
 				REF_ID,
 				input.id_producto,
-				input.codigo_lote.trim(),
+				recortar(input.codigo_lote),
 				cleanOrNull(input.fecha_entrada),
 				cleanOrNull(input.caducidad),
 				stock,
@@ -300,7 +301,7 @@ export function updateLote(idLote: string, input: UpdateLoteInput): BuiltCommand
 			args: [
 				idLote,
 				input.id_producto,
-				input.codigo_lote.trim(),
+				recortar(input.codigo_lote),
 				cleanOrNull(input.fecha_entrada),
 				cleanOrNull(input.caducidad),
 				numOrNull(input.coste_unitario),

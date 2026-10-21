@@ -22,6 +22,7 @@ import type { Env } from "../../env";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import { cuerpo } from "../../lib/validacion";
+import { recortar } from "../../lib/texto";
 import { getDb } from "../../server/db";
 import { claveActivaDelNegocio, claveDelNegocio, codigoParaLaWeb } from "./claves";
 import { enlaceDeCancelar, enviarCorreoReservaWeb, negocioDelCorreo } from "./correos";
@@ -96,7 +97,7 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 	// de aquí sería contarle a otra persona la reserva. Se repite cuando esté al día.
 	if (leido.idCliente !== aviso.id_cliente) return c.json({ ok: false, error: "reserva_no_al_dia" }, 404);
 	// Lo mismo con su correo: si en la Main se corrigió y aún no ha subido, se escribiría al de antes.
-	const huella = leido.email ? await sha256HexStr(leido.email.trim().toLowerCase()) : null;
+	const huella = leido.email ? await sha256HexStr(recortar(leido.email).toLowerCase()) : null;
 	if (huella !== aviso.huella_correo) return c.json({ ok: false, error: "reserva_no_al_dia" }, 404);
 	// Sin correo no hay a quién decírselo: hecho.
 	if (!leido.email) return c.json({ ok: true, enviado: false });

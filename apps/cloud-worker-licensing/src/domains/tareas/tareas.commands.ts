@@ -5,6 +5,7 @@
 // idempotencia por Op_Id y broadcast.
 
 import { nuevoId } from "../../lib/ids";
+import { recortar } from "../../lib/texto";
 import type { ApplyCommand } from "../../lib/hub";
 import type {
 	CreateTareaInput,
@@ -23,13 +24,13 @@ const REF_ID_TAREA = { $ref: "id_tarea" } as const;
 
 function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
+		(ids ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0),
 	);
 	return Array.from(set).sort();
 }
 
 function cleanOrNull(s: unknown): string | null {
-	const t = (s ?? "").toString().trim();
+	const t = recortar((s ?? "").toString());
 	return t.length ? t : null;
 }
 
@@ -87,7 +88,7 @@ function assignmentSteps(idTarea: string | typeof REF_ID_TAREA, idsRaw: string[]
 export function createTarea(input: CreateTareaInput): BuiltCommand {
 	const ids = normalizeIds(input.ids_trabajadores ?? []);
 	const cloudPayload = {
-		titulo: input.titulo.trim(),
+		titulo: recortar(input.titulo),
 		descripcion: cleanOrNull(input.descripcion),
 		fecha_limite: cleanOrNull(input.fecha_limite),
 		ids_trabajadores: ids,
@@ -132,7 +133,7 @@ export function createTarea(input: CreateTareaInput): BuiltCommand {
 export function updateTarea(idTarea: string, input: UpdateTareaInput): BuiltCommand {
 	const cloudPayload = {
 		id_tarea: idTarea,
-		titulo: input.titulo.trim(),
+		titulo: recortar(input.titulo),
 		descripcion: cleanOrNull(input.descripcion),
 		fecha_limite: cleanOrNull(input.fecha_limite),
 	};

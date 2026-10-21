@@ -15,6 +15,7 @@ import type {
 } from "@tpv/contracts";
 
 import { normalizarDia, zDia } from "../../lib/fechas";
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import { isValidEmail } from "../clientes/clientes.schemas";
 import { normalizeHora } from "../reservas/reservas.schemas";
@@ -40,7 +41,7 @@ const texto = (x: unknown): string => (typeof x === "string" ? x : "");
  * Espejo de `tpv_domain::reservas_web::normalizar_telefono`.
  */
 function normalizarTelefono(raw: unknown): string | null {
-	const t = texto(raw).trim();
+	const t = recortar(texto(raw));
 	const mas = t.startsWith("+") ? "+" : "";
 	const resto = mas ? t.slice(1) : t;
 	if (!/^[0-9 \-.()]*$/.test(resto)) return null;
@@ -82,20 +83,20 @@ export const altaReservaWebSchema = z
 			fallo("personas", `El número de personas tiene que estar entre 1 y ${PERSONAS_MAX}`);
 		}
 
-		const id_mesa = texto(v.id_mesa).trim();
+		const id_mesa = recortar(texto(v.id_mesa));
 		if (!id_mesa) fallo("id_mesa", "Elige una mesa");
 
-		const nombre = texto(v.nombre).trim();
+		const nombre = recortar(texto(v.nombre));
 		if (!nombre) fallo("nombre", "Escribe tu nombre");
 		else if (largo(nombre) > NOMBRE_MAX) fallo("nombre", `El nombre no puede pasar de ${NOMBRE_MAX} caracteres`);
 
-		const email = texto(v.email).trim().toLowerCase();
+		const email = recortar(texto(v.email)).toLowerCase();
 		if (largo(email) > EMAIL_MAX || !isValidEmail(email)) fallo("email", "El correo no es válido");
 
 		const telefono = normalizarTelefono(v.telefono);
 		if (!telefono) fallo("telefono", "El teléfono no es válido");
 
-		const notaLimpia = texto(v.nota).trim();
+		const notaLimpia = recortar(texto(v.nota));
 		const nota = notaLimpia.length ? notaLimpia : null;
 		if (nota && largo(nota) > NOTA_MAX) fallo("nota", `La nota no puede pasar de ${NOTA_MAX} caracteres`);
 
@@ -131,7 +132,7 @@ export const disponiblesQuerySchema = z.object({
 		return hora;
 	}),
 	personas: z.unknown().transform((v, ctx) => {
-		const t = texto(v).trim();
+		const t = recortar(texto(v));
 		const n = /^\d{1,3}$/.test(t) ? Number(t) : 0;
 		if (n < 1 || n > PERSONAS_MAX) {
 			ctx.addIssue({ code: "custom", message: `El número de personas tiene que estar entre 1 y ${PERSONAS_MAX}` });
@@ -142,16 +143,16 @@ export const disponiblesQuerySchema = z.object({
 });
 
 /** El cuerpo de `/reserva` y `/cancelar`: el token del enlace del correo. */
-export const tokenEnlaceSchema = z.object({ token: z.unknown().transform((v) => texto(v).trim().slice(0, 64)) });
+export const tokenEnlaceSchema = z.object({ token: z.unknown().transform((v) => recortar(texto(v)).slice(0, 64)) });
 
 /** Una línea de lo que contesta la Main (`POST /v1/reservas-web/recogidas`). */
 const recogidaSchema = z.object({
-	id_peticion: z.string().trim().min(1).max(64),
+	id_peticion: z.string().overwrite(recortar).min(1).max(64),
 	resultado: z.enum(["registrada", "solapada", "fallida"]),
 	// Un código de error, nunca su texto (podría llevar datos de alguien).
 	codigo: z
 		.string()
-		.trim()
+		.overwrite(recortar)
 		.max(64)
 		.regex(/^[a-z0-9_]*$/, "El código de error es un identificador")
 		.nullish()
@@ -170,8 +171,8 @@ type _GRecogidas = Assert<SameKeys<z.infer<typeof recogidasSchema>, RecogidasRes
  * correo de nuestro dominio, así que todo tiene su forma y su tope. El destinatario no viene aquí.
  */
 export const avisoReservaWebSchema = z.object({
-	id_aviso: z.string().trim().regex(/^[A-Za-z0-9_-]{8,64}$/, "id_aviso inválido"),
-	id_reserva: z.string().trim().min(1).max(64),
+	id_aviso: z.string().overwrite(recortar).regex(/^[A-Za-z0-9_-]{8,64}$/, "id_aviso inválido"),
+	id_reserva: z.string().overwrite(recortar).min(1).max(64),
 	tipo: z.enum(["modificada", "cancelada"]),
 	dia_ymd: zDia("Formato de día inválido. Esperado YYYY-MM-DD."),
 	hora: z.unknown().transform((v, ctx) => {
@@ -187,7 +188,7 @@ export const avisoReservaWebSchema = z.object({
 	// El nombre de la mesa en la Main, en una sola línea.
 	mesa: z
 		.string()
-		.trim()
+		.overwrite(recortar)
 		.max(60)
 		.refine((s) => !/[\r\n]/.test(s), "mesa inválida")
 		.nullish()
@@ -195,7 +196,7 @@ export const avisoReservaWebSchema = z.object({
 	// El cliente de la reserva en la Main tras el cambio: la nube sólo le escribe al suyo si es éste.
 	id_cliente: z
 		.string()
-		.trim()
+		.overwrite(recortar)
 		.max(64)
 		.nullish()
 		.transform((v) => (v ? v : null)),

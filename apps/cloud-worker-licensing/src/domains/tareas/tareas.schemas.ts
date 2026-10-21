@@ -6,6 +6,7 @@
 
 import * as z from "zod";
 
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	CreateTareaInput as ContractCreateTareaInput,
@@ -14,16 +15,16 @@ import type {
 	UpdateTareaInput as ContractUpdateTareaInput,
 } from "@tpv/contracts";
 
-const idStr = z.string().trim().min(1);
+const idStr = z.string().overwrite(recortar).min(1);
 
 function cleanOptional(v: unknown): string | null {
-	const t = (v ?? "").toString().trim();
+	const t = recortar((v ?? "").toString());
 	return t.length ? t : null;
 }
 
 function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
+		(ids ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0),
 	);
 	return Array.from(set).sort();
 }
@@ -32,7 +33,7 @@ const optStr = z.string().nullish().transform(cleanOptional);
 const idsTrabajadores = z.array(z.string()).default([]).transform(normalizeIds);
 
 export const createTareaSchema = z.object({
-	titulo: z.string().trim().min(1, "titulo required"),
+	titulo: z.string().overwrite(recortar).min(1, "titulo required"),
 	descripcion: optStr,
 	fecha_limite: optStr,
 	ids_trabajadores: idsTrabajadores.refine((ids) => ids.length > 0, {
@@ -41,7 +42,7 @@ export const createTareaSchema = z.object({
 });
 
 export const updateTareaSchema = z.object({
-	titulo: z.string().trim().min(1, "titulo required"),
+	titulo: z.string().overwrite(recortar).min(1, "titulo required"),
 	descripcion: optStr,
 	fecha_limite: optStr,
 });

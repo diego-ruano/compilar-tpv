@@ -1,4 +1,5 @@
 import { zMetodoPago } from "../../lib/pago";
+import { recortar } from "../../lib/texto";
 // src/domains/venta_rapida/venta_rapida.commands.ts
 
 import type { Dinero } from "@tpv/contracts";
@@ -45,7 +46,7 @@ const UPDATE_TOTAL = `
 // Misma convención que el resto de dominios (ver `idStep` en clientes/inventario/…): una fila
 // tiene UN id, elegido por quien la crea, e idéntico en el dispositivo y en la nube.
 function idStep(saveAs: string, provided?: string) {
-	const id = (provided ?? "").trim() || nuevoId();
+	const id = recortar(provided ?? "") || nuevoId();
 	return { kind: "value", saveAs, sql: "SELECT ?1;", args: [id] };
 }
 

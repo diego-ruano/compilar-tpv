@@ -28,7 +28,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
-| [VALID-01](#valid-01--el-worker-y-la-main-no-recortan-los-mismos-espacios) | 🔵 | El worker y la Main no recortan los mismos espacios | Sin empezar |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
 ---
@@ -408,15 +407,6 @@ identificadores o copia datos del catálogo. Lo que decide es poco más de una d
 Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico de Turso,
 que no se replique y que devuelva un error de negocio si no se cumple; y pasar a él esas
 comprobaciones.
-
-### VALID-01 · El worker y la Main no recortan los mismos espacios
-
-Los `validar` de la Main recortan con `str::trim` de Rust (la propiedad Unicode `White_Space`) y los
-schemas del worker con `.trim()` de JavaScript, que quita además U+FEFF y deja U+0085. Un texto que
-sólo sea uno de esos dos caracteres se acepta en un lado y se rechaza en el otro, y un nombre que
-empiece o acabe por ellos se guarda distinto. Son unos 95 `.trim()` en 15 ficheros de schemas. El
-del plano ya recorta como Rust (MESAS-01); con el resto, igual: una función compartida en `lib/` y
-los casos en `validacion_casos.json`. Sólo lo provoca un texto pegado con esos caracteres.
 
 ---
 

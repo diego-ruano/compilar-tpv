@@ -3,6 +3,7 @@
 import * as z from "zod";
 
 import { normalizarDia, zDia } from "../../lib/fechas";
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	ReservaBuscarClienteArgs,
@@ -19,7 +20,7 @@ const MSG_CLIENTE_SIN_NOMBRE =
 const MSG_DURACION = "La duración de la reserva tiene que estar entre 1 minuto y 24 horas";
 
 function cleanOrNull(v: unknown): string | null {
-	const s = String(v ?? "").trim();
+	const s = recortar(String(v ?? ""));
 	return s.length ? s : null;
 }
 
@@ -27,14 +28,14 @@ function cleanOrNull(v: unknown): string | null {
 // case-insensitive (índice `ux_clientes_email` sobre `lower(Email)`). Espejo de `limpia_email` en
 // `tpv_domain::reservas`: Main y Handy tienen que guardar exactamente el mismo valor.
 function cleanEmailOrNull(v: unknown): string | null {
-	const s = String(v ?? "").trim().toLowerCase();
+	const s = recortar(String(v ?? "")).toLowerCase();
 	return s.length ? s : null;
 }
 
 const MSG_DIA = "dia_ymd invalido";
 
 export function normalizeHora(raw: unknown): string {
-	const s = String(raw ?? "").trim();
+	const s = recortar(String(raw ?? ""));
 	const hhmm = s.length >= 5 ? s.slice(0, 5) : "";
 	if (!/^\d{2}:\d{2}$/.test(hhmm)) {
 		throw new Error("hora invalida");
@@ -58,7 +59,7 @@ function turnoPorHora(hhmm: string): string {
 }
 
 function normalizeTurno(raw: unknown, hora: string): string {
-	const t = String(raw ?? "").trim().toUpperCase();
+	const t = recortar(String(raw ?? "")).toUpperCase();
 	return TURNOS.has(t) ? t : turnoPorHora(hora);
 }
 
@@ -70,12 +71,12 @@ function positiveInt(name: string) {
 }
 
 function idField(name: string) {
-	return z.coerce.string().trim().min(1, `${name} invalido`);
+	return z.coerce.string().overwrite(recortar).min(1, `${name} invalido`);
 }
 
 export const reservaSaveSchema = z
 	.object({
-		id_reserva: z.coerce.string().trim().min(1).nullable().optional(),
+		id_reserva: z.coerce.string().overwrite(recortar).min(1).nullable().optional(),
 		dia_ymd: z.any().optional(),
 		hora: z.any().optional(),
 		turno: z.any().optional().nullable(),
@@ -131,7 +132,7 @@ export const reservaSaveSchema = z
 		}
 
 		const id_reserva =
-			v.id_reserva && v.id_reserva.trim().length > 0 ? v.id_reserva : null;
+			v.id_reserva && recortar(v.id_reserva).length > 0 ? v.id_reserva : null;
 		const turno = hora ? normalizeTurno(v.turno, hora) : "DESAYUNO";
 
 		return {

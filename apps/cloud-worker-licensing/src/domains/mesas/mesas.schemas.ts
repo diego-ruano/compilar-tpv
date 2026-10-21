@@ -2,6 +2,7 @@
 
 import * as z from "zod";
 import { zMetodoPago, zEstadoCocina } from "../../lib/pago";
+import { recortar } from "../../lib/texto";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -13,16 +14,16 @@ import type {
 } from "@tpv/contracts";
 
 function idField(field: string) {
-	return z.coerce.string().trim().min(1, `${field} invalido`);
+	return z.coerce.string().overwrite(recortar).min(1, `${field} invalido`);
 }
 
 function optIdStr(v: unknown): string | null {
-	const s = String(v ?? "").trim();
+	const s = recortar(String(v ?? ""));
 	return s.length ? s : null;
 }
 
 function cleanOrNull(v: unknown): string | null {
-	const s = String(v ?? "").trim();
+	const s = recortar(String(v ?? ""));
 	return s.length ? s : null;
 }
 
@@ -33,7 +34,7 @@ function idArray(values: unknown): string[] {
 	return Array.from(
 		new Set(
 			values
-				.map((s) => String(s ?? "").trim())
+				.map((s) => recortar(String(s ?? "")))
 				.filter((s) => s.length > 0),
 		),
 	);
@@ -45,13 +46,6 @@ const roomSchema = z
 		points: z.array(z.coerce.number()).optional().default([]),
 	})
 	.transform((v) => ({ type: "poly", points: v.points }));
-
-/**
- * Recorta como `str::trim` en la Main: la propiedad Unicode `White_Space`. El `trim` de JavaScript
- * quita además U+FEFF y deja U+0085, y con eso un nombre del plano valía en un lado y no en el otro
- * (MESAS-01).
- */
-const recortar = (s: string) => s.replace(/^\p{White_Space}+|\p{White_Space}+$/gu, "");
 
 const tableSchema = z.object({
 	id: z.string().default(""),
@@ -108,7 +102,7 @@ export const setReservaEstadoSchema = z.object({
 	id_reserva: idField("id_reserva"),
 	estado: z
 		.string()
-		.transform((s) => s.trim().toUpperCase())
+		.transform((s) => recortar(s).toUpperCase())
 		.refine((s) => s === "ACTIVA" || s === "FINALIZADA", MSG_ESTADO_DESDE_LA_MESA),
 });
 
@@ -181,7 +175,7 @@ export const cobrarDetallesSchema = z
 	.transform((v) => ({
 		id_comanda: v.id_comanda,
 		metodo: v.metodo,
-		tipo: String(v.tipo ?? "TOTAL").trim().toUpperCase() === "FRACCIONADO"
+		tipo: recortar(String(v.tipo ?? "TOTAL")).toUpperCase() === "FRACCIONADO"
 			? "FRACCIONADO"
 			: "TOTAL",
 		detalle_ids: idArray(v.detalle_ids),
@@ -203,7 +197,7 @@ export const searchSchema = z.object({
 	q: z.string().optional(),
 	texto: z.string().optional(),
 }).transform((v) => ({
-	query: String(v.query ?? v.q ?? v.texto ?? "").trim(),
+	query: recortar(String(v.query ?? v.q ?? v.texto ?? "")),
 }));
 
 export type SaveLayoutInput = MesasSaveLayoutInput;

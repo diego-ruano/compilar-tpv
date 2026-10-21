@@ -4,6 +4,7 @@ import * as z from "zod";
 import { zMetodoPago } from "../../lib/pago";
 import { zDineroNoNegativo } from "../../lib/dinero";
 
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	VrAddLineaComandaInput,
@@ -15,7 +16,7 @@ import type {
 } from "@tpv/contracts";
 
 function idField(field: string) {
-	return z.coerce.string().trim().min(1, `${field} invalido`);
+	return z.coerce.string().overwrite(recortar).min(1, `${field} invalido`);
 }
 
 /**
@@ -26,7 +27,7 @@ function idField(field: string) {
  */
 const optionalIdField = z.coerce
 	.string()
-	.trim()
+	.overwrite(recortar)
 	.min(1)
 	.nullish()
 	.transform((v) => (v == null ? undefined : v));
@@ -36,12 +37,12 @@ function positiveNumber(field: string) {
 }
 
 function optIdStr(v: unknown): string | null {
-	const s = String(v ?? "").trim();
+	const s = recortar(String(v ?? ""));
 	return s.length ? s : null;
 }
 
 function cleanOrNull(v: unknown): string | null {
-	const s = String(v ?? "").trim();
+	const s = recortar(String(v ?? ""));
 	return s.length ? s : null;
 }
 
@@ -50,7 +51,7 @@ function normalizeIds(values: unknown): string[] {
 	return Array.from(
 		new Set(
 			values
-				.map((s) => String(s ?? "").trim())
+				.map((s) => recortar(String(s ?? "")))
 				.filter((s) => s.length > 0),
 		),
 	).sort();
@@ -62,7 +63,7 @@ export const listComandasSchema = z.object({
 		.any()
 		.optional()
 		.transform((v) => {
-			const s = String(v ?? "").trim().toLowerCase();
+			const s = recortar(String(v ?? "")).toLowerCase();
 			return s === "true" || s === "1";
 		}),
 	limit: z.coerce.number().int().min(1).max(200).optional().default(60),
@@ -76,7 +77,7 @@ export const searchProductosSchema = z
 		q: z.string().optional(),
 		limit: z.coerce.number().int().min(1).max(200).optional().default(60),
 	})
-	.transform((v) => ({ query: String(v.query ?? v.q ?? "").trim(), limit: v.limit }));
+	.transform((v) => ({ query: recortar(String(v.query ?? v.q ?? "")), limit: v.limit }));
 
 export const idsSchema = z
 	.object({ ids: z.any().optional() })

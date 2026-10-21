@@ -7,6 +7,7 @@
 // que la nube y cada Main/Handy escriban EXACTAMENTE la misma fila al re-aplicar el broadcast.
 
 import { nuevoId } from "../../lib/ids";
+import { recortar } from "../../lib/texto";
 import type { ApplyCommand } from "../../lib/hub";
 import type { CrearNotificacionBody } from "./notificaciones.schemas";
 
@@ -21,21 +22,21 @@ const REF_ID = { $ref: "id" } as const;
 const SEVERIDADES = new Set(["info", "exito", "aviso", "error"]);
 
 function normSeveridad(s: unknown): string {
-	const t = (s ?? "").toString().trim().toLowerCase();
+	const t = recortar((s ?? "").toString()).toLowerCase();
 	return SEVERIDADES.has(t) ? t : "info";
 }
 
 function cleanOrNull(s: unknown): string | null {
-	const t = (s ?? "").toString().trim();
+	const t = recortar((s ?? "").toString());
 	return t.length ? t : null;
 }
 
 /** La notificación tal y como se guarda: textos recortados, vacíos a NULL, severidad conocida. */
 export function normalizar(input: CrearNotificacionBody) {
 	return {
-		tipo: input.tipo.trim(),
+		tipo: recortar(input.tipo),
 		severidad: normSeveridad(input.severidad),
-		titulo: input.titulo.trim(),
+		titulo: recortar(input.titulo),
 		cuerpo: cleanOrNull(input.cuerpo),
 		destino_tipo: input.destino_tipo,
 		destino_valor:

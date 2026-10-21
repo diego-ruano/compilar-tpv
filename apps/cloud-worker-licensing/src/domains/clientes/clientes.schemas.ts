@@ -2,16 +2,17 @@
 
 import * as z from "zod";
 
+import { recortar } from "../../lib/texto";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	CreateClienteInput as ContractCreateClienteInput,
 	UpdateClienteInput as ContractUpdateClienteInput,
 } from "@tpv/contracts";
 
-const idStr = z.string().trim().min(1);
+const idStr = z.string().overwrite(recortar).min(1);
 
 function cleanOptional(v: unknown): string | null {
-	const t = (v ?? "").toString().trim();
+	const t = recortar((v ?? "").toString());
 	return t.length ? t : null;
 }
 
@@ -29,7 +30,7 @@ const optEmail = z
 	.string()
 	.nullish()
 	.transform((v) => {
-		const t = (v ?? "").toString().trim().toLowerCase();
+		const t = recortar((v ?? "").toString()).toLowerCase();
 		return t.length ? t : null;
 	})
 	.refine((v) => v === null || isValidEmail(v), { message: "email inválido" });
@@ -38,14 +39,14 @@ export const createClienteSchema = z.object({
 	// ID autogenerado por el backend: el cliente HTTP lo envía como `null` cuando no lo
 	// conoce. Lo aceptamos y lo normalizamos a `undefined` (compat con @tpv/contracts).
 	id_cliente: idStr.nullish().transform((v) => (v == null ? undefined : v)),
-	nombre: z.string().trim().min(1, "nombre required"),
+	nombre: z.string().overwrite(recortar).min(1, "nombre required"),
 	email: optEmail,
 	telefono: optStr,
 	notas: optStr,
 });
 
 export const updateClienteSchema = z.object({
-	nombre: z.string().trim().min(1, "nombre required"),
+	nombre: z.string().overwrite(recortar).min(1, "nombre required"),
 	email: optEmail,
 	telefono: optStr,
 	notas: optStr,
