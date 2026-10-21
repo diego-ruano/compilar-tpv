@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::{Local, NaiveDate, NaiveTime, TimeZone};
+use chrono::Local;
 use crate::ejecutor::Value;
 
 use crate::caja_movimientos::{self, MovimientoCaja};
@@ -271,6 +271,21 @@ pub(crate) const SQL_MESAS_META_ALL: &str = r#"
       ) AS Pendientes_Cocina
     FROM Comandas c
     WHERE c.Estado = 'Abierta';
+"#;
+
+/// Las reservas vivas con mesa, de las que el plano elige la de cada mesa
+/// (`tpv_domain::reservas::reserva_de_cada_mesa`). El mismo texto que `SQL_RESERVAS_DEL_PLANO` en el
+/// worker (`domains/mesas/mesas.queries.ts`), que es el plano de la Handy (MESAS-02).
+pub(crate) const SQL_RESERVAS_DEL_PLANO: &str = r#"
+    SELECT
+      R.ID_Mesa, R.ID_Reserva, R.Dia_YMD, R.Hora, R.Estado, C.Nombre AS Cliente_Nombre,
+      COALESCE(R.Duracion_Min,
+               (SELECT Reserva_Duracion_Min FROM Business_Settings WHERE ID = 1), ?1) AS Duracion_Min
+    FROM Reservas R
+    -- RI-61: LEFT, porque una reserva puede no tener cliente y con un JOIN la mesa
+    -- aparecía libre en el plano.
+    LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
+    WHERE R.ID_Mesa IS NOT NULL AND R.Estado IN ('PROXIMA','ACTIVA');
 "#;
 
 /// El tablero de cocina: líneas de cocina de las comandas de los dos últimos días que aún tienen
@@ -1025,94 +1040,33 @@ impl MesasRepository for SqliteMesasRepository {
         }
 
         let mut rrows = db
-            .query(
-                r#"
-                SELECT
-                  R.ID_Mesa, R.ID_Reserva, R.Dia_YMD, R.Hora, R.Estado, C.Nombre AS Cliente_Nombre,
-                  COALESCE(R.Duracion_Min,
-                           (SELECT Reserva_Duracion_Min FROM Business_Settings WHERE ID = 1), ?1)
-                FROM Reservas R
-                -- RI-61: LEFT, porque una reserva puede no tener cliente y con un JOIN la mesa
-                -- aparecía libre en el plano.
-                LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
-                WHERE R.ID_Mesa IS NOT NULL AND R.Estado IN ('PROXIMA','ACTIVA');
-                "#,
-                vec![Value::Integer(tpv_domain::reservas::DURACION_POR_DEFECTO_MIN)],
-            )
+            .query(SQL_RESERVAS_DEL_PLANO, vec![Value::Integer(tpv_domain::reservas::DURACION_POR_DEFECTO_MIN)])
             .await
             .map_err(db_err)?;
-
-        let now = Local::now();
-        let mut best: HashMap<String, ReservaMesaOut> = HashMap::new();
-
+        let mut reservas = Vec::new();
         while let Some(r) = rrows.next().await.map_err(db_err)? {
-            let id_mesa = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
-            let id_reserva = v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default();
-            let dia_ymd = v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default();
-            let hora = v_string(r.get_value(3).map_err(db_err)?).unwrap_or_default();
-            let estado_db =
-                v_string(r.get_value(4).map_err(db_err)?).unwrap_or_else(|| "PROXIMA".into());
-            let cliente = v_string(r.get_value(5).map_err(db_err)?).unwrap_or_default();
-            let duracion = v_i64(r.get_value(6).map_err(db_err)?)
-                .filter(|m| *m > 0)
-                .unwrap_or(tpv_domain::reservas::DURACION_POR_DEFECTO_MIN);
-
-            if id_mesa.is_empty() || id_reserva.is_empty() {
-                continue;
-            }
-
-            let date = match NaiveDate::parse_from_str(dia_ymd.trim(), "%Y-%m-%d") {
-                Ok(d) => d,
-                Err(_) => continue,
-            };
-            let hora_trim = hora.trim();
-            let time = NaiveTime::parse_from_str(hora_trim, "%H:%M")
-                .or_else(|_| NaiveTime::parse_from_str(hora_trim, "%H:%M:%S"));
-            let time = match time {
-                Ok(t) => t,
-                Err(_) => continue,
-            };
-            let ndt = date.and_time(time);
-            let dt_local = match Local.from_local_datetime(&ndt).single() {
-                Some(dt) => dt,
-                None => match Local.from_local_datetime(&ndt).earliest() {
-                    Some(dt) => dt,
-                    None => continue,
-                },
-            };
-
-            let minutos_para = (dt_local - now).num_minutes();
-            let Some(estado_ui) =
-                tpv_domain::reservas::estado_en_el_plano(&estado_db, minutos_para, duracion)
-            else {
-                continue;
-            };
-
-            let item = ReservaMesaOut {
-                id_reserva,
-                cliente_nombre: cliente,
-                dia_ymd,
-                hora,
-                estado: estado_ui.to_string(),
-                minutos_para,
-            };
-
-            // Una mesa enseña una: la sentada antes que ninguna y, si no, la más cercana a ahora (la
-            // que llega tarde, o la siguiente).
-            let replace = match best.get(id_mesa.as_str()) {
-                None => true,
-                Some(prev) => match (item.estado == "ACTIVA", prev.estado == "ACTIVA") {
-                    (true, false) => true,
-                    (false, true) => false,
-                    _ => item.minutos_para.abs() < prev.minutos_para.abs(),
-                },
-            };
-            if replace {
-                best.insert(id_mesa, item);
-            }
+            reservas.push(tpv_domain::reservas::ReservaDeMesa {
+                id_mesa: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                id_reserva: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                dia_ymd: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
+                hora: v_string(r.get_value(3).map_err(db_err)?).unwrap_or_default(),
+                estado: v_string(r.get_value(4).map_err(db_err)?).unwrap_or_default(),
+                cliente: v_string(r.get_value(5).map_err(db_err)?).unwrap_or_default(),
+                duracion_min: v_i64(r.get_value(6).map_err(db_err)?),
+            });
         }
 
-        for (id_mesa, reserva) in best {
+        // MESAS-02: la misma regla que el plano de la Handy, con la hora local de este equipo.
+        let ahora = Local::now().naive_local();
+        for (id_mesa, r) in tpv_domain::reservas::reserva_de_cada_mesa(reservas, ahora) {
+            let reserva = ReservaMesaOut {
+                id_reserva: r.reserva.id_reserva,
+                cliente_nombre: r.reserva.cliente,
+                dia_ymd: r.reserva.dia_ymd,
+                hora: r.reserva.hora,
+                estado: r.estado.to_string(),
+                minutos_para: r.minutos_para,
+            };
             map.entry(id_mesa)
                 .and_modify(|m| m.reserva = Some(reserva.clone()))
                 .or_insert_with(|| MesaMetaOut {
@@ -1891,7 +1845,7 @@ mod tests_reservas_en_el_plano {
         {
             let w = db.write().await;
             let mut sql = String::from("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Salon');");
-            for m in ["m1", "m2", "m3", "m4", "m5"] {
+            for m in ["m1", "m2", "m3", "m4", "m5", "m6", "m7"] {
                 sql.push_str(&format!(
                     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, \
                      Shape, Width, Height) VALUES ('{m}', 'z1', '{m}', 4, 0, 0, 'rect', 80, 80);"
@@ -1905,9 +1859,18 @@ mod tests_reservas_en_el_plano {
                 reserva("sentada", "m3", -300, "ACTIVA"),
                 reserva("pronto", "m4", 30, "PROXIMA"),
                 reserva("luego", "m5", 180, "PROXIMA"),
+                // m6 y m7: hace hora y media. El negocio da 60 minutos; m7 trae sus 120.
+                reserva("del-negocio", "m6", -90, "PROXIMA"),
+                reserva("con-la-suya", "m7", -90, "PROXIMA"),
             ] {
                 sql.push_str(&s);
             }
+            sql.push_str(
+                "UPDATE Business_Settings SET Reserva_Duracion_Min = 60 WHERE ID = 1; \
+                 UPDATE Reservas SET Duracion_Min = 120 WHERE ID_Reserva = 'con-la-suya'; \
+                 INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('c1', 'Ana'); \
+                 UPDATE Reservas SET ID_Cliente = 'c1' WHERE ID_Reserva = 'pronto';",
+            );
             w.raw().execute_batch(&sql).await.unwrap();
         }
         let meta = SqliteMesasRepository::new(db).mesas_meta_all().await.unwrap();
@@ -1918,7 +1881,13 @@ mod tests_reservas_en_el_plano {
         assert_eq!(reserva_de("m2"), None);
         assert_eq!(reserva_de("m3"), Some(("sentada", "ACTIVA")));
         assert_eq!(reserva_de("m4"), Some(("pronto", "PROXIMA")));
+        assert_eq!(meta["m4"].reserva.as_ref().unwrap().cliente_nombre, "Ana");
+        assert_eq!(meta["m1"].reserva.as_ref().unwrap().cliente_nombre, "");
         assert_eq!(reserva_de("m5"), None);
+        assert_eq!(reserva_de("m6"), None);
+        assert_eq!(reserva_de("m7"), Some(("con-la-suya", "PROXIMA")));
+        // Una mesa reservada y sin comanda sale libre.
+        assert!(!meta["m4"].ocupada);
     }
 }
 

@@ -8,7 +8,6 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { useMode } from "../../shared/stores/useMode";
 import { mesasLoadLayout, mesasLoadMesaMeta } from "./mesasApi";
 
 export const mesasKeys = {
@@ -21,7 +20,7 @@ export const mesasKeys = {
  * Cada cuánto se relee la meta con el plano a la vista. La reserva de una mesa depende de la hora
  * (sale una hora antes, «en N min», y se va al acabar su hueco), y eso no lo avisa nadie: con el
  * plano abierto, una reserva no aparecía hasta que algo lo recargaba. En la Main es una lectura
- * local; la Handy no lo necesita, porque su plano aún no trae reservas (MESAS-02).
+ * local; en la Handy, una petición al worker por minuto (MESAS-02).
  */
 const REFRESCO_META_MS = 60_000;
 
@@ -34,13 +33,12 @@ export function useMesasLayout(options?: { enabled?: boolean }) {
   });
 }
 
-/** Metadatos por mesa (estado de comanda, reserva); cacheado, y en la Main se relee cada minuto. */
+/** Metadatos por mesa (estado de comanda, reserva); cacheado, y se relee cada minuto. */
 export function useMesasMesaMeta(options?: { enabled?: boolean }) {
-  const enLaMain = useMode((s) => s.mode) === "tpv";
   return useQuery({
     queryKey: mesasKeys.meta(),
     queryFn: mesasLoadMesaMeta,
     enabled: options?.enabled ?? true,
-    refetchInterval: enLaMain ? REFRESCO_META_MS : false,
+    refetchInterval: REFRESCO_META_MS,
   });
 }

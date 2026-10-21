@@ -1,0 +1,100 @@
+// src/domains/mesas/reservaEnElPlano.ts
+//
+// MESAS-02: qué reserva enseña cada mesa del plano de la Handy. Espejo de `estado_en_el_plano` y
+// `reserva_de_cada_mesa` en la Main (`tpv-domain/src/reservas.rs`), con los casos que comparten en
+// `crates/tpv-domain/src/plano_reservas_casos.json`. Va fuera de `mesas.queries.ts` porque no lee
+// nada: decide con lo leído.
+
+import { esFechaYmd } from "../../lib/fechas";
+
+/** Cuántos minutos antes de su hora sale una reserva en el plano. `PLANO_ANTELACION_MIN`. */
+const ANTELACION_MIN = 60;
+
+/** Lo que dura una reserva sin duración propia ni del negocio. `DURACION_POR_DEFECTO_MIN`. */
+export const DURACION_POR_DEFECTO_MIN = 120;
+
+/** Una reserva viva con mesa, tal como la lee el plano. */
+export type ReservaDeMesa = {
+	id_mesa: string;
+	id_reserva: string;
+	cliente: string;
+	dia_ymd: string;
+	hora: string;
+	estado: string;
+	/** La suya o, si no tiene, la del negocio. Sin un valor positivo, la de por defecto. */
+	duracion_min: number | null;
+};
+
+export type ReservaEnElPlano = {
+	reserva: ReservaDeMesa;
+	estado: "ACTIVA" | "PROXIMA";
+	minutos_para: number;
+};
+
+/**
+ * Si una reserva sale en el plano y con qué estado. Una sentada sale hasta que se va; una que aún no
+ * ha llegado, desde una hora antes hasta que acaba su hueco, y sigue siendo «por llegar».
+ */
+function estadoEnElPlano(estado: string, minutosPara: number, duracionMin: number): "ACTIVA" | "PROXIMA" | null {
+	const e = estado.trim().toUpperCase();
+	if (e === "ACTIVA") return "ACTIVA";
+	const enSuHueco = minutosPara <= ANTELACION_MIN && minutosPara > -duracionMin;
+	return e === "PROXIMA" && enSuHueco ? "PROXIMA" : null;
+}
+
+const HORA = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
+const AHORA = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})$/;
+
+/** El instante de un día y una hora locales, en milisegundos y sin zona (como UTC). */
+function instante(dia: string, hora: string): number | null {
+	const h = HORA.exec(hora);
+	if (!esFechaYmd(dia) || !h) return null;
+	const [a, m, d] = dia.split("-").map(Number);
+	return Date.UTC(a, m - 1, d, Number(h[1]), Number(h[2]), Number(h[3] ?? 0));
+}
+
+/**
+ * Los minutos que faltan para la hora de una reserva (negativos si ya ha pasado), truncados hacia
+ * cero y sin zona: `ahora` es la hora local de la Handy (`X-Client-Now`). `null` si el día o la hora
+ * no son válidos.
+ */
+function minutosPara(diaYmd: string, hora: string, ahora: number): number | null {
+	const t = instante(diaYmd.trim(), hora.trim());
+	// `|| 0`: un -0 es un 0.
+	return t === null ? null : Math.trunc((t - ahora) / 60_000) || 0;
+}
+
+/**
+ * La reserva que enseña cada mesa: la sentada antes que ninguna y, si no, la más cercana a ahora; a
+ * la misma distancia, la de identificador menor. `ahora` es `YYYY-MM-DD HH:MM:SS`, la hora local de
+ * quien mira; si no lo es, ninguna.
+ */
+export function reservaDeCadaMesa(reservas: ReservaDeMesa[], ahora: string): Map<string, ReservaEnElPlano> {
+	const porMesa = new Map<string, ReservaEnElPlano>();
+	const a = AHORA.exec(ahora);
+	const ahoraMs = a ? instante(a[1], a[2]) : null;
+	if (ahoraMs === null) return porMesa;
+
+	const antes = (x: ReservaEnElPlano, y: ReservaEnElPlano): boolean => {
+		const sx = x.estado === "ACTIVA";
+		const sy = y.estado === "ACTIVA";
+		if (sx !== sy) return sx;
+		const dx = Math.abs(x.minutos_para);
+		const dy = Math.abs(y.minutos_para);
+		if (dx !== dy) return dx < dy;
+		return x.reserva.id_reserva < y.reserva.id_reserva;
+	};
+
+	for (const reserva of reservas) {
+		if (!reserva.id_mesa || !reserva.id_reserva) continue;
+		const minutos = minutosPara(reserva.dia_ymd, reserva.hora, ahoraMs);
+		if (minutos === null) continue;
+		const duracion = reserva.duracion_min !== null && reserva.duracion_min > 0 ? reserva.duracion_min : DURACION_POR_DEFECTO_MIN;
+		const estado = estadoEnElPlano(reserva.estado, minutos, duracion);
+		if (!estado) continue;
+		const candidata: ReservaEnElPlano = { reserva, estado, minutos_para: minutos };
+		const actual = porMesa.get(reserva.id_mesa);
+		if (!actual || antes(candidata, actual)) porMesa.set(reserva.id_mesa, candidata);
+	}
+	return porMesa;
+}

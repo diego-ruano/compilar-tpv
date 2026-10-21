@@ -1,0 +1,137 @@
+{
+  "//": "MESAS-02. Qué reserva enseña cada mesa del plano, igual en la Main (`tpv_domain::reservas::reserva_de_cada_mesa`) y en la Handy (`domains/mesas/reservaEnElPlano.ts` del worker). La leen `crates/tpv-domain/src/reservas.rs` y `apps/cloud-worker-licensing/test/reservaEnElPlano.test.ts`. Cada caso trae «ahora» (la hora local de quien mira), las reservas vivas con mesa como salen de la base y lo que enseña cada mesa; una mesa que no está en «ensena» no enseña ninguna. Un criterio nuevo es un caso nuevo aquí.",
+  "casos": [
+    {
+      "nombre": "una por llegar sale una hora antes y no un minuto más",
+      "ahora": "2026-10-21 19:00:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-21", "hora": "20:00", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-21", "hora": "20:01", "estado": "PROXIMA", "duracion_min": null }
+      ],
+      "ensena": { "m1": { "id_reserva": "r1", "estado": "PROXIMA", "minutos_para": 60 } }
+    },
+    {
+      "nombre": "los minutos se truncan hacia cero, antes y después de la hora",
+      "ahora": "2026-10-21 20:00:30",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-21", "hora": "20:30", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-21", "hora": "20:00", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m3", "id_reserva": "r3", "dia_ymd": "2026-10-21", "hora": "19:59", "estado": "PROXIMA", "duracion_min": null }
+      ],
+      "ensena": {
+        "m1": { "id_reserva": "r1", "estado": "PROXIMA", "minutos_para": 29 },
+        "m2": { "id_reserva": "r2", "estado": "PROXIMA", "minutos_para": 0 },
+        "m3": { "id_reserva": "r3", "estado": "PROXIMA", "minutos_para": -1 }
+      }
+    },
+    {
+      "nombre": "pasada su hora sigue por llegar hasta que acaba su hueco de 120 minutos",
+      "ahora": "2026-10-21 22:00:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-21", "hora": "20:00", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-21", "hora": "20:01", "estado": "PROXIMA", "duracion_min": null }
+      ],
+      "ensena": { "m2": { "id_reserva": "r2", "estado": "PROXIMA", "minutos_para": -119 } }
+    },
+    {
+      "nombre": "con su propia duración",
+      "ahora": "2026-10-21 20:45:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-21", "hora": "20:00", "estado": "PROXIMA", "duracion_min": 45 },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-21", "hora": "20:00", "estado": "PROXIMA", "duracion_min": 46 }
+      ],
+      "ensena": { "m2": { "id_reserva": "r2", "estado": "PROXIMA", "minutos_para": -45 } }
+    },
+    {
+      "nombre": "una duración que no es positiva cuenta como la de por defecto",
+      "ahora": "2026-10-21 21:30:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-21", "hora": "20:00", "estado": "PROXIMA", "duracion_min": 0 },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-21", "hora": "20:00", "estado": "PROXIMA", "duracion_min": -5 }
+      ],
+      "ensena": {
+        "m1": { "id_reserva": "r1", "estado": "PROXIMA", "minutos_para": -90 },
+        "m2": { "id_reserva": "r2", "estado": "PROXIMA", "minutos_para": -90 }
+      }
+    },
+    {
+      "nombre": "una sentada sale siempre, sea la hora que sea",
+      "ahora": "2026-10-21 20:00:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-20", "hora": "13:00", "estado": "ACTIVA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-22", "hora": "20:00", "estado": " activa ", "duracion_min": null }
+      ],
+      "ensena": {
+        "m1": { "id_reserva": "r1", "estado": "ACTIVA", "minutos_para": -1860 },
+        "m2": { "id_reserva": "r2", "estado": "ACTIVA", "minutos_para": 1440 }
+      }
+    },
+    {
+      "nombre": "la sentada gana a la que llega, aunque esté más lejos",
+      "ahora": "2026-10-21 20:00:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r-llega", "dia_ymd": "2026-10-21", "hora": "20:05", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m1", "id_reserva": "r-sentada", "dia_ymd": "2026-10-21", "hora": "18:30", "estado": "ACTIVA", "duracion_min": null }
+      ],
+      "ensena": { "m1": { "id_reserva": "r-sentada", "estado": "ACTIVA", "minutos_para": -90 } }
+    },
+    {
+      "nombre": "entre dos por llegar, la más cercana a ahora: la que llega tarde antes que la siguiente",
+      "ahora": "2026-10-21 20:00:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r-siguiente", "dia_ymd": "2026-10-21", "hora": "20:20", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m1", "id_reserva": "r-tarde", "dia_ymd": "2026-10-21", "hora": "19:50", "estado": "PROXIMA", "duracion_min": null }
+      ],
+      "ensena": { "m1": { "id_reserva": "r-tarde", "estado": "PROXIMA", "minutos_para": -10 } }
+    },
+    {
+      "nombre": "a la misma distancia, la de identificador menor, lleguen en el orden que lleguen",
+      "ahora": "2026-10-21 20:00:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r-b", "dia_ymd": "2026-10-21", "hora": "19:50", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m1", "id_reserva": "r-a", "dia_ymd": "2026-10-21", "hora": "20:10", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r-c", "dia_ymd": "2026-10-21", "hora": "19:00", "estado": "ACTIVA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r-d", "dia_ymd": "2026-10-21", "hora": "21:00", "estado": "ACTIVA", "duracion_min": null }
+      ],
+      "ensena": {
+        "m1": { "id_reserva": "r-a", "estado": "PROXIMA", "minutos_para": 10 },
+        "m2": { "id_reserva": "r-c", "estado": "ACTIVA", "minutos_para": -60 }
+      }
+    },
+    {
+      "nombre": "cruza la medianoche",
+      "ahora": "2026-10-21 23:30:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-22", "hora": "00:15", "estado": "PROXIMA", "duracion_min": null }
+      ],
+      "ensena": { "m1": { "id_reserva": "r1", "estado": "PROXIMA", "minutos_para": 45 } }
+    },
+    {
+      "nombre": "un día o una hora que no valen no salen; con segundos o con espacios, sí",
+      "ahora": "2026-10-21 20:00:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-02-31", "hora": "20:10", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-21", "hora": "24:00", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m3", "id_reserva": "r3", "dia_ymd": "2026-10-21", "hora": "9:30", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m4", "id_reserva": "r4", "dia_ymd": "2026-10-21", "hora": "20:15:00", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m5", "id_reserva": "r5", "dia_ymd": " 2026-10-21 ", "hora": " 20:30 ", "estado": "PROXIMA", "duracion_min": null },
+        { "id_mesa": "m6", "id_reserva": "r6", "dia_ymd": "2026-10-21", "hora": "20:15xx", "estado": "PROXIMA", "duracion_min": null }
+      ],
+      "ensena": {
+        "m4": { "id_reserva": "r4", "estado": "PROXIMA", "minutos_para": 15 },
+        "m5": { "id_reserva": "r5", "estado": "PROXIMA", "minutos_para": 30 }
+      }
+    },
+    {
+      "nombre": "cerrada o sin mesa no sale",
+      "ahora": "2026-10-21 20:00:00",
+      "reservas": [
+        { "id_mesa": "m1", "id_reserva": "r1", "dia_ymd": "2026-10-21", "hora": "20:10", "estado": "CANCELADA", "duracion_min": null },
+        { "id_mesa": "m2", "id_reserva": "r2", "dia_ymd": "2026-10-21", "hora": "20:10", "estado": "FINALIZADA", "duracion_min": null },
+        { "id_mesa": "m3", "id_reserva": "r3", "dia_ymd": "2026-10-21", "hora": "20:10", "estado": "NO_SHOW", "duracion_min": null },
+        { "id_mesa": "", "id_reserva": "r4", "dia_ymd": "2026-10-21", "hora": "20:10", "estado": "ACTIVA", "duracion_min": null }
+      ],
+      "ensena": {}
+    }
+  ]
+}

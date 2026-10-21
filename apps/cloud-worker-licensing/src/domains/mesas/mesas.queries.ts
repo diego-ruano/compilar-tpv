@@ -4,6 +4,7 @@ import type { Client } from "@libsql/client/web";
 import type { Dinero } from "@tpv/contracts";
 import { deLaBase } from "../../lib/dinero";
 import { planConsumo, type PlanConsumo } from "../inventario/consumo";
+import { DURACION_POR_DEFECTO_MIN, reservaDeCadaMesa, type ReservaDeMesa } from "./reservaEnElPlano";
 
 import type {
 	CategoriaVendibleOut,
@@ -195,8 +196,28 @@ export async function lineas(
 	return rows(rs) as MesaLineaComandaRow[];
 }
 
+// MESAS-02: el mismo texto que `SQL_RESERVAS_DEL_PLANO` en la Main (`tpv-infra-sqlite/src/mesas.rs`).
+const SQL_RESERVAS_DEL_PLANO = `
+	SELECT
+	  R.ID_Mesa, R.ID_Reserva, R.Dia_YMD, R.Hora, R.Estado, C.Nombre AS Cliente_Nombre,
+	  COALESCE(R.Duracion_Min,
+	           (SELECT Reserva_Duracion_Min FROM Business_Settings WHERE ID = 1), ?1) AS Duracion_Min
+	FROM Reservas R
+	-- RI-61: LEFT, porque una reserva puede no tener cliente y con un JOIN la mesa
+	-- aparecía libre en el plano.
+	LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
+	WHERE R.ID_Mesa IS NOT NULL AND R.Estado IN ('PROXIMA','ACTIVA');
+`;
+
+/**
+ * El estado de cada mesa del plano de la Handy: lo pendiente de su comanda abierta y la reserva que
+ * enseña (MESAS-02). «Ahora» es la hora local de la Handy: `tenantQuery` fija el
+ * `datetime('now','localtime')` a su `X-Client-Now`.
+ */
 export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaOut>> {
-	const rs = await db.execute(`
+	const [rs, rsReservas, rsAhora] = await db.batch(
+		[
+			`
 		SELECT
 			c.ID_Mesa AS id_mesa,
 			c.ID_Comanda AS id_comanda,
@@ -222,7 +243,12 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 			) AS pendientes_cocina
 		FROM Comandas c
 		WHERE c.Estado = 'Abierta';
-	`);
+	`,
+			{ sql: SQL_RESERVAS_DEL_PLANO, args: [DURACION_POR_DEFECTO_MIN] },
+			"SELECT datetime('now','localtime') AS ahora;",
+		],
+		"read",
+	);
 	const out: Record<string, MesaMetaOut> = {};
 	for (const r of rows(rs)) {
 		const idMesa = String(r.id_mesa ?? "");
@@ -239,6 +265,39 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 			estado: pendientesPago > 0 || totalPendiente > 0 ? "PENDIENTE" : "LIBRE",
 		};
 		out[String(idMesa)] = meta;
+	}
+
+	const texto = (v: unknown) => (v === null || v === undefined ? "" : String(v));
+	const reservas: ReservaDeMesa[] = rows(rsReservas).map((r) => ({
+		id_mesa: texto(r.ID_Mesa),
+		id_reserva: texto(r.ID_Reserva),
+		dia_ymd: texto(r.Dia_YMD),
+		hora: texto(r.Hora),
+		estado: texto(r.Estado),
+		cliente: texto(r.Cliente_Nombre),
+		duracion_min: r.Duracion_Min === null || r.Duracion_Min === undefined ? null : Number(r.Duracion_Min),
+	}));
+	for (const [idMesa, r] of reservaDeCadaMesa(reservas, texto(rows(rsAhora)[0]?.ahora))) {
+		const reserva = {
+			idReserva: r.reserva.id_reserva,
+			clienteNombre: r.reserva.cliente,
+			diaYMD: r.reserva.dia_ymd,
+			hora: r.reserva.hora,
+			estado: r.estado,
+			minutosPara: r.minutos_para,
+		};
+		out[idMesa] = out[idMesa]
+			? { ...out[idMesa], reserva }
+			: {
+					ocupada: false,
+					id_comanda: "",
+					idComanda: "",
+					totalPendiente: deLaBase(0),
+					pendientesPago: 0,
+					pendientesCocina: 0,
+					estado: "LIBRE",
+					reserva,
+				};
 	}
 	return out;
 }

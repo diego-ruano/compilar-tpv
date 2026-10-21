@@ -6,6 +6,45 @@
     "ocupada": true,
     "pendientesCocina": 1,
     "pendientesPago": 2,
+    "reserva": {
+      "clienteNombre": "",
+      "diaYMD": "2000-01-01",
+      "estado": "ACTIVA",
+      "hora": "12:00",
+      "idReserva": "res-mesa-1"
+    },
     "totalPendiente": 2550
+  },
+  "mesa-2": {
+    "estado": "LIBRE",
+    "idComanda": "",
+    "id_comanda": "",
+    "ocupada": false,
+    "pendientesCocina": 0,
+    "pendientesPago": 0,
+    "reserva": {
+      "clienteNombre": "Ana Contrato",
+      "diaYMD": "2000-01-01",
+      "estado": "ACTIVA",
+      "hora": "13:00",
+      "idReserva": "res-mesa-2"
+    },
+    "totalPendiente": 0
+  },
+  "mesa-3": {
+    "estado": "LIBRE",
+    "idComanda": "",
+    "id_comanda": "",
+    "ocupada": false,
+    "pendientesCocina": 0,
+    "pendientesPago": 0,
+    "reserva": {
+      "clienteNombre": "",
+      "diaYMD": "2000-06-01",
+      "estado": "ACTIVA",
+      "hora": "10:00",
+      "idReserva": "res-reciente"
+    },
+    "totalPendiente": 0
   }
 }

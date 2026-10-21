@@ -329,6 +329,87 @@ pub fn estado_en_el_plano(estado: &str, minutos_para: i64, duracion_min: i64) ->
     (estado.eq_ignore_ascii_case("PROXIMA") && en_su_hueco).then_some("PROXIMA")
 }
 
+/// Una reserva viva con mesa, tal como la leen los dos planos: el de la Main (`mesas_meta_all`) y el
+/// de la Handy (`mesasMetaAll` en el worker).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservaDeMesa {
+    pub id_mesa: String,
+    pub id_reserva: String,
+    pub cliente: String,
+    pub dia_ymd: String,
+    pub hora: String,
+    pub estado: String,
+    /// La suya o, si no tiene, la del negocio. Sin un valor positivo, la de por defecto.
+    pub duracion_min: Option<i64>,
+}
+
+/// La reserva que enseña una mesa en el plano, con su estado y los minutos que faltan para su hora.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservaEnElPlano {
+    pub reserva: ReservaDeMesa,
+    pub estado: &'static str,
+    pub minutos_para: i64,
+}
+
+/// `HH:MM` o `HH:MM:SS`, entero.
+fn hora_del_dia(hora: &str) -> Option<chrono::NaiveTime> {
+    let b = hora.as_bytes();
+    let dos = |i: usize| -> Option<u32> {
+        (b[i].is_ascii_digit() && b[i + 1].is_ascii_digit())
+            .then(|| u32::from(b[i] - b'0') * 10 + u32::from(b[i + 1] - b'0'))
+    };
+    let (h, m, s) = match b.len() {
+        5 if b[2] == b':' => (dos(0)?, dos(3)?, 0),
+        8 if b[2] == b':' && b[5] == b':' => (dos(0)?, dos(3)?, dos(6)?),
+        _ => return None,
+    };
+    chrono::NaiveTime::from_hms_opt(h, m, s)
+}
+
+/// Los minutos que faltan para la hora de una reserva (negativos si ya ha pasado), truncados hacia
+/// cero. `ahora` es la hora local de quien mira el plano, sin zona: la Handy sólo manda la suya así
+/// (`X-Client-Now`), y la Main cuenta igual para que las dos enseñen lo mismo. Sólo difiere de
+/// contar con la zona si entre ahora y la reserva hay un cambio de hora. `None` si el día o la hora
+/// no son válidos.
+pub fn minutos_para(dia_ymd: &str, hora: &str, ahora: chrono::NaiveDateTime) -> Option<i64> {
+    let dia = crate::fechas::fecha_ymd(dia_ymd.trim())?;
+    let hora = hora_del_dia(hora.trim())?;
+    Some((dia.and_time(hora) - ahora).num_minutes())
+}
+
+/// MESAS-02: qué reserva enseña cada mesa del plano. Una mesa enseña una: la sentada antes que
+/// ninguna y, si no, la más cercana a ahora (la que llega tarde, o la siguiente), de las que salen
+/// en el plano (`estado_en_el_plano`). A la misma distancia, la de identificador menor: el orden
+/// en que llegan de la base no es el mismo en la Main que en Turso. Espejo de
+/// `domains/mesas/reservaEnElPlano.ts` en el worker, con sus casos en `plano_reservas_casos.json`.
+pub fn reserva_de_cada_mesa(
+    reservas: Vec<ReservaDeMesa>,
+    ahora: chrono::NaiveDateTime,
+) -> std::collections::HashMap<String, ReservaEnElPlano> {
+    let orden = |r: &ReservaEnElPlano| (r.estado != "ACTIVA", r.minutos_para.abs(), r.reserva.id_reserva.clone());
+    let mut por_mesa: std::collections::HashMap<String, ReservaEnElPlano> = std::collections::HashMap::new();
+    for reserva in reservas {
+        if reserva.id_mesa.is_empty() || reserva.id_reserva.is_empty() {
+            continue;
+        }
+        let Some(minutos) = minutos_para(&reserva.dia_ymd, &reserva.hora, ahora) else {
+            continue;
+        };
+        let duracion = reserva.duracion_min.filter(|m| *m > 0).unwrap_or(DURACION_POR_DEFECTO_MIN);
+        let Some(estado) = estado_en_el_plano(&reserva.estado, minutos, duracion) else {
+            continue;
+        };
+        let candidata = ReservaEnElPlano { reserva, estado, minutos_para: minutos };
+        let gana = por_mesa
+            .get(&candidata.reserva.id_mesa)
+            .is_none_or(|actual| orden(&candidata) < orden(actual));
+        if gana {
+            por_mesa.insert(candidata.reserva.id_mesa.clone(), candidata);
+        }
+    }
+    por_mesa
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,6 +451,35 @@ mod tests {
         // Las cerradas no salen.
         for estado in ["FINALIZADA", "CANCELADA", "NO_SHOW"] {
             assert_eq!(estado_en_el_plano(estado, 10, 120), None, "{estado}");
+        }
+    }
+
+    #[test]
+    fn la_reserva_de_cada_mesa_cuadra_con_la_tabla_compartida() {
+        let tabla: serde_json::Value =
+            serde_json::from_str(include_str!("plano_reservas_casos.json")).expect("plano_reservas_casos.json no es JSON");
+        for caso in tabla["casos"].as_array().expect("faltan los «casos»") {
+            let nombre = caso["nombre"].as_str().unwrap();
+            let texto = |r: &serde_json::Value, campo: &str| r[campo].as_str().unwrap().to_string();
+            let reservas = caso["reservas"].as_array().unwrap().iter().map(|r| ReservaDeMesa {
+                id_mesa: texto(r, "id_mesa"),
+                id_reserva: texto(r, "id_reserva"),
+                cliente: String::new(),
+                dia_ymd: texto(r, "dia_ymd"),
+                hora: texto(r, "hora"),
+                estado: texto(r, "estado"),
+                duracion_min: r["duracion_min"].as_i64(),
+            });
+            let ahora = chrono::NaiveDateTime::parse_from_str(caso["ahora"].as_str().unwrap(), "%Y-%m-%d %H:%M:%S").unwrap();
+            let ensena: std::collections::BTreeMap<String, serde_json::Value> = reserva_de_cada_mesa(reservas.collect(), ahora)
+                .into_iter()
+                .map(|(mesa, r)| {
+                    (mesa, serde_json::json!({ "id_reserva": r.reserva.id_reserva, "estado": r.estado, "minutos_para": r.minutos_para }))
+                })
+                .collect();
+            let esperado: std::collections::BTreeMap<String, serde_json::Value> =
+                serde_json::from_value(caso["ensena"].clone()).unwrap();
+            assert_eq!(ensena, esperado, "{nombre}");
         }
     }
 

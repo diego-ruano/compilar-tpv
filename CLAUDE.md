@@ -292,5 +292,5 @@ lo que hay que revisar es el cambio, no el test:
 - Los arneses de contrato ([tests/contract/README.md](tests/contract/README.md)) y
   `scripts/check-contract-coverage.mjs`.
 - Las tablas de casos que comparten Rust y TypeScript: `dinero_casos.json`, `scrub_casos.json`,
-  `horarios_casos.json` y `validacion_casos.json` (la validación de entrada, que los arneses de
-  contrato no ven).
+  `horarios_casos.json`, `plano_reservas_casos.json` (la reserva de cada mesa, que depende de la
+  hora) y `validacion_casos.json` (la validación de entrada, que los arneses de contrato no ven).

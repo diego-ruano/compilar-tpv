@@ -1,5 +1,5 @@
 {
-  "descripcion": "El estado de cada mesa ocupada: lo que queda por cobrar, cuantas lineas faltan de pagar y cuantas de preparar en cocina. Es lo que pinta el color de cada mesa en el plano, asi que una divergencia aqui se ve a simple vista. El seed deja una comanda a medio cobrar (una linea pagada y otra no) con un plato de cocina pendiente y otro ya PREPARADO, que no debe contar.",
+  "descripcion": "El estado de cada mesa ocupada: lo que queda por cobrar, cuantas lineas faltan de pagar y cuantas de preparar en cocina. Es lo que pinta el color de cada mesa en el plano, asi que una divergencia aqui se ve a simple vista. El seed deja una comanda a medio cobrar (una linea pagada y otra no) con un plato de cocina pendiente y otro ya PREPARADO, que no debe contar. Y la reserva de cada mesa (MESAS-02): sentadas del ano 2000, que salen siempre (una en la mesa de la comanda abierta y otra, con cliente, en la de la comanda cerrada), dos sentadas en la misma mesa (sale la mas cercana a hoy), y por llegar del 2000 y del 2099 y una cancelada, que no salen nunca. Los minutos que faltan dependen del reloj y no se comparan; su regla esta en plano_reservas_casos.json.",
   "lectura": "mesas.meta_all",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-1', 'Salon', '[0,0,400,0,400,300,0,300]');",
@@ -22,7 +22,16 @@
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-bebida-pagada', 'com-1', 'prod-cerveza', 1, 300);",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-cerrada', 'com-cerrada', 'prod-cerveza', 1, 300);",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 12:30:00', 'Efectivo', 300, 'parcial');",
-    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-bebida-pagada');"
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-bebida-pagada');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-1', 'Ana Contrato');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-mesa-1', 'mesa-1', '2000-01-01', '12:00', 'COMIDA', 2, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, ID_Cliente, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-mesa-2', 'mesa-2', 'cli-1', '2000-01-01', '13:00', 'COMIDA', 4, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-antigua', 'mesa-3', '2000-01-01', '10:00', 'DESAYUNO', 2, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-reciente', 'mesa-3', '2000-06-01', '10:00', 'DESAYUNO', 2, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-pasada', 'mesa-3', '2000-01-01', '20:00', 'CENA', 2, 'PROXIMA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-futura', 'mesa-3', '2099-01-01', '20:00', 'CENA', 2, 'PROXIMA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-cancelada', 'mesa-2', '2000-01-01', '13:00', 'COMIDA', 2, 'CANCELADA');"
   ],
+  "omitir": ["minutosPara"],
   "entrada": {}
 }
