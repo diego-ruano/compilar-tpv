@@ -12,11 +12,11 @@ import {
 
 import ConfirmarCorreoRecuperacion from "../../features/login/ConfirmarCorreoRecuperacion";
 import { useAuth } from "../../shared/stores/useAuth";
-import { useCorreoRecuperacionPendiente } from "../../shared/stores/useCorreoRecuperacionPendiente";
 import { useMode } from "../../shared/stores/useMode";
 import { Badge, Button, Card, Input } from "../../shared/ui";
 import Titlebar from "../layoutComponent/Titlebar";
 import { conAviso } from "../../shared/lib/conAviso";
+import { correoValido } from "../../shared/lib/correo";
 
 /**
  * Elegir el PIN del primer arranque. Se llega aqui de dos maneras:
@@ -37,11 +37,17 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
     const setSession = useAuth((s) => s.setSession);
     const role = useAuth((s) => s.role);
 
-    // LOGIN-08: el correo de recuperación elegido al activar, si falta confirmarlo. Se resuelve
-    // (confirmar o saltar) antes de guardar el PIN, porque al guardarlo se cierra la ventana en la
-    // que se puede confirmar sin sesión.
-    const correoPendiente = useCorreoRecuperacionPendiente((s) => s.correo);
-    const resolverCorreoPendiente = useCorreoRecuperacionPendiente((s) => s.fijar);
+    // LOGIN-08: a dónde llegan los códigos para recuperar el PIN. Por defecto, al correo de la
+    // compra, que ya está demostrado. Si se desmarca, el correo escrito se confirma con su código
+    // (o se salta) antes de guardar el PIN, porque al guardarlo se cierra la ventana en la que se
+    // puede confirmar sin sesión. Por eso sólo se ofrece sin sesión, en el primer arranque; con ella
+    // se cambia en Configuración → Licencia.
+    const elegirCorreoRecuperacion = !idUsuarioSesion;
+    const [usarCorreoCompra, setUsarCorreoCompra] = useState(true);
+    const [correoRecuperacion, setCorreoRecuperacion] = useState("");
+    const [correoAConfirmar, setCorreoAConfirmar] = useState<string | null>(null);
+    const [correoConfirmado, setCorreoConfirmado] = useState<string | null>(null);
+    const correoRecuperacionResuelto = usarCorreoCompra || correoConfirmado !== null;
 
     // Sin sesion no hay de donde sacar el usuario: se pregunta al equipo quien tiene el setup
     // pendiente (el admin que siembra la BD al crearse).
@@ -93,7 +99,7 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
     const emailTrimmed = email.trim();
     const canSave =
         !saving &&
-        !correoPendiente &&
+        correoRecuperacionResuelto &&
         !!idUsuario &&
         pinNuevo.length >= 4 &&
         pinNuevo === pinNuevo2 &&
@@ -265,13 +271,6 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                     </div>
 
                     <div className="mt-6 grid gap-5">
-                        {correoPendiente ? (
-                            <ConfirmarCorreoRecuperacion
-                                correo={correoPendiente}
-                                onResuelto={() => resolverCorreoPendiente(null)}
-                            />
-                        ) : null}
-
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
                                 <label
@@ -354,6 +353,78 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                             </p>
                         </div>
 
+                        {elegirCorreoRecuperacion && correoAConfirmar ? (
+                            <ConfirmarCorreoRecuperacion
+                                correo={correoAConfirmar}
+                                onResuelto={(confirmado) => {
+                                    setCorreoAConfirmar(null);
+                                    if (confirmado) setCorreoConfirmado(correoAConfirmar);
+                                    else setUsarCorreoCompra(true);
+                                }}
+                            />
+                        ) : elegirCorreoRecuperacion ? (
+                            <div className="rounded-2xl border border-border bg-surface-2 px-4 py-3">
+                                <label
+                                    htmlFor="setup-usar-correo-compra"
+                                    className="flex cursor-pointer items-start gap-3"
+                                >
+                                    <input
+                                        id="setup-usar-correo-compra"
+                                        type="checkbox"
+                                        checked={usarCorreoCompra}
+                                        disabled={correoConfirmado !== null}
+                                        onChange={(e) => setUsarCorreoCompra(e.target.checked)}
+                                        className="mt-0.5 h-4 w-4 rounded border-border accent-accent"
+                                    />
+                                    <span>
+                                        <span className="block text-sm font-semibold text-fg">
+                                            Usar el correo de la compra para recuperar el PIN
+                                        </span>
+                                        <span className="mt-0.5 block text-xs text-fg-muted">
+                                            Si prefieres otro, desmárcalo y escríbelo: te
+                                            mandaremos un código para confirmarlo.
+                                        </span>
+                                    </span>
+                                </label>
+
+                                {usarCorreoCompra ? null : correoConfirmado ? (
+                                    <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-success">
+                                        <Check className="size-3.5 shrink-0" aria-hidden />
+                                        Los códigos para recuperar el PIN llegarán a {correoConfirmado}.
+                                    </p>
+                                ) : (
+                                    <div className="mt-3 flex gap-2">
+                                        <Input
+                                            id="setup-correo-recuperacion"
+                                            type="email"
+                                            value={correoRecuperacion}
+                                            onChange={(e) => setCorreoRecuperacion(e.target.value)}
+                                            invalid={
+                                                correoRecuperacion.trim().length > 0 &&
+                                                !correoValido(correoRecuperacion)
+                                            }
+                                            className="h-12 min-w-0 flex-1 px-4 text-base"
+                                            placeholder="encargado@tubar.com"
+                                            inputMode="email"
+                                            autoComplete="email"
+                                        />
+                                        <Button
+                                            size="lg"
+                                            variant="secondary"
+                                            disabled={!correoValido(correoRecuperacion)}
+                                            onClick={() =>
+                                                setCorreoAConfirmar(
+                                                    correoRecuperacion.trim().toLowerCase(),
+                                                )
+                                            }
+                                        >
+                                            Enviar código
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
+
                         {error ? (
                             <div
                                 className="rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm text-danger"
@@ -377,9 +448,9 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                         </Button>
 
                         <p className="text-center text-xs text-fg-subtle">
-                            {correoPendiente
-                                ? "Antes, confirma el correo de recuperación o salta ese paso."
-                                : "Este paso es necesario para desbloquear el TPV."}
+                            {correoRecuperacionResuelto
+                                ? "Este paso es necesario para desbloquear el TPV."
+                                : "Antes, confirma el correo de recuperación o usa el de la compra."}
                         </p>
                     </div>
                 </section>

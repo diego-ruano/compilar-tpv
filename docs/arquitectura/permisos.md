@@ -169,8 +169,8 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
 - Verificar el código y guardar el PIN son **un** comando; el PIN no sale del equipo (sube por el
   outbox).
 - Va al **correo de recuperación**, que es el de la compra (`licenses.customer_email`) hasta que se
-  cambie. Al activar se puede elegir otro; se confirma con un código en la pantalla del PIN inicial o se
-  salta, y mientras no se confirme manda el de la compra. Cambiarlo después exige un código enviado al
+  cambie. En la pantalla del PIN inicial se puede elegir otro; se confirma con un código antes de
+  guardar el PIN o se salta, y mientras no se confirme manda el de la compra. Cambiarlo después exige un código enviado al
   correo **nuevo** y avisa al anterior y al de la compra; volver al de la compra no pide código.
 - **Cinco minutos entre códigos** (`REENVIO_MIN_MS`), con la cuenta atrás en pantalla.
 - El **traslado de la licencia** va siempre al correo de la compra ([licencias.md](licencias.md)).

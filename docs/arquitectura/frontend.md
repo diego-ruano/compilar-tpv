@@ -76,7 +76,7 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
   vez en stores de Zustand: `useBusinessSettings`, `useTicketSettings`, `useContactSettings`) y el
   login.
 - Otros stores (`shared/stores/`): `useAuth`, `useMode`, `useEstadoSync`, `useMainPresence`,
-  `useEstadoFiscal`, `useSyncSignal`, `usePairCode`, `useTheme`, `useCorreoRecuperacionPendiente`.
+  `useEstadoFiscal`, `useSyncSignal`, `usePairCode`, `useTheme`.
 
 Las escrituras de servicio muestran únicamente respuestas confirmadas. Una cola por comanda
 ordena adiciones, retiradas y notas; los cobros tienen una guardia síncrona y feedback de espera.

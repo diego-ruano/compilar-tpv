@@ -1,10 +1,11 @@
 // src/features/login/ConfirmarCorreoRecuperacion.tsx
 //
-// LOGIN-08: confirmar, en la pantalla del PIN, el correo de recuperación que se eligió al activar.
+// LOGIN-08: confirmar, en la pantalla del PIN inicial, el correo de recuperación que se acaba de
+// escribir en ella.
 //
-// El código se manda solo al llegar, porque ya se pidió ese correo en la activación. Hasta
-// confirmarlo, los códigos siguen yendo al correo de la compra; y si no se confirma nunca —se salta,
-// o se cierra la app— no cambia nada. Por eso «Saltar» no es un fallo: es la opción segura.
+// El código se manda solo al llegar, porque se llega pulsando «Enviar código». Hasta confirmarlo,
+// los códigos siguen yendo al correo de la compra; y si no se confirma nunca —se salta, o se cierra
+// la app— no cambia nada. Por eso «Saltar» no es un fallo: es la opción segura.
 
 import { useEffect, useRef, useState } from "react";
 import { Mail } from "lucide-react";
@@ -20,8 +21,11 @@ import {
 
 type Props = {
     correo: string;
-    /** Confirmado, saltado, o no hacía falta (era el de la compra). */
-    onResuelto: () => void;
+    /**
+     * `true` si los códigos ya van a `correo`: confirmado, o no hacía falta (ya lo era). `false` si
+     * se saltó y siguen yendo al de la compra.
+     */
+    onResuelto: (confirmado: boolean) => void;
 };
 
 export default function ConfirmarCorreoRecuperacion({ correo, onResuelto }: Props) {
@@ -39,7 +43,7 @@ export default function ConfirmarCorreoRecuperacion({ correo, onResuelto }: Prop
         try {
             const r = await correoRecuperacionSolicitar(correo);
             if (r.sinCambios) {
-                onResuelto();
+                onResuelto(true);
                 return;
             }
             setEnviado(r);
@@ -67,7 +71,7 @@ export default function ConfirmarCorreoRecuperacion({ correo, onResuelto }: Prop
         setError(null);
         try {
             await correoRecuperacionConfirmar(codigo);
-            onResuelto();
+            onResuelto(true);
         } catch (e) {
             setError(toAppError(e).message);
             setOcupado(false);
@@ -143,7 +147,7 @@ export default function ConfirmarCorreoRecuperacion({ correo, onResuelto }: Prop
                             ? "Enviar otro código"
                             : "Enviar código"}
                 </Button>
-                <Button size="sm" variant="secondary" disabled={ocupado} onClick={onResuelto}>
+                <Button size="sm" variant="secondary" disabled={ocupado} onClick={() => onResuelto(false)}>
                     Saltar
                 </Button>
             </div>

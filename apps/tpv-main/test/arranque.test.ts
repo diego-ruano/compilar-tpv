@@ -13,10 +13,11 @@ process.env.TZ = "Europe/Madrid";
 import { describe, expect, it } from "vitest";
 import type { LicenseGateResult_Serialize as LicenseGateResult, LicenseLocalState_Serialize as LicenseLocalState } from "@tpv/contracts";
 
-import { activacionCompleta, correoValido, FORMULARIO_VACIO } from "../src/app/arranque/activacion";
+import { activacionCompleta, FORMULARIO_VACIO } from "../src/app/arranque/activacion";
 import { codigoParaVincular, leerCodigoDeVinculacion } from "../src/app/arranque/emparejamiento";
 import { decidirArranque, type EntradaArranque } from "../src/app/arranque/pantallaDeArranque";
 import { textoAvisoCaducidad, textoBloqueo, textoRechazoPrevio } from "../src/app/arranque/textosLicencia";
+import { correoValido } from "../src/shared/lib/correo";
 
 const gate = (allowed: boolean, reason: string, extra: Partial<LicenseGateResult> = {}): LicenseGateResult => ({
 	allowed,
@@ -200,9 +201,9 @@ describe("el formulario de activación", () => {
 		phone: "+34 600 000 000",
 		country: "España",
 	};
-	const listo = { formulario: lleno, usarCorreoCompra: true, correoRecuperacion: "", enCambioDeEquipo: false, codigoCambio: "" };
+	const listo = { formulario: lleno, enCambioDeEquipo: false, codigoCambio: "" };
 
-	it("con todo relleno y el correo de la compra, está listo", () => {
+	it("con todo relleno, está listo", () => {
 		expect(activacionCompleta(listo)).toBe(true);
 	});
 
@@ -213,20 +214,15 @@ describe("el formulario de activación", () => {
 		}
 	});
 
-	it("sin el correo de la compra, pide uno válido (LOGIN-08)", () => {
-		const otro = { ...listo, usarCorreoCompra: false };
-		expect(activacionCompleta({ ...otro, correoRecuperacion: "" })).toBe(false);
-		expect(activacionCompleta({ ...otro, correoRecuperacion: "encargado@" })).toBe(false);
-		expect(activacionCompleta({ ...otro, correoRecuperacion: " encargado@bar.es " })).toBe(true);
-	});
-
 	it("si la licencia está en otro equipo, pide el código completo de 6 cifras", () => {
 		const cambio = { ...listo, enCambioDeEquipo: true };
 		expect(activacionCompleta({ ...cambio, codigoCambio: "" })).toBe(false);
 		expect(activacionCompleta({ ...cambio, codigoCambio: "12345" })).toBe(false);
 		expect(activacionCompleta({ ...cambio, codigoCambio: "123456" })).toBe(true);
 	});
+});
 
+describe("el correo de recuperación que se elige con el PIN inicial (LOGIN-08)", () => {
 	it.each([
 		["encargado@bar.es", true],
 		["ENCARGADO@Bar-La-Plaza.com", true],

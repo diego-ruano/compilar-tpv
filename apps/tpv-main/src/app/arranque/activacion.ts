@@ -19,19 +19,12 @@ export const FORMULARIO_VACIO: FormularioActivacion = {
 	country: "",
 };
 
-/** Un correo con forma de correo. Que el buzón exista lo comprueba el código que se le manda después. */
-export function correoValido(correo: string): boolean {
-	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo.trim());
-}
-
 /**
- * Todos los campos rellenos; si no se usa el correo de la compra, uno válido (LOGIN-08); y si la
- * licencia está en otro equipo, el código de 6 cifras que llegó al correo.
+ * Todos los campos rellenos y, si la licencia está en otro equipo, el código de 6 cifras que llegó al
+ * correo.
  */
 export function activacionCompleta(p: {
 	formulario: FormularioActivacion;
-	usarCorreoCompra: boolean;
-	correoRecuperacion: string;
 	enCambioDeEquipo: boolean;
 	codigoCambio: string;
 }): boolean {
@@ -39,7 +32,6 @@ export function activacionCompleta(p: {
 	const camposRellenos = [f.licenseKey, f.legal_name, f.business_name, f.phone, f.country].every(
 		(v) => v.trim().length > 0,
 	);
-	const correoOk = p.usarCorreoCompra || correoValido(p.correoRecuperacion);
 	const codigoOk = !p.enCambioDeEquipo || p.codigoCambio.trim().length === 6;
-	return camposRellenos && correoOk && codigoOk;
+	return camposRellenos && codigoOk;
 }

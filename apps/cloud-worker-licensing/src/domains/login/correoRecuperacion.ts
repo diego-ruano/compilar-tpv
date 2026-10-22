@@ -139,8 +139,8 @@ export async function solicitarCambioCorreo(
 		return fallo(400, "correo_invalido", "Ese correo no parece válido. Revísalo.");
 	}
 	// Pedir el que ya es no es un error: no hay nada que demostrar, así que ni se manda código ni se
-	// pide confirmar. Pasa sobre todo al activar, cuando alguien desmarca «usar el de la compra» y
-	// escribe justo ése.
+	// pide confirmar. Pasa sobre todo con el PIN inicial, cuando alguien desmarca «usar el de la
+	// compra» y escribe justo ése.
 	if (normalizar(await correoDeRecuperacion(db, l.lic)) === nuevo) {
 		return {
 			status: 200,

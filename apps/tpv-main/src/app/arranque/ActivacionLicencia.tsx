@@ -1,8 +1,8 @@
 import { commands } from "@tpv/client";
 // src/app/arranque/ActivacionLicencia.tsx
 //
-// Activar la licencia de la Main: la clave, los datos del negocio, el correo de recuperación y, si la
-// licencia ya está en otro equipo, el código que llega al correo para moverla.
+// Activar la licencia de la Main: la clave, los datos del negocio y, si la licencia ya está en otro
+// equipo, el código que llega al correo para moverla.
 
 import React, { useState } from "react";
 import { toAppError } from "@tpv/client";
@@ -10,9 +10,8 @@ import type { LicenseActivateOutcome_Serialize as LicenseActivateOutcome } from 
 import { Building2, KeyRound, MapPin, Phone, ShieldCheck, Store } from "lucide-react";
 
 import { conAviso } from "../../shared/lib/conAviso";
-import { useCorreoRecuperacionPendiente } from "../../shared/stores/useCorreoRecuperacionPendiente";
 import { Badge, Button, Card, Input } from "../../shared/ui";
-import { activacionCompleta, correoValido, FORMULARIO_VACIO } from "./activacion";
+import { activacionCompleta, FORMULARIO_VACIO } from "./activacion";
 import FondoDecorado from "./FondoDecorado";
 import { textoRechazoPrevio } from "./textosLicencia";
 
@@ -57,13 +56,6 @@ export default function ActivacionLicencia({
 	// ver que los meses han entrado — si la pantalla pasara sola, no sabría si se aplicó.
 	const [sumado, setSumado] = useState<string | null>(null);
 
-	// LOGIN-08: por defecto los códigos de recuperación van al correo de la compra. Si se desmarca,
-	// el correo escrito queda pendiente y se confirma con su código en la pantalla del PIN.
-	const [usarCorreoCompra, setUsarCorreoCompra] = useState(true);
-	const [correoRecuperacion, setCorreoRecuperacion] = useState("");
-	const fijarCorreoPendiente = useCorreoRecuperacionPendiente((s) => s.fijar);
-	const correoRecuperacionValido = correoValido(correoRecuperacion);
-
 	// Cambio de dispositivo: si la licencia ya está en otro equipo, el servidor pide un
 	// código de 6 dígitos que le llega al email. `hint` (p. ej. `a***@bar.com`) != null significa
 	// que estamos en ese paso.
@@ -76,8 +68,6 @@ export default function ActivacionLicencia({
 
 	const activationValid = activacionCompleta({
 		formulario: act,
-		usarCorreoCompra,
-		correoRecuperacion,
 		enCambioDeEquipo: enDeviceChange,
 		codigoCambio: deviceChangeCode,
 	});
@@ -130,7 +120,6 @@ export default function ActivacionLicencia({
 				return;
 			}
 
-			fijarCorreoPendiente(usarCorreoCompra ? null : correoRecuperacion.trim().toLowerCase());
 			await onActivada();
 		} catch (e: any) {
 			setError(toAppError(e).message);
@@ -292,43 +281,6 @@ export default function ActivacionLicencia({
 								</div>
 							</div>
 
-							{/* LOGIN-08: el correo de recuperación. Marcado, el de la
-								compra (ya demostrado). Desmarcado, uno escrito que se
-								confirma con un código en la pantalla del PIN. */}
-							<div className="rounded-2xl border border-border bg-surface-2 px-4 py-3">
-								<label htmlFor="activation-usar-correo-compra" className="flex cursor-pointer items-start gap-3">
-									<input
-										id="activation-usar-correo-compra"
-										type="checkbox"
-										checked={usarCorreoCompra}
-										onChange={(e) => setUsarCorreoCompra(e.target.checked)}
-										className="mt-0.5 h-4 w-4 rounded border-border accent-accent"
-									/>
-									<span>
-										<span className="block text-sm font-semibold text-fg">
-											Usar el correo de la compra para recuperar el PIN
-										</span>
-										<span className="mt-0.5 block text-xs text-fg-muted">
-											Si prefieres otro, desmárcalo y escríbelo: lo
-											confirmarás con un código en el siguiente paso.
-										</span>
-									</span>
-								</label>
-
-								{!usarCorreoCompra ? (
-									<Input
-										id="activation-correo-recuperacion"
-										type="email"
-										value={correoRecuperacion}
-										onChange={(e) => setCorreoRecuperacion(e.target.value)}
-										invalid={correoRecuperacion.trim().length > 0 && !correoRecuperacionValido}
-										className="mt-3 h-12 px-4"
-										placeholder="encargado@tubar.com"
-										autoComplete="email"
-									/>
-								) : null}
-							</div>
-
 							<div className="grid gap-4 sm:grid-cols-2">
 								<div>
 									<label htmlFor="activation-phone" className="flex items-center gap-2 text-sm font-semibold text-fg">
@@ -413,8 +365,6 @@ export default function ActivacionLicencia({
 										setAct(FORMULARIO_VACIO);
 										setDeviceChangeHint(null);
 										setDeviceChangeCode("");
-										setUsarCorreoCompra(true);
-										setCorreoRecuperacion("");
 									}}
 								>
 									Limpiar

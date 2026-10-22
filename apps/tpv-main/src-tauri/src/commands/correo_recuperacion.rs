@@ -7,8 +7,8 @@
 //! (`pairing.rs::ruta_de_administracion`), o bastaría con llamarlas por él.
 //!
 //! Una excepción: pedir y confirmar el código se permiten SIN sesión mientras el PIN inicial esté
-//! por elegir. Es el primer arranque: al activar se puede elegir otro correo, y su código se escribe
-//! en la pantalla del PIN, cuando todavía no existe nadie con quien iniciar sesión.
+//! por elegir. Es el primer arranque: en la pantalla del PIN se puede elegir otro correo y confirmarlo
+//! con su código, cuando todavía no existe nadie con quien iniciar sesión.
 
 use tauri::{AppHandle, Manager, State};
 
