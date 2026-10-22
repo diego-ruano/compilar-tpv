@@ -110,7 +110,7 @@ pub async fn add_linea_comanda(
         return Err(AppError::validation("Falta el producto."));
     }
     if !input.cantidad.is_finite() || input.cantidad <= 0.0 {
-        return Err(AppError::validation("cantidad inválida"));
+        return Err(AppError::validation("La cantidad tiene que ser mayor que cero."));
     }
     // RI-27: el precio no viene de la pantalla; lo pone el repositorio desde el catálogo.
     let id = opt_id(input.id_usuario.or(input.id_trabajador));

@@ -59,7 +59,7 @@ fn normaliza_email(v: Option<String>) -> Result<Option<String>, String> {
             if crate::login::validate_email_basic(&email) {
                 Ok(Some(email))
             } else {
-                Err("email inválido".to_string())
+                Err("El correo no es válido.".to_string())
             }
         }
     }

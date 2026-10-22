@@ -80,7 +80,8 @@ describe("la validación del worker cuadra con la tabla compartida", () => {
 			if (r.success && caso.queda) {
 				expect(r.data).toMatchObject(caso.queda);
 			}
-			if (!r.success && caso.mensaje) {
+			if (!r.success) {
+				expect(caso.mensaje, "un rechazo sin «mensaje»").toBeTruthy();
 				expect(r.mensaje).toBe(caso.mensaje);
 			}
 		});

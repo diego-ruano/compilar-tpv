@@ -159,7 +159,12 @@ mod tests {
                 id_trabajador: "t".into(), fecha: caso["fecha"].as_str().unwrap().into(), id_turno: "turno".into(), area: "Sala".into(), notas: None,
                 hora_inicio: Some(par[0].as_str().unwrap().into()), hora_fin: Some(par[1].as_str().unwrap().into()),
             }).collect();
-            assert_eq!(validar_tramos(&tramos).is_ok(), caso["valido"].as_bool().unwrap(), "{}", caso["nombre"]);
+            let resultado = validar_tramos(&tramos);
+            assert_eq!(resultado.is_ok(), caso["valido"].as_bool().unwrap(), "{}", caso["nombre"]);
+            // VALID-03: el mismo texto que el worker.
+            if let Err(motivo) = resultado {
+                assert_eq!(Some(motivo.as_str()), caso["mensaje"].as_str(), "{}", caso["nombre"]);
+            }
         }
     }
 

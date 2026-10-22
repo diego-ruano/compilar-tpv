@@ -33,7 +33,7 @@ const optEmail = z
 		const t = recortar((v ?? "").toString()).toLowerCase();
 		return t.length ? t : null;
 	})
-	.refine((v) => v === null || isValidEmail(v), { message: "email inválido" });
+	.refine((v) => v === null || isValidEmail(v), { message: "El correo no es válido." });
 
 export const createClienteSchema = z.object({
 	// ID autogenerado por el backend: el cliente HTTP lo envía como `null` cuando no lo

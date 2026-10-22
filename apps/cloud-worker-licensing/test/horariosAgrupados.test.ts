@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import casos from "../../../crates/tpv-domain/src/horarios_casos.json";
 import { asignacionGuardarSchema } from "../src/domains/trabajadores/trabajadores.schemas";
+import { validarConMensaje } from "../src/lib/validacion";
 import { guardarAsignacion, deleteAsignacion, copySemana } from "../src/domains/trabajadores/trabajadores.commands";
 import { grupoAsignacion, filasSemana } from "../src/domains/trabajadores/trabajadores.queries";
 import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
@@ -27,10 +28,13 @@ function preparar(hub: any) {
     return { sql, db, aplicar, filas };
 }
 
-it("valida los mismos casos de horarios que el dominio Rust", () => {
+it("valida los mismos casos de horarios que el dominio Rust, y dice lo mismo al rechazar", async () => {
     for (const caso of casos) {
         const datos = { ...entrada(caso.tramos), fecha: caso.fecha };
-        expect(asignacionGuardarSchema.safeParse(datos).success, caso.nombre).toBe(caso.valido);
+        const r = await validarConMensaje(asignacionGuardarSchema, datos);
+        expect(r.success, caso.nombre).toBe(caso.valido);
+        // VALID-03: el `message` de la respuesta, el mismo texto que la Main.
+        if (!r.success) expect((r as { mensaje?: string }).mensaje, caso.nombre).toBe((caso as { mensaje?: string }).mensaje);
     }
 });
 

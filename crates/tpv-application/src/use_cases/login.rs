@@ -106,7 +106,7 @@ pub async fn complete_initial_setup(
         return Err(AppError::validation("Falta el usuario."));
     }
     if !validate_email_basic(&email_nuevo) {
-        return Err(AppError::validation("Email inválido"));
+        return Err(AppError::validation("El correo no es válido."));
     }
 
     repo.complete_initial_setup(&input.id_usuario, &pin_nuevo, email_nuevo.trim())

@@ -169,6 +169,8 @@ export const fechaLunesSchema = z.object({
 
 // RI-85: espejo de intervalo_horario del dominio; el solape con filas existentes
 // lo vuelve a comprobar SQLite dentro de la transacción.
+/** Mismo texto que `validar_tramos` en la Main. */
+const MSG_TRAMOS = "El horario debe tener uno o dos tramos";
 const horaTramo = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Hora inválida (usa HH:mm)");
 export const asignacionGuardarSchema = z.object({
 	id_asignacion: z.string().overwrite(recortar).min(1).nullable().optional(),
@@ -177,7 +179,7 @@ export const asignacionGuardarSchema = z.object({
 	id_turno: requiredString("Elige un turno."),
 	area: requiredString("Elige el área."),
 	notas: z.string().nullable().optional(),
-	tramos: z.array(z.object({ hora_inicio: horaTramo, hora_fin: horaTramo }).strict()).min(1).max(2),
+	tramos: z.array(z.object({ hora_inicio: horaTramo, hora_fin: horaTramo }).strict()).min(1, MSG_TRAMOS).max(2, MSG_TRAMOS),
 }).strict().superRefine((input, ctx) => {
 	const intervalos = input.tramos.map(t => {
 		const inicio = Number(t.hora_inicio.slice(0, 2)) * 60 + Number(t.hora_inicio.slice(3));

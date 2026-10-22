@@ -68,7 +68,7 @@ const issueSchema = z.object({
 	termMonths: z.union([z.literal(1), z.literal(3), z.literal(12)]),
 	// Obligatorio: es la raíz de confianza del cambio de dispositivo. Sin email, ese
 	// cliente no puede recuperar su licencia sin pasar por ti.
-	email: z.string().email("email inválido"),
+	email: z.string().email("El correo no es válido."),
 	name: z.string().max(200).optional(),
 	/** Si es `true`, además de devolver la clave se la enviamos al cliente por correo. */
 	sendKey: z.boolean().optional(),

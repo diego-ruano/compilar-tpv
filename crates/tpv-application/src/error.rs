@@ -484,6 +484,8 @@ mod tests_mensajes_en_espanol {
     static CAMPO_INTERPOLADO: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\{[^}]*\}\s*(?:inv[aá]lid|requerid|required|invalid)").unwrap());
     static HUECO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{[^}]*\}").unwrap());
+    static MODULO_DE_TESTS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"#\[cfg\(test\)\]\s*(?:pub(?:\(crate\))?\s+)?mod\s").unwrap());
     /// Una sentencia, que no se le enseña a nadie.
     static SQL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:SELECT|INSERT|UPDATE|DELETE|CREATE)\b").unwrap());
     /// Lo que precede a un texto que es un mensaje.
@@ -586,8 +588,9 @@ mod tests_mensajes_en_espanol {
         let mut encontrados = Vec::new();
         for ruta in &rutas {
             let texto = std::fs::read_to_string(ruta).expect("fichero ilegible");
-            // Lo de los tests no se le enseña a nadie.
-            let produccion = texto.split("#[cfg(test)]").next().unwrap_or_default();
+            // Lo de los tests no se le enseña a nadie: se corta en el módulo de tests, no en un
+            // `#[cfg(test)]` que sólo condiciona un `use`.
+            let produccion = MODULO_DE_TESTS.find(&texto).map_or(texto.as_str(), |m| &texto[..m.start()]);
             for s in malos(produccion) {
                 encontrados.push(format!("{}  «{s}»", ruta.display()));
             }

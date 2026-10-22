@@ -137,7 +137,7 @@ export const addLineaSchema = z
 	.object({
 		id_comanda: idField("Falta la comanda."),
 		id_producto: idField("Falta el producto."),
-		cantidad: z.coerce.number().positive(),
+		cantidad: z.coerce.number().positive("La cantidad tiene que ser mayor que cero."),
 		id_usuario: z.any().optional().nullable(),
 		id_trabajador: z.any().optional().nullable(),
 	})

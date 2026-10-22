@@ -223,7 +223,8 @@ fn la_validacion_cuadra_con_la_tabla_compartida() {
             assert_eq!(resultado.is_ok(), acepta, "{dominio} · {nombre}: {resultado:?}");
 
             // VALID-03: lo que se le dice a quien está delante, el mismo texto en los dos lados.
-            if let (Err(motivo), Some(mensaje)) = (&resultado, caso["mensaje"].as_str()) {
+            if let Err(motivo) = &resultado {
+                let mensaje = caso["mensaje"].as_str().unwrap_or_else(|| panic!("{dominio} · {nombre}: un rechazo sin «mensaje»"));
                 assert_eq!(motivo, mensaje, "{dominio} · {nombre}: el mensaje");
             }
 
