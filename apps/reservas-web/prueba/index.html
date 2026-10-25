@@ -26,7 +26,7 @@
       <label for="clave">Clave del negocio (Configuración → Reservas → «Ver el código»)</label>
       <input id="clave" name="clave" placeholder="rw_…" required />
       <label for="origen">Worker</label>
-      <input id="origen" name="origen" value="https://tpv-api.altarialights.workers.dev" />
+      <input id="origen" name="origen" value="https://reservas-tpv.altarialights.com" />
       <label for="ancho">Ancho del hueco (CSS; vacío: todo el ancho)</label>
       <input id="ancho" name="ancho" placeholder="p. ej. 900px o 100%" />
       <label for="alto">Alto del hueco (CSS; vacío: crece con lo que ocupe)</label>
@@ -41,7 +41,7 @@
       (function () {
         var params = new URLSearchParams(location.search);
         var clave = params.get("clave");
-        var origen = params.get("origen") || "https://tpv-api.altarialights.workers.dev";
+        var origen = params.get("origen") || "https://reservas-tpv.altarialights.com";
         var ancho = params.get("ancho") || "";
         var alto = params.get("alto") || "";
         if (!clave) return;

@@ -59,11 +59,17 @@ export default tseslint.config(
 
     js.configs.recommended,
 
-    // Las dos apps, con información de tipos: `no-floating-promises` necesita saber qué devuelve
-    // cada llamada, y eso no se puede deducir del texto. Sólo ellas porque son las únicas con un
-    // `tsconfig.json` de verdad — los `packages/` no tienen ninguno (ver el bloque de abajo).
+    // Las apps y el SDK de reservas web, con información de tipos: `no-floating-promises` necesita
+    // saber qué devuelve cada llamada, y eso no se puede deducir del texto. Sólo ellos porque son los
+    // únicos con un `tsconfig.json` de verdad — los demás `packages/` no tienen (ver el bloque de abajo).
     {
-        files: ["apps/*/src/**/*.{ts,tsx}", "apps/*/e2e/**/*.ts", "apps/*/test/**/*.ts"],
+        files: [
+            "apps/*/src/**/*.{ts,tsx}",
+            "apps/*/e2e/**/*.ts",
+            "apps/*/test/**/*.ts",
+            "packages/reservas-web-sdk/src/**/*.ts",
+            "packages/reservas-web-sdk/test/**/*.ts",
+        ],
         extends: [tseslint.configs.recommended],
         languageOptions: {
             parserOptions: {
@@ -117,13 +123,15 @@ export default tseslint.config(
 
     // `packages/*` y los scripts de Node: SIN información de tipos.
     //
-    // No es una preferencia: los tres `packages/` no tienen `tsconfig.json` (su tarea `lint` es un
+    // No es una preferencia: estos `packages/` no tienen `tsconfig.json` (su tarea `lint` es un
     // `tsc --noEmit` que no encuentra proyecto), y los `.mjs` de `scripts/` no están en ninguno. Sin
     // proyecto no hay tipos, y sin tipos `no-floating-promises` no puede funcionar — así que aquí
     // sólo quedan las reglas que se deducen del texto. Si algún día esos paquetes ganan su
     // `tsconfig.json`, muévelos al bloque de arriba y ganarán la regla de las promesas.
     {
         files: ["packages/*/src/**/*.{ts,tsx}", "scripts/**/*.mjs", "*.config.mjs"],
+        // El SDK tiene el suyo y va en el bloque de arriba, con tipos.
+        ignores: ["packages/reservas-web-sdk/**"],
         extends: [tseslint.configs.recommended],
         languageOptions: {
             globals: { process: "readonly", console: "readonly", Buffer: "readonly" },

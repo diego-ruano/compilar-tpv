@@ -141,7 +141,7 @@ cierra a los 10 minutos sin actividad (`useInactivityLogout`) y `AppBoot` hace `
 | Directiva | Valor | Por qué |
 |---|---|---|
 | `script-src` | `'self'` | Sólo el bundle. La `devCsp` añade `'unsafe-inline'` para el preámbulo de react-refresh |
-| `connect-src` | `'self' ipc: http://ipc.localhost wss://tpv-api.altarialights.workers.dev` | El IPC y el WebSocket. El REST lo hace Rust. La `devCsp` añade `ws:` para el HMR |
+| `connect-src` | `'self' ipc: http://ipc.localhost` | Sólo el IPC: el REST y el WebSocket los hace Rust. La `devCsp` añade `ws:` para el HMR |
 | `img-src` | `'self' asset: …asset.localhost <bucket r2.dev> blob: data:` | `asset:` para las imágenes locales de la Main; el bucket para las de la Handy |
 | `style-src` | `'self'` | Ver abajo |
 | `object-src`, `frame-src` | `'none'` | Sin plugins ni iframes |

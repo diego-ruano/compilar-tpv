@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AspectoMesa, MesaPlano, SalonPlano } from "@tpv/plano";
 
 import PlanoWidget from "../src/PlanoWidget";
-import type { PlanoPublico } from "../src/api";
+import type { Plano } from "@altarialights/reservas-web-tpv";
 
 vi.mock("react-konva", () => {
 	const Nada = () => null;
@@ -30,10 +30,10 @@ vi.mock("@tpv/plano", async (original) => ({
 
 afterEach(cleanup);
 
-const mesa = (id: string, id_salon: string, numero: string) => ({
+const mesa = (id: string, id_salon: string, nombre: string) => ({
 	id,
 	id_salon,
-	numero,
+	nombre,
 	forma: "rect",
 	x: 0,
 	y: 0,
@@ -44,7 +44,7 @@ const mesa = (id: string, id_salon: string, numero: string) => ({
 	reservable: true,
 });
 
-const PLANO: PlanoPublico = {
+const PLANO: Plano = {
 	completo: true,
 	salones: [
 		{ id: "dentro", nombre: "Interior", puntos: "[]" },
@@ -78,7 +78,7 @@ describe("las mesas libres del plano", () => {
 	});
 
 	it("llevan el nombre que tienen en la Main, sin otro «Mesa» delante", async () => {
-		const conNombre: PlanoPublico = {
+		const conNombre: Plano = {
 			...PLANO,
 			mesas: [mesa("i1", "dentro", "Mesa 7"), mesa("i2", "dentro", "Ventana"), mesa("i3", "dentro", "12")],
 		};

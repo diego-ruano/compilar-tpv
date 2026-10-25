@@ -22,11 +22,16 @@
     },
     "apps/reservas-web": {
       // embed.js va tal cual a la web del restaurante (sale de public/); la página de prueba
-      // la sirve `pnpm prueba`.
-      "entry": ["src/main.tsx", "public/v1/embed.js", "test/**/*.test.{ts,tsx}", "test/setup.ts"],
+      // la sirve `pnpm prueba`. verificar.ts es la casilla de Turnstile del SDK (verificar.html).
+      "entry": ["src/main.tsx", "src/verificar.ts", "public/v1/embed.js", "test/**/*.test.{ts,tsx}", "test/setup.ts"],
       "project": ["src/**/*.{ts,tsx}", "test/**/*.{ts,tsx}", "public/**/*.js", "*.config.ts"],
       // Tailwind y los tokens se importan en estilos.css; Konva lo usa @tpv/plano por debajo.
       "ignoreDependencies": ["tailwindcss", "@tpv/estilos", "react-konva"]
+    },
+    "packages/reservas-web-sdk": {
+      // Lo que se publica en npm: la entrada y la de los tipos, que importa también el worker.
+      "entry": ["src/index.ts", "src/tipos.ts", "test/**/*.test.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts", "*.config.ts"]
     },
     "packages/plano": {
       "entry": ["src/index.ts", "src/geometria.ts"],

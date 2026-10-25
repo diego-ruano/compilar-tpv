@@ -20,6 +20,7 @@
 		"zod": "^4.6.5"
 	},
 	"devDependencies": {
+		"@altarialights/reservas-web-tpv": "workspace:*",
 		"@cloudflare/vitest-pool-workers": "^0.21.3",
 		"@noble/ed25519": "^3.0.0",
 		"@sentry/cli": "2.58.6",

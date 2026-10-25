@@ -8,7 +8,10 @@
 //   · la CSP no deja cargar nada de fuera salvo Turnstile ni hablar con otro origen;
 //   · cada fichero sale con su caché: el script de la web, corta; los de huella, inmutables; el
 //     widget, ninguna;
-//   · el HTML suelto y lo inventado no se sirven.
+//   · el HTML suelto y lo inventado no se sirven;
+//   · la casilla de Turnstile del SDK sólo se da a una web del negocio, que es la única que la puede
+//     incrustar, y lleva la clave pública que pone el worker;
+//   · el SDK servido se puede importar como módulo desde cualquier web.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
@@ -35,6 +38,11 @@ function almacen(conWidget = true) {
 	const ficheros: Record<string, [string, string]> = {
 		"/reservas-web/v1/embed.js": ["(function(){})();", "application/javascript"],
 		"/reservas-web/assets/index-abc123.js": ["console.log(1)", "text/javascript"],
+		"/reservas-web/v1/sdk.js": ["export function reservasWeb() {}", "text/javascript"],
+		"/reservas-web/verificar.html": [
+			'<!doctype html><head><meta name="turnstile" content=""></head><body><div id="casilla"></div></body>',
+			"text/html",
+		],
 	};
 	if (conWidget) ficheros["/reservas-web/index.html"] = ["<!doctype html><title>Reservar mesa</title>", "text/html"];
 	return {
@@ -147,5 +155,38 @@ describe("el widget servido por el worker", () => {
 	it("el limitador de las lecturas también frena el widget", async () => {
 		const lleno = { limit: async () => ({ success: false }) };
 		expect((await pedir("/v1/w/rw_AAAAAAAAAAAAAAAAAAAAAA", { LIMITADOR_RESERVA_WEB: lleno })).status).toBe(429);
+	});
+
+	it("la casilla de Turnstile del SDK: sólo para una web del negocio, que es la única que puede incrustarla", async () => {
+		await conNegocio("verificar", async (clave) => {
+			await ponerDominio(dbDePruebas, "t1", "https://www.barpepe.es", 1);
+			const env = { TURNSTILE_SITE_KEY: "0xPRUEBA" };
+			const res = await pedir(`/v1/w/${clave}/verificar?origen=${encodeURIComponent("https://www.barpepe.es")}`, env);
+			expect(res.status).toBe(200);
+			expect(ancestros(res)).toBe("https://www.barpepe.es");
+			expect(res.headers.get("Cache-Control")).toBe("no-store");
+			expect(res.headers.get("Content-Security-Policy")).toContain("script-src 'self' https://challenges.cloudflare.com");
+			// La clave pública de Turnstile, puesta por el worker (con su escape: es un atributo).
+			expect(await res.text()).toContain('<meta name="turnstile" content="0xPRUEBA">');
+
+			for (const [quien, ruta] of [
+				["otra web", `/v1/w/${clave}/verificar?origen=${encodeURIComponent("https://www.otra.es")}`],
+				["sin origen", `/v1/w/${clave}/verificar`],
+				["clave inventada", `/v1/w/rw_AAAAAAAAAAAAAAAAAAAAAA/verificar?origen=${encodeURIComponent("https://www.barpepe.es")}`],
+			] as const) {
+				expect((await pedir(ruta, env)).status, quien).toBe(403);
+			}
+			// Sin la clave de Turnstile no hay casilla que enseñar.
+			expect((await pedir(`/v1/w/${clave}/verificar?origen=${encodeURIComponent("https://www.barpepe.es")}`)).status).toBe(503);
+		});
+	});
+
+	it("el SDK servido va con caché corta y se puede importar como módulo desde cualquier web", async () => {
+		const sdk = await pedir("/v1/sdk.js");
+		expect(sdk.status).toBe(200);
+		expect(sdk.headers.get("Content-Type")).toBe("text/javascript; charset=utf-8");
+		expect(sdk.headers.get("Cache-Control")).toBe("public, max-age=300");
+		expect(sdk.headers.get("Access-Control-Allow-Origin")).toBe("*");
+		expect((await pedir("/verificar.html")).status).toBe(404);
 	});
 });

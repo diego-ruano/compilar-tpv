@@ -115,6 +115,14 @@ jobs:
           pnpm --filter @tpv/reservas-web test
           pnpm --filter @tpv/reservas-web build
 
+      # El SDK de las reservas web (`packages/reservas-web-sdk`), el que usan el widget y las webs que
+      # hacen su propio formulario: tipos, tests y que compila lo que se publica en npm.
+      - name: SDK de reservas web
+        run: |
+          pnpm --filter @altarialights/reservas-web-tpv typecheck
+          pnpm --filter @altarialights/reservas-web-tpv test
+          pnpm --filter @altarialights/reservas-web-tpv build
+
   # RI-87: exportar usa las firmas reales del ejecutable Tauri, sin arrancar la aplicación.
   contratos-tauri:
     name: Contratos IPC generados al día

@@ -279,6 +279,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	dia_no_reservable: "Ese día no se puede reservar por internet. Elige otro.",
 	hora_fuera_de_franja: "A esa hora no se puede reservar. Elige una de las horas que se ofrecen.",
 	mesa_no_disponible: "Esa mesa acaba de ocuparse. Elige otra de las que quedan libres.",
+	// Con la mesa automática: lo que hay que cambiar es la hora o el día, no la mesa.
+	sin_mesa_libre: "No quedan mesas libres para esas personas a esa hora. Prueba otra hora u otro día.",
 	limite_reservas_correo:
 		"Ya tienes muchas reservas activas con este correo. Cancela alguna o llama al restaurante.",
 	tope_reservas_negocio:

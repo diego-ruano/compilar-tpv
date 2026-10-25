@@ -1,0 +1,8 @@
+/* La casilla de Turnstile del SDK: sin márgenes y transparente, se ve el fondo del formulario. */
+html,
+body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    overflow: hidden;
+}

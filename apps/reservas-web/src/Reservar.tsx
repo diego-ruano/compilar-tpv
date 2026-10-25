@@ -4,8 +4,16 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 
-import type { Api, Confirmada, Disponibles, InfoNegocio, MesaPublica, PlanoPublico } from "./api";
-import { ErrorApi } from "./api";
+import {
+	ErrorReservas,
+	type Disponibles,
+	type InfoNegocio,
+	type Mesa,
+	type Plano,
+	type Reserva,
+	type ReservasWeb,
+} from "@altarialights/reservas-web-tpv";
+
 import Calendario from "./Calendario";
 import { diaCorto, diaLargo, horaEnTramos, horaInicial, personasTexto, textoDeTramos, type Tramo } from "./logica";
 import Turnstile, { type ControlTurnstile } from "./Turnstile";
@@ -21,7 +29,7 @@ type Paso = "cuando" | "mesa" | "datos" | "hecho";
 
 const CAMPO = "w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none focus:ring-2 focus:ring-ring";
 
-export default function Reservar({ api, info }: { api: Api; info: InfoNegocio }) {
+export default function Reservar({ api, info }: { api: ReservasWeb; info: InfoNegocio }) {
 	const [paso, setPaso] = useState<Paso>("cuando");
 	// Al cambiar de paso desaparece el botón que tenía el foco: se lleva al título del paso nuevo, para
 	// que quien va con teclado o lector de pantalla sepa dónde está (y oiga «Reserva confirmada»). Al
@@ -56,9 +64,9 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	const [personas, setPersonas] = useState(Math.min(2, maxPersonas));
 
 	// Paso 2
-	const [plano, setPlano] = useState<PlanoPublico | null>(null);
+	const [plano, setPlano] = useState<Plano | null>(null);
 	const [disponibles, setDisponibles] = useState<Disponibles | null>(null);
-	const [mesa, setMesa] = useState<MesaPublica | null>(null);
+	const [mesa, setMesa] = useState<Mesa | null>(null);
 
 	// Paso 3
 	const [nombre, setNombre] = useState("");
@@ -69,16 +77,12 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	const [token, setToken] = useState<string | null>(null);
 	const [sinTurnstile, setSinTurnstile] = useState(false);
 	const turnstile = useRef<ControlTurnstile | null>(null);
-	// Una clave para todos los envíos de esta reserva: si el alta se guardó pero no llegó la respuesta,
-	// al repetirla el worker contesta la misma reserva en vez de dar otra (o de decir que la mesa, que
-	// ocupa ella, ya no está libre).
-	const [intento] = useState(() => crypto.randomUUID());
 
 	// Paso 4
 	// Con el correo con el que se hizo: el campo se puede tocar mientras se envía.
-	const [hecha, setHecha] = useState<(Confirmada & { email: string }) | null>(null);
+	const [hecha, setHecha] = useState<(Reserva & { email: string }) | null>(null);
 
-	const mensajeDe = (e: unknown) => (e instanceof ErrorApi ? e.message : "Algo ha fallado. Vuelve a intentarlo.");
+	const mensajeDe = (e: unknown) => (e instanceof ErrorReservas ? e.message : "Algo ha fallado. Vuelve a intentarlo.");
 	const fallo = (e: unknown) => setError(mensajeDe(e));
 
 	async function elegirDia(d: string) {
@@ -89,10 +93,10 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 		setErrorDia(null);
 		setError(null);
 		try {
-			const r = await api.dia(d);
+			const delDia = await api.horas(d);
 			if (esta !== peticionDia.current) return;
-			setTramos(r.tramos);
-			setHora((h) => horaInicial(r.tramos, h));
+			setTramos(delDia);
+			setHora((h) => horaInicial(delDia, h));
 		} catch (e) {
 			if (esta === peticionDia.current) setErrorDia(mensajeDe(e));
 		}
@@ -101,10 +105,10 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 	// El plano se pide una vez por visita. Si lo libre trae una mesa que no está en él, el restaurante ha
 	// cambiado la sala desde entonces: se pide otra vez, sin caché. Lo que siga sin estar (un plano que
 	// pasa del techo, `completo: false`) no se ofrece: no tendría botón, y «Continuar» no se podría pulsar.
-	async function alDia(p: PlanoPublico, d: Disponibles): Promise<[PlanoPublico, Disponibles]> {
-		const ids = (q: PlanoPublico) => new Set(q.mesas.map((m) => m.id));
+	async function alDia(p: Plano, d: Disponibles): Promise<[Plano, Disponibles]> {
+		const ids = (q: Plano) => new Set(q.mesas.map((m) => m.id));
 		if (d.mesas.every((id) => ids(p).has(id))) return [p, d];
-		const nuevo = await api.plano(true);
+		const nuevo = await api.plano({ fresco: true });
 		const conocidas = ids(nuevo);
 		return [nuevo, { ...d, mesas: d.mesas.filter((id) => conocidas.has(id)) }];
 	}
@@ -115,7 +119,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 		setOcupado(true);
 		setError(null);
 		try {
-			const [guardado, libres] = await Promise.all([plano ? Promise.resolve(plano) : api.plano(), api.disponibles(dia, h, personas)]);
+			const [guardado, libres] = await Promise.all([plano ? Promise.resolve(plano) : api.plano(), api.disponibles({ dia, hora: h, personas })]);
 			const [p, d] = await alDia(guardado, libres);
 			if (esta !== peticionMesas.current) return;
 			setPlano(p);
@@ -139,20 +143,22 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 		setOcupado(true);
 		setError(null);
 		try {
-			const r = await api.reservar(
-				{ dia_ymd: dia, hora, personas, id_mesa: mesa.id, nombre, email, telefono, nota: nota.trim() ? nota : null },
-				gastado,
-				intento,
+			// El SDK lleva la clave del intento: si el alta se guardó pero no llegó la respuesta, al
+			// repetirla el worker contesta la misma reserva en vez de dar otra (o de decir que la mesa, que
+			// ocupa ella, ya no está libre). Con el token suelto no reintenta solo: lo hace quien pulse.
+			const r = await api.crearReserva(
+				{ dia, hora, personas, mesa: mesa.id, nombre, correo: email, telefono, nota: nota.trim() ? nota : null },
+				{ verificacion: gastado },
 			);
 			setHecha({ ...r, email: conCorreo });
 			setPaso("hecho");
 		} catch (e) {
 			// El token de Turnstile ya se ha gastado: hace falta otro para volver a intentarlo.
 			turnstile.current?.reiniciar();
-			if (e instanceof ErrorApi && e.codigo === "mesa_no_disponible") {
+			if (e instanceof ErrorReservas && e.codigo === "mesa_no_disponible") {
 				// Se la han quitado mientras rellenaba: vuelta al plano con lo que queda libre.
 				try {
-					const [p, d] = await alDia(plano, await api.disponibles(dia, hora, personas));
+					const [p, d] = await alDia(plano, await api.disponibles({ dia, hora, personas }));
 					setPlano(p);
 					setDisponibles(d);
 				} catch {
@@ -305,7 +311,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 					)}
 					{mesa ? (
 						<div className="text-sm">
-							{nombreDeMesa(mesa.numero)} · {mesa.capacidad} plazas
+							{nombreDeMesa(mesa.nombre)} · {mesa.capacidad} plazas
 						</div>
 					) : null}
 					<div className="flex justify-between gap-3">
@@ -335,7 +341,7 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 			{paso === "datos" && mesa && dia ? (
 				<section aria-label="Tus datos" className="space-y-3">
 					<h2 ref={titulo} tabIndex={-1} className="text-sm font-bold outline-none">
-						{diaCorto(dia)} · {hora} · {nombreDeMesa(mesa.numero)} · {personasTexto(personas)}
+						{diaCorto(dia)} · {hora} · {nombreDeMesa(mesa.nombre)} · {personasTexto(personas)}
 					</h2>
 					<div className="space-y-3 md:grid md:grid-cols-2 md:gap-4 md:space-y-0">
 						<label className="block space-y-1">
@@ -411,15 +417,15 @@ export default function Reservar({ api, info }: { api: Api; info: InfoNegocio })
 						{diaLargo(hecha.dia)} · {hecha.hora}
 					</div>
 					<div className="text-sm">
-						{personasTexto(hecha.personas)} · {nombreDeMesa(hecha.mesa)}
+						{personasTexto(hecha.personas)} · {nombreDeMesa(hecha.mesa_nombre)}
 					</div>
 					<div className="text-sm text-fg-muted">
 						Tu código de reserva: <strong className="text-fg">{hecha.codigo}</strong>
 					</div>
 					<p className="text-sm text-fg-muted">
-						{hecha.correo === true
+						{hecha.correo_enviado === true
 							? `Te hemos enviado los detalles a ${hecha.email}, con un enlace para cancelarla si no puedes ir.`
-							: hecha.correo === false
+							: hecha.correo_enviado === false
 								? `No hemos podido enviarte el correo con los detalles. Apunta el código: si necesitas cancelarla, llama al restaurante${info.negocio.telefono ? ` (${info.negocio.telefono})` : ""}.`
 								: "Si no te llega el correo con los detalles, apunta el código."}
 					</p>

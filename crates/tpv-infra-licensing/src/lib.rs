@@ -59,7 +59,7 @@ use device::{
 /// Worker unificado `tpv-api` (fusión de los antiguos `tpv-licensing` + `tpv-server`): sirve
 /// licencia (`/v1/license/*`), pairing (`/v1/pair/*`), revoke, imágenes, WS y el DO TenantHub.
 /// Es el **único** host de la nube: `tpv-infra-http` lo reexporta para el resto del backend.
-pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
+pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.com";
 
 /// Claves públicas ed25519 (base64) con las que el worker puede firmar el estado de licencia. Van
 /// **pineadas** en el binario: no se descargan de ningún sitio. Es lo que cierra LIC-01 —un servidor

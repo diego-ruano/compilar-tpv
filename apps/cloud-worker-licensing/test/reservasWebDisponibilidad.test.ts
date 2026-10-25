@@ -18,6 +18,7 @@ import {
 	franjaValeElDia,
 	horaEnTramos,
 	intervalo,
+	laMasAjustada,
 	libres,
 	llegadasDeLaFranja,
 	maxPersonas,
@@ -235,5 +236,15 @@ describe("los intervalos de Turso dan lo mismo que el SQL de choque de la Main",
 			expect(chocan).toBeGreaterThan(3);
 			expect(chocan).toBeLessThan(HORAS.length - 3);
 		});
+	});
+});
+
+describe("la mesa automática", () => {
+	it("la de menos plazas; si empatan, la primera de la lista; sin ninguna, nada", () => {
+		const m = (id_mesa: string, capacidad: number) => ({ id_mesa, capacidad });
+		expect(laMasAjustada([m("a", 4), m("b", 2), m("c", 3)])).toEqual(m("b", 2));
+		expect(laMasAjustada([m("a", 4), m("b", 2), m("c", 2)])).toEqual(m("b", 2));
+		expect(laMasAjustada([m("a", 6)])).toEqual(m("a", 6));
+		expect(laMasAjustada([])).toBeNull();
 	});
 });

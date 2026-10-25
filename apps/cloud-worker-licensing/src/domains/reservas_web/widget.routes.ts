@@ -9,6 +9,9 @@
 //                                      que hace que un cambio llegue a todas las webs
 //   GET /reservas-web/v1/w/:clave      el widget (y `…/cancelar`, la página del enlace del correo),
 //                                      sin caché y con su CSP
+//   GET /reservas-web/v1/w/:clave/verificar?origen=   la casilla de Turnstile del SDK, para un
+//                                      formulario propio de una web del negocio
+//   GET /reservas-web/v1/sdk.js        el SDK, para las webs que no compilan. Caché corta y CORS
 //   GET /reservas-web/assets/*         JS y CSS con huella en el nombre: inmutables
 //
 // La CSP del widget no deja cargar nada de fuera salvo Turnstile, ni hablar con otro origen que el
@@ -108,6 +111,71 @@ function pagina(vista: "reservar" | "cancelar") {
 
 reservasWebWidgetRoutes.get("/v1/w/:clave", pagina("reservar"));
 reservasWebWidgetRoutes.get("/v1/w/:clave/cancelar", pagina("cancelar"));
+
+function texto(status: number, mensaje: string) {
+	return new Response(mensaje, { status, headers: { "Content-Type": "text/plain; charset=utf-8", ...NOSNIFF } });
+}
+
+/**
+ * La casilla de Turnstile para un formulario que no es el widget (la `verificar()` del SDK): una
+ * página diminuta de este origen que la web mete en un iframe. Turnstile corre aquí, en el dominio
+ * dado de alta en su widget, sea cual sea la web, y el token se le pasa a la web con `postMessage`.
+ *
+ * Sólo a la que dice `?origen=`, que tiene que ser una de las del negocio: `frame-ancestors` deja
+ * incrustar la página sólo en ellas y `postMessage` sólo entrega a ese origen, así que el token no
+ * le llega a ninguna otra. La clave pública de Turnstile la pone el worker en la página.
+ */
+reservasWebWidgetRoutes.get("/v1/w/:clave/verificar", async (c) => {
+	if (!(await pasaElLimitador(c.env.LIMITADOR_RESERVA_WEB, ipDeLaPeticion(c.req.raw), "reservas_web"))) {
+		return texto(429, "Demasiadas peticiones seguidas. Espera un minuto.");
+	}
+	const db = getDb(c.env);
+	const tenantId = await negocioDeLaClave(db, c.req.param("clave") ?? "");
+	const dominios = tenantId ? await dominiosCacheados(db, tenantId) : [];
+	if (!dominios.includes(c.req.query("origen") ?? "")) {
+		return texto(403, "Esta web no está dada de alta para reservar en este restaurante.");
+	}
+	const r = await delAlmacen(c, "/reservas-web/verificar.html");
+	if (!r.ok || !c.env.TURNSTILE_SITE_KEY) {
+		console.error("[reservas-web] falta la página de verificación compilada o la clave de Turnstile");
+		return texto(503, "Reservas no disponibles");
+	}
+	const sitekey = c.env.TURNSTILE_SITE_KEY;
+	const conClave = new HTMLRewriter()
+		.on('meta[name="turnstile"]', {
+			element(e) {
+				e.setAttribute("content", sitekey);
+			},
+		})
+		.transform(r);
+	return new Response(conClave.body, {
+		headers: {
+			"Content-Type": "text/html; charset=utf-8",
+			"Cache-Control": "no-store",
+			"Content-Security-Policy": cspDelWidget(dominios),
+			"Referrer-Policy": "no-referrer",
+			...NOSNIFF,
+		},
+	});
+});
+
+/**
+ * El SDK (`packages/reservas-web-sdk`) para las webs que no compilan nada (un WordPress, un HTML):
+ * `import { reservasWeb } from "https://…/reservas-web/v1/sdk.js"`. Caché corta, como `embed.js`. Se
+ * importa como módulo desde otro origen, y eso pide CORS; es público, como el propio npm.
+ */
+reservasWebWidgetRoutes.get("/v1/sdk.js", async (c) => {
+	const r = await delAlmacen(c, "/reservas-web/v1/sdk.js");
+	if (!r.ok) return noEncontrado();
+	return new Response(r.body, {
+		headers: {
+			"Content-Type": "text/javascript; charset=utf-8",
+			"Cache-Control": "public, max-age=300",
+			"Access-Control-Allow-Origin": "*",
+			...NOSNIFF,
+		},
+	});
+});
 
 // Lo demás bajo `/reservas-web/` (el `index.html` suelto, rutas inventadas) no existe.
 reservasWebWidgetRoutes.all("*", () => noEncontrado());

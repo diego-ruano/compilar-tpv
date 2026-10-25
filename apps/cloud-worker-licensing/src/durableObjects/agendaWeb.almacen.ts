@@ -329,6 +329,8 @@ export type RespuestaDelAlta = {
 	dia: string;
 	hora: string;
 	personas: number;
+	id_mesa: string;
+	/** El nombre de la mesa en la Main. */
 	mesa: string;
 };
 

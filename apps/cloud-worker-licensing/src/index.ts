@@ -52,6 +52,7 @@ import { proveedoresRoutes } from "./domains/proveedores/proveedores.routes";
 import { reservasRoutes } from "./domains/reservas/reservas.routes";
 import { reservasWebMainRoutes } from "./domains/reservas_web/main.routes";
 import { reservasWebPublicoRoutes } from "./domains/reservas_web/publico.routes";
+import { preflightPublico } from "./domains/reservas_web/cors";
 import { reservasWebWidgetRoutes } from "./domains/reservas_web/widget.routes";
 import { statsRoutes } from "./domains/stats/stats.routes";
 import { syncRoutes } from "./domains/sync/sync.routes";
@@ -92,6 +93,9 @@ app.use("*", async (c, next) => {
 });
 
 // ---------------- CORS preflight ----------------
+// Las rutas públicas de la reserva web tienen el suyo: las webs de cada negocio (`cors.ts`). Va
+// delante: el de abajo contesta a todo y no deja pasar a ningún router.
+app.options("/v1/publico/reservas/:clave/*", preflightPublico);
 app.options("*", (c) =>
 	new Response(null, { status: 204, headers: corsHeaders(c.req.raw) }),
 );

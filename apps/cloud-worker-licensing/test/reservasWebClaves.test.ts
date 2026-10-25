@@ -15,6 +15,7 @@ import {
 	generarClave,
 	negocioDeLaClave,
 	olvidarClavesCacheadas,
+	origenDelWidget,
 } from "../src/domains/reservas_web/claves";
 
 beforeEach(() => olvidarClavesCacheadas());
@@ -68,5 +69,14 @@ describe("la clave pública de la reserva web", () => {
 		const codigo = codigoParaLaWeb("https://tpv-api.ejemplo.dev", "rw_AAAAAAAAAAAAAAAAAAAAAA");
 		expect(codigo).toContain('data-negocio="rw_AAAAAAAAAAAAAAAAAAAAAA"');
 		expect(codigo).toContain('src="https://tpv-api.ejemplo.dev/reservas-web/v1/embed.js"');
+	});
+
+	it("el widget se sirve desde su dirección propia aunque la petición llegue por la de la API", () => {
+		const desdeLaMain = "https://tpv-api.ejemplo.dev/v1/reservas-web/clave";
+		expect(origenDelWidget({ RESERVAS_WEB_ORIGEN: "https://reservas.ejemplo.dev" }, desdeLaMain)).toBe("https://reservas.ejemplo.dev");
+		expect(origenDelWidget({ RESERVAS_WEB_ORIGEN: " https://reservas.ejemplo.dev/ " }, desdeLaMain)).toBe("https://reservas.ejemplo.dev");
+		// Sin dirección propia (`wrangler dev`), la de la petición.
+		expect(origenDelWidget({ RESERVAS_WEB_ORIGEN: "" }, "http://localhost:8787/v1/reservas-web/clave")).toBe("http://localhost:8787");
+		expect(origenDelWidget({}, desdeLaMain)).toBe("https://tpv-api.ejemplo.dev");
 	});
 });

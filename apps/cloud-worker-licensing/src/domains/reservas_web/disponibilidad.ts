@@ -197,6 +197,17 @@ export function libres(
 	);
 }
 
+/**
+ * La mesa que se asigna cuando el cliente no elige: la de menos plazas, para no gastar una grande en
+ * un grupo pequeño. Entre las que tienen las mismas, la primera de la lista (`mesasYFranjas` las da
+ * ordenadas por `ID_Mesa`, así que el resultado no depende de la petición).
+ */
+export function laMasAjustada(libresYAdecuadas: MesaWeb[]): MesaWeb | null {
+	let mejor: MesaWeb | null = null;
+	for (const m of libresYAdecuadas) if (!mejor || m.capacidad < mejor.capacidad) mejor = m;
+	return mejor;
+}
+
 /** Los saltos que se prueban para ofrecer otra hora, del más cercano al más lejano. */
 const SALTOS = [15, -15, 30, -30, 45, -45, 60, -60];
 const MAX_ALTERNATIVAS = 4;

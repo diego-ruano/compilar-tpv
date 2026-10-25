@@ -7,7 +7,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Api, InfoNegocio } from "../src/api";
+import type { InfoNegocio, ReservasWeb } from "@altarialights/reservas-web-tpv";
 import { recargarPagina } from "../src/pagina";
 import Reservar from "../src/Reservar";
 
@@ -38,14 +38,14 @@ describe("si no llega el plano", () => {
 		// React también lo cuenta por consola: aquí es lo esperado.
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		const api = {
-			dia: vi.fn(async () => ({ dia: "2026-11-20", tramos: [{ desde: "20:00", hasta: "21:00" }] })),
+			horas: vi.fn(async () => [{ desde: "20:00", hasta: "21:00" }]),
 			plano: vi.fn(async () => ({
 				completo: true,
 				salones: [{ id: "z1", nombre: "Salón", puntos: "[]" }],
-				mesas: [{ id: "m1", id_salon: "z1", numero: "1", forma: "rect", x: 0, y: 0, ancho: 80, alto: 80, radio: null, capacidad: 2, reservable: true }],
+				mesas: [{ id: "m1", id_salon: "z1", nombre: "1", forma: "rect", x: 0, y: 0, ancho: 80, alto: 80, radio: null, capacidad: 2, reservable: true }],
 			})),
 			disponibles: vi.fn(async () => ({ mesas: ["m1"], alternativas: [] })),
-		} as unknown as Api;
+		} as unknown as ReservasWeb;
 		render(<Reservar api={api} info={INFO} />);
 
 		fireEvent.click(await screen.findByRole("button", { name: "2026-11-20" }));

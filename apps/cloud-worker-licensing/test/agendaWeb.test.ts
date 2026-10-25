@@ -146,6 +146,7 @@ describe("la agenda de reservas web", () => {
 				dia: DIA,
 				hora: "21:00",
 				personas: 2,
+				id_mesa: "m2",
 				mesa: "2",
 				token: null,
 				repetida: true,
@@ -380,7 +381,16 @@ describe("la agenda de reservas web", () => {
 		await conAgenda("agenda-cancelar-pendiente", async (motor, sql) => {
 			const r = await motor.reservar({ tenantId: T, alta: alta() });
 			const consulta = await motor.consultarEnlace({ tenantId: T, token: r.token });
-			expect(consulta).toEqual({ ok: true, dia: DIA, hora: "21:00", personas: 2, mesa: "2", estado: "confirmada", cancelable: true });
+			expect(consulta).toEqual({
+				ok: true,
+				dia: DIA,
+				hora: "21:00",
+				personas: 2,
+				id_mesa: "m2",
+				mesa: "2",
+				estado: "confirmada",
+				cancelable: true,
+			});
 			sinDatosPersonales(consulta);
 
 			// Con lo que necesita el correo de «has cancelado»: la dirección del alta y su reserva.

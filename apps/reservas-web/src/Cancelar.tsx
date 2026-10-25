@@ -5,13 +5,13 @@
 import { useEffect, useRef, useState } from "react";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 
-import type { Api, Resumen } from "./api";
-import { ErrorApi } from "./api";
+import { ErrorReservas, type ReservasWeb, type ResumenReserva } from "@altarialights/reservas-web-tpv";
+
 import { diaLargo, personasTexto } from "./logica";
 import { Aviso, Boton, Cargando } from "./ui";
 
-export default function Cancelar({ api, token, negocio }: { api: Api; token: string | null; negocio: string }) {
-	const [resumen, setResumen] = useState<Resumen | null>(null);
+export default function Cancelar({ api, token, negocio }: { api: ReservasWeb; token: string | null; negocio: string }) {
+	const [resumen, setResumen] = useState<ResumenReserva | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	// Si no se ha podido leer la reserva: un enlace que no vale no vale al segundo intento; un fallo de
 	// red o del servidor, quizá sí, y se ofrece «Reintentar» sin recargar la página.
@@ -39,13 +39,13 @@ export default function Cancelar({ api, token, negocio }: { api: Api; token: str
 			return;
 		}
 		let vivo = true;
-		api.reserva(token).then(
+		api.consultarReserva(token).then(
 			(r) => vivo && setResumen(r),
 			(e) =>
 				vivo &&
 				setErrorCarga({
-					mensaje: e instanceof ErrorApi ? e.message : "Algo ha fallado. Vuelve a intentarlo.",
-					reintentable: !(e instanceof ErrorApi && e.codigo === "enlace_no_valido"),
+					mensaje: e instanceof ErrorReservas ? e.message : "Algo ha fallado. Vuelve a intentarlo.",
+					reintentable: !(e instanceof ErrorReservas && e.codigo === "enlace_no_valido"),
 				}),
 		);
 		return () => {
@@ -58,11 +58,11 @@ export default function Cancelar({ api, token, negocio }: { api: Api; token: str
 		setOcupado(true);
 		setError(null);
 		try {
-			await api.cancelar(token);
+			await api.cancelarReserva(token);
 			setResumen({ ...resumen, estado: "cancelada", cancelable: false });
 			setConfirmando(false);
 		} catch (e) {
-			setError(e instanceof ErrorApi ? e.message : "Algo ha fallado. Vuelve a intentarlo.");
+			setError(e instanceof ErrorReservas ? e.message : "Algo ha fallado. Vuelve a intentarlo.");
 		} finally {
 			setOcupado(false);
 		}
@@ -97,7 +97,7 @@ export default function Cancelar({ api, token, negocio }: { api: Api; token: str
 			</div>
 			<div className="text-sm">
 				{personasTexto(resumen.personas)}
-				{resumen.mesa ? ` · ${nombreDeMesa(resumen.mesa)}` : ""}
+				{resumen.mesa_nombre ? ` · ${nombreDeMesa(resumen.mesa_nombre)}` : ""}
 			</div>
 			{error ? <Aviso>{error}</Aviso> : null}
 			{/* Una región que ya estaba: lo que cambie dentro (también «Esta reserva está cancelada») se anuncia. */}

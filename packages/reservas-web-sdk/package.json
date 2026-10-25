@@ -1,0 +1,43 @@
+{
+  "name": "@altarialights/reservas-web-tpv",
+  "version": "0.1.0",
+  "description": "Las reservas por internet del TPV de Altaria Lights desde tu propia web: días, horas, mesas, reservar y cancelar.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./tipos": "./src/tipos.ts"
+  },
+  "types": "./src/index.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./tipos": {
+        "types": "./dist/tipos.d.ts",
+        "import": "./dist/tipos.js"
+      }
+    },
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1",
+    "typescript": "catalog:",
+    "vite": "^7.0.4",
+    "vitest": "^4.1.10"
+  }
+}

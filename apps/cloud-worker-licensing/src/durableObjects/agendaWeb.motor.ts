@@ -24,6 +24,7 @@ import {
 	alternativas,
 	horaEnTramos,
 	intervalo,
+	laMasAjustada,
 	libres,
 	mesasAdecuadas,
 	motivoDelDia,
@@ -38,11 +39,12 @@ import {
 	ajustesWeb,
 	cierresEntre,
 	mesasYFranjas,
+	nombresDeLasReservables,
 	numeroDeMesa,
 	ocupacionAlrededorDe,
 	reservasVivasDelCorreo,
 } from "../domains/reservas_web/lecturas";
-import type { AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
+import { MESA_AUTOMATICA, type AltaReservaWeb } from "../domains/reservas_web/reservasWeb.schemas";
 import {
 	enviarCorreoReservaWeb,
 	negocioDelCorreo,
@@ -125,6 +127,7 @@ type ErrorAgenda =
 	| "dia_no_reservable"
 	| "hora_fuera_de_franja"
 	| "mesa_no_disponible"
+	| "sin_mesa_libre"
 	| "limite_reservas_correo"
 	| "tope_reservas_negocio"
 	| "reserva_no_cancelable"
@@ -138,6 +141,7 @@ const STATUS: Record<ErrorAgenda, RechazoAgenda["status"]> = {
 	dia_no_reservable: 400,
 	hora_fuera_de_franja: 400,
 	mesa_no_disponible: 409,
+	sin_mesa_libre: 409,
 	limite_reservas_correo: 409,
 	tope_reservas_negocio: 429,
 	reserva_no_cancelable: 409,
@@ -158,6 +162,8 @@ export type ResultadoReservar =
 			dia: string;
 			hora: string;
 			personas: number;
+			id_mesa: string;
+			/** El nombre de la mesa en la Main. */
 			mesa: string;
 			/** El token del enlace de cancelar: sólo para el correo, nunca para la respuesta. `null` en una
 			 * repetición: de él sólo queda el hash, y el correo es del alta de verdad. */
@@ -170,7 +176,17 @@ export type ResultadoReservar =
 export type EstadoPublico = "confirmada" | "cancelada" | "pasada";
 
 export type ResultadoConsulta =
-	| { ok: true; dia: string; hora: string; personas: number; mesa: string; estado: EstadoPublico; cancelable: boolean }
+	| {
+			ok: true;
+			dia: string;
+			hora: string;
+			personas: number;
+			id_mesa: string | null;
+			/** El nombre de la mesa en la Main, o vacío si no se sabe. */
+			mesa: string;
+			estado: EstadoPublico;
+			cancelable: boolean;
+	  }
 	| RechazoAgenda;
 
 /**
@@ -325,6 +341,9 @@ export class MotorAgendaWeb {
 	 */
 	async reservar(p: { tenantId: string; alta: AltaReservaWeb; intento?: string | null }): Promise<ResultadoReservar> {
 		const { alta } = p;
+		// Sin mesa elegida (`MESA_AUTOMATICA`), la decide el bloque síncrono de abajo: la de menos plazas
+		// en la que quepan. Elegirla antes, con lo leído, dejaría que dos altas a la vez se llevaran la misma.
+		const automatica = alta.id_mesa === MESA_AUTOMATICA;
 		recordarNegocio(this.sql, p.tenantId);
 		const repetida = this.repeticion(p.intento);
 		if (repetida) return repetida;
@@ -336,12 +355,15 @@ export class MotorAgendaWeb {
 		const leido = await this.leer(p.tenantId, async (db, ahora) => {
 			const ajustes = await ajustesWeb(db);
 			const hoy = ahora.slice(0, 10);
-			const [cierres, { mesas, franjas }, ocupacion, delCorreo, numero] = await Promise.all([
+			const [cierres, { mesas, franjas }, ocupacion, delCorreo, nombres] = await Promise.all([
 				cierresEntre(db, alta.dia_ymd, alta.dia_ymd),
 				mesasYFranjas(db),
 				ocupacionAlrededorDe(db, alta.dia_ymd, ajustes.duracion),
 				reservasVivasDelCorreo(db, alta.email, hoy),
-				numeroDeMesa(db, alta.id_mesa),
+				// El nombre que lleva la respuesta: de la mesa pedida o, sin ella, de todas las que puede tocar.
+				automatica
+					? nombresDeLasReservables(db)
+					: numeroDeMesa(db, alta.id_mesa).then((n) => new Map(n === null ? [] : [[alta.id_mesa, n]])),
 			]);
 			const dia: DiaLeido = {
 				leidaMs,
@@ -353,7 +375,7 @@ export class MotorAgendaWeb {
 				ocupaciones: ocupacion.ocupaciones,
 				idsEnTurso: ocupacion.ids,
 			};
-			return { dia, delCorreo, numero };
+			return { dia, delCorreo, nombres };
 		});
 		const d = leido.dia;
 
@@ -368,8 +390,11 @@ export class MotorAgendaWeb {
 		const ahoraMs = Date.now();
 		darPorVistas(this.sql, [...d.idsEnTurso, ...leido.delCorreo], ahoraMs);
 
-		const libre = this.mesasLibres(d, alta.dia_ymd, alta.hora, alta.personas).some((m) => m.id_mesa === alta.id_mesa);
-		if (!libre || leido.numero === null) return rechazo("mesa_no_disponible");
+		const libres = this.mesasLibres(d, alta.dia_ymd, alta.hora, alta.personas);
+		const elegida = automatica ? laMasAjustada(libres) : (libres.find((m) => m.id_mesa === alta.id_mesa) ?? null);
+		const nombreMesa = elegida ? (leido.nombres.get(elegida.id_mesa) ?? null) : null;
+		if (!elegida || nombreMesa === null) return automatica ? rechazo("sin_mesa_libre") : rechazo("mesa_no_disponible");
+		const idMesa = elegida.id_mesa;
 
 		const hoy = d.ahora.slice(0, 10);
 		const lecturaDelCorreo = { ids: leido.delCorreo, vistasDesdeMs: leidaMs - MARGEN_LECTURA_MS };
@@ -386,7 +411,8 @@ export class MotorAgendaWeb {
 			dia: alta.dia_ymd,
 			hora: alta.hora,
 			personas: alta.personas,
-			mesa: leido.numero,
+			id_mesa: idMesa,
+			mesa: nombreMesa,
 		};
 		this.ctx.storage.transactionSync(() => {
 			apuntarAlta(
@@ -395,7 +421,7 @@ export class MotorAgendaWeb {
 					id_peticion: nuevoId(),
 					tipo: "alta",
 					id_reserva: idReserva,
-					id_mesa: alta.id_mesa,
+					id_mesa: idMesa,
 					dia_ymd: alta.dia_ymd,
 					hora: alta.hora,
 					comensales: alta.personas,
@@ -446,6 +472,7 @@ export class MotorAgendaWeb {
 			dia: datos.dia,
 			hora: datos.hora,
 			personas: datos.personas,
+			id_mesa: datos.id_mesa,
 			mesa: numero ?? "",
 			estado,
 			cancelable: estado === "confirmada",

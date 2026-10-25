@@ -15,7 +15,7 @@ import {
 } from "@tpv/plano";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 
-import type { MesaPublica, PlanoPublico } from "./api";
+import type { Mesa, Plano } from "@altarialights/reservas-web-tpv";
 
 // Konva necesita colores literales: los del tema claro de @tpv/estilos.
 const COLOR = {
@@ -50,7 +50,7 @@ export function altoDelPlano(salon: SalonPlano, ancho: number): number {
 }
 
 /** De lo que devuelve `/plano` a lo que dibuja el lienzo. Unos puntos rotos dejan la sala sin contorno. */
-function salonesDelPlano(plano: PlanoPublico): SalonPlano[] {
+function salonesDelPlano(plano: Plano): SalonPlano[] {
 	return plano.salones.map((s) => {
 		let puntos: number[] = [];
 		try {
@@ -69,7 +69,7 @@ function salonesDelPlano(plano: PlanoPublico): SalonPlano[] {
 				.filter((m) => m.id_salon === s.id)
 				.map((m) => ({
 					id: m.id,
-					name: m.numero,
+					name: m.nombre,
 					x: m.x,
 					y: m.y,
 					width: m.ancho,
@@ -88,11 +88,11 @@ export default function PlanoWidget({
 	elegida,
 	onElegir,
 }: {
-	plano: PlanoPublico;
+	plano: Plano;
 	/** Los ids de las mesas libres y adecuadas. */
 	libres: string[];
 	elegida: string | null;
-	onElegir: (mesa: MesaPublica) => void;
+	onElegir: (mesa: Mesa) => void;
 }) {
 	const salones = useMemo(() => salonesDelPlano(plano), [plano]);
 	const libre = useMemo(() => new Set(libres), [libres]);
@@ -184,7 +184,7 @@ export default function PlanoWidget({
 								m.id === elegida ? "bg-success text-success-fg" : "bg-accent-soft text-accent hover:bg-accent hover:text-accent-fg"
 							}`}
 						>
-							{nombreDeMesa(m.numero)} · {m.capacidad} plazas
+							{nombreDeMesa(m.nombre)} · {m.capacidad} plazas
 						</button>
 					))}
 				</div>

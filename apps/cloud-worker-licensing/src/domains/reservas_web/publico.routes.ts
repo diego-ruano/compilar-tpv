@@ -21,6 +21,14 @@
 // dirección del alta: nunca a una que llegue en el cuerpo de otra cosa.
 
 import { Hono } from "hono";
+import type {
+	Disponibles,
+	InfoNegocio,
+	Plano,
+	Reserva,
+	ResumenReserva,
+	Tramo,
+} from "@altarialights/reservas-web-tpv/tipos";
 
 import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
@@ -32,9 +40,11 @@ import { diasAbiertos, horizonte, maxPersonas, motivoDelDia, tramosDelDia } from
 import { horaDelNegocio } from "./horaDelNegocio";
 import { enlaceDeCancelar, enviarCorreoReservaWeb, negocioDelCorreo, type NegocioDelCorreo } from "./correos";
 import { ajustesWeb, cierresEntre, mesasYFranjas, negocioPublico, planoPublico } from "./lecturas";
+import { origenDelWidget } from "./claves";
+import { corsPublico } from "./cors";
 import { limitadorAltas, puertaPublica, topeDelCuerpo, verificacionHumana, type PublicoVars } from "./puerta";
 import {
-	altaReservaWebSchema,
+	altaPublicaSchema,
 	diaQuerySchema,
 	disponiblesQuerySchema,
 	tokenEnlaceSchema,
@@ -42,7 +52,18 @@ import {
 
 type Ctx = { Bindings: Env; Variables: PublicoVars };
 
+/**
+ * Lo que contesta cada ruta es lo que dice el SDK (`packages/reservas-web-sdk/src/tipos.ts`), que es
+ * lo que leen el widget y las webs que hacen su propio formulario: con `satisfies`, un campo que
+ * cambia aquí sin cambiar allí (o al revés) no compila.
+ */
+type ConOk<T> = T & { ok: true };
+
 export const reservasWebPublicoRoutes = new Hono<Ctx>();
+
+// Las webs del negocio pueden leer las respuestas desde el navegador (`cors.ts`); el preflight va en
+// `index.ts`, delante del `OPTIONS` de todo el worker.
+reservasWebPublicoRoutes.use("/:clave/*", corsPublico);
 
 function rechazada(c: any, r: RechazoAgenda) {
 	return c.json({ ok: false, error: r.error }, r.status);
@@ -90,7 +111,7 @@ reservasWebPublicoRoutes.get("/:clave/negocio", puertaPublica, async (c) => {
 		max_personas: maxPersonas(d.mesas, d.franjas),
 		duracion_min: d.ajustes.duracion,
 		turnstile: c.env.TURNSTILE_SITE_KEY ?? null,
-	});
+	} satisfies ConOk<InfoNegocio>);
 });
 
 reservasWebPublicoRoutes.get("/:clave/dia", puertaPublica, consulta(diaQuerySchema), async (c) => {
@@ -102,13 +123,13 @@ reservasWebPublicoRoutes.get("/:clave/dia", puertaPublica, consulta(diaQuerySche
 	});
 	const motivo = motivoDelDia(dia, d.hoy, d.ajustes, d.cierres);
 	if (motivo) return c.json({ ok: false, error: motivo }, motivo === "reserva_web_cerrada" ? 409 : 400);
-	return c.json({ ok: true, dia, tramos: tramosDelDia(d.mesas, d.franjas, dia, d.ajustes) });
+	return c.json({ ok: true, dia, tramos: tramosDelDia(d.mesas, d.franjas, dia, d.ajustes) } satisfies ConOk<{ dia: string; tramos: Tramo[] }>);
 });
 
 reservasWebPublicoRoutes.get("/:clave/plano", puertaPublica, async (c) => {
 	const plano = await lecturaConHora(c.env, c.get("tenantId"), horaDelNegocio, (db) => planoPublico(db));
 	c.header("Cache-Control", "public, max-age=60");
-	return c.json({ ok: true, ...plano });
+	return c.json({ ok: true, ...plano } satisfies ConOk<Plano>);
 });
 
 reservasWebPublicoRoutes.get(
@@ -119,7 +140,7 @@ reservasWebPublicoRoutes.get(
 		const q = c.req.valid("query");
 		const r = await agendaDe(c.env, c.get("tenantId")).disponibles({ tenantId: c.get("tenantId"), ...q });
 		if (!r.ok) return rechazada(c, r);
-		return c.json({ ok: true, mesas: r.mesas, alternativas: r.alternativas });
+		return c.json({ ok: true, mesas: r.mesas, alternativas: r.alternativas } satisfies ConOk<Disponibles>);
 	},
 );
 
@@ -142,7 +163,7 @@ reservasWebPublicoRoutes.post(
 	limitadorAltas,
 	verificacionHumana,
 	topeDelCuerpo,
-	cuerpo(altaReservaWebSchema),
+	cuerpo(altaPublicaSchema),
 	async (c) => {
 		const alta = c.req.valid("json");
 		const tenantId = c.get("tenantId");
@@ -159,9 +180,9 @@ reservasWebPublicoRoutes.post(
 
 		// La confirmación, con el enlace de cancelar: el token NO va en la respuesta, sólo aquí. Una
 		// repetición ya no lo tiene (de él sólo queda el hash): su correo fue el del alta de verdad, y
-		// `correo: null` dice que no se sabe si llegó. Un correo que falla no deshace la reserva: el
+		// `correo_enviado: null` dice que no se sabe si llegó. Un correo que falla no deshace la reserva: el
 		// widget lo dice y enseña el código.
-		let correo: boolean | null = null;
+		let correoEnviado: boolean | null = null;
 		if (r.token) {
 			const enviado = await enviarCorreoReservaWeb(c.env, {
 				tenantId,
@@ -170,13 +191,22 @@ reservasWebPublicoRoutes.post(
 				para: alta.email,
 				negocio: await negocioParaElCorreo(c, tenantId),
 				reserva: { dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa, codigo: r.codigo },
-				enlace: enlaceDeCancelar(new URL(c.req.url).origin, c.req.param("clave"), r.token),
+				enlace: enlaceDeCancelar(origenDelWidget(c.env, c.req.url), c.req.param("clave"), r.token),
 				dispositivo: "web",
 			});
 			// En curso por otro lado no se sabe aún: lo mismo que una repetición.
-			correo = enviado === "en_curso" ? null : enviado === "enviado" || enviado === "ya_enviado";
+			correoEnviado = enviado === "en_curso" ? null : enviado === "enviado" || enviado === "ya_enviado";
 		}
-		return c.json({ ok: true, codigo: r.codigo, dia: r.dia, hora: r.hora, personas: r.personas, mesa: r.mesa, correo });
+		return c.json({
+			ok: true,
+			codigo: r.codigo,
+			dia: r.dia,
+			hora: r.hora,
+			personas: r.personas,
+			mesa: r.id_mesa,
+			mesa_nombre: r.mesa,
+			correo_enviado: correoEnviado,
+		} satisfies ConOk<Reserva>);
 	},
 );
 
@@ -184,7 +214,16 @@ reservasWebPublicoRoutes.post("/:clave/reserva", puertaPublica, topeDelCuerpo, c
 	const { token } = c.req.valid("json");
 	const r = await agendaDe(c.env, c.get("tenantId")).consultarEnlace({ tenantId: c.get("tenantId"), token });
 	if (!r.ok) return rechazada(c, r);
-	return c.json(r);
+	return c.json({
+		ok: true,
+		dia: r.dia,
+		hora: r.hora,
+		personas: r.personas,
+		mesa: r.id_mesa,
+		mesa_nombre: r.mesa,
+		estado: r.estado,
+		cancelable: r.cancelable,
+	} satisfies ConOk<ResumenReserva>);
 });
 
 reservasWebPublicoRoutes.post("/:clave/cancelar", puertaPublica, topeDelCuerpo, cuerpo(tokenEnlaceSchema), async (c) => {

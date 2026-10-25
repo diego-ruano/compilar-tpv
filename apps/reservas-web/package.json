@@ -11,6 +11,7 @@
     "prueba": "vite prueba --port 5174 --strictPort"
   },
   "dependencies": {
+    "@altarialights/reservas-web-tpv": "workspace:*",
     "@tpv/estilos": "workspace:*",
     "@tpv/plano": "workspace:*",
     "react": "^19.1.0",

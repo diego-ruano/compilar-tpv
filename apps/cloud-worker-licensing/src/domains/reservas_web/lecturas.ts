@@ -216,7 +216,8 @@ export type PlanoPublico = {
 	mesas: {
 		id: string;
 		id_salon: string;
-		numero: string;
+		/** El nombre que tiene en la Main («5», «Terraza 3»). */
+		nombre: string;
 		forma: string;
 		x: number;
 		y: number;
@@ -252,7 +253,7 @@ export async function planoPublico(db: Client): Promise<PlanoPublico> {
 		mesas: mesas.slice(0, TECHO_MESAS).map((m) => ({
 			id: String(m.id),
 			id_salon: String(m.id_salon),
-			numero: String(m.numero),
+			nombre: String(m.numero),
 			forma: String(m.forma),
 			x: Number(m.x),
 			y: Number(m.y),
@@ -263,6 +264,12 @@ export async function planoPublico(db: Client): Promise<PlanoPublico> {
 			reservable: Number(m.reservable) === 1,
 		})),
 	};
+}
+
+/** Los nombres de las mesas reservables desde la web, por su id: entre ellas elige la mesa automática. */
+export async function nombresDeLasReservables(db: Client): Promise<Map<string, string>> {
+	const rs = await db.execute(`SELECT M.ID_Mesa AS id, M.Numero_Mesa AS numero ${RESERVABLES};`);
+	return new Map(filas(rs).map((m) => [String(m.id), String(m.numero)]));
 }
 
 /** Lo que se enseña de una mesa: su número. */

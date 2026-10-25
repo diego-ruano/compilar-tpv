@@ -161,6 +161,18 @@ const ALTA = {
 	nota: "Silla para bebé",
 };
 
+/** La misma alta, como la manda el widget o el SDK: con los nombres públicos. */
+const ALTA_WEB = {
+	dia: DIA,
+	hora: "21:00",
+	personas: 2,
+	mesa: "m2",
+	nombre: "Ana Pérez",
+	correo: "ana@correo.es",
+	telefono: "600 112 233",
+	nota: "Silla para bebé",
+};
+
 describe("las rutas públicas de la reserva web", () => {
 	it("GET /negocio: lo del negocio y el calendario", async () => {
 		await conNegocio("publico-negocio", async (sql) => {
@@ -228,7 +240,7 @@ describe("las rutas públicas de la reserva web", () => {
 			expect(json.mesas[0]).toEqual({
 				id: "m2",
 				id_salon: "z1",
-				numero: "2",
+				nombre: "2",
 				forma: "round",
 				x: 10,
 				y: 20,
@@ -274,10 +286,10 @@ describe("las rutas públicas de la reserva web", () => {
 
 	it("POST /reservas: confirma sin devolver el token ni el id, y la mesa ya no se ofrece", async () => {
 		await conNegocio("publico-reservar", async () => {
-			const { status, json } = await pedir("/reservas", ALTA);
+			const { status, json } = await pedir("/reservas", ALTA_WEB);
 			expect(status).toBe(200);
-			expect(Object.keys(json).sort()).toEqual(["codigo", "correo", "dia", "hora", "mesa", "ok", "personas"]);
-			expect(json).toMatchObject({ ok: true, dia: DIA, hora: "21:00", personas: 2, mesa: "2", correo: true });
+			expect(Object.keys(json).sort()).toEqual(["codigo", "correo_enviado", "dia", "hora", "mesa", "mesa_nombre", "ok", "personas"]);
+			expect(json).toMatchObject({ ok: true, dia: DIA, hora: "21:00", personas: 2, mesa: "m2", mesa_nombre: "2", correo_enviado: true });
 			expect(json.codigo).toMatch(/^[0-9A-F]{6}$/);
 			// A Axiom, el id y nada de quien reserva.
 			const alta = eventos.find((e) => e.event === "reserva_web_alta");
@@ -286,7 +298,7 @@ describe("las rutas públicas de la reserva web", () => {
 
 			expect((await pedir(`/disponibles?dia=${DIA}&hora=21:00&personas=2`)).json.mesas).toEqual(["m4"]);
 			eventos.length = 0;
-			expect(await pedir("/reservas", { ...ALTA, email: "otro@correo.es" })).toMatchObject({
+			expect(await pedir("/reservas", { ...ALTA_WEB, correo: "otro@correo.es" })).toMatchObject({
 				status: 409,
 				json: { ok: false, error: "mesa_no_disponible" },
 			});
@@ -296,7 +308,7 @@ describe("las rutas públicas de la reserva web", () => {
 
 	it("POST /reservas: con la misma Idempotency-Key, la misma reserva; una mal formada no cuenta", async () => {
 		await conNegocio("publico-reservar-intento", async (sql) => {
-			const alta = (clave: string, cuerpo = ALTA) =>
+			const alta = (clave: string, cuerpo = ALTA_WEB) =>
 				app.request(
 					`${BASE}/reservas`,
 					{ method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": clave }, body: JSON.stringify(cuerpo) },
@@ -305,11 +317,11 @@ describe("las rutas públicas de la reserva web", () => {
 			const clave = "5b0e2f8c-6d1a-4c3e-9f7b-2a4d6e8f0a1c";
 			const primera = (await (await alta(clave)).json()) as any;
 			eventos.length = 0;
-			const res = await alta(clave, { ...ALTA, id_mesa: "m4" });
+			const res = await alta(clave, { ...ALTA_WEB, mesa: "m4" });
 			expect(res.status).toBe(200);
 			const repetida = (await res.json()) as any;
 			// La misma reserva; del correo no se sabe (salió con el alta de verdad) y no vuelve a salir.
-			expect(repetida).toEqual({ ...primera, correo: null });
+			expect(repetida).toEqual({ ...primera, correo_enviado: null });
 			expect(enviados).toHaveLength(1);
 			expect(eventos.map((e) => e.event)).toEqual(["reserva_web_alta_repetida"]);
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
@@ -321,7 +333,7 @@ describe("las rutas públicas de la reserva web", () => {
 
 	it("POST /reservas: la confirmación va a la dirección del alta, sin lo que escribió, con un enlace que abre su reserva", async () => {
 		await conNegocio("publico-reservar-correo", async () => {
-			const { json } = await pedir("/reservas", ALTA);
+			const { json } = await pedir("/reservas", ALTA_WEB);
 			expect(enviados).toHaveLength(1);
 			const m = enviados[0];
 			expect(m).toMatchObject({ to: "ana@correo.es", from: { email: "reservas@altaria.test", name: "Bar Pepe" } });
@@ -345,16 +357,17 @@ describe("las rutas públicas de la reserva web", () => {
 	it("POST /reservas: si el correo no sale, la reserva sigue y la respuesta lo dice", async () => {
 		await conNegocio("publico-reservar-sin-correo", async (sql) => {
 			correoCaido = true;
-			const { status, json } = await pedir("/reservas", ALTA);
+			const { status, json } = await pedir("/reservas", ALTA_WEB);
 			expect(status).toBe(200);
-			expect(json).toMatchObject({ ok: true, correo: false });
+			expect(json).toMatchObject({ ok: true, correo_enviado: false });
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
 		});
 	});
 
 	it("POST /reservas: lo que no valida es un 400 y no llega a la agenda", async () => {
 		await conNegocio("publico-reservar-invalido", async (sql) => {
-			for (const malo of [{ ...ALTA, email: "no-es-correo" }, { ...ALTA, personas: "2" }, { ...ALTA, nombre: { toString: null } }]) {
+			// Con los nombres de dentro (`dia_ymd`, `email`) tampoco: la entrada pública es la de los nombres públicos.
+			for (const malo of [{ ...ALTA_WEB, correo: "no-es-correo" }, { ...ALTA_WEB, personas: "2" }, { ...ALTA_WEB, nombre: { toString: null } }, ALTA]) {
 				expect((await pedir("/reservas", malo)).status).toBe(400);
 			}
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 0 });
@@ -365,7 +378,16 @@ describe("las rutas públicas de la reserva web", () => {
 		await conNegocio("publico-cancelar", async (_sql, motor) => {
 			const hecha = await motor.reservar({ tenantId: "t1", alta: { ...ALTA, telefono: "600112233" } });
 			const resumen = await pedir("/reserva", { token: hecha.token });
-			expect(resumen.json).toEqual({ ok: true, dia: DIA, hora: "21:00", personas: 2, mesa: "2", estado: "confirmada", cancelable: true });
+			expect(resumen.json).toEqual({
+				ok: true,
+				dia: DIA,
+				hora: "21:00",
+				personas: 2,
+				mesa: "m2",
+				mesa_nombre: "2",
+				estado: "confirmada",
+				cancelable: true,
+			});
 
 			expect((await pedir("/cancelar", { token: hecha.token })).json).toEqual({ ok: true });
 			expect((await pedir("/reserva", { token: hecha.token })).json.estado).toBe("cancelada");
@@ -378,6 +400,37 @@ describe("las rutas públicas de la reserva web", () => {
 			expect(await pedir("/cancelar", { token: "inventado" })).toMatchObject({ status: 404, json: { error: "enlace_no_valido" } });
 			// Sin token, la petición está mal hecha.
 			expect((await pedir("/cancelar", {})).status).toBe(400);
+		});
+	});
+
+	it("POST /reservas con la mesa automática: la de menos plazas en la que caben; sin ninguna, `sin_mesa_libre`", async () => {
+		await conNegocio("publico-reservar-auto", async (sql) => {
+			const auto = (correo: string, personas = 2) => pedir("/reservas", { ...ALTA_WEB, mesa: "auto", personas, correo });
+			// Para 2 valen la de 2 y la de 4: se queda la de 2, y la de 4 sigue libre para un grupo.
+			expect((await auto("a@correo.es")).json).toMatchObject({ ok: true, mesa: "m2", mesa_nombre: "2" });
+			expect((await auto("b@correo.es")).json).toMatchObject({ ok: true, mesa: "m4", mesa_nombre: "4" });
+			// La de 8 no es reservable: no queda ninguna.
+			expect(await auto("c@correo.es")).toMatchObject({ status: 409, json: { ok: false, error: "sin_mesa_libre" } });
+			// A la Main le llega la mesa asignada, nunca «auto».
+			const mesas = sql.exec(`SELECT id_mesa FROM peticiones ORDER BY creada_ms, id_peticion;`).toArray().map((r: any) => r.id_mesa);
+			expect(mesas.sort()).toEqual(["m2", "m4"]);
+		});
+	});
+
+	it("POST /reservas con la mesa automática para 4: la de 2 no vale, la de 4 sí", async () => {
+		await conNegocio("publico-reservar-auto-grupo", async () => {
+			expect((await pedir("/reservas", { ...ALTA_WEB, mesa: "auto", personas: 4 })).json).toMatchObject({ ok: true, mesa: "m4" });
+		});
+	});
+
+	it("POST /reservas: dos altas automáticas a la vez no se llevan la misma mesa", async () => {
+		await conNegocio("publico-reservar-auto-a-la-vez", async () => {
+			const [a, b, c] = await Promise.all(
+				["a@correo.es", "b@correo.es", "c@correo.es"].map((correo) => pedir("/reservas", { ...ALTA_WEB, mesa: "auto", correo })),
+			);
+			const bien = [a, b, c].filter((r) => r.status === 200).map((r) => r.json.mesa);
+			expect(bien.sort()).toEqual(["m2", "m4"]);
+			expect([a, b, c].filter((r) => r.status === 409).map((r) => r.json.error)).toEqual(["sin_mesa_libre"]);
 		});
 	});
 });

@@ -19,6 +19,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio |
+| [INFRA-04](#infra-04--la-dirección-propia-cae-con-los-bloqueos-de-laliga) | 🔴 | La dirección propia del worker cae con los bloqueos de LaLiga; el webhook de Stripe sigue en `workers.dev` | Sin decidir; bloquea publicar la Main con la dirección nueva |
 | [OPS-02](#ops-02--soporte-sin-canal-ni-diagnóstico) | 🟡 | «Contacta con soporte» sin canal ni diagnóstico exportable | Sin empezar |
 | [RI-28-AUD](#ri-28-aud--ampliar-la-autoría-y-la-administración-de-tareas) | 🔵 | Autoría de apertura/líneas y finalización de tareas ajenas por administrador | Aplazado por decisión de producto |
 | [SEC-SESION](#sec-sesion--sesión-personal-verificable-en-el-worker) | 🟡 | El Worker autentica al dispositivo, sin sesión personal verificable | Aplazado; autorización personal en Rust |
@@ -242,6 +243,30 @@ La Handy carga las imágenes de `pub-6814….r2.dev` (`CDN_IMAGES_BASE`, `shared
 Cloudflare documenta como no destinado a producción. **Decidido: subdominio propio.** Al hacerlo hay
 que tocar `CDN_IMAGES_BASE`, `img-src` de `csp` **y** `devCsp` en `tauri.conf.json`, y la guía de
 Android, que documenta ese host.
+
+### INFRA-04 · La dirección propia cae con los bloqueos de LaLiga
+
+`tpv-api.altarialights.com` y `reservas-tpv.altarialights.com`, los nombres propios del worker
+(`routes` en `wrangler.json`), resuelven a 188.114.96.5 y 188.114.97.5. Esas dos IP de Cloudflare
+las bloquean Movistar, Vodafone, Orange, MásMóvil y DIGI cuando hay fútbol: unas veinte veces cada
+operador entre el 26 de agosto y el 25 de octubre de 2026, según el registro público de
+[hayahora.futbol](https://hayahora.futbol/) (`/estado/data.json`). Las de
+`tpv-api.altarialights.workers.dev` (104.21.11.118 y 172.67.166.1) no aparecen nunca en él. El
+2026-10-25, en hora de partido, los nombres propios no aceptaban ni la conexión y `workers.dev`
+contestaba.
+
+Con el código como está, la Main y la Handy van a `tpv-api.altarialights.com` (`CLOUD_API_BASE`, el
+actualizador en `tauri.conf.json`) y la línea para la web, los enlaces de los correos y el SDK a
+`reservas-tpv.altarialights.com` (`RESERVAS_WEB_ORIGEN`, `SERVIDOR` del SDK). En un bar, en hora de
+partido, la Handy y las reservas web se quedarían sin nube. La sonda de Better Stack no lo ve: no mira
+desde un operador español.
+
+Falta decidir entre volver a `workers.dev` (y aceptar que su dirección queda pegada en cada web) o una
+dirección propia que no salga por esas IP. Afecta también a INFRA-03 si el subdominio de las imágenes
+va por Cloudflare.
+
+**El webhook de Stripe sigue en `tpv-api.altarialights.workers.dev`** (no se pudo cambiar el
+2026-10-25). Se cambia cuando se decida la dirección; mientras `workers_dev` siga activo, funciona.
 
 ### OPS-02 · Soporte sin canal ni diagnóstico
 

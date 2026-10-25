@@ -114,6 +114,41 @@ export const altaReservaWebSchema = z
 
 export type AltaReservaWeb = z.infer<typeof altaReservaWebSchema>;
 
+/**
+ * La mesa que se pide cuando da igual cuál: la agenda elige la de menos plazas en la que quepan
+ * (`agendaWeb.motor.ts::reservar`). Un `ID_Mesa` es un UUID, así que no se confunde con ninguna.
+ */
+export const MESA_AUTOMATICA = "auto";
+
+/**
+ * El alta tal como llega por `POST /v1/publico/reservas/:clave/reservas`, con los nombres públicos
+ * (los del widget y del SDK: `dia`, `mesa`, `correo`), traducida a la de dentro, que es la que
+ * comparten la Main y la agenda y la que valida `altaReservaWebSchema`. Lo que acepta y rechaza
+ * sigue siendo sólo lo de ésa.
+ */
+export const altaPublicaSchema = z
+	.object({
+		dia: z.any(),
+		hora: z.any(),
+		personas: z.any(),
+		mesa: z.any(),
+		nombre: z.any(),
+		correo: z.any(),
+		telefono: z.any(),
+		nota: z.any().optional().nullable(),
+	})
+	.transform((v): z.input<typeof altaReservaWebSchema> => ({
+		dia_ymd: v.dia,
+		hora: v.hora,
+		personas: v.personas,
+		id_mesa: v.mesa,
+		nombre: v.nombre,
+		email: v.correo,
+		telefono: v.telefono,
+		nota: v.nota,
+	}))
+	.pipe(altaReservaWebSchema);
+
 /** `?dia=` de las rutas que preguntan por un día. */
 export const diaQuerySchema = z.object({ dia: zDia("Formato de día inválido. Esperado YYYY-MM-DD.") });
 

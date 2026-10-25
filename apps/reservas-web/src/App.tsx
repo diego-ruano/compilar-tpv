@@ -3,7 +3,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { apiDe, ErrorApi, type InfoNegocio } from "./api";
+import { ErrorReservas, reservasWeb, type InfoNegocio } from "@altarialights/reservas-web-tpv";
+
 import { useAvisarAltura } from "./altura";
 import Cancelar from "./Cancelar";
 import type { Ruta } from "./logica";
@@ -20,7 +21,8 @@ type Carga =
 
 export default function App({ ruta }: { ruta: Ruta | null }) {
 	useAvisarAltura();
-	const api = useMemo(() => (ruta ? apiDe(ruta.clave) : null), [ruta]);
+	// El widget se sirve desde el servidor de reservas: la API, en el mismo origen.
+	const api = useMemo(() => (ruta ? reservasWeb({ clave: ruta.clave, servidor: "" }) : null), [ruta]);
 	const [carga, setCarga] = useState<Carga>({ estado: "cargando" });
 
 	const cargar = useCallback(async () => {
@@ -32,12 +34,12 @@ export default function App({ ruta }: { ruta: Ruta | null }) {
 		try {
 			setCarga({ estado: "lista", info: await api.negocio() });
 		} catch (e) {
-			if (e instanceof ErrorApi && e.codigo === "reserva_web_cerrada") {
+			if (e instanceof ErrorReservas && e.codigo === "reserva_web_cerrada") {
 				setCarga({ estado: "cerrada", nombre: e.cuerpo?.negocio?.nombre ?? "", telefono: e.cuerpo?.negocio?.telefono ?? "" });
-			} else if (e instanceof ErrorApi && e.estado === 404) {
+			} else if (e instanceof ErrorReservas && e.estado === 404) {
 				setCarga({ estado: "no_disponible" });
 			} else {
-				setCarga({ estado: "error", mensaje: e instanceof ErrorApi ? e.message : "Algo ha fallado." });
+				setCarga({ estado: "error", mensaje: e instanceof ErrorReservas ? e.message : "Algo ha fallado." });
 			}
 		}
 	}, [api]);

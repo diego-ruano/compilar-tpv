@@ -24,7 +24,7 @@ import { agendaDe } from "../../durableObjects/agendaWeb";
 import { cuerpo } from "../../lib/validacion";
 import { recortar } from "../../lib/texto";
 import { getDb } from "../../server/db";
-import { claveActivaDelNegocio, claveDelNegocio, codigoParaLaWeb } from "./claves";
+import { claveActivaDelNegocio, claveDelNegocio, codigoParaLaWeb, origenDelWidget } from "./claves";
 import { enlaceDeCancelar, enviarCorreoReservaWeb, negocioDelCorreo } from "./correos";
 import { avisoReservaWebSchema, recogidasSchema } from "./reservasWeb.schemas";
 import { codigoDeReserva } from "../../durableObjects/agendaWeb.motor";
@@ -39,8 +39,7 @@ reservasWebMainRoutes.use("*", tenantAuth);
 
 reservasWebMainRoutes.post("/clave", soloLaMain("forbidden_not_tpv", 403), async (c) => {
 	const clave = await claveDelNegocio(getDb(c.env), c.get("tenantId"), Date.now());
-	// El widget se sirve desde este mismo worker: el origen de la petición es el suyo.
-	const codigo = codigoParaLaWeb(new URL(c.req.url).origin, clave);
+	const codigo = codigoParaLaWeb(origenDelWidget(c.env, c.req.url), clave);
 	return c.json({ ok: true, clave, codigo });
 });
 
@@ -131,7 +130,7 @@ reservasWebMainRoutes.post("/avisos", cuerpo(avisoReservaWebSchema), async (c) =
 		}
 		if (agenda.canceladaPorElCliente) return c.json({ ok: false, error: "aviso_superado" }, 409);
 		const clave = await claveActivaDelNegocio(getDb(c.env), tenantId).catch(() => null);
-		if (clave && agenda.token) enlace = enlaceDeCancelar(new URL(c.req.url).origin, clave, agenda.token);
+		if (clave && agenda.token) enlace = enlaceDeCancelar(origenDelWidget(c.env, c.req.url), clave, agenda.token);
 	}
 
 	const r = await enviarCorreoReservaWeb(c.env, {

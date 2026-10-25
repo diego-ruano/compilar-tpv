@@ -47,6 +47,15 @@ export async function claveDelNegocio(db: Sql, tenantId: string, ahoraMs: number
 	return creada;
 }
 
+/**
+ * Desde dónde se sirve el widget para las webs: `RESERVAS_WEB_ORIGEN` (la dirección propia, que queda
+ * pegada en cada web y en cada correo) o, si no está, el origen de la petición. No sale de la petición
+ * en producción porque la Main llama por la dirección de la API, y la línea que pide llevaría ésa.
+ */
+export function origenDelWidget(env: { RESERVAS_WEB_ORIGEN?: string }, urlDeLaPeticion: string): string {
+	return recortar(env.RESERVAS_WEB_ORIGEN ?? "").replace(/\/+$/, "") || new URL(urlDeLaPeticion).origin;
+}
+
 /** La línea que se pega en la web, con el origen desde el que se sirve el widget. */
 export function codigoParaLaWeb(origen: string, clave: string): string {
 	return (
@@ -79,6 +88,16 @@ export async function negocioDeLaClave(db: Sql, clave: string): Promise<string |
 	if (cache.size >= CACHE_MAX) cache.clear();
 	cache.set(clave, { hasta: ahora + CACHE_MS, tenantId });
 	return tenantId;
+}
+
+/**
+ * El negocio de una clave sólo si este isolate ya la ha resuelto hace menos de un minuto; `undefined`
+ * si no lo sabe. Para lo que no debe preguntar a la base: el CORS de una respuesta que la puerta ha
+ * cortado antes de resolver la clave (el limitador) no puede abrir la puerta a un barrido de claves.
+ */
+export function negocioCacheado(clave: string): string | null | undefined {
+	const guardado = cache.get(clave);
+	return guardado && guardado.hasta > Date.now() ? guardado.tenantId : undefined;
 }
 
 const cacheDominios = new Map<string, { hasta: number; dominios: string[] }>();

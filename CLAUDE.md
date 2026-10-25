@@ -36,6 +36,8 @@ packages/
   database                       migrations/*.sql (esquema único) + schema.snapshot.sql
   contracts                      @tpv/contracts (bindings.ts generado)
   client                         @tpv/client (commands generados + errores)
+  reservas-web-sdk               SDK de las reservas web (@altarialights/reservas-web-tpv, en npm): lo
+                                 usan el widget y las webs con formulario propio
 docs/                            arquitectura, decisiones, guías, estudios, pendientes
 tests/contract/                  arneses de contrato Rust ↔ worker
 scripts/                         generate-types, check-migration-registry, check-contract-coverage,

@@ -1,7 +1,8 @@
 # Reservas desde la web
 
 **Estado:** plan aprobado el 2026-10-17. Fases 0 a 5 hechas y en producción; faltan el piloto (fase 6)
-y el plugin de WordPress (fase 7). Lo que queda por comprobar de cada fase, en el §11.
+y el plugin de WordPress (fase 7). La fase 8 (dirección propia, API abierta a las webs del negocio y
+SDK) está hecha en código, sin desplegar. Lo que queda por comprobar de cada fase, en el §11.
 
 > Un widget de reservas que cualquier web incrusta con una línea, conectado al TPV, y que acepta
 > reservas aunque la Main esté apagada. La decisión de arquitectura y su porqué están en
@@ -21,9 +22,11 @@ y el plugin de WordPress (fase 7). Lo que queda por comprobar de cada fase, en e
 - En el TPV: qué mesas se pueden reservar y cuándo, días cerrados, interruptor general y el código
   para la web.
 - Entrega de las reservas a la Main, cancelación por el cliente y correos.
+- Para las webs que hacen su propio formulario: la API pública abierta a los dominios del negocio y un
+  SDK, `@altarialights/reservas-web-tpv` (§7.4).
 
 **Queda fuera por ahora** (se decide cuando haga falta): página propia por negocio, plugin de
-WordPress (fase 7), paquete npm o SDK, que el cliente modifique su reserva, juntar mesas, señal o
+WordPress (fase 7), que el cliente modifique su reserva, juntar mesas, señal o
 depósito, recordatorios, otros idiomas, tema del widget configurable desde el TPV y panel de
 administración propio (mientras tanto, el CLI).
 
@@ -54,7 +57,10 @@ administración propio (mientras tanto, el CLI).
 | Avisos al restaurante | Sólo las notificaciones de la app |
 | Main apagada o recuperándose | La web sigue aceptando; lo único que espera es la entrega |
 | Precio | Incluido en la licencia |
-| Dirección | La del worker, `tpv-api.altarialights.workers.dev`. ⚠️ Queda pegada en cada web: cambiarla después obliga a tocarlas todas |
+| Dirección | `reservas-tpv.altarialights.com`: el widget, `embed.js`, el SDK y los enlaces de los correos (`RESERVAS_WEB_ORIGEN`). Es del mismo worker que `tpv-api.altarialights.com`, la de la Main y la Handy. Queda pegada en cada web: por eso es nuestra y no la de `workers.dev` |
+| Formularios propios | La API pública con CORS para los dominios del negocio y el SDK (§7.4). Turnstile va en una página nuestra metida en un iframe (`…/verificar`): sólo funciona en los dominios dados de alta en su widget |
+| Mesa automática | Sin mesa (`mesa: "auto"`), la de menos plazas en la que quepan; si empatan, la primera por `ID_Mesa`. La elige la agenda en su bloque síncrono. Sin ninguna, `sin_mesa_libre` |
+| Nombres de la API | Los mismos en lo que entra y en lo que sale: `dia`, `hora`, `personas`, `mesa` (siempre el id; el nombre, `mesa_nombre`), `correo` (`correo_enviado`, si salió). Lo de dentro (la agenda y la Main) sigue con `dia_ymd`, `id_mesa` y `email` |
 | Idioma | Español |
 | Dónde se puede incrustar | Lista de dominios por negocio que gestiona el proveedor (CLI), no el bar |
 
@@ -87,6 +93,9 @@ web del restaurante
 |---|---|---|
 | Widget | `apps/reservas-web/` (nuevo), servido por el worker | Las pantallas de reservar y de cancelar |
 | Script de inserción | `apps/reservas-web/` → `embed.js` | Mete el iframe en la web y le ajusta la altura |
+| SDK | `packages/reservas-web-sdk/` (`@altarialights/reservas-web-tpv`, npm y `/reservas-web/v1/sdk.js`) | Las rutas públicas como funciones, con la idempotencia, los reintentos y la casilla de Turnstile. Lo usa el widget y las webs con formulario propio |
+| Casilla de Turnstile | `apps/reservas-web/` → `verificar.html`, `src/casilla.ts` | La comprobación del SDK, en el dominio del servidor, metida en la web en un iframe |
+| CORS | `domains/reservas_web/cors.ts` | Que las webs del negocio, y ninguna otra, lean las respuestas desde el navegador |
 | Plano compartido | `packages/plano/` (nuevo) | El plano de la Main, usado también por el widget |
 | Estilos compartidos | `packages/estilos/` (nuevo) | Los tokens de color de `Global.css` |
 | Rutas públicas | `domains/reservas_web/publico.routes.ts` | Lo que llama el widget, con la clave del negocio |
@@ -262,8 +271,20 @@ middlewares se añaden a `VETOS` en `test/vetoAntesDelCuerpo.test.ts`. El interr
 negocio (`Reserva_Web_Activa`) se lee de Turso: `/negocio` contesta `reserva_web_cerrada` y el alta
 también.
 
-Sin CORS: el widget se sirve desde el mismo origen que la API (§4.6), así que las rutas públicas no
-necesitan cabeceras CORS y no hay que abrirlas a ningún origen.
+**CORS para las webs del negocio** (`cors.ts`). El widget no lo necesita: se sirve desde el mismo
+origen que la API (§4.6). Una web con su propio formulario (§7.4) sí, y sólo se le abre a los
+orígenes de `reserva_web_dominios` de ese negocio, los mismos en los que se puede incrustar el
+widget. No protege de quien automatiza (fuera del navegador, `Origin` es el que se quiera): eso es
+lo de arriba. Va en dos piezas:
+
+- El **preflight** (`OPTIONS`) se registra en `index.ts` delante del `OPTIONS` de todo el worker, que
+  contesta a todo. Pasa por el limitador antes de mirar la clave, como la puerta; a una web que no es
+  del negocio se le contesta sin permiso. Permite `Content-Type`, `X-Turnstile-Token` e
+  `Idempotency-Key`, sin credenciales, y el navegador lo guarda diez minutos.
+- Las **respuestas**, también las de error, llevan `Access-Control-Allow-Origin` si quien llama es una
+  web del negocio, para que el SDK lea el motivo en vez de un fallo de red. Después de la puerta, con
+  la clave ya resuelta: si la cortó antes de resolverla (el limitador), sólo se mira lo cacheado, para
+  no abrirle a un barrido de claves la base central. Todas llevan `Vary: Origin`.
 
 ### 4.2 Rutas públicas — `/v1/publico/reservas/:clave/…`
 
@@ -271,22 +292,29 @@ necesitan cabeceras CORS y no hay que abrirlas a ningún origen.
 |---|---|---|
 | `GET /negocio` | Turso | Nombre, dirección, teléfono y logo; responsable para el aviso de privacidad (`Razon_Social`, `CIF`); hoy en la hora del negocio; primer y último día reservables; días abiertos del horizonte (con alguna franja y sin cierre); máximo de personas (la mayor capacidad reservable); duración; la clave pública de Turnstile |
 | `GET /dia?dia=` | Turso | Los tramos de hora de llegada válidos ese día (la unión de las franjas, con la tolerancia y la duración) |
-| `GET /plano` | Turso | Salones (id, nombre, `Room_Points`) y mesas (id, número, forma, posición, tamaño, capacidad, si es reservable). Caché corta. Con techo (50 salones, 500 mesas) y `completo` para decir si lo ha alcanzado |
+| `GET /plano` | Turso | Salones (id, nombre, `Room_Points`) y mesas (`id`, `nombre`, forma, posición, tamaño, capacidad, si es reservable). Caché corta. Con techo (50 salones, 500 mesas) y `completo` para decir si lo ha alcanzado |
 | `GET /disponibles?dia=&hora=&personas=` | Agenda | Las mesas libres y adecuadas. Si no hay ninguna, `alternativas`: hasta 4 horas a ±15, 30, 45 y 60 minutos que sí tienen mesa |
-| `POST /reservas` | Agenda | `{ codigo, dia, hora, personas, mesa, correo }` (`correo`: si salió el de confirmación; `null` en una repetición). El token del enlace sólo viaja en el correo. Con `Idempotency-Key` (el widget manda la misma en todos los envíos de una reserva), un intento que ya dio reserva contesta la misma, durante un día, en vez de apuntar otra |
-| `POST /reserva` `{ token }` | Agenda y Turso | El resumen para la página de cancelar: día, hora, personas, mesa, estado y si aún se puede cancelar |
+| `POST /reservas` `{ dia, hora, personas, mesa, nombre, correo, telefono, nota }` | Agenda | `{ codigo, dia, hora, personas, mesa, mesa_nombre, correo_enviado }` (`mesa`: el id, el pedido o el asignado con `"auto"`; `correo_enviado`: si salió el de confirmación, `null` en una repetición). El token del enlace sólo viaja en el correo. Con `Idempotency-Key` (el SDK manda la misma en todos los envíos de una reserva), un intento que ya dio reserva contesta la misma, durante un día, en vez de apuntar otra |
+| `POST /reserva` `{ token }` | Agenda y Turso | El resumen para la página de cancelar: día, hora, personas, `mesa` y `mesa_nombre`, estado y si aún se puede cancelar |
 | `POST /cancelar` `{ token }` | Agenda | `{ ok }` |
 
 `/reserva` va por POST para que el token no aparezca en ninguna URL ni en ningún log.
 
 Identificadores de error nuevos, todos en `MENSAJES` (`lib/errorCodes.ts`) con su frase:
 `reserva_web_no_disponible`, `reserva_web_demasiadas`, `reserva_web_cerrada`, `dia_no_reservable`, `hora_fuera_de_franja`,
-`mesa_no_disponible` (409; el widget vuelve a pedir las disponibles), `limite_reservas_correo`,
+`mesa_no_disponible` (409; el widget vuelve a pedir las disponibles), `sin_mesa_libre` (409; con la
+mesa automática no queda ninguna: hay que cambiar la hora, no la mesa), `limite_reservas_correo`,
 `tope_reservas_negocio`, `verificacion_humana_fallida`, `reserva_no_cancelable` y `enlace_no_valido`.
 Los de la agenda salen con su estado (`agendaWeb.motor.ts::STATUS`): 400 el día o la hora que no
 valen, 409 lo que choca con el estado (`reserva_web_cerrada`, la mesa, el tope por correo, la que ya
 no se puede cancelar), 429 el tope del negocio y 404 el enlace. El `codigo` del alta son los seis
 últimos caracteres del `ID_Reserva`: una referencia corta para hablar con el restaurante.
+
+Los nombres de la API (los del SDK) no son los de dentro: `altaPublicaSchema` traduce el alta
+(`dia`, `mesa`, `correo`) a la de la agenda y la Main (`dia_ymd`, `id_mesa`, `email`) y la valida
+con `altaReservaWebSchema`. Lo que contesta cada ruta cumple los tipos del SDK
+(`packages/reservas-web-sdk/src/tipos.ts`) con `satisfies`: un campo que cambia en un lado sin el
+otro no compila.
 
 La entrada del alta tiene su dominio en
 [validacion_casos.json](../../crates/tpv-domain/src/validacion_casos.json) (`reserva_web`): el schema
@@ -396,6 +424,8 @@ Workers Static Assets en el mismo worker, con lo compilado de `apps/reservas-web
 |---|---|---|
 | `/reservas-web/v1/embed.js` | El script de inserción | Corta (minutos): es lo que hace que un cambio llegue a todas las webs |
 | `/reservas-web/v1/w/:clave` | El HTML del widget (y `…/cancelar`), servido por el worker para poner la CSP | Sin caché |
+| `/reservas-web/v1/w/:clave/verificar?origen=` | La casilla de Turnstile del SDK (§7.4), sólo si `origen` es una web del negocio (si no, 403), con su `frame-ancestors` y la clave pública de Turnstile puesta por el worker (`HTMLRewriter`) | Sin caché |
+| `/reservas-web/v1/sdk.js` | El SDK en un fichero, para las webs que no compilan. Con `Access-Control-Allow-Origin: *`: se importa como módulo desde otro origen | Corta, como `embed.js` |
 | `/reservas-web/assets/*` | JS y CSS con huella en el nombre | Inmutable |
 
 CSP del HTML: `default-src 'self'`; `script-src 'self' https://challenges.cloudflare.com`;
@@ -413,7 +443,13 @@ abre desde el correo. Además de lo de arriba, la CSP lleva `base-uri 'none'`, `
 `object-src 'none'`. Las webs de cada negocio se cachean un minuto por isolate.
 
 El widget compilado tiene que existir antes de desplegar: `pnpm --filter tpv-api desplegar` lo compila
-y despliega (en `wrangler.json`, `assets.directory` apunta a `apps/reservas-web/dist`).
+y despliega (en `wrangler.json`, `assets.directory` apunta a `apps/reservas-web/dist`). El mismo build
+deja `verificar.html` y `v1/sdk.js`, éste compilado desde las fuentes del SDK
+(`apps/reservas-web/vite.config.ts`).
+
+La dirección que va en la línea para pegar y en los enlaces de los correos es `RESERVAS_WEB_ORIGEN`
+(`claves.ts::origenDelWidget`), no la de la petición: la Main la pide por `tpv-api`. Con
+`wrangler dev`, `RESERVAS_WEB_ORIGEN=` (vacía) en `.dev.vars` hace que salga la local.
 
 ### 4.7 Interruptor remoto `reservas_web`
 
@@ -683,7 +719,7 @@ el mismo origen.
 
 ```html
 <div data-negocio="rw_…"></div>
-<script src="https://tpv-api.altarialights.workers.dev/reservas-web/v1/embed.js" async></script>
+<script src="https://reservas-tpv.altarialights.com/reservas-web/v1/embed.js" async></script>
 ```
 
 `embed.js` (vanilla, unos 2 KB) busca los `[data-negocio]` y mete en cada uno un iframe (sin borde,
@@ -718,6 +754,34 @@ veces. **El tamaño lo decide el `div`, con el CSS de la web:**
 <div data-negocio="rw_…" style="width: 900px; height: 700px"></div>
 ```
 
+### 7.4 El SDK, para un formulario propio
+
+`packages/reservas-web-sdk/`, publicado en npm como `@altarialights/reservas-web-tpv` y servido en
+`/reservas-web/v1/sdk.js`. Para las webs que hace otro con su propio diseño: las rutas públicas como
+funciones (`negocio`, `horas`, `plano`, `disponibles`, `verificar`, `crearReserva`,
+`consultarReserva`, `cancelarReserva`). Cómo se usa, en su
+[README](../../packages/reservas-web-sdk/README.md). El widget lo usa igual, con `servidor: ""` (el
+mismo origen).
+
+- **Idempotencia.** `crearReserva` pone la `Idempotency-Key` y la repite en todos los intentos de una
+  reserva, también si se vuelve a llamar tras un error; tras una reserva hecha, la siguiente lleva otra.
+- **Reintentos.** Sin respuesta, con un 5xx o con `verificacion_humana_fallida`, hasta tres intentos
+  (esperando 1 y 3 s), con la misma clave y un token nuevo de la casilla. Con un token suelto (el
+  widget, que pinta Turnstile él mismo) no reintenta: el token sólo vale una vez.
+- **La casilla de Turnstile** (`verificar`). Turnstile sólo funciona en los dominios dados de alta en
+  su widget, y las webs de los restaurantes no lo están. La casilla va en una página nuestra
+  (`…/verificar?origen=`) en un iframe: para Turnstile la página es siempre la nuestra. El token se le
+  pasa a la web con `postMessage` sólo a `origen`, que el worker ha comprobado que es una web del
+  negocio y que es la única que puede incrustarla; la web pide otra comprobación con otro mensaje,
+  que sólo se atiende si viene de ella (`src/casilla.ts`). El token se gasta al usarlo y la casilla
+  pide otro sola.
+- **Errores.** Un solo `ErrorReservas` con `codigo` y `message`; los del SDK (`red`,
+  `verificacion_pendiente`) traen su frase.
+- **Sin deriva.** Los tipos de lo que va y viene están en `src/tipos.ts`, sin nada del navegador, y el
+  worker los importa para comprobar sus respuestas (§4.2).
+- Para publicar: `pnpm --filter @altarialights/reservas-web-tpv publish` (compila antes). En el
+  repositorio el paquete apunta a las fuentes; lo publicado, a `dist/` (`publishConfig`).
+
 ---
 
 ## 8. Seguridad y abuso
@@ -729,6 +793,7 @@ veces. **El tamaño lo decide el `div`, con el CSS de la web:**
 | Volumen | Limitadores por IP (lecturas y altas) y, detrás, los topes exactos de la agenda: 10 activas por correo y un máximo de altas por negocio al día |
 | Reservas falsas para bloquear mesas | Lo anterior, más el límite por correo y la cancelación por el restaurante |
 | Incrustarlo en otra web | `frame-ancestors` con los dominios del negocio |
+| Usar la API desde otra web | CORS sólo para los dominios del negocio (§4.1); la casilla de Turnstile del SDK, sólo para ellos y sólo incrustada en ellos (§7.4) |
 | Datos personales | Las respuestas públicas no los llevan (con un test que lo vigile) |
 | Spam con nuestro dominio | Destinatario acotado (el del alta, o el cliente de una reserva web en Turso), topes y nada de texto del visitante en los correos |
 | Enlace de cancelar | 128 bits aleatorios, sólo su hash guardado, en el fragmento, y botón para confirmar |
@@ -764,7 +829,9 @@ veces. **El tamaño lo decide el `div`, con el CSS de la web:**
 | `tpv-infra-sqlite` | Registrar: cliente existente por correo, cliente nuevo, idempotencia por id, solape que se guarda, `Created_At` literal, captura en el outbox; cancelación idempotente; la foto del esquema; las columnas `INTEGER` declaradas |
 | `tpv-application` | Recoger (orden, resultados, notificaciones) y cuándo se encola un aviso |
 | Contrato | `origen` en las lecturas del calendario; editar una reserva web desde la Handy conserva `Origen` |
-| Widget | Los pasos, la hora limitada a los tramos, `mesa_no_disponible`, la página de cancelar; `embed.js` |
+| Widget | Los pasos, la hora limitada a los tramos, `mesa_no_disponible`, la página de cancelar; `embed.js`; la casilla de Turnstile del SDK (`casilla.test.ts`) |
+| Worker · CORS y SDK | `reservasWebCors` (el permiso sólo para las webs del negocio, el limitador del preflight, el orden en `index.ts`), la página `…/verificar` y `sdk.js` en `reservasWebWidget`, la mesa automática (también dos a la vez) en `reservasWebPublico` |
+| SDK | `packages/reservas-web-sdk/test`: las rutas, la idempotencia, los errores, la casilla y los reintentos con token nuevo |
 | E2E | Alta en la web → aparece en la Main. Alta con la Main apagada → aparece al encenderla. Cancelar desde el enlace → cancelada en la Main. Cambio desde el TPV → sale el aviso |
 
 ---
@@ -783,6 +850,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | ✅ **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, cancelar sin borrar, la cola de avisos y su job | Código y tests hechos el 2026-10-19. En producción llegan los correos y se cancela desde el enlace. Falta ver llegar los otros tres (cambio y cancelación por el restaurante, y el de «no se pudo registrar») |
 | **6 · Piloto** | Los textos de LEGAL-01, `arquitectura/reservas-web.md` y la primera web propia con un bar | Un bar recibe reservas reales |
 | **7 · WordPress** | El plugin: ajustes con la clave, shortcode y bloque, que imprimen la línea del §7.3 | Instalado en un WordPress de prueba |
+| **8 · Dirección propia, API abierta y SDK** | `reservas-tpv.altarialights.com` y `tpv-api.altarialights.com` (`routes` en `wrangler.json`), los nombres unificados de la API, la mesa automática, el CORS para las webs del negocio, la casilla de Turnstile en iframe y el SDK (§7.4) | Código y tests hechos el 2026-10-24. La dirección propia está pendiente de [INFRA-04](../pendientes.md#infra-04--la-dirección-propia-cae-con-los-bloqueos-de-laliga) (los bloqueos de LaLiga). Falta: desplegar el worker, publicar una Main con la dirección nueva, publicar el SDK en npm y probar un formulario propio desde una web dada de alta |
 
 ---
 
@@ -790,15 +858,19 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 
 **Cloudflare** (lo hace el responsable):
 
-1. ✅ **Turnstile**: widget «Panel embebido de reservas», hostname
-   `tpv-api.altarialights.workers.dev`, modo gestionado. Para desarrollar se usan las claves de
-   prueba que publica la documentación de Turnstile.
+1. **Turnstile**: widget «Panel embebido de reservas», modo gestionado, con los hostnames
+   `tpv-api.altarialights.workers.dev` (✅) y `reservas-tpv.altarialights.com` (falta, antes de
+   desplegar la fase 8). Para desarrollar se usan las claves de prueba que publica la documentación de
+   Turnstile.
 2. ✅ El secreto está guardado como `TURNSTILE_SECRET_KEY` (`wrangler secret put`), y la clave
    pública, que no es secreta, como `TURNSTILE_SITE_KEY` en las `vars` de `wrangler.json`.
 3. ✅ **Correo**: se envía desde `reservas@altarialights.com` (el dominio ya estaba dado de alta
    por `pedidos@`). Comprobado con los correos de la fase 5, que llegan en producción.
 4. La clase nueva del DO y los dos limitadores van en `wrangler.json` y se crean al desplegar: no hay
-   que tocar nada en el panel.
+   que tocar nada en el panel. Igual los dos nombres propios (`routes` con `custom_domain`): Cloudflare
+   crea su DNS y su certificado al desplegar, porque `altarialights.com` está en la misma cuenta.
+
+**npm:** la organización `altarialights`, para publicar el SDK (fase 8).
 
 **Turso:** crear a mano las tablas del §3.2 en la base central antes de desplegar la fase 2, la columna
 `tipo` y el índice de `email_sends` antes de desplegar la fase 5, y resetear las bases de desarrollo
@@ -825,7 +897,6 @@ en la fase 1.
 - **Cancelar desde el enlace en el segundo en que el alta se da por vista** cancela, pero puede no
   mandar el correo de «has cancelado»: la lectura de Turso no trae al cliente y la agenda ya olvidó
   el correo del alta. La página de cancelar ya se lo dice.
-- **La dirección `workers.dev`** queda pegada en cada web.
 
 ---
 
@@ -834,8 +905,9 @@ en la fase 1.
 Lo que se ha dejado para más adelante y en qué orden tiene sentido: hacer configurables desde el TPV
 la tolerancia, el margen de plazas, la antelación y el horizonte (las columnas ya existen); varias
 franjas por mesa en la pantalla (el esquema ya las admite); el plugin de WordPress; la página propia
-por negocio (el widget ya es una página); el tema del widget desde el TPV; que el cliente modifique
-su reserva; juntar mesas para grupos grandes.
+por negocio (el widget ya es una página); el tema del widget desde el TPV; que el enlace de cancelar
+del correo pueda llevar a la página de una web propia (el SDK ya tiene `consultarReserva` y
+`cancelarReserva`); que el cliente modifique su reserva; juntar mesas para grupos grandes.
 
 ---
 

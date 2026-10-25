@@ -100,7 +100,7 @@ siguiente comprobación de ese equipo.
 
 | Secretos | Variables |
 |---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` (contenido de `updater.key`), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`, `TPV_SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `CLOUDFLARE_API_TOKEN` | `R2_BUCKET`, `R2_PUBLIC_BASE_URL`, `TPV_API_BASE` (`https://tpv-api.altarialights.workers.dev`), `SENTRY_ORG` (`altaria-lights`), `SENTRY_PROJECT` (`tpv-desktop`), `SENTRY_WORKER_PROJECT` (`node-cloudflare-workers`), `CLOUDFLARE_ACCOUNT_ID` |
+| `TAURI_SIGNING_PRIVATE_KEY` (contenido de `updater.key`), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`, `TPV_SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `CLOUDFLARE_API_TOKEN` | `R2_BUCKET`, `R2_PUBLIC_BASE_URL`, `TPV_API_BASE` (`https://tpv-api.altarialights.com`), `SENTRY_ORG` (`altaria-lights`), `SENTRY_PROJECT` (`tpv-desktop`), `SENTRY_WORKER_PROJECT` (`node-cloudflare-workers`), `CLOUDFLARE_ACCOUNT_ID` |
 
 El token de Cloudflare necesita Workers Editor en la cuenta que contiene `tpv-api`. El DSN del
 worker sigue siendo el secreto `SENTRY_DSN` de Cloudflare; el token de Sentry sólo entra en el build.
@@ -134,7 +134,7 @@ Salida en `target/release/bundle/nsis/`: `tpv_<versión>_x64-setup.exe` y su `.e
 `bundle.targets` es `["nsis"]`). Subir el `.exe` a un sitio público y publicar:
 
 ```bash
-curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/publish \
+curl -X POST https://tpv-api.altarialights.com/v1/update/publish \
   -H "Authorization: Bearer $RELEASE_ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{ "version": "1.2.0", "url": "https://…/tpv_1.2.0_x64-setup.exe",
         "signature": "<contenido del .exe.sig>", "notes": "…" }'
@@ -169,7 +169,7 @@ manifiesto lleva las dos.
 ## Retirar una versión
 
 ```bash
-curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/deactivate \
+curl -X POST https://tpv-api.altarialights.com/v1/update/deactivate \
   -H "Authorization: Bearer $RELEASE_ADMIN_TOKEN" -H "Content-Type: application/json" \
   -d '{ "version": "1.2.0" }'
 ```

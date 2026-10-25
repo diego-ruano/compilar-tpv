@@ -2960,7 +2960,7 @@ mod tests_exenciones_del_gate {
         for campo in ["csp", "devCsp"] {
             let csp = config["app"]["security"][campo].as_str().unwrap();
             let connect = csp.split(';').find(|s| s.trim().starts_with("connect-src")).unwrap();
-            assert!(!connect.contains("workers.dev") && !connect.contains("wss:"));
+            assert!(!connect.contains("workers.dev") && !connect.contains("altarialights.com") && !connect.contains("wss:"));
         }
     }
 

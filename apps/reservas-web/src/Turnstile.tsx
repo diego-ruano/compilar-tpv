@@ -3,36 +3,7 @@
 
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
 
-declare global {
-	interface Window {
-		turnstile?: {
-			render: (el: HTMLElement, opciones: Record<string, unknown>) => string;
-			reset: (id: string) => void;
-			remove: (id: string) => void;
-		};
-	}
-}
-
-const SCRIPT = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-let cargando: Promise<void> | null = null;
-
-function cargarScript(): Promise<void> {
-	if (window.turnstile) return Promise.resolve();
-	if (!cargando) {
-		cargando = new Promise<void>((resolver, rechazar) => {
-			const s = document.createElement("script");
-			s.src = SCRIPT;
-			s.async = true;
-			s.onload = () => resolver();
-			s.onerror = () => {
-				cargando = null;
-				rechazar(new Error("turnstile"));
-			};
-			document.head.appendChild(s);
-		});
-	}
-	return cargando;
-}
+import { cargarTurnstile } from "./turnstileScript";
 
 export type ControlTurnstile = { reiniciar: () => void };
 
@@ -62,7 +33,7 @@ export default function Turnstile({
 
 	useEffect(() => {
 		let vivo = true;
-		cargarScript()
+		cargarTurnstile()
 			.then(() => {
 				if (!vivo || !hueco.current || !window.turnstile) return;
 				id.current = window.turnstile.render(hueco.current, {

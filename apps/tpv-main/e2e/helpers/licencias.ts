@@ -11,7 +11,7 @@
 // La base Turso que crea su activación no se borra sola — es el precio de esta prueba, y por eso es
 // una por tanda y no una por recorrido.
 
-const BASE = process.env.TPV_API_BASE || "https://tpv-api.altarialights.workers.dev";
+const BASE = process.env.TPV_API_BASE || "https://tpv-api.altarialights.com";
 
 function token(): string {
     const t = (process.env.ADMIN_API_TOKEN ?? "").trim();

@@ -4,8 +4,12 @@ Un único Cloudflare Worker (`apps/cloud-worker-licensing/`, desplegado como `tp
 conserva su nombre) sirve todo lo que es nube: la API de datos de la Handy, el Durable Object
 `TenantHub`, el emparejamiento, las licencias, la compra por Stripe, la administración, las
 actualizaciones, el correo, las imágenes y la telemetría. El cliente Rust apunta a él con
-`CLOUD_API_BASE` (`crates/tpv-infra-licensing/src/lib.rs`) y el WebSocket con `CLOUD_WS_URL`
-(`src/shared/lib/cloudApi.ts`): `https://tpv-api.altarialights.workers.dev`.
+`CLOUD_API_BASE` (`crates/tpv-infra-licensing/src/lib.rs`), también para el WebSocket
+(`crates/tpv-infra-http/src/websocket.rs`): `https://tpv-api.altarialights.com`. El widget de las
+reservas web y su API pública se sirven desde `https://reservas-tpv.altarialights.com`
+(`RESERVAS_WEB_ORIGEN`), que es la dirección que queda pegada en las webs y en los correos. Los dos
+nombres son del mismo worker (`routes` en `wrangler.json`); `tpv-api.altarialights.workers.dev` sigue
+activo (`workers_dev`) para las Main instaladas antes del cambio.
 
 ## Mapa
 
@@ -188,7 +192,7 @@ se registra a nivel ERROR, que la integración existente con Sentry captura una 
 - **También descifra el canario de `LICENSE_STORE_KEY`** (`canario_cifrado`, RI-73): con una clave
   equivocada contesta 503 (`cifrado: "falla"`). La fila la crea el propio `/health` la primera vez. Sin la
   tabla, `cifrado: "sin_comprobar"` y la sonda sigue en verde.
-- Una sonda externa (Better Stack) la consulta en `tpv-api.altarialights.workers.dev/health`, el mismo
+- Una sonda externa (Better Stack) la consulta en `tpv-api.altarialights.com/health`, el mismo
   hostname que usan los clientes.
 
 ## El cron diario

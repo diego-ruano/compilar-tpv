@@ -56,8 +56,8 @@ const PLANO = {
 	completo: true,
 	salones: [{ id: "z1", nombre: "Salón", puntos: "[0,0,400,0,400,300,0,300]" }],
 	mesas: [
-		{ id: "m2", id_salon: "z1", numero: "Mesa 2", forma: "rect", x: 10, y: 10, ancho: 80, alto: 80, radio: null, capacidad: 2, reservable: true },
-		{ id: "m4", id_salon: "z1", numero: "Mesa 4", forma: "rect", x: 110, y: 10, ancho: 80, alto: 80, radio: null, capacidad: 4, reservable: true },
+		{ id: "m2", id_salon: "z1", nombre: "Mesa 2", forma: "rect", x: 10, y: 10, ancho: 80, alto: 80, radio: null, capacidad: 2, reservable: true },
+		{ id: "m4", id_salon: "z1", nombre: "Mesa 4", forma: "rect", x: 110, y: 10, ancho: 80, alto: 80, radio: null, capacidad: 4, reservable: true },
 	],
 };
 
@@ -98,7 +98,7 @@ describe("reservar desde la web", () => {
 			[`${BASE}/reservas`]: () =>
 				altas++ === 0
 					? respuesta(409, { ok: false, error: "mesa_no_disponible", message: "Esa mesa acaba de ocuparse. Elige otra de las que quedan libres." })
-					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "20:07", personas: 2, mesa: "Mesa 4", correo: true },
+					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "20:07", personas: 2, mesa: "m4", mesa_nombre: "Mesa 4", correo_enviado: true },
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 
@@ -162,12 +162,12 @@ describe("reservar desde la web", () => {
 		expect(intentos[0]).toMatch(/^[0-9a-f-]{36}$/);
 		expect(intentos[1]).toBe(intentos[0]);
 		expect(JSON.parse(String(envios[1].init?.body))).toEqual({
-			dia_ymd: "2026-11-20",
+			dia: "2026-11-20",
 			hora: "20:07",
 			personas: 2,
-			id_mesa: "m4",
+			mesa: "m4",
 			nombre: "Ana Pérez",
-			email: "ana@correo.es",
+			correo: "ana@correo.es",
 			telefono: "600 112 233",
 			nota: null,
 		});
@@ -216,7 +216,7 @@ describe("reservar desde la web", () => {
 
 	it("si lo libre trae una mesa que no está en el plano guardado, se vuelve a pedir el plano", async () => {
 		let buscadas = 0;
-		const conLaNueve = { ...PLANO, mesas: [...PLANO.mesas, { ...PLANO.mesas[1], id: "m9", numero: "Mesa 9", x: 210 }] };
+		const conLaNueve = { ...PLANO, mesas: [...PLANO.mesas, { ...PLANO.mesas[1], id: "m9", nombre: "Mesa 9", x: 210 }] };
 		const llamadas = simular({
 			[`${BASE}/negocio`]: () => INFO,
 			[`${BASE}/dia?dia=2026-11-20`]: () => ({ ok: true, dia: "2026-11-20", tramos: [{ desde: "20:00", hasta: "21:00" }] }),
@@ -339,7 +339,7 @@ describe("reservar desde la web", () => {
 			[`${BASE}/disponibles`]: () => ({ ok: true, mesas: ["m2"], alternativas: [] }),
 			[`${BASE}/reservas`]: async () => {
 				await espera;
-				return { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "Mesa 2", correo: true };
+				return { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "m2", mesa_nombre: "Mesa 2", correo_enviado: true };
 			},
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
@@ -375,7 +375,7 @@ describe("reservar desde la web", () => {
 			[`${BASE}/reservas`]: () =>
 				altas++ === 0
 					? respuesta(403, { ok: false, error: "verificacion_humana_fallida", message: "No hemos podido comprobar que no eres un robot." })
-					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "Mesa 2", correo: false },
+					: { ok: true, codigo: "ABC123", dia: "2026-11-20", hora: "19:40", personas: 2, mesa: "m2", mesa_nombre: "Mesa 2", correo_enviado: false },
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "reservar", token: null }} />);
 
@@ -416,7 +416,7 @@ describe("cancelar desde el enlace", () => {
 		const llamadas = simular({
 			[`${BASE}/negocio`]: () => INFO,
 			// La mesa, con el nombre que propone la Main: no sale «Mesa Mesa 2».
-			[`${BASE}/reserva`]: () => ({ ok: true, dia: "2026-11-20", hora: "21:00", personas: 2, mesa: "Mesa 2", estado: "confirmada", cancelable: true }),
+			[`${BASE}/reserva`]: () => ({ ok: true, dia: "2026-11-20", hora: "21:00", personas: 2, mesa: "m2", mesa_nombre: "Mesa 2", estado: "confirmada", cancelable: true }),
 			[`${BASE}/cancelar`]: () => ({ ok: true }),
 		});
 		render(<App ruta={{ clave: CLAVE, vista: "cancelar", token: "TOKEN" }} />);

@@ -68,7 +68,7 @@ function loadDotEnv() {
 
 loadDotEnv();
 
-const API_BASE = process.env.TPV_API_BASE || "https://tpv-api.altarialights.workers.dev";
+const API_BASE = process.env.TPV_API_BASE || "https://tpv-api.altarialights.com";
 const TOKEN = process.env.ADMIN_API_TOKEN;
 
 const TERMS = [1, 3, 12];
