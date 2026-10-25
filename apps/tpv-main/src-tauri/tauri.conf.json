@@ -46,7 +46,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVCM0JBRTNGQjdDOUUxRDEKUldUUjRjbTNQNjQ3VzZLUXc0eWd5RmhZYlFpQXRWYjRvdmEwT29QcDBBYjRTQjZ1RWw1U01vb1YK",
       "endpoints": [
-        "https://tpv-api.altarialights.com/v1/update/{{target}}/{{arch}}/{{current_version}}"
+        "https://tpv-api.altarialights.workers.dev/v1/update/{{target}}/{{arch}}/{{current_version}}"
       ],
       "windows": {
         "installMode": "passive"

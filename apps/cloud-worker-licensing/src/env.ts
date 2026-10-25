@@ -86,9 +86,10 @@ export interface Env {
 	// `wrangler secret put TURNSTILE_SECRET_KEY`. Sin secreto el alta queda cerrada (503).
 	TURNSTILE_SITE_KEY?: string;
 	TURNSTILE_SECRET_KEY?: string;
-	// La dirección pública del widget (`https://reservas-tpv.altarialights.com`): la que lleva la
-	// línea que se pega en la web y los enlaces de los correos, venga la petición por donde venga (la
-	// Main llama por `tpv-api`). Vacía, la de la propia petición: así funciona `wrangler dev`.
+	// La dirección pública del widget: la que lleva la línea que se pega en la web y los enlaces de los
+	// correos, venga la petición por donde venga. Hoy es la de `workers.dev`, la misma de la API: los
+	// nombres propios de `altarialights.com` salen por IP que se bloquean con el fútbol (INFRA-04).
+	// Vacía, la de la propia petición: así funciona `wrangler dev`.
 	RESERVAS_WEB_ORIGEN?: string;
 
 	// El widget de reservas web compilado (`apps/reservas-web/dist`), en Workers Static Assets. Pasa

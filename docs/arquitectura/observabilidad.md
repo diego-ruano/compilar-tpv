@@ -224,7 +224,7 @@ Para comprobar la ingesta sin esperar a que pase algo, una petición sin autenti
 emite un `device_auth_rechazado`:
 
 ```bash
-curl -X POST https://tpv-api.altarialights.com/v1/sync/verificar \
+curl -X POST https://tpv-api.altarialights.workers.dev/v1/sync/verificar \
   -H "Authorization: Bearer sonda" -H "Content-Type: application/json" -d '{}'
 ```
 

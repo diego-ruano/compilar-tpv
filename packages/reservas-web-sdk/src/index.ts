@@ -35,8 +35,11 @@ export { ErrorReservas, esError, type CodigoError } from "./errores";
 export * from "./tipos";
 export type { OpcionesVerificacion, Verificacion } from "./verificacion";
 
-/** El servidor de reservas. */
-export const SERVIDOR = "https://reservas-tpv.altarialights.com";
+/**
+ * El servidor de reservas. Es la dirección de `workers.dev` del worker: un nombre propio de
+ * `altarialights.com` saldría por IP que los operadores españoles bloquean cuando hay fútbol.
+ */
+export const SERVIDOR = "https://tpv-api.altarialights.workers.dev";
 
 export type OpcionesReservasWeb = {
 	/** La clave del restaurante (`rw_…`): la que va en el código para la web del TPV. */

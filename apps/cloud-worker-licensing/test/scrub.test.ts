@@ -54,7 +54,7 @@ describe("las opciones de Sentry del worker filtran antes de enviar", () => {
 			breadcrumbs: [{ category: "console", message: "trabajador 12.345.678-Z", data: { iban: "ES91 2100 0418 4502 0005 1332" } }],
 			extra: { destino: "ana@example.com" },
 			request: {
-				url: "https://tpv-api.altarialights.com/v1/login/recuperar-pin?correo=ana@example.com",
+				url: "https://tpv-api.altarialights.workers.dev/v1/login/recuperar-pin?correo=ana@example.com",
 				query_string: "correo=ana@example.com",
 			},
 		});

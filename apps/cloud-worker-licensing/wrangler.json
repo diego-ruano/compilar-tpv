@@ -6,16 +6,6 @@
 		"nodejs_compat"
 	],
 	"workers_dev": true,
-	"routes": [
-		{
-			"pattern": "tpv-api.altarialights.com",
-			"custom_domain": true
-		},
-		{
-			"pattern": "reservas-tpv.altarialights.com",
-			"custom_domain": true
-		}
-	],
 	"observability": {
 		"enabled": true
 	},
@@ -117,7 +107,7 @@
 		"EMAIL_FROM_NAME": "TPV",
 		"EMAIL_RESERVAS_FROM_ADDRESS": "reservas@altarialights.com",
 		"TURNSTILE_SITE_KEY": "0x4AAAAAAFZhNrJzycaxI4_h",
-		"RESERVAS_WEB_ORIGEN": "https://reservas-tpv.altarialights.com",
+		"RESERVAS_WEB_ORIGEN": "https://tpv-api.altarialights.workers.dev",
 		"AXIOM_DATASET": "tpv-device-logs",
 		"AXIOM_DATASET_SYNC": "tpv-sync",
 		"AXIOM_DOMAIN": "eu-central-1.aws.edge.axiom.co"

@@ -48,9 +48,10 @@ export async function claveDelNegocio(db: Sql, tenantId: string, ahoraMs: number
 }
 
 /**
- * Desde dónde se sirve el widget para las webs: `RESERVAS_WEB_ORIGEN` (la dirección propia, que queda
- * pegada en cada web y en cada correo) o, si no está, el origen de la petición. No sale de la petición
- * en producción porque la Main llama por la dirección de la API, y la línea que pide llevaría ésa.
+ * Desde dónde se sirve el widget para las webs: `RESERVAS_WEB_ORIGEN`, la dirección que queda pegada en
+ * cada web y en cada correo (hoy la de `workers.dev`, INFRA-04), o, si no está, el origen de la
+ * petición. Fija, y no la de la petición: la línea y los enlaces no pueden depender de por qué
+ * dirección llame quien los pide.
  */
 export function origenDelWidget(env: { RESERVAS_WEB_ORIGEN?: string }, urlDeLaPeticion: string): string {
 	return recortar(env.RESERVAS_WEB_ORIGEN ?? "").replace(/\/+$/, "") || new URL(urlDeLaPeticion).origin;

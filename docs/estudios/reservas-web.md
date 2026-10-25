@@ -57,7 +57,7 @@ administración propio (mientras tanto, el CLI).
 | Avisos al restaurante | Sólo las notificaciones de la app |
 | Main apagada o recuperándose | La web sigue aceptando; lo único que espera es la entrega |
 | Precio | Incluido en la licencia |
-| Dirección | `reservas-tpv.altarialights.com`: el widget, `embed.js`, el SDK y los enlaces de los correos (`RESERVAS_WEB_ORIGEN`). Es del mismo worker que `tpv-api.altarialights.com`, la de la Main y la Handy. Queda pegada en cada web: por eso es nuestra y no la de `workers.dev` |
+| Dirección | La del worker, `tpv-api.altarialights.workers.dev`, para todo: el widget, `embed.js`, el SDK y los enlaces de los correos (`RESERVAS_WEB_ORIGEN`). ⚠️ Queda pegada en cada web: cambiarla después obliga a tocarlas todas. Un nombre propio de `altarialights.com` saldría por IP que se bloquean cuando hay fútbol (INFRA-04, junto a `CLOUD_API_BASE`) |
 | Formularios propios | La API pública con CORS para los dominios del negocio y el SDK (§7.4). Turnstile va en una página nuestra metida en un iframe (`…/verificar`): sólo funciona en los dominios dados de alta en su widget |
 | Mesa automática | Sin mesa (`mesa: "auto"`), la de menos plazas en la que quepan; si empatan, la primera por `ID_Mesa`. La elige la agenda en su bloque síncrono. Sin ninguna, `sin_mesa_libre` |
 | Nombres de la API | Los mismos en lo que entra y en lo que sale: `dia`, `hora`, `personas`, `mesa` (siempre el id; el nombre, `mesa_nombre`), `correo` (`correo_enviado`, si salió). Lo de dentro (la agenda y la Main) sigue con `dia_ymd`, `id_mesa` y `email` |
@@ -448,8 +448,9 @@ deja `verificar.html` y `v1/sdk.js`, éste compilado desde las fuentes del SDK
 (`apps/reservas-web/vite.config.ts`).
 
 La dirección que va en la línea para pegar y en los enlaces de los correos es `RESERVAS_WEB_ORIGEN`
-(`claves.ts::origenDelWidget`), no la de la petición: la Main la pide por `tpv-api`. Con
-`wrangler dev`, `RESERVAS_WEB_ORIGEN=` (vacía) en `.dev.vars` hace que salga la local.
+(`claves.ts::origenDelWidget`), no la de la petición: así no depende de por qué dirección la pida la
+Main. Hoy es la de `workers.dev`. Con `wrangler dev`, `RESERVAS_WEB_ORIGEN=` (vacía) en `.dev.vars`
+hace que salga la local.
 
 ### 4.7 Interruptor remoto `reservas_web`
 
@@ -719,7 +720,7 @@ el mismo origen.
 
 ```html
 <div data-negocio="rw_…"></div>
-<script src="https://reservas-tpv.altarialights.com/reservas-web/v1/embed.js" async></script>
+<script src="https://tpv-api.altarialights.workers.dev/reservas-web/v1/embed.js" async></script>
 ```
 
 `embed.js` (vanilla, unos 2 KB) busca los `[data-negocio]` y mete en cada uno un iframe (sin borde,
@@ -850,7 +851,7 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 | ✅ **5 · Correos y cambios** | Las plantillas, el enlace de cancelar, la doble confirmación, cancelar sin borrar, la cola de avisos y su job | Código y tests hechos el 2026-10-19. En producción llegan los correos y se cancela desde el enlace. Falta ver llegar los otros tres (cambio y cancelación por el restaurante, y el de «no se pudo registrar») |
 | **6 · Piloto** | Los textos de LEGAL-01, `arquitectura/reservas-web.md` y la primera web propia con un bar | Un bar recibe reservas reales |
 | **7 · WordPress** | El plugin: ajustes con la clave, shortcode y bloque, que imprimen la línea del §7.3 | Instalado en un WordPress de prueba |
-| **8 · Dirección propia, API abierta y SDK** | `reservas-tpv.altarialights.com` y `tpv-api.altarialights.com` (`routes` en `wrangler.json`), los nombres unificados de la API, la mesa automática, el CORS para las webs del negocio, la casilla de Turnstile en iframe y el SDK (§7.4) | Código y tests hechos el 2026-10-24. La dirección propia está pendiente de [INFRA-04](../pendientes.md#infra-04--la-dirección-propia-cae-con-los-bloqueos-de-laliga) (los bloqueos de LaLiga). Falta: desplegar el worker, publicar una Main con la dirección nueva, publicar el SDK en npm y probar un formulario propio desde una web dada de alta |
+| **8 · API abierta y SDK** | Los nombres unificados de la API, la mesa automática, el CORS para las webs del negocio, la casilla de Turnstile en iframe y el SDK (§7.4); la dirección de la línea y los correos, fija (`RESERVAS_WEB_ORIGEN`) | Código y tests hechos el 2026-10-24. La dirección propia se probó y se volvió a `workers.dev` el 2026-10-25 (INFRA-04). Falta: desplegar el worker, probar un formulario propio desde una web dada de alta y publicar el SDK en npm |
 
 ---
 
@@ -858,17 +859,15 @@ Cada fase se sube y se prueba sin esperar a la siguiente.
 
 **Cloudflare** (lo hace el responsable):
 
-1. **Turnstile**: widget «Panel embebido de reservas», modo gestionado, con los hostnames
-   `tpv-api.altarialights.workers.dev` (✅) y `reservas-tpv.altarialights.com` (falta, antes de
-   desplegar la fase 8). Para desarrollar se usan las claves de prueba que publica la documentación de
-   Turnstile.
+1. ✅ **Turnstile**: widget «Panel embebido de reservas», hostname
+   `tpv-api.altarialights.workers.dev`, modo gestionado. Para desarrollar se usan las claves de
+   prueba que publica la documentación de Turnstile.
 2. ✅ El secreto está guardado como `TURNSTILE_SECRET_KEY` (`wrangler secret put`), y la clave
    pública, que no es secreta, como `TURNSTILE_SITE_KEY` en las `vars` de `wrangler.json`.
 3. ✅ **Correo**: se envía desde `reservas@altarialights.com` (el dominio ya estaba dado de alta
    por `pedidos@`). Comprobado con los correos de la fase 5, que llegan en producción.
 4. La clase nueva del DO y los dos limitadores van en `wrangler.json` y se crean al desplegar: no hay
-   que tocar nada en el panel. Igual los dos nombres propios (`routes` con `custom_domain`): Cloudflare
-   crea su DNS y su certificado al desplegar, porque `altarialights.com` está en la misma cuenta.
+   que tocar nada en el panel.
 
 **npm:** la organización `altarialights`, para publicar el SDK (fase 8).
 
@@ -897,6 +896,8 @@ en la fase 1.
 - **Cancelar desde el enlace en el segundo en que el alta se da por vista** cancela, pero puede no
   mandar el correo de «has cancelado»: la lectura de Turso no trae al cliente y la agenda ya olvidó
   el correo del alta. La página de cancelar ya se lo dice.
+- **La dirección `workers.dev`** queda pegada en cada web. Es lo aceptado frente a un nombre propio de
+  `altarialights.com`, que caería con los bloqueos de LaLiga (INFRA-04).
 
 ---
 

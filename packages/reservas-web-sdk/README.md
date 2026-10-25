@@ -12,8 +12,8 @@ que da el TPV en **Configuración → Reservas → Código para tu web**.
 1. **La clave del restaurante.** Es el `rw_…` del código para la web del TPV (`data-negocio="rw_…"`).
 2. **El dominio de tu web, dado de alta para ese restaurante.** Sin eso, el navegador no deja a tu
    web hablar con el servidor de reservas ni mostrar la casilla de «no soy un robot». Pide que lo den
-   de alta (`pnpm reservas-web:dominio-poner --tenant <id> --origen https://www.turestaurante.es`).
-   Para probar en local vale `http://localhost:<puerto>`.
+   de alta con su origen exacto: `https://www.turestaurante.es` y `https://turestaurante.es` son dos
+   distintos. Para probar en local vale `http://localhost:<puerto>`.
 
 ## Instalar
 
@@ -25,7 +25,7 @@ Sin compilación (un WordPress, un HTML suelto), se importa directamente del ser
 
 ```html
 <script type="module">
-  import { reservasWeb } from "https://reservas-tpv.altarialights.com/reservas-web/v1/sdk.js";
+  import { reservasWeb } from "https://tpv-api.altarialights.workers.dev/reservas-web/v1/sdk.js";
 </script>
 ```
 

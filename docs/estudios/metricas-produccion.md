@@ -103,7 +103,7 @@ GROUP BY 1 ORDER BY 1 DESC LIMIT 30;
 Lo que decide si la fase 1 de la recuperación ([recuperacion.md](../arquitectura/recuperacion.md)) cabe holgada:
 
 ```bash
-curl -X POST https://tpv-api.altarialights.com/v1/sync/bootstrap \
+curl -X POST https://tpv-api.altarialights.workers.dev/v1/sync/bootstrap \
   -H "Authorization: Bearer <jwt>" ... | wc -c
 ```
 
