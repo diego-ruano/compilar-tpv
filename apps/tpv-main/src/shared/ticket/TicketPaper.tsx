@@ -31,9 +31,6 @@ import { CERO, por } from "../lib/dinero";
 /** Columnas mientras Rust contesta: el valor por defecto de un papel de 80 mm. */
 const COLS_POR_DEFECTO = 42;
 
-/** MODO-PRUEBA (temporal): gemelo de `es_numero_de_prueba` en `tpv_domain::verifactu`. */
-const esNumeroDePrueba = (n: string) => n.trim().startsWith("PRUEBA/");
-
 const Separador = ({ solido }: { solido?: boolean }) => (
     <div style={{ borderTop: `1px ${solido ? "solid" : "dashed"} #000`, margin: "10px 0" }} />
 );
@@ -128,39 +125,6 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
             {/* `ch` = ancho de un carácter en esta fuente monoespaciada: el papel mide exactamente
                 las columnas que tendrá el de verdad. */}
             <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14, width: `${cols}ch` }}>
-                {/* El QR tributario abre la factura (FISCAL-01, art. 21 de la Orden), precedido de
-                    «QR tributario:» y seguido de «VERI*FACTU». Sin URL no se pinta nada: es el caso
-                    de la precuenta, que no es una factura.
-
-                    La previa lo pinta como un recuadro con la leyenda, no como un código real: lo
-                    que tiene que reflejar es dónde va y con qué textos; el código del papel lo
-                    genera Rust desde la URL guardada. */}
-                {p.qr_url ? (
-                    <>
-                        <Centrado>QR tributario:</Centrado>
-                        <div
-                            aria-label="Código QR tributario"
-                            title={p.qr_url}
-                            style={{
-                                width: "16ch",
-                                height: "16ch",
-                                margin: "6px auto",
-                                border: "2px solid #000",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                fontSize: 10,
-                                opacity: 0.75,
-                            }}
-                        >
-                            QR
-                        </div>
-                        <Centrado negrita>VERI*FACTU</Centrado>
-                        {p.qr_pruebas ? <Centrado negrita>-- ENTORNO DE PRUEBAS --</Centrado> : null}
-                        <Separador />
-                    </>
-                ) : null}
-
                 {/* Cabecera: los datos del negocio, a la izquierda. El logo cierra el ticket. */}
                 <div style={{ textAlign: "left" }}>
                     {p.show_business_name ? (
@@ -188,12 +152,6 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
                     <>
                         {p.es_anulado ? <Centrado negrita>*** ANULADO ***</Centrado> : null}
                         {p.es_copia ? <Centrado negrita>COPIA</Centrado> : null}
-                        {esNumeroDePrueba(numero) ? (
-                            <>
-                                <Centrado negrita>*** MODO PRUEBA ***</Centrado>
-                                <Centrado negrita>SIN VALOR FISCAL</Centrado>
-                            </>
-                        ) : null}
                         {/* Lo que distingue el papel de una factura que no es un ticket: una
                             rectificativa dice qué rectifica, una completa (F1/F3) qué sustituye, y
                             las dos llevan al cliente. Espejo de `bloque_tipo_de_factura`. */}

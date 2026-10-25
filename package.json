@@ -34,15 +34,7 @@
     "reservas-web:dominio-quitar": "node scripts/tpv-license.mjs reservas-web-dominio-quitar",
     "reservas-web:revocar-clave": "node scripts/tpv-license.mjs reservas-web-revocar-clave",
     "release:lista": "node scripts/tpv-license.mjs release-lista",
-    "release:promocionar": "node scripts/tpv-license.mjs release-promocionar",
-    "verifactu:validar-xml": "python scripts/verifactu-validar-xml.py",
-    "verifactu:certificados": "cargo run -q -p tpv-infra-aeat --example certificados",
-    "verifactu:probar-aeat": "cargo run -q -p tpv-infra-aeat --example probar_aeat",
-    "verifactu:ciclo": "cargo run -q -p tpv-infra-aeat --example ciclo_completo",
-    "verifactu:devoluciones": "cargo run -q -p tpv-infra-aeat --example devoluciones",
-    "verifactu:experimento": "cargo run -q -p tpv-infra-aeat --example experimento_cadena",
-    "verifactu:errores": "cargo run -q -p tpv-infra-aeat --example errores_esperados",
-    "verifactu:limites": "cargo run -q --release -p tpv-infra-aeat --example lote_y_subsanacion"
+    "release:promocionar": "node scripts/tpv-license.mjs release-promocionar"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -104,8 +104,7 @@ pub async fn license_activate(
 
     // RI-56: el `tenant_id` es el número de instalación de cada registro de facturación, y en un
     // equipo recién instalado `setup()` corrió antes de que existiera. Sin esto, todo lo facturado
-    // hasta el siguiente reinicio salía con `NumeroInstalacion` vacío. Los que ya salieran así los
-    // rellena el job de remisión antes de enviarlos (`asegurar_sistema_reparado`).
+    // hasta el siguiente reinicio salía con `NumeroInstalacion` vacío.
     //
     // Y la etiqueta de Sentry, por lo mismo: `setup()` la lee del mismo fichero, así que en un
     // equipo recién estrenado los errores salían sin negocio hasta el siguiente reinicio.

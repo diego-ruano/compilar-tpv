@@ -23,7 +23,6 @@ pub struct FacturaDelTicket {
     pub fecha_expedicion: String,
     /// La hora en que se generó el registro (`2027-01-02T13:45:10+01:00`).
     pub fecha_hora_huso: String,
-    pub qr_url: String,
     pub importe_total: Dinero,
     /// El desglose declarado, leído de `Desglose_Json`.
     pub tramos: Vec<TramoIva>,
@@ -49,14 +48,14 @@ pub struct TicketDePago {
     pub origen: String,
     pub anulado: bool,
     /// Es la devolución de parte de otro cobro (`Pagos.ID_Pago_Origen`): sus líneas son las
-    /// devueltas, y el papel las lleva en negativo aunque no haya rectificativa (modo prueba).
+    /// devueltas, y el papel las lleva en negativo aunque no haya rectificativa.
     pub es_devolucion: bool,
-    /// `Pagos.Fecha_Hora`. Es la fecha del papel cuando el cobro no tiene factura (modo prueba).
+    /// `Pagos.Fecha_Hora`. Es la fecha del papel cuando el cobro no tiene factura.
     pub fecha_hora: String,
     /// Las líneas que documenta la factura: las que cobró ESE pago (no las de la comanda entera)
     /// o, en una `F3` de varios tickets, las de todos los cobros que canjea.
     pub lineas: Vec<LineaVendida>,
-    /// `None` en un cobro sin registro de facturación (modo prueba).
+    /// `None` en un cobro sin registro de facturación (uno anterior a la numeración).
     pub factura: Option<FacturaDelTicket>,
     /// Todas las facturas del cobro, en el orden en que se expidieron: el ticket o la `F1`, la `F3`
     /// que lo canjeó (sola o con otros tickets), la rectificativa de una devolución y su `F3`

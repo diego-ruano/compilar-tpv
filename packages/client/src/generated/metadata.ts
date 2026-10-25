@@ -180,17 +180,8 @@ export const nombresComandos = {
     "vr_get_index_rows": "vrGetIndexRows",
     "vr_get_detalles_ver_ticket": "vrGetDetallesVerTicket",
     "verifactu_estado": "verifactuEstado",
-    "verifactu_listar": "verifactuListar",
-    "verifactu_certificados": "verifactuCertificados",
-    "verifactu_set_certificado": "verifactuSetCertificado",
-    "verifactu_probar_conexion": "verifactuProbarConexion",
     "verifactu_emitir_factura_de_tickets": "verifactuEmitirFacturaDeTickets",
     "verifactu_corregir_factura": "verifactuCorregirFactura",
-    "verifactu_subsanar_rechazados": "verifactuSubsanarRechazados",
-    "verifactu_set_modo_prueba": "verifactuSetModoPrueba",
-    "verifactu_reconocer_anomalias": "verifactuReconocerAnomalias",
-    "verifactu_exportar": "verifactuExportar",
-    "verifactu_declaracion_responsable": "verifactuDeclaracionResponsable",
     "stats_mesas_get": "statsMesasGet",
     "stats_productos_list_categorias": "statsProductosListCategorias",
     "stats_productos_resumen": "statsProductosResumen",
@@ -414,17 +405,8 @@ type Argumentos = {
     "vr_get_index_rows": { args: Parameters<Comandos["vrGetIndexRows"]>[0] };
     "vr_get_detalles_ver_ticket": { args: Parameters<Comandos["vrGetDetallesVerTicket"]>[0] };
     "verifactu_estado": {  };
-    "verifactu_listar": { limite: Parameters<Comandos["verifactuListar"]>[0]; desplazamiento: Parameters<Comandos["verifactuListar"]>[1] };
-    "verifactu_certificados": {  };
-    "verifactu_set_certificado": { huella: Parameters<Comandos["verifactuSetCertificado"]>[0] };
-    "verifactu_probar_conexion": { huella: Parameters<Comandos["verifactuProbarConexion"]>[0] };
     "verifactu_emitir_factura_de_tickets": { idPagos: Parameters<Comandos["verifactuEmitirFacturaDeTickets"]>[0]; destinatario: Parameters<Comandos["verifactuEmitirFacturaDeTickets"]>[1] };
     "verifactu_corregir_factura": { numFactura: Parameters<Comandos["verifactuCorregirFactura"]>[0]; destinatario: Parameters<Comandos["verifactuCorregirFactura"]>[1] };
-    "verifactu_subsanar_rechazados": {  };
-    "verifactu_set_modo_prueba": { encendido: Parameters<Comandos["verifactuSetModoPrueba"]>[0] };
-    "verifactu_reconocer_anomalias": {  };
-    "verifactu_exportar": { destino: Parameters<Comandos["verifactuExportar"]>[0]; desde: Parameters<Comandos["verifactuExportar"]>[1]; hasta: Parameters<Comandos["verifactuExportar"]>[2] };
-    "verifactu_declaracion_responsable": {  };
     "stats_mesas_get": { range: Parameters<Comandos["statsMesasGet"]>[0] };
     "stats_productos_list_categorias": {  };
     "stats_productos_resumen": { args: Parameters<Comandos["statsProductosResumen"]>[0] };

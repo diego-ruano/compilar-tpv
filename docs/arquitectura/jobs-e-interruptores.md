@@ -42,7 +42,6 @@ un fallo parcial.
 | `licencia` | 6 h | 2 min | MainOperativa | — | `gate` de la licencia y sus avisos; emite `license:changed` |
 | `licencia_reloj` | 5 min | 5 min | Siempre | — | Cuenta el tiempo sin conexión de la gracia offline con el reloj monótono, sin red (RI-36) |
 | `interruptores` | 5 min | 20 s | MainOperativa | — | Pregunta a la nube qué está apagado |
-| `verifactu_remitir` | 60 s | 60 s | MainOperativa | `verifactu_remitir` | Remite a la AEAT ([verifactu.md](verifactu.md#la-remisión)) |
 | `avisos` | 10 min | 60 s | MainOperativa | — | Tareas vencidas y reservas próximas |
 | `fichajes_colgados` | 1 h | 30 s | MainOperativa | — | Cierra como incidencia, sin hora de salida, las jornadas abiertas que entraron hace más de 16 h. Hasta entonces son la jornada en curso, aunque sean de ayer: un turno de noche ficha la salida al día siguiente |
 | `caja_sin_cerrar` | 1 h | 2 min | MainOperativa | — | Avisa si la caja lleva más de 20 h abierta ([caja.md](caja.md)) |
@@ -88,11 +87,10 @@ pnpm interruptor:lista    -- [--historial]
 | Lo que pregunta el TPV | `domains/interruptores/interruptores.routes.ts` (`POST /v1/interruptores`) | Por `tenantAuth`; el tenant sale del token |
 | Decisión en el TPV | `tpv-application/src/use_cases/interruptores.rs` | Qué vale y cuánto (aquí están los tests) |
 | Estado en el TPV | `src-tauri/src/interruptores.rs` + job `interruptores` | En memoria y en `AppData/interruptores.json` |
-| Pantalla | `features/configuracion/sections/AvisoInterruptores.tsx` | «Pausado por soporte» en Conectividad y en Fiscal |
+| Pantalla | `features/configuracion/sections/AvisoInterruptores.tsx` | «Pausado por soporte» en Conectividad |
 
 | Interruptor | Dónde se mira | Qué deja de pasar |
 |---|---|---|
-| `verifactu_remitir` | motor de jobs | Remitir a la AEAT; los registros siguen `PENDIENTE`. **Máximo 24 h** |
 | `reparacion_nube` | `verificar_nube` | Encolar reparaciones y borrados; se sigue comparando e informando |
 | `volcado_atraso` | `socketMain.ts::subirLoPendiente` | El volcado a la cola del DO: se sube por el camino en vivo |
 | `cola_do` | `tenantHub.cola.ts::drenarCola` (worker) | Drenar la cola de entrada; se vuelve a mirar cada 5 min |
@@ -104,7 +102,7 @@ pnpm interruptor:lista    -- [--historial]
 ### Reglas
 
 - **Para entrar en la lista, las tres cosas a la vez**: es **automática**; puede dañar **a muchos a la
-  vez o fuera del equipo** (escribe en la nube o en la AEAT, o cuesta dinero); y **pausarla no pierde
+  vez o fuera del equipo** (escribe en la nube o cuesta dinero); y **pausarla no pierde
   nada** (lo pendiente espera en su cola). Quedan fuera lo que protege (copias, licencia), el outbox y
   el WebSocket en vivo (apagarlos congela todas las Handy; para un solo equipo está
   `connectivity: "off"`).
@@ -113,7 +111,7 @@ pnpm interruptor:lista    -- [--historial]
 - **Si no se sabe, está encendido.** El worker devuelve lista vacía si la base central no contesta; el
   TPV olvida lo que dijo la nube a la **hora** sin poder confirmarlo (`VIGENCIA_CONSULTA_MS`), y un
   fichero roto o ausente es todo encendido.
-- **Todo apagado caduca**: `expires_at_ms` es obligatorio, con un tope de 7 días (24 h el de la AEAT).
+- **Todo apagado caduca**: `expires_at_ms` es obligatorio, con un tope de 7 días.
   Encender adelanta la caducidad a ahora sin borrar la fila.
 - **La tabla no lleva `CHECK` sobre el nombre**: lo valida el zod del worker, y un nombre que un binario
   viejo no conoce se salta al leer la respuesta.

@@ -8,9 +8,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 
 | ID | Sev | Qué | Estado |
 |---|---|---|---|
-| [VF-PRODUCTOR](#identidad-del-productor) | 🔴 | Identidad del productor del software | Aplazado a propósito; bloquea la remisión |
-| [VF-DECLARACION](#texto-de-la-declaración-responsable) | 🔴 | Texto definitivo de la declaración responsable | Borrador |
-| [VF-MODO-PRUEBA](#quitar-el-modo-prueba) | 🔴 | Quitar el modo prueba antes de octubre de 2028 (anunciado, aún sin BOE) | Sin empezar |
+| [VF-VUELTA](#vf-vuelta--volver-a-poner-verifactu) | 🔴 | Volver a poner Veri\*factu antes de que sea obligatorio | Aplazado; vive en `con-verifactu` |
 | [LEGAL-01](#legal-01--rgpd) | 🟠 | Papeleo RGPD de encargado del tratamiento | Sin empezar |
 | [LEGAL-02](#legal-02--reglamento-de-ciberresiliencia) | 🟠 | Reglamento de Ciberresiliencia | Sin empezar |
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
@@ -34,43 +32,26 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 
 ## Veri\*factu
 
-Lo técnico funciona contra la AEAT ([PRUEBAS_AEAT.md](PRUEBAS_AEAT.md)); lo que queda son datos y
-decisiones.
+### VF-VUELTA · Volver a poner Veri\*factu
 
-### Identidad del productor
+Esta rama no remite a la AEAT. Veri\*factu entero —remisión, certificado, QR en el papel, avisos,
+anomalías, exportación, declaración responsable y modo prueba— está en `con-verifactu` (Windows 10
+y 11) y `con-verifactu-windows-7`, tal como estaba el 25-10-2026. La retirada es un solo commit de
+`main` (`git log --oneline --grep "sin Veri"`): volver a ponerlo empieza por revertirlo sobre la
+rama de trabajo y resolver lo que haya cambiado desde entonces.
 
-Las constantes `PRODUCTOR_*` de `apps/tpv-main/src-tauri/src/lib.rs` van en el bloque
-`SistemaInformatico` de cada registro:
+Con él vuelve lo que estaba pendiente allí:
 
-| Constante | Valor | Máx. | Falta |
-|---|---|---|---|
-| `PRODUCTOR_NOMBRE_RAZON` | `Altaria Lights` | 120 | Confirmar que es la razón social y no el nombre comercial |
-| `PRODUCTOR_NIF` | **vacío** | 9 | El NIF definitivo |
-| `PRODUCTOR_NOMBRE_SISTEMA` | `TPV Altaria` | 30 | Confirmar |
-| `PRODUCTOR_ID_SISTEMA` | `01` | 2 | Confirmar |
+- **La identidad del productor**: `PRODUCTOR_NIF` está vacío y sin él no se remite. Falta saber si
+  el productor será un autónomo o una sociedad, y confirmar `PRODUCTOR_NOMBRE_RAZON`,
+  `PRODUCTOR_NOMBRE_SISTEMA` y `PRODUCTOR_ID_SISTEMA`.
+- **El texto de la declaración responsable** (art. 13 RRSIF), que es un borrador.
+- **Quitar el modo prueba**, que vuelve con la reversión.
+- **Qué se hace con lo emitido en esta rama.** Esos registros tienen su huella y su QR, pero no fila
+  en `_Verifactu_Envios`: tras revertir, `resembrar_cola_de_envio` los encolaría todos para remitir.
+  Hay que decidir entonces si se remiten.
 
-Aplazado a propósito hasta saber si el productor será un autónomo o una sociedad. Mientras tanto se
-vende, se emite y se encadena, pero **no se remite** (`productor_configurado`), y el día que la
-versión traiga el NIF los registros emitidos sin él se corrigen solos antes del primer envío
-(`asegurar_sistema_reparado`). Detalle en
-[arquitectura/verifactu.md](arquitectura/verifactu.md#la-remisión).
-
-Si algún día hay que probar en producción, un `IdSistemaInformatico` distinto para las pruebas hace
-que el sistema definitivo empiece sin el aviso 2007.
-
-### Texto de la declaración responsable
-
-`TEXTO_DECLARACION` en `commands/verifactu.rs` es un borrador con lo que exige el art. 13 RRSIF. Hay
-que revisarlo con la empresa constituida y, si procede, con un asesor: la firma el productor. Hasta
-que `PRODUCTOR_NIF` exista, la pantalla dice que la declaración está incompleta.
-
-### Quitar el modo prueba
-
-Todo lo que hay que borrar lleva la etiqueta `MODO-PRUEBA` (`git grep -n MODO-PRUEBA`), más la columna
-`Business_Settings.Modo_Prueba`, que para entonces irá en una migración nueva. **Antes de octubre de
-2028**: un interruptor que deja de declarar ventas no puede existir en un TPV que se venda.
-
-Esa fecha la anunció Hacienda el 5 de octubre de 2026
+La fecha la anunció Hacienda el 5 de octubre de 2026
 ([nota informativa](https://www.hacienda.gob.es/sgt/gabsehacienda/nota-informativa-verifactu.pdf)):
 aplazar Veri\*factu hasta octubre de 2028 para que coincida con la factura electrónica obligatoria
 de quien factura hasta 8 millones al año. **Todavía no está en el BOE.** Hasta que salga, lo vigente

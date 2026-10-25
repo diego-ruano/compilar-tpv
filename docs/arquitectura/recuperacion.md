@@ -140,8 +140,8 @@ arrancar, antes de abrir la base, y comprimirlas retrasaría el arranque.
 
 ## Reconciliar y desbloquear
 
-Tras restaurar, `_Recovery_State.Reconciliation_Pending = 1`, se reencolan los registros de facturación
-([verifactu.md](verifactu.md#tras-restaurar)) y el socket hace, en orden: **catch-up** (lo ocurrido
+Tras restaurar, `_Recovery_State.Reconciliation_Pending = 1` ([verifactu.md](verifactu.md#tras-restaurar)
+dice qué pasa con los registros de facturación) y el socket hace, en orden: **catch-up** (lo ocurrido
 después de la copia), **subir el outbox** (lo que la copia tenía) y **catch-up** otra vez hasta que el
 outbox esté a 0 y el checkpoint alcance el final del log de la nube (hasta 180 vueltas).
 `completar` vuelve a comprobarlo y desbloquea el login. Si `/v1/sync/changes` no informa del

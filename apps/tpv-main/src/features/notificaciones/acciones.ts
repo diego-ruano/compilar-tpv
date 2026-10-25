@@ -27,8 +27,8 @@ const DESTINOS: Record<string, DestinoNotificacion> = {
   // (ajustar el lote / revisar la ficha del cliente).
   ver_inventario: { to: "/Inventario" },
   ver_clientes: { to: "/Clientes" },
-  // FISCAL-01: atraso en la remisión a la AEAT. Lleva a la pantalla donde se ve la cola, el
-  // certificado y el botón de probar la conexión, que es donde se resuelve.
+  // FISCAL-01: lleva a los datos fiscales del negocio. Lo llevan también los avisos de envío a la
+  // AEAT que se hubieran creado con la rama `con-verifactu`.
   ver_fiscal: { to: "/Configuracion", state: { seccion: "FISCAL" } },
 };
 

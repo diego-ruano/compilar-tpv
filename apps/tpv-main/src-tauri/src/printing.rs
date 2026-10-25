@@ -289,13 +289,13 @@ fn sep(out: &mut Vec<u8>, cols: usize) {
 /// Desglose de IVA del papel.
 ///
 /// En una factura es el **declarado** (`p.desglose`, leído de su `Desglose_Json`): el papel dice
-/// lo que se remitió, no un recálculo (RI-29). Sólo la precuenta, que no tiene registro, lo calcula
+/// lo que se declaró en el registro, no un recálculo (RI-29). Sólo la precuenta, que no tiene registro, lo calcula
 /// de las líneas con `tpv_domain::ticket`.
 ///
 /// **La cuenta no vive aquí desde FISCAL-01.** Tiene tres consumidores —este generador, la vista
-/// previa de `TicketPaper.tsx` y el `Desglose` del registro de facturación que se remite a la
-/// AEAT— y tres copias de la misma aritmética es exactamente la divergencia que no se ve hasta que
-/// la AEAT devuelve un «aceptado con errores» meses después. Las reglas (la cuota se despeja, no
+/// previa de `TicketPaper.tsx` y el `Desglose` del registro de facturación— y tres copias de la
+/// misma aritmética es exactamente la divergencia que no se ve hasta que el papel y el registro
+/// dicen cosas distintas del mismo cobro. Las reglas (la cuota se despeja, no
 /// se redondea) están documentadas allí.
 ///
 /// Una línea sin tipo propio usa el general del negocio, que es el caso de casi todo.
@@ -428,95 +428,6 @@ pub fn rasterizar_logo(bytes: &[u8], ancho_max_dots: u32) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Lado (en dots) que debe tener el código QR para caer en la banda de **30 a 40 mm** que exige el
-/// art. 21.1 de la Orden, al DPI configurado.
-///
-/// Se calcula desde el papel y no desde `chars_per_line`: esa opción es la densidad del TEXTO, no
-/// del código. Y si el papel es tan estrecho que no caben 30 mm más su zona de silencio, se usa lo
-/// que haya: un QR algo menor sigue leyéndose, y un QR que no cabe no se imprime.
-fn lado_qr_dots(paper_width_mm: u32, margin_left_mm: f64, margin_right_mm: f64, dpi: u32) -> u32 {
-    let util_mm = (printable_mm(paper_width_mm) - margin_left_mm.max(0.0) - margin_right_mm.max(0.0))
-        .max(1.0);
-    // Zona de silencio: mínimo 2 mm por los cuatro lados (la especificación recomienda 6).
-    let disponible_mm = (util_mm - 2.0 * ZONA_SILENCIO_MM).max(1.0);
-    let objetivo_mm = disponible_mm.clamp(QR_MIN_MM, QR_MAX_MM);
-    mm_to_dots(objetivo_mm, dpi).max(8)
-}
-
-/// Rasteriza la URL a un bloque ESC/POS `GS v 0`, por el **mismo camino que el logo**.
-///
-/// Se hace así y no con el `GS ( k` nativo de QR de ESC/POS porque es más portable: el comando
-/// nativo no lo llevan todas las térmicas, y una que no lo entienda imprime la basura del comando
-/// en vez del código. Una trama de bits la pinta cualquiera.
-///
-/// - ISO/IEC 18004:2015 con nivel de corrección **M** (medio), que es el que exige el art. 21.1.
-/// - Cada módulo del código se dibuja como un cuadrado de N×N dots, con N entero: un escalado
-///   fraccionario deja módulos de anchos distintos y hay lectores que se atragantan.
-///
-/// Devuelve `None` si la URL no cabe en un QR o si el papel no da ni para un módulo. El ticket sale
-/// entonces sin código: **nada de lo que rodea al ticket puede impedir cobrar**, y la factura
-/// sigue siendo válida (el registro ya está emitido y se remitirá igual).
-pub fn rasterizar_qr(url: &str, lado_max_dots: u32) -> Option<Vec<u8>> {
-    use qrcode::{EcLevel, QrCode};
-
-    let code = QrCode::with_error_correction_level(url.as_bytes(), EcLevel::M).ok()?;
-    let modulos = code.width(); // el código es cuadrado
-    if modulos == 0 {
-        return None;
-    }
-
-    // Escala entera. Si ni siquiera cabe a 1 dot por módulo, no hay QR que imprimir.
-    let escala = (lado_max_dots as usize / modulos).max(1);
-    if modulos * escala > 4096 {
-        return None;
-    }
-
-    let lado = modulos * escala;
-    // Cada byte de la trama son 8 puntos horizontales, así que el ancho se redondea hacia arriba
-    // al múltiplo de 8 y el sobrante queda en blanco (parte de la zona de silencio).
-    let bytes_por_fila = lado.div_ceil(8);
-    let ancho_bits = bytes_por_fila * 8;
-
-    let oscuro: Vec<bool> = code.to_colors().iter().map(|c| *c == qrcode::Color::Dark).collect();
-    if oscuro.len() < modulos * modulos {
-        return None;
-    }
-
-    let mut trama = vec![0u8; bytes_por_fila * lado];
-    for y in 0..lado {
-        let my = y / escala;
-        for x in 0..lado {
-            let mx = x / escala;
-            if oscuro[my * modulos + mx] {
-                trama[y * bytes_por_fila + x / 8] |= 0x80 >> (x % 8);
-            }
-        }
-    }
-    debug_assert!(ancho_bits >= lado);
-
-    // GS v 0 m xL xH yL yH + datos
-    let mut out = vec![0x1D, 0x76, 0x30, 0x00];
-    out.push((bytes_por_fila & 0xFF) as u8);
-    out.push(((bytes_por_fila >> 8) & 0xFF) as u8);
-    out.push((lado & 0xFF) as u8);
-    out.push(((lado >> 8) & 0xFF) as u8);
-    out.extend_from_slice(&trama);
-    Some(out)
-}
-
-/// Tamaño mínimo y máximo del QR en milímetros (art. 21.1 de la Orden).
-const QR_MIN_MM: f64 = 30.0;
-const QR_MAX_MM: f64 = 40.0;
-/// Zona de silencio alrededor del código: mínimo 2 mm por los cuatro lados.
-const ZONA_SILENCIO_MM: f64 = 2.0;
-
-/// Texto que SIEMPRE precede al código, para distinguirlo de cualquier otro QR de la factura.
-const QR_ROTULO: &str = "QR tributario:";
-/// Leyenda que va justo debajo en un sistema que emite facturas verificables.
-const QR_LEYENDA: &str = "VERI*FACTU";
-/// Aviso del entorno de pruebas. No lo pide la norma: lo pide el sentido común.
-const QR_AVISO_PRUEBAS: &str = "-- ENTORNO DE PRUEBAS --";
-
 /// Lo que distingue el papel de una factura que no es un ticket. Todo sale del registro (RI-29):
 ///
 /// - Una **rectificativa** (`R1`–`R5`) se titula FACTURA RECTIFICATIVA y dice qué factura rectifica
@@ -590,8 +501,6 @@ pub fn como_precuenta(mut p: PrintTicketPayload) -> PrintTicketPayload {
     p.numero_ticket = None;
     p.fecha = None;
     p.metodo_pago = None;
-    p.qr_url = None;
-    p.qr_pruebas = false;
     p.es_copia = false;
     p.es_anulado = false;
     p.abre_cajon = false;
@@ -621,41 +530,6 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
 
     // Tamaño base del cuerpo (respeta font_scale); las cabeceras lo sobreescriben y restauran.
     esc_size(&mut out, base_size);
-
-    // ── El QR tributario abre la factura (FISCAL-01, art. 21 de la Orden) ──
-    //
-    // «El código QR se situará al principio de la factura, antes de que empiece el contenido de
-    // ésta generado por el sistema informático de facturación», centrado respecto a los márgenes,
-    // precedido siempre por el texto «QR tributario:» y seguido de la leyenda «VERI*FACTU».
-    //
-    // El logo, en cambio, cierra el ticket (`docs/arquitectura/tickets.md`): lo primero que se lee
-    // tiene que ser de quién es el ticket y cuánto se ha pagado, y el QR no compite con eso porque
-    // no es contenido sino una etiqueta.
-    //
-    // Si no hay URL (una precuenta, o un cobro de modo prueba) no se imprime nada: ni el hueco ni la
-    // leyenda.
-    if let Some(url) = p.qr_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-        let lado = lado_qr_dots(p.paper_width_mm, p.margin_left_mm, p.margin_right_mm, dpi);
-        if let Some(bloque) = rasterizar_qr(url, lado) {
-            esc_align(&mut out, 1);
-            text_line(&mut out, QR_ROTULO);
-            // Zona de silencio arriba y abajo. `text_line` ya deja el salto de línea; esto añade
-            // el aire que exige la especificación (mínimo 2 mm, recomendado 6).
-            esc_feed_dots(&mut out, mm_to_dots(ZONA_SILENCIO_MM, dpi));
-            out.extend_from_slice(&bloque);
-            esc_feed_dots(&mut out, mm_to_dots(ZONA_SILENCIO_MM, dpi));
-            // La leyenda va en negrita: la norma pide un tipo y tamaño «iguales o superiores a los
-            // del resto de datos de la factura».
-            esc_bold(&mut out, true);
-            text_wrap(&mut out, QR_LEYENDA, cols);
-            if p.qr_pruebas {
-                text_wrap(&mut out, QR_AVISO_PRUEBAS, cols);
-            }
-            esc_bold(&mut out, false);
-            esc_align(&mut out, 0);
-            sep(&mut out, cols);
-        }
-    }
 
     // ── Cabecera: los datos del negocio, a la izquierda ──
     //
@@ -738,17 +612,6 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
             esc_align(&mut out, 1);
             esc_bold(&mut out, true);
             text_line(&mut out, "COPIA");
-            esc_bold(&mut out, false);
-            esc_align(&mut out, 0);
-        }
-        // MODO-PRUEBA (temporal): un cobro de prueba no expide factura, y un papel sin QR que no lo
-        // dijera se leería como un ticket normal. Lo dice el número, así que una reimpresión de
-        // mañana también lo dice aunque el modo ya esté apagado.
-        if tpv_domain::verifactu::es_numero_de_prueba(p.numero_ticket.as_deref().unwrap_or("")) {
-            esc_align(&mut out, 1);
-            esc_bold(&mut out, true);
-            text_line(&mut out, "*** MODO PRUEBA ***");
-            text_line(&mut out, "SIN VALOR FISCAL");
             esc_bold(&mut out, false);
             esc_align(&mut out, 0);
         }

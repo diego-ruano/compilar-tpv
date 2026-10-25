@@ -7,8 +7,8 @@
 //! - Si no se sabe nada de la nube, todo está **encendido**, que es como funcionaba el TPV antes
 //!   de que esto existiera.
 //! - Lo último que dijo la nube vale [`VIGENCIA_CONSULTA_MS`] (una hora). Pasado eso sin volver a
-//!   saber de ella, se olvida: un equipo sin red no puede quedarse con la remisión a la AEAT
-//!   parada porque la última vez que habló con la nube estaba apagada.
+//!   saber de ella, se olvida: un equipo sin red no puede quedarse con una tarea parada porque la
+//!   última vez que habló con la nube estaba apagada.
 //! - Cada apagado trae su propia caducidad y, pasada ésta, está encendido aunque la consulta sea
 //!   reciente.
 //!
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn sin_saber_nada_de_la_nube_todo_esta_encendido() {
         let foto = Instantanea::default();
-        assert!(apagado(&foto, Interruptor::VerifactuRemitir, AHORA).is_none());
+        assert!(apagado(&foto, Interruptor::VolcadoAtraso, AHORA).is_none());
     }
 
     #[test]
@@ -118,7 +118,7 @@ mod tests {
             apagados: vec![apagado_hasta(Interruptor::ReparacionNube, AHORA + 60 * MIN)],
         };
         assert!(apagado(&foto, Interruptor::ReparacionNube, AHORA).is_some());
-        assert!(apagado(&foto, Interruptor::VerifactuRemitir, AHORA).is_none());
+        assert!(apagado(&foto, Interruptor::VolcadoAtraso, AHORA).is_none());
     }
 
     #[test]
@@ -132,19 +132,19 @@ mod tests {
 
     #[test]
     fn lo_que_dijo_la_nube_hace_mas_de_una_hora_se_olvida() {
-        // Es lo que impide que un equipo sin red se quede con la AEAT parada: el apagado duraba
+        // Es lo que impide que un equipo sin red se quede con una tarea parada: el apagado duraba
         // 24 h, pero no se ha podido confirmar en la última hora.
         let foto = Instantanea {
             consultado_ms: AHORA - VIGENCIA_CONSULTA_MS - 1,
-            apagados: vec![apagado_hasta(Interruptor::VerifactuRemitir, AHORA + 20 * 60 * MIN)],
+            apagados: vec![apagado_hasta(Interruptor::VolcadoAtraso, AHORA + 20 * 60 * MIN)],
         };
-        assert!(apagado(&foto, Interruptor::VerifactuRemitir, AHORA).is_none());
+        assert!(apagado(&foto, Interruptor::VolcadoAtraso, AHORA).is_none());
 
         let justo = Instantanea {
             consultado_ms: AHORA - VIGENCIA_CONSULTA_MS,
             ..foto
         };
-        assert!(apagado(&justo, Interruptor::VerifactuRemitir, AHORA).is_some());
+        assert!(apagado(&justo, Interruptor::VolcadoAtraso, AHORA).is_some());
     }
 
     #[test]

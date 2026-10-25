@@ -1522,7 +1522,7 @@ mod tests_numero_ticket {
     //! Sigue siendo lo que permite atar un papel a su cobro —para una devolución, para cuadrar un
     //! arqueo o para el cliente que vuelve a reclamar— y una reimpresión sigue teniendo que sacar
     //! el mismo. Lo que cambia es lo que ese número significa: ahora es el `Num_Serie_Factura` del
-    //! registro que se remite a la AEAT, con serie por ejercicio y reinicio anual.
+    //! registro de facturación, con serie por ejercicio y reinicio anual.
     //!
     //! Y aparece una obligación que el contador de tickets no tenía: **no puede repetir un número
     //! ya emitido**. La clave única de una factura ante la AEAT es (emisor, número, fecha), y un

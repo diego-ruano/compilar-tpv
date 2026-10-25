@@ -44,9 +44,6 @@ uuid = { workspace = true }
 # ───────────── Imágenes (resize + recompresión JPEG antes de subir a R2) ─────────────
 image = { workspace = true }
 
-# ───────────── Código QR del ticket (FISCAL-01) ─────────────
-qrcode = { workspace = true }
-
 # ───────────── Seguridad / Auth ─────────────
 rand = { workspace = true }
 
@@ -55,7 +52,6 @@ tpv-domain = { workspace = true }
 tpv-application = { workspace = true }
 tpv-infra-sqlite = { workspace = true }
 tpv-infra-licensing = { workspace = true }
-tpv-infra-aeat = { workspace = true }
 tpv-infra-http = { workspace = true }
 tpv-contracts = { workspace = true }
 tpv-telemetry = { workspace = true }

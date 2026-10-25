@@ -15,10 +15,10 @@ pub struct BusinessSettings {
     /// A partir de cuánto descuadre el cierre de caja pide un motivo escrito (CUENTA-06).
     pub umbral_descuadre: Dinero,
 
-    // ── Datos fiscales (FISCAL-01, Veri*factu) ──────────────────────────────────────────────────
+    // ── Datos fiscales (FISCAL-01) ──────────────────────────────────────────────────────────────
     /// `NombreRazon` del obligado a expedir la factura. **No es `business_name`**: uno es el rótulo
     /// («Bar La Plaza») y el otro quien factura («Francisco García SL»). El ticket enseña los dos;
-    /// el registro que se remite a la AEAT, sólo este.
+    /// el registro de facturación, sólo este.
     pub razon_social: String,
     /// `DescripcionOperacion`, campo obligatorio de hasta 500 caracteres. Texto fijo configurable y
     /// no un resumen de las líneas: los nombres de producto los escribe el usuario, y un campo
@@ -27,7 +27,8 @@ pub struct BusinessSettings {
     /// Límite (IVA incluido) por encima del cual ya no cabe una simplificada (`F2`) y hay que
     /// emitir factura completa. 3.000 € en hostelería (art. 4.2 RD 1619/2012).
     pub limite_simplif: Dinero,
-    /// `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint del servicio web y la URL del QR.
+    /// `"produccion"` | `"pruebas"`. Decide la base de la URL del QR que guarda el registro. No tiene
+    /// pantalla en esta rama: es de la remisión a la AEAT (ver `docs/arquitectura/verifactu.md`).
     pub verifactu_entorno: String,
 
     // ── Reservas (RI-61) ────────────────────────────────────────────────────────────────────────

@@ -45,8 +45,8 @@ pub fn componer(
     // La rectificativa de una devolución (y su `F3` negativa) documenta las mismas líneas que el
     // cobro, con el signo cambiado: el papel lo dice línea a línea, y su total es el declarado.
     //
-    // Una devolución de parte de un cobro, igual aunque no tenga rectificativa (modo prueba): sus
-    // líneas son las devueltas.
+    // Una devolución de parte de un cobro, igual aunque no tenga rectificativa (un cobro anterior a
+    // la numeración): sus líneas son las devueltas.
     let devuelve =
         t.es_devolucion || t.factura.as_ref().is_some_and(|f| f.importe_total.es_negativo());
     let items = ticket::agrupar_lineas(&t.lineas)
@@ -60,15 +60,14 @@ pub fn componer(
         .collect();
 
     // Con factura, lo fiscal sale del registro: el número, el NIF y la razón social que se
-    // declararon, la fecha de expedición, el QR, el desglose y el total. Sin ella (un cobro de modo
-    // prueba) no hay nada que declarar y el papel sale con los datos de hoy.
-    let (numero, cif, razon_social, fecha, qr_url, desglose, total) = match &t.factura {
+    // declararon, la fecha de expedición, el desglose y el total. Sin ella (un cobro anterior a la
+    // numeración) no hay nada que declarar y el papel sale con los datos de hoy.
+    let (numero, cif, razon_social, fecha, desglose, total) = match &t.factura {
         Some(f) => (
             no_vacio(&f.num_serie),
             f.nif_emisor.clone(),
             f.razon_emisor.clone(),
             ticket::fecha_del_papel(&f.fecha_expedicion, &f.fecha_hora_huso),
-            no_vacio(&f.qr_url),
             Some(
                 f.tramos
                     .iter()
@@ -84,12 +83,8 @@ pub fn componer(
             ticket::fecha_de_cobro(&t.fecha_hora),
             None,
             None,
-            None,
         ),
     };
-    let qr_pruebas = qr_url
-        .as_deref()
-        .is_some_and(|u| u.starts_with(tpv_domain::verifactu::QR_BASE_PRUEBAS));
 
     // Una factura completa lleva a su cliente; una `F3`, además, el ticket que canjea.
     let tipo_factura = t.factura.as_ref().and_then(|f| no_vacio(&f.tipo_factura));
@@ -134,8 +129,6 @@ pub fn componer(
         show_address: ajustes.show_address,
         show_phone: ajustes.show_phone,
         show_footer_message: ajustes.show_footer_message,
-        qr_url,
-        qr_pruebas,
         paper_width_mm: ajustes.paper_width_mm.clamp(0, u32::MAX as i64) as u32,
         paper_dpi: ajustes.paper_dpi.clamp(0, u32::MAX as i64) as u32,
         chars_per_line: ajustes.chars_per_line.clamp(0, u32::MAX as i64) as u32,
@@ -246,7 +239,6 @@ mod tests {
             razon_emisor: "Razon Declarada SL".into(),
             fecha_expedicion: "02-01-2027".into(),
             fecha_hora_huso: "2027-01-02T13:45:10+01:00".into(),
-            qr_url: format!("{}?nif=B12345674", tpv_domain::verifactu::QR_BASE_PRODUCCION),
             importe_total: Dinero::de_centimos(220),
             tramos: vec![TramoIva {
                 tipo: 10.0,
@@ -269,7 +261,6 @@ mod tests {
         assert_eq!(p.fecha.as_deref(), Some("02/01/2027 13:45"), "la fecha es la de expedición");
         assert_eq!(p.total, Some(Dinero::de_centimos(220)));
         assert_eq!(p.desglose.as_ref().map(|d| d.len()), Some(1));
-        assert!(p.qr_url.is_some() && !p.qr_pruebas);
     }
 
     #[test]
@@ -280,22 +271,15 @@ mod tests {
     }
 
     #[test]
-    fn un_qr_de_pruebas_se_marca_por_su_url() {
-        let mut f = factura();
-        f.qr_url = format!("{}?nif=B12345674", tpv_domain::verifactu::QR_BASE_PRUEBAS);
-        assert!(componer(cobro(Some(f)), &negocio(), &ajustes(), false).qr_pruebas);
-    }
-
-    #[test]
     fn sin_factura_el_papel_lleva_el_numero_del_cobro_y_los_datos_de_hoy() {
         let mut t = cobro(None);
-        t.numero_ticket = "PRUEBA/000003".into();
+        t.numero_ticket = "T-000003".into();
         let p = componer(t, &negocio(), &ajustes(), true);
 
-        assert_eq!(p.numero_ticket.as_deref(), Some("PRUEBA/000003"));
+        assert_eq!(p.numero_ticket.as_deref(), Some("T-000003"));
         assert_eq!(p.cif, "B00000000");
         assert_eq!(p.fecha.as_deref(), Some("02/01/2027 13:45"));
-        assert!(p.qr_url.is_none() && p.desglose.is_none() && p.total.is_none());
+        assert!(p.desglose.is_none() && p.total.is_none());
         assert!(p.es_copia);
     }
 
@@ -425,8 +409,8 @@ mod tests {
 
     #[test]
     fn una_devolucion_parcial_sin_rectificativa_tambien_va_en_negativo() {
-        // Un cobro de modo prueba no tiene factura que rectificar, pero su devolución sigue siendo
-        // dinero que sale: líneas en negativo, sin «Pago» y sin abrir el cajón.
+        // Un cobro sin registro de facturación no tiene factura que rectificar, pero su devolución
+        // sigue siendo dinero que sale: líneas en negativo, sin «Pago» y sin abrir el cajón.
         let mut t = cobro(None);
         t.es_devolucion = true;
         let p = componer(t, &negocio(), &ajustes(), false);
@@ -437,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn un_cobro_de_modo_prueba_en_efectivo_abre_el_cajon() {
+    fn un_cobro_sin_registro_en_efectivo_abre_el_cajon() {
         // Sin registro fiscal sigue siendo un cobro: el dinero entra igual.
         assert!(componer(cobro(None), &negocio(), &ajustes(), false).abre_cajon);
     }

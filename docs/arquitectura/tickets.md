@@ -29,11 +29,10 @@ Hay dos papeles y salen de sitios distintos (RI-29):
 
 ## Orden del ticket
 
-**QR tributario → «VERI\*FACTU» → datos del negocio → líneas → totales → desglose de IVA → mensaje →
-logo → corte.**
+**Datos del negocio → líneas → totales → desglose de IVA → mensaje → logo → corte.**
 
-- El **QR** va lo primero porque lo exige la norma; los detalles en
-  [verifactu.md](verifactu.md#el-qr-y-el-papel). La URL no se compone al imprimir: sale del registro.
+- Esta rama no imprime el QR tributario ni la leyenda «VERI\*FACTU»: van con la remisión, en la rama
+  `con-verifactu` ([verifactu.md](verifactu.md#lo-que-no-hay-en-esta-rama)).
 - La **cabecera** son los datos del negocio alineados a la izquierda: lo primero que se lee es de quién
   es y cuánto se ha pagado.
 - El **logo cierra el ticket**, centrado.
@@ -52,11 +51,11 @@ logo → corte.**
   tienen que dar el total (0,39 € al 4 % es el primer caso en que redondear por separado falla). La AEAT
   no detecta una `CuotaTotal` descuadrada, así que esta regla y sus goldens son la única red.
 - **El número de ticket es el número de la factura** (`Pagos.Numero_Ticket` = `Num_Serie_Factura`). Una
-  reimpresión reusa número, fecha, QR y desglose y sale marcada `COPIA`; si el cobro está anulado,
+  reimpresión reusa número, fecha y desglose y sale marcada `COPIA`; si el cobro está anulado,
   también `*** ANULADO ***`.
 - **La fecha de un ticket es la de expedición** de su factura, con la hora en que se generó el
-  registro (`fecha_del_papel`). Sólo la precuenta lleva la de ahora, y un cobro de modo prueba, la del
-  pago.
+  registro (`fecha_del_papel`). Sólo la precuenta lleva la de ahora, y un cobro sin registro (anterior a la
+  numeración), la del pago.
 - **Lo fiscal del papel es lo declarado**: el NIF y la razón social del registro, su `Desglose_Json` y
   su `Importe_Total`, no un recálculo ni los ajustes de hoy.
 - **El último cobro se olvida al cambiar de comanda**: el modal sólo ofrece el ticket del último
@@ -77,7 +76,7 @@ logo → corte.**
 - **El papel de una devolución de parte de un cobro** es el de su pago negativo: lleva sólo las
   líneas devueltas (`Devolucion_Lineas`), en negativo, con su rectificativa. Una línea cuya parte
   devuelta no es unidades × precio (la última de una línea al peso) sale como una unidad por lo
-  devuelto. Sin rectificativa (modo prueba), igual en negativo y sin abrir el cajón.
+  devuelto. Sin rectificativa (un cobro sin registro), igual en negativo y sin abrir el cajón.
 - **El cajón sólo lo abre el ticket original de un cobro en efectivo** (`abre_cajon`, que decide
   `ticket_de_pago`). Ni una copia, ni la `F3` de un canje, ni una rectificativa, ni una precuenta. El
   original sale una vez por sesión (`TicketsImpresos`): imprimirlo otra vez desde la pantalla del

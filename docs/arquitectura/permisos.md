@@ -199,7 +199,7 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
   que no vuelvan `tpv_server_signed_headers` (firmaba cualquier petición sin gate) ni
   `cobrar_venta_rapida` (un segundo camino de cobro no idempotente).
 - **Secretos fuera de la base**: `device_id`, clave ed25519, token de la Handy y DEK en el keyring o en
-  Android Keystore. El certificado de la AEAT no se guarda: sólo su huella.
+  Android Keystore.
 - **PII del personal cifrada** (`DNI`, `IBAN`, `Numero_Seguridad_Social`): AES-256-GCM determinista
   (para que el `UNIQUE` siga funcionando) en `tpv-infra-sqlite::trabajadores`, antes de construir la
   sentencia, así que el outbox replica el texto cifrado (`tpv-infra-licensing/src/field_crypto.rs`).

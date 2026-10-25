@@ -15,7 +15,6 @@ vi.mock("../../src/shared/stores/useMode", () => ({ useMode: (fn: (s: { mode: st
 vi.mock("../../src/features/ventaRapida/ui/AddProductModal", () => ({ default: () => null }));
 vi.mock("../../src/features/inventario/ProductDetailModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/PrintTicketModal", () => ({ default: () => null }));
-vi.mock("../../src/shared/ticket/AvisoFiscalModal", () => ({ anunciarCobro: () => {} }));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const cat = { ID_Categoria: "bebidas", Nombre: "Bebidas", Ruta_Imagen: null };
 const producto = { ID_Producto: "cafe", ID_Categoria: "bebidas", Nombre: "Café", Precio_Venta: 300, Ruta_Imagen: null };

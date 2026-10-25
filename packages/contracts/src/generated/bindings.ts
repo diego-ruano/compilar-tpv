@@ -207,32 +207,22 @@ export type BackfillEstado = {
 };
 
 /**
- *  El bloque fiscal que un cobro devuelve al frontend para que lo meta en el payload de impresión.
+ *  La factura que se acaba de emitir, tal como la devuelven las facturas completas de Cuentas.
  *
  *  **Estos datos no se pueden inventar en el cliente.** Salen de la fila que se acaba de escribir
- *  en `Registros_Facturacion` dentro de la misma transacción que el pago: el número es el que
- *  reservó el contador, el QR es la URL exacta que se guardó, y la huella es la que encadena. Una
- *  reimpresión saca los mismos tres, y por eso se leen de la fila y no se recalculan.
+ *  en `Registros_Facturacion` dentro de la misma transacción: el número es el que reservó el
+ *  contador.
  */
 export type BloqueFiscal = {
 	/**
-	 *  `2027/000001`. Es también `Pagos.Numero_Ticket`: un solo número para el papel, el cobro y el
-	 *  registro — dos numeraciones paralelas serían dos cosas que pueden divergir.
+	 *  `2027/000001`. En un cobro es también `Pagos.Numero_Ticket`: un solo número para el papel,
+	 *  el cobro y el registro — dos numeraciones paralelas serían dos cosas que pueden divergir.
 	 */
 	num_serie_factura: string,
-	/**  `DD-MM-AAAA`, tal cual va al XML y al QR. */
+	/**  `DD-MM-AAAA`. */
 	fecha_expedicion: string,
-	/**  La URL que se rasteriza en el código QR del papel. */
-	qr_url: string,
-	/**  64 hexadecimales en mayúsculas. */
-	huella: string,
 	/**  `F1` | `F2` | `F3` | `R1`..`R5`. */
 	tipo_factura: string,
-	/**
-	 *  `true` si el registro se emitió contra el entorno de **pruebas**. El papel lleva entonces un
-	 *  QR que apunta a `prewww2.aeat.es`, y la pantalla tiene que gritarlo.
-	 */
-	entorno_pruebas: boolean,
 };
 
 /**
@@ -337,7 +327,7 @@ export type BusinessSettings = {
 	/**
 	 *  `NombreRazon` del obligado a expedir la factura. **No es `business_name`**: uno es el rótulo
 	 *  («Bar La Plaza») y el otro quien factura («Francisco García SL»). El ticket enseña los dos;
-	 *  el registro que se remite a la AEAT, sólo este.
+	 *  el registro de facturación, sólo este.
 	 */
 	razon_social: string,
 	/**
@@ -351,7 +341,10 @@ export type BusinessSettings = {
 	 *  emitir factura completa. 3.000 € en hostelería (art. 4.2 RD 1619/2012).
 	 */
 	limite_simplif: Dinero,
-	/**  `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint del servicio web y la URL del QR. */
+	/**
+	 *  `"produccion"` | `"pruebas"`. Decide la base de la URL del QR que guarda el registro. No tiene
+	 *  pantalla en esta rama: es de la remisión a la AEAT (ver `docs/arquitectura/verifactu.md`).
+	 */
 	verifactu_entorno: string,
 	/**  Minutos que dura una reserva que no elige su duración. */
 	reserva_duracion_min: number,
@@ -461,29 +454,6 @@ export type CategoriaVendibleOut = {
 	Nombre: string,
 	Ruta_Imagen: string | null,
 	Pasa_Cocina: number,
-};
-
-/**
- *  Un certificado del almacén, tal como lo enseña la pantalla de selección.
- *
- *  **No lleva nada de dentro del certificado más allá de lo que hace falta para reconocerlo.** La
- *  huella identifica pero no abre; la clave privada no sale nunca del almacén de Windows.
- */
-export type CertificadoDto = {
-	huella: string,
-	sujeto: string,
-	emisor: string,
-	valido_hasta: string,
-	/**
-	 *  `CurrentUser` | `LocalMachine`. **Se enseña**: el almacén es por usuario de Windows, y si la
-	 *  gestoría lo instaló con su sesión el TPV no lo ve. Es la llamada de soporte más previsible
-	 *  de todas y esta palabra es la respuesta.
-	 */
-	almacen: string,
-	/**  ¿Se puede usar sin que salga un diálogo o un PIN? Si no, no sirve para el envío automático. */
-	uso_silencioso: boolean,
-	/**  ¿Es el que está elegido ahora mismo? */
-	elegido: boolean,
 };
 
 export type ChartSerieDinero = {
@@ -916,21 +886,6 @@ export type DatosAltaWebDto = {
 	nota: string | null,
 };
 
-/**  La declaración responsable tal como la enseña la pantalla. */
-export type DeclaracionResponsableDto = {
-	productor_nombre_razon: string,
-	productor_nif: string,
-	nombre_sistema: string,
-	id_sistema: string,
-	version: string,
-	texto: string,
-	/**
-	 *  `false` mientras falten los datos definitivos del productor. La pantalla lo dice en vez de
-	 *  enseñar una declaración a medias, que sería peor que no enseñar ninguna.
-	 */
-	completa: boolean,
-};
-
 export type DeleteGastoInput = {
 	id_gasto: string,
 };
@@ -973,10 +928,8 @@ export type DescuadreTabla = {
 /**
  *  Datos del cliente para emitir **factura completa** (FISCAL-02).
  *
- *  El registro de facturación sólo necesita el nombre y el NIF. El `domicilio` es para el **papel**:
- *  el art. 6 ROF le exige a una factura el domicilio del destinatario, y el registro de la AEAT no
- *  lo lleva. Por eso el formulario pide tres cosas y sólo dos viajan a la AEAT; el domicilio se
- *  guarda en `Destinatario_Json` para poder imprimir la factura (RI-29).
+ *  El registro de facturación guarda el nombre, el NIF y el domicilio en `Destinatario_Json`: el
+ *  art. 6 ROF le exige a una factura el domicilio del destinatario, y de ahí sale el papel (RI-29).
  */
 export type DestinatarioInput = {
 	nombre_razon: string,
@@ -1021,7 +974,7 @@ export type DeviceMode = "tpv" | "handy";
 
 /**
  *  La devolución hecha: el pago negativo que la registra y su factura rectificativa, si la hay
- *  (un cobro de modo prueba no tiene ninguna que rectificar).
+ *  (un cobro anterior a la numeración no tiene ninguna que rectificar).
  */
 export type DevolucionDto = {
 	id_pago: string,
@@ -1187,55 +1140,15 @@ export type EstadoCorreoRecuperacion = {
 	es_el_de_la_compra: boolean,
 };
 
-/**  Resumen para el panel de Configuración → Fiscal y para la barra de estado. */
+/**  ¿Puede facturar el negocio? Lo leen el aviso de datos fiscales y Configuración → Fiscal. */
 export type EstadoFiscal = {
 	/**
-	 *  ¿Están el NIF y la razón social configurados? Sin ellos no se puede emitir, y por tanto no
-	 *  se puede cobrar: es la única puerta que Veri\*factu añade al camino de la venta.
+	 *  ¿Están el NIF y la razón social configurados? Sin ellos no se puede emitir la factura, y
+	 *  por tanto no se puede cobrar.
 	 */
 	datos_fiscales_completos: boolean,
 	nif: string | null,
 	razon_social: string | null,
-	entorno_pruebas: boolean,
-	total_registros: number,
-	pendientes: number,
-	aceptados: number,
-	aceptados_con_errores: number,
-	rechazados: number,
-	/**
-	 *  Antigüedad en minutos del registro **pendiente más viejo**. `null` si no hay ninguno.
-	 *
-	 *  Es lo que mide la escalera de avisos, y se mide sobre el registro y no sobre el tiempo sin
-	 *  conexión a propósito: estar desconectado sin nada que enviar no es un problema.
-	 */
-	antiguedad_pendiente_min: number | null,
-	/**
-	 *  Escalón de la escalera: `ninguno` | `visible` | `notificacion` | `modal_login` |
-	 *  `modal_cobro`.
-	 */
-	escalon_aviso: string,
-	/**  ¿Hay un certificado elegido y sigue existiendo en el almacén de Windows? */
-	certificado_ok: boolean,
-	/**
-	 *  Motivo por el que no se puede remitir, si lo hay: `sin_certificado`,
-	 *  `certificado_no_encontrado`, `sin_datos_fiscales`… Vacío si se puede.
-	 */
-	motivo_no_remite: string | null,
-	/**  Días que quedan hasta que caduque el certificado elegido. `null` si no hay certificado. */
-	dias_para_caducar_certificado: number | null,
-	/**
-	 *  Anomalías de la cadena detectadas por la comprobación previa del art. 7.i) y todavía sin
-	 *  reconocer. Normalmente **cero**: lo que las produce es un reloj que se ha movido hacia atrás
-	 *  o una cadena que alguien ha tocado por debajo.
-	 */
-	anomalias_sin_reconocer: number,
-	/**  El mensaje de la más reciente, para que la pantalla diga QUÉ pasó y no sólo que pasó algo. */
-	ultima_anomalia: string | null,
-	/**
-	 *  MODO-PRUEBA (temporal): los cobros no emiten registro ni se remite nada. Se quita entero
-	 *  antes de que Veri*factu sea obligatorio.
-	 */
-	modo_prueba: boolean,
 };
 
 /**  RI-31: estado de réplica para la UI, sin SQL ni credenciales. */
@@ -1355,12 +1268,6 @@ export type IndexRow = {
 
 /**  Catálogo cerrado de lo que se puede apagar desde la nube. */
 export type Interruptor =
-/**
- *  Remisión de registros de facturación a la AEAT (job `verifactu_remitir`). Los registros se
- *  quedan `PENDIENTE`. Es una obligación tributaria: apagarlo es para no generar rechazos que
- *  haya que subsanar a mano mientras sale el arreglo, y por eso se ve en Configuración → Fiscal.
- */
-"verifactu_remitir" |
 /**
  *  La parte que ESCRIBE del contraste con la nube (SYNC-22/24/25): se sigue comparando e
  *  informando, pero no se encola ninguna reparación ni ningún borrado.
@@ -2241,21 +2148,6 @@ export type PrintTicketPayload_Deserialize = {
 	show_address?: boolean,
 	show_phone?: boolean,
 	show_footer_message?: boolean,
-	/**
-	 *  URL exacta que va dentro del código QR tributario. Sale de la fila de
-	 *  `Registros_Facturacion` (`QR_Url`), **no se compone aquí**: es la misma cadena que se
-	 *  guardó al emitir, y una reimpresión tiene que sacar exactamente esa.
-	 *
-	 *  Vacío o ausente = este papel no lleva QR. Es el caso de la **precuenta**, que no es una
-	 *  factura, y el de un cobro de modo prueba.
-	 */
-	qr_url?: string | null,
-	/**
-	 *  `true` si el registro se emitió contra el entorno de **pruebas**. El QR apunta entonces a
-	 *  `prewww2.aeat.es` y el papel lo dice: un ticket de pruebas que parece real es peor que uno
-	 *  que no sale.
-	 */
-	qr_pruebas?: boolean,
 	/**  Ancho de papel en mm (58 / 80 / 112). Acota físicamente las columnas imprimibles. */
 	paper_width_mm?: number,
 	/**  DPI de la impresora (203 | 300). Convierte mm→dots para márgenes y ancho útil. */
@@ -2367,21 +2259,6 @@ export type PrintTicketPayload_Serialize = {
 	show_address: boolean,
 	show_phone: boolean,
 	show_footer_message: boolean,
-	/**
-	 *  URL exacta que va dentro del código QR tributario. Sale de la fila de
-	 *  `Registros_Facturacion` (`QR_Url`), **no se compone aquí**: es la misma cadena que se
-	 *  guardó al emitir, y una reimpresión tiene que sacar exactamente esa.
-	 *
-	 *  Vacío o ausente = este papel no lleva QR. Es el caso de la **precuenta**, que no es una
-	 *  factura, y el de un cobro de modo prueba.
-	 */
-	qr_url?: string | null,
-	/**
-	 *  `true` si el registro se emitió contra el entorno de **pruebas**. El QR apunta entonces a
-	 *  `prewww2.aeat.es` y el papel lo dice: un ticket de pruebas que parece real es peor que uno
-	 *  que no sale.
-	 */
-	qr_pruebas: boolean,
 	/**  Ancho de papel en mm (58 / 80 / 112). Acota físicamente las columnas imprimibles. */
 	paper_width_mm: number,
 	/**  DPI de la impresora (203 | 300). Convierte mm→dots para márgenes y ancho útil. */
@@ -2703,45 +2580,6 @@ export type RectificacionDto = {
 	esperado_despues: Dinero,
 	descuadre_antes: Dinero,
 	descuadre_despues: Dinero,
-};
-
-/**
- *  Una fila de `Registros_Facturacion` tal como la enseña el panel fiscal.
- *
- *  Es un subconjunto: el panel no necesita el desglose ni el bloque del sistema informático, que
- *  son para el XML y para la exportación del art. 8 RRSIF.
- */
-export type RegistroFiscal = {
-	id_registro: string,
-	orden: number,
-	/**  `ALTA` | `ANULACION`. */
-	tipo: string,
-	num_serie_factura: string,
-	fecha_expedicion: string,
-	tipo_factura: string | null,
-	importe_total: string | null,
-	cuota_total: string | null,
-	huella: string,
-	/**  `AAAA-MM-DDThh:mm:ss±hh:mm`. */
-	fecha_hora_huso: string,
-	/**  `"S"` si el registro se generó durante una incidencia (sin conexión, tras una restauración). */
-	incidencia: string,
-	/**  `"S"` si es una subsanación de otro registro. */
-	subsanacion: string | null,
-	id_pago: string | null,
-	/**
-	 *  `PENDIENTE` | `ACEPTADO` | `ACEPTADO_CON_ERRORES` | `RECHAZADO`, o `null` si por lo que sea
-	 *  el registro no tiene fila de envío (no debería pasar: se crean juntas).
-	 */
-	estado_envio: string | null,
-	intentos: number,
-	codigo_error: string | null,
-	descripcion_error: string | null,
-	/**
-	 *  Código Seguro de Verificación que devolvió la AEAT. **No se puede recuperar con una consulta
-	 *  posterior**, así que se guarda en el momento del alta o se pierde.
-	 */
-	csv: string | null,
 };
 
 export type ReintentarImagenArgs = {

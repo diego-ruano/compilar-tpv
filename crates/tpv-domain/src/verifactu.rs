@@ -5,11 +5,15 @@
 //! —la huella— sin una conexión ni un certificado delante.
 //!
 //! **El principio que ordena todo:** el registro de facturación es el hecho fiscal; el papel es una
-//! copia suya y el envío a la AEAT es una consecuencia diferida. De ahí que aquí no haya nada que
-//! pueda fallar por causas externas: lo que se calcula en este módulo es determinista o no es nada.
+//! copia suya. De ahí que aquí no haya nada que pueda fallar por causas externas: lo que se calcula
+//! en este módulo es determinista o no es nada.
 //!
-//! Lo que NO está aquí, a propósito: el XML (es transporte, vive en `tpv-infra-aeat`), la
-//! persistencia (`tpv-infra-sqlite`) y la decisión de cuándo emitir (`tpv-application`).
+//! Esta rama no remite a la AEAT: el registro se guarda completo (huella, QR, sistema informático)
+//! para que el envío se pueda volver a poner sin tocar lo ya emitido. El envío, el certificado y el
+//! QR en el papel viven en la rama `con-verifactu`.
+//!
+//! Lo que NO está aquí, a propósito: la persistencia (`tpv-infra-sqlite`) y la decisión de cuándo
+//! emitir (`tpv-application`).
 //!
 //! ## Fuentes
 //!
@@ -168,22 +172,6 @@ pub const QR_BASE_PRODUCCION: &str =
     "https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR";
 /// Base de la URL de cotejo, entorno de **pruebas** (Portal de Pruebas Externas).
 pub const QR_BASE_PRUEBAS: &str = "https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR";
-
-/// MODO-PRUEBA (temporal): la serie de los cobros hechos en modo prueba (`PRUEBA/000001`).
-///
-/// Un cobro de prueba no expide factura, y lo que lo dice es **su número**: la serie se fija al
-/// reservarlo, así que la emisión y el papel —también una reimpresión de mañana, con el modo ya
-/// apagado— lo saben sin volver a mirar el interruptor. Se quita entero antes de que Veri\*factu sea
-/// obligatorio: `grep -rn MODO-PRUEBA` lista todo lo que hay que borrar.
-pub const SERIE_MODO_PRUEBA: &str = "PRUEBA";
-
-/// MODO-PRUEBA (temporal): ¿es éste el número de un cobro hecho en modo prueba?
-pub fn es_numero_de_prueba(numero: &str) -> bool {
-    numero
-        .trim()
-        .strip_prefix(SERIE_MODO_PRUEBA)
-        .is_some_and(|resto| resto.starts_with('/'))
-}
 
 /// Codifica un valor para la *query string* (`application/x-www-form-urlencoded` sobre UTF-8, pero
 /// con el espacio como `%20` y no como `+`, que es lo que hace `URLEncoder` en el ejemplo de la
@@ -395,7 +383,7 @@ pub fn nif_valido(nif: &str) -> bool {
 /// Hay dos razones distintas y las dos son de la AEAT:
 ///
 /// - El catálogo de la AEAT define el error **1287** para un campo con `<`, `>`, `"`, `'` o `=`. En
-///   `DescripcionOperacion` se comprobó que los acepta escapados (`docs/PRUEBAS_AEAT.md`), pero el
+///   `DescripcionOperacion` se comprobó que los acepta escapados (`docs/PRUEBAS_AEAT.md` en `con-verifactu`), pero el
 ///   error lleva el nombre del campo como parámetro y puede aplicar a otros, así que se quitan en
 ///   todos. Por estos campos pasan textos que escribe el usuario.
 /// - Los campos tienen longitud máxima y superarla es el error 1100.
@@ -558,111 +546,6 @@ pub fn macrodato(importe_total: Dinero) -> Option<&'static str> {
     } else {
         None
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// La comprobación previa del art. 7.i) de la Orden HAC/1177/2024
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// El margen del art. 7.i).2.º: el último registro no puede estar fechado más de un minuto **por
-/// delante** del que se va a generar.
-pub const MARGEN_RELOJ_SEGUNDOS: i64 = 60;
-
-/// Lo que hay que saber del último registro generado para comprobarlo antes de crear el siguiente.
-#[derive(Debug, Clone)]
-pub struct UltimoRegistro<'a> {
-    /// La huella que el último registro **declaró** como la de su anterior. `None` si dijo ser el
-    /// primero de la cadena.
-    pub ant_huella_declarada: Option<&'a str>,
-    /// La huella real del registro que hay **antes** de él. `None` si no hay ninguno.
-    pub huella_del_anterior: Option<&'a str>,
-    /// `FechaHoraHusoGenRegistro` del último registro, en segundos desde época.
-    pub generado_en_segundos: i64,
-}
-
-/// Lo que puede estar mal en el último registro generado.
-///
-/// Es un enum y no un `bool` porque las dos anomalías son de naturaleza distinta y se explican
-/// distinto: una dice que la cadena está rota, la otra que el reloj se ha movido.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnomaliaPrevia {
-    /// El último registro declara como eslabón anterior una huella que no es la del registro que
-    /// realmente le precede. La cadena está rota **en el registro anterior**, no en el que vamos a
-    /// crear.
-    EncadenamientoRoto,
-    /// El último registro está fechado más de un minuto **por delante** del reloj actual. Eso no lo
-    /// produce el paso del tiempo: lo produce un reloj que ha ido hacia atrás.
-    RelojHaciaAtras {
-        /// Cuántos segundos por delante está el último registro.
-        adelanto_segundos: i64,
-    },
-}
-
-impl AnomaliaPrevia {
-    /// Texto para el registro de diagnóstico y para la pantalla.
-    pub fn mensaje(&self) -> String {
-        match self {
-            AnomaliaPrevia::EncadenamientoRoto => {
-                "el último registro de facturación no está correctamente encadenado con el anterior"
-                    .to_string()
-            }
-            AnomaliaPrevia::RelojHaciaAtras { adelanto_segundos } => format!(
-                "el último registro de facturación está fechado {adelanto_segundos} segundos por \
-                 delante de la hora actual: el reloj del equipo ha ido hacia atrás"
-            ),
-        }
-    }
-}
-
-/// La comprobación que el art. 7.i) exige **antes de generar cada registro**.
-///
-/// > *«Salvo cuando se trate del primer registro de facturación, cada vez que el sistema informático
-/// > vaya a generar un nuevo registro de facturación, de alta o de anulación, antes deberá comprobar
-/// > que se cumplen los siguientes requisitos:*
-/// > *1.º El último registro de facturación generado está correctamente encadenado.*
-/// > *2.º La fecha y hora de generación del último registro de facturación generado no es superior
-/// > en más de un minuto a la fecha y hora actuales que se utilizarán para fechar el registro de
-/// > facturación a generar.»*
-///
-/// ## Lo que NO hace, y es lo más importante
-///
-/// **No decide si se puede facturar.** Devuelve lo que ha encontrado y ya. La FAQ de desarrolladores
-/// de la AEAT lo dice sin matices: *«será preciso generar el siguiente RF, ya que la facturación por
-/// este motivo NUNCA debe interrumpirse»*. Un TPV que se niega a cobrar porque detecta una anomalía
-/// en su propia cadena convierte un problema de trazabilidad en un bar que no puede vender.
-///
-/// ## El sentido del segundo punto
-///
-/// Se lee al revés de lo que parece. Que el registro nuevo sea **posterior** al anterior es lo
-/// normal y no es ningún problema, por muchas horas que hayan pasado; lo que no se admite es que el
-/// anterior esté fechado **por delante** del nuevo. Eso no lo produce el paso del tiempo: lo produce
-/// un reloj que se ha movido hacia atrás —una corrección de NTP, un cambio a mano, una pila de BIOS
-/// gastada—. El síntoma sería una cadena con fechas decrecientes, que es justo lo que produciría un
-/// sistema manipulado, y la AEAT lo marca además con el error 2004.
-pub fn comprobar_registro_previo(
-    ultimo: Option<&UltimoRegistro<'_>>,
-    ahora_segundos: i64,
-) -> Option<AnomaliaPrevia> {
-    // «Salvo cuando se trate del primer registro»: sin nada detrás no hay nada que comprobar.
-    let u = ultimo?;
-
-    // 1.º ¿El último está bien encadenado con el suyo? Se comparan las huellas como texto, en
-    // mayúsculas, porque es como se guardan y como viajan.
-    let declarada = u.ant_huella_declarada.unwrap_or("").trim();
-    let real = u.huella_del_anterior.unwrap_or("").trim();
-    if !declarada.eq_ignore_ascii_case(real) {
-        return Some(AnomaliaPrevia::EncadenamientoRoto);
-    }
-
-    // 2.º ¿El último está fechado por delante del reloj actual?
-    let adelanto = u.generado_en_segundos - ahora_segundos;
-    if adelanto > MARGEN_RELOJ_SEGUNDOS {
-        return Some(AnomaliaPrevia::RelojHaciaAtras {
-            adelanto_segundos: adelanto,
-        });
-    }
-
-    None
 }
 
 #[cfg(test)]
@@ -1059,158 +942,5 @@ mod tests {
         })
         .unwrap();
         assert_eq!(d.nombre_razon, "Bar El Rincón SL");
-    }
-}
-#[cfg(test)]
-mod tests_comprobacion_previa {
-    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
-
-    //! La comprobación del art. 7.i) de la Orden HAC/1177/2024, antes de generar cada registro.
-    //!
-    //! Lo que más se presta a equivocarse es el signo del segundo punto: se lee al revés de lo que
-    //! parece. Que el registro nuevo sea POSTERIOR al anterior es lo normal por muchas horas que
-    //! pasen; lo que no se admite es que el ANTERIOR esté fechado por delante del nuevo.
-
-    use super::*;
-
-    const H1: &str = "AAAA1111";
-    const H2: &str = "BBBB2222";
-
-    fn ultimo<'a>(
-        ant_declarada: Option<&'a str>,
-        anterior_real: Option<&'a str>,
-        generado_en: i64,
-    ) -> UltimoRegistro<'a> {
-        UltimoRegistro {
-            ant_huella_declarada: ant_declarada,
-            huella_del_anterior: anterior_real,
-            generado_en_segundos: generado_en,
-        }
-    }
-
-    const AHORA: i64 = 1_800_000_000;
-
-    #[test]
-    fn sin_registros_previos_no_hay_nada_que_comprobar() {
-        // «Salvo cuando se trate del primer registro de facturación». El primero no tiene detrás.
-        assert_eq!(comprobar_registro_previo(None, AHORA), None);
-    }
-
-    #[test]
-    fn una_cadena_sana_no_da_anomalia() {
-        let u = ultimo(Some(H1), Some(H1), AHORA - 300);
-        assert_eq!(comprobar_registro_previo(Some(&u), AHORA), None);
-    }
-
-    #[test]
-    fn el_primer_registro_de_la_cadena_declara_vacio_y_esta_bien() {
-        // El RF n-1 era el primero: no declara huella anterior y no hay ninguna detrás. Comparar
-        // `None` con `None` tiene que dar «correcto», no «roto».
-        let u = ultimo(None, None, AHORA - 10);
-        assert_eq!(comprobar_registro_previo(Some(&u), AHORA), None);
-    }
-
-    #[test]
-    fn si_el_ultimo_declara_otra_huella_la_cadena_esta_rota() {
-        let u = ultimo(Some(H1), Some(H2), AHORA - 10);
-        assert_eq!(
-            comprobar_registro_previo(Some(&u), AHORA),
-            Some(AnomaliaPrevia::EncadenamientoRoto)
-        );
-    }
-
-    #[test]
-    fn declarar_primero_teniendo_uno_detras_tambien_es_romper_la_cadena() {
-        // El caso que deja un hueco silencioso: alguien empieza una cadena nueva sin borrar la
-        // anterior. Las dos partes existen y ninguna apunta a la otra.
-        let u = ultimo(None, Some(H1), AHORA - 10);
-        assert_eq!(
-            comprobar_registro_previo(Some(&u), AHORA),
-            Some(AnomaliaPrevia::EncadenamientoRoto)
-        );
-    }
-
-    #[test]
-    fn la_huella_se_compara_sin_distinguir_mayusculas() {
-        // Se guardan en mayúsculas, pero comparar por igualdad exacta convertiría un cambio de
-        // formato en «cadena rota» para todos los registros de golpe.
-        let u = ultimo(Some("aaaa1111"), Some("AAAA1111"), AHORA - 10);
-        assert_eq!(comprobar_registro_previo(Some(&u), AHORA), None);
-    }
-
-    #[test]
-    fn que_haya_pasado_MUCHO_tiempo_NO_es_una_anomalia() {
-        // Es el malentendido que la propia AEAT tuvo que aclarar en su FAQ: lo natural es que el
-        // registro nuevo sea posterior en más de un minuto, y eso no es ningún problema. Un bar que
-        // abre a las 13:00 genera el primer registro doce horas después del último de anoche.
-        let u = ultimo(Some(H1), Some(H1), AHORA - 12 * 3600);
-        assert_eq!(comprobar_registro_previo(Some(&u), AHORA), None);
-    }
-
-    #[test]
-    fn el_ultimo_fechado_POR_DELANTE_del_reloj_es_el_reloj_hacia_atras() {
-        let u = ultimo(Some(H1), Some(H1), AHORA + 3600);
-        assert_eq!(
-            comprobar_registro_previo(Some(&u), AHORA),
-            Some(AnomaliaPrevia::RelojHaciaAtras {
-                adelanto_segundos: 3600
-            })
-        );
-    }
-
-    #[test]
-    fn el_margen_del_minuto_es_exacto() {
-        // Un minuto justo pasa; un segundo más, no. El margen existe porque la hora de generación se
-        // toma en Rust y la comparación ocurre después: sin él, cualquier registro se acusaría a sí
-        // mismo por el tiempo que tarda la transacción.
-        let justo = ultimo(Some(H1), Some(H1), AHORA + MARGEN_RELOJ_SEGUNDOS);
-        assert_eq!(comprobar_registro_previo(Some(&justo), AHORA), None);
-
-        let pasado = ultimo(Some(H1), Some(H1), AHORA + MARGEN_RELOJ_SEGUNDOS + 1);
-        assert!(matches!(
-            comprobar_registro_previo(Some(&pasado), AHORA),
-            Some(AnomaliaPrevia::RelojHaciaAtras { .. })
-        ));
-    }
-
-    #[test]
-    fn la_cadena_rota_se_reporta_ANTES_que_el_reloj() {
-        // Si las dos cosas fallan a la vez, la que importa es la cadena: el reloj se arregla solo en
-        // cuanto NTP corrija, y la cadena no se arregla nunca sola.
-        let u = ultimo(Some(H1), Some(H2), AHORA + 3600);
-        assert_eq!(
-            comprobar_registro_previo(Some(&u), AHORA),
-            Some(AnomaliaPrevia::EncadenamientoRoto)
-        );
-    }
-
-    #[test]
-    fn los_dos_mensajes_explican_QUE_ha_pasado_y_no_solo_que_algo_falla() {
-        // Estos textos acaban en un log y en una pantalla. «Error de encadenamiento» no le dice nada
-        // a quien lo lee; «el reloj del equipo ha ido hacia atrás» le dice dónde mirar.
-        assert!(AnomaliaPrevia::EncadenamientoRoto
-            .mensaje()
-            .contains("no está correctamente encadenado"));
-        let m = AnomaliaPrevia::RelojHaciaAtras {
-            adelanto_segundos: 90,
-        }
-        .mensaje();
-        assert!(m.contains("90"), "{m}");
-        assert!(m.contains("hacia atrás"), "{m}");
-    }
-}
-
-#[cfg(test)]
-mod tests_modo_prueba {
-    use super::*;
-
-    #[test]
-    fn solo_la_serie_de_prueba_es_de_prueba() {
-        assert!(es_numero_de_prueba("PRUEBA/000001"));
-        assert!(!es_numero_de_prueba("2027/000001"));
-        assert!(!es_numero_de_prueba("R2027/000001"));
-        // Un prefijo que se le parezca no basta: la barra separa la serie del número.
-        assert!(!es_numero_de_prueba("PRUEBAS/000001"));
-        assert!(!es_numero_de_prueba(""));
     }
 }

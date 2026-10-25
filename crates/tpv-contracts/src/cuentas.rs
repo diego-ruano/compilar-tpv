@@ -216,7 +216,7 @@ pub struct DevolverLineasInput {
 }
 
 /// La devolución hecha: el pago negativo que la registra y su factura rectificativa, si la hay
-/// (un cobro de modo prueba no tiene ninguna que rectificar).
+/// (un cobro anterior a la numeración no tiene ninguna que rectificar).
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct DevolucionDto {
     pub id_pago: String,

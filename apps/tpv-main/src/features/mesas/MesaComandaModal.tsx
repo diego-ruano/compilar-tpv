@@ -17,7 +17,6 @@ import { refrescarTrasCambiarReservas } from "../reservas/reservasQueries";
 import { esError,toAppError } from "@tpv/client";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useMode } from "../../shared/stores/useMode";
-import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
 import DatosFiscalesModal from "../../shared/ticket/DatosFiscalesModal";
 import PrintTicketModal,{ type CobroImprimible } from "../../shared/ticket/PrintTicketModal";
 import { useToast } from "../../shared/toast";
@@ -432,7 +431,7 @@ export default function MesaComandaModal({
                 setTicket(prev => prev.map(l => ids.includes(l.id) ? { ...l, pagado: true, seleccionado: false } : l));
             }
             await leerTicket(idComanda).catch(e => toast.warning("Cobro guardado; no se pudo refrescar el ticket", toAppError(e).message));
-            if (comandaActualRef.current !== idComanda) { notifyChanged(); anunciarCobro(); return; }
+            if (comandaActualRef.current !== idComanda) { notifyChanged(); return; }
 
             setCashCount({});
             setPaso("categorias");
@@ -440,9 +439,6 @@ export default function MesaComandaModal({
             setQuery("");
             window.dispatchEvent(new CustomEvent("mesas:changed"));
             notifyChanged();
-            // FISCAL-01: se ha cobrado. Si el equipo lleva tres días sin remitir, el aviso sale
-            // ahora — después del cobro, nunca antes.
-            anunciarCobro();
             setQuiereFactura(false);
             setPideFactura(null);
             setErrorFactura(null);

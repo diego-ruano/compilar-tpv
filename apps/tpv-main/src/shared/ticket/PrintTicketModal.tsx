@@ -210,8 +210,8 @@ export default function PrintTicketModal({
                                 ¿Qué quieres imprimir?
                             </p>
                             <div className="grid grid-cols-1 gap-2">
-                                {/* Un botón por cada factura del cobro. Un cobro de modo prueba no
-                                    tiene ninguna: entonces sólo está su ticket. */}
+                                {/* Un botón por cada factura del cobro. Un cobro anterior a la
+                                    numeración no tiene ninguna: entonces sólo está su ticket. */}
                                 {cobro && facturas.length === 0 ? (
                                     <ModoButton
                                         active={esCobro}

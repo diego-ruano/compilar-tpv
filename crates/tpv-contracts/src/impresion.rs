@@ -95,21 +95,6 @@ pub struct PrintTicketPayload {
     #[serde(default)]
     pub show_footer_message: bool,
 
-    // ── Bloque fiscal (FISCAL-01) ───────────────────────────────────────────────────────────
-    /// URL exacta que va dentro del código QR tributario. Sale de la fila de
-    /// `Registros_Facturacion` (`QR_Url`), **no se compone aquí**: es la misma cadena que se
-    /// guardó al emitir, y una reimpresión tiene que sacar exactamente esa.
-    ///
-    /// Vacío o ausente = este papel no lleva QR. Es el caso de la **precuenta**, que no es una
-    /// factura, y el de un cobro de modo prueba.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub qr_url: Option<String>,
-    /// `true` si el registro se emitió contra el entorno de **pruebas**. El QR apunta entonces a
-    /// `prewww2.aeat.es` y el papel lo dice: un ticket de pruebas que parece real es peor que uno
-    /// que no sale.
-    #[serde(default)]
-    pub qr_pruebas: bool,
-
     /// Ancho de papel en mm (58 / 80 / 112). Acota físicamente las columnas imprimibles.
     #[serde(default = "default_paper_width")]
     pub paper_width_mm: u32,

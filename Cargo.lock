@@ -3629,12 +3629,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
 
 [[package]]
-name = "qrcode"
-version = "0.14.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
-
-[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5281,7 +5275,7 @@ dependencies = [
  "tokio",
  "url",
  "windows-sys 0.60.2",
- "zip 4.6.1",
+ "zip",
 ]
 
 [[package]]
@@ -5767,7 +5761,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "image",
- "qrcode",
  "rand 0.10.3",
  "serde",
  "serde_json",
@@ -5785,7 +5778,6 @@ dependencies = [
  "tpv-application",
  "tpv-contracts",
  "tpv-domain",
- "tpv-infra-aeat",
  "tpv-infra-http",
  "tpv-infra-licensing",
  "tpv-infra-sqlite",
@@ -5837,22 +5829,6 @@ dependencies = [
  "strum",
  "subtle",
  "uuid",
-]
-
-[[package]]
-name = "tpv-infra-aeat"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "quick-xml",
- "rusqlite",
- "serde_json",
- "tokio",
- "tpv-application",
- "tpv-domain",
- "tpv-infra-sqlite",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5915,7 +5891,6 @@ dependencies = [
  "tpv-domain",
  "tracing",
  "uuid",
- "zip 2.4.2",
 ]
 
 [[package]]
@@ -7430,23 +7405,6 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "2.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
-dependencies = [
- "arbitrary",
- "crc32fast",
- "crossbeam-utils",
- "displaydoc",
- "flate2",
- "indexmap 2.14.0",
- "memchr",
- "thiserror 2.0.18",
- "zopfli",
-]
-
-[[package]]
-name = "zip"
 version = "4.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
@@ -7462,18 +7420,6 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[package]]
-name = "zopfli"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
-dependencies = [
- "bumpalo",
- "crc32fast",
- "log",
- "simd-adler32",
-]
 
 [[package]]
 name = "zune-core"

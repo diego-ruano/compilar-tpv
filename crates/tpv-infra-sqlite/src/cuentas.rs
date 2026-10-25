@@ -2762,15 +2762,15 @@ mod tests_anular_vs_devolver {
             0.0,
             "y NO una rectificativa"
         );
-        // Anular no borra nada: el alta original sigue ahí, y los dos se remiten.
+        // Anular no borra nada: el alta original sigue ahí, junto al registro de anulación.
         assert_eq!(
             escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo='ALTA';").await,
             1.0
         );
         assert_eq!(
-            escalar(&db, "SELECT COUNT(*) FROM _Verifactu_Envios;").await,
+            escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion;").await,
             2.0,
-            "los dos registros se encolan para remitir"
+            "el alta y su anulación"
         );
     }
 
@@ -3329,7 +3329,7 @@ mod tests_baja_de_un_ticket_canjeado {
     }
 
     /// La cadena de huellas, entera: cada huella es el SHA-256 de su cadena, cada registro apunta
-    /// a la huella del anterior, el `Orden` no tiene huecos y todo se encola para remitir.
+    /// a la huella del anterior y el `Orden` no tiene huecos.
     pub(super) async fn assert_cadena_sana(db: &Arc<Db>) {
         let filas = registros(db).await;
         assert!(!filas.is_empty());
@@ -3355,16 +3355,6 @@ mod tests_baja_de_un_ticket_canjeado {
                 );
             }
         }
-        assert_eq!(
-            escalar(db, "SELECT COUNT(*) FROM _Verifactu_Envios;").await,
-            filas.len() as f64,
-            "todo registro se encola para remitir"
-        );
-        assert_eq!(
-            escalar(db, "SELECT COUNT(*) FROM _Verifactu_Anomalias;").await,
-            0.0,
-            "la comprobación del art. 7.i) no puede encontrar nada raro en la cadena"
-        );
     }
 
     /// Cobra una comanda por el camino real de venta rápida y devuelve `(id_pago, número)`.
@@ -3929,7 +3919,6 @@ mod tests_baja_de_un_ticket_canjeado {
         assert_eq!(p.rectifica_fecha, Some(alta.fecha.replace('-', "/")));
         assert_eq!(p.total, Some(Dinero::de_centimos(-300)));
         assert_eq!(Some(suma_lineas(&p)), p.total, "las líneas en negativo cuadran con el total");
-        assert!(p.qr_url.as_deref().is_some_and(|u| u.contains("importe=-3.00")), "{:?}", p.qr_url);
         assert_eq!(p.metodo_pago, None, "una devolución no abre el cajón");
         assert!(!p.es_anulado, "el papel de la baja no se marca ANULADO");
         assert!(p.destinatario.is_none());
@@ -5021,26 +5010,6 @@ mod tests_devolucion_parcial {
             .await
             .unwrap_err();
         assert!(e.to_string().contains("tiene una devolución"), "{e:?}");
-    }
-
-    #[tokio::test]
-    async fn un_cobro_de_modo_prueba_se_devuelve_sin_factura() {
-        let (db, _dir) = db_temporal().await;
-        sembrar(&db, VENTA).await;
-        crate::verifactu::set_modo_prueba(&db, true).await.unwrap();
-        let id_pago = cobrar(&db, false).await;
-
-        let d = una_cana(&db, &id_pago).await;
-
-        assert_eq!(d.num_factura, None);
-        assert!(registros(&db).await.is_empty(), "ni el cobro ni la devolución declaran nada");
-        assert_eq!(
-            texto(&db, &format!("SELECT Numero_Ticket FROM Pagos WHERE ID_Pago = '{}';", d.id_pago)).await,
-            None
-        );
-        let p = papel(&db, &d.id_pago, None).await;
-        assert!(p.items.iter().all(|l| l.precio_unitario.es_negativo()));
-        assert!(!p.abre_cajon);
     }
 
     // ── El papel ─────────────────────────────────────────────────────────────────────────────────

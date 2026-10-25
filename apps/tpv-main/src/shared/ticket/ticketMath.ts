@@ -103,7 +103,7 @@ export function totalDe(lineas: LineaAgrupada[]): Dinero {
 
 /**
  * Reparto por tipo de IVA. Espejo de `tpv_domain::ticket::desglose` (que es de donde salen también
- * el papel y el registro que se remite a la AEAT).
+ * el papel y el registro de facturación).
  *
  * Los precios llevan el IVA incluido (es lo que se le enseña al cliente en hostelería), así que la
  * base se saca dividiendo. Se calcula **por línea y luego se suma por tipo**: con dos tipos

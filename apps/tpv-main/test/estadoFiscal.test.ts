@@ -1,7 +1,6 @@
 // test/estadoFiscal.test.ts
 //
-// El store de la escalera de avisos de Veri*factu (FISCAL-01), y en particular la parte que decide
-// si este equipo **puede cobrar**.
+// El store que decide si este equipo **puede cobrar** (FISCAL-01).
 //
 // Lo que se fija aquí es una regla que parece al revés y no lo es: `datosFiscalesCompletos` arranca
 // en **`true`**. En casi todo lo demás de este repo se falla del lado pesimista, pero un aviso
@@ -14,7 +13,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-import { useEstadoFiscal, _resetEstadoFiscal, alMenos } from "../src/shared/stores/useEstadoFiscal";
+import { useEstadoFiscal, _resetEstadoFiscal } from "../src/shared/stores/useEstadoFiscal";
 
 // El store llama a `verifactuEstado()`, que por debajo es un `invoke` de Tauri. Se sustituye por un
 // doble para poder decidir qué contesta cada caso.
@@ -31,9 +30,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 function estado(extra: Record<string, unknown> = {}) {
 	return {
 		datos_fiscales_completos: true,
-		escalon_aviso: "ninguno",
-		antiguedad_pendiente_min: null,
-		pendientes: 0,
 		...extra,
 	};
 }
@@ -84,28 +80,6 @@ describe("los datos del obligado", () => {
 		expect(useEstadoFiscal.getState().datosFiscalesCompletos).toBe(true);
 	});
 
-	it("su reconocimiento es INDEPENDIENTE del de la escalera de atraso", async () => {
-		// Son dos problemas distintos: la escalera dice «hay facturas sin remitir», esto dice «el
-		// siguiente cobro va a fallar». Reconocer uno no puede silenciar el otro, o el aviso grave
-		// desaparecería por haber cerrado el leve.
-		respuesta.valor = estado({
-			datos_fiscales_completos: false,
-			escalon_aviso: "modal_login",
-		});
-		await useEstadoFiscal.getState().refrescar();
-
-		useEstadoFiscal.getState().reconocer();
-		expect(useEstadoFiscal.getState().reconocido).toBe(true);
-		expect(useEstadoFiscal.getState().datosReconocidos).toBe(false);
-
-		_resetEstadoFiscal();
-		await useEstadoFiscal.getState().refrescar();
-
-		useEstadoFiscal.getState().reconocerDatos();
-		expect(useEstadoFiscal.getState().datosReconocidos).toBe(true);
-		expect(useEstadoFiscal.getState().reconocido).toBe(false);
-	});
-
 	it("vuelven a avisar tras un cierre de sesión", async () => {
 		respuesta.valor = estado({ datos_fiscales_completos: false });
 		await useEstadoFiscal.getState().refrescar();
@@ -116,26 +90,5 @@ describe("los datos del obligado", () => {
 		_resetEstadoFiscal();
 
 		expect(useEstadoFiscal.getState().datosReconocidos).toBe(false);
-	});
-});
-
-describe("la escalera de atraso sigue intacta", () => {
-	it("ordena los peldaños de menos a más grave", () => {
-		expect(alMenos("modal_cobro", "modal_login")).toBe(true);
-		expect(alMenos("visible", "notificacion")).toBe(false);
-		expect(alMenos("ninguno", "ninguno")).toBe(true);
-	});
-
-	it("un escalón que sube invalida el reconocimiento anterior", async () => {
-		respuesta.valor = estado({ escalon_aviso: "modal_login" });
-		await useEstadoFiscal.getState().refrescar();
-		useEstadoFiscal.getState().reconocer();
-		expect(useEstadoFiscal.getState().reconocido).toBe(true);
-
-		// Lo que se reconoció era un problema más pequeño que el de ahora.
-		respuesta.valor = estado({ escalon_aviso: "modal_cobro" });
-		await useEstadoFiscal.getState().refrescar();
-
-		expect(useEstadoFiscal.getState().reconocido).toBe(false);
 	});
 });

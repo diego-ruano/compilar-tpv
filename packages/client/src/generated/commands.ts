@@ -1,7 +1,7 @@
 // Generado por pnpm generate-types desde Rust y tauri-specta. No editar.
 
 import { invocar as __TAURI_INVOKE } from "../transporte";
-import type { AccionEmparejamiento, AjusteLoteInput, AjusteStockSueltoInput, AjustesReservaWebDto, AlergenoInvDto, AlergenoMiniDto, AnularPagoInput, ApiSignedHeaders, AplicacionSync, AppErrorDto, ApplySyncChangesArgs, AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput, AutorizacionUsuario, AvisoReservaWebInput, AvisoSocketHandy, BackfillEstado, BloqueFiscal, BootstrapResultado, BootstrapSnapshot, BootstrapSnapshot_Deserialize, BootstrapSnapshot_Serialize, BootstrapTabla, BusinessSettings, BusinessSettingsPatch, BusinessSettingsPatchInput, BusinessSettingsPatchInput_Deserialize, BusinessSettingsPatchInput_Serialize, BusinessSettingsPatch_Deserialize, BusinessSettingsPatch_Serialize, CambioCajaInput, CambioReplicado, CategoriaInvDto, CategoriaProveedorDto, CategoriaRow, CategoriaVendibleOut, CertificadoDto, ChartSerieDinero, ChartSeriesI64, CierreDto, CierreIdInput, CierreListarArgs, CierreReservaWebDto, CierreResumenDto, ClaveReservaWebDto, ClavesTabla, ClienteCoincidente, ClienteForm, ClienteIdArgs, ClienteOverview, ClientesOverviewArgs, ClientesStatsArgs, ClientesStatsResponse, CobroDevolubleDto, CobroPendienteDto, CodigoEnviado, ComandaBarraRow, ComandaReplicada, ComandaRow, CompleteInitialSetupInput, ConexionHandy, ConfiguracionPermisos, ConfirmarCambioCorreoInput, ConfirmarCierreInput, ConfirmarCodigoPinInput, ConnectivityMode, ContactSettings, ContactSettingsPatch, ContactSettingsPatchInput, ContactSettingsPatchInput_Deserialize, ContactSettingsPatchInput_Serialize, ContactSettingsPatch_Deserialize, ContactSettingsPatch_Serialize, ConteoTabla, CopySemanaInput, CrearNotificacionInput, CreateClienteInput, CreateGastoInput, CreateLoteInput, CreateTareaInput, CuentasRangoArgs, CursorCuentas, DatosAltaWebDto, DeclaracionResponsableDto, DeleteGastoInput, DeleteImageArgs, DenominacionDto, DenominacionInput, DescuadreTabla, DestinatarioInput, DestinatarioTicket, DestinatarioTicket_Deserialize, DestinatarioTicket_Serialize, DestinoArgs, DeviceFirmarEmparejamientoArgs, DeviceIdentity, DeviceMode, DevolucionDto, DevolverLineasInput, Dinero, EnsureImageArgs, EntradaDto, EnviarPedidoEmailInput, ErrorCode, EstadoColaImagenes, EstadoCorreoRecuperacion, EstadoFiscal, EstadoReplicacion, EstadoSocketHandy, FacturaDelCobro, FinalizarTareaInput, FirmaDispositivo, GeometriaTicket, GuardarPermisosInput, HandySetTokenArgs, HistoricoPagina, HorariosSemanaArgs, IdCategoriaArgs, IdProductoArgs, ImagenApartada, ImpactoCajaDto, ImpactoCierreDto, IndexRow, Interruptor, InterruptorApagado, InventarioResumenResponse, JobStatus, KitchenRow, LicenseActivateInput, LicenseActivateOutcome, LicenseActivateOutcome_Deserialize, LicenseActivateOutcome_Serialize, LicenseDeviceChangeInput, LicenseGateResult, LicenseGateResult_Deserialize, LicenseGateResult_Serialize, LicenseLocalState, LicenseLocalState_Deserialize, LicenseLocalState_Serialize, LicenseSumarClaveInput, LineaADevolverInput, LineaComandaRow, LineaDevolubleDto, LineaEmailInput, LineaPedidoDto, LineaPedidoInput, LocalBackupInfo, LoginOk, LoginUserArgs, LoteDto, MarcarLeidaInput, MarcarTodasLeidasInput, MesaDto, MesaIngresoRow, MesaLineaComandaRow, MesaMetaOut, MesaMetaOut_Deserialize, MesaMetaOut_Serialize, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetTrabajadorInput, MesasDeleteDetalleInput, MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs, MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput, MesasSaveLayoutInput, MesasSearchProductosArgs, MesasSetReservaEstadoInput, MesasStatsResponse, MesasTopComandas, MesasUpdateDetalleNotaInput, MisTareasArgs, MisTareasRow, NotificacionIdInput, NotificacionRow, NotificacionesListArgs, NotificacionesUsuarioArgs, OutboxEntry, OutboxFallo, PaginaEntradas, PaginaSalidas, PairCreateResult, PedidoProveedorDto, PedidosActualizarInput, PedidosCambiarEstadoInput, PedidosCrearInput, PedidosGetPageInput, PedidosPageDto, PendientesReservaWebDto, PermisoDef, PeticionReservaWebDto, PreparacionCierreDto, PrintArqueoPayload, PrintTicketLine, PrintTicketLine_Deserialize, PrintTicketLine_Serialize, PrintTicketPayload, PrintTicketPayload_Deserialize, PrintTicketPayload_Serialize, PrinterInfo, ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProductoProveedorDto, ProductoResumenDto, ProductoRow, ProductoVendibleOut, ProductosStatsArgs, ProductosStatsResponse, ProveedorDto, ProveedorMiniDto, ProveedorSaveInput, ProveedorTop, ProveedoresDeleteInput, ProveedoresGetProductosArgs, ProveedoresSetVinculosInput, ProveedoresStatsArgs, ProveedoresStatsResponse, PunchInput, PunchParte, PunchStatus, PunchStatusArgs, PuntualidadInfo, RechazoHandy, RecogidaReservaWebDto, RecogidasReservaWebInput, RecoveryState, RecoveryStatus, RectificacionArqueo, RectificacionDto, RegistroFiscal, ReintentarImagenArgs, ReservaBuscarClienteArgs, ReservaCancelarInput, ReservaDeleteInput, ReservaDto, ReservaMesaOut, ReservaSaveInput, ReservaWebActivarInput, ReservaWebAltaInput, ReservaWebCierreInput, ReservaWebMesaDto, ReservaWebMesaInput, ReservaWebQuitarCierreInput, ReservasGetMesArgs, ReservasMesasTurno, ReservasMetaDto, ReservasStatsArgs, ReservasStatsResponse, ResolverCobroPendienteInput, ResultadoRecogidaWeb, ResultadoVerificacion, ResumenCajaDto, RolPermisos, RolRow, RoomPoly, SalidaDto, SalonInput, SalonOut, SaveImageArgs, SetAsignacionesTareaInput, SetConnectionModeArgs, SetDeviceModeArgs, SetPredeterminadoInput, SetPrinterArgs, SetTurnoPartidoInput, SetupPendiente, SolicitarCambioCorreoInput, SolicitarCodigoPinInput, SpoolEvent, SqlStatement, StatsCategoriaRow, StatsRange, StatsTurno, SummaryArgs, SyncChange, SyncHealth, TablaAExaminar, TableInput, TableOut, TareaAdminRow, TareaAsignadoRow, TareaIdArgs, TareaRow, TicketDePagoInput, TicketDePagoInput_Deserialize, TicketDePagoInput_Serialize, TicketSettings, TicketSettingsPatch, TicketSettingsPatchInput, TicketSettingsPatchInput_Deserialize, TicketSettingsPatchInput_Serialize, TicketSettingsPatch_Deserialize, TicketSettingsPatch_Serialize, TipoAvisoReservaWeb, TipoPeticionWeb, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs, TrabajadorCardStats, TrabajadorCardStats_Deserialize, TrabajadorCardStats_Serialize, TrabajadorCreateInput, TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow, TrabajadorUI, TrabajadorUpdateInput, TrabajadoresStatsArgs, TrabajadoresStatsResponse, TrabajadoresStatsResponse_Deserialize, TrabajadoresStatsResponse_Serialize, TramoHorarioInput, TramoTicket, TurnoRow, UltimoGastoProveedor, UpdateClienteInput, UpdateGastoInput, UpdateInfo, UpdateLoteInput, UpdatePagoInput, UpdateStatus, UpdateTareaInput, UploadInitialSetupArgs, UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult, UserListItem, VerTicketsDetalleRow, VerificacionClaves, VerificacionNube, VrAddLineaComandaInput, VrCobrarFraccionadoInput, VrCreateComandaBarraInput, VrDeleteComandaIfSafeInput, VrDeleteLineaIfUnpaidInput, VrIdCategoriaArgs, VrIdComandaArgs, VrIdsArgs, VrLineaAnadida, VrListComandasArgs, VrRemoveLastUnpaidLineaInput, VrSearchProductosArgs, VrUpdateNotaDetalleInput, ZonaDto } from "@tpv/contracts";
+import type { AccionEmparejamiento, AjusteLoteInput, AjusteStockSueltoInput, AjustesReservaWebDto, AlergenoInvDto, AlergenoMiniDto, AnularPagoInput, ApiSignedHeaders, AplicacionSync, AppErrorDto, ApplySyncChangesArgs, AsignacionCreateInput, AsignacionDeleteInput, AsignacionGuardarInput, AsignacionRow, AsignacionUpdateInput, AutorizacionUsuario, AvisoReservaWebInput, AvisoSocketHandy, BackfillEstado, BloqueFiscal, BootstrapResultado, BootstrapSnapshot, BootstrapSnapshot_Deserialize, BootstrapSnapshot_Serialize, BootstrapTabla, BusinessSettings, BusinessSettingsPatch, BusinessSettingsPatchInput, BusinessSettingsPatchInput_Deserialize, BusinessSettingsPatchInput_Serialize, BusinessSettingsPatch_Deserialize, BusinessSettingsPatch_Serialize, CambioCajaInput, CambioReplicado, CategoriaInvDto, CategoriaProveedorDto, CategoriaRow, CategoriaVendibleOut, ChartSerieDinero, ChartSeriesI64, CierreDto, CierreIdInput, CierreListarArgs, CierreReservaWebDto, CierreResumenDto, ClaveReservaWebDto, ClavesTabla, ClienteCoincidente, ClienteForm, ClienteIdArgs, ClienteOverview, ClientesOverviewArgs, ClientesStatsArgs, ClientesStatsResponse, CobroDevolubleDto, CobroPendienteDto, CodigoEnviado, ComandaBarraRow, ComandaReplicada, ComandaRow, CompleteInitialSetupInput, ConexionHandy, ConfiguracionPermisos, ConfirmarCambioCorreoInput, ConfirmarCierreInput, ConfirmarCodigoPinInput, ConnectivityMode, ContactSettings, ContactSettingsPatch, ContactSettingsPatchInput, ContactSettingsPatchInput_Deserialize, ContactSettingsPatchInput_Serialize, ContactSettingsPatch_Deserialize, ContactSettingsPatch_Serialize, ConteoTabla, CopySemanaInput, CrearNotificacionInput, CreateClienteInput, CreateGastoInput, CreateLoteInput, CreateTareaInput, CuentasRangoArgs, CursorCuentas, DatosAltaWebDto, DeleteGastoInput, DeleteImageArgs, DenominacionDto, DenominacionInput, DescuadreTabla, DestinatarioInput, DestinatarioTicket, DestinatarioTicket_Deserialize, DestinatarioTicket_Serialize, DestinoArgs, DeviceFirmarEmparejamientoArgs, DeviceIdentity, DeviceMode, DevolucionDto, DevolverLineasInput, Dinero, EnsureImageArgs, EntradaDto, EnviarPedidoEmailInput, ErrorCode, EstadoColaImagenes, EstadoCorreoRecuperacion, EstadoFiscal, EstadoReplicacion, EstadoSocketHandy, FacturaDelCobro, FinalizarTareaInput, FirmaDispositivo, GeometriaTicket, GuardarPermisosInput, HandySetTokenArgs, HistoricoPagina, HorariosSemanaArgs, IdCategoriaArgs, IdProductoArgs, ImagenApartada, ImpactoCajaDto, ImpactoCierreDto, IndexRow, Interruptor, InterruptorApagado, InventarioResumenResponse, JobStatus, KitchenRow, LicenseActivateInput, LicenseActivateOutcome, LicenseActivateOutcome_Deserialize, LicenseActivateOutcome_Serialize, LicenseDeviceChangeInput, LicenseGateResult, LicenseGateResult_Deserialize, LicenseGateResult_Serialize, LicenseLocalState, LicenseLocalState_Deserialize, LicenseLocalState_Serialize, LicenseSumarClaveInput, LineaADevolverInput, LineaComandaRow, LineaDevolubleDto, LineaEmailInput, LineaPedidoDto, LineaPedidoInput, LocalBackupInfo, LoginOk, LoginUserArgs, LoteDto, MarcarLeidaInput, MarcarTodasLeidasInput, MesaDto, MesaIngresoRow, MesaLineaComandaRow, MesaMetaOut, MesaMetaOut_Deserialize, MesaMetaOut_Serialize, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetTrabajadorInput, MesasDeleteDetalleInput, MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs, MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput, MesasSaveLayoutInput, MesasSearchProductosArgs, MesasSetReservaEstadoInput, MesasStatsResponse, MesasTopComandas, MesasUpdateDetalleNotaInput, MisTareasArgs, MisTareasRow, NotificacionIdInput, NotificacionRow, NotificacionesListArgs, NotificacionesUsuarioArgs, OutboxEntry, OutboxFallo, PaginaEntradas, PaginaSalidas, PairCreateResult, PedidoProveedorDto, PedidosActualizarInput, PedidosCambiarEstadoInput, PedidosCrearInput, PedidosGetPageInput, PedidosPageDto, PendientesReservaWebDto, PermisoDef, PeticionReservaWebDto, PreparacionCierreDto, PrintArqueoPayload, PrintTicketLine, PrintTicketLine_Deserialize, PrintTicketLine_Serialize, PrintTicketPayload, PrintTicketPayload_Deserialize, PrintTicketPayload_Serialize, PrinterInfo, ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProductoProveedorDto, ProductoResumenDto, ProductoRow, ProductoVendibleOut, ProductosStatsArgs, ProductosStatsResponse, ProveedorDto, ProveedorMiniDto, ProveedorSaveInput, ProveedorTop, ProveedoresDeleteInput, ProveedoresGetProductosArgs, ProveedoresSetVinculosInput, ProveedoresStatsArgs, ProveedoresStatsResponse, PunchInput, PunchParte, PunchStatus, PunchStatusArgs, PuntualidadInfo, RechazoHandy, RecogidaReservaWebDto, RecogidasReservaWebInput, RecoveryState, RecoveryStatus, RectificacionArqueo, RectificacionDto, ReintentarImagenArgs, ReservaBuscarClienteArgs, ReservaCancelarInput, ReservaDeleteInput, ReservaDto, ReservaMesaOut, ReservaSaveInput, ReservaWebActivarInput, ReservaWebAltaInput, ReservaWebCierreInput, ReservaWebMesaDto, ReservaWebMesaInput, ReservaWebQuitarCierreInput, ReservasGetMesArgs, ReservasMesasTurno, ReservasMetaDto, ReservasStatsArgs, ReservasStatsResponse, ResolverCobroPendienteInput, ResultadoRecogidaWeb, ResultadoVerificacion, ResumenCajaDto, RolPermisos, RolRow, RoomPoly, SalidaDto, SalonInput, SalonOut, SaveImageArgs, SetAsignacionesTareaInput, SetConnectionModeArgs, SetDeviceModeArgs, SetPredeterminadoInput, SetPrinterArgs, SetTurnoPartidoInput, SetupPendiente, SolicitarCambioCorreoInput, SolicitarCodigoPinInput, SpoolEvent, SqlStatement, StatsCategoriaRow, StatsRange, StatsTurno, SummaryArgs, SyncChange, SyncHealth, TablaAExaminar, TableInput, TableOut, TareaAdminRow, TareaAsignadoRow, TareaIdArgs, TareaRow, TicketDePagoInput, TicketDePagoInput_Deserialize, TicketDePagoInput_Serialize, TicketSettings, TicketSettingsPatch, TicketSettingsPatchInput, TicketSettingsPatchInput_Deserialize, TicketSettingsPatchInput_Serialize, TicketSettingsPatch_Deserialize, TicketSettingsPatch_Serialize, TipoAvisoReservaWeb, TipoPeticionWeb, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs, TrabajadorCardStats, TrabajadorCardStats_Deserialize, TrabajadorCardStats_Serialize, TrabajadorCreateInput, TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow, TrabajadorUI, TrabajadorUpdateInput, TrabajadoresStatsArgs, TrabajadoresStatsResponse, TrabajadoresStatsResponse_Deserialize, TrabajadoresStatsResponse_Serialize, TramoHorarioInput, TramoTicket, TurnoRow, UltimoGastoProveedor, UpdateClienteInput, UpdateGastoInput, UpdateInfo, UpdateLoteInput, UpdatePagoInput, UpdateStatus, UpdateTareaInput, UploadInitialSetupArgs, UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult, UserListItem, VerTicketsDetalleRow, VerificacionClaves, VerificacionNube, VrAddLineaComandaInput, VrCobrarFraccionadoInput, VrCreateComandaBarraInput, VrDeleteComandaIfSafeInput, VrDeleteLineaIfUnpaidInput, VrIdCategoriaArgs, VrIdComandaArgs, VrIdsArgs, VrLineaAnadida, VrListComandasArgs, VrRemoveLastUnpaidLineaInput, VrSearchProductosArgs, VrUpdateNotaDetalleInput, ZonaDto } from "@tpv/contracts";
 
 export const commands = {
 	getDeviceMode: () => __TAURI_INVOKE<"tpv" | "handy" | null>("get_device_mode"),
@@ -453,45 +453,13 @@ export const commands = {
 	vrGetIndexRows: (args: VrIdsArgs) => __TAURI_INVOKE<IndexRow[]>("vr_get_index_rows", { args }),
 	vrGetDetallesVerTicket: (args: VrIdComandaArgs) => __TAURI_INVOKE<VerTicketsDetalleRow[]>("vr_get_detalles_ver_ticket", { args }),
 	/**
-	 *  Resumen del estado fiscal para Configuración → Fiscal y para la escalera de avisos.
+	 *  ¿Están los datos fiscales del negocio? Lo leen el aviso de datos fiscales y Configuración →
+	 *  Fiscal.
 	 *
-	 *  Sin exigir rol tampoco: el escalón de aviso lo leen el aviso al iniciar sesión y el aviso tras
-	 *  cada cobro, que salen a quien esté delante, y el objetivo de la escalera es justamente que **no
-	 *  se pueda ignorar**.
+	 *  Sin exigir rol: el aviso sale a quien esté delante, porque sin esos datos el siguiente cobro
+	 *  va a fallar.
 	 */
 	verifactuEstado: () => __TAURI_INVOKE<EstadoFiscal>("verifactu_estado"),
-	/**
-	 *  Los registros del panel, del más reciente al más antiguo.
-	 *
-	 *  Este sí es de Administrador: es el libro de facturación del negocio.
-	 */
-	verifactuListar: (limite: number | null, desplazamiento: number | null) => __TAURI_INVOKE<RegistroFiscal[]>("verifactu_listar", { limite, desplazamiento }),
-	/**
-	 *  Los certificados del almacén de Windows que sirven para remitir.
-	 *
-	 *  El único filtro es que tengan **clave privada**: un `.cer` o un `.crt` sólo llevan la parte
-	 *  pública y no pueden autenticar nada. La lista **no menciona el sello de entidad** a propósito —
-	 *  es de pago, sólo se emite a personas jurídicas y recomendarlo convierte una pantalla de dos
-	 *  clics en una conversación fiscal. Quien lo tenga lo elige como cualquier otro; el tipo sólo
-	 *  decide el endpoint, que es una cuenta interna.
-	 */
-	verifactuCertificados: () => __TAURI_INVOKE<CertificadoDto[]>("verifactu_certificados"),
-	/**
-	 *  Elige el certificado con el que se remitirá.
-	 *
-	 *  Se guarda **sólo la huella**, en `device_config.json`. Pasar una vacía lo desconfigura, que es
-	 *  una acción legítima (por ejemplo antes de reinstalar uno renovado).
-	 */
-	verifactuSetCertificado: (huella: string) => __TAURI_INVOKE<null>("verifactu_set_certificado", { huella }),
-	/**
-	 *  Handshake real contra la AEAT con el certificado elegido, **sin enviar ningún registro**.
-	 *
-	 *  Es el botón «probar ahora», y existe por una razón concreta: si el certificado esconde un
-	 *  diálogo de PIN —lo que pasa con lectores con pinpad, donde Windows ignora la petición de
-	 *  silencio—, sale **ahí, con el usuario delante**, y no a las tres de la mañana con la cola
-	 *  creciendo.
-	 */
-	verifactuProbarConexion: (huella: string | null) => __TAURI_INVOKE<string>("verifactu_probar_conexion", { huella }),
 	/**
 	 *  Emite una **factura completa en sustitución** de los tickets de unos cobros (`F3`,
 	 *  FISCAL-02): uno, o varios del mismo cliente en una sola factura.
@@ -508,57 +476,6 @@ export const commands = {
 	 *  Devuelve la factura nueva, que es la que se imprime. Administrador, como emitirla.
 	 */
 	verifactuCorregirFactura: (numFactura: string, destinatario: DestinatarioInput) => __TAURI_INVOKE<BloqueFiscal>("verifactu_corregir_factura", { numFactura, destinatario }),
-	/**
-	 *  Vuelve a mandar los registros que la AEAT **rechazó**, como subsanación. Devuelve cuántos.
-	 *
-	 *  Sin esto, un rechazo era el final del camino: `pendientes()` sólo coge los `PENDIENTE`, así que el
-	 *  registro se quedaba en el panel, contado como rechazado y sin ninguna forma de avanzar.
-	 *
-	 *  Es **manual a propósito**. Un reintento automático de algo que la AEAT ya rechazó una vez
-	 *  repetiría el rechazo cada minuto: si el motivo era un fallo del programa, hace falta la versión
-	 *  que lo arregla; si era otra cosa, hace falta mirarla. Lo que se automatiza aquí es lo que no
-	 *  puede fallar dos veces igual, no lo que ya falló.
-	 */
-	verifactuSubsanarRechazados: () => __TAURI_INVOKE<number>("verifactu_subsanar_rechazados"),
-	/**
-	 *  MODO-PRUEBA (temporal): activa o desactiva el modo prueba. Con él los cobros no emiten registro
-	 *  de facturación, no se remite nada y no hacen falta NIF ni certificado. Se quita entero antes de
-	 *  que Veri*factu sea obligatorio: `grep -rn MODO-PRUEBA` lista todo lo que hay que borrar.
-	 */
-	verifactuSetModoPrueba: (encendido: boolean) => __TAURI_INVOKE<null>("verifactu_set_modo_prueba", { encendido }),
-	/**
-	 *  Da por vistas las anomalías de la cadena. Devuelve cuántas ha marcado.
-	 *
-	 *  «Reconocida» no es «resuelta»: las filas se conservan, porque lo que registran es que a este
-	 *  equipo le pasó algo y eso no deja de ser cierto porque alguien pulse un botón. Lo único que
-	 *  cambia es que dejan de gritarlo.
-	 */
-	verifactuReconocerAnomalias: () => __TAURI_INVOKE<number>("verifactu_reconocer_anomalias"),
-	/**
-	 *  Genera el ZIP con los registros de facturación de un rango.
-	 *
-	 *  Es una **obligación del sistema**, no una comodidad: el art. 8 RRSIF exige que el SIF pueda
-	 *  exportar sus registros, y un inspector puede pedirlo. El ZIP lleva cuatro ficheros y el que lo
-	 *  justifica es `cadena.txt`: con la cadena exacta que se hasheó de cada registro, **un tercero
-	 *  verifica la integridad entera con un SHA-256 y sin nuestro código**.
-	 *
-	 *  El destino lo elige el usuario (`destino` es una ruta absoluta, fuera de AppData), como en las
-	 *  copias de seguridad. Devuelve cuántos registros entraron — un rango vacío no es un error.
-	 */
-	verifactuExportar: (destino: string, desde: string, hasta: string) => __TAURI_INVOKE<number>("verifactu_exportar", { destino, desde, hasta }),
-	/**
-	 *  La **declaración responsable** del productor del software (art. 13 RRSIF).
-	 *
-	 *  > *«Los sistemas informáticos […] deberán incluir una declaración responsable […] que podrá
-	 *  > figurar en el propio sistema informático, visible en cada una de sus versiones»*.
-	 *
-	 *  O sea que no basta con tenerla en un PDF: tiene que poder verse **desde dentro del programa**, y
-	 *  con la versión delante. Esto es lo que alimenta esa pantalla.
-	 *
-	 *  Sin exigir rol: la declaración es pública por definición — su objeto es que cualquiera pueda
-	 *  leerla, incluido un inspector que se siente en la barra.
-	 */
-	verifactuDeclaracionResponsable: () => __TAURI_INVOKE<DeclaracionResponsableDto>("verifactu_declaracion_responsable"),
 	statsMesasGet: (range: StatsRange) => __TAURI_INVOKE<MesasStatsResponse>("stats_mesas_get", { range }),
 	statsProductosListCategorias: () => __TAURI_INVOKE<StatsCategoriaRow[]>("stats_productos_list_categorias"),
 	statsProductosResumen: (args: ProductosStatsArgs) => __TAURI_INVOKE<ProductosStatsResponse>("stats_productos_resumen", { args }),

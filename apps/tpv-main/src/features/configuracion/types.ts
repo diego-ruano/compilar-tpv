@@ -2,7 +2,7 @@
 export type SectionKey =
 	| "NEGOCIO"
 	| "PERMISOS"
-	/** FISCAL-01 (Veri*factu): datos del obligado, certificado y estado del envío a la AEAT. */
+	/** FISCAL-01: datos del obligado (NIF y razón social). */
 	| "FISCAL"
 	| "CONTACTO"
 	/** RI-61: duración por defecto de una reserva y qué hacer cuando dos se pisan. */

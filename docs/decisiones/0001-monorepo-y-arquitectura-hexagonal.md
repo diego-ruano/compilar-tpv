@@ -17,8 +17,8 @@ TypeScript no pueden escribirse dos veces a mano.
   - `tpv-domain`: entidades y reglas puras.
   - `tpv-application`: puertos (traits) en `ports/` y casos de uso en `use_cases/`.
   - Adaptadores: `tpv-infra-sqlite` (persistencia), `tpv-infra-http` (los mismos puertos contra el worker,
-    para la Handy), `tpv-infra-licensing` (cripto, keyring, HTTP firmado), `tpv-infra-aeat` (Veri\*factu),
-    `tpv-telemetry`.
+    para la Handy), `tpv-infra-licensing` (cripto, keyring, HTTP firmado), `tpv-telemetry`, y
+    `tpv-infra-aeat` (Veri\*factu) en la rama `con-verifactu`.
   - `tpv-contracts`: los DTO que cruzan a la interfaz.
   - `apps/tpv-main/src-tauri`: comandos Tauri **finos** que adaptan la entrada, llaman al caso de uso y
     devuelven el resultado. Sin SQL ni reglas.

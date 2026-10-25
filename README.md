@@ -3,8 +3,9 @@
 Terminal punto de venta para hostelería. Una aplicación de escritorio para Windows (la **Main**, la caja
 de la barra) que vende contra su propia base de datos aunque no haya internet, una aplicación Android para
 los camareros (la **Handy**) que trabaja contra la nube, y un servicio en Cloudflare que replica los datos
-entre las dos y gestiona las licencias. Cada cobro es una factura con su registro Veri\*factu, que la Main
-remite a la AEAT con el certificado del bar.
+entre las dos y gestiona las licencias. Cada cobro es una factura con su registro de facturación
+encadenado. Esta rama no remite a la AEAT: Veri\*factu está en las ramas `con-verifactu` y
+`con-verifactu-windows-7`.
 
 | Pieza | Tecnología | Dónde |
 |---|---|---|

@@ -139,39 +139,6 @@ struct DeviceConfig {
     /// la configuración de nadie. Una entrada ausente = ese destino no tiene impresora.
     #[serde(default)]
     printers: std::collections::HashMap<String, String>,
-    /// FISCAL-01: **huella digital** del certificado elegido para remitir a la AEAT.
-    ///
-    /// Vive aquí y no en la BD por la misma razón que la impresora: el certificado está instalado
-    /// en ESTA máquina, y replicarlo a la nube y a las Handy sería anunciar una elección que allí
-    /// no significa nada.
-    ///
-    /// **Es lo único que se guarda del certificado, y no es un secreto**: la huella lo identifica
-    /// pero no lo abre. La clave privada no sale nunca del almacén de Windows — quien firma el
-    /// handshake es Windows. Por eso el certificado ni siquiera toca el `secret_store`: un secreto
-    /// menos que proteger es un secreto menos que filtrar.
-    #[serde(default)]
-    verifactu_cert: Option<String>,
-}
-
-/// Guarda (o borra) la huella del certificado con el que se remite a la AEAT.
-///
-/// Sólo la huella: la clave privada no sale nunca del almacén de Windows, y la huella no es un
-/// secreto — identifica al certificado pero no lo abre.
-pub(crate) fn set_certificado_verifactu(
-    app_data_dir: &Path,
-    huella: Option<String>,
-) -> Result<(), String> {
-    let mut cfg = load_config(app_data_dir);
-    cfg.verifactu_cert = huella;
-    save_config(app_data_dir, &cfg)
-}
-
-/// La huella del certificado elegido para remitir a la AEAT, o `None`.
-pub(crate) fn certificado_verifactu(app_data_dir: &Path) -> Option<String> {
-    load_config(app_data_dir)
-        .verifactu_cert
-        .map(|s| s.trim().to_uppercase().replace([' ', ':'], ""))
-        .filter(|s| !s.is_empty())
 }
 
 /* =========================================================
@@ -227,24 +194,12 @@ struct SetPrinterArgs {
    Va en el bloque `SistemaInformatico` de cada registro de facturación (art. 13 de la Orden
    HAC/1177/2024). Describe a quien ha hecho el TPV, no al bar que lo usa.
 
-   Es DATO DECLARADO: la AEAT no lo contrasta contra ningún registro de actividad económica, así
-   que el epígrafe del productor es irrelevante para que un envío se acepte. Lo que sí valida es el
-   FORMATO (el NIF tiene que tener nueve caracteres) y las longitudes máximas.
+   Es DATO DECLARADO: la AEAT no lo contrasta contra ningún registro de actividad económica. Lo que
+   sí valida es el FORMATO (el NIF tiene que tener nueve caracteres) y las longitudes máximas.
 
-   ⚠️ `PRODUCTOR_NIF` ESTÁ VACÍO A PROPÓSITO, y aplazarlo es seguro. Todavía no se sabe si el
-   productor será un autónomo o una sociedad. Lo que hace que la espera no cueste nada:
-
-     · El job SE NIEGA A REMITIR sin identidad (`verifactu::productor_configurado`). No es una
-       carencia: mandar un registro con `"NIF":""` sería que la AEAT lo rechazara por formato, y ese
-       rechazo es DEFINITIVO porque `Sistema_Json` se congela en la fila y no se recompone al
-       remitir. Quedándose `PENDIENTE` se sale; «rechazado» no.
-     · Con la constante puesta, los registros emitidos sin ella se corrigen solos antes del primer
-       envío (`verifactu::asegurar_sistema_reparado`, precondición del job). Es legítimo porque
-       `SistemaInformatico` NO entra en la cadena de huella.
-     · El panel y el aviso dicen que la culpa es del programa, no del bar.
-
-   Lo que falta y por qué, en docs/pendientes.md (Veri*factu). Va junto con la declaración
-   responsable del art. 13 RRSIF.
+   `PRODUCTOR_NIF` está vacío: esta rama no remite a la AEAT, y `SistemaInformatico` NO entra en la
+   cadena de huella, así que rellenarlo después no cambia ninguna huella ya calculada. Cómo se
+   corrigen los registros emitidos sin él, en la rama `con-verifactu`.
 ========================================================= */
 
 /// Razón social del productor. Máx. 120 caracteres.
@@ -2091,20 +2046,11 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::venta_rapida::vr_delete_comanda_if_safe,
             commands::venta_rapida::vr_get_index_rows,
             commands::venta_rapida::vr_get_detalles_ver_ticket,
-            // verifactu (FISCAL-01). Sólo LECTURAS: la emisión ocurre dentro de la transacción
-            // del cobro, no por un comando propio.
+            // registro de facturación (FISCAL-01). La emisión de un cobro ocurre dentro de su
+            // transacción, no por un comando propio.
             commands::verifactu::verifactu_estado,
-            commands::verifactu::verifactu_listar,
-            commands::verifactu::verifactu_certificados,
-            commands::verifactu::verifactu_set_certificado,
-            commands::verifactu::verifactu_probar_conexion,
             commands::verifactu::verifactu_emitir_factura_de_tickets,
             commands::verifactu::verifactu_corregir_factura,
-            commands::verifactu::verifactu_subsanar_rechazados,
-            commands::verifactu::verifactu_set_modo_prueba,
-            commands::verifactu::verifactu_reconocer_anomalias,
-            commands::verifactu::verifactu_exportar,
-            commands::verifactu::verifactu_declaracion_responsable,
             // stats
             commands::stats::stats_mesas_get,
             commands::stats::stats_productos_list_categorias,
@@ -2269,7 +2215,7 @@ pub fn run() {
 
     // REV-05: una sola instancia por equipo. Dos procesos sobre la misma `data.db` abren dos
     // WebSockets con el mismo `deviceId` (el TenantHub echa al anterior: bucle de `replaced`),
-    // duplican los jobs —dos remisiones a la AEAT, dos copias, dos backfills— y drenan el outbox a
+    // duplican los jobs —dos contrastes con la nube, dos copias, dos backfills— y drenan el outbox a
     // la vez. El segundo lanzamiento termina antes de hacer nada y el primero trae su ventana al
     // frente, que es lo que espera quien ha hecho doble clic en el acceso directo.
     //
@@ -2335,10 +2281,8 @@ pub fn run() {
             // `tauri.conf.json`) y el número de instalación (el `tenant_id`, que vive en
             // `license_state.json`, fuera de `data.db`). El resto identifica al PRODUCTOR del
             // software —nosotros—, no al bar, y es dato declarado: la AEAT no lo contrasta contra
-            // ningún registro de actividad económica.
-            //
-            // ⚠️ El NIF está vacío a propósito y no rompe nada: ver el bloque de constantes arriba
-            // y docs/pendientes.md (Veri*factu).
+            // ningún registro de actividad económica. El NIF está vacío: ver el bloque de
+            // constantes arriba.
             {
                 let tenant = tpv_infra_licensing::LicensingAdapter::new(app_data_dir.clone());
                 let numero_instalacion = {
@@ -3202,7 +3146,7 @@ mod tests_exenciones_del_gate {
     /// PROD-06: ningún interruptor remoto puede impedir cobrar ni emitir el registro fiscal de un
     /// cobro. La lista cerrada ya no tiene nada de eso, pero la forma de romperlo no es añadir un
     /// interruptor «cobrar»: es que alguien consulte uno existente dentro de este camino («si la
-    /// remisión está apagada, mejor no emitir»). Por eso se vigila el fuente del camino entero.
+    /// sincronización está apagada, mejor no emitir»). Por eso se vigila el fuente del camino entero.
     #[test]
     fn ningun_interruptor_toca_el_camino_del_cobro() {
         const FUENTES: &[(&str, &str)] = &[

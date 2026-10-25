@@ -5,6 +5,11 @@ TPV de escritorio para hostelería: **Tauri 2 + React 19 + TypeScript** con back
 Turso. La Main (Windows) vende contra su base local y replica cuando hay red; la Handy (Android) trabaja
 contra la nube. Qué es cada pieza: [README.md](README.md). Cómo funciona por dentro: [docs/](docs/README.md).
 
+**Ramas.** `main` es Windows 10 y 11 **sin Veri\*factu**, y es donde se desarrolla;
+`compilacion-windows-7` es la variante de Windows 7 de `main` y recibe `main` por merge. Veri\*factu
+entero vive en `con-verifactu` y `con-verifactu-windows-7`, tal como estaba el 25-10-2026. Cómo
+volver a ponerlo: [pendientes.md](docs/pendientes.md#vf-vuelta--volver-a-poner-verifactu).
+
 Este fichero dice **qué reglas seguir** y **dónde mirar antes de tocar cada cosa**. El porqué largo está
 en los documentos enlazados; léelos antes de cambiar el subsistema.
 
@@ -29,7 +34,6 @@ crates/
   tpv-infra-sqlite               persistencia SQLite (rusqlite), outbox, migraciones
   tpv-infra-http                 los mismos puertos contra el worker (modo Handy)
   tpv-infra-licensing            licencia, identidad del dispositivo, secretos, hora de la nube
-  tpv-infra-aeat                 Veri*factu: SOAP, XML, TLS mutuo con WinHTTP
   tpv-telemetry                  Sentry, spool a Axiom, filtro de datos personales
   tpv-contracts                  DTOs con Specta → packages/contracts
 packages/
@@ -42,8 +46,7 @@ docs/                            arquitectura, decisiones, guías, estudios, pen
 tests/contract/                  arneses de contrato Rust ↔ worker
 scripts/                         generate-types, check-migration-registry, check-contract-coverage,
                                  check-dead-code,
-                                 tpv-license (CLI de administración), generate-license-keypair,
-                                 verifactu-validar-xml
+                                 tpv-license (CLI de administración), generate-license-keypair
 ```
 
 ## Antes de tocar…
@@ -53,7 +56,7 @@ scripts/                         generate-types, check-migration-registry, check
 | Cualquier escritura, el outbox, el WebSocket, el `TenantHub`, una consulta de la Handy | [sincronizacion.md](docs/arquitectura/sincronizacion.md) |
 | La recuperación, las copias, el bootstrap, el traslado de licencia | [recuperacion.md](docs/arquitectura/recuperacion.md) |
 | El esquema o una migración | [esquema.md](docs/arquitectura/esquema.md) |
-| Un cobro, el registro fiscal, el QR, la AEAT | [verifactu.md](docs/arquitectura/verifactu.md) |
+| Un cobro, el registro fiscal | [verifactu.md](docs/arquitectura/verifactu.md) |
 | Cuentas, el cierre de caja, anular un cobro | [caja.md](docs/arquitectura/caja.md) |
 | El ticket o la impresora | [tickets.md](docs/arquitectura/tickets.md) |
 | La licencia, Stripe, la administración | [licencias.md](docs/arquitectura/licencias.md) |
@@ -65,7 +68,6 @@ scripts/                         generate-types, check-migration-registry, check
 | Sentry, Axiom, `/health` | [observabilidad.md](docs/arquitectura/observabilidad.md) |
 | Publicar una versión | [publicar-version.md](docs/guias/publicar-version.md) |
 | Android | [compilar-android.md](docs/guias/compilar-android.md) |
-| Probar contra la AEAT | [PRUEBAS_AEAT.md](docs/PRUEBAS_AEAT.md) |
 
 Lo pendiente y lo detectado sin decidir está en [docs/pendientes.md](docs/pendientes.md).
 
@@ -230,13 +232,11 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
 
 - **El registro de facturación se emite dentro de la transacción del cobro** y `Registros_Facturacion` es
   *append-only*: no se modifica ni se purga.
-- ⚠️ **El job de remisión no depende de `connectivity: "off"`**: no se le añade esa comprobación.
-- **Nada de lo que rodea al ticket ni al envío puede impedir cobrar**: ni la impresora, ni el QR, ni el logo,
-  ni un aviso. Los avisos van después del cobro.
+- **Nada de lo que rodea al ticket puede impedir cobrar**: ni la impresora, ni el logo, ni un aviso. Los
+  avisos van después del cobro.
 - **Ningún interruptor remoto toca el camino del cobro.**
 - El arqueo deriva de `Pagos` con `Estado = 'ACTIVO'`; `Movimientos_Caja` es para investigar, nunca para
   sumar. Toda lectura de «línea cobrada» va por `v_lineas_cobradas`.
-- El modo prueba (`MODO-PRUEBA`) es temporal: no se construye nada encima.
 
 ### Frontend ([frontend.md](docs/arquitectura/frontend.md))
 

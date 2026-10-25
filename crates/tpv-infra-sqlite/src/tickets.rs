@@ -89,7 +89,7 @@ const SQL_LINEAS_DEVUELTAS: &str = r#"
 /// vale la última. Un ticket antiguo se encuentra por `idx_regfact_numserie`, no recorriendo los
 /// registros hacia atrás: lo vigila `planes::tests` (RI-03).
 pub(crate) const SQL_FACTURA: &str = "SELECT Num_Serie_Factura, COALESCE(Tipo_Factura, ''), \
-            NIF_Emisor, Nombre_Razon_Emisor, Fecha_Expedicion, Fecha_Hora_Huso, QR_Url, \
+            NIF_Emisor, Nombre_Razon_Emisor, Fecha_Expedicion, Fecha_Hora_Huso, \
             COALESCE(Importe_Total, ''), Desglose_Json, ID_Pago, Destinatario_Json, \
             Referencias_Json \
      FROM Registros_Facturacion \
@@ -299,10 +299,10 @@ async fn factura<R: Reader>(
     let texto = |i: i32| -> AppResult<String> {
         Ok(v_string(row.get_value(i).map_err(db_err)?).unwrap_or_default())
     };
-    let desglose = v_string(row.get_value(8).map_err(db_err)?);
-    let id_pago = v_string(row.get_value(9).map_err(db_err)?);
-    let destinatario = v_string(row.get_value(10).map_err(db_err)?);
-    let referencias = v_string(row.get_value(11).map_err(db_err)?);
+    let desglose = v_string(row.get_value(7).map_err(db_err)?);
+    let id_pago = v_string(row.get_value(8).map_err(db_err)?);
+    let destinatario = v_string(row.get_value(9).map_err(db_err)?);
+    let referencias = v_string(row.get_value(10).map_err(db_err)?);
     let f = FacturaDelTicket {
         num_serie: texto(0)?,
         tipo_factura: texto(1)?,
@@ -310,9 +310,8 @@ async fn factura<R: Reader>(
         razon_emisor: texto(3)?,
         fecha_expedicion: texto(4)?,
         fecha_hora_huso: texto(5)?,
-        qr_url: texto(6)?,
         // El importe se guardó como TEXTO fiscal ("10.00"): se lee a céntimos sin pasar por f64.
-        importe_total: Dinero::de_texto_fiscal(&texto(7)?).unwrap_or(Dinero::CERO),
+        importe_total: Dinero::de_texto_fiscal(&texto(6)?).unwrap_or(Dinero::CERO),
         tramos: crate::verifactu::tramos_declarados(desglose.as_deref()),
         destinatario: crate::verifactu::destinatario_del_papel(destinatario.as_deref()),
         sustituye: crate::verifactu::numeros_sustituidos(referencias.as_deref()),
@@ -579,7 +578,6 @@ mod tests {
         assert_eq!(f.importe_total, eur(5.10));
         assert_eq!(f.tramos.len(), 2);
         assert_eq!((f.tramos[1].tipo, f.tramos[1].base, f.tramos[1].cuota), (21.0, eur(2.07), eur(0.43)));
-        assert!(f.qr_url.contains("nif=B12345674"));
     }
 
     #[tokio::test]
@@ -606,7 +604,8 @@ mod tests {
 
     #[tokio::test]
     async fn un_cobro_sin_registro_no_inventa_una_factura() {
-        // Un cobro de modo prueba no emite registro: el papel sale sin QR, no con uno vacío.
+        // Un cobro anterior a la numeración no tiene registro: el papel sale sin desglose, no con
+        // uno vacío.
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
 

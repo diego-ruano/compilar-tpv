@@ -10,12 +10,13 @@
 // Lleva dentro lo que antes era un recorrido aparte, la factura de cada cobro (FISCAL-01): los dos
 // estrenaban un equipo idéntico para vender lo mismo (TEST-03). Los pasos 9 y 10 son su corazón. El
 // registro de facturación se emite DENTRO de la transacción del cobro, en Rust, y de él salen el
-// número del papel y la URL del QR. Hay ~100 tests de Rust sobre la huella y la persistencia, y ni
-// uno solo que recorra React → IPC → cobro → registro → vuelta al papel, que es justo la costura
-// donde vive lo que se rompe sin que nadie se entere: el papel sale sin QR y ya está.
+// número, el desglose y el total del papel. Hay ~100 tests de Rust sobre la huella y la
+// persistencia, y ni uno solo que recorra React → IPC → cobro → registro → vuelta al papel, que es
+// justo la costura donde vive lo que se rompe sin que nadie se entere: el papel sale sin desglose y
+// ya está.
 //
 // Y termina con la cifra que lo verifica todo: si algo se rompe entre React y SQLite, el arqueo
-// del paso 13 deja de cuadrar.
+// del paso 12 deja de cuadrar.
 //
 // El equipo que deja es el que usan los recorridos siguientes (ver las recetas de `wdio.conf.ts`),
 // así que el negocio y el PIN viven en `helpers/equipo.ts`. Los gestos de montar la carta, abrir la
@@ -40,9 +41,8 @@ import {
     declararDatosFiscales,
     irASeccionFiscal,
     verifactuEstado,
-    verifactuListar,
     ticketDelCobro,
-    type RegistroFiscal,
+    type TicketDelCobro,
 } from "../helpers/fiscal.js";
 import { conTexto, irA, leerDeLaApp, literalXPath, pulsar, pulsarXPath } from "../helpers/ui.js";
 import {
@@ -87,8 +87,8 @@ const PRODUCTO: Producto = {
 
 /** El id de la mesa creada por el test (UUID de la BD). Lo rellena el paso 6b. */
 let idMesa = "";
-/** El registro de la primera venta, para comparar la cadena en el paso 11. */
-let primero: RegistroFiscal | null = null;
+/** El ticket de la primera venta y su cobro, para comparar con la segunda en el paso 11. */
+let primero: { idPago: string; ticket: TicketDelCobro } | null = null;
 
 describe("El camino del dinero", () => {
     it("1 · arranca en un equipo recién instalado", async () => {
@@ -128,7 +128,6 @@ describe("El camino del dinero", () => {
         // tanto como elegir el PIN, y lo que se comprueba es que la pantalla basta para salir de ahí.
         const antes = await verifactuEstado();
         expect(antes.datos_fiscales_completos).toBe(false);
-        expect(antes.total_registros).toBe(0);
 
         await irASeccionFiscal();
         expect(await avisoDeDatosFiscalesVisible()).toBe(true);
@@ -138,10 +137,6 @@ describe("El camino del dinero", () => {
         const despues = await verifactuEstado();
         expect(despues.datos_fiscales_completos).toBe(true);
         expect(despues.razon_social).toBe(RAZON_SOCIAL);
-        // El entorno por defecto es PRODUCCIÓN, y es lo correcto: un registro emitido contra
-        // pruebas y creído bueno es una factura que la AEAT no tiene.
-        expect(despues.entorno_pruebas).toBe(false);
-        expect(despues.modo_prueba).toBe(false);
     });
 
     it("6a · crea una categoría y un producto con precio, IVA y stock", async () => {
@@ -214,69 +209,40 @@ describe("El camino del dinero", () => {
         // el mismo comando que compone el papel (RI-29).
         const ticket = await ticketDelCobro(entradas[0].id);
         expect(ticket.numero_ticket).toBeTruthy();
-
-        const registros = await verifactuListar();
-        expect(registros.length).toBe(1);
-
-        const alta = registros[0];
-        expect(alta.tipo).toBe("ALTA");
         // `F2` es la simplificada: el ticket de toda la vida. Sale del importe y de que no haya
         // datos del cliente, no del camino que llamó.
-        expect(alta.tipo_factura).toBe("F2");
-        expect(alta.id_pago).toBe(entradas[0].id);
-        expect(alta.orden).toBe(1);
+        expect(ticket.tipo_factura).toBe("F2");
 
         // LA comprobación de la parte fiscal. `Pagos.Numero_Ticket` es lo que se imprime y lo que
-        // busca la reimpresión; `Num_Serie_Factura` es la identidad de la factura ante la AEAT. En
-        // cuanto dejan de ser el mismo dato, el papel deja de poder atarse a su registro.
-        expect(alta.num_serie_factura).toBe(ticket.numero_ticket);
+        // busca la reimpresión; `Num_Serie_Factura` es la identidad de la factura. En cuanto dejan
+        // de ser el mismo dato, el papel deja de poder atarse a su registro.
+        expect(ticket.facturas_del_cobro).toEqual([
+            { num_serie: ticket.numero_ticket, tipo_factura: "F2", importe: 1000 },
+        ]);
 
-        // Los importes se guardan como TEXTO, ya formateados, porque entran en la cadena que se
-        // hashea: recomputarlos al leer daría otra huella. La cuota es «lo que falta» para llegar
-        // al total, no un redondeo aparte — 9,09 + 0,91 = 10,00 exactos.
-        expect(alta.importe_total).toBe("10.00");
-        expect(alta.cuota_total).toBe("0.91");
+        // El desglose es el DECLARADO en el registro, no un recálculo. La cuota es «lo que falta»
+        // para llegar al total, no un redondeo aparte — 9,09 + 0,91 = 10,00 exactos.
+        expect(ticket.desglose).toEqual([{ tipo: 10, base: 909, cuota: 91 }]);
 
-        // 64 hexadecimales en mayúsculas: SHA-256 de la cadena, sin firma. En Veri*factu lo que
-        // garantiza la integridad es el encadenamiento, no un XAdES.
-        expect(alta.huella).toMatch(/^[0-9A-F]{64}$/);
-
-        // Emitido y encolado, pero no enviado: el equipo del test no tiene certificado. Nada se
-        // pierde — el registro ya existe, que es lo que exige el art. 9.
-        expect(alta.estado_envio).toBe("PENDIENTE");
-
-        primero = alta;
+        primero = { idPago: entradas[0].id, ticket };
     });
 
     it("10 · el ticket dice lo que dice su factura, y una reimpresión saca exactamente el mismo", async () => {
-        const numero = primero!.num_serie_factura;
-        const idPago = primero!.id_pago!;
+        const numero = primero!.ticket.numero_ticket;
+        const idPago = primero!.idPago;
 
         // Este es el camino literal de la vista previa y de la impresión: el papel lo compone Rust
-        // desde el pago y su registro (RI-29). Sin QR, el papel saldría sin él.
+        // desde el pago y su registro (RI-29).
         const ticket = await ticketDelCobro(idPago);
-        const qr = ticket.qr_url;
-        if (!qr) throw new Error(`El ticket ${numero} no lleva QR.`);
 
         expect(ticket.numero_ticket).toBe(numero);
-        expect(ticket.qr_pruebas).toBe(false);
         expect(ticket.cif).toBe(NIF);
         expect(ticket.razon_social).toBe(RAZON_SOCIAL);
-        // La fecha del papel es la de expedición, no la de hoy: una copia de mañana dice la misma.
-        expect(ticket.fecha?.startsWith(primero!.fecha_expedicion.replace(/-/g, "/"))).toBe(true);
+        // La fecha del papel es la de expedición, leída del registro: una copia de mañana dice la
+        // misma.
+        expect(ticket.fecha).toBe(primero!.ticket.fecha);
         // El total es el `Importe_Total` declarado: 10,00 €.
         expect(ticket.total).toBe(1000);
-
-        // La URL de cotejo lleva los cuatro parámetros del art. 20, y sólo esos. El número va
-        // percent-encoded porque una barra sin escapar parte la URL y el cotejo devuelve un error
-        // de campo.
-        expect(qr.startsWith("https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?")).toBe(true);
-        expect(qr).toContain(`nif=${NIF}`);
-        expect(qr).toContain(`numserie=${encodeURIComponent(numero)}`);
-        expect(qr).toContain(`fecha=${primero!.fecha_expedicion}`);
-        expect(qr).toContain("importe=10.00");
-        // El parámetro que la especificación prohíbe expresamente en el QR de una factura.
-        expect(qr).not.toContain("formato=json");
 
         // La copia es el mismo papel con la marca: todo se LEE de la fila, nada se recalcula. Lo
         // único que no repite es abrir el cajón: eso sólo lo hace el original de un cobro en efectivo.
@@ -287,7 +253,7 @@ describe("El camino del dinero", () => {
         expect({ ...copia, es_copia: false, abre_cajon: true }).toEqual(ticket);
     });
 
-    it("11 · la segunda venta avanza la cadena, y la cadena está sana", async () => {
+    it("11 · la segunda venta expide la factura siguiente", async () => {
         await abrirMesa(MESA);
         await anadirLineas(PRODUCTO, UNIDADES);
         await esperarTotalPendiente(TOTAL);
@@ -295,53 +261,23 @@ describe("El camino del dinero", () => {
         await cerrarElModalDeLaMesa(MESA);
         await esperarMesaLibre(idMesa);
 
-        const registros = await verifactuListar();
-        expect(registros.length).toBe(2);
+        const entradas = await entradasDeCaja();
+        expect(entradas.length).toBe(2);
+        const segundo = entradas.find((e) => e.id !== primero!.idPago);
+        if (!segundo) throw new Error("La segunda venta no dejó su cobro.");
 
-        const segundo = registros.find((r) => r.orden === 2);
-        if (!segundo) throw new Error("La segunda venta no dejó un registro con Orden 2.");
-
-        // Número correlativo y huella distinta. La huella cambia aunque el importe sea idéntico
-        // porque entran en ella la hora de generación y la huella del eslabón anterior — que es
-        // exactamente lo que hace la cadena una cadena.
-        expect(segundo.num_serie_factura).not.toBe(primero!.num_serie_factura);
-        expect(segundo.huella).not.toBe(primero!.huella);
-        expect(segundo.tipo).toBe("ALTA");
-
-        // Y la prueba de que el eslabón anterior era bueno la da la propia app: antes de generar un
-        // registro comprueba que el último esté bien encadenado y que su fecha no vaya por delante
-        // del reloj (art. 7.i). Una anomalía no impide facturar —nunca puede—, se anota. Cero
-        // anomalías tras la segunda emisión significa que la primera pasó esa comprobación.
-        const estado = await verifactuEstado();
-        expect(estado.anomalias_sin_reconocer).toBe(0);
+        // Número correlativo: el siguiente de la misma serie, con su propia factura.
+        const ticket = await ticketDelCobro(segundo.id);
+        const [serie1, n1] = primero!.ticket.numero_ticket!.split("/");
+        const [serie2, n2] = ticket.numero_ticket!.split("/");
+        expect(serie2).toBe(serie1);
+        expect(Number(n2)).toBe(Number(n1) + 1);
+        expect(ticket.facturas_del_cobro).toEqual([
+            { num_serie: ticket.numero_ticket, tipo_factura: "F2", importe: 1000 },
+        ]);
     });
 
-    it("12 · las dos facturas están en la cola, y el panel dice por qué no han salido", async () => {
-        const estado = await verifactuEstado();
-
-        expect(estado.total_registros).toBe(2);
-        expect(estado.pendientes).toBe(2);
-        expect(estado.aceptados).toBe(0);
-        expect(estado.rechazados).toBe(0);
-
-        // Nada ha salido, y la aplicación DICE por qué. Eso es lo que fija este paso: una cola que
-        // crece sin explicación es el fallo que deja a un bar sin remitir durante semanas.
-        //
-        // No se fija CUÁL de los dos motivos, y no es pereza. Hoy sale `sin_datos_del_productor`
-        // —el NIF del productor del software sigue pendiente, ver `docs/pendientes.md`—
-        // y el día que se rellene pasará a `sin_certificado`, porque el equipo del test tampoco
-        // tiene certificado. El orden entre ellos es deliberado (`estado_fiscal`): primero lo que
-        // puede arreglar el bar, después lo que sólo podemos arreglar nosotros. Atar el test a uno
-        // concreto lo convertiría en rojo el día que se resuelva, que es justo al revés.
-        expect(estado.certificado_ok).toBe(false);
-        expect(["sin_datos_del_productor", "sin_certificado"]).toContain(estado.motivo_no_remite);
-
-        // Y que no dé la lata todavía: por debajo de una hora, no remitir es funcionamiento normal
-        // —la propia norma impone una espera entre envíos—, así que la escalera de avisos calla.
-        expect(estado.escalon_aviso).toBe("ninguno");
-    });
-
-    it("13 · cierra caja: lo que debería haber es lo cobrado, y el descuadre es 0", async () => {
+    it("12 · cierra caja: lo que debería haber es lo cobrado, y el descuadre es 0", async () => {
         await irA("/Cuentas");
         await pulsar("Cerrar caja");
 

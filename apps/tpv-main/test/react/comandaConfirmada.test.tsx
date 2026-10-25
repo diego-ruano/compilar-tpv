@@ -24,7 +24,6 @@ vi.mock("../../src/shared/toast", () => ({ useToast: () => ({ error: vi.fn(), wa
 vi.mock("../../src/features/inventario/ProductDetailModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/PrintTicketModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/DatosFiscalesModal", () => ({ default: () => null }));
-vi.mock("../../src/shared/ticket/AvisoFiscalModal", () => ({ anunciarCobro: () => {} }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 const producto = { ID_Producto: "cafe", Nombre: "Café", Precio_Venta: 300, Ruta_Imagen: null };

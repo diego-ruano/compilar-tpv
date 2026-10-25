@@ -145,7 +145,6 @@ export function payloadDePrecuenta(items: LineaEntrada[], printerName?: string):
         margin_right_mm: t.margin_right_mm,
         font_scale: t.font_scale,
 
-        qr_pruebas: false,
         es_copia: false,
         es_anulado: false,
         abre_cajon: false,

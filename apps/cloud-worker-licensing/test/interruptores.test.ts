@@ -7,7 +7,7 @@
 //   · Que un interruptor aplique exactamente a quien debe: global o de un tenant, en un rango de
 //     versiones, y sólo mientras no haya caducado.
 //   · Que si la base central no contesta, TODO esté encendido (lo contrario convertiría una caída
-//     de Turso en «el TPV deja de remitir a la AEAT»).
+//     de Turso en «el TPV deja de sincronizar»).
 //   · Que administración no deje apagar nada para siempre, y que encender deje rastro.
 //   · Que la cola del DO apagada no aplique ni pierda nada, y que al encenderse drene.
 //
@@ -126,7 +126,7 @@ describe("PROD-06 · leer de la base central", () => {
 					desde,
 					exp,
 				);
-			ins("verifactu_remitir", "*", ahora + HORA);
+			ins("volcado_atraso", "*", ahora + HORA);
 			ins("imagenes", "t-1", ahora + HORA);
 			ins("cola_do", "t-2", ahora + HORA);
 			ins("backfill_historico", "*", ahora - 1);
@@ -135,10 +135,10 @@ describe("PROD-06 · leer de la base central", () => {
 			const nombres = async (t: string, v: string | null) =>
 				(await apagadosPara(() => db as any, t, v)).map((a) => a.interruptor).sort();
 
-			expect(await nombres("t-1", "1.0.0")).toEqual(["imagenes", "verifactu_remitir"]);
+			expect(await nombres("t-1", "1.0.0")).toEqual(["imagenes", "volcado_atraso"]);
 			olvidarInterruptoresCacheados();
-			expect(await nombres("t-1", "9.1.0")).toEqual(["cifrado_pii", "imagenes", "verifactu_remitir"]);
-			expect(await nombres("t-2", "1.0.0")).toEqual(["cola_do", "verifactu_remitir"]);
+			expect(await nombres("t-1", "9.1.0")).toEqual(["cifrado_pii", "imagenes", "volcado_atraso"]);
+			expect(await nombres("t-2", "1.0.0")).toEqual(["cola_do", "volcado_atraso"]);
 		});
 	});
 
@@ -256,11 +256,9 @@ describe("PROD-06 · administración", () => {
 		});
 	});
 
-	it("no deja apagar nada para siempre, y a la AEAT menos", async () => {
+	it("no deja apagar nada para siempre", async () => {
 		await conAdmin(async ({ post, sql }) => {
 			const base = { motivo: "pruebas de tope" };
-			expect((await post("/interruptores", { ...base, interruptor: "verifactu_remitir", horas: 25 })).status).toBe(400);
-			expect((await post("/interruptores", { ...base, interruptor: "verifactu_remitir", horas: 24 })).status).toBe(200);
 			expect((await post("/interruptores", { ...base, interruptor: "imagenes", horas: 169 })).status).toBe(400);
 			expect((await post("/interruptores", { ...base, interruptor: "imagenes", horas: 168 })).status).toBe(200);
 			// Sin caducidad, no.
@@ -270,7 +268,7 @@ describe("PROD-06 · administración", () => {
 			// Sin motivo, no: es lo que se enseña en la pantalla del bar.
 			expect((await post("/interruptores", { interruptor: "imagenes", horas: 1 })).status).toBe(400);
 
-			expect(sql.exec("SELECT COUNT(*) AS n FROM interruptores;").toArray()[0].n).toBe(2);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM interruptores;").toArray()[0].n).toBe(1);
 		});
 	});
 

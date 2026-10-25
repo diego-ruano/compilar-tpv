@@ -8,8 +8,8 @@ import { $, browser } from "@wdio/globals";
 
 import { escribir, irA, leerDeLaApp, literalXPath, pulsarXPath } from "./ui.js";
 
-export type { EstadoFiscal, RegistroFiscal, PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
-import type { EstadoFiscal, RegistroFiscal, PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
+export type { EstadoFiscal, PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
+import type { EstadoFiscal, PrintTicketPayload_Serialize as TicketDelCobro } from "@tpv/contracts";
 
 /**
  * El aviso que sale al entrar cuando faltan el NIF y la razón social (FIS-01).
@@ -146,27 +146,16 @@ export async function avisoDeDatosFiscalesVisible(): Promise<boolean> {
     return await aviso.isExisting();
 }
 
-/** Resumen fiscal: datos del obligado, cola de envío y escalón de aviso. */
+/** ¿Están los datos del obligado? */
 export async function verifactuEstado(): Promise<EstadoFiscal> {
     return await leerDeLaApp("verifactu_estado");
-}
-
-/** El libro de registros, del más reciente al más antiguo (es como lo pinta el panel). */
-export async function verifactuListar(limite = 50): Promise<RegistroFiscal[]> {
-    // ⚠️ Los argumentos van PLANOS (`{ limite }`), no envueltos en `{ args: {…} }`: el comando
-    // declara parámetros sueltos. Equivocarse no da un error legible — un `Option<…>` llega como
-    // `None` y el comando se queda con su valor por defecto.
-    return await leerDeLaApp("verifactu_listar", {
-        limite,
-        desplazamiento: 0,
-    });
 }
 
 /**
  * El ticket de un cobro, por su pago.
  *
  * Es EL MISMO camino que usan la vista previa y la impresión (`printer_ticket_de_pago`): lo que
- * devuelve es lo que sale en el papel. Si no trae QR, el ticket sale sin QR.
+ * devuelve es lo que sale en el papel, leído del pago y de su registro de facturación.
  */
 export async function ticketDelCobro(idPago: string, esCopia = false): Promise<TicketDelCobro> {
     return await leerDeLaApp("printer_ticket_de_pago", {

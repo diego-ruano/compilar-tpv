@@ -14,10 +14,10 @@
 //! del servidor, y la corrección la acerca, no la aleja.
 //!
 //! ⚠️ **Sólo para firmar y para leer fechas que pone la nube** (la caducidad de un token, la de una
-//! aserción). La hora del NEGOCIO —ventas, fichajes, caja, registros Veri\*factu, y la `x-client-now`
-//! con la que el worker resuelve los `datetime('now')`— sigue siendo la del equipo, a propósito:
-//! corregirla de golpe podría fechar una factura antes que la anterior, que es justo lo que la
-//! comprobación del art. 7.i anota como anomalía. Es otra decisión, y no se toma aquí.
+//! aserción). La hora del NEGOCIO —ventas, fichajes, caja, registros de facturación, y la
+//! `x-client-now` con la que el worker resuelve los `datetime('now')`— sigue siendo la del equipo, a
+//! propósito: corregirla de golpe podría fechar una factura antes que la anterior, y eso una cadena
+//! de facturación no lo admite. Es otra decisión, y no se toma aquí.
 //!
 //! El desfase vive en memoria y no se guarda: al arrancar vale 0, la primera petición que la nube
 //! rechace por la hora trae ya la suya, y se repite una vez (ver [`es_rechazo_por_reloj`]).

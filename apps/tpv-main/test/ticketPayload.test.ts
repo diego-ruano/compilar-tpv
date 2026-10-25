@@ -230,14 +230,13 @@ describe("personalización y datos del cobro", () => {
 
 	it("la precuenta no lleva nada fiscal", () => {
 		// Sin número, Rust imprime "NO ES UN TICKET DE VENTA". La pantalla no tiene forma de poner
-		// un número, un QR, una fecha o un total: eso sólo sale del cobro (RI-29).
+		// un número, una fecha o un total: eso sólo sale del cobro (RI-29).
 		const p = payloadDePrecuenta([unidad("Cafe", 1.1)], "EPSON");
 
 		// Ausentes, no vacíos: el contrato generado los declara opcionales y Rust los lee como `None`.
 		expect(p.printer_name).toBe("EPSON");
 		expect(p.numero_ticket).toBeUndefined();
 		expect(p.fecha).toBeUndefined();
-		expect(p.qr_url).toBeUndefined();
 		expect(p.metodo_pago).toBeUndefined();
 		expect(p.desglose).toBeUndefined();
 		expect(p.total).toBeUndefined();

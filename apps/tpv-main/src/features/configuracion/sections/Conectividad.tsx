@@ -280,7 +280,6 @@ const JOB_ETIQUETA: Record<string, string> = {
 	backfill_historico: "Descarga del histórico pendiente",
 	interruptores: "Pausas de emergencia de soporte",
 	verificar_nube: "Contraste con la nube",
-	verifactu_remitir: "Envío de facturas a la AEAT",
 };
 
 function cadaTexto(secs: number): string {

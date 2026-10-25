@@ -137,8 +137,8 @@ export default function DatosFiscalesModal({
                     />
                     {tocadoNif && nif.trim() && !nifOk ? (
                         <span className="mt-1 block text-xs text-danger">
-                            Ese NIF no es válido. Compruébalo con el cliente delante: si se manda
-                            mal, la AEAT lo avisa horas después y ya no está para corregirlo.
+                            Ese NIF no es válido. Compruébalo con el cliente delante: una factura
+                            con el NIF mal hay que rectificarla después.
                         </span>
                     ) : null}
                 </label>
@@ -156,7 +156,7 @@ export default function DatosFiscalesModal({
                         className="mt-1 h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-primary"
                     />
                     <span className="mt-1 block text-xs text-fg-muted">
-                        Una factura lo lleva por ley. No se manda a Hacienda: sólo se imprime.
+                        Una factura lo lleva por ley.
                     </span>
                 </label>
 

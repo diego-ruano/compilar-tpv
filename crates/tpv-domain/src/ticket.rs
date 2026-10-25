@@ -2,9 +2,9 @@
 //! de facturación**.
 //!
 //! Vivía en `printing.rs` y sube aquí porque desde Veri\*factu tiene tres consumidores y no dos:
-//! el generador ESC/POS, `TicketPaper.tsx` (que es su espejo) y el `Desglose` del registro que se
-//! remite a la AEAT. Tres copias de esta cuenta es exactamente el tipo de divergencia que no se ve
-//! hasta que la AEAT devuelve un «aceptado con errores» meses después.
+//! el generador ESC/POS, `TicketPaper.tsx` (que es su espejo) y el `Desglose` del registro de
+//! facturación. Tres copias de esta cuenta es exactamente el tipo de divergencia que no se ve
+//! hasta que el papel y el registro dicen cosas distintas del mismo cobro.
 //!
 //! ## La regla que importa: la cuota se despeja, no se redondea
 //!
@@ -53,7 +53,7 @@ pub struct TramoIva {
 /// 21 %.
 ///
 /// ⚠️ **Y nadie de fuera lo habría cazado.** Se comprobó contra la AEAT mandando una `CuotaTotal`
-/// descuadrada a propósito: la acepta sin decir nada (ver `docs/PRUEBAS_AEAT.md`). Un desglose mal
+/// descuadrada a propósito: la acepta sin decir nada (ver `docs/PRUEBAS_AEAT.md` en `con-verifactu`). Un desglose mal
 /// repartido sale por la puerta como si tal cosa.
 ///
 /// El reparto es proporcional y **cuadra al céntimo**: se redondea cada línea y el resto que sobra
@@ -257,7 +257,7 @@ pub fn fecha_del_papel(fecha_expedicion: &str, fecha_hora_huso: &str) -> String 
     }
 }
 
-/// La fecha de un cobro sin registro de facturación (modo prueba): `Pagos.Fecha_Hora`
+/// La fecha de un cobro sin registro de facturación (uno anterior a la numeración): `Pagos.Fecha_Hora`
 /// (`AAAA-MM-DD HH:MM:SS`) como la escribe el papel (`DD/MM/AAAA HH:MM`). Si no tiene esa forma se
 /// devuelve tal cual: una fecha rara en el papel es mejor que ninguna.
 pub fn fecha_de_cobro(fecha_hora: &str) -> String {

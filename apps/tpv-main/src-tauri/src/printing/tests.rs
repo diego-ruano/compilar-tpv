@@ -43,8 +43,6 @@ mod fixtures {
             show_address: false,
             show_phone: false,
             show_footer_message: false,
-            qr_url: None,
-            qr_pruebas: false,
             paper_width_mm: 80,
             paper_dpi: 203,
             chars_per_line: 42,
@@ -161,7 +159,7 @@ mod tests_desglose_iva {
     //! El reparto del ticket por tipo de IVA.
     //!
     //! La aritmética vive en `tpv_domain::ticket` desde FISCAL-01 (la comparte con la vista previa
-    //! y con el registro de facturación que se remite a la AEAT). Lo que se prueba AQUÍ es el
+    //! y con el registro de facturación). Lo que se prueba AQUÍ es el
     //! puente: que el payload de impresión se traduce a líneas de dominio sin perder nada — el
     //! tipo de la línea por encima del general, y la exención congelada.
 
@@ -348,26 +346,6 @@ mod tests_identidad_del_ticket {
 
         assert!(contiene(&bytes, "NO ES UN TICKET DE VENTA"));
         assert!(!contiene(&bytes, "COPIA"));
-    }
-
-    #[test]
-    fn un_ticket_del_modo_prueba_dice_que_no_tiene_valor_fiscal() {
-        // MODO-PRUEBA (temporal): sin QR y sin marca, se leería como un ticket de verdad.
-        let mut p = base(vec![linea()]);
-        p.numero_ticket = Some("PRUEBA/000001".into());
-        let bytes = build_ticket(&p, None);
-
-        assert!(contiene(&bytes, "MODO PRUEBA"));
-        assert!(contiene(&bytes, "SIN VALOR FISCAL"));
-    }
-
-    #[test]
-    fn un_ticket_normal_no_lleva_la_marca_de_prueba() {
-        let mut p = base(vec![linea()]);
-        p.numero_ticket = Some("2027/000001".into());
-        let bytes = build_ticket(&p, None);
-
-        assert!(!contiene(&bytes, "MODO PRUEBA"));
     }
 
     #[test]
@@ -577,249 +555,6 @@ mod tests_logo {
         assert!(!bytes.windows(4).any(|w| w == [0x1D, 0x76, 0x30, 0x00]));
     }
 
-}
-
-#[cfg(test)]
-mod tests_qr_tributario {
-    //! El código QR que exigen los arts. 20 y 21 de la Orden HAC/1177/2024.
-    //!
-    //! Lo que se comprueba aquí es lo que la norma dice literalmente y no se puede deducir mirando
-    //! el papel: **dónde** va (al principio, antes de cualquier contenido del sistema), **qué** lo
-    //! acompaña (el rótulo encima, la leyenda debajo) y **cuánto** mide (entre 30 y 40 mm).
-    //!
-    //! La URL no se compone aquí: llega en el payload tal como se guardó al emitir el registro.
-    //! Ese es el punto — una reimpresión tiene que sacar exactamente la misma.
-
-    use super::fixtures::*;
-    use super::*;
-
-    /// PNG mínimo válido (1×1, negro): sólo para comprobar que el logo y el QR son dos bloques
-    /// distintos y en el orden correcto.
-    fn png_1x1() -> Vec<u8> {
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD
-            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
-            .unwrap()
-    }
-
-    /// URL de ejemplo con la forma real (la del vector oficial de la especificación del QR).
-    const URL: &str = "https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR\
-?nif=89890001K&numserie=12345678%26G33&fecha=01-01-2024&importe=241.4";
-
-    fn con_qr() -> PrintTicketPayload {
-        let mut p = payload(10.0, vec![linea()]);
-        p.business_name = "Bar La Plaza".into();
-        p.show_business_name = true;
-        p.direccion = "Calle Mayor 1".into();
-        p.show_address = true;
-        p.numero_ticket = Some("2027/000001".into());
-        p.qr_url = Some(URL.into());
-        p
-    }
-
-    /// Posición del primer bloque de imagen (`GS v 0`), que es como se imprime el QR.
-    fn pos_imagen(bytes: &[u8]) -> Option<usize> {
-        bytes.windows(4).position(|w| w == [0x1D, 0x76, 0x30, 0x00])
-    }
-
-    fn pos_texto(bytes: &[u8], aguja: &str) -> usize {
-        let a = encode_cp858(aguja);
-        bytes
-            .windows(a.len())
-            .position(|w| w == a.as_slice())
-            .unwrap_or_else(|| panic!("no está {aguja:?}"))
-    }
-
-    #[test]
-    fn el_qr_abre_la_factura_antes_de_cualquier_contenido() {
-        // «El código QR se situará al principio de la factura, antes de que empiece el contenido de
-        // ésta generado por el sistema informático de facturación» (art. 21, y el documento de
-        // especificaciones lo detalla). Esto DEROGA la regla que ponía los datos del negocio los
-        // primeros: el QR no compite por la atención, es una etiqueta.
-        let bytes = build_ticket(&con_qr(), None);
-        let qr = pos_imagen(&bytes).expect("el QR tiene que estar");
-
-        assert!(qr < pos_texto(&bytes, "Bar La Plaza"), "el QR va antes del nombre");
-        assert!(qr < pos_texto(&bytes, "Calle Mayor 1"), "el QR va antes de la dirección");
-        assert!(qr < pos_texto(&bytes, "2027/000001"), "el QR va antes del número");
-        assert!(qr < pos_texto(&bytes, "TOTAL"), "el QR va antes del total");
-    }
-
-    #[test]
-    fn lleva_el_rotulo_encima_y_la_leyenda_debajo() {
-        // Los dos textos son obligatorios y su posición también: el rótulo «QR tributario:» sirve
-        // para distinguirlo de cualquier otro QR que lleve la factura, y la leyenda declara que el
-        // sistema emite facturas verificables.
-        let bytes = build_ticket(&con_qr(), None);
-        let qr = pos_imagen(&bytes).expect("el QR tiene que estar");
-
-        assert!(pos_texto(&bytes, "QR tributario:") < qr, "el rótulo va ENCIMA");
-        assert!(pos_texto(&bytes, "VERI*FACTU") > qr, "la leyenda va DEBAJO");
-    }
-
-    #[test]
-    fn el_qr_va_centrado() {
-        // «preferiblemente centrado respecto a los márgenes izquierdo y derecho de la factura».
-        let bytes = build_ticket(&con_qr(), None);
-        let qr = pos_imagen(&bytes).expect("el QR tiene que estar");
-        // Entre el ESC a 1 y el bloque hay un avance de papel (la zona de silencio), así que se
-        // busca el centrado en lo que va antes del código y no pegado a él.
-        let previo = &bytes[..qr];
-        let centrado = previo
-            .windows(3)
-            .rposition(|w| w == [0x1B, 0x61, 0x01])
-            .expect("el bloque del QR tiene que ir precedido de ESC a 1 (centrado)");
-        let izquierda = previo.windows(3).rposition(|w| w == [0x1B, 0x61, 0x00]);
-        assert!(
-            izquierda.is_none_or(|i| i < centrado),
-            "lo último antes del QR tiene que ser centrar, no volver a la izquierda"
-        );
-    }
-
-    #[test]
-    fn mide_entre_30_y_40_mm_en_los_tres_formatos_de_papel() {
-        // Art. 21.1: «tendrá un tamaño entre 30x30 y 40x40 milímetros». Es la única medida que la
-        // norma da en milímetros, así que hay que traducirla al DPI de cada impresora.
-        for (mm, dpi) in [(58u32, 203u32), (80, 203), (112, 203), (80, 300), (58, 300)] {
-            let mut p = con_qr();
-            p.paper_width_mm = mm;
-            p.paper_dpi = dpi;
-            let bytes = build_ticket(&p, None);
-            let i = pos_imagen(&bytes).unwrap_or_else(|| panic!("sin QR en {mm}mm/{dpi}dpi"));
-
-            // Cabecera GS v 0: bytes 4-5 = ancho en bytes, 6-7 = alto en puntos.
-            let ancho_bytes = bytes[i + 4] as usize | ((bytes[i + 5] as usize) << 8);
-            let alto = bytes[i + 6] as usize | ((bytes[i + 7] as usize) << 8);
-            let lado_mm = alto as f64 * 25.4 / dpi as f64;
-
-            assert!(
-                (29.0..=41.0).contains(&lado_mm),
-                "{mm}mm/{dpi}dpi: el QR mide {lado_mm:.1} mm, fuera de la banda de 30-40"
-            );
-            // Cuadrado: la cabecera declara el ancho en BYTES (8 puntos cada uno), así que el
-            // ancho en puntos tiene que cubrir el alto sin pasarse de un byte.
-            let ancho_dots = ancho_bytes * 8;
-            assert!(
-                ancho_dots >= alto && ancho_dots - alto < 8,
-                "{mm}mm/{dpi}dpi: el QR no es cuadrado ({ancho_dots}x{alto} puntos)"
-            );
-        }
-    }
-
-    #[test]
-    fn sin_url_no_se_imprime_ni_el_hueco_ni_la_leyenda() {
-        // Es el caso de la PRECUENTA: no es una factura, así que no lleva registro, ni QR, ni
-        // leyenda. Imprimir la leyenda sin código diría que el papel es verificable cuando no lo es.
-        let mut p = con_qr();
-        p.qr_url = None;
-        p.numero_ticket = None;
-        let bytes = build_ticket(&p, None);
-
-        assert!(pos_imagen(&bytes).is_none(), "sin URL no hay imagen que imprimir");
-        assert!(!contiene(&bytes, "QR tributario:"));
-        assert!(!contiene(&bytes, "VERI*FACTU"));
-        assert!(contiene(&bytes, "NO ES UN TICKET DE VENTA"));
-    }
-
-    #[test]
-    fn una_url_vacia_se_trata_como_ausente() {
-        let mut p = con_qr();
-        p.qr_url = Some("   ".into());
-        let bytes = build_ticket(&p, None);
-        assert!(pos_imagen(&bytes).is_none());
-    }
-
-    #[test]
-    fn el_entorno_de_pruebas_lo_dice_en_el_papel() {
-        // Un ticket emitido contra preproducción lleva un QR que apunta a prewww2.aeat.es y NO es
-        // una factura real. Que lo parezca es peor que no imprimirlo.
-        let mut p = con_qr();
-        p.qr_pruebas = true;
-        let bytes = build_ticket(&p, None);
-
-        assert!(contiene(&bytes, "ENTORNO DE PRUEBAS"));
-    }
-
-    #[test]
-    fn el_logo_sigue_cerrando_el_ticket_por_debajo_del_qr() {
-        // El QR sube arriba, pero eso no devuelve el logo a la cabecera: sigue siendo lo último
-        // antes del corte. Son dos bloques de imagen distintos y el orden importa.
-        let mut p = con_qr();
-        p.show_logo = true;
-        p.show_footer_message = true;
-        p.mensaje_footer = "Hasta pronto".into();
-        let bytes = build_ticket(&p, Some(&png_1x1()));
-
-        let imagenes: Vec<usize> = bytes
-            .windows(4)
-            .enumerate()
-            .filter(|(_, w)| *w == [0x1D, 0x76, 0x30, 0x00])
-            .map(|(i, _)| i)
-            .collect();
-        assert_eq!(imagenes.len(), 2, "tienen que salir dos imágenes: el QR y el logo");
-        assert!(imagenes[0] < pos_texto(&bytes, "Bar La Plaza"), "la primera es el QR");
-        assert!(imagenes[1] > pos_texto(&bytes, "Hasta pronto"), "la segunda es el logo");
-    }
-
-    #[test]
-    fn el_trabajo_sigue_siendo_escpos_valido_con_el_qr_dentro() {
-        // El mini-intérprete falla si encuentra un byte que no es ni texto ni comando conocido, que
-        // es la única forma de comprobar el trabajo de impresión sin una impresora delante. Una
-        // trama de QR mal medida se delataría aquí como bytes sueltos.
-        let bytes = build_ticket(&con_qr(), None);
-        super::parser::trocear(&bytes).expect("el trabajo con QR tiene que ser ESC/POS válido");
-    }
-
-    #[test]
-    fn una_url_disparatada_no_impide_imprimir_el_ticket() {
-        // Nada de lo que rodea al ticket puede impedir cobrar. Si el QR no se puede generar, sale
-        // el ticket sin él: la factura sigue siendo válida porque el registro ya está emitido y se
-        // remitirá igual.
-        let mut p = con_qr();
-        p.qr_url = Some("x".repeat(10_000));
-        let bytes = build_ticket(&p, None);
-
-        assert!(pos_imagen(&bytes).is_none(), "no cabe en un QR: se omite");
-        assert!(contiene(&bytes, "TOTAL"), "pero el ticket sale entero");
-    }
-
-    #[test]
-    fn el_qr_se_lee_de_vuelta_y_dice_exactamente_la_url_que_se_le_dio() {
-        // El test que de verdad importa: que lo que se imprime sea la URL guardada. La cadena que
-        // va en el QR es la misma que se cotejará en la sede de la AEAT, y un carácter de más la
-        // convierte en una factura que "no consta".
-        use qrcode::{EcLevel, QrCode};
-        let code = QrCode::with_error_correction_level(URL.as_bytes(), EcLevel::M).unwrap();
-        let modulos = code.width();
-
-        let bytes = build_ticket(&con_qr(), None);
-        let i = pos_imagen(&bytes).expect("el QR tiene que estar");
-        let ancho_bytes = bytes[i + 4] as usize | ((bytes[i + 5] as usize) << 8);
-        let alto = bytes[i + 6] as usize | ((bytes[i + 7] as usize) << 8);
-        let escala = alto / modulos;
-        assert!(escala >= 1, "el QR se ha impreso más pequeño que sus módulos");
-
-        // Se reconstruye la matriz leyendo el bit del centro de cada módulo y se compara con la
-        // que produce la librería para esa misma URL.
-        let esperado: Vec<bool> = code
-            .to_colors()
-            .iter()
-            .map(|c| *c == qrcode::Color::Dark)
-            .collect();
-        let trama = &bytes[i + 8..i + 8 + ancho_bytes * alto];
-        for my in 0..modulos {
-            for mx in 0..modulos {
-                let y = my * escala + escala / 2;
-                let x = mx * escala + escala / 2;
-                let bit = trama[y * ancho_bytes + x / 8] & (0x80 >> (x % 8)) != 0;
-                assert_eq!(
-                    bit,
-                    esperado[my * modulos + mx],
-                    "el módulo ({mx},{my}) no coincide con el QR de la URL"
-                );
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -2398,7 +2133,6 @@ mod tests_factura_del_registro {
     fn lo_que_manda_la_pantalla_sale_como_precuenta() {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("2027/000009".into());
-        p.qr_url = Some("https://www2.agenciatributaria.gob.es/x".into());
         p.es_copia = true;
         p.metodo_pago = Some("Efectivo".into());
         p.abre_cajon = true;

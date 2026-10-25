@@ -11,7 +11,6 @@ members = [
   "crates/tpv-application",
   "crates/tpv-infra-sqlite",
   "crates/tpv-infra-licensing",
-  "crates/tpv-infra-aeat",
   "crates/tpv-infra-http",
   "crates/tpv-contracts",
   "crates/tpv-telemetry",
@@ -30,7 +29,6 @@ tpv-domain = { path = "crates/tpv-domain" }
 tpv-application = { path = "crates/tpv-application" }
 tpv-infra-sqlite = { path = "crates/tpv-infra-sqlite" }
 tpv-infra-licensing = { path = "crates/tpv-infra-licensing" }
-tpv-infra-aeat = { path = "crates/tpv-infra-aeat" }
 tpv-infra-http = { path = "crates/tpv-infra-http" }
 tpv-contracts = { path = "crates/tpv-contracts" }
 tpv-telemetry = { path = "crates/tpv-telemetry" }
@@ -81,34 +79,10 @@ sha2 = "0.10"
 aes-gcm = "0.10"
 hmac = "0.12"
 
-# ── Exportacion de los registros de facturacion (art. 8 RRSIF) ──
-# Sin default-features y solo `deflate`: el ZIP lleva cuatro ficheros de texto, asi que no hacen
-# falta ni bzip2, ni zstd, ni el cifrado. Un ZIP y no una carpeta porque es UN fichero que se le
-# entrega a quien lo pide.
-zip = { version = "2", default-features = false, features = ["deflate"] }
-
 # ── Copias locales comprimidas (gzip) ──
-# Ya estaba en el árbol por `zip`; con el backend en Rust puro (miniz_oxide), sin compilar C. Un
-# `.db.gz` lo abre 7-Zip, así que un técnico puede sacar la base sin nuestro código.
+# Con el backend en Rust puro (miniz_oxide), sin compilar C. Un `.db.gz` lo abre 7-Zip, así que un
+# técnico puede sacar la base sin nuestro código.
 flate2 = "1"
-
-# ── Codigo QR del ticket (FISCAL-01, arts. 20-21 de la Orden HAC/1177/2024) ──
-# Sin default-features: solo hace falta la MATRIZ de modulos, no renderizar a imagen. La
-# rasterizacion a ESC/POS la hace printing.rs por el mismo camino que el logo (GS v 0), que es
-# mas portable que el `GS ( k` nativo de QR: no todas las termicas lo llevan.
-qrcode = { version = "0.14", default-features = false }
-
-# ── API de Windows (solo en target windows) ──
-# La usa `tpv-infra-aeat`: enumerar el almacen de certificados (CryptoAPI) y hablar por WinHTTP
-# con el certificado de cliente. Es el unico camino que sirve para las TRES formas en que un
-# certificado puede estar instalado -KSP moderno, CSP heredado y tarjeta/DNIe-, porque quien firma
-# el handshake es Windows y la clave privada no sale nunca del almacen.
-windows-sys = { version = "0.59", features = [
-  "Win32_Foundation",
-  "Win32_Security_Cryptography",
-  "Win32_Networking_WinHttp",
-  "Win32_System_Time",
-] }
 
 # ── Migraciones: embeber los .sql de packages/database/migrations en el binario ──
 include_dir = "0.7"

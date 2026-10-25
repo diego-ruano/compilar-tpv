@@ -28,7 +28,7 @@ Tres reglas:
 - [sincronizacion.md](arquitectura/sincronizacion.md): outbox, WebSocket, `TenantHub`, cola, reparación.
 - [recuperacion.md](arquitectura/recuperacion.md): volver de perder la base local; copias; traslado.
 - [esquema.md](arquitectura/esquema.md): el esquema único y las migraciones.
-- [verifactu.md](arquitectura/verifactu.md): el registro de facturación y la remisión a la AEAT.
+- [verifactu.md](arquitectura/verifactu.md): el registro de facturación (esta rama no remite a la AEAT).
 - [caja.md](arquitectura/caja.md): cobros, gastos, cierre de caja y anulación.
 - [tickets.md](arquitectura/tickets.md): el ticket ESC/POS y su vista previa.
 - [licencias.md](arquitectura/licencias.md): licencias, Stripe y administración.
@@ -47,8 +47,6 @@ Tres reglas:
 
 - [publicar-version.md](guias/publicar-version.md): sacar y retirar una versión; CI.
 - [compilar-android.md](guias/compilar-android.md): el build de la Handy.
-- [PRUEBAS_AEAT.md](PRUEBAS_AEAT.md): probar Veri\*factu contra la AEAT. Se queda en esta ruta porque la
-  pantalla Configuración → Fiscal la cita.
 
 ## Estudios
 

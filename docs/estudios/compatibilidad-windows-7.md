@@ -141,11 +141,6 @@ estado concreto del sistema, son:
   deshabilitar solamente los minidumps en Windows 7.
 - La descarga, verificación e instalación mediante el updater.
 - TLS, certificados raíz y WebSockets contra los dominios de producción.
-- **La remisión a la AEAT** (`crates/tpv-infra-aeat`): va por **WinHTTP** (schannel) con el certificado
-  del almacén por CryptoAPI, y el código no fija `WINHTTP_OPTION_SECURE_PROTOCOLS`. En Windows 7, WinHTTP
-  sólo negocia TLS 1.2 con la actualización KB3140245 y la clave de registro `DefaultSecureProtocols`;
-  sin eso no se puede remitir. Hay que añadirlo a los requisitos del sistema o fijar la opción en el
-  código.
 - Los drivers de la impresora concreta y la impresión RAW.
 
 ## Sistema operativo mínimo
@@ -186,8 +181,7 @@ probar el instalador final en una máquina o VM limpia con Windows 7 SP1 x64:
 2. Renderizado completo del frontend y comunicación IPC con Tauri.
 3. Activación de licencia y acceso al Credential Manager.
 4. Apertura, migración y uso continuado de la base de datos local.
-5. Conexiones HTTPS y WebSocket con producción, y el *handshake* con la AEAT
-   (`pnpm verifactu:probar-aeat`).
+5. Conexiones HTTPS y WebSocket con producción.
 6. Guardado y carga de imágenes.
 7. Enumeración de impresoras, ticket de prueba y apertura del cajón.
 8. Registro de errores y comportamiento de Sentry/minidumps.

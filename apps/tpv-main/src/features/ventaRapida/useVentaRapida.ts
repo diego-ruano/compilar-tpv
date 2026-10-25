@@ -14,7 +14,6 @@ import type { CobroImprimible } from "../../shared/ticket/PrintTicketModal";
 
 import { commands, esError, toAppError } from "@tpv/client";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
-import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
 
 import {
 CategoriaDisplay,
@@ -640,7 +639,7 @@ export function useVentaRapida() {
         setCashCount({}); setPaso("categorias"); setQuiereFactura(false);
       }
       setPideFactura(null); setErrorFactura(null);
-      anunciarCobro(); emitVrChanged();
+      emitVrChanged();
     } catch (e) {
       if (esError(e, "factura_completa_requerida")) {
         setOpenPendientes(false);

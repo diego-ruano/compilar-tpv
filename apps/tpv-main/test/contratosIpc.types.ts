@@ -10,7 +10,7 @@ export function comprobarFirmasSinEjecutar() {
     // @ts-expect-error: el nombre procede del registro de comandos Rust.
     void commands.comandoQueNoExiste();
     // @ts-expect-error: los parámetros planos no aceptan el envoltorio args.
-    void commands.verifactuListar({ args: { limite: 100 } });
+    void commands.cierreDetalle({ args: { idCierre: "id" } });
     // @ts-expect-error: el dinero exige céntimos marcados.
     void commands.configPatchBusinessSettings({ patch: { limite_simplif: 3 } });
     // @ts-expect-error: el patch no admite claves camelCase.

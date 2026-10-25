@@ -5,8 +5,7 @@
 //! sólo si cumple las tres condiciones —
 //!
 //! 1. **es automática** (la hace un job o el sistema, no alguien en el mostrador);
-//! 2. **puede dañar a muchos a la vez o fuera del equipo** (escribe en la nube o en la AEAT, o
-//!    cuesta dinero);
+//! 2. **puede dañar a muchos a la vez o fuera del equipo** (escribe en la nube o cuesta dinero);
 //! 3. **pausarla no pierde nada**: lo pendiente se queda en su cola y se retoma al encender.
 //!
 //! Y queda fuera siempre lo que PROTEGE (copias, licencia) y lo que rodea al cobro: nada de esto
@@ -20,10 +19,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Interruptor {
-    /// Remisión de registros de facturación a la AEAT (job `verifactu_remitir`). Los registros se
-    /// quedan `PENDIENTE`. Es una obligación tributaria: apagarlo es para no generar rechazos que
-    /// haya que subsanar a mano mientras sale el arreglo, y por eso se ve en Configuración → Fiscal.
-    VerifactuRemitir,
     /// La parte que ESCRIBE del contraste con la nube (SYNC-22/24/25): se sigue comparando e
     /// informando, pero no se encola ninguna reparación ni ningún borrado.
     ReparacionNube,

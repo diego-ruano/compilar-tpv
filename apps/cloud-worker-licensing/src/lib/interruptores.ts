@@ -2,8 +2,8 @@
 //
 // PROD-06 · Interruptores remotos de emergencia.
 //
-// Si una tarea automática se pone a hacer daño en los equipos de los clientes —la remisión a la
-// AEAT manda XML roto, la reparación por estado pisa filas buenas, el volcado satura Turso—, la
+// Si una tarea automática se pone a hacer daño en los equipos de los clientes —la reparación por
+// estado pisa filas buenas, el volcado satura Turso—, la
 // única forma de pararla era publicar una versión y esperar a que cada TPV se actualizara. Esto
 // deja apagarla desde aquí, en minutos, con una fila en la tabla `interruptores` de la base
 // central (su estructura está en `docs/sql/control-plane/esquema-actual.sql`).
@@ -16,7 +16,7 @@
 //   · **Todo interruptor caduca.** `expires_at_ms` es obligatorio: uno olvidado se enciende solo.
 //     Si hace falta más tiempo, se vuelve a apagar.
 //   · **Si no se puede leer, todo está encendido.** Esto es un freno de mano, no una dependencia:
-//     una caída de la base central no puede convertirse en «el TPV deja de remitir a la AEAT».
+//     una caída de la base central no puede convertirse en «el TPV deja de sincronizar».
 //   · **Se cachea por isolate y poco tiempo**, como la licencia (`licenciaEnUso.ts`): el TPV
 //     pregunta cada pocos minutos y el DO en cada vuelta de su cola.
 
@@ -28,7 +28,6 @@ import type { Sql } from "../server/db";
 import type { Assert } from "./typeGuards";
 
 export const INTERRUPTORES = [
-	"verifactu_remitir",
 	"reparacion_nube",
 	"volcado_atraso",
 	"cola_do",
@@ -53,13 +52,8 @@ type _MismoCatalogo = Assert<
 /** El tope general de un apagado. Lo que tenga que durar más se vuelve a apagar a conciencia. */
 export const MAX_HORAS = 7 * 24;
 
-/**
- * La remisión a la AEAT es una obligación tributaria: pararla vale para no generar rechazos
- * mientras sale un arreglo, no para dejarla parada. Por eso su tope es mucho más corto.
- */
-export const MAX_HORAS_POR_INTERRUPTOR: Partial<Record<Interruptor, number>> = {
-	verifactu_remitir: 24,
-};
+/** Los interruptores con un tope más corto que el general. Hoy, ninguno. */
+export const MAX_HORAS_POR_INTERRUPTOR: Partial<Record<Interruptor, number>> = {};
 
 export function maxHoras(i: Interruptor): number {
 	return MAX_HORAS_POR_INTERRUPTOR[i] ?? MAX_HORAS;

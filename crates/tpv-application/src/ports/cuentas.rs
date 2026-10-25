@@ -46,7 +46,7 @@ pub struct DevolverLineasArgs {
 pub enum ClaseBaja {
     /// **La venta no existió**: un ticket de prueba, una formación, una mesa equivocada, un cobro
     /// que nunca debió emitirse. Genera un **RF de anulación** (art. 11.1 RRSIF), que no borra nada
-    /// —el registro erróneo y el de anulación se conservan y se remiten los dos— y devuelve las
+    /// —el registro erróneo y el de anulación se conservan los dos— y devuelve las
     /// líneas a la comanda.
     ///
     /// La AEAT avisa en su FAQ de desarrolladores de que estos casos deben ser *«MUY POCO
