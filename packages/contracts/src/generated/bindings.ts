@@ -693,7 +693,6 @@ export type ComandaRow = {
 export type CompleteInitialSetupInput = {
 	id_usuario: string,
 	pin_nuevo: string,
-	email_nuevo: string,
 };
 
 export type ConexionHandy = "pausada" | "sin_identidad" | "conectando" | "conectada" | "reintentando" | "rechazada";
@@ -2916,7 +2915,6 @@ export type SetupPendiente = {
 	requiere_recuperacion?: boolean,
 	id_usuario: string | null,
 	nombre: string | null,
-	email: string | null,
 };
 
 export type SolicitarCambioCorreoInput = {
@@ -3435,7 +3433,6 @@ export type UpdateTareaInput = {
  */
 export type UploadInitialSetupArgs = {
 	id_usuario: string,
-	email: string,
 	pin: string,
 };
 

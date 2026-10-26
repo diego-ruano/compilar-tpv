@@ -144,7 +144,7 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
   verifique un PIN mira el freno antes y cuenta el fallo después; lo vigila
   `test/pinSiempreConFreno.test.ts`. El hash se replica a Turso; el riesgo de romperlo offline está en
   [LOGIN-04](../pendientes.md#login-04--el-hash-del-pin-se-puede-romper-offline).
-- **El PIN inicial se elige en la Main y sólo ahí.** `complete_initial_setup` cambia PIN y correo del
+- **El PIN inicial se elige en la Main y sólo ahí.** `complete_initial_setup` cambia el PIN del
   administrador sin pedir el actual (es el del seed, público) y su único cerrojo es
   `Requiere_Setup = 1`, que se apaga al usarlo. El worker no tiene un segundo camino hacia esa fila:
   la Main lo aplica en su SQLite y lo sube por `POST /v1/login/sync-initial-setup` (firmada, rol TPV),

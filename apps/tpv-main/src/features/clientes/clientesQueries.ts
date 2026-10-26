@@ -7,7 +7,7 @@ import { commands } from "@tpv/client";
 //    que las listas en caché se refresquen solas (Local-First: el dato sólo cambia aquí).
 //  - El hook envuelve las funciones de `*Apis.ts` (commands) sin tocar su firma.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { clientesGetOverview, clientesRecalcularGasto, type FiltroRanking } from "./clientesApis";
 
@@ -17,11 +17,16 @@ export const clientesKeys = {
   overview: (ranking: FiltroRanking) => ["clientes", "overview", ranking] as const,
 };
 
-/** Lista/overview de clientes según el ranking seleccionado (cacheada por ranking). */
+/**
+ * Lista/overview de clientes según el ranking seleccionado (cacheada por ranking). Al cambiar de
+ * ranking se sigue enseñando la lista anterior hasta que llega la nueva, para que la pantalla no
+ * parpadee.
+ */
 export function useClientesOverview(ranking: FiltroRanking) {
   return useQuery({
     queryKey: clientesKeys.overview(ranking),
     queryFn: () => clientesGetOverview({ ranking }),
+    placeholderData: keepPreviousData,
   });
 }
 

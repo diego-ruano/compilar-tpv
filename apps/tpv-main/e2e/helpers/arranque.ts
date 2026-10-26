@@ -11,9 +11,6 @@ import { $, $$, browser } from "@wdio/globals";
 import { licenciaDelRecorrido } from "./entorno.js";
 import { conTexto, escribir, pulsar, pulsarXPath } from "./ui.js";
 
-/** El correo del administrador que se escribe al elegir el PIN. No recibe nada. */
-export const EMAIL = "e2e@altarialights.test";
-
 /**
  * Teclea el PIN en el teclado numérico del login, comprobando cada tecla.
  *
@@ -94,7 +91,6 @@ export async function activarLicencia(negocio: string): Promise<"setup" | "login
 export async function elegirPin(pin: string): Promise<void> {
     await escribir("#setup-pin-nuevo", pin);
     await escribir("#setup-pin-confirmacion", pin);
-    await escribir("#setup-email", EMAIL);
 
     await pulsar("Guardar y continuar");
 

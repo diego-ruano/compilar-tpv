@@ -29,7 +29,7 @@ const DESTINOS: Record<string, DestinoNotificacion> = {
   ver_clientes: { to: "/Clientes" },
   // FISCAL-01: lleva a los datos fiscales del negocio. Lo llevan también los avisos de envío a la
   // AEAT que se hubieran creado con la rama `con-verifactu`.
-  ver_fiscal: { to: "/Configuracion", state: { seccion: "FISCAL" } },
+  ver_fiscal: { to: "/Configuracion", state: { seccion: "NEGOCIO" } },
 };
 
 export function destinoDeAccion(

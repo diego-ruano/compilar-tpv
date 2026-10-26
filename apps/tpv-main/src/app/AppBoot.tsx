@@ -44,10 +44,6 @@ export default function AppBoot({ router }: { router: any }) {
 	// Ruta relativa → URL utilizable (ver `useImageUrl`).
 	const logoSrc = useImageUrl(logo_data_url);
 
-	const bizInit = useBusinessSettings((s) => s.init);
-	const ticketInit = useTicketSettings((s) => s.init);
-	const contactInit = useContactSettings((s) => s.init);
-
 	const modo = useMode((s) => s.mode);
 	const licencia = useLicencia(modo);
 	const dispositivo = useModoDispositivo({ alElegir: licencia.refrescarLicencia });
@@ -88,21 +84,13 @@ export default function AppBoot({ router }: { router: any }) {
 		});
 	}, []);
 
+	// Los `init` no fallan: el error lo cuenta cada store.
 	useEffect(() => {
 		if (modo !== "tpv") return;
-
-		bizInit().catch((e: unknown) => {
-			console.error("[AppBoot] bizInit error:", e);
-		});
-
-		ticketInit().catch((e: unknown) => {
-			console.error("[AppBoot] ticketInit error:", e);
-		});
-
-		contactInit().catch((e: unknown) => {
-			console.error("[AppBoot] contactInit error:", e);
-		});
-	}, [modo, bizInit, ticketInit, contactInit]);
+		void useBusinessSettings.getState().init();
+		void useTicketSettings.getState().init();
+		void useContactSettings.getState().init();
+	}, [modo]);
 
 	// Imágenes → R2: una sola vez, encolar las imágenes locales pre-existentes (Mains anteriores
 	// a R2) y drenar la cola. El backfill se auto-protege con un marcador; el drenado es no-op si
@@ -217,13 +205,6 @@ export default function AppBoot({ router }: { router: any }) {
 
 			case "tpv_app":
 				return <RouterProvider router={router} />;
-
-			case "modo_invalido":
-				return (
-					<div className="min-h-full w-full bg-slate-100 p-6 font-sans">
-						Modo de dispositivo no válido. Reinicia la app.
-					</div>
-				);
 		}
 	}
 

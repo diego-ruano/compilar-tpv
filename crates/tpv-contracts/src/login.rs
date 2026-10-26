@@ -72,7 +72,6 @@ pub struct SetTurnoPartidoInput {
 pub struct CompleteInitialSetupInput {
     pub id_usuario: String,
     pub pin_nuevo: String,
-    pub email_nuevo: String,
 }
 
 /// ¿Queda por hacer el setup inicial? Se consulta SIN sesión, al arrancar, para decidir cuál es la
@@ -88,7 +87,6 @@ pub struct SetupPendiente {
     pub requiere_recuperacion: bool,
     pub id_usuario: Option<String>,
     pub nombre: Option<String>,
-    pub email: Option<String>,
 }
 
 /* =========================================================

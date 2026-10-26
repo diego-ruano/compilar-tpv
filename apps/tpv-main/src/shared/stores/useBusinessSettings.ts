@@ -37,6 +37,12 @@ type BusinessSettingsState = BusinessSettings & {
 
     // UI instantánea + autoguardado
     setMany: (patch: Partial<BusinessSettings>) => void;
+    /**
+     * Lo que usa un botón «Guardar»: escribe ya lo pendiente, sin el retardo del autoguardado, y
+     * falla si no se guarda. Si falla, se vuelve a leer lo guardado: la pantalla no puede enseñar
+     * como guardado lo que no lo está.
+     */
+    guardarYa: () => Promise<void>;
 
     // opcionales (por comodidad)
     setBusinessName: (v: string) => void;
@@ -53,6 +59,15 @@ type BusinessSettingsState = BusinessSettings & {
 let timer: number | null = null;
 let pending: Partial<BusinessSettings> = {};
 let contexto = 0;
+
+/** Escribe ya lo acumulado y cancela la escritura con retardo. Sin nada pendiente, no hace nada. */
+async function escribirPendiente(): Promise<void> {
+    if (timer) window.clearTimeout(timer);
+    timer = null;
+    const toSave = pending;
+    pending = {};
+    if (Object.keys(toSave).length) await configPatchBusinessSettings(toSave);
+}
 
 export const useBusinessSettings = create<BusinessSettingsState>(
     (set, get) => ({
@@ -96,14 +111,18 @@ export const useBusinessSettings = create<BusinessSettingsState>(
             // está se descubre mucho después (el guardado exige Administrador, por ejemplo).
             if (timer) window.clearTimeout(timer);
             timer = window.setTimeout(
-                conAviso(async () => {
-                    const toSave = pending;
-                    pending = {};
-                    timer = null;
-                    await configPatchBusinessSettings(toSave);
-                }, "No se han podido guardar los datos del negocio"),
+                conAviso(escribirPendiente, "No se han podido guardar los datos del negocio"),
                 400,
             );
+        },
+
+        guardarYa: async () => {
+            try {
+                await escribirPendiente();
+            } catch (e) {
+                void get().init();
+                throw e;
+            }
         },
 
         setBusinessName: (v) => get().setMany({ business_name: v }),

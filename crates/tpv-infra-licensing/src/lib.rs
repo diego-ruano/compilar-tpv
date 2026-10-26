@@ -1264,14 +1264,12 @@ impl CloudSyncService for PairingAdapter {
     async fn upload_initial_setup(
         &self,
         id_usuario: &str,
-        email: &str,
         pin: &str,
     ) -> AppResult<()> {
         // POST firmado en modo `tpv` (el worker comprueba rol TPV y escribe directo en Turso,
         // sin pasar por el hub → no se topa con `main_offline`).
         let body = serde_json::json!({
             "id_usuario": id_usuario,
-            "email": email,
             "pin": pin,
         });
         let _ = self

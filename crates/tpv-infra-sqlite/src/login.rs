@@ -386,47 +386,20 @@ async fn query_setup_info<C: Reader>(conn: &C, id_usuario: &str) -> AppResult<Op
     }))
 }
 
-async fn query_email_in_use<C: Reader>(
-    conn: &C,
-    email: &str,
-    exclude_id: &str,
-) -> AppResult<bool> {
-    let mut rows = conn
-        .query(
-            r#"
-            SELECT COUNT(*)
-            FROM Usuarios
-            WHERE Email = ?1 AND ID_Usuario <> ?2;
-            "#,
-            vec![Value::Text(email.to_string()), Value::Text(exclude_id.to_string())],
-        )
-        .await
-        .map_err(db_err)?;
-
-    let count = match rows.next().await.map_err(db_err)? {
-        Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-        None => 0,
-    };
-    Ok(count > 0)
-}
-
+/// El correo del administrador se queda el del seed: nadie lo lee, y el de recuperar el PIN es otro
+/// (`correo_recuperacion`, en la base central).
 async fn exec_apply_initial_setup<C: Writer>(
     conn: &C,
     id_usuario: &str,
-    email: String,
     new_hash: String,
 ) -> AppResult<()> {
     conn.execute(
         r#"
         UPDATE Usuarios
-        SET Email = ?2, Password_Hash = ?3, Requiere_Setup = 0
+        SET Password_Hash = ?2, Requiere_Setup = 0
         WHERE ID_Usuario = ?1;
         "#,
-        vec![
-            Value::Text(id_usuario.to_string()),
-            Value::Text(email),
-            Value::Text(new_hash),
-        ],
+        vec![Value::Text(id_usuario.to_string()), Value::Text(new_hash)],
     )
     .await
     .map_err(db_err)?;
@@ -627,7 +600,7 @@ impl LoginRepository for SqliteLoginRepository {
         let mut rows = db
             .query(
                 r#"
-                SELECT ID_Usuario, Nombre, Email
+                SELECT ID_Usuario, Nombre
                 FROM Usuarios
                 WHERE Requiere_Setup = 1 AND Estado = 'Activo'
                 ORDER BY ID_Usuario ASC
@@ -650,7 +623,6 @@ impl LoginRepository for SqliteLoginRepository {
                 requiere_recuperacion: sin_usuarios,
                 id_usuario: None,
                 nombre: None,
-                email: None,
             });
         };
 
@@ -664,7 +636,6 @@ impl LoginRepository for SqliteLoginRepository {
             requiere_recuperacion: false,
             id_usuario: texto(0),
             nombre: texto(1),
-            email: texto(2),
         })
     }
 
@@ -741,12 +712,7 @@ impl LoginRepository for SqliteLoginRepository {
     /// ninguno que confirmar y el que hay es el del seed, que no es secreto. Quien autoriza es
     /// `Requiere_Setup = 1`, que además se apaga al aplicarlo: la puerta se cierra tras el primer
     /// uso. Es el ÚNICO cerrojo, y por eso esto sólo puede vivir donde está el dato (REV-06).
-    async fn complete_initial_setup(
-        &self,
-        id_usuario: &str,
-        pin_nuevo: &str,
-        email_nuevo: &str,
-    ) -> AppResult<()> {
+    async fn complete_initial_setup(&self, id_usuario: &str, pin_nuevo: &str) -> AppResult<()> {
         let db = self.db.write().await;
         let info = query_setup_info(&db, id_usuario)
             .await?
@@ -756,13 +722,9 @@ impl LoginRepository for SqliteLoginRepository {
             return Err(AppError::conflict("Este usuario ya completó el setup inicial"));
         }
 
-        if query_email_in_use(&db, email_nuevo, id_usuario).await? {
-            return Err(AppError::conflict("Ese email ya está en uso"));
-        }
-
         let new_hash = hash_pin(pin_nuevo).map_err(AppError::validation)?;
 
-        exec_apply_initial_setup(&db, id_usuario, email_nuevo.to_string(), new_hash).await
+        exec_apply_initial_setup(&db, id_usuario, new_hash).await
     }
 
     /// LOGIN-07. Esto no pide PIN actual, así que no puede servir para cambiárselo a otro rol aunque
@@ -1146,7 +1108,7 @@ mod tests_setup_inicial {
     async fn se_aplica_una_vez_y_cierra_la_puerta_detras() {
         let (repo, db, _dir) = repo_temporal().await;
 
-        repo.complete_initial_setup("admin", "4321", "ana@bar.test")
+        repo.complete_initial_setup("admin", "4321")
             .await
             .expect("el primer setup tiene que entrar");
 
@@ -1157,11 +1119,14 @@ mod tests_setup_inicial {
         );
         let hash = campo(&db, "SELECT Password_Hash FROM Usuarios WHERE ID_Usuario='admin';").await;
         assert_ne!(hash, Value::Text("hash-del-seed".into()), "el PIN tiene que haber cambiado");
+        assert_eq!(
+            campo(&db, "SELECT Email FROM Usuarios WHERE ID_Usuario='admin';").await,
+            Value::Text("admin@bar.test".into()),
+            "el correo se queda el del seed"
+        );
 
         // Y una segunda vez ya no: no hay un segundo primer arranque.
-        let otra = repo
-            .complete_initial_setup("admin", "9999", "otro@bar.test")
-            .await;
+        let otra = repo.complete_initial_setup("admin", "9999").await;
         assert!(otra.is_err(), "no puede volver a usarse");
         assert_eq!(
             campo(&db, "SELECT Password_Hash FROM Usuarios WHERE ID_Usuario='admin';").await,
@@ -1185,19 +1150,12 @@ mod tests_setup_inicial {
                 .unwrap();
         }
 
-        let r = repo
-            .complete_initial_setup("admin", "4321", "ladron@bar.test")
-            .await;
+        let r = repo.complete_initial_setup("admin", "4321").await;
 
         assert!(r.is_err(), "sin Requiere_Setup no hay permiso");
         assert_eq!(
             campo(&db, "SELECT Password_Hash FROM Usuarios WHERE ID_Usuario='admin';").await,
             Value::Text("hash-del-seed".into())
-        );
-        assert_eq!(
-            campo(&db, "SELECT Email FROM Usuarios WHERE ID_Usuario='admin';").await,
-            Value::Text("admin@bar.test".into()),
-            "ni el correo, que es por donde se recupera el acceso"
         );
     }
 
@@ -1206,9 +1164,7 @@ mod tests_setup_inicial {
         // Un intento rechazado no puede dejar rastro replicable: subiría a la nube un UPDATE que
         // aquí no ha ocurrido.
         let (repo, db, _dir) = repo_temporal().await;
-        let _ = repo
-            .complete_initial_setup("nadie", "4321", "x@bar.test")
-            .await;
+        let _ = repo.complete_initial_setup("nadie", "4321").await;
 
         assert_eq!(
             campo(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await,

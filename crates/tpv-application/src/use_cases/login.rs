@@ -6,7 +6,7 @@ use tpv_contracts::login::{
     CompleteInitialSetupInput, LoginOk, LoginUserArgs, PunchInput, PunchStatus, PunchStatusArgs,
     SetTurnoPartidoInput, SetupPendiente, UserListItem,
 };
-use tpv_domain::login::{limpiar_opcional, pin_de_teclado, requerido, validate_email_basic};
+use tpv_domain::login::{limpiar_opcional, pin_de_teclado, requerido};
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::{AppError, AppResult};
@@ -98,19 +98,14 @@ pub async fn complete_initial_setup(
     repo: &dyn LoginRepository,
     input: CompleteInitialSetupInput,
 ) -> AppResult<()> {
-    let email_nuevo = requerido(&input.email_nuevo, "Escribe el correo.").map_err(AppError::validation)?;
     // RI-63: el mismo PIN que se puede teclear en el login, no sólo «al menos 4».
     let pin_nuevo = pin_de_teclado(&input.pin_nuevo).map_err(AppError::validation)?;
 
     if input.id_usuario.trim().is_empty() {
         return Err(AppError::validation("Falta el usuario."));
     }
-    if !validate_email_basic(&email_nuevo) {
-        return Err(AppError::validation("El correo no es válido."));
-    }
 
-    repo.complete_initial_setup(&input.id_usuario, &pin_nuevo, email_nuevo.trim())
-        .await
+    repo.complete_initial_setup(&input.id_usuario, &pin_nuevo).await
 }
 
 pub async fn punch(repo: &dyn LoginRepository, input: PunchInput) -> AppResult<PunchStatus> {
@@ -157,7 +152,7 @@ mod tests {
         async fn intentos_fallidos(&self, _: &str) -> AppResult<i64> {
             Ok(self.fallidos)
         }
-        async fn complete_initial_setup(&self, _: &str, _: &str, _: &str) -> AppResult<()> {
+        async fn complete_initial_setup(&self, _: &str, _: &str) -> AppResult<()> {
             unimplemented!("no usado")
         }
         async fn punch(&self, _: &str, _: &str, _: &str) -> AppResult<PunchStatus> {

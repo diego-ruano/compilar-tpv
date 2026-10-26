@@ -138,15 +138,15 @@ export async function throttleFail(db: Client, idUsuario: string): Promise<void>
  */
 export async function applyInitialSetupDirect(
 	db: Client,
-	input: { idUsuario: string; email: string; passwordHash: string },
+	input: { idUsuario: string; passwordHash: string },
 ): Promise<void> {
 	await db.execute({
 		sql: `
 			UPDATE Usuarios
-			SET Email = ?2, Password_Hash = ?3, Requiere_Setup = 0
+			SET Password_Hash = ?2, Requiere_Setup = 0
 			WHERE ID_Usuario = ?1;
 		`,
-		args: [input.idUsuario, input.email, input.passwordHash],
+		args: [input.idUsuario, input.passwordHash],
 	});
 }
 

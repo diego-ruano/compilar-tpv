@@ -122,7 +122,6 @@ loginRoutes.post(
 		await tenantQuery(c, (db) =>
 			q.applyInitialSetupDirect(db, {
 				idUsuario: datos.id_usuario,
-				email: datos.email,
 				passwordHash,
 			}),
 		);

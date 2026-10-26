@@ -1,4 +1,4 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 // src/pages/Configuracion.tsx
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -26,7 +26,6 @@ import { TextInput } from "../../features/configuracion/ui/Inputs";
 // Sections
 import { Permisos } from "../../features/configuracion/sections/Permisos";
 import { Negocio } from "../../features/configuracion/sections/Negocio";
-import { Fiscal } from "../../features/configuracion/sections/Fiscal";
 import { Contacto } from "../../features/configuracion/sections/Contacto";
 import { Reservas } from "../../features/configuracion/sections/Reservas";
 import { Ticket } from "../../features/configuracion/sections/Ticket";
@@ -38,6 +37,7 @@ import { VincularHandy } from "../../features/configuracion/sections/VincularHan
 import { Actualizaciones } from "../../features/configuracion/sections/Actualizaciones";
 import { conAviso } from "../../shared/lib/conAviso";
 import { MSG_IVA } from "../../shared/lib/iva";
+import { nifValido } from "../../shared/ticket/nif";
 
 
 export default function Configuracion() {
@@ -46,18 +46,6 @@ export default function Configuracion() {
 
     const ticket = useTicketSettings((s) => s.settings);
     const setSetting = useTicketSettings((s) => s.setSetting);
-
-    // compat: si en tu store mantienes hydrated/ready, lo usamos; si no, asumimos true
-    const bizHydrated = useBusinessSettings((s: any) =>
-        typeof s.hydrated === "boolean" ? s.hydrated : true,
-    );
-    const ticketHydrated = useTicketSettings((s: any) =>
-        typeof s.hydrated === "boolean" ? s.hydrated : true,
-    );
-
-    // opcional: si existe init() en stores, lo llamamos al entrar (por seguridad)
-    const bizInit = useBusinessSettings((s: any) => s.init);
-    const ticketInit = useTicketSettings((s: any) => s.init);
 
     const mode = useMode((s) => s.mode);
     const isMain = mode === "tpv";
@@ -126,19 +114,9 @@ export default function Configuracion() {
                 "direccion",
                 "teléfono",
                 "cif",
-                "iva",
-                "footer",
-            ],
-        },
-        {
-            key: "FISCAL",
-            title: "Fiscal",
-            desc: "Quién factura: NIF y razón social del negocio",
-            keywords: [
-                "factura",
                 "nif",
-                "cif",
                 "razón social",
+                "factura",
                 "fiscal",
                 "impuestos",
             ],
@@ -273,37 +251,32 @@ export default function Configuracion() {
         el.scrollIntoView({ behavior: "smooth", block: "start" });
     };
 
-    // ✅ Seguridad extra: si existen init() y todavía no está listo, inicializa aquí también (solo MAIN)
-    useEffect(() => {
-        if (!isMain) return;
-
-        if (typeof bizInit === "function" && !bizHydrated) {
-            bizInit().catch((e: unknown) => console.warn("[Configuracion] bizInit error:", e));
-        }
-        if (typeof ticketInit === "function" && !ticketHydrated) {
-            ticketInit().catch((e: unknown) => console.warn("[Configuracion] ticketInit error:", e));
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isMain]);
-
     // Draft + dirty (hook) (tu hook ya no depende de hydrate)
     const { draft, setDraft, dirty, resetDraft, setIvaFromRaw, ivaTexto, ivaValido } =
         useBusinessDraft(biz);
 
     // Save negocio
     const [savingBiz, setSavingBiz] = useState(false);
-    const onSaveBusiness = async () => {
+    // En Negocio no sale el «Guardado» nativo: al guardar, el botón se apaga y desaparece el aviso de
+    // los datos fiscales que faltaban. Los errores sí salen.
+    const guardarNegocio = async (avisarGuardado: boolean) => {
         // RI-78: el borrador se guarda entero desde varias secciones. Con un IVA tecleado que no
         // vale, guardar el último válido sería guardar otro número sin decirlo.
         if (!ivaValido) {
             await messageDialog(`${MSG_IVA}. Corrígelo en la sección Ticket.`, { kind: "error" });
             return;
         }
+        // Y lo mismo con el NIF, que también va en el borrador: guardar uno que no vale deja el TPV
+        // sin poder cobrar.
+        if (draft.cif.trim() && !nifValido(draft.cif)) {
+            await messageDialog("El NIF no es válido. Corrígelo en la sección Negocio.", { kind: "error" });
+            return;
+        }
         try {
             setSavingBiz(true);
             // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2).
             const prevLogo = biz.logo_data_url;
-            await (biz as any).setMany({
+            (biz as any).setMany({
                 business_name: draft.business_name,
                 logo_data_url: draft.logo_data_url,
                 direccion: draft.direccion,
@@ -313,6 +286,9 @@ export default function Configuracion() {
                 iva_percent: draft.iva_percent,
                 razon_social: draft.razon_social,
             });
+            // Se espera a que esté escrito: «Guardado» sólo sale si se ha guardado, y Fiscal vuelve
+            // a preguntar si faltan los datos cuando ya están en la base.
+            await biz.guardarYa();
             // Best-effort: si el logo anterior era una ruta relativa (canal R2) y cambió, borrarlo.
             if (
                 prevLogo &&
@@ -321,25 +297,28 @@ export default function Configuracion() {
             ) {
                 void commands.imagesDelete({ rel_path: prevLogo }).catch(() => {});
             }
-            await messageDialog("Guardado");
-        } catch {
-            await messageDialog("No se pudo guardar. Revisa la consola.", {
+            if (avisarGuardado) await messageDialog("Guardado");
+        } catch (e) {
+            await messageDialog(`No se ha podido guardar: ${toAppError(e).message}`, {
                 kind: "error",
             });
         } finally {
             setSavingBiz(false);
         }
     };
+    const onSaveBusiness = () => guardarNegocio(true);
+    const onSaveNegocio = () => guardarNegocio(false);
 
-    const canSaveBusiness = dirty && !savingBiz && bizHydrated;
+    const canSaveBusiness = dirty && !savingBiz;
 
     const onSaveContact = async () => {
         try {
             setSavingContact(true);
             contact.setMany({ contact_email, contact_phone });
+            await contact.guardarYa();
             await messageDialog("Guardado");
-        } catch {
-            await messageDialog("No se pudo guardar. Revisa la consola.", {
+        } catch (e) {
+            await messageDialog(`No se ha podido guardar: ${toAppError(e).message}`, {
                 kind: "error",
             });
         } finally {
@@ -694,33 +673,12 @@ export default function Configuracion() {
                                             <Negocio
                                                 darkMode={darkMode}
                                                 inputTone={inputTone}
-                                                bizHydrated={bizHydrated}
                                                 draft={draft}
                                                 setDraft={setDraft}
                                                 dirty={dirty}
                                                 saving={savingBiz}
-                                                onSave={onSaveBusiness}
+                                                onSave={onSaveNegocio}
                                                 onReset={resetDraft}
-                                            />
-                                        ) : null}
-
-                                        {section === "FISCAL" ? (
-                                            <Fiscal
-                                                inputTone={inputTone}
-                                                razon_social={draft.razon_social}
-                                                setRazonSocial={(v) =>
-                                                    setDraft((d) => ({
-                                                        ...d,
-                                                        razon_social: v,
-                                                    }))
-                                                }
-                                                cif={draft.cif}
-                                                setCif={(v) =>
-                                                    setDraft((d) => ({ ...d, cif: v }))
-                                                }
-                                                dirty={dirty}
-                                                saving={savingBiz}
-                                                onSave={onSaveBusiness}
                                             />
                                         ) : null}
 

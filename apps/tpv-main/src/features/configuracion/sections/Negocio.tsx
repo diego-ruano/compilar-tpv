@@ -1,6 +1,12 @@
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 // src/features/configuracion/sections/Negocio.tsx
-import React, { useEffect, useRef, useState } from "react";
+//
+// Configuración → Negocio: el logo, los datos que salen en el ticket y quién factura (FISCAL-01).
+// Sin NIF ni razón social no se puede emitir la factura, y sin factura no se puede cobrar. Esta rama
+// no remite a la AEAT (docs/arquitectura/verifactu.md).
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { commands } from "@tpv/client";
+import type { EstadoFiscal } from "@tpv/contracts";
 
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
@@ -14,11 +20,12 @@ import {
 } from "../../../shared/lib/imageUrl";
 import { useToast } from "../../../shared/toast";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { useEstadoFiscal } from "../../../shared/stores/useEstadoFiscal";
+import { nifValido } from "../../../shared/ticket/nif";
 
 export function Negocio({
     darkMode,
     inputTone,
-    bizHydrated,
     draft,
     setDraft,
     dirty,
@@ -28,7 +35,6 @@ export function Negocio({
 }: {
     darkMode: boolean;
     inputTone: string;
-    bizHydrated: boolean;
     draft: BusinessDraft;
     setDraft: React.Dispatch<React.SetStateAction<BusinessDraft>>;
     dirty: boolean;
@@ -39,6 +45,30 @@ export function Negocio({
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const toast = useToast();
     const [uploadingLogo, setUploadingLogo] = useState(false);
+
+    // Lo GUARDADO: si faltan los datos fiscales, no se puede cobrar.
+    const [estado, setEstado] = useState<EstadoFiscal | null>(null);
+    const refrescarEstado = useCallback(() => {
+        commands.verifactuEstado()
+            .then(setEstado)
+            .catch(() => setEstado(null));
+        // Y el store que usa el RESTO de la aplicación: sin esto, el aviso de «este TPV todavía no
+        // puede cobrar» (FIS-01) seguiría en pantalla hasta su siguiente consulta, a los dos minutos.
+        void useEstadoFiscal.getState().refrescar();
+    }, []);
+    useEffect(() => {
+        refrescarEstado();
+    }, [refrescarEstado]);
+
+    // Guarda y vuelve a preguntar el estado: `onSave` sólo persiste.
+    const guardar = useCallback(async () => {
+        await onSave();
+        refrescarEstado();
+    }, [onSave, refrescarEstado]);
+
+    // Lo que se está ESCRIBIENDO, con el mismo criterio que el backend (`nifValido`). Un NIF que no
+    // vale no se guarda: dejaría el TPV sin poder cobrar por una errata.
+    const nifMal = draft.cif.trim().length > 0 && !nifValido(draft.cif);
 
     // `draft.logo_data_url` puede ser una ruta relativa (`images/logo/…`, nuevo canal R2) o un
     // data URL heredado; `resolveImageUrl` maneja ambos y devuelve una URL para el <img>.
@@ -89,7 +119,7 @@ export function Negocio({
                     <div className="flex items-center gap-2">
                         <GhostButton
                             onClick={onPickLogo}
-                            disabled={!bizHydrated || uploadingLogo}
+                            disabled={uploadingLogo}
                         >
                             {uploadingLogo ? "Subiendo…" : "Subir logo"}
                         </GhostButton>
@@ -97,7 +127,6 @@ export function Negocio({
                             onClick={() =>
                                 setDraft((d) => ({ ...d, logo_data_url: null }))
                             }
-                            disabled={!bizHydrated}
                         >
                             Quitar
                         </GhostButton>
@@ -172,10 +201,10 @@ export function Negocio({
 
             <Panel
                 title="Datos del negocio"
-                subtitle="Estos datos se imprimen en el ticket según tus preferencias."
+                subtitle="Salen en el ticket. Sin la razón social y el NIF no se puede cobrar."
             >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="Nombre">
+                    <Field label="Nombre" hint="El rótulo del bar">
                         <TextInput
                             value={draft.business_name}
                             onChange={(e) =>
@@ -189,6 +218,33 @@ export function Negocio({
                         />
                     </Field>
 
+                    <Field label="Razón social" hint="Quien factura: «Francisco García SL»">
+                        <TextInput
+                            value={draft.razon_social}
+                            onChange={(e) =>
+                                setDraft((d) => ({ ...d, razon_social: e.target.value }))
+                            }
+                            placeholder="Nombre o razón social del obligado"
+                            className={inputTone}
+                        />
+                    </Field>
+
+                    <Field label="NIF / CIF" hint="El de quien factura">
+                        <TextInput
+                            value={draft.cif}
+                            onChange={(e) =>
+                                setDraft((d) => ({ ...d, cif: e.target.value.toUpperCase() }))
+                            }
+                            placeholder="B12345674"
+                            className={cn(inputTone, nifMal && "ring-1 ring-danger")}
+                        />
+                        {nifMal ? (
+                            <span className="mt-1 block text-xs text-danger">
+                                Ese NIF no es válido: revisa la letra o el dígito de control.
+                            </span>
+                        ) : null}
+                    </Field>
+
                     <Field label="Teléfono" hint="Opcional">
                         <TextInput
                             value={draft.telefono}
@@ -199,22 +255,6 @@ export function Negocio({
                                 }))
                             }
                             placeholder="+34 600 000 000"
-                            className={inputTone}
-                        />
-                    </Field>
-
-                    {/* NO es opcional, y es la MISMA columna (`Business_Settings.CIF`) que edita
-                        Configuración → Fiscal diciendo «sin esto no se puede cobrar». Dos pantallas
-                        sobre el mismo dato diciendo lo contrario es peor que una sola mal puesta:
-                        quien lee ésta se queda tranquilo. El sitio para rellenarlo con su contexto
-                        —y con la validación del NIF— es Fiscal; aquí sólo se dice dónde. */}
-                    <Field label="CIF" hint="Se configura en Fiscal">
-                        <TextInput
-                            value={draft.cif}
-                            onChange={(e) =>
-                                setDraft((d) => ({ ...d, cif: e.target.value }))
-                            }
-                            placeholder="B12345678"
                             className={inputTone}
                         />
                     </Field>
@@ -234,23 +274,31 @@ export function Negocio({
                     </Field>
                 </div>
 
-                {/* `justify-end` y no `justify-between`: al quitar el texto de la izquierda, un
-                    `between` con un solo hijo lo empujaría al principio de la fila. */}
-                <div className="mt-4 flex items-center justify-end gap-2">
-                    <div className="flex items-center gap-2">
-                        <GhostButton
-                            onClick={onReset}
-                            disabled={!dirty || saving}
-                        >
-                            Descartar
-                        </GhostButton>
-                        <PrimaryButton
-                            onClick={conAviso(onSave)}
-                            disabled={!dirty || saving || !bizHydrated}
-                        >
-                            {saving ? "Guardando…" : "Guardar cambios"}
-                        </PrimaryButton>
+                {estado && !estado.datos_fiscales_completos ? (
+                    <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+                        {estado.nif && estado.razon_social
+                            ? "El NIF no es válido: revisa que esté bien escrito."
+                            : "Faltan la razón social o el NIF."}{" "}
+                        <strong>Mientras tanto, no se puede cobrar</strong>: cada cobro emite una
+                        factura, y una factura necesita saber quién la emite.
                     </div>
+                ) : null}
+
+                {/* Un solo «Guardar» para toda la sección, logo incluido: es la misma fila
+                    (`Business_Settings`). */}
+                <div className="mt-4 flex items-center justify-end gap-2">
+                    <GhostButton
+                        onClick={onReset}
+                        disabled={!dirty || saving}
+                    >
+                        Descartar
+                    </GhostButton>
+                    <PrimaryButton
+                        onClick={conAviso(guardar)}
+                        disabled={!dirty || saving || nifMal}
+                    >
+                        {saving ? "Guardando…" : "Guardar cambios"}
+                    </PrimaryButton>
                 </div>
             </Panel>
         </div>

@@ -54,12 +54,10 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
     const [pendiente, setPendiente] = useState<{
         idUsuario: string | null;
         nombre: string | null;
-        email: string | null;
     } | null>(null);
 
     const [pinNuevo, setPinNuevo] = useState("");
     const [pinNuevo2, setPinNuevo2] = useState("");
-    const [email, setEmail] = useState(emailPrev ?? "");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -73,13 +71,7 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                 setPendiente({
                     idUsuario: r.id_usuario,
                     nombre: r.nombre,
-                    email: r.email,
                 });
-                // El email del seed (admin@local) es un relleno, no algo que confirmar: se deja el
-                // campo vacio para que se escriba el de verdad.
-                if (r.email && !r.email.endsWith("@local")) {
-                    setEmail((prev) => (prev ? prev : r.email!));
-                }
             })
             .catch((e) => {
                 console.error("No se pudo leer el estado del setup inicial:", e);
@@ -96,15 +88,12 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
         return <Navigate to="/VentaRapida" replace />;
     }
 
-    const emailTrimmed = email.trim();
     const canSave =
         !saving &&
         correoRecuperacionResuelto &&
         !!idUsuario &&
         pinNuevo.length >= 4 &&
-        pinNuevo === pinNuevo2 &&
-        emailTrimmed.includes("@") &&
-        emailTrimmed.includes(".");
+        pinNuevo === pinNuevo2;
 
     const onSave = async () => {
         if (!idUsuario) return;
@@ -121,20 +110,12 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
             return;
         }
 
-        const cleanEmail = email.trim();
-
-        if (!cleanEmail || !cleanEmail.includes("@") || !cleanEmail.includes(".")) {
-            setError("Introduce un email válido.");
-            return;
-        }
-
         setSaving(true);
 
         try {
             await commands.completeInitialSetup({
                 id_usuario: idUsuario,
                 pin_nuevo: pinNuevo,
-                email_nuevo: cleanEmail,
             });
 
             // Subimos el setup a la nube para que la Handy haga login con datos reales.
@@ -143,7 +124,6 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
             try {
                 await commands.configUploadInitialSetup({
                     id_usuario: idUsuario,
-                    email: cleanEmail,
                     pin: pinNuevo,
                 });
             } catch (e) {
@@ -157,7 +137,7 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                     idTrabajador: null,
                     nombre: nombre ?? "",
                     requiresSetup: false,
-                    email: cleanEmail,
+                    email: emailPrev,
                 });
 
                 void navigate("/", { replace: true });
@@ -214,8 +194,8 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                         </h1>
                         <p className="mt-3 text-sm leading-relaxed text-fg-muted sm:text-base">
                             Hola, <span className="font-semibold text-fg">{nombre ?? "usuario"}</span>.
-                            Elige el PIN con el que vas a entrar y dinos tu correo. Despues
-                            iniciaras sesion con ese PIN.
+                            Elige el PIN con el que vas a entrar. Después iniciarás sesión con
+                            ese PIN.
                         </p>
 
                         <div className="mt-7 space-y-4">
@@ -233,19 +213,22 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                                 </div>
                             </div>
 
-                            <div className="flex gap-3">
-                                <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-accent shadow-sm">
-                                    <Mail className="size-4" aria-hidden />
+                            {elegirCorreoRecuperacion ? (
+                                <div className="flex gap-3">
+                                    <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-accent shadow-sm">
+                                        <Mail className="size-4" aria-hidden />
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-semibold text-fg">
+                                            Por si lo olvidas
+                                        </p>
+                                        <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
+                                            Te mandaremos un código al correo de la compra, o al
+                                            que elijas.
+                                        </p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <p className="text-sm font-semibold text-fg">
-                                        Confirma tu correo
-                                    </p>
-                                    <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
-                                        Se asociará a tu usuario para los servicios del TPV.
-                                    </p>
-                                </div>
-                            </div>
+                            ) : null}
                         </div>
                     </div>
 
@@ -329,28 +312,6 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                                     </p>
                                 ) : null}
                             </div>
-                        </div>
-
-                        <div>
-                            <label
-                                htmlFor="setup-email"
-                                className="text-sm font-semibold text-fg"
-                            >
-                                Correo electrónico
-                            </label>
-                            <Input
-                                id="setup-email"
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="mt-2 h-12 px-4 text-base"
-                                placeholder="tuemail@ejemplo.com"
-                                inputMode="email"
-                                autoComplete="email"
-                            />
-                            <p className="mt-2 text-xs text-fg-subtle">
-                                No tiene que ser Gmail; puedes usar cualquier correo válido.
-                            </p>
                         </div>
 
                         {elegirCorreoRecuperacion && correoAConfirmar ? (

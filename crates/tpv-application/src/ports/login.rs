@@ -44,7 +44,6 @@ pub trait LoginRepository: Send + Sync {
         &self,
         _id_usuario: &str,
         _pin_nuevo: &str,
-        _email_nuevo: &str,
     ) -> AppResult<()> {
         Err(AppError::validation(
             "El PIN inicial se elige desde el TPV principal",

@@ -16,11 +16,22 @@ type ContactSettingsState = ContactSettings & {
     init: () => Promise<void>;
     limpiarContexto: () => void;
     setMany: (patch: Partial<ContactSettings>) => void;
+    /** Escribe ya y falla si no se guarda (ver `guardarYa` en useBusinessSettings). */
+    guardarYa: () => Promise<void>;
 };
 
 let timer: number | null = null;
 let pending: Partial<ContactSettings> = {};
 let contexto = 0;
+
+/** Escribe ya lo acumulado y cancela la escritura con retardo. Sin nada pendiente, no hace nada. */
+async function escribirPendiente(): Promise<void> {
+    if (timer) window.clearTimeout(timer);
+    timer = null;
+    const toSave = pending;
+    pending = {};
+    if (Object.keys(toSave).length) await configPatchContactSettings(toSave);
+}
 
 export const useContactSettings = create<ContactSettingsState>((set, get) => ({
     ...DEFAULTS,
@@ -53,13 +64,17 @@ export const useContactSettings = create<ContactSettingsState>((set, get) => ({
         if (timer) window.clearTimeout(timer);
         // Autoguardado sin rollback, pero el fallo se avisa (ver useBusinessSettings).
         timer = window.setTimeout(
-            conAviso(async () => {
-                const toSave = pending;
-                pending = {};
-                timer = null;
-                await configPatchContactSettings(toSave);
-            }, "No se han podido guardar los datos de contacto"),
+            conAviso(escribirPendiente, "No se han podido guardar los datos de contacto"),
             400,
         );
+    },
+
+    guardarYa: async () => {
+        try {
+            await escribirPendiente();
+        } catch (e) {
+            void get().init();
+            throw e;
+        }
     },
 }));

@@ -70,7 +70,7 @@ function AvisoDatosFiscalesModal({ onClose }: { onClose: () => void }) {
                             type="button"
                             onClick={() => {
                                 onClose();
-                                void navigate("/Configuracion", { state: { seccion: "FISCAL" } });
+                                void navigate("/Configuracion", { state: { seccion: "NEGOCIO" } });
                             }}
                             className="h-10 rounded-xl border border-primary bg-primary px-5 text-sm font-bold text-white shadow-sm hover:opacity-90 active:scale-[0.97]"
                         >

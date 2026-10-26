@@ -15,6 +15,7 @@ import { useElementSize } from "../../features/mesas/useElementSize";
 import type { MesaMetaOut } from "@tpv/contracts";
 import type { Salon } from "../../features/mesas/types";
 import { useAuth } from "../../shared/stores/useAuth";
+import { useMode } from "../../shared/stores/useMode";
 
 import {
     useMesasLayout,
@@ -81,10 +82,13 @@ export default function Mesas() {
         [salons, activeSalonId],
     );
 
+    // En la Handy se encajan sólo las mesas: en una pantalla estrecha, con el salón entero salen
+    // diminutas. Lo que sobre del contorno se corta por los bordes.
+    const soloMesas = useMode((s) => s.mode) === "handy";
     const view = useMemo(() => {
         if (!activeSalon) return { x: 0, y: 0, scale: 1 };
-        return fitTransform(activeSalon, mapSize.width, mapSize.height, 26);
-    }, [activeSalon, mapSize.width, mapSize.height]);
+        return fitTransform(activeSalon, mapSize.width, mapSize.height, 26, { soloMesas });
+    }, [activeSalon, mapSize.width, mapSize.height, soloMesas]);
 
     const handleOpenMesa = useCallback((mesaId: string, mesaNombre: string) => {
         setMesaSel({ mesaId, mesaNombre });
@@ -116,7 +120,7 @@ export default function Mesas() {
                                 onChangeSalon={setActiveSalonId}
                             />
 
-
+                            <Legend />
                         </div>
 
                         <MapCanvas
@@ -128,8 +132,6 @@ export default function Mesas() {
                             mesaMetaById={mesaMetaById as any}
                             onOpenMesa={handleOpenMesa}
                         />
-
-                        <Legend />
                     </div>
 
                     {mesaSel ? (

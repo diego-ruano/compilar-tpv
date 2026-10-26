@@ -38,12 +38,17 @@ function unir(a: Caja, b: Caja): Caja {
 export type OpcionesEncaje = {
     /**
      * Encajar sólo las mesas, no el contorno del salón. Un salón con mucho espacio libre alrededor
-     * deja las mesas diminutas; el widget de reservas web quiere las mesas grandes, y el contorno que
-     * se salga del hueco se corta.
+     * deja las mesas diminutas; la sala de la Handy y el widget de reservas web quieren las mesas
+     * grandes, y el contorno que se salga del hueco se corta.
      */
     soloMesas?: boolean;
-    /** El zoom máximo. Por defecto 1,15, para no «reventar» un salón pequeño en la sala. */
+    /**
+     * El zoom máximo. Por defecto 3: el salón llena el hueco, pero uno con dos mesas no las hace
+     * gigantes.
+     */
     escalaMaxima?: number;
+    /** Cuánto se encoge además del margen: 0,9 deja un 10 % de aire. Por defecto 1, nada. */
+    holgura?: number;
 };
 
 /** Lo que hay que encajar: el salón entero con sus mesas, o sólo las mesas (si las hay). */
@@ -62,9 +67,8 @@ export function tamanoDelContenido(salon: SalonPlano, soloMesas = false): { anch
 }
 
 /**
- * Encaja el salón entero en el hueco sin hacerlo enorme: escala para que se vea completo, un poco
- * menos, y con un tope (para no «reventar» un salón pequeño). Los E2E calculan con esta misma
- * función dónde pulsar una mesa.
+ * Encaja el salón en el hueco: la escala con la que se ve entero, con un tope para no «reventar» un
+ * salón pequeño. Los E2E calculan con esta misma función dónde pulsar una mesa.
  */
 export function fitTransform(
     salon: SalonPlano,
@@ -82,7 +86,7 @@ export function fitTransform(
     const usableH = Math.max(1, viewH - padding * 2);
 
     const rawScale = Math.min(usableW / contentW, usableH / contentH);
-    const scale = Math.max(0.2, Math.min(rawScale * 0.9, opciones.escalaMaxima ?? 1.15));
+    const scale = Math.max(0.2, Math.min(rawScale * (opciones.holgura ?? 1), opciones.escalaMaxima ?? 3));
 
     const offsetX = padding + (usableW - contentW * scale) / 2;
     const offsetY = padding + (usableH - contentH * scale) / 2;

@@ -11,6 +11,7 @@
 import { $, browser } from "@wdio/globals";
 
 import { fitTransform } from "../../src/features/mesas/geometry.js";
+import { nombreDeMesa } from "@tpv/plano/nombre";
 import type { Salon } from "../../src/features/mesas/types.js";
 import { conTexto, escribir, irA, leerDeLaApp, literalXPath, pulsar, pulsarXPath } from "./ui.js";
 
@@ -160,7 +161,7 @@ export async function abrirMesa(mesa: string): Promise<void> {
  * contenedor que lo envuelva.
  */
 function tituloDelModal(mesa: string) {
-    return $(`//div[normalize-space(text())=${literalXPath(`Mesa: ${mesa}`)}]`);
+    return $(`//div[normalize-space(text())=${literalXPath(nombreDeMesa(mesa))}]`);
 }
 
 /**
@@ -171,7 +172,7 @@ function tituloDelModal(mesa: string) {
  */
 export async function cerrarElModalDeLaMesa(mesa: string): Promise<void> {
     await pulsarXPath(
-        `//div[normalize-space(text())=${literalXPath(`Mesa: ${mesa}`)}]` +
+        `//div[normalize-space(text())=${literalXPath(nombreDeMesa(mesa))}]` +
             `/following-sibling::div//button[@aria-label="Cerrar"]`,
         "aspa de cerrar el modal de la mesa",
     );

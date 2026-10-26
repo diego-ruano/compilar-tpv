@@ -6,7 +6,7 @@ import { commands } from "@tpv/client";
 // ## Por qué hay un store y no una llamada en cada pantalla
 //
 // Lo consumen dos sitios muy distintos: el aviso de que faltan los datos fiscales, que sale delante
-// de quien esté, y Configuración → Fiscal, que lo refresca al guardar. Con el estado en un sitio,
+// de quien esté, y Configuración → Negocio, que lo refresca al guardar. Con el estado en un sitio,
 // guardar los datos quita el aviso en el momento.
 
 import { create } from "zustand";

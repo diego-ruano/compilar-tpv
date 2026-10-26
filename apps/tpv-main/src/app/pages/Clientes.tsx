@@ -101,8 +101,7 @@ export default function Clientes() {
   const createCliente = useCreateCliente();
   const updateCliente = useUpdateCliente();
 
-  const loading =
-    overview.isFetching || createCliente.isPending || updateCliente.isPending;
+  const guardando = createCliente.isPending || updateCliente.isPending;
 
   // Modal (nuevo/editar)
   const [modalClienteOpen, setModalClienteOpen] = useState(false);
@@ -142,11 +141,6 @@ export default function Clientes() {
     () => (overview.data ?? []).map(mapRowToUI),
     [overview.data],
   );
-
-  /** Recarga manual (botones de UI): fuerza un refetch de la query cacheada. */
-  function recargarSegunFiltroManteniendoSeleccion() {
-    return overview.refetch();
-  }
 
   // Mantener la selección de detalle sincronizada con la lista recacheada.
   useEffect(() => {
@@ -318,20 +312,46 @@ export default function Clientes() {
       {/* ================= LISTA ================= */}
       {vista === "list" && (
         <>
-          {/* HEADER */}
-          <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
-                  <Users className="size-6" aria-hidden />
-                </div>
-                <div className="min-w-0">
-                  <h2 className="text-xl font-bold text-fg sm:text-2xl">Clientes</h2>
-                  <p className="text-sm text-fg-muted">
-                    {clientes.length} {clientes.length === 1 ? "cliente" : "clientes"} en total
-                  </p>
-                </div>
+          {/* HEADER: título, filtros y, a la derecha, buscar y crear. Si no cabe en una línea, baja
+              por bloques; en el móvil, buscar y crear ocupan su propia línea. */}
+          <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                <Users className="size-6" aria-hidden />
               </div>
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-fg sm:text-2xl">Clientes</h2>
+                <p className="text-sm text-fg-muted">
+                  {clientes.length} {clientes.length === 1 ? "cliente" : "clientes"} en total
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {RANKINGS.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => setRanking(r.key)}
+                  className={cn(
+                    "cursor-pointer rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                    ranking === r.key
+                      ? "border-accent bg-accent text-accent-fg shadow-sm"
+                      : "border-border bg-surface text-fg-muted hover:bg-surface-2 hover:text-fg",
+                  )}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
+              <SearchInput
+                value={busqueda}
+                onValueChange={setBusqueda}
+                placeholder="Buscar cliente..."
+                className="min-w-0 flex-1 sm:w-72 sm:flex-none"
+              />
 
               <button
                 type="button"
@@ -342,49 +362,11 @@ export default function Clientes() {
                 <span className="hidden xs:inline">Nuevo cliente</span>
               </button>
             </div>
-
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                {RANKINGS.map((r) => (
-                  <button
-                    key={r.key}
-                    type="button"
-                    onClick={() => setRanking(r.key)}
-                    className={cn(
-                      "cursor-pointer rounded-xl border px-3 py-2 text-sm font-semibold transition",
-                      ranking === r.key
-                        ? "border-accent bg-accent text-accent-fg shadow-sm"
-                        : "border-border bg-surface text-fg-muted hover:bg-surface-2 hover:text-fg",
-                    )}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-
-                <button
-                  type="button"
-                  onClick={conAviso(() => recargarSegunFiltroManteniendoSeleccion())}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-                >
-                  <RefreshCw className={cn("size-4", loading && "animate-spin")} aria-hidden />
-                  Recargar
-                </button>
-              </div>
-
-              <SearchInput
-                value={busqueda}
-                onValueChange={setBusqueda}
-                placeholder="Buscar cliente..."
-                className="lg:w-80"
-              />
-            </div>
           </div>
 
           {/* CARDS */}
           <div className="w-full">
-            {loading ? (
-              <p className="text-fg-muted">Cargando clientes...</p>
-            ) : clientesFiltrados.length === 0 ? (
+            {overview.isPending ? null : clientesFiltrados.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-10 text-center shadow-sm">
                 <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
                   <Users className="size-6" aria-hidden />
@@ -703,15 +685,15 @@ export default function Clientes() {
             <button
               type="button"
               onClick={conAviso(guardarCliente)}
-              disabled={loading}
+              disabled={guardando}
               className={cn(
                 "w-full rounded-xl px-4 py-2 font-semibold transition sm:w-auto",
-                loading
+                guardando
                   ? "cursor-not-allowed bg-surface-2 text-fg-subtle"
                   : "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover active:scale-[0.98] cursor-pointer",
               )}
             >
-              {loading ? "Guardando..." : "Guardar"}
+              {guardando ? "Guardando..." : "Guardar"}
             </button>
           </div>
         </div>

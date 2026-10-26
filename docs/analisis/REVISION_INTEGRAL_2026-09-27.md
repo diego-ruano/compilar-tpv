@@ -71,8 +71,6 @@ La rama de Windows 7 es anterior a ARQ-01 y su canal del feed no está desplegad
 frontend tienen regresiones automatizadas; el recorrido completo y la comprobación táctil en el
 TPV real siguen siendo validaciones de la release.
 
-**Migraciones:** `0001_inicial.sql` ya está congelada. Las mejoras pendientes se añaden mediante
-una migración nueva, registrada en los dos runners.
 
 **Antes de repartir la Handy de Android:** RI-75 y RI-76 (firma, márgenes), y
 RI-77 para que no enseñe lo que no puede hacer.
@@ -84,114 +82,6 @@ del canal a `main`.
 
 ---
 
-## 20. Plataformas: Android (Handy) y Windows 7
-
-<a id="ri-75"></a>
-### RI-75 🔵 · Android: el `Context` sale de una API no pública
-
-**Dónde:** el almacén de secretos de Android,
-[`secret_store.rs:174-191`](../../crates/tpv-infra-licensing/src/secret_store.rs#L174-L191)
-(`contexto`).
-
-`ActivityThread.currentApplication()`
-([`:176-190`](../../crates/tpv-infra-licensing/src/secret_store.rs#L176-L190)) es una **API no
-pública**. Hoy funciona dejando un aviso en logcat, pero Android restringe estas llamadas de una
-versión a otra. `ndk-context` no sirve porque Tauri no lo inicializa (lo documenta
-`COMPILAR_ANDROID.md`). La vía soportada es un plugin de Android propio en Kotlin, que recibe la
-`Activity` (Tauri 2 lo admite con `register_android_plugin`), o que el Kotlin de `MainActivity`
-entregue el `Context` a Rust una vez al arrancar.
-
-<a id="ri-76"></a>
-### RI-76 🔵 · Android: restos de la plantilla y ajustes por defecto
-
-**Dónde:** [`AndroidManifest.xml`](../../apps/tpv-main/src-tauri/gen/android/app/src/main/AndroidManifest.xml),
-[`build.gradle.kts`](../../apps/tpv-main/src-tauri/gen/android/app/build.gradle.kts),
-[`MainActivity.kt`](../../apps/tpv-main/src-tauri/gen/android/app/src/main/java/com/altarialights/tpv/MainActivity.kt),
-[`index.html`](../../apps/tpv-main/index.html).
-
-- **Soporte de Android TV** (`leanback` y `LEANBACK_LAUNCHER`) y un **`FileProvider`** que no usa
-  nada: son de la plantilla de Tauri. La app aparecería en el lanzador de una tele. Quitarlos.
-- **Pantalla completa sin márgenes seguros.** `MainActivity.kt` llama a `enableEdgeToEdge()`, y con
-  `targetSdk = 36` Android 15+ lo impone de todas formas. Pero el `viewport` de `index.html` no
-  lleva `viewport-fit=cover` y ningún CSS usa `env(safe-area-inset-*)`. **A verificar en el
-  emulador** con barra de gestos y con muesca: lo esperable es que la cabecera y la barra inferior
-  de la app queden debajo de las del sistema.
-- **La versión de release no se firma**: `build.gradle.kts` no tiene `signingConfig`, así que
-  `tauri android build` sale sin firma. O unas `signingConfigs` que lean el almacén de claves de
-  variables de entorno, o dejarlo escrito en `COMPILAR_ANDROID.md`.
-
-<a id="ri-77"></a>
-### RI-77 🔵 · La Handy enseña pantallas que en ella no funcionan
-
-**Dónde:** [`NavBar.tsx:53-88`](../../apps/tpv-main/src/app/layoutComponent/NavBar.tsx#L53-L88)
-y [`Configuracion.tsx:154-178`](../../apps/tpv-main/src/app/pages/Configuracion.tsx#L154-L178).
-
-El menú se construye **sólo por rol**, sin mirar el modo. Un administrador con una Handy ve:
-
-- **«Proveedores y Pedidos»**: los pedidos sólo existen en la Main. El worker no tiene rutas de
-  pedidos, y `pedidos_proveedor_repo` contesta «DB no inicializada (pedidos requieren modo Main)»
-  ([`lib.rs:781-794`](../../apps/tpv-main/src-tauri/src/lib.rs#L781-L794)), que es lo que acaba
-  saliendo en pantalla.
-- **Cuentas** con todos sus botones de escritura (gasto, cierre, anular, editar). El worker las
-  rechaza (`soloLaMainEscribeCaja`), y está bien que lo haga, pero la pantalla ofrece acciones que
-  van a fallar.
-- En **Configuración**, además de lo propio de la Handy (Dispositivo), siguen **Ticket** (la Handy
-  no imprime), **Licencia** (la Handy no tiene licencia propia) y **Actualizaciones** (el updater
-  sólo se compila en escritorio: `#[cfg(desktop)]`).
-
-**Propuesta.** Un `soloMain: true` en los elementos del menú y en las secciones de configuración,
-filtrado con `useMode`, igual que ya se hace para Conectividad y Vincular Handy.
-
-<a id="ri-74"></a>
-### RI-74 🟡 · Windows 7: la rama no se puede compilar tal cual contra la nube de hoy
-
-**Dónde:** el *worktree* `tpv-win7` (rama en `bac10e2`, 14/09; se separó de `main` en `52b4d71`).
-Sirve para decidir cuándo y cómo reintegrarla; con la variante sin publicar no hay nada roto
-todavía.
-
-1. **Su esquema es anterior a ARQ-01.** Desde que se separó la rama, `0001_inicial.sql` ha cambiado
-   una vez: `343c113` (20/09), el dinero en céntimos enteros. Un `.exe` de Windows 7 compilado hoy
-   desde la rama guarda y sube los precios como euros `REAL` a una nube cuyo esquema, cuyo worker
-   (`zDinero`) y cuya Handy trabajan en céntimos. La Handy enseñaría 2,50 € como 0,03 €, y el
-   volcado de recuperación traería céntimos a un binario que espera euros. La prueba en la máquina
-   virtual valida que la aplicación arranca, no que sus datos sean compatibles.
-2. **El canal `win7` del feed sólo existe en la rama.** La rama cambia `updates.routes.ts` (una
-   ruta `/:canal/:target/:arch/:current` con una lista cerrada `CANALES`) y añade
-   `test/updateCanal.test.ts`, pero el worker se despliega desde `main`, que no la tiene. Así que
-   `/v1/update/win7/windows/x86_64/<versión>` contesta 404 en producción y **un Windows 7
-   instalado no se actualiza nunca**. Falla del lado seguro: los cuatro segmentos no casan con
-   `/:target/:arch/:current`, así que no puede recibir el instalador de Windows 10. El `publish` de
-   `main` ya acepta `channel: "win7"`, de modo que `release-win7.yml` puede publicar… pero nadie
-   puede leerlo. Además, la versión de la rama es anterior a REV-23 (el `arch` en la clave,
-   `compararVersiones`) y todavía llama a `ensureReleasesSchema`, un `CREATE` contra el
-   control-plane que §4.5 ya prohíbe: al integrarla, el conflicto es seguro. **Propuesta:** pasar la
-   ruta del canal a `main` ahora, encima de REV-23 (es código del worker y no afecta al canal
-   `stable`), y dejar en la rama sólo lo que es de verdad de Windows 7.
-3. **95 commits por detrás de `main`.** Hay conflictos previsibles en `lib.rs` (el `cfg` del
-   minidump), `vite.config.ts`, `transporte.rs` (los arreglos de WinHTTP de la rama frente a los
-   cambios de `main`), `CLAUDE.md` y los dos *lockfiles*. **Propuesta:** integrar `main` en la rama
-   antes de cada versión, y que `build-win7.ps1` **se niegue a compilar** si su `0001_inicial.sql`
-   no es idéntico al de `main`, porque eso es exactamente lo que hace un binario incompatible con
-   la nube. Un job de CI que haga la integración y un `cargo check` del *target* de Windows 7
-   avisaría del desfase sin esperar a la siguiente versión.
-4. **El *nightly* sólo está fijado en CI.** `release-win7.yml` usa `nightly-2026-09-01`, pero
-   `build-win7.ps1` usa por defecto `nightly` a secas salvo que se defina `TPV_WIN7_TOOLCHAIN`
-   (línea 27 del script). Un build local puede salir con otro compilador que el de CI. Conviene el
-   mismo valor fijo por defecto.
-5. **Por verificar en la VM: el TLS con la AEAT.** WinHTTP usa SChannel, y en Windows 7 los
-   cifrados de TLS 1.2 de SChannel no incluyen ECDHE-RSA con AES-GCM. Si los servidores de la AEAT
-   sólo ofrecen esos, el *handshake* fallaría aunque KB3140245 esté instalada. El paso 6.7 de
-   `COMPATIBILIDAD_WINDOWS_7.md` (probar contra la AEAT) es justo esa comprobación, y en la VM
-   todavía no se ha hecho.
-
-**Lo que está bien en la variante**, y no hay que perderlo al integrarla: todo el HTTP de Rust va
-por **rustls con las raíces de `webpki-roots`**, así que no depende ni del almacén de certificados
-ni del SChannel de Windows 7 (sólo la AEAT, que va por WinHTTP, depende de él). WinHTTP **pide TLS
-1.2 de forma explícita**, con un error que nombra KB3140245 en vez de un 12175 genérico. Los canales
-del feed se separan **por ruta y con una lista cerrada**. WebView2 109 va empotrado, el minidump se
-desactiva con la *feature* `win7`, y el *nightly* está fijado en CI.
-
----
 
 ## Lo que está bien y conviene no tocar
 

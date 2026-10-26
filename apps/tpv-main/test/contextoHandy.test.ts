@@ -37,3 +37,23 @@ describe("cambiar de negocio con ajustes pendientes", () => {
         expect(patch).not.toHaveBeenCalled(); expect(store.getState().ready).toBe(false);
     });
 });
+describe("guardar con el botón «Guardar»", () => {
+    const conBoton = [
+        { nombre: "negocio", api: h.business, patch: h.patchBusiness, mutar: casos[0].mutar, guardarYa: () => useBusinessSettings.getState().guardarYa(),
+            guardado: {business_name: "B", iva_percent: 10}, valor: () => useBusinessSettings.getState().business_name },
+        { nombre: "contacto", api: h.contact, patch: h.patchContact, mutar: casos[2].mutar, guardarYa: () => useContactSettings.getState().guardarYa(),
+            guardado: {contact_email: "b@ejemplo.test"}, valor: () => useContactSettings.getState().contact_email },
+    ];
+    it.each(conBoton)("$nombre se escribe sin esperar al autoguardado, y una sola vez", async ({patch, mutar, guardarYa}) => {
+        patch.mockResolvedValue(undefined);
+        mutar(); await guardarYa();
+        expect(patch).toHaveBeenCalledTimes(1);
+        await vi.runAllTimersAsync(); expect(patch).toHaveBeenCalledTimes(1);
+    });
+    it.each(conBoton)("si $nombre no se guarda, falla y se vuelve a leer lo guardado", async ({api, patch, mutar, guardarYa, guardado, valor}) => {
+        patch.mockRejectedValue(new Error("sin permiso")); api.mockResolvedValue(guardado);
+        mutar(); await expect(guardarYa()).rejects.toThrow("sin permiso");
+        await vi.runAllTimersAsync();
+        expect(valor()).toBe(Object.values(guardado)[0]);
+    });
+});

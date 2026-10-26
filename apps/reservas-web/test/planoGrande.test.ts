@@ -25,20 +25,21 @@ const SALON: SalonPlano = {
 };
 
 describe("encajar el plano", () => {
-	it("por defecto, como en la sala de la Main: el salón entero y un zoom de 1,15 como mucho", () => {
+	it("por defecto, como en la sala de la Main: el salón entero llena el hueco, con un zoom de 3 como mucho", () => {
 		expect(tamanoDelContenido(SALON)).toEqual({ ancho: 2000, alto: 1200 });
-		expect(fitTransform(SALON, 600, 400, 16).scale).toBeLessThan(0.3);
-		expect(fitTransform({ ...SALON, room: { points: [] } }, 4000, 4000, 16).scale).toBe(1.15);
+		// 568 de ancho útil para 2000 de salón, sin encoger más.
+		expect(fitTransform(SALON, 600, 400, 16).scale).toBeCloseTo(568 / 2000, 5);
+		expect(fitTransform({ ...SALON, room: { points: [] } }, 4000, 4000, 16).scale).toBe(3);
 	});
 
-	it("sólo las mesas, con el zoom que se le dé: las mesas llenan el hueco", () => {
+	it("sólo las mesas, con el zoom y el aire que se le den: las mesas llenan el hueco", () => {
 		expect(tamanoDelContenido(SALON, true)).toEqual({ ancho: 280, alto: 80 });
-		const v = fitTransform(SALON, 600, 400, 16, { soloMesas: true, escalaMaxima: 2.5 });
+		const v = fitTransform(SALON, 600, 400, 16, { soloMesas: true, escalaMaxima: 2.5, holgura: 0.9 });
 		// 568 de ancho útil para 280 de mesas: 0,9 · 2,03.
 		expect(v.scale).toBeCloseTo(0.9 * (568 / 280), 5);
 		// La primera mesa empieza dentro del hueco, no en el contorno del salón.
 		expect(100 * v.scale + v.x).toBeGreaterThanOrEqual(16);
-		expect(fitTransform(SALON, 4000, 4000, 16, { soloMesas: true, escalaMaxima: 2.5 }).scale).toBe(2.5);
+		expect(fitTransform(SALON, 4000, 4000, 16, { soloMesas: true, escalaMaxima: 2.5, holgura: 0.9 }).scale).toBe(2.5);
 	});
 
 	it("un salón sin mesas se encaja entero aunque se pidan sólo las mesas", () => {

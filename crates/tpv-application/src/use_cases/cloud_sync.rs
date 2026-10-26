@@ -20,13 +20,12 @@ pub async fn upload_initial_setup(
     args: UploadInitialSetupArgs,
 ) -> AppResult<()> {
     let id_usuario = requerido(&args.id_usuario, "Falta el usuario.")?;
-    let email = requerido(&args.email, "Escribe el correo.")?;
     let pin = requerido(&args.pin, "Escribe el PIN.")?;
     if pin.len() < 4 {
         return Err(AppError::validation("PIN demasiado corto"));
     }
 
-    svc.upload_initial_setup(&id_usuario, &email, &pin).await
+    svc.upload_initial_setup(&id_usuario, &pin).await
 }
 
 #[cfg(test)]
@@ -44,7 +43,7 @@ mod tests {
 
     #[test]
     fn requerido_dice_que_falta() {
-        let error = requerido("\t\n", "Escribe el correo.").unwrap_err().to_string();
-        assert_eq!(error, "Escribe el correo.");
+        let error = requerido("\t\n", "Escribe el PIN.").unwrap_err().to_string();
+        assert_eq!(error, "Escribe el PIN.");
     }
 }

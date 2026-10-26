@@ -85,7 +85,6 @@ describe("qué pantalla enseña el arranque", () => {
 		],
 		["una Main bloqueada", { gate: gate(false, "expired") }, { tipo: "tpv_bloqueada", motivo: "expired" }],
 		["una Main con licencia trabaja", { gate: gate(true, "ok") }, { tipo: "tpv_app" }],
-		["un modo que no es ninguno de los conocidos (localStorage corrupto)", { modo: "otro" as never }, { tipo: "modo_invalido" }],
 	] as [string, Partial<EntradaArranque>, object][])("%s", (_caso, e, esperada) => {
 		expect(decidirArranque(entrada(e)).pantalla).toEqual(esperada);
 	});

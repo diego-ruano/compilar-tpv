@@ -6,6 +6,7 @@ import { addDetalle,deleteDetalleById,ensureOpenComanda,fmtReserva,loadTicketFor
 import type { Paso,ProductoDisplay,TicketItem } from "./tiposComanda";
 // components/mesasComponents/MesaComandaModal.tsx
 import { useQueryClient } from "@tanstack/react-query";
+import { nombreDeMesa } from "@tpv/plano/nombre";
 import { ImageOff,Printer } from "lucide-react";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 import { shouldReloadTicket } from "../../shared/lib/syncStatements";
@@ -532,8 +533,8 @@ export default function MesaComandaModal({
 
     const modalTitle = useMemo(() => {
         if (reserva?.estado === "ACTIVA")
-            return `Mesa: ${mesaNombre} · Reserva ${reserva.clienteNombre}`;
-        return `Mesa: ${mesaNombre}`;
+            return `${nombreDeMesa(mesaNombre)} · Reserva ${reserva.clienteNombre}`;
+        return nombreDeMesa(mesaNombre);
     }, [mesaNombre, reserva?.estado, reserva?.clienteNombre]);
 
     return (

@@ -36,7 +36,6 @@ export const setTurnoPartidoSchema = z.object({
 // device-proof + el chequeo de rol). El `pin` viaja para hashearlo aquí (como complete-setup).
 export const syncInitialSetupSchema = z.object({
 	id_usuario: idStr,
-	email: z.string().overwrite(recortar).email("El correo no es válido."),
 	pin: z.string().overwrite(recortar).min(4, "PIN demasiado corto"),
 });
 

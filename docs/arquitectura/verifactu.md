@@ -31,7 +31,7 @@ salen las tres reglas que no se negocian:
 | Emisión y persistencia | `crates/tpv-infra-sqlite/src/verifactu.rs` | `emitir_cobro`, `emitir_alta`, `emitir_anulacion`, `emitir_baja_de_pago`, `emitir_sustitutiva`, `estado_fiscal` |
 | Comandos | `apps/tpv-main/src-tauri/src/commands/verifactu.rs` | Estado de los datos fiscales, `F3`, corrección del cliente |
 | Identidad del productor | `apps/tpv-main/src-tauri/src/lib.rs` (`PRODUCTOR_*`) | El bloque `SistemaInformatico`, inyectado al arrancar |
-| Pantalla | `src/features/configuracion/sections/Fiscal.tsx` | NIF y razón social del obligado |
+| Pantalla | `src/features/configuracion/sections/Negocio.tsx` | NIF y razón social del obligado, con el NIF validado al escribir |
 | Factura completa | `src/shared/ticket/DatosFiscalesModal.tsx` + `nif.ts` | Datos del destinatario, con el NIF validado al escribir |
 | Aviso | `src/shared/stores/useEstadoFiscal.ts` + `src/shared/ticket/AvisoFiscalModal.tsx` | El aviso de que faltan los datos fiscales |
 | Veto en la nube | `apps/cloud-worker-licensing/src/lib/hub.ts` (`TABLAS_SOLO_MAIN`) | Ninguna escritura del worker toca `Registros_Facturacion` ni `Serie_Facturacion` |
@@ -300,7 +300,7 @@ RI-29), marcada COPIA. El orden completo del ticket está en [tickets.md](ticket
   frente a quien factura) y `Descripcion_Op` (texto fijo, por defecto «Servicios de hosteleria y
   restauracion», hasta 500 caracteres). Sin NIF válido o sin razón social no se cobra.
   `config_patch_business_settings` exige Administrador, así que el aviso de que faltan sale después
-  del login (`AvisoFiscalMontado`) y lleva a Configuración → Fiscal. `useEstadoFiscal` arranca con
+  del login (`AvisoFiscalMontado`) y lleva a Configuración → Negocio. `useEstadoFiscal` arranca con
   `datosFiscalesCompletos = true` para no sacar el aviso en una Handy (donde el comando falla) ni
   antes de la primera respuesta.
 - **Productor** (quien hace el TPV): las constantes `PRODUCTOR_NOMBRE_RAZON`, `PRODUCTOR_NIF`,

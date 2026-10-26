@@ -200,6 +200,5 @@ pub struct TpvServerPostJsonArgs {
 pub struct UploadInitialSetupArgs {
     // ID UUIDv7 (texto), igual que en el resto del sistema y en el worker (`idStr`).
     pub id_usuario: String,
-    pub email: String,
     pub pin: String,
 }

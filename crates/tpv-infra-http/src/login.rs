@@ -40,7 +40,6 @@ impl LoginRepository for HttpLoginRepository {
             requiere_recuperacion: false,
             id_usuario: None,
             nombre: None,
-            email: None,
         })
     }
 
@@ -110,7 +109,7 @@ mod tests {
         let repo = HttpLoginRepository::new(Arc::new(cliente));
 
         let e = repo
-            .complete_initial_setup("admin", "4321", "ladron@bar.test")
+            .complete_initial_setup("admin", "4321")
             .await
             .expect_err("tiene que rechazarlo");
 

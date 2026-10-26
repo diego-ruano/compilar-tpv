@@ -8,7 +8,7 @@ export default function Legend() {
     const libreFill = dark ? "rgba(71,85,105,0.95)" : "rgba(15,23,42,0.92)";
 
     return (
-        <div className="mt-3 grid shrink-0 grid-cols-2 gap-x-3 gap-y-2 text-xs text-fg-muted sm:mt-4 sm:flex sm:flex-wrap sm:gap-x-8 sm:gap-y-3 sm:text-sm">
+        <div className="grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 text-xs text-fg-muted sm:flex sm:flex-wrap sm:gap-x-6 sm:text-sm">
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <div className="size-4 rounded border border-border" style={{ background: libreFill }} />
                 <span>Mesa libre</span>

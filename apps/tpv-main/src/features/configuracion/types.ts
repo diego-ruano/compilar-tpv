@@ -2,8 +2,6 @@
 export type SectionKey =
 	| "NEGOCIO"
 	| "PERMISOS"
-	/** FISCAL-01: datos del obligado (NIF y razón social). */
-	| "FISCAL"
 	| "CONTACTO"
 	/** RI-61: duración por defecto de una reserva y qué hacer cuando dos se pisan. */
 	| "RESERVAS"
@@ -32,9 +30,9 @@ export type BusinessDraft = {
 	iva_percent: number;
 	/**
 	 * FISCAL-01: quién factura. **No es `business_name`** — uno es el rótulo («Bar La Plaza») y el
-	 * otro el obligado («Francisco García SL»). Va en el borrador del negocio aunque se edite desde
-	 * la sección Fiscal, porque se guarda en la misma fila (`Business_Settings`) y con el mismo
-	 * botón: dos borradores para una fila serían dos cosas que pueden divergir.
+	 * otro el obligado («Francisco García SL»). Va en el borrador del negocio porque se guarda en
+	 * la misma fila (`Business_Settings`) y con el mismo botón: dos borradores para una fila serían
+	 * dos cosas que pueden divergir.
 	 */
 	razon_social: string;
 };

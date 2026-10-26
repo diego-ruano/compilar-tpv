@@ -48,8 +48,7 @@ export type Pantalla =
 	| { tipo: "handy_app" }
 	| { tipo: "tpv_activar"; rechazoPrevio: string | null }
 	| { tipo: "tpv_bloqueada"; motivo: string }
-	| { tipo: "tpv_app" }
-	| { tipo: "modo_invalido" };
+	| { tipo: "tpv_app" };
 
 export type Arranque = {
 	pantalla: Pantalla;
@@ -96,15 +95,10 @@ function pantalla(e: EntradaArranque): Pantalla {
 		};
 	}
 
-	if (e.modo === "tpv") {
-		if (e.gate === null) return { tipo: "cargando" };
-		if (!e.gate.allowed && e.gate.reason === "needs_activation") {
-			return { tipo: "tpv_activar", rechazoPrevio: e.gate.last_rejection ?? null };
-		}
-		if (!e.gate.allowed) return { tipo: "tpv_bloqueada", motivo: e.gate.reason };
-		return { tipo: "tpv_app" };
+	if (e.gate === null) return { tipo: "cargando" };
+	if (!e.gate.allowed && e.gate.reason === "needs_activation") {
+		return { tipo: "tpv_activar", rechazoPrevio: e.gate.last_rejection ?? null };
 	}
-
-	// El modo se persiste en localStorage: un valor que no es ninguno de los conocidos es posible.
-	return { tipo: "modo_invalido" };
+	if (!e.gate.allowed) return { tipo: "tpv_bloqueada", motivo: e.gate.reason };
+	return { tipo: "tpv_app" };
 }

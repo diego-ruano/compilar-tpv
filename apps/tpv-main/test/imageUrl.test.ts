@@ -26,4 +26,10 @@ describe("imágenes al cambiar de vínculo", () => {
         limpiarCacheImagenes(); useMode.setState({mode: "tpv"}); h.invoke.mockResolvedValue(true);
         expect(await resolveImageUrl("images/productos/p.jpg")).toBe("asset:appdata/images/productos/p.jpg");
     });
+    it("una ruta que empieza por «/» es de la aplicación: ni AppData ni CDN", async () => {
+        expect(await resolveImageUrl("/alergenos/gluten.png")).toBe("/alergenos/gluten.png");
+        useMode.setState({mode: "tpv"});
+        expect(await resolveImageUrl("/alergenos/gluten.png")).toBe("/alergenos/gluten.png");
+        expect(h.invoke).not.toHaveBeenCalled();
+    });
 });

@@ -68,6 +68,8 @@ function isAbsoluteUrl(u: string): boolean {
 /**
  * Resuelve una `Ruta_Imagen` (relativa) a una URL utilizable para `<img src>`.
  * Si ya viene como URL absoluta, la devuelve tal cual. Cadena vacía → "".
+ * Una ruta que empieza por «/» es de la propia aplicación (`public/`, como los iconos de los
+ * alérgenos del seed) y también se devuelve tal cual, en la Main y en la Handy.
  */
 export async function resolveImageUrl(
   ruta: string | null | undefined,
@@ -75,7 +77,7 @@ export async function resolveImageUrl(
   const vigente = contexto;
   const r = String(ruta ?? "").trim();
   if (!r) return "";
-  if (isAbsoluteUrl(r)) return r;
+  if (isAbsoluteUrl(r) || r.startsWith("/")) return r;
 
   const cached = urlCache.get(r);
   if (cached) return cached;

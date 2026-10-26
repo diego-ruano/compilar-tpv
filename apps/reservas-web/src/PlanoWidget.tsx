@@ -30,10 +30,10 @@ const COLOR = {
 };
 
 /**
- * El plano del widget se encaja a las mesas, no al contorno del salón, y con más zoom que la sala de
- * la Main: con el salón entero y un tope de 1,15 en un hueco pequeño, las mesas salían diminutas.
+ * El plano del widget se encaja a las mesas, no al contorno del salón: con el salón entero, en un
+ * hueco pequeño las mesas salían diminutas. Deja un 10 % de aire alrededor.
  */
-const ENCAJE: OpcionesEncaje = { soloMesas: true, escalaMaxima: 2.5 };
+const ENCAJE = { soloMesas: true, escalaMaxima: 2.5, holgura: 0.9 } satisfies OpcionesEncaje;
 const MARGEN = 16;
 const ALTO_MIN = 280;
 const ALTO_MAX = 640;
@@ -45,7 +45,7 @@ const ALTO_MAX = 640;
  */
 export function altoDelPlano(salon: SalonPlano, ancho: number): number {
 	const { ancho: w, alto: h } = tamanoDelContenido(salon, ENCAJE.soloMesas);
-	const alto = 0.9 * Math.max(1, ancho - MARGEN * 2) * (h / w) + MARGEN * 2;
+	const alto = ENCAJE.holgura * Math.max(1, ancho - MARGEN * 2) * (h / w) + MARGEN * 2;
 	return Math.round(Math.min(Math.max(alto, ALTO_MIN), ALTO_MAX));
 }
 

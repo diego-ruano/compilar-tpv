@@ -26,12 +26,12 @@ const BOTON_AHORA_NO =
     '//h3[contains(normalize-space(.), "Este TPV todavía no puede cobrar")]' +
     '/ancestor::div[1]//button[normalize-space(.)="Ahora no"]';
 
-/** El panel de Configuración → Fiscal donde se declaran los datos del obligado. */
+/** El panel de Configuración → Negocio donde se declaran los datos del obligado. */
 const PANEL_OBLIGADO =
-    '//section[.//h2[normalize-space(text())="Datos fiscales del negocio"]]';
+    '//section[.//h2[normalize-space(text())="Datos del negocio"]]';
 
 /**
- * Abre Configuración y se planta en la sección Fiscal.
+ * Abre Configuración y se planta en la sección Negocio, la de los datos fiscales.
  *
  * ⚠️ **Primero mira si está el aviso de «este TPV todavía no puede cobrar»** (FIS-01), porque en un
  * equipo recién estrenado lo está: sale al entrar, es un `fixed inset-0` y tapa el menú entero. El
@@ -71,11 +71,11 @@ export async function irASeccionFiscal(): Promise<void> {
 
     await irA("/Configuracion");
 
-    // Anclado al `div` del título dentro del botón de la barra lateral: un `contains(., "Fiscal")`
-    // a secas también engancharía cualquier panel que hable de lo fiscal.
+    // Anclado al `div` del título dentro del botón de la barra lateral: un `contains(., "Negocio")`
+    // a secas también engancharía cualquier panel que hable del negocio.
     await pulsarXPath(
-        '//nav//button[.//div[normalize-space(text())="Fiscal"]]',
-        'sección "Fiscal" de Configuración',
+        '//nav//button[.//div[normalize-space(text())="Negocio"]]',
+        'sección "Negocio" de Configuración',
     );
 
     await $(PANEL_OBLIGADO).waitForDisplayed({ timeout: 30_000 });
@@ -96,8 +96,8 @@ export async function declararDatosFiscales(razon_social: string, nif: string): 
     await escribir(`${PANEL_OBLIGADO}//label[.//span[normalize-space(text())="NIF / CIF"]]//input`, nif);
 
     await pulsarXPath(
-        `${PANEL_OBLIGADO}//button[normalize-space(.)="Guardar"]`,
-        'botón "Guardar" de los datos fiscales',
+        `${PANEL_OBLIGADO}//button[normalize-space(.)="Guardar cambios"]`,
+        'botón "Guardar cambios" de los datos del negocio',
     );
 
     // La señal de que ha entrado no es el botón: es que la app deje de decir que faltan. Se
@@ -141,7 +141,7 @@ export async function descartarAvisoDatosFiscales(): Promise<void> {
 /** Comprueba que el aviso rojo de «faltan los datos fiscales» está o no está en pantalla. */
 export async function avisoDeDatosFiscalesVisible(): Promise<boolean> {
     const aviso = $(
-        `${PANEL_OBLIGADO}//*[contains(normalize-space(.), ${literalXPath("Faltan los datos fiscales")})]`,
+        `${PANEL_OBLIGADO}//*[contains(normalize-space(.), ${literalXPath("Faltan la razón social o el NIF")})]`,
     );
     return await aviso.isExisting();
 }
