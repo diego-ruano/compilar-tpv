@@ -326,7 +326,7 @@ export default function TicketPanel({
                                   }
                                 }}
                                 className={cn(
-                                  "flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition",
+                                  "flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left transition",
                                   checked
                                     ? "border-accent bg-accent-soft"
                                     : "border-border bg-surface hover:bg-surface-2",

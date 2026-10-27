@@ -33,8 +33,10 @@ export default function VentaRapida() {
     setOpenVerTickets, comandasBarra, abrirTicketDesdeModal, eliminarTicketDesdeModal, cobrarTicketDesdeModal,
   } = useVentaRapida();
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-bg text-fg">
-      <div className="flex shrink-0 flex-col gap-3 border-b border-border bg-surface py-3 pl-16 pr-3 sm:flex-row sm:items-center sm:justify-between sm:pl-16 sm:pr-4 lg:px-4">
+    // En escritorio el ticket ocupa toda la altura de la derecha y la cabecera se queda sobre el
+    // catálogo: la rejilla interior pasa a `contents` para que sus dos paneles se coloquen aquí.
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-bg text-fg lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(360px,38vw)] lg:grid-rows-[auto_auto_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-border bg-surface py-3 pl-16 pr-3 sm:flex-row sm:items-center sm:justify-between sm:pl-16 sm:pr-4 lg:col-start-1 lg:row-start-1 lg:px-4">
         <div className="min-w-0">
           <h1 className="truncate text-lg font-extrabold text-fg sm:text-xl">Venta rápida</h1>
         </div>
@@ -63,9 +65,9 @@ export default function VentaRapida() {
         </div>
       </div>
 
-      {recuperacion.main && (recuperacion.pendientes.length > 0 || recuperacion.error) ? <button onClick={() => setOpenPendientes(true)} className="px-4 py-2 text-left text-sm text-danger">Cobros pendientes ({recuperacion.pendientes.length}){recuperacion.error ? ` · ${recuperacion.error}` : ""}</button> : null}
-      <div className="grid min-h-0 flex-1 touch-pan-y auto-rows-max grid-cols-1 content-start gap-3 overflow-y-scroll overscroll-contain p-3 [scrollbar-gutter:stable] lg:auto-rows-auto lg:content-stretch lg:grid-cols-[minmax(0,1fr)_minmax(360px,38vw)] lg:overflow-hidden xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="flex h-[clamp(20rem,58dvh,44rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface md:h-[clamp(24rem,62dvh,44rem)] lg:h-auto">
+      {recuperacion.main && (recuperacion.pendientes.length > 0 || recuperacion.error) ? <button onClick={() => setOpenPendientes(true)} className="px-4 py-2 text-left text-sm text-danger lg:col-start-1 lg:row-start-2">Cobros pendientes ({recuperacion.pendientes.length}){recuperacion.error ? ` · ${recuperacion.error}` : ""}</button> : null}
+      <div className="grid min-h-0 flex-1 touch-pan-y auto-rows-max grid-cols-1 content-start gap-3 overflow-y-scroll overscroll-contain p-3 [scrollbar-gutter:stable] lg:contents">
+        <div className="flex h-[clamp(20rem,58dvh,44rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface md:h-[clamp(24rem,62dvh,44rem)] lg:col-start-1 lg:row-start-3 lg:m-3 lg:mr-0 lg:h-auto">
           <div className="border-b border-border bg-surface p-3">
             <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
               <div className="min-w-0">
@@ -131,7 +133,7 @@ export default function VentaRapida() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:m-3">
           <TicketPanel
             ocupado={cobrando || escriturasPendientes > 0}
             ultimoCobro={ultimoCobro}
