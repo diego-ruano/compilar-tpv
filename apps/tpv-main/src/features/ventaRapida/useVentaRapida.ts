@@ -1,6 +1,5 @@
 import { useCatalogoServicio } from "../../shared/lib/useCatalogoServicio";
 import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
-import { usePermisos } from "../../shared/lib/usePermisos";
 import { useCobrosPendientes } from "./useCobrosPendientes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveImageUrl } from "../../shared/lib/imageUrl";
@@ -135,8 +134,6 @@ export function useVentaRapida() {
   // lo único que se imprime es una precuenta.
   const [ultimoCobro, setUltimoCobro] = useState<CobroImprimible | null>(null);
   const [cashCount, setCashCount] = useState<Record<string, number>>({});
-  const { puede } = usePermisos();
-  const [openAddProduct, setOpenAddProduct] = useState(false);
 
   const [openProductDetail, setOpenProductDetail] = useState(false);
   const [productDetailId, setProductDetailId] = useState<string | null>(null);
@@ -921,7 +918,7 @@ export function useVentaRapida() {
     ],
   );
 
-  const onOpenAddProductCb = useCallback(() => setOpenAddProduct(true), []);
+  const onVolverCb = useCallback(() => setCategoriaSeleccionada(null), [setCategoriaSeleccionada]);
 
   const onSelectCategoriaCb = useCallback((c: CategoriaDisplay) => {
     setCategoriaSeleccionada(c);
@@ -944,14 +941,14 @@ export function useVentaRapida() {
 
   return {
     nuevoTicket, abrirVerTickets, loadingComandas, escriturasPendientes, cobrando, recuperacion,
-    setOpenPendientes, leftTitle, leftSubtitle, categoriaSeleccionada, paso, setCategoriaSeleccionada,
+    setOpenPendientes, leftTitle, leftSubtitle, paso,
     query, setQuery, cashCount, totalACobrar, totalEfectivo, diferencia,
     addCash, removeCash, resetCash, cobrar, setPaso, setCashCount,
     variant, categorias, productos, busqueda, loadingBusqueda, loadingProductos,
     getQtyZero, getQty, onSelectCategoriaCb, onAddProductoCb, onRemoveProductoCb, onOpenProductDetailCb,
-    puede, onOpenAddProductCb, ultimoCobro, ticketForPanel, totalPendiente, totalSeleccionado,
+    onVolverCb, ultimoCobro, ticketForPanel, totalPendiente, totalSeleccionado,
     haySeleccion, seleccionaTodoPendiente, toggleSeleccion, eliminarLineaTicket, limpiarSeleccion, setQuiereFactura,
-    quiereFactura, onGuardarNota, openAddProduct, setOpenAddProduct, onProductoGuardado, openProductDetail,
+    quiereFactura, onGuardarNota, openProductDetail,
     cerrarDetalleProducto, productDetailId, pideFactura, cancelarFactura, confirmarFactura, limite_simplif,
     errorFactura, openPendientes, setErrorFactura, setPideFactura, resolverPendiente, openVerTickets,
     setOpenVerTickets, comandasBarra, abrirTicketDesdeModal, eliminarTicketDesdeModal, cobrarTicketDesdeModal,

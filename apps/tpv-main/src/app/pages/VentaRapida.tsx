@@ -1,7 +1,6 @@
 import { commands } from "@tpv/client";
-import { ArrowLeft, Plus, ReceiptText } from "lucide-react";
+import { Plus, ReceiptText } from "lucide-react";
 import ProductDetailModal from "../../features/inventario/ProductDetailModal";
-import AddProductModal from "../../features/ventaRapida/ui/AddProductModal";
 import CashPanel from "../../features/ventaRapida/ui/CashPanel";
 import CatalogGrid from "../../features/ventaRapida/ui/CatalogGrid";
 import CobrosPendientesModal from "../../features/ventaRapida/ui/CobrosPendientesModal";
@@ -20,14 +19,14 @@ import { SearchInput } from "../../shared/ui";
 export default function VentaRapida() {
   const {
     nuevoTicket, abrirVerTickets, loadingComandas, escriturasPendientes, cobrando, recuperacion,
-    setOpenPendientes, leftTitle, leftSubtitle, categoriaSeleccionada, paso, setCategoriaSeleccionada,
+    setOpenPendientes, leftTitle, leftSubtitle, paso,
     query, setQuery, cashCount, totalACobrar, totalEfectivo, diferencia,
     addCash, removeCash, resetCash, cobrar, setPaso, setCashCount,
     variant, categorias, productos, busqueda, loadingBusqueda, loadingProductos,
     getQtyZero, getQty, onSelectCategoriaCb, onAddProductoCb, onRemoveProductoCb, onOpenProductDetailCb,
-    puede, onOpenAddProductCb, ultimoCobro, ticketForPanel, totalPendiente, totalSeleccionado,
+    onVolverCb, ultimoCobro, ticketForPanel, totalPendiente, totalSeleccionado,
     haySeleccion, seleccionaTodoPendiente, toggleSeleccion, eliminarLineaTicket, limpiarSeleccion, setQuiereFactura,
-    quiereFactura, onGuardarNota, openAddProduct, setOpenAddProduct, onProductoGuardado, openProductDetail,
+    quiereFactura, onGuardarNota, openProductDetail,
     cerrarDetalleProducto, productDetailId, pideFactura, cancelarFactura, confirmarFactura, limite_simplif,
     errorFactura, openPendientes, setErrorFactura, setPideFactura, resolverPendiente, openVerTickets,
     setOpenVerTickets, comandasBarra, abrirTicketDesdeModal, eliminarTicketDesdeModal, cobrarTicketDesdeModal,
@@ -76,17 +75,6 @@ export default function VentaRapida() {
               </div>
 
               <div className="flex min-w-0 flex-col gap-2 xs:flex-row xs:items-center">
-                {categoriaSeleccionada && paso !== "efectivo" && (
-                  <button
-                    type="button"
-                    onClick={() => setCategoriaSeleccionada(null)}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
-                  >
-                    <ArrowLeft className="size-4" aria-hidden />
-                    Categorías
-                  </button>
-                )}
-
                 <SearchInput
                   value={query}
                   onValueChange={setQuery}
@@ -127,7 +115,7 @@ export default function VentaRapida() {
                 onAddProducto={onAddProductoCb}
                 onRemoveProducto={onRemoveProductoCb}
                 onOpenProductDetail={onOpenProductDetailCb}
-                onOpenAddProduct={puede("catalogo.editar") && puede("catalogo.precios") ? onOpenAddProductCb : undefined}
+                onVolver={onVolverCb}
               />
             )}
           </div>
@@ -169,17 +157,6 @@ export default function VentaRapida() {
           />
         </div>
       </div>
-
-      <AddProductModal
-        open={openAddProduct}
-        onClose={() => setOpenAddProduct(false)}
-        categoriaPreseleccionadaId={
-          categoriaSeleccionada ? categoriaSeleccionada.ID_Categoria : null
-        }
-        onSaved={conAviso(async () => {
-          await onProductoGuardado();
-        })}
-      />
 
       <ProductDetailModal
         open={openProductDetail}

@@ -1,7 +1,7 @@
 // src/features/ventaRapida/ui/CatalogGrid.tsx
 import React from "react";
 import type { CategoriaDisplay, ProductoDisplay } from "../types";
-import AddProductoCard from "./AddProductoCard";
+import VolverCard from "./VolverCard";
 import ProductCard from "./ProductCard";
 import CategoryCard from "./CategoryCard";
 
@@ -15,7 +15,8 @@ type Props = {
   productos?: ProductoDisplay[] | null;
   busqueda?: ProductoDisplay[] | null;
 
-  onOpenAddProduct?: () => void;
+  /** Dentro de una categoría, vuelve a la lista de categorías. */
+  onVolver: () => void;
   onSelectCategoria: (c: CategoriaDisplay) => void;
 
   onAddProducto: (p: ProductoDisplay) => void;
@@ -94,7 +95,7 @@ function CatalogGrid({
   productos,
   busqueda,
 
-  onOpenAddProduct,
+  onVolver,
   onSelectCategoria,
   onAddProducto,
   onRemoveProducto,
@@ -117,8 +118,6 @@ function CatalogGrid({
     return (
       <Wrapper>
         <div className={gridClass}>
-          {onOpenAddProduct && <AddProductoCard onClick={onOpenAddProduct} />}
-
           {search.map((p) => (
             <ProductCard
               key={p.ID_Producto}
@@ -138,8 +137,6 @@ function CatalogGrid({
     return (
       <Wrapper>
         <div className={gridCats}>
-          {onOpenAddProduct && <AddProductoCard onClick={onOpenAddProduct} />}
-
           {cats.map((c) => (
             <CategoryCard key={c.ID_Categoria} c={c} onSelect={onSelectCategoria} />
           ))}
@@ -152,7 +149,7 @@ function CatalogGrid({
     return (
       <Wrapper>
         <div className={gridClass}>
-          {onOpenAddProduct && <AddProductoCard onClick={onOpenAddProduct} />}
+          <VolverCard onClick={onVolver} />
 
           <div className="flex items-center rounded-2xl border border-border bg-surface p-4 text-sm text-fg-muted">
             No hay productos en esta categoría.
@@ -165,7 +162,7 @@ function CatalogGrid({
   return (
     <Wrapper>
       <div className={gridClass}>
-        {onOpenAddProduct && <AddProductoCard onClick={onOpenAddProduct} />}
+        <VolverCard onClick={onVolver} />
 
         {prods.map((p) => (
           <ProductCard
@@ -186,7 +183,7 @@ export default React.memo(CatalogGrid, (prev, next) => {
   if (prev.variant !== next.variant) return false;
   if (Boolean(prev.loading) !== Boolean(next.loading)) return false;
 
-  if (prev.onOpenAddProduct !== next.onOpenAddProduct) return false;
+  if (prev.onVolver !== next.onVolver) return false;
   if (prev.onSelectCategoria !== next.onSelectCategoria) return false;
   if (prev.onAddProducto !== next.onAddProducto) return false;
   if (prev.onRemoveProducto !== next.onRemoveProducto) return false;
