@@ -2,12 +2,10 @@
 export type SectionKey =
 	| "NEGOCIO"
 	| "PERMISOS"
-	| "CONTACTO"
 	/** RI-61: duración por defecto de una reserva y qué hacer cuando dos se pisan. */
 	| "RESERVAS"
 	| "TICKET"
 	| "LICENCIA"
-	| "APARIENCIA"
 	| "CONECTIVIDAD"
 	| "VINCULAR_HANDY"
 	| "DISPOSITIVO"
@@ -17,7 +15,6 @@ export type NavItem = {
 	key: SectionKey;
 	title: string;
 	desc: string;
-	keywords: string[];
 };
 
 export type BusinessDraft = {

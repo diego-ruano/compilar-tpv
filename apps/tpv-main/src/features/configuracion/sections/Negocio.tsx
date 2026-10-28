@@ -1,9 +1,13 @@
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 // src/features/configuracion/sections/Negocio.tsx
 //
-// Configuración → Negocio: el logo, los datos que salen en el ticket y quién factura (FISCAL-01).
-// Sin NIF ni razón social no se puede emitir la factura, y sin factura no se puede cobrar. Esta rama
-// no remite a la AEAT (docs/arquitectura/verifactu.md).
+// Configuración → Negocio: los datos que salen en el ticket, quién factura (FISCAL-01), el correo de
+// contacto y el logo. Sin NIF ni razón social no se puede emitir la factura, y sin factura no se
+// puede cobrar. Esta rama no remite a la AEAT (docs/arquitectura/verifactu.md).
+//
+// El correo de contacto se guarda en otra tabla (`Contact_Settings`), pero con el mismo botón. El de
+// RECUPERACIÓN es otro, a propósito: vive en la base central y tiene su propio panel, que lo cambia
+// verificando el buzón nuevo (LOGIN-08).
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { commands } from "@tpv/client";
 import type { EstadoFiscal } from "@tpv/contracts";
@@ -21,13 +25,18 @@ import {
 import { useToast } from "../../../shared/toast";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { useEstadoFiscal } from "../../../shared/stores/useEstadoFiscal";
+import { useMode } from "../../../shared/stores/useMode";
 import { nifValido } from "../../../shared/ticket/nif";
+import { CorreoRecuperacion } from "./CorreoRecuperacion";
 
 export function Negocio({
     darkMode,
     inputTone,
     draft,
     setDraft,
+    correo,
+    setCorreo,
+    correoCargando,
     dirty,
     saving,
     onSave,
@@ -37,6 +46,10 @@ export function Negocio({
     inputTone: string;
     draft: BusinessDraft;
     setDraft: React.Dispatch<React.SetStateAction<BusinessDraft>>;
+    correo: string;
+    setCorreo: (v: string) => void;
+    correoCargando: boolean;
+    /** Cambios sin guardar en el borrador del negocio o en el correo. */
     dirty: boolean;
     saving: boolean;
     onSave: () => Promise<void>;
@@ -44,6 +57,7 @@ export function Negocio({
 }) {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const toast = useToast();
+    const esMain = useMode((s) => s.mode === "tpv");
     const [uploadingLogo, setUploadingLogo] = useState(false);
 
     // Lo GUARDADO: si faltan los datos fiscales, no se puede cobrar.
@@ -112,6 +126,104 @@ export function Negocio({
 
     return (
         <div className="flex flex-col gap-4">
+            <Panel
+                title="Datos del negocio"
+                subtitle="Salen en el ticket. Sin la razón social y el NIF no se puede cobrar."
+            >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Field label="Nombre" hint="El rótulo del bar">
+                        <TextInput
+                            value={draft.business_name}
+                            onChange={(e) =>
+                                setDraft((d) => ({
+                                    ...d,
+                                    business_name: e.target.value,
+                                }))
+                            }
+                            placeholder="Ej: Bar La Plaza"
+                            className={inputTone}
+                        />
+                    </Field>
+
+                    <Field label="Razón social" hint="Quien factura: «Francisco García SL»">
+                        <TextInput
+                            value={draft.razon_social}
+                            onChange={(e) =>
+                                setDraft((d) => ({ ...d, razon_social: e.target.value }))
+                            }
+                            placeholder="Nombre o razón social del obligado"
+                            className={inputTone}
+                        />
+                    </Field>
+
+                    <Field label="NIF / CIF" hint="El de quien factura">
+                        <TextInput
+                            value={draft.cif}
+                            onChange={(e) =>
+                                setDraft((d) => ({ ...d, cif: e.target.value.toUpperCase() }))
+                            }
+                            placeholder="B12345674"
+                            className={cn(inputTone, nifMal && "ring-1 ring-danger")}
+                        />
+                        {nifMal ? (
+                            <span className="mt-1 block text-xs text-danger">
+                                Ese NIF no es válido: revisa la letra o el dígito de control.
+                            </span>
+                        ) : null}
+                    </Field>
+
+                    <Field label="Teléfono" hint="Opcional">
+                        <TextInput
+                            value={draft.telefono}
+                            onChange={(e) =>
+                                setDraft((d) => ({
+                                    ...d,
+                                    telefono: e.target.value,
+                                }))
+                            }
+                            placeholder="+34 600 000 000"
+                            className={inputTone}
+                        />
+                    </Field>
+
+                    <Field label="Dirección" hint="Opcional">
+                        <TextInput
+                            value={draft.direccion}
+                            onChange={(e) =>
+                                setDraft((d) => ({
+                                    ...d,
+                                    direccion: e.target.value,
+                                }))
+                            }
+                            placeholder="C/ Ejemplo 12, 46000 Valencia"
+                            className={inputTone}
+                        />
+                    </Field>
+
+                    <Field label="Correo de contacto" hint="Para los pedidos a proveedores; no sale en el ticket">
+                        <TextInput
+                            type="email"
+                            maxLength={254}
+                            value={correo}
+                            onChange={(e) => setCorreo(e.target.value)}
+                            placeholder={correoCargando ? "Cargando…" : "bar@ejemplo.com"}
+                            disabled={correoCargando}
+                            className={inputTone}
+                        />
+                    </Field>
+                </div>
+
+                {estado && !estado.datos_fiscales_completos ? (
+                    <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+                        {estado.nif && estado.razon_social
+                            ? "El NIF no es válido: revisa que esté bien escrito."
+                            : "Faltan la razón social o el NIF."}{" "}
+                        <strong>Mientras tanto, no se puede cobrar</strong>: cada cobro emite una
+                        factura, y una factura necesita saber quién la emite.
+                    </div>
+                ) : null}
+            </Panel>
+
             <Panel
                 title="Logo"
                 subtitle="Se mostrará en el ticket (si lo tienes activado)."
@@ -199,108 +311,25 @@ export function Negocio({
                 </div>
             </Panel>
 
-            <Panel
-                title="Datos del negocio"
-                subtitle="Salen en el ticket. Sin la razón social y el NIF no se puede cobrar."
-            >
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Field label="Nombre" hint="El rótulo del bar">
-                        <TextInput
-                            value={draft.business_name}
-                            onChange={(e) =>
-                                setDraft((d) => ({
-                                    ...d,
-                                    business_name: e.target.value,
-                                }))
-                            }
-                            placeholder="Ej: Bar La Plaza"
-                            className={inputTone}
-                        />
-                    </Field>
+            {/* Un solo «Guardar» para toda la sección, logo y correo incluidos. */}
+            <div className="flex items-center justify-end gap-2">
+                <GhostButton
+                    onClick={onReset}
+                    disabled={!dirty || saving}
+                >
+                    Descartar
+                </GhostButton>
+                <PrimaryButton
+                    onClick={conAviso(guardar)}
+                    disabled={!dirty || saving || nifMal}
+                >
+                    {saving ? "Guardando…" : "Guardar cambios"}
+                </PrimaryButton>
+            </div>
 
-                    <Field label="Razón social" hint="Quien factura: «Francisco García SL»">
-                        <TextInput
-                            value={draft.razon_social}
-                            onChange={(e) =>
-                                setDraft((d) => ({ ...d, razon_social: e.target.value }))
-                            }
-                            placeholder="Nombre o razón social del obligado"
-                            className={inputTone}
-                        />
-                    </Field>
-
-                    <Field label="NIF / CIF" hint="El de quien factura">
-                        <TextInput
-                            value={draft.cif}
-                            onChange={(e) =>
-                                setDraft((d) => ({ ...d, cif: e.target.value.toUpperCase() }))
-                            }
-                            placeholder="B12345674"
-                            className={cn(inputTone, nifMal && "ring-1 ring-danger")}
-                        />
-                        {nifMal ? (
-                            <span className="mt-1 block text-xs text-danger">
-                                Ese NIF no es válido: revisa la letra o el dígito de control.
-                            </span>
-                        ) : null}
-                    </Field>
-
-                    <Field label="Teléfono" hint="Opcional">
-                        <TextInput
-                            value={draft.telefono}
-                            onChange={(e) =>
-                                setDraft((d) => ({
-                                    ...d,
-                                    telefono: e.target.value,
-                                }))
-                            }
-                            placeholder="+34 600 000 000"
-                            className={inputTone}
-                        />
-                    </Field>
-
-                    <Field label="Dirección" hint="Opcional">
-                        <TextInput
-                            value={draft.direccion}
-                            onChange={(e) =>
-                                setDraft((d) => ({
-                                    ...d,
-                                    direccion: e.target.value,
-                                }))
-                            }
-                            placeholder="C/ Ejemplo 12, 46000 Valencia"
-                            className={inputTone}
-                        />
-                    </Field>
-                </div>
-
-                {estado && !estado.datos_fiscales_completos ? (
-                    <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
-                        {estado.nif && estado.razon_social
-                            ? "El NIF no es válido: revisa que esté bien escrito."
-                            : "Faltan la razón social o el NIF."}{" "}
-                        <strong>Mientras tanto, no se puede cobrar</strong>: cada cobro emite una
-                        factura, y una factura necesita saber quién la emite.
-                    </div>
-                ) : null}
-
-                {/* Un solo «Guardar» para toda la sección, logo incluido: es la misma fila
-                    (`Business_Settings`). */}
-                <div className="mt-4 flex items-center justify-end gap-2">
-                    <GhostButton
-                        onClick={onReset}
-                        disabled={!dirty || saving}
-                    >
-                        Descartar
-                    </GhostButton>
-                    <PrimaryButton
-                        onClick={conAviso(guardar)}
-                        disabled={!dirty || saving || nifMal}
-                    >
-                        {saving ? "Guardando…" : "Guardar cambios"}
-                    </PrimaryButton>
-                </div>
-            </Panel>
+            {/* Debajo de «Guardar cambios» porque no va con él: se cambia verificando un código. Sólo
+                en la Main, que es donde lo dejan cambiar sus comandos. */}
+            {esMain ? <CorreoRecuperacion /> : null}
         </div>
     );
 }

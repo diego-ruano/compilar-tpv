@@ -30,7 +30,7 @@ antigua crearía dos historiales que no hay forma de juntar.
 | Reconciliar | `tpv-application/src/use_cases/replicacion.rs` + transporte nativo | Catch-up → outbox → catch-up, hasta converger |
 | Desbloquear | `commands/recovery.rs::completar` (interno) | Outbox a 0 y checkpoint ≥ el final del log de la nube |
 | Traslado de licencia | `commands/licensing.rs::license_activate` + `recovery.rs::marcar_traslado` | La base de antes del traslado no se usa |
-| Pantallas | `src/app/pages/RecuperarDatos.tsx` (restaurar) · `features/configuracion/sections/Conectividad.tsx` (ver y sacar copias) | |
+| Pantallas | `src/app/pages/RecuperarDatos.tsx` (restaurar) · `features/configuracion/sections/CopiasSeguridad.tsx` (ver y sacar copias, en Configuración → Licencia) | |
 
 ---
 
@@ -120,7 +120,7 @@ esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_
   `recovery::asegurar_reemplazo_seguro`), con dos excepciones: una base ya en reconciliación y una base
   sin usuarios, porque ninguna de las dos está vendiendo. Una operación apartada sigue contando.
 - **Las copias viven en el mismo disco que protegen**: cubren un borrado o una corrupción, no una
-  máquina muerta. Para eso, «Guardar fuera…» en Configuración → Conectividad (ahí no se restaura).
+  máquina muerta. Para eso, «Guardar fuera…» en Configuración → Licencia (ahí no se restaura).
 
 ## Base ilegible
 

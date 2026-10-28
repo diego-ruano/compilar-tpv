@@ -16,7 +16,7 @@ import { Button, Input } from "../../../shared/ui";
 import { conAviso } from "../../../shared/lib/conAviso";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
-import { CorreoRecuperacion } from "./CorreoRecuperacion";
+import { CopiasSeguridad } from "./CopiasSeguridad";
 import { diasNaturalesHasta } from "../../../shared/lib/diasNaturales";
 import { useMode } from "../../../shared/stores/useMode";
 
@@ -135,8 +135,18 @@ function AnadirClave({ onSumada }: { onSumada: () => void }) {
 	);
 }
 
+/** La licencia y, en la Main, sus copias de seguridad: lo que el dueño mira para quedarse tranquilo. */
 export function Licencia({ darkMode }: { darkMode: boolean }) {
-	void darkMode; // el estilo va por tokens de tema; el prop se mantiene por firma común
+	const esMain = useMode((s) => s.mode === "tpv");
+	return (
+		<div className="flex flex-col gap-4">
+			<EstadoLicencia />
+			{esMain && <CopiasSeguridad darkMode={darkMode} />}
+		</div>
+	);
+}
+
+function EstadoLicencia() {
 	const [state, setState] = useState<LicenseLocalState | null | "loading">("loading");
 	const esHandy = useMode((s) => s.mode === "handy");
 
@@ -196,7 +206,6 @@ export function Licencia({ darkMode }: { darkMode: boolean }) {
 		<div className="flex flex-col gap-4">
 			<Panel
 				title="Licencia"
-				subtitle="Estado de la licencia de este TPV principal"
 				right={
 					<span
 						className={cn(
@@ -232,8 +241,6 @@ export function Licencia({ darkMode }: { darkMode: boolean }) {
 			</Panel>
 
 			<AnadirClave onSumada={leerEstado} />
-
-			<CorreoRecuperacion />
 		</div>
 	);
 }

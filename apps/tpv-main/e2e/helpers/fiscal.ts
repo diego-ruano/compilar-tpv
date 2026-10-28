@@ -95,8 +95,9 @@ export async function declararDatosFiscales(razon_social: string, nif: string): 
     await escribir(`${PANEL_OBLIGADO}//label[.//span[normalize-space(text())="Razón social"]]//input`, razon_social);
     await escribir(`${PANEL_OBLIGADO}//label[.//span[normalize-space(text())="NIF / CIF"]]//input`, nif);
 
+    // El botón va debajo de los paneles de la sección (datos y logo), no dentro de uno.
     await pulsarXPath(
-        `${PANEL_OBLIGADO}//button[normalize-space(.)="Guardar cambios"]`,
+        `${PANEL_OBLIGADO}/following-sibling::div//button[normalize-space(.)="Guardar cambios"]`,
         'botón "Guardar cambios" de los datos del negocio',
     );
 

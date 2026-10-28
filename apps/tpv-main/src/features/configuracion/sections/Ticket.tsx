@@ -4,7 +4,7 @@ import TicketPreviewModal from "../../../shared/ticket/PreviewModal";
 import { useToast } from "../../../shared/toast";
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
-import { TextArea, TextInput } from "../ui/Inputs";
+import { TextInput } from "../ui/Inputs";
 import { Checkbox } from "../ui/Toggles";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { PrinterPanel } from "./PrinterPanel";
@@ -293,28 +293,24 @@ export function Ticket({
                     y el total salen siempre: los exige la factura.
                 </div>
 
-                {/* ✅ NUEVO: el mensaje final se edita aquí */}
-                <div className="mt-4">
-                    <Field
-                        label="Mensaje final del ticket"
-                        hint="Se guarda en Business Settings"
-                    >
-                        <TextArea
-                            value={footerMessage}
-                            onChange={(e) =>
-                                onFooterMessageChange(e.target.value)
-                            }
-                            placeholder="Ej: Gracias por su visita"
-                            className={inputTone}
-                            disabled={!ticket.show_footer_message}
-                        />
-                    </Field>
-                    {!ticket.show_footer_message ? (
-                        <div className="mt-2 text-xs text-fg-muted">
-                            Activa “Mostrar mensaje final” para editarlo.
-                        </div>
-                    ) : null}
-                </div>
+                {/* El mensaje final sólo se edita si sale en el ticket. */}
+                {ticket.show_footer_message ? (
+                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Field
+                            label="Mensaje final del ticket"
+                            hint="Se guarda en Business Settings"
+                        >
+                            <TextInput
+                                value={footerMessage}
+                                onChange={(e) =>
+                                    onFooterMessageChange(e.target.value)
+                                }
+                                placeholder="Ej: Gracias por su visita"
+                                className={inputTone}
+                            />
+                        </Field>
+                    </div>
+                ) : null}
 
                 <div className="mt-4 flex items-center justify-end gap-2">
                     <GhostButton

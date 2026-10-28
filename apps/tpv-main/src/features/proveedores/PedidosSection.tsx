@@ -174,7 +174,7 @@ export default function PedidosSection({ proveedores }: Props) {
       // RI-60: aviso previo; el Worker también valida su copia del contacto comercial.
       const [negocio, contacto] = await Promise.all([configGetBusinessSettings(), configGetContactSettings()]);
       if (!negocio.business_name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contacto.contact_email.trim())) {
-        toast.error("Faltan datos del negocio", "Completa el nombre y un correo de contacto válido en Configuración antes de enviar pedidos.");
+        toast.error("Faltan datos del negocio", "Completa el nombre y un correo de contacto válido en Configuración → Negocio antes de enviar pedidos.");
         return;
       }
       {

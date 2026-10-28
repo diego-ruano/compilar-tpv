@@ -41,7 +41,7 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
     // compra, que ya está demostrado. Si se desmarca, el correo escrito se confirma con su código
     // (o se salta) antes de guardar el PIN, porque al guardarlo se cierra la ventana en la que se
     // puede confirmar sin sesión. Por eso sólo se ofrece sin sesión, en el primer arranque; con ella
-    // se cambia en Configuración → Licencia.
+    // se cambia en Configuración → Negocio.
     const elegirCorreoRecuperacion = !idUsuarioSesion;
     const [usarCorreoCompra, setUsarCorreoCompra] = useState(true);
     const [correoRecuperacion, setCorreoRecuperacion] = useState("");

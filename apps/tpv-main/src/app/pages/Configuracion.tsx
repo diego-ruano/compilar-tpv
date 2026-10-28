@@ -1,7 +1,7 @@
 import { commands, toAppError } from "@tpv/client";
 // src/pages/Configuracion.tsx
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { message as messageDialog } from "@tauri-apps/plugin-dialog";
 
@@ -21,21 +21,17 @@ import { useBusinessDraft } from "../../features/configuracion/hooks/useBusiness
 
 // UI
 import { Badge } from "../../features/configuracion/ui/Badge";
-import { TextInput } from "../../features/configuracion/ui/Inputs";
 
 // Sections
 import { Permisos } from "../../features/configuracion/sections/Permisos";
 import { Negocio } from "../../features/configuracion/sections/Negocio";
-import { Contacto } from "../../features/configuracion/sections/Contacto";
 import { Reservas } from "../../features/configuracion/sections/Reservas";
 import { Ticket } from "../../features/configuracion/sections/Ticket";
 import { Licencia } from "../../features/configuracion/sections/Licencia";
-import { Apariencia } from "../../features/configuracion/sections/Apariencia";
 import { Conectividad } from "../../features/configuracion/sections/Conectividad";
 import { Dispositivo } from "../../features/configuracion/sections/Dispositivo";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
 import { Actualizaciones } from "../../features/configuracion/sections/Actualizaciones";
-import { conAviso } from "../../shared/lib/conAviso";
 import { MSG_IVA } from "../../shared/lib/iva";
 import { nifValido } from "../../shared/ticket/nif";
 
@@ -50,21 +46,16 @@ export default function Configuracion() {
     const mode = useMode((s) => s.mode);
     const isMain = mode === "tpv";
 
-    // Datos de contacto — store + draft local
+    // El correo de contacto se edita en Negocio y se guarda con su mismo botón, aunque vive en otra
+    // tabla (`Contact_Settings`). El teléfono de contacto ya no se enseña: Negocio tiene el suyo.
     const contact = useContactSettings();
     const contactReady = useContactSettings((s) => s.ready);
     const contactInit = useContactSettings((s) => s.init);
 
     const [contact_email, setContactEmail] = useState("");
-    const [contact_phone, setContactPhone] = useState("");
-    const [savingContact, setSavingContact] = useState(false);
+    const contactDirty = contactReady && contact_email !== contact.contact_email;
 
-    // Conectado al tema global real: el switch de Apariencia cambia toda la app.
     const darkMode = useTheme((s) => s.theme === "dark");
-    const setDarkMode = useCallback(
-        (v: boolean) => useTheme.getState().setTheme(v ? "dark" : "light"),
-        [],
-    );
 
     // Sección de arranque. Se puede pedir una concreta al navegar
     // (`navigate("/Configuracion", { state: { seccion: "LICENCIA" } })`); lo usan las
@@ -87,18 +78,16 @@ export default function Configuracion() {
         if (!contactReady || contactSyncedRef.current) return;
         contactSyncedRef.current = true;
         setContactEmail(contact.contact_email);
-        setContactPhone(contact.contact_phone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [contactReady]);
 
     // Carga lazy al entrar en la sección (cubre modo Handy y TPV sin AppBoot)
     useEffect(() => {
-        if (section !== "CONTACTO") return;
+        if (section !== "NEGOCIO") return;
         if (contactReady) return;
         contactInit().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [section, contactReady]);
-    const [navQuery, setNavQuery] = useState("");
 
     const [animKey, setAnimKey] = useState(0);
     useEffect(() => setAnimKey((k) => k + 1), [section]);
@@ -107,65 +96,30 @@ export default function Configuracion() {
         {
             key: "NEGOCIO",
             title: "Negocio",
-            desc: "Identidad y datos fiscales",
-            keywords: [
-                "logo",
-                "nombre",
-                "direccion",
-                "teléfono",
-                "cif",
-                "nif",
-                "razón social",
-                "factura",
-                "fiscal",
-                "impuestos",
-            ],
-        },
-        {
-            key: "CONTACTO",
-            title: "Contacto",
-            desc: "Correo y teléfono de contacto",
-            keywords: ["email", "correo", "teléfono", "soporte"],
+            desc: "Identidad, datos fiscales y contacto",
         },
         {
             key: "RESERVAS",
             title: "Reservas",
             desc: "Duración, solapes y reservas desde la web",
-            keywords: ["reservas", "duración", "solape", "mesa ocupada", "doble reserva", "web", "online", "días cerrados", "festivos"],
         },
         {
             key: "TICKET",
             title: "Ticket",
             desc: "Opciones de impresión",
-            keywords: ["ticket", "impresión", "iva", "footer"],
         },
         {
             key: "LICENCIA",
-            title: "Licencia",
-            desc: "Plan, estado y pago",
-            keywords: ["licencia", "plan", "pago", "dispositivos", "correo de recuperación", "recuperar pin"],
-        },
-        {
-            key: "APARIENCIA",
-            title: "Apariencia",
-            desc: "Tema / modo oscuro",
-            keywords: ["tema", "oscuro", "apariencia"],
+            // Las copias de seguridad son de la Main: la Handy trabaja contra la nube.
+            title: isMain ? "Licencias y copias de seguridad" : "Licencia",
+            desc: isMain ? "Estado, renovación y copias diarias" : "Estado y renovación",
         },
         {
             key: "ACTUALIZACIONES",
             title: "Actualizaciones",
             desc: "Versión instalada y novedades",
-            keywords: [
-                "actualizacion",
-                "actualizaciones",
-                "update",
-                "versión",
-                "version",
-                "novedades",
-                "instalar",
-            ],
         },
-    ], []);
+    ], [isMain]);
 
     const navItems: NavItem[] = useMemo(() => {
         if (!isMain)
@@ -175,53 +129,23 @@ export default function Configuracion() {
                     key: "DISPOSITIVO",
                     title: "Dispositivo",
                     desc: "Desvincular este equipo",
-                    keywords: [
-                        "desvincular",
-                        "dispositivo",
-                        "handy",
-                        "salir",
-                        "reset",
-                    ],
                 },
             ];
         return [
             ...baseNavItems,
-                { key:"PERMISOS", title:"Permisos", desc:"Acciones permitidas por rol", keywords:["roles", "encargado", "permisos"] },
+            { key: "PERMISOS", title: "Permisos", desc: "Acciones permitidas por rol" },
             {
                 key: "CONECTIVIDAD",
                 title: "Conectividad",
                 desc: "Estado de la conexión con la nube y tareas de fondo",
-                keywords: [
-                    "modo",
-                    "conexión",
-                    "online",
-                    "offline",
-                    "nube",
-                    "internet",
-                    "copia",
-                    "backup",
-                    "sincronización",
-                ],
             },
             {
                 key: "VINCULAR_HANDY",
                 title: "Vincular Handy",
                 desc: "Emparejar otro dispositivo",
-                keywords: ["handy", "vincular", "emparejar", "qr", "pair"],
             },
         ];
     }, [isMain, baseNavItems]);
-
-    const filteredNav = useMemo(() => {
-        const q = navQuery.trim().toLowerCase();
-        if (!q) return navItems;
-        return navItems.filter((it) =>
-            [it.title, it.desc, ...it.keywords]
-                .join(" ")
-                .toLowerCase()
-                .includes(q),
-        );
-    }, [navQuery, navItems]);
 
     const PageTitle = useMemo(
         () => navItems.find((n) => n.key === section)?.title ?? "Configuración",
@@ -274,28 +198,35 @@ export default function Configuracion() {
         }
         try {
             setSavingBiz(true);
-            // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2).
-            const prevLogo = biz.logo_data_url;
-            (biz as any).setMany({
-                business_name: draft.business_name,
-                logo_data_url: draft.logo_data_url,
-                direccion: draft.direccion,
-                telefono: draft.telefono,
-                cif: draft.cif,
-                mensaje_footer: draft.mensaje_footer,
-                iva_percent: draft.iva_percent,
-                razon_social: draft.razon_social,
-            });
-            // Se espera a que esté escrito: «Guardado» sólo sale si se ha guardado, y Fiscal vuelve
-            // a preguntar si faltan los datos cuando ya están en la base.
-            await biz.guardarYa();
-            // Best-effort: si el logo anterior era una ruta relativa (canal R2) y cambió, borrarlo.
-            if (
-                prevLogo &&
-                prevLogo.startsWith("images/logo/") &&
-                prevLogo !== draft.logo_data_url
-            ) {
-                void commands.imagesDelete({ rel_path: prevLogo }).catch(() => {});
+            // El correo va primero porque lo valida el backend: si no vale, no se guarda nada.
+            if (contactDirty) {
+                contact.setMany({ contact_email });
+                await contact.guardarYa();
+            }
+            if (dirty) {
+                // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2).
+                const prevLogo = biz.logo_data_url;
+                (biz as any).setMany({
+                    business_name: draft.business_name,
+                    logo_data_url: draft.logo_data_url,
+                    direccion: draft.direccion,
+                    telefono: draft.telefono,
+                    cif: draft.cif,
+                    mensaje_footer: draft.mensaje_footer,
+                    iva_percent: draft.iva_percent,
+                    razon_social: draft.razon_social,
+                });
+                // Se espera a que esté escrito: «Guardado» sólo sale si se ha guardado, y Fiscal vuelve
+                // a preguntar si faltan los datos cuando ya están en la base.
+                await biz.guardarYa();
+                // Best-effort: si el logo anterior era una ruta relativa (canal R2) y cambió, borrarlo.
+                if (
+                    prevLogo &&
+                    prevLogo.startsWith("images/logo/") &&
+                    prevLogo !== draft.logo_data_url
+                ) {
+                    void commands.imagesDelete({ rel_path: prevLogo }).catch(() => {});
+                }
             }
             if (avisarGuardado) await messageDialog("Guardado");
         } catch (e) {
@@ -311,19 +242,10 @@ export default function Configuracion() {
 
     const canSaveBusiness = dirty && !savingBiz;
 
-    const onSaveContact = async () => {
-        try {
-            setSavingContact(true);
-            contact.setMany({ contact_email, contact_phone });
-            await contact.guardarYa();
-            await messageDialog("Guardado");
-        } catch (e) {
-            await messageDialog(`No se ha podido guardar: ${toAppError(e).message}`, {
-                kind: "error",
-            });
-        } finally {
-            setSavingContact(false);
-        }
+    const hayCambios = dirty || contactDirty;
+    const descartarNegocio = () => {
+        resetDraft();
+        setContactEmail(contact.contact_email);
     };
 
     // El código de emparejamiento (y su ciclo de vida) vive en `usePairCode`: esta página se
@@ -375,7 +297,7 @@ export default function Configuracion() {
                             {/* Sólo el aviso de cambios pendientes. Los distintivos permanentes
                                 ("Sincronizado", "Modo: TPV") no decían nada que el usuario no
                                 supiera ya y ocupaban la esquina que mira cuando busca un aviso. */}
-                            {dirty ? (
+                            {hayCambios ? (
                                 <div className="flex flex-wrap items-center gap-2">
                                     <Badge tone="warn">Cambios sin guardar</Badge>
                                 </div>
@@ -394,50 +316,15 @@ export default function Configuracion() {
                                     : "border-border bg-surface",
                             )}
                         >
-                            <div className="px-4 pt-4">
-                                <div
-                                    className={cn(
-                                        "text-xs font-semibold uppercase tracking-wider",
-                                        darkMode
-                                            ? "text-fg-muted"
-                                            : "text-fg-muted",
-                                    )}
-                                >
-                                    Buscar
-                                </div>
-                                <div className="mt-2">
-                                    <TextInput
-                                        value={navQuery}
-                                        onChange={(e) =>
-                                            setNavQuery(e.target.value)
-                                        }
-                                        placeholder="Ej: ticket, logo, pago…"
-                                        className={cn(
-                                            inputTone,
-                                            darkMode
-                                                ? "bg-surface-2"
-                                                : "bg-surface-2",
-                                        )}
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="px-4 pt-5">
-                                <div
-                                    className={cn(
-                                        "text-xs font-semibold uppercase tracking-wider",
-                                        darkMode
-                                            ? "text-fg-muted"
-                                            : "text-fg-muted",
-                                    )}
-                                >
+                            <div className="px-5 pt-5 pb-3">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-fg-muted">
                                     Secciones
                                 </div>
                             </div>
 
                             <div className="px-2 pb-4 overflow-auto min-h-0">
                                 <nav className="flex flex-col gap-1">
-                                    {filteredNav.map((it) => {
+                                    {navItems.map((it) => {
                                         const active = it.key === section;
                                         return (
                                             <button
@@ -480,19 +367,6 @@ export default function Configuracion() {
                                             </button>
                                         );
                                     })}
-
-                                    {filteredNav.length === 0 ? (
-                                        <div
-                                            className={cn(
-                                                "px-3 py-3 text-sm rounded-2xl border",
-                                                darkMode
-                                                    ? "border-border text-fg-muted"
-                                                    : "border-border text-fg-muted",
-                                            )}
-                                        >
-                                            No hay resultados para “{navQuery}”.
-                                        </div>
-                                    ) : null}
                                 </nav>
                             </div>
 
@@ -556,25 +430,9 @@ export default function Configuracion() {
                                     {PageTitle}
                                 </div>
 
-                                <div className="mt-3">
-                                    <TextInput
-                                        value={navQuery}
-                                        onChange={(e) =>
-                                            setNavQuery(e.target.value)
-                                        }
-                                        placeholder="Buscar sección…"
-                                        className={cn(
-                                            inputTone,
-                                            darkMode
-                                                ? "bg-surface-2"
-                                                : "bg-surface-2",
-                                        )}
-                                    />
-                                </div>
-
                                 <div className="mt-3 overflow-auto">
                                     <div className="flex gap-2">
-                                        {filteredNav.map((it) => {
+                                        {navItems.map((it) => {
                                             const active = it.key === section;
                                             return (
                                                 <button
@@ -675,35 +533,18 @@ export default function Configuracion() {
                                                 inputTone={inputTone}
                                                 draft={draft}
                                                 setDraft={setDraft}
-                                                dirty={dirty}
+                                                correo={contact_email}
+                                                setCorreo={setContactEmail}
+                                                correoCargando={!contactReady}
+                                                dirty={hayCambios}
                                                 saving={savingBiz}
                                                 onSave={onSaveNegocio}
-                                                onReset={resetDraft}
-                                            />
-                                        ) : null}
-
-                                        {section === "CONTACTO" ? (
-                                            <Contacto
-                                                inputTone={inputTone}
-                                                contact_email={contact_email}
-                                                setContactEmail={setContactEmail}
-                                                contact_phone={contact_phone}
-                                                setContactPhone={setContactPhone}
-                                                loading={!contactReady}
-                                                saving={savingContact}
-                                                onSave={conAviso(onSaveContact)}
+                                                onReset={descartarNegocio}
                                             />
                                         ) : null}
 
                                         {section === "RESERVAS" ? (
                                             <Reservas inputTone={inputTone} isMain={isMain} />
-                                        ) : null}
-
-                                        {section === "APARIENCIA" ? (
-                                            <Apariencia
-                                                darkMode={darkMode}
-                                                setDarkMode={setDarkMode}
-                                            />
                                         ) : null}
 
                                         {section === "CONECTIVIDAD" &&

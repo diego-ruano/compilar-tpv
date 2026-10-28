@@ -23,14 +23,13 @@ function isTodayLocal(dt: Date) {
   );
 }
 
+// Sale de lo pendiente y no de `Estado`: una comanda cobrada a la que se le añaden líneas
+// sigue en «Pagada» aunque tenga importe por cobrar.
 function estadoTicket(c: ComandaBarraRow) {
-  if (c.Total_Pendiente <= 0) return "COBRADO";
-  if (c.Pendientes_Cocina > 0) return "PEDIDO";
-
-  return "PREPARADO";
+  return c.Total_Pendiente <= 0 ? "COBRADO" : "SIN COBRAR";
 }
 
-type Filtro = "RECIENTES" | "COBRADOS" | "PREPARADOS" | "PEDIDOS";
+type Filtro = "RECIENTES" | "SIN_COBRAR" | "COBRADOS";
 
 export default function VerTicketsModal({
   open,
@@ -101,8 +100,6 @@ export default function VerTicketsModal({
         totalPendiente,
         total,
         est,
-        pendientesCocina: c.Pendientes_Cocina,
-        pendientesPago: c.Pendientes_Pago,
       };
     });
   }, [comandas]);
@@ -211,8 +208,7 @@ export default function VerTicketsModal({
 
     out = out.filter((r) => {
       if (filtro === "COBRADOS") return r.est === "COBRADO";
-      if (filtro === "PREPARADOS") return r.est === "PREPARADO";
-      if (filtro === "PEDIDOS") return r.est === "PEDIDO";
+      if (filtro === "SIN_COBRAR") return r.est === "SIN COBRAR";
       return true;
     });
 
@@ -226,15 +222,11 @@ export default function VerTicketsModal({
         const baseText = [
           String(r.when ?? ""),
           String(r.c.Fecha_Hora_Apertura ?? ""),
-          String(r.c.ID_Comanda ?? ""),
           String(r.est ?? ""),
-          String(r.c.Estado ?? ""),
           String(r.totalPendiente ?? ""),
           String(r.total ?? ""),
           eur(r.totalPendiente),
           eur(r.total),
-          `cocina ${r.pendientesCocina}`,
-          `pago ${r.pendientesPago}`,
           idx?.Productos ?? "",
           idx ? `lineas ${idx.NumLineas}` : "",
           idx ? `unidades ${idx.Unidades}` : "",
@@ -269,7 +261,8 @@ export default function VerTicketsModal({
         aria-label="Cerrar"
       />
 
-      <div className="absolute left-1/2 top-1/2 max-h-[calc(100dvh-1.5rem)] w-[980px] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
+      {/* El ancho lo fija la medida común de las modales (Global.css); ésta la amplía. */}
+      <div className="absolute left-1/2 top-1/2 max-h-[calc(100dvh-1.5rem)] [--modal-width:68rem] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b border-border p-3 sm:items-center sm:p-4">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-fg sm:text-lg">Tickets (Barra) · Hoy</h3>
@@ -299,17 +292,10 @@ export default function VerTicketsModal({
               </button>
               <button
                 type="button"
-                className={pill(filtro === "PEDIDOS")}
-                onClick={() => setFiltro("PEDIDOS")}
+                className={pill(filtro === "SIN_COBRAR")}
+                onClick={() => setFiltro("SIN_COBRAR")}
               >
-                Pedidos
-              </button>
-              <button
-                type="button"
-                className={pill(filtro === "PREPARADOS")}
-                onClick={() => setFiltro("PREPARADOS")}
-              >
-                Preparados
+                Sin cobrar
               </button>
               <button
                 type="button"
@@ -326,11 +312,12 @@ export default function VerTicketsModal({
                   className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle"
                   aria-hidden
                 />
+                {/* `pl-9!`: Global.css fija el relleno de los inputs de las modales y taparía la lupa. */}
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Buscar por hora, importe, productos, etc…"
-                  className="w-full rounded-xl border border-border bg-surface-2 py-2.5 pl-9 pr-4 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-xl border border-border bg-surface-2 py-2.5 pl-9! pr-4 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
               {showIndexHint ? (
@@ -356,18 +343,11 @@ export default function VerTicketsModal({
           ) : (
             <div className="max-h-[70vh] overflow-y-auto pr-1 lg:max-h-[72vh]">
               <div className="grid grid-cols-1 gap-3">
-                {rows.map(({ c, when, totalPendiente, total, est, pendientesCocina, pendientesPago }) => {
+                {rows.map(({ c, when, totalPendiente, total, est }) => {
                   const badge =
                     est === "COBRADO"
                       ? "border-success/30 bg-success-soft text-success"
-                      : est === "PREPARADO"
-                        ? "border-accent/30 bg-accent-soft text-accent"
-                        : "border-warning/30 bg-warning-soft text-warning";
-
-                  const estadoComandaBadge =
-                    String(c.Estado).toLowerCase() === "pagada"
-                      ? "border-success/30 bg-success-soft text-success"
-                      : "border-border bg-surface-2 text-fg-muted";
+                      : "border-warning/30 bg-warning-soft text-warning";
 
                   const isExpanded = expandedId === c.ID_Comanda;
                   const detalles = detallesByComanda[c.ID_Comanda] ?? [];
@@ -384,25 +364,10 @@ export default function VerTicketsModal({
                             <span className={cn("rounded-full border px-2 py-1 text-xs font-bold", badge)}>
                               {est}
                             </span>
-                            <span
-                              className={cn(
-                                "rounded-full border px-2 py-1 text-xs font-bold",
-                                estadoComandaBadge,
-                              )}
-                            >
-                              {String(c.Estado).toUpperCase()}
-                            </span>
                             <p className="text-sm text-fg-muted">{when}</p>
                           </div>
 
-                          <p className="mt-1 truncate font-bold text-fg">
-                            Ticket #{String(c.ID_Comanda)} ·{" "}
-                            <span className="font-semibold text-fg-muted">
-                              cocina {pendientesCocina} · pago {pendientesPago}
-                            </span>
-                          </p>
-
-                          <p className="mt-1 text-sm text-fg-muted">
+                          <p className="mt-2 text-sm text-fg-muted">
                             Pendiente: <span className="font-bold text-fg">{eur(totalPendiente)}</span>
                             <span className="mx-2 text-fg-subtle">·</span>
                             Total: <span className="font-semibold text-fg">{eur(total)}</span>
@@ -466,26 +431,10 @@ export default function VerTicketsModal({
                             ) : (
                               <div className="grid grid-cols-1 gap-2">
                                 {detalles.map((d) => {
-                                  const estado = String(d.Estado_Cocina ?? "").toUpperCase();
-                                  const noCocina = estado === "NO_COCINA";
-                                  const cocinaOk = estado === "PREPARADO";
-
-                                  const badgeCocina = noCocina
-                                    ? "border-border bg-surface text-fg-muted"
-                                    : cocinaOk
-                                      ? "border-success/30 bg-success-soft text-success"
-                                      : "border-warning/30 bg-warning-soft text-warning";
-
-                                  const labelCocina = noCocina
-                                    ? "NO COCINA"
-                                    : cocinaOk
-                                      ? "PREPARADO"
-                                      : estado || "PENDIENTE";
-
                                   const badgePago =
                                     d.Pagado === 1
                                       ? "border-success/30 bg-success-soft text-success"
-                                      : "border-border bg-surface text-fg-muted";
+                                      : "border-warning/30 bg-warning-soft text-warning";
 
                                   // Centimos por una cantidad fraccionaria: vuelve a ser
                                   // flotante, asi que se redondea al centimo como hace el SQL.
@@ -504,20 +453,11 @@ export default function VerTicketsModal({
                                           <span
                                             className={cn(
                                               "rounded-full border px-2 py-1 text-[11px] font-bold",
-                                              badgeCocina,
-                                            )}
-                                          >
-                                            {labelCocina}
-                                          </span>
-                                          <span
-                                            className={cn(
-                                              "rounded-full border px-2 py-1 text-[11px] font-bold",
                                               badgePago,
                                             )}
                                           >
-                                            {d.Pagado === 1 ? "PAGADO" : "PAGO PEND."}
+                                            {d.Pagado === 1 ? "COBRADO" : "SIN COBRAR"}
                                           </span>
-                                          <span className="text-xs text-fg-subtle">#{d.ID_Detalle}</span>
                                         </div>
 
                                         <p className="mt-1 truncate font-bold text-fg">

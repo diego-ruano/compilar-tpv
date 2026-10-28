@@ -67,7 +67,7 @@ describe("Copias de seguridad · antes de la avería", () => {
 
     it("4 · guarda una copia de seguridad desde Configuración", async () => {
         await irA("/Configuracion");
-        await pulsar("Conectividad");
+        await pulsar("Licencia");
 
         await conTexto("div", "Copias de seguridad").waitForDisplayed({ timeout: 30_000 });
         await pulsar("Crear copia ahora");

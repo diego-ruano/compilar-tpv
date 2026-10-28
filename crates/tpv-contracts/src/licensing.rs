@@ -112,7 +112,7 @@ pub struct LicenseActivateInput {
     #[serde(default)]
     pub legal_name: Option<String>,
     // Sin `email`, a propósito (LOGIN-08): el correo de recuperación es el de la compra hasta que
-    // alguien lo cambie verificándolo, en la pantalla del PIN inicial o en Configuración → Licencia.
+    // alguien lo cambie verificándolo, en la pantalla del PIN inicial o en Configuración → Negocio.
     #[serde(default)]
     pub phone: Option<String>,
     #[serde(default)]

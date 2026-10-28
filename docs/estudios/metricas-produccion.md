@@ -218,7 +218,7 @@ Esto no cuesta dinero, pero dice si el producto aguanta un servicio real.
 | Tiempo del volcado del atraso | Axiom: `cola_volcado_inicio` / `cola_volcado_fin` (por su `_time`; no llevan duración) | Cuánto tarda un TPV en ponerse al día tras un corte |
 | **Fallos de impresión** | Logs | Un cobro que no imprime es una reclamación |
 | Tiempo de arranque de la app | Logs | Un TPV que tarda en abrir molesta cada mañana |
-| Copias diarias correctas y su tamaño | `recovery_list_backups` (Conectividad) y el job `backup_local` en `jobs_status` | Si fallan, el plan B no existe |
+| Copias diarias correctas y su tamaño | `recovery_list_backups` (Configuración → Licencia) y el job `backup_local` en `jobs_status` | Si fallan, el plan B no existe |
 
 ---
 

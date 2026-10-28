@@ -107,14 +107,8 @@ function CatalogGrid({
   const search: ProductoDisplay[] = Array.isArray(busqueda) ? busqueda : [];
 
   if (variant === "search") {
-    if (loading) {
-      return (
-        <Wrapper>
-          <p className="text-sm text-fg-muted">Buscando…</p>
-        </Wrapper>
-      );
-    }
-
+    // Sin «Buscando…»: mientras llega la respuesta se quedan los resultados anteriores, que
+    // sustituirlos por el texto en cada tecla hacía parpadear la rejilla.
     return (
       <Wrapper>
         <div className={gridClass}>

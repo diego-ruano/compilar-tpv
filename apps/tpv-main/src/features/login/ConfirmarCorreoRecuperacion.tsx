@@ -154,7 +154,7 @@ export default function ConfirmarCorreoRecuperacion({ correo, onResuelto }: Prop
 
             <p className="mt-3 text-xs leading-relaxed text-fg-muted">
                 ¿No tienes acceso a ese correo ahora? Salta este paso: se usará el correo de la compra
-                y podrás cambiarlo en Configuración → Licencia.
+                y podrás cambiarlo en Configuración → Negocio.
             </p>
         </div>
     );

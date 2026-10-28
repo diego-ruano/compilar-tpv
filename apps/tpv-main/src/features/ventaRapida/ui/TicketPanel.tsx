@@ -295,12 +295,7 @@ export default function TicketPanel({
                     </button>
 
                     {expanded ? (
-                      <div
-                        className="
-                          max-h-[280px] overflow-y-auto overscroll-contain border-t border-border/70 p-2 pr-1
-                          [scrollbar-gutter:stable]
-                        "
-                      >
+                      <div className="border-t border-border/70 p-2">
                         <div className="flex flex-col gap-2">
                           {items.map((t) => {
                             const checked = t.seleccionado && !t.pagado;
