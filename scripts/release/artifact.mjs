@@ -29,6 +29,12 @@ export function verifySignature(bytes, signature, publicKey) {
   }
 }
 
+// El instalador se llama como el `productName` («TPV - Altaria Lights_1.2.0_x64-setup.exe»). Se
+// publica sin espacios: el nombre acaba en la clave de R2 y en la URL del feed tal cual.
+export function publishedName(name) {
+  return name.replace(/\s*-\s*/g, "-").replace(/\s+/g, "-");
+}
+
 export function readArtifact(directory, version, publicKey) {
   const manifest = JSON.parse(readFileSync(join(directory, "manifest.json"), "utf8"));
   if (manifest.version !== version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version) ||
@@ -50,7 +56,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const file = join(directory, installers[0]);
     mkdirSync(extra, { recursive: true });
     copyFileSync(file, join(extra, "installer.exe"));
-    writeFileSync(join(extra, "manifest.json"), JSON.stringify({ version, name: basename(file),
+    writeFileSync(join(extra, "manifest.json"), JSON.stringify({ version, name: publishedName(basename(file)),
       sha256: createHash("sha256").update(readFileSync(file)).digest("hex") }, null, 2));
     readArtifact(extra, version);
   } else if (mode === "verify") {

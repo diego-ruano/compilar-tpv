@@ -130,13 +130,14 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 pnpm tauri build
 ```
 
-Salida en `target/release/bundle/nsis/`: `tpv_<versión>_x64-setup.exe` y su `.exe.sig` (sólo NSIS:
-`bundle.targets` es `["nsis"]`). Subir el `.exe` a un sitio público y publicar:
+Salida en `target/release/bundle/nsis/`: `TPV - Altaria Lights_<versión>_x64-setup.exe` y su `.exe.sig`
+(sólo NSIS: `bundle.targets` es `["nsis"]`). Subir el `.exe` a un sitio público sin espacios en el nombre,
+como lo deja `release.yml` (`TPV-Altaria-Lights_<versión>_x64-setup.exe`), y publicar:
 
 ```bash
 curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/publish \
   -H "Authorization: Bearer $RELEASE_ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{ "version": "1.2.0", "url": "https://…/tpv_1.2.0_x64-setup.exe",
+  -d '{ "version": "1.2.0", "url": "https://…/TPV-Altaria-Lights_1.2.0_x64-setup.exe",
         "signature": "<contenido del .exe.sig>", "notes": "…" }'
 ```
 
@@ -183,6 +184,7 @@ versión.
 | Pieza | Archivo |
 |---|---|
 | Configuración | `tauri.conf.json` (`plugins.updater`: `pubkey`, `endpoints`, `windows.installMode: "passive"`; `bundle.createUpdaterArtifacts`) |
+| Instalador | `tauri.conf.json`: `productName`, `bundle.publisher`, `copyright` y `homepage`, y `bundle.windows.nsis` (en español, con el icono de la app y las imágenes de `src-tauri/windows/`) |
 | Comandos | `lib.rs`: `updater_check`, `updater_status`, `updater_install` |
 | Comprobación | job `updater` (sólo escritorio): a los 30 s del arranque y cada 6 h → `check_and_announce` |
 | Aviso | evento `update:available` (banner `src/shared/ui/UpdateBanner.tsx`) y notificación a los administradores con dedupe `actualizacion:<versión>` |
@@ -190,7 +192,9 @@ versión.
 
 La instalación no reinicia sola: la lanza el usuario («Actualizar y reiniciar») para no cortar un
 servicio. Si el feed está caído, la aplicación sigue funcionando y lo vuelve a intentar con el backoff del
-runner. Reinstalar el `.exe` por encima conserva los datos (`data.db` está en AppData). Antes de migrar
+runner. Reinstalar el `.exe` por encima conserva los datos (`data.db` está en AppData). Cambiar el
+`productName` no es reinstalar: el instalador busca la instalación anterior por ese nombre y, si no la
+encuentra, deja otra copia al lado, con los mismos datos (AppData va por `identifier`). Antes de migrar
 el esquema, la aplicación copia `data.db` a `data.db.bak.<ms>` (se conservan las dos últimas).
 
 ## Cambios de esquema y de la base central

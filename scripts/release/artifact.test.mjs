@@ -6,8 +6,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { readArtifact, verifySignature } from "./artifact.mjs";
+import { publishedName, readArtifact, verifySignature } from "./artifact.mjs";
 import { createHash } from "node:crypto";
+
+test("el instalador se publica sin espacios en el nombre", () => {
+  assert.equal(publishedName("TPV - Altaria Lights_1.2.3_x64-setup.exe"), "TPV-Altaria-Lights_1.2.3_x64-setup.exe");
+  assert.equal(publishedName("tpv_1.2.3_x64-setup.exe"), "tpv_1.2.3_x64-setup.exe");
+});
 
 test("Tauri firma; el verificador rechaza bytes, comentario, clave y manifiesto alterados", () => {
   const directory = mkdtempSync(join(tmpdir(), "tpv-updater-test-"));
