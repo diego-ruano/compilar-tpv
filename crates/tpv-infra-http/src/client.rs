@@ -5,8 +5,9 @@
 //! `tpv-infra-licensing`, que ya gestiona el token Handy (keyring) y la firma ed25519.
 //!
 //! Contrato del worker (ver `apps/cloud-worker-licensing`):
-//! - Auth: JWT Bearer + device-proof `{ts}\n{METHOD}\n{pathname}\n{sha256(token)}\n{sha256(body)}`
-//!   (la firma va sobre el path SIN query string, y sobre los bytes exactos del cuerpo).
+//! - Auth: JWT Bearer + device-proof `{ts}\n{METHOD}\n{pathname}{search}\n{sha256(token)}\n{sha256(body)}`
+//!   (la firma va sobre la ruta CON su query, tal como la verá el worker, y sobre los bytes exactos
+//!   del cuerpo).
 //! - Escrituras (POST/PUT/PATCH/DELETE): requieren la cabecera `X-Idempotency-Key`; las aplica el
 //!   Durable Object en la base de la nube, y sólo si hay una Main conectada (si no, `main_offline`).
 //!   La clave se repite en el reintento de una escritura incierta (RI-64, `EscriturasInciertas`).
@@ -139,15 +140,19 @@ impl CloudClient {
         format!("{}{}", self.base_url.trim_end_matches('/'), path)
     }
 
-    /// Firma device-proof sobre la ruta y la query **canónicas** y el cuerpo exacto.
-    fn signed(&self, method: &str, path: &str, body: &[u8]) -> AppResult<ApiSignedHeaders> {
-        let url = reqwest::Url::parse(&self.url(path)).map_err(|e| AppError::validation(e.to_string()))?;
-        let target = format!("{}{}", url.path(), url.query().map(|q| format!("?{q}")).unwrap_or_default());
-        self.pairing
-            .tpv_server_signed_headers(&self.mode, method, &target, body)
-    }
-
-    /// Crea un `RequestBuilder` con las cabeceras device-proof firmadas para `method`/`path`.
+    /// La petición lista para salir, con las cabeceras device-proof firmadas sobre su destino
+    /// **exacto**: la ruta con la query ya puesta, que es lo que el worker verifica
+    /// (`pathname + search`, RI-50).
+    ///
+    /// INC-20261030-003 — la query entra en la URL ANTES de firmar. Se firmaba la ruta y la query
+    /// se añadía después con `RequestBuilder::query`, así que salía `/v1/cuentas/cierres?limite=20`
+    /// con la firma de `/v1/cuentas/cierres`, y el worker rechazaba con `bad_device_signature`
+    /// toda consulta de la Handy con parámetros: barra, Cuentas, Inventario, tareas, horarios,
+    /// notificaciones, búsquedas y estadísticas.
+    ///
+    /// `firmar` recibe el método, el destino y el cuerpo, que son las piezas del mensaje que el
+    /// worker vuelve a montar. Es un parámetro para que el test compruebe que lo firmado es lo
+    /// que sale, sin tocar la identidad del equipo.
     ///
     /// SYNC-04 — `x-client-now`: el reloj lo pone el dispositivo EMISOR, no el servidor. El worker
     /// usa esta hora local para resolver a literal fijo los `datetime('now',…)` de las escrituras,
@@ -165,20 +170,48 @@ impl CloudClient {
     /// resuelve el `'now','localtime'` de una LECTURA a la hora local de este equipo; sin ella lo
     /// resuelve Turso, que corre en UTC, y «hoy» pasa a ser el día del servidor: de madrugada, el
     /// de ayer. Quitarla de los GET no daría ningún error, sólo respuestas de otro día.
-    /// `body` son los bytes que se van a enviar (vacío en GET/DELETE): entran en la firma, así que
-    /// el llamante tiene que adjuntar **exactamente** esos bytes con `.body(...)`, nunca volver a
-    /// serializar con `.json(...)` (FABLE-E).
-    fn signed_req(&self, method: Method, path: &str, body: &[u8]) -> AppResult<RequestBuilder> {
-        let method_str = method.as_str().to_string();
-        let h = self.signed(&method_str, path, body)?;
+    ///
+    /// `cuerpo` son los bytes que se envían (vacío en GET/DELETE): entran en la firma y se adjuntan
+    /// **esos mismos** con `.body(...)`, nunca volviendo a serializar con `.json(...)` (FABLE-E).
+    fn preparar(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        cuerpo: &[u8],
+        idempotencia: Option<&str>,
+        firmar: impl FnOnce(&str, &str, &[u8]) -> AppResult<ApiSignedHeaders>,
+    ) -> AppResult<RequestBuilder> {
+        let mut url = reqwest::Url::parse(&self.url(path))
+            .map_err(|e| AppError::validation(e.to_string()))?;
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+        let destino = format!(
+            "{}{}",
+            url.path(),
+            url.query().map(|q| format!("?{q}")).unwrap_or_default()
+        );
+
+        let h = firmar(method.as_str(), &destino, cuerpo)?;
         let client_now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        Ok(self
+        let mut rb = self
             .http
-            .request(method, self.url(path))
+            .request(method, url)
             .header("authorization", h.authorization)
             .header("x-device-ts", h.x_device_ts)
             .header("x-device-sig", h.x_device_sig)
-            .header("x-client-now", client_now))
+            .header("x-client-now", client_now);
+
+        if let Some(clave) = idempotencia {
+            rb = rb.header("x-idempotency-key", clave);
+        }
+        if !cuerpo.is_empty() {
+            rb = rb
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(cuerpo.to_vec());
+        }
+        Ok(rb)
     }
 
     /// GET firmado que deserializa la respuesta JSON en `T`.
@@ -186,7 +219,7 @@ impl CloudClient {
         self.enviar(Method::GET, path, b"", None, &[]).await
     }
 
-    /// GET firmado con parámetros de query (reqwest los codifica; la firma va sobre el path).
+    /// GET firmado con parámetros de query (se codifican en la URL y la firma los incluye).
     pub async fn get_query<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -385,19 +418,10 @@ impl CloudClient {
         idempotencia: Option<&str>,
         query: &[(&str, String)],
     ) -> AppResult<(u16, String)> {
-        let mut rb = self.signed_req(method, path, cuerpo)?;
-
-        if !query.is_empty() {
-            rb = rb.query(query);
-        }
-        if let Some(clave) = idempotencia {
-            rb = rb.header("x-idempotency-key", clave);
-        }
-        if !cuerpo.is_empty() {
-            rb = rb
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(cuerpo.to_vec());
-        }
+        let rb = self.preparar(method, path, query, cuerpo, idempotencia, |metodo, destino, cuerpo| {
+            self.pairing
+                .tpv_server_signed_headers(&self.mode, metodo, destino, cuerpo)
+        })?;
 
         let resp = reloj::enviar(rb).await.map_err(AppError::sin_conexion)?;
         let status = resp.status().as_u16();
@@ -418,6 +442,148 @@ fn interpretar<T: DeserializeOwned>(status: u16, text: &str) -> AppResult<T> {
 
     serde_json::from_str::<T>(text)
         .map_err(|e| AppError::external(format!("bad_json: {e} | body={text}")))
+}
+
+#[cfg(test)]
+mod tests_firma_del_destino {
+    //! INC-20261030-003: lo que se firma es lo que sale. Un servidor local recibe la petición de
+    //! verdad, saca de ella lo mismo que el worker al verificar la firma (método, `pathname +
+    //! search` y los bytes del cuerpo) y se compara con lo que `preparar` le pasó a `firmar`.
+
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// Las piezas del mensaje device-proof que dependen de la petición (la hora y el token van en
+    /// cabeceras y no se tocan por el camino).
+    #[derive(Debug, PartialEq)]
+    struct Piezas {
+        metodo: String,
+        destino: String,
+        cuerpo: Vec<u8>,
+    }
+
+    /// Atiende UNA petición: devuelve sus piezas, vistas como las ve el worker, y la cabecera de
+    /// firma con la que llegó.
+    async fn recibir(listener: TcpListener) -> (Piezas, Option<String>) {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut leido = Vec::new();
+        let mut buf = [0u8; 4096];
+        let fin_cabeceras = loop {
+            let n = socket.read(&mut buf).await.unwrap();
+            assert!(n > 0, "la conexión se cerró a mitad de las cabeceras");
+            leido.extend_from_slice(&buf[..n]);
+            if let Some(i) = leido.windows(4).position(|w| w == b"\r\n\r\n") {
+                break i + 4;
+            }
+        };
+
+        let cabeceras = String::from_utf8(leido[..fin_cabeceras].to_vec()).unwrap();
+        let mut lineas = cabeceras.split("\r\n");
+        let mut primera = lineas.next().unwrap().split(' ');
+        let metodo = primera.next().unwrap().to_string();
+        let objetivo = primera.next().unwrap().to_string();
+        let mut largo = 0;
+        let mut firma = None;
+        for linea in lineas {
+            if let Some((nombre, valor)) = linea.split_once(':') {
+                match nombre.to_ascii_lowercase().as_str() {
+                    "content-length" => largo = valor.trim().parse().unwrap(),
+                    "x-device-sig" => firma = Some(valor.trim().to_string()),
+                    _ => {}
+                }
+            }
+        }
+        while leido.len() < fin_cabeceras + largo {
+            let n = socket.read(&mut buf).await.unwrap();
+            assert!(n > 0, "la conexión se cerró a mitad del cuerpo");
+            leido.extend_from_slice(&buf[..n]);
+        }
+        let cuerpo = leido[fin_cabeceras..fin_cabeceras + largo].to_vec();
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+            .await
+            .unwrap();
+
+        // Como el worker: `new URL(req.url)` y `pathname + search`. `Url` sigue el mismo estándar
+        // (WHATWG), así que normaliza igual.
+        let url = reqwest::Url::parse(&format!("http://worker{objetivo}")).unwrap();
+        let destino = format!(
+            "{}{}",
+            url.path(),
+            url.query().map(|q| format!("?{q}")).unwrap_or_default()
+        );
+        (Piezas { metodo, destino, cuerpo }, firma)
+    }
+
+    /// Prepara y manda la petición; devuelve lo que se firmó y lo que recibió el servidor.
+    async fn firmado_y_recibido(
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        cuerpo: &[u8],
+    ) -> (Piezas, Piezas) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let servidor = tokio::spawn(recibir(listener));
+
+        let client = CloudClient::new(base, std::env::temp_dir()).unwrap();
+        let mut firmado = None;
+        let rb = client
+            .preparar(method, path, query, cuerpo, None, |metodo, destino, cuerpo| {
+                firmado = Some(Piezas {
+                    metodo: metodo.to_string(),
+                    destino: destino.to_string(),
+                    cuerpo: cuerpo.to_vec(),
+                });
+                Ok(ApiSignedHeaders {
+                    authorization: "Bearer token".into(),
+                    x_device_ts: "1".into(),
+                    x_device_sig: "la-firma".into(),
+                })
+            })
+            .unwrap();
+        rb.send().await.unwrap();
+
+        let (recibido, firma) = servidor.await.unwrap();
+        assert_eq!(firma.as_deref(), Some("la-firma"), "la firma va en la petición que sale");
+        (firmado.expect("se firmó"), recibido)
+    }
+
+    #[tokio::test]
+    async fn la_query_de_una_consulta_entra_en_la_firma() {
+        let query = [("limite", "20".to_string())];
+        let (firmado, recibido) =
+            firmado_y_recibido(Method::GET, "/v1/cuentas/cierres", &query, b"").await;
+        assert_eq!(recibido.destino, "/v1/cuentas/cierres?limite=20");
+        assert_eq!(firmado, recibido);
+    }
+
+    #[tokio::test]
+    async fn lo_que_se_escapa_se_firma_escapado() {
+        // Una búsqueda de productos: tilde, espacios y un `&` que no separa parámetros.
+        let query = [("query", "café & tostá".to_string()), ("limit", "20".to_string())];
+        let (firmado, recibido) =
+            firmado_y_recibido(Method::GET, "/v1/venta-rapida/productos/search", &query, b"").await;
+        assert_eq!(firmado, recibido);
+    }
+
+    #[tokio::test]
+    async fn la_query_escrita_en_la_ruta_tambien_se_firma() {
+        let (firmado, recibido) =
+            firmado_y_recibido(Method::GET, "/v1/clientes/overview?ranking=gasto", &[], b"").await;
+        assert_eq!(recibido.destino, "/v1/clientes/overview?ranking=gasto");
+        assert_eq!(firmado, recibido);
+    }
+
+    #[tokio::test]
+    async fn una_escritura_firma_sus_bytes_sin_query() {
+        let cuerpo = br#"{"id_producto":"p","cantidad":1}"#;
+        let (firmado, recibido) =
+            firmado_y_recibido(Method::POST, "/v1/venta-rapida/lineas", &[], cuerpo).await;
+        assert_eq!(recibido.destino, "/v1/venta-rapida/lineas");
+        assert_eq!(firmado, recibido);
+    }
 }
 
 #[cfg(test)]
