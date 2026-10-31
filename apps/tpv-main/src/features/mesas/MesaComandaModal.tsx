@@ -5,7 +5,7 @@ import { Modal,NotaLineaModal,ProductCard } from "./ComandaElementos";
 import { addDetalle,deleteDetalleById,ensureOpenComanda,fmtReserva,loadTicketForComanda,removeOnePendingDetalle } from "./comanda";
 import type { Paso,ProductoDisplay,TicketItem } from "./tiposComanda";
 // components/mesasComponents/MesaComandaModal.tsx
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery,useQueryClient } from "@tanstack/react-query";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 import { ImageOff,Printer } from "lucide-react";
 import { useCallback,useEffect,useMemo,useRef,useState } from "react";
@@ -36,7 +36,8 @@ sumaImportes,
 totalRecuento,
 } from "../../shared/lib/efectivo";
 import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
-import { mesasCobrarDetalles,mesasUpdateDetalleNota,productosListByCategoria,productosSearchByNombre,reservaFinalizar,reservaMarcarActivaAhora } from "./mesasApi";
+import { mesasCobrarDetalles,mesasLoadMesaMeta,mesasUpdateDetalleNota,productosListByCategoria,productosSearchByNombre,reservaFinalizar,reservaMarcarActivaAhora } from "./mesasApi";
+import { mesasKeys } from "./mesasQueries";
 
 /* =========================
    Tipos
@@ -99,6 +100,21 @@ export default function MesaComandaModal({
     // nada en pantalla hasta salir del modal.
     const reservaMeta = mesaMeta?.reserva ?? null;
 
+    // INC-20261030-016: esa foto y la comanda que se fija al abrir no se enteraban de lo que hacía
+    // otro equipo: la Handy seguía en la comanda que la Main ya había cobrado (y la Main ya había
+    // abierto otra), o enseñando «Reserva activa» de una reserva que Android había cerrado. Esta
+    // lectura propia de la mesa se refresca con los cambios remotos (comandas, mesas y reservas
+    // invalidan `mesas`), no con las líneas de esta pantalla. `gcTime: 0`: no sobrevive al modal,
+    // así que lo que hay es de esta apertura. `undefined` = aún no ha llegado; manda la foto.
+    const mesaAhora = useQuery({
+        queryKey: [...mesasKeys.meta(), "modal", mesaId],
+        queryFn: async () => (await mesasLoadMesaMeta())[mesaId] ?? null,
+        enabled: open,
+        gcTime: 0,
+    });
+    const mesaFresca = mesaAhora.data;
+    const reservaAhora = mesaFresca !== undefined ? (mesaFresca?.reserva ?? null) : reservaMeta;
+
     // Lo que la propia pantalla acaba de hacer con la reserva. `null` = manda la foto del plano.
     const [estadoReserva, setEstadoReserva] = useState<"ACTIVA" | "FINALIZADA" | null>(null);
 
@@ -110,15 +126,15 @@ export default function MesaComandaModal({
     // Al abrir, o si se salta a otra mesa/reserva, vuelve a mandar el plano.
     useEffect(() => {
         setEstadoReserva(null);
-    }, [open, mesaId, reservaMeta?.idReserva]);
+    }, [open, mesaId, reservaAhora?.idReserva]);
 
     // La reserva que se PINTA (cartel, botón y título). Una finalizada deja de colgar de la mesa:
     // el meta sólo trae PROXIMA/ACTIVA, así que el cartel se va igual que al reabrir el modal.
     const reserva = useMemo(() => {
-        if (!reservaMeta) return null;
+        if (!reservaAhora) return null;
         if (estadoReserva === "FINALIZADA") return null;
-        return estadoReserva ? { ...reservaMeta, estado: estadoReserva } : reservaMeta;
-    }, [reservaMeta, estadoReserva]);
+        return estadoReserva ? { ...reservaAhora, estado: estadoReserva } : reservaAhora;
+    }, [reservaAhora, estadoReserva]);
 
     // `onChanged` llega como arrow nueva en cada render del padre; la guardamos en un ref
     // para que `notifyChanged` (y, en cascada, reloadTicket/addProducto…) sea estable y
@@ -283,16 +299,59 @@ export default function MesaComandaModal({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [syncTick]);
 
+    // INC-20261030-016: sólo hay una comanda abierta por mesa. Si la lectura de la mesa trae otra,
+    // la de esta pantalla ya está cobrada (otro equipo la cobró y abrió la siguiente): se pasa a
+    // esa, igual que al cerrar y volver a abrir la mesa. Sin ninguna abierta se queda la cobrada a
+    // la vista, con su ticket para imprimir. Reacciona a cada lectura nueva y no al cambio de
+    // comanda: una lectura de antes no puede devolver la pantalla a una comanda ya cobrada.
+    const leidaEn = mesaAhora.dataUpdatedAt;
+    useEffect(() => {
+        const abierta = mesaFresca?.idComanda || null;
+        const anterior = comandaActualRef.current;
+        if (!open || !abierta || !anterior || abierta === anterior) return;
+        let cancelado = false;
+        void (async () => {
+            await cola.esperar();
+            if (cancelado || cobroEnCursoRef.current || comandaActualRef.current !== anterior) return;
+            const t = await loadTicketForComanda(abierta);
+            if (cancelado || comandaActualRef.current !== anterior) return;
+            comandaActualRef.current = abierta;
+            setIdComanda(abierta);
+            setTicket(t);
+            notifyChanged();
+        })().catch((e) => console.error("Fallo pasando a la comanda abierta de la mesa", e));
+        return () => { cancelado = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, leidaEn]);
+
     const addProductoToTicket = useCallback(async (p: ProductoDisplay) => {
         if (!idComanda || loadingTicket || cobroEnCursoRef.current || (!isAdmin && operador == null)) return;
         ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
-            const t = await addDetalle(idComanda, p, operador);
+            let destino = comandaActualRef.current ?? idComanda;
+            let t: TicketItem[];
+            try {
+                t = await addDetalle(destino, p, operador);
+            } catch (e) {
+                // INC-20261030-016: cobrada entera (aquí o en otro equipo), la comanda ya no admite
+                // líneas, y en pantalla no se distingue de una vacía (`mapTicketRows`). Lo que se
+                // pide después del cobro va a la comanda abierta de la mesa —la misma que daría
+                // cerrar y volver a abrirla—, que se crea si no hay ninguna. Si la abierta es esta,
+                // el rechazo era por otra cosa y se enseña tal cual (`conAviso`).
+                if (!esError(e, "conflict")) throw e;
+                const reservaActiva = reserva?.estado === "ACTIVA" ? { idReserva: reserva.idReserva } : null;
+                const abierta = await ensureOpenComanda(mesaId, operador, reservaActiva);
+                if (abierta === destino) throw e;
+                comandaActualRef.current = abierta;
+                setIdComanda(abierta);
+                destino = abierta;
+                t = await addDetalle(destino, p, operador);
+            }
             ++lecturaTicketRef.current.version;
-            aplicarTicket(idComanda, t);
+            aplicarTicket(destino, t);
             notifyChanged();
         });
-    }, [idComanda, loadingTicket, isAdmin, operador, cola, aplicarTicket, notifyChanged]);
+    }, [idComanda, loadingTicket, isAdmin, operador, cola, aplicarTicket, notifyChanged, mesaId, reserva]);
 
     const removeProductoFromTicket = useCallback(async (productoId: string) => {
         if (!idComanda || loadingTicket || cobroEnCursoRef.current) return;

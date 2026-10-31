@@ -9,7 +9,7 @@ const api = vi.hoisted(() => ({
     mesasEnsureOpenComanda: vi.fn(), mesasLoadTicket: vi.fn(), mesasAddDetalle: vi.fn(),
     mesasCobrarDetalles: vi.fn(), productosListCategoriasVendibles: vi.fn(), productosListByCategoria: vi.fn(),
     productosSearchByNombre: vi.fn(), mesasRemoveOnePendingDetalle: vi.fn(), mesasDeleteDetalle: vi.fn(),
-    mesasUpdateDetalleNota: vi.fn(), reservaMarcarActivaAhora: vi.fn(), reservaFinalizar: vi.fn(),
+    mesasUpdateDetalleNota: vi.fn(), reservaMarcarActivaAhora: vi.fn(), reservaFinalizar: vi.fn(), mesasLoadMesaMeta: vi.fn(),
 }));
 vi.mock("../../src/features/mesas/mesasApi", () => api);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (comando: string) => {
@@ -88,4 +88,62 @@ it("envía un solo cobro al pulsar dos veces antes de que el backend responda", 
     expect(tarjeta).toBeDisabled();
     responder("pago");
     await waitFor(() => expect(screen.queryByRole("button", { name: "Cobrar con tarjeta" })).not.toBeInTheDocument());
+});
+
+// INC-20261030-016: la comanda y la reserva del modal se fijaban al abrir. Si otro equipo cobraba
+// la comanda y abría la siguiente, o cerraba la reserva, esta pantalla no se enteraba, y lo que se
+// añadía iba a la comanda ya cobrada, donde nadie lo iba a cobrar.
+const pagada = (id: string) => ({ ...fila(id), Pagado: 1 });
+const meta = (idComanda: string, reserva?: unknown) => ({
+    mesa: { ocupada: true, id_comanda: idComanda, idComanda, totalPendiente: 0, pendientesPago: 0, pendientesCocina: 0, estado: "", reserva },
+});
+async function abrirCon(qc: QueryClient, mesaMeta?: unknown) {
+    useAuth.setState({ idUsuario: "operador", idTrabajador: "trabajador", role: "camarero" });
+    api.productosListCategoriasVendibles.mockResolvedValue([categoria]);
+    api.productosListByCategoria.mockResolvedValue([producto]);
+    render(<QueryClientProvider client={qc}><MesaComandaModal open onClose={() => {}} mesaId="mesa" mesaNombre="1" mesaMeta={mesaMeta as any} /></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Bebidas" }));
+    await screen.findByText("Café");
+}
+
+it("lo que se pide después de cobrarlo todo va a la comanda abierta de la mesa, no a la cobrada", async () => {
+    // Cobrada entera, en pantalla es un ticket vacío: lo sabe el backend, que rechaza la línea.
+    api.mesasEnsureOpenComanda.mockResolvedValueOnce("cobrada").mockResolvedValueOnce("nueva");
+    api.mesasLoadTicket.mockResolvedValue([pagada("1")]);
+    api.mesasLoadMesaMeta.mockResolvedValue({});
+    api.mesasAddDetalle
+        .mockRejectedValueOnce({ code: "conflict", message: "Esa cuenta ya está cobrada." })
+        .mockResolvedValueOnce([fila("2")]);
+    await abrirCon(new QueryClient());
+    fireEvent.click(screen.getByRole("button", { name: "+" }));
+    await waitFor(() => expect(api.mesasAddDetalle).toHaveBeenCalledTimes(2));
+    expect(api.mesasAddDetalle.mock.calls[0][0].idComanda).toBe("cobrada");
+    expect(api.mesasAddDetalle.mock.calls[1][0].idComanda).toBe("nueva");
+    expect(api.mesasEnsureOpenComanda).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.getByText("Total pendiente:").textContent).toContain("3,00"));
+});
+
+it("pasa a la comanda que otro equipo abrió en la mesa después de cobrar la de esta pantalla", async () => {
+    const qc = new QueryClient();
+    api.mesasEnsureOpenComanda.mockResolvedValue("cobrada");
+    api.mesasLoadTicket.mockImplementation(async (id: string) => id === "otra" ? [fila("3")] : [pagada("1")]);
+    api.mesasLoadMesaMeta.mockResolvedValue(meta("cobrada"));
+    await abrirCon(qc);
+    api.mesasLoadMesaMeta.mockResolvedValue(meta("otra"));
+    await qc.invalidateQueries({ queryKey: ["mesas"] });
+    await waitFor(() => expect(screen.getByText("Total pendiente:").textContent).toContain("3,00"));
+    expect(api.mesasLoadTicket).toHaveBeenCalledWith("otra");
+});
+
+it("una reserva que otro equipo cierra deja de verse sin cerrar el modal", async () => {
+    const qc = new QueryClient();
+    const reserva = { idReserva: "r", clienteNombre: "Ana", diaYMD: "2026-10-31", hora: "10:00", estado: "ACTIVA", minutosPara: 0 };
+    api.mesasEnsureOpenComanda.mockResolvedValue("comanda");
+    api.mesasLoadTicket.mockResolvedValue([]);
+    api.mesasLoadMesaMeta.mockResolvedValue(meta("comanda", reserva));
+    await abrirCon(qc, meta("comanda", reserva).mesa);
+    expect(screen.getByText("🔵 Reserva activa")).toBeInTheDocument();
+    api.mesasLoadMesaMeta.mockResolvedValue(meta("comanda"));
+    await qc.invalidateQueries({ queryKey: ["mesas"] });
+    await waitFor(() => expect(screen.queryByText("🔵 Reserva activa")).not.toBeInTheDocument());
 });
