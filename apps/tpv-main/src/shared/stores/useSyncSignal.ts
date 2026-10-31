@@ -1,7 +1,7 @@
 // src/shared/stores/useSyncSignal.ts
 //
-// Señal de "han cambiado datos por sincronización con la nube". La usa el POS (mesas y
-// venta_rápida), que NO está en React Query y por tanto no se puede invalidar: estos
+// Señal de "han cambiado datos por sincronización con la nube". La usa el POS (mesas,
+// venta_rápida y la cocina), que NO está en React Query y por tanto no se puede invalidar: estos
 // componentes observan `tick` y, al cambiar, vuelven a leer su estado de la BD local.
 //
 // Además del contador `tick` (que dispara la relectura del catálogo / barra de comandas),

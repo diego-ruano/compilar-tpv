@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 import { cocinaSetLineaEstado, type KitchenRow } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
+import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 
 type KitchenLine = {
     idDetalle: string;
@@ -83,9 +84,10 @@ export default function KitchenBoard({
         });
     }
 
-    const load = useCallback(async () => {
+    /** `mostrarCarga = false` relee sin quitar la lista de la vista (un aviso de otro equipo). */
+    const load = useCallback(async (mostrarCarga = true) => {
         const lectura = ++lecturas.current.version;
-        setLoading(true);
+        if (mostrarCarga) setLoading(true);
         try {
             const r = await commands.kitchenListTodayPending();
             if (!lecturas.current.activo || lectura !== lecturas.current.version) return;
@@ -118,8 +120,33 @@ export default function KitchenBoard({
 
         window.addEventListener("vr:changed", onChanged);
         return () => window.removeEventListener("vr:changed", onChanged);
-         
+
     }, []);
+
+    // INC-20261030-006: lo que cambia en otro equipo —una línea nueva, una nota, un Preparado, un
+    // cobro, una retirada— llega por la señal de sincronización, y `vr:changed` es sólo de esta
+    // ventana. Sin escucharla, una cocina abierta seguía vacía o con estados viejos hasta pulsar
+    // Recargar. Mientras se marca una línea, la relectura espera a que termine: si no, el acuse de
+    // la marca invalidaba la lectura en curso y el cambio remoto se perdía.
+    const recargaPendiente = useRef(false);
+    const recargarPorCambioRemoto = useCallback(() => {
+        if (enCurso.current.size > 0) {
+            recargaPendiente.current = true;
+            return;
+        }
+        recargaPendiente.current = false;
+        rememberScroll();
+        void load(false);
+    }, [load]);
+    const syncTick = useSyncSignal((s) => s.tick);
+    // El aviso que ya estaba al montar lo cubre la primera lectura.
+    const tickAlMontar = useRef(syncTick);
+    useEffect(() => {
+        if (syncTick === tickAlMontar.current) return;
+        const info = useSyncSignal.getState().comanda;
+        if (info.touchedComanda || info.uncertain) recargarPorCambioRemoto();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [syncTick]);
 
     const comandas: KitchenComanda[] = useMemo(() => {
         const map = new Map<string, KitchenComanda>();
@@ -191,10 +218,11 @@ export default function KitchenBoard({
                 if (lecturas.current.activo) {
                     setOcupadas(new Set(enCurso.current));
                     setLoading(false);
+                    if (recargaPendiente.current) recargarPorCambioRemoto();
                 }
             }
         },
-        [idUsuarioCocinero],
+        [idUsuarioCocinero, recargarPorCambioRemoto],
     );
 
     return (

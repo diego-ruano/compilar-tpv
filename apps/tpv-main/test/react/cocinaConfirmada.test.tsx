@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import KitchenBoard from "../../src/features/mesas/KitchenBoard";
+import { useSyncSignal } from "../../src/shared/stores/useSyncSignal";
 
 const api = vi.hoisted(() => ({ leer: vi.fn(), marcar: vi.fn() }));
 vi.mock("@tpv/client", () => ({ commands: { kitchenListTodayPending: api.leer }, toAppError: (e: Error) => e }));
@@ -45,4 +46,41 @@ it("un fallo conserva la comanda pendiente y permite reintentar", async () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Sin conexión");
     expect(linea).toBeEnabled();
     expect(screen.getByText("1× Tostada")).toBeInTheDocument();
+});
+
+// INC-20261030-006: lo que cambia en otro equipo llega por la señal de sincronización. Antes la
+// cocina sólo escuchaba `vr:changed`, que es de esta ventana, y se quedaba vacía o con estados
+// viejos hasta pulsar Recargar.
+const otraLinea = { ...fila, ID_Detalle: "d2", Nombre_Producto: "Cafe" };
+const cambioEnComanda = { ids: ["comanda"], touchedComanda: true, uncertain: false, touchedCatalog: false };
+
+afterEach(() => { useSyncSignal.setState({ tick: 0 }); });
+
+it("una línea añadida en otro equipo aparece sin pulsar Recargar y sin quitar la lista", async () => {
+    await abrir();
+    api.leer.mockResolvedValue([fila, otraLinea]);
+    act(() => useSyncSignal.getState().bump(cambioEnComanda));
+    expect(screen.queryByText("Cargando…")).not.toBeInTheDocument();
+    expect(await screen.findByText("1× Cafe")).toBeInTheDocument();
+    expect(screen.getByText("1× Tostada")).toBeInTheDocument();
+});
+
+it("un cambio que no toca comandas no vuelve a leer", async () => {
+    await abrir();
+    act(() => useSyncSignal.getState().bump({ ids: [], touchedComanda: false, uncertain: false, touchedCatalog: true }));
+    await Promise.resolve();
+    expect(api.leer).toHaveBeenCalledTimes(1);
+});
+
+it("un cambio remoto mientras se marca una línea se lee al terminar la marca", async () => {
+    let confirmar!: () => void;
+    api.marcar.mockImplementation(() => new Promise(resolve => { confirmar = () => resolve(undefined); }));
+    const linea = await abrir();
+    fireEvent.click(linea);
+    api.leer.mockResolvedValue([fila, otraLinea]);
+    act(() => useSyncSignal.getState().bump(cambioEnComanda));
+    expect(api.leer).toHaveBeenCalledTimes(1);
+    confirmar();
+    expect(await screen.findByText("1× Cafe")).toBeInTheDocument();
+    expect(api.leer).toHaveBeenCalledTimes(2);
 });
