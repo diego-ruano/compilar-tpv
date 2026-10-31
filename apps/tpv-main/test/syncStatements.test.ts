@@ -3,7 +3,7 @@ import { featureKeysPorTablas, ajustesPorTablas, shouldReloadTicket, type Comand
 
 describe("metadatos nativos y cachés de presentación", () => {
     it("deduplica las áreas y distingue ajustes de tablas desconocidas", () => {
-        expect(featureKeysPorTablas(["pagos", "productos"])).toEqual(["cuentas", "stats", "inventario"]);
+        expect(featureKeysPorTablas(["pagos", "productos"])).toEqual(["cuentas", "stats", "inventario", "proveedores"]);
         expect(featureKeysPorTablas(["business_settings"])).toEqual([]);
         expect(featureKeysPorTablas(["tabla_nueva"])).toBeNull();
         expect(featureKeysPorTablas(null)).toBeNull();
@@ -12,6 +12,12 @@ describe("metadatos nativos y cachés de presentación", () => {
         // Una reserva web recogida o cancelada, una de la Handy o el «No vino» automático: el plano
         // pinta la de cada mesa y el resumen de Clientes cuenta las pendientes.
         expect(featureKeysPorTablas(["reservas"])).toEqual(["reservas", "mesas", "clientes", "stats"]);
+    });
+    it("vincular un producto o mover su stock refresca la ficha del proveedor", () => {
+        // INC-20261030-013: vincular es un UPDATE de Productos, y la lista de vinculados enseña el
+        // stock y la última entrada, que salen de los lotes.
+        expect(featureKeysPorTablas(["productos"])).toContain("proveedores");
+        expect(featureKeysPorTablas(["lotes_producto"])).toContain("proveedores");
     });
     it("los tres ajustes y un cambio sin clasificación obligan a releer stores", () => {
         for (const tabla of ["business_settings", "ticket_settings", "contact_settings"]) expect(ajustesPorTablas([tabla])).toBe(true);

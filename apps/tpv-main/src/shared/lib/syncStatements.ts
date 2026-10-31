@@ -10,8 +10,11 @@ const TABLE_TO_FEATURES: Record<string, readonly string[]> = {
 	devolucion_lineas: ["cuentas"],
 	cuentas_gastos: ["cuentas", "stats"],
 	categorias_producto: ["inventario", "stats"],
-	productos: ["inventario", "stats"],
-	lotes_producto: ["inventario", "stats"],
+	// INC-20261030-013: la ficha de un proveedor enseña sus productos vinculados, con el stock y la
+	// última entrada. Vincular es un `UPDATE Productos SET ID_Proveedor`, así que sin `proveedores`
+	// aquí los demás equipos no se enteraban hasta salir y volver a entrar.
+	productos: ["inventario", "proveedores", "stats"],
+	lotes_producto: ["inventario", "proveedores", "stats"],
 	lote_consumos: ["inventario", "stats"],
 	alergenos: ["inventario"],
 	producto_alergenos: ["inventario"],
