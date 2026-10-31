@@ -609,13 +609,29 @@ export function useVentaRapida() {
       }
       try {
         await operacion(id);
-        await cargarComandaEnTicketPanel(id, { keepSelection: true });
+        // Al ticket activo: añadir tras cobrarlo todo pasa a uno nuevo (ver `addProductoToTicket`).
+        await cargarComandaEnTicketPanel(idComandaActivaRef.current ?? id, { keepSelection: true });
         emitVrChanged();
       } catch (e) { toast.error("No se pudo modificar el ticket", toAppError(e).message); }
     });
   }, [cola, ensureComandaActiva, cargarComandaEnTicketPanel, recuperacion.pendientes, toast]);
 
-  const addProductoToTicket = useCallback((p: ProductoDisplay) => escribirLinea(id => vrAddLineaComanda(id, p.ID_Producto, 1)), [escribirLinea]);
+  // INC-20261030-016: un ticket cobrado entero ya no admite líneas (el backend lo rechaza), y
+  // después de cobrar se queda a la vista con su ticket para imprimir. Lo que se añade entonces es
+  // otra venta: abre un ticket nuevo, como «Nuevo ticket», y va ahí. Antes entraba en el cobrado,
+  // donde se quedaba sin cobrar en cuanto se pasaba a otro ticket.
+  const addProductoToTicket = useCallback((p: ProductoDisplay) => escribirLinea(async (id) => {
+    const cobrado = ticketRef.current.length > 0 && ticketRef.current.every((t) => t.pagado);
+    if (!cobrado) {
+      await vrAddLineaComanda(id, p.ID_Producto, 1);
+      return;
+    }
+    const nuevo = await vrCreateComandaBarra(idTrabajadorAuth ?? null);
+    idComandaActivaRef.current = nuevo;
+    setIdComandaActiva(nuevo);
+    clearTicketLocal();
+    await vrAddLineaComanda(nuevo, p.ID_Producto, 1);
+  }), [escribirLinea, idTrabajadorAuth, clearTicketLocal]);
   const removeProductoFromTicket = useCallback((productoId: string) => escribirLinea(id => vrRemoveLastUnpaidLinea(id, productoId)), [escribirLinea]);
   const eliminarLineaTicket = useCallback((ticketItemId: string) => escribirLinea(id => {
     const item = ticketRef.current.find(t => t.id === ticketItemId);

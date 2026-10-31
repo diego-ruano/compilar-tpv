@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, cleanup } from "@testing-library/re
 import { afterEach, expect, it, vi } from "vitest";
 import VentaRapida from "../../src/app/pages/VentaRapida";
 const api = vi.hoisted(() => ({ vrBootstrap: vi.fn(), vrListProductosByCategoria: vi.fn(), vrSearchProductos: vi.fn(), vrAddLineaComanda: vi.fn(),
-    vrGetLineasComanda: vi.fn(), vrRemoveLastUnpaidLinea: vi.fn(), vrListCategoriasVendibles: vi.fn(), vrDeleteLineaIfUnpaid: vi.fn(), vrUpdateNotaDetalle: vi.fn() }));
+    vrGetLineasComanda: vi.fn(), vrRemoveLastUnpaidLinea: vi.fn(), vrListCategoriasVendibles: vi.fn(), vrDeleteLineaIfUnpaid: vi.fn(), vrUpdateNotaDetalle: vi.fn(), vrCreateComandaBarra: vi.fn() }));
 const pago = vi.hoisted(() => vi.fn());
 vi.mock("../../src/features/ventaRapida/ventaRapidaAPI", () => api);
 vi.mock("../../src/features/ventaRapida/useCobrosPendientes", () => ({ useCobrosPendientes: () => ({ pendientes: [], recargar: async () => {}, main: true, error: null }) }));
@@ -56,4 +56,27 @@ it("no marca como pagado ni envía dos cobros antes de la respuesta", async () =
     api.vrGetLineasComanda.mockResolvedValue([{ ...fila, Pagado: 1 }]);
     responder();
     await waitFor(() => expect(screen.queryByRole("button", { name: "Eliminar" })).not.toBeInTheDocument());
+});
+
+// INC-20261030-016: un ticket cobrado entero ya no admite líneas, y tras cobrar se queda a la vista.
+// Lo que se añade entonces es otra venta: va a un ticket nuevo, no al cobrado.
+it("lo que se añade con el ticket ya cobrado va a un ticket nuevo", async () => {
+    await abrir([{ ...fila, Pagado: 1 }]);
+    api.vrCreateComandaBarra.mockResolvedValueOnce("nueva");
+    api.vrAddLineaComanda.mockResolvedValueOnce({ ok: true });
+    api.vrGetLineasComanda.mockImplementation(async (id: string) => id === "nueva" ? [{ ...fila, ID_Detalle: "nuevo" }] : [{ ...fila, Pagado: 1 }]);
+    fireEvent.click(screen.getByRole("button", { name: "Añadir uno" }));
+    await waitFor(() => expect(api.vrAddLineaComanda).toHaveBeenCalledTimes(1));
+    expect(api.vrCreateComandaBarra).toHaveBeenCalledTimes(1);
+    expect(api.vrAddLineaComanda.mock.calls[0][0]).toBe("nueva");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Eliminar" })).toBeInTheDocument());
+});
+
+it("con líneas pendientes, lo que se añade sigue en el mismo ticket", async () => {
+    await abrir([fila]);
+    api.vrAddLineaComanda.mockResolvedValueOnce({ ok: true });
+    fireEvent.click(screen.getByRole("button", { name: "Añadir uno" }));
+    await waitFor(() => expect(api.vrAddLineaComanda).toHaveBeenCalledTimes(1));
+    expect(api.vrCreateComandaBarra).not.toHaveBeenCalled();
+    expect(api.vrAddLineaComanda.mock.calls[0][0]).toBe("comanda");
 });
