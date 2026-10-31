@@ -81,7 +81,7 @@ import {
 	setTrabajadorIfNull,
 	updateDetalleNota,
 } from "../src/domains/mesas/mesas.commands";
-import { cobrarDetallesPlan, datosDeLinea } from "../src/domains/mesas/mesas.queries";
+import { cobrarDetallesPlan, comandaCobrada, datosDeLinea } from "../src/domains/mesas/mesas.queries";
 import {
 	eliminarProveedor,
 	guardarProveedor,
@@ -1026,6 +1026,79 @@ describe("edición de catálogo sin cambiar precios", () => {
 			aplicar(hub, sql, upsertProducto({ id_producto:'p',id_categoria:'cat',nombre:'Editado',precio_venta:100,iva_percent:10,ids_alergenos:[] }, false, 'actor', true));
 			const filas = await clienteSobre(sql).execute("SELECT Nombre,Precio_Venta,IVA_Percent FROM Productos WHERE ID_Producto='p'");
 			expect(filas.rows).toEqual([{Nombre:'Editado',Precio_Venta:200,IVA_Percent:21}]);
+		});
+	});
+});
+
+// INC-20261030-016: una comanda cobrada no admite líneas nuevas. La Main lo rechaza con
+// `COMANDA_COBRADA`, y eso el harness de arriba no lo ve: sólo compara casos que salen bien. Aquí,
+// la consulta con la que la ruta rechaza y la condición del propio INSERT, que cubre a la Main
+// cobrando entre esa lectura y el lote (SYNC-30).
+describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
+	const SIEMBRA = [
+		"INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Bar')",
+		"INSERT INTO Productos (ID_Producto,ID_Categoria,Nombre,Precio_Venta) VALUES ('cafe','cat','Cafe',130)",
+		"INSERT INTO Zonas (ID_Zona,Nombre_Zona) VALUES ('z','Sala')",
+		"INSERT INTO Mesas (ID_Mesa,ID_Zona,Numero_Mesa,Capacidad,Ubicacion_X,Ubicacion_Y,Shape,Width,Height) VALUES ('m','z','1',4,0,0,'rect',80,80)",
+		"INSERT INTO Comandas (ID_Comanda,ID_Mesa,Canal,Fecha_Hora_Apertura,Fecha_Hora_Cierre,Estado) VALUES ('mesa_cobrada','m','MESA','2026-10-30 23:00:00','2026-10-30 23:30:00','Pagada')",
+		"INSERT INTO Comandas (ID_Comanda,ID_Mesa,Canal,Fecha_Hora_Apertura,Estado) VALUES ('mesa_abierta','m','MESA','2026-10-30 23:35:00','Abierta')",
+		"INSERT INTO Comandas (ID_Comanda,Canal,Fecha_Hora_Apertura,Fecha_Hora_Cierre,Estado) VALUES ('barra_cobrada','BARRA','2026-10-30 23:00:00','2026-10-30 23:10:00','Pagada')",
+	];
+
+	async function lineasDe(sql: any, idComanda: string): Promise<number> {
+		const rs = await clienteSobre(sql).execute({
+			sql: "SELECT COUNT(*) AS n FROM Detalle_Comanda WHERE ID_Comanda = ?1",
+			args: [idComanda],
+		});
+		return Number((rs.rows[0] as any).n);
+	}
+
+	const lineaMesa = (idComanda: string) =>
+		addLineaMesa(
+			{ id_comanda: idComanda, id_producto: "cafe", cantidad: 1, id_trabajador_o_usuario: null } as any,
+			"PENDIENTE",
+			null,
+			"Cafe",
+			130 as any,
+		);
+
+	it("la ruta sabe qué comanda está cobrada", async () => {
+		await enElHub("inc016-consulta", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of SIEMBRA) sql.exec(s);
+			const db = clienteSobre(sql);
+			expect(await comandaCobrada(db as any, "mesa_cobrada")).toBe(true);
+			expect(await comandaCobrada(db as any, "barra_cobrada")).toBe(true);
+			expect(await comandaCobrada(db as any, "mesa_abierta")).toBe(false);
+			// La de barra se crea en el mismo lote que su primera línea: que no exista no es cobrada.
+			expect(await comandaCobrada(db as any, "aun_no_existe")).toBe(false);
+		});
+	});
+
+	it("Mesas no mete la línea en la comanda cobrada y sí en la abierta", async () => {
+		await enElHub("inc016-mesas", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of SIEMBRA) sql.exec(s);
+			aplicar(hub, sql, lineaMesa("mesa_cobrada"));
+			aplicar(hub, sql, lineaMesa("mesa_abierta"));
+			expect(await lineasDe(sql, "mesa_cobrada")).toBe(0);
+			expect(await lineasDe(sql, "mesa_abierta")).toBe(1);
+		});
+	});
+
+	it("la barra no mete la línea en el ticket cobrado", async () => {
+		await enElHub("inc016-barra", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of SIEMBRA) sql.exec(s);
+			aplicar(
+				hub,
+				sql,
+				addLinea({ id_comanda: "barra_cobrada", id_producto: "cafe", cantidad: 1 } as any, null, "Cafe", 130 as any),
+			);
+			expect(await lineasDe(sql, "barra_cobrada")).toBe(0);
 		});
 	});
 });

@@ -127,6 +127,9 @@ export function addLinea(
 						args: [input.id_comanda, CANAL_BARRA],
 					},
 					{
+						// INC-20261030-016: sólo entra en un ticket abierto. La ruta ya lo rechaza
+						// antes, pero lo lee fuera de esta transacción (SYNC-30). El `WHERE` también
+						// evita que el `ON CONFLICT` se lea como parte del `SELECT`.
 						kind: "execute",
 						sql: `
 							INSERT INTO Detalle_Comanda (
@@ -140,7 +143,8 @@ export function addLinea(
 								Estado_Cocina,
 								IVA_Percent
 							)
-							VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'PENDIENTE', ?7)
+							SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL, 'PENDIENTE', ?7
+							WHERE EXISTS (SELECT 1 FROM Comandas WHERE ID_Comanda = ?2 AND Estado = 'Abierta')
 							ON CONFLICT(ID_Detalle) DO UPDATE SET
 								ID_Comanda = excluded.ID_Comanda,
 								ID_Producto = excluded.ID_Producto,

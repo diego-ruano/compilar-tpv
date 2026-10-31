@@ -106,6 +106,9 @@ mesasRoutes.post("/lineas", cuerpo(S.addLineaSchema), async (c) => {
 		q.datosDeLinea(db, entrada.id_producto),
 	);
 	if (datos.archivado) return c.json({ ok: false, error: "producto_archivado" }, 409);
+	if (await tenantQuery(c, (db) => q.comandaCobrada(db, entrada.id_comanda))) {
+		return c.json({ ok: false, error: "comanda_cobrada" }, 409);
+	}
 	await apply(
 		c,
 		cmd.addLinea(

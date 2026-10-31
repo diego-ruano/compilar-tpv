@@ -818,6 +818,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
         let precio = producto.precio;
         let res: AppResult<String> = db.transaccion(async {
+            // INC-20261030-016: un ticket cobrado no admite líneas nuevas.
+            crate::mesas::exigir_comanda_abierta(db, id_comanda).await?;
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda

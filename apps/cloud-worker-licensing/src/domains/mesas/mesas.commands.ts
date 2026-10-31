@@ -445,6 +445,10 @@ export function addLinea(
 	// El tipo de IVA (?7) y el nombre (?8) viajan igual y por el mismo motivo, y se guardan EN LA
 	// LÍNEA: una reimpresión tiene que enseñar lo del día de la venta, y el producto puede haberse
 	// borrado del catálogo desde entonces (INV-05). El precio (?5) también sale del catálogo (RI-27).
+	//
+	// INC-20261030-016: sólo entra en una comanda abierta. La ruta ya lo rechaza antes, pero lo
+	// lee fuera de esta transacción (SYNC-30): si la Main cobra en medio, la condición hace que no
+	// entre nada en vez de una línea que nadie va a cobrar.
 	steps.push({
 		kind: "execute",
 		sql: `
@@ -458,7 +462,8 @@ export function addLinea(
 				IVA_Percent,
 				Nombre_Producto
 			)
-			VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
+			SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+			WHERE EXISTS (SELECT 1 FROM Comandas WHERE ID_Comanda = ?2 AND Estado = 'Abierta');
 		`,
 		args: [
 			idDetalle,

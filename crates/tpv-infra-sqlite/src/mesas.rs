@@ -104,6 +104,30 @@ pub(crate) async fn snapshot_del_producto<C: Reader>(conn: &C, id_producto: &str
     }
 }
 
+/// Lo que se enseña al intentar añadir una línea a una comanda ya cobrada. El mismo texto que
+/// `comanda_cobrada` en el worker (`lib/errorCodes.ts`).
+pub(crate) const COMANDA_COBRADA: &str =
+    "Esa cuenta ya está cobrada. Ciérrala y vuelve a abrir la mesa o un ticket nuevo.";
+
+/// INC-20261030-016: una comanda cobrada no admite líneas nuevas. Una pantalla que se quedó con la
+/// comanda de antes del cobro (otro equipo la cobró, o se cobró y se volvió a abrir la mesa) metía
+/// la línea en la comanda ya `Pagada`: la mesa aparecía libre, la comanda nueva no la enseñaba y
+/// nadie la iba a cobrar. Se comprueba dentro de la transacción que escribe la línea.
+///
+/// Una comanda que no existe pasa: la rechaza la FK del `INSERT`, como siempre.
+pub(crate) async fn exigir_comanda_abierta<C: Reader>(conn: &C, id_comanda: &str) -> AppResult<()> {
+    let cobrada = select_one_i64(
+        conn,
+        "SELECT Estado <> 'Abierta' FROM Comandas WHERE ID_Comanda = ?1 LIMIT 1;",
+        vec![Value::Text(id_comanda.to_string())],
+    )
+    .await?;
+    if cobrada == Some(1) {
+        return Err(AppError::conflict(COMANDA_COBRADA));
+    }
+    Ok(())
+}
+
 /// Ver [`snapshot_del_producto`].
 #[derive(Debug)]
 pub(crate) struct ProductoEnLinea {
@@ -913,6 +937,7 @@ impl MesasRepository for SqliteMesasRepository {
         let db = &g;
 
         let res: AppResult<()> = db.transaccion(async {
+            exigir_comanda_abierta(db, id_comanda).await?;
             let id_trabajador_real = resolve_trabajador_id_input(db, id_trab_o_usuario).await?;
             if let Some(idt) = id_trabajador_real {
                 db.execute(
@@ -1804,6 +1829,93 @@ mod tests_snapshot_de_la_linea {
             Dinero::CERO,
             "sin precio se vende a 0 €"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_comanda_cobrada {
+    //! INC-20261030-016: una comanda cobrada no admite líneas nuevas, ni desde Mesas ni desde la
+    //! barra. Una pantalla con la comanda de antes del cobro las metía en la `Pagada`, donde nadie
+    //! las iba a cobrar.
+
+    use super::*;
+    use crate::db::Db;
+    use crate::ejecutor::Connection;
+    use crate::venta_rapida::SqliteVentaRapidaRepository;
+    use tpv_application::ports::venta_rapida::VentaRapidaRepository;
+
+    async fn db_sembrada() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("comanda_cobrada");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in [
+                "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');",
+                "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+                   VALUES ('cafe', 'cat', 'Cafe', 130);",
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z', 'Sala');",
+                "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+                   VALUES ('m', 'z', '1', 4, 0, 0, 'rect', 80, 80);",
+                "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado)
+                   VALUES ('mesa_cobrada', 'm', 'MESA', '2026-10-30 23:00:00', '2026-10-30 23:30:00', 'Pagada');",
+                "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado)
+                   VALUES ('mesa_abierta', 'm', 'MESA', '2026-10-30 23:35:00', 'Abierta');",
+                "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado)
+                   VALUES ('barra_cobrada', 'BARRA', '2026-10-30 23:00:00', '2026-10-30 23:10:00', 'Pagada');",
+            ] {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        (db, dir)
+    }
+
+    async fn lineas_de(db: &Arc<Db>, id_comanda: &str) -> i64 {
+        let r = db.read().await;
+        select_one_i64(
+            &r,
+            "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda = ?1;",
+            vec![Value::Text(id_comanda.to_string())],
+        )
+        .await
+        .unwrap()
+        .unwrap_or(0)
+    }
+
+    fn es_la_comanda_cobrada(e: &AppError) -> bool {
+        matches!(e, AppError::Conflict(m) if m == COMANDA_COBRADA)
+    }
+
+    #[tokio::test]
+    async fn mesas_no_anade_una_linea_a_la_comanda_cobrada() {
+        let (db, _dir) = db_sembrada().await;
+        let repo = SqliteMesasRepository::new(db.clone());
+
+        let e = repo.add_linea_comanda("mesa_cobrada", "cafe", 1.0, None).await.unwrap_err();
+        assert!(es_la_comanda_cobrada(&e), "{e:?}");
+        assert_eq!(lineas_de(&db, "mesa_cobrada").await, 0);
+    }
+
+    #[tokio::test]
+    async fn mesas_sigue_anadiendo_a_la_comanda_abierta() {
+        let (db, _dir) = db_sembrada().await;
+        let repo = SqliteMesasRepository::new(db.clone());
+
+        repo.add_linea_comanda("mesa_abierta", "cafe", 1.0, None).await.unwrap();
+        assert_eq!(lineas_de(&db, "mesa_abierta").await, 1);
+    }
+
+    #[tokio::test]
+    async fn la_barra_no_anade_una_linea_al_ticket_cobrado() {
+        let (db, _dir) = db_sembrada().await;
+        let repo = SqliteVentaRapidaRepository::new(db.clone());
+
+        let e = repo.add_linea_comanda("barra_cobrada", "cafe", 1.0).await.unwrap_err();
+        assert!(es_la_comanda_cobrada(&e), "{e:?}");
+        assert_eq!(lineas_de(&db, "barra_cobrada").await, 0);
     }
 }
 

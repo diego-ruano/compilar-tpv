@@ -422,6 +422,19 @@ export async function datosDeLinea(
 	};
 }
 
+/**
+ * INC-20261030-016: si la comanda ya está cobrada, para que la ruta rechace la línea con su
+ * mensaje. Espejo de `exigir_comanda_abierta` en la Main. Una comanda que no existe no cuenta como
+ * cobrada (la de barra se crea en el mismo lote que su primera línea).
+ */
+export async function comandaCobrada(db: Client, idComanda: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: "SELECT Estado <> 'Abierta' AS cobrada FROM Comandas WHERE ID_Comanda = ?1 LIMIT 1;",
+		args: [idComanda],
+	});
+	return Number(rows(rs)[0]?.cobrada ?? 0) === 1;
+}
+
 export async function idComandaByDetalle(
 	db: Client,
 	idDetalle: string,
