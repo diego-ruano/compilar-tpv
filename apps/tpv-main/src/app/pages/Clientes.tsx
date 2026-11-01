@@ -637,7 +637,10 @@ export default function Clientes() {
         zIndex={60}
         widthClass="max-w-[780px]"
       >
-        <div className="max-h-[75vh] overflow-y-auto pr-1">
+        {/* INC-20261030-020: sin desplazamiento propio; ya lo tiene el cuerpo del modal. Con una
+            segunda caja de 75vh dentro, en Android horizontal la interior era más alta que la
+            exterior: el dedo movía la de dentro y Guardar/Cancelar quedaban fuera de la vista. */}
+        <div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Campo
               label="Nombre *"

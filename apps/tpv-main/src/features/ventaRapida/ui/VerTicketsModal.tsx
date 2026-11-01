@@ -261,8 +261,11 @@ export default function VerTicketsModal({
         aria-label="Cerrar"
       />
 
-      {/* El ancho lo fija la medida común de las modales (Global.css); ésta la amplía. */}
-      <div className="absolute left-1/2 top-1/2 max-h-[calc(100dvh-1.5rem)] [--modal-width:68rem] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
+      {/* El ancho lo fija la medida común de las modales (Global.css); ésta la amplía.
+          INC-20261030-020: en columna, y la lista se desplaza con el alto que queda. Con una lista
+          de 70vh dentro de un panel que no se desplaza, en una pantalla baja (Android en horizontal)
+          su final quedaba cortado por el borde del panel. */}
+      <div className="absolute left-1/2 top-1/2 flex max-h-[calc(100dvh-1.5rem)] flex-col [--modal-width:68rem] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b border-border p-3 sm:items-center sm:p-4">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-fg sm:text-lg">Tickets (Barra) · Hoy</h3>
@@ -329,7 +332,7 @@ export default function VerTicketsModal({
           </div>
         </div>
 
-        <div className="p-3 sm:p-4">
+        <div className="flex min-h-0 flex-1 flex-col p-3 sm:p-4">
           {rows.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-bg p-8 text-center">
               <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
@@ -341,7 +344,7 @@ export default function VerTicketsModal({
               </p>
             </div>
           ) : (
-            <div className="max-h-[70vh] overflow-y-auto pr-1 lg:max-h-[72vh]">
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               <div className="grid grid-cols-1 gap-3">
                 {rows.map(({ c, when, totalPendiente, total, est }) => {
                   const badge =
