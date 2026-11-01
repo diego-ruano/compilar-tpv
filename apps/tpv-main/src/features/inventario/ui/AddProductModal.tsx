@@ -178,6 +178,11 @@ export function AddProductModal({
                 setStockMinimo("");
                 setUnidadMedida("");
                 setCantidadPedidoEsperada("");
+                // INC-20261030-002: se quedaban los del último producto abierto, y un alta nueva
+                // podía guardarse controlando stock o con un IVA que nadie había elegido. Vacíos:
+                // sin control de suelto y con el IVA del negocio.
+                setStockSuelto("");
+                setIvaPercent("");
 
                 setExistingImageName(null);
                 setExistingImagePath(null);

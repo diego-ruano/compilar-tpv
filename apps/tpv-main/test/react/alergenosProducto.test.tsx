@@ -69,3 +69,21 @@ it("muestra iconos con UUID, guarda las altas y bajas y recupera la selección",
         expect(screen.getByRole("button", { name: "Alergeno Crustáceos" })).toHaveAttribute("aria-pressed", "true");
     });
 });
+
+// INC-20261030-002: «Nuevo producto» después de abrir otro se quedaba con su stock suelto y su IVA,
+// y el alta nueva podía guardarse controlando stock o con un IVA que nadie había elegido.
+it("un alta nueva no hereda el stock suelto ni el IVA del producto abierto antes", async () => {
+    datos.leer.mockResolvedValue({
+        ID_Producto: "producto-1", ID_Categoria: "categoria-1", ID_Proveedor: null,
+        Nombre: "Cafe", Precio_Venta: deCentimos(130), Stock_Suelto: 2, IVA_Percent: 10,
+        Nombre_Imagen: null, Ruta_Imagen: null, alergs: [],
+    });
+    const props = { open: true, onClose: vi.fn(), onSaved: vi.fn(), categoriaPreseleccionadaId: null };
+    const vista = render(<AddProductModal {...props} productIdToEdit="producto-1" />);
+    await waitFor(() => expect(screen.getByPlaceholderText("Vacío = el del negocio")).toHaveValue(10));
+    expect(screen.getByPlaceholderText("Vacío = no se controla")).toHaveValue(2);
+
+    vista.rerender(<AddProductModal {...props} productIdToEdit={null} />);
+    await waitFor(() => expect(screen.getByPlaceholderText("Vacío = el del negocio")).toHaveValue(null));
+    expect(screen.getByPlaceholderText("Vacío = no se controla")).toHaveValue(null);
+});
