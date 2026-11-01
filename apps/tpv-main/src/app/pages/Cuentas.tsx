@@ -745,8 +745,11 @@ export default function Cuentas() {
         </>
     );
 
+    // INC-20261031-023: la página se desplaza si no cabe, y las listas no bajan de un alto mínimo.
+    // Antes era de alto fijo y sin desplazamiento: las listas se quedaban con lo que sobraba tras la
+    // cabecera, el pie y el historial de cierres, y a 1280×800 no sobraba nada.
     return (
-        <div className="flex h-full w-full flex-col gap-3 overflow-hidden bg-bg p-3 sm:p-4 lg:px-10 lg:py-5">
+        <div className="flex h-full w-full flex-col gap-3 overflow-y-auto bg-bg p-3 sm:p-4 lg:px-10 lg:py-5">
             {/* HEADER */}
             <div className="flex w-full shrink-0 flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -835,7 +838,7 @@ export default function Cuentas() {
             {/* PANELES */}
             <div
                 className={cn(
-                    "grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden",
+                    "grid min-h-128 flex-1 grid-cols-1 gap-4 overflow-hidden lg:min-h-80",
                     admin && cobrosPermitidos
                         ? "grid-rows-[repeat(2,minmax(0,1fr))] lg:grid-cols-2 lg:grid-rows-1"
                         : "grid-rows-[minmax(0,1fr)]",
