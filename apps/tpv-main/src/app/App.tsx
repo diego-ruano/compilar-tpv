@@ -103,7 +103,9 @@ function AppInner() {
     }
 
     const path = location.pathname.toLowerCase();
-    if (permisos.isPending) return <p className="p-4">Cargando permisos…</p>;
+    // Leer los permisos de la sesión es casi instantáneo: un «Cargando permisos…» ahí sólo parpadea
+    // entre el login y la aplicación. Mientras tanto no se pinta nada, como al arrancar.
+    if (permisos.isPending) return null;
     if (permisos.isError) return <div className="p-4"><p>{toAppError(permisos.error).message}</p><button onClick={() => void permisos.refetch()}>Reintentar</button><button onClick={() => useAuth.getState().logout()}>Cerrar sesión</button></div>;
     const destino = permisos.puede("servicio.vender") ? "/VentaRapida" : permisos.puede("servicio.cocina") ? "/Comandas" : permisos.puede("tareas.propias") ? "/Tareas" : "/Inventario";
     if ((path === "/" || path === "/ventarapida") && !permisos.puede("servicio.vender")) return <Navigate to={destino} replace />;

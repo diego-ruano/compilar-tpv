@@ -42,7 +42,8 @@ export function Permisos() {
         });
     }
 
-    if (query.isPending) return <p>Cargando permisos…</p>;
+    // Sin texto de espera: la matriz llega enseguida y el aviso sólo parpadeaba.
+    if (query.isPending) return null;
     if (query.isError) {
         return <div>
             <p>{toAppError(query.error).message}</p>
