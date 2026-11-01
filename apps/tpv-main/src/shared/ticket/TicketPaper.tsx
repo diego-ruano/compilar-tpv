@@ -113,18 +113,22 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
         };
     }, [p.logo_path]);
 
+    // INC-20261031-026: entre nombre e importe, un carácter, como en el papel (`recortar` le deja
+    // justo ése); y el importe no se parte. Con 8 px de hueco la fila no cabía y el «€» saltaba.
     const fila = (izq: React.ReactNode, der: React.ReactNode, estilo?: React.CSSProperties) => (
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, ...estilo }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "1ch", ...estilo }}>
             <span style={{ whiteSpace: "nowrap" }}>{izq}</span>
-            <span>{der}</span>
+            <span style={{ whiteSpace: "nowrap" }}>{der}</span>
         </div>
     );
 
     return (
         <div className="bg-white text-black rounded-xl border border-black/10 shadow-sm overflow-hidden inline-block">
             {/* `ch` = ancho de un carácter en esta fuente monoespaciada: el papel mide exactamente
-                las columnas que tendrá el de verdad. */}
-            <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14, width: `${cols}ch` }}>
+                las columnas que tendrá el de verdad. INC-20261031-026: `content-box`, porque Tailwind
+                pone `border-box` a todo, y entonces el relleno salía de esas columnas: la línea útil
+                era unos 4 caracteres más corta que la del papel y el importe no cabía. */}
+            <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14, width: `${cols}ch`, boxSizing: "content-box" }}>
                 {/* Cabecera: los datos del negocio, a la izquierda. El logo cierra el ticket. */}
                 <div style={{ textAlign: "left" }}>
                     {p.show_business_name ? (
