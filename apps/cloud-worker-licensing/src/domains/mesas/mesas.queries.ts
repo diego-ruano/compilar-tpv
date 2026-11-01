@@ -320,6 +320,7 @@ export async function mesasMetaAll(
 	return out;
 }
 
+// INC-20261030-005: la categoría no vendible no sale en la venta. Espejo de la Main.
 export async function categorias(db: Client): Promise<CategoriaVendibleOut[]> {
 	const rs = await db.execute(`
 		SELECT
@@ -328,6 +329,7 @@ export async function categorias(db: Client): Promise<CategoriaVendibleOut[]> {
 			Ruta_Imagen AS Ruta_Imagen,
 			COALESCE(Pasa_Cocina,0) AS Pasa_Cocina
 		FROM Categorias_Producto
+		WHERE COALESCE(Vendible,1) = 1
 		ORDER BY Nombre ASC;
 	`);
 	return rows(rs) as CategoriaVendibleOut[];
@@ -362,14 +364,15 @@ export async function searchProductos(
 	const rs = await db.execute({
 		sql: `
 			SELECT
-				ID_Producto AS ID_Producto,
-				ID_Categoria AS ID_Categoria,
-				Nombre AS Nombre,
-				COALESCE(Precio_Venta,0) AS Precio_Venta,
-				Ruta_Imagen AS Ruta_Imagen
-			FROM Productos
-			WHERE LOWER(Nombre) LIKE ?1 AND Archivado_En IS NULL
-			ORDER BY Nombre ASC
+				p.ID_Producto AS ID_Producto,
+				p.ID_Categoria AS ID_Categoria,
+				p.Nombre AS Nombre,
+				COALESCE(p.Precio_Venta,0) AS Precio_Venta,
+				p.Ruta_Imagen AS Ruta_Imagen
+			FROM Productos p
+			JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
+			WHERE LOWER(p.Nombre) LIKE ?1 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1) = 1
+			ORDER BY p.Nombre ASC
 			LIMIT 200;
 		`,
 		args: [`%${query.toLowerCase()}%`],

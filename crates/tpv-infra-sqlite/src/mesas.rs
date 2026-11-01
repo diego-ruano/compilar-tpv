@@ -1124,9 +1124,11 @@ impl MesasRepository for SqliteMesasRepository {
         let g = self.db.read().await;
         let db = &g;
 
+        // INC-20261030-005: la categoría no vendible (materia prima) no sale en la venta, igual que
+        // en la venta rápida. Es lo que promete el interruptor «¿Esta categoría es vendible?».
         let sql1 = r#"
             SELECT ID_Categoria, Nombre, Ruta_Imagen, COALESCE(Pasa_Cocina,0)
-            FROM Categorias_Producto ORDER BY Nombre ASC;
+            FROM Categorias_Producto WHERE COALESCE(Vendible,1)=1 ORDER BY Nombre ASC;
         "#;
 
         let mut rows = db.query(sql1, ()).await.map_err(db_err)?;
@@ -1160,9 +1162,13 @@ impl MesasRepository for SqliteMesasRepository {
         let g = self.db.read().await;
         let db = &g;
         let needle = format!("%{}%", q.trim().to_lowercase());
+        // INC-20261030-005: el buscador tampoco ofrece productos de una categoría no vendible.
         let sql1 = r#"
-            SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), Ruta_Imagen
-            FROM Productos WHERE LOWER(Nombre) LIKE ?1 AND Archivado_En IS NULL ORDER BY Nombre ASC LIMIT 200;
+            SELECT p.ID_Producto, p.ID_Categoria, p.Nombre, COALESCE(p.Precio_Venta,0), p.Ruta_Imagen
+            FROM Productos p
+            JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
+            WHERE LOWER(p.Nombre) LIKE ?1 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1)=1
+            ORDER BY p.Nombre ASC LIMIT 200;
         "#;
         productos_query(db, sql1, vec![Value::Text(needle)]).await
     }

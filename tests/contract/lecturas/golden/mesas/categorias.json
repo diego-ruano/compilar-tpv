@@ -6,12 +6,6 @@
     "Ruta_Imagen": null
   },
   {
-    "ID_Categoria": "cat-no-vendible",
-    "Nombre": "Materia prima",
-    "Pasa_Cocina": 0,
-    "Ruta_Imagen": null
-  },
-  {
     "ID_Categoria": "cat-cocina",
     "Nombre": "Platos",
     "Pasa_Cocina": 1,

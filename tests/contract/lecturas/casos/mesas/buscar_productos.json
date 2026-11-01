@@ -1,5 +1,5 @@
 {
-  "descripcion": "Buscador de productos por nombre. El LIKE va en minusculas por los dos lados, asi que se busca con mayusculas a proposito para que una diferencia de mayusculas/minusculas salte. 'cro' casa con Croquetas y no con el resto.",
+  "descripcion": "Buscador de productos por nombre. El LIKE va en minusculas por los dos lados, asi que se busca con mayusculas a proposito para que una diferencia de mayusculas/minusculas salte. 'cro' casa con Croquetas y con el Croissant crudo, que es de una categoria no vendible y no debe salir (INC-20261030-005).",
   "lectura": "mesas.buscar_productos",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina, Ruta_Imagen) VALUES ('cat-cocina', 'Platos', 1, '/img/platos.png');",
@@ -9,7 +9,8 @@
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-croquetas', 'cat-cocina', 'Croquetas', 750);",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent) VALUES ('prod-cerveza', 'cat-barra', 'Cerveza', 300, 21.0);",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-sin-precio', 'cat-barra', 'Agua del grifo');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-harina', 'cat-no-vendible', 'Harina', 0);"
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-harina', 'cat-no-vendible', 'Harina', 0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-croissant-crudo', 'cat-no-vendible', 'Croissant crudo', 0);"
   ],
   "entrada": {
     "query": "CRO"
