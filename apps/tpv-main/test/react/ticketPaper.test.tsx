@@ -26,3 +26,14 @@ it("el papel mide sus columnas sin el relleno y el importe no se parte", async (
     expect(fila.style.gap).toBe("1ch");
     expect(importe.parentElement!.style.whiteSpace).toBe("nowrap");
 });
+
+// OBS-20261031-022: un ticket anulado por ERROR cuyas líneas se retiraron después de la mesa se queda
+// sin ellas (lo borra el esquema) pero con su total. La copia dice por qué, en vez de «No hay
+// productos» junto a un total que no cuadra.
+it("la copia de un ticket anulado sin líneas explica por qué no las tiene", async () => {
+    const vacio = payloadDePrecuenta([]);
+    const { rerender } = render(<TicketPaper payload={{ ...vacio, es_anulado: true }} />);
+    expect(await screen.findByText("Las líneas de este ticket se retiraron de la mesa después de anularlo.")).toBeInTheDocument();
+    rerender(<TicketPaper payload={vacio} />);
+    expect(screen.getByText("No hay productos en el ticket.")).toBeInTheDocument();
+});

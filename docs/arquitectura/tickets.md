@@ -52,7 +52,9 @@ Hay dos papeles y salen de sitios distintos (RI-29):
   no detecta una `CuotaTotal` descuadrada, así que esta regla y sus goldens son la única red.
 - **El número de ticket es el número de la factura** (`Pagos.Numero_Ticket` = `Num_Serie_Factura`). Una
   reimpresión reusa número, fecha y desglose y sale marcada `COPIA`; si el cobro está anulado,
-  también `*** ANULADO ***`.
+  también `*** ANULADO ***`. Anular por ERROR devuelve las líneas a la mesa, y si después se retiran
+  desaparecen también de la copia, que conserva el total del cobro: la vista previa lo explica en
+  lugar de «No hay productos».
 - **La fecha de un ticket es la de expedición** de su factura, con la hora en que se generó el
   registro (`fecha_del_papel`). Sólo la precuenta lleva la de ahora, y un cobro sin registro (anterior a la
   numeración), la del pago.

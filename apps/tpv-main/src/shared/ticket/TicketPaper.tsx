@@ -192,7 +192,13 @@ export default function TicketPaper({ payload }: { payload: PrintTicketPayload }
 
                 {lineas.length === 0 ? (
                     <div style={{ textAlign: "center", opacity: 0.65, padding: "10px 0" }}>
-                        No hay productos en el ticket.
+                        {/* OBS-20261031-022: anular por ERROR devuelve las líneas a la mesa, y si
+                            luego se retiran se borran también de este ticket (lo dice el esquema). El
+                            cobro anulado conserva su importe: sin esto, el total no cuadraba con
+                            «No hay productos» y no se sabía por qué. */}
+                        {p.es_anulado
+                            ? "Las líneas de este ticket se retiraron de la mesa después de anularlo."
+                            : "No hay productos en el ticket."}
                     </div>
                 ) : (
                     <div>
