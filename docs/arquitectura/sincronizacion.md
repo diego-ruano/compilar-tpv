@@ -59,6 +59,9 @@ pendientes de los ajustes anteriores tampoco pueden repoblarlas.
 El saludo exige `hello_ok` con rol Handy y un `main_status` válido antes de confirmar presencia. Un
 corte de red conserva la presencia anterior durante cinco segundos; la gracia vence también si se
 está esperando un ticket o una reconexión. Sin Main o durante su volcado se mantiene el bloqueo.
+Si la Handy ya ha trabajado con ese vínculo, el bloqueo se pone encima de la aplicación sin
+desmontarla (`inert`), y al volver la Main sigue lo que estaba abierto; al arrancar o al vincular de
+nuevo, es la pantalla entera (`app/arranque/pantallaDeArranque.ts`).
 Rechazos de licencia y revocación se distinguen de la red, con reintentos cada cinco minutos.
 
 Cada conexión confirmada tiene un contador nativo. Al volver a observarla, reconectar o terminar el

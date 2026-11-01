@@ -13,6 +13,11 @@
 //   · El aviso de caducidad sólo acompaña a una Main que trabaja, nunca a una bloqueada.
 //   · Un Handy al que la nube rechaza no está «conectando»: se le dice qué pasa y qué hacer. Es
 //     la diferencia entre una espera que termina sola y una que no va a terminar nunca.
+//   · INC-20261030-014: un Handy que ya ha trabajado con este vínculo no pierde lo que tenía abierto
+//     al quedarse sin Main. La espera bloquea igual, pero encima de la aplicación, sin desmontarla:
+//     antes se sustituía entera, y al volver la Main cada página empezaba de cero (la ficha que se
+//     editaba, el modal abierto, la lista en la que se estaba). Al arrancar o al vincular de nuevo
+//     no hay nada que conservar, y la espera sigue siendo la pantalla entera.
 
 import type { LicenseGateResult_Serialize as LicenseGateResult } from "@tpv/contracts";
 
@@ -31,6 +36,15 @@ export type EntradaArranque = {
 	mainVolcando: boolean;
 	/** La nube no deja entrar a este Handy, y por qué. `null` mientras no lo haya dicho. */
 	rechazoHandy: MotivoRechazo | null;
+	/** El Handy ya ha trabajado con este vínculo: tiene pantallas abiertas que conservar. */
+	handyYaTrabajo: boolean;
+};
+
+/** Por qué espera un Handy, y si es una espera que termina sola. */
+export type EsperaHandy = {
+	conectando: boolean;
+	volcando: boolean;
+	rechazo: MotivoRechazo | null;
 };
 
 export type AvisoCaducidad = { motivo: "warn" | "expiry_grace"; expiresAtMs: number | null };
@@ -39,13 +53,9 @@ export type Pantalla =
 	| { tipo: "cargando" }
 	| { tipo: "elegir_modo" }
 	| { tipo: "handy_vincular" }
-	| {
-			tipo: "handy_esperando_main";
-			conectando: boolean;
-			volcando: boolean;
-			rechazo: MotivoRechazo | null;
-	  }
-	| { tipo: "handy_app" }
+	| ({ tipo: "handy_esperando_main" } & EsperaHandy)
+	/** `espera`: la aplicación sigue montada, pero bloqueada por la espera, encima. */
+	| { tipo: "handy_app"; espera: EsperaHandy | null }
 	| { tipo: "tpv_activar"; rechazoPrevio: string | null }
 	| { tipo: "tpv_bloqueada"; motivo: string }
 	| { tipo: "tpv_app" };
@@ -73,6 +83,8 @@ export function decidirArranque(e: EntradaArranque): Arranque {
 	return {
 		pantalla: pantalla(e),
 		mainLista,
+		// También con la espera encima de la aplicación: tapa la barra propia de la aplicación, y en
+		// el escritorio es la que mueve y cierra la ventana.
 		conBarraDeArranque: !mainLista && !handyTrabajando,
 		avisoCaducidad,
 	};
@@ -84,15 +96,15 @@ function pantalla(e: EntradaArranque): Pantalla {
 
 	if (e.modo === "handy") {
 		if (!e.handyEmparejado) return { tipo: "handy_vincular" };
-		if (e.mainOnline === true && !e.mainVolcando) return { tipo: "handy_app" };
-		return {
-			tipo: "handy_esperando_main",
+		if (e.mainOnline === true && !e.mainVolcando) return { tipo: "handy_app", espera: null };
+		const espera: EsperaHandy = {
 			// Un rechazo NO es estar conectando: la nube ya ha contestado, y lo que ha dicho es
 			// que no. Confundirlos es lo que dejaba la pantalla girando para siempre.
 			conectando: e.mainOnline === null && e.rechazoHandy === null,
 			volcando: e.mainVolcando,
 			rechazo: e.rechazoHandy,
 		};
+		return e.handyYaTrabajo ? { tipo: "handy_app", espera } : { tipo: "handy_esperando_main", ...espera };
 	}
 
 	if (e.gate === null) return { tipo: "cargando" };

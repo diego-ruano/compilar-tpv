@@ -10,7 +10,7 @@ import { commands } from "@tpv/client";
 // sin Main no trabaja, una Main no enseña nada sin licencia) está en `pantallaDeArranque.ts`, con sus
 // tests en `test/arranque.test.ts`.
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 
 
@@ -55,6 +55,17 @@ export default function AppBoot({ router }: { router: any }) {
 	const rechazoHandy = useMainPresence((s) => s.rechazo);
 	// SYNC-18: la Main está subiendo su atraso. Cuenta como "no disponible todavía" para el Handy.
 	const mainVolcando = useMainPresence((s) => s.volcando);
+
+	// INC-20261030-014: el vínculo (la generación del servicio nativo) en el que el Handy ha llegado a
+	// trabajar. Mientras sea el mismo, quedarse sin Main bloquea encima de la aplicación en vez de
+	// desmontarla; uno nuevo (vincular otra vez, cambiar de modo) empieza sin nada que conservar.
+	const generacion = useMainPresence((s) => s.generacion);
+	const handyEmparejado = emparejamiento.estado.step === "paired";
+	const handyTrabajando = modo === "handy" && handyEmparejado && mainOnline === true && !mainVolcando;
+	const [trabajoEnGeneracion, setTrabajoEnGeneracion] = useState<number | null>(null);
+	useEffect(() => {
+		if (handyTrabajando) setTrabajoEnGeneracion(generacion);
+	}, [handyTrabajando, generacion]);
 
 	// SYNC-17: palanca de conectividad (auto/off) persistida en AppData. No es un ajuste de
 	// usuario: se lee al arrancar y solo existe como salida de emergencia.
@@ -108,10 +119,11 @@ export default function AppBoot({ router }: { router: any }) {
 		modo,
 		licenciaCargando: licencia.lic === "loading",
 		gate: licencia.gate === "loading" ? null : licencia.gate,
-		handyEmparejado: emparejamiento.estado.step === "paired",
+		handyEmparejado,
 		mainOnline,
 		mainVolcando,
 		rechazoHandy,
+		handyYaTrabajo: trabajoEnGeneracion !== null && trabajoEnGeneracion === generacion,
 	});
 
 	// SYNC-17: en cuanto la licencia deja pasar (activación recién hecha, licencia renovada, o el
@@ -167,15 +179,31 @@ export default function AppBoot({ router }: { router: any }) {
 				// Handy: en modo TPV este botón no existe.
 				return (
 					<div className="relative h-full w-full">
-						<RouterProvider router={router} />
+						{/* INC-20261030-014: con la espera encima, `inert` deja la aplicación montada
+						    pero fuera de alcance, también del teclado y del lector de pantalla. */}
+						<div className="h-full w-full" inert={p.espera !== null}>
+							<RouterProvider router={router} />
 
-						<button
-							type="button"
-							onClick={emparejamiento.volverAVincular}
-							className="absolute bottom-3 left-3 z-50 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-800 shadow-md backdrop-blur transition hover:bg-white active:scale-[0.98]"
-						>
-							← Vinculación
-						</button>
+							<button
+								type="button"
+								onClick={emparejamiento.volverAVincular}
+								className="absolute bottom-3 left-3 z-50 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-800 shadow-md backdrop-blur transition hover:bg-white active:scale-[0.98]"
+							>
+								← Vinculación
+							</button>
+						</div>
+
+						{p.espera ? (
+							<div className="absolute inset-0 z-100 overflow-y-auto">
+								<HandyEsperandoMain
+									conectando={p.espera.conectando}
+									volcando={p.espera.volcando}
+									rechazo={p.espera.rechazo}
+									onReintentar={() => useMainPresence.getState().requestReconnect()}
+									onIrAVinculacion={emparejamiento.volverAVincular}
+								/>
+							</div>
+						) : null}
 					</div>
 				);
 

@@ -37,6 +37,7 @@ const entrada = (e: Partial<EntradaArranque>): EntradaArranque => ({
 	mainOnline: null,
 	mainVolcando: false,
 	rechazoHandy: null,
+	handyYaTrabajo: false,
 	...e,
 });
 
@@ -71,7 +72,28 @@ describe("qué pantalla enseña el arranque", () => {
 			{ modo: "handy", handyEmparejado: true, mainOnline: null, rechazoHandy: "licencia" as const },
 			{ tipo: "handy_esperando_main", conectando: false, volcando: false, rechazo: "licencia" },
 		],
-		["un Handy con Main trabaja", { modo: "handy", handyEmparejado: true, mainOnline: true }, { tipo: "handy_app" }],
+		["un Handy con Main trabaja", { modo: "handy", handyEmparejado: true, mainOnline: true }, { tipo: "handy_app", espera: null }],
+		[
+			// INC-20261030-014: lo que tenía abierto se conserva; la espera bloquea encima.
+			"un Handy que ya trabajaba y se queda sin Main sigue con su aplicación, bloqueada",
+			{ modo: "handy", handyEmparejado: true, mainOnline: false, handyYaTrabajo: true },
+			{ tipo: "handy_app", espera: { conectando: false, volcando: false, rechazo: null } },
+		],
+		[
+			"igual mientras la Main vuelca su atraso o se reconecta",
+			{ modo: "handy", handyEmparejado: true, mainOnline: null, mainVolcando: true, handyYaTrabajo: true },
+			{ tipo: "handy_app", espera: { conectando: true, volcando: true, rechazo: null } },
+		],
+		[
+			"y si la nube lo rechaza, la espera encima dice por qué",
+			{ modo: "handy", handyEmparejado: true, mainOnline: null, rechazoHandy: "dispositivo" as const, handyYaTrabajo: true },
+			{ tipo: "handy_app", espera: { conectando: false, volcando: false, rechazo: "dispositivo" } },
+		],
+		[
+			"sin emparejar no hay aplicación que conservar",
+			{ modo: "handy", handyEmparejado: false, mainOnline: false, handyYaTrabajo: true },
+			{ tipo: "handy_vincular" },
+		],
 		["una Main mientras se comprueba la licencia no enseña nada", { gate: null }, { tipo: "cargando" }],
 		[
 			"una Main sin licencia activa",
@@ -102,6 +124,8 @@ describe("qué pantalla enseña el arranque", () => {
 		expect(decidirArranque(entrada({ ...handy, mainOnline: true })).conBarraDeArranque).toBe(false);
 		expect(decidirArranque(entrada({ ...handy, mainOnline: null })).conBarraDeArranque).toBe(true);
 		expect(decidirArranque(entrada({ ...handy, mainOnline: true, mainVolcando: true })).conBarraDeArranque).toBe(true);
+		// Con la espera encima de la aplicación también: tapa la barra propia, que mueve y cierra la ventana.
+		expect(decidirArranque(entrada({ ...handy, mainOnline: false, handyYaTrabajo: true })).conBarraDeArranque).toBe(true);
 	});
 
 	it("el aviso de caducidad sólo acompaña a una Main que trabaja", () => {
