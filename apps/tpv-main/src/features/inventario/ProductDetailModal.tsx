@@ -479,17 +479,22 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 </div>
               </div>
 
-              {/* Acciones */}
-              <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
+              {/* Acciones. INC-20261030-018: «Editar» y «Eliminar» sólo salen si quien abre la
+                  ficha sabe hacerlo (Inventario, Proveedores). Desde Mesas y la venta rápida no
+                  llegaba ninguno: «Editar» no abría nada, y «Eliminar» pedía confirmación y
+                  cerraba la ficha como si lo hubiera borrado. */}
+              <div className={`mt-5 grid grid-cols-1 gap-2 sm:gap-3 `}>
+                {onEdit ? (
                 <button
                   type="button"
                   disabled={!puede("catalogo.editar")}
-                  onClick={() => onEdit?.(p.ID_Producto)}
+                  onClick={() => onEdit(p.ID_Producto)}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-accent py-3 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                 >
                   <Pencil className="size-4" aria-hidden />
                   Editar
                 </button>
+                ) : null}
 
                 <button
                   type="button"
@@ -504,6 +509,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   Añadir lote
                 </button>
 
+                {onDeleted ? (
                 <button
                   type="button"
                   disabled={!puede("catalogo.borrar")}
@@ -513,6 +519,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   <Trash2 className="size-4" aria-hidden />
                   Eliminar producto
                 </button>
+                ) : null}
               </div>
 
               {/* Modal añadir lote */}
