@@ -13,6 +13,43 @@ type DatosPdfCuentas = {
     generadoEn?: Date;
 };
 
+const PAGE_W = 595.28;
+const PAGE_H = 841.89;
+const M = 50;
+/** Lo mínimo que queda libre entre el texto de una columna y la siguiente. */
+const SEPARACION = 6;
+
+type Columna = { x: number; w: number; align?: "left" | "right" };
+const IMPORTE: Columna = { x: M + 415, w: PAGE_W - M - (M + 415), align: "right" };
+
+/**
+ * INC-20261031-025: cada columna tiene su ancho, el mismo en la cabecera y en las filas, y su texto
+ * se recorta a él. Antes el método empezaba en x 430 sin límite y el importe ocupaba 35 pt alineado a
+ * la derecha: «Efectivo · ANULADO» pisaba el importe, y un cliente o un concepto largos podían pisar
+ * la columna de al lado.
+ */
+export const COLUMNAS_ENTRADAS = {
+    fecha: { x: M, w: 120 },
+    cliente: { x: M + 120, w: 180 },
+    metodo: { x: M + 300, w: 115 },
+    importe: IMPORTE,
+} satisfies Record<string, Columna>;
+export const COLUMNAS_SALIDAS = {
+    fecha: { x: M, w: 110 },
+    tipo: { x: M + 110, w: 120 },
+    concepto: { x: M + 230, w: 185 },
+    importe: IMPORTE,
+} satisfies Record<string, Columna>;
+export const ANCHO_UTIL = PAGE_W - 2 * M;
+
+/** Lo que cabe de `texto` en `ancho` puntos según `medir`; si hay que cortarlo, termina en «…». */
+export function ajustarAlAncho(texto: string, ancho: number, medir: (t: string) => number): string {
+    if (medir(texto) <= ancho) return texto;
+    const caracteres = Array.from(texto);
+    while (caracteres.length && medir(caracteres.join("") + "…") > ancho) caracteres.pop();
+    return caracteres.length ? caracteres.join("") + "…" : "";
+}
+
 /** RI-82: un único documento para el día o el rango; independiente de React y del diálogo. */
 export async function generarPdfCuentas({ del, al, entradas: entradasFull, salidas: salidasFull,
     proveedores: proveedoresMap, tipo = "rango", generadoEn = new Date(),
@@ -24,10 +61,6 @@ export async function generarPdfCuentas({ del, al, entradas: entradasFull, salid
     const pdfDoc = await PDFDocument.create();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-    const PAGE_W = 595.28;
-    const PAGE_H = 841.89;
-    const M = 50;
 
     const mkPage = () => {
         const page = pdfDoc.addPage([PAGE_W, PAGE_H]);
@@ -82,27 +115,23 @@ export async function generarPdfCuentas({ del, al, entradas: entradasFull, salid
 
     const writeRow = (
         ctx: ContextoPdf,
-        cols: Array<{
-            text: string;
-            x: number;
-            w?: number;
-            align?: "left" | "right";
-        }>,
+        cols: Array<Columna & { text: string }>,
         opts?: { size?: number; bold?: boolean; color?: Color },
     ) => {
         const size = opts?.size ?? 10;
         const usedFont = opts?.bold ? fontBold : font;
         const color = opts?.color ?? black;
+        const medir = (t: string) => usedFont.widthOfTextAtSize(t, size);
 
         if (ctx.y < M + 30) ctx = mkPage();
 
         for (const c of cols) {
-            const t = safeText(c.text);
+            // La de la derecha llega al margen; las demás dejan sitio a la siguiente.
+            const t = ajustarAlAncho(safeText(c.text), c.align === "right" ? c.w : c.w - SEPARACION, medir);
             let x = c.x;
 
             if (c.align === "right") {
-                const w = usedFont.widthOfTextAtSize(t, size);
-                x = c.x + (c.w ?? 0) - w;
+                x = c.x + c.w - medir(t);
             }
 
             ctx.page.drawText(t, {
@@ -140,15 +169,10 @@ export async function generarPdfCuentas({ del, al, entradas: entradasFull, salid
     ctx = writeRow(
         ctx,
         [
-            { text: "Fecha/Hora", x: M },
-            { text: "Cliente", x: M + 140 },
-            { text: "Método", x: M + 380 },
-            {
-                text: "Importe",
-                x: M + 460,
-                w: PAGE_W - M - (M + 460),
-                align: "right",
-            },
+            { text: "Fecha/Hora", ...COLUMNAS_ENTRADAS.fecha },
+            { text: "Cliente", ...COLUMNAS_ENTRADAS.cliente },
+            { text: "Método", ...COLUMNAS_ENTRADAS.metodo },
+            { text: "Importe", ...COLUMNAS_ENTRADAS.importe },
         ],
         { bold: true, color: gray },
     );
@@ -160,15 +184,10 @@ export async function generarPdfCuentas({ del, al, entradas: entradasFull, salid
     } else {
         for (const e of entradasFull) {
             ctx = writeRow(ctx, [
-                { text: e.fecha_hora, x: M },
-                { text: e.cliente, x: M + 140 },
-                { text: esAnulado(e) ? `${e.metodo} · ANULADO` : e.metodo, x: M + 380 },
-                {
-                    text: eur(e.importe),
-                    x: M + 460,
-                    w: PAGE_W - M - (M + 460),
-                    align: "right",
-                },
+                { text: e.fecha_hora, ...COLUMNAS_ENTRADAS.fecha },
+                { text: e.cliente, ...COLUMNAS_ENTRADAS.cliente },
+                { text: esAnulado(e) ? `${e.metodo} · ANULADO` : e.metodo, ...COLUMNAS_ENTRADAS.metodo },
+                { text: eur(e.importe), ...COLUMNAS_ENTRADAS.importe },
             ]);
         }
     }
@@ -181,15 +200,10 @@ export async function generarPdfCuentas({ del, al, entradas: entradasFull, salid
     ctx = writeRow(
         ctx,
         [
-            { text: "Fecha", x: M },
-            { text: "Tipo", x: M + 110 },
-            { text: "Concepto", x: M + 230 },
-            {
-                text: "Importe",
-                x: M + 460,
-                w: PAGE_W - M - (M + 460),
-                align: "right",
-            },
+            { text: "Fecha", ...COLUMNAS_SALIDAS.fecha },
+            { text: "Tipo", ...COLUMNAS_SALIDAS.tipo },
+            { text: "Concepto", ...COLUMNAS_SALIDAS.concepto },
+            { text: "Importe", ...COLUMNAS_SALIDAS.importe },
         ],
         { bold: true, color: gray },
     );
@@ -208,15 +222,10 @@ export async function generarPdfCuentas({ del, al, entradas: entradasFull, salid
                     : s.concepto;
 
             ctx = writeRow(ctx, [
-                { text: tipo === "dia" ? s.fecha_hora.slice(0, 10) : s.fecha_hora, x: M },
-                { text: s.tipo_gasto, x: M + 110 },
-                { text: conceptoPdf, x: M + 230 },
-                {
-                    text: eur(s.importe),
-                    x: M + 460,
-                    w: PAGE_W - M - (M + 460),
-                    align: "right",
-                },
+                { text: tipo === "dia" ? s.fecha_hora.slice(0, 10) : s.fecha_hora, ...COLUMNAS_SALIDAS.fecha },
+                { text: s.tipo_gasto, ...COLUMNAS_SALIDAS.tipo },
+                { text: conceptoPdf, ...COLUMNAS_SALIDAS.concepto },
+                { text: eur(s.importe), ...COLUMNAS_SALIDAS.importe },
             ]);
         }
     }
