@@ -29,6 +29,8 @@ pub trait MesasRepository: Send + Sync {
         id_comanda: &str,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<bool>;
+    /// INC-20261030-007: la reserva pasa a la comanda abierta si no tiene ninguna.
+    async fn comanda_set_reserva_if_null(&self, id_comanda: &str, id_reserva: &str) -> AppResult<bool>;
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>>;
     async fn add_linea_comanda(
         &self,

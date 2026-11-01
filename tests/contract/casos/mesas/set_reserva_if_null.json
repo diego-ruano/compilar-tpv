@@ -1,0 +1,20 @@
+{
+  "descripcion": "INC-20261030-007: la reserva que llega pasa a la comanda que ya estaba abierta en su mesa, si no tiene ninguna. La de otra mesa, que ya tiene la suya, no se toca.",
+  "comando": "mesas.set_reserva_if_null",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-2', 'zona-1', '2', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-1', 'mesa-1', '2026-01-01', '13:00', 'COMIDA', 2, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-2', 'mesa-2', '2026-01-01', '13:00', 'COMIDA', 2, 'ACTIVA');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado) VALUES ('comanda-2', 'MESA', 'mesa-2', 'res-2', '2026-01-01 12:00:00', 'Abierta');"
+  ],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "id_reserva": "res-1"
+  },
+  "snapshot": {
+    "Comandas": "SELECT ID_Comanda, ID_Reserva FROM Comandas"
+  }
+}

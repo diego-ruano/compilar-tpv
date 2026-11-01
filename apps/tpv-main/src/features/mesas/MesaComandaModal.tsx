@@ -13,6 +13,7 @@ import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
+import { ModalShell } from "../../shared/ui/ModalShell";
 import { refrescarTrasCambiarReservas } from "../reservas/reservasQueries";
 
 import { esError,toAppError } from "@tpv/client";
@@ -36,7 +37,7 @@ sumaImportes,
 totalRecuento,
 } from "../../shared/lib/efectivo";
 import { useColaOperaciones } from "../../shared/lib/useColaOperaciones";
-import { mesasCobrarDetalles,mesasLoadMesaMeta,mesasUpdateDetalleNota,productosListByCategoria,productosSearchByNombre,reservaFinalizar,reservaMarcarActivaAhora } from "./mesasApi";
+import { mesasCobrarDetalles,mesasComandaAbierta,mesasComandaSetReservaIfNull,mesasLoadMesaMeta,mesasLoadTicket,mesasUpdateDetalleNota,productosListByCategoria,productosSearchByNombre,reservaFinalizar,reservaMarcarActivaAhora } from "./mesasApi";
 import { mesasKeys } from "./mesasQueries";
 
 /* =========================
@@ -60,6 +61,7 @@ export default function MesaComandaModal({
     onChanged?: () => void;
 }) {
     const { categorias, categoriaSeleccionada, setCategoriaSeleccionada, productos, loadingProductos, query, setQuery, q, busqueda, loadingBusqueda } = useCatalogoServicio(open, apiCatalogo);
+    const toast = useToast();
 
     const [idComanda, setIdComanda] = useState<string | null>(null);
     const [ticket, setTicket] = useState<TicketItem[]>([]);
@@ -245,6 +247,27 @@ export default function MesaComandaModal({
         ++ciclo.valor;
         return () => { ++ciclo.valor; };
     }, [open, mesaId]);
+    // INC-20261030-007: si se abrió la mesa con la reserva todavía «Próxima», su comanda nació sin
+    // reserva, y lo que se cobraba de ella no contaba en el gasto del cliente. Al marcar la llegada
+    // se enlaza; pero si ya tiene productos pueden ser de los clientes anteriores, que se van al
+    // llegar los de la reserva, y eso lo sabe el camarero: se le pregunta. Una mesa sólo puede
+    // tener una cuenta abierta, así que si no es suya lo de la reserva irá a una nueva cuando se
+    // cobre ésta (la abre `addProductoToTicket` al chocar con la cobrada, o el modal al reabrirse).
+    const [preguntaCuenta, setPreguntaCuenta] = useState<{ cliente: string; responder: (esSuya: boolean) => void } | null>(null);
+    const enlazarCuentaAbierta = useCallback(async (r: { idReserva: string; clienteNombre: string }) => {
+        const abierta = await mesasComandaAbierta(mesaId);
+        if (!abierta?.id_comanda || abierta.id_reserva) return;
+        const lineas = await mesasLoadTicket(abierta.id_comanda);
+        const esSuya = lineas.length === 0
+            || await new Promise<boolean>((responder) => setPreguntaCuenta({ cliente: r.clienteNombre, responder }));
+        setPreguntaCuenta(null);
+        if (esSuya) await mesasComandaSetReservaIfNull(abierta.id_comanda, r.idReserva);
+        else toast.info(
+            "La cuenta abierta sigue siendo de los clientes anteriores",
+            "Cóbrala antes de añadir lo de la reserva: lo que se pida después irá a una cuenta nueva a su nombre.",
+        );
+    }, [mesaId, toast]);
+
     const marcarLlegada = useCallback(async () => {
         if (!reserva || cola.pendientes() || cobroEnCursoRef.current) return;
         const ciclo = cicloVista.current.valor;
@@ -264,6 +287,8 @@ export default function MesaComandaModal({
                 invalidarReservas(); notifyChanged();
                 if (ciclo !== cicloVista.current.valor) return;
                 setEstadoReserva("ACTIVA");
+                await enlazarCuentaAbierta(reserva);
+                if (ciclo !== cicloVista.current.valor) return;
                 const cId = await ensureOpenComanda(mesaId, operador, { idReserva: reserva.idReserva });
                 if (ciclo !== cicloVista.current.valor) return;
                 comandaActualRef.current = cId;
@@ -271,7 +296,7 @@ export default function MesaComandaModal({
                 await leerTicket(cId);
             });
         } finally { if (ciclo === cicloVista.current.valor) setLoadingTicket(false); }
-    }, [reserva, cola, mesaId, operador, invalidarReservas, notifyChanged, leerTicket]);
+    }, [reserva, cola, mesaId, operador, invalidarReservas, notifyChanged, leerTicket, enlazarCuentaAbierta]);
 
     const reloadTicket = useCallback(async () => {
         if (!idComanda) return;
@@ -445,7 +470,6 @@ export default function MesaComandaModal({
     } | null>(null);
     const [errorFactura, setErrorFactura] = useState<string | null>(null);
     const [cobrandoFactura, setCobrandoFactura] = useState(false);
-    const toast = useToast();
 
     const cobrar = async (
         metodo: "tarjeta" | "efectivo",
@@ -634,6 +658,38 @@ export default function MesaComandaModal({
                 items={ticket}
                 cobro={ultimoCobro}
             />
+            {/* INC-20261030-007: sólo se sale contestando; cerrar sin decir de quién es la cuenta
+                dejaría el gasto del cliente al azar. */}
+            <ModalShell
+                open={preguntaCuenta !== null}
+                onClose={() => {}}
+                className="fixed inset-0 z-90 flex items-center justify-center"
+            >
+                <div className="absolute inset-0 bg-black/40" />
+                <div className="relative w-120 max-w-[92vw] rounded-3xl border border-border bg-surface p-6 shadow-xl">
+                    <h3 className="text-lg font-semibold text-fg">Esta mesa tiene una cuenta abierta</h3>
+                    <p className="mt-2 text-sm text-fg-muted">
+                        ¿Es de los clientes de la reserva de {preguntaCuenta?.cliente}? Si es suya, lo que se
+                        cobre de ella contará en su gasto.
+                    </p>
+                    <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                        <button
+                            type="button"
+                            onClick={() => preguntaCuenta?.responder(false)}
+                            className="cursor-pointer rounded-2xl border border-border bg-surface px-4 py-2.5 font-semibold text-fg transition hover:bg-surface-2"
+                        >
+                            No, es de los anteriores
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => preguntaCuenta?.responder(true)}
+                            className="cursor-pointer rounded-2xl bg-accent px-4 py-2.5 font-extrabold text-accent-fg transition hover:bg-accent-hover"
+                        >
+                            Sí, es suya
+                        </button>
+                    </div>
+                </div>
+            </ModalShell>
             <DatosFiscalesModal
                 open={pideFactura !== null}
                 onClose={() => {

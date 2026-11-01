@@ -891,6 +891,26 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(changed > 0)
     }
 
+    async fn comanda_set_reserva_if_null(&self, id_comanda: &str, id_reserva: &str) -> AppResult<bool> {
+        let g = self.db.write().await;
+        let changed = g
+            .execute(
+                r#"
+                UPDATE Comandas
+                SET ID_Reserva = ?2
+                WHERE ID_Comanda = ?1
+                  AND Estado = 'Abierta'
+                  AND ID_Reserva IS NULL
+                  AND EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?2);
+                "#,
+                vec![Value::Text(id_comanda.to_string()), Value::Text(id_reserva.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+        Ok(changed > 0)
+    }
+
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>> {
         let g = self.db.read().await;
         let db = &g;

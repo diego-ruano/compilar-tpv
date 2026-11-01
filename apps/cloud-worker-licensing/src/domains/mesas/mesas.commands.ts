@@ -13,6 +13,7 @@ import type {
 	AddLineaInput,
 	CobrarDetallesInput,
 	SaveLayoutInput,
+	SetReservaInput,
 	SetTrabajadorInput,
 } from "./mesas.schemas";
 
@@ -402,6 +403,29 @@ export function setTrabajadorIfNull(
 			},
 		},
 		cloudPayload: { ...input, id_trabajador: idTrabajador },
+	};
+}
+
+// INC-20261030-007: espejo de `comanda_set_reserva_if_null` en la Main. Sólo una comanda abierta y
+// sin reserva: la de otra reserva no se pisa.
+export function setReservaIfNull(input: SetReservaInput): BuiltCommand {
+	return {
+		commandName: "comanda_set_reserva_if_null",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					UPDATE Comandas
+					SET ID_Reserva = ?2
+					WHERE ID_Comanda = ?1
+						AND Estado = 'Abierta'
+						AND ID_Reserva IS NULL
+						AND EXISTS (SELECT 1 FROM Reservas WHERE ID_Reserva = ?2);
+				`,
+				args: [input.id_comanda, input.id_reserva],
+			},
+		},
+		cloudPayload: input,
 	};
 }
 

@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
     mesasCobrarDetalles: vi.fn(), productosListCategoriasVendibles: vi.fn(), productosListByCategoria: vi.fn(),
     productosSearchByNombre: vi.fn(), mesasRemoveOnePendingDetalle: vi.fn(), mesasDeleteDetalle: vi.fn(),
     mesasUpdateDetalleNota: vi.fn(), reservaMarcarActivaAhora: vi.fn(), reservaFinalizar: vi.fn(), mesasLoadMesaMeta: vi.fn(),
+    mesasComandaAbierta: vi.fn(), mesasComandaSetReservaIfNull: vi.fn(),
 }));
 vi.mock("../../src/features/mesas/mesasApi", () => api);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (comando: string) => {
@@ -20,7 +21,7 @@ vi.mock("../../src/shared/lib/imageUrl", () => ({ resolveImageUrl: async () => "
 vi.mock("../../src/shared/lib/conAviso", () => ({ conAviso: (fn: unknown) => fn }));
 vi.mock("../../src/shared/stores/useMode", () => ({ useMode: (fn: (s: { mode: string }) => unknown) => fn({ mode: "tpv" }) }));
 vi.mock("../../src/shared/stores/useBusinessSettings", () => ({ useBusinessSettings: (fn: (s: { limite_simplif: number }) => unknown) => fn({ limite_simplif: 300000 }) }));
-vi.mock("../../src/shared/toast", () => ({ useToast: () => ({ error: vi.fn(), warning: vi.fn() }) }));
+vi.mock("../../src/shared/toast", () => ({ useToast: () => ({ error: vi.fn(), warning: vi.fn(), info: vi.fn() }) }));
 vi.mock("../../src/features/inventario/ProductDetailModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/PrintTicketModal", () => ({ default: () => null }));
 vi.mock("../../src/shared/ticket/DatosFiscalesModal", () => ({ default: () => null }));
@@ -146,4 +147,40 @@ it("una reserva que otro equipo cierra deja de verse sin cerrar el modal", async
     api.mesasLoadMesaMeta.mockResolvedValue(meta("comanda"));
     await qc.invalidateQueries({ queryKey: ["mesas"] });
     await waitFor(() => expect(screen.queryByText("🔵 Reserva activa")).not.toBeInTheDocument());
+});
+
+// INC-20261030-007: si se abrió la mesa con la reserva todavía «Próxima», su comanda nació sin
+// reserva y lo cobrado no contaba en el gasto del cliente. Al marcar la llegada se enlaza, pero si
+// ya tiene productos pueden ser de los clientes anteriores: se pregunta.
+const proxima = { idReserva: "r", clienteNombre: "Ana", diaYMD: "2026-10-31", hora: "21:00", estado: "PROXIMA", minutosPara: 0 };
+async function llegarCon(lineas: unknown[]) {
+    api.mesasEnsureOpenComanda.mockResolvedValue("comanda");
+    api.mesasLoadTicket.mockResolvedValue(lineas);
+    api.mesasLoadMesaMeta.mockResolvedValue(meta("comanda", proxima));
+    api.mesasComandaAbierta.mockResolvedValue({ id_comanda: "comanda", id_reserva: null });
+    api.reservaMarcarActivaAhora.mockResolvedValue(undefined);
+    api.mesasComandaSetReservaIfNull.mockResolvedValue(true);
+    await abrirCon(new QueryClient(), meta("comanda", proxima).mesa);
+    fireEvent.click(screen.getByRole("button", { name: /Ha llegado ya el cliente/ }));
+}
+
+it("al llegar la reserva con la cuenta ya empezada, pregunta y la enlaza si es suya", async () => {
+    await llegarCon([fila("1")]);
+    fireEvent.click(await screen.findByRole("button", { name: "Sí, es suya" }));
+    await waitFor(() => expect(api.mesasComandaSetReservaIfNull).toHaveBeenCalledWith("comanda", "r"));
+    expect(screen.queryByText("Esta mesa tiene una cuenta abierta")).not.toBeInTheDocument();
+});
+
+it("si la cuenta es de los clientes anteriores, no se enlaza", async () => {
+    await llegarCon([fila("1")]);
+    fireEvent.click(await screen.findByRole("button", { name: "No, es de los anteriores" }));
+    await waitFor(() => expect(screen.queryByText("Esta mesa tiene una cuenta abierta")).not.toBeInTheDocument());
+    await waitFor(() => expect(api.mesasEnsureOpenComanda).toHaveBeenCalledTimes(2));
+    expect(api.mesasComandaSetReservaIfNull).not.toHaveBeenCalled();
+});
+
+it("con la cuenta vacía, la enlaza sin preguntar", async () => {
+    await llegarCon([]);
+    await waitFor(() => expect(api.mesasComandaSetReservaIfNull).toHaveBeenCalledWith("comanda", "r"));
+    expect(screen.queryByText("Esta mesa tiene una cuenta abierta")).not.toBeInTheDocument();
 });

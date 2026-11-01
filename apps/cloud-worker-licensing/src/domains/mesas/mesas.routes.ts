@@ -91,6 +91,12 @@ mesasRoutes.put("/comandas/trabajador-if-null", cuerpo(S.setTrabajadorSchema), a
 	return c.json(true);
 });
 
+// INC-20261030-007: la reserva que llega pasa a la comanda que ya estaba abierta en su mesa.
+mesasRoutes.put("/comandas/reserva-if-null", cuerpo(S.setReservaSchema), async (c) => {
+	await apply(c, cmd.setReservaIfNull(c.req.valid("json")));
+	return c.json(true);
+});
+
 mesasRoutes.get("/comandas/:id/lineas", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_comanda_invalido");

@@ -79,6 +79,13 @@ impl MesasRepository for HttpMesasRepository {
             .await
     }
 
+    async fn comanda_set_reserva_if_null(&self, id_comanda: &str, id_reserva: &str) -> AppResult<bool> {
+        let body = json!({ "id_comanda": id_comanda, "id_reserva": id_reserva });
+        self.client
+            .put_json("/v1/mesas/comandas/reserva-if-null", &body)
+            .await
+    }
+
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>> {
         self.client
             .get_json(&format!("/v1/mesas/comandas/{id_comanda}/lineas"))

@@ -1745,6 +1745,15 @@ export type MesasCobrarDetallesInput = {
 	destinatario?: DestinatarioInput | null,
 };
 
+/**
+ *  INC-20261030-007: enlazar la reserva que acaba de llegar con la comanda que ya estaba abierta
+ *  en su mesa, si el camarero dice que es suya.
+ */
+export type MesasComandaSetReservaInput = {
+	id_comanda: string,
+	id_reserva: string,
+};
+
 export type MesasComandaSetTrabajadorInput = {
 	id_comanda: string,
 	id_usuario?: string | null,

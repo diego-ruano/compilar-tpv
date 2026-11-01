@@ -8,7 +8,7 @@ use tauri::State;
 use tpv_application::use_cases::mesas as uc;
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetTrabajadorInput,
+    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
     MesasDeleteDetalleInput,
     MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
     MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
@@ -91,6 +91,19 @@ pub async fn comanda_set_trabajador_if_null(
     args.id_trabajador = sesion.id_trabajador;
     let repo = state.mesas_repo().await?;
     Ok(uc::comanda_set_trabajador_if_null(repo.as_ref(), args).await?)
+}
+
+/// INC-20261030-007: lo pide el modal de la mesa al marcar la llegada, si el camarero dice que la
+/// cuenta que ya estaba abierta es de los clientes de la reserva.
+#[tauri::command]
+#[specta::specta]
+pub async fn comanda_set_reserva_if_null(
+    state: State<'_, AppState>,
+    args: MesasComandaSetReservaInput,
+) -> Result<bool, AppErrorDto> {
+    state.exigir_permiso("servicio.vender").await?;
+    let repo = state.mesas_repo().await?;
+    Ok(uc::comanda_set_reserva_if_null(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]

@@ -1,0 +1,12 @@
+{
+  "Comandas": [
+    {
+      "ID_Comanda": "comanda-1",
+      "ID_Reserva": "res-1"
+    },
+    {
+      "ID_Comanda": "comanda-2",
+      "ID_Reserva": "res-2"
+    }
+  ]
+}

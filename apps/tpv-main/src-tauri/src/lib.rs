@@ -1912,6 +1912,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::mesas::get_comanda_abierta_by_mesa,
             commands::mesas::abrir_comanda,
             commands::mesas::comanda_set_trabajador_if_null,
+            commands::mesas::comanda_set_reserva_if_null,
             commands::mesas::get_lineas_comanda,
             commands::mesas::add_linea_comanda,
             commands::mesas::mesas_meta_all,

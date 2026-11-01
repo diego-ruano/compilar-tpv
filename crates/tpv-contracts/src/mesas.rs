@@ -246,6 +246,14 @@ pub struct MesasComandaSetTrabajadorInput {
     pub id_trabajador: Option<String>,
 }
 
+/// INC-20261030-007: enlazar la reserva que acaba de llegar con la comanda que ya estaba abierta
+/// en su mesa, si el camarero dice que es suya.
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+pub struct MesasComandaSetReservaInput {
+    pub id_comanda: String,
+    pub id_reserva: String,
+}
+
 /// RI-27: sin precio. El de la línea lo pone el catálogo, no la pantalla.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct MesasAddLineaComandaInput {

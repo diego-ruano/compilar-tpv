@@ -117,6 +117,16 @@ export async function reservaFinalizar(idReserva: string): Promise<void> {
    Comandas / Ticket
 ========================= */
 
+/** La comanda abierta de la mesa, si la hay. No crea ninguna. */
+export async function mesasComandaAbierta(idMesa: string) {
+    return await commands.getComandaAbiertaByMesa({ id_mesa: idMesa.trim() });
+}
+
+/** INC-20261030-007: la reserva pasa a la comanda abierta, si aún no tiene ninguna. */
+export async function mesasComandaSetReservaIfNull(idComanda: string, idReserva: string): Promise<boolean> {
+    return await commands.comandaSetReservaIfNull({ id_comanda: idComanda, id_reserva: idReserva });
+}
+
 export async function mesasEnsureOpenComanda(params: {
     idMesa: string;
     idUsuario: string | null;

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetTrabajadorInput,
+    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
     MesasDeleteDetalleInput,
     MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
     MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
@@ -87,6 +87,23 @@ pub async fn comanda_set_trabajador_if_null(
     let id = opt_id(input.id_usuario.or(input.id_trabajador));
     repo.comanda_set_trabajador_if_null(&input.id_comanda, id)
         .await
+}
+
+/// INC-20261030-007: si se abrió la mesa con la reserva todavía «Próxima», su comanda nació sin
+/// reserva, y lo que se cobraba de ella no contaba en el gasto del cliente. Al marcar la llegada, si
+/// el camarero dice que la cuenta abierta es de los clientes de la reserva, se enlaza aquí. Sólo una
+/// comanda abierta y sin reserva: la de otra reserva no se pisa.
+pub async fn comanda_set_reserva_if_null(
+    repo: &dyn MesasRepository,
+    input: MesasComandaSetReservaInput,
+) -> AppResult<bool> {
+    if input.id_comanda.trim().is_empty() {
+        return Err(AppError::validation("Falta la comanda."));
+    }
+    if input.id_reserva.trim().is_empty() {
+        return Err(AppError::validation("Falta la reserva."));
+    }
+    repo.comanda_set_reserva_if_null(input.id_comanda.trim(), input.id_reserva.trim()).await
 }
 
 pub async fn get_lineas_comanda(

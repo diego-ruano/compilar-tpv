@@ -9,6 +9,7 @@ import type {
 	MesasAbrirComandaInput,
 	MesasAddLineaComandaInput,
 	MesasCobrarDetallesInput as ContractMesasCobrarDetallesInput,
+	MesasComandaSetReservaInput,
 	MesasComandaSetTrabajadorInput,
 	MesasSaveLayoutInput,
 } from "@tpv/contracts";
@@ -133,6 +134,11 @@ export const setTrabajadorSchema = z
 			optIdStr(v.id_trabajador) ?? optIdStr(v.id_usuario),
 	}));
 
+export const setReservaSchema = z.object({
+	id_comanda: idField("Falta la comanda."),
+	id_reserva: idField("Falta la reserva."),
+});
+
 export const addLineaSchema = z
 	.object({
 		id_comanda: idField("Falta la comanda."),
@@ -215,6 +221,9 @@ export type SetTrabajadorInput = Pick<
 	id_trabajador_o_usuario: string | null;
 };
 
+/** INC-20261030-007: la reserva que llega pasa a la comanda abierta de su mesa. */
+export type SetReservaInput = Pick<MesasComandaSetReservaInput, "id_comanda" | "id_reserva">;
+
 export type AddLineaInput = Pick<
 	MesasAddLineaComandaInput,
 	"id_comanda" | "id_producto" | "cantidad"
@@ -248,5 +257,6 @@ export type CobrarDetallesInput = Omit<
 type _GSaveLayout = Assert<SameKeys<z.infer<typeof saveLayoutSchema>, SaveLayoutInput>>;
 type _GAbrirComanda = Assert<SameKeys<z.infer<typeof abrirComandaSchema>, AbrirComandaInput>>;
 type _GSetTrabajador = Assert<SameKeys<z.infer<typeof setTrabajadorSchema>, SetTrabajadorInput>>;
+type _GSetReserva = Assert<SameKeys<z.infer<typeof setReservaSchema>, SetReservaInput>>;
 type _GAddLinea = Assert<SameKeys<z.infer<typeof addLineaSchema>, AddLineaInput>>;
 type _GCobrarDetalles = Assert<SameKeys<z.infer<typeof cobrarDetallesSchema>, CobrarDetallesInput>>;
