@@ -378,12 +378,11 @@ export default function Cuentas() {
         void recargarCierres();
     }, [recargarCierres]);
 
+    // INC-20261031-024: un fallo al imprimir (sin impresora, sin papel) se avisa con `conAviso` en
+    // el botón. Antes se guardaba en `cierresError`, que es el de CARGAR el historial, y la tabla
+    // entera se sustituía por el mensaje hasta volver a entrar en Cuentas.
     const imprimirCierre = async (idCierre: string) => {
-        try {
-            await cierreImprimir(await commands.cierreDetalle(idCierre));
-        } catch (e) {
-            setCierresError(toAppError(e).message);
-        }
+        await cierreImprimir(await commands.cierreDetalle(idCierre));
     };
 
     // Deshacer un cierre es para volver a contar el cajón, y por eso sólo se ofrece en el último
@@ -1250,7 +1249,7 @@ export default function Cuentas() {
                                             <div className="flex items-center justify-end gap-1.5">
                                                 <button
                                                     type="button"
-                                                    onClick={() => void imprimirCierre(c.id_cierre)}
+                                                    onClick={conAviso(() => imprimirCierre(c.id_cierre), "No se ha podido imprimir el arqueo")}
                                                     title="Imprimir el arqueo"
                                                     className="grid size-8 cursor-pointer place-items-center rounded-lg border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
                                                 >
