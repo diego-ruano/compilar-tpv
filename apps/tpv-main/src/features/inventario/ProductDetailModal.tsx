@@ -23,6 +23,7 @@ import { resolveImageUrl } from "../../shared/lib/imageUrl";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 import AddLoteModal from "./ui/AddLoteModal";
 import AjustarExistenciasModal from "./ui/AjustarExistenciasModal";
+import { stockTotal as stockTotalDe } from "./utils/inventarioFormat";
 import {
   useAjustarLote,
   useAjustarStockSuelto,
@@ -151,9 +152,8 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
   const title = useMemo(() => "Acciones del producto", []);
 
-  const stockTotal = useMemo(() => {
-    return (lotes ?? []).reduce((acc, l: any) => acc + (Number(l.Stock_Disponible) || 0), 0);
-  }, [lotes]);
+  // INC-20261030-001: lotes más suelto, como el resto de la aplicación.
+  const stockTotal = useMemo(() => stockTotalDe(lotes ?? [], p?.Stock_Suelto), [lotes, p?.Stock_Suelto]);
 
   const fefo = useMemo(() => {
     const arr = (lotes ?? [])
