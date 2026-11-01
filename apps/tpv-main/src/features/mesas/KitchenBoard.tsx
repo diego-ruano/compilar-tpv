@@ -226,7 +226,11 @@ export default function KitchenBoard({
     );
 
     return (
-        <div className="h-full w-full rounded-2xl border border-border bg-surface p-6 shadow-sm">
+        // INC-20261030-021: la cocina ocupa lo que queda bajo la barra y su lista se desplaza dentro.
+        // Desde `lg` la página de Mesas es `overflow-hidden` (pensado para el plano, que cabe), y la
+        // cocina no tenía desplazamiento propio: lo que no cabía quedaba recortado y la rueda no
+        // llegaba (el Tab sí, porque enfocar desplaza aunque la caja esté oculta).
+        <div className="flex min-h-0 w-full flex-1 flex-col rounded-2xl border border-border bg-surface p-6 shadow-sm">
             <div className="flex items-end justify-between gap-4">
                 <div>
                     <h2 className="text-xl font-bold">COCINA</h2>
@@ -255,7 +259,7 @@ export default function KitchenBoard({
             {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
 
             {/* ✅ si el scroll real lo hace un contenedor interno, este ref lo preserva */}
-            <div ref={scrollRef} className="mt-6">
+            <div ref={scrollRef} className="mt-6 min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {loading ? (
                     <div className="w-full grid place-items-center text-fg-muted py-20">
                         Cargando…

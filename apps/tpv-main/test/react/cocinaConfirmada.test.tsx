@@ -84,3 +84,10 @@ it("un cambio remoto mientras se marca una línea se lee al terminar la marca", 
     expect(await screen.findByText("1× Cafe")).toBeInTheDocument();
     expect(api.leer).toHaveBeenCalledTimes(2);
 });
+
+// INC-20261030-021: desde `lg` la página de Mesas no se desplaza (es para el plano), así que la lista
+// de la cocina tiene que hacerlo dentro; si no, lo que no cabe queda recortado y la rueda no llega.
+it("la lista de comandas se desplaza dentro de la cocina", async () => {
+    const linea = await abrir();
+    expect(linea.closest(".overflow-y-auto")).not.toBeNull();
+});
