@@ -1,29 +1,29 @@
 {
   "Asignacion_Turnos": [
     {
-      "ID_Trabajador": "trab-1",
-      "Fecha": "2026-02-01",
-      "ID_Turno": "turno-1",
       "Area": "barra",
-      "Hora_Inicio": "09:00",
+      "Fecha": "2026-02-01",
       "Hora_Fin": "14:00",
+      "Hora_Inicio": "09:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "turno-1",
       "Notas": "jornada partida"
     },
     {
-      "ID_Trabajador": "trab-1",
-      "Fecha": "2026-02-01",
-      "ID_Turno": "turno-1",
       "Area": "barra",
-      "Hora_Inicio": "17:00",
+      "Fecha": "2026-02-01",
       "Hora_Fin": "22:00",
+      "Hora_Inicio": "17:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "turno-1",
       "Notas": "jornada partida"
     }
   ],
   "Grupos": [
     {
-      "Tramos": 2,
       "Grupos": 1,
-      "Sin_Grupo": 0
+      "Sin_Grupo": 0,
+      "Tramos": 2
     }
   ]
 }
