@@ -154,6 +154,19 @@ export async function getTareaAsignados(
 	return rows(rs) as TareaAsignadoRow[];
 }
 
+/**
+ * INC-20261030-010: si la tarea está asignada a ese trabajador. Finalizar una que no lo está no
+ * cambia ninguna fila, y la ruta la daba por buena: la pantalla se cerraba como si se hubiera
+ * hecho. Espejo del `affected == 0` de `marcar_finalizada` en la Main.
+ */
+export async function estaAsignada(db: Client, idTarea: string, idTrabajador: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: "SELECT 1 AS si FROM Tarea_Asignaciones WHERE ID_Tarea = ?1 AND ID_Trabajador = ?2 LIMIT 1;",
+		args: [idTarea, idTrabajador],
+	});
+	return rs.rows.length > 0;
+}
+
 export async function getMisTareas(
 	db: Client,
 	idTrabajador: string,

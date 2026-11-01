@@ -585,10 +585,48 @@ impl TareasRepository for SqliteTareasRepository {
             .map_err(db_err)?;
 
         if affected == 0 {
-            return Err(AppError::not_found("Asignación no encontrada"));
+            return Err(AppError::not_found(MSG_TAREA_NO_ASIGNADA));
         }
 
         Ok(true)
+    }
+}
+
+/// INC-20261030-010: finalizar una tarea que no es tuya (te la quitaron, o la pantalla se quedó con
+/// una ajena al perder el permiso de gestión). El mismo texto que `tarea_no_asignada` en el worker,
+/// que antes la daba por buena sin tocar nada.
+pub(crate) const MSG_TAREA_NO_ASIGNADA: &str = "Esa tarea ya no está asignada a ti. Actualiza la lista.";
+
+#[cfg(test)]
+mod tests_finalizar {
+    use super::*;
+
+    async fn preparar() -> (Arc<Db>, SqliteTareasRepository) {
+        let dir = crate::test_temp::dir_temporal("tareas_finalizar");
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        db.write().await.raw().execute_batch(
+            "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) SELECT 'u', ID_Rol, 'u@bar.test', 'h', 'Ana', 'Activo' FROM Roles WHERE Nombre_Rol = 'Administrador';
+             INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('t', 'u');
+             INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion) VALUES ('tarea', 'Limpiar', '2026-10-30 10:00:00');",
+        ).await.unwrap();
+        let repo = SqliteTareasRepository::new(db.clone());
+        (db, repo)
+    }
+
+    #[tokio::test]
+    async fn finalizar_una_tarea_que_no_es_tuya_se_rechaza_y_dice_que_hacer() {
+        let (_db, repo) = preparar().await;
+        let e = repo.marcar_finalizada("tarea", "t").await.unwrap_err();
+        assert!(matches!(&e, AppError::NotFound(m) if m == MSG_TAREA_NO_ASIGNADA), "{e:?}");
+    }
+
+    #[tokio::test]
+    async fn finalizar_la_tuya_la_marca() {
+        let (db, repo) = preparar().await;
+        db.write().await.raw().execute_batch(
+            "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At) VALUES ('tarea', 't', '2026-10-30 10:00:00');",
+        ).await.unwrap();
+        assert!(repo.marcar_finalizada("tarea", "t").await.unwrap());
     }
 }
 

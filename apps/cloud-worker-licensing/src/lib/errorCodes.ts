@@ -228,6 +228,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 		"Ese cliente ya no existe. Vuelve a buscarlo o guarda la reserva sin cliente.",
 	// RI-54: una pantalla con la carta de antes en caché ofrece un producto que ya se quitó.
 	producto_archivado: "Ese producto ya no está en la carta. Vuelve a abrir la carta y elige otro.",
+	// INC-20261030-010: el mismo texto que da la Main (`MSG_TAREA_NO_ASIGNADA`).
+	tarea_no_asignada: "Esa tarea ya no está asignada a ti. Actualiza la lista.",
 	// INC-20261030-016: el mismo texto que da la Main (`COMANDA_COBRADA`).
 	comanda_cobrada: "Esa cuenta ya está cobrada. Ciérrala y vuelve a abrir la mesa o un ticket nuevo.",
 	producto_en_comanda_abierta:

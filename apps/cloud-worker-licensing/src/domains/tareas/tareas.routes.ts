@@ -120,6 +120,9 @@ tareasRoutes.post("/:id/finalizar", cuerpo(S.finalizarTareaSchema), async (c) =>
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_tarea_invalido");
 	const datos = c.req.valid("json");
+	if (!(await tenantQuery(c, (db) => q.estaAsignada(db, id, datos.id_trabajador)))) {
+		return c.json({ ok: false, error: "tarea_no_asignada" }, 404);
+	}
 	await apply(c, cmd.marcarFinalizada(id, datos));
 	return c.json({ ok: true });
 });

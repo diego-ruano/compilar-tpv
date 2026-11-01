@@ -275,13 +275,34 @@ export default function Tareas() {
     );
   }, [isAdmin, tareasAdmin, misTareas]);
 
+  const cerrarDetalle = () => {
+    setModalDetalle(false);
+    setSelected(null);
+    setConfirmAccion(null);
+  };
+
+  // INC-20261030-010: el detalle se pinta distinto para quien gestiona y para quien sólo ve las
+  // suyas. Al quitar el permiso con el modal abierto, la tarea que se había abierto desde la lista
+  // de gestión pasaba a la vista propia con «Marcar como finalizada», aunque no fuera suya. Abierta
+  // con un permiso, el modal se cierra si el permiso cambia.
+  const [detalleComoGestor, setDetalleComoGestor] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (modalDetalle && detalleComoGestor !== null && detalleComoGestor !== isAdmin) cerrarDetalle();
+  }, [isAdmin, modalDetalle, detalleComoGestor]);
+
   // Re-sincroniza la tarea seleccionada (modal de detalle) cuando la lista cacheada cambia
-  // tras una invalidación/refetch, para que progreso/estado mostrados queden frescos.
+  // tras una invalidación/refetch, para que progreso/estado mostrados queden frescos. Si la lista
+  // ya ha llegado y la tarea no está (la borraron, o ya no es tuya), el modal se cierra.
   useEffect(() => {
     if (!selected) return;
+    if (!(isAdmin ? tareasAdminQuery.isSuccess : misTareasQuery.isSuccess)) return;
     const src = isAdmin ? tareasAdmin : misTareas;
     const fresh = src.find((t) => t.ID_Tarea === selected.ID_Tarea);
-    if (fresh && fresh !== selected) {
+    if (!fresh) {
+      cerrarDetalle();
+      return;
+    }
+    if (fresh !== selected) {
       setSelected({ ...selected, ...fresh });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -336,6 +357,7 @@ export default function Tareas() {
   const openDetalle = async (t: TareaUI) => {
     setConfirmAccion(null);
     setSelected(t);
+    setDetalleComoGestor(isAdmin);
     setModalDetalle(true);
 
     if (!isAdmin) return;
