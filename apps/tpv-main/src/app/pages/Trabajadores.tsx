@@ -34,6 +34,14 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 import { conAviso } from "../../shared/lib/conAviso";
 import { CampoHora, esHora } from "../../shared/ui/CampoHora";
 
+/**
+ * INC-20261030-012: las columnas de la semana, las mismas para la cabecera y para cada fila. Cada fila
+ * es su propia rejilla, y con `1fr` (que no baja del ancho de su contenido) una fila con tarjetas
+ * anchas ensanchaba sus columnas: dejaba de cuadrar con la cabecera y se pulsaba el día de al lado.
+ * `minmax(0,1fr)` las deja todas iguales, y el contenido se parte dentro.
+ */
+const COLUMNAS_SEMANA = "grid grid-cols-[260px_repeat(7,minmax(0,1fr))]";
+
 /* =========================
    Helpers runtime
 ========================= */
@@ -837,7 +845,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
       <div className="block min-w-0">
         <div className="w-full touch-pan-x overflow-x-auto overscroll-x-contain rounded-xl border border-border pb-2 [scrollbar-gutter:stable]">
           <div className="min-w-[900px]">
-            <div className="grid grid-cols-[260px_repeat(7,1fr)] border-b border-border bg-surface-2">
+            <div className={`${COLUMNAS_SEMANA} border-b border-border bg-surface-2`}>
               <div className="p-3 font-semibold">Trabajador</div>
               {weekDays.map((d) => (
                 <div key={d.ymd} className="p-3 font-semibold text-center">
@@ -850,7 +858,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
             {trabajadoresVisibles.map((t) => (
               <div
                 key={t.ID_Trabajador}
-                className="grid grid-cols-[260px_repeat(7,1fr)] border-b border-border"
+                className={`${COLUMNAS_SEMANA} border-b border-border`}
               >
                 <div className="p-3">
                   <div className="font-semibold">
@@ -866,7 +874,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                   const list = asignacionesByCell.get(key) ?? [];
 
                   return (
-                    <div key={d.ymd} className="p-2 border-l border-border">
+                    <div key={d.ymd} className="min-w-0 p-2 border-l border-border">
                       <div className="flex flex-col gap-2">
                         {list.length === 0 ? (
                           <div className="text-xs text-fg-subtle">{isAdmin ? "Sin asignacion" : "—"}</div>
@@ -886,8 +894,8 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                 key={`${a.ID_Asignacion}-${a.ID_Turno}-${a.Hora_Inicio ?? ""}-${a.Hora_Fin ?? ""}-${a.Area ?? ""}-${a.Notas ?? ""}`}
                                 className="rounded-xl border border-border bg-surface px-2 py-2 flex flex-col gap-1"
                               >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex flex-col">
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div className="flex min-w-0 flex-col break-words">
                                     <div className="text-sm font-semibold">{a.Nombre_Turno}</div>
                                     <div className="text-xs text-fg-muted">
                                       {a.Area}

@@ -69,3 +69,14 @@ it("el campo de hora pone los dos puntos y no deja pasar más que una hora", () 
     expect(["00:00", "23:59", "24:00", "12:60", "9:30", "1230", ""].map(esHora))
         .toEqual([true, true, false, false, false, false, false]);
 });
+
+// INC-20261030-012: la cabecera y cada fila son rejillas separadas. Con `1fr`, una fila con tarjetas
+// anchas ensanchaba sus columnas y dejaba de cuadrar con la cabecera: se pulsaba el día de al lado.
+// jsdom no mide, pero sí puede comprobar que todas usan las mismas columnas y que ninguna crece con
+// su contenido.
+it("la cabecera y cada fila de la semana tienen las mismas columnas", () => {
+    const { container } = render(<MemoryRouter><Trabajadores /></MemoryRouter>);
+    const rejillas = Array.from(container.querySelectorAll("[class*=\"repeat(7\"]"));
+    expect(rejillas.length).toBe(2); // la cabecera y la fila de Ana
+    for (const r of rejillas) expect(r.className).toContain("grid-cols-[260px_repeat(7,minmax(0,1fr))]");
+});
