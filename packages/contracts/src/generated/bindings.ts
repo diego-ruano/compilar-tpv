@@ -1178,6 +1178,25 @@ export type FacturaDelCobro = {
 	importe: Dinero,
 };
 
+/**  Un comando que ha fallado, tal como lo cuenta la pantalla. */
+export type FalloDeComando = {
+	/**  Nombre del comando (`printer_imprimir_pago`). */
+	comando: string,
+	code: ErrorCode,
+	gravedad: GravedadFallo,
+	/**
+	 *  El texto del error. Sólo viaja en los de `entorno` y `programa`: el de una respuesta
+	 *  esperada puede llevar lo que ha escrito alguien, y para saber que pasa basta el código.
+	 */
+	mensaje: string | null,
+	/**  Ruta de la pantalla desde la que se llamó. */
+	pantalla: string | null,
+	/**  Lo que tardó el comando en fallar. */
+	duracion_ms: number,
+	/**  Cuántas veces cuenta este aviso: 1, o las que se juntaron en la ventana de un minuto. */
+	veces: number,
+};
+
 export type FinalizarTareaInput = {
 	id_tarea: string,
 	id_trabajador: string,
@@ -1198,6 +1217,18 @@ export type GeometriaTicket = {
 	margin_left_mm?: number | null,
 	margin_right_mm?: number | null,
 };
+
+/**
+ *  Qué clase de fallo es. La decide la pantalla por el código, con una tabla exhaustiva
+ *  (`fallosDeComandos.ts`): un código nuevo no compila hasta que alguien le asigne una.
+ */
+export type GravedadFallo =
+/**  Una respuesta esperada: un dato que no vale, un PIN mal puesto, un permiso que no se tiene. */
+"normal" |
+/**  Algo de fuera que no es un fallo del programa: la red, la impresora, la Main apagada. */
+"entorno" |
+/**  Un fallo del programa: hay que mirarlo. */
+"programa";
 
 export type GuardarPermisosInput = {
 	id_rol: string,

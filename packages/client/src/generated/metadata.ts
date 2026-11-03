@@ -218,6 +218,7 @@ export const nombresComandos = {
     "sync_inicializar_tenant_vacio": "syncInicializarTenantVacio",
     "jobs_status": "jobsStatus",
     "interruptores_apagados": "interruptoresApagados",
+    "telemetria_fallo_de_comando": "telemetriaFalloDeComando",
     "config_get_business_settings": "configGetBusinessSettings",
     "config_patch_business_settings": "configPatchBusinessSettings",
     "config_get_ticket_settings": "configGetTicketSettings",
@@ -444,6 +445,7 @@ type Argumentos = {
     "sync_inicializar_tenant_vacio": {  };
     "jobs_status": {  };
     "interruptores_apagados": {  };
+    "telemetria_fallo_de_comando": { args: Parameters<Comandos["telemetriaFalloDeComando"]>[0] };
     "config_get_business_settings": {  };
     "config_patch_business_settings": { args: Parameters<Comandos["configPatchBusinessSettings"]>[0] };
     "config_get_ticket_settings": {  };

@@ -49,6 +49,19 @@ use std::sync::OnceLock;
 use context::Context;
 use state::TelemetryState;
 
+/// Target de los fallos de comandos que cuenta la pantalla (`commands/telemetria.rs` de la app).
+pub const TARGET_FALLOS_DE_COMANDOS: &str = "tpv::comandos";
+
+/// Qué hace Sentry con cada evento de `tracing`: lo de siempre (`error!` es un evento; `warn!` e
+/// `info!`, migas), salvo los fallos de comandos. Esos los manda a Sentry la pantalla, con el rastro
+/// de lo que se pulsó antes; aquí quedan como miga para no contarlos dos veces.
+fn filtro_de_sentry(metadata: &tracing::Metadata<'_>) -> sentry_tracing::EventFilter {
+    if metadata.target() == TARGET_FALLOS_DE_COMANDOS {
+        return sentry_tracing::EventFilter::Breadcrumb;
+    }
+    sentry_tracing::default_event_filter(metadata)
+}
+
 /// Tope del anillo de staging en memoria (nº de eventos). Antesala entre captura y disco; si se
 /// llenara (atasco grave de E/S) se descartan los más antiguos, que de todos modos siguen en el
 /// fichero local.
@@ -134,14 +147,14 @@ pub fn init(config: TelemetryConfig) -> Result<(), TelemetryError> {
     let forward_layer = forward::ForwardLayer::new(state.clone());
 
     // Capa puente tracing→Sentry: los eventos `error!` se convierten en eventos Sentry y el resto
-    // en breadcrumbs. Es no-op si Sentry no está inicializado/está deshabilitado.
+    // en breadcrumbs (ver `filtro_de_sentry`). Es no-op si Sentry no está inicializado/está deshabilitado.
     let subscriber = tracing_subscriber::registry()
         .with(env_filter)
         .with(file_layer)
         .with(console_layer)
         .with(logcat_layer)
         .with(forward_layer)
-        .with(sentry_tracing::layer());
+        .with(sentry_tracing::layer().event_filter(filtro_de_sentry));
     // Registrar el subscriber y el logger por separado: try_init instala primero el
     // subscriber y luego falla si Android/otro componente ya posee el logger de log.
     tracing::subscriber::set_global_default(subscriber)

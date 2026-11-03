@@ -24,6 +24,7 @@ pub mod reservas_web;
 pub mod stats;
 pub mod sync;
 pub mod tareas;
+pub mod telemetria;
 pub mod trabajadores;
 pub mod venta_rapida;
 pub mod verifactu;

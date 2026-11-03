@@ -27,6 +27,7 @@ si la fachada `log` está libre.
 ```
 Escritorio (Rust + Webview)
   ├─ tauri-plugin-sentry ───────────────────────────────► Sentry   (DSN público embebido)
+  ├─ invocar (fallo de un comando) ─► telemetria_fallo_de_comando ─► tracing (tpv::comandos)
   ├─ tracing ─► fichero local de 7 días                  [fuente de verdad]
   └─ tracing ─► cola durable <AppData>/telemetry-spool/
                   └─ hilo propio ─ POST /v1/telemetry (device-proof) ─► worker ─► Axiom
@@ -78,6 +79,38 @@ Better Stack     ── GET /health, latidos del cron
 - **Logpush** está activado en el worker (`"logpush": true`); el destino se configura en el panel de
   Cloudflare.
 
+## Los fallos de comandos
+
+Todo comando pasa por `invocar` (`packages/client/src/transporte.ts`). Cuando uno falla, avisa a
+`shared/observability/fallosDeComandos.ts`, que decide su gravedad por el código con una tabla
+exhaustiva (`GRAVEDAD`: un código nuevo no compila hasta tener la suya) y lo cuenta:
+
+| Gravedad | Códigos | `tracing` | Mensaje | Sentry |
+|---|---|---|---|---|
+| `programa` | `internal`, `repository`, `tenant_migration_altered`, `bootstrap_too_large` | `error!` | Sí | Sí, desde la Webview |
+| `entorno` | `external`, `main_offline`, `backup_corrupt` | `warn!` | Sí | No |
+| `normal` | los de respuesta esperada: validación, PIN, permisos, licencia… | `info!` | No | No |
+| no se cuenta | `not_approved` (la respuesta del sondeo mientras se vincula una Handy) | — | — | — |
+
+- **Va a Rust siempre**, con `telemetria_fallo_de_comando` (sin sesión: también cuenta lo de antes del
+  login), que lo escribe con target `tpv::comandos`: llega al `tpv.log` y a Axiom
+  (`tpv-device-logs`) por la cola en disco, así que lo que falla sin red llega al volver. Lleva el
+  comando, el código, la gravedad, la pantalla (`pathname`), lo que tardó y las veces.
+- **A Sentry sólo los fallos del programa**, y desde la Webview: el evento lleva el rastro de lo que
+  se pulsó y por dónde se navegó antes. Se agrupa por comando y código (`fingerprint`). El
+  `error!` de Rust no genera un segundo evento: `filtro_de_sentry` (`tpv-telemetry`) deja
+  `tpv::comandos` como miga. Lo que falla sin red no llega a Sentry, pero sí a Axiom.
+- **El mensaje de una respuesta esperada no viaja**: puede llevar lo que escribió alguien, y para
+  saber que pasa basta el código.
+- **Una racha no inunda**: el mismo comando con el mismo código sale una vez, y los que lleguen en el
+  minuto siguiente salen juntos al cerrarse, con `veces`.
+- **No se cuenta dos veces**: `invocar` marca el error (`yaRegistrado`) y `captureException` no lo
+  reenvía, venga de `conAviso`, del listener global o del `catch` de una pantalla.
+- **Lo que no es un fallo del programa va como `external`**: los errores de la impresora
+  (`fallo_de_impresora` en `lib.rs`) lo son, o cada rollo que se acaba sería un issue.
+
+Lo que falla en la propia pantalla, sin comando de por medio, va por `captureException`.
+
 ## Los errores salen sin datos personales (OBS-01)
 
 Antes de mandar algo a Sentry o a Axiom, el mensaje y los campos pasan por un filtro que sustituye por un
@@ -118,6 +151,7 @@ reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idem
 | Crate de telemetría | `crates/tpv-telemetry/` (`config`, `context`, `event`, `forward`, `spool`, `worker`, `sentry`, `scrub`, `state`) |
 | Cableado del escritorio | `apps/tpv-main/src-tauri/src/lib.rs` |
 | Sentry de la Webview | `apps/tpv-main/src/shared/observability/sentry.ts` (más el error boundary y el listener global) |
+| Fallos de comandos | `packages/client/src/transporte.ts`, `shared/observability/fallosDeComandos.ts`, `commands/telemetria.rs` |
 | Sentry del worker | `apps/cloud-worker-licensing/src/observability/sentry.ts` |
 | Axiom | `apps/cloud-worker-licensing/src/observability/axiom.ts` |
 | Ingesta | `apps/cloud-worker-licensing/src/domains/telemetry/telemetry.routes.ts` |
@@ -267,7 +301,8 @@ Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
   `motivo` (`device_revoked`, `bad_device_signature`, `device_ts_out_of_range`). No van a Sentry: un 401
   suelto es normal.
 - **Descuadres**: `tenant_salud_sync` con descuadres.
-- **Errores de dispositivo**: tasa de `level == "ERROR"` en `tpv-device-logs` por tenant.
+- **Errores de dispositivo**: tasa de `level == "ERROR"` en `tpv-device-logs` por tenant. Los fallos
+  de comandos (`target == "tpv::comandos"`) se agrupan por `comando` y `code`.
 - **Better Stack**: `/health` en rojo, y cualquiera de los dos latidos que deje de sonar.
 
 ## Por qué `/health` y los latidos

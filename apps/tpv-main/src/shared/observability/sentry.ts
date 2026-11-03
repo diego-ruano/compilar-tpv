@@ -11,6 +11,8 @@
 
 import * as Sentry from "@sentry/browser";
 import { defaultOptions } from "tauri-plugin-sentry-api";
+import { yaRegistrado } from "@tpv/client";
+import type { FalloDeComando } from "@tpv/contracts";
 
 import { scrubEvent } from "./scrub";
 
@@ -41,13 +43,37 @@ export function initSentry(): void {
 	}
 }
 
-/** Reporta una excepción a Sentry. `context` se adjunta como datos extra (sin PII). */
+/**
+ * Reporta una excepción a Sentry. `context` se adjunta como datos extra (sin PII).
+ *
+ * El fallo de un comando ya lo registró `invocar` (`fallosDeComandos.ts`): si después lo recoge
+ * otro —`conAviso`, el listener global, el `catch` de una pantalla—, no se cuenta otra vez.
+ */
 export function captureException(
 	error: unknown,
 	context?: Record<string, unknown>,
 ): void {
+	if (yaRegistrado(error)) return;
 	try {
 		Sentry.captureException(error, context ? { extra: context } : undefined);
+	} catch {
+		/* no-op */
+	}
+}
+
+/**
+ * Un fallo del programa en un comando (`fallosDeComandos.ts`). Se agrupa por comando y código: el
+ * mismo fallo en el mismo comando es el mismo issue, diga lo que diga el texto.
+ */
+export function capturarFalloDeComando(fallo: FalloDeComando): void {
+	try {
+		const error = new Error(fallo.mensaje ?? fallo.code);
+		error.name = fallo.comando;
+		Sentry.captureException(error, {
+			fingerprint: ["comando", fallo.comando, fallo.code],
+			tags: { comando: fallo.comando, code: fallo.code },
+			extra: { pantalla: fallo.pantalla, duracion_ms: fallo.duracion_ms },
+		});
 	} catch {
 		/* no-op */
 	}

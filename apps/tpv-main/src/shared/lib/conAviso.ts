@@ -29,7 +29,10 @@ export function conAviso<A extends unknown[]>(
     };
 }
 
-/** Reporta un fallo a Sentry y lo enseña en pantalla (o en consola, si no hay avisos montados). */
+/**
+ * Reporta un fallo a Sentry —si no lo registró ya `invocar`— y lo enseña en pantalla (o en
+ * consola, si no hay avisos montados).
+ */
 export function avisarDelFallo(titulo: string, e: unknown): void {
     captureException(e, { titulo });
     const avisos = avisosFueraDeReact();

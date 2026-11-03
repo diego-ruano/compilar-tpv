@@ -2107,6 +2107,8 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             // tareas periódicas de fondo (runner de jobs)
             commands::jobs::jobs_status,
             commands::jobs::interruptores_apagados,
+            // registro de los fallos de comandos que ve la pantalla
+            commands::telemetria::telemetria_fallo_de_comando,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,
@@ -2890,6 +2892,11 @@ mod tests_exenciones_del_gate {
             "commands/recuperacion_pin.rs",
             include_str!("commands/recuperacion_pin.rs"),
             "recuperar el PIN es para el administrador que no puede iniciar sesión (LOGIN-07)",
+        ),
+        (
+            "commands/telemetria.rs",
+            include_str!("commands/telemetria.rs"),
+            "registra también los fallos de antes del login, que son los que más cuesta averiguar",
         ),
     ];
 

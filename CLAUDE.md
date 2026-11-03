@@ -254,6 +254,10 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   nueva lleva su caso en `crates/tpv-telemetry/src/scrub_casos.json`.
 - Un mensaje de error no se compone con nombres ni direcciones.
 - `/health` tiene que seguir tocando la base central.
+- **El fallo de un comando lo registra `invocar`** (`fallosDeComandos.ts`), con su gravedad según el
+  código: una pantalla no lo manda a Sentry. Lo que falla en la pantalla sin comando de por medio, por
+  `captureException`. Un código nuevo necesita su gravedad en `GRAVEDAD`, y lo que no es un fallo del
+  programa (la impresora, la red) se devuelve como `external`, no `internal`.
 
 ### Jobs ([jobs-e-interruptores.md](docs/arquitectura/jobs-e-interruptores.md))
 

@@ -8,9 +8,12 @@ import { appRouter } from "./Router";
 import { queryClient } from "../shared/lib/queryClient";
 import { initTheme } from "../shared/stores/useTheme";
 import { initSentry } from "../shared/observability/sentry";
+import { iniciarRegistroDeFallos } from "../shared/observability/fallosDeComandos";
 
-// Observabilidad lo primero: así se capturan también los errores del arranque.
+// Observabilidad lo primero: así se capturan también los errores del arranque, y los fallos de
+// los comandos desde el primero.
 initSentry();
+iniciarRegistroDeFallos();
 
 // Aplica el tema (claro/oscuro) al <html> antes del primer render para
 // evitar el parpadeo de tema incorrecto.
