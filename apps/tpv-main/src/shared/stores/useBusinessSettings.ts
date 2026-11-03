@@ -6,6 +6,7 @@ import {
     type BusinessSettings,
 } from "../../features/configuracion/api/configApis";
 import { conAviso } from "../lib/conAviso";
+import { captureException } from "../observability/sentry";
 import { deCentimos } from "../lib/dinero";
 
 const DEFAULTS: BusinessSettings = {
@@ -82,7 +83,7 @@ export const useBusinessSettings = create<BusinessSettingsState>(
                 set({ ...DEFAULTS, ...s, ready: true });
             } catch (e) {
                 if (vigente !== contexto) return;
-                console.error("useBusinessSettings.init error:", e);
+                captureException(e, { fase: "ajustes_negocio" });
                 set({ ...DEFAULTS, ready: true });
             }
         },

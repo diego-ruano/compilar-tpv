@@ -12,7 +12,7 @@ import { Paso, TicketItem } from "../types";
 import { cn, lineaGuardada } from "../utils";
 import PrintTicketModal, { type CobroImprimible } from "../../../shared/ticket/PrintTicketModal";
 import { useMode } from "../../../shared/stores/useMode";
-import { conAviso } from "../../../shared/lib/conAviso";
+import { avisarDelFallo, conAviso } from "../../../shared/lib/conAviso";
 import type { Dinero } from "@tpv/contracts";
 import { eur } from "../../../shared/lib/dinero";
 
@@ -156,7 +156,8 @@ export default function TicketPanel({
       await onGuardarNota(currentItem.detalleId, notaValue);
       closeNotaModal();
     } catch (e) {
-      console.error("Error guardando nota:", e);
+      // El modal sigue abierto con lo escrito; sin aviso, «Guardar» parecía no hacer nada.
+      avisarDelFallo("No se pudo guardar la nota", e);
       setNotaSaving(false);
     }
   };

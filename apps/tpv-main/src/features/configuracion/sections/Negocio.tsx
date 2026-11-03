@@ -9,7 +9,7 @@ import { guardarImagen } from "../../../shared/lib/guardarImagen";
 // RECUPERACIÓN es otro, a propósito: vive en la base central y tiene su propio panel, que lo cambia
 // verificando el buzón nuevo (LOGIN-08).
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 import type { EstadoFiscal } from "@tpv/contracts";
 
 import { Panel } from "../ui/Panel";
@@ -114,11 +114,7 @@ export function Negocio({
             setDraft((d) => ({ ...d, logo_data_url: guardada.ruta }));
             triggerImageUploadDrain();
         } catch (e) {
-            console.error("save_image (logo) error:", e);
-            toast.error(
-                "Logo",
-                e instanceof Error ? e.message : typeof e === "string" ? e : "No se pudo subir el logo.",
-            );
+            toast.error("No se pudo subir el logo", toAppError(e).message);
         } finally {
             setUploadingLogo(false);
         }

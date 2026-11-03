@@ -33,6 +33,7 @@ import { mesasLoadLayout } from "../../features/mesas/mesasApi";
 
 import { useAuth } from "../../shared/stores/useAuth";
 import { useToast } from "../../shared/toast";
+import { captureException } from "../../shared/observability/sentry";
 
 // ✅ Modal + tipos del layout (MapCanvas)
 import ReservaMesaMapModal from "../../features/reservas/ReservaMesaMapModal";
@@ -470,8 +471,10 @@ export default function Reservas() {
           }
         }
       } catch (e) {
-        console.error("Error cargando layout:", e);
-        if (!cancelado) setSalonsLayout([]);
+        if (!cancelado) {
+          toast.error("No se pudo cargar el plano", toAppError(e).message);
+          setSalonsLayout([]);
+        }
       }
     }
 
@@ -498,16 +501,14 @@ export default function Reservas() {
   ========================================================= */
   useEffect(() => {
     if (metaQuery.isError) {
-      console.error(metaQuery.error);
-      toast.error("Error", "Error al cargar zonas y mesas.");
+      toast.error("No se pudieron cargar las zonas y mesas", toAppError(metaQuery.error).message);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [metaQuery.isError]);
 
   useEffect(() => {
     if (reservasMesQuery.isError) {
-      console.error(reservasMesQuery.error);
-      toast.error("Error", "Error al cargar las reservas.");
+      toast.error("No se pudieron cargar las reservas", toAppError(reservasMesQuery.error).message);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reservasMesQuery.isError]);
@@ -784,7 +785,6 @@ export default function Reservas() {
       setMostrarMapaMesas(false);
       resetFormulario();
     } catch (err) {
-      console.error(err);
       toast.error("No se pudo guardar la reserva", textoDelError(err));
     }
   }
@@ -796,7 +796,6 @@ export default function Reservas() {
       if (!ok) return toast.error("No se pudo borrar la reserva", "Esa reserva ya no existe.");
       toast.success?.("OK", "Reserva borrada.");
     } catch (err) {
-      console.error(err);
       toast.error("No se pudo borrar la reserva", textoDelError(err));
     }
   }
@@ -810,7 +809,6 @@ export default function Reservas() {
         cancelarLeEscribe(reserva) ? "Reserva cancelada. Se le avisará al cliente por correo." : "Reserva cancelada.",
       );
     } catch (err) {
-      console.error(err);
       toast.error("No se pudo cancelar la reserva", textoDelError(err));
     }
   }
@@ -1142,7 +1140,7 @@ export default function Reservas() {
                     onChangeSalon={(salonIdRaw) => {
                       const zonaId = parseDbZonaId(salonIdRaw);
                       if (!zonaId) {
-                        console.error("ID de salón inválido desde mapa:", salonIdRaw);
+                        captureException(new Error("ID de salón inválido desde el mapa"), { salonIdRaw });
                         return;
                       }
                       setForm((p) => ({ ...p, idZona: zonaId, idMesa: "" }));
@@ -1151,7 +1149,7 @@ export default function Reservas() {
                     onSelectMesa={(mesaIdRaw) => {
                       const idMesa = parseDbMesaId(mesaIdRaw);
                       if (!idMesa) {
-                        console.error("ID de mesa inválido desde mapa:", mesaIdRaw);
+                        captureException(new Error("ID de mesa inválido desde el mapa"), { mesaIdRaw });
                         return;
                       }
                       setForm((p) => ({ ...p, idMesa }));

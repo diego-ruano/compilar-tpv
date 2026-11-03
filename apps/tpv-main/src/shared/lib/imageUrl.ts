@@ -107,8 +107,7 @@ export async function resolveImageUrl(
   let url: string;
   try {
     url = convertFileSrc(await join(await appDataDir(), r));
-  } catch (e) {
-    console.warn("[imageUrl] no se pudo resolver la ruta local de", r, e);
+  } catch {
     return "";
   }
   // Solo memoizamos cuando el fichero ya está en disco: así, si aún no estaba, la próxima
@@ -124,8 +123,7 @@ export async function resolveImageUrl(
  */
 export function triggerImageUploadDrain(): void {
   commands.imagesDrainPending()
-    .catch((e) => {
-      console.error("[images_drain] Tauri error:", e);
+    .catch((e: unknown) => {
       captureException(e, { fase: "images_drain_pending" });
     });
 }

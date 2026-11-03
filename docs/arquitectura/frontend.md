@@ -45,9 +45,19 @@ lleva clases de Tailwind, que sólo escanea dentro de cada app.
   `_Serialize` para respuestas y `_Deserialize` para entradas.
 - **Los errores** se normalizan con `toAppError(e)` y se ramifica con `esError(e, "código")`, nunca por
   el texto. Lo que se enseña es `message`.
+- **Registrar y avisar son dos trabajos.** Registrar es para nosotros y lo hace `invocar` con todo
+  comando que falla ([observabilidad.md](observabilidad.md#los-fallos-de-comandos)): una pantalla no
+  manda a Sentry el fallo de un comando ni lo escribe en consola, que en la versión instalada no ve
+  nadie. Lo que falla en la propia pantalla (componer un PDF, un dato que no cuadra) va por
+  `captureException`, que no cuenta dos veces lo que ya registró `invocar`. Avisar es para quien
+  está delante y es de cada pantalla: el título dice qué ha fallado y el texto, por qué
+  (`toast.error("No se pudo guardar el cliente", toAppError(e).message)`), nunca un genérico que
+  esconda el motivo. Una carga que falla se avisa: una lista sin cargar no puede parecer vacía.
+- **Un `catch` en una pantalla, sólo si hace algo distinto** con el error: dejar el modal abierto,
+  ramificar por código, poner el error junto al campo. Si sólo hay que avisar, `conAviso(fn)`
+  (`shared/lib/conAviso.ts`); fuera de un componente, `avisarDelFallo(titulo, e)`.
 - **`void` marca un «fuego y olvido» a sabiendas.** Si lo que va detrás puede fallar de una forma que el
-  usuario deba ver, se usa `conAviso(fn)` (`shared/lib/conAviso.ts`), que reporta a Sentry y lo dice en
-  pantalla.
+  usuario deba ver, se usa `conAviso(fn)`, que lo dice en pantalla.
 
 ## Datos: TanStack Query y Zustand
 

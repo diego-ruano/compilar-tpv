@@ -1,5 +1,7 @@
 import { usePermisos } from "../../shared/lib/usePermisos";
 import React, { useEffect, useMemo, useState } from "react";
+import { toAppError } from "@tpv/client";
+import { useToast } from "../../shared/toast";
 import {
   X,
   Plus,
@@ -94,6 +96,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   const activeId = open ? productId : null;
   const detalleQuery = useProductoDetalle(activeId);
   const { puede } = usePermisos();
+  const toast = useToast();
   const lotesQuery = useLotesByProducto(activeId);
 
   const p: ProductoDetalleDto | null = detalleQuery.data ?? null;
@@ -140,15 +143,13 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   // Muestra el toast/limpieza cuando falla la carga (paridad con el catch anterior).
   useEffect(() => {
     if (detalleQuery.isError || lotesQuery.isError) {
-      console.error(
-        "Error cargando detalle producto:",
-        detalleQuery.error ?? lotesQuery.error,
-      );
+      toast.error("No se pudo cargar el producto", toAppError(detalleQuery.error ?? lotesQuery.error).message);
       setImgUrl("");
       setAlergOpen(false);
       setAlergImgUrl({});
     }
-  }, [detalleQuery.isError, lotesQuery.isError, detalleQuery.error, lotesQuery.error]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detalleQuery.isError, lotesQuery.isError]);
 
   const title = useMemo(() => "Acciones del producto", []);
 

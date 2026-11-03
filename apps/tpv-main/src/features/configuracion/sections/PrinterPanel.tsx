@@ -1,4 +1,4 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 // src/features/configuracion/sections/PrinterPanel.tsx
 //
 // Panel de selección de impresora de tickets. Lista las impresoras del sistema (locales y de
@@ -31,11 +31,7 @@ export function PrinterPanel() {
             setPrinters(list);
             setSelected(sel);
         } catch (e) {
-            console.error("printerList error:", e);
-            toast.error(
-                "Impresoras",
-                "No se pudieron listar las impresoras del sistema.",
-            );
+            toast.error("No se pudieron listar las impresoras", toAppError(e).message);
         } finally {
             setLoading(false);
         }
@@ -52,8 +48,7 @@ export function PrinterPanel() {
             try {
                 await printerSetSelected(next);
             } catch (e) {
-                console.error("printerSetSelected error:", e);
-                toast.error("Impresoras", "No se pudo guardar la selección.");
+                toast.error("No se pudo guardar la impresora", toAppError(e).message);
                 void cargar();
             }
         },
@@ -71,11 +66,7 @@ export function PrinterPanel() {
             await printerOpenDrawer();
             toast.success("Cajón", "Orden de apertura enviada.");
         } catch (e) {
-            console.error("printerOpenDrawer error:", e);
-            toast.error(
-                "Cajón",
-                typeof e === "string" ? e : "No se pudo abrir el cajón.",
-            );
+            toast.error("No se pudo abrir el cajón", toAppError(e).message);
         }
     }, [toast]);
 
@@ -86,11 +77,7 @@ export function PrinterPanel() {
             await printerPrintTest(selected);
             toast.success("Impresora", "Ticket de prueba enviado.");
         } catch (e) {
-            console.error("printerPrintTest error:", e);
-            toast.error(
-                "Impresora",
-                typeof e === "string" ? e : "No se pudo imprimir la prueba.",
-            );
+            toast.error("No se pudo imprimir la prueba", toAppError(e).message);
         } finally {
             setTesting(false);
         }

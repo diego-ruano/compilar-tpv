@@ -247,7 +247,6 @@ function EditTrabajador() {
 
         setIndefinido(!detail.Fecha_Fin_Contrato);
       } catch (e) {
-        console.error(e);
         setError(getErrorMessage(e));
       } finally {
         setLoading(false);
@@ -302,7 +301,6 @@ function EditTrabajador() {
 
       void navigate("/Trabajadores");
     } catch (e) {
-      console.error(e);
       setError(getErrorMessage(e));
     } finally {
       setSaving(false);

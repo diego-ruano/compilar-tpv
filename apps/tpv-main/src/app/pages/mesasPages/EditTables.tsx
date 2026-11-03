@@ -212,7 +212,8 @@ export default function EditTables() {
                     setActiveSalonId("");
                 }
             } catch (e) {
-                console.error("No se pudo cargar layout desde API/local fallback:", e);
+                // Sin aviso, el editor vacío parecía un plano sin salones.
+                toast.error("No se pudo cargar el plano", toAppError(e).message);
                 setSalons([]);
                 setActiveSalonId("");
             } finally {
@@ -220,7 +221,7 @@ export default function EditTables() {
                 setDirty(false);
             }
         })();
-    }, []);
+    }, [toast]);
 
     const activeSalon = salons.find((s) => s.id === activeSalonId) ?? salons[0];
     const emptyState = !loadingDb && salons.length === 0;
@@ -891,7 +892,6 @@ export default function EditTables() {
                                         // Una mesa borrada se lleva su configuración web (cascada).
                                         void mesasWeb.recargar();
                                     } catch (e) {
-                                        console.error("No se pudo guardar el layout:", e);
                                         toast.error("No se pudo guardar el plano", toAppError(e).message);
                                     }
                                 })}

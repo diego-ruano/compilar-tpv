@@ -183,11 +183,7 @@ export default function Login() {
                 if (!mounted) return;
                 setUsers(arr ?? []);
             } catch (e) {
-                console.error("listLoginUsers error:", e);
-                toast.error(
-                    "No se pudieron cargar los usuarios",
-                    "Revisa la conexión con la base de datos.",
-                );
+                toast.error("No se pudieron cargar los usuarios", toAppError(e).message);
             } finally {
                 if (mounted) setLoadingUsers(false);
             }
@@ -216,14 +212,10 @@ export default function Login() {
                 });
                 if (!mounted) return;
                 setPunchStatus(st);
-            } catch (e: any) {
-                console.error("get_today_punch_status error:", e);
+            } catch (e) {
                 if (!mounted) return;
                 setPunchStatus(null);
-                toast.error(
-                    "No se pudo comprobar el fichaje",
-                    "Revisa la conexión con la base de datos.",
-                );
+                toast.error("No se pudo comprobar el fichaje", toAppError(e).message);
             } finally {
                 if (mounted) setLoadingPunch(false);
             }
@@ -289,7 +281,6 @@ export default function Login() {
                 checked ? "Marcado como turno partido." : "Turno partido desactivado.",
             );
         } catch (e) {
-            console.error("setTurnoPartidoHoy error:", e);
             toast.error("No se pudo guardar turno partido", toAppError(e).message);
         } finally {
             accionEnCursoRef.current = false;
@@ -342,17 +333,8 @@ export default function Login() {
                 tipo === "entrada" ? "Entrada registrada" : "Salida registrada",
                 "Fichaje guardado correctamente.",
             );
-        } catch (e: any) {
-            console.error("punch error:", e);
-
-            const msg =
-                typeof e === "string"
-                    ? e
-                    : e?.message
-                        ? String(e.message)
-                        : "No se pudo fichar";
-
-            toast.error("Error al fichar", msg);
+        } catch (e) {
+            toast.error("No se pudo fichar", toAppError(e).message);
         } finally {
             accionEnCursoRef.current = false;
             setIsSubmitting(false);
@@ -415,15 +397,8 @@ export default function Login() {
             });
 
             void navigate(ok.rol === "Cocinero" ? "/Comandas" : "/", { replace: true });
-        } catch (e: any) {
-            const msg =
-                typeof e === "string"
-                    ? e
-                    : e?.message
-                        ? String(e.message)
-                        : "PIN incorrecto";
-
-            toast.error("Acceso denegado", msg);
+        } catch (e) {
+            toast.error("Acceso denegado", toAppError(e).message);
             pinRef.current = "";
             setPin("");
         } finally {

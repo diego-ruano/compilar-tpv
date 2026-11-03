@@ -175,8 +175,7 @@ function AddTrabajador() {
         setRoles(rows);
         if (rows.length === 1) setIdRol(rows[0].ID_Rol);
       } catch (e) {
-        console.error(e);
-        setError("No se pudieron cargar los roles.");
+        setError(`No se pudieron cargar los roles: ${toAppError(e).message}`);
       } finally {
         setLoadingRoles(false);
       }
@@ -232,7 +231,6 @@ function AddTrabajador() {
 
       void navigate("/Trabajadores");
     } catch (e) {
-      console.error(e);
       setError(getErrorMessage(e));
     } finally {
       setSaving(false);

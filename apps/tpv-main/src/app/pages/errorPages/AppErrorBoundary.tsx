@@ -19,9 +19,8 @@ export default class AppErrorBoundary extends React.Component<Props, State> {
     }
 
     componentDidCatch(error: unknown, info: unknown) {
-        // Reporta a Sentry (vía el SDK de Rust) y deja también el rastro en consola.
+        // Reporta a Sentry (vía el SDK de Rust).
         captureException(error, { react: info });
-        console.error("💥 ErrorBoundary caught:", error, info);
     }
 
     reset = () => {

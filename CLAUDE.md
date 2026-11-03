@@ -247,6 +247,10 @@ pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e   # E2E, a
   origen externo nuevo va en `csp` **y** `devCsp`. Una gráfica de ApexCharts nueva esparce
   `APEX_CHART_BASE`. Esto no se ve en `pnpm tauri dev`: se comprueba empaquetado o en Android.
 - `void` es «fuego y olvido» a sabiendas; si el fallo debe verse, `conAviso(fn)`.
+- **Un aviso de error dice qué falló y por qué**: `toast.error("No se pudo guardar el cliente",
+  toAppError(e).message)`, nunca un genérico que esconda el motivo. Una carga que falla se avisa. Un
+  `catch` sólo si la pantalla hace algo distinto con el error; si sólo avisa, `conAviso`. Sin
+  `console.error`: en la versión instalada no lo ve nadie.
 
 ### Telemetría ([observabilidad.md](docs/arquitectura/observabilidad.md))
 

@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { cloudPost } from "../../shared/lib/cloudApi";
 import { deviceFingerprint } from "../../shared/lib/deviceFingerprint";
+import { captureException } from "../../shared/observability/sentry";
 import type { ModeStateValue } from "../../shared/stores/useMode";
 import {
 	cancelarEmparejamiento,
@@ -147,7 +148,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 			// Si no llega, lo único que pasa es que la solicitud sigue en la lista de la Main hasta que
 			// caduque el código, y aprobarla entonces no le da acceso a nadie: la Handy ya no la espera.
 			cancelarEmparejamiento(espera, { commands, pedirALaNube }).catch((e: unknown) =>
-				console.warn("[emparejamiento] no se ha podido soltar el código en la nube:", e),
+				captureException(e, { fase: "cancelar_emparejamiento" }),
 			);
 		}
 	}

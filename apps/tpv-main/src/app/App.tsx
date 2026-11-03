@@ -18,6 +18,7 @@ import { ToastProvider } from "../shared/toast";
 
 import { usePermisos } from "../shared/lib/usePermisos";
 import { toAppError } from "@tpv/client";
+import { captureException } from "../shared/observability/sentry";
 
 function AppInner() {
     const role = useAuth((s) => s.role);
@@ -60,8 +61,8 @@ function AppInner() {
                 );
                 configurarRecuperacion(recovery.state);
             })
-            .catch((e) => {
-                console.error("No se pudo comprobar el setup inicial:", e);
+            .catch((e: unknown) => {
+                captureException(e, { fase: "comprobar_setup_inicial" });
                 if (vivo) {
                     marcarDatosPerdidos(true);
                     setPrimeraPantalla("recuperar");

@@ -19,6 +19,7 @@ import {
 } from "../../features/trabajadores/trabajadoresQueries";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { captureException } from "../../shared/observability/sentry";
 import { useAuth } from "../../shared/stores/useAuth";
 import { usePermisos } from "../../shared/lib/usePermisos";
 import { esAdmin } from "../../shared/lib/permisos";
@@ -435,8 +436,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   // Aviso si falla la carga de turnos/asignaciones (equivale al catch del fetch anterior).
   useEffect(() => {
     if (turnosQuery.isError || asignacionesQuery.isError) {
-      console.error(turnosQuery.error ?? asignacionesQuery.error);
-      setError("No se pudo cargar el horario semanal.");
+      setError(`No se pudo cargar el horario semanal: ${toAppError(turnosQuery.error ?? asignacionesQuery.error).message}`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turnosQuery.isError, asignacionesQuery.isError]);
@@ -457,8 +457,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     try {
       await copySemana.mutateAsync({ from_monday, to_monday, overwrite: true });
     } catch (e) {
-      console.error(e);
-      setError("No se pudo copiar la semana anterior.");
+      setError(`No se pudo copiar la semana anterior: ${toAppError(e).message}`);
     }
   };
 
@@ -482,8 +481,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
       }
       toast.success("Listo", "Horario predeterminado guardado.");
     } catch (e) {
-      console.error(e);
-      setError("No se pudo establecer el horario predeterminado.");
+      setError(`No se pudo establecer el horario predeterminado: ${toAppError(e).message}`);
     }
   };
 
@@ -515,8 +513,9 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
       await writeFile(filePath, pdfData);
       toast.success("Completado", `PDF guardado:\n${filePath}`);
     } catch (e) {
-      console.error(e);
-      setError("No se pudo generar el PDF del horario.");
+      // El PDF se compone en la pantalla: si falla, no lo ha registrado `invocar`.
+      captureException(e, { fase: "pdf_horario" });
+      setError(`No se pudo generar el PDF del horario: ${toAppError(e).message}`);
     }
   };
 
@@ -629,8 +628,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     try {
       await deleteAsignacion.mutateAsync(id_asignacion);
     } catch (e) {
-      console.error(e);
-      setError("No se pudo borrar la asignacion.");
+      setError(`No se pudo borrar la asignación: ${toAppError(e).message}`);
     }
   };
 
@@ -1109,15 +1107,8 @@ function Trabajadores() {
   );
 
   const error = trabajadoresQuery.isError
-    ? "No se pudieron cargar los trabajadores."
+    ? `No se pudieron cargar los trabajadores: ${toAppError(trabajadoresQuery.error).message}`
     : null;
-
-  useEffect(() => {
-    if (trabajadoresQuery.isError) {
-      console.error("Fallo al cargar trabajadores", trabajadoresQuery.error);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trabajadoresQuery.isError]);
 
   // Refrescar la lista cada vez que se navega a la página (equivale al efecto previo
   // keyed por location.key, que recargaba al volver desde alta/edición de trabajador).

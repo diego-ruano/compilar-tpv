@@ -6,6 +6,7 @@ import {
     type TicketSettings,
 } from "../../features/configuracion/api/configApis";
 import { conAviso } from "../lib/conAviso";
+import { captureException } from "../observability/sentry";
 
 const DEFAULTS: TicketSettings = {
     show_logo: true,
@@ -98,7 +99,7 @@ export const useTicketSettings = create<TicketSettingsState>((set, get) => ({
             set({ settings: merged, ready: true });
         } catch (e) {
             if (vigente !== contexto) return;
-            console.error("useTicketSettings.init error:", e);
+            captureException(e, { fase: "ajustes_ticket" });
             set({ settings: DEFAULTS, ready: true });
         }
     },

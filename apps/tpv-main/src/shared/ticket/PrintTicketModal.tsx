@@ -176,8 +176,7 @@ export default function PrintTicketModal({
             toast.success("Ticket", "Enviado a la impresora.");
             onClose();
         } catch (e) {
-            console.error("imprimir ticket:", e);
-            toast.error("Ticket", toAppError(e).message || "No se pudo imprimir el ticket.");
+            toast.error("No se pudo imprimir el ticket", toAppError(e).message);
         } finally {
             setPrinting(false);
         }

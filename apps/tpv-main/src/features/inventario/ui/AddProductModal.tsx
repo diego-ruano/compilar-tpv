@@ -1,4 +1,4 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 import { usePermisos } from "../../../shared/lib/usePermisos";
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -254,9 +254,8 @@ export function AddProductModal({
             setCantidadInicialLote("");
 
             setAlergenosOpen(false);
-        })().catch((e) => {
-            console.error("Error cargando modal producto:", e);
-            toast.error("Error", "No se pudieron cargar los datos del producto.");
+        })().catch((e: unknown) => {
+            toast.error("No se pudieron cargar los datos del producto", toAppError(e).message);
         });
 
         return () => {
@@ -371,8 +370,7 @@ export function AddProductModal({
             onSaved();
             onClose();
         } catch (err) {
-            console.error("Error guardando producto:", err);
-            toast.error("Error", "Error al guardar el producto");
+            toast.error("No se pudo guardar el producto", toAppError(err).message);
         } finally {
             setLoading(false);
         }

@@ -6,7 +6,7 @@ import { cn } from "../utils";
 import type { ComandaBarraRow, IndexRow, VerTicketsDetalleRow } from "@tpv/contracts";
 
 import { vrGetIndexRows, vrGetDetallesVerTicket } from "../ventaRapidaAPI";
-import { conAviso } from "../../../shared/lib/conAviso";
+import { avisarDelFallo, conAviso } from "../../../shared/lib/conAviso";
 import { eur, escalar } from "../../../shared/lib/dinero";
 
 function parseWhen(fecha: string) {
@@ -120,8 +120,8 @@ export default function VerTicketsModal({
         const map: Record<string, IndexRow> = {};
         for (const r of rows) map[r.ID_Comanda] = r;
         setIndexByComanda((prev) => ({ ...prev, ...map }));
-      } catch (e) {
-        console.error("prefetchIndex error:", e);
+      } catch {
+        // Ya lo registró `invocar`; es una precarga y la lista funciona sin ella.
       } finally {
         if (indexRunIdRef.current === runId) setLoadingIndex(false);
       }
@@ -158,7 +158,7 @@ export default function VerTicketsModal({
       const det = await vrGetDetallesVerTicket(idComanda);
       setDetallesByComanda((prev) => ({ ...prev, [idComanda]: det }));
     } catch (e) {
-      console.error("Error loadDetalles:", e);
+      avisarDelFallo("No se pudieron cargar las líneas del ticket", e);
       setDetallesByComanda((prev) => ({ ...prev, [idComanda]: [] }));
     } finally {
       setLoadingDetallesId(null);

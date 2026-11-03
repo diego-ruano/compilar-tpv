@@ -56,6 +56,7 @@ import PrintTicketModal,{
 type CobroImprimible,
 } from "../../shared/ticket/PrintTicketModal";
 import { ModalShell,SearchInput } from "../../shared/ui";
+import { useToast } from "../../shared/toast";
 
 
 // PDF
@@ -232,6 +233,7 @@ export default function Cuentas() {
     // El camarero entra a los cobros y sus bajas; el resto de la caja (gastos, totales, cierre,
     // facturas con NIF, exportar) es del administrador y ni se pide ni se enseña.
     const { puede, rol } = usePermisos();
+    const toast = useToast();
     const admin = puede("cuentas.gastos");
     const cobrosPermitidos = puede("cuentas.cobros");
     const exportarPermitido = admin && cobrosPermitidos;
@@ -429,19 +431,22 @@ export default function Cuentas() {
         }
     };
 
-    // Mostrar errores de carga como antes (los logs/efectos previos se sustituyen por
-    // los estados de error de las queries).
+    // Una lista que no se ha podido cargar no puede parecer una lista vacía: en caja, «no hay
+    // cobros» y «no se han podido leer» piden cosas distintas. Se avisa al empezar a fallar, no
+    // en cada reintento.
     useEffect(() => {
         if (entradasQuery.isError) {
-            console.error("Error cargando ingresos:", entradasQuery.error);
+            toast.error("No se pudieron cargar los ingresos", toAppError(entradasQuery.error).message);
         }
-    }, [entradasQuery.isError, entradasQuery.error]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [entradasQuery.isError]);
 
     useEffect(() => {
         if (salidasQuery.isError) {
-            console.error("Error cargando salidas:", salidasQuery.error);
+            toast.error("No se pudieron cargar las salidas", toAppError(salidasQuery.error).message);
         }
-    }, [salidasQuery.isError, salidasQuery.error]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [salidasQuery.isError]);
 
     // La búsqueda y la paginación se hacen en el servidor (CUENTA-05): la lista ya llega filtrada
     // y paginada, así que se muestra tal cual (sin filtrar de nuevo en cliente).
@@ -487,7 +492,7 @@ export default function Cuentas() {
             const rectificativa = (t.facturas_del_cobro ?? []).find((f) => f.tipo_factura.startsWith("R"));
             if (rectificativa) setReimpresion({ idPago, numFactura: rectificativa.num_serie });
         } catch (err) {
-            console.error("no se pudo preparar la rectificativa para imprimir:", err);
+            toast.error("No se pudo preparar la rectificativa para imprimir", toAppError(err).message);
         }
     };
 
@@ -611,9 +616,8 @@ export default function Cuentas() {
                     void recargarCierres();
                 },
             );
-        } catch (e: any) {
-            console.error(e);
-            setErrEditPago(String(e?.message ?? "Error actualizando entrada"));
+        } catch (e) {
+            setErrEditPago(toAppError(e).message);
         } finally {
             setSavingEditPago(false);
         }
@@ -662,8 +666,7 @@ export default function Cuentas() {
                     true,
                 );
             }
-        } catch (e: any) {
-            console.error("Error en la operación de caja:", e);
+        } catch (e) {
             setConfirmError(toAppError(e).message);
         } finally {
             setConfirmando(false);

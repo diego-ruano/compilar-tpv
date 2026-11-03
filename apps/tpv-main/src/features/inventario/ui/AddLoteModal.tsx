@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { toAppError } from "@tpv/client";
 import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
 import type { LoteDto } from "@tpv/contracts";
@@ -118,8 +119,7 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
             reset();
             onClose();
         } catch (err) {
-            console.error("Error guardando lote:", err);
-            toast.error("Error", isEdit ? "No se pudo actualizar el lote" : "No se pudo crear el lote");
+            toast.error(isEdit ? "No se pudo actualizar el lote" : "No se pudo crear el lote", toAppError(err).message);
         } finally {
             setLoading(false);
         }

@@ -1,6 +1,7 @@
 import { usePermisos } from "../../shared/lib/usePermisos";
 // pages/Clientes.tsx
 import React, { useEffect, useMemo, useState } from "react";
+import { toAppError } from "@tpv/client";
 import {
   ArrowLeft,
   Plus,
@@ -154,10 +155,9 @@ export default function Clientes() {
   // Aviso + reset si falla la carga (equivale al catch del fetch anterior).
   useEffect(() => {
     if (overview.isError) {
-      console.error("Error cargando clientes", overview.error);
       setClienteActivo(null);
       setVista("list");
-      toast.error("Error", "No se pudieron cargar los clientes.");
+      toast.error("No se pudieron cargar los clientes", toAppError(overview.error).message);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overview.isError]);
@@ -250,8 +250,7 @@ export default function Clientes() {
       setFNotas(r0?.notas ?? "");
       setModalClienteOpen(true);
     } catch (e) {
-      console.error(e);
-      toast.error("Error", "No se pudo cargar el cliente para editar.");
+      toast.error("No se pudo cargar el cliente para editar", toAppError(e).message);
     }
   }
 
@@ -301,8 +300,7 @@ export default function Clientes() {
 
       setModalClienteOpen(false);
     } catch (e) {
-      console.error("Error guardando cliente", e);
-      toast.error("Error", "No se pudo guardar el cliente.");
+      toast.error("No se pudo guardar el cliente", toAppError(e).message);
     }
   }
   // La invalidación en las mutaciones recachea la lista automáticamente.

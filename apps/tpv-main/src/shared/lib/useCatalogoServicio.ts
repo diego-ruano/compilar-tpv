@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { resolveImageUrl } from "./imageUrl";
+import { avisarDelFallo } from "./conAviso";
 
 type Imagen = { Ruta_Imagen: string | null };
 type Categoria = Imagen & { ID_Categoria: string };
@@ -9,6 +10,8 @@ type Accion<T> = { tipo: "pedir" } | { tipo: "recibir"; datos: ConImagen<T>[] };
 function reducir<T>(estado: Lista<T>, accion: Accion<T>): Lista<T> {
     return accion.tipo === "pedir" ? { ...estado, cargando: true } : { datos: accion.datos, cargando: false };
 }
+/** Una carta que no carga no puede parecer una carta vacía. El registro lo hace `invocar`, o `avisarDelFallo` si el fallo es de la pantalla. */
+const avisarDeLaCarta = (e: unknown) => avisarDelFallo("No se pudo cargar la carta", e);
 async function imagenes<T extends Imagen>(filas: T[]): Promise<ConImagen<T>[]> {
     return Promise.all(filas.map(async f => ({ ...f, urlImagen: await resolveImageUrl(f.Ruta_Imagen) })));
 }
@@ -57,19 +60,19 @@ export function useCatalogoServicio<C extends Categoria, P extends Imagen>(activ
     }, [api]);
     useEffect(() => {
         vigencia.current.activo = activo;
-        if (activo && autoCategorias) void cargarCategorias().catch(console.error);
+        if (activo && autoCategorias) void cargarCategorias().catch(avisarDeLaCarta);
         const contadores = generaciones.current;
         return () => { ++contadores.categorias; ++contadores.productos; ++contadores.busqueda; vigencia.current.activo = false; };
     }, [activo, autoCategorias, cargarCategorias]);
     // Antes de pintar: con `useEffect` se llegaba a ver un fotograma de la categoría recién elegida
     // sin productos y sin `cargando`, es decir, «No hay productos» en una que sí los tiene.
     useLayoutEffect(() => {
-        if (activo) void cargarProductosDeCategoria(categoriaSeleccionada).catch(console.error);
+        if (activo) void cargarProductosDeCategoria(categoriaSeleccionada).catch(avisarDeLaCarta);
         const contadores = generaciones.current;
         return () => { ++contadores.productos; };
     }, [activo, categoriaSeleccionada, cargarProductosDeCategoria]);
     useEffect(() => {
-        const timer = window.setTimeout(() => { if (activo) void buscarProductosPorNombre(q).catch(console.error); }, 180);
+        const timer = window.setTimeout(() => { if (activo) void buscarProductosPorNombre(q).catch(avisarDeLaCarta); }, 180);
         const contadores = generaciones.current;
         return () => { window.clearTimeout(timer); ++contadores.busqueda; };
     }, [activo, q, buscarProductosPorNombre]);

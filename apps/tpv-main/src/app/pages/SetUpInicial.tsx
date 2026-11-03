@@ -1,4 +1,4 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 import React, { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
@@ -73,8 +73,8 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                     nombre: r.nombre,
                 });
             })
-            .catch((e) => {
-                console.error("No se pudo leer el estado del setup inicial:", e);
+            .catch(() => {
+                // Ya lo registró `invocar`; sin el pendiente, se sigue con los datos de la sesión.
             });
         return () => {
             vivo = false;
@@ -126,8 +126,8 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                     id_usuario: idUsuario,
                     pin: pinNuevo,
                 });
-            } catch (e) {
-                console.warn("uploadInitialSetupToCloud falló (setup local OK):", e);
+            } catch {
+                // Ya lo registró `invocar`; el setup local está hecho y se puede seguir.
             }
 
             if (role) {
@@ -146,15 +146,8 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
 
             // Primer arranque: no se entra sin mas, se pasa por el login con el PIN elegido.
             onCompletado?.();
-        } catch (e: any) {
-            const msg =
-                typeof e === "string"
-                    ? e
-                    : e?.message
-                        ? String(e.message)
-                        : "Error guardando";
-
-            setError(msg);
+        } catch (e) {
+            setError(toAppError(e).message);
         } finally {
             setSaving(false);
             setPinNuevo("");

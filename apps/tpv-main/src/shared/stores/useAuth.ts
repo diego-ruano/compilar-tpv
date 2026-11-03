@@ -66,10 +66,8 @@ export const useAuth = create<AuthState>((set) => ({
         // quedar colgado esperando al IPC. El aviso al backend va detrás y sin `await` —quien
         // llama a `logout()` (incluido el cierre por inactividad) no tiene nada que hacer con
         // el resultado— pero su fallo no se traga en silencio: una sesión que no se cierra en
-        // el backend es exactamente lo que este comando existe para evitar.
-        void commands.logout().catch((e: unknown) => {
-            console.error("[useAuth] no se pudo cerrar la sesión del backend:", e);
-        });
+        // el backend es exactamente lo que este comando existe para evitar. Lo registra `invocar`.
+        void commands.logout().catch(() => {});
     },
 }));
 

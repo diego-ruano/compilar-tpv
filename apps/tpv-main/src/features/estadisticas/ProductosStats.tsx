@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { toAppError } from "@tpv/client";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 
@@ -30,15 +31,13 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
 
   useEffect(() => {
     if (categoriasQuery.isError) {
-      console.error(categoriasQuery.error);
-      toast.error("Error", "No se pudieron cargar las categorías.");
+      toast.error("No se pudieron cargar las categorías", toAppError(categoriasQuery.error).message);
     }
   }, [categoriasQuery.isError, categoriasQuery.error, toast]);
 
   useEffect(() => {
     if (resumenQuery.isError) {
-      console.error(resumenQuery.error);
-      toast.error("Error", "No se pudieron cargar las estadísticas de productos.");
+      toast.error("No se pudieron cargar las estadísticas de productos", toAppError(resumenQuery.error).message);
     }
   }, [resumenQuery.isError, resumenQuery.error, toast]);
 

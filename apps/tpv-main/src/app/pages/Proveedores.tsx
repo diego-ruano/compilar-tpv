@@ -1,4 +1,4 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 import { usePermisos } from "../../shared/lib/usePermisos";
 import { guardarImagen } from "../../shared/lib/guardarImagen";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -172,12 +172,13 @@ export default function Proveedores() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proveedoresQuery.data, proveedoresQuery.isError]);
 
-  // Toast de error si falla la carga de proveedores (preserva el aviso al usuario).
+  // Toast de error si falla la carga de proveedores: una lista sin cargar no es una lista vacía.
   useEffect(() => {
     if (proveedoresQuery.isError) {
-      console.error("Error cargando proveedores", proveedoresQuery.error);
+      toast.error("No se pudieron cargar los proveedores", toAppError(proveedoresQuery.error).message);
     }
-  }, [proveedoresQuery.isError, proveedoresQuery.error]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proveedoresQuery.isError]);
 
   // Mapea las filas de la query de productos del proveedor activo a UI (async).
   useEffect(() => {
@@ -344,9 +345,8 @@ export default function Proveedores() {
 
       // La invalidación en onSuccess recachea la lista; el efecto re-deriva y re-sincroniza el activo.
       setModalProveedorOpen(false);
-    } catch (e: any) {
-      console.error("Error guardando proveedor", e);
-      toast.error("Error", "No se pudo guardar. Revisa si el Email o el CIF ya existen.");
+    } catch (e) {
+      toast.error("No se pudo guardar el proveedor", toAppError(e).message);
     } finally {
       setLoadingLocal(false);
     }
@@ -388,8 +388,7 @@ export default function Proveedores() {
           volverALista();
           setConfirmAccion(null);
         } catch (e) {
-          console.error("Error eliminando proveedor", e);
-          toast.error("Error", "No se pudo eliminar el proveedor.");
+          toast.error("No se pudo eliminar el proveedor", toAppError(e).message);
         }
       }
 
@@ -420,8 +419,7 @@ export default function Proveedores() {
 
           setConfirmAccion(null);
         } catch (e) {
-          console.error("Error desvinculando producto", e);
-          toast.error("Error", "No se pudo desvincular el producto.");
+          toast.error("No se pudo desvincular el producto", toAppError(e).message);
         }
       }
     } finally {
@@ -451,7 +449,7 @@ export default function Proveedores() {
       }
       setSeleccionProductoIds(pre);
     } catch (e) {
-      console.error("Error cargando productos disponibles", e);
+      toast.error("No se pudieron cargar los productos", toAppError(e).message);
       setProductosDisponibles([]);
       setSeleccionProductoIds(new Set());
     } finally {
@@ -488,8 +486,7 @@ export default function Proveedores() {
       await recargarProductosProveedor();
       setModalVincularOpen(false);
     } catch (e) {
-      console.error("Error guardando vínculos", e);
-      toast.error("Error", "No se pudieron guardar los vínculos.");
+      toast.error("No se pudieron guardar los vínculos", toAppError(e).message);
     }
   }
 

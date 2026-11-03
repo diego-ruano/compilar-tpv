@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from "react";
+import { toAppError } from "@tpv/client";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 
@@ -268,11 +269,7 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
 
     useEffect(() => {
         if (query.isError) {
-            console.error(query.error);
-            toast.error(
-                "Error",
-                "No se pudieron cargar estadísticas de trabajadores.",
-            );
+            toast.error("No se pudieron cargar las estadísticas de trabajadores", toAppError(query.error).message);
         }
     }, [query.isError, query.error, toast]);
 

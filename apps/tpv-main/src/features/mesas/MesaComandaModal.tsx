@@ -29,6 +29,7 @@ DestinatarioInput,
 MesaMetaOut
 } from "@tpv/contracts";
 import { conAviso } from "../../shared/lib/conAviso";
+import { captureException } from "../../shared/observability/sentry";
 import { abs,CERO,eur } from "../../shared/lib/dinero";
 import {
 cambioDelCobro,
@@ -316,9 +317,9 @@ export default function MesaComandaModal({
         const info = useSyncSignal.getState().comanda;
         if (shouldReloadTicket(info, idComanda)) {
             // HIG-04: `reloadTicket` no captura. Es un refresco de fondo —el siguiente cambio lo
-            // vuelve a intentar—, así que basta con que el fallo quede a la vista y no se pierda.
-            reloadTicket().catch((e) =>
-                console.error("Fallo recargando el ticket tras un cambio remoto", e),
+            // vuelve a intentar—, así que basta con que el fallo quede registrado y no se pierda.
+            reloadTicket().catch((e: unknown) =>
+                captureException(e, { fase: "recargar_ticket_remoto" }),
             );
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -344,7 +345,7 @@ export default function MesaComandaModal({
             setIdComanda(abierta);
             setTicket(t);
             notifyChanged();
-        })().catch((e) => console.error("Fallo pasando a la comanda abierta de la mesa", e));
+        })().catch((e: unknown) => captureException(e, { fase: "pasar_a_comanda_abierta" }));
         return () => { cancelado = true; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, leidaEn]);
@@ -527,7 +528,6 @@ export default function MesaComandaModal({
             setPideFactura(null);
             setErrorFactura(null);
         } catch (e) {
-            console.error("Error cobrando:", e);
             if (comandaActualRef.current !== idComanda) { toast.error("No se pudo cobrar", toAppError(e).message); return; }
             // El importe pasa del límite de la simplificada: no es un fallo, es que falta un dato.
             // Se abre el formulario en modo obligatorio en vez de dejar al camarero sin salida.

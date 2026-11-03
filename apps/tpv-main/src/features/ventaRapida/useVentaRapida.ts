@@ -303,9 +303,8 @@ export function useVentaRapida() {
         });
         setComandasBarra(rows);
       } catch (e) {
-        console.error("Error vrListComandasBarra:", e);
-
         if (!silent) {
+          toast.error("No se pudieron cargar los tickets", toAppError(e).message);
           setComandasBarra([]);
         }
       } finally {
@@ -314,7 +313,7 @@ export function useVentaRapida() {
         }
       }
     },
-    [],
+    [toast],
   );
 
   const cargarComandaEnTicketPanel = useCallback(
@@ -325,10 +324,8 @@ export function useVentaRapida() {
         if (lectura !== lecturaTicketRef.current || idComandaActivaRef.current !== idComanda) return [];
         return applyLineasToTicketPanel(lineas, opts);
       } catch (e) {
-        console.error("Error cargarComandaEnTicketPanel:", e);
-
         if (!opts?.silentError) {
-          toast.error("Error", "No se pudo cargar el ticket desde la base de datos.");
+          toast.error("No se pudo cargar el ticket", toAppError(e).message);
         }
 
         if (!opts?.keepSelection) {
@@ -385,7 +382,8 @@ export function useVentaRapida() {
               });
             }
           } catch (e) {
-            console.error("queueComandaRefresh error:", e);
+            // Las cargas de dentro ya avisan de lo suyo: lo que llega aquí es un fallo de la pantalla.
+            captureException(e, { fase: "refrescar_comanda" });
           }
         })();
       };
@@ -463,8 +461,7 @@ export function useVentaRapida() {
 
       applyLineasToTicketPanel(boot.lineas);
     } catch (e) {
-      console.error("Fallo bootstrap venta rápida, usando flujo anterior:", e);
-      // Se captura como excepción en Sentry (no sólo breadcrumb) para que aparezca como issue
+      // Se sigue por el flujo anterior. Se captura como excepción en Sentry (no sólo breadcrumb) para que aparezca como issue
       // con traza, aunque el flujo se recupere con el camino anterior.
       captureException(e, { flujo: "vrBootstrap" });
 
@@ -807,8 +804,7 @@ export function useVentaRapida() {
 
       emitVrChanged();
     } catch (e) {
-      console.error(e);
-      toast.error("Error", "No se pudo crear un nuevo ticket.");
+      toast.error("No se pudo crear un nuevo ticket", toAppError(e).message);
     } finally {
       ensureComandaPromiseRef.current = null;
     }
@@ -889,8 +885,7 @@ export function useVentaRapida() {
 
         emitVrChanged();
       } catch (e) {
-        console.error(e);
-        toast.error("Error", "No se pudo eliminar el ticket.");
+        toast.error("No se pudo eliminar el ticket", toAppError(e).message);
       }
     },
     [

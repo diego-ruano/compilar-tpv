@@ -1,5 +1,6 @@
 // src/features/configuracion/sections/Ticket.tsx
 import React, { useMemo, useState } from "react";
+import { toAppError } from "@tpv/client";
 import TicketPreviewModal from "../../../shared/ticket/PreviewModal";
 import { useToast } from "../../../shared/toast";
 import { Panel } from "../ui/Panel";
@@ -100,11 +101,7 @@ export function Ticket({
             await printerImprimirPrecuenta(payloadDePrecuenta(previewItems));
             toast.success("Ticket", "Enviado a la impresora.");
         } catch (e) {
-            console.error("printerImprimirPrecuenta error:", e);
-            toast.error(
-                "Ticket",
-                typeof e === "string" ? e : "No se pudo imprimir el ticket.",
-            );
+            toast.error("No se pudo imprimir el ticket", toAppError(e).message);
         }
     };
 

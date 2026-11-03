@@ -16,6 +16,8 @@ import type { MesaMetaOut } from "@tpv/contracts";
 import type { Salon } from "../../features/mesas/types";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
+import { useToast } from "../../shared/toast";
+import { toAppError } from "@tpv/client";
 
 import {
     useMesasLayout,
@@ -37,6 +39,7 @@ export default function Mesas() {
 
     const { idUsuario } = useAuth();
     const { puede } = usePermisos();
+    const toast = useToast();
     const esCocinero = !puede("servicio.vender") && puede("servicio.cocina");
     const canEditMesas = puede("plano.gestionar");
 
@@ -69,13 +72,19 @@ export default function Mesas() {
         });
     }, [salons]);
 
-    // Log de errores de carga (equivale a los catch de los loaders anteriores).
+    // Un plano que no se ha podido cargar no puede parecer un plano vacío. Se avisa al empezar a
+    // fallar, no en cada reintento: las consultas se repiten solas. Si falla al refrescar, sigue
+    // a la vista el último plano bueno y no hace falta decir nada.
     useEffect(() => {
-        if (layoutQuery.isError)
-            console.error("Error cargando layout:", layoutQuery.error);
+        if (layoutQuery.isError && !layoutQuery.data)
+            toast.error("No se pudo cargar el plano", toAppError(layoutQuery.error).message);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [layoutQuery.isError]);
+    useEffect(() => {
         if (metaQuery.isError)
-            console.error("Error cargando meta mesas:", metaQuery.error);
-    }, [layoutQuery.isError, metaQuery.isError, layoutQuery.error, metaQuery.error]);
+            toast.error("No se pudo cargar el estado de las mesas", toAppError(metaQuery.error).message);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [metaQuery.isError]);
 
     const activeSalon = useMemo(
         () => salons.find((s) => s.id === activeSalonId) ?? null,

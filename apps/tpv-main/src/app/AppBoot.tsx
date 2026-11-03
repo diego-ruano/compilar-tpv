@@ -90,8 +90,8 @@ export default function AppBoot({ router }: { router: any }) {
 	// que perder —al arrancar SIEMPRE se pide PIN, no hay sesión persistente que respetar—, así
 	// que cerrar es lo correcto aunque no venga de un F5.
 	useEffect(() => {
-		void commands.logout().catch((e: unknown) => {
-			console.warn("[AppBoot] no se pudo limpiar la sesión del backend:", e);
+		void commands.logout().catch(() => {
+			// Ya lo registró `invocar`.
 		});
 	}, []);
 
@@ -110,8 +110,8 @@ export default function AppBoot({ router }: { router: any }) {
 		if (modo !== "tpv") return;
 		void commands.imagesBackfill()
 			.then(() => commands.imagesDrainPending())
-			.catch((e: unknown) => {
-				console.warn("[AppBoot] images_drain_pending falló:", e);
+			.catch(() => {
+				// Ya lo registró `invocar`; se reintenta por el WebSocket.
 			});
 	}, [modo]);
 

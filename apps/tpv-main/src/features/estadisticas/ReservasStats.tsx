@@ -1,5 +1,6 @@
 // src/features/estadisticas/ReservasStats.tsx
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { toAppError } from "@tpv/client";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 
@@ -26,8 +27,7 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
 
     useEffect(() => {
         if (query.isError) {
-            console.error(query.error);
-            toast.error("Error", "No se pudieron cargar las estadísticas de reservas.");
+            toast.error("No se pudieron cargar las estadísticas de reservas", toAppError(query.error).message);
         }
     }, [query.isError, query.error, toast]);
 

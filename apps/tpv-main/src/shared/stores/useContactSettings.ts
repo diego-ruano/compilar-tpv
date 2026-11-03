@@ -5,6 +5,7 @@ import {
     type ContactSettings,
 } from "../../features/configuracion/api/configApis";
 import { conAviso } from "../lib/conAviso";
+import { captureException } from "../observability/sentry";
 
 const DEFAULTS: ContactSettings = {
     contact_email: "",
@@ -45,7 +46,7 @@ export const useContactSettings = create<ContactSettingsState>((set, get) => ({
             set({ ...DEFAULTS, ...s, ready: true });
         } catch (e) {
             if (vigente !== contexto) return;
-            console.error("useContactSettings.init error:", e);
+            captureException(e, { fase: "ajustes_contacto" });
             set({ ...DEFAULTS, ready: true });
         }
     },

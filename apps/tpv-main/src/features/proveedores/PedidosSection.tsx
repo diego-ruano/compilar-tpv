@@ -126,8 +126,8 @@ export default function PedidosSection({ proveedores }: Props) {
         await actualizarMutation.mutateAsync(toInput(updated));
       }
       cerrarModal();
-    } catch (e: any) {
-      toast.error("Error", String(e?.message ?? e));
+    } catch (e) {
+      toast.error("No se pudo guardar el pedido", toAppError(e).message);
     }
   }
 
@@ -139,8 +139,8 @@ export default function PedidosSection({ proveedores }: Props) {
     try {
       await cancelarMutation.mutateAsync(id);
       cerrarModal();
-    } catch (e: any) {
-      toast.error("Error", String(e?.message ?? e));
+    } catch (e) {
+      toast.error("No se pudo cancelar el pedido", toAppError(e).message);
     }
   }
 

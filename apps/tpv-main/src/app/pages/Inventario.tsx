@@ -53,8 +53,7 @@ export default function Inventario() {
             // El motivo viene del caso de uso y dice qué hacer ("está en una comanda abierta:
             // cóbrala o quita la línea"). Tragárselo por un genérico deja al usuario delante de un
             // botón que no funciona y sin saber por qué.
-            console.error("Error eliminando producto:", e);
-            toast.error("No se puede", toAppError(e).message || "No se pudo eliminar el producto.");
+            toast.error("No se pudo eliminar el producto", toAppError(e).message);
         }
     };
 

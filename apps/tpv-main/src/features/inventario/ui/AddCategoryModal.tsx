@@ -1,5 +1,6 @@
 import { guardarImagen } from "../../../shared/lib/guardarImagen";
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { toAppError } from "@tpv/client";
 import Modal from "./Modal";
 import { useToast } from "../../../shared/toast";
 
@@ -115,8 +116,7 @@ export default function AddCategoryModal({
             await onSaved();
             onClose();
         } catch (err) {
-            console.error("Error guardando categoría:", err);
-            toast.error("Error", "Hubo un error al guardar la categoría.");
+            toast.error("No se pudo guardar la categoría", toAppError(err).message);
         } finally {
             setLoading(false);
         }
