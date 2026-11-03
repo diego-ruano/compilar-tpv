@@ -114,6 +114,25 @@ modo activo: editar, añadir vértice, borrar o colocar una mesa. Sus borradores
 optimistas: sólo se persisten al guardar el plano. Los formularios conservan sus propios errores
 y bloquean envíos repetidos mientras esperan confirmación.
 
+## El tamaño de la interfaz
+
+La interfaz está pensada para 1280 píxeles de CSS de ancho. En una pantalla más estrecha (un
+monitor 4:3 de 1024, un portátil con el escalado de Windows al 125 %) se veía como en un móvil
+grande: la venta rápida enseñaba dos columnas. En vez de ajustar la maqueta a cada pantalla, el
+escritorio usa **el zoom de la ventana** (`src-tauri/src/zoom.rs`):
+
+- **Automático por defecto, según el monitor**: lo justo para que quepan los 1280, en pasos del 5 %
+  y nunca por debajo del 70 % ni por encima del 100 %. Sale del monitor y no de la ventana: una
+  ventana pequeña en un monitor grande se queda al 100 % y la maqueta responde a su tamaño. Se
+  recalcula si la ventana pasa a otro monitor.
+- **A mano en este equipo**: `−` y `+` en la barra de arriba (`ControlesZoom`), o Ctrl −/+, de 10 en
+  10 entre el 70 % y el 130 %. Se guarda en `device_config.json` (`zoom`) y se aplica desde Rust al
+  abrir la ventana, antes de pintar nada. La lupa, o Ctrl 0, vuelve al automático; al pasar por
+  encima dice el porcentaje.
+- **Todo se escala por igual**, menú incluido: es el zoom del WebView, no un `zoom`/`transform` de
+  CSS, que en el Chromium del WebView2 de Windows 7 descuadra el puntero en el canvas del plano.
+- En Android no hay ventana que escalar: ni controles ni zoom.
+
 ## El dinero en pantalla
 
 Los horarios se guardan con `horariosGuardarAsignacion`: uno o dos tramos forman un conjunto

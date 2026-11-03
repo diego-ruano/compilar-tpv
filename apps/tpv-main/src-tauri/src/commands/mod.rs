@@ -27,6 +27,7 @@ pub mod tareas;
 pub mod telemetria;
 pub mod trabajadores;
 pub mod venta_rapida;
+pub mod ventana;
 pub mod verifactu;
 
 pub mod permisos;

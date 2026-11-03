@@ -219,6 +219,8 @@ export const nombresComandos = {
     "jobs_status": "jobsStatus",
     "interruptores_apagados": "interruptoresApagados",
     "telemetria_fallo_de_comando": "telemetriaFalloDeComando",
+    "ventana_zoom_estado": "ventanaZoomEstado",
+    "ventana_zoom_cambiar": "ventanaZoomCambiar",
     "config_get_business_settings": "configGetBusinessSettings",
     "config_patch_business_settings": "configPatchBusinessSettings",
     "config_get_ticket_settings": "configGetTicketSettings",
@@ -446,6 +448,8 @@ type Argumentos = {
     "jobs_status": {  };
     "interruptores_apagados": {  };
     "telemetria_fallo_de_comando": { args: Parameters<Comandos["telemetriaFalloDeComando"]>[0] };
+    "ventana_zoom_estado": {  };
+    "ventana_zoom_cambiar": { args: Parameters<Comandos["ventanaZoomCambiar"]>[0] };
     "config_get_business_settings": {  };
     "config_patch_business_settings": { args: Parameters<Comandos["configPatchBusinessSettings"]>[0] };
     "config_get_ticket_settings": {  };

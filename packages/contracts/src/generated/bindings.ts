@@ -425,6 +425,15 @@ export type CambioReplicado = {
 	comanda: ComandaReplicada,
 };
 
+/**  Lo que se pide desde la barra de arriba. */
+export type CambioZoom = "acercar" | "alejar" |
+/**  Volver a que lo decida el monitor. */
+"automatico";
+
+export type CambioZoomArgs = {
+	cambio: CambioZoom,
+};
+
 export type CategoriaInvDto = {
 	ID_Categoria: string,
 	Nombre: string,
@@ -3663,4 +3672,15 @@ export type VrUpdateNotaDetalleInput = {
 export type ZonaDto = {
 	id_zona: string,
 	nombre_zona: string,
+};
+
+/**  El zoom de la ventana tal como está ahora. */
+export type ZoomVentana = {
+	/**
+	 *  El aplicado, en tanto por ciento (`85` es el 85 %). Entero a propósito: un `f64` viaja como
+	 *  `number | null`, porque un NaN se serializa como `null`.
+	 */
+	porcentaje: number,
+	/**  `true` si lo decide el monitor; `false` si alguien lo ha fijado en este equipo. */
+	automatico: boolean,
 };

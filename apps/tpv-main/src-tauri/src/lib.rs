@@ -10,6 +10,7 @@ mod reservas_web;
 mod socket_handy;
 mod jobs;
 mod printing;
+mod zoom;
 
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -139,6 +140,10 @@ struct DeviceConfig {
     /// la configuración de nadie. Una entrada ausente = ese destino no tiene impresora.
     #[serde(default)]
     printers: std::collections::HashMap<String, String>,
+    /// Tamaño de la interfaz fijado a mano en este equipo (`1` = 100 %). Ausente = automático,
+    /// según el monitor (`zoom.rs`).
+    #[serde(default)]
+    zoom: Option<f64>,
 }
 
 /* =========================================================
@@ -2109,6 +2114,9 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::jobs::interruptores_apagados,
             // registro de los fallos de comandos que ve la pantalla
             commands::telemetria::telemetria_fallo_de_comando,
+            // tamaño de la interfaz (zoom de la ventana)
+            commands::ventana::ventana_zoom_estado,
+            commands::ventana::ventana_zoom_cambiar,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,
@@ -2264,6 +2272,16 @@ pub fn run() {
 
     builder
         .on_window_event(|window, event| {
+            // La ventana puede haber pasado a otro monitor: el zoom automático sale de él.
+            #[cfg(desktop)]
+            if matches!(
+                event,
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }
+            ) {
+                if let Some(ventana) = window.app_handle().get_webview_window(window.label()) {
+                    zoom::aplicar(&ventana);
+                }
+            }
             let revisar = matches!(event, tauri::WindowEvent::Focused(true));
             #[cfg(mobile)]
             let revisar = revisar || matches!(event, tauri::WindowEvent::Resumed);
@@ -2284,6 +2302,13 @@ pub fn run() {
 
             let cfg = load_config(&app_data_dir);
             let mode = cfg.mode;
+
+            // El tamaño de la interfaz, antes de que la página pinte nada.
+            zoom::fijar_manual(cfg.zoom);
+            #[cfg(desktop)]
+            if let Some(ventana) = handle.get_webview_window("main") {
+                zoom::aplicar(&ventana);
+            }
 
             // Espejo SÍNCRONO del modo: lo lee el firmante de telemetría desde su propio hilo (sin
             // contexto async). Se comparte con el `AppState` para mantenerlo al día en cada cambio.
@@ -2897,6 +2922,11 @@ mod tests_exenciones_del_gate {
             "commands/telemetria.rs",
             include_str!("commands/telemetria.rs"),
             "registra también los fallos de antes del login, que son los que más cuesta averiguar",
+        ),
+        (
+            "commands/ventana.rs",
+            include_str!("commands/ventana.rs"),
+            "el tamaño de la pantalla se ajusta también en el login",
         ),
     ];
 

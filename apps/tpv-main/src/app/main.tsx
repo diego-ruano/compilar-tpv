@@ -7,6 +7,7 @@ import AppBoot from "./AppBoot";
 import { appRouter } from "./Router";
 import { queryClient } from "../shared/lib/queryClient";
 import { initTheme } from "../shared/stores/useTheme";
+import { iniciarZoomVentana } from "../shared/stores/useZoomVentana";
 import { initSentry } from "../shared/observability/sentry";
 import { iniciarRegistroDeFallos } from "../shared/observability/fallosDeComandos";
 
@@ -18,6 +19,8 @@ iniciarRegistroDeFallos();
 // Aplica el tema (claro/oscuro) al <html> antes del primer render para
 // evitar el parpadeo de tema incorrecto.
 initTheme();
+// El zoom ya lo ha aplicado Rust al abrir la ventana; esto lee el porcentaje y engancha Ctrl +/−.
+iniciarZoomVentana();
 
 const container = document.getElementById("root");
 

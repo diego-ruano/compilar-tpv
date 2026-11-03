@@ -4,10 +4,11 @@ import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useImageUrl } from "../../shared/lib/useImageUrl";
 import { ThemeToggle } from "../../shared/ui";
 import ControlesVentana from "./ControlesVentana";
+import ControlesZoom from "./ControlesZoom";
 
 /**
- * Barra de título reutilizable: zona de arrastre (logo + nombre del negocio),
- * toggle de tema y controles de ventana de Tauri (que en Android no salen).
+ * Barra de título reutilizable: zona de arrastre (logo + nombre del negocio), tamaño de la
+ * interfaz, toggle de tema y controles de ventana de Tauri (que en Android no salen).
  */
 function Titlebar() {
     const { business_name, logo_data_url } = useBusinessSettings();
@@ -36,6 +37,7 @@ function Titlebar() {
             </div>
 
             <div className="flex w-fit items-center gap-1 p-1 px-1.5">
+                <ControlesZoom />
                 <ThemeToggle size="sm" />
                 <ControlesVentana />
             </div>
