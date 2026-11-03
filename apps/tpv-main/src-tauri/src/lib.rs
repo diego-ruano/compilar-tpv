@@ -1312,7 +1312,14 @@ async fn printer_list() -> Result<Vec<printing::PrinterInfo>, AppErrorDto> {
     tokio::task::spawn_blocking(printing::list_printers)
         .await
         .map_err(|e| AppErrorDto::internal(e.to_string()))?
-        .map_err(AppErrorDto::from)
+        .map_err(fallo_de_impresora)
+}
+
+/// Lo que falla al imprimir es del entorno —la impresora, su driver, la cola de Windows, que no
+/// haya ninguna elegida—, no un fallo del programa: va como `External`, y así cada rollo que se
+/// acaba no cuenta como un fallo del programa (`fallosDeComandos.ts`).
+fn fallo_de_impresora(e: String) -> AppErrorDto {
+    AppErrorDto::new(tpv_contracts::errors::ErrorCode::External, e)
 }
 
 /// Destino por defecto cuando nadie dice cuál: el ticket de cliente.
@@ -1403,7 +1410,7 @@ async fn imprimir_ticket(
     app: &AppHandle,
     payload: printing::PrintTicketPayload,
 ) -> Result<String, AppErrorDto> {
-    let printer = resolve_printer(app, payload.printer_name.clone())?;
+    let printer = resolve_printer(app, payload.printer_name.clone()).map_err(fallo_de_impresora)?;
 
     // El logo se lee AQUÍ y no dentro del builder: `build_ticket` no toca el disco, que es lo que
     // lo mantiene comprobable con un test. Si el fichero no está o no se puede decodificar, el
@@ -1420,7 +1427,8 @@ async fn imprimir_ticket(
     let bytes = printing::build_ticket(&payload, logo.as_deref());
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_TICKET, &bytes))
         .await
-        .map_err(|e| e.to_string())??;
+        .map_err(|e| AppErrorDto::internal(e.to_string()))?
+        .map_err(fallo_de_impresora)?;
     Ok("OK".into())
 }
 
@@ -1504,11 +1512,12 @@ async fn printer_print_arqueo(
     app: AppHandle,
     payload: printing::PrintArqueoPayload,
 ) -> Result<String, AppErrorDto> {
-    let printer = resolve_printer(&app, payload.printer_name.clone())?;
+    let printer = resolve_printer(&app, payload.printer_name.clone()).map_err(fallo_de_impresora)?;
     let bytes = printing::build_arqueo(&payload);
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_ARQUEO, &bytes))
         .await
-        .map_err(|e| e.to_string())??;
+        .map_err(|e| AppErrorDto::internal(e.to_string()))?
+        .map_err(fallo_de_impresora)?;
     Ok("OK".into())
 }
 
@@ -1615,11 +1624,12 @@ async fn printer_open_drawer(
         }
     }
 
-    let printer = resolve_printer(&app, None)?;
+    let printer = resolve_printer(&app, None).map_err(fallo_de_impresora)?;
     let bytes = printing::build_abrir_cajon();
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_CAJON, &bytes))
         .await
-        .map_err(|e| e.to_string())??;
+        .map_err(|e| AppErrorDto::internal(e.to_string()))?
+        .map_err(fallo_de_impresora)?;
     Ok("OK".into())
 }
 
@@ -1630,11 +1640,12 @@ async fn printer_print_test(
     app: AppHandle,
     args: Option<SetPrinterArgs>,
 ) -> Result<String, AppErrorDto> {
-    let printer = resolve_printer(&app, args.map(|a| a.name))?;
+    let printer = resolve_printer(&app, args.map(|a| a.name)).map_err(fallo_de_impresora)?;
     let bytes = printing::build_test_ticket(&printer);
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_PRUEBA, &bytes))
         .await
-        .map_err(|e| e.to_string())??;
+        .map_err(|e| AppErrorDto::internal(e.to_string()))?
+        .map_err(fallo_de_impresora)?;
     Ok("OK".into())
 }
 

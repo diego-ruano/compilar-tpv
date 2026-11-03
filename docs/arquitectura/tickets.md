@@ -94,6 +94,9 @@ Hay dos papeles y salen de sitios distintos (RI-29):
   avisa. Si el driver no informa, se manda. Además borra de la cola los trabajos del TPV (los que
   empiezan por `TPV · `) que lleven más de cinco minutos: al encender la impresora no salen de golpe
   los atrasados ni se abre el cajón por cada uno.
+- **Un fallo de la impresora es `external`** (`fallo_de_impresora`): es del entorno, no del programa.
+  Se registra como tal ([observabilidad.md](observabilidad.md#los-fallos-de-comandos)) y la pantalla
+  enseña el motivo («La impresora … está sin papel»).
 - **El logo es de un bit**: `rasterizar_logo` lo reduce al ancho del papel (múltiplo de 8 dots), compone
   la transparencia sobre blanco, difumina con Floyd–Steinberg y emite `GS v 0`. Su ancho sale del
   cabezal y los márgenes (`ancho_logo_dots`), no de `chars_per_line`, que es la densidad del texto. Si
