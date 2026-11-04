@@ -18,8 +18,13 @@ use tpv_contracts::ventana::{CambioZoom, ZoomVentana};
 
 /// El ancho, en píxeles de CSS, para el que está pensada la interfaz.
 pub const ANCHO_DE_REFERENCIA: f64 = 1280.0;
-pub const ZOOM_MINIMO: f64 = 0.7;
-pub const ZOOM_MAXIMO: f64 = 1.3;
+/// Lo que se puede elegir a mano. Amplio a propósito: por debajo del 60 % cuesta leer en una
+/// pantalla normal, y por encima del 150 % una de 1920 se queda con la maqueta de tablet; las dos
+/// cosas pueden ser justo lo que alguien quiere (un monitor grande visto de lejos, poca vista).
+pub const ZOOM_MINIMO: f64 = 0.5;
+pub const ZOOM_MAXIMO: f64 = 2.0;
+/// El automático no baja de aquí: más pequeño ya cuesta leerlo, y quien lo quiera lo elige a mano.
+pub const AUTOMATICO_MINIMO: f64 = 0.7;
 
 /// Lo que hay que recordar mientras corre la app: el zoom fijado a mano (`None` = automático) y el
 /// último aplicado, para no repetirlo en cada movimiento de la ventana.
@@ -47,7 +52,7 @@ pub fn automatico(ancho_css: f64) -> f64 {
         return 1.0;
     }
     let justo = (ancho_css / ANCHO_DE_REFERENCIA).min(1.0);
-    redondear(((justo * 20.0) + 1e-9).floor() / 20.0).max(ZOOM_MINIMO)
+    redondear(((justo * 20.0) + 1e-9).floor() / 20.0).max(AUTOMATICO_MINIMO)
 }
 
 /// Un paso más grande, al siguiente múltiplo del 10 % (del 85 % automático se pasa al 90 %).
@@ -73,7 +78,13 @@ fn aplicado() -> f64 {
 
 pub fn actual() -> ZoomVentana {
     let automatico = estado().manual.is_none();
-    ZoomVentana { porcentaje: (aplicado() * 100.0).round() as u32, automatico }
+    let z = aplicado();
+    ZoomVentana {
+        porcentaje: (z * 100.0).round() as u32,
+        automatico,
+        puede_acercar: acercar(z) > z,
+        puede_alejar: alejar(z) < z,
+    }
 }
 
 /// El zoom manual que resulta de un cambio desde la barra (`None` = automático).
@@ -136,8 +147,8 @@ mod tests {
     }
 
     #[test]
-    fn una_pantalla_diminuta_no_baja_del_minimo() {
-        assert_eq!(automatico(640.0), ZOOM_MINIMO);
+    fn una_pantalla_diminuta_no_baja_del_minimo_del_automatico() {
+        assert_eq!(automatico(640.0), AUTOMATICO_MINIMO);
     }
 
     #[test]
@@ -162,16 +173,39 @@ mod tests {
     }
 
     #[test]
+    fn a_mano_se_llega_mas_lejos_que_el_automatico() {
+        assert_eq!(alejar(AUTOMATICO_MINIMO), 0.6);
+        assert_eq!(acercar(1.0), 1.1);
+    }
+
+    #[test]
     fn subir_y_bajar_vuelve_al_mismo_sitio() {
-        let mut z = 0.7;
-        for _ in 0..6 {
+        let mut z = ZOOM_MINIMO;
+        for _ in 0..15 {
             z = acercar(z);
         }
-        assert_eq!(z, 1.3);
-        for _ in 0..6 {
+        assert_eq!(z, ZOOM_MAXIMO);
+        for _ in 0..15 {
             z = alejar(z);
         }
-        assert_eq!(z, 0.7);
+        assert_eq!(z, ZOOM_MINIMO);
+    }
+
+    #[test]
+    fn en_los_limites_el_boton_correspondiente_se_apaga() {
+        estado().aplicado = Some(ZOOM_MAXIMO);
+        let arriba = actual();
+        assert!(!arriba.puede_acercar && arriba.puede_alejar);
+
+        estado().aplicado = Some(ZOOM_MINIMO);
+        let abajo = actual();
+        assert!(abajo.puede_acercar && !abajo.puede_alejar);
+
+        // El 85 % automático puede ir a los dos lados.
+        estado().aplicado = Some(0.85);
+        let medio = actual();
+        assert!(medio.puede_acercar && medio.puede_alejar);
+        assert_eq!(medio.porcentaje, 85);
     }
 
     #[test]

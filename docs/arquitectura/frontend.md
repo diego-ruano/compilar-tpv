@@ -126,9 +126,13 @@ escritorio usa **el zoom de la ventana** (`src-tauri/src/zoom.rs`):
   ventana pequeña en un monitor grande se queda al 100 % y la maqueta responde a su tamaño. Se
   recalcula si la ventana pasa a otro monitor.
 - **A mano en este equipo**: `−` y `+` en la barra de arriba (`ControlesZoom`), o Ctrl −/+, de 10 en
-  10 entre el 70 % y el 130 %. Se guarda en `device_config.json` (`zoom`) y se aplica desde Rust al
-  abrir la ventana, antes de pintar nada. La lupa, o Ctrl 0, vuelve al automático; al pasar por
-  encima dice el porcentaje.
+  10 entre el 50 % y el 200 %. Es un rango amplio a propósito: por encima del 150 %, una pantalla de
+  1920 pasa a la maqueta de tablet. Se guarda en `device_config.json` (`zoom`) y se aplica desde Rust
+  al abrir la ventana, antes de pintar nada. La lupa, o Ctrl 0, vuelve al automático; al pasar por
+  encima dice el porcentaje. Los límites sólo los sabe `zoom.rs`: la barra apaga `−` y `+` con lo
+  que devuelve (`puede_alejar`, `puede_acercar`).
+- **La barra de título es una sola** (`Titlebar`), también en el login, que la pone encima de su
+  fondo: una copia aparte se queda sin lo que se le añada.
 - **Todo se escala por igual**, menú incluido: es el zoom del WebView, no un `zoom`/`transform` de
   CSS, que en el Chromium del WebView2 de Windows 7 descuadra el puntero en el canvas del plano.
 - En Android no hay ventana que escalar: ni controles ni zoom.

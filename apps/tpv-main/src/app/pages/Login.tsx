@@ -16,19 +16,17 @@ import {
     Store,
     Lightbulb,
 } from "lucide-react";
-import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useNavigate } from "react-router-dom";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
-import { useImageUrl } from "../../shared/lib/useImageUrl";
 import { useToast } from "../../shared/toast";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
-import { Button, IconButton, ThemeToggle } from "../../shared/ui";
+import { Button, IconButton } from "../../shared/ui";
 
 
 import RecuperarPinModal from "../../features/login/RecuperarPinModal";
 import { conAviso } from "../../shared/lib/conAviso";
-import ControlesVentana from "../layoutComponent/ControlesVentana";
+import Titlebar from "../layoutComponent/Titlebar";
 import { ROL_ADMIN } from "../../shared/lib/permisos";
 
 function cn(...classes: Array<string | false | undefined | null>) {
@@ -72,9 +70,7 @@ export default function Login() {
     const navigate = useNavigate();
     const toast = useToast();
     const deviceMode = useMode((s) => s.mode);
-    const { business_name, logo_data_url } = useBusinessSettings();
-    // Ruta relativa → URL utilizable (ver `useImageUrl`).
-    const logoSrc = useImageUrl(logo_data_url);
+    const { business_name } = useBusinessSettings();
 
     const [users, setUsers] = useState<DbUser[]>([]);
     const [loadingUsers, setLoadingUsers] = useState(true);
@@ -493,30 +489,8 @@ export default function Login() {
                 <div className="absolute -bottom-32 -right-16 size-96 rounded-full bg-accent/5 blur-3xl" />
             </div>
 
-            {/* Barra de título (drag region + controles de ventana) */}
-            <div className="absolute top-0 left-0 right-0 z-50 flex justify-between shrink-0 border-b border-border bg-surface">
-                <div
-                    className="flex min-w-0 flex-1 items-center gap-2 p-1.5 sm:gap-3"
-                    data-tauri-drag-region
-                >
-                    <img
-                        src={logoSrc || LogoAltaria}
-                        className="size-6 rounded-md object-cover"
-                        data-tauri-drag-region
-                        alt="logo"
-                    />
-                    <p
-                        data-tauri-drag-region
-                        className="min-w-0 max-w-[35vw] truncate text-sm font-semibold text-fg sm:max-w-60"
-                    >
-                        {business_name || "TPV"}
-                    </p>
-                </div>
-                <div className="flex w-fit items-center gap-1 p-1 px-1.5">
-                    <ThemeToggle size="sm" />
-                    <ControlesVentana />
-                </div>
-            </div>
+            {/* La barra de título común, encima del fondo. */}
+            <Titlebar className="absolute top-0 left-0 right-0 z-50" />
 
             <div className="h-full touch-pan-y overflow-y-auto overscroll-contain pt-11 sm:pt-12">
                 <div className="mx-auto flex min-h-[calc(100dvh-44px)] w-full max-w-6xl items-start justify-center px-2 py-3 sm:min-h-[calc(100dvh-48px)] sm:px-4 sm:py-4 lg:items-center">

@@ -3683,4 +3683,7 @@ export type ZoomVentana = {
 	porcentaje: number,
 	/**  `true` si lo decide el monitor; `false` si alguien lo ha fijado en este equipo. */
 	automatico: boolean,
+	/**  Si quedan pasos hacia arriba y hacia abajo: los límites sólo los sabe Rust. */
+	puede_acercar: boolean,
+	puede_alejar: boolean,
 };

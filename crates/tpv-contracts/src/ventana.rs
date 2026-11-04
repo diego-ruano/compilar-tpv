@@ -10,6 +10,9 @@ pub struct ZoomVentana {
     pub porcentaje: u32,
     /// `true` si lo decide el monitor; `false` si alguien lo ha fijado en este equipo.
     pub automatico: bool,
+    /// Si quedan pasos hacia arriba y hacia abajo: los límites sólo los sabe Rust.
+    pub puede_acercar: bool,
+    pub puede_alejar: bool,
 }
 
 /// Lo que se pide desde la barra de arriba.
