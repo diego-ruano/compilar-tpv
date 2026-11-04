@@ -22,13 +22,15 @@ export async function listLoginUsers(db: Client): Promise<UserListItem[]> {
 			u.ID_Usuario AS id_usuario,
 			u.Nombre AS nombre,
 			u.Apellido AS apellido,
-			r.Nombre_Rol AS nombre_rol
+			r.Nombre_Rol AS nombre_rol,
+			u.Sin_PIN AS sin_pin
 		FROM Usuarios u
 		JOIN Roles r ON r.ID_Rol = u.ID_Rol
 		WHERE u.Estado = 'Activo'
 		ORDER BY u.Nombre ASC;
 	`);
-	return rows(rs) as UserListItem[];
+	// SQLite da 0/1 y la Main deserializa un booleano.
+	return rows(rs).map((r) => ({ ...r, sin_pin: Number(r.sin_pin) === 1 })) as UserListItem[];
 }
 
 export async function getLoginRecord(db: Client, idUsuario: string): Promise<any | null> {
@@ -42,7 +44,8 @@ export async function getLoginRecord(db: Client, idUsuario: string): Promise<any
 				u.Email AS email,
 				u.Password_Hash AS password_hash,
 				u.Requiere_Setup AS requiere_setup,
-				r.Nombre_Rol AS rol
+				r.Nombre_Rol AS rol,
+				u.Sin_PIN AS sin_pin
 			FROM Usuarios u
 			JOIN Roles r ON r.ID_Rol = u.ID_Rol
 			LEFT JOIN Trabajadores t ON t.ID_Usuario = u.ID_Usuario

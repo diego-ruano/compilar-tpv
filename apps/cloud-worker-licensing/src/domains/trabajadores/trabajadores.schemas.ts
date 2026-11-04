@@ -78,6 +78,8 @@ export const trabajadorCreateSchema = z
 		puesto: z.any().optional().nullable(),
 		fecha_inicio_contrato: z.any().optional().nullable(),
 		fecha_fin_contrato: z.any().optional().nullable(),
+		// Entra sin PIN. Ausente, como en la Main: pide PIN.
+		sin_pin: z.boolean().optional().default(false),
 	})
 	.transform((v) => ({
 		...v,
@@ -113,6 +115,8 @@ export const trabajadorUpdateSchema = z
 			.nullable()
 			.transform((v) => cleanOrNull(v))
 			.refine((v) => v === null || PIN_DE_TECLADO.test(v), MSG_PIN),
+		// Ausente o null: se queda el que tenga, como en la Main (`COALESCE`).
+		sin_pin: z.boolean().optional().nullable().transform((v) => v ?? null),
 	})
 	.transform((v) => ({
 		...v,
@@ -213,7 +217,8 @@ type NullableTrabajadorCreateFields =
 
 type NullableTrabajadorUpdateFields =
 	| NullableTrabajadorCreateFields
-	| "pin";
+	| "pin"
+	| "sin_pin";
 
 type NullableAsignacionFields = "hora_inicio" | "hora_fin" | "notas";
 

@@ -1,11 +1,12 @@
 {
-  "descripcion": "La lista de usuarios de la pantalla de entrada. NO puede llevar el hash del PIN, y esa es la parte que mas importa que coincida: si un lado lo colara, el hash viajaria a cada dispositivo. Hay un usuario dado de baja para ver si se filtra igual en los dos lados.",
+  "descripcion": "La lista de usuarios de la pantalla de entrada. NO puede llevar el hash del PIN, y esa es la parte que mas importa que coincida: si un lado lo colara, el hash viajaria a cada dispositivo. Hay un usuario dado de baja para ver si se filtra igual en los dos lados, y uno que entra sin PIN para ver que los dos lo devuelven como booleano.",
   "lectura": "login.usuarios",
   "seed": [
     "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect', 'RolLecturaContrato');",
     "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect-2', 'RolLecturaContrato2');",
     "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido) VALUES ('user-1', 'rol-lect', 'ana@bar.com', 'hash-1', 'Ana', 'Gomez');",
     "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('user-2', 'rol-lect-2', 'beto@bar.com', 'hash-2', 'Beto', 'Baja');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Sin_PIN) VALUES ('user-3', 'rol-lect-2', 'carla@bar.com', 'hash-3', 'Carla', 1);",
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Telefono, Puesto, Fecha_Inicio_Contrato) VALUES ('trab-1', 'user-1', '600100200', 'Camarera', '2026-01-15');",
     "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Puesto) VALUES ('trab-2', 'user-2', 'Cocinero');"
   ],

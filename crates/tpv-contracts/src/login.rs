@@ -13,6 +13,10 @@ pub struct UserListItem {
     pub nombre: String,
     pub apellido: Option<String>,
     pub nombre_rol: String,
+    /// Entra sin PIN: la pantalla no se lo pide y el backend no lo comprueba (`Usuarios.Sin_PIN`).
+    /// `default` para que una Handy nueva siga listando contra un worker que aún no lo devuelve.
+    #[serde(default)]
+    pub sin_pin: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]

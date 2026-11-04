@@ -252,6 +252,8 @@ pub struct LoginUserRecord {
     pub password_hash: String,
     pub requiere_setup: i64,
     pub rol: String,
+    /// `Usuarios.Sin_PIN`: el login y el fichaje no le piden PIN.
+    pub sin_pin: bool,
 }
 
 /// Información mínima para el setup inicial.

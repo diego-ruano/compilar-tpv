@@ -317,6 +317,7 @@ export const commands = {
 	Numero_Seguridad_Social: string | null,
 	Fecha_Inicio_Contrato: string | null,
 	Fecha_Fin_Contrato: string | null,
+	Sin_PIN?: boolean,
 } | null>("trabajadores_get_detail", { args }),
 	trabajadoresGetTrabajadorIdByUsuario: (args: TrabajadorIdByUsuarioArgs) => __TAURI_INVOKE<string | null>("trabajadores_get_trabajador_id_by_usuario", { args }),
 	trabajadoresCreate: (args: TrabajadorCreateInput) => __TAURI_INVOKE<boolean>("trabajadores_create", { args }),

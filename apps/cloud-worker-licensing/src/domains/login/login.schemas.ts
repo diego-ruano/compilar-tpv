@@ -20,9 +20,11 @@ function cleanOptional(v: unknown): string | null {
 	return t.length ? t : null;
 }
 
+// El PIN puede llegar vacío: quien entra sin PIN (`Usuarios.Sin_PIN`) no escribe ninguno. Si el
+// usuario sí lo necesita, la ruta lo da por incorrecto y lo cuenta como fallo, igual que la Main.
 export const loginUserSchema = z.object({
 	id_usuario: idStr,
-	pin: z.string().overwrite(recortar).min(1, "Escribe el PIN."),
+	pin: z.string().overwrite(recortar),
 });
 
 export const setTurnoPartidoSchema = z.object({
@@ -66,7 +68,8 @@ export const confirmarCambioCorreoSchema = z.object({
 // rompe contra esto: el schema no es `strict`, así que zod las descarta sin quejarse.
 export const punchSchema = z.object({
 	id_usuario: idStr,
-	pin: z.string().overwrite(recortar).min(1, "Escribe el PIN."),
+	// Vacío vale, como en `loginUserSchema`.
+	pin: z.string().overwrite(recortar),
 	tipo: z.enum(["entrada", "salida"]),
 });
 

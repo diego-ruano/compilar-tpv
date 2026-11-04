@@ -211,7 +211,8 @@ export async function detail(
 				NULL AS IBAN,
 				NULL AS Numero_Seguridad_Social,
 				t.Fecha_Inicio_Contrato AS Fecha_Inicio_Contrato,
-				t.Fecha_Fin_Contrato AS Fecha_Fin_Contrato
+				t.Fecha_Fin_Contrato AS Fecha_Fin_Contrato,
+				u.Sin_PIN AS Sin_PIN
 			FROM Trabajadores t
 			JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
 			WHERE t.ID_Trabajador = ?1
@@ -219,7 +220,9 @@ export async function detail(
 		`,
 		args: [idTrabajador],
 	});
-	return (rows(rs)[0] ?? null) as TrabajadorDetailRow | null;
+	const fila = rows(rs)[0];
+	// SQLite da 0/1 y la Main deserializa un booleano.
+	return (fila ? { ...fila, Sin_PIN: Number(fila.Sin_PIN) === 1 } : null) as TrabajadorDetailRow | null;
 }
 
 /**

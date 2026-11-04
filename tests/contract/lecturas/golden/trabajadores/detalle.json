@@ -12,5 +12,6 @@
   "Nombre": "Ana",
   "Numero_Seguridad_Social": null,
   "Puesto": "Camarera",
+  "Sin_PIN": false,
   "Telefono": "600100200"
 }

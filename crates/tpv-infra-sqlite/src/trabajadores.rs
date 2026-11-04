@@ -307,7 +307,8 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                   t.IBAN,
                   t.Numero_Seguridad_Social,
                   t.Fecha_Inicio_Contrato,
-                  t.Fecha_Fin_Contrato
+                  t.Fecha_Fin_Contrato,
+                  u.Sin_PIN
                 FROM Trabajadores t
                 JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
                 WHERE t.ID_Trabajador = ?1
@@ -340,6 +341,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 .descifrar(v_string(row.get_value(11).map_err(db_err)?))?,
             fecha_inicio_contrato: v_string(row.get_value(12).map_err(db_err)?),
             fecha_fin_contrato: v_string(row.get_value(13).map_err(db_err)?),
+            sin_pin: v_i64(row.get_value(14).map_err(db_err)?).unwrap_or(0) == 1,
         }))
     }
 
@@ -577,8 +579,8 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             db.execute(
                 r#"
                 INSERT INTO Usuarios (
-                  ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido, Estado
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
+                  ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido, Estado, Sin_PIN
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
                 "#,
                 vec![
                     Value::Text(id_usuario.clone()),
@@ -588,6 +590,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                     Value::Text(data.nombre.clone()),
                     opt_text(data.apellido.clone()),
                     Value::Text(data.estado.clone()),
+                    Value::Integer(i64::from(data.sin_pin)),
                 ],
             )
             .await
@@ -643,14 +646,19 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             // RI-63: un id que no existe era un `Ok(true)` sin tocar nada.
             let sin_fila = || AppError::not_found("Ese trabajador ya no existe. Actualiza la lista.");
 
-            // Datos de cuenta (Usuarios). El PIN sólo se actualiza si llega uno nuevo.
+            // Datos de cuenta (Usuarios). El PIN sólo se actualiza si llega uno nuevo, y `Sin_PIN`
+            // sólo si llega (`COALESCE`: sin valor se queda el que tenga). Mismo SQL en el worker.
+            let sin_pin = cambios
+                .sin_pin
+                .map(|s| Value::Integer(i64::from(s)))
+                .unwrap_or(Value::Null);
             let usuarios = if let Some(hash) = password_hash {
                 db.execute(
                     r#"
                     UPDATE Usuarios
                        SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4,
-                           Estado = ?5, Password_Hash = ?6
-                     WHERE ID_Usuario = ?7;
+                           Estado = ?5, Sin_PIN = COALESCE(?6, Sin_PIN), Password_Hash = ?7
+                     WHERE ID_Usuario = ?8;
                     "#,
                     vec![
                         Value::Text(cambios.id_rol.clone()),
@@ -658,6 +666,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                         Value::Text(cambios.nombre.clone()),
                         opt_text(cambios.apellido.clone()),
                         Value::Text(cambios.estado.clone()),
+                        sin_pin,
                         Value::Text(hash),
                         Value::Text(cambios.id_usuario.clone()),
                     ],
@@ -668,8 +677,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 db.execute(
                     r#"
                     UPDATE Usuarios
-                       SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4, Estado = ?5
-                     WHERE ID_Usuario = ?6;
+                       SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4, Estado = ?5,
+                           Sin_PIN = COALESCE(?6, Sin_PIN)
+                     WHERE ID_Usuario = ?7;
                     "#,
                     vec![
                         Value::Text(cambios.id_rol.clone()),
@@ -677,6 +687,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                         Value::Text(cambios.nombre.clone()),
                         opt_text(cambios.apellido.clone()),
                         Value::Text(cambios.estado.clone()),
+                        sin_pin,
                         Value::Text(cambios.id_usuario.clone()),
                     ],
                 )
@@ -1276,6 +1287,7 @@ mod tests_edicion {
             numero_seguridad_social: None,
             fecha_inicio_contrato: None,
             fecha_fin_contrato: None,
+            sin_pin: false,
         })
         .await
         .unwrap();
@@ -1313,6 +1325,17 @@ mod tests_edicion {
         estado: &str,
         pin: Option<&str>,
     ) -> Result<bool, AppError> {
+        editar_completo(repo, f, rol, estado, pin, None).await
+    }
+
+    async fn editar_completo(
+        repo: &SqliteTrabajadoresRepository,
+        f: &Ficha,
+        rol: &str,
+        estado: &str,
+        pin: Option<&str>,
+        sin_pin: Option<bool>,
+    ) -> Result<bool, AppError> {
         repo.update_trabajador(
             &f.id_trabajador,
             TrabajadorCambios {
@@ -1330,9 +1353,25 @@ mod tests_edicion {
                 fecha_inicio_contrato: None,
                 fecha_fin_contrato: None,
                 pin: pin.map(str::to_string),
+                sin_pin,
             },
         )
         .await
+    }
+
+    async fn sin_pin_guardado(db: &Arc<Db>, f: &Ficha) -> i64 {
+        let conn = db.read().await;
+        let mut rows = conn
+            .query(
+                "SELECT Sin_PIN FROM Usuarios WHERE ID_Usuario = ?1;",
+                vec![Value::Text(f.id_usuario.clone())],
+            )
+            .await
+            .unwrap();
+        match rows.next().await.unwrap().unwrap().get_value(0).unwrap() {
+            Value::Integer(n) => n,
+            otro => panic!("se esperaba un entero, había {otro:?}"),
+        }
     }
 
     async fn hash_guardado(db: &Arc<Db>, f: &Ficha) -> String {
@@ -1445,6 +1484,32 @@ mod tests_edicion {
         assert!(tpv_domain::login::verify_pin("1234", &hash).is_err());
     }
 
+    /// `Sin_PIN` se cambia sólo cuando la edición lo dice: una pantalla que no lo manda no lo pisa,
+    /// y quitarlo o ponerlo no toca el PIN guardado.
+    #[tokio::test]
+    async fn sin_pin_se_cambia_solo_cuando_llega_y_no_toca_el_pin() {
+        let (db, repo, _dir) = abrir().await;
+        let ana = alta(&db, &repo, "ana@bar.test", ADMIN, "Activo").await;
+        let pepe = alta(&db, &repo, "pepe@bar.test", CAMARERO, "Activo").await;
+        assert_eq!(sin_pin_guardado(&db, &pepe).await, 0);
+
+        assert!(editar_completo(&repo, &pepe, CAMARERO, "Activo", None, Some(true)).await.unwrap());
+        assert_eq!(sin_pin_guardado(&db, &pepe).await, 1);
+        assert!(tpv_domain::login::verify_pin("1234", &hash_guardado(&db, &pepe).await).is_ok());
+
+        assert!(editar(&repo, &pepe, CAMARERO, "Activo").await.unwrap());
+        assert_eq!(sin_pin_guardado(&db, &pepe).await, 1, "sin decirlo, se queda como estaba");
+
+        assert!(editar_completo(&repo, &pepe, CAMARERO, "Activo", Some("5678"), Some(false)).await.unwrap());
+        assert_eq!(sin_pin_guardado(&db, &pepe).await, 0);
+        assert!(tpv_domain::login::verify_pin("5678", &hash_guardado(&db, &pepe).await).is_ok());
+
+        // Y la ficha lo devuelve.
+        assert!(editar_completo(&repo, &ana, ADMIN, "Activo", None, Some(true)).await.unwrap());
+        let ficha = repo.get_detail(&ana.id_trabajador).await.unwrap().unwrap();
+        assert!(ficha.sin_pin);
+    }
+
     #[tokio::test]
     async fn editar_una_ficha_que_no_existe_es_un_error() {
         // RI-63: era un `Ok(true)` sin haber tocado nada.
@@ -1539,6 +1604,7 @@ mod tests_cifrado {
             numero_seguridad_social: Some(NSS.to_string()),
             fecha_inicio_contrato: None,
             fecha_fin_contrato: None,
+            sin_pin: false,
         }
     }
 

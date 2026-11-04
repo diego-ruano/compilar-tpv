@@ -4,8 +4,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { UserCog, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
 import type { RolRow as Rol, TrabajadorDetailRow as TrabajadorDetail } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
-import { esPermisoDenegado } from "../../../shared/lib/permisos";
+import { esPermisoDenegado, ROL_ADMIN } from "../../../shared/lib/permisos";
 import { conAviso } from "../../../shared/lib/conAviso";
+import CasillaSinPin from "./CasillaSinPin";
 
 function normalizeNullable(v: string) {
   const s = String(v ?? "").trim();
@@ -86,6 +87,7 @@ async function updateTrabajadorRemote(payload: {
   fechaInicioContrato?: string | null;
   fechaFinContrato?: string | null;
   pin?: string | null;
+  sinPin: boolean;
 }): Promise<boolean> {
   const body: Record<string, any> = {
     idTrabajador: payload.idTrabajador,
@@ -137,6 +139,7 @@ async function updateTrabajadorRemote(payload: {
       fecha_fin_contrato: body.fecha_fin_contrato,
       // RI-63: el PIN, no su hash: lo hashea el backend, que así exige la política del PIN.
       pin: body.pin,
+      sin_pin: payload.sinPin,
     });
 
   if (typeof ok !== "boolean") {
@@ -162,6 +165,9 @@ function EditTrabajador() {
   const [nombre, setNombre] = useState("");
   const [apellido, setApellido] = useState("");
   const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
+  const [sinPin, setSinPin] = useState(false);
+  // Cómo estaba al abrir la ficha: quitarle «Entra sin PIN» pide un PIN nuevo.
+  const [sinPinGuardado, setSinPinGuardado] = useState(false);
 
   const [telefono, setTelefono] = useState("");
   const [puesto, setPuesto] = useState("");
@@ -218,6 +224,8 @@ function EditTrabajador() {
         setNombre(detail.Nombre ?? "");
         setApellido(detail.Apellido ?? "");
         setEstado((detail.Estado as "Activo" | "Inactivo") ?? "Activo");
+        setSinPin(Boolean(detail.Sin_PIN));
+        setSinPinGuardado(Boolean(detail.Sin_PIN));
 
         setTelefono(detail.Telefono ?? "");
         setPuesto(detail.Puesto ?? "");
@@ -258,6 +266,11 @@ function EditTrabajador() {
     if (pinNuevo.trim() && !/^\d{4,6}$/.test(pinNuevo.trim())) {
       return setError("El PIN nuevo tiene que tener entre 4 y 6 cifras");
     }
+    // Quien entraba sin PIN puede no saber el suyo (al darlo de alta sin escribir uno se le puso
+    // uno al azar): sin uno nuevo se quedaría sin poder entrar.
+    if (sinPinGuardado && !sinPin && !pinNuevo.trim()) {
+      return setError("Escribe un PIN nuevo: a partir de ahora lo necesitará para entrar");
+    }
 
     setSaving(true);
 
@@ -278,6 +291,7 @@ function EditTrabajador() {
         fechaInicioContrato: normalizeNullable(fechaInicioContrato),
         fechaFinContrato: indefinido ? null : normalizeNullable(fechaFinContrato),
         pin: pinNuevo.trim() || null,
+        sinPin,
       });
 
       if (!ok) {
@@ -390,8 +404,16 @@ function EditTrabajador() {
               <p className="text-xs text-fg-subtle">Debe ser único.</p>
             </div>
 
+            <CasillaSinPin
+              checked={sinPin}
+              onChange={setSinPin}
+              esAdministrador={rolActual?.Nombre_Rol === ROL_ADMIN}
+            />
+
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">PIN nuevo (opcional)</label>
+              <label className="text-sm font-medium">
+                {sinPinGuardado && !sinPin ? "PIN nuevo *" : "PIN nuevo (opcional)"}
+              </label>
               <input
                 value={pinNuevo}
                 onChange={(e) => setPinNuevo(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -399,11 +421,13 @@ function EditTrabajador() {
                 pattern="[0-9]*"
                 maxLength={6}
                 className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                placeholder="Dejar vacío para no cambiar"
+                placeholder={sinPinGuardado && !sinPin ? "1234" : "Dejar vacío para no cambiar"}
                 autoComplete="off"
               />
               <p className="text-xs text-fg-subtle">
-                De 4 a 6 cifras. Si lo dejas vacío, se mantiene el PIN actual.
+                {sinPinGuardado && !sinPin
+                  ? "De 4 a 6 cifras. Hasta ahora entraba sin PIN: con este entrará a partir de ahora."
+                  : "De 4 a 6 cifras. Si lo dejas vacío, se mantiene el PIN actual."}
               </p>
             </div>
           </div>

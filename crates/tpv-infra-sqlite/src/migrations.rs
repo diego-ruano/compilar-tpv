@@ -586,7 +586,7 @@ mod tests {
                 "Show_FooterMessage", "Paper_Width_Mm", "Paper_Dpi", "Chars_Per_Line",
             ],
         ),
-        ("Usuarios", &["Requiere_Setup"]),
+        ("Usuarios", &["Requiere_Setup", "Sin_PIN"]),
     ];
 
     /// RI-65: toda columna de dinero lleva su CHECK de tipo, y ninguna otra lo necesita. Ver

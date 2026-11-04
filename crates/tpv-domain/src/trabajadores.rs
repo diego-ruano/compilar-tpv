@@ -125,10 +125,12 @@ pub struct TrabajadorNuevo {
     pub numero_seguridad_social: Option<String>,
     pub fecha_inicio_contrato: Option<String>,
     pub fecha_fin_contrato: Option<String>,
+    /// `Usuarios.Sin_PIN`: el login y el fichaje no le piden PIN. El PIN se guarda igual.
+    pub sin_pin: bool,
 }
 
 /// Cambios sobre un trabajador existente. `pin` opcional (si `None`, no se cambia); como en el
-/// alta, en claro y ya validado.
+/// alta, en claro y ya validado. `sin_pin` igual: `None` deja el que tenga.
 #[derive(Debug, Clone)]
 pub struct TrabajadorCambios {
     pub id_usuario: String,
@@ -145,6 +147,7 @@ pub struct TrabajadorCambios {
     pub fecha_inicio_contrato: Option<String>,
     pub fecha_fin_contrato: Option<String>,
     pub pin: Option<String>,
+    pub sin_pin: Option<bool>,
 }
 
 #[cfg(test)]

@@ -11,7 +11,8 @@ gate de licencia son fronteras criptográficas.
 
 Lo que sí consiguen:
 
-- Para pasar un gate hay que iniciar sesión con el PIN de alguien autorizado.
+- Para pasar un gate hay que iniciar sesión con el PIN de alguien autorizado, o como alguien autorizado
+  que entra sin PIN ([abajo](#entrar-sin-pin)).
 - El usuario que queda **firmado en una fila** (quién cobró, cerró la caja, anuló, abrió el cajón) lo
   pone el backend, no la pantalla.
 - Entre «la interfaz esconde el botón» y «el botón no hace nada» no queda hueco.
@@ -37,7 +38,7 @@ salta, un ataque de red no.
 
 | Momento | Qué pasa |
 |---|---|
-| Arranque | `None`: al abrir la app siempre se pide PIN |
+| Arranque | `None`: al abrir la app siempre se vuelve al login |
 | `login_user` correcto | Se pone, con el rol **que devuelve el repositorio** (SQLite en la Main, worker en la Handy) |
 | `logout` | Se quita |
 | Cambio de modo o sustitución del token Handy | Se quita antes de cambiar el backend/tenant |
@@ -150,6 +151,21 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
   la Main lo aplica en su SQLite y lo sube por `POST /v1/login/sync-initial-setup` (firmada, rol TPV),
   directa a Turso porque aún no hay WebSocket. En Rust el puerto falla por defecto en la Handy, y una
   Main con el setup pendiente no sale de `/setup`, así que no puede haber Handys vinculadas todavía.
+
+### Entrar sin PIN
+
+`Usuarios.Sin_PIN = 1` (migración `0002`): el login y el fichaje de ese usuario no comprueban el PIN,
+y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en la ficha del trabajador.
+
+- **Lo decide el backend**, no la pantalla: `comprobar_pin` en `tpv-infra-sqlite/src/login.rs` y
+  `entraSinPin` en `login.routes.ts`. A ese usuario tampoco se le mira el freno de LOGIN-01, que
+  sigue intacto para los demás: no hay secreto que adivinar, y un bloqueo anterior le dejaría fuera.
+  `list_login_users` devuelve `sin_pin` para que la pantalla no le pida nada.
+- **La cuenta conserva su PIN.** El alta pone uno al azar si no se escribe ninguno, y quitar la
+  casilla en la edición exige escribir uno nuevo.
+- **No se le niega a ningún rol.** Marcarlo en un administrador avisa en la ficha: cualquiera que toque
+  su nombre pasa sus gates, y lo que se firma en una fila queda a su nombre.
+- La edición sólo cambia `Sin_PIN` si llega (`COALESCE(?, Sin_PIN)`, igual en la Main y en el worker).
 
 ### Recuperar el PIN
 

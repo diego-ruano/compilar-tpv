@@ -190,6 +190,7 @@ pub async fn create_trabajador(
         numero_seguridad_social: limpiar_opcional(input.numero_seguridad_social),
         fecha_inicio_contrato: limpiar_opcional(input.fecha_inicio_contrato),
         fecha_fin_contrato: limpiar_opcional(input.fecha_fin_contrato),
+        sin_pin: input.sin_pin,
     };
 
     repo.create_trabajador(data).await
@@ -232,6 +233,7 @@ pub async fn update_trabajador(
         fecha_inicio_contrato: limpiar_opcional(input.fecha_inicio_contrato),
         fecha_fin_contrato: limpiar_opcional(input.fecha_fin_contrato),
         pin,
+        sin_pin: input.sin_pin,
     };
 
     repo.update_trabajador(&input.id_trabajador, cambios).await

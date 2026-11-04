@@ -265,7 +265,7 @@ async fn query_login_record<C: Reader>(
         .query(
             r#"
             SELECT u.ID_Usuario, t.ID_Trabajador, u.Nombre, u.Apellido, u.Email,
-                   u.Password_Hash, u.Requiere_Setup, r.Nombre_Rol
+                   u.Password_Hash, u.Requiere_Setup, r.Nombre_Rol, u.Sin_PIN
             FROM Usuarios u
             JOIN Roles r ON r.ID_Rol = u.ID_Rol
             LEFT JOIN Trabajadores t ON t.ID_Usuario = u.ID_Usuario
@@ -319,6 +319,7 @@ async fn query_login_record<C: Reader>(
         Value::Text(s) => s,
         _ => return Err(AppError::repository("Rol de usuario inválido")),
     };
+    let sin_pin = v_i64(row.get_value(8).map_err(db_err)?).unwrap_or(0) == 1;
 
     Ok(Some(LoginUserRecord {
         id_usuario: id,
@@ -329,14 +330,19 @@ async fn query_login_record<C: Reader>(
         password_hash,
         requiere_setup,
         rol,
+        sin_pin,
     }))
 }
 
-async fn query_password_hash<C: Reader>(conn: &C, id_usuario: &str) -> AppResult<Option<String>> {
+/// El PIN guardado de un usuario activo y si entra sin él (`Sin_PIN`).
+async fn query_password_hash<C: Reader>(
+    conn: &C,
+    id_usuario: &str,
+) -> AppResult<Option<(String, bool)>> {
     let mut rows = conn
         .query(
             r#"
-            SELECT Password_Hash
+            SELECT Password_Hash, Sin_PIN
             FROM Usuarios
             WHERE ID_Usuario = ?1 AND Estado = 'Activo'
             LIMIT 1;
@@ -349,10 +355,28 @@ async fn query_password_hash<C: Reader>(conn: &C, id_usuario: &str) -> AppResult
     let Some(row) = rows.next().await.map_err(db_err)? else {
         return Ok(None);
     };
-    match row.get_value(0).map_err(db_err)? {
-        Value::Text(s) => Ok(Some(s)),
-        _ => Err(AppError::repository("Password_Hash inválido")),
+    let hash = match row.get_value(0).map_err(db_err)? {
+        Value::Text(s) => s,
+        _ => return Err(AppError::repository("Password_Hash inválido")),
+    };
+    let sin_pin = v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0) == 1;
+    Ok(Some((hash, sin_pin)))
+}
+
+/// Comprueba el PIN de un login o un fichaje con el freno de LOGIN-01: mira el bloqueo antes y
+/// cuenta el intento después. A quien entra sin PIN (`Sin_PIN = 1`) no se le comprueba nada: no hay
+/// secreto que adivinar, y un bloqueo que le quedara de antes le dejaría fuera sin poder hacer nada.
+async fn comprobar_pin(db: &Db, id_usuario: &str, pin: &str, hash: &str, sin_pin: bool) -> AppResult<()> {
+    if sin_pin {
+        return Ok(());
     }
+    crate::auth::throttle_check(db, id_usuario).await?;
+    if let Err(e) = verificar_pin_sin_bloquear(pin, hash).await? {
+        let _ = crate::auth::throttle_registrar(db, id_usuario, false).await;
+        return Err(AppError::validation(e));
+    }
+    let _ = crate::auth::throttle_registrar(db, id_usuario, true).await;
+    Ok(())
 }
 
 async fn query_setup_info<C: Reader>(conn: &C, id_usuario: &str) -> AppResult<Option<SetupInfo>> {
@@ -549,7 +573,7 @@ impl LoginRepository for SqliteLoginRepository {
         let mut rows = db
             .query(
                 r#"
-                SELECT u.ID_Usuario, u.Nombre, u.Apellido, r.Nombre_Rol
+                SELECT u.ID_Usuario, u.Nombre, u.Apellido, r.Nombre_Rol, u.Sin_PIN
                 FROM Usuarios u
                 JOIN Roles r ON r.ID_Rol = u.ID_Rol
                 WHERE u.Estado = 'Activo'
@@ -579,12 +603,14 @@ impl LoginRepository for SqliteLoginRepository {
                 Value::Text(s) => s,
                 _ => "Sin rol".into(),
             };
+            let sin_pin = v_i64(row.get_value(4).map_err(db_err)?).unwrap_or(0) == 1;
 
             out.push(UserListItem {
                 id_usuario,
                 nombre,
                 apellido,
                 nombre_rol,
+                sin_pin,
             });
         }
         Ok(out)
@@ -667,8 +693,6 @@ impl LoginRepository for SqliteLoginRepository {
     }
 
     async fn login(&self, id_usuario: &str, pin: &str) -> AppResult<LoginOk> {
-        crate::auth::throttle_check(&self.db, id_usuario).await?;
-
         let rec = {
             let db = self.db.read().await;
             query_login_record(&db, id_usuario)
@@ -676,16 +700,13 @@ impl LoginRepository for SqliteLoginRepository {
                 .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?
         };
 
-        if let Err(e) = verificar_pin_sin_bloquear(pin, &rec.password_hash).await? {
-            let _ = crate::auth::throttle_registrar(&self.db, id_usuario, false).await;
-            return Err(AppError::validation(e));
-        }
-        let _ = crate::auth::throttle_registrar(&self.db, id_usuario, true).await;
+        comprobar_pin(&self.db, id_usuario, pin, &rec.password_hash, rec.sin_pin).await?;
 
         // Rehash-en-login (LOGIN-04): si el hash usa menos iteraciones que el objetivo actual, se
         // recomputa con el PIN ya verificado y se actualiza. Best-effort: un fallo aquí NO rompe el
         // login. Hoy el objetivo es 100k → no-op; al subirlo (plan de pago) migra en el primer login.
-        if hash_needs_upgrade(&rec.password_hash) {
+        // Sin PIN no hay PIN verificado con el que rehacerlo.
+        if !rec.sin_pin && hash_needs_upgrade(&rec.password_hash) {
             if let Ok(new_hash) = hash_pin(pin) {
                 let w = self.db.write().await;
                 let _ = w
@@ -778,20 +799,14 @@ impl LoginRepository for SqliteLoginRepository {
     }
 
     async fn punch(&self, id_usuario: &str, pin: &str, tipo: &str) -> AppResult<PunchStatus> {
-        crate::auth::throttle_check(&self.db, id_usuario).await?;
-
-        let hash = {
+        let (hash, sin_pin) = {
             let db = self.db.read().await;
             query_password_hash(&db, id_usuario)
                 .await?
                 .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?
         };
 
-        if let Err(e) = verificar_pin_sin_bloquear(pin, &hash).await? {
-            let _ = crate::auth::throttle_registrar(&self.db, id_usuario, false).await;
-            return Err(AppError::validation(e));
-        }
-        let _ = crate::auth::throttle_registrar(&self.db, id_usuario, true).await;
+        comprobar_pin(&self.db, id_usuario, pin, &hash, sin_pin).await?;
 
         let db = self.db.write().await;
         exec_punch(&db, id_usuario, tipo).await
@@ -1262,6 +1277,84 @@ mod tests_restablecer_pin {
             contar(&db, "SELECT COUNT(*) FROM Intentos_Login WHERE ID_Usuario = 'admin';").await,
             0
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_sin_pin {
+    //! `Usuarios.Sin_PIN`: el login y el fichaje de ese usuario no comprueban el PIN, y a los demás
+    //! se les sigue pidiendo igual.
+
+    use super::*;
+    use tpv_contracts::login::LoginUserArgs;
+
+    async fn db_con_usuario(sin_pin: i64) -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("sin_pin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado, Sin_PIN)
+                     VALUES ('u1', (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Camarero'),
+                             'u1@bar.test', ?1, 'Ana', 'Activo', ?2);",
+                    vec![Value::Text(hash_pin("1234").unwrap()), Value::Integer(sin_pin)],
+                )
+                .await
+                .unwrap();
+        }
+        (db, dir)
+    }
+
+    fn entrar(pin: &str) -> LoginUserArgs {
+        LoginUserArgs { id_usuario: "u1".into(), pin: pin.into() }
+    }
+
+    #[tokio::test]
+    async fn sin_pin_ficha_y_entra_sin_escribirlo() {
+        let (db, _dir) = db_con_usuario(1).await;
+        let repo = SqliteLoginRepository::new(db.clone());
+
+        repo.punch("u1", "", "entrada").await.unwrap();
+        let ok = tpv_application::use_cases::login::login_user(&repo, None, entrar("")).await.unwrap();
+        assert_eq!(ok.id_usuario, "u1");
+
+        let lista = repo.list_login_users().await.unwrap();
+        assert!(lista.iter().any(|u| u.id_usuario == "u1" && u.sin_pin));
+    }
+
+    #[tokio::test]
+    async fn con_pin_sigue_haciendo_falta() {
+        let (db, _dir) = db_con_usuario(0).await;
+        let repo = SqliteLoginRepository::new(db.clone());
+
+        assert!(matches!(repo.punch("u1", "", "entrada").await, Err(AppError::Validation(_))));
+        assert!(matches!(repo.login("u1", "").await, Err(AppError::Validation(_))));
+        repo.punch("u1", "1234", "entrada").await.unwrap();
+        tpv_application::use_cases::login::login_user(&repo, None, entrar("1234")).await.unwrap();
+
+        let lista = repo.list_login_users().await.unwrap();
+        assert!(lista.iter().any(|u| u.id_usuario == "u1" && !u.sin_pin));
+    }
+
+    #[tokio::test]
+    async fn un_bloqueo_de_antes_no_deja_fuera_a_quien_pasa_a_entrar_sin_pin() {
+        let (db, _dir) = db_con_usuario(0).await;
+        let repo = SqliteLoginRepository::new(db.clone());
+        for _ in 0..7 {
+            let _ = repo.login("u1", "0000").await;
+        }
+        assert!(repo.punch("u1", "1234", "entrada").await.is_err(), "el freno de LOGIN-01 está puesto");
+
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute("UPDATE Usuarios SET Sin_PIN = 1 WHERE ID_Usuario = 'u1';", Vec::<Value>::new())
+                .await
+                .unwrap();
+        }
+        repo.punch("u1", "", "entrada").await.unwrap();
     }
 }
 

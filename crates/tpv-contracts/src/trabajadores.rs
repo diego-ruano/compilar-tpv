@@ -67,6 +67,8 @@ pub struct TrabajadorDetailRow {
     pub fecha_inicio_contrato: Option<String>,
     #[serde(rename = "Fecha_Fin_Contrato")]
     pub fecha_fin_contrato: Option<String>,
+    #[serde(rename = "Sin_PIN", default)]
+    pub sin_pin: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -191,6 +193,9 @@ pub struct SetPredeterminadoInput {
 ///
 /// RI-63: llega el PIN, no su hash. Lo hashea quien lo guarda (la Main o el worker), que así puede
 /// exigir la política del PIN y no guarda un hash con las iteraciones que alguien quiera.
+///
+/// `sin_pin`: el login y el fichaje no se lo piden. El PIN llega igual —la pantalla pone uno al azar
+/// si no se escribe ninguno—, para que quitarle la opción después no deje la cuenta sin PIN.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TrabajadorCreateInput {
     pub id_rol: String,
@@ -214,10 +219,13 @@ pub struct TrabajadorCreateInput {
     pub fecha_inicio_contrato: Option<String>,
     #[serde(default)]
     pub fecha_fin_contrato: Option<String>,
+    #[serde(default)]
+    pub sin_pin: bool,
 }
 
 /// Edición de trabajador (actualiza Usuario + Trabajador). `pin` opcional: si viene, cambia el
 /// PIN; si no, se mantiene el actual. Como en el alta, llega el PIN y no su hash (RI-63).
+/// `sin_pin` igual: ausente, se queda el que tenga (una pantalla que no lo conoce no lo pisa).
 /// Local-First.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct TrabajadorUpdateInput {
@@ -245,4 +253,6 @@ pub struct TrabajadorUpdateInput {
     pub fecha_fin_contrato: Option<String>,
     #[serde(default)]
     pub pin: Option<String>,
+    #[serde(default)]
+    pub sin_pin: Option<bool>,
 }

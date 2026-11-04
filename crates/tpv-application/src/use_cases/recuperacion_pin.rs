@@ -107,6 +107,7 @@ mod tests {
                         nombre: "Nombre".into(),
                         apellido: None,
                         nombre_rol: rol.to_string(),
+                        sin_pin: false,
                     })
                     .collect(),
                 pines: Mutex::new(vec![]),

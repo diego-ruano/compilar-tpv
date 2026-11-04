@@ -47,27 +47,38 @@ loginRoutes.get("/users", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.listLoginUsers(db))),
 );
 
+/**
+ * ¿Entra sin PIN (`Usuarios.Sin_PIN = 1`)? Entonces ni se comprueba el PIN ni se mira el freno: no
+ * hay secreto que adivinar, y un bloqueo que le quedara de antes le dejaría fuera. Igual en la Main
+ * (`comprobar_pin` de `tpv-infra-sqlite/src/login.rs`).
+ */
+function entraSinPin(record: any): boolean {
+	return Number(record?.sin_pin) === 1;
+}
+
 loginRoutes.post("/login", cuerpo(S.loginUserSchema), async (c) => {
 	const datos = c.req.valid("json");
-	// LOGIN-01: bloqueo por intentos fallidos (anti brute-force).
-	const secs = await tenantQuery(c, (db) =>
-		q.throttleSecondsLeft(db, datos.id_usuario),
-	);
-	if (secs > 0) {
-		return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
-	}
 	const record = await tenantQuery(c, (db) =>
 		q.getLoginRecord(db, datos.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
-	const badPin = await ensurePin(c, datos.pin, String(record.password_hash));
-	if (badPin) {
-		await tenantQuery(c, (db) =>
-			q.throttleFail(db, datos.id_usuario),
+	if (!entraSinPin(record)) {
+		// LOGIN-01: bloqueo por intentos fallidos (anti brute-force).
+		const secs = await tenantQuery(c, (db) =>
+			q.throttleSecondsLeft(db, datos.id_usuario),
 		);
-		return badPin;
+		if (secs > 0) {
+			return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
+		}
+		const badPin = await ensurePin(c, datos.pin, String(record.password_hash));
+		if (badPin) {
+			await tenantQuery(c, (db) =>
+				q.throttleFail(db, datos.id_usuario),
+			);
+			return badPin;
+		}
+		await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario));
 	}
-	await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario));
 	const ok = await tenantQuery(c, (db) =>
 		q.loginOk(db, datos.id_usuario),
 	);
@@ -269,25 +280,27 @@ loginRoutes.post("/correo-recuperacion/usar-el-de-la-compra", soloLaMainRecupera
 
 loginRoutes.post("/punch", cuerpo(S.punchSchema), async (c) => {
 	const datos = c.req.valid("json");
-	// LOGIN-01: el fichaje también verifica PIN → mismo throttle anti brute-force.
-	const secs = await tenantQuery(c, (db) =>
-		q.throttleSecondsLeft(db, datos.id_usuario),
-	);
-	if (secs > 0) {
-		return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
-	}
 	const record = await tenantQuery(c, (db) =>
 		q.getLoginRecord(db, datos.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
-	const badPin = await ensurePin(c, datos.pin, String(record.password_hash));
-	if (badPin) {
-		await tenantQuery(c, (db) =>
-			q.throttleFail(db, datos.id_usuario),
+	if (!entraSinPin(record)) {
+		// LOGIN-01: el fichaje también verifica PIN → mismo throttle anti brute-force.
+		const secs = await tenantQuery(c, (db) =>
+			q.throttleSecondsLeft(db, datos.id_usuario),
 		);
-		return badPin;
+		if (secs > 0) {
+			return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
+		}
+		const badPin = await ensurePin(c, datos.pin, String(record.password_hash));
+		if (badPin) {
+			await tenantQuery(c, (db) =>
+				q.throttleFail(db, datos.id_usuario),
+			);
+			return badPin;
+		}
+		await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario));
 	}
-	await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario));
 
 	// La fecha del fichaje. Sale de una consulta (`date('now','localtime')`) que `tenantQuery`
 	// resuelve con la hora local de quien ficha (REV-03), que es la MISMA con la que el Durable

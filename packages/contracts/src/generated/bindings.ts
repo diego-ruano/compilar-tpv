@@ -3274,6 +3274,9 @@ export type TrabajadorCardStats_Serialize = {
  *
  *  RI-63: llega el PIN, no su hash. Lo hashea quien lo guarda (la Main o el worker), que así puede
  *  exigir la política del PIN y no guarda un hash con las iteraciones que alguien quiera.
+ *
+ *  `sin_pin`: el login y el fichaje no se lo piden. El PIN llega igual —la pantalla pone uno al azar
+ *  si no se escribe ninguno—, para que quitarle la opción después no deje la cuenta sin PIN.
  */
 export type TrabajadorCreateInput = {
 	id_rol: string,
@@ -3289,6 +3292,7 @@ export type TrabajadorCreateInput = {
 	numero_seguridad_social?: string | null,
 	fecha_inicio_contrato?: string | null,
 	fecha_fin_contrato?: string | null,
+	sin_pin?: boolean,
 };
 
 export type TrabajadorDetailArgs = {
@@ -3310,6 +3314,7 @@ export type TrabajadorDetailRow = {
 	Numero_Seguridad_Social: string | null,
 	Fecha_Inicio_Contrato: string | null,
 	Fecha_Fin_Contrato: string | null,
+	Sin_PIN?: boolean,
 };
 
 export type TrabajadorIdByUsuarioArgs = {
@@ -3340,6 +3345,7 @@ export type TrabajadorUI = {
 /**
  *  Edición de trabajador (actualiza Usuario + Trabajador). `pin` opcional: si viene, cambia el
  *  PIN; si no, se mantiene el actual. Como en el alta, llega el PIN y no su hash (RI-63).
+ *  `sin_pin` igual: ausente, se queda el que tenga (una pantalla que no lo conoce no lo pisa).
  *  Local-First.
  */
 export type TrabajadorUpdateInput = {
@@ -3358,6 +3364,7 @@ export type TrabajadorUpdateInput = {
 	fecha_inicio_contrato?: string | null,
 	fecha_fin_contrato?: string | null,
 	pin?: string | null,
+	sin_pin?: boolean | null,
 };
 
 export type TrabajadoresStatsArgs = {
@@ -3526,6 +3533,11 @@ export type UserListItem = {
 	nombre: string,
 	apellido: string | null,
 	nombre_rol: string,
+	/**
+	 *  Entra sin PIN: la pantalla no se lo pide y el backend no lo comprueba (`Usuarios.Sin_PIN`).
+	 *  `default` para que una Handy nueva siga listando contra un worker que aún no lo devuelve.
+	 */
+	sin_pin?: boolean,
 };
 
 export type VerTicketsDetalleRow = {

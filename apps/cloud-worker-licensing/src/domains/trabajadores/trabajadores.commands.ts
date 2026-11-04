@@ -50,9 +50,10 @@ export function createTrabajador(input: TrabajadorCreateInput, passwordHash: str
 					Password_Hash,
 					Nombre,
 					Apellido,
-					Estado
+					Estado,
+					Sin_PIN
 				)
-				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
+				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
 			`,
 			args: [
 				REF_ID_USUARIO,
@@ -62,6 +63,7 @@ export function createTrabajador(input: TrabajadorCreateInput, passwordHash: str
 				input.nombre,
 				input.apellido,
 				input.estado,
+				input.sin_pin ? 1 : 0,
 			],
 		},
 		{
@@ -118,6 +120,8 @@ export function updateTrabajador(
 	input: TrabajadorUpdateInput,
 	passwordHash: string | null,
 ): BuiltCommand {
+	// `Sin_PIN` sólo cambia si llega; sin valor se queda el que tenga. Mismo SQL en la Main.
+	const valorSinPin = input.sin_pin == null ? null : input.sin_pin ? 1 : 0;
 	const updateUsuario = passwordHash
 		? {
 				kind: "execute",
@@ -130,8 +134,9 @@ export function updateTrabajador(
 						Nombre = ?3,
 						Apellido = ?4,
 						Estado = ?5,
-						Password_Hash = ?6
-					WHERE ID_Usuario = ?7;
+						Sin_PIN = COALESCE(?6, Sin_PIN),
+						Password_Hash = ?7
+					WHERE ID_Usuario = ?8;
 				`,
 				args: [
 					input.id_rol,
@@ -139,6 +144,7 @@ export function updateTrabajador(
 					input.nombre,
 					input.apellido,
 					input.estado,
+					valorSinPin,
 					passwordHash,
 					input.id_usuario,
 				],
@@ -153,8 +159,9 @@ export function updateTrabajador(
 						Email = ?2,
 						Nombre = ?3,
 						Apellido = ?4,
-						Estado = ?5
-					WHERE ID_Usuario = ?6;
+						Estado = ?5,
+						Sin_PIN = COALESCE(?6, Sin_PIN)
+					WHERE ID_Usuario = ?7;
 				`,
 				args: [
 					input.id_rol,
@@ -162,6 +169,7 @@ export function updateTrabajador(
 					input.nombre,
 					input.apellido,
 					input.estado,
+					valorSinPin,
 					input.id_usuario,
 				],
 			};

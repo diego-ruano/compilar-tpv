@@ -82,6 +82,9 @@ export default function Login() {
         () => users.find((u) => u.id_usuario === selectedUserId) ?? null,
         [users, selectedUserId],
     );
+    // `Usuarios.Sin_PIN`: entra y ficha sin escribir nada. Lo decide el backend, que no le comprueba
+    // el PIN; aquí sólo se deja de pedir.
+    const sinPin = Boolean(selectedUser?.sin_pin);
 
     const [pin, setPin] = useState("");
     const pinRef = useRef(pin);
@@ -93,7 +96,7 @@ export default function Login() {
     // se lo cambia un administrador desde Trabajadores, y la Handy no guarda PINs.
     const [recuperandoPin, setRecuperandoPin] = useState(false);
     const puedeRecuperarPin =
-        deviceMode !== "handy" && selectedUser?.nombre_rol === ROL_ADMIN;
+        deviceMode !== "handy" && selectedUser?.nombre_rol === ROL_ADMIN && !sinPin;
 
     // Solo visual: consejo rotativo del panel del PIN.
     const [tipIndex, setTipIndex] = useState(0);
@@ -113,6 +116,8 @@ export default function Login() {
     const [loadingPunch, setLoadingPunch] = useState(false);
 
     const canType = Boolean(selectedUser) && !isSubmitting;
+    // El teclado numérico; «Entrar» va aparte (`canEnter`).
+    const puedeTeclear = canType && !sinPin;
     const pinMasked = useMemo(() => "•".repeat(pin.length), [pin.length]);
 
     const p1 = useMemo(
@@ -153,7 +158,7 @@ export default function Login() {
             ? ("action" as const)
             : ("default" as const);
 
-    const pinOk = pin.length >= 4 && canType;
+    const pinOk = (sinPin || pin.length >= 4) && canType;
 
     const ficharDisabled =
         !selectedUser || isSubmitting || loadingPunch || !pinOk || fichajeCompleto;
@@ -234,7 +239,7 @@ export default function Login() {
 
     const handleDigit = (d: string) => {
         if (!requireUserOrWarn()) return;
-        if (isSubmitting) return;
+        if (isSubmitting || sinPin) return;
 
         setPin((prev) => {
             const next = prev.length >= 6 ? prev : prev + d;
@@ -245,7 +250,7 @@ export default function Login() {
 
     const handleBackspace = () => {
         if (!requireUserOrWarn()) return;
-        if (isSubmitting) return;
+        if (isSubmitting || sinPin) return;
 
         setPin((prev) => {
             const next = prev.slice(0, -1);
@@ -288,8 +293,8 @@ export default function Login() {
         if (accionEnCursoRef.current || loadingPunch) return;
         if (!requireUserOrWarn()) return;
 
-        const currentPin = pinRef.current.trim();
-        if (currentPin.length < 4) {
+        const currentPin = sinPin ? "" : pinRef.current.trim();
+        if (!sinPin && currentPin.length < 4) {
             toast.info("PIN incompleto", "Introduce al menos 4 dígitos para fichar.");
             return;
         }
@@ -342,8 +347,8 @@ export default function Login() {
         if (accionEnCursoRef.current || loadingPunch) return;
         if (!requireUserOrWarn()) return;
 
-        const currentPin = pinRef.current.trim();
-        if (currentPin.length < 4) {
+        const currentPin = sinPin ? "" : pinRef.current.trim();
+        if (!sinPin && currentPin.length < 4) {
             toast.info("PIN incompleto", "Introduce al menos 4 dígitos.");
             return;
         }
@@ -424,6 +429,7 @@ export default function Login() {
 
             if (/^\d$/.test(e.key)) {
                 e.preventDefault();
+                if (sinPin) return;
                 setPin((prev) => {
                     const next = prev.length >= 6 ? prev : prev + e.key;
                     pinRef.current = next;
@@ -853,9 +859,13 @@ export default function Login() {
                                         {selectedUser
                                             ? isSubmitting
                                                 ? "Procesando..."
-                                                : !hasEntrada1
-                                                    ? `Introduce PIN y ficha entrada (${selectedUser.nombre}).`
-                                                    : "Introduce tu PIN para habilitar el teclado."
+                                                : sinPin
+                                                    ? !hasEntrada1
+                                                        ? `Entra sin PIN: ficha entrada (${selectedUser.nombre}).`
+                                                        : "Entra sin PIN: pulsa Entrar."
+                                                    : !hasEntrada1
+                                                        ? `Introduce PIN y ficha entrada (${selectedUser.nombre}).`
+                                                        : "Introduce tu PIN para habilitar el teclado."
                                             : "Selecciona un usuario para habilitar el teclado."}
                                     </p>
                                 </div>
@@ -876,7 +886,11 @@ export default function Login() {
                         {/* Display del PIN (puntos indicadores + mostrar/ocultar) */}
                         <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface-2 px-3 py-3 sm:mt-5 sm:px-4 sm:py-4">
                             <div className="flex min-h-9 flex-1 items-center gap-2.5">
-                                {Array.from({ length: Math.max(4, pin.length) }).map((_, i) => {
+                                {sinPin ? (
+                                    <p className="text-sm font-medium text-fg-muted">
+                                        {selectedUser?.nombre} entra sin PIN.
+                                    </p>
+                                ) : Array.from({ length: Math.max(4, pin.length) }).map((_, i) => {
                                     const filled = i < pin.length;
 
                                     if (showPin && filled) {
@@ -919,7 +933,7 @@ export default function Login() {
                                     variant="secondary"
                                     size="sm"
                                     onClick={handleClear}
-                                    disabled={!canType}
+                                    disabled={!puedeTeclear}
                                     title="Limpiar"
                                 >
                                     Limpiar
@@ -934,11 +948,11 @@ export default function Login() {
                                     key={d}
                                     type="button"
                                     onClick={() => handleDigit(d)}
-                                    disabled={!canType}
+                                    disabled={!puedeTeclear}
                                     className={cn(
                                         "h-11 w-full rounded-xl border sm:h-[clamp(2.75rem,7dvh,4rem)] sm:rounded-2xl",
                                         "text-lg font-semibold sm:text-2xl transition active:scale-[0.97]",
-                                        !canType
+                                        !puedeTeclear
                                             ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
                                             : "cursor-pointer border-border bg-surface text-fg shadow-sm hover:border-border-strong hover:bg-surface-2",
                                     )}
@@ -950,11 +964,11 @@ export default function Login() {
                             <button
                                 type="button"
                                 onClick={() => handleDigit("0")}
-                                disabled={!canType}
+                                disabled={!puedeTeclear}
                                 className={cn(
                                     "h-11 w-full rounded-xl border sm:h-[clamp(2.75rem,7dvh,4rem)] sm:rounded-2xl",
                                     "text-lg font-semibold sm:text-2xl transition active:scale-[0.97]",
-                                    !canType
+                                    !puedeTeclear
                                         ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
                                         : "cursor-pointer border-border bg-surface text-fg shadow-sm hover:border-border-strong hover:bg-surface-2",
                                 )}
@@ -965,13 +979,13 @@ export default function Login() {
                             <button
                                 type="button"
                                 onClick={handleBackspace}
-                                disabled={!canType}
+                                disabled={!puedeTeclear}
                                 aria-label="Borrar último"
                                 title="Borrar último"
                                 className={cn(
                                     "inline-flex h-11 w-full items-center justify-center rounded-xl border sm:h-[clamp(2.75rem,7dvh,4rem)] sm:rounded-2xl",
                                     "transition active:scale-[0.97]",
-                                    !canType
+                                    !puedeTeclear
                                         ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
                                         : "cursor-pointer border-border bg-surface text-fg-muted shadow-sm hover:border-border-strong hover:bg-surface-2 hover:text-fg",
                                 )}

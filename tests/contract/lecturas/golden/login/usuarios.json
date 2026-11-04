@@ -3,6 +3,14 @@
     "apellido": "Gomez",
     "id_usuario": "user-1",
     "nombre": "Ana",
-    "nombre_rol": "RolLecturaContrato"
+    "nombre_rol": "RolLecturaContrato",
+    "sin_pin": false
+  },
+  {
+    "apellido": null,
+    "id_usuario": "user-3",
+    "nombre": "Carla",
+    "nombre_rol": "RolLecturaContrato2",
+    "sin_pin": true
   }
 ]

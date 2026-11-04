@@ -5,10 +5,22 @@ import { UserPlus, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-re
 import type { RolRow as Rol, TrabajadorDetailRow as TrabajadorDetail } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { ROL_ADMIN } from "../../../shared/lib/permisos";
+import CasillaSinPin from "./CasillaSinPin";
 
 function normalizeNullable(v: string) {
   const s = String(v ?? "").trim();
   return s ? s : null;
+}
+
+/**
+ * Un PIN de 6 cifras que no sabe nadie, para quien entra sin PIN y no ha escrito uno. La cuenta
+ * guarda siempre un PIN: si algún día se le quita «Entra sin PIN», la edición pide uno nuevo.
+ */
+function pinAlAzar(): string {
+  const n = new Uint32Array(1);
+  crypto.getRandomValues(n);
+  return String(n[0] % 1_000_000).padStart(6, "0");
 }
 
 const getRolesLocal = commands.trabajadoresGetRoles;
@@ -66,6 +78,7 @@ async function createTrabajadorRemote(payload: {
   puesto?: string | null;
   fechaInicioContrato?: string | null;
   fechaFinContrato?: string | null;
+  sinPin: boolean;
 }): Promise<boolean> {
   const body = {
     idRol: payload.idRol,
@@ -100,6 +113,7 @@ async function createTrabajadorRemote(payload: {
       puesto: body.puesto,
       fecha_inicio_contrato: body.fecha_inicio_contrato,
       fecha_fin_contrato: body.fecha_fin_contrato,
+      sin_pin: payload.sinPin,
     });
 
   if (typeof ok !== "boolean") {
@@ -120,6 +134,7 @@ function AddTrabajador() {
   const [nombre, setNombre] = useState("");
   const [apellido, setApellido] = useState("");
   const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
+  const [sinPin, setSinPin] = useState(false);
 
   const [telefono, setTelefono] = useState("");
   const [puesto, setPuesto] = useState("");
@@ -163,9 +178,11 @@ function AddTrabajador() {
 
     if (!idRol) return setError("Selecciona un rol");
     if (!email.trim()) return setError("El email es obligatorio");
-    if (!password.trim()) return setError("El PIN es obligatorio");
+    // Quien entra sin PIN puede dejarlo vacío: se le pone uno al azar.
+    const pin = password.trim() || (sinPin ? pinAlAzar() : "");
+    if (!pin) return setError("El PIN es obligatorio");
     // RI-63: el teclado del login sólo admite de 4 a 6 cifras (el backend lo exige igual).
-    if (!/^\d{4,6}$/.test(password.trim())) {
+    if (!/^\d{4,6}$/.test(pin)) {
       return setError("El PIN tiene que tener entre 4 y 6 cifras");
     }
     if (!nombre.trim()) return setError("El nombre es obligatorio");
@@ -176,7 +193,7 @@ function AddTrabajador() {
       const ok = await createTrabajadorRemote({
         idRol: idRol,
         email: email.trim(),
-        pin: password.trim(),
+        pin,
         nombre: nombre.trim(),
         apellido: normalizeNullable(apellido),
         estado,
@@ -184,6 +201,7 @@ function AddTrabajador() {
         puesto: normalizeNullable(puesto),
         fechaInicioContrato: normalizeNullable(fechaInicioContrato),
         fechaFinContrato: indefinido ? null : normalizeNullable(fechaFinContrato),
+        sinPin,
       });
 
       if (!ok) {
@@ -291,8 +309,16 @@ function AddTrabajador() {
               <p className="text-xs text-fg-subtle">Debe ser único.</p>
             </div>
 
+            <CasillaSinPin
+              checked={sinPin}
+              onChange={setSinPin}
+              esAdministrador={rolActual?.Nombre_Rol === ROL_ADMIN}
+            />
+
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">PIN (solo números) *</label>
+              <label className="text-sm font-medium">
+                {sinPin ? "PIN (opcional)" : "PIN (solo números) *"}
+              </label>
               <input
                 value={password}
                 onChange={(e) => setPassword(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -303,7 +329,11 @@ function AddTrabajador() {
                 placeholder="1234"
                 autoComplete="off"
               />
-              <p className="text-xs text-fg-subtle">De 4 a 6 cifras: es lo que admite el teclado del fichaje.</p>
+              <p className="text-xs text-fg-subtle">
+                {sinPin
+                  ? "No se le pedirá. Sirve si algún día le quitas «Entra sin PIN»; si lo dejas vacío, se le pone uno al azar."
+                  : "De 4 a 6 cifras: es lo que admite el teclado del fichaje."}
+              </p>
             </div>
           </div>
           </div>
