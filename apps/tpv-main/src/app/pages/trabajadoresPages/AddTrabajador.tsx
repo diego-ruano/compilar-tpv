@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { UserPlus, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
 import type { RolRow as Rol, TrabajadorDetailRow as TrabajadorDetail } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
-import { useMode } from "../../../shared/stores/useMode";
 import { conAviso } from "../../../shared/lib/conAviso";
 
 function normalizeNullable(v: string) {
@@ -21,22 +20,9 @@ function getErrorMessage(e: unknown) {
     return "Ese email ya existe";
   }
 
-  if (msg.includes("trabajadores.dni") || msg.includes(" dni") || msg.endsWith("dni")) {
-    return "Ese DNI ya existe";
-  }
-
-  if (
-    msg.includes("numero_seguridad_social") ||
-    msg.includes("seguridad social") ||
-    msg.includes("seguridad") ||
-    msg.includes("nss")
-  ) {
-    return "Ese Nº de Seguridad Social ya existe";
-  }
-
   // Lo que el backend rechaza a propósito (una validación, un conflicto) llega con su frase y se
   // enseña tal cual, por código; antes caía en el «Error al guardar el trabajador» de abajo. Lo de
-  // arriba son los choques del UNIQUE, que llegan con el texto de SQLite.
+  // arriba es el choque del UNIQUE, que llega con el texto de SQLite.
   const { code, message } = toAppError(e);
   if (code === "validation" || code === "conflict" || code === "not_found") {
     return message;
@@ -76,11 +62,7 @@ async function createTrabajadorRemote(payload: {
   nombre: string;
   apellido?: string | null;
   estado: "Activo" | "Inactivo";
-  dni?: string | null;
   telefono?: string | null;
-  puesto?: string | null;
-  iban?: string | null;
-  numeroSeguridadSocial?: string | null;
   fechaInicioContrato?: string | null;
   fechaFinContrato?: string | null;
 }): Promise<boolean> {
@@ -95,13 +77,7 @@ async function createTrabajadorRemote(payload: {
     apellido: payload.apellido ?? null,
     estado: payload.estado,
 
-    dni: payload.dni ?? null,
     telefono: payload.telefono ?? null,
-    puesto: payload.puesto ?? null,
-    iban: payload.iban ?? null,
-
-    numeroSeguridadSocial: payload.numeroSeguridadSocial ?? null,
-    numero_seguridad_social: payload.numeroSeguridadSocial ?? null,
 
     fechaInicioContrato: payload.fechaInicioContrato ?? null,
     fecha_inicio_contrato: payload.fechaInicioContrato ?? null,
@@ -118,11 +94,7 @@ async function createTrabajadorRemote(payload: {
       nombre: body.nombre,
       apellido: body.apellido,
       estado: body.estado,
-      dni: body.dni,
       telefono: body.telefono,
-      puesto: body.puesto,
-      iban: body.iban,
-      numero_seguridad_social: body.numero_seguridad_social,
       fecha_inicio_contrato: body.fecha_inicio_contrato,
       fecha_fin_contrato: body.fecha_fin_contrato,
     });
@@ -146,18 +118,7 @@ function AddTrabajador() {
   const [apellido, setApellido] = useState("");
   const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
 
-  // TRAB-03: DNI, IBAN y nº de la Seguridad Social se guardan cifrados con una clave que
-  // sólo tiene la Main. Desde una Handy no se pueden ni leer ni escribir, así que se ocultan
-  // en vez de enseñar campos que no se guardarían.
-  const esMain = useMode((st) => st.mode) === "tpv";
-  const cnPii = esMain ? "flex flex-col gap-1" : "hidden";
-
-  const [dni, setDni] = useState("");
   const [telefono, setTelefono] = useState("");
-  const [puesto, setPuesto] = useState("");
-
-  const [iban, setIban] = useState("");
-  const [numeroSS, setNumeroSS] = useState("");
 
   const [fechaInicioContrato, setFechaInicioContrato] = useState("");
   const [fechaFinContrato, setFechaFinContrato] = useState("");
@@ -215,11 +176,7 @@ function AddTrabajador() {
         nombre: nombre.trim(),
         apellido: normalizeNullable(apellido),
         estado,
-        dni: normalizeNullable(dni),
         telefono: normalizeNullable(telefono),
-        puesto: normalizeNullable(puesto),
-        iban: normalizeNullable(iban),
-        numeroSeguridadSocial: normalizeNullable(numeroSS),
         fechaInicioContrato: normalizeNullable(fechaInicioContrato),
         fechaFinContrato: indefinido ? null : normalizeNullable(fechaFinContrato),
       });
@@ -373,16 +330,6 @@ function AddTrabajador() {
               />
             </div>
 
-            <div className={cnPii}>
-              <label className="text-sm font-medium">DNI</label>
-              <input
-                value={dni}
-                onChange={(e) => setDni(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                placeholder="12345678X"
-              />
-            </div>
-
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Teléfono</label>
               <input
@@ -390,38 +337,6 @@ function AddTrabajador() {
                 onChange={(e) => setTelefono(e.target.value)}
                 className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="600 000 000"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Puesto (opcional)</label>
-              <input
-                value={puesto}
-                onChange={(e) => setPuesto(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                placeholder="Camarero / Limpieza / Cocina..."
-              />
-            </div>
-
-            <div className={cnPii}>
-              <label className="text-sm font-medium">IBAN</label>
-              <input
-                value={iban}
-                onChange={(e) => setIban(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                placeholder="ES00 0000 0000 0000 0000 0000"
-                autoComplete="off"
-              />
-            </div>
-
-            <div className={cnPii}>
-              <label className="text-sm font-medium">Nº Seguridad Social</label>
-              <input
-                value={numeroSS}
-                onChange={(e) => setNumeroSS(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                placeholder="00/0000000000"
-                autoComplete="off"
               />
             </div>
           </div>

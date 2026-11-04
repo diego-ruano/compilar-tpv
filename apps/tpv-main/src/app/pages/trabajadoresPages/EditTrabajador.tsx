@@ -5,7 +5,6 @@ import { UserCog, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-rea
 import type { RolRow as Rol, TrabajadorDetailRow as TrabajadorDetail } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 import { esPermisoDenegado } from "../../../shared/lib/permisos";
-import { useMode } from "../../../shared/stores/useMode";
 import { conAviso } from "../../../shared/lib/conAviso";
 
 function normalizeNullable(v: string) {
@@ -31,23 +30,10 @@ function getErrorMessage(e: unknown) {
     return "Ese email ya existe";
   }
 
-  if (msg.includes("trabajadores.dni") || msg.includes(" dni") || msg.endsWith("dni")) {
-    return "Ese DNI ya existe";
-  }
-
-  if (
-    msg.includes("numero_seguridad_social") ||
-    msg.includes("seguridad social") ||
-    msg.includes("seguridad") ||
-    msg.includes("nss")
-  ) {
-    return "Ese Nº de Seguridad Social ya existe";
-  }
-
   // RI-62: lo que el backend rechaza a propósito (una validación, un conflicto como quitarle el rol
   // al último administrador, una ficha que ya no existe) llega con su frase y se enseña tal cual,
-  // por código. Antes caía en el «Error al guardar los cambios» de abajo. Lo de arriba son los
-  // choques del UNIQUE, que llegan con el texto de SQLite.
+  // por código. Antes caía en el «Error al guardar los cambios» de abajo. Lo de arriba es el
+  // choque del UNIQUE, que llega con el texto de SQLite.
   const { code, message } = toAppError(e);
   if (code === "validation" || code === "conflict" || code === "not_found") {
     return message;
@@ -177,17 +163,14 @@ function EditTrabajador() {
   const [apellido, setApellido] = useState("");
   const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
 
-  // TRAB-03: cifrados con una clave que sólo tiene la Main; desde una Handy no se pueden
-  // ni leer ni escribir, así que se ocultan.
-  const esMain = useMode((st) => st.mode) === "tpv";
-  const cnPii = esMain ? "flex flex-col gap-1" : "hidden";
-
-  const [dni, setDni] = useState("");
   const [telefono, setTelefono] = useState("");
-  const [puesto, setPuesto] = useState("");
 
-  const [iban, setIban] = useState("");
-  const [numeroSS, setNumeroSS] = useState("");
+  // DNI, puesto, IBAN y nº de la Seguridad Social ya no se piden en la ficha, pero la edición
+  // reescribe la fila entera: lo que el trabajador tuviera guardado se devuelve tal cual para no
+  // borrarlo al guardar otra cosa.
+  const [conservados, setConservados] = useState<
+    Pick<TrabajadorDetail, "DNI" | "Puesto" | "IBAN" | "Numero_Seguridad_Social">
+  >({ DNI: null, Puesto: null, IBAN: null, Numero_Seguridad_Social: null });
 
   const [fechaInicioContrato, setFechaInicioContrato] = useState("");
   const [fechaFinContrato, setFechaFinContrato] = useState("");
@@ -235,12 +218,14 @@ function EditTrabajador() {
         setApellido(detail.Apellido ?? "");
         setEstado((detail.Estado as "Activo" | "Inactivo") ?? "Activo");
 
-        setDni(detail.DNI ?? "");
         setTelefono(detail.Telefono ?? "");
-        setPuesto(detail.Puesto ?? "");
 
-        setIban(detail.IBAN ?? "");
-        setNumeroSS(detail.Numero_Seguridad_Social ?? "");
+        setConservados({
+          DNI: detail.DNI,
+          Puesto: detail.Puesto,
+          IBAN: detail.IBAN,
+          Numero_Seguridad_Social: detail.Numero_Seguridad_Social,
+        });
 
         setFechaInicioContrato(detail.Fecha_Inicio_Contrato ?? "");
         setFechaFinContrato(detail.Fecha_Fin_Contrato ?? "");
@@ -284,11 +269,11 @@ function EditTrabajador() {
         nombre: nombre.trim(),
         apellido: normalizeNullable(apellido),
         estado,
-        dni: normalizeNullable(dni),
+        dni: conservados.DNI,
         telefono: normalizeNullable(telefono),
-        puesto: normalizeNullable(puesto),
-        iban: normalizeNullable(iban),
-        numeroSeguridadSocial: normalizeNullable(numeroSS),
+        puesto: conservados.Puesto,
+        iban: conservados.IBAN,
+        numeroSeguridadSocial: conservados.Numero_Seguridad_Social,
         fechaInicioContrato: normalizeNullable(fechaInicioContrato),
         fechaFinContrato: indefinido ? null : normalizeNullable(fechaFinContrato),
         pin: pinNuevo.trim() || null,
@@ -448,52 +433,12 @@ function EditTrabajador() {
               />
             </div>
 
-            <div className={cnPii}>
-              <label className="text-sm font-medium">DNI</label>
-              <input
-                value={dni}
-                onChange={(e) => setDni(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-              />
-            </div>
-
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Teléfono</label>
               <input
                 value={telefono}
                 onChange={(e) => setTelefono(e.target.value)}
                 className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Puesto</label>
-              <input
-                value={puesto}
-                onChange={(e) => setPuesto(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-              />
-            </div>
-
-            <div className={cnPii}>
-              <label className="text-sm font-medium">IBAN</label>
-              <input
-                value={iban}
-                onChange={(e) => setIban(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                placeholder="ES00 0000 0000 0000 0000 0000"
-                autoComplete="off"
-              />
-            </div>
-
-            <div className={cnPii}>
-              <label className="text-sm font-medium">Nº Seguridad Social</label>
-              <input
-                value={numeroSS}
-                onChange={(e) => setNumeroSS(e.target.value)}
-                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
-                placeholder="00/0000000000"
-                autoComplete="off"
               />
             </div>
           </div>
