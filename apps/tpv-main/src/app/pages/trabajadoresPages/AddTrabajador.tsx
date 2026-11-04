@@ -63,6 +63,7 @@ async function createTrabajadorRemote(payload: {
   apellido?: string | null;
   estado: "Activo" | "Inactivo";
   telefono?: string | null;
+  puesto?: string | null;
   fechaInicioContrato?: string | null;
   fechaFinContrato?: string | null;
 }): Promise<boolean> {
@@ -78,6 +79,7 @@ async function createTrabajadorRemote(payload: {
     estado: payload.estado,
 
     telefono: payload.telefono ?? null,
+    puesto: payload.puesto ?? null,
 
     fechaInicioContrato: payload.fechaInicioContrato ?? null,
     fecha_inicio_contrato: payload.fechaInicioContrato ?? null,
@@ -95,6 +97,7 @@ async function createTrabajadorRemote(payload: {
       apellido: body.apellido,
       estado: body.estado,
       telefono: body.telefono,
+      puesto: body.puesto,
       fecha_inicio_contrato: body.fecha_inicio_contrato,
       fecha_fin_contrato: body.fecha_fin_contrato,
     });
@@ -119,6 +122,7 @@ function AddTrabajador() {
   const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
 
   const [telefono, setTelefono] = useState("");
+  const [puesto, setPuesto] = useState("");
 
   const [fechaInicioContrato, setFechaInicioContrato] = useState("");
   const [fechaFinContrato, setFechaFinContrato] = useState("");
@@ -177,6 +181,7 @@ function AddTrabajador() {
         apellido: normalizeNullable(apellido),
         estado,
         telefono: normalizeNullable(telefono),
+        puesto: normalizeNullable(puesto),
         fechaInicioContrato: normalizeNullable(fechaInicioContrato),
         fechaFinContrato: indefinido ? null : normalizeNullable(fechaFinContrato),
       });
@@ -337,6 +342,16 @@ function AddTrabajador() {
                 onChange={(e) => setTelefono(e.target.value)}
                 className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="600 000 000"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Puesto (opcional)</label>
+              <input
+                value={puesto}
+                onChange={(e) => setPuesto(e.target.value)}
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
+                placeholder="Camarero / Limpieza / Cocina..."
               />
             </div>
           </div>

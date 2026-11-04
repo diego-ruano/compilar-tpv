@@ -164,13 +164,14 @@ function EditTrabajador() {
   const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
 
   const [telefono, setTelefono] = useState("");
+  const [puesto, setPuesto] = useState("");
 
-  // DNI, puesto, IBAN y nº de la Seguridad Social ya no se piden en la ficha, pero la edición
-  // reescribe la fila entera: lo que el trabajador tuviera guardado se devuelve tal cual para no
-  // borrarlo al guardar otra cosa.
+  // DNI, IBAN y nº de la Seguridad Social ya no se piden en la ficha, pero la edición reescribe la
+  // fila entera: lo que el trabajador tuviera guardado se devuelve tal cual para no borrarlo al
+  // guardar otra cosa.
   const [conservados, setConservados] = useState<
-    Pick<TrabajadorDetail, "DNI" | "Puesto" | "IBAN" | "Numero_Seguridad_Social">
-  >({ DNI: null, Puesto: null, IBAN: null, Numero_Seguridad_Social: null });
+    Pick<TrabajadorDetail, "DNI" | "IBAN" | "Numero_Seguridad_Social">
+  >({ DNI: null, IBAN: null, Numero_Seguridad_Social: null });
 
   const [fechaInicioContrato, setFechaInicioContrato] = useState("");
   const [fechaFinContrato, setFechaFinContrato] = useState("");
@@ -219,10 +220,10 @@ function EditTrabajador() {
         setEstado((detail.Estado as "Activo" | "Inactivo") ?? "Activo");
 
         setTelefono(detail.Telefono ?? "");
+        setPuesto(detail.Puesto ?? "");
 
         setConservados({
           DNI: detail.DNI,
-          Puesto: detail.Puesto,
           IBAN: detail.IBAN,
           Numero_Seguridad_Social: detail.Numero_Seguridad_Social,
         });
@@ -271,7 +272,7 @@ function EditTrabajador() {
         estado,
         dni: conservados.DNI,
         telefono: normalizeNullable(telefono),
-        puesto: conservados.Puesto,
+        puesto: normalizeNullable(puesto),
         iban: conservados.IBAN,
         numeroSeguridadSocial: conservados.Numero_Seguridad_Social,
         fechaInicioContrato: normalizeNullable(fechaInicioContrato),
@@ -438,6 +439,15 @@ function EditTrabajador() {
               <input
                 value={telefono}
                 onChange={(e) => setTelefono(e.target.value)}
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Puesto</label>
+              <input
+                value={puesto}
+                onChange={(e) => setPuesto(e.target.value)}
                 className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
               />
             </div>
