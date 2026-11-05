@@ -35,7 +35,7 @@ import {
     ficharYEntrar,
 } from "../helpers/arranque.js";
 import { APP_ID_E2E, cargarDotEnv, dirDatosE2E } from "../helpers/entorno.js";
-import { NEGOCIO, NIF, PIN, RAZON_SOCIAL } from "../helpers/equipo.js";
+import { MESA, NEGOCIO, NIF, PIN, PRODUCTO, RAZON_SOCIAL, ZONA } from "../helpers/equipo.js";
 import {
     avisoDeDatosFiscalesVisible,
     declararDatosFiscales,
@@ -56,7 +56,6 @@ import {
     esperarTotalPendiente,
     estadoDeMesa,
     montarLaCarta,
-    type Producto,
 } from "../helpers/vender.js";
 
 cargarDotEnv();
@@ -71,19 +70,11 @@ cargarDotEnv();
    FALTA para llegar al total, 0,91 €. Redondeando las dos por separado saldría
    0,92 y el papel diría que 9,09 + 0,92 = 10,00, que es un documento mal
    emitido.                                                                    */
-const ZONA = "Salón E2E";
-const MESA = "M1";
 const UNIDADES = 2;
 const BILLETE = "10€";
 const TOTAL = "10,00";
 const EN_EL_CAJON = "20,00";
 
-const PRODUCTO: Producto = {
-    categoria: "Bebidas E2E",
-    nombre: "Caña E2E",
-    precio: "5.00",
-    iva: "10",
-};
 
 /** El id de la mesa creada por el test (UUID de la BD). Lo rellena el paso 6b. */
 let idMesa = "";

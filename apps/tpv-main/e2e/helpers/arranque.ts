@@ -9,7 +9,7 @@
 import { $, $$, browser } from "@wdio/globals";
 
 import { licenciaDelRecorrido } from "./entorno.js";
-import { conTexto, escribir, pulsar, pulsarXPath } from "./ui.js";
+import { conTexto, escribir, gestosEn, pulsar } from "./ui.js";
 
 /**
  * Teclea el PIN en el teclado numérico del login, comprobando cada tecla.
@@ -18,13 +18,16 @@ import { conTexto, escribir, pulsar, pulsarXPath } from "./ui.js";
  * lo que falla después es otra cosa —el botón de fichar sigue apagado, o el fichaje contesta que
  * el PIN no es—, así que el informe habla de cualquier cosa menos de la tecla que se perdió. El
  * display se pone en modo visible para poder leer lo tecleado, que es la única forma de saberlo.
+ *
+ * `b` es la pantalla donde se teclea: la Main por defecto, o la Handy.
  */
-export async function tecleaPin(pin: string): Promise<void> {
-    const ojo = $('//button[@aria-label="Mostrar PIN"]');
+export async function tecleaPin(pin: string, b: WebdriverIO.Browser = browser): Promise<void> {
+    const { pulsarXPath } = gestosEn(b);
+    const ojo = b.$('//button[@aria-label="Mostrar PIN"]');
     if (await ojo.isExisting()) await ojo.click();
 
     const leerPin = async () =>
-        (await $$('//span[contains(@class,"tabular-nums")]').map((s) => s.getText())).join("");
+        (await b.$$('//span[contains(@class,"tabular-nums")]').map((s) => s.getText())).join("");
 
     for (const digito of pin) {
         const antes = await leerPin();
@@ -32,7 +35,7 @@ export async function tecleaPin(pin: string): Promise<void> {
             `//button[normalize-space(text())="${digito}"]`,
             `tecla ${digito} del PIN`,
         );
-        await browser.waitUntil(async () => (await leerPin()) === antes + digito, {
+        await b.waitUntil(async () => (await leerPin()) === antes + digito, {
             timeout: 10_000,
             timeoutMsg: `La tecla ${digito} no entró: el PIN sigue en "${antes}"`,
         });
@@ -100,31 +103,56 @@ export async function elegirPin(pin: string): Promise<void> {
     await conTexto("h2", "PIN de acceso").waitForDisplayed({ timeout: 180_000 });
 }
 
+/** Quién entra, y en qué pantalla. Por defecto, el administrador de la tanda en la Main. */
+export type Acceso = {
+    /** La Main (el `browser` de WDIO) o la Handy. */
+    b?: WebdriverIO.Browser;
+    /** El nombre que sale en la rejilla de usuarios del login. */
+    usuario?: string;
+    /** El PIN, o `null` para quien entra sin PIN (`Usuarios.Sin_PIN`). */
+    pin: string | null;
+};
+
 /**
  * Ficha entrada e inicia sesión. Fichar es obligatorio para poder entrar, y consume el PIN, que
- * hay que volver a teclear.
+ * hay que volver a teclear. Quien entra sin PIN pulsa los mismos botones sin teclear nada.
+ *
+ * Termina cuando el login se ha ido: la Main y la Handy no aterrizan en el mismo sitio (en un
+ * teléfono el menú lateral está plegado), así que se espera a que desaparezca el panel del PIN.
  */
-export async function ficharYEntrar(pin: string): Promise<void> {
-    await conTexto("h2", "PIN de acceso").waitForDisplayed({ timeout: 60_000 });
-    await pulsar("Admin TPV");
+export async function entrar({ b = browser, usuario = "Admin TPV", pin }: Acceso): Promise<void> {
+    const { conTexto: texto, pulsar: tocar } = gestosEn(b);
+    await texto("h2", "PIN de acceso").waitForDisplayed({ timeout: 60_000 });
+    await tocar(usuario);
 
     // Si el equipo ya tenía la entrada fichada de antes (un recorrido que continúa a otro), no hay
-    // nada que fichar: se entra directamente.
-    const yaFichado = await conTexto("button", "Fichar salida").isExisting();
+    // nada que fichar: se entra directamente. Pero hay que esperar a que el fichaje cargue: mientras
+    // tanto el botón dice «Cargando...», y en la Handy, que lo pregunta a la nube, eso tarda lo
+    // bastante como para decidir mal y ponerse a fichar una entrada que ya está hecha.
+    const fichajeDelDia = await b.waitUntil(
+        async () => {
+            if (await texto("button", "Fichar salida").isExisting()) return "hecho";
+            if (await texto("button", "Fichaje completado").isExisting()) return "hecho";
+            if (await texto("button", "Fichar entrada").isExisting()) return "pendiente";
+            return false;
+        },
+        { timeout: 30_000, timeoutMsg: `El fichaje de ${usuario} no llegó a cargarse` },
+    );
+    const yaFichado = fichajeDelDia === "hecho";
 
     if (!yaFichado) {
-        await tecleaPin(pin);
-        await pulsar("Fichar entrada");
+        if (pin !== null) await tecleaPin(pin, b);
+        await tocar("Fichar entrada");
 
         // Hay que esperar a que el fichaje responda: al terminar borra el PIN, y teclear antes deja
         // los dígitos escritos a medias sin que nada lo diga. Que la entrada quedó registrada se ve
         // en que el botón pasa a ofrecer la salida. Si en vez de eso sale un aviso, se recoge: el
         // aviso desaparece solo a los pocos segundos, y sin él el fallo sólo dice "no apareció un
         // botón", que es la consecuencia y no el motivo.
-        const fichaje = await browser.waitUntil(
+        const fichaje = await b.waitUntil(
             async () => {
-                if (await conTexto("button", "Fichar salida").isExisting()) return "ok";
-                const avisos = await $$('//div[@role="status"]').map((t) => t.getText());
+                if (await texto("button", "Fichar salida").isExisting()) return "ok";
+                const avisos = await b.$$('//div[@role="status"]').map((t) => t.getText());
                 const malo = avisos.find((t) => /error|no se pudo|pin/i.test(t));
                 return malo ?? false;
             },
@@ -133,9 +161,18 @@ export async function ficharYEntrar(pin: string): Promise<void> {
         if (fichaje !== "ok") throw new Error(`El fichaje de entrada falló: ${fichaje}`);
     }
 
-    await tecleaPin(pin);
-    await pulsar("Entrar");
+    if (pin !== null) await tecleaPin(pin, b);
+    await tocar("Entrar");
 
+    await b.waitUntil(async () => !(await texto("h2", "PIN de acceso").isExisting()), {
+        timeout: 60_000,
+        timeoutMsg: `${usuario} no pasó del login`,
+    });
+}
+
+/** El administrador de la tanda entra en la Main. Lo usan todos los recorridos de un equipo. */
+export async function ficharYEntrar(pin: string): Promise<void> {
+    await entrar({ pin });
     // Dentro: el menú lateral sólo existe con sesión.
     await $('a[href="/Inventario"]').waitForDisplayed({ timeout: 60_000 });
 }

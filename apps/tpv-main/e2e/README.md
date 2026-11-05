@@ -1,14 +1,16 @@
 # E2E sobre la aplicación compilada
 
-Cinco recorridos sobre la aplicación **compilada**, encadenados sobre un mismo equipo. Prueban la costura
+Seis recorridos sobre la aplicación **compilada**, encadenados sobre un mismo equipo: la Main en Windows
+y, en uno de ellos, una Handy de Android a la vez. Prueban la costura
 que no prueba nada más: React → IPC de Tauri → comandos Rust → SQLite → y vuelta. No cubren el frontend
 (la cobertura de componentes está descartada a propósito, ver `vitest.config.ts`). Van sobre
-WebdriverIO + `@wdio/tauri-service` y tardan algo más de un minuto.
+WebdriverIO + `@wdio/tauri-service` (la Handy, por Appium) y tardan menos de dos minutos.
 
 ```bash
-cargo install tauri-driver --locked          # una vez por máquina
+cargo install tauri-driver --locked          # una vez por máquina (y Appium: abajo)
 pnpm --filter @tpv/main build:e2e            # compila el binario aislado y lo verifica
-pnpm --filter @tpv/main test:e2e             # la tanda
+pnpm --filter @tpv/main build:e2e:android    # compila el APK de la Handy
+pnpm --filter @tpv/main test:e2e             # la tanda (con el emulador arrancado)
 ```
 
 Hace falta `ADMIN_API_TOKEN` en el `.env` de la raíz: la tanda emite su propia licencia y la revoca al
@@ -21,6 +23,7 @@ corre antes de cada versión ([publicar-version.md](../../../docs/guias/publicar
 | Recorrido | Fichero | Qué hace |
 |---|---|---|
 | El camino del dinero | `specs/venta.e2e.ts` | Equipo nuevo → modo TPV → **activar una licencia real** → PIN → fichar y entrar → declarar los datos fiscales (la pantalla avisa de que faltan) → categoría y producto con precio, IVA y lote → zona y mesa → dos líneas → **cobro en efectivo exacto** → el registro de facturación existe, es `F2` y su número es el del ticket → el ticket lleva su QR y una reimpresión saca el mismo → una segunda venta avanza la cadena sin anomalías → las dos quedan en cola diciendo por qué no salen → **cierre de caja con descuadre 0** |
+| La Main y la Handy | `specs/handy.e2e.ts` | La Main enseña el código → una Handy de Android recién instalada se configura como Handy y lo escribe → la Main acepta la solicitud → el administrador entra en la Handy → la Handy apunta una caña en la mesa → a la Main le llega por la nube y la cobra → la Handy ve la mesa libre → la Main da de alta una camarera **sin PIN** y entra en la Handy sin teclear nada |
 | Copias, 1 | `specs/copias-1-copia.e2e.ts` | Crea algo más, espera a que la nube lo tenga todo y guarda una copia |
 | Copias, 2 | `specs/copias-2-recuperar.e2e.ts` | Con la base rota: la app arranca igual y ofrece recuperar; rechaza una copia inservible diciendo por qué; restaura la buena, reconcilia y abre el login |
 | Copias, 3 | `specs/copias-3-nube.e2e.ts` | Con la base rota otra vez: **«Recuperar el estado actual de la nube»**, sin copia local (el volcado de la recuperación) |
@@ -32,13 +35,49 @@ que la pantalla se bloquee sola, y con poca espera, porque anular empuja (cierra
 `licencia` tarda 2 minutos en su primera vuelta. La caducidad no empuja, y por eso sí usa
 `license_check_now`.
 
+## La Handy de Android
+
+La Main la mueve WDIO por `tauri-driver`; la Handy, una segunda sesión de **Appium** que abre el propio
+recorrido (`helpers/handy.ts`), dentro de la WebView de la app: los mismos botones y los mismos gestos
+(`gestosEn(navegador)`). No van juntas en un *multiremote*: `@wdio/tauri-service` está hecho para una sola
+app de escritorio.
+
+Una vez por máquina, además de `tauri-driver`:
+
+- El SDK de Android con un emulador (`Pixel_7`), el NDK y el JDK de Android Studio, como en
+  [compilar-android.md](../../../docs/guias/compilar-android.md).
+- **Appium, fuera del repo**, en `%LOCALAPPDATA%\tpv-e2e\appium` (o donde diga `TPV_E2E_APPIUM_HOME`):
+  trae unos 190 paquetes que sólo hacen falta aquí, y en una ruta larga Windows no llega a extraer sus
+  APK.
+
+  ```bat
+  mkdir "%LOCALAPPDATA%\tpv-e2e\appium" && cd "%LOCALAPPDATA%\tpv-e2e\appium"
+  echo {"private":true} > package.json
+  pnpm add appium@3.9.0 appium-uiautomator2-driver@8.7.3
+  ```
+
+Antes de cada tanda, el emulador arrancado:
+`"%LOCALAPPDATA%\Android\Sdk\emulator\emulator.exe" -avd Pixel_7 -no-snapshot-save`. La tanda instala el
+APK, arranca Appium (su salida, en `target/e2e/appium.log`) y lo para al terminar.
+
+- **Es el APK de depuración**, el único que deja entrar a Appium en la WebView, y **sin la información de
+  depuración de Rust**: con ella pesa más de 500 MB y no cabe en el emulador. Para un teléfono de verdad,
+  `TPV_E2E_ANDROID_TARGET=aarch64`.
+- **El APK lleva la misma huella que el binario** y la tanda se niega si no es la del código. Lo que hay
+  bajo `src-tauri/gen/android` no entra en ella: tras tocarlo, `build:e2e:android` a mano.
+- **Cada sesión estrena Handy**: Appium le borra los datos a la app (`noReset: false`), y con ellos su
+  identidad y su emparejamiento. Por eso, con dos Android conectados, la tanda no elige: hay que decirle
+  cuál con `TPV_E2E_HANDY_SERIAL`.
+- **`TPV_E2E_SIN_HANDY=1`** corre sólo los recorridos de la Main.
+
 ## Piezas
 
 | Pieza | Archivo |
 |---|---|
 | El equipo de la tanda (negocio, PIN, obligado) | `helpers/equipo.ts` |
-| Arranque compartido (modo, activación, PIN, login) | `helpers/arranque.ts` |
-| Vender por mesa | `helpers/vender.ts` |
+| Arranque compartido (modo, activación, PIN, login, también sin PIN y en la Handy) | `helpers/arranque.ts` |
+| Vender por mesa (en la Main o en la Handy) | `helpers/vender.ts` |
+| La Handy: emulador, APK, Appium y su sesión | `helpers/handy.ts` |
 | Lo fiscal | `helpers/fiscal.ts` |
 | Lo común a los tramos de copias | `helpers/copias.ts` |
 | Licencias de la tanda (emitir, revocar, desrevocar, acortar) | `helpers/licencias.ts` |
@@ -48,9 +87,14 @@ que la pantalla se bloquee sola, y con poca espera, porque anular empuja (cierra
 | Huella del código que entra en el binario | `helpers/huella.ts` |
 | Configuración, recetas y captura al fallar | `wdio.conf.ts` |
 | Build aislado | `construir.ts` + `../src-tauri/tauri.e2e.conf.json` |
+| APK de la Handy | `construir-android.ts` |
 
 ## Reglas
 
+- **Los secretos del build de E2E van aparte** (`device-id`, clave, tokens): con el identificador `….e2e`,
+  la app los guarda en el almacén del sistema con otro nombre (`lib.rs::espacio_de_secretos`). Antes
+  compartía los de la app de trabajo del mismo Windows, y si ésa era la Main de una licencia viva, la de
+  la tanda se canjeaba en ella (REV-13).
 - **El aislamiento es un identificador, no una variable de entorno.** `app_data_dir()` sale de
   `SHGetKnownFolderPath`, que no mira `%APPDATA%`: lanzar el `.exe` con otro `APPDATA` usaría la carpeta
   real. El build de E2E tiene su propio `identifier` (`…tpv.e2e`).

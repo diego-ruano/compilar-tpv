@@ -13,7 +13,7 @@ import { $, browser } from "@wdio/globals";
 import { fitTransform } from "../../src/features/mesas/geometry.js";
 import { nombreDeMesa } from "@tpv/plano/nombre";
 import type { Salon } from "../../src/features/mesas/types.js";
-import { conTexto, escribir, irA, leerDeLaApp, literalXPath, pulsar, pulsarXPath } from "./ui.js";
+import { conTexto, escribir, gestosEn, irA, leerDeLaApp, literalXPath, pulsar, pulsarXPath } from "./ui.js";
 
 /** Un producto de la carta del test. */
 export type Producto = {
@@ -114,20 +114,21 @@ export async function crearZonaConMesa(zona: string, mesa: string): Promise<stri
 }
 
 /**
- * Abre la mesa del plano.
+ * Abre la mesa del plano, en la Main o en la Handy (`b`).
  *
  * El plano lo pinta Konva sobre un `<canvas>`: las mesas no son elementos, así que no hay nada que
  * seleccionar ni nada a lo que hacer `click()`. Se calcula dónde cae la mesa con la MISMA función
  * que usa la pantalla (`fitTransform`) sobre el layout real, y se pulsa ahí. Copiar la cuenta en
  * vez de importarla habría dejado dos versiones que se separan al primer retoque del encuadre.
  */
-export async function abrirMesa(mesa: string): Promise<void> {
-    await irA("/Mesas");
+export async function abrirMesa(mesa: string, b: WebdriverIO.Browser = browser): Promise<void> {
+    const g = gestosEn(b);
+    await g.irA("/Mesas");
 
-    const lienzo = $("canvas");
+    const lienzo = b.$("canvas");
     await lienzo.waitForDisplayed({ timeout: 30_000 });
 
-    const salones = await leerDeLaApp("load_layout");
+    const salones = await g.leerDeLaApp("load_layout");
     const salon = salones[0];
     const figura = salon.tables.find((t) => t.name === mesa) ?? salon.tables[0];
 
@@ -139,7 +140,7 @@ export async function abrirMesa(mesa: string): Promise<void> {
     const centroY = vista.y + (figura.y + figura.height / 2) * vista.scale;
 
     // Los desplazamientos de la acción son relativos al CENTRO del elemento.
-    await browser
+    await b
         .action("pointer")
         .move({
             origin: lienzo,
@@ -151,7 +152,7 @@ export async function abrirMesa(mesa: string): Promise<void> {
         .up()
         .perform();
 
-    await tituloDelModal(mesa).waitForDisplayed({ timeout: 30_000 });
+    await tituloDelModal(mesa, b).waitForDisplayed({ timeout: 30_000 });
 }
 
 /**
@@ -160,8 +161,8 @@ export async function abrirMesa(mesa: string): Promise<void> {
  * Es un `div`, no un encabezado: se busca el nodo EXACTO para no acabar encontrando cualquier
  * contenedor que lo envuelva.
  */
-function tituloDelModal(mesa: string) {
-    return $(`//div[normalize-space(text())=${literalXPath(nombreDeMesa(mesa))}]`);
+function tituloDelModal(mesa: string, b: WebdriverIO.Browser = browser) {
+    return b.$(`//div[normalize-space(text())=${literalXPath(nombreDeMesa(mesa))}]`);
 }
 
 /**
@@ -170,36 +171,80 @@ function tituloDelModal(mesa: string) {
  * ⚠️ Acotado a la cabecera del modal a propósito: el aspa de la barra de título de la propia
  * aplicación lleva el mismo `aria-label="Cerrar"`, y ese botón cierra el TPV en mitad del test.
  */
-export async function cerrarElModalDeLaMesa(mesa: string): Promise<void> {
-    await pulsarXPath(
+export async function cerrarElModalDeLaMesa(mesa: string, b: WebdriverIO.Browser = browser): Promise<void> {
+    await gestosEn(b).pulsarXPath(
         `//div[normalize-space(text())=${literalXPath(nombreDeMesa(mesa))}]` +
             `/following-sibling::div//button[@aria-label="Cerrar"]`,
         "aspa de cerrar el modal de la mesa",
     );
 }
 
-/** Añade `unidades` de un producto al ticket, pulsando su tarjeta. */
-export async function anadirLineas(p: Producto, unidades: number): Promise<void> {
-    await conTexto("p", p.categoria).waitForDisplayed({ timeout: 30_000 });
-    await conTexto("button", p.categoria).click();
+/**
+ * Añade `unidades` de un producto al ticket, pulsando su tarjeta.
+ *
+ * La categoría y la tarjeta se pulsan por la visible: en un teléfono el modal de la mesa coloca
+ * la carta de otra forma, y lo que está en el documento no siempre es lo que se ve.
+ */
+export async function anadirLineas(p: Producto, unidades: number, b: WebdriverIO.Browser = browser): Promise<void> {
+    const g = gestosEn(b);
+    await g.pulsarXPath(
+        `//button[contains(normalize-space(.), ${literalXPath(p.categoria)})]`,
+        `categoría "${p.categoria}"`,
+        30_000,
+    );
+    // Mientras el ticket carga, el modal ignora el toque SIN avisar (la tarjeta queda
+    // `aria-disabled`, y sin comanda abierta ni eso). En la Main es un instante; en la Handy, que lo
+    // pregunta a la nube, tarda lo bastante como para perder el primer toque. Se espera a que la
+    // mesa esté lista: tarjeta activa y ticket sin «Cargando…».
+    await b.waitUntil(
+        async () => {
+            const cargando = await g.conTexto("div", "Cargando…").isDisplayed().catch(() => false);
+            const bloqueada = await b
+                .$(`//p[contains(normalize-space(.), ${literalXPath(p.nombre)})]/ancestor::*[@aria-disabled][1]`)
+                .getAttribute("aria-disabled")
+                .catch(() => "true");
+            return !cargando && bloqueada === "false";
+        },
+        { timeout: 60_000, timeoutMsg: `La mesa no llegó a estar lista para añadir "${p.nombre}"` },
+    );
 
-    const tarjeta = conTexto("p", p.nombre);
-    await tarjeta.waitForDisplayed({ timeout: 30_000 });
+    // La tarjeta se busca UNA vez: después de la primera pulsación el ticket pinta una línea con el
+    // mismo nombre, y buscarla de nuevo podría acabar pulsando esa línea en vez de la carta.
+    const tarjeta = await b.waitUntil(
+        async () => {
+            for (const c of await b.$$(`//p[contains(normalize-space(.), ${literalXPath(p.nombre)})]`)) {
+                if (await c.isDisplayed()) return c;
+            }
+            return false;
+        },
+        { timeout: 30_000, timeoutMsg: `No se ve la tarjeta de "${p.nombre}"` },
+    );
     for (let i = 0; i < unidades; i++) await tarjeta.click();
 }
 
 /** Espera a que el panel del ticket muestre ese total pendiente (`"10,00"`). */
-export async function esperarTotalPendiente(importe: string): Promise<void> {
-    const cifra = $('//div[starts-with(normalize-space(.), "Total pendiente")]/span');
-    await browser.waitUntil(async () => (await cifra.getText()).includes(importe), {
-        timeout: 30_000,
-        timeoutMsg: `El ticket no llegó a ${importe} €`,
-    });
+export async function esperarTotalPendiente(importe: string, b: WebdriverIO.Browser = browser): Promise<void> {
+    const cifras = () => b.$$('//div[starts-with(normalize-space(.), "Total pendiente")]/span');
+    let visto = "(nada)";
+    const llego = await b
+        .waitUntil(
+            async () => {
+                const textos = await cifras().map((c) => c.getText());
+                visto = textos.filter(Boolean).join(" / ") || "(nada)";
+                return textos.some((t) => t.includes(importe));
+            },
+            { timeout: 30_000 },
+        )
+        .then(
+            () => true,
+            () => false,
+        );
+    if (!llego) throw new Error(`El ticket no llegó a ${importe} €: se ve ${visto}`);
 }
 
 /** Suma un billete en el contador de efectivo del cobro (el "+" de esa denominación). */
-export async function sumarBillete(etiqueta: string): Promise<void> {
-    await pulsarXPath(
+export async function sumarBillete(etiqueta: string, b: WebdriverIO.Browser = browser): Promise<void> {
+    await gestosEn(b).pulsarXPath(
         `//p[normalize-space(text())=${literalXPath(etiqueta)}]` +
             `/ancestor::div[contains(@class,"flex-col")][1]//button[normalize-space(.)="+"]`,
         `"+" de ${etiqueta} en el cobro`,
@@ -213,31 +258,32 @@ export async function sumarBillete(etiqueta: string): Promise<void> {
  * pendiente en esta comanda, o sea de que la transacción del cobro llegó a COMMIT. Esperar a un
  * mensaje sería esperar a algo que la pantalla no siempre enseña.
  */
-export async function cobrarTodoEnEfectivo(billete: string): Promise<void> {
-    await pulsar("Cobrar todo");
-    await pulsar("Cobrar en efectivo");
+export async function cobrarTodoEnEfectivo(billete: string, b: WebdriverIO.Browser = browser): Promise<void> {
+    const g = gestosEn(b);
+    await g.pulsar("Cobrar todo");
+    await g.pulsar("Cobrar en efectivo");
 
-    await sumarBillete(billete);
-    await conTexto("p", "Cambio").waitForDisplayed({ timeout: 20_000 });
+    await sumarBillete(billete, b);
+    await g.conTexto("p", "Cambio").waitForDisplayed({ timeout: 20_000 });
 
-    await pulsar("Confirmar cobro");
+    await g.pulsar("Confirmar cobro");
 
-    await browser.waitUntil(async () => !(await conTexto("button", "Cobrar todo").isEnabled()), {
+    await b.waitUntil(async () => !(await g.conTexto("button", "Cobrar todo").isEnabled()), {
         timeout: 30_000,
         timeoutMsg: 'Tras cobrar, "Cobrar todo" seguía activo',
     });
 }
 
 /**
- * Cómo ve la app el estado de una mesa.
+ * Cómo ve la app el estado de una mesa, en la Main o en la Handy.
  *
  * `mesas_meta_all` sólo devuelve las mesas con una comanda ABIERTA: una mesa libre no sale en el
  * mapa, y así es justamente como la pinta el plano (sin meta = libre). Por eso "no está" se traduce
  * aquí a LIBRE en vez de a un fallo.
  */
-export async function estadoDeMesa(idMesa: string): Promise<string> {
+export async function estadoDeMesa(idMesa: string, b: WebdriverIO.Browser = browser): Promise<string> {
     try {
-        const mapa = await leerDeLaApp("mesas_meta_all");
+        const mapa = await gestosEn(b).leerDeLaApp("mesas_meta_all");
         // La clave puede venir como UUID o como `db-mesa-<uuid>`: `mesasLoadMesaMeta` normaliza las
         // dos, así que aquí se aceptan las dos también.
         const meta = mapa[idMesa] ?? mapa[`db-mesa-${idMesa}`];
@@ -247,16 +293,25 @@ export async function estadoDeMesa(idMesa: string): Promise<string> {
     }
 }
 
-/** Espera a que la mesa vuelva a LIBRE, contando en el error lo que se vio por última vez. */
-export async function esperarMesaLibre(idMesa: string): Promise<void> {
+/**
+ * Espera a que la mesa llegue a `estado` (LIBRE por defecto), contando en el error lo que se vio
+ * por última vez. En la Handy el cambio viene de la nube, así que se le da más margen.
+ */
+export async function esperarMesa(
+    idMesa: string,
+    estado: (e: string) => boolean,
+    descripcion: string,
+    b: WebdriverIO.Browser = browser,
+    timeout = 30_000,
+): Promise<void> {
     let ultimo = "(no se llegó a leer)";
-    const libre = await browser
+    const llego = await b
         .waitUntil(
             async () => {
-                ultimo = await estadoDeMesa(idMesa);
-                return ultimo === "LIBRE";
+                ultimo = await estadoDeMesa(idMesa, b);
+                return estado(ultimo);
             },
-            { timeout: 30_000 },
+            { timeout },
         )
         .then(
             () => true,
@@ -265,7 +320,12 @@ export async function esperarMesaLibre(idMesa: string): Promise<void> {
 
     // `timeoutMsg` se construye al llamar y no al fallar, así que lo que cuenta el último intento
     // hay que lanzarlo después de esperar.
-    if (!libre) throw new Error(`La mesa ${idMesa} sigue en ${ultimo} tras el cobro.`);
+    if (!llego) throw new Error(`La mesa ${idMesa} no llegó a ${descripcion}: sigue en ${ultimo}.`);
+}
+
+/** Espera a que la mesa vuelva a LIBRE. */
+export async function esperarMesaLibre(idMesa: string, b: WebdriverIO.Browser = browser, timeout = 30_000): Promise<void> {
+    await esperarMesa(idMesa, (e) => e === "LIBRE", "LIBRE", b, timeout);
 }
 
 /** Las entradas de caja (cobros) que ve la pantalla de Cuentas. Sólo LEE. Sin `page_size` vuelve

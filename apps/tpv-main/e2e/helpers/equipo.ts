@@ -10,6 +10,8 @@
 // acabó corriendo los pasos del primero contra un equipo que ya estaba estrenado, y el síntoma —"no
 // aparece la pantalla de primer inicio"— no se parecía en nada a la causa.
 
+import type { Producto } from "./vender.js";
+
 export const NEGOCIO = "Bar E2E";
 
 /** Distinto del 1234 del seed: así el login prueba el PIN elegido, no el sembrado. */
@@ -26,3 +28,16 @@ export const RAZON_SOCIAL = "Hostelería E2E SL";
  * uno que no cuadre, precisamente para que no vuelva como error admisible de la AEAT horas después.
  */
 export const NIF = "B12345674";
+
+/**
+ * La sala, la mesa y el producto que monta la venta. Los usa también la Handy, que vende en esa
+ * misma mesa: por eso son del equipo y no del recorrido que los crea.
+ */
+export const ZONA = "Salón E2E";
+export const MESA = "M1";
+export const PRODUCTO: Producto = {
+    categoria: "Bebidas E2E",
+    nombre: "Caña E2E",
+    precio: "5.00",
+    iva: "10",
+};
