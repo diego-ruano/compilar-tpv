@@ -13,7 +13,6 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [LEGAL-02](#legal-02--reglamento-de-ciberresiliencia) | 🟠 | Reglamento de Ciberresiliencia | Sin empezar |
 | [ARCH-01](#arch-01--doble-implementación-mainworker) | 🟠 | Doble implementación Main/worker | Refactor gradual tras el lanzamiento |
 | [DB-14](#db-14--retención-y-archivado) | 🟡 | Sin retención ni archivado de datos de negocio | Decidido: archivo en R2, falta medir |
-| [RI-13](#ri-13--la-pii-del-personal-sigue-guardada-aunque-la-ficha-ya-no-la-pide) | 🔵 | La ficha ya no pide DNI, IBAN ni nº de la Seguridad Social, pero las capas de abajo los siguen guardando | Pendiente de decidir si se retiran del todo |
 | [INFRA-01](#infra-01--entorno-de-staging) | 🟡 | No hay entorno de staging | Aplazado |
 | [INFRA-02](#infra-02--instalador-sin-firmar) | 🟡 | El instalador no va firmado (Authenticode) | Aceptado a sabiendas |
 | [INFRA-03](#infra-03--imágenes-por-r2dev) | 🟡 | Las imágenes de la Handy salen de `r2.dev` | Decidido: dominio propio, pero uno de Cloudflare cae con los bloqueos de LaLiga |
@@ -268,29 +267,6 @@ Decidido, a falta de medir cuánto genera un bar al año:
 
 ⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
 (`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
-
-### RI-13 · La PII del personal sigue guardada aunque la ficha ya no la pide
-
-Las pantallas de alta y edición del trabajador ya no piden DNI, IBAN ni nº de la Seguridad Social.
-Todo lo de debajo sigue: las columnas, el cifrado en la Main (TRAB-03, `FieldCipher`, determinista
-para que el `UNIQUE` de `DNI` y `Numero_Seguridad_Social` siga funcionando) y el job `cifrado_pii`. Lo
-que una ficha ya tuviera guardado se conserva: `EditTrabajador.tsx` lo devuelve tal cual, porque la
-edición reescribe la fila entera.
-
-**Pendiente de decidir si se retiran del todo.** Si se retiran, hay que quitar los tres campos de
-todas las capas:
-
-- Esquema: las tres columnas de `Trabajadores` en `0001_inicial.sql` (sin clientes se edita ahí, con
-  su reset) y `schema.snapshot.sql`.
-- DTOs (`tpv-contracts/src/trabajadores.rs`, `bindings.ts`), dominio, caso de uso y los dos
-  adaptadores (`tpv-infra-sqlite`, `tpv-infra-http`), y el schema y los comandos del worker.
-- Lo que conserva y devuelve `EditTrabajador.tsx`.
-- El cifrado de campos entero, si no queda nada más que cifrar: `FieldCipher`, `field_crypto.rs`, el
-  job `cifrado_pii`, la DEK que entrega el worker al activar y su custodia en el control-plane.
-- Lo que los nombra en recuperación (`recovery.rs`, `RecuperarDatos.tsx`), en el filtro de datos
-  personales de la telemetría (tres copias y `scrub_casos.json`) y en el caso de lectura de contrato
-  `trabajadores/detalle`.
-- LEGAL-01, que cuenta la PII del personal como dato que tratamos.
 
 ---
 
