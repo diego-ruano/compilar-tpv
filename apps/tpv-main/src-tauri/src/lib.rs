@@ -2212,6 +2212,11 @@ pub fn run() {
     //
     // El contexto se genera aquí, y no al final en `.run()`, porque el entorno sale de él.
     let context = tauri::generate_context!();
+    // Antes de leer ningún secreto: el build de E2E guarda los suyos aparte de los de la app de
+    // trabajo del mismo equipo (ver `espacio_de_secretos`).
+    if let Some(espacio) = espacio_de_secretos(&context.config().identifier) {
+        tpv_infra_licensing::apartar_secretos(espacio);
+    }
     let sentry_guard = tpv_telemetry::init_sentry(tpv_telemetry::SentryConfig {
         dsn: option_env!("TPV_SENTRY_DSN").map(|s| s.to_string()),
         environment: entorno_de_sentry(&context.config().identifier, cfg!(debug_assertions))
@@ -2496,6 +2501,27 @@ fn entorno_de_sentry(identificador: &str, depuracion: bool) -> &'static str {
         "dev"
     } else {
         "prod"
+    }
+}
+
+/// Dónde guarda este build sus secretos (`device-id`, clave, tokens, DEK) en el almacén del sistema.
+///
+/// El de E2E, aparte: comparte Windows con la app de trabajo y, con los mismos nombres, la nube los
+/// veía como el mismo equipo. Si la app de trabajo era la Main de una licencia viva, activar la
+/// licencia de la tanda la canjeaba en ésa (REV-13) y la tanda acababa trabajando en su negocio.
+/// Producción no se toca nunca: cambiarle los nombres sería perder la identidad de cada equipo.
+fn espacio_de_secretos(identificador: &str) -> Option<&'static str> {
+    identificador.ends_with(".e2e").then_some("e2e")
+}
+
+#[cfg(test)]
+mod tests_espacio_de_secretos {
+    use super::espacio_de_secretos;
+
+    #[test]
+    fn el_e2e_guarda_sus_secretos_aparte_y_produccion_donde_siempre() {
+        assert_eq!(espacio_de_secretos("com.altarialights.tpv.e2e"), Some("e2e"));
+        assert_eq!(espacio_de_secretos("com.altarialights.tpv"), None);
     }
 }
 

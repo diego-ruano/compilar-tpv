@@ -154,6 +154,8 @@ fn delete_rejection(dir: &Path) -> AppResult<()> {
 
 /* ===== HTTP ===== */
 
+pub use secret_store::apartar_secretos;
+
 // El shell conoce la versión de la aplicación; la versión de esta crate puede ser distinta.
 static METADATOS_CLIENTE: std::sync::OnceLock<(&'static str, &'static str)> = std::sync::OnceLock::new();
 pub fn configurar_metadatos_cliente(version: &'static str, variante: &'static str) {

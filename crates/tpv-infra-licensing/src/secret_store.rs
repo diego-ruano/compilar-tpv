@@ -616,7 +616,37 @@ mod imp {
     }
 }
 
-pub use imp::{delete, get, set};
+/// El espacio de los secretos de este build. Sin fijar, que es producción: los nombres de siempre.
+static ESPACIO: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// Aparta los secretos de este build bajo otro nombre (`{service}.{espacio}`).
+///
+/// Lo usa el build de E2E, que en el mismo Windows convive con la app de trabajo. Con el mismo
+/// almacén compartían `device-id` y clave: para la nube eran el mismo equipo, y si la app de trabajo
+/// era la Main de una licencia viva, la licencia de la tanda se canjeaba en ella (REV-13) y la tanda
+/// trabajaba en ese negocio. Se fija una vez, al arrancar y antes de leer ningún secreto.
+pub fn apartar_secretos(espacio: &'static str) {
+    let _ = ESPACIO.set(espacio);
+}
+
+fn servicio(service: &str) -> std::borrow::Cow<'_, str> {
+    match ESPACIO.get() {
+        Some(espacio) => format!("{service}.{espacio}").into(),
+        None => service.into(),
+    }
+}
+
+pub fn get(service: &str, key: &str) -> Result<Option<String>, ErrorSecreto> {
+    imp::get(&servicio(service), key)
+}
+
+pub fn set(service: &str, key: &str, value: &str) -> Result<(), String> {
+    imp::set(&servicio(service), key, value)
+}
+
+pub fn delete(service: &str, key: &str) -> Result<(), String> {
+    imp::delete(&servicio(service), key)
+}
 
 /// Guardan la `JavaVM` del proceso (la entrega `JNI_OnLoad`) y el `Context` de la app (lo entrega
 /// `MainActivity`), los dos desde el cdylib de la app. Solo Android.

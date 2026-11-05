@@ -215,7 +215,9 @@ y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en 
   que no vuelvan `tpv_server_signed_headers` (firmaba cualquier petición sin gate) ni
   `cobrar_venta_rapida` (un segundo camino de cobro no idempotente).
 - **Secretos fuera de la base**: `device_id`, clave ed25519, token de la Handy y DEK en el keyring o en
-  Android Keystore.
+  Android Keystore. El build de E2E (identificador `….e2e`) los guarda con otro nombre
+  (`lib.rs::espacio_de_secretos`, `secret_store::apartar_secretos`), para no compartir identidad con la
+  app de trabajo del mismo equipo. Los de producción no cambian de nombre nunca.
 - **PII del personal cifrada** (`DNI`, `IBAN`, `Numero_Seguridad_Social`): AES-256-GCM determinista
   (para que el `UNIQUE` siga funcionando) en `tpv-infra-sqlite::trabajadores`, antes de construir la
   sentencia, así que el outbox replica el texto cifrado (`tpv-infra-licensing/src/field_crypto.rs`).
