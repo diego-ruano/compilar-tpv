@@ -977,12 +977,6 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               </button>
             </div>
 
-            {error && (
-              <div className="w-full rounded-xl border border-danger/30 bg-danger-soft p-3 text-sm text-danger">
-                {error}
-              </div>
-            )}
-
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="flex min-w-0 flex-col gap-1">
                 <label className="text-sm font-medium">Turno</label>
@@ -1061,6 +1055,8 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               </div>
             </div>
 
+            {/* Una sola vez y junto a Guardar, que es lo que lo provoca. Salía también arriba, bajo
+                el título: el mismo error dos veces en el mismo modal. */}
             {error && <p role="alert" className="rounded-xl bg-danger-soft p-3 text-sm text-danger">{error}</p>}
             <div className="grid grid-cols-2 gap-2 pt-2 sm:flex sm:items-center sm:justify-end">
               <button
