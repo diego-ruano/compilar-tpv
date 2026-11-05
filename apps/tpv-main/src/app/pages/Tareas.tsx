@@ -126,18 +126,23 @@ function Modal({
   onClose,
   children,
   title,
+  amplio = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  /** Formularios a dos columnas: más ancho para que quepan sin desplazarse. */
+  amplio?: boolean;
 }) {
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[999] overflow-y-auto bg-black/50">
       <div className="flex min-h-full items-start justify-center p-2 sm:p-4 md:items-center">
-        <div className="flex max-h-[94dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl sm:max-h-[88dvh] sm:rounded-3xl">
+        <div
+          className={`flex max-h-[calc(100dvh-1rem)] w-full flex-col overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl ${amplio ? "max-w-5xl" : "max-w-3xl"}`}
+        >
           <div className="flex items-center justify-between gap-2 border-b border-border p-3 sm:p-4 lg:p-5">
             <h2 className="break-words text-base font-semibold leading-tight text-fg sm:text-lg lg:text-xl">
               {title}
@@ -554,69 +559,75 @@ export default function Tareas() {
         </div>
       )}
 
-      <Modal open={modalNueva} onClose={() => setModalNueva(false)} title="Crear tarea">
+      <Modal open={modalNueva} onClose={() => setModalNueva(false)} title="Crear tarea" amplio>
         <div className="flex flex-col gap-3 sm:gap-4">
-          <div>
-            <p className="mb-1 text-sm text-fg-muted">Nombre</p>
-            <input
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-              className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:rounded-2xl sm:text-base"
-              placeholder="Ej: Limpiar terraza"
-            />
-          </div>
+          <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-3 sm:gap-4">
+              <div>
+                <p className="mb-1 text-sm text-fg-muted">Nombre</p>
+                <input
+                  value={titulo}
+                  onChange={(e) => setTitulo(e.target.value)}
+                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:rounded-2xl sm:text-base"
+                  placeholder="Ej: Limpiar terraza"
+                />
+              </div>
 
-          <div>
-            <p className="mb-1 text-sm text-fg-muted">Descripción</p>
-            <textarea
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-              className="min-h-[96px] w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:min-h-[110px] sm:rounded-2xl sm:text-base"
-              placeholder="Detalles de la tarea…"
-            />
-          </div>
+              <div>
+                <p className="mb-1 text-sm text-fg-muted">Descripción</p>
+                <textarea
+                  value={descripcion}
+                  onChange={(e) => setDescripcion(e.target.value)}
+                  className="min-h-[96px] w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:min-h-[110px] sm:rounded-2xl sm:text-base"
+                  placeholder="Detalles de la tarea…"
+                />
+              </div>
 
-          <div>
-            <p className="mb-1 text-sm text-fg-muted">Fecha límite</p>
-            <input
-              type="date"
-              value={fecha_limite}
-              onChange={(e) => setFechaLimite(e.target.value)}
-              className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:w-auto sm:rounded-2xl sm:text-base"
-            />
-          </div>
+              <div>
+                <p className="mb-1 text-sm text-fg-muted">Fecha límite</p>
+                <input
+                  type="date"
+                  value={fecha_limite}
+                  onChange={(e) => setFechaLimite(e.target.value)}
+                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:w-auto sm:rounded-2xl sm:text-base"
+                />
+              </div>
+            </div>
 
-          <div>
-            <p className="mb-2 text-sm text-fg-muted">Asignar a</p>
+            <div className="min-w-0">
+              <div>
+                <p className="mb-2 text-sm text-fg-muted">Asignar a</p>
 
-            <div className="flex max-h-[240px] flex-col gap-2 overflow-auto rounded-xl border border-border p-2 sm:rounded-2xl sm:p-3">
-              {trabajadores.map((tr) => {
-                const checked = idsAsignados.includes(tr.ID_Trabajador);
-                return (
-                  <label
-                    key={tr.ID_Trabajador}
-                    className="flex cursor-pointer flex-col gap-1 rounded-lg p-2 hover:bg-surface-2 sm:flex-row sm:items-center sm:gap-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleAsignado(tr.ID_Trabajador)}
-                      />
-                      <span className="font-medium">
-                        {tr.Nombre} {tr.Apellido ?? ""}
-                      </span>
-                    </div>
-                    <span className="pl-6 text-sm text-fg-subtle sm:pl-0">
-                      {tr.Puesto ?? tr.Email}
-                    </span>
-                  </label>
-                );
-              })}
+                <div className="flex max-h-[240px] flex-col gap-2 overflow-auto rounded-xl border border-border p-2 sm:rounded-2xl sm:p-3">
+                  {trabajadores.map((tr) => {
+                    const checked = idsAsignados.includes(tr.ID_Trabajador);
+                    return (
+                      <label
+                        key={tr.ID_Trabajador}
+                        className="flex cursor-pointer flex-col gap-1 rounded-lg p-2 hover:bg-surface-2 sm:flex-row sm:items-center sm:gap-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleAsignado(tr.ID_Trabajador)}
+                          />
+                          <span className="font-medium">
+                            {tr.Nombre} {tr.Apellido ?? ""}
+                          </span>
+                        </div>
+                        <span className="pl-6 text-sm text-fg-subtle sm:pl-0">
+                          {tr.Puesto ?? tr.Email}
+                        </span>
+                      </label>
+                    );
+                  })}
 
-              {!trabajadores.length ? (
-                <p className="text-sm text-fg-subtle">No hay trabajadores en la BD.</p>
-              ) : null}
+                  {!trabajadores.length ? (
+                    <p className="text-sm text-fg-subtle">No hay trabajadores en la BD.</p>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -647,6 +658,8 @@ export default function Tareas() {
           setConfirmAccion(null);
         }}
         title={modalTitle}
+        // Quien no administra sólo ve la descripción y un botón: le basta el ancho normal.
+        amplio={isAdmin}
       >
         {!selected ? null : (
           <div className="flex flex-col gap-3 sm:gap-4">
@@ -698,130 +711,136 @@ export default function Tareas() {
             ) : (
               <>
                 <div className="flex flex-col gap-3 sm:gap-4">
-                  <div>
-                    <p className="mb-1 text-sm text-fg-muted">Nombre</p>
-                    <input
-                      value={adminEditTitulo}
-                      onChange={(e) => setAdminEditTitulo(e.target.value)}
-                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:rounded-2xl sm:text-base"
-                    />
-                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2">
+                    <div className="flex min-w-0 flex-col gap-3 sm:gap-4">
+                      <div>
+                        <p className="mb-1 text-sm text-fg-muted">Nombre</p>
+                        <input
+                          value={adminEditTitulo}
+                          onChange={(e) => setAdminEditTitulo(e.target.value)}
+                          className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:rounded-2xl sm:text-base"
+                        />
+                      </div>
 
-                  <div>
-                    <p className="mb-1 text-sm text-fg-muted">Descripción</p>
-                    <textarea
-                      value={adminEditDescripcion}
-                      onChange={(e) => setAdminEditDescripcion(e.target.value)}
-                      className="min-h-[96px] w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:min-h-[110px] sm:rounded-2xl sm:text-base"
-                    />
-                  </div>
+                      <div>
+                        <p className="mb-1 text-sm text-fg-muted">Descripción</p>
+                        <textarea
+                          value={adminEditDescripcion}
+                          onChange={(e) => setAdminEditDescripcion(e.target.value)}
+                          className="min-h-[96px] w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:min-h-[110px] sm:rounded-2xl sm:text-base"
+                        />
+                      </div>
 
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
-                    <div className="flex-1">
-                      <p className="mb-1 text-sm text-fg-muted">Fecha límite</p>
-                      <input
-                        type="date"
-                        value={adminEditFechaLimite ?? ""}
-                        onChange={(e) => setAdminEditFechaLimite(e.target.value)}
-                        className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:w-auto sm:rounded-2xl sm:text-base"
-                      />
-                    </div>
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between lg:gap-4">
+                        <div className="flex-1">
+                          <p className="mb-1 text-sm text-fg-muted">Fecha límite</p>
+                          <input
+                            type="date"
+                            value={adminEditFechaLimite ?? ""}
+                            onChange={(e) => setAdminEditFechaLimite(e.target.value)}
+                            className="w-full rounded-xl border border-border px-3 py-2.5 text-sm sm:w-auto sm:rounded-2xl sm:text-base"
+                          />
+                        </div>
 
-                    <div className="text-sm text-fg-muted lg:text-right">
-                      <p>
-                        <b>Creada:</b>{" "}
-                        {selected.Fecha_Creacion ? fmtFechaHora(selected.Fecha_Creacion) : "—"}
-                      </p>
-                      <p>
-                        <b>Progreso:</b> {selected.Total_Finalizadas ?? 0}/{selected.Total_Asignados ?? 0}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="mb-2 text-sm text-fg-muted">
-                      Asignación (asignados / no asignados)
-                    </p>
-
-                    <div className="flex max-h-[220px] flex-col gap-2 overflow-y-auto rounded-xl border border-border p-2 sm:rounded-2xl sm:p-3">
-                      {trabajadores.map((tr) => {
-                        const checked = adminEditIdsAsignados.includes(tr.ID_Trabajador);
-                        return (
-                          <label
-                            key={tr.ID_Trabajador}
-                            className="flex cursor-pointer flex-col gap-2 rounded-lg p-2 hover:bg-surface-2 sm:flex-row sm:items-center sm:gap-2"
-                          >
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => toggleAsignadoAdmin(tr.ID_Trabajador)}
-                              />
-                              <span className="font-medium">
-                                {tr.Nombre} {tr.Apellido ?? ""}
-                              </span>
-                            </div>
-
-                            <span className="pl-6 text-sm text-fg-subtle sm:pl-0">
-                              {tr.Puesto ?? tr.Email}
-                            </span>
-
-                            <span className="text-xs rounded-full bg-surface-2 px-2 py-1 sm:ml-auto">
-                              {checked ? "Asignado" : "No asignado"}
-                            </span>
-                          </label>
-                        );
-                      })}
-
-                      {!trabajadores.length ? (
-                        <p className="text-sm text-fg-subtle">No hay trabajadores.</p>
-                      ) : null}
-                    </div>
-
-                    <p className="mt-2 text-sm text-fg-subtle">
-                      Asignados: {adminEditIdsAsignados.length}
-                    </p>
-
-                    {adminDetalleAsignados.length ? (
-                      <div className="mt-3 rounded-xl border border-border p-3 sm:rounded-2xl sm:p-4">
-                        <p className="mb-2 text-sm font-semibold sm:text-base">Estado por trabajador</p>
-
-                        <div className="flex flex-col gap-2.5">
-                          {adminDetalleAsignados.map((a) => (
-                            <div
-                              key={a.ID_Trabajador}
-                              className="flex flex-col gap-2 rounded-xl bg-surface-2 p-2.5 sm:bg-transparent sm:p-0 lg:flex-row lg:items-center lg:justify-between lg:gap-3 text-sm"
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">
-                                  {a.Nombre} {a.Apellido ?? ""}
-                                </p>
-                                <p className="text-fg-subtle">
-                                  Asignada: {fmtFechaHora(a.Asignada_At)}
-                                </p>
-                              </div>
-
-                              <div className="lg:text-right">
-                                <p
-                                  className={`inline-flex rounded-full px-2 py-1 text-xs ${
-                                    a.Estado === "FINALIZADA"
-                                      ? "bg-accent text-white"
-                                      : "bg-warning text-white"
-                                  }`}
-                                >
-                                  {a.Estado}
-                                </p>
-                                {a.Finalizada_At ? (
-                                  <p className="mt-1 text-fg-subtle">
-                                    Fin: {fmtFechaHora(a.Finalizada_At)}
-                                  </p>
-                                ) : null}
-                              </div>
-                            </div>
-                          ))}
+                        <div className="text-sm text-fg-muted lg:text-right">
+                          <p>
+                            <b>Creada:</b>{" "}
+                            {selected.Fecha_Creacion ? fmtFechaHora(selected.Fecha_Creacion) : "—"}
+                          </p>
+                          <p>
+                            <b>Progreso:</b> {selected.Total_Finalizadas ?? 0}/{selected.Total_Asignados ?? 0}
+                          </p>
                         </div>
                       </div>
-                    ) : null}
+                    </div>
+
+                    <div className="min-w-0">
+                      <div>
+                        <p className="mb-2 text-sm text-fg-muted">
+                          Asignación (asignados / no asignados)
+                        </p>
+
+                        <div className="flex max-h-[220px] flex-col gap-2 overflow-y-auto rounded-xl border border-border p-2 sm:rounded-2xl sm:p-3">
+                          {trabajadores.map((tr) => {
+                            const checked = adminEditIdsAsignados.includes(tr.ID_Trabajador);
+                            return (
+                              <label
+                                key={tr.ID_Trabajador}
+                                className="flex cursor-pointer flex-col gap-2 rounded-lg p-2 hover:bg-surface-2 sm:flex-row sm:items-center sm:gap-2"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleAsignadoAdmin(tr.ID_Trabajador)}
+                                  />
+                                  <span className="font-medium">
+                                    {tr.Nombre} {tr.Apellido ?? ""}
+                                  </span>
+                                </div>
+
+                                <span className="pl-6 text-sm text-fg-subtle sm:pl-0">
+                                  {tr.Puesto ?? tr.Email}
+                                </span>
+
+                                <span className="text-xs rounded-full bg-surface-2 px-2 py-1 sm:ml-auto">
+                                  {checked ? "Asignado" : "No asignado"}
+                                </span>
+                              </label>
+                            );
+                          })}
+
+                          {!trabajadores.length ? (
+                            <p className="text-sm text-fg-subtle">No hay trabajadores.</p>
+                          ) : null}
+                        </div>
+
+                        <p className="mt-2 text-sm text-fg-subtle">
+                          Asignados: {adminEditIdsAsignados.length}
+                        </p>
+
+                        {adminDetalleAsignados.length ? (
+                          <div className="mt-3 rounded-xl border border-border p-3 sm:rounded-2xl sm:p-4">
+                            <p className="mb-2 text-sm font-semibold sm:text-base">Estado por trabajador</p>
+
+                            <div className="flex flex-col gap-2.5">
+                              {adminDetalleAsignados.map((a) => (
+                                <div
+                                  key={a.ID_Trabajador}
+                                  className="flex flex-col gap-2 rounded-xl bg-surface-2 p-2.5 sm:bg-transparent sm:p-0 lg:flex-row lg:items-center lg:justify-between lg:gap-3 text-sm"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="truncate font-medium">
+                                      {a.Nombre} {a.Apellido ?? ""}
+                                    </p>
+                                    <p className="text-fg-subtle">
+                                      Asignada: {fmtFechaHora(a.Asignada_At)}
+                                    </p>
+                                  </div>
+
+                                  <div className="lg:text-right">
+                                    <p
+                                      className={`inline-flex rounded-full px-2 py-1 text-xs ${
+                                        a.Estado === "FINALIZADA"
+                                          ? "bg-accent text-white"
+                                          : "bg-warning text-white"
+                                      }`}
+                                    >
+                                      {a.Estado}
+                                    </p>
+                                    {a.Finalizada_At ? (
+                                      <p className="mt-1 text-fg-subtle">
+                                        Fin: {fmtFechaHora(a.Finalizada_At)}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="mt-2 flex flex-col gap-2 sm:gap-3 lg:flex-row lg:items-center lg:justify-between">

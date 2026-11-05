@@ -639,7 +639,7 @@ export default function Clientes() {
             segunda caja de 75vh dentro, en Android horizontal la interior era más alta que la
             exterior: el dedo movía la de dentro y Guardar/Cancelar quedaban fuera de la vista. */}
         <div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Campo
               label="Nombre *"
               value={fNombre}
@@ -662,7 +662,7 @@ export default function Clientes() {
               placeholder="Ej: 600123123"
             />
 
-            <div className="sm:col-span-2">
+            <div className="sm:col-span-2 lg:col-span-3">
               <label className="text-sm font-semibold text-fg">Notas</label>
               <textarea
                 value={fNotas}

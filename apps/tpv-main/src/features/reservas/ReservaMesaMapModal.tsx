@@ -165,7 +165,7 @@ export default function ReservaMesaMapModal({
                 {/* Canvas container */}
                 <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-surface-2">
                     {/* OJO: este div es el que MapCanvas usa para medir */}
-                    <div ref={mapBoxRef} className="flex h-[clamp(20rem,62dvh,32.5rem)] w-full">
+                    <div ref={mapBoxRef} className="flex h-[clamp(20rem,62dvh,44rem)] w-full">
                         <MapCanvas
                             loading={false}
                             activeSalon={activeSalon}

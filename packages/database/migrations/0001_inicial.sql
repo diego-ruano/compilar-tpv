@@ -146,6 +146,8 @@ CREATE TABLE IF NOT EXISTS Usuarios (
   Apellido TEXT,
   Estado TEXT DEFAULT 'Activo',
   Requiere_Setup INTEGER DEFAULT 0,
+  -- 1 = entra sin PIN: el login y el fichaje no se lo piden. Conserva su Password_Hash.
+  Sin_PIN INTEGER NOT NULL DEFAULT 0 CHECK (Sin_PIN IN (0, 1)),
   FOREIGN KEY (ID_Rol) REFERENCES Roles(ID_Rol)
 );
 

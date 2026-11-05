@@ -954,7 +954,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
       {modalOpen && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 p-2 sm:p-4">
-          <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-2xl border border-border bg-surface p-3 shadow-lg sm:gap-4 sm:p-5">
+          <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col gap-3 overflow-y-auto rounded-2xl border border-border bg-surface p-3 shadow-lg sm:gap-4 sm:p-5">
             <div className="flex flex-col items-stretch gap-3 xs:flex-row xs:items-start xs:justify-between sm:gap-4">
               <div className="flex flex-col">
                 <h4 className="text-lg font-bold">
@@ -983,8 +983,8 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="flex flex-col gap-1">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="flex min-w-0 flex-col gap-1">
                 <label className="text-sm font-medium">Turno</label>
                 <select
                   value={id_turno}
@@ -1000,7 +1000,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 </select>
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex min-w-0 flex-col gap-1">
                 <label className="text-sm font-medium">Area</label>
                 <select
                   value={area}
@@ -1012,7 +1012,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 </select>
               </div>
 
-              <div className="flex items-center gap-2 sm:col-span-2">
+              <div className="flex items-center gap-2 sm:col-span-2 lg:h-10 lg:self-end">
                 <input
                   id="partido"
                   type="checkbox"
@@ -1026,31 +1026,31 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 </label>
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex min-w-0 flex-col justify-end gap-1">
                 <label className="text-sm font-medium">Hora inicio (tramo 1)</label>
                 <CampoHora aria-label="Hora inicio (tramo 1)" valor={horaInicio1} onCambio={setHoraInicio1} />
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex min-w-0 flex-col justify-end gap-1">
                 <label className="text-sm font-medium">Hora fin (tramo 1)</label>
                 <CampoHora aria-label="Hora fin (tramo 1)" valor={horaFin1} onCambio={setHoraFin1} />
               </div>
 
               {turnoPartido && (
                 <>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex min-w-0 flex-col justify-end gap-1">
                     <label className="text-sm font-medium">Hora inicio (tramo 2)</label>
                     <CampoHora aria-label="Hora inicio (tramo 2)" valor={horaInicio2} onCambio={setHoraInicio2} />
                   </div>
 
-                  <div className="flex flex-col gap-1">
+                  <div className="flex min-w-0 flex-col justify-end gap-1">
                     <label className="text-sm font-medium">Hora fin (tramo 2)</label>
                     <CampoHora aria-label="Hora fin (tramo 2)" valor={horaFin2} onCambio={setHoraFin2} />
                   </div>
                 </>
               )}
 
-              <div className="flex flex-col gap-1 sm:col-span-2">
+              <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-4">
                 <label className="text-sm font-medium">Notas (opcional)</label>
                 <input
                   value={notas}

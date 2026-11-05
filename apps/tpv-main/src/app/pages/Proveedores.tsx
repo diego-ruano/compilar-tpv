@@ -800,7 +800,7 @@ export default function Proveedores() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
           <Campo label="Nombre empresa *" value={fNombre} onChange={setFNombre} placeholder="Ej: Coca-Cola" />
           <Campo label="Contacto" value={fContacto} onChange={setFContacto} placeholder="Ej: Juan Pérez" />
 
@@ -809,7 +809,7 @@ export default function Proveedores() {
 
           <Campo label="CIF" value={fCif} onChange={setFCif} placeholder="Ej: B12345678" />
 
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 lg:col-span-3">
             <label className="text-sm font-semibold text-fg">Otros datos</label>
             <textarea
               value={fOtros}

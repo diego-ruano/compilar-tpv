@@ -197,7 +197,10 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-[820px] flex-col overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl sm:max-h-[calc(100dvh-1.5rem)]">
+      <div
+        data-modal="ficha-producto"
+        className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-[820px] flex-col overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl sm:max-h-[calc(100dvh-1.5rem)]"
+      >
         <button
           type="button"
           onClick={onClose}
@@ -259,7 +262,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 </div>
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5 sm:grid-cols-3 sm:gap-3">
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 *:min-w-0 *:wrap-break-word">
                 <div className="rounded-2xl border border-border bg-surface-2 p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <Boxes className="size-4 text-accent" aria-hidden />
@@ -484,7 +487,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   ficha sabe hacerlo (Inventario, Proveedores). Desde Mesas y la venta rápida no
                   llegaba ninguno: «Editar» no abría nada, y «Eliminar» pedía confirmación y
                   cerraba la ficha como si lo hubiera borrado. */}
-              <div className={`mt-5 grid grid-cols-1 gap-2 sm:gap-3 `}>
+              <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:gap-3 *:sm:flex-1">
                 {onEdit ? (
                 <button
                   type="button"
@@ -515,7 +518,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   type="button"
                   disabled={!puede("catalogo.borrar")}
                   onClick={() => setConfirmDelete(true)}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-danger/30 bg-danger-soft py-3 font-extrabold text-danger transition hover:opacity-90 cursor-pointer sm:col-span-2"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-danger/30 bg-danger-soft py-3 font-extrabold text-danger transition hover:opacity-90 cursor-pointer"
                 >
                   <Trash2 className="size-4" aria-hidden />
                   Eliminar producto

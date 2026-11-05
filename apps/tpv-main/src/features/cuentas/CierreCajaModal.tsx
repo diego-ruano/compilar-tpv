@@ -153,8 +153,9 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         >
             <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
 
-            {/* El ancho lo fija la medida común de las modales (Global.css); ésta la amplía. */}
-            <div className="relative flex h-[92vh] [--modal-width:73.5rem] flex-col overflow-hidden rounded-3xl border border-border bg-surface shadow-2xl">
+            {/* El ancho lo fija la medida común de las modales (Global.css); ésta la amplía. El
+                alto, todo el que deje la pantalla: el recuento es largo y así cabe más sin desplazar. */}
+            <div className="relative flex h-full [--modal-width:73.5rem] flex-col overflow-hidden rounded-3xl border border-border bg-surface shadow-2xl">
                 <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-surface px-4 py-4 sm:px-6">
                     <div className="flex min-w-0 items-center gap-3">
                         <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">

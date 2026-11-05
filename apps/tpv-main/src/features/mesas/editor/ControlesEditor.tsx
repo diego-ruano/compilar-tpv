@@ -87,8 +87,8 @@ export function Modal({
 
     return (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-2 sm:p-4">
-            <div className="max-h-[calc(100dvh-1rem)] w-full max-w-[520px] overflow-hidden rounded-2xl border border-border bg-surface shadow-xl sm:max-h-[calc(100dvh-2rem)]">
-                <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
+            <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl sm:max-h-[calc(100dvh-2rem)]">
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
                     <div className="text-base font-bold text-fg">
                         {title}
                     </div>
@@ -99,7 +99,9 @@ export function Modal({
                         ✕
                     </button>
                 </div>
-                <div className="max-h-[calc(100dvh-5.5rem)] overflow-y-auto p-3 sm:p-4">{children}</div>
+                {/* El cuerpo ocupa lo que deje la cabecera dentro del alto del panel: con un alto
+                    calculado aparte podía pasarse y el panel cortaba lo último. */}
+                <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">{children}</div>
             </div>
         </div>
     );

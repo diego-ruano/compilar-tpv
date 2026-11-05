@@ -2,8 +2,7 @@
 
 Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada tenant
 en Turso: los ficheros `.sql` de `packages/database/migrations/`, aplicados en orden.
-Hoy hay dos: `0001_inicial.sql`, con el esquema completo, y `0002_usuarios_sin_pin.sql`
-(`Usuarios.Sin_PIN`).
+Hoy hay uno solo, `0001_inicial.sql`, con el esquema completo.
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 

@@ -216,17 +216,37 @@ body {
     --modal-font-size: 0.875rem;
 }
 
-/* Panel principal: misma medida, borde y comportamiento de desbordamiento. */
+/* Panel principal: mismo alto máximo, borde y comportamiento de desbordamiento. */
 .fixed.inset-0 > [class~="bg-surface"],
 .fixed.inset-0 > :where([role="dialog"], [aria-modal="true"]) > [class~="bg-surface"],
 [role="dialog"].fixed.inset-0 > [class~="bg-surface"],
 [aria-modal="true"].fixed.inset-0 > [class~="bg-surface"] {
-    width: min(var(--modal-width), calc(100vw - 2rem)) !important;
-    max-width: var(--modal-width) !important;
     max-height: var(--modal-max-height) !important;
     overflow: hidden;
     border-radius: 1rem !important;
     font-size: var(--modal-font-size);
+}
+
+/* El ancho. Un panel sin ancho máximo propio lleva la medida común (o la suya en
+   `--modal-width`). Uno que declara `max-w-*` se queda con él: un formulario largo pide más
+   ancho para repartir los campos en columnas y no tener que desplazarse. Nunca baja de la
+   medida común, así que los que piden menos (avisos, confirmaciones) no cambian. */
+:is(
+    .fixed.inset-0 > [class~="bg-surface"],
+    .fixed.inset-0 > :where([role="dialog"], [aria-modal="true"]) > [class~="bg-surface"],
+    [role="dialog"].fixed.inset-0 > [class~="bg-surface"],
+    [aria-modal="true"].fixed.inset-0 > [class~="bg-surface"]
+):not([class*="max-w-"]) {
+    width: min(var(--modal-width), calc(100vw - 2rem)) !important;
+    max-width: var(--modal-width) !important;
+}
+:is(
+    .fixed.inset-0 > [class~="bg-surface"],
+    .fixed.inset-0 > :where([role="dialog"], [aria-modal="true"]) > [class~="bg-surface"],
+    [role="dialog"].fixed.inset-0 > [class~="bg-surface"],
+    [aria-modal="true"].fixed.inset-0 > [class~="bg-surface"]
+)[class*="max-w-"] {
+    min-width: min(var(--modal-width), calc(100vw - 2rem));
 }
 
 /* Las modales que son ellas mismas el panel conservan el scroll dentro del viewport. */
@@ -302,6 +322,7 @@ body {
     [role="dialog"].fixed.inset-0 > [class~="bg-surface"],
     [aria-modal="true"].fixed.inset-0 > [class~="bg-surface"] {
         width: calc(100vw - 1rem) !important;
+        max-width: calc(100vw - 1rem) !important;
     }
 }
 
@@ -313,10 +334,11 @@ body {
     height: min(88vh, calc(100dvh - 2rem));
 }
 
-/* La ficha de Inventario no cambia de tamaño mientras se invalida la consulta tras borrar,
-   evitando el salto visual bajo el diálogo de confirmación. */
-.fixed.inset-0 > [class~="max-w-[820px]"] {
-    height: min(44rem, calc(100dvh - 1.5rem));
+/* La ficha de Inventario no encoge mientras se invalida la consulta tras borrar, evitando el
+   salto visual bajo el diálogo de confirmación. Por encima de ese mínimo crece con lo que tenga
+   abierto hasta el alto de la pantalla, y sólo entonces se desplaza. */
+.fixed.inset-0 > [data-modal="ficha-producto"] {
+    min-height: min(44rem, var(--modal-max-height));
 }
 
 /* La modal fiscal conserva nombres de utilidad legacy (`primary`), pero el tema actual

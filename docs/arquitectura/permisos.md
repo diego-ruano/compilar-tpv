@@ -154,7 +154,7 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
 
 ### Entrar sin PIN
 
-`Usuarios.Sin_PIN = 1` (migración `0002`): el login y el fichaje de ese usuario no comprueban el PIN,
+`Usuarios.Sin_PIN = 1`: el login y el fichaje de ese usuario no comprueban el PIN,
 y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en la ficha del trabajador.
 
 - **Lo decide el backend**, no la pantalla: `comprobar_pin` en `tpv-infra-sqlite/src/login.rs` y

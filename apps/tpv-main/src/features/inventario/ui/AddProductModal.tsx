@@ -384,8 +384,8 @@ export function AddProductModal({
             maxWidthClass="max-w-[980px]"
         >
             <div className="pr-1">
-                <form onSubmit={conAviso(handleSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="md:col-span-2">
+                <form onSubmit={conAviso(handleSubmit)} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="sm:col-span-2">
                         <label htmlFor="producto-nombre" className="block font-semibold">
                             Nombre *
                         </label>
@@ -516,7 +516,7 @@ export function AddProductModal({
                         />
                     </div>
 
-                    <div>
+                    <div className="lg:col-span-2">
                         <label
                             htmlFor="producto-stock-suelto"
                             className="block font-semibold"
@@ -542,7 +542,7 @@ export function AddProductModal({
                         </p>
                     </div>
 
-                    <div>
+                    <div className="lg:col-span-2">
                         <label htmlFor="producto-iva" className="block font-semibold">
                             IVA (%)
                         </label>
@@ -572,7 +572,7 @@ export function AddProductModal({
                         </p>
                     </div>
 
-                    <div className="md:col-span-2 rounded-2xl border border-border bg-surface-2 p-4">
+                    <div className="rounded-2xl border border-border bg-surface-2 p-4 sm:col-span-2 lg:col-span-4">
                         <div className="flex items-center justify-between gap-3">
                             <div>
                                 <p className="font-extrabold text-fg">
@@ -669,7 +669,7 @@ export function AddProductModal({
                         )}
                     </div>
 
-                    <div className="md:col-span-2">
+                    <div className="sm:col-span-2 lg:col-span-4">
                         <button
                             type="button"
                             onClick={() => setAlergenosOpen((v) => !v)}
@@ -765,7 +765,7 @@ export function AddProductModal({
                         </div>
                     </div>
 
-                    <div className="md:col-span-2 flex flex-col gap-2">
+                    <div className="flex flex-col gap-2 sm:col-span-2 lg:col-span-4">
                         <label htmlFor="producto-imagen" className="font-semibold text-fg">
                             Imagen <span className="text-fg-muted font-medium">(opcional)</span>
                         </label>
@@ -898,7 +898,7 @@ export function AddProductModal({
                     <button
                         type="submit"
                         disabled={loading}
-                        className="md:col-span-2 bg-accent text-white py-2 rounded-xl font-extrabold mt-2"
+                        className="bg-accent text-white py-2 rounded-xl font-extrabold mt-2 sm:col-span-2 lg:col-span-4"
                     >
                         {loading ? "Guardando..." : isEdit ? "Guardar cambios" : "Guardar producto"}
                     </button>
