@@ -207,6 +207,8 @@ frescura, y decide
 su motivo y la conserva. Si el servidor se corrige (se deshace la anulación, o era un error nuestro:
 una base equivocada, una copia restaurada), basta con reintentar. El único borrado es «Borrar y volver
 a activar» (`clear_state`), que anota el motivo para que la pantalla de activación lo explique.
+Una comprobación que estaba esperando a la nube mientras se borraba, se activaba o se sumaba una clave
+no guarda lo que trae, ni el estado ni el token: vuelve a comprobar la licencia que haya entonces.
 `/refresh` y la readmisión de una Main adjuntan a su rechazo la misma aserción firmada que daría
 `/status` cuando la licencia existe.
 

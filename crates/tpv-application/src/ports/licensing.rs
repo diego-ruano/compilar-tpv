@@ -23,6 +23,14 @@ pub enum ResultadoSubidaImagen {
     Rechazada { motivo: String },
 }
 
+/// Lo que contesta el servidor a una consulta de estado.
+pub struct EstadoConsultado {
+    pub verificado: EstadoVerificado,
+    /// El token de sesión con el que seguir: el que renovó `/status` o, si no vino, el que se usó
+    /// (el del keyring o el del `/refresh`). `None` en un rechazo firmado: el del keyring no cambia.
+    pub token: Option<String>,
+}
+
 /// Servicio de licenciamiento: **transporte y almacén**, sin política.
 ///
 /// El adaptador trae datos del servidor (incluida la verificación ed25519 de la firma, que es
@@ -63,13 +71,20 @@ pub trait LicensingService: Send + Sync {
 
     /// Consulta el estado de la licencia (petición firmada con el token del keyring) y **verifica
     /// la firma ed25519** contra la clave pública pineada antes de devolverla. Si el token de sesión
-    /// ha caducado, lo renueva de forma transparente por device-proof (`/refresh`) y reintenta; el
-    /// token renovado se guarda en el keyring. El `Err` está clasificado para que el dominio sepa
-    /// qué significa el fallo.
+    /// ha caducado, lo renueva de forma transparente por device-proof (`/refresh`) y reintenta. El
+    /// `Err` está clasificado para que el dominio sepa qué significa el fallo.
+    ///
+    /// No guarda nada: el token con el que seguir vuelve en `EstadoConsultado`, y lo guarda el caso
+    /// de uso junto con el estado (LIC-08).
     async fn consultar_estado(
         &self,
         state: &LicenseLocalState,
-    ) -> Result<EstadoVerificado, FalloConsulta>;
+    ) -> Result<EstadoConsultado, FalloConsulta>;
+
+    /// Guarda en el keyring el token que trajo `consultar_estado`. Un fallo del keyring no invalida
+    /// la comprobación (la petición ya se hizo con un token válido): se ignora y se reintentará en
+    /// la siguiente.
+    fn guardar_token(&self, token: &str);
 
     /// RI-36: milisegundos transcurridos según el reloj MONÓTONO del proceso desde la llamada
     /// anterior (que queda como nueva marca). `None` en la primera llamada del proceso: entre un

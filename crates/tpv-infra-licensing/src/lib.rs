@@ -37,7 +37,7 @@ use serde_json::Value as JsonValue;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cloud_sync::CloudSyncService;
-use tpv_application::ports::licensing::{LicensingService, PairingService, ResultadoSubidaImagen};
+use tpv_application::ports::licensing::{EstadoConsultado, LicensingService, PairingService, ResultadoSubidaImagen};
 use tpv_application::ports::correo_recuperacion::CorreoRecuperacionService;
 use tpv_application::ports::recuperacion_pin::RecuperacionPinService;
 use tpv_contracts::errors::ErrorCode;
@@ -534,15 +534,6 @@ impl LicensingAdapter {
         Self { app_data_dir }
     }
 
-    /// Guarda en el keyring el token de sesión efectivo tras un `/status`: el que renovó el
-    /// servidor (`renovado`) o, si no vino, el que ya se estaba usando (`actual`). Un fallo de
-    /// escritura del keyring no invalida el gate (la petición ya se hizo con el token válido): se
-    /// ignora y se reintentará en la siguiente comprobación.
-    fn persistir_token(&self, renovado: Option<&str>, actual: &str) {
-        let efectivo = renovado.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(actual);
-        let _ = set_license_token(efectivo);
-    }
-
     /// GET `/v1/license/status` firmado con device-proof. Devuelve el cuerpo parseado, o el error
     /// ya clasificado. NO verifica la firma todavía (eso es del llamante, que conoce el `ts`).
     async fn get_status(
@@ -769,7 +760,7 @@ impl LicensingService for LicensingAdapter {
     async fn consultar_estado(
         &self,
         state: &LicenseLocalState,
-    ) -> Result<EstadoVerificado, FalloConsulta> {
+    ) -> Result<EstadoConsultado, FalloConsulta> {
         // El token vive en el keyring. Si no está, no podemos consultar: se trata como offline
         // (gracia) en vez de tirar la licencia por un problema puntual de acceso al keyring.
         let token = get_license_token().map_err(|_| FalloConsulta::Inalcanzable)?;
@@ -779,7 +770,7 @@ impl LicensingService for LicensingAdapter {
         // de la licencia: se devuelve como tal, y el dominio lo evalúa igual que un `/status` bueno.
         let (ok, ts) = match self.get_status(&token, &state.device_id).await {
             Ok(v) => v,
-            Err(Rechazo::Firmado(estado)) => return Ok(estado),
+            Err(Rechazo::Firmado(estado)) => return Ok(sin_token(estado)),
             Err(Rechazo::Fallo(fallo)) => {
                 // Un token de sesión caducado NO debe borrar la licencia: se renueva por
                 // device-proof (`/refresh`) y se reintenta una vez. El worker devuelve
@@ -790,20 +781,19 @@ impl LicensingService for LicensingAdapter {
                 }
                 let nuevo = match self.refrescar_token(&token, &state.device_id).await {
                     Ok(t) => t,
-                    Err(Rechazo::Firmado(estado)) => return Ok(estado),
+                    Err(Rechazo::Firmado(estado)) => return Ok(sin_token(estado)),
                     Err(Rechazo::Fallo(f)) => return Err(f),
                 };
                 let (ok, ts) = match self.get_status(&nuevo, &state.device_id).await {
                     Ok(v) => v,
-                    Err(Rechazo::Firmado(estado)) => return Ok(estado),
+                    Err(Rechazo::Firmado(estado)) => return Ok(sin_token(estado)),
                     Err(Rechazo::Fallo(f)) => return Err(f),
                 };
                 let assertion = verificar_assertion(ok.assertion, ts, reloj::ahora_ms())?;
-                // Persistir el token efectivo (el que renovó /status, o el del refresh si no).
-                self.persistir_token(ok.token.as_deref(), &nuevo);
-                return Ok(EstadoVerificado {
-                    assertion,
-                    server_time_ms: ok.server_time,
+                return Ok(EstadoConsultado {
+                    verificado: EstadoVerificado { assertion, server_time_ms: ok.server_time },
+                    // El que renovó /status, o el del refresh si no.
+                    token: Some(token_efectivo(ok.token.as_deref(), &nuevo)),
                 });
             }
         };
@@ -812,13 +802,27 @@ impl LicensingService for LicensingAdapter {
         // la hora de la nube. Con la del equipo, uno adelantado más de cinco minutos daría por
         // caducada una aserción recién firmada, justo cuando la petición ya había entrado.
         let assertion = verificar_assertion(ok.assertion, ts, reloj::ahora_ms())?;
-        // El worker renueva el token en cada /status: se guarda en el keyring (fin del muro de 30d).
-        self.persistir_token(ok.token.as_deref(), &token);
-        Ok(EstadoVerificado {
-            assertion,
-            server_time_ms: ok.server_time,
+        Ok(EstadoConsultado {
+            verificado: EstadoVerificado { assertion, server_time_ms: ok.server_time },
+            // El worker renueva el token en cada /status (fin del muro de 30d).
+            token: Some(token_efectivo(ok.token.as_deref(), &token)),
         })
     }
+
+    fn guardar_token(&self, token: &str) {
+        let _ = set_license_token(token);
+    }
+}
+
+/// El token con el que seguir tras un `/status`: el que renovó el servidor (`renovado`) o, si no
+/// vino, el que ya se estaba usando (`actual`).
+fn token_efectivo(renovado: Option<&str>, actual: &str) -> String {
+    renovado.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(actual).to_string()
+}
+
+/// Un rechazo firmado no trae token: el del keyring se queda como está.
+fn sin_token(verificado: EstadoVerificado) -> EstadoConsultado {
+    EstadoConsultado { verificado, token: None }
 }
 
 /* =========================================================

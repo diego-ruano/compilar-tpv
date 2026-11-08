@@ -203,7 +203,7 @@ pub fn assertion_fresca(a: &AssertionVerificada, client_ts_enviado: i64, ahora_m
 /// Respuesta de estado ya verificada, lista para que decida el dominio.
 ///
 /// El token renovado que el servidor devuelve en cada `/status` (fin del muro de los 30 días) NO
-/// aparece aquí: el adaptador lo persiste directamente en el keyring. El dominio solo decide.
+/// aparece aquí: es una credencial, y va aparte hasta el keyring. El dominio solo decide.
 #[derive(Debug, Clone)]
 pub struct EstadoVerificado {
     pub assertion: AssertionVerificada,

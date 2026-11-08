@@ -13,6 +13,7 @@ use tpv_domain::licensing::{
     ResultadoActivacion, SolicitudActivacion, Veredicto,
 };
 use chrono::{Local, TimeZone};
+use std::sync::{Mutex, MutexGuard};
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::{AppError, AppResult};
@@ -20,6 +21,27 @@ use crate::ports::licensing::LicensingService;
 use crate::ports::notificaciones::Notifier;
 
 const HORA_MS: i64 = 60 * 60 * 1000;
+
+/// LIC-08 · Cuántas veces se ha reescrito a mano la licencia de este equipo (borrarla, activarla,
+/// sumarle una clave), con el cerrojo bajo el que se escribe su estado.
+///
+/// Una comprobación lee el estado, espera a la nube y guarda lo que contesta. Si mientras esperaba
+/// se pulsaba «Borrar y volver a activar», lo que guardaba al volver era la licencia anulada que se
+/// acababa de borrar, y su token: la pantalla volvía a «Licencia anulada». Ahora la comprobación
+/// apunta este número al leer y sólo guarda si no ha cambiado; si cambió, vuelve a comprobar la
+/// licencia que haya entonces.
+static REESCRITURAS: Mutex<u64> = Mutex::new(0);
+
+fn cerrojo() -> MutexGuard<'static, u64> {
+    REESCRITURAS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Reescribe la licencia a mano: lo que se estuviera comprobando desde antes ya no se guarda.
+fn reescribir<T>(f: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
+    let mut n = cerrojo();
+    *n += 1;
+    f()
+}
 
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -44,13 +66,15 @@ pub fn get_state(svc: &dyn LicensingService) -> AppResult<Option<LicenseLocalSta
 /// motivo se anota: la pantalla de activación lo explica, y lo que dice —que la misma clave vuelve a
 /// activar sin perder nada si se deshace— es justo lo que nadie adivina delante de un formulario vacío.
 pub fn clear_state(svc: &dyn LicensingService) -> AppResult<()> {
-    let motivo = svc
-        .load_state()?
-        .and_then(|s| s.status)
-        .and_then(|s| EstadoLicencia::from_code(&s))
-        .filter(|e| matches!(e, EstadoLicencia::Revoked | EstadoLicencia::DeviceReplaced))
-        .map(|e| e.codigo());
-    svc.delete_state(motivo)
+    reescribir(|| {
+        let motivo = svc
+            .load_state()?
+            .and_then(|s| s.status)
+            .and_then(|s| EstadoLicencia::from_code(&s))
+            .filter(|e| matches!(e, EstadoLicencia::Revoked | EstadoLicencia::DeviceReplaced))
+            .map(|e| e.codigo());
+        svc.delete_state(motivo)
+    })
 }
 
 /// Activa la licencia en este dispositivo. Si el servidor exige el código de cambio de equipo,
@@ -75,7 +99,7 @@ pub async fn activate(
             let cambio_de_equipo = concedido.cambio_de_equipo;
             let tiempo_sumado = concedido.tiempo_sumado;
             let estado = estado_inicial(concedido);
-            svc.save_state(&estado)?;
+            reescribir(|| svc.save_state(&estado))?;
             Ok(LicenseActivateOutcome {
                 outcome: "activated".to_string(),
                 state: Some(estado),
@@ -109,7 +133,7 @@ pub async fn sumar_clave(svc: &dyn LicensingService, clave: String) -> AppResult
     match svc.activar_remoto(&solicitud, None).await? {
         ResultadoActivacion::Activada(concedido) if concedido.tiempo_sumado => {
             let estado = estado_inicial(concedido);
-            svc.save_state(&estado)?;
+            reescribir(|| svc.save_state(&estado))?;
             Ok(LicenseActivateOutcome {
                 outcome: "activated".to_string(),
                 state: Some(estado),
@@ -344,16 +368,37 @@ fn horas_ceil(ms: i64) -> i64 {
     }
 }
 
+/// LIC-08: si la licencia se reescribe mientras se espera a la nube, se comprueba la que haya
+/// entonces. Que vuelva a pasar en cada vuelta ya no es casualidad, y se deja de insistir.
 async fn comprobar(svc: &dyn LicensingService, forzar_red: bool) -> AppResult<LicenseGateResult> {
-    let Some(mut estado) = svc.load_state()? else {
-        return Ok(LicenseGateResult {
+    for _ in 0..3 {
+        if let Some(res) = comprobar_una_vez(svc, forzar_red).await? {
+            return Ok(res);
+        }
+    }
+    Err(AppError::conflict(
+        "La licencia ha cambiado mientras se comprobaba. Vuelve a intentarlo.",
+    ))
+}
+
+/// `None` si la licencia se reescribió a mano mientras se consultaba (LIC-08).
+async fn comprobar_una_vez(
+    svc: &dyn LicensingService,
+    forzar_red: bool,
+) -> AppResult<Option<LicenseGateResult>> {
+    let (leida, guardado) = {
+        let n = cerrojo();
+        (*n, svc.load_state()?)
+    };
+    let Some(mut estado) = guardado else {
+        return Ok(Some(LicenseGateResult {
             allowed: false,
             reason: Motivo::NecesitaActivacion.codigo(),
             state: None,
             // Puede que este equipo no sea nuevo, sino uno al que le anularon la licencia: la
             // pantalla de activación necesita saberlo para poder decirlo.
             last_rejection: svc.last_rejection()?,
-        });
+        }));
     };
 
     let ahora = now_ms();
@@ -361,17 +406,19 @@ async fn comprobar(svc: &dyn LicensingService, forzar_red: bool) -> AppResult<Li
     contar_tiempo(svc, &mut estado, ahora);
 
     match svc.consultar_estado(&estado).await {
-        Ok(verificado) => aplicar(
+        Ok(consultado) => aplicar(
             svc,
-            actualizar(estado, &verificado, ahora),
-            dom::evaluar_estado(verificado.assertion.estado),
+            leida,
+            actualizar(estado, &consultado.verificado, ahora),
+            consultado.token.as_deref(),
+            dom::evaluar_estado(consultado.verificado.assertion.estado),
         ),
 
         Err(fallo) => {
             let base = dom::base_gracia(estado.last_check_ok_ms, estado.activated_at_ms);
             let consumido = estado.offline_consumido_ms.unwrap_or(0);
             match dom::evaluar_fallo(&fallo, base, ahora, consumido, forzar_red) {
-                Resolucion::Decidido(veredicto) => aplicar(svc, estado, veredicto),
+                Resolucion::Decidido(veredicto) => aplicar(svc, leida, estado, None, veredicto),
                 Resolucion::Indecidible => Err(AppError::external(fallo.to_string())),
             }
         }
@@ -394,7 +441,7 @@ fn actualizar(
     // RI-36: con la licencia comprobada, la gracia offline vuelve a empezar.
     estado.offline_consumido_ms = Some(0);
     estado.marca_tiempo_ms = Some(ahora);
-    // El token renovado ya lo persistió el adaptador en el keyring; aquí no hay token que tocar.
+    // El token renovado no va en el estado: lo guarda `aplicar` en el keyring.
     estado
 }
 
@@ -416,6 +463,8 @@ fn contar_tiempo(svc: &dyn LicensingService, estado: &mut LicenseLocalState, aho
 /// pocos minutos (job `licencia_reloj`) para que lo que se pueda esconder cerrando la app y atrasando
 /// el reloj sean minutos, no las 6 h que separan dos comprobaciones.
 pub fn contar_tiempo_sin_conexion(svc: &dyn LicensingService) -> AppResult<()> {
+    // LIC-08: leer y guardar con el cerrojo cogido, o lo leído se escribiría encima de un borrado.
+    let _cerrojo = cerrojo();
     let Some(mut estado) = svc.load_state()? else {
         return Ok(());
     };
@@ -423,19 +472,35 @@ pub fn contar_tiempo_sin_conexion(svc: &dyn LicensingService) -> AppResult<()> {
     svc.save_state(&estado)
 }
 
-/// Guarda el estado y compone la respuesta para la UI. Nunca borra (RI-09, ver `Veredicto`).
+/// Guarda el estado y el token que trajo la consulta, y compone la respuesta para la UI. Nunca
+/// borra (RI-09, ver `Veredicto`).
+///
+/// LIC-08: si la licencia se ha reescrito a mano desde que se leyó (`leida`), no guarda nada y
+/// devuelve `None`: lo comprobado ya no es la licencia que hay.
 fn aplicar(
     svc: &dyn LicensingService,
+    leida: u64,
     estado: LicenseLocalState,
+    token: Option<&str>,
     veredicto: Veredicto,
-) -> AppResult<LicenseGateResult> {
+) -> AppResult<Option<LicenseGateResult>> {
+    let n = cerrojo();
+    if *n != leida {
+        return Ok(None);
+    }
+    // El token primero: es la credencial de la siguiente petición, y guardarlo no depende de que
+    // se pueda escribir el fichero.
+    if let Some(token) = token {
+        svc.guardar_token(token);
+    }
     svc.save_state(&estado)?;
-    Ok(LicenseGateResult {
+    drop(n);
+    Ok(Some(LicenseGateResult {
         allowed: veredicto.permitido,
         reason: veredicto.motivo.codigo(),
         last_rejection: None,
         state: Some(estado),
-    })
+    }))
 }
 
 fn estado_inicial(concedido: Concesion) -> LicenseLocalState {
@@ -458,8 +523,8 @@ fn estado_inicial(concedido: Concesion) -> LicenseLocalState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ports::licensing::EstadoConsultado;
     use async_trait::async_trait;
-    use std::sync::Mutex;
 
     const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
@@ -694,16 +759,27 @@ mod tests {
         async fn consultar_estado(
             &self,
             _: &LicenseLocalState,
-        ) -> Result<EstadoVerificado, dom::FalloConsulta> {
+        ) -> Result<EstadoConsultado, dom::FalloConsulta> {
             unreachable!("la activación no consulta el estado")
         }
+        fn guardar_token(&self, _: &str) {
+            unreachable!("la activación no guarda el token de una consulta")
+        }
     }
+
+    /// Lo que pasa en el equipo mientras la consulta espera a la nube.
+    type MientrasConsulta = Box<dyn FnOnce(&ServicioDeGate) + Send>;
 
     /// Un servicio con una licencia guardada al que se le dice qué contesta el servidor.
     struct ServicioDeGate {
         guardado: Mutex<Option<LicenseLocalState>>,
         borrado_con: Mutex<Option<Option<String>>>,
-        respuesta: Mutex<Option<Result<EstadoVerificado, dom::FalloConsulta>>>,
+        /// Lo que contesta el servidor, una respuesta por consulta. Cada respuesta buena trae el
+        /// token `token-<n>`, con `n` el número de la consulta.
+        respuestas: Mutex<std::collections::VecDeque<Result<EstadoVerificado, dom::FalloConsulta>>>,
+        consultas: Mutex<u32>,
+        tokens: Mutex<Vec<String>>,
+        mientras_consulta: Mutex<Option<MientrasConsulta>>,
         /// Lo que contesta el reloj monótono (RI-36).
         monotono: Mutex<Option<i64>>,
     }
@@ -715,7 +791,10 @@ mod tests {
             ServicioDeGate {
                 guardado: Mutex::new(Some(s)),
                 borrado_con: Mutex::new(None),
-                respuesta: Mutex::new(Some(respuesta)),
+                respuestas: Mutex::new([respuesta].into()),
+                consultas: Mutex::new(0),
+                tokens: Mutex::new(Vec::new()),
+                mientras_consulta: Mutex::new(None),
                 monotono: Mutex::new(None),
             }
         }
@@ -751,8 +830,21 @@ mod tests {
         async fn consultar_estado(
             &self,
             _: &LicenseLocalState,
-        ) -> Result<EstadoVerificado, dom::FalloConsulta> {
-            self.respuesta.lock().unwrap().take().expect("una consulta por test")
+        ) -> Result<EstadoConsultado, dom::FalloConsulta> {
+            let n = {
+                let mut c = self.consultas.lock().unwrap();
+                *c += 1;
+                *c
+            };
+            let mientras = self.mientras_consulta.lock().unwrap().take();
+            if let Some(f) = mientras {
+                f(self);
+            }
+            let respuesta = self.respuestas.lock().unwrap().pop_front().expect("una respuesta por consulta");
+            respuesta.map(|verificado| EstadoConsultado { verificado, token: Some(format!("token-{n}")) })
+        }
+        fn guardar_token(&self, token: &str) {
+            self.tokens.lock().unwrap().push(token.to_string());
         }
         fn transcurrido_monotono(&self) -> Option<i64> {
             *self.monotono.lock().unwrap()
@@ -876,6 +968,56 @@ mod tests {
         gate(&svc, None).await.unwrap();
         clear_state(&svc).unwrap();
         assert_eq!(*svc.borrado_con.lock().unwrap(), Some(None));
+    }
+
+    /// LIC-08: la comprobación salió con la licencia anulada y, mientras esperaba a la nube, se
+    /// pulsó «Borrar y volver a activar». Al volver no puede guardar la anulada ni su token: el
+    /// equipo se queda sin licencia, en la pantalla de activar.
+    #[tokio::test]
+    async fn una_comprobacion_que_llega_tarde_no_resucita_la_licencia_borrada() {
+        let svc = ServicioDeGate::con(Ok(firmado(EstadoLicencia::Revoked)));
+        svc.guardado.lock().unwrap().as_mut().unwrap().status = Some("revoked".into());
+        *svc.mientras_consulta.lock().unwrap() = Some(Box::new(|s| clear_state(s).unwrap()));
+
+        let res = check_now(&svc).await.unwrap();
+
+        assert!(!res.allowed);
+        assert_eq!(res.reason, Motivo::NecesitaActivacion.codigo());
+        assert!(res.state.is_none());
+        assert!(svc.guardado.lock().unwrap().is_none(), "la licencia borrada ha vuelto");
+        assert!(svc.tokens.lock().unwrap().is_empty(), "ha guardado el token de la borrada");
+        assert_eq!(*svc.consultas.lock().unwrap(), 1);
+    }
+
+    /// LIC-08: si lo que pasó mientras tanto fue que se activó otra licencia, se comprueba esa, y
+    /// lo que queda es lo que contestó la nube sobre ella, con su token.
+    #[tokio::test]
+    async fn una_comprobacion_que_llega_tarde_comprueba_la_licencia_que_hay_ahora() {
+        let svc = ServicioDeGate::con(Ok(firmado(EstadoLicencia::Revoked)));
+        svc.respuestas.lock().unwrap().push_back(Ok(firmado(EstadoLicencia::Active)));
+        *svc.mientras_consulta.lock().unwrap() = Some(Box::new(|s| {
+            let mut nueva = state_con_expiry(None);
+            nueva.tenant_id = "t2".into();
+            nueva.activated_at_ms = now_ms();
+            reescribir(|| s.save_state(&nueva)).unwrap();
+        }));
+
+        let res = gate(&svc, None).await.unwrap();
+
+        assert!(res.allowed);
+        assert_eq!(res.reason, "ok");
+        let guardado = svc.guardado.lock().unwrap().clone().unwrap();
+        assert_eq!(guardado.tenant_id, "t2");
+        assert_eq!(guardado.status.as_deref(), Some("active"));
+        assert_eq!(*svc.tokens.lock().unwrap(), ["token-2"]);
+    }
+
+    /// LIC-08: sin nada de por medio, la comprobación guarda el token que trajo.
+    #[tokio::test]
+    async fn la_comprobacion_guarda_el_token_que_trae() {
+        let svc = ServicioDeGate::con(Ok(firmado(EstadoLicencia::Active)));
+        gate(&svc, None).await.unwrap();
+        assert_eq!(*svc.tokens.lock().unwrap(), ["token-1"]);
     }
 
     fn activacion(respuesta: ResultadoActivacion) -> (ServicioQueActiva, LicenseActivateInput) {
