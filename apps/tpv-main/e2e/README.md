@@ -80,7 +80,7 @@ APK, arranca Appium (su salida, en `target/e2e/appium.log`) y lo para al termina
 | La Handy: emulador, APK, Appium y su sesión | `helpers/handy.ts` |
 | Lo fiscal | `helpers/fiscal.ts` |
 | Lo común a los tramos de copias | `helpers/copias.ts` |
-| Licencias de la tanda (emitir, revocar, desrevocar, acortar) | `helpers/licencias.ts` |
+| Licencias de la tanda (emitir, revocar, desrevocar, acortar, retirar) | `helpers/licencias.ts` |
 | Aislamiento del equipo (verificar el binario, preparar AppData, romper la base) | `helpers/entorno.ts` |
 | Gestos (pulsar, escribir, leer por IPC) | `helpers/ui.ts` |
 | Esperar a la nube (outbox a cero) | `helpers/nube.ts` |
@@ -135,7 +135,8 @@ APK, arranca Appium (su salida, en `target/e2e/appium.log`) y lo para al termina
   `typecheck`).
 - **Un fallo deja una captura** en `e2e/fallos/` (no se versiona).
 - **Sus errores llegan a Sentry como `e2e`**: lo decide el identificador (`lib.rs::entorno_de_sentry`).
-- **Cada tanda crea una base en Turso** que no se borra sola.
+- **Cada tanda crea una base en Turso** (grupo `tpv`) y la borra al terminar, con
+  `/v1/admin/pruebas/retirar`. Lo que deje una tanda que no llegue al final lo borra la siguiente.
 
 ## Lo que no sube a E2E
 

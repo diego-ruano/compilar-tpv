@@ -7,9 +7,9 @@
 // tenant deja de migrar. El recorrido de la licencia, además, la revoca y la caduca a propósito:
 // por eso va el último.
 //
-// Al terminar la tanda se revoca (`onComplete`): queda marcada y no se confunde con una de verdad.
-// La base Turso que crea su activación no se borra sola — es el precio de esta prueba, y por eso es
-// una por tanda y no una por recorrido.
+// Se emite como de pruebas, y al terminar la tanda (`onComplete`) se retira su negocio con la base
+// Turso que creó su activación: no se acumulan en el panel. Retirar se lleva también lo que dejara
+// una tanda que no llegó al final.
 
 const BASE = process.env.TPV_API_BASE || "https://tpv-api.altarialights.workers.dev";
 
@@ -56,9 +56,17 @@ export async function emitirLicencia(nombre: string): Promise<LicenciaEmitida> {
         termMonths: 12,
         email: "e2e@altarialights.test",
         name: nombre,
+        pruebas: true,
     });
     return { licenseId: res.licenseId, key: res.key };
 }
+
+/** Borra los negocios de pruebas que queden, con su base de Turso, y anula sus licencias. */
+export const retirarLasDePrueba = () =>
+    admin<{ negocios: number; bases: number; licencias: number; fallos: { tenantId: string; error: string }[] }>(
+        "POST",
+        "/v1/admin/pruebas/retirar",
+    );
 
 export const revocar = (licenseId: string) =>
     admin<{ status: string }>("POST", `/v1/admin/licenses/${licenseId}/revoke`);

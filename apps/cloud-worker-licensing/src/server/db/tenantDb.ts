@@ -153,6 +153,31 @@ export async function tursoCreateDbToken(
 	return jwt;
 }
 
+/**
+ * Borra la base de un tenant en Turso. Que ya no exista (404) cuenta como hecho: es lo que
+ * permite repetir un borrado que se quedó a medias.
+ */
+export async function tursoDeleteDatabase(
+	env: Pick<TenantDbEnv, "TURSO_PLATFORM_TOKEN" | "TURSO_ORG_SLUG">,
+	dbName: string,
+): Promise<"borrada" | "no_existia"> {
+	const r = await fetch(
+		`https://api.turso.tech/v1/organizations/${encodeURIComponent(
+			env.TURSO_ORG_SLUG,
+		)}/databases/${encodeURIComponent(dbName)}`,
+		{
+			method: "DELETE",
+			headers: {
+				Authorization: `Bearer ${env.TURSO_PLATFORM_TOKEN}`,
+				Accept: "application/json",
+			},
+		},
+	);
+	if (r.status === 404) return "no_existia";
+	if (!r.ok) throw new Error(`turso_delete_db_failed (${r.status}) ${await r.text()}`);
+	return "borrada";
+}
+
 function toNumOrNull(v: any): number | null {
 	// ⚠️ `Number(null)` es 0 (y es finito), así que sin este guardia una columna SQL NULL se
 	// convertía en 0 en vez de en null. Eso rompía la rotación del token del tenant de dos formas:

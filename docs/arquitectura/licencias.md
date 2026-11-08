@@ -272,6 +272,12 @@ las congela al irse la Main. **Caducar no empuja**: se nota en la siguiente comp
 | Desrevocar | `POST …/:id/unrevoke` (vuelve a `issued` o `active`) | `pnpm license:unrevoke` |
 | Extender | `POST …/:id/extend` | `pnpm license:extend -- --id … --months 12` |
 | Acortar | `POST …/:id/shorten` (puede dejarla caducada) | `pnpm license:shorten` |
+| Retirar los negocios del E2E | `POST /v1/admin/pruebas/retirar` | — (lo llama el E2E al terminar) |
+
+Una licencia emitida con `pruebas: true` (`origin = 'pruebas'`) es del E2E. Retirar borra la base en
+Turso de cada negocio cuyas licencias sean todas de pruebas, lo da por borrado (`status = 'deleted'`)
+y anula sus licencias. Un negocio con cualquier otra licencia no se toca. Las bases de los negocios
+se crean en el grupo `tpv` de Turso (`GRUPO_TURSO`), que tiene que existir antes de desplegar.
 
 Todas exigen `ADMIN_API_TOKEN` (comparación de tiempo constante; sin el secreto la ruta responde 503)
 y quedan en `admin_audit`. El CLI lee el token de la variable de entorno `ADMIN_API_TOKEN`.

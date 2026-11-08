@@ -1494,7 +1494,8 @@ export async function auditAdmin(
 		| "release_promocionar"
 		| "reserva_web_dominio_poner"
 		| "reserva_web_dominio_quitar"
-		| "reserva_web_revocar_clave",
+		| "reserva_web_revocar_clave"
+		| "pruebas_retirar",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

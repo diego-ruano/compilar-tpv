@@ -10,7 +10,8 @@ export type LicenseStatus =
 	| "expired" // pasada la caducidad
 	| "revoked"; // anulada (fraude, reembolso, admin)
 
-export type LicenseOrigin = "stripe" | "manual";
+/** `pruebas`: las que emite el E2E, que se retiran con su base al acabar (`admin/pruebas.ts`). */
+export type LicenseOrigin = "stripe" | "manual" | "pruebas";
 
 /**
  * Cómo ve el gate el estado de la licencia. Lo deriva el servidor (`computeLicenseState`)

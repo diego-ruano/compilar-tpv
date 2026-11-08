@@ -15,6 +15,7 @@
 //   GET|POST /v1/admin/pilotos            → qué negocios son bares piloto (RI-30, abajo)
 //   GET /v1/admin/releases                → las últimas versiones, con su canal
 //   POST /v1/admin/releases/promote       → pasa una versión de beta a stable
+//   POST /v1/admin/pruebas/retirar        → borra los negocios de pruebas del E2E con su base (`pruebas.ts`)
 //   /v1/admin/reservas-web/:tenantId      → dominios y clave de la reserva web (`reservas_web/admin.routes.ts`)
 //
 // La clave en claro se devuelve UNA sola vez, en la respuesta del issue: después ya solo existe
@@ -43,6 +44,7 @@ import {
 } from "../../server/licenseStore";
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
+import { retirarNegociosDePrueba } from "./pruebas";
 import { cuerpo } from "../../lib/validacion";
 import { TARGETS } from "../updates/updates.routes";
 import { reservasWebAdminRoutes } from "../reservas_web/admin.routes";
@@ -72,6 +74,8 @@ const issueSchema = z.object({
 	name: z.string().max(200).optional(),
 	/** Si es `true`, además de devolver la clave se la enviamos al cliente por correo. */
 	sendKey: z.boolean().optional(),
+	/** Una licencia del E2E: su negocio se retira, con su base, en `/pruebas/retirar`. */
+	pruebas: z.boolean().optional(),
 });
 
 adminRoutes.post("/licenses", cuerpo(issueSchema), async (c) => {
@@ -79,13 +83,13 @@ adminRoutes.post("/licenses", cuerpo(issueSchema), async (c) => {
 	const miss = assertEnv(env, ["LICENSE_STORE_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
 	if (miss) return c.json({ ok: false, error: miss }, 500);
 
-	const { termMonths, email, name, sendKey } = c.req.valid("json");
+	const { termMonths, email, name, sendKey, pruebas } = c.req.valid("json");
 	const db = getDb(env);
 
 	const { license, keyPlain } = await issueLicense(db, {
 		claves: env,
 		termMonths,
-		origin: "manual",
+		origin: pruebas ? "pruebas" : "manual",
 		customerEmail: email.trim().toLowerCase(),
 		customerName: name?.trim() || null,
 	});
@@ -582,4 +586,20 @@ adminRoutes.post("/releases/promote", cuerpo(promocionarSchema), async (c) => {
 	}
 	await auditAdmin(db, "release_promocionar", null, { version, target: target || "windows", arch: arch ?? "todos" });
 	return c.json({ ok: true, version });
+});
+
+/* ── Negocios de pruebas del E2E ─────────────────────────────────────────────
+ *
+ * Cada tanda del E2E activa una licencia emitida con `pruebas: true`, y activarla crea una base en
+ * Turso. Al acabar la tanda se llama a esto, que retira esos negocios con su base (y los que hubiera
+ * dejado una tanda que no llegó al final). Lo que no sea de pruebas no lo toca: ver `pruebas.ts`.
+ */
+adminRoutes.post("/pruebas/retirar", async (c) => {
+	const miss = assertEnv(c.env, ["TURSO_PLATFORM_TOKEN", "TURSO_ORG_SLUG"]);
+	if (miss) return c.json({ ok: false, error: miss }, 500);
+
+	const db = getDb(c.env);
+	const retirada = await retirarNegociosDePrueba(db, c.env);
+	await auditAdmin(db, "pruebas_retirar", null, retirada);
+	return c.json({ ok: true, ...retirada });
 });

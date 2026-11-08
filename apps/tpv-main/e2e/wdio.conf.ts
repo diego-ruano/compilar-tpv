@@ -34,7 +34,7 @@ import {
     exigirAppium,
     instalarApk,
 } from "./helpers/handy.js";
-import { emitirLicencia, revocar } from "./helpers/licencias.js";
+import { emitirLicencia, retirarLasDePrueba } from "./helpers/licencias.js";
 
 /**
  * La Handy de Android entra en la tanda salvo que se pida lo contrario: hace falta un emulador (o
@@ -76,7 +76,7 @@ const RECETAS: Record<string, Receta> = {
     "licencia.e2e.ts": { equipo: "el de antes" },
 };
 
-/** La licencia emitida para esta tanda, para revocarla al terminar. */
+/** La licencia emitida para esta tanda, para retirarla al terminar. */
 let emitida: { licenseId: string } | null = null;
 
 function receta(specs: string[]): { nombre: string; receta: Receta } {
@@ -260,10 +260,10 @@ export const config: WebdriverIO.Config = {
                 instalarApk(serie);
                 appium = await arrancarAppium();
             } catch (e) {
-                // Como arriba: un hook que lanza no para WDIO. Y la licencia ya emitida se revoca, que
+                // Como arriba: un hook que lanza no para WDIO. Y la licencia ya emitida se retira, que
                 // `onComplete` no llega a correr tras un `exit`.
                 console.error(`\n[e2e] NO SE PUEDE EJECUTAR (Handy)\n\n${(e as Error).message}\n`);
-                await revocar(lic.licenseId).catch(() => {});
+                await retirarLasDePrueba().catch(() => {});
                 process.exit(1);
             }
             console.log(`[e2e] handy     ${serie} (Appium en marcha)`);
@@ -287,15 +287,19 @@ export const config: WebdriverIO.Config = {
     },
 
     /**
-     * La licencia de la tanda se revoca al terminar: queda marcada y no se confunde con una de
-     * verdad en el panel. Best-effort — que falle esto no puede tumbar una tanda que ha pasado.
+     * Al terminar se retira el negocio de la tanda, con su base de Turso, y se anula su licencia.
+     * Best-effort — que falle esto no puede tumbar una tanda que ha pasado: lo que quede lo retira
+     * la siguiente.
      */
     async onComplete() {
         appium?.kill();
         if (!emitida) return;
-        const { licenseId } = emitida;
-        await revocar(licenseId).catch((e: unknown) => {
-            console.log(`[e2e] no se pudo revocar la licencia de la tanda (${licenseId}): ${e}`);
-        });
+        try {
+            const r = await retirarLasDePrueba();
+            console.log(`[e2e] retirados ${r.negocios} negocio(s) de pruebas y ${r.bases} base(s) de Turso`);
+            for (const f of r.fallos) console.log(`[e2e] no se pudo retirar ${f.tenantId}: ${f.error}`);
+        } catch (e) {
+            console.log(`[e2e] no se pudieron retirar los negocios de pruebas: ${e}`);
+        }
     },
 };
