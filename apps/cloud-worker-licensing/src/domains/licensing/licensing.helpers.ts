@@ -445,6 +445,12 @@ async function ensureTenantInitialAdmin(client: Client): Promise<void> {
 
 // ---------------- Provisión de la BD del tenant (Turso) ----------------
 
+/**
+ * El grupo de Turso donde van las bases de los tenants: el del proyecto, en Frankfurt. Tiene que
+ * existir antes de desplegar: Turso no lo crea al crear una base, contesta «group not found».
+ */
+export const GRUPO_TURSO = "tpv";
+
 /** Sanitiza el nombre de DB: minúsculas, números y guiones; máx 64. */
 function makeDbNameFromTenant(tenantId: string): string {
 	const base = `tpv-${tenantId}`.toLowerCase();
@@ -465,7 +471,7 @@ async function tursoCreateDatabase(
 				"Content-Type": "application/json",
 				Accept: "application/json",
 			},
-			body: JSON.stringify({ name: dbName, group: "default" }),
+			body: JSON.stringify({ name: dbName, group: GRUPO_TURSO }),
 		},
 	);
 
