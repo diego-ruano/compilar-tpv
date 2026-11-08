@@ -143,6 +143,11 @@ export function NotaLineaModal({
 }
 
 
+/**
+ * `bloqueado`: no admite toques (se está cobrando). `abriendo`: la mesa todavía se está abriendo; los
+ * toques sí entran —la pantalla los apunta y los añade al terminar—, pero la tarjeta se ve apagada
+ * para que se note que aún no está lista.
+ */
 export const ProductCard = React.memo(function ProductCard({
     p,
     qty,
@@ -150,8 +155,10 @@ export const ProductCard = React.memo(function ProductCard({
     onRemove,
     onInfo,
     bloqueado,
+    abriendo = false,
 }: {
     bloqueado: boolean;
+    abriendo?: boolean;
     p: ProductoDisplay;
     qty: number;
     onAdd: (p: ProductoDisplay) => void;
@@ -159,11 +166,15 @@ export const ProductCard = React.memo(function ProductCard({
     onInfo: (p: ProductoDisplay) => void;
 }) {
     return (
-        <div className="rounded-xl border border-border bg-surface p-3 text-left">
+        <div className={cn(
+            "rounded-xl border border-border bg-surface p-3 text-left transition-opacity",
+            (bloqueado || abriendo) && "opacity-60",
+        )}>
             <div
                 role="button"
                 tabIndex={bloqueado ? -1 : 0}
                 aria-disabled={bloqueado}
+                aria-busy={abriendo}
                 onClick={() => { if (!bloqueado) onAdd(p); }}
                 onKeyDown={(e) => {
                     if (!bloqueado && (e.key === "Enter" || e.key === " ")) {
@@ -171,7 +182,10 @@ export const ProductCard = React.memo(function ProductCard({
                         onAdd(p);
                     }
                 }}
-                className="w-full text-left hover:opacity-95 transition cursor-pointer outline-none"
+                className={cn(
+                    "w-full text-left hover:opacity-95 transition outline-none",
+                    bloqueado ? "cursor-not-allowed" : "cursor-pointer",
+                )}
             >
                 <div className="relative">
                     <ImageWithFallback
@@ -221,7 +235,7 @@ export const ProductCard = React.memo(function ProductCard({
                         "w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold",
                         qty === 0 && "opacity-40 cursor-not-allowed",
                     )}
-                    disabled={qty === 0 || bloqueado}
+                    disabled={qty === 0 || bloqueado || abriendo}
                 >
                     −
                 </button>

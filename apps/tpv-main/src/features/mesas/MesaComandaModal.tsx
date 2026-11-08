@@ -193,12 +193,24 @@ export default function MesaComandaModal({
         setProductDetailTarget(null);
     };
 
+    // Lo que se toca mientras la mesa se abre (en la Handy, uno o dos segundos de nube): se apunta y
+    // se añade, en el mismo orden, en cuanto la comanda está lista. Antes esos toques se perdían sin
+    // aviso, y quien pedía dos cañas nada más abrir la mesa se quedaba con una. La lista vive en la
+    // ref, que es la que se vacía de una vez; el estado sólo la pinta.
+    const enEsperaRef = useRef<ProductoDisplay[]>([]);
+    const [enEspera, setEnEspera] = useState<ProductoDisplay[]>([]);
+    const ponerEnEspera = useCallback((lista: ProductoDisplay[]) => {
+        enEsperaRef.current = lista;
+        setEnEspera(lista);
+    }, []);
+
     useEffect(() => {
         if (!open) return;
         let cancelado = false;
         const lecturas = lecturaTicketRef.current;
         comandaActualRef.current = null;
         ++lecturaTicketRef.current.version;
+        ponerEnEspera([]);
         setTicket([]);
         setIdComanda(null);
         setLoadingTicket(true);
@@ -216,6 +228,7 @@ export default function MesaComandaModal({
             } catch (e) {
                 if (!cancelado) {
                     toast.error("No se pudo abrir la comanda", toAppError(e).message);
+                    ponerEnEspera([]);
                     setIdComanda(null);
                     setTicket([]);
                 }
@@ -223,7 +236,7 @@ export default function MesaComandaModal({
                 if (!cancelado) setLoadingTicket(false);
             }
         })();
-        return () => { cancelado = true; comandaActualRef.current = null; ++lecturas.version; };
+        return () => { cancelado = true; comandaActualRef.current = null; ++lecturas.version; ponerEnEspera([]); };
         // La foto de la reserva sólo cambia al abrir o al cambiar de mesa.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, mesaId, idUsuario, reservaMeta?.estado, reservaMeta?.idReserva]);
@@ -351,7 +364,12 @@ export default function MesaComandaModal({
     }, [open, leidaEn]);
 
     const addProductoToTicket = useCallback(async (p: ProductoDisplay) => {
-        if (!idComanda || loadingTicket || cobroEnCursoRef.current || (!isAdmin && operador == null)) return;
+        if (cobroEnCursoRef.current || (!isAdmin && operador == null)) return;
+        if (loadingTicket) {
+            ponerEnEspera([...enEsperaRef.current, p]);
+            return;
+        }
+        if (!idComanda) return;
         ++lecturaTicketRef.current.version;
         await cola.ejecutar(async () => {
             let destino = comandaActualRef.current ?? idComanda;
@@ -377,7 +395,7 @@ export default function MesaComandaModal({
             aplicarTicket(destino, t);
             notifyChanged();
         });
-    }, [idComanda, loadingTicket, isAdmin, operador, cola, aplicarTicket, notifyChanged, mesaId, reserva]);
+    }, [idComanda, loadingTicket, isAdmin, operador, cola, aplicarTicket, notifyChanged, mesaId, reserva, ponerEnEspera]);
 
     const removeProductoFromTicket = useCallback(async (productoId: string) => {
         if (!idComanda || loadingTicket || cobroEnCursoRef.current) return;
@@ -392,8 +410,18 @@ export default function MesaComandaModal({
     const anadirConAviso = useMemo(() => conAviso(addProductoToTicket), [addProductoToTicket]);
     const quitarConAviso = useMemo(() => conAviso(removeProductoFromTicket), [removeProductoFromTicket]);
 
+    // Con la mesa ya abierta, lo apuntado entra por el camino de siempre: `cola` lo escribe en orden.
+    useEffect(() => {
+        if (loadingTicket || !idComanda || enEsperaRef.current.length === 0) return;
+        const lote = enEsperaRef.current;
+        ponerEnEspera([]);
+        for (const p of lote) anadirConAviso(p);
+    }, [loadingTicket, idComanda, enEspera, anadirConAviso, ponerEnEspera]);
+
+    // Lo apuntado cuenta ya en la tarjeta: es la señal de que el toque ha entrado.
     const countEnTicket = (productoId: string) =>
-        ticket.filter((t) => t.productoId === productoId && !t.pagado).length;
+        ticket.filter((t) => t.productoId === productoId && !t.pagado).length
+        + enEspera.filter((p) => p.ID_Producto === productoId).length;
 
     const totalPendiente = useMemo(
         () =>
@@ -983,6 +1011,11 @@ export default function MesaComandaModal({
                                 </div>
                             ) : (
                                 <div className="h-full overflow-y-auto pr-1">
+                                    {loadingTicket ? (
+                                        <p className="mb-2 text-sm text-fg-muted" role="status">
+                                            Abriendo la mesa… Lo que toques se añade en cuanto esté lista.
+                                        </p>
+                                    ) : null}
                                     {showingSearch ? (
                                         loadingBusqueda ? (
                                             <p className="text-sm text-fg-muted">Buscando…</p>
@@ -997,7 +1030,8 @@ export default function MesaComandaModal({
                                                         key={p.ID_Producto}
                                                         p={p}
                                                         qty={countEnTicket(p.ID_Producto)}
-                                                        bloqueado={loadingTicket || cobrandoFactura}
+                                                        bloqueado={cobrandoFactura}
+                                                        abriendo={loadingTicket}
                                                         onAdd={anadirConAviso}
                                                         onRemove={quitarConAviso}
                                                         onInfo={abrirDetalleProducto}
@@ -1043,7 +1077,8 @@ export default function MesaComandaModal({
                                                     key={p.ID_Producto}
                                                     p={p}
                                                     qty={countEnTicket(p.ID_Producto)}
-                                                        bloqueado={loadingTicket || cobrandoFactura}
+                                                        bloqueado={cobrandoFactura}
+                                                        abriendo={loadingTicket}
                                                     onAdd={anadirConAviso}
                                                     onRemove={quitarConAviso}
                                                     onInfo={abrirDetalleProducto}

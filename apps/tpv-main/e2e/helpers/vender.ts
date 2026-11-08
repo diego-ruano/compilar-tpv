@@ -192,21 +192,9 @@ export async function anadirLineas(p: Producto, unidades: number, b: WebdriverIO
         `categoría "${p.categoria}"`,
         30_000,
     );
-    // Mientras el ticket carga, el modal ignora el toque SIN avisar (la tarjeta queda
-    // `aria-disabled`, y sin comanda abierta ni eso). En la Main es un instante; en la Handy, que lo
-    // pregunta a la nube, tarda lo bastante como para perder el primer toque. Se espera a que la
-    // mesa esté lista: tarjeta activa y ticket sin «Cargando…».
-    await b.waitUntil(
-        async () => {
-            const cargando = await g.conTexto("div", "Cargando…").isDisplayed().catch(() => false);
-            const bloqueada = await b
-                .$(`//p[contains(normalize-space(.), ${literalXPath(p.nombre)})]/ancestor::*[@aria-disabled][1]`)
-                .getAttribute("aria-disabled")
-                .catch(() => "true");
-            return !cargando && bloqueada === "false";
-        },
-        { timeout: 60_000, timeoutMsg: `La mesa no llegó a estar lista para añadir "${p.nombre}"` },
-    );
+    // No se espera a que la mesa termine de abrirse, a propósito: en la Handy, que lo pregunta a la
+    // nube, los primeros toques caen mientras se abre, y la pantalla tiene que apuntarlos y añadirlos
+    // al terminar. Antes los perdía sin avisar.
 
     // La tarjeta se busca UNA vez: después de la primera pulsación el ticket pinta una línea con el
     // mismo nombre, y buscarla de nuevo podría acabar pulsando esa línea en vez de la carta.
