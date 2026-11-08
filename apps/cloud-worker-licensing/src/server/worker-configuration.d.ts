@@ -10,7 +10,7 @@ interface __BaseEnv_Env {
 	LIMITADOR_RESERVA_WEB: RateLimit;
 	LIMITADOR_RESERVA_WEB_ALTA: RateLimit;
 	ASSETS: Fetcher;
-	TURSO_DATABASE_URL: "libsql://tpvcontrol-altarialights.aws-eu-west-1.turso.io";
+	TURSO_DATABASE_URL: "libsql://tpv-control-altarialights.aws-eu-central-1.turso.io";
 	TURSO_ORG_SLUG: "altarialights";
 	EMAIL_FROM_ADDRESS: "pedidos@altarialights.com";
 	EMAIL_FROM_NAME: "TPV";

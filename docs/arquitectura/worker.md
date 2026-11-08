@@ -220,7 +220,7 @@ Turso no (más de 24 h en el plan Free, una base borrada, el propio proveedor):
   `RETENCION_ENVIOS_MS`.
 - Sin `LICENSE_STORE_KEY` las DEK y los tokens de Turso de la copia no se pueden descifrar: ese secreto
   tiene que estar guardado fuera de Cloudflare.
-- ⚠️ **Restaurar cambia de base**: `turso db create <nueva> --from-db tpvcontrol --timestamp <RFC3339>`
+- ⚠️ **Restaurar cambia de base**: `turso db create <nueva> --from-db tpv-control --timestamp <RFC3339>`
   (PITR) o `--from-dump copia.sql`, un token nuevo (`TURSO_AUTH_TOKEN`), su URL en `TURSO_DATABASE_URL`
   de `wrangler.json` y desplegar, **deprisa**: mientras el worker apunte a una base sin esas filas, cada
   TPV que compruebe su licencia la borra. Las licencias activadas después del punto restaurado hay que

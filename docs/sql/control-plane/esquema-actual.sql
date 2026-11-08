@@ -12,7 +12,7 @@
 -- gestiona a mano en Turso, y si cambia allí esta foto se queda vieja sin que nada avise, así que
 -- hay que regenerarla a mano:
 --
---   turso db shell tpvcontrol-altarialights "SELECT * FROM sqlite_master;"
+--   turso db shell tpv-control "SELECT * FROM sqlite_master;"
 --
 -- De ese volcado se quitan las entradas `sqlite_autoindex_*` (sin SQL: son los índices que SQLite
 -- crea solo para las claves primarias y los UNIQUE) y se agrupa cada tabla con sus índices.

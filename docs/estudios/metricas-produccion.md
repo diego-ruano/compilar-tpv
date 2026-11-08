@@ -182,7 +182,7 @@ Vigilar también:
 - **Bases activas por mes**: con una base por tenant, este número *es* tu número de clientes. Marca
   el salto de plan antes que ninguna otra métrica.
 - **Almacenamiento por tenant**: el input de DB-14.
-- **Latencia p95 de consulta desde el worker**: la región es `aws-eu-west-1`; si la Handy va lenta,
+- **Latencia p95 de consulta desde el worker**: la región es `aws-eu-central-1` (Frankfurt); si la Handy va lenta,
   aquí se ve si es la BD o el camino.
 
 ---
