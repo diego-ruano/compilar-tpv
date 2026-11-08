@@ -13,7 +13,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
-import { CORREO_DE_PRUEBAS } from "../src/domains/admin/pruebas";
+import { CORREO_DE_PRUEBAS, NEGOCIOS_POR_LLAMADA } from "../src/domains/admin/pruebas";
 import { activateLicenseFirstTime, getLicenseById, issueLicense } from "../src/server/licenseStore";
 import type { LicenseOrigin } from "../src/shared";
 
@@ -131,7 +131,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 
 			const res = await e.post("/pruebas/retirar");
 			expect(res.status).toBe(200);
-			expect(await res.json()).toMatchObject({ ok: true, negocios: 2, bases: 2, licencias: 3, fallos: [] });
+			expect(await res.json()).toMatchObject({ ok: true, negocios: 2, bases: 2, licencias: 3, fallos: [], quedan: false });
 
 			expect(e.borradasEnTurso.sort()).toEqual(["tpv-t-antigua", "tpv-t-tanda"]);
 			for (const t of ["t-tanda", "t-antigua"]) {
@@ -203,6 +203,21 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 				licencias: 0,
 			});
 			expect(e.borradasEnTurso).toEqual([]);
+		});
+	});
+
+	it("retira como mucho NEGOCIOS_POR_LLAMADA por llamada y dice si quedan más", async () => {
+		// Cada negocio son peticiones salientes, y el Worker tiene un tope por llamada.
+		await escenario(async (e) => {
+			for (let i = 0; i < NEGOCIOS_POR_LLAMADA + 2; i++) {
+				await e.negocio("pruebas", CORREO_DE_PRUEBAS, `t-${String(i).padStart(2, "0")}`);
+			}
+
+			const primero = await (await e.post("/pruebas/retirar")).json();
+			expect(primero).toMatchObject({ negocios: NEGOCIOS_POR_LLAMADA, quedan: true });
+			const segundo = await (await e.post("/pruebas/retirar")).json();
+			expect(segundo).toMatchObject({ negocios: 2, quedan: false });
+			expect(new Set(e.borradasEnTurso).size).toBe(NEGOCIOS_POR_LLAMADA + 2);
 		});
 	});
 

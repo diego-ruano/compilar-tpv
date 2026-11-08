@@ -61,12 +61,30 @@ export async function emitirLicencia(nombre: string): Promise<LicenciaEmitida> {
     return { licenseId: res.licenseId, key: res.key };
 }
 
-/** Borra los negocios de pruebas que queden, con su base de Turso, y anula sus licencias. */
-export const retirarLasDePrueba = () =>
-    admin<{ negocios: number; bases: number; licencias: number; fallos: { tenantId: string; error: string }[] }>(
-        "POST",
-        "/v1/admin/pruebas/retirar",
-    );
+type Retirada = {
+    negocios: number;
+    bases: number;
+    licencias: number;
+    fallos: { tenantId: string; error: string }[];
+    quedan: boolean;
+};
+
+/**
+ * Borra los negocios de pruebas que queden, con su base de Turso, y anula sus licencias. El worker
+ * retira unos pocos por llamada, así que se repite mientras queden y la llamada anterior avance.
+ */
+export async function retirarLasDePrueba(): Promise<Retirada> {
+    const total: Retirada = { negocios: 0, bases: 0, licencias: 0, fallos: [], quedan: true };
+    while (total.quedan) {
+        const r = await admin<Retirada>("POST", "/v1/admin/pruebas/retirar");
+        total.negocios += r.negocios;
+        total.bases += r.bases;
+        total.licencias += r.licencias;
+        total.fallos = r.fallos;
+        total.quedan = r.quedan && r.negocios > 0;
+    }
+    return total;
+}
 
 export const revocar = (licenseId: string) =>
     admin<{ status: string }>("POST", `/v1/admin/licenses/${licenseId}/revoke`);

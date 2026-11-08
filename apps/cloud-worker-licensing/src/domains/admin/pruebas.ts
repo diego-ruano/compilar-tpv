@@ -11,7 +11,7 @@
 import type { Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
-import { enTransaccion, exec, rowsAffected } from "../../server/db";
+import { exec, rowsAffected } from "../../server/db";
 import { tursoDeleteDatabase } from "../../server/db/tenantDb";
 
 /** El correo con el que el E2E emite sus licencias (`apps/tpv-main/e2e/helpers/licencias.ts`). */
@@ -21,6 +21,13 @@ export const CORREO_DE_PRUEBAS = "e2e@altarialights.test";
 function dePruebas(alias: string): string {
 	return `(${alias}.origin = 'pruebas' OR (${alias}.origin = 'manual' AND ${alias}.customer_email = ?1))`;
 }
+
+/**
+ * Cuántos negocios retira una llamada. Cada uno son dos peticiones salientes (Turso y la base
+ * central), y un Worker tiene un tope de peticiones por llamada (50 en el plan gratuito): sin techo,
+ * una purga grande se quedaba a medias con «Too many subrequests». Lo que no cabe sale en `quedan`.
+ */
+export const NEGOCIOS_POR_LLAMADA = 10;
 
 /** Un negocio cuyas licencias son todas de pruebas. */
 const SOLO_DE_PRUEBAS = `NOT EXISTS (
@@ -36,17 +43,19 @@ export type Retirada = {
 	licencias: number;
 	/** Los negocios que no se pudieron retirar; se quedan como estaban para el siguiente intento. */
 	fallos: { tenantId: string; error: string }[];
+	/** Si quedan más negocios por retirar que los de esta llamada. */
+	quedan: boolean;
 };
 
 /**
- * Retira todos los negocios de pruebas que queden. Repetirlo no hace nada: lo ya retirado no vuelve
- * a salir, y lo que falló se reintenta.
+ * Retira los negocios de pruebas que queden, `NEGOCIOS_POR_LLAMADA` como mucho. Repetirlo no hace
+ * nada: lo ya retirado no vuelve a salir, y lo que falló se reintenta.
  */
 export async function retirarNegociosDePrueba(
 	db: Client,
 	env: Pick<Env, "TURSO_PLATFORM_TOKEN" | "TURSO_ORG_SLUG">,
 ): Promise<Retirada> {
-	const retirada: Retirada = { negocios: 0, bases: 0, licencias: 0, fallos: [] };
+	const retirada: Retirada = { negocios: 0, bases: 0, licencias: 0, fallos: [], quedan: false };
 
 	const pendientes = await exec(
 		db,
@@ -55,25 +64,32 @@ export async function retirarNegociosDePrueba(
 		   LEFT JOIN tenant_databases d ON d.tenant_id = l.tenant_id
 		   LEFT JOIN tenants t ON t.tenant_id = l.tenant_id
 		  WHERE l.tenant_id IS NOT NULL AND ${dePruebas("l")} AND ${SOLO_DE_PRUEBAS}
-		    AND (d.tenant_id IS NOT NULL OR t.status IS NOT 'deleted');`,
-		[CORREO_DE_PRUEBAS],
+		    AND (d.tenant_id IS NOT NULL OR t.status IS NOT 'deleted')
+		  ORDER BY l.tenant_id
+		  LIMIT ?2;`,
+		[CORREO_DE_PRUEBAS, NEGOCIOS_POR_LLAMADA + 1],
 	);
+	const filas = pendientes.rows as any[];
+	retirada.quedan = filas.length > NEGOCIOS_POR_LLAMADA;
 
-	for (const fila of pendientes.rows as any[]) {
+	for (const fila of filas.slice(0, NEGOCIOS_POR_LLAMADA)) {
 		const tenantId = String(fila.tenant_id);
 		const base = fila.turso_db_name ? String(fila.turso_db_name) : null;
 		try {
 			// La base primero: si Turso falla, el negocio se queda como estaba y el siguiente
 			// intento la vuelve a encontrar. Al revés, se perdería la fila que dice cuál borrar.
 			if (base && (await tursoDeleteDatabase(env, base)) === "borrada") retirada.bases++;
-			await enTransaccion(db, async (tx) => {
-				await exec(tx, `DELETE FROM tenant_databases WHERE tenant_id = ?;`, [tenantId]);
-				await exec(
-					tx,
-					`UPDATE tenants SET status = 'deleted', updated_at_ms = ? WHERE tenant_id = ?;`,
-					[Date.now(), tenantId],
-				);
-			});
+			// Las dos juntas y en una sola petición.
+			await db.batch(
+				[
+					{ sql: `DELETE FROM tenant_databases WHERE tenant_id = ?;`, args: [tenantId] },
+					{
+						sql: `UPDATE tenants SET status = 'deleted', updated_at_ms = ? WHERE tenant_id = ?;`,
+						args: [Date.now(), tenantId],
+					},
+				],
+				"write",
+			);
 			retirada.negocios++;
 		} catch (e: any) {
 			retirada.fallos.push({ tenantId, error: String(e?.message || e) });
