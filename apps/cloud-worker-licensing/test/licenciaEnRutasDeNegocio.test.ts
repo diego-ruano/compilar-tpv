@@ -112,11 +112,12 @@ async function pedir(
 	metodo: "GET" | "POST",
 	ruta: string,
 	seed: Uint8Array,
+	licHash = LIC_HASH,
 ): Promise<Response> {
 	const token = await firmarSesion(ENV as any, {
 		tenantId: TENANT,
 		deviceId: MAIN,
-		licHash: LIC_HASH,
+		licHash,
 	});
 	const ts = Date.now();
 	const mensaje = [
@@ -190,6 +191,53 @@ describe("REV-12 · la licencia manda en TODAS las rutas de negocio", () => {
 		// daría por desplazada SIEMPRE y bloquearía todas las del local.
 		await escenario("handy", { caducaEnDias: 30, mainDeLaLicencia: "otro-equipo", rol: "handy" }, async (seed) => {
 			expect((await negocio(seed)).status).toBe(200);
+		});
+	});
+});
+
+describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () => {
+	// Un token con el `licHash` de otra fila (de otro negocio, o sin negocio) no puede hacer pasar la
+	// licencia anulada de éste. `/refresh` ya no los firma; esto cubre cualquier otro camino.
+	it("con la licencia de otro negocio, viva, no abre nada", async () => {
+		await escenario("aud03-ajena", { caducaEnDias: 30, anulada: true }, async (seed, sql) => {
+			sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('tenant-otro');`);
+			sql.exec(
+				`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
+				                       disabled, term_months, origin, issued_at_ms, activated_at_ms,
+				                       expires_at_ms, customer_email, created_at_ms, updated_at_ms)
+				 VALUES ('lic-ajena', 'hash-ajena', 'tenant-otro', ?, 'active', 0, 12, 'stripe', 1, 1, ?,
+				         'otro@a.test', 1, 1);`,
+				MAIN,
+				Date.now() + 30 * DIA,
+			);
+
+			const res = await pedir(loginRoutes as any, "GET", "/users", seed, "hash-ajena");
+			expect(res.status).toBe(403);
+			expect(((await res.json()) as any).error).toBe("license_not_found");
+
+			// Y `/status` ni la firma, ni renueva el token, ni enseña su correo.
+			const status = await pedir(licenseRoutes as any, "GET", "/status", seed, "hash-ajena");
+			expect(status.status).toBe(404);
+			const cuerpo = (await status.json()) as any;
+			expect(cuerpo.error).toBe("license_not_found");
+			expect(cuerpo.assertion).toBeUndefined();
+			expect(cuerpo.token).toBeUndefined();
+			expect(cuerpo.info).toBeUndefined();
+		});
+	});
+
+	it("con una clave sin estrenar, tampoco", async () => {
+		await escenario("aud03-sin-estrenar", { caducaEnDias: 30, anulada: true }, async (seed, sql) => {
+			sql.exec(
+				`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status,
+				                       disabled, term_months, origin, issued_at_ms, customer_email,
+				                       created_at_ms, updated_at_ms)
+				 VALUES ('lic-nueva', 'hash-nueva', NULL, NULL, 'issued', 0, 12, 'stripe', 1, 'bar@a.test', 1, 1);`,
+			);
+
+			const res = await pedir(loginRoutes as any, "GET", "/users", seed, "hash-nueva");
+			expect(res.status).toBe(403);
+			expect(((await res.json()) as any).error).toBe("license_not_found");
 		});
 	});
 });

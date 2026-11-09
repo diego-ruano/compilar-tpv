@@ -608,6 +608,11 @@ licenseRoutes.get("/status", async (c) => {
 
 	const lic = await getLicenseByHash(db, claims.licHash);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+	// AUD-03: como en `/refresh`, la licencia tiene que ser la de su negocio. Un token con el `licHash`
+	// de otra fila recibía aquí una aserción firmada de esa licencia, un token renovado y su correo.
+	if (lic.tenant_id !== claims.tenantId) {
+		return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+	}
 
 	const now = Date.now();
 	const clientTs = Number(c.req.header("X-Device-Ts") || 0);
@@ -692,6 +697,14 @@ licenseRoutes.post("/refresh", async (c) => {
 
 	const lic = await getLicenseByHash(db, claims.licHash);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+	// AUD-03: la licencia tiene que ser la de su negocio. Los claims se leen sin verificar, así que el
+	// `licHash` lo elige quien llama, y el device-proof sólo ata tenant y dispositivo: sin esto, una
+	// Handy de un negocio con la licencia anulada o caducada salía con un token firmado hacia otra
+	// fila (una clave suya sin estrenar o ya canjeada) y se saltaba REV-12. Se contesta como si no
+	// existiera y sin aserción firmada, que hablaría de una licencia ajena.
+	if (lic.tenant_id !== claims.tenantId) {
+		return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+	}
 	if (estaAnulada(lic)) {
 		return rechazoFirmado(c, { lic, claims, error: "license_revoked", status: 403 });
 	}

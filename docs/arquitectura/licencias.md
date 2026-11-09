@@ -181,6 +181,8 @@ el PIN de un administrador podría cambiarlo y llevarse la licencia.
   la clave del dispositivo no está registrada en ese tenant —una Main que se usó como Handy de otro
   negocio—, `readmitirMain` la vuelve a dar de alta si firma con su clave registrada y sigue siendo
   la Main.
+- La licencia del `licHash` tiene que ser la del tenant del token (AUD-03): si no, `license_not_found`
+  sin aserción, que hablaría de una licencia ajena.
 - Deriva el estado (`computeLicenseState`):
 
 | Estado | Cuándo | ¿Trabaja? |
@@ -234,13 +236,16 @@ a cero.
 El pulso es el job `licencia`, cada 6 h; usa `gate` (que aplica la gracia y emite los avisos a los
 administradores), no la comprobación manual del botón «Reintentar». Además de esto, el worker
 **comprueba la licencia en todas las rutas autenticadas** (`tenantAuth` → `lib/licenciaEnUso.ts`, con
-caché de 60 s), así que una licencia anulada deja sin correo, R2, volcado ni lecturas de la Handy
-aunque el equipo conserve un token. El ticket del WebSocket la comprueba **sin** esa caché: es con
-lo que reconecta la Main a la que se acaba de anular la licencia. Detalle en [permisos.md](permisos.md).
+caché de 60 s), y que sea la de su negocio, así que una licencia anulada deja sin correo, R2, volcado
+ni lecturas de la Handy aunque el equipo conserve un token. El ticket del WebSocket la comprueba
+**sin** esa caché: es con lo que reconecta la Main a la que se acaba de anular la licencia. Detalle en
+[permisos.md](permisos.md).
 
 ### Renovar el token
 
-`POST /v1/license/refresh`: lee los claims del token **sin verificarlo** y exige el device-proof. Con
+`POST /v1/license/refresh`: lee los claims del token **sin verificarlo** y exige el device-proof, que
+sólo ata tenant y dispositivo; por eso la licencia del `licHash` tiene que ser la de ese tenant
+(AUD-03), o sería quien llama el que la elige. Licencia de otro tenant o sin él → `license_not_found`;
 licencia anulada → `license_revoked`; dispositivo revocado → `device_revoked`; una Main desplazada →
 `device_replaced`. Una Handy recibe su token con su propia duración (`handyTokenTtlSeconds`) y sin la
 comprobación de traslado, que la daría por desplazada siempre (ver [emparejamiento.md](emparejamiento.md)).

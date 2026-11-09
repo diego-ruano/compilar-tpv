@@ -10,7 +10,8 @@
 //
 //   · una Handy viva renueva su token, y el que recibe es el mismo token con otra fecha;
 //   · una Handy revocada NO lo renueva, y se le dice por qué (para que deje de reintentar);
-//   · seguir siendo la Main de la licencia sigue siendo obligatorio para quien es una Main.
+//   · seguir siendo la Main de la licencia sigue siendo obligatorio para quien es una Main;
+//   · la licencia del token tiene que ser la de su negocio (AUD-03).
 
 import { describe, expect, it, vi } from "vitest";
 import * as ed from "@noble/ed25519";
@@ -89,8 +90,8 @@ async function escenario<T>(
  * puede estar caducado —es justo el caso— porque `/refresh` lee sus claims sin verificar y lo que
  * autentica de verdad es la firma de la clave privada del equipo.
  */
-async function renovar(deviceId: string, seed: Uint8Array): Promise<Response> {
-	const token = await firmarSesion(ENV as any, { tenantId: TENANT, deviceId, licHash: LIC_HASH });
+async function renovar(deviceId: string, seed: Uint8Array, licHash = LIC_HASH): Promise<Response> {
+	const token = await firmarSesion(ENV as any, { tenantId: TENANT, deviceId, licHash });
 	const ts = Date.now();
 	const mensaje = ["DEVICE_PROOF", ts, "POST", "/refresh", await sha256HexStr(token), await sha256HexBytes(new Uint8Array())].join("\n");
 	const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), seed));
@@ -153,6 +154,66 @@ describe("una Handy renueva su token", () => {
 			const res = await renovar(LA_HANDY, seed);
 			expect(res.status).toBe(403);
 			expect(((await res.json()) as any).error).toBe("device_replaced");
+		});
+	});
+});
+
+describe("AUD-03 · la licencia del token tiene que ser la de su negocio", () => {
+	// `/refresh` lee los claims sin verificar y el device-proof sólo ata tenant y dispositivo, así que
+	// el `licHash` lo elige quien llama. Una Handy de un negocio con la licencia anulada apuntaba a
+	// otra fila y salía con un token firmado que se saltaba REV-12 en todas las rutas.
+
+	/** Anula la licencia del bar y da de alta otra fila a la que apuntar. */
+	function otraFila(sql: any, fila: { id: string; hash: string; tenant: string | null; status: string }) {
+		sql.exec(`UPDATE licenses SET status='revoked', disabled=1 WHERE license_id='lic-1';`);
+		sql.exec(
+			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, main_device_id, status, term_months,
+			                       origin, issued_at_ms, expires_at_ms, customer_email, created_at_ms, updated_at_ms)
+			 VALUES (?, ?, ?, NULL, ?, 12, 'stripe', 1, ?, 'otro@ejemplo.test', 1, 1);`,
+			fila.id,
+			fila.hash,
+			fila.tenant,
+			fila.status,
+			Date.now() + 30 * 24 * 60 * 60 * 1000,
+		);
+	}
+
+	it("no renueva hacia una clave sin estrenar", async () => {
+		const { seed, pub } = await clave(3);
+		await escenario("aud03-sin-estrenar", { pubDeLaHandy: pub }, async (sql) => {
+			otraFila(sql, { id: "lic-nueva", hash: "hash-nueva", tenant: null, status: "issued" });
+
+			const res = await renovar(LA_HANDY, seed, "hash-nueva");
+			expect(res.status).toBe(404);
+			const cuerpo = (await res.json()) as any;
+			expect(cuerpo.error).toBe("license_not_found");
+			expect(cuerpo.token).toBeUndefined();
+		});
+	});
+
+	it("ni hacia una clave ya canjeada", async () => {
+		const { seed, pub } = await clave(3);
+		await escenario("aud03-canjeada", { pubDeLaHandy: pub }, async (sql) => {
+			otraFila(sql, { id: "lic-canjeada", hash: "hash-canjeada", tenant: null, status: "redeemed" });
+
+			const res = await renovar(LA_HANDY, seed, "hash-canjeada");
+			expect(res.status).toBe(404);
+			expect(((await res.json()) as any).error).toBe("license_not_found");
+		});
+	});
+
+	it("ni hacia la licencia de otro negocio, y sin aserción que hable de ella", async () => {
+		const { seed, pub } = await clave(3);
+		await escenario("aud03-ajena", { pubDeLaHandy: pub }, async (sql) => {
+			sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('tenant-otro');`);
+			otraFila(sql, { id: "lic-ajena", hash: "hash-ajena", tenant: "tenant-otro", status: "active" });
+
+			const res = await renovar(LA_HANDY, seed, "hash-ajena");
+			expect(res.status).toBe(404);
+			const cuerpo = (await res.json()) as any;
+			expect(cuerpo.error).toBe("license_not_found");
+			expect(cuerpo.token).toBeUndefined();
+			expect(cuerpo.assertion).toBeUndefined();
 		});
 	});
 });
