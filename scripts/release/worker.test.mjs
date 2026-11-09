@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { workerVersion, workerSentryConfig, readWorkerArtifact, validateCloudflare, configuracionLocal } from "./worker.mjs";
+import { workerVersion, workerSentryConfig, readWorkerArtifact, validateCloudflare, configuracionLocal, configuracionDelModo } from "./worker.mjs";
 
 test("Windows 7 nunca despliega el backend; tags y releases deben corresponder al producto", () => {
   const identity = workerVersion(undefined, {});
@@ -12,6 +12,18 @@ test("Windows 7 nunca despliega el backend; tags y releases deben corresponder a
   assert.throws(() => workerVersion(`win7-v${identity.version}`, {}), /nunca/);
   assert.throws(() => workerVersion("v99.99.99", {}));
   assert.throws(() => workerSentryConfig({}), /SENTRY_AUTH_TOKEN/);
+});
+
+// AUD-44: el paso que ejecuta Wrangler con el token de Cloudflare no necesita el de Sentry.
+test("desplegar sólo pide la identidad del artefacto; compilar y comprobar mapas, Sentry", () => {
+  const identity = workerVersion(undefined, {});
+  const commit = "c".repeat(40);
+  assert.deepEqual(configuracionDelModo("cloudflare", { GITHUB_SHA: commit }), { ...identity, commit });
+  assert.deepEqual(configuracionDelModo("cloudflare", { GITHUB_SHA: commit }, `v${identity.version}`), { ...identity, commit });
+  assert.throws(() => configuracionDelModo("cloudflare", {}, "v99.99.99"));
+  assert.throws(() => configuracionDelModo("cloudflare", {}, `win7-v${identity.version}`), /nunca/);
+  for (const mode of ["prepare", "verify"]) assert.throws(() => configuracionDelModo(mode, { GITHUB_SHA: commit }), /SENTRY_AUTH_TOKEN/);
+  assert.throws(() => configuracionDelModo("desplegar", {}), /Uso/);
 });
 
 test("se rechaza cualquier cambio o archivo añadido después de subir los mapas", () => {

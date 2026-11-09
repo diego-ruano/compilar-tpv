@@ -234,7 +234,7 @@ ni simbolización TypeScript; esto requiere completar el despliegue del worker.
 | Variable | Dónde | Qué |
 |---|---|---|
 | `TPV_SENTRY_DSN` | Entorno del build de escritorio (release) | DSN de `tpv-desktop` |
-| `SENTRY_AUTH_TOKEN` | Secret de GitHub; sólo validación/build Vite | Token interno para subir mapas y comprobar la configuración |
+| `SENTRY_AUTH_TOKEN` | Secret de GitHub; validación, builds y comprobación de mapas, nunca el paso que ejecuta Wrangler con el token de Cloudflare | Token interno para subir mapas y comprobar la configuración |
 | `SENTRY_ORG`, `SENTRY_PROJECT` | Variables de GitHub | `altaria-lights`, `tpv-desktop` |
 | `SENTRY_RELEASE` | Lo calcula el workflow desde el tag | Nombre del componente/variante y versión compartidos por eventos y mapas |
 | `TPV_RELEASE_BUILD` | Lo fija el workflow a `1` | Bloquea la release si faltan los datos de Sentry |

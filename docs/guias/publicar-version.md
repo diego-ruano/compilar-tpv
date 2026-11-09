@@ -59,6 +59,13 @@ referencias. La separación evita que código que se haya ejecutado al compilar 
 el runner que recibe la clave. No elimina la necesidad de revisar las dependencias y los cambios
 al workflow o al firmante.
 
+Ningún job de `release.yml` ni de `verify-sentry.yml` restaura ni guarda una caché (AUD-44): la de
+pnpm la guardan también los jobs de CI, que ejecutan código de terceros sin secretos, y pnpm usa lo
+que encuentra en su almacén sin revalidarlo contra el lockfile. Cada job instala desde el registro
+con `--frozen-lockfile`, y el de Windows compila Rust desde cero (tiene 90 minutos).
+`scripts/release/workflows.test.mjs`, que corre en CI, falla si un job con credenciales, o del que
+depende uno que firma o despliega, vuelve a declarar una caché.
+
 ### Versiones y mapas de Sentry
 
 El workflow exige versiones coherentes con el tag y valida el token y el DSN activo de
@@ -71,6 +78,15 @@ comprueba un evento real con traza TypeScript. El mismo job compila el widget de
 sin el widget no se despliega (`scripts/release/worker.mjs`). Una vez listos ambos builds y la firma del
 escritorio, otro runner despliega ese mismo artefacto del worker. El instalador sólo se publica
 cuando ese despliegue termina correctamente. El tag de Windows 7 no despliega el worker.
+
+El runner que despliega no instala el workspace: baja sólo el comprobador y Wrangler, a la misma
+versión que el worker, desde `.github/tools/worker-deployer/`, con `--frozen-lockfile
+--ignore-scripts` y sin caché, como el firmante. Wrangler corre en un paso que recibe sólo las
+credenciales de Cloudflare; el token de Sentry se queda en el paso que comprueba los mapas. La
+versión de prueba de `verify-sentry.yml` se sube igual, en un job aparte del que compila. Cuando
+se sube Wrangler en el worker, `scripts/release/workflows.test.mjs` pide subirlo también en el
+desplegador: cambiar la versión en su `package.json` y regenerar el lock con
+`pnpm --dir .github/tools/worker-deployer install --ignore-workspace`.
 
 Vite sube los mapas por release/ruta, sin Debug IDs incompatibles con el puente actual de Tauri.
 Tras compilar, CI comprueba que cada JS tiene su mapa en Sentry y que no quedan `.map` en el bundle.
@@ -103,7 +119,8 @@ siguiente comprobación de ese equipo.
 | `TAURI_SIGNING_PRIVATE_KEY` (contenido de `updater.key`), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`, `TPV_SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `CLOUDFLARE_API_TOKEN` | `R2_BUCKET`, `R2_PUBLIC_BASE_URL`, `TPV_API_BASE` (`https://tpv-api.altarialights.workers.dev`), `SENTRY_ORG` (`altaria-lights`), `SENTRY_PROJECT` (`tpv-desktop`), `SENTRY_WORKER_PROJECT` (`node-cloudflare-workers`), `CLOUDFLARE_ACCOUNT_ID` |
 
 El token de Cloudflare necesita Workers Editor en la cuenta que contiene `tpv-api`. El DSN del
-worker sigue siendo el secreto `SENTRY_DSN` de Cloudflare; el token de Sentry sólo entra en el build.
+worker sigue siendo el secreto `SENTRY_DSN` de Cloudflare; el token de Sentry entra en los builds y
+en la comprobación de mapas, nunca en el paso que ejecuta Wrangler con el de Cloudflare.
 Las migraciones de la base central siguen siendo manuales y deben estar aplicadas antes de tagear.
 
 Crear el token en Sentry → Settings de la organización → Developer Settings → Internal Integrations:
@@ -213,7 +230,7 @@ a compilar ni se publica con un `wrangler deploy` manual que omita las comprobac
 |---|---|---|
 | `ci.yml` | push y PR | Tests de todo el workspace Rust con `cargo nextest --workspace --profile ci --locked` y clippy en Windows (incluidos guardianes y anti-drift del esquema); exportación real de contratos IPC con `generate-types.mjs --check`; ESLint; typecheck y tests del frontend; typecheck y tests del worker, `check-migration-registry.mjs` y la cobertura de los arneses de contrato (informativa) |
 | `release.yml` | tag `v*` | CI completo, mapas de escritorio/worker y evento real de Sentry; firma aislada; despliegue del worker y publicación del instalador |
-| `verify-sentry.yml` | manual | Verifica ambos proyectos y mapas; prueba el envío del worker y, opcionalmente, sube una versión sin activarla |
+| `verify-sentry.yml` | manual | Verifica ambos proyectos y mapas; prueba el envío del worker y, opcionalmente, sube una versión sin activarla desde un job aparte, como el despliegue |
 | `audit.yml` | PR y los lunes | `cargo audit` y `pnpm audit --prod --audit-level moderate` |
 
 ## Lista

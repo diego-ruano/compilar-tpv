@@ -48,6 +48,16 @@ export function workerSentryConfig(env = process.env, tag) {
   return { ...identity, org: env.SENTRY_ORG, project: env.SENTRY_WORKER_PROJECT, authToken: env.SENTRY_AUTH_TOKEN, commit: env.GITHUB_SHA };
 }
 
+/**
+ * Lo que necesita cada modo. `cloudflare` sólo comprueba el artefacto y las credenciales de
+ * Cloudflare: no pide el token de Sentry, y el paso que ejecuta Wrangler no lo recibe (AUD-44).
+ */
+export function configuracionDelModo(mode, env = process.env, tag) {
+  if (mode === "prepare" || mode === "verify") return workerSentryConfig(env, tag);
+  if (mode === "cloudflare") return { ...workerVersion(tag, env), commit: env.GITHUB_SHA };
+  throw new Error("Uso: worker.mjs prepare|verify|cloudflare <directorio> [tag]");
+}
+
 export async function validateWorkerTarget(config) {
   const project = await (await sentryRequest(config, `projects/${config.org}/${config.project}/`)).json();
   const keys = await (await sentryRequest(config, `projects/${config.org}/${config.project}/keys/`)).json();
@@ -147,12 +157,11 @@ export async function validateCloudflare(env = process.env) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const [mode, directory = "target/worker-release", tag] = process.argv.slice(2);
-  const config = workerSentryConfig(process.env, tag);
+  const config = configuracionDelModo(mode, process.env, tag);
   const output = resolve(directory);
   if (mode === "prepare") await prepareWorker(output, config);
   else if (mode === "verify") { await validateWorkerTarget(config); await verifyWorkerMaps(output, config); }
-  else if (mode === "cloudflare") { readWorkerArtifact(output, config); await validateCloudflare(); }
-  else throw new Error("Uso: worker.mjs prepare|verify|cloudflare <directorio> [tag]");
+  else { readWorkerArtifact(output, config); await validateCloudflare(); }
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `version=${config.version}\nsentry_release=${config.release}\n`);
   console.log(`Worker ${config.release}: comprobación ${mode} correcta`);
 }

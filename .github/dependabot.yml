@@ -38,6 +38,11 @@ updates:
       interval: monthly
     open-pull-requests-limit: 2
 
+  # AUD-44: el desplegador del worker (.github/tools/worker-deployer) no tiene entrada a propósito.
+  # Su Wrangler es el del worker: cuando la entrada de la raíz lo sube, scripts/release/
+  # workflows.test.mjs falla hasta subirlo también allí. Una entrada propia abriría PR que ese test
+  # rechaza.
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

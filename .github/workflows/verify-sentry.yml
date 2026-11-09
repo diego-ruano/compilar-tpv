@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+# AUD-44: los tres jobs tienen credenciales y ninguno restaura ni guarda una caché: la de pnpm la
+# guardan también los jobs de CI, que ejecutan código de terceros sin secretos
+# (scripts/release/workflows.test.mjs).
 jobs:
   worker:
     runs-on: ubuntu-latest
@@ -20,10 +23,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      # AUD-44: sin `cache: pnpm`; compila con el workspace, que sale del registro con su lockfile.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Construir y comprobar Sentry con el worker real
         env:
@@ -33,23 +36,62 @@ jobs:
         run: |
           node scripts/release/worker.mjs prepare target/worker-release
           node scripts/release/verify-worker-sentry.mjs target/worker-release
-      - name: Validar Cloudflare y subir la versión de prueba
+      # AUD-44: la versión de prueba la sube otro job. En este ya ha corrido código de terceros
+      # (Vite, Wrangler, sentry-cli), y el token de Cloudflare no entra en un runner así.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: inputs.preview
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_WORKER_PROJECT: ${{ vars.SENTRY_WORKER_PROJECT }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          node scripts/release/worker.mjs cloudflare target/worker-release
-          pnpm --filter tpv-api exec wrangler versions upload --config ../../target/worker-release/wrangler.json --message "Comprobación de Sentry; no activa el despliegue"
+        with:
+          name: worker-preview-${{ github.run_attempt }}
+          path: target/worker-release/
+          if-no-files-found: error
+          retention-days: 1
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: sentry-worker-verification
           path: target/worker-sentry-verification.json
           if-no-files-found: ignore
+
+  # AUD-44: como deploy-worker en release.yml: sin el workspace ni caché, sólo el comprobador y
+  # Wrangler desde .github/tools/worker-deployer, sin scripts de instalación.
+  preview-worker:
+    name: Worker · subir la versión de prueba
+    needs: worker
+    if: inputs.preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/tools/worker-deployer/
+            /scripts/release/worker.mjs
+            /scripts/release/sentry-config.mjs
+            /apps/cloud-worker-licensing/package.json
+            /apps/tpv-main/package.json
+            /apps/tpv-main/src-tauri/Cargo.toml
+            /apps/tpv-main/src-tauri/tauri.conf.json
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.15.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Instalar sólo Wrangler (sin scripts ni caché)
+        run: pnpm --dir .github/tools/worker-deployer install --ignore-workspace --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: worker-preview-${{ github.run_attempt }}
+          path: target/worker-release
+      - name: Validar Cloudflare y subir la versión de prueba
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node scripts/release/worker.mjs cloudflare target/worker-release
+          pnpm --dir .github/tools/worker-deployer exec wrangler versions upload --config "$GITHUB_WORKSPACE/target/worker-release/wrangler.json" --message "Comprobación de Sentry; no activa el despliegue"
 
   desktop:
     runs-on: ubuntu-latest
@@ -59,10 +101,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      # AUD-44: sin `cache: pnpm`; el build sube los mapas con SENTRY_AUTH_TOKEN.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Comprobar proyecto, DSN y mapas de escritorio
         env:

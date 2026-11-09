@@ -1,0 +1,8 @@
+{
+  "name": "tpv-worker-deployer",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "dependencies": {
+    "wrangler": "4.96.0"
+  }
+}
