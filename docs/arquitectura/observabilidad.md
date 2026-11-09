@@ -191,8 +191,11 @@ El tag moderno `v<versión>` publica escritorio y API con una misma versión. El
 congelada nunca reemplaza el backend compartido con código antiguo.
 
 `worker.mjs` compila con Wrangler, inyecta Debug IDs y sube los mapas con la CLI oficial. Un
-manifiesto guarda hashes del JS, mapas, módulos SQL y configuración. Antes de desplegar se
-comprueban los hashes y el Debug ID remoto. Wrangler recibe `no_bundle`, para ejecutar los mismos
+manifiesto guarda hashes del JS, mapas, módulos SQL, widget y configuración. Su sha256 sale como
+salida del job que compila, y el que despliega lo exige antes de leer el artefacto (AUD-43): los
+hashes y el Debug ID remoto sólo prueban que el artefacto es coherente consigo mismo, y otro job de
+la ejecución podría sustituirlo por uno con el Debug ID legítimo copiado. Después se comprueban los
+hashes y el Debug ID remoto. Wrangler recibe `no_bundle`, y ningún `build`, para ejecutar los mismos
 bytes que se subieron. `verify-worker-sentry.mjs` ejecuta ese artefacto en workerd local sin
 credenciales de Turso y exige que Sentry reciba el fallo con archivo, línea y contexto TypeScript.
 Las pruebas van a `sentry-verification` y fallan antes de abrir una conexión o escribir datos.

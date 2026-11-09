@@ -48,8 +48,13 @@ jobs:
     runs-on: windows-latest
     # AUD-44: sin caché de Rust, los contratos y el instalador se compilan desde cero.
     timeout-minutes: 90
+    # AUD-43: el sha256 del manifiesto del instalador y el id del artefacto salen como salidas del
+    # job, y sign sólo firma ese artefacto con ese manifiesto. Otro job de la ejecución puede
+    # sustituir un artefacto con el mismo nombre, pero no las salidas de este.
     outputs:
       version: ${{ steps.version.outputs.version }}
+      manifest_sha256: ${{ steps.preparar.outputs.manifest_sha256 }}
+      artifact_id: ${{ steps.subir.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -97,10 +102,12 @@ jobs:
           SENTRY_RELEASE: ${{ steps.version.outputs.sentry_release }}
         run: node scripts/release/sentry-config.mjs maps apps/tpv-main/dist
       - name: Preparar instalador y hash
+        id: preparar
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: node scripts/release/artifact.mjs prepare target/release/bundle/nsis $env:RELEASE_VERSION artifacts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        id: subir
         with:
           name: unsigned-installer-${{ github.run_attempt }}
           path: artifacts/
@@ -111,6 +118,11 @@ jobs:
     needs: build
     runs-on: windows-latest
     timeout-minutes: 15
+    # AUD-43: lo mismo para el instalador firmado, que publish sólo publica con este id y este
+    # manifiesto (el de build, que la firma no cambia).
+    outputs:
+      manifest_sha256: ${{ steps.firmar.outputs.manifest_sha256 }}
+      artifact_id: ${{ steps.subir.outputs.artifact-id }}
     steps:
       # Sólo la herramienta bloqueada y el verificador: ni dependencias ni scripts de la app.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -130,16 +142,24 @@ jobs:
           node-version: 22
       - name: Instalar sólo el firmante (sin scripts ni caché del build)
         run: pnpm --dir tools/.github/tools/updater-signer install --ignore-workspace --frozen-lockfile --ignore-scripts
+      # AUD-43: por el id que publicó build, no por el nombre: un artefacto que otro job suba con ese
+      # nombre tiene otro id y aquí no se encuentra. Con ids, `merge-multiple` lo deja en `path`.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: unsigned-installer-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          merge-multiple: true
           path: artifacts
+      # AUD-43: rechaza, antes de nada, un manifiesto con otro sha256 o sin él: sólo se firma el
+      # instalador que compiló build.
       - name: Validar el instalador recibido
         env:
+          INSTALLER_MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
         run: node tools/scripts/release/artifact.mjs verify artifacts $env:RELEASE_VERSION
       - name: Firmar y comprobar con la clave pública del updater
+        id: firmar
         env:
+          INSTALLER_MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
@@ -152,6 +172,7 @@ jobs:
           node tools/scripts/release/artifact.mjs verify artifacts $env:RELEASE_VERSION tools/apps/tpv-main/src-tauri/tauri.conf.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        id: subir
         with:
           name: signed-installer-${{ github.run_attempt }}
           path: artifacts/
@@ -173,12 +194,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
+      # AUD-43: por el id que publicó sign, y con el sha256 de su manifiesto antes de nada.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: signed-installer-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.sign.outputs.artifact_id }}
+          merge-multiple: true
           path: artifacts
       - name: Verificar firma y hash antes de publicar
         env:
+          INSTALLER_MANIFEST_SHA256: ${{ needs.sign.outputs.manifest_sha256 }}
           RELEASE_VERSION: ${{ needs.build.outputs.version }}
         run: node scripts/release/artifact.mjs verify artifacts $env:RELEASE_VERSION apps/tpv-main/src-tauri/tauri.conf.json
       - name: Subir instalador a R2
@@ -224,6 +248,12 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # AUD-43: el sha256 del manifiesto y el id del artefacto salen como salidas de este job, y
+    # deploy-worker sólo despliega ese artefacto con ese manifiesto. Otro job de la ejecución puede
+    # sustituir un artefacto con el mismo nombre, pero no las salidas de este.
+    outputs:
+      manifest_sha256: ${{ steps.preparar.outputs.manifest_sha256 }}
+      artifact_id: ${{ steps.subir.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -235,6 +265,7 @@ jobs:
           node-version: 22
       - run: pnpm install --frozen-lockfile
       - name: Compilar una vez, inyectar Debug IDs y confirmar el mapa subido
+        id: preparar
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
@@ -247,6 +278,7 @@ jobs:
           SENTRY_WORKER_PROJECT: ${{ vars.SENTRY_WORKER_PROJECT }}
         run: node scripts/release/verify-worker-sentry.mjs target/worker-release
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        id: subir
         with:
           name: worker-${{ github.run_attempt }}
           path: target/worker-release/
@@ -283,12 +315,18 @@ jobs:
           node-version: 22
       - name: Instalar sólo Wrangler (sin scripts ni caché)
         run: pnpm --dir .github/tools/worker-deployer install --ignore-workspace --frozen-lockfile --ignore-scripts
+      # AUD-43: por el id que publicó build-worker, no por el nombre: un artefacto que otro job suba
+      # con ese nombre tiene otro id y aquí no se encuentra. Con ids, `merge-multiple` lo extrae en
+      # `path` y no en una subcarpeta con su nombre.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: worker-${{ github.run_attempt }}
+          artifact-ids: ${{ needs.build-worker.outputs.artifact_id }}
+          merge-multiple: true
           path: target/worker-release
+      # AUD-43: los dos pasos rechazan, antes de leer nada más, un manifiesto con otro sha256 o sin él.
       - name: Comprobar identidad, hashes y mapas antes de desplegar
         env:
+          WORKER_MANIFEST_SHA256: ${{ needs.build-worker.outputs.manifest_sha256 }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
           SENTRY_WORKER_PROJECT: ${{ vars.SENTRY_WORKER_PROJECT }}
@@ -297,6 +335,7 @@ jobs:
       # el paso anterior, que no ejecuta nada de terceros.
       - name: Comprobar credenciales y desplegar sin recompilar
         env:
+          WORKER_MANIFEST_SHA256: ${{ needs.build-worker.outputs.manifest_sha256 }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |

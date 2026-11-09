@@ -7,6 +7,10 @@
 //   lockfile: un Wrangler cambiado ahí correría con el token de Cloudflare.
 // - Quien sube el worker a Cloudflare instala sólo Wrangler, desde su lockfile aislado y sin
 //   scripts, y ese Wrangler es el mismo con el que se compila el worker.
+// - AUD-43: todo artefacto que baja un job con credenciales, o que firma o despliega (el worker y el
+//   instalador, sin firmar y firmado), se baja por el id que publica el job que lo produjo y se
+//   comprueba, antes de nada, contra el sha256 de su manifiesto que ese job publica como salida;
+//   y las salidas que se pasan de un job a otro existen.
 //
 // Sin dependencias, como el resto de scripts/release: ci.yml lo ejecuta sin instalar el workspace.
 // Los workflows se leen por sangría, que es como están escritos.
@@ -91,6 +95,39 @@ function cachesDe(job) {
 
 /** Los jobs que suben el worker a Cloudflare (un `--dry-run` no sube nada). */
 const subeElWorker = job => job.lineas.some(l => /\bwrangler\s+(?:deploy|versions\s+upload)\b/.test(l) && !l.includes("--dry-run"));
+
+/** Los pasos de un job, cada uno como un texto. */
+function pasosDe(job) {
+  const pasos = [];
+  for (const l of job.lineas) {
+    if (/^ {6}- /.test(l)) pasos.push(l);
+    else if (pasos.length && sangria(l) > 6) pasos[pasos.length - 1] += `\n${l}`;
+  }
+  return pasos;
+}
+
+/** Las salidas que declara un job (`outputs:`), `{ nombre: expresión }`. */
+function salidasDe(job) {
+  const i = job.lineas.findIndex(l => /^ {4}outputs:\s*$/.test(l));
+  const salidas = {};
+  for (let j = i + 1; i !== -1 && j < job.lineas.length && sangria(job.lineas[j]) > 4; j++) {
+    const salida = /^ {6}([\w-]+):\s*(.+)$/.exec(job.lineas[j]);
+    if (salida) salidas[salida[1]] = salida[2].trim();
+  }
+  return salidas;
+}
+
+/** El `id:` de un paso. */
+const idDelPaso = paso => /^ {6}(?:- | {2})id:\s*([\w-]+)\s*$/m.exec(paso)?.[1];
+
+/** Los `id:` de los pasos de un job. */
+const idsDePasos = job => pasosDe(job).map(idDelPaso).filter(Boolean);
+
+/** El valor de una clave de `with:` o `env:` dentro de un paso. */
+const valorEnPaso = (paso, clave) => new RegExp(`^ {8,}${clave}:\\s*(.+)$`, "m").exec(paso)?.[1].trim();
+
+/** Los pasos que comprueban un artefacto descargado contra su manifiesto. */
+const COMPROBADOR = /\b(?:worker\.mjs (?:verify|cloudflare)|artifact\.mjs verify)\b/;
 
 /** `{ specifier, version }` con que un pnpm-lock.yaml resuelve `dependencia` en `importador`. */
 function resolucion(lockfile, importador, dependencia) {
@@ -178,4 +215,68 @@ test("AUD-44 · el Wrangler que despliega es el del worker, fijado y bloqueado e
     `iguala ${DESPLEGADOR}/package.json y regenera su lock con \`pnpm --dir ${DESPLEGADOR} install --ignore-workspace\``);
   assert.deepEqual(resolucion(join(raiz, DESPLEGADOR, "pnpm-lock.yaml"), ".", "wrangler"), { specifier: fijada, version: fijada },
     `Regenera ${DESPLEGADOR}/pnpm-lock.yaml: con --frozen-lockfile, el job que despliega no podría instalar`);
+});
+
+test("AUD-43 · las salidas que pasan de un job a otro existen", () => {
+  // Una errata dejaría vacío un sha256 o un id, y la release se pararía después de compilar.
+  for (const [fichero, jobs] of Object.entries(leerWorkflows())) {
+    for (const [id, job] of Object.entries(jobs)) {
+      for (const [, origen, salida] of job.lineas.join("\n").matchAll(/needs\.([\w-]+)\.outputs\.([\w-]+)/g)) {
+        assert.ok(job.needs.includes(origen), `${fichero} · ${id} usa una salida de ${origen} sin esperarlo en needs`);
+        assert.ok(salidasDe(jobs[origen] ?? { lineas: [] })[salida], `${fichero} · ${origen} no declara la salida ${salida}`);
+      }
+      for (const [salida, expresion] of Object.entries(salidasDe(job))) {
+        for (const [, paso] of expresion.matchAll(/steps\.([\w-]+)\.outputs\./g)) {
+          assert.ok(idsDePasos(job).includes(paso), `${fichero} · ${id}: la salida ${salida} sale de un paso «${paso}» que no existe`);
+        }
+      }
+    }
+  }
+});
+
+test("AUD-43 · todo artefacto que baja un job con credenciales, o que firma o despliega, viaja por su id y con el sha256 que publica quien lo produjo", () => {
+  const parejas = [];
+  for (const [fichero, jobs] of Object.entries(leerWorkflows())) {
+    for (const [id, job] of Object.entries(jobs)) {
+      if (!usaSecretos(job) && !FIRMAN_O_DESPLIEGAN.includes(id)) continue;
+      const pasos = pasosDe(job);
+      pasos.forEach((paso, i) => {
+        if (!/uses:\s*actions\/download-artifact@/.test(paso)) return;
+        const aqui = `${fichero} · ${id}`;
+        // Por el id que publica el job que lo produjo; nunca por nombre ni por patrón.
+        const productor = /^\$\{\{ needs\.([\w-]+)\.outputs\.artifact_id \}\}$/.exec(valorEnPaso(paso, "artifact-ids") ?? "")?.[1];
+        assert.ok(productor, `${aqui} baja un artefacto sin el id que publica quien lo produjo:\n${paso}`);
+        assert.doesNotMatch(paso, /^\s+(?:name|pattern):/m, `${aqui} baja un artefacto por su nombre`);
+        assert.equal(valorEnPaso(paso, "merge-multiple"), "true", `${aqui}: sin merge-multiple, el artefacto acaba en una subcarpeta`);
+        assert.ok(job.needs.includes(productor), `${aqui} no espera a ${productor}`);
+        // Quien lo produjo publica, sacados de sus pasos, el id de lo que sube y el sha256 de su manifiesto.
+        const origen = jobs[productor];
+        const salidas = salidasDe(origen);
+        const subida = /^\$\{\{ steps\.([\w-]+)\.outputs\.artifact-id \}\}$/.exec(salidas.artifact_id ?? "")?.[1];
+        assert.ok(subida && pasosDe(origen).some(p => /uses:\s*actions\/upload-artifact@/.test(p) && idDelPaso(p) === subida),
+          `${fichero} · ${productor} no publica como salida el id del artefacto que sube`);
+        assert.match(salidas.manifest_sha256 ?? "", /^\$\{\{ steps\.[\w-]+\.outputs\.manifest_sha256 \}\}$/, `${fichero} · ${productor} no publica el sha256 del manifiesto`);
+        // El primer paso que usa lo bajado lo comprueba, y todo paso que lo comprueba lleva ese sha256.
+        const ruta = valorEnPaso(paso, "path");
+        const usan = pasos.slice(i + 1).filter(p => /^\s+(?:- )?run:/m.test(p) && p.includes(ruta));
+        assert.ok(usan.length && COMPROBADOR.test(usan[0]), `${aqui}: el primer paso que usa ${ruta} no lo comprueba`);
+        const sha = new RegExp(`^ +\\w+_MANIFEST_SHA256: \\$\\{\\{ needs\\.${productor}\\.outputs\\.manifest_sha256 \\}\\}$`, "m");
+        for (const p of usan.filter(p => COMPROBADOR.test(p))) {
+          assert.match(p, sha, `${aqui}: un paso comprueba ${ruta} sin el sha256 que publicó ${productor}:\n${p}`);
+        }
+        // Wrangler sólo corre detrás de la comprobación, en el mismo paso.
+        for (const p of usan.filter(p => /exec wrangler\s/.test(p))) {
+          const comprobacion = p.search(/worker\.mjs cloudflare\b/);
+          assert.ok(comprobacion !== -1 && comprobacion < p.search(/exec wrangler\s/), `${aqui}: Wrangler corre sin la comprobación delante`);
+        }
+        parejas.push(`${fichero} · ${productor} → ${id}`);
+      });
+    }
+  }
+  assert.deepEqual(parejas.sort(), [
+    "release.yml · build → sign",
+    "release.yml · build-worker → deploy-worker",
+    "release.yml · sign → publish",
+    "verify-sentry.yml · worker → preview-worker",
+  ]);
 });

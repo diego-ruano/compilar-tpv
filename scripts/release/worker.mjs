@@ -28,6 +28,7 @@ function rutaAceptable(file) {
 }
 const hash = data => createHash("sha256").update(data).digest("hex");
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
 
 export function workerVersion(tag, env = process.env) {
   if (tag?.startsWith("win7-")) throw new Error("Un tag de Windows 7 nunca despliega el worker");
@@ -51,10 +52,14 @@ export function workerSentryConfig(env = process.env, tag) {
 /**
  * Lo que necesita cada modo. `cloudflare` sólo comprueba el artefacto y las credenciales de
  * Cloudflare: no pide el token de Sentry, y el paso que ejecuta Wrangler no lo recibe (AUD-44).
+ * `verify` y `cloudflare` exigen el sha256 del manifiesto que publicó build-worker (AUD-43): si
+ * no llega, queda vacío y el artefacto se rechaza.
  */
 export function configuracionDelModo(mode, env = process.env, tag) {
-  if (mode === "prepare" || mode === "verify") return workerSentryConfig(env, tag);
-  if (mode === "cloudflare") return { ...workerVersion(tag, env), commit: env.GITHUB_SHA };
+  const manifestSha256 = env.WORKER_MANIFEST_SHA256 ?? "";
+  if (mode === "prepare") return workerSentryConfig(env, tag);
+  if (mode === "verify") return { ...workerSentryConfig(env, tag), manifestSha256 };
+  if (mode === "cloudflare") return { ...workerVersion(tag, env), commit: env.GITHUB_SHA, manifestSha256 };
   throw new Error("Uso: worker.mjs prepare|verify|cloudflare <directorio> [tag]");
 }
 
@@ -72,7 +77,15 @@ function cli(tool, args, env = process.env) {
 }
 
 export function readWorkerArtifact(directory, expected = workerVersion()) {
-  const manifest = JSON.parse(readFileSync(join(directory, "manifest.json"), "utf8"));
+  const bytes = readFileSync(join(directory, "manifest.json"));
+  // AUD-43: un artefacto coherente consigo mismo no prueba quién lo subió: otro job de la ejecución
+  // puede sustituirlo por uno con su propio manifiesto. Quien despliega exige, antes de leer nada
+  // más, el sha256 que build-worker publicó como salida de su job, que ningún otro job puede fijar.
+  if (expected.manifestSha256 !== undefined) {
+    if (!SHA256.test(expected.manifestSha256)) throw new Error("Falta el sha256 del manifiesto que publicó build-worker: sin él no se despliega");
+    if (hash(bytes) !== expected.manifestSha256) throw new Error("El artefacto no es el que subió build-worker: su manifiesto tiene otro sha256");
+  }
+  const manifest = JSON.parse(bytes.toString("utf8"));
   if (manifest.version !== expected.version || manifest.release !== expected.release || manifest.worker !== "tpv-api") throw new Error("El artefacto no corresponde a esta release");
   if (expected.commit && manifest.commit !== expected.commit) throw new Error("El artefacto no corresponde al commit de este workflow");
   const actual = listar(directory).filter(f => f !== "manifest.json").sort();
@@ -82,6 +95,8 @@ export function readWorkerArtifact(directory, expected = workerVersion()) {
   }
   const config = JSON.parse(readFileSync(join(directory, "wrangler.json"), "utf8"));
   if (config.name !== "tpv-api" || config.main !== "index.js" || config.no_bundle !== true || config.vars.SENTRY_RELEASE !== expected.release || config.vars.BUILD_COMMIT !== manifest.commit) throw new Error("Configuración de despliegue incorrecta");
+  // AUD-43: desplegar no compila. Con `build`, Wrangler ejecutaría su orden con las credenciales.
+  if (config.build !== undefined) throw new Error("El artefacto no puede llevar `build`: desplegar no compila");
   // Sin el widget dentro, el worker se desplegaría sin poder servirlo.
   if (config.assets?.directory !== ASSETS || FICHEROS_DEL_WIDGET.some(f => !manifest.files[`${ASSETS}/${f}`])) throw new Error("Falta el widget de reservas web en el artefacto");
   const map = JSON.parse(readFileSync(join(directory, "index.js.map"), "utf8"));
@@ -105,16 +120,22 @@ export async function prepareWorker(directory, config, env = process.env) {
   cli("sentry-cli", ["sourcemaps", "inject", directory]);
   cli("sentry-cli", ["sourcemaps", "upload", "--release", config.release, "--wait", directory], { ...env, SENTRY_PROJECT: config.project });
   const source = JSON.parse(readFileSync(join(worker, "wrangler.json"), "utf8"));
-  // Nunca se vuelve a compilar después de subir los mapas: se despliegan estos mismos bytes.
+  // Nunca se vuelve a compilar después de subir los mapas: se despliegan estos mismos bytes. Un
+  // `build` del fuente ya ha corrido en el dry-run; el despliegue no lo repite (AUD-43).
+  delete source.build;
   cpSync(compilado, join(directory, ASSETS), { recursive: true });
   const deploy = { ...source, main: "index.js", no_bundle: true, find_additional_modules: true, base_dir: ".", assets: { ...source.assets, directory: ASSETS }, vars: { ...source.vars, ENVIRONMENT: "prod", SENTRY_RELEASE: config.release, BUILD_COMMIT: env.GITHUB_SHA } };
   writeFileSync(join(directory, "wrangler.json"), JSON.stringify(deploy, null, 2));
   const files = Object.fromEntries(listar(directory).filter(f => f !== "manifest.json").map(f => [f, hash(readFileSync(join(directory, f)))]));
   const manifest = { worker: "tpv-api", version: config.version, release: config.release, commit: env.GITHUB_SHA, files };
-  writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest, null, 2));
-  readWorkerArtifact(directory, config);
-  await verifyWorkerMaps(directory, config);
-  return manifest;
+  const texto = JSON.stringify(manifest, null, 2);
+  writeFileSync(join(directory, "manifest.json"), texto);
+  // AUD-43: el sha256 de los bytes escritos es la salida del job que deploy-worker exige; la
+  // comprobación propia ya pasa por él, como la de quien despliega.
+  const manifestSha256 = hash(texto);
+  readWorkerArtifact(directory, { ...config, manifestSha256 });
+  await verifyWorkerMaps(directory, { ...config, manifestSha256 });
+  return { manifest, manifestSha256 };
 }
 
 /**
@@ -159,9 +180,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const [mode, directory = "target/worker-release", tag] = process.argv.slice(2);
   const config = configuracionDelModo(mode, process.env, tag);
   const output = resolve(directory);
-  if (mode === "prepare") await prepareWorker(output, config);
-  else if (mode === "verify") { await validateWorkerTarget(config); await verifyWorkerMaps(output, config); }
+  const salidas = { version: config.version, sentry_release: config.release };
+  // AUD-43: `prepare` publica el sha256 del manifiesto como salida del job; `verify` y `cloudflare`
+  // lo exigen en el artefacto antes de hablar con Sentry o con Cloudflare.
+  if (mode === "prepare") salidas.manifest_sha256 = (await prepareWorker(output, config)).manifestSha256;
+  else if (mode === "verify") { readWorkerArtifact(output, config); await validateWorkerTarget(config); await verifyWorkerMaps(output, config); }
   else { readWorkerArtifact(output, config); await validateCloudflare(); }
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `version=${config.version}\nsentry_release=${config.release}\n`);
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(salidas).map(([clave, valor]) => `${clave}=${valor}\n`).join(""));
   console.log(`Worker ${config.release}: comprobación ${mode} correcta`);
 }

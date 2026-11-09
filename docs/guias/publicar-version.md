@@ -46,13 +46,24 @@ pnpm --filter @tpv/main test:e2e
 pasa no se publica. Después se ejecutan jobs con credenciales separadas (RI-25):
 
 - **Build**: comprueba versiones y contratos, compila NSIS sin la clave del updater y guarda el
-  instalador junto a su versión, nombre y SHA-256 en un artefacto inmutable del mismo workflow.
-- **Firma**: descarga ese artefacto e instala sólo un firmante Tauri con versión e integridades
-  bloqueadas en `.github/tools/updater-signer/`, sin scripts de instalación ni caché del build.
-  Sólo el paso de firma recibe la clave. Verifica el hash y la firma contra la clave pública de
-  `tauri.conf.json` antes de entregar el instalador firmado.
-- **Publicación**: vuelve a verificar hash y firma, sube el instalador a R2 y publica el feed **beta**.
-  Sólo este job recibe las credenciales de R2 y del feed.
+  instalador junto a su versión, nombre y SHA-256 en un artefacto del mismo workflow. Publica como
+  salidas del job el sha256 de ese manifiesto y el id del artefacto.
+- **Firma**: baja ese artefacto por su id y rechaza, antes de nada, un manifiesto con otro sha256:
+  sólo firma el instalador que compiló Build. Instala sólo un firmante Tauri con versión e
+  integridades bloqueadas en `.github/tools/updater-signer/`, sin scripts de instalación ni caché
+  del build. Sólo el paso de firma recibe la clave. Verifica el hash y la firma contra la clave
+  pública de `tauri.conf.json` antes de entregar el instalador firmado, con sus propias salidas.
+- **Publicación**: baja el instalador firmado por el id que publica la Firma y con su sha256, vuelve
+  a verificar hash y firma, sube el instalador a R2 y publica el feed **beta**. Sólo este job
+  recibe las credenciales de R2 y del feed.
+
+Entre jobs, cada artefacto viaja por su id y con el sha256 de su manifiesto, que el job que lo
+produce publica como salida (AUD-43); quien lo baja rechaza, antes de nada, un manifiesto con otro
+sha256 o sin él. Un manifiesto sólo prueba que el artefacto es coherente consigo mismo: otro job de
+la misma ejecución que corra código de terceros podría sustituirlo por uno con su propio manifiesto,
+y la firma lo habría firmado o el despliegue lo habría publicado. Las salidas de otro job no las
+puede cambiar. `scripts/release/workflows.test.mjs` exige esta regla a todo artefacto que baja un
+job con credenciales o que firma o despliega.
 
 Las acciones externas de los workflows están fijadas por SHA completo; Dependabot mantiene esas
 referencias. La separación evita que código que se haya ejecutado al compilar pueda permanecer en
@@ -76,8 +87,13 @@ El worker se compila en otro job con `tpv-api@<versión>`, inyecta Debug IDs, su
 comprueba un evento real con traza TypeScript. El mismo job compila el widget de reservas web
 (`apps/reservas-web`) y lo mete en el artefacto, en `assets/`, cubierto por el manifiesto: un artefacto
 sin el widget no se despliega (`scripts/release/worker.mjs`). Una vez listos ambos builds y la firma del
-escritorio, otro runner despliega ese mismo artefacto del worker. El instalador sólo se publica
+escritorio, otro runner despliega ese artefacto del worker. El instalador sólo se publica
 cuando ese despliegue termina correctamente. El tag de Windows 7 no despliega el worker.
+
+El artefacto del worker viaja igual que el instalador (AUD-43): su manifiesto cubre el JavaScript,
+los mapas, los módulos SQL, el widget y `wrangler.json`, y `worker.mjs` lo comprueba antes de hablar
+con Sentry o con Cloudflare. El `wrangler.json` del artefacto no puede llevar `build`: desplegar no
+compila.
 
 El runner que despliega no instala el workspace: baja sólo el comprobador y Wrangler, a la misma
 versión que el worker, desde `.github/tools/worker-deployer/`, con `--frozen-lockfile
