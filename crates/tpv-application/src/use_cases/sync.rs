@@ -23,7 +23,8 @@ pub async fn apply_changes(
             last_seq: repo.get_checkpoint().await?,
         });
     }
-    repo.apply_changes(args.changes).await
+    let r = repo.apply_changes(args.changes).await?;
+    Ok(AplicacionSync { aplicadas: r.aplicadas, last_seq: r.last_seq })
 }
 
 /// Último `seq` aplicado localmente (cursor del catch-up).
@@ -295,11 +296,15 @@ mod tests {
         async fn apply_changes(
             &self,
             changes: Vec<tpv_contracts::sync::SyncChange>,
-        ) -> AppResult<AplicacionSync> {
-            Ok(AplicacionSync {
+        ) -> AppResult<crate::ports::sync::BajadaAplicada> {
+            Ok(crate::ports::sync::BajadaAplicada {
                 aplicadas: changes.into_iter().map(|c| c.op_id).collect(),
                 last_seq: 99,
+                detenida: None,
             })
+        }
+        async fn cambio_detenido(&self) -> AppResult<Option<tpv_contracts::sync::SyncChange>> {
+            Ok(None)
         }
         async fn get_checkpoint(&self) -> AppResult<i64> {
             *self.checkpoints.lock().unwrap() += 1;

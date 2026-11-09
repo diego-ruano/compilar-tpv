@@ -20,9 +20,9 @@ use crate::ejecutor::Value;
 use crate::ejecutor::Connection;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::sync::SyncRepository;
+use tpv_application::ports::sync::{BajadaAplicada, CambioDetenido, SyncRepository};
 use tpv_contracts::sync::{
-    AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
+    BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
     DescuadreTabla, OutboxEntry, OutboxFallo, ResultadoVerificacion, SqlStatement,
     SyncChange, SyncHealth, TablaAExaminar, VerificacionClaves, VerificacionNube,
 };
@@ -48,11 +48,11 @@ const PURGE_CURSOR_MARGIN: i64 = 500;
 /// Antigüedad mínima (ms) para que la purga TTL retire un registro ya confirmado en la nube.
 const PURGE_TTL_MS: i64 = 72 * 60 * 60 * 1000;
 
-/// Reintentos de una op nube→Main antes de ponerla en CUARENTENA (SYNC-01). Cada intento ocurre
-/// en un ciclo de catch-up distinto (el pipeline para y reintenta), así que cubre fallos
-/// transitorios sin descartar datos a la primera. Agotados, la op se salta para no bloquear el
-/// resto de la sincronización indefinidamente.
-const MAX_APPLY_ATTEMPTS: i64 = 5;
+/// Reintentos de una op nube→Main antes de ponerla en CUARENTENA (SYNC-01). AUD-18: el motor los
+/// hace dentro de la sesión, con esperas cortas entre ellos (`use_cases::replicacion`), y mientras
+/// tanto la bajada está detenida en ella: no se aplica nada posterior ni se mueve el checkpoint.
+/// Agotados, la op se salta para no bloquear el resto de la sincronización indefinidamente.
+pub(crate) const MAX_APPLY_ATTEMPTS: i64 = 5;
 
 /// Reintentos de una op Main→nube antes de APARTARLA (SYNC-20). Es el espejo de
 /// `MAX_APPLY_ATTEMPTS` para la dirección contraria, y existe por el mismo motivo: el outbox es
@@ -138,9 +138,6 @@ async fn op_already_applied(conn: &Connection, op_id: &str) -> AppResult<bool> {
     Ok(rows.next().await.map_err(db_err)?.is_some())
 }
 
-/// Avanza el checkpoint hasta `seq` (solo hacia delante). Se usa al SALTAR una op ya aplicada
-/// (p. ej. un eco de las propias escrituras de la Main que vuelve por el catch-up): aunque no se
-/// reaplique, hay que mover el cursor para no volver a pedirla indefinidamente.
 /// SYNC-18: la nube confirma (devolviéndonosla) que una operación NUESTRA está aplicada allí.
 /// Se retira del outbox y de las encoladas. Si no era nuestra, no hay nada que borrar.
 async fn confirmar_subida(conn: &Connection, op_id: &str) -> AppResult<()> {
@@ -159,10 +156,22 @@ async fn confirmar_subida(conn: &Connection, op_id: &str) -> AppResult<()> {
     Ok(())
 }
 
-async fn advance_checkpoint(conn: &Connection, seq: i64) -> AppResult<()> {
+/// AUD-18 · El checkpoint pasa por encima de `ch` (sólo hacia delante), y con él su fallo de
+/// bajada, si lo tenía: lo que no está en cuarentena es que se ha resuelto (entró, o ya estaba
+/// aplicado) y se borra. Es lo único, fuera de la restauración desde la nube (que vacía
+/// `_Sync_Failed` en la misma transacción), que mueve `Last_Seq`: así ningún camino deja atrás un
+/// fallo sin resolver ni en cuarentena, que nada volvería a intentar y que bloquearía
+/// `verificar_nube` para siempre. Lo vigila `el_checkpoint_solo_se_mueve_resolviendo_el_fallo`.
+async fn pasar_el_checkpoint(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
     conn.execute(
         "UPDATE _Sync_State SET Last_Seq = ?1 WHERE Id = 1 AND Last_Seq < ?1;",
-        vec![Value::Integer(seq)],
+        vec![Value::Integer(ch.seq)],
+    )
+    .await
+    .map_err(db_err)?;
+    conn.execute(
+        "DELETE FROM _Sync_Failed WHERE Op_Id = ?1 AND Quarantined = 0;",
+        vec![Value::Text(ch.op_id.clone())],
     )
     .await
     .map_err(db_err)?;
@@ -342,6 +351,8 @@ async fn bump_failure(conn: &Connection, ch: &SyncChange, err: &str) -> AppResul
 /// Pone una op en CUARENTENA: la marca como aplicada (para que el gate de idempotencia la salte),
 /// deja constancia en `_Sync_Failed` (Quarantined=1, visible en el panel de salud) y AVANZA el
 /// checkpoint para no volver a pedirla. El resto del pipeline puede así seguir convergiendo.
+///
+/// ⚠️ AUD-18: sólo dentro de la transacción de `anotar_fallo`. Las tres cosas van juntas o ninguna.
 async fn quarantine(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
     conn.execute(
         "INSERT OR IGNORE INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES (?1, ?2, ?3);",
@@ -359,15 +370,79 @@ async fn quarantine(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
     )
     .await
     .map_err(db_err)?;
-    advance_checkpoint(conn, ch.seq).await?;
+    pasar_el_checkpoint(conn, ch).await?;
     Ok(())
 }
 
-/// Limpia el registro de fallo de una op que acabó aplicándose (fallo transitorio recuperado).
-/// No toca las ya en cuarentena (que igualmente no vuelven a `apply_one`, al estar marcadas).
-async fn clear_failure(conn: &Connection, op_id: &str) -> AppResult<()> {
+/// AUD-18 · Qué fue de un cambio con el que `apply_one` falló.
+enum Fallo {
+    /// Su `Seq` no pasa del checkpoint: ya se procesó, y no hay nada que reintentar ni anotar.
+    YaProcesado,
+    /// Anotado en `_Sync_Failed`, con los intentos que lleva: la bajada se detiene en él.
+    Anotado(i64),
+    /// Agotó los intentos: en cuarentena, y el checkpoint ya pasó por encima.
+    Cuarentena(i64),
+}
+
+/// AUD-18 · Lo que queda de un cambio que no entró, en UNA transacción: la confirmación de su
+/// subida, el intento contado y, agotados los intentos, la cuarentena (el marcador de
+/// `_Sync_Applied_Ops`, la marca en `_Sync_Failed` y el checkpoint). Eran sentencias sueltas, cada
+/// una con su commit, y una copia (`VACUUM INTO`) podía fotografiar el marcador sin el checkpoint:
+/// al restaurarla, el catch-up traía el cambio, el gate lo daba por aplicado y el checkpoint lo
+/// dejaba atrás sin haberlo aplicado nunca.
+async fn anotar_fallo(conn: &Connection, ch: &SyncChange, err: &str) -> AppResult<Fallo> {
+    conn.transaccion(async {
+        // El ROLLBACK de `apply_one` se llevó también la confirmación de subida, y ésa no depende
+        // de que aquí se pueda aplicar: el cambio ha vuelto de la nube, así que allí está.
+        confirmar_subida(conn, &ch.op_id).await?;
+
+        // AUD-18: lo que no pasa del checkpoint (releído aquí, en esta transacción) ya se procesó:
+        // un duplicado con el que `apply_one` falló por algo pasajero. No se anota. Anotarlo dejaría
+        // un fallo por debajo del checkpoint que nada volvería a intentar y que bloquearía
+        // `verificar_nube`; el que hubiera de antes, se resuelve.
+        if ch.seq <= checkpoint(conn).await? {
+            resolver_fallo_ya_procesado(conn, &ch.op_id).await?;
+            return Ok(Fallo::YaProcesado);
+        }
+
+        // AUD-18: si era el eco de una escritura propia (su anti-eco está, sin `Seq` todavía: las
+        // que suben por la cola no reciben `apply_ack`), el anti-eco pasa a llevar el `Seq` del eco.
+        // `confirmar_subida` acaba de sacarla del outbox, y un anti-eco con `Seq = 0` fuera del
+        // outbox es lo que la purga TTL retira: el reintento volvería a aplicar la escritura.
+        // Con su `Seq`, por delante del checkpoint, la purga no lo toca hasta que el eco entre.
+        conn.execute(
+            "UPDATE _Sync_Applied_Ops SET Seq = ?1 WHERE Op_Id = ?2 AND Seq = 0;",
+            vec![Value::Integer(ch.seq), Value::Text(ch.op_id.clone())],
+        )
+        .await
+        .map_err(db_err)?;
+
+        let attempts = bump_failure(conn, ch, err).await?;
+        if attempts >= MAX_APPLY_ATTEMPTS {
+            quarantine(conn, ch).await?;
+            return Ok(Fallo::Cuarentena(attempts));
+        }
+        Ok(Fallo::Anotado(attempts))
+    })
+    .await
+}
+
+/// AUD-18 · Un cambio que ya se procesó (su `Seq` no pasa del checkpoint) y que tiene un fallo sin
+/// cuarentena: el fallo se resuelve. Si la operación consta como procesada (`_Sync_Applied_Ops`),
+/// se borra. Si no, es un fallo de antes de AUD-18, de cuando el checkpoint se saltaba lo que fallaba:
+/// ese cambio no se aplicó nunca, y pasa a cuarentena, que es lo que es. Así no queda nada por
+/// debajo del checkpoint sin resolver ni en cuarentena.
+async fn resolver_fallo_ya_procesado(conn: &Connection, op_id: &str) -> AppResult<()> {
     conn.execute(
-        "DELETE FROM _Sync_Failed WHERE Op_Id = ?1 AND Quarantined = 0;",
+        "DELETE FROM _Sync_Failed \
+          WHERE Op_Id = ?1 AND Quarantined = 0 \
+            AND EXISTS (SELECT 1 FROM _Sync_Applied_Ops WHERE Op_Id = ?1);",
+        vec![Value::Text(op_id.to_string())],
+    )
+    .await
+    .map_err(db_err)?;
+    conn.execute(
+        "UPDATE _Sync_Failed SET Quarantined = 1 WHERE Op_Id = ?1 AND Quarantined = 0;",
         vec![Value::Text(op_id.to_string())],
     )
     .await
@@ -387,6 +462,42 @@ enum Aplicacion {
     /// el checkpoint.
     YaEstaba,
     Aplicada,
+    /// AUD-18: su `Seq` no pasa del checkpoint, así que ya se procesó (aplicado, saltado o
+    /// apartado). No se aplica ni mueve nada.
+    YaProcesada,
+    /// AUD-18: hay un cambio anterior detenido. Éste no entra hasta que aquél entre o pase a
+    /// cuarentena.
+    Bloqueada(CambioDetenido),
+}
+
+/// AUD-18 · El cambio detenido que va por delante de `seq`: un fallo de `_Sync_Failed` sin
+/// cuarentena con `Seq` entre el checkpoint y `seq`. Mientras exista, nada posterior entra.
+async fn detenido_antes_de(
+    conn: &Connection,
+    seq: i64,
+    checkpoint: i64,
+) -> AppResult<Option<CambioDetenido>> {
+    let mut rows = conn
+        .query(
+            "SELECT Op_Id, Seq, Attempts FROM _Sync_Failed \
+              WHERE Quarantined = 0 AND Seq > ?1 AND Seq < ?2 \
+              ORDER BY Seq LIMIT 1;",
+            vec![Value::Integer(checkpoint), Value::Integer(seq)],
+        )
+        .await
+        .map_err(db_err)?;
+    let Some(r) = rows.next().await.map_err(db_err)? else {
+        return Ok(None);
+    };
+    let op_id = match r.get_value(0).map_err(db_err)? {
+        Value::Text(s) => s,
+        _ => String::new(),
+    };
+    Ok(Some(CambioDetenido {
+        op_id,
+        seq: v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
+        intentos: v_i64(r.get_value(2).map_err(db_err)?).unwrap_or(0),
+    }))
 }
 
 /// Aplica un cambio en UNA transacción: la confirmación de subida, el gate de idempotencia, sus
@@ -396,17 +507,49 @@ enum Aplicacion {
 /// operación. Corre sobre la conexión CRUDA de escritura (sin captura).
 async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> {
     let res: AppResult<Aplicacion> = conn.transaccion(async {
+        // AUD-18: nada pasa por delante de uno anterior que falló y no se ha resuelto. Va lo
+        // primero, antes incluso de dar por confirmada una subida: un cambio que no se procesa ahora
+        // volverá por el catch-up, y si fuera el eco de una escritura propia, sacarla ya del outbox
+        // dejaría su anti-eco a merced de la purga TTL antes de que vuelva. Y va antes que el gate de
+        // idempotencia: tampoco ese eco puede llevar el checkpoint por encima del detenido.
+        let cp = checkpoint(conn).await?;
+        if ch.seq > cp {
+            if let Some(detenido) = detenido_antes_de(conn, ch.seq, cp).await? {
+                return Ok(Aplicacion::Bloqueada(detenido));
+            }
+        }
+
         // SYNC-18: que un cambio VUELVA de la nube es la prueba de que allí se aplicó. Si era una
         // de las nuestras (encolada o simplemente sin ack), esta es su confirmación: se retira del
         // outbox y deja de estar pendiente. Cubre de una vez el camino de la cola y cualquier
         // `apply_ack` que se perdiera por el camino.
         confirmar_subida(conn, &ch.op_id).await?;
 
+        // AUD-18: la bajada va en orden de `Seq` y el checkpoint sólo pasa por encima de lo que
+        // ya se procesó. Lo que llega por debajo (un reenvío, el solape del catch-up con lo que
+        // llegó en vivo al conectar) no se aplica otra vez, aunque su registro de idempotencia ya
+        // se haya purgado: repetiría un `Stock - 1` o devolvería una fila a un valor viejo.
+        if ch.seq <= cp {
+            tracing::warn!(
+                target: "tpv::sync",
+                op_id = %ch.op_id,
+                seq = ch.seq,
+                checkpoint = cp,
+                "cambio de la nube por debajo del checkpoint: ya procesado, no se aplica"
+            );
+            // Y si tenía un fallo anotado (por debajo del checkpoint, nada lo reintentaría), se
+            // resuelve con él.
+            resolver_fallo_ya_procesado(conn, &ch.op_id).await?;
+            return Ok(Aplicacion::YaProcesada);
+        }
+
         // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up, eco de las
         // propias escrituras de la Main o una op en cuarentena) se ignora, pero igualmente avanza
-        // el checkpoint.
+        // el checkpoint. AUD-18: y si era el reintento de un fallo (el eco propio cuyo checkpoint no
+        // se pudo mover), el fallo se resuelve con él; si no, quedaría por debajo del checkpoint
+        // sin que nada lo reintentara.
         if op_already_applied(conn, &ch.op_id).await? {
-            advance_checkpoint(conn, ch.seq).await?;
+            pasar_el_checkpoint(conn, ch).await?;
             return Ok(Aplicacion::YaEstaba);
         }
 
@@ -442,15 +585,8 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> 
         .await
         .map_err(db_err)?;
 
-        conn.execute(
-            "UPDATE _Sync_State SET Last_Seq = ?1 WHERE Id = 1 AND Last_Seq < ?1;",
-            vec![Value::Integer(ch.seq)],
-        )
-        .await
-        .map_err(db_err)?;
-
         // Éxito (posible recuperación de un fallo transitorio previo): limpia su marca.
-        clear_failure(conn, &ch.op_id).await?;
+        pasar_el_checkpoint(conn, ch).await?;
 
         Ok(Aplicacion::Aplicada)
     }).await;
@@ -460,11 +596,12 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<Aplicacion> 
 
 #[async_trait]
 impl SyncRepository for SqliteSyncRepository {
-    async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<AplicacionSync> {
+    async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<BajadaAplicada> {
         // Se anota lo que se aplica DE VERDAD. Lo que el gate de idempotencia salta (un
         // re-broadcast, el eco de nuestras propias escrituras al volver por el catch-up, una op en
         // cuarentena) no cambió nada en esta BD, así que el frontend no tiene por qué reaccionar.
         let mut aplicadas: Vec<String> = Vec::new();
+        let mut detenida: Option<CambioDetenido> = None;
 
         'lote: for tramo in changes.chunks(CAMBIOS_POR_TURNO_DE_ESCRITOR) {
             // Acceso EXCLUSIVO de escritura, pero por tramos (RI-33): serializa con las
@@ -479,20 +616,36 @@ impl SyncRepository for SqliteSyncRepository {
                         aplicadas.push(ch.op_id.clone());
                         continue;
                     }
-                    Ok(Aplicacion::YaEstaba) => continue,
+                    Ok(Aplicacion::YaEstaba | Aplicacion::YaProcesada) => continue,
+                    // AUD-18: hay uno anterior detenido; la tanda se para aquí sin gastarle
+                    // intentos a éste.
+                    Ok(Aplicacion::Bloqueada(anterior)) => {
+                        detenida = Some(anterior);
+                        break 'lote;
+                    }
                     Err(e) => e,
                 };
 
-                // El ROLLBACK se llevó también la confirmación de subida, y esa no depende de
-                // que aquí se pueda aplicar: el cambio ha vuelto de la nube, así que allí está.
-                confirmar_subida(conn, &ch.op_id).await?;
-
                 // SYNC-01: política de poison-message. Contamos el intento; agotados los
                 // reintentos, ponemos la op en cuarentena (se salta + avanza checkpoint +
-                // alerta) para NO bloquear el resto de la cola indefinidamente.
-                let attempts = bump_failure(conn, ch, &e.to_string()).await?;
-                if attempts >= MAX_APPLY_ATTEMPTS {
-                    quarantine(conn, ch).await?;
+                // alerta) para NO bloquear el resto de la cola indefinidamente. AUD-18: todo en
+                // una transacción (`anotar_fallo`).
+                let (attempts, cuarentena) = match anotar_fallo(conn, ch, &e.to_string()).await? {
+                    // AUD-18: un duplicado de algo ya procesado: no se anota ni detiene nada.
+                    Fallo::YaProcesado => {
+                        tracing::warn!(
+                            target: "tpv::sync",
+                            op_id = %ch.op_id,
+                            seq = ch.seq,
+                            error = %e,
+                            "fallo descartando un cambio ya procesado; no se anota"
+                        );
+                        continue;
+                    }
+                    Fallo::Anotado(intentos) => (intentos, false),
+                    Fallo::Cuarentena(intentos) => (intentos, true),
+                };
+                if cuarentena {
                     tracing::error!(
                         target: "tpv::sync",
                         op_id = %ch.op_id,
@@ -501,18 +654,24 @@ impl SyncRepository for SqliteSyncRepository {
                         error = %e,
                         "op de sync en CUARENTENA tras agotar reintentos: se salta para no bloquear el pipeline"
                     );
-                    // Cuarentenada: seguimos con el resto del lote.
+                    // Cuarentenada: seguimos, en orden, con el resto del lote.
                 } else {
-                    // Aún dentro del margen: paramos el lote SIN avanzar el checkpoint, para
-                    // reintentar esta op (y las siguientes) en el próximo ciclo de catch-up.
+                    // AUD-18: aún dentro del margen. La bajada se detiene aquí SIN avanzar el
+                    // checkpoint: no se aplica nada posterior hasta que ésta entre o se aparte, y
+                    // el motor la reintenta dentro de la sesión, tras una espera corta.
                     tracing::warn!(
                         target: "tpv::sync",
                         op_id = %ch.op_id,
                         seq = ch.seq,
                         attempts,
                         error = %e,
-                        "fallo aplicando op de sync; se reintentará en el próximo ciclo"
+                        "fallo aplicando op de sync; la bajada se detiene aquí y se reintentará"
                     );
+                    detenida = Some(CambioDetenido {
+                        op_id: ch.op_id.clone(),
+                        seq: ch.seq,
+                        intentos: attempts,
+                    });
                     break 'lote;
                 }
             }
@@ -525,10 +684,42 @@ impl SyncRepository for SqliteSyncRepository {
         let conn: &Connection = w.raw();
         let last_seq = checkpoint(conn).await?;
         purge_by_cursor(conn, last_seq).await?;
-        Ok(AplicacionSync {
+        Ok(BajadaAplicada {
             aplicadas,
             last_seq,
+            detenida,
         })
+    }
+
+    async fn cambio_detenido(&self) -> AppResult<Option<SyncChange>> {
+        // AUD-18: el que no ha entrado ni está en cuarentena y va por delante del checkpoint.
+        let r = self.db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                "SELECT Op_Id, Seq, Statements_Json FROM _Sync_Failed \
+                  WHERE Quarantined = 0 \
+                    AND Seq > (SELECT Last_Seq FROM _Sync_State WHERE Id = 1) \
+                  ORDER BY Seq LIMIT 1;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        let Some(fila) = rows.next().await.map_err(db_err)? else {
+            return Ok(None);
+        };
+        let op_id = match fila.get_value(0).map_err(db_err)? {
+            Value::Text(s) => s,
+            _ => return Err(AppError::repository("Cambio detenido sin operación")),
+        };
+        let seq = v_i64(fila.get_value(1).map_err(db_err)?).unwrap_or(0);
+        let statements: Vec<SqlStatement> = match fila.get_value(2).map_err(db_err)? {
+            Value::Text(s) => serde_json::from_str(&s).map_err(|_| {
+                AppError::repository(format!("Sentencias ilegibles del cambio detenido {op_id}"))
+            })?,
+            _ => return Err(AppError::repository("Cambio detenido sin sentencias")),
+        };
+        Ok(Some(SyncChange { op_id, seq, statements }))
     }
 
     async fn get_checkpoint(&self) -> AppResult<i64> {
@@ -811,12 +1002,21 @@ impl SyncRepository for SqliteSyncRepository {
         // `Op_Id` YA NO está pendiente en el outbox (es decir, ya confirmados en la nube). El
         // filtro `NOT IN (_Sync_Outbox)` es la garantía de "solo borrar lo subido": jamás retira
         // un anti-eco cuya op siga sin enviarse (lo que provocaría su re-aplicación tras catch-up).
+        //
+        // AUD-18: y tampoco el de una op propia cuyo `Seq` va por delante del checkpoint. La bajada
+        // no pasa por encima de un cambio que falla mientras se reintenta, así que lo que esta Main
+        // subió después le volverá por el catch-up; sin su anti-eco, se aplicaría otra vez. Un
+        // `Seq = 0` fuera del outbox ya no puede volver: o su eco ya entró (lo que sube por la cola
+        // sale del outbox al volver su eco, y si ese eco falla, `anotar_fallo` le pone su `Seq`), o
+        // el `apply_ack` no trajo `Seq` porque la nube ya había purgado su log, cosa que sólo hace
+        // por debajo del checkpoint de las Main activas (el DO no contesta `Seq` 0 por un error).
         let cutoff = now_ms() - PURGE_TTL_MS;
         let w = self.db.write().await;
         w.raw()
             .execute(
                 "DELETE FROM _Sync_Applied_Ops \
                  WHERE Applied_At_Ms < ?1 \
+                   AND Seq <= (SELECT Last_Seq FROM _Sync_State WHERE Id = 1) \
                    AND Op_Id NOT IN (SELECT Op_Id FROM _Sync_Outbox);",
                 vec![Value::Integer(cutoff)],
             )
@@ -2803,6 +3003,16 @@ impl SqliteSyncRepository {
         foto: VerificacionNube,
         reparar: bool,
     ) -> AppResult<ResultadoVerificacion> {
+        let plan = self.plan_de_valores(&foto, reparar).await?;
+        self.ejecutar_plan_de_valores(plan, foto.hasta_seq, foto.ventana_omitida).await
+    }
+
+    /// Pasos 1 y 2 del contraste de valores: compara y decide, sin escribir nada.
+    async fn plan_de_valores(
+        &self,
+        foto: &VerificacionNube,
+        reparar: bool,
+    ) -> AppResult<PlanDeValores> {
         use crate::sync_reparacion as rep;
 
         let mut descuadres: Vec<DescuadreTabla> = Vec::new();
@@ -2903,11 +3113,41 @@ impl SqliteSyncRepository {
             }
         }
 
-        // 3) Reparar. En su propio guard de escritura, ya soltado el de lectura.
+        Ok(PlanDeValores {
+            descuadres,
+            a_reparar,
+            a_examinar,
+            aplazado,
+        })
+    }
+
+    /// 3) Reparar. En su propio guard de escritura, ya soltado el de lectura.
+    ///
+    /// AUD-18: con la guarda otra vez, ya con el escritor cogido (`guarda_con_el_escritor`): entre
+    /// la comparación y aquí la bajada pudo dejar un cambio detenido, y una fila distinta puede
+    /// serlo por él. Pisarla arriba con el permiso de antes se llevaría lo que hizo ese cambio.
+    async fn ejecutar_plan_de_valores(
+        &self,
+        plan: PlanDeValores,
+        hasta_seq: i64,
+        ventana_omitida: bool,
+    ) -> AppResult<ResultadoVerificacion> {
+        use crate::sync_reparacion as rep;
+
+        let PlanDeValores {
+            descuadres,
+            mut a_reparar,
+            a_examinar,
+            mut aplazado,
+        } = plan;
         let mut reparadas = 0i64;
         if !a_reparar.is_empty() {
             let w = self.db.write().await;
             let conn = w.raw();
+            if !guarda_con_el_escritor(conn, hasta_seq).await?.deja_tocar_lo_que_hay_arriba() {
+                a_reparar.clear();
+                aplazado = true;
+            }
             let mut sentencias = Vec::new();
             for f in &a_reparar {
                 if let Ok(Some(st)) = rep::sentencia_de_reparacion(conn, f).await {
@@ -2945,12 +3185,62 @@ impl SqliteSyncRepository {
         Ok(ResultadoVerificacion {
             descuadres,
             reparadas,
-            ventana_omitida: foto.ventana_omitida,
+            ventana_omitida,
             tablas_a_examinar: a_examinar,
             borradas: 0,
             aplazado,
         })
     }
+}
+
+/// AUD-18 · Lo que el contraste de valores ha decidido, a falta de escribirlo.
+struct PlanDeValores {
+    descuadres: Vec<DescuadreTabla>,
+    a_reparar: Vec<crate::sync_reparacion::FilaAfectada>,
+    a_examinar: Vec<TablaAExaminar>,
+    aplazado: bool,
+}
+
+/// AUD-18 · Lo que el contraste de claves ha decidido, a falta de escribirlo.
+struct PlanDeClaves {
+    descuadres: Vec<DescuadreTabla>,
+    a_reparar: Vec<crate::sync_reparacion::FilaAfectada>,
+    a_borrar: Vec<crate::sync_reparacion::FilaAfectada>,
+    aplazado: bool,
+}
+
+/// AUD-18 · La guarda de `verificar_nube` vista con el escritor cogido.
+struct Guarda {
+    /// El checkpoint alcanza el final de la foto: nada de lo que hay en ella está de camino.
+    al_dia: bool,
+    /// No hay ningún fallo de bajada (`hay_fallos_de_bajada`).
+    sin_fallos: bool,
+}
+
+impl Guarda {
+    /// Borrar lo que sobra arriba o pisar lo que es distinto.
+    fn deja_tocar_lo_que_hay_arriba(&self) -> bool {
+        self.al_dia && self.sin_fallos
+    }
+}
+
+/// AUD-18 · La guarda otra vez, justo antes de encolar. La comparación se hace con lecturas y sin
+/// el escritor, y la bajada registra sus fallos con él: lo que se decidió con la guarda de antes
+/// puede no valer ya. Con el escritor en la mano, lo que se ve aquí vale hasta encolar.
+async fn guarda_con_el_escritor(conn: &Connection, hasta_seq: i64) -> AppResult<Guarda> {
+    let al_dia = hasta_seq > 0 && checkpoint(conn).await? >= hasta_seq;
+    let mut filas = conn
+        .query("SELECT COUNT(*) FROM _Sync_Failed;", ())
+        .await
+        .map_err(db_err)?;
+    let fallos = match filas.next().await.map_err(db_err)? {
+        Some(f) => v_i64(f.get_value(0).map_err(db_err)?).unwrap_or(0),
+        None => 0,
+    };
+    Ok(Guarda {
+        al_dia,
+        sin_fallos: fallos == 0,
+    })
 }
 
 /// `COUNT(*)` local. `None` = la tabla no existe aquí (una versión con menos tablas), que no es un
@@ -3246,7 +3536,8 @@ impl SqliteSyncRepository {
     /// Segunda fase del contraste (SYNC-25): con las claves de la nube delante, resta los dos
     /// conjuntos y actúa.
     ///
-    /// - **En la Main y no en la nube** → falta arriba → se repara mandando su estado actual.
+    /// - **En la Main y no en la nube** → falta arriba → se repara mandando su estado actual, salvo
+    ///   con un fallo de bajada sin resolver (AUD-18, `hay_fallos_de_bajada`).
     /// - **En la nube y no en la Main** → sobra arriba → se borra, **pero sólo si se puede afirmar
     ///   que esta Main está al día**. Ver `puede_borrar_arriba`.
     pub async fn contrastar_claves(
@@ -3265,9 +3556,23 @@ impl SqliteSyncRepository {
         hasta_seq: i64,
         reparar: bool,
     ) -> AppResult<(Vec<DescuadreTabla>, i64, i64, bool)> {
+        let plan = self.plan_de_claves(respuesta, hasta_seq, reparar).await?;
+        self.ejecutar_plan_de_claves(plan, hasta_seq).await
+    }
+
+    /// Lo que el contraste de claves compara y decide, sin escribir nada.
+    async fn plan_de_claves(
+        &self,
+        respuesta: VerificacionClaves,
+        hasta_seq: i64,
+        reparar: bool,
+    ) -> AppResult<PlanDeClaves> {
         use crate::sync_reparacion as rep;
 
         let seguro = reparar && self.puede_borrar_arriba(hasta_seq).await?;
+        // AUD-18: con un fallo de bajada sin resolver, lo que aquí está y arriba no puede ser lo
+        // que la nube borró con el cambio que aquí no ha entrado: subirlo lo resucitaría.
+        let subir_lo_que_falta = reparar && !self.hay_fallos_de_bajada().await?;
         let mut descuadres: Vec<DescuadreTabla> = Vec::new();
         let mut a_reparar: Vec<rep::FilaAfectada> = Vec::new();
         let mut a_borrar: Vec<rep::FilaAfectada> = Vec::new();
@@ -3318,7 +3623,7 @@ impl SqliteSyncRepository {
                     continue;
                 }
 
-                if reparar {
+                if subir_lo_que_falta {
                     for c in &faltan {
                         if let Some(valores) = locales.get(*c) {
                             if let Some(f) = fila_de(&t.nombre, &t.columnas, valores) {
@@ -3353,13 +3658,51 @@ impl SqliteSyncRepository {
             }
         }
 
+        Ok(PlanDeClaves {
+            descuadres,
+            a_reparar,
+            a_borrar,
+            aplazado,
+        })
+    }
+
+    /// Encola lo que el plan sube y borra arriba.
+    ///
+    /// AUD-18: con la guarda otra vez, ya con el escritor cogido (`guarda_con_el_escritor`): entre
+    /// la comparación y aquí la bajada pudo registrar un fallo, y entonces lo que falta arriba puede
+    /// ser lo que borró ese cambio y lo que sobra, lo que creó. Subirlo o borrarlo con el permiso
+    /// de antes lo resucitaría o se lo llevaría.
+    async fn ejecutar_plan_de_claves(
+        &self,
+        plan: PlanDeClaves,
+        hasta_seq: i64,
+    ) -> AppResult<(Vec<DescuadreTabla>, i64, i64, bool)> {
+        use crate::sync_reparacion as rep;
+
+        let PlanDeClaves {
+            descuadres,
+            mut a_reparar,
+            mut a_borrar,
+            mut aplazado,
+        } = plan;
         let mut sentencias: Vec<SqlStatement> = Vec::new();
+        let mut reparadas = 0i64;
         if !a_reparar.is_empty() || !a_borrar.is_empty() {
             let w = self.db.write().await;
             let conn = w.raw();
+            let guarda = guarda_con_el_escritor(conn, hasta_seq).await?;
+            if !guarda.sin_fallos && !a_reparar.is_empty() {
+                a_reparar.clear();
+                aplazado = true;
+            }
+            if !guarda.deja_tocar_lo_que_hay_arriba() && !a_borrar.is_empty() {
+                a_borrar.clear();
+                aplazado = true;
+            }
             for f in &a_reparar {
                 if let Ok(Some(st)) = rep::sentencia_de_reparacion(conn, f).await {
                     sentencias.push(st);
+                    reparadas += 1;
                 }
             }
             for f in &a_borrar {
@@ -3372,7 +3715,6 @@ impl SqliteSyncRepository {
             }
         }
 
-        let reparadas = a_reparar.len().min(sentencias.len()) as i64;
         let borradas = sentencias.len() as i64 - reparadas;
         Ok((descuadres, reparadas, borradas, aplazado))
     }
@@ -3385,29 +3727,43 @@ impl SqliteSyncRepository {
     ///    DO y recibe un `Seq`; si el marcapáginas local llega hasta el `Seq` de la foto, esta Main
     ///    ya ha pasado por todo lo que hay en ella. Una fila que le falte no puede ser algo que
     ///    todavía esté de camino.
-    /// 2. **No hay nada en la cuarentena de BAJADA.** Un cambio que esta Main no supo aplicar
-    ///    avanza el checkpoint igual (SYNC-01, para no bloquear el resto), así que la Main *parece*
-    ///    al día y en realidad le falta esa fila de verdad. Borrarla arriba sería cargarse el dato
-    ///    bueno; lo que hay que hacer ahí es lo contrario, volver a aplicarlo abajo.
+    /// 2. **No hay ningún fallo de BAJADA** (`hay_fallos_de_bajada`).
     async fn puede_borrar_arriba(&self, hasta_seq: i64) -> AppResult<bool> {
         if hasta_seq <= 0 {
             // Un worker anterior no manda el `Seq`. Sin él no hay forma de saberlo: no se borra.
             return Ok(false);
         }
-        let r = self.db.read().await;
-        let conn = r.conn();
-        if checkpoint(conn).await? < hasta_seq {
-            return Ok(false);
+        {
+            let r = self.db.read().await;
+            if checkpoint(r.conn()).await? < hasta_seq {
+                return Ok(false);
+            }
         }
-        let mut rows = conn
-            .query("SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 1;", ())
+        Ok(!self.hay_fallos_de_bajada().await?)
+    }
+
+    /// AUD-18 · ¿Hay algún cambio de la nube que esta Main no tiene? Es cualquier fila de
+    /// `_Sync_Failed`, en cuarentena o no.
+    ///
+    /// - **En cuarentena**: el checkpoint pasó por encima (SYNC-01, para no bloquear el resto), así
+    ///   que la Main *parece* al día y en realidad le falta ese cambio.
+    /// - **Pendiente de reintentar**: la bajada está detenida en él.
+    ///
+    /// Mientras haya una, nada se toca arriba: ni se borra lo que la nube tiene y aquí falta (puede
+    /// ser lo que creó ese cambio), ni se pisa lo que es distinto (lo cambió él), ni se sube lo que
+    /// aquí sobra (puede ser lo que borró él).
+    async fn hay_fallos_de_bajada(&self) -> AppResult<bool> {
+        let r = self.db.read().await;
+        let mut rows = r
+            .conn()
+            .query("SELECT COUNT(*) FROM _Sync_Failed;", ())
             .await
             .map_err(db_err)?;
-        let cuarentena = match rows.next().await.map_err(db_err)? {
+        let fallos = match rows.next().await.map_err(db_err)? {
             Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
             None => 0,
         };
-        Ok(cuarentena == 0)
+        Ok(fallos > 0)
     }
 }
 
@@ -4153,3 +4509,707 @@ mod tests_main_atrasada {
 }
 
 
+
+#[cfg(test)]
+mod tests_bajada_en_orden {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! AUD-18 — la bajada se aplica estrictamente en orden de `Seq`.
+    //!
+    //! Lo que se fija aquí, contra el SQLite de verdad: un cambio que falla detiene la bajada (ni lo
+    //! de detrás entra ni el checkpoint pasa por encima de él), se reintenta con lo que se guardó al
+    //! fallar y a los cinco intentos pasa a cuarentena; lo que ya se procesó no se aplica otra vez;
+    //! el anti-eco de lo propio que va por delante sobrevive a la purga; y con cualquier fallo de
+    //! bajada `verificar_nube` no toca nada arriba.
+
+    use std::sync::Arc;
+
+    use crate::ejecutor::Value;
+    use tpv_contracts::sync::{BootstrapTabla, ClavesTabla, VerificacionClaves, VerificacionNube};
+
+    use super::*;
+    use crate::db::Db;
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("bajada_en_orden");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sql: &str) {
+        let w = db.write().await;
+        w.raw().execute_batch(sql).await.unwrap();
+    }
+
+    async fn numero(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut filas = r.conn().query(sql, ()).await.unwrap();
+        let fila = filas.next().await.unwrap().expect("una fila");
+        v_i64(fila.get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    fn cambio(op: &str, seq: i64, sql: &str) -> SyncChange {
+        SyncChange {
+            op_id: op.into(),
+            seq,
+            statements: vec![SqlStatement { sql: sql.into(), args: vec![] }],
+        }
+    }
+
+    fn zona(op: &str, seq: i64, id: &str) -> SyncChange {
+        cambio(op, seq, &format!("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('{id}','{id}');"))
+    }
+
+    /// Una zona en una tabla que esta versión no tiene: falla siempre.
+    fn rota(op: &str, seq: i64) -> SyncChange {
+        cambio(op, seq, "UPDATE Tabla_Que_No_Existe SET x = 1;")
+    }
+
+    /// Una mesa de una zona que aquí todavía no existe: falla hasta que la zona entra.
+    fn mesa(op: &str, seq: i64, id: &str, zona: &str) -> SyncChange {
+        cambio(
+            op,
+            seq,
+            &format!(
+                "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, \
+                 Shape, Width, Height) VALUES ('{id}', '{zona}', '{id}', 4, 0, 0, 'rect', 80, 80);"
+            ),
+        )
+    }
+
+    fn detenida(r: &BajadaAplicada) -> Option<(String, i64, i64)> {
+        r.detenida.as_ref().map(|d| (d.op_id.clone(), d.seq, d.intentos))
+    }
+
+    #[tokio::test]
+    async fn un_cambio_que_falla_detiene_la_tanda_y_no_se_aplica_nada_posterior() {
+        let (repo, db, _dir) = repo_temporal().await;
+
+        let r = repo
+            .apply_changes(vec![zona("op-1", 1, "z1"), rota("op-2", 2), zona("op-3", 3, "z3")])
+            .await
+            .unwrap();
+
+        assert_eq!(r.aplicadas, vec!["op-1".to_string()]);
+        assert_eq!(r.last_seq, 1, "el checkpoint no pasa por encima del que falla");
+        assert_eq!(detenida(&r), Some(("op-2".into(), 2, 1)));
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z3';").await, 0, "ni lo de detrás");
+        assert_eq!(
+            numero(&db, "SELECT COUNT(*) FROM _Sync_Failed WHERE Op_Id = 'op-2' AND Quarantined = 0;").await,
+            1,
+        );
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed WHERE Op_Id = 'op-3';").await, 0);
+        let salud = repo.health().await.unwrap();
+        assert_eq!((salud.failing, salud.quarantined), (1, 0), "«Reintentándose» dice la verdad");
+    }
+
+    #[tokio::test]
+    async fn con_un_cambio_detenido_lo_posterior_no_entra_ni_gasta_intentos() {
+        // Lo que llega en vivo mientras la bajada está detenida no pasa por delante, aunque se le
+        // pida al repositorio: la tanda se para sin anotarle nada.
+        let (repo, db, _dir) = repo_temporal().await;
+        repo.apply_changes(vec![zona("op-1", 1, "z1"), rota("op-2", 2)]).await.unwrap();
+
+        let r = repo.apply_changes(vec![zona("op-3", 3, "z3")]).await.unwrap();
+
+        assert!(r.aplicadas.is_empty());
+        assert_eq!(r.last_seq, 1);
+        assert_eq!(detenida(&r), Some(("op-2".into(), 2, 1)), "el detenido sigue con su intento");
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z3';").await, 0);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed;").await, 1, "op-3 no se anota");
+    }
+
+    #[tokio::test]
+    async fn el_detenido_se_reintenta_con_lo_que_se_guardo_y_al_entrar_sigue_lo_de_detras() {
+        // La mesa de la zona `zx` falla por su clave foránea; mientras tanto la zona aparece (en
+        // la realidad, el conflicto que la frenaba se resuelve) y al reintentarla entra. Lo de
+        // detrás entra después, en orden.
+        let (repo, db, _dir) = repo_temporal().await;
+        repo.apply_changes(vec![zona("op-1", 1, "z1"), mesa("op-2", 2, "m1", "zx")]).await.unwrap();
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zx','X');").await;
+
+        let detenido = repo.cambio_detenido().await.unwrap().expect("el detenido");
+        assert_eq!((detenido.op_id.as_str(), detenido.seq), ("op-2", 2));
+        assert_eq!(
+            serde_json::to_value(&detenido.statements).unwrap(),
+            serde_json::to_value(mesa("op-2", 2, "m1", "zx").statements).unwrap(),
+            "lo que se guardó al fallar"
+        );
+
+        let r = repo.apply_changes(vec![detenido]).await.unwrap();
+        assert_eq!((r.aplicadas.clone(), r.last_seq, r.detenida.clone()), (vec!["op-2".to_string()], 2, None));
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed;").await, 0, "entró: se olvida el fallo");
+        assert!(repo.cambio_detenido().await.unwrap().is_none());
+
+        let r = repo.apply_changes(vec![zona("op-3", 3, "z3")]).await.unwrap();
+        assert_eq!((r.aplicadas, r.last_seq), (vec!["op-3".to_string()], 3));
+    }
+
+    #[tokio::test]
+    async fn a_los_cinco_intentos_pasa_a_cuarentena_y_el_checkpoint_sigue_en_orden() {
+        let (repo, db, _dir) = repo_temporal().await;
+        repo.apply_changes(vec![zona("op-1", 1, "z1"), rota("op-2", 2), zona("op-3", 3, "z3")])
+            .await
+            .unwrap();
+        for intento in 2..MAX_APPLY_ATTEMPTS {
+            let detenido = repo.cambio_detenido().await.unwrap().unwrap();
+            let r = repo.apply_changes(vec![detenido]).await.unwrap();
+            assert_eq!(detenida(&r), Some(("op-2".into(), 2, intento)));
+            assert_eq!(r.last_seq, 1);
+        }
+
+        let detenido = repo.cambio_detenido().await.unwrap().unwrap();
+        let r = repo.apply_changes(vec![detenido, zona("op-3", 3, "z3")]).await.unwrap();
+
+        assert_eq!(r.detenida, None);
+        assert_eq!(r.aplicadas, vec!["op-3".to_string()], "lo de detrás entra, en orden");
+        assert_eq!(r.last_seq, 3);
+        let salud = repo.health().await.unwrap();
+        assert_eq!((salud.failing, salud.quarantined), (0, 1), "se ve como cualquier cuarentena");
+        assert_eq!(
+            numero(&db, "SELECT Attempts FROM _Sync_Failed WHERE Op_Id = 'op-2' AND Quarantined = 1;").await,
+            MAX_APPLY_ATTEMPTS,
+        );
+        assert!(repo.cambio_detenido().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn la_cuarentena_es_atomica_o_todo_o_nada() {
+        // Codex (tercera revisión, 4): el marcador de `_Sync_Applied_Ops`, la marca en
+        // `_Sync_Failed` y el checkpoint iban en tres commits sueltos, y una copia podía fotografiar
+        // el marcador solo. Si el último paso no puede escribirse, no queda ninguno de los tres.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,
+               First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-rota', 1, '[]', 4, 0, 1, 1);
+             CREATE TRIGGER checkpoint_bloqueado BEFORE UPDATE ON _Sync_State
+             BEGIN SELECT RAISE(ABORT, 'checkpoint bloqueado'); END;",
+        )
+        .await;
+
+        assert!(repo.apply_changes(vec![rota("op-rota", 1)]).await.is_err());
+
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Applied_Ops WHERE Op_Id = 'op-rota';").await, 0);
+        assert_eq!(
+            numero(&db, "SELECT Attempts * 10 + Quarantined FROM _Sync_Failed WHERE Op_Id = 'op-rota';").await,
+            40,
+            "ni el intento ni la cuarentena"
+        );
+        assert_eq!(numero(&db, "SELECT Last_Seq FROM _Sync_State WHERE Id = 1;").await, 0);
+
+        // Sin el bloqueo, el quinto intento la pone en cuarentena con las tres cosas a la vez.
+        sembrar(&db, "DROP TRIGGER checkpoint_bloqueado;").await;
+        let r = repo.apply_changes(vec![rota("op-rota", 1)]).await.unwrap();
+        assert_eq!(r.last_seq, 1);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Applied_Ops WHERE Op_Id = 'op-rota';").await, 1);
+        assert_eq!(
+            numero(&db, "SELECT Attempts * 10 + Quarantined FROM _Sync_Failed WHERE Op_Id = 'op-rota';").await,
+            51
+        );
+    }
+
+    #[tokio::test]
+    async fn la_cuarentena_guarda_lo_necesario_para_diagnosticarla() {
+        let (repo, db, _dir) = repo_temporal().await;
+        let mut r = repo.apply_changes(vec![rota("op-2", 2)]).await.unwrap();
+        while r.detenida.is_some() {
+            let detenido = repo.cambio_detenido().await.unwrap().unwrap();
+            r = repo.apply_changes(vec![detenido]).await.unwrap();
+        }
+        let r = db.read().await;
+        let mut filas = r
+            .conn()
+            .query(
+                "SELECT Seq, Statements_Json, Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms \
+                 FROM _Sync_Failed WHERE Op_Id = 'op-2';",
+                (),
+            )
+            .await
+            .unwrap();
+        let f = filas.next().await.unwrap().expect("la fila de la cuarentena");
+        assert_eq!(v_i64(f.get_value(0).unwrap()), Some(2));
+        let texto = |v: Value| match v {
+            Value::Text(s) => s,
+            v => panic!("{v:?}"),
+        };
+        let sentencias: Vec<SqlStatement> = serde_json::from_str(&texto(f.get_value(1).unwrap())).unwrap();
+        assert_eq!(
+            serde_json::to_value(&sentencias).unwrap(),
+            serde_json::to_value(rota("op-2", 2).statements).unwrap()
+        );
+        assert!(texto(f.get_value(2).unwrap()).contains("no such table"));
+        assert!(v_i64(f.get_value(3).unwrap()).unwrap() > 0 && v_i64(f.get_value(4).unwrap()).unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn lo_que_llega_por_debajo_del_checkpoint_no_se_aplica_aunque_se_haya_purgado_su_registro() {
+        // Codex (primera revisión, 4): el DO reenvía el `Seq` 10 (SYNC-03) cuando esta Main ya va
+        // por el 701 y la purga por cursor ya retiró su registro de idempotencia. Aplicarlo otra
+        // vez devolvería la zona a su nombre viejo.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','Nuevo');
+             UPDATE _Sync_State SET Last_Seq = 701 WHERE Id = 1;",
+        )
+        .await;
+
+        let r = repo
+            .apply_changes(vec![cambio("op-10", 10, "UPDATE Zonas SET Nombre_Zona = 'Viejo' WHERE ID_Zona = 'z1';")])
+            .await
+            .unwrap();
+
+        assert!(r.aplicadas.is_empty());
+        assert_eq!((r.last_seq, r.detenida), (701, None));
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE Nombre_Zona = 'Nuevo';").await, 1);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Applied_Ops WHERE Op_Id = 'op-10';").await, 0);
+    }
+
+    #[tokio::test]
+    async fn el_eco_propio_no_lleva_el_checkpoint_por_encima_de_un_cambio_detenido() {
+        // Codex (primera revisión, 2): la Main sube una operación suya (el 3) mientras la bajada
+        // está detenida en el 2. Su eco no puede subir el checkpoint por encima del 2: si lo
+        // hiciera, el 2 no se volvería a pedir y la Main se quedaría sin él.
+        let (repo, db, _dir) = repo_temporal().await;
+        repo.apply_changes(vec![zona("op-1", 1, "z1"), mesa("op-2", 2, "m1", "zx")]).await.unwrap();
+        sembrar(
+            &db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-propia','Propia');
+             INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-propia', 'zona', '[]', 1);
+             INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-propia', 0, 1);",
+        )
+        .await;
+
+        let eco = zona("op-propia", 3, "z-propia");
+        let r = repo.apply_changes(vec![eco.clone()]).await.unwrap();
+        assert_eq!((r.last_seq, detenida(&r)), (1, Some(("op-2".into(), 2, 1))));
+        // Ni siquiera se da por confirmada la subida: volverá por el catch-up, y fuera del outbox su
+        // anti-eco quedaría expuesto a la purga TTL antes de que vuelva.
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Op_Id = 'op-propia';").await, 1);
+
+        // Resuelto el 2, el eco entra como siempre: no se aplica (ya está aquí), confirma la subida
+        // y mueve el checkpoint.
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zx','X');").await;
+        let detenido = repo.cambio_detenido().await.unwrap().unwrap();
+        repo.apply_changes(vec![detenido]).await.unwrap();
+        let r = repo.apply_changes(vec![eco]).await.unwrap();
+        assert!(r.aplicadas.is_empty(), "el eco no se aplica: {:?}", r.aplicadas);
+        assert_eq!((r.last_seq, r.detenida), (3, None));
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z-propia';").await, 1);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Op_Id = 'op-propia';").await, 0);
+    }
+
+    #[tokio::test]
+    async fn la_purga_no_retira_el_anti_eco_de_lo_propio_que_va_por_delante() {
+        // Lo que esta Main subió mientras la bajada estaba detenida vuelve por el catch-up cuando
+        // se resuelve. Si la purga TTL retirara antes su anti-eco, se aplicaría otra vez.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "UPDATE _Sync_State SET Last_Seq = 10 WHERE Id = 1;
+             INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES
+               ('propia-delante', 50, 1), ('propia-detras', 5, 1), ('propia-sin-seq', 0, 1),
+               ('reciente-delante', 60, 9999999999999);",
+        )
+        .await;
+
+        repo.purge_applied_ops().await.unwrap();
+
+        let r = db.read().await;
+        let mut filas = r
+            .conn()
+            .query("SELECT Op_Id FROM _Sync_Applied_Ops ORDER BY Op_Id;", ())
+            .await
+            .unwrap();
+        let mut quedan = Vec::new();
+        while let Some(f) = filas.next().await.unwrap() {
+            if let Value::Text(s) = f.get_value(0).unwrap() {
+                quedan.push(s);
+            }
+        }
+        assert_eq!(quedan, vec!["propia-delante".to_string(), "reciente-delante".to_string()]);
+    }
+
+    fn claves_zonas(ids: &[&str]) -> VerificacionClaves {
+        VerificacionClaves {
+            tablas: vec![ClavesTabla {
+                nombre: "Zonas".into(),
+                columnas: vec!["ID_Zona".into()],
+                claves: ids.iter().map(|i| vec![serde_json::json!(i)]).collect(),
+                truncada: false,
+            }],
+        }
+    }
+
+    /// Un fallo de bajada todavía sin cuarentena, por encima de un checkpoint en 100.
+    async fn con_un_fallo_pendiente(db: &Arc<Db>) {
+        sembrar(
+            db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','A'),('z-solo-aqui','B');
+             UPDATE _Sync_State SET Last_Seq = 100 WHERE Id = 1;
+             INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,
+               First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-x', 101, '[]', 1, 0, 1, 1);",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn NO_se_borra_arriba_con_un_fallo_de_bajada_PENDIENTE() {
+        // La investigación: la guarda sólo miraba la cuarentena, y un fallo aún sin apartar dejaba
+        // borrar en la nube lo que ese cambio había creado.
+        let (repo, db, _dir) = repo_temporal().await;
+        con_un_fallo_pendiente(&db).await;
+
+        let (_d, _r, borradas, aplazado) = repo
+            .contrastar_claves(claves_zonas(&["z1", "z-solo-aqui", "z-que-no-supe-aplicar"]), 100)
+            .await
+            .unwrap();
+
+        assert_eq!((borradas, aplazado), (0, true));
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn NO_se_sube_lo_que_falta_arriba_con_un_fallo_de_bajada() {
+        // Lo que aquí está y arriba no puede ser lo que la nube borró con el cambio que aquí no ha
+        // entrado: subirlo lo resucitaría.
+        let (repo, db, _dir) = repo_temporal().await;
+        con_un_fallo_pendiente(&db).await;
+
+        let (desc, reparadas, borradas, aplazado) =
+            repo.contrastar_claves(claves_zonas(&["z1"]), 100).await.unwrap();
+
+        assert_eq!(desc[0].faltan, 1, "se ve y se informa...");
+        assert_eq!((reparadas, borradas, aplazado), (0, 0, true), "...pero no se toca");
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+
+        // Resuelto el fallo, la pasada siguiente sí lo repara.
+        sembrar(&db, "DELETE FROM _Sync_Failed;").await;
+        let (_d, reparadas, _b, aplazado) =
+            repo.contrastar_claves(claves_zonas(&["z1"]), 100).await.unwrap();
+        assert_eq!((reparadas, aplazado), (1, false));
+    }
+
+    #[tokio::test]
+    async fn NO_se_pisa_arriba_lo_distinto_con_un_fallo_de_bajada_PENDIENTE() {
+        let (repo, db, _dir) = repo_temporal().await;
+        con_un_fallo_pendiente(&db).await;
+        let foto = VerificacionNube {
+            conteos: vec![],
+            ventana: vec![BootstrapTabla {
+                nombre: "Zonas".into(),
+                columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                filas: vec![vec![serde_json::json!("z1"), serde_json::json!("Terraza")]],
+                parcial: false,
+            }],
+            ventana_omitida: false,
+            desde: String::new(),
+            hasta_seq: 100,
+        };
+
+        let r = repo.contrastar_con_la_nube(foto).await.unwrap();
+
+        assert_eq!(r.descuadres.iter().map(|d| d.distintas).sum::<i64>(), 1);
+        assert_eq!((r.reparadas, r.aplazado), (0, true));
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+    }
+
+    /// Lo que el checkpoint ha dejado atrás sin resolver ni en cuarentena: nada lo volvería a
+    /// intentar, y bloquearía `verificar_nube` para siempre.
+    async fn fallos_atras_sin_resolver(db: &Arc<Db>) -> i64 {
+        numero(
+            db,
+            "SELECT COUNT(*) FROM _Sync_Failed \
+              WHERE Quarantined = 0 AND Seq <= (SELECT Last_Seq FROM _Sync_State WHERE Id = 1);",
+        )
+        .await
+    }
+
+    async fn checkpoint_de(db: &Arc<Db>) -> i64 {
+        numero(db, "SELECT Last_Seq FROM _Sync_State WHERE Id = 1;").await
+    }
+
+    const CHECKPOINT_BLOQUEADO: &str = "CREATE TRIGGER checkpoint_bloqueado BEFORE UPDATE ON _Sync_State
+         BEGIN SELECT RAISE(ABORT, 'checkpoint bloqueado'); END;";
+
+    #[tokio::test]
+    async fn el_reintento_de_un_eco_propio_resuelve_su_fallo() {
+        // Codex (tercera revisión bis, 3): el eco de una escritura propia no pudo mover el
+        // checkpoint, y el reintento salía por el anti-eco sin borrar el fallo. Quedaba por debajo
+        // del checkpoint, sin que nada lo reintentara, y bloqueando verificar_nube para siempre.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "UPDATE _Sync_State SET Last_Seq = 10 WHERE Id = 1;
+             INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-propia', 12, 1);",
+        )
+        .await;
+        sembrar(&db, CHECKPOINT_BLOQUEADO).await;
+
+        let r = repo.apply_changes(vec![zona("op-propia", 12, "z-propia")]).await.unwrap();
+        assert_eq!(detenida(&r), Some(("op-propia".into(), 12, 1)));
+
+        sembrar(&db, "DROP TRIGGER checkpoint_bloqueado;").await;
+        let detenido = repo.cambio_detenido().await.unwrap().expect("el eco se reintenta");
+        let r = repo.apply_changes(vec![detenido]).await.unwrap();
+
+        assert_eq!((r.last_seq, r.detenida.is_none()), (12, true));
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed;").await, 0, "el fallo se resuelve");
+        assert_eq!(
+            numero(&db, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z-propia';").await,
+            0,
+            "lo propio no se aplica otra vez"
+        );
+        // Y verificar_nube vuelve a poder tocar arriba.
+        let (_d, _r, borradas, aplazado) =
+            repo.contrastar_claves(claves_zonas(&["z-solo-arriba"]), 12).await.unwrap();
+        assert_eq!((borradas, aplazado), (1, false));
+    }
+
+    #[tokio::test]
+    async fn ningun_camino_deja_atras_un_fallo_sin_resolver_ni_en_cuarentena() {
+        // AUD-18: cada forma que tiene el checkpoint de pasar por encima de un fallo lo resuelve o lo
+        // deja en cuarentena: entrar al reintentarlo, salir por el anti-eco y la cuarentena.
+        let (repo, db, _dir) = repo_temporal().await;
+
+        // 1) Falla (la mesa antes que su zona) y entra al reintentarlo.
+        let r = repo.apply_changes(vec![mesa("op-mesa", 1, "m-1", "z-a")]).await.unwrap();
+        assert!(r.detenida.is_some());
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-a', 'A');").await;
+        let d = repo.cambio_detenido().await.unwrap().unwrap();
+        repo.apply_changes(vec![d]).await.unwrap();
+        assert_eq!((checkpoint_de(&db).await, fallos_atras_sin_resolver(&db).await), (1, 0));
+
+        // 2) El eco de lo propio que no pudo mover el checkpoint sale por el anti-eco al reintentarlo.
+        sembrar(
+            &db,
+            "INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-propia', 2, 1);",
+        )
+        .await;
+        sembrar(&db, CHECKPOINT_BLOQUEADO).await;
+        let r = repo.apply_changes(vec![zona("op-propia", 2, "z-propia")]).await.unwrap();
+        assert!(r.detenida.is_some());
+        sembrar(&db, "DROP TRIGGER checkpoint_bloqueado;").await;
+        let d = repo.cambio_detenido().await.unwrap().unwrap();
+        repo.apply_changes(vec![d]).await.unwrap();
+        assert_eq!((checkpoint_de(&db).await, fallos_atras_sin_resolver(&db).await), (2, 0));
+
+        // 3) No entra nunca: cuarentena, con el checkpoint en la misma transacción.
+        for _ in 0..MAX_APPLY_ATTEMPTS {
+            repo.apply_changes(vec![rota("op-rota", 3)]).await.unwrap();
+        }
+        assert_eq!((checkpoint_de(&db).await, fallos_atras_sin_resolver(&db).await), (3, 0));
+        assert_eq!(numero(&db, "SELECT Quarantined FROM _Sync_Failed WHERE Op_Id = 'op-rota';").await, 1);
+    }
+
+    #[tokio::test]
+    async fn el_anti_eco_de_un_eco_propio_que_falla_no_lo_retira_la_purga() {
+        // Codex (tercera revisión ter, 1): lo subido por la cola no recibe `apply_ack`, así que su
+        // anti-eco se queda con `Seq = 0`. Si su eco no podía mover el checkpoint, `anotar_fallo` lo
+        // sacaba del outbox y la purga TTL retiraba el anti-eco durante la espera: el reintento
+        // descontaba el stock otra vez (9 → 8).
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('c-1', 'Bebidas');
+             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Stock_Suelto)
+             VALUES ('p-1', 'c-1', 'Agua', 9);
+             UPDATE _Sync_State SET Last_Seq = 10 WHERE Id = 1;
+             INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms)
+             VALUES ('op-venta', 'venta', '[]', 1);
+             INSERT INTO _Sync_Encoladas (Op_Id, Encolada_En_Ms) VALUES ('op-venta', 1);
+             INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-venta', 0, 1);",
+        )
+        .await;
+        sembrar(&db, CHECKPOINT_BLOQUEADO).await;
+        let eco = cambio(
+            "op-venta",
+            12,
+            "UPDATE Productos SET Stock_Suelto = Stock_Suelto - 1 WHERE ID_Producto = 'p-1';",
+        );
+
+        let r = repo.apply_changes(vec![eco]).await.unwrap();
+        assert_eq!(detenida(&r), Some(("op-venta".into(), 12, 1)));
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Op_Id = 'op-venta';").await, 0);
+        assert_eq!(
+            numero(&db, "SELECT Seq FROM _Sync_Applied_Ops WHERE Op_Id = 'op-venta';").await,
+            12,
+            "el anti-eco lleva ya el Seq de su eco"
+        );
+
+        // Mientras se espera al reintento corre la purga, y el anti-eco se queda.
+        sembrar(&db, "DROP TRIGGER checkpoint_bloqueado;").await;
+        repo.purge_applied_ops().await.unwrap();
+        let detenido = repo.cambio_detenido().await.unwrap().unwrap();
+        let r = repo.apply_changes(vec![detenido]).await.unwrap();
+
+        assert_eq!((r.last_seq, r.detenida.is_none()), (12, true));
+        assert_eq!(
+            numero(&db, "SELECT CAST(Stock_Suelto AS INTEGER) FROM Productos WHERE ID_Producto = 'p-1';").await,
+            9,
+            "no se descuenta dos veces"
+        );
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed;").await, 0);
+    }
+
+    #[tokio::test]
+    async fn un_fallo_de_algo_ya_procesado_no_se_anota() {
+        // Codex (tercera revisión ter, 2): con el checkpoint en 20, un error puntual al descartar un
+        // duplicado del 12 dejaba anotado un fallo 12 sin cuarentena, por debajo del checkpoint: nada
+        // lo reintentaba y bloqueaba `verificar_nube`. Cuando `apply_one` falla, `apply_changes`
+        // llama a `anotar_fallo`; aquí se le llama igual, con el error que fuera.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 20 WHERE Id = 1;").await;
+        let duplicado = zona("op-12", 12, "z-12");
+        {
+            let w = db.write().await;
+            let fallo = anotar_fallo(w.raw(), &duplicado, "error puntual leyendo el checkpoint")
+                .await
+                .unwrap();
+            assert!(matches!(fallo, Fallo::YaProcesado));
+        }
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed;").await, 0);
+
+        // Recibido otra vez, sale por `YaProcesada` sin anotar nada, y `verificar_nube` puede actuar.
+        let r = repo.apply_changes(vec![duplicado]).await.unwrap();
+        assert_eq!((r.last_seq, r.detenida.is_none()), (20, true));
+        assert_eq!(fallos_atras_sin_resolver(&db).await, 0);
+        let (_d, _r, borradas, aplazado) =
+            repo.contrastar_claves(claves_zonas(&["z-solo-arriba"]), 20).await.unwrap();
+        assert_eq!((borradas, aplazado), (1, false));
+    }
+
+    #[tokio::test]
+    async fn un_duplicado_resuelve_el_fallo_que_tuviera_por_debajo_del_checkpoint() {
+        // Lo que dejara anotado una versión anterior por debajo del checkpoint se resuelve al llegar
+        // su duplicado: con la operación procesada, se borra; sin ella (un fallo de antes de AUD-18,
+        // que el checkpoint se saltó sin aplicarlo), pasa a cuarentena, que es lo que es.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "UPDATE _Sync_State SET Last_Seq = 20 WHERE Id = 1;
+             INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-12', 12, 1);
+             INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,
+               First_Failed_At_Ms, Last_Failed_At_Ms)
+             VALUES ('op-12', 12, '[]', 1, 0, 1, 1), ('op-11', 11, '[]', 1, 0, 1, 1);",
+        )
+        .await;
+        assert_eq!(fallos_atras_sin_resolver(&db).await, 2);
+
+        repo.apply_changes(vec![zona("op-11", 11, "z-11"), zona("op-12", 12, "z-12")])
+            .await
+            .unwrap();
+
+        assert_eq!(fallos_atras_sin_resolver(&db).await, 0);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM _Sync_Failed WHERE Op_Id = 'op-12';").await, 0);
+        assert_eq!(numero(&db, "SELECT Quarantined FROM _Sync_Failed WHERE Op_Id = 'op-11';").await, 1);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona IN ('z-11', 'z-12');").await, 0);
+    }
+
+    #[test]
+    fn el_checkpoint_solo_se_mueve_resolviendo_el_fallo() {
+        // AUD-18 (tercera revisión bis, 3): lo que mueve `Last_Seq` tiene que resolver a la vez el
+        // fallo que deja atrás. Fuera de los tests sólo lo hacen `pasar_el_checkpoint` (que borra el
+        // de esa operación si no está en cuarentena) y `bootstrap_restaurar` (que vacía
+        // `_Sync_Failed` en la misma transacción). Un sitio nuevo tiene que pasar por la primera.
+        let fuente = include_str!("sync.rs").replace("\r\n", "\n");
+        // Sin los tests: cada bloque `#[cfg(test)]` acaba en la primera llave de columna 0.
+        let mut codigo = String::new();
+        let mut resto = fuente.as_str();
+        while let Some(i) = resto.find("\n#[cfg(test)]\n") {
+            codigo.push_str(&resto[..i]);
+            let tras = &resto[i + 1..];
+            let fin = tras.find("\n}\n").expect("el bloque de tests se cierra");
+            resto = &tras[fin + 2..];
+        }
+        codigo.push_str(resto);
+
+        let mut donde: Vec<String> = codigo
+            .match_indices("SET Last_Seq")
+            .map(|(i, _)| {
+                let antes = &codigo[..i];
+                let f = antes.rfind("fn ").expect("dentro de una función");
+                antes[f + 3..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect()
+            })
+            .collect();
+        donde.sort();
+        donde.dedup();
+        assert_eq!(donde, ["bootstrap_restaurar", "pasar_el_checkpoint"]);
+
+        let cuerpo = &codigo[codigo.find("fn bootstrap_restaurar").unwrap()..];
+        let fin = cuerpo[1..].find("\n    async fn ").map_or(cuerpo.len(), |i| i + 1);
+        assert!(cuerpo[..fin].contains("DELETE FROM _Sync_Failed;"));
+    }
+
+    /// El fallo que la bajada registra entre la comparación y la escritura.
+    async fn la_bajada_registra_un_fallo(db: &Arc<Db>) {
+        sembrar(
+            db,
+            "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,
+               First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-x', 101, '[]', 1, 0, 1, 1);",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn NO_se_encolan_claves_con_un_fallo_registrado_entre_la_comparacion_y_la_escritura() {
+        // Codex (tercera revisión, 5): la guarda se miraba antes de comparar y de coger el
+        // escritor. Un fallo de bajada registrado entre medias no impedía encolar con el permiso de
+        // antes: se resucitaba arriba una fila cuyo borrado acababa de fallar aquí.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','A'),('z-solo-aqui','B');
+             UPDATE _Sync_State SET Last_Seq = 100 WHERE Id = 1;",
+        )
+        .await;
+
+        // Sin fallos, el plan sube lo que falta arriba y borra lo que sobra...
+        let plan = repo
+            .plan_de_claves(claves_zonas(&["z1", "z-solo-arriba"]), 100, true)
+            .await
+            .unwrap();
+        assert_eq!((plan.a_reparar.len(), plan.a_borrar.len(), plan.aplazado), (1, 1, false));
+
+        // ...pero antes de encolarlo, la bajada registra un fallo.
+        la_bajada_registra_un_fallo(&db).await;
+        let (_d, reparadas, borradas, aplazado) = repo.ejecutar_plan_de_claves(plan, 100).await.unwrap();
+
+        assert_eq!((reparadas, borradas, aplazado), (0, 0, true));
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn NO_se_pisa_lo_distinto_con_un_fallo_registrado_entre_la_comparacion_y_la_escritura() {
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','A');
+             UPDATE _Sync_State SET Last_Seq = 100 WHERE Id = 1;",
+        )
+        .await;
+        let foto = VerificacionNube {
+            conteos: vec![],
+            ventana: vec![BootstrapTabla {
+                nombre: "Zonas".into(),
+                columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                filas: vec![vec![serde_json::json!("z1"), serde_json::json!("Terraza")]],
+                parcial: false,
+            }],
+            ventana_omitida: false,
+            desde: String::new(),
+            hasta_seq: 100,
+        };
+
+        let plan = repo.plan_de_valores(&foto, true).await.unwrap();
+        assert_eq!((plan.a_reparar.len(), plan.aplazado), (1, false));
+
+        la_bajada_registra_un_fallo(&db).await;
+        let r = repo.ejecutar_plan_de_valores(plan, 100, false).await.unwrap();
+
+        assert_eq!((r.reparadas, r.aplazado), (0, true));
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+    }
+}

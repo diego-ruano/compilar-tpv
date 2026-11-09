@@ -42,9 +42,10 @@ sin nube no opera.
 | …el transporte | `tenantHub.rutas.ts`, `tenantHub.rpc.ts` | Upgrade WebSocket y contratos de aplicar, revocar y avisar |
 | …el saludo | `tenantHub.identidad.ts` | Quién llama y qué puede hacer |
 | …la cola | `tenantHub.cola.ts` | `_Cola_Entrada`, `_Cola_Estado`, `_Cola_Muerta` |
+| …el turno del log | `tenantHub.turno.ts` | La escritura en curso (`_Escritura_En_Curso`), cómo se resuelve una confirmación incierta y el veto de una operación |
 | …el lote | `tenantHub.lote.ts`, `tenantHub.sentencias.ts`, `tenantHub.envelope.ts` | De un comando a sentencias; el sobre que se guarda en `Sync_Changes` |
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
-| …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |
+| …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido; si la base lo rechazaría igual otra vez |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar`, `/verificar-claves`, `/salud` |
 
@@ -221,17 +222,111 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 
 - Al autenticarse, la Main pide `/v1/sync/changes` desde su `Last_Seq` y aplica en orden, guardando
   los `change` en vivo hasta terminar.
-- Una operación remota que falla al aplicarse se reintenta 5 veces (`MAX_APPLY_ATTEMPTS`) y pasa a
-  cuarentena de bajada (`_Sync_Failed`): se salta, avanza el checkpoint y se señala.
+- **La bajada va estrictamente en orden de `Seq` (AUD-18)**: nunca se aplica un cambio posterior antes
+  que uno anterior, y el checkpoint sólo pasa por encima de lo que ya se procesó. Lo garantizan dos
+  lados: el DO difunde en orden de `Seq` (ver «El orden de la difusión») y la Main aplica así:
+  - Un cambio con `Seq` igual o menor que el checkpoint ya se procesó (un reenvío, el solape del
+    catch-up con lo que llegó en vivo al conectar): no se aplica, aunque su registro de idempotencia
+    ya se haya purgado, y deja un `warn`.
+  - Uno que falla al aplicarse **detiene la bajada**: se anota en `_Sync_Failed` (sentencias, error,
+    intentos), no se aplica nada posterior y el checkpoint no lo pasa. El repositorio lo garantiza
+    por su cuenta: mientras haya un fallo sin cuarentena por delante del checkpoint, lo posterior no
+    entra ni da nada por hecho, tampoco el eco de una escritura propia (que sigue en el outbox hasta
+    que vuelva en su turno).
+  - Se reintenta **dentro de la sesión**, con las sentencias que se guardaron al fallar
+    (`cambio_detenido`), tras 1, 2, 4 y 8 s (`espera_para_reintentar`): lo pasajero de escribir en
+    el SQLite local se resuelve en segundos, y lo que falla siempre (una columna que esta versión no
+    tiene, una restricción, una clave foránea) no se arregla esperando. Mientras tanto el socket se
+    sigue atendiendo, pero lo que llega en vivo no se aplica: lo trae después el catch-up desde el
+    checkpoint, que es la fuente de verdad. Si la sesión se cae, la siguiente empieza por él.
+  - El reintento no se coordina con lo que el personal escribe aquí durante la espera: si toca la
+    misma fila, el cambio remoto la pisa al entrar. Es el riesgo aceptado SYNC-29
+    ([pendientes](../pendientes.md)), y la espera lo agranda en unos segundos.
+  - Al quinto intento (`MAX_APPLY_ATTEMPTS`) pasa a **cuarentena** (`Quarantined = 1`, con lo
+    necesario para diagnosticarlo): el checkpoint pasa por encima y la bajada sigue en orden desde ahí.
+    El intento contado, el marcador de `_Sync_Applied_Ops`, la marca de cuarentena y el checkpoint van
+    en una sola transacción (`anotar_fallo`): una copia de la base tiene los cuatro o ninguno.
+  - El catch-up sigue la misma regla en cada página, y no pide la siguiente si el checkpoint no llegó
+    al final de la actual.
+- «Reintentándose» (Configuración → Conectividad) son los fallos sin cuarentena: la bajada está
+  detenida en uno de ellos. «En cuarentena», los que se saltaron.
 - Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,
   sentencias, checkpoint) y el escritor se suelta cada 50 (`CAMBIOS_POR_TURNO_DE_ESCRITOR`): una
   página de catch-up de 500 no deja a un cobro esperando a que termine entera (RI-33).
+- **El checkpoint no deja atrás un fallo sin resolver** (AUD-18): lo único que lo mueve
+  (`pasar_el_checkpoint`) borra a la vez el fallo de ese cambio si no está en cuarentena, entre o
+  salga por el anti-eco al reintentarlo (el eco propio que no pudo mover el checkpoint). Fuera de
+  eso, sólo la restauración desde la nube lo mueve, y vacía `_Sync_Failed` en la misma transacción.
+  Un fallo olvidado por debajo del checkpoint no lo reintentaría nadie y bloquearía `verificar_nube`.
+  Por lo mismo, **no se anota el fallo de algo que ya no pasa del checkpoint** (un duplicado con el
+  que algo falló: `anotar_fallo` relee el checkpoint en su transacción), y el que hubiera se resuelve
+  cuando llega su duplicado: se borra si la operación consta como procesada y, si no (un fallo de
+  antes de AUD-18), pasa a cuarentena.
+- El anti-eco de una operación propia (`_Sync_Applied_Ops`) no se retira por antigüedad mientras su
+  `Seq` vaya por delante del checkpoint: volverá por el catch-up, y sin él se aplicaría otra vez.
+  Uno con `Seq = 0` fuera del outbox sí, porque ya no puede volver: lo que sube por la cola no recibe
+  `apply_ack` y sale del outbox al volver su eco; si ese eco falla, `anotar_fallo` le pone su `Seq`
+  en la misma transacción. Y la nube sólo contesta un `apply_ack` con `Seq` 0 si ya purgó el log de
+  la operación, por debajo del checkpoint de las Main activas; un error al leerlo sale como error.
 - La Handy no aplica nada: refresca las claves de React Query de las tablas tocadas.
 - **Freeze**: si no hay ninguna Main conectada al DO, las Handy reciben `main_offline` y bloquean su
   interfaz.
 - `Sync_Changes` se purga por encima de un suelo: lo de más de 7 días que todas las Main activas (las
   que reportaron checkpoint en los últimos 7 días) ya tienen, con 1000 de margen. Como mucho una purga
-  por hora y por DO.
+  por hora y por DO. `Applied_Operations`, por antigüedad (7 días) y con las condiciones de «El
+  orden de la difusión».
+
+### El orden de la difusión (AUD-18)
+
+- El DO confirma en Turso y difunde **de una escritura en una** (el turno del log, `enTurnoDelLog`),
+  también el lote de la cola. Turso numera al confirmar y la difusión va justo después, antes de soltar
+  el turno: sale en orden de `Seq`, sin suponer que sea contiguo. El WebSocket entrega en orden, y el
+  catch-up de cada conexión de la Main va después de autenticarse: lo confirmado antes le llega por
+  REST y lo posterior por el socket.
+- Cada petición del DO a la base del tenant lleva un plazo de 15 s (`fetchConPlazo`,
+  `PLAZO_TURSO_MS`) que cubre también el cuerpo de la respuesta: el turno nunca se queda cogido. Las
+  migraciones, que no van en el turno, no lo llevan.
+- **Una confirmación incierta** —el transporte se cortó después de enviar, venció el plazo, la
+  respuesta no se deja leer— se resuelve antes de dejar pasar nada posterior. Cada escritura suelta se
+  anota en el SQLite del DO antes de mandarla (`_Escritura_En_Curso`) y se olvida al saber cómo acabó;
+  una nota que sigue ahí la resuelve primero el turno siguiente, también si el DO se apagó entre medias.
+  Se repite por su `Op_Id`: el registro de idempotencia (`Applied_Operations`) y el log
+  (`Sync_Changes`) van en el mismo batch atómico, así que si ya estaba confirmada la repetición choca y
+  se difunde la suya, y si no, se confirma ahora (y la original, si llega tarde, es la que choca).
+  Nunca hay dos `Seq` para la misma operación.
+- **Sólo una respuesta de la base la resuelve, nunca el tiempo**: abortar una petición no impide que
+  Turso la confirme después. Si el reenvío tampoco tiene respuesta, la nota se queda, las Main se
+  desconectan (4004, por `sessionGone`) para ponerse al día por el catch-up y no se confirma ni se
+  difunde nada posterior del negocio: quien escribe recibe `escritura_en_duda`, un fallo pasajero, y lo
+  vuelve a intentar. El reenvío se repite en los turnos siguientes con una espera que crece desde el
+  último (en el acto, y luego 1, 2, 4… s hasta un minuto: `esperaDeReenvio`); mientras se espera no
+  se manda nada ni se desconecta a nadie. Un rechazo de credenciales no cuenta como envío.
+- Si el reenvío lo rechaza la propia base (`rechazoDeterminista`: una restricción, una tabla o columna
+  que no existe, un 4xx que no es de credenciales), la original podría seguir en vuelo y entrar más
+  tarde, cuando otra escritura hubiera cambiado lo que la hacía fallar. Se **veta** su `Op_Id`
+  (`vetarOperacion`): entra en `Applied_Operations` como `FAILED`, con el rechazo como motivo, y
+  cualquier copia que llegue después choca con él. Si el veto entra, la operación no se aplicó ni se
+  aplicará, y su reintento acaba con ese mismo rechazo; si choca, es que estaba aplicada, y se difunde.
+- En el primer envío, ese mismo rechazo es definitivo sin veto: no hay otra copia en vuelo.
+- El lote de la cola no necesita nota: sus operaciones siguen en `_Cola_Entrada` hasta aplicarse, la
+  cola no vacía congela todo lo demás (también dentro del turno) y el drenado siguiente las repite por
+  `Op_Id` y difunde, en orden, las que ya estaban confirmadas. Si el lote se confirma y el `Seq` de
+  alguna no se deja leer (ni en la respuesta ni en el log), no se difunde ninguna ni sale ninguna de la
+  cola: es una confirmación incierta, y el drenado siguiente las encuentra aplicadas y las difunde en
+  orden. Una escritura en duda no se le imputa a ninguna operación de la cola: se espera como con la
+  base caída.
+- Antes de **apartar** una operación de la cola (REV-04) se veta igual: un intento suyo pudo quedarse
+  sin respuesta y confirmarse con ella ya apartada. Si el veto choca porque estaba aplicada, se difunde
+  y sale de la cola como aplicada; si no se sabe cómo acabó, se queda en la cola sin gastar el intento.
+- **El gate y el veto sólo cierran el paso mientras su fila existe**, así que la purga de
+  `Applied_Operations` no puede adelantarse a la última copia que pueda llegar. **Supuesto, muy
+  conservador: ninguna petición a Turso sigue en vuelo un día después de enviarse**
+  (`VIDA_MAXIMA_DE_UN_ENVIO_MS`; el cliente la aborta a los 15 s, pero abortarla no prueba que no se
+  ejecute). La purga va en el turno del log, así que antes se resuelve la escritura en duda (si no se
+  puede, no se purga); no corre con la cola sin vaciar; ni hasta un día después del último envío sin
+  respuesta (`_Envio_Sin_Respuesta`: cada turno que encuentra una escritura en duda, cada reenvío sin
+  respuesta y cada lote de la cola antes de mandarlo, por si el DO se apaga con él en vuelo); y nunca
+  retira una fila de menos de un día, aunque se acorte el plazo de 7.
 
 ### Reparar una divergencia (SYNC-22, SYNC-24, SYNC-25)
 
@@ -251,9 +346,14 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
   ventana de 30 días de la nube con la base local, repara e informa a Axiom (`tenant_salud_sync`), no al
   usuario. La comparación tolera las dos formas de escribir un número (`2.5` y `"2.50"`).
 - **Nada se toca si esta Main no puede afirmar que está al día**: su checkpoint tiene que alcanzar el
-  `Seq` de la foto (leído después de las filas) y no puede haber cuarentena de bajada. Vale para
-  actualizar y para borrar. Una fila que la nube tiene y aquí no, sólo se borra arriba en ese caso; con
-  una lista de claves truncada no se borra nada.
+  `Seq` de la foto (leído después de las filas) y no puede haber **ninguna fila en `_Sync_Failed`**,
+  ni en cuarentena ni pendiente de reintentar (`hay_fallos_de_bajada`). Vale para actualizar y para
+  borrar. Una fila que la nube tiene y aquí no, sólo se borra arriba en ese caso; con una lista de
+  claves truncada no se borra nada. La guarda se mira al comparar y **otra vez con el escritor cogido,
+  justo antes de encolar** (`guarda_con_el_escritor`): la bajada registra sus fallos con el escritor,
+  así que uno registrado entre la comparación y la escritura aplaza lo que se iba a encolar.
+- Con un fallo de bajada tampoco se sube lo que aquí está y arriba no: puede ser lo que la nube borró
+  con el cambio que aquí no ha entrado, y subirlo lo resucitaría.
 - Con el interruptor `reparacion_nube` apagado se compara e informa, sin escribir.
 
 `/verificar-claves` reparte un presupuesto común entre las tablas: lo que no cabe sale `truncada` y se
@@ -278,18 +378,22 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
    cerrados: `liveSocketsFor()` filtra por `readyState` e `isMainConnected(except)` excluye el que se
    está cerrando.
 3. **Nada que mantenga vivo el DO**: ni `setInterval` ni `setTimeout`. El único `alarm` es el de la cola
-   de entrada, y sólo mientras hay cola o está en pausa.
+   de entrada, y sólo mientras hay cola o está en pausa. El único temporizador es el plazo de una
+   petición a Turso (`fetchConPlazo`), y vive lo que su petición: se quita al leer la respuesta entera,
+   al fallar o al cancelarse.
 4. **Las cachés de instancia se pierden al hibernar, y eso no cuesta nada**: la conexión a la base del
    tenant (`TENANT_DB_CACHE_TTL_MS`), `lastSeenPushedAtMs`, `lastPurgeAtMs`. Se quedan como campos a
-   propósito.
+   propósito. Lo mismo el turno del log (`turnoDelLog`): es lo que está en vuelo, y el DO sólo hiberna
+   sin nada en vuelo. Lo que sí tiene que sobrevivir, una escritura que no se sabe si entró, va en
+   `_Escritura_En_Curso`.
 5. ⚠️ **En los módulos de funciones libres no puede haber variables de módulo con estado**: en Workers
    una variable de módulo es por **isolate**, compartido entre DO de **tenants distintos**. Lo que haya
    que recordar entre invocaciones va al SQL del DO (como `_Cola_Estado`).
 6. Si cambia el texto del latido en el frontend, hay que cambiar el par del auto-response: casa cadenas
    exactas, y si no coinciden todo funciona pero el DO se despierta en cada ping.
 7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la presencia vive en
-   `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde el revoke. Todo cierre nuevo
-   iniciado por el DO llama a `sessionGone`.
+   `sessionGone(ws, att)`, que se llama desde `webSocketClose`, desde el revoke y desde el cierre de
+   las Main ante una confirmación incierta. Todo cierre nuevo iniciado por el DO llama a `sessionGone`.
 
 `instrumentDurableObjectWithSentry` envuelve los tres handlers del WebSocket.
 

@@ -1,7 +1,7 @@
 import type { Env } from "../env";
 import { HubError } from "../lib/errorHttp";
 import type { Client } from "@libsql/client/web";
-import { createDbClient } from "../server/db/clients";
+import { createDbClient, PLAZO_TURSO_MS } from "../server/db/clients";
 import { getDb } from "../server/db";
 import { estaApagado } from "../lib/interruptores";
 import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
@@ -40,6 +40,21 @@ import {
 	revocar,
 } from "./tenantHub.rutas";
 import { isUniqueOpIdViolation } from "./tenantHub.sentencias";
+import type { ContextoDeTurno, EscrituraPreparada, Resolucion } from "./tenantHub.turno";
+import {
+	anotarEscritura,
+	confirmacionIncierta,
+	anotarEnvioSinRespuesta,
+	EscrituraEnDuda,
+	loteDe,
+	olvidarEscritura,
+	rechazoDeVetada,
+	resolverEscrituraEnCurso,
+	ultimoEnvioSinRespuesta,
+	VETADA,
+	VIDA_MAXIMA_DE_UN_ENVIO_MS,
+	vetarOperacion,
+} from "./tenantHub.turno";
 import {
 	commandHasNowLiteral,
 	horaSinFijar,
@@ -77,7 +92,9 @@ const PURGE_INTERVAL_MS = 60 * 60 * 1000; // como mucho una purga por hora y por
 const CHECKPOINT_ACTIVE_MS = 7 * 24 * 60 * 60 * 1000; // una Main cuenta para el suelo si reportó < 7 días
 const PURGE_SEQ_MARGIN = 1000; // holgura de Seq por debajo del suelo (cubre solape catch-up/live)
 const SYNC_CHANGES_TTL_MS = 7 * 24 * 60 * 60 * 1000; // no borrar cambios de menos de 7 días
-const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // idempotencia: un reintento nunca llega tan tarde
+// idempotencia: un reintento nunca llega tan tarde. AUD-18: y nunca menos que lo que puede seguir en
+// vuelo una copia (`VIDA_MAXIMA_DE_UN_ENVIO_MS`), ver `maybePurgeSyncLog`.
+const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 
 export class MotorTenantHub {
@@ -101,6 +118,12 @@ export class MotorTenantHub {
 	private tenantDbDbName: string | null = null;
 	private tenantDbRotatedAtMs: number | null = null;
 	private tenantDbResolvedAtMs: number | null = null;
+
+	// AUD-18: la cola de lo que está confirmando en Turso y difundiendo ahora mismo (ver
+	// `enTurnoDelLog`). Es lo que está en vuelo, no algo que recordar entre invocaciones: el DO sólo
+	// hiberna sin nada en vuelo, así que al despertar vacía es lo correcto (SYNC-16, regla 4). Lo que
+	// sí debe sobrevivir, una escritura que no se sabe si entró, va en `_Escritura_En_Curso`.
+	private turnoDelLog: Promise<void> = Promise.resolve();
 
 	constructor(private state: DurableObjectState, private env: Env) {
 		// SYNC-16: el latido (cada 30 s por dispositivo) se responde EN EL EDGE, sin despertar al DO
@@ -185,6 +208,15 @@ export class MotorTenantHub {
 		this.tenantDbResolvedAtMs = null;
 	}
 
+	/**
+	 * AUD-18 · El cliente de la base del tenant, con plazo. Una petición colgada retendría el turno
+	 * del log (`enTurnoDelLog`), y con él todas las escrituras del negocio; vencida, es una
+	 * confirmación incierta.
+	 */
+	private clienteDelTenant(url: string, authToken: string): Client {
+		return createDbClient({ url, authToken, plazoMs: PLAZO_TURSO_MS });
+	}
+
 	private async resolveTenantDbClient(
 		tenantId: string,
 		forceRotate: boolean,
@@ -198,16 +230,19 @@ export class MotorTenantHub {
 			forceRotate,
 		);
 
-		const dbTenant = createDbClient({
-			url: resolved.tursoUrl,
-			authToken: resolved.tursoAuthToken,
-		});
+		const dbTenant = this.clienteDelTenant(resolved.tursoUrl, resolved.tursoAuthToken);
 
 		await this.probeTenantDb(dbTenant);
 
 		// Guard de migración (una vez por vida del DO): asegura el esquema al día ANTES de aplicar
 		// escrituras, por si se publicó un cambio de esquema con el tenant ya activo.
-		await ensureTenantMigrated(dbTenant, tenantId);
+		//
+		// AUD-18: con un cliente SIN plazo. Reconstruir una tabla grande puede tardar más que una
+		// escritura, y la migración no va dentro del turno del log, que es lo que el plazo protege.
+		await ensureTenantMigrated(
+			createDbClient({ url: resolved.tursoUrl, authToken: resolved.tursoAuthToken }),
+			tenantId,
+		);
 
 		this.tenantDb = dbTenant;
 		this.tenantDbTenantId = tenantId;
@@ -283,12 +318,16 @@ export class MotorTenantHub {
 	// SYNC-12: purga (throttled) del log de sync en el tenant. Solo borra filas por DEBAJO del
 	// checkpoint mínimo de las Main activas (con holgura) Y suficientemente antiguas (TTL), de modo
 	// que jamás retira un cambio que una Main aún no ha consumido. Best-effort: nunca rompe el sync.
+	//
+	// AUD-18: va en el turno del log, así que antes se resuelve la escritura en duda, si la hay; si
+	// no se puede, no se purga nada. Y `Applied_Operations` sólo se purga cuando ninguna copia de lo
+	// que guarda puede llegar ya (`puedePurgarIdempotencia`).
 	private async maybePurgeSyncLog(tenantId: string): Promise<void> {
 		const now = nowMs();
 		if (now - this.lastPurgeAtMs < PURGE_INTERVAL_MS) return;
 		this.lastPurgeAtMs = now;
 		try {
-			await this.withTenantDbRetry(tenantId, async (db) => {
+			await this.withTenantDbRetry(tenantId, (db) => this.enTurnoDelLog(db, async () => {
 				// Suelo = mínimo Last_Seq de las Main que reportaron checkpoint recientemente. Si no
 				// hay ninguna activa, MIN devuelve NULL → no purgamos Sync_Changes (fail-safe).
 				const r = await db.execute({
@@ -307,14 +346,106 @@ export class MotorTenantHub {
 
 				// Applied_Operations es dedup por Op_Id: un reintento idempotente nunca llega días
 				// después, así que basta un TTL (independiente del checkpoint) para acotarla.
-				await db.execute({
-					sql: `DELETE FROM Applied_Operations WHERE Created_At_Ms < ?1;`,
-					args: [now - APPLIED_OPS_TTL_MS],
-				});
-			});
+				//
+				// AUD-18: y es lo que cierra el paso a una copia tardía (el gate, o el veto de su
+				// `Op_Id`). La purga no puede adelantarse al supuesto de `VIDA_MAXIMA_DE_UN_ENVIO_MS`:
+				// ni corre mientras pueda quedar una copia en vuelo, ni retira nunca una fila más joven.
+				if (this.puedePurgarIdempotencia(now)) {
+					await db.execute({
+						sql: `DELETE FROM Applied_Operations WHERE Created_At_Ms < ?1;`,
+						args: [now - Math.max(APPLIED_OPS_TTL_MS, VIDA_MAXIMA_DE_UN_ENVIO_MS)],
+					});
+				}
+			}));
 		} catch {
 			/* la purga es best-effort: nunca debe afectar al camino de escritura del sync */
 		}
+	}
+
+	/**
+	 * AUD-18 · ¿Puede retirarse ya lo viejo de `Applied_Operations` sin que una copia tardía de una
+	 * operación encuentre libre su `Op_Id` y se aplique otra vez (o la vetada, por primera vez)?
+	 *
+	 * - Con la cola sin vaciar, no: sus operaciones pueden estar aplicadas por un lote cuya respuesta
+	 *   se perdió, y sin su gate el drenado siguiente las aplicaría de nuevo.
+	 * - Hasta `VIDA_MAXIMA_DE_UN_ENVIO_MS` después del último envío sin respuesta, tampoco: es lo que
+	 *   puede seguir en vuelo una copia (`anotarEnvioSinRespuesta`).
+	 * - La escritura en duda ya la ha resuelto el turno en el que corre la purga, y anotó su envío.
+	 */
+	private puedePurgarIdempotencia(now: number): boolean {
+		if (this.cuantasEnCola() > 0) return false;
+		return now - ultimoEnvioSinRespuesta(this.state.storage) >= VIDA_MAXIMA_DE_UN_ENVIO_MS;
+	}
+
+	/**
+	 * AUD-18 · El turno del log: confirmar en Turso y difundir, de una escritura en una.
+	 *
+	 * Mientras una escritura espera a Turso, el runtime deja entrar a otra (la compuerta de entrada
+	 * sólo protege el almacenamiento del propio DO, no la E/S de red). Turso numera al confirmar,
+	 * pero la respuesta de la segunda podía volver antes, o la primera esperar además al refinado del
+	 * resultado: el DO difundía el `Seq` 11 antes que el 10, y si a la Main le llegaba el 11 y se le
+	 * caía el socket antes del 10, al reconectar pedía desde el 11 y el 10 se perdía sin rastro.
+	 *
+	 * Con el turno la difusión sale en orden de `Seq`, sin suponer que sea contiguo: (1) sólo este
+	 * DO escribe `Sync_Changes`, y las dos inserciones (`applyInternalCommandIdempotent` y
+	 * `applyBatchIdempotent`) van dentro; (2) el `Seq` lo asigna el commit, que acaba antes de soltar
+	 * el turno, y la difusión va justo después; (3) un WebSocket entrega en orden, y el catch-up de
+	 * cada conexión de la Main va después de autenticarse, así que lo confirmado antes le llega por
+	 * REST y lo posterior por el socket; (4) lo que no se sabe si se confirmó se anota antes de
+	 * mandarlo y el turno siguiente lo resuelve PRIMERO (`tenantHub.turno.ts`), también si el DO se
+	 * apagó entre medias, y sólo con una respuesta de la base, nunca por tiempo: mientras no la hay,
+	 * el turno no deja pasar nada. Cada petición a Turso lleva su plazo (`PLAZO_TURSO_MS`), así que
+	 * el turno nunca se queda cogido.
+	 *
+	 * Nada de temporizadores ni de estado que deba sobrevivir (SYNC-16): es una cadena de promesas de
+	 * lo que está en vuelo, y un fallo no la rompe para el siguiente.
+	 */
+	private enTurnoDelLog<T>(db: Client, trabajo: () => Promise<T>): Promise<T> {
+		const resultado = this.turnoDelLog.then(async () => {
+			await resolverEscrituraEnCurso(this.ctxTurno(), db);
+			return trabajo();
+		});
+		this.turnoDelLog = resultado.then(
+			() => undefined,
+			() => undefined,
+		);
+		return resultado;
+	}
+
+	/** ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Ver `ctxCola`. */
+	private ctxTurno(): ContextoDeTurno {
+		return {
+			storage: this.state.storage,
+			difundir: (cambio) => this.broadcastChange(cambio, cambio.deviceId || undefined),
+			cerrarSocketsDeLaMain: () => this.cerrarSocketsDeLaMain(),
+			emitSyncEvent: (name, fields) => this.emitSyncEvent(name, fields),
+		};
+	}
+
+	/**
+	 * AUD-18 · Ante una confirmación incierta se desconectan las Main, para que se pongan al día.
+	 *
+	 * Si el batch se confirmó, tiene un `Seq` que todavía no se ha difundido; nada posterior se
+	 * difundirá antes de resolverlo, y al reconectar la Main hace el catch-up desde su checkpoint, que
+	 * se lo trae si ya está en el log. Cuesta una reconexión, y mientras tanto las Handy ven
+	 * `main_offline`. Como todo cierre que inicia el DO, pasa por `sessionGone`. Las Handy no llevan
+	 * checkpoint: sus sockets se quedan.
+	 */
+	private cerrarSocketsDeLaMain(): void {
+		for (const ws of this.state.getWebSockets()) {
+			const a = this.att(ws);
+			if (!a?.authed || a.role !== "tpv") continue;
+			try {
+				ws.close(4004, "confirmacion_incierta");
+			} catch { }
+			this.sessionGone(ws, a);
+		}
+	}
+
+	/** AUD-18 · Lo que devuelve una escritura que se ha resuelto tras una confirmación incierta. */
+	private desenlace(resolucion: Resolucion | null, causa: unknown): { result: any; seq: number } {
+		if (resolucion?.confirmada) return { result: resolucion.result, seq: resolucion.seq };
+		throw resolucion?.error ?? causa;
 	}
 
 	private async applyInternalCommandIdempotent(params: {
@@ -398,36 +529,42 @@ export class MotorTenantHub {
 
 		// Aplanamos el comando a un único batch atómico (1 round trip a Turso en lugar de ~7
 		// awaits secuenciales de la transacción interactiva).
-		const built = buildApplyBatch(cmd);
+		//
+		// Batch atómico = [PRAGMA defer FK] + [gate idempotente] + [trabajo] + [log de sync].
+		// El gate va SIN ON CONFLICT: en un reintento (mismo Op_Id) viola UNIQUE(Op_Id) y hace
+		// rollback de TODO el batch → ni se duplica el trabajo ni el log. No existe estado
+		// PROCESSING intermedio: la op está APPLIED (commit) o ausente (rollback). AUD-18: o FAILED
+		// si se vetó (`vetarOperacion`), que es un rechazo definitivo.
+		//
+		// AUD-18: ésta es también la escritura que se anota antes de mandarla y la que se repite,
+		// igual, si no se sabe cómo acabó (`tenantHub.turno.ts`).
+		const escritura: EscrituraPreparada = {
+			opId: op,
+			commandName: command,
+			cmd,
+			deviceId: deviceId || null,
+			requestHash,
+			cloudPayloadJson,
+		};
+		const { stmts: batchStmts, built, offsetTrabajo: MIDDLE_OFFSET } = loteDe(escritura, createdAtMs);
 
-		const runApply = () => this.withTenantDbRetry(tenantId, async (db) => {
-			// Batch atómico = [PRAGMA defer FK] + [gate idempotente] + [trabajo] + [log de sync].
-			// El gate va SIN ON CONFLICT: en un reintento (mismo Op_Id) viola UNIQUE(Op_Id) y hace
-			// rollback de TODO el batch → ni se duplica el trabajo ni el log. No existe estado
-			// PROCESSING/FAILED intermedio: la op está APPLIED (commit) o ausente (rollback).
-			const gate: ResolvedStmt = {
-				sql: `INSERT INTO Applied_Operations (Op_Id, Command_Name, Request_Hash, Device_Id, Status, Result_Json, Error_Text, Created_At_Ms, Applied_At_Ms, Updated_At_Ms) VALUES (?1, ?2, ?3, ?4, 'APPLIED', ?5, NULL, ?6, ?6, ?6);`,
-				args: [op, command, requestHash, deviceId || null, stringifyJsonValue(built.storageResult), createdAtMs],
-			};
-			const syncLog: ResolvedStmt = {
-				sql: `INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES (?1, ?2, ?3, ?4, ?5);`,
-				args: [op, command, stableStringify(built.replicated), deviceId || null, createdAtMs],
-			};
+		// AUD-18: confirmar y difundir van dentro del turno del log (`enTurnoDelLog`), que antes
+		// resuelve la escritura anterior que hubiera quedado en duda.
+		const runApply = () => this.withTenantDbRetry(tenantId, (db) => this.enTurnoDelLog(db, async () => {
+			// AUD-18: otra vez dentro del turno, el congelado de la cola (SYNC-18): mientras se
+			// esperaba el turno pudo llegar un volcado, y nada puede confirmarse por delante de él.
+			if (this.cuantasEnCola() > 0) {
+				throw new HubError("main_volcando", 400);
+			}
 
-			// Índices del batch: 0=PRAGMA, 1=gate, 2..=middle (trabajo+lecturas), último=syncLog.
-			const MIDDLE_OFFSET = 2;
-			const batchStmts: ResolvedStmt[] = [
-				{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] },
-				gate,
-				...built.middle,
-				syncLog,
-			];
-
+			anotarEscritura(this.ctxTurno(), tenantId, escritura);
 			let batchResults: any[];
 			try {
 				batchResults = await db.batch(batchStmts as any, "write");
 			} catch (e: any) {
 				if (isUniqueOpIdViolation(e)) {
+					// Este envío no se confirmó: la op ya estaba aplicada de antes.
+					olvidarEscritura(this.ctxTurno());
 					// Reintento idempotente: la op ya estaba aplicada. Recuperamos result + seq.
 					const recovered = await this.recoverAppliedOp(db, op, command, requestHash);
 					// SYNC-03: si el DO se reinició/evictó tras el commit y ANTES del broadcast
@@ -450,32 +587,35 @@ export class MotorTenantHub {
 					}
 					return { result: recovered.result, seq: recovered.seq };
 				}
-				throw e;
+				if (!confirmacionIncierta(e)) {
+					// La base la rechazó (o las credenciales): no se confirmó.
+					olvidarEscritura(this.ctxTurno());
+					throw e;
+				}
+				// AUD-18: no se sabe si se confirmó. Se resuelve ya, antes de soltar el turno: se
+				// repite por su Op_Id y, si tampoco se aclara, queda anotada, se desconectan las Main y
+				// nada posterior entra hasta resolverla.
+				return this.desenlace(await resolverEscrituraEnCurso(this.ctxTurno(), db), e);
 			}
 
-			const seq = Number(batchResults[batchResults.length - 1]?.lastInsertRowid ?? 0);
-			const result = built.resolveResult(batchResults, MIDDLE_OFFSET);
+			let seq: number;
+			let result: any;
+			try {
+				seq = Number(batchResults[batchResults.length - 1]?.lastInsertRowid ?? 0);
+				if (!(seq > 0)) throw new Error("respuesta de Turso sin Seq legible");
+				result = built.resolveResult(batchResults, MIDDLE_OFFSET);
+			} catch (e) {
+				// AUD-18: confirmada, pero lo que devolvió Turso no se deja leer: se resuelve igual que
+				// una confirmación incierta, repitiéndola por su Op_Id, que choca y trae la suya.
+				return this.desenlace(await resolverEscrituraEnCurso(this.ctxTurno(), db), e);
+			}
 
-			// SYNC-10: el gate guardó un Result_Json best-effort (solo literales; lo derivado de la
-				// DB quedó null). Si el resultado REAL difiere (incluye campos derivados de la DB), lo
-				// persistimos ahora para que un reintento idempotente (p. ej. una Handy con
-				// timeout+retry) devuelva el MISMO `data` que el primer intento, no uno degradado.
-				// Solo pagamos el round trip extra cuando de verdad hay algo que refinar.
-				const realResultJson = stringifyJsonValue(result);
-				if (realResultJson !== stringifyJsonValue(built.storageResult)) {
-					try {
-						await db.execute({
-							sql: "UPDATE Applied_Operations SET Result_Json = ?1, Updated_At_Ms = ?2 WHERE Op_Id = ?3;",
-							args: [realResultJson, nowMs(), op],
-						});
-					} catch {
-						/* refinar el cache es best-effort: nunca romper el apply por esto */
-					}
-				}
-
-				// Tras confirmar en Turso, propagamos el cambio (payload + resultado) al resto de
+			// Tras confirmar en Turso, propagamos el cambio (payload + resultado) al resto de
 			// dispositivos autenticados. El originador queda excluido. La Main aplica el payload
 			// directo a su SQLite local (no hay refetch).
+			//
+			// AUD-18: antes que nada más en el turno, y antes de olvidar la nota: si el DO se apagara
+			// entre las dos cosas, el turno siguiente la repetiría y la difundiría otra vez (inocuo).
 			this.broadcastChange(
 				{
 					command,
@@ -488,15 +628,33 @@ export class MotorTenantHub {
 				},
 				deviceId || undefined,
 			);
+			olvidarEscritura(this.ctxTurno());
+
+			// SYNC-10: el gate guardó un Result_Json best-effort (solo literales; lo derivado de la
+			// DB quedó null). Si el resultado REAL difiere (incluye campos derivados de la DB), lo
+			// persistimos ahora para que un reintento idempotente (p. ej. una Handy con
+			// timeout+retry) devuelva el MISMO `data` que el primer intento, no uno degradado.
+			// Solo pagamos el round trip extra cuando de verdad hay algo que refinar.
+			const realResultJson = stringifyJsonValue(result);
+			if (realResultJson !== stringifyJsonValue(built.storageResult)) {
+				try {
+					await db.execute({
+						sql: "UPDATE Applied_Operations SET Result_Json = ?1, Updated_At_Ms = ?2 WHERE Op_Id = ?3;",
+						args: [realResultJson, nowMs(), op],
+					});
+				} catch {
+					/* refinar el cache es best-effort: nunca romper el apply por esto */
+				}
+			}
 
 			// SYNC-12: aprovechamos una escritura confirmada para purgar (throttled, fire-and-forget)
-				// el log de sync ya consumido por todas las Main. No bloquea el apply.
-				this.state.waitUntil(this.maybePurgeSyncLog(tenantId));
+			// el log de sync ya consumido por todas las Main. No bloquea el apply.
+			this.state.waitUntil(this.maybePurgeSyncLog(tenantId));
 
-				// OBS-04: en el ÉXITO no emitimos nada a Axiom. El coste que disparaba el volumen era
+			// OBS-04: en el ÉXITO no emitimos nada a Axiom. El coste que disparaba el volumen era
 			// justo este evento por cada `apply`; el detalle de un apply correcto no se necesita.
 			return { result, seq };
-		});
+		}));
 
 		try {
 			return await runApply();
@@ -577,92 +735,279 @@ export class MotorTenantHub {
 			return { ...o, opId: op, commandName: command, cmd };
 		});
 
-		// 2) Fuera las ya aplicadas (ver punto 1 del comentario de arriba).
-		const ids = preparadas.map((p) => p.opId);
-		const yaAplicadas = new Set<string>();
-		const r = await db.execute({
-			sql: `SELECT Op_Id FROM Applied_Operations WHERE Op_Id IN (${ids
-				.map((_, i) => `?${i + 1}`)
-				.join(",")});`,
-			args: ids,
-		});
-		for (const fila of r.rows ?? []) {
-			const v = String((fila as any).Op_Id ?? "");
-			if (v) yaAplicadas.add(v);
-		}
+		// AUD-18: lo que toca `Sync_Changes` va en el turno del log (`enTurnoDelLog`), igual que una
+		// escritura suelta: si no, una de una Handy podría confirmarse entre medias y difundirse
+		// fuera de orden.
+		return this.enTurnoDelLog(db, () => this.aplicarPreparadas(db, preparadas));
+	}
 
-		const pendientes = preparadas.filter((p) => !yaAplicadas.has(p.opId));
-		if (!pendientes.length) {
-			return { aplicadas: [], yaEstaban: [...yaAplicadas] };
-		}
-
-		// 3) Un solo array de sentencias: [PRAGMA] + por operación [gate, ...trabajo, syncLog].
-		const createdAtMs = nowMs();
-		const stmts: ResolvedStmt[] = [{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] }];
-		const tramos: {
-			op: (typeof pendientes)[number];
-			built: ReturnType<typeof buildApplyBatch>;
-			offsetMiddle: number;
-			idxSyncLog: number;
-		}[] = [];
-
-		for (const p of pendientes) {
-			const built = buildApplyBatch(p.cmd);
-			const requestHash = await sha256Hex(p.requestPayloadJson);
-
-			stmts.push({
-				sql: `INSERT INTO Applied_Operations (Op_Id, Command_Name, Request_Hash, Device_Id, Status, Result_Json, Error_Text, Created_At_Ms, Applied_At_Ms, Updated_At_Ms) VALUES (?1, ?2, ?3, ?4, 'APPLIED', ?5, NULL, ?6, ?6, ?6);`,
-				args: [
-					p.opId,
-					p.commandName,
-					requestHash,
-					p.deviceId || null,
-					stringifyJsonValue(built.storageResult),
-					createdAtMs,
-				],
+	/**
+	 * SYNC-18 · pasos 2 a 4 de `applyBatchIdempotent`, ya dentro del turno del log (AUD-18).
+	 *
+	 * AUD-18: un lote cuya confirmación quedó incierta no necesita nota (`tenantHub.turno.ts`): sus
+	 * operaciones siguen en `_Cola_Entrada` hasta aplicarse, la cola no vacía congela todo lo demás,
+	 * y el siguiente drenado las repite por `Op_Id`: las que ya estaban confirmadas se difunden aquí,
+	 * antes que lo nuevo.
+	 */
+	private async aplicarPreparadas(
+		db: Client,
+		preparadas: OpParaAplicar[],
+	): Promise<{ aplicadas: string[]; yaEstaban: string[] }> {
+		for (let vuelta = 0; ; vuelta++) {
+			// 2) Fuera las ya aplicadas (ver punto 1 del comentario de arriba).
+			const ids = preparadas.map((p) => p.opId);
+			const yaAplicadas = new Set<string>();
+			const vetadas = new Map<string, string>();
+			const r = await db.execute({
+				sql: `SELECT Op_Id, Status, Error_Text FROM Applied_Operations WHERE Op_Id IN (${ids
+					.map((_, i) => `?${i + 1}`)
+					.join(",")});`,
+				args: ids,
 			});
-			const offsetMiddle = stmts.length;
-			stmts.push(...built.middle);
-			const idxSyncLog = stmts.length;
-			stmts.push({
-				sql: `INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES (?1, ?2, ?3, ?4, ?5);`,
-				args: [
-					p.opId,
-					p.commandName,
-					stableStringify(built.replicated),
-					p.deviceId || null,
-					createdAtMs,
-				],
-			});
+			for (const fila of r.rows ?? []) {
+				const v = String((fila as any).Op_Id ?? "");
+				if (!v) continue;
+				if (String((fila as any).Status ?? "") === VETADA) vetadas.set(v, String((fila as any).Error_Text ?? ""));
+				else yaAplicadas.add(v);
+			}
 
-			tramos.push({ op: p, built, offsetMiddle, idxSyncLog });
+			// AUD-18: una vetada (`vetarOperacion`) no se aplicó ni se aplicará: sale con el rechazo
+			// que la vetó, y quien drena la aísla de una en una y la aparta sin culpar a las demás.
+			const vetada = preparadas.find((p) => vetadas.has(p.opId));
+			if (vetada) throw rechazoDeVetada(vetadas.get(vetada.opId) ?? "");
+
+			// AUD-18: lo ya confirmado se difunde, en orden de `Seq` y antes que lo nuevo. Si salió de
+			// un lote cuya respuesta se perdió, es su única difusión; si ya se difundió, repetirla es
+			// inocuo (la Main la descarta por estar por debajo de su checkpoint, o es suya).
+			if (yaAplicadas.size) {
+				await this.difundirYaConfirmadas(
+					db,
+					preparadas.filter((p) => yaAplicadas.has(p.opId)),
+				);
+			}
+
+			const pendientes = preparadas.filter((p) => !yaAplicadas.has(p.opId));
+			if (!pendientes.length) {
+				return { aplicadas: [], yaEstaban: [...yaAplicadas] };
+			}
+
+			// 3) Un solo array de sentencias: [PRAGMA] + por operación [gate, ...trabajo, syncLog].
+			const createdAtMs = nowMs();
+			const stmts: ResolvedStmt[] = [{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] }];
+			const tramos: {
+				op: (typeof pendientes)[number];
+				built: ReturnType<typeof buildApplyBatch>;
+				offsetMiddle: number;
+				idxSyncLog: number;
+			}[] = [];
+
+			for (const p of pendientes) {
+				const built = buildApplyBatch(p.cmd);
+				const requestHash = await sha256Hex(p.requestPayloadJson);
+
+				stmts.push({
+					sql: `INSERT INTO Applied_Operations (Op_Id, Command_Name, Request_Hash, Device_Id, Status, Result_Json, Error_Text, Created_At_Ms, Applied_At_Ms, Updated_At_Ms) VALUES (?1, ?2, ?3, ?4, 'APPLIED', ?5, NULL, ?6, ?6, ?6);`,
+					args: [
+						p.opId,
+						p.commandName,
+						requestHash,
+						p.deviceId || null,
+						stringifyJsonValue(built.storageResult),
+						createdAtMs,
+					],
+				});
+				const offsetMiddle = stmts.length;
+				stmts.push(...built.middle);
+				const idxSyncLog = stmts.length;
+				stmts.push({
+					sql: `INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES (?1, ?2, ?3, ?4, ?5);`,
+					args: [
+						p.opId,
+						p.commandName,
+						stableStringify(built.replicated),
+						p.deviceId || null,
+						createdAtMs,
+					],
+				});
+
+				tramos.push({ op: p, built, offsetMiddle, idxSyncLog });
+			}
+
+			// AUD-18: el DO podría apagarse con el lote en vuelo; hasta que no pueda llegar ninguna
+			// copia suya, la purga no toca `Applied_Operations`.
+			anotarEnvioSinRespuesta(this.state.storage);
+			let batchResults: any[];
+			try {
+				batchResults = await db.batch(stmts as any, "write");
+			} catch (e) {
+				// AUD-18: un lote anterior cuya respuesta se perdió acaba de confirmarse por delante.
+				// Se mira otra vez qué hay ya aplicado; una vuelta basta, porque un lote es atómico.
+				if (vuelta === 0 && isUniqueOpIdViolation(e)) continue;
+				// AUD-18: no se sabe si se confirmó. Las operaciones siguen en la cola y el drenado
+				// siguiente las repite por `Op_Id`; las Main se desconectan para ponerse al día.
+				if (confirmacionIncierta(e)) {
+					anotarEnvioSinRespuesta(this.state.storage);
+					this.cerrarSocketsDeLaMain();
+				}
+				throw e;
+			}
+
+			// 4) Ya en Turso: cada operación recupera su `seq` y se difunde por separado, para que el
+			//    anti-eco por `Op_Id` de la Main y el refetch de las Handy sigan funcionando igual.
+			//
+			//    AUD-18: TODAS se difunden, aunque el resultado de alguna no se deje leer: están
+			//    confirmadas, y de una operación de la cola sólo se usa el `seq` (un resultado
+			//    ilegible viaja como `null`). Un `seq` que no se deja leer se busca en el log; si
+			//    tampoco ahí, es una confirmación incierta del lote: no se difunde ninguna ni sale
+			//    ninguna de la cola, y el drenado siguiente las encuentra aplicadas y las difunde en
+			//    orden (`difundirYaConfirmadas`). Darle `Seq` 0 sería difundir lo de detrás sin ella.
+			const seqs = tramos.map((t) => Number(batchResults[t.idxSyncLog]?.lastInsertRowid ?? 0));
+			if (seqs.some((s) => !(s > 0))) {
+				let delLog: Map<string, number>;
+				try {
+					delLog = await this.seqsDelLog(db, tramos.map((t) => t.op.opId));
+				} catch (e) {
+					this.cerrarSocketsDeLaMain();
+					throw new EscrituraEnDuda(e);
+				}
+				tramos.forEach((t, i) => {
+					if (!(seqs[i] > 0)) seqs[i] = delLog.get(t.op.opId) ?? 0;
+				});
+				if (seqs.some((s) => !(s > 0))) {
+					this.cerrarSocketsDeLaMain();
+					throw new EscrituraEnDuda(new Error("lote confirmado con un Seq que no se deja leer"));
+				}
+			}
+			const aplicadas: string[] = [];
+			for (const [i, t] of tramos.entries()) {
+				const seq = seqs[i];
+				let result: any = null;
+				try {
+					result = t.built.resolveResult(batchResults, t.offsetMiddle);
+				} catch (e) {
+					this.emitSyncEvent("resultado_ilegible", {
+						op_id: t.op.opId,
+						error: String((e as any)?.message || e).slice(0, 200),
+					});
+				}
+				aplicadas.push(t.op.opId);
+				this.broadcastChange(
+					{
+						command: t.op.commandName,
+						opId: t.op.opId,
+						deviceId: t.op.deviceId || null,
+						payloadJson: t.op.cloudPayloadJson,
+						result,
+						seq,
+						statements: t.built.replicated,
+					},
+					t.op.deviceId || undefined,
+				);
+			}
+
+			return { aplicadas, yaEstaban: [...yaAplicadas] };
 		}
+	}
 
-		const batchResults = await db.batch(stmts as any, "write");
-
-		// 4) Ya en Turso: cada operación recupera su `seq` y se difunde por separado, para que el
-		//    anti-eco por `Op_Id` de la Main y el refetch de las Handy sigan funcionando igual.
-		const aplicadas: string[] = [];
-		for (const t of tramos) {
-			const seq = Number(batchResults[t.idxSyncLog]?.lastInsertRowid ?? 0);
-			const result = t.built.resolveResult(batchResults, t.offsetMiddle);
-			aplicadas.push(t.op.opId);
-
+	/**
+	 * AUD-18 · Difunde, en orden de `Seq`, operaciones de la cola que ya estaban confirmadas.
+	 *
+	 * Si no se puede leer su `Seq`, es una confirmación incierta: se lanza `EscrituraEnDuda`, que no
+	 * culpa a nadie, y siguen en la cola hasta que se difundan. Una que no tenga línea en el log es una
+	 * cuyo log ya se purgó, por debajo del checkpoint de todas las Main (SYNC-12): nada que difundir.
+	 */
+	private async difundirYaConfirmadas(db: Client, ops: OpParaAplicar[]): Promise<void> {
+		const porId = new Map(ops.map((o) => [o.opId, o]));
+		let r: Awaited<ReturnType<Client["execute"]>>;
+		try {
+			r = await db.execute({
+				sql: `SELECT Op_Id AS op_id, Seq AS seq, Statements_Json AS statements_json
+				        FROM Sync_Changes WHERE Op_Id IN (${ops.map((_, i) => `?${i + 1}`).join(",")})
+				       ORDER BY Seq;`,
+				args: ops.map((o) => o.opId),
+			});
+		} catch (e) {
+			this.cerrarSocketsDeLaMain();
+			throw new EscrituraEnDuda(e);
+		}
+		for (const fila of (r.rows ?? []) as any[]) {
+			const op = porId.get(String(fila.op_id ?? ""));
+			const seq = Number(fila.seq ?? 0);
+			if (!op || !(seq > 0)) continue;
+			const statements = safeJsonParse(String(fila.statements_json ?? "[]"));
 			this.broadcastChange(
 				{
-					command: t.op.commandName,
-					opId: t.op.opId,
-					deviceId: t.op.deviceId || null,
-					payloadJson: t.op.cloudPayloadJson,
-					result,
+					command: op.commandName,
+					opId: op.opId,
+					deviceId: op.deviceId || null,
+					payloadJson: op.cloudPayloadJson,
+					result: null,
 					seq,
-					statements: t.built.replicated,
+					statements: Array.isArray(statements) ? statements : [],
 				},
-				t.op.deviceId || undefined,
+				op.deviceId || undefined,
 			);
 		}
+	}
 
-		return { aplicadas, yaEstaban: [...yaAplicadas] };
+	/** AUD-18 · El `Seq` de cada operación en el log. Un error sale tal cual: no es un «no está». */
+	private async seqsDelLog(db: Client, opIds: string[]): Promise<Map<string, number>> {
+		const r = await db.execute({
+			sql: `SELECT Op_Id AS op_id, Seq AS seq FROM Sync_Changes
+			       WHERE Op_Id IN (${opIds.map((_, i) => `?${i + 1}`).join(",")});`,
+			args: opIds,
+		});
+		const seqs = new Map<string, number>();
+		for (const fila of (r.rows ?? []) as any[]) {
+			const seq = Number(fila.seq ?? 0);
+			if (seq > 0) seqs.set(String(fila.op_id ?? ""), seq);
+		}
+		return seqs;
+	}
+
+	/**
+	 * AUD-18 · Antes de apartar una operación de la cola, se veta (`vetarOperacion`): alguno de sus
+	 * intentos pudo quedarse sin respuesta y confirmarse después, ya apartada, con un `Seq` que nadie
+	 * difundiría. Si el veto entra, ninguno lo hará. Si choca, es que estaba aplicada: se difunde y
+	 * sale de la cola como tal. Va en el turno del log, como todo lo que puede difundir. Si no se sabe
+	 * cómo acabó el veto, lanza `EscrituraEnDuda` y la operación se queda en la cola.
+	 */
+	private vetarParaApartar(db: Client, op: OpParaAplicar, error: string): Promise<"vetada" | "aplicada"> {
+		return this.enTurnoDelLog(db, async () => {
+			const opId = op.opId.trim();
+			let estado: Awaited<ReturnType<typeof vetarOperacion>>;
+			try {
+				estado = await vetarOperacion(
+					db,
+					{
+						opId,
+						commandName: op.commandName.trim(),
+						requestHash: await sha256Hex(op.requestPayloadJson),
+						deviceId: op.deviceId || null,
+					},
+					new Error(error),
+				);
+			} catch (e) {
+				if (isTursoAuthError(e)) throw e;
+				throw new EscrituraEnDuda(e);
+			}
+			if (estado.estado === "vetada") return "vetada";
+			if (estado.seq > 0) {
+				this.broadcastChange(
+					{
+						command: op.commandName.trim(),
+						opId,
+						deviceId: op.deviceId || null,
+						payloadJson: op.cloudPayloadJson,
+						result: estado.result,
+						seq: estado.seq,
+						statements: estado.statements,
+					},
+					op.deviceId || undefined,
+				);
+			}
+			return "aplicada";
+		});
 	}
 
 	// ---- SYNC-18: cola de entrada -----------------------------------------------------------
@@ -684,6 +1029,7 @@ export class MotorTenantHub {
 			storage: this.state.storage,
 			waitUntil: (p) => this.state.waitUntil(p),
 			applyBatchIdempotent: (db, ops) => this.applyBatchIdempotent(db, ops),
+			vetarParaApartar: (db, op, error) => this.vetarParaApartar(db, op, error),
 			withTenantDbRetry: (tenantId, run) => this.withTenantDbRetry(tenantId, run),
 			maybePurgeSyncLog: (tenantId) => this.maybePurgeSyncLog(tenantId),
 			colaPausada: (tenantId) => this.colaPausada(tenantId),
@@ -752,13 +1098,16 @@ export class MotorTenantHub {
 		requestHash: string,
 	): Promise<{ result: any; seq: number; statements: ResolvedStmt[] }> {
 		const r = await db.execute({
-			sql: `SELECT Command_Name AS command_name, Request_Hash AS request_hash, Result_Json AS result_json FROM Applied_Operations WHERE Op_Id = ?1 LIMIT 1;`,
+			sql: `SELECT Command_Name AS command_name, Request_Hash AS request_hash, Result_Json AS result_json, Status AS status, Error_Text AS error_text FROM Applied_Operations WHERE Op_Id = ?1 LIMIT 1;`,
 			args: [op],
 		});
 		const row = r.rows?.[0] as any | undefined;
 		if (!row) throw new HubError("idempotency_operation_processing", 409);
 		if (String(row.command_name || "") !== command) throw new HubError("idempotency_command_mismatch", 409);
 		if (String(row.request_hash || "") !== requestHash) throw new HubError("idempotency_payload_mismatch", 409);
+		// AUD-18: vetada (`vetarOperacion`): no se aplicó ni se aplicará. Su reintento acaba con el
+		// mismo rechazo que la vetó, como si la base acabara de devolverlo.
+		if (String(row.status || "") === VETADA) throw rechazoDeVetada(String(row.error_text || ""));
 		const result = safeJsonParse(String(row.result_json ?? "null"));
 		const { seq, statements } = await this.lookupChange(db, op);
 		return { result, seq, statements };
@@ -766,24 +1115,25 @@ export class MotorTenantHub {
 
 	// Recupera el `Seq` y las sentencias replicadas que el log de cambios asignó a una op ya
 	// aplicada (reintentos idempotentes). Las sentencias permiten re-emitir el broadcast (SYNC-03).
-	// Devuelve `{ seq: 0, statements: [] }` si no hay registro.
+	// Devuelve `{ seq: 0, statements: [] }` si no hay registro, lo que sólo pasa si la purga del log
+	// ya se lo llevó (SYNC-12), por debajo del checkpoint de todas las Main activas.
+	//
+	// AUD-18: un error de lectura sale tal cual, y quien manda la operación lo vuelve a intentar.
+	// Contestarle con `Seq` 0 le dejaba a la Main el anti-eco sin `Seq` (no se asciende) y fuera del
+	// outbox: la purga TTL podía retirarlo antes de que volviera su eco, y entonces se aplicaba otra vez.
 	private async lookupChange(
 		executor: any,
 		opId: string,
 	): Promise<{ seq: number; statements: ResolvedStmt[] }> {
-		try {
-			const r = await executor.execute({
-				sql: "SELECT Seq AS seq, Statements_Json AS statements_json FROM Sync_Changes WHERE Op_Id = ?1 ORDER BY Seq DESC LIMIT 1;",
-				args: [opId],
-			});
-			const row = r.rows?.[0] as any | undefined;
-			const seq = Number(row?.seq ?? 0);
-			const parsed = safeJsonParse(String(row?.statements_json ?? "[]"));
-			const statements: ResolvedStmt[] = Array.isArray(parsed) ? parsed : [];
-			return { seq, statements };
-		} catch {
-			return { seq: 0, statements: [] };
-		}
+		const r = await executor.execute({
+			sql: "SELECT Seq AS seq, Statements_Json AS statements_json FROM Sync_Changes WHERE Op_Id = ?1 ORDER BY Seq DESC LIMIT 1;",
+			args: [opId],
+		});
+		const row = r.rows?.[0] as any | undefined;
+		const seq = Number(row?.seq ?? 0);
+		const parsed = safeJsonParse(String(row?.statements_json ?? "[]"));
+		const statements: ResolvedStmt[] = Array.isArray(parsed) ? parsed : [];
+		return { seq, statements };
 	}
 
 	/**

@@ -16,6 +16,7 @@
 import type { Client } from "@libsql/client/web";
 
 import { esRechazoPermanente, isTursoAuthError } from "./tenantHub.errores";
+import { esEscrituraEnDuda } from "./tenantHub.turno";
 import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
 
@@ -60,6 +61,12 @@ export interface ContextoDeCola {
 		db: Client,
 		ops: OpParaAplicar[],
 	): Promise<{ aplicadas: string[]; yaEstaban: string[] }>;
+	/**
+	 * AUD-18: veta una operación antes de apartarla, para que ninguna copia suya que siguiera en vuelo
+	 * se confirme después. `"aplicada"` si ya lo estaba (y entonces ya se ha difundido). Si no se
+	 * sabe cómo acabó el veto, lanza.
+	 */
+	vetarParaApartar(db: Client, op: OpParaAplicar, error: string): Promise<"vetada" | "aplicada">;
 	withTenantDbRetry<T>(tenantId: string, run: (db: Client) => Promise<T>): Promise<T>;
 	maybePurgeSyncLog(tenantId: string): Promise<void>;
 
@@ -216,6 +223,19 @@ export function sacarDeLaCola(ctx: ContextoDeCola, opIds: string[]): void {
 	});
 }
 
+/** Los intentos que lleva la operación contando éste. */
+function intentosConEste(ctx: ContextoDeCola, op: OpParaAplicar): number {
+	const fila = ctx.storage.sql
+		.exec("SELECT Intentos FROM _Cola_Entrada WHERE Op_Id = ?;", op.opId)
+		.toArray()[0] as any;
+	return Number(fila?.Intentos ?? 0) + 1;
+}
+
+/** ¿Este fallo la aparta? (Antes de apartarla hay que vetarla: `aplicarLote`.) */
+function laAparta(ctx: ContextoDeCola, op: OpParaAplicar, permanente: boolean): boolean {
+	return permanente || intentosConEste(ctx, op) >= COLA_MAX_INTENTOS;
+}
+
 /**
  * Anota el fallo de una operación y, si no tiene arreglo, la aparta.
  *
@@ -238,12 +258,9 @@ function anotarFallo(
 	permanente: boolean,
 ): void {
 	const sql = ctx.storage.sql;
-	const fila = sql
-		.exec("SELECT Intentos FROM _Cola_Entrada WHERE Op_Id = ?;", op.opId)
-		.toArray()[0] as any;
-	const intentos = Number(fila?.Intentos ?? 0) + 1;
+	const intentos = intentosConEste(ctx, op);
 
-	if (permanente || intentos >= COLA_MAX_INTENTOS) {
+	if (laAparta(ctx, op, permanente)) {
 		ctx.storage.transactionSync(() => {
 			sql.exec(
 				`INSERT OR REPLACE INTO _Cola_Muerta (Op_Id, Command_Name, Device_Id, Error, Intentos, Apartada_En_Ms)
@@ -307,6 +324,9 @@ async function aplicarLote(
 		// (el `run` que le pasa el drenado nunca lanzaba), y un token de Turso caducado —que se
 		// arregla rotando— se llevaba por delante las cincuenta operaciones del lote.
 		if (isTursoAuthError(e)) throw e;
+		// AUD-18: una escritura anterior está en duda y nada entra hasta resolverla. No es culpa
+		// de ninguna operación de la cola: se espera como con la base caída.
+		if (esEscrituraEnDuda(e)) return "base_caida";
 	}
 
 	// El lote ha fallado y no sabemos cuál lo rompió: se prueban de una en una, EN ORDEN, que es
@@ -318,23 +338,41 @@ async function aplicarLote(
 			continue;
 		} catch (e: any) {
 			if (isTursoAuthError(e)) throw e;
+			if (esEscrituraEnDuda(e)) return "base_caida";
 			capturarError(e, "sync.queue_apply");
 			const error = String(e?.message || e);
 
 			// Un rechazo permanente se aparta en el acto y la cola sigue por la de detrás: es la
 			// política de SYNC-20, que hasta ahora sólo aplicaba el camino en vivo.
-			if (esRechazoPermanente(error)) {
-				anotarFallo(ctx, op, error, true);
-				continue;
-			}
+			const permanente = esRechazoPermanente(error);
 
 			// Y si no sabemos que sea definitivo, puede ser la base. Preguntárselo a ella es la
 			// única respuesta fiable: el texto de un error de libsql no distingue "estoy caída"
 			// de "esta sentencia no me gusta", y fiarlo al texto es lo que se pudre en silencio
 			// cuando cambia una redacción entre versiones.
-			if (!(await baseResponde(db))) return "base_caida";
+			if (!permanente && !(await baseResponde(db))) return "base_caida";
 
-			anotarFallo(ctx, op, error, false);
+			// AUD-18: lo que se aparta se veta antes. Un intento anterior suyo pudo quedarse sin
+			// respuesta y confirmarse después, con la operación ya fuera de la cola: tendría un `Seq`
+			// que nadie difundiría, y lo de detrás llevaría a la Main por encima de él. Si resulta que
+			// estaba aplicada, se difunde y sale de la cola como tal; si no se sabe cómo acabó el
+			// veto, se espera como con la base caída, sin culpar a nadie.
+			if (laAparta(ctx, op, permanente)) {
+				let veto: "vetada" | "aplicada";
+				try {
+					veto = await ctx.vetarParaApartar(db, op, error);
+				} catch (f) {
+					if (isTursoAuthError(f)) throw f;
+					return "base_caida";
+				}
+				if (veto === "aplicada") {
+					sacarDeLaCola(ctx, [op.opId]);
+					continue;
+				}
+			}
+
+			anotarFallo(ctx, op, error, permanente);
+			if (permanente) continue;
 			return "operacion_en_duda";
 		}
 	}

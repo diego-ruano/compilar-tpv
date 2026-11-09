@@ -76,6 +76,10 @@ const TRANSITORIOS = [
 	"503",
 	"502",
 	"429",
+	// AUD-18: una escritura anterior de este negocio quedó sin saber si se confirmó y todavía no se
+	// ha resuelto (`tenantHub.turno.ts`). Hasta entonces no entra nada posterior, y no es culpa de
+	// quien espera: vuelve a intentarlo.
+	"escritura_en_duda",
 ] as const;
 
 /**
@@ -109,6 +113,31 @@ export function esFalloPasajero(error: unknown): boolean {
 	const texto = String((error as any)?.message ?? error ?? "").toLowerCase();
 	if (!texto) return false;
 	return TRANSITORIOS.some((f) => texto.includes(f));
+}
+
+/**
+ * AUD-18 · ¿Lo rechazó la propia base, y lo rechazaría igual otra vez?
+ *
+ * Es lo que permite dar por NO confirmado un envío que ha fallado: la base contestó que no encaja
+ * (una restricción, una tabla o columna que no existe, una sintaxis, unos argumentos que no
+ * cuadran), o el servidor rechazó la petición sin ejecutarla (un 4xx que no es de credenciales).
+ * Habla de ESE envío, no de otro anterior que siguiera en vuelo: ése podría entrar más tarde, con la
+ * base ya cambiada. Por eso un reenvío rechazado así no basta para olvidar la escritura en duda, y
+ * se veta su `Op_Id` (`tenantHub.turno.ts`).
+ *
+ * Lo demás —un corte después de enviar, un plazo vencido, un 5xx, una respuesta que no se deja
+ * leer, un bloqueo— puede haberse confirmado sin que nos enteremos: es una confirmación incierta.
+ * Los códigos son los de libsql (`LibsqlError.code`); el texto, el de `esRechazoPermanente`.
+ */
+export function rechazoDeterminista(error: unknown): boolean {
+	if (esRechazoPermanente(error)) return true;
+	const codigo = String((error as any)?.code ?? "");
+	if (/^SQLITE_(CONSTRAINT|ERROR|MISMATCH|TOOBIG|RANGE|READONLY)/.test(codigo)) return true;
+	if (codigo === "SQL_PARSE_ERROR" || codigo === "SQL_INPUT_ERROR" || codigo === "ARGS_INVALID") {
+		return true;
+	}
+	const estado = Number((error as any)?.cause?.status ?? (error as any)?.status ?? 0);
+	return estado >= 400 && estado < 500 && estado !== 408 && estado !== 429;
 }
 
 /**

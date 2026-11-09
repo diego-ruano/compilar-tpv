@@ -113,8 +113,16 @@ esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_
   La validación no comprueba que sea del mismo negocio (la base no lleva marca de tenant): la pantalla lo
   advierte, el daño se queda en local (restaurar no llena el outbox) y se deshace recuperando de la nube.
 - Una copia inservible se rechaza diciendo por qué.
-- Al restaurar se vacía `_Sync_Failed`: lo que registra son intentos contra la base que se reemplaza, y
-  `completar` exige que no haya ninguno.
+- Al restaurar, `_Sync_Failed` queda coherente con el checkpoint de la copia (AUD-18): lo que va por
+  encima se borra, porque el catch-up de la reconciliación lo vuelve a traer y a intentar en orden. Su
+  marcador de `_Sync_Applied_Ops`, si lo tiene, se va con él sólo si lo puso una cuarentena que no
+  llegó a mover el checkpoint (una copia de cuando no era una sola transacción: intentos agotados y el
+  marcador posterior al último fallo), porque con él el cambio se daría por aplicado sin haberse
+  aplicado. Si es el anti-eco de una operación propia (cuyo eco no pudo mover el checkpoint), se
+  queda: ya está aplicada en esa copia, y sin él el catch-up la aplicaría otra vez. La cuarentena que
+  va por debajo se conserva, porque esa copia no tiene ese cambio y el catch-up no lo traerá (un fallo
+  de debajo sin cuarentena, de una copia anterior a AUD-18, pasa a estarlo). Con una cuarentena,
+  `completar` no desbloquea con esa copia: la salida es otra copia o la nube.
 - **La guardia del outbox**: restaurar reemplaza, así que se niega si hay operaciones sin subir. La
   comprobación va **dentro** de la transacción (`bootstrap_restaurar` y
   `recovery::asegurar_reemplazo_seguro`), con dos excepciones: una base ya en reconciliación y una base

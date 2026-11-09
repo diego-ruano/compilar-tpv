@@ -7,18 +7,57 @@
 use async_trait::async_trait;
 
 use tpv_contracts::sync::{
-    AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
-    OutboxEntry, OutboxFallo, ResultadoVerificacion, SyncChange, SyncHealth,
-    VerificacionClaves, VerificacionNube,
+    BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina, OutboxEntry,
+    OutboxFallo, ResultadoVerificacion, SyncChange, SyncHealth, VerificacionClaves,
+    VerificacionNube,
 };
 
 use crate::error::AppResult;
 
+/// AUD-18 · Lo que ha pasado al aplicar una tanda de cambios de la nube.
+///
+/// La bajada va estrictamente en orden de `Seq`: el primer cambio que falla detiene la tanda, y ni
+/// se aplica nada posterior ni el checkpoint pasa por encima de él hasta que entra o pasa a
+/// cuarentena. No cruza a la interfaz: es lo que se dicen el motor de réplica y el repositorio.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BajadaAplicada {
+    /// `op_id` de los cambios aplicados de verdad en esta llamada: sin los que ya estaban, los que
+    /// ya se habían procesado ni los que pasan a cuarentena. La interfaz reacciona sólo a éstos.
+    pub aplicadas: Vec<String>,
+    /// Checkpoint local tras la tanda.
+    pub last_seq: i64,
+    /// El cambio en el que se ha detenido la bajada, si alguno.
+    pub detenida: Option<CambioDetenido>,
+}
+
+/// AUD-18 · Un cambio de la nube que ha fallado al aplicarse y aún no ha agotado sus intentos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CambioDetenido {
+    pub op_id: String,
+    pub seq: i64,
+    /// Intentos fallidos que lleva (`_Sync_Failed.Attempts`): con él decide el motor cuánto espera
+    /// antes del siguiente.
+    pub intentos: i64,
+}
+
 #[async_trait]
 pub trait SyncRepository: Send + Sync {
-    /// Aplica los cambios en orden de `seq`, saltando los `op_id` ya aplicados. Cada operación
-    /// es atómica. Devuelve el nuevo checkpoint (último `seq` aplicado).
-    async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<AplicacionSync>;
+    /// Aplica los cambios en orden de `seq`, cada uno en su transacción e idempotente por `op_id`.
+    ///
+    /// AUD-18 · Nunca aplica uno posterior antes que uno anterior:
+    /// - un cambio con `seq` igual o menor que el checkpoint ya se procesó: no se aplica, y se
+    ///   avisa con `warn`;
+    /// - el primero que falla se anota en `_Sync_Failed` y detiene la tanda (`detenida`): ni lo de
+    ///   detrás se aplica ni el checkpoint pasa por encima de él. Al agotar sus intentos pasa a
+    ///   cuarentena, el checkpoint lo salta y la tanda sigue en orden;
+    /// - mientras haya uno detenido, lo posterior no entra: la tanda se para ahí sin gastarle
+    ///   intentos a nadie.
+    async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<BajadaAplicada>;
+
+    /// AUD-18 · El cambio en el que está detenida la bajada (el de `_Sync_Failed` que no está en
+    /// cuarentena y va por delante del checkpoint), con las sentencias que se guardaron al fallar.
+    /// Es lo primero que se reintenta, y así no depende de que la nube lo siga teniendo.
+    async fn cambio_detenido(&self) -> AppResult<Option<SyncChange>>;
 
     /// Último `seq` aplicado localmente (0 si todavía ninguno).
     async fn get_checkpoint(&self) -> AppResult<i64>;
@@ -48,10 +87,6 @@ pub trait SyncRepository: Send + Sync {
         permanente: bool,
     ) -> AppResult<OutboxFallo>;
 
-    /// Purga de mantenimiento de `_Sync_Applied_Ops` que SOLO retira lo ya confirmado en la nube:
-    /// registros antiguos (TTL) cuyo `Op_Id` ya no está pendiente en el outbox. Pensada para
-    /// llamarse cuando el outbox queda vacío tras drenar (todo subido). Es segura por diseño: nunca
-    /// borra un anti-eco cuya operación siga sin enviarse (evitaría su re-aplicación tras catch-up).
     /// SYNC-18: marca operaciones como **aceptadas por la cola de la nube**. Su fila sigue en el
     /// outbox (la prueba de que se aplicaron es verlas volver por el catch-up), pero dejan de
     /// ofrecerse para reenviar mientras tanto.
@@ -83,7 +118,8 @@ pub trait SyncRepository: Send + Sync {
     /// Devuelve `(descuadres, reparadas, borradas, aplazado)`. Lo que falta arriba se
     /// repara por estado; lo que sobra se borra **sólo** si esta Main puede afirmar que está al
     /// día — si no, se informa y se espera al ciclo siguiente, que es lo que impide que un dato
-    /// recién creado en la Handy se borre por llegar tarde.
+    /// recién creado en la Handy se borre por llegar tarde. AUD-18: con cualquier fallo de bajada
+    /// en `_Sync_Failed` (en cuarentena o no) no se toca nada arriba: ni se borra ni se sube.
     ///
     /// Con `reparar = false` ni repara ni borra: sólo cuenta.
     async fn contrastar_claves(
@@ -93,6 +129,12 @@ pub trait SyncRepository: Send + Sync {
         reparar: bool,
     ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)>;
 
+    /// Purga de mantenimiento de `_Sync_Applied_Ops` que SOLO retira lo ya confirmado en la nube:
+    /// registros antiguos (TTL) cuyo `Op_Id` ya no está pendiente en el outbox. Pensada para
+    /// llamarse cuando el outbox queda vacío tras drenar (todo subido). Es segura por diseño: nunca
+    /// borra un anti-eco cuya operación siga sin enviarse (evitaría su re-aplicación tras catch-up)
+    /// ni, AUD-18, el de una operación propia cuyo `Seq` va por delante del checkpoint: volverá por
+    /// el catch-up y sin él se aplicaría otra vez.
     async fn purge_applied_ops(&self) -> AppResult<()>;
 
     /// Foto de salud de la sincronización (profundidad de outbox, checkpoint, ops en

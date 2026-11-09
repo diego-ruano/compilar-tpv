@@ -310,6 +310,10 @@ de que la Main la escribe a que la sube, la nube se queda con lo de la Main (lle
 con lo de la Handy (lo aplicó encima, y el eco de su propia escritura se descarta por idempotencia).
 Las dos copias quedan distintas hasta que `verificar_nube` lo ve y repara con lo de la Main.
 
+La bajada en orden (AUD-18) agranda la ventana: un cambio remoto que falla al aplicarse se reintenta
+tras unos segundos (`espera_para_reintentar`), y lo que la Main escriba en esa fila mientras tanto
+también lo pisa al entrar.
+
 Le pasa a cualquier escritura de la Main, pero donde más se nota es en la reserva desde la web
 (docs/estudios/reservas-web.md): la Main cancela una reserva porque lo pide el cliente, una Handy la
 edita en ese momento con su estado de antes, y la Main se queda con la reserva viva mientras la nube

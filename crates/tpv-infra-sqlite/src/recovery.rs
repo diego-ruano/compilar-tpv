@@ -577,22 +577,62 @@ fn discard_sidecars(path: &Path) {
     }
 }
 
-/// Vacía `_Sync_Failed` en la copia que se va a instalar.
+/// AUD-18 · Deja `_Sync_Failed` de la copia que se va a instalar coherente con su checkpoint.
 ///
-/// Una cuarentena (`Quarantined = 1`) no se borra nunca: es la constancia de que una operación de
-/// la nube se rindió tras cinco intentos, y `recovery_complete` exige que no haya ninguna. Sin
-/// esto, una cuarentena vieja viaja dentro de las siete copias diarias y deja **cualquier**
-/// restauración local imposible de completar, en silencio y para siempre. Lo que registra esa
-/// tabla son intentos contra un estado de la BD que estamos reemplazando, así que aquí no dice
-/// nada; el volcado desde la nube la vacía por la misma razón (ver `sync.rs::bootstrap_restaurar`).
-/// Las que no llegaron a cuarentena vuelven a ofrecerse en el catch-up con el contador a cero.
-async fn limpiar_registro_de_fallos(db: &Db) -> AppResult<()> {
+/// - **Lo que va por encima** del checkpoint de la copia se borra: el catch-up de la
+///   reconciliación lo vuelve a traer desde ahí y lo intenta otra vez, en orden, con el contador a
+///   cero. Lo que registraba eran intentos contra un estado que se está reemplazando.
+/// - **El marcador de `_Sync_Applied_Ops` de lo que se borra** depende de quién lo puso:
+///   - Si lo puso una **cuarentena que no llegó a mover el checkpoint** (una copia anterior a que
+///     la cuarentena fuera atómica, `sync::anotar_fallo`), se borra: con él, el gate daría por
+///     aplicado un cambio que esta base nunca aplicó. Se reconoce porque la cuarentena va tras el
+///     último intento (`Attempts` agotados) y su marcador lleva la hora de ese momento, posterior
+///     al último fallo.
+///   - Si es el **anti-eco de una operación propia**, se queda: la operación ya está aplicada en
+///     esta base (se escribió aquí), y lo que falló fue mover el checkpoint al volver su eco. Se
+///     puso al escribirla, antes de subirla y de que su eco pudiera fallar; y con la cuarentena
+///     atómica, lo que queda por encima del checkpoint nunca tiene los intentos agotados. Sin él,
+///     el catch-up la aplicaría otra vez (un `Stock - 1` dos veces).
+/// - **Lo que va por debajo y está en cuarentena se conserva**: el checkpoint ya pasó por encima,
+///   así que el catch-up no lo traerá nunca y esta copia no tiene ese cambio. Borrarlo lo
+///   escondería y le abriría a `verificar_nube` la puerta de borrar o pisar arriba lo que ese
+///   cambio hizo. Con él, `recovery_complete` (que exige cuarentena = 0) no desbloquea con esta
+///   copia: la salida es otra copia o la nube, que es lo que dice la pantalla al quedar bloqueada.
+/// - Lo que va por debajo **sin** cuarentena (una copia anterior a AUD-18, cuando el checkpoint
+///   podía saltarse un fallo) pasa a estarlo, porque es lo que es: un cambio que el checkpoint dejó
+///   atrás y que no volverá.
+async fn ajustar_registro_de_fallos(db: &Db) -> AppResult<()> {
+    use crate::db::Writer;
     let w = db.write().await;
-    w.raw()
-        .execute("DELETE FROM _Sync_Failed;", ())
+    let conn: &Connection = w.raw();
+    conn.transaccion(async {
+        conn.execute(
+            "DELETE FROM _Sync_Applied_Ops \
+              WHERE EXISTS (SELECT 1 FROM _Sync_Failed f \
+                             WHERE f.Op_Id = _Sync_Applied_Ops.Op_Id \
+                               AND f.Seq > (SELECT Last_Seq FROM _Sync_State WHERE Id = 1) \
+                               AND f.Attempts >= ?1 \
+                               AND _Sync_Applied_Ops.Applied_At_Ms >= f.Last_Failed_At_Ms);",
+            vec![Value::Integer(crate::sync::MAX_APPLY_ATTEMPTS)],
+        )
         .await
         .map_err(db_err)?;
-    Ok(())
+        conn.execute(
+            "DELETE FROM _Sync_Failed \
+              WHERE Seq > (SELECT Last_Seq FROM _Sync_State WHERE Id = 1);",
+            (),
+        )
+        .await
+        .map_err(db_err)?;
+        conn.execute(
+            "UPDATE _Sync_Failed SET Quarantined = 1 WHERE Quarantined = 0;",
+            (),
+        )
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    })
+    .await
 }
 
 /// Guardia de toda restauración: reemplazar el fichero se lleva por delante el outbox actual.
@@ -791,7 +831,7 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf
             .await
             .map_err(|e| corrupta(format!("No se puede preparar la copia: {e}")))?;
         mark_reconciliation_pending(&db).await?;
-        limpiar_registro_de_fallos(&db).await?;
+        ajustar_registro_de_fallos(&db).await?;
         {
             let w = db.write().await;
             let _ = w.raw().query("PRAGMA wal_checkpoint(TRUNCATE);", ()).await;
@@ -1029,42 +1069,221 @@ mod tests {
         scalar_i64(r.conn(), sql).await.unwrap()
     }
 
-    async fn registrar_cuarentena(db: &Db) {
+    /// Una base con el checkpoint en 10 y tres fallos de bajada: una cuarentena por debajo (7), un
+    /// fallo sin cuarentena por debajo (5, como los que dejaba el checkpoint al saltarse un fallo
+    /// antes de AUD-18) y otro por encima (12), en el que la bajada está detenida.
+    async fn registrar_fallos_de_bajada(db: &Db) {
         let w = db.write().await;
         w.raw()
-            .execute(
-                "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,                  Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms)                  VALUES ('op-vieja', 7, '[]', 5, 1, 'no such table', 1, 1);",
-                (),
+            .execute_batch(
+                "UPDATE _Sync_State SET Last_Seq = 10 WHERE Id = 1;
+                 INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,
+                   Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms)
+                 VALUES ('op-apartada', 7, '[]', 5, 1, 'no such table', 1, 1),
+                        ('op-saltada', 5, '[]', 1, 0, 'FOREIGN KEY constraint failed', 1, 1),
+                        ('op-detenida', 12, '[]', 2, 0, 'UNIQUE constraint failed', 1, 1);",
             )
             .await
             .unwrap();
     }
 
+    async fn fallos(db: &Db) -> Vec<(String, i64)> {
+        let r = db.read().await;
+        let mut rows = r
+            .conn()
+            .query("SELECT Op_Id, Quarantined FROM _Sync_Failed ORDER BY Seq;", ())
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(f) = rows.next().await.unwrap() {
+            let op = match f.get_value(0).unwrap() {
+                Value::Text(s) => s,
+                v => panic!("{v:?}"),
+            };
+            out.push((op, crate::mapping::v_i64(f.get_value(1).unwrap()).unwrap_or(-1)));
+        }
+        out
+    }
+
+    /// AUD-18: restaurar una copia deja `_Sync_Failed` coherente con el checkpoint de la copia.
+    /// Lo que va por encima lo vuelve a traer el catch-up (y a intentar); la cuarentena de debajo
+    /// se conserva, porque esa copia no tiene ese cambio y el catch-up no lo traerá; y un fallo de
+    /// debajo sin cuarentena pasa a estarlo, que es lo que es.
     #[tokio::test]
-    async fn una_cuarentena_vieja_no_viaja_dentro_de_la_copia_restaurada() {
-        // Si viajara, `recovery_complete` (que exige cuarentena = 0) no podría desbloquear NUNCA,
-        // y esa fila no se borra sola en ningún sitio.
+    async fn la_copia_restaurada_deja_los_fallos_de_bajada_coherentes_con_su_checkpoint() {
         let dir = test_dir("cuarentena");
         let db = db_operativa(&dir).await;
-        registrar_cuarentena(&db).await;
+        registrar_fallos_de_bajada(&db).await;
 
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
         let origen = abrible(&dir, &backup.id).await;
-        let copia_sucia = Db::open(origen.to_str().unwrap()).await.unwrap();
-        assert_eq!(
-            cuenta(&copia_sucia, "SELECT COUNT(*) FROM _Sync_Failed;").await,
-            1,
-            "la copia refleja el estado del momento, cuarentena incluida"
-        );
-        drop(copia_sucia);
+        let copia = Db::open(origen.to_str().unwrap()).await.unwrap();
+        assert_eq!(fallos(&copia).await.len(), 3, "la copia refleja el estado del momento");
+        drop(copia);
 
         let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
         let lista = Db::open(prepared.to_str().unwrap()).await.unwrap();
         assert_eq!(
-            cuenta(&lista, "SELECT COUNT(*) FROM _Sync_Failed;").await,
-            0
+            fallos(&lista).await,
+            vec![("op-saltada".to_string(), 1), ("op-apartada".to_string(), 1)],
+        );
+        assert_eq!(cuenta(&lista, "SELECT Last_Seq FROM _Sync_State WHERE Id = 1;").await, 10);
+
+        drop(lista);
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// AUD-18: una copia tomada cuando la cuarentena eran tres commits sueltos pudo fotografiar el
+    /// marcador de `_Sync_Applied_Ops` (con la marca de cuarentena o sin ella) y no el avance del
+    /// checkpoint. Al restaurarla, el fallo de encima del checkpoint se borra y se lleva su
+    /// marcador: cuando el catch-up trae el cambio, se aplica de verdad en vez de darse por
+    /// aplicado y quedar atrás para siempre.
+    #[tokio::test]
+    async fn la_copia_con_la_cuarentena_a_medias_no_da_por_aplicado_lo_que_nunca_se_aplico() {
+        use tpv_application::ports::sync::SyncRepository;
+        use tpv_contracts::sync::{SqlStatement, SyncChange};
+
+        let dir = test_dir("cuarentena_a_medias");
+        let db = db_operativa(&dir).await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "UPDATE _Sync_State SET Last_Seq = 10 WHERE Id = 1;
+                     INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,
+                       Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms)
+                     VALUES ('op-solo-marcador', 12, '[]', 5, 0, 'no such table', 1, 1),
+                            ('op-sin-checkpoint', 13, '[]', 5, 1, 'no such table', 1, 1);
+                     INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms)
+                     VALUES ('op-solo-marcador', 12, 1), ('op-sin-checkpoint', 13, 1);",
+                )
+                .await
+                .unwrap();
+        }
+
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        let lista = Db::open(prepared.to_str().unwrap()).await.unwrap();
+        assert!(fallos(&lista).await.is_empty());
+        assert_eq!(
+            cuenta(
+                &lista,
+                "SELECT COUNT(*) FROM _Sync_Applied_Ops \
+                  WHERE Op_Id IN ('op-solo-marcador', 'op-sin-checkpoint');",
+            )
+            .await,
+            0,
+            "el fallo descartado se lleva su marcador"
         );
 
+        // El catch-up los trae desde el checkpoint de la copia, y ahora entran de verdad.
+        let zona = |op: &str, seq: i64, id: &str| SyncChange {
+            op_id: op.into(),
+            seq,
+            statements: vec![SqlStatement {
+                sql: format!("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('{id}', '{id}');"),
+                args: vec![],
+            }],
+        };
+        let repo = crate::sync::SqliteSyncRepository::new(lista.clone());
+        let r = repo
+            .apply_changes(vec![
+                zona("op-solo-marcador", 12, "z-12"),
+                zona("op-sin-checkpoint", 13, "z-13"),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(r.aplicadas, vec!["op-solo-marcador".to_string(), "op-sin-checkpoint".to_string()]);
+        assert_eq!((r.last_seq, r.detenida.is_none()), (13, true));
+        assert_eq!(
+            cuenta(&lista, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona IN ('z-12', 'z-13');").await,
+            2
+        );
+
+        drop(repo);
+        drop(lista);
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// AUD-18 (Codex, tercera revisión bis, 1): el eco de una venta propia, ya aplicada aquí, no
+    /// pudo mover el checkpoint, y la copia se tomó entonces: su fallo va por encima del checkpoint y
+    /// su marcador es el anti-eco. Restaurar no puede llevárselo: el catch-up la aplicaría otra vez.
+    /// Tampoco el de una copia vieja en la que ese eco agotó sus intentos y la cuarentena no llegó a
+    /// mover el checkpoint: el anti-eco es de antes de cualquier fallo de su eco.
+    #[tokio::test]
+    async fn restaurar_conserva_el_anti_eco_de_lo_propio_y_no_lo_aplica_dos_veces() {
+        use tpv_application::ports::sync::SyncRepository;
+        use tpv_contracts::sync::{SqlStatement, SyncChange};
+
+        let dir = test_dir("eco_propio");
+        let db = db_operativa(&dir).await;
+        {
+            // Stock 9: la venta propia ya se descontó aquí. Su eco es el 12.
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('c-1', 'Bebidas');
+                     INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Stock_Suelto)
+                     VALUES ('p-1', 'c-1', 'Agua', 9), ('p-2', 'c-1', 'Zumo', 4);
+                     UPDATE _Sync_State SET Last_Seq = 10 WHERE Id = 1;
+                     INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms)
+                     VALUES ('op-venta', 12, 1000), ('op-venta-vieja', 13, 1000);
+                     INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,
+                       Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms)
+                     VALUES ('op-venta', 12, '[]', 1, 0, 'database is locked', 2000, 2000),
+                            ('op-venta-vieja', 13, '[]', 5, 1, 'database is locked', 1500, 2000);",
+                )
+                .await
+                .unwrap();
+        }
+
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        let lista = Db::open(prepared.to_str().unwrap()).await.unwrap();
+        assert!(fallos(&lista).await.is_empty());
+        assert_eq!(
+            cuenta(
+                &lista,
+                "SELECT COUNT(*) FROM _Sync_Applied_Ops WHERE Op_Id IN ('op-venta', 'op-venta-vieja');"
+            )
+            .await,
+            2,
+            "los anti-ecos se quedan"
+        );
+
+        // El catch-up trae el eco: el gate lo salta y el stock no se descuenta otra vez.
+        let repo = crate::sync::SqliteSyncRepository::new(lista.clone());
+        let eco = |op: &str, seq: i64, producto: &str| SyncChange {
+            op_id: op.into(),
+            seq,
+            statements: vec![SqlStatement {
+                sql: format!(
+                    "UPDATE Productos SET Stock_Suelto = Stock_Suelto - 1 WHERE ID_Producto = '{producto}';"
+                ),
+                args: vec![],
+            }],
+        };
+        let r = repo
+            .apply_changes(vec![eco("op-venta", 12, "p-1"), eco("op-venta-vieja", 13, "p-2")])
+            .await
+            .unwrap();
+        assert!(r.aplicadas.is_empty());
+        assert_eq!((r.last_seq, r.detenida.is_none()), (13, true));
+        assert_eq!(
+            cuenta(&lista, "SELECT CAST(Stock_Suelto AS INTEGER) FROM Productos WHERE ID_Producto = 'p-1';")
+                .await,
+            9
+        );
+        assert_eq!(
+            cuenta(&lista, "SELECT CAST(Stock_Suelto AS INTEGER) FROM Productos WHERE ID_Producto = 'p-2';")
+                .await,
+            4
+        );
+        assert!(fallos(&lista).await.is_empty());
+
+        drop(repo);
         drop(lista);
         drop(db);
         let _ = std::fs::remove_dir_all(dir);
