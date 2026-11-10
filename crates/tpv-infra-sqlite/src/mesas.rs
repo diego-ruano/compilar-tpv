@@ -1320,6 +1320,12 @@ impl MesasRepository for SqliteMesasRepository {
             let total = select_one_dinero(db, &sql_sum, count_args.clone())
                 .await?
                 .unwrap_or(Dinero::CERO);
+            // AUD-17: un cobro negativo sería dinero que sale del cajón con el arqueo cuadrado (el
+            // esperado baja lo mismo que falta). Como en la barra, se rechaza; uno de 0 € (una
+            // invitación) sí entra. Va antes de reservar el número, y la transacción no deja nada.
+            if total.es_negativo() {
+                return Err(AppError::validation("El importe no puede ser negativo."));
+            }
 
             // Numero correlativo del ticket: se reserva aqui y viaja como literal en el pago,
             // para que una reimpresion saque el mismo papel.
@@ -1942,6 +1948,105 @@ mod tests_comanda_cobrada {
         let e = repo.add_linea_comanda("barra_cobrada", "cafe", 1.0).await.unwrap_err();
         assert!(es_la_comanda_cobrada(&e), "{e:?}");
         assert_eq!(lineas_de(&db, "barra_cobrada").await, 0);
+    }
+}
+
+#[cfg(test)]
+mod tests_cobro_negativo {
+    //! AUD-17: un cobro de mesa en negativo era dinero que salía del cajón con el arqueo cuadrado:
+    //! un pago ACTIVO de −50 € en efectivo baja el esperado lo mismo que falta. Venía de una línea con
+    //! precio negativo (un producto dado de alta así desde una Handy, que la Main aplica tal cual al
+    //! replicar). Se rechaza como en la barra; un cobro de 0 € (una invitación) sigue entrando.
+
+    use super::*;
+    use crate::db::Db;
+    use crate::ejecutor::Connection;
+    use tpv_domain::pago::MetodoPago;
+
+    async fn db_sembrada() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("cobro_negativo");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in [
+                // Con NIF: sin él no se emite el registro y no se cobra nada.
+                "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL' WHERE ID = 1;",
+                "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+                   VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+                "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');",
+                "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('ajuste', 'cat', 'Ajuste', -5000);",
+                "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('agua', 'cat', 'Agua', 0);",
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z', 'Sala');",
+                "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+                   VALUES ('m', 'z', '1', 4, 0, 0, 'rect', 80, 80);",
+                "INSERT INTO Comandas (ID_Comanda, ID_Mesa, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+                   VALUES ('com', 'm', 'MESA', '2026-11-08 13:00:00', 'Abierta', -5000);",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                   VALUES ('det-ajuste', 'com', 'ajuste', 1, -5000, 10);",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                   VALUES ('det-agua', 'com', 'agua', 1, 0, 10);",
+            ] {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        (db, dir)
+    }
+
+    async fn contar(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        select_one_i64(&r, sql, Vec::<Value>::new()).await.unwrap().unwrap_or(0)
+    }
+
+    fn cobro(detalle: &str) -> CobroDetalles {
+        CobroDetalles {
+            id_comanda: "com".into(),
+            metodo: MetodoPago::Efectivo,
+            tipo: "FRACCIONADO".into(),
+            detalle_ids: vec![detalle.into()],
+            id_usuario: Some("u1".into()),
+            destinatario: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn un_cobro_de_mesa_en_negativo_no_entra_ni_deja_rastro() {
+        let (db, _dir) = db_sembrada().await;
+        let repo = SqliteMesasRepository::new(db.clone());
+
+        let e = repo.cobrar_detalles(cobro("det-ajuste")).await.unwrap_err();
+        assert!(
+            matches!(&e, AppError::Validation(m) if m == "El importe no puede ser negativo."),
+            "{e:?}"
+        );
+
+        // Ni el pago, ni su apunte de caja, ni la factura, ni el número: la transacción no deja nada.
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Pagos;").await, 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Movimientos_Caja;").await, 0);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Registros_Facturacion;").await, 0);
+        assert_eq!(contar(&db, "SELECT COALESCE(MAX(Ultimo), 0) FROM Serie_Facturacion;").await, 0);
+        // Y la línea sigue pendiente en la comanda abierta.
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM v_lineas_cobradas;").await, 0);
+        assert_eq!(
+            contar(&db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda = 'com' AND Estado = 'Abierta';").await,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn un_cobro_de_mesa_a_cero_si_entra() {
+        // Una invitación: 0 € no es negativo.
+        let (db, _dir) = db_sembrada().await;
+        let repo = SqliteMesasRepository::new(db.clone());
+
+        let id_pago = repo.cobrar_detalles(cobro("det-agua")).await.expect("una invitación se cobra");
+        assert_eq!(
+            contar(&db, &format!("SELECT Importe_Total FROM Pagos WHERE ID_Pago = '{id_pago}' AND Estado = 'ACTIVO';")).await,
+            0
+        );
     }
 }
 

@@ -6,7 +6,7 @@
 // ids, default de stock) la hace el constructor de comandos.
 
 import * as z from "zod";
-import { zDineroOpcional } from "../../lib/dinero";
+import { zDineroNoNegativoCon } from "../../lib/dinero";
 import { diaDeInstante, esFechaYmd } from "../../lib/fechas";
 import { zIva } from "../../lib/iva";
 
@@ -32,6 +32,14 @@ const idList = z.array(z.string().overwrite(recortar).min(1)).default([]);
 // lo normalizamos a `undefined` para no romper los tipos de @tpv/contracts (string | undefined).
 const optId = idStr.nullish().transform((v) => (v == null ? undefined : v));
 
+// AUD-17: un precio de venta negativo entraba por aquí desde una Handy y, cobrado en mesa, era una
+// salida de caja con el arqueo cuadrado. Cero (una invitación) y sin precio valen; el coste de un
+// lote, igual. Los mismos textos que en la Main (`tpv-domain/src/inventario.rs`).
+const MSG_PRECIO_NEGATIVO = "El precio no puede ser negativo.";
+const MSG_COSTE_NEGATIVO = "El coste unitario no puede ser negativo.";
+const precioOpcional = zDineroNoNegativoCon(MSG_PRECIO_NEGATIVO).nullish();
+const costeOpcional = zDineroNoNegativoCon(MSG_COSTE_NEGATIVO).nullish();
+
 export const upsertCategoriaSchema = z.object({
 	id_categoria: optId,
 	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre de la categoría."),
@@ -46,7 +54,7 @@ export const upsertProductoSchema = z.object({
 	id_categoria: idCon("Elige la categoría del producto."),
 	id_proveedor: idStr.nullish(),
 	nombre: z.string().overwrite(recortar).min(1, "Escribe el nombre del producto."),
-	precio_venta: zDineroOpcional,
+	precio_venta: precioOpcional,
 	stock_minimo: optNum,
 	unidad_medida: optStr,
 	nombre_imagen: optStr,
@@ -103,7 +111,7 @@ const createLoteCampos = z.object({
 	caducidad: optStr,
 	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	fecha_entrada: optStr,
-	coste_unitario: zDineroOpcional,
+	coste_unitario: costeOpcional,
 	id_proveedor: idStr.nullish(),
 	notas: optStr,
 });
@@ -120,7 +128,7 @@ const updateLoteCampos = z.object({
 	codigo_lote: z.string().overwrite(recortar).min(1, "Escribe el código del lote."),
 	caducidad: optStr,
 	fecha_entrada: optStr,
-	coste_unitario: zDineroOpcional,
+	coste_unitario: costeOpcional,
 	id_proveedor: idStr.nullish(),
 	notas: optStr,
 });

@@ -56,7 +56,11 @@
       { "nombre": "lote agotado", "cambios": { "stock_disponible": 0 }, "acepta": true },
       { "nombre": "cantidad negativa", "cambios": { "stock_disponible": -1 }, "acepta": false, "mensaje": "Cantidad inválida" },
       { "nombre": "código en blanco", "cambios": { "codigo_lote": "   " }, "acepta": false, "mensaje": "Escribe el código del lote." },
-      { "nombre": "sin producto", "cambios": { "id_producto": "  " }, "acepta": false, "mensaje": "Falta el producto." }
+      { "nombre": "sin producto", "cambios": { "id_producto": "  " }, "acepta": false, "mensaje": "Falta el producto." },
+      { "nombre": "AUD-17: coste unitario a cero", "cambios": { "coste_unitario": 0 }, "acepta": true },
+      { "nombre": "AUD-17: coste unitario nulo", "cambios": { "coste_unitario": null }, "acepta": true },
+      { "nombre": "AUD-17: coste unitario", "cambios": { "coste_unitario": 125 }, "acepta": true },
+      { "nombre": "AUD-17: coste unitario negativo", "cambios": { "coste_unitario": -1 }, "acepta": false, "mensaje": "El coste unitario no puede ser negativo." }
     ]
   },
   "lote_edicion": {
@@ -68,7 +72,9 @@
       { "nombre": "caducidad con texto detrás", "cambios": { "caducidad": "2026-12-31basura" }, "acepta": false, "mensaje": "Caducidad con formato inválido (se espera YYYY-MM-DD)" },
       { "nombre": "entrada con texto detrás", "cambios": { "fecha_entrada": "2026-07-22 basura" }, "acepta": false, "mensaje": "La fecha de entrada no tiene un formato válido." },
       { "nombre": "caduca antes de entrar", "cambios": { "caducidad": "2026-07-21", "fecha_entrada": "2026-07-22 10:00:00" }, "acepta": false, "mensaje": "La caducidad no puede ser anterior a la fecha de entrada" },
-      { "nombre": "sin lote", "cambios": { "id_lote": "  " }, "acepta": false, "mensaje": "Falta el lote." }
+      { "nombre": "sin lote", "cambios": { "id_lote": "  " }, "acepta": false, "mensaje": "Falta el lote." },
+      { "nombre": "AUD-17: coste unitario a cero", "cambios": { "coste_unitario": 0 }, "acepta": true },
+      { "nombre": "AUD-17: coste unitario negativo", "cambios": { "coste_unitario": -1 }, "acepta": false, "mensaje": "El coste unitario no puede ser negativo." }
     ]
   },
   "negocio": {
@@ -111,7 +117,12 @@
       { "nombre": "VALID-01: U+0085 es un espacio y se recorta", "cambios": { "nombre": "\u0085Café\u0085" }, "acepta": true, "queda": { "nombre": "Café" } },
       { "nombre": "VALID-01: un nombre que sólo es U+0085 está en blanco", "cambios": { "nombre": "\u0085" }, "acepta": false, "mensaje": "Escribe el nombre del producto." },
       { "nombre": "VALID-01: U+FEFF no es un espacio y se queda", "cambios": { "nombre": "\ufeffCafé" }, "acepta": true, "queda": { "nombre": "\ufeffCafé" } },
-      { "nombre": "sin categoría", "cambios": { "id_categoria": "  " }, "acepta": false, "mensaje": "Elige la categoría del producto." }
+      { "nombre": "sin categoría", "cambios": { "id_categoria": "  " }, "acepta": false, "mensaje": "Elige la categoría del producto." },
+      { "nombre": "AUD-17: precio de venta a cero (una invitación)", "cambios": { "precio_venta": 0 }, "acepta": true },
+      { "nombre": "AUD-17: precio de venta nulo", "cambios": { "precio_venta": null }, "acepta": true },
+      { "nombre": "AUD-17: precio de venta", "cambios": { "precio_venta": 250 }, "acepta": true },
+      { "nombre": "AUD-17: precio de venta negativo", "cambios": { "precio_venta": -1 }, "acepta": false, "mensaje": "El precio no puede ser negativo." },
+      { "nombre": "AUD-17: precio de venta de -50 €", "cambios": { "precio_venta": -5000 }, "acepta": false, "mensaje": "El precio no puede ser negativo." }
     ]
   },
   "horario_alta": {

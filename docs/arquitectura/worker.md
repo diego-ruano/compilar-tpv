@@ -95,6 +95,8 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
   común (como `leerClaves` en `/verificar-claves`, que marca `truncada` lo que no cabe). Un isolate
   tiene 128 MB.
 - **Un importe que llega por la API viene en céntimos enteros** (`zDinero`); un `12.5` se rechaza.
+  Uno que no puede ser negativo (un precio de venta, el coste de un lote) va con
+  `zDineroNoNegativoCon(mensaje)` y el texto de la Main.
 
 ## Errores
 

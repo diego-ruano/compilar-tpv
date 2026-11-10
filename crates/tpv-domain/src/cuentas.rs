@@ -101,6 +101,12 @@ pub enum RechazoDevolucion {
     NoCuadra,
     /// Lo elegido no se cobró (líneas a 0 €): no hay dinero que devolver.
     SinImporte,
+    /// Lo elegido suma más dinero del que queda por devolver del cobro (AUD-17).
+    MasDeLoCobrado,
+    /// Una línea del cobro va en negativo (un precio que entró de antes, AUD-17): por partes, lo
+    /// devuelto de las otras pasaría de lo cobrado, y esa línea no tiene nada que devolver. Queda la
+    /// devolución total.
+    LineaEnNegativo,
 }
 
 impl RechazoDevolucion {
@@ -123,6 +129,10 @@ impl RechazoDevolucion {
                 "Este cobro no cuadra con sus líneas, así que no se puede devolver por partes: haz la devolución total."
             }
             RechazoDevolucion::SinImporte => "Eso no se cobró: no hay dinero que devolver.",
+            RechazoDevolucion::MasDeLoCobrado => "Eso es más de lo que queda por devolver de este cobro.",
+            RechazoDevolucion::LineaEnNegativo => {
+                "Este cobro tiene una línea en negativo, así que no se puede devolver por partes: haz la devolución total."
+            }
         }
     }
 }
@@ -164,6 +174,21 @@ pub fn importe_devuelto(precio_unitario: Dinero, antes: f64, unidades: f64) -> D
     precio_unitario.escala(despues) - precio_unitario.escala(antes)
 }
 
+/// AUD-17: lo que se devuelve ahora cabe en lo que queda del cobro. `cobrado` es su importe y
+/// `devuelto`, lo que ya devolvieron sus devoluciones vigentes, en positivo.
+///
+/// Con un cobro que es la suma de sus líneas y precios que no bajan de cero, devolver línea a línea
+/// no pasa nunca de aquí. Lo pasaría una línea en negativo: de un menú de 60 € y una línea de −50 €
+/// se cobran 10 €, y devolver sólo el menú sacaría del cajón 50 € que nunca entraron. Ese cobro ya
+/// se rechaza antes por partes ([`RechazoDevolucion::LineaEnNegativo`]); esto es la red que sostiene
+/// la regla aunque llegue otra cosa.
+pub fn cabe_en_el_cobro(cobrado: Dinero, devuelto: Dinero, ahora: Dinero) -> Result<(), RechazoDevolucion> {
+    if ahora > cobrado - devuelto {
+        return Err(RechazoDevolucion::MasDeLoCobrado);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,6 +208,24 @@ mod tests {
         assert_eq!(unidades_a_devolver(1.0, 3.0, 3.0).unwrap_err(), RechazoDevolucion::MasDeLoQueQueda);
         // Al peso, con el residuo de coma flotante que deja restar 0,1 a 0,3.
         assert_eq!(unidades_a_devolver(0.2, 0.3, 0.1).unwrap(), 0.2);
+    }
+
+    #[test]
+    fn no_se_devuelve_mas_de_lo_que_queda_del_cobro() {
+        // AUD-17: un menú de 60 € y una línea de −50 € se cobran por 10 €.
+        let cobrado = Dinero::de_centimos(1000);
+        assert_eq!(
+            cabe_en_el_cobro(cobrado, Dinero::CERO, Dinero::de_centimos(6000)).unwrap_err(),
+            RechazoDevolucion::MasDeLoCobrado
+        );
+        assert!(cabe_en_el_cobro(cobrado, Dinero::CERO, cobrado).is_ok(), "todo lo cobrado, sí");
+        // Con 4 € ya devueltos quedan 6 €: ni un céntimo más.
+        let devuelto = Dinero::de_centimos(400);
+        assert!(cabe_en_el_cobro(cobrado, devuelto, Dinero::de_centimos(600)).is_ok());
+        assert_eq!(
+            cabe_en_el_cobro(cobrado, devuelto, Dinero::de_centimos(601)).unwrap_err(),
+            RechazoDevolucion::MasDeLoCobrado
+        );
     }
 
     #[test]

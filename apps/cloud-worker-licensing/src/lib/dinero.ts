@@ -106,8 +106,14 @@ export const zDinero = z
 	.finite()
 	.transform((v) => v as Dinero);
 
+/**
+ * Como `zDinero`, pero rechazando además los negativos con `mensaje`, que es lo que se enseña: el
+ * mismo texto que da la Main para ese dato (VALID-03).
+ */
+export const zDineroNoNegativoCon = (mensaje: string) => zDinero.refine((v) => v >= 0, mensaje);
+
 /** Como `zDinero`, pero rechazando además los negativos. */
-export const zDineroNoNegativo = zDinero.refine((v) => v >= 0, "el importe no puede ser negativo");
+export const zDineroNoNegativo = zDineroNoNegativoCon("el importe no puede ser negativo");
 
 /** Un importe opcional de la API (`null`/ausente = no informado). */
 export const zDineroOpcional = zDinero.nullish();

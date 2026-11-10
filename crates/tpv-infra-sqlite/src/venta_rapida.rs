@@ -90,32 +90,6 @@ impl SqliteVentaRapidaRepository {
                 }
             }
 
-            // FISCAL-01: el número se reserva DENTRO de la transacción. Antes se hacía fuera, y
-            // con un contador de tickets daba igual gastar uno en un cobro que acabara en
-            // ROLLBACK; ahora ese número es el de una factura, y un hueco tiene que ser un hueco
-            // de verdad y no un número emitido dos veces.
-            //
-            // `Pagos.Numero_Ticket` guarda este mismo valor: un solo número para el papel, el
-            // cobro y el registro.
-            let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
-            let numero_ticket = numero_reservado.0.clone();
-            // FISCAL-02: se captura aquí porque `data` se consume al construir los parámetros.
-            let destinatario = data.destinatario.clone();
-
-            if let Some(idt) = id_trabajador_cobrador.clone() {
-                db.execute(
-                    r#"
-                    UPDATE Comandas
-                    SET ID_Trabajador = ?2
-                    WHERE ID_Comanda = ?1
-                      AND ID_Trabajador IS NULL;
-                    "#,
-                    vec![Value::Text(data.id_comanda.clone()), Value::Text(idt)],
-                )
-                .await
-                .map_err(db_err)?;
-            }
-
             let placeholders = detalles.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             let sql = format!(
                 r#"
@@ -148,6 +122,40 @@ impl SqliteVentaRapidaRepository {
 
             if num_valid <= 0 || num_valid as usize != detalles.len() {
                 return Err(AppError::conflict("No hay detalles válidos pendientes de pago"));
+            }
+
+            // AUD-17: lo que se guarda es lo que suma la base, no lo que manda la pantalla (que
+            // `datos_cobro` ya mira). Con una línea en negativo, un total por debajo de cero sería
+            // dinero que sale del cajón con el arqueo cuadrado. Se rechaza aquí, antes de reservar el
+            // número, y vale igual para el cobro directo y para el pendiente que se reintenta.
+            if importe_total_db.es_negativo() {
+                return Err(AppError::validation("El importe no puede ser negativo."));
+            }
+
+            // FISCAL-01: el número se reserva DENTRO de la transacción. Antes se hacía fuera, y
+            // con un contador de tickets daba igual gastar uno en un cobro que acabara en
+            // ROLLBACK; ahora ese número es el de una factura, y un hueco tiene que ser un hueco
+            // de verdad y no un número emitido dos veces.
+            //
+            // `Pagos.Numero_Ticket` guarda este mismo valor: un solo número para el papel, el
+            // cobro y el registro.
+            let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
+            let numero_ticket = numero_reservado.0.clone();
+            // FISCAL-02: se captura aquí porque `data` se consume al construir los parámetros.
+            let destinatario = data.destinatario.clone();
+
+            if let Some(idt) = id_trabajador_cobrador.clone() {
+                db.execute(
+                    r#"
+                    UPDATE Comandas
+                    SET ID_Trabajador = ?2
+                    WHERE ID_Comanda = ?1
+                      AND ID_Trabajador IS NULL;
+                    "#,
+                    vec![Value::Text(data.id_comanda.clone()), Value::Text(idt)],
+                )
+                .await
+                .map_err(db_err)?;
             }
 
             // Capturamos los detalles a cobrar (detalle, producto, cantidad) para validar
@@ -1030,6 +1038,140 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         }).await;
 
         res
+    }
+}
+
+#[cfg(test)]
+mod tests_total_negativo {
+    //! AUD-17: la barra guarda lo que suma la base, no lo que manda la pantalla. Con una línea en
+    //! negativo (un precio que entró de antes), la pantalla podía mandar 0 € y quedar un cobro ACTIVO
+    //! de −50 € en efectivo: dinero que sale del cajón con el arqueo cuadrado. Se rechaza dentro de
+    //! la transacción, antes de reservar el número, también al reintentar el cobro pendiente.
+
+    use super::*;
+    use crate::ejecutor::Connection;
+    use tpv_contracts::venta_rapida::{ResolverCobroPendienteInput, VrCobrarFraccionadoInput};
+
+    const ID: &str = "0192f7a4-3b1c-7d2e-8f00-123456789abc";
+    const IMPORTE_NEGATIVO: &str = "El importe no puede ser negativo.";
+
+    async fn preparar() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("barra_total_negativo");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in [
+                "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL' WHERE ID = 1;",
+                "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+                   VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+                "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+                "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('ajuste', 'cat', 'Ajuste', -5000);",
+                "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+                   VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', -5000);",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                   VALUES ('det-neg', 'com', 'ajuste', 1, -5000, 10);",
+            ] {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        (db, dir)
+    }
+
+    /// Todo lo que deja un cobro, número de factura incluido.
+    async fn rastro(db: &Arc<Db>) -> Vec<f64> {
+        let r = db.read().await;
+        let mut v = Vec::new();
+        for sql in [
+            "SELECT COUNT(*) FROM Pagos;",
+            "SELECT COUNT(*) FROM Pago_Detalles;",
+            "SELECT COUNT(*) FROM Movimientos_Caja;",
+            "SELECT COUNT(*) FROM Registros_Facturacion;",
+            "SELECT COALESCE(SUM(Ultimo), 0) FROM Serie_Facturacion;",
+        ] {
+            let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+            let row = rows.next().await.unwrap().expect("sin filas");
+            v.push(v_f64(row.get_value(0).unwrap()).unwrap_or(0.0));
+        }
+        v
+    }
+
+    fn es_importe_negativo(e: &AppError) -> bool {
+        matches!(e, AppError::Validation(m) if m == IMPORTE_NEGATIVO)
+    }
+
+    #[tokio::test]
+    async fn con_la_pantalla_en_cero_y_la_base_en_negativo_no_se_cobra_ni_al_reintentar() {
+        let (db, _dir) = preparar().await;
+        let repo = SqliteVentaRapidaRepository::new(db.clone());
+        let nada = rastro(&db).await;
+        assert_eq!(nada, vec![0.0; 5]);
+
+        // La pantalla manda 0 €, que `datos_cobro` deja pasar; la base suma −50 €.
+        let e = tpv_application::use_cases::venta_rapida::cobrar_fraccionado(
+            &repo,
+            "u1",
+            None,
+            VrCobrarFraccionadoInput {
+                id_pago: ID.into(),
+                id_comanda: "com".into(),
+                metodo: "Efectivo".into(),
+                importe_total: Dinero::CERO,
+                detalles: vec!["det-neg".into()],
+                destinatario: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(es_importe_negativo(&e), "{e:?}");
+        assert_eq!(rastro(&db).await, nada, "ni pago, ni apunte, ni registro, ni número");
+
+        // El cobro se queda pendiente con su motivo, y reintentarlo dice lo mismo sin dejar nada.
+        let pendientes = repo.listar_cobros_pendientes().await.unwrap();
+        assert_eq!(pendientes.len(), 1);
+        assert_eq!(pendientes[0].ultimo_error.as_deref(), Some(IMPORTE_NEGATIVO));
+        for _ in 0..2 {
+            let e = repo
+                .resolver_cobro_pendiente(ResolverCobroPendienteInput { id_pago: ID.into(), destinatario: None })
+                .await
+                .unwrap_err();
+            assert!(es_importe_negativo(&e), "{e:?}");
+            assert_eq!(rastro(&db).await, nada);
+        }
+
+        // Y se puede cancelar: la línea vuelve a quedar libre.
+        assert!(repo.cancelar_cobro_pendiente(ID).await.unwrap());
+        assert!(repo.listar_cobros_pendientes().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn un_pendiente_guardado_antes_tampoco_se_cobra() {
+        // Un cobro que se guardó como pendiente (la pantalla lo conserva al arrancar) pasa por la
+        // misma comprobación al resolverse.
+        let (db, _dir) = preparar().await;
+        let repo = SqliteVentaRapidaRepository::new(db.clone());
+        repo.guardar_cobro_pendiente(CobroFraccionado {
+            id_pago: ID.into(),
+            id_comanda: "com".into(),
+            metodo: tpv_domain::pago::MetodoPago::Efectivo,
+            importe_total: Dinero::CERO,
+            id_usuario_cobrador: Some("u1".into()),
+            id_trabajador_cobrador: None,
+            detalles: vec!["det-neg".into()],
+            destinatario: None,
+        })
+        .await
+        .unwrap();
+
+        let e = repo
+            .resolver_cobro_pendiente(ResolverCobroPendienteInput { id_pago: ID.into(), destinatario: None })
+            .await
+            .unwrap_err();
+        assert!(es_importe_negativo(&e), "{e:?}");
+        assert_eq!(rastro(&db).await, vec![0.0; 5]);
     }
 }
 

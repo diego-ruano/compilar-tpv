@@ -106,6 +106,11 @@ impl ProductoUpsert {
         if id_categoria.is_empty() {
             return Err("Elige la categoría del producto.".into());
         }
+        // AUD-17: un precio negativo hace de la venta una salida de caja que el arqueo da por
+        // cuadrada. Cero (una invitación) y sin precio valen.
+        if precio_venta.is_some_and(Dinero::es_negativo) {
+            return Err(MSG_PRECIO_NEGATIVO.into());
+        }
         // RI-78: un tipo fuera de rango se rechaza. Antes caía en silencio a «hereda el del
         // negocio»: quien tecleaba «210» por «21» guardaba el producto con otro IVA y un aviso de
         // que todo había ido bien. Un tipo impositivo es un dato fiscal; no se elige por nadie.
@@ -131,6 +136,8 @@ impl ProductoUpsert {
 }
 
 // Los mismos textos en el worker (`inventario.schemas.ts`).
+pub const MSG_PRECIO_NEGATIVO: &str = "El precio no puede ser negativo.";
+pub const MSG_COSTE_NEGATIVO: &str = "El coste unitario no puede ser negativo.";
 pub const MSG_CADUCIDAD_INVALIDA: &str = "Caducidad con formato inválido (se espera YYYY-MM-DD)";
 pub const MSG_ENTRADA_INVALIDA: &str = "La fecha de entrada no tiene un formato válido.";
 pub const MSG_CADUCIDAD_ANTERIOR: &str = "La caducidad no puede ser anterior a la fecha de entrada";
@@ -261,6 +268,11 @@ impl LoteNuevo {
         // sea para impedir corregir al alza justo lo que se acababa de contar.
         if !stock_disponible.is_finite() || stock_disponible < 0.0 {
             return Err("Cantidad inválida".into());
+        }
+        // AUD-17: lo que costó un lote no es negativo; cero (un regalo del proveedor) y sin coste
+        // valen. La edición pasa por aquí también.
+        if coste_unitario.is_some_and(Dinero::es_negativo) {
+            return Err(MSG_COSTE_NEGATIVO.into());
         }
 
         let caducidad = limpia(caducidad);
@@ -484,6 +496,34 @@ mod tests {
         assert!(producto("Cafe", "c1", Some(f64::INFINITY), vec![]).unwrap().stock_suelto.is_none());
     }
 
+    #[test]
+    fn el_precio_de_venta_no_es_negativo_pero_puede_ser_cero_o_faltar() {
+        // AUD-17: cobrado en mesa, un precio negativo era dinero que salía del cajón con el
+        // arqueo cuadrado.
+        let con_precio = |precio_venta: Option<Dinero>| {
+            ProductoUpsert::validar(crate::inventario::ProductoEntrada {
+                id_producto: None,
+                id_categoria: "c1".into(),
+                id_proveedor: None,
+                nombre: "Ajuste".into(),
+                precio_venta,
+                stock_minimo: None,
+                unidad_medida: None,
+                nombre_imagen: None,
+                ruta_imagen: None,
+                cantidad_pedido_esperada: None,
+                stock_suelto: None,
+                iva_percent: None,
+                ids_alergenos: vec![],
+            })
+        };
+        for malo in [-1, -5000] {
+            assert_eq!(con_precio(Some(Dinero::de_centimos(malo))).unwrap_err(), MSG_PRECIO_NEGATIVO);
+        }
+        assert_eq!(con_precio(Some(Dinero::CERO)).unwrap().precio_venta, Some(Dinero::CERO));
+        assert_eq!(con_precio(None).unwrap().precio_venta, None);
+    }
+
     fn lote(cantidad: f64, caducidad: Option<&str>, entrada: Option<&str>) -> Result<LoteNuevo, String> {
         LoteNuevo::validar(crate::inventario::LoteEntrada {
             id_lote: Some(" l1 ".into()),
@@ -595,6 +635,43 @@ mod tests {
         }).unwrap();
         assert_eq!(l.id_lote, "l1");
         assert_eq!(l.notas.as_deref(), Some("nota"));
+    }
+
+    #[test]
+    fn el_coste_de_un_lote_no_es_negativo_ni_al_crearlo_ni_al_editarlo() {
+        // AUD-17: lo mismo que el precio de venta. Cero y sin coste valen.
+        let alta = |coste_unitario: Option<Dinero>| {
+            LoteNuevo::validar(crate::inventario::LoteEntrada {
+                id_lote: None,
+                id_producto: "p1".into(),
+                codigo_lote: "L-1".into(),
+                caducidad: None,
+                stock_disponible: 1.0,
+                fecha_entrada: None,
+                coste_unitario,
+                id_proveedor: None,
+                notas: None,
+            })
+        };
+        let edicion = |coste_unitario: Option<Dinero>| {
+            LoteUpdate::validar(crate::inventario::LoteEdicionEntrada {
+                id_lote: "l1".into(),
+                id_producto: "p1".into(),
+                codigo_lote: "L-1".into(),
+                caducidad: None,
+                fecha_entrada: None,
+                coste_unitario,
+                id_proveedor: None,
+                notas: None,
+            })
+        };
+        let negativo = Some(Dinero::de_centimos(-1));
+        assert_eq!(alta(negativo).unwrap_err(), MSG_COSTE_NEGATIVO);
+        assert_eq!(edicion(negativo).unwrap_err(), MSG_COSTE_NEGATIVO);
+        for vale in [Some(Dinero::CERO), Some(Dinero::de_centimos(125)), None] {
+            assert_eq!(alta(vale).unwrap().coste_unitario, vale);
+            assert_eq!(edicion(vale).unwrap().coste_unitario, vale);
+        }
     }
 
     #[test]

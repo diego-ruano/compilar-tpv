@@ -18,8 +18,8 @@ use tpv_contracts::cuentas::{
     PaginaEntradas, PaginaSalidas, ResumenCajaDto, SalidaDto,
 };
 use tpv_domain::cuentas::{
-    importe_devuelto, unidades_a_devolver, GastoData, PagoData, RechazoDevolucion, ESTADO_ACTIVO,
-    ESTADO_ANULADO, TIPO_DEVOLUCION,
+    cabe_en_el_cobro, importe_devuelto, unidades_a_devolver, GastoData, PagoData,
+    RechazoDevolucion, ESTADO_ACTIVO, ESTADO_ANULADO, TIPO_DEVOLUCION,
 };
 
 use crate::caja_movimientos::{self, MovimientoCaja};
@@ -1108,6 +1108,13 @@ impl CuentasRepository for SqliteCuentasRepository {
             if lineas.is_empty() || suma != cobro.importe {
                 return Err(error_de_devolucion(RechazoDevolucion::NoCuadra));
             }
+            // AUD-17: con una línea en negativo, lo devuelto de las otras pasaría de lo cobrado, y
+            // esa línea no se puede devolver (`Devolucion_Lineas.Importe >= 0`). Se rechaza desde la
+            // primera parcial, para que la devolución total siga abierta: la de `anular_pago`, que
+            // devuelve lo cobrado y no cabe si ya hay parciales.
+            if lineas.iter().any(|l| l.precio.es_negativo()) {
+                return Err(error_de_devolucion(RechazoDevolucion::LineaEnNegativo));
+            }
 
             let mut devueltas: Vec<LineaDevuelta> = Vec::with_capacity(pedidas.len());
             for (id_detalle, unidades) in &pedidas {
@@ -1131,6 +1138,11 @@ impl CuentasRepository for SqliteCuentasRepository {
             if total <= Dinero::CERO {
                 return Err(error_de_devolucion(RechazoDevolucion::SinImporte));
             }
+            // AUD-17: y lo devuelto de un cobro no pasa nunca de lo cobrado. Con las reglas de arriba
+            // no debería pasar; es la red que sostiene la regla aunque llegue otra cosa.
+            let devuelto: Dinero =
+                devoluciones_vigentes(conn, &id_pago).await?.iter().map(|(_, i)| -*i).sum();
+            cabe_en_el_cobro(cobro.importe, devuelto, total).map_err(error_de_devolucion)?;
             // ¿Con ésta queda devuelto el cobro entero? Entonces la rectificativa se lleva lo que
             // quede de lo declarado, al céntimo (`emitir_devolucion_parcial`).
             let completa = lineas.iter().all(|l| {
@@ -4763,6 +4775,73 @@ mod tests_devolucion_parcial {
         assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Pagos;").await, pagos, "ni el pago");
         assert_eq!(registros(&db).await.len(), registros_antes, "ni la factura");
         assert_eq!(stock(&db).await.2, 4.0, "ni el stock del vino, que sí cabía");
+    }
+
+    #[tokio::test]
+    async fn un_cobro_con_una_linea_en_negativo_no_se_devuelve_por_partes_sino_entero() {
+        // AUD-17: una línea de −5,00 € (un precio negativo que entró por la réplica) deja el cobro
+        // en 12,99 €, menos que sus otras líneas juntas (17,99 €). Por partes, lo devuelto de las
+        // otras pasaría de lo cobrado, y la línea en negativo no tiene nada que devolver: se rechaza
+        // desde la primera parcial, sin llegar a escribir nada, y la devolución total queda abierta.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA).await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+                   VALUES ('ajuste', 'cat', 'Ajuste', -500);",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                   VALUES ('det-ajuste', 'com', 'ajuste', 1, -500, 10);",
+            ],
+        )
+        .await;
+        let id_pago = crate::util::new_id();
+        crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
+            .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_pago: id_pago.clone(),
+                id_comanda: "com".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
+                importe_total: Dinero::CERO,
+                id_usuario_cobrador: Some("u1".into()),
+                id_trabajador_cobrador: None,
+                detalles: vec!["det-ajuste".into(), "det-canas".into(), "det-vino".into()],
+                destinatario: None,
+            })
+            .await
+            .expect("el cobro rebajado entra");
+        let del_cobro = |c: &str| format!("SELECT {c} FROM Pagos WHERE ID_Pago = '{id_pago}';");
+        assert_eq!(escalar(&db, &del_cobro("Importe_Total")).await, 1299.0);
+
+        let pagos = escalar(&db, "SELECT COUNT(*) FROM Pagos;").await;
+        let registros_antes = registros(&db).await.len();
+        let stock_antes = stock(&db).await;
+        let elegidas: [&[(&str, f64)]; 4] = [
+            &[("det-vino", 1.0)],
+            &[("det-canas", 3.0), ("det-vino", 2.0)],
+            &[("det-canas", 3.0), ("det-ajuste", 1.0)],
+            &[("det-ajuste", 1.0)],
+        ];
+        for lineas in elegidas {
+            let e = devolver(&db, &id_pago, lineas, "Efectivo").await.unwrap_err();
+            assert!(matches!(e, AppError::Conflict(_)), "{lineas:?}: {e:?}");
+            assert_eq!(e.to_string(), RechazoDevolucion::LineaEnNegativo.mensaje(), "{lineas:?}");
+        }
+        assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Pagos;").await, pagos, "ni el pago");
+        assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Devolucion_Lineas;").await, 0.0, "ni sus líneas");
+        assert_eq!(registros(&db).await.len(), registros_antes, "ni la factura");
+        assert_eq!(stock(&db).await, stock_antes, "ni el stock");
+
+        // La devolución total devuelve lo cobrado, 12,99 €, y nada más.
+        use super::tests_baja_de_un_ticket_canjeado::dar_de_baja;
+        assert!(dar_de_baja(&db, &id_pago, ClaseBaja::Devolucion).await.expect("la devolución total sale"));
+        assert_eq!(texto(&db, &del_cobro("Estado")).await.as_deref(), Some("ANULADO"));
+        assert_eq!(
+            escalar(&db, &format!(
+                "SELECT Importe FROM Movimientos_Caja WHERE ID_Pago = '{id_pago}' AND Tipo = 'DEVOLUCION';"
+            ))
+            .await,
+            1299.0
+        );
     }
 
     #[tokio::test]

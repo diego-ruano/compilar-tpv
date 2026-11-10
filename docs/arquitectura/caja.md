@@ -18,7 +18,7 @@ periodo (arqueo), la baja de un cobro y la devolución de parte de él. Sus tres
 |---|---|---|
 | Aritmética del arqueo | `crates/tpv-domain/src/cierre_caja.rs` | Recuento, esperado, descuadre, umbral del motivo, fechas de apunte, `HORA_DE_UN_GASTO`. Sin BD ni reloj |
 | Regla de la baja | `crates/tpv-domain/src/cuentas.rs::puede_anularse` | Ya anulado / falta motivo |
-| Reglas de la devolución | `crates/tpv-domain/src/cuentas.rs` (`unidades_a_devolver`, `importe_devuelto`, `RechazoDevolucion`) · `pago.rs::es_efectivo` | Tope por línea, el importe de cada parte, qué método pasa por el cajón |
+| Reglas de la devolución | `crates/tpv-domain/src/cuentas.rs` (`unidades_a_devolver`, `importe_devuelto`, `cabe_en_el_cobro`, `RechazoDevolucion`) · `pago.rs::es_efectivo` | Tope por línea y por cobro, el importe de cada parte, qué método pasa por el cajón |
 | Espejo en pantalla | `apps/tpv-main/src/shared/lib/efectivo.ts` | El arqueo que se ve antes de confirmar, y el cambio del cobro. Redondea la mitad lejos del cero, como Rust; sus tablas de test repiten las del dominio |
 | Casos de uso | `tpv-application/src/use_cases/cierre_caja.rs` | `preparar`, `confirmar`, `listar`, `detalle`, `reabrir` (deshacer) y el aviso de caja sin cerrar |
 | Rectificación | `tpv-application/src/use_cases/rectificacion_caja.rs` | `previsualizar` y los cinco cambios: editar o anular un cobro, crear, editar o borrar un gasto |
@@ -68,6 +68,15 @@ retirado  = contado − dejado
 
 - **Sólo se cuadra el efectivo.** Cuenta como efectivo todo cobro cuyo `Metodo_Pago` no sea
   exactamente `Tarjeta`.
+- **Un cobro nunca es negativo** (AUD-17): uno activo de −50 € en efectivo bajaría el esperado lo
+  mismo que falta en el cajón, y el arqueo saldría cuadrado. Lo que se mira es lo que suma la base,
+  que es lo que se guarda, no lo que manda la pantalla: el de mesa (`cobrar_detalles`) y el de barra
+  (`ejecutar_cobro`, también al resolver un cobro pendiente) lo rechazan dentro de la transacción,
+  antes de reservar el número, con «El importe no puede ser negativo.». Uno de 0 € (una invitación)
+  entra. El único pago negativo es una devolución. En origen, ni el precio de venta ni el coste de un
+  lote pueden ser negativos, en la Main (`ProductoUpsert::validar`, `LoteNuevo::validar`) y en el
+  worker, con la misma regla y el mismo texto (`validacion_casos.json`); y una línea siempre copia
+  el precio del catálogo (RI-27).
 - **Un gasto sólo resta si lleva `Pagado_Con_Caja`.** Un gasto no tiene hora: para decidir en qué
   periodo cae se toma a las **12:00 de su día** (`HORA_DE_UN_GASTO`, la misma expresión en el SQL de
   `totales_desde` y en `momento_de_gasto`). El gasto de la tarde cae en el cierre de esa noche aunque
@@ -235,9 +244,13 @@ Reglas:
   (`pago::es_efectivo`, y `Metodo_Pago = 'Efectivo'` en SQL). Los cobros admiten efectivo y tarjeta;
   `Otro` sólo lo lleva una devolución. Rust y el Worker rechazan cualquier método desconocido (RI-48).
 - **Se devuelve por líneas, así que el cobro tiene que ser la suma de sus líneas.** Uno que no lo es
-  (un cobro prorrateado) no dice cuánto se pagó de cada una: queda la devolución entera.
-- **No se devuelve más de lo que queda**, ni de un cobro dado de baja, ni una devolución, ni lo que se
-  cobró a 0 €. Un rechazo no deja nada escrito: todo va en una transacción.
+  (un cobro prorrateado) no dice cuánto se pagó de cada una: queda la devolución entera. Lo mismo un
+  cobro con una línea en negativo (AUD-17): por partes, lo devuelto de las otras pasaría de lo
+  cobrado y esa línea no tiene nada que devolver, así que se rechaza desde la primera parcial y la
+  devolución entera queda abierta.
+- **No se devuelve más de lo que queda**: ni de una línea, ni del cobro, que en total no devuelve
+  nunca más de lo cobrado (`cabe_en_el_cobro`); ni de un cobro dado de baja, ni una devolución, ni lo
+  que se cobró a 0 €. Un rechazo no deja nada escrito: todo va en una transacción.
 - **En las estadísticas resta dinero, pero no es un cobro**: no cuenta como cobro de un camarero ni
   como mesa servida.
 - Al acabar, la pantalla abre su rectificativa en el modal de impresión, sin imprimirla.
