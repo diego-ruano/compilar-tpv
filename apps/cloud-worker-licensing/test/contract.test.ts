@@ -1283,3 +1283,116 @@ describe("borrar un ticket no se lleva su cobro (AUD-14)", () => {
 		});
 	});
 });
+
+// AUD-16: las dos altas de venta rápida usan como clave el id que manda el dispositivo. Con
+// `ON CONFLICT … DO UPDATE` pisaban la fila que ya tuviera ese id: una línea cobrada cambiaba de
+// ticket, de producto, de cantidad, de precio y de IVA sin salir de su cobro, y una comanda cobrada
+// se reabría como ticket de barra, sin mesa y con otro camarero. Ahora son altas puras.
+describe("un alta con un id que ya existe no toca la fila (AUD-16)", () => {
+	const SIEMBRA = [
+		"INSERT INTO Usuarios (ID_Usuario,ID_Rol,Email,Password_Hash,Nombre) VALUES ('u-ana','00000000-0000-7000-8000-000000000002','ana@ejemplo.test','x','Ana')",
+		"INSERT INTO Usuarios (ID_Usuario,ID_Rol,Email,Password_Hash,Nombre) VALUES ('u-luis','00000000-0000-7000-8000-000000000002','luis@ejemplo.test','x','Luis')",
+		"INSERT INTO Trabajadores (ID_Trabajador,ID_Usuario) VALUES ('t-ana','u-ana')",
+		"INSERT INTO Trabajadores (ID_Trabajador,ID_Usuario) VALUES ('t-luis','u-luis')",
+		"INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Bar')",
+		"INSERT INTO Productos (ID_Producto,ID_Categoria,Nombre,Precio_Venta,IVA_Percent) VALUES ('cafe','cat','Cafe',130,10)",
+		"INSERT INTO Productos (ID_Producto,ID_Categoria,Nombre,Precio_Venta,IVA_Percent) VALUES ('gin','cat','Gin',900,21)",
+		"INSERT INTO Lotes_Producto (ID_Lote,ID_Producto,Codigo_Lote,Fecha_Entrada,Stock_Disponible) VALUES ('lote-cafe','cafe','C1','2026-10-01 10:00:00',9)",
+		"INSERT INTO Zonas (ID_Zona,Nombre_Zona) VALUES ('z','Sala')",
+		"INSERT INTO Mesas (ID_Mesa,ID_Zona,Numero_Mesa,Capacidad,Ubicacion_X,Ubicacion_Y,Shape,Width,Height) VALUES ('m','z','1',4,0,0,'rect',80,80)",
+		// Ticket de barra cobrado: dos cafés (uno del lote, otro del suelto), 2,60 € en efectivo.
+		"INSERT INTO Comandas (ID_Comanda,Canal,Fecha_Hora_Apertura,Fecha_Hora_Cierre,Estado,Total_Comanda,ID_Trabajador) VALUES ('barra_cobrada','BARRA','2026-10-30 23:00:00','2026-10-30 23:10:00','Pagada',260,'t-ana')",
+		"INSERT INTO Detalle_Comanda (ID_Detalle,ID_Comanda,ID_Producto,Nombre_Producto,Cantidad,Precio_Unitario,IVA_Percent) VALUES ('L','barra_cobrada','cafe','Cafe',2,130,10)",
+		"INSERT INTO Pagos (ID_Pago,ID_Comanda,Fecha_Hora,Metodo_Pago,Importe_Total,Tipo) VALUES ('P1','barra_cobrada','2026-10-30 23:10:00','Efectivo',260,'FRACCIONADO')",
+		"INSERT INTO Pago_Detalles (ID_Pago,ID_Detalle) VALUES ('P1','L')",
+		"INSERT INTO Lote_Consumos (ID_Detalle,ID_Lote,ID_Pago,Cantidad) VALUES ('L','lote-cafe','P1',1)",
+		"INSERT INTO Suelto_Consumos (ID_Detalle,ID_Producto,ID_Pago,Cantidad) VALUES ('L','cafe','P1',1)",
+		// Mesa cobrada, atendida por Ana: tres cafés con tarjeta.
+		"INSERT INTO Comandas (ID_Comanda,ID_Mesa,Canal,Fecha_Hora_Apertura,Fecha_Hora_Cierre,Estado,Total_Comanda,ID_Trabajador) VALUES ('mesa_cobrada','m','MESA','2026-10-30 23:00:00','2026-10-30 23:30:00','Pagada',390,'t-ana')",
+		"INSERT INTO Detalle_Comanda (ID_Detalle,ID_Comanda,ID_Producto,Nombre_Producto,Cantidad,Precio_Unitario,IVA_Percent) VALUES ('LM','mesa_cobrada','cafe','Cafe',3,130,10)",
+		"INSERT INTO Pagos (ID_Pago,ID_Comanda,Fecha_Hora,Metodo_Pago,Importe_Total,Tipo) VALUES ('P2','mesa_cobrada','2026-10-30 23:30:00','Tarjeta',390,'FRACCIONADO')",
+		"INSERT INTO Pago_Detalles (ID_Pago,ID_Detalle) VALUES ('P2','LM')",
+	];
+
+	const filas = (sql: any, q: string) => sql.exec(q).toArray();
+	const n = (sql: any, q: string) => Number(Object.values(filas(sql, q)[0] ?? {})[0] ?? 0);
+
+	/** El tenant sembrado, dentro de su propio DO. */
+	async function conTenant(nombre: string, cuerpo: (hub: any, sql: any) => Promise<void> | void) {
+		await enElHub(nombre, async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of SIEMBRA) sql.exec(s);
+			await cuerpo(hub, sql);
+		});
+	}
+
+	const lineaGin = (idDetalle: string, idComanda: string) =>
+		addLinea({ id_detalle: idDetalle, id_comanda: idComanda, id_producto: "gin", cantidad: 50 } as any, 21, "Gin", 900 as any);
+	const lineaCafe = (idDetalle: string, idComanda: string, cantidad: number) =>
+		addLinea({ id_detalle: idDetalle, id_comanda: idComanda, id_producto: "cafe", cantidad } as any, 10, "Cafe", 130 as any);
+	const ticket = (idComanda: string, idTrabajador: string) =>
+		createComandaBarra({ id_comanda: idComanda, id_trabajador: null, get_or_create: false } as any, idTrabajador);
+
+	it("lo que se replica a la Main es un alta pura", () => {
+		for (const built of [lineaGin("L", "T"), ticket("mesa_cobrada", "t-luis")]) {
+			const replicado = buildApplyBatch(built.command as any).replicated.map((s) => s.sql);
+			expect(replicado.some((s) => /DO UPDATE/i.test(s)), replicado.join("\n")).toBe(false);
+		}
+	});
+
+	it("una línea con el id de otra ya cobrada no la mueve ni la reescribe", async () => {
+		await conTenant("aud16-mover", (hub, sql) => {
+			const antes = filas(sql, "SELECT * FROM Detalle_Comanda WHERE ID_Detalle='L'");
+			aplicar(hub, sql, lineaGin("L", "T"));
+			expect(filas(sql, "SELECT * FROM Detalle_Comanda WHERE ID_Detalle='L'")).toEqual(antes);
+			expect(n(sql, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='barra_cobrada'")).toBe(1);
+			expect(n(sql, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='T'")).toBe(0);
+			expect(filas(sql, "SELECT ID_Pago FROM v_lineas_cobradas WHERE ID_Detalle='L'")).toEqual([{ ID_Pago: "P1" }]);
+		});
+	});
+
+	it("y borrar después el ticket al que iba no se lleva la línea cobrada ni sus trazas", async () => {
+		await conTenant("aud16-borrar", (hub, sql) => {
+			aplicar(hub, sql, lineaGin("L", "T"));
+			// `T` lo creó vacío el alta de la línea, y sin cobros se borra.
+			aplicar(hub, sql, deleteComandaIfSafe("T"));
+			expect(n(sql, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda='T'")).toBe(0);
+			expect(n(sql, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Detalle='L'")).toBe(1);
+			expect({
+				pago_detalles: n(sql, "SELECT COUNT(*) FROM Pago_Detalles WHERE ID_Pago='P1'"),
+				lote_consumos: n(sql, "SELECT COUNT(*) FROM Lote_Consumos WHERE ID_Pago='P1'"),
+				suelto_consumos: n(sql, "SELECT COUNT(*) FROM Suelto_Consumos WHERE ID_Pago='P1'"),
+			}).toEqual({ pago_detalles: 1, lote_consumos: 1, suelto_consumos: 1 });
+		});
+	});
+
+	it("un ticket con el id de una mesa cobrada no la reabre ni le cambia el camarero", async () => {
+		await conTenant("aud16-reabrir", (hub, sql) => {
+			const antes = filas(sql, "SELECT * FROM Comandas WHERE ID_Comanda='mesa_cobrada'");
+			aplicar(hub, sql, ticket("mesa_cobrada", "t-luis"));
+			expect(filas(sql, "SELECT * FROM Comandas WHERE ID_Comanda='mesa_cobrada'")).toEqual(antes);
+			// Sigue cobrada, así que tampoco admite líneas (INC-20261030-016).
+			aplicar(hub, sql, lineaCafe("nueva-1", "mesa_cobrada", 1));
+			expect(n(sql, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='mesa_cobrada'")).toBe(1);
+		});
+	});
+
+	it("el alta con un id nuevo entra; otra con el mismo id no duplica ni cambia nada", async () => {
+		await conTenant("aud16-legitimo", (hub, sql) => {
+			aplicar(hub, sql, ticket("nuevo", "t-ana"));
+			aplicar(hub, sql, lineaCafe("nueva-1", "nuevo", 2));
+			const linea = "SELECT ID_Comanda,ID_Producto,Cantidad,Precio_Unitario,IVA_Percent FROM Detalle_Comanda WHERE ID_Detalle='nueva-1'";
+			const comanda = "SELECT Estado,Canal,ID_Mesa,ID_Trabajador,Total_Comanda FROM Comandas WHERE ID_Comanda='nuevo'";
+			const LINEA = [{ ID_Comanda: "nuevo", ID_Producto: "cafe", Cantidad: 2, Precio_Unitario: 130, IVA_Percent: 10 }];
+			const COMANDA = [{ Estado: "Abierta", Canal: "BARRA", ID_Mesa: null, ID_Trabajador: "t-ana", Total_Comanda: 260 }];
+			expect(filas(sql, linea)).toEqual(LINEA);
+			expect(filas(sql, comanda)).toEqual(COMANDA);
+
+			aplicar(hub, sql, ticket("nuevo", "t-luis"));
+			aplicar(hub, sql, lineaCafe("nueva-1", "nuevo", 5));
+			expect(filas(sql, linea)).toEqual(LINEA);
+			expect(filas(sql, comanda)).toEqual(COMANDA);
+		});
+	});
+});

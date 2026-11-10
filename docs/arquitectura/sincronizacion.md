@@ -471,6 +471,13 @@ petición vuelve a salir con su clave y sus bytes durante 5 minutos, y el DO dev
 la primera si se aplicó (RI-64). Así, el camarero que vuelve a pulsar tras un error no duplica la
 línea. Con una respuesta clara la clave se olvida, y pedir dos veces lo mismo son dos operaciones.
 
+El id de lo que da de alta la Handy lo elige el dispositivo. Las altas de venta rápida (un ticket,
+una línea) y la de un lote son **altas puras** (`ON CONFLICT … DO NOTHING`): un id que ya existe no
+toca la fila, y la ruta contesta como siempre. Ningún flujo de la app reenvía un id esperando que se
+actualice (su reintento va por la clave de idempotencia), y con `DO UPDATE` el id de una línea
+cobrada la movía a otro ticket y el de una comanda cobrada la reabría (AUD-16); el de un lote le
+pisaba las existencias (INV-02).
+
 ### Frontera con la webview (RI-31/RI-57)
 
 El motor se inicia en el shell y sigue vivo al desmontar React. La webview sólo consulta

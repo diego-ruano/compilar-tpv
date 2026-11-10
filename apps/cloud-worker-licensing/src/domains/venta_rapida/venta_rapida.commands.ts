@@ -45,6 +45,14 @@ const UPDATE_TOTAL = `
 // Local-First/UUIDv7: el id lo genera el dispositivo y lo envía; si faltara, generamos uno.
 // Misma convención que el resto de dominios (ver `idStep` en clientes/inventario/…): una fila
 // tiene UN id, elegido por quien la crea, e idéntico en el dispositivo y en la nube.
+//
+// AUD-16: por eso las altas de este fichero son puras (`ON CONFLICT … DO NOTHING`): un id que ya
+// existe no toca la fila. Con `DO UPDATE`, el id de una línea cobrada la movía a otro ticket y le
+// cambiaba producto, cantidad, precio e IVA sin sacarla de su cobro, y el de una comanda cobrada la
+// reabría como ticket de barra. La app manda siempre un id nuevo, y el reintento de una escritura
+// incierta sale con su misma `X-Idempotency-Key`, que devuelve el resultado de la primera sin
+// aplicarla otra vez. Un id repetido con otra clave es esa misma alta otra vez o alguien fuera de la
+// app: la ruta contesta como siempre y no se hace nada, igual que en el alta de lotes (INV-02).
 function idStep(saveAs: string, provided?: string) {
 	const id = recortar(provided ?? "") || nuevoId();
 	return { kind: "value", saveAs, sql: "SELECT ?1;", args: [id] };
@@ -60,6 +68,7 @@ export function createComandaBarra(
 			// Ticket de venta rápida: SIN mesa (Canal='BARRA'). Ya no compite con otros tickets
 			// abiertos, así que tampoco hace falta la antigua purga de comandas de barra vacías
 			// (existía solo para esquivar el índice único que compartían todas por la mesa BARRA).
+			// AUD-16: alta pura (ver `idStep`); una comanda que ya existe no se reabre.
 			kind: "execute",
 			sql: `
 				INSERT INTO Comandas (
@@ -72,12 +81,7 @@ export function createComandaBarra(
 					Canal
 				)
 				VALUES (?1, datetime('now','localtime'), 'Abierta', 0, ?2, NULL, ?3)
-				ON CONFLICT(ID_Comanda) DO UPDATE SET
-					Estado = excluded.Estado,
-					Total_Comanda = COALESCE(Comandas.Total_Comanda, excluded.Total_Comanda),
-					ID_Trabajador = excluded.ID_Trabajador,
-					ID_Mesa = excluded.ID_Mesa,
-					Canal = excluded.Canal;
+				ON CONFLICT(ID_Comanda) DO NOTHING;
 			`,
 			args: [REF_ID_COMANDA, idTrabajadorReal, CANAL_BARRA],
 		},
@@ -130,6 +134,7 @@ export function addLinea(
 						// INC-20261030-016: sólo entra en un ticket abierto. La ruta ya lo rechaza
 						// antes, pero lo lee fuera de esta transacción (SYNC-30). El `WHERE` también
 						// evita que el `ON CONFLICT` se lea como parte del `SELECT`.
+						// AUD-16: alta pura (ver `idStep`); una línea que ya existe no se toca.
 						kind: "execute",
 						sql: `
 							INSERT INTO Detalle_Comanda (
@@ -145,14 +150,7 @@ export function addLinea(
 							)
 							SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL, 'PENDIENTE', ?7
 							WHERE EXISTS (SELECT 1 FROM Comandas WHERE ID_Comanda = ?2 AND Estado = 'Abierta')
-							ON CONFLICT(ID_Detalle) DO UPDATE SET
-								ID_Comanda = excluded.ID_Comanda,
-								ID_Producto = excluded.ID_Producto,
-								Nombre_Producto = excluded.Nombre_Producto,
-								Cantidad = excluded.Cantidad,
-								Precio_Unitario = excluded.Precio_Unitario,
-								IVA_Percent = excluded.IVA_Percent,
-								Estado_Cocina = COALESCE(Detalle_Comanda.Estado_Cocina, excluded.Estado_Cocina);
+							ON CONFLICT(ID_Detalle) DO NOTHING;
 						`,
 						args: [
 							REF_ID_DETALLE,

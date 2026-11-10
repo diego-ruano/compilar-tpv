@@ -776,18 +776,16 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             // Ticket de venta rápida: SIN mesa (Canal='BARRA'). Ya no compite con otros tickets
             // abiertos, así que tampoco hace falta la antigua purga de comandas de barra vacías
             // (existía solo para esquivar el índice único que compartían todas por la mesa BARRA).
+            // AUD-16: alta pura, como la del worker (`createComandaBarra`), donde el id lo elige el
+            // dispositivo y uno que ya existe no puede reabrir una comanda cobrada. Aquí el id es
+            // siempre nuevo.
             db.execute(
                 r#"
                 INSERT INTO Comandas (
                   ID_Comanda, Fecha_Hora_Apertura, Estado, Total_Comanda, ID_Trabajador, ID_Mesa, Canal
                 )
                 VALUES (?1, datetime('now','localtime'), 'Abierta', 0, ?2, NULL, ?3)
-                ON CONFLICT(ID_Comanda) DO UPDATE SET
-                  Estado = excluded.Estado,
-                  Total_Comanda = COALESCE(Comandas.Total_Comanda, excluded.Total_Comanda),
-                  ID_Trabajador = excluded.ID_Trabajador,
-                  ID_Mesa = excluded.ID_Mesa,
-                  Canal = excluded.Canal;
+                ON CONFLICT(ID_Comanda) DO NOTHING;
                 "#,
                 vec![
                     Value::Text(id_comanda_final.clone()),
@@ -828,6 +826,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let res: AppResult<String> = db.transaccion(async {
             // INC-20261030-016: un ticket cobrado no admite líneas nuevas.
             crate::mesas::exigir_comanda_abierta(db, id_comanda).await?;
+            // AUD-16: alta pura, como la del worker (`addLinea`), donde un id que ya existe no
+            // puede mover ni reescribir una línea cobrada. Aquí el id es siempre nuevo.
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda
@@ -835,14 +835,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                    Notas, Estado_Cocina, IVA_Percent)
                 VALUES
                   (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'PENDIENTE', ?7)
-                ON CONFLICT(ID_Detalle) DO UPDATE SET
-                  ID_Comanda = excluded.ID_Comanda,
-                  ID_Producto = excluded.ID_Producto,
-                  Nombre_Producto = excluded.Nombre_Producto,
-                  Cantidad = excluded.Cantidad,
-                  Precio_Unitario = excluded.Precio_Unitario,
-                  IVA_Percent = excluded.IVA_Percent,
-                  Estado_Cocina = COALESCE(Detalle_Comanda.Estado_Cocina, excluded.Estado_Cocina);
+                ON CONFLICT(ID_Detalle) DO NOTHING;
                 "#,
                 vec![
                     Value::Text(id_detalle_final.clone()),
