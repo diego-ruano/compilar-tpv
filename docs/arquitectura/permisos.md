@@ -141,9 +141,19 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
 - **PBKDF2-HMAC-SHA256**, 100.000 iteraciones (el techo de `crypto.subtle` en Workers, y el worker
   también verifica), sal de 16 bytes, formato `$pbkdf2-sha256$i=…$<sal>$<derivada>` idéntico en Rust y
   en el worker. Verificación en tiempo constante con `subtle`, parámetros acotados (1–100.000 iteraciones, sal de 16 bytes y derivada de 32), cálculo fuera del ejecutor async y rehash al iniciar sesión.
-- **Freno a la fuerza bruta (LOGIN-01)**: bloqueo escalado tras los fallos. Toda ruta del worker que
-  verifique un PIN mira el freno antes y cuenta el fallo después; lo vigila
-  `test/pinSiempreConFreno.test.ts`. El hash se replica a Turso; el riesgo de romperlo offline está en
+- **Freno a la fuerza bruta (LOGIN-01)**: cinco intentos libres y, desde el sexto fallo, un bloqueo
+  de 30 s, 1 min, 5 min y 15 min. Toda ruta del worker que verifique un PIN **reserva el intento
+  antes de verificarlo** (`reservarIntento`, AUD-05): una sola sentencia que lo cuenta y, si toca,
+  fija el bloqueo, y que no concede nada mientras haya uno en vigor. Sin reserva contesta 429 sin
+  verificar: con un bloqueo en vigor no se verifica ningún PIN, y los fallos que llegan a la vez se
+  cuentan uno a uno (de veinte PIN malos a la vez se verifican seis, como en serie). Acertar borra
+  el recuento (`throttleReset`), salvo que haya en vigor un bloqueo que fijó otro intento: ése sólo
+  lo quita el acierto del intento que lo puso y, si no, dura hasta que vence, así que un acierto
+  cuyo borrado llega tarde no se lleva un bloqueo posterior. Todo con el reloj del worker, no con
+  `X-Client-Now`. Lo vigilan `test/pinSiempreConFreno.test.ts`, leyendo el fuente, y
+  `test/loginFrenoConcurrente.test.ts`. El recuento vive en `Intentos_Login`, que no se replica: el
+  worker lleva el de las Handy en la base del negocio y la Main el suyo en la local
+  (`tpv-infra-sqlite/src/auth.rs`). El hash se replica a Turso; el riesgo de romperlo offline está en
   [LOGIN-04](../pendientes.md#login-04--el-hash-del-pin-se-puede-romper-offline).
 - **El PIN inicial se elige en la Main y sólo ahí.** `complete_initial_setup` cambia el PIN del
   administrador sin pedir el actual (es el del seed, público) y su único cerrojo es

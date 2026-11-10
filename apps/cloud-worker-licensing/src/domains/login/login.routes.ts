@@ -63,21 +63,18 @@ loginRoutes.post("/login", cuerpo(S.loginUserSchema), async (c) => {
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
 	if (!entraSinPin(record)) {
-		// LOGIN-01: bloqueo por intentos fallidos (anti brute-force).
-		const secs = await tenantQuery(c, (db) =>
-			q.throttleSecondsLeft(db, datos.id_usuario),
+		// LOGIN-01: bloqueo por intentos fallidos (anti brute-force). AUD-05: el intento se reserva
+		// ANTES de verificar el PIN; sin reserva no se verifica nada.
+		const reserva = await tenantQuery(c, (db) =>
+			q.reservarIntento(db, datos.id_usuario),
 		);
-		if (secs > 0) {
-			return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
+		if (!reserva.concedido) {
+			return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${reserva.segundos} s.` }, 429);
 		}
 		const badPin = await ensurePin(c, datos.pin, String(record.password_hash));
-		if (badPin) {
-			await tenantQuery(c, (db) =>
-				q.throttleFail(db, datos.id_usuario),
-			);
-			return badPin;
-		}
-		await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario));
+		// El fallo ya está contado: es el intento reservado.
+		if (badPin) return badPin;
+		await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario, reserva.bloqueadoHastaMs));
 	}
 	const ok = await tenantQuery(c, (db) =>
 		q.loginOk(db, datos.id_usuario),
@@ -285,21 +282,18 @@ loginRoutes.post("/punch", cuerpo(S.punchSchema), async (c) => {
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
 	if (!entraSinPin(record)) {
-		// LOGIN-01: el fichaje también verifica PIN → mismo throttle anti brute-force.
-		const secs = await tenantQuery(c, (db) =>
-			q.throttleSecondsLeft(db, datos.id_usuario),
+		// LOGIN-01: el fichaje también verifica PIN → mismo throttle anti brute-force, con el
+		// intento reservado antes de verificar (AUD-05).
+		const reserva = await tenantQuery(c, (db) =>
+			q.reservarIntento(db, datos.id_usuario),
 		);
-		if (secs > 0) {
-			return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
+		if (!reserva.concedido) {
+			return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${reserva.segundos} s.` }, 429);
 		}
 		const badPin = await ensurePin(c, datos.pin, String(record.password_hash));
-		if (badPin) {
-			await tenantQuery(c, (db) =>
-				q.throttleFail(db, datos.id_usuario),
-			);
-			return badPin;
-		}
-		await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario));
+		// El fallo ya está contado: es el intento reservado.
+		if (badPin) return badPin;
+		await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario, reserva.bloqueadoHastaMs));
 	}
 
 	// La fecha del fichaje. Sale de una consulta (`date('now','localtime')`) que `tenantQuery`

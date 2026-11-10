@@ -94,7 +94,7 @@ function bloqueoMs(fallidos: number): number {
 }
 
 /** Segundos que faltan para poder reintentar (0 si no está bloqueado). */
-export async function throttleSecondsLeft(db: Client, idUsuario: string): Promise<number> {
+async function throttleSecondsLeft(db: Client, idUsuario: string): Promise<number> {
 	const rs = await db.execute({
 		sql: "SELECT Bloqueado_Hasta_Ms AS hasta FROM Intentos_Login WHERE ID_Usuario=?1 LIMIT 1;",
 		args: [idUsuario],
@@ -104,34 +104,95 @@ export async function throttleSecondsLeft(db: Client, idUsuario: string): Promis
 	return hasta > now ? Math.ceil((hasta - now) / 1000) : 0;
 }
 
-/** Resetea el contador tras un login correcto. */
-export async function throttleReset(db: Client, idUsuario: string): Promise<void> {
+/**
+ * Borra el recuento tras un acierto. `bloqueoPropioMs` es el bloqueo que fijó la reserva de ESTE
+ * intento (`bloqueadoHastaMs` de `reservarIntento`; 0 si no fijó ninguno).
+ *
+ * AUD-05: sólo borra si no hay un bloqueo en vigor o si el que hay es el de su propia reserva. Desde
+ * el sexto intento la reserva fija el bloqueo antes de verificar, así que quien acierta entonces
+ * tiene que poder llevarse el suyo; si no, se quedaría con el recuento pegado para siempre. En
+ * cambio, un bloqueo en vigor que puso OTRO intento es posterior a la reserva de este acierto (con
+ * él en vigor no se la habrían concedido), y un borrado que llega tarde no lo quita. La hora es la
+ * del worker, como en la reserva.
+ */
+export async function throttleReset(
+	db: Client,
+	idUsuario: string,
+	bloqueoPropioMs: number,
+	ahora: number = Date.now(),
+): Promise<void> {
 	await db.execute({
-		sql: "DELETE FROM Intentos_Login WHERE ID_Usuario=?1;",
-		args: [idUsuario],
+		sql: `
+			DELETE FROM Intentos_Login
+			WHERE ID_Usuario = ?1 AND (Bloqueado_Hasta_Ms <= ?2 OR Bloqueado_Hasta_Ms = ?3);
+		`,
+		args: [idUsuario, ahora, bloqueoPropioMs],
 	});
 }
 
-/** Registra un fallo: incrementa el contador y fija el bloqueo escalado. */
-export async function throttleFail(db: Client, idUsuario: string): Promise<void> {
+/**
+ * Lo que devuelve `reservarIntento`: el intento concedido y el bloqueo que ha fijado (0 si ninguno),
+ * o cuánto falta para poder pedir otro.
+ */
+export type ReservaDeIntento =
+	| { concedido: true; intento: number; bloqueadoHastaMs: number }
+	| { concedido: false; segundos: number };
+
+/**
+ * AUD-05 · Reserva un intento de PIN ANTES de verificarlo, en UNA sentencia: cuenta el intento y, si
+ * con él se pasa de los libres, fija el bloqueo escalado; todo ello sólo si no hay un bloqueo en
+ * vigor. Sin reserva no se verifica nada. Quien acierta borra la fila (`throttleReset`, con sus
+ * condiciones), así que lo que queda contado son los fallos.
+ *
+ * Mirar el bloqueo, verificar y contar después dejaba verificar a la vez todos los intentos que
+ * llegaran juntos, y el recuento —leído y vuelto a escribir entero— se pisaba: veinte fallos
+ * contaban como uno y uno atrasado quitaba un bloqueo ya puesto.
+ *
+ * `ahora` es el reloj del worker. No sale de `X-Client-Now` ni de un `'now'` del SQL, que en las
+ * rutas de la Handy lo fija quien pregunta (`tenantQuery`): un cliente no acorta su bloqueo
+ * mintiendo con la hora. Sin bloqueo se guarda 0, no la hora del intento, para que dos intentos
+ * que se cruzan por milisegundos no se frenen entre sí.
+ */
+export async function reservarIntento(
+	db: Client,
+	idUsuario: string,
+	ahora: number = Date.now(),
+): Promise<ReservaDeIntento> {
 	const rs = await db.execute({
-		sql: "SELECT Intentos_Fallidos AS n FROM Intentos_Login WHERE ID_Usuario=?1 LIMIT 1;",
-		args: [idUsuario],
-	});
-	const fallidos = Number(rows(rs)[0]?.n ?? 0) + 1;
-	const now = Date.now();
-	const hasta = now + bloqueoMs(fallidos);
-	await db.execute({
 		sql: `
 			INSERT INTO Intentos_Login (ID_Usuario, Intentos_Fallidos, Bloqueado_Hasta_Ms, Ultimo_Intento_Ms)
-			VALUES (?1, ?2, ?3, ?4)
+			VALUES (?1, 1, 0, ?2)
 			ON CONFLICT(ID_Usuario) DO UPDATE SET
-				Intentos_Fallidos = excluded.Intentos_Fallidos,
-				Bloqueado_Hasta_Ms = excluded.Bloqueado_Hasta_Ms,
-				Ultimo_Intento_Ms = excluded.Ultimo_Intento_Ms;
+				Intentos_Fallidos = Intentos_Fallidos + 1,
+				Bloqueado_Hasta_Ms = CASE
+					WHEN Intentos_Fallidos + 1 <= ?3 THEN 0
+					WHEN Intentos_Fallidos + 1 = ?3 + 1 THEN ?2 + ?4
+					WHEN Intentos_Fallidos + 1 = ?3 + 2 THEN ?2 + ?5
+					WHEN Intentos_Fallidos + 1 = ?3 + 3 THEN ?2 + ?6
+					ELSE ?2 + ?7
+				END,
+				Ultimo_Intento_Ms = ?2
+			WHERE Intentos_Login.Bloqueado_Hasta_Ms <= ?2
+			RETURNING Intentos_Fallidos AS n, Bloqueado_Hasta_Ms AS hasta;
 		`,
-		args: [idUsuario, fallidos, hasta, now],
+		// Los escalones salen de `bloqueoMs`, para que el SQL no lleve su propia copia.
+		args: [
+			idUsuario,
+			ahora,
+			INTENTOS_LIBRES,
+			bloqueoMs(INTENTOS_LIBRES + 1),
+			bloqueoMs(INTENTOS_LIBRES + 2),
+			bloqueoMs(INTENTOS_LIBRES + 3),
+			bloqueoMs(INTENTOS_LIBRES + 4),
+		],
 	});
+	const concedida = rows(rs)[0];
+	if (concedida) {
+		return { concedido: true, intento: Number(concedida.n), bloqueadoHastaMs: Number(concedida.hasta) };
+	}
+	// Bloqueado. Esta lectura sólo sirve para decir cuánto falta; si el bloqueo vence justo ahora,
+	// la respuesta sigue siendo que espere.
+	return { concedido: false, segundos: Math.max(1, await throttleSecondsLeft(db, idUsuario)) };
 }
 
 /**
