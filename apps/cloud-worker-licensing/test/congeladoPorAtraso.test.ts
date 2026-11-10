@@ -18,6 +18,7 @@ import { deleteComandaIfSafe } from "../src/domains/venta_rapida/venta_rapida.co
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { laMainEs } from "./helpers/mainVigente";
 
 const TENANT = "tenant-1";
 
@@ -98,6 +99,8 @@ function prepararHub(hub: any) {
 	hub.getCentralDb = () => {
 		throw new Error("la prueba no tiene base central");
 	};
+	// AUD-02: la Main de estas pruebas es la de la licencia, y su saludo lo pregunta a un doble.
+	laMainEs(hub, "device-main");
 	hub.resolveTenantDbClient = async () => {
 		throw new Error("la prueba no resuelve credenciales");
 	};

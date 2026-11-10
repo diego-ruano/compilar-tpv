@@ -123,21 +123,33 @@ export async function upsertTenantDbRow(
 	});
 }
 
+/**
+ * Cómo sale una petición a la API de plataforma de Turso: `fetch` a secas, o con plazo
+ * (`fetchConPlazo`) cuando quien rota el token no puede quedarse esperando sin límite. AUD-02: el
+ * `TenantHub` rota dentro del turno del log, y el turno no puede quedarse cogido.
+ */
+export type PedirATurso = (peticion: Request) => Promise<Response>;
+
+const pedirSinPlazo: PedirATurso = (peticion) => fetch(peticion);
+
 export async function tursoCreateDbToken(
 	env: TenantDbEnv,
 	dbName: string,
+	pedir: PedirATurso = pedirSinPlazo,
 ): Promise<string> {
-	const r = await fetch(
-		`https://api.turso.tech/v1/organizations/${encodeURIComponent(
-			env.TURSO_ORG_SLUG,
-		)}/databases/${encodeURIComponent(dbName)}/auth/tokens?expiration=7d`,
-		{
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${env.TURSO_PLATFORM_TOKEN}`,
-				Accept: "application/json",
+	const r = await pedir(
+		new Request(
+			`https://api.turso.tech/v1/organizations/${encodeURIComponent(
+				env.TURSO_ORG_SLUG,
+			)}/databases/${encodeURIComponent(dbName)}/auth/tokens?expiration=7d`,
+			{
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${env.TURSO_PLATFORM_TOKEN}`,
+					Accept: "application/json",
+				},
 			},
-		},
+		),
 	);
 
 	const text = await r.text();
@@ -213,6 +225,7 @@ export async function resolveTenantDbCredentials(
 	env: TenantDbEnv,
 	tenantId: string,
 	forceRotate = false,
+	pedir?: PedirATurso,
 ): Promise<ResolvedTenantDb> {
 	const row = await getTenantDbRow(dbCentral, tenantId);
 
@@ -246,7 +259,7 @@ export async function resolveTenantDbCredentials(
 		//     porque entonces seguir con él sólo cambia un error claro ahora por un 401 opaco luego.
 		let freshToken: string;
 		try {
-			freshToken = await tursoCreateDbToken(env, dbName);
+			freshToken = await tursoCreateDbToken(env, dbName, pedir);
 		} catch (e: any) {
 			const vidaRestante = lastRotationBaseMs
 				? lastRotationBaseMs + TENANT_DB_TOKEN_TTL_MS - Date.now()
@@ -315,7 +328,7 @@ export async function resolveTenantDbCredentials(
 		console.warn(
 			`[tenantDb] el token guardado de tenant=${tenantId} no se puede descifrar (${String(e?.message || e)}): se rota ya.`,
 		);
-		return resolveTenantDbCredentials(dbCentral, env, tenantId, true);
+		return resolveTenantDbCredentials(dbCentral, env, tenantId, true, pedir);
 	}
 
 	return {

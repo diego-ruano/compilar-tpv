@@ -26,7 +26,7 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
-import { cerrarSocketsDelDispositivo } from "../../lib/hub";
+import { avisarCambioDeLicencia } from "../../lib/hub";
 import { enTransaccion, getDb } from "../../server/db";
 import { descifrar } from "../../server/crypto";
 import {
@@ -240,12 +240,15 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	//
 	// Las Handy no hace falta cerrarlas: el propio DO las congela (`main_offline`) en cuanto la
 	// Main se va, y al reconectar su ticket también se rechaza. Y si la licencia nunca llegó a
-	// activarse no hay `main_device_id` ni socket que cerrar.
-	await cerrarSocketsDelDispositivo(
-		c.env.TenantHub,
-		String(lic.tenant_id || ""),
-		String(lic.main_device_id || ""),
-	);
+	// activarse no hay negocio ni socket que cerrar.
+	//
+	// AUD-02: el aviso no nombra a quién echar: el `TenantHub` vuelve a leer quién es la Main (con
+	// la licencia anulada, nadie) y echa a la que no lo sea. Así, si llega tarde, después de deshacer
+	// la anulación, no echa a la Main que ha vuelto a serlo. Si ya estaba revocada (una disputa, otra
+	// anulación), quién es la Main no cambia y no hay nada que avisar.
+	if (lic.status !== "revoked") {
+		await avisarCambioDeLicencia(c.env.TenantHub, String(lic.tenant_id || ""));
+	}
 
 	return c.json({ ok: true, licenseId, status: "revoked" });
 });

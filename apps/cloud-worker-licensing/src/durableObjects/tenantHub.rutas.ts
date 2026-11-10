@@ -15,7 +15,8 @@ export interface ContextoDeRutas {
 	broadcast(obj: any, exceptDeviceId?: string): void;
 	broadcastRol(rol: "tpv" | "handy" | "unknown", obj: any): void;
 	liveSocketsFor(deviceId: string, except?: WebSocket): WebSocket[];
-	sessionGone(ws: WebSocket, a: WsAttachment): void;
+	/** AUD-02: cierra una sesión (deja de estar autenticada, queda fuera y se contabiliza su salida). */
+	cerrar(ws: WebSocket, a: WsAttachment | null, code: number, motivo: string): void;
 
 	/** SYNC-16: `acceptWebSocket`, no `server.accept()`. Es lo que permite hibernar sin cerrar. */
 	aceptarWebSocket(ws: WebSocket, tags: string[]): void;
@@ -40,12 +41,19 @@ export function esUpgradeDeWebSocket(req: Request): boolean {
 	return h.toLowerCase() === "websocket";
 }
 
+/**
+ * El dispositivo se ha dado de baja (`devices.revoked_at_ms`): sus sesiones se cierran en el acto,
+ * sin condición.
+ *
+ * AUD-02: por `cerrar`, así que dejan de estar autenticadas antes de cerrarse y lo que tuvieran
+ * esperando no entra. Un cambio de licencia (traslado, anulación, reembolso) no pasa por aquí: no
+ * nombra a quién echar, pide releer quién es la Main (`releerMain`), y así un aviso que llega
+ * tarde no echa a la Main que ha vuelto a serlo.
+ */
 export function revocar(ctx: ContextoDeRutas, deviceId: string): void {
 	if (!deviceId) return;
 	for (const ws of ctx.liveSocketsFor(deviceId)) {
-		const a = ctx.att(ws);
-		try { ws.close(4001, "revoked"); } catch { }
-		if (a) ctx.sessionGone(ws, a);
+		ctx.cerrar(ws, ctx.att(ws), 4001, "revoked");
 	}
 }
 
@@ -135,12 +143,12 @@ export function abrirWebSocket(
 	// AUD-15: y deja de estar autenticada antes de cerrarla. Mientras termina de cerrarse puede
 	// seguir en `getWebSockets()`, y una Main reemplazada no puede seguir autorizando a las Handy
 	// (ni congelándolas) por encima de lo que diga la sesión nueva.
+	// AUD-02: por `cerrar`, como todo cierre: queda `fuera` (un saludo que tuviera a medias no la
+	// vuelve a autenticar, ni entra lo que dejara esperando) y su salida se contabiliza aquí, sin
+	// contar con que el runtime avise del cierre. Con la sesión nueva ya abierta, eso no anuncia
+	// nada; lo anunciará el cierre de la nueva si su saludo falla.
 	for (const prev of ctx.liveSocketsFor(deviceId, server)) {
-		const a = ctx.att(prev);
-		if (a) ctx.setAtt(prev, { ...a, authed: false, recovering: false });
-		try {
-			prev.close(4000, "replaced");
-		} catch { }
+		ctx.cerrar(prev, ctx.att(prev), 4000, "replaced");
 	}
 
 	ctx.waitUntil(ctx.touchLastSeen(tenantId, deviceId, true));

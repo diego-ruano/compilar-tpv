@@ -12,6 +12,21 @@
 // Ese corchete es el gate: `ping` y `helloSigned` van ANTES porque son justamente los que atiende
 // un socket que todavía no se ha autenticado. Mover una rama de un lado al otro del gate es abrir
 // o cerrar una puerta, no reordenar código.
+//
+// AUD-02 · Y dentro de cada rama hay otro orden que tampoco se puede cambiar. Lo que sólo puede
+// hacer la Main se decide con `ctx.esLaMain`, que mira la tabla del DO sin esperar a nadie:
+//
+//   forma del mensaje → [comprobación por actividad, si toca: la única espera] → attachment de
+//   AHORA y `esLaMain` → el trabajo, en el acto
+//
+// La forma va primero para que un mensaje mal hecho no cueste una lectura de la base central. Y
+// entre `esLaMain` y el trabajo no puede haber ninguna espera, ni siquiera la de una función
+// `async` intermedia: mientras se espera pueden echar a la sesión, o cerrarse su socket, y el
+// attachment que se leyó antes ya no vale (`sesionAbierta`).
+//
+// `apply` y `bulk_apply` esperan en fila (`enTurnoDeEntrada`): el orden en que entran es el orden
+// en que llegaron, también si al primero le toca esperar la comprobación. `recovery_ready` no la
+// espera ni la pide: decide con la tabla tal como está, y a la Main no se le rechaza nunca.
 
 import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 import { isEventAllowed } from "./tenantHub.identidad";
@@ -66,6 +81,19 @@ export interface ContextoDeMensajes {
 		pubkeyB64Hint?: string | null;
 	}): Promise<{ roleFinal: Role; pubkeyB64: string }>;
 
+	/** AUD-02: ¿es esta sesión la de la Main, según la tabla del DO? No espera. */
+	esLaMain(a: WsAttachment | null): boolean;
+	/** AUD-02: el dispositivo que es la Main según la tabla, o `null` si ninguno. No espera. */
+	mainVigente(): string | null;
+	/** AUD-02: pregunta a la base central quién es la Main y lo apunta. Lanza si no contesta. */
+	leerMain(tenantId: string): Promise<void>;
+	/** AUD-02: la comprobación por actividad. `null` si no toca; si toca, no lanza. */
+	comprobarMain(): Promise<void> | null;
+	/** Todo cierre que inicia el DO: la sesión queda fuera, se cierra y se contabiliza su salida. */
+	cerrar(ws: WebSocket, a: WsAttachment | null, code: number, motivo: string): void;
+	/** AUD-02: en fila con lo demás que la Main manda y entra en el acto (`apply`, `bulk_apply`). */
+	enTurnoDeEntrada(trabajo: () => Promise<void> | void): Promise<void>;
+
 	isMainConnected(except?: WebSocket): boolean;
 	isMainRecovering(): boolean;
 
@@ -84,6 +112,10 @@ export interface ContextoDeMensajes {
 		cloudPayloadJson: string;
 		clientNow?: string | null;
 		allowWhileRecovering?: boolean;
+		/** AUD-02: el socket de la sesión que manda la escritura. */
+		sesion?: WebSocket;
+		/** AUD-02: se llama en cuanto la escritura tiene sitio en el turno del log. */
+		alReservarTurno?: () => void;
 	}): Promise<{ result: any; seq: number }>;
 	withTenantDbRetry<T>(tenantId: string, run: (db: Client) => Promise<T>): Promise<T>;
 }
@@ -163,10 +195,36 @@ export async function atenderHelloSigned(
 					pubkeyB64Hint: a.pubkeyB64,
 				});
 
+				// AUD-02: el rol `tpv` dice que el equipo se activó como Main, no que lo siga
+				// siendo. Quién lo es ahora está en la tabla del DO. El saludo de un `tpv` la pone
+				// al día antes de mirarla, y si la base central no contesta no entra: como con la
+				// lectura del dispositivo, sin ella no se sabe quién es. El de una Handy es
+				// actividad, y pregunta sólo si toca.
+				if (roleFinal === "tpv") await ctx.leerMain(tenantId);
+				else await ctx.comprobarMain();
+
+				// ⚠️ De aquí al final no hay ninguna espera: la sesión se lee como está AHORA, se
+				// decide con la tabla y se autentica en el mismo paso.
+				//
+				// Mientras se verificaba pudieron echarla (una revocación), reemplazarla (una
+				// reconexión del mismo dispositivo) o cerrarse su socket (el cliente, la red, un
+				// error): su salida ya está contabilizada, y no vuelve a entrar ni a anunciarse.
+				const actual = sesionAbierta(ctx, ws);
+				if (!actual) return;
+
+				// La respuesta de este saludo pudo no apuntarse, porque ya había apuntada la de
+				// una lectura que empezó después (`fijarMain`). Por eso no decide lo que le
+				// contestaron a él, sino lo que dice la tabla: una respuesta vieja que llega tarde
+				// no deja entrar a quien ya no es la Main, ni echa a quien lo es.
+				if (roleFinal === "tpv") {
+					const main = ctx.mainVigente();
+					if (main !== deviceId) throw new Error(main ? "device_replaced" : "license_revoked");
+				}
+
 				// Persistimos el resultado de la autenticación en el attachment: es lo que
 				// leerán los futuros mensajes, broadcasts y el cierre (incluso tras hibernar).
 				ctx.setAtt(ws, {
-					...a,
+					...actual,
 					role: roleFinal,
 					authed: true,
 					pubkeyB64,
@@ -231,15 +289,20 @@ export async function atenderHelloSigned(
 					ctx.emitSyncEvent("main_online", { device_id: deviceId });
 				}
 			} catch (e: any) {
+				// Echada o cerrada mientras se verificaba: su salida ya está contabilizada.
+				const ahora = sesionAbierta(ctx, ws);
+				if (!ahora) return;
 				const err = String(e?.message || e);
 				ctx.send(ws, {
 					type: "error",
 					error: "hello_failed",
 					details: err,
 				});
-				try {
-					ws.close(4003, "auth_failed");
-				} catch { }
+				// Por `cerrar`, como todo cierre que inicia el DO: contabiliza la salida sin contar
+				// con que el runtime avise. Si era la Main reconectando, su sesión anterior ya se
+				// echó al abrir ésta sin anunciar nada (había otra viva): es este cierre el que
+				// les dice a las Handy que se han quedado sin Main.
+				ctx.cerrar(ws, ahora, 4003, "auth_failed");
 			}
 		})(),
 	);
@@ -256,6 +319,13 @@ export function atenderRecoveryReady(
 		ctx.send(ws, { type: "error", error: "forbidden_not_tpv" });
 		return;
 	}
+	// AUD-02: soltar a las Handy sólo puede hacerlo la Main. Aquí no hay lecturas ni esperas: `a`
+	// se acaba de leer (`despachar`) y decide la tabla. A la Main no se le rechaza nunca, tampoco
+	// con la base central caída: el cliente da el desbloqueo por hecho en cuanto lo manda.
+	if (!ctx.esLaMain(a)) {
+		ctx.send(ws, { type: "error", error: "not_authenticated" });
+		return;
+	}
 	ctx.setAtt(ws, { ...a, recovering: false });
 	ctx.broadcastAuthed({
 		type: "main_volcando",
@@ -269,12 +339,12 @@ export function atenderRecoveryReady(
 // REV-04: la Main confirma que ya ha anotado las apartadas. Es lo que convierte `_Cola_Muerta`
 // en una bandeja de salida en vez de un archivo que no lee nadie: entregada la carta, se tira.
 // Sólo la Main puede acusar, porque sólo ella puede reparar (tiene la fila; la Handy no).
-export function atenderColaApartadaAck(
+export async function atenderColaApartadaAck(
 	ctx: ContextoDeMensajes,
 	ws: WebSocket,
 	a: WsAttachment,
 	msg: ColaApartadaAckMsg,
-): void {
+): Promise<void> {
 	if (a.role !== "tpv") {
 		ctx.send(ws, { type: "error", error: "forbidden_not_tpv" });
 		return;
@@ -282,6 +352,21 @@ export function atenderColaApartadaAck(
 	const opIds = Array.isArray(msg.opIds)
 		? (msg.opIds as unknown[]).map((v) => String(v)).filter(Boolean)
 		: [];
+	// AUD-02: sin nada que acusar no hay trabajo, y se contesta sin preguntar a nadie.
+	if (!opIds.length) {
+		ctx.send(ws, { type: "cola_apartada_ack_ok", n: 0 });
+		return;
+	}
+
+	// AUD-02: acusar borra las apartadas, y con ellas el aviso de una divergencia: sólo la Main.
+	// Tras la comprobación por actividad, que es la última espera, la sesión como está ahora. Un
+	// acuse no depende del orden de los demás: no hace falta que espere en fila.
+	await ctx.comprobarMain();
+	if (!ctx.esLaMain(sesionAbierta(ctx, ws))) {
+		ctx.send(ws, { type: "error", error: "not_authenticated" });
+		return;
+	}
+
 	const olvidadas = ctx.olvidarApartadas(opIds);
 	if (olvidadas) {
 		ctx.emitSyncEvent("cola_apartada_acusada", {
@@ -315,7 +400,13 @@ export async function atenderBulkApply(
 		return;
 	}
 
+	// AUD-02: la forma, antes que nada. Un trozo sin operaciones no hace trabajo, y se contesta
+	// sin preguntar a nadie.
 	const entrada = Array.isArray(m.ops) ? m.ops : [];
+	if (!entrada.length) {
+		ctx.send(ws, { type: "bulk_ack", ok: true, opIds: [] });
+		return;
+	}
 	const clientNowLote = String(getFirstOwnValue(m, ["client_now", "clientNow"]) || "");
 	const ops: OpParaAplicar[] = [];
 
@@ -352,17 +443,31 @@ export async function atenderBulkApply(
 		});
 	}
 
-	try {
-		const aceptadas = ctx.encolar(tenantId, ops);
-		ctx.send(ws, { type: "bulk_ack", ok: true, opIds: aceptadas });
-	} catch (e: any) {
-		capturarError(e, "sync.bulk_enqueue");
-		ctx.send(ws, {
-			type: "bulk_ack",
-			ok: false,
-			error: String(e?.message || e).slice(0, 300),
-		});
-	}
+	// AUD-02: lo que entra en la cola se aplicará aunque quien lo mandó ya no esté: sólo lo encola
+	// la Main. En fila con lo demás que manda (`enTurnoDeEntrada`), para que entre en el orden en
+	// que llegó aunque le toque esperar la comprobación por actividad; tras ella, que es la última
+	// espera, la sesión como está ahora, y de ahí a encolar no hay ninguna más.
+	ctx.waitUntil(
+		ctx.enTurnoDeEntrada(async () => {
+			await ctx.comprobarMain();
+			if (!ctx.esLaMain(sesionAbierta(ctx, ws))) {
+				ctx.send(ws, { type: "bulk_ack", ok: false, error: "not_authenticated" });
+				return;
+			}
+
+			try {
+				const aceptadas = ctx.encolar(tenantId, ops);
+				ctx.send(ws, { type: "bulk_ack", ok: true, opIds: aceptadas });
+			} catch (e: any) {
+				capturarError(e, "sync.bulk_enqueue");
+				ctx.send(ws, {
+					type: "bulk_ack",
+					ok: false,
+					error: String(e?.message || e).slice(0, 300),
+				});
+			}
+		}),
+	);
 	return;
 }
 
@@ -424,81 +529,109 @@ export async function atenderApply(
 		getFirstOwnValue(m, ["client_now", "clientNow"]) || "",
 	);
 
-	// SYNC-18: si hay cola, esta operación va DETRÁS de ella. El outbox de la Main está
-	// ordenado y sus operaciones se apoyan unas en otras (una línea necesita su comanda),
-	// así que colarse por delante del atraso sería aplicar el futuro antes que el pasado.
-	// Se responde igual de rápido, pero diciendo que quedó encolada.
-	if (ctx.cuantasEnCola() > 0) {
-		try {
-			ctx.encolar(tenantId, [
-				{
-					opId,
-					commandName,
-					cmd,
-					deviceId,
-					requestPayloadJson,
-					cloudPayloadJson,
-					clientNow,
-				},
-			]);
-			ctx.send(ws, { type: "apply_ack", opId, ok: true, encolada: true });
-		} catch (e: any) {
-			capturarError(e, "sync.enqueue");
-			ctx.send(ws, {
-				type: "apply_ack",
-				opId,
-				ok: false,
-				error: String(e?.message || e).slice(0, 300),
-			});
-		}
-		return;
-	}
-
+	// AUD-02: el rol `tpv` no basta: tiene que ser la sesión de la Main. Y lo que manda entra en
+	// fila (`enTurnoDeEntrada`), con sus volcados, en el orden en que llegó: si al primero le toca
+	// esperar la comprobación por actividad, los de detrás esperan con él. Tras esa espera, que es la
+	// última, la sesión como está ahora.
 	ctx.waitUntil(
-		(async () => {
-			try {
-				const { result, seq } = await ctx.applyInternalCommandIdempotent({
-					tenantId,
-					cmd,
-					opId,
-					commandName,
-					deviceId,
-					requestPayloadJson,
-					cloudPayloadJson,
-					clientNow,
-					allowWhileRecovering: true,
-				});
-				ctx.send(ws, {
-					type: "apply_ack",
-					opId,
-					ok: true,
-					result,
-					// `seq` que la nube asignó a la op: la Main asciende su anti-eco con él.
-					seq,
-				});
-			} catch (e: any) {
-				capturarError(e, "sync.apply");
-				// SYNC-20: el ack dice de qué clase es el fallo. Quien tiene la excepción
-				// delante es este DO; el cliente no puede deducirlo del texto sin acabar
-				// comparando mensajes de libsql, que cambian de redacción entre versiones.
-				// Sin esto, el drenado trataba todo como transitorio y una sentencia que el
-				// esquema del tenant no admite paraba la cola entera para siempre.
-				//
-				// REV-11: y `transitorio` es la otra mitad. Sin él, una caída de Turso —que
-				// no dice nada de la operación— le gastaba uno de sus veinte intentos, y
-				// cuatro baches bastaban para apartar una venta perfectamente buena. Son
-				// tres estados y no dos: definitivo (apartar ya), pasajero (no cuenta) y
-				// desconocido (cuenta, y acabará apartándose si no deja de fallar).
-				ctx.send(ws, {
-					type: "apply_ack",
-					opId,
-					ok: false,
-					error: String(e?.message || e),
-					permanente: esRechazoPermanente(e),
-					transitorio: esFalloPasajero(e),
-				});
+		ctx.enTurnoDeEntrada(async () => {
+			await ctx.comprobarMain();
+			if (!ctx.esLaMain(sesionAbierta(ctx, ws))) {
+				ctx.send(ws, { type: "apply_ack", opId, ok: false, error: "not_authenticated" });
+				return;
 			}
-		})(),
+
+			// SYNC-18: si hay cola, esta operación va DETRÁS de ella. El outbox de la Main está
+			// ordenado y sus operaciones se apoyan unas en otras (una línea necesita su comanda),
+			// así que colarse por delante del atraso sería aplicar el futuro antes que el pasado.
+			// Se responde igual de rápido, pero diciendo que quedó encolada.
+			if (ctx.cuantasEnCola() > 0) {
+				try {
+					ctx.encolar(tenantId, [
+						{
+							opId,
+							commandName,
+							cmd,
+							deviceId,
+							requestPayloadJson,
+							cloudPayloadJson,
+							clientNow,
+						},
+					]);
+					ctx.send(ws, { type: "apply_ack", opId, ok: true, encolada: true });
+				} catch (e: any) {
+					capturarError(e, "sync.enqueue");
+					ctx.send(ws, {
+						type: "apply_ack",
+						opId,
+						ok: false,
+						error: String(e?.message || e).slice(0, 300),
+					});
+				}
+				return;
+			}
+
+			// En vivo: la fila no suelta al siguiente hasta que éste tiene sitio en el turno del log
+			// (`alReservarTurno`), que es lo que fija el orden en que se confirman. Antes de eso el motor
+			// calcula el hash y resuelve las credenciales de la base del tenant, y el segundo, si las suyas
+			// llegaban antes, se le adelantaba. Lo que tarde Turso después ya no retiene la fila. La
+			// escritura lleva su socket (`sesion`) para que el motor vuelva a mirar la sesión dentro del
+			// turno, justo antes de enviarla.
+			let conSitio!: () => void;
+			const tieneSitio = new Promise<void>((r) => (conSitio = r));
+			ctx.waitUntil(
+				(async () => {
+					try {
+						const { result, seq } = await ctx.applyInternalCommandIdempotent({
+							tenantId,
+							cmd,
+							opId,
+							commandName,
+							deviceId,
+							requestPayloadJson,
+							cloudPayloadJson,
+							clientNow,
+							allowWhileRecovering: true,
+							sesion: ws,
+							alReservarTurno: conSitio,
+						});
+						ctx.send(ws, {
+							type: "apply_ack",
+							opId,
+							ok: true,
+							result,
+							// `seq` que la nube asignó a la op: la Main asciende su anti-eco con él.
+							seq,
+						});
+					} catch (e: any) {
+						capturarError(e, "sync.apply");
+						// SYNC-20: el ack dice de qué clase es el fallo. Quien tiene la excepción
+						// delante es este DO; el cliente no puede deducirlo del texto sin acabar
+						// comparando mensajes de libsql, que cambian de redacción entre versiones.
+						// Sin esto, el drenado trataba todo como transitorio y una sentencia que el
+						// esquema del tenant no admite paraba la cola entera para siempre.
+						//
+						// REV-11: y `transitorio` es la otra mitad. Sin él, una caída de Turso —que
+						// no dice nada de la operación— le gastaba uno de sus veinte intentos, y
+						// cuatro baches bastaban para apartar una venta perfectamente buena. Son
+						// tres estados y no dos: definitivo (apartar ya), pasajero (no cuenta) y
+						// desconocido (cuenta, y acabará apartándose si no deja de fallar).
+						ctx.send(ws, {
+							type: "apply_ack",
+							opId,
+							ok: false,
+							error: String(e?.message || e),
+							permanente: esRechazoPermanente(e),
+							transitorio: esFalloPasajero(e),
+						});
+					} finally {
+						// La que falla antes de llegar al turno (sin Main, por ejemplo) también suelta la fila.
+						conSitio();
+					}
+				})(),
+			);
+			await tieneSitio;
+		}),
 	);
 	return;
 }
@@ -525,6 +658,12 @@ export async function atenderEvent(
 		return;
 	}
 
+	// AUD-02: un `tpv` que ya no es la Main no manda eventos ni sondea la base del negocio.
+	if (!sigueDentro(ctx, a)) {
+		ctx.send(ws, { type: "error", error: "not_authenticated" });
+		return;
+	}
+
 	if (name === "tenantDb.ping") {
 		ctx.waitUntil(
 			(async () => {
@@ -547,7 +686,21 @@ export async function atenderEvent(
 		return;
 	}
 
-	ctx.broadcast(
+	// AUD-02: un evento lleva datos del negocio (`payload`) a los demás dispositivos, así que es
+	// actividad: si toca preguntar quién es la Main, se pregunta antes de repartirlo. Después de esa
+	// espera, que es la última, quien lo manda tiene que seguir dentro. (Mientras se espera, el
+	// evento siguiente del mismo dispositivo podría adelantarlo; hoy ningún cliente manda eventos.)
+	await ctx.comprobarMain();
+	if (!sigueDentro(ctx, sesionAbierta(ctx, ws))) {
+		ctx.send(ws, { type: "error", error: "not_authenticated" });
+		return;
+	}
+
+	// AUD-02: sólo a sockets abiertos y autenticados, y de los `tpv`, sólo a la Main
+	// (`broadcastAuthed`). No por `broadcast`, que llega también a un socket que no ha saludado: un
+	// equipo que abrió el socket siendo la Main y se quedó sin saludar no puede recibir los eventos
+	// del negocio, ni antes ni después de perder la licencia.
+	ctx.broadcastAuthed(
 		{
 			type: "event",
 			from: deviceId,
@@ -559,4 +712,24 @@ export async function atenderEvent(
 		deviceId,
 	);
 	return;
+}
+
+/**
+ * AUD-02 · ¿Puede esta sesión mandar un evento? Autenticada y no echada; y si es de un `tpv`, la de
+ * la Main. Síncrono: se llama con el attachment recién leído, justo antes de actuar.
+ */
+function sigueDentro(ctx: ContextoDeMensajes, a: WsAttachment | null): boolean {
+	if (!a?.authed || a.fuera) return false;
+	return a.role !== "tpv" || ctx.esLaMain(a);
+}
+
+/**
+ * AUD-02 · La sesión como está AHORA, después de una espera: `null` si se ha cerrado su socket o se
+ * ha echado. Todo cierre la deja `fuera` (`cerrar`, `webSocketClose`), y se mira además el socket
+ * por si el attachment de un socket ya cerrado no se dejara escribir.
+ */
+function sesionAbierta(ctx: ContextoDeMensajes, ws: WebSocket): WsAttachment | null {
+	if (ws.readyState !== 1) return null;
+	const a = ctx.att(ws);
+	return a && !a.fuera ? a : null;
 }

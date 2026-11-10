@@ -36,6 +36,7 @@ import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
 
 import type { Env } from "../../env";
+import { avisarCambioDeLicencia } from "../../lib/hub";
 import { topeAnonimo } from "../../lib/validacion";
 import { enTransaccion, getDb, type Sql } from "../../server/db";
 import { sha256Hex } from "../../server/crypto";
@@ -157,6 +158,7 @@ stripeRoutes.post("/webhook", async (c) => {
 		try {
 			const resultado = await revertir(db, event);
 			await markWebhookProcessed(db, eventId, true);
+			await avisarDeLasAnuladas(env, db, resultado);
 			return c.json({ ok: true, received: true, ...resultado });
 		} catch (e: any) {
 			capturarError(e, "stripe.reversal");
@@ -189,6 +191,39 @@ stripeRoutes.post("/webhook", async (c) => {
 		return c.json({ ok: false, error: "fulfillment_failed" }, 500);
 	}
 });
+
+/**
+ * AUD-02 · Un alta devuelta deja la licencia anulada: se avisa al `TenantHub` del negocio, que vuelve
+ * a leer quién es la Main y le cierra el socket a la que ya no lo es, igual que al anularla desde la
+ * administración (`admin.routes.ts`). Sin esto seguía replicando hasta que se cayera su conexión o
+ * lo notara el job `licencia`, hasta seis horas después.
+ *
+ * Va con la reversión ya confirmada y nunca la hace fallar: es best-effort, y un 500 aquí haría que
+ * Stripe reintentara un evento ya aplicado. Si el aviso no llega, el `TenantHub` lo corrige en cuanto
+ * haya actividad en el negocio, como mucho un minuto después de su última lectura de la licencia.
+ * Una renovación devuelta no avisa: caducar no empuja.
+ */
+async function avisarDeLasAnuladas(
+	env: Env,
+	db: ReturnType<typeof getDb>,
+	resultado: Record<string, unknown>,
+): Promise<void> {
+	const licencias = Array.isArray(resultado.licencias)
+		? (resultado.licencias as { license_id: string; accion: string }[])
+		: [];
+
+	for (const { license_id, accion } of licencias) {
+		if (accion !== "revoked") continue;
+		try {
+			const lic = await getLicenseById(db, license_id);
+			if (!lic) continue;
+			// Una licencia que no llegó a activarse no tiene negocio ni Main: no hay a quién avisar.
+			await avisarCambioDeLicencia(env.TenantHub, String(lic.tenant_id || ""));
+		} catch (e) {
+			capturarError(e, "stripe.notify_hub");
+		}
+	}
+}
 
 /** Qué ha hecho `cumplir` con una sesión. Lo leen los tests. */
 export type Cumplimiento =

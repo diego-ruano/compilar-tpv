@@ -191,8 +191,8 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 
 ## Sincronización y firmas
 
-El binding `TenantHub` está tipado y llama por RPC a `aplicar`, `revocarDispositivo` y
-`avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los helpers y credenciales
+El binding `TenantHub` está tipado y llama por RPC a `aplicar`, `revocarDispositivo`, `releerMain`
+(AUD-02: la licencia del negocio ha cambiado) y `avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los helpers y credenciales
 permanecen en un motor interno que no pertenece al prototipo RPC. No se publican rutas
 `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con otro Worker
 ni convertirse en un proxy público. La autenticación del cliente y los gates de cada ruta siguen

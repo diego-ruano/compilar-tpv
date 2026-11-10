@@ -28,6 +28,7 @@ import {
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { laMainEs } from "./helpers/mainVigente";
 
 const TENANT = "tenant-1";
 const INSERTAR_ZONA = "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?2);";
@@ -122,6 +123,8 @@ function prepararHub(hub: any, fallo: () => { cuando: Fallo; error?: Error }) {
 	hub.getTenantDb = async () => db;
 	hub.resolveTenantDbClient = async () => db;
 	hub.touchLastSeen = async () => {};
+	// AUD-02: la Main de estas pruebas es la de la licencia. Preguntarlo iría a la base central.
+	laMainEs(hub, "device-main");
 	hub.maybePurgeSyncLog = async () => {};
 	return { sql, db, base, enviados };
 }
@@ -189,6 +192,7 @@ describe("AUD-18 · una confirmación incierta se resuelve antes de dejar pasar 
 			};
 			hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
 			hub.touchLastSeen = async () => {};
+			laMainEs(hub, "device-main");
 			hub.maybePurgeSyncLog = async () => {};
 			const main = conectar(hub, "device-main", "tpv");
 
@@ -488,7 +492,7 @@ describe("AUD-18 · una confirmación incierta se resuelve antes de dejar pasar 
 
 	it("un reenvío rechazado por credenciales no cuenta como envío", async () => {
 		await enElHub("aud18-credenciales", async (hub: any) => {
-			const { sql, enviados } = prepararHub(
+			const { sql, db, enviados } = prepararHub(
 				hub,
 				guion(
 					{ cuando: "antes", error: plazo() },
@@ -496,11 +500,17 @@ describe("AUD-18 · una confirmación incierta se resuelve antes de dejar pasar 
 				),
 			);
 			conectar(hub, "device-main", "tpv");
+			// AUD-02: un 401 dentro del turno se renueva ahí mismo, sin soltarlo. Aquí la renovación
+			// tampoco consigue un token que valga, y el 401 sale.
+			hub.resolveTenantDbClient = async () => {
+				throw new Error("Server returned HTTP status 401");
+			};
 
 			await expect(hub.applyInternalCommandIdempotent(escritura("op-1", "z-1"))).rejects.toThrow("401");
 			expect(Number(sql.exec("SELECT Envios FROM _Escritura_En_Curso;").toArray()[0].Envios)).toBe(1);
 
 			// Con credenciales que valen se reenvía en el acto, entra, y lo siguiente detrás.
+			hub.resolveTenantDbClient = async () => db;
 			const r2 = await hub.applyInternalCommandIdempotent(escritura("op-2", "z-2"));
 			expect(enviados).toHaveLength(4);
 			expect(seqDelLog(sql, "op-1")[0]).toBeLessThan(r2.seq);
@@ -638,6 +648,7 @@ describe("AUD-18 · el lote de la cola", () => {
 			hub.getTenantDb = async () => db;
 			hub.resolveTenantDbClient = async () => db;
 			hub.touchLastSeen = async () => {};
+			laMainEs(hub, "device-main");
 			hub.maybePurgeSyncLog = async () => {};
 			const difundidos: any[] = [];
 			const original = hub.broadcastAuthed.bind(hub);

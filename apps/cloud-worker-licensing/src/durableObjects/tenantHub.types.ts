@@ -32,6 +32,13 @@ export type WsAttachment = {
 	challenge: { nonceB64: string; expiresAtMs: number } | null;
 	/** La Main ha restaurado una copia y todavía está reconciliándola. Bloquea las Handy. */
 	recovering?: boolean;
+	/**
+	 * AUD-02: la sesión se ha cerrado (`cerrar`, `webSocketClose`): ya no es la Main, la han dado de
+	 * baja, la ha reemplazado una reconexión o se ha ido. No vuelve a autenticarse aunque tuviera un
+	 * saludo a medias, ni entra lo que dejara esperando. Quién es la Main no va aquí: está en el SQL del DO
+	 * (`tenantHub.main.ts`), que es uno para todas las sesiones.
+	 */
+	fuera?: boolean;
 };
 
 /* =========================================================

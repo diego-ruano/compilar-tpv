@@ -99,18 +99,20 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 }
 
 /**
- * Le dice al `TenantHub` que cierre los WebSockets vivos de un dispositivo.
+ * Le dice al `TenantHub` que cierre los WebSockets vivos de un dispositivo que se ha dado de baja.
  *
- * Es la diferencia entre "se entera cuando le toque" y "se entera ahora". El TPV sólo pregunta por
- * su licencia cada 6 horas (job `licencia`), así que sin esto un equipo con el socket abierto sigue
- * vendiendo hasta medio día después de anularla. Cerrándoselo, el cliente reconecta a los 3 s,
- * `/v1/ws/ticket` le contesta 403 y ESO es lo que dispara el bloqueo de verdad: `useMainSocket`
- * traduce un rechazo de la nube en un `license_check_now`, que emite `license:changed` y tapa la
- * aplicación. Por eso no hace falta ningún mensaje nuevo del DO: basta con cerrar.
+ * Es la diferencia entre "se entera cuando le toque" y "se entera ahora". Cerrándoselo, el cliente
+ * reconecta a los 3 s, `/v1/ws/ticket` le contesta 403 y ESO es lo que dispara el bloqueo de verdad:
+ * `useMainSocket` traduce un rechazo de la nube en un `license_check_now`, que emite
+ * `license:changed` y tapa la aplicación. Por eso no hace falta ningún mensaje nuevo del DO: basta
+ * con cerrar.
  *
  * **Best-effort a propósito.** Quien llama ya ha escrito el cambio en el control-plane, que es lo
  * que manda; esto sólo lo adelanta. Si el DO no contesta, el equipo se bloquea igual en su próximo
  * reconnect o en la siguiente vuelta del job. Un fallo aquí nunca puede tumbar la operación.
+ *
+ * AUD-02: cierra sin condición, porque la baja de un dispositivo no se deshace con otro aviso. Un
+ * cambio de licencia (traslado, anulación, reembolso) va por `avisarCambioDeLicencia`.
  */
 export async function cerrarSocketsDelDispositivo(
 	hubNs: Env["TenantHub"],
@@ -126,5 +128,32 @@ export async function cerrarSocketsDelDispositivo(
 	} catch (error) {
 		capturarError(error, "device.close_sockets");
 		// Ver arriba: si falla, el dispositivo se bloquea en el próximo reconnect.
+	}
+}
+
+/**
+ * AUD-02 · Le dice al `TenantHub` del negocio que su licencia ha cambiado y quién es la Main puede
+ * no ser ya quien era: un traslado a otro equipo (`/v1/license/activate`), una anulación desde la
+ * administración, o el reembolso o la disputa de un alta (webhook de Stripe).
+ *
+ * El hub no echa a nadie porque se lo digan: vuelve a leer de la base central quién es la Main y
+ * echa a la sesión `tpv` que no lo sea (`releerMain`). Así un aviso que llega tarde —el del traslado
+ * B→A, entregado después de que la licencia haya vuelto a B— no echa a la Main que ha vuelto a
+ * serlo. Al equipo que ha dejado de ser la Main se le cierra el socket, reconecta, el ticket se le
+ * niega y se bloquea, como con `cerrarSocketsDelDispositivo`.
+ *
+ * Best-effort, igual que aquél: quien llama ya ha escrito el cambio en el control-plane. Si el aviso
+ * no llega, el hub lo corrige por su cuenta en cuanto hay actividad, como mucho un minuto después
+ * de su última lectura (`comprobarMain`).
+ */
+export async function avisarCambioDeLicencia(hubNs: Env["TenantHub"], tenantId: string): Promise<void> {
+	if (!tenantId) return;
+
+	try {
+		const stub = hubNs.get(hubNs.idFromName(tenantId));
+
+		await stub.releerMain(tenantId);
+	} catch (error) {
+		capturarError(error, "license.notify_hub");
 	}
 }

@@ -110,7 +110,9 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - **Copia diaria**: `VACUUM INTO` por el pool de **lectura** (en WAL la instantánea es coherente sin
   bloquear al escritor ni los cobros), se valida y se guarda **comprimida con gzip** en
   `AppData/backups/data-*.db.gz`, conservando las 7 últimas. Lo que se valida y se restaura es siempre
-  la base descomprimida en un fichero aparte; un `.db.gz` también lo abre 7-Zip.
+  la base descomprimida en un fichero aparte; un `.db.gz` también lo abre 7-Zip. Por el escritor
+  fallaría: no admite `ATTACH` (AUD-02), que es como SQLite adjunta el destino de un `VACUUM INTO`
+  ([sincronizacion.md](sincronizacion.md#escritor-único-y-captura)).
 - **Fuera del runtime async**: SQLite trabaja sin ceder en el hilo que lo llama, así que el
   `VACUUM INTO`, el `quick_check`, comprimir y copiar la base entera van por `spawn_blocking`.
 - **Copia ahora / guardar fuera / traer**: `recovery_create_backup`, `recovery_export_backup` (a donde

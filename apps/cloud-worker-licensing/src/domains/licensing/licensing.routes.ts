@@ -46,6 +46,7 @@ import {
 	type LicenseRow,
 } from "../../server/licenseStore";
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
+import { avisarCambioDeLicencia } from "../../lib/hub";
 import { pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 import { cuerpo, topeAnonimo } from "../../lib/validacion";
@@ -647,6 +648,15 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 			fromDeviceId: lic.main_device_id,
 			toDeviceId: deviceId,
 		});
+
+		// AUD-02: y el equipo anterior deja de ser Main también en el `TenantHub`. Su socket seguía
+		// abierto con el rol `tpv` de cuando saludó, mandando SQL que la nube confirmaba y este
+		// equipo ejecutaba, y recibiendo todo lo del negocio. Después de cambiar la licencia, para
+		// que lo que lea el hub sea ya este equipo y al reconectar se le niegue el ticket al
+		// anterior. No nombra a quién echar: el hub vuelve a leer quién es la Main, y un aviso que
+		// llegue tarde no echa a la que haya vuelto a serlo. Best-effort: si no llega, el hub lo
+		// corrige cuando salude este equipo o en cuanto haya actividad en el negocio.
+		await avisarCambioDeLicencia(env.TenantHub, tenantId);
 
 		// Aviso al titular: si el cambio no lo ha hecho él, queremos que se entere HOY.
 		// No bloquea la activación: el correo es entrega, no autorización.

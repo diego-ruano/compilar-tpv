@@ -88,7 +88,7 @@ cuenta:
 
 | Caso | Efecto |
 |---|---|
-| Reembolso total o disputa abierta de un **alta** | Licencia revocada. Si ya lo estaba, no se toca; en una disputa, su cobro queda `dispute_ya_revocada` en vez de `dispute` |
+| Reembolso total o disputa abierta de un **alta** | Licencia revocada, y se avisa al `TenantHub` como al [anular desde la administración](#anular-desde-la-administración). Si ya lo estaba, no se toca ni se avisa; en una disputa, su cobro queda `dispute_ya_revocada` en vez de `dispute` |
 | … de una **renovación** (`kind='renewal'`, incluida una clave canjeada) | Se restan sus meses |
 | Reembolso parcial | Nada; queda en `admin_audit` con la licencia de cada cobro de la compra. Stripe no dice cuál se devuelve: se corrige a mano ([abajo](#reembolso-parcial-lo-que-se-hace-a-mano)) |
 | Disputa **ganada** | Se deshace lo que revirtió esa disputa, y sólo eso (AUD-08): vuelve el alta cuyo cobro es `dispute` y los meses de la renovación. A un cobro `dispute_ya_revocada` sólo se le quita la marca, y una licencia sin cobro registrado (anterior a LIC-07) no se toca: si la revocó la disputa, se desrevoca a mano |
@@ -242,6 +242,38 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
    `reassignMainDevice` cambia la Main (registro en `license_device_swaps`) **conservando el
    tenant**, y se avisa por correo al titular.
 
+**Qué pasa con el equipo anterior** (AUD-02). Su fila de `devices` no se toca (sigue con rol `tpv`
+y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la vez.
+
+- **REST**: `tenantAuth` lo rechaza con `device_replaced`, pero guarda la respuesta 60 s por isolate.
+  Durante ese minuto, una petición suya que caiga en un isolate que lo dio por bueno todavía pasa.
+  El ticket del socket lo comprueba sin caché: desde el traslado no recibe ninguno.
+- **El socket que tenía abierto**: con la licencia ya cambiada, la ruta avisa al `TenantHub` del
+  negocio (`lib/hub.ts::avisarCambioDeLicencia`), que vuelve a leer quién es la Main y le cierra el
+  socket. El aviso no nombra a quién echar: si llega tarde, cuando la licencia ya ha vuelto a ese
+  equipo, la lectura lo dice y no se le echa. Entre cambiar `main_device_id` y que el hub lea hay
+  una llamada: en ese instante sigue dentro. Cerrado, deja de recibir lo del negocio, de poder
+  mandar SQL y de contar como Main, y lo que tuviera esperando no entra. Al reconectar se le niega el ticket, lo traduce en un
+  `license_check_now` y se bloquea con `device_replaced`, conservando su licencia local.
+- **Si ese aviso no llega** (es best-effort) o su lectura no contesta, sigue dentro hasta que pase
+  una de dos cosas: que
+  salude el equipo nuevo, que lo echa, o la siguiente comprobación del `TenantHub`, que vuelve a
+  leer de la base central quién es la Main en cuanto hay actividad en el negocio (una escritura
+  suya o de una Handy, un volcado, un evento, el saludo de una Handy, un aviso) y ha pasado un
+  minuto desde la última vez. Hasta que vuelve esa lectura puede escribir, recibir y contar como
+  Main; entonces se le echa antes de hacer nada más. Sin actividad se queda conectado, y no le llega
+  nada del negocio porque no hay nada que entregar. Detalle en
+  [sincronizacion.md](sincronizacion.md#quién-es-la-main-dentro-del-tenanthub-aud-02).
+- **Si la base central no contesta** o rechaza la consulta cuando el `TenantHub` pregunta, lo que
+  sabía se queda como estaba y no se rechaza nada: se vuelve a preguntar al minuto. Es lo que evita
+  cortar a la Main en una avería, y deja dentro a un equipo desplazado cuyo cierre no llegó
+  mientras dure. Al saludar no: un `tpv` no entra sin que la base central conteste.
+- **Las Handy** se quedan sin Main (`main_offline`) cuando se cierra el socket del equipo anterior y
+  hasta que el nuevo se conecta y se pone al día. Mientras el anterior siga dentro, no.
+- **Lo que tenía sin subir**: lo que no haya mandado cuando se le cierra se queda en su outbox. Lo
+  que mandó antes sí está en la nube, y lo que dejó en la cola del `TenantHub` (un volcado) se
+  aplica igual.
+
 **Los topes de verdad van por licencia** (RI-68, `license_otp_eventos`, ventana de 24 h):
 - como mucho **5 códigos enviados**; pasado el tope se contesta igual, sin enviar;
 - como mucho **10 códigos incorrectos**; después, ni el bueno entra hasta el día siguiente.
@@ -379,12 +411,27 @@ equipo ([pendientes.md](../pendientes.md#reloj-01--la-hora-del-negocio-es-la-del
 
 `POST /v1/admin/licenses/:id/revoke` revoca y, en la misma transacción, hace suya la revocación
 (`atribuirRevocacionAMano`): si una disputa abierta ya había revocado el alta, su cobro pasa de
-`dispute` a `dispute_ya_revocada`, y ganarla ya no la reactiva (AUD-08). Después, como best-effort,
-le pide al `TenantHub` del tenant por RPC que cierre los sockets de la Main
-(`lib/hub.ts::cerrarSocketsDelDispositivo` → `revocarDispositivo`; si el DO no contesta, la revocación
-sigue hecha). El cliente reconecta, recibe un 403, lo traduce en un `license_check_now` y se bloquea
-en el acto, sin esperar al job. Las Handy no se cierran a mano: el DO
+`dispute` a `dispute_ya_revocada`, y ganarla ya no la reactiva (AUD-08). Después, como best-effort y
+si no estaba ya revocada, avisa por RPC al `TenantHub` del tenant (`lib/hub.ts::avisarCambioDeLicencia`
+→ `releerMain`), que vuelve a leer quién es la Main (con la licencia anulada, nadie) y le cierra el
+socket a la que había; si el DO no contesta, la revocación sigue hecha. El cliente reconecta, recibe
+un 403, lo traduce en un `license_check_now` y se bloquea en el acto, sin esperar al job. Las Handy
+no se cierran a mano: el DO
 las congela al irse la Main. **Caducar no empuja**: se nota en la siguiente comprobación.
+
+Hacen lo mismo las otras dos puertas que le quitan la licencia a una Main (AUD-02): el
+[traslado a otro equipo](#3-cambio-de-equipo-la-licencia-ya-está-en-otro), con el equipo anterior, y
+el webhook de Stripe cuando un reembolso o una disputa anulan un alta (una renovación devuelta sólo
+resta meses, y eso es caducar; una que ya estaba revocada no avisa). Ninguna nombra a quién echar: el aviso hace que el hub relea en el
+acto, y echa a la sesión `tpv` que no sea la Main que resulte. Así un aviso que llega tarde —el de un
+traslado B→A después de que la licencia haya vuelto a B, o el de una anulación después de
+deshacerla— no echa a la Main que ha vuelto a serlo. Si el aviso no llega, o su lectura no contesta,
+el hub lo corrige por su cuenta en cuanto hay actividad: como mucho un minuto después de la última
+vez vuelve a leer quién es la Main de la licencia sin anular, y echa a la sesión `tpv` que ya no lo
+sea ([sincronizacion.md](sincronizacion.md#quién-es-la-main-dentro-del-tenanthub-aud-02)). La baja
+de un dispositivo, en cambio, le cierra sus sockets sin condición (`cerrarSocketsDelDispositivo`).
+Retirar los negocios del E2E anula sus licencias sin avisar al `TenantHub`: esa Main se queda fuera
+así.
 
 | Operación | Ruta | CLI |
 |---|---|---|
