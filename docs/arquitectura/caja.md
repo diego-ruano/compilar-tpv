@@ -202,7 +202,11 @@ Todo ocurre en una transacción con `defer_foreign_keys`. Reglas:
 - **Borrar una comanda se niega si tiene cualquier cobro**, activo o anulado: `Pagos.ID_Comanda` va
   en cascada y se llevaría la prueba. `Pago_Detalles.ID_Detalle` sí va en cascada, para que una línea
   devuelta a la mesa se pueda quitar; lo que protege a un cobro activo son las guardias de
-  `delete_detalle` y `remove_one_pending_detalle`.
+  `delete_detalle` y `remove_one_pending_detalle`. Cuando el ticket se borra desde la Handy, la
+  condición va dentro de los dos `DELETE` que se replican (`deleteComandaIfSafe`): la Main la vuelve a
+  evaluar al aplicarlos, y un ticket que allí está cobrado, con el cobro aún sin subir, no se borra
+  (AUD-14). Tampoco se borra si alguna de sus líneas está en `v_lineas_cobradas`, aunque el cobro sea
+  de otra comanda: o se borra entero o no se borra nada.
 - **Los anulados se ven pero no cuentan**: salen tachados en Cuentas y en los PDF, y no suman en los
   totales, las estadísticas ni el pendiente de una comanda.
 - **Una reimpresión** de un ticket anulado sale marcada `COPIA` y `*** ANULADO ***`, con el mismo

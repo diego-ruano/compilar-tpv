@@ -456,6 +456,15 @@ Handy no puede hacer, lo veta un middleware antes de leer el cuerpo ([worker.md]
 duplicada entre Rust y estos comandos la sujetan los arneses de contrato
 ([tests/contract/README.md](../../tests/contract/README.md)).
 
+Una ruta decide leyendo Turso fuera del lote (SYNC-30), y lo que llega a la Main es la sentencia, que
+la Main aplica con sus datos: puede tener sin subir lo que la ruta no vio. Por eso la regla que no
+puede romperse va también **dentro de la sentencia replicada**, y cada base la vuelve a evaluar al
+aplicarla: una línea sólo entra en una comanda abierta (INC-20261030-016) y borrar un ticket no borra
+nada si tiene algún cobro o alguna línea cobrada (AUD-14). La ruta de borrar un ticket mira lo mismo
+antes de mandar el lote (`hasPaidLines`), y vuelve a mirarlo cuando no consta que el lote lo haya
+borrado: no tocó ninguna fila, o se perdió la respuesta y el DO devolvió el resultado que guardó al
+confirmarlo, con `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
+
 La `X-Idempotency-Key` la pone el `CloudClient` de `tpv-infra-http`, una por escritura, salvo cuando el
 resultado de la anterior quedó **incierto** (fallo de transporte, timeout o 5xx): entonces la misma
 petición vuelve a salir con su clave y sus bytes durante 5 minutos, y el DO devuelve el resultado de

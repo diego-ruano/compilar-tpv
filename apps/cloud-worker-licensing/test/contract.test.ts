@@ -109,7 +109,7 @@ import {
 	removeLastUnpaidLinea,
 	updateNotaDetalle,
 } from "../src/domains/venta_rapida/venta_rapida.commands";
-import { cobrarPlan } from "../src/domains/venta_rapida/venta_rapida.queries";
+import { cobrarPlan, hasPaidLines } from "../src/domains/venta_rapida/venta_rapida.queries";
 
 // Casos del harness. Los goldens los bendice Rust (lado canónico). Añadir uno: crear el fixture,
 // bendecir su golden y sumar aquí su par caso/golden (workerd no lee del disco: los imports son
@@ -1107,6 +1107,179 @@ describe("una comanda cobrada no admite líneas (INC-20261030-016)", () => {
 				addLinea({ id_comanda: "barra_cobrada", id_producto: "cafe", cantidad: 1 } as any, null, "Cafe", 130 as any),
 			);
 			expect(await lineasDe(sql, "barra_cobrada")).toBe(0);
+		});
+	});
+});
+
+// AUD-14: borrar un ticket desde la Handy (`delete-if-safe`). La ruta decide con `hasPaidLines`, que
+// lee Turso, pero lo que llega a la Main son los `DELETE`, y la Main los aplica con lo suyo: puede
+// tener ese ticket cobrado y sin subir. Sin la condición dentro de la sentencia, la cascada de
+// `Pagos.ID_Comanda` se llevaba allí el cobro, sus líneas cobradas y sus consumos; y en Turso pasaba
+// lo mismo si el cobro subía entre la lectura y el lote (SYNC-30).
+describe("borrar un ticket no se lleva su cobro (AUD-14)", () => {
+	const SIEMBRA = [
+		"INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Bebidas')",
+		"INSERT INTO Productos (ID_Producto,ID_Categoria,Nombre,Precio_Venta) VALUES ('cana','cat','Caña',200)",
+		"INSERT INTO Lotes_Producto (ID_Lote,ID_Producto,Codigo_Lote,Fecha_Entrada,Stock_Disponible) VALUES ('lote','cana','L1','2026-11-01 10:00:00',7)",
+		"INSERT INTO Comandas (ID_Comanda,Canal,Fecha_Hora_Apertura,Estado) VALUES ('ticket','BARRA','2026-11-08 12:00:00','Abierta')",
+		"INSERT INTO Detalle_Comanda (ID_Detalle,ID_Comanda,ID_Producto,Cantidad,Precio_Unitario) VALUES ('linea','ticket','cana',3,200)",
+	];
+	// Lo esencial de un cobro en efectivo de la Main: el pago, su línea, la traza del lote y el apunte
+	// de caja.
+	const COBRO = [
+		"UPDATE Comandas SET Estado='Pagada', Total_Comanda=600, Fecha_Hora_Cierre='2026-11-08 12:05:00' WHERE ID_Comanda='ticket'",
+		"INSERT INTO Pagos (ID_Pago,ID_Comanda,Fecha_Hora,Metodo_Pago,Importe_Total,Tipo) VALUES ('pago','ticket','2026-11-08 12:05:00','Efectivo',600,'FRACCIONADO')",
+		"INSERT INTO Pago_Detalles (ID_Pago,ID_Detalle) VALUES ('pago','linea')",
+		"INSERT INTO Lote_Consumos (ID_Detalle,ID_Lote,ID_Pago,Cantidad) VALUES ('linea','lote','pago',3)",
+		"INSERT INTO Movimientos_Caja (ID_Movimiento,Fecha_Hora,Tipo,ID_Pago,Importe,Metodo_Pago) VALUES ('mov','2026-11-08 12:05:00','COBRO','pago',600,'Efectivo')",
+	];
+	const COBRADO = {
+		comanda: 1,
+		lineas: 1,
+		pagos: 1,
+		efectivo_que_cuenta: 600,
+		pago_detalles: 1,
+		lote_consumos: 1,
+		pago_del_cobro_en_caja: "pago",
+	};
+	// El texto exacto que recibe la Main. El test de la Main
+	// (`venta_rapida.rs::tests_borrado_desde_la_handy`) aplica estas mismas sentencias.
+	const SIN_COBROS =
+		"NOT EXISTS (SELECT 1 FROM Pagos WHERE ID_Comanda = ?1)" +
+		" AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas v JOIN Detalle_Comanda dc ON dc.ID_Detalle = v.ID_Detalle WHERE dc.ID_Comanda = ?1)";
+	const REPLICADO = [
+		{ sql: `DELETE FROM Detalle_Comanda WHERE ID_Comanda = ?1 AND ${SIN_COBROS};`, args: ["ticket"] },
+		{ sql: `DELETE FROM Comandas WHERE ID_Comanda = ?1 AND ${SIN_COBROS};`, args: ["ticket"] },
+	];
+
+	function estado(sql: any) {
+		const n = (q: string) => Number(Object.values(sql.exec(q).toArray()[0] ?? {})[0] ?? 0);
+		return {
+			comanda: n("SELECT COUNT(*) FROM Comandas WHERE ID_Comanda='ticket'"),
+			lineas: n("SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='ticket'"),
+			pagos: n("SELECT COUNT(*) FROM Pagos WHERE ID_Pago='pago'"),
+			efectivo_que_cuenta: n(
+				"SELECT COALESCE(SUM(Importe_Total),0) FROM Pagos WHERE Metodo_Pago='Efectivo' AND Estado='ACTIVO'",
+			),
+			pago_detalles: n("SELECT COUNT(*) FROM Pago_Detalles WHERE ID_Pago='pago'"),
+			lote_consumos: n("SELECT COUNT(*) FROM Lote_Consumos WHERE ID_Pago='pago'"),
+			pago_del_cobro_en_caja:
+				sql.exec("SELECT ID_Pago AS id FROM Movimientos_Caja WHERE ID_Movimiento='mov'").toArray()[0]?.id ?? null,
+		};
+	}
+
+	/** Como aplica la Main un cambio que le llega (`apply_one`): una transacción, FK diferidas. */
+	function aplicarComoLaMain(hub: any, sql: any, sentencias: { sql: string; args: any[] }[]) {
+		hub.state.storage.transactionSync(() => {
+			sql.exec("PRAGMA defer_foreign_keys = ON;");
+			for (const st of sentencias) sql.exec(st.sql, ...(st.args ?? []));
+		});
+	}
+
+	it("lo que se replica a la Main lleva la condición", () => {
+		expect(buildApplyBatch(deleteComandaIfSafe("ticket").command as any).replicated).toEqual(REPLICADO);
+	});
+
+	it("aplicado donde el ticket ya está cobrado (la Main, sin haberlo subido), conserva el cobro", async () => {
+		await enElHub("aud14-main", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of [...SIEMBRA, ...COBRO]) sql.exec(s);
+			expect(estado(sql)).toEqual(COBRADO);
+			aplicarComoLaMain(hub, sql, buildApplyBatch(deleteComandaIfSafe("ticket").command as any).replicated);
+			expect(estado(sql)).toEqual(COBRADO);
+		});
+		// Donde no hay cobro (Turso cuando la Handy pulsa), se borra el ticket entero, como antes.
+		await enElHub("aud14-turso", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of SIEMBRA) sql.exec(s);
+			aplicar(hub, sql, deleteComandaIfSafe("ticket"));
+			expect(estado(sql)).toMatchObject({ comanda: 0, lineas: 0 });
+		});
+	});
+
+	// La condición mira también las líneas: una cobrada por el cobro de OTRA comanda no se borra, ni
+	// el ticket que la tiene. Es una subconsulta sobre la misma tabla del `DELETE`; el test de la Main
+	// (`una_linea_cobrada_por_otra_comanda_no_se_borra`) la comprueba en su SQLite.
+	it("una línea del ticket cobrada por el cobro de otra comanda no se borra, ni el ticket", async () => {
+		await enElHub("aud14-linea-de-otro-cobro", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of [
+				...SIEMBRA,
+				"INSERT INTO Detalle_Comanda (ID_Detalle,ID_Comanda,ID_Producto,Cantidad,Precio_Unitario) VALUES ('linea-2','ticket','cana',1,200)",
+				"INSERT INTO Comandas (ID_Comanda,Canal,Fecha_Hora_Apertura,Fecha_Hora_Cierre,Estado,Total_Comanda) VALUES ('otra','BARRA','2026-11-08 11:00:00','2026-11-08 11:30:00','Pagada',200)",
+				"INSERT INTO Detalle_Comanda (ID_Detalle,ID_Comanda,ID_Producto,Cantidad,Precio_Unitario) VALUES ('linea-otra','otra','cana',1,200)",
+				"INSERT INTO Pagos (ID_Pago,ID_Comanda,Fecha_Hora,Metodo_Pago,Importe_Total,Tipo) VALUES ('pago-otra','otra','2026-11-08 11:30:00','Efectivo',800,'FRACCIONADO')",
+				"INSERT INTO Pago_Detalles (ID_Pago,ID_Detalle) VALUES ('pago-otra','linea-otra')",
+				"INSERT INTO Pago_Detalles (ID_Pago,ID_Detalle) VALUES ('pago-otra','linea')",
+				"INSERT INTO Lote_Consumos (ID_Detalle,ID_Lote,ID_Pago,Cantidad) VALUES ('linea','lote','pago-otra',3)",
+				"INSERT INTO Suelto_Consumos (ID_Detalle,ID_Producto,ID_Pago,Cantidad) VALUES ('linea','cana','pago-otra',1)",
+				// Otro ticket sin nada cobrado: ése sí se borra.
+				"INSERT INTO Comandas (ID_Comanda,Canal,Fecha_Hora_Apertura,Estado) VALUES ('libre','BARRA','2026-11-08 12:30:00','Abierta')",
+				"INSERT INTO Detalle_Comanda (ID_Detalle,ID_Comanda,ID_Producto,Cantidad,Precio_Unitario) VALUES ('linea-libre','libre','cana',1,200)",
+			]) {
+				sql.exec(s);
+			}
+			const n = (q: string) => Number(Object.values(sql.exec(q).toArray()[0] ?? {})[0] ?? 0);
+			const foto = () => ({
+				ticket: n("SELECT COUNT(*) FROM Comandas WHERE ID_Comanda='ticket'"),
+				lineas_del_ticket: n("SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='ticket'"),
+				pago_detalles: n("SELECT COUNT(*) FROM Pago_Detalles WHERE ID_Pago='pago-otra'"),
+				lote_consumos: n("SELECT COUNT(*) FROM Lote_Consumos WHERE ID_Pago='pago-otra'"),
+				suelto_consumos: n("SELECT COUNT(*) FROM Suelto_Consumos WHERE ID_Pago='pago-otra'"),
+			});
+			const INTACTO = { ticket: 1, lineas_del_ticket: 2, pago_detalles: 2, lote_consumos: 1, suelto_consumos: 1 };
+			expect(foto()).toEqual(INTACTO);
+
+			aplicar(hub, sql, deleteComandaIfSafe("ticket"));
+			expect(foto()).toEqual(INTACTO);
+
+			aplicar(hub, sql, deleteComandaIfSafe("libre"));
+			expect(n("SELECT COUNT(*) FROM Comandas WHERE ID_Comanda='libre'")).toBe(0);
+			expect(n("SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='libre'")).toBe(0);
+			expect(foto()).toEqual(INTACTO);
+		});
+	});
+
+	it("si el cobro sube a Turso entre `hasPaidLines` y el lote, tampoco se pierde allí", async () => {
+		await enElHub("aud14-carrera", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of SIEMBRA) sql.exec(s);
+			// El motor real del TenantHub, con el SQLite del DO haciendo de Turso.
+			const db = clienteSobre(sql, hub.state.storage);
+			hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
+			hub.touchLastSeen = async () => {};
+			hub.isMainConnected = () => true;
+			hub.isMainReady = () => true;
+			hub.maybePurgeSyncLog = async () => {};
+			const difundidos: any[] = [];
+			hub.broadcastAuthed = (m: any) => {
+				if (m?.type === "change") difundidos.push(m);
+			};
+
+			// La ruta lee: todavía no hay cobro.
+			expect(await hasPaidLines(db as any, "ticket")).toBe(false);
+			// La Main sube el cobro justo entonces.
+			for (const s of COBRO) sql.exec(s);
+			const built = deleteComandaIfSafe("ticket");
+			const { result } = await hub.applyInternalCommandIdempotent({
+				tenantId: "t-aud14",
+				cmd: built.command,
+				opId: "op-borrar-ticket",
+				commandName: built.commandName,
+				deviceId: "handy",
+				requestPayloadJson: JSON.stringify(built.cloudPayload),
+				cloudPayloadJson: JSON.stringify(built.cloudPayload),
+				clientNow: "2026-11-08 12:10:00",
+			});
+
+			expect(estado(sql)).toEqual(COBRADO);
+			// Lo que mira la ruta para contestar `comanda_has_paid_lines`: no se ha borrado nada.
+			expect(result).toBe(0);
+			expect(difundidos.map((m) => m.statements)).toEqual([REPLICADO]);
 		});
 	});
 });

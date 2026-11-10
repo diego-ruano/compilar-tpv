@@ -385,10 +385,20 @@ export async function cobrarPlan(
 // Basta con que la comanda tenga UN cobro, activo o anulado (CUENTA-07). Y no es una sutileza:
 // `Pagos.ID_Comanda` va con `ON DELETE CASCADE`, asi que borrar la comanda se llevaria por delante
 // la fila del cobro anulado -que es justo la prueba que ese cambio existe para conservar. Por eso
-// se mira `Pagos` y no las lineas cobradas. Paridad con `delete_comanda_if_safe` de la Main.
+// se mira `Pagos`, como `delete_comanda_if_safe` de la Main.
+//
+// AUD-14: y además las lineas de la comanda que esten en `v_lineas_cobradas`, aunque su cobro sea
+// de otra comanda: es la misma condicion que llevan los `DELETE` de `deleteComandaIfSafe`, y la ruta
+// tiene que decir lo mismo que ellos (si no borran nada, no se ha borrado). El borrado propio de la
+// Main sigue mirando solo `Pagos`.
 export async function hasPaidLines(db: Client, idComanda: string): Promise<boolean> {
 	const rs = await db.execute({
-		sql: "SELECT EXISTS(SELECT 1 FROM Pagos WHERE ID_Comanda = ?1) AS has_paid;",
+		sql: `SELECT EXISTS(SELECT 1 FROM Pagos WHERE ID_Comanda = ?1)
+			OR EXISTS(
+				SELECT 1 FROM v_lineas_cobradas v
+				JOIN Detalle_Comanda dc ON dc.ID_Detalle = v.ID_Detalle
+				WHERE dc.ID_Comanda = ?1
+			) AS has_paid;`,
 		args: [idComanda],
 	});
 	return Number(rows(rs)[0]?.has_paid ?? 0) === 1;

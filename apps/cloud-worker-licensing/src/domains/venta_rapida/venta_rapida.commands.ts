@@ -385,6 +385,20 @@ export function cobrarFraccionado(
 }
 
 
+// AUD-14: la regla de borrar (ningún cobro, activo o anulado: CUENTA-07) va dentro de cada
+// `DELETE`, no sólo en la lectura de la ruta. Lo que se replica es la sentencia, y la Main la vuelve
+// a evaluar con sus datos: un ticket que allí está cobrado y aún sin subir no se borra, y la cascada
+// de `Pagos.ID_Comanda` no se lleva el cobro. La misma condición cubre en Turso un cobro que entra
+// entre `hasPaidLines` y el lote (SYNC-30). Tampoco se borra si alguna de sus líneas está cobrada
+// (`v_lineas_cobradas`) por el cobro de otra comanda: borrarla se llevaría en cascada sus
+// `Pago_Detalles` y sus trazas de consumo; así no depende de que ningún camino mueva una línea
+// cobrada de ticket. Las dos sentencias llevan la misma condición, que la primera no cambia: o se
+// borra el ticket entero o no se borra nada, y nunca queda la comanda sin sus líneas ni choca la FK
+// de `Detalle_Comanda.ID_Comanda`.
+const SIN_COBROS =
+	"NOT EXISTS (SELECT 1 FROM Pagos WHERE ID_Comanda = ?1)" +
+	" AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas v JOIN Detalle_Comanda dc ON dc.ID_Detalle = v.ID_Detalle WHERE dc.ID_Comanda = ?1)";
+
 export function deleteComandaIfSafe(idComanda: string): BuiltCommand {
 	return {
 		commandName: "vr_delete_comanda_if_safe",
@@ -394,13 +408,13 @@ export function deleteComandaIfSafe(idComanda: string): BuiltCommand {
 				steps: [
 					{
 						kind: "execute",
-						sql: "DELETE FROM Detalle_Comanda WHERE ID_Comanda = ?1;",
+						sql: `DELETE FROM Detalle_Comanda WHERE ID_Comanda = ?1 AND ${SIN_COBROS};`,
 						args: [idComanda],
 					},
 					{
 						kind: "execute",
 						saveAs: "deleted",
-						sql: "DELETE FROM Comandas WHERE ID_Comanda = ?1;",
+						sql: `DELETE FROM Comandas WHERE ID_Comanda = ?1 AND ${SIN_COBROS};`,
 						args: [idComanda],
 					},
 				],

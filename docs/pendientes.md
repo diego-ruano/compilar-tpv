@@ -25,6 +25,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
+| [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
@@ -344,12 +345,48 @@ puede tener la fila de otra forma sin subir), que es la más ancha de las dos.
 
 Lo que no puede romperse ya lo para la base con un índice único, también entre dos dispositivos a la
 vez: una comanda abierta por mesa, un cierre por periodo, nombres de zona, mesa y producto, correos
-de cliente. Y no todo lo que leen las rutas antes de escribir decide algo: la mayoría resuelve
+de cliente. O una condición dentro de la propia sentencia, que Turso y la Main vuelven a evaluar al
+aplicarla: una línea en una comanda cobrada (INC-20261030-016) o borrar un ticket con cobros
+(AUD-14). Y no todo lo que leen las rutas antes de escribir decide algo: la mayoría resuelve
 identificadores o copia datos del catálogo. Lo que decide es poco más de una decena de comprobaciones.
 
 Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico de Turso,
 que no se replique y que devuelva un error de negocio si no se cumple; y pasar a él esas
 comprobaciones.
+
+### SYNC-31 · Un ticket borrado desde la Handy con su cobro en camino falta en la nube
+
+Si una Handy borra un ticket de barra mientras su cobro va de camino a la nube —la Main ya lo ha
+confirmado y su subida aún no ha entrado en Turso—, Turso no ve ningún cobro y borra el ticket; la
+Main lo conserva, porque la condición de `deleteComandaIfSafe` se vuelve a evaluar allí (AUD-14). La
+ventana es la de un cobro en vuelo con la sesión de la Main viva: cada vez que la Main reconecta,
+congela a las Handy hasta haberse puesto al día (AUD-15). La subida del cobro choca después con la FK de
+`Pagos.ID_Comanda` y se aparta (`outbox_mark_failed`).
+
+Lo que viene detrás no lo devuelve entero:
+
+- **La reparación inmediata** repara las filas que escribió la operación apartada y que su analizador
+  sabe localizar (`sync_reparacion::analizar`), que sólo lee `INSERT … VALUES` y `UPDATE … WHERE
+  <clave>`. Se salta los `INSERT … SELECT` del cobro (`Pago_Detalles`, `Movimientos_Caja`,
+  `Suelto_Consumos`), y el cobro no escribe `Detalle_Comanda`. Si lleva `Lote_Consumos`, su FK a la
+  línea que falta revierte la reparación entera. Si no, puede entrar a medias: la comanda y el pago
+  sin líneas, con el cobro en Cuentas y el ticket fuera de la lista de la Handy, que sólo enseña
+  tickets con líneas.
+- **El contraste diario** (`verificar_nube`) sube lo que falta arriba en una sola operación, que el
+  DO aplica con las FK diferidas, pero:
+  - Las claves de `/verificar-claves` comparten un presupuesto (`TOPE_CLAVES`, que es también el de
+    una tabla sola). Si `Detalle_Comanda` no cabe, sale `truncada` y la Main se la salta
+    (`plan_de_claves`), así que la operación puede llevar filas que apuntan a líneas que no están
+    (`Pago_Detalles`, `Lote_Consumos`, `Suelto_Consumos`): falla por FK, y con ella todo lo demás que
+    reparaba, cada día. No hay cursor para pedir una tabla por partes.
+  - Sus reparaciones no llevan `Repara_Op_Id` (`encolar_op_de_reparacion`), y es lo único que retira
+    una cuarentena al subir (`outbox_mark_sent`): la del cobro y la de la reparación inmediata que
+    falló se quedan.
+
+Arreglo propuesto: que la reparación inmediata mande en una operación el estado completo de la
+comanda afectada (la comanda, sus líneas, sus cobros y lo que cuelga de ellos); y que el contraste
+pida las claves por páginas, no encole una reparación a la que le falta una tabla de la que dependen
+sus filas y quede enlazado a las cuarentenas que resuelve.
 
 ### SYNC-32 · Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube
 

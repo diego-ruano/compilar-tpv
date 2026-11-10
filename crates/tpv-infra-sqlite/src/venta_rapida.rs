@@ -1372,3 +1372,235 @@ mod tests_cobro_repetido {
 
 }
 
+#[cfg(test)]
+mod tests_borrado_desde_la_handy {
+    //! AUD-14: borrar un ticket desde la Handy. El worker decide con lo que ve en Turso
+    //! (`hasPaidLines`) y lo que llega aquí son sus `DELETE`, por la réplica y no por
+    //! `delete_comanda_if_safe`. La Main puede tener ese ticket cobrado con el cobro todavía en el
+    //! outbox: la condición viaja dentro de las sentencias y se vuelve a evaluar aquí. Sin ella, la
+    //! cascada de `Pagos.ID_Comanda` se llevaba el cobro, sus líneas cobradas y sus consumos, y el
+    //! esperado del arqueo bajaba lo cobrado.
+
+    use super::*;
+    use crate::ejecutor::Connection;
+    use crate::sync::SqliteSyncRepository;
+    use serde_json::json;
+    use tpv_application::ports::sync::SyncRepository;
+    use tpv_contracts::sync::{SqlStatement, SyncChange};
+
+    const PAGO: &str = "0192f7a4-3b1c-7d2e-8f00-123456789abc";
+
+    const TICKET_ABIERTO: &[&str] = &[
+        "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL'
+           WHERE ID = 1;",
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+           VALUES ('cana', 'cat', 'Caña', 200);",
+        "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+           VALUES ('lote', 'cana', 'L1', 10, '2027-01-15 10:00:00');",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
+           VALUES ('ticket', 'BARRA', '2027-01-15 12:00:00', 'Abierta');",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('linea', 'ticket', 'cana', 3, 200);",
+    ];
+
+    /// Lo que difunde el `TenantHub` al borrar `ticket` desde la Handy. `contract.test.ts` del
+    /// worker («borrar un ticket no se lleva su cobro») comprueba que es exactamente este texto.
+    fn borrado_de_la_handy() -> Vec<SqlStatement> {
+        let sin_cobros = "NOT EXISTS (SELECT 1 FROM Pagos WHERE ID_Comanda = ?1) \
+            AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas v JOIN Detalle_Comanda dc \
+            ON dc.ID_Detalle = v.ID_Detalle WHERE dc.ID_Comanda = ?1)";
+        vec![
+            SqlStatement {
+                sql: format!("DELETE FROM Detalle_Comanda WHERE ID_Comanda = ?1 AND {sin_cobros};"),
+                args: vec![json!("ticket")],
+            },
+            SqlStatement {
+                sql: format!("DELETE FROM Comandas WHERE ID_Comanda = ?1 AND {sin_cobros};"),
+                args: vec![json!("ticket")],
+            },
+        ]
+    }
+
+    async fn preparar(nombre: &str) -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal(nombre);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in TICKET_ABIERTO {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        (db, dir)
+    }
+
+    async fn valor(db: &Arc<Db>, sql: &str) -> Value {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        match rows.next().await.unwrap() {
+            Some(fila) => fila.get_value(0).unwrap(),
+            None => Value::Null,
+        }
+    }
+
+    /// Lo que un cobro deja y lo que CUENTA-07 exige conservar.
+    #[derive(Debug, PartialEq)]
+    struct Foto {
+        comanda: Value,
+        lineas: Value,
+        pagos: Value,
+        efectivo_que_cuenta: Value,
+        pago_detalles: Value,
+        lote_consumos: Value,
+        pago_del_cobro_en_caja: Value,
+        pago_del_registro_fiscal: Value,
+    }
+
+    async fn foto(db: &Arc<Db>) -> Foto {
+        Foto {
+            comanda: valor(db, "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda = 'ticket';").await,
+            lineas: valor(db, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda = 'ticket';").await,
+            pagos: valor(db, "SELECT COUNT(*) FROM Pagos;").await,
+            efectivo_que_cuenta: valor(
+                db,
+                "SELECT COALESCE(SUM(Importe_Total), 0) FROM Pagos
+                  WHERE Metodo_Pago = 'Efectivo' AND Estado = 'ACTIVO';",
+            )
+            .await,
+            pago_detalles: valor(db, "SELECT COUNT(*) FROM Pago_Detalles;").await,
+            lote_consumos: valor(db, "SELECT COUNT(*) FROM Lote_Consumos;").await,
+            pago_del_cobro_en_caja: valor(db, "SELECT ID_Pago FROM Movimientos_Caja WHERE Tipo = 'COBRO';").await,
+            pago_del_registro_fiscal: valor(db, "SELECT ID_Pago FROM Registros_Facturacion;").await,
+        }
+    }
+
+    fn cobrado() -> Foto {
+        Foto {
+            comanda: Value::Integer(1),
+            lineas: Value::Integer(1),
+            pagos: Value::Integer(1),
+            efectivo_que_cuenta: Value::Integer(600),
+            pago_detalles: Value::Integer(1),
+            lote_consumos: Value::Integer(1),
+            pago_del_cobro_en_caja: Value::Text(PAGO.into()),
+            pago_del_registro_fiscal: Value::Text(PAGO.into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn el_borrado_de_la_handy_no_se_lleva_un_cobro_sin_subir() {
+        let (db, _dir) = preparar("borrado_handy_cobrado").await;
+        SqliteVentaRapidaRepository::new(db.clone())
+            .cobrar_fraccionado(CobroFraccionado {
+                id_pago: PAGO.into(),
+                id_comanda: "ticket".into(),
+                metodo: tpv_domain::pago::MetodoPago::Efectivo,
+                importe_total: Dinero::CERO,
+                id_usuario_cobrador: None,
+                id_trabajador_cobrador: None,
+                detalles: vec!["linea".into()],
+                destinatario: None,
+            })
+            .await
+            .unwrap();
+        let sync = SqliteSyncRepository::new(db.clone());
+        assert_eq!(sync.outbox_pending(50).await.unwrap().len(), 1, "el cobro está sin subir");
+        assert_eq!(foto(&db).await, cobrado());
+
+        // Su propio borrado lo niega dentro de la transacción (CUENTA-07): no necesita la condición.
+        let e = SqliteVentaRapidaRepository::new(db.clone())
+            .delete_comanda_if_safe("ticket")
+            .await
+            .unwrap_err();
+        assert_eq!(e.code(), tpv_contracts::errors::ErrorCode::Conflict);
+
+        let r = sync
+            .apply_changes(vec![SyncChange {
+                op_id: "op-handy".into(),
+                seq: 1,
+                statements: borrado_de_la_handy(),
+            }])
+            .await
+            .unwrap();
+        assert_eq!(r.aplicadas, vec!["op-handy".to_string()], "el cambio entra, sin borrar nada");
+        assert_eq!(foto(&db).await, cobrado());
+        assert_eq!(sync.outbox_pending(50).await.unwrap().len(), 1, "y el cobro sigue por subir");
+    }
+
+    #[tokio::test]
+    async fn sin_cobro_el_borrado_de_la_handy_se_lleva_el_ticket_entero() {
+        let (db, _dir) = preparar("borrado_handy_sin_cobro").await;
+        let r = SqliteSyncRepository::new(db.clone())
+            .apply_changes(vec![SyncChange {
+                op_id: "op-handy".into(),
+                seq: 1,
+                statements: borrado_de_la_handy(),
+            }])
+            .await
+            .unwrap();
+        assert_eq!(r.aplicadas, vec!["op-handy".to_string()]);
+        let f = foto(&db).await;
+        assert_eq!((f.comanda, f.lineas), (Value::Integer(0), Value::Integer(0)));
+    }
+
+    /// La condición también mira las líneas: una del ticket cobrada por el cobro de otra comanda no
+    /// se borra, y con ella tampoco el resto del ticket. Es una subconsulta sobre la misma tabla del
+    /// primer `DELETE`; aquí, evaluada por el SQLite de la Main al aplicar la réplica.
+    #[tokio::test]
+    async fn una_linea_cobrada_por_otra_comanda_no_se_borra() {
+        let (db, _dir) = preparar("borrado_handy_linea_de_otro_cobro").await;
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in [
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+                   VALUES ('linea-2', 'ticket', 'cana', 1, 200);",
+                "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado, Total_Comanda)
+                   VALUES ('otra', 'BARRA', '2027-01-15 11:00:00', '2027-01-15 11:30:00', 'Pagada', 200);",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+                   VALUES ('linea-otra', 'otra', 'cana', 1, 200);",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago-otra', 'otra', '2027-01-15 11:30:00', 'Efectivo', 800, 'FRACCIONADO');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-otra', 'linea-otra');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-otra', 'linea');",
+                "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('linea', 'lote', 'pago-otra', 3);",
+                "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad) VALUES ('linea', 'cana', 'pago-otra', 1);",
+            ] {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        async fn rastro(db: &Arc<Db>) -> Vec<Value> {
+            let mut v = Vec::new();
+            for sql in [
+                "SELECT COUNT(*) FROM Comandas WHERE ID_Comanda = 'ticket';",
+                "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda = 'ticket';",
+                "SELECT COUNT(*) FROM Pago_Detalles WHERE ID_Pago = 'pago-otra';",
+                "SELECT COUNT(*) FROM Lote_Consumos WHERE ID_Pago = 'pago-otra';",
+                "SELECT COUNT(*) FROM Suelto_Consumos WHERE ID_Pago = 'pago-otra';",
+            ] {
+                v.push(valor(db, sql).await);
+            }
+            v
+        }
+        let intacto: Vec<Value> = [1, 2, 2, 1, 1].into_iter().map(Value::Integer).collect();
+        assert_eq!(rastro(&db).await, intacto);
+
+        let r = SqliteSyncRepository::new(db.clone())
+            .apply_changes(vec![SyncChange {
+                op_id: "op-handy".into(),
+                seq: 1,
+                statements: borrado_de_la_handy(),
+            }])
+            .await
+            .unwrap();
+        assert_eq!(r.aplicadas, vec!["op-handy".to_string()], "el cambio entra, sin borrar nada");
+        assert_eq!(rastro(&db).await, intacto);
+    }
+}
+
