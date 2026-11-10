@@ -751,7 +751,7 @@ export default function Proveedores() {
                   <input
                     ref={fotoInputRef}
                     type="file"
-                    accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                    accept="image/jpeg,image/png,.jpg,.jpeg,.png"
                     className="hidden"
                     onChange={conAviso(async (e) => {
                       const file = e.target.files?.[0];

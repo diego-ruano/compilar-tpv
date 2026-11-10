@@ -236,7 +236,7 @@ export default function AddCategoryModal({
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                        accept="image/jpeg,image/png,.jpg,.jpeg,.png"
                         className="hidden"
                         onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
                         disabled={loading}

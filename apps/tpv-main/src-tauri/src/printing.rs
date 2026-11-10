@@ -346,9 +346,43 @@ fn ancho_logo_dots(paper_width_mm: u32, margin_left_mm: f64, margin_right_mm: f6
 ///
 /// Devuelve `None` si la imagen no se puede decodificar: el ticket sale sin logo, que es mejor que
 /// no salir.
+///
+/// AUD-30: los bytes son los de `Logo_DataUrl`, que llega replicado, así que se decodifican con
+/// las mismas cotas con que se guarda una imagen (`imagenes::decodificar`) y no con las de
+/// `image`, que dejan pasar un PNG de 65 KB que pide 3 GiB.
 pub fn rasterizar_logo(bytes: &[u8], ancho_max_dots: u32) -> Option<Vec<u8>> {
-    let img = image::load_from_memory(bytes).ok()?;
+    logo_o_nada(|| {
+        crate::imagenes::decodificar(bytes).map(|(img, _)| rasterizar(img, ancho_max_dots))
+    })
+}
 
+/// El bloque del logo, o `None` con un aviso si no se ha podido hacer.
+///
+/// AUD-30: también si el intento acaba en pánico. Los decodificadores son de terceros y lo que
+/// leen puede venir hecho a mala idea; un pánico aquí mataría la tarea del comando, que no
+/// contestaría nunca, y nada de lo que rodea al ticket puede impedir que salga.
+fn logo_o_nada(
+    intento: impl FnOnce() -> Result<Vec<u8>, String> + std::panic::UnwindSafe,
+) -> Option<Vec<u8>> {
+    match std::panic::catch_unwind(intento) {
+        Ok(Ok(bloque)) => Some(bloque),
+        Ok(Err(motivo)) => {
+            tracing::warn!(target: "tpv::impresion", %motivo, "el logo no se puede imprimir: el ticket sale sin él");
+            None
+        }
+        Err(_) => {
+            tracing::warn!(target: "tpv::impresion", "pánico al rasterizar el logo: el ticket sale sin él");
+            None
+        }
+    }
+}
+
+/// La imagen ya decodificada, como bloque `GS v 0`.
+///
+/// La imagen se entrega, no se presta, para no tener a la vez más copias de las que hacen falta
+/// (AUD-30): lo más que conviven son la imagen y su copia RGBA mientras se convierte. Después
+/// quedan esa copia y el plano gris, y al redimensionar, el plano gris y el intermedio.
+fn rasterizar(img: image::DynamicImage, ancho_max_dots: u32) -> Vec<u8> {
     // El ancho se ajusta al papel; el alto va en proporción. Se usa un múltiplo de 8 porque cada
     // byte de la trama son 8 puntos horizontales.
     let ancho = ancho_max_dots.min(img.width().max(1)).max(8) & !7;
@@ -359,7 +393,10 @@ pub fn rasterizar_logo(bytes: &[u8], ancho_max_dots: u32) -> Option<Vec<u8>> {
     // con el fondo transparente, y `to_luma8()` tira el canal alfa: los píxeles de fuera del
     // dibujo (que suelen ser negro con alfa 0) se leían como negro opaco y el logo salía como un
     // rectángulo de tinta. El papel es blanco, así que lo transparente es blanco.
-    let rgba = img.to_rgba8();
+    //
+    // `into_rgba8` da los mismos píxeles que `to_rgba8`, pero si la imagen ya es RGBA no la copia
+    // y, si no lo es, suelta el original en cuanto la ha convertido.
+    let rgba = img.into_rgba8();
     let mut plano = image::GrayImage::new(rgba.width(), rgba.height());
     for (x, y, px) in rgba.enumerate_pixels() {
         let [r, g, b, a] = px.0;
@@ -368,6 +405,9 @@ pub fn rasterizar_logo(bytes: &[u8], ancho_max_dots: u32) -> Option<Vec<u8>> {
         let sobre_blanco = luma * alfa + 255.0 * (1.0 - alfa);
         plano.put_pixel(x, y, image::Luma([sobre_blanco.round() as u8]));
     }
+    // La copia RGBA ya no hace falta, y el redimensionado reserva su propio intermedio (16 bytes
+    // por cada píxel del ancho original y del alto de salida).
+    drop(rgba);
 
     let gris = image::imageops::resize(&plano, ancho, alto, image::imageops::FilterType::Lanczos3);
 
@@ -425,7 +465,7 @@ pub fn rasterizar_logo(bytes: &[u8], ancho_max_dots: u32) -> Option<Vec<u8>> {
     out.push((h & 0xFF) as u8);
     out.push(((h >> 8) & 0xFF) as u8);
     out.extend_from_slice(&trama);
-    Some(out)
+    out
 }
 
 /// Lo que distingue el papel de una factura que no es un ticket. Todo sale del registro (RI-29):

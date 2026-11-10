@@ -1327,6 +1327,14 @@ fn fallo_de_impresora(e: String) -> AppErrorDto {
     AppErrorDto::new(tpv_contracts::errors::ErrorCode::External, e)
 }
 
+/// El hilo que maqueta e imprime no ha terminado (un pánico): eso sí es un fallo del programa. A
+/// la pantalla le llega qué hacer; el detalle (`task 12 panicked…`, en inglés) es para quien lo
+/// arregle y va al registro (AUD-30).
+fn hilo_de_impresion_caido(e: tokio::task::JoinError) -> AppErrorDto {
+    tracing::warn!(target: "tpv::impresion", error = %e, "el hilo de impresión no ha terminado");
+    AppErrorDto::internal("No se pudo completar la impresión. Vuelve a intentarlo.")
+}
+
 /// Destino por defecto cuando nadie dice cuál: el ticket de cliente.
 const DESTINO_CAJA: &str = "caja";
 
@@ -1417,23 +1425,29 @@ async fn imprimir_ticket(
 ) -> Result<String, AppErrorDto> {
     let printer = resolve_printer(app, payload.printer_name.clone()).map_err(fallo_de_impresora)?;
 
-    // El logo se lee AQUÍ y no dentro del builder: `build_ticket` no toca el disco, que es lo que
-    // lo mantiene comprobable con un test. Si el fichero no está o no se puede decodificar, el
-    // ticket sale sin logo — mejor que no salir.
-    let logo = if payload.show_logo {
-        payload
-            .logo_path
-            .as_deref()
-            .and_then(|ruta| leer_imagen_local(app, ruta))
-    } else {
-        None
-    };
+    // AUD-30: leer el logo y rasterizarlo es disco y CPU, así que va en el hilo de bloqueo de la
+    // impresión y no en la tarea del comando. Si ahí hubiera un pánico, el comando contesta con
+    // un error (`hilo_de_impresion_caido`) en vez de no contestar nunca.
+    let app_data = app_data_dir_of(app).ok();
+    tokio::task::spawn_blocking(move || {
+        // El logo se lee AQUÍ y no dentro del builder: `build_ticket` no toca el disco, que es lo
+        // que lo mantiene comprobable con un test. Si el fichero no está o no se puede
+        // decodificar, el ticket sale sin logo — mejor que no salir.
+        let logo = if payload.show_logo {
+            payload
+                .logo_path
+                .as_deref()
+                .and_then(|ruta| leer_imagen_local(app_data.as_deref(), ruta))
+        } else {
+            None
+        };
 
-    let bytes = printing::build_ticket(&payload, logo.as_deref());
-    tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_TICKET, &bytes))
-        .await
-        .map_err(|e| AppErrorDto::internal(e.to_string()))?
-        .map_err(fallo_de_impresora)?;
+        let bytes = printing::build_ticket(&payload, logo.as_deref());
+        printing::print_raw(&printer, printing::DOC_TICKET, &bytes)
+    })
+    .await
+    .map_err(hilo_de_impresion_caido)?
+    .map_err(fallo_de_impresora)?;
     Ok("OK".into())
 }
 
@@ -1521,7 +1535,7 @@ async fn printer_print_arqueo(
     let bytes = printing::build_arqueo(&payload);
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_ARQUEO, &bytes))
         .await
-        .map_err(|e| AppErrorDto::internal(e.to_string()))?
+        .map_err(hilo_de_impresion_caido)?
         .map_err(fallo_de_impresora)?;
     Ok("OK".into())
 }
@@ -1545,7 +1559,11 @@ fn printer_ticket_cols(args: printing::GeometriaTicket) -> Result<u32, AppErrorD
 
 /// Lee del disco una imagen guardada en AppData (`images/{sub}/{archivo}`) o descodifica un data
 /// URL heredado. `None` si no se puede: quien llama decide qué hacer sin ella.
-fn leer_imagen_local(app: &AppHandle, ruta: &str) -> Option<Vec<u8>> {
+///
+/// AUD-30: la ruta es `Logo_DataUrl`, que llega replicado (o, en la precuenta, de la pantalla), y
+/// puede ser cualquier texto. Ni el data URL ni el fichero se leen más allá de lo que pesa una
+/// imagen admitida (`imagenes::MAX_BYTES`): lo que pasa de ahí no se iba a imprimir.
+fn leer_imagen_local(app_data: Option<&std::path::Path>, ruta: &str) -> Option<Vec<u8>> {
     let r = ruta.trim();
     if r.is_empty() {
         return None;
@@ -1553,12 +1571,26 @@ fn leer_imagen_local(app: &AppHandle, ruta: &str) -> Option<Vec<u8>> {
 
     // Data URL heredado (`data:image/png;base64,…`): los logos antiguos se guardaron así.
     if let Some(b64) = r.split_once(";base64,").map(|(_, b)| b) {
+        // Base64 añade un tercio: se mide antes de decodificar, como en `save_image`.
+        if b64.len() > imagenes::MAX_BYTES.div_ceil(3) * 4 {
+            tracing::warn!(target: "tpv::impresion", "el logo pesa más de 5 MB: el ticket sale sin él");
+            return None;
+        }
         use base64::Engine;
         return base64::engine::general_purpose::STANDARD.decode(b64).ok();
     }
 
-    let dir = app_data_dir_of(app).ok()?;
-    std::fs::read(ruta_dentro_de(&dir, r)?).ok()
+    // Sólo una imagen guardada (`images/{sub}/{archivo}`). Cualquier otro nombre puede ser un
+    // dispositivo de Windows (`COM1`, `NUL`), que se abre como un fichero aunque esté escrito
+    // dentro de AppData, y de un puerto serie no se acaba de leer nunca.
+    if !imagenes::ruta_segura(r) {
+        return None;
+    }
+    let leido = imagenes::leer_para_subida(&ruta_dentro_de(app_data?, r)?).ok()?;
+    if leido.is_none() {
+        tracing::warn!(target: "tpv::impresion", "el logo pesa más de 5 MB: el ticket sale sin él");
+    }
+    leido
 }
 
 /// Resuelve una ruta relativa **dentro** de `dir`, o `None` si se sale.
@@ -1633,7 +1665,7 @@ async fn printer_open_drawer(
     let bytes = printing::build_abrir_cajon();
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_CAJON, &bytes))
         .await
-        .map_err(|e| AppErrorDto::internal(e.to_string()))?
+        .map_err(hilo_de_impresion_caido)?
         .map_err(fallo_de_impresora)?;
     Ok("OK".into())
 }
@@ -1649,7 +1681,7 @@ async fn printer_print_test(
     let bytes = printing::build_test_ticket(&printer);
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, printing::DOC_PRUEBA, &bytes))
         .await
-        .map_err(|e| AppErrorDto::internal(e.to_string()))?
+        .map_err(hilo_de_impresion_caido)?
         .map_err(fallo_de_impresora)?;
     Ok("OK".into())
 }
@@ -2716,6 +2748,84 @@ mod tests_ruta_del_logo {
         // "./images/logo.png" es la misma ruta escrita de otra forma.
         let dir = temporal();
         assert!(ruta_dentro_de(&dir, "./images/logo.png").is_some());
+    }
+
+    // AUD-30: el valor llega replicado, así que sólo se lee una imagen guardada, y no más de lo
+    // que pesa una admitida, venga como fichero o como data URL.
+
+    /// `temporal()` con un logo donde lo deja `save_image`.
+    fn con_logo() -> std::path::PathBuf {
+        let dir = temporal();
+        std::fs::create_dir_all(dir.join("images/logo")).unwrap();
+        std::fs::write(dir.join("images/logo/logo.png"), b"logo").unwrap();
+        dir
+    }
+
+    #[test]
+    fn un_logo_se_lee_del_disco_o_de_un_data_url() {
+        let dir = con_logo();
+
+        assert_eq!(leer_imagen_local(Some(&dir), "images/logo/logo.png").as_deref(), Some(&b"logo"[..]));
+        // «logo» en base64.
+        assert_eq!(leer_imagen_local(None, "data:image/png;base64,bG9nbw==").as_deref(), Some(&b"logo"[..]));
+        assert_eq!(leer_imagen_local(Some(&dir), "images/logo/no_esta.png"), None);
+    }
+
+    #[test]
+    fn solo_se_lee_una_imagen_guardada() {
+        // `images/logo.png` existe dentro de AppData, pero no es donde se guarda una imagen. Y
+        // `NUL` es un dispositivo de Windows: se abre como un fichero vacío en cualquier carpeta,
+        // igual que `COM1` se abriría como un puerto serie del que no se acaba de leer.
+        let dir = con_logo();
+
+        for ruta in ["images/logo.png", "NUL", "../../secreto.png", "C:/Windows/win.ini"] {
+            assert_eq!(leer_imagen_local(Some(&dir), ruta), None, "{ruta}");
+        }
+    }
+
+    #[test]
+    fn un_data_url_mas_largo_que_una_imagen_admitida_no_se_decodifica() {
+        // El mismo tope que `save_image` pone a lo que le manda la pantalla.
+        let tope = imagenes::MAX_BYTES.div_ceil(3) * 4;
+        let data_url = |largo: usize| format!("data:image/png;base64,{}", "A".repeat(largo));
+
+        assert!(leer_imagen_local(None, &data_url(tope)).is_some());
+        assert!(leer_imagen_local(None, &data_url(tope + 4)).is_none());
+    }
+
+    #[test]
+    fn un_fichero_mas_grande_que_una_imagen_admitida_no_se_lee() {
+        let dir = con_logo();
+        let grande = dir.join("images/logo/grande.png");
+        std::fs::File::create(&grande).unwrap().set_len((imagenes::MAX_BYTES + 1) as u64).unwrap();
+
+        let leido = leer_imagen_local(Some(&dir), "images/logo/grande.png");
+        std::fs::remove_file(&grande).unwrap();
+
+        assert!(leido.is_none(), "se han leído {} bytes", leido.map_or(0, |b| b.len()));
+    }
+}
+
+#[cfg(test)]
+mod tests_hilo_de_impresion {
+    //! Si el hilo que maqueta e imprime se cae, la pantalla recibe qué hacer, en español, y no el
+    //! texto de tokio (AUD-30).
+
+    use super::*;
+
+    #[tokio::test]
+    async fn un_panico_al_imprimir_no_llega_a_la_pantalla_en_ingles() {
+        let caido = tokio::task::spawn_blocking(|| {
+            panic!("index out of bounds");
+        })
+        .await
+        .expect_err("el hilo ha entrado en pánico");
+        assert!(caido.to_string().contains("panicked"), "{caido}");
+
+        let error = hilo_de_impresion_caido(caido);
+
+        assert!(matches!(error.code, tpv_contracts::errors::ErrorCode::Internal));
+        assert_eq!(error.message, "No se pudo completar la impresión. Vuelve a intentarlo.");
     }
 }
 

@@ -99,8 +99,34 @@ Hay dos papeles y salen de sitios distintos (RI-29):
   enseña el motivo («La impresora … está sin papel»).
 - **El logo es de un bit**: `rasterizar_logo` lo reduce al ancho del papel (múltiplo de 8 dots), compone
   la transparencia sobre blanco, difumina con Floyd–Steinberg y emite `GS v 0`. Su ancho sale del
-  cabezal y los márgenes (`ancho_logo_dots`), no de `chars_per_line`, que es la densidad del texto. Si
-  la imagen no se lee, el ticket sale sin logo.
+  cabezal y los márgenes (`ancho_logo_dots`), no de `chars_per_line`, que es la densidad del texto.
+- **El logo pasa al imprimir por las mismas cotas que al guardarlo** (AUD-30). `Logo_DataUrl` se
+  replica y lo puede escribir cualquier dispositivo del negocio, así que no se da por bueno aunque
+  la interfaz sólo guarde imágenes ya reconstruidas. `leer_imagen_local` sólo lee una imagen
+  guardada (`images/{carpeta}/{archivo}`, la forma que valida `imagenes::ruta_segura`) o un data URL
+  heredado, y no más de 5 MB; `rasterizar_logo` decodifica con `imagenes::decodificar`, la misma
+  función de `save_image`. Lo que no se lee, no cumple las cotas o hace fallar al decodificador
+  (también con un pánico) deja el ticket sin logo, con un aviso en el registro si es la imagen la
+  que se rechaza.
+- **Sólo se decodifican JPEG y PNG**, al guardar una imagen y al imprimir el logo: 8192 px de lado,
+  24 Mpx y 128 MiB de imagen decodificada, comprobados con la cabecera antes de reservar los
+  píxeles. WebP no se admite ni se compila (`image` va sin esa característica) y la interfaz no lo
+  ofrece: su decodificador reserva lo que declara el fichero antes de comprobarlo, y con unos bytes
+  pedía gigas. Un logo que ya estuviera guardado en WebP se sigue viendo en pantalla, que lo pinta
+  la webview, pero no sale en el papel.
+- **128 MiB acotan la imagen decodificada, no la memoria del proceso.** Con ella conviven otros
+  búferes en cada paso. Al decodificarla, los coeficientes de un JPEG progresivo (hasta 8 bytes por
+  píxel) o el perfil de color de un PNG (hasta otros 128 MiB). Al girarla por su orientación, la
+  copia girada. Al rasterizarla, su copia RGBA de 8 bits mientras se convierte (una imagen que ya
+  es RGBA no se copia); el plano gris se compone con el original ya liberado, y el intermedio del
+  redimensionado (16 bytes por cada píxel del ancho original y del alto de salida), con esa copia
+  ya liberada. El peor caso conocido de búferes son unos 256 MiB: una imagen de 128 MiB junto a su
+  copia girada o a su perfil de color. Al rasterizar son 213 MiB, con un PNG RGB de 16 bits de
+  4096 × 5461. No es un techo del proceso: se suman la entrada, lo que el decodificador guarda por
+  dentro y lo que ya ocupe la Main.
+- **El logo se lee y el ticket se maqueta en el hilo de bloqueo que lo manda a la impresora**, no en
+  la tarea del comando. Si ese hilo se cae, la pantalla recibe «No se pudo completar la impresión.
+  Vuelve a intentarlo.» y el detalle va al registro.
 - **Nada de lo que rodea al ticket puede impedir cobrar**: ni el logo, ni el QR, ni la impresora.
 - **Un carácter, un byte**: `encode_cp858` mapea uno a uno y lo que no está en la tabla sale `?`. Los
   bytes de control se convierten en espacio: el nombre de un producto lo escribe una persona, y un

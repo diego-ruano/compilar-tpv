@@ -242,7 +242,7 @@ export function Negocio({
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                            accept="image/jpeg,image/png,.jpg,.jpeg,.png"
                             className="hidden"
                             onChange={conAviso((e) => onLogoFile(e.target.files?.[0]))}
                         />

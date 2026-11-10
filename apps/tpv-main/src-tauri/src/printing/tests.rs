@@ -1566,6 +1566,318 @@ mod tests_logo_imagen {
 }
 
 #[cfg(test)]
+mod reservas {
+    //! El asignador de los tests de esta crate: el del sistema, que además apunta la mayor reserva
+    //! que pide cada hilo.
+    //!
+    //! Está para poder afirmar que una imagen se rechaza SIN reservar su memoria (AUD-30). El
+    //! resultado solo no lo dice —una imagen sin datos también acaba en `None`, después de pedir
+    //! medio giga—, y medir el tiempo o la memoria del proceso dependería de la máquina.
+
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        // `const` y sin `Drop`: leerla no reserva nada, así que se puede tocar desde el asignador.
+        static MAYOR: Cell<usize> = const { Cell::new(0) };
+    }
+
+    struct Apuntador;
+
+    fn apuntar(bytes: usize) {
+        let _ = MAYOR.try_with(|mayor| mayor.set(mayor.get().max(bytes)));
+    }
+
+    // SAFETY: todo se delega en `System`; lo único que se añade es apuntar el tamaño pedido.
+    unsafe impl GlobalAlloc for Apuntador {
+        unsafe fn alloc(&self, forma: Layout) -> *mut u8 {
+            apuntar(forma.size());
+            unsafe { System.alloc(forma) }
+        }
+        unsafe fn alloc_zeroed(&self, forma: Layout) -> *mut u8 {
+            apuntar(forma.size());
+            unsafe { System.alloc_zeroed(forma) }
+        }
+        unsafe fn dealloc(&self, puntero: *mut u8, forma: Layout) {
+            unsafe { System.dealloc(puntero, forma) }
+        }
+        unsafe fn realloc(&self, puntero: *mut u8, forma: Layout, bytes: usize) -> *mut u8 {
+            apuntar(bytes);
+            unsafe { System.realloc(puntero, forma, bytes) }
+        }
+    }
+
+    #[global_allocator]
+    static ASIGNADOR: Apuntador = Apuntador;
+
+    /// Ejecuta `f` y dice de cuántos bytes ha sido la mayor reserva que ha pedido en este hilo.
+    pub fn mayor_reserva<T>(f: impl FnOnce() -> T) -> (T, usize) {
+        MAYOR.with(|mayor| mayor.set(0));
+        let resultado = f();
+        (resultado, MAYOR.with(Cell::get))
+    }
+}
+
+#[cfg(test)]
+mod tests_logo_replicado {
+    //! El logo que se imprime es un dato replicado, no una imagen que haya guardado esta Main
+    //! (AUD-30).
+    //!
+    //! `Logo_DataUrl` lo puede escribir una Handy con cualquier texto, y la Main lo decodificaba
+    //! con los límites de `image` (512 MiB y ningún tope de lado): un PNG de 65 KB pedía 3,2 GiB
+    //! en cada ticket. Ahora pasa por las cotas con que se guarda una imagen, comprobadas con la
+    //! cabecera, y lo que no las cumple deja el ticket sin logo.
+    //!
+    //! Los ficheros de aquí sólo DECLARAN lo que piden: una cabecera y ningún dato. Es todo lo que
+    //! hace falta para saber si algo se rechaza a tiempo, porque quien se fíe de la cabecera
+    //! reserva antes de descubrir que no hay datos. Ninguna imagen enorme se fabrica ni se
+    //! decodifica, y lo que se mide es la mayor reserva, no el tiempo.
+
+    use super::fixtures::*;
+    use super::reservas::mayor_reserva;
+    use super::*;
+    use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
+
+    const MIB: usize = 1024 * 1024;
+    const GRIS: u8 = 0;
+    const RGBA: u8 = 6;
+
+    fn crc32(datos: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &byte in datos {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xEDB8_8320 & 0u32.wrapping_sub(crc & 1));
+            }
+        }
+        !crc
+    }
+
+    /// Un PNG que sólo declara su tamaño: la cabecera y un bloque de datos sin un solo píxel. La
+    /// bomba de verdad lleva la misma cabecera y 65 KB de ceros comprimidos.
+    fn png_que_declara(ancho: u32, alto: u32, bits: u8, color: u8) -> Vec<u8> {
+        fn trozo(png: &mut Vec<u8>, tipo: &[u8; 4], datos: &[u8]) {
+            png.extend_from_slice(&(datos.len() as u32).to_be_bytes());
+            let desde = png.len();
+            png.extend_from_slice(tipo);
+            png.extend_from_slice(datos);
+            let crc = crc32(&png[desde..]);
+            png.extend_from_slice(&crc.to_be_bytes());
+        }
+
+        let mut cabecera = Vec::new();
+        cabecera.extend_from_slice(&ancho.to_be_bytes());
+        cabecera.extend_from_slice(&alto.to_be_bytes());
+        cabecera.extend_from_slice(&[bits, color, 0, 0, 0]);
+
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        trozo(&mut png, b"IHDR", &cabecera);
+        // Un flujo zlib válido y vacío: un bloque sin comprimir de cero bytes y su Adler-32.
+        trozo(&mut png, b"IDAT", &[0x78, 0x01, 0x01, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x01]);
+        trozo(&mut png, b"IEND", &[]);
+        png
+    }
+
+    /// Un JPEG en gris que sólo declara su tamaño: la cabecera del fotograma y la del barrido.
+    fn jpeg_que_declara(ancho: u16, alto: u16) -> Vec<u8> {
+        let (ancho, alto) = (ancho.to_be_bytes(), alto.to_be_bytes());
+        let mut jpeg = vec![0xFF, 0xD8];
+        // SOF0: 8 bits, alto, ancho y un componente sin submuestreo.
+        jpeg.extend_from_slice(&[0xFF, 0xC0, 0, 11, 8, alto[0], alto[1], ancho[0], ancho[1], 1, 1, 0x11, 0]);
+        // SOS: ese componente, de la frecuencia 0 a la 63.
+        jpeg.extend_from_slice(&[0xFF, 0xDA, 0, 8, 1, 1, 0, 0, 63, 0]);
+        jpeg
+    }
+
+    /// Un WebP hecho de trozos RIFF, cada uno con el tamaño que declara y los datos que trae, que
+    /// pueden ser menos.
+    fn webp(trozos: &[(&[u8; 4], u32, &[u8])]) -> Vec<u8> {
+        let mut cuerpo = b"WEBP".to_vec();
+        for (tipo, declarado, datos) in trozos {
+            cuerpo.extend_from_slice(*tipo);
+            cuerpo.extend_from_slice(&declarado.to_le_bytes());
+            cuerpo.extend_from_slice(datos);
+        }
+        let mut fichero = b"RIFF".to_vec();
+        fichero.extend_from_slice(&(cuerpo.len() as u32).to_le_bytes());
+        fichero.extend_from_slice(&cuerpo);
+        fichero
+    }
+
+    /// Los bytes que `image` reservaría para decodificarla, según su cabecera.
+    fn declarado(fichero: &[u8]) -> u64 {
+        use image::ImageDecoder;
+        image::ImageReader::new(std::io::Cursor::new(fichero))
+            .with_guessed_format()
+            .unwrap()
+            .into_decoder()
+            .expect("la cabecera es válida")
+            .total_bytes()
+    }
+
+    fn codificar(img: &DynamicImage, formato: ImageFormat) -> Vec<u8> {
+        let mut salida = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut salida, formato).expect("codificar la imagen");
+        salida.into_inner()
+    }
+
+    /// Rechazada por las dos puertas, imprimir y guardar, sin haber reservado ni un mebibyte.
+    fn se_rechaza_sin_reservar(nombre: &str, fichero: &[u8]) {
+        let (bloque, mayor) = mayor_reserva(|| rasterizar_logo(fichero, 576));
+        assert!(bloque.is_none(), "{nombre}: no es un logo que se pueda imprimir");
+        assert!(mayor < MIB, "{nombre}: al imprimir se ha rechazado después de reservar {mayor} bytes");
+
+        let (guardada, mayor) = mayor_reserva(|| crate::imagenes::procesar(fichero));
+        assert!(guardada.is_err(), "{nombre}: no es una imagen que se pueda guardar");
+        assert!(mayor < MIB, "{nombre}: al guardar se ha rechazado después de reservar {mayor} bytes");
+    }
+
+    #[test]
+    fn las_bombas_se_rechazan_sin_reservar_su_memoria() {
+        // Las dos de la investigación, y la misma en JPEG. Declaran lo mismo, justo por debajo de
+        // los 512 MiB que `image` deja reservar por defecto, y ninguna pasa de 550 KB comprimida.
+        // La de un bit se expandía a 8 al decodificar y a RGBA después: 3,2 GiB por ticket.
+        for (nombre, fichero) in [
+            ("PNG gris de 1 bit, 23168²", png_que_declara(23168, 23168, 1, GRIS)),
+            ("PNG RGBA8, 11584²", png_que_declara(11584, 11584, 8, RGBA)),
+            ("JPEG gris, 23168²", jpeg_que_declara(23168, 23168)),
+        ] {
+            assert_eq!(declarado(&fichero), 536_756_224, "{nombre}");
+            se_rechaza_sin_reservar(nombre, &fichero);
+        }
+    }
+
+    #[test]
+    fn cada_cota_de_guardar_una_imagen_vale_tambien_al_imprimir() {
+        // Una imagen por cota, que sólo se pasa de esa, en los dos formatos que se admiten.
+        for (nombre, fichero) in [
+            ("PNG de 8193 px de ancho", png_que_declara(8193, 1, 8, RGBA)),
+            ("PNG de 8193 px de alto", png_que_declara(1, 8193, 8, RGBA)),
+            // 36 Mpx en 36 MB: cabe en memoria y en lado.
+            ("PNG de más de 24 Mpx", png_que_declara(6000, 6000, 8, GRIS)),
+            // 18 Mpx a 8 bytes por píxel: 144 MB.
+            ("PNG de más de 128 MiB", png_que_declara(4000, 4500, 16, RGBA)),
+            ("JPEG de 8193 px de ancho", jpeg_que_declara(8193, 1)),
+            ("JPEG de 8193 px de alto", jpeg_que_declara(1, 8193)),
+            ("JPEG de más de 24 Mpx", jpeg_que_declara(6000, 6000)),
+        ] {
+            se_rechaza_sin_reservar(nombre, &fichero);
+        }
+    }
+
+    #[test]
+    fn un_webp_no_llega_a_su_decodificador() {
+        // WebP no se admite: su decodificador reserva lo que declara el fichero antes de
+        // comprobarlo, y con estos dos (56 y 48 bytes, dentro de todas las cotas) pedía 3 GiB al
+        // leer la orientación y 400 MiB al abrir el fotograma. El tercero es un WebP correcto.
+        const CON_EXIF: u8 = 0x08;
+        let lienzo_de_1x1 = |marcas: u8| [marcas, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let vp8_de = |lado: u16| {
+            let lado = lado.to_le_bytes();
+            [0, 0, 0, 0x9D, 0x01, 0x2A, lado[0], lado[1], lado[0], lado[1]]
+        };
+
+        let exif_sin_datos = webp(&[
+            (b"VP8X", 10, &lienzo_de_1x1(CON_EXIF)),
+            (b"VP8 ", 10, &vp8_de(1)),
+            (b"EXIF", 0xC000_0000, &[]),
+        ]);
+        let vp8_mayor_que_el_lienzo =
+            webp(&[(b"VP8X", 10, &lienzo_de_1x1(0)), (b"VP8 ", 10, &vp8_de(16383))]);
+        let correcto =
+            b"RIFF\x1a\0\0\0WEBPVP8L\x0d\0\0\0\x2f\0\0\0\x10\x07\x10\x11\x11\x88\x88\xfe\x07\0".to_vec();
+        assert_eq!((exif_sin_datos.len(), vp8_mayor_que_el_lienzo.len()), (56, 48));
+
+        for (nombre, fichero) in [
+            ("un EXIF que declara 3 GiB", exif_sin_datos),
+            ("un VP8 de 16383² en un lienzo de 1×1", vp8_mayor_que_el_lienzo),
+            ("un WebP correcto de 1×1", correcto),
+        ] {
+            assert_eq!(image::guess_format(&fichero).unwrap(), ImageFormat::WebP, "{nombre}");
+            se_rechaza_sin_reservar(nombre, &fichero);
+            assert_eq!(
+                crate::imagenes::procesar(&fichero).unwrap_err(),
+                "Solo se admiten JPEG y PNG",
+                "{nombre}"
+            );
+        }
+    }
+
+    #[test]
+    fn una_imagen_valida_que_pasa_de_las_cotas_tampoco_se_imprime() {
+        // No hace falta que sea una bomba: lo que `save_image` no habría guardado no se imprime.
+        let png = codificar(&DynamicImage::new_rgba8(8193, 1), ImageFormat::Png);
+
+        assert!(image::load_from_memory(&png).is_ok(), "la imagen es válida");
+        assert!(rasterizar_logo(&png, 576).is_none(), "se ha impreso una imagen de 8193 px de ancho");
+    }
+
+    #[test]
+    fn un_logo_normal_sale_igual_que_antes() {
+        // Un círculo negro de 600×200: como lo guarda la app (PNG con transparencia y JPEG) y como
+        // puede llegar replicado sin haber pasado por ella, en RGB de 16 bits, que es el formato
+        // que más memoria pide al rasterizarlo.
+        let dibujo = |fondo: Rgba<u8>| {
+            RgbaImage::from_fn(600, 200, |x, y| {
+                let (dx, dy) = (x as i32 - 300, y as i32 - 100);
+                if dx * dx + dy * dy < 90 * 90 { Rgba([0, 0, 0, 255]) } else { fondo }
+            })
+        };
+        let transparente = DynamicImage::ImageRgba8(dibujo(Rgba([0, 0, 0, 0])));
+        let opaco = DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(dibujo(Rgba([255; 4]))).to_rgb8());
+        let de_16_bits = DynamicImage::ImageRgb16(opaco.to_rgb16());
+        // Lo que `save_image` deja en el disco.
+        let guardado = |img: &DynamicImage, formato| crate::imagenes::procesar(&codificar(img, formato)).unwrap().0;
+
+        for (nombre, fichero) in [
+            ("PNG guardado por la app", guardado(&transparente, ImageFormat::Png)),
+            ("JPEG guardado por la app", guardado(&opaco, ImageFormat::Jpeg)),
+            ("PNG RGB de 16 bits", codificar(&de_16_bits, ImageFormat::Png)),
+        ] {
+            // Como se decodificaba: `image::load_from_memory`, sin cotas. El rasterizado es el mismo.
+            let antes = rasterizar(image::load_from_memory(&fichero).unwrap(), 576);
+            assert_eq!(antes.len(), 8 + (576 / 8) * 192, "{nombre}: 600×200 a 576 puntos son 192 filas");
+
+            assert!(rasterizar_logo(&fichero, 576) == Some(antes), "{nombre}: no sale igual que antes");
+        }
+    }
+
+    #[test]
+    fn una_imagen_que_ya_es_rgba_no_se_copia_para_rasterizarla() {
+        // 6000×100 en RGBA son 2,4 MB. El plano gris (0,6 MB) y el intermedio del redimensionado
+        // (6000 de ancho × 10 filas de salida × 16 bytes, 1 MB) son menores: si algo reserva
+        // 2,4 MB, es una copia de la imagen.
+        let imagen = DynamicImage::new_rgba8(6000, 100);
+        let (bloque, mayor) = mayor_reserva(|| rasterizar(imagen, 576));
+
+        assert_eq!(bloque.len(), 8 + (576 / 8) * 10);
+        assert!(mayor < 6000 * 100 * 4, "se ha reservado una copia de la imagen: {mayor} bytes");
+    }
+
+    #[test]
+    fn con_un_logo_rechazado_sale_el_mismo_ticket_que_sin_logo() {
+        let mut p = base(vec![linea()]);
+        p.show_logo = true;
+        p.fecha = Some("10/11/2026 13:30".into());
+
+        let bytes = build_ticket(&p, Some(&png_que_declara(23168, 23168, 1, GRIS)));
+
+        assert!(contiene(&bytes, "Cafe"));
+        assert_eq!(bytes, build_ticket(&p, None));
+    }
+
+    #[test]
+    fn un_panico_al_rasterizar_deja_el_ticket_sin_logo() {
+        // Lo que pasaría si un decodificador reventara con una imagen hecha a mala idea: el
+        // pánico se queda en el logo y no mata la tarea que imprime.
+        assert_eq!(logo_o_nada(|| panic!("el decodificador ha reventado")), None);
+
+        assert_eq!(logo_o_nada(|| Err("Imagen no válida".into())), None);
+        assert_eq!(logo_o_nada(|| Ok(vec![0x1D, 0x76])), Some(vec![0x1D, 0x76]));
+    }
+}
+
+#[cfg(test)]
 mod tests_ancho_del_logo {
     //! Cuánto papel puede ocupar el logo.
     //!

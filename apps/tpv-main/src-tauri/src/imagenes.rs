@@ -47,13 +47,24 @@ pub fn destino(app_data: &Path, rel: &str, crear: bool) -> Result<PathBuf, Strin
     Ok(archivo)
 }
 
-pub fn procesar(bytes: &[u8]) -> Result<(Vec<u8>, &'static str), String> {
+/// Decodifica una imagen con las cotas de RI-07: 5 MB, JPEG o PNG, 8192 px de lado, 24 Mpx y
+/// 128 MiB de imagen decodificada. Se comprueban con la cabecera, antes de reservar los píxeles,
+/// así que una imagen que declara más se rechaza sin ocupar memoria.
+///
+/// AUD-30: por aquí pasa toda imagen que decodifica Rust, la que se guarda (`procesar`) y la que
+/// se imprime (`printing::rasterizar_logo`). El logo llega replicado: que la interfaz sólo guarde
+/// imágenes ya reconstruidas no dice nada de lo que hay en `Logo_DataUrl`.
+///
+/// WebP no se admite, y `image` se compila sin él. Su decodificador reserva lo que declara el
+/// fichero antes de comprobarlo —el tamaño de un trozo EXIF que no está, los planos de un VP8 más
+/// grande que el lienzo, una tabla por cada grupo de códigos de un VP8L— e `image` no le pasa
+/// ningún límite: con unos bytes pedía gigas, dentro de todas las cotas de arriba. Los de PNG y
+/// JPEG reservan según los bytes que hay o según las dimensiones ya comprobadas, y el perfil de
+/// color de un PNG, que va comprimido, no pasa de `max_alloc`.
+pub fn decodificar(bytes: &[u8]) -> Result<(DynamicImage, ImageFormat), String> {
     if bytes.is_empty() || bytes.len() > MAX_BYTES { return Err("La imagen debe pesar como máximo 5 MB".into()); }
     let formato = image::guess_format(bytes).map_err(|_| "Imagen no válida")?;
-    let extension = match formato {
-        ImageFormat::Jpeg => "jpg", ImageFormat::Png => "png", ImageFormat::WebP => "webp",
-        _ => return Err("Solo se admiten JPEG, PNG y WebP".into()),
-    };
+    if !matches!(formato, ImageFormat::Jpeg | ImageFormat::Png) { return Err("Solo se admiten JPEG y PNG".into()); }
     let mut lector = ImageReader::with_format(Cursor::new(bytes), formato);
     let mut limites = Limits::default();
     limites.max_image_width = Some(MAX_LADO_ENTRADA);
@@ -66,6 +77,12 @@ pub fn procesar(bytes: &[u8]) -> Result<(Vec<u8>, &'static str), String> {
     let orientacion = decoder.orientation().map_err(|e| e.to_string())?;
     let mut img = DynamicImage::from_decoder(decoder).map_err(|e| format!("Imagen no válida: {e}"))?;
     img.apply_orientation(orientacion);
+    Ok((img, formato))
+}
+
+pub fn procesar(bytes: &[u8]) -> Result<(Vec<u8>, &'static str), String> {
+    let (mut img, formato) = decodificar(bytes)?;
+    let extension = if formato == ImageFormat::Jpeg { "jpg" } else { "png" };
     if img.width() > 1024 || img.height() > 1024 { img = img.resize(1024, 1024, FilterType::Lanczos3); }
     // Solo se codifican píxeles: no se trasladan metadatos ni bytes añadidos al original.
     let mut out = Cursor::new(Vec::new());
@@ -97,7 +114,7 @@ mod tests {
     }
     #[test]
     fn conserva_formato_y_transparencia_sin_bytes_anadidos() {
-        for formato in [ImageFormat::Jpeg, ImageFormat::Png, ImageFormat::WebP] {
+        for formato in [ImageFormat::Jpeg, ImageFormat::Png] {
             let mut original = Cursor::new(Vec::new());
             let img = if formato == ImageFormat::Jpeg { DynamicImage::new_rgb8(2, 2) } else { DynamicImage::new_rgba8(2, 2) };
             img.write_to(&mut original, formato).unwrap();
@@ -116,5 +133,12 @@ mod tests {
         img.write_to(&mut original, ImageFormat::Png).unwrap();
         assert!(procesar(original.get_ref()).is_err());
         assert!(procesar(b"<svg><script/></svg>").is_err());
+    }
+    #[test]
+    fn no_admite_webp_aunque_sea_valido() {
+        // AUD-30: un WebP sin pérdida de 1×1, correcto. Lo que no se admite es el formato.
+        let webp = b"RIFF\x1a\0\0\0WEBPVP8L\x0d\0\0\0\x2f\0\0\0\x10\x07\x10\x11\x11\x88\x88\xfe\x07\0";
+        assert_eq!(image::guess_format(webp).unwrap(), ImageFormat::WebP);
+        assert_eq!(procesar(webp).unwrap_err(), "Solo se admiten JPEG y PNG");
     }
 }
