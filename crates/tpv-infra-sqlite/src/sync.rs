@@ -215,6 +215,21 @@ async fn ya_apartada(conn: &Connection, op_id: &str) -> AppResult<bool> {
     }
 }
 
+/// AUD-19 · ¿Es esta base una copia restaurada que todavía no se ha reconciliado? Por el pool de
+/// lectura: se mira antes de tomar el escritor, para guardar la base con `VACUUM INTO`.
+async fn reconciliacion_pendiente(db: &Db) -> AppResult<bool> {
+    let r = db.read().await;
+    let mut rows = r
+        .conn()
+        .query("SELECT Reconciliation_Pending FROM _Recovery_State WHERE Id = 1;", ())
+        .await
+        .map_err(db_err)?;
+    match rows.next().await.map_err(db_err)? {
+        Some(f) => Ok(v_i64(f.get_value(0).map_err(db_err)?).unwrap_or(0) != 0),
+        None => Ok(false),
+    }
+}
+
 /// No reintenta la sentencia rechazada: lee cómo está **ahora** cada fila en la Main —que es el
 /// escritor único, o sea la autoridad— y encola un `INSERT OR REPLACE` con su contenido actual. Eso
 /// no depende del orden, se puede repetir sin daño y converge; reaplicar la sentencia vieja, en
@@ -1086,6 +1101,17 @@ impl SyncRepository for SqliteSyncRepository {
             let copia = crate::recovery::guardar_base_de_antes_del_traslado(&self.db).await?;
             tracing::info!(target: "tpv::sync", copia = %copia.display(), "base de antes del traslado guardada");
         }
+        // AUD-19: lo mismo con una copia restaurada que todavía no se ha reconciliado (la que se
+        // rechaza por anterior a lo que guarda la nube, o cualquier otra que no converge). Su outbox
+        // es de antes: lo que el equipo de entonces ya subió volvería a aplicarse en cuanto caducara
+        // su `Applied_Operations`, y un `UPDATE` viejo devolvería un PIN o un rol ya cambiados. Se
+        // guarda la base entera, con ese outbox, y no se sube.
+        let copia_sin_reconciliar = !traslado && reconciliacion_pendiente(&self.db).await?;
+        if copia_sin_reconciliar {
+            let copia = crate::recovery::guardar_base_de_antes_de_la_nube(&self.db).await?;
+            tracing::info!(target: "tpv::sync", copia = %copia.display(), "copia sin reconciliar guardada antes de traer la nube");
+        }
+        let apartar_outbox = traslado || copia_sin_reconciliar;
 
         let w = self.db.write().await;
         let conn = w.raw();
@@ -1234,9 +1260,10 @@ impl SyncRepository for SqliteSyncRepository {
             conn.execute("DELETE FROM _Sync_Encoladas;", ())
                 .await
                 .map_err(db_err)?;
-            if traslado {
-                // Lo que quedaba por subir es de antes del traslado (ver arriba): ya está en la
-                // copia, y en el outbox lo subiría el primer drenado encima de datos más nuevos.
+            if apartar_outbox {
+                // Lo que quedaba por subir es de antes del traslado o de la copia (ver arriba): ya
+                // está en la base guardada, y en el outbox lo subiría el primer drenado encima de
+                // datos más nuevos.
                 conn.execute("DELETE FROM _Sync_Outbox;", ())
                     .await
                     .map_err(db_err)?;

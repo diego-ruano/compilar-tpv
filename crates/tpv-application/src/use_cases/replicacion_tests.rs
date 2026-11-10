@@ -217,7 +217,7 @@ fn contexto(ops:Vec<OutboxEntry>)->Contexto {
 }
 fn op(id:&str)->OutboxEntry {OutboxEntry{seq:1,op_id:id.into(),command_name:"venta".into(),statements:vec![SqlStatement{sql:"INSERT INTO Productos (Nombre) VALUES (?1)".into(),args:vec![json!("Producto")]}]}}
 fn nube(respuestas:Vec<Value>)->Nube {Nube{responses:Mutex::new(respuestas.into()),calls:Mutex::new(vec![]),cuerpos:Mutex::new(vec![])}}
-fn pagina(items:Vec<Value>,high:i64)->Value {json!({"items":items,"nextSince":high,"highWater":high})}
+fn pagina(items:Vec<Value>,high:i64)->Value {json!({"items":items,"nextSince":high,"highWater":high,"purgadoHasta":0})}
 fn canal(respuestas:Vec<Value>)->Canal {Canal{respuestas:respuestas.into(),enviados:vec![]}}
 
 #[tokio::test]
@@ -305,7 +305,7 @@ impl CanalReplicacion for Socket {
 fn socket(entrantes:Vec<Option<Value>>)->Socket {Socket{entrantes:entrantes.into(),esperas:vec![],enviados:vec![]}}
 fn item(op:&str,seq:i64)->Value {json!({"opId":op,"seq":seq,"statements":[{"sql":"UPDATE Zonas SET Nombre_Zona=?1","args":[op]}]})}
 fn vivo(op:&str,seq:i64)->Value {let mut m=item(op,seq);m["type"]=json!("change");m}
-fn pagina_hasta(items:Vec<Value>,next:i64,high:i64)->Value {json!({"items":items,"nextSince":next,"highWater":high})}
+fn pagina_hasta(items:Vec<Value>,next:i64,high:i64)->Value {json!({"items":items,"nextSince":next,"highWater":high,"purgadoHasta":0})}
 fn since_pedidos(n:&Nube)->Vec<i64> {n.cuerpos.lock().unwrap().iter().map(|c|c["since"].as_i64().unwrap()).collect()}
 
 #[tokio::test]
@@ -548,4 +548,84 @@ async fn en_la_recuperacion_las_suelta_su_desbloqueo_una_sola_vez() {
     ejecutar(&ctx,&n,&mut c,true).await.unwrap();
     assert_eq!(c.enviados,vec![json!({"type":"recovery_ready"})]);
     assert_eq!(*ctx.completa.lock().unwrap(),Some(0));
+}
+
+// ── AUD-19 · un cursor por debajo de lo que la nube ya purgó ────────────────
+
+/// Lo que devuelve la nube a un cursor en 10 cuando ya purgó hasta el 700 (`test/huecoDelLog`).
+fn purgado_hasta_700()->Value {json!({"ok":true,"items":[item("op-701",701),item("op-1700",1700)],"nextSince":1700,"highWater":1700,"purgadoHasta":700})}
+
+#[tokio::test]
+async fn una_copia_anterior_a_lo_purgado_no_se_da_por_reconciliada() {
+    let ctx=contexto(vec![op("de-la-copia")]);*ctx.repo.cursor.lock().unwrap()=10;
+    let n=nube(vec![purgado_hasta_700()]);let mut c=canal(vec![]);
+    let e=ejecutar(&ctx,&n,&mut c,true).await.unwrap_err();
+    assert_eq!(e.to_string(),"Esta copia es anterior a lo que guarda la nube: recupera el estado actual de la nube.");
+    // Se para antes de aplicar, de subir y de mover el checkpoint: no se desbloquea nada.
+    assert!(ctx.repo.llamadas.lock().unwrap().is_empty());
+    assert_eq!(*ctx.repo.cursor.lock().unwrap(),10);
+    assert!(c.enviados.is_empty(),"ni sube lo de la copia ni suelta a las Handy");
+    assert_eq!(ctx.repo.pending.lock().unwrap().len(),1);
+    assert!(ctx.completa.lock().unwrap().is_none());
+    assert_eq!(ctx.fases.lock().unwrap().as_slice(),["descargando"]);
+}
+
+#[tokio::test]
+async fn en_la_sesion_normal_se_detiene_sin_error_y_sin_tocar_nada() {
+    // Una base cambiada por fuera de la aplicación. No es un fallo que se arregle reconectando:
+    // la sesión acaba con su resultado propio y el motor deja de reintentar.
+    let ctx=disponible(contexto(vec![op("venta-de-hoy")]));*ctx.repo.cursor.lock().unwrap()=10;
+    let n=nube(vec![purgado_hasta_700()]);let mut c=conversacion(vec![estado(0)]);
+    assert_eq!(ejecutar(&ctx,&n,&mut c,false).await.unwrap(),FinDeSesion::AnteriorAlLog);
+    assert!(ctx.repo.llamadas.lock().unwrap().is_empty());
+    assert_eq!(*ctx.repo.cursor.lock().unwrap(),10);
+    assert!(c.enviados.is_empty(),"ni sube nada ni suelta a las Handy");
+    assert_eq!(ctx.repo.pending.lock().unwrap().len(),1,"lo vendido se queda en el outbox");
+    assert!(MOTIVO_ANTERIOR_AL_LOG.contains("Contacta con soporte"));
+}
+
+#[tokio::test]
+async fn una_purga_que_se_lleva_el_12_y_deja_el_11_no_se_cuela() {
+    // La purga mira también la antigüedad: el 11, más joven, se queda. El principio del log (11)
+    // diría que a un cursor en el 10 no le falta nada; lo purgado (12) dice que sí.
+    let ctx=contexto(vec![]);*ctx.repo.cursor.lock().unwrap()=10;
+    let n=nube(vec![json!({"items":[item("op-11",11),item("op-13",13)],"nextSince":13,"highWater":13,"purgadoHasta":12})]);
+    assert!(catch_up(&ctx,&n,true).await.is_err());
+    assert!(ctx.repo.aplicados.lock().unwrap().is_empty(),"ni el 11 entra");
+    let n=nube(vec![json!({"items":[item("op-11",11),item("op-13",13)],"nextSince":13,"highWater":13,"purgadoHasta":12})]);
+    assert!(catch_up(&ctx,&n,false).await.unwrap().anterior_al_log);
+    assert!(ctx.repo.aplicados.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn lo_purgado_se_mira_en_cada_pagina() {
+    // La purga corre entre una página y la siguiente: lo de la primera entra, la segunda no.
+    let ctx=contexto(vec![]);*ctx.repo.cursor.lock().unwrap()=10;
+    let n=nube(vec![
+        json!({"items":[item("op-11",11),item("op-12",12)],"nextSince":12,"highWater":1700,"purgadoHasta":0}),
+        json!({"items":[item("op-701",701)],"nextSince":701,"highWater":1700,"purgadoHasta":700}),
+    ]);
+    assert!(catch_up(&ctx,&n,true).await.is_err());
+    assert_eq!(*ctx.repo.aplicados.lock().unwrap(),vec![11,12]);
+    assert_eq!(*ctx.repo.cursor.lock().unwrap(),12);
+}
+
+#[tokio::test]
+async fn en_el_borde_se_pone_al_dia_y_sin_purgado_hasta_solo_falla_la_recuperacion() {
+    // Lo purgado llega justo hasta el cursor: no falta nada.
+    let ctx=contexto(vec![]);*ctx.repo.cursor.lock().unwrap()=700;
+    let n=nube(vec![purgado_hasta_700(),pagina(vec![],1700)]);
+    assert_eq!(catch_up(&ctx,&n,true).await.unwrap().high_water,1700);
+    assert_eq!(*ctx.repo.aplicados.lock().unwrap(),vec![701,1700]);
+    // Un worker anterior no lo dice: la recuperación no puede comprobar la copia y falla cerrada;
+    // la sesión normal sigue como antes.
+    let sin_marca=||json!({"items":[item("op-11",11)],"nextSince":11,"highWater":11});
+    let ctx=contexto(vec![]);*ctx.repo.cursor.lock().unwrap()=10;
+    let n=nube(vec![sin_marca()]);
+    let e=catch_up(&ctx,&n,true).await.unwrap_err();
+    assert!(e.to_string().ends_with("recupera el estado actual de la nube."),"{e}");
+    assert!(ctx.repo.aplicados.lock().unwrap().is_empty());
+    let n=nube(vec![sin_marca(),json!({"items":[],"nextSince":11,"highWater":11})]);
+    assert_eq!(catch_up(&ctx,&n,false).await.unwrap().high_water,11);
+    assert_eq!(*ctx.repo.aplicados.lock().unwrap(),vec![11]);
 }

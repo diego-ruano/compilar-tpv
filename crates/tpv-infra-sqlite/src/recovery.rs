@@ -48,6 +48,10 @@ const ILEGIBLE_PREFIX: &str = "ilegible-";
 /// restaurable —es justo lo que no vale—, pero se guarda: puede tener operaciones que nunca
 /// llegaron a la nube.
 const ANTES_DE_TRASLADO_PREFIX: &str = "antes-de-traslado-";
+/// AUD-19 · La copia restaurada que se sustituyó por la nube antes de reconciliarse (una copia
+/// anterior a lo que guarda la nube). Tampoco se lista como restaurable: su outbox, que no se sube,
+/// queda aquí por si hiciera falta mirarlo.
+const ANTES_DE_LA_NUBE_PREFIX: &str = "antes-de-la-nube-";
 /// Marca en AppData de que la licencia se ha trasladado a este equipo y su base todavía no se ha
 /// reconstruido desde la nube. Vive FUERA de `data.db` a propósito: restaurar una copia local
 /// no puede borrarla, porque esa copia también es de antes del traslado.
@@ -266,11 +270,21 @@ pub(crate) fn quitar_marca_traslado(app_data_dir: &Path) -> AppResult<()> {
 
 /// Guarda la base de antes del traslado en `backups/antes-de-traslado-*`, antes de reemplazarla.
 pub(crate) async fn guardar_base_de_antes_del_traslado(db: &Db) -> AppResult<PathBuf> {
+    guardar_base_apartada(db, ANTES_DE_TRASLADO_PREFIX, "traslado").await
+}
+
+/// AUD-19 · Guarda en `backups/antes-de-la-nube-*` la copia restaurada que se reemplaza por la nube
+/// sin haberse reconciliado, con su outbox, que no se sube (ver `bootstrap_restaurar`).
+pub(crate) async fn guardar_base_de_antes_de_la_nube(db: &Db) -> AppResult<PathBuf> {
+    guardar_base_apartada(db, ANTES_DE_LA_NUBE_PREFIX, "nube").await
+}
+
+async fn guardar_base_apartada(db: &Db, prefijo: &str, que: &str) -> AppResult<PathBuf> {
     let dir = db.carpeta().join(BACKUP_DIR);
     std::fs::create_dir_all(&dir).map_err(db_err)?;
-    let destino = dir.join(format!("{ANTES_DE_TRASLADO_PREFIX}{}{BACKUP_SUFFIX}", now_ms()));
+    let destino = dir.join(format!("{prefijo}{}{BACKUP_SUFFIX}", now_ms()));
     // Por el pool de lectura, como las copias diarias: `VACUUM INTO` hace su propia instantánea.
-    let tmp = temporal(&dir, "traslado");
+    let tmp = temporal(&dir, que);
     if let Err(e) = vacuum_into(db, &tmp).await {
         discard_prepared(&tmp);
         return Err(e);
@@ -713,7 +727,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
             }
         }
 
-        for familia in ["pre-restore-", "failed-restore-", ILEGIBLE_PREFIX, ANTES_DE_TRASLADO_PREFIX] {
+        for familia in ["pre-restore-", "failed-restore-", ILEGIBLE_PREFIX, ANTES_DE_TRASLADO_PREFIX, ANTES_DE_LA_NUBE_PREFIX] {
             // El nombre lleva el instante justo detrás del prefijo; los sidecars (`-wal`/`-shm`)
             // comparten instante con su `.db` y se van con él, no por separado.
             let mut sellos: Vec<i64> = Vec::new();

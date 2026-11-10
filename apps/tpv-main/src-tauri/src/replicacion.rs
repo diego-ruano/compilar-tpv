@@ -69,7 +69,7 @@ impl ContextoReplicacion for Contexto {
     }
 }
 
-async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<()> {
+async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<uc::FinDeSesion> {
     let dir = app.path().app_data_dir().map_err(|e| AppError::internal(e.to_string()))?;
     let nube = PairingAdapter::new(dir);
     let ticket = nube.tpv_server_post_json("tpv", "/v1/ws/ticket", json!({})).await?;
@@ -104,10 +104,18 @@ pub(crate) fn arrancar(app: AppHandle) {
             let disponible = ctx.sigue_disponible(false).await.unwrap_or(false);
             let recuperando = ctx.sigue_disponible(true).await.unwrap_or(false);
             let mut espera = 60;
+            let mut detenida = false;
             if (disponible || recuperando) && con_licencia {
                 runtime.publicar(&app, "conectando", None);
                 match sesion(&app, recuperando).await {
-                    Ok(()) => { retardo = 3; fallos = 0; espera = 1; }
+                    Ok(uc::FinDeSesion::NoDisponible) => { retardo = 3; fallos = 0; espera = 1; }
+                    // AUD-19: a esta base le falta lo que la nube ya purgó. Reconectar no lo
+                    // arregla: se espera a que se pida reintentar o al siguiente arranque, sin
+                    // tocar los datos ni el outbox, y se sigue vendiendo.
+                    Ok(uc::FinDeSesion::AnteriorAlLog) => {
+                        runtime.publicar(&app, "detenida", Some(uc::MOTIVO_ANTERIOR_AL_LOG.into()));
+                        detenida = true;
+                    }
                     Err(e) => {
                         let estuvo_conectada = runtime.estado().estado == "conectado";
                         if estuvo_conectada { retardo = 3; }
@@ -129,7 +137,7 @@ pub(crate) fn arrancar(app: AppHandle) {
                 }
             } else if !con_licencia && (disponible || recuperando) { runtime.publicar(&app, "sin_identidad", Some("Aún no hay una licencia activada".into())); }
             else { runtime.publicar(&app, "pausada", Some("Sincronización pendiente del modo, los datos o la palanca de este equipo".into())); }
-            if fallos >= 5 {
+            if fallos >= 5 || detenida {
                 runtime.reintentar.notified().await;
                 fallos = 0;
             } else {

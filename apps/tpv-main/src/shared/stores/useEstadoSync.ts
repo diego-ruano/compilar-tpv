@@ -53,6 +53,8 @@ export const MAX_FALLOS_RECUPERACION = 5;
  * - `reintentando`: se cayó o no se pudo abrir; hay un reintento programado con backoff.
  * - `rechazado`: el worker dice que no (licencia caducada/anulada, dispositivo desplazado).
  *   Reintentar cada pocos segundos no lo arregla, así que se espacia mucho.
+ * - `detenida` (AUD-19): a los datos de este equipo les falta un tramo que la nube ya no guarda.
+ *   No se reintenta sola: espera a que se pida o al siguiente arranque. Se sigue vendiendo.
  */
 export type EstadoSync =
 	| "pausada"
@@ -60,7 +62,8 @@ export type EstadoSync =
 	| "conectando"
 	| "conectado"
 	| "reintentando"
-	| "rechazado";
+	| "rechazado"
+	| "detenida";
 
 /** Palanca de emergencia persistida (sin UI). `auto` = intentar siempre. */
 export type PreferenciaSync = "auto" | "off";

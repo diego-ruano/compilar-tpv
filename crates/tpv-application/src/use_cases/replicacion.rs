@@ -76,12 +76,34 @@ pub struct Sesion {
     cola: ColaDeLaNube,
 }
 
-/// Lo que deja un catch-up: el final del log que ha visto y, si se ha detenido, en qué cambio.
+/// Lo que deja un catch-up: el final del log que ha visto, si se ha detenido, en qué cambio, y si a
+/// esta base le falta un tramo que la nube ya purgó (AUD-19, sólo fuera del modo recuperación).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PuestaAlDia {
     pub high_water: i64,
     pub detenida: Option<CambioDetenido>,
+    pub anterior_al_log: bool,
 }
+
+/// Cómo acaba una sesión del motor que no ha fallado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinDeSesion {
+    /// Este equipo ha dejado de replicar (el modo, la palanca o el estado de la base): el bucle del
+    /// motor vuelve a mirar.
+    NoDisponible,
+    /// AUD-19 · A esta base le falta un tramo que la nube ya purgó. Con la purga actual, una Main que
+    /// sólo ha estado sin conexión no llega aquí: el suelo de la purga no pasa de su propio
+    /// checkpoint mientras lo reporta, y si lleva más de 7 días sin hacerlo no se purga nada. Llega
+    /// una base cambiada por fuera de la aplicación (una imagen de disco, una `data.db` copiada a
+    /// mano). Se para antes de aplicar, de subir y de mover el checkpoint, así que `verificar_nube`
+    /// tampoco toca la nube; los datos y el outbox se quedan como están y se sigue vendiendo.
+    /// Reconectar no lo arregla: el motor espera a que se pida reintentar o al siguiente arranque, y
+    /// Conectividad enseña `MOTIVO_ANTERIOR_AL_LOG`.
+    AnteriorAlLog,
+}
+
+/// AUD-19 · Lo que enseña Conectividad cuando la sesión normal acaba en `FinDeSesion::AnteriorAlLog`.
+pub const MOTIVO_ANTERIOR_AL_LOG: &str = "Los datos de este equipo son anteriores a lo que guarda la nube: no se sincronizan para no mezclarlos, y lo que se venda se sigue guardando aquí. Contacta con soporte para recuperar el estado actual de la nube.";
 
 pub fn cambio(m: Value) -> AppResult<SyncChange> {
     let op_id = m.get("opId").or_else(|| m.get("op_id")).and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| AppError::external("Cambio sin operación"))?.to_string();
@@ -98,6 +120,22 @@ async fn aplicar(ctx: &dyn ContextoReplicacion, cambios: Vec<SyncChange>) -> App
     Ok(resultado)
 }
 
+/// AUD-19 · ¿Le falta a esta base algo que la nube ya purgó? La purga anota, en la misma
+/// transacción que borra, el mayor `Seq` que se ha llevado, y `/v1/sync/changes` lo devuelve con cada
+/// página, leído con ella (`purgadoHasta`): si pasa del checkpoint, lo de en medio ya no está y el
+/// catch-up no lo puede traer. Es exacto: no depende de que los `Seq` sean contiguos ni de que la
+/// purga quite un prefijo (combina `Seq` y antigüedad, y la antigüedad se fija antes de numerar).
+///
+/// Sin `purgadoHasta` (un worker anterior), la recuperación no puede comprobar la copia y falla
+/// cerrada, como sin `highWater`; la sesión normal sigue como antes: el worker se despliega antes.
+fn falta_un_tramo(respuesta: &Value, since: i64, estricto: bool) -> AppResult<bool> {
+    match respuesta.get("purgadoHasta").and_then(Value::as_i64) {
+        Some(purgado) => Ok(purgado > since),
+        None if estricto => Err(AppError::external("La nube no dice hasta dónde ha purgado sus cambios, así que esta copia no se puede comprobar: recupera el estado actual de la nube.")),
+        None => Ok(false),
+    }
+}
+
 /// Una pasada de catch-up desde el checkpoint, en orden de `Seq`.
 ///
 /// AUD-18: empieza por el cambio en el que se detuvo la bajada, con las sentencias que se
@@ -106,7 +144,7 @@ async fn aplicar(ctx: &dyn ContextoReplicacion, cambios: Vec<SyncChange>) -> App
 pub async fn catch_up(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, estricto: bool) -> AppResult<PuestaAlDia> {
     if let Some(detenido) = ctx.repositorio().await?.cambio_detenido().await? {
         let r = aplicar(ctx, vec![detenido]).await?;
-        if r.detenida.is_some() { return Ok(PuestaAlDia { high_water: 0, detenida: r.detenida }); }
+        if r.detenida.is_some() { return Ok(PuestaAlDia { high_water: 0, detenida: r.detenida, anterior_al_log: false }); }
     }
     let mut since = ctx.repositorio().await?.get_checkpoint().await?;
     let mut high_water = 0;
@@ -117,12 +155,18 @@ pub async fn catch_up(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             _ if estricto => return Err(AppError::external("La nube no informa del punto de sincronización")),
             _ => {}
         }
+        // AUD-19: en cada página, porque la purga puede correr entre una y otra. Antes de aplicar
+        // nada: lo conservado encima de un hueco daría por buena una base sin ese tramo.
+        if falta_un_tramo(&respuesta, since, estricto)? {
+            if estricto { return Err(AppError::conflict("Esta copia es anterior a lo que guarda la nube: recupera el estado actual de la nube.")); }
+            return Ok(PuestaAlDia { high_water, detenida: None, anterior_al_log: true });
+        }
         let items = respuesta.get("items").and_then(Value::as_array).ok_or_else(|| AppError::external("Catch-up sin lista de cambios"))?;
-        if items.is_empty() { return Ok(PuestaAlDia { high_water, detenida: None }); }
+        if items.is_empty() { return Ok(PuestaAlDia { high_water, detenida: None, anterior_al_log: false }); }
         let cambios = items.iter().cloned().map(cambio).collect::<AppResult<Vec<_>>>()?;
         if cambios.windows(2).any(|p| p[0].seq >= p[1].seq) { return Err(AppError::external("Catch-up desordenado")); }
         let r = aplicar(ctx, cambios).await?;
-        if r.detenida.is_some() { return Ok(PuestaAlDia { high_water, detenida: r.detenida }); }
+        if r.detenida.is_some() { return Ok(PuestaAlDia { high_water, detenida: r.detenida, anterior_al_log: false }); }
         let next = respuesta.get("nextSince").and_then(Value::as_i64).ok_or_else(|| AppError::external("Catch-up sin cursor"))?;
         if next <= since { return Err(AppError::external("El cursor de sincronización no avanza")); }
         // AUD-18: la página siguiente sólo se pide si el checkpoint ha llegado al final de ésta.
@@ -135,8 +179,9 @@ pub async fn catch_up(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
 /// AUD-18 · El catch-up con la regla de orden. Si se detiene en un cambio que falla, se espera lo
 /// que toque atendiendo el socket (sin aplicar lo que llega en vivo) y se vuelve a intentar desde
 /// el checkpoint, hasta que el cambio entra o pasa a cuarentena y el catch-up llega al final del
-/// log. Termina siempre: cada cambio tiene cinco intentos. Devuelve el final del log visto.
-async fn ponerse_al_dia(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, estricto: bool) -> AppResult<i64> {
+/// log. Termina siempre: cada cambio tiene cinco intentos. Devuelve el final del log visto, o que a
+/// esta base le falta un tramo (AUD-19), sin haber aplicado nada.
+async fn ponerse_al_dia(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, estricto: bool) -> AppResult<PuestaAlDia> {
     loop {
         if let Some(hasta) = sesion.bajada.detenida_hasta {
             esperar_atendiendo(ctx, canal, sesion, hasta).await?;
@@ -145,7 +190,7 @@ async fn ponerse_al_dia(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService
         match r.detenida {
             None => {
                 sesion.bajada.detenida_hasta = None;
-                return Ok(r.high_water);
+                return Ok(r);
             }
             Some(d) => sesion.bajada.detener(&d),
         }
@@ -273,11 +318,11 @@ where F: FnMut(&str) -> AppResult<FirmaDispositivo> + Send {
     crate::use_cases::saludo_socket::saludar(canal, firmar, "tpv", true).await
 }
 
-pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, recuperando: bool) -> AppResult<()> {
+pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, recuperando: bool) -> AppResult<FinDeSesion> {
     ctx.repositorio().await?.liberar_encoladas_caducadas(if recuperando {0} else {TTL_ENCOLADA}).await?;
     ctx.fase_recuperacion(if recuperando {"descargando"} else {"inactiva"});
     let mut sesion = Sesion::default();
-    ponerse_al_dia(ctx, nube, canal, &mut sesion, recuperando).await?;
+    if ponerse_al_dia(ctx, nube, canal, &mut sesion, recuperando).await?.anterior_al_log { return Ok(FinDeSesion::AnteriorAlLog); }
     let volcado = !recuperando && ctx.volcado_permitido() && ctx.repositorio().await?.outbox_pending(101).await?.len() > 100;
     let mut vacio = true;
     if recuperando {
@@ -286,7 +331,7 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
         let mut completada = false;
         for _ in 0..180 {
             ctx.fase_recuperacion("verificando");
-            let high_water = ponerse_al_dia(ctx, nube, canal, &mut sesion, true).await?;
+            let high_water = ponerse_al_dia(ctx, nube, canal, &mut sesion, true).await?.high_water;
             let salud = ctx.repositorio().await?.health().await?;
             if salud.outbox_pending == 0 && salud.last_seq >= high_water && salud.failing == 0 && salud.quarantined == 0 && salud.subida_en_cuarentena == 0 {
                 ctx.completar_recuperacion(high_water).await?;
@@ -325,11 +370,11 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
             }
             ultimo_sondeo = Instant::now();
         }
-        if !ctx.sigue_disponible(false).await? { return Ok(()); }
+        if !ctx.sigue_disponible(false).await? { return Ok(FinDeSesion::NoDisponible); }
         // AUD-18: un cambio en vivo ha fallado. Se reintenta con su espera y la bajada se pone al
         // día por catch-up antes de volver a escuchar; después, una vuelta de subida.
         if sesion.bajada.detenida() {
-            ponerse_al_dia(ctx, nube, canal, &mut sesion, false).await?;
+            if ponerse_al_dia(ctx, nube, canal, &mut sesion, false).await?.anterior_al_log { return Ok(FinDeSesion::AnteriorAlLog); }
             vacio = subir_pendientes(ctx, canal, &mut sesion, false, false).await?;
             ultimo_sondeo = Instant::now();
             continue;

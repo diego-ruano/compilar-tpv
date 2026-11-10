@@ -249,6 +249,21 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 
 - Al autenticarse, la Main pide `/v1/sync/changes` desde su `Last_Seq` y aplica en orden, guardando
   los `change` en vivo hasta terminar.
+- **Antes de aplicar una página, la Main comprueba que no le falte nada** (AUD-19). La ruta devuelve
+  también el mayor `Seq` que se ha purgado (`purgadoHasta`), leído en la misma lectura que los
+  cambios, y si pasa del `since`, lo de en medio ya no está. Es exacto: no depende de que `Seq` sea
+  contiguo ni de que la purga quite un prefijo (no siempre lo hace: ver la purga, abajo). La Main
+  se para entonces sin aplicar ni subir nada ni mover el checkpoint, así que `verificar_nube`
+  tampoco toca la nube, y el cobro local sigue.
+  - En la recuperación es un error, «Esta copia es anterior a lo que guarda la nube»
+    ([recuperacion.md](recuperacion.md#reconciliar-y-desbloquear)).
+  - En la sesión normal, a la que sólo se llega así con una base cambiada por fuera de la
+    aplicación, la sesión acaba en `FinDeSesion::AnteriorAlLog`: el motor publica `detenida`, que
+    Conectividad explica, y no vuelve a conectar hasta que se pida reintentar (lo pide la interfaz
+    al volver la red o el foco) o hasta el siguiente arranque. Los datos y el outbox se quedan como
+    están. Volver a la nube desde ahí está pendiente ([SYNC-32](../pendientes.md#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube)).
+  - Sin `purgadoHasta` (un worker anterior), toda recuperación falla cerrada, también la que sigue a
+    traer la nube, y la sesión normal sigue: el worker se despliega antes.
 - **La bajada va estrictamente en orden de `Seq` (AUD-18)**: nunca se aplica un cambio posterior antes
   que uno anterior, y el checkpoint sólo pasa por encima de lo que ya se procesó. Lo garantizan dos
   lados: el DO difunde en orden de `Seq` (ver «El orden de la difusión») y la Main aplica así:
@@ -300,8 +315,16 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   interfaz.
 - `Sync_Changes` se purga por encima de un suelo: lo de más de 7 días que todas las Main activas (las
   que reportaron checkpoint en los últimos 7 días) ya tienen, con 1000 de margen. Como mucho una purga
-  por hora y por DO. `Applied_Operations`, por antigüedad (7 días) y con las condiciones de «El
-  orden de la difusión».
+  por hora y por DO. Como mira también la antigüedad, y `Created_At_Ms` se fija antes de que el turno
+  numere, puede llevarse el 12 y dejar el 11. En la misma transacción que borra anota el mayor `Seq`
+  que se ha llevado, en una fila reservada de `Sync_Main_Checkpoints` (`_purgado_hasta`, que el suelo
+  no cuenta); una purga que no borra nada no la toca. `/v1/sync/changes` devuelve como `purgadoHasta`
+  el mayor entre esa marca y el primer `Seq` conservado menos uno, que cubre un log purgado antes de
+  que existiera la marca (el porqué, en `sync.routes.ts`). Una Main que sólo ha estado sin conexión no
+  queda por debajo: mientras reporta, el suelo no pasa de su checkpoint, y cuando deja de contar, sin
+  otra Main activa no se purga nada. Quien sí puede quedar debajo es una base anterior (una copia
+  restaurada). `Applied_Operations`, por antigüedad (7 días) y con las condiciones de «El orden de la
+  difusión».
 
 ### El orden de la difusión (AUD-18)
 

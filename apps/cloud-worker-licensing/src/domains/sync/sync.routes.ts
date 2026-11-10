@@ -9,7 +9,7 @@
 
 import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
-import { serializarCambios, type CambioGuardado } from "./cambiosJson";
+import { PURGADO_HASTA, serializarCambios, type CambioGuardado } from "./cambiosJson";
 
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
@@ -54,14 +54,19 @@ function rows(rs: any): any[] {
 }
 
 // POST /v1/sync/changes  { since?: number, limit?: number }
-// Devuelve las operaciones con Seq > since en orden ascendente.
+// Devuelve las operaciones con Seq > since en orden ascendente, el final del log (`highWater`) y
+// el mayor Seq que ya se purgó (`purgadoHasta`, AUD-19).
 syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
 	const { since, limit } = c.req.valid("json");
 
 	const snapshot = await tenantQuery(c, async (db) => {
-		// Items y high-water en la misma transacción de lectura. La recuperación sólo desbloquea
-		// cuando el checkpoint local alcanza exactamente una foto conocida del final del log.
-		const [rs, rsHighWater] = await db.batch(
+		// Items, high-water y lo purgado en la misma transacción de lectura. La recuperación sólo
+		// desbloquea cuando el checkpoint local alcanza exactamente una foto conocida del final del
+		// log. AUD-19: y lo purgado tiene que ser de la misma foto que los items; leído aparte, una
+		// purga entre medias escondería el tramo que se lleva. Cada lectura es de una fila: los
+		// extremos del log por su clave (un `MIN` o un `MAX` solo, sin recorrerlo), la marca por la
+		// del checkpoint.
+		const [rs, rsFinal, rsPrimero, rsPurgado] = await db.batch(
 			[
 				{
 					sql: `
@@ -75,17 +80,34 @@ syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
 					args: [since, limit],
 				},
 				{ sql: "SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;", args: [] },
+				{ sql: "SELECT MIN(Seq) AS primero FROM Sync_Changes;", args: [] },
+				{
+					sql: "SELECT Last_Seq AS purgado FROM Sync_Main_Checkpoints WHERE Device_Id = ?1;",
+					args: [PURGADO_HASTA],
+				},
 			],
 			"read",
 		);
 
 		const items = rows(rs) as unknown as CambioGuardado[];
-		const highWater = Number((rows(rsHighWater)[0] as any)?.seq ?? 0);
-		return { items, highWater };
+		const highWater = Number((rows(rsFinal)[0] as any)?.seq ?? 0);
+		// La marca la escribe la purga desde AUD-19. Un log que ya purgó el código anterior no la
+		// tiene, y a cualquiera le falta lo que hay por debajo de su primer Seq conservado: de ahí
+		// el `MIN(Seq) - 1` (0 con el log vacío). Basta porque nunca dice de más (por debajo del
+		// primero no queda nada) y la marca, cuando existe, ya cubre todo lo que se borró desde
+		// AUD-19. Lo único que puede decir de menos es un hueco que la purga anterior dejara por
+		// encima de su primer conservado, cuando la antigüedad y el Seq de dos escrituras en vuelo a
+		// la vez se cruzaban justo en el corte de los 7 días; se cierra en cuanto una purga de este
+		// código pasa por ese tramo. Ninguna base de producción la ha ejecutado.
+		const marca = Number((rows(rsPurgado)[0] as any)?.purgado ?? 0);
+		const primero = (rows(rsPrimero)[0] as any)?.primero;
+		const debajoDelPrimero = primero == null ? 0 : Number(primero) - 1;
+		const purgadoHasta = Math.max(marca, debajoDelPrimero);
+		return { items, highWater, purgadoHasta };
 	});
-	const { items, highWater } = snapshot;
+	const { items, highWater, purgadoHasta } = snapshot;
 
-	const responseJson = serializarCambios(items, since, highWater);
+	const responseJson = serializarCambios(items, since, highWater, purgadoHasta);
 
 	// SYNC-12: registramos el checkpoint (`since`, lo que la Main YA tiene confirmado) como suelo de
 	// la purga del log. Usamos `since` (no `nextSince`) porque es el límite inferior seguro: si la

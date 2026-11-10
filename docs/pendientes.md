@@ -25,6 +25,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
+| [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -349,6 +350,24 @@ identificadores o copia datos del catálogo. Lo que decide es poco más de una d
 Arreglarlo es darle al lote un paso de guarda que se evalúe dentro del mismo lote atómico de Turso,
 que no se replique y que devuelva un error de negocio si no se cumple; y pasar a él esas
 comprobaciones.
+
+### SYNC-32 · Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube
+
+Si la nube ya ha purgado algo por encima del checkpoint de la Main (`purgadoHasta`, AUD-19) y la base
+no está en recuperación, la sesión se detiene (`FinDeSesion::AnteriorAlLog`): no aplica, no sube y no
+mueve el checkpoint, Conectividad dice `detenida` y la Main sigue vendiendo en local. Con la purga
+actual sólo llega ahí una base cambiada por fuera de la aplicación (una imagen de disco restaurada,
+una `data.db` copiada a mano), porque el suelo de la purga no pasa del checkpoint de una Main que
+reporta.
+
+Falta el camino para salir: la pantalla de recuperación sólo aparece en los estados de recuperación,
+y reconstruir desde la nube con el outbox lleno lo niega la guardia (`bootstrap_restaurar`). Ese
+outbox mezcla lo vendido desde el cambio de base con lo que la base vieja tenía pendiente, que el
+equipo de entonces ya subió y que volvería a aplicarse si su `Applied_Operations` ha caducado. Hay
+que decidir qué se hace con él (guardarlo aparte y descartarlo, como en el traslado; subir sólo lo
+posterior al cambio de base, si se puede distinguir; o pasar por la recuperación aceptando que el
+cobro se detenga mientras tanto) y cómo se le ofrece al personal. Mientras tanto, el mensaje manda
+contactar con soporte (OPS-02). Sin decidir.
 
 ---
 

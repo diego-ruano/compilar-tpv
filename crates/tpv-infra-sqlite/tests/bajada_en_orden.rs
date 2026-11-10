@@ -6,8 +6,9 @@
 //!
 //! La nube simulada sirve `/v1/sync/changes` como la ruta real (`sync.routes.ts`,
 //! `cambiosJson.ts`): `Seq > since`, en orden, con tope por página, `nextSince` = el último `Seq`
-//! servido y `highWater` = el mayor. Lo que llega en vivo se anota en su log al entregarse, que es
-//! lo que hace el DO: confirmar en Turso y después difundir, en orden de `Seq`.
+//! servido, `highWater` = el mayor y `purgadoHasta` = 0 (nada purgado). Lo que llega en vivo se
+//! anota en su log al entregarse, que es lo que hace el DO: confirmar en Turso y después difundir,
+//! en orden de `Seq`.
 //!
 //! Los escenarios son los de la investigación de AUD-18 (un fallo en mitad de una página del
 //! catch-up y otro en vivo): ningún cambio se pierde, nada se aplica fuera de orden y
@@ -79,7 +80,7 @@ impl Nube {
         let items: Vec<JsonValue> = pendientes.into_iter().take(POR_PAGINA).collect();
         let next_since = items.last().map(seq).unwrap_or(since);
         let high_water = log.iter().map(seq).max().unwrap_or(0);
-        json!({ "ok": true, "items": items, "nextSince": next_since, "highWater": high_water })
+        json!({ "ok": true, "items": items, "nextSince": next_since, "highWater": high_water, "purgadoHasta": 0 })
     }
 }
 

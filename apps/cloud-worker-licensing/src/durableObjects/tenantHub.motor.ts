@@ -6,6 +6,7 @@ import { getDb } from "../server/db";
 import { estaApagado } from "../lib/interruptores";
 import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
 import { ingestToAxiom } from "../observability/axiom";
+import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 
 import type { ContextoDeCola } from "./tenantHub.cola";
 import {
@@ -329,19 +330,41 @@ export class MotorTenantHub {
 		try {
 			await this.withTenantDbRetry(tenantId, (db) => this.enTurnoDelLog(db, async () => {
 				// Suelo = mínimo Last_Seq de las Main que reportaron checkpoint recientemente. Si no
-				// hay ninguna activa, MIN devuelve NULL → no purgamos Sync_Changes (fail-safe).
+				// hay ninguna activa, MIN devuelve NULL → no purgamos Sync_Changes (fail-safe). La
+				// marca de lo purgado (AUD-19) vive en la misma tabla y no es una Main.
 				const r = await db.execute({
-					sql: `SELECT MIN(Last_Seq) AS floor FROM Sync_Main_Checkpoints WHERE Updated_At_Ms > ?1;`,
-					args: [now - CHECKPOINT_ACTIVE_MS],
+					sql: `SELECT MIN(Last_Seq) AS floor FROM Sync_Main_Checkpoints WHERE Updated_At_Ms > ?1 AND Device_Id <> ?2;`,
+					args: [now - CHECKPOINT_ACTIVE_MS, PURGADO_HASTA],
 				});
 				const floorRaw = (r.rows?.[0] as any)?.floor;
 				const floor = floorRaw == null ? null : Number(floorRaw);
 
 				if (floor != null && floor > PURGE_SEQ_MARGIN) {
-					await db.execute({
-						sql: `DELETE FROM Sync_Changes WHERE Seq <= ?1 AND Created_At_Ms < ?2;`,
-						args: [floor - PURGE_SEQ_MARGIN, now - SYNC_CHANGES_TTL_MS],
-					});
+					const hasta = floor - PURGE_SEQ_MARGIN;
+					const antesDe = now - SYNC_CHANGES_TTL_MS;
+					// AUD-19: el mayor Seq que se borra queda anotado en la misma transacción, y
+					// `/v1/sync/changes` lo devuelve. Hace falta el dato y no el principio del log: la
+					// purga mira también la antigüedad, que se fija antes de que el turno numere, así
+					// que puede llevarse el 12 y dejar el 11.
+					await db.batch(
+						[
+							{
+								sql: `INSERT INTO Sync_Main_Checkpoints (Device_Id, Last_Seq, Updated_At_Ms)
+									SELECT ?3, m, ?4 FROM (
+										SELECT MAX(Seq) AS m FROM Sync_Changes WHERE Seq <= ?1 AND Created_At_Ms < ?2
+									) WHERE m IS NOT NULL
+									ON CONFLICT(Device_Id) DO UPDATE SET
+										Last_Seq = MAX(Last_Seq, excluded.Last_Seq),
+										Updated_At_Ms = excluded.Updated_At_Ms;`,
+								args: [hasta, antesDe, PURGADO_HASTA, now],
+							},
+							{
+								sql: `DELETE FROM Sync_Changes WHERE Seq <= ?1 AND Created_At_Ms < ?2;`,
+								args: [hasta, antesDe],
+							},
+						],
+						"write",
+					);
 				}
 
 				// Applied_Operations es dedup por Op_Id: un reintento idempotente nunca llega días

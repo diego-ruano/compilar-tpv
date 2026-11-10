@@ -56,6 +56,12 @@ const ESTADO_TEXTO: Record<
 		desc: "Este dispositivo tiene la sincronización apagada a propósito. Todo se sigue guardando en local y se subirá si se vuelve a activar.",
 		tono: "neutro",
 	},
+	// AUD-19: la base de este equipo es anterior a lo que guarda la nube. No se arregla reconectando.
+	detenida: {
+		titulo: "Sincronización detenida",
+		desc: "Los datos de este equipo son anteriores a lo que guarda la nube y no se pueden poner al día con ella. Este TPV sigue funcionando y guarda todo lo que hagas, pero no lo sube ni recibe nada; los Handy no pueden trabajar. Esto no se arregla solo.",
+		tono: "malo",
+	},
 };
 
 function desdeHace(ms: number): string {

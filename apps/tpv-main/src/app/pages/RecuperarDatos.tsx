@@ -27,6 +27,21 @@ function fechaCopia(ms: number): string {
     }).format(new Date(ms));
 }
 
+const DIA_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * AUD-19: la nube purga los cambios de más de 7 días. Con una copia más antigua puede faltar lo que
+ * pasó en medio, y entonces la reconciliación no termina con ella. Se avisa antes de elegir, sin
+ * impedirlo: si la nube aún lo guarda todo, la copia vale.
+ */
+const DIAS_QUE_GUARDA_LA_NUBE = 7;
+
+function antiguedadCopia(ms: number, ahora: number): { texto: string; vieja: boolean } {
+    const dias = Math.floor((ahora - ms) / DIA_MS);
+    const texto = dias < 1 ? "hace menos de un día" : dias === 1 ? "hace 1 día" : `hace ${dias} días`;
+    return { texto, vieja: ahora - ms > DIAS_QUE_GUARDA_LA_NUBE * DIA_MS };
+}
+
 function textoFase(fase: string): string {
     switch (fase) {
         case "descargando":
@@ -51,6 +66,8 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
     const [operacion, setOperacion] = useState<Origen | null>(null);
     const [error, setError] = useState<AppErrorDto | null>(null);
     const [resultado, setResultado] = useState<BootstrapResultado | null>(null);
+    // La antigüedad de las copias se cuenta desde que se abre la pantalla.
+    const [ahora] = useState(() => Date.now());
 
     const reconciliacionPendiente = useEstadoSync((s) => s.reconciliacionPendiente);
     // La licencia viene de otro equipo: lo de este ordenador es de antes, copias incluidas, así que
@@ -258,24 +275,39 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                                 Todavía no hay ninguna copia local disponible.
                                             </p>
                                         ) : (
-                                            backups.map((backup, index) => (
-                                                <Button
-                                                    key={backup.id}
-                                                    variant="secondary"
-                                                    disabled={operacion !== null}
-                                                    onClick={() =>
-                                                        void ejecutar("local", () => commands.recoveryRestoreBackup(backup.id))
-                                                    }
-                                                >
-                                                    <HardDriveDownload className="size-4" aria-hidden />
-                                                    {backup.importada
-                                                        ? "Copia importada"
-                                                        : index === 0
-                                                          ? "Última copia"
-                                                          : "Copia"}
-                                                    : {fechaCopia(backup.created_at_ms)}
-                                                </Button>
-                                            ))
+                                            backups.map((backup, index) => {
+                                                const edad = antiguedadCopia(backup.created_at_ms, ahora);
+                                                return (
+                                                    <div key={backup.id} className="grid gap-1">
+                                                        <Button
+                                                            variant="secondary"
+                                                            disabled={operacion !== null}
+                                                            onClick={() =>
+                                                                void ejecutar("local", () => commands.recoveryRestoreBackup(backup.id))
+                                                            }
+                                                        >
+                                                            <HardDriveDownload className="size-4" aria-hidden />
+                                                            {backup.importada
+                                                                ? "Copia importada"
+                                                                : index === 0
+                                                                  ? "Última copia"
+                                                                  : "Copia"}
+                                                            : {fechaCopia(backup.created_at_ms)} ({edad.texto})
+                                                        </Button>
+                                                        {edad.vieja && (
+                                                            <p className="flex gap-2 px-1 text-xs text-fg-muted">
+                                                                <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden />
+                                                                <span>
+                                                                    Tiene más de {DIAS_QUE_GUARDA_LA_NUBE} días: puede que la nube
+                                                                    ya no guarde todo lo que pasó después. Si es así, la
+                                                                    recuperación no terminará con esta copia y habrá que
+                                                                    recuperar el estado actual de la nube.
+                                                                </span>
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })
                                         )}
 
                                         <Button

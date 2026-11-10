@@ -29,6 +29,7 @@ antigua crearía dos historiales que no hay forma de juntar.
 | Bloqueo del login | `_Recovery_State.Reconciliation_Pending` | Restaurado no es utilizable |
 | Reconciliar | `tpv-application/src/use_cases/replicacion.rs` + transporte nativo | Catch-up → outbox → catch-up, hasta converger |
 | Desbloquear | `commands/recovery.rs::completar` (interno) | Outbox a 0 y checkpoint ≥ el final del log de la nube |
+| Copia anterior al log | `replicacion.rs::falta_un_tramo` + `purgadoHasta` de `/v1/sync/changes` | Le falta un tramo purgado: no se reconcilia (AUD-19) |
 | Traslado de licencia | `commands/licensing.rs::license_activate` + `recovery.rs::marcar_traslado` | La base de antes del traslado no se usa |
 | Pantallas | `src/app/pages/RecuperarDatos.tsx` (restaurar) · `features/configuracion/sections/CopiasSeguridad.tsx` (ver y sacar copias, en Configuración → Licencia) | |
 
@@ -84,6 +85,12 @@ contra `sqlite_master` y contra `[A-Za-z0-9_]` (se interpolan en el SQL), inform
 esta versión no conoce (`tablas_desconocidas`) en vez de fallar, vacía `_Sync_Failed` y siembra
 `_Backfill_Historico`.
 
+Si lo que se reemplaza es una copia restaurada que no llegó a reconciliarse (AUD-19), su outbox no
+pasa a la base nueva, como en el traslado: es de antes, y lo que el equipo de entonces ya subió se
+aplicaría otra vez en cuanto caducara su `Applied_Operations` (un `UPDATE` viejo devolvería un PIN o un
+rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox incluido, en
+`backups/antes-de-la-nube-*`, y dentro de la transacción se vacía el outbox.
+
 **Fase 2** (`/v1/sync/historico` + job `backfill_historico`, cada 5 minutos): el resto, por páginas de
 `rowid`, sin transacción ni `Seq` (son datos que ya no cambian).
 
@@ -138,11 +145,12 @@ copia restaurable) y crea una vacía en su sitio para que la nube tenga dónde e
 
 ## Restos
 
-`pre-restore-*`, `failed-restore-*`, `ilegible-*` y `antes-de-traslado-*` no son copias diarias: el job
-`backup_local` conserva las dos más recientes de cada familia y purga el resto, junto con los temporales
-de más de una hora (`data.restore.*` y los `backups/.*.tmp` de una copia que no terminó). De estas
-familias, `pre-restore-*`, `failed-restore-*` e `ilegible-*` no se comprimen: se apartan con un `rename`,
-sin reescribirlas. `antes-de-traslado-*` sí va comprimida. Las copias previas a una migración
+`pre-restore-*`, `failed-restore-*`, `ilegible-*`, `antes-de-traslado-*` y `antes-de-la-nube-*` no son
+copias diarias: el job `backup_local` conserva las dos más recientes de cada familia y purga el resto,
+junto con los temporales de más de una hora (`data.restore.*` y los `backups/.*.tmp` de una copia que
+no terminó). De estas familias, `pre-restore-*`, `failed-restore-*` e `ilegible-*` no se comprimen: se
+apartan con un `rename`, sin reescribirlas. `antes-de-traslado-*` y `antes-de-la-nube-*` sí van
+comprimidas. Las copias previas a una migración
 (`data.db.bak.*`, en la raíz de AppData) siguen la misma regla, y tampoco se comprimen: se hacen al
 arrancar, antes de abrir la base, y comprimirlas retrasaría el arranque.
 
@@ -154,6 +162,20 @@ después de la copia), **subir el outbox** (lo que la copia tenía) y **catch-up
 outbox esté a 0 y el checkpoint alcance el final del log de la nube (hasta 180 vueltas).
 `completar` vuelve a comprobarlo y desbloquea el login. Si `/v1/sync/changes` no informa del
 final del log, **no se desbloquea**.
+
+**Una copia anterior a lo que guarda la nube no se reconcilia** (AUD-19). `Sync_Changes` se purga
+a los 7 días, así que a una copia con el cursor por debajo le faltaría un tramo que el catch-up ya
+no puede traer: ventas, cobros y cierres de en medio, y las bajas, los roles y los PIN que
+cambiaron. Si `/v1/sync/changes` dice que la nube ya ha purgado algo por encima de `Last_Seq`
+(`purgadoHasta`), el catch-up para antes de aplicar ni subir nada con «Esta copia es anterior a lo que
+guarda la nube: recupera el estado actual de la nube.». Es un ciclo fallido más, y a los cinco la
+pantalla ofrece las alternativas, la nube entre ellas; elegirla no sube el outbox de la copia (ver
+«Desde la nube»). Antes de elegir, la lista de copias enseña la antigüedad de cada una y avisa, sin
+impedirla, de las que pasan de 7 días.
+
+Si `/v1/sync/changes` no dice `purgadoHasta` (un worker anterior a AUD-19), **ninguna
+reconciliación termina**, tampoco la que sigue a recuperar desde la nube: el modo recuperación
+no puede comprobar lo que falta y para. Por eso el worker se despliega antes que la Main.
 
 Tras **5 ciclos seguidos fallidos** (contador del motor nativo) la reconciliación queda `bloqueada`: deja
 de reintentar sola y la pantalla vuelve a ofrecer las alternativas.
