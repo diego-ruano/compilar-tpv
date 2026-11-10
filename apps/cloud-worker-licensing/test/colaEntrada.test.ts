@@ -295,7 +295,10 @@ describe("SYNC-18 · cola de entrada del DO", () => {
 		// el camarero ve "haciendo copia de seguridad", no "la Main no está activa").
 		await enElHub("cola-freeze", async (hub: any) => {
 			prepararHub(hub);
-			hub.isMainConnected = () => true; // hay Main; lo que falta es que termine de volcar
+			// AUD-15: hay Main y está lista (sin sockets, `isMainReady` daría `main_volcando` también
+			// con la cola vacía): lo único que falta es que termine de volcar.
+			hub.isMainConnected = () => true;
+			hub.isMainReady = () => true;
 
 			hub.encolar(TENANT, [opLinea(1)]);
 

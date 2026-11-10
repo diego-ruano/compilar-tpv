@@ -59,7 +59,8 @@ pendientes de los ajustes anteriores tampoco pueden repoblarlas.
 
 El saludo exige `hello_ok` con rol Handy y un `main_status` válido antes de confirmar presencia. Un
 corte de red conserva la presencia anterior durante cinco segundos; la gracia vence también si se
-está esperando un ticket o una reconexión. Sin Main o durante su volcado se mantiene el bloqueo.
+está esperando un ticket o una reconexión. Sin Main, mientras se pone al día al conectar o durante
+su volcado se mantiene el bloqueo.
 Si la Handy ya ha trabajado con ese vínculo, el bloqueo se pone encima de la aplicación sin
 desmontarla (`inert`), y al volver la Main sigue lo que estaba abierto; al arrancar o al vincular de
 nuevo, es la pantalla entera (`app/arranque/pantallaDeArranque.ts`).
@@ -198,9 +199,35 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   TPV puede volver a quedarse sin red. El umbral sólo se mira al conectar.
 - **Encolada no es aplicada.** La fila sigue en el outbox marcada en `_Sync_Encoladas`, y lo que la da
   por buena es **verla volver por el catch-up**. Una encolada sin confirmar en 1 h vuelve a ofrecerse.
+- **Las Handy esperan a que la Main se ponga al día** (AUD-15), suba su atraso en vivo o por la cola:
+  si no, decidirían sobre una nube a la que le falta lo hecho sin conexión. Toda sesión de la Main
+  saluda con `recovering` (`replicacion.rs::saludar`), haya atraso o no: mirarlo antes dejaría fuera
+  lo que se confirme mientras se autentica. En el DO eso sólo congela a las Handy (`main_volcando`) y
+  deja pasar lo que suba la Main; el modo recuperación es otra cosa ([recuperacion.md](recuperacion.md)).
+  La Main manda `recovery_ready` una vez por sesión, cuando se cumplen tres cosas:
+  - el saludo está cerrado: el DO manda lo que apartó para esta Main (`cola_apartada`) y después
+    `main_status`, que lo cierra;
+  - la cola del DO está vacía: `main_status` y cada `main_volcando` llevan lo que queda (`cola`), y al
+    vaciarla el DO avisa de lo que apartó antes de mandar `cola: 0`;
+  - `subir_pendientes` encuentra el outbox vacío, con las reparaciones de lo apartado ya subidas. Esa
+    subida es la frontera: lo que se confirme después es trabajo en vivo.
+
+  Una reparación que la nube tampoco acepta queda en cuarentena, fuera de lo pendiente, y no las
+  retiene, a propósito: congelarlas sin fin por algo irreparable bloquearía al personal, y lo
+  apartado ya queda con su aviso y lo repara el contraste diario. Un DO que no dice su cola
+  (anterior a AUD-15) no las retiene por ella. `recovery_ready` limpia también el congelado que
+  dejara una sesión anterior cortada a medias.
+
+  En el DO, lo que cuenta es la Main de ahora: sólo las sesiones autenticadas con el socket abierto
+  (`getWebSockets()` devuelve también los que se están cerrando), y la sesión que se reemplaza al
+  reconectar pierde la autenticación en su attachment antes de cerrarse. Las guardias de una
+  escritura de la Handy (Main conectada, Main lista, cola vacía) se vuelven a mirar dentro del turno
+  del log, justo antes de enviarla: la Main pudo dejar de estar lista mientras esperaba. Y la cola
+  avisa de que está vacía también cuando la vacía el quinto fallo de su última operación, y cada
+  vez que una alarma la encuentra vacía, por si un aviso se perdió.
 - **Con cola pendiente todo va a la cola**, también un `apply` en vivo: colarse por delante sería
-  aplicar el futuro antes que el pasado. Las Handy esperan (`main_volcando`) mientras la cola no esté
-  vacía; no hay flag, el estado es la cola.
+  aplicar el futuro antes que el pasado. Las Handy esperan (`main_volcando`) también mientras la cola
+  no esté vacía, aunque la Main ya haya mandado su `recovery_ready`.
 - El DO la drena por `alarm` en lotes de 50 (`applyBatchIdempotent`, que filtra antes las ya
   aplicadas). **Se aplica en Turso primero y se borra de la cola después.** El `alarm` captura sus
   excepciones y se reprograma a mano, y para si una vuelta no reduce la cola.

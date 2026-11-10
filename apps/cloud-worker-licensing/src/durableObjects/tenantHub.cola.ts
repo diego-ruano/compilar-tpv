@@ -195,7 +195,7 @@ export function encolar(
 	// Las Handy se congelan mientras dure. Solo en la transición: si ya estaba volcando, ya lo
 	// saben.
 	if (estabaVacia && cuantasEnCola(ctx) > 0) {
-		ctx.broadcastAuthed({ type: "main_volcando", volcando: true });
+		ctx.broadcastAuthed({ type: "main_volcando", volcando: true, cola: cuantasEnCola(ctx) });
 		ctx.emitSyncEvent("cola_volcado_inicio", { pendientes: cuantasEnCola(ctx) });
 	}
 
@@ -485,16 +485,12 @@ export async function drenarCola(ctx: ContextoDeCola): Promise<void> {
 			)
 			.toArray();
 		if (!filas.length) {
-			// Cola vacía: no se reprograma nada y el DO puede volver a hibernar. Si veníamos de
-			// drenar, es el momento de soltar a las Handy.
+			// Cola vacía: no se reprograma nada y el DO puede volver a hibernar. Es el momento de
+			// soltar a las Handy. AUD-15: también si esta vuelta no ha drenado nada: la alarma sólo
+			// se programa con trabajo, así que encontrarla vacía es que una salida anterior la dejó
+			// así sin avisar, y repetir el aviso no cuesta nada.
 			reiniciarEspera(ctx);
-			if (huboTrabajo) {
-				ctx.broadcastAuthed({
-					type: "main_volcando",
-					volcando: ctx.isMainRecovering(),
-				});
-				ctx.emitSyncEvent("cola_volcado_fin", {});
-			}
+			avisarColaVacia(ctx);
 			return;
 		}
 		const antes = filas.length === COLA_LOTE ? cuantasEnCola(ctx) : filas.length;
@@ -548,6 +544,12 @@ export async function drenarCola(ctx: ContextoDeCola): Promise<void> {
 		reiniciarEspera(ctx);
 
 		if (veredicto === "operacion_en_duda") {
+			// AUD-15: si su quinto fallo la ha apartado y era la última, la cola ya está vacía:
+			// se avisa ahora, sin esperar a una alarma que no tiene nada que drenar.
+			if (cuantasEnCola(ctx) === 0) {
+				avisarColaVacia(ctx);
+				return;
+			}
 			await ctx.storage.setAlarm(nowMs() + COLA_REINTENTO_MS);
 			return;
 		}
@@ -561,8 +563,24 @@ export async function drenarCola(ctx: ContextoDeCola): Promise<void> {
 		}
 	}
 
-	// Se acabó el presupuesto pero queda cola: seguimos en la siguiente alarma.
+	// Se acabó el presupuesto pero queda cola: seguimos en la siguiente alarma. AUD-15: si la última
+	// vuelta la vació, el aviso va aquí: la alarma siguiente ya no llegaría a darlo.
 	if (cuantasEnCola(ctx) > 0) await ctx.storage.setAlarm(nowMs());
+	else if (huboTrabajo) avisarColaVacia(ctx);
+}
+
+/**
+ * La cola se ha vaciado. Las Handy se sueltan si la Main no las retiene (`recovering`), y la Main
+ * se entera de que lo que dejó en la cola ya está aplicado o apartado: lo apartado se le avisó antes
+ * (`cola_apartada`), por el mismo socket, así que cuando le llega esto ya lo tiene (AUD-15).
+ */
+function avisarColaVacia(ctx: ContextoDeCola): void {
+	ctx.broadcastAuthed({
+		type: "main_volcando",
+		volcando: ctx.isMainRecovering(),
+		cola: 0,
+	});
+	ctx.emitSyncEvent("cola_volcado_fin", {});
 }
 
 /**

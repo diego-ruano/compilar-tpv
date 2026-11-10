@@ -2,7 +2,7 @@
 //! El canal sólo procede del transporte TLS autenticado. Ningún llamante de IPC aporta SQL/acks.
 use std::time::{Duration, Instant};
 use serde_json::{json, Value};
-use tpv_contracts::sync::{OutboxEntry, SyncChange};
+use tpv_contracts::{licensing::FirmaDispositivo, sync::{OutboxEntry, SyncChange}};
 use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{CanalReplicacion, ContextoReplicacion}, sync::{BajadaAplicada, CambioDetenido}}};
 
 const MAX_PAGINAS: usize = 2000;
@@ -39,6 +39,41 @@ impl Bajada {
     pub fn detenida(&self) -> bool {
         self.detenida_hasta.is_some()
     }
+}
+
+/// AUD-15 · Lo que la nube ha dicho en esta sesión de su cola de entrada (SYNC-18). Las Handy no se
+/// sueltan mientras pueda llegar algo que la Main tenga que reparar: lo que el DO apartó de la cola
+/// (`cola_apartada`) llega en el saludo, antes de `main_status`, o al drenarla, antes del aviso de
+/// que se ha vaciado.
+#[derive(Debug, Default)]
+pub struct ColaDeLaNube {
+    /// Ha llegado `main_status`, lo último del saludo.
+    saludo_cerrado: bool,
+    /// Lo que hay en la cola del DO según su último aviso (`cola` en `main_status` y
+    /// `main_volcando`). `None`: el DO no lo dice (un worker anterior), y no se espera por ella.
+    en_cola: Option<i64>,
+}
+
+impl ColaDeLaNube {
+    fn anotar(&mut self, mensaje: &Value) {
+        if let Some(n) = mensaje.get("cola").and_then(Value::as_i64) { self.en_cola = Some(n.max(0)); }
+        if mensaje.get("type").and_then(Value::as_str) == Some("main_status") { self.saludo_cerrado = true; }
+    }
+    /// La Main acaba de dejar algo en la cola del DO: hasta que avise de que se ha vaciado, puede
+    /// volver apartado.
+    fn encolado(&mut self) {
+        if let Some(n) = self.en_cola { self.en_cola = Some(n.max(1)); }
+    }
+    fn nada_por_llegar(&self) -> bool {
+        self.saludo_cerrado && self.en_cola.unwrap_or(0) == 0
+    }
+}
+
+/// Una sesión del motor: su bajada (AUD-18) y lo que se sabe de la cola de la nube (AUD-15).
+#[derive(Debug, Default)]
+pub struct Sesion {
+    bajada: Bajada,
+    cola: ColaDeLaNube,
 }
 
 /// Lo que deja un catch-up: el final del log que ha visto y, si se ha detenido, en qué cambio.
@@ -101,32 +136,32 @@ pub async fn catch_up(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
 /// que toque atendiendo el socket (sin aplicar lo que llega en vivo) y se vuelve a intentar desde
 /// el checkpoint, hasta que el cambio entra o pasa a cuarentena y el catch-up llega al final del
 /// log. Termina siempre: cada cambio tiene cinco intentos. Devuelve el final del log visto.
-async fn ponerse_al_dia(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, bajada: &mut Bajada, estricto: bool) -> AppResult<i64> {
+async fn ponerse_al_dia(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, estricto: bool) -> AppResult<i64> {
     loop {
-        if let Some(hasta) = bajada.detenida_hasta {
-            esperar_atendiendo(ctx, canal, bajada, hasta).await?;
+        if let Some(hasta) = sesion.bajada.detenida_hasta {
+            esperar_atendiendo(ctx, canal, sesion, hasta).await?;
         }
         let r = catch_up(ctx, nube, estricto).await?;
         match r.detenida {
             None => {
-                bajada.detenida_hasta = None;
+                sesion.bajada.detenida_hasta = None;
                 return Ok(r.high_water);
             }
-            Some(d) => bajada.detener(&d),
+            Some(d) => sesion.bajada.detener(&d),
         }
     }
 }
 
 /// AUD-18 · Atiende el socket hasta `hasta` con la bajada detenida: lo que no es un cambio se
 /// atiende como siempre, y los cambios no se aplican.
-async fn esperar_atendiendo(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, bajada: &mut Bajada, hasta: Instant) -> AppResult<()> {
+async fn esperar_atendiendo(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, hasta: Instant) -> AppResult<()> {
     loop {
         let falta = hasta.saturating_duration_since(Instant::now());
         if falta.is_zero() { return Ok(()); }
         match canal.recibir(falta).await? {
             // `None` es que ha vencido la espera (`CanalNube::recibir`).
             None => return Ok(()),
-            Some(m) => atender(ctx, canal, bajada, m).await?,
+            Some(m) => atender(ctx, canal, sesion, m).await?,
         }
     }
 }
@@ -140,13 +175,14 @@ pub fn rechazo_contabilizable(ack: &Value) -> bool {
     ack.get("ok") == Some(&Value::Bool(false)) && ack.get("transitorio") != Some(&Value::Bool(true))
 }
 
-async fn atender(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, bajada: &mut Bajada, mensaje: Value) -> AppResult<()> {
+async fn atender(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, mensaje: Value) -> AppResult<()> {
     match mensaje.get("type").and_then(Value::as_str) {
         Some("change") => {
             // AUD-18: con la bajada detenida no se aplica nada posterior; lo trae el catch-up.
-            if bajada.detenida() { return Ok(()); }
-            if let Some(d) = aplicar(ctx, vec![cambio(mensaje)?]).await?.detenida { bajada.detener(&d); }
+            if sesion.bajada.detenida() { return Ok(()); }
+            if let Some(d) = aplicar(ctx, vec![cambio(mensaje)?]).await?.detenida { sesion.bajada.detener(&d); }
         }
+        Some("main_status" | "main_volcando") => sesion.cola.anotar(&mensaje),
         Some("pair_request") => ctx.solicitud_emparejamiento(),
         Some("reservas_web") => ctx.reservas_web(),
         Some("cola_apartada") => {
@@ -166,19 +202,19 @@ async fn atender(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion
     Ok(())
 }
 
-async fn esperar_ack(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, bajada: &mut Bajada, tipo: &str, op_id: Option<&str>, espera: Duration) -> AppResult<Value> {
+async fn esperar_ack(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, tipo: &str, op_id: Option<&str>, espera: Duration) -> AppResult<Value> {
     let fin = Instant::now() + espera;
     while Instant::now() < fin {
         let restante = fin.saturating_duration_since(Instant::now());
         if let Some(m) = canal.recibir(restante).await? {
             if m.get("type").and_then(Value::as_str) == Some(tipo) && op_id.is_none_or(|id| m.get("opId").or_else(|| m.get("op_id")).and_then(Value::as_str) == Some(id)) { return Ok(m); }
-            atender(ctx, canal, bajada, m).await?;
+            atender(ctx, canal, sesion, m).await?;
         }
     }
     Err(AppError::external("No llegó la confirmación de la nube"))
 }
 
-pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, bajada: &mut Bajada, volcado: bool, estricto: bool) -> AppResult<bool> {
+pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, volcado: bool, estricto: bool) -> AppResult<bool> {
     // Finito para no dejar al receptor sin turno ante una importación continua.
     for _ in 0..10000 {
         let pendientes = ctx.repositorio().await?.outbox_pending(if volcado {200} else {50}).await?;
@@ -192,16 +228,17 @@ pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn Can
                 if bytes >= 256 * 1024 { break; }
             }
             canal.enviar(json!({"type":"bulk_apply","ops":trozo.iter().map(operacion).collect::<Vec<_>>()})).await?;
-            let ack = esperar_ack(ctx, canal, bajada, "bulk_ack", None, Duration::from_secs(30)).await?;
+            let ack = esperar_ack(ctx, canal, sesion, "bulk_ack", None, Duration::from_secs(30)).await?;
             if ack.get("ok") != Some(&Value::Bool(true)) { return Err(AppError::external("La nube no aceptó el volcado")); }
             let ids = trozo.iter().map(|e| e.op_id.clone()).collect::<Vec<_>>();
             ctx.repositorio().await?.outbox_mark_encolada(&ids).await?;
+            sesion.cola.encolado();
         } else {
             for entry in pendientes {
                 let mut msg = operacion(&entry);
                 msg["type"] = json!("apply");
                 canal.enviar(msg).await?;
-                let ack = esperar_ack(ctx, canal, bajada, "apply_ack", Some(&entry.op_id), Duration::from_secs(10)).await?;
+                let ack = esperar_ack(ctx, canal, sesion, "apply_ack", Some(&entry.op_id), Duration::from_secs(10)).await?;
                 if ack.get("ok") != Some(&Value::Bool(true)) {
                     if estricto { return Err(AppError::external(format!("La nube rechazó la operación {}", entry.op_id))); }
                     if rechazo_contabilizable(&ack) {
@@ -214,6 +251,7 @@ pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn Can
                 }
                 if ack.get("encolada") == Some(&Value::Bool(true)) {
                     ctx.repositorio().await?.outbox_mark_encolada(&[entry.op_id]).await?;
+                    sesion.cola.encolado();
                 } else {
                     ctx.repositorio().await?.outbox_mark_sent(&entry.op_id, ack.get("seq").and_then(Value::as_i64).unwrap_or(0)).await?;
                 }
@@ -223,20 +261,32 @@ pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn Can
     Ok(false)
 }
 
+/// AUD-15 · El saludo de la Main, siempre con `recovering`: el DO congela a las Handy
+/// (`main_volcando`) y deja pasar lo que suba la Main, y `ejecutar` las suelta con `recovery_ready`
+/// cuando se ha puesto al día. Mirar antes si hay atraso no sirve: lo que se confirme entre mirarlo y
+/// autenticarse subiría con las Handy ya sueltas.
+///
+/// En el DO, `recovering` sólo congela a las Handy; el modo recuperación de la Main (estricto, con
+/// sus fases y `completar_recuperacion`) sigue siendo `recuperando`, que no tiene que ver con esto.
+pub async fn saludar<F>(canal: &mut dyn CanalReplicacion, firmar: F) -> AppResult<()>
+where F: FnMut(&str) -> AppResult<FirmaDispositivo> + Send {
+    crate::use_cases::saludo_socket::saludar(canal, firmar, "tpv", true).await
+}
+
 pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, recuperando: bool) -> AppResult<()> {
     ctx.repositorio().await?.liberar_encoladas_caducadas(if recuperando {0} else {TTL_ENCOLADA}).await?;
     ctx.fase_recuperacion(if recuperando {"descargando"} else {"inactiva"});
-    let mut bajada = Bajada::default();
-    ponerse_al_dia(ctx, nube, canal, &mut bajada, recuperando).await?;
+    let mut sesion = Sesion::default();
+    ponerse_al_dia(ctx, nube, canal, &mut sesion, recuperando).await?;
     let volcado = !recuperando && ctx.volcado_permitido() && ctx.repositorio().await?.outbox_pending(101).await?.len() > 100;
     let mut vacio = true;
     if recuperando {
         ctx.fase_recuperacion("subiendo");
-        subir_pendientes(ctx, canal, &mut bajada, false, true).await?;
+        subir_pendientes(ctx, canal, &mut sesion, false, true).await?;
         let mut completada = false;
         for _ in 0..180 {
             ctx.fase_recuperacion("verificando");
-            let high_water = ponerse_al_dia(ctx, nube, canal, &mut bajada, true).await?;
+            let high_water = ponerse_al_dia(ctx, nube, canal, &mut sesion, true).await?;
             let salud = ctx.repositorio().await?.health().await?;
             if salud.outbox_pending == 0 && salud.last_seq >= high_water && salud.failing == 0 && salud.quarantined == 0 && salud.subida_en_cuarentena == 0 {
                 ctx.completar_recuperacion(high_water).await?;
@@ -247,32 +297,48 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
                 completada = true;
                 break;
             }
-            if let Some(m) = canal.recibir(Duration::from_secs(1)).await? { atender(ctx, canal, &mut bajada, m).await?; }
+            if let Some(m) = canal.recibir(Duration::from_secs(1)).await? { atender(ctx, canal, &mut sesion, m).await?; }
             ctx.fase_recuperacion("subiendo");
-            subir_pendientes(ctx, canal, &mut bajada, false, true).await?;
+            subir_pendientes(ctx, canal, &mut sesion, false, true).await?;
         }
         if !completada { return Err(AppError::external("La nube no confirmó la convergencia")); }
     } else {
-        vacio = subir_pendientes(ctx, canal, &mut bajada, volcado, false).await?;
+        vacio = subir_pendientes(ctx, canal, &mut sesion, volcado, false).await?;
         // Al conectar, lo que se haya reservado en la web mientras esta Main no estaba.
         ctx.reservas_web();
     }
+    // AUD-15: las Handy que congeló el saludo se sueltan una vez por sesión, cuando no queda nada
+    // que deba llegar antes a la nube: el saludo cerrado (lo apartado para esta Main ya ha
+    // llegado), la cola del DO vacía (lo que apartó al drenarla, también) y `subir_pendientes`
+    // encuentra el outbox vacío, reparaciones de lo apartado incluidas. Una reparación que la nube
+    // tampoco acepta queda en cuarentena, fuera de lo pendiente, y no las retiene: su rastro es el
+    // de cualquier apartada. Esa última subida es la frontera: lo que se confirme aquí después es
+    // trabajo en vivo, como con la sesión ya abierta. En la recuperación las suelta su desbloqueo.
+    let mut handy_por_soltar = !recuperando;
     let mut ultimo_sondeo = Instant::now();
     loop {
+        if handy_por_soltar && vacio && sesion.cola.nada_por_llegar() {
+            vacio = subir_pendientes(ctx, canal, &mut sesion, false, false).await?;
+            if vacio && sesion.cola.nada_por_llegar() {
+                canal.enviar(json!({"type":"recovery_ready"})).await?;
+                handy_por_soltar = false;
+            }
+            ultimo_sondeo = Instant::now();
+        }
         if !ctx.sigue_disponible(false).await? { return Ok(()); }
         // AUD-18: un cambio en vivo ha fallado. Se reintenta con su espera y la bajada se pone al
         // día por catch-up antes de volver a escuchar; después, una vuelta de subida.
-        if bajada.detenida() {
-            ponerse_al_dia(ctx, nube, canal, &mut bajada, false).await?;
-            vacio = subir_pendientes(ctx, canal, &mut bajada, false, false).await?;
+        if sesion.bajada.detenida() {
+            ponerse_al_dia(ctx, nube, canal, &mut sesion, false).await?;
+            vacio = subir_pendientes(ctx, canal, &mut sesion, false, false).await?;
             ultimo_sondeo = Instant::now();
             continue;
         }
         let msg = canal.recibir(Duration::from_secs(if vacio {30} else {3})).await?;
         let despertar = msg.as_ref().and_then(|m| m.get("type")).and_then(Value::as_str) == Some("despertar");
-        if let Some(m) = msg { atender(ctx, canal, &mut bajada, m).await?; }
+        if let Some(m) = msg { atender(ctx, canal, &mut sesion, m).await?; }
         if despertar || ultimo_sondeo.elapsed() >= Duration::from_secs(if vacio {30} else {3}) {
-            vacio = subir_pendientes(ctx, canal, &mut bajada, false, false).await?;
+            vacio = subir_pendientes(ctx, canal, &mut sesion, false, false).await?;
             ultimo_sondeo = Instant::now();
         }
     }

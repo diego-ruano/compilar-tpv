@@ -191,6 +191,19 @@ export async function atenderHelloSigned(
 					deviceId,
 				);
 
+				if (roleFinal === "tpv") {
+					// REV-04: lo que la nube apartó mientras esta Main no estaba (o estaba y no
+					// escuchaba: esto es también el reintento del aviso que no se acusó). Va
+					// antes del catch-up a propósito —la Main pone su copia en cuarentena y
+					// encola la reparación por estado— y se repite en cada conexión hasta que
+					// alguien lo acuse. AUD-15: y antes de `main_status`, que cierra el saludo:
+					// la Main no suelta a las Handy sin haberlo recibido.
+					const apartadas = ctx.apartadasPendientes();
+					if (apartadas.length) {
+						ctx.send(ws, { type: "cola_apartada", ops: apartadas });
+					}
+				}
+
 				// Freeze por presencia de Main: informamos a este
 				// dispositivo de si hay Main conectada (una Handy recién
 				// autenticada necesita saberlo para bloquear/desbloquear su
@@ -202,23 +215,16 @@ export async function atenderHelloSigned(
 					// SYNC-18: una Handy que entra a mitad de un volcado tiene que bloquear
 					// igual que si no hubiera Main; con `online` a secas no se enteraría.
 					volcando: ctx.cuantasEnCola() > 0 || ctx.isMainRecovering(),
+					// AUD-15: lo que queda en la cola. La Main no suelta a las Handy hasta verla
+					// vacía: lo que se aparte al drenarla tiene que repararse antes.
+					cola: ctx.cuantasEnCola(),
 				});
 
 				if (roleFinal === "tpv") {
-					// REV-04: lo que la nube apartó mientras esta Main no estaba (o estaba y no
-					// escuchaba: esto es también el reintento del aviso que no se acusó). Va
-					// antes del catch-up a propósito —la Main pone su copia en cuarentena y
-					// encola la reparación por estado— y se repite en cada conexión hasta que
-					// alguien lo acuse.
-					const apartadas = ctx.apartadasPendientes();
-					if (apartadas.length) {
-						ctx.send(ws, { type: "cola_apartada", ops: apartadas });
-					}
-
 					ctx.broadcast({ type: "main_online", deviceId }, deviceId);
 					if (msg.recovering) {
 						ctx.broadcastAuthed(
-							{ type: "main_volcando", volcando: true },
+							{ type: "main_volcando", volcando: true, cola: ctx.cuantasEnCola() },
 							deviceId,
 						);
 					}
@@ -254,6 +260,7 @@ export function atenderRecoveryReady(
 	ctx.broadcastAuthed({
 		type: "main_volcando",
 		volcando: ctx.cuantasEnCola() > 0 || ctx.isMainRecovering(),
+		cola: ctx.cuantasEnCola(),
 	});
 	ctx.send(ws, { type: "recovery_ready_ack" });
 	return;

@@ -132,7 +132,12 @@ export function abrirWebSocket(
 
 	// Reconexión con el mismo deviceId: se echa la sesión anterior. Se cierra DESPUÉS de aceptar
 	// la nueva para que su `webSocketClose` vea que ya hay un socket vivo y no dispare el freeze.
+	// AUD-15: y deja de estar autenticada antes de cerrarla. Mientras termina de cerrarse puede
+	// seguir en `getWebSockets()`, y una Main reemplazada no puede seguir autorizando a las Handy
+	// (ni congelándolas) por encima de lo que diga la sesión nueva.
 	for (const prev of ctx.liveSocketsFor(deviceId, server)) {
+		const a = ctx.att(prev);
+		if (a) ctx.setAtt(prev, { ...a, authed: false, recovering: false });
 		try {
 			prev.close(4000, "replaced");
 		} catch { }

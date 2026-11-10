@@ -16,6 +16,10 @@ struct FakeRepo {
     detenido: Mutex<Option<SyncChange>>, aplicados: Mutex<Vec<i64>>, cuarentena: Mutex<Vec<String>>,
     // Los `Seq` que se le han pedido aplicar, llamada a llamada.
     llamadas: Mutex<Vec<Vec<i64>>>,
+    // AUD-15: las encoladas cuya marca ya caducó (`liberar_encoladas_caducadas` las suelta), las
+    // apartadas de la subida (`Cuarentena = 1`: siguen en el outbox, fuera de lo pendiente) y los
+    // rechazos contados de cada operación.
+    caducadas: Mutex<Vec<String>>, apartadas: Mutex<Vec<String>>, rechazos: Mutex<HashMap<String, i64>>,
 }
     #[async_trait]
     impl SyncRepository for FakeRepo {
@@ -65,14 +69,34 @@ struct FakeRepo {
         }
         async fn outbox_pending(&self, limit: i64) -> AppResult<Vec<OutboxEntry>> {
             self.limits.lock().unwrap().push(limit);
-            Ok(self.pending.lock().unwrap().iter().filter(|e| !self.encoladas.lock().unwrap().contains(&e.op_id)).take(limit as usize).cloned().collect())
+            let fuera = |id: &String| self.encoladas.lock().unwrap().contains(id) || self.apartadas.lock().unwrap().contains(id);
+            Ok(self.pending.lock().unwrap().iter().filter(|e| !fuera(&e.op_id)).take(limit as usize).cloned().collect())
         }
         async fn outbox_mark_sent(&self, id: &str, _: i64) -> AppResult<()> {
             self.pending.lock().unwrap().retain(|e| e.op_id != id);
             Ok(())
         }
-        async fn outbox_mark_failed(&self, _: &str, _: &str, _: bool) -> AppResult<OutboxFallo> {
-            Ok(OutboxFallo::default())
+        /// El mismo contrato que el real: repetible, aparta al rechazo permanente o a los 20,
+        /// suelta la marca de encolada y encola la reparación, salvo de una reparación.
+        async fn outbox_mark_failed(&self, id: &str, _: &str, permanente: bool) -> AppResult<OutboxFallo> {
+            if self.apartadas.lock().unwrap().iter().any(|a| a == id) { return Ok(OutboxFallo::default()); }
+            let Some(command_name) = self.pending.lock().unwrap().iter().find(|e| e.op_id == id).map(|e| e.command_name.clone()) else {
+                return Ok(OutboxFallo::default());
+            };
+            let intentos = { let mut r = self.rechazos.lock().unwrap(); let n = r.entry(id.to_string()).or_insert(0); *n += 1; *n };
+            let apartada = permanente || intentos >= 20;
+            let mut reparadas = 0;
+            if apartada {
+                self.apartadas.lock().unwrap().push(id.to_string());
+                self.encoladas.lock().unwrap().retain(|e| e != id);
+                if command_name != "main_reparacion" {
+                    let mut reparacion = op(&format!("repara-{id}"));
+                    reparacion.command_name = "main_reparacion".into();
+                    self.pending.lock().unwrap().push(reparacion);
+                    reparadas = 1;
+                }
+            }
+            Ok(OutboxFallo { intentos, apartada, command_name, reparadas })
         }
         async fn contrastar_con_la_nube(
             &self,
@@ -93,14 +117,21 @@ struct FakeRepo {
             self.encoladas.lock().unwrap().extend_from_slice(ids);
             Ok(())
         }
-        async fn liberar_encoladas_caducadas(&self, _: i64) -> AppResult<i64> {
-            Ok(0)
+        async fn liberar_encoladas_caducadas(&self, antiguedad: i64) -> AppResult<i64> {
+            let mut encoladas = self.encoladas.lock().unwrap();
+            let antes = encoladas.len();
+            if antiguedad <= 0 { encoladas.clear(); } else {
+                let caducadas = self.caducadas.lock().unwrap();
+                encoladas.retain(|e| !caducadas.contains(e));
+            }
+            Ok((antes - encoladas.len()) as i64)
         }
         async fn purge_applied_ops(&self) -> AppResult<()> {
             Ok(())
         }
         async fn health(&self) -> AppResult<SyncHealth> {
-            Ok(SyncHealth {outbox_pending:self.pending.lock().unwrap().len() as i64,last_seq:*self.cursor.lock().unwrap(),quarantined:0,failing:0,subida_fallando:0,subida_en_cuarentena:0})
+            let apartadas = self.apartadas.lock().unwrap().len() as i64;
+            Ok(SyncHealth {outbox_pending:self.pending.lock().unwrap().len() as i64 - apartadas,last_seq:*self.cursor.lock().unwrap(),quarantined:0,failing:0,subida_fallando:0,subida_en_cuarentena:apartadas})
         }
         async fn bootstrap_restaurar(
             &self,
@@ -192,31 +223,31 @@ fn canal(respuestas:Vec<Value>)->Canal {Canal{respuestas:respuestas.into(),envia
 #[tokio::test]
 async fn solo_el_ack_de_la_operacion_enviada_la_confirma() {
     let ctx=contexto(vec![op("a")]);let mut c=canal(vec![json!({"type":"apply_ack","opId":"otra","ok":true})]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut Bajada::default(),false,false).await.is_err());
+    assert!(subir_pendientes(&ctx,&mut c,&mut Sesion::default(),false,false).await.is_err());
     assert_eq!(ctx.repo.pending.lock().unwrap().len(),1);
 }
 #[tokio::test]
 async fn un_corte_sin_ack_conserva_la_operacion() {
     let ctx=contexto(vec![op("a")]);let mut c=canal(vec![]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut Bajada::default(),false,false).await.is_err());
+    assert!(subir_pendientes(&ctx,&mut c,&mut Sesion::default(),false,false).await.is_err());
     assert_eq!(ctx.repo.pending.lock().unwrap().len(),1);
 }
 #[tokio::test]
 async fn se_aplica_lo_vivo_mientras_se_espera_una_confirmacion() {
     let ctx=contexto(vec![op("a")]);let mut c=canal(vec![json!({"type":"change","opId":"remota","seq":2,"statements":[{"sql":"UPDATE Productos SET Nombre=?1","args":["Otro"]}]}),json!({"type":"apply_ack","opId":"a","seq":3,"ok":true})]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut Bajada::default(),false,false).await.unwrap());
+    assert!(subir_pendientes(&ctx,&mut c,&mut Sesion::default(),false,false).await.unwrap());
     assert!(ctx.repo.pending.lock().unwrap().is_empty());assert_eq!(*ctx.avisos.lock().unwrap(),1);
 }
 #[tokio::test]
 async fn encolada_no_se_considera_aplicada() {
     let ctx=contexto(vec![op("a")]);let mut c=canal(vec![json!({"type":"apply_ack","opId":"a","ok":true,"encolada":true})]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut Bajada::default(),false,false).await.unwrap());
+    assert!(subir_pendientes(&ctx,&mut c,&mut Sesion::default(),false,false).await.unwrap());
     assert_eq!(ctx.repo.pending.lock().unwrap().len(),1);assert_eq!(ctx.repo.encoladas.lock().unwrap().as_slice(),["a"]);
 }
 #[tokio::test]
 async fn el_volcado_conserva_las_filas_hasta_verlas_volver() {
     let ctx=contexto((0..101).map(|i|op(&i.to_string())).collect());let mut c=canal(vec![json!({"type":"bulk_ack","ok":true})]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut Bajada::default(),true,false).await.unwrap());
+    assert!(subir_pendientes(&ctx,&mut c,&mut Sesion::default(),true,false).await.unwrap());
     assert_eq!(ctx.repo.pending.lock().unwrap().len(),101);assert_eq!(ctx.repo.encoladas.lock().unwrap().len(),101);
     assert_eq!(c.enviados[0]["type"],"bulk_apply");
 }
@@ -254,7 +285,7 @@ async fn al_terminar_una_recuperacion_se_recogen_las_reservas_web() {
 #[tokio::test]
 async fn el_aviso_de_la_agenda_pide_recogerlas_aunque_llegue_esperando_una_confirmacion() {
     let ctx=contexto(vec![op("a")]);let mut c=canal(vec![json!({"type":"reservas_web"}),json!({"type":"apply_ack","opId":"a","seq":3,"ok":true})]);
-    assert!(subir_pendientes(&ctx,&mut c,&mut Bajada::default(),false,false).await.unwrap());
+    assert!(subir_pendientes(&ctx,&mut c,&mut Sesion::default(),false,false).await.unwrap());
     assert_eq!(*ctx.recogidas.lock().unwrap(),1);
 }
 
@@ -341,4 +372,180 @@ async fn con_la_bajada_detenida_el_socket_se_sigue_atendiendo() {
     // El 2 que llegó en vivo no se aplicó entonces: vino después, por el catch-up.
     assert_eq!(*ctx.repo.llamadas.lock().unwrap(),vec![vec![1],vec![1],vec![2]]);
     assert_eq!(*ctx.repo.aplicados.lock().unwrap(),vec![1,2]);
+}
+
+// ── AUD-15 · la Main congela a las Handy hasta ponerse al día ───────────────
+
+fn firma(_:&str)->AppResult<FirmaDispositivo> {Ok(FirmaDispositivo{ts:10,sig_b64:"firma".into()})}
+/// Lo último que manda el DO al saludar a la Main, con lo que tiene en su cola.
+fn estado(cola:i64)->Option<Value> {Some(json!({"type":"main_status","online":true,"volcando":true,"cola":cola}))}
+fn ack(op:&str,seq:i64)->Option<Value> {Some(json!({"type":"apply_ack","opId":op,"ok":true,"seq":seq}))}
+fn apartada(op:&str)->Option<Value> {Some(json!({"type":"cola_apartada","ops":[{"opId":op}]}))}
+fn cola_vacia()->Option<Value> {Some(json!({"type":"main_volcando","volcando":true,"cola":0}))}
+fn disponible(ctx:Contexto)->Contexto {*ctx.sigue.lock().unwrap()=true;ctx}
+
+/// Un socket que apunta en orden lo que sale («>») y lo que entra («<»). `None` es una espera que
+/// vence, y agotado se cierra. Puede dejar una venta en el outbox al mandar el saludo: la que se
+/// confirma mientras la Main se autentica.
+struct Conversacion { entrantes:VecDeque<Option<Value>>, log:Vec<String>, enviados:Vec<Value>, al_saludar:Option<(Arc<FakeRepo>,OutboxEntry)> }
+#[async_trait]
+impl CanalReplicacion for Conversacion {
+    async fn enviar(&mut self,m:Value)->AppResult<()> {
+        if m["type"]=="helloSigned" { if let Some((repo,venta))=self.al_saludar.take() { repo.pending.lock().unwrap().push(venta); } }
+        self.log.push(format!(">{}",m["type"].as_str().unwrap_or("?")));
+        self.enviados.push(m);
+        Ok(())
+    }
+    async fn recibir(&mut self,_:Duration)->AppResult<Option<Value>> {
+        let m=self.entrantes.pop_front().ok_or_else(||AppError::external("Socket cerrado"))?;
+        if let Some(m)=&m { self.log.push(format!("<{}",m["type"].as_str().unwrap_or("?"))); }
+        Ok(m)
+    }
+}
+fn conversacion(entrantes:Vec<Option<Value>>)->Conversacion {Conversacion{entrantes:entrantes.into(),log:vec![],enviados:vec![],al_saludar:None}}
+
+#[tokio::test]
+async fn toda_sesion_de_la_main_saluda_congelando_a_las_handy() {
+    let mut c=conversacion(vec![Some(json!({"type":"challenge","nonceB64":"reto"})),Some(json!({"type":"hello_ok","role":"tpv","authed":true}))]);
+    saludar(&mut c,firma).await.unwrap();
+    assert_eq!((c.enviados[0]["type"].as_str(),c.enviados[0]["recovering"].as_bool()),(Some("helloSigned"),Some(true)));
+}
+
+#[tokio::test]
+async fn una_venta_confirmada_durante_el_saludo_sube_antes_de_soltarlas() {
+    // El outbox estaba vacío al conectar; la venta entra después, antes de `hello_ok`.
+    let ctx=disponible(contexto(vec![]));
+    let mut c=conversacion(vec![Some(json!({"type":"challenge","nonceB64":"reto"})),Some(json!({"type":"hello_ok","role":"tpv","authed":true})),estado(0),ack("venta",1)]);
+    c.al_saludar=Some((ctx.repo.clone(),op("venta")));
+    saludar(&mut c,firma).await.unwrap();
+    let n=nube(vec![pagina(vec![],0)]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err(),"acaba al cerrarse el socket");
+    assert_eq!(c.log,["<challenge",">helloSigned","<hello_ok",">apply","<main_status","<apply_ack",">recovery_ready"]);
+    assert_eq!(c.enviados[0]["recovering"],true);
+    assert!(ctx.repo.pending.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn el_atraso_sube_en_vivo_y_al_vaciarse_suelta_a_las_handy() {
+    // Cien operaciones: no llegan al volcado, así que suben en vivo de una en una.
+    let ctx=contexto((0..100).map(|i|op(&i.to_string())).collect());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut entrantes=vec![estado(0)];
+    entrantes.extend((0..100i64).map(|i|ack(&i.to_string(),i+1)));
+    let mut c=conversacion(entrantes);
+    ejecutar(&ctx,&n,&mut c,false).await.unwrap();
+    assert_eq!(c.enviados.len(),101);
+    assert!(c.enviados[..100].iter().all(|m|m["type"]=="apply"));
+    assert_eq!(c.log.last().map(String::as_str),Some(">recovery_ready"),"después de la última confirmación");
+    assert!(ctx.repo.pending.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn no_las_suelta_hasta_que_el_atraso_ha_subido_entero() {
+    let ctx=disponible(contexto(vec![op("a")]));
+    let n=nube(vec![pagina(vec![],0)]);
+    // La nube no la acepta a la primera (un fallo pasajero) y sí en la vuelta siguiente.
+    let mut c=conversacion(vec![
+        estado(0),
+        Some(json!({"type":"apply_ack","opId":"a","ok":false,"transitorio":true})),
+        Some(json!({"type":"despertar"})),
+        ack("a",1),
+    ]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err(),"acaba al cerrarse el socket");
+    assert_eq!(c.log,[">apply","<main_status","<apply_ack","<despertar",">apply","<apply_ack",">recovery_ready"]);
+}
+
+#[tokio::test]
+async fn sin_atraso_las_suelta_al_cerrarse_el_saludo() {
+    // También limpia el congelado que dejara una sesión anterior cortada a medias.
+    let ctx=disponible(contexto(vec![]));let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![estado(0)]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert_eq!(c.log,["<main_status",">recovery_ready"]);
+}
+
+#[tokio::test]
+async fn lo_que_la_nube_aparto_mientras_no_estaba_se_repara_antes_de_soltarlas() {
+    // La Main vuelve antes de una hora: «a» sigue marcada como encolada, pero el DO la apartó y lo
+    // avisa en el saludo, antes de `main_status`. El outbox no tiene nada que subir.
+    let ctx=disponible(contexto(vec![op("a")]));ctx.repo.encoladas.lock().unwrap().push("a".into());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![apartada("a"),estado(0),ack("repara-a",1)]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert_eq!(c.log,["<cola_apartada",">cola_apartada_ack","<main_status",">apply","<apply_ack",">recovery_ready"]);
+    assert_eq!(c.enviados[1]["opId"],"repara-a");
+    assert_eq!(*ctx.repo.apartadas.lock().unwrap(),vec!["a".to_string()]);
+    assert!(ctx.repo.encoladas.lock().unwrap().is_empty(),"la apartada deja de estar encolada");
+}
+
+#[tokio::test]
+async fn el_volcado_que_aparta_una_no_las_suelta_hasta_subir_su_reparacion() {
+    let ctx=disponible(contexto((0..101).map(|i|op(&i.to_string())).collect()));
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![
+        estado(0),
+        Some(json!({"type":"main_volcando","volcando":true,"cola":101})),
+        Some(json!({"type":"bulk_ack","ok":true})),
+        // El DO drena: aparta la «7», lo avisa y después avisa de que la cola está vacía.
+        None,
+        apartada("7"),
+        cola_vacia(),
+        ack("repara-7",200),
+    ]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert_eq!(c.log,[">bulk_apply","<main_status","<main_volcando","<bulk_ack","<cola_apartada",">cola_apartada_ack","<main_volcando",">apply","<apply_ack",">recovery_ready"]);
+    assert_eq!(c.enviados[2]["opId"],"repara-7");
+}
+
+#[tokio::test]
+async fn con_algo_en_la_cola_de_la_nube_espera_a_que_se_vacie() {
+    let ctx=disponible(contexto(vec![]));let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![estado(3),None,cola_vacia()]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert_eq!(c.log,["<main_status","<main_volcando",">recovery_ready"]);
+}
+
+#[tokio::test]
+/// Decisión del responsable, no un descuido: una operación que ni su reparación consigue subir no
+/// congela a las Handy para siempre, que sería bloquear al personal por algo que no va a cambiar.
+/// Se sueltan con lo apartado en cuarentena y su aviso, y lo repara el contraste diario.
+async fn una_reparacion_irreparable_suelta_a_las_handy_para_no_bloquear_al_personal() {
+    let ctx=disponible(contexto(vec![op("a")]));ctx.repo.encoladas.lock().unwrap().push("a".into());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![apartada("a"),estado(0),Some(json!({"type":"apply_ack","opId":"repara-a","ok":false,"permanente":true}))]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert_eq!(c.log,["<cola_apartada",">cola_apartada_ack","<main_status",">apply","<apply_ack",">recovery_ready"]);
+    // Las dos quedan en cuarentena, con su rastro: ni se borran ni se reintentan.
+    assert_eq!(*ctx.repo.apartadas.lock().unwrap(),vec!["a".to_string(),"repara-a".to_string()]);
+    assert_eq!(ctx.repo.pending.lock().unwrap().len(),2);
+}
+
+#[tokio::test]
+async fn una_encolada_caducada_vuelve_a_subir_antes_de_soltarlas() {
+    // Lleva más de una hora sin volver por el catch-up: se ofrece otra vez.
+    let ctx=disponible(contexto(vec![op("a")]));
+    ctx.repo.encoladas.lock().unwrap().push("a".into());ctx.repo.caducadas.lock().unwrap().push("a".into());
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![estado(0),ack("a",9)]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert_eq!(c.log,[">apply","<main_status","<apply_ack",">recovery_ready"]);
+    assert!(ctx.repo.encoladas.lock().unwrap().is_empty() && ctx.repo.pending.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn un_do_que_no_dice_su_cola_no_las_retiene() {
+    // Un worker anterior: `main_status` sin `cola`. Se sueltan como antes, al subir lo pendiente.
+    let ctx=disponible(contexto((0..101).map(|i|op(&i.to_string())).collect()));
+    let n=nube(vec![pagina(vec![],0)]);
+    let mut c=conversacion(vec![Some(json!({"type":"main_status","online":true,"volcando":true})),Some(json!({"type":"bulk_ack","ok":true}))]);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
+    assert_eq!(c.log,[">bulk_apply","<main_status","<bulk_ack",">recovery_ready"]);
+}
+
+#[tokio::test]
+async fn en_la_recuperacion_las_suelta_su_desbloqueo_una_sola_vez() {
+    let ctx=contexto(vec![]);let n=nube(vec![pagina(vec![],0),pagina(vec![],0)]);let mut c=canal(vec![]);
+    ejecutar(&ctx,&n,&mut c,true).await.unwrap();
+    assert_eq!(c.enviados,vec![json!({"type":"recovery_ready"})]);
+    assert_eq!(*ctx.completa.lock().unwrap(),Some(0));
 }

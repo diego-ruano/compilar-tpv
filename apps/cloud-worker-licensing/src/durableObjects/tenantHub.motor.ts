@@ -507,22 +507,26 @@ export class MotorTenantHub {
 		// Freeze global: si no hay una Main (tpv) autenticada conectada, NO se
 		// aplica nada. Vale tanto para escrituras REST de la Handy como para el
 		// WS-write de la propia Main (que cuenta como presente al estar conectada).
-		if (!this.isMainConnected()) {
-			throw new HubError("main_offline", 400);
-		}
-		if (!params.allowWhileRecovering && !this.isMainReady()) {
-			throw new HubError("main_volcando", 400);
-		}
-
+		//
 		// SYNC-18: y si la Main tiene atraso sin aplicar, la nube está a medio construir. Dejar
 		// escribir a una Handy sobre ese estado es pedir un choque (dos comandas abiertas para la
 		// misma mesa, por ejemplo). Se congela igual que sin Main, con otro motivo.
 		//
 		// Solo afecta a las escrituras que NO son el propio atraso: las de la cola no pasan por
-		// aquí, van por `applyBatchIdempotent`.
-		if (this.cuantasEnCola() > 0) {
-			throw new HubError("main_volcando", 400);
-		}
+		// aquí, van por `applyBatchIdempotent`. Se mira aquí, para no esperar en balde, y otra vez
+		// dentro del turno, que es lo que vale.
+		const exigirQueSePuedaEscribir = () => {
+			if (!this.isMainConnected()) {
+				throw new HubError("main_offline", 400);
+			}
+			if (!params.allowWhileRecovering && !this.isMainReady()) {
+				throw new HubError("main_volcando", 400);
+			}
+			if (this.cuantasEnCola() > 0) {
+				throw new HubError("main_volcando", 400);
+			}
+		};
+		exigirQueSePuedaEscribir();
 
 		const requestHash = await sha256Hex(requestPayloadJson);
 		const createdAtMs = nowMs();
@@ -551,11 +555,12 @@ export class MotorTenantHub {
 		// AUD-18: confirmar y difundir van dentro del turno del log (`enTurnoDelLog`), que antes
 		// resuelve la escritura anterior que hubiera quedado en duda.
 		const runApply = () => this.withTenantDbRetry(tenantId, (db) => this.enTurnoDelLog(db, async () => {
-			// AUD-18: otra vez dentro del turno, el congelado de la cola (SYNC-18): mientras se
-			// esperaba el turno pudo llegar un volcado, y nada puede confirmarse por delante de él.
-			if (this.cuantasEnCola() > 0) {
-				throw new HubError("main_volcando", 400);
-			}
+			// AUD-18: otra vez dentro del turno, ya resuelta la escritura anterior que estuviera en
+			// duda, el congelado de la cola (SYNC-18): mientras se esperaba el turno pudo llegar un
+			// volcado, y nada puede confirmarse por delante de él. AUD-15: y el de la Main, por lo
+			// mismo: la que estaba lista pudo irse, o reconectar y saludar congelando, y lo que la
+			// Handy decidió con ella lista no puede entrar después.
+			exigirQueSePuedaEscribir();
 
 			anotarEscritura(this.ctxTurno(), tenantId, escritura);
 			let batchResults: any[];
@@ -1216,34 +1221,38 @@ export class MotorTenantHub {
 		}
 	}
 
+	/**
+	 * Las sesiones de Main que cuentan: autenticadas y con el socket abierto. AUD-15: `getWebSockets`
+	 * puede devolver un socket después de su `close` (en `CLOSING`), así que sin mirar `readyState`
+	 * una sesión reemplazada seguiría autorizando —o congelando— a las Handy. Al reemplazarla se le
+	 * quita además la autenticación en su attachment (`abrirWebSocket`), que sobrevive a la
+	 * hibernación aunque el estado del socket no fuera fiable al despertar.
+	 */
+	private mainsAbiertas(except?: WebSocket): WsAttachment[] {
+		const out: WsAttachment[] = [];
+		for (const ws of this.state.getWebSockets()) {
+			if (except && ws === except) continue;
+			if (ws.readyState !== 1) continue;
+			const a = this.att(ws);
+			if (a?.authed && a.role === "tpv") out.push(a);
+		}
+		return out;
+	}
+
 	// ¿Hay alguna Main (rol tpv) autenticada y conectada ahora mismo?
 	// `except` excluye un socket concreto: al procesar `webSocketClose` el socket que se va puede
 	// seguir apareciendo en `getWebSockets()`, y sin excluirlo nunca detectaríamos el freeze.
 	private isMainConnected(except?: WebSocket): boolean {
-		for (const ws of this.state.getWebSockets()) {
-			if (except && ws === except) continue;
-			const a = this.att(ws);
-			if (a?.authed && a.role === "tpv") return true;
-		}
-		return false;
+		return this.mainsAbiertas(except).length > 0;
 	}
 
 	/** Una Main en recuperación está conectada, pero aún no autoriza trabajo de las Handy. */
 	private isMainReady(except?: WebSocket): boolean {
-		for (const ws of this.state.getWebSockets()) {
-			if (except && ws === except) continue;
-			const a = this.att(ws);
-			if (a?.authed && a.role === "tpv" && !a.recovering) return true;
-		}
-		return false;
+		return this.mainsAbiertas(except).some((a) => !a.recovering);
 	}
 
 	private isMainRecovering(): boolean {
-		for (const ws of this.state.getWebSockets()) {
-			const a = this.att(ws);
-			if (a?.authed && a.role === "tpv" && a.recovering) return true;
-		}
-		return false;
+		return this.mainsAbiertas().some((a) => a.recovering);
 	}
 
 	/** Nº de dispositivos autenticados ahora mismo (telemetría). */

@@ -75,7 +75,8 @@ async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<()> {
     let ticket = nube.tpv_server_post_json("tpv", "/v1/ws/ticket", json!({})).await?;
     let ticket = ticket.get("ticket").and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| AppError::external("Respuesta sin ticket"))?;
     let mut canal = conectar(ticket, app.state::<SyncNativo>().despertar.clone()).await?;
-    tpv_application::use_cases::saludo_socket::saludar(&mut canal, |nonce| nube.firmar_hello("tpv", nonce), "tpv", recuperando).await?;
+    // AUD-15: el saludo congela a las Handy hasta que esta Main se ponga al día (`uc::saludar`).
+    uc::saludar(&mut canal, |nonce| nube.firmar_hello("tpv", nonce)).await?;
     app.state::<SyncNativo>().publicar(app, "conectado", None);
     if !recuperando {
         let h = app.clone();
