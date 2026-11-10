@@ -18,10 +18,11 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { activacionFirmada, clavePublica, parDeClaves } from "./helpers/activar";
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import { exigirClaveSiEsDeOtroNegocio } from "../src/server/licenseStore";
+import { ensureDevice, exigirClaveSiEsDeOtroNegocio } from "../src/server/licenseStore";
 
 let dbDePruebas: unknown = null;
 
@@ -48,8 +49,10 @@ const CLAVE = generateLicenseKey();
 const VICTIMA = "equipo-de-la-victima";
 const BAR_VICTIMA = "tenant-victima";
 const BAR_ATACANTE = "tenant-atacante";
-const PUB_VICTIMA = btoa(String.fromCharCode(...new Uint8Array(32).fill(1)));
-const PUB_ATACANTE = btoa(String.fromCharCode(...new Uint8Array(32).fill(2)));
+// AUD-01: claves ed25519 de verdad. El atacante tiene la privada de la suya y no la de la víctima.
+const PUB_VICTIMA = await clavePublica(1);
+const ATACANTE = await parDeClaves(2);
+const PUB_ATACANTE = ATACANTE.pub;
 
 /** El bar de la víctima con su equipo dado de alta, y una licencia libre en manos del atacante. */
 async function escenario<T>(nombre: string, prueba: (sql: any) => Promise<T>): Promise<T> {
@@ -83,14 +86,14 @@ const fila = (sql: any) =>
 	sql.exec(`SELECT tenant_id, role, device_pubkey_b64 FROM devices WHERE device_id = ?;`, VICTIMA)
 		.toArray()[0];
 
+/** El atacante activa con el `device_id` de la víctima, firmando con la única clave que tiene. */
 async function activar(devicePubKey: string): Promise<Response> {
 	return licenseRoutes.request(
 		"/activate",
-		{
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ activationKey: CLAVE, deviceId: VICTIMA, devicePubKey }),
-		},
+		await activacionFirmada(
+			{ activationKey: CLAVE, deviceId: VICTIMA, devicePubKey },
+			{ firmarCon: ATACANTE.seed },
+		),
 		ENV,
 	);
 }
@@ -113,6 +116,26 @@ describe("activar con el device_id de otro negocio", () => {
 		});
 	});
 
+	it("y presentando la clave pública de la víctima tampoco, porque no puede firmar con ella", async () => {
+		// AUD-01: la clave pública no es un secreto (la ve la Main de cada negocio por el que pasó el
+		// equipo), así que compararla no basta. Sin la firma de su privada, 401 y nada se mueve.
+		await escenario("clave-publica-ajena", async (sql) => {
+			const res = await activar(PUB_VICTIMA);
+
+			expect(res.status).toBe(401);
+			expect(((await res.json()) as any).error).toBe("bad_device_signature");
+			expect(fila(sql)).toEqual({
+				tenant_id: BAR_VICTIMA,
+				role: "tpv",
+				device_pubkey_b64: PUB_VICTIMA,
+			});
+			const lic = sql
+				.exec(`SELECT status, tenant_id, main_device_id FROM licenses WHERE license_id='lic-atacante';`)
+				.toArray()[0];
+			expect(lic).toEqual({ status: "issued", tenant_id: null, main_device_id: null });
+		});
+	});
+
 	it("y la licencia del atacante se queda sin activar", async () => {
 		// Si se hubiera activado a medias, el atacante tendría además un tenant aprovisionado a
 		// nombre de una activación que la nube rechazó.
@@ -130,7 +153,9 @@ describe("activar con el device_id de otro negocio", () => {
 describe("la regla, que comparten las dos puertas", () => {
 	it("deja pasar al equipo de verdad, esté donde esté su fila", async () => {
 		// Es la mudanza legítima de §9, y no puede romperse: un equipo que fue Handy de otro negocio
-		// vuelve a ser la Main del suyo firmando con la clave que tiene registrada.
+		// vuelve a ser la Main del suyo firmando con la clave que tiene registrada. La regla sólo
+		// compara claves públicas: que quien la presenta tiene su privada lo comprueba antes cada
+		// puerta, con la firma (AUD-01 al activar, el reto del emparejamiento al recoger el token).
 		await escenario("mismo-equipo", async () => {
 			await expect(
 				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, VICTIMA, PUB_VICTIMA, BAR_ATACANTE),
@@ -164,6 +189,80 @@ describe("la regla, que comparten las dos puertas", () => {
 			await expect(
 				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, VICTIMA, PUB_ATACANTE, BAR_ATACANTE),
 			).rejects.toThrow("device_key_mismatch");
+		});
+	});
+
+	it.each([
+		{ como: "NULL", valor: null, id: "null" },
+		{ como: "cadena vacía", valor: "", id: "vacia" },
+	])("una fila de otro negocio sin clave registrada ($como) tampoco se mueve con la que llegue", async ({ valor, id }) => {
+		// AUD-01: la firma de cada puerta sólo prueba la clave que se presenta. Sin una registrada con
+		// la que compararla, se la llevaría el primero que firmase. Dentro de su negocio sí pasa:
+		// volver a vincularla es como se le pone clave, y eso lo aprueba su dueño.
+		await escenario(`sin-clave-${id}`, async (sql) => {
+			sql.exec(`UPDATE devices SET device_pubkey_b64 = ? WHERE device_id = ?;`, valor, VICTIMA);
+
+			await expect(
+				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, VICTIMA, PUB_ATACANTE, BAR_ATACANTE),
+			).rejects.toThrow("device_key_missing");
+			await expect(
+				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, VICTIMA, PUB_ATACANTE, BAR_VICTIMA),
+			).resolves.toBeUndefined();
+		});
+	});
+});
+
+describe("AUD-01 · el alta del dispositivo va con su clave, en una sola sentencia", () => {
+	// `ensureDevice` contra SQL de verdad: lo que decide es el `WHERE` de su `DO UPDATE`.
+	const completa = (sql: any) =>
+		sql
+			.exec(`SELECT tenant_id, role, revoked_at_ms, device_pubkey_b64 FROM devices WHERE device_id = ?;`, VICTIMA)
+			.toArray()[0];
+
+	it.each([
+		{ como: "otra clave", valor: PUB_VICTIMA, id: "otra" },
+		{ como: "ninguna (NULL)", valor: null, id: "null" },
+		{ como: "ninguna (cadena vacía)", valor: "", id: "vacia" },
+	])("no toca una fila registrada con $como", async ({ valor, id }) => {
+		await escenario(`alta-${id}`, async (sql) => {
+			sql.exec(
+				`UPDATE devices SET role = 'handy', revoked_at_ms = 5, device_pubkey_b64 = ? WHERE device_id = ?;`,
+				valor,
+				VICTIMA,
+			);
+			const antes = completa(sql);
+
+			await expect(
+				ensureDevice(dbDePruebas as any, BAR_ATACANTE, VICTIMA, "tpv", PUB_ATACANTE),
+			).rejects.toMatchObject({ code: "device_key_mismatch" });
+			expect(completa(sql)).toEqual(antes);
+		});
+	});
+
+	it("con la clave registrada muda la fila, la deja de `tpv` y le quita la revocación", async () => {
+		await escenario("alta-misma-clave", async (sql) => {
+			sql.exec(`UPDATE devices SET role = 'handy', revoked_at_ms = 5 WHERE device_id = ?;`, VICTIMA);
+
+			await ensureDevice(dbDePruebas as any, BAR_ATACANTE, VICTIMA, "tpv", PUB_VICTIMA);
+
+			expect(completa(sql)).toEqual({
+				tenant_id: BAR_ATACANTE,
+				role: "tpv",
+				revoked_at_ms: null,
+				device_pubkey_b64: PUB_VICTIMA,
+			});
+		});
+	});
+
+	it("y una fila nueva nace ya con su clave", async () => {
+		await escenario("alta-nueva", async (sql) => {
+			await ensureDevice(dbDePruebas as any, BAR_ATACANTE, "equipo-nuevo", "tpv", PUB_ATACANTE);
+
+			expect(
+				sql
+					.exec(`SELECT tenant_id, role, device_pubkey_b64, pubkey_alg FROM devices WHERE device_id = 'equipo-nuevo';`)
+					.toArray()[0],
+			).toEqual({ tenant_id: BAR_ATACANTE, role: "tpv", device_pubkey_b64: PUB_ATACANTE, pubkey_alg: "ed25519" });
 		});
 	});
 });
@@ -216,15 +315,11 @@ describe("REV-15 · dos equipos activando la misma clave a la vez", () => {
 
 			const res = await licenseRoutes.request(
 				"/activate",
-				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						activationKey: CLAVE,
-						deviceId: "equipo-segundo",
-						devicePubKey: btoa(String.fromCharCode(...new Uint8Array(32).fill(3))),
-					}),
-				},
+				await activacionFirmada({
+					activationKey: CLAVE,
+					deviceId: "equipo-segundo",
+					devicePubKey: await clavePublica(3),
+				}),
 				ENV,
 			);
 

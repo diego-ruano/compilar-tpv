@@ -20,7 +20,7 @@ tenant ([sincronizacion.md](sincronizacion.md)).
 | Pieza | Archivo | Rol |
 |---|---|---|
 | Rutas del TPV | `apps/cloud-worker-licensing/src/domains/licensing/licensing.routes.ts` | `activate`, `device-change/request`, `status`, `refresh` |
-| Estado y firma | `…/licensing/licensing.helpers.ts` | `computeLicenseState`, `stateAllowsUse`, mensaje canónico y firma, OTP, device-proof, aprovisionar el tenant |
+| Estado y firma | `…/licensing/licensing.helpers.ts` | `computeLicenseState`, `stateAllowsUse`, mensaje canónico y firma, OTP, device-proof, la firma de la activación, aprovisionar el tenant |
 | La clave | `…/licensing/licenseKey.ts` | Formato, generación y normalización |
 | Correos | `…/licensing/licenseEmails.ts` | Clave, código de cambio de equipo, aviso de cambio, recibo de canje, aviso de caducidad |
 | Avisos de caducidad | `…/licensing/avisosDeCaducidad.ts` | Del cron diario (`scheduled` en `src/index.ts`) |
@@ -97,23 +97,78 @@ días que llevaba activada.
 
 ## Activar
 
-`POST /v1/license/activate { activationKey, deviceId, devicePubKey, tenantInfo, deviceChangeCode? }`.
+`POST /v1/license/activate { activationKey, deviceId, devicePubKey, tenantInfo, deviceChangeCode?,
+soloSumar?, tenantActual? }`.
 
 La activación y la solicitud de traslado validan el JSON con el middleware común antes de
 consultar licencias. `deviceId` es obligatorio: el servidor no inventa otra identidad. La clave
 pública debe contener exactamente 32 bytes Ed25519 en base64 estándar. Los cuerpos inválidos
 devuelven `validation_error` (400); pedir un traslado con una clave bien formada pero desconocida
 sigue devolviendo `{ ok: true }`, para no revelar qué licencias existen.
+**La ruta es anónima, pero va firmada con la clave privada del equipo** (AUD-01). Ni el `device_id` ni
+la clave pública son un secreto: la Main de un negocio ve los de cada equipo que pasó por él
+(`/v1/device/list`, `/v1/pair/pending`), y no cambian al mudarse. Lo que prueba que quien activa es
+ese equipo es la firma:
+
+- El cliente (`activar_remoto`) serializa el cuerpo una vez, lo firma y manda la firma en
+  `X-Device-Sig` y su hora en `X-Device-Ts`. Lo firmado es el device-proof de las rutas autenticadas
+  sobre esta ruta y sin token (`device.rs::mensaje_de_activacion`):
+  `DEVICE_PROOF \n ts \n POST \n /v1/license/activate \n sha256("") \n sha256(cuerpo)`. El cuerpo
+  entra entero, así que quedan atados el `deviceId`, la clave pública, la clave de activación, el
+  código de traslado, `soloSumar` y `tenantActual`; la ruta va dentro, así que la firma no vale para
+  otra.
+- El worker la comprueba **con la clave pública que presenta el cuerpo**
+  (`verificarFirmaDeActivacion`), con ±2 minutos de margen, antes de leer una sola fila. Sin
+  cabeceras o con la hora fuera de margen no llega a leerse el cuerpo (`exigirFirma`, delante del
+  validador); la firma se comprueba detrás (`firmaDelEquipo`). Si no vale, 401
+  (`missing_device_proof`, `device_ts_out_of_range`, `bad_device_signature`) sin mover la fila del
+  equipo, gastar la clave, entregar la DEK ni contar un intento del código de traslado.
+- **La firma sólo prueba la clave que se presenta**, así que lo siguiente es compararla con la
+  registrada (`exigirLaClaveDeEsteEquipo`): si la nube ya conoce ese `device_id`, en el negocio que
+  sea, la clave tiene que ser la suya (`device_key_mismatch`, 409). Una fila sin clave registrada no
+  se da por buena con la que llegue (`device_key_missing`, 409): la arregla soporte, y a una Handy,
+  volver a vincularla en su negocio. Va delante del canje y del código de traslado, así que el
+  rechazo no deja nada hecho: ni código consumido, ni fila tocada.
+- **El negocio de un equipo es el de su fila de `devices`**, no el que diga la petición. El TPV
+  manda en `tenantActual` el de su licencia guardada, si tiene; si no es el registrado, 409
+  `device_tenant_mismatch` y no se sigue. Abrir el TPV comprueba la licencia, y eso devuelve la fila
+  a su negocio si el equipo sigue siendo su Main.
+- Un equipo recién estrenado no ha visto todavía la hora de la nube: si su reloj va mal, el rechazo
+  la trae y la activación se repite una vez firmada con ella
+  ([abajo](#la-hora-con-la-que-se-firma)).
+
+Rust y el worker comparten un vector con una clave fija
+(`crates/tpv-infra-licensing/src/firma_activacion_casos.json`): el mismo cuerpo, el mismo mensaje y
+la misma firma en los dos lados.
+
 No existe o no se reconoce → `license_not_found`; revocada → `license_revoked`; caducada **y pasada la
 gracia** → `license_expired`. Después, uno de tres caminos según `main_device_id`:
 
 ### 1. Clave sin estrenar en un equipo que ya tiene licencia: suma tiempo (canje)
 
-Si este `deviceId` ya es la Main de una licencia viva, la clave nueva **no crea un negocio**:
+Si este `deviceId` ya es la Main de una licencia viva **en el negocio en el que la nube lo tiene
+registrado** (el `tenant_id` de su fila de `devices`), la clave nueva **no crea un negocio**:
 
-- Comprueba antes la clave del equipo (`exigirLaClaveDeEsteEquipo`): el `device_id` no es un secreto.
+- **Va atado al negocio en el que la nube tiene registrado al equipo.** El canje suma a la licencia
+  viva de la que el equipo es la Main **en ese negocio** (`licenciaVivaDelDispositivo`), se diga o no
+  `tenantActual`. Un equipo puede ser la Main de dos licencias vivas de negocios distintos; si en el
+  suyo no tiene ninguna, no se suma a la de otro.
+- **Si su fila está en otro negocio que su licencia, no hay canje.** Una Main de A cuya fila está en
+  B (vinculada como Handy en B y aún sin readmitir, por ejemplo) no tiene licencia viva en B. Si
+  activa sin licencia guardada y sin `soloSumar` (la pantalla de activación tras «Borrar y volver a
+  activar»), la clave sigue a la primera activación: crea un negocio C, muda allí la fila y estrena
+  en él la clave. La salida es devolver antes la fila a A. Si el TPV conserva su licencia, abrirlo
+  pasa por `/status`, que readmite la Main en el negocio de su licencia (`readmitirMain`), y después
+  la clave se suma a A; mientras la fila siga en B, la petición lleva `tenantActual` = A y contesta
+  `device_tenant_mismatch` sin gastar la clave. Sin licencia guardada, se activa primero la clave de
+  A en ese equipo (es su Main: lo readmite en A) y después la nueva.
+- Esa licencia se lee **una vez**, y con ella deciden el veto de `soloSumar` y el canje.
+- La clave presentada ya se ha comparado con la registrada, y aquí el equipo tiene que tener fila:
+  sin ella no hay con qué comprobar que es él (`device_key_missing`).
 - Calcula antes todo lo que puede fallar sin escribir (la DEK y el token).
-- En una transacción: `canjearLicencia` (`WHERE status='issued'`, y si no gana la carrera contesta
+- En una transacción: comprueba que la licencia elegida sigue siendo la viva de ese equipo
+  (`sigueSiendoLaLicenciaDelEquipo`; si se ha anulado o trasladado entretanto, `clave_no_canjeable`
+  sin gastar la clave), `canjearLicencia` (`WHERE status='issued'`, y si no gana la carrera contesta
   `license_already_used`), `extendLicense` (suma sobre lo que quedaba, o sobre hoy si ya venció) y
   `reasignarCobrosDeLaClave` (el cobro pasa a la licencia viva como `renewal`, para que un reembolso
   tenga de dónde restar).
@@ -126,8 +181,14 @@ Con el TPV ya en marcha, el sitio es **Configuración → Licencia → Añadir o
 (`license_sumar_clave`, de administrador). La petición lleva `soloSumar`, y con ella el worker
 rechaza con `clave_no_canjeable` todo lo que no sea este canje, sin tocar nada: la clave que ya
 tiene el equipo, una ya activada en otro (que por la pantalla de activación sería un cambio de
-equipo) y una clave nueva en un equipo sin licencia viva (que estrenaría otro negocio). Es como
-renueva quien compra otra licencia, y como junta en un local el tiempo de varias.
+equipo) y una clave nueva en un equipo sin licencia viva en su negocio (que estrenaría otro). Con
+`soloSumar` la ruta suma o rechaza: no llega nunca al alta de un negocio. Es como renueva quien compra
+otra licencia, y como junta en un local el tiempo de varias.
+
+El TPV tampoco guarda lo que la nube le concede sin mirar qué le pidió
+(`tpv_domain::licensing::comprobar_solicitud` y `comprobar_concesion`): sin licencia guardada no
+manda un `soloSumar`; un `soloSumar` que no vuelve como suma no se guarda; y una suma que vuelve con
+otro negocio que el suyo, tampoco. En los tres casos se queda con su token y su DEK de antes.
 
 ### 2. Primera activación
 
@@ -171,11 +232,24 @@ el PIN de un administrador podría cambiarlo y llevarse la licencia.
 
 ### Lo que hacen los tres
 
-- Antes de tocar `devices`, `exigirClaveSiEsDeOtroNegocio`: si el `device_id` ya tiene clave
-  registrada en **otro** negocio y no es ésta, no se mueve nada (`device_key_mismatch`). Toda puerta
-  que dé de alta un dispositivo llama a ese guardián (hoy: activar y recoger el token del
-  emparejamiento). Dentro del mismo negocio, que la clave cambie es la vía de recuperación de una
-  Handy revocada.
+- Antes de nada, la firma del equipo y la comparación de su clave con la registrada
+  ([arriba](#activar)).
+- Dan de alta el dispositivo, o mudan su fila, con `ensureDevice`: **una sola sentencia, que escribe
+  la fila con su clave** y sólo toca una que ya existe si su clave registrada es la presentada. Un
+  corte a mitad de la activación no deja una fila sin clave.
+- **Límite conocido.** La comparación de la clave y el alta no son un lote. Si la clave registrada de
+  ese mismo `device_id` cambia justo entre las dos —sólo puede hacerlo un emparejamiento suyo que
+  recoja el token en ese instante, en el negocio donde está su fila—, se rechaza
+  (`device_key_mismatch`) sin escribir la fila ni entregar credenciales, pero lo anterior ya está
+  hecho: en un cambio de equipo el código queda consumido y hay que pedir otro, y si la fila era de
+  ese mismo negocio, su `updated_at_ms` ya se ha movido. El negocio se crea o se toca después de
+  `exigirClaveSiEsDeOtroNegocio`, así que un rechazo suyo no deja un negocio recién creado.
+- Justo antes, `exigirClaveSiEsDeOtroNegocio`, la regla que comparten con el emparejamiento: una
+  fila de **otro** negocio no se mueve con otra clave (`device_key_mismatch`) ni si no tiene clave
+  registrada (`device_key_missing`). Toda puerta que dé de alta un dispositivo comprueba la firma de
+  la clave que le presentan y llama a ese guardián (hoy: activar y recoger el token del
+  emparejamiento). Dentro del mismo negocio, el emparejamiento sí deja que la clave cambie: es la vía
+  de recuperación de una Handy revocada. Activar, no.
 - Entregan la **DEK** del tenant (`getOrCreateTenantFieldDek`, la existente si ya la hay), para que
   un equipo nuevo pueda descifrar la PII del personal.
 - Devuelven el token de sesión (JWT HS256 de 30 días) y `cambioDeEquipo`. **Quién decide que hubo
@@ -264,7 +338,7 @@ comprobación de traslado, que la daría por desplazada siempre (ver [emparejami
 Toda firma con hora sale de `reloj::ahora_ms()`: el reloj del equipo más el desfase medido con la
 cabecera `Date` de cada respuesta del worker. Todo lo que habla con el worker se manda con
 `reloj::enviar`, para anotar la medida. Un rechazo por la hora se repite **una vez** con la hora que
-trajo ese rechazo. El desfase vive en memoria; se descarta una medida con una ida y vuelta de más de
+trajo ese rechazo; también la activación, que es la primera petición de un equipo recién estrenado. El desfase vive en memoria; se descarta una medida con una ida y vuelta de más de
 10 s. Las caducidades que pone la nube (de la aserción, del token) también se comparan con su hora.
 La **hora del negocio** —ventas, fichajes, caja, Veri\*factu, `x-client-now`— sigue siendo la del
 equipo ([pendientes.md](../pendientes.md#reloj-01--la-hora-del-negocio-es-la-del-equipo)).
@@ -337,7 +411,8 @@ no silencie el del siguiente.
 | DEK de la PII del personal | Almacén de secretos (y en la base central, cifrada con `LICENSE_STORE_KEY`) |
 
 El device-proof firma `ts \n MÉTODO \n ruta \n sha256(token) \n sha256(cuerpo)` (`device.rs`), con ±2
-minutos de margen en el worker.
+minutos de margen en el worker. La activación firma lo mismo con el token vacío
+([Activar](#activar)).
 
 **La identidad sólo se crea al activar y al emparejar** (`get_or_create_*` en `device.rs`). Firmar, el
 gate y el updater la leen (`leer_*`) y nunca la crean. Al leer, el almacén distingue tres casos

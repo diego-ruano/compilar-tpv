@@ -253,7 +253,9 @@ y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en 
 - **Webhook de Stripe**: firma sobre el cuerpo crudo, ventana de 5 min e idempotencia
   ([licencias.md](licencias.md#comprar)).
 - **Device-proof**: firma con dominio `DEVICE_PROOF` de `ts`, método, ruta **y query**, hash del token y hash del cuerpo, con ±2 minutos.
-  Sin nonce ([FABLE-E](../pendientes.md#fable-e--sin-nonce-en-el-device-proof)).
+  Sin nonce ([FABLE-E](../pendientes.md#fable-e--sin-nonce-en-el-device-proof)). Activar una licencia,
+  que es anónima, lleva esa misma firma con el tramo del token vacío, comprobada con la clave pública
+  que presenta la petición ([licencias.md](licencias.md#activar)).
 - **El correo se acota por destinatario y por volumen**: sólo al email de un proveedor dado de alta y
   con un tope diario por negocio ([worker.md](worker.md#correo)).
 - **Los errores no cuentan cómo está hecho el worker**: un 500 no lleva traza ni texto de Turso

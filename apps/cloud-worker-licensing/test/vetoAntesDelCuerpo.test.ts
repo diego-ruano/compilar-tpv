@@ -30,9 +30,12 @@ const PRIMITIVAS_DE_ROL = /\b(isTpvDevice|tieneRol|rolDelDispositivo)\s*\(/g;
 
 /**
  * Los middlewares que vetan, sea por rol, por IP o, en las rutas públicas de la reserva web, por la
- * clave del negocio, por Turnstile y por el tamaño del cuerpo (`domains/reservas_web/puerta.ts`).
+ * clave del negocio, por Turnstile y por el tamaño del cuerpo (`domains/reservas_web/puerta.ts`). Y
+ * al activar una licencia, por no traer la firma del equipo o traerla con la hora fuera de margen
+ * (AUD-01, `exigirFirma`); la firma en sí se comprueba detrás del validador, porque la clave pública
+ * viaja en el cuerpo.
  */
-const VETOS = /\b(soloLaMain\w*|filtroExterior|puertaPublica|limitadorAltas|verificacionHumana|topeDelCuerpo)\b/g;
+const VETOS = /\b(soloLaMain\w*|filtroExterior|puertaPublica|limitadorAltas|verificacionHumana|topeDelCuerpo|exigirFirma)\b/g;
 
 /** Dónde empieza el ÚLTIMO veto: con varios en la cadena, todos van delante del validador. */
 function ultimoVeto(bloque: string): number {

@@ -2,7 +2,8 @@
 //
 // Las cuatro rutas que consume el TPV (cliente Rust en `crates/tpv-infra-licensing`):
 //
-//   POST /v1/license/activate              → canjea la clave, liga el Main, provisiona el tenant
+//   POST /v1/license/activate              → canjea la clave, liga el Main, provisiona el tenant;
+//                                            anónima, pero firmada con la clave del equipo
 //   POST /v1/license/device-change/request → manda el OTP para mover la licencia a otro equipo
 //   GET  /v1/license/status                → estado FIRMADO (ed25519) + token renovado
 //   POST /v1/license/refresh               → reemite el token caducado, autenticando por device-proof
@@ -11,7 +12,7 @@
 // ningún tercero. Y el estado que decide el gate viaja firmado: el TLS deja de ser la única
 // barrera (docs/arquitectura/licencias.md).
 
-import { Hono, type MiddlewareHandler } from "hono";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 
 import type { Env } from "../../env";
 import { capturarError } from "../../observability/errors";
@@ -39,7 +40,7 @@ import {
 	getOrCreateTenantFieldDek,
 	licenciaVivaDelDispositivo,
 	reasignarCobrosDeLaClave,
-	setDevicePubKeyB64IfEmptyOrThrow,
+	sigueSiendoLaLicenciaDelEquipo,
 	upsertTenantInfo,
 	type LicenseRow,
 } from "../../server/licenseStore";
@@ -71,6 +72,8 @@ import {
 	stateAllowsUse,
 	toBool01,
 	readmitirMain,
+	cabecerasDeLaFirma,
+	verificarFirmaDeActivacion,
 	verifyDeviceProof,
 } from "./licensing.helpers";
 import {
@@ -155,6 +158,68 @@ const filtroExterior: MiddlewareHandler<Ctx> = async (c, next) => {
 	await next();
 };
 
+// La tabla de frases (`lib/errorCodes.ts`) manda volver a vincular, que es cosa de una Handy. A quien
+// está activando se le dice lo que puede hacer él.
+const ACTIVAR_SIN_FIRMA =
+	"Esta versión del programa ya no puede activar licencias. Actualízalo y vuelve a intentarlo.";
+const ACTIVAR_CON_FIRMA_MALA =
+	"No se ha podido comprobar la identidad de este equipo. Vuelve a intentarlo y, si se repite, contacta con soporte.";
+
+/** El 401 de una activación sin prueba de posesión (AUD-01). El de la hora lleva la frase de la tabla. */
+function rechazoDeFirma(c: Context, error: string) {
+	const message =
+		error === "device_ts_out_of_range"
+			? undefined
+			: error === "missing_device_proof"
+				? ACTIVAR_SIN_FIRMA
+				: ACTIVAR_CON_FIRMA_MALA;
+	return c.json({ ok: false, error, message } satisfies ApiError, 401);
+}
+
+/**
+ * El 409 de una clave que no es la registrada (`device_key_mismatch`) o de un equipo registrado sin
+ * ninguna (`device_key_missing`). `null` si el fallo es otro, que sigue su camino.
+ */
+function rechazoPorLaClave(c: Context, e: any) {
+	const error = e?.code;
+	if (error !== "device_key_mismatch" && error !== "device_key_missing") return null;
+	return c.json({ ok: false, error } satisfies ApiError, 409);
+}
+
+/**
+ * AUD-01 · Activar exige demostrar que se tiene la clave privada del equipo. Va en dos pasos porque
+ * la clave pública con la que se comprueba la firma viaja en el cuerpo.
+ *
+ * Éste va DELANTE del validador: sin las cabeceras de la firma, o con su hora fuera de margen, no se
+ * lee el cuerpo. Y deja leídos sus bytes tal como llegaron, que es lo que cubre la firma: el
+ * validador los lee después como texto.
+ */
+const exigirFirma: MiddlewareHandler<Ctx> = async (c, next) => {
+	const cabeceras = cabecerasDeLaFirma(c.req.raw);
+	if (!cabeceras.ok) return rechazoDeFirma(c, cabeceras.error);
+	await c.req.arrayBuffer();
+	await next();
+};
+
+/**
+ * AUD-01 · El segundo paso, DETRÁS del validador y antes de que el handler lea una sola fila: la
+ * firma tiene que ser de la clave pública que presenta el cuerpo. Sin ella no se mira ni si la
+ * licencia existe, así que tampoco se mueve la fila del equipo, se gasta la clave, se entrega la DEK
+ * o se cuenta un intento del código de traslado.
+ */
+const firmaDelEquipo: MiddlewareHandler<Ctx, string, { out: { json: { devicePubKey: string } } }> = async (
+	c,
+	next,
+) => {
+	const firma = await verificarFirmaDeActivacion(
+		c.req.raw,
+		c.req.valid("json").devicePubKey,
+		new Uint8Array(await c.req.arrayBuffer()),
+	);
+	if (!firma.ok) return rechazoDeFirma(c, firma.error);
+	await next();
+};
+
 /** El rechazo de `readmitirMain`, firmado cuando es un traslado (la licencia existe). */
 async function rechazoDeReadmision(
 	c: any,
@@ -173,7 +238,7 @@ async function rechazoDeReadmision(
 // POST /v1/license/activate
 // ──────────────────────────────────────────────────────────────────────────────
 
-licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c) => {
+licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchema), firmaDelEquipo, async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, [
 		"LICENSE_JWT_SECRET",
@@ -217,21 +282,64 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 	const esMismoEquipo = lic.main_device_id === deviceId;
 	const esCambioDeEquipo = !esPrimeraActivacion && !esMismoEquipo;
 
+	// ── La clave del equipo, antes de nada que escriba (REV-07, REV-13, AUD-01) ────────────────
+	//
+	// Si la nube ya conoce este `device_id`, la clave presentada —que llega firmada con su privada
+	// (`firmaDelEquipo`)— tiene que ser la que tiene registrada, esté su fila en el negocio que esté.
+	// Una fila sin clave registrada no se da por buena con la que llegue: la firma sólo prueba la
+	// clave presentada.
+	//
+	// Va aquí, delante del canje y del código de traslado, para que el rechazo no deje nada hecho.
+	// Se comparaba después de consumir el código y de mudar la fila: con la licencia y el código
+	// buenos pero otra clave, contestaba `device_key_mismatch` con el código gastado y, si el equipo
+	// era una Handy del propio negocio, con su fila ya de rol `tpv` y sin revocar.
+	let equipo: { tenantId: string } | null;
+	try {
+		equipo = await exigirLaClaveDeEsteEquipo(db, deviceId, devicePubKey);
+	} catch (e: any) {
+		const rechazo = rechazoPorLaClave(c, e);
+		if (rechazo) return rechazo;
+		throw e;
+	}
+
+	// AUD-01 · El negocio de un equipo es el de su fila de `devices`: lo que la nube tiene
+	// registrado, no lo que diga la petición. Si el equipo dice tener otro (`tenantActual`, dentro
+	// del cuerpo firmado), no se sigue. Con licencias de dos negocios apuntando a él, bastaba con
+	// nombrar el otro para canjear sobre su licencia y recibir su DEK y su token.
+	if (body.tenantActual && equipo && body.tenantActual !== equipo.tenantId) {
+		return c.json({ ok: false, error: "device_tenant_mismatch" } satisfies ApiError, 409);
+	}
+
+	// La licencia viva de la que este equipo es la Main EN SU NEGOCIO, si la clave está sin estrenar:
+	// es a la que una clave nueva le suma tiempo (REV-13). Sin mirar el negocio, con dos licencias
+	// apuntando al equipo se elegía la que más tarde caduca y la Main recibía el negocio de la otra.
+	//
+	// Se lee UNA vez. Eran dos lecturas, la del veto de `soloSumar` y la del canje: si la licencia
+	// se anulaba o se trasladaba entre las dos, la segunda ya no la encontraba y la clave seguía
+	// hasta estrenar un negocio nuevo, también con `soloSumar`. Un equipo sin fila no tiene negocio
+	// registrado; se pregunta sin él sólo para rechazarlo en el canje.
+	const actual = esPrimeraActivacion
+		? await licenciaVivaDelDispositivo(db, deviceId, equipo?.tenantId)
+		: null;
+
+	const noCanjeable = (message: string) =>
+		c.json({ ok: false, error: "clave_no_canjeable", message } satisfies ApiError, 409);
+
 	// RI-52 · Canje desde Configuración → Licencia: el TPV ya está en marcha y sólo quiere sumar el
 	// tiempo de otra clave. Todo lo demás que haría esta ruta con esa clave sería un desastre desde
 	// ahí: con la clave de otro local ya activada, pedir el código y MOVER aquella licencia a este
 	// equipo; con este equipo sin licencia viva, estrenar un negocio nuevo y dejar el suyo atrás. Así
 	// que se rechaza antes de tocar nada, con la frase de cada caso.
 	if (body?.soloSumar === true) {
-		const noCanjeable = (message: string) =>
-			c.json({ ok: false, error: "clave_no_canjeable", message } satisfies ApiError, 409);
 		if (esMismoEquipo) return noCanjeable("Esa es la clave que ya tiene este equipo.");
 		if (!esPrimeraActivacion) {
 			return noCanjeable(
 				"Esa clave ya está activada en otro equipo. Aquí sólo se pueden añadir claves sin estrenar.",
 			);
 		}
-		if (!(await licenciaVivaDelDispositivo(db, deviceId))) {
+		// Sin licencia a la que sumar, de aquí no se pasa. Con ella, lo que sigue es el canje, que
+		// suma o rechaza sin gastar la clave: con `soloSumar` no se llega nunca al alta.
+		if (!actual) {
 			return noCanjeable("Este equipo no tiene una licencia a la que sumarle tiempo.");
 		}
 	}
@@ -251,23 +359,17 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 	// Y sólo entra por aquí una clave **sin estrenar**: una licencia ya activada no suma tiempo.
 	// Moverla a otro local es un cambio de equipo, que recicla la que hay y tiene su propio camino.
 	if (esPrimeraActivacion) {
-		const actual = await licenciaVivaDelDispositivo(db, deviceId);
-
 		if (actual) {
 			// La identidad del equipo se comprueba ANTES de gastar la clave: sin esto bastaría con
 			// saber un `device_id` ajeno —que viaja en los mensajes de presencia del WebSocket,
 			// REV-07— para sumarle meses a la licencia de otro. No es robar, pero tampoco es lo que
 			// quiere quien ha pagado.
 			//
-			// Y no vale `exigirClaveSiEsDeOtroNegocio`: aquél se aparta en cuanto el dispositivo es
-			// del tenant que autoriza, que es exactamente este caso.
-			try {
-				await exigirLaClaveDeEsteEquipo(db, deviceId, devicePubKey);
-			} catch (e: any) {
-				if (e?.code === "device_key_mismatch") {
-					return c.json({ ok: false, error: "device_key_mismatch" } satisfies ApiError, 409);
-				}
-				throw e;
+			// La clave ya se ha comparado arriba con la registrada (`exigirLaClaveDeEsteEquipo`). Lo
+			// que falta por exigir aquí es que haya con qué compararla: la Main de una licencia viva
+			// tiene su fila, y si no la tiene no hay nada que pruebe que quien firma es ese equipo.
+			if (!equipo) {
+				return c.json({ ok: false, error: "device_key_missing" } satisfies ApiError, 409);
 			}
 
 			const tenantId = actual.tenant_id || "";
@@ -289,16 +391,27 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 			// Gastar la clave, sumar sus meses y mudar su cobro van juntos o no van (REV-01): con
 			// sentencias sueltas, un corte a mitad dejaba la clave gastada sin haber sumado nada. Y
 			// en este orden: si el canje no gana la carrera, no se ha sumado nada.
-			const expiresAtMs = await enTransaccion(db, async (tx) => {
-				if (!(await canjearLicencia(tx, lic.license_id, actual.license_id))) return null;
+			const canje = await enTransaccion(db, async (tx) => {
+				// AUD-01: la licencia se eligió fuera de la transacción. Si entretanto se ha anulado o
+				// se ha trasladado a otro equipo, la clave no se gasta sobre ella.
+				if (!(await sigueSiendoLaLicenciaDelEquipo(tx, actual.license_id, deviceId))) {
+					return "sin_licencia" as const;
+				}
+				if (!(await canjearLicencia(tx, lic.license_id, actual.license_id))) return "usada" as const;
 				const hasta = await extendLicense(tx, actual.license_id, lic.term_months);
 				// LIC-07: el cobro se muda con el tiempo, o un reembolso no tendría de dónde restar.
 				await reasignarCobrosDeLaClave(tx, lic.license_id, actual.license_id);
 				return hasta;
 			});
-			if (expiresAtMs === null) {
+			if (canje === "sin_licencia") {
+				return noCanjeable(
+					"Este equipo ya no tiene una licencia a la que sumarle tiempo. La clave no se ha gastado: comprueba la licencia y vuelve a intentarlo.",
+				);
+			}
+			if (canje === "usada") {
 				return c.json({ ok: false, error: "license_already_used" } satisfies ApiError, 409);
 			}
+			const expiresAtMs = canje;
 
 			// Recibo. No bloquea nada —quien ha canjeado está delante del TPV y ya lo ve en
 			// pantalla—, pero deja constancia en su correo de cuánto se sumó y hasta cuándo.
@@ -409,8 +522,6 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 	// ── Tenant + dispositivo ────────────────────────────────────────────────
 	const tenantId = lic.tenant_id || crypto.randomUUID();
 
-	await ensureTenantExistsMinimal(db, tenantId);
-
 	try {
 		// REV-07: la comprobación va PRIMERO, y ahí estaba el fallo. `ensureDevice` hace un
 		// `ON CONFLICT(device_id) DO UPDATE` que mueve la fila al tenant de quien activa, y sólo
@@ -418,16 +529,22 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 		// fila ya movida—. Resultado: presentando una licencia propia y el `device_id` ajeno, la
 		// Main de otro negocio se quedaba con su fila en un tenant que no es el suyo. Ahora, si ese
 		// `device_id` ya tiene clave registrada en cualquier negocio y no es ésta, no se toca nada.
+		// Y presentar la registrada exige tener su privada: la petición llega firmada con ella
+		// (AUD-01, `firmaDelEquipo`).
 		await exigirClaveSiEsDeOtroNegocio(db, deviceId, devicePubKey, tenantId);
 
-		// Liga la pubkey del dispositivo (anti-copia). Si ese device_id ya existía con OTRA
-		// clave, esto lanza `device_key_mismatch`: alguien ha copiado el fichero de estado.
+		// El negocio se crea (o se toca) después de esa comprobación y no antes: si rechaza, no
+		// queda ni un tenant recién creado ni su `updated_at_ms` movido. Tiene que ir delante del
+		// alta, que apunta a él.
+		await ensureTenantExistsMinimal(db, tenantId);
+
+		// Da de alta el dispositivo con su clave, o muda su fila, en UNA sentencia (AUD-01): la
+		// fila nace con clave, y una que ya existe sólo se toca si la registrada es ésta. Si no
+		// lo es, lanza `device_key_mismatch` sin haber escrito la fila.
 		await ensureDevice(db, tenantId, deviceId, "tpv", devicePubKey);
-		await setDevicePubKeyB64IfEmptyOrThrow(db, tenantId, deviceId, devicePubKey);
 	} catch (e: any) {
-		if (e?.code === "device_key_mismatch") {
-			return c.json({ ok: false, error: "device_key_mismatch" } satisfies ApiError, 409);
-		}
+		const rechazo = rechazoPorLaClave(c, e);
+		if (rechazo) return rechazo;
 		throw e;
 	}
 

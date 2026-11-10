@@ -18,6 +18,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { activacionFirmada, clavePublica } from "./helpers/activar";
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
@@ -67,8 +68,9 @@ const ENV = {
 	TURSO_ORG_SLUG: "no-se-usa",
 	EMAIL_FROM_ADDRESS: "no-responder@ejemplo.test",
 };
-const PUB_A = btoa(String.fromCharCode(...new Uint8Array(32).fill(1)));
-const PUB_B = btoa(String.fromCharCode(...new Uint8Array(32).fill(2)));
+// AUD-01: claves ed25519 de verdad, porque activar exige la firma del equipo.
+const PUB_A = await clavePublica(1);
+const PUB_B = await clavePublica(2);
 const CONTEXTO = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
 
 /** La primera sentencia de cada tope: la reserva. */
@@ -78,8 +80,9 @@ const TOPE_POR_LICENCIA = /license_otp_eventos/;
 type Respuesta = { status: number; body: any };
 
 /**
- * La única llamada a `/v1/license/activate` de este fichero: si la ruta pasa a pedir algo más (una
- * firma del equipo, por ejemplo), se cambia aquí.
+ * La única llamada a `/v1/license/activate` de este fichero. Va firmada con la clave privada de
+ * `devicePubKey` (AUD-01): cada petición de una ráfaga lleva su propia firma, válida, así que lo que
+ * frena las de más son los topes, no la firma.
  */
 async function activar(
 	clave: string,
@@ -89,17 +92,13 @@ async function activar(
 ): Promise<Respuesta> {
 	const res = await licenseRoutes.request(
 		"/activate",
-		{
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				activationKey: clave,
-				deviceId,
-				devicePubKey,
-				deviceChangeCode,
-				tenantInfo: { displayName: "Bar de Pruebas" },
-			}),
-		},
+		await activacionFirmada({
+			activationKey: clave,
+			deviceId,
+			devicePubKey,
+			deviceChangeCode,
+			tenantInfo: { displayName: "Bar de Pruebas" },
+		}),
 		ENV,
 		CONTEXTO as any,
 	);

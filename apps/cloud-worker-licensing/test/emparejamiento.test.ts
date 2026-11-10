@@ -426,6 +426,77 @@ describe("el reto y la recogida del token", () => {
 		});
 	});
 
+	it("dos recogidas a la vez del mismo device_id, en negocios y con claves distintos: sólo entra una (AUD-01)", async () => {
+		// La comprobación de REV-07 y el alta no son un lote. Las dos recogidas, cada una aprobada en
+		// su negocio, veían que ese `device_id` no tenía fila; la primera la creaba y el upsert de la
+		// segunda, sin condición, le cambiaba el negocio y la clave: la primera se iba con un token de
+		// un negocio en el que ya no estaba su fila. Ahora la regla va dentro de la sentencia.
+		const uno = await dispositivo("equipo-disputado", 7);
+		const otro = await dispositivo("equipo-disputado", 9); // mismo id, otra clave
+		const CODIGO_2 = "555555";
+		await conPlanoDeControl("dos-recogidas", async (m) => {
+			// Un segundo negocio, con su licencia y su código.
+			m.sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('tenant-2');`);
+			m.sql.exec(
+				`INSERT INTO licenses (license_id, license_key_hash, tenant_id, status, term_months, origin,
+				                       issued_at_ms, customer_email, created_at_ms, updated_at_ms)
+				 VALUES ('lic-2', 'hash-licencia-2', 'tenant-2', 'active', 12, 'manual', ?, 'otro@ejemplo.test', ?, ?);`,
+				T0,
+				T0,
+				T0,
+			);
+			m.sql.exec(
+				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)
+				 VALUES (?, 'sin-secreto', 'tenant-2', 'main-2', 'pending', ?, ?);`,
+				CODIGO_2,
+				T0,
+				T0 + 10 * MIN,
+			);
+
+			const reclamoUno = await m.reclamar(uno, CODIGO, T0);
+			const reclamoOtro = await m.reclamar(otro, CODIGO_2, T0, "10.0.0.2");
+			m.aprobar(CODIGO, uno, T0);
+			m.aprobar(CODIGO_2, otro, T0);
+
+			// Ninguna sigue hasta que las dos han leído que ese `device_id` no tiene fila.
+			let llegadas = 0;
+			let soltar!: () => void;
+			const lasDos = new Promise<void>((resolve) => (soltar = resolve));
+			const aLaVez = new Mundo(m.sql, {
+				...m.db,
+				async execute(entrada: any) {
+					const leido = await m.db.execute(entrada);
+					const texto = String(typeof entrada === "string" ? entrada : entrada.sql);
+					if (/SELECT tenant_id, device_pubkey_b64 FROM devices/.test(texto)) {
+						if (++llegadas >= 2) soltar();
+						await lasDos;
+					}
+					return leido;
+				},
+			});
+
+			const [a, b] = await Promise.all([
+				aLaVez.recoger(uno, CODIGO, reclamoUno.body.nonceB64, T0),
+				aLaVez.recoger(otro, CODIGO_2, reclamoOtro.body.nonceB64, T0),
+			]);
+
+			expect(llegadas).toBe(2);
+			expect([a.status, b.status].sort()).toEqual([200, 409]);
+			const [ganadora, perdedora, suClave] = a.status === 200 ? [a, b, uno.pub] : [b, a, otro.pub];
+
+			// La que llega tarde se va sin token…
+			expect(perdedora.body.error).toBe("device_key_mismatch");
+			expect(perdedora.body.token).toBeUndefined();
+			// …y la fila es la de la que entró: su negocio y su clave, las del token que se lleva.
+			expect(ganadora.body.token).toBeTruthy();
+			expect(m.dispositivoRegistrado(uno)).toMatchObject({
+				tenant_id: ganadora.body.tenantId,
+				role: "handy",
+				device_pubkey_b64: suClave,
+			});
+		});
+	});
+
 	it("un código aprobado para otro dispositivo no sirve, ni con el mismo id y otra clave", async () => {
 		const a = await dispositivo("handy-a", 1);
 		const b = await dispositivo("handy-b", 2);

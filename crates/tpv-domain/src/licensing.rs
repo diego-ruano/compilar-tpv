@@ -111,6 +111,58 @@ pub enum ResultadoActivacion {
 }
 
 /* =========================================================
+   Lo pedido y lo concedido (AUD-01)
+========================================================= */
+
+const MSG_SIN_LICENCIA_A_LA_QUE_SUMAR: &str = "Este equipo no tiene una licencia a la que sumarle tiempo.";
+const MSG_CLAVE_NO_SUMADA: &str =
+    "Esa clave no se ha sumado a la licencia de este equipo. Aquí no se ha cambiado nada: contacta con soporte.";
+const MSG_SUMADA_A_OTRO_NEGOCIO: &str =
+    "Esa clave se ha sumado a la licencia de otro negocio, no a la de este equipo. Aquí no se ha cambiado nada: contacta con soporte.";
+
+/// AUD-01 · ¿Se puede pedir esto a la nube? Se mira ANTES de mandar la clave.
+///
+/// Sumar (`solo_sumar`, el canje desde Configuración) es sumar a la licencia que el equipo ya
+/// tiene: sin licencia guardada no hay a qué sumar, y la clave no sale del equipo.
+/// `negocio_del_equipo` es el de esa licencia, `None` si no tiene.
+pub fn comprobar_solicitud(solo_sumar: bool, negocio_del_equipo: Option<&str>) -> Result<(), &'static str> {
+    if solo_sumar && negocio_del_equipo.is_none() {
+        return Err(MSG_SIN_LICENCIA_A_LA_QUE_SUMAR);
+    }
+    Ok(())
+}
+
+/// AUD-01 · ¿Se puede guardar lo que la nube ha concedido, para lo que se le pidió? Se mira ANTES de
+/// guardar nada de la respuesta: con su token y su clave de cifrado en el equipo, todo lo que
+/// hable con la nube lo hace ya en nombre del negocio concedido.
+///
+/// - Quien pidió **sólo sumar** espera una suma (`tiempo_sumado`) sobre la licencia de su negocio.
+///   Un negocio estrenado o un traslado no es lo que pidió.
+/// - Una suma no cambia de negocio, se pidiera como se pidiera.
+///
+/// Los caminos en los que el negocio cambia a propósito —una primera activación, un traslado con su
+/// código— no son sumas ni se piden con `solo_sumar`, y pasan. Un equipo sin licencia guardada no
+/// tiene negocio con el que comparar.
+///
+/// Devuelve la frase para quien está delante. Es pura para que la llame quien decide guardar.
+pub fn comprobar_concesion(
+    solo_sumar: bool,
+    negocio_del_equipo: Option<&str>,
+    negocio_concedido: &str,
+    tiempo_sumado: bool,
+) -> Result<(), &'static str> {
+    comprobar_solicitud(solo_sumar, negocio_del_equipo)?;
+
+    if solo_sumar && !tiempo_sumado {
+        return Err(MSG_CLAVE_NO_SUMADA);
+    }
+    if tiempo_sumado && negocio_del_equipo.is_some_and(|propio| propio.trim() != negocio_concedido.trim()) {
+        return Err(MSG_SUMADA_A_OTRO_NEGOCIO);
+    }
+    Ok(())
+}
+
+/* =========================================================
    Estado firmado (lo que decide el gate)
 ========================================================= */
 
@@ -666,5 +718,59 @@ mod tests {
         let s = SolicitudActivacion::para_sumar(" K ".into()).expect("válida");
         assert_eq!(s.clave, "K");
         assert!(s.solo_sumar);
+    }
+}
+
+#[cfg(test)]
+mod tests_lo_pedido_y_lo_concedido {
+    //! AUD-01: lo que la nube concede no se guarda sin mirar qué se le pidió.
+
+    use super::*;
+
+    const MIO: Option<&str> = Some("negocio-a");
+
+    /// El canje desde Configuración: una suma sobre la licencia de su negocio, y nada más.
+    #[test]
+    fn quien_pide_solo_sumar_espera_una_suma_en_su_negocio() {
+        assert!(comprobar_concesion(true, MIO, "negocio-a", true).is_ok());
+        assert!(comprobar_concesion(true, Some(" negocio-a "), "negocio-a", true).is_ok());
+    }
+
+    /// Lo que pasaba si la licencia se anulaba o se trasladaba a mitad del canje: la nube estrenaba
+    /// un negocio con esa clave, y el equipo guardaba su token y su clave de cifrado antes de que
+    /// nadie mirase que no era una suma.
+    #[test]
+    fn un_solo_sumar_que_no_vuelve_como_suma_no_se_guarda() {
+        // Un negocio nuevo, o un traslado.
+        assert_eq!(comprobar_concesion(true, MIO, "negocio-nuevo", false), Err(MSG_CLAVE_NO_SUMADA));
+        // Ni aunque el negocio sea el suyo: no es lo que pidió.
+        assert_eq!(comprobar_concesion(true, MIO, "negocio-a", false), Err(MSG_CLAVE_NO_SUMADA));
+    }
+
+    /// Una suma no cambia de negocio, se pidiera con `solo_sumar` o desde la pantalla de activación.
+    #[test]
+    fn una_suma_en_otro_negocio_no_se_guarda() {
+        assert_eq!(comprobar_concesion(true, MIO, "negocio-b", true), Err(MSG_SUMADA_A_OTRO_NEGOCIO));
+        assert_eq!(comprobar_concesion(false, MIO, "negocio-b", true), Err(MSG_SUMADA_A_OTRO_NEGOCIO));
+    }
+
+    /// Sumar es sumar a la licencia que el equipo ya tiene: sin ella, la clave ni sale.
+    #[test]
+    fn sin_licencia_guardada_no_se_pide_sumar() {
+        assert_eq!(comprobar_solicitud(true, None), Err(MSG_SIN_LICENCIA_A_LA_QUE_SUMAR));
+        assert_eq!(comprobar_concesion(true, None, "negocio-a", true), Err(MSG_SIN_LICENCIA_A_LA_QUE_SUMAR));
+        assert!(comprobar_solicitud(true, MIO).is_ok());
+        assert!(comprobar_solicitud(false, None).is_ok());
+    }
+
+    /// Los caminos en los que el negocio cambia a propósito: una primera activación o un traslado
+    /// con su código no son sumas ni se piden con `solo_sumar`. Y un equipo sin licencia guardada no
+    /// tiene negocio con el que comparar una suma.
+    #[test]
+    fn estrenar_o_trasladar_si_cambian_de_negocio() {
+        assert!(comprobar_concesion(false, MIO, "negocio-b", false).is_ok());
+        assert!(comprobar_concesion(false, None, "negocio-b", false).is_ok());
+        assert!(comprobar_concesion(false, None, "negocio-b", true).is_ok());
+        assert!(comprobar_concesion(false, MIO, "negocio-a", true).is_ok());
     }
 }

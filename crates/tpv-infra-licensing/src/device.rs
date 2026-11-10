@@ -218,6 +218,28 @@ pub fn device_proof_message(
     )
 }
 
+/// AUD-01 · La ruta de la activación: a donde se manda y lo que se firma.
+pub const RUTA_ACTIVAR: &str = "/v1/license/activate";
+
+/// AUD-01 · El mensaje que firma este equipo para activar una licencia.
+///
+/// Es el device-proof de siempre sobre `POST /v1/license/activate`, con el tramo del token vacío:
+/// al activar todavía no hay sesión. `cuerpo` son los bytes EXACTOS que se mandan, y con ellos van
+/// firmados el `deviceId`, la clave pública, la clave de activación, el código de traslado,
+/// `soloSumar` y el negocio que el equipo ya tiene. El worker lo comprueba con la clave pública que
+/// presenta ese mismo cuerpo (`licensing.helpers.ts::verificarFirmaDeActivacion`), así que presentar
+/// una clave exige tener su privada. Los dos lados leen el mismo vector,
+/// `firma_activacion_casos.json`.
+pub fn mensaje_de_activacion(ts_ms: i64, cuerpo: &[u8]) -> String {
+    device_proof_message(ts_ms, "POST", RUTA_ACTIVAR, "", cuerpo)
+}
+
+/// La firma (base64) de [`mensaje_de_activacion`]: lo que va en `X-Device-Sig`, con `ts_ms` en
+/// `X-Device-Ts`.
+pub fn firmar_activacion(sk: &SigningKey, ts_ms: i64, cuerpo: &[u8]) -> Result<String, String> {
+    sign_payload_b64(sk, &mensaje_de_activacion(ts_ms, cuerpo))
+}
+
 pub fn sign_payload_b64(sk: &SigningKey, payload: &str) -> Result<String, String> {
     let sig: Signature = sk.sign(payload.as_bytes());
     Ok(B64.encode(sig.to_bytes()))
@@ -579,6 +601,99 @@ mod tests {
             sha256_hex(""),
             "el último tramo es sha256(\"\")"
         );
+    }
+}
+
+/// AUD-01: lo que firma un equipo para activar. Ninguno de estos tests toca el almacén de claves:
+/// la clave sale de una semilla fija.
+#[cfg(test)]
+mod tests_firma_de_activar {
+    use super::*;
+
+    /// El vector que comparten este lado y el worker (`test/activarConFirma.test.ts`).
+    fn vector() -> serde_json::Value {
+        serde_json::from_str(include_str!("firma_activacion_casos.json"))
+            .expect("firma_activacion_casos.json no es JSON válido")
+    }
+
+    fn casos(v: &serde_json::Value) -> &Vec<serde_json::Value> {
+        v["casos"].as_array().expect("casos")
+    }
+
+    #[test]
+    fn el_mensaje_de_activar_ata_la_ruta_la_hora_y_el_cuerpo() {
+        let cuerpo = br#"{"activationKey":"TPV-1","deviceId":"d1","devicePubKey":"k"}"#;
+        let msg = mensaje_de_activacion(1_790_000_000_000, cuerpo);
+
+        let lineas: Vec<&str> = msg.split('\n').collect();
+        assert_eq!(lineas.len(), 6);
+        assert_eq!(lineas[0], "DEVICE_PROOF");
+        assert_eq!(lineas[1], "1790000000000");
+        assert_eq!(lineas[2], "POST");
+        assert_eq!(lineas[3], "/v1/license/activate");
+        // Sin token: sha256 de la cadena vacía, escrito a mano para que no lo calcule lo que se prueba.
+        assert_eq!(
+            lineas[4],
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(lineas[5], sha256_hex_bytes(cuerpo));
+    }
+
+    /// El `deviceId`, la clave pública, la clave de activación, el código de traslado, `soloSumar` y
+    /// el negocio del equipo van en el cuerpo: cambiar cualquiera cambia lo firmado.
+    #[test]
+    fn cambiar_cualquier_dato_del_cuerpo_cambia_lo_firmado() {
+        let base = mensaje_de_activacion(1, br#"{"activationKey":"A","deviceId":"d","devicePubKey":"k"}"#);
+        for otro in [
+            &br#"{"activationKey":"B","deviceId":"d","devicePubKey":"k"}"#[..],
+            br#"{"activationKey":"A","deviceId":"e","devicePubKey":"k"}"#,
+            br#"{"activationKey":"A","deviceId":"d","devicePubKey":"q"}"#,
+            br#"{"activationKey":"A","deviceId":"d","devicePubKey":"k","deviceChangeCode":"123456"}"#,
+            br#"{"activationKey":"A","deviceId":"d","devicePubKey":"k","soloSumar":true}"#,
+            br#"{"activationKey":"A","deviceId":"d","devicePubKey":"k","tenantActual":"t"}"#,
+        ] {
+            assert_ne!(base, mensaje_de_activacion(1, otro));
+        }
+        assert_ne!(base, mensaje_de_activacion(2, br#"{"activationKey":"A","deviceId":"d","devicePubKey":"k"}"#));
+    }
+
+    /// La firma de activar no vale como device-proof de otra ruta, ni al revés: la ruta va dentro, y
+    /// una petición autenticada lleva siempre un token.
+    #[test]
+    fn la_firma_de_activar_no_sirve_para_otra_ruta() {
+        let cuerpo = b"{}";
+        let activar = mensaje_de_activacion(1, cuerpo);
+        assert_ne!(activar, device_proof_message(1, "POST", "/v1/license/refresh", "", cuerpo));
+        assert_ne!(activar, device_proof_message(1, "POST", RUTA_ACTIVAR, "un-token", cuerpo));
+    }
+
+    #[test]
+    fn la_firma_de_activar_es_la_del_vector_compartido() {
+        let v = vector();
+        let semilla: [u8; 32] = B64
+            .decode(v["semillaB64"].as_str().unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let sk = SigningKey::from_bytes(&semilla);
+        assert_eq!(
+            B64.encode(sk.verifying_key().to_bytes()),
+            v["clavePublicaB64"].as_str().unwrap()
+        );
+
+        assert!(casos(&v).len() >= 3);
+        for caso in casos(&v) {
+            let nombre = caso["nombre"].as_str().unwrap();
+            let ts = caso["tsMs"].as_i64().unwrap();
+            let cuerpo = caso["cuerpo"].as_str().unwrap().as_bytes();
+
+            assert_eq!(mensaje_de_activacion(ts, cuerpo), caso["mensaje"].as_str().unwrap(), "{nombre}");
+            assert_eq!(
+                firmar_activacion(&sk, ts, cuerpo).unwrap(),
+                caso["firmaB64"].as_str().unwrap(),
+                "{nombre}"
+            );
+        }
     }
 }
 

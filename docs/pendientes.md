@@ -155,6 +155,22 @@ idempotentes por `Op_Id`. Cuando se retome hace falta un almacén de nonces comp
 (KV es eventualmente consistente; un Durable Object o una tabla con TTL sí sirven) y un despliegue en
 tres pasos: worker tolerante, clientes nuevos, worker estricto.
 
+La firma de `/v1/license/activate` es ese mismo device-proof y comparte la ventana. Una activación
+ya aceptada que se repite tal cual dentro de ella **vuelve a ejecutarse**, no sólo a contestar
+(`test/activarConFirma.test.ts`):
+
+- La primera activación, o la del mismo equipo: vuelve a dar de alta el dispositivo (le quita una
+  revocación posterior), repone los datos del negocio que llevaba la petición (el nombre), pasa otra
+  vez por el aprovisionamiento de su base y entrega de nuevo la DEK y un token. No abre otro negocio
+  ni mueve la caducidad.
+- El cambio de equipo: el código ya está consumido y la licencia ya es de ese equipo, así que entra
+  como el caso anterior, sin anotar otro traslado.
+- El canje: no suma dos veces. Mientras el equipo conserve su licencia, la clave ya está gastada y
+  contesta `license_already_used`, sin DEK ni token. Si la licencia que recibió el tiempo se ha
+  anulado o trasladado después, la repetición de un `soloSumar` contesta `clave_no_canjeable`; la de
+  un canje hecho desde la pantalla de activación entra como una clave sin estrenar y abre un negocio
+  nuevo para ese equipo, porque `/activate` no mira que la clave ya está canjeada.
+
 ### LOGIN-04 · El hash del PIN se puede romper offline
 
 PBKDF2-HMAC-SHA256, 100.000 iteraciones, sal de 16 bytes por usuario (`tpv-domain/src/login.rs`,

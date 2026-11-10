@@ -15,6 +15,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+import { activacionFirmada, clavePublica } from "./helpers/activar";
 import { clienteSobre, conFalloSimulado } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
@@ -58,7 +59,8 @@ const ENV = {
 
 const DIA = 24 * 60 * 60 * 1000;
 const EQUIPO = "equipo-del-bar";
-const CLAVE_EQUIPO = btoa(String.fromCharCode(...new Uint8Array(32).fill(1)));
+// AUD-01: claves ed25519 de verdad, porque activar exige la firma del equipo.
+const CLAVE_EQUIPO = await clavePublica(1);
 
 type Escenario = {
 	sql: any;
@@ -130,11 +132,7 @@ async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): P
 			async activar(clave, deviceId = EQUIPO, pubKey = CLAVE_EQUIPO, extra = {}) {
 				const res = await licenseRoutes.request(
 					"/activate",
-					{
-						method: "POST",
-						headers: { "content-type": "application/json" },
-						body: JSON.stringify({ activationKey: clave, deviceId, devicePubKey: pubKey, ...extra }),
-					},
+					await activacionFirmada({ activationKey: clave, deviceId, devicePubKey: pubKey, ...extra }),
 					ENV,
 					// El recibo del canje sale por `waitUntil`, así que hace falta un contexto.
 					{ waitUntil: (p: Promise<unknown>) => void p, passThroughOnException: () => {} } as any,
@@ -252,13 +250,15 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 
 	it("con la clave de otro equipo no se suma nada", async () => {
 		// El `device_id` no es un secreto: viaja en los mensajes de presencia del WebSocket
-		// (REV-07). Lo que no se puede falsificar es la clave registrada de ese equipo.
+		// (REV-07). Quien lo conoce puede firmar con una clave suya, pero no es la registrada de ese
+		// equipo; y presentar la registrada exige firmar con su privada (AUD-01,
+		// `activarConFirma.test.ts`).
 		const r = await escenario("clave-ajena", async (e) => {
 			const viejaId = await e.licenciaDelEquipo();
 			const antes = await e.leer(viejaId);
 			const nueva = await e.emitir(12);
 
-			const res = await e.activar(nueva.clave, EQUIPO, btoa(String.fromCharCode(...new Uint8Array(32).fill(2))));
+			const res = await e.activar(nueva.clave, EQUIPO, await clavePublica(2));
 			return { res, final: await e.leer(viejaId), clave: await e.leer(nueva.id) };
 		});
 

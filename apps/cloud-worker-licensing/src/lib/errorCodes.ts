@@ -256,6 +256,13 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 		"Esta licencia está activada en otro equipo. Para pasarla a éste hay que confirmar el cambio con el código enviado al correo de la compra.",
 	device_key_mismatch:
 		"La identidad de este equipo no coincide con la registrada para la licencia. Contacta con soporte.",
+	// AUD-01: el equipo dice ser de un negocio y la nube lo tiene registrado en otro. Abrir el TPV
+	// comprueba la licencia, que es lo que devuelve su fila a su negocio si sigue siendo su Main.
+	device_tenant_mismatch:
+		"Este equipo consta en la nube en otro negocio. Cierra el TPV y vuelve a abrirlo para que compruebe su licencia; si sigue igual, contacta con soporte.",
+	// AUD-01: la fila del equipo no tiene clave registrada con la que comparar la que presenta.
+	device_key_missing:
+		"Este equipo está registrado sin su clave de identidad y no se puede comprobar que es él. Contacta con soporte.",
 	tenant_db_provision_failed:
 		"No se ha podido preparar la base de datos en la nube. Inténtalo de nuevo en unos minutos.",
 	tenant_db_already_provisioned: "La base de datos de la nube ya existe.",

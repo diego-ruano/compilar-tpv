@@ -91,33 +91,46 @@ export async function getLicenseById(db: Sql, licenseId: string): Promise<Licens
 	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
 }
 
+/** El rechazo de una clave que no es la registrada, o de un equipo registrado sin ninguna. */
+function errorDeClave(code: "device_key_mismatch" | "device_key_missing"): Error {
+	return Object.assign(new Error(code), { code });
+}
+
 /**
- * Exige que un equipo YA conocido presente la clave pública con la que está registrado (REV-13).
+ * Exige que un equipo YA conocido presente la clave pública con la que está registrado, esté su
+ * fila en el negocio que esté (REV-07, REV-13). Devuelve el negocio en el que la nube lo tiene
+ * registrado, o `null` si ese `device_id` no tiene fila.
  *
- * `exigirClaveSiEsDeOtroNegocio` no sirve aquí: aquél cubre el robo ENTRE negocios y se aparta en
- * cuanto el dispositivo es del tenant que autoriza, que es justo el caso del canje. Y el
- * `device_id` no es un secreto —viaja en los mensajes de presencia del WebSocket (REV-07)—, así
- * que sin esto bastaría con conocer el de otro bar para gastar una clave sobre su licencia.
+ * `exigirClaveSiEsDeOtroNegocio` no sirve para activar: aquél cubre el robo ENTRE negocios y se
+ * aparta en cuanto el dispositivo es del tenant que autoriza, que es justo el caso del canje y el de
+ * un cambio de equipo hacia una Handy del propio negocio. Y el `device_id` no es un secreto —viaja
+ * en los mensajes de presencia del WebSocket (REV-07)—, así que sin esto bastaría con conocer el de
+ * otro bar para gastar una clave sobre su licencia.
  *
- * Un dispositivo sin clave registrada pasa: es el mismo hueco que deja
- * `setDevicePubKeyB64IfEmptyOrThrow` para poder rellenarla la primera vez.
+ * AUD-01: la clave pública tampoco es un secreto, y aquí sólo se comparan dos cadenas. Que quien la
+ * presenta tiene su privada lo comprueba antes la ruta, con la firma de la petición
+ * (`verificarFirmaDeActivacion`). Por eso mismo **una fila sin clave registrada no pasa**
+ * (`device_key_missing`): la firma sólo prueba la clave que se presenta, y darla por buena sería
+ * dejar que el primero que firme se quede con ese equipo. El alta escribe la fila con su clave en
+ * una sola sentencia (`ensureDevice`), así que una fila así no sale del uso normal.
  */
 export async function exigirLaClaveDeEsteEquipo(
 	db: Sql,
 	deviceId: string,
 	pubB64: string,
-): Promise<void> {
+): Promise<{ tenantId: string } | null> {
 	const r = await exec(
 		db,
-		`SELECT device_pubkey_b64 FROM devices WHERE device_id=? LIMIT 1;`,
+		`SELECT tenant_id, device_pubkey_b64 FROM devices WHERE device_id=? LIMIT 1;`,
 		[deviceId],
 	);
-	const registrada = String((r.rows?.[0] as any)?.device_pubkey_b64 || "").trim();
-	if (!registrada || registrada === pubB64.trim()) return;
+	const fila = r.rows?.[0] as any | undefined;
+	if (!fila) return null;
 
-	const err: any = new Error("device_key_mismatch");
-	err.code = "device_key_mismatch";
-	throw err;
+	const registrada = String(fila.device_pubkey_b64 || "").trim();
+	if (!registrada) throw errorDeClave("device_key_missing");
+	if (registrada !== pubB64.trim()) throw errorDeClave("device_key_mismatch");
+	return { tenantId: String(fila.tenant_id || "").trim() };
 }
 
 /**
@@ -130,10 +143,17 @@ export async function exigirLaClaveDeEsteEquipo(
  * `active` y `expired`, las dos: renovar cuando ya se te ha pasado la fecha es EL caso normal.
  * `revoked` no — a quien se le ha cortado el servicio no se le devuelve pagando otra clave; eso
  * pasa por administración.
+ *
+ * AUD-01: con `tenantId`, sólo la de ese negocio. Un equipo puede ser la Main de dos licencias
+ * vivas de negocios distintos (las dos suyas, o una que otro le apuntó antes de que activar
+ * exigiera firma), y sin esto el canje elegía la que más tarde caduca: la renovación se iba a la
+ * otra y la Main recibía su negocio. El negocio es el de su fila de `devices`, que es lo que la nube
+ * tiene registrado; sin `tenantId` sólo se pregunta por un equipo que no tiene fila.
  */
 export async function licenciaVivaDelDispositivo(
 	db: Sql,
 	deviceId: string,
+	tenantId?: string,
 ): Promise<LicenseRow | null> {
 	const r = await exec(
 		db,
@@ -142,12 +162,39 @@ export async function licenciaVivaDelDispositivo(
     WHERE main_device_id = ?
       AND disabled = 0
       AND status IN ('active', 'expired')
+      AND (? IS NULL OR tenant_id = ?)
     ORDER BY expires_at_ms DESC
     LIMIT 1;
     `,
-		[deviceId],
+		[deviceId, tenantId ?? null, tenantId ?? null],
 	);
 	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
+}
+
+/**
+ * ¿Sigue siendo ésta la licencia viva de la que ese equipo es la Main? Para preguntarlo DENTRO de
+ * la transacción del canje (AUD-01): entre que la ruta elige la licencia y gasta la clave, la
+ * licencia se puede haber anulado o trasladado a otro equipo, y sumarle tiempo entonces sería
+ * gastar la clave sobre una licencia que ya no es de quien la teclea.
+ */
+export async function sigueSiendoLaLicenciaDelEquipo(
+	db: Sql,
+	licenseId: string,
+	deviceId: string,
+): Promise<boolean> {
+	const r = await exec(
+		db,
+		`
+    SELECT 1 AS viva FROM licenses
+    WHERE license_id = ?
+      AND main_device_id = ?
+      AND disabled = 0
+      AND status IN ('active', 'expired')
+    LIMIT 1;
+    `,
+		[licenseId, deviceId],
+	);
+	return (r.rows?.length ?? 0) > 0;
 }
 
 /**
@@ -1377,8 +1424,14 @@ export async function getDevicePubKeyB64EnCualquierNegocio(
  * Queda fuera, por tanto, que alguien de dentro del local le quite el sitio a su propia Main; es el
  * modelo de amenaza que §14 ya asume («cubre a un camarero con el TPV delante, no a un atacante»).
  *
- * Lanza `device_key_mismatch`, el mismo error que `setDevicePubKeyB64IfEmptyOrThrow`. La diferencia
- * es CUÁNDO: esto se llama **antes** de tocar nada.
+ * Lanza `device_key_mismatch`, y se llama **antes** de tocar nada.
+ *
+ * AUD-01: aquí sólo se comparan claves públicas, que no son un secreto. La firma la comprueba antes
+ * cada puerta que llama a esto, con la clave que le presentan: `/v1/license/activate` sobre la
+ * petición entera (`verificarFirmaDeActivacion`) y `fetch-token` sobre su reto de un solo uso. Y
+ * por eso una fila de otro negocio **sin clave registrada** tampoco se mueve
+ * (`device_key_missing`): la firma sólo prueba la clave presentada, y sin una registrada con la que
+ * compararla se la llevaría el primero que firmase.
  */
 export async function exigirClaveSiEsDeOtroNegocio(
 	db: Sql,
@@ -1397,41 +1450,24 @@ export async function exigirClaveSiEsDeOtroNegocio(
 	const duenyo = String(row.tenant_id || "").trim();
 	const registrada = String(row.device_pubkey_b64 || "").trim();
 
-	if (!registrada || !duenyo || duenyo === tenantIdQueAutoriza) return;
+	if (duenyo && duenyo === tenantIdQueAutoriza) return;
+	if (!registrada) throw errorDeClave("device_key_missing");
 	if (registrada === pubB64.trim()) return;
 
-	const err: any = new Error("device_key_mismatch");
-	err.code = "device_key_mismatch";
-	throw err;
-}
-
-/** Guarda la pubkey solo si está vacía. Si ya hay otra distinta → error (anti-clonado). */
-export async function setDevicePubKeyB64IfEmptyOrThrow(
-	db: Sql,
-	tenantId: string,
-	deviceId: string,
-	pubB64: string,
-) {
-	const cur = await getDevicePubKeyB64(db, tenantId, deviceId);
-	if (!cur) {
-		await exec(
-			db,
-			`UPDATE devices SET device_pubkey_b64=?, pubkey_alg='ed25519' WHERE tenant_id=? AND device_id=?;`,
-			[pubB64, tenantId, deviceId],
-		);
-		return;
-	}
-	if (cur !== pubB64) {
-		const err: any = new Error("device_key_mismatch");
-		err.code = "device_key_mismatch";
-		throw err;
-	}
+	throw errorDeClave("device_key_mismatch");
 }
 
 /**
- * Alta o readmisión del dispositivo. La llama `/v1/license/activate`, es decir: alguien ha
- * presentado una clave de licencia válida (y el OTP al email del titular si era un cambio de
- * equipo). Eso **es** la autorización, así que la fila queda como la de un dispositivo vivo.
+ * Alta o readmisión del dispositivo, **con su clave y en una sola sentencia**. La llaman
+ * `/v1/license/activate` —alguien ha presentado una clave de licencia válida (y el OTP al email del
+ * titular si era un cambio de equipo), firmando con la clave del equipo— y `readmitirMain`.
+ *
+ * AUD-01: la fila nace con su clave, y una que ya existe sólo se toca si su clave registrada es
+ * ésta (el `WHERE` del `DO UPDATE`). Antes eran dos escrituras —la fila, y después la clave si
+ * faltaba—: un corte entre las dos dejaba una fila sin clave, que cualquiera podía reclamar
+ * firmando con la suya, y la comparación llegaba cuando la fila ya estaba mudada, con rol `tpv` y
+ * sin revocar. Si la fila existe con otra clave, o sin ninguna, no se escribe nada y se lanza
+ * `device_key_mismatch`.
  *
  * ⚠️ `revoked_at_ms=NULL` no sobra. La PK de `devices` es el `device_id`, que en el cliente
  * vive en el keyring del SO y sobrevive a reinstalar la app, borrar AppData y cambiar de
@@ -1445,28 +1481,30 @@ export async function ensureDevice(
 	db: Sql,
 	tenantId: string,
 	deviceId: string,
-	role: "tpv" | "handy" = "tpv",
-	devicePubKeyB64?: string | null,
-) {
+	role: "tpv" | "handy",
+	devicePubKeyB64: string,
+): Promise<void> {
 	const now = Date.now();
 
-	await exec(
+	const r = await exec(
 		db,
 		`
-    INSERT INTO devices (device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms, revoked_at_ms)
-    VALUES (?, ?, ?, ?, ?, NULL)
+    INSERT INTO devices (
+      device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms, revoked_at_ms,
+      device_pubkey_b64, pubkey_alg
+    )
+    VALUES (?, ?, ?, ?, ?, NULL, ?, 'ed25519')
     ON CONFLICT(device_id) DO UPDATE SET
       tenant_id=excluded.tenant_id,
       role=excluded.role,
       last_seen_at_ms=excluded.last_seen_at_ms,
-      revoked_at_ms=NULL;
+      revoked_at_ms=NULL
+    WHERE devices.device_pubkey_b64 = excluded.device_pubkey_b64;
     `,
-		[deviceId, tenantId, role, now, now],
+		[deviceId, tenantId, role, now, now, devicePubKeyB64.trim()],
 	);
 
-	if (devicePubKeyB64 && devicePubKeyB64.trim()) {
-		await setDevicePubKeyB64IfEmptyOrThrow(db, tenantId, deviceId, devicePubKeyB64.trim());
-	}
+	if (Number((r as any)?.rowsAffected ?? 0) <= 0) throw errorDeClave("device_key_mismatch");
 }
 
 /* ============================================================

@@ -27,6 +27,8 @@ export const activarSchema = z.object({
 	}).optional(),
 	deviceChangeCode: z.string().trim().regex(/^(?:[0-9]{6})?$/).optional(),
 	soloSumar: z.boolean().optional(),
+	// AUD-01: el negocio que el equipo tiene ahora, si tiene alguno. Ata el canje a ese negocio.
+	tenantActual: identificador.optional(),
 });
 
 export const pedirCambioSchema = z.object({ activationKey: clave, deviceId: identificador });

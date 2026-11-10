@@ -323,6 +323,9 @@ export async function entregarToken(
 		await exigirClaveSiEsDeOtroNegocio(db, deviceId, pubB64Raw, tenantId);
 	} catch (e: any) {
 		if (e?.code === "device_key_mismatch") return fallo(409, "device_key_mismatch");
+		// AUD-01: la fila está en otro negocio y sin clave registrada. La firma de arriba sólo prueba
+		// la clave que se acaba de presentar, así que no hay con qué comprobar que es ese equipo.
+		if (e?.code === "device_key_missing") return fallo(409, "device_key_missing");
 		throw e;
 	}
 
@@ -381,7 +384,14 @@ export async function entregarToken(
 	// `device_pubkey_b64` se sigue escribiendo, pero ya no puede CAMBIAR de dueño: arriba se ha
 	// exigido que sea la que este `device_id` tuviera registrada (REV-07). Escribirla aquí es lo
 	// que le pone clave a un dispositivo que aún no la tenía.
-	await db.execute({
+	//
+	// AUD-01: y la regla de REV-07 va también DENTRO de la sentencia. La comprobación de arriba y
+	// esta escritura no son un lote: dos recogidas aprobadas para el mismo `device_id`, en negocios
+	// distintos y con claves distintas, veían las dos que no había fila; la primera la creaba y el
+	// upsert de la segunda, sin condición, le cambiaba el negocio y la clave. Una fila que ya
+	// existe sólo se toca si es de este negocio (la recuperación que aprueba el dueño) o si su clave
+	// registrada es ésta (la mudanza del propio equipo). Si no escribe, no se entrega el token.
+	const alta = await db.execute({
 		sql: `
 			INSERT INTO devices (
 				device_id,
@@ -400,10 +410,14 @@ export async function entregarToken(
 				last_seen_at_ms=excluded.last_seen_at_ms,
 				revoked_at_ms=NULL,
 				device_pubkey_b64=excluded.device_pubkey_b64,
-				pubkey_alg='ed25519';
+				pubkey_alg='ed25519'
+			WHERE devices.tenant_id = excluded.tenant_id
+			   OR devices.device_pubkey_b64 = excluded.device_pubkey_b64;
 		`,
 		args: [deviceId, tenantId, now, now, pubB64Raw],
 	});
+
+	if (rowsAffected(alta) <= 0) return fallo(409, "device_key_mismatch");
 
 	// La lista de vinculados de la Main cambia en este momento, no al aprobar.
 	await avisarSolicitudALaMain(env, tenantId);

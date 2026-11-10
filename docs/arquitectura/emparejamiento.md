@@ -54,11 +54,21 @@ revés.
   fila de `devices` a ese negocio. Si vuelve a ser la Main del suyo, `/v1/license/status` y `/refresh`
   lo readmiten (`readmitirMain`) cuando firma con su clave registrada y sigue siendo el
   `main_device_id`; si la licencia ya está en otro equipo, contestan `device_replaced`.
-- **Esa mudanza la hace el propio dispositivo, firmando.** Antes de mover una fila de `devices`, las dos
-  puertas que dan de alta un dispositivo (activar una licencia y recoger este token) llaman a
-  `exigirClaveSiEsDeOtroNegocio`: si el `device_id` tiene clave registrada en **otro** negocio y no es
-  ésta, no se toca nada. Dentro del mismo negocio, que la clave cambie es la vía de recuperación de una
-  Handy revocada que se vuelve a vincular, y lo aprueba el dueño.
+- **Esa mudanza la hace el propio dispositivo, firmando.** Las dos puertas que dan de alta un
+  dispositivo comprueban la firma de la clave que se les presenta: activar una licencia, sobre la
+  petición entera ([licencias.md](licencias.md#activar)); recoger este token, sobre su reto de un solo
+  uso. Después, antes de mover una fila de `devices`, llaman a `exigirClaveSiEsDeOtroNegocio`: si la
+  fila del `device_id` está en **otro** negocio, no se toca con otra clave que la registrada, ni si
+  no tiene ninguna registrada (`device_key_missing`): la firma sólo prueba la clave presentada. La
+  clave pública sola no prueba nada: la Main de un negocio ve la de cada equipo que pasó por él
+  (`/v1/device/list`, `/v1/pair/pending`). Dentro del mismo negocio, que la clave cambie al volver a
+  vincular es la vía de recuperación de una Handy revocada (o de una fila que se quedó sin clave), y
+  lo aprueba el dueño. Activar una licencia no lo deja ni dentro del mismo negocio.
+- **Esa regla va también dentro de la sentencia del alta.** La comprobación y la escritura no son un
+  lote, así que el upsert de `fetch-token` sólo toca una fila que ya existe si es de este negocio o
+  si su clave registrada es la presentada. Si no escribe, contesta `device_key_mismatch` y no
+  entrega el token: de dos recogidas simultáneas del mismo `device_id` en negocios y con claves
+  distintos entra una sola. A la que llega tarde le queda el código gastado.
 
 ## El token de la Handy
 

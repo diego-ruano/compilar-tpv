@@ -133,14 +133,35 @@ describe("activar una licencia readmite el dispositivo", () => {
 		const { db, consultas } = bdFalsa([]);
 		vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
 
-		await ensureDevice(db, "t-nuevo", "d1", "tpv", null);
+		await ensureDevice(db, "t-nuevo", "d1", "tpv", "clave-del-equipo");
 
+		// AUD-01: una sola sentencia, con la clave dentro. Antes eran dos, y un corte entre ellas
+		// dejaba una fila sin clave.
+		expect(consultas).toHaveLength(1);
 		const sql = consultas[0].sql.replace(/\s+/g, " ");
 		expect(sql).toContain("INSERT INTO devices");
-		expect(sql).toContain("revoked_at_ms) VALUES (?, ?, ?, ?, ?, NULL)");
+		expect(sql).toContain("device_pubkey_b64, pubkey_alg ) VALUES (?, ?, ?, ?, ?, NULL, ?, 'ed25519')");
 		expect(sql).toContain("ON CONFLICT(device_id) DO UPDATE SET");
 		expect(sql).toContain("revoked_at_ms=NULL");
+		// Y la fila que ya existe sólo se toca si su clave registrada es la que se presenta.
+		expect(sql).toContain("WHERE devices.device_pubkey_b64 = excluded.device_pubkey_b64");
+		expect(consultas[0].args).toEqual([
+			"d1",
+			"t-nuevo",
+			"tpv",
+			1_700_000_000_000,
+			1_700_000_000_000,
+			"clave-del-equipo",
+		]);
 
 		vi.restoreAllMocks();
+	});
+
+	it("si la fila existe con otra clave, o sin ninguna, no la toca y lo dice", async () => {
+		// La sentencia no ha escrito nada: el `WHERE` del `DO UPDATE` no ha casado.
+		const db = { execute: async () => ({ rows: [], rowsAffected: 0 }) } as any;
+		await expect(ensureDevice(db, "t-nuevo", "d1", "tpv", "otra-clave")).rejects.toMatchObject({
+			code: "device_key_mismatch",
+		});
 	});
 });

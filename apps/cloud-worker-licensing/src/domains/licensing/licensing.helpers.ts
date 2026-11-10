@@ -253,28 +253,70 @@ export async function readmitirMain(
 	const lic = await getLicenseByHash(dbi, claims.licHash);
 	if (!lic || lic.tenant_id !== claims.tenantId) return noRegistrado;
 
-	const firma = await comprobarFirma(
-		request,
-		() => getDevicePubKeyB64EnCualquierNegocio(dbi, claims.deviceId),
-		undefined,
-		rawBody,
-	);
+	const clave = await getDevicePubKeyB64EnCualquierNegocio(dbi, claims.deviceId);
+	const firma = await comprobarFirma(request, async () => clave, undefined, rawBody);
 	if (!firma.ok) return { ok: false, status: 401, error: firma.error };
 
 	if (lic.main_device_id !== claims.deviceId) {
 		return { ok: false, status: 403, error: "device_replaced" };
 	}
 
-	await ensureDevice(dbi, claims.tenantId, claims.deviceId, "tpv");
+	// AUD-01: la fila se muda con la misma clave con la que se ha comprobado la firma, y sólo si
+	// sigue registrada con ella (`ensureDevice`). Sin clave no se llega aquí: la firma ya habría
+	// contestado `device_pubkey_not_registered`.
+	if (!clave) return noRegistrado;
+	try {
+		await ensureDevice(dbi, claims.tenantId, claims.deviceId, "tpv", clave);
+	} catch (e: any) {
+		if (e?.code === "device_key_mismatch") return noRegistrado;
+		throw e;
+	}
 	return { ok: true };
 }
 
-async function comprobarFirma(
+/**
+ * AUD-01 · La ruta que firma quien activa. Va fija y no se lee de la petición: la firma de una
+ * activación sólo vale para activar, esté montado el router donde esté.
+ */
+const RUTA_DE_ACTIVACION = "/v1/license/activate";
+
+/**
+ * AUD-01 · La prueba de posesión de `/v1/license/activate`: el device-proof de siempre, comprobado
+ * con la clave pública que la propia petición presenta.
+ *
+ * La ruta es anónima y las guardas de REV-07 y REV-13 comparan esa clave pública con la registrada,
+ * pero una clave pública no es un secreto: la ve la Main de cualquier negocio por el que pasó el
+ * equipo (`/v1/device/list`, `/v1/pair/pending`). Con esta firma, presentar una clave exige tener su
+ * privada, así que aquellas comparaciones pasan a exigirla también.
+ *
+ * Lo firmado es `DEVICE_PROOF \n ts \n POST \n /v1/license/activate \n sha256("") \n sha256(cuerpo)`:
+ * todavía no hay token, así que su tramo es el hash de la cadena vacía (ninguna ruta autenticada
+ * acepta un token vacío). El cuerpo entra entero, y con él el `deviceId`, la clave pública, la clave
+ * de activación, el código de traslado, `soloSumar` y `tenantActual`. El gemelo del cliente es
+ * `device.rs::mensaje_de_activacion`, y los dos leen el mismo vector
+ * (`crates/tpv-infra-licensing/src/firma_activacion_casos.json`).
+ */
+export async function verificarFirmaDeActivacion(
 	request: Request,
-	obtenerClave: () => Promise<string | null>,
-	target?: { method: string; path: string },
-	rawBody?: Uint8Array,
+	pubB64: string,
+	rawBody: Uint8Array,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+	return comprobarFirma(
+		request,
+		async () => pubB64,
+		{ method: "POST", path: RUTA_DE_ACTIVACION },
+		rawBody,
+		false,
+	);
+}
+
+/**
+ * Las cabeceras del device-proof: que estén, que la hora se pueda leer y que caiga dentro del margen
+ * de ±2 minutos. Es lo que se puede decidir sin haber leído el cuerpo ni la clave.
+ */
+export function cabecerasDeLaFirma(
+	request: Request,
+): { ok: true; ts: number; sigB64: string } | { ok: false; error: string } {
 	const tsStr = (request.headers.get("X-Device-Ts") || "").trim();
 	const sigB64Raw = (request.headers.get("X-Device-Sig") || "").trim();
 	if (!tsStr || !sigB64Raw) return { ok: false, error: "missing_device_proof" };
@@ -289,11 +331,30 @@ async function comprobarFirma(
 	const MAX_SKEW_MS = 2 * 60 * 1000;
 	if (Math.abs(now - ts) > MAX_SKEW_MS) return { ok: false, error: "device_ts_out_of_range" };
 
+	return { ok: true, ts, sigB64 };
+}
+
+async function comprobarFirma(
+	request: Request,
+	obtenerClave: () => Promise<string | null>,
+	target?: { method: string; path: string },
+	rawBody?: Uint8Array,
+	/** `false` sólo al activar (AUD-01), que se firma antes de tener token: su tramo va vacío. */
+	conToken = true,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	const cabeceras = cabecerasDeLaFirma(request);
+	if (!cabeceras.ok) return cabeceras;
+	const { ts, sigB64 } = cabeceras;
+
 	const pubB64 = await obtenerClave();
 	if (!pubB64) return { ok: false, error: "device_pubkey_not_registered" };
 
-	const token = leerBearer(request);
-	if (!token) return { ok: false, error: "missing_token" };
+	let token = "";
+	if (conToken) {
+		const bearer = leerBearer(request);
+		if (!bearer) return { ok: false, error: "missing_token" };
+		token = bearer;
+	}
 
 	const tokenHash = await sha256HexStr(token);
 

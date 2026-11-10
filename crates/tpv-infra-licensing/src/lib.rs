@@ -234,6 +234,64 @@ async fn peticion_con_prueba(
     }
 }
 
+/// AUD-01 · Lo que sale hacia la nube en un intento de activar: el cuerpo tal cual, la hora con la
+/// que se ha firmado (`X-Device-Ts`) y la firma (`X-Device-Sig`).
+struct ActivacionFirmada<'a> {
+    ts: i64,
+    firma: String,
+    cuerpo: &'a [u8],
+}
+
+/// Firma `cuerpo` con la clave del equipo y la hora de la nube de AHORA
+/// (`device::mensaje_de_activacion`). Cada intento se firma de nuevo: la hora va dentro de la firma.
+fn firmar_intento<'a>(sk: &SigningKey, cuerpo: &'a [u8]) -> AppResult<ActivacionFirmada<'a>> {
+    let ts = reloj::ahora_ms();
+    let firma = device::firmar_activacion(sk, ts, cuerpo).map_err(ext)?;
+    Ok(ActivacionFirmada { ts, firma, cuerpo })
+}
+
+/// AUD-01 · Activa con la petición firmada, y repite UNA vez si la nube la rechaza por la hora de la
+/// firma (PROD-04, ver [`reloj`]). El rechazo ya ha traído la hora buena —`enviar` la anota—, así
+/// que el segundo intento se firma con ella: misma petición, otra hora y otra firma. Lo que
+/// conteste el segundo es lo que hay: no se insiste.
+///
+/// `enviar` es el transporte ([`enviar_activacion`]); va aparte para poder probar esto sin red.
+async fn activar_firmando<'a, E, Fut>(
+    sk: &SigningKey,
+    cuerpo: &'a [u8],
+    mut enviar: E,
+) -> AppResult<(u16, String)>
+where
+    E: FnMut(ActivacionFirmada<'a>) -> Fut,
+    Fut: std::future::Future<Output = AppResult<(u16, String)>>,
+{
+    let (http, texto) = enviar(firmar_intento(sk, cuerpo)?).await?;
+    if reloj::es_rechazo_por_reloj(http, &texto) {
+        return enviar(firmar_intento(sk, cuerpo)?).await;
+    }
+    Ok((http, texto))
+}
+
+/// AUD-01 · Manda un intento de activar tal cual, con la firma en `X-Device-Sig` y su hora en
+/// `X-Device-Ts`, y anota la hora de la nube que traiga la respuesta. Devuelve el par crudo
+/// `(status, cuerpo)`.
+async fn enviar_activacion(intento: ActivacionFirmada<'_>) -> AppResult<(u16, String)> {
+    let resp = reloj::enviar(
+        http_client()?
+            .post(api_url(device::RUTA_ACTIVAR))
+            .header(CONTENT_TYPE, "application/json")
+            .header("X-Device-Ts", intento.ts.to_string())
+            .header("X-Device-Sig", intento.firma)
+            .body(intento.cuerpo.to_vec()),
+    )
+    .await
+    .map_err(|e| ext(format!("No se pudo conectar con el servidor de licencias: {e}")))?;
+
+    let http = resp.status().as_u16();
+    let texto = resp.text().await.unwrap_or_default();
+    Ok((http, texto))
+}
+
 /* ===== Tipos de la API de licencias (internos del adaptador) ===== */
 
 /// Respuesta de error del worker: `{ ok:false, error, code?, message?, details? }`.
@@ -326,6 +384,36 @@ struct ActivateReq<'a> {
     /// RI-52: canje desde Configuración. Sólo viaja cuando es `true`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     solo_sumar: bool,
+    /// AUD-01: el negocio que este equipo tiene ahora, si tiene alguno. La nube lo contrasta con el
+    /// que tiene registrado para el equipo, y no canjea si no es el mismo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tenant_actual: Option<&'a str>,
+}
+
+/// Los bytes del cuerpo de `/v1/license/activate`: lo que se firma y lo que se manda (AUD-01).
+/// `negocio_actual` es el tenant de la licencia que este equipo tiene guardada, si tiene alguna.
+fn cuerpo_de_activar(
+    solicitud: &SolicitudActivacion,
+    device_id: &str,
+    device_pub_key: &str,
+    device_change_code: Option<&str>,
+    negocio_actual: Option<&str>,
+) -> AppResult<Vec<u8>> {
+    serde_json::to_vec(&ActivateReq {
+        activation_key: &solicitud.clave,
+        device_id,
+        device_pub_key,
+        device_change_code,
+        tenant_info: TenantInfo {
+            display_name: &solicitud.business_name,
+            legal_name: solicitud.legal_name.as_deref(),
+            phone: solicitud.phone.as_deref(),
+            country: solicitud.country.as_deref(),
+        },
+        solo_sumar: solicitud.solo_sumar,
+        tenant_actual: negocio_actual,
+    })
+    .map_err(ext)
 }
 
 /// Respuesta de `/v1/license/status`: la aserción firmada + token renovado + info no crítica.
@@ -632,35 +720,33 @@ impl LicensingService for LicensingAdapter {
         device_change_code: Option<&str>,
     ) -> AppResult<ResultadoActivacion> {
         let device_id = get_or_create_device_id().map_err(ext)?;
-        let (_sk, pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
+        let (sk, pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
 
-        let req = ActivateReq {
-            activation_key: &solicitud.clave,
-            device_id: &device_id,
-            device_pub_key: &pub_b64,
+        // AUD-01: el negocio que este equipo tiene ahora, si tiene licencia guardada. Va en el cuerpo
+        // firmado —la nube rechaza el canje si no es el que tiene registrado para este equipo— y se
+        // compara abajo con el que conteste.
+        let negocio_actual = load_state(&self.app_data_dir)
+            .map(|st| st.tenant_id.trim().to_string())
+            .filter(|t| !t.is_empty());
+
+        // Lo que se pide tiene que poder pedirse, antes de que la clave salga del equipo.
+        dom::comprobar_solicitud(solicitud.solo_sumar, negocio_actual.as_deref())
+            .map_err(AppError::conflict)?;
+
+        // AUD-01: el cuerpo se serializa UNA vez. Es lo que se firma y lo que se manda; si reqwest
+        // lo volviera a serializar, cualquier diferencia de bytes invalidaría la firma.
+        let cuerpo = cuerpo_de_activar(
+            solicitud,
+            &device_id,
+            &pub_b64,
             device_change_code,
-            tenant_info: TenantInfo {
-                display_name: &solicitud.business_name,
-                legal_name: solicitud.legal_name.as_deref(),
-                phone: solicitud.phone.as_deref(),
-                country: solicitud.country.as_deref(),
-            },
-            solo_sumar: solicitud.solo_sumar,
-        };
+            negocio_actual.as_deref(),
+        )?;
 
-        // Sin firma, pero su respuesta es la primera hora de la nube que ve un equipo recién
-        // estrenado: el primer `/status` ya sale con ella (PROD-04).
-        let resp = reloj::enviar(
-            http_client()?
-                .post(api_url("/v1/license/activate"))
-                .header(CONTENT_TYPE, "application/json")
-                .json(&req),
-        )
-        .await
-        .map_err(|e| ext(format!("No se pudo conectar con el servidor de licencias: {e}")))?;
-
-        let http = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
+        // Firmado con la clave del equipo: la nube no activa nada sin esa prueba. Un equipo recién
+        // estrenado no ha visto todavía la hora de la nube, así que si su reloj va mal el primer
+        // intento se rechaza por la hora; ese rechazo ya la trae, y el segundo se firma con ella.
+        let (http, text) = activar_firmando(&sk, &cuerpo, enviar_activacion).await?;
 
         if !(200..300).contains(&http) {
             if let Some(e) = ApiErr::parse(&text) {
@@ -708,6 +794,21 @@ impl LicensingService for LicensingAdapter {
                     "deviceId mismatch (server devolvió otro deviceId)",
                 ));
             }
+        }
+
+        // AUD-01: lo concedido se contrasta con lo PEDIDO antes de guardar nada. Quien pidió sólo
+        // sumar espera una suma, y una suma no cambia de negocio: si la nube ha estrenado un negocio
+        // con esa clave o la ha sumado a otro, no se guarda ni su token ni su DEK, y la Main sigue
+        // siendo la de su negocio. La regla es de `tpv_domain::licensing`; va aquí porque es aquí
+        // donde hoy se guardan las credenciales.
+        if let Err(motivo) = dom::comprobar_concesion(
+            solicitud.solo_sumar,
+            negocio_actual.as_deref(),
+            &ok.tenant_id,
+            ok.tiempo_sumado,
+        ) {
+            tracing::warn!("[licencia] la nube ha concedido otra cosa que la pedida: no se guarda");
+            return Err(AppError::conflict(motivo));
         }
 
         // El token es una credencial: va directo al keyring, nunca a `license_state.json`.
@@ -1404,6 +1505,228 @@ mod tests_respuesta_de_activar {
     fn sin_el_campo_no_es_un_traslado() {
         let ok: ActivateOk = serde_json::from_str(&format!("{RESPUESTA}}}")).unwrap();
         assert!(!ok.cambio_de_equipo);
+    }
+}
+
+#[cfg(test)]
+mod tests_peticion_de_activar {
+    //! AUD-01: qué se manda al activar y cuándo se repite. Sin red y sin almacén de claves: la clave
+    //! sale de una semilla fija, el cuerpo es una función pura y la nube es de mentira.
+
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::future::Future;
+    use std::task::{Context, Poll, Waker};
+
+    /// La nube de estos tests contesta en el acto, así que basta con sondear el futuro una vez: no
+    /// hace falta un runtime.
+    fn esperar<F: Future>(futuro: F) -> F::Output {
+        let mut futuro = std::pin::pin!(futuro);
+        match futuro.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(valor) => valor,
+            Poll::Pending => panic!("la nube de prueba no se queda esperando"),
+        }
+    }
+
+    /// Un intento tal como llegó a la nube.
+    #[derive(Debug, Clone, PartialEq)]
+    struct Recibido {
+        ts: i64,
+        firma: String,
+        cuerpo: Vec<u8>,
+    }
+
+    /// Una nube que guarda cada intento que recibe y contesta lo que se le diga, por orden. Si se
+    /// le da una hora, sus rechazos por el reloj la traen en la cabecera `Date`, y la anota como lo
+    /// hace `reloj::enviar` con una respuesta de verdad.
+    struct Nube {
+        respuestas: RefCell<VecDeque<AppResult<(u16, String)>>>,
+        recibidos: RefCell<Vec<Recibido>>,
+        hora: Option<&'static str>,
+    }
+
+    impl Nube {
+        fn que_contesta(respuestas: Vec<AppResult<(u16, String)>>) -> Self {
+            Nube {
+                respuestas: RefCell::new(respuestas.into()),
+                recibidos: RefCell::new(Vec::new()),
+                hora: None,
+            }
+        }
+
+        fn con_hora(mut self, fecha_http: &'static str) -> Self {
+            self.hora = Some(fecha_http);
+            self
+        }
+
+        fn recibir(
+            &self,
+            intento: ActivacionFirmada<'_>,
+        ) -> std::future::Ready<AppResult<(u16, String)>> {
+            self.recibidos.borrow_mut().push(Recibido {
+                ts: intento.ts,
+                firma: intento.firma,
+                cuerpo: intento.cuerpo.to_vec(),
+            });
+            let respuesta = self
+                .respuestas
+                .borrow_mut()
+                .pop_front()
+                .expect("más intentos que respuestas");
+
+            if let (Some(fecha), Ok((http, texto))) = (self.hora, &respuesta) {
+                if reloj::es_rechazo_por_reloj(*http, texto) {
+                    let mut cabeceras = HeaderMap::new();
+                    cabeceras.insert(reqwest::header::DATE, HeaderValue::from_static(fecha));
+                    let ahora = reloj::reloj_del_sistema_ms();
+                    reloj::anotar_respuesta(&cabeceras, ahora, ahora);
+                }
+            }
+            std::future::ready(respuesta)
+        }
+
+        fn activar(&self, cuerpo: &[u8]) -> AppResult<(u16, String)> {
+            esperar(activar_firmando(&clave(), cuerpo, |intento| self.recibir(intento)))
+        }
+
+        fn intentos(&self) -> usize {
+            self.recibidos.borrow().len()
+        }
+    }
+
+    fn clave() -> SigningKey {
+        SigningKey::from_bytes(&[7u8; 32])
+    }
+
+    const CUERPO: &[u8] = br#"{"activationKey":"TPV-1","deviceId":"d1","devicePubKey":"k"}"#;
+
+    fn rechazo(http: u16, error: &str) -> AppResult<(u16, String)> {
+        Ok((http, format!(r#"{{"ok":false,"error":"{error}"}}"#)))
+    }
+
+    fn activada() -> AppResult<(u16, String)> {
+        Ok((200, r#"{"ok":true}"#.to_string()))
+    }
+
+    /// El equipo recién estrenado con el reloj mal. El primer intento va firmado con su hora; el
+    /// rechazo trae la de la nube, y el segundo es la MISMA petición firmada de nuevo con ella. Si
+    /// reutilizara la hora o la firma del primero, la nube lo volvería a rechazar.
+    #[test]
+    fn un_rechazo_por_la_hora_se_repite_firmando_con_la_hora_de_la_nube() {
+        // La cabecera `Date` tal como la manda Cloudflare (la misma de los tests de `reloj`).
+        const FECHA: &str = "Fri, 25 Sep 2026 19:19:26 GMT";
+        const HORA_DE_LA_NUBE_MS: i64 = 1_790_363_966_000 + 500;
+        const MARGEN_DE_LA_NUBE_MS: i64 = 2 * 60 * 1000;
+
+        let nube = Nube::que_contesta(vec![rechazo(401, "device_ts_out_of_range"), activada()])
+            .con_hora(FECHA);
+
+        let antes = reloj::reloj_del_sistema_ms();
+        assert_eq!(nube.activar(CUERPO).unwrap().0, 200);
+        let tardado = reloj::reloj_del_sistema_ms() - antes;
+
+        let recibidos = nube.recibidos.borrow();
+        assert_eq!(recibidos.len(), 2);
+        let (primero, segundo) = (&recibidos[0], &recibidos[1]);
+
+        // El primero salió con una hora que la nube no acepta; el segundo, con la que trajo el
+        // rechazo (el centro del segundo de `Date`, más lo que haya tardado este test).
+        assert!((primero.ts - HORA_DE_LA_NUBE_MS).abs() > MARGEN_DE_LA_NUBE_MS);
+        assert!(
+            (HORA_DE_LA_NUBE_MS..=HORA_DE_LA_NUBE_MS + tardado + 1).contains(&segundo.ts),
+            "el segundo intento lleva {} y la nube dijo {HORA_DE_LA_NUBE_MS}",
+            segundo.ts
+        );
+        assert_ne!(primero.ts, segundo.ts);
+
+        // Otra firma, no la de antes: cada una es la de su hora, sobre el mismo cuerpo.
+        assert_ne!(primero.firma, segundo.firma);
+        for intento in [primero, segundo] {
+            assert_eq!(intento.cuerpo, CUERPO);
+            assert_eq!(
+                intento.firma,
+                device::firmar_activacion(&clave(), intento.ts, CUERPO).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn si_la_hora_sigue_sin_valer_no_se_insiste() {
+        let nube = Nube::que_contesta(vec![
+            rechazo(401, "device_ts_out_of_range"),
+            rechazo(401, "device_ts_out_of_range"),
+            activada(),
+        ]);
+        let (http, texto) = nube.activar(CUERPO).unwrap();
+        assert_eq!(http, 401);
+        assert!(texto.contains("device_ts_out_of_range"));
+        assert_eq!(nube.intentos(), 2, "una repetición, no un bucle");
+    }
+
+    /// Repetir se reserva a la hora: una firma que no vale, el código de traslado que falta o uno
+    /// incorrecto (que cuenta un intento en la nube) no se mandan dos veces.
+    #[test]
+    fn lo_que_no_es_la_hora_no_se_repite() {
+        for respuesta in [
+            activada(),
+            rechazo(401, "bad_device_signature"),
+            rechazo(401, "missing_device_proof"),
+            rechazo(401, "invalid_code"),
+            rechazo(409, "device_change_required"),
+            rechazo(403, "device_ts_out_of_range"),
+        ] {
+            let esperado = respuesta.as_ref().unwrap().clone();
+            let nube = Nube::que_contesta(vec![respuesta, activada()]);
+            assert_eq!(nube.activar(CUERPO).unwrap(), esperado);
+            assert_eq!(nube.intentos(), 1, "{esperado:?}");
+        }
+    }
+
+    #[test]
+    fn un_fallo_de_red_no_se_repite() {
+        let nube = Nube::que_contesta(vec![Err(AppError::external("sin red")), activada()]);
+        assert!(nube.activar(CUERPO).is_err());
+        assert_eq!(nube.intentos(), 1);
+    }
+
+    /// El cuerpo que sale de aquí es, byte a byte, el del vector que firma el test de `device.rs` y
+    /// verifica el worker: el orden de los campos y lo que se omite son parte de lo firmado.
+    #[test]
+    fn el_cuerpo_de_activar_es_el_del_vector_compartido() {
+        let vector: serde_json::Value =
+            serde_json::from_str(include_str!("firma_activacion_casos.json")).unwrap();
+        let clave_publica = vector["clavePublicaB64"].as_str().unwrap();
+        let device_id = "3f2b8c1e-5d47-4a9b-8e6f-0c1d2e3f4a5b";
+        let negocio = "0b6f3c52-7f0a-4b1e-9c3d-5a2e8f1d4c7b";
+
+        let alta = SolicitudActivacion::validar(
+            "TPV-AAAAA-BBBBB-CCCCC-DDDDD".into(),
+            "Bar Ñandú".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let canje = SolicitudActivacion::para_sumar("TPV-EEEEE-FFFFF-GGGGG-HHHHH".into()).unwrap();
+
+        let cuerpos = [
+            // Un equipo sin licencia guardada no tiene negocio que decir.
+            cuerpo_de_activar(&alta, device_id, clave_publica, None, None).unwrap(),
+            cuerpo_de_activar(&alta, device_id, clave_publica, Some("123456"), None).unwrap(),
+            // El canje desde Configuración lleva el negocio del equipo.
+            cuerpo_de_activar(&canje, device_id, clave_publica, None, Some(negocio)).unwrap(),
+        ];
+        let casos = vector["casos"].as_array().unwrap();
+        assert_eq!(casos.len(), cuerpos.len());
+        for (caso, cuerpo) in casos.iter().zip(cuerpos) {
+            assert_eq!(
+                String::from_utf8(cuerpo).unwrap(),
+                caso["cuerpo"].as_str().unwrap(),
+                "{}",
+                caso["nombre"]
+            );
+        }
     }
 }
 

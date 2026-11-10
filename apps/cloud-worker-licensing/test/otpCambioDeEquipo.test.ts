@@ -13,6 +13,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { activacionFirmada, clavePublica } from "./helpers/activar";
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
@@ -62,8 +63,9 @@ const ENV = {
 	TURSO_ORG_SLUG: "no-se-usa",
 	EMAIL_FROM_ADDRESS: "no-responder@ejemplo.test",
 };
-const PUB_A = btoa(String.fromCharCode(...new Uint8Array(32).fill(1)));
-const PUB_B = btoa(String.fromCharCode(...new Uint8Array(32).fill(2)));
+// AUD-01: claves ed25519 de verdad, porque activar exige la firma del equipo.
+const PUB_A = await clavePublica(1);
+const PUB_B = await clavePublica(2);
 const CONTEXTO = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
 
 /** Una licencia ya activada en `equipo-a`, que es lo que hace que otro equipo necesite el código. */
@@ -93,17 +95,13 @@ async function conLicenciaActivada<T>(
 async function activar(clave: string, deviceId: string, devicePubKey: string, deviceChangeCode?: string) {
 	const res = await licenseRoutes.request(
 		"/activate",
-		{
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				activationKey: clave,
-				deviceId,
-				devicePubKey,
-				deviceChangeCode,
-				tenantInfo: { displayName: "Bar de Pruebas" },
-			}),
-		},
+		await activacionFirmada({
+			activationKey: clave,
+			deviceId,
+			devicePubKey,
+			deviceChangeCode,
+			tenantInfo: { displayName: "Bar de Pruebas" },
+		}),
 		ENV,
 		CONTEXTO as any,
 	);

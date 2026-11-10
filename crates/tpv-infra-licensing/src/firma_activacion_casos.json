@@ -1,0 +1,28 @@
+{
+	"_leeme": "AUD-01. La firma con la que un equipo activa una licencia (POST /v1/license/activate), con una clave fija. La leen el cliente (crates/tpv-infra-licensing/src/device.rs, test `la_firma_de_activar_es_la_del_vector_compartido`, y lib.rs, `el_cuerpo_de_activar_es_el_del_vector_compartido`) y el worker (apps/cloud-worker-licensing/test/activarConFirma.test.ts): si uno cambia el mensaje que firma o que verifica, el otro falla. 'semillaB64' son los 32 bytes de la clave privada; 'cuerpo' son los bytes exactos que se mandan (UTF-8); 'mensaje' es lo que se firma y 'firmaB64' lo que va en X-Device-Sig, con 'tsMs' en X-Device-Ts. Ed25519 es determinista: la misma clave y el mismo mensaje dan siempre la misma firma.",
+	"semillaB64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+	"clavePublicaB64": "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=",
+	"casos": [
+		{
+			"nombre": "primera activación, con un nombre de negocio que no es ASCII",
+			"tsMs": 1790000000000,
+			"cuerpo": "{\"activationKey\":\"TPV-AAAAA-BBBBB-CCCCC-DDDDD\",\"deviceId\":\"3f2b8c1e-5d47-4a9b-8e6f-0c1d2e3f4a5b\",\"devicePubKey\":\"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=\",\"tenantInfo\":{\"displayName\":\"Bar Ñandú\"}}",
+			"mensaje": "DEVICE_PROOF\n1790000000000\nPOST\n/v1/license/activate\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n1e1bc38a88baa0d979ad41931559707123416d926e28f2b046f98bdd64771e03",
+			"firmaB64": "hAc/cht4cvA2PAM2oI3Mhc2QhXQnDgf0r1Er/1qCPoiZ+0DmHvrxyPJz4oxSWdbZ+6uecfGWXsAIz9XzgwBjDw=="
+		},
+		{
+			"nombre": "cambio de equipo, con el código del correo",
+			"tsMs": 1790000000001,
+			"cuerpo": "{\"activationKey\":\"TPV-AAAAA-BBBBB-CCCCC-DDDDD\",\"deviceId\":\"3f2b8c1e-5d47-4a9b-8e6f-0c1d2e3f4a5b\",\"devicePubKey\":\"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=\",\"deviceChangeCode\":\"123456\",\"tenantInfo\":{\"displayName\":\"Bar Ñandú\"}}",
+			"mensaje": "DEVICE_PROOF\n1790000000001\nPOST\n/v1/license/activate\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n931c6b4ddb10a37444f1fe5409e2f4274d0014fec9a94f57b1c59f9a9c3541fb",
+			"firmaB64": "GyHSLgAUoq04Zzkq9fRyISu6s3fVYmlrm/vJKH3560lYvl9N/lTbLZineWgaNAHhPClIbgmk8YbHNoYzziNGDQ=="
+		},
+		{
+			"nombre": "canje desde Configuración (soloSumar), con el negocio que el equipo ya tiene",
+			"tsMs": 1790000000002,
+			"cuerpo": "{\"activationKey\":\"TPV-EEEEE-FFFFF-GGGGG-HHHHH\",\"deviceId\":\"3f2b8c1e-5d47-4a9b-8e6f-0c1d2e3f4a5b\",\"devicePubKey\":\"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=\",\"tenantInfo\":{\"displayName\":\"\"},\"soloSumar\":true,\"tenantActual\":\"0b6f3c52-7f0a-4b1e-9c3d-5a2e8f1d4c7b\"}",
+			"mensaje": "DEVICE_PROOF\n1790000000002\nPOST\n/v1/license/activate\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n68358b316072659feb6941ea14e3c69b81f9521eac34a6ae1533ca7ccfafabdf",
+			"firmaB64": "ZDtrklTP9W6yGDu7ZS4tz0zmkv5f5f/2tsaSn/4ga48aC638EI6jJwS4sYjxVtIooW2MLHYnfJJ16zmwmB3RCA=="
+		}
+	]
+}
