@@ -23,10 +23,11 @@ import {
 	canjearLicencia,
 	exigirLaClaveDeEsteEquipo,
 	extendLicense,
-	anotarFalloDeOtp,
-	bumpDeviceOtpAttempts,
-	fallosDeOtpRecientes,
+	devolverFalloDeOtp,
+	devolverIntentoDeOtp,
 	reservarEnvioDeOtp,
+	reservarFalloDeOtp,
+	reservarIntentoDeOtp,
 	consumeDeviceOtp,
 	ensureDevice,
 	ensureTenantExistsMinimal,
@@ -338,21 +339,45 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 			);
 		}
 
-		const otp = await getDeviceOtp(db, lic.license_id, deviceId);
-		if (!otp || otp.consumed_at_ms) {
+		// AUD-04: los dos topes se RESERVAN antes de comparar, cada uno en una sola sentencia que sólo
+		// concede si queda cupo. Leyendo el contador, comparando y anotando después, las peticiones
+		// que llegaban a la vez leían todas antes de que escribiera ninguna y se comparaban todas, y
+		// la que acertaba se llevaba la Main. Quien no reserva sale sin que se compare nada.
+		const reserva = await reservarIntentoDeOtp(db, {
+			licenseId: lic.license_id,
+			newDeviceId: deviceId,
+			ahoraMs: now,
+			maximo: OTP_MAX_ATTEMPTS,
+		});
+		if (!reserva) {
+			// Sólo queda decir por qué. Esta lectura ya no decide nada.
+			const otp = await getDeviceOtp(db, lic.license_id, deviceId);
+			if (otp && !otp.consumed_at_ms) {
+				if (otp.attempts >= OTP_MAX_ATTEMPTS) {
+					return c.json({ ok: false, error: "too_many_attempts" } satisfies ApiError, 429);
+				}
+				if (now > otp.expires_at_ms) {
+					return c.json({ ok: false, error: "code_expired" } satisfies ApiError, 401);
+				}
+			}
 			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
-		}
-		if (otp.attempts >= OTP_MAX_ATTEMPTS) {
-			return c.json({ ok: false, error: "too_many_attempts" } satisfies ApiError, 429);
 		}
 		// RI-68: el tope de verdad es por LICENCIA, no por código: pedir otro código o inventarse otro
 		// `deviceId` daban intentos nuevos sin fin.
-		const fallosHoy = await fallosDeOtpRecientes(db, {
+		const quedanFallos = await reservarFalloDeOtp(db, {
 			licenseId: lic.license_id,
 			ahoraMs: now,
 			ventanaMs: OTP_VENTANA_MS,
+			maximo: OTP_FALLOS_AL_DIA,
 		});
-		if (fallosHoy >= OTP_FALLOS_AL_DIA) {
+		if (!quedanFallos) {
+			// No se va a comparar nada, así que el intento del código se devuelve: el rechazo del día
+			// no puede dejar sin intentos un código que seguirá valiendo cuando el día se libere.
+			await devolverIntentoDeOtp(db, {
+				licenseId: lic.license_id,
+				newDeviceId: deviceId,
+				codeHash: reserva.codeHash,
+			});
 			return c.json(
 				{
 					ok: false,
@@ -363,19 +388,19 @@ licenseRoutes.post("/activate", filtroExterior, cuerpo(activarSchema), async (c)
 				429,
 			);
 		}
-		if (now > otp.expires_at_ms) {
-			return c.json({ ok: false, error: "code_expired" } satisfies ApiError, 401);
-		}
 
 		const presentado = await otpHash(deviceChangeCode);
-		if (!timingSafeEqualHex(presentado, otp.code_hash)) {
-			await bumpDeviceOtpAttempts(db, lic.license_id, deviceId);
-			await anotarFalloDeOtp(db, lic.license_id, now);
+		if (!timingSafeEqualHex(presentado, reserva.codeHash)) {
+			// El intento y el fallo del día ya están anotados: son las dos reservas.
 			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
 		}
 
+		// El código es el bueno, así que su reserva no es un fallo del día. Se devuelve ANTES de
+		// consumirlo: si esta sentencia fallara, el código sigue vivo y basta con reintentar.
+		await devolverFalloDeOtp(db, lic.license_id, now);
+
 		// Consumo atómico: si dos peticiones llegan a la vez con el código bueno, solo una gana.
-		const consumido = await consumeDeviceOtp(db, lic.license_id, deviceId);
+		const consumido = await consumeDeviceOtp(db, lic.license_id, deviceId, reserva.codeHash);
 		if (!consumido) {
 			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
 		}

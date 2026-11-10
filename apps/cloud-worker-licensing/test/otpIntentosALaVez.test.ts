@@ -1,0 +1,531 @@
+// test/otpIntentosALaVez.test.ts
+//
+// AUD-04 · Los topes del código de traslado aguantan los intentos simultáneos.
+//
+// El código de 6 cifras que mueve una licencia a otro equipo tiene dos topes: 5 intentos por código
+// y 10 códigos incorrectos por licencia y día (RI-68, `otpCambioDeEquipo.test.ts`). Los dos se
+// RESERVAN antes de comparar, cada uno en una sentencia que sólo concede si queda cupo. Si se leyera
+// el contador, se comparase y se anotase después, las peticiones que llegan a la vez leerían todas
+// antes de que escribiera ninguna y se compararían todas; la que acertase se llevaría la Main.
+//
+// En producción cada sentencia es una ida y vuelta a Turso, y entre la de una petición y la
+// siguiente caben las de las demás. El doble de los tests (`clienteSobre`) contesta al momento, así
+// que ese orden se reproduce con una barrera: cada petición se queda parada justo después de su
+// primera sentencia sobre la tabla del tope hasta que todas han hecho la suya.
+//
+// El aprovisionamiento en Turso y los correos se sustituyen: salen a internet y no son lo que se
+// prueba. Datos ficticios.
+
+import { describe, expect, it, vi } from "vitest";
+
+import { clienteSobre } from "./helpers/clienteSql";
+import { enElHub } from "./helpers/hub";
+import { prepararPlanoDeControl } from "./helpers/planoDeControl";
+import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
+import {
+	OTP_FALLOS_AL_DIA,
+	OTP_MAX_ATTEMPTS,
+	OTP_VENTANA_MS,
+	otpHash,
+} from "../src/domains/licensing/licensing.helpers";
+import {
+	consumeDeviceOtp,
+	devolverIntentoDeOtp,
+	issueLicense,
+	putDeviceOtp,
+	reservarIntentoDeOtp,
+} from "../src/server/licenseStore";
+
+let dbDePruebas: any = null;
+
+vi.mock("../src/server/db", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/server/db")>();
+	return { ...original, getDb: () => dbDePruebas };
+});
+
+vi.mock("../src/domains/licensing/licensing.helpers", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/domains/licensing/licensing.helpers")>();
+	return { ...original, provisionTenantDatabase: async () => ({ reused: true }) };
+});
+
+vi.mock("../src/domains/licensing/licenseEmails", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/domains/licensing/licenseEmails")>();
+	return {
+		...original,
+		sendDeviceChangeCodeEmail: async () => true,
+		sendDeviceChangedNoticeEmail: async () => true,
+	};
+});
+
+const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+const ENV = {
+	LICENSE_JWT_SECRET: "secreto-de-pruebas",
+	LICENSE_STORE_KEY: STORE_KEY,
+	TURSO_DATABASE_URL: "libsql://no-se-usa",
+	TURSO_AUTH_TOKEN: "no-se-usa",
+	TURSO_PLATFORM_TOKEN: "no-se-usa",
+	TURSO_ORG_SLUG: "no-se-usa",
+	EMAIL_FROM_ADDRESS: "no-responder@ejemplo.test",
+};
+const PUB_A = btoa(String.fromCharCode(...new Uint8Array(32).fill(1)));
+const PUB_B = btoa(String.fromCharCode(...new Uint8Array(32).fill(2)));
+const CONTEXTO = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
+
+/** La primera sentencia de cada tope: la reserva. */
+const TOPE_POR_CODIGO = /license_device_otp/;
+const TOPE_POR_LICENCIA = /license_otp_eventos/;
+
+type Respuesta = { status: number; body: any };
+
+/**
+ * La única llamada a `/v1/license/activate` de este fichero: si la ruta pasa a pedir algo más (una
+ * firma del equipo, por ejemplo), se cambia aquí.
+ */
+async function activar(
+	clave: string,
+	deviceId: string,
+	devicePubKey: string,
+	deviceChangeCode?: string,
+): Promise<Respuesta> {
+	const res = await licenseRoutes.request(
+		"/activate",
+		{
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				activationKey: clave,
+				deviceId,
+				devicePubKey,
+				deviceChangeCode,
+				tenantInfo: { displayName: "Bar de Pruebas" },
+			}),
+		},
+		ENV,
+		CONTEXTO as any,
+	);
+	return { status: res.status, body: (await res.json()) as any };
+}
+
+/** Una licencia ya activada en `equipo-a`, que es lo que hace que otro equipo necesite el código. */
+async function conLicenciaActivada<T>(
+	nombre: string,
+	prueba: (e: { clave: string; licenseId: string; sql: any; real: any }) => Promise<T>,
+) {
+	return enElHub(`otp-a-la-vez-${nombre}`, async (hub: any) => {
+		const sql = hub.state.storage.sql;
+		prepararPlanoDeControl(sql);
+		for (const tabla of [
+			"licenses",
+			"devices",
+			"tenants",
+			"license_device_otp",
+			"license_otp_eventos",
+			"license_device_swaps",
+		]) {
+			sql.exec(`DELETE FROM ${tabla};`);
+		}
+		const real = clienteSobre(sql);
+		dbDePruebas = real;
+		const { license, keyPlain } = await issueLicense(real as any, {
+			claves: STORE_KEY,
+			termMonths: 12,
+			origin: "manual",
+			customerEmail: "bar@ejemplo.test",
+		});
+		expect((await activar(keyPlain, "equipo-a", PUB_A)).status).toBe(200);
+		return prueba({ clave: keyPlain, licenseId: license.license_id, sql, real });
+	});
+}
+
+/** Deja preparado un código conocido para la pareja (licencia, `deviceId`). */
+async function codigoConocido(licenseId: string, deviceId: string, codigo: string, caducaEnMs = 60_000) {
+	await putDeviceOtp(dbDePruebas as any, {
+		licenseId,
+		newDeviceId: deviceId,
+		codeHash: await otpHash(codigo),
+		expiresAtMs: Date.now() + caducaEnMs,
+	});
+}
+
+/**
+ * Retiene las `n` primeras sentencias que casen con `patron` —la primera de cada petición sobre esa
+ * tabla— justo después de ejecutarlas, hasta que han llegado las `n`. Devuelve cómo quitarla.
+ */
+function conBarrera(real: any, patron: RegExp, n: number): () => void {
+	let llegadas = 0;
+	let soltar!: () => void;
+	const barrera = new Promise<void>((r) => (soltar = r));
+	dbDePruebas = {
+		...real,
+		async execute(entrada: any) {
+			const texto = typeof entrada === "string" ? entrada : entrada.sql;
+			const r = await real.execute(entrada);
+			if (llegadas < n && patron.test(String(texto))) {
+				if (++llegadas === n) soltar();
+				await barrera;
+			}
+			return r;
+		},
+	};
+	return () => {
+		dbDePruebas = real;
+	};
+}
+
+function fallosDelDia(sql: any, licenseId: string): number {
+	return Number(
+		sql
+			.exec(
+				`SELECT COUNT(*) AS n FROM license_otp_eventos WHERE license_id = ? AND tipo = 'fallo';`,
+				licenseId,
+			)
+			.toArray()[0].n,
+	);
+}
+
+/** Deja la licencia con el día agotado: OTP_FALLOS_AL_DIA códigos incorrectos dentro de la ventana. */
+function agotarElDia(sql: any, licenseId: string) {
+	for (let i = 0; i < OTP_FALLOS_AL_DIA; i++) {
+		sql.exec(
+			`INSERT INTO license_otp_eventos (license_id, tipo, at_ms) VALUES (?, 'fallo', ?);`,
+			licenseId,
+			Date.now(),
+		);
+	}
+}
+
+/** Como si hubiera pasado un día: los fallos anotados salen de la ventana. */
+function pasaElDia(sql: any, licenseId: string) {
+	sql.exec(
+		`UPDATE license_otp_eventos SET at_ms = at_ms - ? WHERE license_id = ?;`,
+		OTP_VENTANA_MS + 1000,
+		licenseId,
+	);
+}
+
+function codigoDe(sql: any, licenseId: string, deviceId: string): { attempts: number; consumido: boolean } {
+	const fila = sql
+		.exec(
+			`SELECT attempts, consumed_at_ms FROM license_device_otp WHERE license_id = ? AND new_device_id = ?;`,
+			licenseId,
+			deviceId,
+		)
+		.toArray()[0];
+	return { attempts: Number(fila.attempts), consumido: fila.consumed_at_ms != null };
+}
+
+function mainDe(sql: any, licenseId: string): string {
+	return String(
+		sql.exec(`SELECT main_device_id FROM licenses WHERE license_id = ?;`, licenseId).toArray()[0]
+			.main_device_id,
+	);
+}
+
+function repartir(res: Respuesta[]) {
+	return {
+		incorrectos: res.filter((r) => r.status === 401 && r.body.error === "invalid_code"),
+		trasladados: res.filter((r) => r.status === 200 && r.body.cambioDeEquipo === true),
+		frenados: res.filter((r) => r.status === 429 && r.body.error === "too_many_attempts"),
+	};
+}
+
+describe("AUD-04 · el tope por código con intentos simultáneos", () => {
+	it("de 20 códigos incorrectos a la vez sólo se comparan OTP_MAX_ATTEMPTS; después ni el bueno entra", async () => {
+		await conLicenciaActivada("codigo-malos", async ({ clave, licenseId, sql, real }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222");
+
+			const N = 20;
+			const quitar = conBarrera(real, TOPE_POR_CODIGO, N);
+			const res = await Promise.all(
+				Array.from({ length: N }, (_, i) => activar(clave, "equipo-b", PUB_B, String(100000 + i))),
+			);
+			quitar();
+
+			const { incorrectos, trasladados, frenados } = repartir(res);
+			expect(incorrectos).toHaveLength(OTP_MAX_ATTEMPTS);
+			expect(frenados).toHaveLength(N - OTP_MAX_ATTEMPTS);
+			expect(trasladados).toHaveLength(0);
+			expect(codigoDe(sql, licenseId, "equipo-b")).toEqual({ attempts: OTP_MAX_ATTEMPTS, consumido: false });
+			expect(fallosDelDia(sql, licenseId)).toBe(OTP_MAX_ATTEMPTS);
+
+			// El código se ha quedado sin intentos: el bueno ya no entra y la Main no se mueve.
+			const tarde = await activar(clave, "equipo-b", PUB_B, "222222");
+			expect(tarde.status).toBe(429);
+			expect(tarde.body.error).toBe("too_many_attempts");
+			expect(codigoDe(sql, licenseId, "equipo-b").consumido).toBe(false);
+			expect(mainDe(sql, licenseId)).toBe("equipo-a");
+		});
+	});
+
+	it("con el bueno entre 20 a la vez, la Main sólo se traslada si su intento fue de los concedidos", async () => {
+		await conLicenciaActivada("codigo-mezcla", async ({ clave, licenseId, sql, real }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222");
+
+			const N = 20;
+			const quitar = conBarrera(real, TOPE_POR_CODIGO, N);
+			const codigos = [...Array.from({ length: N - 1 }, (_, i) => String(100000 + i)), "222222"];
+			const res = await Promise.all(codigos.map((cod) => activar(clave, "equipo-b", PUB_B, cod)));
+			quitar();
+
+			const { incorrectos, trasladados, frenados } = repartir(res);
+			// Se comparan OTP_MAX_ATTEMPTS, esté o no el bueno entre ellos. El resto, 429.
+			expect(incorrectos.length + trasladados.length).toBe(OTP_MAX_ATTEMPTS);
+			expect(frenados).toHaveLength(N - OTP_MAX_ATTEMPTS);
+			expect(trasladados.length).toBeLessThanOrEqual(1);
+			expect(codigoDe(sql, licenseId, "equipo-b").attempts).toBe(OTP_MAX_ATTEMPTS);
+			// Sólo cuentan como fallo del día los que se compararon y no valían.
+			expect(fallosDelDia(sql, licenseId)).toBe(incorrectos.length);
+			expect(mainDe(sql, licenseId)).toBe(trasladados.length === 1 ? "equipo-b" : "equipo-a");
+			expect(codigoDe(sql, licenseId, "equipo-b").consumido).toBe(trasladados.length === 1);
+		});
+	});
+
+	it("si todos caben en el tope, el bueno traslada y su intento no cuenta como fallo del día", async () => {
+		await conLicenciaActivada("codigo-caben", async ({ clave, licenseId, sql, real }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222");
+
+			const N = OTP_MAX_ATTEMPTS;
+			const quitar = conBarrera(real, TOPE_POR_CODIGO, N);
+			const codigos = [...Array.from({ length: N - 1 }, (_, i) => String(100000 + i)), "222222"];
+			const res = await Promise.all(codigos.map((cod) => activar(clave, "equipo-b", PUB_B, cod)));
+			quitar();
+
+			const { incorrectos, trasladados, frenados } = repartir(res);
+			expect(incorrectos).toHaveLength(N - 1);
+			expect(trasladados).toHaveLength(1);
+			expect(frenados).toHaveLength(0);
+			expect(fallosDelDia(sql, licenseId)).toBe(N - 1);
+			expect(mainDe(sql, licenseId)).toBe("equipo-b");
+		});
+	});
+});
+
+describe("AUD-04 · el tope por licencia con intentos simultáneos", () => {
+	it("de 15 códigos incorrectos a la vez, cada uno de un equipo distinto, sólo se comparan OTP_FALLOS_AL_DIA", async () => {
+		await conLicenciaActivada("licencia", async ({ clave, licenseId, sql, real }) => {
+			const N = OTP_FALLOS_AL_DIA + 5;
+			for (let i = 0; i < N; i++) {
+				await codigoConocido(licenseId, `inventado-${i}`, "111111");
+			}
+
+			const quitar = conBarrera(real, TOPE_POR_LICENCIA, N);
+			const res = await Promise.all(
+				Array.from({ length: N }, (_, i) => activar(clave, `inventado-${i}`, PUB_B, "999999")),
+			);
+			quitar();
+
+			const { incorrectos, frenados } = repartir(res);
+			expect(incorrectos).toHaveLength(OTP_FALLOS_AL_DIA);
+			expect(frenados).toHaveLength(N - OTP_FALLOS_AL_DIA);
+			for (const r of frenados) expect(r.body.message).toContain("mañana");
+			expect(fallosDelDia(sql, licenseId)).toBe(OTP_FALLOS_AL_DIA);
+
+			// Y con el día agotado ni el código bueno entra.
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			const tarde = await activar(clave, "equipo-b", PUB_B, "222222");
+			expect(tarde.status).toBe(429);
+			expect(mainDe(sql, licenseId)).toBe("equipo-a");
+		});
+	});
+});
+
+describe("AUD-04 · el rechazo del día no gasta intentos del código", () => {
+	it("con el día agotado el código conserva sus intentos, y sigue valiendo cuando el día se libera", async () => {
+		await conLicenciaActivada("dia-serie", async ({ clave, licenseId, sql }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			agotarElDia(sql, licenseId);
+
+			// Más veces de las que el código tiene intentos, y con el bueno: no se compara ninguna.
+			for (let i = 0; i < OTP_MAX_ATTEMPTS + 1; i++) {
+				const r = await activar(clave, "equipo-b", PUB_B, "222222");
+				expect(r.status).toBe(429);
+				expect(r.body.message).toContain("mañana");
+			}
+			expect(codigoDe(sql, licenseId, "equipo-b")).toEqual({ attempts: 0, consumido: false });
+			expect(fallosDelDia(sql, licenseId)).toBe(OTP_FALLOS_AL_DIA);
+			expect(mainDe(sql, licenseId)).toBe("equipo-a");
+
+			pasaElDia(sql, licenseId);
+			const r = await activar(clave, "equipo-b", PUB_B, "222222");
+			expect(r.status).toBe(200);
+			expect(r.body.cambioDeEquipo).toBe(true);
+			expect(mainDe(sql, licenseId)).toBe("equipo-b");
+		});
+	});
+
+	it("y lo mismo si los rechazos llegan a la vez", async () => {
+		await conLicenciaActivada("dia-a-la-vez", async ({ clave, licenseId, sql, real }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			agotarElDia(sql, licenseId);
+
+			// Tantas como intentos tiene el código: todas reservan el suyo antes de que el día diga que no.
+			const N = OTP_MAX_ATTEMPTS;
+			const quitar = conBarrera(real, TOPE_POR_LICENCIA, N);
+			const res = await Promise.all(
+				Array.from({ length: N }, () => activar(clave, "equipo-b", PUB_B, "999999")),
+			);
+			quitar();
+
+			for (const r of res) {
+				expect(r.status).toBe(429);
+				expect(r.body.message).toContain("mañana");
+			}
+			expect(codigoDe(sql, licenseId, "equipo-b")).toEqual({ attempts: 0, consumido: false });
+			expect(fallosDelDia(sql, licenseId)).toBe(OTP_FALLOS_AL_DIA);
+
+			pasaElDia(sql, licenseId);
+			const r = await activar(clave, "equipo-b", PUB_B, "222222");
+			expect(r.status).toBe(200);
+			expect(mainDe(sql, licenseId)).toBe("equipo-b");
+		});
+	});
+});
+
+describe("AUD-04 · uno detrás de otro, lo de siempre", () => {
+	it("el tope por licencia frena al undécimo, y los fallos anotados son los comparados", async () => {
+		await conLicenciaActivada("serie-licencia", async ({ clave, licenseId, sql }) => {
+			for (let i = 0; i < OTP_FALLOS_AL_DIA; i++) {
+				await codigoConocido(licenseId, `inventado-${i}`, "111111");
+				const r = await activar(clave, `inventado-${i}`, PUB_B, "999999");
+				expect(r.body.error).toBe("invalid_code");
+			}
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			const r = await activar(clave, "equipo-b", PUB_B, "222222");
+			expect(r.status).toBe(429);
+			expect(r.body.message).toContain("mañana");
+			expect(fallosDelDia(sql, licenseId)).toBe(OTP_FALLOS_AL_DIA);
+		});
+	});
+
+	it("el tope por código frena al sexto intento y el código bueno ya no se consume", async () => {
+		await conLicenciaActivada("serie-codigo", async ({ clave, licenseId, sql }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			for (let i = 0; i < OTP_MAX_ATTEMPTS; i++) {
+				expect((await activar(clave, "equipo-b", PUB_B, "999999")).body.error).toBe("invalid_code");
+			}
+			const r = await activar(clave, "equipo-b", PUB_B, "222222");
+			expect(r.status).toBe(429);
+			expect(r.body.error).toBe("too_many_attempts");
+			expect(codigoDe(sql, licenseId, "equipo-b")).toEqual({ attempts: OTP_MAX_ATTEMPTS, consumido: false });
+			expect(mainDe(sql, licenseId)).toBe("equipo-a");
+		});
+	});
+
+	it("quien se equivoca una vez y acierta traslada, y sólo el error cuenta como fallo del día", async () => {
+		await conLicenciaActivada("serie-dueno", async ({ clave, licenseId, sql }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			expect((await activar(clave, "equipo-b", PUB_B, "999999")).body.error).toBe("invalid_code");
+			const r = await activar(clave, "equipo-b", PUB_B, "222222");
+			expect(r.status).toBe(200);
+			expect(r.body.cambioDeEquipo).toBe(true);
+			expect(fallosDelDia(sql, licenseId)).toBe(1);
+			expect(mainDe(sql, licenseId)).toBe("equipo-b");
+		});
+	});
+
+	it("un código caducado contesta que ha caducado, sin gastar intento ni fallo del día", async () => {
+		await conLicenciaActivada("serie-caducado", async ({ clave, licenseId, sql }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222", -1000);
+			for (let i = 0; i < OTP_MAX_ATTEMPTS + 1; i++) {
+				const r = await activar(clave, "equipo-b", PUB_B, "222222");
+				expect(r.status).toBe(401);
+				expect(r.body.error).toBe("code_expired");
+			}
+			expect(codigoDe(sql, licenseId, "equipo-b")).toEqual({ attempts: 0, consumido: false });
+			expect(fallosDelDia(sql, licenseId)).toBe(0);
+		});
+	});
+
+	it("sin código pedido para ese equipo, el código no vale y no se anota nada", async () => {
+		await conLicenciaActivada("serie-sin-codigo", async ({ clave, licenseId, sql }) => {
+			const r = await activar(clave, "equipo-b", PUB_B, "222222");
+			expect(r.status).toBe(401);
+			expect(r.body.error).toBe("invalid_code");
+			expect(fallosDelDia(sql, licenseId)).toBe(0);
+		});
+	});
+});
+
+describe("AUD-04 · las reservas del almacén", () => {
+	it("de 8 reservas a la vez sobre un código se conceden OTP_MAX_ATTEMPTS", async () => {
+		await conLicenciaActivada("almacen-reservas", async ({ licenseId, real }) => {
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			const reservas = await Promise.all(
+				Array.from({ length: OTP_MAX_ATTEMPTS + 3 }, () =>
+					reservarIntentoDeOtp(real, {
+						licenseId,
+						newDeviceId: "equipo-b",
+						ahoraMs: Date.now(),
+						maximo: OTP_MAX_ATTEMPTS,
+					}),
+				),
+			);
+			expect(reservas.filter((r) => r !== null)).toHaveLength(OTP_MAX_ATTEMPTS);
+		});
+	});
+
+	it("devolver un intento sólo toca el código de esa huella, y no baja de cero", async () => {
+		await conLicenciaActivada("almacen-devolver", async ({ licenseId, sql, real }) => {
+			const reservar = () =>
+				reservarIntentoDeOtp(real, {
+					licenseId,
+					newDeviceId: "equipo-b",
+					ahoraMs: Date.now(),
+					maximo: OTP_MAX_ATTEMPTS,
+				});
+			const devolver = (codeHash: string) =>
+				devolverIntentoDeOtp(real, { licenseId, newDeviceId: "equipo-b", codeHash });
+
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			const vieja = await reservar();
+			await reservar();
+			await devolver(vieja!.codeHash);
+			expect(codigoDe(sql, licenseId, "equipo-b").attempts).toBe(1);
+
+			// Se pide otro código: una devolución con la huella del anterior no toca el nuevo.
+			await codigoConocido(licenseId, "equipo-b", "333333");
+			const nueva = await reservar();
+			await devolver(vieja!.codeHash);
+			expect(codigoDe(sql, licenseId, "equipo-b").attempts).toBe(1);
+			await devolver(nueva!.codeHash);
+			await devolver(nueva!.codeHash);
+			expect(codigoDe(sql, licenseId, "equipo-b").attempts).toBe(0);
+		});
+	});
+
+	it("consumir sólo consume el código de la huella que se le pasa, y sólo si no ha caducado", async () => {
+		await conLicenciaActivada("almacen-consumo", async ({ licenseId, sql, real }) => {
+			const reservar = () =>
+				reservarIntentoDeOtp(real, {
+					licenseId,
+					newDeviceId: "equipo-b",
+					ahoraMs: Date.now(),
+					maximo: OTP_MAX_ATTEMPTS,
+				});
+
+			await codigoConocido(licenseId, "equipo-b", "222222");
+			const reserva = await reservar();
+			expect(reserva?.codeHash).toBe(await otpHash("222222"));
+
+			// Entre la comparación y el consumo se pide otro código para el mismo equipo: con la huella
+			// del anterior no se consume nada, y el nuevo sigue vivo.
+			await codigoConocido(licenseId, "equipo-b", "333333");
+			expect(await consumeDeviceOtp(real, licenseId, "equipo-b", reserva!.codeHash)).toBe(false);
+			expect(codigoDe(sql, licenseId, "equipo-b")).toEqual({ attempts: 0, consumido: false });
+
+			// Un código caducado tampoco se consume, aunque la huella sea la suya.
+			await codigoConocido(licenseId, "equipo-c", "444444", -1000);
+			expect(await consumeDeviceOtp(real, licenseId, "equipo-c", await otpHash("444444"))).toBe(false);
+			expect(codigoDe(sql, licenseId, "equipo-c").consumido).toBe(false);
+
+			// Con la huella del código vivo sí, y una sola vez. `consumeDeviceOtp` no mira si quien
+			// llama reservó un intento: que a ella sólo se llegue con reserva lo fijan los casos de la
+			// ruta («el tope por código frena al sexto intento y el código bueno ya no se consume»).
+			const nueva = await reservar();
+			expect(await consumeDeviceOtp(real, licenseId, "equipo-b", nueva!.codeHash)).toBe(true);
+			expect(await consumeDeviceOtp(real, licenseId, "equipo-b", nueva!.codeHash)).toBe(false);
+			// Y un código consumido no admite más reservas.
+			expect(await reservar()).toBeNull();
+		});
+	});
+});

@@ -157,6 +157,15 @@ Los 5 intentos de cada código no bastan: un `deviceId` inventado abre otra pare
 los reinicia. Delante de las dos rutas hay además un filtro por IP (`LIMITADOR_LICENCIA`, 10 por
 minuto), que deja pasar si el binding falta (`lib/limitador.ts`).
 
+**Cada tope se reserva antes de actuar, en una sola sentencia que sólo concede si queda cupo**
+(AUD-04; `reservarEnvioDeOtp`, `reservarIntentoDeOtp`, `reservarFalloDeOtp`): muchos intentos a la vez
+no comparan más códigos que los del tope, y quien no reserva sale sin que se compare nada, con 429 si
+es el tope lo que se lo impide. Primero el intento del código, que devuelve la huella con la que
+comparar, y después el fallo del día. Si el día no concede el suyo, el intento del código se devuelve:
+un rechazo sin comparación no gasta intentos, y el código sigue valiendo cuando el día se libera. Si
+el código es el bueno, el fallo reservado se devuelve y se consume justo el código que se comparó,
+siempre que no haya caducado. Un código caducado no gasta intento.
+
 El traslado va siempre al correo de la compra, no al de recuperación: si siguiera a éste, quien sepa
 el PIN de un administrador podría cambiarlo y llevarse la licencia.
 

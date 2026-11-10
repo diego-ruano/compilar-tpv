@@ -1007,25 +1007,47 @@ export async function reservarEnvioDeOtp(
 	return Number((r as any)?.rowsAffected ?? 0) > 0;
 }
 
-/** RI-68 · Cuántos códigos incorrectos se han tecleado para esta licencia en la ventana. */
-export async function fallosDeOtpRecientes(
+/**
+ * RI-68 / AUD-04 · Reserva uno de los códigos incorrectos del día de esta licencia (no de la pareja)
+ * ANTES de comparar: `true` si quedaba alguno.
+ *
+ * Contar y anotar van en UNA sentencia, como en `reservarEnvioDeOtp`: contando primero y anotando
+ * después de comparar, las peticiones que llegan a la vez cuentan todas lo mismo y se comparan todas.
+ * La fila reservada ES el fallo; si el código resulta ser el bueno se devuelve con
+ * `devolverFalloDeOtp`.
+ */
+export async function reservarFalloDeOtp(
 	db: Sql,
-	args: { licenseId: string; ahoraMs: number; ventanaMs: number },
-): Promise<number> {
+	args: { licenseId: string; ahoraMs: number; ventanaMs: number; maximo: number },
+): Promise<boolean> {
 	const r = await exec(
 		db,
-		`SELECT COUNT(*) AS n FROM license_otp_eventos WHERE license_id = ? AND tipo = 'fallo' AND at_ms > ?;`,
-		[args.licenseId, args.ahoraMs - args.ventanaMs],
+		`
+    INSERT INTO license_otp_eventos (license_id, tipo, at_ms)
+    SELECT ?1, 'fallo', ?2
+    WHERE (SELECT COUNT(*) FROM license_otp_eventos
+            WHERE license_id = ?1 AND tipo = 'fallo' AND at_ms > ?3) < ?4;
+    `,
+		[args.licenseId, args.ahoraMs, args.ahoraMs - args.ventanaMs, args.maximo],
 	);
-	return Number((r.rows?.[0] as any)?.n ?? 0);
+	return Number((r as any)?.rowsAffected ?? 0) > 0;
 }
 
-/** RI-68 · Anota un código incorrecto contra la licencia (no contra la pareja). */
-export async function anotarFalloDeOtp(db: Sql, licenseId: string, ahoraMs: number): Promise<void> {
-	await exec(db, `INSERT INTO license_otp_eventos (license_id, tipo, at_ms) VALUES (?, 'fallo', ?);`, [
-		licenseId,
-		ahoraMs,
-	]);
+/**
+ * AUD-04 · Devuelve la reserva de `reservarFalloDeOtp`: el código era el bueno y no cuenta como fallo
+ * del día. La tabla no tiene clave, así que se quita UNA fila con la hora de la reserva; si otra
+ * petición reservó en el mismo milisegundo las dos filas son iguales y da lo mismo cuál se vaya.
+ */
+export async function devolverFalloDeOtp(db: Sql, licenseId: string, ahoraMs: number): Promise<void> {
+	await exec(
+		db,
+		`
+    DELETE FROM license_otp_eventos
+    WHERE rowid = (SELECT rowid FROM license_otp_eventos
+                    WHERE license_id = ?1 AND tipo = 'fallo' AND at_ms = ?2 LIMIT 1);
+    `,
+		[licenseId, ahoraMs],
+	);
 }
 
 export async function getDeviceOtp(
@@ -1041,36 +1063,80 @@ export async function getDeviceOtp(
 	return (r.rows?.[0] as unknown as DeviceOtpRow) ?? null;
 }
 
-export async function bumpDeviceOtpAttempts(
+/**
+ * AUD-04 · Reserva uno de los intentos del código ANTES de compararlo, en una sola sentencia:
+ * devuelve la huella con la que comparar, o `null` si no hay nada que comparar (no hay código, está
+ * consumido o caducado, o ya no le quedan intentos). Mirar el contador y sumarlo después de comparar
+ * dejaba pasar a la vez a todas las peticiones que lo leían antes de que ninguna escribiera.
+ *
+ * Un código caducado no gasta intento: no se va a comparar.
+ */
+export async function reservarIntentoDeOtp(
 	db: Sql,
-	licenseId: string,
-	newDeviceId: string,
+	args: { licenseId: string; newDeviceId: string; ahoraMs: number; maximo: number },
+): Promise<{ codeHash: string } | null> {
+	const r = await exec(
+		db,
+		`
+    UPDATE license_device_otp
+    SET attempts = attempts + 1
+    WHERE license_id=? AND new_device_id=? AND consumed_at_ms IS NULL AND attempts < ?
+      AND expires_at_ms >= ?
+    RETURNING code_hash;
+    `,
+		[args.licenseId, args.newDeviceId, args.maximo, args.ahoraMs],
+	);
+	const row = r.rows?.[0] as any;
+	return row ? { codeHash: String(row.code_hash) } : null;
+}
+
+/**
+ * AUD-04 · Devuelve la reserva de `reservarIntentoDeOtp` cuando al final no se compara nada (el tope
+ * del día no concedió la suya): un rechazo sin comparación no gasta intentos del código, que tiene
+ * que seguir valiendo cuando el día se libere. Sólo sobre el código de esa huella: si entre medias
+ * se pidió otro, el nuevo no se toca.
+ */
+export async function devolverIntentoDeOtp(
+	db: Sql,
+	args: { licenseId: string; newDeviceId: string; codeHash: string },
 ): Promise<void> {
 	await exec(
 		db,
-		`UPDATE license_device_otp SET attempts = attempts + 1 WHERE license_id=? AND new_device_id=?;`,
-		[licenseId, newDeviceId],
+		`
+    UPDATE license_device_otp
+    SET attempts = attempts - 1
+    WHERE license_id=? AND new_device_id=? AND code_hash=? AND consumed_at_ms IS NULL AND attempts > 0;
+    `,
+		[args.licenseId, args.newDeviceId, args.codeHash],
 	);
 }
 
 /**
  * Consume el OTP de forma **atómica**: solo consume si sigue sin consumir. Devuelve `false`
  * si otro intento se le adelantó (anti-replay ante peticiones concurrentes).
+ *
+ * AUD-04: consume sólo el código de esa huella (`codeHash`, la que devolvió `reservarIntentoDeOtp` y
+ * con la que se comparó) y sólo si no ha caducado a la hora de consumir. Si entre la comparación y
+ * esto se pidió otro código, el nuevo sigue vivo. No comprueba que quien llama tenga una reserva ni
+ * mira `attempts`: de eso responde la ruta, que sólo llega aquí después de reservar y comparar.
  */
 export async function consumeDeviceOtp(
 	db: Sql,
 	licenseId: string,
 	newDeviceId: string,
+	codeHash: string,
 ): Promise<boolean> {
+	const ahora = Date.now();
 	const r = await exec(
 		db,
 		`
     UPDATE license_device_otp
     SET consumed_at_ms = ?
-    WHERE license_id=? AND new_device_id=? AND consumed_at_ms IS NULL
+    WHERE license_id=? AND new_device_id=? AND consumed_at_ms IS NULL AND code_hash=?
+      AND expires_at_ms >= ?
     RETURNING license_id;
     `,
-		[Date.now(), licenseId, newDeviceId],
+		[ahora, licenseId, newDeviceId, codeHash, ahora],
 	);
 	return (r.rows?.length ?? 0) > 0;
 }
