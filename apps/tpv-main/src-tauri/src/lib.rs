@@ -307,24 +307,26 @@ fn save_config(app_data_dir: &Path, cfg: &DeviceConfig) -> Result<(), String> {
     let tmp = p.with_extension("json.tmp");
     let txt = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
 
-    fs::write(&tmp, &txt).map_err(|e| format!("Error escribiendo config tmp {:?}: {e}", tmp))?;
-    fs::rename(&tmp, &p).map_err(|e| format!("Error renombrando config {:?}: {e}", p))?;
+    // AUD-28: el nombre del fichero y no la ruta de AppData, que lleva el usuario de Windows; el
+    // mensaje sale del equipo con el fallo del comando. El `io::Error` no cita la ruta.
+    fs::write(&tmp, &txt)
+        .map_err(|e| format!("No se pudo guardar la configuración del equipo (device_config.json.tmp): {e}"))?;
+    fs::rename(&tmp, &p)
+        .map_err(|e| format!("No se pudo guardar la configuración del equipo (device_config.json): {e}"))?;
 
     Ok(())
 }
 
 fn ensure_folders(app_data_dir: &Path) -> Result<(), String> {
-    let folders = vec![
-        app_data_dir.to_path_buf(),
-        app_data_dir.join("images"),
-        app_data_dir.join("images").join("categorias"),
-        app_data_dir.join("images").join("productos"),
-        app_data_dir.join("images").join("logo"),
-    ];
+    let folders = ["", "images", "images/categorias", "images/productos", "images/logo"];
 
-    for f in folders {
+    for carpeta in folders {
+        let f = app_data_dir.join(carpeta);
         if !f.exists() {
-            fs::create_dir_all(&f).map_err(|e| format!("Error creando carpeta {:?}: {e}", f))?;
+            // AUD-28: la carpeta dentro de AppData, sin la ruta: un fallo aquí acaba en el pánico
+            // del arranque, que va a Sentry.
+            let nombre = if carpeta.is_empty() { "la carpeta de datos" } else { carpeta };
+            fs::create_dir_all(&f).map_err(|e| format!("No se pudo crear {nombre}: {e}"))?;
         }
     }
 
@@ -1191,8 +1193,9 @@ pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result
         if cola.terminar(&imagen, Some(&rechazo))? {
             apartadas += 1;
             // La capa tracing -> Sentry ya existe: avisar una vez, tras persistir el rechazo.
-            tracing::error!(target: "tpv::imagenes", ruta = %imagen.rel_path, motivo = %rechazo,
-                "image_upload_rejected");
+            // AUD-28: la imagen sin el nombre que alguien le dio (`para_registro`).
+            tracing::error!(target: "tpv::imagenes", ruta = %imagenes::para_registro(&imagen.rel_path),
+                motivo = %rechazo, "image_upload_rejected");
             let _ = app.emit("images:queue_changed", ());
         }
         // Una imagen rechazada no impide subir la siguiente.
@@ -1316,8 +1319,10 @@ async fn images_ensure_local(
     match uc_pairing::download_image(&svc, mode_str, &rel_path).await {
         Ok(Some(bytes)) => {
             let file_path = imagenes::destino(&app_data_dir, &rel_path, true)?;
-            fs::write(&file_path, bytes)
-                .map_err(|e| format!("Error escribiendo {:?}: {e}", file_path))?;
+            // AUD-28: sin la ruta de AppData ni el nombre que alguien le dio a la imagen.
+            fs::write(&file_path, bytes).map_err(|e| {
+                format!("No se pudo guardar la imagen descargada ({}): {e}", imagenes::para_registro(&rel_path))
+            })?;
             Ok(true)
         }
         // Aún no está en R2 (404) o falló la red: no es un error duro, el UI reintentará.
@@ -1325,7 +1330,8 @@ async fn images_ensure_local(
         Err(e) => {
             // WARN y no DEBUG: si esto falla, la imagen no está ni en disco ni en R2 y la UI la
             // reintentará en cada resolución. Merece verse en Axiom, no sólo en la consola de dev.
-            tracing::warn!(target: "tpv::imagenes", ruta = %rel_path, error = ?e, "fallo bajando imagen de R2");
+            tracing::warn!(target: "tpv::imagenes", ruta = %imagenes::para_registro(&rel_path), error = %e,
+                "fallo bajando imagen de R2");
             Ok(false)
         }
     }
@@ -2428,7 +2434,12 @@ pub fn run() {
                 .expect("Error obteniendo AppData");
 
             ensure_folders(&app_data_dir).expect("Error creando carpetas");
-            tracing::warn!("[TPV] setup: app_data_dir={:?}", app_data_dir);
+            // AUD-28: el nombre de la carpeta (el identificador de la app: prod, dev o e2e), no la
+            // ruta, que lleva el usuario de Windows.
+            tracing::warn!(
+                carpeta = %app_data_dir.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+                "[TPV] setup: carpeta de datos"
+            );
 
             let cfg = load_config(&app_data_dir);
             let mode = cfg.mode;

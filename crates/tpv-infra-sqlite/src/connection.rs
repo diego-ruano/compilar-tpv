@@ -202,9 +202,10 @@ pub async fn init_main_db(app_data_dir: &Path, licencia: Option<&str>) -> AppRes
         .ok_or_else(|| AppError::internal("Ruta de BD inválida"))?;
 
     if let Some(apartado) = crate::recovery::resolver_al_abrir(app_data_dir, licencia)? {
+        // AUD-28: el nombre de la carpeta, no la ruta, que lleva el usuario de Windows.
         tracing::warn!(
             target: "tpv::startup",
-            carpeta = %apartado.display(),
+            carpeta = %crate::recovery::nombre_de(&apartado),
             "la base local era de otro negocio: se ha apartado entera y se abre una nueva"
         );
     }
@@ -273,9 +274,10 @@ pub async fn abrir_para_recuperar(app_data_dir: &Path, licencia: Option<&str>) -
         Ok(db) => Ok(db),
         Err(e) => {
             if let Some(apartada) = crate::recovery::archivar_base_ilegible(app_data_dir)? {
+                // AUD-28: el nombre de la copia apartada, no la ruta.
                 tracing::warn!(
                     target: "tpv::recovery",
-                    ruta = ?apartada,
+                    fichero = %crate::recovery::nombre_de(&apartada),
                     error = %e,
                     "base local ilegible apartada para reconstruirla desde la nube"
                 );

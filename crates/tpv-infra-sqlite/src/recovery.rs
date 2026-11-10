@@ -584,6 +584,12 @@ fn destino_libre(carpeta: &Path, nombre: &std::ffi::OsStr) -> PathBuf {
         .expect("siempre hay un nombre libre")
 }
 
+/// AUD-28 — lo que se registra de un fichero o una carpeta de AppData: su nombre. La ruta entera
+/// lleva el usuario de Windows, y lo que se registra sale del equipo (Axiom).
+pub(crate) fn nombre_de(ruta: &Path) -> String {
+    ruta.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
 /// El error de un fichero que no se deja apartar. Sólo el nombre: la ruta entera lleva el usuario
 /// de Windows.
 fn no_se_pudo_apartar(nombre: &str, e: impl std::fmt::Display) -> AppError {
@@ -1213,7 +1219,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
                 continue;
             }
             if let Err(e) = purgar(app_data_dir, &path) {
-                tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un temporal de copia");
+                tracing::warn!(target: "tpv::recovery", fichero = %nombre_de(&path), error = %e, "no se pudo purgar un temporal de copia");
             }
         }
 
@@ -1250,7 +1256,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
                     continue;
                 }
                 if let Err(e) = purgar(app_data_dir, &path) {
-                    tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un resto de restauración");
+                    tracing::warn!(target: "tpv::recovery", fichero = %nombre_de(&path), error = %e, "no se pudo purgar un resto de restauración");
                 }
             }
         }
@@ -1279,7 +1285,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
             continue;
         }
         if let Err(e) = purgar(app_data_dir, &path) {
-            tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un temporal de restauración");
+            tracing::warn!(target: "tpv::recovery", fichero = %nombre_de(&path), error = %e, "no se pudo purgar un temporal de restauración");
         }
     }
 
@@ -1303,7 +1309,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
     migraciones.sort_unstable_by_key(|(sello, _)| std::cmp::Reverse(*sello));
     for (_, path) in migraciones.into_iter().skip(MIGRACIONES_A_CONSERVAR) {
         if let Err(e) = purgar(app_data_dir, &path) {
-            tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar una copia de migración");
+            tracing::warn!(target: "tpv::recovery", fichero = %nombre_de(&path), error = %e, "no se pudo purgar una copia de migración");
         }
     }
 

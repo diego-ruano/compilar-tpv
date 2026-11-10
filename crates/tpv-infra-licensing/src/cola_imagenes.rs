@@ -24,8 +24,12 @@ impl ColaImagenes {
         let _guard = ACCESO.lock().map_err(|_| "No se pudo bloquear la cola de imágenes".to_string())?;
         let ruta = self.carpeta.join("image_uploads.json");
         let mut cola: Vec<ImagenPendiente> = match fs::read(&ruta) {
-            Ok(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|e| format!("La cola de imágenes no se puede leer: {e}"))?,
+            // AUD-28: la clase y la posición, sin el texto de serde, que cita lo que hay en el fichero
+            // (el nombre de una imagen). Este mensaje sale del equipo con el fallo del comando.
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!(
+                "La cola de imágenes no se puede leer ({:?}, línea {}, columna {})",
+                e.classify(), e.line(), e.column()
+            ))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(format!("No se pudo leer la cola de imágenes: {e}")),
         };
@@ -156,6 +160,22 @@ mod tests {
         fs::write(&ruta, b"JSON roto").unwrap();
         assert!(dir.cola().pendientes().is_err()); assert!(dir.cola().encolar("a", "image/jpeg").is_err());
         assert_eq!(fs::read(ruta).unwrap(), b"JSON roto");
+    }
+
+    /// AUD-28: una cola con otro formato no se lee, y el mensaje no repite lo que hay en ella.
+    #[test]
+    fn una_cola_incompatible_no_cita_su_contenido() {
+        const COLA: &[u8] = br#"["images/productos/Tarta de Ana Prueba.jpg"]"#;
+        // El control: el texto de serde sí lleva el nombre del fichero.
+        let de_serde = serde_json::from_slice::<Vec<ImagenPendiente>>(COLA).unwrap_err().to_string();
+        assert!(de_serde.contains("Tarta de Ana Prueba"), "{de_serde}");
+
+        let dir = Directorio::new(); let ruta = dir.0.join("image_uploads.json");
+        fs::write(&ruta, COLA).unwrap();
+        let error = dir.cola().pendientes().unwrap_err();
+        assert!(error.starts_with("La cola de imágenes no se puede leer (Data, línea 1, columna "), "{error}");
+        assert!(!error.contains("Tarta") && !error.contains("Ana Prueba") && !error.contains("images/"), "{error}");
+        assert_eq!(fs::read(ruta).unwrap(), COLA);
     }
 
     #[test]

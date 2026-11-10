@@ -54,8 +54,11 @@ fn escribir_fichero(dir: &Path, foto: &Instantanea) -> Result<(), String> {
     let p = ruta(dir);
     let tmp = p.with_extension("json.tmp");
     let bytes = serde_json::to_vec_pretty(foto).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, bytes).map_err(|e| format!("escribiendo {tmp:?}: {e}"))?;
-    std::fs::rename(&tmp, &p).map_err(|e| format!("renombrando {p:?}: {e}"))
+    // AUD-28: el nombre del fichero y no la ruta de AppData, que lleva el usuario de Windows. El
+    // error sube al motor de jobs, que lo registra (Axiom) y lo guarda en el estado del job. El
+    // `io::Error` no cita la ruta.
+    std::fs::write(&tmp, bytes).map_err(|e| format!("No se pudo escribir {FICHERO}.tmp: {e}"))?;
+    std::fs::rename(&tmp, &p).map_err(|e| format!("No se pudo renombrar {FICHERO}.tmp a {FICHERO}: {e}"))
 }
 
 fn foto(app: &AppHandle) -> Instantanea {
@@ -104,11 +107,12 @@ pub(crate) async fn refrescar(app: &AppHandle) -> Result<(), String> {
     let despues = uc::vigentes(&nueva, ahora_ms());
     for a in &despues {
         if !antes.contains(&a.interruptor) {
+            // AUD-28: sin el motivo, que es texto libre de quien lo apaga; se guarda y se enseña en
+            // pantalla, pero no sale del equipo.
             tracing::warn!(
                 target: "tpv::interruptores",
                 interruptor = ?a.interruptor,
                 hasta_ms = a.hasta_ms,
-                motivo = %a.motivo,
                 "apagado desde la nube"
             );
         }
@@ -152,6 +156,34 @@ mod tests {
         };
         escribir_fichero(&dir, &foto).unwrap();
         assert_eq!(leer_fichero(&dir), foto);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// AUD-28: si no se puede guardar, el error dice qué fichero y qué operación, no la ruta de
+    /// AppData (lleva el usuario de Windows y sale del equipo con el estado del job).
+    #[test]
+    fn un_fallo_al_guardar_no_dice_la_ruta() {
+        let dir = std::env::temp_dir().join(format!(
+            "tpv_interruptores_aud28_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let carpeta = dir.to_string_lossy().to_string();
+        let tmp = ruta(&dir).with_extension("json.tmp");
+
+        // El temporal es una carpeta: escribirlo falla.
+        std::fs::create_dir_all(&tmp).unwrap();
+        let e = escribir_fichero(&dir, &Instantanea::default()).unwrap_err();
+        assert!(e.starts_with("No se pudo escribir interruptores.json.tmp: "), "{e}");
+        assert!(!e.contains(&carpeta) && !e.contains("tpv_interruptores_aud28"), "{e}");
+
+        // El definitivo es una carpeta con algo dentro: renombrar encima falla.
+        std::fs::remove_dir_all(&tmp).unwrap();
+        std::fs::create_dir_all(ruta(&dir).join("dentro")).unwrap();
+        let e = escribir_fichero(&dir, &Instantanea::default()).unwrap_err();
+        assert!(e.starts_with("No se pudo renombrar interruptores.json.tmp a interruptores.json: "), "{e}");
+        assert!(!e.contains(&carpeta) && !e.contains("tpv_interruptores_aud28"), "{e}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

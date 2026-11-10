@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 
-use tpv_application::error::{AppError, AppResult};
+use tpv_application::error::AppResult;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
@@ -13,6 +13,7 @@ use tpv_contracts::mesas::{
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
+use crate::client::leer_campo;
 use crate::CloudClient;
 
 pub struct HttpMesasRepository {
@@ -106,8 +107,8 @@ impl MesasRepository for HttpMesasRepository {
             "id_trabajador": id_trab_o_usuario,
         });
         let resp: JsonValue = self.client.post_json("/v1/mesas/lineas", &body).await?;
-        serde_json::from_value(resp["lineas"].clone())
-            .map_err(|e| AppError::external(format!("bad_lineas: {e}")))
+        // AUD-28: sin el texto de serde, que cita el valor que no encaja.
+        leer_campo("bad_lineas", &resp["lineas"])
     }
 
     /* Meta + catálogo */

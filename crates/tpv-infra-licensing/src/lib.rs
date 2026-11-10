@@ -96,6 +96,29 @@ fn ext(e: impl std::fmt::Display) -> AppError {
     AppError::external(e.to_string())
 }
 
+/// AUD-28 — no se pudo `que` (escribir, borrar) un fichero de AppData: su nombre, nunca la ruta
+/// entera, que lleva el usuario de Windows. El mensaje sale del equipo con el fallo del comando
+/// (Axiom, y Sentry si es de programa), y la ruta de AppData no dice nada que no diga el nombre. El
+/// `io::Error` no cita la ruta.
+fn fallo_de_fichero(que: &str, ruta: &Path, e: std::io::Error) -> AppError {
+    let nombre = ruta.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    ext(format!("No se pudo {que} {nombre}: {e}"))
+}
+
+/// AUD-28 — una respuesta de la nube que no encaja en el tipo esperado: el tipo, la clase del error
+/// de serde, la línea y la columna. Ni el cuerpo ni el texto de serde, que cita el valor que no
+/// encaja: el de la activación y el de `/status` llevan el token de sesión y la DEK de los datos
+/// del personal. Es el criterio de `no_encaja` en `tpv-infra-http`.
+fn no_encaja<T>(que: &str, e: &serde_json::Error) -> String {
+    format!(
+        "{que}: la respuesta de la nube no encaja en {} ({:?}, línea {}, columna {})",
+        std::any::type_name::<T>(),
+        e.classify(),
+        e.line(),
+        e.column()
+    )
+}
+
 /* ===== Estado local (license_state.json) ===== */
 
 fn license_state_path(dir: &Path) -> PathBuf {
@@ -110,14 +133,14 @@ fn load_state(dir: &Path) -> Option<LicenseLocalState> {
 fn save_state(dir: &Path, st: &LicenseLocalState) -> AppResult<()> {
     let p = license_state_path(dir);
     let txt = serde_json::to_string_pretty(st).map_err(ext)?;
-    fs::write(&p, txt).map_err(|e| ext(format!("Error escribiendo {:?}: {e}", p)))?;
+    fs::write(&p, txt).map_err(|e| fallo_de_fichero("escribir", &p, e))?;
     Ok(())
 }
 
 fn delete_state(dir: &Path) -> AppResult<()> {
     let p = license_state_path(dir);
     if p.exists() {
-        fs::remove_file(&p).map_err(|e| ext(format!("Error borrando {:?}: {e}", p)))?;
+        fs::remove_file(&p).map_err(|e| fallo_de_fichero("borrar", &p, e))?;
     }
     Ok(())
 }
@@ -164,6 +187,11 @@ fn load_estado_pendiente(dir: &Path) -> Option<LicenseLocalState> {
 /// vigente, como hace `guardar_credenciales`. Sin entrada, en cambio, es que ya se aplicó.
 const SIN_DEK: &str = "sin-dek";
 
+/// AUD-28 — la DEK de la licencia no se pudo guardar. Sin el error del almacén de secretos ni el
+/// nombre de la entrada: el aviso sale del equipo, y para saber qué pasó basta con esto.
+const AVISO_SIN_CLAVE_DEL_PERSONAL: &str =
+    "no se pudo guardar la clave de cifrado de los datos del personal: el equipo sigue sin ella";
+
 /// Guarda como pendiente lo concedido: el token y la DEK (ligada a su negocio) en sus entradas
 /// pendientes, y después el estado, entero o nada (temporal y `rename`). Lo vigente no se toca.
 /// Como en `guardar_credenciales`, si la DEK no se puede guardar la activación sigue sin ella.
@@ -181,8 +209,9 @@ fn guardar_pendiente_en(
         Some(Err(e)) => Err(e),
         None => secretos.guardar(device::KEY_FIELD_DEK_PENDIENTE, SIN_DEK),
     };
-    if let Err(e) = guardada {
-        tracing::warn!("no se pudo guardar la field_dek pendiente: {e}");
+    if guardada.is_err() {
+        // AUD-28: sin el error del almacén de secretos ni el nombre de la entrada.
+        tracing::warn!("no se pudo guardar la clave de cifrado del personal de la licencia nueva: se aplicará sin ella");
         // Lo que quedara de otra activación va ligado a su negocio: no se usaría con éste.
         let _ = secretos.guardar(device::KEY_FIELD_DEK_PENDIENTE, SIN_DEK);
     }
@@ -207,8 +236,8 @@ fn aplicar_pendiente_en(secretos: &dyn Secretos, dir: &Path) -> AppResult<()> {
     }
     match secretos.leer(device::KEY_FIELD_DEK_PENDIENTE).map_err(ext)? {
         Some(dek) if dek != SIN_DEK => {
-            if let Err(e) = secretos.guardar(device::KEY_FIELD_DEK_VIGENTE, &dek) {
-                tracing::warn!("no se pudo guardar la field_dek: {e}");
+            if secretos.guardar(device::KEY_FIELD_DEK_VIGENTE, &dek).is_err() {
+                tracing::warn!("{AVISO_SIN_CLAVE_DEL_PERSONAL}");
                 let _ = secretos.borrar(device::KEY_FIELD_DEK_VIGENTE);
             }
         }
@@ -251,13 +280,13 @@ fn load_rejection(dir: &Path) -> Option<String> {
 
 fn save_rejection(dir: &Path, code: &str) -> AppResult<()> {
     let p = license_rejection_path(dir);
-    fs::write(&p, code).map_err(|e| ext(format!("Error escribiendo {:?}: {e}", p)))
+    fs::write(&p, code).map_err(|e| fallo_de_fichero("escribir", &p, e))
 }
 
 fn delete_rejection(dir: &Path) -> AppResult<()> {
     let p = license_rejection_path(dir);
     if p.exists() {
-        fs::remove_file(&p).map_err(|e| ext(format!("Error borrando {:?}: {e}", p)))?;
+        fs::remove_file(&p).map_err(|e| fallo_de_fichero("borrar", &p, e))?;
     }
     Ok(())
 }
@@ -469,6 +498,31 @@ struct ActivateOk {
     tiempo_sumado: bool,
 }
 
+/// El 2xx de `/v1/license/activate`, ya leído: tiene que traer la licencia concedida.
+///
+/// AUD-28: ese cuerpo lleva el token de sesión y la DEK de los datos del personal, así que ningún
+/// mensaje de aquí lo cita, ni entero ni a trozos: si no encaja, el tipo y la posición
+/// ([`no_encaja`]); si encaja pero le falta algo, qué le falta.
+fn leer_activacion(texto: &str) -> AppResult<ActivateOk> {
+    let ok: ActivateOk =
+        serde_json::from_str(texto).map_err(|e| ext(no_encaja::<ActivateOk>("activate_bad_json", &e)))?;
+    let falta = if !ok.ok {
+        Some("ok=false")
+    } else if ok.token.trim().is_empty() {
+        Some("sin token")
+    } else if ok.tenant_id.trim().is_empty() {
+        Some("sin negocio")
+    } else {
+        None
+    };
+    match falta {
+        Some(falta) => Err(AppError::external(format!(
+            "La respuesta del servidor de licencias no trae la licencia concedida ({falta})."
+        ))),
+        None => Ok(ok),
+    }
+}
+
 /// Datos del negocio que acompañan a la activación (el worker los espera en camelCase).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -537,6 +591,14 @@ struct StatusOk {
     server_time: i64,
 }
 
+/// El 2xx de `/v1/license/status`, ya leído. Si no encaja es una respuesta ilegible para el gate;
+/// el detalle, sin el cuerpo, que lleva el token renovado (AUD-28, [`no_encaja`]).
+fn leer_status(texto: &str) -> Result<StatusOk, FalloConsulta> {
+    serde_json::from_str(texto).map_err(|e| FalloConsulta::Ilegible {
+        detalle: no_encaja::<StatusOk>("invalid_json", &e),
+    })
+}
+
 /// La aserción tal cual viaja por el cable. La firma se verifica antes de creerse nada.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -578,6 +640,18 @@ fn firmado_por_alguna(claves: &[&str], msg: &[u8], sig: &Signature) -> bool {
         .any(|vk| vk.verify(msg, sig).is_ok())
 }
 
+/// AUD-28 — un estado de licencia que este equipo no conoce. Es un trozo de la respuesta, todavía
+/// sin verificar: va al mensaje sólo si es un identificador (`suspended`), y si no, nada de él.
+fn estado_desconocido(estado: &str) -> String {
+    let es_identificador = (1..=32).contains(&estado.len())
+        && estado.bytes().all(|b| b.is_ascii_lowercase() || b == b'_');
+    if es_identificador {
+        format!("estado_desconocido: {estado}")
+    } else {
+        "estado_desconocido".to_string()
+    }
+}
+
 /// Verifica la firma ed25519 contra las claves pineadas, comprueba que la aserción es de ESTA
 /// petición (`client_ts`) y que no ha caducado, y solo entonces construye el estado de fiar.
 fn verificar_assertion(
@@ -595,7 +669,7 @@ fn verificar_assertion_con(
     ahora_ms: i64,
 ) -> Result<AssertionVerificada, FalloConsulta> {
     let estado = EstadoLicencia::from_code(&dto.state).ok_or_else(|| FalloConsulta::Ilegible {
-        detalle: format!("estado_desconocido: {}", dto.state),
+        detalle: estado_desconocido(&dto.state),
     })?;
 
     let assertion = AssertionVerificada {
@@ -797,11 +871,7 @@ impl LicensingAdapter {
             return Err(leer_rechazo(&r));
         }
 
-        let ok: StatusOk = serde_json::from_str(&r.texto).map_err(|e| FalloConsulta::Ilegible {
-            detalle: format!("invalid_json: {e} | body={}", r.texto),
-        })?;
-
-        Ok((ok, r.ts))
+        Ok((leer_status(&r.texto)?, r.ts))
     }
 
     /// POST `/v1/license/refresh` (device-proof). Reemite el token de sesión cuando el viejo ha
@@ -922,19 +992,11 @@ impl LicensingService for LicensingAdapter {
                     .unwrap_or_else(|| ErrorCode::from_wire(&e.error));
                 return Err(AppError::coded(code, e.texto()));
             }
-            return Err(AppError::external(format!(
-                "activate_failed_http_{http}: {text}"
-            )));
+            // AUD-28: sin el cuerpo, que no es de la API (la página de un intermediario).
+            return Err(AppError::rechazo("activate_failed", http, &text));
         }
 
-        let ok: ActivateOk = serde_json::from_str(&text)
-            .map_err(|e| ext(format!("Respuesta JSON inválida del servidor: {e} | body={text}")))?;
-
-        if !ok.ok || ok.token.trim().is_empty() || ok.tenant_id.trim().is_empty() {
-            return Err(AppError::external(format!(
-                "Respuesta inesperada del servidor: {text}"
-            )));
-        }
+        let ok = leer_activacion(&text)?;
 
         // Anti-copia: el token concedido va ligado a la clave de ESTE dispositivo. Si el servidor
         // devuelve otro `deviceId`, la firma de las siguientes peticiones no cuadraría.
@@ -989,8 +1051,8 @@ impl LicensingService for LicensingAdapter {
         // (y se intenta retirar); nunca se cifra ni se descifra con la clave de otro negocio.
         match concedido.field_dek.as_deref() {
             Some(dek) => {
-                if let Err(e) = device::set_field_dek_de(&concedido.negocio, dek) {
-                    tracing::warn!("no se pudo guardar la field_dek: {e}");
+                if device::set_field_dek_de(&concedido.negocio, dek).is_err() {
+                    tracing::warn!("{AVISO_SIN_CLAVE_DEL_PERSONAL}");
                     let _ = device::clear_field_dek();
                 }
             }
@@ -1036,7 +1098,7 @@ impl LicensingService for LicensingAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| ext(format!("No se pudo pedir el código: {e}")))?;
+            .map_err(|e| ext(format!("No se pudo pedir el código: {}", e.without_url())))?;
 
         Ok(())
     }
@@ -1279,8 +1341,9 @@ impl PairingAdapter {
             return Err(AppError::from_api_body(r.http, &r.texto));
         }
 
+        // AUD-28: sin el texto de serde, que citaría el token.
         let nuevo = serde_json::from_str::<RefreshOk>(&r.texto)
-            .map_err(|e| ext(format!("bad_refresh_response:{e}")))?;
+            .map_err(|e| ext(no_encaja::<RefreshOk>("bad_refresh_response", &e)))?;
 
         device::handy_set_token(nuevo.token.trim(), &tenant_id).map_err(ext)
     }
@@ -1362,7 +1425,7 @@ impl PairingAdapter {
         let bytes = resp
             .bytes()
             .await
-            .map_err(|e| ext(format!("respuesta_ilegible:{e}")))?;
+            .map_err(|e| ext(format!("respuesta_ilegible:{}", e.without_url())))?;
         Ok((status, bytes.to_vec()))
     }
 
@@ -1461,7 +1524,7 @@ impl PairingService for PairingAdapter {
         // reqwest lo volviera a serializar con `.json(&body)`, cualquier diferencia de bytes
         // (orden, espacios) invalidaría la firma en el worker.
         let body_str =
-            serde_json::to_string(&body).map_err(|e| ext(format!("bad_json_body:{e}")))?;
+            serde_json::to_string(&body).map_err(|e| ext(format!("bad_json_body:{:?}", e.classify())))?;
 
         let (mut status, mut text) = self.enviar_post(mode, path, &body_str).await?;
 
@@ -1511,7 +1574,9 @@ impl PairingService for PairingAdapter {
         let parsed = self
             .tpv_server_post_json("tpv", "/v1/pair/create", JsonValue::Object(Default::default()))
             .await?;
-        serde_json::from_value(parsed).map_err(|e| ext(format!("bad_pair_create_response:{e}")))
+        // AUD-28: sin el texto de serde, que citaría el código o el secreto del emparejamiento.
+        serde_json::from_value(parsed)
+            .map_err(|e| ext(no_encaja::<PairCreateResult>("bad_pair_create_response", &e)))
     }
 
     async fn upload_image(
@@ -1541,11 +1606,8 @@ impl PairingService for PairingAdapter {
         if (200..300).contains(&status) {
             return Ok(());
         }
-        Err(AppError::external(format!(
-            "image_delete_http_{}: {}",
-            status,
-            String::from_utf8_lossy(&cuerpo)
-        )))
+        // AUD-28: lo que falló y su status; nada del cuerpo.
+        Err(AppError::rechazo("image_delete", status, &String::from_utf8_lossy(&cuerpo)))
     }
 
     async fn download_image(&self, mode: &str, rel_path: &str) -> AppResult<Option<Vec<u8>>> {
@@ -1554,7 +1616,7 @@ impl PairingService for PairingAdapter {
         // firma** (FABLE-E). 404 → None (el binario aún no está en R2).
         let path = "/v1/images/download";
         let body_str = serde_json::to_string(&serde_json::json!({ "rel_path": rel_path }))
-            .map_err(|e| ext(format!("bad_json_body:{e}")))?;
+            .map_err(|e| ext(format!("bad_json_body:{:?}", e.classify())))?;
 
         let (status, bytes) = self
             .enviar_firmado(
@@ -1571,11 +1633,8 @@ impl PairingService for PairingAdapter {
             return Ok(None);
         }
         if !(200..300).contains(&status) {
-            return Err(AppError::external(format!(
-                "image_download_http_{}: {}",
-                status,
-                String::from_utf8_lossy(&bytes)
-            )));
+            // AUD-28: lo que falló y su status; nada del cuerpo.
+            return Err(AppError::rechazo("image_download", status, &String::from_utf8_lossy(&bytes)));
         }
 
         Ok(Some(bytes))
@@ -2412,6 +2471,127 @@ mod tests_licencia_pendiente {
         assert!(secretos.valor(device::KEY_FIELD_DEK_PENDIENTE).is_none());
         aplicar_pendiente_en(&secretos, &dir).unwrap();
         assert_eq!(vigente(&secretos, &dir), (Some("token-de-a".into()), Some("dek-de-a".into()), Some("negocio-a".into())));
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod tests_mensajes_sin_datos {
+    //! AUD-28: los mensajes de error de este adaptador salen del equipo (Axiom, y Sentry si son de
+    //! programa). No llevan el cuerpo de una respuesta, que en la activación y en `/status` trae el
+    //! token de sesión y la DEK de los datos del personal, ni la ruta de AppData, que lleva el
+    //! usuario de Windows. Puros: sin red, sin almacén de secretos; sólo una carpeta temporal.
+
+    use super::*;
+
+    const TOKEN: &str = "eyJhbGciOiJFZERTQSJ9.eyJ0ZW5hbnRJZCI6Im5lZ29jaW8ifQ.firma-de-prueba";
+    const DEK: &str = "3q2+7wZmaWVsZC1kZWstZGUtcHJ1ZWJh";
+
+    fn sin_secretos(mensaje: &str) {
+        for dato in [TOKEN, "eyJ", DEK, "3q2+7w", "987654321", "body="] {
+            assert!(!mensaje.contains(dato), "{dato}: {mensaje}");
+        }
+    }
+
+    #[test]
+    fn una_activacion_que_no_encaja_no_cita_el_token_ni_la_dek() {
+        // El control: con todo en su sitio, se lee.
+        let buena = format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#);
+        assert_eq!(leer_activacion(&buena).unwrap().token, TOKEN);
+
+        for cuerpo in [
+            // La DEK con otro tipo: el texto de serde la citaría.
+            format!(r#"{{"ok":true,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":987654321}}"#),
+            // El token con otro tipo.
+            format!(r#"{{"ok":true,"tenantId":"t1","token":987654321,"status":"active","fieldDek":"{DEK}"}}"#),
+            // Le falta un campo.
+            format!(r#"{{"ok":true,"token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#),
+        ] {
+            let mensaje = leer_activacion(&cuerpo).expect_err("no encaja").to_string();
+            sin_secretos(&mensaje);
+            assert!(mensaje.starts_with("activate_bad_json: la respuesta de la nube no encaja en "), "{mensaje}");
+            assert!(mensaje.contains("ActivateOk") && mensaje.contains("línea 1, columna "), "{mensaje}");
+        }
+    }
+
+    #[test]
+    fn una_activacion_sin_la_licencia_dice_que_le_falta() {
+        for (cuerpo, falta) in [
+            (format!(r#"{{"ok":false,"tenantId":"t1","token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#), "ok=false"),
+            (format!(r#"{{"ok":true,"tenantId":"t1","token":"  ","status":"active","fieldDek":"{DEK}"}}"#), "sin token"),
+            (format!(r#"{{"ok":true,"tenantId":" ","token":"{TOKEN}","status":"active","fieldDek":"{DEK}"}}"#), "sin negocio"),
+        ] {
+            let mensaje = leer_activacion(&cuerpo).expect_err("le falta algo").to_string();
+            sin_secretos(&mensaje);
+            assert_eq!(
+                mensaje,
+                format!("La respuesta del servidor de licencias no trae la licencia concedida ({falta}).")
+            );
+        }
+    }
+
+    #[test]
+    fn un_status_que_no_encaja_no_cita_el_token() {
+        let cuerpo = format!(r#"{{"ok":true,"assertion":"{DEK}","token":"{TOKEN}","serverTime":1}}"#);
+        let Err(fallo) = leer_status(&cuerpo) else { panic!("no encaja") };
+        let mensaje = fallo.to_string();
+        sin_secretos(&mensaje);
+        assert!(mensaje.starts_with("status_unreadable: invalid_json: la respuesta de la nube no encaja en "), "{mensaje}");
+    }
+
+    #[test]
+    fn un_estado_desconocido_solo_se_cita_si_es_un_identificador() {
+        assert_eq!(estado_desconocido("suspended"), "estado_desconocido: suspended");
+        let largo = "a".repeat(33);
+        for estado in ["Ana Prueba", "612345678", TOKEN, "", largo.as_str()] {
+            assert_eq!(estado_desconocido(estado), "estado_desconocido", "{estado:?}");
+        }
+    }
+
+    /// Una carpeta temporal en la que el fichero de la licencia es una carpeta: escribirlo o
+    /// borrarlo falla, que es lo que se quiere ver.
+    fn equipo_con_ficheros_bloqueados(nombre: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("tpv_tests").join(format!(
+            "aud28-{nombre}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(license_state_path(&dir)).unwrap();
+        fs::create_dir_all(license_rejection_path(&dir)).unwrap();
+        dir
+    }
+
+    #[test]
+    fn un_fichero_de_la_licencia_que_falla_no_dice_la_ruta() {
+        let dir = equipo_con_ficheros_bloqueados("ficheros");
+        let estado = LicenseLocalState {
+            tenant_id: "negocio".into(),
+            device_id: "equipo".into(),
+            status: Some("active".into()),
+            expires_at: None,
+            expires_at_ms: None,
+            plan: None,
+            last_server_time_ms: None,
+            last_check_ok_ms: None,
+            last_check_attempt_ms: None,
+            activated_at_ms: 1,
+            offline_consumido_ms: None,
+            marca_tiempo_ms: None,
+        };
+        let carpeta = dir.to_string_lossy().to_string();
+        // El control: la ruta de la carpeta temporal es la de AppData de un usuario de verdad.
+        assert!(carpeta.len() > "license_state.json".len());
+
+        for (fallo, fichero) in [
+            (save_state(&dir, &estado).err(), "license_state.json"),
+            (delete_state(&dir).err(), "license_state.json"),
+            (save_rejection(&dir, "license_revoked").err(), "license_rejection.txt"),
+            (delete_rejection(&dir).err(), "license_rejection.txt"),
+        ] {
+            let mensaje = fallo.expect("el fichero es una carpeta: tiene que fallar").to_string();
+            assert!(mensaje.starts_with("No se pudo ") && mensaje.contains(fichero), "{mensaje}");
+            assert!(!mensaje.contains(&carpeta) && !mensaje.contains("tpv_tests"), "{mensaje}");
+        }
         let _ = fs::remove_dir_all(dir);
     }
 }

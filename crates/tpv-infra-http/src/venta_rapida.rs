@@ -14,6 +14,7 @@ use tpv_contracts::venta_rapida::{
 use tpv_application::error::AppError;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
+use crate::client::leer_campo;
 use crate::CloudClient;
 
 /// Confirma con el cuerpo de la respuesta el id de la fila creada.
@@ -146,8 +147,8 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
             .await?;
         Ok(VrLineaAnadida {
             id_detalle: id_from_response(&resp, "id_detalle")?,
-            precio_unitario: serde_json::from_value(resp["precio_unitario"].clone())
-                .map_err(|e| AppError::external(format!("bad_precio_unitario: {e}")))?,
+            // AUD-28: sin el texto de serde, que cita el valor que no encaja.
+            precio_unitario: leer_campo("bad_precio_unitario", &resp["precio_unitario"])?,
         })
     }
 

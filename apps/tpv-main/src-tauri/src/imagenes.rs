@@ -16,6 +16,23 @@ pub fn leer_para_subida(ruta: &Path) -> std::io::Result<Option<Vec<u8>>> {
     Ok((bytes.len() <= MAX_BYTES).then_some(bytes))
 }
 
+/// AUD-28 — una imagen tal como se nombra en lo que sale del equipo (avisos y errores, que llegan
+/// a Axiom y a Sentry). La carpeta y el nombre, si el nombre es el UUID que le pone la app; si no
+/// (una imagen heredada, guardada con el nombre que alguien le dio), sólo la carpeta y la extensión:
+/// ese nombre puede ser el de una persona. Nunca la ruta de AppData.
+pub fn para_registro(rel: &str) -> String {
+    if !ruta_segura(rel) {
+        return "(ruta no válida)".to_string();
+    }
+    let partes: Vec<_> = rel.split('/').collect();
+    let (base, ext) = partes[2].rsplit_once('.').unwrap_or((partes[2], ""));
+    if uuid::Uuid::parse_str(base).is_ok() {
+        rel.to_string()
+    } else {
+        format!("images/{}/(nombre propio).{}", partes[1], ext)
+    }
+}
+
 pub fn ruta_segura(rel: &str) -> bool {
     let partes: Vec<_> = rel.split('/').collect();
     if partes.len() != 3 || partes[0] != "images" || !matches!(partes[1], "productos" | "categorias" | "proveedores" | "alergenos" | "logo") { return false; }
@@ -106,6 +123,13 @@ mod tests {
         fs::write(&ruta, b"imagen").unwrap();
         assert_eq!(leer_para_subida(&ruta).unwrap().unwrap(), b"imagen");
         fs::remove_file(ruta).unwrap();
+    }
+    #[test]
+    fn lo_que_sale_del_equipo_no_lleva_el_nombre_que_alguien_le_dio_a_una_imagen() {
+        let uuid = "0190f3a1-7b2c-7d4e-8f00-123456789abc";
+        assert_eq!(para_registro(&format!("images/productos/{uuid}.jpg")), format!("images/productos/{uuid}.jpg"));
+        assert_eq!(para_registro("images/logo/Tarta-de-Ana-Prueba.png"), "images/logo/(nombre propio).png");
+        assert_eq!(para_registro("images/../C:/Users/ana/AppData/data.db"), "(ruta no válida)");
     }
     #[test]
     fn rechaza_rutas_absolutas_traversal_y_nombres_especiales() {

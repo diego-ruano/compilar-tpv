@@ -244,6 +244,54 @@ las pasadas posteriores conservan los marcadores y el diagnóstico.
 No redacta cualquier número largo por su longitud. Rust preselecciona reglas con RegexSet y conserva cadenas prestadas sin
 reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idempotencia.
 
+### Qué lleva un mensaje de error (AUD-28)
+
+El filtro es la segunda barrera. La primera es que el mensaje no se componga con datos: el de un
+fallo de `entorno` o de `programa` viaja entero, y el filtro no reconoce un nombre, una nota, una
+ruta de AppData ni un teléfono o un correo codificados en una URL (`telefono=%2B34+612+345+678`,
+`email=ana%40…`). Así que **un mensaje de error no lleva el cuerpo de una respuesta, ni a trozos, ni
+la URL de la petición, ni una ruta de AppData**. Lo que falla al hablar con el worker dice esto:
+
+| Fallo | Lo que dice | Lo que no lleva |
+|---|---|---|
+| La petición no tiene respuesta (sin red, DNS, TLS, tiempo agotado) | En la Handy (`tpv-infra-http`), «No se ha podido conectar con el servidor. Comprueba la conexión a internet.» y, entre paréntesis, la clase del fallo: `tiempo de espera agotado`, `no se pudo abrir la conexión` o `la petición no llegó a completarse`. En licencias y emparejamiento, el texto de reqwest sin la URL | La URL (ni la query ni la ruta) |
+| Un 2xx que no encaja en su DTO, entero o un trozo | `bad_json: la respuesta de la nube no encaja en <tipo> (<clase de serde>, línea …, columna …)`; en licencias, con su operación delante (`activate_bad_json`, `invalid_json` en `/status`, `bad_refresh_response`, `bad_pair_create_response`) | El cuerpo ni el texto de serde, que cita el valor que no encaja. El de la activación y el de `/status` llevan el token de sesión y la DEK de los datos del personal |
+| Un 2xx de la activación sin la licencia | «La respuesta del servidor de licencias no trae la licencia concedida (ok=false | sin token | sin negocio).» | El cuerpo |
+| Un rechazo (no 2xx) que el worker explica | Su `message` o su `error` (`AppError::from_api_body`) | — |
+| Un rechazo sin el JSON de la API (la página de un intermediario) | `http_<status>`, con lo que falló delante cuando lo cuenta el adaptador (`activate_failed_http_502`, `image_download_http_404`: `AppError::rechazo`) y, sólo si el cuerpo entero es el `error code: NNNN` de Cloudflare, ese código (`http_530:cloudflare_1016`). Lo que el cuerpo diga del caso va al código del error, no al texto | El cuerpo: una página de error puede repetir la petición que se le hizo |
+
+- La clase del fallo sale de `fallo_de_transporte`, y el tipo y la posición, de `no_encaja` /
+  `leer_campo` (`client.rs`) y de `no_encaja` en `tpv-infra-licensing`: bastan para dar con el
+  campo. La ruta no se conserva: el evento del fallo ya lleva el comando, la pantalla y lo que tardó,
+  y nada impide que una ruta lleve un texto.
+- **`reloj::enviar`** (`tpv-infra-licensing`), por donde salen las peticiones de la Handy y las de
+  licencia, emparejamiento e imágenes, devuelve el error de reqwest sin su URL (`without_url`): quien
+  ponga su texto en un mensaje pone `error sending request`, sin destino. La petición del código de
+  traslado de licencia, que no pasa por ahí, le quita la URL ella misma; la subida de la telemetría no
+  compone ningún mensaje con su error.
+- **Un fichero de AppData se nombra por su nombre** (`license_state.json`, `device_config.json`,
+  `interruptores.json`, `images/logo`), nunca por su ruta, que lleva el usuario de Windows; el
+  `io::Error` no la cita. No hay un registro sólo local: todo lo que se escribe con `tracing` a
+  partir de INFO sale a Axiom (`forward.rs`), así que la ruta no va ni a los avisos. **Una
+  imagen** se nombra con `imagenes::para_registro`: la carpeta y su UUID, o, si es una heredada con
+  el nombre que alguien le dio, sólo la carpeta y la extensión.
+- Si la DEK de los datos del personal no se puede guardar, el aviso lo dice sin el error del almacén
+  de secretos ni el nombre de su entrada.
+- El aviso de un interruptor que se apaga desde la nube dice cuál y hasta cuándo, no el motivo: es
+  texto libre de soporte, y se guarda y se enseña en pantalla sin salir del equipo.
+- Lo comprueban los tests de comportamiento, que miran el mensaje que sale: `tests_mensaje_sin_datos`
+  en `client.rs` (un puerto en el que no escucha nadie, el tiempo agotado y respuestas que no
+  encajan), `tests_respuesta_api` en `tpv-application/src/error.rs` (rechazos cuyo cuerpo no es de
+  la API) y `tests_mensajes_sin_datos` en `tpv-infra-licensing` (la activación y `/status` que no
+  encajan, y los ficheros de la licencia que no se dejan escribir).
+- Además, `tests_ningun_mensaje_lleva_el_error_ni_el_cuerpo` (`client.rs`) lee el fuente de
+  `tpv-infra-http` y avisa de lo que se ve a simple vista: un hueco con el error o con el cuerpo
+  (`{e}`, `{text}`), el error o el cuerpo entre los argumentos de `format!`, de un aviso de
+  `tracing` o de un constructor de `AppError` (`"{}", e`, `e.to_string()`, `error = %e`), ese
+  constructor entregado como función (`map_err(AppError::sin_conexion)`) y una petición que sale
+  con `.send()` o `execute` en vez de con `reloj::enviar`. No sigue un valor de una variable a otra
+  ni entra en una función aparte: no sustituye a los tests de comportamiento.
+
 ## Lo que registra Cloudflare de cada petición
 
 La plataforma registra cada invocación del worker por su cuenta, sin que su código intervenga: **el
@@ -278,6 +326,7 @@ repositorio no dice si está puesto. Cada despliegue envía el `observability` d
 | Cableado del escritorio | `apps/tpv-main/src-tauri/src/lib.rs` |
 | Sentry de la Webview | `apps/tpv-main/src/shared/observability/sentry.ts` (más el error boundary y el listener global) |
 | Fallos de comandos | `packages/client/src/transporte.ts`, `shared/observability/fallosDeComandos.ts`, `commands/telemetria.rs` |
+| Mensajes de error (AUD-28) | `crates/tpv-infra-licensing/src/reloj.rs` (`enviar`), `crates/tpv-infra-http/src/client.rs` (`fallo_de_transporte`, `no_encaja`, `leer_campo`), `crates/tpv-infra-licensing/src/lib.rs` (`no_encaja`, `leer_activacion`, `leer_status`, `fallo_de_fichero`), `crates/tpv-application/src/error.rs` (`from_api_body`, `rechazo`), `apps/tpv-main/src-tauri/src/imagenes.rs` (`para_registro`) |
 | Sentry del worker | `apps/cloud-worker-licensing/src/observability/sentry.ts` |
 | Axiom | `apps/cloud-worker-licensing/src/observability/axiom.ts` |
 | Ingesta | `apps/cloud-worker-licensing/src/domains/telemetry/telemetry.routes.ts` |
