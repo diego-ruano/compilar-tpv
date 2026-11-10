@@ -204,6 +204,9 @@ mod tests {
         fn handy_get_tenant(&self) -> AppResult<Option<String>> {
             panic!("ajeno a esta prueba")
         }
+        fn negocio_de_la_licencia(&self) -> AppResult<Option<String>> {
+            panic!("ajeno a esta prueba")
+        }
         fn tpv_server_signed_headers(&self, _: &str, _: &str, _: &str, _: &[u8]) -> AppResult<ApiSignedHeaders> {
             panic!("ajeno a esta prueba")
         }
@@ -215,7 +218,7 @@ mod tests {
         async fn pair_create(&self) -> AppResult<PairCreateResult> {
             panic!("ajeno a esta prueba")
         }
-        async fn upload_image(&self, _: &str, _: &str, _: &str, _: Vec<u8>) -> AppResult<ResultadoSubidaImagen> {
+        async fn upload_image(&self, _: &str, _: &str, _: &str, _: Vec<u8>, _: &str) -> AppResult<ResultadoSubidaImagen> {
             panic!("ajeno a esta prueba")
         }
         async fn delete_image(&self, _: &str, _: &str) -> AppResult<()> {

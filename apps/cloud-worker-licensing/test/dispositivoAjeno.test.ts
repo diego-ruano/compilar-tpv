@@ -156,10 +156,12 @@ describe("la regla, que comparten las dos puertas", () => {
 		// vuelve a ser la Main del suyo firmando con la clave que tiene registrada. La regla sólo
 		// compara claves públicas: que quien la presenta tiene su privada lo comprueba antes cada
 		// puerta, con la firma (AUD-01 al activar, el reto del emparejamiento al recoger el token).
+		// AUD-06: y dice en qué negocio estaba, que es lo que la activación necesita saber antes de
+		// mudar la fila.
 		await escenario("mismo-equipo", async () => {
 			await expect(
 				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, VICTIMA, PUB_VICTIMA, BAR_ATACANTE),
-			).resolves.toBeUndefined();
+			).resolves.toBe(BAR_VICTIMA);
 		});
 	});
 
@@ -167,7 +169,7 @@ describe("la regla, que comparten las dos puertas", () => {
 		await escenario("desconocido", async () => {
 			await expect(
 				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, "equipo-nuevo", "cualquiera", BAR_ATACANTE),
-			).resolves.toBeUndefined();
+			).resolves.toBeNull();
 		});
 	});
 
@@ -180,7 +182,7 @@ describe("la regla, que comparten las dos puertas", () => {
 		await escenario("mismo-negocio", async () => {
 			await expect(
 				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, VICTIMA, "clave-nueva", BAR_VICTIMA),
-			).resolves.toBeUndefined();
+			).resolves.toBe(BAR_VICTIMA);
 		});
 	});
 
@@ -207,7 +209,7 @@ describe("la regla, que comparten las dos puertas", () => {
 			).rejects.toThrow("device_key_missing");
 			await expect(
 				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, VICTIMA, PUB_ATACANTE, BAR_VICTIMA),
-			).resolves.toBeUndefined();
+			).resolves.toBe(BAR_VICTIMA);
 		});
 	});
 });

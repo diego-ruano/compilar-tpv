@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 
 use tpv_domain::licensing::{
-    EstadoVerificado, FalloConsulta, ResultadoActivacion, SolicitudActivacion,
+    EstadoVerificado, FalloConsulta, ResultadoActivacion, Sello, SolicitudActivacion,
 };
 
 use tpv_contracts::licensing::{
@@ -56,15 +56,44 @@ pub trait LicensingService: Send + Sync {
     /// licencia válida delante, no hay rechazo pendiente que enseñar.
     fn last_rejection(&self) -> AppResult<Option<String>>;
 
-    /// Canjea la clave en el servidor. Persiste el **token** concedido en el keyring (es una
-    /// credencial, no estado), pero no escribe `license_state.json` (eso lo hace el caso de uso con
-    /// `save_state`). `device_change_code` solo se envía al mover la licencia a otro equipo;
-    /// el servidor puede responder pidiéndolo.
+    /// Canjea la clave en el servidor. **No guarda nada en el equipo**: las credenciales concedidas
+    /// (el token de sesión y la clave de cifrado de campo) se quedan en el adaptador hasta
+    /// [`Self::guardar_credenciales`], y `license_state.json` lo escribe el caso de uso con
+    /// `save_state`. `device_change_code` solo se envía al mover la licencia a otro equipo; el
+    /// servidor puede responder pidiéndolo.
     async fn activar_remoto(
         &self,
         solicitud: &SolicitudActivacion,
         device_change_code: Option<&str>,
     ) -> AppResult<ResultadoActivacion>;
+
+    /// Guarda en el almacén de secretos las credenciales que concedió la última `activar_remoto`.
+    ///
+    /// AUD-06: va aparte de la petición para que el caso de uso pueda decidir antes qué se hace con
+    /// la base del equipo. Con ellas guardadas, cualquier cosa que hable con la nube lo hace ya en
+    /// nombre del negocio concedido. La clave de cifrado de campo se guarda ligada a su negocio.
+    fn guardar_credenciales(&self) -> AppResult<()>;
+
+    /// AUD-06 · Guarda lo concedido por la última `activar_remoto` como **pendiente**, sin tocar lo
+    /// vigente: el token y la DEK en entradas aparte del almacén de secretos, y `estado` aparte de
+    /// `license_state.json`. Es la licencia de otro negocio que la base del equipo: no vale hasta el
+    /// arranque siguiente, que aparta la base y la aplica (`aplicar_pendiente`).
+    fn guardar_pendiente(&self, _estado: &LicenseLocalState) -> AppResult<()> {
+        Err(crate::error::AppError::internal("Este equipo no guarda licencias pendientes."))
+    }
+    /// AUD-06 · El negocio de la licencia pendiente, si la hay.
+    fn negocio_pendiente(&self) -> AppResult<Option<String>> {
+        Ok(None)
+    }
+    /// AUD-06 · Lo pendiente pasa a vigente: credenciales, DEK y licencia. Repetible: un corte a medias
+    /// se termina repitiéndolo, y sin nada pendiente no hace nada.
+    fn aplicar_pendiente(&self) -> AppResult<()> {
+        Ok(())
+    }
+    /// AUD-06 · Olvida lo pendiente (otra activación lo sustituye, o nunca llegó a anotarse el cambio).
+    fn descartar_pendiente(&self) -> AppResult<()> {
+        Ok(())
+    }
 
     /// Pide al servidor que envíe el OTP de cambio de dispositivo al email de la licencia.
     async fn solicitar_cambio_dispositivo(&self, clave: &str) -> AppResult<()>;
@@ -97,6 +126,34 @@ pub trait LicensingService: Send + Sync {
     }
 }
 
+/// AUD-06 · La base local de este equipo, vista desde la licencia que se activa y desde el arranque.
+///
+/// Una base sólo se usa con la licencia de su negocio, y de quién es lo dice ella: su sello. Con la
+/// licencia de otro negocio no cambia nada en el proceso que la activa: se anota el cambio, y el
+/// arranque siguiente aparta la base y aplica la licencia (`docs/arquitectura/recuperacion.md`).
+#[async_trait]
+pub trait BaseDelEquipo: Send + Sync {
+    /// Lo que la base dice de sí misma: el negocio que lleva sellado, ninguno (o no hay base), o que
+    /// no se deja leer.
+    async fn sello(&self) -> AppResult<Sello>;
+    /// Sella con `negocio` una base que no lleva sello.
+    async fn sellar(&self, negocio: &str) -> AppResult<()>;
+    /// La base es del negocio, pero de antes de que la licencia pasara por otro equipo: deja la
+    /// marca de traslado y cierra las escrituras de negocio hasta que se reconstruya desde la nube.
+    async fn marcar_traslado(&self) -> AppResult<()>;
+    /// La licencia de `negocio` se ha guardado como pendiente sobre una base de otro negocio (o que no
+    /// se sabe de quién es): deja anotado el cambio, de forma duradera (entero o nada). Lo que está en
+    /// marcha sigue siendo del negocio de la base hasta el reinicio.
+    async fn marcar_cambio_de_negocio(&self, negocio: &str) -> AppResult<()>;
+    /// El negocio del cambio anotado, si lo hay.
+    async fn cambio_de_negocio_pendiente(&self) -> AppResult<Option<String>>;
+    /// Al arrancar, con la base cerrada: termina un apartado a medias y, si la base no es de
+    /// `negocio` (o no se deja leer), aparta todo lo suyo. Repetible.
+    async fn apartar_si_no_es_de(&self, negocio: &str) -> AppResult<()>;
+    /// Quita la marca del cambio. Sólo lo hace el arranque, cuando ya está aplicado.
+    async fn quitar_cambio_de_negocio(&self) -> AppResult<()>;
+}
+
 /// Servicio de identidad de dispositivo / pairing (claves, firma, handy token, tpv-server).
 #[async_trait]
 pub trait PairingService: Send + Sync {
@@ -110,6 +167,9 @@ pub trait PairingService: Send + Sync {
     fn handy_set_token(&self, token: &str, tenant_id: &str) -> AppResult<()>;
     fn handy_clear_token(&self) -> AppResult<()>;
     fn handy_get_tenant(&self) -> AppResult<Option<String>>;
+    /// AUD-06 · El negocio de la licencia de esta Main, o `None` si no tiene. Es con el que se
+    /// firma en modo `tpv`: el token guardado tiene que ser de ese negocio.
+    fn negocio_de_la_licencia(&self) -> AppResult<Option<String>>;
     /// Cabeceras firmadas para tpv-server según el modo (anon|tpv|handy).
     ///
     /// `body` son los bytes exactos del cuerpo que se enviará (vacío si no hay). Entra en la firma
@@ -135,12 +195,18 @@ pub trait PairingService: Send + Sync {
     /// Sube los bytes de una imagen al worker (PUT firmado) → bucket R2. `path` es el path
     /// canónico (`/v1/images/images/{subcarpeta}/{archivo}`); el tenant lo deriva el worker
     /// del token, no del cliente. `mode` es el de firma (`tpv`|`handy`).
+    ///
+    /// AUD-06 · `negocio` es el del equipo cuando empezó la subida. Cada intento (también el que
+    /// repite tras un rechazo por la hora, o tras renovar el token) lo compara con el del token con
+    /// el que va a firmar, y si no es el mismo no sube: una imagen no acaba en el bucket de otro
+    /// negocio porque la licencia cambie a media subida.
     async fn upload_image(
         &self,
         mode: &str,
         path: &str,
         content_type: &str,
         bytes: Vec<u8>,
+        negocio: &str,
     ) -> AppResult<ResultadoSubidaImagen>;
 
     /// Borra una imagen del bucket R2 (DELETE firmado). `path` igual que en `upload_image`.

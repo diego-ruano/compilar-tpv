@@ -96,17 +96,22 @@ pub async fn pair_create(svc: &dyn PairingService) -> AppResult<PairCreateResult
 }
 
 /// Sube una imagen al bucket R2 vía el worker (PUT firmado). `mode` = `tpv`|`handy`.
+///
+/// AUD-06 · `negocio` es el del equipo al empezar la subida: el adaptador no la firma con el token
+/// de otro negocio (ver el puerto).
 pub async fn upload_image(
     svc: &dyn PairingService,
     mode: &str,
     path: &str,
     content_type: &str,
     bytes: Vec<u8>,
+    negocio: &str,
 ) -> AppResult<ResultadoSubidaImagen> {
     let mode = normalize_mode(mode)?;
     let path = normalize_path(path)?;
     let content_type = requerido(content_type, "Falta el tipo de la imagen.")?;
-    svc.upload_image(&mode, &path, &content_type, bytes).await
+    let negocio = requerido(negocio, "No se sabe de qué negocio es la imagen.")?;
+    svc.upload_image(&mode, &path, &content_type, bytes, &negocio).await
 }
 
 /// Borra una imagen del bucket R2 vía el worker (DELETE firmado). `mode` = `tpv`|`handy`.

@@ -11,6 +11,15 @@ import type { AvisoCaducidad } from "./pantallaDeArranque";
 export type Texto = { titulo: string; cuerpo: string };
 
 /**
+ * AUD-06 · Lo que pasa con los datos de este ordenador cuando se activa en él otra licencia. Se
+ * dice antes, en la pantalla de bloqueo y en la de activación, y no se impide. Vale para los dos
+ * casos: una licencia que ya trabajaba en otro equipo trae sus datos de la nube, y una nueva no
+ * tiene ninguno. Es el final de una frase: cada texto pone delante cuándo pasa.
+ */
+const LOS_DATOS_SE_APARTAN =
+	"los datos que hay ahora en este ordenador se guardan aparte, sin borrarlos, y el TPV pasa a trabajar con los de esa licencia: si es nueva, empieza de cero.";
+
+/**
  * Por qué la licencia bloquea la Main. El motivo crudo (el que compara el gate) se enseña aparte,
  * pequeño, para soporte. El caso por defecto cubre cualquier código nuevo sin dejar la pantalla muda.
  */
@@ -23,15 +32,18 @@ export function textoBloqueo(motivo: string): Texto {
 	// RI-09: el gate ya no borra la licencia local, así que esta pantalla se queda (también al
 	// reiniciar) hasta que el servidor diga otra cosa o alguien pulse «Borrar y volver a activar».
 	// Por eso cada texto dice qué arregla cada botón.
+	//
+	// AUD-06: y qué pasa con lo que hay guardado si después se activa otra licencia, antes de que
+	// nadie pulse: los datos de este equipo se apartan y el TPV trabaja con los de esa licencia.
 	if (motivo === "revoked")
 		return {
 			titulo: "Licencia anulada",
-			cuerpo: "Esta licencia ha sido anulada, así que este equipo no puede seguir trabajando. Si es un error, en cuanto se deshaga la anulación basta con reintentar: el equipo vuelve a funcionar sin perder ningún dato.",
+			cuerpo: `Esta licencia ha sido anulada, así que este equipo no puede seguir trabajando. Si es un error, en cuanto se deshaga la anulación basta con reintentar: el equipo vuelve a funcionar sin perder ningún dato. Si en vez de eso la borras y activas otra licencia, ${LOS_DATOS_SE_APARTAN}`,
 		};
 	if (motivo === "device_replaced")
 		return {
 			titulo: "Licencia trasladada",
-			cuerpo: "Esta licencia se ha activado en otro equipo, así que este ha dejado de tener acceso. Si no has sido tú, contacta con soporte cuanto antes. Para usar aquí otra licencia, borra esta y vuelve a activar.",
+			cuerpo: `Esta licencia se ha activado en otro equipo, así que este ha dejado de tener acceso. Si no has sido tú, contacta con soporte cuanto antes. Para usar aquí otra licencia, borra esta y vuelve a activar: ${LOS_DATOS_SE_APARTAN}`,
 		};
 	if (motivo === "bad_signature")
 		return {
@@ -70,9 +82,11 @@ export function textoBloqueo(motivo: string): Texto {
  * nada por su cuenta (RI-09).
  *
  * Lo importante que dice cada caso no es el nombre del estado, es qué hacer: una anulación se puede
- * deshacer y entonces **la misma clave vuelve a activar sin perder ningún dato**, porque activar no
- * toca la base local. Eso convierte una revocación por error en un susto y no en una pérdida, y es
- * justo lo que nadie adivina mirando un formulario vacío.
+ * deshacer y entonces **la misma clave vuelve a activar sin perder ningún dato**, porque activar la
+ * licencia del mismo negocio no toca la base local. Eso convierte una revocación por error en un
+ * susto y no en una pérdida, y es justo lo que nadie adivina mirando un formulario vacío.
+ *
+ * AUD-06: con otra licencia no es así, y se dice aquí, delante del campo de la clave.
  */
 export function textoRechazoPrevio(motivo: string | null): Texto | null {
 	if (!motivo) return null;
@@ -82,14 +96,15 @@ export function textoRechazoPrevio(motivo: string | null): Texto | null {
 			titulo: "Esta licencia fue anulada",
 			cuerpo:
 				"Por eso se pide de nuevo. Si ha sido un error, en cuanto se deshaga la anulación " +
-				"esta misma clave vuelve a activar el equipo y no se pierde ningún dato: activar no " +
-				"toca lo que hay guardado aquí.",
+				"esta misma clave vuelve a activar el equipo y no se pierde ningún dato. Si en vez " +
+				`de eso activas otra licencia, ${LOS_DATOS_SE_APARTAN}`,
 		},
 		device_replaced: {
 			titulo: "Esta licencia se activó en otro equipo",
 			cuerpo:
 				"Al moverla, este ordenador dejó de tener acceso. Si no has sido tú, contacta con " +
-				"soporte cuanto antes; si sí, vuelve a activarla aquí con tu clave.",
+				"soporte cuanto antes; si sí, puedes volver a traerla aquí con tu clave. Actives " +
+				`la licencia que actives, ${LOS_DATOS_SE_APARTAN}`,
 		},
 	};
 

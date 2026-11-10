@@ -107,7 +107,7 @@ pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esp
   (`sin_comentarios_iniciales` → `is_write_sql`), y lo que sube va sin ellos. Un `WITH … INSERT` no se
   reconoce como escritura; si alguna vez hace falta, hay que enseñárselo a `is_write_sql`.
 - **Lo que es estado local del equipo va por `raw()`**: `_Jobs_State`, `_Sync_*`, `_Verifactu_*`,
-  `_Backfill_Historico`, `_Recovery_State`, el backfill. Por `execute()` se replicaría a la nube.
+  `_Backfill_Historico`, `_Recovery_State`, `_Negocio`, el backfill. Por `execute()` se replicaría a la nube.
 - **Idempotencia** por `Op_Id`: `Applied_Operations` en la nube y `_Sync_Applied_Ops` en la Main evitan
   duplicados en catch-up y en vivo, y los ecos de las propias escrituras.
 - **IDs deterministas**: toda columna `TEXT PRIMARY KEY` recibe su UUID generado **antes** del

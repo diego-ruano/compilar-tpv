@@ -88,10 +88,13 @@ describe("migraciones del tenant", () => {
 			expect(sql.exec("SELECT Reserva_No_Vino_Min AS m FROM Business_Settings WHERE ID = 1;").toArray()[0].m).toBe(0);
 			// Todo el mundo nace pidiendo PIN.
 			expect(sql.exec("SELECT COUNT(*) AS n FROM Usuarios WHERE Sin_PIN <> 0;").toArray()[0].n).toBe(0);
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(1);
+			// AUD-06: el sello de la base (0002) existe también en la nube, vacío: es de cada equipo, y el
+			// volcado de recuperación descarta lo que empieza por `_`.
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _Negocio").toArray()[0].n).toBe(0);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(2);
 			// Volver a ejecutar el runner conserva el esquema y no duplica sus registros.
 			await runTenantMigrations(clienteConMigraciones(sql));
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(1);
+			expect(sql.exec("SELECT COUNT(*) AS n FROM _migrations").toArray()[0].n).toBe(2);
 		});
 	});
     it("RI-48 impone los valores de dominio en el SQL de la nube", async () => {

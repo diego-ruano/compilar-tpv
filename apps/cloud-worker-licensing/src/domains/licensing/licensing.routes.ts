@@ -40,6 +40,7 @@ import {
 	reassignMainDevice,
 	getOrCreateTenantFieldDek,
 	licenciaVivaDelDispositivo,
+	eraLaMainDeOtroNegocio,
 	reasignarCobrosDeLaClave,
 	sigueSiendoLaLicenciaDelEquipo,
 	upsertTenantInfo,
@@ -563,6 +564,13 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 	// ── Tenant + dispositivo ────────────────────────────────────────────────
 	const tenantId = lic.tenant_id || crypto.randomUUID();
 
+	// AUD-06: una clave sin estrenar abre un negocio nuevo, y si este equipo era la Main de otro
+	// negocio con licencia (anulada, o trasladada a otro equipo), lo que tiene en su base local son
+	// los datos de aquél. Se le contesta como a un traslado, `cambioDeEquipo: true`. Es un aviso: lo
+	// que protege a la Main es el sello de su base. Sólo en la primera activación: el equipo que
+	// vuelve a la licencia de su negocio conserva su base aunque su fila pasara por otro.
+	let estrenoSobreOtroNegocio = false;
+
 	try {
 		// REV-07: la comprobación va PRIMERO, y ahí estaba el fallo. `ensureDevice` hace un
 		// `ON CONFLICT(device_id) DO UPDATE` que mueve la fila al tenant de quien activa, y sólo
@@ -572,7 +580,17 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// `device_id` ya tiene clave registrada en cualquier negocio y no es ésta, no se toca nada.
 		// Y presentar la registrada exige tener su privada: la petición llega firmada con ella
 		// (AUD-01, `firmaDelEquipo`).
-		await exigirClaveSiEsDeOtroNegocio(db, deviceId, devicePubKey, tenantId);
+		const negocioAnterior = await exigirClaveSiEsDeOtroNegocio(db, deviceId, devicePubKey, tenantId);
+
+		// AUD-06: se decide aquí, antes de que `ensureDevice` mude la fila: después ya no se sabe de
+		// dónde venía. Sólo si era la Main de un negocio con licencia y sin retirar
+		// (`eraLaMainDeOtroNegocio`): una Handy no guarda base, y un negocio sin licencia es el resto
+		// de una primera activación que falló a medias.
+		estrenoSobreOtroNegocio =
+			esPrimeraActivacion &&
+			negocioAnterior !== null &&
+			negocioAnterior !== tenantId &&
+			(await eraLaMainDeOtroNegocio(db, deviceId, negocioAnterior));
 
 		// El negocio se crea (o se toca) después de esa comprobación y no antes: si rechaza, no
 		// queda ni un tenant recién creado ni su `updated_at_ms` movido. Tiene que ir delante del
@@ -678,7 +696,7 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		status: esPrimeraActivacion ? "active" : lic.status,
 		expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
 		fieldDek,
-		cambioDeEquipo: esCambioDeEquipo,
+		cambioDeEquipo: esCambioDeEquipo || estrenoSobreOtroNegocio,
 	};
 
 	return c.json(out);

@@ -28,6 +28,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
 | [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
+| [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -444,6 +445,29 @@ que decidir qué se hace con él (guardarlo aparte y descartarlo, como en el tra
 posterior al cambio de base, si se puede distinguir; o pasar por la recuperación aceptando que el
 cobro se detenga mientras tanto) y cómo se le ofrece al personal. Mientras tanto, el mensaje manda
 contactar con soporte (OPS-02). Sin decidir.
+
+### SYNC-33 · Una copia sin sello no dice de qué negocio es
+
+Cada base lleva su negocio en `_Negocio` (AUD-06, [recuperacion.md](arquitectura/recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)),
+y una copia es la base entera: una copia sellada con otro negocio no se importa ni se restaura. Lo que
+queda abierto son las bases y copias **sin sello**, las de antes de la migración `0002`:
+
+- «Restaurar desde un archivo» acepta una copia sin sello si está sana y tiene usuarios, como antes,
+  con el aviso de que no se comprueba de qué negocio es. Al abrirla se sella con la licencia del
+  equipo. Si es de otro negocio, con el outbox vacío y el cursor (`Last_Seq`) por encima del final del
+  log de la nube, termina la reconciliación y abre el login con sus usuarios; desde ahí el código para
+  restablecer el PIN de su administrador va al correo del negocio de la licencia, y `verificar_nube`
+  sube sus filas a esa nube.
+- Una base sin sello en un equipo con licencia recibe la de esa licencia la primera vez que se abre.
+  Si el equipo ya tenía la base de otro negocio sin sellar (cambió de licencia antes de esta versión),
+  se queda con ella.
+- Una DEK guardada antes de ligarlas a su negocio no se usa hasta volver a activar.
+
+Arreglo propuesto: rechazar una copia sin sello cuando el equipo ya tiene licencia (o pedir para
+restaurarla lo que demuestre que es del negocio: el PIN de un administrador de la nube), y que la
+reconciliación no dé por buena una base con el cursor por encima de lo que la nube ha emitido. No hay
+nadie en producción con copias sin sello, así que lo primero puede bastar. Es lo que falta para cerrar
+AUD-22 (la copia traída de fuera, restaurada sin PIN). Sin decidir.
 
 ---
 

@@ -192,8 +192,9 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                     <div className="text-sm">
                                         <p className="font-semibold">Datos recuperados y sincronizados</p>
                                         <p className="mt-0.5 text-fg-muted">
-                                            La copia local y la nube ya están reconciliadas. Puedes
-                                            iniciar sesión con tu PIN habitual.
+                                            Este ordenador y la nube ya tienen los mismos datos.
+                                            Puedes iniciar sesión con tu PIN habitual; si la
+                                            licencia es nueva, antes elegirás uno.
                                         </p>
                                     </div>
                                 </div>

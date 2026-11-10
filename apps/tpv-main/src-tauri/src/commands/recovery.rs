@@ -101,7 +101,8 @@ pub async fn recovery_export_backup(
     destino: String,
 ) -> Result<(), AppErrorDto> {
     let dir = app_data_dir(&app)?;
-    tpv_infra_sqlite::recovery::export_backup(&dir, &backup_id, Path::new(&destino)).await?;
+    let licencia = crate::negocio_de_la_licencia(&dir);
+    tpv_infra_sqlite::recovery::export_backup(&dir, &backup_id, Path::new(&destino), licencia.as_deref()).await?;
     Ok(())
 }
 
@@ -114,7 +115,8 @@ pub async fn recovery_import_backup(
     origen: String,
 ) -> Result<LocalBackupInfo, AppErrorDto> {
     let dir = app_data_dir(&app)?;
-    Ok(tpv_infra_sqlite::recovery::import_backup(&dir, Path::new(&origen)).await?)
+    let licencia = crate::negocio_de_la_licencia(&dir);
+    Ok(tpv_infra_sqlite::recovery::import_backup(&dir, Path::new(&origen), licencia.as_deref()).await?)
 }
 
 /// Deja el equipo en condiciones de reconstruirse desde la nube cuando la base local no se pudo
@@ -124,6 +126,10 @@ pub async fn recovery_import_backup(
 /// el fichero ilegible (no lo borra) y abre uno vacío en su sitio. **Sólo actúa si NO hay `Db`**;
 /// con una base abierta esto sería un borrado disfrazado, y quién puede reemplazar datos
 /// utilizables lo decide `bootstrap_restaurar` dentro de su transacción, con su guardia de outbox.
+///
+/// AUD-06: al abrir la vacía se aplica la regla de la licencia (`connection::abrir_para_recuperar`):
+/// si lo que hay es de otro negocio, o no se deja leer, se aparta con todo lo suyo antes. Con un
+/// cambio de negocio a medias no se abre nada: lo termina el arranque.
 pub(crate) async fn asegurar_base_para_recuperar(
     app: &AppHandle,
     state: &AppState,
@@ -144,16 +150,9 @@ pub(crate) async fn asegurar_base_para_recuperar(
     }
 
     let dir = app_data_dir(app)?;
-    if let Some(apartada) = tpv_infra_sqlite::recovery::archivar_base_ilegible(&dir)? {
-        tracing::warn!(
-            target: "tpv::recovery",
-            ruta = ?apartada,
-            "base local ilegible apartada para reconstruirla desde la nube"
-        );
-    }
-
-    let db = tpv_infra_sqlite::connection::init_main_db(&dir, crate::dispositivo_aprovisionado(&dir))
-        .await?;
+    crate::sin_cambio_de_negocio_a_medias(&dir)?;
+    let licencia = crate::negocio_de_la_licencia(&dir);
+    let db = tpv_infra_sqlite::connection::abrir_para_recuperar(&dir, licencia.as_deref()).await?;
     crate::configure_outbox_notifier(app, &db);
     *guard = Some(db);
     Ok(())
@@ -189,11 +188,15 @@ pub async fn recovery_restore_backup(
     // ilegible—, y el intercambio de más abajo ya lo retiene hasta diez segundos.
     let mut guard = state.db.lock().await;
 
-    if let Some(actual) = guard.as_ref() {
-        tpv_infra_sqlite::recovery::asegurar_reemplazo_seguro(actual).await?;
+    match guard.as_ref() {
+        Some(actual) => tpv_infra_sqlite::recovery::asegurar_reemplazo_seguro(actual).await?,
+        // AUD-06: sin base, con un cambio de negocio a medias, no se instala ninguna: lo termina
+        // el arranque.
+        None => crate::sin_cambio_de_negocio_a_medias(&dir)?,
     }
 
-    let prepared = tpv_infra_sqlite::recovery::prepare_restore(&dir, &backup_id).await?;
+    let licencia = crate::negocio_de_la_licencia(&dir);
+    let prepared = tpv_infra_sqlite::recovery::prepare_restore(&dir, &backup_id, licencia.as_deref()).await?;
 
     // Puede no haber `Db`: si la base local estaba corrupta, el arranque no pudo abrirla y siguió
     // sin ella para poder llegar hasta aquí. Es justo el caso que esta pantalla existe para
@@ -235,7 +238,7 @@ pub async fn recovery_restore_backup(
             tpv_infra_sqlite::recovery::discard_prepared(&prepared);
             let reopened = tpv_infra_sqlite::connection::init_main_db(
                 &dir,
-                crate::dispositivo_aprovisionado(&dir),
+                licencia.as_deref(),
             )
             .await
             .map_err(AppErrorDto::from)?;
@@ -245,7 +248,7 @@ pub async fn recovery_restore_backup(
         }
     };
 
-    match tpv_infra_sqlite::connection::init_main_db(&dir, crate::dispositivo_aprovisionado(&dir))
+    match tpv_infra_sqlite::connection::init_main_db(&dir, licencia.as_deref())
         .await
     {
         Ok(restored) => {
@@ -263,7 +266,7 @@ pub async fn recovery_restore_backup(
             let reopened = if rollback.is_ok() {
                 tpv_infra_sqlite::connection::init_main_db(
                     &dir,
-                    crate::dispositivo_aprovisionado(&dir),
+                    licencia.as_deref(),
                 )
                 .await
                 .ok()

@@ -9,15 +9,15 @@ use tpv_contracts::licensing::{
     LicenseLocalState,
 };
 use tpv_domain::licensing::{
-    self as dom, Concesion, EstadoLicencia, EstadoVerificado, Motivo, Resolucion,
-    ResultadoActivacion, SolicitudActivacion, Veredicto,
+    self as dom, que_hacer_con_la_base, Concesion, EstadoLicencia, EstadoVerificado, Motivo,
+    QueHacerConLaBase, Resolucion, ResultadoActivacion, SolicitudActivacion, Veredicto,
 };
 use chrono::{Local, TimeZone};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::{AppError, AppResult};
-use crate::ports::licensing::LicensingService;
+use crate::ports::licensing::{BaseDelEquipo, LicensingService};
 use crate::ports::notificaciones::Notifier;
 
 const HORA_MS: i64 = 60 * 60 * 1000;
@@ -41,6 +41,23 @@ fn reescribir<T>(f: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
     let mut n = cerrojo();
     *n += 1;
     f()
+}
+
+/// AUD-06 · Una activación o un canje cada vez, en todo el proceso. Dentro va todo: la petición a la
+/// nube (lo concedido espera en el adaptador, en un solo sitio, hasta que se guarda), decidir con el
+/// sello, sellar y guardar las credenciales y el estado. Dos a la vez no se mezclan: la segunda espera
+/// y decide con lo que dejó la primera.
+static ACTIVACIONES: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+/// AUD-06 · Con un cambio de negocio pendiente no se activa ni se canjea nada: lo que hay que hacer es
+/// reiniciar, y el arranque lo termina. Se mira antes de pedir nada a la nube, con el turno tomado.
+async fn sin_cambio_de_negocio_pendiente(base: &dyn BaseDelEquipo) -> AppResult<()> {
+    if base.cambio_de_negocio_pendiente().await?.is_some() {
+        return Err(AppError::conflict(
+            "El TPV tiene un cambio de licencia pendiente: ciérralo y vuelve a abrirlo antes de activar otra.",
+        ));
+    }
+    Ok(())
 }
 
 fn now_ms() -> i64 {
@@ -79,8 +96,28 @@ pub fn clear_state(svc: &dyn LicensingService) -> AppResult<()> {
 
 /// Activa la licencia en este dispositivo. Si el servidor exige el código de cambio de equipo,
 /// no falla: devuelve `outcome = "device_change_required"` para que la UI pida el OTP.
+///
+/// AUD-06 · Con la respuesta del servidor en la mano, se contrasta con lo pedido (AUD-01) y se mira de
+/// qué negocio es la base del equipo (su sello), que dice qué hacer (`que_hacer_con_la_base`):
+///
+/// - **otro negocio** (o una base que no se deja leer): nada de la licencia nueva pasa a vigente en
+///   este proceso. Se guarda como pendiente (credenciales y estado) y, después, se anota el cambio.
+///   La respuesta lleva `reinicia`: quien llama reinicia el TPV, y el arranque aparta la base y aplica
+///   lo pendiente (`aplicar_cambio_de_negocio_pendiente`). Hasta entonces lo que está en marcha sigue
+///   siendo del negocio de la base, con sus credenciales;
+/// - **el mismo negocio**: se descarta lo que hubiera pendiente sin anotar (una activación cortada
+///   antes de anotar el cambio), se sella la base o se marca el traslado, y se guardan credenciales y
+///   estado.
+///
+/// Una activación cada vez (`ACTIVACIONES`), y ninguna con un cambio de negocio pendiente: se rechaza
+/// antes de pedir nada a la nube.
+///
+/// No depende de que la licencia anterior se haya borrado, ni de lo que diga el servidor: un corte
+/// entre dos pasos, o repetir la activación, llega al mismo sitio, porque lo que decide está escrito
+/// en la propia base.
 pub async fn activate(
     svc: &dyn LicensingService,
+    base: &dyn BaseDelEquipo,
     input: LicenseActivateInput,
 ) -> AppResult<LicenseActivateOutcome> {
     let solicitud = SolicitudActivacion::validar(
@@ -94,18 +131,53 @@ pub async fn activate(
 
     let code = clean(input.device_change_code);
 
+    let _turno = ACTIVACIONES.lock().await;
+    sin_cambio_de_negocio_pendiente(base).await?;
+
     match svc.activar_remoto(&solicitud, code.as_deref()).await? {
         ResultadoActivacion::Activada(concedido) => {
-            let cambio_de_equipo = concedido.cambio_de_equipo;
+            // AUD-01: lo concedido se contrasta con lo pedido antes de hacer nada con ello.
+            comprobar_lo_concedido(svc, false, &concedido)?;
+
+            let decision = que_hacer_con_la_base(
+                &base.sello().await?,
+                &concedido.tenant_id,
+                concedido.cambio_de_equipo,
+            );
+            let negocio = concedido.tenant_id.clone();
             let tiempo_sumado = concedido.tiempo_sumado;
             let estado = estado_inicial(concedido);
+
+            if decision == QueHacerConLaBase::Apartar {
+                // Primero lo pendiente y después la marca: una marca sin nada pendiente no aplica nada.
+                svc.guardar_pendiente(&estado)?;
+                base.marcar_cambio_de_negocio(&negocio).await?;
+                return Ok(LicenseActivateOutcome {
+                    outcome: "activated".to_string(),
+                    state: Some(estado),
+                    email_hint: None,
+                    cambio_de_equipo: true,
+                    tiempo_sumado,
+                    reinicia: true,
+                });
+            }
+
+            svc.descartar_pendiente()?;
+            match decision {
+                QueHacerConLaBase::Sellar => base.sellar(&negocio).await?,
+                QueHacerConLaBase::Reconstruir => base.marcar_traslado().await?,
+                QueHacerConLaBase::Usar | QueHacerConLaBase::Apartar => {}
+            }
+            svc.guardar_credenciales()?;
             reescribir(|| svc.save_state(&estado))?;
+
             Ok(LicenseActivateOutcome {
                 outcome: "activated".to_string(),
                 state: Some(estado),
                 email_hint: None,
-                cambio_de_equipo,
+                cambio_de_equipo: decision == QueHacerConLaBase::Reconstruir,
                 tiempo_sumado,
+                reinicia: false,
             })
         }
         ResultadoActivacion::CambioDispositivoRequerido { email_hint } => {
@@ -115,9 +187,67 @@ pub async fn activate(
                 email_hint: Some(email_hint),
                 cambio_de_equipo: false,
                 tiempo_sumado: false,
+                reinicia: false,
             })
         }
     }
+}
+
+/// AUD-01 · Lo concedido, contrastado con lo pedido, antes de guardar nada de ello
+/// (`tpv_domain::licensing::comprobar_concesion`): quien pidió sólo sumar espera una suma, y una
+/// suma no cambia de negocio.
+fn comprobar_lo_concedido(svc: &dyn LicensingService, solo_sumar: bool, concedido: &Concesion) -> AppResult<()> {
+    let negocio_del_equipo = svc
+        .load_state()?
+        .map(|st| st.tenant_id.trim().to_string())
+        .filter(|t| !t.is_empty());
+    dom::comprobar_concesion(
+        solo_sumar,
+        negocio_del_equipo.as_deref(),
+        &concedido.tenant_id,
+        concedido.tiempo_sumado,
+    )
+    .map_err(AppError::conflict)
+}
+
+/// AUD-06 · Al arrancar, antes de abrir la base y de que corra ninguna tarea: aplica el cambio de
+/// negocio que dejó anotado una activación. Devuelve el negocio, si había uno.
+///
+/// (a) se aparta lo que no es de ese negocio (y se termina un apartado a medias); (b) lo pendiente
+/// pasa a vigente; (c) se quita la marca. Cada paso se puede repetir, así que un corte en cualquier
+/// punto lo termina el arranque siguiente. Lo que se aparta lo dice el negocio de lo pendiente, o el
+/// de la marca si ya se aplicó.
+///
+/// Sin marca, lo pendiente es de una activación que se cortó antes de anotar el cambio: se descarta.
+/// Con la marca y nada pendiente, si la licencia vigente es la de la marca es que se cortó entre (b) y
+/// (c), y se termina; si no lo es, lo pendiente se ha perdido (no se deja leer): la marca ya no vale y
+/// el equipo sigue con la licencia y la base que tenía.
+pub async fn aplicar_cambio_de_negocio_pendiente(
+    svc: &dyn LicensingService,
+    base: &dyn BaseDelEquipo,
+) -> AppResult<Option<String>> {
+    let pendiente = svc.negocio_pendiente()?;
+    let Some(marca) = base.cambio_de_negocio_pendiente().await? else {
+        if pendiente.is_some() {
+            svc.descartar_pendiente()?;
+        }
+        return Ok(None);
+    };
+    let negocio = match pendiente {
+        Some(negocio) => negocio,
+        None => {
+            let vigente = svc.load_state()?.map(|st| st.tenant_id.trim().to_string());
+            if vigente.as_deref() != Some(marca.trim()) {
+                base.quitar_cambio_de_negocio().await?;
+                return Ok(None);
+            }
+            marca
+        }
+    };
+    base.apartar_si_no_es_de(&negocio).await?;
+    svc.aplicar_pendiente()?;
+    base.quitar_cambio_de_negocio().await?;
+    Ok(Some(negocio))
 }
 
 /// RI-52: suma el tiempo de otra clave a la licencia de este equipo, que ya está en marcha. Es el
@@ -127,11 +257,24 @@ pub async fn activate(
 /// La petición lleva `solo_sumar`, y con ella el servidor rechaza todo lo que no sea sumar (la
 /// clave de otro local ya activada, o este equipo sin licencia viva) sin tocar nada. Si aun así no
 /// volviera `tiempo_sumado`, es un error: nunca se da por bueno otro resultado.
-pub async fn sumar_clave(svc: &dyn LicensingService, clave: String) -> AppResult<LicenseActivateOutcome> {
+pub async fn sumar_clave(
+    svc: &dyn LicensingService,
+    base: &dyn BaseDelEquipo,
+    clave: String,
+) -> AppResult<LicenseActivateOutcome> {
     let solicitud = SolicitudActivacion::para_sumar(clave).map_err(AppError::validation)?;
 
+    // AUD-06: en el mismo turno que las activaciones, y tampoco con un cambio de negocio pendiente.
+    let _turno = ACTIVACIONES.lock().await;
+    sin_cambio_de_negocio_pendiente(base).await?;
+
     match svc.activar_remoto(&solicitud, None).await? {
-        ResultadoActivacion::Activada(concedido) if concedido.tiempo_sumado => {
+        ResultadoActivacion::Activada(concedido) => {
+            // AUD-01: sólo si de verdad ha sumado, y a la licencia de este negocio; con cualquier
+            // otro resultado no se guarda nada de lo concedido.
+            comprobar_lo_concedido(svc, true, &concedido)?;
+            // El token renovado de la licencia que ya había.
+            svc.guardar_credenciales()?;
             let estado = estado_inicial(concedido);
             reescribir(|| svc.save_state(&estado))?;
             Ok(LicenseActivateOutcome {
@@ -140,9 +283,12 @@ pub async fn sumar_clave(svc: &dyn LicensingService, clave: String) -> AppResult
                 email_hint: None,
                 cambio_de_equipo: false,
                 tiempo_sumado: true,
+                reinicia: false,
             })
         }
-        _ => Err(AppError::conflict("Esa clave no se ha podido añadir a este equipo.")),
+        ResultadoActivacion::CambioDispositivoRequerido { .. } => {
+            Err(AppError::conflict("Esa clave no se ha podido añadir a este equipo."))
+        }
     }
 }
 
@@ -524,7 +670,9 @@ fn estado_inicial(concedido: Concesion) -> LicenseLocalState {
 mod tests {
     use super::*;
     use crate::ports::licensing::EstadoConsultado;
+    use tpv_domain::licensing::Sello;
     use async_trait::async_trait;
+    use std::sync::Arc;
 
     const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
@@ -725,19 +873,149 @@ mod tests {
         assert!(estado.activated_at_ms > 0);
     }
 
+    /// Lo que pasa en el equipo al activar y al arrancar, en el orden en que pasa, y dónde se corta.
+    #[derive(Default)]
+    struct Equipo {
+        escrituras: Mutex<Vec<&'static str>>,
+        /// El paso que no llega a darse, como si el proceso se cortara justo antes.
+        corte: Mutex<Option<&'static str>>,
+        /// Lo que la base dice de sí misma.
+        sello: Mutex<Option<Sello>>,
+        marca: Mutex<bool>,
+        /// El cambio de negocio anotado, si lo hay.
+        cambio: Mutex<Option<String>>,
+        /// Si se ha apartado lo que había (al arrancar).
+        apartada: Mutex<bool>,
+        /// De qué negocio son las credenciales vigentes.
+        credenciales: Mutex<Option<String>>,
+        /// La licencia vigente.
+        guardado: Mutex<Option<LicenseLocalState>>,
+        /// Lo pendiente: la licencia y las credenciales de otro negocio, hasta el arranque.
+        pendiente: Mutex<Option<LicenseLocalState>>,
+        /// Lo que concedió la última activación.
+        concedido: Mutex<Option<String>>,
+    }
+
+    impl Equipo {
+        fn con_sello(sello: Option<&str>) -> Arc<Self> {
+            let equipo = Equipo::default();
+            *equipo.sello.lock().unwrap() = Some(Sello::leido(sello));
+            Arc::new(equipo)
+        }
+        fn sello(&self) -> Sello {
+            self.sello.lock().unwrap().clone().unwrap_or(Sello::Ninguno)
+        }
+        fn con_licencia(self: Arc<Self>, negocio: &str) -> Arc<Self> {
+            let mut st = state_con_expiry(None);
+            st.tenant_id = negocio.into();
+            *self.guardado.lock().unwrap() = Some(st);
+            *self.credenciales.lock().unwrap() = Some(negocio.into());
+            self
+        }
+        fn escribir(&self, que: &'static str) -> AppResult<()> {
+            if *self.corte.lock().unwrap() == Some(que) {
+                return Err(AppError::internal(format!("corte antes de: {que}")));
+            }
+            self.escrituras.lock().unwrap().push(que);
+            Ok(())
+        }
+        fn escrituras(&self) -> Vec<&'static str> {
+            self.escrituras.lock().unwrap().clone()
+        }
+        fn negocio_guardado(&self) -> Option<String> {
+            self.guardado.lock().unwrap().as_ref().map(|s| s.tenant_id.clone())
+        }
+        fn negocio_pendiente(&self) -> Option<String> {
+            self.pendiente.lock().unwrap().as_ref().map(|s| s.tenant_id.clone())
+        }
+        fn cortar(&self, que: Option<&'static str>) {
+            *self.corte.lock().unwrap() = que;
+        }
+    }
+
+    /// La base del equipo: su sello, la marca de traslado, la del cambio de negocio y lo apartado.
+    struct BaseDeMentira(Arc<Equipo>);
+
+    #[async_trait]
+    impl BaseDelEquipo for BaseDeMentira {
+        async fn sello(&self) -> AppResult<Sello> {
+            Ok(self.0.sello())
+        }
+        async fn sellar(&self, negocio: &str) -> AppResult<()> {
+            self.0.escribir("sellar")?;
+            *self.0.sello.lock().unwrap() = Some(Sello::De(negocio.to_string()));
+            Ok(())
+        }
+        async fn marcar_traslado(&self) -> AppResult<()> {
+            self.0.escribir("marca")?;
+            *self.0.marca.lock().unwrap() = true;
+            Ok(())
+        }
+        async fn marcar_cambio_de_negocio(&self, negocio: &str) -> AppResult<()> {
+            self.0.escribir("cambio")?;
+            *self.0.cambio.lock().unwrap() = Some(negocio.to_string());
+            Ok(())
+        }
+        async fn cambio_de_negocio_pendiente(&self) -> AppResult<Option<String>> {
+            Ok(self.0.cambio.lock().unwrap().clone())
+        }
+        async fn apartar_si_no_es_de(&self, negocio: &str) -> AppResult<()> {
+            // Como la de verdad: todo lo del equipo, salvo una base ya sellada con `negocio`; y si
+            // no queda nada, nada.
+            let suya = self.0.sello() == Sello::De(negocio.to_string());
+            if !suya && !*self.0.apartada.lock().unwrap() {
+                self.0.escribir("apartar")?;
+                *self.0.apartada.lock().unwrap() = true;
+                *self.0.sello.lock().unwrap() = Some(Sello::Ninguno);
+            }
+            Ok(())
+        }
+        async fn quitar_cambio_de_negocio(&self) -> AppResult<()> {
+            self.0.escribir("quitar")?;
+            *self.0.cambio.lock().unwrap() = None;
+            Ok(())
+        }
+    }
+
     /// Un servicio de licencias que contesta a la activación con lo que se le diga.
     struct ServicioQueActiva {
         respuesta: Mutex<Option<ResultadoActivacion>>,
-        guardado: Mutex<Option<LicenseLocalState>>,
+        equipo: Arc<Equipo>,
     }
 
     #[async_trait]
     impl LicensingService for ServicioQueActiva {
         fn load_state(&self) -> AppResult<Option<LicenseLocalState>> {
-            Ok(None)
+            Ok(self.equipo.guardado.lock().unwrap().clone())
         }
         fn save_state(&self, state: &LicenseLocalState) -> AppResult<()> {
-            *self.guardado.lock().unwrap() = Some(state.clone());
+            self.equipo.escribir("estado")?;
+            *self.equipo.guardado.lock().unwrap() = Some(state.clone());
+            Ok(())
+        }
+        fn guardar_pendiente(&self, estado: &LicenseLocalState) -> AppResult<()> {
+            self.equipo.escribir("pendiente")?;
+            *self.equipo.pendiente.lock().unwrap() = Some(estado.clone());
+            Ok(())
+        }
+        fn negocio_pendiente(&self) -> AppResult<Option<String>> {
+            Ok(self.equipo.negocio_pendiente())
+        }
+        fn aplicar_pendiente(&self) -> AppResult<()> {
+            let pendiente = self.equipo.pendiente.lock().unwrap().clone();
+            if let Some(estado) = pendiente {
+                self.equipo.escribir("aplicar")?;
+                *self.equipo.credenciales.lock().unwrap() = Some(estado.tenant_id.clone());
+                *self.equipo.guardado.lock().unwrap() = Some(estado);
+                *self.equipo.pendiente.lock().unwrap() = None;
+            }
+            Ok(())
+        }
+        fn descartar_pendiente(&self) -> AppResult<()> {
+            if self.equipo.pendiente.lock().unwrap().is_some() {
+                self.equipo.escribir("descartar")?;
+                *self.equipo.pendiente.lock().unwrap() = None;
+            }
             Ok(())
         }
         fn delete_state(&self, _: Option<&str>) -> AppResult<()> {
@@ -751,7 +1029,16 @@ mod tests {
             _: &SolicitudActivacion,
             _: Option<&str>,
         ) -> AppResult<ResultadoActivacion> {
-            Ok(self.respuesta.lock().unwrap().take().expect("una sola activación por test"))
+            let respuesta = self.respuesta.lock().unwrap().take().expect("una sola activación por test");
+            if let ResultadoActivacion::Activada(c) = &respuesta {
+                *self.equipo.concedido.lock().unwrap() = Some(c.tenant_id.clone());
+            }
+            Ok(respuesta)
+        }
+        fn guardar_credenciales(&self) -> AppResult<()> {
+            self.equipo.escribir("credenciales")?;
+            *self.equipo.credenciales.lock().unwrap() = self.equipo.concedido.lock().unwrap().clone();
+            Ok(())
         }
         async fn solicitar_cambio_dispositivo(&self, _: &str) -> AppResult<()> {
             Ok(())
@@ -822,6 +1109,9 @@ mod tests {
             _: &SolicitudActivacion,
             _: Option<&str>,
         ) -> AppResult<ResultadoActivacion> {
+            unreachable!("el gate no activa")
+        }
+        fn guardar_credenciales(&self) -> AppResult<()> {
             unreachable!("el gate no activa")
         }
         async fn solicitar_cambio_dispositivo(&self, _: &str) -> AppResult<()> {
@@ -1020,20 +1310,35 @@ mod tests {
         assert_eq!(*svc.tokens.lock().unwrap(), ["token-1"]);
     }
 
-    fn activacion(respuesta: ResultadoActivacion) -> (ServicioQueActiva, LicenseActivateInput) {
-        let svc = ServicioQueActiva {
-            respuesta: Mutex::new(Some(respuesta)),
-            guardado: Mutex::new(None),
-        };
-        let input = LicenseActivateInput {
+    fn entrada() -> LicenseActivateInput {
+        LicenseActivateInput {
             activation_key: "TPV-AAAA-BBBB-CCCC".into(),
             business_name: "Bar de Pruebas".into(),
             legal_name: None,
             phone: None,
             country: None,
             device_change_code: Some("123456".into()),
-        };
-        (svc, input)
+        }
+    }
+
+    /// Una activación sobre `equipo`: el servicio que contesta `respuesta` y la base.
+    fn sobre(equipo: &Arc<Equipo>, respuesta: ResultadoActivacion) -> (ServicioQueActiva, BaseDeMentira) {
+        (
+            ServicioQueActiva { respuesta: Mutex::new(Some(respuesta)), equipo: equipo.clone() },
+            BaseDeMentira(equipo.clone()),
+        )
+    }
+
+    /// Activa en `equipo` el negocio `tenant-1`, diga lo que diga el servidor del traslado.
+    async fn activar_en(equipo: &Arc<Equipo>, servidor_dice_traslado: bool) -> AppResult<LicenseActivateOutcome> {
+        let (svc, base) = sobre(equipo, ResultadoActivacion::Activada(concesion(servidor_dice_traslado)));
+        activate(&svc, &base, entrada()).await
+    }
+
+    /// El arranque de `equipo`.
+    async fn arrancar(equipo: &Arc<Equipo>) -> AppResult<Option<String>> {
+        let svc = ServicioQueActiva { respuesta: Mutex::new(None), equipo: equipo.clone() };
+        aplicar_cambio_de_negocio_pendiente(&svc, &BaseDeMentira(equipo.clone())).await
     }
 
     fn concesion(cambio_de_equipo: bool) -> Concesion {
@@ -1049,30 +1354,198 @@ mod tests {
         }
     }
 
-    /// Lo que decide si la base de este equipo se reconstruye desde la nube es lo que diga el
-    /// servidor, no que se haya escrito un código: con el código puesto, una activación en el
-    /// mismo equipo no es un traslado y no puede llevarse por delante sus datos.
+    /// AUD-06 · Qué se hace con la base lo decide su sello. Con el mismo negocio se guarda lo concedido
+    /// como vigente; con otro (o una base ilegible), nada pasa a vigente: queda pendiente, se anota el
+    /// cambio y se pide reiniciar.
     #[tokio::test]
-    async fn la_activacion_dice_si_ha_sido_un_traslado_segun_el_servidor() {
-        let (svc, input) = activacion(ResultadoActivacion::Activada(concesion(true)));
-        let outcome = activate(&svc, input).await.unwrap();
-        assert_eq!(outcome.outcome, "activated");
-        assert!(outcome.cambio_de_equipo);
-        assert!(svc.guardado.lock().unwrap().is_some(), "la licencia queda guardada igual");
+    async fn la_activacion_decide_con_el_sello_de_la_base() {
+        for (sello, servidor, pasos, reinicia) in [
+            // Un equipo recién instalado: su base no es de nadie todavía, y pasa a ser de la licencia.
+            (Sello::Ninguno, false, vec!["sellar", "credenciales", "estado"], false),
+            // El mismo negocio que vuelve (una anulación que se deshizo): su base vale tal cual.
+            (Sello::De("tenant-1".into()), false, vec!["credenciales", "estado"], false),
+            // El mismo negocio con la licencia traída de otro equipo: la base es de antes.
+            (Sello::De("tenant-1".into()), true, vec!["marca", "credenciales", "estado"], false),
+            (Sello::Ninguno, true, vec!["marca", "credenciales", "estado"], false),
+            // Otro negocio, o no se sabe de quién es: pendiente, la marca la última, y reinicio.
+            (Sello::De("tenant-anterior".into()), false, vec!["pendiente", "cambio"], true),
+            (Sello::De("tenant-anterior".into()), true, vec!["pendiente", "cambio"], true),
+            (Sello::Ilegible, false, vec!["pendiente", "cambio"], true),
+        ] {
+            let equipo = Arc::new(Equipo::default());
+            *equipo.sello.lock().unwrap() = Some(sello.clone());
+            let outcome = activar_en(&equipo, servidor).await.unwrap();
 
-        let (svc, input) = activacion(ResultadoActivacion::Activada(concesion(false)));
-        assert!(!activate(&svc, input).await.unwrap().cambio_de_equipo);
+            assert_eq!(outcome.outcome, "activated");
+            assert_eq!(equipo.escrituras(), pasos, "sello {sello:?}, servidor {servidor}");
+            assert_eq!(outcome.reinicia, reinicia, "sello {sello:?}, servidor {servidor}");
+            if reinicia {
+                assert_eq!(equipo.negocio_guardado(), None, "nada vigente cambia");
+                assert_eq!(*equipo.credenciales.lock().unwrap(), None);
+                assert_eq!(equipo.negocio_pendiente().as_deref(), Some("tenant-1"));
+                assert_eq!(equipo.cambio.lock().unwrap().as_deref(), Some("tenant-1"));
+            } else {
+                assert_eq!(equipo.negocio_guardado().as_deref(), Some("tenant-1"));
+                assert_eq!(equipo.credenciales.lock().unwrap().as_deref(), Some("tenant-1"));
+            }
+        }
+    }
+
+    /// AUD-06 · Con la licencia del negocio anterior todavía guardada (el comando, sin pasar por «Borrar
+    /// y volver a activar»), la de otro negocio queda pendiente: lo vigente sigue siendo del anterior,
+    /// credenciales incluidas, hasta el arranque.
+    #[tokio::test]
+    async fn la_licencia_de_otro_negocio_queda_pendiente_y_lo_vigente_no_cambia() {
+        let equipo = Equipo::con_sello(Some("tenant-anterior")).con_licencia("tenant-anterior");
+
+        let outcome = activar_en(&equipo, false).await.unwrap();
+
+        assert!(outcome.cambio_de_equipo && outcome.reinicia);
+        assert_eq!(equipo.escrituras(), ["pendiente", "cambio"]);
+        assert_eq!(equipo.negocio_guardado().as_deref(), Some("tenant-anterior"));
+        assert_eq!(equipo.credenciales.lock().unwrap().as_deref(), Some("tenant-anterior"));
+        assert_eq!(equipo.negocio_pendiente().as_deref(), Some("tenant-1"));
+        assert_eq!(equipo.sello(), Sello::De("tenant-anterior".into()));
+    }
+
+    /// AUD-06 · El arranque aplica el cambio: aparta, aplica lo pendiente y quita la marca, por ese
+    /// orden. Cortado antes de cualquiera de los tres pasos, el arranque siguiente lo termina.
+    #[tokio::test]
+    async fn el_arranque_aplica_el_cambio_y_aguanta_un_corte_en_cualquier_paso() {
+        for corte in [None, Some("apartar"), Some("aplicar"), Some("quitar")] {
+            let equipo = Equipo::con_sello(Some("tenant-anterior")).con_licencia("tenant-anterior");
+            activar_en(&equipo, false).await.unwrap();
+            equipo.escrituras.lock().unwrap().clear();
+
+            equipo.cortar(corte);
+            let primera = arrancar(&equipo).await;
+            assert_eq!(primera.is_err(), corte.is_some(), "corte en {corte:?}");
+            equipo.cortar(None);
+            if corte.is_some() {
+                assert_eq!(arrancar(&equipo).await.unwrap().as_deref(), Some("tenant-1"), "corte en {corte:?}");
+            }
+
+            assert!(*equipo.apartada.lock().unwrap(), "corte en {corte:?}");
+            assert_eq!(equipo.negocio_guardado().as_deref(), Some("tenant-1"), "corte en {corte:?}");
+            assert_eq!(equipo.credenciales.lock().unwrap().as_deref(), Some("tenant-1"), "corte en {corte:?}");
+            assert_eq!(equipo.negocio_pendiente(), None, "corte en {corte:?}");
+            assert_eq!(*equipo.cambio.lock().unwrap(), None, "corte en {corte:?}");
+            let pasos = equipo.escrituras();
+            let orden: Vec<&str> = pasos.iter().copied().filter(|p| ["apartar", "aplicar", "quitar"].contains(p)).collect();
+            assert_eq!(orden, ["apartar", "aplicar", "quitar"], "corte en {corte:?}: {pasos:?}");
+            // Y arrancar otra vez ya no hace nada.
+            assert_eq!(arrancar(&equipo).await.unwrap(), None);
+        }
+    }
+
+    /// AUD-06 · Con un cambio de negocio pendiente no se activa ni se canjea nada, sea de quien sea la
+    /// clave (otro negocio más, o el de la base): se rechaza antes de pedir nada a la nube, y lo
+    /// pendiente y la anotación se quedan como estaban hasta el arranque.
+    #[tokio::test]
+    async fn con_un_cambio_pendiente_no_se_activa_ni_se_canjea_nada() {
+        let equipo = Equipo::con_sello(Some("tenant-anterior")).con_licencia("tenant-anterior");
+        activar_en(&equipo, false).await.unwrap();
+        let antes = equipo.escrituras();
+
+        for negocio in ["tenant-otro", "tenant-anterior", "tenant-1"] {
+            let (svc, base) = sobre(
+                &equipo,
+                ResultadoActivacion::Activada(Concesion { tenant_id: negocio.into(), ..concesion(false) }),
+            );
+            let err = activate(&svc, &base, entrada()).await.unwrap_err();
+            assert!(err.to_string().contains("cambio de licencia pendiente"), "{negocio}: {err}");
+            assert!(svc.respuesta.lock().unwrap().is_some(), "{negocio}: no se ha pedido nada a la nube");
+
+            let (svc, base) = sobre(
+                &equipo,
+                ResultadoActivacion::Activada(Concesion { tenant_id: negocio.into(), tiempo_sumado: true, ..concesion(false) }),
+            );
+            assert!(sumar_clave(&svc, &base, "TPV-AAAA-BBBB-CCCC".into()).await.is_err(), "{negocio}");
+            assert!(svc.respuesta.lock().unwrap().is_some(), "{negocio}");
+        }
+        assert_eq!(equipo.escrituras(), antes, "no se ha escrito nada");
+        assert_eq!(equipo.negocio_pendiente().as_deref(), Some("tenant-1"));
+        assert_eq!(equipo.cambio.lock().unwrap().as_deref(), Some("tenant-1"));
+        assert_eq!(equipo.negocio_guardado().as_deref(), Some("tenant-anterior"));
+
+        // El arranque lo termina, y después ya se puede activar.
+        assert_eq!(arrancar(&equipo).await.unwrap().as_deref(), Some("tenant-1"));
+        assert!(activar_en(&equipo, false).await.is_ok());
+    }
+
+    /// AUD-06 · Lo pendiente sin anotar (la activación se cortó antes de anotar el cambio) se descarta
+    /// al arrancar, sin apartar nada. Y una anotación sin nada pendiente cuya licencia no es la
+    /// vigente (lo pendiente se ha perdido) sólo se quita: el equipo sigue con lo que tenía.
+    #[tokio::test]
+    async fn lo_que_no_esta_completo_no_aparta_nada() {
+        let equipo = Equipo::con_sello(Some("tenant-anterior")).con_licencia("tenant-anterior");
+        equipo.cortar(Some("cambio"));
+        assert!(activar_en(&equipo, false).await.is_err());
+        equipo.cortar(None);
+        assert_eq!(equipo.negocio_pendiente().as_deref(), Some("tenant-1"));
+        assert_eq!(arrancar(&equipo).await.unwrap(), None);
+        assert_eq!(equipo.negocio_pendiente(), None);
+        assert!(!*equipo.apartada.lock().unwrap());
+        assert_eq!(equipo.negocio_guardado().as_deref(), Some("tenant-anterior"));
+
+        let equipo = Equipo::con_sello(Some("tenant-anterior")).con_licencia("tenant-anterior");
+        activar_en(&equipo, false).await.unwrap();
+        *equipo.pendiente.lock().unwrap() = None;
+        assert_eq!(arrancar(&equipo).await.unwrap(), None);
+        assert!(!*equipo.apartada.lock().unwrap());
+        assert_eq!(*equipo.cambio.lock().unwrap(), None);
+        assert_eq!(equipo.negocio_guardado().as_deref(), Some("tenant-anterior"));
+    }
+
+    /// AUD-01, en el caso de uso: lo concedido se contrasta con lo pedido ANTES de tocar la base o el
+    /// almacén de secretos. Una suma que la nube haya aplicado a otro negocio no deja nada en el equipo.
+    #[tokio::test]
+    async fn lo_concedido_que_no_es_lo_pedido_no_toca_nada() {
+        let equipo = Equipo::con_sello(Some("tenant-propio")).con_licencia("tenant-propio");
+        let (svc, base) = sobre(
+            &equipo,
+            ResultadoActivacion::Activada(Concesion { tiempo_sumado: true, ..concesion(false) }),
+        );
+        let err = activate(&svc, &base, entrada()).await.unwrap_err();
+        assert!(err.to_string().contains("otro negocio"), "{err}");
+        assert!(equipo.escrituras().is_empty(), "no se ha hecho nada: {:?}", equipo.escrituras());
+        assert_eq!(equipo.negocio_guardado().as_deref(), Some("tenant-propio"));
+        assert_eq!(equipo.negocio_pendiente(), None);
     }
 
     #[tokio::test]
     async fn pedir_el_codigo_no_es_todavia_un_traslado() {
-        let (svc, input) = activacion(ResultadoActivacion::CambioDispositivoRequerido {
-            email_hint: "b***@bar.test".into(),
-        });
-        let outcome = activate(&svc, input).await.unwrap();
+        let equipo = Equipo::con_sello(Some("tenant-anterior"));
+        let (svc, base) = sobre(
+            &equipo,
+            ResultadoActivacion::CambioDispositivoRequerido { email_hint: "b***@bar.test".into() },
+        );
+        let outcome = activate(&svc, &base, entrada()).await.unwrap();
         assert_eq!(outcome.outcome, "device_change_required");
-        assert!(!outcome.cambio_de_equipo);
-        assert!(svc.guardado.lock().unwrap().is_none());
+        assert!(!outcome.cambio_de_equipo && !outcome.reinicia);
+        assert!(equipo.escrituras().is_empty(), "no se toca nada en el equipo");
+    }
+
+    /// Sumar una clave guarda el token renovado sólo si de verdad ha sumado, y a la licencia de este
+    /// negocio (AUD-01): con cualquier otra respuesta, lo concedido no llega al almacén de secretos.
+    #[tokio::test]
+    async fn sumar_una_clave_solo_guarda_lo_concedido_si_ha_sumado_a_este_negocio() {
+        let sumada = |negocio: &str| Concesion { tiempo_sumado: true, tenant_id: negocio.into(), ..concesion(false) };
+
+        let equipo = Equipo::con_sello(Some("tenant-1")).con_licencia("tenant-1");
+        let (svc, base) = sobre(&equipo, ResultadoActivacion::Activada(sumada("tenant-1")));
+        assert!(sumar_clave(&svc, &base, "TPV-AAAA-BBBB-CCCC".into()).await.unwrap().tiempo_sumado);
+        assert_eq!(equipo.escrituras(), ["credenciales", "estado"]);
+
+        for (que, respuesta) in [
+            ("no ha sumado", ResultadoActivacion::Activada(concesion(false))),
+            ("ha sumado a otro negocio", ResultadoActivacion::Activada(sumada("tenant-otro"))),
+        ] {
+            let equipo = Equipo::con_sello(Some("tenant-1")).con_licencia("tenant-1");
+            let (svc, base) = sobre(&equipo, respuesta);
+            assert!(sumar_clave(&svc, &base, "TPV-AAAA-BBBB-CCCC".into()).await.is_err(), "{que}");
+            assert!(equipo.escrituras().is_empty(), "{que}");
+        }
     }
 
     #[test]

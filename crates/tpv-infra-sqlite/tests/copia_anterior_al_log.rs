@@ -73,6 +73,9 @@ impl PairingService for Nube {
     fn handy_get_tenant(&self) -> AppResult<Option<String>> {
         unimplemented!()
     }
+    fn negocio_de_la_licencia(&self) -> AppResult<Option<String>> {
+        Ok(Some("negocio-de-prueba".into()))
+    }
     fn tpv_server_signed_headers(&self, _: &str, _: &str, _: &str, _: &[u8]) -> AppResult<ApiSignedHeaders> {
         unimplemented!()
     }
@@ -86,7 +89,7 @@ impl PairingService for Nube {
     async fn pair_create(&self) -> AppResult<PairCreateResult> {
         unimplemented!()
     }
-    async fn upload_image(&self, _: &str, _: &str, _: &str, _: Vec<u8>) -> AppResult<ResultadoSubidaImagen> {
+    async fn upload_image(&self, _: &str, _: &str, _: &str, _: Vec<u8>, _: &str) -> AppResult<ResultadoSubidaImagen> {
         unimplemented!()
     }
     async fn delete_image(&self, _: &str, _: &str) -> AppResult<()> {
@@ -210,7 +213,7 @@ async fn elegir_la_nube_tras_una_copia_anterior_al_log_no_sube_el_outbox_de_la_c
 
     // 1) La copia: `u-baja` activo, administrador y con el PIN viejo; el cursor en 10; y en el
     //    outbox lo que puso ese PIN, que el equipo de entonces subió después.
-    let db = init_main_db(&dir, true).await.unwrap();
+    let db = init_main_db(&dir, Some("negocio-de-prueba")).await.unwrap();
     for (id, email, pin) in [("u-duena", "duena@bar.test", hash_pin("9999").unwrap()), ("u-baja", "baja@bar.test", pin_viejo.clone())] {
         escribir(
             &db,
@@ -237,12 +240,12 @@ async fn elegir_la_nube_tras_una_copia_anterior_al_log_no_sube_el_outbox_de_la_c
     for f in ["data.db", "data.db-wal", "data.db-shm"] {
         let _ = std::fs::remove_file(dir.join(f));
     }
-    let vacia = init_main_db(&dir, true).await.unwrap();
+    let vacia = init_main_db(&dir, Some("negocio-de-prueba")).await.unwrap();
     recovery::asegurar_reemplazo_seguro(&vacia).await.unwrap();
-    let preparada = recovery::prepare_restore(&dir, &copia.id).await.unwrap();
+    let preparada = recovery::prepare_restore(&dir, &copia.id, Some("negocio-de-prueba")).await.unwrap();
     cerrar(vacia).await;
     recovery::install_prepared(&dir, &preparada).unwrap();
-    let db = init_main_db(&dir, true).await.unwrap();
+    let db = init_main_db(&dir, Some("negocio-de-prueba")).await.unwrap();
     assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::ReconciliationPending);
     let repo = Arc::new(SqliteSyncRepository::new(db.clone()));
     let ctx = Ctx { db: db.clone(), repo: repo.clone() };
@@ -311,7 +314,7 @@ async fn elegir_la_nube_tras_una_copia_anterior_al_log_no_sube_el_outbox_de_la_c
 #[tokio::test]
 async fn tras_traer_la_nube_la_reconciliacion_tampoco_termina_contra_un_worker_sin_purgado_hasta() {
     let dir = dir_temporal();
-    let db = init_main_db(&dir, true).await.unwrap();
+    let db = init_main_db(&dir, Some("negocio-de-prueba")).await.unwrap();
 
     // Lo que tiene la nube: una administradora. Se toma con las columnas de esta versión y la base
     // se deja sin usuarios, como una que se ha perdido.

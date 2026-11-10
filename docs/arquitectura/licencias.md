@@ -230,6 +230,18 @@ AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_repla
 es que otro la canjeó mientras éste aprovisionaba su base, `license_already_used` (AUD-07). La base
 de Turso aprovisionada para el perdedor se queda vacía.
 
+**En un equipo que era de otro negocio** (AUD-06). Con la licencia anulada o trasladada, el equipo ya
+no tiene una licencia viva a la que sumar tiempo, así que una clave sin estrenar abre un negocio
+nuevo; pero su base local es la del anterior. Si el equipo era la Main (`role = 'tpv'`) de otro
+negocio con alguna licencia (esté como esté) y sin retirar, la respuesta lleva `cambioDeEquipo: true`,
+igual que un traslado; una Handy no guarda base, y no cuenta. Es un aviso: lo que protege a la Main es el sello de su base (abajo), que no depende de
+que esta respuesta llegue.
+No cuentan como negocio anterior el que deja a medias una primera activación fallida (dio de alta el
+equipo y no llegó a tener licencia) ni el retirado (`status = 'deleted'`, lo que deja cada tanda del
+E2E, cuyo equipo estrena la siguiente con la carpeta de datos borrada). Sólo se mira en la primera
+activación: el equipo que vuelve a la licencia de su negocio conserva su base aunque su fila haya
+pasado por otro.
+
 ### 3. Cambio de equipo (la licencia ya está en otro)
 
 Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email`):
@@ -313,12 +325,69 @@ el PIN de un administrador podría cambiarlo y llevarse la licencia.
   registrada (`device_key_missing`). Toda puerta que dé de alta un dispositivo comprueba la firma de
   la clave que le presentan y llama a ese guardián (hoy: activar y recoger el token del
   emparejamiento). Dentro del mismo negocio, el emparejamiento sí deja que la clave cambie: es la vía
-  de recuperación de una Handy revocada. Activar, no.
+  de recuperación de una Handy revocada. Activar, no. El guardián devuelve el negocio en el que
+  estaba la fila, que deja de saberse en cuanto el alta la muda (AUD-06).
 - Entregan la **DEK** del tenant (`getOrCreateTenantFieldDek`, la existente si ya la hay), para que
   un equipo nuevo pueda descifrar la PII del personal.
-- Devuelven el token de sesión (JWT HS256 de 30 días) y `cambioDeEquipo`. **Quién decide que hubo
-  traslado es el servidor**: con `cambioDeEquipo`, el TPV marca `traslado-pendiente` y reconstruye su
-  base desde la nube ([recuperacion.md](recuperacion.md)).
+- Devuelven el token de sesión (JWT HS256 de 30 días) y `cambioDeEquipo`. **Que la licencia viene de
+  otro equipo sólo lo sabe el servidor**, y no depende de que se haya escrito un código: con
+  `cambioDeEquipo`, la base del mismo negocio es de antes del traslado y se reconstruye desde la nube
+  ([recuperacion.md](recuperacion.md)).
+
+### Una base sólo se usa con la licencia de su negocio
+
+De qué negocio es una base lo dice ella misma: su **sello**, la tabla local `_Negocio` (migración
+`0002`), que viaja en cada copia. `tpv_domain::licensing::que_hacer_con_la_base` compara el sello con
+el negocio de la licencia y es la misma regla en los tres sitios donde se mira: al activar, al abrir
+la base (`connection::init_main_db`) y al restaurar o importar una copia
+([recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)).
+
+| La base | La licencia viene de otro equipo | Qué se hace |
+|---|---|---|
+| Lleva el sello del negocio de la licencia | No | Se usa |
+| No lleva sello (recién creada, o anterior a los sellos) | No | Se sella con ese negocio y se usa |
+| Lleva su sello, o ninguno | Sí | Se marca el traslado y se reconstruye desde la nube |
+| Lleva el sello de otro negocio, o no se deja leer | Da igual | La licencia queda pendiente, el TPV se reinicia y el arranque aparta la base entera antes de aplicarla |
+
+`activate` (el caso de uso), con la respuesta de la nube en la mano: primero contrasta lo concedido
+con lo pedido (AUD-01, `comprobar_concesion`: quien pidió sólo sumar espera una suma, y una suma no
+cambia de negocio; si no, no toca nada). Después decide con el sello:
+
+- **otro negocio**: guarda lo concedido **como pendiente** (`guardar_pendiente`: el token y la DEK en
+  entradas aparte del almacén de secretos, el estado en `license_state.pending.json`, el último), sin
+  tocar la licencia vigente, anota el cambio (`AppData/cambio-de-negocio`) y contesta `reinicia`. El
+  comando pide a Tauri que reinicie el TPV a los cuatro segundos, y hasta entonces todo sigue siendo
+  del negocio anterior: la licencia, el token y la DEK vigentes son los suyos. Lo aplica el arranque,
+  ése o cualquiera posterior si el reinicio no llega (`aplicar_cambio_de_negocio_pendiente`):
+  aparta lo del equipo, pasa lo pendiente a vigente (`aplicar_pendiente`) y quita la anotación, en
+  ese orden y antes de abrir nada
+  ([recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio));
+- **el mismo negocio, o una base sin sello**: descarta lo que hubiera pendiente sin anotar, sella la
+  base (nunca encima de un sello distinto: eso es un error) o marca el traslado, y guarda las
+  credenciales (`guardar_credenciales`: el token y la DEK) y, lo último, `license_state.json`.
+
+Las activaciones y los canjes (`sumar_clave`) van de uno en uno en todo el proceso: un cerrojo del
+caso de uso cubre la petición a la nube (lo concedido espera en el adaptador, en un solo sitio), la
+decisión, el sello y lo que se guarda. Y con un cambio de negocio anotado no se activa ni se canjea
+nada: se rechaza antes de pedir nada a la nube, y lo que hay que hacer es reiniciar.
+
+`activar_remoto` no guarda nada: lo concedido espera en el adaptador a que el caso de uso decida
+dónde va. No necesita saber qué licencia se borró ni que el servidor avise: lo que decide está en la
+base. Un corte en cualquier punto deja o la licencia de antes o el cambio entero pendiente; repetir
+una activación cortada antes de anotar el cambio llega al mismo sitio. `sumar_clave` hace la misma comprobación de AUD-01 antes de
+guardar nada.
+
+Las credenciales guardadas también dicen de qué negocio son, y no se usan con otro:
+
+- en modo `tpv`, la Main sólo firma con un token cuyo `tenantId` sea el de su licencia
+  (`comprobar_negocio_del_token`), y `/status` no se consulta con uno ajeno; entre guardar el token
+  de una licencia y guardar la licencia (una activación o un arranque cortados) no sale nada firmado;
+- una subida de imagen lleva el negocio con el que empezó y cada intento comprueba que el token con
+  el que firma es de ese negocio;
+- la DEK se guarda ligada a su negocio (`set_field_dek_de`) y sólo se entrega para el sello de la
+  base que se cifra. Si no se puede guardar, la que hubiera no se usa: se trabaja sin cifrar antes que
+  con la clave de otro negocio. Una DEK guardada antes de ligarlas no dice de quién es y no se usa
+  hasta la siguiente activación.
 
 ## El gate
 
@@ -355,7 +424,9 @@ frescura, y decide
 **El gate nunca borra la licencia local** (RI-09). Un `revoked` o `device_replaced` firmado bloquea con
 su motivo y la conserva. Si el servidor se corrige (se deshace la anulación, o era un error nuestro:
 una base equivocada, una copia restaurada), basta con reintentar. El único borrado es «Borrar y volver
-a activar» (`clear_state`), que anota el motivo para que la pantalla de activación lo explique.
+a activar» (`clear_state`), que anota el motivo para que la pantalla de activación lo explique. La
+pantalla de bloqueo y la de activación avisan antes de que activar otra licencia aparta los datos
+del equipo; no lo impiden.
 Una comprobación que estaba esperando a la nube mientras se borraba, se activaba o se sumaba una clave
 no guarda lo que trae, ni el estado ni el token: vuelve a comprobar la licencia que haya entonces.
 `/refresh` y la readmisión de una Main adjuntan a su rechazo la misma aserción firmada que daría
@@ -490,7 +561,9 @@ no silencie el del siguiente.
 |---|---|
 | `device_id` y clave privada ed25519 del dispositivo | Almacén de secretos: keyring del sistema en escritorio, Android Keystore (AES-GCM) en la Handy |
 | Estado de la licencia (`tenant_id`, `device_id`, token, estado, caducidad, última comprobación) | `AppData/license_state.json` |
-| DEK de la PII del personal | Almacén de secretos (y en la base central, cifrada con `LICENSE_STORE_KEY`) |
+| DEK de la PII del personal, con el negocio al que pertenece | Almacén de secretos (y en la base central, cifrada con `LICENSE_STORE_KEY`) |
+| De qué negocio es la base local | Su sello, `_Negocio`, dentro de `data.db` y de cada copia |
+| La licencia de otro negocio que espera al reinicio | Su token y su DEK en entradas aparte del almacén de secretos; su estado en `AppData/license_state.pending.json`. La aplica el arranque |
 
 El device-proof firma `ts \n MÉTODO \n ruta \n sha256(token) \n sha256(cuerpo)` (`device.rs`), con ±2
 minutos de margen en el worker. La activación firma lo mismo con el token vacío

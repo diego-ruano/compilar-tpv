@@ -22,6 +22,8 @@ use tpv_contracts::errors::ErrorCode;
 use tpv_contracts::recovery::{LocalBackupInfo, RecoveryState, RecoveryStatus};
 
 use crate::db::Db;
+use tpv_application::ports::licensing::BaseDelEquipo;
+use tpv_domain::licensing::{procedencia, que_hacer_con_la_base, Procedencia, QueHacerConLaBase, Sello};
 
 const BACKUP_DIR: &str = "backups";
 const BACKUP_PREFIX: &str = "data-";
@@ -56,6 +58,33 @@ const ANTES_DE_LA_NUBE_PREFIX: &str = "antes-de-la-nube-";
 /// reconstruido desde la nube. Vive FUERA de `data.db` a propósito: restaurar una copia local
 /// no puede borrarla, porque esa copia también es de antes del traslado.
 const MARCA_TRASLADO: &str = "traslado-pendiente";
+/// AUD-06 · Marca en AppData de un cambio de negocio pendiente: se ha activado la licencia de otro
+/// negocio que el de la base, guardada como pendiente, y el TPV se reinicia. Lleva el negocio
+/// activado y se escribe entera o no se escribe. Mientras está, el proceso que la puso sigue siendo
+/// del negocio de la base. Sólo la quita el arranque, cuando ya ha apartado la base y aplicado lo
+/// pendiente (`tpv_application::use_cases::licensing::aplicar_cambio_de_negocio_pendiente`).
+const MARCA_CAMBIO_DE_NEGOCIO: &str = "cambio-de-negocio";
+/// AUD-06 · Dentro de una carpeta `negocio-anterior-<ms>/`, la marca de que el apartado no ha
+/// terminado. Se escribe al empezar y se quita al terminar; lleva el negocio cuyas copias selladas se
+/// quedan (vacío si no se queda ninguna).
+const APARTADO_EN_CURSO: &str = "apartado-en-curso";
+/// AUD-06 · Donde se aparta, dentro de `backups/`, todo lo que había en el equipo de otro negocio
+/// (`apartar_lo_de_otro_negocio`). Una carpeta por vez, con la hora; dentro, lo apartado tiene la
+/// misma forma que en AppData. No es una familia de restos: la purga no entra, y nada de lo que hay
+/// dentro se ofrece para restaurar ni se deja importar.
+const NEGOCIO_ANTERIOR_PREFIX: &str = "negocio-anterior-";
+/// AUD-06 · Lo que un negocio tiene en la raíz de AppData, fuera de la base y de `backups/`: las
+/// copias previas a una migración y los temporales de una restauración (por prefijo), la cola de
+/// imágenes por subir y su temporal, la carpeta de imágenes, la marca del repaso de imágenes y la de
+/// un traslado. Lo que es del equipo (la licencia, el modo, los interruptores, la telemetría) no.
+const DEL_NEGOCIO_EN_APPDATA: [&str; 5] = [
+    "image_uploads.json",
+    "image_uploads.json.tmp",
+    "images",
+    "image_backfill_done",
+    MARCA_TRASLADO,
+];
+const DEL_NEGOCIO_EN_APPDATA_POR_PREFIJO: [&str; 2] = [MIGRACION_PREFIX, "data.restore."];
 
 fn corrupta(e: impl std::fmt::Display) -> AppError {
     AppError::coded(ErrorCode::BackupCorrupt, e.to_string())
@@ -177,12 +206,14 @@ async fn guardar_comprimida(base: &Path, destino: &Path) -> AppResult<()> {
 }
 
 /// Valida una copia del almacén, comprimida o no, descomprimiéndola en un temporal que se borra.
-async fn validar_guardada(path: &Path) -> AppResult<()> {
+/// AUD-06: y que sea del negocio de la licencia (`comprobar_procedencia_de_copia`).
+async fn validar_guardada(path: &Path, licencia: Option<&str>) -> AppResult<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let tmp = temporal(dir, "validar");
     let r = async {
         descomprimir(path, &tmp).await?;
-        validate_backup(&tmp).await
+        validate_backup(&tmp).await?;
+        comprobar_procedencia_de_copia(&tmp, licencia)
     }
     .await;
     discard_prepared(&tmp);
@@ -268,9 +299,450 @@ pub(crate) fn quitar_marca_traslado(app_data_dir: &Path) -> AppResult<()> {
     }
 }
 
+/// AUD-06 · El turno entre publicar la marca del cambio de negocio y cada borrado de una retención
+/// (`purgar`). Publicar espera a que termine el borrado que esté en curso, y todo borrado posterior
+/// ve la marca: no hay hueco entre mirar que no está y borrar en el que pueda aparecer.
+static MARCA_Y_PURGA: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn turno_de_marca_y_purga() -> std::sync::MutexGuard<'static, ()> {
+    MARCA_Y_PURGA.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// AUD-06 · Deja anotado, de forma duradera, que se ha activado la licencia de `negocio` sobre una base
+/// de otro negocio (o que no se sabe de quién es). Temporal y `rename`: se escribe entera o no se
+/// escribe. El `rename` va con el turno de `purgar` tomado.
+pub fn marcar_cambio_de_negocio(app_data_dir: &Path, negocio: &str) -> AppResult<()> {
+    std::fs::create_dir_all(app_data_dir).map_err(db_err)?;
+    let tmp = app_data_dir.join(format!("{MARCA_CAMBIO_DE_NEGOCIO}.tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp).map_err(db_err)?;
+        f.write_all(negocio.trim().as_bytes())
+            .and_then(|_| f.sync_all())
+            .map_err(db_err)?;
+    }
+    let _turno = turno_de_marca_y_purga();
+    std::fs::rename(&tmp, app_data_dir.join(MARCA_CAMBIO_DE_NEGOCIO)).map_err(db_err)
+}
+
+/// AUD-06 · ¿Hay un cambio de negocio pendiente de reinicio? Si no se puede saber, se da por que sí:
+/// con él no se activa nada, no se abre ninguna base en caliente y no se purga nada.
+pub fn hay_cambio_de_negocio_pendiente(app_data_dir: &Path) -> bool {
+    !matches!(app_data_dir.join(MARCA_CAMBIO_DE_NEGOCIO).try_exists(), Ok(false))
+}
+
+/// AUD-06 · Borra `ruta` de una retención, salvo con un cambio de negocio pendiente: entonces la
+/// retención se suspende hasta que el arranque lo aparte todo, y no se borra nada del equipo. Mirar
+/// la marca y borrar van juntos, con el turno que también toma quien la publica
+/// (`marcar_cambio_de_negocio`): la marca no puede aparecer entre las dos cosas.
+fn purgar(app_data_dir: &Path, ruta: &Path) -> std::io::Result<()> {
+    let _turno = turno_de_marca_y_purga();
+    if hay_cambio_de_negocio_pendiente(app_data_dir) {
+        return Ok(());
+    }
+    #[cfg(test)]
+    tests::tras_mirar_la_marca();
+    std::fs::remove_file(ruta)
+}
+
+/// Las entradas de `carpeta`. Una carpeta que no existe no tiene ninguna; cualquier otro error al
+/// abrirla o al recorrerla se devuelve: no se decide nada con una lista a medias.
+fn entradas_de(carpeta: &Path) -> AppResult<Vec<std::fs::DirEntry>> {
+    match std::fs::read_dir(carpeta) {
+        Ok(entradas) => entradas.map(|e| e.map_err(db_err)).collect(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(db_err(e)),
+    }
+}
+
+/// AUD-06 · El negocio del cambio pendiente, si lo hay. Una marca que no se deja leer sigue siendo
+/// un cambio pendiente, de un negocio que no se sabe (vacío).
+pub fn cambio_de_negocio_pendiente(app_data_dir: &Path) -> Option<String> {
+    match std::fs::read_to_string(app_data_dir.join(MARCA_CAMBIO_DE_NEGOCIO)) {
+        Ok(negocio) => Some(negocio.trim().to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => Some(String::new()),
+    }
+}
+
+/// AUD-06 · Quita la marca del cambio. Sólo desde el arranque (ver la marca).
+pub fn quitar_cambio_de_negocio(app_data_dir: &Path) -> AppResult<()> {
+    match std::fs::remove_file(app_data_dir.join(MARCA_CAMBIO_DE_NEGOCIO)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(db_err(e)),
+        _ => Ok(()),
+    }
+}
+
 /// Guarda la base de antes del traslado en `backups/antes-de-traslado-*`, antes de reemplazarla.
 pub(crate) async fn guardar_base_de_antes_del_traslado(db: &Db) -> AppResult<PathBuf> {
     guardar_base_apartada(db, ANTES_DE_TRASLADO_PREFIX, "traslado").await
+}
+
+/// AUD-06 · La base local de este equipo, vista desde la activación de una licencia
+/// (`tpv_application::ports::licensing::BaseDelEquipo`). `db` es `None` si no hay base abierta:
+/// entonces el sello se lee del fichero, y sellar se deja para cuando se abra
+/// (`connection::init_main_db`), que aplica la misma regla.
+pub struct BaseLocal {
+    carpeta: PathBuf,
+    db: Option<std::sync::Arc<Db>>,
+}
+
+impl BaseLocal {
+    pub fn new(app_data_dir: &Path, db: Option<std::sync::Arc<Db>>) -> Self {
+        Self { carpeta: app_data_dir.to_path_buf(), db }
+    }
+}
+
+#[async_trait::async_trait]
+impl BaseDelEquipo for BaseLocal {
+    async fn sello(&self) -> AppResult<Sello> {
+        match &self.db {
+            Some(db) => Ok(Sello::leido(crate::sello::leer(&db.read().await).await?.as_deref())),
+            None => crate::sello::del_fichero(&self.carpeta.join("data.db")),
+        }
+    }
+
+    async fn sellar(&self, negocio: &str) -> AppResult<()> {
+        if let Some(db) = &self.db {
+            let w = db.write().await;
+            crate::sello::escribir(w.raw(), negocio).await?;
+        }
+        Ok(())
+    }
+
+    async fn marcar_traslado(&self) -> AppResult<()> {
+        marcar_traslado(&self.carpeta)?;
+        if let Some(db) = &self.db {
+            db.bloquear_escrituras_de_negocio(true);
+        }
+        Ok(())
+    }
+
+    async fn marcar_cambio_de_negocio(&self, negocio: &str) -> AppResult<()> {
+        marcar_cambio_de_negocio(&self.carpeta, negocio)
+    }
+
+    async fn cambio_de_negocio_pendiente(&self) -> AppResult<Option<String>> {
+        Ok(cambio_de_negocio_pendiente(&self.carpeta))
+    }
+
+    async fn apartar_si_no_es_de(&self, negocio: &str) -> AppResult<()> {
+        // Con la base abierta no se mueve nada: esto es del arranque.
+        if self.db.is_some() {
+            return Err(AppError::internal("La base sólo se aparta al arrancar, con ella cerrada."));
+        }
+        apartar_para_el_cambio_de_negocio(&self.carpeta, negocio).map(|_| ())
+    }
+
+    async fn quitar_cambio_de_negocio(&self) -> AppResult<()> {
+        quitar_cambio_de_negocio(&self.carpeta)
+    }
+}
+
+/// AUD-06 · ¿Es `db` la base del negocio `negocio`? Lo que sube o baja algo de la nube en nombre de
+/// ese negocio sin pasar por la base (las imágenes) lo pregunta antes.
+pub async fn base_del_negocio(db: &Db, negocio: &str) -> AppResult<bool> {
+    let sello = Sello::leido(crate::sello::leer(&db.read().await).await?.as_deref());
+    Ok(procedencia(&sello, negocio) == Procedencia::Suya)
+}
+
+/// AUD-06 · Lo que se resuelve al abrir la base (`connection::init_main_db`), ANTES de abrir nada, que
+/// es el arranque: ninguna tarea del negocio anterior sigue en marcha y nadie usa sus ficheros.
+///
+/// 1. Un apartado que se quedó a medias se termina primero, sea cual sea la licencia: lo que ya se
+///    movió es de un negocio que no es el de la base que quede, y lo que falta es suyo.
+/// 2. La regla (`que_hacer_con_la_base`) con `licencia`: una base de otro negocio, o que no se deja
+///    leer, se aparta con todo lo de su negocio.
+///
+/// La marca de un cambio de negocio pendiente no la toca: sólo la quita el arranque, cuando ya ha
+/// aplicado lo pendiente. Si algo no se puede mover, devuelve el error: no se abre la base, y la
+/// siguiente apertura lo repite. Sin licencia no hay con qué comparar (sólo se termina lo que
+/// estuviera a medias). Devuelve dónde ha quedado lo apartado, si se ha apartado algo.
+pub fn resolver_al_abrir(app_data_dir: &Path, licencia: Option<&str>) -> AppResult<Option<PathBuf>> {
+    let mut apartado = terminar_apartados_en_curso(app_data_dir)?;
+    if let Some(negocio) = licencia {
+        let sello = crate::sello::del_fichero(&app_data_dir.join("data.db"))?;
+        if que_hacer_con_la_base(&sello, negocio, false) == QueHacerConLaBase::Apartar {
+            // Con una base ilegible no se sabe de quién es lo demás, salvo las copias que lo dicen:
+            // las selladas con la licencia son de este negocio y se quedan (son con las que se
+            // recupera una base dañada). Con una de otro negocio, todo es de ése.
+            let conservar = (sello == Sello::Ilegible).then_some(negocio);
+            apartado = Some(apartar_lo_de_otro_negocio(app_data_dir, conservar)?);
+        }
+    }
+    Ok(apartado)
+}
+
+/// AUD-06 · El paso (a) de un cambio de negocio pendiente, al arrancar
+/// (`tpv_application::use_cases::licensing::aplicar_cambio_de_negocio_pendiente`): se termina un
+/// apartado a medias y después se aparta **todo** lo que haya en el equipo de un negocio (la base si
+/// la hay, todas las familias de copias y bases guardadas, las de antes de una migración, los
+/// temporales de una restauración, las imágenes y su cola), haya o no `data.db` y diga lo que diga
+/// su sello: una restauración cortada entre sus dos `rename` deja el equipo sin `data.db` y con todo
+/// lo demás. Lo único que se queda es una base ya sellada con `negocio`, que no puede darse antes de
+/// aplicarlo. Repetible: si no queda nada, no crea ninguna carpeta. Devuelve dónde ha quedado.
+pub fn apartar_para_el_cambio_de_negocio(app_data_dir: &Path, negocio: &str) -> AppResult<Option<PathBuf>> {
+    let mut apartado = terminar_apartados_en_curso(app_data_dir)?;
+    let sello = crate::sello::del_fichero(&app_data_dir.join("data.db"))?;
+    if procedencia(&sello, negocio) == Procedencia::Suya {
+        return Ok(apartado);
+    }
+    if hay_algo_de_un_negocio(app_data_dir)? {
+        apartado = Some(apartar_lo_de_otro_negocio(app_data_dir, None)?);
+    }
+    Ok(apartado)
+}
+
+/// ¿Queda en el equipo algo de un negocio (lo que `apartar_en` se llevaría)?
+fn hay_algo_de_un_negocio(app_data_dir: &Path) -> AppResult<bool> {
+    for nombre in ["data.db", "data.db-wal", "data.db-shm"] {
+        if app_data_dir.join(nombre).try_exists().map_err(db_err)? {
+            return Ok(true);
+        }
+    }
+    for entrada in entradas_de(&app_data_dir.join(BACKUP_DIR))? {
+        if !entrada.file_name().to_string_lossy().starts_with(NEGOCIO_ANTERIOR_PREFIX) {
+            return Ok(true);
+        }
+    }
+    for entrada in entradas_de(app_data_dir)? {
+        if es_del_negocio_en_appdata(&entrada.file_name().to_string_lossy()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn es_del_negocio_en_appdata(nombre: &str) -> bool {
+    DEL_NEGOCIO_EN_APPDATA.contains(&nombre) || DEL_NEGOCIO_EN_APPDATA_POR_PREFIJO.iter().any(|p| nombre.starts_with(p))
+}
+
+/// ¿`carpeta` es un apartado que no ha terminado? Tiene la marca y le falta la base, que es lo
+/// último que se mueve: con la marca y la base, lo único que no llegó a hacerse es quitar la marca.
+fn apartado_a_medias(carpeta: &Path) -> AppResult<bool> {
+    Ok(carpeta.join(APARTADO_EN_CURSO).try_exists().map_err(db_err)?
+        && !carpeta.join("data.db").try_exists().map_err(db_err)?)
+}
+
+/// Las carpetas `backups/negocio-anterior-*`. Un error al abrir o recorrer `backups/` se devuelve
+/// (`entradas_de`): sólo una carpeta que no existe cuenta como vacía.
+fn carpetas_apartadas(app_data_dir: &Path) -> AppResult<Vec<PathBuf>> {
+    let mut carpetas = Vec::new();
+    for entrada in entradas_de(&app_data_dir.join(BACKUP_DIR))? {
+        let es_apartado = entrada.file_name().to_string_lossy().starts_with(NEGOCIO_ANTERIOR_PREFIX);
+        if es_apartado && entrada.file_type().map_err(db_err)?.is_dir() {
+            carpetas.push(entrada.path());
+        }
+    }
+    carpetas.sort();
+    Ok(carpetas)
+}
+
+/// AUD-06 · ¿Hay un apartado a medias? Mientras lo haya no se restaura ninguna copia: restaurarla
+/// pondría una base en el sitio de la que falta por apartar, y al terminar se iría con lo demás.
+pub fn hay_apartado_a_medias(app_data_dir: &Path) -> AppResult<bool> {
+    for carpeta in carpetas_apartadas(app_data_dir)? {
+        if apartado_a_medias(&carpeta)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Termina los apartados que se quedaron a medias, cada uno en su carpeta. Devuelve la última. Un
+/// error al mirar una carpeta o su marca para aquí, con las marcas puestas.
+fn terminar_apartados_en_curso(app_data_dir: &Path) -> AppResult<Option<PathBuf>> {
+    let mut terminado = None;
+    for carpeta in carpetas_apartadas(app_data_dir)? {
+        let marca = carpeta.join(APARTADO_EN_CURSO);
+        if !marca.try_exists().map_err(db_err)? {
+            continue;
+        }
+        if carpeta.join("data.db").try_exists().map_err(db_err)? {
+            // Terminó: sólo faltó quitar la marca.
+            std::fs::remove_file(&marca).map_err(db_err)?;
+            continue;
+        }
+        let conservar = std::fs::read_to_string(&marca).map_err(db_err)?;
+        let conservar = Some(conservar.trim()).filter(|c| !c.is_empty());
+        apartar_en(app_data_dir, &carpeta, conservar)?;
+        terminado = Some(carpeta);
+    }
+    Ok(terminado)
+}
+
+/// Un nombre libre en `carpeta` para `nombre`: el mismo si no existe, y si existe, con un número
+/// detrás. Lo apartado nunca pisa nada.
+fn destino_libre(carpeta: &Path, nombre: &std::ffi::OsStr) -> PathBuf {
+    let primero = carpeta.join(nombre);
+    if !primero.exists() {
+        return primero;
+    }
+    let nombre = nombre.to_string_lossy();
+    (2..)
+        .map(|n| carpeta.join(format!("{nombre}.{n}")))
+        .find(|ruta| !ruta.exists())
+        .expect("siempre hay un nombre libre")
+}
+
+/// El error de un fichero que no se deja apartar. Sólo el nombre: la ruta entera lleva el usuario
+/// de Windows.
+fn no_se_pudo_apartar(nombre: &str, e: impl std::fmt::Display) -> AppError {
+    tracing::warn!(target: "tpv::recovery", fichero = %nombre, error = %e, "no se pudo apartar un fichero del negocio anterior");
+    AppError::conflict(format!(
+        "No se pudo apartar «{nombre}», de los datos del negocio anterior: puede que esté abierto en otro programa. Cierra el TPV y vuelve a abrirlo."
+    ))
+}
+
+fn mover(origen: &Path, carpeta: &Path) -> AppResult<()> {
+    std::fs::create_dir_all(carpeta).map_err(db_err)?;
+    let nombre = origen.file_name().unwrap_or_default().to_os_string();
+    let destino = destino_libre(carpeta, &nombre);
+    std::fs::rename(origen, &destino).map_err(|e| no_se_pudo_apartar(&nombre.to_string_lossy(), e))
+}
+
+/// ¿La copia `ruta` (de `backups/`) lleva el sello de `negocio`? Se descomprime en un temporal para
+/// mirarlo. Ante cualquier duda, no: se aparta.
+fn copia_sellada_con(ruta: &Path, negocio: &str) -> bool {
+    let nombre = ruta.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    if !(nombre.starts_with(BACKUP_PREFIX) || nombre.starts_with(IMPORT_PREFIX)) {
+        return false;
+    }
+    let dir = ruta.parent().unwrap_or(Path::new("."));
+    let tmp = temporal(dir, "sello");
+    let leido = (|| -> AppResult<Sello> {
+        let mut entrada: Box<dyn Read> = if es_gzip(ruta).map_err(db_err)? {
+            Box::new(flate2::read::GzDecoder::new(BufReader::new(std::fs::File::open(ruta).map_err(db_err)?)))
+        } else {
+            Box::new(BufReader::new(std::fs::File::open(ruta).map_err(db_err)?))
+        };
+        let mut salida = BufWriter::new(std::fs::File::create(&tmp).map_err(db_err)?);
+        std::io::copy(&mut entrada, &mut salida).map_err(db_err)?;
+        salida.flush().map_err(db_err)?;
+        drop(salida);
+        crate::sello::del_fichero(&tmp)
+    })();
+    discard_prepared(&tmp);
+    matches!(leido, Ok(sello) if procedencia(&sello, negocio) == Procedencia::Suya)
+}
+
+/// AUD-06 · Aparta TODO lo que hay en este equipo de un negocio que no es el de la licencia: la base,
+/// todas sus copias y bases guardadas (`backups/`, sean de la familia que sean), las copias previas a
+/// una migración, la carpeta de imágenes y su cola, y sus marcas. Va a `backups/negocio-anterior-<ms>/`,
+/// con la misma forma que tenía en AppData, sin borrar ni pisar nada. Devuelve la carpeta.
+///
+/// `conservar`: el negocio cuyas copias selladas se quedan (sólo cuando la base no se deja leer).
+///
+/// Se llama con la base CERRADA, al abrirla (`resolver_al_abrir`). La carpeta lleva la marca de
+/// apartado en curso desde el principio hasta el final, y la base va la última: es lo que dice de
+/// quién es todo lo demás. Si algo no se puede mover, se para ahí y devuelve el error; la siguiente
+/// apertura lo termina en la misma carpeta, antes que nada.
+pub fn apartar_lo_de_otro_negocio(app_data_dir: &Path, conservar: Option<&str>) -> AppResult<PathBuf> {
+    let copias = app_data_dir.join(BACKUP_DIR);
+    let destino = (now_ms()..)
+        .map(|ms| copias.join(format!("{NEGOCIO_ANTERIOR_PREFIX}{ms}")))
+        .find(|ruta| !ruta.exists())
+        .expect("siempre hay un instante libre");
+    std::fs::create_dir_all(&destino).map_err(db_err)?;
+    let marca = destino.join(APARTADO_EN_CURSO);
+    {
+        let mut f = std::fs::File::create(&marca).map_err(db_err)?;
+        f.write_all(conservar.unwrap_or_default().as_bytes())
+            .and_then(|_| f.sync_all())
+            .map_err(db_err)?;
+    }
+    apartar_en(app_data_dir, &destino, conservar)?;
+    Ok(destino)
+}
+
+/// El apartado en sí, en `destino` (que ya lleva su marca de en curso). Repetible: lo que ya se
+/// movió no está, y lo que quede va a la misma carpeta, sin pisar nada.
+fn apartar_en(app_data_dir: &Path, destino: &Path, conservar: Option<&str>) -> AppResult<()> {
+    // Un error al abrir o recorrer una carpeta para aquí, con la marca puesta: nada se da por
+    // apartado con una lista a medias.
+    for entrada in entradas_de(&app_data_dir.join(BACKUP_DIR))? {
+        let nombre = entrada.file_name();
+        if nombre.to_string_lossy().starts_with(NEGOCIO_ANTERIOR_PREFIX) {
+            continue;
+        }
+        if conservar.is_some_and(|negocio| copia_sellada_con(&entrada.path(), negocio)) {
+            continue;
+        }
+        mover(&entrada.path(), &destino.join(BACKUP_DIR))?;
+    }
+
+    for entrada in entradas_de(app_data_dir)? {
+        if es_del_negocio_en_appdata(&entrada.file_name().to_string_lossy()) {
+            mover(&entrada.path(), destino)?;
+        }
+    }
+
+    // La base: antes, lo que tenga en el WAL al fichero, para que se aparte entera aunque no viajen
+    // juntos (si se deja: una base ilegible se mueve con su WAL tal cual). Después sus ficheros
+    // auxiliares, haya base o no (una restauración cortada puede dejarlos sin ella, y junto a la base
+    // nueva serían su WAL), y ella la última.
+    let base = app_data_dir.join("data.db");
+    let hay_base = base.try_exists().map_err(db_err)?;
+    if hay_base && crate::sello::del_fichero(&base)? != Sello::Ilegible {
+        let conn = crate::ejecutor::abrir(&base).map_err(|e| no_se_pudo_apartar("data.db", e))?;
+        let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+        conn.query_row("PRAGMA wal_checkpoint(TRUNCATE);", [], |_| Ok(()))
+            .map_err(|e| no_se_pudo_apartar("data.db", ErrorSql::from(e)))?;
+        drop(conn);
+    }
+    for sufijo in ["-wal", "-shm"] {
+        let auxiliar = app_data_dir.join(format!("data.db{sufijo}"));
+        if auxiliar.try_exists().map_err(db_err)? {
+            mover(&auxiliar, destino)?;
+        }
+    }
+    if hay_base {
+        mover(&base, destino)?;
+    }
+    match std::fs::remove_file(destino.join(APARTADO_EN_CURSO)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(db_err(e)),
+        _ => Ok(()),
+    }
+}
+
+/// AUD-06 · ¿`origen` es de lo que la aplicación apartó (`backups/antes-de-traslado-*` o
+/// `backups/negocio-anterior-*/…`)? Se comparan rutas ya resueltas, sin enlaces ni `..`. Es la red
+/// de las copias sin sello (anteriores a los sellos), que el sello no puede rechazar.
+fn es_de_lo_apartado(app_data_dir: &Path, origen: &Path) -> bool {
+    let (Ok(copias), Ok(origen)) = (
+        app_data_dir.join(BACKUP_DIR).canonicalize(),
+        origen.canonicalize(),
+    ) else {
+        return false;
+    };
+    let Ok(dentro) = origen.strip_prefix(&copias) else {
+        return false;
+    };
+    dentro
+        .components()
+        .next()
+        .and_then(|c| c.as_os_str().to_str())
+        .is_some_and(|nombre| {
+            nombre.starts_with(ANTES_DE_TRASLADO_PREFIX) || nombre.starts_with(NEGOCIO_ANTERIOR_PREFIX)
+        })
+}
+
+/// AUD-06 · Una copia (ya descomprimida) sólo vale para la licencia de su negocio. Una sin sello es
+/// anterior a los sellos: se acepta como hasta ahora, y la pantalla avisa de que no se comprueba de
+/// qué negocio es.
+fn comprobar_procedencia_de_copia(copia: &Path, licencia: Option<&str>) -> AppResult<()> {
+    let sello = crate::sello::del_fichero(copia)?;
+    match (&sello, licencia) {
+        (Sello::Ninguno, _) => Ok(()),
+        (_, None) => Err(AppError::validation(
+            "Activa la licencia de este ordenador antes de restaurar una copia: sin ella no se puede comprobar que la copia sea de su negocio.",
+        )),
+        (_, Some(negocio)) => match procedencia(&sello, negocio) {
+            Procedencia::Suya | Procedencia::SinSello => Ok(()),
+            Procedencia::DeOtroNegocio | Procedencia::Desconocida => Err(AppError::validation(
+                "Esa copia es de otro negocio, no del de la licencia activada en este ordenador, y no se puede restaurar aquí.",
+            )),
+        },
+    }
 }
 
 /// AUD-19 · Guarda en `backups/antes-de-la-nube-*` la copia restaurada que se reemplaza por la nube
@@ -449,7 +921,8 @@ pub async fn create_backup(db: &Db, app_data_dir: &Path) -> AppResult<Option<Loc
         // Los ids proceden exclusivamente de `list_backups`, que sólo admite nuestro patrón.
         // Un borrado fallido (fichero en uso por un antivirus) NO invalida la copia recién hecha:
         // devolver `Err` marcaría el job como fallido y su backoff crearía otra copia enseguida.
-        if let Err(e) = std::fs::remove_file(dir.join(&vieja.id)) {
+        // AUD-06: con un cambio de negocio pendiente no se borra ninguna (`purgar`).
+        if let Err(e) = purgar(app_data_dir, &dir.join(&vieja.id)) {
             tracing::warn!(target: "tpv::recovery", copia = %vieja.id, error = %e, "no se pudo purgar una copia antigua");
         }
     }
@@ -513,11 +986,13 @@ pub fn archivar_base_ilegible(app_data_dir: &Path) -> AppResult<Option<PathBuf>>
 /// (TRAB-03). Lo que sólo salva esta copia es lo que nunca llegó a subir.
 ///
 /// Sale tal como está guardada: comprimida (un `.db.gz`, que también abre 7-Zip).
-pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path) -> AppResult<()> {
+pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path, licencia: Option<&str>) -> AppResult<()> {
     let source = resolve_backup(app_data_dir, id)?;
     // Validar ANTES de copiar: exportar una copia ilegible es peor que no exportar nada, porque
     // parece un respaldo y no lo es hasta el día que hace falta.
-    validar_guardada(&source).await?;
+    // AUD-06: una copia de otro negocio que siga en el almacén (con su licencia ya cambiada, antes
+    // de apartarla) tampoco sale del equipo.
+    validar_guardada(&source, licencia).await?;
 
     if let Some(parent) = destino.parent() {
         if !parent.as_os_str().is_empty() {
@@ -530,17 +1005,27 @@ pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path) -> App
 
 /// Trae al almacén local una copia que estaba fuera, para poder restaurarla como cualquier otra.
 ///
-/// Se valida igual que las nuestras, pero eso comprueba que sea una base sana **de este esquema**,
-/// no que sea de este mismo negocio: hoy la BD no lleva ninguna marca del tenant con la que
-/// distinguirlo. La pantalla lo advierte. El daño de equivocarse queda acotado a este equipo —
-/// restaurar no llena el outbox, así que nada de eso se replica— y se deshace recuperando de la
-/// nube.
+/// Se valida igual que las nuestras: que sea una base sana de este esquema y, AUD-06, que si lleva
+/// sello sea el del negocio de la licencia (`licencia`). Una copia sin sello (anterior a los sellos)
+/// no dice de quién es: se acepta, y la pantalla lo advierte. El daño de equivocarse con una de ésas
+/// queda acotado a este equipo —restaurar no llena el outbox, así que nada de eso se replica— y se
+/// deshace recuperando de la nube.
 ///
 /// Acepta una copia comprimida (lo que saca «Guardar fuera…») o una base tal cual: una copia de
 /// antes de comprimirlas, o una `data.db` rescatada a mano de otro equipo. Se guarda comprimida.
-pub async fn import_backup(app_data_dir: &Path, origen: &Path) -> AppResult<LocalBackupInfo> {
+pub async fn import_backup(
+    app_data_dir: &Path,
+    origen: &Path,
+    licencia: Option<&str>,
+) -> AppResult<LocalBackupInfo> {
     if !origen.is_file() {
         return Err(AppError::not_found("El archivo seleccionado ya no existe"));
+    }
+    // AUD-06: lo que se apartó no vuelve por aquí, lleve sello o no.
+    if es_de_lo_apartado(app_data_dir, origen) {
+        return Err(AppError::validation(
+            "Ese archivo es de los datos que el programa guardó aparte, de antes de un cambio de licencia o de otro negocio, y no se puede restaurar aquí.",
+        ));
     }
 
     let dir = app_data_dir.join(BACKUP_DIR);
@@ -551,7 +1036,9 @@ pub async fn import_backup(app_data_dir: &Path, origen: &Path) -> AppResult<Loca
     let tmp = temporal(&dir, "import");
     let r = async {
         descomprimir(origen, &tmp).await?;
-        validate_backup(&tmp).await
+        validate_backup(&tmp).await?;
+        // AUD-06: una copia de otro negocio no entra en el almacén de éste.
+        comprobar_procedencia_de_copia(&tmp, licencia)
     }
     .await;
     if let Err(e) = r {
@@ -698,6 +1185,9 @@ pub async fn asegurar_reemplazo_seguro(db: &Db) -> AppResult<()> {
 /// No llevan el prefijo de las copias diarias, así que la retención de siete no los ve y cada
 /// intento acumulaba una BD entera en AppData. Se conservan los dos más recientes de cada familia:
 /// son la marcha atrás manual si alguien restaura la copia equivocada.
+///
+/// AUD-06: con un cambio de negocio pendiente no se borra nada (`purgar`, antes de cada borrado):
+/// todo eso es del negocio que se aparta al arrancar.
 pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
     const FAMILIAS_A_CONSERVAR: usize = 2;
 
@@ -722,7 +1212,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
             if !viejo {
                 continue;
             }
-            if let Err(e) = std::fs::remove_file(&path) {
+            if let Err(e) = purgar(app_data_dir, &path) {
                 tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un temporal de copia");
             }
         }
@@ -759,7 +1249,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
                 if conservados.contains(&sello) {
                     continue;
                 }
-                if let Err(e) = std::fs::remove_file(&path) {
+                if let Err(e) = purgar(app_data_dir, &path) {
                     tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un resto de restauración");
                 }
             }
@@ -788,7 +1278,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
         if ahora.saturating_sub(sello) < TMP_ANTIGUEDAD_MS {
             continue;
         }
-        if let Err(e) = std::fs::remove_file(&path) {
+        if let Err(e) = purgar(app_data_dir, &path) {
             tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un temporal de restauración");
         }
     }
@@ -812,7 +1302,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
     }
     migraciones.sort_unstable_by_key(|(sello, _)| std::cmp::Reverse(*sello));
     for (_, path) in migraciones.into_iter().skip(MIGRACIONES_A_CONSERVAR) {
-        if let Err(e) = std::fs::remove_file(&path) {
+        if let Err(e) = purgar(app_data_dir, &path) {
             tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar una copia de migración");
         }
     }
@@ -822,12 +1312,29 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
 
 /// Copia y valida el respaldo en un fichero temporal independiente. Además lo marca pendiente de
 /// reconciliación ANTES del intercambio, para que ni un crash entre pasos pueda abrir el login.
-pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf> {
+pub async fn prepare_restore(app_data_dir: &Path, id: &str, licencia: Option<&str>) -> AppResult<PathBuf> {
     // Tras un traslado, cualquier copia de este equipo es de antes: restaurarla sería volver a
     // trabajar con lo que el traslado deja atrás. La pantalla ya no la ofrece; esto es la red.
     if hay_traslado_pendiente(app_data_dir) {
         return Err(AppError::conflict(
             "La licencia viene de otro equipo: los datos tienen que traerse de la nube. Una copia de este ordenador es de antes del traslado.",
+        ));
+    }
+    // AUD-06: tampoco sobre una base de otro negocio que la licencia (sin apartar porque algo no se
+    // dejó mover), ni con un apartado a medias: ésa se aparta entera antes de poner nada en su sitio.
+    // Restaurar la movería sola y dejaría lo demás de su negocio (sus imágenes, su cola) junto a la
+    // base restaurada. Con un cambio de negocio pendiente sí se restaura: la licencia vigente sigue
+    // siendo la de la base, y la marca no se toca (el arranque aparta lo que haya).
+    let de_otro_negocio = match licencia {
+        Some(negocio) => matches!(
+            procedencia(&crate::sello::del_fichero(&app_data_dir.join("data.db"))?, negocio),
+            Procedencia::DeOtroNegocio | Procedencia::Desconocida
+        ),
+        None => false,
+    };
+    if de_otro_negocio || hay_apartado_a_medias(app_data_dir)? {
+        return Err(AppError::conflict(
+            "Los datos de este ordenador son de otro negocio y hay que apartarlos antes de restaurar nada. Cierra el TPV y vuelve a abrirlo.",
         ));
     }
     let source = resolve_backup(app_data_dir, id)?;
@@ -838,6 +1345,8 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf
     let result = async {
         descomprimir(&source, &prepared).await?;
         validate_backup(&prepared).await?;
+        // AUD-06: la red de la misma regla, por si una copia de otro negocio llegó al almacén.
+        comprobar_procedencia_de_copia(&prepared, licencia)?;
         let prepared_str = prepared
             .to_str()
             .ok_or_else(|| AppError::internal("Ruta temporal de restauración inválida"))?;
@@ -953,7 +1462,7 @@ mod tests {
 
     async fn db_operativa(dir: &Path) -> std::sync::Arc<Db> {
         std::fs::create_dir_all(dir).unwrap();
-        crate::connection::init_main_db(dir, false).await.unwrap()
+        crate::connection::init_main_db(dir, None).await.unwrap()
     }
 
     /// La copia `id` descomprimida en un fichero aparte, para abrirla con SQLite.
@@ -998,7 +1507,7 @@ mod tests {
         drop(db);
 
         marcar_traslado(&dir).unwrap();
-        let db = crate::connection::init_main_db(&dir, true).await.unwrap();
+        let db = crate::connection::init_main_db(&dir, Some("negocio-de-prueba")).await.unwrap();
         assert!(db.escrituras_de_negocio_bloqueadas());
 
         db.cerrar().await.unwrap();
@@ -1015,11 +1524,11 @@ mod tests {
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
 
         marcar_traslado(&dir).unwrap();
-        let err = prepare_restore(&dir, &backup.id).await.unwrap_err();
+        let err = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap_err();
         assert_eq!(err.code(), ErrorCode::Conflict);
 
         quitar_marca_traslado(&dir).unwrap();
-        let preparada = prepare_restore(&dir, &backup.id).await.unwrap();
+        let preparada = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap();
         discard_prepared(&preparada);
 
         drop(db);
@@ -1065,7 +1574,7 @@ mod tests {
         let dir = test_dir("pending");
         let db = db_operativa(&dir).await;
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
-        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        let prepared = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap();
 
         let restored = Db::open(prepared.to_str().unwrap()).await.unwrap();
         assert_eq!(
@@ -1135,7 +1644,7 @@ mod tests {
         assert_eq!(fallos(&copia).await.len(), 3, "la copia refleja el estado del momento");
         drop(copia);
 
-        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        let prepared = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap();
         let lista = Db::open(prepared.to_str().unwrap()).await.unwrap();
         assert_eq!(
             fallos(&lista).await,
@@ -1177,7 +1686,7 @@ mod tests {
         }
 
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
-        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        let prepared = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap();
         let lista = Db::open(prepared.to_str().unwrap()).await.unwrap();
         assert!(fallos(&lista).await.is_empty());
         assert_eq!(
@@ -1254,7 +1763,7 @@ mod tests {
         }
 
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
-        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        let prepared = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap();
         let lista = Db::open(prepared.to_str().unwrap()).await.unwrap();
         assert!(fallos(&lista).await.is_empty());
         assert_eq!(
@@ -1562,19 +2071,19 @@ mod tests {
         let backup = create_backup(&db, &dir).await.unwrap().unwrap();
 
         let fuera = dir.join("usb").join("copia-del-bar.db.gz");
-        export_backup(&dir, &backup.id, &fuera).await.unwrap();
+        export_backup(&dir, &backup.id, &fuera, Some("negocio-de-prueba")).await.unwrap();
         assert!(fuera.is_file(), "la carpeta destino se crea si no existía");
 
         std::fs::remove_file(dir.join(BACKUP_DIR).join(&backup.id)).unwrap();
         assert!(list_backups(&dir).unwrap().is_empty());
 
-        let vuelta = import_backup(&dir, &fuera).await.unwrap();
+        let vuelta = import_backup(&dir, &fuera, Some("negocio-de-prueba")).await.unwrap();
         assert!(vuelta.importada);
         let lista = list_backups(&dir).unwrap();
         assert_eq!(lista.len(), 1);
         assert!(lista[0].importada);
         // Y se puede restaurar como cualquier otra: es el mismo camino, no una segunda vía.
-        let prepared = prepare_restore(&dir, &vuelta.id).await.unwrap();
+        let prepared = prepare_restore(&dir, &vuelta.id, Some("negocio-de-prueba")).await.unwrap();
         assert!(prepared.is_file());
         discard_prepared(&prepared);
 
@@ -1702,7 +2211,7 @@ mod tests {
         let basura = dir.join("fotos.db");
         std::fs::write(&basura, b"esto no es una base de datos").unwrap();
 
-        let err = import_backup(&dir, &basura).await.unwrap_err();
+        let err = import_backup(&dir, &basura, Some("negocio-de-prueba")).await.unwrap_err();
         assert_eq!(err.code(), ErrorCode::BackupCorrupt);
         assert!(list_backups(&dir).unwrap().is_empty());
 
@@ -1784,7 +2293,7 @@ mod tests {
             "el tamaño que se enseña es el que ocupa en el disco"
         );
 
-        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        let prepared = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap();
         assert!(!es_gzip(&prepared).unwrap(), "lo que se instala es la base, no el gzip");
         validate_backup(&prepared).await.unwrap();
         discard_prepared(&prepared);
@@ -1818,14 +2327,14 @@ mod tests {
             .into_iter()
             .find(|b| b.created_at_ms == 1)
             .expect("la copia sin comprimir se lista");
-        let prepared = prepare_restore(&dir, &listada.id).await.unwrap();
+        let prepared = prepare_restore(&dir, &listada.id, Some("negocio-de-prueba")).await.unwrap();
         discard_prepared(&prepared);
-        export_backup(&dir, &listada.id, &dir.join("usb").join("vieja.db"))
+        export_backup(&dir, &listada.id, &dir.join("usb").join("vieja.db"), Some("negocio-de-prueba"))
             .await
             .unwrap();
 
         // Traída de fuera: se importa y se guarda comprimida.
-        let importada = import_backup(&dir, &base).await.unwrap();
+        let importada = import_backup(&dir, &base, Some("negocio-de-prueba")).await.unwrap();
         assert!(importada.id.ends_with(BACKUP_SUFFIX));
         assert!(es_gzip(&dir.join(BACKUP_DIR).join(&importada.id)).unwrap());
 
@@ -1844,9 +2353,9 @@ mod tests {
         let bytes = std::fs::read(&guardada).unwrap();
         std::fs::write(&guardada, &bytes[..bytes.len() / 2]).unwrap();
 
-        let err = prepare_restore(&dir, &backup.id).await.unwrap_err();
+        let err = prepare_restore(&dir, &backup.id, Some("negocio-de-prueba")).await.unwrap_err();
         assert_eq!(err.code(), ErrorCode::BackupCorrupt);
-        let err = export_backup(&dir, &backup.id, &dir.join("usb").join("rota.db.gz"))
+        let err = export_backup(&dir, &backup.id, &dir.join("usb").join("rota.db.gz"), Some("negocio-de-prueba"))
             .await
             .unwrap_err();
         assert_eq!(err.code(), ErrorCode::BackupCorrupt);
@@ -1861,6 +2370,494 @@ mod tests {
         drop(db);
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    // ── AUD-06 · el sello de la base ────────────────────────────────────────────
+
+    async fn sellar(db: &Db, negocio: &str) {
+        let w = db.write().await;
+        crate::sello::escribir(w.raw(), negocio).await.unwrap();
+    }
+
+    /// Una copia es la base entera, así que lleva su sello, y sólo vale para la licencia de su
+    /// negocio: ni se restaura ni se importa con la de otro. Una sin sello (de antes de los sellos)
+    /// se sigue aceptando como hasta ahora.
+    #[tokio::test]
+    async fn una_copia_sellada_solo_se_restaura_o_importa_con_la_licencia_de_su_negocio() {
+        // Las copias, hechas en el equipo del negocio A: una de antes de los sellos y otra sellada.
+        let de_a = test_dir("sello_de_las_copias_a");
+        let db_a = db_operativa(&de_a).await;
+        let sin_sello = create_backup(&db_a, &de_a).await.unwrap().unwrap().id;
+        sellar(&db_a, "negocio-a").await;
+        // Otro instante: las copias se nombran por su milisegundo.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let sellada = create_backup(&db_a, &de_a).await.unwrap().unwrap().id;
+        assert_ne!(sin_sello, sellada);
+        assert_eq!(
+            crate::sello::del_fichero(&abrible(&de_a, &sellada).await).unwrap(),
+            Sello::De("negocio-a".into())
+        );
+        assert_eq!(crate::sello::del_fichero(&abrible(&de_a, &sin_sello).await).unwrap(), Sello::Ninguno);
+
+        // Llevadas a un equipo cuya base no dice de quién es (recién instalado), con cada licencia.
+        let dir = test_dir("sello_de_las_copias");
+        let db = db_operativa(&dir).await;
+        let fuera = dir.join("usb");
+        std::fs::create_dir_all(&fuera).unwrap();
+        std::fs::create_dir_all(dir.join(BACKUP_DIR)).unwrap();
+        for copia in [&sin_sello, &sellada] {
+            std::fs::copy(de_a.join(BACKUP_DIR).join(copia), dir.join(BACKUP_DIR).join(copia)).unwrap();
+            std::fs::copy(de_a.join(BACKUP_DIR).join(copia), fuera.join(copia)).unwrap();
+        }
+        for (copia, licencia, vale) in [
+            (&sin_sello, Some("negocio-x"), true),
+            (&sin_sello, None, true),
+            (&sellada, Some("negocio-a"), true),
+            (&sellada, Some("negocio-x"), false),
+            (&sellada, None, false),
+        ] {
+            match prepare_restore(&dir, copia, licencia).await {
+                Ok(preparada) => {
+                    assert!(vale, "{copia} con {licencia:?} se restauraría");
+                    discard_prepared(&preparada);
+                }
+                Err(e) => assert!(!vale, "{copia} con {licencia:?}: {e}"),
+            }
+            assert_eq!(
+                import_backup(&dir, &fuera.join(copia), licencia).await.is_ok(),
+                vale,
+                "{copia} importada con {licencia:?}"
+            );
+        }
+        let err = prepare_restore(&dir, &sellada, Some("negocio-x")).await.unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Validation);
+        assert!(err.to_string().contains("Esa copia es de otro negocio"), "{err}");
+        let err = import_backup(&dir, &fuera.join(&sellada), None).await.unwrap_err();
+        assert!(err.to_string().contains("Activa la licencia"), "{err}");
+
+        // Y en el equipo de A, con la licencia de X ya vigente y la base de A sin apartar (porque algo
+        // no se dejó mover), no se restaura ninguna: ni la de antes de los sellos.
+        for copia in [&sin_sello, &sellada] {
+            let err = prepare_restore(&de_a, copia, Some("negocio-x")).await.unwrap_err();
+            assert!(err.to_string().contains("hay que apartarlos antes"), "{copia}: {err}");
+        }
+        assert!(prepare_restore(&de_a, &sellada, Some("negocio-a")).await.is_ok(), "con la suya, sí");
+        // Ni se saca del equipo a un USB: sólo con la licencia de su negocio.
+        let usb = de_a.join("usb");
+        let err = export_backup(&de_a, &sellada, &usb.join("x.db.gz"), Some("negocio-x")).await.unwrap_err();
+        assert!(err.to_string().contains("Esa copia es de otro negocio"), "{err}");
+        assert!(!usb.join("x.db.gz").exists());
+        export_backup(&de_a, &sellada, &usb.join("a.db.gz"), Some("negocio-a")).await.unwrap();
+        export_backup(&de_a, &sin_sello, &usb.join("antigua.db.gz"), Some("negocio-x")).await.unwrap();
+
+        for (db, d) in [(db, dir), (db_a, de_a)] {
+            db.cerrar().await.unwrap();
+            drop(db);
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+
+    /// Con un cambio de negocio pendiente (se ha activado la licencia de otro negocio, guardada como
+    /// pendiente, y el TPV se reinicia) la base sigue siendo la del negocio vigente hasta el reinicio:
+    /// operativa, con sus copias y sus escrituras. La marca se escribe entera o no se escribe, y ni
+    /// abrir la base ni restaurar una copia en caliente la quitan: sólo el arranque.
+    #[tokio::test]
+    async fn un_cambio_de_negocio_pendiente_no_cambia_nada_hasta_el_arranque() {
+        let dir = test_dir("cambio_pendiente");
+        let db = db_operativa(&dir).await;
+        sellar(&db, "negocio-a").await;
+        let copia = create_backup(&db, &dir).await.unwrap().unwrap().id;
+
+        let base = BaseLocal::new(&dir, Some(db.clone()));
+        base.marcar_cambio_de_negocio("negocio-x").await.unwrap();
+
+        assert_eq!(std::fs::read_to_string(dir.join(MARCA_CAMBIO_DE_NEGOCIO)).unwrap(), "negocio-x");
+        assert!(!dir.join(format!("{MARCA_CAMBIO_DE_NEGOCIO}.tmp")).exists());
+        assert_eq!(base.cambio_de_negocio_pendiente().await.unwrap().as_deref(), Some("negocio-x"));
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::Ready);
+        assert!(!db.escrituras_de_negocio_bloqueadas());
+        assert!(base_del_negocio(&db, "negocio-a").await.unwrap());
+        assert!(create_backup(&db, &dir).await.unwrap().is_some());
+        // Con la base abierta no se aparta nada.
+        assert!(base.apartar_si_no_es_de("negocio-x").await.is_err());
+        db.cerrar().await.unwrap();
+        drop(db);
+
+        // Restaurar en caliente una copia de A, con la licencia vigente de A: se puede, y la marca
+        // sigue.
+        let preparada = prepare_restore(&dir, &copia, Some("negocio-a")).await.unwrap();
+        install_prepared(&dir, &preparada).unwrap();
+        let db = crate::connection::init_main_db(&dir, Some("negocio-a")).await.unwrap();
+        assert!(hay_cambio_de_negocio_pendiente(&dir), "ni restaurar ni abrir quitan la marca");
+        assert!(carpetas_apartadas(&dir).unwrap().is_empty());
+        db.cerrar().await.unwrap();
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Lo de otro negocio se aparta ENTERO —la base y todas sus familias de copias y bases
+    /// guardadas, no sólo las diarias e importadas— con la forma que tenía en AppData, a una
+    /// carpeta en la que la purga no entra. Lo que es del equipo se queda, y un apartado anterior,
+    /// terminado, no se toca.
+    #[tokio::test]
+    async fn se_aparta_todo_lo_de_otro_negocio_y_la_purga_no_entra() {
+        let dir = test_dir("apartar_otro_negocio");
+        let db = db_operativa(&dir).await;
+        sellar(&db, "negocio-a").await;
+        let diaria = create_backup(&db, &dir).await.unwrap().unwrap().id;
+        db.cerrar().await.unwrap();
+        drop(db);
+
+        let copias = dir.join(BACKUP_DIR);
+        let familias = [
+            "import-2.db.gz", "pre-restore-3.db", "pre-restore-3-wal", "failed-restore-4.db",
+            "ilegible-5.db", "antes-de-la-nube-6.db.gz", "antes-de-traslado-7.db.gz", ".backup-8.tmp",
+        ];
+        for nombre in familias {
+            std::fs::write(copias.join(nombre), "de A").unwrap();
+        }
+        let del_negocio = [
+            "data.db.bak.9", "data.db.bak.10", "data.restore.11.tmp", "image_uploads.json",
+            "image_uploads.json.tmp", "image_backfill_done", "traslado-pendiente",
+        ];
+        for nombre in del_negocio {
+            std::fs::write(dir.join(nombre), "de A").unwrap();
+        }
+        std::fs::create_dir_all(dir.join("images").join("logo")).unwrap();
+        std::fs::write(dir.join("images").join("logo").join("logo.png"), "logo de A").unwrap();
+        let del_equipo = ["license_state.json", "device_config.json", "interruptores.json"];
+        for nombre in del_equipo {
+            std::fs::write(dir.join(nombre), "del equipo").unwrap();
+        }
+        let anterior = copias.join("negocio-anterior-1");
+        std::fs::create_dir_all(&anterior).unwrap();
+        std::fs::write(anterior.join("data.db"), "de otro, apartado antes").unwrap();
+
+        // Con la licencia del mismo negocio, o sin licencia, no se toca nada.
+        assert_eq!(resolver_al_abrir(&dir, Some("negocio-a")).unwrap(), None);
+        assert_eq!(resolver_al_abrir(&dir, None).unwrap(), None);
+        assert!(dir.join("data.db").exists());
+
+        marcar_cambio_de_negocio(&dir, "negocio-x").unwrap();
+        let carpeta = resolver_al_abrir(&dir, Some("negocio-x")).unwrap().expect("apartado");
+
+        assert_ne!(carpeta, anterior, "un apartado terminado no se reutiliza");
+        assert!(!carpeta.join(APARTADO_EN_CURSO).exists(), "terminado");
+        assert!(hay_cambio_de_negocio_pendiente(&dir), "la marca no es cosa de apartar");
+        // El arranque la quita después; con ella puesta no se purgaría nada.
+        quitar_cambio_de_negocio(&dir).unwrap();
+        assert_eq!(crate::sello::del_fichero(&carpeta.join("data.db")).unwrap(), Sello::De("negocio-a".into()));
+        let mut esperadas: Vec<String> = familias.iter().map(|f| f.to_string()).collect();
+        esperadas.push(diaria.clone());
+        esperadas.sort();
+        let mut movidas: Vec<String> = std::fs::read_dir(carpeta.join(BACKUP_DIR))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        movidas.sort();
+        assert_eq!(movidas, esperadas);
+        for nombre in del_negocio {
+            assert!(carpeta.join(nombre).exists(), "{nombre} apartado");
+            assert!(!dir.join(nombre).exists(), "{nombre} ya no está en AppData");
+        }
+        assert_eq!(std::fs::read_to_string(carpeta.join("images").join("logo").join("logo.png")).unwrap(), "logo de A");
+        assert!(!dir.join("images").exists());
+        assert!(!dir.join("data.db").exists());
+        for nombre in del_equipo {
+            assert!(dir.join(nombre).exists(), "{nombre} es del equipo y se queda");
+        }
+        assert_eq!(std::fs::read_to_string(anterior.join("data.db")).unwrap(), "de otro, apartado antes");
+        assert!(list_backups(&dir).unwrap().is_empty());
+
+        // La purga de restos no entra en lo apartado, ni con copias nuevas de todas las familias.
+        for nombre in ["pre-restore-20.db", "pre-restore-21.db", "pre-restore-22.db", "antes-de-traslado-20.db.gz",
+                       "antes-de-traslado-21.db.gz", "antes-de-traslado-22.db.gz"] {
+            std::fs::write(copias.join(nombre), "de X").unwrap();
+        }
+        std::fs::write(dir.join("data.db.bak.30"), "de X").unwrap();
+        std::fs::write(dir.join("data.db.bak.31"), "de X").unwrap();
+        std::fs::write(dir.join("data.db.bak.32"), "de X").unwrap();
+        purge_restore_leftovers(&dir).unwrap();
+        let mut despues: Vec<String> = std::fs::read_dir(carpeta.join(BACKUP_DIR))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        despues.sort();
+        assert_eq!(despues, esperadas);
+        assert!(carpeta.join("data.db.bak.9").exists() && carpeta.join("data.db.bak.10").exists());
+        assert!(!copias.join("pre-restore-20.db").exists(), "la purga sigue haciendo su trabajo fuera");
+
+        // Y nada de lo apartado vuelve por «Restaurar desde un archivo».
+        let err = import_backup(&dir, &carpeta.join(BACKUP_DIR).join(&diaria), Some("negocio-a")).await.unwrap_err();
+        assert!(err.to_string().contains("guardó aparte"), "{err}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+
+    /// AUD-06 · Una base que no se deja leer no dice de quién es: con una licencia guardada se aparta
+    /// entera, como si fuera de otro negocio, con sus imágenes, su cola y las copias de otros o sin
+    /// sello. Nunca se da por «sin sello». Lo único que se queda son las copias selladas con la
+    /// licencia, que dicen ser de este negocio: son con las que se recupera una base dañada.
+    #[tokio::test]
+    async fn una_base_ilegible_se_aparta_entera_salvo_las_copias_selladas_con_la_licencia() {
+        let dir = test_dir("base_ilegible");
+        let db = db_operativa(&dir).await;
+        let sin_sello = create_backup(&db, &dir).await.unwrap().unwrap().id;
+        sellar(&db, "negocio-a").await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let de_a = create_backup(&db, &dir).await.unwrap().unwrap().id;
+        // Una copia de otro negocio: el sello se cambia por debajo, que sellar no lo sustituye nunca.
+        db.write().await.raw().execute_batch("UPDATE _Negocio SET ID_Negocio = 'negocio-otro';").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let de_otro = create_backup(&db, &dir).await.unwrap().unwrap().id;
+        db.cerrar().await.unwrap();
+        drop(db);
+        for sufijo in ["-wal", "-shm"] {
+            let _ = std::fs::remove_file(dir.join(format!("data.db{sufijo}")));
+        }
+        std::fs::write(dir.join("data.db"), vec![b'x'; 8192]).unwrap();
+        assert_eq!(crate::sello::del_fichero(&dir.join("data.db")).unwrap(), Sello::Ilegible);
+        std::fs::create_dir_all(dir.join("images").join("productos")).unwrap();
+        std::fs::write(dir.join("images").join("productos").join("p.jpg"), "foto").unwrap();
+        std::fs::write(dir.join("image_uploads.json"), "[]").unwrap();
+
+        let carpeta = resolver_al_abrir(&dir, Some("negocio-a")).unwrap().expect("se aparta");
+
+        assert_eq!(std::fs::read(carpeta.join("data.db")).unwrap(), vec![b'x'; 8192], "la base, tal cual");
+        assert!(carpeta.join("images").join("productos").join("p.jpg").exists());
+        assert!(carpeta.join("image_uploads.json").exists());
+        assert!(carpeta.join(BACKUP_DIR).join(&sin_sello).exists(), "la copia sin sello no dice de quién es");
+        assert!(carpeta.join(BACKUP_DIR).join(&de_otro).exists());
+        let quedan: Vec<String> = list_backups(&dir).unwrap().into_iter().map(|b| b.id).collect();
+        assert_eq!(quedan, vec![de_a.clone()], "la sellada con la licencia se queda para recuperar");
+        assert!(!dir.join("data.db").exists());
+
+        // Y con ella se recupera la base dañada.
+        let db = crate::connection::init_main_db(&dir, Some("negocio-a")).await.unwrap();
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::DataMissing);
+        db.cerrar().await.unwrap();
+        drop(db);
+        assert!(prepare_restore(&dir, &de_a, Some("negocio-a")).await.is_ok());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// AUD-06 · Lo apartado nunca pisa nada: con el nombre ocupado se usa otro.
+    #[test]
+    fn lo_apartado_no_pisa_lo_que_ya_hay() {
+        let dir = test_dir("destino_libre");
+        std::fs::create_dir_all(&dir).unwrap();
+        let nombre = std::ffi::OsStr::new("image_uploads.json");
+        assert_eq!(destino_libre(&dir, nombre), dir.join("image_uploads.json"));
+        std::fs::write(dir.join("image_uploads.json"), "primero").unwrap();
+        assert_eq!(destino_libre(&dir, nombre), dir.join("image_uploads.json.2"));
+        std::fs::write(dir.join("image_uploads.json.2"), "segundo").unwrap();
+        assert_eq!(destino_libre(&dir, nombre), dir.join("image_uploads.json.3"));
+
+        let origen = test_dir("destino_libre_origen");
+        std::fs::create_dir_all(&origen).unwrap();
+        std::fs::write(origen.join("image_uploads.json"), "tercero").unwrap();
+        mover(&origen.join("image_uploads.json"), &dir).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("image_uploads.json")).unwrap(), "primero");
+        assert_eq!(std::fs::read_to_string(dir.join("image_uploads.json.3")).unwrap(), "tercero");
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(origen);
+    }
+
+    /// AUD-06 · Un apartado que terminó de mover (la base ya está en su carpeta) pero no llegó a
+    /// quitar su marca no se «termina» otra vez: eso se llevaría la base nueva. Sólo se quita la
+    /// marca.
+    #[tokio::test]
+    async fn un_apartado_terminado_con_la_marca_puesta_no_se_lleva_la_base_nueva() {
+        let dir = test_dir("apartado_terminado");
+        let db = db_operativa(&dir).await;
+        sellar(&db, "negocio-a").await;
+        db.cerrar().await.unwrap();
+        drop(db);
+        let carpeta = resolver_al_abrir(&dir, Some("negocio-x")).unwrap().expect("apartado");
+        let db = crate::connection::init_main_db(&dir, Some("negocio-x")).await.unwrap();
+        db.cerrar().await.unwrap();
+        drop(db);
+        // Lo que no llegó a hacerse.
+        std::fs::write(carpeta.join(APARTADO_EN_CURSO), "").unwrap();
+        assert!(!hay_apartado_a_medias(&dir).unwrap());
+
+        assert_eq!(resolver_al_abrir(&dir, Some("negocio-x")).unwrap(), None);
+
+        assert!(!carpeta.join(APARTADO_EN_CURSO).exists());
+        assert_eq!(crate::sello::del_fichero(&dir.join("data.db")).unwrap(), Sello::De("negocio-x".into()));
+        assert_eq!(crate::sello::del_fichero(&carpeta.join("data.db")).unwrap(), Sello::De("negocio-a".into()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// AUD-06 · Con un cambio de negocio pendiente no se borra nada del equipo: ni la retención de las
+    /// copias diarias ni la purga de restos (temporales viejos, bases de antes de restaurar, copias de
+    /// antes de una migración). Todo eso es del negocio que el arranque aparta. Sin la marca, purgan
+    /// como siempre.
+    #[tokio::test]
+    async fn con_un_cambio_pendiente_la_retencion_no_borra_nada() {
+        let dir = test_dir("retencion_suspendida");
+        let db = db_operativa(&dir).await;
+        let backups = dir.join(BACKUP_DIR);
+        std::fs::create_dir_all(&backups).unwrap();
+        for stamp in 1..=BACKUPS_A_CONSERVAR as i64 {
+            std::fs::write(backups.join(format!("{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}")), b"antigua").unwrap();
+        }
+        let mut restos: Vec<PathBuf> = Vec::new();
+        for sello in [10, 20, 30] {
+            restos.push(backups.join(format!("pre-restore-{sello}.db")));
+        }
+        restos.push(dir.join("data.restore.1.tmp"));
+        for sello in [1, 2, 3] {
+            restos.push(dir.join(format!("{MIGRACION_PREFIX}{sello}")));
+        }
+        let huerfano = backups.join(".backup-1-a.tmp");
+        restos.push(huerfano.clone());
+        for resto in &restos {
+            std::fs::write(resto, b"x").unwrap();
+        }
+        std::fs::File::options()
+            .write(true)
+            .open(&huerfano)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600))
+            .unwrap();
+
+        marcar_cambio_de_negocio(&dir, "negocio-x").unwrap();
+        create_backup(&db, &dir).await.unwrap().expect("la copia se hace");
+        purge_restore_leftovers(&dir).unwrap();
+        assert_eq!(list_backups(&dir).unwrap().len(), BACKUPS_A_CONSERVAR + 1, "la retención no borra");
+        for resto in &restos {
+            assert!(resto.exists(), "{} no se borra con el cambio pendiente", resto.display());
+        }
+
+        quitar_cambio_de_negocio(&dir).unwrap();
+        create_backup(&db, &dir).await.unwrap().expect("la copia se hace");
+        purge_restore_leftovers(&dir).unwrap();
+        assert_eq!(list_backups(&dir).unwrap().len(), BACKUPS_A_CONSERVAR);
+        assert!(!backups.join("pre-restore-10.db").exists() && !huerfano.exists());
+        assert!(!dir.join("data.restore.1.tmp").exists() && !dir.join(format!("{MIGRACION_PREFIX}1")).exists());
+
+        db.cerrar().await.unwrap();
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// AUD-06 · Un error al abrir o recorrer una carpeta no cuenta como carpeta vacía: se devuelve, y
+    /// el apartado se para ahí con las marcas puestas. Sólo una carpeta que no existe está vacía.
+    #[test]
+    fn un_error_al_recorrer_no_cuenta_como_carpeta_vacia() {
+        let dir = test_dir("enumerar");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!hay_apartado_a_medias(&dir).unwrap(), "sin backups/ no hay nada");
+        assert!(carpetas_apartadas(&dir).unwrap().is_empty());
+
+        std::fs::write(dir.join("image_uploads.json"), "[]").unwrap();
+        std::fs::write(dir.join(BACKUP_DIR), "no es una carpeta").unwrap();
+        marcar_cambio_de_negocio(&dir, "negocio-x").unwrap();
+
+        assert!(hay_apartado_a_medias(&dir).is_err());
+        assert!(carpetas_apartadas(&dir).is_err());
+        assert!(apartar_para_el_cambio_de_negocio(&dir, "negocio-x").is_err());
+        assert!(hay_cambio_de_negocio_pendiente(&dir), "la marca sigue");
+        assert!(dir.join("image_uploads.json").exists(), "no se ha movido nada");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// AUD-06 · Con un cambio pendiente se aparta todo lo del equipo aunque no haya `data.db` (una
+    /// restauración cortada entre sus dos `rename`), con su WAL suelto incluido; si ya no queda nada,
+    /// no se crea ninguna carpeta; y una base ya sellada con el negocio nuevo se queda.
+    #[tokio::test]
+    async fn con_un_cambio_pendiente_se_aparta_todo_aunque_no_haya_base() {
+        let dir = test_dir("apartar_sin_base");
+        let backups = dir.join(BACKUP_DIR);
+        std::fs::create_dir_all(&backups).unwrap();
+        std::fs::write(backups.join("pre-restore-1.db"), b"x").unwrap();
+        std::fs::write(backups.join(format!("{BACKUP_PREFIX}2{BACKUP_SUFFIX}")), b"x").unwrap();
+        std::fs::write(dir.join("data.restore.3.tmp"), b"x").unwrap();
+        std::fs::write(dir.join("data.db-wal"), b"x").unwrap();
+        std::fs::write(dir.join("image_uploads.json"), b"[]").unwrap();
+
+        let carpeta = apartar_para_el_cambio_de_negocio(&dir, "negocio-x").unwrap().expect("apartado");
+        for resto in ["data.restore.3.tmp", "data.db-wal", "image_uploads.json"] {
+            assert!(carpeta.join(resto).exists() && !dir.join(resto).exists(), "{resto}");
+        }
+        assert_eq!(std::fs::read_dir(carpeta.join(BACKUP_DIR)).unwrap().count(), 2);
+        assert!(!carpeta.join(APARTADO_EN_CURSO).exists());
+
+        assert_eq!(apartar_para_el_cambio_de_negocio(&dir, "negocio-x").unwrap(), None, "no queda nada");
+        assert_eq!(carpetas_apartadas(&dir).unwrap(), vec![carpeta]);
+
+        let db = crate::connection::init_main_db(&dir, Some("negocio-x")).await.unwrap();
+        db.cerrar().await.unwrap();
+        drop(db);
+        std::fs::write(dir.join("image_uploads.json"), b"[]").unwrap();
+        assert_eq!(apartar_para_el_cambio_de_negocio(&dir, "negocio-x").unwrap(), None, "la base ya es de X");
+        assert!(dir.join("data.db").exists() && dir.join("image_uploads.json").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Lo que hace una purga justo después de ver que no hay marca, antes de borrar (sólo en tests).
+    type Gancho = Box<dyn FnOnce() + Send>;
+    static TRAS_MIRAR_LA_MARCA: std::sync::Mutex<Option<Gancho>> = std::sync::Mutex::new(None);
+
+    pub(super) fn tras_mirar_la_marca() {
+        let gancho = TRAS_MIRAR_LA_MARCA.lock().unwrap().take();
+        if let Some(gancho) = gancho {
+            gancho();
+        }
+    }
+
+    /// AUD-06 · La purga se detiene justo después de ver que no hay marca, y entonces se intenta
+    /// publicar el cambio de negocio: la publicación espera a que termine ese borrado (empezó antes del
+    /// cambio), y cuando la marca está, ninguna purga borra nada. Ninguna copia se borra con el cambio
+    /// ya publicado.
+    #[test]
+    fn publicar_el_cambio_espera_al_borrado_en_curso_y_despues_no_se_borra_nada() {
+        use std::sync::mpsc;
+        let dir = test_dir("marca_y_purga");
+        let backups = dir.join(BACKUP_DIR);
+        std::fs::create_dir_all(&backups).unwrap();
+        // Dos que conservar y una que sobra.
+        for sello in [10, 20, 30] {
+            std::fs::write(backups.join(format!("pre-restore-{sello}.db")), b"de A").unwrap();
+        }
+        let en_curso = backups.join("pre-restore-10.db");
+
+        let (visto, ha_visto) = mpsc::channel::<()>();
+        let (sigue, puede_seguir) = mpsc::channel::<()>();
+        *TRAS_MIRAR_LA_MARCA.lock().unwrap() = Some(Box::new(move || {
+            visto.send(()).unwrap();
+            puede_seguir.recv().unwrap();
+        }));
+
+        let purga = {
+            let dir = dir.clone();
+            std::thread::spawn(move || purge_restore_leftovers(&dir).unwrap())
+        };
+        ha_visto.recv().unwrap();
+        // La purga ha visto que no hay marca y aún no ha borrado. Se publica el cambio.
+        let publicar = {
+            let dir = dir.clone();
+            std::thread::spawn(move || marcar_cambio_de_negocio(&dir, "negocio-x").unwrap())
+        };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!hay_cambio_de_negocio_pendiente(&dir), "la publicación espera al borrado en curso");
+        assert!(en_curso.exists());
+
+        sigue.send(()).unwrap();
+        publicar.join().unwrap();
+        // Publicada la marca, el borrado que estaba en curso ya había terminado.
+        assert!(hay_cambio_de_negocio_pendiente(&dir));
+        assert!(!en_curso.exists(), "se borró antes de que la marca estuviera");
+        purga.join().unwrap();
+
+        // Con la marca puesta, otra purga no borra nada aunque sobre.
+        std::fs::write(backups.join("pre-restore-5.db"), b"de A").unwrap();
+        purge_restore_leftovers(&dir).unwrap();
+        for queda in ["pre-restore-5.db", "pre-restore-20.db", "pre-restore-30.db"] {
+            assert!(backups.join(queda).exists(), "{queda}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
-
-

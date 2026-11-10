@@ -691,6 +691,9 @@ async fn backup_local(app: AppHandle) -> Result<(), String> {
     // temporales). No entran en la retención de siete porque no son copias diarias, y sin esto
     // cada intento de recuperación dejaba una BD entera en AppData para siempre. Aquí es el sitio:
     // el job sólo corre con la Main ya operativa, o sea con la restauración terminada.
+    //
+    // AUD-06: con un cambio de negocio pendiente, ni la retención de la copia ni esta purga borran
+    // nada: lo miran en cada borrado, con el turno que toma quien la publica (`recovery::purgar`).
     tpv_infra_sqlite::recovery::purge_restore_leftovers(&dir)?;
     Ok(())
 }
@@ -711,9 +714,11 @@ async fn cifrado_pii(app: AppHandle) -> Result<(), String> {
         .cloned()
         .ok_or_else(|| "DB no inicializada".to_string())?;
 
+    // AUD-06: con la clave del negocio de la base (su sello), nunca con la de otro.
+    let negocio = tpv_infra_sqlite::sello::leer(&conn.read().await).await.ok().flatten();
     let repo = tpv_infra_sqlite::trabajadores::SqliteTrabajadoresRepository::with_cipher(
         conn,
-        crate::field_cipher(),
+        crate::field_cipher(negocio.as_deref()),
     );
 
     let n = repo.cifrar_pii_pendiente().await?;

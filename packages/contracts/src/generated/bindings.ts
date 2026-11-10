@@ -1419,6 +1419,12 @@ export type LicenseActivateOutcome_Deserialize = {
 	 *  meses») y no hay nada más que hacer.
 	 */
 	tiempo_sumado?: boolean,
+	/**
+	 *  AUD-06 · La licencia es de otro negocio que la base de este equipo: los datos del anterior se
+	 *  guardan aparte al volver a arrancar, y el TPV se reinicia solo enseguida. La pantalla lo
+	 *  avisa y no sigue.
+	 */
+	reinicia?: boolean,
 };
 
 /**
@@ -1438,6 +1444,12 @@ export type LicenseActivateOutcome_Serialize = {
 	 *  meses») y no hay nada más que hacer.
 	 */
 	tiempo_sumado: boolean,
+	/**
+	 *  AUD-06 · La licencia es de otro negocio que la base de este equipo: los datos del anterior se
+	 *  guardan aparte al volver a arrancar, y el TPV se reinicia solo enseguida. La pantalla lo
+	 *  avisa y no sigue.
+	 */
+	reinicia: boolean,
 };
 
 /**

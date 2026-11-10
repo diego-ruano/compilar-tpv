@@ -67,6 +67,7 @@ pub mod pedidos_proveedor;
 pub mod proveedores;
 pub mod reconciliacion;
 pub mod recovery;
+pub mod sello;
 pub mod reservas;
 pub mod reservas_web;
 pub mod reservas_web_avisos;

@@ -11,6 +11,7 @@
 //! Las tablas de control (`_Sync_*`) las crea `Db::open` al arrancar, así que aquí no hace falta
 //! asegurarlas en cada llamada.
 
+use tpv_domain::licensing::{procedencia, Procedencia, Sello};
 use crate::consultas::{db_err};
 use crate::util::now_ms;
 use std::sync::Arc;
@@ -1092,6 +1093,7 @@ impl SyncRepository for SqliteSyncRepository {
     async fn bootstrap_restaurar(
         &self,
         snapshot: BootstrapSnapshot,
+        negocio: &str,
     ) -> AppResult<BootstrapResultado> {
         // Tras un traslado de licencia la base de este equipo es de antes: se guarda entera (puede
         // tener operaciones que nunca subieron) y se reemplaza por la de la nube, outbox incluido.
@@ -1143,6 +1145,18 @@ impl SyncRepository for SqliteSyncRepository {
         // COMMIT, cuando ya está todo dentro. Sin esto habría que ordenar 41 tablas por sus
         // dependencias y mantener ese orden a mano en cada cambio de esquema.
         let res: AppResult<i64> = conn.transaccion(async {
+            // AUD-06: una base sólo se usa con la licencia de su negocio. La que lleva el sello de
+            // otro no se rellena con los datos de éste: se aparta entera al volver a abrirla
+            // (`connection::init_main_db`). La que queda, con el sello de la nube de la que viene,
+            // en esta misma transacción: no hay base reconstruida sin sello, ni con el de otro.
+            let sello = Sello::leido(crate::sello::leer(&**conn).await?.as_deref());
+            if procedencia(&sello, negocio) == Procedencia::DeOtroNegocio {
+                return Err(AppError::conflict(
+                    "Los datos de este ordenador son de otro negocio y hay que apartarlos antes de traer los de la licencia. Cierra el programa y vuelve a abrirlo.",
+                ));
+            }
+            crate::sello::escribir(conn, negocio).await?;
+
             // Restaurar VACÍA las tablas: una operación local aún sin subir se perdería sin dejar
             // rastro y sin que nadie lo supiera. Va DENTRO de la transacción a propósito —
             // comprobarlo antes dejaría una ventana por la que puede colarse una venta entre el
@@ -1983,7 +1997,7 @@ mod tests_bootstrap {
                 total_filas: 1,
                 tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
                 backfill: vec![],
-            })
+            }, "negocio-de-prueba")
             .await
             .unwrap();
 
@@ -2002,7 +2016,7 @@ mod tests_bootstrap {
             total_filas: 0,
             tablas: vec![tabla("Zonas", vec![])],
             backfill: vec![],
-        })
+        }, "negocio-de-prueba")
         .await
         .unwrap();
 
@@ -2038,7 +2052,7 @@ mod tests_bootstrap {
                     ],
                 )],
                 backfill: vec![],
-            })
+            }, "negocio-de-prueba")
             .await;
 
         assert!(err.is_err());
@@ -2062,7 +2076,7 @@ mod tests_bootstrap {
                     tabla("Tabla_Del_Futuro", vec![vec![json!("x"), json!("y")]]),
                 ],
                 backfill: vec![],
-            })
+            }, "negocio-de-prueba")
             .await
             .unwrap();
 
@@ -2086,7 +2100,7 @@ mod tests_bootstrap {
                     tabla("Zonas\"; DROP TABLE Zonas; --", vec![]),
                 ],
                 backfill: vec![],
-            })
+            }, "negocio-de-prueba")
             .await
             .unwrap();
 
@@ -2113,7 +2127,7 @@ mod tests_bootstrap {
                 total_filas: n as i64,
                 tablas: vec![tabla("Zonas", filas)],
                 backfill: vec![],
-            })
+            }, "negocio-de-prueba")
             .await
             .unwrap();
 
@@ -2159,7 +2173,7 @@ mod tests_bootstrap {
                 total_filas: 0,
                 tablas: vec![tabla("Zonas", vec![])],
                 backfill: vec![],
-            })
+            }, "negocio-de-prueba")
             .await;
 
         assert!(err.is_err(), "no puede restaurar con el outbox pendiente");
@@ -2197,7 +2211,7 @@ mod tests_bootstrap {
                     vec![vec![json!("z1"), json!("Terraza")]],
                 )],
                 backfill: vec![],
-            })
+            }, "negocio-de-prueba")
             .await
             .unwrap();
 
@@ -2257,7 +2271,7 @@ mod tests_bootstrap {
             total_filas: 1,
             tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Terraza")]])],
             backfill: vec![],
-        })
+        }, "negocio-de-prueba")
         .await
         .unwrap();
 
@@ -2306,7 +2320,7 @@ mod tests_bootstrap {
                     vec![vec![json!("z1"), json!("A")], vec![json!("z1"), json!("B")]],
                 )],
                 backfill: vec![],
-            })
+            }, "negocio-de-prueba")
             .await;
 
         assert!(err.is_err());
@@ -2315,6 +2329,33 @@ mod tests_bootstrap {
         assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 1);
         assert!(repo.outbox_pending(10).await.unwrap().is_empty());
     }
+
+    /// AUD-06 · La reconstrucción sella la base con el negocio de la nube de la que viene, en la
+    /// misma transacción. Y una base sellada con otro negocio no se rellena con los datos de éste:
+    /// se rechaza sin tocar nada (se aparta entera al volver a abrirla).
+    #[tokio::test]
+    async fn la_reconstruccion_sella_la_base_y_no_rellena_la_de_otro_negocio() {
+        let (repo, db, _dir) = repo_temporal().await;
+        let volcado = || BootstrapSnapshot {
+            seq: 10,
+            total_filas: 1,
+            tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
+            backfill: vec![],
+        };
+
+        repo.bootstrap_restaurar(volcado(), "negocio-a").await.unwrap();
+        assert_eq!(crate::sello::leer(&db.read().await).await.unwrap().as_deref(), Some("negocio-a"));
+
+        {
+            let w = db.write().await;
+            w.raw().execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z2', 'De A');", ()).await.unwrap();
+        }
+        let err = repo.bootstrap_restaurar(volcado(), "negocio-x").await.unwrap_err();
+        assert!(err.to_string().contains("son de otro negocio"), "{err}");
+        assert_eq!(zonas(&db).await, vec!["De A".to_string(), "Salon".to_string()], "no se ha tocado nada");
+        assert_eq!(crate::sello::leer(&db.read().await).await.unwrap().as_deref(), Some("negocio-a"));
+    }
+
 }
 
 #[cfg(test)]
@@ -2359,7 +2400,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Zonas".into()],
-        })
+        }, "negocio-de-prueba")
         .await
         .unwrap();
     }
@@ -2426,7 +2467,7 @@ mod tests_backfill {
             // Padres primero: es lo único que hace viable la fase 2, porque cada página es su
             // propia transacción y `defer_foreign_keys` no cubre entre transacciones.
             backfill: vec!["Comandas".into(), "Detalle_Comanda".into()],
-        })
+        }, "negocio-de-prueba")
         .await
         .unwrap();
 
@@ -2609,7 +2650,7 @@ mod tests_backfill {
                 parcial: true,
             }],
             backfill: vec!["Tabla_Del_Futuro".into(), "Zonas".into()],
-        })
+        }, "negocio-de-prueba")
         .await
         .unwrap();
 

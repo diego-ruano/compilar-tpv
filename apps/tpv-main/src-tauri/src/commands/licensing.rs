@@ -62,7 +62,10 @@ pub async fn license_sumar_clave(
 ) -> Result<LicenseActivateOutcome, AppErrorDto> {
     app.state::<crate::AppState>().exigir_rol(&[crate::ADMIN]).await?;
     let service = svc(&app)?;
-    let outcome = uc::sumar_clave(&service, args.activation_key).await?;
+    // AUD-06: en el turno de las activaciones, y no con un cambio de negocio pendiente.
+    let db = app.state::<crate::AppState>().db.lock().await.as_ref().cloned();
+    let base = tpv_infra_sqlite::recovery::BaseLocal::new(&app_data_dir(&app)?, db);
+    let outcome = uc::sumar_clave(&service, &base, args.activation_key).await?;
 
     // Best-effort: el tiempo ya está sumado; si la comprobación falla, el pulso lo traerá.
     if let Ok(res) = uc::check_now(&service).await {
@@ -100,7 +103,20 @@ pub async fn license_activate(
     args: LicenseActivateInput,
 ) -> Result<LicenseActivateOutcome, AppErrorDto> {
     let service = svc(&app)?;
-    let outcome = uc::activate(&service, args).await?;
+    // AUD-06: el caso de uso decide con el sello de la base abierta (o del fichero, si no hay).
+    let state = app.state::<crate::AppState>();
+    let db = state.db.lock().await.as_ref().cloned();
+    let base = tpv_infra_sqlite::recovery::BaseLocal::new(&app_data_dir(&app)?, db);
+    let outcome = uc::activate(&service, &base, args).await?;
+
+    // AUD-06: la licencia es de otro negocio que la base. Se ha guardado como pendiente, sin tocar
+    // la vigente: hasta que el proceso acabe, todo sigue siendo del negocio anterior, con sus
+    // credenciales. El TPV se reinicia, y el arranque aparta los datos del anterior y aplica la
+    // licencia nueva antes de abrir nada. La pantalla avisa mientras tanto.
+    if outcome.reinicia {
+        reiniciar_en_unos_segundos(app.clone());
+        return Ok(outcome);
+    }
 
     // RI-56: el `tenant_id` es el número de instalación de cada registro de facturación, y en un
     // equipo recién instalado `setup()` corrió antes de que existiera. Sin esto, todo lo facturado
@@ -112,13 +128,6 @@ pub async fn license_activate(
         if !st.tenant_id.is_empty() {
             tpv_infra_sqlite::verifactu::set_numero_instalacion(&st.tenant_id);
             tpv_telemetry::set_tenant(st.tenant_id);
-        }
-    }
-
-    if outcome.cambio_de_equipo {
-        tpv_infra_sqlite::recovery::marcar_traslado(&app_data_dir(&app)?)?;
-        if let Some(db) = app.state::<crate::AppState>().db.lock().await.as_ref() {
-            db.bloquear_escrituras_de_negocio(true);
         }
     }
 
@@ -135,3 +144,18 @@ pub async fn license_request_device_change(
     uc::request_device_change(&svc(&app)?, args).await?;
     Ok("OK".into())
 }
+
+/// AUD-06 · Reinicia el TPV dentro de unos segundos, el tiempo de que la pantalla enseñe el aviso.
+#[cfg(desktop)]
+fn reiniciar_en_unos_segundos(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+        tracing::info!(target: "tpv::licensing", "licencia de otro negocio: el TPV se reinicia");
+        app.restart();
+    });
+}
+
+/// En la Handy no se activa ninguna licencia de Main; si llegara aquí, el cambio pendiente lo
+/// resuelve el siguiente arranque.
+#[cfg(not(desktop))]
+fn reiniciar_en_unos_segundos(_app: AppHandle) {}

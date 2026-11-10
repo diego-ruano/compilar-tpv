@@ -40,7 +40,7 @@ fn dir_temporal(nombre: &str) -> PathBuf {
 /// La base de una Main en marcha, como la abre el arranque (`init_main_db`).
 async fn abrir(nombre: &str) -> (Arc<Db>, SqliteSyncRepository, PathBuf) {
     let dir = dir_temporal(nombre);
-    let db = init_main_db(&dir, false).await.unwrap();
+    let db = init_main_db(&dir, None).await.unwrap();
     (db.clone(), SqliteSyncRepository::new(db), dir)
 }
 
@@ -211,7 +211,7 @@ async fn el_escritor_no_adjunta_bases_y_las_copias_locales_siguen_funcionando() 
     }
     let copia = recovery::create_backup(&db, &dir).await.unwrap().expect("la base está operativa: hay copia");
     assert_eq!(recovery::list_backups(&dir).unwrap().len(), 1);
-    let preparada = recovery::prepare_restore(&dir, &copia.id).await.unwrap();
+    let preparada = recovery::prepare_restore(&dir, &copia.id, None).await.unwrap();
     let bytes = std::fs::read(&preparada).unwrap();
     assert!(bytes.starts_with(b"SQLite format 3"), "la copia es una base SQLite");
     assert!(

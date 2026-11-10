@@ -30,7 +30,11 @@ antigua crearía dos historiales que no hay forma de juntar.
 | Reconciliar | `tpv-application/src/use_cases/replicacion.rs` + transporte nativo | Catch-up → outbox → catch-up, hasta converger |
 | Desbloquear | `commands/recovery.rs::completar` (interno) | Outbox a 0 y checkpoint ≥ el final del log de la nube |
 | Copia anterior al log | `replicacion.rs::falta_un_tramo` + `purgadoHasta` de `/v1/sync/changes` | Le falta un tramo purgado: no se reconcilia (AUD-19) |
-| Traslado de licencia | `commands/licensing.rs::license_activate` + `recovery.rs::marcar_traslado` | La base de antes del traslado no se usa |
+| Traslado de licencia | `use_cases/licensing.rs::activate` + `recovery.rs::BaseLocal` (la marca) | La base de antes del traslado no se usa |
+| El sello de la base (AUD-06) | `_Negocio` (`0002_negocio.sql`) · `crates/tpv-infra-sqlite/src/sello.rs` · `tpv_domain::licensing::que_hacer_con_la_base` | De qué negocio es cada base y cada copia; una base sólo se usa con la licencia de su negocio |
+| Cambio de negocio | `use_cases/licensing.rs::activate` (licencia pendiente + marca `AppData/cambio-de-negocio`) + reinicio (`commands/licensing.rs`) | La licencia es de otro negocio que la base: queda pendiente y el TPV se reinicia |
+| Aplicarlo al arrancar | `lib.rs::run` → `use_cases/licensing.rs::aplicar_cambio_de_negocio_pendiente` | Apartar lo del anterior, la licencia pendiente a vigente, quitar la marca; antes de abrir nada |
+| Apartar lo de otro negocio | `recovery::apartar_para_el_cambio_de_negocio` (arranque con cambio pendiente: todo) · `recovery::resolver_al_abrir` (`connection::init_main_db`: con la regla) | A `backups/negocio-anterior-<ms>/`; lo que quedó a medias, primero |
 | Pantallas | `src/app/pages/RecuperarDatos.tsx` (restaurar) · `features/configuracion/sections/CopiasSeguridad.tsx` (ver y sacar copias, en Configuración → Licencia) | |
 
 ---
@@ -119,8 +123,14 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
   elija el usuario: un USB; sale comprimida, tal como está guardada) y `recovery_import_backup`, que la
   guarda comprimida como `import-*` y **no caduca**. Se importa una copia comprimida o una base tal cual
   (una `.db` de antes, o la `data.db` rescatada de otro equipo): el formato se reconoce por el contenido.
-  La validación no comprueba que sea del mismo negocio (la base no lleva marca de tenant): la pantalla lo
-  advierte, el daño se queda en local (restaurar no llena el outbox) y se deshace recuperando de la nube.
+- **Una copia lleva el sello de su base** (AUD-06): con el de otro negocio que el de la licencia, ni
+  se importa, ni se restaura, ni se saca del equipo, y lo dice («Esa copia es de otro negocio…»); sin licencia activada, una
+  sellada tampoco. Una copia **sin sello** (anterior a los sellos) no dice de quién es: se acepta como
+  antes, la pantalla advierte de que no se comprueba, el daño se queda en local (restaurar no llena el
+  outbox) y se deshace recuperando de la nube; al abrirla se sella con la licencia que haya
+  ([SYNC-33](../pendientes.md#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es)). Lo apartado
+  (`backups/antes-de-traslado-*` y `backups/negocio-anterior-*/`) no se importa, lleve sello o no.
+  Y no se restaura nada mientras la base que hay en el equipo sea de otro negocio: primero se aparta.
 - Una copia inservible se rechaza diciendo por qué.
 - Al restaurar, `_Sync_Failed` queda coherente con el checkpoint de la copia (AUD-18): lo que va por
   encima se borra, porque el catch-up de la reconciliación lo vuelve a traer y a intentar en orden. Su
@@ -155,6 +165,14 @@ apartan con un `rename`, sin reescribirlas. `antes-de-traslado-*` y `antes-de-la
 comprimidas. Las copias previas a una migración
 (`data.db.bak.*`, en la raíz de AppData) siguen la misma regla, y tampoco se comprimen: se hacen al
 arrancar, antes de abrir la base, y comprimirlas retrasaría el arranque.
+
+Con un cambio de negocio pendiente no se borra nada de esto, ni las copias diarias de más: la
+retención se suspende hasta que el arranque lo aparte todo
+([abajo](#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)).
+
+`backups/negocio-anterior-<ms>/` no es una familia de restos: es todo lo de otro negocio, apartado
+([abajo](#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)). La purga no entra y nada la vacía:
+ocupa lo que ocupaban esos ficheros hasta que alguien la borre a mano.
 
 ## Reconciliar y desbloquear
 
@@ -194,8 +212,123 @@ traslado, y el otro equipo ha seguido trabajando:
   **el outbox no sube**.
 - Reconstruir desde la nube **descarta ese outbox** (la excepción a la guardia) y guarda antes la base
   en `backups/antes-de-traslado-*`. La marca se quita **después** del `COMMIT`.
+- Es del mismo negocio, así que sólo la base es de antes: sus copias, sus imágenes y lo que dejó a
+  medias (`_Cobros_Pendientes`, `_Reservas_Web_Avisos`) se quedan.
 - No cubre al equipo que vuelve a ser la Main de su licencia sin que se trasladara: ahí su base vale, y
   si su fila de `devices` se movió, `readmitirMain` lo arregla al comprobar la licencia.
+
+## Una base sólo se usa con la licencia de su negocio
+
+AUD-06. Cada base lleva dentro de qué negocio es: su **sello**, la fila de `_Negocio`. Lo escriben la
+activación (en una base sin sello), la apertura de una base sin sello con una licencia guardada (en la
+misma transacción que sus datos iniciales, si es nueva) y la reconstrucción desde la nube, en la suya;
+las copias lo llevan porque son la base entera. Una base que no se deja leer no dice de quién es, y
+nunca se da por «sin sello». La regla es una (`tpv_domain::licensing::que_hacer_con_la_base`,
+[licencias.md](licencias.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)) y se aplica en tres
+sitios: al activar, al abrir la base y al restaurar, importar o exportar una copia (arriba).
+
+**Cambiar de negocio reinicia el TPV, y hasta entonces el negocio nuevo no existe en el proceso.**
+Cuando la licencia que se activa es de otro negocio que la base (o no se sabe de quién es la base):
+
+1. Se guarda **como pendiente**, sin tocar la vigente: su token y su DEK en entradas aparte del
+   almacén de secretos (`license-token-pendiente`, `field-dek-pendiente`) y su estado en
+   `AppData/license_state.pending.json`, que se escribe el último (entero o nada) y es lo que dice
+   que hay una pendiente. Después se anota el cambio en `AppData/cambio-de-negocio` (con el negocio;
+   también entero o nada).
+2. La pantalla avisa («Esta licencia es de otro negocio. Guardamos aparte los datos del anterior y el
+   TPV se reinicia.») y a los cuatro segundos el comando pide a Tauri que reinicie el TPV
+   (`app.restart()`, en escritorio). No es más que eso: si el TPV se cierra antes o el reinicio no
+   llega, el cambio se queda anotado y lo aplica el siguiente arranque, sea cuando sea.
+3. Hasta entonces todo sigue siendo del negocio anterior: la licencia vigente, sus credenciales, su
+   base y lo que se hace con ella. Lo que estaba en marcha, o empieza en esos segundos (un login, la
+   réplica, una subida o una descarga, la copia diaria, una restauración), termina como del anterior,
+   con sus credenciales y en su base, y lo que deje se aparta con ella al arrancar. Con el cambio
+   anotado:
+   - **no se activa ni se canjea ninguna otra licencia**, tampoco la del negocio de la base: se
+     rechaza antes de pedir nada a la nube («El TPV tiene un cambio de licencia pendiente: ciérralo y
+     vuelve a abrirlo antes de activar otra.»). Todas las activaciones y canjes van además de una en
+     una (un cerrojo del proceso en el caso de uso), y sellar nunca sustituye un sello distinto;
+   - **la retención se suspende**: ni la copia diaria ni la purga de restos borran nada del equipo
+     (mirar la marca y borrar van juntos, con el mismo turno que toma quien publica la marca: la
+     publicación espera al borrado en curso y lo que viene detrás ya la ve), porque todo es del
+     negocio que se va a apartar.
+4. Al arrancar, en `setup()`, antes de leer la licencia para nada, de abrir la base y de que arranque
+   ninguna tarea (`use_cases::licensing::aplicar_cambio_de_negocio_pendiente`), si hay un cambio
+   anotado:
+   1. se aparta **todo** lo que haya en el equipo de un negocio (abajo), haya o no `data.db` y diga lo
+      que diga su sello: una restauración cortada entre sus dos `rename` deja el equipo sin
+      `data.db` y con todo lo demás. Lo único que se queda es una base ya sellada con el negocio
+      nuevo, que no puede darse antes de aplicarlo;
+   2. la licencia pendiente pasa a vigente: token, DEK y estado; después se borra lo pendiente, el
+      estado lo último;
+   3. se quita la anotación del cambio.
+
+   Y se abre la base con la licencia nueva: vacía, y el equipo sigue el camino de uno que ha perdido
+   sus datos (trae los de su negocio de la nube).
+
+Cada paso se puede repetir, y el orden aguanta un corte en cualquier punto: el siguiente arranque
+sigue desde donde se quedó. Mientras el cambio no termina, la licencia vigente es la anterior (hasta
+el paso 2) y **no se abre ninguna base**: el arranque sigue sin `Db`, como con una base ilegible, y en
+caliente no se abre ni se instala ninguna (`sin_cambio_de_negocio_a_medias`: la pantalla de
+recuperación dice que se cierre el TPV y se vuelva a abrir). Como el proceso de antes puede tardar un
+instante en soltar la base al reiniciarse, un fallo al arrancar se reintenta unas cuantas veces antes
+de rendirse.
+
+Sólo el arranque quita la anotación: ni una restauración ni una apertura en caliente lo hacen. Y una
+licencia pendiente sólo se aplica con su anotación: una pendiente sin anotación (el corte cayó entre
+guardar la una y la otra) se descarta al arrancar, y una anotación sin pendiente (lo pendiente se ha
+perdido o no se deja leer) cuyo negocio no es el de la licencia vigente sólo se quita, y el equipo
+sigue con lo que tenía. Cambiar de idea antes del reinicio no se puede: hay que reiniciar y, después,
+activar la otra licencia, que es otro cambio de negocio.
+
+El cableado de `setup()` (llamar al caso de uso, el reintento, arrancar sin base si no termina) y las
+negativas en caliente con la marca puesta no tienen test automático: lo que tiene es lo de debajo (el
+caso de uso, lo pendiente en el almacén y el apartado, con SQLite de verdad). El reinicio en sí sólo
+se prueba a mano.
+
+**Lo que se aparta** (`recovery::apartar_para_el_cambio_de_negocio` en el paso 1;
+`recovery::resolver_al_abrir`, con la regla de la licencia, desde cada `connection::init_main_db`):
+
+- un apartado que se quedó a medias se termina primero, sea cual sea la licencia: lo que ya se movió
+  no es del negocio de la base que quede, y lo que falta es suyo;
+- con un cambio pendiente, todo lo del equipo (arriba); al abrir, si la base es de otro negocio que
+  la licencia, o no se deja leer. En los dos casos **se aparta todo lo de ese negocio**, sin borrar ni
+  pisar nada (un nombre ocupado lleva otro detrás), a
+  `backups/negocio-anterior-<ms>/`, con la misma forma que tenía en AppData: la base (y con ella sus
+  intentos de login, su registro de jobs, lo que tenía a medias y su outbox), **todas** sus copias y
+  bases guardadas de `backups/`, las copias previas a una migración, los temporales de una
+  restauración, la carpeta `images/` y su cola, sus marcas y el WAL de la base (aunque no esté la
+  base: junto a la nueva sería su WAL). Al abrir una base ilegible se quedan sólo las copias selladas
+  con la licencia, que dicen ser de ese negocio: son con las que se recupera una base dañada. Lo que
+  es del equipo (la licencia, el modo, los interruptores, la telemetría) se queda.
+
+La carpeta lleva una marca de apartado en curso desde que se crea hasta que termina, y la base es lo
+último que se mueve. Si algo no se deja mover (un fichero abierto por otro programa), o una carpeta
+no se deja abrir o recorrer (sólo una que no existe cuenta como vacía), se para ahí: la base sigue en
+su sitio con su sello, las marcas siguen puestas, la licencia nueva sigue pendiente y el siguiente
+arranque lo termina en la misma carpeta. Si ya no queda nada que apartar, no se crea ninguna.
+
+Volver a la licencia del negocio anterior después de traer la nube del nuevo es lo mismo al revés: la
+base del nuevo se aparta en otra carpeta y el anterior trae la suya de su nube.
+
+Las imágenes y la clave de cifrado de campo siguen la misma regla
+([licencias.md](licencias.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)): la cola sólo se
+sube, y lo que falta sólo se baja, si la base abierta es la del negocio de la licencia, y cada subida
+lleva el negocio con el que empezó.
+
+Lo que no hace:
+
+- **No reconoce una copia sin sello** (anterior a los sellos): se acepta con un aviso
+  ([SYNC-33](../pendientes.md#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es)).
+- Los cobros antiguos del navegador (`localStorage`, de antes de que los cobros a medias vivieran en
+  la base) no dicen de qué negocio son: se importan sólo si su ticket está en la base, con todas sus
+  líneas; los demás se apartan en el propio `localStorage` como desconocidos
+  ([frontend.md](frontend.md)).
+- `negocio-anterior-<ms>/` no se vacía nunca.
+- En la Handy no hay base ni reinicio: no activa licencias de Main.
+- No reinicia por la fuerza: si el TPV no llega a reiniciarse (se cierra antes, o el reinicio falla),
+  el cambio lo aplica el siguiente arranque, y hasta entonces no se activa otra licencia ni se purga
+  nada.
 
 ## Lo que vuelve y lo que no
 

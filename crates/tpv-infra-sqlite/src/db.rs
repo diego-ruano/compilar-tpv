@@ -997,7 +997,7 @@ mod tests {
 
         let dir = crate::test_temp::dir_temporal("carga");
         std::fs::create_dir_all(&dir).unwrap();
-        let db = crate::connection::init_main_db(&dir, false).await.unwrap();
+        let db = crate::connection::init_main_db(&dir, None).await.unwrap();
         let fin = Instant::now() + Duration::from_millis(1500);
         let escritas = Arc::new(AtomicI64::new(0));
         let mut tareas = Vec::new();

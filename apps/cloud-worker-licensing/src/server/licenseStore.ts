@@ -1473,29 +1473,62 @@ export async function getDevicePubKeyB64EnCualquierNegocio(
  * por eso una fila de otro negocio **sin clave registrada** tampoco se mueve
  * (`device_key_missing`): la firma sólo prueba la clave presentada, y sin una registrada con la que
  * compararla se la llevaría el primero que firmase.
+ *
+ * AUD-06: devuelve el negocio en el que estaba la fila del equipo (`null` si no tenía), que es lo
+ * único que queda de él en cuanto el alta la muda. `/activate` lo usa para avisar a la Main de que
+ * su base es de otro negocio.
  */
 export async function exigirClaveSiEsDeOtroNegocio(
 	db: Sql,
 	deviceId: string,
 	pubB64: string,
 	tenantIdQueAutoriza: string,
-): Promise<void> {
+): Promise<string | null> {
 	const r = await exec(
 		db,
 		`SELECT tenant_id, device_pubkey_b64 FROM devices WHERE device_id=? LIMIT 1;`,
 		[deviceId],
 	);
 	const row = (r.rows?.[0] as any) || null;
-	if (!row) return;
+	if (!row) return null;
 
 	const duenyo = String(row.tenant_id || "").trim();
 	const registrada = String(row.device_pubkey_b64 || "").trim();
 
-	if (duenyo && duenyo === tenantIdQueAutoriza) return;
+	if (duenyo && duenyo === tenantIdQueAutoriza) return duenyo;
 	if (!registrada) throw errorDeClave("device_key_missing");
-	if (registrada === pubB64.trim()) return;
+	if (registrada === pubB64.trim()) return duenyo || null;
 
 	throw errorDeClave("device_key_mismatch");
+}
+
+/**
+ * AUD-06: ¿este equipo era la Main de `tenantId`, un negocio con alguna licencia, esté como esté
+ * (también anulada o caducada), y sin retirar? Es lo que deja en el equipo una base de ese negocio.
+ *
+ * Quedan fuera:
+ * - el negocio que deja a medias una primera activación que falló después de dar de alta el
+ *   dispositivo: no llegó a tener licencia, así que ningún equipo guarda datos suyos;
+ * - el retirado (`status = 'deleted'`, `domains/admin/pruebas.ts`), que es lo que deja cada tanda
+ *   del E2E: su equipo conserva la identidad y estrena la tanda siguiente con la carpeta de datos
+ *   recién borrada;
+ * - el equipo que fue Handy de ese negocio: una Handy no guarda base (AUD-01, una tablet que pasa
+ *   a ser Main de un negocio nuevo).
+ *
+ * Se mira antes de que el alta mude la fila.
+ */
+export async function eraLaMainDeOtroNegocio(db: Sql, deviceId: string, tenantId: string): Promise<boolean> {
+	const r = await exec(
+		db,
+		`SELECT 1
+		   FROM devices d
+		   JOIN licenses l ON l.tenant_id = d.tenant_id
+		   JOIN tenants t ON t.tenant_id = d.tenant_id
+		  WHERE d.device_id = ? AND d.tenant_id = ? AND d.role = 'tpv' AND t.status <> 'deleted'
+		  LIMIT 1;`,
+		[deviceId, tenantId],
+	);
+	return (r.rows?.length ?? 0) > 0;
 }
 
 /**
