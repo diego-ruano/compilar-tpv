@@ -88,11 +88,32 @@ cuenta:
 
 | Caso | Efecto |
 |---|---|
-| Reembolso total o disputa abierta de un **alta** | Licencia revocada |
+| Reembolso total o disputa abierta de un **alta** | Licencia revocada. Si ya lo estaba, no se toca; en una disputa, su cobro queda `dispute_ya_revocada` en vez de `dispute` |
 | … de una **renovación** (`kind='renewal'`, incluida una clave canjeada) | Se restan sus meses |
-| Reembolso parcial | Nada; queda en `admin_audit` con todas las licencias de la compra (Stripe no dice cuál se devuelve: se revoca a mano) |
-| Disputa **ganada** | Se deshace lo que revirtió esa disputa (y sólo eso) |
+| Reembolso parcial | Nada; queda en `admin_audit` con la licencia de cada cobro de la compra. Stripe no dice cuál se devuelve: se corrige a mano ([abajo](#reembolso-parcial-lo-que-se-hace-a-mano)) |
+| Disputa **ganada** | Se deshace lo que revirtió esa disputa, y sólo eso (AUD-08): vuelve el alta cuyo cobro es `dispute` y los meses de la renovación. A un cobro `dispute_ya_revocada` sólo se le quita la marca, y una licencia sin cobro registrado (anterior a LIC-07) no se toca: si la revocó la disputa, se desrevoca a mano |
 | Cargo sin licencia atribuible | Nada; se audita |
+
+Una revocación a mano no la deshace ninguna disputa: ni la que se abre después ni la que ya estaba
+abierta, porque revocar pasa sus cobros `dispute` a `dispute_ya_revocada`
+([abajo](#anular-desde-la-administración)). Así, tras el reembolso parcial de una compra de varias,
+la clave devuelta y revocada a mano no vuelve a `issued` aunque después se gane una disputa del
+cargo.
+
+#### Reembolso parcial: lo que se hace a mano
+
+Lo decide el cobro de la unidad devuelta, en `license_payments` (`unidad`, `kind`, `term_months` y
+`license_id`, que es la licencia que tiene ahora su tiempo):
+
+- **Un alta que es el único cobro sin devolver de su licencia** (nadie ha canjeado otra clave sobre
+  ella): se revoca esa licencia, `pnpm license:revoke -- --id …`.
+- **Cualquier otro caso** —una renovación, una clave canjeada (su cobro se movió como `renewal` a la
+  licencia que recibió el tiempo) o un alta sobre la que ya se han canjeado otras claves—: se restan
+  a esa licencia los meses de la unidad, `pnpm license:shorten -- --id … --months N`. Revocarla
+  anularía el negocio entero, con el tiempo que sigue pagado.
+
+Si se compran dos claves y una se canjea sobre la otra, los dos cobros apuntan a la receptora, y la
+auditoría del reembolso la lista dos veces: se acorta, no se revoca.
 
 El cargo se atribuye por el historial de cobros, luego por el último cobro de la licencia y, como
 último recurso, por el cliente de Stripe **sólo si tiene una única licencia**. La auditoría anota los
@@ -356,10 +377,13 @@ equipo ([pendientes.md](../pendientes.md#reloj-01--la-hora-del-negocio-es-la-del
 
 ## Anular desde la administración
 
-`POST /v1/admin/licenses/:id/revoke` revoca y, como best-effort, pide al `TenantHub` del tenant que
-cierre el socket de la Main (`lib/hub.ts::cerrarSocketsDelDispositivo` → `/internal/revoke`, firmado
-con HMAC sobre método, ruta y cuerpo). El cliente reconecta, recibe un 403, lo traduce en un
-`license_check_now` y se bloquea en el acto, sin esperar al job. Las Handy no se cierran a mano: el DO
+`POST /v1/admin/licenses/:id/revoke` revoca y, en la misma transacción, hace suya la revocación
+(`atribuirRevocacionAMano`): si una disputa abierta ya había revocado el alta, su cobro pasa de
+`dispute` a `dispute_ya_revocada`, y ganarla ya no la reactiva (AUD-08). Después, como best-effort,
+le pide al `TenantHub` del tenant por RPC que cierre los sockets de la Main
+(`lib/hub.ts::cerrarSocketsDelDispositivo` → `revocarDispositivo`; si el DO no contesta, la revocación
+sigue hecha). El cliente reconecta, recibe un 403, lo traduce en un `license_check_now` y se bloquea
+en el acto, sin esperar al job. Las Handy no se cierran a mano: el DO
 las congela al irse la Main. **Caducar no empuja**: se nota en la siguiente comprobación.
 
 | Operación | Ruta | CLI |

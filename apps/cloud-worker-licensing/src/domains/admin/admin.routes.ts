@@ -27,9 +27,10 @@ import * as z from "zod";
 import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
 import { cerrarSocketsDelDispositivo } from "../../lib/hub";
-import { getDb } from "../../server/db";
+import { enTransaccion, getDb } from "../../server/db";
 import { descifrar } from "../../server/crypto";
 import {
+	atribuirRevocacionAMano,
 	auditAdmin,
 	extendLicense,
 	guardarClaveRecifrada,
@@ -225,7 +226,12 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	const lic = await getLicenseById(db, licenseId);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 
-	await revokeLicense(db, licenseId);
+	// AUD-08: la revocación es del operador aunque una disputa abierta ya hubiera revocado el alta.
+	// Su cobro deja de figurar como revocado por la disputa, y ganarla ya no la resucita.
+	await enTransaccion(db, async (tx) => {
+		await revokeLicense(tx, licenseId);
+		await atribuirRevocacionAMano(tx, licenseId);
+	});
 	await auditAdmin(db, "revoke", licenseId, { keyShort: lic.key_short });
 
 	// Y se le corta el WebSocket a la Main, que es lo que convierte "anulada" en "bloqueada" ahora

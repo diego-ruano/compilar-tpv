@@ -30,7 +30,7 @@
 //   · reembolso PARCIAL → no toca ninguna licencia; queda auditado (es un ajuste, no una
 //                         devolución: Stripe no dice de cuál de las licencias, y eso se decide a mano)
 //   · disputa abierta   → se revierte ya, que el dinero ya no está
-//   · disputa GANADA    → se deshace la reversión
+//   · disputa GANADA    → se deshace la reversión que hizo ella, y sólo ésa (AUD-08)
 
 import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
@@ -43,6 +43,7 @@ import {
 	attachStripeSession,
 	auditAdmin,
 	clearLicensePaymentReversal,
+	DISPUTA_SIN_REVOCAR,
 	extendLicense,
 	getLicenseById,
 	getLicenseByStripeIntent,
@@ -61,7 +62,7 @@ import {
 } from "../../server/licenseStore";
 import type { LicenseRow, LicensePaymentRow } from "../../server/licenseStore";
 import { sendLicenseKeysEmail } from "../licensing/licenseEmails";
-import { assertEnv } from "../licensing/licensing.helpers";
+import { assertEnv, toBool01 } from "../licensing/licensing.helpers";
 import {
 	customerAddressJsonFromSession,
 	customerBusinessNameFromSession,
@@ -361,7 +362,7 @@ function diasActivada(license: LicenseRow): number | null {
 /**
  * Deshace los cobros de un cargo: los de todas las licencias de la compra (RI-52). Una renovación
  * devuelta solo pierde los meses que añadió; un alta devuelta revoca la licencia (el cliente no se
- * queda con el producto).
+ * queda con el producto), salvo que ya estuviera revocada (AUD-08).
  */
 async function revertirCobros(
 	db: Sql,
@@ -389,27 +390,31 @@ async function revertirCobros(
 		return { reversed: false, reason: "already_reversed", license_id: cobros[0].license.license_id };
 	}
 
-	const licencias: { license_id: string; accion: "shortened" | "revoked" }[] = [];
+	const licencias: { license_id: string; accion: "shortened" | "revoked" | "already_revoked" }[] = [];
 	for (const { license, pago } of pendientes) {
 		const esRenovacion = pago?.kind === "renewal";
+		// AUD-08: un alta que ya estaba revocada (a mano, o tras el reembolso parcial de una compra
+		// de varias) no la revoca esta reversión, y su cobro no se marca como revocado por la
+		// disputa: si no, ganarla la resucitaría.
+		const yaRevocada = !esRenovacion && (license.status === "revoked" || toBool01(license.disabled));
 		let expiresAtMs: number | null = null;
 
 		if (esRenovacion) {
 			expiresAtMs = await shortenLicense(db, license.license_id, pago!.term_months);
-		} else {
+		} else if (!yaRevocada) {
 			await revokeLicense(db, license.license_id);
 		}
 
 		if (pago) {
 			await markLicensePaymentReversed(db, pago.payment_id, {
-				reason: rev.reason,
+				reason: yaRevocada && rev.reason === "dispute" ? DISPUTA_SIN_REVOCAR : rev.reason,
 				eventUid: rev.eventUid,
 			});
 		}
 
 		await auditAdmin(db, rev.reason === "dispute" ? "dispute" : "refund", license.license_id, {
 			event_uid: rev.eventUid,
-			accion: esRenovacion ? "meses_restados" : "revocada",
+			accion: esRenovacion ? "meses_restados" : yaRevocada ? "ya_revocada" : "revocada",
 			term_months: pago?.term_months ?? null,
 			expires_at_ms: expiresAtMs,
 			// Si esto sale alto, el reembolso se emitió fuera de la política de 7 días.
@@ -417,7 +422,10 @@ async function revertirCobros(
 			payment_intent: String(obj?.payment_intent || "") || null,
 		});
 
-		licencias.push({ license_id: license.license_id, accion: esRenovacion ? "shortened" : "revoked" });
+		licencias.push({
+			license_id: license.license_id,
+			accion: esRenovacion ? "shortened" : yaRevocada ? "already_revoked" : "revoked",
+		});
 	}
 
 	return {
@@ -443,7 +451,17 @@ async function restaurarCobros(
 
 	// Solo se deshace lo que revirtió ESTA disputa. Si una licencia se revocó a mano por otro
 	// motivo, ganar la disputa no es razón para resucitarla.
-	const aRestaurar = cobros.filter((c) => !c.pago || c.pago.reversed_reason === "dispute");
+	//
+	// AUD-08: por eso sólo vuelve lo marcado `dispute`. Lo que ya estaba revocado al abrirse, o se
+	// revocó a mano mientras seguía abierta (`DISPUTA_SIN_REVOCAR`), sólo pierde la marca: el dinero
+	// ha vuelto, pero la revocación es del operador. Y una licencia sin cobro registrado (anterior a
+	// LIC-07) no se toca: sin él no se sabe quién la revocó; si fue la disputa, se desrevoca a mano.
+	for (const { pago } of cobros) {
+		if (pago?.reversed_reason === DISPUTA_SIN_REVOCAR) {
+			await clearLicensePaymentReversal(db, pago.payment_id);
+		}
+	}
+	const aRestaurar = cobros.filter((c) => c.pago?.reversed_reason === "dispute");
 	if (aRestaurar.length === 0) return { restored: false, reason: "not_reversed_by_dispute" };
 
 	const restauradas: string[] = [];
@@ -495,7 +513,8 @@ async function decidirReversion(db: Sql, event: any): Promise<Record<string, unk
 		// toca. Queda auditado para que se vea en el histórico del cliente.
 		//
 		// RI-52: con varias licencias en la compra, Stripe tampoco dice cuál se devuelve. Se audita
-		// con todas, para que quien emitió el reembolso revoque la que toque desde administración.
+		// con todas, para que quien emitió el reembolso revoque o acorte la que toque desde
+		// administración (licencias.md, «Reembolso parcial: lo que se hace a mano»).
 		if (total > 0 && devuelto < total) {
 			const cobros = await localizarCobros(db, obj);
 			await auditAdmin(db, "refund", cobros[0]?.license.license_id ?? null, {

@@ -564,8 +564,9 @@ export async function revokeLicense(db: Sql, licenseId: string): Promise<void> {
 }
 
 /**
- * LIC-07: deshace una revocación. Solo la usa el cierre de una disputa GANADA: el dinero vuelve,
- * así que cortar el servicio deja de tener motivo.
+ * LIC-07: deshace una revocación. La usan el cierre de una disputa GANADA, sólo sobre lo que revocó
+ * esa disputa (el dinero vuelve, así que cortar el servicio deja de tener motivo; AUD-08), y
+ * `/unrevoke` de la administración.
  *
  * El estado al que regresa depende de si la licencia llegó a activarse: una que nunca se activó
  * vuelve a `issued` (su reloj no había arrancado) y una activada a `active`. Si además caducó
@@ -743,6 +744,32 @@ export async function clearLicensePaymentReversal(
     WHERE payment_id=?;
     `,
 		[paymentId],
+	);
+}
+
+/**
+ * AUD-08 · La marca del cobro de un alta disputada cuya licencia NO revocó esa disputa: ya estaba
+ * revocada al abrirse, o se revocó a mano mientras seguía abierta. Ganar la disputa le quita la
+ * marca (el dinero ha vuelto) y no toca la licencia. Perderla la deja como está.
+ */
+export const DISPUTA_SIN_REVOCAR = "dispute_ya_revocada";
+
+/**
+ * AUD-08 · Revocar a mano una licencia cuya alta había revocado una disputa que sigue abierta hace
+ * suya la revocación: el cobro deja de figurar como revocado por la disputa, y ganarla ya no
+ * resucita la licencia. Va en la misma transacción que `revokeLicense`.
+ *
+ * Sólo las altas: una renovación disputada no revoca nada (resta meses), y devolvérselos al
+ * ganarla no reactiva una licencia revocada (`extendLicense` no toca `status = 'revoked'`).
+ */
+export async function atribuirRevocacionAMano(db: Sql, licenseId: string): Promise<void> {
+	await exec(
+		db,
+		`
+    UPDATE license_payments SET reversed_reason = ?
+    WHERE license_id = ? AND kind = 'issue' AND reversed_reason = 'dispute';
+    `,
+		[DISPUTA_SIN_REVOCAR, licenseId],
 	);
 }
 
