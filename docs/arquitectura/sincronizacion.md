@@ -131,11 +131,14 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 - **El esquema no tiene `DEFAULT` de hora** (lo vigila un test): quien inserta, la informa.
 - En la nube sólo se puede fijar la hora **local** del emisor (`X-Client-Now`). Un `'now'` en UTC o un
   `CURRENT_*` en una escritura de la Handy se rechaza (`hora_no_determinista`), y lo mismo si falta
-  `X-Client-Now` (`missing_client_now`), **por los dos caminos**: en vivo y en la cola. Los dos rechazos
-  son permanentes.
+  `X-Client-Now` o no vale (`missing_client_now`), **por los dos caminos**: en vivo y en la cola. Los
+  dos rechazos son permanentes. Vale una `YYYY-MM-DD HH:MM:SS` que sea un instante del calendario
+  (`lib/fechas.ts::diaDeInstante`: ni las 24:30 ni un 29 de febrero que no existe, AUD-21) a menos de
+  14 h 05 min del reloj del worker (`tenantHub.tiempo.ts::parseClientNow`).
 - **Las lecturas de la Handy también**: `lib/tenantClient.ts::tenantQuery`, por donde pasan todas,
-  fija `'now'` con `X-Client-Now` usando la misma función que el DO (`rewriteNowInSql`). Sin cabecera
-  manda el reloj de Turso (UTC). El cliente de Rust pone `x-client-now` en todas las peticiones, también
+  fija `'now'` con `X-Client-Now` usando la misma función que el DO (`rewriteNowInSql`) y con el
+  mismo criterio de lo que vale (`parseClientNow`). Sin cabecera, o con una que no vale, manda el
+  reloj de Turso (UTC). El cliente de Rust pone `x-client-now` en todas las peticiones, también
   en los GET y en las lecturas que van por POST ([worker.md](worker.md#cómo-se-escribe-una-ruta)). Lo
   cubre `test/lecturasEnHoraLocal.test.ts`; el arnés de contrato no lo ve, porque corre las dos
   implementaciones en la misma zona horaria.
