@@ -302,7 +302,9 @@ sentencias que ponen un `?` por elemento de una lista:
   (`tareas.rs`).
 
 Decidido: pasar la lista como un único parámetro JSON, `IN (SELECT value FROM json_each(?))`, en los dos
-lados y con sus arneses de contrato. Así no hace falta ningún tope de mesas.
+lados y con sus arneses de contrato. Así no hace falta ningún tope de mesas. Se hace si la base del negocio
+se queda en el DO (decisión [0008](decisiones/0008-la-base-del-negocio-en-su-durable-object.md)); con
+Turso no hace falta.
 
 ### DO-02 · La recuperación de una Main con mucho desde el último cierre
 
