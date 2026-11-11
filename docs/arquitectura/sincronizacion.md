@@ -466,6 +466,10 @@ antes de mandar el lote (`hasPaidLines`), y vuelve a mirarlo cuando no consta qu
 borrado: no tocó ninguna fila, o se perdió la respuesta y el DO devolvió el resultado que guardó al
 confirmarlo, con `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
 
+Toda escritura de la Handy lleva su `X-Idempotency-Key`, que es el `Op_Id` de la operación: un UUIDv7.
+El worker exige que tenga de 16 a 64 letras, cifras, guiones o guiones bajos (`lib/rutas.ts`) y
+rechaza otra cosa con `invalid_op_id`, sin llamar al DO (AUD-32).
+
 La `X-Idempotency-Key` la pone el `CloudClient` de `tpv-infra-http`, una por escritura, salvo cuando el
 resultado de la anterior quedó **incierto** (fallo de transporte, timeout o 5xx): entonces la misma
 petición vuelve a salir con su clave y sus bytes durante 5 minutos, y el DO devuelve el resultado de

@@ -1,5 +1,5 @@
 {
-  "_leeme": "Tabla de casos que comparten las TRES copias del filtro de datos personales: crates/tpv-telemetry/src/scrub.rs (Rust), apps/tpv-main/src/shared/observability/scrub.ts (Webview) y apps/cloud-worker-licensing/src/observability/scrub.ts (worker). Las tres la leen en sus tests, así que si una regla cambia en una copia, las otras fallan hasta que se igualen. 'redacta' son pares [entrada, salida exacta]; 'no_toca' son textos de diagnóstico que tienen que salir tal cual. 'objetos' son pares de entrada/salida de valores JSON anidados.",
+  "_leeme": "Tabla de casos que comparten las TRES copias del filtro de datos personales: crates/tpv-telemetry/src/scrub.rs (Rust), apps/tpv-main/src/shared/observability/scrub.ts (Webview) y apps/cloud-worker-licensing/src/observability/scrub.ts (worker). Las tres la leen en sus tests, así que si una regla cambia en una copia, las otras fallan hasta que se igualen. 'redacta' son pares [entrada, salida exacta]; 'no_toca' son textos de diagnóstico que tienen que salir tal cual. 'objetos' son pares de entrada/salida de valores JSON anidados. Detrás de los casos de siempre van, por este orden (AUD-32): los bordes de las cotas de un correo, que son 64 caracteres antes de la arroba, 253 de dominio y 63 de dominio final (lo que cabe se redacta entero y de lo que no cabe se dice qué queda), con los separadores de 'huella' y los que rodean a un teléfono; las claves secretas que no lo parecen por su nombre, que son la DEK de los campos cifrados (fieldDek, field_dek), el hash de un PIN (password_hash, passwordHash) y el ticket del WebSocket (ticket); y lo que las tres copias tienen que decidir igual sin apoyarse en su motor de expresiones: un JWT con la cabecera tan larga como sea y las fronteras de su 'eyJ' (el principio de un tramo, o detrás de un guion); los blancos, que alrededor de un separador son los de Unicode más U+FEFF (ni el \\s de JavaScript ni el de Rust) y al final de un valor, y entre una palabra de diagnóstico y lo que protege (hash, huella, ts…), sólo los que valían ahí en las dos copias, sin U+0085 ni U+FEFF, para no tapar menos que antes; y las mayúsculas, que sólo se igualan en ASCII (la K del kelvin, U+212A, y la ese larga, U+017F, no cuentan como k ni como s).",
   "redacta": [
     ["cliente ana@example.com pidió", "cliente [email] pidió"],
     ["ANA.Perez+tpv@Bar-La-Plaza.ES", "[email]"],
@@ -72,7 +72,44 @@
     ["token=01925678-1234-7123-8123-123456789012", "token=[redacted]"],
     ["pin=1727450000002", "pin=[redacted]"],
     ["fecha 2026-10-07 12:34:56 ana@example.com", "fecha 2026-10-07 12:34:56 [email]"],
-    ["op_id=01925678-1234-7123-8123-123456789012 NSS 281234567840", "op_id=01925678-1234-7123-8123-123456789012 NSS [nss]"]
+    ["op_id=01925678-1234-7123-8123-123456789012 NSS 281234567840", "op_id=01925678-1234-7123-8123-123456789012 NSS [nss]"],
+    ["abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcd@example.com", "[email]"],
+    ["xabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcd@example.com", "x[email]"],
+    ["ana@example.com-abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghija.zz", "[email]"],
+    ["ana@example.com-abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijab.zz", "[email]-abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijab.zz"],
+    ["ana@example.abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc", "[email]"],
+    ["ana@example.abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcd", "[email]d"],
+    ["token eyJabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdef.eyJzdWIiOiIxIn0.sig-nature_00 ok", "token [jwt] ok"],
+    ["huella\tAB12123456781234567812345678123456", "huella\t[iban]"],
+    [". 612345678 .", ". [num] ."],
+    ["{\"ok\":true,\"token\":\"jwt\",\"fieldDek\":\"3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\",\"deviceId\":\"d1\"}", "{\"ok\":true,\"token\":\"[redacted]\",\"fieldDek\":\"[redacted]\",\"deviceId\":\"d1\"}"],
+    ["no se pudo guardar la field_dek: 3q2+7w== caducada", "no se pudo guardar la field_dek=[redacted] caducada"],
+    ["FIELD-DEK=abc123 fieldDek=abc123", "FIELD-DEK=[redacted] fieldDek=[redacted]"],
+    ["UPDATE Usuarios SET Password_Hash = 'pbkdf2$abcdef' WHERE ID_Usuario = 'u1'", "UPDATE Usuarios SET Password_Hash=[redacted] WHERE ID_Usuario = 'u1'"],
+    ["{\"passwordHash\":\"abc\",\"nombre\":\"Ana\"}", "{\"passwordHash\":\"[redacted]\",\"nombre\":\"Ana\"}"],
+    ["password_hash=$pbkdf2-sha256$i=210000$c2FsdA$aGFzaA password-hash: abc123", "password_hash=[redacted] password-hash=[redacted]"],
+    ["wss://tpv-api.example/ws?ticket=AbC123%2Bxyz%3D&v=2", "wss://tpv-api.example/ws?ticket=[redacted]&v=2"],
+    ["{\"ok\":true,\"ticket\":\"q83vEjRWeJA=\",\"expiresInMs\":30000}", "{\"ok\":true,\"ticket\":\"[redacted]\",\"expiresInMs\":30000}"],
+    ["fallo eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6Imtra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2trIn0.eyJzdWIiOiIxIn0.c2lnLW5hdHVyZV8wMA", "fallo [jwt]"],
+    ["token eyJabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefg.eyJzdWIiOiIxIn0.sig-nature_00 ok", "token [jwt] ok"],
+    ["x-eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig", "x-[jwt]"],
+    ["eyJa.eyJb.c.d", "[jwt].d"],
+    ["eyJa eyJb.c.d eyJe.f.g", "eyJa [jwt] [jwt]"],
+    ["token\u00a0=\u2003abc fin", "token=[redacted] fin"],
+    ["ticket\ufeff=X", "ticket=[redacted]"],
+    ["ticket\u0085=X", "ticket=[redacted]"],
+    ["token=abc\u0085def token=abc\ufeffdef", "token=[redacted] token=[redacted]"],
+    ["Bearer\ufeffabcdef123456", "[redacted]"],
+    ["password=secreto\u0085resto fin", "password=[redacted] fin"],
+    ["password=secreto\ufeffresto fin", "password=[redacted] fin"],
+    ["Authorization: Bearer abc\u0085def fin", "Authorization=[redacted] fin"],
+    ["{\"pin\": 1234\ufeff5678, \"seq\": 3}", "{\"pin\":\"[redacted]\", \"seq\": 3}"],
+    ["CONTRASEÑA: hunter2 contraseÑa=x", "CONTRASEÑA=[redacted] contraseÑa=[redacted]"],
+    ["huella\u0085=AB12123456781234567812345678123456", "huella\u0085=[iban]"],
+    ["huella\ufeff AB12123456781234567812345678123456", "huella\ufeff [iban]"],
+    ["hash\u0085:4111111111111111", "hash\u0085:[num]"],
+    ["hash\ufeff:4111111111111111", "hash\ufeff:[num]"],
+    ["huella\ufeff 4111111111111111", "huella\ufeff [num]"]
   ],
   "no_toca": [
     "op 12 aplicada seq=34 en 5ms",
@@ -112,7 +149,16 @@
     "contador=61234567891122233300",
     "contador=612345678 911222333 00",
     "contador=123 612345678",
-    "access_token_count=3 token_expired=true secret_version=2"
+    "access_token_count=3 token_expired=true secret_version=2",
+    "huella \t AB12123456781234567812345678123456",
+    "huella\t AB12123456781234567812345678123456",
+    "huella\t=\tAB12123456781234567812345678123456",
+    "contador=123 .- 612345678",
+    "tel 612345678 -. 12 fin",
+    "field_dek_no_persistida password_hash_version=2 id_ticket=7 numero_ticket=2027/000001 tickets=3",
+    "x_eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig",
+    "eyJ.a.b eyJa.b",
+    "tic\u212aet=X pa\u017f\u017fword=hunter2"
   ],
   "objetos": [
     [
@@ -175,6 +221,48 @@
       {
         "huella": "AB12123456781234567812345678123456",
         "token": "[redacted]"
+      }
+    ],
+    [
+      {
+        "fieldDek": "3q2+7w==",
+        "field_dek": "3q2+7w==",
+        "FIELD-DEK": "3q2+7w==",
+        "password_hash": "pbkdf2$abcdef",
+        "passwordHash": "pbkdf2$abcdef",
+        "Password_Hash": "pbkdf2$abcdef",
+        "ticket": "q83vEjRWeJA=",
+        "numero_ticket": "2027/000001",
+        "id_ticket": 7,
+        "tickets": 3
+      },
+      {
+        "fieldDek": "[redacted]",
+        "field_dek": "[redacted]",
+        "FIELD-DEK": "[redacted]",
+        "password_hash": "[redacted]",
+        "passwordHash": "[redacted]",
+        "Password_Hash": "[redacted]",
+        "ticket": "[redacted]",
+        "numero_ticket": "2027/000001",
+        "id_ticket": 7,
+        "tickets": 3
+      }
+    ],
+    [
+      {
+        "tic\u212aet": "x",
+        "TICKET": "x",
+        "contraseÑa": "x",
+        "CONTRASEÑA": "x",
+        "pa\u017f\u017fword": "x"
+      },
+      {
+        "tic\u212aet": "x",
+        "TICKET": "[redacted]",
+        "contraseÑa": "[redacted]",
+        "CONTRASEÑA": "[redacted]",
+        "pa\u017f\u017fword": "x"
       }
     ]
   ]

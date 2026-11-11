@@ -40,10 +40,36 @@ struct Rule {
 
 struct Rules { rules: Vec<Rule>, set: RegexSet }
 
-const SECRET_KEYS: &str = r"authorization|auth|password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp|(?:access|refresh|id)[_-]?token|client[_-]?secret";
-// Una captura acotada puede terminar en mitad del valor o de un escape: redactarlo hasta el final.
-const SECRET_VALUE: &str = r#"(?:"(?:\\[\s\S]|[^"\\])*(?:"|\\?$)|'(?:\\[\s\S]|[^'\\])*(?:'|\\?$)|[^\s,;&}"']+)"#;
-const SENSITIVE_RULES: usize = 6;
+/// Los blancos, escritos uno a uno y los mismos en las tres copias. `\s` no vale: aquí incluye U+0085
+/// y no U+FEFF, y en JavaScript, al revés.
+///
+/// Alrededor de un separador (`token = x`) cuentan todos los de los dos: lo que Unicode marca como
+/// espacio, más U+FEFF. Que sobren sólo hace que se reconozcan más claves.
+const BLANCO_SIN_ESPACIO: &str = r"\t-\r\u{85}\u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
+/// Lo que termina un valor, en cambio, sólo los que lo terminaban en las dos copias (sin U+0085 ni
+/// U+FEFF): que falte uno sólo alarga lo que se tapa, y que sobre dejaría a la vista el resto del valor.
+/// Y lo mismo en lo que el filtro deja sin tapar a propósito (los intervalos de diagnóstico, como
+/// `hash: …`): sólo los blancos que lo dejaban sin tapar en las dos copias.
+const FIN_DE_VALOR: &str = r" \t-\r\u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}";
+
+// Las tres últimas no llevan «secreto» en el nombre: la clave con la que se cifran los datos del
+// personal (`fieldDek`, que viaja en la respuesta de la activación), el hash de un PIN y el ticket de
+// un solo uso del WebSocket. `ticket` sólo cuenta como clave con `:` o `=` detrás, o como nombre de
+// campo: «ticket 2027/000001» y `numero_ticket` no se tocan.
+const SECRET_KEYS_ASCII: &str = r"authorization|auth|password|passwd|pwd|secret|token|api[_-]?key|apikey|pin|otp|(?:access|refresh|id)[_-]?token|client[_-]?secret|field[_-]?dek|password[_-]?hash|ticket";
+
+/// Las claves secretas, sin distinguir mayúsculas de minúsculas pero sólo las de ASCII, igual en las
+/// tres copias. `(?i)` a secas pliega Unicode (`k` casaría con el kelvin, U+212A, y `s` con la ese
+/// larga, U+017F) y la bandera `i` de JavaScript, sin la `u`, no: por eso en este fichero va siempre
+/// como `(?i-u:…)`, que sólo admite ASCII dentro, y la eñe de «contraseña» se escribe fuera, en sus
+/// dos cajas.
+fn secret_keys() -> String {
+    format!(r"(?i-u:{SECRET_KEYS_ASCII})|(?i-u:contrase)[nNñÑ](?i-u:a)")
+}
+
+/// Las cuatro primeras reglas son las de credenciales; detrás va el JWT, que se recorre a mano.
+const SECRET_RULES: usize = 4;
+const EMAIL_RULE: usize = 4;
 
 fn rules() -> &'static Rules {
     static RULES: OnceLock<Rules> = OnceLock::new();
@@ -52,23 +78,27 @@ fn rules() -> &'static Rules {
             re: Regex::new(patron).unwrap_or_else(|e| panic!("regex del filtro «{patron}»: {e}")),
             with,
         };
+        let b = format!("[ {BLANCO_SIN_ESPACIO}]");
+        let claves = secret_keys();
+        // Una captura acotada puede terminar en mitad del valor o de un escape: redactarlo hasta el final.
+        let valor = format!(r#"(?:"(?:\\[\s\S]|[^"\\])*(?:"|\\?$)|'(?:\\[\s\S]|[^'\\])*(?:'|\\?$)|[^{FIN_DE_VALOR},;&}}"']+)"#);
         // El orden importa: primero lo específico, para que una regla genérica no se quede media
         // coincidencia.
         let rules = vec![
             // RI-42: una segunda palabra sólo pertenece al valor si la primera es un esquema.
             // [redacted] nunca consume el diagnóstico que viene después en otra pasada.
-            regla(r#"(?i)(?-u:\b)(authorization|auth)(?-u:\b)\s*[:=]\s*(?:(?:bearer|basic)\s+)?[^\s,;&}"']+"#, "$1=[redacted]"),
+            regla(&format!(r#"(?-u:\b)((?i-u:authorization|auth))(?-u:\b){b}*[:=]{b}*(?:(?i-u:bearer|basic){b}+)?[^{FIN_DE_VALOR},;&}}"']+"#), "$1=[redacted]"),
             // Esquemas de credencial sueltos (`Bearer <tok>` / `Basic <tok>`) sin clave delante.
-            regla(r"(?i)(?-u:\b)(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}", "[redacted]"),
+            regla(&format!(r"(?-u:\b)(?i-u:bearer|basic){b}+[A-Za-z0-9._~+/=\-]{{4,}}"), "[redacted]"),
             // RI-42: claves JSON o entre comillas; consumir también valores con espacios/escapes.
-            regla(&format!(r#"(?i)(["'])({SECRET_KEYS})["']\s*[:=]\s*{SECRET_VALUE}"#), "$1$2$1:$1[redacted]$1"),
-            regla(&format!(r"(?i)(?-u:\b)({SECRET_KEYS})(?-u:\b)\s*[:=]\s*{SECRET_VALUE}"), "$1=[redacted]"),
-            // JWT / tokens con forma cabecera.carga.firma (base64url).
-            regla(r"(?-u:\b)eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "[jwt]"),
-            // Correos.
-            regla(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", "[email]"),
+            regla(&format!(r#"(["'])({claves})["']{b}*[:=]{b}*{valor}"#), "$1$2$1:$1[redacted]$1"),
+            regla(&format!(r"(?-u:\b)({claves})(?-u:\b){b}*[:=]{b}*{valor}"), "$1=[redacted]"),
+            // Correos. AUD-32: las cotas son las de las copias de TypeScript, cuyo motor retrocede;
+            // aquí no hacen falta para el coste, pero las tres copias tienen que redactar lo mismo.
+            // De una parte local más larga se redactan sus últimos 64 caracteres.
+            regla(r"[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,253}\.[A-Za-z]{2,63}", "[email]"),
             // IBAN español, en cualquier caja, junto o agrupado con espacios o guiones.
-            regla(r"(?i)(?-u:\b)ES[0-9]{2}(?:[ \-]?[0-9]{4}){5}(?-u:\b)", "[iban]"),
+            regla(r"(?-u:\b)(?i-u:ES)[0-9]{2}(?:[ \-]?[0-9]{4}){5}(?-u:\b)", "[iban]"),
             // IBAN de cualquier país, en mayúsculas. Sólo en mayúsculas a propósito: en minúsculas, un
             // hash o un identificador hexadecimal que empiece por dos letras tendría su forma.
             regla(
@@ -79,7 +109,7 @@ fn rules() -> &'static Rules {
             regla(r"(?-u:\b)[0-9]{2}[ /\-]?[0-9]{8}[ /\-]?[0-9]{2}(?-u:\b)", "[nss]"),
             // DNI y NIE, con puntos, guiones o espacios, en cualquier caja. Un CIF (letra delante y
             // cifras pegadas) no encaja a propósito: es de una empresa, no de una persona.
-            regla(r"(?i)(?-u:\b)(?:[XYZ][ \-]?)?[0-9]{1,2}(?:[. ]?[0-9]{3}){2}[ \-]?[A-Z](?-u:\b)", "[id]"),
+            regla(r"(?-u:\b)(?:(?i-u:[XYZ])[ \-]?)?[0-9]{1,2}(?:[. ]?[0-9]{3}){2}[ \-]?(?i-u:[A-Z])(?-u:\b)", "[id]"),
         ];
         let set = RegexSet::new(rules.iter().map(|r| r.re.as_str())).expect("RegexSet del filtro");
         Rules { rules, set }
@@ -89,7 +119,12 @@ fn rules() -> &'static Rules {
 /// RI-42: las credenciales y los correos se ocultan antes de proteger identificadores.
 /// Los intervalos de diagnóstico se conservan; el resto sigue pasando por TODAS las reglas.
 pub(crate) fn scrub(input: &str) -> Cow<'_, str> {
-    let mut out = apply_rules(input, 0..SENSITIVE_RULES);
+    let mut out = apply_rules(input, 0..SECRET_RULES);
+    if let Cow::Owned(sin_jwt) = redact_jwt(&out) { out = Cow::Owned(sin_jwt); }
+    if out.contains('@') {
+        let correo = &rules().rules[EMAIL_RULE];
+        if let Cow::Owned(sin_correos) = correo.re.replace_all(&out, correo.with) { out = Cow::Owned(sin_correos); }
+    }
     let text = out.as_ref();
     let mut last = 0;
     let mut result: Option<String> = None;
@@ -127,18 +162,73 @@ fn apply_rules(input: &str, range: std::ops::Range<usize>) -> Cow<'_, str> {
     out
 }
 
+/// Letras, cifras, guion y guion bajo: lo que cabe en un tramo de un JWT.
+fn es_base64url(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
+}
+
+/// Dónde acaba el tramo de base64url que empieza en `i` (`i` si ahí no empieza ninguno).
+fn fin_de_tramo(s: &[u8], mut i: usize) -> usize {
+    while i < s.len() && es_base64url(s[i]) { i += 1; }
+    i
+}
+
+/// JWT: cabecera.carga.firma en base64url, con `eyJ` al principio de la cabecera. Sustituye lo mismo
+/// que `(?-u:\b)eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`, sin cota en ningún tramo.
+///
+/// Va escrito a mano porque así va en las copias de TypeScript, donde esa expresión cuesta un tiempo
+/// cuadrático (AUD-32): su motor prueba cada `eyJ` de un tramo y desde cada uno lo recorre hasta el
+/// final. Aquí cada tramo se mira una vez: todos los `eyJ` de un mismo tramo acaban donde acaba el
+/// tramo, así que lo que venga detrás (punto, carga, punto, firma) vale para todos o para ninguno, y
+/// si vale, el JWT empieza en el primero. La frontera es la de `\b`: el principio del tramo, o detrás
+/// de un guion.
+fn redact_jwt(input: &str) -> Cow<'_, str> {
+    if !input.contains("eyJ") { return Cow::Borrowed(input); }
+    let s = input.as_bytes();
+    let mut out = String::new();
+    let mut last = 0;
+    let mut i = 0;
+    while i < s.len() {
+        if !es_base64url(s[i]) { i += 1; continue; }
+        let tramo = i;
+        let fin = fin_de_tramo(s, tramo);
+        i = fin;
+        let inicio = (tramo..fin.saturating_sub(3))
+            .find(|&p| s[p..].starts_with(b"eyJ") && (p == tramo || s[p - 1] == b'-'));
+        let Some(inicio) = inicio else { continue; };
+        if s.get(fin) != Some(&b'.') { continue; }
+        let fin_carga = fin_de_tramo(s, fin + 1);
+        if fin_carga == fin + 1 || s.get(fin_carga) != Some(&b'.') { continue; }
+        let fin_firma = fin_de_tramo(s, fin_carga + 1);
+        if fin_firma == fin_carga + 1 { continue; }
+        out.push_str(&input[last..inicio]);
+        out.push_str("[jwt]");
+        last = fin_firma;
+        i = fin_firma;
+    }
+    if last == 0 { Cow::Borrowed(input) }
+    else { out.push_str(&input[last..]); Cow::Owned(out) }
+}
+
 fn diagnostic() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(concat!(
-        r"(?-u:\b)(?i:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?-u:\b)",
-        r"|(?-u:\b)[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.,][0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})?)?(?-u:\b)",
-        r"|(?-u:\b)(?i:[a-z_][a-z0-9_]*_ms|timestamp|epoch|ts)\s*[:=]\s*[0-9]{10,16}(?-u:\b)",
-        r"|(?-u:\b)(?i:hash|huella|event(?:_id)?)\s*[:= ]\s*[A-Fa-f0-9]{16,128}(?-u:\b)"
-    )).expect("regex de diagnóstico"))
+    RE.get_or_init(|| {
+        // Los blancos, los comunes (`FIN_DE_VALOR`): esto deja algo sin tapar.
+        let c = format!("[{FIN_DE_VALOR}]");
+        let comun_sin_espacio = &FIN_DE_VALOR[1..];
+        Regex::new(&[
+            r"(?-u:\b)(?i-u:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?-u:\b)",
+            r"|(?-u:\b)(?i-u:[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:[.,][0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})?)?)(?-u:\b)",
+            &format!(r"|(?-u:\b)(?i-u:[a-z_][a-z0-9_]*_ms|timestamp|epoch|ts){c}*[:=]{c}*[0-9]{{10,16}}(?-u:\b)"),
+            // AUD-32: dos puntos o un igual entre blancos, o blancos con algún espacio: el primer
+            // espacio es el que cuenta. Escrito como en las copias de TypeScript.
+            &format!(r"|(?-u:\b)(?i-u:hash|huella|event(?:_id)?)(?:{c}*[:=]|[{comun_sin_espacio}]*[ ]){c}*[A-Fa-f0-9]{{16,128}}(?-u:\b)"),
+        ].concat()).expect("regex de diagnóstico")
+    })
 }
 
 fn scrub_fragment(input: &str) -> Cow<'_, str> {
-    let mut out = apply_rules(input, SENSITIVE_RULES..rules().rules.len());
+    let mut out = apply_rules(input, EMAIL_RULE + 1..rules().rules.len());
     static CARDS: OnceLock<Regex> = OnceLock::new();
     static PHONES: OnceLock<Regex> = OnceLock::new();
     let cards = CARDS.get_or_init(|| Regex::new(r"[0-9](?:[ .\-]?[0-9]){12,18}").unwrap());
@@ -204,7 +294,7 @@ fn timestamp_value(key: &str, value: &str) -> bool {
 
 fn secret_key(key: &str) -> bool {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(&format!(r"(?i)^({SECRET_KEYS})$")).unwrap()).is_match(key)
+    RE.get_or_init(|| Regex::new(&format!("^(?:{})$", secret_keys())).unwrap()).is_match(key)
 }
 
 pub(crate) fn scrub_string_field<'a>(key: &str, input: &'a str) -> Cow<'a, str> {
@@ -330,5 +420,30 @@ mod tests {
         for text in casos()["no_toca"].as_array().unwrap() {
             assert!(matches!(scrub(texto(text)), Cow::Borrowed(_)), "{}", texto(text));
         }
+    }
+
+    /// AUD-32: el recorrido a mano de los JWT sustituye lo mismo que la expresión de siempre.
+    #[test]
+    fn redact_jwt_sustituye_lo_mismo_que_la_expresion() {
+        let referencia = Regex::new(r"(?-u:\b)eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+").unwrap();
+        let piezas = ["eyJ", "eyJa", "a", "b", ".", ".", "-", "_", " ", "é", "x-", "J", "\n"];
+        // Un generador congruencial: los mismos textos en cada pasada.
+        let mut semilla: u32 = 20_261_111;
+        let mut azar = |n: usize| {
+            semilla = semilla.wrapping_mul(1_103_515_245).wrapping_add(12_345) & 0x7fff_ffff;
+            semilla as usize % n
+        };
+        let mut con_jwt = 0;
+        for _ in 0..20_000 {
+            let mut texto = String::new();
+            for _ in 0..2 + azar(15) { texto.push_str(piezas[azar(piezas.len())]); }
+            let esperado = referencia.replace_all(&texto, "[jwt]");
+            if esperado != texto { con_jwt += 1; }
+            assert_eq!(redact_jwt(&texto), esperado, "{texto:?}");
+        }
+        assert!(con_jwt > 200, "{con_jwt}");
+        // Y sin cota: una cabecera, una carga y una firma de 100.000 caracteres cada una.
+        let tramo = "x".repeat(100_000);
+        assert_eq!(scrub(&format!("fallo eyJ{tramo}.{tramo}.{tramo} fin")), "fallo [jwt] fin");
     }
 }

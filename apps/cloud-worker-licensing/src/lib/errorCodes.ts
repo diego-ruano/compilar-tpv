@@ -375,6 +375,8 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"initial_admin_role_missing",
 	"invalid_devicePubKey",
 	"invalid_json",
+	// AUD-32: una `X-Idempotency-Key` sin su forma. La Handy manda siempre un UUIDv7.
+	"invalid_op_id",
 	"invalid_signature",
 	"invalid_sql_args",
 	"invalid_ticket",

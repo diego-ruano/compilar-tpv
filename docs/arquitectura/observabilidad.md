@@ -60,8 +60,9 @@ Better Stack     ── GET /health, latidos del cron
   realimentación. Los errores de escritura conservan los eventos no persistidos para reintentar.
 - El cliente recorta el texto conforme al schema del servidor y omite campos estructurados
   excesivos con un marcador. Un 400/413/422 divide el lote hasta aislar el evento rechazado;
-  autenticación, rate limit, red y 5xx conservan el lote. El servidor limita el cuerpo antes de
-  autenticar y espera Axiom: si falla, responde 502. Sin token de Axiom, sigue siendo un no-op.
+  autenticación, rate limit, red y 5xx conservan el lote. El servidor limita el cuerpo a 1 MiB
+  antes de autenticar y espera Axiom: si falla, responde 502. Sin token de Axiom, sigue siendo un
+  no-op.
 - La captura a la antesala limita el mensaje a 4.000 bytes y cada campo de texto a 4 KiB, sin
   construir antes su representación completa. Los campos se limitan conjuntamente a 32 KiB de
   memoria estimada y 64 entradas, más el marcador `telemetry_captura_recortada` cuando se recortan
@@ -125,10 +126,90 @@ Lo que sale a Axiom se filtra también en `ingestToAxiom`, sobre una copia del l
 generados por el worker/DO sin modificar el estado del llamante. Si copiar, filtrar o serializar falla,
 no se envía el lote y la ingesta del dispositivo responde 502 para conservarlo.
 Lo que las mantiene iguales es `crates/tpv-telemetry/src/scrub_casos.json`, la tabla que leen los tests de
-las tres: **una regla nueva lleva su caso ahí**, o las otras copias no se enteran. Usa fronteras y dígitos
-ASCII (`(?-u:\b)`, `[0-9]`) para que Rust y JavaScript decidan igual.
+las tres: **una regla nueva lleva su caso ahí**, o las otras copias no se enteran. Lo que
+decide cada regla no depende del motor de cada copia: ver «Lo que tiene que decidir igual en las
+tres copias», más abajo.
 
 No reconoce nombres ni direcciones: un mensaje de error no se compone con ellos. No toca el fichero local.
+
+**Lo que tiene que decidir igual en las tres copias.** Sin apoyarse en lo que cada motor entiende
+por blanco o por mayúscula:
+
+- **Blancos**, escritos uno a uno (`\s` no vale: en JavaScript incluye U+FEFF y no U+0085, y en
+  Rust, al revés). Alrededor de un separador (`token = x`), los de los dos: lo que Unicode marca como
+  espacio, más U+FEFF. Lo que termina un valor, y lo que separa una palabra de diagnóstico del
+  valor que deja sin tapar (`hash: …`, `ts=…`), sólo los que valían ahí en las dos copias (sin
+  U+0085 ni U+FEFF): ninguna copia tapa menos que antes.
+- **Mayúsculas**: sólo se igualan las de ASCII. En JavaScript, la bandera `i` sin la `u`; en Rust,
+  `(?i-u:…)`, porque `(?i)` a secas pliega Unicode (la K del kelvin, U+212A, contaría como `k`, y
+  la ese larga, U+017F, como `s`). La eñe de «contraseña» va escrita en sus dos cajas.
+- **Fronteras y dígitos**: ASCII, `(?-u:\b)` y `[0-9]`.
+
+**El filtro cuesta un tiempo lineal (AUD-32).** En el worker y en el `TenantHub` corre síncrono,
+antes de contestar, sobre texto que elige quien llama, y el motor de expresiones regulares de
+JavaScript retrocede: una repetición sin tope que puede empezar en cada posición de un tramo (`x+@`)
+lo recorre entero desde cada una. Las tres copias redactan lo mismo (la de Rust no retrocede):
+
+- **Correo**: con las cotas de lo que reconoce, hasta 64 caracteres antes de la arroba, 253 de
+  dominio y 63 de dominio final (los límites de RFC 5321 y 1035). De una parte local más larga se
+  redactan sus últimos 64 caracteres; de un dominio final más largo, los primeros 63; y si el último
+  punto del dominio queda a más de 253 caracteres de la arroba, se redacta hasta el último punto que
+  sí cabe.
+- **JWT**: sin cota en ningún tramo, recorrido a mano (`redactarJwt`, `redact_jwt`): cada tramo de
+  base64url se mira una vez, y si tiene un `eyJ` al principio o detrás de un guion y le siguen un
+  punto, otro tramo, otro punto y otro tramo, se redacta desde el primer `eyJ`. Redacta lo mismo que
+  la expresión de siempre, con la cabecera tan larga como sea (un `kid` largo).
+- **`hash`, `huella`, `event`**: entre la palabra y su valor van `:` o `=` entre blancos, o blancos
+  con algún espacio, escrito de modo que sólo se pueda repartir de una manera.
+- **Teléfonos y tarjetas**: los separadores pegados a un número se miran desde el número hacia
+  fuera, no recorriendo el texto anterior.
+
+Los bordes de cada cota, el JWT largo y sus fronteras, los blancos y las mayúsculas son casos de
+`scrub_casos.json`. Lo vigila `test/scrubCoste.test.ts`, en el worker, sin depender de la máquina:
+
+- lee las fuentes de todas las expresiones regulares del filtro, que están juntas en
+  `EXPRESIONES`: una con alguna repetición sin tope (`*`, `+`, `{n,}`) tiene que estar en la lista de
+  excepciones con su fuente entera, carácter a carácter, y el porqué escrito, así que cualquier
+  cambio en ella obliga a revisarla (quitar el `^` de `/^ +$/` haría cuadrática la búsqueda de un
+  teléfono detrás de un hueco largo); y comprueba que el filtro no ejecuta ninguna otra;
+- cuenta los pasos de los dos recorridos escritos a mano (`scrubContando`) con textos escritos
+  contra ellos, y exige que no pasen de ocho por carácter.
+
+Lleva además un diagnóstico con reloj que no falla: compara lo que tarda un texto entero con lo que
+tarda en dieciséis trozos y, si el entero tarda más de cuatro veces, lo avisa en la consola.
+
+`apps/tpv-main/test/scrub.test.ts` comprueba que la copia de la Webview es, por debajo de su
+cabecera, el mismo código que la del worker.
+
+**Lo que entra al filtro del worker tiene techo** (`observability/tope.ts`). Todas sus salidas a
+telemetría filtran cada cadena con dos topes: `ingestToAxiom` (todo evento a Axiom, del worker, del
+`TenantHub` o de un dispositivo), el `beforeSend` de Sentry (mensaje, excepciones, migas, extra,
+etiquetas y URL) y el aviso de la consola cuando Axiom rechaza un lote. Se acota la copia que sale,
+nunca el dato con el que se trabaja.
+
+- **Lo que sale**: 16 KiB (16.384 bytes) en UTF-8, con la marca `…[recortado]` dentro, cortado entre
+  caracteres completos (un emoji no se parte). Se corta **después** de filtrar: cortar un texto ya
+  filtrado no deja a la vista nada que el filtro haya tapado, y al revés un JWT o un correo partidos
+  ya no se reconocerían.
+- **Lo que se filtra**: hasta 64 Ki caracteres (de JavaScript), entero. Uno más largo se corta antes
+  de filtrarlo, en el último blanco que no sea un espacio (un salto de línea, un tabulador…) antes
+  de ese tope, y si no hay ninguno sale sólo la marca. Ningún dato que el filtro reconoce lleva uno
+  de esos blancos dentro, así que cortar ahí no parte nada; un espacio no valdría, porque un
+  teléfono, una tarjeta o un IBAN se escriben con espacios.
+
+Nada legítimo llega a esos topes: el texto más largo de un dispositivo son 4 KiB por campo. Además,
+cada entrada tiene el suyo:
+
+| Entrada | Techo |
+|---|---|
+| `POST /v1/telemetry` | 1 MiB de cuerpo, antes de autenticar (el dispositivo manda como mucho 512 KiB); 500 eventos; 4.000 caracteres de mensaje; por evento, 128 KiB de `fields` serializados y 256 caracteres por nombre de campo |
+| `device_auth_rechazado` | La ruta, filtrada y acotada después a 256 bytes con la marca (`tenantAuth`, con `acotar`): un JWT en la ruta sale `[jwt]` entero |
+| Eventos del `TenantHub` (`apply_error`, `cola_apartada`, `escritura_en_duda`…) | El tope común: la clave y el nombre de la operación llegan enteros a `ingestToAxiom`, que los filtra antes de acotarlos |
+| `X-Idempotency-Key` | De 16 a 64 letras, cifras, guiones o guiones bajos (`^[A-Za-z0-9_-]{16,64}$`; la Handy manda un UUIDv7). Otra cosa se rechaza con `invalid_op_id` (400) sin llamar al `TenantHub` |
+
+La Webview y el core de Rust no acotan: lo que filtran lo ha escrito la propia app, y el motor de
+Rust no retrocede. Las dos copias de TypeScript son el mismo código: `scrubDeep` y `scrubEvent`
+aceptan un filtro por cadena, y sólo el worker les pasa el suyo.
 
 RI-42: conserva UUIDs completos, fechas ISO, timestamps identificados por claves temporales
 (`*_ms`, `timestamp`, `epoch`, `ts`) y hashes identificados como tales. Las credenciales se
@@ -137,7 +218,11 @@ redactan. Detecta teléfonos españoles de nueve cifras con prefijo opcional `+3
 o `(+34)`, incluidos varios teléfonos consecutivos separados por espacios, y candidatos a tarjeta
 de 13–19 cifras que pasan Luhn. Reconoce claves de credenciales entre comillas en texto JSON y
 variantes explícitas como `access_token`, `refreshToken`, `id-token` y `client_secret`, también
-en objetos anidados. Los valores entre comillas se redactan completos, incluidos espacios y escapes.
+en objetos anidados. Son secretas también tres claves que no lo parecen por su nombre: la DEK de los
+campos cifrados (`fieldDek`, `field_dek`), el hash de un PIN (`password_hash`, `passwordHash`) y el
+ticket de un solo uso del WebSocket (`ticket`, como nombre de campo o con `:` o `=` detrás: «ticket
+2027/000001» y `numero_ticket` se conservan). Los valores entre comillas se redactan completos,
+incluidos espacios y escapes.
 Si la captura termina dentro de un valor entre comillas, se redacta hasta el final del texto.
 La autorización consume el esquema Bearer/Basic y su credencial, sin borrar el texto siguiente;
 las pasadas posteriores conservan los marcadores y el diagnóstico.
@@ -312,7 +397,7 @@ Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
 |---|---|
 | `apply_error` | Un apply falla en el DO. `command_name`, `op_id`, `device_id`, error recortado y `latency_ms`, sin el comando ni sus args |
 | `main_online` / `main_offline` | Una Main se autentica / se va la última (freeze de las Handy) |
-| `device_auth_rechazado` | El worker rechaza a un dispositivo. `motivo`, `ruta`, `metodo` |
+| `device_auth_rechazado` | El worker rechaza a un dispositivo. `motivo`, `ruta` (filtrada y acotada a 256 bytes), `metodo` |
 | `tenant_salud_sync` | El contraste diario de una Main con la nube (descuadres, reparadas) |
 | `cola_volcado_inicio` / `cola_volcado_fin` | La Main vuelca su atraso a la cola del DO |
 | `cola_pausada`, `cola_base_caida`, `cola_ciclo_error` | La cola no avanza: interruptor, Turso que no contesta, fallo de una vuelta |

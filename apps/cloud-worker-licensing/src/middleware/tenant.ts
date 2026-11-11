@@ -14,6 +14,8 @@ import { getDb } from "../server/db";
 import { normalizarRol, SQL_DEVICE_ACTIVO } from "../lib/deviceAuth";
 import { verifyJwt, verifyDeviceProofOrThrow } from "../server/middleware/auth";
 import { reportarRechazoDeDispositivo } from "../observability/axiom";
+import { scrub } from "../observability/scrub";
+import { acotar, MAX_FILTRADO } from "../observability/tope";
 
 /**
  * Mantiene viva una entrega de observabilidad más allá de la respuesta.
@@ -31,6 +33,9 @@ function retenerEnvio(c: { executionCtx: Pick<ExecutionContext, "waitUntil"> }, 
 import { forbidden, unauthorized } from "../server/utils/response";
 import { wireToCode } from "../lib/errorCodes";
 import { vetoDeLicencia } from "../lib/licenciaEnUso";
+
+/** AUD-32: lo que se guarda de la ruta de una petición rechazada, en bytes de UTF-8 y ya filtrada. */
+const MAX_RUTA_EN_TELEMETRIA = { bytes: 256, filtrado: MAX_FILTRADO };
 
 export type TenantVars = {
 	tenantId: string;
@@ -127,9 +132,12 @@ export const tenantAuth: MiddlewareHandler<{
 		// `waitUntil` y no `void`: al devolver la respuesta, el runtime de Workers CANCELA lo que
 		// quede pendiente sin registrar. Con `void`, este aviso se lanzaba y se moría a medio
 		// vuelo — sin error y sin log, simplemente no llegaba nunca a Axiom.
+		// AUD-32: esto pasa antes de saber quién llama, y la ruta la elige él (hasta 16 KB). Al
+		// evento sólo va su principio, 256 bytes, recortado DESPUÉS de filtrarla (`acotar`): un JWT o
+		// un correo en la ruta, partidos antes de filtrar, ya no se reconocerían y quedarían a la vista.
 		retenerEnvio(c, reportarRechazoDeDispositivo(c.env, {
 			motivo,
-			ruta: new URL(c.req.url).pathname,
+			ruta: acotar(new URL(c.req.url).pathname, scrub, MAX_RUTA_EN_TELEMETRIA),
 			metodo: c.req.method,
 		}));
 

@@ -52,10 +52,20 @@ export function parseId(raw: string | undefined): string | null {
 }
 
 /**
+ * AUD-32: la forma de una `X-Idempotency-Key`: de 16 a 64 letras, cifras, guiones o guiones bajos.
+ * La Handy manda un UUIDv7 (`CloudClient` de `tpv-infra-http`). La clave es el `Op_Id` de la
+ * operación: se guarda en la base del negocio, viaja a la Main y sale en los eventos de `tpv-sync`,
+ * y una cabecera puede ocupar 128 KB. La misma forma que la clave del widget de reservas
+ * (`CLAVE_DE_INTENTO`, `publico.routes.ts`).
+ */
+const CLAVE_DE_IDEMPOTENCIA = /^[A-Za-z0-9_-]{16,64}$/;
+
+/**
  * Aplica un comando de escritura por el Durable Object del negocio.
  *
  * La `X-Idempotency-Key` es obligatoria y la pone el cliente: es lo que hace que un reintento
- * —una Handy que pierde la respuesta y repite— no cobre dos veces. Sin ella no se aplica nada.
+ * —una Handy que pierde la respuesta y repite— no cobre dos veces. Sin ella, o con una que no
+ * tiene su forma, no se aplica nada ni se llama al Durable Object.
  */
 export async function apply(
 	c: any,
@@ -63,6 +73,7 @@ export async function apply(
 ): Promise<any> {
 	const opId = recortar(c.req.header("X-Idempotency-Key") || "");
 	if (!opId) throw new HubError("missing_op_id", 400);
+	if (!CLAVE_DE_IDEMPOTENCIA.test(opId)) throw new HubError("invalid_op_id", 400);
 
 	return applyViaHub(c.env, {
 		tenantId: c.get("tenantId"),
