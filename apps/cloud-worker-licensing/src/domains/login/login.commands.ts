@@ -9,27 +9,49 @@ export type BuiltCommand = {
 	cloudPayload: any;
 };
 
-export function setTurnoPartido(input: {
-	id_usuario: string;
-	fecha: string | null;
-	turno_partido: boolean;
-}): BuiltCommand {
+/**
+ * El turno partido de un día. `fecha` es la fecha efectiva, ya resuelta por la ruta: la que trae la
+ * petición o, sin ella, «hoy» de quien la manda.
+ *
+ * Va como paso `value` y el resultado es `{ fecha, cambiados }`: el DO guarda los literales de los
+ * pasos `value` en el `Result_Json` desde el primer intento, así que un reintento con la misma
+ * `X-Idempotency-Key`, o el reenvío del DO, recupera el día que se escribió aunque haya pasado la
+ * medianoche; `cambiados` sólo está si llegó la primera respuesta. La ruta mira el estado de ESE día
+ * cuando no lo está (`decidirPorEstado`; salió en AUD-26). El `cloudPayload` sigue siendo la
+ * petición tal cual: es lo que firma el reintento como el mismo.
+ */
+export function setTurnoPartido(
+	input: {
+		id_usuario: string;
+		fecha: string | null;
+		turno_partido: boolean;
+	},
+	fecha: string,
+): BuiltCommand {
+	const FECHA = { $ref: "fecha" } as const;
 	return {
 		commandName: "set_turno_partido_hoy",
 		command: {
-			type: "tenantDb.exec",
+			type: "tenantDb.transaction",
 			payload: {
-				sql: `
-					INSERT INTO Fichaje_Dia (ID_Usuario, Fecha, Turno_Partido)
-					SELECT ?1, COALESCE(?2, date('now','localtime')), ?3
-                    WHERE ?3=1 OR NOT EXISTS (
-                        SELECT 1 FROM Fichajes
-                        WHERE ID_Usuario=?1 AND Fecha=COALESCE(?2, date('now','localtime')) AND Parte=2
-                    )
-					ON CONFLICT(ID_Usuario, Fecha) DO UPDATE SET
-						Turno_Partido = excluded.Turno_Partido;
-				`,
-				args: [input.id_usuario, input.fecha, input.turno_partido ? 1 : 0],
+				steps: [
+					{ kind: "value", saveAs: "fecha", sql: "SELECT ?1;", args: [fecha] },
+					{
+						kind: "execute",
+						saveAs: "cambiados",
+						sql: `
+							INSERT INTO Fichaje_Dia (ID_Usuario, Fecha, Turno_Partido)
+							SELECT ?1, ?2, ?3
+							WHERE ?3=1 OR NOT EXISTS (
+								SELECT 1 FROM Fichajes
+								WHERE ID_Usuario=?1 AND Fecha=?2 AND Parte=2
+							)
+							ON CONFLICT(ID_Usuario, Fecha) DO UPDATE SET
+								Turno_Partido = excluded.Turno_Partido;
+						`,
+						args: [input.id_usuario, FECHA, input.turno_partido ? 1 : 0],
+					},
+				],
 			},
 		},
 		cloudPayload: input,

@@ -211,6 +211,20 @@ export async function hoy(db: Client): Promise<string> {
 }
 
 /**
+ * ¿Está marcado el turno partido de ese día? Sin fila, no (es lo que vale por defecto). `fecha` es el
+ * día que escribió `setTurnoPartido`, el que devuelve con su resultado. Para decidir por el estado
+ * cuando no se sabe cuántas filas tocó la escritura (`decidirPorEstado`; salió en AUD-26).
+ */
+export async function turnoPartidoDe(db: Client, idUsuario: string, fecha: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `SELECT COALESCE((SELECT Turno_Partido FROM Fichaje_Dia
+			WHERE ID_Usuario = ?1 AND Fecha = ?2), 0) AS turno_partido;`,
+		args: [idUsuario, fecha],
+	});
+	return Number(rows(rs)[0]?.turno_partido ?? 0) === 1;
+}
+
+/**
  * RI-05: con una jornada en curso, el estado es el de SU día aunque empezara ayer. La pantalla elige
  * entre entrada y salida mirando este estado; con el de hoy, a la 01:30 un turno de noche aparecía
  * sin empezar y se fichaba una entrada nueva.

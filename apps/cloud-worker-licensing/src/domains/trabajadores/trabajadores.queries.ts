@@ -35,6 +35,57 @@ export async function grupoAsignacion(db: Client, id: string): Promise<GrupoAsig
 	return miembros.length ? { id_grupo: String(miembros[0].ID_Grupo), ids: miembros.map(m => String(m.ID_Asignacion)) } : null;
 }
 
+/**
+ * ¿La asignación que se edita está como se pidió guardar? El grupo ENTERO de su miembro principal, como
+ * lo deja `guardarAsignacion`: tantos miembros como tramos, todos con ese trabajador, día, turno, área
+ * y notas; el principal con el primer tramo y los demás con el resto. No basta el primer tramo: otra
+ * escritura puede reponer el grupo con el mismo primero y otro segundo. Para decidir por el estado
+ * cuando no se sabe cuántas filas tocó el guardado (`decidirPorEstado`; salió en AUD-26).
+ */
+export async function asignacionComoSePidio(
+	db: Client,
+	input: {
+		id_asignacion?: string | null;
+		id_trabajador: string;
+		fecha: string;
+		id_turno: string;
+		area: string;
+		notas?: string | null;
+		tramos: { hora_inicio: string; hora_fin: string }[];
+	},
+): Promise<boolean> {
+	const [primero, ...resto] = input.tramos;
+	if (!input.id_asignacion || !primero) return false;
+	const resultado = await db.execute({
+		sql: `SELECT ID_Asignacion AS id, ID_Trabajador AS trabajador, Fecha AS fecha, ID_Turno AS turno,
+				Area AS area, Notas AS notas, Hora_Inicio AS inicio, Hora_Fin AS fin
+			FROM Asignacion_Turnos
+			WHERE COALESCE(ID_Grupo, ID_Asignacion) =
+				(SELECT COALESCE(ID_Grupo, ID_Asignacion) FROM Asignacion_Turnos WHERE ID_Asignacion = ?1);`,
+		args: [input.id_asignacion],
+	});
+	const miembros = rows(resultado);
+	if (miembros.length !== input.tramos.length) return false;
+	const notas = input.notas ?? null;
+	const comoSePidio = (m: any) =>
+		m.trabajador === input.id_trabajador &&
+		m.fecha === input.fecha &&
+		m.turno === input.id_turno &&
+		m.area === input.area &&
+		(m.notas ?? null) === notas;
+	if (!miembros.every(comoSePidio)) return false;
+	const principal = miembros.find((m) => m.id === input.id_asignacion);
+	if (!principal || principal.inicio !== primero.hora_inicio || principal.fin !== primero.hora_fin) return false;
+	// Los demás tramos, como conjunto: el orden de las filas no dice nada.
+	const tramo = (inicio: unknown, fin: unknown) => `${inicio}-${fin}`;
+	const pedidos = resto.map((t) => tramo(t.hora_inicio, t.hora_fin)).sort();
+	const guardados = miembros
+		.filter((m) => m !== principal)
+		.map((m) => tramo(m.inicio, m.fin))
+		.sort();
+	return pedidos.every((t, i) => t === guardados[i]);
+}
+
 export type FilaSemanaOrigen = {
 	id_grupo?: string | null;
 	id_trabajador: string;

@@ -30,6 +30,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
 | [SYNC-34](#sync-34--dos-recorridos-cuadráticos-sobre-el-sql-que-sube-la-main) | 🔵 | Dos recorridos cuadráticos en el `TenantHub` sobre el SQL que sube la Main | Sin empezar |
+| [SYNC-35](#sync-35--tres-rutas-de-la-handy-contestan-mal-un-reintento-cuyo-recuento-no-se-guardó) | 🔵 | Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó | Sin empezar |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -496,6 +497,25 @@ final. En `tenantHub.tiempo.ts`, una sola pasada hacia delante con una pila de p
 cada uno con el nombre que lleva delante (leído hacia atrás sólo sobre los espacios y la palabra que
 lo preceden), de modo que cada `'now'` mire la cima de la pila; con los casos de
 `test/tenantHubTiempo.test.ts` como referencia de que no cambia lo que se reconoce.
+
+### SYNC-35 · Tres rutas de la Handy contestan mal un reintento cuyo recuento no se guardó
+
+En un reintento idempotente (el reenvío del `TenantHub` o la misma `X-Idempotency-Key`), `apply`
+devuelve el resultado que se guardó al aplicar, donde los recuentos y las lecturas son `null`: no
+dice si la escritura cambió algo, porque el lote se confirma también cuando una sentencia condicional
+no toca ninguna fila. Las rutas que deciden por el recuento lo resuelven releyendo el estado con
+`decidirPorEstado` (`lib/rutas.ts`): la papelera de notificaciones, `turno-partido` y
+`horarios/guardar`. Quedan tres que no:
+
+- `PUT /v1/trabajadores/:id` y `PUT /v1/trabajadores/horarios/asignaciones/:id` toman `null` por
+  éxito: si otro dispositivo borró lo que se editaba y se perdió la respuesta, el reintento contesta
+  200 sin haber cambiado nada. Lo editado ya no existe, y la pantalla lo ve al recargar.
+- `DELETE /v1/inventario/productos/:id` mira `en_uso`, una lectura del resultado: en el reintento
+  llega sin ella y contesta el 409 «producto en una comanda abierta» aunque el producto se haya borrado.
+
+Arreglo propuesto: `decidirPorEstado` en las tres, como en `horarios/guardar`, con una lectura de lo
+pedido (el trabajador o la asignación tal como se pidió; el producto, que ya no exista o esté
+archivado).
 
 ---
 

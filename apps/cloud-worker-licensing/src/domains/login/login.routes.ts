@@ -2,7 +2,10 @@
 
 import { Hono } from "hono";
 
+import { parseClientNow } from "../../durableObjects/tenantHub.tiempo";
 import type { Env } from "../../env";
+import { diaDeInstante } from "../../lib/fechas";
+import { HubError } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
@@ -20,7 +23,7 @@ import {
 } from "./correoRecuperacion";
 import { badRequest } from "../../server/utils/response";
 import { cuerpo } from "../../lib/validacion";
-import { apply, parseId } from "../../lib/rutas";
+import { apply, decidirPorEstado, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -102,10 +105,30 @@ loginRoutes.get("/:id/punch-status", async (c) => {
 	return c.json(await tenantQuery(c, (db) => q.punchStatus(db, id)));
 });
 
+/** El día de la hora local de quien pide, o el `missing_client_now` del DO si no la manda bien. */
+function diaDeQuienPide(c: any): string {
+	const ahora = parseClientNow(c.req.header("X-Client-Now"));
+	const dia = ahora === null ? null : diaDeInstante(ahora);
+	if (dia === null) throw new HubError("missing_client_now", 400);
+	return dia;
+}
+
 loginRoutes.post("/turno-partido", cuerpo(S.setTurnoPartidoSchema), async (c) => {
 	const datos = c.req.valid("json");
-	const cambiados = await apply(c, cmd.setTurnoPartido(datos));
-    if (Number(cambiados) === 0) {
+	// El día se resuelve aquí y viaja en el comando, que lo devuelve. Sin fecha, es el de la hora de
+	// quien pide (`X-Client-Now`, validada como en `tenantQuery`). Sin esa hora no se cae al reloj de
+	// Turso, que es UTC (cerca de la medianoche, el día anterior): el mismo rechazo que da el DO a una
+	// escritura que pide «ahora» sin hora de quien escribe (SYNC-04), el de cuando el día salía del SQL.
+	const fecha = datos.fecha ?? diaDeQuienPide(c);
+	const r = await apply(c, cmd.setTurnoPartido(datos, fecha));
+	// Sin recuento (`null`: un reintento o el reenvío del DO, AUD-26), se mira si quedó como se pidió el
+	// día que se escribió: el del primer intento, que el DO guardó con el resultado, y no el de hoy si
+	// el reintento llega pasada la medianoche.
+	const dia = typeof r?.fecha === "string" ? r.fecha : fecha;
+	const hecho = await decidirPorEstado(r?.cambiados, async () =>
+		(await tenantQuery(c, (db) => q.turnoPartidoDe(db, datos.id_usuario, dia))) === datos.turno_partido,
+	);
+    if (!hecho) {
         return c.json({ ok: false, code: "conflict", error: "No puedes quitar el turno partido: ya hay un segundo tramo registrado" }, 409);
     }
 	return c.json({ ok: true });

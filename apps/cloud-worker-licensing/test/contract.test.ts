@@ -928,7 +928,8 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "login.set_turno_partido": {
-			aplicar(hub, sql, setTurnoPartido(caso.entrada as any));
+			// El caso trae la fecha; la ruta la resuelve igual cuando no viene.
+			aplicar(hub, sql, setTurnoPartido(caso.entrada as any, caso.entrada.fecha));
 			return;
 		}
 		case "horarios.copiar_semana": {
