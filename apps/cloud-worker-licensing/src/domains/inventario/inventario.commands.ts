@@ -106,19 +106,28 @@ const SQL_INSERT_LOTE = `
 
 // Auditoría de stock (INV-01b): cada alta/ajuste deja un movimiento trazable. Fecha canónica
 // (la congela resolveNowLiterals del worker antes de replicar).
-const SQL_INSERT_MOVIMIENTO = `
+//
+// AUD-20: el 'ALTA' de un lote sólo entra si el lote no existe, y va DELANTE de su INSERT para que
+// la condición mire la base antes del alta (la FK al lote la comprueba el COMMIT: el lote del DO
+// abre con `defer_foreign_keys`). Con el id de un lote que ya existe, el alta pura no lo toca y
+// tampoco queda un ALTA que descuadre la reconciliación. La condición viaja en la sentencia: la
+// Main la vuelve a evaluar al aplicar la réplica. Espejo de `create_lote` en la Main.
+const SQL_ALTA_DEL_LOTE = `
 	INSERT INTO Movimientos_Stock
 		(ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
-	VALUES
-		(?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now','localtime'));
+	SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now','localtime')
+	WHERE NOT EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?2);
 `;
 
-// RI-55: el movimiento del stock suelto de un producto (sin lote).
-const SQL_INSERT_MOVIMIENTO_PRODUCTO = `
+// RI-55: el movimiento del stock suelto de un producto nuevo (sin lote). AUD-20: igual que el del
+// lote, delante del alta y sólo si el producto no existe. `esNuevo` lo decide la ruta leyendo fuera
+// del lote (SYNC-30): dos altas del mismo id a la vez llegan las dos como nuevas, y la segunda es un
+// DO UPDATE que no toca el suelto. Espejo de `guardar_producto` en la Main.
+const SQL_ALTA_DEL_SUELTO = `
 	INSERT INTO Movimientos_Stock
 		(ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
-	VALUES
-		(?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now','localtime'));
+	SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now','localtime')
+	WHERE NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?2);
 `;
 
 // UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno aquí.
@@ -158,6 +167,16 @@ export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean, idU
 	const stockSuelto = esNuevo ? cantidadONull(input.stock_suelto) : null;
 	const steps: any[] = [
 		idStep(input.id_producto),
+		// AUD-20: delante del alta del producto, y sólo si no existe (ver `SQL_ALTA_DEL_SUELTO`).
+		...(stockSuelto == null
+			? []
+			: [
+					{
+						kind: "execute",
+						sql: SQL_ALTA_DEL_SUELTO,
+						args: [nuevoId(), REF_ID, "ALTA", stockSuelto, stockSuelto, "Alta del producto", idUsuario],
+					},
+				]),
 		{
 			kind: "execute",
 			// RI-70: al editar sin permiso de precios se conserva el valor dentro de la escritura.
@@ -182,15 +201,6 @@ export function upsertProducto(input: UpsertProductoInput, esNuevo: boolean, idU
 			sql: "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
 			args: [REF_ID],
 		},
-		...(stockSuelto == null
-			? []
-			: [
-					{
-						kind: "execute",
-						sql: SQL_INSERT_MOVIMIENTO_PRODUCTO,
-						args: [nuevoId(), REF_ID, "ALTA", stockSuelto, stockSuelto, "Alta del producto", idUsuario],
-					},
-				]),
 		...normalizeIds(input.ids_alergenos ?? []).map((idA) => ({
 			kind: "execute",
 			sql: "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
@@ -250,6 +260,13 @@ export function createLote(input: CreateLoteInput, idUsuario: string): BuiltComm
 
 	const steps: any[] = [
 		idStep(input.id_lote),
+		// Auditoría: el alta entra como movimiento 'ALTA' con delta = stock inicial. AUD-20: delante
+		// del lote y sólo si el lote no existe (ver `SQL_ALTA_DEL_LOTE`).
+		{
+			kind: "execute",
+			sql: SQL_ALTA_DEL_LOTE,
+			args: [movId, REF_ID, "ALTA", stock, stock, cleanOrNull(input.notas), idUsuario],
+		},
 		{
 			kind: "execute",
 			sql: SQL_INSERT_LOTE,
@@ -264,12 +281,6 @@ export function createLote(input: CreateLoteInput, idUsuario: string): BuiltComm
 				idOrNull(input.id_proveedor),
 				cleanOrNull(input.notas),
 			],
-		},
-		// Auditoría: el alta entra como movimiento 'ALTA' con delta = stock inicial.
-		{
-			kind: "execute",
-			sql: SQL_INSERT_MOVIMIENTO,
-			args: [movId, REF_ID, "ALTA", stock, stock, cleanOrNull(input.notas), idUsuario],
 		},
 	];
 	return {

@@ -488,6 +488,14 @@ actualice (su reintento va por la clave de idempotencia), y con `DO UPDATE` el i
 cobrada la movía a otro ticket y el de una comanda cobrada la reabría (AUD-16); el de un lote le
 pisaba las existencias (INV-02).
 
+Lo que acompaña a un alta tampoco se escribe si la fila ya estaba (AUD-20). El movimiento `ALTA` de
+un lote va delante de su alta y sólo entra si el lote no existe, y el del stock suelto de un producto
+nuevo, sólo si el producto no existe; en el worker y en la Main. Sin esa condición quedaba otra
+entrada de existencias que la reconciliación daba por descuadre y que ningún ajuste cerraba. La
+condición va en la sentencia y la vuelve a evaluar quien aplica la réplica: la ruta del worker da un
+producto por nuevo leyendo fuera del lote, y aunque la Main lo decide dentro de su transacción, la
+nube puede tener ya ese id (dos equipos que vuelven a crear a la vez un producto que otro borró).
+
 ### Frontera con la webview (RI-31/RI-57)
 
 El motor se inicia en el shell y sigue vivo al desmontar React. La webview sólo consulta

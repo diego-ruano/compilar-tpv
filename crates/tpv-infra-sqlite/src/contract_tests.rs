@@ -281,6 +281,7 @@ casos_de_contrato! {
     tareas__vaciar_papelera,
     tareas__marcar_finalizada,
     inventario__create_lote,
+    inventario__create_lote_id_existente,
     inventario__create_categoria,
     inventario__upsert_producto,
     inventario__delete_producto,
