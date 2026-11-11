@@ -4,22 +4,20 @@
 // ya no deja ilegible lo anterior.
 //
 // El 27/09 se regeneraron los secretos del worker. Como el formato era sólo base64(iv‖ct), sin decir
-// con qué clave, todo lo cifrado antes —las DEK, los tokens de Turso, las claves de licencia— dejó de
-// poder leerse, y `/health` siguió en verde. Lo que se fija aquí:
+// con qué clave, todo lo cifrado antes —las DEK, las claves de licencia— dejó de poder leerse, y
+// `/health` siguió en verde. Lo que se fija aquí:
 //   · lo de antes (sin prefijo) se sigue leyendo;
 //   · durante una rotación se lee con la anterior y se guarda ya con la actual;
 //   · la ruta de recifrar termina la rotación, y dice lo que no puede;
-//   · un token de Turso que no se deja descifrar se sustituye en el acto;
 //   · `/health` descifra un canario y contesta 503 con una clave equivocada.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { cifrar, descifrar, versionDe } from "../src/server/crypto";
 import { getOrCreateTenantFieldDek, recifrarConLaActual } from "../src/server/licenseStore";
-import { resolveTenantDbCredentials } from "../src/server/db/tenantDb";
 import { comprobarSalud, olvidarSalud, TEXTO_CANARIO } from "../src/server/salud";
 
 const K1 = btoa(String.fromCharCode(...new Uint8Array(32).fill(1)));
@@ -80,7 +78,7 @@ async function conBaseCentral<T>(nombre: string, prueba: (e: { sql: any; db: any
 	return enElHub(`cifrado-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		prepararPlanoDeControl(sql);
-		for (const t of ["licenses", "tenant_databases", "tenants", "canario_cifrado"]) sql.exec(`DELETE FROM ${t};`);
+		for (const t of ["licenses", "tenants", "canario_cifrado"]) sql.exec(`DELETE FROM ${t};`);
 		return prueba({ sql, db: clienteSobre(sql) });
 	});
 }
@@ -97,14 +95,10 @@ describe("RI-73 · rotar LICENSE_STORE_KEY sin perder nada", () => {
 
 	it("la ruta de recifrar pasa todo a la actual, y separa lo que no puede leer", async () => {
 		await conBaseCentral("recifrar", async ({ sql, db }) => {
-			sql.exec(`INSERT INTO tenants (tenant_id, field_dek) VALUES ('t1', ?), ('t2', ?);`,
+			sql.exec(`INSERT INTO tenants (tenant_id, field_dek) VALUES ('t1', ?), ('t2', ?), ('t3', ?);`,
 				await comoAntes("dek-1"),
 				await cifrar(ROTANDO, "dek-2"), // ya está con la actual: no se toca
-			);
-			sql.exec(
-				`INSERT INTO tenant_databases (tenant_id, turso_db_name, turso_url, turso_auth_token_enc)
-				 VALUES ('t1', 'db', 'libsql://db', ?);`,
-				await cifrar(OTRA, "token-ilegible"),
+				await cifrar(OTRA, "dek-ilegible"),
 			);
 			sql.exec(
 				`INSERT INTO licenses (license_id, license_key_hash, license_key_enc, status, term_months, origin,
@@ -114,8 +108,8 @@ describe("RI-73 · rotar LICENSE_STORE_KEY sin perder nada", () => {
 			);
 
 			const r = await recifrarConLaActual(db, ROTANDO, 100);
-			expect(r.recifrados).toEqual({ licencias: 1, deks: 1, tokensTurso: 0 });
-			expect(r.ilegibles).toEqual([{ tabla: "tenant_databases", id: "t1" }]);
+			expect(r.recifrados).toEqual({ licencias: 1, deks: 1 });
+			expect(r.ilegibles).toEqual([{ tabla: "tenants", id: "t3" }]);
 			expect(r.quedanMas).toBe(false);
 
 			const clave = String(sql.exec(`SELECT license_key_enc FROM licenses;`).toArray()[0].license_key_enc);
@@ -133,33 +127,6 @@ describe("RI-73 · rotar LICENSE_STORE_KEY sin perder nada", () => {
 			expect(r.recifrados.deks).toBe(1);
 			expect(r.quedanMas).toBe(true);
 			expect((await recifrarConLaActual(db, ROTANDO, 1)).quedanMas).toBe(false);
-		});
-	});
-});
-
-describe("RI-73 · un token de Turso que no se deja descifrar", () => {
-	afterEach(() => vi.unstubAllGlobals());
-
-	it("se sustituye en el acto por uno nuevo, sin esperar a la rotación del día siguiente", async () => {
-		const pedidos: string[] = [];
-		vi.stubGlobal("fetch", async (url: string) => {
-			pedidos.push(String(url));
-			return new Response(JSON.stringify({ jwt: "token-nuevo" }), { status: 200 });
-		});
-		await conBaseCentral("token", async ({ sql, db }) => {
-			sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('t1');`);
-			sql.exec(
-				`INSERT INTO tenant_databases (tenant_id, turso_db_name, turso_url, turso_auth_token_enc, rotated_at_ms)
-				 VALUES ('t1', 'db', 'libsql://db', ?, ?);`,
-				await cifrar(OTRA, "token-viejo"),
-				Date.now() - 1000,
-			);
-			const env = { LICENSE_STORE_KEY: K1, TURSO_PLATFORM_TOKEN: "p", TURSO_ORG_SLUG: "org" };
-			const r = await resolveTenantDbCredentials(db, env as any, "t1");
-			expect(r.tursoAuthToken).toBe("token-nuevo");
-			expect(pedidos.length).toBe(1);
-			const guardado = String(sql.exec(`SELECT turso_auth_token_enc FROM tenant_databases;`).toArray()[0].turso_auth_token_enc);
-			expect((await descifrar(K1, guardado)).texto).toBe("token-nuevo");
 		});
 	});
 });

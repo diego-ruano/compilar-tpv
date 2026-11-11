@@ -89,7 +89,7 @@ export function allRowsFromResult(result: any): any[] {
 	return rows.map((r: any) => toPlainValue(r));
 }
 
-// Evalúa en JS un paso `value` para no gastar un round trip a Turso por cada uno.
+// Evalúa en JS un paso `value` para no gastar un round trip a la base por cada uno.
 // Cubre el set CERRADO de formas que generan los *.commands.ts (echo de un literal,
 // constante numérica, o concatenación 'prefijo' || ?N). Cualquier otra forma lanza,
 // para no resolver mal en silencio (fail-fast: lo detectarían los tests).

@@ -8,13 +8,9 @@ import type { TenantHub } from "./durableObjects/tenantHub";
 //   - La base de datos central de Turso (`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`).
 //   - Los secretos de licencias (`LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`,
 //     `LICENSE_SIGNING_PRIVATE_KEY`, `ADMIN_API_TOKEN`, `STRIPE_*`).
-//   - El Turso Platform API (`TURSO_PLATFORM_TOKEN`, `TURSO_ORG_SLUG`) para
-//     aprovisionar/rotar las DBs por-tenant.
-//   - El Durable Object `TenantHub` (WebSocket + apply idempotente).
+//   - El Durable Object `TenantHub` (WebSocket + apply idempotente), que guarda además la base de
+//     cada negocio en su SQLite.
 //   - El pepper de emparejamiento (`PAIR_PEPPER`) y el TTL opcional del token Handy.
-//
-// Ya NO existe el service binding `TPV_LICENSING`: la resolución de la DB del
-// tenant es ahora una llamada de función local (ver server/db/tenantDb.ts).
 
 export interface Env {
 	// Turso central (DB de control: tenants, devices, licencias, pair_requests…)
@@ -23,7 +19,7 @@ export interface Env {
 
 	// Licencias / firma de tokens
 	LICENSE_JWT_SECRET: string;
-	LICENSE_STORE_KEY: string; // base64 32 bytes (AES-GCM): cifra en reposo claves, DEK y tokens de Turso
+	LICENSE_STORE_KEY: string; // base64 32 bytes (AES-GCM): cifra en reposo las claves y las DEK
 	// RI-73 · La versión de `LICENSE_STORE_KEY` (por defecto "1") y, durante una rotación, la clave
 	// anterior con la suya (`server/crypto.ts`). Las dos últimas sólo existen mientras dura la rotación.
 	LICENSE_STORE_KEY_ID?: string;
@@ -57,10 +53,6 @@ export interface Env {
 	// Lo usa el correo de aviso de caducidad. Sin esta variable no se manda ningún aviso: uno que
 	// no lleva a ninguna parte es peor que no mandarlo.
 	CHECKOUT_URL?: string;
-
-	// Turso Platform API (crear DBs + tokens por-tenant)
-	TURSO_PLATFORM_TOKEN: string;
-	TURSO_ORG_SLUG: string;
 
 	// Emparejamiento Handy
 	PAIR_PEPPER?: string;
@@ -97,15 +89,15 @@ export interface Env {
 	// fichero su caché y al widget su CSP.
 	ASSETS: Fetcher;
 
-	// Durable Object (WebSocket hub por tenant)
+	// Durable Object por negocio: su WebSocket hub y su base, en el SQLite del propio objeto.
 	TenantHub: DurableObjectNamespace<TenantHub>;
 
 	// La agenda de reservas web, una por negocio (docs/estudios/reservas-web.md §4.3). Nunca escribe
-	// en Turso: guarda en su SQLite lo que espera a la Main.
+	// en la base del negocio: guarda en su SQLite lo que espera a la Main.
 	AgendaWeb: DurableObjectNamespace<AgendaWeb>;
 
-	// prueba/sqlite-do: jurisdicción de los dos DO, que ahora guardan los datos del negocio («eu» al
-	// desplegar). Vacía en local y en los tests: workerd no implementa jurisdicciones.
+	// Jurisdicción de los dos DO, que guardan los datos del negocio («eu» al desplegar). Vacía en
+	// local y en los tests: workerd no implementa jurisdicciones.
 	JURISDICCION_DO?: string;
 
 	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).

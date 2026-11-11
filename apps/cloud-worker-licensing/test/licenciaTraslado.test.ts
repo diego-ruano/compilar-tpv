@@ -47,8 +47,6 @@ const ENV = {
 	LICENSE_STORE_KEY: STORE_KEY,
 	TURSO_DATABASE_URL: "libsql://no-se-usa",
 	TURSO_AUTH_TOKEN: "no-se-usa",
-	TURSO_PLATFORM_TOKEN: "no-se-usa",
-	TURSO_ORG_SLUG: "no-se-usa",
 };
 // AUD-01: claves ed25519 de verdad, porque activar exige la firma del equipo.
 const PUB_A = await clavePublica(1);

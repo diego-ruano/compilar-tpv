@@ -1,10 +1,9 @@
 // src/server/crypto.ts
 //
 // El cifrado en reposo de la base central con `LICENSE_STORE_KEY`: las claves de licencia
-// (`licenses.license_key_enc`), la DEK de cada negocio (`tenants.field_dek`) y el token de Turso de
-// cada negocio (`tenant_databases.turso_auth_token_enc`). Es el ÚNICO sitio que cifra o descifra con
-// esa clave: había tres implementaciones del mismo AES-GCM, y versionar el formato en una sola
-// habría dejado a las otras dos leyendo a ciegas.
+// (`licenses.license_key_enc`) y la DEK de cada negocio (`tenants.field_dek`). Es el ÚNICO sitio que
+// cifra o descifra con esa clave: había tres implementaciones del mismo AES-GCM, y versionar el
+// formato en una sola habría dejado a las otras leyendo a ciegas.
 //
 // RI-73 · El formato lleva la versión de la clave: `k<id>:` + base64(iv‖ct). Antes era sólo el
 // base64, sin decir con qué clave, así que cambiarla dejaba ilegible todo lo anterior —y pasó: el

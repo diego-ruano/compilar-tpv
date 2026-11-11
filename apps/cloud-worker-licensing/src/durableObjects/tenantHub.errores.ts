@@ -35,7 +35,7 @@ const PERMANENTES = [
 	"too many sql variables",
 	"values were supplied", // "N values for M columns"
 	"readonly database",
-	// CFG-04: el DO rechaza una escritura que dejaría a Turso elegir la hora. Es el propio comando
+	// CFG-04: el DO rechaza una escritura que dejaría a la base elegir la hora. Es el propio comando
 	// el que está mal escrito: repetirlo da el mismo rechazo.
 	"hora_no_determinista",
 	// REV-22: su pareja. La hora del emisor viaja GUARDADA con la operación (la columna `Client_Now`
@@ -76,10 +76,6 @@ const TRANSITORIOS = [
 	"503",
 	"502",
 	"429",
-	// AUD-18: una escritura anterior de este negocio quedó sin saber si se confirmó y todavía no se
-	// ha resuelto (`tenantHub.turno.ts`). Hasta entonces no entra nada posterior, y no es culpa de
-	// quien espera: vuelve a intentarlo.
-	"escritura_en_duda",
 ] as const;
 
 /**
@@ -114,41 +110,3 @@ export function esFalloPasajero(error: unknown): boolean {
 	if (!texto) return false;
 	return TRANSITORIOS.some((f) => texto.includes(f));
 }
-
-/**
- * AUD-18 · ¿Lo rechazó la propia base, y lo rechazaría igual otra vez?
- *
- * Es lo que permite dar por NO confirmado un envío que ha fallado: la base contestó que no encaja
- * (una restricción, una tabla o columna que no existe, una sintaxis, unos argumentos que no
- * cuadran), o el servidor rechazó la petición sin ejecutarla (un 4xx que no es de credenciales).
- * Habla de ESE envío, no de otro anterior que siguiera en vuelo: ése podría entrar más tarde, con la
- * base ya cambiada. Por eso un reenvío rechazado así no basta para olvidar la escritura en duda, y
- * se veta su `Op_Id` (`tenantHub.turno.ts`).
- *
- * Lo demás —un corte después de enviar, un plazo vencido, un 5xx, una respuesta que no se deja
- * leer, un bloqueo— puede haberse confirmado sin que nos enteremos: es una confirmación incierta.
- * Los códigos son los de libsql (`LibsqlError.code`); el texto, el de `esRechazoPermanente`.
- */
-export function rechazoDeterminista(error: unknown): boolean {
-	if (esRechazoPermanente(error)) return true;
-	const codigo = String((error as any)?.code ?? "");
-	if (/^SQLITE_(CONSTRAINT|ERROR|MISMATCH|TOOBIG|RANGE|READONLY)/.test(codigo)) return true;
-	if (codigo === "SQL_PARSE_ERROR" || codigo === "SQL_INPUT_ERROR" || codigo === "ARGS_INVALID") {
-		return true;
-	}
-	const estado = Number((error as any)?.cause?.status ?? (error as any)?.status ?? 0);
-	return estado >= 400 && estado < 500 && estado !== 408 && estado !== 429;
-}
-
-/**
- * ¿Es un rechazo de CREDENCIALES de la base del tenant?
- *
- * Otra pregunta distinta de las de arriba: aquéllas miran la sentencia, ésta mira el token. Un 401
- * de Turso no se arregla reintentando ni se arregla apartando la operación --se arregla pidiendo
- * otro token--, así que quien lo ve tiene que dejarlo SALIR hasta `withTenantDbRetry`, que es quien
- * rota. Capturarlo por el camino convierte un token caducado en cincuenta operaciones sanas
- * apartadas (REV-04).
- */
-// ARQ-07: una sola clasificación para REST y Durable Object; se reexporta para no dispersar
-// imports de la lógica propia del DO.
-export { isTursoAuthError } from "../lib/tursoAuthError";

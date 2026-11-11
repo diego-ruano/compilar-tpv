@@ -2,7 +2,7 @@
 //
 // Puente con el Durable Object TenantHub para las ESCRITURAS de la API.
 //
-// Toda escritura va al MISMO motor del DO (RPC `aplicar`): aplica en Turso
+// Toda escritura va al MISMO motor del DO (RPC `aplicar`): aplica en la base
 // dentro de una transacción, registra idempotencia por `Op_Id` y, tras confirmar,
 // hace broadcast del cambio por WebSocket al resto de dispositivos. El DO también
 // rechaza la escritura con `main_offline` si no hay una Main conectada.
@@ -80,7 +80,7 @@ function escrituraVetada(command: ApplyCommand): string | null {
 }
 
 /**
- * prueba/sqlite-do · El espacio de los TenantHub, con la jurisdicción del despliegue.
+ * El espacio de los TenantHub, con la jurisdicción del despliegue.
  *
  * Con la base del negocio dentro del DO, donde nace el objeto es donde viven sus datos, y nace
  * cerca de quien lo toca primero: una reserva web hecha desde fuera de Europa, por ejemplo. Con
@@ -89,13 +89,13 @@ function escrituraVetada(command: ApplyCommand): string | null {
  *
  * El mismo nombre da otro objeto en otra jurisdicción: cambiarla es empezar de cero.
  */
-export function espacioDelHub(env: Env): Env["TenantHub"] {
+export function espacioDelHub(env: Pick<Env, "TenantHub" | "JURISDICCION_DO">): Env["TenantHub"] {
 	const j = env.JURISDICCION_DO;
 	return j ? env.TenantHub.jurisdiction(j as DurableObjectJurisdiction) : env.TenantHub;
 }
 
 /** El TenantHub de un negocio. */
-export function hubDe(env: Env, tenantId: string) {
+export function hubDe(env: Pick<Env, "TenantHub" | "JURISDICCION_DO">, tenantId: string) {
 	const ns = espacioDelHub(env);
 	return ns.get(ns.idFromName(tenantId));
 }

@@ -13,6 +13,7 @@ documento de [arquitectura](../arquitectura/).
 | [0005](0005-dinero-en-centimos.md) | El dinero es un entero de céntimos |
 | [0006](0006-un-solo-worker.md) | Un solo worker para toda la nube |
 | [0007](0007-la-reserva-web-no-escribe-en-la-base-del-negocio.md) | La reserva web no escribe en la base del negocio |
+| [0008](0008-la-base-del-negocio-en-su-durable-object.md) | La base de cada negocio vive en su Durable Object |
 
 ## Cómo se escribe uno
 

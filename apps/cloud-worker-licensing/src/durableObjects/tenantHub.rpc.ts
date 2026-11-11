@@ -14,7 +14,7 @@ export type ApplyParams = {
 };
 
 /**
- * prueba/sqlite-do · Lo que contesta `consultar` (las lecturas del Worker). Un error SQL viaja como
+ * Lo que contesta `consultar` (las lecturas del Worker). Un error SQL viaja como
  * excepción, con su mensaje; uno con status decidido (`HubError`) viaja como dato, porque RPC no
  * conserva las propiedades de una subclase de Error.
  */

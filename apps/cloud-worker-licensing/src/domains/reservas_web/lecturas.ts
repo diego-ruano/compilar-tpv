@@ -1,7 +1,7 @@
 // src/domains/reservas_web/lecturas.ts
 //
-// Reservas desde la web (docs/estudios/reservas-web.md): lo que se lee de la base del negocio en
-// Turso. Sólo lecturas: la reserva web nunca escribe en Turso (ADR 0007). Ninguna devuelve datos
+// Reservas desde la web (docs/estudios/reservas-web.md): lo que se lee de la base del negocio.
+// Sólo lecturas: la reserva web nunca escribe en la base (ADR 0007). Ninguna devuelve datos
 // personales de una reserva; lo que sí sale por las rutas públicas es lo del negocio.
 //
 // `'now','localtime'` lo fija `lecturaConHora` con la hora del negocio (`horaDelNegocio.ts`).
@@ -132,8 +132,8 @@ export async function cierresEntre(db: Client, desde: string, hasta: string): Pr
 	return new Set(filas(rs).map((r) => String(r.dia)));
 }
 
-/** Las reservas de Turso alrededor de un día: las que ocupan su mesa y todos sus ids. */
-export type OcupacionTurso = {
+/** Las reservas de la base alrededor de un día: las que ocupan su mesa y todos sus ids. */
+export type OcupacionEnLaBase = {
 	ocupaciones: Ocupacion[];
 	/** Todas las reservas de la ventana, ocupen o no: la agenda da por vistas las suyas. */
 	ids: Set<string>;
@@ -163,7 +163,7 @@ const SQL_COMANDAS_ABIERTAS = `
 	WHERE C.Estado = 'Abierta' AND C.ID_Mesa IS NOT NULL;
 `;
 
-export async function ocupacionAlrededorDe(db: Client, dia: string, duracion: number): Promise<OcupacionTurso> {
+export async function ocupacionAlrededorDe(db: Client, dia: string, duracion: number): Promise<OcupacionEnLaBase> {
 	const [rsReservas, rsComandas] = await db.batch(
 		[
 			{ sql: SQL_RESERVAS_VENTANA, args: [dia, duracion] },

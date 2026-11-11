@@ -2,17 +2,16 @@
 //
 // El cliente de la base de cada negocio para las LECTURAS de la API.
 //
-// prueba/sqlite-do: la base vive en el SQLite del TenantHub del negocio, así que cada consulta es
-// una llamada RPC al DO (`consultar`). El `Client` que reciben las rutas tiene la misma forma que el
-// de libsql (`execute`, `batch`), y por eso ninguna de ellas cambia. Ya no hay credenciales que
-// resolver ni token que rotar.
+// La base vive en el SQLite del TenantHub del negocio, así que cada consulta es una llamada RPC al
+// DO (`consultar`). El `Client` que reciben las rutas tiene la misma forma que el de libsql
+// (`execute`, `batch`).
 //
 // - Fija «ahora» a la hora LOCAL de quien pregunta antes de ejecutar (REV-03, ver abajo).
 //
-// ── REV-03: «hoy» es el de quien pregunta, no el de Turso ──────────────────────────────────────
+// ── REV-03: «hoy» es el de quien pregunta, no el de la base ──────────────────────────────────────
 //
-// Estas lecturas se ejecutan en Turso, que corre en UTC, así que su `'localtime'` ES UTC. Un
-// `date('now','localtime')` dentro de una consulta devolvía el día de Turso, no el del bar: entre
+// Estas lecturas se ejecutan en la base, que corre en UTC, así que su `'localtime'` ES UTC. Un
+// `date('now','localtime')` dentro de una consulta devolvía el día de la base, no el del bar: entre
 // medianoche y las dos de la mañana (verano en España) todavía era ayer. Eso salía en las tareas
 // «de hoy», en las estadísticas, en las reservas próximas… y, lo peor, en la fecha con la que se
 // guardaba un fichaje, que es un registro de jornada obligatorio.
@@ -23,7 +22,7 @@
 // y no consulta a consulta: una que se añada mañana no puede olvidarse de hacerlo.
 //
 // Sin cabecera (o con una fuera de la deriva admisible) no se reescribe nada y manda el reloj de
-// Turso, que es como se comportaba antes. Es lo correcto: quien no dice su hora no puede esperar
+// La base, que es como se comportaba antes. Es lo correcto: quien no dice su hora no puede esperar
 // que se la adivinen.
 
 import type { Client, ResultSet } from "@libsql/client/web";

@@ -5,7 +5,7 @@
 // `parseId` estaba escrito doce veces con el mismo cuerpo, y `apply` diez — las dos únicas
 // variantes se diferenciaban en una línea en blanco. No es sólo ruido: cuando `apply` cambió para
 // mandar `X-Client-Now` (CFG-04), hubo que acordarse de tocar diez ficheros, y el que se olvidara
-// habría dejado un dominio replicando con la hora de Turso sin que nada fallara.
+// habría dejado un dominio replicando con la hora de la base sin que nada fallara.
 
 import { applyViaHub, HubError, type ApplyCommand } from "./hub";
 import { recortar } from "./texto";

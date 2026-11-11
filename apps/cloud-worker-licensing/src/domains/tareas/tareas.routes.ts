@@ -1,7 +1,7 @@
 // src/domains/tareas/tareas.routes.ts
 //
 // Subrouter Hono del modulo de tareas. Se monta en /v1/tareas (index.ts).
-// Lecturas directas a Turso; escrituras por TenantHub con idempotencia.
+// Lecturas directas a la base; escrituras por TenantHub con idempotencia.
 
 import { Hono } from "hono";
 

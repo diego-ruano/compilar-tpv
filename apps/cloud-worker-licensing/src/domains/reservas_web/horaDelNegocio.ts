@@ -36,7 +36,7 @@ export function horaLocalEn(zona: string, ms: number): string {
 	return `${p("year")}-${p("month")}-${p("day")} ${p("hour")}:${p("minute")}:${p("second")}`;
 }
 
-/** «Ahora» en el negocio, leyendo su zona de Turso. */
+/** «Ahora» en el negocio, leyendo su zona de la base. */
 export async function horaDelNegocio(db: Client, ahoraMs = Date.now()): Promise<string> {
 	const rs = await db.execute("SELECT Zona_Horaria AS zona FROM Business_Settings WHERE ID = 1;");
 	const fila: any = rs.rows?.[0];

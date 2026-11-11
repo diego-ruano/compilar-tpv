@@ -5,12 +5,13 @@
 // El escalón que hay entre `tenantHub.sentencias.ts` (las primitivas: resolver un `$ref`,
 // normalizar un valor de libsql, leer una fila de un resultado) y el motor de aplicación del
 // TenantHub: coge un `InternalApplyCommand` y lo aplana a las piezas del batch atómico que se
-// ejecuta contra Turso.
+// ejecuta contra la base del negocio.
 //
 // Vive fuera de la clase porque no toca NADA del Durable Object: ni `state`, ni la conexión al
 // tenant, ni el censo de sockets. Es una función del comando a sus sentencias, y por eso se puede
 // probar sin levantar un DO.
 
+import { stableStringify, stringifyJsonValue } from "./tenantHub.envelope";
 import type { InternalApplyCommand, ResolvedStmt, SqlScalar } from "./tenantHub.types";
 import {
 	allRowsFromResult,
@@ -131,4 +132,40 @@ export function buildApplyBatch(cmd: InternalApplyCommand): {
 	}
 
 	throw new Error(`batch_unsupported_command_type:${(cmd as any).type}`);
+}
+
+/** Una escritura suelta, ya validada y con la hora fijada (`rewriteCmdNowLiterals`). */
+export type EscrituraPreparada = {
+	opId: string;
+	commandName: string;
+	cmd: InternalApplyCommand;
+	deviceId: string | null;
+	requestHash: string;
+	cloudPayloadJson: string;
+};
+
+/**
+ * El batch atómico de una escritura: [PRAGMA] + [gate de idempotencia] + [trabajo] + [log].
+ *
+ * El gate va SIN `ON CONFLICT`: en un reintento (mismo `Op_Id`) viola el UNIQUE y deshace TODO el
+ * batch, así que ni se duplica el trabajo ni el log. La operación está aplicada (commit) o no está.
+ */
+export function loteDe(e: EscrituraPreparada, createdAtMs: number) {
+	const built = buildApplyBatch(e.cmd);
+	const gate: ResolvedStmt = {
+		sql: `INSERT INTO Applied_Operations (Op_Id, Command_Name, Request_Hash, Device_Id, Status, Result_Json, Error_Text, Created_At_Ms, Applied_At_Ms, Updated_At_Ms) VALUES (?1, ?2, ?3, ?4, 'APPLIED', ?5, NULL, ?6, ?6, ?6);`,
+		args: [e.opId, e.commandName, e.requestHash, e.deviceId, stringifyJsonValue(built.storageResult), createdAtMs],
+	};
+	const log: ResolvedStmt = {
+		sql: `INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES (?1, ?2, ?3, ?4, ?5);`,
+		args: [e.opId, e.commandName, stableStringify(built.replicated), e.deviceId, createdAtMs],
+	};
+	// Índices: 0 = PRAGMA, 1 = gate, 2.. = trabajo y lecturas, último = log.
+	const stmts: ResolvedStmt[] = [
+		{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] },
+		gate,
+		...built.middle,
+		log,
+	];
+	return { stmts, built, offsetTrabajo: 2, idxLog: stmts.length - 1 };
 }

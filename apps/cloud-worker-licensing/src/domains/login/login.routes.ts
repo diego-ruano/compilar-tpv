@@ -115,7 +115,7 @@ loginRoutes.post("/turno-partido", cuerpo(S.setTurnoPartidoSchema), async (c) =>
 // tiene autoridad sobre esa fila es la Main, así que la nube no ofrece un segundo camino hacia ella.
 // Lo vigila `test/pinSiempreConFreno.test.ts`, que además exige el freno a toda ruta que mire un PIN.
 
-// Subida del setup inicial Main -> nube. Escritura DIRECTA en Turso (sin hub), porque la Main
+// Subida del setup inicial Main -> nube. Escritura DIRECTA en la base (sin hub), porque la Main
 // no está conectada por WebSocket; el hub la rechazaría con `main_offline`. Deja la nube con
 // las credenciales reales del admin para que el login de la Handy funcione.
 loginRoutes.post(
@@ -298,7 +298,7 @@ loginRoutes.post("/punch", cuerpo(S.punchSchema), async (c) => {
 
 	// La fecha del fichaje. Sale de una consulta (`date('now','localtime')`) que `tenantQuery`
 	// resuelve con la hora local de quien ficha (REV-03), que es la MISMA con la que el Durable
-	// Object fija la `Hora_Entrada` de la fila. Antes la ponía Turso, que corre en UTC: a las 00:30
+	// Object fija la `Hora_Entrada` de la fila. Antes la ponía la base, que corre en UTC: a las 00:30
 	// se guardaba un fichaje fechado ayer con una hora de hoy — una fila que se contradice a sí
 	// misma y que viaja así a la Main, al registro de jornada.
 	//

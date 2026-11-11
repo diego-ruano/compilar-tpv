@@ -28,32 +28,48 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 | `/v1/telemetry/*` | `domains/telemetry/` | Reenvío de eventos ([observabilidad.md](observabilidad.md)) |
 
 Cada dominio de negocio tiene `*.routes.ts` (rutas), `*.queries.ts` (lecturas), `*.commands.ts`
-(escrituras, que se aplican por el `TenantHub`) y `*.schemas.ts` (zod). Bindings (`wrangler.json`): el
-DO `TenantHub` (SQLite), R2 `tpv-images` (público por `r2.dev`) y `tpv-copias-control` (privado),
-`send_email` (`EMAIL`), los limitadores por IP `LIMITADOR_CLAIM` y `LIMITADOR_LICENCIA` (`lib/limitador.ts`)
-y el cron diario `0 7 * * *`.
+(escrituras, que se aplican por el `TenantHub`) y `*.schemas.ts` (zod). Bindings (`wrangler.json`): los
+DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (público por `r2.dev`) y `tpv-copias-control`
+(privado), `send_email` (`EMAIL`), los limitadores por IP `LIMITADOR_CLAIM` y `LIMITADOR_LICENCIA`
+(`lib/limitador.ts`) y el cron diario `0 7 * * *`.
 
 RI-46: los bindings de R2 son exclusivamente `IMAGES` y `COPIAS`. En desarrollo local, R2 y
-`EMAIL` se simulan; no llevan `remote: true`. Turso conserva la configuración externa existente.
+`EMAIL` se simulan; no llevan `remote: true`. La base central sigue siendo la Turso de siempre.
 La fecha de compatibilidad (`2026-05-29`) coincide con el runtime instalado; los tests reutilizan
 el mismo `wrangler.json` y los tipos se regeneran con `pnpm cf-typegen`.
 
 ## Dos bases, y sólo una se migra desde el código
 
-- **La base de cada tenant** (Turso, una por negocio) se construye con las migraciones de
-  `packages/database/migrations/`, registradas a mano en `src/server/tenantMigrations.ts`
-  ([esquema.md](esquema.md)). `ensureTenantMigrated` la deja al día en el DO y en el REST.
+- **La base de cada negocio** vive en el SQLite de su `TenantHub` y se construye con las migraciones
+  de `packages/database/migrations/`, registradas a mano en `src/server/tenantMigrations.ts`
+  ([esquema.md](esquema.md)). La crea el alta (`aprovisionar`) y el DO la pone al día la primera vez
+  que la toca tras un despliegue (`migrarBaseLocal`).
 - **La base central** (control-plane: licencias, tenants, dispositivos, emparejamientos, interruptores,
-  correo, releases…) **no cambia de estructura desde el código**: el worker lee y escribe filas, nunca
-  hace `CREATE`, `ALTER` ni `DROP`. Su estructura se cambia **a mano en Turso, antes de desplegar** el
-  worker que la use, y se refleja en `docs/sql/control-plane/esquema-actual.sql`, que es lo único que la
-  documenta y lo que cargan los tests (`test/helpers/planoDeControl.ts`).
+  correo, releases…) está en Turso y **no cambia de estructura desde el código**: el worker lee y
+  escribe filas, nunca hace `CREATE`, `ALTER` ni `DROP`. Su estructura se cambia **a mano en Turso,
+  antes de desplegar** el worker que la use, y se refleja en `docs/sql/control-plane/esquema-actual.sql`,
+  que es lo único que la documenta y lo que cargan los tests (`test/helpers/planoDeControl.ts`).
 
-### El token de la base del tenant
+### La base del negocio, dentro de su `TenantHub`
 
-Dura 7 días (`?expiration=7d`) y se rota cada 24 h (`server/db/tenantDb.ts`). **Que no se pueda rotar
-no es una caída**: si la API de plataforma de Turso falla, `resolveTenantDbCredentials` sigue con el
-token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos de 12 h.
+- **Las escrituras** van por el motor del DO (RPC `aplicar`, o el WebSocket de la Main). **Las
+  lecturas** de las rutas, por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de
+  libsql cuyas consultas viajan por RPC (`consultar`) al DO, que las ejecuta en su SQLite
+  (`tenantHub.sqlite.ts`). Un lote de lectura da una foto coherente: el SQL del DO es síncrono y nada
+  se intercala.
+- Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
+- **Jurisdicción `eu`** (`JURISDICCION_DO` en `wrangler.json`): los DO del negocio (`TenantHub` y
+  `AgendaWeb`) sólo nacen y guardan datos en la UE (`lib/hub.ts::espacioDelHub`). Cloudflare no deja
+  elegir país. El mismo nombre da otro objeto en otra jurisdicción: cambiarla es empezar de cero. En
+  local va vacía, porque workerd no implementa jurisdicciones.
+- **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
+  `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, 8 MB por fila y 10 GB por
+  objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
+  `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento. Lo comprueba
+  `test/sondaSqliteDo.test.ts`; lo que aún no lo cumple está en
+  [DO-01](../pendientes.md#do-01--listas-de-ids-con-un-parámetro-por-elemento).
+- **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos.
+- **Retirar un negocio** es borrar todo su DO (`borrarTodo`, `/v1/admin/pruebas/retirar`).
 
 ## Cómo se escribe una ruta
 
@@ -220,7 +236,7 @@ Turso no (más de 24 h en el plan Free, una base borrada, el propio proveedor):
   cifradas.
 - La retención la pone el ciclo de vida del bucket (35 días), por debajo de los 90 de
   `RETENCION_ENVIOS_MS`.
-- Sin `LICENSE_STORE_KEY` las DEK y los tokens de Turso de la copia no se pueden descifrar: ese secreto
+- Sin `LICENSE_STORE_KEY` las DEK de la copia no se pueden descifrar: ese secreto
   tiene que estar guardado fuera de Cloudflare.
 - ⚠️ **Restaurar cambia de base**: `turso db create <nueva> --from-db tpv-control --timestamp <RFC3339>`
   (PITR) o `--from-dump copia.sql`, un token nuevo (`TURSO_AUTH_TOKEN`), su URL en `TURSO_DATABASE_URL`
@@ -232,7 +248,7 @@ Turso no (más de 24 h en el plan Free, una base borrada, el propio proveedor):
 
 Van con `pnpm exec wrangler secret put <NOMBRE>` desde `apps/cloud-worker-licensing/`, nunca en
 `wrangler.json`. Los de licencias están en [licencias.md](licencias.md#secretos-del-worker); además:
-`TURSO_AUTH_TOKEN` y `TURSO_PLATFORM_TOKEN` (base central y API de plataforma), `PAIR_PEPPER`,
+`TURSO_AUTH_TOKEN` (base central), `PAIR_PEPPER`,
 `RELEASE_ADMIN_TOKEN` (publicar releases), `SENTRY_DSN`, `AXIOM_TOKEN`,
 `BETTERSTACK_HEARTBEAT_URL`, `BETTERSTACK_HEARTBEAT_COPIAS_URL` y, opcional, `HANDY_TOKEN_TTL_SECONDS`.
 Una ruta que depende de un secreto ausente responde 503 o 500 (fail-closed).
@@ -243,7 +259,8 @@ Producción se despliega desde GitHub con un tag `v<versión>`. El workflow comp
 en worker y escritorio, sube los mapas a Sentry y verifica un error real antes de desplegar los mismos
 bytes. Los tags `win7-v<versión>` publican únicamente el escritorio de Windows 7.
 
-El worker lleva el esquema del tenant compilado dentro: **con un cambio de esquema, se despliega antes
-de que los TPV escriban la columna nueva**, o la primera escritura se rechaza. Y cualquier tabla o
+El worker lleva el esquema del negocio compilado dentro: **con un cambio de esquema, se despliega antes
+de que los TPV escriban la columna nueva**, o la primera escritura se rechaza. Desplegar reinicia los DO,
+y cada uno migra su base la primera vez que la toca. Y cualquier tabla o
 columna nueva de la base central se crea a mano en Turso antes. Más en
 [publicar-version.md](../guias/publicar-version.md).

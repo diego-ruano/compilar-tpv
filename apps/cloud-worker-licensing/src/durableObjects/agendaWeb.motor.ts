@@ -4,10 +4,10 @@
 // guarda la reserva hasta que la Main la tiene y lleva los enlaces de cancelar.
 //
 // Reglas que no se rompen aquí:
-//   · **Nunca escribe en Turso** (ADR 0007). Lee la base del negocio y escribe sólo en su SQLite.
+//   · **Nunca escribe en la base del negocio** (ADR 0007). Lee la base del negocio y escribe sólo en su SQLite.
 //   · **Comprobar y apuntar van en el mismo bloque síncrono**, sin `await` en medio: lo que hace que
 //     dos altas a la vez para la misma mesa no salgan las dos (`agendaWeb.almacen.ts`). Lo que es
-//     asíncrono (Turso, los hashes) va antes.
+//     asíncrono (la base, los hashes) va antes.
 //   · **Sin estado en campos de instancia que importe**: lo que hay que recordar va en el SQLite
 //     (`estado`), como en el `TenantHub` (SYNC-16). `leer` es una costura para los tests, no estado.
 //   · Las respuestas no llevan datos personales de ninguna reserva.
@@ -85,17 +85,17 @@ import {
 	type ResultadoDeLaMain,
 } from "./agendaWeb.almacen";
 
-/** Reservas vivas por correo, contando las de Turso y las que esperan aquí. */
+/** Reservas vivas por correo, contando las de la base y las que esperan aquí. */
 export const MAX_RESERVAS_POR_CORREO = 10;
 /** Altas por negocio en 24 h: el control exacto detrás del limitador por IP. */
 export const MAX_ALTAS_DIA_NEGOCIO = 200;
 /** Cada cuánto despierta la alarma mientras haya algo guardado. */
 const CADA_ALARMA_MS = 60 * 60_000;
-/** Lo entregado a la Main que no se ve en Turso (ni contesta) en este tiempo se le vuelve a ofrecer. */
+/** Lo entregado a la Main que no se ve en la base (ni contesta) en este tiempo se le vuelve a ofrecer. */
 const REOFRECER_TRAS_MS = 60 * 60_000;
 /** Una petición que sigue sin recoger tanto tiempo es una anomalía que mirar (§9). */
 const ATASCADA_TRAS_MS = 72 * 60 * 60_000;
-// Lo que se pregunta a Turso para dar por hecho lo que espera: un alta, si la reserva está; una
+// Lo que se pregunta a la base para dar por hecho lo que espera: un alta, si la reserva está; una
 // cancelación, si está y ya no está por llegar (cancelada, sentada, terminada o no presentada). La
 // Main sólo cancela una que aún no ha llegado (`cancelar_desde_la_web`): con el cliente ya sentado la
 // deja, y esperar a verla cancelada sería volver a ofrecérsela cada hora.
@@ -112,12 +112,12 @@ const MAX_FALLIDAS_MIRADAS = 100;
 /** Cuántas peticiones se entregan a la Main de una vez. */
 const MAX_ENTREGA = 50;
 /**
- * Cuánto antes de empezar a leer Turso se mira si otra petición dio un alta por vista
- * (`agendaWeb.almacen.ts::Lectura`). Cubre que la lectura de Turso llegue con algo de retraso.
+ * Cuánto antes de empezar a leer la base se mira si otra petición dio un alta por vista
+ * (`agendaWeb.almacen.ts::Lectura`). Cubre que la lectura de la base llegue con algo de retraso.
  */
 const MARGEN_LECTURA_MS = 60_000;
 /**
- * Cuántas altas que esperan mira la alarma en Turso por consulta, y cuántas consultas hace cada vez.
+ * Cuántas altas que esperan mira la alarma en la base por consulta, y cuántas consultas hace cada vez.
  * Lo que no le dé tiempo lo sigue en la siguiente, desde donde lo dejó (`cursor_alarma`).
  */
 const MAX_RECONCILIAR = 500;
@@ -228,7 +228,7 @@ export function caducidadDelEnlace(dia: string, hora: string): number {
 /** La forma de un token de enlace: lo demás no se busca. */
 const TOKEN_RE = /^[A-Za-z0-9_-]{22}$/;
 
-/** Lo que se lee de Turso para decidir sobre un día. */
+/** Lo que se lee de la base para decidir sobre un día. */
 type DiaLeido = {
 	/** Cuándo se empezó a leer: de ahí sale `Lectura.vistasDesdeMs`. */
 	leidaMs: number;
@@ -238,18 +238,18 @@ type DiaLeido = {
 	mesas: MesaWeb[];
 	franjas: FranjaWeb[];
 	ocupaciones: Ocupacion[];
-	idsEnTurso: Set<string>;
+	idsEnLaBase: Set<string>;
 };
 
-/** El estado de una reserva en Turso, para el enlace de cancelar, con el correo de su cliente. */
-type ReservaEnTurso = { dia: string; hora: string; personas: number; id_mesa: string | null; estado: string; email: string | null };
+/** El estado de una reserva en la base, para el enlace de cancelar, con el correo de su cliente. */
+type ReservaEnLaBase = { dia: string; hora: string; personas: number; id_mesa: string | null; estado: string; email: string | null };
 
 export type Lector = <T>(tenantId: string, fn: (db: Client, ahora: string) => Promise<T>) => Promise<T>;
 
 export type EnviarCorreo = (correo: Correo) => Promise<ResultadoCorreo>;
 
 export class MotorAgendaWeb {
-	/** Cómo se lee Turso. Los tests lo cambian por un cliente sobre SQLite. */
+	/** Cómo se lee la base. Los tests lo cambian por un cliente sobre SQLite. */
 	leer: Lector;
 	/** Cómo se manda un correo al cliente. Los tests lo cambian por uno que apunta. */
 	enviarCorreo: EnviarCorreo;
@@ -295,7 +295,7 @@ export class MotorAgendaWeb {
 				mesasYFranjas(db),
 				ocupacionAlrededorDe(db, dia, ajustes.duracion),
 			]);
-			return { leidaMs, ahora, ajustes, cierres, mesas, franjas, ocupaciones: ocupacion.ocupaciones, idsEnTurso: ocupacion.ids };
+			return { leidaMs, ahora, ajustes, cierres, mesas, franjas, ocupaciones: ocupacion.ocupaciones, idsEnLaBase: ocupacion.ids };
 		});
 	}
 
@@ -308,9 +308,9 @@ export class MotorAgendaWeb {
 		return null;
 	}
 
-	/** Las mesas libres a esa hora, contando Turso y lo que espera aquí. Síncrono. */
+	/** Las mesas libres a esa hora, contando la base y lo que espera aquí. Síncrono. */
 	private mesasLibres(d: DiaLeido, dia: string, hora: string, personas: number): MesaWeb[] {
-		const lectura = { ids: d.idsEnTurso, vistasDesdeMs: d.leidaMs - MARGEN_LECTURA_MS };
+		const lectura = { ids: d.idsEnLaBase, vistasDesdeMs: d.leidaMs - MARGEN_LECTURA_MS };
 		const ocupado = [...d.ocupaciones, ...ocupacionPendiente(this.sql, dia, d.ajustes.duracion, lectura)];
 		const adecuadas = mesasAdecuadas(d.mesas, d.franjas, dia, hora, personas, d.ajustes);
 		return libres(adecuadas, ocupado, dia, hora, d.ajustes.duracion);
@@ -323,7 +323,7 @@ export class MotorAgendaWeb {
 		const motivo = this.motivo(d, p.dia, p.hora);
 		if (motivo) return motivo;
 
-		darPorVistas(this.sql, d.idsEnTurso, Date.now());
+		darPorVistas(this.sql, d.idsEnLaBase, Date.now());
 		const mesas = this.mesasLibres(d, p.dia, p.hora, p.personas).map((m) => m.id_mesa);
 		if (mesas.length) return { ok: true, mesas, alternativas: [] };
 
@@ -374,14 +374,14 @@ export class MotorAgendaWeb {
 				mesas,
 				franjas,
 				ocupaciones: ocupacion.ocupaciones,
-				idsEnTurso: ocupacion.ids,
+				idsEnLaBase: ocupacion.ids,
 			};
 			return { dia, delCorreo, nombres };
 		});
 		const d = leido.dia;
 
 		// ── Desde aquí, síncrono hasta apuntarla ──
-		// Otra vez: el mismo intento pudo apuntarse mientras éste leía Turso.
+		// Otra vez: el mismo intento pudo apuntarse mientras éste leía la base.
 		const repetidaAlLeer = this.repeticion(p.intento);
 		if (repetidaAlLeer) return repetidaAlLeer;
 
@@ -389,7 +389,7 @@ export class MotorAgendaWeb {
 		if (motivo) return motivo;
 
 		const ahoraMs = Date.now();
-		darPorVistas(this.sql, [...d.idsEnTurso, ...leido.delCorreo], ahoraMs);
+		darPorVistas(this.sql, [...d.idsEnLaBase, ...leido.delCorreo], ahoraMs);
 
 		const libres = this.mesasLibres(d, alta.dia_ymd, alta.hora, alta.personas);
 		const elegida = automatica ? laMasAjustada(libres) : (libres.find((m) => m.id_mesa === alta.id_mesa) ?? null);
@@ -462,12 +462,12 @@ export class MotorAgendaWeb {
 		const idReserva = await this.reservaDelToken(p.token);
 		if (!idReserva) return rechazo("enlace_no_valido");
 
-		const { leidaMs, ahora, enTurso, numero } = await this.leerReserva(p.tenantId, idReserva);
+		const { leidaMs, ahora, enLaBase, numero } = await this.leerReserva(p.tenantId, idReserva);
 		const alta = peticion(this.sql, "alta", idReserva);
-		const datos = enTurso ?? (alta ? { dia: alta.dia_ymd, hora: alta.hora, personas: alta.comensales, id_mesa: alta.id_mesa } : null);
+		const datos = enLaBase ?? (alta ? { dia: alta.dia_ymd, hora: alta.hora, personas: alta.comensales, id_mesa: alta.id_mesa } : null);
 		if (!datos) return rechazo("enlace_no_valido");
 
-		const estado = this.estadoPublico(idReserva, enTurso, ahora, datos, leidaMs);
+		const estado = this.estadoPublico(idReserva, enLaBase, ahora, datos, leidaMs);
 		return {
 			ok: true,
 			dia: datos.dia,
@@ -490,27 +490,27 @@ export class MotorAgendaWeb {
 		const idReserva = await this.reservaDelToken(p.token);
 		if (!idReserva) return rechazo("enlace_no_valido");
 
-		const { leidaMs, ahora, enTurso, numero } = await this.leerReserva(p.tenantId, idReserva);
+		const { leidaMs, ahora, enLaBase, numero } = await this.leerReserva(p.tenantId, idReserva);
 		// ── Síncrono hasta el final ──
 		const ahoraMs = Date.now();
-		if (enTurso) darPorVistas(this.sql, [idReserva], ahoraMs);
+		if (enLaBase) darPorVistas(this.sql, [idReserva], ahoraMs);
 		const alta = peticion(this.sql, "alta", idReserva);
-		const datos = enTurso ?? (alta ? { dia: alta.dia_ymd, hora: alta.hora, personas: alta.comensales, id_mesa: alta.id_mesa } : null);
+		const datos = enLaBase ?? (alta ? { dia: alta.dia_ymd, hora: alta.hora, personas: alta.comensales, id_mesa: alta.id_mesa } : null);
 		if (!datos) return rechazo("enlace_no_valido");
 
-		const estado = this.estadoPublico(idReserva, enTurso, ahora, datos, leidaMs);
+		const estado = this.estadoPublico(idReserva, enLaBase, ahora, datos, leidaMs);
 		// Ya cancelada: ya se le dijo, no se le vuelve a escribir.
 		if (estado === "cancelada") return { ok: true, aviso: null };
 		if (estado === "pasada") return rechazo("reserva_no_cancelable");
 
-		// A quién decírselo: al cliente de la reserva en Turso o, si aún no está, al correo del alta.
+		// A quién decírselo: al cliente de la reserva en la base o, si aún no está, al correo del alta.
 		// Antes de anularla, que se lleva los datos del alta.
-		const email = enTurso?.email ?? correoDelAlta(alta);
+		const email = enLaBase?.email ?? correoDelAlta(alta);
 		const aviso: AvisoDeCancelacion | null = email
 			? { id_reserva: idReserva, email, dia: datos.dia, hora: datos.hora, personas: datos.personas, mesa: numero }
 			: null;
 
-		if (!enTurso && anularAlta(this.sql, idReserva, ahoraMs)) return { ok: true, aviso };
+		if (!enLaBase && anularAlta(this.sql, idReserva, ahoraMs)) return { ok: true, aviso };
 		apuntarCancelacion(this.sql, {
 			id_peticion: nuevoId(),
 			id_reserva: idReserva,
@@ -528,20 +528,20 @@ export class MotorAgendaWeb {
 
 	/**
 	 * Lo que la Main tiene que registrar, por orden de llegada; pasa a `entregada`. Antes se da por
-	 * visto lo que ya está en Turso, para no volver a entregarlo. Si Turso no contesta se entrega
+	 * visto lo que ya está en la base, para no volver a entregarlo. Si la base no contesta se entrega
 	 * igual: registrarlo dos veces no lo duplica.
 	 */
 	async pendientes(p: { tenantId: string }): Promise<{ ok: true } & PendientesReservaWebDto> {
 		recordarNegocio(this.sql, p.tenantId);
 		try {
-			await this.reconciliarConTurso();
+			await this.reconciliarConLaBase();
 		} catch (e: any) {
-			console.warn("[agenda-web] no se ha podido mirar Turso antes de entregar:", String(e?.message || e));
+			console.warn("[agenda-web] no se ha podido mirar la base antes de entregar:", String(e?.message || e));
 		}
 		const { peticiones, hayMas } = entregarPendientes(this.sql, MAX_ENTREGA, Date.now());
 		if (peticiones.length) {
 			this.anotar({ event: "reserva_web_entregada", tenant_id: p.tenantId, cuantas: peticiones.length });
-			// La alarma es la que las vuelve a ofrecer si no llegan a Turso.
+			// La alarma es la que las vuelve a ofrecer si no llegan a la base.
 			await this.asegurarAlarma();
 		}
 		return { ok: true, peticiones: peticiones.map(paraLaMain), hay_mas: hayMas };
@@ -651,27 +651,27 @@ export class MotorAgendaWeb {
 	/** Lo que ve quien abre el enlace. Síncrono. */
 	private estadoPublico(
 		idReserva: string,
-		enTurso: ReservaEnTurso | null,
+		enLaBase: ReservaEnLaBase | null,
 		ahora: string,
 		datos: { dia: string; hora: string },
 		leidaMs: number,
 	): EstadoPublico {
 		const alta = peticion(this.sql, "alta", idReserva);
-		// Que no esté en esta lectura de Turso sólo quiere decir que se borró si se dio por vista antes
+		// Que no esté en esta lectura de la base sólo quiere decir que se borró si se dio por vista antes
 		// de empezar a leerla: si fue mientras, la lectura es simplemente más vieja (`Lectura`).
 		const borrada =
-			!enTurso && alta?.estado === "vista" && Number(alta.cerrada_ms ?? 0) < leidaMs - MARGEN_LECTURA_MS;
+			!enLaBase && alta?.estado === "vista" && Number(alta.cerrada_ms ?? 0) < leidaMs - MARGEN_LECTURA_MS;
 		const cancelada =
-			enTurso?.estado === "CANCELADA" ||
+			enLaBase?.estado === "CANCELADA" ||
 			alta?.estado === "anulada" ||
 			// La Main no pudo registrarla: al cliente se le avisa por correo y deja de valer.
 			alta?.estado === "fallida" ||
-			// Estuvo en Turso y ya no está: el restaurante la borró, que es cancelarla.
+			// Estuvo en la base y ya no está: el restaurante la borró, que es cancelarla.
 			borrada ||
 			peticion(this.sql, "cancelacion", idReserva) !== null;
 		if (cancelada) return "cancelada";
 		// Sentados (ACTIVA), terminada o no se presentaron: ya no es una reserva por venir.
-		if (enTurso && enTurso.estado !== "PROXIMA") return "pasada";
+		if (enLaBase && enLaBase.estado !== "PROXIMA") return "pasada";
 		// Hasta la hora de la reserva, en la hora del negocio.
 		if (intervalo(datos.dia, datos.hora, 0).inicio <= ahora) return "pasada";
 		return "confirmada";
@@ -686,7 +686,7 @@ export class MotorAgendaWeb {
 	private async leerReserva(
 		tenantId: string,
 		idReserva: string,
-	): Promise<{ leidaMs: number; ahora: string; enTurso: ReservaEnTurso | null; numero: string | null }> {
+	): Promise<{ leidaMs: number; ahora: string; enLaBase: ReservaEnLaBase | null; numero: string | null }> {
 		const leidaMs = Date.now();
 		return this.leer(tenantId, async (db, ahora) => {
 			const rs = await db.execute({
@@ -697,7 +697,7 @@ export class MotorAgendaWeb {
 				args: [idReserva],
 			});
 			const r: any = rs.rows?.[0];
-			const enTurso: ReservaEnTurso | null = r
+			const enLaBase: ReservaEnLaBase | null = r
 				? {
 						dia: String(r.dia),
 						hora: String(r.hora),
@@ -707,9 +707,9 @@ export class MotorAgendaWeb {
 						email: typeof r.email === "string" ? r.email : null,
 					}
 				: null;
-			const idMesa = enTurso?.id_mesa ?? peticion(this.sql, "alta", idReserva)?.id_mesa ?? null;
+			const idMesa = enLaBase?.id_mesa ?? peticion(this.sql, "alta", idReserva)?.id_mesa ?? null;
 			const numero = idMesa ? await numeroDeMesa(db, idMesa) : null;
-			return { leidaMs, ahora, enTurso, numero };
+			return { leidaMs, ahora, enLaBase, numero };
 		});
 	}
 
@@ -721,18 +721,18 @@ export class MotorAgendaWeb {
 	}
 
 	async alarm(): Promise<void> {
-		let turso = true;
+		let baseMirada = true;
 		try {
-			await this.reconciliarConTurso();
+			await this.reconciliarConLaBase();
 		} catch (e: any) {
-			// Sin Turso se purga igual; lo que espera se vuelve a mirar en la próxima.
-			turso = false;
-			console.warn("[agenda-web] la alarma no ha podido mirar Turso:", String(e?.message || e));
+			// Sin la base se purga igual; lo que espera se vuelve a mirar en la próxima.
+			baseMirada = false;
+			console.warn("[agenda-web] la alarma no ha podido mirar la base:", String(e?.message || e));
 		}
 		const tenantId = negocioRecordado(this.sql);
 		const ahoraMs = Date.now();
-		// Sólo con lo visto en Turso al día: sin él, se volvería a ofrecer lo que ya llegó.
-		if (turso && tenantId) {
+		// Sólo con lo visto en la base al día: sin él, se volvería a ofrecer lo que ya llegó.
+		if (baseMirada && tenantId) {
 			const reofrecidas = reofrecer(this.sql, ahoraMs - REOFRECER_TRAS_MS);
 			if (reofrecidas > 0) {
 				this.anotar({ event: "reserva_web_reofrecida", tenant_id: tenantId, cuantas: reofrecidas });
@@ -756,11 +756,11 @@ export class MotorAgendaWeb {
 	}
 
 	/**
-	 * Las altas que esperan y ya están en Turso pasan a `vista` y olvidan sus datos personales, aunque
+	 * Las altas que esperan y ya están en la base pasan a `vista` y olvidan sus datos personales, aunque
 	 * nadie vuelva a preguntar por ese día. Sin esto, una reserva cuyo día nadie consulta guardaría
 	 * nombre, correo y teléfono hasta que se purgase.
 	 */
-	private async reconciliarConTurso(): Promise<void> {
+	private async reconciliarConLaBase(): Promise<void> {
 		const tenantId = negocioRecordado(this.sql);
 		if (!tenantId) return;
 		const vistas = await this.reconciliarTipo(tenantId, "alta", SQL_ESTAN_EN_TURSO, darPorVistas);
@@ -770,12 +770,12 @@ export class MotorAgendaWeb {
 
 	/**
 	 * Por lotes y avanzando aunque un lote no encuentre nada: si las más viejas no llegan nunca a
-	 * Turso, no pueden tapar a las de detrás. Lo que no da tiempo sigue en la siguiente vez.
+	 * la base, no pueden tapar a las de detrás. Lo que no da tiempo sigue en la siguiente vez.
 	 */
 	private async reconciliarTipo(
 		tenantId: string,
 		tipo: "alta" | "cancelacion",
-		sqlTurso: string,
+		sqlDeLaBase: string,
 		cerrar: (sql: SqlStorage, ids: string[], ahoraMs: number) => number,
 	): Promise<number> {
 		let cerradas = 0;
@@ -787,11 +787,11 @@ export class MotorAgendaWeb {
 				break;
 			}
 			const ids = grupo.map((a) => a.id_reserva);
-			const enTurso = await this.leer(tenantId, async (db) => {
-				const rs = await db.execute({ sql: sqlTurso, args: [JSON.stringify(ids)] });
+			const enLaBase = await this.leer(tenantId, async (db) => {
+				const rs = await db.execute({ sql: sqlDeLaBase, args: [JSON.stringify(ids)] });
 				return (rs.rows ?? []).map((r: any) => String(r.id));
 			});
-			cerradas += cerrar(this.sql, enTurso, Date.now());
+			cerradas += cerrar(this.sql, enLaBase, Date.now());
 			// Un lote incompleto es el último: la siguiente vez se empieza otra vez por lo más viejo.
 			cursor = grupo.length < MAX_RECONCILIAR ? null : grupo[grupo.length - 1];
 			if (!cursor) break;

@@ -11,7 +11,7 @@ encadenado. Esta rama no remite a la AEAT: Veri\*factu está en las ramas `con-v
 |---|---|---|
 | Aplicación (Main y Handy) | Tauri 2, React 19, TypeScript, Vite | `apps/tpv-main/` |
 | Backend local | Rust, arquitectura hexagonal, SQLite (rusqlite) | `crates/*`, `apps/tpv-main/src-tauri/` |
-| Nube | Cloudflare Worker (Hono), Durable Objects, Turso, R2 | `apps/cloud-worker-licensing/` (desplegado como `tpv-api`) |
+| Nube | Cloudflare Worker (Hono), Durable Objects (con la base de cada negocio), Turso (base central), R2 | `apps/cloud-worker-licensing/` (desplegado como `tpv-api`) |
 | Widget de reservas web | React 19, Vite, servido por el worker | `apps/reservas-web/` |
 | Código compartido | Esquema SQL, tipos generados, cliente de invoke, colores y plano de mesas | `packages/*` |
 

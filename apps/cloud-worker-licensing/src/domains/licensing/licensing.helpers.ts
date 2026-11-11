@@ -504,9 +504,8 @@ async function ensureTenantInitialAdmin(client: Client): Promise<void> {
 /**
  * Garantiza que el negocio tiene su base con el esquema aplicado y el admin inicial.
  *
- * prueba/sqlite-do: la base es el SQLite de su TenantHub. Aprovisionar es pedirle que cree su
- * esquema (idempotente: si ya lo tiene, sólo aplica lo pendiente) y sembrar el administrador. Ya no
- * se crea nada en Turso ni se guarda nada en `tenant_databases`.
+ * La base es el SQLite de su TenantHub. Aprovisionar es pedirle que cree su esquema (idempotente:
+ * si ya lo tiene, sólo aplica lo pendiente) y sembrar el administrador.
  */
 export async function provisionTenantDatabase(_dbi: Client, env: Env, tenantId: string) {
 	const hub = hubDe(env, tenantId);

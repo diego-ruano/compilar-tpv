@@ -3,7 +3,7 @@
 // PROD-06 · Interruptores remotos de emergencia.
 //
 // Si una tarea automática se pone a hacer daño en los equipos de los clientes —la reparación por
-// estado pisa filas buenas, el volcado satura Turso—, la
+// estado pisa filas buenas, el volcado satura la base—, la
 // única forma de pararla era publicar una versión y esperar a que cada TPV se actualizara. Esto
 // deja apagarla desde aquí, en minutos, con una fila en la tabla `interruptores` de la base
 // central (su estructura está en `docs/sql/control-plane/esquema-actual.sql`).
@@ -12,7 +12,7 @@
 //
 //   · **La lista es cerrada** (`Interruptor` en `tpv-contracts`) y la valida el zod de abajo, con
 //     drift-guard contra el contrato. La tabla no lleva `CHECK` a propósito: añadir un interruptor
-//     no puede obligar a rehacerla en Turso.
+//     no puede obligar a rehacerla en la base.
 //   · **Todo interruptor caduca.** `expires_at_ms` es obligatorio: uno olvidado se enciende solo.
 //     Si hace falta más tiempo, se vuelve a apagar.
 //   · **Si no se puede leer, todo está encendido.** Esto es un freno de mano, no una dependencia:

@@ -196,7 +196,7 @@ export async function reservarIntento(
 }
 
 /**
- * Escritura DIRECTA del setup inicial en la Turso del tenant (mismo UPDATE que aplica el
+ * Escritura DIRECTA del setup inicial en la base del negocio (mismo UPDATE que aplica el
  * comando `complete_initial_setup` vía el hub). Se usa para la SUBIDA desde la Main, que no
  * está conectada por WebSocket: por eso no pasa por el Durable Object (evita el `main_offline`).
  */

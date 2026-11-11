@@ -1,9 +1,9 @@
 # Sincronización: Main ↔ nube ↔ Handy
 
 La Main es **Local-First**: vende contra su SQLite haya red o no. Cuando hay conexión replica sus
-escrituras a la nube (un Durable Object `TenantHub` por negocio, sobre una base Turso por negocio) y
-recibe las de las Handy. La **Handy no tiene base local**: lee por REST del worker y escribe por REST;
-sin nube no opera.
+escrituras a la nube (un Durable Object `TenantHub` por negocio, que guarda la base del negocio en su
+propio SQLite) y recibe las de las Handy. La **Handy no tiene base local**: lee y escribe por REST
+del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no opera.
 
 ```
 ┌──────────────────────┐        WebSocket /ws          ┌────────────────────────────┐
@@ -12,14 +12,12 @@ sin nube no opera.
 │ _Sync_Outbox         │                               │   (Applied_Operations)     │
 │ _Sync_Applied_Ops    │   REST /v1/sync/changes       │ · cola de entrada          │
 │ _Sync_State          │◄── catch-up ──────────────────│ · difunde a los demás      │
-└──────────────────────┘                               └─────────────┬──────────────┘
-┌──────────────────────┐   REST /v1/<dominio>                        │
-│ HANDY (sin base)     │── escrituras ──► lib/hub.ts → RPC aplicar
-│ lee por REST         │◄── change (WS): vuelve a pedir lo que cambió
-└──────────────────────┘                                             ▼
-                                                           ┌──────────────────┐
-                                                           │ Turso del tenant │
-                                                           └──────────────────┘
+└──────────────────────┘                               │ · la base del negocio      │
+┌──────────────────────┐   REST /v1/<dominio>          │   (su SQLite)              │
+│ HANDY (sin base)     │── escribe: RPC aplicar ──────►│                            │
+│ lee por REST         │── lee: RPC consultar ────────►│                            │
+│                      │◄── change (WS) ───────────────│                            │
+└──────────────────────┘                               └────────────────────────────┘
 ```
 
 ---
@@ -33,7 +31,7 @@ sin nube no opera.
 | Reparación por estado | `crates/tpv-infra-sqlite/src/sync_reparacion.rs` | Reencola la fila tal como está ahora |
 | Casos de uso y comandos | `tpv-application/src/use_cases/sync.rs` · `commands/sync.rs` | La interfaz Tauri |
 | Réplica de la Main | `src-tauri/src/replicacion.rs` · `tpv-application/src/use_cases/replicacion.rs` | Transporte nativo TLS, catch-up, outbox, confirmaciones, recuperación y estado de conexión. La UI observa `sync:estado` y `sync:cambio`, sin SQL ni credenciales (RI-31/RI-57) |
-| Reservas web | `src-tauri/src/reservas_web.rs` · `tpv-application/src/use_cases/reservas_web_recogida.rs` | Lo que se reserva desde la web espera en la agenda del worker (`AgendaWeb`), no en Turso. El motor pide recogerlo al conectar, al terminar una recuperación y cuando el `TenantHub` manda `{"type":"reservas_web"}`; la recogida va por REST en segundo plano y registra con el outbox ([plan](../estudios/reservas-web.md#54-recoger-las-reservas-web)) |
+| Reservas web | `src-tauri/src/reservas_web.rs` · `tpv-application/src/use_cases/reservas_web_recogida.rs` | Lo que se reserva desde la web espera en la agenda del worker (`AgendaWeb`), no en la base del negocio. El motor pide recogerlo al conectar, al terminar una recuperación y cuando el `TenantHub` manda `{"type":"reservas_web"}`; la recogida va por REST en segundo plano y registra con el outbox ([plan](../estudios/reservas-web.md#54-recoger-las-reservas-web)) |
 | Socket de la Handy | `src-tauri/src/socket_handy.rs` · `tpv-application/src/use_cases/presencia_handy.rs` | Servicio nativo de presencia y avisos, independiente de React. La UI observa `handy:estado` y `handy:cambio` |
 | Transporte común | `tpv-infra-http/src/websocket.rs` · `tpv-application/src/use_cases/saludo_socket.rs` | TLS, latido, buffers y tiempos acotados; saludo firmado y rol confirmado. Main y Handy conservan casos de uso distintos |
 | Qué refrescar | `tpv-application/src/use_cases/avisos_nube.rs` · `src/shared/lib/syncStatements.ts` | Rust deriva tablas e IDs sin exponer SQL; React los traduce a sus cachés y al ticket abierto |
@@ -42,10 +40,11 @@ sin nube no opera.
 | …el transporte | `tenantHub.rutas.ts`, `tenantHub.rpc.ts` | Upgrade WebSocket y contratos de aplicar, revocar y avisar |
 | …el saludo | `tenantHub.identidad.ts` | Quién llama y qué puede hacer |
 | …la cola | `tenantHub.cola.ts` | `_Cola_Entrada`, `_Cola_Estado`, `_Cola_Muerta` |
-| …el turno del log | `tenantHub.turno.ts` | La escritura en curso (`_Escritura_En_Curso`), cómo se resuelve una confirmación incierta y el veto de una operación |
-| …el lote | `tenantHub.lote.ts`, `tenantHub.sentencias.ts`, `tenantHub.envelope.ts` | De un comando a sentencias; el sobre que se guarda en `Sync_Changes` |
+| …la base del negocio | `tenantHub.sqlite.ts` | El `Client` de libsql sobre el SQLite del DO, el lote atómico (`loteEnBruto`) y las migraciones (`migrarBaseLocal`) |
+| …el lote | `tenantHub.lote.ts`, `tenantHub.sentencias.ts`, `tenantHub.envelope.ts` | De un comando a sentencias (`loteDe`); el sobre que se guarda en `Sync_Changes` |
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
-| …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido; si la base lo rechazaría igual otra vez |
+| …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |
+| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` cuyas consultas van por RPC (`consultar`) al `TenantHub` del negocio |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar`, `/verificar-claves`, `/salud` |
 
@@ -111,11 +110,13 @@ pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esp
   última» es la de clave mayor. Donde la hay, «lo más reciente» se ordena por ella.
 - **Los agregados derivados se re-derivan en el SQL** (`Total_Comanda = SUM(…)`), no se escriben como
   literal: tienen dos escritores (Main por el outbox, Handy por el DO) y sólo convergen así.
-- **Las FK están activas en los dos motores**: la Main las activa en su conexión y Turso las trae
-  activadas en cada una (comprobado con el cliente HTTP del DO, RI-06). Las cascadas (`ON DELETE
-  CASCADE / SET NULL`) las ejecuta cada motor al aplicar, y el `defer_foreign_keys` del lote aplaza la
-  comprobación al `COMMIT`. Un `PRAGMA foreign_keys` suelto en el DO no serviría: el cliente HTTP abre
-  un stream por llamada y el ajuste es por conexión.
+- **Las FK están activas en los dos motores**: la Main las activa en su conexión y el SQLite del DO
+  las trae activadas (RI-06). Las cascadas (`ON DELETE CASCADE / SET NULL`) las ejecuta cada motor al
+  aplicar. La Main confirma cada transacción con `defer_foreign_keys`, así que una operación correcta
+  puede escribir una hija antes que su padre, y el lote la sube con el mismo `PRAGMA`. En el DO, una
+  FK aplazada que llega rota al `COMMIT` **resetea el objeto entero** en vez de lanzar, así que
+  `loteEnBruto` prueba primero sin aplazar y, sólo si falla por una FK, repite aplazando y mira
+  `PRAGMA foreign_key_check` antes de cerrar: una FK rota de verdad sale como un error normal.
 - Las tablas que sólo usa la nube (`Applied_Operations`, `Sync_Changes`, `Sync_Main_Checkpoints`) están
   en el esquema único, así que existen también, vacías, en la Main. Un volcado o una comparación que
   recorra tablas **se las salta**, igual que todo lo que empieza por `_`.
@@ -135,7 +136,7 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   son permanentes.
 - **Las lecturas de la Handy también**: `lib/tenantClient.ts::tenantQuery`, por donde pasan todas,
   fija `'now'` con `X-Client-Now` usando la misma función que el DO (`rewriteNowInSql`). Sin cabecera
-  manda el reloj de Turso (UTC). El cliente de Rust pone `x-client-now` en todas las peticiones, también
+  manda el reloj de la nube (UTC). El cliente de Rust pone `x-client-now` en todas las peticiones, también
   en los GET. Lo cubre `test/lecturasEnHoraLocal.test.ts`; el arnés de contrato no lo ve, porque corre
   las dos implementaciones en la misma zona horaria.
 - Un `'localtime'` aplicado a un valor (`datetime(Fecha,'localtime')`) depende de quien lo ejecuta. En
@@ -229,7 +230,7 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   aplicar el futuro antes que el pasado. Las Handy esperan (`main_volcando`) también mientras la cola
   no esté vacía, aunque la Main ya haya mandado su `recovery_ready`.
 - El DO la drena por `alarm` en lotes de 50 (`applyBatchIdempotent`, que filtra antes las ya
-  aplicadas). **Se aplica en Turso primero y se borra de la cola después.** El `alarm` captura sus
+  aplicadas). **Se aplica en la base primero y se borra de la cola después.** El `alarm` captura sus
   excepciones y se reprograma a mano, y para si una vuelta no reduce la cola.
 - **De quién es la culpa cuando falla** (`aplicarLote`):
   - un rechazo permanente se aparta en el acto y la cola sigue;
@@ -237,8 +238,6 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
     y se espera 5 s, 30 s, 2 min, 5 min, 15 min (la escalera vive en `_Cola_Estado`); `encolar` adelanta
     la alarma si la Main vuelve a escribir;
   - si contesta, la culpa es de esa operación: un intento más (cinco y se aparta) y el lote se para ahí.
-- **Un error de credenciales sale del drenado** para que `withTenantDbRetry` rote el token. Por eso el
-  test no sustituye `withTenantDbRetry`: sustituye el resolutor de credenciales.
 - **`_Cola_Muerta` es una bandeja de salida.** Cada fila espera hasta que una Main la acuse
   (`cola_apartada` → `cola_apartada_ack`; sólo al rol `tpv`, en cada conexión). Al acusarla, la Main la
   pone en cuarentena (`outbox_mark_failed`, repetible: `ya_apartada`), suelta su marca de encolada y
@@ -323,60 +322,26 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   que existiera la marca (el porqué, en `sync.routes.ts`). Una Main que sólo ha estado sin conexión no
   queda por debajo: mientras reporta, el suelo no pasa de su checkpoint, y cuando deja de contar, sin
   otra Main activa no se purga nada. Quien sí puede quedar debajo es una base anterior (una copia
-  restaurada). `Applied_Operations`, por antigüedad (7 días) y con las condiciones de «El orden de la
-  difusión».
+  restaurada). `Applied_Operations`, por antigüedad (7 días) y nunca con la cola sin vaciar: si el DO
+  se apagó entre aplicar un lote y sacarlo de la cola, su gate es lo que impide que el drenado
+  siguiente lo aplique otra vez.
 
 ### El orden de la difusión (AUD-18)
 
-- El DO confirma en Turso y difunde **de una escritura en una** (el turno del log, `enTurnoDelLog`),
-  también el lote de la cola. Turso numera al confirmar y la difusión va justo después, antes de soltar
-  el turno: sale en orden de `Seq`, sin suponer que sea contiguo. El WebSocket entrega en orden, y el
+- El DO confirma y difunde **de una escritura en una** (el turno del log, `enTurnoDelLog`), también
+  el lote de la cola. La base numera al confirmar y la difusión va justo después, antes de soltar el
+  turno: sale en orden de `Seq`, sin suponer que sea contiguo. El WebSocket entrega en orden, y el
   catch-up de cada conexión de la Main va después de autenticarse: lo confirmado antes le llega por
   REST y lo posterior por el socket.
-- Cada petición del DO a la base del tenant lleva un plazo de 15 s (`fetchConPlazo`,
-  `PLAZO_TURSO_MS`) que cubre también el cuerpo de la respuesta: el turno nunca se queda cogido. Las
-  migraciones, que no van en el turno, no lo llevan.
-- **Una confirmación incierta** —el transporte se cortó después de enviar, venció el plazo, la
-  respuesta no se deja leer— se resuelve antes de dejar pasar nada posterior. Cada escritura suelta se
-  anota en el SQLite del DO antes de mandarla (`_Escritura_En_Curso`) y se olvida al saber cómo acabó;
-  una nota que sigue ahí la resuelve primero el turno siguiente, también si el DO se apagó entre medias.
-  Se repite por su `Op_Id`: el registro de idempotencia (`Applied_Operations`) y el log
-  (`Sync_Changes`) van en el mismo batch atómico, así que si ya estaba confirmada la repetición choca y
-  se difunde la suya, y si no, se confirma ahora (y la original, si llega tarde, es la que choca).
-  Nunca hay dos `Seq` para la misma operación.
-- **Sólo una respuesta de la base la resuelve, nunca el tiempo**: abortar una petición no impide que
-  Turso la confirme después. Si el reenvío tampoco tiene respuesta, la nota se queda, las Main se
-  desconectan (4004, por `sessionGone`) para ponerse al día por el catch-up y no se confirma ni se
-  difunde nada posterior del negocio: quien escribe recibe `escritura_en_duda`, un fallo pasajero, y lo
-  vuelve a intentar. El reenvío se repite en los turnos siguientes con una espera que crece desde el
-  último (en el acto, y luego 1, 2, 4… s hasta un minuto: `esperaDeReenvio`); mientras se espera no
-  se manda nada ni se desconecta a nadie. Un rechazo de credenciales no cuenta como envío.
-- Si el reenvío lo rechaza la propia base (`rechazoDeterminista`: una restricción, una tabla o columna
-  que no existe, un 4xx que no es de credenciales), la original podría seguir en vuelo y entrar más
-  tarde, cuando otra escritura hubiera cambiado lo que la hacía fallar. Se **veta** su `Op_Id`
-  (`vetarOperacion`): entra en `Applied_Operations` como `FAILED`, con el rechazo como motivo, y
-  cualquier copia que llegue después choca con él. Si el veto entra, la operación no se aplicó ni se
-  aplicará, y su reintento acaba con ese mismo rechazo; si choca, es que estaba aplicada, y se difunde.
-- En el primer envío, ese mismo rechazo es definitivo sin veto: no hay otra copia en vuelo.
-- El lote de la cola no necesita nota: sus operaciones siguen en `_Cola_Entrada` hasta aplicarse, la
-  cola no vacía congela todo lo demás (también dentro del turno) y el drenado siguiente las repite por
-  `Op_Id` y difunde, en orden, las que ya estaban confirmadas. Si el lote se confirma y el `Seq` de
-  alguna no se deja leer (ni en la respuesta ni en el log), no se difunde ninguna ni sale ninguna de la
-  cola: es una confirmación incierta, y el drenado siguiente las encuentra aplicadas y las difunde en
-  orden. Una escritura en duda no se le imputa a ninguna operación de la cola: se espera como con la
-  base caída.
-- Antes de **apartar** una operación de la cola (REV-04) se veta igual: un intento suyo pudo quedarse
-  sin respuesta y confirmarse con ella ya apartada. Si el veto choca porque estaba aplicada, se difunde
-  y sale de la cola como aplicada; si no se sabe cómo acabó, se queda en la cola sin gastar el intento.
-- **El gate y el veto sólo cierran el paso mientras su fila existe**, así que la purga de
-  `Applied_Operations` no puede adelantarse a la última copia que pueda llegar. **Supuesto, muy
-  conservador: ninguna petición a Turso sigue en vuelo un día después de enviarse**
-  (`VIDA_MAXIMA_DE_UN_ENVIO_MS`; el cliente la aborta a los 15 s, pero abortarla no prueba que no se
-  ejecute). La purga va en el turno del log, así que antes se resuelve la escritura en duda (si no se
-  puede, no se purga); no corre con la cola sin vaciar; ni hasta un día después del último envío sin
-  respuesta (`_Envio_Sin_Respuesta`: cada turno que encuentra una escritura en duda, cada reenvío sin
-  respuesta y cada lote de la cola antes de mandarlo, por si el DO se apaga con él en vuelo); y nunca
-  retira una fila de menos de un día, aunque se acorte el plazo de 7.
+- El turno hace falta aunque el SQL del DO sea síncrono: entre confirmar y difundir hay `await`, y por
+  ahí puede colarse otra escritura.
+- **No hay confirmaciones inciertas.** La base está dentro del DO: el lote entra entero o se deshace
+  en el acto (`transactionSync`), y si el DO se apaga a medias se deshace solo. Lo único que puede
+  perderse es la difusión de algo ya confirmado, si el DO se apaga justo después. Las Main lo traen
+  por el catch-up al reconectar (el apagado cierra todos los sockets); las Handy vuelven a pedir lo que
+  ven al reconectar; y el emisor que reintenta recibe el resultado guardado y provoca otra difusión
+  (SYNC-03). El drenado de la cola difunde otra vez, en orden y antes que lo nuevo, lo que encuentra
+  ya aplicado.
 
 ### Reparar una divergencia (SYNC-22, SYNC-24, SYNC-25)
 
@@ -428,42 +393,39 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
    cerrados: `liveSocketsFor()` filtra por `readyState` e `isMainConnected(except)` excluye el que se
    está cerrando.
 3. **Nada que mantenga vivo el DO**: ni `setInterval` ni `setTimeout`. El único `alarm` es el de la cola
-   de entrada, y sólo mientras hay cola o está en pausa. El único temporizador es el plazo de una
-   petición a Turso (`fetchConPlazo`), y vive lo que su petición: se quita al leer la respuesta entera,
-   al fallar o al cancelarse.
-4. **Las cachés de instancia se pierden al hibernar, y eso no cuesta nada**: la conexión a la base del
-   tenant (`TENANT_DB_CACHE_TTL_MS`), `lastSeenPushedAtMs`, `lastPurgeAtMs`. Se quedan como campos a
-   propósito. Lo mismo el turno del log (`turnoDelLog`): es lo que está en vuelo, y el DO sólo hiberna
-   sin nada en vuelo. Lo que sí tiene que sobrevivir, una escritura que no se sabe si entró, va en
-   `_Escritura_En_Curso`.
+   de entrada, y sólo mientras hay cola o está en pausa.
+4. **Las cachés de instancia se pierden al hibernar, y eso no cuesta nada**: el cliente de la base del
+   negocio (`baseLocal`, que al volver comprueba otra vez las migraciones), `lastSeenPushedAtMs`,
+   `lastPurgeAtMs`. Se quedan como campos a propósito. Lo mismo el turno del log (`turnoDelLog`): es lo
+   que está en vuelo, y el DO sólo hiberna sin nada en vuelo.
 5. ⚠️ **En los módulos de funciones libres no puede haber variables de módulo con estado**: en Workers
    una variable de módulo es por **isolate**, compartido entre DO de **tenants distintos**. Lo que haya
    que recordar entre invocaciones va al SQL del DO (como `_Cola_Estado`).
 6. Si cambia el texto del latido en el frontend, hay que cambiar el par del auto-response: casa cadenas
    exactas, y si no coinciden todo funciona pero el DO se despierta en cada ping.
 7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la presencia vive en
-   `sessionGone(ws, att)`, que se llama desde `webSocketClose`, desde el revoke y desde el cierre de
-   las Main ante una confirmación incierta. Todo cierre nuevo iniciado por el DO llama a `sessionGone`.
+   `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde el revoke. Todo cierre nuevo
+   iniciado por el DO llama a `sessionGone`.
 
 `instrumentDurableObjectWithSentry` envuelve los tres handlers del WebSocket.
 
 ## Las escrituras de la Handy
 
 Cada dominio del worker tiene su `*.commands.ts`, que construye la transacción (`BuiltCommand`) y la
-aplica por `lib/hub.ts` → RPC `aplicar` del DO, que la ejecuta en Turso y la difunde. Sólo el rol
+aplica por `lib/hub.ts` → RPC `aplicar` del DO, que la ejecuta en la base del negocio y la difunde. Sólo el rol
 `tpv` puede ejecutar SQL por el WebSocket, y el rol lo dicta la base central, no el cliente. Lo que la
 Handy no puede hacer, lo veta un middleware antes de leer el cuerpo ([worker.md](worker.md)). La lógica
 duplicada entre Rust y estos comandos la sujetan los arneses de contrato
 ([tests/contract/README.md](../../tests/contract/README.md)).
 
-Una ruta decide leyendo Turso fuera del lote (SYNC-30), y lo que llega a la Main es la sentencia, que
+Una ruta decide leyendo la base fuera del lote (SYNC-30), y lo que llega a la Main es la sentencia, que
 la Main aplica con sus datos: puede tener sin subir lo que la ruta no vio. Por eso la regla que no
 puede romperse va también **dentro de la sentencia replicada**, y cada base la vuelve a evaluar al
 aplicarla: una línea sólo entra en una comanda abierta (INC-20261030-016) y borrar un ticket no borra
 nada si tiene algún cobro o alguna línea cobrada (AUD-14). La ruta de borrar un ticket mira lo mismo
 antes de mandar el lote (`hasPaidLines`), y vuelve a mirarlo cuando no consta que el lote lo haya
-borrado: no tocó ninguna fila, o se perdió la respuesta y el DO devolvió el resultado que guardó al
-confirmarlo, con `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
+borrado: no tocó ninguna fila, o es el reintento de una operación ya aplicada y el resultado guardado
+lleva `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
 
 La `X-Idempotency-Key` la pone el `CloudClient` de `tpv-infra-http`, una por escritura, salvo cuando el
 resultado de la anterior quedó **incierto** (fallo de transporte, timeout o 5xx): entonces la misma

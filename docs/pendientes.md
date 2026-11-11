@@ -288,6 +288,37 @@ Decidido, a falta de medir cuánto genera un bar al año:
 ⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
 (`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
 
+### DO-01 · Listas de IDs con un parámetro por elemento
+
+El SQLite del DO admite 100 parámetros por sentencia ([worker.md](arquitectura/worker.md)). Quedan
+sentencias que ponen un `?` por elemento de una lista:
+
+- En el worker: «Ver tickets» de la venta rápida (`venta_rapida.queries.ts::indexRows`) manda **todos los
+  tickets del día**, así que un bar con más de 100 se queda sin esa pantalla en la Handy. Y también
+  cobrar o mover líneas (`mesas.queries.ts`, `mesas.commands.ts`, `venta_rapida.queries.ts`) y las
+  tareas (`tareas.*.ts`).
+- En la Main, las que se replican: guardar el plano (`mesas.rs`, el `NOT IN` de zonas y de mesas: una
+  zona con más de 98 mesas no sube), las líneas de la venta rápida (`venta_rapida.rs`) y las tareas
+  (`tareas.rs`).
+
+Decidido: pasar la lista como un único parámetro JSON, `IN (SELECT value FROM json_each(?))`, en los dos
+lados y con sus arneses de contrato. Así no hace falta ningún tope de mesas.
+
+### DO-02 · La recuperación de una Main con mucho desde el último cierre
+
+`/v1/sync/bootstrap` baja la fase 1 (catálogo, clientes y lo que hay desde el último cierre de caja) en
+una sola llamada al DO, con un tope de 300.000 filas. Una llamada entre el worker y el DO no puede
+pasar de 32 MiB, y 300.000 filas no caben. Un negocio normal no se acerca; uno que lleve semanas sin
+cerrar caja, sí. Falta comprobar con qué tamaño falla de verdad y decidir: un tope por tamaño, o que la
+foto salga del DO en trozos o como flujo. El histórico ya va en páginas de 2.000 filas.
+
+### DO-03 · Copias de la base de cada negocio
+
+El DO trae la vuelta a cualquier punto de los últimos 30 días, pero no hay forma de pedirla ni copia
+fuera del propio objeto. Falta: una ruta de administración que devuelva un DO a un instante, y una copia
+diaria de cada negocio a R2 desde el cron, como la de la base central (`copiaBaseCentral.ts`). Turso
+queda como opción para guardar esas copias.
+
 ---
 
 ## Arquitectura

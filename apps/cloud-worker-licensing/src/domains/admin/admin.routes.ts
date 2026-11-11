@@ -170,7 +170,7 @@ const TECHO_RECIFRADO = 200;
 
 /**
  * RI-73 · Termina una rotación de `LICENSE_STORE_KEY`: pasa a la clave actual todo lo que siga cifrado
- * con la anterior (claves de licencia, DEK de los negocios y tokens de Turso), sin esperar a que cada
+ * con la anterior (claves de licencia y DEK de los negocios), sin esperar a que cada
  * valor se lea. Se llama hasta que `quedanMas` sea `false`; después se puede quitar
  * `LICENSE_STORE_KEY_ANTERIOR`. Los `ilegibles` no se dejan descifrar con ninguna de las dos: se miran
  * a mano. Procedimiento: docs/arquitectura/licencias.md («Rotar LICENSE_STORE_KEY»).
@@ -590,14 +590,12 @@ adminRoutes.post("/releases/promote", cuerpo(promocionarSchema), async (c) => {
 
 /* ── Negocios de pruebas del E2E ─────────────────────────────────────────────
  *
- * Cada tanda del E2E activa una licencia emitida con `pruebas: true`, y activarla crea una base en
- * Turso. Al acabar la tanda se llama a esto, que retira esos negocios con su base (y los que hubiera
- * dejado una tanda que no llegó al final). Lo que no sea de pruebas no lo toca: ver `pruebas.ts`.
+ * Cada tanda del E2E activa una licencia emitida con `pruebas: true`, y activarla crea la base del
+ * negocio en su TenantHub. Al acabar la tanda se llama a esto, que retira esos negocios con su base
+ * (y los que hubiera dejado una tanda que no llegó al final). Lo que no sea de pruebas no lo toca:
+ * ver `pruebas.ts`.
  */
 adminRoutes.post("/pruebas/retirar", async (c) => {
-	const miss = assertEnv(c.env, ["TURSO_PLATFORM_TOKEN", "TURSO_ORG_SLUG"]);
-	if (miss) return c.json({ ok: false, error: miss }, 500);
-
 	const db = getDb(c.env);
 	const retirada = await retirarNegociosDePrueba(db, c.env);
 	await auditAdmin(db, "pruebas_retirar", null, retirada);

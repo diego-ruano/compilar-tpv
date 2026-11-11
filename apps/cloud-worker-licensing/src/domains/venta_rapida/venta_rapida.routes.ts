@@ -157,8 +157,8 @@ ventaRapidaRoutes.post("/comandas/delete-if-safe", cuerpo(z.object({ id_comanda:
 	const borradas = await apply(c, cmd.deleteComandaIfSafe(datos.id_comanda));
 	// AUD-14: el lote lleva dentro la misma condición que `hasPaidLines` (cobros de la comanda o
 	// líneas suyas cobradas). Si no consta que haya borrado el ticket —`0` porque algo cobrado entró
-	// en Turso después de la lectura, o `null` porque se perdió la respuesta y el DO la resolvió
-	// repitiéndola por su `Op_Id` (AUD-18) sin saber qué borró— se vuelve a mirar: si la condición
+	// en la base después de la lectura, o `null` porque es el reintento de una operación ya aplicada
+	// y el resultado guardado no sabe qué borró— se vuelve a mirar: si la condición
 	// lo impide, la Handy oye lo mismo que si lo hubiera visto antes; si no (el ticket ya no existe,
 	// o sí se borró), lo de siempre.
 	const consta = typeof borradas === "number" && borradas > 0;

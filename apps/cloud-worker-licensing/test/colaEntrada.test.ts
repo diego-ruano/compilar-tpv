@@ -452,10 +452,8 @@ describe("REV-04 · de quién es la culpa cuando la cola falla", () => {
 		});
 	});
 
-	// prueba/sqlite-do: sin base en Turso no hay token que caduque ni que rotar (era REV-04).
-
-	it("una hora que tendría que poner Turso se rechaza también por la cola", async () => {
-		// REV-22: el guard de CFG-04 estaba sólo en el camino en vivo. Por la cola entraba, y Turso
+	it("una hora que tendría que poner la base se rechaza también por la cola", async () => {
+		// REV-22: el guard de CFG-04 estaba sólo en el camino en vivo. Por la cola entraba, y la base
 		// resolvía el `CURRENT_TIMESTAMP` con su reloj y en UTC: la fila de la nube decía otra hora
 		// que la de la Main. Es el mismo motor — una operación no puede valer o no según hubiera
 		// atraso por delante cuando se subió.

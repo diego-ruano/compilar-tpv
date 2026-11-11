@@ -331,7 +331,7 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 			// se queda esperando.
 			let soltarTurno = () => {};
 			const ocupado = new Promise<void>((r) => (soltarTurno = r));
-			const turno = hub.enTurnoDelLog(db, () => ocupado);
+			const turno = hub.enTurnoDelLog(() => ocupado);
 			const escritura = hub.aplicar(borradoDeLaHandy("op-handy"));
 			await new Promise((r) => setTimeout(r, 20));
 

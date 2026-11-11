@@ -1,13 +1,14 @@
 // test/pruebasRetiradas.test.ts
 //
-// POST /v1/admin/pruebas/retirar: borra los negocios que deja el E2E, con su base de Turso.
+// POST /v1/admin/pruebas/retirar: borra los negocios que deja el E2E, con la base de su TenantHub.
 //
 // Es una ruta que borra bases en producción, así que lo que más importa aquí es lo que NO toca: un
 // negocio con una licencia que no sea de pruebas, aunque tenga también una de pruebas. Corre contra
 // el esquema real del control-plane sobre el SQLite de un Durable Object, como
-// `adminLicenciaReversible.test.ts`.
+// `adminLicenciaReversible.test.ts`. Los TenantHub de los negocios son de mentira: sólo apuntan qué
+// base se borró.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
@@ -27,10 +28,6 @@ vi.mock("../src/server/db", async (importOriginal) => {
 	return { ...original, getDb: () => dbDePruebas };
 });
 
-afterEach(() => {
-	vi.unstubAllGlobals();
-});
-
 type Escenario = {
 	post: (ruta: string, cuerpo?: unknown) => Promise<Response>;
 	/** Emite una licencia y, si se da `tenantId`, la activa en ese negocio, que tendrá su base. */
@@ -38,10 +35,10 @@ type Escenario = {
 	estadoDelNegocio: (tenantId: string) => string | null;
 	tieneBase: (tenantId: string) => boolean;
 	estadoDeLicencia: (licenseId: string) => Promise<string>;
-	/** Las bases que se le pidió a Turso borrar, en orden. */
-	borradasEnTurso: string[];
-	/** Lo que contesta Turso a cada borrado, por nombre de base (200 si no se dice). */
-	turso: Map<string, number>;
+	/** Las bases que se borraron, en orden. */
+	borradas: string[];
+	/** Los negocios cuyo TenantHub no contesta. */
+	noContestan: Set<string>;
 };
 
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
@@ -50,34 +47,35 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 		const db = clienteSobre(sql);
 		dbDePruebas = db;
 		prepararPlanoDeControl(sql);
-		for (const tabla of ["licenses", "tenant_databases", "tenants", "admin_audit"]) {
+		for (const tabla of ["licenses", "tenants", "admin_audit"]) {
 			sql.exec(`DELETE FROM ${tabla};`);
 		}
 
-		const borradasEnTurso: string[] = [];
-		const turso = new Map<string, number>();
-		vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-			const base = decodeURIComponent(String(url).split("/databases/")[1] ?? "");
-			if (init?.method !== "DELETE" || !String(url).startsWith("https://api.turso.tech/")) {
-				throw new Error(`petición inesperada: ${init?.method} ${url}`);
-			}
-			borradasEnTurso.push(base);
-			const status = turso.get(base) ?? 200;
-			return new Response(JSON.stringify({ database: base }), { status });
-		});
+		const conBase = new Set<string>();
+		const borradas: string[] = [];
+		const noContestan = new Set<string>();
+		const TenantHub = {
+			idFromName: (nombre: string) => nombre,
+			get: (tenantId: string) => ({
+				async borrarTodo() {
+					if (noContestan.has(tenantId)) throw new Error("el TenantHub no contesta");
+					borradas.push(tenantId);
+					conBase.delete(tenantId);
+				},
+			}),
+		};
 
 		const env = {
 			ADMIN_API_TOKEN: TOKEN,
 			LICENSE_STORE_KEY: STORE_KEY,
 			TURSO_DATABASE_URL: "libsql://central.turso.io",
 			TURSO_AUTH_TOKEN: "token-central",
-			TURSO_PLATFORM_TOKEN: "token-de-plataforma",
-			TURSO_ORG_SLUG: "org",
+			TenantHub,
 		} as unknown as Parameters<typeof adminRoutes.fetch>[1];
 
 		return fn({
-			borradasEnTurso,
-			turso,
+			borradas,
+			noContestan,
 			post: async (ruta, cuerpo) =>
 				await adminRoutes.fetch(
 					new Request(`https://api${ruta}`, {
@@ -96,13 +94,7 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 				});
 				if (tenantId) {
 					sql.exec(`INSERT OR IGNORE INTO tenants (tenant_id) VALUES (?);`, tenantId);
-					sql.exec(
-						`INSERT OR IGNORE INTO tenant_databases (tenant_id, turso_db_name, turso_url)
-						 VALUES (?, ?, ?);`,
-						tenantId,
-						`tpv-${tenantId}`,
-						`libsql://tpv-${tenantId}.turso.io`,
-					);
+					conBase.add(tenantId);
 					await activateLicenseFirstTime(db, {
 						licenseId: license.license_id,
 						tenantId,
@@ -114,8 +106,7 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 			},
 			estadoDelNegocio: (tenantId) =>
 				sql.exec(`SELECT status FROM tenants WHERE tenant_id = ?;`, tenantId).toArray()[0]?.status ?? null,
-			tieneBase: (tenantId) =>
-				sql.exec(`SELECT 1 FROM tenant_databases WHERE tenant_id = ?;`, tenantId).toArray().length > 0,
+			tieneBase: (tenantId) => conBase.has(tenantId),
 			estadoDeLicencia: async (licenseId) => (await getLicenseById(db, licenseId))!.status,
 		});
 	});
@@ -133,7 +124,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			expect(res.status).toBe(200);
 			expect(await res.json()).toMatchObject({ ok: true, negocios: 2, bases: 2, licencias: 3, fallos: [], quedan: false });
 
-			expect(e.borradasEnTurso.sort()).toEqual(["tpv-t-antigua", "tpv-t-tanda"]);
+			expect(e.borradas.sort()).toEqual(["t-antigua", "t-tanda"]);
 			for (const t of ["t-tanda", "t-antigua"]) {
 				expect(e.estadoDelNegocio(t)).toBe("deleted");
 				expect(e.tieneBase(t)).toBe(false);
@@ -155,7 +146,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			const res = await e.post("/pruebas/retirar");
 			expect(await res.json()).toMatchObject({ negocios: 0, bases: 0, licencias: 0 });
 
-			expect(e.borradasEnTurso).toEqual([]);
+			expect(e.borradas).toEqual([]);
 			for (const t of ["t-bar", "t-stripe", "t-mezcla"]) {
 				expect(e.estadoDelNegocio(t)).toBe("active");
 				expect(e.tieneBase(t)).toBe(true);
@@ -166,11 +157,11 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 		});
 	});
 
-	it("si Turso falla, el negocio se queda como estaba y el siguiente intento lo retira", async () => {
+	it("si su TenantHub falla, el negocio se queda como estaba y el siguiente intento lo retira", async () => {
 		await escenario(async (e) => {
 			await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-uno");
 			await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-dos");
-			e.turso.set("tpv-t-uno", 503);
+			e.noContestan.add("t-uno");
 
 			const primero = (await (await e.post("/pruebas/retirar")).json()) as any;
 			expect(primero).toMatchObject({ negocios: 1, bases: 1 });
@@ -179,30 +170,29 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			expect(e.tieneBase("t-uno")).toBe(true);
 			expect(e.estadoDelNegocio("t-uno")).toBe("active");
 
-			e.turso.delete("tpv-t-uno");
-			e.borradasEnTurso.length = 0;
+			e.noContestan.delete("t-uno");
+			e.borradas.length = 0;
 			const segundo = await (await e.post("/pruebas/retirar")).json();
 			expect(segundo).toMatchObject({ negocios: 1, bases: 1, fallos: [] });
-			expect(e.borradasEnTurso).toEqual(["tpv-t-uno"]);
+			expect(e.borradas).toEqual(["t-uno"]);
 			expect(e.estadoDelNegocio("t-uno")).toBe("deleted");
 		});
 	});
 
-	it("una base que ya no existe en Turso cuenta como retirada, y repetir no hace nada", async () => {
+	it("repetir la retirada no hace nada", async () => {
 		await escenario(async (e) => {
-			await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-ya-borrada");
-			e.turso.set("tpv-t-ya-borrada", 404);
+			await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-una-vez");
 
-			expect(await (await e.post("/pruebas/retirar")).json()).toMatchObject({ negocios: 1, bases: 0 });
-			expect(e.estadoDelNegocio("t-ya-borrada")).toBe("deleted");
+			expect(await (await e.post("/pruebas/retirar")).json()).toMatchObject({ negocios: 1, bases: 1 });
+			expect(e.estadoDelNegocio("t-una-vez")).toBe("deleted");
 
-			e.borradasEnTurso.length = 0;
+			e.borradas.length = 0;
 			expect(await (await e.post("/pruebas/retirar")).json()).toMatchObject({
 				negocios: 0,
 				bases: 0,
 				licencias: 0,
 			});
-			expect(e.borradasEnTurso).toEqual([]);
+			expect(e.borradas).toEqual([]);
 		});
 	});
 
@@ -217,7 +207,7 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			expect(primero).toMatchObject({ negocios: NEGOCIOS_POR_LLAMADA, quedan: true });
 			const segundo = await (await e.post("/pruebas/retirar")).json();
 			expect(segundo).toMatchObject({ negocios: 2, quedan: false });
-			expect(new Set(e.borradasEnTurso).size).toBe(NEGOCIOS_POR_LLAMADA + 2);
+			expect(new Set(e.borradas).size).toBe(NEGOCIOS_POR_LLAMADA + 2);
 		});
 	});
 

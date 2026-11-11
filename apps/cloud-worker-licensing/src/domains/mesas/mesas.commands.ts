@@ -442,7 +442,7 @@ export function addLinea(
 	const idDetalle = nuevoId();
 
 	// Resolución de trabajador embebida en la propia UPDATE para evitar un round-trip
-	// previo a Turso. El EXISTS garantiza que solo se actualiza si hay match real.
+	// previo a la base. El EXISTS garantiza que solo se actualiza si hay match real.
 	if (input.id_trabajador_o_usuario) {
 		steps.push({
 			kind: "execute",

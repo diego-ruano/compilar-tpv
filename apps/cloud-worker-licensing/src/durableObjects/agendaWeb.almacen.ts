@@ -9,7 +9,7 @@
 // las dos la comprobación.
 //
 // Los datos personales (`datos_json`) sólo están mientras la reserva espera a la Main: se borran al
-// verla en Turso o al anularla. De una fallida queda sólo el correo, para avisar al cliente, hasta
+// verla en la base o al anularla. De una fallida queda sólo el correo, para avisar al cliente, hasta
 // que se purga.
 
 import type { Ocupacion } from "../domains/reservas_web/disponibilidad";
@@ -146,7 +146,7 @@ export function negocioRecordado(sql: SqlStorage): string | null {
 }
 
 /**
- * Las altas que ya están en Turso pasan a `vista`: desde ahí las cuenta Turso, y sus datos
+ * Las altas que ya están en la base pasan a `vista`: desde ahí las cuenta la base, y sus datos
  * personales sobran. Devuelve cuántas.
  */
 export function darPorVistas(sql: SqlStorage, ids: Iterable<string>, ahoraMs: number): number {
@@ -164,12 +164,12 @@ export function darPorVistas(sql: SqlStorage, ids: Iterable<string>, ahoraMs: nu
 }
 
 /**
- * Con qué lectura de Turso se decide. Las altas que esa lectura ya trae (`ids`) las cuenta Turso;
+ * Con qué lectura de la base se decide. Las altas que esa lectura ya trae (`ids`) las cuenta la base;
  * las demás, la agenda.
  *
- * `vistasDesdeMs` cubre un cruce: mientras esta petición esperaba a Turso, otra pudo leer una
+ * `vistasDesdeMs` cubre un cruce: mientras esta petición esperaba a la base, otra pudo leer una
  * versión más nueva, ver ya registrada un alta y darla por vista. Para esta lectura, más vieja, esa
- * alta no está en ningún sitio: ni en Turso ni entre las pendientes. Por eso cuenta también la que
+ * alta no está en ningún sitio: ni en la base ni entre las pendientes. Por eso cuenta también la que
  * se dio por vista desde poco antes de empezar a leer y no viene en `ids`.
  */
 export type Lectura = { ids: ReadonlySet<string>; vistasDesdeMs: number };
@@ -181,9 +181,9 @@ const ALTAS_PARA_LA_LECTURA = `tipo = 'alta'
 	AND id_reserva NOT IN (SELECT value FROM json_each(?))`;
 
 /**
- * Lo que ocupan las altas que esta lectura de Turso no trae, del día anterior al siguiente (la
+ * Lo que ocupan las altas que esta lectura de la base no trae, del día anterior al siguiente (la
  * misma ventana que `lecturas.ts::ocupacionAlrededorDe`). Con la duración de ahora del negocio,
- * que es la que tendrán en Turso: la Main las registra sin duración propia.
+ * que es la que tendrán en la base: la Main las registra sin duración propia.
  */
 export function ocupacionPendiente(sql: SqlStorage, dia: string, duracion: number, lectura: Lectura): Ocupacion[] {
 	const filas = sql
@@ -205,7 +205,7 @@ export type CursorAlarma = { creada_ms: number; id_reserva: string };
 type TipoPeticion = FilaPeticion["tipo"];
 
 /**
- * Lo que espera a verse en Turso, de un tipo, de lo más viejo a lo más nuevo y a partir de
+ * Lo que espera a verse en la base, de un tipo, de lo más viejo a lo más nuevo y a partir de
  * `despues` (sin incluirlo): lo que mira la alarma, por lotes. Un alta espera a que la reserva
  * aparezca; una cancelación, a que aparezca cancelada.
  */
@@ -251,7 +251,7 @@ export function guardarCursorDeLaAlarma(sql: SqlStorage, tipo: TipoPeticion, cur
 }
 
 /**
- * Las cancelaciones cuya reserva ya está cancelada (o terminada) en Turso están hechas: pasan a
+ * Las cancelaciones cuya reserva ya está cancelada (o terminada) en la base están hechas: pasan a
  * `vista`. Antes no: que la Main diga que la ha cancelado no basta, porque hasta que su outbox sube
  * la cancelación sólo existe en su base. Devuelve cuántas.
  */
@@ -279,8 +279,8 @@ export function altasDesde(sql: SqlStorage, desdeMs: number): number {
 }
 
 /**
- * Las altas vivas de un correo desde `hoy` que la lectura de Turso no trae (las que sí, las cuenta
- * Turso; ver `Lectura`). Una con cancelación pedida ya no cuenta.
+ * Las altas vivas de un correo desde `hoy` que la lectura de la base no trae (las que sí, las cuenta
+ * la base; ver `Lectura`). Una con cancelación pedida ya no cuenta.
  */
 export function vivasDelCorreoEnLaAgenda(sql: SqlStorage, emailHash: string, hoy: string, lectura: Lectura): number {
 	const fila = sql
@@ -473,7 +473,7 @@ export function entregarPendientes(
 			.toArray() as any[]
 	).map(conTipos);
 	const tanda = filas.slice(0, max);
-	// Una cancelación lleva delante su alta si todavía no se ha visto en Turso. Si la respuesta con el
+	// Una cancelación lleva delante su alta si todavía no se ha visto en la base. Si la respuesta con el
 	// alta se perdió por el camino, la Main no la tiene: le llegaría sólo la cancelación, diría que esa
 	// reserva no existe, y al volver a ofrecerle el alta la registraría viva. Juntas, el alta se
 	// registra (o ya estaba) y en seguida se cancela.
@@ -509,7 +509,7 @@ export type ResultadoDeLaMain = {
  * Lo que la Main contesta de lo que se le entregó. Sólo cuenta para lo que está `entregada`: una
  * respuesta repetida, tardía o de algo que no existe no cambia nada.
  *
- *   · Lo registrado (o solapado) sigue `entregada` hasta verse en Turso: un alta, al aparecer la
+ *   · Lo registrado (o solapado) sigue `entregada` hasta verse en la base: un alta, al aparecer la
  *     reserva; una cancelación, al aparecer cancelada. Si no, se vuelve a ofrecer. La palabra de la
  *     Main no basta: hasta que su outbox lo sube, sólo existe en su base.
  *   · Lo `fallida` se cierra. De un alta queda sólo el correo, para avisar al cliente.
@@ -578,7 +578,7 @@ export function olvidarCorreo(sql: SqlStorage, idPeticion: string): void {
 }
 
 /**
- * Lo entregado hace más de una hora que no se ha visto en Turso (un alta) o del que la Main no ha
+ * Lo entregado hace más de una hora que no se ha visto en la base (un alta) o del que la Main no ha
  * contestado (una cancelación) vuelve a `pendiente`. Cubre una Main que perdió su base o un outbox
  * atascado: registrarla otra vez no la duplica (el `INSERT` es idempotente por `ID_Reserva`).
  * Devuelve cuántas.

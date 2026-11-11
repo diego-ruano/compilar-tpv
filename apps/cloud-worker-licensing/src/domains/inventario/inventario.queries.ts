@@ -2,8 +2,8 @@
 //
 // LECTURAS de inventario. SQL idéntico al de la app local (crate
 // tpv-infra-sqlite/inventario.rs): mismas columnas/alias en PascalCase, de modo que
-// las filas ya salen con la forma de los DTOs de @tpv/contracts. Van directas a
-// Turso (sin DO): son datos de solo lectura, sin idempotencia que romper.
+// las filas ya salen con la forma de los DTOs de @tpv/contracts. Van a la base por `tenantQuery`,
+// sin pasar por el motor de escritura: son datos de solo lectura, sin idempotencia que romper.
 
 import type { Client } from "@libsql/client/web";
 

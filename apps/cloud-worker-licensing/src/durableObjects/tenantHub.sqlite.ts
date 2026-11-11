@@ -1,14 +1,14 @@
 // src/durableObjects/tenantHub.sqlite.ts
 //
-// La base del negocio vive en el SQLite del propio TenantHub (rama prueba/sqlite-do).
+// La base del negocio vive en el SQLite del propio TenantHub.
 //
 // El motor, las rutas y los tests hablan con la base a través de un `Client` de libsql (`execute`,
-// `batch`). Aquí se sirve esa misma forma sobre `ctx.storage.sql`, para que el cambio de sustrato no
-// obligue a reescribir las doscientas consultas que ya existen. Dentro del DO se usa directamente
+// `batch`). Aquí se sirve esa misma forma sobre `ctx.storage.sql`, para que las doscientas
+// consultas del worker no dependan de dónde vive la base. Dentro del DO se usa directamente
 // (`clienteLocal`); desde el Worker, las lecturas llegan por RPC (`ejecutarEnBruto`/`loteEnBruto`
 // devuelven filas planas, y `aResultSet` las vuelve a montar al otro lado).
 //
-// Diferencias con Turso que este fichero absorbe:
+// Diferencias con el SQLite de libsql que este fichero absorbe:
 //
 // - `rowsWritten` del cursor cuenta también las filas de índice, así que NO es el `rowsAffected` de
 //   libsql. Se pregunta a SQLite con `changes()`, que es lo mismo que devuelve libsql.
@@ -102,7 +102,7 @@ function esFkRota(e: unknown): boolean {
  *    cambia CUÁNDO se comprueba) y no cuesta nada más.
  * 2. Si falla por una FK, se repite como lo hizo la Main, aplazando, y antes de cerrar se mira
  *    `PRAGMA foreign_key_check`. Si queda alguna rota se lanza un error normal: la transacción se
- *    deshace y el motor lo clasifica como rechazo permanente, igual que hacía con Turso.
+ *    deshace y el motor lo clasifica como rechazo permanente.
  *
  * El paso 2 recorre las tablas con FK (unos 230 ms con 250.000 líneas), pero sólo lo paga quien
  * necesita el aplazamiento o trae una FK rota de verdad.
@@ -210,7 +210,7 @@ function sinComentarios(sql: string): string {
 	return sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
 }
 
-/** ¿Este negocio tiene ya su base? Es lo que antes decía la fila de `tenant_databases`. */
+/** ¿Este negocio tiene ya su base? La crea el alta (`aprovisionar`). */
 export function baseAprovisionada(sql: SqlStorage): boolean {
 	return (
 		sql
@@ -220,9 +220,10 @@ export function baseAprovisionada(sql: SqlStorage): boolean {
 }
 
 /**
- * Aplica las migraciones pendientes, cada una con su registro en `_migrations` y en su propia
- * transacción, como `runTenantMigrations` hacía en Turso (mismo nombre, mismo hash). El DO es de un
- * solo hilo, así que no hay dos migraciones a la vez que coordinar.
+ * Aplica las migraciones pendientes (`server/tenantMigrations.ts`), cada una con su registro en
+ * `_migrations` y en su propia transacción, como el runner de la Main (mismo nombre, mismo hash).
+ * Falla con `migration_altered` si una ya aplicada cambió. El DO es de un solo hilo, así que no hay
+ * dos migraciones a la vez que coordinar.
  */
 export async function migrarBaseLocal(storage: DurableObjectStorage): Promise<void> {
 	const hashes = await Promise.all(MIGRATIONS.map((m) => sha256Hex(normalize(m.sql))));

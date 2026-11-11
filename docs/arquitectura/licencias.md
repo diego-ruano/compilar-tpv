@@ -179,7 +179,7 @@ registrado** (el `tenant_id` de su fila de `devices`), la clave nueva **no crea 
   `license_already_used`), `extendLicense` (suma sobre lo que quedaba, o sobre hoy si ya venció) y
   `reasignarCobrosDeLaClave` (el cobro pasa a la licencia viva como `renewal`, para que un reembolso
   tenga de dónde restar).
-- Ni tenant, ni base en Turso, ni DEK nuevos. Manda un recibo por correo y responde
+- Ni tenant, ni base, ni DEK nuevos. Manda un recibo por correo y responde
   `tiempoSumado: true`; la pantalla enseña «tiempo añadido, vence el X» y espera a que se pulse.
 
 Teclear en el bar 1 la clave que era para el bar 2 le suma el tiempo al bar 1: se ve en el acto. Y
@@ -202,12 +202,13 @@ otro negocio que el suyo, tampoco. En los tres casos se queda con su token y su 
 ### 2. Primera activación
 
 Crea el tenant (`ensureTenantExistsMinimal`), da de alta el dispositivo con su clave pública,
-aprovisiona su base en Turso (`provisionTenantDatabase`) y guarda los datos del negocio. Después
+aprovisiona su base en el `TenantHub` del negocio (`provisionTenantDatabase`: el esquema y el
+administrador inicial) y guarda los datos del negocio. Después
 `activateLicenseFirstTime` pone `active`, `activated_at_ms`, `expires_at_ms = ahora + meses` y
 `main_device_id`, condicionado a que siga sin activar **y sin estrenar** (`main_device_id IS NULL
 AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_replaced`; si lo que pasó
 es que otro la canjeó mientras éste aprovisionaba su base, `license_already_used` (AUD-07). La base
-de Turso aprovisionada para el perdedor se queda vacía.
+aprovisionada para el perdedor se queda vacía.
 
 ### 3. Cambio de equipo (la licencia ya está en otro)
 
@@ -373,10 +374,9 @@ las congela al irse la Main. **Caducar no empuja**: se nota en la siguiente comp
 | Acortar | `POST …/:id/shorten` (puede dejarla caducada) | `pnpm license:shorten` |
 | Retirar los negocios del E2E | `POST /v1/admin/pruebas/retirar` | — (lo llama el E2E al terminar) |
 
-Una licencia emitida con `pruebas: true` (`origin = 'pruebas'`) es del E2E. Retirar borra la base en
-Turso de cada negocio cuyas licencias sean todas de pruebas, lo da por borrado (`status = 'deleted'`)
-y anula sus licencias. Un negocio con cualquier otra licencia no se toca. Las bases de los negocios
-se crean en el grupo `tpv` de Turso (`GRUPO_TURSO`), que tiene que existir antes de desplegar.
+Una licencia emitida con `pruebas: true` (`origin = 'pruebas'`) es del E2E. Retirar borra la base
+(todo el `TenantHub`) de cada negocio cuyas licencias sean todas de pruebas, lo da por borrado
+(`status = 'deleted'`) y anula sus licencias. Un negocio con cualquier otra licencia no se toca.
 
 Todas exigen `ADMIN_API_TOKEN` (comparación de tiempo constante; sin el secreto la ruta responde 503)
 y quedan en `admin_audit`. El CLI lee el token de la variable de entorno `ADMIN_API_TOKEN`.
@@ -440,7 +440,7 @@ gate y el updater la leen (`leer_*`) y nunca la crean. Al leer, el almacén dist
 |---|---|
 | `LICENSE_SIGNING_PRIVATE_KEY` | Firmar la aserción. Su pública va fija en `LICENSE_SIGNING_PUBLIC_KEYS_B64` (`tpv-infra-licensing/src/lib.rs`) junto a la de reserva (`pnpm license:keypair` genera cada par) |
 | `LICENSE_JWT_SECRET` | Tokens de sesión |
-| `LICENSE_STORE_KEY` (+ `LICENSE_STORE_KEY_ID`) | Cifrar en reposo claves, DEK y tokens de Turso (`server/crypto.ts`). Global: perderla deja la PII de todos irrecuperable. **No se regenera nunca**: se guarda en el gestor de contraseñas el día que se crea, porque Cloudflare no deja volver a leerla |
+| `LICENSE_STORE_KEY` (+ `LICENSE_STORE_KEY_ID`) | Cifrar en reposo claves y DEK (`server/crypto.ts`). Global: perderla deja la PII de todos irrecuperable. **No se regenera nunca**: se guarda en el gestor de contraseñas el día que se crea, porque Cloudflare no deja volver a leerla |
 | `LICENSE_STORE_KEY_ANTERIOR` (+ `_ID`) | Sólo durante una rotación: la clave de antes, para leer |
 | `ADMIN_API_TOKEN` | Las rutas de administración |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Leer la sesión de checkout y verificar el webhook |
@@ -475,9 +475,8 @@ de RI-73), así que cambiarla ya no deja ilegible lo anterior:
 4. Cuando no quede nada: `wrangler secret delete LICENSE_STORE_KEY_ANTERIOR` (y su `_ID`).
 
 Cambiar `LICENSE_STORE_KEY` **sin** pasar la anterior es lo que pasó el 27/09. Lo delata `/health`, que
-descifra un canario y contesta 503 (ver [worker.md](worker.md#salud-y-vigilancia-externa)). Los tokens de
-Turso se sustituyen solos en la siguiente lectura, pero las DEK y las claves de licencia no tienen
-arreglo sin la clave buena.
+descifra un canario y contesta 503 (ver [worker.md](worker.md#salud-y-vigilancia-externa)). Las DEK y las
+claves de licencia no tienen arreglo sin la clave buena.
 
 Stripe: un producto con un Price *one-time* por duración, cada uno con `metadata.term_months`, el
 enlace de compra con «recopilar email», y el webhook en

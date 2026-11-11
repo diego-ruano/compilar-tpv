@@ -220,7 +220,7 @@ const SQL_RESERVAS_DEL_PLANO = `
 /**
  * El estado de cada mesa del plano de la Handy: lo pendiente de su comanda abierta y la reserva que
  * enseña (MESAS-02). `ahoraLocal` es la hora local de la Handy (su `X-Client-Now` validado); sin
- * ella, cuenta el reloj del worker, que es un instante: la hora de Turso está en UTC y leída como la
+ * ella, cuenta el reloj del worker, que es un instante: la hora de la base está en UTC y leída como la
  * del negocio desplazaría las reservas una o dos horas.
  */
 export async function mesasMetaAll(

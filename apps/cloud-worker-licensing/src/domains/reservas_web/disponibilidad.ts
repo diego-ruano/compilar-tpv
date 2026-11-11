@@ -1,13 +1,13 @@
 // src/domains/reservas_web/disponibilidad.ts
 //
 // Reservas desde la web (docs/estudios/reservas-web.md §4.3): qué días, qué horas y qué mesas se
-// pueden reservar. Todo puro, sin Turso ni el SQLite de la agenda: recibe lo leído y decide. Lo usan
+// pueden reservar. Todo puro, sin la base ni el SQLite de la agenda: recibe lo leído y decide. Lo usan
 // las rutas públicas (`/negocio`, `/dia`) y la agenda (`disponibles`, `reservar`), así que el
 // criterio es uno solo.
 //
 // Las horas son de reloj de pared en la zona del negocio, como las guarda `Reservas` (`Dia_YMD`,
 // `Hora`), y los instantes van en el formato de `datetime()` de SQLite (`YYYY-MM-DD HH:MM:SS`): así
-// se comparan como texto, igual que en `SQL_CHOQUE_RESERVA`, y lo que llega de Turso ya viene así.
+// se comparan como texto, igual que en `SQL_CHOQUE_RESERVA`, y lo que llega de la base ya viene así.
 
 /** Los ajustes de `Business_Settings` que mira la reserva web. */
 export type AjustesWeb = {

@@ -4,7 +4,7 @@ import * as z from "zod";
 // Subrouter Hono del módulo de inventario. Se monta en /v1/inventario (index.ts).
 //
 // - Auth de tenant en todas las rutas (JWT + device proof) vía `tenantAuth`.
-// - LECTURAS (GET): directas a Turso con `tenantQuery`.
+// - LECTURAS (GET): directas a la base con `tenantQuery`.
 // - ESCRITURAS (POST/PUT/PATCH/DELETE): pasan por el DO (`applyViaHub`), que aplica
 //   en transacción con idempotencia por Op_Id (cabecera X-Idempotency-Key) y hace
 //   broadcast del cambio. Requieren que haya una Main conectada (si no, main_offline).

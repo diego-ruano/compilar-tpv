@@ -12,7 +12,7 @@
 //   POST /reserva  { token }              el resumen para la página de cancelar
 //   POST /cancelar { token }              cancelar desde el enlace del correo
 //
-// Lo que no depende de lo pendiente se lee directamente de Turso; lo que sí (qué mesas están
+// Lo que no depende de lo pendiente se lee directamente de la base; lo que sí (qué mesas están
 // libres, reservar, cancelar), lo decide la agenda del negocio. Ninguna respuesta lleva datos
 // personales de una reserva, y el token del enlace sólo viaja en el correo (§4.8): `/reserva` va
 // por POST para que no salga en ninguna URL ni en ningún log.

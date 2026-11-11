@@ -8,7 +8,7 @@
 //   · **Sólo datos estructurados**: negocio, dirección, teléfono, día, hora, personas, mesa y el
 //     código. Nada que haya escrito el visitante, tampoco su nombre: un formulario público que mete
 //     texto libre en un correo de nuestro dominio es una vía de spam.
-//   · **A quién**: el correo del alta, o el del cliente de una reserva web en Turso. Nunca uno que
+//   · **A quién**: el correo del alta, o el del cliente de una reserva web en la base. Nunca uno que
 //     llegue en un cuerpo. Eso lo garantiza quien llama; aquí sólo se envía.
 //   · **Cuánto**: un tope diario por negocio y otro por destinatario, sobre lo entregado y lo que está
 //     saliendo, reservados a la vez que el id (`reservar`): muchos envíos a la vez no los pasan.

@@ -26,7 +26,7 @@ pnpm --filter @tpv/main test:e2e
   raíz.
 - **Redespliega el worker antes si ha cambiado el esquema**: la tanda activa contra el `tpv-api`
   desplegado.
-- Cada tanda crea una base en Turso que no se borra sola: de vez en cuando, limpiar las licencias
+- Cada tanda crea un negocio con su base que no se borra solo: de vez en cuando, limpiar las licencias
   `E2E …` de `pnpm license:list`.
 - **Si sale rojo, no se tagea.** Un fallo deja una captura en `apps/tpv-main/e2e/fallos/`. Un fallo al
   activar puede ser la red: el mensaje lo distingue.

@@ -268,8 +268,6 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		"LICENSE_STORE_KEY",
 		"TURSO_DATABASE_URL",
 		"TURSO_AUTH_TOKEN",
-		"TURSO_PLATFORM_TOKEN",
-		"TURSO_ORG_SLUG",
 	]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
@@ -382,8 +380,8 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 	// datos era lo que disparaba la renovación, y el dueño de un segundo local pagaba y no recibía
 	// clave—. Aquí no hay nada que adivinar: o este equipo ya es la Main de una licencia, o no.
 	//
-	// Va ANTES de resolver el tenant a propósito: canjear no crea nada. Ni tenant, ni base en
-	// Turso, ni DEK. El negocio sigue siendo el mismo con más meses por delante, que es justo lo
+	// Va ANTES de resolver el tenant a propósito: canjear no crea nada. Ni tenant, ni base, ni
+	// DEK. El negocio sigue siendo el mismo con más meses por delante, que es justo lo
 	// que hace que esto no pueda perder datos.
 	//
 	// Y sólo entra por aquí una clave **sin estrenar**: una licencia ya activada no suma tiempo.
@@ -587,9 +585,8 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 	} catch (e: any) {
 		capturarError(e, "license.provision");
 		const detalle = String(e?.message || e);
-		// Al log (visible con `wrangler tail`): el detalle de Turso es la clave para diagnosticar
-		// (401 = token de plataforma malo, 404 = org/grupo inexistente, límite de plan, etc.). A la
-		// respuesta no va (FABLE-B): es el texto crudo de la API de plataforma de Turso.
+		// Al log (visible con `wrangler tail`): el detalle es la clave para diagnosticar. A la
+		// respuesta no va (FABLE-B): es el texto crudo del error.
 		console.error("[activate] tenant_db_provision_failed:", detalle);
 		return c.json({ ok: false, error: "tenant_db_provision_failed" } satisfies ApiError, 500);
 	}
@@ -621,7 +618,7 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// base, y ninguno de los dos enterándose.
 		//
 		// A la perdedora se le dice lo mismo que a cualquier equipo que llega tarde a una licencia
-		// ya activada: está en otro sitio. Lo que sí queda detrás es la base de Turso que se
+		// ya activada: está en otro sitio. Lo que sí queda detrás es la base del negocio que se
 		// aprovisionó unas líneas más arriba, vacía y sin dueño; moverlo todo por delante del
 		// aprovisionamiento lo evitaría, pero dejaría la licencia atada a un equipo cuya base falló
 		// al crearse, y eso es peor que una base de sobra.

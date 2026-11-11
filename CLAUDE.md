@@ -1,9 +1,9 @@
 # TPV — instrucciones para trabajar en este repositorio
 
 TPV de escritorio para hostelería: **Tauri 2 + React 19 + TypeScript** con backend **Rust** sobre
-**SQLite local (rusqlite)**, y un **Cloudflare Worker** (`tpv-api`) con un Durable Object por negocio y
-Turso. La Main (Windows) vende contra su base local y replica cuando hay red; la Handy (Android) trabaja
-contra la nube. Qué es cada pieza: [README.md](README.md). Cómo funciona por dentro: [docs/](docs/README.md).
+**SQLite local (rusqlite)**, y un **Cloudflare Worker** (`tpv-api`) con un Durable Object por negocio,
+que guarda la base del negocio en su SQLite, y Turso para la base central. La Main (Windows) vende
+contra su base local y replica cuando hay red; la Handy (Android) trabaja contra la nube. Qué es cada pieza: [README.md](README.md). Cómo funciona por dentro: [docs/](docs/README.md).
 
 **Ramas.** `main` es Windows 10 y 11 **sin Veri\*factu**, y es donde se desarrolla;
 `compilacion-windows-7` es la variante de Windows 7 de `main` y recibe `main` por merge. Veri\*factu

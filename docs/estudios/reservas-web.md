@@ -330,11 +330,11 @@ mismo.
 - **RPC**: `disponibles`, `reservar`, `consultarEnlace`, `cancelar` (para las rutas públicas),
   `pendientes` y `recogidas` (para las rutas de la Main). Los errores de negocio cruzan como resultado
   tipado, igual que `ResultadoAplicacion`.
-- **Lee Turso** con el mismo resolutor de credenciales que el REST, y fija `'now'` con la hora local
-  del negocio (`Zona_Horaria`), con la misma reescritura que `tenantQuery` (`lecturaConHora`). Como
-  toda lectura REST, pasa por el guard de migraciones (`ensureTenantMigrated`): si el esquema del
-  negocio va atrasado, lo pone al día quien llegue primero. Eso es esquema, no datos del negocio, y
-  no rompe la regla de que la agenda no escribe en Turso.
+- **Lee la base del negocio** como el REST, por RPC al `TenantHub` (`clienteDelHub`), y fija `'now'`
+  con la hora local del negocio (`Zona_Horaria`), con la misma reescritura que `tenantQuery`
+  (`lecturaConHora`). Si el esquema del negocio va atrasado, lo pone al día el propio `TenantHub` al
+  recibir la consulta. Eso es esquema, no datos del negocio, y no rompe la regla de que la agenda no
+  escribe en la base del negocio.
 - **Sin estado en campos de instancia que importe ni variables de módulo con estado**, por las mismas
   razones que el `TenantHub` ([sincronizacion.md](../arquitectura/sincronizacion.md#hibernación-del-durable-object-sync-16)).
 - **Una sola alarma**, que se reprograma mientras haya algo que hacer: volver a ofrecer las

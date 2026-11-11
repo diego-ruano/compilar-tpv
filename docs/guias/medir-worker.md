@@ -13,13 +13,13 @@ no requiere crear staging ni modificar datos de clientes.
    con `waitUntil` para que no retrasen la respuesta.
 3. **Prueba de un piloto:** medir varios días de uso normal en un negocio autorizado, incluyendo
    reconexiones y páginas de catch-up pequeñas y grandes. Comparar p50 y p95 por ruta; comprobar
-   también la apertura de WebSockets y las imágenes, no sólo las rutas con Turso.
+   también la apertura de WebSockets y las imágenes, no sólo las rutas que consultan la base.
 4. **Comparación controlada:** sólo tras tener esa referencia, probar Placement en un despliegue
    separado con un negocio de prueba o en una ventana acordada. Conservar versión, carga y
    consultas comparables; volver a la configuración anterior si perjudica rutas relevantes.
 
 Cambiar de HTTP interno a RPC elimina construcción de peticiones, serialización manual y HMAC,
-pero no elimina el viaje al Durable Object ni las consultas a Turso. Una prueba local permite
+pero no elimina el viaje al Durable Object ni las consultas a la base central de Turso. Una prueba local permite
 comparar ese coste de transporte; no estima los milisegundos de una petición real en producción.
 
 Referencias: [métricas de Workers](https://developers.cloudflare.com/workers/observability/metrics-and-analytics/)

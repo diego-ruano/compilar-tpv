@@ -15,47 +15,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import {
-	esFalloPasajero,
-	esRechazoPermanente,
-	isTursoAuthError,
-} from "../src/durableObjects/tenantHub.errores";
-
-describe("ARQ-07 · credenciales de Turso", () => {
-	it("reconoce las redacciones reales de un 401 de Turso", () => {
-		for (const error of [
-			new Error("Server returned HTTP status 401"),
-			new Error("Hrana: server returned HTTP status 401 Unauthorized"),
-			"Unauthorized",
-		]) {
-			expect(isTursoAuthError(error), String(error)).toBe(true);
-		}
-		expect(isTursoAuthError(new Error("503 Service Unavailable"))).toBe(false);
-		expect(isTursoAuthError(undefined)).toBe(false);
-	});
-
-	// El motivo de que la comparación sea larga y no un `includes("401")`: en la cola del DO esta
-	// pregunta va ANTES que `esRechazoPermanente`, así que un falso positivo saca al error del
-	// aislamiento por operación y se lleva el lote entero a la rotación de credenciales (REV-04).
-	// Los tres de abajo son mensajes que un lote puede producir de verdad.
-	it("no confunde un 401 con una cifra que aparezca dentro de otro error", () => {
-		for (const error of [
-			// Dinero en céntimos: 401 son 4,01 €, y el importe viaja dentro de la sentencia.
-			new Error("SQLite error: CHECK constraint failed: Importe_401"),
-			new Error('SQLite error: no such column: "401"'),
-			new Error("UNIQUE constraint failed: Pagos.Numero_Ticket (2401/000001)"),
-		]) {
-			expect(isTursoAuthError(error), String(error)).toBe(false);
-		}
-	});
-
-	// Y la otra mitad: lo que NO es de credenciales tiene que poder llegar a clasificarse.
-	it("un rechazo permanente con un 401 dentro se sigue apartando", () => {
-		const error = new Error("SQLite error: no such column: Importe_401");
-		expect(isTursoAuthError(error)).toBe(false);
-		expect(esRechazoPermanente(error)).toBe(true);
-	});
-});
+import { esFalloPasajero, esRechazoPermanente } from "../src/durableObjects/tenantHub.errores";
 
 describe("un rechazo que NO se arregla reintentando", () => {
 	it("reconoce el desajuste de esquema que motivó todo esto", () => {

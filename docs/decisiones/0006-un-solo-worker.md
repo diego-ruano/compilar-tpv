@@ -1,6 +1,6 @@
 # 0006 · Un solo worker para toda la nube
 
-**Estado:** vigente.
+**Estado:** vigente. La base de cada tenant ya no está en Turso: ver [0008](0008-la-base-del-negocio-en-su-durable-object.md).
 
 ## Contexto
 

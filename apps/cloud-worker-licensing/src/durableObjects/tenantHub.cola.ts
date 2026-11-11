@@ -15,14 +15,13 @@
 
 import type { Client } from "@libsql/client/web";
 
-import { esRechazoPermanente, isTursoAuthError } from "./tenantHub.errores";
-import { esEscrituraEnDuda } from "./tenantHub.turno";
+import { esRechazoPermanente } from "./tenantHub.errores";
 import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
 
 import type { InternalApplyCommand, OpParaAplicar, Role } from "./tenantHub.types";
 
-const COLA_LOTE = 50; // operaciones por batch contra Turso
+const COLA_LOTE = 50; // operaciones por batch contra la base del negocio
 const COLA_MAX_INTENTOS = 5; // fallos de una operación antes de apartarla
 // Espera tras un fallo que se le imputa a UNA operación. La base contesta, así que no hay nada que
 // esperar salvo darle sus intentos con algo de aire entre medias.
@@ -61,12 +60,6 @@ export interface ContextoDeCola {
 		db: Client,
 		ops: OpParaAplicar[],
 	): Promise<{ aplicadas: string[]; yaEstaban: string[] }>;
-	/**
-	 * AUD-18: veta una operación antes de apartarla, para que ninguna copia suya que siguiera en vuelo
-	 * se confirme después. `"aplicada"` si ya lo estaba (y entonces ya se ha difundido). Si no se
-	 * sabe cómo acabó el veto, lanza.
-	 */
-	vetarParaApartar(db: Client, op: OpParaAplicar, error: string): Promise<"vetada" | "aplicada">;
 	withTenantDbRetry<T>(tenantId: string, run: (db: Client) => Promise<T>): Promise<T>;
 	maybePurgeSyncLog(tenantId: string): Promise<void>;
 
@@ -83,9 +76,9 @@ export interface ContextoDeCola {
 }
 
 /**
- * Crea las tablas de la cola en el SQLite del propio DO (no en Turso: esto es control, no
- * negocio). Es barato e idempotente, así que se llama al principio de cada operación con la
- * cola en vez de llevar un flag que se evapore al hibernar.
+ * Crea las tablas de la cola en el SQLite del propio DO, fuera del esquema del negocio (`0001`):
+ * esto es control, no negocio, y no se replica. Es barato e idempotente, así que se llama al
+ * principio de cada operación con la cola en vez de llevar un flag que se evapore al hibernar.
  */
 export function asegurarCola(ctx: ContextoDeCola): void {
 	const sql = ctx.storage.sql;
@@ -231,7 +224,7 @@ function intentosConEste(ctx: ContextoDeCola, op: OpParaAplicar): number {
 	return Number(fila?.Intentos ?? 0) + 1;
 }
 
-/** ¿Este fallo la aparta? (Antes de apartarla hay que vetarla: `aplicarLote`.) */
+/** ¿Este fallo la aparta? */
 function laAparta(ctx: ContextoDeCola, op: OpParaAplicar, permanente: boolean): boolean {
 	return permanente || intentosConEste(ctx, op) >= COLA_MAX_INTENTOS;
 }
@@ -318,15 +311,8 @@ async function aplicarLote(
 		const r = await ctx.applyBatchIdempotent(db, ops);
 		sacarDeLaCola(ctx, [...r.aplicadas, ...r.yaEstaban]);
 		return "ok";
-	} catch (e) {
-		// REV-04: que un error de credenciales SALGA de aquí es lo que deja actuar a la rotación
-		// de `withTenantDbRetry`. Capturado, su reintento era código inalcanzable para la cola
-		// (el `run` que le pasa el drenado nunca lanzaba), y un token de Turso caducado —que se
-		// arregla rotando— se llevaba por delante las cincuenta operaciones del lote.
-		if (isTursoAuthError(e)) throw e;
-		// AUD-18: una escritura anterior está en duda y nada entra hasta resolverla. No es culpa
-		// de ninguna operación de la cola: se espera como con la base caída.
-		if (esEscrituraEnDuda(e)) return "base_caida";
+	} catch {
+		/* se aísla abajo, de una en una */
 	}
 
 	// El lote ha fallado y no sabemos cuál lo rompió: se prueban de una en una, EN ORDEN, que es
@@ -337,8 +323,6 @@ async function aplicarLote(
 			sacarDeLaCola(ctx, [...r.aplicadas, ...r.yaEstaban]);
 			continue;
 		} catch (e: any) {
-			if (isTursoAuthError(e)) throw e;
-			if (esEscrituraEnDuda(e)) return "base_caida";
 			capturarError(e, "sync.queue_apply");
 			const error = String(e?.message || e);
 
@@ -351,25 +335,6 @@ async function aplicarLote(
 			// de "esta sentencia no me gusta", y fiarlo al texto es lo que se pudre en silencio
 			// cuando cambia una redacción entre versiones.
 			if (!permanente && !(await baseResponde(db))) return "base_caida";
-
-			// AUD-18: lo que se aparta se veta antes. Un intento anterior suyo pudo quedarse sin
-			// respuesta y confirmarse después, con la operación ya fuera de la cola: tendría un `Seq`
-			// que nadie difundiría, y lo de detrás llevaría a la Main por encima de él. Si resulta que
-			// estaba aplicada, se difunde y sale de la cola como tal; si no se sabe cómo acabó el
-			// veto, se espera como con la base caída, sin culpar a nadie.
-			if (laAparta(ctx, op, permanente)) {
-				let veto: "vetada" | "aplicada";
-				try {
-					veto = await ctx.vetarParaApartar(db, op, error);
-				} catch (f) {
-					if (isTursoAuthError(f)) throw f;
-					return "base_caida";
-				}
-				if (veto === "aplicada") {
-					sacarDeLaCola(ctx, [op.opId]);
-					continue;
-				}
-			}
 
 			anotarFallo(ctx, op, error, permanente);
 			if (permanente) continue;
@@ -465,7 +430,7 @@ export function olvidarApartadas(ctx: ContextoDeCola, opIds: string[]): number {
 /**
  * Drena la cola en lotes hasta vaciarla o agotar el presupuesto de esta invocación.
  *
- * Aplica en Turso **primero** y borra de la cola después. Si el DO muere entre las dos cosas,
+ * Aplica en la base del negocio **primero** y borra de la cola después. Si el DO muere entre las dos cosas,
  * la operación se reaplica y el filtro de `Op_Id` la reconoce como ya aplicada: se pierde una
  * lectura, nunca un dato. Al revés (borrar y luego aplicar) se perdería la operación.
  *

@@ -153,13 +153,13 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
   `X-Client-Now`. Lo vigilan `test/pinSiempreConFreno.test.ts`, leyendo el fuente, y
   `test/loginFrenoConcurrente.test.ts`. El recuento vive en `Intentos_Login`, que no se replica: el
   worker lleva el de las Handy en la base del negocio y la Main el suyo en la local
-  (`tpv-infra-sqlite/src/auth.rs`). El hash se replica a Turso; el riesgo de romperlo offline está en
+  (`tpv-infra-sqlite/src/auth.rs`). El hash se replica a la nube; el riesgo de romperlo offline está en
   [LOGIN-04](../pendientes.md#login-04--el-hash-del-pin-se-puede-romper-offline).
 - **El PIN inicial se elige en la Main y sólo ahí.** `complete_initial_setup` cambia el PIN del
   administrador sin pedir el actual (es el del seed, público) y su único cerrojo es
   `Requiere_Setup = 1`, que se apaga al usarlo. El worker no tiene un segundo camino hacia esa fila:
   la Main lo aplica en su SQLite y lo sube por `POST /v1/login/sync-initial-setup` (firmada, rol TPV),
-  directa a Turso porque aún no hay WebSocket. En Rust el puerto falla por defecto en la Handy, y una
+  directa a la base del negocio porque aún no hay WebSocket. En Rust el puerto falla por defecto en la Handy, y una
   Main con el setup pendiente no sale de `/setup`, así que no puede haber Handys vinculadas todavía.
 
 ### Entrar sin PIN
@@ -277,7 +277,7 @@ y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en 
   que presenta la petición ([licencias.md](licencias.md#activar)).
 - **El correo se acota por destinatario y por volumen**: sólo al email de un proveedor dado de alta y
   con un tope diario por negocio ([worker.md](worker.md#correo)).
-- **Los errores no cuentan cómo está hecho el worker**: un 500 no lleva traza ni texto de Turso
+- **Los errores no cuentan cómo está hecho el worker**: un 500 no lleva traza ni texto de la base
   ([worker.md](worker.md#errores)).
 - Dependencias: `.github/workflows/audit.yml` (`cargo audit` y `pnpm audit --prod`, en cada PR y los
   lunes) y Dependabot. Un aviso no es un fallo explotable: hay que mirar si el camino vulnerable se usa.

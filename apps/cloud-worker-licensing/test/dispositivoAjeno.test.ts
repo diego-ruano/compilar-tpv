@@ -41,8 +41,6 @@ const ENV = {
 	TURSO_DATABASE_URL: "libsql://no-se-usa",
 	TURSO_AUTH_TOKEN: "no-se-usa",
 	// La ruta los exige antes de nada (fail-closed); el rechazo llega mucho antes de usarlos.
-	TURSO_PLATFORM_TOKEN: "no-se-usa",
-	TURSO_ORG_SLUG: "no-se-usa",
 };
 
 const CLAVE = generateLicenseKey();

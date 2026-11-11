@@ -1,7 +1,7 @@
 // src/domains/notificaciones/notificaciones.routes.ts
 //
 // Subrouter Hono del módulo de notificaciones. Se monta en /v1/notificaciones (index.ts).
-// Lecturas directas a Turso; escrituras por TenantHub (idempotencia + broadcast por WebSocket).
+// Lecturas directas a la base; escrituras por TenantHub (idempotencia + broadcast por WebSocket).
 
 import { Hono } from "hono";
 

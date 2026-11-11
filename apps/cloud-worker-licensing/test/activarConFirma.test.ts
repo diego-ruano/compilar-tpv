@@ -81,8 +81,6 @@ const ENV = {
 	LICENSE_SIGNING_PRIVATE_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(3))),
 	TURSO_DATABASE_URL: "libsql://pruebas",
 	TURSO_AUTH_TOKEN: "t",
-	TURSO_PLATFORM_TOKEN: "p",
-	TURSO_ORG_SLUG: "org",
 	EMAIL_FROM_ADDRESS: "pedidos@ejemplo.test",
 	PAIR_PEPPER: "pimienta-de-pruebas",
 	EMAIL: {

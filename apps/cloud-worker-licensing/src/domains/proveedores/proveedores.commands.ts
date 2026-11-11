@@ -104,7 +104,7 @@ export function eliminarProveedor(idProveedor: string): BuiltCommand {
 			args: [idProveedor],
 		},
 		// DB-03: el ON DELETE SET NULL se escribe EXPLICITAMENTE, mismo criterio que Rust. En la
-		// nube la FK también lo haría (Turso trae las FK activadas, RI-06), pero así el lote dice
+		// nube la FK también lo haría (la base trae las FK activadas, RI-06), pero así el lote dice
 		// lo que hace sin depender de leer el esquema.
 		{
 			kind: "execute",

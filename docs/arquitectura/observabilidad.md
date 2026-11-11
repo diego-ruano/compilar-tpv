@@ -288,7 +288,7 @@ Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
 | `device_auth_rechazado` | El worker rechaza a un dispositivo. `motivo`, `ruta`, `metodo` |
 | `tenant_salud_sync` | El contraste diario de una Main con la nube (descuadres, reparadas) |
 | `cola_volcado_inicio` / `cola_volcado_fin` | La Main vuelca su atraso a la cola del DO |
-| `cola_pausada`, `cola_base_caida`, `cola_ciclo_error` | La cola no avanza: interruptor, Turso que no contesta, fallo de una vuelta |
+| `cola_pausada`, `cola_base_caida`, `cola_ciclo_error` | La cola no avanza: interruptor, base que no contesta, fallo de una vuelta |
 | `cola_apartada` / `cola_apartada_acusada` | Una operación sale a `_Cola_Muerta` / una Main la acusa |
 
 ## Alarmas recomendadas

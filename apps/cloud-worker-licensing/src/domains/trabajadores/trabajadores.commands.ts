@@ -76,7 +76,7 @@ export function createTrabajador(input: TrabajadorCreateInput, passwordHash: str
 			kind: "execute",
 			// TRAB-03: DNI, IBAN y Numero_Seguridad_Social NO se escriben desde aquí. Van
 			// cifrados con una clave que sólo tiene la Main, así que si la Handy los
-			// insertara quedarían en claro en Turso — exactamente lo que el cifrado evita.
+			// insertara quedarían en claro en la base — exactamente lo que el cifrado evita.
 			// Se dan de alta vacíos y se completan luego desde la Main.
 			sql: `
 				INSERT INTO Trabajadores (

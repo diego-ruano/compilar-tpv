@@ -814,7 +814,6 @@ export async function guardarClaveRecifrada(
 const COLUMNAS_CIFRADAS = [
 	{ nombre: "licencias", tabla: "licenses", id: "license_id", columna: "license_key_enc" },
 	{ nombre: "deks", tabla: "tenants", id: "tenant_id", columna: "field_dek" },
-	{ nombre: "tokensTurso", tabla: "tenant_databases", id: "tenant_id", columna: "turso_auth_token_enc" },
 ] as const;
 
 export type ResultadoRecifrado = {
@@ -838,7 +837,7 @@ export async function recifrarConLaActual(
 	techo: number,
 ): Promise<ResultadoRecifrado> {
 	const res: ResultadoRecifrado = {
-		recifrados: { licencias: 0, deks: 0, tokensTurso: 0 },
+		recifrados: { licencias: 0, deks: 0 },
 		ilegibles: [],
 		quedanMas: false,
 	};

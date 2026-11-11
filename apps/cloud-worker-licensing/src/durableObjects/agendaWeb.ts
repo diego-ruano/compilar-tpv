@@ -70,7 +70,7 @@ export class AgendaWeb extends DurableObject<Env> {
 }
 
 /**
- * La agenda de un negocio. prueba/sqlite-do: con la jurisdicción del despliegue, como el TenantHub
+ * La agenda de un negocio, con la jurisdicción del despliegue, como el TenantHub
  * (`espacioDelHub`): guarda datos personales de quien reserva.
  */
 export function agendaDe(env: Env, tenantId: string): DurableObjectStub<AgendaWeb> {

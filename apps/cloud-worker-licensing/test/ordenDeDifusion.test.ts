@@ -3,15 +3,15 @@
 // AUD-18 · el TenantHub difunde los cambios en orden de `Seq`.
 //
 // La Main aplica en orden de `Seq` y guarda como checkpoint el último que le llega; al reconectar
-// pide desde ahí. Si el DO difundía el 11 antes que el 10 —dos escrituras a la vez: Turso numera al
-// confirmar, pero la respuesta de la segunda vuelve antes— y a la Main se le caía el socket entre
-// medias, el 10 no volvía a pedirse nunca. Aquí se prueba lo que lo impide: el turno del log
+// pide desde ahí. Si el DO difundiera el 11 antes que el 10 —dos escrituras a la vez: la base
+// numera al confirmar, pero la segunda termina antes— y a la Main se le cayera el socket entre
+// medias, el 10 no volvería a pedirse nunca. Aquí se prueba lo que lo impide: el turno del log
 // (`enTurnoDelLog`), que hace que cada escritura confirme y difunda antes de que empiece la
 // siguiente, también la del drenado de la cola.
 //
 // La base del tenant es el SQLite del propio DO (`clienteSobre`) con una puerta delante: la primera
 // escritura confirma en el acto, pero su respuesta no vuelve hasta que el test la abre. Es la forma
-// determinista de que una segunda escritura llegue mientras la primera espera a Turso.
+// determinista de que una segunda escritura llegue mientras la primera aún no ha terminado.
 
 import { describe, it, expect } from "vitest";
 
@@ -82,7 +82,7 @@ function conPuerta(base: any) {
 	};
 }
 
-/** Hub sin Turso ni base central delante; devuelve lo que difunde, en orden. */
+/** Hub sin base central delante; devuelve lo que difunde, en orden. */
 function prepararHub(hub: any, db: any): any[] {
 	crearEsquemaTenant(hub.state.storage.sql);
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
@@ -167,7 +167,7 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 		});
 	});
 
-	it("una escritura que la base rechaza suelta el turno sin dejar nada anotado", async () => {
+	it("una escritura que la base rechaza suelta el turno", async () => {
 		await enElHub("aud18-turno-libre", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			const base = clienteSobre(sql, hub.state.storage);
@@ -189,7 +189,6 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 
 			expect(r.seq).toBe(seqDelLog(sql, "op-y"));
 			expect(difundidos.map((m) => m.opId)).toEqual(["op-y"]);
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _Escritura_En_Curso;").toArray()[0].n).toBe(0);
 		});
 	});
 });

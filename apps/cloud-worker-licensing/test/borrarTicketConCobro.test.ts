@@ -1,16 +1,14 @@
 // test/borrarTicketConCobro.test.ts
 //
 // AUD-14: qué contesta `POST /v1/venta-rapida/comandas/delete-if-safe` a la Handy. La ruta mira en
-// Turso si el ticket tiene cobros o líneas cobradas (aunque sea por el cobro de otra comanda) y, si
-// no, manda los `DELETE`, que llevan la misma condición dentro (el efecto lo fija
+// la base si el ticket tiene cobros o líneas cobradas (aunque sea por el cobro de otra comanda) y,
+// si no, manda los `DELETE`, que llevan la misma condición dentro (el efecto lo fija
 // `contract.test.ts`, «borrar un ticket no se lleva su cobro»). Si el cobro sube
 // entre la lectura y el lote, el lote no borra nada, y la Handy tiene que oír lo mismo que si lo
-// hubiera visto antes, no que el ticket se ha borrado. También cuando se pierde la respuesta del
-// lote: el DO la resuelve repitiéndola por su `Op_Id` (`resolverEscrituraEnCurso`, AUD-18) y
-// devuelve el resultado que guardó al confirmarla, que no sabe qué borró (`null`).
+// hubiera visto antes, no que el ticket se ha borrado.
 //
 // Se pasa por lo real: la ruta de Hono, `applyViaHub` y el motor del TenantHub. Sólo se sustituyen
-// `tenantAuth` (la identidad de la Handy), la presencia de la Main y el cliente de Turso, que es el
+// `tenantAuth` (la identidad de la Handy), la presencia de la Main y la base del negocio, que es el
 // SQLite del propio DO con el esquema real. Cada caso usa su propia instancia del DO.
 
 import { describe, expect, it, vi } from "vitest";
@@ -67,15 +65,13 @@ const LINEA_DE_OTRO_COBRO = [
 ];
 
 type Guion = {
-	/** Lo que entra en Turso justo antes que el lote, después de la lectura de la ruta. */
+	/** Lo que entra en la base justo antes que el lote, después de la lectura de la ruta. */
 	antesDelLote?: string[];
-	/** El lote se confirma, pero su respuesta no vuelve: se corta el transporte. */
-	respuestaPerdida?: boolean;
 };
 
 /**
  * Prepara el DO del caso y pide el borrado de `idComanda` por la ruta. Devuelve la respuesta, lo
- * que el DO le devolvió a la ruta (`devuelto`) y cómo queda Turso.
+ * que el DO le devolvió a la ruta (`devuelto`) y cómo queda la base.
  */
 async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda = "ticket") {
 	return enElHub(nombre, async (hub: any) => {
@@ -90,9 +86,7 @@ async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda
 				if (modo !== "write" || !primero) return base.batch(sentencias, modo);
 				primero = false;
 				for (const s of guion.antesDelLote ?? []) sql.exec(s);
-				const r = await base.batch(sentencias, modo);
-				if (guion.respuestaPerdida) throw new Error("fetch failed");
-				return r;
+				return base.batch(sentencias, modo);
 			},
 		};
 		turso = base;
@@ -143,10 +137,6 @@ async function borrar(nombre: string, sembrar: string[], guion: Guion, idComanda
 			lineas_de_otro_cobro: n(
 				"SELECT COUNT(*) FROM v_lineas_cobradas v JOIN Detalle_Comanda dc ON dc.ID_Detalle = v.ID_Detalle WHERE dc.ID_Comanda='ticket' AND v.ID_Pago='pago-otra'",
 			),
-			// La tabla la crea el DO con su primera escritura.
-			en_duda: n("SELECT COUNT(*) FROM sqlite_master WHERE name='_Escritura_En_Curso'")
-				? n("SELECT COUNT(*) FROM _Escritura_En_Curso")
-				: 0,
 		};
 	});
 }
@@ -156,7 +146,7 @@ const COBRADO = { ticket: 1, lineas: 1, pagos: 1, pago_detalles: 1 };
 const BORRADO = { ticket: 0, lineas: 0, pagos: 0, pago_detalles: 0 };
 
 describe("borrar un ticket desde la Handy (AUD-14)", () => {
-	it("con el cobro ya en Turso, 409 y no se manda nada", async () => {
+	it("con el cobro ya en la base, 409 y no se manda nada", async () => {
 		const r = await borrar("aud14-ruta-cobrado", [...SIEMBRA, ...COBRO], {});
 		expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
 		expect(r.devuelto).toEqual([]);
@@ -177,23 +167,6 @@ describe("borrar un ticket desde la Handy (AUD-14)", () => {
 		expect(r.turso).toEqual(COBRADO);
 	});
 
-	it("y si además se pierde la respuesta del lote, el DO no sabe qué borró y la ruta lo vuelve a mirar", async () => {
-		const r = await borrar("aud14-ruta-perdida", SIEMBRA, { antesDelLote: COBRO, respuestaPerdida: true });
-		// Resuelta por su `Op_Id`: confirmada, nada en duda, y el resultado que se guardó al confirmar.
-		expect(r.en_duda).toBe(0);
-		expect(r.devuelto).toEqual([{ ok: true, data: null }]);
-		expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
-		expect(r.turso).toEqual(COBRADO);
-	});
-
-	it("con la respuesta perdida de un borrado que sí entró, contesta que se ha borrado", async () => {
-		const r = await borrar("aud14-ruta-perdida-libre", SIEMBRA, { respuestaPerdida: true });
-		expect(r.en_duda).toBe(0);
-		expect(r.devuelto).toEqual([{ ok: true, data: null }]);
-		expect([r.status, r.json]).toEqual([200, { ok: true }]);
-		expect(r.turso).toEqual(BORRADO);
-	});
-
 	it("un ticket que ya no existe contesta como siempre", async () => {
 		const r = await borrar("aud14-ruta-inexistente", SIEMBRA, {}, "no-existe");
 		expect(r.devuelto).toEqual([{ ok: true, data: 0 }]);
@@ -203,7 +176,7 @@ describe("borrar un ticket desde la Handy (AUD-14)", () => {
 	describe("con una línea del ticket cobrada por el cobro de otra comanda", () => {
 		const SIGUE = { ticket: 1, lineas: 1, pagos: 0, pago_detalles: 0 };
 
-		it("si ya está en Turso, 409 y no se manda nada", async () => {
+		it("si ya está en la base, 409 y no se manda nada", async () => {
 			const r = await borrar("aud14-ruta-otro-cobro", [...SIEMBRA, ...LINEA_DE_OTRO_COBRO], {});
 			expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
 			expect(r.devuelto).toEqual([]);
@@ -213,17 +186,6 @@ describe("borrar un ticket desde la Handy (AUD-14)", () => {
 		it("si entra entre la lectura y el lote, el lote no borra nada y la Handy no lo da por borrado", async () => {
 			const r = await borrar("aud14-ruta-otro-cobro-carrera", SIEMBRA, { antesDelLote: LINEA_DE_OTRO_COBRO });
 			expect(r.devuelto).toEqual([{ ok: true, data: 0 }]);
-			expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
-			expect([r.turso, r.lineas_de_otro_cobro]).toEqual([SIGUE, 1]);
-		});
-
-		it("y con la respuesta perdida, resuelta por su `Op_Id`, tampoco", async () => {
-			const r = await borrar("aud14-ruta-otro-cobro-perdida", SIEMBRA, {
-				antesDelLote: LINEA_DE_OTRO_COBRO,
-				respuestaPerdida: true,
-			});
-			expect(r.en_duda).toBe(0);
-			expect(r.devuelto).toEqual([{ ok: true, data: null }]);
 			expect([r.status, r.json]).toEqual([409, TIENE_COBROS]);
 			expect([r.turso, r.lineas_de_otro_cobro]).toEqual([SIGUE, 1]);
 		});

@@ -1,7 +1,8 @@
 # Esquema de base de datos y migraciones
 
-Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada tenant
-en Turso: los ficheros `.sql` de `packages/database/migrations/`, aplicados en orden.
+Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada negocio
+en la nube, que vive en el SQLite de su `TenantHub`: los ficheros `.sql` de
+`packages/database/migrations/`, aplicados en orden.
 Hoy hay uno solo, `0001_inicial.sql`, con el esquema completo.
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)

@@ -19,12 +19,12 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.aplicar(params);
 	}
 
-	/** prueba/sqlite-do: las lecturas del Worker contra la base del negocio, que vive aquí. */
+	/** Las lecturas del Worker contra la base del negocio, que vive aquí. */
 	consultar(tenantId: string, sentencias: Sentencia[], enLote: boolean): Promise<RespuestaDeConsulta> {
 		return this.motor.consultar(tenantId, sentencias, enLote);
 	}
 
-	/** prueba/sqlite-do: el alta del negocio crea aquí su esquema. */
+	/** El alta del negocio crea aquí su esquema. */
 	aprovisionar(tenantId: string): Promise<void> {
 		return this.motor.aprovisionar(tenantId);
 	}
@@ -33,7 +33,7 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.estaAprovisionado();
 	}
 
-	/** prueba/sqlite-do: retirar un negocio de pruebas. */
+	/** Retirar un negocio de pruebas: su base entera. */
 	borrarTodo(): Promise<void> {
 		return this.motor.borrarTodo();
 	}

@@ -294,11 +294,11 @@ export function atenderColaApartadaAck(
 }
 
 // Escritura de la Main por WS: se aplica al MISMO motor idempotente que
-// las escrituras REST de la Handy (commit en Turso + broadcast del cambio
+// las escrituras REST de la Handy (commit en la base + broadcast del cambio
 // al resto). La Main no se bloquea esperando; recibe un `apply_ack`
 // asíncrono solo para reconciliar/revertir si algo falla.
 // SYNC-18: volcado del atraso. La Main manda por trozos lo que lleva acumulado, el DO lo
-// guarda en su cola y confirma sin tocar Turso — de ahí que sea inmediato y que la Main
+// guarda en su cola y confirma sin tocar la base — de ahí que sea inmediato y que la Main
 // pueda desconectarse justo después. El trabajo lo hace luego el `alarm`.
 export async function atenderBulkApply(
 	ctx: ContextoDeMensajes,
@@ -484,7 +484,7 @@ export async function atenderApply(
 				// Sin esto, el drenado trataba todo como transitorio y una sentencia que el
 				// esquema del tenant no admite paraba la cola entera para siempre.
 				//
-				// REV-11: y `transitorio` es la otra mitad. Sin él, una caída de Turso —que
+				// REV-11: y `transitorio` es la otra mitad. Sin él, una caída de la base —que
 				// no dice nada de la operación— le gastaba uno de sus veinte intentos, y
 				// cuatro baches bastaban para apartar una venta perfectamente buena. Son
 				// tres estados y no dos: definitivo (apartar ya), pasajero (no cuenta) y

@@ -4,7 +4,7 @@
 // MISMAS migraciones que producción (packages/database/migrations). Así los tests de contrato corren
 // contra el esquema de verdad, no contra un doble que emule las tablas.
 //
-// A diferencia de `runTenantMigrations`, esto no lleva control de versiones ni transacciones: es un
+// A diferencia de `migrarBaseLocal`, esto no lleva control de versiones ni transacciones: es un
 // levantado de esquema de un solo uso sobre una BD vacía.
 
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";

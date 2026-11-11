@@ -374,7 +374,7 @@ syncRoutes.post("/initialize-empty", async (c) => {
  *   dos sitios.
  *
  * El histórico viejo se queda fuera a propósito: ya no cambia, así que volver a leerlo cada ciclo
- * es pagar lecturas de Turso por comprobar datos inmutables. Si algo se descuadró ahí, se descuadró
+ * es pagar lecturas de la base por comprobar datos inmutables. Si algo se descuadró ahí, se descuadró
  * cuando estaba dentro de la ventana.
  *
  * ⚠️ NO abre transacción ni devuelve `Seq`, y ésa es la diferencia con `/bootstrap`. Aquí una foto

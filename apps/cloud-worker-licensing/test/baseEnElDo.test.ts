@@ -1,6 +1,6 @@
 // test/baseEnElDo.test.ts
 //
-// prueba/sqlite-do: la base del negocio en el SQLite del TenantHub.
+// La base del negocio en el SQLite del TenantHub.
 //
 // Lo que el resto del worker da por hecho de un `Client` de libsql tiene que seguir siendo verdad
 // con la base dentro del DO: `rowsAffected` cuenta filas y no índices, el `Seq` sale de
