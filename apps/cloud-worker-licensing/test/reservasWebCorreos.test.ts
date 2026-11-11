@@ -30,7 +30,7 @@ const {
 	TOPE_DIARIO_DESTINATARIO,
 	TOPE_DIARIO_NEGOCIO,
 } = await import("../src/domains/reservas_web/correos");
-const { pasaDelTope } = await import("../src/domains/email/email.routes");
+const { reservarCupo } = await import("../src/domains/email/email.routes");
 
 const NEGOCIO = { nombre: "Bar Pepe", direccion: "Calle Mayor 1", telefono: "950 000 000", correo: "hola@barpepe.es" };
 const RESERVA = { dia: "2026-10-23", hora: "21:00", personas: 4, mesa: "Mesa 5", codigo: "ABC123" };
@@ -271,14 +271,15 @@ describe("enviar", () => {
 
 describe("los topes", () => {
 	function apuntar(sql: any, n: number, extra: Record<string, unknown> = {}) {
-		const f = { tenant_id: "t1", to_email: "otro@correo.es", ok: 1, tipo: "reserva_web", sent_at_ms: Date.now(), ...extra } as any;
+		const f = { tenant_id: "t1", to_email: "otro@correo.es", ok: 1, error_code: null, tipo: "reserva_web", sent_at_ms: Date.now(), ...extra } as any;
 		for (let i = 0; i < n; i++) {
 			sql.exec(
-				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, sent_at_ms, tipo) VALUES (?, ?, 'web', ?, ?, ?, ?);`,
+				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo) VALUES (?, ?, 'web', ?, ?, ?, ?, ?);`,
 				crypto.randomUUID(),
 				f.tenant_id,
 				f.to_email,
 				f.ok,
+				f.error_code,
 				f.sent_at_ms,
 				f.tipo,
 			);
@@ -347,9 +348,12 @@ describe("los topes", () => {
 		const { TOPE_DIARIO } = await import("../src/domains/email/email.routes");
 		const r = await conBase("cupo-pedidos", async (sql) => {
 			apuntar(sql, TOPE_DIARIO);
-			return pasaDelTope(baseCentral, "t1");
+			// AUD-41: tampoco los que están saliendo.
+			apuntar(sql, TOPE_DIARIO, { ok: 0, error_code: "enviando" });
+			const envio = { id: crypto.randomUUID(), tenantId: "t1", deviceId: "dev", toEmail: "prov@correo.es", proveedor: "Prov" };
+			return reservarCupo(baseCentral, envio);
 		});
-		expect(r).toBe(false);
+		expect(r).toBe("reservado");
 	});
 });
 

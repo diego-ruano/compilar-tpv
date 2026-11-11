@@ -164,8 +164,14 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
 `/v1/email` manda pedidos a proveedores con el binding `EMAIL` (Cloudflare Email Service) desde
 `EMAIL_FROM_ADDRESS`. Se acota **por destinatario** (sólo al `Email` de un proveedor dado de alta) **y
 por volumen**: `TOPE_DIARIO` (100) envíos por negocio en una ventana de 24 h, contados en `email_sends`.
-Sólo cuentan los pedidos entregados (`tipo = 'pedido'`, `ok = 1`), y si no se puede contar se deja
-pasar. Las trazas se purgan a los 90 días (`RETENCION_ENVIOS_MS`).
+Cuentan los pedidos entregados y los que están saliendo (`tipo = 'pedido'`, `ok = 1` o
+`error_code = 'enviando'`); lo que falló no. El sitio se reserva con la fila del envío en una sola
+sentencia (`reservarCupo`), justo antes de enviar y después de comprobar el destinatario, y luego se
+apunta cómo acabó y a qué hora: muchos pedidos a la vez no pasan del tope (AUD-41). Un pedido cuenta
+desde que salió; una reserva que se quedó en `enviando` (el worker murió a medias), como enviada desde
+que se reservó. Las dos dejan de contar al salir de la ventana. Si la base central no contesta, el
+pedido sale igual y se apunta después si se puede. Las trazas se purgan a los 90 días
+(`RETENCION_ENVIOS_MS`).
 
 Los correos al cliente de una reserva web salen de `domains/reservas_web/correos.ts`, desde
 `EMAIL_RESERVAS_FROM_ADDRESS` con el nombre del negocio y su correo de contacto como `Reply-To`. Sólo

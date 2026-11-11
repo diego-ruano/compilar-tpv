@@ -19,7 +19,8 @@
 //     creaba un proveedor con cualquier correo y se enviaba, sin límite y con el SPF/DKIM de
 //     nuestro dominio detrás. El filtro no acotaba el destinatario: acotaba el número de pasos.
 //
-// Cada envío deja traza en `email_sends` (control-plane), que es de donde sale el recuento.
+// Cada envío deja traza en `email_sends` (control-plane), que es de donde sale el recuento: la fila
+// se pone al reservar el sitio en el cupo, antes de enviar, y después se apunta cómo acabó.
 
 import { Hono } from "hono";
 import type { Dinero } from "@tpv/contracts";
@@ -67,10 +68,6 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 	const tenantId = c.get("tenantId");
 	const deviceId = c.get("deviceId");
 
-	if (await pasaDelTope(getDb(c.env), tenantId)) {
-		return c.json({ error: "email_limite_diario" }, 429);
-	}
-
 	// FABLE-C — el destinatario NO lo elige libremente el dispositivo: tiene que ser el correo de un
 	// proveedor dado de alta en ESTE tenant. Sin esto, un token robado podía usar nuestro dominio
 	// (con su SPF/DKIM) para mandar correo a cualquier dirección del mundo. Es el control real de
@@ -86,6 +83,21 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 	}
 	const from: EmailAddress = { email: fromAddress, name: identidad.nombre };
 
+	// REV-14 y AUD-41: el sitio en el cupo se reserva justo antes de enviar, con la fila del envío y
+	// en una sola sentencia. Va después de lo que puede rechazar el pedido (el destinatario, el
+	// contacto del negocio, el remitente): un 403 o un 400 no gastan cupo.
+	const db = getDb(c.env);
+	const envio: Envio = {
+		id: crypto.randomUUID(),
+		tenantId,
+		deviceId,
+		toEmail: email_destino,
+		proveedor: identidad.proveedor,
+	};
+	if ((await reservarCupo(db, envio)) === "tope") {
+		return c.json({ error: "email_limite_diario" }, 429);
+	}
+
 	try {
 		await c.env.EMAIL.send({
 			from,
@@ -100,12 +112,12 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 		// El binding lanza Error con `.code` (E_SENDER_NOT_VERIFIED, E_RATE_LIMIT_EXCEEDED, …).
 		const e = err as { code?: string; message?: string };
 		console.error("[email] Cloudflare Email Service error:", e.code ?? "", e.message ?? err);
-		await registrarEnvio(c.env, tenantId, deviceId, email_destino, identidad.proveedor, false, e.code ?? null);
+		await terminarEnvio(db, envio, false, e.code ?? null);
 		// El código del binding va en `detalle`: `code` es el del catálogo compartido.
 		return c.json({ error: "email_send_failed", detalle: e.code ?? null }, 500);
 	}
 
-	await registrarEnvio(c.env, tenantId, deviceId, email_destino, identidad.proveedor, true, null);
+	await terminarEnvio(db, envio, true, null);
 	return c.json({ ok: true });
 });
 
@@ -119,61 +131,98 @@ emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
 export const TOPE_DIARIO = 100;
 export const VENTANA_MS = 24 * 60 * 60 * 1000;
 
+/** Un pedido que va a salir, tal como queda en su fila de `email_sends`. El id es nuevo en cada petición. */
+export type Envio = { id: string; tenantId: string; deviceId: string; toEmail: string; proveedor: string };
+
 /**
- * ¿Este negocio ya ha gastado su cupo de hoy?
- *
- * Dos decisiones que importan:
- *   · **Sólo cuentan los pedidos ENTREGADOS** (`tipo = 'pedido'`, `ok = 1`). Un proveedor con el
- *     buzón lleno, o una caída de nuestro proveedor de correo, no pueden gastarle el cupo a un bar
- *     que no ha mandado nada. Los correos de las reservas web tienen sus propios topes
- *     (`domains/reservas_web/correos.ts`).
- *     Y lo que se protege es la reputación del dominio, que sólo sufre con lo que sale.
- *   · **Si no se puede contar, se deja pasar.** Es la misma regla que el registro de abajo: Turso
- *     caído no puede impedir que un bar mande su pedido. Un tope que convierte una caída nuestra
- *     en «no puedes trabajar» cuesta más de lo que evita.
+ * `reservado`: hay sitio y la fila ya está puesta, en `enviando`; se envía y se cierra con
+ * `terminarEnvio`. `tope`: no hay sitio y no se envía. `sin_base`: la base central no ha contestado.
  */
-export async function pasaDelTope(db: Sql, tenantId: string): Promise<boolean> {
+type ReservaDeCupo = "reservado" | "tope" | "sin_base";
+
+/**
+ * AUD-41 · Reserva el sitio de este pedido en el cupo diario del negocio, justo antes de enviarlo.
+ *
+ * Es **una sola sentencia**, como `reservas_web/correos.ts::reservar`: inserta la fila en
+ * `enviando` sólo si lo que ya cuenta no llega al tope. Contar en una sentencia y apuntar en otra,
+ * después de enviar, dejaba pasar a todas las peticiones que contaban a la vez: leían el mismo
+ * recuento, y lo que estaba saliendo no ocupaba sitio. Así, de muchas a la vez sólo pasan las que
+ * caben.
+ *
+ * Qué cuenta, de `tipo = 'pedido'` y en las últimas 24 h (la ventana es móvil, no el día natural):
+ *   · **Lo entregado** (`ok = 1`) **y lo que está saliendo** (`error_code = 'enviando'`). Lo que
+ *     falló (`ok = 0` con el código del binding, o sin código) no cuenta: un proveedor con el buzón
+ *     lleno, o una caída de nuestro proveedor de correo, no pueden gastarle el cupo a un bar que no
+ *     ha mandado nada. Lo que se protege es la reputación del dominio, que sólo sufre con lo que
+ *     sale. Los correos de las reservas web tienen sus propios topes.
+ *   · **Cada fila cuenta desde su `sent_at_ms`**: la hora de la reserva mientras está saliendo, y la
+ *     de después del envío cuando `terminarEnvio` la cierra. Un envío que tarda no adelanta el
+ *     momento en que deja de contar.
+ *   · **Una reserva que se quedó en `enviando`** (el worker murió entre la reserva y
+ *     `terminarEnvio`, o no se pudo apuntar cómo acabó) cuenta como si hubiera salido, que es lo
+ *     prudente: no se sabe si salió. Deja de contar cuando sale de la ventana de 24 h, contadas desde
+ *     que se reservó, y nunca pasa a entregada (`ok` sigue en 0). No necesita caducar antes, como las
+ *     de las reservas web: cada pedido lleva un id nuevo y nadie la retoma.
+ *
+ * **Si la base central no contesta, se envía igual** (`sin_base`), y `terminarEnvio` apunta el envío
+ * si para entonces puede. Turso caído no puede impedir que un bar mande su pedido: un tope que
+ * convierte una caída nuestra en «no puedes trabajar» cuesta más de lo que evita. Ese hueco no lo
+ * abre quien llama: no puede tirar la base central a voluntad.
+ */
+export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo> {
+	const ahora = Date.now();
 	try {
-		const r = await db.execute({
-			sql: `SELECT COUNT(*) AS n FROM email_sends
-			      WHERE tenant_id = ?1 AND tipo = 'pedido' AND ok = 1 AND sent_at_ms > ?2`,
-			args: [tenantId, Date.now() - VENTANA_MS],
+		const rs = await db.execute({
+			sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
+			      SELECT ?1, ?2, ?3, ?4, ?5, 0, 'enviando', ?6, 'pedido'
+			      WHERE (SELECT COUNT(*) FROM email_sends
+			             WHERE tenant_id = ?2 AND tipo = 'pedido' AND sent_at_ms > ?7
+			               AND (ok = 1 OR error_code = 'enviando')) < ?8`,
+			args: [
+				envio.id,
+				envio.tenantId,
+				envio.deviceId,
+				envio.toEmail,
+				envio.proveedor,
+				ahora,
+				ahora - VENTANA_MS,
+				TOPE_DIARIO,
+			],
 		});
-		return Number((r.rows?.[0] as any)?.n ?? 0) >= TOPE_DIARIO;
+		return Number(rs.rowsAffected) > 0 ? "reservado" : "tope";
 	} catch (e: any) {
 		capturarError(e, "email.quota");
-		console.error("[email] no se pudo contar el cupo diario:", String(e?.message || e));
-		return false;
+		console.error("[email] no se pudo reservar el cupo diario:", String(e?.message || e));
+		return "sin_base";
 	}
 }
 
 /**
- * Deja traza del envío en el control-plane (tabla `email_sends`, ver
- * `docs/sql/control-plane/esquema-actual.sql`), y es además de donde sale el recuento del tope.
+ * Apunta cómo acabó el envío (`ok`, y el código del binding si falló) en la fila que puso
+ * `reservarCupo`. Si la reserva no llegó a la base (`sin_base`), la fila se crea aquí: por eso va
+ * por el id con `ON CONFLICT(id) DO UPDATE`, que cierra la reserva cuando la hay.
  *
- * Es **best-effort a propósito**: si la tabla no existe todavía o Turso falla, se registra en el
- * log del worker y ya está. Un fallo del registro no puede impedir que un bar mande su pedido.
+ * AUD-41: al cerrar, `sent_at_ms` pasa a la hora de después del envío: un envío cuenta desde que
+ * salió. Si se quedara la de la reserva, un envío que tarda 30 s dejaría de contar 30 s antes de
+ * cumplir sus 24 h, y una ráfaga lenta dejaría sitio a otra entera antes de tiempo.
+ *
+ * Es **best-effort a propósito**: si Turso falla, se registra en el log del worker y ya está. Un
+ * fallo del registro no puede impedir que un bar mande su pedido, y la reserva que se queda en
+ * `enviando` sigue contando para el cupo de hoy.
  */
-async function registrarEnvio(
-	env: Env,
-	tenantId: string,
-	deviceId: string,
-	toEmail: string,
-	proveedor: string,
-	ok: boolean,
-	errorCode: string | null,
-): Promise<void> {
+async function terminarEnvio(db: Sql, envio: Envio, ok: boolean, errorCode: string | null): Promise<void> {
 	try {
-		await getDb(env).execute({
-			sql: `INSERT INTO email_sends
-			        (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms)
-			      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+		await db.execute({
+			sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
+			      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pedido')
+			      ON CONFLICT(id) DO UPDATE SET ok = excluded.ok, error_code = excluded.error_code,
+			                                    sent_at_ms = excluded.sent_at_ms`,
 			args: [
-				crypto.randomUUID(),
-				tenantId,
-				deviceId,
-				toEmail,
-				proveedor,
+				envio.id,
+				envio.tenantId,
+				envio.deviceId,
+				envio.toEmail,
+				envio.proveedor,
 				ok ? 1 : 0,
 				errorCode,
 				Date.now(),
