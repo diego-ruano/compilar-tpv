@@ -182,25 +182,48 @@ async function enElLogin() {
 	expect(screen.queryByText("Venta rápida (ficticia)")).toBeNull();
 }
 
+/**
+ * Pulsa un botón cuando se puede pulsar, no en cuanto aparece.
+ *
+ * Una pantalla puede pintarse antes de habilitar sus botones: el modo es un store externo y React
+ * pinta su cambio en el acto, pero el `ocupado` que se apaga después de un `await` llega en la tarea
+ * siguiente. Entre las dos, «Activa tu TPV» o el selector ya están a la vista con los botones
+ * deshabilitados, y un clic ahí se pierde. Se espera a eso, no a un plazo.
+ */
+async function pulsar(nombre: string | RegExp) {
+	const boton = await waitFor(() => {
+		const b = screen.getByRole("button", { name: nombre });
+		expect(b).toBeEnabled();
+		return b;
+	});
+	fireEvent.click(boton);
+}
+
 async function entrarComoCamarero() {
-	fireEvent.click(screen.getAllByText("Lucía")[0].closest("button")!);
-	// El fichaje cargado: con la entrada hecha, Enter intenta entrar.
+	const usuario = await waitFor(() => {
+		const b = screen.getAllByText("Lucía")[0].closest("button")!;
+		expect(b).toBeEnabled();
+		return b;
+	});
+	fireEvent.click(usuario);
+	// El fichaje cargado y el PIN escrito: «Entrar» se habilita cuando se puede entrar.
 	expect((await screen.findAllByText("Fichar salida")).length).toBeGreaterThan(0);
-	for (const tecla of ["1", "2", "3", "4", "Enter"]) fireEvent.keyDown(window, { key: tecla });
+	for (const cifra of ["1", "2", "3", "4"]) await pulsar(cifra);
+	await pulsar("Entrar");
 	expect(await screen.findByText("Venta rápida (ficticia)")).toBeInTheDocument();
 	expect(backend.sesion).toEqual({ id_usuario: "u-cam", rol: "Camarero" });
 }
 
 /** «← Vinculación» (o «← Ir a vinculación», o «Vincular de nuevo») y después «← Volver». */
 async function alSelector(primero: string) {
-	fireEvent.click(await screen.findByRole("button", { name: primero }));
+	await pulsar(primero);
 	expect(await screen.findByText("Conecta este Handy")).toBeInTheDocument();
-	fireEvent.click(screen.getByRole("button", { name: "← Volver" }));
+	await pulsar("← Volver");
 	expect(await screen.findByText(SELECTOR)).toBeInTheDocument();
 }
 
-function elegir(modo: "Handy" | "TPV") {
-	fireEvent.click(screen.getByRole("button", { name: new RegExp(`Configurar como ${modo}`) }));
+async function elegir(modo: "Handy" | "TPV") {
+	await pulsar(new RegExp(`Configurar como ${modo}`));
 }
 
 /** Nada guardado ha cambiado: ni el vínculo, ni nadie ha llamado a `device_reset_mode`. */
@@ -234,7 +257,7 @@ it("desde el login, sin sesión, «← Volver» va al selector sin desvincular, 
 	expect(await screen.findByText(/Vuelve a la vinculación de este equipo\./)).toBeInTheDocument();
 	expect(screen.queryByText(/Necesitarás vincularlo después/)).toBeNull();
 
-	elegir("Handy");
+	await elegir("Handy");
 	await enElLogin();
 	nadaBorrado();
 });
@@ -243,14 +266,14 @@ it("tras «Cerrar sesión», lo mismo", async () => {
 	arrancarHandy({ mainOnline: true });
 	await enElLogin();
 	await entrarComoCamarero();
-	fireEvent.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+	await pulsar("Cerrar sesión");
 	await enElLogin();
 	await waitFor(() => expect(backend.sesion).toBeNull());
 
 	await alSelector("← Vinculación");
 	nadaBorrado();
 
-	elegir("Handy");
+	await elegir("Handy");
 	await enElLogin();
 });
 
@@ -281,7 +304,7 @@ it("con sesión de camarero, «← Volver» la cierra y va al selector; el vínc
 	await waitFor(() => expect(backend.sesion).toBeNull());
 	expect(useAuth.getState().role).toBe("");
 
-	elegir("Handy");
+	await elegir("Handy");
 	await enElLogin();
 });
 
@@ -292,7 +315,7 @@ it("desde la espera a pantalla completa, «← Volver» va al selector y «Handy
 	await alSelector("← Ir a vinculación");
 	nadaBorrado();
 
-	elegir("Handy");
+	await elegir("Handy");
 	expect(await screen.findByText("La Main no está activa")).toBeInTheDocument();
 	nadaBorrado();
 });
@@ -314,18 +337,18 @@ it("sin Main, se puede probar el camino de la Main y volver: el vínculo sigue a
 	expect(await screen.findByText("La Main no está activa")).toBeInTheDocument();
 	await alSelector("← Ir a vinculación");
 
-	elegir("TPV");
+	await elegir("TPV");
 	expect(await screen.findByText("Activa tu TPV")).toBeInTheDocument();
 	expect(backend.modo).toBe("tpv");
 	nadaBorrado();
 
 	// El «← Volver» de la activación pone el modo a cero, pero el de la Main: el vínculo no lo toca.
-	fireEvent.click(screen.getByRole("button", { name: "← Volver" }));
+	await pulsar("← Volver");
 	expect(await screen.findByText(SELECTOR)).toBeInTheDocument();
 	expect(backend.resets).toEqual([{ sesion: null, resultado: "OK" }]);
 	expect(backend.llavero).toEqual(VINCULADA);
 
-	elegir("Handy");
+	await elegir("Handy");
 	expect(await screen.findByText("La Main no está activa")).toBeInTheDocument();
 	expect(backend.llavero).toEqual(VINCULADA);
 });
@@ -334,15 +357,15 @@ it("sin Main, el código de otra Main sustituye el vínculo, y sólo entonces", 
 	arrancarHandy({ mainOnline: false });
 	expect(await screen.findByText("La Main no está activa")).toBeInTheDocument();
 	await alSelector("← Ir a vinculación");
-	elegir("Handy");
+	await elegir("Handy");
 	expect(await screen.findByText("La Main no está activa")).toBeInTheDocument();
 	nadaBorrado();
 
-	fireEvent.click(screen.getByRole("button", { name: "← Ir a vinculación" }));
+	await pulsar("← Ir a vinculación");
 	expect(await screen.findByText("Conecta este Handy")).toBeInTheDocument();
 	fireEvent.change(screen.getByLabelText("Código manual"), { target: { value: "654321" } });
 	vi.useFakeTimers({ shouldAdvanceTime: true });
-	fireEvent.click(screen.getByRole("button", { name: "Vincular dispositivo" }));
+	await pulsar("Vincular dispositivo");
 	expect(await screen.findByText("Esperando aprobación en el TPV…")).toBeInTheDocument();
 	nadaBorrado();
 
@@ -366,7 +389,7 @@ it.each([
 
 	expect(confirmar).not.toHaveBeenCalled();
 	nadaBorrado();
-	elegir("Handy");
+	await elegir("Handy");
 	expect(await screen.findByText(titulo)).toBeInTheDocument();
 });
 
@@ -374,13 +397,13 @@ it("una Handy sin vincular (primer arranque) va al selector y vuelve a la vincul
 	arrancarHandy({ mainOnline: null, vinculada: false });
 	expect(await screen.findByText("Conecta este Handy")).toBeInTheDocument();
 
-	fireEvent.click(screen.getByRole("button", { name: "← Volver" }));
+	await pulsar("← Volver");
 	expect(await screen.findByText(SELECTOR)).toBeInTheDocument();
 	expect(backend.resets).toEqual([]);
 	expect(await screen.findByText(/Necesitarás vincularlo después\./)).toBeInTheDocument();
 	expect(screen.queryByText(/Vuelve a la vinculación de este equipo/)).toBeNull();
 
-	elegir("Handy");
+	await elegir("Handy");
 	expect(await screen.findByText("Conecta este Handy")).toBeInTheDocument();
 });
 
@@ -391,13 +414,13 @@ it("si el almacén no contesta, no se toma por una Handy sin vincular: lo dice y
 	expect(await screen.findByRole("alert")).toHaveTextContent(
 		/No se ha podido leer la vinculación guardada de este Handy: almacén de secretos no disponible/,
 	);
-	fireEvent.click(screen.getByRole("button", { name: "← Volver" }));
+	await pulsar("← Volver");
 	expect(await screen.findByText(SELECTOR)).toBeInTheDocument();
 	nadaBorrado();
 
 	// En cuanto contesta, «Handy» vuelve al vínculo sin pedir un código.
 	backend.almacenSinContestar = false;
-	elegir("Handy");
+	await elegir("Handy");
 	await enElLogin();
 	nadaBorrado();
 });
@@ -412,7 +435,7 @@ it("desde Configuración → Dispositivo, el administrador la desvincula tras co
 	useMode.setState({ mode: "handy" });
 
 	render(<Dispositivo darkMode={false} />);
-	fireEvent.click(await screen.findByRole("button", { name: "Desvincular este dispositivo" }));
+	await pulsar("Desvincular este dispositivo");
 
 	await waitFor(() => expect(useMode.getState().mode).toBeNull());
 	expect(confirmar).toHaveBeenCalledTimes(1);
