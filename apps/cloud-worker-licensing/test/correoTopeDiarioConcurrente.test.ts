@@ -169,7 +169,10 @@ describe("AUD-41 · el tope diario de pedidos con peticiones a la vez", () => {
 		expect(r).toEqual({ respuestas200: 1, respuestas429: 11, enviados: 1, filasOk: TOPE_DIARIO, filasEnviando: 0 });
 	});
 
-	it("una ráfaga de 250 a la vez sobre un día vacío deja salir exactamente el tope", async () => {
+	// 250 pedidos enteros por la ruta: solo, el fichero entero tarda unos 2 s, pero en la suite
+	// completa, con los demás ficheros a la vez, esta prueba pasaba de los 5 s de espera por defecto.
+	// El resultado no depende del tiempo, así que la espera sólo tiene que dar margen.
+	it("una ráfaga de 250 a la vez sobre un día vacío deja salir exactamente el tope", { timeout: 60_000 }, async () => {
 		const r = await conNegocio("rafaga", 0, async (ctx) => {
 			const { respuestas, enviados } = await aLaVez(250);
 			return resumen(respuestas, enviados, ctx);
