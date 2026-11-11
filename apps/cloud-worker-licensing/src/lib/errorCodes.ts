@@ -210,6 +210,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	caja_solo_en_main: "La caja sólo se gestiona desde el TPV principal.",
 	cobro_solo_en_main: "Los cobros sólo se hacen desde el TPV principal.",
 	recuperacion_solo_en_main: SOLO_EN_LA_MAIN,
+	// AUD-24: el PIN elegido en la configuración inicial de la Main aún no ha llegado a la nube.
+	setup_inicial_pendiente: "Termina la configuración inicial en el TPV y vuelve a intentarlo.",
 	// RI-61: la ruta manda su propia frase con las horas del choque; ésta es la de reserva.
 	reserva_solapada: "Esa mesa ya está ocupada a esa hora.",
 	reserva_solapada_prohibida:

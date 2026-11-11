@@ -2222,7 +2222,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::pairing::device_hora_para_firmar,
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,
-            commands::pairing::config_upload_initial_setup,
             // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
 
             // sincronización Main → nube (outbox de escrituras locales)
@@ -3330,6 +3329,11 @@ mod tests_exenciones_del_gate {
                 "era una segunda alta de producto, sin IVA, sin venta suelta ni alérgenos, cuyo \
                  `ON CONFLICT` pisaba el precio; los productos se dan de alta desde Inventario \
                  (RI-52)",
+            ),
+            (
+                "config_upload_initial_setup",
+                "subía a la nube, sin sesión ni `Requiere_Setup`, el PIN que le dijeran para el \
+                 usuario que le dijeran; el setup inicial sube por el outbox (AUD-24)",
             ),
         ] {
             assert!(

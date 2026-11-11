@@ -183,7 +183,6 @@ const LECTURAS_POR_POST: Record<string, string[]> = {
 const SOLO_CONSULTAN_Y_NO_SON_LECTURAS: Record<string, string> = {
 	"domains/email/email.routes.ts → /enviar-pedido": "manda un correo; lee el proveedor para acotar a quién",
 	"domains/login/login.routes.ts → /login": "verifica un PIN y cuenta el intento (LOGIN-01)",
-	"domains/login/login.routes.ts → /sync-initial-setup": "escritura directa de la Main en Turso, sin hub",
 	"domains/reservas_web/main.routes.ts → /avisos": "manda un correo al cliente de una reserva web",
 	// El protocolo de réplica y de recuperación de la Main (sincronizacion.md): sus cuerpos y sus
 	// techos son los suyos, y sólo la Main pasa de la puerta del router.

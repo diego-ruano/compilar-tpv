@@ -3495,15 +3495,6 @@ export type UpdateTareaInput = {
 	fecha_limite?: string | null,
 };
 
-/**
- *  Args para subir el setup inicial de la Main a la nube (tras "Guardar y continuar" en el
- *  panel de configuración inicial). El `pin` viaja firmado y se hashea en el worker.
- */
-export type UploadInitialSetupArgs = {
-	id_usuario: string,
-	pin: string,
-};
-
 export type UpsertCategoriaInput = {
 	id_categoria?: string | null,
 	nombre: string,

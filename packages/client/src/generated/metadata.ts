@@ -204,7 +204,6 @@ export const nombresComandos = {
     "device_hora_para_firmar": "deviceHoraParaFirmar",
     "tpv_server_post_json": "tpvServerPostJson",
     "pair_create": "pairCreate",
-    "config_upload_initial_setup": "configUploadInitialSetup",
     "sync_health": "syncHealth",
     "permisos_sesion": "permisosSesion",
     "permisos_configuracion": "permisosConfiguracion",
@@ -433,7 +432,6 @@ type Argumentos = {
     "device_hora_para_firmar": {  };
     "tpv_server_post_json": { args: Parameters<Comandos["tpvServerPostJson"]>[0] };
     "pair_create": {  };
-    "config_upload_initial_setup": { args: Parameters<Comandos["configUploadInitialSetup"]>[0] };
     "sync_health": {  };
     "permisos_sesion": {  };
     "permisos_configuracion": {  };

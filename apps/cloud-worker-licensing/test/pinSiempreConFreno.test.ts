@@ -6,7 +6,7 @@
 // fallidos, así que desde cualquier Handy vinculada se podían probar las diez mil combinaciones de
 // un PIN de cuatro cifras sin ninguna espera, y al acertar se le cambiaban PIN y correo a cualquier
 // usuario activo — administrador incluido. Esa ruta ya no existe: el setup inicial lo hace la Main
-// contra su propia base y sube por `/sync-initial-setup`.
+// contra su propia base y sube por el outbox.
 //
 // Pero comprobar que aquella ruta no está sólo protege de aquella ruta. Lo que se fija aquí es la
 // REGLA, leyendo el fuente: **cada** sitio que verifique un PIN tiene que estar dentro de un handler
@@ -90,13 +90,16 @@ describe("REV-06 · verificar un PIN exige el freno de LOGIN-01", () => {
 		});
 	}
 
-	it("el setup inicial ya no se puede hacer desde la nube", () => {
-		// La corrección de REV-06 es una ausencia, así que se fija como tal. El camino bueno —la
-		// Main sube el resultado de su setup local— sigue donde estaba.
+	it("el setup inicial ya no se puede hacer ni subir desde la nube", () => {
+		// Las correcciones de REV-06 y de AUD-24 son ausencias, así que se fijan como tales: ni
+		// `/complete-initial-setup` (elegía el PIN desde la nube) ni `/sync-initial-setup` (lo
+		// subía directo a Turso para cualquier usuario). El PIN inicial sube por el outbox.
 		// Se mira la tabla de RUTAS y no el texto del fichero: ahí arriba hay un comentario que
-		// explica por qué se fue, y ese comentario tiene que poder seguir nombrándola.
+		// explica por qué se fueron, y ese comentario tiene que poder seguir nombrándolas.
 		const rutas = handlers(fuente).map((h) => h.ruta);
+		// Que la tabla se lee de verdad: sin esto, un `handlers` roto dejaría las ausencias en verde.
+		expect(rutas).toContain("POST /login");
 		expect(rutas).not.toContain("POST /complete-initial-setup");
-		expect(rutas).toContain("POST /sync-initial-setup");
+		expect(rutas).not.toContain("POST /sync-initial-setup");
 	});
 });

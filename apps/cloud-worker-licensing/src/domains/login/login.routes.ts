@@ -8,7 +8,7 @@ import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant
 import { getDb } from "../../server/db";
 
 import * as cmd from "./login.commands";
-import { hashPin, verifyPin } from "./login.crypto";
+import { verifyPin } from "./login.crypto";
 import * as q from "./login.queries";
 import * as S from "./login.schemas";
 import { solicitarCodigoPin, verificarCodigoPin } from "./recuperarPin";
@@ -56,12 +56,26 @@ function entraSinPin(record: any): boolean {
 	return Number(record?.sin_pin) === 1;
 }
 
+/**
+ * AUD-24: un usuario que en la nube aún tiene el setup inicial pendiente no entra ni ficha en la
+ * Handy. Su PIN aquí es todavía el de la siembra (`ensureTenantInitialAdmin`), que es público: el
+ * que se elige en la Main sube por el outbox, con `Requiere_Setup = 0`, y puede tardar (la Main sin
+ * red, o con la réplica apagada) mientras ya hay una Handy vinculada. Se mira antes que el PIN y
+ * que el freno: no hay nada que verificar contra el PIN de la siembra.
+ */
+function setupPendiente(c: any, record: any): Response | null {
+	if (Number(record?.requiere_setup) !== 1) return null;
+	return c.json({ error: "setup_inicial_pendiente" }, 409);
+}
+
 loginRoutes.post("/login", cuerpo(S.loginUserSchema), async (c) => {
 	const datos = c.req.valid("json");
 	const record = await tenantQuery(c, (db) =>
 		q.getLoginRecord(db, datos.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
+	const pendiente = setupPendiente(c, record);
+	if (pendiente) return pendiente;
 	if (!entraSinPin(record)) {
 		// LOGIN-01: bloqueo por intentos fallidos (anti brute-force). AUD-05: el intento se reserva
 		// ANTES de verificar el PIN; sin reserva no se verifica nada.
@@ -107,36 +121,21 @@ loginRoutes.post("/turno-partido", cuerpo(S.setTurnoPartidoSchema), async (c) =>
 //   · Y tampoco miraba `Requiere_Setup`, que en la Main es el ÚNICO cerrojo (allí el PIN ni se
 //     comprueba: en el primer arranque no hay ninguno que confirmar). O sea que las dos
 //     implementaciones del mismo comando tenían el cerrojo cambiado: cada una la mitad de la otra.
-//   · No cubría ningún caso real. El setup lo hace la Main contra su SQLite y luego sube el
-//     resultado por `/sync-initial-setup` (aquí abajo); la Handy no entra nunca a este flujo,
-//     porque una Main con el setup pendiente no pasa de su propia pantalla de setup y por tanto no
-//     llega a Configuración ni puede vincular ninguna Handy.
+//   · No cubría ningún caso real. El setup lo hace la Main contra su SQLite y el resultado sube
+//     por el outbox; la Handy no entra nunca a este flujo, porque una Main con el setup pendiente
+//     no pasa de su propia pantalla de setup y por tanto no llega a Configuración ni puede
+//     vincular ninguna Handy.
 // Es la misma decisión que `cobro_solo_en_main`, `soloLaMainEscribeCaja` y `fiscalSoloMain`: quien
 // tiene autoridad sobre esa fila es la Main, así que la nube no ofrece un segundo camino hacia ella.
 // Lo vigila `test/pinSiempreConFreno.test.ts`, que además exige el freno a toda ruta que mire un PIN.
-
-// Subida del setup inicial Main -> nube. Escritura DIRECTA en Turso (sin hub), porque la Main
-// no está conectada por WebSocket; el hub la rechazaría con `main_offline`. Deja la nube con
-// las credenciales reales del admin para que el login de la Handy funcione.
-loginRoutes.post(
-	"/sync-initial-setup",
-	soloLaMain("forbidden_not_tpv", 403),
-	cuerpo(S.syncInitialSetupSchema),
-	async (c) => {
-		const datos = c.req.valid("json");
-
-		const passwordHash = await hashPin(datos.pin);
-
-		await tenantQuery(c, (db) =>
-			q.applyInitialSetupDirect(db, {
-				idUsuario: datos.id_usuario,
-				passwordHash,
-			}),
-		);
-
-		return c.json({ ok: true });
-	},
-);
+//
+// AUD-24: y aquí estaba `POST /sync-initial-setup`, la subida directa a Turso del PIN que eligiera
+// la Main en su setup. No miraba `Requiere_Setup`: firmada como la Main, cambiaba en la nube el PIN
+// de cualquier usuario, también el del administrador con el setup hecho, sin pasar por el hub, y la
+// Main no se enteraba. Sobraba: el `UPDATE` del setup local sube por el outbox como cualquier
+// escritura de la Main, y la Main ya no la llamaba. Se ha retirado; lo vigilan el mismo test y
+// `test/setupInicialPendiente.test.ts`. Mientras ese `UPDATE` no llega, `setupPendiente` no deja
+// entrar ni fichar en la Handy con el PIN de la siembra.
 
 // ── Recuperar el PIN de un administrador (LOGIN-07) ─────────────────────────────────────────
 // Sólo desde la Main: el PIN que se recupera vive en su base local, y que la petición vaya firmada
@@ -281,6 +280,8 @@ loginRoutes.post("/punch", cuerpo(S.punchSchema), async (c) => {
 		q.getLoginRecord(db, datos.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
+	const pendiente = setupPendiente(c, record);
+	if (pendiente) return pendiente;
 	if (!entraSinPin(record)) {
 		// LOGIN-01: el fichaje también verifica PIN → mismo throttle anti brute-force, con el
 		// intento reservado antes de verificar (AUD-05).

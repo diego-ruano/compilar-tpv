@@ -165,10 +165,16 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
   [LOGIN-04](../pendientes.md#login-04--el-hash-del-pin-se-puede-romper-offline).
 - **El PIN inicial se elige en la Main y sólo ahí.** `complete_initial_setup` cambia el PIN del
   administrador sin pedir el actual (es el del seed, público) y su único cerrojo es
-  `Requiere_Setup = 1`, que se apaga al usarlo. El worker no tiene un segundo camino hacia esa fila:
-  la Main lo aplica en su SQLite y lo sube por `POST /v1/login/sync-initial-setup` (firmada, rol TPV),
-  directa a Turso porque aún no hay WebSocket. En Rust el puerto falla por defecto en la Handy, y una
-  Main con el setup pendiente no sale de `/setup`, así que no puede haber Handys vinculadas todavía.
+  `Requiere_Setup = 1`, que se apaga al usarlo. La Main lo aplica en su SQLite y el `UPDATE`, con el
+  hash y no el PIN, sube por el outbox como cualquier escritura. No hay otro camino hacia esa fila:
+  ni un comando que lo suba aparte ni una ruta del worker que lo escriba directo en Turso (AUD-24; lo
+  vigilan `pinSiempreConFreno.test.ts` y `setupInicialPendiente.test.ts`). En Rust el puerto falla
+  por defecto en la Handy. Ese `UPDATE` puede tardar en llegar (la Main sin red, o con la réplica
+  apagada, con una Handy ya vinculada), y mientras tanto la nube conserva el PIN público de la
+  siembra con `Requiere_Setup = 1`: el worker no deja entrar ni fichar en la Handy a un usuario así
+  («Termina la configuración inicial en el TPV y vuelve a intentarlo.», `setup_inicial_pendiente`),
+  antes de mirar el PIN y sin gastar intentos. La Main sigue sin bloquearse: sin red, su setup y su
+  login son locales.
 
 ### Entrar sin PIN
 

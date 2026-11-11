@@ -196,25 +196,6 @@ export async function reservarIntento(
 }
 
 /**
- * Escritura DIRECTA del setup inicial en la Turso del tenant (mismo UPDATE que aplica el
- * comando `complete_initial_setup` vía el hub). Se usa para la SUBIDA desde la Main, que no
- * está conectada por WebSocket: por eso no pasa por el Durable Object (evita el `main_offline`).
- */
-export async function applyInitialSetupDirect(
-	db: Client,
-	input: { idUsuario: string; passwordHash: string },
-): Promise<void> {
-	await db.execute({
-		sql: `
-			UPDATE Usuarios
-			SET Password_Hash = ?2, Requiere_Setup = 0
-			WHERE ID_Usuario = ?1;
-		`,
-		args: [input.idUsuario, input.passwordHash],
-	});
-}
-
-/**
  * RI-05: la entrada más antigua que todavía cuenta como jornada en curso. La jornada se busca por su
  * hora de entrada y no por su `Fecha`, porque el turno de noche ficha la salida al día siguiente.
  * Pasado este margen el fichaje se da por olvidado y lo cierra el job `fichajes_colgados` de la Main.

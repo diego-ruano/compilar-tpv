@@ -198,12 +198,3 @@ pub struct TpvServerPostJsonArgs {
     #[specta(type = specta_typescript::Unknown)]
     pub body: serde_json::Value,
 }
-
-/// Args para subir el setup inicial de la Main a la nube (tras "Guardar y continuar" en el
-/// panel de configuración inicial). El `pin` viaja firmado y se hashea en el worker.
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct UploadInitialSetupArgs {
-    // ID UUIDv7 (texto), igual que en el resto del sistema y en el worker (`idStr`).
-    pub id_usuario: String,
-    pub pin: String,
-}
