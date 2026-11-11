@@ -116,6 +116,8 @@ function prepararHub(hub: any, fallo: () => { cuando: Fallo; error?: Error }) {
 			return r;
 		},
 	};
+	// El interruptor `cola_do` se lee de la base central, que aquí no existe: nadie ha pausado la cola.
+	hub.colaPausada = async () => null;
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
 	hub.getTenantDb = async () => db;
 	hub.resolveTenantDbClient = async () => db;
@@ -631,6 +633,7 @@ describe("AUD-18 · el lote de la cola", () => {
 					return r;
 				},
 			};
+			hub.colaPausada = async () => null;
 			hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
 			hub.getTenantDb = async () => db;
 			hub.resolveTenantDbClient = async () => db;

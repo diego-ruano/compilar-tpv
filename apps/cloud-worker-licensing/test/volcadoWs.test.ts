@@ -84,6 +84,8 @@ function prepararHub(hub: any) {
 	// Las tablas de la cola las crea `encolar`, pero los tests que comprueban que NO se encoló nada
 	// necesitan poder leerlas igualmente.
 	hub.asegurarCola();
+	// El interruptor `cola_do` se lee de la base central, que aquí no existe: nadie ha pausado la cola.
+	hub.colaPausada = async () => null;
 	return { sql, db };
 }
 

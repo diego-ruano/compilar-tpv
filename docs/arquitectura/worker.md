@@ -36,7 +36,8 @@ y el cron diario `0 7 * * *`.
 RI-46: los bindings de R2 son exclusivamente `IMAGES` y `COPIAS`. En desarrollo local, R2 y
 `EMAIL` se simulan; no llevan `remote: true`. Turso conserva la configuración externa existente.
 La fecha de compatibilidad (`2026-05-29`) coincide con el runtime instalado; los tests reutilizan
-el mismo `wrangler.json` y los tipos se regeneran con `pnpm cf-typegen`.
+el mismo `wrangler.json` con el entorno pisado ([los tests no salen a la red](#los-tests-no-salen-a-la-red))
+y los tipos se regeneran con `pnpm cf-typegen`.
 
 ## Dos bases, y sólo una se migra desde el código
 
@@ -227,6 +228,59 @@ Turso no (más de 24 h en el plan Free, una base borrada, el propio proveedor):
   de `wrangler.json` y desplegar, **deprisa**: mientras el worker apunte a una base sin esas filas, cada
   TPV que compruebe su licencia la borra. Las licencias activadas después del punto restaurado hay que
   rehacerlas a mano.
+
+## Los tests no salen a la red
+
+Los tests corren dentro de workerd (`@cloudflare/vitest-pool-workers`) y toman de `wrangler.json` los
+bindings, pero no pueden hablar con ningún servicio de verdad (`vitest.config.ts`):
+
+- **El entorno es de pruebas** (`test/helpers/entornoDePruebas.ts`). Las `vars` que nombran un
+  servicio o una cuenta —la base central, la organización de Turso, los remitentes, Turnstile, el
+  origen de las reservas web, Axiom— valen direcciones `.invalid` y nombres ficticios. Los secretos
+  que la suite necesita (`LICENSE_JWT_SECRET`, `TURSO_AUTH_TOKEN`, `TURSO_PLATFORM_TOKEN`) son
+  deterministas; los demás van vacíos, que el worker trata como sin configurar, y el test que
+  necesita uno lo pasa en su propio entorno. Wrangler mete además en los tests el `.dev.vars` de la
+  carpeta del worker o, si no lo hay, su `.env` y su `.env.local`, y el pool no deja desactivarlo:
+  la configuración le pregunta qué nombres va a cargar y los pone todos vacíos antes de aplicar la
+  tabla. Así nada de ese fichero llega a un test, esté o no en `Env`. Vite, por su lado, cargaría
+  el `.env` y pasaría sus `VITE_*` por `import.meta.env` y `process.env`: `envDir: false` se lo
+  impide.
+- **Una salida sin doble se rechaza y hace fallar al test** (`test/helpers/sinRed.ts`, que
+  `setupFiles` pone antes de cada fichero). El `fetch` y el `WebSocket` globales —los comparten los
+  tests, el worker y sus Durable Objects— lanzan `Salida a la red bloqueada en los tests: POST
+  https://host`: el método y el origen, nunca la ruta ni la consulta, que es donde viajan los
+  secretos (la URL de un latido lo es entera). Al terminar, el test falla con la lista de lo que
+  intentó, aunque el código se haya tragado el error (un envío a Axiom o un latido no propagan su
+  fallo). La guarda se pone antes de cargar el worker: el cliente de libsql se guarda el
+  `WebSocket` al cargarse.
+- **Detrás, el worker de pruebas no tiene por dónde salir**: `outboundService` manda todo lo que
+  sale de él, también lo que no pase por el `fetch` global, a un worker auxiliar que lo corta, lo
+  apunta y contesta 599 con el mismo texto; la guarda recoge lo apuntado al terminar cada test, así
+  que también hace fallar al test.
+- **Un socket TCP**: el worker auxiliar también lo corta, pero workerd no se lo pasa y no lo puede
+  apuntar. Por eso `sinRed.setup.ts` sustituye con `vi.mock` el `connect` de `cloudflare:sockets`
+  para todo lo que lo importe por el cargador de Vitest (los tests y el worker): lo rechaza, dice el
+  host y el puerto, y lo apunta como el `fetch`. Lo que abre un socket por dentro del runtime
+  (`node:net`, `node:tls`) no pasa por ahí: se vigila que ni el worker ni los tests los importen, y
+  lo que haga así una dependencia se corta pero no hace fallar al test.
+
+Queda fuera de los dos cierres el proceso de Node del propio Vitest (`vitest.config.ts`, sus
+plugins y un `globalSetup`): hoy no hay `globalSetup` ni nada que pida red ahí, y lo que se añada
+en ese lado no lo vigila nada.
+
+Lo vigila `test/sinRed.test.ts`, también con el propio Vitest: tres tests marcados `it.fails` se
+tragan una salida (una de la guarda, una del worker auxiliar y un socket) y sólo los hace fallar el
+gancho; sin él, salen en rojo.
+
+**Un test declara el doble de lo que su código llama fuera**, antes de llamarlo:
+
+| Lo que se llama | Doble |
+|---|---|
+| La base central desde una ruta o un helper (`getDb`) | `vi.mock("../src/server/db", …)` con `getDb` devolviendo `clienteSobre(sql, storage)` (`helpers/clienteSql.ts`) sobre el SQLite de un Durable Object, con `prepararPlanoDeControl(sql)` |
+| La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` (o `lecturaConHora`) llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)` |
+| La base del negocio en el `TenantHub` | Dentro de `enElHub`: `hub.withTenantDbRetry`, o `hub.getTenantDb` y `hub.resolveTenantDbClient` |
+| La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` y, si el test hace drenar la cola, `hub.colaPausada = async () => null` (el interruptor `cola_do` se lee de la base central en cada vuelta) |
+| Un `fetch`: la API de plataforma de Turso, Stripe, Axiom, Turnstile, un latido | `vi.stubGlobal("fetch", doble)` y `vi.unstubAllGlobals()` en `afterEach`; o `vi.mock` del módulo que lo hace |
 
 ## Secretos
 
