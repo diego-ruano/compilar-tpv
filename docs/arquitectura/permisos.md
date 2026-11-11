@@ -214,6 +214,25 @@ y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en 
   `<style>` inyectado en tiempo de ejecución ni librerías que se autoinyecten CSS; la CSP sólo se aplica
   al build empaquetado y en Android, no en `pnpm tauri dev` de escritorio. Detalle y cómo comprobarlo
   en [frontend.md](frontend.md#csp).
+- **La ventana no navega fuera de la aplicación** (AUD-25, `src-tauri/src/navegacion.rs`). No tiene
+  marco ni barra de direcciones: otra web cargada en ella ocuparía el TPV entero, y la CSP no regula
+  la navegación de nivel superior (un `<meta http-equiv=refresh>`, un enlace). Un plugin con
+  `on_navigation` sólo admite los orígenes desde los que Tauri sirve la app: `http://tauri.localhost`
+  y `https://tauri.localhost` (Windows y Android) y, sólo en un build de desarrollo, el servidor de
+  Vite (`build.devUrl`). Cualquier otro destino (otra web, otro puerto del equipo, `data:`,
+  `about:blank`) se cancela y deja un aviso en el registro con su origen. Lo decide `es_de_la_app`,
+  con sus tests. Es una segunda capa, no la garantía de interceptar cualquier navegación:
+  - cubre el marco principal: en Windows, lo que WebView2 anuncia con `NavigationStarting`; en
+    Android, lo que la WebView pasa por `shouldOverrideUrlLoading`;
+  - los iframes no pasan por ella: los para la CSP (`frame-src 'none'`);
+  - la carga inicial no depende de ella: la hace Tauri con la dirección de la app, que sólo
+    consulta a los plugins cuando la webview ya está registrada, y Android no la pasa por
+    `shouldOverrideUrlLoading`;
+  - una dirección que Tauri no sepa interpretar no llega al plugin: Tauri la deja pasar.
+
+  La app no tiene enlaces externos ni ventanas secundarias; un enlace que haya que abrir va al
+  navegador del sistema, nunca a la webview. Lo que impide que llegue marcado a la página es la
+  primera capa: [frontend.md](frontend.md#gráficas).
 - **La webview no lee AppData mediante el plugin `fs` ni escribe sobre los ficheros del equipo.** `fs:allow-write-file` existe para guardar
   donde la persona elija (el diálogo autoriza la ruta), con un `deny` para `data.db`, el estado de
   licencia, las copias y el resto de ficheros propios de AppData. Un fichero propio nuevo va a ese

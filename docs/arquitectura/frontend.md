@@ -196,6 +196,44 @@ cierra a los 10 minutos sin actividad (`useInactivityLogout`) y `AppBoot` hace `
   `securitypolicyviolation`, que dice la directiva culpable. Receta completa en
   [compilar-android.md](../guias/compilar-android.md).
 
+## Gráficas
+
+Las gráficas son de ApexCharts y viven en `features/estadisticas/`. Toda gráfica esparce
+`APEX_CHART_BASE` (`apexBase.ts`) en su `chart: {}`, y con importar ese fichero tiene dos cosas:
+
+- **Sin `<style>` inyectado**: `injectStyleSheet: false` (ver [CSP](#csp)).
+- **El texto del negocio no llega como HTML** (AUD-25). ApexCharts escribe con `innerHTML` el
+  título del tooltip (la categoría), el nombre de la serie dentro del tooltip y el texto de la
+  leyenda, y el nombre de un cliente, un producto, un proveedor, una mesa, una zona o un trabajador
+  es lo que quiera quien lo escribe. `apexBase.ts` fija los tres formateadores en `window.Apex`, los
+  valores por defecto que ApexCharts funde con las opciones de cada gráfica, y los tres pasan el
+  texto por `escaparHtml`: un nombre con `&`, `<` o comillas se lee tal cual. Los ejes, las
+  etiquetas de datos y el centro de una tarta son SVG y se pintan como texto.
+
+Lo que una gráfica puede fijar en sus opciones:
+
+| Opción | Regla |
+|---|---|
+| `tooltip.x.formatter`, `tooltip.y.title.formatter`, `legend.formatter` | Pisan el de la base, así que escapan ellas: devuelven un texto fijo o lo que sea pasado por `escaparHtml`. Con eje de fechas (`xaxis.type: "datetime"`) la gráfica trae su `tooltip.x.formatter`, porque el de la base no da formato a una fecha |
+| `tooltip.y.formatter`, `yaxis.labels.formatter` | El valor también se escribe como HTML: sólo dan formato al número que reciben (`eur`, `Math.round`…) |
+| `xaxis.labels.formatter`, el centro de una tarta, `dataLabels` | Libres: son SVG, y el título pasa después por el formateador de la base |
+| `legend.customLegendItems` | Sin escapar antes: pasan por `legend.formatter` y saldrían escapadas dos veces |
+| `tooltip`, `tooltip.x`, `tooltip.y`, `tooltip.y.title`, `legend` | Siempre un objeto. ApexCharts sólo funde objetos: una lista en `tooltip.y` (la admite, con un formateador por serie) o cualquier otro valor sustituye al formateador de la base |
+| `xaxis.tooltip.formatter` (se salta el del título), `yaxis.tooltip`, `tooltip.custom`, `tooltip.z`, `legend.tooltipHoverFormatter`, `legend.markers.customHTML`, `customSVG` en una anotación, `chart.toolbar.tools`, `goals` en una serie | No se usan: ApexCharts los escribe tal cual |
+
+La protección de fondo son dos cosas: el formateador de la base, que escapa lo que una gráfica no
+toque, y `test/react/etiquetasApexEscapadas.test.tsx`, que monta las seis pantallas con nombres
+hostiles. Encima, `test/graficasConBase.test.ts` lee con el analizador de TypeScript las opciones
+de cada `<ReactApexChart options=…>` y falla si una gráfica se monta sin la base, se sale de esa
+tabla o lleva algo que no sabe leer (una clave calculada, un objeto esparcido desde un fichero que
+no revisa, unas opciones fabricadas con una llamada). Caza lo corriente, no todo: sigue un nombre
+hasta su objeto sólo dentro del mismo fichero.
+
+El resto de la interfaz lo pinta React como texto: no hay `dangerouslySetInnerHTML` ni
+`innerHTML`. Detrás hay una segunda capa, la política de navegación de la ventana, que cancela la
+salida del marco principal a otra web; qué cubre y qué no, en
+[permisos.md](permisos.md#la-superficie-de-la-aplicación-de-escritorio).
+
 ## Linters
 
 `pnpm lint` (ESLint en todo el monorepo) analiza, no formatea. Las cuatro reglas y por qué están en

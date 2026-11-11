@@ -9,6 +9,7 @@ mod replicacion;
 mod reservas_web;
 mod socket_handy;
 mod jobs;
+mod navegacion;
 mod printing;
 mod zoom;
 
@@ -2294,7 +2295,9 @@ pub fn run() {
 
     let builder = builder
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // AUD-25: la ventana no navega fuera de la aplicación.
+        .plugin(navegacion::plugin());
 
     // Sentry (bridge webview+core) es solo escritorio: el plugin arrastra el minidump (proceso
     // helper) y native-tls. En móvil el crate `sentry` (rustls) sigue capturando panics de Rust.

@@ -6,7 +6,7 @@ import type { ApexOptions } from "apexcharts";
 import { useToast } from "../../shared/toast";
 import { cn } from "../ventaRapida/utils";
 
-import { APEX_CHART_BASE } from "./apexBase";
+import { APEX_CHART_BASE, escaparHtml } from "./apexBase";
 import {
   type StatsRange,
   type StatsCategoriaRow,
@@ -105,7 +105,8 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
         marker: { show: true },
         y: {
           formatter: (val: number) => `${val}`,
-          title: { formatter: () => title },
+          // AUD-25: se escribe como HTML, y `title` lo pone quien llama.
+          title: { formatter: () => escaparHtml(title) },
         },
       },
     }),
