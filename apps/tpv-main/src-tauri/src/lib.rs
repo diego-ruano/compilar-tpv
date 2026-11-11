@@ -3223,6 +3223,8 @@ mod tests_exenciones_del_gate {
             (include_str!("commands/tareas.rs"), vec!["tareas_marcar_tarea_finalizada"]),
             (include_str!("commands/venta_rapida.rs"), vec!["vr_create_comanda_barra"]),
             (include_str!("commands/inventario.rs"), vec!["inventario_upsert_producto", "inventario_create_lote", "inventario_ajustar_lote", "inventario_ajustar_stock_suelto"]),
+            // AUD-26: qué se ve, en nombre de quién se marca leído y sobre qué actúa la papelera.
+            (include_str!("commands/notificaciones.rs"), vec!["notificaciones_listar", "notificaciones_no_leidas", "notificaciones_marcar_leida", "notificaciones_marcar_todas_leidas", "notificaciones_descartar", "notificaciones_papelera", "notificaciones_restaurar", "notificaciones_eliminar"]),
         ] {
             for comando in comandos {
                 let cuerpo = fuente.split(&format!("pub async fn {comando}(" )).nth(1).unwrap().split("#[tauri::command]").next().unwrap();

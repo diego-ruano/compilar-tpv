@@ -23,24 +23,32 @@ pub trait NotificacionesRepository: Send + Sync {
     /// Nº de notificaciones activas visibles y **no leídas** por `id_usuario` (para el badge).
     async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<i64>;
 
-    /// Marca una notificación como leída por `id_usuario`. Idempotente. `true` si insertó el recibo.
+    // AUD-26: las escrituras de abajo reciben el usuario (el de la sesión) y sólo actúan sobre una
+    // notificación dirigida a él (a todos, a él o a su rol) y, en la papelera, en el estado que
+    // toca. Esa condición va dentro de la propia sentencia que escribe, no sólo en una consulta
+    // previa: así nadie se cuela entre la comprobación y la escritura, y se cumple también donde se
+    // aplique después (la nube). Si no la cumple, `not_found` y no se escribe nada.
+
+    /// Marca una notificación dirigida a `id_usuario` como leída por él. Idempotente: `true` si
+    /// insertó el recibo, `false` si ya estaba leída.
     async fn marcar_leida(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool>;
 
     /// Marca como leídas todas las visibles y no leídas de `id_usuario`. Devuelve cuántas marcó.
     async fn marcar_todas_leidas(&self, id_usuario: &str) -> AppResult<i64>;
 
-    /// Manda una notificación a la papelera (`Estado = 'descartada'`). Reversible: la fila sigue
-    /// ahí, sólo deja de aparecer en el centro de notificaciones. `true` si cambió alguna.
-    async fn descartar(&self, id_notificacion: &str) -> AppResult<bool>;
+    /// Manda a la papelera (`Estado = 'descartada'`) una notificación activa dirigida a
+    /// `id_usuario`. Reversible: la fila sigue ahí, sólo deja de aparecer en el centro.
+    async fn descartar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool>;
 
     /// Contenido de la papelera visible para `id_usuario`: lo descartado, sin borrar del todo.
     async fn listar_descartadas(&self, id_usuario: &str) -> AppResult<Vec<NotificacionRow>>;
 
-    /// Devuelve una notificación de la papelera al centro (`Estado = 'activa'`).
-    async fn restaurar(&self, id_notificacion: &str) -> AppResult<bool>;
+    /// Devuelve al centro (`Estado = 'activa'`) una notificación de la papelera de `id_usuario`.
+    async fn restaurar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool>;
 
-    /// Borra la fila para siempre. Sus recibos de lectura se van con ella (ON DELETE CASCADE).
-    async fn eliminar(&self, id_notificacion: &str) -> AppResult<bool>;
+    /// Borra para siempre una notificación de la papelera de `id_usuario`. Sus recibos de lectura
+    /// se van con ella (ON DELETE CASCADE).
+    async fn eliminar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool>;
 }
 
 /// Puerto de **emisión** de notificaciones. Cualquier módulo lo recibe y emite en una línea.

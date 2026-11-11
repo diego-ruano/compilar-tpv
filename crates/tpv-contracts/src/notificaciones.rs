@@ -24,43 +24,28 @@ pub struct NotificacionRow {
     pub leida: bool,
 }
 
-/// Args para listar las notificaciones visibles de un usuario.
+// AUD-26: ningún DTO de notificaciones lleva el `id_usuario`. Las notificaciones son las de quien ha
+// iniciado sesión, y el comando lo saca de la sesión del backend: la pantalla no elige en nombre de
+// quién se lee ni se marca. Contar las no leídas, marcar todas y la papelera no reciben nada.
+
+/// Args para listar las notificaciones visibles de quien ha iniciado sesión.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct NotificacionesListArgs {
-    pub id_usuario: String,
     /// Si es `true`, solo devuelve las no leídas por ese usuario.
     #[serde(default)]
     pub solo_no_leidas: Option<bool>,
 }
 
-/// Args con solo el id de usuario (p. ej. contador de no leídas).
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct NotificacionesUsuarioArgs {
-    pub id_usuario: String,
-}
-
-/// Marca una notificación como leída por un usuario.
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct MarcarLeidaInput {
-    pub id_notificacion: String,
-    pub id_usuario: String,
-}
-
-/// Identifica una notificación para las acciones de la papelera (descartar, restaurar, eliminar).
+/// Identifica una notificación: para marcarla leída y para las acciones de la papelera
+/// (descartar, restaurar, eliminar).
 ///
 /// El estado de la papelera es de la NOTIFICACIÓN, no del usuario que la mira: una notificación es
 /// un aviso del negocio (stock bajo, pedido por aprobar) y borrarla es decir "esto ya está visto",
-/// no "no me lo enseñes a mí". Por eso aquí no viaja el `id_usuario`: lo que sí es por usuario es
-/// la lectura, que tiene su propia tabla.
+/// no "no me lo enseñes a mí". Lo que sí es por usuario es la lectura, que tiene su propia tabla. Y
+/// la papelera sólo actúa sobre lo que ve quien la usa.
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 pub struct NotificacionIdInput {
     pub id_notificacion: String,
-}
-
-/// Marca como leídas todas las notificaciones visibles de un usuario.
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct MarcarTodasLeidasInput {
-    pub id_usuario: String,
 }
 
 /// Entrada para emitir una notificación manual (envío desde una pantalla de administración).

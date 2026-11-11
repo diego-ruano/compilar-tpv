@@ -86,12 +86,14 @@ impl NotificacionesRepository for HttpNotificacionesRepository {
         Ok(r.marcadas)
     }
 
-    async fn descartar(&self, id_notificacion: &str) -> AppResult<bool> {
+    // AUD-26: la papelera manda el usuario de la sesión; el worker sólo escribe si la notificación
+    // va dirigida a él y está en el estado que toca (si no, 404 y `not_found`).
+    async fn descartar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
         let _: JsonValue = self
             .client
             .post_json(
                 &format!("/v1/notificaciones/{id_notificacion}/descartar"),
-                &json!({}),
+                &json!({ "id_usuario": id_usuario }),
             )
             .await?;
         Ok(true)
@@ -106,21 +108,24 @@ impl NotificacionesRepository for HttpNotificacionesRepository {
             .await
     }
 
-    async fn restaurar(&self, id_notificacion: &str) -> AppResult<bool> {
+    async fn restaurar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
         let _: JsonValue = self
             .client
             .post_json(
                 &format!("/v1/notificaciones/{id_notificacion}/restaurar"),
-                &json!({}),
+                &json!({ "id_usuario": id_usuario }),
             )
             .await?;
         Ok(true)
     }
 
-    async fn eliminar(&self, id_notificacion: &str) -> AppResult<bool> {
+    async fn eliminar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
         let _: JsonValue = self
             .client
-            .delete_json(&format!("/v1/notificaciones/{id_notificacion}"))
+            .post_json(
+                &format!("/v1/notificaciones/{id_notificacion}/eliminar"),
+                &json!({ "id_usuario": id_usuario }),
+            )
             .await?;
         Ok(true)
     }

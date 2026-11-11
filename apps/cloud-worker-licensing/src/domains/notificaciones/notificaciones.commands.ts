@@ -3,8 +3,11 @@
 // Escrituras de notificaciones expresadas como comandos para el Durable Object. El SQL replica
 // tpv-infra-sqlite/src/notificaciones.rs y el DO aporta transacción, idempotencia por Op_Id y
 // broadcast. Nota (determinismo del broadcast): igual que el resto de módulos, se usan INSERT con
-// VALUES explícitos (nunca INSERT ... SELECT), y el UUID se genera en un paso `value` previo, para
-// que la nube y cada Main/Handy escriban EXACTAMENTE la misma fila al re-aplicar el broadcast.
+// VALUES explícitos, y el UUID se genera en un paso `value` previo, para que la nube y cada
+// Main/Handy escriban EXACTAMENTE la misma fila al re-aplicar el broadcast. La excepción es el
+// recibo de lectura (AUD-26): un INSERT ... SELECT de la propia notificación, que escribe siempre la
+// misma fila (notificación, usuario) y reevalúa al aplicarse sólo la condición de que vaya dirigida
+// a quien lee, que es justo lo que tiene que reevaluar.
 
 import { nuevoId } from "../../lib/ids";
 import { recortar } from "../../lib/texto";
@@ -18,6 +21,18 @@ export type BuiltCommand = {
 };
 
 const REF_ID = { $ref: "id" } as const;
+
+/**
+ * AUD-26: el `WHERE` de las escrituras de un usuario sobre una notificación. `?1` es la
+ * notificación y `?2` el usuario; va dirigida a él si es para todos, para él o para su rol. Va
+ * dentro de la propia sentencia que escribe, igual que en la Main (`DIRIGIDA_AL_USUARIO` en
+ * `tpv-infra-sqlite/src/notificaciones.rs`): se cumple al aplicarse, sin hueco entre comprobar y
+ * escribir. El arnés de contrato comprueba que los dos lados hacen lo mismo.
+ */
+export const DIRIGIDA_AL_USUARIO = `ID_Notificacion = ?1 AND (Destino_Tipo = 'todos'
+	OR (Destino_Tipo = 'usuario' AND Destino_Valor = ?2)
+	OR (Destino_Tipo = 'rol' AND Destino_Valor =
+		(SELECT u.ID_Rol FROM Usuarios u WHERE u.ID_Usuario = ?2)))`;
 
 const SEVERIDADES = new Set(["info", "exito", "aviso", "error"]);
 
@@ -161,13 +176,16 @@ export function crear(input: CrearNotificacionBody): BuiltCommand {
 	};
 }
 
+/** AUD-26: sólo de una notificación dirigida a quien lee, en cualquier estado. */
 export function marcarLeida(idNotificacion: string, idUsuario: string): BuiltCommand {
 	return {
 		commandName: "notificaciones_marcar_leida",
 		command: {
 			type: "tenantDb.exec",
 			payload: {
-				sql: `INSERT OR IGNORE INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES (?1, ?2, datetime('now','localtime'));`,
+				sql: `INSERT OR IGNORE INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En)
+					SELECT ?1, ?2, datetime('now','localtime') FROM Notificaciones
+					WHERE ${DIRIGIDA_AL_USUARIO};`,
 				args: [idNotificacion, idUsuario],
 			},
 		},
@@ -208,10 +226,15 @@ export function resolverPorClave(clave: string): BuiltCommand {
  * Papelera: descartar y restaurar son el MISMO cambio de estado en direcciones opuestas, así que
  * comparten constructor. Como toda escritura replicable, va por el DO: la Main y las demás Handy
  * lo reciben por el broadcast y su papelera es la misma que la de aquí.
+ *
+ * AUD-26: sólo sobre una notificación dirigida al usuario y en el estado de partida (en el centro
+ * para descartar, en la papelera para restaurar). La ruta contesta 404 si no ha tocado ninguna fila.
  */
 function cambiarEstado(
 	idNotificacion: string,
-	estado: "activa" | "descartada",
+	idUsuario: string,
+	desde: "activa" | "descartada",
+	hasta: "activa" | "descartada",
 	commandName: string,
 ): BuiltCommand {
 	return {
@@ -219,33 +242,36 @@ function cambiarEstado(
 		command: {
 			type: "tenantDb.exec",
 			payload: {
-				sql: `UPDATE Notificaciones SET Estado = ?2 WHERE ID_Notificacion = ?1;`,
-				args: [idNotificacion, estado],
+				sql: `UPDATE Notificaciones SET Estado = ?3 WHERE ${DIRIGIDA_AL_USUARIO} AND Estado = ?4;`,
+				args: [idNotificacion, idUsuario, hasta, desde],
 			},
 		},
-		cloudPayload: { id_notificacion: idNotificacion, estado },
+		cloudPayload: { id_notificacion: idNotificacion, id_usuario: idUsuario, estado: hasta },
 	};
 }
 
-export function descartar(idNotificacion: string): BuiltCommand {
-	return cambiarEstado(idNotificacion, "descartada", "notificaciones_descartar");
+export function descartar(idNotificacion: string, idUsuario: string): BuiltCommand {
+	return cambiarEstado(idNotificacion, idUsuario, "activa", "descartada", "notificaciones_descartar");
 }
 
-export function restaurar(idNotificacion: string): BuiltCommand {
-	return cambiarEstado(idNotificacion, "activa", "notificaciones_restaurar");
+export function restaurar(idNotificacion: string, idUsuario: string): BuiltCommand {
+	return cambiarEstado(idNotificacion, idUsuario, "descartada", "activa", "notificaciones_restaurar");
 }
 
-/** Borrado definitivo. Los recibos de lectura caen por ON DELETE CASCADE en cada motor. */
-export function eliminar(idNotificacion: string): BuiltCommand {
+/**
+ * Borrado definitivo. Los recibos de lectura caen por ON DELETE CASCADE en cada motor. AUD-26: sólo
+ * una que siga en la papelera del usuario al borrarla; si otro la restauró, no se la lleva.
+ */
+export function eliminar(idNotificacion: string, idUsuario: string): BuiltCommand {
 	return {
 		commandName: "notificaciones_eliminar",
 		command: {
 			type: "tenantDb.exec",
 			payload: {
-				sql: `DELETE FROM Notificaciones WHERE ID_Notificacion = ?1;`,
-				args: [idNotificacion],
+				sql: `DELETE FROM Notificaciones WHERE ${DIRIGIDA_AL_USUARIO} AND Estado = 'descartada';`,
+				args: [idNotificacion, idUsuario],
 			},
 		},
-		cloudPayload: { id_notificacion: idNotificacion },
+		cloudPayload: { id_notificacion: idNotificacion, id_usuario: idUsuario },
 	};
 }

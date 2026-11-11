@@ -9,7 +9,8 @@
     "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-descartada', 'user-1', '2026-01-01 12:00:00');"
   ],
   "entrada": {
-    "id_notificacion": "notif-activa"
+    "id_notificacion": "notif-activa",
+    "id_usuario": "user-1"
   },
   "snapshot": {
     "Notificaciones": "SELECT ID_Notificacion, Estado FROM Notificaciones",

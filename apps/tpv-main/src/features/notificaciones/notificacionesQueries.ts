@@ -3,6 +3,9 @@
 // Hooks TanStack Query de notificaciones. Las lecturas se cachean por usuario; las mutaciones
 // (marcar leída / todas) invalidan la clave de la feature para refrescar lista + contador.
 //
+// El `idUsuario` que reciben las lecturas sólo separa la caché de cada persona y apaga la consulta
+// sin sesión: al backend no llega, que saca el usuario de la sesión (AUD-26).
+//
 // Nota de sincronización: cuando llega un `change` por WebSocket que toca `Notificaciones` /
 // `Notificacion_Lecturas`, el socket (Main o Handy) invalida la clave ["notificaciones"] (ver
 // TABLE_TO_FEATURES en shared/lib/syncStatements.ts), así que la lista/badge se refrescan al
@@ -34,7 +37,7 @@ export const notificacionesKeys = {
 export function useNotificaciones(idUsuario: string | null, soloNoLeidas = false) {
   return useQuery({
     queryKey: notificacionesKeys.lista(idUsuario ?? "", soloNoLeidas),
-    queryFn: () => notificacionesListar({ id_usuario: idUsuario as string, solo_no_leidas: soloNoLeidas }),
+    queryFn: () => notificacionesListar({ solo_no_leidas: soloNoLeidas }),
     enabled: !!idUsuario,
   });
 }
@@ -43,7 +46,7 @@ export function useNotificaciones(idUsuario: string | null, soloNoLeidas = false
 export function useNoLeidasCount(idUsuario: string | null) {
   return useQuery({
     queryKey: notificacionesKeys.noLeidas(idUsuario ?? ""),
-    queryFn: () => notificacionesNoLeidas({ id_usuario: idUsuario as string }),
+    queryFn: () => notificacionesNoLeidas(),
     enabled: !!idUsuario,
   });
 }
@@ -61,7 +64,7 @@ export function useMarcarLeida() {
 export function useMarcarTodasLeidas() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: notificacionesMarcarTodasLeidas,
+    mutationFn: () => notificacionesMarcarTodasLeidas(),
     onSuccess: () => qc.invalidateQueries({ queryKey: notificacionesKeys.all }),
   });
 }
@@ -70,7 +73,7 @@ export function useMarcarTodasLeidas() {
 export function usePapelera(idUsuario: string | null, activa: boolean) {
   return useQuery({
     queryKey: notificacionesKeys.papelera(idUsuario ?? ""),
-    queryFn: () => notificacionesPapelera({ id_usuario: idUsuario as string }),
+    queryFn: () => notificacionesPapelera(),
     enabled: !!idUsuario && activa,
   });
 }

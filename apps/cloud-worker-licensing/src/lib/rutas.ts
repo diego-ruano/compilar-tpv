@@ -86,3 +86,21 @@ export async function apply(
 		cloudPayload: built.cloudPayload,
 	});
 }
+
+/**
+ * ¿Hizo la escritura lo que se pedía? Para una ruta que mira el recuento que devuelve `apply` (el de un
+ * `tenantDb.exec`, o el `saveAs` de un paso de una transacción). Con un número, el recuento: 0 es que no
+ * tocó nada. `null` es que no se sabe cuántas filas tocó, y se mira el estado (`quedoComoSePidio`, que
+ * sólo se llama en ese caso): un reintento con la misma `X-Idempotency-Key`, o el reenvío con que el DO
+ * resuelve una escritura cuya respuesta se perdió, devuelve el `Result_Json` guardado, que sólo lleva el
+ * recuento si llegó la primera respuesta; y el lote se confirma también cuando la escritura condicional
+ * no toca ninguna fila, así que `null` puede ser «hecho» o «no se pudo». Es lo que hace ya borrar un
+ * ticket (AUD-14); salió en AUD-26.
+ */
+export async function decidirPorEstado(
+	resultado: unknown,
+	quedoComoSePidio: () => Promise<boolean>,
+): Promise<boolean> {
+	if (typeof resultado === "number") return resultado > 0;
+	return quedoComoSePidio();
+}

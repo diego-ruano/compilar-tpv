@@ -1689,17 +1689,6 @@ export type LoteDto = {
 	Notas: string | null,
 };
 
-/**  Marca una notificación como leída por un usuario. */
-export type MarcarLeidaInput = {
-	id_notificacion: string,
-	id_usuario: string,
-};
-
-/**  Marca como leídas todas las notificaciones visibles de un usuario. */
-export type MarcarTodasLeidasInput = {
-	id_usuario: string,
-};
-
 export type MesaDto = {
 	id_mesa: string,
 	id_zona: string,
@@ -1890,12 +1879,13 @@ export type MisTareasRow = {
 };
 
 /**
- *  Identifica una notificación para las acciones de la papelera (descartar, restaurar, eliminar).
+ *  Identifica una notificación: para marcarla leída y para las acciones de la papelera
+ *  (descartar, restaurar, eliminar).
  *
  *  El estado de la papelera es de la NOTIFICACIÓN, no del usuario que la mira: una notificación es
  *  un aviso del negocio (stock bajo, pedido por aprobar) y borrarla es decir "esto ya está visto",
- *  no "no me lo enseñes a mí". Por eso aquí no viaja el `id_usuario`: lo que sí es por usuario es
- *  la lectura, que tiene su propia tabla.
+ *  no "no me lo enseñes a mí". Lo que sí es por usuario es la lectura, que tiene su propia tabla. Y
+ *  la papelera sólo actúa sobre lo que ve quien la usa.
  */
 export type NotificacionIdInput = {
 	id_notificacion: string,
@@ -1922,16 +1912,10 @@ export type NotificacionRow = {
 	leida: boolean,
 };
 
-/**  Args para listar las notificaciones visibles de un usuario. */
+/**  Args para listar las notificaciones visibles de quien ha iniciado sesión. */
 export type NotificacionesListArgs = {
-	id_usuario: string,
 	/**  Si es `true`, solo devuelve las no leídas por ese usuario. */
 	solo_no_leidas?: boolean | null,
-};
-
-/**  Args con solo el id de usuario (p. ej. contador de no leídas). */
-export type NotificacionesUsuarioArgs = {
-	id_usuario: string,
 };
 
 /**  Una operación pendiente del outbox (Main → nube). La envía exclusivamente el motor nativo. */

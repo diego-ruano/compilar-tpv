@@ -96,6 +96,19 @@ precio bajo el cerrojo de escritura; una edición Handy sin permiso de precios c
 en el SQL aplicado por el Worker, sin recrear el producto si se borró durante la edición. Ajustar existencias va por sus comandos con atribución, nunca
 por la ficha. Las tareas propias se consultan y finalizan con el trabajador de la sesión.
 
+Las notificaciones las puede ver cualquiera con sesión, pero cada uno las suyas: los ocho comandos
+`notificaciones_*` sacan el usuario de la sesión, y la pantalla no lo manda. Lo que ve (las dirigidas
+a todos, a él o a su rol), en nombre de quién marca leído y sobre qué actúa la papelera depende de
+ese usuario (AUD-26). Marcar leída exige que vaya dirigida a él; descartar, además, que esté en el
+centro, y restaurar o eliminar, que esté en la papelera. Esa condición va **dentro de la propia
+sentencia que escribe** (`DIRIGIDA_AL_USUARIO`, igual en `tpv-infra-sqlite/src/notificaciones.rs` y en
+`notificaciones.commands.ts`): no hay hueco entre comprobar y escribir (si otro restaura lo que uno
+iba a borrar para siempre, no se borra), y se cumple también donde se aplique después. Si no se cumple,
+`not_found` («Esa notificación no está en tu lista.») y nada en el outbox. En la Handy el usuario lo
+pone Rust desde la sesión y viaja en el cuerpo; el Worker aplica la misma condición, pero no puede
+saber que ese usuario es el de la sesión
+([SEC-SESION](../pendientes.md#sec-sesion--sesión-personal-verificable-en-el-worker)).
+
 Valores iniciales:
 
 - **Administrador:** acceso completo. No se puede retirar su acceso ni modificarlo con el gestor.

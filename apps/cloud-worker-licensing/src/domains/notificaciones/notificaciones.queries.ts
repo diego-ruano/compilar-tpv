@@ -8,7 +8,7 @@ import type { Client } from "@libsql/client/web";
 
 import type { NotificacionRow } from "@tpv/contracts";
 
-import type { ContenidoActivo } from "./notificaciones.commands";
+import { DIRIGIDA_AL_USUARIO, type ContenidoActivo } from "./notificaciones.commands";
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
@@ -145,6 +145,45 @@ export async function idsNoLeidas(db: Client, idUsuario: string): Promise<string
 	return rows(rs)
 		.map((r) => String(r.id ?? ""))
 		.filter((s) => s.length > 0);
+}
+
+/**
+ * AUD-26: ¿la notificación va dirigida a ese usuario (a todos, a él o a su rol)? Es la misma
+ * condición que llevan las escrituras; marcar leída la mira antes para distinguir «ya estaba
+ * leída» de «no es tuya», que el INSERT por sí solo no distingue.
+ */
+export async function dirigidaA(db: Client, idNotificacion: string, idUsuario: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `SELECT 1 AS si FROM Notificaciones WHERE ${DIRIGIDA_AL_USUARIO} LIMIT 1;`,
+		args: [idNotificacion, idUsuario],
+	});
+	return rows(rs).length > 0;
+}
+
+/**
+ * AUD-26: ¿va dirigida a ese usuario y está en ese estado? Para decidir por el estado cuando no se
+ * sabe cuántas filas tocó un descartar o un restaurar (`decidirPorEstado`).
+ */
+export async function dirigidaYEn(
+	db: Client,
+	idNotificacion: string,
+	idUsuario: string,
+	estado: "activa" | "descartada",
+): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `SELECT 1 AS si FROM Notificaciones WHERE ${DIRIGIDA_AL_USUARIO} AND Estado = ?3 LIMIT 1;`,
+		args: [idNotificacion, idUsuario, estado],
+	});
+	return rows(rs).length > 0;
+}
+
+/** AUD-26: ¿sigue existiendo? Para decidir por el estado cuando no se sabe si un eliminar borró. */
+export async function existe(db: Client, idNotificacion: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: "SELECT 1 AS si FROM Notificaciones WHERE ID_Notificacion = ?1 LIMIT 1;",
+		args: [idNotificacion],
+	});
+	return rows(rs).length > 0;
 }
 
 /**

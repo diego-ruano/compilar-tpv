@@ -37,6 +37,11 @@ export const marcarLeidaSchema = z.object({
 	id_usuario: z.string().overwrite(recortar).min(1),
 });
 
+/** AUD-26: descartar, restaurar y eliminar dicen en nombre de quién (el usuario de la sesión). */
+export const papeleraSchema = z.object({
+	id_usuario: z.string().overwrite(recortar).min(1),
+});
+
 export const marcarTodasSchema = z.object({
 	id_usuario: z.string().overwrite(recortar).min(1),
 });

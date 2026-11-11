@@ -1,0 +1,21 @@
+{
+  "descripcion": "AUD-26: marcar como leida una notificacion que no va dirigida a quien la marca (es para otro rol). No se escribe ningun recibo: ni el de el ni el de nadie. La Main contesta not_found antes de escribir; el worker aplica el INSERT ... SELECT con la condicion y no inserta nada. La del seed, de otro usuario de ese rol, no se toca.",
+  "comando": "notificaciones.marcar_leida",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-sala', 'RolSalaContrato');",
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-gestion', 'RolGestionContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-sala', 'rol-sala', 'a@a.com', 'x', 'Ana');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-gestion', 'rol-gestion', 'b@b.com', 'x', 'Bea');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('notif-gestion', 'aviso', 'info', 'Para gestion', 'rol', 'rol-gestion', 'activa', '2026-01-01 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('notif-de-bea', 'aviso', 'info', 'Solo para Bea', 'usuario', 'user-gestion', 'activa', '2026-01-01 11:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-de-bea', 'user-gestion', '2026-01-01 12:00:00');"
+  ],
+  "entrada": {
+    "id_notificacion": "notif-gestion",
+    "id_usuario": "user-sala",
+    "rechazo": "not_found"
+  },
+  "snapshot": {
+    "Notificacion_Lecturas": "SELECT ID_Notificacion, ID_Usuario FROM Notificacion_Lecturas"
+  }
+}

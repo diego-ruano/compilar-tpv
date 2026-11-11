@@ -1,7 +1,8 @@
 // pages/Notificaciones.tsx
 //
-// Centro de notificaciones del usuario logueado. Lee por `id_usuario` (de useAuth) y permite
-// marcar como leída / todas como leídas. El estado "leído" es por usuario.
+// Centro de notificaciones del usuario logueado: el backend lo saca de la sesión (AUD-26), y el
+// `idUsuario` de useAuth sólo separa la caché. Permite marcar como leída / todas como leídas. El
+// estado "leído" es por usuario.
 //
 // Al pulsar una notificación se marca como leída y, si su `accion` tiene destino conocido
 // (ver `features/notificaciones/acciones.ts`), se navega a la pantalla que resuelve el aviso.
@@ -88,8 +89,8 @@ export default function Notificaciones() {
   const borradas: NotificacionRow[] = papelera.data ?? [];
 
   function onCardClick(n: NotificacionRow) {
-    if (id_usuario && !n.leida) {
-      marcarLeida.mutate({ id_notificacion: n.id_notificacion, id_usuario });
+    if (!n.leida) {
+      marcarLeida.mutate({ id_notificacion: n.id_notificacion });
     }
     // Navegar es lo último: la mutación (y su invalidación en `onSuccess`) sobrevive al desmontaje
     // de esta pantalla, así que el marcado se completa aunque salgamos de aquí al instante.
@@ -109,8 +110,8 @@ export default function Notificaciones() {
   }
 
   function onMarcarTodas() {
-    if (!id_usuario || noLeidas === 0) return;
-    marcarTodas.mutate({ id_usuario });
+    if (noLeidas === 0) return;
+    marcarTodas.mutate();
   }
 
   return (

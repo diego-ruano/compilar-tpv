@@ -228,6 +228,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	// RI-61: el mismo texto que da la Main.
 	cliente_no_encontrado:
 		"Ese cliente ya no existe. Vuelve a buscarlo o guarda la reserva sin cliente.",
+	// AUD-26: el mismo texto que da la Main (`NO_ESTA_EN_TU_LISTA`): no va dirigida a ti, o ya no
+	// está donde estaba (otro la restauró, la descartó o la borró).
+	notificacion_no_encontrada: "Esa notificación no está en tu lista.",
 	// RI-54: una pantalla con la carta de antes en caché ofrece un producto que ya se quitó.
 	producto_archivado: "Ese producto ya no está en la carta. Vuelve a abrir la carta y elige otro.",
 	// INC-20261030-010: el mismo texto que da la Main (`MSG_TAREA_NO_ASIGNADA`).

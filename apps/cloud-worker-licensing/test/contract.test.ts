@@ -274,6 +274,12 @@ import casoNotifRestaurar from "../../../tests/contract/casos/notificaciones/res
 import goldenNotifRestaurar from "../../../tests/contract/golden/notificaciones/restaurar.json";
 import casoNotifEliminar from "../../../tests/contract/casos/notificaciones/eliminar.json";
 import goldenNotifEliminar from "../../../tests/contract/golden/notificaciones/eliminar.json";
+import casoNotifLeidaAjena from "../../../tests/contract/casos/notificaciones/marcar_leida_ajena.json";
+import goldenNotifLeidaAjena from "../../../tests/contract/golden/notificaciones/marcar_leida_ajena.json";
+import casoNotifDescartarAjena from "../../../tests/contract/casos/notificaciones/descartar_ajena.json";
+import goldenNotifDescartarAjena from "../../../tests/contract/golden/notificaciones/descartar_ajena.json";
+import casoNotifEliminarRestaurada from "../../../tests/contract/casos/notificaciones/eliminar_restaurada.json";
+import goldenNotifEliminarRestaurada from "../../../tests/contract/golden/notificaciones/eliminar_restaurada.json";
 import casoNotifResolver from "../../../tests/contract/casos/notificaciones/resolver_por_clave.json";
 import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/resolver_por_clave.json";
 import casoHorariosCopiar from "../../../tests/contract/casos/horarios/copiar_semana.json";
@@ -403,6 +409,13 @@ const CASOS = [
 	{ nombre: "notificaciones_descartar", caso: casoNotifDescartar, golden: goldenNotifDescartar },
 	{ nombre: "notificaciones_restaurar", caso: casoNotifRestaurar, golden: goldenNotifRestaurar },
 	{ nombre: "notificaciones_eliminar", caso: casoNotifEliminar, golden: goldenNotifEliminar },
+	{ nombre: "notificaciones_marcar_leida_ajena", caso: casoNotifLeidaAjena, golden: goldenNotifLeidaAjena },
+	{ nombre: "notificaciones_descartar_ajena", caso: casoNotifDescartarAjena, golden: goldenNotifDescartarAjena },
+	{
+		nombre: "notificaciones_eliminar_restaurada",
+		caso: casoNotifEliminarRestaurada,
+		golden: goldenNotifEliminarRestaurada,
+	},
 	{ nombre: "horarios_copiar_semana", caso: casoHorariosCopiar, golden: goldenHorariosCopiar },
 	{
 		nombre: "horarios_set_predeterminado_desde_semana",
@@ -947,16 +960,18 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			aplicar(hub, sql, deleteAsignacion(caso.entrada.id_asignacion));
 			return;
 		}
+		// AUD-26: con el usuario que la toca, y la condición dentro de la sentencia. Un caso con
+		// `rechazo` no cambia nada: el otro lado contesta not_found antes de escribir.
 		case "notificaciones.descartar": {
-			aplicar(hub, sql, descartarNotificacion(caso.entrada.id_notificacion));
+			aplicar(hub, sql, descartarNotificacion(caso.entrada.id_notificacion, caso.entrada.id_usuario));
 			return;
 		}
 		case "notificaciones.restaurar": {
-			aplicar(hub, sql, restaurarNotificacion(caso.entrada.id_notificacion));
+			aplicar(hub, sql, restaurarNotificacion(caso.entrada.id_notificacion, caso.entrada.id_usuario));
 			return;
 		}
 		case "notificaciones.eliminar": {
-			aplicar(hub, sql, eliminarNotificacion(caso.entrada.id_notificacion));
+			aplicar(hub, sql, eliminarNotificacion(caso.entrada.id_notificacion, caso.entrada.id_usuario));
 			return;
 		}
 		default:

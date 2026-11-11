@@ -383,11 +383,11 @@ type Argumentos = {
     "pedidos_proveedor_actualizar": { args: Parameters<Comandos["pedidosProveedorActualizar"]>[0] };
     "pedidos_proveedor_cambiar_estado": { args: Parameters<Comandos["pedidosProveedorCambiarEstado"]>[0] };
     "notificaciones_listar": { args: Parameters<Comandos["notificacionesListar"]>[0] };
-    "notificaciones_no_leidas": { args: Parameters<Comandos["notificacionesNoLeidas"]>[0] };
+    "notificaciones_no_leidas": {  };
     "notificaciones_marcar_leida": { args: Parameters<Comandos["notificacionesMarcarLeida"]>[0] };
-    "notificaciones_marcar_todas_leidas": { args: Parameters<Comandos["notificacionesMarcarTodasLeidas"]>[0] };
+    "notificaciones_marcar_todas_leidas": {  };
     "notificaciones_descartar": { args: Parameters<Comandos["notificacionesDescartar"]>[0] };
-    "notificaciones_papelera": { args: Parameters<Comandos["notificacionesPapelera"]>[0] };
+    "notificaciones_papelera": {  };
     "notificaciones_restaurar": { args: Parameters<Comandos["notificacionesRestaurar"]>[0] };
     "notificaciones_eliminar": { args: Parameters<Comandos["notificacionesEliminar"]>[0] };
     "vr_list_categorias_vendibles": {  };

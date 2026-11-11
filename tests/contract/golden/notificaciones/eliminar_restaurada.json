@@ -1,0 +1,14 @@
+{
+  "Notificacion_Lecturas": [
+    {
+      "ID_Notificacion": "notif-restaurada",
+      "ID_Usuario": "user-1"
+    }
+  ],
+  "Notificaciones": [
+    {
+      "Estado": "activa",
+      "ID_Notificacion": "notif-restaurada"
+    }
+  ]
+}
