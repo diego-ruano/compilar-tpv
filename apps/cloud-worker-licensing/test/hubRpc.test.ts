@@ -25,6 +25,8 @@ describe("TenantHub RPC", () => {
 			"webSocketMessage", "webSocketClose", "webSocketError",
 			// La base del negocio vive en el DO.
 			"consultar", "aprovisionar", "estaAprovisionado", "borrarTodo",
+			// La ruta de diagnóstico de latencias (`/v1/admin/diagnostico/latencias`).
+			"diagnostico",
 		].sort());
 	});
 

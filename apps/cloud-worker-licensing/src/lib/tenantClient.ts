@@ -30,6 +30,7 @@ import type { Client, ResultSet } from "@libsql/client/web";
 import type { Env } from "../env";
 import { HubError } from "./errorHttp";
 import { hubDe } from "./hub";
+import { medirTramo } from "../observability/tiempos";
 import { parseClientNow, rewriteNowInSql } from "../durableObjects/tenantHub.tiempo";
 import { aResultSet, type Sentencia as SentenciaDelHub } from "../durableObjects/tenantHub.sqlite";
 import type { RespuestaDeConsulta } from "../durableObjects/tenantHub.rpc";
@@ -51,7 +52,7 @@ export function clienteDelHub(env: Env, tenantId: string): Client {
 	const stub = hubDe(env, tenantId);
 	const pedir = async (sentencias: SentenciaDelHub[], enLote: boolean): Promise<ResultSet[]> => {
 		// Los tipos de RPC no aceptan `unknown` (valores de SQLite): se afirma la forma que devuelve el DO.
-		const r = (await stub.consultar(tenantId, sentencias as any, enLote)) as unknown as RespuestaDeConsulta;
+		const r = (await medirTramo("hub-lee", () => stub.consultar(tenantId, sentencias as any, enLote))) as unknown as RespuestaDeConsulta;
 		if (!r.ok) throw new HubError(r.code, r.status, r.details);
 		return r.resultados.map(aResultSet);
 	};

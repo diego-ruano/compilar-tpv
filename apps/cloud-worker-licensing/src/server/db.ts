@@ -1,5 +1,6 @@
 // src/server/db.ts
 import { createClient, type Client, type Transaction } from "@libsql/client/web";
+import { medirTramo } from "../observability/tiempos";
 
 /**
  * Donde se puede ejecutar una sentencia: la conexión o una transacción abierta sobre ella. Las
@@ -23,8 +24,22 @@ export function getDb(env: TursoEnv): Client {
 	if (!url) throw new Error("missing_env_TURSO_DATABASE_URL");
 	if (!authToken) throw new Error("missing_env_TURSO_AUTH_TOKEN");
 
-	_client = createClient({ url, authToken });
+	_client = conTiempos(createClient({ url, authToken }));
 	return _client;
+}
+
+/** Cada viaje a la base central suma al tramo `central` de la petición (`observability/tiempos.ts`). */
+function conTiempos(db: Client): Client {
+	return new Proxy(db, {
+		get(target, prop) {
+			const valor = Reflect.get(target, prop, target);
+			if (typeof valor !== "function") return valor;
+			if (prop === "execute" || prop === "batch" || prop === "transaction") {
+				return (...args: unknown[]) => medirTramo("central", () => (valor as any).apply(target, args));
+			}
+			return valor.bind(target);
+		},
+	});
 }
 
 /**

@@ -99,6 +99,8 @@ export interface Env {
 	// Jurisdicción de los dos DO, que guardan los datos del negocio («eu» al desplegar). Vacía en
 	// local y en los tests: workerd no implementa jurisdicciones.
 	JURISDICCION_DO?: string;
+	// Pista de región para el TenantHub de un negocio nuevo («weur», «eeur»…). Sólo cuenta al nacer.
+	UBICACION_DO?: string;
 
 	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).
 	// Las claves replican la ruta de la Main: `{tenantId}/images/{subcarpeta}/{uuid}.jpg`.

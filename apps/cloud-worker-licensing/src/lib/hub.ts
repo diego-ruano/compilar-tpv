@@ -10,6 +10,7 @@
 import type { Env } from "../env";
 import { HubError } from "./errorHttp";
 import { capturarError } from "../observability/errors";
+import { medirTramo } from "../observability/tiempos";
 import type { ApplyParams, ResultadoAplicacion } from "../durableObjects/tenantHub.rpc";
 export type { ApplyParams } from "../durableObjects/tenantHub.rpc";
 
@@ -95,9 +96,10 @@ export function espacioDelHub(env: Pick<Env, "TenantHub" | "JURISDICCION_DO">): 
 }
 
 /** El TenantHub de un negocio. */
-export function hubDe(env: Pick<Env, "TenantHub" | "JURISDICCION_DO">, tenantId: string) {
+export function hubDe(env: Pick<Env, "TenantHub" | "JURISDICCION_DO" | "UBICACION_DO">, tenantId: string) {
 	const ns = espacioDelHub(env);
-	return ns.get(ns.idFromName(tenantId));
+	const pista = env.UBICACION_DO as DurableObjectLocationHint | undefined;
+	return pista ? ns.get(ns.idFromName(tenantId), { locationHint: pista }) : ns.get(ns.idFromName(tenantId));
 }
 
 export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
@@ -113,7 +115,7 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 
 	const stub = hubDe(env, tenantId);
 
-	const respuesta: ResultadoAplicacion = await stub.aplicar(params);
+	const respuesta = (await medirTramo("hub-escribe", async () => stub.aplicar(params))) as ResultadoAplicacion;
 	if (!respuesta.ok) throw new HubError(respuesta.error, respuesta.status, respuesta.details);
 	return respuesta.data;
 }

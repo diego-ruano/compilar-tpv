@@ -3,6 +3,7 @@ import type { Env } from "../env";
 import { MotorTenantHub } from "./tenantHub.motor";
 import type { ApplyParams, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
 import type { Sentencia } from "./tenantHub.sqlite";
+import { diagnosticar, type AccionDeDiagnostico, type RespuestaDeDiagnostico } from "./tenantHub.diagnostico";
 
 /** RI-45: solo este adaptador es RPC. Los helpers del motor no pertenecen a su prototipo. */
 export class TenantHub extends DurableObject<Env> {
@@ -36,6 +37,11 @@ export class TenantHub extends DurableObject<Env> {
 	/** Retirar un negocio de pruebas: su base entera. */
 	borrarTodo(): Promise<void> {
 		return this.motor.borrarTodo();
+	}
+
+	/** La ruta de diagnóstico de latencias (`tenantHub.diagnostico.ts`). */
+	diagnostico(a: AccionDeDiagnostico): Promise<RespuestaDeDiagnostico> {
+		return diagnosticar(this.ctx, this.env, a);
 	}
 
 	revocarDispositivo(deviceId: string): void {

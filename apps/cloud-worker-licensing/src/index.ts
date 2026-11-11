@@ -24,6 +24,7 @@ import type { Env } from "./env";
 import { sentryOptions } from "./observability/sentry";
 import { capturarError } from "./observability/errors";
 import { registrarPeticion } from "./observability/requestContext";
+import { cabeceraServerTiming, conMedida } from "./observability/tiempos";
 import { getDb } from "./server/db";
 import { comprobarSalud } from "./server/salud";
 import { cargarDevice, estaRevocado } from "./lib/deviceAuth";
@@ -84,6 +85,21 @@ import { AgendaWeb as AgendaWebClass } from "./durableObjects/agendaWeb";
 export const AgendaWeb = Sentry.instrumentDurableObjectWithSentry(sentryOptions, AgendaWebClass);
 
 const app = new Hono<{ Bindings: Env }>();
+
+// El desglose del tiempo de cada petición (`observability/tiempos.ts`). Va antes que nada para que
+// el total lo cubra todo; el upgrade del WebSocket (101) no se toca.
+app.use("*", async (c, next) => {
+	const { medida } = await conMedida(() => next());
+	if (c.res.status === 101) return;
+	const valor = cabeceraServerTiming(medida, (c.req.raw.cf as { colo?: string } | undefined)?.colo);
+	try {
+		c.res.headers.set("Server-Timing", valor);
+	} catch {
+		// Una respuesta que llega de otro sitio (un `fetch`) tiene las cabeceras inmutables.
+		c.res = new Response(c.res.body, c.res);
+		c.res.headers.set("Server-Timing", valor);
+	}
+});
 
 // Todas las respuestas de error salen con `code` y, si lo hay, `message` legible. Va el primero
 // para envolver también las que produce `onError`.
