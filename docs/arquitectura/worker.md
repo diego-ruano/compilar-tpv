@@ -177,6 +177,13 @@ no sale dos veces, muchos a la vez no pasan de los topes y uno que falló se pue
 base central no se envía (no se sabría si ya salió). Qué correo y cuándo:
 [reservas-web.md](../estudios/reservas-web.md#48-correos).
 
+Lo que va a una cabecera de esos correos sale en una línea (AUD-40). El nombre del negocio llega al
+asunto y al remitente tal como está en la base, y ahí lo deja una Handy o la Main, que sube su
+propio SQL: por eso no se valida al guardar sino donde se compone el correo. `enUnaLinea` pasa a
+un espacio los caracteres de control y los separadores de línea, y el nombre entra con un tope de
+100 caracteres (el asunto no puede pasar de 998). Una dirección de destino con un carácter de
+control no es una dirección: no se envía ni gasta cupo, y sale como `fallido`.
+
 RI-60: el envío exige nombre y correo comercial, leídos de la base del negocio junto con el
 proveedor. Sale desde nuestro dominio verificado, con el nombre del negocio y su correo en
 `Reply-To`. Dirección y teléfono son opcionales. Compra y recuperación del PIN conservan sus

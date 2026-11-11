@@ -99,6 +99,14 @@ export async function enviarCorreoReservaWeb(env: Env, correo: Correo): Promise<
 
 async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 	const para = recortar(correo.para).toLowerCase();
+	// AUD-40: la dirección la escribe un visitante (la del alta) o el personal (la del cliente), y la
+	// regla de un correo, la misma que en la Main, no mira los caracteres de control. Con uno dentro no
+	// es una dirección, y en `to` sería una cabecera más: no se envía, ni se le reserva sitio en los
+	// topes.
+	if (SALTO_O_CONTROL.test(para)) {
+		console.warn("[reservas-web] correo sin enviar: la dirección lleva caracteres de control:", correo.tipo);
+		return "fallido";
+	}
 	const db = getDb(env);
 	const remitente = recortar(String(env.EMAIL_RESERVAS_FROM_ADDRESS || ""));
 	if (!remitente) {
@@ -115,7 +123,8 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 			from: { email: remitente, name: nombreDelRemitente(correo.negocio.nombre) },
 			to: para,
 			...(correo.negocio.correo ? { replyTo: correo.negocio.correo } : {}),
-			subject: asunto,
+			// AUD-40: la plantilla ya lo compone en una línea; esto cubre lo que se le añada.
+			subject: enUnaLinea(asunto),
 			html,
 			text: texto,
 		});
@@ -132,10 +141,31 @@ async function enviar(env: Env, correo: Correo): Promise<ResultadoCorreo> {
 	return "enviado";
 }
 
-/** El nombre del negocio como remitente: una línea, sin lo que rompería la cabecera. */
+/** Un carácter de control (CR, LF, NUL, el NEL de U+0085…) o un separador de línea o de párrafo. */
+const SALTO_O_CONTROL = /[\p{Cc}\p{Zl}\p{Zp}]/u;
+
+/**
+ * AUD-40 · Un texto que va a una cabecera del correo, en una línea: los caracteres de control y los
+ * separadores de línea pasan a un espacio, y se recorta con `recortar`. El nombre del negocio llega
+ * de su base tal como lo dejó una Handy o la Main, que sube su propio SQL por la réplica: con un CR/LF
+ * dentro, el asunto salía partido y el negocio escribía cabeceras en correos de nuestro dominio.
+ * Rechazarlo al guardar no bastaría; se limpia donde se compone el correo.
+ */
+export function enUnaLinea(texto: string): string {
+	return recortar(texto.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " "));
+}
+
+/** Lo más largo que entra del nombre del negocio en una cabecera: el asunto no puede pasar de 998. */
+const NOMBRE_EN_CABECERA_MAX = 100;
+
+/** El nombre del negocio para una cabecera: en una línea y con su tope, sin partir un carácter. */
+function nombreEnCabecera(nombre: string): string {
+	return recortar([...enUnaLinea(nombre)].slice(0, NOMBRE_EN_CABECERA_MAX).join(""));
+}
+
+/** El nombre del negocio como remitente: en una línea, y sin lo que rompería la dirección. */
 function nombreDelRemitente(nombre: string): string {
-	const limpio = recortar(nombre.replace(/[\r\n"<>]/g, " ")).slice(0, 100);
-	return limpio || "Reservas";
+	return nombreEnCabecera(nombre.replace(/["<>]/g, " ")) || "Reservas";
 }
 
 /** Lo que tarda como mucho un envío: una reserva más vieja sin terminar es de uno que murió a medias. */
@@ -262,7 +292,8 @@ type Texto = { asunto: string; titulo: string; antes: string; despues: string };
 
 /** Lo que dice cada correo, alrededor del resumen de la reserva. */
 function textos(c: Correo): Texto {
-	const n = c.negocio.nombre || "el restaurante";
+	// AUD-40: el nombre va en el asunto, que es una cabecera.
+	const n = nombreEnCabecera(c.negocio.nombre) || "el restaurante";
 	const llamar = c.negocio.telefono ? ` Si lo prefieres, llama al ${c.negocio.telefono}.` : "";
 	// Sin correo de contacto del negocio, una respuesta llegaría a nuestro remitente: no se ofrece.
 	const contestar = c.negocio.correo ? "contesta a este correo" : "llama al restaurante";
