@@ -228,6 +228,24 @@ impl CloudClient {
         self.enviar(Method::GET, path, b"", None, query).await
     }
 
+    /// POST firmado de una **lectura** (AUD-27): lo que se busca viaja en el cuerpo y no en la
+    /// query, porque la URL de cada petición se queda en los registros de Cloudflare y el cuerpo
+    /// no. Ahí va todo lo que sea de una persona (nombre, teléfono, correo) o texto que escribe
+    /// alguien; en la query sólo identificadores, fechas, filtros cerrados y paginación.
+    ///
+    /// Sale como un GET: por `enviar`, sin `X-Idempotency-Key` y sin pasar por
+    /// `EscriturasInciertas` (no aplica nada: repetirla no duplica nada), y con `x-client-now`,
+    /// que `preparar` pone en todas y que el worker usa también al leer.
+    pub async fn post_lectura<B, T>(&self, path: &str, body: &B) -> AppResult<T>
+    where
+        B: Serialize + ?Sized,
+        T: DeserializeOwned,
+    {
+        let bytes = serde_json::to_vec(body)
+            .map_err(|e| AppError::external(format!("bad_json_body: {e}")))?;
+        self.enviar(Method::POST, path, &bytes, None, &[]).await
+    }
+
     /// POST firmado (escritura): añade `X-Idempotency-Key`.
     pub async fn post_json<B, T>(&self, path: &str, body: &B) -> AppResult<T>
     where
@@ -561,10 +579,11 @@ mod tests_firma_del_destino {
 
     #[tokio::test]
     async fn lo_que_se_escapa_se_firma_escapado() {
-        // Una búsqueda de productos: tilde, espacios y un `&` que no separa parámetros.
-        let query = [("query", "café & tostá".to_string()), ("limit", "20".to_string())];
+        // Un valor con tilde, espacios y un `&` que no separa parámetros. Ninguna consulta de la
+        // app lleva ya texto así en la query (AUD-27), pero lo que llegue se firma como sale.
+        let query = [("valor", "café & tostá".to_string()), ("limit", "20".to_string())];
         let (firmado, recibido) =
-            firmado_y_recibido(Method::GET, "/v1/venta-rapida/productos/search", &query, b"").await;
+            firmado_y_recibido(Method::GET, "/v1/venta-rapida/comandas", &query, b"").await;
         assert_eq!(firmado, recibido);
     }
 
@@ -583,6 +602,135 @@ mod tests_firma_del_destino {
             firmado_y_recibido(Method::POST, "/v1/venta-rapida/lineas", &[], cuerpo).await;
         assert_eq!(recibido.destino, "/v1/venta-rapida/lineas");
         assert_eq!(firmado, recibido);
+    }
+}
+
+#[cfg(test)]
+mod tests_lectura_por_post {
+    //! AUD-27: una lectura que lleva datos de una persona o texto libre sale por POST, con ellos
+    //! en el cuerpo. Un servidor local recibe la petición de verdad (`preparar` + reqwest, con
+    //! una firma ficticia: no toca la identidad del equipo) y se mira lo que llega.
+
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// La petición tal como llega: la línea de petición, las cabeceras (en minúsculas) y el cuerpo.
+    struct Recibida {
+        linea: String,
+        cabeceras: HashMap<String, String>,
+        cuerpo: Vec<u8>,
+    }
+
+    async fn recibir(listener: TcpListener) -> Recibida {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut leido = Vec::new();
+        let mut buf = [0u8; 4096];
+        let fin_cabeceras = loop {
+            let n = socket.read(&mut buf).await.unwrap();
+            assert!(n > 0, "la conexión se cerró a mitad de las cabeceras");
+            leido.extend_from_slice(&buf[..n]);
+            if let Some(i) = leido.windows(4).position(|w| w == b"\r\n\r\n") {
+                break i + 4;
+            }
+        };
+        let cabecera = String::from_utf8(leido[..fin_cabeceras].to_vec()).unwrap();
+        let mut lineas = cabecera.split("\r\n");
+        let linea = lineas.next().unwrap().to_string();
+        let cabeceras: HashMap<String, String> = lineas
+            .filter_map(|l| l.split_once(':'))
+            .map(|(nombre, valor)| (nombre.to_ascii_lowercase(), valor.trim().to_string()))
+            .collect();
+        let largo: usize = cabeceras
+            .get("content-length")
+            .map(|v| v.parse().unwrap())
+            .unwrap_or(0);
+        while leido.len() < fin_cabeceras + largo {
+            let n = socket.read(&mut buf).await.unwrap();
+            assert!(n > 0, "la conexión se cerró a mitad del cuerpo");
+            leido.extend_from_slice(&buf[..n]);
+        }
+        let cuerpo = leido[fin_cabeceras..fin_cabeceras + largo].to_vec();
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 4\r\nconnection: close\r\n\r\nnull")
+            .await
+            .unwrap();
+        Recibida { linea, cabeceras, cuerpo }
+    }
+
+    /// Lo que sale con los argumentos que `post_lectura` le da a `enviar`: POST, sin query y sin
+    /// clave de idempotencia.
+    async fn lectura_por_post(path: &str, cuerpo: &serde_json::Value) -> Recibida {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let servidor = tokio::spawn(recibir(listener));
+
+        let client = CloudClient::new(base, std::env::temp_dir()).unwrap();
+        let bytes = serde_json::to_vec(cuerpo).unwrap();
+        let rb = client
+            .preparar(Method::POST, path, &[], &bytes, None, |_, _, _| {
+                Ok(ApiSignedHeaders {
+                    authorization: "Bearer ficticio".into(),
+                    x_device_ts: "1".into(),
+                    x_device_sig: "ficticia".into(),
+                })
+            })
+            .unwrap();
+        rb.send().await.unwrap();
+        servidor.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn el_telefono_y_el_correo_van_en_el_cuerpo_y_no_en_la_url() {
+        let cuerpo = serde_json::json!({ "telefono": "+34 600 000 000", "email": "prueba@ejemplo.invalid" });
+        let r = lectura_por_post("/v1/reservas/buscar-cliente", &cuerpo).await;
+
+        assert_eq!(r.linea, "POST /v1/reservas/buscar-cliente HTTP/1.1");
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&r.cuerpo).unwrap(), cuerpo);
+        assert_eq!(r.cabeceras.get("content-type").map(String::as_str), Some("application/json"));
+    }
+
+    #[tokio::test]
+    async fn lo_que_se_busca_en_cuentas_va_en_el_cuerpo_y_no_en_la_url() {
+        let cuerpo = serde_json::json!({ "del": "2026-11-08", "al": "2026-11-08", "q": "María José Fernández López" });
+        let r = lectura_por_post("/v1/cuentas/resumen", &cuerpo).await;
+
+        assert_eq!(r.linea, "POST /v1/cuentas/resumen HTTP/1.1");
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&r.cuerpo).unwrap(), cuerpo);
+    }
+
+    #[tokio::test]
+    async fn sale_como_una_lectura_con_la_hora_y_sin_clave_de_idempotencia() {
+        let r = lectura_por_post("/v1/cuentas/entradas", &serde_json::json!({ "q": "Cliente Ficticio" })).await;
+
+        // La hora local de quien pregunta, como en un GET (REV-03): «hoy» es el de la Handy.
+        assert!(r.cabeceras.contains_key("x-client-now"), "falta x-client-now");
+        assert!(
+            !r.cabeceras.contains_key("x-idempotency-key"),
+            "una lectura no lleva clave de idempotencia"
+        );
+    }
+
+    /// `post_lectura` no es una escritura: va por `enviar`, como `get_query`, y no por `escribir`,
+    /// que es quien pone la clave y recuerda las inciertas (RI-64). No se puede llamar aquí de
+    /// verdad —firmaría con la identidad del equipo—, así que se lee su cuerpo.
+    #[test]
+    fn post_lectura_no_pasa_por_el_camino_de_las_escrituras() {
+        // Con `core.autocrlf` el fuente llega con CRLF: se mira siempre con LF.
+        let fuente = include_str!("client.rs").replace("\r\n", "\n");
+        let desde = fuente
+            .find("pub async fn post_lectura")
+            .expect("no encuentro post_lectura");
+        let resto = &fuente[desde..];
+        let cuerpo = &resto[..resto.find("\n    }\n").expect("no encuentro el final de post_lectura")];
+
+        assert!(
+            cuerpo.contains("self.enviar(Method::POST, path, &bytes, None, &[])"),
+            "post_lectura tiene que salir por `enviar`, sin clave y sin query:\n{cuerpo}"
+        );
+        for camino in ["escribir", "write_body", "inciertas"] {
+            assert!(!cuerpo.contains(camino), "post_lectura no puede tocar `{camino}`:\n{cuerpo}");
+        }
     }
 }
 

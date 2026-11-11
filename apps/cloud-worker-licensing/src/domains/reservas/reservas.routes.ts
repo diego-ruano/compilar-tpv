@@ -11,12 +11,14 @@ import * as q from "./reservas.queries";
 import * as S from "./reservas.schemas";
 import { badRequest } from "../../server/utils/response";
 import { consulta, cuerpo } from "../../lib/validacion";
-import { apply, parseId } from "../../lib/rutas";
+import { apply, lecturaPorPost, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const reservasRoutes = new Hono<Ctx>();
 
+// AUD-27: lectura por POST (el teléfono y el correo de un cliente van en el cuerpo, no en la URL).
+reservasRoutes.use("/buscar-cliente", lecturaPorPost());
 reservasRoutes.use("*", tenantAuth);
 
 reservasRoutes.get("/meta", async (c) =>
@@ -29,16 +31,16 @@ reservasRoutes.get("/mes", consulta(S.mesQuerySchema), async (c) => {
 });
 
 // RI-61: ¿ese teléfono o ese email ya son de un cliente? La pantalla pregunta antes de asignarle la
-// reserva. Sin ninguno de los dos no hay nada que buscar.
-reservasRoutes.get("/buscar-cliente", consulta(S.buscarClienteSchema), async (c) => {
-	const { telefono, email } = c.req.valid("query");
+// reserva. Sin ninguno de los dos no hay nada que buscar. Es una lectura, por POST (AUD-27).
+reservasRoutes.post("/buscar-cliente", cuerpo(S.buscarClienteSchema), async (c) => {
+	const { telefono, email } = c.req.valid("json");
 	if (!telefono && !email) return c.json(null);
 	return c.json(await tenantQuery(c, (db) => q.buscarCliente(db, telefono, email)));
 });
 
 // Una reserva, o `null`: la Handy la mira antes de cambiarla o borrarla, para saber si hay que
-// avisar a su cliente (docs/estudios/reservas-web.md §5.7). Después de `/meta`, `/mes` y
-// `/buscar-cliente`, que si no se los comería.
+// avisar a su cliente (docs/estudios/reservas-web.md §5.7). Después de `/meta` y `/mes`, que si no
+// se los comería.
 reservasRoutes.get("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_reserva_invalido");

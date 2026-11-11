@@ -22,6 +22,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [FABLE-E](#fable-e--sin-nonce-en-el-device-proof) | 🔵 | Sin nonce anti-repetición en el device-proof | Aplazado |
 | [LOGIN-04](#login-04--el-hash-del-pin-se-puede-romper-offline) | 🔵 | El hash del PIN se puede romper offline | Aplazado |
 | [LIC-02](#lic-02--sin-certificate-pinning) | 🔵 | Sin *certificate pinning* del host de la API | Aplazado |
+| [OBS-06](#obs-06--el-nombre-de-una-imagen-heredada-viaja-en-la-url) | 🔵 | El nombre de una imagen heredada viaja en la URL | Sin empezar |
 | [RELOJ-01](#reloj-01--la-hora-del-negocio-es-la-del-equipo) | 🔵 | La hora del negocio es la del equipo | Aplazado |
 | [SYNC-29](#sync-29--un-cambio-de-la-handy-pisa-en-la-main-una-escritura-suya-sin-subir) | 🟡 | Un cambio de la Handy pisa en la Main una escritura suya que aún no ha subido | Sin decidir |
 | [SYNC-30](#sync-30--una-ruta-del-worker-decide-con-una-lectura-fuera-de-su-transacción) | 🔵 | Una ruta del worker decide con una lectura fuera de su transacción | Sin decidir |
@@ -197,6 +198,26 @@ Aplazado: exige primero acceso de lectura a la base del tenant.
 bypass: el estado de licencia va firmado con ed25519 y la clave pública está fijada en el binario
 (`LICENSE_SIGNING_PUBLIC_KEYS_B64`), y el emparejamiento firma con la clave del dispositivo. Queda como
 extra opcional, a revisar al fijar el modelo de precios.
+
+### OBS-06 · El nombre de una imagen heredada viaja en la URL
+
+Una imagen nueva se guarda con un UUID por nombre (`save_image`, en `src-tauri/src/lib.rs`). Pero
+`images_backfill`, que sube una vez las que ya había en el equipo, encola cada fichero de
+`images/{productos,categorias,proveedores,alergenos}` **con el nombre que tenía**, y ese nombre es
+parte del camino con el que la imagen se sube, se sirve y se borra (`/v1/images/…`). `ruta_segura`
+(`imagenes.rs`) y `REL_PATH_RE` (`images.routes.ts`) sólo piden letras, cifras, punto, guion y guion
+bajo: un `images/proveedores/Juan-Perez.jpg` pasa. Cloudflare guarda la URL de cada petición
+([observabilidad.md](arquitectura/observabilidad.md#lo-que-registra-cloudflare-de-cada-petición)),
+así que un nombre de persona puesto a un fichero acabaría en sus registros, que es lo que AUD-27
+quita del resto de rutas. También va en la dirección pública de `r2.dev` que carga la Handy.
+
+Hoy no hay instalaciones en producción con ficheros anteriores al UUID.
+
+Arreglo propuesto: antes de cualquier petición, renombrar lo heredado a un identificador opaco (un
+UUID con su extensión) y actualizar en la misma operación las referencias de la base (la ruta de
+imagen de productos, categorías, proveedores y alérgenos), por `WriteGuard` para que replique. Con
+eso `ruta_segura` y `REL_PATH_RE` se pueden estrechar a `<uuid>.<ext>` y la excepción de las rutas
+de imágenes en `test/sinDatosPersonalesEnLaQuery.node.test.ts` (`COMODINES`) pasa a ser una comprobación.
 
 ---
 

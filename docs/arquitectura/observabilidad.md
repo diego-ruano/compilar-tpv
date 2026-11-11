@@ -77,7 +77,7 @@ Better Stack     ── GET /health, latidos del cron
   `SENTRY_RELEASE=tpv-api@<versión>` y `BUILD_COMMIT`. `nodejs_compat` está activado (lo exige `@sentry/cloudflare`).
   `instrumentDurableObjectWithSentry` cubre los handlers del WebSocket del DO.
 - **Logpush** está activado en el worker (`"logpush": true`); el destino se configura en el panel de
-  Cloudflare.
+  Cloudflare. Qué lleva: [Lo que registra Cloudflare de cada petición](#lo-que-registra-cloudflare-de-cada-petición).
 
 ## Los fallos de comandos
 
@@ -143,6 +143,32 @@ La autorización consume el esquema Bearer/Basic y su credencial, sin borrar el 
 las pasadas posteriores conservan los marcadores y el diagnóstico.
 No redacta cualquier número largo por su longitud. Rust preselecciona reglas con RegexSet y conserva cadenas prestadas sin
 reemplazos. La tabla compartida cubre texto y objetos anidados, incluida su idempotencia.
+
+## Lo que registra Cloudflare de cada petición
+
+La plataforma registra cada invocación del worker por su cuenta, sin que su código intervenga: **el
+filtro de datos personales no llega ahí**.
+
+- **Workers Logs** (`"observability": { "enabled": true }` en `wrangler.json`) guarda de cada petición
+  el método y la URL, con su query, durante 7 días.
+- **Logpush** (`"logpush": true`) deja que un job, que se configura en el panel de Cloudflare, exporte
+  las trazas de cada invocación al dataset `cloudflare-logpush` de Axiom. Si ese job incluye el campo
+  `Event`, la URL va dentro. Qué campos manda el nuestro no está en el repositorio.
+- La redacción propia de la plataforma sólo tapa lo que parece un identificador largo (un hexadecimal
+  de 32 cifras o más, un base64 de 21 o más): un teléfono, un correo o un nombre se quedan como están.
+- El cuerpo de la petición no se registra.
+
+Por eso **ningún dato personal ni texto libre viaja en la URL** (AUD-27): va en el cuerpo de un POST,
+y en la query sólo quedan identificadores, fechas, filtros cerrados y paginación. La regla y los tests
+que la vigilan, en [worker.md](worker.md#cómo-se-escribe-una-ruta). Lo que queda fuera de ella, el
+nombre de una imagen heredada, es [OBS-06](../pendientes.md#obs-06--el-nombre-de-una-imagen-heredada-viaja-en-la-url).
+
+Cloudflare puede además quitar la query de las URL que registra, con el ajuste
+`observability.redact_query_string` del worker. **No sale de `wrangler.json`**: el Wrangler con el que
+se despliega (4.96.0) no conoce ese campo, así que se pone por la API de Cloudflare, a mano, y el
+repositorio no dice si está puesto. Cada despliegue envía el `observability` de `wrangler.json`
+(`{ "enabled": true }`), sin él: si se pone, después de cada despliegue se comprueba que sigue
+([pendiente](#pendiente)).
 
 ## Piezas
 
@@ -254,8 +280,9 @@ ni simbolización TypeScript; esto requiere completar el despliegue del worker.
 Sentry: dos proyectos para este sistema (`tpv-desktop` y `node-cloudflare-workers`), región UE,
 sin Session Replay. Axiom: tres datasets
 (`cloudflare-logpush`, `tpv-sync`, `tpv-device-logs`), separados por la **retención**, que es propiedad
-del dataset y no se aplica hacia atrás; cada evento lleva `service` (`tpv-device`, `tpv-sync`,
-`tpv-api`). Retención sugerida: 30 días para `tpv-sync`, 30–90 para `tpv-device-logs`.
+del dataset: acortarla borra lo que quede fuera del plazo nuevo, sin vuelta atrás. Cada evento lleva
+`service` (`tpv-device`, `tpv-sync`, `tpv-api`). Retención sugerida: 30 días para `tpv-sync`, 30–90
+para `tpv-device-logs`.
 
 Para comprobar la ingesta sin esperar a que pase algo, una petición sin autenticar a una ruta de tenant
 emite un `device_auth_rechazado`:
@@ -319,6 +346,14 @@ su latido.
 
 ## Pendiente
 
+- **Lo que tiene que comprobar y hacer el responsable en Cloudflare y en Axiom** (AUD-27; nada de
+  esto se ve desde el repositorio):
+  - mirar si `observability.redact_query_string` está puesto en el worker `tpv-api`; si no, ponerlo
+    por la API de Cloudflare y comprobar tras el siguiente despliegue que sigue;
+  - mirar en el panel si el job de Logpush manda el campo `Event` (la URL va dentro), qué retención
+    tiene `cloudflare-logpush` y quién puede leerlo;
+  - si el job lo mandaba, lo que se copió con datos de clientes en la URL sale de Axiom acortando
+    la retención de `cloudflare-logpush`; en Workers Logs caduca solo a los 7 días.
 - Un límite por dispositivo en `/v1/telemetry` (hoy: topes de tamaño y autenticación).
 - En Rust, `#[tracing::instrument(skip_all, fields(...))]` en los casos de uso para no volcar DTOs con
   datos de cliente en los spans.

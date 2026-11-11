@@ -227,6 +227,8 @@ export async function lineas(
 	return rows(rs) as LineaComandaRow[];
 }
 
+// Los nombres se unen con « · », como en la Main (`get_index_rows`): aquí iban con « - » y el
+// arnés de contrato no lo veía, porque una lectura por POST no contaba como lectura (AUD-27).
 export async function indexRows(db: Client, ids: string[]): Promise<IndexRow[]> {
 	if (!ids.length) return [];
 	const placeholders = ids.map((_, i) => `?${i + 1}`).join(",");
@@ -235,7 +237,7 @@ export async function indexRows(db: Client, ids: string[]): Promise<IndexRow[]> 
 			SELECT
 				x.ID_Comanda AS ID_Comanda,
 				(
-					SELECT GROUP_CONCAT(nn.Nombre, ' - ')
+					SELECT GROUP_CONCAT(nn.Nombre, ' · ')
 					FROM (
 						SELECT DISTINCT COALESCE(dc2.Nombre_Producto, p2.Nombre, '') AS Nombre
 						FROM Detalle_Comanda dc2

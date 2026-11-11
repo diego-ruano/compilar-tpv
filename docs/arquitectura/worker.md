@@ -66,6 +66,31 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
   `test/vetoAntesDelCuerpo.test.ts`.
 - **Toda ruta autenticada pasa por `tenantAuth`** (`middleware/tenant.ts`): token, device-proof, rol de
   la fila, licencia en uso. Tenant y dispositivo salen del token, nunca del cuerpo.
+- **Ningún dato personal ni texto libre en la query ni en el camino: va en el cuerpo** (AUD-27).
+  Cloudflare guarda el método y la URL de cada petición, y Logpush puede exportarlos a Axiom, sin
+  pasar por el filtro de datos personales; el cuerpo no se registra
+  ([observabilidad.md](observabilidad.md#lo-que-registra-cloudflare-de-cada-petición)). En la URL
+  sólo van identificadores, fechas, filtros cerrados y paginación. Lo que es de una persona (nombre,
+  teléfono, correo, documento), una nota o lo que se escribe en un buscador hace que la lectura pase
+  a `post` con `cuerpo(schema)`.
+- **Una lectura que va por POST se declara** con `xRoutes.use("/ruta", lecturaPorPost())`
+  (`lib/rutas.ts`) **delante de `tenantAuth`**, que lee el cuerpo entero para comprobar la firma. La
+  declaración le pone el tope a su cuerpo (8 KB, o el que se le diga) y es lo que la distingue de
+  una escritura. Sigue siendo una lectura: sólo `tenantQuery`, que le fija la hora con
+  `X-Client-Now`; ni `apply` ni `X-Idempotency-Key` ni los vetos que son para lo que escribe
+  (`soloLaMain…`), y la Handy la pide con `CloudClient::post_lectura`. Sus consultas cuentan como
+  lecturas en la cobertura de contrato. Van así el cliente de una reserva
+  (`/v1/reservas/buscar-cliente`), los listados y el resumen de Cuentas (`/v1/cuentas/entradas`,
+  `/salidas`, `/resumen`), los buscadores de productos (`/v1/mesas/productos/search`,
+  `/v1/venta-rapida/productos/search`) y el resumen de tickets (`/v1/venta-rapida/index-rows`, cuya
+  lista de ids no cabe en una query).
+- Las dos reglas las vigila `test/sinDatosPersonalesEnLaQuery.node.test.ts`, que lee todo `src/`
+  con el analizador de TypeScript (en Node: workerd no puede cargarlo, y `vitest.config.ts` tiene
+  un proyecto para los `*.node.test.ts`) y con listas cerradas: lo que se lee de la query (por su
+  nombre o con un schema con nombre de un `*.schemas.ts`, siguiendo los alias de importación), lo
+  que lleva el camino, y que todo lo que no es un GET y sólo consulta esté declarado. Lo que no sabe
+  leer lo da por malo. En la Handy, `tests_sin_datos_en_la_url` (`tpv-infra-http`) hace lo mismo
+  con lo que pone en la URL, función a función.
 - **Lo que la Handy no puede hacer** lo vetan middlewares: `soloLaMainCobra` (`cobro_solo_en_main`),
   `soloLaMainEscribeCaja` (`caja_solo_en_main`), y `lib/hub.ts::TABLAS_SOLO_MAIN` para las tablas
   fiscales.
@@ -264,13 +289,21 @@ bindings, pero no pueden hablar con ningún servicio de verdad (`vitest.config.t
   (`node:net`, `node:tls`) no pasa por ahí: se vigila que ni el worker ni los tests los importen, y
   lo que haga así una dependencia se corta pero no hace fallar al test.
 
-Queda fuera de los dos cierres el proceso de Node del propio Vitest (`vitest.config.ts`, sus
-plugins y un `globalSetup`): hoy no hay `globalSetup` ni nada que pida red ahí, y lo que se añada
-en ese lado no lo vigila nada.
-
 Lo vigila `test/sinRed.test.ts`, también con el propio Vitest: tres tests marcados `it.fails` se
 tragan una salida (una de la guarda, una del worker auxiliar y un socket) y sólo los hace fallar el
 gancho; sin él, salen en rojo.
+
+Todo eso es del proyecto `workerd`. Los `*.node.test.ts` corren en el proyecto `node` (leen el
+fuente con el analizador de TypeScript, que workerd no carga) y no tienen worker auxiliar: su guarda
+es `test/helpers/sinRed.node.ts`. `fetch`, `WebSocket`, `node:net`, `node:tls` y los agentes de
+`node:http` y `node:https` lanzan con el mismo texto (método y origen, o host y puerto), y el
+gancho hace fallar al test aunque se trague el error. No cubre `node:dns` ni un proceso hijo: hoy
+esos tests sólo leen ficheros. `envDir: false` va arriba y en cada proyecto: con uno solo de los
+dos sitios, el `.env` sigue llegando. Lo vigila `test/sinRed.node.test.ts`.
+
+Queda fuera el proceso de Node del propio Vitest (`vitest.config.ts`, sus plugins y un
+`globalSetup`): hoy no hay `globalSetup` ni nada que pida red ahí, y lo que se añada en ese lado
+no lo vigila nada.
 
 **Un test declara el doble de lo que su código llama fuera**, antes de llamarlo:
 

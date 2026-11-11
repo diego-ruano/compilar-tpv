@@ -211,9 +211,15 @@ describe("una salida a la red sin doble", () => {
 		const propias = Object.keys(fuentes).filter((ruta) => !ruta.endsWith(".d.ts"));
 		expect(propias.some((ruta) => ruta.startsWith("../src/"))).toBe(true);
 		expect(propias.some((ruta) => ruta.startsWith("./helpers/"))).toBe(true);
+		// Este fichero los nombra para buscarlos, y la guarda del proyecto `node` (que corre en Node,
+		// no en workerd) los sustituye y los prueba.
+		const QUE_LOS_NOMBRAN = new Set([
+			"./sinRed.test.ts",
+			"./sinRed.node.test.ts",
+			"./helpers/sinRed.node.ts",
+		]);
 		const conSockets = propias
-			// Este fichero nombra los módulos para buscarlos.
-			.filter((ruta) => ruta !== "./sinRed.test.ts")
+			.filter((ruta) => !QUE_LOS_NOMBRAN.has(ruta))
 			.filter((ruta) => /["'](?:node:)?(?:net|tls)["']/.test(fuentes[ruta]));
 		expect(conSockets).toEqual([]);
 	});

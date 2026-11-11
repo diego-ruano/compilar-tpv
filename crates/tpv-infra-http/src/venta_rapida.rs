@@ -64,10 +64,11 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
     }
 
     async fn search_productos(&self, query: String, limit: i64) -> AppResult<Vec<ProductoRow>> {
+        // AUD-27: lo que se escribe en un buscador va en el cuerpo, no en la URL.
         self.client
-            .get_query(
+            .post_lectura(
                 "/v1/venta-rapida/productos/search",
-                &[("query", query), ("limit", limit.to_string())],
+                &json!({ "query": query, "limit": limit }),
             )
             .await
     }
@@ -91,9 +92,9 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
     }
 
     async fn get_index_rows(&self, ids: Vec<String>) -> AppResult<Vec<IndexRow>> {
-        // Lectura vía POST (el body lleva la lista de ids); el worker no exige idempotencia aquí.
+        // Lectura por POST (el cuerpo lleva la lista de ids): sin clave de idempotencia.
         self.client
-            .post_json("/v1/venta-rapida/index-rows", &json!({ "ids": ids }))
+            .post_lectura("/v1/venta-rapida/index-rows", &json!({ "ids": ids }))
             .await
     }
 

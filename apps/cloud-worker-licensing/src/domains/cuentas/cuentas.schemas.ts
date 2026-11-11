@@ -76,8 +76,9 @@ const optInt = z
 		return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
 	});
 
-// Listado de caja con búsqueda de texto + paginación por clave (CUENTA-05, RI-18). El cursor viaja
-// en dos parámetros planos; con uno solo no dice dónde empezar y es la primera página.
+// Listado de caja con búsqueda de texto + paginación por clave (CUENTA-05, RI-18). Llega en el
+// cuerpo de un POST: lo que se busca no va en la URL (AUD-27). El cursor viaja en dos campos
+// planos; con uno solo no dice dónde empezar y es la primera página.
 export const listadoSchema = z
 	.object({
 		del: z.string().nullish().transform(cleanOptional),

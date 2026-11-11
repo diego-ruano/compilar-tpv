@@ -277,6 +277,7 @@ lecturas_de_contrato! {
     venta_rapida__productos_por_categoria,
     venta_rapida__buscar_productos,
     venta_rapida__detalles_ver_ticket,
+    venta_rapida__index_rows,
     tareas__admin,
     tareas__mias,
     tareas__trabajadores,
@@ -479,6 +480,12 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
                 .get_lineas_comanda(&s(&e["id_comanda"]))
                 .await
                 .expect("lineas comanda barra");
+            serde_json::to_value(r).unwrap()
+        }
+        "venta_rapida.index_rows" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            let ids = e["ids"].as_array().expect("ids").iter().map(s).collect();
+            let r = repo.get_index_rows(ids).await.expect("index rows");
             serde_json::to_value(r).unwrap()
         }
         "tareas.admin" => {

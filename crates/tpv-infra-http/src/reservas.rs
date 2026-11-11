@@ -23,6 +23,12 @@ impl HttpReservasRepository {
     }
 }
 
+/// El cuerpo de `POST /v1/reservas/buscar-cliente`: los mismos dos campos que
+/// `ReservaBuscarClienteArgs`, con `null` en el que no se busca.
+fn cuerpo_buscar_cliente(telefono: Option<&str>, email: Option<&str>) -> JsonValue {
+    json!({ "telefono": telefono, "email": email })
+}
+
 #[async_trait]
 impl ReservasRepository for HttpReservasRepository {
     async fn meta(&self) -> AppResult<ReservasMetaDto> {
@@ -82,14 +88,10 @@ impl ReservasRepository for HttpReservasRepository {
         telefono: Option<&str>,
         email: Option<&str>,
     ) -> AppResult<Option<ClienteCoincidente>> {
-        let mut query = Vec::new();
-        if let Some(t) = telefono {
-            query.push(("telefono", t.to_string()));
-        }
-        if let Some(e) = email {
-            query.push(("email", e.to_string()));
-        }
-        self.client.get_query("/v1/reservas/buscar-cliente", &query).await
+        // AUD-27: el teléfono y el correo de un cliente van en el cuerpo, nunca en la URL.
+        self.client
+            .post_lectura("/v1/reservas/buscar-cliente", &cuerpo_buscar_cliente(telefono, email))
+            .await
     }
 
     async fn eliminar(&self, id_reserva: &str) -> AppResult<bool> {
@@ -137,5 +139,30 @@ impl AvisosReservaWeb for HttpAvisosReservaWeb {
         };
         let _: JsonValue = self.client.post_json("/v1/reservas-web/avisos", &cuerpo).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! AUD-27: el teléfono y el correo con los que se busca al cliente de una reserva viajan en el
+    //! cuerpo, con los nombres de campo que lee el `buscarClienteSchema` del worker.
+
+    use super::*;
+
+    #[test]
+    fn el_cuerpo_lleva_el_telefono_y_el_correo() {
+        assert_eq!(
+            cuerpo_buscar_cliente(Some("600000000"), Some("prueba@ejemplo.invalid")),
+            json!({ "telefono": "600000000", "email": "prueba@ejemplo.invalid" })
+        );
+    }
+
+    #[test]
+    fn el_que_no_se_busca_va_como_null() {
+        assert_eq!(
+            cuerpo_buscar_cliente(Some("600000000"), None),
+            json!({ "telefono": "600000000", "email": null })
+        );
+        assert_eq!(cuerpo_buscar_cliente(None, None), json!({ "telefono": null, "email": null }));
     }
 }

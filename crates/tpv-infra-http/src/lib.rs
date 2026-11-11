@@ -39,3 +39,6 @@ pub use client::{CloudClient, CLOUD_API_BASE};
 pub mod permisos;
 
 pub mod websocket;
+
+#[cfg(test)]
+mod tests_sin_datos_en_la_url;

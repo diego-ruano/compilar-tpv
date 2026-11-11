@@ -99,6 +99,7 @@ import { asignacionesSemana } from "../src/domains/trabajadores/trabajadores.que
 import {
 	categorias as categoriasBarra,
 	detallesVerTicket,
+	indexRows,
 	lineas as lineasBarra,
 	listComandas,
 	productosByCategoria as productosByCategoriaBarra,
@@ -174,6 +175,8 @@ import casoVrBuscar from "../../../tests/contract/lecturas/casos/venta_rapida/bu
 import goldenVrBuscar from "../../../tests/contract/lecturas/golden/venta_rapida/buscar_productos.json";
 import casoVrVerTicket from "../../../tests/contract/lecturas/casos/venta_rapida/detalles_ver_ticket.json";
 import goldenVrVerTicket from "../../../tests/contract/lecturas/golden/venta_rapida/detalles_ver_ticket.json";
+import casoVrIndexRows from "../../../tests/contract/lecturas/casos/venta_rapida/index_rows.json";
+import goldenVrIndexRows from "../../../tests/contract/lecturas/golden/venta_rapida/index_rows.json";
 
 import casoCfgBusiness from "../../../tests/contract/lecturas/casos/configuracion/business.json";
 import goldenCfgBusiness from "../../../tests/contract/lecturas/golden/configuracion/business.json";
@@ -320,6 +323,7 @@ const CASOS = [
 		caso: casoVrVerTicket,
 		golden: goldenVrVerTicket,
 	},
+	{ nombre: "venta_rapida_index_rows", caso: casoVrIndexRows, golden: goldenVrIndexRows },
 	{ nombre: "configuracion_business", caso: casoCfgBusiness, golden: goldenCfgBusiness },
 	{ nombre: "configuracion_ticket", caso: casoCfgTicket, golden: goldenCfgTicket },
 	{ nombre: "configuracion_contact", caso: casoCfgContact, golden: goldenCfgContact },
@@ -500,6 +504,8 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return searchProductosBarra(db, e.query, e.limit);
 		case "venta_rapida.detalles_ver_ticket":
 			return detallesVerTicket(db, e.id_comanda);
+		case "venta_rapida.index_rows":
+			return indexRows(db, e.ids);
 		case "tareas.admin":
 			return getTareasAdmin(db);
 		case "tareas.mias":

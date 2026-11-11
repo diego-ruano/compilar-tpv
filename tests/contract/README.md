@@ -120,8 +120,10 @@ Eso lo cubre `test/lecturasEnHoraLocal.test.ts`.
 
 - **Escritura**: los `export function` de los `*.commands.ts` del worker con los builders que importa el
   arnés.
-- **Lectura**: los `export function` de los `*.queries.ts` que sirven a un GET con las consultas que
-  importa el arnés de lectura (las comprobaciones previas de una escritura ya viajan en el de escritura).
+- **Lectura**: los `export function` de los `*.queries.ts` que sirven a una lectura —un GET, o un POST
+  que el router declara con `lecturaPorPost(…)` porque lo que pide va en el cuerpo— con las consultas
+  que importa el arnés de lectura (las comprobaciones previas de una escritura ya viajan en el de
+  escritura).
 
 Corre en CI (job `worker`) y **avisa sin romper**: anotaciones en el PR y una tabla en el resumen. Con
 `--estricto` sale con código 1. Imprime cuántos comandos y lecturas tienen caso, cuántos están excluidos

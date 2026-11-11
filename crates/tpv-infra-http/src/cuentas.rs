@@ -26,45 +26,43 @@ impl HttpCuentasRepository {
     }
 }
 
-fn rango(del: Option<String>, al: Option<String>) -> Vec<(&'static str, String)> {
-    let mut q = Vec::new();
-    if let Some(d) = del {
-        q.push(("del", d));
-    }
-    if let Some(a) = al {
-        q.push(("al", a));
-    }
-    q
+/// Lo que se busca, o `None` si no hay nada escrito.
+fn busqueda(q: Option<&String>) -> Option<&String> {
+    q.filter(|s| !s.trim().is_empty())
 }
 
-/// Query params de listado: rango + búsqueda + paginación por clave (el cursor va en dos
-/// parámetros planos, `cursor_fecha` y `cursor_id`, igual que en `CuentasRangoArgs`).
-fn listado_query(filtro: &CuentasFiltro) -> Vec<(&'static str, String)> {
-    let mut q = rango(filtro.del.clone(), filtro.al.clone());
-    if let Some(s) = filtro.q.as_ref().filter(|s| !s.trim().is_empty()) {
-        q.push(("q", s.clone()));
-    }
-    if let Some(ps) = filtro.page_size {
-        q.push(("page_size", ps.to_string()));
-    }
-    if let Some(c) = &filtro.cursor {
-        q.push(("cursor_fecha", c.fecha.clone()));
-        q.push(("cursor_id", c.id.clone()));
-    }
-    q
+/// El cuerpo de un listado: rango + búsqueda + paginación por clave (el cursor va en dos campos
+/// planos, `cursor_fecha` y `cursor_id`, igual que en `CuentasRangoArgs`).
+///
+/// AUD-27: va en el cuerpo de un POST y no en la query. Lo que se busca es texto que escribe
+/// alguien (el nombre de un cliente, un concepto) y la URL se queda en los registros de la nube.
+fn cuerpo_listado(filtro: &CuentasFiltro) -> JsonValue {
+    json!({
+        "del": filtro.del,
+        "al": filtro.al,
+        "q": busqueda(filtro.q.as_ref()),
+        "page_size": filtro.page_size,
+        "cursor_fecha": filtro.cursor.as_ref().map(|c| &c.fecha),
+        "cursor_id": filtro.cursor.as_ref().map(|c| &c.id),
+    })
+}
+
+/// El cuerpo del resumen: el mismo rango y la misma búsqueda, sin paginar (AUD-27).
+fn cuerpo_resumen(del: Option<String>, al: Option<String>, q: Option<String>) -> JsonValue {
+    json!({ "del": del, "al": al, "q": busqueda(q.as_ref()) })
 }
 
 #[async_trait]
 impl CuentasRepository for HttpCuentasRepository {
     async fn entradas(&self, filtro: CuentasFiltro) -> AppResult<PaginaEntradas> {
         self.client
-            .get_query("/v1/cuentas/entradas", &listado_query(&filtro))
+            .post_lectura("/v1/cuentas/entradas", &cuerpo_listado(&filtro))
             .await
     }
 
     async fn salidas(&self, filtro: CuentasFiltro) -> AppResult<PaginaSalidas> {
         self.client
-            .get_query("/v1/cuentas/salidas", &listado_query(&filtro))
+            .post_lectura("/v1/cuentas/salidas", &cuerpo_listado(&filtro))
             .await
     }
 
@@ -74,11 +72,9 @@ impl CuentasRepository for HttpCuentasRepository {
         al: Option<String>,
         q: Option<String>,
     ) -> AppResult<ResumenCajaDto> {
-        let mut params = rango(del, al);
-        if let Some(s) = q.filter(|s| !s.trim().is_empty()) {
-            params.push(("q", s));
-        }
-        self.client.get_query("/v1/cuentas/resumen", &params).await
+        self.client
+            .post_lectura("/v1/cuentas/resumen", &cuerpo_resumen(del, al, q))
+            .await
     }
 
     async fn crear_gasto(
@@ -179,5 +175,64 @@ impl CuentasRepository for HttpCuentasRepository {
             .post_json(&format!("/v1/cuentas/pagos/{id_pago}/anular"), &body)
             .await?;
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! AUD-27: lo que se busca en Cuentas viaja en el cuerpo, con los nombres de campo que lee el
+    //! `listadoSchema` del worker.
+
+    use super::*;
+    use tpv_contracts::cuentas::CursorCuentas;
+
+    #[test]
+    fn el_listado_lleva_rango_busqueda_y_pagina_con_el_cursor_en_dos_campos() {
+        let filtro = CuentasFiltro {
+            del: Some("2026-11-01".into()),
+            al: Some("2026-11-08".into()),
+            q: Some("Cliente Ficticio".into()),
+            page_size: Some(50),
+            cursor: Some(CursorCuentas { fecha: "2026-11-08 13:05:00".into(), id: "p-1".into() }),
+        };
+        assert_eq!(
+            cuerpo_listado(&filtro),
+            json!({
+                "del": "2026-11-01",
+                "al": "2026-11-08",
+                "q": "Cliente Ficticio",
+                "page_size": 50,
+                "cursor_fecha": "2026-11-08 13:05:00",
+                "cursor_id": "p-1",
+            })
+        );
+    }
+
+    #[test]
+    fn lo_que_no_se_pide_va_como_null_y_una_busqueda_en_blanco_no_se_manda() {
+        let filtro = CuentasFiltro { q: Some("   ".into()), ..CuentasFiltro::default() };
+        assert_eq!(
+            cuerpo_listado(&filtro),
+            json!({
+                "del": null,
+                "al": null,
+                "q": null,
+                "page_size": null,
+                "cursor_fecha": null,
+                "cursor_id": null,
+            })
+        );
+    }
+
+    #[test]
+    fn el_resumen_lleva_el_mismo_rango_y_la_misma_busqueda() {
+        assert_eq!(
+            cuerpo_resumen(Some("2026-11-01".into()), None, Some("María José".into())),
+            json!({ "del": "2026-11-01", "al": null, "q": "María José" })
+        );
+        assert_eq!(
+            cuerpo_resumen(None, None, Some(" ".into())),
+            json!({ "del": null, "al": null, "q": null })
+        );
     }
 }

@@ -92,8 +92,8 @@ pub struct CuentasRangoArgs {
     #[serde(default)]
     pub page_size: Option<u32>,
     /// La página empieza justo después de esta fila (el `siguiente` de la página anterior, ver
-    /// [`CursorCuentas`]). Van planos y no como un objeto porque hacia el worker viajan como
-    /// parámetros de la URL. Sin los dos, es la primera página.
+    /// [`CursorCuentas`]). Van planos y no como un objeto porque así los lee el worker, en el
+    /// cuerpo del listado. Sin los dos, es la primera página.
     #[serde(default)]
     pub cursor_fecha: Option<String>,
     #[serde(default)]

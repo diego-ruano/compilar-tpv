@@ -129,8 +129,9 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     async fn search_productos_by_nombre(&self, q: String) -> AppResult<Vec<ProductoVendibleOut>> {
+        // AUD-27: lo que se escribe en un buscador va en el cuerpo, no en la URL.
         self.client
-            .get_query("/v1/mesas/productos/search", &[("query", q)])
+            .post_lectura("/v1/mesas/productos/search", &json!({ "query": q }))
             .await
     }
 

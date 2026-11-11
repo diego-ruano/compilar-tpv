@@ -136,8 +136,9 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 - **Las lecturas de la Handy también**: `lib/tenantClient.ts::tenantQuery`, por donde pasan todas,
   fija `'now'` con `X-Client-Now` usando la misma función que el DO (`rewriteNowInSql`). Sin cabecera
   manda el reloj de Turso (UTC). El cliente de Rust pone `x-client-now` en todas las peticiones, también
-  en los GET. Lo cubre `test/lecturasEnHoraLocal.test.ts`; el arnés de contrato no lo ve, porque corre
-  las dos implementaciones en la misma zona horaria.
+  en los GET y en las lecturas que van por POST ([worker.md](worker.md#cómo-se-escribe-una-ruta)). Lo
+  cubre `test/lecturasEnHoraLocal.test.ts`; el arnés de contrato no lo ve, porque corre las dos
+  implementaciones en la misma zona horaria.
 - Un `'localtime'` aplicado a un valor (`datetime(Fecha,'localtime')`) depende de quien lo ejecuta. En
   desarrollo falla; en el equipo del cliente no bloquea la escritura, pero queda anotado.
 
@@ -470,6 +471,8 @@ resultado de la anterior quedó **incierto** (fallo de transporte, timeout o 5xx
 petición vuelve a salir con su clave y sus bytes durante 5 minutos, y el DO devuelve el resultado de
 la primera si se aplicó (RI-64). Así, el camarero que vuelve a pulsar tras un error no duplica la
 línea. Con una respuesta clara la clave se olvida, y pedir dos veces lo mismo son dos operaciones.
+Una lectura que va por POST (`post_lectura`: lo que busca lleva datos de una persona o texto libre,
+AUD-27) no es una escritura: sale sin clave, no entra en ese reintento y no pasa por el DO.
 
 El id de lo que da de alta la Handy lo elige el dispositivo. Las altas de venta rápida (un ticket,
 una línea) y la de un lote son **altas puras** (`ON CONFLICT … DO NOTHING`): un id que ya existe no
