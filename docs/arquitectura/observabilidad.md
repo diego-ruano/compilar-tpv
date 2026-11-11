@@ -17,10 +17,25 @@ de Sentry completa y sus mapas verificados; no se despliega sin esa comprobació
 El código propio, incluido licencias, emite con `tracing`. En Android, `JNI_OnLoad` inicializa
 el logger de plataforma antes de usar JNI: conserva el diagnóstico temprano en Logcat
 (`TPVRust`, INFO o superior). Cuando se instala el subscriber, el mismo logger pasa a conectar
-las dependencias que usan `log` con `tracing`; una capa escribe directamente a Logcat sin bucles
-ni duplicados. El subscriber se registra por separado del logger: un logger ya instalado no
-interrumpe la creación del guard, el estado y el worker. En escritorio se instala `LogTracer`
-si la fachada `log` está libre.
+las dependencias que usan `log` con `tracing`. El subscriber se registra por separado del logger:
+un logger ya instalado no interrumpe la creación del guard, el estado y el worker. En escritorio
+se instala `LogTracer` si la fachada `log` está libre.
+
+**En la APK de release no hay capa de Logcat** (AUD-29, `tpv-telemetry::capa_de_logcat`): desde
+`init`, lo de la app va a los destinos de siempre (el fichero local, Axiom y Sentry) y no a Logcat.
+Logcat lo lee quien tenga ADB autorizado, un informe de errores del terminal o una app preinstalada
+con `READ_LOGS`, el filtro de datos personales no llega ahí, y los fallos de comandos van con su
+mensaje. **Tampoco cuando `init` falla**: si el fichero de logs no se puede crear (el almacenamiento
+lleno), `init` sale sin subscriber ni puente, y con la feature `log` de `tracing` lo que se registra
+saldría por el logger temprano. En release ese logger deja de escribir en Logcat en cuanto empieza
+`init` (`tpv-telemetry::logger_temprano`), así que entonces lo de la app no va a ningún sitio; en
+depuración sigue en Logcat hasta que lo sustituye el puente. En una compilación de depuración (la de
+`pnpm tauri android dev` y la de E2E) una capa escribe además directamente a Logcat, sin bucles ni
+duplicados. En release siguen llegando a Logcat
+el arranque anterior a `init` (`[TPV] run() start`, la ruta de AppData), lo que Rust escriba por la
+salida estándar o de error (tao la redirige con la etiqueta `RustStdoutStderr` en todo build: un
+`panic`, el aviso de que `init` falló) y la excepción de Java que limpia el almacén de secretos
+(`ExceptionDescribe`). La consola de la Webview sólo llega en depuración.
 
 ## El flujo
 
