@@ -26,7 +26,7 @@ import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
 
 import type { Env } from "../../env";
-import { cuerpoConIdentificador } from "../../lib/validacion";
+import { cuerpoConIdentificador, topeAnonimo } from "../../lib/validacion";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
 import { ipDeLaPeticion } from "./pairing.avisos";
@@ -39,6 +39,11 @@ import * as S from "./pairing.schemas";
 type Ctx = { Bindings: Env; Variables: Partial<TenantVars> };
 
 export const pairingRoutes = new Hono<Ctx>();
+
+// AUD-34: las tres anónimas leen el cuerpo antes de saber quién llama. Su tope, delante de todo.
+pairingRoutes.use("/claim", topeAnonimo());
+pairingRoutes.use("/fetch-token", topeAnonimo());
+pairingRoutes.use("/cancel", topeAnonimo());
 
 /**
  * El cortafuegos de coste, DELANTE del validador del cuerpo a propósito: lo que se quiere es

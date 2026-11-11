@@ -36,6 +36,7 @@ import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
 
 import type { Env } from "../../env";
+import { topeAnonimo } from "../../lib/validacion";
 import { enTransaccion, getDb, type Sql } from "../../server/db";
 import { sha256Hex } from "../../server/crypto";
 import {
@@ -76,6 +77,13 @@ import {
 } from "./stripe.helpers";
 
 export const stripeRoutes = new Hono<{ Bindings: Env }>();
+
+// AUD-34: el cuerpo se lee y pasa por el HMAC antes de saber si lo manda Stripe; la forma y la hora
+// de la cabecera las escribe quien llama. 4 MiB: el evento más grande de los suscritos es una disputa
+// cerrada con sus pruebas al máximo (150 000 caracteres) y 50 metadatos al máximo (clave de 40 y valor
+// de 500); con cada carácter fuera del plano básico y escapado en `\uXXXX\uXXXX` (12 bytes) son unos
+// 2,1 MB más el resto del evento. Lo vigila `test/topeAnonimo.test.ts`.
+stripeRoutes.use("/webhook", topeAnonimo(4 * 1024 * 1024));
 
 /** Los eventos que nos importan. Un pago diferido (SEPA, etc.) llega por el segundo. */
 const EVENTOS_DE_PAGO = new Set([

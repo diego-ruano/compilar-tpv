@@ -64,6 +64,15 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
   (`soloLaMain…`), un tope de tamaño, un token de administración, el filtro por IP del emparejamiento. Un
   `*.routes.ts` no resuelve roles. Lo vigilan `test/anularSoloMain.test.ts` y
   `test/vetoAntesDelCuerpo.test.ts`.
+- **Una ruta anónima lleva el tope de su cuerpo delante** (AUD-34): lo que no pasa por `tenantAuth`
+  ni por un token de administración no lee un cuerpo entero antes de saber quién llama. Se declara
+  antes que la ruta, `xRoutes.use("/ruta", topeAnonimo())` (`lib/validacion.ts`, 413
+  `payload_too_large`): 8 KiB el emparejamiento (`claim`, `fetch-token`, `cancel`) y las licencias
+  (`activate`, `device-change/request`, `refresh`), y 4 MiB el webhook de Stripe. Su evento más
+  grande es una disputa cerrada con las pruebas y los metadatos al máximo (150 000 caracteres y 50
+  pares de 40 + 500): con todo escapado en `\uXXXX`, unos 2,1 MB. Las públicas de la reserva web
+  llevan el suyo, `topeDelCuerpo`. `test/vetoAntesDelCuerpo.test.ts` barre los routers y falla con una
+  ruta anónima con cuerpo sin tope.
 - **Toda ruta autenticada pasa por `tenantAuth`** (`middleware/tenant.ts`): token, device-proof, rol de
   la fila, licencia en uso. Tenant y dispositivo salen del token, nunca del cuerpo.
 - **Ningún dato personal ni texto libre en la query ni en el camino: va en el cuerpo** (AUD-27).

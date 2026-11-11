@@ -22,6 +22,7 @@
 import { zValidator } from "@hono/zod-validator";
 import type { Context } from "hono";
 import type { MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import * as z from "zod";
 
 import { badRequest } from "../server/utils/response";
@@ -189,4 +190,30 @@ export function textoObligatorio(identificador: string) {
 		.string({ message: identificador })
 		.trim()
 		.min(1, { message: identificador });
+}
+
+/**
+ * Lo más grande que manda la app a una ruta anónima: la activación firmada, con todos sus campos en
+ * su tope y en caracteres de tres bytes, no llega a 5 KB; el emparejamiento, a medio KB.
+ */
+export const TOPE_ANONIMO = 8 * 1024;
+
+/**
+ * AUD-34 · El tope del cuerpo de una ruta ANÓNIMA, la que no pasa por `tenantAuth` ni por un token de
+ * administración. Antes de saber quién llama no se lee un cuerpo entero: sin esto, cualquiera hacía
+ * al worker leer, parsear o firmar decenas de megas, y un isolate (128 MB) atiende a todos los
+ * negocios a la vez.
+ *
+ * Va DELANTE de todo lo que lee el cuerpo (el validador, la firma), declarado antes que la ruta:
+ *
+ *     xRoutes.use("/ruta", topeAnonimo());
+ *
+ * Con `Content-Length` decide sin leer nada; sin él, deja de leer en cuanto pasa del tope. Lo vigila
+ * `test/vetoAntesDelCuerpo.test.ts`.
+ */
+export function topeAnonimo(maxSize: number = TOPE_ANONIMO) {
+	return bodyLimit({
+		maxSize,
+		onError: (c) => c.json({ ok: false, error: "payload_too_large" }, 413),
+	});
 }

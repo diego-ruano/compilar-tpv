@@ -48,7 +48,7 @@ import {
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 import { pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
-import { cuerpo } from "../../lib/validacion";
+import { cuerpo, topeAnonimo } from "../../lib/validacion";
 import { activarSchema, pedirCambioSchema } from "./licensing.schemas";
 import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
 import {
@@ -89,6 +89,12 @@ import {
 type Ctx = { Bindings: Env };
 
 export const licenseRoutes = new Hono<Ctx>();
+
+// AUD-34: las tres anónimas leen el cuerpo antes de saber quién llama (`/refresh`, tras un token sin
+// verificar). Su tope, delante de todo.
+licenseRoutes.use("/activate", topeAnonimo());
+licenseRoutes.use("/device-change/request", topeAnonimo());
+licenseRoutes.use("/refresh", topeAnonimo());
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
