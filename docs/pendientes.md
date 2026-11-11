@@ -165,11 +165,13 @@ ya aceptada que se repite tal cual dentro de ella **vuelve a ejecutarse**, no s�
   ni mueve la caducidad.
 - El cambio de equipo: el código ya está consumido y la licencia ya es de ese equipo, así que entra
   como el caso anterior, sin anotar otro traslado.
-- El canje: no suma dos veces. Mientras el equipo conserve su licencia, la clave ya está gastada y
-  contesta `license_already_used`, sin DEK ni token. Si la licencia que recibió el tiempo se ha
-  anulado o trasladado después, la repetición de un `soloSumar` contesta `clave_no_canjeable`; la de
-  un canje hecho desde la pantalla de activación entra como una clave sin estrenar y abre un negocio
-  nuevo para ese equipo, porque `/activate` no mira que la clave ya está canjeada.
+- El canje: no se repite. La clave ya está canjeada y contesta `license_already_used`, sin DEK ni
+  token, con `soloSumar` o sin él y aunque la licencia que recibió el tiempo se haya anulado o
+  trasladado después: una clave canjeada no vuelve a sumar ni estrena un negocio (AUD-07).
+
+Lo que queda, entonces, es de la primera activación y del cambio de equipo: quien haya capturado
+una de esas peticiones entera puede, durante dos minutos, deshacer la baja de ese equipo, reponer
+el nombre del negocio y recibir otra vez su DEK y un token.
 
 ### LOGIN-04 · El hash del PIN se puede romper offline
 

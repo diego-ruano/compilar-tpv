@@ -8,7 +8,8 @@ export type LicenseStatus =
 	| "issued" // emitida (comprada o alta manual), aún sin activar: el reloj no corre
 	| "active" // activada en un Main; corre hasta expires_at_ms
 	| "expired" // pasada la caducidad
-	| "revoked"; // anulada (fraude, reembolso, admin)
+	| "revoked" // anulada (fraude, reembolso, admin)
+	| "redeemed"; // canjeada: su tiempo se sumó a otra licencia (`redeemed_into_license_id`) y ya no se activa
 
 /** `pruebas`: las que emite el E2E, que se retiran con su base al acabar (`admin/pruebas.ts`). */
 export type LicenseOrigin = "stripe" | "manual" | "pruebas";

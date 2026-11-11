@@ -1117,6 +1117,52 @@ describe("AUD-01 · repetir una activación ya aceptada dentro del margen de la 
 		});
 	});
 
+	it.each([
+		{ como: "anulado", id: "anulada", sentencia: `UPDATE licenses SET status = 'revoked' WHERE license_id = ?;` },
+		{ como: "trasladado a otro equipo", id: "trasladada", sentencia: `UPDATE licenses SET main_device_id = 'otro-equipo' WHERE license_id = ?;` },
+	])("repetir un canje cuando la licencia que recibió el tiempo se ha $como no estrena otro negocio (AUD-07)", async ({ id, sentencia }) => {
+		// Sin `soloSumar`, como lo manda la pantalla de activación. El equipo ya no tiene licencia viva
+		// a la que sumar y la clave canjeada sigue con `main_device_id` a NULL: la repetición seguía
+		// hasta el alta y abría un negocio nuevo con el plazo entero de una clave ya gastada.
+		await escenario(`repetir-canje-${id}`, async (c) => {
+			const { victima } = await dosNegocios(c);
+			const renovacion = await emitir(c, victima.email, "lic-renovacion");
+			const peticion = await activacionFirmada({
+				activationKey: renovacion.clave,
+				deviceId: victima.mainId,
+				devicePubKey: victima.main.pub,
+			});
+
+			const primera = await enviar(peticion);
+			expect(primera.status).toBe(200);
+			expect(primera.body.tiempoSumado).toBe(true);
+			const sumado = (await getLicenseById(c.db, victima.licenseId))!.expires_at_ms;
+
+			c.sql.exec(sentencia, victima.licenseId);
+			const negocios = contar(c, "tenants");
+			basesCreadas = [];
+			correos = [];
+
+			// La misma petición, con la misma hora y la misma firma.
+			const repetida = await enviar(peticion);
+
+			expect([repetida.status, repetida.body.error]).toEqual([409, "license_already_used"]);
+			expect(repetida.body.token).toBeUndefined();
+			expect(repetida.body.fieldDek).toBeUndefined();
+			expect(repetida.body.tenantId).toBeUndefined();
+			// Ni negocio ni base nuevos, y la clave sigue gastada donde se gastó.
+			expect(contar(c, "tenants")).toBe(negocios);
+			expect(basesCreadas).toEqual([]);
+			expect(await getLicenseById(c.db, renovacion.id)).toMatchObject({
+				status: "redeemed",
+				main_device_id: null,
+				redeemed_into_license_id: victima.licenseId,
+			});
+			expect((await getLicenseById(c.db, victima.licenseId))!.expires_at_ms).toBe(sumado);
+			expect(correos).toEqual([]);
+		});
+	});
+
 	it("el traslado no se repite con su código: ya consumido, la repetición entra como el mismo equipo", async () => {
 		await escenario("repetir-traslado", async (c) => {
 			const { atacante: dueno } = await dosNegocios(c);

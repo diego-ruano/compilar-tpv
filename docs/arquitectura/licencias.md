@@ -46,6 +46,9 @@ tenant ([sincronizacion.md](sincronizacion.md)).
   `expires_at_ms`, `main_device_id`, `tenant_id`, `customer_email` (obligatorio: es a donde va el
   código de cambio de equipo), datos del cliente de Stripe, `redeemed_into_license_id` y
   `key_email_sent_at_ms`.
+- **`redeemed` es una clave canjeada**: su tiempo se sumó a otra licencia
+  (`redeemed_into_license_id`) y ella se queda sin Main, sin negocio y sin caducidad. No se activa
+  ni se canjea otra vez, y no vuelve a `issued` (AUD-07).
 - **El reloj arranca en la primera activación**, no en la compra: al emitir, `expires_at_ms` es
   `NULL`.
 
@@ -142,7 +145,11 @@ Rust y el worker comparten un vector con una clave fija
 la misma firma en los dos lados.
 
 No existe o no se reconoce → `license_not_found`; revocada → `license_revoked`; caducada **y pasada la
-gracia** → `license_expired`. Después, uno de tres caminos según `main_device_id`:
+gracia** → `license_expired`. **Una clave sin Main que no esté `issued` → `license_already_used`**
+(409, AUD-07): es la que un canje dejó `redeemed`, que tampoco tiene `main_device_id`. Se rechaza
+antes de elegir camino, sin negocio, base, fila de equipo, token ni DEK; al equipo que la canjeó se
+le dice que su tiempo ya está sumado, y a cualquier otro, que se sumó a otra licencia. Después, uno
+de tres caminos según `main_device_id`:
 
 ### 1. Clave sin estrenar en un equipo que ya tiene licencia: suma tiempo (canje)
 
@@ -175,7 +182,9 @@ registrado** (el `tenant_id` de su fila de `devices`), la clave nueva **no crea 
 - Ni tenant, ni base en Turso, ni DEK nuevos. Manda un recibo por correo y responde
   `tiempoSumado: true`; la pantalla enseña «tiempo añadido, vence el X» y espera a que se pulse.
 
-Teclear en el bar 1 la clave que era para el bar 2 le suma el tiempo al bar 1: se ve en el acto.
+Teclear en el bar 1 la clave que era para el bar 2 le suma el tiempo al bar 1: se ve en el acto. Y
+esa clave ya no estrena el bar 2: allí contesta `license_already_used` («Esa clave ya se ha sumado a
+otra licencia. Si era para otro local, contacta con soporte.»).
 
 Con el TPV ya en marcha, el sitio es **Configuración → Licencia → Añadir otra licencia**
 (`license_sumar_clave`, de administrador). La petición lleva `soloSumar`, y con ella el worker
@@ -195,8 +204,10 @@ otro negocio que el suyo, tampoco. En los tres casos se queda con su token y su 
 Crea el tenant (`ensureTenantExistsMinimal`), da de alta el dispositivo con su clave pública,
 aprovisiona su base en Turso (`provisionTenantDatabase`) y guarda los datos del negocio. Después
 `activateLicenseFirstTime` pone `active`, `activated_at_ms`, `expires_at_ms = ahora + meses` y
-`main_device_id`, condicionado a que siga sin activar: si otro equipo ganó la carrera, contesta
-`device_replaced`. La base de Turso aprovisionada para el perdedor se queda vacía.
+`main_device_id`, condicionado a que siga sin activar **y sin estrenar** (`main_device_id IS NULL
+AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_replaced`; si lo que pasó
+es que otro la canjeó mientras éste aprovisionaba su base, `license_already_used` (AUD-07). La base
+de Turso aprovisionada para el perdedor se queda vacía.
 
 ### 3. Cambio de equipo (la licencia ya está en otro)
 
@@ -357,7 +368,7 @@ las congela al irse la Main. **Caducar no empuja**: se nota en la siguiente comp
 | Listar | `GET /v1/admin/licenses` | `pnpm license:list` |
 | Reenviar la clave | `POST …/:id/resend-key` | `pnpm license:resend` |
 | Revocar | `POST …/:id/revoke` | `pnpm license:revoke -- --id …` |
-| Desrevocar | `POST …/:id/unrevoke` (vuelve a `issued` o `active`) | `pnpm license:unrevoke` |
+| Desrevocar | `POST …/:id/unrevoke` (vuelve a `issued` o `active`; una clave canjeada, a `redeemed`) | `pnpm license:unrevoke` |
 | Extender | `POST …/:id/extend` | `pnpm license:extend -- --id … --months 12` |
 | Acortar | `POST …/:id/shorten` (puede dejarla caducada) | `pnpm license:shorten` |
 | Retirar los negocios del E2E | `POST /v1/admin/pruebas/retirar` | — (lo llama el E2E al terminar) |

@@ -35,6 +35,7 @@ import {
 	exigirClaveSiEsDeOtroNegocio,
 	getDeviceOtp,
 	getLicenseByHash,
+	getLicenseById,
 	putDeviceOtp,
 	reassignMainDevice,
 	getOrCreateTenantFieldDek,
@@ -177,6 +178,25 @@ function rechazoDeFirma(c: Context, error: string) {
 }
 
 /**
+ * AUD-07 · Lo que se le dice a quien teclea una clave ya canjeada, además de `license_already_used`.
+ *
+ * Lo normal es que sea el mismo equipo repitiendo un canje que ya salió bien (la respuesta no le
+ * llegó, o ha pulsado dos veces): a ése se le dice que su tiempo ya está sumado, para que no crea
+ * que no se aplicó. A cualquier otro, la frase de la tabla: la clave se sumó a otra licencia.
+ */
+async function fraseDeClaveYaCanjeada(
+	db: ReturnType<typeof getDb>,
+	clave: LicenseRow,
+	deviceId: string,
+): Promise<string | undefined> {
+	if (!clave.redeemed_into_license_id) return undefined;
+	const receptora = await getLicenseById(db, clave.redeemed_into_license_id);
+	return receptora?.main_device_id === deviceId
+		? "Esa clave ya se ha usado: su tiempo ya está sumado a la licencia de este equipo."
+		: undefined;
+}
+
+/**
  * El 409 de una clave que no es la registrada (`device_key_mismatch`) o de un equipo registrado sin
  * ninguna (`device_key_missing`). `null` si el fallo es otro, que sigue su camino.
  */
@@ -310,6 +330,16 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		return c.json({ ok: false, error: "device_tenant_mismatch" } satisfies ApiError, 409);
 	}
 
+	// AUD-07 · Una clave sin Main sólo vale si sigue sin estrenar (`issued`). Un canje la deja
+	// `redeemed` con `main_device_id` a NULL, y aquí sólo se miraba esto último: la misma clave
+	// estrenaba después un negocio nuevo, con su plazo entero, en cualquier equipo sin licencia
+	// viva. El primer local se quedaba los meses sumados, y un reembolso sólo se los restaba a él.
+	// Se rechaza antes de elegir camino.
+	if (esPrimeraActivacion && lic.status !== "issued") {
+		const message = await fraseDeClaveYaCanjeada(db, lic, deviceId);
+		return c.json({ ok: false, error: "license_already_used", message } satisfies ApiError, 409);
+	}
+
 	// La licencia viva de la que este equipo es la Main EN SU NEGOCIO, si la clave está sin estrenar:
 	// es a la que una clave nueva le suma tiempo (REV-13). Sin mirar el negocio, con dos licencias
 	// apuntando al equipo se elegía la que más tarde caduca y la Main recibía el negocio de la otra.
@@ -409,7 +439,11 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 				);
 			}
 			if (canje === "usada") {
-				return c.json({ ok: false, error: "license_already_used" } satisfies ApiError, 409);
+				// Otra petición la ha canjeado entretanto. Si ha sido este mismo equipo (un doble
+				// envío), se le dice que su tiempo ya está sumado (AUD-07).
+				const gastada = await getLicenseByHash(db, licHash);
+				const message = gastada ? await fraseDeClaveYaCanjeada(db, gastada, deviceId) : undefined;
+				return c.json({ ok: false, error: "license_already_used", message } satisfies ApiError, 409);
 			}
 			const expiresAtMs = canje;
 
@@ -592,6 +626,12 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// aprovisionamiento lo evitaría, pero dejaría la licencia atada a un equipo cuya base falló
 		// al crearse, y eso es peor que una base de sobra.
 		if (activada === null) {
+			// AUD-07: o la ha activado otro equipo, o la ha canjeado otro mientras éste aprovisionaba
+			// su base. En el segundo caso la clave sigue sin Main: no está en otro equipo, está usada.
+			const ganada = await getLicenseByHash(db, licHash);
+			if (ganada && !ganada.main_device_id) {
+				return c.json({ ok: false, error: "license_already_used" } satisfies ApiError, 409);
+			}
 			return c.json({ ok: false, error: "device_replaced" } satisfies ApiError, 409);
 		}
 		expiresAtMs = activada;

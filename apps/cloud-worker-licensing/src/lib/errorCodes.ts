@@ -273,11 +273,11 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	demasiadas_solicitudes: "Se han pedido demasiados códigos. Espera un rato antes de pedir otro.",
 	espera_reenvio: "Espera unos minutos antes de pedir otro código.",
 	sin_correo: "La licencia no tiene un correo al que enviar el código.",
-	// REV-13: se teclea un código que ya se usó. Lo normal es reintentar un canje que ya salió
-	// bien (y los meses ya están sumados), así que el texto tiene que evitar que lo vuelva a
-	// intentar creyendo que no se aplicó.
+	// REV-13, AUD-07: se teclea una clave que ya se canjeó. Si es el mismo equipo repitiendo un canje
+	// que ya salió bien, la ruta se lo dice con su propia frase (`fraseDeClaveYaCanjeada`); ésta es
+	// para quien la teclea en otro equipo, donde antes estrenaba un negocio nuevo.
 	license_already_used:
-		"Ese código ya se ha usado. Si acabas de canjearlo, el tiempo ya está sumado a tu licencia.",
+		"Esa clave ya se ha sumado a otra licencia. Si era para otro local, contacta con soporte.",
 
 	// Reserva desde la web: lo lee quien reserva, en el widget, que pinta `message` tal cual.
 	// Sin detalles a propósito (domains/reservas_web/puerta.ts): el motivo queda en el log.

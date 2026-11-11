@@ -24,6 +24,8 @@ import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 let clienteActual: any = null;
 /** Bases de tenant que se han llegado a aprovisionar: el canje no puede crear ninguna. */
 let basesCreadas: string[] = [];
+/** Lo que pasa mientras se aprovisiona una base, para intercalar otra petición (AUD-07). */
+let alAprovisionar: (() => Promise<void>) | null = null;
 
 vi.mock("../src/server/db", async (original) => ({
 	...(await (original as any)()),
@@ -34,6 +36,9 @@ vi.mock("../src/domains/licensing/licensing.helpers", async (original) => ({
 	...(await (original as any)()),
 	provisionTenantDatabase: async (_db: any, _env: any, tenantId: string) => {
 		basesCreadas.push(tenantId);
+		const intercalar = alAprovisionar;
+		alAprovisionar = null;
+		if (intercalar) await intercalar();
 	},
 }));
 
@@ -41,7 +46,9 @@ const { licenseRoutes } = await import("../src/domains/licensing/licensing.route
 const { generateLicenseKey, licenseKeyHash } = await import(
 	"../src/domains/licensing/licenseKey"
 );
-const { getLicenseById } = await import("../src/server/licenseStore");
+const { activateLicenseFirstTime, getLicenseById, reactivateLicense, revokeLicense } = await import(
+	"../src/server/licenseStore"
+);
 const { cifrar } = await import("../src/server/crypto");
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -153,6 +160,7 @@ async function escenario<T>(nombre: string, fn: (e: Escenario) => Promise<T>): P
 beforeEach(() => {
 	clienteActual = null;
 	basesCreadas = [];
+	alAprovisionar = null;
 });
 
 describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
@@ -221,7 +229,162 @@ describe("REV-13 · el equipo ya tiene licencia: se suma el tiempo", () => {
 		expect(r.uno.status).toBe(200);
 		expect(r.dos.status).toBe(409);
 		expect(r.dos.body.error).toBe("license_already_used");
+		// Al equipo que la canjeó se le dice que su tiempo ya está sumado, no que fue a otra licencia.
+		expect(r.dos.body.message).toMatch(/ya está sumado a la licencia de este equipo/);
 		expect(r.final.expires_at_ms).toBe(r.tras.expires_at_ms);
+	});
+
+	it("una clave ya canjeada no estrena otro negocio en un equipo sin licencia (AUD-07)", async () => {
+		// El canje deja la clave `redeemed` con `main_device_id` a NULL, y `/activate` sólo miraba esto
+		// último: la misma clave, tecleada en la pantalla de activación de otro ordenador, estrenaba un
+		// negocio nuevo con su plazo entero mientras el primero se quedaba los meses sumados.
+		const r = await escenario("canjeada-en-otro-equipo", async (e) => {
+			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
+			const nueva = await e.emitir(12);
+
+			const uno = await e.activar(nueva.clave);
+			const tras = await e.leer(viejaId);
+			const dos = await e.activar(nueva.clave, "equipo-sin-licencia", await clavePublica(4), {
+				tenantInfo: { displayName: "Bar 2" },
+			});
+			return {
+				viejaId,
+				uno,
+				dos,
+				tras,
+				vieja: await e.leer(viejaId),
+				clave: await e.leer(nueva.id),
+				tenants: Number(e.sql.exec(`SELECT COUNT(*) AS n FROM tenants;`).toArray()[0].n),
+				equipoNuevo: e.sql.exec(`SELECT 1 FROM devices WHERE device_id = 'equipo-sin-licencia';`).toArray(),
+			};
+		});
+
+		expect(r.uno.status).toBe(200);
+		expect(r.uno.body.tiempoSumado).toBe(true);
+
+		expect(r.dos.status).toBe(409);
+		expect(r.dos.body.error).toBe("license_already_used");
+		// La frase es la de la tabla (se sumó a otra licencia): no es el equipo que la canjeó.
+		expect(r.dos.body.message).toBeUndefined();
+		expect(r.dos.body.token).toBeUndefined();
+		expect(r.dos.body.fieldDek).toBeUndefined();
+		expect(r.dos.body.tenantId).toBeUndefined();
+
+		// La clave sigue gastada donde se gastó, y no hay negocio, base ni equipo nuevos.
+		expect(r.clave).toMatchObject({
+			status: "redeemed",
+			main_device_id: null,
+			expires_at_ms: null,
+			redeemed_into_license_id: r.viejaId,
+		});
+		expect(r.tenants).toBe(1);
+		expect(basesCreadas).toEqual([]);
+		expect(r.equipoNuevo).toEqual([]);
+		expect(r.vieja.expires_at_ms).toBe(r.tras.expires_at_ms);
+	});
+
+	it("el alta no estrena una clave canjeada aunque llegue hasta ella (AUD-07)", async () => {
+		// La segunda barrera, la del `UPDATE`: no basta con que la ruta mire el estado al leer.
+		const r = await escenario("alta-de-canjeada", async (e) => {
+			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
+			const nueva = await e.emitir(12);
+			await e.activar(nueva.clave);
+			const antes = await e.leer(nueva.id);
+
+			const resultado = await activateLicenseFirstTime(e.db, {
+				licenseId: nueva.id,
+				tenantId: "tenant-cualquiera",
+				deviceId: "equipo-cualquiera",
+				termMonths: 12,
+			});
+			return { viejaId, antes, resultado, despues: await e.leer(nueva.id) };
+		});
+
+		expect(r.antes.status).toBe("redeemed");
+		expect(r.resultado).toBeNull();
+		expect(r.despues).toMatchObject({
+			status: "redeemed",
+			main_device_id: null,
+			tenant_id: null,
+			expires_at_ms: null,
+			redeemed_into_license_id: r.viejaId,
+		});
+	});
+
+	it("anular y desanular una clave canjeada no la deja otra vez sin estrenar (AUD-07)", async () => {
+		// Nunca se activó, así que deshacer su anulación la devolvía a `issued`: se podía estrenar con
+		// ella un negocio, o sumarla otra vez.
+		const r = await escenario("desanulada", async (e) => {
+			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
+			const nueva = await e.emitir(12);
+			await e.activar(nueva.clave);
+			const tras = await e.leer(viejaId);
+
+			await revokeLicense(e.db, nueva.id);
+			const anulada = await e.activar(nueva.clave, "equipo-sin-licencia", await clavePublica(4));
+			await reactivateLicense(e.db, nueva.id);
+			const desanulada = await e.leer(nueva.id);
+
+			const enOtroEquipo = await e.activar(nueva.clave, "equipo-sin-licencia", await clavePublica(4));
+			const enElMismo = await e.activar(nueva.clave);
+			return { viejaId, tras, anulada, desanulada, enOtroEquipo, enElMismo, vieja: await e.leer(viejaId) };
+		});
+
+		expect([r.anulada.status, r.anulada.body.error]).toEqual([403, "license_revoked"]);
+		expect(r.desanulada).toMatchObject({
+			status: "redeemed",
+			disabled: 0,
+			main_device_id: null,
+			redeemed_into_license_id: r.viejaId,
+		});
+		expect([r.enOtroEquipo.status, r.enOtroEquipo.body.error]).toEqual([409, "license_already_used"]);
+		expect([r.enElMismo.status, r.enElMismo.body.error]).toEqual([409, "license_already_used"]);
+		expect(basesCreadas).toEqual([]);
+		expect(r.vieja.expires_at_ms).toBe(r.tras.expires_at_ms);
+	});
+
+	it("si el canje entra mientras otro equipo aprovisiona su base con esa clave, gana el canje y sólo él (AUD-07)", async () => {
+		// Lo que el rechazo de la ruta no ve: el equipo nuevo leyó la clave cuando aún era `issued`, y
+		// el canje la gasta antes de su `UPDATE`. Ganaban los dos: 12 meses al primer local y un
+		// negocio nuevo con otros 12.
+		const r = await escenario("carrera-con-el-alta", async (e) => {
+			const viejaId = await e.licenciaDelEquipo({ diasRestantes: 30 });
+			const antes = await e.leer(viejaId);
+			const nueva = await e.emitir(12);
+
+			let estadoAlAprovisionar: string | null = null;
+			let canje: { status: number; body: any } | null = null;
+			alAprovisionar = async () => {
+				estadoAlAprovisionar = (await e.leer(nueva.id)).status;
+				canje = await e.activar(nueva.clave);
+			};
+			const nuevo = await e.activar(nueva.clave, "equipo-sin-licencia", await clavePublica(4));
+			return {
+				viejaId,
+				antes,
+				estadoAlAprovisionar,
+				canje: canje as { status: number; body: any } | null,
+				nuevo,
+				vieja: await e.leer(viejaId),
+				clave: await e.leer(nueva.id),
+			};
+		});
+
+		expect(r.estadoAlAprovisionar).toBe("issued");
+		expect(r.canje?.status).toBe(200);
+		expect(r.canje?.body.tiempoSumado).toBe(true);
+		expect(r.vieja.expires_at_ms).toBeGreaterThan(r.antes.expires_at_ms + 350 * DIA);
+
+		// Al equipo nuevo se le dice que la clave ya está usada, no que está en otro equipo.
+		expect(r.nuevo.status).toBe(409);
+		expect(r.nuevo.body.error).toBe("license_already_used");
+		expect(r.nuevo.body.token).toBeUndefined();
+		expect(r.nuevo.body.fieldDek).toBeUndefined();
+		expect(r.clave).toMatchObject({
+			status: "redeemed",
+			main_device_id: null,
+			redeemed_into_license_id: r.viejaId,
+		});
 	});
 
 	it("el cobro se muda con el tiempo, o un reembolso no tendría de dónde restar", async () => {

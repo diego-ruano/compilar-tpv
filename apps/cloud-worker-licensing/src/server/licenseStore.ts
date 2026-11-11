@@ -26,6 +26,8 @@ export type LicenseRow = {
 
 	tenant_id: string | null;
 	main_device_id: string | null;
+	/** La licencia a la que se sumó el tiempo de esta clave, si se canjeó (`status = 'redeemed'`). */
+	redeemed_into_license_id: string | null;
 
 	status: LicenseStatus;
 	disabled: number;
@@ -425,6 +427,11 @@ export async function issueLicense(
  * Condicionada en SQL a que siga sin activar (`main_device_id IS NULL`), para que dos activaciones
  * simultáneas no puedan pisarse. Devuelve `null` si **no** ganó esa carrera (REV-15).
  *
+ * AUD-07: y a que siga sin estrenar (`status = 'issued'`). Un canje deja la clave `redeemed` con
+ * `main_device_id` a NULL, y sin esta condición la misma clave estrenaba después un negocio nuevo
+ * con su plazo entero. La ruta ya lo rechaza al leerla; esto cierra la carrera del equipo que la
+ * leyó `issued` y llega aquí cuando otro ya la ha canjeado (lo que tarda en aprovisionar su base).
+ *
  * ⚠️ Mirar el resultado es la mitad que faltaba. El `WHERE` estaba desde el principio, pero nadie
  * comprobaba si había afectado a alguna fila, así que la perdedora seguía como si tal cosa: se
  * llevaba un token y la DEK de un tenant que la licencia no apunta, o sea dos equipos creyéndose
@@ -448,7 +455,7 @@ export async function activateLicenseFirstTime(
         activated_at_ms=?,
         expires_at_ms=?,
         updated_at_ms=?
-    WHERE license_id=? AND main_device_id IS NULL;
+    WHERE license_id=? AND main_device_id IS NULL AND status = 'issued';
     `,
 		[args.tenantId, args.deviceId, now, expiresAt, now, args.licenseId],
 	);
@@ -563,6 +570,9 @@ export async function revokeLicense(db: Sql, licenseId: string): Promise<void> {
  * El estado al que regresa depende de si la licencia llegó a activarse: una que nunca se activó
  * vuelve a `issued` (su reloj no había arrancado) y una activada a `active`. Si además caducó
  * mientras tanto, `computeLicenseState` ya lo resuelve por `expires_at_ms`: aquí no se toca.
+ *
+ * AUD-07: una clave canjeada vuelve a `redeemed`. Tampoco se activó nunca, así que volvía a
+ * `issued`: anularla y desanularla la dejaba otra vez sin estrenar, con su tiempo ya sumado a otra.
  */
 export async function reactivateLicense(db: Sql, licenseId: string): Promise<void> {
 	const now = Date.now();
@@ -570,7 +580,11 @@ export async function reactivateLicense(db: Sql, licenseId: string): Promise<voi
 		db,
 		`
     UPDATE licenses
-    SET status = CASE WHEN activated_at_ms IS NULL THEN 'issued' ELSE 'active' END,
+    SET status = CASE
+            WHEN redeemed_into_license_id IS NOT NULL THEN 'redeemed'
+            WHEN activated_at_ms IS NULL THEN 'issued'
+            ELSE 'active'
+        END,
         disabled = 0,
         updated_at_ms = ?
     WHERE license_id = ? AND status = 'revoked';
