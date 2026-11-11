@@ -1,4 +1,4 @@
-import { commands } from "@tpv/client";
+import { commands, toAppError } from "@tpv/client";
 // src/app/arranque/useEmparejamientoHandy.ts
 //
 // El estado de la vinculación de un Handy con su Main durante el arranque: si ya está emparejado, la
@@ -35,6 +35,18 @@ export type EstadoEmparejamiento =
 
 const pedirALaNube: PedirALaNube = (ruta, cuerpo) => cloudPost("anon", ruta, cuerpo);
 
+/** El vínculo guardado: la Handy emparejada, o `idle` si no lo está. Si no se puede leer, lanza. */
+async function leerVinculoGuardado(): Promise<EstadoEmparejamiento> {
+	const tenantIdRaw = await commands.handyGetTenant();
+	const tenantId = String(tenantIdRaw || "").trim();
+
+	if (!tenantId) return { step: "idle" };
+
+	const ident = await identidadDelDispositivo(commands);
+
+	return { step: "paired", tenantId, token: "", deviceId: ident.deviceId };
+}
+
 export function useEmparejamientoHandy(modo: ModeStateValue) {
 	const [estado, setEstado] = useState<EstadoEmparejamiento>({ step: "idle" });
 	const [ocupado, setOcupado] = useState(false);
@@ -70,27 +82,47 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 		};
 	}, []);
 
+	/**
+	 * Al arrancar en modo Handy y al elegir «Handy» en el selector: con un vínculo guardado se vuelve
+	 * a él, sin pedir un código nuevo. AUD-23: si no se puede leer, se dice, para que nadie lo tome
+	 * por una Handy sin vincular.
+	 */
 	async function cargarEmparejamientoExistente() {
+		setError(null);
 		try {
-			const tenantIdRaw = await commands.handyGetTenant();
-			const tenantId = String(tenantIdRaw || "").trim();
-
-			if (!tenantId) {
-				setEstado({ step: "idle" });
-				return;
-			}
-
-			const ident = await identidadDelDispositivo(commands);
-
-			setEstado({ step: "paired", tenantId, token: "", deviceId: ident.deviceId });
-		} catch {
+			setEstado(await leerVinculoGuardado());
+		} catch (e: unknown) {
 			setEstado({ step: "idle" });
+			setError(
+				`No se ha podido leer la vinculación guardada de este Handy: ${toAppError(e).message}. ` +
+					"Para volver a intentarlo, pulsa «← Volver» y elige Handy.",
+			);
 		}
 	}
 
 	useEffect(() => {
 		if (modo !== "handy") return;
 		void cargarEmparejamientoExistente();
+	}, [modo]);
+
+	// AUD-23: en el selector de modo, si el equipo guarda un vínculo de Handy, la tarjeta lo dice:
+	// elegir «Handy» vuelve a él sin código. Si no se puede leer, la tarjeta dice lo de siempre: es un
+	// texto, y al elegir «Handy» la vinculación cuenta el fallo (el comando ya lo registra `invocar`).
+	const [hayVinculoGuardado, setHayVinculoGuardado] = useState(false);
+	useEffect(() => {
+		if (modo !== null) return;
+		let vivo = true;
+		void commands
+			.handyGetTenant()
+			.then((tenant) => {
+				if (vivo) setHayVinculoGuardado(String(tenant || "").trim() !== "");
+			})
+			.catch(() => {
+				if (vivo) setHayVinculoGuardado(false);
+			});
+		return () => {
+			vivo = false;
+		};
 	}, [modo]);
 
 	async function iniciar(codigo: CodigoDeVinculacion) {
@@ -159,7 +191,7 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 		setEstado({ step: "idle" });
 	}
 
-	return { estado, ocupado, error, huella, vincular, cancelar, volverAVincular };
+	return { estado, ocupado, error, huella, hayVinculoGuardado, vincular, cancelar, volverAVincular };
 }
 
 export type EmparejamientoHandy = ReturnType<typeof useEmparejamientoHandy>;

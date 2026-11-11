@@ -336,7 +336,15 @@ pub fn handy_clear_token() -> Result<(), String> {
 }
 
 pub fn handy_get_tenant() -> Result<Option<String>, String> {
-    match secret_store::get(SVC_AUTH, KEY_HANDY_TENANT) {
+    handy_tenant_en(&DelSistema)
+}
+
+/// AUD-23: `None` es que no hay vínculo, y sólo se dice cuando consta. Que el almacén no conteste
+/// es un error: tomarlo por «sin vínculo» enseñaba a una Handy vinculada la pantalla de emparejar.
+/// Lo ilegible cuenta como ausente, como en la identidad (RI-72): no se va a poder leer nunca, y
+/// lo que lo arregla es vincularla de nuevo.
+fn handy_tenant_en(almacen: &impl Almacen) -> Result<Option<String>, String> {
+    match almacen.get(SVC_AUTH, KEY_HANDY_TENANT) {
         Ok(Some(v)) => {
             let tenant_id = v.trim().to_string();
             if tenant_id.is_empty() {
@@ -345,7 +353,12 @@ pub fn handy_get_tenant() -> Result<Option<String>, String> {
                 Ok(Some(tenant_id))
             }
         }
-        _ => Ok(None),
+        Ok(None) => Ok(None),
+        Err(ErrorSecreto::Ilegible(e)) => {
+            tracing::warn!("[vinculación] el negocio de la Handy no se puede descifrar en este equipo ({e})");
+            Ok(None)
+        }
+        Err(e @ ErrorSecreto::NoDisponible(_)) => Err(e.to_string()),
     }
 }
 
@@ -506,6 +519,25 @@ mod tests {
         let a = AlmacenFalso::con(SVC_DEVICE_KEY, "d1", "no-es-una-clave");
         assert!(keypair_en(&a, "d1", true).is_err());
         assert_eq!(*a.escrituras.borrow(), 0);
+    }
+
+    /// AUD-23: con el almacén sin contestar, la vinculación de la Handy es un error, no «no hay».
+    #[test]
+    fn si_el_almacen_no_contesta_la_vinculacion_no_cuenta_como_ausente() {
+        let a = AlmacenFalso::con(SVC_AUTH, KEY_HANDY_TENANT, "tenant-1").fallando(no_disponible());
+        let e = handy_tenant_en(&a).unwrap_err();
+        assert!(e.contains("no disponible"), "{e}");
+        assert_eq!(a.valor(SVC_AUTH, KEY_HANDY_TENANT).as_deref(), Some("tenant-1"));
+    }
+
+    #[test]
+    fn la_vinculacion_guardada_se_lee_y_sin_ella_es_none() {
+        let a = AlmacenFalso::con(SVC_AUTH, KEY_HANDY_TENANT, "  tenant-1 ");
+        assert_eq!(handy_tenant_en(&a).unwrap().as_deref(), Some("tenant-1"));
+        assert_eq!(handy_tenant_en(&AlmacenFalso::default()).unwrap(), None);
+        assert_eq!(handy_tenant_en(&AlmacenFalso::con(SVC_AUTH, KEY_HANDY_TENANT, "  ")).unwrap(), None);
+        // La copia de Android restaurada en otro teléfono: no se va a poder leer nunca.
+        assert_eq!(handy_tenant_en(&AlmacenFalso::default().fallando(ilegible())).unwrap(), None);
     }
 
     /// Un JWT de mentira con el `exp` que se le pida. No lleva firma válida a propósito: quien

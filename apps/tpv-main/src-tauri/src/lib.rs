@@ -970,10 +970,13 @@ async fn device_reset_mode(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
-    // SEC-01: con la app abierta esto es de administrador (se llega por Configuración →
-    // Dispositivo, cuya ruta no tiene candado). Sin sesión pasa, porque el otro camino que lleva
-    // aquí es el botón "volver al selector de modo" de las pantallas de arranque, donde todavía
-    // no hay con quién iniciar sesión.
+    // SEC-01: con la app abierta esto es de administrador (Configuración → Dispositivo). Sin
+    // sesión pasa, porque el otro camino que lleva aquí es el «← Volver» de la activación de la
+    // licencia, donde todavía no hay con quién iniciar sesión. AUD-23: el «← Volver» de la
+    // vinculación de la Handy ya no llega aquí (enseña el selector sin tocar nada guardado), así
+    // que en la Handy sólo lo pide Configuración. No se endurece para ella: `handy_set_token`, que
+    // va sin sesión para poder emparejar, sustituye el vínculo igual, y el IPC no es una frontera
+    // (docs/arquitectura/permisos.md).
     state.exigir_rol_si_hay_sesion(&[ADMIN]).await?;
 
     state.cerrar_sesion().await;
@@ -3000,10 +3003,9 @@ mod tests_sesion_y_permisos {
 
     /* ── `exigir_rol_si_hay_sesion`: el gate de las pantallas de arranque ──────────────────── */
 
-    /// Sin sesión pasa, y esto NO es un descuido. A `device_reset_mode` se llega también desde el
-    /// selector de modo y desde la pantalla de activación, que se pintan en lugar del router: ahí
-    /// no hay con quién iniciar sesión, y un gate duro dejaría un equipo recién instalado sin
-    /// poder activarse jamás.
+    /// Sin sesión pasa, y esto NO es un descuido. A `device_reset_mode` se llega también desde la
+    /// pantalla de activación, que se pinta en lugar del router: ahí no hay con quién iniciar
+    /// sesión, y un gate duro dejaría un equipo recién instalado sin poder activarse jamás.
     #[tokio::test]
     async fn sin_sesion_el_gate_blando_deja_pasar() {
         let st = estado().await;

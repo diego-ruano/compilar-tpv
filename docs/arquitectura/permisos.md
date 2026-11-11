@@ -60,6 +60,14 @@ manual; una segunda parte registrada impide desmarcarla, tanto en la Main como e
 | `exigir_rol(&[ADMIN])` | Administración estructural: sesión y rol vigente |
 | `exigir_rol_si_hay_sesion(&[ADMIN])` | Lo que se alcanza también **antes** del login: sin sesión pasa, con sesión exige el rol |
 
+Lo lleva `device_reset_mode` (volver al selector de modo, que en la Handy borra el vínculo). Sin
+sesión lo alcanza el «← Volver» de la activación de licencia; con ella, Configuración → Dispositivo,
+que tiene además candado de ruta. El «← Volver» de la vinculación de la Handy no lo llama: enseña el
+selector sin tocar nada guardado, y desvincular queda para el administrador
+([emparejamiento.md](emparejamiento.md#salir-del-vínculo)). El comando no se endurece para la Handy:
+`handy_set_token`, que va sin sesión porque emparejar es anterior al login, sustituye el vínculo
+igual, y por el IPC no hay frontera ([arriba](#qué-garantiza-esto-y-qué-no)).
+
 ---
 
 ## Capacidades por rol (RI-70)
