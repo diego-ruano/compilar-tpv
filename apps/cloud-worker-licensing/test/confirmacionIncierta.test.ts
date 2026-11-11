@@ -1080,25 +1080,5 @@ describe("AUD-18 · el plazo de cada petición a Turso", () => {
 		}
 	});
 
-	it("el cliente de la base del tenant en el DO lleva el plazo", async () => {
-		// libsql llama a `fetch` sin señal; la que llega es la del plazo. No se espera a los 15 s de
-		// verdad: basta ver que cada petición va con ella.
-		await enElHub("aud18-cliente-con-plazo", async (hub: any) => {
-			const fetchDeVerdad = globalThis.fetch;
-			const senales: unknown[] = [];
-			(globalThis as any).fetch = async (_p: Request, init?: RequestInit) => {
-				senales.push(init?.signal);
-				return new Response("caida", { status: 503, headers: { "content-type": "text/plain" } });
-			};
-			try {
-				const db = hub.clienteDelTenant("https://tenant.turso.invalid", "x");
-				await expect(db.batch([{ sql: "SELECT 1;", args: [] }], "write")).rejects.toThrow();
-				db.close();
-				expect(senales.length).toBeGreaterThan(0);
-				for (const s of senales) expect(s).toBeInstanceOf(AbortSignal);
-			} finally {
-				(globalThis as any).fetch = fetchDeVerdad;
-			}
-		});
-	});
+	// prueba/sqlite-do: la base del negocio es la del propio DO; no hay petición de red que acotar.
 });

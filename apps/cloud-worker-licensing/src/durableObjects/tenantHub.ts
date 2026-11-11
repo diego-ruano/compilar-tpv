@@ -1,7 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { MotorTenantHub } from "./tenantHub.motor";
-import type { ApplyParams, ResultadoAplicacion } from "./tenantHub.rpc";
+import type { ApplyParams, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
+import type { Sentencia } from "./tenantHub.sqlite";
 
 /** RI-45: solo este adaptador es RPC. Los helpers del motor no pertenecen a su prototipo. */
 export class TenantHub extends DurableObject<Env> {
@@ -16,6 +17,25 @@ export class TenantHub extends DurableObject<Env> {
 
 	aplicar(params: ApplyParams): Promise<ResultadoAplicacion> {
 		return this.motor.aplicar(params);
+	}
+
+	/** prueba/sqlite-do: las lecturas del Worker contra la base del negocio, que vive aquí. */
+	consultar(tenantId: string, sentencias: Sentencia[], enLote: boolean): Promise<RespuestaDeConsulta> {
+		return this.motor.consultar(tenantId, sentencias, enLote);
+	}
+
+	/** prueba/sqlite-do: el alta del negocio crea aquí su esquema. */
+	aprovisionar(tenantId: string): Promise<void> {
+		return this.motor.aprovisionar(tenantId);
+	}
+
+	estaAprovisionado(): boolean {
+		return this.motor.estaAprovisionado();
+	}
+
+	/** prueba/sqlite-do: retirar un negocio de pruebas. */
+	borrarTodo(): Promise<void> {
+		return this.motor.borrarTodo();
 	}
 
 	revocarDispositivo(deviceId: string): void {

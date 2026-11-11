@@ -1,10 +1,9 @@
 import type { Env } from "../env";
 import { HubError } from "../lib/errorHttp";
 import type { Client } from "@libsql/client/web";
-import { createDbClient, PLAZO_TURSO_MS } from "../server/db/clients";
+import { createDbClient } from "../server/db/clients";
 import { getDb } from "../server/db";
 import { estaApagado } from "../lib/interruptores";
-import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
 import { ingestToAxiom } from "../observability/axiom";
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 
@@ -30,7 +29,15 @@ import { loadDeviceFromCentral, verifyHelloSigned } from "./tenantHub.identidad"
 import { buildApplyBatch } from "./tenantHub.lote";
 import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
-import type { ApplyParams, ResultadoAplicacion } from "./tenantHub.rpc";
+import type { ApplyParams, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
+import {
+	baseAprovisionada,
+	clienteLocal,
+	ejecutarEnBruto,
+	loteEnBruto,
+	migrarBaseLocal,
+	type Sentencia,
+} from "./tenantHub.sqlite";
 import type { ContextoDeRutas } from "./tenantHub.rutas";
 import {
 	abrirWebSocket,
@@ -75,12 +82,6 @@ import type {
 } from "./tenantHub.types";
 
 
-// Caché en memoria (por instancia de DO) de las credenciales de la DB del
-// tenant. El token de Turso es válido 7 días y se rota proactivamente cada 24h
-// en `resolveTenantDbCredentials`, así que no hace falta re-resolver en cada
-// consulta: basta revalidar cada cierto tiempo (o de inmediato ante un 401).
-const TENANT_DB_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-
 // SYNC-08: ventana mínima entre escrituras de `last_seen_at_ms` por dispositivo en la BD central.
 // Absorbe los pings (cada 30 s) sin perder utilidad de presencia (granularidad de minutos basta).
 const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
@@ -114,11 +115,11 @@ export class MotorTenantHub {
 
 	private centralDb: Client | null = null;
 
-	private tenantDb: Client | null = null;
-	private tenantDbTenantId: string | null = null;
-	private tenantDbDbName: string | null = null;
-	private tenantDbRotatedAtMs: number | null = null;
-	private tenantDbResolvedAtMs: number | null = null;
+	// prueba/sqlite-do: la base del negocio es el SQLite de este DO. El cliente se monta una vez por
+	// instancia, tras comprobar que el negocio está aprovisionado y su esquema al día.
+	private baseLocal: Client | null = null;
+	// El negocio de este DO, para las trazas: lo dice la primera petición que llega.
+	private tenantIdVisto: string | null = null;
 
 	// AUD-18: la cola de lo que está confirmando en Turso y difundiendo ahora mismo (ver
 	// `enTurnoDelLog`). Es lo que está en vuelo, no algo que recordar entre invocaciones: el DO sólo
@@ -183,116 +184,75 @@ export class MotorTenantHub {
 		return this.centralDb;
 	}
 
-	private async probeTenantDb(db: Client): Promise<void> {
-		// RI-06: aquí no se activan las FOREIGN KEYS. Turso las trae activadas en cada conexión, y
-		// un `PRAGMA foreign_keys = ON` no serviría de nada: el cliente HTTP abre un stream por
-		// llamada y el ajuste es por conexión, así que no llegaría al `batch()` que aplica. Se
-		// comprobó el 01/10/2026 contra una base de Turso con ese cliente: `PRAGMA foreign_keys`
-		// da 1 en una llamada nueva, un lote con una fila huérfana falla con FOREIGN KEY, el
-		// `defer_foreign_keys` del lote aplaza la comprobación al COMMIT y el ON DELETE CASCADE se
-		// ejecuta. Es lo que la Main necesita: la nube rechaza lo mismo que ella rechazaría.
-		await db.execute({
-			sql: "SELECT 1 AS ok;",
-			args: [],
-		});
-		// Las tablas que sólo usa la nube (`Sync_Changes`, `Sync_Main_Checkpoints`) ya no se crean
-		// aquí: van en `0001_inicial.sql` y las garantiza `ensureTenantMigrated`, el mismo guard que
-		// pasa el REST. Creadas aquí, una lectura por REST anterior a la primera escritura por el DO
-		// no las encontraba (SYNC-28).
-	}
-
-	private clearTenantDbCache() {
-		this.tenantDb = null;
-		this.tenantDbTenantId = null;
-		this.tenantDbDbName = null;
-		this.tenantDbRotatedAtMs = null;
-		this.tenantDbResolvedAtMs = null;
-	}
-
 	/**
-	 * AUD-18 · El cliente de la base del tenant, con plazo. Una petición colgada retendría el turno
-	 * del log (`enTurnoDelLog`), y con él todas las escrituras del negocio; vencida, es una
-	 * confirmación incierta.
+	 * prueba/sqlite-do · La base del negocio: el SQLite de este mismo DO.
+	 *
+	 * Sin aprovisionar contesta lo mismo que antes contestaba la nube sin fila en
+	 * `tenant_databases`. Aprovisionado, migra lo pendiente una vez por instancia (al desplegar un
+	 * esquema nuevo, el DO se reinicia y el primer acceso lo aplica).
+	 *
+	 * Ya no hay credenciales, ni token que rotar, ni plazo de red: lo que queda de AUD-18
+	 * (`tenantHub.turno.ts`) sigue funcionando, pero una escritura local no se queda en duda.
 	 */
-	private clienteDelTenant(url: string, authToken: string): Client {
-		return createDbClient({ url, authToken, plazoMs: PLAZO_TURSO_MS });
-	}
-
-	private async resolveTenantDbClient(
-		tenantId: string,
-		forceRotate: boolean,
-	): Promise<Client> {
-		// Resolución LOCAL (antes era una llamada HTTP firmada al worker de
-		// licensing por service binding). Ahora ambos viven en `tpv-api`.
-		const resolved = await resolveTenantDbCredentials(
-			this.getCentralDb(),
-			this.env,
-			tenantId,
-			forceRotate,
-		);
-
-		const dbTenant = this.clienteDelTenant(resolved.tursoUrl, resolved.tursoAuthToken);
-
-		await this.probeTenantDb(dbTenant);
-
-		// Guard de migración (una vez por vida del DO): asegura el esquema al día ANTES de aplicar
-		// escrituras, por si se publicó un cambio de esquema con el tenant ya activo.
-		//
-		// AUD-18: con un cliente SIN plazo. Reconstruir una tabla grande puede tardar más que una
-		// escritura, y la migración no va dentro del turno del log, que es lo que el plazo protege.
-		await ensureTenantMigrated(
-			createDbClient({ url: resolved.tursoUrl, authToken: resolved.tursoAuthToken }),
-			tenantId,
-		);
-
-		this.tenantDb = dbTenant;
-		this.tenantDbTenantId = tenantId;
-		this.tenantDbDbName = resolved.dbName;
-		this.tenantDbRotatedAtMs = resolved.rotatedAtMs;
-		this.tenantDbResolvedAtMs = nowMs();
-
-		return dbTenant;
-	}
-
-	private isTenantDbCacheFresh(tenantId: string): boolean {
-		return (
-			this.tenantDb != null &&
-			this.tenantDbTenantId === tenantId &&
-			this.tenantDbResolvedAtMs != null &&
-			nowMs() - this.tenantDbResolvedAtMs < TENANT_DB_CACHE_TTL_MS
-		);
-	}
-
 	private async getTenantDb(tenantId: string): Promise<Client> {
-		// Sirve la credencial cacheada si sigue fresca (TTL). Pasado el TTL se
-		// revalida (resolución local barata); ante un 401 se fuerza rotación.
-		if (this.isTenantDbCacheFresh(tenantId)) {
-			return this.tenantDb!;
-		}
-
-		try {
-			return await this.resolveTenantDbClient(tenantId, false);
-		} catch (e) {
-			if (!isTursoAuthError(e)) throw e;
-			return await this.resolveTenantDbClient(tenantId, true);
-		}
+		this.tenantIdVisto ??= tenantId || null;
+		if (this.baseLocal) return this.baseLocal;
+		const storage = this.state.storage;
+		if (!baseAprovisionada(storage.sql)) throw new HubError("tenant_db_not_provisioned", 404);
+		await migrarBaseLocal(storage);
+		this.baseLocal = clienteLocal(storage);
+		return this.baseLocal;
 	}
 
 	private async withTenantDbRetry<T>(
 		tenantId: string,
 		run: (db: Client) => Promise<T>,
 	): Promise<T> {
-		const db = await this.getTenantDb(tenantId);
+		return run(await this.getTenantDb(tenantId));
+	}
 
+	/** El alta del negocio: crea su esquema (idempotente). Antes era crear una base en Turso. */
+	async aprovisionar(tenantId: string): Promise<void> {
+		this.tenantIdVisto ??= tenantId;
+		await migrarBaseLocal(this.state.storage);
+		this.baseLocal = clienteLocal(this.state.storage);
+	}
+
+	estaAprovisionado(): boolean {
+		return baseAprovisionada(this.state.storage.sql);
+	}
+
+	/**
+	 * Las lecturas del Worker (`tenantQuery`), que antes iban directas a Turso. Una sentencia suelta,
+	 * o un lote atómico: el lote de lectura da una foto coherente, como el `batch("read")` de libsql.
+	 *
+	 * No pasan por el turno del log: el SQL del DO es síncrono, así que ven lo confirmado o lo que
+	 * otra petición acaba de escribir en este mismo DO, nunca una escritura a medias.
+	 */
+	async consultar(
+		tenantId: string,
+		sentencias: Sentencia[],
+		enLote: boolean,
+	): Promise<RespuestaDeConsulta> {
 		try {
-			return await run(db);
+			await this.getTenantDb(tenantId);
 		} catch (e) {
-			if (!isTursoAuthError(e)) throw e;
+			if (e instanceof HubError) {
+				return { ok: false, code: e.code, status: e.status, details: e.details };
+			}
+			throw e;
 		}
+		const storage = this.state.storage;
+		const resultados = enLote
+			? loteEnBruto(storage, sentencias)
+			: [ejecutarEnBruto(storage.sql, sentencias[0])];
+		return { ok: true, resultados };
+	}
 
-		this.clearTenantDbCache();
-		const rotatedDb = await this.resolveTenantDbClient(tenantId, true);
-		return await run(rotatedDb);
+	/** Retirar un negocio de pruebas: su base entera, con la cola y lo demás del DO. */
+	async borrarTodo(): Promise<void> {
+		await this.state.storage.deleteAll();
+		this.baseLocal = null;
 	}
 
 	private async touchLastSeen(tenantId: string, deviceId: string, force = false) {
@@ -1177,7 +1137,7 @@ export class MotorTenantHub {
 				_time: new Date().toISOString(),
 				service: "tpv-sync",
 				event: name,
-				tenant_id: this.tenantDbTenantId ?? undefined,
+				tenant_id: this.tenantIdVisto ?? undefined,
 				connected_devices: this.authedCount(),
 				main_connected: this.isMainConnected(),
 				...fields,

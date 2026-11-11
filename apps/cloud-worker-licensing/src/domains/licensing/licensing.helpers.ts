@@ -11,7 +11,7 @@
 // vez de mantener copias propias.
 
 import { ed25519Sign, ed25519Verify } from "../../server/utils/ed25519";
-import { createClient, type Client } from "@libsql/client/web";
+import type { Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
 import type { LicenseGateState, SignedLicenseAssertion } from "../../shared";
@@ -26,13 +26,8 @@ import { sha256Hex } from "../../server/crypto";
 import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../../server/utils/crypto";
 import { leerBearer } from "../../lib/sesion";
-import { runTenantMigrations } from "../../server/tenantMigrations";
-import {
-	getTenantDbRow,
-	resolveTenantDbCredentials,
-	tursoCreateDbToken,
-	upsertTenantDbRow,
-} from "../../server/db/tenantDb";
+import { hubDe } from "../../lib/hub";
+import { clienteDelHub } from "../../lib/tenantClient";
 
 /** Caducidad: aviso los 7 días previos, y 3 días de gracia después */
 export const WARN_DAYS = 7;
@@ -504,82 +499,19 @@ async function ensureTenantInitialAdmin(client: Client): Promise<void> {
 	});
 }
 
-// ---------------- Provisión de la BD del tenant (Turso) ----------------
+// ---------------- Provisión de la base del negocio ----------------
 
 /**
- * El grupo de Turso donde van las bases de los tenants: el del proyecto, en Frankfurt. Tiene que
- * existir antes de desplegar: Turso no lo crea al crear una base, contesta «group not found».
+ * Garantiza que el negocio tiene su base con el esquema aplicado y el admin inicial.
+ *
+ * prueba/sqlite-do: la base es el SQLite de su TenantHub. Aprovisionar es pedirle que cree su
+ * esquema (idempotente: si ya lo tiene, sólo aplica lo pendiente) y sembrar el administrador. Ya no
+ * se crea nada en Turso ni se guarda nada en `tenant_databases`.
  */
-export const GRUPO_TURSO = "tpv";
-
-/** Sanitiza el nombre de DB: minúsculas, números y guiones; máx 64. */
-function makeDbNameFromTenant(tenantId: string): string {
-	const base = `tpv-${tenantId}`.toLowerCase();
-	const clean = base.replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
-	return clean.length <= 64 ? clean : clean.slice(0, 64);
-}
-
-async function tursoCreateDatabase(
-	env: Env,
-	dbName: string,
-): Promise<{ name: string; hostname: string; url: string }> {
-	const r = await fetch(
-		`https://api.turso.tech/v1/organizations/${encodeURIComponent(env.TURSO_ORG_SLUG)}/databases`,
-		{
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${env.TURSO_PLATFORM_TOKEN}`,
-				"Content-Type": "application/json",
-				Accept: "application/json",
-			},
-			body: JSON.stringify({ name: dbName, group: GRUPO_TURSO }),
-		},
-	);
-
-	const text = await r.text();
-	let data: any = null;
-	try {
-		data = JSON.parse(text);
-	} catch {}
-
-	if (!r.ok) throw new Error(`turso_create_db_failed (${r.status}) ${text}`);
-
-	const hostname = String(data?.database?.Hostname || data?.database?.hostname || "");
-	const name = String(data?.database?.Name || data?.database?.name || dbName);
-
-	if (!hostname) throw new Error(`turso_create_db_failed_missing_hostname ${text}`);
-
-	const url = `libsql://${hostname}`;
-	return { name, hostname, url };
-}
-
-async function applyTenantSchemaOnce(tursoUrl: string, token: string): Promise<void> {
-	const client = createClient({ url: tursoUrl, authToken: token });
-	// Construye/actualiza el esquema aplicando las migraciones (fuente única compartida en
-	// packages/database/migrations). Ver `tenantMigrations.ts`.
-	await runTenantMigrations(client);
-	await ensureTenantInitialAdmin(client);
-}
-
-/**
- * Garantiza que el tenant tiene su BD en Turso con el esquema aplicado y el admin inicial.
- * Si ya existe, reaplica migraciones (idempotente); si no, la crea, genera token y la registra.
- */
-export async function provisionTenantDatabase(dbi: Client, env: Env, tenantId: string) {
-	const existing = await getTenantDbRow(dbi, tenantId);
-
-	if (existing?.turso_url && existing?.turso_auth_token_enc && existing?.turso_db_name) {
-		const resolved = await resolveTenantDbCredentials(dbi, env, tenantId, false);
-		await applyTenantSchemaOnce(resolved.tursoUrl, resolved.tursoAuthToken);
-		return { reused: true, dbName: resolved.dbName, url: resolved.tursoUrl };
-	}
-
-	const dbName = makeDbNameFromTenant(tenantId);
-	const created = await tursoCreateDatabase(env, dbName);
-	const dbToken = await tursoCreateDbToken(env, created.name);
-
-	await upsertTenantDbRow(dbi, env, tenantId, created.name, created.url, dbToken);
-	await applyTenantSchemaOnce(created.url, dbToken);
-
-	return { reused: false, dbName: created.name, url: created.url };
+export async function provisionTenantDatabase(_dbi: Client, env: Env, tenantId: string) {
+	const hub = hubDe(env, tenantId);
+	const reused = await hub.estaAprovisionado();
+	await hub.aprovisionar(tenantId);
+	await ensureTenantInitialAdmin(clienteDelHub(env, tenantId));
+	return { reused };
 }

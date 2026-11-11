@@ -18,6 +18,7 @@ import type { PendientesReservaWebDto, PeticionReservaWebDto } from "@tpv/contra
 import type { Env } from "../env";
 import { nuevoId } from "../lib/ids";
 import { lecturaConHora } from "../lib/tenantClient";
+import { hubDe } from "../lib/hub";
 import { sha256HexStr } from "../server/utils/crypto";
 import { reportarReservaWeb } from "../observability/axiom";
 import {
@@ -268,7 +269,7 @@ export class MotorAgendaWeb {
 	 * conectar o cuando la alarma se lo vuelve a ofrecer.
 	 */
 	private avisarALaMain(tenantId: string): void {
-		const hub = this.env.TenantHub.get(this.env.TenantHub.idFromName(tenantId));
+		const hub = hubDe(this.env, tenantId);
 		this.ctx.waitUntil(
 			Promise.resolve()
 				.then(() => hub.avisarReservasWeb())

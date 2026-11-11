@@ -26,7 +26,7 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
-import { cerrarSocketsDelDispositivo } from "../../lib/hub";
+import { cerrarSocketsDelDispositivo, espacioDelHub } from "../../lib/hub";
 import { getDb } from "../../server/db";
 import { descifrar } from "../../server/crypto";
 import {
@@ -236,7 +236,7 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	// Main se va, y al reconectar su ticket también se rechaza. Y si la licencia nunca llegó a
 	// activarse no hay `main_device_id` ni socket que cerrar.
 	await cerrarSocketsDelDispositivo(
-		c.env.TenantHub,
+		espacioDelHub(c.env),
 		String(lic.tenant_id || ""),
 		String(lic.main_device_id || ""),
 	);

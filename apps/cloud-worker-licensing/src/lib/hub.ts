@@ -79,6 +79,27 @@ function escrituraVetada(command: ApplyCommand): string | null {
 	return null;
 }
 
+/**
+ * prueba/sqlite-do · El espacio de los TenantHub, con la jurisdicción del despliegue.
+ *
+ * Con la base del negocio dentro del DO, donde nace el objeto es donde viven sus datos, y nace
+ * cerca de quien lo toca primero: una reserva web hecha desde fuera de Europa, por ejemplo. Con
+ * `JURISDICCION_DO = "eu"` sólo puede nacer y guardarse en la UE. En local va vacía: workerd no
+ * implementa jurisdicciones («Jurisdiction restrictions are not implemented in workerd»).
+ *
+ * El mismo nombre da otro objeto en otra jurisdicción: cambiarla es empezar de cero.
+ */
+export function espacioDelHub(env: Env): Env["TenantHub"] {
+	const j = env.JURISDICCION_DO;
+	return j ? env.TenantHub.jurisdiction(j as DurableObjectJurisdiction) : env.TenantHub;
+}
+
+/** El TenantHub de un negocio. */
+export function hubDe(env: Env, tenantId: string) {
+	const ns = espacioDelHub(env);
+	return ns.get(ns.idFromName(tenantId));
+}
+
 export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 	const { tenantId, command } = params;
 
@@ -90,8 +111,7 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 		throw new HubError(`escritura_solo_en_main:${vetada}`, 403);
 	}
 
-	const id = env.TenantHub.idFromName(tenantId);
-	const stub = env.TenantHub.get(id);
+	const stub = hubDe(env, tenantId);
 
 	const respuesta: ResultadoAplicacion = await stub.aplicar(params);
 	if (!respuesta.ok) throw new HubError(respuesta.error, respuesta.status, respuesta.details);

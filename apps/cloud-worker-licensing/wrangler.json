@@ -110,7 +110,8 @@
 		"RESERVAS_WEB_ORIGEN": "https://tpv-api.altarialights.workers.dev",
 		"AXIOM_DATASET": "tpv-device-logs",
 		"AXIOM_DATASET_SYNC": "tpv-sync",
-		"AXIOM_DOMAIN": "eu-central-1.aws.edge.axiom.co"
+		"AXIOM_DOMAIN": "eu-central-1.aws.edge.axiom.co",
+		"JURISDICCION_DO": "eu"
 	},
 	"assets": {
 		"directory": "../reservas-web/dist",

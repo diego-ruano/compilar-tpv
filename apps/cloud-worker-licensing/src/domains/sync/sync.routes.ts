@@ -17,7 +17,7 @@ import { cuerpoTolerante } from "../../lib/validacion";
 import { reportarSaludDeSync as emitirSalud } from "../../observability/axiom";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
-import { getTenantDbRow } from "../../server/db/tenantDb";
+import { hubDe } from "../../lib/hub";
 import { provisionTenantDatabase } from "../licensing/licensing.helpers";
 import {
 	TRANSACCIONALES,
@@ -348,8 +348,7 @@ syncRoutes.post("/historico", cuerpoTolerante(historicoSchema), async (c) => {
 syncRoutes.post("/initialize-empty", async (c) => {
 	const tenantId = c.get("tenantId");
 	const central = getDb(c.env);
-	const existing = await getTenantDbRow(central, tenantId);
-	if (existing?.turso_url && existing?.turso_auth_token_enc && existing?.turso_db_name) {
+	if (await hubDe(c.env, tenantId).estaAprovisionado()) {
 		return c.json(
 			{ ok: false, code: "conflict", error: "tenant_db_already_provisioned" },
 			409,

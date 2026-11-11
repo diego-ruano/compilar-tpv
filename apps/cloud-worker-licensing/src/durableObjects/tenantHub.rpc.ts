@@ -1,3 +1,4 @@
+import type { FilasEnBruto } from "./tenantHub.sqlite";
 import type { InternalApplyCommand } from "./tenantHub.types";
 
 export type ValorJson = null | string | number | boolean | object;
@@ -11,6 +12,15 @@ export type ApplyParams = {
 	cloudPayload?: unknown;
 	clientNow?: string;
 };
+
+/**
+ * prueba/sqlite-do · Lo que contesta `consultar` (las lecturas del Worker). Un error SQL viaja como
+ * excepción, con su mensaje; uno con status decidido (`HubError`) viaja como dato, porque RPC no
+ * conserva las propiedades de una subclase de Error.
+ */
+export type RespuestaDeConsulta =
+	| { ok: true; resultados: FilasEnBruto[] }
+	| { ok: false; code: string; status: number; details?: unknown };
 
 /** Los errores de negocio son datos: RPC no conserva las propiedades de una subclase de Error. */
 export type ResultadoAplicacion =

@@ -12,6 +12,7 @@ import type { Env } from "../../env";
 import { cuerpoConIdentificador } from "../../lib/validacion";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
+import { espacioDelHub } from "../../lib/hub";
 import { listarDispositivos, revocarDispositivo } from "./dispositivos";
 import { responder } from "./pairing.resultado";
 import { revocarSchema } from "./pairing.schemas";
@@ -34,7 +35,7 @@ dispositivosRoutes.post("/revoke", cuerpoConIdentificador(revocarSchema), async 
 		await revocarDispositivo(
 			getDb(c.env),
 			c.env,
-			c.env.TenantHub,
+			espacioDelHub(c.env),
 			c.get("tenantId"),
 			c.get("deviceId"),
 			c.req.valid("json").deviceId,

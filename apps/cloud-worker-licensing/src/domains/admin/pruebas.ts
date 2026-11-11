@@ -13,6 +13,7 @@ import type { Client } from "@libsql/client/web";
 import type { Env } from "../../env";
 import { exec, rowsAffected } from "../../server/db";
 import { tursoDeleteDatabase } from "../../server/db/tenantDb";
+import { hubDe } from "../../lib/hub";
 
 /** El correo con el que el E2E emite sus licencias (`apps/tpv-main/e2e/helpers/licencias.ts`). */
 export const CORREO_DE_PRUEBAS = "e2e@altarialights.test";
@@ -53,7 +54,8 @@ export type Retirada = {
  */
 export async function retirarNegociosDePrueba(
 	db: Client,
-	env: Pick<Env, "TURSO_PLATFORM_TOKEN" | "TURSO_ORG_SLUG">,
+	env: Pick<Env, "TURSO_PLATFORM_TOKEN" | "TURSO_ORG_SLUG"> &
+		Partial<Pick<Env, "TenantHub" | "JURISDICCION_DO">>,
 ): Promise<Retirada> {
 	const retirada: Retirada = { negocios: 0, bases: 0, licencias: 0, fallos: [], quedan: false };
 
@@ -79,6 +81,11 @@ export async function retirarNegociosDePrueba(
 			// La base primero: si Turso falla, el negocio se queda como estaba y el siguiente
 			// intento la vuelve a encontrar. Al revés, se perdería la fila que dice cuál borrar.
 			if (base && (await tursoDeleteDatabase(env, base)) === "borrada") retirada.bases++;
+			// prueba/sqlite-do: la base del negocio es la de su TenantHub. Borrarla dos veces no hace nada.
+			if (env.TenantHub) {
+				await hubDe(env as Env, tenantId).borrarTodo();
+				retirada.bases++;
+			}
 			// Las dos juntas y en una sola petición.
 			await db.batch(
 				[

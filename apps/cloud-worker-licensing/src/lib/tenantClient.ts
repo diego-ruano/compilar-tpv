@@ -1,12 +1,12 @@
 // src/lib/tenantClient.ts
 //
-// Resolución + caché (a nivel de isolate) del cliente Turso de cada tenant, para
-// las LECTURAS de la API (van directas a Turso, sin pasar por el Durable Object).
+// El cliente de la base de cada negocio para las LECTURAS de la API.
 //
-// - Cachea el cliente por tenant con un TTL corto para evitar un SELECT a la DB
-//   central en cada petición.
-// - Si una query falla por 401 (token rotado), invalida la caché, re-resuelve con
-//   `forceRotate` y reintenta una vez. Mismo criterio que el DO.
+// prueba/sqlite-do: la base vive en el SQLite del TenantHub del negocio, así que cada consulta es
+// una llamada RPC al DO (`consultar`). El `Client` que reciben las rutas tiene la misma forma que el
+// de libsql (`execute`, `batch`), y por eso ninguna de ellas cambia. Ya no hay credenciales que
+// resolver ni token que rotar.
+//
 // - Fija «ahora» a la hora LOCAL de quien pregunta antes de ejecutar (REV-03, ver abajo).
 //
 // ── REV-03: «hoy» es el de quien pregunta, no el de Turso ──────────────────────────────────────
@@ -26,47 +26,52 @@
 // Turso, que es como se comportaba antes. Es lo correcto: quien no dice su hora no puede esperar
 // que se la adivinen.
 
-import { createClient, type Client } from "@libsql/client/web";
+import type { Client, ResultSet } from "@libsql/client/web";
 
 import type { Env } from "../env";
-import { getDb } from "../server/db";
-import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
+import { HubError } from "./errorHttp";
+import { hubDe } from "./hub";
 import { parseClientNow, rewriteNowInSql } from "../durableObjects/tenantHub.tiempo";
-import { isTursoAuthError } from "./tursoAuthError";
+import { aResultSet, type Sentencia as SentenciaDelHub } from "../durableObjects/tenantHub.sqlite";
+import type { RespuestaDeConsulta } from "../durableObjects/tenantHub.rpc";
 
-type Cached = { client: Client; expiresAtMs: number };
-
-const CACHE_TTL_MS = 5 * 60 * 1000;
-const cache = new Map<string, Cached>();
-
-async function build(env: Env, tenantId: string, forceRotate: boolean): Promise<Client> {
-	const creds = await resolveTenantDbCredentials(
-		getDb(env),
-		env as any,
-		tenantId,
-		forceRotate,
+function sinTransacciones(): never {
+	throw new Error(
+		"tenantQuery: la base del negocio no abre transacciones interactivas desde el Worker; usa batch()",
 	);
-
-	const client = createClient({
-		url: creds.tursoUrl,
-		authToken: creds.tursoAuthToken,
-		intMode: "number",
-	});
-
-	cache.set(tenantId, { client, expiresAtMs: Date.now() + CACHE_TTL_MS });
-	return client;
 }
 
-async function getTenantClient(env: Env, tenantId: string): Promise<Client> {
-	const hit = cache.get(tenantId);
-	const client =
-		hit && hit.expiresAtMs > Date.now() ? hit.client : await build(env, tenantId, false);
-
-	// Guard de migración: garantiza el esquema al día una vez por isolate (no-op tras la primera
-	// vez). Cubre el caso de un tenant ya activo cuando se publica un cambio de esquema.
-	await ensureTenantMigrated(client, tenantId);
-
-	return client;
+/**
+ * Un `Client` de libsql cuyas sentencias se ejecutan en el TenantHub del negocio.
+ *
+ * Una llamada RPC por `execute` y otra por `batch`: una ruta con N consultas seguidas hace N
+ * viajes al DO, que está en el mismo centro de datos o cerca. El migrado del esquema lo hace el DO
+ * en su primer acceso.
+ */
+export function clienteDelHub(env: Env, tenantId: string): Client {
+	const stub = hubDe(env, tenantId);
+	const pedir = async (sentencias: SentenciaDelHub[], enLote: boolean): Promise<ResultSet[]> => {
+		// Los tipos de RPC no aceptan `unknown` (valores de SQLite): se afirma la forma que devuelve el DO.
+		const r = (await stub.consultar(tenantId, sentencias as any, enLote)) as unknown as RespuestaDeConsulta;
+		if (!r.ok) throw new HubError(r.code, r.status, r.details);
+		return r.resultados.map(aResultSet);
+	};
+	return {
+		async execute(entrada: SentenciaDelHub, args?: unknown[]) {
+			const s = typeof entrada === "string" && args ? { sql: entrada, args } : entrada;
+			return (await pedir([s], false))[0];
+		},
+		async batch(sentencias: SentenciaDelHub[]) {
+			return pedir(sentencias, true);
+		},
+		transaction: sinTransacciones,
+		executeMultiple: sinTransacciones,
+		migrate: sinTransacciones,
+		sync: async () => undefined,
+		close() {},
+		closed: false,
+		protocol: "do",
+	} as unknown as Client;
 }
 
 /**
@@ -131,18 +136,7 @@ export function conLaHoraDeQuienPregunta(db: Client, ahoraLocal: string): Client
 	});
 }
 
-/**
- * Ejecuta una lectura contra la DB del tenant. Reintenta una vez con credenciales
- * rotadas si el token había caducado (401).
- *
- * ⚠️ La resolución del cliente va DENTRO del `try` a propósito. `getTenantClient` habla con Turso
- * por dos vías (resolver credenciales y, sobre todo, el guard de migración `ensureTenantMigrated`),
- * así que también puede lanzar 401. Cuando esa llamada quedaba fuera del `try`, un token caducado
- * hacía que el guard lanzase el 401 antes de llegar al `catch`: la rotación no se ejecutaba NUNCA y
- * **todas** las lecturas REST de la Handy se quedaban en 500 permanente (`internal_error`), sin
- * recuperarse solas. El sync seguía funcionando porque el Durable Object tiene su propio reintento
- * con rotación (`withTenantDbRetry`), de ahí que fallasen las lecturas pero no la replicación.
- */
+/** Ejecuta una lectura contra la base del negocio. */
 export async function tenantQuery<T>(
 	c: ContextoDeLectura,
 	fn: (db: Client) => Promise<T>,
@@ -173,16 +167,5 @@ export async function lecturaConHora<T>(
 }
 
 async function conElClienteDelTenant<T>(env: Env, tenantId: string, fn: (db: Client) => Promise<T>): Promise<T> {
-	try {
-		const db = await getTenantClient(env, tenantId);
-		return await fn(db);
-	} catch (e) {
-		if (!isTursoAuthError(e)) throw e;
-		cache.delete(tenantId);
-		const fresh = await build(env, tenantId, true);
-		// Si el 401 vino del guard de migración, su entrada ya se invalidó al fallar: hay que
-		// reintentarlo con el token nuevo antes de la query (si ya estaba migrado, es un no-op).
-		await ensureTenantMigrated(fresh, tenantId);
-		return await fn(fresh);
-	}
+	return fn(clienteDelHub(env, tenantId));
 }

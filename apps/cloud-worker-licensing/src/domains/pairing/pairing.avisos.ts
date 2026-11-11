@@ -3,6 +3,7 @@
 // El empujón a la Main para que recargue su lista de solicitudes.
 
 import type { Env } from "../../env";
+import { hubDe } from "../../lib/hub";
 
 /**
  * Empuja a la Main el aviso de que ha cambiado una solicitud de emparejamiento (una nueva, o una
@@ -16,8 +17,7 @@ export async function avisarSolicitudALaMain(env: Env, tenantId: string): Promis
 	if (!tenantId) return;
 
 	try {
-		const stub = env.TenantHub.get(env.TenantHub.idFromName(tenantId));
-		await stub.avisarEmparejamiento();
+		await hubDe(env, tenantId).avisarEmparejamiento();
 	} catch {
 		// Silencio deliberado: ver el comentario de arriba.
 	}

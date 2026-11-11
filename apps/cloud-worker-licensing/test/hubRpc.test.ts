@@ -23,6 +23,8 @@ describe("TenantHub RPC", () => {
 		expect(Object.getOwnPropertyNames(TenantHub.prototype).sort()).toEqual([
 			"constructor", "aplicar", "revocarDispositivo", "avisarEmparejamiento", "avisarReservasWeb", "fetch", "alarm",
 			"webSocketMessage", "webSocketClose", "webSocketError",
+			// prueba/sqlite-do: la base del negocio vive en el DO.
+			"consultar", "aprovisionar", "estaAprovisionado", "borrarTodo",
 		].sort());
 	});
 

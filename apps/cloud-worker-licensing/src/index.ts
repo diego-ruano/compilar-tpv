@@ -27,6 +27,7 @@ import { registrarPeticion } from "./observability/requestContext";
 import { getDb } from "./server/db";
 import { comprobarSalud } from "./server/salud";
 import { cargarDevice, estaRevocado } from "./lib/deviceAuth";
+import { hubDe } from "./lib/hub";
 import { cuerpoDeErrorConStatus } from "./lib/errorHttp";
 import {
 	json,
@@ -157,8 +158,7 @@ app.get("/ws", async (c) => {
 		const roleFinal = String(fila.role || roleFromToken || "unknown");
 		const pubB64 = String(fila.device_pubkey_b64 || "").trim();
 
-		const id = env.TenantHub.idFromName(tenantId);
-		const stub = env.TenantHub.get(id);
+		const stub = hubDe(env, tenantId);
 
 		const doUrl = new URL(request.url);
 		doUrl.pathname = "/ws";

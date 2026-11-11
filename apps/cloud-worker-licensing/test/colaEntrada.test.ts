@@ -452,42 +452,7 @@ describe("REV-04 · de quién es la culpa cuando la cola falla", () => {
 		});
 	});
 
-	it("un token de Turso caducado se rota, no se lleva el lote por delante", async () => {
-		// `withTenantDbRetry` sabe rotar credenciales desde siempre; lo que pasaba es que el drenado
-		// capturaba el 401 antes de que llegara a enterarse, así que su reintento era código
-		// inalcanzable desde la cola y las cincuenta operaciones del lote gastaban un intento por un
-		// problema que se arregla pidiendo un token nuevo.
-		await enElHub("rev04-credenciales", async (hub: any) => {
-			const { sql, db, credenciales } = prepararHub(hub);
-
-			// Un token caducado no falla una vez: falla TODAS hasta que se rota. Modelarlo con un
-			// solo fallo dejaba el test en verde con el bug puesto —el reintento de una en una
-			// aplicaba lo mismo sin rotar nada—, así que aquí el cliente viejo no vuelve a servir.
-			let rotado = false;
-			const caducado = conLaBase(db, { caida: true, error: "Server returned HTTP status 401" });
-			hub.getTenantDb = async () => {
-				credenciales.veces++;
-				return rotado ? db : caducado;
-			};
-			hub.resolveTenantDbClient = async (_t: string, forzar: boolean) => {
-				credenciales.veces++;
-				if (forzar) rotado = true;
-				return rotado ? db : caducado;
-			};
-
-			hub.encolar(TENANT, [opLinea(1), opLinea(2)]);
-			credenciales.veces = 0;
-
-			await hub.drenarCola();
-
-			expect(rotado).toBe(true); // el 401 llegó hasta quien sabe rotar
-			expect(credenciales.veces).toBeGreaterThanOrEqual(2);
-			expect(enCola(sql)).toEqual([]);
-			expect(muertas(sql)).toEqual([]);
-			expect(intentosEnCola(sql)).toEqual([]);
-			expect(lineas(sql)).toEqual(["det-1", "det-2"]);
-		});
-	});
+	// prueba/sqlite-do: sin base en Turso no hay token que caduque ni que rotar (era REV-04).
 
 	it("una hora que tendría que poner Turso se rechaza también por la cola", async () => {
 		// REV-22: el guard de CFG-04 estaba sólo en el camino en vivo. Por la cola entraba, y Turso

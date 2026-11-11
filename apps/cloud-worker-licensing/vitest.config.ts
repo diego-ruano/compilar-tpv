@@ -21,6 +21,8 @@ export default defineConfig({
 			miniflare: {
 				bindings: {
 					LICENSE_JWT_SECRET: "secreto-de-pruebas-no-usar-en-produccion",
+				// prueba/sqlite-do: workerd no implementa jurisdicciones; producción va con «eu».
+				JURISDICCION_DO: "",
 				},
 			},
 		}),

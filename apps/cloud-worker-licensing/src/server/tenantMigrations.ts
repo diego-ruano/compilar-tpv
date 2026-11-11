@@ -27,12 +27,12 @@ import type { Client } from "@libsql/client";
 import { HubError } from "../lib/errorHttp";
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
 
-const MIGRATIONS: { name: string; sql: string }[] = [
+export const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
 ];
 
 /** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */
-function normalize(s: string): string {
+export function normalize(s: string): string {
 	return s.replace(/\r\n/g, "\n");
 }
 
@@ -41,7 +41,7 @@ function stripBlockComments(s: string): string {
 	return s.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-async function sha256Hex(s: string): Promise<string> {
+export async function sha256Hex(s: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
 	return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

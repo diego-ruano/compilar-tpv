@@ -1,0 +1,266 @@
+// src/durableObjects/tenantHub.sqlite.ts
+//
+// La base del negocio vive en el SQLite del propio TenantHub (rama prueba/sqlite-do).
+//
+// El motor, las rutas y los tests hablan con la base a través de un `Client` de libsql (`execute`,
+// `batch`). Aquí se sirve esa misma forma sobre `ctx.storage.sql`, para que el cambio de sustrato no
+// obligue a reescribir las doscientas consultas que ya existen. Dentro del DO se usa directamente
+// (`clienteLocal`); desde el Worker, las lecturas llegan por RPC (`ejecutarEnBruto`/`loteEnBruto`
+// devuelven filas planas, y `aResultSet` las vuelve a montar al otro lado).
+//
+// Diferencias con Turso que este fichero absorbe:
+//
+// - `rowsWritten` del cursor cuenta también las filas de índice, así que NO es el `rowsAffected` de
+//   libsql. Se pregunta a SQLite con `changes()`, que es lo mismo que devuelve libsql.
+// - No hay `lastInsertRowid`: se pregunta con `last_insert_rowid()` tras un INSERT.
+// - Una clave foránea aplazada (`defer_foreign_keys`) que sigue rota al confirmar no lanza: el
+//   runtime **resetea el Durable Object entero** a su último estado bueno (comprobado en
+//   `test/sondaSqliteDo.test.ts`). Ver `loteEnBruto`.
+// - `BEGIN`/`SAVEPOINT` no están permitidos: la atomicidad del lote la da `transactionSync`.
+
+import type { Client, ResultSet } from "@libsql/client/web";
+
+import { MIGRATIONS, normalize, sha256Hex } from "../server/tenantMigrations";
+import { HubError } from "../lib/errorHttp";
+
+/** Una sentencia tal y como la acepta libsql: texto suelto, o texto con argumentos posicionales. */
+export type Sentencia = string | { sql: string; args?: unknown[] };
+
+/** Lo que viaja por RPC: columnas y valores en bruto, sin el envoltorio de libsql. */
+export type FilasEnBruto = {
+	columns: string[];
+	rows: unknown[][];
+	rowsAffected: number;
+	lastInsertRowid: number | null;
+};
+
+const VACIO: FilasEnBruto = { columns: [], rows: [], rowsAffected: 0, lastInsertRowid: null };
+
+const APLAZAR_FK = /^\s*PRAGMA\s+defer_foreign_keys\s*=\s*(ON|1|TRUE|YES)\s*;?\s*$/i;
+const PRIMERA_PALABRA = /^\s*(\w+)/;
+
+function partes(s: Sentencia): { texto: string; args: unknown[] } {
+	if (typeof s === "string") return { texto: s, args: [] };
+	const args = s.args ?? [];
+	if (!Array.isArray(args)) {
+		// Ninguna consulta del negocio usa argumentos con nombre. Si llega una, que se vea aquí y no
+		// como un `?1` sin valor.
+		throw new Error("tenantHub.sqlite: los argumentos con nombre no están soportados");
+	}
+	return { texto: s.sql, args };
+}
+
+/** Los valores que acepta `sql.exec`: libsql admite además booleanos y `undefined`. */
+function valorParaExec(v: unknown): unknown {
+	if (v === undefined) return null;
+	if (typeof v === "boolean") return v ? 1 : 0;
+	if (typeof v === "bigint") return Number(v);
+	return v;
+}
+
+/** Ejecuta una sentencia y devuelve sus filas en bruto, con `rowsAffected` como el de libsql. */
+export function ejecutarEnBruto(sql: SqlStorage, s: Sentencia): FilasEnBruto {
+	const { texto, args } = partes(s);
+	if (APLAZAR_FK.test(texto)) {
+		// Fuera de un lote no hay transacción que la acote: el aplazamiento seguiría vivo hasta el
+		// commit implícito del evento y una FK rota reseteará el DO. Sólo `loteEnBruto` la honra.
+		return VACIO;
+	}
+	const cursor = sql.exec(texto, ...args.map(valorParaExec));
+	const columns = [...cursor.columnNames];
+	const rows = Array.from(cursor.raw()) as unknown[][];
+
+	const verbo = (PRIMERA_PALABRA.exec(texto)?.[1] ?? "").toUpperCase();
+	const esEscritura =
+		verbo === "INSERT" || verbo === "UPDATE" || verbo === "DELETE" || verbo === "REPLACE";
+	let rowsAffected = 0;
+	let lastInsertRowid: number | null = null;
+	if (esEscritura || (verbo === "WITH" && cursor.rowsWritten > 0)) {
+		const r = sql.exec("SELECT changes() AS c, last_insert_rowid() AS r;").one() as {
+			c: number;
+			r: number;
+		};
+		rowsAffected = Number(r.c);
+		if (verbo === "INSERT" || verbo === "REPLACE" || verbo === "WITH") lastInsertRowid = Number(r.r);
+	}
+	return { columns, rows, rowsAffected, lastInsertRowid };
+}
+
+function esFkRota(e: unknown): boolean {
+	return /FOREIGN KEY constraint failed/i.test(String((e as Error)?.message ?? e));
+}
+
+/**
+ * Un lote todo-o-nada, como `batch()` de libsql.
+ *
+ * La Main confirma cada transacción con `defer_foreign_keys` (db.rs), así que sus operaciones pueden
+ * escribir una hija antes que su padre, y el motor manda ese mismo PRAGMA al aplicarlas. Aquí no se
+ * puede dejar que una FK aplazada llegue rota al commit, porque el runtime resetea el DO en vez de
+ * lanzar. Así que:
+ *
+ * 1. Primero se prueba SIN aplazar. Si entra, el resultado es el mismo que aplazando (aplazar sólo
+ *    cambia CUÁNDO se comprueba) y no cuesta nada más.
+ * 2. Si falla por una FK, se repite como lo hizo la Main, aplazando, y antes de cerrar se mira
+ *    `PRAGMA foreign_key_check`. Si queda alguna rota se lanza un error normal: la transacción se
+ *    deshace y el motor lo clasifica como rechazo permanente, igual que hacía con Turso.
+ *
+ * El paso 2 recorre las tablas con FK (unos 230 ms con 250.000 líneas), pero sólo lo paga quien
+ * necesita el aplazamiento o trae una FK rota de verdad.
+ */
+export function loteEnBruto(storage: DurableObjectStorage, sentencias: Sentencia[]): FilasEnBruto[] {
+	const sql = storage.sql;
+	const pideAplazar = sentencias.some((s) => APLAZAR_FK.test(partes(s).texto));
+
+	const correr = (aplazar: boolean): FilasEnBruto[] =>
+		storage.transactionSync(() => {
+			if (aplazar) sql.exec("PRAGMA defer_foreign_keys = ON;");
+			try {
+				const salida = sentencias.map((s) =>
+					APLAZAR_FK.test(partes(s).texto) ? VACIO : ejecutarEnBruto(sql, s),
+				);
+				if (aplazar) {
+					const rota = sql.exec("PRAGMA foreign_key_check;").toArray()[0] as
+						| { table?: string; parent?: string }
+						| undefined;
+					if (rota) {
+						throw new Error(
+							`FOREIGN KEY constraint failed: ${rota.table ?? "?"} → ${rota.parent ?? "?"} (aplazada)`,
+						);
+					}
+				}
+				return salida;
+			} finally {
+				// El aplazamiento es de la conexión, no de la transacción: deshacer el lote no lo apaga.
+				if (aplazar) sql.exec("PRAGMA defer_foreign_keys = OFF;");
+			}
+		});
+
+	if (!pideAplazar) return correr(false);
+	try {
+		return correr(false);
+	} catch (e) {
+		if (!esFkRota(e)) throw e;
+		return correr(true);
+	}
+}
+
+/** Las filas en bruto con la forma de una `Row` de libsql: por nombre y por posición. */
+export function aResultSet(b: FilasEnBruto): ResultSet {
+	const rows = b.rows.map((valores) => {
+		const fila: Record<string | number, unknown> = {};
+		Object.defineProperty(fila, "length", { value: valores.length });
+		valores.forEach((v, i) => {
+			Object.defineProperty(fila, i, { value: v });
+			const col = b.columns[i];
+			if (col !== undefined && !Object.prototype.hasOwnProperty.call(fila, col)) {
+				Object.defineProperty(fila, col, { value: v, enumerable: true, configurable: true, writable: true });
+			}
+		});
+		return fila;
+	});
+	const lastInsertRowid = b.lastInsertRowid == null ? undefined : BigInt(b.lastInsertRowid);
+	return {
+		columns: b.columns,
+		columnTypes: b.columns.map(() => ""),
+		rows: rows as any,
+		rowsAffected: b.rowsAffected,
+		lastInsertRowid,
+		toJSON() {
+			return {
+				columns: b.columns,
+				columnTypes: b.columns.map(() => ""),
+				rows: b.rows,
+				rowsAffected: b.rowsAffected,
+				lastInsertRowid: lastInsertRowid?.toString() ?? null,
+			};
+		},
+	};
+}
+
+function sinTransacciones(): never {
+	throw new Error(
+		"tenantHub.sqlite: la base del negocio no abre transacciones interactivas; usa batch()",
+	);
+}
+
+/** Un `Client` de libsql sobre el SQLite del propio Durable Object. */
+export function clienteLocal(storage: DurableObjectStorage): Client {
+	return {
+		async execute(entrada: Sentencia, args?: unknown[]) {
+			const s = typeof entrada === "string" && args ? { sql: entrada, args } : entrada;
+			return aResultSet(ejecutarEnBruto(storage.sql, s));
+		},
+		async batch(sentencias: Sentencia[]) {
+			return loteEnBruto(storage, sentencias).map(aResultSet);
+		},
+		transaction: sinTransacciones,
+		executeMultiple: sinTransacciones,
+		migrate: sinTransacciones,
+		sync: async () => undefined,
+		close() {},
+		closed: false,
+		protocol: "file",
+	} as unknown as Client;
+}
+
+// ---------------- Esquema ----------------
+
+/** Comentarios fuera: el `exec` de varias sentencias del DO se atraganta con algunos. */
+function sinComentarios(sql: string): string {
+	return sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
+}
+
+/** ¿Este negocio tiene ya su base? Es lo que antes decía la fila de `tenant_databases`. */
+export function baseAprovisionada(sql: SqlStorage): boolean {
+	return (
+		sql
+			.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_migrations';")
+			.toArray().length > 0
+	);
+}
+
+/**
+ * Aplica las migraciones pendientes, cada una con su registro en `_migrations` y en su propia
+ * transacción, como `runTenantMigrations` hacía en Turso (mismo nombre, mismo hash). El DO es de un
+ * solo hilo, así que no hay dos migraciones a la vez que coordinar.
+ */
+export async function migrarBaseLocal(storage: DurableObjectStorage): Promise<void> {
+	const hashes = await Promise.all(MIGRATIONS.map((m) => sha256Hex(normalize(m.sql))));
+	const sql = storage.sql;
+	// `_migrations` nace dentro de la transacción de la primera migración: si ésta falla, el negocio
+	// sigue sin base (`baseAprovisionada` = false) en vez de quedarse con una tabla de control vacía.
+	const aplicadas = new Map(
+		baseAprovisionada(sql)
+			? sql
+					.exec("SELECT name, hash FROM _migrations;")
+					.toArray()
+					.map((r: any) => [String(r.name), String(r.hash)] as const)
+			: [],
+	);
+	MIGRATIONS.forEach((mig, i) => {
+		const hash = hashes[i];
+		const previa = aplicadas.get(mig.name);
+		if (previa !== undefined) {
+			if (previa !== hash) {
+				throw new HubError("migration_altered", 500, {
+					message:
+						`migration_altered: '${mig.name}' fue modificada tras aplicarse (hash distinto). ` +
+						`Nunca edites una migración ya publicada: crea una nueva.`,
+				});
+			}
+			return;
+		}
+		storage.transactionSync(() => {
+			sql.exec(
+				"CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, hash TEXT NOT NULL, applied_at INTEGER NOT NULL);",
+			);
+			sql.exec(sinComentarios(normalize(mig.sql)));
+			sql.exec(
+				"INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, ?3);",
+				mig.name,
+				hash,
+				Date.now(),
+			);
+		});
+	});
+}
