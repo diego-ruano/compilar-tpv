@@ -29,6 +29,7 @@ Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 | [SYNC-31](#sync-31--un-ticket-borrado-desde-la-handy-con-su-cobro-en-camino-falta-en-la-nube) | 🟡 | Un ticket borrado desde la Handy con su cobro en camino falta en la nube, y las reparaciones no lo devuelven entero | Sin decidir |
 | [SYNC-32](#sync-32--una-main-en-sesión-normal-con-la-base-anterior-a-lo-purgado-no-tiene-cómo-volver-a-la-nube) | 🔵 | Una Main en sesión normal con la base anterior a lo purgado no tiene cómo volver a la nube | Sin decidir |
 | [SYNC-33](#sync-33--una-copia-sin-sello-no-dice-de-qué-negocio-es) | 🟡 | Una copia sin sello no dice de qué negocio es: una de otro negocio traída de fuera se puede restaurar | Sin decidir (lo que falta para AUD-22) |
+| [SYNC-34](#sync-34--dos-recorridos-cuadráticos-sobre-el-sql-que-sube-la-main) | 🔵 | Dos recorridos cuadráticos en el `TenantHub` sobre el SQL que sube la Main | Sin empezar |
 | [INC-20261030-019](#inc-20261030-019--la-handy-windows-sólo-cambia-el-nombre-del-negocio-al-recibir-el-foco) | 🔵 | La Handy Windows sólo cambia el nombre del negocio al recibir el foco | Comprobar a mano |
 | [Revisión de docs](#detectado-al-revisar-la-documentación) | — | Lo que salió al contrastar la documentación con el código | Sin decidir |
 
@@ -468,6 +469,33 @@ restaurarla lo que demuestre que es del negocio: el PIN de un administrador de l
 reconciliación no dé por buena una base con el cursor por encima de lo que la nube ha emitido. No hay
 nadie en producción con copias sin sello, así que lo primero puede bastar. Es lo que falta para cerrar
 AUD-22 (la copia traída de fuera, restaurada sin PIN). Sin decidir.
+
+### SYNC-34 · Dos recorridos cuadráticos sobre el SQL que sube la Main
+
+Dos sitios del `TenantHub` miran el texto del SQL de una operación con un coste que crece con el
+cuadrado de su longitud, la misma forma que tenía AUD-33 (`/^"+|"+$/`):
+
+- `evalValueStep` (`tenantHub.sentencias.ts`) quita el `;` final de un paso `value` con
+  `/;+\s*$/`. Sin ancla al principio, con una racha de `;` que no está al final la expresión se
+  prueba desde cada uno y la recorre entera desde cada uno.
+- `esArgumentoDeFecha` (`tenantHub.tiempo.ts`), por cada `'now'` del SQL, recorre el texto hacia
+  atrás hasta el paréntesis que lo abre y pasa sobre todo lo anterior
+  `/([a-z_][a-z0-9_]*)\s*$/`, que se prueba desde cada letra de cada palabra. Con muchos `'now'`, o
+  con una palabra muy larga delante, el coste es cuadrático aunque se cambiara sólo la expresión.
+  Lo llaman `sqlHasNowLiteral`, `rewriteNowInSql` y `horaSinFijarEnSql`, en cada operación que
+  aplica el motor.
+
+Sólo los alcanza una Main autenticada (el `helloSigned` firmado con su clave y el rol `tpv` de su
+fila), con el SQL de sus propias operaciones, en vivo o por la cola, y en el Durable Object de su
+propio negocio: no comparte el isolate del worker con otros negocios. Lo que escribe la Handy lleva el SQL
+de los `*.commands.ts` del worker. Ninguno corre antes de autenticar.
+
+Arreglo propuesto: recorridos lineales escritos a mano, como `recortar` y `quitarComillas`
+(`lib/texto.ts`). En `evalValueStep`, quitar los `;` y los espacios finales recorriendo desde el
+final. En `tenantHub.tiempo.ts`, una sola pasada hacia delante con una pila de paréntesis abiertos,
+cada uno con el nombre que lleva delante (leído hacia atrás sólo sobre los espacios y la palabra que
+lo preceden), de modo que cada `'now'` mire la cima de la pila; con los casos de
+`test/tenantHubTiempo.test.ts` como referencia de que no cambia lo que se reconoce.
 
 ---
 

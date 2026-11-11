@@ -122,6 +122,18 @@ token guardado, salvo que venga de un 401 (`forceRotate`) o que le queden menos 
   espacio. El `.trim()` de JavaScript quita además U+FEFF y deja U+0085, y un texto valía en un lado y
   no en el otro (VALID-01). `test/recortarComoLaMain.test.ts` lo vigila en todos los ficheros de los
   dominios del negocio.
+- **Lo que llega antes de saber quién llama no pasa por nada que cueste más que recorrerlo**
+  (AUD-33). Este motor de expresiones regulares retrocede: una repetición anclada al final que puede
+  empezar en cada posición de un tramo (`"+$`, `\s+$`) lo recorre entero desde cada una, y tarda el
+  cuadrado de su longitud. Las comillas de los extremos de una firma o una clave se quitan con
+  `quitarComillas` (`lib/texto.ts`), que recorre los extremos como `recortar`. Y la firma y la clave
+  pública llevan su tope antes de procesarlas, sobre la cadena tal como llega, antes de recortarla
+  (`TOPE_FIRMA_B64`, 128, y `TOPE_CLAVE_B64`, 64, en `server/utils/ed25519.ts`; una firma son 88
+  caracteres y una clave, 44): una `X-Device-Sig` más larga sale como `bad_device_signature` sin leer
+  la base, en `tenantAuth` y en las rutas de licencias; en el emparejamiento, el `devicePubKey` de
+  `claim` como `invalid_devicePubKey` y el `sigB64` de `fetch-token` y `cancel` como `missing_proof`,
+  con el `.max()` del schema delante del recorte y del `transform`. Lo vigilan
+  `test/quitarComillas.test.ts` y `test/topeDeLaFirma.test.ts`.
 - **Una fecha que llega como texto se valida con `lib/fechas.ts`** (`zDia`, `normalizarDia`,
   `esFechaYmd`; espejo de `tpv_domain::fechas`): forma `YYYY-MM-DD` y día real de calendario. Una
   expresión regular deja pasar un 31 de febrero, y un `throw` dentro de un `transform` de zod no sale

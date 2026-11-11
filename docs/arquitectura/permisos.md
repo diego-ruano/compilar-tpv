@@ -282,7 +282,9 @@ y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en 
 - **Device-proof**: firma con dominio `DEVICE_PROOF` de `ts`, método, ruta **y query**, hash del token y hash del cuerpo, con ±2 minutos.
   Sin nonce ([FABLE-E](../pendientes.md#fable-e--sin-nonce-en-el-device-proof)). Activar una licencia,
   que es anónima, lleva esa misma firma con el tramo del token vacío, comprobada con la clave pública
-  que presenta la petición ([licencias.md](licencias.md#activar)).
+  que presenta la petición ([licencias.md](licencias.md#activar)). Una `X-Device-Sig` de más de 128
+  caracteres (una firma son 88) se rechaza con `bad_device_signature` antes de mirarla y de leer la
+  base (AUD-33, [worker.md](worker.md#cómo-se-escribe-una-ruta)).
 - **El correo se acota por destinatario y por volumen**: sólo al email de un proveedor dado de alta y
   con un tope diario por negocio ([worker.md](worker.md#correo)).
 - **Los errores no cuentan cómo está hecho el worker**: un 500 no lleva traza ni texto de Turso

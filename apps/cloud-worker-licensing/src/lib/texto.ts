@@ -20,3 +20,22 @@ export function recortar(texto: string): string {
 	while (fin > inicio && ESPACIO.test(texto[fin - 1])) fin--;
 	return texto.slice(inicio, fin);
 }
+
+/** La comilla doble (`"`). */
+const COMILLA = 34;
+
+/**
+ * AUD-33 · Quita las comillas dobles de los dos extremos: lo mismo que
+ * `texto.replace(/^"+|"+$/g, "")`, para cualquier texto. Esa expresión, en este motor, prueba
+ * `"+$` desde cada comilla de una racha interior y la recorre entera desde cada una: el cuadrado de
+ * su longitud, y corría sobre la firma y la clave del dispositivo antes de saber quién llamaba.
+ * Aquí se recorre desde cada extremo, como `recortar`, sin expresiones regulares: cada carácter se
+ * mira como mucho una vez.
+ */
+export function quitarComillas(texto: string): string {
+	let inicio = 0;
+	let fin = texto.length;
+	while (inicio < fin && texto.charCodeAt(inicio) === COMILLA) inicio++;
+	while (fin > inicio && texto.charCodeAt(fin - 1) === COMILLA) fin--;
+	return texto.slice(inicio, fin);
+}
