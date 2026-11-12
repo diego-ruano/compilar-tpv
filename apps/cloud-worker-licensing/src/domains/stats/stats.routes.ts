@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as q from "./stats.queries";
 import { rangeSchema, turnoSchema } from "./stats.schemas";
@@ -14,7 +15,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const statsRoutes = new Hono<Ctx>();
 
-statsRoutes.use("*", tenantAuth);
+statsRoutes.use("*", tenantAuth, alHub);
 
 function parseRange(raw: string | undefined) {
 	return rangeSchema.parse(raw || "hoy");

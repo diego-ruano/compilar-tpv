@@ -31,6 +31,7 @@ function retenerEnvio(c: { executionCtx: Pick<ExecutionContext, "waitUntil"> }, 
 import { forbidden, unauthorized } from "../server/utils/response";
 import { wireToCode } from "../lib/errorCodes";
 import { vetoDeLicencia } from "../lib/licenciaEnUso";
+import { hubLocal } from "../lib/hubLocal";
 
 export type TenantVars = {
 	tenantId: string;
@@ -102,6 +103,19 @@ export const tenantAuth: MiddlewareHandler<{
 	Bindings: Env;
 	Variables: TenantVars;
 }> = async (c, next) => {
+	// Dentro del TenantHub (`lib/enElHub.ts`) ya está todo comprobado: el Worker lo hizo antes de
+	// pasarle la petición, y la identidad llega con el RPC, no con la petición. Volver a comprobarlo
+	// aquí sería volver a la base central desde el DO.
+	const dentro = hubLocal();
+	if (dentro) {
+		c.set("tenantId", dentro.identidad.tenantId);
+		c.set("deviceId", dentro.identidad.deviceId);
+		c.set("token", dentro.identidad.token);
+		c.set("licHash", dentro.identidad.licHash);
+		await next();
+		return;
+	}
+
 	try {
 		const dbCentral = getDb(c.env);
 		const { token, claims } = await verifyJwt(c.env, c.req.raw);

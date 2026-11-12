@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./reservas.commands";
 import * as q from "./reservas.queries";
@@ -17,7 +18,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const reservasRoutes = new Hono<Ctx>();
 
-reservasRoutes.use("*", tenantAuth);
+reservasRoutes.use("*", tenantAuth, alHub);
 
 reservasRoutes.get("/meta", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.meta(db))),

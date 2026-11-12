@@ -16,6 +16,7 @@ import { tenantQuery } from "../../lib/tenantClient";
 import { cuerpoTolerante } from "../../lib/validacion";
 import { reportarSaludDeSync as emitirSalud } from "../../observability/axiom";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 import { getDb } from "../../server/db";
 import { hubDe } from "../../lib/hub";
 import { provisionTenantDatabase } from "../licensing/licensing.helpers";
@@ -39,7 +40,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 export const syncRoutes = new Hono<Ctx>();
 
 // ARQ-06: autenticación y rol se resuelven antes de que el validador lea el cuerpo.
-syncRoutes.use("*", tenantAuth, soloLaMain("forbidden_not_tpv", 403));
+syncRoutes.use("*", tenantAuth, alHub, soloLaMain("forbidden_not_tpv", 403));
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];

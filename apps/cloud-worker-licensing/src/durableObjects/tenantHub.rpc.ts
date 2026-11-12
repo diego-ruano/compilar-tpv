@@ -3,6 +3,17 @@ import type { InternalApplyCommand } from "./tenantHub.types";
 
 export type ValorJson = null | string | number | boolean | object;
 
+/**
+ * Quién pregunta, tal y como lo comprobó el Worker (`tenantAuth`), para una ruta que se ejecuta dentro
+ * del TenantHub (`ejecutarRuta`, `lib/enElHub.ts`). Viaja como argumento del RPC, no en la petición.
+ */
+export type IdentidadDelWorker = {
+	tenantId: string;
+	deviceId: string;
+	token: string;
+	licHash: string;
+};
+
 export type ApplyParams = {
 	tenantId: string;
 	deviceId: string;

@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./trabajadores.commands";
 import * as q from "./trabajadores.queries";
@@ -18,7 +19,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const trabajadoresRoutes = new Hono<Ctx>();
 
-trabajadoresRoutes.use("*", tenantAuth);
+trabajadoresRoutes.use("*", tenantAuth, alHub);
 
 trabajadoresRoutes.get("/permisos/:id", async (c) => {
     const id = parseId(c.req.param("id"));

@@ -9,6 +9,7 @@ import {
 	tenantAuth,
 	type TenantVars,
 } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./cuentas.commands";
 import * as q from "./cuentas.queries";
@@ -21,7 +22,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const cuentasRoutes = new Hono<Ctx>();
 
-cuentasRoutes.use("*", tenantAuth);
+cuentasRoutes.use("*", tenantAuth, alHub);
 
 cuentasRoutes.get("/entradas", async (c) => {
 	const p = S.listadoSchema.parse({

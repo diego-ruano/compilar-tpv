@@ -9,6 +9,7 @@ import { recortar } from "../../lib/texto";
 import { parseClientNow } from "../../durableObjects/tenantHub.tiempo";
 import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./mesas.commands";
 import * as q from "./mesas.queries";
@@ -23,7 +24,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const mesasRoutes = new Hono<Ctx>();
 
-mesasRoutes.use("*", tenantAuth);
+mesasRoutes.use("*", tenantAuth, alHub);
 
 mesasRoutes.get("/layout", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.loadLayout(db))),

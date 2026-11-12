@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./tareas.commands";
 import * as q from "./tareas.queries";
@@ -20,7 +21,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const tareasRoutes = new Hono<Ctx>();
 
-tareasRoutes.use("*", tenantAuth);
+tareasRoutes.use("*", tenantAuth, alHub);
 
 // Lecturas
 

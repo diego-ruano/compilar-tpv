@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { MotorTenantHub } from "./tenantHub.motor";
-import type { ApplyParams, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
+import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
 import type { Sentencia } from "./tenantHub.sqlite";
 import { diagnosticar, type AccionDeDiagnostico, type RespuestaDeDiagnostico } from "./tenantHub.diagnostico";
 
@@ -18,6 +18,11 @@ export class TenantHub extends DurableObject<Env> {
 
 	aplicar(params: ApplyParams): Promise<ResultadoAplicacion> {
 		return this.motor.aplicar(params);
+	}
+
+	/** Una ruta de negocio entera, ejecutada aquí al lado de la base (`lib/enElHub.ts`). */
+	ejecutarRuta(peticion: Request, identidad: IdentidadDelWorker): Promise<Response> {
+		return this.motor.ejecutarRuta(peticion, identidad);
 	}
 
 	/** Las lecturas del Worker contra la base del negocio, que vive aquí. */

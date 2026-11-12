@@ -8,6 +8,7 @@ import { HubError } from "../../lib/hub";
 import { recortar } from "../../lib/texto";
 import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./venta_rapida.commands";
 import * as q from "./venta_rapida.queries";
@@ -23,7 +24,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const ventaRapidaRoutes = new Hono<Ctx>();
 
-ventaRapidaRoutes.use("*", tenantAuth);
+ventaRapidaRoutes.use("*", tenantAuth, alHub);
 
 function conflictStock(plan: any): never {
 	throw new HubError(

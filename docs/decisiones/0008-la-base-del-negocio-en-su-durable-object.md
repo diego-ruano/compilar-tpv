@@ -14,9 +14,11 @@ El DO tiene su propio SQLite, en la misma máquina que el código, con transacci
 
 ## Decisión
 
-La base de cada negocio es el SQLite de su `TenantHub`. Las escrituras van por el motor del DO, como
-antes; las lecturas de las rutas, por RPC al mismo DO (`consultar`). La base central sigue en Turso.
-Los DO del negocio se crean en la jurisdicción `eu` ([worker.md](../arquitectura/worker.md)).
+La base de cada negocio es el SQLite de su `TenantHub`, y **las rutas de negocio se ejecutan dentro de
+ese DO**: el Worker autentica (token, firma y licencia, contra la base central) y le pasa la petición
+entera (`lib/enElHub.ts`), así que cada petición cuesta un viaje al DO y no uno por consulta. Las
+escrituras van por el motor del DO, como antes. La base central sigue en Turso. Los DO del negocio se
+crean en la jurisdicción `eu` ([worker.md](../arquitectura/worker.md)).
 
 ## Consecuencias
 
@@ -24,6 +26,10 @@ Los DO del negocio se crean en la jurisdicción `eu` ([worker.md](../arquitectur
   negocio, su rotación, el plazo de red y la resolución de confirmaciones inciertas. Queda el turno del
   log, que ordena la difusión ([sincronizacion.md](../arquitectura/sincronizacion.md)).
 - Los tests corren sobre el mismo motor que producción.
+- El coste de una petición lo marca el viaje entre el Worker que atiende y el DO, no el SQL. Con
+  `eu`, el DO nace en un centro de la UE que no se elige (Frankfurt, Milán, Viena, Varsovia, Praga,
+  Estocolmo, Bucarest…) y la pista de región no se respeta; sin jurisdicción, nace junto al primero
+  que lo llama. Por eso la ruta va entera al DO: con un solo viaje, dónde caiga pesa poco.
 - **Un negocio es un hilo**: toda lectura de la Handy pasa por su DO, y una consulta pesada retrasa al
   resto del negocio mientras dura. Medido en local con medio año de un restaurante con mucho
   movimiento (58 MB): las ventas por día de un mes, 159 ms; las de seis meses, 657 ms.

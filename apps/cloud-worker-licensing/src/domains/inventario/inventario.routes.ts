@@ -13,6 +13,7 @@ import { Hono } from "hono";
 
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 import { tenantQuery } from "../../lib/tenantClient";
 import { applyViaHub } from "../../lib/hub";
 
@@ -28,7 +29,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const inventarioRoutes = new Hono<Ctx>();
 
-inventarioRoutes.use("*", tenantAuth);
+inventarioRoutes.use("*", tenantAuth, alHub);
 
 // ───────────────── helpers ─────────────────
 

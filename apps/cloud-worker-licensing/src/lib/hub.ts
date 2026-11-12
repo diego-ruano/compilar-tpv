@@ -11,6 +11,7 @@ import type { Env } from "../env";
 import { HubError } from "./errorHttp";
 import { capturarError } from "../observability/errors";
 import { medirTramo } from "../observability/tiempos";
+import { hubLocal } from "./hubLocal";
 import type { ApplyParams, ResultadoAplicacion } from "../durableObjects/tenantHub.rpc";
 export type { ApplyParams } from "../durableObjects/tenantHub.rpc";
 
@@ -113,9 +114,11 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 		throw new HubError(`escritura_solo_en_main:${vetada}`, 403);
 	}
 
-	const stub = hubDe(env, tenantId);
-
-	const respuesta = (await medirTramo("hub-escribe", async () => stub.aplicar(params))) as ResultadoAplicacion;
+	// Dentro del TenantHub del negocio (`lib/enElHub.ts`), el motor está al lado: sin RPC.
+	const local = hubLocal(tenantId);
+	const respuesta = local
+		? await local.aplicar(params)
+		: ((await medirTramo("hub-escribe", async () => hubDe(env, tenantId).aplicar(params))) as ResultadoAplicacion);
 	if (!respuesta.ok) throw new HubError(respuesta.error, respuesta.status, respuesta.details);
 	return respuesta.data;
 }

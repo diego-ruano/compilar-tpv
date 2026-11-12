@@ -36,6 +36,23 @@ export async function medirTramo<T>(nombre: string, fn: () => Promise<T>): Promi
 	}
 }
 
+/**
+ * Una ruta que se ejecuta dentro del TenantHub (`lib/enElHub.ts`) trae su propio desglose en la
+ * respuesta. Se suma al de la petición con `en-hub-` delante (`en-hub-total`, `en-hub-central`…), para
+ * ver qué parte del viaje es trabajo del DO y cuál es red.
+ */
+export function anotarDesgloseDelHub(cabecera: string | null): void {
+	const medida = actual.getStore();
+	if (!medida || !cabecera) return;
+	for (const parte of cabecera.split(",")) {
+		const nombre = parte.trim().split(";")[0];
+		const ms = Number(/dur=([\d.]+)/.exec(parte)?.[1]);
+		if (!nombre || nombre === "colo" || !Number.isFinite(ms)) continue;
+		const n = Number(/desc="?(\d+)/.exec(parte)?.[1] ?? 1);
+		medida.tramos.set(`en-hub-${nombre}`, { n, ms });
+	}
+}
+
 /** `central;dur=12;desc="2", hub;dur=8;desc="1", total;dur=25, colo;desc="CDG"`. */
 export function cabeceraServerTiming(medida: Medida, colo: string | undefined): string {
 	const partes = [...medida.tramos].map(([nombre, t]) => `${nombre};dur=${t.ms};desc="${t.n}"`);

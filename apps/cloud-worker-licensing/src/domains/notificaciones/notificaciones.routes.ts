@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./notificaciones.commands";
 import * as q from "./notificaciones.queries";
@@ -20,7 +21,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const notificacionesRoutes = new Hono<Ctx>();
 
-notificacionesRoutes.use("*", tenantAuth);
+notificacionesRoutes.use("*", tenantAuth, alHub);
 
 // Lecturas
 

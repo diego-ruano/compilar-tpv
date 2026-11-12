@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./clientes.commands";
 import * as q from "./clientes.queries";
@@ -17,7 +18,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const clientesRoutes = new Hono<Ctx>();
 
-clientesRoutes.use("*", tenantAuth);
+clientesRoutes.use("*", tenantAuth, alHub);
 
 clientesRoutes.get("/overview", async (c) => {
 	const ranking = c.req.query("ranking") || "todos";

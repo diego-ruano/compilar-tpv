@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 
 import * as cmd from "./proveedores.commands";
 import * as q from "./proveedores.queries";
@@ -17,7 +18,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const proveedoresRoutes = new Hono<Ctx>();
 
-proveedoresRoutes.use("*", tenantAuth);
+proveedoresRoutes.use("*", tenantAuth, alHub);
 
 proveedoresRoutes.get("/", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.getAll(db))),

@@ -30,6 +30,7 @@ import type { Client, ResultSet } from "@libsql/client/web";
 import type { Env } from "../env";
 import { HubError } from "./errorHttp";
 import { hubDe } from "./hub";
+import { hubLocal } from "./hubLocal";
 import { medirTramo } from "../observability/tiempos";
 import { parseClientNow, rewriteNowInSql } from "../durableObjects/tenantHub.tiempo";
 import { aResultSet, type Sentencia as SentenciaDelHub } from "../durableObjects/tenantHub.sqlite";
@@ -45,12 +46,18 @@ function sinTransacciones(): never {
  * Un `Client` de libsql cuyas sentencias se ejecutan en el TenantHub del negocio.
  *
  * Una llamada RPC por `execute` y otra por `batch`: una ruta con N consultas seguidas hace N
- * viajes al DO, que está en el mismo centro de datos o cerca. El migrado del esquema lo hace el DO
- * en su primer acceso.
+ * viajes al DO. Por eso las rutas de negocio se ejecutan dentro del propio DO (`lib/enElHub.ts`), y
+ * ahí este cliente lee del SQLite de al lado, sin viaje. El migrado del esquema lo hace el DO en su
+ * primer acceso.
  */
 export function clienteDelHub(env: Env, tenantId: string): Client {
 	const stub = hubDe(env, tenantId);
 	const pedir = async (sentencias: SentenciaDelHub[], enLote: boolean): Promise<ResultSet[]> => {
+		const local = hubLocal(tenantId);
+		if (local) {
+			const db = await local.base();
+			return enLote ? db.batch(sentencias as any) : [await db.execute(sentencias[0] as any)];
+		}
 		// Los tipos de RPC no aceptan `unknown` (valores de SQLite): se afirma la forma que devuelve el DO.
 		const r = (await medirTramo("hub-lee", () => stub.consultar(tenantId, sentencias as any, enLote))) as unknown as RespuestaDeConsulta;
 		if (!r.ok) throw new HubError(r.code, r.status, r.details);

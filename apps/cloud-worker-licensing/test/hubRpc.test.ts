@@ -27,6 +27,8 @@ describe("TenantHub RPC", () => {
 			"consultar", "aprovisionar", "estaAprovisionado", "borrarTodo",
 			// La ruta de diagnóstico de latencias (`/v1/admin/diagnostico/latencias`).
 			"diagnostico",
+			// Una ruta de negocio entera, ejecutada junto a la base (`lib/enElHub.ts`).
+			"ejecutarRuta",
 		].sort());
 	});
 

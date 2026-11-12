@@ -28,7 +28,9 @@ import { loadDeviceFromCentral, verifyHelloSigned } from "./tenantHub.identidad"
 import { buildApplyBatch, loteDe, type EscrituraPreparada } from "./tenantHub.lote";
 import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
-import type { ApplyParams, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
+import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
+import { app } from "../app";
+import { dentroDelHub } from "../lib/hubLocal";
 import {
 	baseAprovisionada,
 	clienteLocal,
@@ -1091,6 +1093,27 @@ export class MotorTenantHub {
 
 	async aplicar(params: ApplyParams): Promise<ResultadoAplicacion> {
 		return aplicar(this.ctxRutas(), params);
+	}
+
+	/**
+	 * Una ruta de negocio entera, ejecutada aquí (`lib/enElHub.ts`): la misma `app` que sirve el
+	 * Worker, con la identidad que ya comprobó él. Sus lecturas van al SQLite de este DO y sus
+	 * escrituras a `aplicar`, sin RPC: la petición cuesta un viaje, el que la ha traído.
+	 */
+	async ejecutarRuta(peticion: Request, identidad: IdentidadDelWorker): Promise<Response> {
+		const ctxEjecucion = {
+			waitUntil: (p: Promise<unknown>) => this.state.waitUntil(p),
+			passThroughOnException: () => undefined,
+			props: {},
+		} as unknown as ExecutionContext;
+		return dentroDelHub(
+			{
+				identidad,
+				base: () => this.getTenantDb(identidad.tenantId),
+				aplicar: (params) => aplicar(this.ctxRutas(), params),
+			},
+			async () => app.fetch(peticion, this.env, ctxEjecucion),
+		);
 	}
 
 	revocarDispositivo(deviceId: string): void {

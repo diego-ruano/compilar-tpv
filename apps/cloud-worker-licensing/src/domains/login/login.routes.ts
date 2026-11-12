@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { alHub } from "../../lib/enElHub";
 import { getDb } from "../../server/db";
 
 import * as cmd from "./login.commands";
@@ -26,7 +27,7 @@ type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const loginRoutes = new Hono<Ctx>();
 
-loginRoutes.use("*", tenantAuth);
+loginRoutes.use("*", tenantAuth, alHub);
 
 // Verifica el PIN; si es incorrecto (o el hash esta mal formado) devuelve un 401 con el
 // mensaje, en vez de dejar que el throw caiga al onError como 500 internal_error.

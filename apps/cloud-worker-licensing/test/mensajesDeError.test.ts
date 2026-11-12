@@ -154,11 +154,11 @@ describe("ningún identificador del worker se queda sin clasificar", () => {
 
 describe("en la frontera HTTP", () => {
 	it("el worker lo aplica a todo: el middleware va antes que cualquier ruta", async () => {
-		const fuente: string = (await import("../src/index.ts?raw")).default;
+		const fuente: string = (await import("../src/app.ts?raw")).default;
 		const middleware = fuente.indexOf('app.use("*", completarErrores)');
-		expect(middleware, "index.ts no registra completarErrores").toBeGreaterThan(-1);
+		expect(middleware, "app.ts no registra completarErrores").toBeGreaterThan(-1);
 		for (const primeraRuta of ["app.options(", "app.get(", "app.route(", "app.onError("]) {
-			expect(fuente.indexOf(primeraRuta), `index.ts no usa ${primeraRuta}`).toBeGreaterThan(-1);
+			expect(fuente.indexOf(primeraRuta), `app.ts no usa ${primeraRuta}`).toBeGreaterThan(-1);
 			expect(middleware, primeraRuta).toBeLessThan(fuente.indexOf(primeraRuta));
 		}
 	});

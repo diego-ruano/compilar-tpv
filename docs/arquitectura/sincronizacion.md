@@ -14,8 +14,8 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 │ _Sync_State          │◄── catch-up ──────────────────│ · difunde a los demás      │
 └──────────────────────┘                               │ · la base del negocio      │
 ┌──────────────────────┐   REST /v1/<dominio>          │   (su SQLite)              │
-│ HANDY (sin base)     │── escribe: RPC aplicar ──────►│                            │
-│ lee por REST         │── lee: RPC consultar ────────►│                            │
+│ HANDY (sin base)     │── la ruta entera: RPC ───────►│ · ejecuta la ruta junto a  │
+│ lee y escribe        │   ejecutarRuta (un viaje)     │   su base                  │
 │                      │◄── change (WS) ───────────────│                            │
 └──────────────────────┘                               └────────────────────────────┘
 ```
@@ -44,7 +44,8 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | …el lote | `tenantHub.lote.ts`, `tenantHub.sentencias.ts`, `tenantHub.envelope.ts` | De un comando a sentencias (`loteDe`); el sobre que se guarda en `Sync_Changes` |
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
 | …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |
-| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` cuyas consultas van por RPC (`consultar`) al `TenantHub` del negocio |
+| Rutas de la Handy | `src/lib/enElHub.ts` · `src/lib/hubLocal.ts` | El Worker autentica y pasa la petición entera al `TenantHub` del negocio (`ejecutarRuta`), que ejecuta la ruta junto a su base: un viaje por petición |
+| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` que dentro del DO lee de su SQLite y, fuera, manda cada consulta por RPC (`consultar`) |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar`, `/verificar-claves`, `/salud` |
 

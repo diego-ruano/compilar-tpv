@@ -6,7 +6,7 @@
 //     en la respuesta, también en la de un error;
 //   · el preflight pasa por el limitador antes de mirar la clave;
 //   · toda respuesta lleva `Vary: Origin`;
-//   · en `index.ts`, el preflight de estas rutas va delante del `OPTIONS` de todo el worker.
+//   · en `app.ts`, el preflight de estas rutas va delante del `OPTIONS` de todo el worker.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
@@ -14,7 +14,7 @@ import { Hono } from "hono";
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import indice from "../src/index.ts?raw";
+import indice from "../src/app.ts?raw";
 
 let dbDePruebas: any = null;
 
@@ -149,7 +149,7 @@ describe("el CORS de las rutas públicas de la reserva web", () => {
 		});
 	});
 
-	it("en index.ts el preflight de las rutas públicas va delante del de todo el worker", () => {
+	it("en app.ts el preflight de las rutas públicas va delante del de todo el worker", () => {
 		const suyo = indice.indexOf(`app.options("/v1/publico/reservas/:clave/*", preflightPublico)`);
 		const general = indice.indexOf(`app.options("*"`);
 		expect(suyo, "falta el preflight de las rutas públicas").toBeGreaterThan(-1);

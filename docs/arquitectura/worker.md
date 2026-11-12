@@ -52,16 +52,27 @@ el mismo `wrangler.json` y los tipos se regeneran con `pnpm cf-typegen`.
 
 ### La base del negocio, dentro de su `TenantHub`
 
-- **Las escrituras** van por el motor del DO (RPC `aplicar`, o el WebSocket de la Main). **Las
-  lecturas** de las rutas, por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de
-  libsql cuyas consultas viajan por RPC (`consultar`) al DO, que las ejecuta en su SQLite
-  (`tenantHub.sqlite.ts`). Un lote de lectura da una foto coherente: el SQL del DO es síncrono y nada
-  se intercala.
+- **Las rutas de negocio se ejecutan dentro del DO** (`lib/enElHub.ts`): un viaje por petición, no
+  uno por consulta. El Worker resuelve lo que depende de la base central (`tenantAuth`: token, firma
+  del dispositivo y licencia) y, si el router lleva `alHub` detrás de `tenantAuth`, le pasa la petición
+  entera al `TenantHub` del negocio por RPC (`ejecutarRuta`), con la identidad como argumento y nunca
+  en una cabecera. El DO ejecuta la misma `app` (`app.ts`); dentro, `tenantAuth` se fía de esa
+  identidad, y los demás middlewares del router (vetos de rol, validación) corren allí una vez. Un
+  router nuevo que lea o escriba la base del negocio lleva `alHub`; uno que sólo toque la central, R2
+  o el correo, no. `EJECUTAR_EN_EL_HUB = "0"` lo apaga (para medir).
+- **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
+  por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
+  lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote
+  de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
+- Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
+  vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
 - Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
 - **Jurisdicción `eu`** (`JURISDICCION_DO` en `wrangler.json`): los DO del negocio (`TenantHub` y
   `AgendaWeb`) sólo nacen y guardan datos en la UE (`lib/hub.ts::espacioDelHub`). Cloudflare no deja
   elegir país. El mismo nombre da otro objeto en otra jurisdicción: cambiarla es empezar de cero. En
-  local va vacía, porque workerd no implementa jurisdicciones.
+  local va vacía, porque workerd no implementa jurisdicciones. Dentro de `eu`, el DO nace en un centro
+  de la UE que no se elige y la pista de región (`UBICACION_DO`) no se respeta: lo mide
+  `/v1/admin/diagnostico/latencias`, que crea objetos de usar y tirar en cada ubicación.
 - **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
   `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, 8 MB por fila y 10 GB por
   objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
@@ -165,12 +176,13 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 
 ## Sincronización y firmas
 
-El binding `TenantHub` está tipado y llama por RPC a `aplicar`, `revocarDispositivo` y
-`avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los helpers y credenciales
-permanecen en un motor interno que no pertenece al prototipo RPC. No se publican rutas
-`/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con otro Worker
-ni convertirse en un proxy público. La autenticación del cliente y los gates de cada ruta siguen
-ejecutándose antes de llamar al DO. Sentry instrumenta también las llamadas RPC, con tracing de
+El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `consultar`,
+`revocarDispositivo` y `avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
+helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
+publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con
+otro Worker ni convertirse en un proxy público. La autenticación del cliente (token, firma y
+licencia) se ejecuta en el Worker antes de llamar al DO; los gates de cada ruta, dentro, antes de leer
+el cuerpo, como siempre. Sentry instrumenta también las llamadas RPC, con tracing de
 rendimiento desactivado. Los errores de negocio cruzan como un resultado tipado y los inesperados
 como excepciones. WebSockets, attachments, alarmas y almacenamiento conservan su funcionamiento.
 
