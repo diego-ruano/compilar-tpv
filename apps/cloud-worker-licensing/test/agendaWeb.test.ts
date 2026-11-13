@@ -93,7 +93,7 @@ function sinDatosPersonales(respuesta: unknown) {
 describe("la agenda de reservas web", () => {
 	it("sólo expone por RPC lo que llaman las rutas, y la alarma (RI-45)", () => {
 		expect(Object.getOwnPropertyNames(AgendaWeb.prototype).sort()).toEqual(
-			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "pendientes", "recogidas", "enlaceParaUnCambio", "alarm"].sort(),
+			["constructor", "disponibles", "reservar", "consultarEnlace", "cancelar", "pendientes", "recogidas", "enlaceParaUnCambio", "borrarTodo", "alarm"].sort(),
 		);
 	});
 

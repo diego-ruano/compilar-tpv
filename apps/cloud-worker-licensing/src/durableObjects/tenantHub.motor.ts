@@ -344,10 +344,28 @@ export class MotorTenantHub {
 		return this.conLaBase(tenantId, (storage) => [anotarEnBruto(storage, sentencia)]);
 	}
 
-	/** Retirar un negocio de pruebas: su base entera, con la cola y lo demás del DO. */
+	/**
+	 * Retirar un negocio de pruebas: todo lo que este objeto guarda de él.
+	 *
+	 * - **Las sesiones vivas se cierran primero**, por `cerrar` como todo cierre que inicia el DO: quedan
+	 *   fuera y su salida se contabiliza con la tabla de quién es la Main todavía delante. Una Main o
+	 *   una Handy que siguiera conectada no puede seguir escribiendo en una base recién vaciada.
+	 * - **La alarma** de la cola se quita aparte: sin cola que drenar no tiene a qué despertar al objeto.
+	 * - **`deleteAll`** se lleva la base del negocio, la cola y la tabla de la Main.
+	 *
+	 * Después el objeto no vuelve a crear nada por su cuenta: el cierre de esos sockets, que llega
+	 * más tarde, es de sesiones que ya están fuera (`cerrar`, `webSocketClose`).
+	 */
 	async borrarTodo(): Promise<void> {
+		for (const ws of this.state.getWebSockets()) {
+			this.cerrar(ws, this.att(ws), 4001, "negocio_retirado");
+		}
+		await this.state.storage.deleteAlarm();
 		await this.state.storage.deleteAll();
 		this.baseLocal = null;
+		this.lastSeenPushedAtMs.clear();
+		this.lastPurgeAtMs = 0;
+		this.avisados.clear();
 	}
 
 	private async touchLastSeen(tenantId: string, deviceId: string, force = false) {
@@ -658,11 +676,13 @@ export class MotorTenantHub {
 	 * cierre: es el que dice si era la Main.
 	 */
 	private cerrar(ws: WebSocket, a: WsAttachment | null, code: number, motivo: string): void {
-		if (a) this.setAtt(ws, { ...a, authed: false, recovering: false, fuera: true });
+		// Una sesión que ya está fuera ya tiene su salida contabilizada: sólo queda cerrar el socket.
+		const contabilizar = a && !a.fuera ? a : null;
+		if (contabilizar) this.setAtt(ws, { ...contabilizar, authed: false, recovering: false, fuera: true });
 		try {
 			ws.close(code, motivo);
 		} catch { }
-		if (a) this.sessionGone(ws, a);
+		if (contabilizar) this.sessionGone(ws, contabilizar);
 	}
 
 	private async applyInternalCommandIdempotent(params: {
@@ -1638,7 +1658,10 @@ export class MotorTenantHub {
 		_wasClean: boolean,
 	): Promise<void> {
 		const a = this.att(ws);
-		if (!a) return;
+		// Si la cerró el DO (`cerrar`), ya está fuera y su salida ya se contabilizó entonces. Esto es
+		// sólo el cierre que llega después, quizá con el negocio ya retirado (`borrarTodo`): no se
+		// vuelve a contabilizar, que sería además volver a crear tablas en un objeto vacío.
+		if (!a || a.fuera) return;
 		// AUD-02: como en `cerrar`, la sesión queda fuera antes de nada: lo que tuviera a medias (un
 		// saludo esperando a la base central, una escritura esperando turno) no sigue.
 		this.setAtt(ws, { ...a, authed: false, recovering: false, fuera: true });

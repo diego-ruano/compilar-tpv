@@ -50,7 +50,7 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.estaAprovisionado();
 	}
 
-	/** Retirar un negocio de pruebas: su base entera. */
+	/** Retirar un negocio de pruebas: cierra sus sesiones, quita la alarma y borra todo lo guardado. */
 	borrarTodo(): Promise<void> {
 		return this.motor.borrarTodo();
 	}

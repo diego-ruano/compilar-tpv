@@ -254,11 +254,17 @@ export class MotorAgendaWeb {
 	/** Cómo se manda un correo al cliente. Los tests lo cambian por uno que apunta. */
 	enviarCorreo: EnviarCorreo;
 
+	/**
+	 * Si las tablas de la agenda están creadas y al día. Se preparan al construir el objeto, y otra
+	 * vez, cuando hagan falta, después de vaciarlo (`borrarTodo`).
+	 */
+	private almacenListo = false;
+
 	constructor(
 		private readonly ctx: DurableObjectState,
 		private readonly env: Env,
 	) {
-		prepararAlmacen(ctx.storage.sql);
+		void this.sql;
 		this.leer = (tenantId, fn) => lecturaConHora(env, tenantId, horaDelNegocio, fn);
 		this.enviarCorreo = (correo) => enviarCorreoReservaWeb(env, correo);
 	}
@@ -283,7 +289,22 @@ export class MotorAgendaWeb {
 	}
 
 	private get sql(): SqlStorage {
+		if (!this.almacenListo) {
+			prepararAlmacen(this.ctx.storage.sql);
+			this.almacenListo = true;
+		}
 		return this.ctx.storage.sql;
+	}
+
+	/**
+	 * Retirar un negocio de pruebas: lo que esperaba a la Main (con los datos de quien reservó), los
+	 * enlaces, los intentos y la alarma. El objeto queda sin nada guardado; si después le llega algo,
+	 * vuelve a crear sus tablas vacías.
+	 */
+	async borrarTodo(): Promise<void> {
+		await this.ctx.storage.deleteAlarm();
+		await this.ctx.storage.deleteAll();
+		this.almacenListo = false;
 	}
 
 	private async leerDia(tenantId: string, dia: string): Promise<DiaLeido> {

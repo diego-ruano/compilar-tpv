@@ -248,8 +248,9 @@ sus sesiones en el acto, sin condición, porque no se deshace con otro aviso.
 
 **Todo cierre deja la sesión fuera**: los que inicia el DO (`cerrar`: echarla, la baja, la sesión
 anterior de un dispositivo que reconecta con 4000, el saludo que falla, un error del socket) y los que le llegan (`webSocketClose`). Le quita la autenticación y la marca `fuera`
-en su attachment, y contabiliza su salida (`sessionGone`). Sin autenticar no se le atiende ningún
-mensaje ni se le difunde nada, y no cuenta como Main, aunque el cliente no conteste al cierre. Lo que
+en su attachment, y contabiliza su salida (`sessionGone`), una vez: el cierre que llega después de
+uno que inició el DO es de una sesión que ya está fuera, y no se vuelve a contabilizar. Sin autenticar
+no se le atiende ningún mensaje ni se le difunde nada, y no cuenta como Main, aunque el cliente no conteste al cierre. Lo que
 estuviera esperando tampoco sigue: cada rama mira, después de su última espera, que el socket siga
 abierto y la sesión no esté fuera (`sesionAbierta`); una escritura lleva la sesión que la mandó y se
 vuelve a mirar dentro del turno, antes de aplicarla; y **un saludo cuyo socket se cierra,
@@ -546,7 +547,8 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la presencia vive en
    `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde `cerrar`, por donde pasa todo
    cierre que inicia el DO: la baja, la sesión que ya no es la Main, la anterior de un dispositivo que
-   reconecta, el saludo que falla y `webSocketError`. Los dos dejan la sesión fuera antes de nada.
+   reconecta, el saludo que falla, `webSocketError` y retirar el negocio (`borrarTodo`). Los dos
+   dejan la sesión fuera antes de nada, y a una que ya está fuera no le vuelven a contar la salida.
    Todo cierre nuevo iniciado por el DO va por `cerrar`.
 
 `instrumentDurableObjectWithSentry` envuelve los tres handlers del WebSocket.

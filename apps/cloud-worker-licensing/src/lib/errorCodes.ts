@@ -442,6 +442,8 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"reversal_failed",
 	"signature_timestamp_out_of_range",
 	"tabla_no_paginable",
+	// Retirar un negocio de pruebas: un id que no nombra la carpeta de imágenes de un negocio.
+	"tenant_id_invalido",
 	"ts_out_of_range",
 	"unknown_type",
 	"unsupported_sql_arg",

@@ -65,6 +65,11 @@ export class AgendaWeb extends DurableObject<Env> {
 		return this.motor.enlaceParaUnCambio(p);
 	}
 
+	/** Retirar un negocio de pruebas: todo lo que la agenda guarda de él, y su alarma. */
+	borrarTodo(): Promise<void> {
+		return this.motor.borrarTodo();
+	}
+
 	alarm(): Promise<void> {
 		return this.motor.alarm();
 	}

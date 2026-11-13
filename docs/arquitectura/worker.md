@@ -131,7 +131,17 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `test/sondaSqliteDo.test.ts`; lo que aún no lo cumple está en
   [DO-01](../pendientes.md#do-01--listas-de-ids-con-un-parámetro-por-elemento).
 - **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos.
-- **Retirar un negocio** es borrar todo su DO (`borrarTodo`, `/v1/admin/pruebas/retirar`).
+- **Retirar un negocio** (`/v1/admin/pruebas/retirar`, sólo los de pruebas:
+  [licencias.md](licencias.md#anular-desde-la-administración)) es borrar todo lo que guarda en la nube:
+  - su `TenantHub` (`borrarTodo`): cierra las sesiones que sigan vivas, quita la alarma de la cola y
+    borra todo lo guardado. El cierre de esos sockets llega después y no vuelve a crear nada: una
+    sesión que cerró el DO ya está fuera y su salida ya se contabilizó;
+  - su `AgendaWeb` (`borrarTodo`): lo que esperaba a la Main, con los datos de quien reservó, y su
+    alarma;
+  - sus imágenes: la carpeta del negocio en el bucket (`prefijoDelNegocio`), que acaba en `/` y por
+    eso no es el principio de la de otro. La copia que el edge tenga en caché caduca sola.
+
+  Lo cubre `test/retirarUnNegocio.test.ts`.
 
 ## Cómo se escribe una ruta
 
