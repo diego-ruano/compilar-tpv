@@ -832,15 +832,7 @@ export class MotorTenantHub {
 					// resto de dispositivos converja. La Main secundaria lo descarta por Op_Id.
 					if (recovered.statements.length) {
 						this.broadcastChange(
-							{
-								command,
-								opId: op,
-								deviceId: deviceId || null,
-								payloadJson: cloudPayloadJson,
-								result: recovered.result,
-								seq: recovered.seq,
-								statements: recovered.statements,
-							},
+							{ opId: op, seq: recovered.seq, statements: recovered.statements },
 							deviceId || undefined,
 						);
 					}
@@ -863,21 +855,10 @@ export class MotorTenantHub {
 				});
 			}
 
-			// Tras confirmar, propagamos el cambio (payload + resultado) al resto de dispositivos
-			// autenticados. El originador queda excluido. La Main aplica el payload directo a su
-			// SQLite local (no hay refetch). AUD-18: antes que nada más en el turno.
-			this.broadcastChange(
-				{
-					command,
-					opId: op,
-					deviceId: deviceId || null,
-					payloadJson: cloudPayloadJson,
-					result,
-					seq,
-					statements: built.replicated,
-				},
-				deviceId || undefined,
-			);
+			// Tras confirmar, propagamos el cambio (sus sentencias ya resueltas y su `Seq`) al resto de
+			// dispositivos autenticados. El originador queda excluido. La Main las aplica tal cual a
+			// su SQLite local (no hay refetch). AUD-18: antes que nada más en el turno.
+			this.broadcastChange({ opId: op, seq, statements: built.replicated }, deviceId || undefined);
 
 			// SYNC-10: el gate guardó un Result_Json best-effort (solo literales; lo derivado de la
 			// DB quedó null). Si el resultado REAL difiere (incluye campos derivados de la DB), lo
@@ -1095,15 +1076,7 @@ export class MotorTenantHub {
 			}
 			aplicadas.push(t.op.opId);
 			this.broadcastChange(
-				{
-					command: t.op.commandName,
-					opId: t.op.opId,
-					deviceId: t.op.deviceId || null,
-					payloadJson: t.op.cloudPayloadJson,
-					result,
-					seq,
-					statements: t.built.replicated,
-				},
+				{ opId: t.op.opId, seq, statements: t.built.replicated },
 				t.op.deviceId || undefined,
 			);
 		}
@@ -1130,15 +1103,7 @@ export class MotorTenantHub {
 			if (!op || !(seq > 0)) continue;
 			const statements = safeJsonParse(String(fila.statements_json ?? "[]"));
 			this.broadcastChange(
-				{
-					command: op.commandName,
-					opId: op.opId,
-					deviceId: op.deviceId || null,
-					payloadJson: op.cloudPayloadJson,
-					result: null,
-					seq,
-					statements: Array.isArray(statements) ? statements : [],
-				},
+				{ opId: op.opId, seq, statements: Array.isArray(statements) ? statements : [] },
 				op.deviceId || undefined,
 			);
 		}
@@ -1322,8 +1287,8 @@ export class MotorTenantHub {
 
 	/**
 	 * A TODOS los sockets, también a los que aún no han saludado. Sólo para lo que no lleva datos
-	 * del negocio: la presencia y si hay Main (`main_online`, `main_offline`). Lo demás, por
-	 * `broadcastAuthed` o `broadcastRol`.
+	 * del negocio: si hay Main (`main_online`, `main_offline`). Lo demás, por `broadcastAuthed` o
+	 * `broadcastRol`.
 	 */
 	private broadcast(obj: any, exceptDeviceId?: string) {
 		const msg = JSON.stringify(obj);
@@ -1430,38 +1395,24 @@ export class MotorTenantHub {
 		return n;
 	}
 
-	// Propaga un cambio aplicado (payload + resultado) a los dispositivos
-	// autenticados, excluyendo al originador. Reemplaza la antigua señal
-	// `cloud_changes_available` (modelo de refetch) por el envío directo del JSON.
+	/**
+	 * Propaga un cambio aplicado a los dispositivos autenticados, excluyendo al originador.
+	 *
+	 * El mensaje lleva lo que se lee, y nada más: la Main, la operación (`opId`, su anti-eco), su
+	 * `seq` (su checkpoint) y las sentencias ya resueltas, que aplica a su SQLite; la Handy, sólo las
+	 * sentencias, de las que saca qué pantallas refrescar (`replicacion.rs::cambio`,
+	 * `presencia_handy.rs`). El comando, el dispositivo que lo mandó, su payload y su resultado
+	 * viajaban en cada cambio a cada dispositivo sin que nadie los leyera.
+	 */
 	private broadcastChange(
-		params: {
-			command: string;
-			opId: string;
-			deviceId: string | null;
-			payloadJson: string;
-			result: any;
-			seq: number;
-			statements: ResolvedStmt[];
-		},
+		params: { opId: string; seq: number; statements: ResolvedStmt[] },
 		exceptDeviceId?: string,
 	) {
 		// AUD-02: se entrega con lo que dice ahora la tabla (`broadcastAuthed`): de los `tpv`, sólo a la
 		// Main. La comprobación por actividad ya se ha hecho, si tocaba, en el mismo turno del log y
 		// antes de enviar lo que se difunde (`applyInternalCommandIdempotent`, `applyBatchIdempotent`).
 		this.broadcastAuthed(
-			{
-				type: "change",
-				command: params.command,
-				opId: params.opId,
-				deviceId: params.deviceId,
-				payload: safeJsonParse(params.payloadJson),
-				result: params.result ?? null,
-				// Opción 3: sentencias ya resueltas + cursor, para que la Main las aplique
-				// directamente a su SQLite local (y sepa su checkpoint).
-				seq: params.seq,
-				statements: params.statements,
-				ts: nowMs(),
-			},
+			{ type: "change", opId: params.opId, seq: params.seq, statements: params.statements },
 			exceptDeviceId,
 		);
 	}
@@ -1557,7 +1508,6 @@ export class MotorTenantHub {
 			att: (ws) => this.att(ws),
 			setAtt: (ws, att) => this.setAtt(ws, att),
 			send: (ws, obj) => this.send(ws, obj),
-			broadcast: (obj, except) => this.broadcast(obj, except),
 			broadcastRol: (rol, obj) => this.broadcastRol(rol, obj),
 			liveSocketsFor: (deviceId, except) => this.liveSocketsFor(deviceId, except),
 			cerrar: (ws, a, code, motivo) => this.cerrar(ws, a, code, motivo),
@@ -1616,30 +1566,28 @@ export class MotorTenantHub {
 			olvidarApartadas: (opIds) => this.olvidarApartadas(opIds),
 			applyInternalCommandIdempotent: (params) =>
 				this.applyInternalCommandIdempotent(params),
-			withTenantDbRetry: (tenantId, run) => this.withTenantDbRetry(tenantId, run),
 		};
 	}
 
 
 	/**
-	 * Contabilidad de una sesión que se va: presencia + freeze. Se invoca desde `webSocketClose`
+	 * Contabilidad de una sesión que se va: el freeze de las Handy si era la Main. Se invoca desde `webSocketClose`
 	 * (cierre del cliente / caída de red) y TAMBIÉN de forma explícita en los cierres que inicia el
 	 * servidor, todos por `cerrar`, porque la documentación de Cloudflare no garantiza que
 	 * `webSocketClose` se dispare cuando el cierre lo provoca el propio DO. Es **idempotente y
 	 * auto-inhibida**: si queda otro socket vivo del mismo dispositivo no hace nada, y repetirla solo
-	 * reemite señales que el cliente ya trata como idempotentes.
+	 * reemite una señal que el cliente ya trata como idempotente.
 	 */
 	private sessionGone(ws: WebSocket, a: WsAttachment): void {
 		const { deviceId } = a;
 
-		// Si ya nos reemplazó una reconexión bajo el mismo deviceId, no dispares presencia ni
-		// main_offline en falso: la sesión nueva sigue viva.
+		// Si ya nos reemplazó una reconexión bajo el mismo deviceId, no dispares `main_offline` en
+		// falso: la sesión nueva sigue viva.
 		if (this.liveSocketsFor(deviceId, ws).length > 0) return;
 
 		const wasMain = a.role === "tpv";
 
 		this.lastSeenPushedAtMs.delete(deviceId);
-		this.broadcast({ type: "presence", action: "leave", deviceId }, deviceId);
 
 		// Si se va la Main y no queda ninguna conectada, congelamos todo: las
 		// Handy reciben main_offline y deben bloquear su UI hasta que vuelva.

@@ -336,7 +336,6 @@ const enLaCola = (sql: any) =>
 
 const recoveryReady = JSON.stringify({ type: "recovery_ready" });
 
-const evento = (name: string, payload: unknown = null) => JSON.stringify({ type: "event", name, payload });
 
 function apartada(sql: any, opId: string) {
 	sql.exec(
@@ -583,12 +582,10 @@ describe("AUD-02 · el traslado sin aviso: la siguiente actividad echa a la Main
 				// Nada que la Main nueva vaya a ejecutar.
 				expect(cambios(nueva)).toEqual([]);
 
-				// La tabla ya dice quién es; la sesión queda fuera y sin autenticar, y la salida se
-				// ha contabilizado (`sessionGone`): la Main nueva ve irse al equipo anterior, y no se
-				// da el negocio por sin Main.
+				// La tabla ya dice quién es; la sesión queda fuera y sin autenticar, y su salida se ha
+				// contabilizado (`sessionGone`) sin dar el negocio por sin Main.
 				expect(mainDeLaTabla(hub)).toBe("main-nueva");
 				expect(att(vieja)).toMatchObject({ authed: false, fuera: true });
-				expect(nueva.recibidos).toContainEqual({ type: "presence", action: "leave", deviceId: "main-vieja" });
 				expect(nueva.recibidos.filter((m) => m.type === "main_offline")).toEqual([]);
 				expect(hub.isMainConnected()).toBe(true);
 				expect(eventos).toContainEqual({ name: "main_expulsada", device_id: "main-vieja", motivo: "device_replaced" });
@@ -794,41 +791,7 @@ describe("AUD-02 · la Main anterior que no escribe también deja de serlo", () 
 		});
 	});
 
-	it("el evento de una Handy pregunta antes, y no le llega", async () => {
-		await enElHub("aud02-pasiva-event", async (hub: any) => {
-			const { central } = trasladoSinAviso(hub, "main-vieja", "main-nueva");
-			const vieja = conectar(hub, "main-vieja");
-			const handy = conectar(hub, "handy-1", "handy");
-			const handy2 = conectar(hub, "handy-2", "handy");
-			try {
-				await hub.webSocketMessage(handy.servidor, evento("mesa.abierta", { mesa: "m-1" }));
-				expect(await esperar(handy2, (m) => m.type === "event")).toMatchObject({ from: "handy-1", name: "mesa.abierta" });
-				expect(await esperarCierre(vieja)).toEqual({ code: 4001, reason: "device_replaced" });
-				expect(vieja.recibidos.filter((m) => m.type === "event")).toEqual([]);
-				expect(central.lecturas).toBe(1);
-			} finally {
-				await cerrar(hub, vieja, handy, handy2);
-			}
-		});
-	});
-
-	it("su propio evento no se difunde", async () => {
-		await enElHub("aud02-pasiva-event-suyo", async (hub: any) => {
-			trasladoSinAviso(hub, "main-vieja", "main-nueva");
-			const vieja = conectar(hub, "main-vieja");
-			const handy = conectar(hub, "handy-1", "handy");
-			try {
-				await hub.webSocketMessage(vieja.servidor, evento("mesa.abierta", { mesa: "falsa" }));
-				expect(await esperarCierre(vieja)).toEqual({ code: 4001, reason: "device_replaced" });
-				await unMomento();
-				expect(handy.recibidos.filter((m) => m.type === "event")).toEqual([]);
-			} finally {
-				await cerrar(hub, vieja, handy);
-			}
-		});
-	});
-
-	it("un socket que no ha saludado no recibe eventos ni cambios, aunque sea de la Main", async () => {
+	it("un socket que no ha saludado no recibe los cambios, aunque sea de la Main", async () => {
 		// Abrió el socket con un ticket de cuando era la Main y se quedó sin saludar.
 		await enElHub("aud02-sin-saludar", async (hub: any) => {
 			prepararHub(hub, "main-nueva");
@@ -838,14 +801,12 @@ describe("AUD-02 · la Main anterior que no escribe también deja de serlo", () 
 			const nueva = conectar(hub, "main-nueva");
 			const handy = conectar(hub, "handy-1", "handy");
 			try {
-				await hub.webSocketMessage(handy.servidor, evento("mesa.abierta", { mesa: "m-1" }));
-				expect(await esperar(nueva, (m) => m.type === "event")).toBeTruthy();
 				expect(await escribeLaHandy(hub, "op-handy", "z-handy")).toMatchObject({ ok: true });
 				expect(await esperar(nueva, (m) => m.type === "change" && m.opId === "op-handy")).toBeTruthy();
 				await unMomento();
 
 				for (const c of [callado, propio]) {
-					expect(c.recibidos.filter((m) => m.type === "event" || m.type === "change")).toEqual([]);
+					expect(c.recibidos.filter((m) => m.type === "change")).toEqual([]);
 				}
 			} finally {
 				await cerrar(hub, callado, propio, nueva, handy);
@@ -894,12 +855,8 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 				expect(await esperar(main, (m) => m.type === "cola_apartada_ack_ok")).toMatchObject({ n: 1 });
 				await hub.webSocketMessage(main.servidor, recoveryReady);
 				expect(await esperar(main, (m) => m.type === "recovery_ready_ack")).toBeTruthy();
-				await hub.webSocketMessage(main.servidor, evento("aviso.cualquiera"));
-				expect(await esperar(handy, (m) => m.type === "event")).toMatchObject({ from: "main-nueva" });
 				// Lo de las Handy también depende de ella, y tampoco cuesta otra lectura.
 				expect(await escribeLaHandy(hub, "op-handy", "z-handy")).toMatchObject({ ok: true });
-				await hub.webSocketMessage(handy.servidor, evento("mesa.abierta"));
-				expect(await esperar(main, (m) => m.type === "event" && m.from === "handy-1")).toBeTruthy();
 				await hub.webSocketMessage(main.servidor, bulkApply("op-b1", [altaDeZona("z-bulk")]));
 				expect(await esperar(main, (m) => m.type === "bulk_ack")).toMatchObject({ ok: true, opIds: ["op-b1"] });
 				await hub.state.storage.deleteAlarm();
@@ -1006,9 +963,8 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 			try {
 				central.retenerLicencias = true;
 				const mensajes = Array.from({ length: 20 }, (_, i) => {
-					if (i % 4 === 1) return acuse(`ap-${i}`);
-					if (i % 4 === 2) return evento("aviso.cualquiera", { i });
-					if (i % 4 === 3) return recoveryReady;
+					if (i % 3 === 1) return acuse(`ap-${i}`);
+					if (i % 3 === 2) return recoveryReady;
 					return apply(`op-${i}`, [altaDeZona(`z-${i}`)]);
 				});
 				const enviados = Promise.all(mensajes.map((m) => hub.webSocketMessage(main.servidor, m)));
@@ -1019,14 +975,13 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 				central.retenerLicencias = false;
 				soltarTodas(central);
 				await enviados;
-				expect(await esperarA(() => acksOk(main, "apply_ack").length === 5)).toBe(true);
-				expect(await esperarA(() => main.recibidos.filter((m) => m.type === "cola_apartada_ack_ok").length === 5)).toBe(true);
-				expect(await esperarA(() => handy.recibidos.filter((m) => m.type === "event").length === 5)).toBe(true);
-				expect(await esperarA(() => main.recibidos.filter((m) => m.type === "recovery_ready_ack").length === 5)).toBe(true);
+				expect(await esperarA(() => acksOk(main, "apply_ack").length === 7)).toBe(true);
+				expect(await esperarA(() => main.recibidos.filter((m) => m.type === "cola_apartada_ack_ok").length === 7)).toBe(true);
+				expect(await esperarA(() => main.recibidos.filter((m) => m.type === "recovery_ready_ack").length === 6)).toBe(true);
 
 				expect(central.lecturas).toBe(1);
 				expect(main.cierre).toBeNull();
-				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(5);
+				expect(n(sql, "SELECT COUNT(*) AS n FROM Zonas;")).toBe(7);
 			} finally {
 				soltarTodas(central);
 				await cerrar(hub, main, handy);
@@ -1126,7 +1081,8 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "bulk_apply", ops: {} }));
 				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "cola_apartada_ack" }));
 				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "cola_apartada_ack", opIds: "ap-1" }));
-				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "event", name: "" }));
+				// Un mensaje de los que ya no existen: un tipo desconocido más.
+				await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "event", name: "mesa.abierta" }));
 				// Soltar a las Handy no pregunta nada: decide la tabla.
 				await hub.webSocketMessage(main.servidor, recoveryReady);
 				// Una Handy que lo intenta se rechaza por su rol, sin preguntar por ninguna licencia.
@@ -1142,7 +1098,8 @@ describe("AUD-02 · la Main de la licencia no nota la comprobación", () => {
 					{ ok: true, opIds: [] },
 				]);
 				expect(main.recibidos.filter((m) => m.type === "cola_apartada_ack_ok")).toMatchObject([{ n: 0 }, { n: 0 }]);
-				expect(main.recibidos).toContainEqual({ type: "error", error: "forbidden_event", name: "" });
+				expect(main.recibidos.filter((m) => m.type === "error" && m.error === "unknown_type")).toHaveLength(2);
+				expect(handy.recibidos.filter((m) => m.type === "event")).toEqual([]);
 				expect(main.recibidos.filter((m) => m.type === "recovery_ready_ack")).toHaveLength(1);
 				expect(handy.recibidos.filter((m) => m.type === "apply_ack")).toMatchObject([{ ok: false, error: "forbidden_not_tpv" }]);
 				expect(handy.recibidos.filter((m) => m.type === "bulk_ack")).toMatchObject([{ ok: false, error: "forbidden_not_tpv" }]);
@@ -1263,18 +1220,6 @@ describe("AUD-02 · una expulsión entre la última espera y lo que se iba a hac
 			} finally {
 				soltarTodas(r.central);
 				await cerrar(hub, r.main, r.handy);
-			}
-		});
-	});
-
-	it("`event`: no se difunde", async () => {
-		await enElHub("aud02-espera-event", async (hub: any) => {
-			const { main, handy, central } = await conLaLecturaRetenida(hub, evento("mesa.abierta", { mesa: "m-1" }));
-			try {
-				expect(handy.recibidos.filter((m) => m.type === "event")).toEqual([]);
-			} finally {
-				soltarTodas(central);
-				await cerrar(hub, main, handy);
 			}
 		});
 	});
@@ -1622,10 +1567,7 @@ describe("AUD-02 · el saludo", () => {
 					const anuncios = handy.recibidos
 						.slice(hasta)
 						.filter(
-							(m) =>
-								m.type === "main_online" ||
-								m.type === "main_volcando" ||
-								(m.type === "presence" && m.action === "auth"),
+							(m) => m.type === "main_online" || m.type === "main_volcando",
 						);
 					expect(anuncios).toEqual([]);
 					expect(att(main).authed).toBe(false);
@@ -1839,19 +1781,14 @@ describe("AUD-02 · el saludo", () => {
 				expect(att(vieja)).toMatchObject({ authed: false, fuera: true });
 				expect(vieja.recibidos.filter((m) => m.type === "hello_ok" || m.type === "main_status")).toEqual([]);
 				expect(vieja.cierre).toEqual({ code: 4001, reason: "revoked" });
-				// La Main nueva sigue dentro, y nadie ha oído que la anterior haya vuelto. Que se ha ido
-				// puede oírse otra vez: su cierre también llega por `webSocketClose`, cuando llegue.
+				// La Main nueva sigue dentro, y nadie ha oído que la anterior haya vuelto.
 				expect(att(nueva).authed).toBe(true);
 				expect(nueva.cierre).toBeNull();
 				expect(hub.isMainConnected()).toBe(true);
 				const anuncios = (c: Conexion, desde: number) =>
 					c.recibidos
 						.slice(desde)
-						.filter(
-							(m) =>
-								m.deviceId === "main-vieja" &&
-								(m.type === "main_online" || (m.type === "presence" && m.action !== "leave")),
-						);
+						.filter((m) => m.deviceId === "main-vieja" && m.type === "main_online");
 				expect(anuncios(nueva, hasta.nueva)).toEqual([]);
 				expect(anuncios(handy, hasta.handy)).toEqual([]);
 			} finally {

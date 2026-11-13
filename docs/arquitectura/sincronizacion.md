@@ -197,8 +197,8 @@ no cierra el socket).
 **Quién es la Main lo dice una tabla del propio DO** (`_Main_Vigente`, `tenantHub.main.ts`), y lo
 que depende de ello la mira sin esperar a nadie (`esLaMain`). Sólo la sesión `tpv` autenticada, no
 echada y del dispositivo que nombra la tabla escribe (`apply`), encola (`bulk_apply`), acusa las
-apartadas, suelta a las Handy (`recovery_ready`) y manda eventos; recibe lo del negocio (cambios,
-eventos, `pair_request`, `reservas_web`), y cuenta como Main para las Handy (`isMainConnected`,
+apartadas y suelta a las Handy (`recovery_ready`); recibe lo del negocio (cambios,
+`pair_request`, `reservas_web`), y cuenta como Main para las Handy (`isMainConnected`,
 `isMainReady`, `isMainRecovering`). Si la tabla dice que no hay Main (la licencia está anulada),
 ninguna lo es. Se mira justo antes de actuar, después de la última espera de cada rama y con el
 attachment releído: entre la pregunta y el acto no cabe nada.
@@ -226,7 +226,7 @@ solo paso, sin esperas (`fijarMain`), y es el único sitio que echa por este mot
     adelantaría. Lo que tarde la escritura después no retiene la fila;
   - una escritura que entra en el turno del log (de una Handy, del drenado de la cola, o la de la
     Main en vivo), dentro del turno y justo antes de aplicarse: lo que va detrás espera su turno;
-  - `cola_apartada_ack` con algo que acusar y `event`, que no dependen del orden de los demás;
+  - `cola_apartada_ack` con algo que acusar, que no depende del orden de los demás;
   - el saludo de una Handy, a la que se le dice si hay Main, y los avisos para la Main, que salen
     después de la respuesta.
 
@@ -278,7 +278,7 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 - **Mientras una lectura está en vuelo, lo que no va detrás de quien la pidió se decide con la tabla
   de antes**: sólo esperan la respuesta quien la pidió y lo que va detrás de él, en la fila de
   entrada o en el turno del log. Lo que va por otro camino (una escritura de la Handy si la lectura
-  la pidió la fila de entrada, un acuse, un evento, un saludo) no espera.
+  la pidió la fila de entrada, un acuse, un saludo) no espera.
 - **Un aviso de cambio de licencia cuya lectura no contesta** no echa a nadie: es como un aviso
   perdido, salvo que la siguiente actividad pregunta sin esperar al minuto.
 - **La numeración ordena las lecturas por cuándo salieron, no por cuándo las atendió la base
@@ -286,8 +286,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   y quedar descartada; lo corrige la lectura siguiente (otro saludo, o la siguiente comprobación).
 - **Lo que el equipo anterior dejó en la cola del DO** antes de salir se aplica: se aceptó cuando era
   la Main.
-- **Lo que no lleva datos del negocio** (la presencia, `main_online`, `main_offline`) va a todos los
-  sockets, también a los que no han saludado.
+- **Lo que no lleva datos del negocio** (`main_online`, `main_offline`) va a todos los sockets,
+  también a los que no han saludado.
 - **Una tabla que no se ha leído nunca** da por Main a cualquier sesión `tpv` autenticada, como antes
   de que existiera. Sólo puede pasar con una sesión que saludó antes (el saludo de un `tpv` siempre
   la lee), y dura hasta la primera comprobación por actividad, que la lee y echa a la que no lo sea.
@@ -384,6 +384,16 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 
 - Al autenticarse, la Main pide `/v1/sync/changes` desde su `Last_Seq` y aplica en orden, guardando
   los `change` en vivo hasta terminar.
+- **Un `change` lleva lo que se lee**: `opId`, `seq` y `statements` (las sentencias ya resueltas). La
+  Main lee los tres (`replicacion.rs::cambio`); la Handy, las sentencias, de las que saca qué
+  refrescar (`presencia_handy.rs`). Ni el comando, ni quién lo mandó, ni su payload, ni su resultado.
+- **Por el socket no hay más mensajes que los del protocolo**: el saludo (`connected`, `challenge`,
+  `helloSigned`, `hello_ok`), lo que sube la Main (`apply`, `bulk_apply`, `recovery_ready`,
+  `cola_apartada_ack` y sus acuses), lo que baja (`change`, `cola_apartada`) y los avisos
+  (`main_status`, `main_online`, `main_offline`, `main_volcando`, `pair_request`, `reservas_web`).
+  Un dispositivo no manda mensajes a los demás, y no se difunde quién entra o sale: lo que hay que
+  saber de los otros es si hay Main. Un tipo que no está en la lista se contesta `unknown_type`.
+  Lo cubre `test/difusionAjustada.test.ts`.
 - **Antes de aplicar una página, la Main comprueba que no le falte nada** (AUD-19). La ruta devuelve
   también el mayor `Seq` que se ha purgado (`purgadoHasta`), leído en la misma lectura que los
   cambios, y si pasa del `since`, lo de en medio ya no está. Es exacto: no depende de que `Seq` sea
@@ -544,8 +554,8 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
    que recordar entre invocaciones va al SQL del DO (como `_Cola_Estado`).
 6. Si cambia el texto del latido en el frontend, hay que cambiar el par del auto-response: casa cadenas
    exactas, y si no coinciden todo funciona pero el DO se despierta en cada ping.
-7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la presencia vive en
-   `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde `cerrar`, por donde pasa todo
+7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la salida de una sesión (si se
+   va la Main, las Handy tienen que saberlo) se contabiliza en `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde `cerrar`, por donde pasa todo
    cierre que inicia el DO: la baja, la sesión que ya no es la Main, la anterior de un dispositivo que
    reconecta, el saludo que falla, `webSocketError` y retirar el negocio (`borrarTodo`). Los dos
    dejan la sesión fuera antes de nada, y a una que ya está fuera no le vuelven a contar la salida.

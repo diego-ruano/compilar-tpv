@@ -394,7 +394,6 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"estado_local_no_admitido",
 	"expired_ticket",
 	"field_dek_no_persistida",
-	"forbidden_event",
 	"fulfillment_failed",
 	"hello_failed",
 	"idempotency_command_mismatch",

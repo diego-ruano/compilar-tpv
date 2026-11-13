@@ -31,24 +31,6 @@ export function roleNormalize(r: any): Role {
 	return "unknown";
 }
 
-export function isEventAllowed(role: Role, name: string): boolean {
-	const n = String(name || "");
-	if (!n) return false;
-
-	if (role === "tpv") return true;
-
-	if (role === "handy") {
-		return (
-			n.startsWith("handy.") ||
-			n.startsWith("mesa.") ||
-			n.startsWith("ticket.") ||
-			n.startsWith("order.")
-		);
-	}
-
-	return false;
-}
-
 export async function loadDeviceFromCentral(
 	dbCentral: Client,
 	tenantId: string,
