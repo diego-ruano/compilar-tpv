@@ -11,6 +11,7 @@ import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { alHub } from "../../lib/enElHub";
 
+import { planAbrirORetomar } from "./abrirORetomar";
 import * as cmd from "./mesas.commands";
 import * as q from "./mesas.queries";
 import * as S from "./mesas.schemas";
@@ -84,12 +85,24 @@ mesasRoutes.post("/comandas", cuerpo(S.abrirComandaSchema), async (c) => {
 	return c.json(row);
 });
 
+// Abrir o retomar la mesa en un viaje: la comanda abierta (creada si no hay ninguna, con el
+// trabajador si le faltaba) y sus líneas. Espejo de `abrir_o_retomar_comanda` en la Main.
+mesasRoutes.post("/comandas/abrir-o-retomar", cuerpo(S.abrirComandaSchema), async (c) => {
+	const datos = c.req.valid("json");
+	const comando = await tenantQuery(c, (db) => planAbrirORetomar(db, datos));
+	if (comando) await apply(c, comando);
+	return c.json(await tenantQuery(c, (db) => q.comandaConLineas(db, datos.id_mesa)));
+});
+
 mesasRoutes.put("/comandas/trabajador-if-null", cuerpo(S.setTrabajadorSchema), async (c) => {
 	const datos = c.req.valid("json");
-	const idTrabajador = await tenantQuery(c, (db) =>
-		q.resolveTrabajadorId(db, datos.id_trabajador_o_usuario),
-	);
-	if (!idTrabajador) return c.json(false);
+	const { idTrabajador, porPoner } = await tenantQuery(c, async (db) => ({
+		idTrabajador: await q.resolveTrabajadorId(db, datos.id_trabajador_o_usuario),
+		porPoner: await q.trabajadorPorPoner(db, datos.id_comanda),
+	}));
+	// Ya tiene trabajador (o líneas, o está cobrada): la sentencia no cambiaría nada y aun así se
+	// replicaría, con su aviso a los demás equipos. No se escribe, como en la Main.
+	if (!idTrabajador || !porPoner) return c.json(false);
 	await apply(c, cmd.setTrabajadorIfNull(datos, idTrabajador));
 	return c.json(true);
 });

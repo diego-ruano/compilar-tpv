@@ -2,7 +2,7 @@ import { commands } from "@tpv/client";
 import { cn } from "../../shared/lib/cn";
 import { useCatalogoServicio } from "../../shared/lib/useCatalogoServicio";
 import { Modal,NotaLineaModal,ProductCard } from "./ComandaElementos";
-import { addDetalle,deleteDetalleById,ensureOpenComanda,fmtReserva,loadTicketForComanda,removeOnePendingDetalle } from "./comanda";
+import { abrirORetomarMesa,addDetalle,deleteDetalleById,ensureOpenComanda,fmtReserva,loadTicketForComanda,removeOnePendingDetalle } from "./comanda";
 import type { Paso,ProductoDisplay,TicketItem } from "./tiposComanda";
 // components/mesasComponents/MesaComandaModal.tsx
 import { useQuery,useQueryClient } from "@tanstack/react-query";
@@ -217,9 +217,9 @@ export default function MesaComandaModal({
         void (async () => {
             try {
                 const reservaActiva = reservaMeta?.estado === "ACTIVA" ? { idReserva: reservaMeta.idReserva } : null;
-                const cId = await ensureOpenComanda(mesaId, operador, reservaActiva);
-                if (cancelado) return;
-                const t = await loadTicketForComanda(cId);
+                // La comanda (abierta ahora si no había) y su ticket, en un paso: en la Handy eran
+                // cuatro viajes seguidos con la mesa en blanco.
+                const { idComanda: cId, ticket: t } = await abrirORetomarMesa(mesaId, reservaActiva);
                 if (cancelado) return;
                 comandaActualRef.current = cId;
                 setIdComanda(cId);

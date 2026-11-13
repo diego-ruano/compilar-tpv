@@ -54,6 +54,7 @@ export const nombresComandos = {
     "set_reserva_estado": "setReservaEstado",
     "get_comanda_abierta_by_mesa": "getComandaAbiertaByMesa",
     "abrir_comanda": "abrirComanda",
+    "mesas_abrir_o_retomar": "mesasAbrirORetomar",
     "comanda_set_trabajador_if_null": "comandaSetTrabajadorIfNull",
     "comanda_set_reserva_if_null": "comandaSetReservaIfNull",
     "get_lineas_comanda": "getLineasComanda",
@@ -282,6 +283,7 @@ type Argumentos = {
     "set_reserva_estado": { args: Parameters<Comandos["setReservaEstado"]>[0] };
     "get_comanda_abierta_by_mesa": { args: Parameters<Comandos["getComandaAbiertaByMesa"]>[0] };
     "abrir_comanda": { args: Parameters<Comandos["abrirComanda"]>[0] };
+    "mesas_abrir_o_retomar": { args: Parameters<Comandos["mesasAbrirORetomar"]>[0] };
     "comanda_set_trabajador_if_null": { args: Parameters<Comandos["comandaSetTrabajadorIfNull"]>[0] };
     "comanda_set_reserva_if_null": { args: Parameters<Comandos["comandaSetReservaIfNull"]>[0] };
     "get_lineas_comanda": { args: Parameters<Comandos["getLineasComanda"]>[0] };

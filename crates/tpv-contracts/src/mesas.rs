@@ -78,6 +78,14 @@ pub struct ComandaRow {
     pub estado: String,
 }
 
+/// La comanda abierta de una mesa con sus líneas: lo que devuelve abrir o retomar la mesa, en un
+/// solo viaje para la Handy (`mesas_abrir_o_retomar`, `/v1/mesas/comandas/abrir-o-retomar`).
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ComandaConLineasOut {
+    pub comanda: ComandaRow,
+    pub lineas: Vec<MesaLineaComandaRow>,
+}
+
 /// Línea de comanda de mesa. (`Mesa`-prefijo para no colisionar con la de venta_rapida.)
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[allow(non_snake_case)]

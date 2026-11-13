@@ -11,7 +11,14 @@ const api = vi.hoisted(() => ({
     productosSearchByNombre: vi.fn(), mesasRemoveOnePendingDetalle: vi.fn(), mesasDeleteDetalle: vi.fn(),
     mesasUpdateDetalleNota: vi.fn(), reservaMarcarActivaAhora: vi.fn(), reservaFinalizar: vi.fn(), mesasLoadMesaMeta: vi.fn(),
     mesasComandaAbierta: vi.fn(), mesasComandaSetReservaIfNull: vi.fn(),
+    // El modal abre la mesa en un paso (`mesasAbrirORetomar`). Aquí sale de los dobles de siempre,
+    // para que cada prueba siga diciendo sólo qué comanda hay abierta y qué líneas tiene.
+    mesasAbrirORetomar: vi.fn(),
 }));
+api.mesasAbrirORetomar.mockImplementation(async () => {
+    const id = await api.mesasEnsureOpenComanda();
+    return { comanda: { id_comanda: id }, lineas: await api.mesasLoadTicket(id) };
+});
 vi.mock("../../src/features/mesas/mesasApi", () => api);
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (comando: string) => {
     if (comando === "list_categorias_vendibles") return api.productosListCategoriasVendibles();
@@ -40,6 +47,12 @@ async function abrir() {
     fireEvent.click(await screen.findByRole("button", { name: "Bebidas" }));
     await screen.findByText("Café");
 }
+
+it("abrir la mesa pide la comanda y su ticket en un solo paso", async () => {
+    await abrir();
+    expect(api.mesasAbrirORetomar).toHaveBeenCalledTimes(1);
+    expect(api.mesasAbrirORetomar).toHaveBeenCalledWith({ idMesa: "mesa", idReserva: null });
+});
 
 it("no pinta líneas sin confirmar y conserva dos adiciones rápidas en orden", async () => {
     let responder!: (filas: ReturnType<typeof fila>[]) => void;

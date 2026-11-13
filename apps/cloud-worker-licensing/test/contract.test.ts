@@ -82,6 +82,7 @@ import {
 	setTrabajadorIfNull,
 	updateDetalleNota,
 } from "../src/domains/mesas/mesas.commands";
+import { planAbrirORetomar } from "../src/domains/mesas/abrirORetomar";
 import { cobrarDetallesPlan, comandaCobrada, datosDeLinea } from "../src/domains/mesas/mesas.queries";
 import {
 	eliminarProveedor,
@@ -226,6 +227,12 @@ import casoMesaAbrir from "../../../tests/contract/casos/mesas/abrir_comanda.jso
 import goldenMesaAbrir from "../../../tests/contract/golden/mesas/abrir_comanda.json";
 import casoMesaSetTrab from "../../../tests/contract/casos/mesas/set_trabajador_if_null.json";
 import goldenMesaSetTrab from "../../../tests/contract/golden/mesas/set_trabajador_if_null.json";
+import casoMesaAbrirORetomar from "../../../tests/contract/casos/mesas/abrir_o_retomar.json";
+import goldenMesaAbrirORetomar from "../../../tests/contract/golden/mesas/abrir_o_retomar.json";
+import casoMesaAbrirORetomarSinAbierta from "../../../tests/contract/casos/mesas/abrir_o_retomar_sin_abierta.json";
+import goldenMesaAbrirORetomarSinAbierta from "../../../tests/contract/golden/mesas/abrir_o_retomar_sin_abierta.json";
+import casoMesaAbrirORetomarConTrab from "../../../tests/contract/casos/mesas/abrir_o_retomar_con_trabajador.json";
+import goldenMesaAbrirORetomarConTrab from "../../../tests/contract/golden/mesas/abrir_o_retomar_con_trabajador.json";
 import casoMesaSetReservaIfNull from "../../../tests/contract/casos/mesas/set_reserva_if_null.json";
 import goldenMesaSetReservaIfNull from "../../../tests/contract/golden/mesas/set_reserva_if_null.json";
 import casoMesaAddLinea from "../../../tests/contract/casos/mesas/add_linea.json";
@@ -370,6 +377,9 @@ const CASOS = [
 	{ nombre: "mesas_save_layout_archiva", caso: casoMesaSaveLayoutArchiva, golden: goldenMesaSaveLayoutArchiva },
 	{ nombre: "mesas_abrir_comanda", caso: casoMesaAbrir, golden: goldenMesaAbrir },
 	{ nombre: "mesas_set_trabajador_if_null", caso: casoMesaSetTrab, golden: goldenMesaSetTrab },
+	{ nombre: "mesas_abrir_o_retomar", caso: casoMesaAbrirORetomar, golden: goldenMesaAbrirORetomar },
+	{ nombre: "mesas_abrir_o_retomar_sin_abierta", caso: casoMesaAbrirORetomarSinAbierta, golden: goldenMesaAbrirORetomarSinAbierta },
+	{ nombre: "mesas_abrir_o_retomar_con_trabajador", caso: casoMesaAbrirORetomarConTrab, golden: goldenMesaAbrirORetomarConTrab },
 	{ nombre: "mesas_set_reserva_if_null", caso: casoMesaSetReservaIfNull, golden: goldenMesaSetReservaIfNull },
 	{ nombre: "mesas_add_linea", caso: casoMesaAddLinea, golden: goldenMesaAddLinea },
 	{ nombre: "mesas_add_linea_sin_precio", caso: casoMesaAddLineaSinPrecio, golden: goldenMesaAddLineaSinPrecio },
@@ -842,6 +852,16 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					caso.entrada.id_trabajador_o_usuario,
 				),
 			);
+			return;
+		}
+		case "mesas.abrir_o_retomar": {
+			// Como el route: lee, decide qué escribir (si algo) y lo aplica.
+			const plan = await planAbrirORetomar(db, {
+				id_mesa: caso.entrada.id_mesa,
+				id_trabajador_o_usuario: caso.entrada.id_trabajador_o_usuario ?? null,
+				id_reserva: caso.entrada.id_reserva ?? null,
+			});
+			if (plan) aplicar(hub, sql, plan);
 			return;
 		}
 		case "mesas.set_reserva_if_null": {

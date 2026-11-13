@@ -17,6 +17,7 @@ import {
 
 import type {
 	CategoriaVendibleOut,
+	ComandaConLineasOut,
 	ComandaRow,
 	KitchenRow,
 	MesaLineaComandaRow,
@@ -203,6 +204,33 @@ export async function lineas(
 		args: [idComanda],
 	});
 	return rows(rs) as MesaLineaComandaRow[];
+}
+
+/**
+ * ¿Le falta el trabajador a esta comanda y todavía se le puede poner? Es lo que exige
+ * `setTrabajadorIfNull` en su `WHERE`: abierta, sin trabajador y sin líneas. Se mira antes de
+ * escribir porque una sentencia que no cambia nada también se replica: su `Applied_Operations`,
+ * su `Sync_Changes`, el aviso a los demás equipos y lo que releen. Espejo de `trabajador_por_poner`
+ * en la Main.
+ */
+export async function trabajadorPorPoner(db: Client, idComanda: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `
+			SELECT 1 AS si FROM Comandas
+			WHERE ID_Comanda = ?1 AND Estado = 'Abierta' AND ID_Trabajador IS NULL
+				AND NOT EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = ?1)
+			LIMIT 1;
+		`,
+		args: [idComanda],
+	});
+	return rows(rs).length > 0;
+}
+
+/** La comanda abierta de la mesa con sus líneas (`/comandas/abrir-o-retomar`); `null` sin ninguna. */
+export async function comandaConLineas(db: Client, idMesa: string): Promise<ComandaConLineasOut | null> {
+	const comanda = await comandaAbiertaByMesa(db, idMesa);
+	if (!comanda) return null;
+	return { comanda, lineas: await lineas(db, comanda.id_comanda) };
 }
 
 // MESAS-02: el mismo texto que `SQL_RESERVAS_DEL_PLANO` en la Main (`tpv-infra-sqlite/src/mesas.rs`).

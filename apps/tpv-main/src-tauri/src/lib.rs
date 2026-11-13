@@ -2079,6 +2079,7 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::mesas::set_reserva_estado,
             commands::mesas::get_comanda_abierta_by_mesa,
             commands::mesas::abrir_comanda,
+            commands::mesas::mesas_abrir_o_retomar,
             commands::mesas::comanda_set_trabajador_if_null,
             commands::mesas::comanda_set_reserva_if_null,
             commands::mesas::get_lineas_comanda,
@@ -3340,7 +3341,7 @@ mod tests_exenciones_del_gate {
     #[test]
     fn atribuciones_de_servicio_salen_de_la_sesion() {
         for (fuente, comandos) in [
-            (include_str!("commands/mesas.rs"), vec!["abrir_comanda", "add_linea_comanda", "comanda_set_trabajador_if_null", "kitchen_set_line_state"]),
+            (include_str!("commands/mesas.rs"), vec!["abrir_comanda", "mesas_abrir_o_retomar", "add_linea_comanda", "comanda_set_trabajador_if_null", "kitchen_set_line_state"]),
             (include_str!("commands/tareas.rs"), vec!["tareas_marcar_tarea_finalizada"]),
             (include_str!("commands/venta_rapida.rs"), vec!["vr_create_comanda_barra"]),
             (include_str!("commands/inventario.rs"), vec!["inventario_upsert_producto", "inventario_create_lote", "inventario_ajustar_lote", "inventario_ajustar_stock_suelto"]),

@@ -104,6 +104,13 @@ ordena adiciones, retiradas y notas; los cobros tienen una guardia síncrona y f
 Main confirma contra SQLite sin esperar a la réplica. Handy confirma contra el Worker.
 Las lecturas tardías de una comanda anterior se descartan.
 
+Abrir una mesa es un paso (`mesas_abrir_o_retomar`, `POST /v1/mesas/comandas/abrir-o-retomar`): la
+comanda abierta, creada si no hay ninguna y con el trabajador de la sesión si le faltaba, y sus
+líneas. En la Handy eran cuatro viajes seguidos con la mesa en blanco. Poner el trabajador a una
+comanda que ya lo tiene, o que ya tiene líneas, no escribe nada en ningún lado: la sentencia no
+cambiaría ninguna fila, pero se replicaría igual (su operación, su cambio en el log, el aviso a los
+demás equipos y lo que releen).
+
 La recuperación de venta rápida usa `_Cobros_Pendientes` en SQLite, escrita por `raw()` y ajena al
 outbox. El backend fija el operador al preparar; cualquier operador con `servicio.vender` puede
 resolver, corregir los datos de factura o descartar una preparación. La confirmación del pago

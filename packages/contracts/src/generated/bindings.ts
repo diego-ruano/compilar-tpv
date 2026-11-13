@@ -675,6 +675,15 @@ export type ComandaBarraRow = {
 	Pendientes_Pago: number,
 };
 
+/**
+ *  La comanda abierta de una mesa con sus líneas: lo que devuelve abrir o retomar la mesa, en un
+ *  solo viaje para la Handy (`mesas_abrir_o_retomar`, `/v1/mesas/comandas/abrir-o-retomar`).
+ */
+export type ComandaConLineasOut = {
+	comanda: ComandaRow,
+	lineas: MesaLineaComandaRow[],
+};
+
 export type ComandaReplicada = {
 	ids: string[],
 	touchedComanda: boolean,

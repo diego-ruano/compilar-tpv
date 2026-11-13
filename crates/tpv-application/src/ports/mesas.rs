@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
@@ -24,6 +24,14 @@ pub trait MesasRepository: Send + Sync {
     /* Comandas de mesa */
     async fn get_comanda_abierta_by_mesa(&self, id_mesa: &str) -> AppResult<Option<ComandaRow>>;
     async fn abrir_comanda(&self, data: AbrirComandaData) -> AppResult<Option<ComandaRow>>;
+    /// Abrir o retomar la mesa: su comanda abierta —creada si no hay ninguna, como
+    /// `abrir_comanda`, y con el trabajador puesto si le faltaba y aún no tiene líneas, como
+    /// `comanda_set_trabajador_if_null`— y sus líneas. Lo mismo que esas tres llamadas seguidas,
+    /// en una: en la Handy es un viaje en vez de cuatro. `None` si, aun así, la mesa no tiene una
+    /// comanda abierta (la cobró otro equipo en ese instante).
+    async fn abrir_o_retomar_comanda(&self, data: AbrirComandaData) -> AppResult<Option<ComandaConLineasOut>>;
+    /// Pone el trabajador a una comanda abierta que no lo tiene y aún no tiene líneas. Si ya lo
+    /// tiene, no escribe nada: una sentencia que no cambia nada también se replicaría.
     async fn comanda_set_trabajador_if_null(
         &self,
         id_comanda: &str,

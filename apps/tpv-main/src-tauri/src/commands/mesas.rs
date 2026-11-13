@@ -7,7 +7,7 @@ use tauri::State;
 
 use tpv_application::use_cases::mesas as uc;
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
     MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
     MesasDeleteDetalleInput,
     MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
@@ -77,6 +77,23 @@ pub async fn abrir_comanda(
     args.id_trabajador = sesion.id_trabajador;
     let repo = state.mesas_repo().await?;
     Ok(uc::abrir_comanda(repo.as_ref(), args).await?)
+}
+
+/// Abrir o retomar la mesa: su comanda abierta (creada si no hay ninguna, con el trabajador de la
+/// sesión si le faltaba) y sus líneas, en un paso. Es lo que pide la pantalla de la mesa al
+/// abrirse; en la Handy, un viaje en vez de cuatro.
+#[tauri::command]
+#[specta::specta]
+pub async fn mesas_abrir_o_retomar(
+    state: State<'_, AppState>,
+    mut args: MesasAbrirComandaInput,
+) -> Result<ComandaConLineasOut, AppErrorDto> {
+    // RI-28: la atribución procede de la sesión del backend.
+    let sesion = state.exigir_permiso("servicio.vender").await?;
+    args.id_usuario = Some(sesion.id_usuario);
+    args.id_trabajador = sesion.id_trabajador;
+    let repo = state.mesas_repo().await?;
+    Ok(uc::abrir_o_retomar(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]

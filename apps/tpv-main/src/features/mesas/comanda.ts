@@ -1,10 +1,22 @@
 import type { MesaLineaComandaRow,MesaMetaOut } from "@tpv/contracts";
-import { mesasAddDetalle,mesasDeleteDetalle,mesasEnsureOpenComanda,mesasLoadTicket,mesasRemoveOnePendingDetalle } from "./mesasApi";
+import { mesasAbrirORetomar,mesasAddDetalle,mesasDeleteDetalle,mesasEnsureOpenComanda,mesasLoadTicket,mesasRemoveOnePendingDetalle } from "./mesasApi";
 import type { ProductoDisplay,TicketItem } from "./tiposComanda";
 
 /* =========================
    Helpers ticket (sin SQL)
 ========================= */
+
+/**
+ * Abre o retoma la mesa: el id de su comanda abierta y su ticket, en un paso (en la Handy, un viaje
+ * en vez de cuatro). El trabajador lo pone el backend, el de la sesión, si a la comanda le faltaba.
+ */
+export async function abrirORetomarMesa(
+    idMesa: string,
+    reservaActiva?: { idReserva: string } | null,
+): Promise<{ idComanda: string; ticket: TicketItem[] }> {
+    const r = await mesasAbrirORetomar({ idMesa, idReserva: reservaActiva?.idReserva ?? null });
+    return { idComanda: r.comanda.id_comanda, ticket: mapTicketRows(r.lineas) };
+}
 
 export async function ensureOpenComanda(
     idMesa: string,
