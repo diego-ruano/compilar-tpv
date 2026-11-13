@@ -334,7 +334,10 @@ fila (`pedido:<negocio>:<id_envio>`). La reserva del cupo es también la del id,
 sentencia: un reintento de uno que ya salió (la respuesta se perdió por el camino) contesta `ok`
 sin mandar otro; uno que está saliendo ahora por otra petición, 409 `email_en_curso`; uno que
 falló, o que se quedó a medias más de cinco minutos, se vuelve a reservar y sale. Lo que ya salió no
-se pisa nunca (`ok = 1`). Sin clave (una Main anterior), cada petición es un envío.
+se pisa nunca (`ok = 1`), y apuntar que salió se intenta tres veces antes de rendirse: uno que salió y
+se queda en `enviando` es lo único que un reintento podría repetir. Sin clave (una Main anterior), cada
+petición es un envío. Con la base central caída el pedido sale igual, también con clave: no se sabe
+si ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída se queda lo segundo.
 
 Los correos al cliente de una reserva web salen de `domains/reservas_web/correos.ts`, desde
 `EMAIL_RESERVAS_FROM_ADDRESS` con el nombre del negocio y su correo de contacto como `Reply-To`. Sólo

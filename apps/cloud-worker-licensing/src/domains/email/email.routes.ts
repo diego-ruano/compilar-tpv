@@ -190,13 +190,20 @@ const ENVIANDO_MAX_MS = 5 * 60_000;
  *   · **Una reserva que se quedó en `enviando`** (el worker murió entre la reserva y
  *     `terminarEnvio`, o no se pudo apuntar cómo acabó) cuenta como si hubiera salido, que es lo
  *     prudente: no se sabe si salió. Deja de contar cuando sale de la ventana de 24 h, contadas desde
- *     que se reservó, y nunca pasa a entregada (`ok` sigue en 0). No necesita caducar antes, como las
- *     de las reservas web: cada pedido lleva un id nuevo y nadie la retoma.
+ *     que se reservó, y nunca pasa a entregada (`ok` sigue en 0).
+ *
+ * **El mismo envío** (el mismo `id_envio`, el mismo id) se reserva una vez: uno que ya salió no se
+ * vuelve a reservar (`ya_enviado`) y uno que está saliendo tampoco (`en_curso`). Uno que falló se
+ * puede repetir. Uno que se quedó en `enviando` más de `ENVIANDO_MAX_MS` se puede retomar, como los
+ * correos de las reservas web: no se sabe si salió, y no retomarlo dejaría ese pedido sin poder
+ * mandarse nunca. Para que eso sea lo raro, `terminarEnvio` insiste antes de rendirse.
  *
  * **Si la base central no contesta, se envía igual** (`sin_base`), y `terminarEnvio` apunta el envío
  * si para entonces puede. Turso caído no puede impedir que un bar mande su pedido: un tope que
  * convierte una caída nuestra en «no puedes trabajar» cuesta más de lo que evita. Ese hueco no lo
- * abre quien llama: no puede tirar la base central a voluntad.
+ * abre quien llama: no puede tirar la base central a voluntad. También con `id_envio`: sin la base
+ * no se sabe si ese envío ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída de
+ * Turso se queda lo segundo (los correos de las reservas web, al revés, no salen).
  */
 export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo> {
 	const ahora = Date.now();
@@ -251,31 +258,39 @@ export async function reservarCupo(db: Sql, envio: Envio): Promise<ReservaDeCupo
  *
  * Es **best-effort a propósito**: si Turso falla, se registra en el log del worker y ya está. Un
  * fallo del registro no puede impedir que un bar mande su pedido, y la reserva que se queda en
- * `enviando` sigue contando para el cupo de hoy.
+ * `enviando` sigue contando para el cupo de hoy. Pero se insiste unas veces: un pedido que salió y se
+ * queda en `enviando` se puede volver a reservar pasados unos minutos (`reservarCupo`), y un
+ * reintento con la misma clave lo mandaría otra vez. Un `ok = 1` no se toca nunca.
  */
 async function terminarEnvio(db: Sql, envio: Envio, ok: boolean, errorCode: string | null): Promise<void> {
-	try {
-		await db.execute({
-			sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
-			      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pedido')
-			      ON CONFLICT(id) DO UPDATE SET ok = excluded.ok, error_code = excluded.error_code,
-			                                    sent_at_ms = excluded.sent_at_ms
-			      WHERE email_sends.ok = 0`,
-			args: [
-				envio.id,
-				envio.tenantId,
-				envio.deviceId,
-				envio.toEmail,
-				envio.proveedor,
-				ok ? 1 : 0,
-				errorCode,
-				Date.now(),
-			],
-		});
-	} catch (e: any) {
-		capturarError(e, "email.audit");
-		console.error("[email] no se pudo registrar el envío:", String(e?.message || e));
+	for (let intento = 1; ; intento++) {
+		try {
+			await apuntarComoAcabo(db, envio, ok, errorCode);
+			return;
+		} catch (e: any) {
+			if (intento >= INTENTOS_DE_TERMINAR) {
+				capturarError(e, "email.audit");
+				console.error("[email] no se pudo registrar el envío:", String(e?.message || e));
+				return;
+			}
+			await new Promise((r) => setTimeout(r, ESPERA_TERMINAR_MS * intento));
+		}
 	}
+}
+
+/** Cuántas veces se intenta apuntar cómo acabó un envío, y cuánto se espera entre una y otra. */
+const INTENTOS_DE_TERMINAR = 3;
+const ESPERA_TERMINAR_MS = 200;
+
+async function apuntarComoAcabo(db: Sql, envio: Envio, ok: boolean, errorCode: string | null): Promise<void> {
+	await db.execute({
+		sql: `INSERT INTO email_sends (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms, tipo)
+		      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pedido')
+		      ON CONFLICT(id) DO UPDATE SET ok = excluded.ok, error_code = excluded.error_code,
+		                                    sent_at_ms = excluded.sent_at_ms
+		      WHERE email_sends.ok = 0`,
+		args: [envio.id, envio.tenantId, envio.deviceId, envio.toEmail, envio.proveedor, ok ? 1 : 0, errorCode, Date.now()],
+	});
 }
 
 /* ── Plantillas de email ─────────────────────────────────────────────── */

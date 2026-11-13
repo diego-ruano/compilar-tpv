@@ -203,6 +203,31 @@ describe("el pedido a un proveedor no sale dos veces (id_envio)", () => {
 		});
 	});
 
+	it("si apuntar que salió falla, se insiste: no se queda en «enviando», que se podría retomar", async () => {
+		await conNegocio("pedido-apuntar-insiste", async (n, sql) => {
+			const real: any = dbCentral;
+			let fallos = 2;
+			dbCentral = {
+				...real,
+				execute: async (s: any) => {
+					const texto = typeof s === "string" ? s : s.sql;
+					if (/INSERT INTO email_sends[\s\S]*VALUES/.test(texto) && fallos-- > 0) throw new Error("la base central no contesta");
+					return real.execute(s);
+				},
+			};
+			const res = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave());
+			expect(await res.json()).toEqual({ ok: true });
+			expect(fallos).toBe(-1);
+			expect(filas(sql)).toEqual([{ id: `pedido:${n.tenantId}:${CLAVE}`, ok: 1, error_code: null }]);
+
+			// Pasados los minutos en que una reserva a medias se puede retomar, sigue sin salir otra vez.
+			sql.exec("UPDATE email_sends SET sent_at_ms = sent_at_ms - 600000;");
+			const repetido = await pedirFirmado(deps, app, n, "/v1/email/enviar-pedido", conClave());
+			expect(await repetido.json()).toEqual({ ok: true });
+			expect(enviados).toHaveLength(1);
+		});
+	});
+
 	it("el mismo envío saliendo ahora por otra petición: ésta no lo manda (409)", async () => {
 		await conNegocio("pedido-en-curso", async (n, sql) => {
 			sql.exec(
