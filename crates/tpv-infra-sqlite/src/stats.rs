@@ -182,6 +182,71 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
     )
 }
 
+/// La sentencia de los clientes recurrentes: quién ha comprado en el rango y si ya había comprado
+/// antes de que empezara, que es lo que hace falta mirar en toda la historia y no sólo en el rango.
+///
+/// `allp` (los cobros de comandas con reserva de un cliente) va `MATERIALIZED`: la leen tres CTE, y
+/// sin esa palabra SQLite la deshace dentro de cada una y recorre tres veces todos los cobros de la
+/// historia. Así los recorre una. El resultado es el mismo; igual en el worker (`clientes` de
+/// `domains/stats/stats.queries.ts`), donde corre en el SQLite del Durable Object.
+pub(crate) fn sql_clientes_recurrentes(range: StatsRange) -> String {
+    let (start_expr, end_expr) = range_bounds_sql(range);
+    format!(
+        r#"
+        WITH
+        rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
+        allp AS MATERIALIZED (
+          SELECT
+            r.ID_Cliente AS id_cliente,
+            datetime(p.Fecha_Hora) AS paid_at,
+            COALESCE(p.Importe_Total,0) AS imp
+          FROM Pagos p
+          JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+          JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+          WHERE c.ID_Reserva IS NOT NULL
+            AND r.ID_Cliente IS NOT NULL
+            AND p.Fecha_Hora IS NOT NULL
+            AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+        ),
+        cust_range AS (
+          SELECT DISTINCT id_cliente
+          FROM allp, rng
+          WHERE paid_at >= rng.start_dt
+            AND paid_at <  rng.end_dt
+        ),
+        firsts AS (
+          SELECT id_cliente, MIN(paid_at) AS first_paid
+          FROM allp
+          GROUP BY id_cliente
+        ),
+        tot_range AS (
+          SELECT id_cliente, SUM(imp) AS total
+          FROM allp, rng
+          WHERE paid_at >= rng.start_dt
+            AND paid_at <  rng.end_dt
+          GROUP BY id_cliente
+        )
+        SELECT
+          (SELECT COUNT(*)
+           FROM cust_range cr
+           JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
+           WHERE f.first_paid < rng.start_dt
+          ) AS recurrentes,
+          (SELECT COUNT(*)
+           FROM cust_range cr
+           JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
+           WHERE f.first_paid >= rng.start_dt
+             AND f.first_paid <  rng.end_dt
+          ) AS no_recurrentes,
+          COALESCE((SELECT SUM(total) FROM tot_range),0) AS ventas_total,
+          (SELECT COUNT(*) FROM cust_range) AS clientes_rango
+        ;
+        "#,
+        start = start_expr,
+        end = end_expr
+    )
+}
+
 /// Una fila de `sql_productos`: un producto vendido en el rango o uno del catálogo vendible.
 struct FilaProducto {
     label: Option<String>,
@@ -1362,60 +1427,7 @@ impl SqliteStatsRepository {
         let ticket_medio_cliente: Dinero;
 
         {
-            let sql_rec = format!(
-                r#"
-                WITH
-                rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
-                allp AS (
-                  SELECT
-                    r.ID_Cliente AS id_cliente,
-                    datetime(p.Fecha_Hora) AS paid_at,
-                    COALESCE(p.Importe_Total,0) AS imp
-                  FROM Pagos p
-                  JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-                  JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-                  WHERE c.ID_Reserva IS NOT NULL
-                    AND r.ID_Cliente IS NOT NULL
-                    AND p.Fecha_Hora IS NOT NULL
-                    AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
-                ),
-                cust_range AS (
-                  SELECT DISTINCT id_cliente
-                  FROM allp, rng
-                  WHERE paid_at >= rng.start_dt
-                    AND paid_at <  rng.end_dt
-                ),
-                firsts AS (
-                  SELECT id_cliente, MIN(paid_at) AS first_paid
-                  FROM allp
-                  GROUP BY id_cliente
-                ),
-                tot_range AS (
-                  SELECT id_cliente, SUM(imp) AS total
-                  FROM allp, rng
-                  WHERE paid_at >= rng.start_dt
-                    AND paid_at <  rng.end_dt
-                  GROUP BY id_cliente
-                )
-                SELECT
-                  (SELECT COUNT(*)
-                   FROM cust_range cr
-                   JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
-                   WHERE f.first_paid < rng.start_dt
-                  ) AS recurrentes,
-                  (SELECT COUNT(*)
-                   FROM cust_range cr
-                   JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
-                   WHERE f.first_paid >= rng.start_dt
-                     AND f.first_paid <  rng.end_dt
-                  ) AS no_recurrentes,
-                  COALESCE((SELECT SUM(total) FROM tot_range),0) AS ventas_total,
-                  (SELECT COUNT(*) FROM cust_range) AS clientes_rango
-                ;
-                "#,
-                start = start_expr,
-                end = end_expr
-            );
+            let sql_rec = sql_clientes_recurrentes(args.range);
 
             let mut rows_r = db.query(&sql_rec, ()).await.map_err(|e| e.to_string())?;
 

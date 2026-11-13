@@ -779,11 +779,15 @@ export async function clientes(
 	// rango empezara. Por eso no basta con mirar el rango: hace falta la fecha de su PRIMER cobro de
 	// toda la historia (`firsts`) y compararla con el inicio de la ventana. El cliente se identifica
 	// por la reserva de la comanda, que es el unico hilo que ata un cobro a una persona.
+	//
+	// `allp` va MATERIALIZED: la leen tres CTE, y sin esa palabra SQLite la deshace dentro de cada
+	// una y recorre tres veces todos los cobros de la historia. Asi los recorre una. El resultado
+	// es el mismo; igual en la Main (`sql_clientes_recurrentes`).
 	const rec = await one(
 		db,
 		`WITH
 		 rng AS (SELECT ${start} AS start_dt, ${end} AS end_dt),
-		 allp AS (
+		 allp AS MATERIALIZED (
 			SELECT
 				r.ID_Cliente AS id_cliente,
 				datetime(p.Fecha_Hora) AS paid_at,

@@ -127,4 +127,27 @@ mod tests {
         // `paid_det` se calcula una vez: en toda la sentencia sólo se entra una vez a los cobros.
         assert_eq!(p.iter().filter(|l| l.starts_with("SEARCH p ")).count(), 1, "{p:#?}");
     }
+
+    /// Saber quién es recurrente obliga a mirar los cobros de toda la historia, pero una vez: `allp`
+    /// la leen tres CTE y, sin materializar, SQLite recorría los cobros (`p`) y sus comandas (`c`)
+    /// en cada una.
+    #[tokio::test]
+    async fn los_clientes_recurrentes_leen_los_cobros_una_sola_vez() {
+        let sql = crate::stats::sql_clientes_recurrentes(tpv_contracts::stats::StatsRange::Hoy);
+        let p = plan(&sql).await;
+
+        let lecturas_de = |alias: &str| {
+            p.iter()
+                .filter(|l| {
+                    [format!("SCAN {alias}"), format!("SEARCH {alias}")]
+                        .iter()
+                        .any(|t| *l == t || l.starts_with(&format!("{t} ")))
+                })
+                .count()
+        };
+        assert!(p.iter().any(|l| l == "MATERIALIZE allp"), "{p:#?}");
+        assert_eq!(lecturas_de("p"), 1, "los cobros se leen una vez: {p:#?}");
+        assert_eq!(lecturas_de("c"), 1, "las comandas se leen una vez: {p:#?}");
+        assert_eq!(lecturas_de("allp"), 3, "{p:#?}");
+    }
 }
