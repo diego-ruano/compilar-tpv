@@ -215,9 +215,55 @@ export class MotorTenantHub {
 		if (this.baseLocal) return this.baseLocal;
 		const storage = this.state.storage;
 		if (!baseAprovisionada(storage.sql)) throw new HubError("tenant_db_not_provisioned", 404);
-		await migrarBaseLocal(storage);
+		try {
+			await this.migrarEnExclusiva();
+		} catch (causa) {
+			throw this.migracionFallida(causa);
+		}
 		this.baseLocal = clienteLocal(storage);
 		return this.baseLocal;
+	}
+
+	/**
+	 * Pone al día el esquema de la base sin que nada más corra en el objeto entretanto.
+	 *
+	 * El runner apaga las claves foráneas alrededor de la tanda (`migrarBaseLocal`) y para volver a
+	 * encenderlas tiene que esperar: sin esto, otra petición podría escribir con ellas apagadas, sin
+	 * que se comprobaran y sin que sus cascadas se ejecutaran. `blockConcurrencyWhile` no entrega
+	 * ningún otro evento al objeto hasta que su cuerpo acaba; como resetea el objeto si el cuerpo
+	 * lanza, el fallo sale como dato. Tiene 30 s: una migración que reconstruya una tabla grande
+	 * tiene que caber ahí.
+	 */
+	private async migrarEnExclusiva(): Promise<void> {
+		const storage = this.state.storage;
+		const fallo = await this.state.blockConcurrencyWhile(async () => {
+			try {
+				await migrarBaseLocal(storage);
+				return null;
+			} catch (error) {
+				return { error };
+			}
+		});
+		if (!fallo) return;
+		// Si las claves foráneas se hubieran quedado apagadas, el siguiente acceso lo vuelve a mirar
+		// antes de servir nada.
+		this.baseLocal = null;
+		throw fallo.error;
+	}
+
+	/**
+	 * La base del negocio no ha podido ponerse al día. Hasta que alguien lo arregle fallará cada
+	 * petición de este negocio, así que se avisa una vez por instancia (`avisarUnaVez`) y lo que ve
+	 * quien pregunta es un 503 con nombre, no un 500 con el texto de SQLite por clasificar. Para una
+	 * operación de la Main es pasajero (`tenantHub.errores.ts`): no se aparta por ello.
+	 *
+	 * Una migración ya aplicada que ha cambiado conserva su código, que está en el catálogo
+	 * (`tenant_migration_altered`).
+	 */
+	private migracionFallida(causa: unknown): HubError {
+		this.avisarUnaVez("migracion_fallida", causa, "tenant_db.migration");
+		if (causa instanceof HubError && causa.code === "migration_altered") return causa;
+		return new HubError("tenant_db_migration_failed", 503);
 	}
 
 	private async withTenantDbRetry<T>(
@@ -230,7 +276,7 @@ export class MotorTenantHub {
 	/** El alta del negocio: crea su esquema (idempotente). */
 	async aprovisionar(tenantId: string): Promise<void> {
 		this.tenantIdVisto ??= tenantId;
-		await migrarBaseLocal(this.state.storage);
+		await this.migrarEnExclusiva();
 		this.baseLocal = clienteLocal(this.state.storage);
 	}
 

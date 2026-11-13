@@ -54,6 +54,17 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	not_found: "not_found",
 };
 
+/**
+ * Lo que sale con un 5xx y NO es un fallo del programa: la nube no puede atender a este negocio
+ * ahora mismo. Para quien lo recibe es `external` (la gravedad «entorno» del cliente), no
+ * `internal`: no hay nada que arreglar en el equipo, y quien tiene que enterarse ya se entera en la
+ * nube. En Rust caen en `External` por la misma vía, la de lo que `from_wire` no conoce.
+ */
+const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
+	// La base del negocio no ha podido ponerse al día tras un despliegue (`MotorTenantHub.getTenantDb`).
+	"tenant_db_migration_failed",
+]);
+
 /** Clasificación por defecto cuando el string no es un código de negocio conocido. */
 function porEstado(status: number): ErrorCode {
 	if (status === 404) return "not_found";
@@ -79,7 +90,7 @@ export function wireToCode(error: string, status: number): ErrorCode {
 		.trim()
 		.toLowerCase();
 
-	return propia(NEGOCIO, clave) ?? porEstado(status);
+	return propia(NEGOCIO, clave) ?? (NUBE_NO_DISPONIBLE.has(clave) ? "external" : porEstado(status));
 }
 
 /** Busca sólo claves propias: `NEGOCIO["constructor"]` no puede devolver lo del prototipo. */
@@ -271,6 +282,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	tenant_db_provision_failed:
 		"No se ha podido preparar la base de datos en la nube. Inténtalo de nuevo en unos minutos.",
 	tenant_db_already_provisioned: "La base de datos de la nube ya existe.",
+	tenant_db_migration_failed:
+		"La base de datos de la nube no está disponible ahora mismo. Vuelve a intentarlo en unos minutos.",
 	invalid_code: "El código no es correcto.",
 	code_expired: "El código ha caducado. Pide uno nuevo.",
 	correo_invalido: "Ese correo no parece válido. Revísalo.",

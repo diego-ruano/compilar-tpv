@@ -164,6 +164,229 @@ describe("claves foráneas", () => {
 	});
 });
 
+// Lo que necesita una migración que reconstruye una tabla (crear la nueva, copiar, borrar la vieja,
+// renombrar): el runner de la Main apaga las FK alrededor de la tanda (`migrations.rs::run`). Aquí
+// se mira si el SQLite del DO deja hacer lo mismo y qué pasa si no se hace.
+describe("claves foráneas al migrar", () => {
+	const fk = (sql: any): number => Number(sql.exec("PRAGMA foreign_keys;").toArray()[0]?.foreign_keys);
+	const mesa = (sql: any, id: string, zona: string) =>
+		sql.exec(
+			"INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES (?1, ?2, ?1, 4, 0, 0, 'rect', 10, 10);",
+			id,
+			zona,
+		);
+	/** Una zona con dos mesas (`Mesas.ID_Zona` es `ON DELETE CASCADE`). */
+	const sembrar = (sql: any) => {
+		crearEsquemaTenant(sql);
+		sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Sala');");
+		mesa(sql, "m1", "z1");
+		mesa(sql, "m2", "z1");
+	};
+	/** La reconstrucción de una tabla padre, como la haría una migración que le quita un `CHECK`. */
+	const reconstruirZonas = (sql: any) => {
+		sql.exec(
+			"CREATE TABLE Zonas_nueva (ID_Zona TEXT NOT NULL PRIMARY KEY, Nombre_Zona TEXT NOT NULL, Room_Points TEXT NOT NULL DEFAULT '[]', Updated_At DATETIME, Archivada_En DATETIME);",
+		);
+		sql.exec("INSERT INTO Zonas_nueva SELECT * FROM Zonas;");
+		sql.exec("DROP TABLE Zonas;");
+		sql.exec("ALTER TABLE Zonas_nueva RENAME TO Zonas;");
+	};
+
+	it("PRAGMA foreign_keys = OFF fuera de transactionSync: se acepta, tiene efecto y dura hasta que se vuelve a encender", async () => {
+		const nombre = "sonda-fk-apagar";
+		await enElHub(nombre, (hub) => sembrar(hub.state.storage.sql));
+
+		// Al empezar un turno, sin nada escrito todavía.
+		const alEmpezar = await enElHub(nombre, (hub) => {
+			const { sql } = hub.state.storage;
+			const antes = fk(sql);
+			const errOff = error(() => sql.exec("PRAGMA foreign_keys = OFF;"));
+			const trasOff = fk(sql);
+			// Con las FK apagadas de verdad, una mesa de una zona que no existe entra.
+			const errHuerfana = error(() => mesa(sql, "huerfana", "NO-EXISTE"));
+			const violaciones = sql.exec("PRAGMA foreign_key_check;").toArray().length;
+			sql.exec("DELETE FROM Mesas WHERE ID_Mesa = 'huerfana';");
+			// Ya se ha escrito en este turno: ¿se puede volver a encender aquí mismo?
+			const errOn = error(() => sql.exec("PRAGMA foreign_keys = ON;"));
+			return { antes, errOff, trasOff, errHuerfana, violaciones, errOn, trasOnEnElMismoTurno: fk(sql) };
+		});
+
+		// En el turno siguiente: lo que quedó, y encender sin haber escrito nada.
+		const turnoSiguiente = await enElHub(nombre, (hub) => {
+			const { sql } = hub.state.storage;
+			const heredado = fk(sql);
+			sql.exec("PRAGMA foreign_keys = ON;");
+			const trasOn = fk(sql);
+			return { heredado, trasOn, errHuerfana: error(() => mesa(sql, "huerfana-2", "NO-EXISTE")) };
+		});
+
+		// Después de escribir en el mismo turno, y dentro de `transactionSync`.
+		const conEscrituraPrevia = await enElHub(nombre, (hub) => {
+			const st = hub.state.storage;
+			st.sql.exec("UPDATE Zonas SET Nombre_Zona = 'Sala 2' WHERE ID_Zona = 'z1';");
+			const errOff = error(() => st.sql.exec("PRAGMA foreign_keys = OFF;"));
+			const trasEscribir = fk(st.sql);
+			let dentro: number | null = null;
+			st.transactionSync(() => {
+				st.sql.exec("PRAGMA foreign_keys = OFF;");
+				dentro = fk(st.sql);
+			});
+			const alSalir = fk(st.sql);
+			st.sql.exec("PRAGMA foreign_keys = ON;");
+			return { errOff, trasEscribir, dentroDeTransactionSync: dentro, alSalir, trasOn: fk(st.sql) };
+		});
+		const alFinal = await enElHub(nombre, (hub) => {
+			const { sql } = hub.state.storage;
+			const heredado = fk(sql);
+			sql.exec("PRAGMA foreign_keys = ON;");
+			return { heredado, trasOn: fk(sql) };
+		});
+
+		informe.fkApagar = { alEmpezar, turnoSiguiente, conEscrituraPrevia, alFinal };
+		// De esto depende `migrarBaseLocal` (`tenantHub.sqlite.ts`): si cambia, hay que volver a mirarlo.
+		expect(alEmpezar.antes).toBe(1);
+		// Sin nada escrito en el turno, se apagan de verdad: una huérfana entra.
+		expect(alEmpezar).toMatchObject({ errOff: null, trasOff: 0, errHuerfana: null, violaciones: 1 });
+		// Con algo escrito en el turno, el PRAGMA no hace nada y no avisa: ni para encender…
+		expect(alEmpezar).toMatchObject({ errOn: null, trasOnEnElMismoTurno: 0 });
+		// …ni para apagar, ni dentro de `transactionSync`.
+		expect(conEscrituraPrevia).toMatchObject({ errOff: null, trasEscribir: 1, dentroDeTransactionSync: 1 });
+		// Y como se quedan, se quedan: el turno siguiente las hereda apagadas.
+		expect(turnoSiguiente.heredado).toBe(0);
+		expect(turnoSiguiente.trasOn).toBe(1);
+		expect(turnoSiguiente.errHuerfana).toMatch(/FOREIGN KEY/i);
+		expect(alFinal.trasOn).toBe(1);
+	});
+
+	it("reconstruir una tabla padre con las FK activas se lleva a sus hijas en cascada", async () => {
+		const nombre = "sonda-fk-reconstruir-activas";
+		await enElHub(nombre, (hub) => sembrar(hub.state.storage.sql));
+		const res = await enElHub(nombre, (hub) => {
+			const st = hub.state.storage;
+			const mesasAntes = contar(st.sql, "Mesas");
+			const err = error(() => st.transactionSync(() => reconstruirZonas(st.sql)));
+			return {
+				fk: fk(st.sql),
+				err,
+				mesasAntes,
+				mesasDespues: contar(st.sql, "Mesas"),
+				zonasDespues: contar(st.sql, "Zonas"),
+				violaciones: st.sql.exec("PRAGMA foreign_key_check;").toArray().length,
+			};
+		});
+		informe.fkReconstruirConFkActivas = res;
+		expect(res.mesasAntes).toBe(2);
+		// Sin error y sin nada que `foreign_key_check` pueda ver: las mesas ya no están.
+		expect(res).toMatchObject({ fk: 1, err: null, mesasDespues: 0, zonasDespues: 1, violaciones: 0 });
+	});
+
+	it("y una hija sin acción (NO ACTION) impide borrar la tabla padre", async () => {
+		const nombre = "sonda-fk-reconstruir-no-action";
+		await enElHub(nombre, (hub) => {
+			const { sql } = hub.state.storage;
+			sembrar(sql);
+			// `Reservas.ID_Mesa` no lleva acción: borrar la mesa con una reserva que la apunta no se puede.
+			sql.exec(
+				"INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno) VALUES ('r1', 'm1', '2026-11-13', '21:00', 'CENA');",
+			);
+		});
+		const res = await enElHub(nombre, (hub) => {
+			const st = hub.state.storage;
+			const err = error(() => st.transactionSync(() => st.sql.exec("DROP TABLE Mesas;")));
+			return { fk: fk(st.sql), err, mesas: contar(st.sql, "Mesas"), reservas: contar(st.sql, "Reservas") };
+		});
+		informe.fkBorrarPadreConHijaSinAccion = res;
+		expect(res.err).toMatch(/FOREIGN KEY/i);
+		expect(res).toMatchObject({ mesas: 2, reservas: 1 });
+	});
+
+	it("con las FK apagadas alrededor, la reconstrucción conserva a las hijas", async () => {
+		const nombre = "sonda-fk-reconstruir-apagadas";
+		await enElHub(nombre, (hub) => sembrar(hub.state.storage.sql));
+		const res = await enElHub(nombre, async (hub) => {
+			const st = hub.state.storage;
+			st.sql.exec("PRAGMA foreign_keys = OFF;");
+			const apagadas = fk(st.sql);
+			let violaciones = -1;
+			const err = error(() =>
+				st.transactionSync(() => {
+					reconstruirZonas(st.sql);
+					violaciones = st.sql.exec("PRAGMA foreign_key_check;").toArray().length;
+				}),
+			);
+			const errOn = error(() => st.sql.exec("PRAGMA foreign_keys = ON;"));
+			const trasOnEnElMismoTurno = fk(st.sql);
+			// Ceder sólo a las microtareas no cierra la transacción que el DO abre al escribir.
+			await Promise.resolve();
+			st.sql.exec("PRAGMA foreign_keys = ON;");
+			const trasCederALasMicrotareas = fk(st.sql);
+			// Esperar a que lo escrito esté confirmado, sí.
+			await st.sync();
+			st.sql.exec("PRAGMA foreign_keys = ON;");
+			const trasSync = fk(st.sql);
+			return {
+				apagadas,
+				err,
+				violaciones,
+				errOn,
+				trasOnEnElMismoTurno,
+				trasCederALasMicrotareas,
+				trasSync,
+				mesas: contar(st.sql, "Mesas"),
+				zonas: contar(st.sql, "Zonas"),
+			};
+		});
+		const despues = await enElHub(nombre, (hub) => {
+			const { sql } = hub.state.storage;
+			const heredado = fk(sql);
+			sql.exec("PRAGMA foreign_keys = ON;");
+			return {
+				heredado,
+				trasOn: fk(sql),
+				mesas: contar(sql, "Mesas"),
+				// Encendidas otra vez, la FK de las hijas sigue apuntando a la tabla reconstruida.
+				errHuerfana: error(() => mesa(sql, "huerfana", "NO-EXISTE")),
+				errBorrarZona: error(() => sql.exec("DELETE FROM Zonas WHERE ID_Zona = 'z1';")),
+				mesasTrasBorrarLaZona: contar(sql, "Mesas"),
+			};
+		});
+		informe.fkReconstruirConFkApagadas = { ...res, despues };
+		expect(res).toMatchObject({ apagadas: 0, err: null, violaciones: 0, mesas: 2, zonas: 1 });
+		// Volver a encenderlas pide que lo escrito esté confirmado: ni en el mismo turno ni cediendo
+		// a las microtareas, sí tras `storage.sync()`.
+		expect(res).toMatchObject({ trasOnEnElMismoTurno: 0, trasCederALasMicrotareas: 0, trasSync: 1 });
+		expect(despues).toMatchObject({ heredado: 1, mesas: 2, errBorrarZona: null, mesasTrasBorrarLaZona: 0 });
+		expect(despues.errHuerfana).toMatch(/FOREIGN KEY/i);
+	});
+
+	it("reconstruir una tabla que lee una vista: el RENAME falla si la vista se queda sin tabla", async () => {
+		const nombre = "sonda-fk-reconstruir-con-vista";
+		await enElHub(nombre, (hub) => sembrar(hub.state.storage.sql));
+		const res = await enElHub(nombre, async (hub) => {
+			const st = hub.state.storage;
+			const vistas = st.sql
+				.exec("SELECT name FROM sqlite_master WHERE type = 'view' AND sql LIKE '%Productos%' ORDER BY name;")
+				.toArray()
+				.map((v: any) => String(v.name));
+			st.sql.exec("PRAGMA foreign_keys = OFF;");
+			const reconstruir = () =>
+				st.transactionSync(() => {
+					st.sql.exec("CREATE TABLE Productos_nueva AS SELECT * FROM Productos;");
+					st.sql.exec("DROP TABLE Productos;");
+					st.sql.exec("ALTER TABLE Productos_nueva RENAME TO Productos;");
+				});
+			const err = error(reconstruir);
+			await st.sync();
+			st.sql.exec("PRAGMA foreign_keys = ON;");
+			return { vistas, err, fk: fk(st.sql), sigueLaTabla: contar(st.sql, "Productos") };
+		});
+		informe.fkReconstruirConVista = res;
+		expect(res.vistas.length).toBeGreaterThan(0);
+		expect(res.err).toMatch(/error in view/i);
+		expect(res).toMatchObject({ fk: 1, sigueLaTabla: 0 });
+	});
+});
+
 describe("límites del SQL", () => {
 	it("parámetros, json_each, LIKE, UNION y longitud", async () => {
 		const res = await enElHub("sonda-limites", (hub) => {

@@ -45,6 +45,7 @@ describe("por el código de un fallo nuestro, antes que por su texto", () => {
 		["idempotency_payload_mismatch", 409, "permanente"],
 		// No habla de la operación sino de cómo está la nube ahora: no se le gasta ningún intento.
 		["tenant_db_not_provisioned", 404, "pasajero"],
+		["tenant_db_migration_failed", 503, "pasajero"],
 		["migration_altered", 500, "pasajero"],
 		["main_offline", 400, "pasajero"],
 		["main_volcando", 400, "pasajero"],

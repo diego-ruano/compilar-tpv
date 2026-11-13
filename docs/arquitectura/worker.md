@@ -44,7 +44,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - **La base de cada negocio** vive en el SQLite de su `TenantHub` y se construye con las migraciones
   de `packages/database/migrations/`, registradas a mano en `src/server/tenantMigrations.ts`
   ([esquema.md](esquema.md)). La crea el alta (`aprovisionar`) y el DO la pone al día la primera vez
-  que la toca tras un despliegue (`migrarBaseLocal`).
+  que la toca tras un despliegue (`migrarBaseLocal`), sin atender nada más mientras tanto. Si no
+  puede, el negocio contesta 503 `tenant_db_migration_failed` y el DO avisa
+  ([esquema.md](esquema.md#si-la-migración-falla-en-la-nube)).
 - **La base central** (control-plane: licencias, tenants, dispositivos, emparejamientos, interruptores,
   correo, releases…) está en Turso y **no cambia de estructura desde el código**: el worker lee y
   escribe filas, nunca hace `CREATE`, `ALTER` ni `DROP`. Su estructura se cambia **a mano en Turso,

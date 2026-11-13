@@ -534,7 +534,8 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
    petición: se quita al leer la respuesta entera, al fallar o al cancelarse.
 4. **Las cachés de instancia se pierden al hibernar, y eso no cuesta nada**: el cliente de la base del
    negocio (`baseLocal`, que al volver comprueba otra vez las migraciones), `lastSeenPushedAtMs`,
-   `lastPurgeAtMs`. Se quedan como campos a propósito. Lo mismo el turno del log (`turnoDelLog`) y la
+   `lastPurgeAtMs` y lo que ya se ha avisado de una avería de la base (`avisados`: al despertar se
+   avisa otra vez). Se quedan como campos a propósito. Lo mismo el turno del log (`turnoDelLog`) y la
    fila de entrada de la Main (`turnoDeEntrada`): son lo que está en vuelo, y el DO sólo hiberna sin
    nada en vuelo. Lo que sí tiene que sobrevivir va al SQL del DO: quién es la Main (`_Main_Vigente`).
 5. ⚠️ **En los módulos de funciones libres no puede haber variables de módulo con estado**: en Workers

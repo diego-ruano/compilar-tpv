@@ -57,8 +57,10 @@ const CODIGOS_PERMANENTES: ReadonlySet<string> = new Set([
  */
 const CODIGOS_PASAJEROS: ReadonlySet<string> = new Set([
 	"tenant_db_not_provisioned",
-	// El esquema de la base del negocio no cuadra con el del worker: lo arreglamos nosotros, no un
-	// reintento, pero apartar por ello las ventas de un negocio entero las dejaría fuera de la nube.
+	// El esquema de la base del negocio no ha podido ponerse al día, o no cuadra con el del worker
+	// (`MotorTenantHub.getTenantDb`): lo arreglamos nosotros, no un reintento, pero apartar por ello
+	// las ventas de un negocio entero las dejaría fuera de la nube.
+	"tenant_db_migration_failed",
 	"migration_altered",
 	"main_offline",
 	"main_volcando",
