@@ -20,7 +20,7 @@ import { describe, expect, it } from "vitest";
 import wrangler from "../wrangler.json";
 import { agendaDe } from "../src/durableObjects/agendaWeb";
 import { avisarCambioDeLicencia, cerrarSocketsDelDispositivo, hubDe } from "../src/lib/hub";
-import { colocacionDelDespliegue, objetoDelNegocio, objetoEn } from "../src/lib/objetosDelNegocio";
+import { colocacionDelDespliegue, objetoDelNegocio } from "../src/lib/objetosDelNegocio";
 
 type Peticion = { jurisdiccion: string | null; nombre: string; opciones: unknown };
 
@@ -60,10 +60,10 @@ describe("lo que dice el despliegue", () => {
 describe("cómo se pide un objeto", () => {
 	it("sin jurisdicción ni pista, tal cual; con ellas, las dos", () => {
 		const pedidos: Peticion[] = [];
-		objetoEn(espacio(pedidos), "a", {});
-		objetoEn(espacio(pedidos), "b", { pista: "weur" });
-		objetoEn(espacio(pedidos), "c", { jurisdiccion: "eu" });
-		objetoEn(espacio(pedidos), "d", { jurisdiccion: "eu", pista: "weur" });
+		objetoDelNegocio({}, espacio(pedidos), "a");
+		objetoDelNegocio({ UBICACION_DO: "weur" }, espacio(pedidos), "b");
+		objetoDelNegocio({ JURISDICCION_DO: "eu" }, espacio(pedidos), "c");
+		objetoDelNegocio({ JURISDICCION_DO: "eu", UBICACION_DO: "weur" }, espacio(pedidos), "d");
 		expect(pedidos).toEqual([
 			{ jurisdiccion: null, nombre: "a", opciones: undefined },
 			{ jurisdiccion: null, nombre: "b", opciones: { locationHint: "weur" } },

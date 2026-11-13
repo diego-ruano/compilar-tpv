@@ -45,7 +45,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
 | …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |
 | Rutas de la Handy | `src/lib/enElHub.ts` · `src/lib/hubLocal.ts` | El Worker autentica y pasa la petición entera al `TenantHub` del negocio (`ejecutarRuta`), que ejecuta la ruta junto a su base: un viaje por petición |
-| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` que dentro del DO lee de su SQLite y, fuera, manda cada consulta por RPC (`consultar`, que sólo lee) |
+| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` sobre el SQLite del DO, para las rutas que se ejecutan dentro (`alHub`) |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar`, `/verificar-claves`, `/salud` |
 
@@ -200,6 +200,15 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   ([licencias.md](licencias.md#anular-desde-la-administración)).
 - **Dentro del `TenantHub` sólo es Main la de la licencia**, y eso se vuelve a comprobar con la
   sesión abierta: ver [Quién es la Main dentro del `TenantHub`](#quién-es-la-main-dentro-del-tenanthub-aud-02).
+- **Abrir el socket es un viaje a la base central**: el Worker canjea el ticket, lee la fila del
+  dispositivo y apunta su `last_seen` en un lote (`GET /ws`, `domains/ws/canje.ts`), y le pasa al
+  `TenantHub` el negocio, el dispositivo, su rol y su clave pública en cuatro cabeceras que sólo pone
+  él: las que mande el cliente se quitan antes. Un dispositivo sin clave no abre el socket
+  (`device_pubkey_not_registered`). El `TenantHub` verifica el saludo con ese rol y esa clave, sin
+  volver a la base central (`test/abrirElSocket.test.ts`); una baja entretanto le cierra el socket
+  (`revocarDispositivo`). Una que llega entre el canje y el upgrade, sin socket que cerrar, queda
+  anotada en el objeto, y el upgrade de un ticket canjeado antes (`x-ws-canje-ms`, la hora del canje
+  que pone el Worker) se rechaza con 401 `device_revoked`.
 - **Se firma con la hora de la nube** (Rust construye y firma el saludo). Un
   rechazo por la hora es `RelojDesfasado`, no falta de red.
 - **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong`, se cierra. Se reconecta al
@@ -438,6 +447,12 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 
 - Al autenticarse, la Main pide `/v1/sync/changes` desde su `Last_Seq` y aplica en orden, guardando
   los `change` en vivo hasta terminar.
+- **Una página de `/v1/sync/changes` tiene dos topes**: los cambios que se piden (`limit`, hasta 1.000) y
+  4 MiB de sentencias (`CAMBIOS_MAX_BYTES`, `sync.routes.ts::leerPaginaDeCambios`), lo que antes llegue;
+  un cambio puede llevar cientos de sentencias. El corte lo hace la propia sentencia con la suma
+  acumulada de lo que ocupa cada cambio, y nunca deja la página vacía: un cambio que solo ya pasa
+  viaja solo. La página cortada lleva el `nextSince` de su último cambio, como una completa, y la
+  Main sigue hasta una vacía (`test/cambiosConTecho.test.ts`).
 - **Un `change` lleva lo que se lee**: `opId`, `seq` y `statements` (las sentencias ya resueltas). La
   Main lee los tres (`replicacion.rs::cambio`); la Handy, las sentencias, de las que saca qué
   refrescar (`presencia_handy.rs`). Ni el comando, ni quién lo mandó, ni su payload, ni su resultado.
@@ -493,7 +508,8 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   detenida en uno de ellos. «En cuarentena», los que se saltaron.
 - Cada cambio se aplica en **una** transacción (confirmación de subida, gate de idempotencia,
   sentencias, checkpoint) y el escritor se suelta cada 50 (`CAMBIOS_POR_TURNO_DE_ESCRITOR`): una
-  página de catch-up de 500 no deja a un cobro esperando a que termine entera (RI-33).
+  página de catch-up de mil cambios (los que pide la Main, `CAMBIOS_POR_PAGINA`) no deja a un cobro
+  esperando a que termine entera (RI-33).
 - **El checkpoint no deja atrás un fallo sin resolver** (AUD-18): lo único que lo mueve
   (`pasar_el_checkpoint`) borra a la vez el fallo de ese cambio si no está en cuarentena, entre o
   salga por el anti-eco al reintentarlo (el eco propio que no pudo mover el checkpoint). Fuera de

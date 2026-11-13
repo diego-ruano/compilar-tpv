@@ -48,6 +48,8 @@ pub async fn email_enviar_pedido(
         "email_destino": args.email_destino,
         "nombre_proveedor": args.nombre_proveedor,
         "notas": args.notas,
+        // Idempotencia del envío: un reintento con la misma clave no manda otro correo.
+        "id_envio": args.id_envio,
         "lineas": args.lineas.iter().map(|l| json!({
             "nombre_producto": l.nombre_producto,
             "cantidad": l.cantidad,

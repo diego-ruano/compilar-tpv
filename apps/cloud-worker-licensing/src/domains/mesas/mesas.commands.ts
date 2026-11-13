@@ -92,14 +92,15 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 		.map((z) => parseDbId(z.id, "db-zona-"))
 		.filter((id): id is string => !!id);
 
-	const zoneNotInClause = keptZoneIds.length
-		? `AND ID_Zona NOT IN (${keptZoneIds.map((_, i) => `?${i + 1}`).join(",")})`
-		: "";
+	// DO-01: las zonas conservadas van en un solo parámetro (un array JSON), no en uno por zona: estas
+	// sentencias se replican y el SQLite del DO admite 100 parámetros por sentencia. Igual que la Main.
+	const zoneNotInClause = keptZoneIds.length ? "AND ID_Zona NOT IN (SELECT value FROM json_each(?1))" : "";
+	const keptZoneArgs = keptZoneIds.length ? [JSON.stringify(keptZoneIds)] : [];
 
 	// RI-54: las mesas de las zonas eliminadas se archivan si tienen historia y se borran si no; una
 	// con comanda abierta se queda. Luego la zona: archivada si le quedan mesas archivadas, borrada si
 	// no le queda ninguna. Mismo criterio y mismas sentencias que la Main.
-	steps.push(...pasosQuitarMesas(`1 = 1 ${zoneNotInClause}`, [...keptZoneIds]));
+	steps.push(...pasosQuitarMesas(`1 = 1 ${zoneNotInClause}`, keptZoneArgs));
 	steps.push({
 		kind: "execute",
 		sql: `
@@ -112,7 +113,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 					SELECT 1 FROM Mesas M WHERE M.ID_Zona = Zonas.ID_Zona AND M.Archivada_En IS NULL
 				);
 		`,
-		args: [...keptZoneIds],
+		args: keptZoneArgs,
 	});
 	steps.push({
 		kind: "execute",
@@ -122,7 +123,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 				${zoneNotInClause}
 				AND NOT EXISTS (SELECT 1 FROM Mesas M WHERE M.ID_Zona = Zonas.ID_Zona);
 		`,
-		args: [...keptZoneIds],
+		args: keptZoneArgs,
 	});
 
 	// Aparca los nombres de las zonas conservadas a un valor temporal único, para que los
@@ -133,9 +134,9 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 			kind: "execute",
 			sql: `
 				UPDATE Zonas SET Nombre_Zona = '__tmp_zona_' || ID_Zona
-				WHERE ID_Zona IN (${keptZoneIds.map((_, i) => `?${i + 1}`).join(",")});
+				WHERE ID_Zona IN (SELECT value FROM json_each(?1));
 			`,
-			args: [...keptZoneIds],
+			args: keptZoneArgs,
 		});
 	}
 
@@ -173,13 +174,12 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 		const kept = z.tables
 			.map((t) => parseDbId(t.id, "db-mesa-"))
 			.filter((n): n is string => !!n);
-		const keptClause = kept.length
-			? `AND ID_Mesa NOT IN (${kept.map((_, i) => `?${i + 3}`).join(",")})`
-			: "";
+		// DO-01: las mesas conservadas, en un solo parámetro (una zona puede tener cientos).
+		const keptClause = kept.length ? "AND ID_Mesa NOT IN (SELECT value FROM json_each(?3))" : "";
 		steps.push(
 			...pasosQuitarMesas(
 				`ID_Zona = COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 AND Archivada_En IS NULL LIMIT 1)) ${keptClause}`,
-				[idZona, z.name, ...kept],
+				kept.length ? [idZona, z.name, JSON.stringify(kept)] : [idZona, z.name],
 			),
 		);
 

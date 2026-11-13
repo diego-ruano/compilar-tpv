@@ -1,0 +1,38 @@
+{
+  "descripcion": "DO-01: el índice de 'Ver tickets' de un día con 120 tickets de barra. Ponía un parámetro por ticket, y con más de 100 la Handy se quedaba sin esa pantalla. La lista va en un solo parámetro (un array JSON). Cada ticket tiene una línea, con unidades distintas; el 121 no se pide y no sale.",
+  "lectura": "venta_rapida.index_rows",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 300);",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 121) INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) SELECT 'com-' || substr('000' || i, -3), 'BARRA', '2026-05-10 12:00:00', 'Abierta' FROM n;",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 121) INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) SELECT 'det-' || substr('000' || i, -3), 'com-' || substr('000' || i, -3), 'prod-1', i, 300 FROM n;"
+  ],
+  "entrada": {
+    "ids": [
+      "com-001", "com-002", "com-003", "com-004", "com-005",
+      "com-006", "com-007", "com-008", "com-009", "com-010",
+      "com-011", "com-012", "com-013", "com-014", "com-015",
+      "com-016", "com-017", "com-018", "com-019", "com-020",
+      "com-021", "com-022", "com-023", "com-024", "com-025",
+      "com-026", "com-027", "com-028", "com-029", "com-030",
+      "com-031", "com-032", "com-033", "com-034", "com-035",
+      "com-036", "com-037", "com-038", "com-039", "com-040",
+      "com-041", "com-042", "com-043", "com-044", "com-045",
+      "com-046", "com-047", "com-048", "com-049", "com-050",
+      "com-051", "com-052", "com-053", "com-054", "com-055",
+      "com-056", "com-057", "com-058", "com-059", "com-060",
+      "com-061", "com-062", "com-063", "com-064", "com-065",
+      "com-066", "com-067", "com-068", "com-069", "com-070",
+      "com-071", "com-072", "com-073", "com-074", "com-075",
+      "com-076", "com-077", "com-078", "com-079", "com-080",
+      "com-081", "com-082", "com-083", "com-084", "com-085",
+      "com-086", "com-087", "com-088", "com-089", "com-090",
+      "com-091", "com-092", "com-093", "com-094", "com-095",
+      "com-096", "com-097", "com-098", "com-099", "com-100",
+      "com-101", "com-102", "com-103", "com-104", "com-105",
+      "com-106", "com-107", "com-108", "com-109", "com-110",
+      "com-111", "com-112", "com-113", "com-114", "com-115",
+      "com-116", "com-117", "com-118", "com-119", "com-120"
+    ]
+  }
+}

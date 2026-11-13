@@ -118,6 +118,8 @@ import casoVrUnLote from "../../../tests/contract/casos/venta_rapida/cobro_fracc
 import goldenVrUnLote from "../../../tests/contract/golden/venta_rapida/cobro_fraccionado_un_lote.json";
 import casoVrMultilote from "../../../tests/contract/casos/venta_rapida/cobro_fraccionado_fefo_multilote.json";
 import goldenVrMultilote from "../../../tests/contract/golden/venta_rapida/cobro_fraccionado_fefo_multilote.json";
+import casoVr120 from "../../../tests/contract/casos/venta_rapida/cobro_fraccionado_120_lineas.json";
+import goldenVr120 from "../../../tests/contract/golden/venta_rapida/cobro_fraccionado_120_lineas.json";
 import casoMesasCobro from "../../../tests/contract/casos/mesas/cobrar_detalles_un_lote.json";
 import goldenMesasCobro from "../../../tests/contract/golden/mesas/cobrar_detalles_un_lote.json";
 import casoMesasCobroCliente from "../../../tests/contract/casos/mesas/cobrar_detalles_con_cliente.json";
@@ -137,6 +139,8 @@ import goldenTareaCrear from "../../../tests/contract/golden/tareas/crear.json";
 import casoTareaActualizar from "../../../tests/contract/casos/tareas/actualizar.json";
 import goldenTareaActualizar from "../../../tests/contract/golden/tareas/actualizar.json";
 import casoTareaSetAsig from "../../../tests/contract/casos/tareas/set_asignaciones.json";
+import casoTareaSetAsig120 from "../../../tests/contract/casos/tareas/set_asignaciones_120.json";
+import goldenTareaSetAsig120 from "../../../tests/contract/golden/tareas/set_asignaciones_120.json";
 import goldenTareaSetAsig from "../../../tests/contract/golden/tareas/set_asignaciones.json";
 import casoTareaEliminar from "../../../tests/contract/casos/tareas/eliminar.json";
 import goldenTareaEliminar from "../../../tests/contract/golden/tareas/eliminar.json";
@@ -221,6 +225,8 @@ import goldenVrDeleteComanda from "../../../tests/contract/golden/venta_rapida/d
 import casoMesaSaveLayout from "../../../tests/contract/casos/mesas/save_layout.json";
 import goldenMesaSaveLayout from "../../../tests/contract/golden/mesas/save_layout.json";
 import casoMesaSaveLayoutArchiva from "../../../tests/contract/casos/mesas/save_layout_archiva.json";
+import casoMesaSaveLayout120 from "../../../tests/contract/casos/mesas/save_layout_120_mesas.json";
+import goldenMesaSaveLayout120 from "../../../tests/contract/golden/mesas/save_layout_120_mesas.json";
 import goldenMesaSaveLayoutArchiva from "../../../tests/contract/golden/mesas/save_layout_archiva.json";
 import casoMesaAbrir from "../../../tests/contract/casos/mesas/abrir_comanda.json";
 import goldenMesaAbrir from "../../../tests/contract/golden/mesas/abrir_comanda.json";
@@ -308,6 +314,7 @@ import goldenHorDelete from "../../../tests/contract/golden/horarios/delete_asig
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
 	{ nombre: "vr_fefo_multilote", caso: casoVrMultilote, golden: goldenVrMultilote },
+	{ nombre: "vr_120_lineas", caso: casoVr120, golden: goldenVr120 },
 	{ nombre: "mesas_cobro_un_lote", caso: casoMesasCobro, golden: goldenMesasCobro },
 	{ nombre: "mesas_cobro_con_cliente", caso: casoMesasCobroCliente, golden: goldenMesasCobroCliente },
 	{ nombre: "mesas_cobro_lote_y_suelto", caso: casoMesasCobroSuelto, golden: goldenMesasCobroSuelto },
@@ -318,6 +325,7 @@ const CASOS = [
 	{ nombre: "tareas_crear", caso: casoTareaCrear, golden: goldenTareaCrear },
 	{ nombre: "tareas_actualizar", caso: casoTareaActualizar, golden: goldenTareaActualizar },
 	{ nombre: "tareas_set_asignaciones", caso: casoTareaSetAsig, golden: goldenTareaSetAsig },
+	{ nombre: "tareas_set_asignaciones_120", caso: casoTareaSetAsig120, golden: goldenTareaSetAsig120 },
 	{ nombre: "tareas_eliminar", caso: casoTareaEliminar, golden: goldenTareaEliminar },
 	{ nombre: "tareas_restaurar", caso: casoTareaRestaurar, golden: goldenTareaRestaurar },
 	{ nombre: "tareas_vaciar_papelera", caso: casoTareaVaciar, golden: goldenTareaVaciar },
@@ -368,6 +376,7 @@ const CASOS = [
 	{ nombre: "vr_delete_comanda_if_safe", caso: casoVrDeleteComanda, golden: goldenVrDeleteComanda },
 	{ nombre: "mesas_save_layout", caso: casoMesaSaveLayout, golden: goldenMesaSaveLayout },
 	{ nombre: "mesas_save_layout_archiva", caso: casoMesaSaveLayoutArchiva, golden: goldenMesaSaveLayoutArchiva },
+	{ nombre: "mesas_save_layout_120_mesas", caso: casoMesaSaveLayout120, golden: goldenMesaSaveLayout120 },
 	{ nombre: "mesas_abrir_comanda", caso: casoMesaAbrir, golden: goldenMesaAbrir },
 	{ nombre: "mesas_set_trabajador_if_null", caso: casoMesaSetTrab, golden: goldenMesaSetTrab },
 	{ nombre: "mesas_set_reserva_if_null", caso: casoMesaSetReservaIfNull, golden: goldenMesaSetReservaIfNull },

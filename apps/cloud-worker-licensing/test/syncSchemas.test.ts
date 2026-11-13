@@ -25,7 +25,9 @@ describe("schemas totales de sync", () => {
 			cursor: 0,
 			limite: 1_000,
 		});
-		expect(historicoSchema.parse({ tabla: "Comandas", limite: 99_999 }).limite).toBe(2_000);
+		// El tope de una página del histórico (`HISTORICO_MAX_FILAS`): lo que pide la Main en calma.
+		expect(historicoSchema.parse({ tabla: "Comandas", limite: 99_999 }).limite).toBe(10_000);
+		expect(historicoSchema.parse({ tabla: "Comandas", limite: 2_000 }).limite).toBe(2_000);
 	});
 
 	it("descarta peticiones de claves inválidas y recorta antes de filtrar", () => {

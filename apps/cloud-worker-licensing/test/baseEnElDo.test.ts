@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
 
 import { enElHub } from "./helpers/hub";
-import { clienteDelHub } from "../src/lib/tenantClient";
+import { leerParaLaWeb } from "../src/domains/reservas_web/lecturasDeLaWeb";
 import { provisionTenantDatabase } from "../src/domains/licensing/licensing.helpers";
 import {
 	baseAprovisionada,
@@ -124,11 +124,10 @@ describe("claves foráneas aplazadas", () => {
 	});
 });
 
-describe("las lecturas del Worker van por RPC al DO", () => {
+describe("una lectura de la web va entera, en un viaje, al TenantHub", () => {
 	it("sin aprovisionar contesta tenant_db_not_provisioned; aprovisionado, lee", async () => {
 		const tenantId = "t-base-rpc";
-		const db = clienteDelHub(env as any, tenantId);
-		await expect(db.execute("SELECT 1;")).rejects.toMatchObject({
+		await expect(leerParaLaWeb(env as any, tenantId, { que: "negocioDelCorreo" })).rejects.toMatchObject({
 			code: "tenant_db_not_provisioned",
 			status: 404,
 		});
@@ -138,26 +137,47 @@ describe("las lecturas del Worker van por RPC al DO", () => {
 		const segunda = await provisionTenantDatabase(null as any, env as any, tenantId);
 		expect(segunda.reused).toBe(true);
 
-		const rs = await db.execute({ sql: "SELECT ID_Usuario, Email FROM Usuarios;", args: [] });
-		expect(rs.rows).toHaveLength(1);
-		const admin: any = rs.rows[0];
-		expect(admin.Email).toBe("admin@local");
-		expect(admin[0]).toBe("00000000-0000-7000-8000-000000000501");
-
-		const lote = await db.batch(
-			[
-				{ sql: "SELECT COUNT(*) AS n FROM Usuarios;", args: [] },
-				{ sql: "SELECT COUNT(*) AS n FROM Comandas;", args: [] },
-			],
-			"read",
-		);
-		expect(lote.map((r: any) => r.rows[0].n)).toEqual([1, 0]);
+		expect(await leerParaLaWeb(env as any, tenantId, { que: "negocioDelCorreo" })).toMatchObject({ nombre: expect.any(String) });
 	});
 
-	it("un error de SQL llega al Worker con su mensaje", async () => {
+	it("lo que devuelve cruza el RPC con sus `Set` y sus `Map`", async () => {
+		const tenantId = "t-base-rpc-colecciones";
+		await provisionTenantDatabase(null as any, env as any, tenantId);
+		await enElHub(tenantId, (hub: any) => {
+			const sql = hub.state.storage.sql;
+			sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Sala');");
+			sql.exec(
+				`INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+				 VALUES ('m1', 'z1', 'Mesa 1', 4, 0, 0, 'rect', 80, 80);`,
+			);
+			sql.exec("INSERT INTO Reserva_Web_Mesas (ID_Mesa, Activa) VALUES ('m1', 1);");
+			sql.exec("INSERT INTO Reserva_Web_Cierres (ID_Cierre, Dia_YMD) VALUES ('c1', '2026-12-24');");
+			sql.exec(
+				`INSERT INTO Reservas (ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Origen)
+				 VALUES ('r1', 'm1', '2026-12-24', '21:00', 'CENA', 2, 'PROXIMA', 'WEB');`,
+			);
+		});
+
+		const alta = await leerParaLaWeb(env as any, tenantId, {
+			que: "alta",
+			dia: "2026-12-24",
+			email: "nadie@correo.es",
+			idMesa: "auto",
+			automatica: true,
+		});
+		expect(alta.dia.cierres).toBeInstanceOf(Set);
+		expect([...alta.dia.cierres]).toEqual(["2026-12-24"]);
+		expect(alta.dia.idsEnLaBase).toBeInstanceOf(Set);
+		expect([...alta.dia.idsEnLaBase]).toEqual(["r1"]);
+		expect(alta.delCorreo).toBeInstanceOf(Set);
+		expect(alta.nombres).toBeInstanceOf(Map);
+		expect([...alta.nombres]).toEqual([["m1", "Mesa 1"]]);
+	});
+
+	it("un error de SQL llega con su mensaje", async () => {
 		const tenantId = "t-base-rpc-error";
 		await provisionTenantDatabase(null as any, env as any, tenantId);
-		const db = clienteDelHub(env as any, tenantId);
-		await expect(db.execute("SELECT * FROM Tabla_Que_No_Existe;")).rejects.toThrow(/no such table/);
+		await enElHub(tenantId, (hub: any) => hub.state.storage.sql.exec("DROP TABLE Reserva_Web_Cierres;"));
+		await expect(leerParaLaWeb(env as any, tenantId, { que: "dia", dia: "2026-12-24" })).rejects.toThrow(/no such table/);
 	});
 });

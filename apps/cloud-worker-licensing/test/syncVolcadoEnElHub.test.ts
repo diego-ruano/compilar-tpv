@@ -5,8 +5,8 @@
 //
 // Dentro del DO el volcado lee del cursor de su SQLite y sale como bytes ya escritos
 // (`domains/sync/volcado.ts`). Lo que se fija aquí es que eso llega entero a quien pregunta
-// cruzando el RPC, en un solo viaje y sin ninguna consulta suelta, y que con la ruta ejecutándose
-// en el Worker la respuesta es la misma.
+// cruzando el RPC, en un solo viaje y sin ninguna consulta suelta. Que el lector del cursor y el
+// del cliente escriben lo mismo, byte a byte, lo fijan los tests de cada ruta (`helpers/dosCaminos.ts`).
 //
 // El veto de rol (`soloLaMain`) es el de verdad. Dentro del TenantHub decide con el rol que llega
 // con la identidad: la base central de pruebas es el SQLite de otro Durable Object, que desde el del
@@ -33,7 +33,7 @@ const deps = {
 	olvidarLicenciasCacheadas,
 };
 
-/** La consulta con la que `soloLaMain` le pide el rol a la base central cuando corre en el Worker. */
+/** La consulta con la que `soloLaMain` le pide el rol a la base central en un router que corre en el Worker. */
 const PIDE_EL_ROL = /SELECT role FROM devices WHERE tenant_id=\? AND device_id=\? AND revoked_at_ms IS NULL/;
 
 function sembrar(n: Negocio): Promise<void> {
@@ -52,17 +52,11 @@ function sembrar(n: Negocio): Promise<void> {
 	});
 }
 
-/**
- * La hora de quien pregunta, la misma en las dos peticiones que se comparan: de ella sale la ventana,
- * y pedidas a un lado y a otro de un cambio de segundo las respuestas se diferenciarían en eso.
- */
+/** La hora de quien pregunta: de ella sale la ventana. */
 const AHORA = { "X-Client-Now": new Date().toISOString().slice(0, 19).replace("T", " ") };
 
-/** Lo mismo con la ruta en el Worker: cada lectura es una consulta al DO. */
-const EN_EL_WORKER = { entorno: { EJECUTAR_EN_EL_HUB: "0" }, cabeceras: AHORA };
-
 describe("los volcados de sync, dentro del TenantHub", () => {
-	it("la fase 1 llega entera en un viaje, y es la misma que con la ruta en el Worker", async () => {
+	it("la fase 1 llega entera en un viaje", async () => {
 		await conNegocioFirmado(deps, "volcado-hub-fase1", async (n) => {
 			await sembrar(n);
 
@@ -73,20 +67,12 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 			expect(res.headers.get("content-type")).toContain("application/json");
 			expect(viajes(res, "hub-ruta")).toBe(1);
 			expect(viajes(res, "hub-lee")).toBe(0);
-			const texto = await res.text();
-			const cuerpo = JSON.parse(texto);
+			const cuerpo = JSON.parse(await res.text());
 			expect(cuerpo.ok).toBe(true);
 			expect(cuerpo.seq).toBe(1);
 			const tabla = (nombre: string) => cuerpo.tablas.find((t: any) => t.nombre === nombre);
 			expect(tabla("Comandas").filas).toHaveLength(40);
 			expect(tabla("Zonas").filas[0]).toContain("Terraza de la ría");
-
-			const fuera = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", EN_EL_WORKER);
-			// Con la ruta en el Worker el veto lee la fila viva, como siempre.
-			expect(n.central.filter((q) => PIDE_EL_ROL.test(q))).toHaveLength(1);
-			expect(viajes(fuera, "hub-ruta")).toBe(0);
-			expect(viajes(fuera, "hub-lee")).toBeGreaterThan(0);
-			expect(await fuera.text()).toBe(texto);
 		});
 	});
 
@@ -94,8 +80,6 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 		await conNegocioFirmado(deps, "volcado-hub-resto", async (n) => {
 			await sembrar(n);
 
-			// Con la ruta en el Worker cada lectura pasa por `consultar`, que sólo deja leer: las
-			// sentencias de los volcados y la de las claves tienen que caber por esa puerta.
 			for (const [ruta, cuerpo] of [
 				["/v1/sync/verificar", {}],
 				["/v1/sync/verificar-claves", { tablas: [{ nombre: "Comandas", claves: ["ID_Comanda"] }] }],
@@ -105,11 +89,7 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 				expect(res.status, ruta).toBe(200);
 				expect(viajes(res, "hub-ruta"), ruta).toBe(1);
 				expect(viajes(res, "hub-lee"), ruta).toBe(0);
-				const texto = await res.text();
-
-				const fuera = await pedirFirmado(deps, app, n, ruta, { cuerpo, ...EN_EL_WORKER });
-				expect(viajes(fuera, "hub-ruta"), ruta).toBe(0);
-				expect(await fuera.text(), ruta).toBe(texto);
+				await res.text();
 			}
 
 			const pagina = await (
@@ -122,18 +102,16 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 		});
 	});
 
-	it("sin base, la fase 1 lo dice con su código por los dos caminos", async () => {
+	it("sin base, la fase 1 lo dice con su código", async () => {
 		// Es lo que la pantalla de recuperación necesita para ofrecer «empezar de cero»
 		// (`tenant_db_not_provisioned`): no un 500 del lector en bruto, que pide la base al motor.
 		await conNegocioFirmado(
 			deps,
 			"volcado-hub-sin-base",
 			async (n) => {
-				for (const opciones of [{ cabeceras: AHORA }, EN_EL_WORKER]) {
-					const res = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", opciones);
-					expect(res.status).toBe(404);
-					expect(await res.json()).toMatchObject({ ok: false, code: "tenant_db_not_provisioned" });
-				}
+				const res = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", { cabeceras: AHORA });
+				expect(res.status).toBe(404);
+				expect(await res.json()).toMatchObject({ ok: false, code: "tenant_db_not_provisioned" });
 			},
 			{ sinBase: true },
 		);

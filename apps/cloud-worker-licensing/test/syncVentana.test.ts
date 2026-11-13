@@ -21,6 +21,9 @@ import {
 	VENTANA_DIAS,
 } from "../src/domains/sync/bootstrap.ventana";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 let clienteActual: any = null;
 let esTpv = true;
 

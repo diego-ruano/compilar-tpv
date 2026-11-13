@@ -286,6 +286,7 @@ lecturas_de_contrato! {
     venta_rapida__buscar_productos_texto_largo,
     venta_rapida__detalles_ver_ticket,
     venta_rapida__index_rows,
+    venta_rapida__index_rows_120_tickets,
     tareas__admin,
     tareas__mias,
     tareas__trabajadores,

@@ -167,24 +167,61 @@ fn negocio_de_la_licencia(nube: &dyn PairingService) -> AppResult<String> {
 
 /* ===== SYNC-19 · fase 2: el histórico, en segundo plano ===== */
 
-/// Filas por página. El servidor tiene su propio techo (más bajo manda); esto es lo que se pide.
-pub const BACKFILL_FILAS_POR_PAGINA: i64 = 1_000;
+/// Filas por página con el equipo trabajando: las que admitía el worker antes de que la página del
+/// histórico tuviera su techo propio (2.000). Cada página ocupa un rato el hilo del DO del negocio,
+/// que atiende a la vez a la Main y a las Handy, y aquí el escritor de la base mientras se aplica: con
+/// el bar trabajando, páginas cortas.
+pub const BACKFILL_FILAS_POR_PAGINA: i64 = 2_000;
 
-/// Páginas por vencimiento del job. Con el intervalo del job son ~10.000 filas cada cinco minutos:
-/// un histórico de tres meses converge en unas horas sin que nadie lo note ni en el equipo ni en la
-/// factura de Turso.
+/// Páginas por vencimiento con el equipo trabajando: ~20.000 filas cada cinco minutos, unas 240.000
+/// a la hora.
 ///
 /// **No es el bucle entero a propósito.** El motor de jobs tiene que conservar el control: un
 /// backfill que se lleva el equipo por delante durante media hora lo hace en hora punta, y eso es
 /// peor que tardar.
 pub const BACKFILL_PAGINAS_POR_TICK: usize = 10;
 
+/// Filas por página con el equipo en calma: las que admite el worker (`HISTORICO_MAX_FILAS`, 10.000),
+/// que además corta la página en 4 MiB (`HISTORICO_MAX_BYTES`). Un worker anterior la recorta a las
+/// suyas (2.000) y el histórico baja igual, más despacio.
+pub const BACKFILL_FILAS_POR_PAGINA_EN_CALMA: i64 = 10_000;
+
+/// Páginas por vencimiento con el equipo en calma: hasta 400.000 filas cada cinco minutos. Un año de
+/// un bar de mil comandas diarias (unos ocho millones de filas) baja así en unas horas de calma, y
+/// no en días: mientras tanto la reconciliación y el contraste no corren. Cada página es una petición
+/// aparte, así que entre una y otra el DO atiende lo demás del negocio.
+pub const BACKFILL_PAGINAS_POR_TICK_EN_CALMA: usize = 40;
+
+/// Lo que tiene que llevar el equipo sin escribir nada (ni una operación de aquí ni un cambio
+/// aplicado de la nube) para bajar el histórico a ritmo de calma. Se mira antes de cada página: si
+/// entra una venta a mitad, lo que queda del vencimiento va al ritmo de trabajo.
+pub const BACKFILL_CALMA_MS: i64 = 3 * 60 * 1000;
+
 /// Progreso del backfill del histórico.
 pub async fn backfill_estado(repo: &dyn SyncRepository) -> AppResult<BackfillEstado> {
     repo.backfill_estado().await
 }
 
+fn ahora_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// ¿Está el equipo en calma? Nadie ha escrito en [`BACKFILL_CALMA_MS`]: sin ninguna escritura
+/// todavía, también.
+fn en_calma(ultima_escritura_ms: Option<i64>, ahora_ms: i64) -> bool {
+    ultima_escritura_ms.is_none_or(|t| ahora_ms.saturating_sub(t) >= BACKFILL_CALMA_MS)
+}
+
 /// Un vencimiento del job: trae unas cuantas páginas del histórico y las aplica.
+///
+/// Cuántas y de qué tamaño depende de si el equipo está en calma ([`en_calma`], mirado antes de cada
+/// página): trabajando, [`BACKFILL_PAGINAS_POR_TICK`] de [`BACKFILL_FILAS_POR_PAGINA`]; en calma,
+/// [`BACKFILL_PAGINAS_POR_TICK_EN_CALMA`] de [`BACKFILL_FILAS_POR_PAGINA_EN_CALMA`]. Las tablas van
+/// una detrás de otra, en el orden que da el worker (padres primero), y cada una de lo más antiguo a
+/// lo más nuevo: al bajar una tabla ya están todas las filas de las que cuelga.
 ///
 /// Idempotente, como exige el motor: repetir una página no cambia nada (`INSERT OR IGNORE` en la
 /// persistencia) y el cursor sólo avanza cuando la página entra de verdad.
@@ -196,16 +233,27 @@ pub async fn backfill_paso(
     repo: &dyn SyncRepository,
 ) -> AppResult<i64> {
     let mut total = 0i64;
+    let mut paginas = 0usize;
 
-    for _ in 0..BACKFILL_PAGINAS_POR_TICK {
+    loop {
         let Some((tabla, cursor)) = repo.backfill_siguiente().await? else {
             break;
         };
+        let ahora = ahora_ms();
+        let (tope, limite) = if en_calma(repo.ultima_escritura_ms(ahora).await?, ahora) {
+            (BACKFILL_PAGINAS_POR_TICK_EN_CALMA, BACKFILL_FILAS_POR_PAGINA_EN_CALMA)
+        } else {
+            (BACKFILL_PAGINAS_POR_TICK, BACKFILL_FILAS_POR_PAGINA)
+        };
+        if paginas >= tope {
+            break;
+        }
+        paginas += 1;
 
         let pagina: HistoricoPagina = match pedir(
             nube,
             "/v1/sync/historico",
-            json!({ "tabla": tabla, "cursor": cursor, "limite": BACKFILL_FILAS_POR_PAGINA }),
+            json!({ "tabla": tabla, "cursor": cursor, "limite": limite }),
             &format!("página de histórico ({tabla})"),
             AppError::External,
         )
@@ -455,6 +503,9 @@ mod tests {
             Ok(())
         }
         async fn backfill_estado(&self) -> AppResult<BackfillEstado> {
+            panic!("no usado")
+        }
+        async fn ultima_escritura_ms(&self, _: i64) -> AppResult<Option<i64>> {
             panic!("no usado")
         }
     }

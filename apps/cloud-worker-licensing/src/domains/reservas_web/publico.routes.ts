@@ -12,8 +12,9 @@
 //   POST /reserva  { token }              el resumen para la página de cancelar
 //   POST /cancelar { token }              cancelar desde el enlace del correo
 //
-// Lo que no depende de lo pendiente se lee directamente de la base; lo que sí (qué mesas están
-// libres, reservar, cancelar), lo decide la agenda del negocio. Ninguna respuesta lleva datos
+// Lo que no depende de lo pendiente se lee directamente de la base, una lectura entera por viaje a su
+// TenantHub (`leerParaLaWeb`); lo que sí (qué mesas están libres, reservar, cancelar), lo decide la
+// agenda del negocio. Ninguna respuesta lleva datos
 // personales de una reserva, y el token del enlace sólo viaja en el correo (§4.8): `/reserva` va
 // por POST para que no salga en ninguna URL ni en ningún log.
 //
@@ -33,13 +34,11 @@ import type {
 import type { Env } from "../../env";
 import { agendaDe } from "../../durableObjects/agendaWeb";
 import { codigoDeReserva, type RechazoAgenda } from "../../durableObjects/agendaWeb.motor";
-import { lecturaConHora } from "../../lib/tenantClient";
 import { reportarReservaWeb } from "../../observability/axiom";
 import { consulta, cuerpo } from "../../lib/validacion";
-import { diasAbiertos, horizonte, maxPersonas, motivoDelDia, tramosDelDia } from "./disponibilidad";
-import { horaDelNegocio } from "./horaDelNegocio";
-import { enlaceDeCancelar, enviarCorreoReservaWeb, negocioDelCorreo, type NegocioDelCorreo } from "./correos";
-import { ajustesWeb, cierresEntre, mesasYFranjas, negocioPublico, planoPublico } from "./lecturas";
+import { diasAbiertos, maxPersonas, motivoDelDia, tramosDelDia } from "./disponibilidad";
+import { enlaceDeCancelar, enviarCorreoReservaWeb, type NegocioDelCorreo } from "./correos";
+import { leerParaLaWeb } from "./lecturasDeLaWeb";
 import { origenDelWidget } from "./claves";
 import { corsPublico } from "./cors";
 import { limitadorAltas, puertaPublica, topeDelCuerpo, verificacionHumana, type PublicoVars } from "./puerta";
@@ -81,17 +80,7 @@ function anotar(c: any, campos: Parameters<typeof reportarReservaWeb>[1]): void 
 }
 
 reservasWebPublicoRoutes.get("/:clave/negocio", puertaPublica, async (c) => {
-	const d = await lecturaConHora(c.env, c.get("tenantId"), horaDelNegocio, async (db, ahora) => {
-		const ajustes = await ajustesWeb(db);
-		const hoy = ahora.slice(0, 10);
-		const { primero, ultimo } = horizonte(hoy, ajustes);
-		const [negocio, { mesas, franjas }, cierres] = await Promise.all([
-			negocioPublico(db),
-			mesasYFranjas(db),
-			cierresEntre(db, primero, ultimo),
-		]);
-		return { ajustes, hoy, primero, ultimo, negocio, mesas, franjas, cierres };
-	});
+	const d = await leerParaLaWeb(c.env, c.get("tenantId"), { que: "negocio" });
 
 	// El interruptor general del negocio. Con el nombre y el teléfono, para que el widget diga a
 	// quién llamar.
@@ -116,18 +105,14 @@ reservasWebPublicoRoutes.get("/:clave/negocio", puertaPublica, async (c) => {
 
 reservasWebPublicoRoutes.get("/:clave/dia", puertaPublica, consulta(diaQuerySchema), async (c) => {
 	const { dia } = c.req.valid("query");
-	const d = await lecturaConHora(c.env, c.get("tenantId"), horaDelNegocio, async (db, ahora) => {
-		const ajustes = await ajustesWeb(db);
-		const [cierres, { mesas, franjas }] = await Promise.all([cierresEntre(db, dia, dia), mesasYFranjas(db)]);
-		return { ajustes, hoy: ahora.slice(0, 10), cierres, mesas, franjas };
-	});
+	const d = await leerParaLaWeb(c.env, c.get("tenantId"), { que: "dia", dia });
 	const motivo = motivoDelDia(dia, d.hoy, d.ajustes, d.cierres);
 	if (motivo) return c.json({ ok: false, error: motivo }, motivo === "reserva_web_cerrada" ? 409 : 400);
 	return c.json({ ok: true, dia, tramos: tramosDelDia(d.mesas, d.franjas, dia, d.ajustes) } satisfies ConOk<{ dia: string; tramos: Tramo[] }>);
 });
 
 reservasWebPublicoRoutes.get("/:clave/plano", puertaPublica, async (c) => {
-	const plano = await lecturaConHora(c.env, c.get("tenantId"), horaDelNegocio, (db) => planoPublico(db));
+	const plano = await leerParaLaWeb(c.env, c.get("tenantId"), { que: "plano" });
 	c.header("Cache-Control", "public, max-age=60");
 	return c.json({ ok: true, ...plano } satisfies ConOk<Plano>);
 });
@@ -147,7 +132,7 @@ reservasWebPublicoRoutes.get(
 /** Lo del negocio para un correo. Si no se puede leer, el correo sale igual, sin ello. */
 async function negocioParaElCorreo(c: any, tenantId: string): Promise<NegocioDelCorreo> {
 	try {
-		return await lecturaConHora(c.env, tenantId, horaDelNegocio, (db) => negocioDelCorreo(db));
+		return await leerParaLaWeb(c.env, tenantId, { que: "negocioDelCorreo" });
 	} catch (e: any) {
 		console.warn("[reservas-web] no se ha podido leer el negocio para el correo:", String(e?.message || e));
 		return { nombre: "", direccion: "", telefono: "", correo: null };

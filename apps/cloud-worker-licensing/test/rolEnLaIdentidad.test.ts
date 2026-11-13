@@ -12,7 +12,7 @@
 //   entrada del dispositivo en caché la petición no toca la base central;
 // - una Handy se queda fuera, decidido dentro del DO y antes de mirar el cuerpo;
 // - el rol no sale de la petición: una cabecera `x-role` no abre nada;
-// - con las rutas ejecutándose en el Worker, el veto sigue leyendo la fila viva, como antes;
+// - en un router que se queda en el Worker (las reservas web de la Main), el veto lee la fila viva;
 // - una baja se nota como mucho al caducar la entrada del dispositivo (60 s), que es lo que ya
 //   tardaba en notarla `tenantAuth`, y un dispositivo dado de baja nunca entra en la caché.
 
@@ -151,8 +151,6 @@ afterEach(() => {
 describe("el rol del dispositivo viaja con la identidad al TenantHub", () => {
 	it("la Main pasa el veto dentro del DO sin que nadie vuelva a la base central a por el rol", async () => {
 		await conNegocio("main", async (n) => {
-			expect(env.EJECUTAR_EN_EL_HUB).toBe("1");
-
 			const primera = await pedir(n, MAIN, "/v1/sync/changes", { since: 0 });
 			expect(primera.status).toBe(200);
 			expect(primera.json).toMatchObject({ items: [] });
@@ -197,16 +195,15 @@ describe("el rol del dispositivo viaja con la identidad al TenantHub", () => {
 		});
 	});
 
-	it("con las rutas en el Worker, el veto sigue leyendo la fila viva de la base central", async () => {
+	it("en un router que se queda en el Worker, el veto lee la fila viva de la base central", async () => {
 		await conNegocio("worker", async (n) => {
-			const apagado = { entorno: { EJECUTAR_EN_EL_HUB: "0" } };
-
-			const main = await pedir(n, MAIN, "/v1/sync/changes", { since: 0 }, apagado);
+			// Las reservas web de la Main sólo tocan la base central y la agenda: no llevan `alHub`.
+			const main = await pedir(n, MAIN, "/v1/reservas-web/pendientes", {});
 			expect(main.status).toBe(200);
 			expect(main.viajes).toBe(0);
 			expect(n.central.filter((s) => PIDE_EL_ROL.test(s))).toHaveLength(1);
 
-			const handy = await pedir(n, HANDY, "/v1/sync/changes", { since: 0 }, apagado);
+			const handy = await pedir(n, HANDY, "/v1/reservas-web/pendientes", {});
 			expect(handy.status).toBe(403);
 			expect(handy.json.error).toBe("forbidden_not_tpv");
 			expect(n.central.filter((s) => PIDE_EL_ROL.test(s))).toHaveLength(2);

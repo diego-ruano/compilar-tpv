@@ -1,9 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../env";
 import { MotorTenantHub } from "./tenantHub.motor";
-import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
-import type { Sentencia } from "./tenantHub.sqlite";
-import { diagnosticar, type AccionDeDiagnostico, type RespuestaDeDiagnostico } from "./tenantHub.diagnostico";
+import type { ApplyParams, IdentidadDelWorker, ResultadoAplicacion } from "./tenantHub.rpc";
+import type { LecturaWeb, RespuestaDeLecturaWeb } from "../domains/reservas_web/lecturasDeLaWeb";
 import { comoPeticionDeSentry } from "../observability/sentry";
 
 /** RI-45: solo este adaptador es RPC. Los helpers del motor no pertenecen a su prototipo. */
@@ -31,14 +30,12 @@ export class TenantHub extends DurableObject<Env> {
 		);
 	}
 
-	/** Las lecturas del Worker contra la base del negocio, que vive aquí. Sólo lee. */
-	consultar(tenantId: string, sentencias: Sentencia[], enLote: boolean): Promise<RespuestaDeConsulta> {
-		return this.motor.consultar(tenantId, sentencias, enLote);
-	}
-
-	/** El estado propio de la nube (el freno del PIN, el checkpoint de la purga), para la ruta que corre en el Worker. */
-	anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
-		return this.motor.anotarEstado(tenantId, sentencia);
+	/**
+	 * Una lectura de la agenda de reservas web o de la API pública de la reserva, entera, con la base
+	 * al lado (`domains/reservas_web/lecturasDeLaWeb.ts`). Sólo lee.
+	 */
+	leerParaLaWeb(tenantId: string, lectura: LecturaWeb): Promise<RespuestaDeLecturaWeb> {
+		return this.motor.leerParaLaWeb(tenantId, lectura);
 	}
 
 	/** El alta del negocio crea aquí su esquema y su administrador inicial. */
@@ -55,13 +52,8 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.borrarTodo();
 	}
 
-	/** La ruta de diagnóstico de latencias (`tenantHub.diagnostico.ts`). */
-	diagnostico(a: AccionDeDiagnostico): Promise<RespuestaDeDiagnostico> {
-		return diagnosticar(this.ctx, this.env, a);
-	}
-
-	revocarDispositivo(deviceId: string): void {
-		this.motor.revocarDispositivo(deviceId);
+	revocarDispositivo(deviceId: string): Promise<void> {
+		return this.motor.revocarDispositivo(deviceId);
 	}
 
 	/** AUD-02: la licencia del negocio ha cambiado; que vuelva a leer quién es la Main. */

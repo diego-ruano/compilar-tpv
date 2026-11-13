@@ -23,6 +23,9 @@ import { ensureEd25519Sha512 } from "./helpers/ed25519";
 import { bytesToB64 } from "../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../src/server/utils/crypto";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 let dbDePruebas: unknown = null;
 
 vi.mock("../src/server/db", async (importOriginal) => {

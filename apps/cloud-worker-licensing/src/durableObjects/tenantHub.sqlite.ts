@@ -4,9 +4,10 @@
 //
 // El motor, las rutas y los tests hablan con la base a través de un `Client` de libsql (`execute`,
 // `batch`). Aquí se sirve esa misma forma sobre `ctx.storage.sql`, para que las doscientas
-// consultas del worker no dependan de dónde vive la base. Dentro del DO se usa directamente
-// (`clienteLocal`); desde el Worker, las lecturas llegan por RPC (`leerEnBruto` devuelve filas
-// planas, y `aResultSet` las vuelve a montar al otro lado) y no pueden escribir.
+// consultas del worker no dependan de dónde vive la base: es `clienteLocal`, que usan las rutas
+// (que se ejecutan dentro del DO, `lib/enElHub.ts`) y el motor. Desde fuera del DO no se lee por
+// aquí: la agenda y la API pública de la reserva piden una lectura entera
+// (`domains/reservas_web/lecturasDeLaWeb.ts`).
 //
 // Diferencias con el SQLite de libsql que este fichero absorbe:
 //
@@ -24,9 +25,9 @@ import { MIGRATIONS, normalize, sha256Hex } from "../server/tenantMigrations";
 import { HubError } from "../lib/errorHttp";
 
 /** Una sentencia tal y como la acepta libsql: texto suelto, o texto con argumentos posicionales. */
-export type Sentencia = string | { sql: string; args?: unknown[] };
+type Sentencia = string | { sql: string; args?: unknown[] };
 
-/** Lo que viaja por RPC: columnas y valores en bruto, sin el envoltorio de libsql. */
+/** Las filas de una sentencia en bruto: columnas y valores, sin el envoltorio de libsql. */
 export type FilasEnBruto = {
 	columns: string[];
 	rows: unknown[][];
@@ -162,139 +163,8 @@ export class HaceFaltaAplazar extends Error {
 	}
 }
 
-// ---------------- Lo que llega de fuera del DO ----------------
-//
-// El Worker habla con la base por dos puertas (`MotorTenantHub.consultar` y `anotarEstado`), y
-// ninguna deja escribir datos del negocio: eso va por el motor (`aplicar`), que es quien lo apunta
-// en `Applied_Operations` y en `Sync_Changes` y lo difunde. Una escritura que entrara por aquí no
-// la vería nunca la Main.
-
-/** Una lectura empieza por `SELECT` o por `WITH`, con comentarios o sin ellos delante. */
-const EMPIEZA_COMO_LECTURA = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*(?:SELECT|WITH)\b/i;
-
-/**
- * ¿Hay una sola sentencia en este texto?
- *
- * El SQLite del DO ejecuta todas las que le lleguen separadas por `;`, y lo que devuelve es de la
- * última: detrás de un `SELECT` cabe un `PRAGMA` que no escribe ninguna fila y deja cambiada la
- * conexión para todo lo que venga después (`ignore_check_constraints`, por ejemplo; comprobado en
- * `test/sondaSqliteDo.test.ts`).
- *
- * El texto se recorre como lo trocea SQLite: un `;` dentro de un texto o de un nombre entre
- * comillas, corchetes o acentos graves, o dentro de un comentario, no separa nada. Detrás del
- * primero que sí separa sólo puede haber espacios, comentarios y más `;`.
- *
- * ⚠️ Ante la duda dice que no. Un parámetro con nombre (`$a`, `@a`, `:a`, `#a`) puede llevar
- * detrás un paréntesis que SQLite se traga entero, comillas incluidas (`$a(')`), y lo que aquí
- * parecería un texto entre comillas sería para él una segunda sentencia. Ninguna consulta del
- * negocio los usa (`partes`), así que un texto que traiga uno no pasa.
- */
-export function unaSolaSentencia(texto: string): boolean {
-	const n = texto.length;
-	let cerrada = false;
-	let i = 0;
-	while (i < n) {
-		const c = texto[i];
-		if (c === "-" && texto[i + 1] === "-") {
-			const fin = texto.indexOf("\n", i);
-			i = fin < 0 ? n : fin + 1;
-			continue;
-		}
-		if (c === "/" && texto[i + 1] === "*") {
-			const fin = texto.indexOf("*/", i + 2);
-			i = fin < 0 ? n : fin + 2;
-			continue;
-		}
-		if (c === ";") {
-			cerrada = true;
-			i++;
-			continue;
-		}
-		if (/\s/.test(c)) {
-			i++;
-			continue;
-		}
-		// Cualquier otra cosa es parte de una sentencia.
-		if (cerrada) return false;
-		if (c === "$" || c === "@" || c === ":" || c === "#") return false;
-		if (c === "'" || c === '"' || c === "`") {
-			// Hasta la comilla que cierra; dos seguidas son una comilla dentro del texto.
-			i++;
-			while (i < n) {
-				if (texto[i] === c) {
-					if (texto[i + 1] !== c) break;
-					i++;
-				}
-				i++;
-			}
-			i++;
-			continue;
-		}
-		if (c === "[") {
-			const fin = texto.indexOf("]", i + 1);
-			i = fin < 0 ? n : fin + 1;
-			continue;
-		}
-		i++;
-	}
-	return true;
-}
-
-/**
- * Las lecturas del Worker: ni una fila escrita, ni la conexión cambiada.
- *
- * Se mira tres veces. Antes de ejecutar, que cada texto sea una sola sentencia y que empiece como
- * una lectura: deja fuera lo que no escribe filas pero cambia la conexión (un `PRAGMA`, delante o
- * detrás de un `SELECT`). Y después de ejecutar, que no haya escrito nada: un `WITH … DELETE`
- * empieza como una lectura. Va todo en una transacción, así que lo que haya escrito se deshace.
- */
-export function leerEnBruto(storage: DurableObjectStorage, sentencias: Sentencia[]): FilasEnBruto[] {
-	const sql = storage.sql;
-	const noEsLectura = () => new HubError("consulta_no_es_lectura", 500);
-	return storage.transactionSync(() =>
-		sentencias.map((s) => {
-			const { texto, args } = partes(s);
-			if (!EMPIEZA_COMO_LECTURA.test(texto) || !unaSolaSentencia(texto)) throw noEsLectura();
-			const cursor = sql.exec(texto, ...args.map(valorParaExec));
-			const columns = [...cursor.columnNames];
-			const rows = Array.from(cursor.raw()) as unknown[][];
-			// Sólo es fiable con el cursor ya recorrido.
-			if (cursor.rowsWritten > 0) throw noEsLectura();
-			return { columns, rows, rowsAffected: 0, lastInsertRowid: null };
-		}),
-	);
-}
-
-/**
- * Las tablas del esquema que son estado de la nube y de nadie más: el freno del PIN de las Handy
- * (`Intentos_Login`, LOGIN-01) y el checkpoint de cada Main, que es el suelo de la purga del log
- * (`Sync_Main_Checkpoints`, SYNC-12). No se replican, así que lo que una ruta escribe en ellas no
- * pasa por el motor. Dentro del DO las escribe con el cliente de al lado; cuando la ruta corre en el
- * Worker, por `anotarEstado`.
- */
-const TABLAS_DE_ESTADO: ReadonlySet<string> = new Set(["intentos_login", "sync_main_checkpoints"]);
-
-/** Un alta, un cambio o un borrado que dice a las claras en qué tabla: nada de `WITH` ni de `OR REPLACE`. */
-const ESCRITURA_EN_TABLA = /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([A-Za-z_][A-Za-z0-9_]*)\b/i;
-
-/** ¿Es esta sentencia una escritura de estado de la nube, y nada más que eso? */
-export function esEscrituraDeEstado(s: Sentencia): boolean {
-	const { texto } = partes(s);
-	const tabla = ESCRITURA_EN_TABLA.exec(texto)?.[1]?.toLowerCase();
-	if (!tabla || !TABLAS_DE_ESTADO.has(tabla)) return false;
-	// Una sola sentencia: sin `;` que no sea el del final. Ninguna de las que se escriben aquí lleva
-	// uno dentro de un texto, y el SQLite del DO ejecutaría lo que viniera detrás.
-	return !texto.trimEnd().replace(/;$/, "").includes(";");
-}
-
-/** Una escritura de estado de la nube (`esEscrituraDeEstado`); cualquier otra cosa se rechaza. */
-export function anotarEnBruto(storage: DurableObjectStorage, s: Sentencia): FilasEnBruto {
-	if (!esEscrituraDeEstado(s)) throw new HubError("estado_local_no_admitido", 500);
-	return storage.transactionSync(() => ejecutarEnBruto(storage.sql, s));
-}
-
 /** Las filas en bruto con la forma de una `Row` de libsql: por nombre y por posición. */
-export function aResultSet(b: FilasEnBruto): ResultSet {
+function aResultSet(b: FilasEnBruto): ResultSet {
 	const rows = b.rows.map((valores) => {
 		const fila: Record<string | number, unknown> = {};
 		Object.defineProperty(fila, "length", { value: valores.length });

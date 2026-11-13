@@ -47,6 +47,29 @@ async fn un_entero<C: Reader>(conn: &C, sql: &str) -> AppResult<Option<i64>> {
     Ok(un_valor(conn, sql).await?.and_then(v_i64))
 }
 
+/// La última escritura en la base que se puede creer, en milisegundos de época.
+///
+/// Cada operación de aquí y cada cambio aplicado de la nube deja su fila en `_Sync_Applied_Ops` con
+/// la hora a la que entró: la más reciente es la última escritura. La más reciente **que se pueda
+/// creer**: una fila fechada más allá de ahora es de un reloj que estuvo adelantado (se adelanta una
+/// semana, se vende, se corrige); sería el máximo hasta que el reloj la alcanzase, taparía todo lo
+/// escrito después y no se vería un momento tranquilo en días. Se salta y vale la anterior.
+///
+/// La leen el contraste (VERIF-02) y el ritmo del backfill del histórico (`SyncRepository`).
+pub(crate) async fn ultima_escritura_creible<C: Reader>(conn: &C, ahora_ms: i64) -> AppResult<Option<i64>> {
+    let mut filas = conn
+        .query(
+            "SELECT MAX(Applied_At_Ms) FROM _Sync_Applied_Ops WHERE Applied_At_Ms <= ?1;",
+            vec![Value::Integer(ahora_ms.saturating_add(MARCA_FUTURA_CREIBLE_MS))],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(match filas.next().await.map_err(db_err)? {
+        Some(f) => v_i64(f.get_value(0).map_err(db_err)?),
+        None => None,
+    })
+}
+
 /// Una hora local de la base (`YYYY-MM-DD HH:MM:SS`, la del equipo: RELOJ-01) en milisegundos de
 /// época. `None` si no es una hora, o si cae en la hora que no existe de un cambio de horario.
 fn hora_local_a_ms(texto: &str) -> Option<i64> {
@@ -108,26 +131,7 @@ impl VerificacionNubeRepository for SqliteVerificacionNube {
                 .unwrap_or(0)
                 > 0;
 
-        // Cada operación de aquí y cada cambio aplicado de la nube deja su fila en
-        // `_Sync_Applied_Ops` con la hora a la que entró: la más reciente es la última escritura.
-        //
-        // La más reciente **que se pueda creer**. Una fila fechada más allá de ahora es de un reloj
-        // que estuvo adelantado (se adelanta una semana, se vende, se corrige): sería el máximo
-        // hasta que el reloj la alcanzase, taparía todo lo escrito después y el contraste no vería
-        // un momento tranquilo en días. Se salta y vale la anterior.
-        let ultima_escritura_ms = {
-            let mut filas = r
-                .query(
-                    "SELECT MAX(Applied_At_Ms) FROM _Sync_Applied_Ops WHERE Applied_At_Ms <= ?1;",
-                    vec![Value::Integer(ahora_ms.saturating_add(MARCA_FUTURA_CREIBLE_MS))],
-                )
-                .await
-                .map_err(db_err)?;
-            match filas.next().await.map_err(db_err)? {
-                Some(f) => v_i64(f.get_value(0).map_err(db_err)?),
-                None => None,
-            }
-        };
+        let ultima_escritura_ms = ultima_escritura_creible(&r, ahora_ms).await?;
 
         Ok(SituacionVerificacion {
             ultima_ok_ms,

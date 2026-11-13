@@ -348,6 +348,7 @@ repositorio no dice si está puesto. Cada despliegue envía el `observability` d
 | Eventos de sync | `durableObjects/tenantHub.motor.ts` (`emitSyncEvent`), `tenantHub.mensajes.ts` |
 | Latidos | `apps/cloud-worker-licensing/src/observability/latido.ts` |
 | Salud | `apps/cloud-worker-licensing/src/server/salud.ts` |
+| Desglose de tiempos (`Server-Timing`: base central y viajes al `TenantHub`; lo lee el generador de carga, y sólo lo recibe un dispositivo autenticado por `tenantAuth`, nunca una ruta pública o anónima) | `apps/cloud-worker-licensing/src/observability/tiempos.ts`, `src/app.ts` |
 | Esquema de evento | `crates/tpv-telemetry/src/event.rs` → `packages/contracts/src/generated/telemetry.ts` (ts-rs) |
 
 ## Release de Sentry y source maps
@@ -465,8 +466,8 @@ La telemetría de dispositivos y sync lleva `tenant_id`, `device_id`, `device_mo
 `build_variant` y `build_commit` identifican el escritorio, y los errores HTTP del worker añaden
 `client_version` y `client_variant` cuando el cliente los envía. Los eventos del DO en Axiom añaden `connected_devices` y
 `main_connected`. `connected_devices` cuenta los sockets autenticados de `state.getWebSockets()`; el
-`last_seen_at_ms` de un dispositivo se refresca al conectar y con su actividad, no con el latido (que no
-despierta al DO): la presencia real la dan `main_online` / `main_offline`.
+`last_seen_at_ms` de un dispositivo se refresca al conectar (lo apunta el Worker al canjear el ticket) y con
+su actividad, no con el latido (que no despierta al DO): la presencia real la dan `main_online` / `main_offline`.
 
 ## Eventos de `tpv-sync`
 

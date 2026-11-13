@@ -7,6 +7,7 @@
 //
 // Solo la Main (rol tpv) consume este endpoint: es quien tiene la BD local que mantener al día.
 
+import type { Client } from "@libsql/client/web";
 import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
 import { PURGADO_HASTA, serializarCambios, type CambioGuardado } from "./cambiosJson";
@@ -30,6 +31,7 @@ import {
 } from "./bootstrap.ventana";
 import {
 	Escritor,
+	HISTORICO_MAX_BYTES,
 	VOLCADO_MAX_BYTES,
 	bytesDe,
 	enBytes,
@@ -75,59 +77,101 @@ function rows(rs: any): any[] {
 	});
 }
 
+/**
+ * Lo más que ocupa una página de `/v1/sync/changes`, en bytes de las sentencias de sus cambios y de
+ * lo que lleva alrededor cada uno (`BYTES_POR_CAMBIO`). Va además del tope de cambios (`limit`,
+ * hasta 1.000): mil cambios pequeños caben de sobra, pero un cambio puede llevar cientos de
+ * sentencias (un plano entero, un cobro de cien líneas), y mil de esos eran cientos de megas que el
+ * TenantHub montaba en memoria con el hilo del negocio ocupado y que la Main tenía que bajar entera.
+ *
+ * La página se corta antes de pasar de aquí, y nunca sin al menos un cambio: uno que solo ya pase
+ * viaja igual (partirlo no se puede, y dejarlo fuera atascaría a la Main en él). Una página cortada
+ * lleva su `nextSince`, el `Seq` de su último cambio, igual que una completa, y la Main sigue pidiendo
+ * desde ahí hasta que una llega vacía (`use_cases/replicacion.rs::catch_up`): no necesita saber que
+ * se ha cortado, y una Main anterior a esto tampoco.
+ */
+export const CAMBIOS_MAX_BYTES = 4 * 1024 * 1024;
+
+/** Lo que añade un cambio a sus sentencias en la respuesta: `seq`, `opId`, `command`, `deviceId`… */
+const BYTES_POR_CAMBIO = 256;
+
+/**
+ * Los cambios con `Seq > since`, en orden, hasta `limit` y sin pasar de `maxBytes` (`CAMBIOS_MAX_BYTES`),
+ * con el final del log (`highWater`) y lo purgado (`purgadoHasta`, AUD-19), todo de la misma foto.
+ *
+ * El corte por bytes lo hace la propia sentencia, con la suma acumulada de lo que ocupa cada cambio:
+ * lo que no cabe no llega a salir de la base, ni a montarse como texto.
+ */
+export async function leerPaginaDeCambios(
+	db: Pick<Client, "batch">,
+	since: number,
+	limit: number,
+	maxBytes: number = CAMBIOS_MAX_BYTES,
+): Promise<{ items: CambioGuardado[]; highWater: number; purgadoHasta: number }> {
+	// Items, high-water y lo purgado en la misma transacción de lectura. La recuperación sólo
+	// desbloquea cuando el checkpoint local alcanza exactamente una foto conocida del final del
+	// log. AUD-19: y lo purgado tiene que ser de la misma foto que los items; leído aparte, una
+	// purga entre medias escondería el tramo que se lleva. Cada lectura es de una fila: los
+	// extremos del log por su clave (un `MIN` o un `MAX` solo, sin recorrerlo), la marca por la
+	// del checkpoint.
+	//
+	// Los cambios: los `limit` siguientes por su clave y, de ellos, los que caben en `maxBytes`
+	// contando lo que ocupa cada uno (sus sentencias, en bytes de UTF-8, y lo de alrededor); el
+	// primero, siempre. La suma acumulada crece con el `Seq`, así que lo que cabe es un principio de
+	// la página, sin huecos.
+	const [rs, rsFinal, rsPrimero, rsPurgado] = await db.batch(
+		[
+			{
+				sql: `
+				SELECT Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms, Statements_Type
+				FROM (
+					SELECT Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms,
+					       CASE WHEN json_valid(Statements_Json) THEN json_type(Statements_Json) ELSE 'invalid' END AS Statements_Type,
+					       ROW_NUMBER() OVER (ORDER BY Seq) AS Orden,
+					       SUM(COALESCE(length(CAST(Statements_Json AS BLOB)), 0) + ?3)
+					           OVER (ORDER BY Seq ROWS UNBOUNDED PRECEDING) AS Bytes_Hasta_Aqui
+					FROM (SELECT * FROM Sync_Changes WHERE Seq > ?1 ORDER BY Seq ASC LIMIT ?2)
+				)
+				WHERE Orden = 1 OR Bytes_Hasta_Aqui <= ?4
+				ORDER BY Seq ASC;
+			`,
+				args: [since, limit, BYTES_POR_CAMBIO, maxBytes],
+			},
+			{ sql: "SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;", args: [] },
+			{ sql: "SELECT MIN(Seq) AS primero FROM Sync_Changes;", args: [] },
+			{
+				sql: "SELECT Last_Seq AS purgado FROM Sync_Main_Checkpoints WHERE Device_Id = ?1;",
+				args: [PURGADO_HASTA],
+			},
+		],
+		"read",
+	);
+
+	const items = rows(rs) as unknown as CambioGuardado[];
+	const highWater = Number((rows(rsFinal)[0] as any)?.seq ?? 0);
+	// La marca la escribe la purga desde AUD-19. Un log que ya purgó el código anterior no la
+	// tiene, y a cualquiera le falta lo que hay por debajo de su primer Seq conservado: de ahí
+	// el `MIN(Seq) - 1` (0 con el log vacío). Basta porque nunca dice de más (por debajo del
+	// primero no queda nada) y la marca, cuando existe, ya cubre todo lo que se borró desde
+	// AUD-19. Lo único que puede decir de menos es un hueco que la purga anterior dejara por
+	// encima de su primer conservado, cuando la antigüedad y el Seq de dos escrituras en vuelo a
+	// la vez se cruzaban justo en el corte de los 7 días; se cierra en cuanto una purga de este
+	// código pasa por ese tramo. Ninguna base de producción la ha ejecutado.
+	const marca = Number((rows(rsPurgado)[0] as any)?.purgado ?? 0);
+	const primero = (rows(rsPrimero)[0] as any)?.primero;
+	const debajoDelPrimero = primero == null ? 0 : Number(primero) - 1;
+	const purgadoHasta = Math.max(marca, debajoDelPrimero);
+	return { items, highWater, purgadoHasta };
+}
+
 // POST /v1/sync/changes  { since?: number, limit?: number }
-// Devuelve las operaciones con Seq > since en orden ascendente, el final del log (`highWater`) y
-// el mayor Seq que ya se purgó (`purgadoHasta`, AUD-19).
+// Devuelve las operaciones con Seq > since en orden ascendente, hasta `limit` y sin pasar de
+// `CAMBIOS_MAX_BYTES`, el final del log (`highWater`) y el mayor Seq que ya se purgó
+// (`purgadoHasta`, AUD-19).
 syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
 	const { since, limit } = c.req.valid("json");
 
-	const snapshot = await tenantQuery(c, async (db) => {
-		// Items, high-water y lo purgado en la misma transacción de lectura. La recuperación sólo
-		// desbloquea cuando el checkpoint local alcanza exactamente una foto conocida del final del
-		// log. AUD-19: y lo purgado tiene que ser de la misma foto que los items; leído aparte, una
-		// purga entre medias escondería el tramo que se lleva. Cada lectura es de una fila: los
-		// extremos del log por su clave (un `MIN` o un `MAX` solo, sin recorrerlo), la marca por la
-		// del checkpoint.
-		const [rs, rsFinal, rsPrimero, rsPurgado] = await db.batch(
-			[
-				{
-					sql: `
-				SELECT Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms,
-                        CASE WHEN json_valid(Statements_Json) THEN json_type(Statements_Json) ELSE 'invalid' END AS Statements_Type
-				FROM Sync_Changes
-				WHERE Seq > ?1
-				ORDER BY Seq ASC
-				LIMIT ?2;
-			`,
-					args: [since, limit],
-				},
-				{ sql: "SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;", args: [] },
-				{ sql: "SELECT MIN(Seq) AS primero FROM Sync_Changes;", args: [] },
-				{
-					sql: "SELECT Last_Seq AS purgado FROM Sync_Main_Checkpoints WHERE Device_Id = ?1;",
-					args: [PURGADO_HASTA],
-				},
-			],
-			"read",
-		);
-
-		const items = rows(rs) as unknown as CambioGuardado[];
-		const highWater = Number((rows(rsFinal)[0] as any)?.seq ?? 0);
-		// La marca la escribe la purga desde AUD-19. Un log que ya purgó el código anterior no la
-		// tiene, y a cualquiera le falta lo que hay por debajo de su primer Seq conservado: de ahí
-		// el `MIN(Seq) - 1` (0 con el log vacío). Basta porque nunca dice de más (por debajo del
-		// primero no queda nada) y la marca, cuando existe, ya cubre todo lo que se borró desde
-		// AUD-19. Lo único que puede decir de menos es un hueco que la purga anterior dejara por
-		// encima de su primer conservado, cuando la antigüedad y el Seq de dos escrituras en vuelo a
-		// la vez se cruzaban justo en el corte de los 7 días; se cierra en cuanto una purga de este
-		// código pasa por ese tramo. Ninguna base de producción la ha ejecutado.
-		const marca = Number((rows(rsPurgado)[0] as any)?.purgado ?? 0);
-		const primero = (rows(rsPrimero)[0] as any)?.primero;
-		const debajoDelPrimero = primero == null ? 0 : Number(primero) - 1;
-		const purgadoHasta = Math.max(marca, debajoDelPrimero);
-		return { items, highWater, purgadoHasta };
-	});
-	const { items, highWater, purgadoHasta } = snapshot;
+	const { items, highWater, purgadoHasta } = await tenantQuery(c, (db) => leerPaginaDeCambios(db, since, limit));
 
 	const responseJson = serializarCambios(items, since, highWater, purgadoHasta);
 
@@ -285,8 +329,8 @@ function medidorDeVentanas(lector: Lector, tablas: string[], pesos: Map<string, 
  * - Si se queda larga, se descarta una candidata que cabía y viaja una más estrecha. Con la última
  *   no puede pasar: detrás no hay otra, y descartarla por una estimación sería contestar «no cabe»
  *   a un negocio que sí cabe. Se intenta siempre que quepa por filas, y decide lo que se escribe.
- *   (Sólo donde escribir para a tiempo, `paraAlEscribir`: con la ruta en el Worker, intentarlo es
- *   traer todas las filas por la llamada al DO, así que allí la estimación sí descarta.)
+ *   (Sólo donde escribir para a tiempo, `paraAlEscribir`: con el lector de un cliente, intentarlo es
+ *   traer todas las filas antes de escribir, así que allí la estimación sí descarta.)
  *
  * La medida va fuera de la foto a propósito: sólo decide qué ventana se intenta, no es el dato.
  * `volcar` recibe el límite UNA vez y lo usa en todas sus sentencias, de modo que padre e hijas
@@ -431,7 +475,7 @@ const CIERRE_DE_PAGINA = 48;
 export async function paginaDelHistorico(
 	lector: Lector,
 	{ tabla, cursor, limite }: { tabla: string; cursor: number; limite: number },
-	maxBytes: number = VOLCADO_MAX_BYTES,
+	maxBytes: number = HISTORICO_MAX_BYTES,
 ): Promise<Uint8Array<ArrayBuffer>> {
 	const cabecera = `{"ok":true,"tabla":${JSON.stringify(tabla)}`;
 

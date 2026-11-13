@@ -10,7 +10,7 @@
 //
 // - **Sin jurisdicción** (`JURISDICCION_DO` vacía). Lo decidió el responsable, por latencia: dentro
 //   de `eu` el objeto nace en un centro de la UE que no se elige y la pista de región no se respeta
-//   (medido con `/v1/admin/diagnostico/latencias`).
+//   (medido el 2026-11-12 con objetos de usar y tirar en cada colocación).
 // - **Con pista de región** (`UBICACION_DO = "weur"`, Europa occidental). Sólo cuenta en la primera
 //   llamada, la que crea el objeto, y es una pista: Cloudflare la sigue cuando puede. Por eso va en
 //   todas: nadie sabe cuál va a ser la primera.
@@ -40,26 +40,14 @@ export function colocacionDelDespliegue(env: Pick<Env, "JURISDICCION_DO" | "UBIC
 	};
 }
 
-/**
- * El objeto `nombre` de un espacio de nombres, colocado donde se diga. Sólo lo llama directamente
- * la ruta de diagnóstico, que compara colocaciones con objetos de usar y tirar; lo demás, por
- * `objetoDelNegocio`.
- */
-export function objetoEn<T extends Rpc.DurableObjectBranded | undefined>(
-	espacio: DurableObjectNamespace<T>,
-	nombre: string,
-	donde: Colocacion,
-): DurableObjectStub<T> {
-	const ns = donde.jurisdiccion ? espacio.jurisdiction(donde.jurisdiccion) : espacio;
-	const id = ns.idFromName(nombre);
-	return donde.pista ? ns.get(id, { locationHint: donde.pista }) : ns.get(id);
-}
-
 /** El objeto de un negocio en `espacio` (`env.TenantHub`, `env.AgendaWeb`), como lo coloca el despliegue. */
 export function objetoDelNegocio<T extends Rpc.DurableObjectBranded | undefined>(
 	env: Pick<Env, "JURISDICCION_DO" | "UBICACION_DO">,
 	espacio: DurableObjectNamespace<T>,
 	tenantId: string,
 ): DurableObjectStub<T> {
-	return objetoEn(espacio, tenantId, colocacionDelDespliegue(env));
+	const donde = colocacionDelDespliegue(env);
+	const ns = donde.jurisdiccion ? espacio.jurisdiction(donde.jurisdiccion) : espacio;
+	const id = ns.idFromName(tenantId);
+	return donde.pista ? ns.get(id, { locationHint: donde.pista }) : ns.get(id);
 }

@@ -72,12 +72,14 @@ export interface ContextoDeMensajes {
 	emitSyncEvent(name: string, fields: Record<string, unknown>): void;
 	waitUntil(p: Promise<unknown>): void;
 
-	touchLastSeen(tenantId: string, deviceId: string, force?: boolean): Promise<void>;
+	touchLastSeen(tenantId: string, deviceId: string): Promise<void>;
 	verifyHelloSigned(params: {
 		tenantId: string;
 		deviceId: string;
 		msg: HelloSignedMsg;
 		challenge: { nonceB64: string; expiresAtMs: number } | null;
+		/** El rol y la clave del dispositivo que el Worker puso al abrir el socket (`tenantHub.rutas.ts`). */
+		rol: Role;
 		pubkeyB64Hint?: string | null;
 	}): Promise<{ roleFinal: Role; pubkeyB64: string }>;
 
@@ -208,6 +210,7 @@ export async function atenderHelloSigned(
 					deviceId,
 					msg,
 					challenge,
+					rol: a.role,
 					pubkeyB64Hint: a.pubkeyB64,
 				});
 

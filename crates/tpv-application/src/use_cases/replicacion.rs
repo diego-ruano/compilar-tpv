@@ -17,6 +17,12 @@ const ESPERA_DEL_APPLY: Duration = Duration::from_secs(10);
 /// Lo que se anota en una operación que la nube rechaza. Sin su SQL ni sus datos (OBS-02).
 const RECHAZO_DE_LA_NUBE: &str = "Rechazo de aplicación recibido de la nube";
 
+/// Cambios que se piden por página de `/v1/sync/changes`: los que admite el worker (`changesSchema`,
+/// 1.000). Lo que cuesta una página en el DO es leer el log por su clave y escribirla; el worker la
+/// corta además por bytes (`CAMBIOS_MAX_BYTES`), así que pedir más sólo ahorra viajes. Sin `limit`
+/// el worker daba 500, y un worker anterior que admita menos lo recorta sin más.
+pub(crate) const CAMBIOS_POR_PAGINA: i64 = 1_000;
+
 /// AUD-18 · Cuánto se espera antes de volver a intentar un cambio de la nube que ha fallado al
 /// aplicarse, según los intentos que lleva: 1, 2, 4 y 8 s. Son cinco intentos
 /// (`MAX_APPLY_ATTEMPTS`, en el repositorio) y cuatro esperas, unos 15 s antes de la cuarentena.
@@ -133,7 +139,7 @@ pub async fn catch_up(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
     let mut since = ctx.repositorio().await?.get_checkpoint().await?;
     let mut high_water = 0;
     for _ in 0..MAX_PAGINAS {
-        let respuesta = nube.tpv_server_post_json("tpv", "/v1/sync/changes", json!({"since":since})).await?;
+        let respuesta = nube.tpv_server_post_json("tpv", "/v1/sync/changes", json!({"since":since,"limit":CAMBIOS_POR_PAGINA})).await?;
         match respuesta.get("highWater").or_else(|| respuesta.get("high_water")).and_then(Value::as_i64) {
             Some(hw) if hw >= 0 => high_water = hw,
             _ if estricto => return Err(AppError::external("La nube no informa del punto de sincronización")),

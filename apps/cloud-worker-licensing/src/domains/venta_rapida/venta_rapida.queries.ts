@@ -233,9 +233,11 @@ export async function lineas(
 
 // Los nombres se unen con « · », como en la Main (`get_index_rows`): aquí iban con « - » y el
 // arnés de contrato no lo veía, porque una lectura por POST no contaba como lectura (AUD-27).
+//
+// DO-01: los ids van en un solo parámetro (un array JSON), no en uno por ticket: «Ver tickets» pide
+// todos los del día y el SQLite del DO admite 100 parámetros por sentencia.
 export async function indexRows(db: Client, ids: string[]): Promise<IndexRow[]> {
 	if (!ids.length) return [];
-	const placeholders = ids.map((_, i) => `?${i + 1}`).join(",");
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -259,11 +261,11 @@ export async function indexRows(db: Client, ids: string[]): Promise<IndexRow[]> 
 					COUNT(*) AS NumLineas,
 					COALESCE(SUM(COALESCE(dc.Cantidad,1)),0) AS Unidades
 				FROM Detalle_Comanda dc
-				WHERE dc.ID_Comanda IN (${placeholders})
+				WHERE dc.ID_Comanda IN (SELECT value FROM json_each(?1))
 				GROUP BY dc.ID_Comanda
 			) x;
 		`,
-		args: ids,
+		args: [JSON.stringify(ids)],
 	});
 	return rows(rs) as IndexRow[];
 }
@@ -319,8 +321,8 @@ export async function cobrarPlan(
 	db: Client,
 	input: CobrarFraccionadoInput,
 ): Promise<CobroPlan> {
-	const placeholders = input.detalles.map((_, i) => `?${i + 2}`).join(",");
-	const detalleArgs = [input.id_comanda, ...input.detalles];
+	// DO-01: las líneas, en un solo parámetro (un array JSON): un ticket puede pasar de 99.
+	const detalleArgs = [input.id_comanda, JSON.stringify(input.detalles)];
 
 	const resumenRs = await db.execute({
 		sql: `
@@ -329,7 +331,7 @@ export async function cobrarPlan(
 				COUNT(*) AS num_valid
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
-				AND dc.ID_Detalle IN (${placeholders})
+				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
 				AND NOT EXISTS (
 					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				);
@@ -349,7 +351,7 @@ export async function cobrarPlan(
 				CAST(COALESCE(dc.Cantidad,1) AS REAL) AS cantidad
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
-				AND dc.ID_Detalle IN (${placeholders})
+				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
 				AND NOT EXISTS (
 					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				)

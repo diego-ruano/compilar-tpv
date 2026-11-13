@@ -312,27 +312,6 @@ Decidido, a falta de medir cuánto genera un bar al año:
 ⚠️ El ID `DB-14` también aparece en el código para otra cosa: la reconciliación de valores derivados
 (`use_cases/reconciliacion.rs`, `jobs/registro.rs::reconciliacion`).
 
-### DO-01 · Listas de IDs con un parámetro por elemento
-
-El SQLite del DO admite 100 parámetros por sentencia ([worker.md](arquitectura/worker.md)). En el
-worker quedan sentencias que ponen un `?` por elemento de una lista:
-
-- «Ver tickets» de la venta rápida (`venta_rapida.queries.ts::indexRows`) manda **todos los tickets
-  del día**, así que un bar con más de 100 se queda sin esa pantalla en la Handy.
-- El plan del cobro de barra (`venta_rapida.queries.ts::cobrarPlan`): un ticket de más de 99 líneas.
-- Guardar el plano desde la Handy (`mesas.commands.ts::saveLayout`, el `NOT IN` de zonas y de mesas
-  y el `IN` de zonas): un plano con más de 100 zonas o una zona con más de 98 mesas.
-- Las asignaciones de una tarea (`tareas.commands.ts`, `tareas.queries.ts`): más de 99 asignados.
-
-Decidido: pasar la lista como un único parámetro JSON, `IN (SELECT value FROM json_each(?))`, con su
-caso en el arnés de contrato, como el cobro de mesa (`mesas/cobrar_detalles_120_lineas`). Así no hace
-falta ningún tope de mesas.
-
-Lo que sube la Main ya va así, y `WriteGuard` revienta en desarrollo ante una sentencia que la nube
-no admitiría ([sincronizacion.md](arquitectura/sincronizacion.md#escritor-único-y-captura)). Las
-lecturas de la Main que todavía ponen un `?` por elemento (`venta_rapida.rs`,
-`pedidos_proveedor.rs`) van contra su SQLite local y no se replican: no les afecta.
-
 ### DO-02 · La recuperación de una Main con mucho desde el último cierre
 
 `/v1/sync/bootstrap` baja la fase 1 en una sola respuesta, con dos topes: 300.000 filas y 24 MiB de
@@ -354,10 +333,15 @@ sin un cierre al que agarrarse, y que ese negocio no pueda recuperarse; o que la
 el primer cierre mientras falte histórico. Sin decidir.
 
 Una cosa de la Main que pesa más con una ventana estrecha, y que hoy no depende de ella:
-**el histórico baja de lo más antiguo a lo más nuevo** y a 10.000 filas cada cinco minutos
-(`BACKFILL_FILAS_POR_PAGINA` × `BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`). A un bar grande que
-recupere con la ventana de un día, la semana pasada le llega la última, después de todo lo
-anterior.
+**el histórico baja tabla a tabla, padres primero, y cada una de lo más antiguo a lo más nuevo**.
+Va deprisa con el equipo en calma (hasta 400.000 filas cada cinco minutos) y a 20.000 con el bar
+trabajando ([recuperacion.md](arquitectura/recuperacion.md#desde-la-nube-dos-fases-sync-19)), pero a un
+bar grande que recupere con la ventana de un día la semana pasada le llega la última. Bajar cada
+tabla de lo más nuevo a lo más antiguo no lo arregla: las líneas de una comanda van en otra tabla,
+que llega después de todas las comandas; `Pagos` se apunta a sí misma (una devolución, al cobro
+original) y una hija llegaría antes que su padre; y una Main nueva con un worker anterior, que no
+conoce el sentido, tomaría el cursor al revés y saltaría filas. Haría falta bajar por tramos de
+fechas, todas las tablas de cada tramo. Sin decidir.
 
 ### DO-03 · Copias de la base de cada negocio
 

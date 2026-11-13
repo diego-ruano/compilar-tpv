@@ -4,7 +4,8 @@
 // Sólo lecturas: la reserva web nunca escribe en la base (ADR 0007). Ninguna devuelve datos
 // personales de una reserva; lo que sí sale por las rutas públicas es lo del negocio.
 //
-// `'now','localtime'` lo fija `lecturaConHora` con la hora del negocio (`horaDelNegocio.ts`).
+// `'now','localtime'` lo fija `leerConLaHoraDelNegocio` (`lecturasDeLaWeb.ts`) con la hora del negocio
+// (`horaDelNegocio.ts`).
 
 import type { Client } from "@libsql/client/web";
 

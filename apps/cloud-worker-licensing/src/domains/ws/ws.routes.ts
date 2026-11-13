@@ -54,15 +54,18 @@ wsRoutes.post("/ticket", async (c) => {
 	crypto.getRandomValues(bytes);
 	const ticket = bytesToB64(bytes);
 
-	// Limpieza oportunista de tickets caducados (mantiene la tabla acotada sin job aparte).
-	await db.execute({
-		sql: `DELETE FROM Ws_Tickets WHERE expires_at_ms < ?;`,
-		args: [now],
-	});
-	await db.execute({
-		sql: `INSERT INTO Ws_Tickets (ticket, tenant_id, device_id, expires_at_ms) VALUES (?1, ?2, ?3, ?4);`,
-		args: [ticket, tenantId, deviceId, now + TICKET_TTL_MS],
-	});
+	// Limpieza oportunista de tickets caducados (mantiene la tabla acotada sin job aparte), en el
+	// mismo viaje a la base central que el alta del ticket.
+	await db.batch(
+		[
+			{ sql: `DELETE FROM Ws_Tickets WHERE expires_at_ms < ?;`, args: [now] },
+			{
+				sql: `INSERT INTO Ws_Tickets (ticket, tenant_id, device_id, expires_at_ms) VALUES (?1, ?2, ?3, ?4);`,
+				args: [ticket, tenantId, deviceId, now + TICKET_TTL_MS],
+			},
+		],
+		"write",
+	);
 
 	return c.json({ ok: true, ticket, expiresInMs: TICKET_TTL_MS });
 });

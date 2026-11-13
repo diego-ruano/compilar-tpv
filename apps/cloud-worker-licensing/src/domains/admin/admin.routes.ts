@@ -46,9 +46,7 @@ import {
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import { retirarNegociosDePrueba } from "./pruebas";
-import { medirLatencias } from "./diagnostico";
-import { diagnosticoSchema } from "./admin.schemas";
-import { consulta, cuerpo } from "../../lib/validacion";
+import { cuerpo } from "../../lib/validacion";
 import { TARGETS } from "../updates/updates.routes";
 import { reservasWebAdminRoutes } from "../reservas_web/admin.routes";
 import {
@@ -65,13 +63,6 @@ adminRoutes.use("*", requireAdmin);
 
 // Detrás del mismo `requireAdmin`: el `use("*")` de arriba cubre también lo que se monta aquí.
 adminRoutes.route("/reservas-web", reservasWebAdminRoutes);
-
-/** Cuánto cuesta cada viaje a la base central y a un TenantHub según dónde nazca (`diagnostico.ts`). */
-adminRoutes.get("/diagnostico/latencias", consulta(diagnosticoSchema), async (c) => {
-	const { vueltas, tenant } = c.req.valid("query");
-	const colo = (c.req.raw.cf as { colo?: string } | undefined)?.colo;
-	return c.json({ ok: true, ...(await medirLatencias(c.env, colo, vueltas, tenant)) });
-});
 
 /** Las tres duraciones del producto. Un plazo fuera de aquí es un error de tecleo. */
 const TERMS = [1, 3, 12] as const;

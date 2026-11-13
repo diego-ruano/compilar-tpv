@@ -1,0 +1,20 @@
+{
+  "Mesas": [
+    {
+      "N": 120,
+      "Primera": "M001",
+      "SumaX": 7260,
+      "SumaY": 1200,
+      "Ultima": "M120",
+      "Zona": "Z001"
+    }
+  ],
+  "Zonas": [
+    {
+      "Archivadas": 0,
+      "N": 101,
+      "Primera": "Z001",
+      "Ultima": "Z101"
+    }
+  ]
+}

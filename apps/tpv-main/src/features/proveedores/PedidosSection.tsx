@@ -15,6 +15,7 @@ import type {
 import { estadoDelPedido, type PedidoEstado } from "./pedidosApis";
 import { configGetBusinessSettings, configGetContactSettings } from "../configuracion/api/configApis";
 import { emailEnviarPedido } from "../configuracion/api/emailConfigApis";
+import { claveDeEnvio, envioTerminado } from "./claveDeEnvio";
 import {
   usePedidosPage,
   useCrearPedido,
@@ -178,7 +179,7 @@ export default function PedidosSection({ proveedores }: Props) {
         return;
       }
       {
-        await emailEnviarPedido({
+        const correo = {
           email_destino: updated.email_destino!,
           nombre_proveedor: updated.nombre_proveedor ?? "Proveedor",
           notas: updated.notas ?? undefined,
@@ -188,7 +189,10 @@ export default function PedidosSection({ proveedores }: Props) {
             precio_unitario: l.precio_unitario ?? undefined,
             unidad: l.unidad ?? undefined,
           })),
-        });
+        };
+        // La misma clave mientras se reintenta este pedido sin cambiarlo (`claveDeEnvio.ts`): si el
+        // correo ya salió y lo que falló fue la vuelta, la nube no lo manda otra vez.
+        await emailEnviarPedido({ ...correo, id_envio: claveDeEnvio(updated.id_pedido, correo) });
       }
 
       // Solo llegamos aquí si el correo salió de verdad.
@@ -200,6 +204,7 @@ export default function PedidosSection({ proveedores }: Props) {
       const fecha = new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
       await enviarMutation.mutateAsync({ id_pedido: updated.id_pedido, estado: "enviado", fecha_envio: fecha });
 
+      envioTerminado(updated.id_pedido);
       toast.success("Pedido enviado", `Correo enviado a ${updated.email_destino}`);
 
       cerrarModal();

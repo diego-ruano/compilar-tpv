@@ -204,10 +204,6 @@ async function escenario<R>(nombre: string, prueba: (c: Caso) => Promise<R>): Pr
 }
 
 describe("AUD-21 · POST /v1/login/punch con una X-Client-Now imposible", () => {
-	it("la ruta se ejecuta dentro del TenantHub del negocio, como en producción", () => {
-		expect(env.EJECUTAR_EN_EL_HUB).toBe("1");
-	});
-
 	it("contesta lo mismo que a una hora fuera de la deriva y no ficha nada", async () => {
 		await escenario("imposible", async ({ filas, difundidos, fichar }) => {
 			// La referencia: el mismo día, bien escrito, está fuera de la deriva.

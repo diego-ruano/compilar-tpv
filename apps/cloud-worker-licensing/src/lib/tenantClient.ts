@@ -2,14 +2,16 @@
 //
 // El cliente de la base de cada negocio para las LECTURAS de la API.
 //
-// La base vive en el SQLite del TenantHub del negocio, así que cada consulta es una llamada RPC al
-// DO (`consultar`). El `Client` que reciben las rutas tiene la misma forma que el de libsql
-// (`execute`, `batch`).
+// La base vive en el SQLite del TenantHub del negocio, y toda ruta que la lee se ejecuta dentro de él
+// (`lib/enElHub.ts`): `tenantQuery` le da a la ruta el cliente de al lado (`tenantHub.sqlite.ts`), con
+// la forma del de libsql (`execute`, `batch`). Fuera del TenantHub no hay de dónde leer: una ruta que
+// llamara a `tenantQuery` sin `alHub` en su router falla en el acto. La agenda de reservas web y la
+// API pública de la reserva, que no corren dentro, leen por `leerParaLaWeb`
+// (`domains/reservas_web/lecturasDeLaWeb.ts`), una lectura entera por viaje.
 //
-// - `consultar` sólo lee: una escritura del negocio va por el motor del DO (`lib/hub.ts`), que es
-//   quien la apunta y la difunde. Lo único que una ruta escribe por aquí es el estado propio de la
-//   nube (el freno del PIN, el checkpoint de la purga), que no se replica: dentro del DO, con el
-//   cliente de al lado; desde el Worker, por su propia puerta (`anotarEstado`).
+// - Una escritura del negocio va por el motor del DO (`lib/hub.ts`), que es quien la apunta y la
+//   difunde. Lo único que una ruta escribe por aquí es el estado propio de la nube (el freno del PIN,
+//   el checkpoint de la purga), que no se replica.
 // - Fija «ahora» a la hora LOCAL de quien pregunta antes de ejecutar (REV-03, ver abajo).
 //
 // ── REV-03: «hoy» es el de quien pregunta, no el de la base ──────────────────────────────────────
@@ -29,65 +31,11 @@
 // La base, que es como se comportaba antes. Es lo correcto: quien no dice su hora no puede esperar
 // que se la adivinen.
 
-import type { Client, ResultSet } from "@libsql/client/web";
+import type { Client } from "@libsql/client/web";
 
 import type { Env } from "../env";
-import { HubError } from "./errorHttp";
-import { hubDe } from "./hub";
 import { hubLocal } from "./hubLocal";
-import { medirTramo } from "../observability/tiempos";
 import { parseClientNow, rewriteNowInSql } from "../durableObjects/tenantHub.tiempo";
-import { aResultSet, esEscrituraDeEstado, type Sentencia as SentenciaDelHub } from "../durableObjects/tenantHub.sqlite";
-import type { RespuestaDeConsulta } from "../durableObjects/tenantHub.rpc";
-
-function sinTransacciones(): never {
-	throw new Error(
-		"tenantQuery: la base del negocio no abre transacciones interactivas desde el Worker; usa batch()",
-	);
-}
-
-/**
- * Un `Client` de libsql cuyas sentencias se ejecutan en el TenantHub del negocio.
- *
- * Una llamada RPC por `execute` y otra por `batch`: una ruta con N consultas seguidas hace N
- * viajes al DO. Por eso las rutas de negocio se ejecutan dentro del propio DO (`lib/enElHub.ts`), y
- * ahí este cliente lee del SQLite de al lado, sin viaje. El migrado del esquema lo hace el DO en su
- * primer acceso.
- */
-export function clienteDelHub(env: Env, tenantId: string): Client {
-	const stub = hubDe(env, tenantId);
-	const pedir = async (sentencias: SentenciaDelHub[], enLote: boolean): Promise<ResultSet[]> => {
-		const local = hubLocal(tenantId);
-		if (local) {
-			const db = await local.base();
-			return enLote ? db.batch(sentencias as any) : [await db.execute(sentencias[0] as any)];
-		}
-		// Los tipos de RPC no aceptan `unknown` (valores de SQLite): se afirma la forma que devuelve el DO.
-		const r = (
-			!enLote && esEscrituraDeEstado(sentencias[0])
-				? await medirTramo("hub-anota", () => stub.anotarEstado(tenantId, sentencias[0] as any))
-				: await medirTramo("hub-lee", () => stub.consultar(tenantId, sentencias as any, enLote))
-		) as unknown as RespuestaDeConsulta;
-		if (!r.ok) throw new HubError(r.code, r.status, r.details);
-		return r.resultados.map(aResultSet);
-	};
-	return {
-		async execute(entrada: SentenciaDelHub, args?: unknown[]) {
-			const s = typeof entrada === "string" && args ? { sql: entrada, args } : entrada;
-			return (await pedir([s], false))[0];
-		},
-		async batch(sentencias: SentenciaDelHub[]) {
-			return pedir(sentencias, true);
-		},
-		transaction: sinTransacciones,
-		executeMultiple: sinTransacciones,
-		migrate: sinTransacciones,
-		sync: async () => undefined,
-		close() {},
-		closed: false,
-		protocol: "do",
-	} as unknown as Client;
-}
 
 /**
  * Lo que `tenantQuery` necesita de la petición. Es la forma estructural de un `Context` de Hono,
@@ -151,36 +99,22 @@ export function conLaHoraDeQuienPregunta(db: Client, ahoraLocal: string): Client
 	});
 }
 
-/** Ejecuta una lectura contra la base del negocio. */
+/**
+ * Ejecuta una lectura contra la base del negocio, desde una ruta que se ejecuta en su TenantHub.
+ *
+ * Fuera de él lanza: es un router sin `alHub` que lee la base del negocio, y lo que le toca es
+ * llevarlo (`lib/enElHub.ts`). Un test que monta un router suelto pone su propio `tenantQuery`.
+ */
 export async function tenantQuery<T>(
 	c: ContextoDeLectura,
 	fn: (db: Client) => Promise<T>,
 ): Promise<T> {
+	const local = hubLocal(c.get("tenantId"));
+	if (!local) {
+		throw new Error("tenantQuery: la ruta no se está ejecutando en el TenantHub de su negocio (¿falta alHub en su router?)");
+	}
+	const db = await local.base();
 	// REV-03: la hora local del emisor, validada igual que en las escrituras (formato y deriva).
 	const ahoraLocal = parseClientNow(c.req.header("X-Client-Now"));
-	return conElClienteDelTenant(c.env, c.get("tenantId"), (db) =>
-		fn(ahoraLocal ? conLaHoraDeQuienPregunta(db, ahoraLocal) : db),
-	);
-}
-
-/**
- * Lo mismo que `tenantQuery` para quien no tiene un dispositivo que diga su hora: la reserva desde
- * la web, que pregunta desde un navegador cualquiera. «Ahora» lo calcula `hora` con el propio
- * cliente (la zona del negocio) y se fija igual en todas las sentencias de `fn`, que lo recibe
- * también para no tener que volver a calcularlo.
- */
-export async function lecturaConHora<T>(
-	env: Env,
-	tenantId: string,
-	hora: (db: Client) => Promise<string>,
-	fn: (db: Client, ahoraLocal: string) => Promise<T>,
-): Promise<T> {
-	return conElClienteDelTenant(env, tenantId, async (db) => {
-		const ahoraLocal = await hora(db);
-		return fn(conLaHoraDeQuienPregunta(db, ahoraLocal), ahoraLocal);
-	});
-}
-
-async function conElClienteDelTenant<T>(env: Env, tenantId: string, fn: (db: Client) => Promise<T>): Promise<T> {
-	return fn(clienteDelHub(env, tenantId));
+	return fn(ahoraLocal ? conLaHoraDeQuienPregunta(db, ahoraLocal) : db);
 }

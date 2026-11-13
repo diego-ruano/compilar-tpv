@@ -430,9 +430,9 @@ describe("límites del SQL", () => {
 	});
 
 	it("un texto con varias sentencias las ejecuta todas, y un PRAGMA de las de detrás cambia la conexión", async () => {
-		// Lo que obliga a `leerEnBruto` a contar sentencias: el `SELECT` de delante hace que el texto
-		// parezca una lectura, el `PRAGMA` no escribe ninguna fila, y la conexión se queda sin comprobar
-		// los `CHECK` para todo lo que venga después en este objeto.
+		// Por qué en el DO no entra un texto que no sea de aquí: el `SELECT` de delante hace que parezca
+		// una lectura, el `PRAGMA` no escribe ninguna fila, y la conexión se queda sin comprobar los
+		// `CHECK` para todo lo que venga después en este objeto.
 		const res = await enElHub("sonda-varias-sentencias", (hub) => {
 			const { sql } = hub.state.storage;
 			sql.exec("CREATE TABLE T (ID TEXT PRIMARY KEY, N INTEGER NOT NULL CHECK (N > 0));");

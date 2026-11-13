@@ -268,6 +268,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	sync_log_corrupto: "No se pueden recuperar los cambios: el registro de sincronización está dañado.",
 	email_limite_diario:
 		"Se han mandado muchos pedidos por correo hoy desde este negocio. Vuelve a intentarlo mañana.",
+	// El mismo pedido está saliendo ahora mismo por otra petición (`id_envio`).
+	email_en_curso: "El pedido se está enviando ahora mismo. Espera un momento y vuelve a intentarlo: no saldrá dos veces.",
 
 	// Licencia, base de la nube y códigos por correo
 	invalid_license_key_format: "La clave de licencia no tiene el formato correcto. Revísala.",
@@ -388,10 +390,6 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"bad_ts",
 	"bad_ws_signature",
 	"challenge_mismatch",
-	// Una ruta ha mandado por la puerta de las lecturas del DO algo que no es una lectura, o por la
-	// del estado de la nube algo que no lo es.
-	"consulta_no_es_lectura",
-	"estado_local_no_admitido",
 	"expired_ticket",
 	"field_dek_no_persistida",
 	"fulfillment_failed",

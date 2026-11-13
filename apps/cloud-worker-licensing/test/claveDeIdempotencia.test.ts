@@ -28,6 +28,9 @@ vi.mock(import("../src/middleware/tenant"), async (importOriginal) => ({
 
 import { clientesRoutes } from "../src/domains/clientes/clientes.routes";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 const UUID_V7 = "0190f3c2-7d1e-7c4a-9b2e-5a6f7e8d9c0b";
 
 const aplicar = vi.fn();

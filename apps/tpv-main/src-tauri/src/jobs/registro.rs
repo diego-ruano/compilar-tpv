@@ -102,9 +102,9 @@ const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
 /// Cada cuánto se traen unas páginas del histórico pendiente (SYNC-19, fase 2).
 ///
-/// Cinco minutos por ~10.000 filas es el ritmo que hace converger un histórico de tres meses en
-/// unas horas SIN que se note: ni en el equipo, que puede estar en hora punta, ni en las lecturas
-/// facturadas de Turso. En el 99,99 % de los vencimientos no hay nada que hacer y el job es una
+/// Cada vencimiento trae unas páginas (`BACKFILL_PAGINAS_POR_TICK`, `use_cases/sync.rs`) sin acaparar
+/// ni el equipo, que puede estar en hora punta, ni el hilo del DO del negocio, que atiende a la vez a
+/// la Main y a las Handy. En el 99,99 % de los vencimientos no hay nada que hacer y el job es una
 /// lectura de una tabla vacía.
 const BACKFILL_INTERVAL_SECS: u64 = 5 * 60;
 

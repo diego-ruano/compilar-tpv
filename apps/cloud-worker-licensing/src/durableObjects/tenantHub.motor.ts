@@ -8,7 +8,7 @@ import { bytesUtf8 } from "../observability/tope";
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 
 import { safeJsonParse, sha256Hex, stringifyJsonValue } from "./tenantHub.envelope";
-import { loadDeviceFromCentral, mainDeLaLicencia, verifyHelloSigned } from "./tenantHub.identidad";
+import { mainDeLaLicencia, verifyHelloSigned } from "./tenantHub.identidad";
 import { loteDe, type EscrituraPreparada } from "./tenantHub.lote";
 import {
 	aplicarLectura,
@@ -20,19 +20,21 @@ import {
 import type { MainVigente } from "./tenantHub.main";
 import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
-import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
+import type { ApplyParams, IdentidadDelWorker, ResultadoAplicacion } from "./tenantHub.rpc";
+import {
+	leerConLaHoraDelNegocio,
+	type LecturaWeb,
+	type RespuestaDeLecturaWeb,
+} from "../domains/reservas_web/lecturasDeLaWeb";
 import { app } from "../app";
 import { dentroDelHub } from "../lib/hubLocal";
 import {
-	anotarEnBruto,
 	baseAprovisionada,
 	clienteLocal,
 	HaceFaltaAplazar,
-	leerEnBruto,
 	loteEnBruto,
-	migrarBaseLocal,
 	type FilasEnBruto,
-	type Sentencia,
+	migrarBaseLocal,
 } from "./tenantHub.sqlite";
 import { sembrarAdminInicial } from "./tenantHub.alta";
 import type { ContextoDeRutas } from "./tenantHub.rutas";
@@ -101,6 +103,11 @@ const LOTE_MAX_APLAZADAS = 3;
 /** Una operación de un lote, lista para aplicarse: validada, con la hora fijada y sus sentencias. */
 type LotePreparado = { escritura: EscrituraPreparada; lote: ReturnType<typeof loteDe> };
 
+
+/** Dónde anota el objeto la última baja de cada dispositivo (`revocarDispositivo`). */
+const CLAVE_REVOCADO = "revocado:";
+/** Holgura entre el reloj del Worker que canjea el ticket y el del objeto que anota la baja. */
+const MARGEN_CANJE_MS = 5_000;
 
 export class MotorTenantHub {
 	// SYNC-16: este DO usa la WebSocket Hibernation API. Mientras las conexiones están ociosas el
@@ -296,53 +303,23 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * Lo que contestan las dos puertas por las que el Worker llega a la base (`consultar` y
-	 * `anotarEstado`): un fallo con status decidido viaja como dato, porque el RPC no conserva las
-	 * propiedades de un `HubError`; un error de SQL, como excepción, con su mensaje.
+	 * Una lectura de la agenda de reservas web o de la API pública de la reserva, entera, con la base al
+	 * lado (`domains/reservas_web/lecturasDeLaWeb.ts`): un viaje por lectura, no uno por consulta. Sólo
+	 * lee. Un fallo con status decidido (la base sin aprovisionar) viaja como dato, porque el RPC no
+	 * conserva las propiedades de un `HubError`; un error de SQL, como excepción, con su mensaje.
+	 *
+	 * No pasa por el turno del log: el SQL del DO es síncrono, así que ve lo confirmado o lo que otra
+	 * petición acaba de escribir en este mismo DO, nunca una escritura a medias.
 	 */
-	private async conLaBase(
-		tenantId: string,
-		trabajo: (storage: DurableObjectStorage) => FilasEnBruto[],
-	): Promise<RespuestaDeConsulta> {
+	async leerParaLaWeb(tenantId: string, lectura: LecturaWeb): Promise<RespuestaDeLecturaWeb> {
 		try {
-			await this.getTenantDb(tenantId);
-			return { ok: true, resultados: trabajo(this.state.storage) };
+			return { ok: true, valor: await leerConLaHoraDelNegocio(await this.getTenantDb(tenantId), lectura) };
 		} catch (e) {
 			if (e instanceof HubError) {
 				return { ok: false, code: e.code, status: e.status, details: e.details };
 			}
 			throw e;
 		}
-	}
-
-	/**
-	 * Las lecturas del Worker (`tenantQuery`). Una sentencia suelta, o un lote: van en una
-	 * transacción, así que el lote da una foto coherente, como el `batch("read")` de libsql.
-	 *
-	 * **Sólo lee** (`leerEnBruto`): lo que no es una lectura se rechaza con `consulta_no_es_lectura`,
-	 * y lo que escriba se deshace. Una escritura del negocio va por el motor (`aplicar`).
-	 *
-	 * No pasan por el turno del log: el SQL del DO es síncrono, así que ven lo confirmado o lo que
-	 * otra petición acaba de escribir en este mismo DO, nunca una escritura a medias.
-	 */
-	async consultar(
-		tenantId: string,
-		sentencias: Sentencia[],
-		enLote: boolean,
-	): Promise<RespuestaDeConsulta> {
-		return this.conLaBase(tenantId, (storage) =>
-			leerEnBruto(storage, enLote ? sentencias : sentencias.slice(0, 1)),
-		);
-	}
-
-	/**
-	 * Lo único que el Worker escribe en la base sin pasar por el motor: el estado propio de la nube
-	 * (el freno del PIN, el checkpoint de la purga), que no se replica. Es para la ruta que corre en
-	 * el Worker; dentro del DO lo escribe con el cliente de al lado. Qué tablas son, y que la
-	 * sentencia sea una sola y diga la suya a las claras, lo comprueba `anotarEnBruto`.
-	 */
-	async anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
-		return this.conLaBase(tenantId, (storage) => [anotarEnBruto(storage, sentencia)]);
 	}
 
 	/**
@@ -370,19 +347,18 @@ export class MotorTenantHub {
 		this.avisados.clear();
 	}
 
-	private async touchLastSeen(tenantId: string, deviceId: string, force = false) {
+	private async touchLastSeen(tenantId: string, deviceId: string) {
 		// SYNC-08: sin throttle, cada ping (30 s) por dispositivo escribía en la BD central →
 		// amplificación de escrituras proporcional al nº de dispositivos. Guardamos en memoria del
-		// DO el último instante empujado y solo re-escribimos pasada la ventana (o si `force`, p. ej.
-		// al conectar). La precisión de `last_seen` no necesita ser al segundo.
+		// DO el último instante empujado y solo re-escribimos pasada la ventana. La precisión de
+		// `last_seen` no necesita ser al segundo.
 		// SYNC-16: el ping ya NO llega hasta aquí (lo contesta el auto-response sin despertar al DO),
-		// así que ahora esto se alimenta de: conexión (force) y actividad real (apply/event). El
+		// así que esto se alimenta de la actividad real (apply/event). Al conectar lo apunta el Worker,
+		// en el mismo lote que canjea el ticket, y el upgrade sólo marca el instante (`vistoAhora`). El
 		// throttle en memoria se pierde al hibernar → como mucho un UPDATE extra por despertar.
 		const now = nowMs();
-		if (!force) {
-			const last = this.lastSeenPushedAtMs.get(deviceId) ?? 0;
-			if (now - last < LAST_SEEN_THROTTLE_MS) return;
-		}
+		const last = this.lastSeenPushedAtMs.get(deviceId) ?? 0;
+		if (now - last < LAST_SEEN_THROTTLE_MS) return;
 		this.lastSeenPushedAtMs.set(deviceId, now);
 		const dbCentral = this.getCentralDb();
 		await dbCentral.execute({
@@ -1359,8 +1335,11 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * ARQ-04: las reglas del handshake viven en `tenantHub.identidad.ts`; aquí sólo se les ata la
-	 * base central, que es lo único que la clase aporta. Sigue siendo un método porque es la
+	 * ARQ-04: las reglas del handshake viven en `tenantHub.identidad.ts`; aquí sólo se les ata lo que
+	 * se sabe del dispositivo: el rol y la clave que el Worker leyó de la base central al canjear el
+	 * ticket y le pasó a este objeto al abrir el socket (`tenantHub.rutas.ts::abrirWebSocket`). Sin
+	 * otro viaje a la base central: una baja entre el canje y el saludo cierra el socket por su lado
+	 * (`revocarDispositivo`). Sigue siendo un método porque es la
 	 * costura por la que un test sustituye la verificación de la firma cuando lo que prueba es
 	 * otra cosa (`congeladoPorAtraso.test.ts`): sin ella habría que firmar de verdad para comprobar un
 	 * mensaje de estado.
@@ -1370,6 +1349,7 @@ export class MotorTenantHub {
 		deviceId: string;
 		msg: HelloSignedMsg;
 		challenge: { nonceB64: string; expiresAtMs: number } | null;
+		rol: Role;
 		pubkeyB64Hint?: string | null;
 	}): Promise<{ roleFinal: Role; pubkeyB64: string }> {
 		// `return await` y no `return` a secas: `verifyHelloSigned` rechaza ANTES de su primer
@@ -1377,10 +1357,10 @@ export class MotorTenantHub {
 		// microtask tarde. workerd da la promesa por no manejada en ese hueco y cada saludo
 		// rechazado dejaba además un «unhandled rejection» en los logs, aunque quien llama sí lo
 		// captura. Mismo arreglo en `tenantHubHello.test.ts`, donde rompía el CI.
+		const { rol, ...resto } = params;
 		return await verifyHelloSigned({
-			...params,
-			cargarDispositivo: (tenantId, deviceId) =>
-				loadDeviceFromCentral(this.getCentralDb(), tenantId, deviceId),
+			...resto,
+			cargarDispositivo: async () => ({ role: rol, pubkeyB64: params.pubkeyB64Hint ?? null, revoked: false }),
 		});
 	}
 
@@ -1401,7 +1381,31 @@ export class MotorTenantHub {
 			return new Response("Expected WebSocket", { status: 426 });
 		}
 
+		// El Worker canjeó el ticket con el dispositivo vivo, pero pudo darse de baja entre el canje y
+		// este momento: su `revocarDispositivo` llegó antes que el socket y no tuvo nada que cerrar.
+		const deviceId = request.headers.get("x-device-id") || "";
+		if (await this.revocadoTrasElCanje(deviceId, Number(request.headers.get("x-ws-canje-ms")))) {
+			return Response.json({ ok: false, code: "device_revoked", error: "device_revoked" }, { status: 401 });
+		}
+
 		return abrirWebSocket(ctx, request);
+	}
+
+	/**
+	 * ¿Se dio de baja `deviceId` después de que el Worker canjeara el ticket de este socket?
+	 *
+	 * El Worker lee la fila del dispositivo al canjear el ticket y el saludo ya no vuelve a la base
+	 * central. Una baja que llega entre el canje y el upgrade no encuentra socket que cerrar, así que
+	 * `revocarDispositivo` deja anotado cuándo llegó (en el almacenamiento del objeto: sobrevive a la
+	 * hibernación) y aquí se compara con la hora del canje. Las dos horas son de máquinas distintas: con
+	 * `MARGEN_CANJE_MS` de holgura, un canje de justo antes de la baja no se cuela, y uno posterior a
+	 * volver a dar de alta el mismo dispositivo entra (como mucho, unos segundos después).
+	 */
+	private async revocadoTrasElCanje(deviceId: string, canjeMs: number): Promise<boolean> {
+		if (!deviceId) return false;
+		const revocadoMs = await this.state.storage.get<number>(`${CLAVE_REVOCADO}${deviceId}`);
+		if (revocadoMs === undefined) return false;
+		return !(Number.isFinite(canjeMs) && canjeMs > revocadoMs + MARGEN_CANJE_MS);
 	}
 
 	async aplicar(params: ApplyParams): Promise<ResultadoAplicacion> {
@@ -1435,8 +1439,12 @@ export class MotorTenantHub {
 		);
 	}
 
-	revocarDispositivo(deviceId: string): void {
+	async revocarDispositivo(deviceId: string): Promise<void> {
+		if (!deviceId) return;
 		revocar(this.ctxRutas(), deviceId);
+		// Y queda anotada, en el mismo turno: un socket cuyo ticket se canjeó antes de la baja y que todavía
+		// no ha llegado lo rechaza el upgrade (`revocadoTrasElCanje`).
+		await this.state.storage.put(`${CLAVE_REVOCADO}${deviceId}`, nowMs());
 	}
 
 	avisarEmparejamiento(): void {
@@ -1458,8 +1466,7 @@ export class MotorTenantHub {
 			cerrar: (ws, a, code, motivo) => this.cerrar(ws, a, code, motivo),
 			aceptarWebSocket: (ws, tags) => this.state.acceptWebSocket(ws, tags),
 			waitUntil: (p) => this.state.waitUntil(p),
-			touchLastSeen: (tenantId, deviceId, force) =>
-				this.touchLastSeen(tenantId, deviceId, force),
+			vistoAhora: (deviceId) => void this.lastSeenPushedAtMs.set(deviceId, nowMs()),
 			applyInternalCommandIdempotent: (params) =>
 				this.applyInternalCommandIdempotent(params),
 		};
@@ -1496,8 +1503,7 @@ export class MotorTenantHub {
 			broadcastAuthed: (obj, except) => this.broadcastAuthed(obj, except),
 			emitSyncEvent: (name, fields) => this.emitSyncEvent(name, fields),
 			waitUntil: (p) => this.state.waitUntil(p),
-			touchLastSeen: (tenantId, deviceId, force) =>
-				this.touchLastSeen(tenantId, deviceId, force),
+			touchLastSeen: (tenantId, deviceId) => this.touchLastSeen(tenantId, deviceId),
 			verifyHelloSigned: (params) => this.verifyHelloSigned(params),
 			esLaMain: (a) => this.esLaMain(a),
 			mainVigente: () => this.mainVigente().deviceId,

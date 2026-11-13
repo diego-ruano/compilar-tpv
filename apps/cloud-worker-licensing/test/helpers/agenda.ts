@@ -8,6 +8,7 @@ import { env, runInDurableObject } from "cloudflare:test";
 
 import { clienteSobre } from "./clienteSql";
 import { conLaHoraDeQuienPregunta } from "../../src/lib/tenantClient";
+import { ejecutarLecturaWeb } from "../../src/domains/reservas_web/lecturasDeLaWeb";
 
 const ejecutar = runInDurableObject as unknown as (
 	stub: unknown,
@@ -39,16 +40,18 @@ export async function enElObjetoDeLaAgenda<R>(
 }
 
 /**
- * Un lector de Turso sobre el SQLite de la agenda, con «ahora» fijo (o el que diga `ahora()` en
- * cada lectura). `espera` hace que cada lectura ceda el turno, como una consulta de red: es lo que
- * deja que dos altas a la vez se crucen.
+ * Un lector de la base del negocio sobre el SQLite de la agenda, con «ahora» fijo (o el que diga
+ * `ahora()` en cada lectura): las mismas lecturas que hace el TenantHub (`lecturasDeLaWeb.ts`), sin el
+ * viaje. `espera` hace que cada lectura ceda el turno, como el viaje: es lo que deja que dos altas a
+ * la vez se crucen.
  */
 export function lectorSobre(state: DurableObjectState, ahora: () => string, espera = 0) {
 	const db = clienteSobre(state.storage.sql, state.storage);
-	return async <T>(_tenantId: string, fn: (db: any, ahora: string) => Promise<T>): Promise<T> => {
+	return async (_tenantId: string, lectura: any): Promise<any> => {
 		if (espera) await new Promise((r) => setTimeout(r, espera));
 		const a = ahora();
-		return fn(conLaHoraDeQuienPregunta(db, a), a);
+		// La hora del negocio la fija el test: `horaDelNegocio` leería el reloj de verdad.
+		return ejecutarLecturaWeb(conLaHoraDeQuienPregunta(db as any, a), a, lectura);
 	};
 }
 
@@ -62,8 +65,8 @@ export function lectorConBarrera(state: DurableObjectState, ahora: () => string,
 	let leidas = 0;
 	let soltar!: () => void;
 	const todas = new Promise<void>((r) => (soltar = r));
-	return async <T>(tenantId: string, fn: (db: any, ahora: string) => Promise<T>): Promise<T> => {
-		const resultado = await leer(tenantId, fn);
+	return async (tenantId: string, lectura: any): Promise<any> => {
+		const resultado = await leer(tenantId, lectura);
 		if (++leidas >= n) soltar();
 		await todas;
 		return resultado;

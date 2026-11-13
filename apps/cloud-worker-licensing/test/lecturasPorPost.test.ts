@@ -25,6 +25,9 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 /** La base del negocio de la prueba: el SQLite del DO con el esquema real. */
 let dbActual: any = null;
 /** Las rutas que han llegado a autenticarse. */

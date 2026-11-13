@@ -15,12 +15,11 @@
 // - **El techo.** `VOLCADO_MAX_BYTES`. Quien escribe para en cuanto lo pasa, y cada ruta contesta
 //   lo que ya contestaba cuando el volcado no cabía por filas.
 //
-// Con la ruta ejecutándose en el Worker (`EJECUTAR_EN_EL_HUB` apagado, o un router suelto en un
-// test), las filas llegan por `tenantQuery` y se escriben igual: lo que sale es lo mismo, byte a
-// byte, y el techo es el mismo. Lo que cambia es cuándo actúa: allí las filas ya han cruzado la
-// llamada al DO, enteras y como valor, antes de que nadie las escriba, así que parar de escribir
-// no evita haberlas traído. Lo que acota esa llamada es su propio tope de 32 MiB, y por eso el
-// techo queda por debajo de él.
+// Desplegada, la ruta se ejecuta siempre dentro del TenantHub. Fuera de él sólo corre un router
+// montado suelto en un test, con `tenantQuery` de mentira (`test/helpers/rutaSuelta.ts`): ahí las
+// filas llegan por `tenantQuery`, ya montadas, y se escriben igual. Lo que sale es lo mismo, byte a
+// byte (`test/helpers/dosCaminos.ts`), y el techo es el mismo; lo que cambia es que ese lote ya está
+// entero en memoria cuando se empieza a escribir (`paraAlEscribir`).
 
 import type { Client, ResultSet } from "@libsql/client/web";
 
@@ -37,10 +36,6 @@ import { tenantQuery, type ContextoDeLectura } from "../../lib/tenantClient";
  * - **La memoria del TenantHub**: 128 MB, con el negocio entero dentro. Lo escrito ocupa su tamaño
  *   una vez, y dos durante el instante en que se junta; con 24 MiB caben dos volcados a la vez (una
  *   recuperación y el contraste diario) con holgura.
- * - **El tope de 32 MiB de una llamada entre el Worker y el DO.** El cuerpo de la respuesta de una
- *   ruta que se ejecuta dentro del DO viaja como flujo y no lo tiene (comprobado en local con
- *   40 MiB), pero con la ruta en el Worker las filas vuelven como valor de `consultar`, que sí.
- *   Por debajo de 32 MiB valen las dos formas.
  * - **La Main**, que descarga la respuesta entera dentro del plazo de un volcado, 150 s
  *   (`HTTP_TIMEOUT_VOLCADO_SECS`, `tpv-infra-licensing`), y la monta en memoria antes de
  *   restaurarla. 24 MiB en 150 s son 1,3 Mbit/s sin comprimir, y la Main la pide en gzip
@@ -50,6 +45,16 @@ import { tenantQuery, type ContextoDeLectura } from "../../lib/tenantClient";
  *   con la sexta parte de movimiento.
  */
 export const VOLCADO_MAX_BYTES = 24 * 1024 * 1024;
+
+/**
+ * Techo de una página del histórico, en bytes de JSON sin comprimir. Más bajo que el de los volcados
+ * (`VOLCADO_MAX_BYTES`): el histórico baja en muchas páginas, cada una ocupa el hilo del TenantHub
+ * mientras se recorre y se escribe, y entre una y otra el negocio sigue atendiendo a la Main y a las
+ * Handy. 4 MiB son unas 20.000 filas de las normales (unos 180 bytes cada una): por encima del tope
+ * de filas (`HISTORICO_MAX_FILAS`, `sync.schemas.ts`), que es el que corta casi siempre, y por debajo de lo que tarda en
+ * notarse.
+ */
+export const HISTORICO_MAX_BYTES = 4 * 1024 * 1024;
 
 /** Una sentencia de lectura con sus argumentos posicionales. */
 export type Sentencia = { sql: string; args: unknown[] };
@@ -71,8 +76,8 @@ export type Resultado = { columnas: string[]; filas: Iterable<unknown[]> };
 export type Lector = {
 	/**
 	 * Si las filas se leen según se recorren: es así con el cursor del DO, y entonces quien escribe
-	 * puede parar a mitad sin haber cargado lo que no cabe. Con la ruta en el Worker no: el lote
-	 * entero ya ha cruzado la llamada al DO cuando se empieza a escribir.
+	 * puede parar a mitad sin haber cargado lo que no cabe. Con el lector de un cliente no: el lote
+	 * entero ya está en memoria cuando se empieza a escribir.
 	 */
 	readonly paraAlEscribir: boolean;
 	foto<T>(sentencias: Sentencia[], usar: (resultados: Iterator<Resultado>) => T): Promise<T>;
@@ -138,8 +143,8 @@ export function lectorDelCliente(db: Pick<Client, "batch">): Lector {
 }
 
 /**
- * El lector de la petición en curso: el SQLite de al lado si la ruta se ejecuta dentro del
- * TenantHub del negocio, y `tenantQuery` si no. En los dos, «ahora» es el de quien pregunta
+ * El lector de la petición en curso: el SQLite de al lado, dentro del TenantHub del negocio, que es
+ * donde corre la ruta desplegada; `tenantQuery` en un router montado suelto en un test. En los dos, «ahora» es el de quien pregunta
  * (REV-03): `tenantQuery` lo fija por su cuenta y aquí se fija igual, con la misma función.
  */
 export function lectorDe(c: ContextoDeLectura): Lector {

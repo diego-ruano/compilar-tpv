@@ -20,6 +20,9 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 let clienteActual: any = null;
 let esTpv = true;
 /** Cuántas consultas ha llegado a lanzar el handler: lo que prueba que no pide lo que no cabe. */

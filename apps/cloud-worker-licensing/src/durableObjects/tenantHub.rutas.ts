@@ -20,7 +20,11 @@ export interface ContextoDeRutas {
 	/** SYNC-16: `acceptWebSocket`, no `server.accept()`. Es lo que permite hibernar sin cerrar. */
 	aceptarWebSocket(ws: WebSocket, tags: string[]): void;
 	waitUntil(p: Promise<unknown>): void;
-	touchLastSeen(tenantId: string, deviceId: string, force?: boolean): Promise<void>;
+	/**
+	 * El Worker acaba de apuntar el `last_seen` del dispositivo al canjear su ticket
+	 * (`domains/ws/canje.ts`): que la actividad de este socket no lo vuelva a apuntar enseguida.
+	 */
+	vistoAhora(deviceId: string): void;
 
 	applyInternalCommandIdempotent(params: {
 		tenantId: string;
@@ -97,6 +101,12 @@ export async function aplicar(ctx: ContextoDeRutas, params: ApplyParams): Promis
 /**
  * El upgrade: acepta el socket, le adosa su sesión y le manda el reto. Las REGLAS del handshake
  * están en `tenantHub.identidad.ts`; esto es su cableado con el transporte.
+ *
+ * Quién abre el socket lo dicen las cuatro cabeceras de identidad (`x-tenant-id`, `x-device-id`,
+ * `x-role`, `x-device-pubkey-b64`), y las pone el Worker (`GET /ws`, `app.ts`) con la fila del
+ * dispositivo de la base central, leída al canjear el ticket; las que mandara el cliente las quita
+ * antes. Sólo el Worker puede hablar con este objeto, así que aquí se fía de ellas: el saludo
+ * verifica la firma con esa clave y ese rol, sin volver a la base central.
  */
 export function abrirWebSocket(
 	ctx: ContextoDeRutas,
@@ -147,7 +157,7 @@ export function abrirWebSocket(
 		ctx.cerrar(prev, ctx.att(prev), 4000, "replaced");
 	}
 
-	ctx.waitUntil(ctx.touchLastSeen(tenantId, deviceId, true));
+	ctx.vistoAhora(deviceId);
 
 	ctx.send(server, {
 		type: "connected",

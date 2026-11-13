@@ -34,10 +34,11 @@ export async function trabajadoresExisten(db: Client, idsRaw: string[]): Promise
 		new Set((idsRaw ?? []).map((s) => recortar((s ?? "").toString())).filter((s) => s.length > 0)),
 	);
 	if (ids.length === 0) return true;
-	const placeholders = ids.map((_, i) => `?${i + 1}`).join(", ");
+	// DO-01: la lista, en un solo parámetro (un array JSON), como en la Main.
 	const rs = await db.execute({
-		sql: `SELECT COUNT(DISTINCT ID_Trabajador) AS n FROM Trabajadores WHERE ID_Trabajador IN (${placeholders});`,
-		args: ids,
+		sql: `SELECT COUNT(DISTINCT ID_Trabajador) AS n FROM Trabajadores
+		      WHERE ID_Trabajador IN (SELECT value FROM json_each(?1));`,
+		args: [JSON.stringify(ids)],
 	});
 	const n = Number(rows(rs)[0]?.n ?? 0);
 	return n === ids.length;

@@ -16,7 +16,7 @@ cuando hay fútbol (INFRA-04; el porqué, junto a `CLOUD_API_BASE`).
 | Ruta | Dominio | Quién la usa |
 |---|---|---|
 | `GET /health` | `server/salud.ts` | La sonda externa |
-| `GET /ws`, `/v1/ws` | `src/index.ts`, `domains/ws` | El WebSocket del `TenantHub` (con ticket de un solo uso) |
+| `GET /ws`, `/v1/ws` | `src/app.ts`, `domains/ws` | El WebSocket del `TenantHub` (con ticket de un solo uso, canjeado en `domains/ws/canje.ts`) |
 | `/v1/clientes`, `/configuracion`, `/cuentas`, `/inventario`, `/login`, `/mesas`, `/notificaciones`, `/proveedores`, `/reservas`, `/stats`, `/tareas`, `/trabajadores`, `/venta-rapida` | `domains/<dominio>/` | La Handy (lecturas y escrituras de negocio) |
 | `/v1/sync/*` | `domains/sync/` | La Main: catch-up, volcado, histórico, contraste ([sincronizacion.md](sincronizacion.md)) |
 | `/v1/images/*` | `domains/images/` | Subir, servir y borrar imágenes en R2 |
@@ -62,7 +62,8 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   en una cabecera. El DO ejecuta la misma `app` (`app.ts`); dentro, `tenantAuth` se fía de esa
   identidad, y los demás middlewares del router (vetos de rol, validación) corren allí una vez. Un
   router nuevo que lea o escriba la base del negocio lleva `alHub`; uno que sólo toque la central, R2
-  o el correo, no. `EJECUTAR_EN_EL_HUB = "0"` lo apaga (para medir).
+  o el correo, no. No hay otra forma de ejecutar una ruta de negocio: un test que monta un router
+  suelto declara el doble de `alHub` (`test/helpers/rutaSuelta.ts`) y la ruta corre allí mismo.
 - **Una ruta que lee la base del negocio va dentro aunque el resto de lo que hace sea de fuera.** El
   pedido a un proveedor (`/v1/email/enviar-pedido`) y el aviso de una reserva web
   (`/v1/reservas-web/avisos`) leen la base del negocio y además reservan cupo en la base central,
@@ -80,29 +81,23 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   web de la Main) el veto corre en el Worker y lee la fila viva, sin caché (`rolDelDispositivo`).
   Lo cubre `test/rolEnLaIdentidad.test.ts`.
 - **Las escrituras** van por el motor del DO (`aplicar`, o el WebSocket de la Main). **Las lecturas**,
-  por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
-  lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote
-  de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
-- **`consultar` sólo lee** (`leerEnBruto`), y no cambia la conexión. Cada texto tiene que ser **una
-  sola sentencia** que empiece como una lectura (`SELECT`, `WITH`); si no, se rechaza con
-  `consulta_no_es_lectura` sin ejecutarse. El SQLite del DO ejecuta todo lo que le llegue separado
-  por `;`, y un `PRAGMA` detrás de un `SELECT` no escribe ninguna fila y deja la conexión cambiada
-  para todo lo que venga después (sin comprobar los `CHECK`, por ejemplo). Las sentencias se cuentan
-  troceando el texto como SQLite (`unaSolaSentencia`: un `;` dentro de un texto, de un nombre entre
-  comillas o de un comentario no separa nada), y ante la duda es que no: un parámetro con nombre
-  (`$a`, `:a`, `@a`) no pasa, porque ninguna consulta los usa y SQLite los trocea de otra manera. Lo
-  que empieza como una lectura y escribe (un `WITH … DELETE`) se deshace entero: va todo en una
-  transacción y se mira que no se haya escrito ninguna fila. Una escritura que entrara por ahí no
-  pasaría por el motor: ni `Applied_Operations`, ni `Sync_Changes`, ni difusión, y la Main no la
-  vería nunca. Por `consultar` leen las rutas que corren en el Worker, la agenda de reservas web y
-  las rutas públicas de la reserva.
+  por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql sobre el SQLite
+  del DO (`tenantHub.sqlite.ts`). Sólo dentro del DO: toda ruta que lo usa lleva `alHub`, y fuera
+  lanza (un router sin `alHub` que lee la base del negocio es un fallo). Un lote de lectura da una
+  foto coherente: el SQL del DO es síncrono y nada se intercala.
+- **Desde fuera del DO no se lee consulta a consulta, ni hay una puerta que acepte SQL.** La agenda
+  de reservas web (otro DO) y las rutas públicas de la reserva (sin dispositivo, no van por `alHub`)
+  piden **una lectura entera, por su nombre** (`leerParaLaWeb`, RPC `TenantHub.leerParaLaWeb`,
+  `domains/reservas_web/lecturasDeLaWeb.ts`): el TenantHub la ejecuta con su base al lado, con «ahora»
+  fijado a la hora del negocio, y devuelve lo que la agenda o la ruta necesitan. Un viaje por lectura:
+  el día de la agenda eran cinco consultas y tres viajes seguidos. Lo que la lectura necesita del
+  estado de la agenda se le pasa en sus datos, y lo que devuelve cruza el RPC por copia estructurada
+  (`Map` y `Set` incluidos, `test/baseEnElDo.test.ts`). Sólo leen: la reserva web no escribe en la base
+  del negocio (ADR 0007).
 - **Lo único que una ruta escribe sin pasar por el motor es el estado propio de la nube**, que no
   se replica: el freno del PIN (`Intentos_Login`) y el checkpoint de cada Main, que es el suelo de la
-  purga (`Sync_Main_Checkpoints`). Dentro del DO lo escribe con el cliente de al lado; cuando la ruta
-  corre en el Worker (`EJECUTAR_EN_EL_HUB` apagado), el cliente lo manda por otra puerta,
-  `anotarEstado`, que sólo admite una sentencia que diga a las claras que escribe en una de esas
-  tablas (`esEscrituraDeEstado`). Una tabla nueva de ese tipo se añade ahí. Lo cubre
-  `test/consultarSoloLee.test.ts`.
+  purga (`Sync_Main_Checkpoints`). Lo escribe dentro del DO, con el cliente de al lado: las rutas que
+  lo tocan (el PIN, `/v1/sync/changes`) llevan `alHub`, y desde fuera no hay puerta que escriba.
 - **El alta siembra el administrador inicial dentro del DO** (`aprovisionar`,
   `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
   viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main
@@ -135,10 +130,9 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) se
   piden en Europa occidental, para que nazcan ahí aunque quien los llame primero esté en otro sitio,
   como el visitante de una web que reserva desde otro continente. Lo decidió el responsable, por
-  latencia: dentro de la
-  jurisdicción `eu` el objeto nace en un centro de la UE que no se elige y la pista de región no se
-  respeta. Lo mide `/v1/admin/diagnostico/latencias`, que crea objetos de usar y tirar en cada
-  colocación. La pista sólo cuenta en la llamada que crea el objeto, y es una preferencia, no una
+  latencia: dentro de la jurisdicción `eu` el objeto nace en un centro de la UE que no se elige y la
+  pista de región no se respeta (medido el 2026-11-12 con objetos de usar y tirar en cada
+  colocación). La pista sólo cuenta en la llamada que crea el objeto, y es una preferencia, no una
   garantía: Cloudflare la sigue cuando puede, y hoy un objeto no se muda después de creado.
 - **Todo el que pide el objeto de un negocio pasa por `lib/objetosDelNegocio.ts`** (`hubDe`, en
   `lib/hub.ts`, y `agendaDe`, en `durableObjects/agendaWeb.ts`), que aplica la jurisdicción y la
@@ -149,9 +143,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
 - **Límites del SQLite del DO** que no tiene el de la Main: 100 parámetros por sentencia, patrones de
   `LIKE` de 50 bytes, 5 `SELECT` por compuesto, 100 KB por sentencia, unos 2 MB por valor (uno de
   3 MB se rechaza) y 10 GB por objeto. Una lista de IDs de tamaño variable va como un único parámetro JSON:
-  `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento. Lo comprueba
-  `test/sondaSqliteDo.test.ts`; lo que aún no lo cumple está en
-  [DO-01](../pendientes.md#do-01--listas-de-ids-con-un-parámetro-por-elemento).
+  `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento: así entran en la nube «Ver tickets»
+  de un día con cientos de tickets, el cobro de un ticket de barra de más de 99 líneas, un plano con
+  más de 100 zonas o de 98 mesas en una zona y una tarea con más de 99 asignados (DO-01). Lo
+  comprueban `test/sondaSqliteDo.test.ts` (el límite), los casos de contrato de 120 elementos
+  (`*_120_*`) y `test/listasEnUnParametro.test.ts`, que lee el fuente y falla si una sentencia
+  vuelve a componer un `?` por elemento.
 - **Lo que teclea el usuario se busca con `instr(lower(col), lower(?)) > 0`, nunca con `LIKE`**: un
   patrón de `LIKE` con un texto de más de 50 bytes (49 letras, o 25 con acento) no pasa del DO, y en un
   patrón el `%` y el `_` tecleados son comodines. Así buscan los productos de las mesas y de la barra
@@ -159,21 +156,18 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   patrón fijo y corto (`LIKE '%:%'`) no tiene ese problema. Lo vigila `test/busquedaDeTexto.test.ts`,
   que lee el fuente de los dominios.
 - **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos: lo que se le
-  pasa y lo que devuelve como valor (las filas de `consultar`). El cuerpo de la respuesta de una ruta
-  que se ejecuta dentro del DO no lo tiene: viaja como flujo.
+  pasa y lo que devuelve como valor. El cuerpo de la respuesta de una ruta que se ejecuta dentro del
+  DO no lo tiene: viaja como flujo (comprobado en local con 40 MiB).
 - **Los volcados de sync** (`/v1/sync/bootstrap`, `/verificar` e `/historico`) no leen por
   `tenantQuery`: dentro del DO recorren el cursor de su SQLite una vez y escriben cada fila una vez,
   ya como bytes de la respuesta (`domains/sync/volcado.ts`), sin un objeto por fila ni el texto del
   JSON entero. Lo escrito tiene un techo, `VOLCADO_MAX_BYTES` (24 MiB de JSON sin comprimir), además
-  del tope de filas: cabe en la memoria del objeto, queda por debajo de los 32 MiB con la ruta en el
-  Worker y es lo que la Main descarga dentro del plazo de un volcado (150 s, y lo pide en gzip:
-  [recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Con la ruta en el Worker las filas
-  llegan por `tenantQuery` y, para una misma ventana, la respuesta es la misma byte a byte
-  (`test/helpers/dosCaminos.ts`); pero allí ya han cruzado la llamada al DO, enteras, cuando se
-  escriben, así que lo que acota esa llamada es su tope de 32 MiB y no el techo, que actúa después.
-  Por eso con la ruta en el Worker una ventana cuya estimación no cabe no se intenta, y dentro del
-  DO la más estrecha sí ([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)). Los
-  bytes se cuentan al escribir, exactos (UTF-8), y las filas también.
+  del tope de filas: cabe en la memoria del objeto y es lo que la Main descarga dentro del plazo de un
+  volcado (150 s, y lo pide en gzip: [recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)).
+  Como el cursor se lee según se escribe, la ventana más estrecha se intenta siempre aunque su
+  estimación no quepa, y decide lo escrito. Los bytes se cuentan al escribir, exactos (UTF-8), y las
+  filas también. Un router de sync montado suelto en un test lee por `tenantQuery`, y para una misma
+  ventana la respuesta es la misma byte a byte (`test/helpers/dosCaminos.ts`).
 - **Un cursor del SQLite del DO se recorre hasta el final.** Uno que se deja a medias mantiene su
   sentencia abierta, con su lectura, hasta que el recolector de memoria lo retira (mientras tanto,
   un `DROP` de esa tabla falla con `database table is locked`). `cursor.toArray()` y
@@ -334,6 +328,18 @@ que se reservó. Las dos dejan de contar al salir de la ventana. Si la base cent
 pedido sale igual y se apunta después si se puede. Las trazas se purgan a los 90 días
 (`RETENCION_ENVIOS_MS`).
 
+**Un pedido no sale dos veces.** La Main manda con cada pedido su clave de envío (`id_envio`, la
+misma mientras se reintenta el mismo pedido sin cambiarlo, guardada en el almacenamiento de la
+aplicación hasta que el envío termina bien: `claveDeEnvio.ts`), y es el id de su
+fila (`pedido:<negocio>:<id_envio>`). La reserva del cupo es también la del id, en la misma
+sentencia: un reintento de uno que ya salió (la respuesta se perdió por el camino) contesta `ok`
+sin mandar otro; uno que está saliendo ahora por otra petición, 409 `email_en_curso`; uno que
+falló, o que se quedó a medias más de cinco minutos, se vuelve a reservar y sale. Lo que ya salió no
+se pisa nunca (`ok = 1`), y apuntar que salió se intenta tres veces antes de rendirse: uno que salió y
+se queda en `enviando` es lo único que un reintento podría repetir. Sin clave (una Main anterior), cada
+petición es un envío. Con la base central caída el pedido sale igual, también con clave: no se sabe
+si ya salió, y entre no mandar un pedido y mandarlo dos veces en una caída se queda lo segundo.
+
 Los correos al cliente de una reserva web salen de `domains/reservas_web/correos.ts`, desde
 `EMAIL_RESERVAS_FROM_ADDRESS` con el nombre del negocio y su correo de contacto como `Reply-To`. Sólo
 llevan datos estructurados (nada que haya escrito el visitante), van a la dirección del alta o al
@@ -358,8 +364,8 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 
 ## Sincronización y firmas
 
-El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `consultar`,
-`anotarEstado`, `aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
+El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `leerParaLaWeb`,
+`aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
 `avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
 helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
 publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con
@@ -448,8 +454,8 @@ bindings, pero no pueden hablar con ningún servicio de verdad (`vitest.config.t
 - **El entorno es de pruebas** (`test/helpers/entornoDePruebas.ts`). Las `vars` que nombran un
   servicio o una cuenta —la base central, los remitentes, Turnstile, el origen de las reservas web,
   Axiom— valen direcciones `.invalid` y nombres ficticios. Los secretos que la suite necesita
-  (`LICENSE_JWT_SECRET`, `TURSO_AUTH_TOKEN`) son deterministas; `EJECUTAR_EN_EL_HUB` va como en
-  producción, para que la suite pase por el mismo camino, y la pista de región de los DO, vacía; los demás van vacíos, que el worker trata como sin configurar, y el test que
+  (`LICENSE_JWT_SECRET`, `TURSO_AUTH_TOKEN`) son deterministas; la pista de región de los DO, vacía;
+  los demás van vacíos, que el worker trata como sin configurar, y el test que
   necesita uno lo pasa en su propio entorno. Wrangler mete además en los tests el `.dev.vars` de la
   carpeta del worker o, si no lo hay, su `.env` y su `.env.local`, y el pool no deja desactivarlo:
   la configuración le pregunta qué nombres va a cargar y los pone todos vacíos antes de aplicar la
@@ -496,7 +502,8 @@ no lo vigila nada.
 | Lo que se llama | Doble |
 |---|---|
 | La base central desde una ruta o un helper (`getDb`) | `vi.mock("../src/server/db", …)` con `getDb` devolviendo `clienteSobre(sql, storage)` (`helpers/clienteSql.ts`) sobre el SQLite de un Durable Object, con `prepararPlanoDeControl(sql)` |
-| La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` (o `lecturaConHora`) llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)` |
+| El viaje al `TenantHub` de una ruta de negocio, en un router montado suelto | `vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"))`: la ruta corre allí mismo, contra los demás dobles. Con la `app` entera y el TenantHub de verdad no hace falta (`unViajePorPeticion.test.ts`) |
+| La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)`. Desde la agenda o una ruta pública: `motor.leer = lectorSobre(state, ahora)` (`helpers/agenda.ts`) o el doble de `leerParaLaWeb` |
 | La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con un `clienteSobre` |
 | La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` |
 | Un `fetch`: Stripe, Axiom, Turnstile, un latido | `vi.stubGlobal("fetch", doble)` y `vi.unstubAllGlobals()` en `afterEach`; o `vi.mock` del módulo que lo hace |

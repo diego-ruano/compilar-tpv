@@ -15,6 +15,9 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { enLaAgenda } from "./helpers/agenda";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 
+// El router va suelto, con sus dobles: la ruta corre aquí, sin el viaje al TenantHub.
+vi.mock("../src/lib/enElHub", () => import("./helpers/rutaSuelta"));
+
 /** La base del negocio y la central de la prueba en curso, en el mismo SQLite. */
 let base: any = null;
 

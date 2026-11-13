@@ -140,9 +140,16 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - ⚠️ **Por `WriteGuard::raw()`**: por `execute()` devolvería a la nube, fila a fila, el histórico que
   acaba de bajar.
 - El cursor avanza en la misma transacción que inserta: apagar a mitad no pierde nada.
-- Una página lleva hasta 2.000 filas y hasta 24 MiB: si se corta por tamaño trae su
-  `siguiente_cursor` igual, y nunca viene sin al menos una fila (una fila que sola pase del tope
-  viaja igual: rechazarla dejaría al backfill atascado en ella).
+- Una página lleva hasta 10.000 filas y hasta 4 MiB (`HISTORICO_MAX_FILAS`, `HISTORICO_MAX_BYTES`):
+  cada una ocupa el hilo del DO del negocio mientras se escribe, y entre una y otra atiende lo demás.
+  Si se corta por tamaño trae su `siguiente_cursor` igual, y nunca viene sin al menos una fila (una
+  fila que sola pase del tope viaja igual: rechazarla dejaría al backfill atascado en ella).
+- **El ritmo depende de la calma** (`backfill_paso`, mirada antes de cada página): con el equipo
+  trabajando, diez páginas de 2.000 filas por vencimiento (unas 240.000 a la hora); sin ninguna
+  escritura en tres minutos (ni de aquí ni de la nube: `_Sync_Applied_Ops`), hasta cuarenta de 10.000
+  (más de cuatro millones a la hora). Si entra una venta a mitad, lo que queda va al ritmo de
+  trabajo. Un worker anterior recorta las páginas a las suyas y el histórico baja igual
+  (`tests/historico_al_ritmo.rs`).
 - Es `Requiere::MainOperativa`, así que no compite con el desbloqueo del login. Se pausa con el
   interruptor `backfill_historico`.
 - **La reconciliación de valores derivados se calla mientras falte histórico** (compararía maestros
