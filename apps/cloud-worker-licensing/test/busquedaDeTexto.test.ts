@@ -15,6 +15,9 @@
 //
 // Que la Main devuelve las mismas filas lo fijan los casos de lectura `*_comodines` y
 // `*_texto_largo` (`tests/contract/lecturas/`).
+//
+// Aparte de los comodines, `instr` sólo se aparta de `LIKE` con un carácter NUL dentro del texto:
+// `LIKE` deja de mirar al llegar a él e `instr` busca en el texto entero, igual en los dos lados.
 
 import type { Client } from "@libsql/client/web";
 import { describe, expect, it } from "vitest";
@@ -165,17 +168,24 @@ describe("buscar en los listados de caja con lo que teclea el usuario", () => {
 	});
 });
 
-describe("ninguna consulta de un dominio compone un patrón de LIKE", () => {
+describe("ninguna consulta de un dominio compone un patrón de LIKE ni de GLOB", () => {
 	// Todo el fuente de los dominios, como texto (dentro del pool de workers no hay `node:fs`).
 	const fuentes = import.meta.glob("../src/domains/**/*.ts", { query: "?raw", import: "default", eager: true });
 
-	/** Un `LIKE` cuyo patrón no es un texto fijo: un parámetro, una concatenación o una interpolación. */
-	const PATRON_DE_FUERA = /\bLIKE\s+(?!'[^'$]*'(?!\s*\|\|))/gi;
+	/**
+	 * Un `LIKE` o un `GLOB` cuyo patrón no es un texto fijo: un parámetro, una concatenación (de SQL
+	 * o de JavaScript) o una interpolación. `GLOB` tiene el mismo tope de 50 bytes. También caza las
+	 * dos como función (`like(patron, texto)`), que nadie usa con un patrón fijo.
+	 *
+	 * El texto fijo es un literal de SQL entero, con sus comillas dobladas (`'it''s'`), al que no le
+	 * sigue un `||`.
+	 */
+	const PATRON_DE_FUERA = /\b(?:LIKE|GLOB)\s*\(|\b(?:LIKE|GLOB)\s+(?!'(?:[^'$"`+]|'')*'(?!')(?!\s*\|\|))/gi;
 
 	it("lee el fuente de verdad", () => {
 		expect(Object.keys(fuentes).length).toBeGreaterThan(40);
 		// Los patrones fijos que ya hay sí se ven, y no cuentan.
-		const fijos = Object.values(fuentes).join("\n").match(/\bLIKE\s+'[^'$]*'/gi) ?? [];
+		const fijos = Object.values(fuentes).join("\n").match(/\b(?:LIKE|GLOB)\s+'[^'$]*'/gi) ?? [];
 		expect(fijos.length).toBeGreaterThan(0);
 	});
 
@@ -184,9 +194,17 @@ describe("ninguna consulta de un dominio compone un patrón de LIKE", () => {
 		expect(caza("WHERE p.Nombre LIKE ?1")).toBe(1);
 		expect(caza("WHERE x LIKE '%' || lower(?2) || '%'")).toBe(1);
 		expect(caza("WHERE x LIKE ${patron}")).toBe(1);
+		expect(caza("WHERE x LIKE '%${texto}%'")).toBe(1);
+		expect(caza(`WHERE x LIKE '%" + texto + "%'`)).toBe(1);
 		expect(caza("WHERE x like :texto")).toBe(1);
+		expect(caza("WHERE x GLOB ?1")).toBe(1);
+		expect(caza("WHERE x LIKE 'it''s' || ?1")).toBe(1);
+		expect(caza("WHERE like(?1, x)")).toBe(1);
+		expect(caza("WHERE glob(?1, x)")).toBe(1);
+		expect(caza("WHERE x LIKE 'it''s%'")).toBe(0);
 		expect(caza("CASE WHEN f.Hora LIKE '%-%' THEN 1 END")).toBe(0);
 		expect(caza("lower(cg.Tipo_Gasto) LIKE '%proveedor%')")).toBe(0);
+		expect(caza("m.Numero_Mesa NOT GLOB '*[^0-9]*'")).toBe(0);
 	});
 
 	it("en los dominios sólo hay patrones fijos", () => {
