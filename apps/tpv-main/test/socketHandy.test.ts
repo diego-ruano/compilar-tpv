@@ -14,6 +14,8 @@ import { useContactSettings } from "../src/shared/stores/useContactSettings";
 import { useAuth } from "../src/shared/stores/useAuth";
 const foto = (cambio: Partial<EstadoSocketHandy> = {}): EstadoSocketHandy => ({ revision: 0, generacion: 1, conexion: 1, tenant_id: "negocio-a", estado: "conectada", main_online: true, volcando: false, rechazo: null, ...cambio });
 const asentar = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
+/** Los `init` de los tres stores de ajustes: negocio, ticket y contacto. */
+const inits = () => [useBusinessSettings, useTicketSettings, useContactSettings].map((s) => vi.mocked(s.getState().init));
 beforeEach(() => {
     h.listen.mockImplementation(async (nombre, callback) => {
         h.listeners.set(nombre, callback);
@@ -61,14 +63,13 @@ describe("presentación del socket Handy nativo", () => {
         // entrada en el mapa, cada venta es un `invalidateQueries()` de todo en cada Handy.
         const socket = iniciarSocketHandy("handy")!; await asentar();
         vi.mocked(queryClient.invalidateQueries).mockClear();
-        const ajustes = [useBusinessSettings, useTicketSettings, useContactSettings].map((s) => vi.mocked(s.getState().init));
-        for (const init of ajustes) init.mockClear();
+        for (const init of inits()) init.mockClear();
         const tablas = ["comandas", "pagos", "pago_detalles", "lotes_producto", "lote_consumos", "movimientos_caja", "serie_facturacion", "registros_facturacion"];
         h.listeners.get("handy:cambio")!({payload: {generacion: 1, cambio: {tablas, comanda: {ids: ["c1"], touchedComanda: true, uncertain: false, touchedCatalog: true}}}});
         const claves = vi.mocked(queryClient.invalidateQueries).mock.calls.map(([args]) => args?.queryKey);
         expect(claves).not.toContain(undefined);
         expect(claves.map((c) => String(c)).sort()).toEqual(["cuentas", "inventario", "mesas", "proveedores", "stats"]);
-        for (const init of ajustes) expect(init).not.toHaveBeenCalled();
+        for (const init of inits()) expect(init).not.toHaveBeenCalled();
         socket.detener();
     });
     it("ignora los avisos de una conexión que pertenece al vínculo anterior", async () => {
@@ -77,12 +78,44 @@ describe("presentación del socket Handy nativo", () => {
         h.listeners.get("handy:cambio")!({payload: {generacion: 0, cambio: {tablas: null, comanda: {}}}});
         expect(queryClient.invalidateQueries).not.toHaveBeenCalled(); socket.detener();
     });
-    it("los ajustes se releen y una tabla desconocida obliga al refresco completo", async () => {
+    it("un cambio sin clasificar obliga al refresco completo y a releer los tres ajustes", async () => {
         const socket = iniciarSocketHandy("handy")!; await asentar();
-        vi.mocked(useBusinessSettings.getState().init).mockClear(); vi.mocked(useTicketSettings.getState().init).mockClear();
+        for (const init of inits()) init.mockClear();
         h.listeners.get("handy:cambio")!({payload: {generacion: 1, cambio: {tablas: null, comanda: {ids: [], touchedComanda: true, uncertain: true, touchedCatalog: true}}}});
         expect(queryClient.invalidateQueries).toHaveBeenCalledWith();
-        expect(useBusinessSettings.getState().init).toHaveBeenCalledOnce(); expect(useTicketSettings.getState().init).toHaveBeenCalledOnce(); socket.detener();
+        for (const init of inits()) expect(init).toHaveBeenCalledOnce();
+        socket.detener();
+    });
+    it("un cambio en una tabla de ajustes relee sólo su store", async () => {
+        // Cada store es una petición a la nube: cambiar el teléfono de contacto no es motivo para
+        // volver a pedir los ajustes del negocio y los del ticket.
+        const socket = iniciarSocketHandy("handy")!; await asentar();
+        const [negocio, ticket, contacto] = inits();
+        const sinTicket = {ids: [], touchedComanda: false, uncertain: false, touchedCatalog: false};
+        const llega = (tablas: string[]) => {
+            for (const init of inits()) init.mockClear();
+            h.listeners.get("handy:cambio")!({payload: {generacion: 1, cambio: {tablas, comanda: sinTicket}}});
+        };
+        llega(["contact_settings"]);
+        expect(contacto).toHaveBeenCalledOnce(); expect(negocio).not.toHaveBeenCalled(); expect(ticket).not.toHaveBeenCalled();
+        llega(["business_settings"]);
+        expect(negocio).toHaveBeenCalledOnce(); expect(ticket).not.toHaveBeenCalled(); expect(contacto).not.toHaveBeenCalled();
+        llega(["ticket_settings", "business_settings"]);
+        expect(negocio).toHaveBeenCalledOnce(); expect(ticket).toHaveBeenCalledOnce(); expect(contacto).not.toHaveBeenCalled();
+        llega(["pagos"]);
+        for (const init of inits()) expect(init).not.toHaveBeenCalled();
+        socket.detener();
+    });
+    it("una conexión nueva relee los tres ajustes, y la misma conexión ninguno", async () => {
+        const socket = iniciarSocketHandy("handy")!; await asentar();
+        for (const init of inits()) expect(init).toHaveBeenCalledOnce();
+        for (const init of inits()) init.mockClear();
+        // La presencia de la Main no ha cambiado ni hay conexión nueva: nada que releer.
+        h.listeners.get("handy:estado")!({payload: foto({revision: 1})});
+        for (const init of inits()) expect(init).not.toHaveBeenCalled();
+        h.listeners.get("handy:estado")!({payload: foto({revision: 2, conexion: 2})});
+        for (const init of inits()) expect(init).toHaveBeenCalledOnce();
+        socket.detener();
     });
     it("el botón pide un reintento nativo sin recrear los observadores", async () => {
         const socket = iniciarSocketHandy("handy")!; await asentar(); socket.reconectarSiHaceFalta(true); await asentar();

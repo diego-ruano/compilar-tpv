@@ -93,7 +93,7 @@ const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
 	// no hay pantalla que lo enseñe.
 	intentos_login: [],
 	// Ajustes: viven en stores Zustand (no en React Query), así que no invalidan ninguna clave de
-	// caché. Lo que sí hace falta es que sus stores se recarguen — ver `ajustesPorTablas` más abajo.
+	// caché. Lo que sí hace falta es que su store se recargue — ver `ajustesPorTablas` más abajo.
 	business_settings: [],
 	ticket_settings: [],
 	contact_settings: [],
@@ -107,7 +107,9 @@ export function tablasConArea(): string[] {
 	return Array.from(AREAS_POR_TABLA.keys());
 }
 
-const TABLAS_DE_AJUSTES = new Set(["business_settings", "ticket_settings", "contact_settings"]);
+/** Las tres tablas de ajustes. Cada una tiene su store (`recargarAjustes.ts`). */
+export type TablaDeAjustes = "business_settings" | "ticket_settings" | "contact_settings";
+const TABLAS_DE_AJUSTES: readonly TablaDeAjustes[] = ["business_settings", "ticket_settings", "contact_settings"];
 
 export function shouldReloadTicket(
 	info: ComandaSyncInfo,
@@ -130,6 +132,12 @@ export function featureKeysPorTablas(tablas: string[] | null): string[] | null {
     return Array.from(keys);
 }
 
-export function ajustesPorTablas(tablas: string[] | null): boolean {
-    return tablas === null || tablas.some((t) => TABLAS_DE_AJUSTES.has(t.toLowerCase()));
+/**
+ * Qué ajustes hay que releer: los de las tablas que han cambiado, y sólo ésos. Sin clasificación
+ * (`null`: Rust no ha sabido leer alguna sentencia) no se sabe cuáles, así que los tres.
+ */
+export function ajustesPorTablas(tablas: string[] | null): readonly TablaDeAjustes[] {
+    if (tablas === null) return TABLAS_DE_AJUSTES;
+    const tocadas = new Set(tablas.map((t) => t.toLowerCase()));
+    return TABLAS_DE_AJUSTES.filter((t) => tocadas.has(t));
 }

@@ -40,7 +40,7 @@ describe("toda tabla de negocio dice qué pantallas la enseñan", () => {
         const areas = featureKeysPorTablas(cobro);
         expect(areas).not.toBeNull();
         expect([...areas!].sort()).toEqual(["cuentas", "inventario", "mesas", "proveedores", "stats"]);
-        expect(ajustesPorTablas(cobro)).toBe(false);
+        expect(ajustesPorTablas(cobro)).toEqual([]);
     });
     it("la caja, el stock y las reservas web refrescan su pantalla; lo fiscal, ninguna", () => {
         for (const tabla of ["movimientos_caja", "aperturas_cajon", "cierres_caja", "cierre_denominaciones", "cierre_rectificaciones"]) {
@@ -76,9 +76,14 @@ describe("metadatos nativos y cachés de presentación", () => {
         expect(featureKeysPorTablas(["productos"])).toContain("proveedores");
         expect(featureKeysPorTablas(["lotes_producto"])).toContain("proveedores");
     });
-    it("los tres ajustes y un cambio sin clasificación obligan a releer stores", () => {
-        for (const tabla of ["business_settings", "ticket_settings", "contact_settings"]) expect(ajustesPorTablas([tabla])).toBe(true);
-        expect(ajustesPorTablas(null)).toBe(true); expect(ajustesPorTablas(["pagos"])).toBe(false);
+    it("cada tabla de ajustes relee sólo su store, y un cambio sin clasificación los tres", () => {
+        for (const tabla of ["business_settings", "ticket_settings", "contact_settings"]) expect(ajustesPorTablas([tabla])).toEqual([tabla]);
+        expect(ajustesPorTablas(["Contact_Settings", "pagos"])).toEqual(["contact_settings"]);
+        expect(ajustesPorTablas(["ticket_settings", "business_settings", "ticket_settings"])).toEqual(["business_settings", "ticket_settings"]);
+        expect(ajustesPorTablas(null)).toEqual(["business_settings", "ticket_settings", "contact_settings"]);
+        expect(ajustesPorTablas(["pagos"])).toEqual([]);
+        // Una tabla sin entrada obliga a releer las consultas, pero no dice nada de los ajustes.
+        expect(ajustesPorTablas(["tabla_nueva"])).toEqual([]);
     });
 });
 

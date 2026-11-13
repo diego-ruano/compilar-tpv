@@ -68,7 +68,9 @@ Rechazos de licencia y revocación se distinguen de la red, con reintentos cada 
 
 Cada conexión confirmada tiene un contador nativo. Al volver a observarla, reconectar o terminar el
 volcado se releen consultas, ajustes y ticket abierto: la Handy no conserva ni reproduce SQL perdido.
-Los cambios en vivo siguen invalidando sólo las áreas afectadas. Tauri avisa a Rust del foco y de la
+Los cambios en vivo siguen invalidando sólo las áreas afectadas, y un cambio en una tabla de ajustes
+relee sólo su store (`shared/lib/recargarAjustes.ts`): los tres se releen con una conexión nueva o
+con un cambio sin clasificar. Tauri avisa a Rust del foco y de la
 reanudación en Android; `online` en la webview es sólo una pista para el servicio. No se requiere un
 servicio Android en segundo plano: la conexión se recupera al volver si el sistema suspendió la app.
 
