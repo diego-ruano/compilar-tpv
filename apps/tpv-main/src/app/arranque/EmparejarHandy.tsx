@@ -18,7 +18,8 @@ export default function EmparejarHandy({
 }: {
 	emparejamiento: EmparejamientoHandy;
 	volviendo: boolean;
-	onVolver: () => Promise<void>;
+	/** Al selector de modo, sin tocar el vínculo guardado (AUD-23). */
+	onVolver: () => void;
 }) {
 	const { estado, ocupado, error, huella } = emparejamiento;
 	const [contenidoQr, setContenidoQr] = useState("");

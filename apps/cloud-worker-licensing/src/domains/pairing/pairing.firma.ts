@@ -9,6 +9,7 @@
 
 import type { Client } from "@libsql/client/web";
 
+import { quitarComillas } from "../../lib/texto";
 import { b64ToBytes } from "../../server/utils/base64";
 import { ed25519Verify, bytesExactos } from "../../server/utils/ed25519";
 
@@ -18,10 +19,15 @@ export type ProblemaDeFirma = { status: 401 | 404 | 409 | 410; error: string };
 
 const MARGEN_DE_RELOJ_MS = 2 * 60 * 1000;
 
+/**
+ * Una clave o una firma en base64 tal como puede llegar: con comillas o espacios alrededor, o en
+ * base64url sin relleno. Lo que llega de fuera ya viene con su tope (`TOPE_CLAVE_B64`,
+ * `TOPE_FIRMA_B64`, en el schema); esto, en todo caso, es lineal (AUD-33).
+ */
 export function sanitizeB64(input: string): string {
 	let s = String(input || "").trim();
 
-	s = s.replace(/^"+|"+$/g, "");
+	s = quitarComillas(s);
 	s = s.replace(/\s+/g, "");
 	s = s.replace(/-/g, "+").replace(/_/g, "/");
 

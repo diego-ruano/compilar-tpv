@@ -138,6 +138,11 @@ pub struct LicenseActivateOutcome {
     /// meses») y no hay nada más que hacer.
     #[serde(default)]
     pub tiempo_sumado: bool,
+    /// AUD-06 · La licencia es de otro negocio que la base de este equipo: los datos del anterior se
+    /// guardan aparte al volver a arrancar, y el TPV se reinicia solo enseguida. La pantalla lo
+    /// avisa y no sigue.
+    #[serde(default)]
+    pub reinicia: bool,
 }
 
 /// Args de `license_sumar_clave` (RI-52): una clave sin estrenar cuyo tiempo se suma a la licencia
@@ -192,13 +197,4 @@ pub struct TpvServerPostJsonArgs {
     pub path: String,
     #[specta(type = specta_typescript::Unknown)]
     pub body: serde_json::Value,
-}
-
-/// Args para subir el setup inicial de la Main a la nube (tras "Guardar y continuar" en el
-/// panel de configuración inicial). El `pin` viaja firmado y se hashea en el worker.
-#[derive(Debug, Clone, Deserialize, specta::Type)]
-pub struct UploadInitialSetupArgs {
-    // ID UUIDv7 (texto), igual que en el resto del sistema y en el worker (`idStr`).
-    pub id_usuario: String,
-    pub pin: String,
 }

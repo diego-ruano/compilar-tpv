@@ -8,11 +8,10 @@ use std::path::PathBuf;
 use tpv_contracts::json::JsonDinamico;
 use tauri::{AppHandle, Manager, State};
 
-use tpv_application::use_cases::cloud_sync as uc_sync;
 use tpv_application::use_cases::pairing as uc;
 use tpv_contracts::licensing::{
     DeviceIdentity, DeviceFirmarEmparejamientoArgs, HandySetTokenArgs,
-    PairCreateResult, FirmaDispositivo, TpvServerPostJsonArgs, UploadInitialSetupArgs,
+    PairCreateResult, FirmaDispositivo, TpvServerPostJsonArgs,
 };
 use tpv_infra_licensing::PairingAdapter;
 use tpv_contracts::errors::AppErrorDto;
@@ -155,17 +154,10 @@ pub async fn pair_create(
     Ok(uc::pair_create(&svc(&app)?).await?)
 }
 
-/// Sube a la nube el setup inicial del admin tras completarlo en local (panel de
-/// configuración inicial). El `PairingAdapter` firma la petición como dispositivo TPV.
-#[tauri::command]
-#[specta::specta]
-pub async fn config_upload_initial_setup(
-    app: AppHandle,
-    args: UploadInitialSetupArgs,
-) -> Result<String, AppErrorDto> {
-    uc_sync::upload_initial_setup(&svc(&app)?, args).await?;
-    Ok("OK".into())
-}
+// AUD-24: aquí estaba `config_upload_initial_setup`, que subía a la nube el PIN que le dijeran para
+// el usuario que le dijeran, sin sesión ni `Requiere_Setup`. Sobraba: el `UPDATE` del setup local
+// ya sube por el outbox (`complete_initial_setup`). Lo vigila
+// `lib.rs::los_comandos_retirados_no_vuelven_por_la_puerta_de_atras`.
 
 #[cfg(test)]
 mod tests_gate_del_proxy {

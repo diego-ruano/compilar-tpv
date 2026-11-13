@@ -97,14 +97,35 @@ pub async fn bootstrap_desde_nube(
     nube: &dyn PairingService,
     repo: &dyn SyncRepository,
 ) -> AppResult<BootstrapResultado> {
+    // AUD-06: el volcado es del negocio de la licencia, que es el del token con el que se firma la
+    // petición (el adaptador no firma en modo `tpv` con el token de otro negocio). Con ése se sella
+    // la base. Se vuelve a leer después: si la licencia ha cambiado mientras bajaba, no se sabe de
+    // quién es lo que ha llegado y no se instala.
+    let negocio = negocio_de_la_licencia(nube)?;
     let raw = nube
         .tpv_server_post_json("tpv", "/v1/sync/bootstrap", json!({}))
         .await?;
+    if negocio_de_la_licencia(nube)? != negocio {
+        return Err(AppError::conflict(
+            "La licencia de este equipo ha cambiado mientras se traían los datos. Vuelve a intentarlo.",
+        ));
+    }
 
     let snapshot: BootstrapSnapshot = serde_json::from_value(raw)
         .map_err(|e| AppError::external(format!("respuesta de bootstrap ilegible: {e}")))?;
 
-    repo.bootstrap_restaurar(snapshot).await
+    repo.bootstrap_restaurar(snapshot, &negocio).await
+}
+
+fn negocio_de_la_licencia(nube: &dyn PairingService) -> AppResult<String> {
+    nube.negocio_de_la_licencia()?
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| {
+            AppError::conflict(
+                "Este equipo no tiene ninguna licencia activada. Actívala antes de traer los datos de la nube.",
+            )
+        })
 }
 
 /* ===== SYNC-19 · fase 2: el histórico, en segundo plano ===== */
@@ -350,6 +371,7 @@ mod tests {
         async fn bootstrap_restaurar(
             &self,
             _: tpv_contracts::sync::BootstrapSnapshot,
+            _: &str,
         ) -> AppResult<tpv_contracts::sync::BootstrapResultado> {
             panic!("no se debe llegar a restaurar en estas pruebas")
         }

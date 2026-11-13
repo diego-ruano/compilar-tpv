@@ -504,6 +504,34 @@ impl InventarioRepository for SqliteInventarioRepository {
         let g = self.db.write().await;
         let conn = &g;
         conn.transaccion(async {
+            // Auditoría (INV-01b): el alta entra como movimiento 'ALTA' con delta = stock inicial.
+            // RI-28: el usuario viene del contexto autenticado de la capa de aplicación.
+            //
+            // AUD-20: el movimiento va DELANTE del alta del lote y sólo entra si el lote no existe.
+            // Con el id de un lote que ya existe, el alta pura de abajo no lo toca, y sin la
+            // condición quedaba otro 'ALTA' que la reconciliación daba por descuadre sin que ningún
+            // ajuste lo cerrara. La condición viaja en la sentencia y la vuelve a evaluar la nube al
+            // aplicarla; la FK al lote la comprueba el COMMIT (`transaccion` abre con
+            // `defer_foreign_keys`). Espejo de `createLote` del worker.
+            conn.execute(
+                r#"
+                INSERT INTO Movimientos_Stock
+                  (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                SELECT ?1, ?2, 'ALTA', ?3, ?4, ?5, ?6, datetime('now','localtime')
+                WHERE NOT EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?2);
+                "#,
+                vec![
+                    Value::Text(id_mov),
+                    Value::Text(id_lote.clone()),
+                    Value::Real(stock),
+                    Value::Real(stock),
+                    opt_text(motivo),
+                    Value::Text(id_usuario.to_string()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
             conn.execute(
                 r#"
                 -- Alta PURA (INV-02): un create con un ID_Lote existente es un no-op idempotente,
@@ -516,7 +544,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 ON CONFLICT(ID_Lote) DO NOTHING;
                 "#,
                 vec![
-                    Value::Text(id_lote.clone()),
+                    Value::Text(id_lote),
                     Value::Text(l.id_producto),
                     Value::Text(l.codigo_lote),
                     opt_text(l.fecha_entrada),
@@ -528,27 +556,6 @@ impl InventarioRepository for SqliteInventarioRepository {
                         None => Value::Null,
                     },
                     opt_text(l.notas),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-
-            // Auditoría (INV-01b): el alta entra como movimiento 'ALTA' con delta = stock inicial.
-            // RI-28: el usuario viene del contexto autenticado de la capa de aplicación.
-            conn.execute(
-                r#"
-                INSERT INTO Movimientos_Stock
-                  (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
-                VALUES
-                  (?1, ?2, 'ALTA', ?3, ?4, ?5, ?6, datetime('now','localtime'));
-                "#,
-                vec![
-                    Value::Text(id_mov),
-                    Value::Text(id_lote),
-                    Value::Real(stock),
-                    Value::Real(stock),
-                    opt_text(motivo),
-                    Value::Text(id_usuario.to_string()),
                 ],
             )
             .await
@@ -785,6 +792,31 @@ impl SqliteInventarioRepository {
             }
             let stock_suelto = if es_nuevo { p.stock_suelto.map(redondear_cantidad) } else { None };
 
+            // AUD-20: el 'ALTA' del suelto va DELANTE del alta del producto y sólo entra si el
+            // producto no existe. Aquí `es_nuevo` ya lo asegura, pero la condición viaja en la
+            // sentencia y la vuelve a evaluar la nube, que puede tener ya este id: dos equipos que
+            // vuelven a crear a la vez un producto que otro borró. Si el de la Handy entra antes,
+            // el upsert de abajo conserva su stock, y sin la condición quedaba otro ALTA encima.
+            // La FK la comprueba el COMMIT (`defer_foreign_keys`). Espejo de `upsertProducto`.
+            if let Some(stock) = stock_suelto {
+                conn.execute(
+                    r#"
+                    INSERT INTO Movimientos_Stock
+                      (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                    SELECT ?1, ?2, 'ALTA', ?3, ?3, 'Alta del producto', ?4, datetime('now','localtime')
+                    WHERE NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?2);
+                    "#,
+                    vec![
+                        Value::Text(new_id()),
+                        Value::Text(id_producto.to_string()),
+                        Value::Real(stock),
+                        Value::Text(id_usuario.to_string()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
             conn.execute(
                 r#"
                 INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent)
@@ -821,25 +853,6 @@ impl SqliteInventarioRepository {
             )
             .await
             .map_err(db_err)?;
-
-            if let Some(stock) = stock_suelto {
-                conn.execute(
-                    r#"
-                    INSERT INTO Movimientos_Stock
-                      (ID_Movimiento, ID_Producto, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
-                    VALUES
-                      (?1, ?2, 'ALTA', ?3, ?3, 'Alta del producto', ?4, datetime('now','localtime'));
-                    "#,
-                    vec![
-                        Value::Text(new_id()),
-                        Value::Text(id_producto.to_string()),
-                        Value::Real(stock),
-                        Value::Text(id_usuario.to_string()),
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-            }
 
             conn.execute(
                 "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
@@ -1164,6 +1177,325 @@ mod tests_borrado_de_producto {
         repo.delete_producto("nuevo").await.unwrap();
 
         assert!(existe(&db, "vendido").await);
+    }
+}
+
+#[cfg(test)]
+mod tests_alta_de_lote {
+    //! AUD-20: dar de alta un lote con el id de uno que ya existe. El alta del lote es pura (INV-02)
+    //! y su movimiento 'ALTA' tampoco entra: va delante y sólo si el lote no existe. Sin esa
+    //! condición el lote se quedaba igual con otro ALTA, y la reconciliación avisaba al
+    //! administrador de un descuadre que ningún ajuste cerraba (un ajuste mueve a la vez lo guardado
+    //! y lo calculado). La condición viaja en la sentencia: la vuelve a evaluar quien aplica la
+    //! réplica, aquí la de una Handy y en la nube la de esta Main.
+
+    use super::*;
+    use crate::ejecutor::Connection;
+    use crate::reconciliacion::SqliteReconciliacionRepository;
+    use crate::sync::SqliteSyncRepository;
+    use serde_json::json;
+    use tpv_application::ports::reconciliacion::ReconciliacionRepository;
+    use tpv_application::ports::sync::SyncRepository;
+    use tpv_contracts::sync::{SqlStatement, SyncChange};
+
+    const CATALOGO: &[&str] = &[
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+           VALUES ('cerveza', 'cat', 'Cerveza', 200);",
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('autor', '00000000-0000-7000-8000-000000000001', 'autor@ejemplo.test', 'x', 'Autor');",
+    ];
+
+    async fn preparar(nombre: &str) -> Arc<Db> {
+        let dir = crate::test_temp::dir_temporal(nombre);
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in CATALOGO {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        db
+    }
+
+    fn lote(id: &str, codigo: &str, stock: f64) -> LoteNuevo {
+        LoteNuevo {
+            id: Some(id.into()),
+            id_producto: "cerveza".into(),
+            codigo_lote: codigo.into(),
+            caducidad: None,
+            stock_disponible: stock,
+            fecha_entrada: Some("2026-01-01 10:00:00".into()),
+            coste_unitario: None,
+            id_proveedor: None,
+            notas: None,
+        }
+    }
+
+    /// Código, lo guardado, cuántos movimientos tiene y lo que suman: lo que cuadra la reconciliación.
+    async fn cuadre(db: &Arc<Db>, id_lote: &str) -> Option<(String, f64, i64, f64)> {
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT l.Codigo_Lote, l.Stock_Disponible,
+                        (SELECT COUNT(*) FROM Movimientos_Stock m WHERE m.ID_Lote = l.ID_Lote),
+                        (SELECT COALESCE(SUM(m.Delta), 0) FROM Movimientos_Stock m WHERE m.ID_Lote = l.ID_Lote)
+                 FROM Lotes_Producto l WHERE l.ID_Lote = ?1;",
+                vec![Value::Text(id_lote.into())],
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap()?;
+        Some((
+            s(fila.get_value(0).unwrap()),
+            fl(fila.get_value(1).unwrap()),
+            v_i64(fila.get_value(2).unwrap()).unwrap(),
+            fl(fila.get_value(3).unwrap()),
+        ))
+    }
+
+    #[tokio::test]
+    async fn el_mismo_lote_otra_vez_no_anota_otro_alta() {
+        let db = preparar("alta_lote_repetida").await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+        repo.create_lote("autor", lote("lote-1", "L1", 10.0)).await.unwrap();
+        // El mismo id con otro código y 50, o con el mismo código y 7: no es un error y no hace nada.
+        repo.create_lote("autor", lote("lote-1", "L2", 50.0)).await.unwrap();
+        repo.create_lote("autor", lote("lote-1", "L1", 7.0)).await.unwrap();
+
+        assert_eq!(cuadre(&db, "lote-1").await, Some(("L1".into(), 10.0, 1, 10.0)));
+        let descuadrados = SqliteReconciliacionRepository::new(db.clone())
+            .lotes_descuadrados(0.001)
+            .await
+            .unwrap();
+        assert!(descuadrados.is_empty(), "{descuadrados:?}");
+    }
+
+    #[tokio::test]
+    async fn lo_que_sube_lleva_el_movimiento_delante_del_lote_y_con_la_condicion() {
+        let db = preparar("alta_lote_outbox").await;
+        SqliteInventarioRepository::new(db.clone())
+            .create_lote("autor", lote("lote-1", "L1", 10.0))
+            .await
+            .unwrap();
+        let r = db.read().await;
+        let mut rows = r
+            .query("SELECT Statements_Json FROM _Sync_Outbox;", Vec::<Value>::new())
+            .await
+            .unwrap();
+        let json = s(rows.next().await.unwrap().expect("el alta está en el outbox").get_value(0).unwrap());
+        assert!(rows.next().await.unwrap().is_none(), "una sola operación");
+        let sentencias: Vec<SqlStatement> = serde_json::from_str(&json).unwrap();
+        assert_eq!(sentencias.len(), 2, "{json}");
+        assert!(sentencias[0].sql.contains("INSERT INTO Movimientos_Stock"), "{json}");
+        assert!(
+            sentencias[0]
+                .sql
+                .contains("WHERE NOT EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?2)"),
+            "{json}"
+        );
+        assert!(sentencias[1].sql.contains("INSERT INTO Lotes_Producto"), "{json}");
+    }
+
+    /// Lo que difunde el `TenantHub` tras el alta de un lote desde una Handy, con la hora ya fijada
+    /// por el DO. `contract.test.ts` del worker («un alta con un id que ya existe no anota otro
+    /// movimiento ALTA») comprueba que es este texto, con `datetime('now','localtime')` en vez de la
+    /// hora.
+    fn alta_de_la_handy(id_lote: &str, codigo: &str, stock: f64, id_mov: &str) -> Vec<SqlStatement> {
+        let ahora = "'2026-11-11 10:00:00'";
+        let nulo = serde_json::Value::Null;
+        vec![
+            SqlStatement {
+                sql: format!(
+                    "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha) \
+                     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, {ahora} \
+                     WHERE NOT EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?2);"
+                ),
+                args: vec![
+                    json!(id_mov),
+                    json!(id_lote),
+                    json!("ALTA"),
+                    json!(stock),
+                    json!(stock),
+                    nulo.clone(),
+                    json!("autor"),
+                ],
+            },
+            SqlStatement {
+                sql: format!(
+                    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas) \
+                     VALUES (?1, ?2, ?3, COALESCE(NULLIF(?4, ''), {ahora}), NULLIF(?5, ''), ?6, ?7, ?8, ?9) \
+                     ON CONFLICT(ID_Lote) DO NOTHING;"
+                ),
+                args: vec![
+                    json!(id_lote),
+                    json!("cerveza"),
+                    json!(codigo),
+                    json!("2026-01-01 00:00:00"),
+                    nulo.clone(),
+                    json!(stock),
+                    nulo.clone(),
+                    nulo.clone(),
+                    nulo,
+                ],
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn la_replica_de_un_alta_repetida_no_anota_nada_y_la_de_un_lote_nuevo_si() {
+        let db = preparar("alta_lote_replica").await;
+        SqliteInventarioRepository::new(db.clone())
+            .create_lote("autor", lote("lote-1", "L1", 10.0))
+            .await
+            .unwrap();
+
+        let r = SqliteSyncRepository::new(db.clone())
+            .apply_changes(vec![
+                SyncChange {
+                    op_id: "op-repetida".into(),
+                    seq: 1,
+                    statements: alta_de_la_handy("lote-1", "L2", 50.0, "019a0000-0000-7000-8000-0000000000f0"),
+                },
+                SyncChange {
+                    op_id: "op-nueva".into(),
+                    seq: 2,
+                    statements: alta_de_la_handy("lote-9", "L9", 4.0, "019a0000-0000-7000-8000-0000000000f1"),
+                },
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(r.aplicadas, vec!["op-repetida".to_string(), "op-nueva".to_string()]);
+        assert_eq!(cuadre(&db, "lote-1").await, Some(("L1".into(), 10.0, 1, 10.0)));
+        assert_eq!(cuadre(&db, "lote-9").await, Some(("L9".into(), 4.0, 1, 4.0)));
+    }
+}
+
+#[cfg(test)]
+mod tests_alta_del_suelto {
+    //! AUD-20: el 'ALTA' del stock suelto de un producto nuevo. La Main decide que es nuevo dentro
+    //! de su transacción, pero lo que replica lo aplica otra base que puede tener ya ese producto:
+    //! un producto sin ventas que otro equipo borra, con su ficha abierta en la Main y en una Handy;
+    //! las dos lo guardan y lo vuelven a crear con el mismo id antes de recibir lo del otro. Si el de
+    //! la Handy entra antes en Turso, el upsert de la Main conserva ese stock, y sin la condición su
+    //! ALTA quedaba encima. El movimiento va delante del alta y sólo si el producto no existe, como
+    //! en `upsertProducto` del worker.
+
+    use super::*;
+    use crate::ejecutor::Connection;
+    use crate::sync::SqliteSyncRepository;
+    use tpv_application::ports::sync::SyncRepository;
+    use tpv_contracts::sync::{SqlStatement, SyncChange};
+
+    /// El producto ya no está: lo borró otro equipo y las dos bases lo saben.
+    const SIN_EL_PRODUCTO: &[&str] = &[
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');",
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('autor', '00000000-0000-7000-8000-000000000001', 'autor@ejemplo.test', 'x', 'Autor');",
+    ];
+
+    async fn base(nombre: &str) -> Arc<Db> {
+        let dir = crate::test_temp::dir_temporal(nombre);
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in SIN_EL_PRODUCTO {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        db
+    }
+
+    /// Guarda la ficha de `hielo` con su stock suelto y devuelve lo que replica esa escritura.
+    async fn guardar_hielo(db: &Arc<Db>, stock: f64, op_id: &str, seq: i64) -> SyncChange {
+        SqliteInventarioRepository::new(db.clone())
+            .upsert_producto(
+                "autor",
+                ProductoUpsert {
+                    id: Some("hielo".into()),
+                    id_categoria: "cat".into(),
+                    id_proveedor: None,
+                    nombre: "Hielo".into(),
+                    precio_venta: None,
+                    stock_minimo: None,
+                    unidad_medida: None,
+                    nombre_imagen: None,
+                    ruta_imagen: None,
+                    cantidad_pedido_esperada: None,
+                    stock_suelto: Some(stock),
+                    iva_percent: None,
+                    ids_alergenos: vec![],
+                },
+            )
+            .await
+            .unwrap();
+        let r = db.read().await;
+        let mut rows = r
+            .query("SELECT Statements_Json FROM _Sync_Outbox;", Vec::<Value>::new())
+            .await
+            .unwrap();
+        let json = s(rows.next().await.unwrap().expect("el alta está en el outbox").get_value(0).unwrap());
+        let statements: Vec<SqlStatement> = serde_json::from_str(&json).unwrap();
+        SyncChange { op_id: op_id.into(), seq, statements }
+    }
+
+    /// Lo guardado, cuántos movimientos tiene y lo que suman.
+    async fn cuadre(db: &Arc<Db>) -> (f64, i64, f64) {
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT p.Stock_Suelto,
+                        (SELECT COUNT(*) FROM Movimientos_Stock m WHERE m.ID_Producto = p.ID_Producto),
+                        (SELECT COALESCE(SUM(m.Delta), 0) FROM Movimientos_Stock m WHERE m.ID_Producto = p.ID_Producto)
+                 FROM Productos p WHERE p.ID_Producto = 'hielo';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap().expect("el producto existe");
+        (
+            fl(fila.get_value(0).unwrap()),
+            v_i64(fila.get_value(1).unwrap()).unwrap(),
+            fl(fila.get_value(2).unwrap()),
+        )
+    }
+
+    #[tokio::test]
+    async fn dos_equipos_que_recrean_el_mismo_producto_no_dejan_dos_altas() {
+        // Cada equipo lo da de alta en su base antes de recibir lo del otro.
+        let main = base("suelto_main").await;
+        let nube = base("suelto_nube").await;
+        let de_la_main = guardar_hielo(&main, 7.0, "op-main", 2).await;
+        let de_la_handy = guardar_hielo(&nube, 5.0, "op-handy", 1).await;
+
+        // Lo de la Handy entró antes en la nube; lo de la Main llega después.
+        SqliteSyncRepository::new(nube.clone()).apply_changes(vec![de_la_main]).await.unwrap();
+        // Y la Main recibe lo de la Handy.
+        SqliteSyncRepository::new(main.clone()).apply_changes(vec![de_la_handy]).await.unwrap();
+
+        // Cada base se queda con su stock y un solo ALTA que lo explica.
+        assert_eq!(cuadre(&nube).await, (5.0, 1, 5.0));
+        assert_eq!(cuadre(&main).await, (7.0, 1, 7.0));
+    }
+
+    #[tokio::test]
+    async fn lo_que_sube_lleva_el_movimiento_delante_del_producto_y_con_la_condicion() {
+        let main = base("suelto_outbox").await;
+        let cambio = guardar_hielo(&main, 7.0, "op-main", 1).await;
+        let sql: Vec<&str> = cambio.statements.iter().map(|s| s.sql.as_str()).collect();
+        assert!(sql[0].contains("INSERT INTO Movimientos_Stock"), "{sql:?}");
+        assert!(
+            sql[0].contains("WHERE NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?2)"),
+            "{sql:?}"
+        );
+        assert!(sql[1].contains("INSERT INTO Productos"), "{sql:?}");
     }
 }
 

@@ -53,6 +53,11 @@ export class TenantHub extends DurableObject<Env> {
 		this.motor.revocarDispositivo(deviceId);
 	}
 
+	/** AUD-02: la licencia del negocio ha cambiado; que vuelva a leer quién es la Main. */
+	releerMain(tenantId: string): Promise<void> {
+		return this.motor.releerMain(tenantId);
+	}
+
 	avisarEmparejamiento(): void {
 		this.motor.avisarEmparejamiento();
 	}

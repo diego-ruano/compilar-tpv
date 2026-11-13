@@ -15,9 +15,10 @@ use std::sync::Arc;
 use crate::ejecutor::{Connection, ErrorSql, Value};
 
 use tpv_application::error::{AppError, AppResult};
+use tpv_domain::licensing::{que_hacer_con_la_base, QueHacerConLaBase, Sello};
 use tpv_domain::login::hash_pin;
 
-use crate::db::Db;
+use crate::db::{Db, Writer};
 
 fn value_to_i64(v: Value) -> Option<i64> {
     match v {
@@ -180,12 +181,35 @@ fn backup_antes_de_migrar(db_path: &Path) -> AppResult<()> {
 /// Abre la BD local `data.db` dentro de `app_data_dir` (escritor único + pool de lectura, WAL),
 /// construye/actualiza el esquema aplicando las migraciones embebidas y siembra el admin inicial.
 ///
-/// `aprovisionado` lo decide el shell (es quien conoce la licencia): ver [`seed_admin_if_empty`].
-pub async fn init_main_db(app_data_dir: &Path, aprovisionado: bool) -> AppResult<Arc<Db>> {
+/// `licencia` es el negocio de la licencia guardada en el equipo, si la hay (lo conoce el shell).
+/// Con ella el equipo está aprovisionado (ver [`seed_admin_if_empty`]) y, AUD-06, se aplica la
+/// regla de que una base sólo se usa con la licencia de su negocio
+/// (`tpv_domain::licensing::que_hacer_con_la_base`), ANTES de abrir nada:
+///
+/// - lo que se quedó a medias de un apartado anterior se termina primero, y una base con el sello de
+///   otro negocio, o que no se deja leer, se aparta entera con todo lo de ese negocio
+///   (`recovery::resolver_al_abrir`); después se abre una vacía. Si algo no se puede mover, falla: el
+///   arranque sigue sin base (sin login, sin réplica, sin subidas) y se repite la próxima vez;
+/// - una base sin sello se sella con el negocio de la licencia, en la misma transacción que sus
+///   datos iniciales.
+///
+/// Es la misma regla en el arranque, al elegir el modo y al cambiar de base, porque todos abren
+/// por aquí. Un corte en cualquier punto de una activación lo resuelve la siguiente apertura.
+pub async fn init_main_db(app_data_dir: &Path, licencia: Option<&str>) -> AppResult<Arc<Db>> {
     let db_path = app_data_dir.join("data.db");
     let db_path_str = db_path
         .to_str()
         .ok_or_else(|| AppError::internal("Ruta de BD inválida"))?;
+
+    if let Some(apartado) = crate::recovery::resolver_al_abrir(app_data_dir, licencia)? {
+        // AUD-28: el nombre de la carpeta, no la ruta, que lleva el usuario de Windows.
+        tracing::warn!(
+            target: "tpv::startup",
+            carpeta = %crate::recovery::nombre_de(&apartado),
+            "la base local era de otro negocio: se ha apartado entera y se abre una nueva"
+        );
+    }
+    let aprovisionado = licencia.is_some();
 
     // Antes de abrir (lo que dispara las migraciones), respaldar si hay migraciones pendientes.
     backup_if_migration_pending(&db_path).await?;
@@ -195,10 +219,34 @@ pub async fn init_main_db(app_data_dir: &Path, aprovisionado: bool) -> AppResult
         .map_err(|e| AppError::repository(format!("Error abriendo la BD: {e}")))?;
 
     // El seed corre sobre la conexión de escritura (exclusiva) tras abrir.
+    //
+    // AUD-06: y el sello, en la MISMA transacción: una base recién creada con licencia nace con sus
+    // datos iniciales y su sello juntos, o sin ninguno de los dos. Las migraciones van antes, cada
+    // una en su transacción dentro de `Db::open`: un corte entre ellas y ésta deja una base sin
+    // sello y sin datos de negocio, que la siguiente apertura sella igual. Una base sin sello CON
+    // datos (anterior a los sellos) también se sella con la licencia, como la activación.
     {
         let w = db.write().await;
-        seed_admin_if_empty(w.raw(), aprovisionado).await?;
-        seed_contact_settings(w.raw()).await?;
+        let conn = w.raw();
+        conn.transaccion(async {
+            seed_admin_if_empty(conn, aprovisionado).await?;
+            seed_contact_settings(conn).await?;
+            if let Some(negocio) = licencia {
+                let sello = Sello::leido(crate::sello::leer(&**conn).await?.as_deref());
+                match que_hacer_con_la_base(&sello, negocio, false) {
+                    QueHacerConLaBase::Sellar => crate::sello::escribir(conn, negocio).await?,
+                    // Lo de otro negocio se ha apartado antes de abrir: si aun así lo es, no se usa.
+                    QueHacerConLaBase::Apartar => {
+                        return Err(AppError::conflict(
+                            "La base de este ordenador es de otro negocio y no se ha podido apartar. Cierra el TPV y vuelve a abrirlo.",
+                        ))
+                    }
+                    QueHacerConLaBase::Usar | QueHacerConLaBase::Reconstruir => {}
+                }
+            }
+            Ok(())
+        })
+        .await?;
     }
 
     // Una base sin usuarios (datos perdidos) o restaurada y aún sin reconciliar no puede admitir
@@ -214,4 +262,27 @@ pub async fn init_main_db(app_data_dir: &Path, aprovisionado: bool) -> AppResult
     Ok(db)
 }
 
-
+/// Abre una base donde traer la nube cuando no hay ninguna abierta: la del equipo no se pudo abrir
+/// al arrancar.
+///
+/// Primero la regla de `init_main_db`: si no se puede apartar lo de otro negocio, falla y no se
+/// abre nada. Si lo que queda no se deja abrir, se aparta como ilegible (no se borra) y se abre una
+/// vacía en su sitio.
+pub async fn abrir_para_recuperar(app_data_dir: &Path, licencia: Option<&str>) -> AppResult<Arc<Db>> {
+    crate::recovery::resolver_al_abrir(app_data_dir, licencia)?;
+    match init_main_db(app_data_dir, licencia).await {
+        Ok(db) => Ok(db),
+        Err(e) => {
+            if let Some(apartada) = crate::recovery::archivar_base_ilegible(app_data_dir)? {
+                // AUD-28: el nombre de la copia apartada, no la ruta.
+                tracing::warn!(
+                    target: "tpv::recovery",
+                    fichero = %crate::recovery::nombre_de(&apartada),
+                    error = %e,
+                    "base local ilegible apartada para reconstruirla desde la nube"
+                );
+            }
+            init_main_db(app_data_dir, licencia).await
+        }
+    }
+}

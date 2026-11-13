@@ -33,14 +33,6 @@ export const setTurnoPartidoSchema = z.object({
 	fecha: z.string().nullish().transform(cleanOptional),
 });
 
-// Subida del setup inicial desde la Main (modo TPV) a la nube. No verifica pin_actual: la
-// Main ya lo hizo en local y la petición va firmada como dispositivo TPV (la autoriza el
-// device-proof + el chequeo de rol). El `pin` viaja para hashearlo aquí (como complete-setup).
-export const syncInitialSetupSchema = z.object({
-	id_usuario: idStr,
-	pin: z.string().overwrite(recortar).min(4, "PIN demasiado corto"),
-});
-
 // LOGIN-07: recuperar el PIN de un administrador. El PIN nuevo NO viaja: la nube sólo dice si el
 // código vale y el PIN lo guarda la Main. Por eso `verificar` no tiene contrapartida exacta en Rust
 // (el DTO de la Main lleva además `pin_nuevo`) y no lleva drift-guard; `solicitar` sí.

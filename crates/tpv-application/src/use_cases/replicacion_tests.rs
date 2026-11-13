@@ -136,6 +136,7 @@ struct FakeRepo {
         async fn bootstrap_restaurar(
             &self,
             _: tpv_contracts::sync::BootstrapSnapshot,
+            _: &str,
         ) -> AppResult<tpv_contracts::sync::BootstrapResultado> {
             panic!("no se debe llegar a restaurar en estas pruebas")
         }
@@ -164,6 +165,9 @@ fn hora_para_firmar(&self) -> i64 { panic!("Capacidad ajena a esta prueba") }
 fn handy_set_token(&self, _token: &str, _tenant_id: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 fn handy_clear_token(&self) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 fn handy_get_tenant(&self) -> AppResult<Option<String>> { panic!("Capacidad ajena a esta prueba") }
+fn negocio_de_la_licencia(&self) -> AppResult<Option<String>> {
+    Ok(Some("negocio-de-prueba".into()))
+}
 fn tpv_server_signed_headers(
         &self,
         _mode: &str,
@@ -188,6 +192,7 @@ async fn upload_image(
         _path: &str,
         _content_type: &str,
         _bytes: Vec<u8>,
+        _negocio: &str,
     ) -> AppResult<crate::ports::licensing::ResultadoSubidaImagen> { panic!("Capacidad ajena a esta prueba") }
 async fn delete_image(&self, _mode: &str, _path: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 async fn download_image(&self, _mode: &str, _rel_path: &str) -> AppResult<Option<Vec<u8>>> { panic!("Capacidad ajena a esta prueba") }

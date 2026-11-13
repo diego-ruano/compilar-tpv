@@ -95,6 +95,53 @@ describe("parseClientNow", () => {
 		// Justo pasado el límite (14 h 5 min): 14 h 10 min por delante.
 		expect(parseClientNow("2026-08-19 02:10:00")).toBeNull();
 	});
+
+	// AUD-21: con un componente imposible `new Date(...)` da `NaN`, y la deriva comparada con `NaN`
+	// nunca pasaba del margen: la hora valía como «ahora» en lo que escribe y lee la Handy.
+	it("rechaza una hora con la forma buena y un componente imposible, esté cerca o lejos", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-18T12:00:00Z"));
+
+		const imposibles = [
+			"2020-01-01 24:30:00", // hora 24 con minutos
+			"2026-08-18 24:00:01", // hora 24 con segundos
+			"2026-08-18 24:00:00",
+			"2026-13-01 10:00:00", // mes 13
+			"2026-00-10 10:00:00", // mes 00
+			"2026-08-32 10:00:00", // día 32
+			"2026-08-00 10:00:00", // día 00
+			"2026-08-18 25:00:00", // hora 25
+			"2026-08-18 12:60:00", // minuto 60
+			"2026-08-18 12:00:60", // segundo 60
+			"1999-99-99 99:99:99",
+		];
+		for (const v of imposibles) {
+			expect(parseClientNow(v), `debería rechazar ${JSON.stringify(v)}`).toBeNull();
+		}
+	});
+
+	// Un día que no existe pero que `Date` desborda al mes siguiente: no da `NaN`, da otra fecha, y
+	// cerca de ella entraba por la deriva con el texto del día que no existe.
+	it("rechaza un día que no existe aunque caiga dentro de la deriva", () => {
+		vi.useFakeTimers();
+
+		vi.setSystemTime(new Date("2026-03-01T12:00:00Z"));
+		expect(parseClientNow("2026-02-29 12:00:00")).toBeNull(); // 2026 no es bisiesto
+		expect(parseClientNow("2026-03-01 12:00:00")).toBe("2026-03-01 12:00:00");
+
+		vi.setSystemTime(new Date("2026-03-03T10:00:00Z"));
+		expect(parseClientNow("2026-02-31 10:00:00")).toBeNull();
+	});
+
+	it("acepta el 29 de febrero de un año bisiesto", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2028-02-29T12:00:00Z"));
+
+		expect(parseClientNow("2028-02-29 12:00:00")).toBe("2028-02-29 12:00:00");
+		// Y los extremos de un día de verdad.
+		expect(parseClientNow("2028-02-29 00:00:00")).toBe("2028-02-29 00:00:00");
+		expect(parseClientNow("2028-02-29 23:59:59")).toBe("2028-02-29 23:59:59");
+	});
 });
 
 describe("serverNowFixed", () => {

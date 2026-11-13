@@ -196,25 +196,6 @@ export async function reservarIntento(
 }
 
 /**
- * Escritura DIRECTA del setup inicial en la base del negocio (mismo UPDATE que aplica el
- * comando `complete_initial_setup` vía el hub). Se usa para la SUBIDA desde la Main, que no
- * está conectada por WebSocket: por eso no pasa por el Durable Object (evita el `main_offline`).
- */
-export async function applyInitialSetupDirect(
-	db: Client,
-	input: { idUsuario: string; passwordHash: string },
-): Promise<void> {
-	await db.execute({
-		sql: `
-			UPDATE Usuarios
-			SET Password_Hash = ?2, Requiere_Setup = 0
-			WHERE ID_Usuario = ?1;
-		`,
-		args: [input.idUsuario, input.passwordHash],
-	});
-}
-
-/**
  * RI-05: la entrada más antigua que todavía cuenta como jornada en curso. La jornada se busca por su
  * hora de entrada y no por su `Fecha`, porque el turno de noche ficha la salida al día siguiente.
  * Pasado este margen el fichaje se da por olvidado y lo cierra el job `fichajes_colgados` de la Main.
@@ -227,6 +208,20 @@ const INICIO_MAS_ANTIGUO = "datetime('now','localtime','-16 hours')";
 export async function hoy(db: Client): Promise<string> {
 	const fechaRs = await db.execute("SELECT date('now','localtime') AS fecha;");
 	return String(rows(fechaRs)[0]?.fecha ?? "");
+}
+
+/**
+ * ¿Está marcado el turno partido de ese día? Sin fila, no (es lo que vale por defecto). `fecha` es el
+ * día que escribió `setTurnoPartido`, el que devuelve con su resultado. Para decidir por el estado
+ * cuando no se sabe cuántas filas tocó la escritura (`decidirPorEstado`; salió en AUD-26).
+ */
+export async function turnoPartidoDe(db: Client, idUsuario: string, fecha: string): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `SELECT COALESCE((SELECT Turno_Partido FROM Fichaje_Dia
+			WHERE ID_Usuario = ?1 AND Fecha = ?2), 0) AS turno_partido;`,
+		args: [idUsuario, fecha],
+	});
+	return Number(rows(rs)[0]?.turno_partido ?? 0) === 1;
 }
 
 /**

@@ -107,3 +107,26 @@ El WebSocket de la Handy usa un ticket efímero. JavaScript sólo consulta el id
 negocio (`handy_get_tenant`); el JWT permanece en el keyring.
 Guardar un nuevo token avisa al servicio nativo para sustituir el socket anterior inmediatamente;
 la sesión y las cachés de presentación del vínculo anterior se retiran, sin recargar la aplicación.
+
+## Salir del vínculo
+
+Ir al selector de modo y borrar el vínculo son dos cosas (AUD-23):
+
+- **«← Volver»** en la vinculación (a la que llevan «← Vinculación», siempre a la vista, también
+  encima del login, y «← Ir a vinculación», en la espera) cierra la sesión y enseña el selector **sin
+  tocar nada guardado**: ni el token, ni el negocio, ni el modo de `device_config.json` (si la
+  aplicación se reinicia ahí, vuelve a la Handy). No pide nada, tampoco con la Main desaparecida o la
+  nube rechazando a la Handy. Desde el selector:
+  - **«Handy»** vuelve al vínculo guardado (`handy_get_tenant`) sin pedir un código, y su tarjeta
+    lo dice («Vuelve a la vinculación de este equipo.»);
+  - **«TPV»** sigue el camino de la activación de la licencia, con el vínculo de Handy todavía en el
+    almacén; si se vuelve atrás desde la activación, «Handy» lo recupera;
+  - el **código de otra Main** lo sustituye (`handy_set_token`), igual que desde la vinculación.
+- **Desvincular** es Configuración → Dispositivo, en la propia Handy (administrador y confirmación):
+  `device_reset_mode` borra el token y el negocio del almacén y vuelve al selector; la identidad del
+  equipo se conserva.
+
+`handy_get_tenant` sólo contesta «no hay» cuando consta: si el almacén no responde es un error, y la
+vinculación lo enseña en vez de pedir un código como a una Handy sin vincular. Un valor que no se
+puede descifrar (la copia de Android restaurada en otro teléfono) cuenta como ausente: no se va a
+poder leer nunca, y lo arregla vincularla de nuevo.

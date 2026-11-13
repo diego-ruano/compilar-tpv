@@ -72,6 +72,10 @@ impl AppError {
     /// delante, y lo único que puede hacer esa persona es mirar la conexión. El detalle va detrás,
     /// entre paréntesis, para diagnosticar. Es `External` y no un código propio: nadie ramifica
     /// por él, sólo se enseña.
+    ///
+    /// AUD-28 — el detalle sale del equipo con el mensaje (Axiom): no puede llevar la URL de la
+    /// petición, que es donde van el teléfono o el correo de una búsqueda. Un error de reqwest
+    /// sólo vale si viene de `reloj::enviar`, que se la quita; mejor aún, la clase del fallo.
     pub fn sin_conexion(detalle: impl std::fmt::Display) -> Self {
         AppError::External(format!(
             "No se ha podido conectar con el servidor. Comprueba la conexión a internet. ({detalle})"
@@ -136,7 +140,8 @@ impl AppError {
     ///    exactamente la divergencia que el catálogo compartido existe para evitar.
     /// 2. **`from_wire(error)`**, si no hay `code` (worker anterior a ARCH-05) o si el `code`
     ///    es uno que este cliente todavía no conoce (worker más nuevo).
-    /// 3. **`External`** con el status y el cuerpo, si no hay JSON del que sacar nada.
+    /// 3. **`External`** con el status, si no hay JSON del que sacar nada. El cuerpo no entra en el
+    ///    mensaje (AUD-28, ver `rechazo_sin_error`).
     ///
     /// El mensaje legible sale de `message` o `details.message` cuando existen. Muchos 500 del
     /// Worker conservan el identificador de máquina en `error` y colocan el diagnóstico real en
@@ -173,9 +178,45 @@ impl AppError {
             (None, Some(error), message) => {
                 AppError::Coded(ErrorCode::from_wire(&error), message.unwrap_or(error))
             }
-            (None, None, _) => AppError::external(format!("http_{status}: {body}")),
+            (None, None, _) => AppError::external(rechazo_sin_error(status, body)),
         }
     }
+
+    /// AUD-28 — un rechazo de la nube contado sólo con lo que falló y su status:
+    /// `image_download_http_502`. Para los adaptadores que componen su propio mensaje en vez de
+    /// enseñar el del worker.
+    ///
+    /// Nada del cuerpo va al texto. Lo que el cuerpo diga del caso (el `code` o el `error` de la API:
+    /// equipo revocado, licencia caducada…) va al código, que es por lo que se ramifica; el texto,
+    /// como en [`AppError::from_api_body`], sólo rescata el código de Cloudflare.
+    pub fn rechazo(operacion: &str, status: u16, body: &str) -> Self {
+        let code = AppError::from_api_body(status, body).code();
+        AppError::Coded(code, format!("{operacion}_{}", rechazo_sin_error(status, body)))
+    }
+}
+
+/// AUD-28 — el mensaje de un rechazo cuyo cuerpo no trae el `error` ni el `code` de la API: la
+/// página de un intermediario, un cuerpo vacío, un JSON que no es de un error.
+///
+/// Dice el status y nada del cuerpo. Ese mensaje es `external` y sale del equipo (Axiom), y un
+/// cuerpo que no es de la API es un texto cualquiera: la página de error de un intermediario puede
+/// repetir la petición que se le hizo. Lo único que se rescata es el código con el que contesta
+/// Cloudflare, y sólo si el cuerpo entero es eso.
+///
+/// Es un identificador y no una frase: `AppErrorDto` enseña la del código y lo pone detrás, entre
+/// paréntesis («Error de un servicio externo (http_502)»).
+fn rechazo_sin_error(status: u16, body: &str) -> String {
+    match codigo_de_cloudflare(body) {
+        Some(codigo) => format!("http_{status}:cloudflare_{codigo}"),
+        None => format!("http_{status}"),
+    }
+}
+
+/// `error code: 1101` → `1101`. Tres o cuatro cifras detrás de ese texto exacto, y nada más: es lo
+/// que devuelve Cloudflare a quien no pide HTML cuando el fallo es suyo o del worker.
+fn codigo_de_cloudflare(body: &str) -> Option<&str> {
+    let codigo = body.trim().strip_prefix("error code: ")?;
+    ((3..=4).contains(&codigo.len()) && codigo.bytes().all(|b| b.is_ascii_digit())).then_some(codigo)
 }
 
 #[cfg(test)]
@@ -274,6 +315,73 @@ mod tests_respuesta_api {
                 "el status debe quedar en el mensaje para diagnosticar: {}",
                 err
             );
+        }
+    }
+
+    /// AUD-28: un cuerpo que no es de la API no entra en el mensaje, que sale del equipo. La página
+    /// de un intermediario puede repetir la URL que se pidió, y un JSON sin `error`, llevar datos.
+    #[test]
+    fn un_rechazo_sin_error_de_la_api_no_lleva_el_cuerpo() {
+        for body in [
+            "<html><body>502 Bad Gateway: GET /v1/reservas/buscar-cliente?telefono=%2B34+612+345+678&amp;email=ana.prueba%40example.com</body></html>",
+            r#"[{"nombre_cliente":"Ana Prueba","nota":"alergia al marisco","telefono_cliente":"612 345 678"}]"#,
+            r#"{"message":"Ana Prueba, 612 345 678"}"#,
+            r#"{"ok":false,"details":{"message":"Ana Prueba"}}"#,
+            "Ana Prueba, alergia al marisco",
+            "",
+        ] {
+            let err = AppError::from_api_body(502, body);
+            assert_eq!(err.to_string(), "http_502", "body: {body:?}");
+
+            // Lo que se enseña y lo que sube: la frase del código y, detrás, ese identificador.
+            let dto: AppErrorDto = err.into();
+            assert_eq!(dto.code, ErrorCode::External, "body: {body:?}");
+            assert_eq!(dto.message, "Error de un servicio externo (http_502)", "body: {body:?}");
+        }
+    }
+
+    /// `AppError::rechazo`: lo que falló y el status en el texto; lo que el cuerpo diga del caso, en
+    /// el código. Nunca el cuerpo, ni el `message` del worker.
+    #[test]
+    fn un_rechazo_contado_por_el_adaptador_dice_que_fallo_y_su_status() {
+        let revocado = AppError::rechazo(
+            "image_download",
+            401,
+            r#"{"ok":false,"error":"device_revoked","message":"El equipo de Ana Prueba está revocado"}"#,
+        );
+        assert_eq!(revocado.code(), ErrorCode::DeviceRevoked);
+        assert_eq!(revocado.to_string(), "image_download_http_401");
+
+        let pagina = AppError::rechazo(
+            "activate_failed",
+            502,
+            "<html>502: POST /v1/license/activate {\"token\":\"eyJ…\",\"fieldDek\":\"3q2+7w==\"}</html>",
+        );
+        assert_eq!(pagina.code(), ErrorCode::External);
+        assert_eq!(pagina.to_string(), "activate_failed_http_502");
+
+        let cloudflare = AppError::rechazo("image_delete", 500, "error code: 1101");
+        assert_eq!(cloudflare.to_string(), "image_delete_http_500:cloudflare_1101");
+    }
+
+    /// Lo único que se rescata de un cuerpo así: el código de Cloudflare, si el cuerpo es sólo eso.
+    #[test]
+    fn el_codigo_de_cloudflare_se_conserva_y_nada_que_se_le_parezca() {
+        let mensaje = |body: &str| AppError::from_api_body(500, body).to_string();
+
+        assert_eq!(mensaje("error code: 1101"), "http_500:cloudflare_1101");
+        assert_eq!(mensaje("error code: 522\n"), "http_500:cloudflare_522");
+
+        for body in [
+            "error code: 612345678",
+            "error code: 11",
+            "error code: 1101 Ana Prueba",
+            "Ana Prueba error code: 1101",
+            "error code: 11a1",
+            "error code: ١١٠١",
+            "Error Code: 1101",
+        ] {
+            assert_eq!(mensaje(body), "http_500", "body: {body:?}");
         }
     }
 

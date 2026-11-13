@@ -4,7 +4,10 @@ import Layout from "./layouts/layout";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigation } from "react-router-dom";
 import { useAuth } from "../shared/stores/useAuth";
+import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
+import { useContactSettings } from "../shared/stores/useContactSettings";
 import { useEstadoSync } from "../shared/stores/useEstadoSync";
+import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
 import { esAdmin } from "../shared/lib/permisos";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
@@ -80,6 +83,12 @@ function AppInner() {
                 <RecuperarDatos
                     onRecuperado={() => {
                         marcarDatosPerdidos(false);
+                        // AUD-06: la base ya no es la que se leyó al arrancar (una copia, o la de la
+                        // nube tras un traslado). El nombre, el logo y los datos del ticket se vuelven
+                        // a leer de la que hay ahora (los `init` no fallan: el error lo cuenta cada store).
+                        void useBusinessSettings.getState().init();
+                        void useTicketSettings.getState().init();
+                        void useContactSettings.getState().init();
                         // Una base creada de cero trae el admin inicial con `Requiere_Setup=1`.
                         // Se vuelve a preguntar en vez de obligar a entrar con el PIN público.
                         void commands.setupPendiente()

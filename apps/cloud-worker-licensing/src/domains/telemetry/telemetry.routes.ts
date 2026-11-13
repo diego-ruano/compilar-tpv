@@ -6,9 +6,9 @@
 // con el TOKEN privado (que nunca sale de la nube). Reglas:
 //   - Autenticación device-proof (mismo `tenantAuth` que el resto de negocio).
 //   - El `tenant_id`/`device_id` los fija el SERVIDOR desde el JWT, no el cliente (seguridad).
-//   - Guardarraíles de servidor: tope de eventos por lote, tope de tamaño del cuerpo y recorte de
-//     campos largos. El throttling del cliente protege al cliente honesto; estos topes frenan a un
-//     cliente con token robado.
+//   - Guardarraíles de servidor: tope de eventos por lote, de tamaño del cuerpo, de cada texto y de
+//     los campos de cada evento. El throttling del cliente protege al cliente honesto; estos topes
+//     frenan a un cliente con token robado.
 //   - Se ESPERA la ingesta de Axiom: si falla, 5xx para que el dispositivo conserve el lote y
 //     reintente ("no perder ninguno"). La latencia no importa: el envío va en un hilo de fondo.
 
@@ -31,10 +31,26 @@ type ClientEventKeys = Exclude<keyof SpoolEvent, ServerSetKeys>;
 
 // Tope de eventos por lote (== tamaño de lote del dispositivo, 500).
 const MAX_EVENTS = 500;
-// Tope del cuerpo (bytes): ~2 MB sobra para 500 eventos de log.
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+// Tope del cuerpo (bytes). AUD-32: todo el lote pasa por el filtro de datos personales antes de
+// responder, así que éste es el techo de lo que el filtro recibe en una petición. El dispositivo
+// manda como mucho 512 KiB por lote (`MAX_BODY_BYTES` en `crates/tpv-telemetry/src/spool.rs`).
+const MAX_BODY_BYTES = 1024 * 1024;
 // Límite de texto: el cliente recorta antes de firmar; zod rechaza el exceso.
 const MAX_MESSAGE_LEN = 4000;
+// AUD-32: los campos de un evento, serializados, y el nombre de cada uno. Son los topes del propio
+// dispositivo (`spool.rs`: un evento de más de 128 KiB sale sin campos; `forward.rs`: un nombre de
+// más de 256 no se captura), así que un evento suyo nunca se rechaza por esto.
+const MAX_FIELDS_LEN = 128 * 1024;
+const MAX_FIELD_NAME_LEN = 256;
+
+/** ¿Caben los campos de un evento? Unos que no se dejan serializar (demasiado anidados) no caben. */
+function camposDentroDelTope(fields: Record<string, unknown>): boolean {
+	try {
+		return JSON.stringify(fields).length <= MAX_FIELDS_LEN;
+	} catch {
+		return false;
+	}
+}
 
 // Por defecto zod DESCARTA las claves desconocidas (allowlist de nivel superior). En particular
 // ignora cualquier `tenant_id`/`device_id` que mande el cliente: los fija el servidor.
@@ -43,7 +59,7 @@ const eventSchema = z.object({
 	level: z.string().max(16).optional(),
 	target: z.string().max(256).optional(),
 	message: z.string().max(MAX_MESSAGE_LEN).optional(),
-	fields: z.record(z.string(), z.unknown()).optional(),
+	fields: z.record(z.string().max(MAX_FIELD_NAME_LEN), z.unknown()).refine(camposDentroDelTope).optional(),
 	device_mode: z.string().max(16).optional(),
 	app_version: z.string().max(64).optional(),
 	environment: z.string().max(32).optional(),

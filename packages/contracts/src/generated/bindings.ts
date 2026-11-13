@@ -865,8 +865,8 @@ export type CuentasRangoArgs = {
 	page_size?: number | null,
 	/**
 	 *  La página empieza justo después de esta fila (el `siguiente` de la página anterior, ver
-	 *  [`CursorCuentas`]). Van planos y no como un objeto porque hacia el worker viajan como
-	 *  parámetros de la URL. Sin los dos, es la primera página.
+	 *  [`CursorCuentas`]). Van planos y no como un objeto porque así los lee el worker, en el
+	 *  cuerpo del listado. Sin los dos, es la primera página.
 	 */
 	cursor_fecha?: string | null,
 	cursor_id?: string | null,
@@ -1419,6 +1419,12 @@ export type LicenseActivateOutcome_Deserialize = {
 	 *  meses») y no hay nada más que hacer.
 	 */
 	tiempo_sumado?: boolean,
+	/**
+	 *  AUD-06 · La licencia es de otro negocio que la base de este equipo: los datos del anterior se
+	 *  guardan aparte al volver a arrancar, y el TPV se reinicia solo enseguida. La pantalla lo
+	 *  avisa y no sigue.
+	 */
+	reinicia?: boolean,
 };
 
 /**
@@ -1438,6 +1444,12 @@ export type LicenseActivateOutcome_Serialize = {
 	 *  meses») y no hay nada más que hacer.
 	 */
 	tiempo_sumado: boolean,
+	/**
+	 *  AUD-06 · La licencia es de otro negocio que la base de este equipo: los datos del anterior se
+	 *  guardan aparte al volver a arrancar, y el TPV se reinicia solo enseguida. La pantalla lo
+	 *  avisa y no sigue.
+	 */
+	reinicia: boolean,
 };
 
 /**
@@ -1677,17 +1689,6 @@ export type LoteDto = {
 	Notas: string | null,
 };
 
-/**  Marca una notificación como leída por un usuario. */
-export type MarcarLeidaInput = {
-	id_notificacion: string,
-	id_usuario: string,
-};
-
-/**  Marca como leídas todas las notificaciones visibles de un usuario. */
-export type MarcarTodasLeidasInput = {
-	id_usuario: string,
-};
-
 export type MesaDto = {
 	id_mesa: string,
 	id_zona: string,
@@ -1878,12 +1879,13 @@ export type MisTareasRow = {
 };
 
 /**
- *  Identifica una notificación para las acciones de la papelera (descartar, restaurar, eliminar).
+ *  Identifica una notificación: para marcarla leída y para las acciones de la papelera
+ *  (descartar, restaurar, eliminar).
  *
  *  El estado de la papelera es de la NOTIFICACIÓN, no del usuario que la mira: una notificación es
  *  un aviso del negocio (stock bajo, pedido por aprobar) y borrarla es decir "esto ya está visto",
- *  no "no me lo enseñes a mí". Por eso aquí no viaja el `id_usuario`: lo que sí es por usuario es
- *  la lectura, que tiene su propia tabla.
+ *  no "no me lo enseñes a mí". Lo que sí es por usuario es la lectura, que tiene su propia tabla. Y
+ *  la papelera sólo actúa sobre lo que ve quien la usa.
  */
 export type NotificacionIdInput = {
 	id_notificacion: string,
@@ -1910,16 +1912,10 @@ export type NotificacionRow = {
 	leida: boolean,
 };
 
-/**  Args para listar las notificaciones visibles de un usuario. */
+/**  Args para listar las notificaciones visibles de quien ha iniciado sesión. */
 export type NotificacionesListArgs = {
-	id_usuario: string,
 	/**  Si es `true`, solo devuelve las no leídas por ese usuario. */
 	solo_no_leidas?: boolean | null,
-};
-
-/**  Args con solo el id de usuario (p. ej. contador de no leídas). */
-export type NotificacionesUsuarioArgs = {
-	id_usuario: string,
 };
 
 /**  Una operación pendiente del outbox (Main → nube). La envía exclusivamente el motor nativo. */
@@ -3481,15 +3477,6 @@ export type UpdateTareaInput = {
 	titulo: string,
 	descripcion?: string | null,
 	fecha_limite?: string | null,
-};
-
-/**
- *  Args para subir el setup inicial de la Main a la nube (tras "Guardar y continuar" en el
- *  panel de configuración inicial). El `pin` viaja firmado y se hashea en el worker.
- */
-export type UploadInitialSetupArgs = {
-	id_usuario: string,
-	pin: string,
 };
 
 export type UpsertCategoriaInput = {

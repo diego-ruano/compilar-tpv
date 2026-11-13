@@ -18,12 +18,22 @@ import * as mesasQ from "../mesas/mesas.queries";
 import * as S from "./venta_rapida.schemas";
 import { badRequest } from "../../server/utils/response";
 import { consulta, cuerpo } from "../../lib/validacion";
-import { apply, parseId } from "../../lib/rutas";
+import { apply, lecturaPorPost, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const ventaRapidaRoutes = new Hono<Ctx>();
 
+/**
+ * Lo más que ocupa la lista de ids de `/index-rows`: la app pide el resumen de los tickets que
+ * tiene en pantalla, 200 como mucho (unos 8 KB). 64 KB dejan sitio de sobra.
+ */
+const TOPE_DE_INDEX_ROWS = 64 * 1024;
+
+// AUD-27: lecturas por POST. Lo que se escribe en el buscador va en el cuerpo, no en la URL; y
+// `/index-rows` ya lo era (su lista de ids no cabe en una query).
+ventaRapidaRoutes.use("/productos/search", lecturaPorPost());
+ventaRapidaRoutes.use("/index-rows", lecturaPorPost(TOPE_DE_INDEX_ROWS));
 ventaRapidaRoutes.use("*", tenantAuth, alHub);
 
 function conflictStock(plan: any): never {
@@ -39,8 +49,8 @@ ventaRapidaRoutes.get("/categorias", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.categorias(db))),
 );
 
-ventaRapidaRoutes.get("/productos/search", consulta(S.searchProductosSchema), async (c) => {
-	const { query, limit } = c.req.valid("query");
+ventaRapidaRoutes.post("/productos/search", cuerpo(S.searchProductosSchema), async (c) => {
+	const { query, limit } = c.req.valid("json");
 	return c.json(
 		await tenantQuery(c, (db) => q.searchProductos(db, query, limit)),
 	);

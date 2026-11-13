@@ -24,6 +24,7 @@
 // resuelva la base es el día del servidor, no el del bar. Son las dos mitades de una sola regla, así
 // que viven en un solo sitio; si cambias cómo se fija la hora, cambias las dos a la vez.
 
+import { diaDeInstante } from "../lib/fechas";
 import type { InternalApplyCommand } from "./tenantHub.types";
 
 const CLIENT_NOW_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -49,11 +50,17 @@ const MAX_CLIENT_NOW_DRIFT_MS = (14 * 60 + 5) * 60 * 1000;
 // Devuelve el literal `YYYY-MM-DD HH:MM:SS` SOLO si el emisor mandó una hora válida y dentro de la
 // deriva admisible; `null` si falta o es inaceptable (formato/deriva). NO cae a UTC en silencio: esa
 // decisión la toma el llamador (ver el guard `missing_client_now` en applyInternalCommandIdempotent).
+//
+// AUD-21: la forma no basta. Con un componente imposible (las 24:30, el mes 13, el minuto 60)
+// `getTime()` da `NaN`, la comparación de la deriva da falso y la cadena valía como «ahora»; y un
+// 29 de febrero de un año que no es bisiesto se desborda al 1 de marzo y pasaba por cerca. Tiene que
+// ser un instante del calendario (`diaDeInstante`, el criterio del resto del worker y de
+// `tpv_domain::fechas`) y su instante, un número. Si no, se trata como una forma mala.
 export function parseClientNow(raw: unknown): string | null {
 	const s = String(raw ?? "").trim();
-	if (!CLIENT_NOW_RE.test(s)) return null;
+	if (!CLIENT_NOW_RE.test(s) || diaDeInstante(s) === null) return null;
 	const clientMs = new Date(s.replace(" ", "T") + "Z").getTime();
-	if (Math.abs(Date.now() - clientMs) > MAX_CLIENT_NOW_DRIFT_MS) return null;
+	if (!Number.isFinite(clientMs) || Math.abs(Date.now() - clientMs) > MAX_CLIENT_NOW_DRIFT_MS) return null;
 	return s;
 }
 

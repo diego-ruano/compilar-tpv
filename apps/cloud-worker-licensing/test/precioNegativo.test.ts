@@ -167,7 +167,7 @@ describe("AUD-17 · el precio de venta no es negativo", () => {
 				"/v1/inventario/productos",
 				{ id_producto: "prod-neg", id_categoria: "cat-1", nombre: "Ajuste", precio_venta: -5000, id_usuario: "u1" },
 				env,
-				"op-alta-neg",
+				"op-aud17-alta-neg",
 			);
 			expect(r.status).toBe(400);
 			expect(r.json).toMatchObject({ error: "validation_error", message: PRECIO_NEGATIVO });
@@ -183,7 +183,7 @@ describe("AUD-17 · el precio de venta no es negativo", () => {
 				"/v1/inventario/productos",
 				{ id_producto: "cafe", id_categoria: "cat-1", nombre: "Café", precio_venta: -800, id_usuario: "u1", conservar_precio: false },
 				env,
-				"op-edicion-neg",
+				"op-aud17-edicion-neg",
 			);
 			expect(r.status).toBe(400);
 			expect(r.json.message).toBe(PRECIO_NEGATIVO);
@@ -199,7 +199,7 @@ describe("AUD-17 · el precio de venta no es negativo", () => {
 				"/v1/inventario/productos",
 				{ id_producto: "agua", id_categoria: "cat-1", nombre: "Agua", precio_venta: 0, id_usuario: "u1" },
 				env,
-				"op-alta-cero",
+				"op-aud17-alta-cero",
 			);
 			expect(r).toEqual({ status: 200, json: { id_producto: "agua" } });
 			expect(aplicados).toHaveLength(1);
@@ -224,7 +224,7 @@ describe("AUD-17 · el coste de un lote no es negativo", () => {
 				"/v1/inventario/lotes",
 				{ id_producto: "cafe", codigo_lote: "L-2", stock_disponible: 3, coste_unitario: -1, id_usuario: "u1" },
 				env,
-				"op-lote-neg",
+				"op-aud17-lote-neg",
 			);
 			expect(r.status).toBe(400);
 			expect(r.json.message).toBe(COSTE_NEGATIVO);
@@ -240,7 +240,7 @@ describe("AUD-17 · el coste de un lote no es negativo", () => {
 				"/v1/inventario/lotes/lote-1",
 				{ id_lote: "lote-1", id_producto: "cafe", codigo_lote: "L-1", coste_unitario: -1 },
 				env,
-				"op-lote-edicion-neg",
+				"op-aud17-lote-edicion-neg",
 			);
 			expect(r.status).toBe(400);
 			expect(r.json.message).toBe(COSTE_NEGATIVO);

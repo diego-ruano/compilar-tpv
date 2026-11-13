@@ -12,9 +12,25 @@
 import { describe, expect, it } from "vitest";
 
 import casosJson from "../../../crates/tpv-telemetry/src/scrub_casos.json?raw";
+import fuenteDelWorker from "../../cloud-worker-licensing/src/observability/scrub.ts?raw";
+import fuenteDeLaWebview from "../src/shared/observability/scrub.ts?raw";
 import { scrub, scrubDeep, scrubEvent } from "../src/shared/observability/scrub";
 
 const casos = JSON.parse(casosJson) as { redacta: [string, string][]; no_toca: string[]; objetos: [unknown, unknown][] };
+
+describe("la copia de la Webview y la del worker", () => {
+	// AUD-32: el coste del filtro se mide en la copia del worker (`test/scrubCoste.test.ts`), que
+	// es la que recibe texto de fuera. Vale para ésta porque es el mismo código.
+	it("son el mismo código por debajo de la cabecera", () => {
+		const cuerpo = (fuente: string) => {
+			const inicio = fuente.indexOf("\ntype Regla = ");
+			expect(inicio).toBeGreaterThan(0);
+			return fuente.slice(inicio).replace(/\r\n/g, "\n");
+		};
+		expect(cuerpo(fuenteDeLaWebview).length).toBeGreaterThan(5000);
+		expect(cuerpo(fuenteDeLaWebview)).toBe(cuerpo(fuenteDelWorker));
+	});
+});
 
 describe("scrub, con la tabla que comparten las tres copias", () => {
 	it.each(casos.objetos)("filtra un objeto conservando timestamps e identificadores", (entrada, salida) => {

@@ -192,6 +192,25 @@ describe("lo que se dice cuando la licencia bloquea", () => {
 		expect(textoRechazoPrevio("device_replaced")?.titulo).toBe("Esta licencia se activó en otro equipo");
 		expect(textoRechazoPrevio("un_motivo_nuevo")?.cuerpo).toContain("un_motivo_nuevo");
 	});
+
+	it("antes de activar otra licencia, se dice qué pasa con los datos de este ordenador", () => {
+		// AUD-06: con la licencia anulada o trasladada, activar otra aparta lo que hay guardado y
+		// el TPV sigue con los datos de esa (ninguno, si es nueva). Las dos pantallas por las que se
+		// llega a teclear la clave lo avisan antes, y ninguna dice ya que activar no toca nada.
+		const avisos = [
+			textoBloqueo("revoked").cuerpo,
+			textoBloqueo("device_replaced").cuerpo,
+			textoRechazoPrevio("revoked")!.cuerpo,
+			textoRechazoPrevio("device_replaced")!.cuerpo,
+		];
+		for (const cuerpo of avisos) {
+			expect(cuerpo).toContain("se guardan aparte, sin borrarlos");
+			expect(cuerpo).toContain("si es nueva, empieza de cero");
+			expect(cuerpo).not.toContain("no toca lo que hay guardado");
+		}
+		// Lo que no tiene que ver con activar otra licencia no lo menciona.
+		expect(textoBloqueo("expired").cuerpo).not.toContain("se guardan aparte");
+	});
 });
 
 describe("el aviso de caducidad", () => {

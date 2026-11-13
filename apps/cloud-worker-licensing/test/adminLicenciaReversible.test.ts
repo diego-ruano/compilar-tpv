@@ -46,7 +46,7 @@ vi.mock("../src/server/db", async (importOriginal) => {
 });
 
 /** Una llamada que la ruta le hizo al `TenantHub`, tal cual salió. */
-type LlamadaAlHub = { nombreDO: string; deviceId: string };
+type LlamadaAlHub = { nombreDO: string; aviso: "releerMain" | "revocarDispositivo"; tenantId?: string; deviceId?: string };
 
 type Escenario = {
 	/** Golpea una ruta de admin con el token bueno. */
@@ -66,8 +66,8 @@ type Escenario = {
  *
  * No se puede usar el binding de verdad: `enElHub` ya está *dentro* de un Durable Object y lo que
  * interesa comprobar no es lo que el DO hace con el aviso (eso es cosa suya y de sus tests) sino
- * que la ruta se lo manda —al DO correcto, con el dispositivo correcto por RPC—, que es lo
- * único que puede romperse desde aquí sin que nadie se entere.
+ * que la ruta se lo manda —al DO correcto y por el RPC correcto—, que es lo único que puede
+ * romperse desde aquí sin que nadie se entere.
  */
 function hubDeMentira() {
 	const llamadas: LlamadaAlHub[] = [];
@@ -76,9 +76,13 @@ function hubDeMentira() {
 	const ns = {
 		idFromName: (nombre: string) => ({ nombre }),
 		get: ({ nombre }: { nombre: string }) => ({
+			releerMain: async (tenantId: string) => {
+				if (roto) throw new Error("el DO no contesta");
+				llamadas.push({ nombreDO: nombre, aviso: "releerMain", tenantId });
+			},
 			revocarDispositivo: async (deviceId: string) => {
 				if (roto) throw new Error("el DO no contesta");
-				llamadas.push({ nombreDO: nombre, deviceId });
+				llamadas.push({ nombreDO: nombre, aviso: "revocarDispositivo", deviceId });
 			},
 		}),
 	} as unknown as DurableObjectNamespace;
@@ -161,9 +165,10 @@ describe("admin · anular corta el socket de la Main", () => {
 	// reconecta a los 3 s, `/v1/ws/ticket` le contesta 403 y `useMainSocket` traduce ese rechazo en
 	// un `license_check_now`, que emite `license:changed` y tapa la aplicación. La pieza frágil, y
 	// por tanto lo que se fija aquí, es que el aviso salga bien formado: al DO del tenant correcto,
-	// a `revocarDispositivo`, con el `deviceId` de la Main.
+	// pidiéndole que relea quién es la Main (`releerMain`, AUD-02). No nombra a quién echar: si el
+	// aviso llegara tarde, después de deshacer la anulación, no echaría a la Main que ha vuelto a serlo.
 
-	it("avisa por RPC al TenantHub del tenant con el dispositivo de la Main", async () => {
+	it("avisa por RPC al TenantHub del tenant para que relea quién es la Main", async () => {
 		await escenario(async (e) => {
 			const lic = await e.emitir();
 			await e.activar(lic.license_id);
@@ -175,8 +180,7 @@ describe("admin · anular corta el socket de la Main", () => {
 			const [llamada] = e.llamadasAlHub;
 
 			// El DO se direcciona por `tenantId`: uno distinto sería avisar a otro negocio.
-			expect(llamada.nombreDO).toBe("tenant-1");
-			expect(llamada.deviceId).toBe("device-main");
+			expect(llamada).toEqual({ nombreDO: "tenant-1", aviso: "releerMain", tenantId: "tenant-1" });
 		});
 	});
 

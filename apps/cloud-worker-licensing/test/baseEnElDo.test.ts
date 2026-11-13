@@ -37,10 +37,10 @@ describe("esquema", () => {
 			expect(baseAprovisionada(st.sql)).toBe(false);
 			await migrarBaseLocal(st);
 			expect(baseAprovisionada(st.sql)).toBe(true);
-			const migraciones = st.sql.exec("SELECT name FROM _migrations;").toArray();
-			expect(migraciones.map((r: any) => r.name)).toEqual(["0001_inicial.sql"]);
+			const migraciones = st.sql.exec("SELECT name FROM _migrations ORDER BY name;").toArray();
+			expect(migraciones.map((r: any) => r.name)).toEqual(["0001_inicial.sql", "0002_negocio.sql"]);
 			await migrarBaseLocal(st);
-			expect(st.sql.exec("SELECT COUNT(*) AS n FROM _migrations;").one().n).toBe(1);
+			expect(st.sql.exec("SELECT COUNT(*) AS n FROM _migrations;").one().n).toBe(2);
 		});
 	});
 });

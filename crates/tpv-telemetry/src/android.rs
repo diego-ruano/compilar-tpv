@@ -1,16 +1,18 @@
 //! Un único logger global: Logcat durante el arranque y log → tracing después del subscriber.
 //! Los eventos tracing llegan a Logcat por un writer directo, sin volver a la fachada log.
+//! A dónde va cada registro lo dice `logger_temprano::ESTADO` (AUD-29: en release, desde que empieza
+//! `init`, nunca a Logcat).
 
 use std::io::{self, Write};
 use std::sync::{Once, OnceLock};
-use std::sync::atomic::{AtomicBool, Ordering};
 use log::{Log, Level, LevelFilter, Metadata, Record};
 use tracing_subscriber::fmt::MakeWriter;
+
+use crate::logger_temprano::{Destino, ESTADO};
 
 struct PlatformLogger {
     android: android_logger::AndroidLogger,
     bridge: tracing_log::LogTracer,
-    ready: AtomicBool,
 }
 
 fn logger() -> &'static PlatformLogger {
@@ -19,18 +21,23 @@ fn logger() -> &'static PlatformLogger {
         android: android_logger::AndroidLogger::new(android_logger::Config::default()
             .with_max_level(LevelFilter::Info).with_tag("TPVRust")),
         bridge: tracing_log::LogTracer::new(),
-        ready: AtomicBool::new(false),
     })
 }
 
 impl Log for PlatformLogger {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        if self.ready.load(Ordering::Acquire) { self.bridge.enabled(metadata) }
-        else { self.android.enabled(metadata) }
+        match ESTADO.destino() {
+            Destino::Tracing => self.bridge.enabled(metadata),
+            Destino::Logcat => self.android.enabled(metadata),
+            Destino::Ninguno => false,
+        }
     }
     fn log(&self, record: &Record<'_>) {
-        if self.ready.load(Ordering::Acquire) { self.bridge.log(record); }
-        else { self.android.log(record); }
+        match ESTADO.destino() {
+            Destino::Tracing => self.bridge.log(record),
+            Destino::Logcat => self.android.log(record),
+            Destino::Ninguno => {}
+        }
     }
     fn flush(&self) { self.android.flush(); }
 }
@@ -43,8 +50,8 @@ pub(crate) fn init() {
     });
 }
 
+/// Con el subscriber montado (y `ESTADO` ya en `Tracing`).
 pub(crate) fn activate() {
-    logger().ready.store(true, Ordering::Release);
     // JNI emite miles de DEBUG/TRACE: no deben inundar ni Logcat ni la antesala.
     log::set_max_level(LevelFilter::Info);
 }

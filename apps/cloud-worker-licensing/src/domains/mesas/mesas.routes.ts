@@ -17,13 +17,15 @@ import * as S from "./mesas.schemas";
 import { estadoYOrigen } from "../reservas/reservas.queries";
 import { cambioDesdeLaMesa } from "./estadoDesdeLaMesa";
 import { badRequest } from "../../server/utils/response";
-import { consulta, cuerpo } from "../../lib/validacion";
-import { apply, parseId } from "../../lib/rutas";
+import { cuerpo } from "../../lib/validacion";
+import { apply, lecturaPorPost, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const mesasRoutes = new Hono<Ctx>();
 
+// AUD-27: lectura por POST (lo que se escribe en el buscador va en el cuerpo, no en la URL).
+mesasRoutes.use("/productos/search", lecturaPorPost());
 mesasRoutes.use("*", tenantAuth, alHub);
 
 mesasRoutes.get("/layout", async (c) =>
@@ -178,10 +180,11 @@ mesasRoutes.get("/categorias", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.categorias(db))),
 );
 
-mesasRoutes.get("/productos/search", consulta(S.searchSchema), async (c) => {
+mesasRoutes.post("/productos/search", cuerpo(S.searchSchema), async (c) => {
+	const { query } = c.req.valid("json");
 	return c.json(
 		await tenantQuery(c, (db) =>
-			q.searchProductos(db, c.req.valid("query").query),
+			q.searchProductos(db, query),
 		),
 	);
 });

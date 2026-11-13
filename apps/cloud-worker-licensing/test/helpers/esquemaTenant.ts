@@ -8,6 +8,7 @@
 // levantado de esquema de un solo uso sobre una BD vacía.
 
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
+import m0002 from "../../../../packages/database/migrations/0002_negocio.sql";
 
 /** Quita comentarios de bloque y de línea (el parser de sqld/SqlStorage no siempre los tolera). */
 function sinComentarios(sql: string): string {
@@ -17,7 +18,7 @@ function sinComentarios(sql: string): string {
 /** Aplica el esquema sobre `sql` (el `ctx.storage.sql` del DO), sentencia a sentencia. */
 export function crearEsquemaTenant(sql: any): void {
 	// SqlStorage admite varias sentencias y conserva los BEGIN/END de los triggers.
-	for (const mig of [m0001]) sql.exec(sinComentarios(mig));
+	for (const mig of [m0001, m0002]) sql.exec(sinComentarios(mig));
 }
 
 // RI-70: el esquema compartido incluye Encargado y Roles_Permisos.

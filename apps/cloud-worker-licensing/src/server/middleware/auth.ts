@@ -3,9 +3,10 @@ import type { Client } from "@libsql/client/web";
 
 import { cargarDevice, estaRevocado } from "../../lib/deviceAuth";
 import { leerBearer, verificarSesion, type ClaimsSesion } from "../../lib/sesion";
+import { quitarComillas } from "../../lib/texto";
 import { b64ToBytes } from "../utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../utils/crypto";
-import { ed25519Verify, bytesExactos } from "../utils/ed25519";
+import { ed25519Verify, bytesExactos, TOPE_FIRMA_B64 } from "../utils/ed25519";
 
 export type AuthClaims = ClaimsSesion;
 
@@ -102,7 +103,10 @@ export async function verifyDeviceProofOrThrow(
 	rawBody: Uint8Array
 ): Promise<void> {
 	const tsStr = (req.headers.get("X-Device-Ts") || "").trim();
-	const sigB64Raw = (req.headers.get("X-Device-Sig") || "").trim();
+	const sigCabecera = req.headers.get("X-Device-Sig") || "";
+	// AUD-33: una firma son 88 caracteres. Más larga se rechaza antes de tocarla y de leer la base.
+	if (sigCabecera.length > TOPE_FIRMA_B64) throw new Error("bad_device_signature");
+	const sigB64Raw = sigCabecera.trim();
 	if (!tsStr || !sigB64Raw) throw new Error("missing_device_proof");
 
 	const ts = Number(tsStr);
@@ -121,8 +125,8 @@ export async function verifyDeviceProofOrThrow(
 	const bodyHash = await sha256HexBytes(rawBody ?? new Uint8Array());
 	const msg = `DEVICE_PROOF\n${ts}\n${req.method.toUpperCase()}\n${url.pathname}${url.search}\n${tokenHash}\n${bodyHash}`;
 
-	// por si llega con comillas
-	const sigB64 = sigB64Raw.replace(/^"+|"+$/g, "");
+	// por si llega con comillas (AUD-33: recorriendo los extremos, no con una expresión regular)
+	const sigB64 = quitarComillas(sigB64Raw);
 
 	try {
 		const pubU8 = bytesExactos(b64ToBytes(pubB64));

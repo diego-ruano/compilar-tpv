@@ -42,7 +42,11 @@ emulador (identidad que persiste tras reiniciar, emparejamiento, REST y WebSocke
 - **Imprimir** no está disponible fuera de Windows (`printing.rs` tiene un stub `#[cfg(not(windows))]`
   que devuelve error).
 - **Logs**: `android_logger` con la etiqueta `TPVRust`, nivel Info (a Trace, la crate `jni` inunda logcat
-  y el sistema mata la app). `adb logcat -d -s TPVRust`.
+  y el sistema mata la app). `adb logcat -d -s TPVRust`. Todo lo de `tracing` llega ahí sólo en el APK
+  de depuración (`--debug`, el de `tauri android dev` y el de E2E). En el de release sólo queda el
+  arranque anterior a la telemetría, también si ésta no llega a arrancar (AUD-29): lo demás va al
+  `tpv.log` de AppData, a Axiom y a Sentry ([observabilidad.md](../arquitectura/observabilidad.md)). Lo que Rust escribe por la salida estándar
+  o de error, como un `panic`, sale en los dos con la etiqueta `RustStdoutStderr`.
 - **Actualizaciones**: el updater de Tauri es sólo de escritorio. En Android se instala el APK nuevo
   encima del anterior (o lo hace Google Play), siempre firmado con la misma clave (abajo).
 

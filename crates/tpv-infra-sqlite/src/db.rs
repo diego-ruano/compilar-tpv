@@ -400,6 +400,21 @@ pub(crate) fn tune(conn: &rusqlite::Connection) -> Result<(), ErrorSql> {
     Ok(())
 }
 
+/// AUD-02 · La conexión deja de admitir `ATTACH` (`SQLITE_LIMIT_ATTACHED` a 0).
+///
+/// Es para el escritor, que ejecuta tal cual las sentencias que llegan de la nube
+/// (`sync::apply_one`): con un `ATTACH`, una de ellas abría como base cualquier ruta del disco y
+/// escribía en ella. Nada de la aplicación adjunta otra base por el escritor.
+///
+/// Las conexiones de lectura lo conservan a propósito: las copias (`VACUUM INTO`, `recovery.rs`)
+/// van por ellas, y SQLite las hace adjuntando el destino por dentro, así que con el límite a 0
+/// fallarían («too many attached databases - max 0»). Por ellas no pasa ninguna sentencia que venga
+/// de fuera.
+pub(crate) fn sin_attach(conn: &rusqlite::Connection) -> Result<(), ErrorSql> {
+    conn.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_ATTACHED, 0)?;
+    Ok(())
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Pool de lectura
 // ──────────────────────────────────────────────────────────────────────────────
@@ -763,6 +778,9 @@ impl Db {
         // segundo esquema, sin versión, sin hash y fuera del snapshot anti-drift.
         crate::migrations::run(&write_conn)?;
 
+        // AUD-02: desde aquí el escritor no adjunta otras bases. Las de lectura, sí (las copias).
+        sin_attach(&write_conn)?;
+
         // Pool de lectura.
         let mut read_conns = Vec::with_capacity(READ_POOL_SIZE);
         for i in 0..READ_POOL_SIZE {
@@ -979,7 +997,7 @@ mod tests {
 
         let dir = crate::test_temp::dir_temporal("carga");
         std::fs::create_dir_all(&dir).unwrap();
-        let db = crate::connection::init_main_db(&dir, false).await.unwrap();
+        let db = crate::connection::init_main_db(&dir, None).await.unwrap();
         let fin = Instant::now() + Duration::from_millis(1500);
         let escritas = Arc::new(AtomicI64::new(0));
         let mut tareas = Vec::new();

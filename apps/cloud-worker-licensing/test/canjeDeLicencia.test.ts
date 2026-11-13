@@ -46,9 +46,8 @@ const { licenseRoutes } = await import("../src/domains/licensing/licensing.route
 const { generateLicenseKey, licenseKeyHash } = await import(
 	"../src/domains/licensing/licenseKey"
 );
-const { activateLicenseFirstTime, getLicenseById, reactivateLicense, revokeLicense } = await import(
-	"../src/server/licenseStore"
-);
+const { activateLicenseFirstTime, ensureDevice, getLicenseById, reactivateLicense, reassignMainDevice, revokeLicense } =
+	await import("../src/server/licenseStore");
 const { cifrar } = await import("../src/server/crypto");
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -461,6 +460,177 @@ describe("REV-13 · el equipo NO tiene licencia: se estrena", () => {
 		expect(r.res.body.tenantId).not.toBe("tenant-del-bar");
 		// Y al primer bar no se le ha tocado nada.
 		expect(r.primera.expires_at_ms).toBe(r.antes.expires_at_ms);
+	});
+});
+
+describe("AUD-06 · una clave sin estrenar en un equipo que era de otro negocio", () => {
+	// Con la licencia anulada o trasladada, el equipo ya no tiene una licencia viva a la que sumar
+	// tiempo, así que la clave nueva estrena otro negocio. Pero su base local es la del anterior: si
+	// el servidor contesta `cambioDeEquipo: false`, la Main abre el login con los usuarios de aquél
+	// —y el código para restablecer el PIN de su administrador va al comprador de la clave— y
+	// después sube sus filas a la nube del nuevo. La Main sólo aparta la base si se lo dicen.
+
+	/** El negocio en el que está la fila del equipo, o `null` si no la tiene. */
+	const negocioDelEquipo = (e: Escenario): string | null => {
+		const fila = e.sql.exec(`SELECT tenant_id FROM devices WHERE device_id = ?;`, EQUIPO).toArray()[0];
+		return fila ? String(fila.tenant_id) : null;
+	};
+
+	/** El mismo cliente, pero la primera sentencia suelta que case con `patron` revienta. */
+	function conCorte(db: any, patron: RegExp) {
+		let pendiente = true;
+		return {
+			...db,
+			async execute(entrada: any) {
+				const texto = typeof entrada === "string" ? entrada : entrada.sql;
+				if (pendiente && patron.test(String(texto))) {
+					pendiente = false;
+					throw new Error("corte_simulado");
+				}
+				return db.execute(entrada);
+			},
+		} as any;
+	}
+
+	for (const previo of ["anulada", "trasladada"] as const) {
+		it(`con la licencia del negocio anterior ${previo}, el estreno avisa de que la base no vale`, async () => {
+			const r = await escenario(`aud06-${previo}`, async (e) => {
+				const viejaId = await e.licenciaDelEquipo();
+				if (previo === "anulada") {
+					await revokeLicense(e.db, viejaId);
+				} else {
+					// Lo que hace `/activate` en un cambio de equipo con el código del correo.
+					const otra = btoa(String.fromCharCode(...new Uint8Array(32).fill(2)));
+					await ensureDevice(e.db, "tenant-del-bar", "equipo-nuevo-del-bar", "tpv", otra);
+					await reassignMainDevice(e.db, {
+						licenseId: viejaId,
+						fromDeviceId: EQUIPO,
+						toDeviceId: "equipo-nuevo-del-bar",
+					});
+				}
+				const nueva = await e.emitir(12);
+
+				const res = await e.activar(nueva.clave);
+				return {
+					res,
+					vieja: await e.leer(viejaId),
+					nueva: await e.leer(nueva.id),
+					negocio: negocioDelEquipo(e),
+				};
+			});
+
+			expect(r.res.status).toBe(200);
+			expect(r.res.body.cambioDeEquipo).toBe(true);
+			// Sigue siendo un estreno: negocio nuevo, con su base, y no tiempo sumado al anterior.
+			expect(r.res.body.tiempoSumado).toBeUndefined();
+			expect(r.res.body.tenantId).not.toBe("tenant-del-bar");
+			expect(basesCreadas).toEqual([r.res.body.tenantId]);
+			expect(r.negocio).toBe(r.res.body.tenantId);
+			expect(r.nueva.status).toBe("active");
+			expect(r.nueva.tenant_id).toBe(r.res.body.tenantId);
+			expect(r.nueva.main_device_id).toBe(EQUIPO);
+			// Y a la licencia del negocio anterior no se le toca nada.
+			expect(r.vieja.tenant_id).toBe("tenant-del-bar");
+		});
+	}
+
+	it("un equipo nuevo no tiene nada que apartar", async () => {
+		const r = await escenario("aud06-equipo-nuevo", async (e) => {
+			// Otro negocio con su licencia, en su equipo: no es el que activa.
+			await e.licenciaDelEquipo();
+			const nueva = await e.emitir(12);
+			return e.activar(nueva.clave, "equipo-recien-comprado", CLAVE_EQUIPO);
+		});
+
+		expect(r.status).toBe(200);
+		expect(r.body.cambioDeEquipo).toBe(false);
+	});
+
+	it("el mismo negocio, reactivado en su equipo, conserva su base", async () => {
+		// Una anulación por error que se deshace: la misma clave vuelve a activar el mismo equipo.
+		const r = await escenario("aud06-mismo-negocio", async (e) => {
+			const mia = await e.emitir(12);
+			const estreno = await e.activar(mia.clave);
+			await revokeLicense(e.db, mia.id);
+			await reactivateLicense(e.db, mia.id);
+			const vuelta = await e.activar(mia.clave);
+			return { estreno, vuelta };
+		});
+
+		expect(r.estreno.body.cambioDeEquipo).toBe(false);
+		expect(r.vuelta.status).toBe(200);
+		expect(r.vuelta.body.cambioDeEquipo).toBe(false);
+		expect(r.vuelta.body.tenantId).toBe(r.estreno.body.tenantId);
+	});
+
+	it("el equipo que pasó por otro negocio y vuelve a su licencia también la conserva", async () => {
+		// Una Main que se usó como Handy de otro negocio: su fila se mudó allí, pero su base sigue
+		// siendo la de su licencia. No es una primera activación, así que no hay nada que apartar.
+		const r = await escenario("aud06-vuelve-a-su-licencia", async (e) => {
+			const mia = await e.emitir(12);
+			const estreno = await e.activar(mia.clave);
+
+			const ajena = await e.emitir(12);
+			e.sql.exec(`INSERT INTO tenants (tenant_id, status) VALUES ('otro-negocio', 'active');`);
+			e.sql.exec(
+				`UPDATE licenses SET status='active', tenant_id='otro-negocio', main_device_id='main-del-otro',
+				        activated_at_ms=?, expires_at_ms=? WHERE license_id=?;`,
+				Date.now(),
+				Date.now() + 200 * DIA,
+				ajena.id,
+			);
+			e.sql.exec(`UPDATE devices SET tenant_id='otro-negocio', role='handy' WHERE device_id=?;`, EQUIPO);
+
+			const vuelta = await e.activar(mia.clave);
+			return { estreno, vuelta, negocio: negocioDelEquipo(e) };
+		});
+
+		expect(r.vuelta.status).toBe(200);
+		expect(r.vuelta.body.cambioDeEquipo).toBe(false);
+		expect(r.vuelta.body.tenantId).toBe(r.estreno.body.tenantId);
+		expect(r.negocio).toBe(r.estreno.body.tenantId);
+	});
+
+	it("el reintento de un estreno que falló a medias no es de otro negocio", async () => {
+		// El primer intento da de alta el equipo en el negocio que acaba de crear y falla después: la
+		// fila queda en un negocio que no llegó a tener licencia. Si eso contara, el equipo nuevo que
+		// reintenta acabaría en la pantalla de recuperación.
+		const r = await escenario("aud06-reintento", async (e) => {
+			const nueva = await e.emitir(12);
+
+			clienteActual = conCorte(e.db, /UPDATE tenants\s+SET display_name/);
+			const fallo = await e.activar(nueva.clave);
+			const trasElFallo = { negocio: negocioDelEquipo(e), clave: await e.leer(nueva.id) };
+
+			clienteActual = e.db;
+			const bien = await e.activar(nueva.clave);
+			return { fallo, trasElFallo, bien };
+		});
+
+		expect(r.fallo.status).toBe(500);
+		expect(r.trasElFallo.clave.status).toBe("issued");
+		// La fila del equipo ya estaba dada de alta en el negocio del primer intento.
+		expect(r.trasElFallo.negocio).not.toBeNull();
+		expect(r.bien.status).toBe(200);
+		expect(r.bien.body.tenantId).not.toBe(r.trasElFallo.negocio);
+		expect(r.bien.body.cambioDeEquipo).toBe(false);
+	});
+
+	it("un negocio retirado no cuenta: su equipo estrena el siguiente sin nada que apartar", async () => {
+		// Lo que deja cada tanda del E2E (`admin/pruebas.ts`): el negocio dado por borrado y su
+		// licencia anulada. El equipo conserva la identidad y estrena la tanda siguiente con la
+		// carpeta de datos recién borrada.
+		const r = await escenario("aud06-retirado", async (e) => {
+			const viejaId = await e.licenciaDelEquipo();
+			await revokeLicense(e.db, viejaId);
+			e.sql.exec(`UPDATE tenants SET status='deleted' WHERE tenant_id='tenant-del-bar';`);
+			const nueva = await e.emitir(12);
+			return e.activar(nueva.clave);
+		});
+
+		expect(r.status).toBe(200);
+		expect(r.body.tiempoSumado).toBeUndefined();
+		expect(r.body.cambioDeEquipo).toBe(false);
 	});
 });
 

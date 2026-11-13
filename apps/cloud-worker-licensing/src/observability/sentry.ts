@@ -11,6 +11,7 @@ import type { Env } from "../env";
 import * as Sentry from "@sentry/cloudflare";
 import { scrubEvent, type EventoSentry } from "./scrub";
 import { limitarPeticion } from "./requestContext";
+import { acotar } from "./tope";
 import { esRechazoEsperado } from "./errors";
 
 export function sentryOptions(env: Env) {
@@ -35,7 +36,8 @@ export function sentryOptions(env: Env) {
 		beforeSend: <E extends EventoSentry>(event: E, hint?: { originalException?: unknown }): E | null => {
 			try {
 				if (esRechazoEsperado(hint?.originalException)) return null;
-				return scrubEvent(limitarPeticion(event));
+				// AUD-32: cada cadena se filtra con sus topes (`tope.ts`).
+				return scrubEvent(limitarPeticion(event), acotar);
 			} catch {
 				// Si el filtro fallara, es más seguro NO enviar que enviar sin depurar.
 				return null;

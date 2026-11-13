@@ -13,6 +13,7 @@ import { describe, it, expect } from "vitest";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { laMainEs } from "./helpers/mainVigente";
 
 
 const TENANT = "tenant-1";
@@ -79,11 +80,15 @@ function prepararHub(hub: any) {
 	hub.withTenantDbRetry = async (_t: string, run: any) => run(db);
 	// `last_seen` va contra la BD central, que aquí no existe y tampoco es lo que se prueba.
 	hub.touchLastSeen = async () => {};
+	// AUD-02: la Main de estas pruebas es la de la licencia (lo otro, en `mainDesplazadaSocket.test.ts`).
+	laMainEs(hub, "device-main");
 	hub.isMainConnected = () => true;
 	hub.isMainReady = () => true;
 	// Las tablas de la cola las crea `encolar`, pero los tests que comprueban que NO se encoló nada
 	// necesitan poder leerlas igualmente.
 	hub.asegurarCola();
+	// El interruptor `cola_do` se lee de la base central, que aquí no existe: nadie ha pausado la cola.
+	hub.colaPausada = async () => null;
 	return { sql, db };
 }
 

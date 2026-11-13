@@ -14,6 +14,7 @@ use tpv_contracts::venta_rapida::{
 use tpv_application::error::AppError;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
+use crate::client::leer_campo;
 use crate::CloudClient;
 
 /// Confirma con el cuerpo de la respuesta el id de la fila creada.
@@ -64,10 +65,11 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
     }
 
     async fn search_productos(&self, query: String, limit: i64) -> AppResult<Vec<ProductoRow>> {
+        // AUD-27: lo que se escribe en un buscador va en el cuerpo, no en la URL.
         self.client
-            .get_query(
+            .post_lectura(
                 "/v1/venta-rapida/productos/search",
-                &[("query", query), ("limit", limit.to_string())],
+                &json!({ "query": query, "limit": limit }),
             )
             .await
     }
@@ -91,9 +93,9 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
     }
 
     async fn get_index_rows(&self, ids: Vec<String>) -> AppResult<Vec<IndexRow>> {
-        // Lectura vía POST (el body lleva la lista de ids); el worker no exige idempotencia aquí.
+        // Lectura por POST (el cuerpo lleva la lista de ids): sin clave de idempotencia.
         self.client
-            .post_json("/v1/venta-rapida/index-rows", &json!({ "ids": ids }))
+            .post_lectura("/v1/venta-rapida/index-rows", &json!({ "ids": ids }))
             .await
     }
 
@@ -145,8 +147,8 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
             .await?;
         Ok(VrLineaAnadida {
             id_detalle: id_from_response(&resp, "id_detalle")?,
-            precio_unitario: serde_json::from_value(resp["precio_unitario"].clone())
-                .map_err(|e| AppError::external(format!("bad_precio_unitario: {e}")))?,
+            // AUD-28: sin el texto de serde, que cita el valor que no encaja.
+            precio_unitario: leer_campo("bad_precio_unitario", &resp["precio_unitario"])?,
         })
     }
 

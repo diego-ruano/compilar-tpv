@@ -13,12 +13,16 @@
 //     cubierto  = los builders que test/contract.test.ts importa Y usa
 //
 //   LECTURA (mismas filas → mismo resultado devuelto)
-//     universo  = cada `export function` de domains/*/*.queries.ts **que sirve a un GET**.
+//     universo  = cada `export function` de domains/*/*.queries.ts **que sirve a una lectura**:
+//                 un GET, o un POST que el router declara como lectura con `lecturaPorPost(…)`
+//                 (AUD-27: lo que es de una persona o texto libre va en el cuerpo, no en la query;
+//                 que toda ruta que sólo consulta lleve esa marca lo vigila el worker, en
+//                 test/sinDatosPersonalesEnLaQuery.node.test.ts).
 //                 El recorte no es cosmético: la mitad de los `*.queries.ts` son comprobaciones
 //                 previas de una escritura (`cobrarPlan`, `datosDeLinea`, `hasPaidLines`, el
 //                 throttle del login…), que ya viajan dentro del harness de escritura al correr su
-//                 comando. Lo que la Handy LEE es lo que cuelga de un GET, y eso es lo que tiene
-//                 una segunda implementación en `tpv-infra-sqlite` con la que poder discrepar.
+//                 comando. Lo que la Handy LEE es lo que cuelga de una lectura, y eso es lo que
+//                 tiene una segunda implementación en `tpv-infra-sqlite` con la que poder discrepar.
 //     cubierto  = las consultas que test/contractLectura.test.ts importa Y usa
 //
 //   excluido  = lo listado con motivo en el `cobertura.json` de cada vertiente
@@ -72,36 +76,44 @@ const VERTIENTES = [
 ];
 
 /**
- * Tramos de un `*.routes.ts` que son el cuerpo de un handler **GET**.
+ * Tramos de un `*.routes.ts` que son el cuerpo de un handler de **lectura**: un GET, o un POST
+ * cuya ruta el router declara como lectura (`xRoutes.use("/ruta", lecturaPorPost(…))`, AUD-27).
  *
- * El recorte importa: sólo un GET es una lectura que la Handy pide. Las demás consultas de un
+ * El recorte importa: sólo eso es una lectura que la Handy pide. Las demás consultas de un
  * `*.queries.ts` son comprobaciones previas de una escritura —el plan de un cobro, un "¿ya existe
  * este email?", el throttle del login— y ésas ya viajan dentro del harness de escritura, que las
  * ejecuta al correr su comando. Contarlas aquí llenaría el aviso de deuda que no existe, y un aviso
  * que nadie puede vaciar deja de leerse.
  */
-function tramosGet(srcRutas) {
+function tramosDeLectura(srcRutas) {
+	const porPost = new Set(
+		[
+			...srcRutas.matchAll(/\b[A-Za-z0-9_$]*Routes\.use\(\s*"([^"]+)"\s*,\s*lecturaPorPost\s*\(/g),
+		].map((m) => m[1]),
+	);
 	const handlers = [
 		...srcRutas.matchAll(/\b[A-Za-z0-9_$]*Routes\.(get|post|put|patch|delete)\s*\(/g),
 	];
 	return handlers
 		.map((h, i) => ({
 			verbo: h[1],
+			// La ruta es el primer argumento del registro, en su línea o en la siguiente.
+			ruta: srcRutas.slice(h.index + h[0].length).match(/^\s*"([^"]+)"/)?.[1],
 			desde: h.index,
 			hasta: i + 1 < handlers.length ? handlers[i + 1].index : srcRutas.length,
 		}))
-		.filter((t) => t.verbo === "get");
+		.filter((t) => t.verbo === "get" || (t.verbo === "post" && porPost.has(t.ruta)));
 }
 
 /**
- * ¿La sirve algún GET del dominio?
+ * ¿La sirve alguna lectura del dominio?
  *
  * Los `*.routes.ts` importan sus consultas con un namespace (`import * as q from "./x.queries"`),
- * así que se busca `q.<nombre>` dentro del cuerpo de un GET. Se resuelve el alias en vez de darlo
- * por hecho: si mañana alguien importa `as consultas`, esto lo sigue viendo. Un import con nombres
- * sueltos también cuenta.
+ * así que se busca `q.<nombre>` dentro del cuerpo de una lectura. Se resuelve el alias en vez de
+ * darlo por hecho: si mañana alguien importa `as consultas`, esto lo sigue viendo. Un import con
+ * nombres sueltos también cuenta.
  */
-function laSirveUnGet(srcRutas, dominio, nombre) {
+function laSirveUnaLectura(srcRutas, dominio, nombre) {
 	if (!srcRutas) return false;
 
 	const usados = [];
@@ -124,7 +136,7 @@ function laSirveUnGet(srcRutas, dominio, nombre) {
 	}
 	if (!usados.length) return false;
 
-	return tramosGet(srcRutas).some((t) => {
+	return tramosDeLectura(srcRutas).some((t) => {
 		const cuerpo = srcRutas.slice(t.desde, t.hasta);
 		return usados.some((u) => new RegExp(`${u.replace(".", "\\.")}\\s*\\(`).test(cuerpo));
 	});
@@ -146,7 +158,7 @@ function universoDe(v) {
 			const src = readFileSync(ruta, "utf8");
 			for (const m of src.matchAll(/^export (?:async )?function ([A-Za-z0-9_]+)/gm)) {
 				const nombre = m[1];
-				if (v.soloSiEnRuta && !laSirveUnGet(srcRutas, dominio.name, nombre)) continue;
+				if (v.soloSiEnRuta && !laSirveUnaLectura(srcRutas, dominio.name, nombre)) continue;
 				salida.push({
 					dominio: dominio.name,
 					nombre,

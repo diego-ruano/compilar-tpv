@@ -10,7 +10,7 @@
 // Reutiliza las utilidades compartidas del worker (base64, crypto, credenciales del tenant) en
 // vez de mantener copias propias.
 
-import { ed25519Sign, ed25519Verify } from "../../server/utils/ed25519";
+import { ed25519Sign, ed25519Verify, TOPE_FIRMA_B64 } from "../../server/utils/ed25519";
 import type { Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
@@ -28,6 +28,7 @@ import { sha256HexBytes, sha256HexStr } from "../../server/utils/crypto";
 import { leerBearer } from "../../lib/sesion";
 import { hubDe } from "../../lib/hub";
 import { clienteDelHub } from "../../lib/tenantClient";
+import { quitarComillas } from "../../lib/texto";
 
 /** Caducidad: aviso los 7 días previos, y 3 días de gracia después */
 export const WARN_DAYS = 7;
@@ -313,10 +314,13 @@ export function cabecerasDeLaFirma(
 	request: Request,
 ): { ok: true; ts: number; sigB64: string } | { ok: false; error: string } {
 	const tsStr = (request.headers.get("X-Device-Ts") || "").trim();
-	const sigB64Raw = (request.headers.get("X-Device-Sig") || "").trim();
+	const sigCabecera = request.headers.get("X-Device-Sig") || "";
+	// AUD-33: una firma son 88 caracteres. Más larga se rechaza antes de tocarla.
+	if (sigCabecera.length > TOPE_FIRMA_B64) return { ok: false, error: "bad_device_signature" };
+	const sigB64Raw = sigCabecera.trim();
 	if (!tsStr || !sigB64Raw) return { ok: false, error: "missing_device_proof" };
 
-	const sigB64 = sigB64Raw.replace(/^"+|"+$/g, "");
+	const sigB64 = quitarComillas(sigB64Raw);
 	if (!tsStr || !sigB64) return { ok: false, error: "missing_device_proof" };
 
 	const ts = Number(tsStr);

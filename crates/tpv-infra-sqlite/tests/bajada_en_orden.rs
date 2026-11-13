@@ -107,6 +107,9 @@ impl PairingService for Nube {
     fn handy_get_tenant(&self) -> AppResult<Option<String>> {
         unimplemented!()
     }
+    fn negocio_de_la_licencia(&self) -> AppResult<Option<String>> {
+        Ok(Some("negocio-de-prueba".into()))
+    }
     fn tpv_server_signed_headers(&self, _: &str, _: &str, _: &str, _: &[u8]) -> AppResult<ApiSignedHeaders> {
         unimplemented!()
     }
@@ -121,7 +124,7 @@ impl PairingService for Nube {
     async fn pair_create(&self) -> AppResult<PairCreateResult> {
         unimplemented!()
     }
-    async fn upload_image(&self, _: &str, _: &str, _: &str, _: Vec<u8>) -> AppResult<ResultadoSubidaImagen> {
+    async fn upload_image(&self, _: &str, _: &str, _: &str, _: Vec<u8>, _: &str) -> AppResult<ResultadoSubidaImagen> {
         unimplemented!()
     }
     async fn delete_image(&self, _: &str, _: &str) -> AppResult<()> {

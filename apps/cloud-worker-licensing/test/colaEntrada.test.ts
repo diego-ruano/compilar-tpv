@@ -94,6 +94,8 @@ function prepararHub(hub: any) {
 		credenciales.veces++;
 		return db;
 	};
+	// El interruptor `cola_do` se lee de la base central, que aquí no existe: nadie ha pausado la cola.
+	hub.colaPausada = async () => null;
 	return { sql, db, credenciales };
 }
 

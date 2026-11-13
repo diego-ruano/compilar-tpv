@@ -5,6 +5,7 @@ import { createDbClient } from "../server/db/clients";
 import { getDb } from "../server/db";
 import { estaApagado } from "../lib/interruptores";
 import { ingestToAxiom } from "../observability/axiom";
+import { capturarError } from "../observability/errors";
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 
 import type { ContextoDeCola } from "./tenantHub.cola";
@@ -24,8 +25,16 @@ import {
 	stableStringify,
 	stringifyJsonValue,
 } from "./tenantHub.envelope";
-import { loadDeviceFromCentral, verifyHelloSigned } from "./tenantHub.identidad";
+import { loadDeviceFromCentral, mainDeLaLicencia, verifyHelloSigned } from "./tenantHub.identidad";
 import { buildApplyBatch, loteDe, type EscrituraPreparada } from "./tenantHub.lote";
+import {
+	aplicarLectura,
+	empezarLectura,
+	mainVigente,
+	olvidarComprobacion,
+	tocaComprobar,
+} from "./tenantHub.main";
+import type { MainVigente } from "./tenantHub.main";
 import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
 import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
@@ -83,6 +92,12 @@ const SYNC_CHANGES_TTL_MS = 7 * 24 * 60 * 60 * 1000; // no borrar cambios de men
 // idempotencia: un reintento nunca llega tan tarde.
 const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+// AUD-02: plazo de la lectura que pone al día quién es la Main (`mainEnCentral`). Es una consulta
+// por índice, de milisegundos; puede ir delante de una escritura o dentro del turno del log, la
+// Main espera su `apply_ack` 10 s, y una base central colgada no puede comerse esa espera. Vencido,
+// es una lectura que no ha contestado: la tabla se queda como estaba.
+const PLAZO_LEER_MAIN_MS = 5_000;
+
 
 export class MotorTenantHub {
 	// SYNC-16: este DO usa la WebSocket Hibernation API. Mientras las conexiones están ociosas el
@@ -110,6 +125,12 @@ export class MotorTenantHub {
 	// lo que está en vuelo, no algo que recordar entre invocaciones: el DO sólo hiberna sin nada en
 	// vuelo, así que al despertar vacía es lo correcto (SYNC-16, regla 4).
 	private turnoDelLog: Promise<void> = Promise.resolve();
+
+	// AUD-02: la cola de lo que la Main manda por el socket y entra en el acto (`apply` y
+	// `bulk_apply`, ver `enTurnoDeEntrada`). Como el turno del log, es lo que está en vuelo y nada
+	// más: lo que se pierda al descartar la instancia no tenía respuesta todavía, y la Main lo vuelve
+	// a mandar.
+	private turnoDeEntrada: Promise<void> = Promise.resolve();
 
 	constructor(private state: DurableObjectState, private env: Env) {
 		// SYNC-16: el latido (cada 30 s por dispositivo) se responde EN EL EDGE, sin despertar al DO
@@ -158,7 +179,16 @@ export class MotorTenantHub {
 		return out;
 	}
 
-	private getCentralDb(): Client {
+	private getCentralDb(plazoMs?: number): Client {
+		// AUD-02: con plazo, un cliente que vive lo que su lectura. No se guarda: el plazo es de
+		// quien lo pide, y las demás lecturas de la base central siguen sin él.
+		if (plazoMs) {
+			return createDbClient({
+				url: this.env.TURSO_DATABASE_URL,
+				authToken: this.env.TURSO_AUTH_TOKEN,
+				plazoMs,
+			});
+		}
 		if (!this.centralDb) {
 			this.centralDb = createDbClient({
 				url: this.env.TURSO_DATABASE_URL,
@@ -341,14 +371,215 @@ export class MotorTenantHub {
 	 *
 	 * Nada de temporizadores ni de estado que deba sobrevivir (SYNC-16): es una cadena de promesas de
 	 * lo que está en vuelo, y un fallo no la rompe para el siguiente.
+	 *
+	 * AUD-02: `alReservar` se llama en cuanto el trabajo tiene sitio en la cadena, antes de que
+	 * empiece. Es lo que espera la fila de entrada de la Main (`enTurnoDeEntrada`) para soltar al
+	 * siguiente `apply`: a partir de ahí el orden en que se confirman ya está fijado.
 	 */
-	private enTurnoDelLog<T>(trabajo: () => Promise<T>): Promise<T> {
+	private enTurnoDelLog<T>(trabajo: () => Promise<T>, alReservar?: () => void): Promise<T> {
 		const resultado = this.turnoDelLog.then(trabajo);
 		this.turnoDelLog = resultado.then(
 			() => undefined,
 			() => undefined,
 		);
+		alReservar?.();
 		return resultado;
+	}
+
+	// ---- AUD-02: quién es la Main -----------------------------------------------------------
+	//
+	// El rol `tpv` de una sesión dice que el equipo se activó como Main; que lo SIGA siendo lo dice
+	// la licencia, en la base central, y puede cambiar con el socket abierto (un traslado, una
+	// anulación, un reembolso). Quién lo es ahora está apuntado en el SQL del DO
+	// (`tenantHub.main.ts`), y todo lo que depende de ello lo mira ahí, sin esperar a nadie:
+	// `esLaMain`. Las lecturas de la base central sólo ponen la tabla al día, y lo hacen por un único
+	// sitio, `fijarMain`, que en el mismo paso echa a la sesión `tpv` que ha dejado de serlo.
+	//
+	// La tabla se pone al día: (a) en el saludo de un `tpv` (`leerMain`); (b) cuando hay trabajo y
+	// hace más de un minuto de la última lectura (`comprobarMain`); y (c) cuando las rutas avisan de
+	// que la licencia ha cambiado (`releerMain`: un traslado, una anulación, un reembolso), que no
+	// echa a nadie por su cuenta: vuelve a leer. Si la base central no contesta, la tabla se queda
+	// como está.
+
+	/** AUD-02 · Quién es la Main ahora mismo, según la tabla del DO. No espera. */
+	private mainVigente(): MainVigente {
+		return mainVigente(this.state.storage);
+	}
+
+	/**
+	 * AUD-02 · ¿Es esta sesión la de la Main? Autenticada, no echada, de un `tpv`, y del dispositivo
+	 * que la tabla dice que es la Main. Es síncrono a propósito: se llama justo antes de actuar,
+	 * después de la última espera, y entre la pregunta y el acto no cabe nada.
+	 *
+	 * Si la tabla dice que no hay Main (la licencia está anulada), ninguna sesión lo es.
+	 *
+	 * Si no se ha leído nunca, lo es cualquier sesión `tpv` autenticada, como antes de que hubiera
+	 * tabla. Sólo puede pasar con una sesión que saludó antes de que existiera (el saludo de un `tpv`
+	 * siempre la lee, y sin respuesta no entra), y dura hasta la primera comprobación por actividad,
+	 * que la lee y echa a la que no lo sea. Sin esto, una sesión así se quedaría sin poder soltar a las
+	 * Handy ni escribir en vivo, que deciden con la tabla sin leerla.
+	 */
+	private esLaMain(a: WsAttachment | null, vigente: MainVigente = this.mainVigente()): boolean {
+		if (!a?.authed || a.fuera || a.role !== "tpv") return false;
+		if (!vigente.leida) return true;
+		return vigente.deviceId !== null && a.deviceId === vigente.deviceId;
+	}
+
+	/**
+	 * AUD-02 · Apunta quién es la Main según la lectura `lectura`, y echa a toda sesión `tpv` que no
+	 * sea de ese dispositivo. Es el único sitio donde cambia la tabla y el único que echa por este
+	 * motivo; las dos cosas van juntas y sin esperas, así que nunca hay dentro una sesión `tpv`
+	 * autenticada que la tabla no reconozca.
+	 *
+	 * Si ya se apuntó una lectura que empezó después, ésta no cuenta: ni toca la tabla ni echa a
+	 * nadie (`aplicarLectura`).
+	 */
+	private fijarMain(lectura: number, deviceId: string | null): void {
+		if (!aplicarLectura(this.state.storage, lectura, deviceId)) return;
+
+		const motivo = deviceId ? "device_replaced" : "license_revoked";
+		for (const ws of this.state.getWebSockets()) {
+			const a = this.att(ws);
+			if (!a?.authed || a.fuera || a.role !== "tpv" || a.deviceId === deviceId) continue;
+			this.emitSyncEvent("main_expulsada", { device_id: a.deviceId, motivo });
+			this.cerrar(ws, a, 4001, motivo);
+		}
+	}
+
+	/**
+	 * AUD-02 · Lo que dice ahora la base central: la Main de la licencia viva, o `null`. Método, y
+	 * no una lambda del contexto, para que un test lo sustituya, como `verifyHelloSigned`.
+	 *
+	 * Con plazo, porque puede ir delante de una escritura o dentro del turno del log y no puede
+	 * retenerlos. Lanza si no hay respuesta.
+	 */
+	private async mainEnCentral(tenantId: string): Promise<string | null> {
+		return await mainDeLaLicencia(this.getCentralDb(PLAZO_LEER_MAIN_MS), tenantId);
+	}
+
+	/**
+	 * AUD-02 · Una lectura de la base central, numerada al empezar, y su respuesta apuntada
+	 * (`fijarMain`). Lanza si la base central no contesta o rechaza la consulta, sin tocar la tabla:
+	 * es la lectura del saludo de un `tpv`, que sin respuesta no puede entrar.
+	 */
+	private async leerMain(tenantId: string): Promise<void> {
+		const lectura = empezarLectura(this.state.storage);
+		const main = await this.mainEnCentral(tenantId);
+		this.fijarMain(lectura, main);
+	}
+
+	/**
+	 * AUD-02 · La comprobación por actividad: si hay dentro alguna sesión `tpv` y hace más de un
+	 * minuto de la última lectura, pregunta a la base central. Devuelve la lectura en marcha, para
+	 * quien quiera esperarla antes de decidir, o `null` si no toca.
+	 *
+	 * - Una vez por minuto y por negocio, haya los mensajes que haya: quien pregunta se queda la
+	 *   marca antes de esperar (`tocaComprobar`), y los demás siguen con lo que dice la tabla. Lo
+	 *   que se decide mientras esa lectura está en vuelo se decide, por tanto, con la tabla de antes;
+	 *   menos lo que espera en el turno del log detrás de quien pregunta, que sale después.
+	 * - Sin sesiones `tpv` dentro no hay a quién echar ni nadie que cuente como Main: no se pregunta.
+	 * - No lanza. Si la base central no contesta o rechaza la consulta, queda registrado, la tabla
+	 *   se queda como está y nadie se queda fuera por ello; se vuelve a preguntar al minuto.
+	 * - Ni temporizador ni alarma (SYNC-16): un negocio parado no pregunta.
+	 */
+	private comprobarMain(): Promise<void> | null {
+		const tenantId = this.tenantConSesionTpv();
+		if (!tenantId) return null;
+		if (!tocaComprobar(this.state.storage)) return null;
+		return this.leerMain(tenantId).catch((e) => {
+			capturarError(e, "sync.main_vigente");
+		});
+	}
+
+	/** AUD-02 · El negocio de este hub, si hay dentro una sesión `tpv` por la que preguntar. */
+	private tenantConSesionTpv(): string | null {
+		for (const ws of this.state.getWebSockets()) {
+			if (ws.readyState !== 1) continue;
+			const a = this.att(ws);
+			if (a?.authed && !a.fuera && a.role === "tpv") return a.tenantId;
+		}
+		return null;
+	}
+
+	/**
+	 * AUD-02 · Un aviso para la Main (una solicitud de emparejamiento, una reserva de la web) también
+	 * es actividad: si toca preguntar quién es la Main, sale después de la respuesta. Si no toca,
+	 * sale en el acto.
+	 */
+	private trasComprobarMain(avisar: () => void): void {
+		const comprobando = this.comprobarMain();
+		if (!comprobando) return avisar();
+		this.state.waitUntil(comprobando.then(avisar));
+	}
+
+	/**
+	 * AUD-02 · Las lecturas de la base central que piden las rutas cuando cambia la licencia del
+	 * negocio (un traslado, una anulación, un reembolso: `lib/hub.ts::avisarCambioDeLicencia`).
+	 *
+	 * No echa a nadie por su cuenta: vuelve a leer quién es la Main, y `fijarMain` echa a la sesión
+	 * `tpv` que no lo sea. Así un aviso que llega tarde no hace daño: si entretanto la licencia volvió
+	 * a la Main que nombraba (B→A→B), la lectura dice B y B sigue dentro; y si dos avisos se cruzan,
+	 * manda la lectura que empezó después, como siempre.
+	 *
+	 * Lee siempre, también sin ninguna sesión `tpv` autenticada dentro: puede haber un saludo a medias
+	 * cuya lectura salió antes del cambio y todavía no ha vuelto. Esta lectura empieza después, así que
+	 * su respuesta prevalece, y el saludo, que decide con la tabla, no entra (`fijarMain`). Por eso el
+	 * negocio llega con el aviso (`tenantId`) y no se saca de las sesiones.
+	 *
+	 * Si la base central no contesta, la tabla se queda como está, queda registrado y la siguiente
+	 * actividad vuelve a preguntar sin esperar al minuto.
+	 */
+	async releerMain(tenantId: string): Promise<void> {
+		olvidarComprobacion(this.state.storage);
+		if (!tenantId) return;
+		try {
+			await this.leerMain(tenantId);
+		} catch (e) {
+			capturarError(e, "sync.main_vigente");
+			olvidarComprobacion(this.state.storage);
+		}
+	}
+
+	/**
+	 * AUD-02 · Lo que la Main manda por el socket y entra en el acto (`apply`, `bulk_apply`), en fila:
+	 * cada uno empieza cuando ha acabado el anterior. Si al primero le toca esperar la comprobación por
+	 * actividad, los de detrás esperan con él y salen en el orden en que llegaron; si no, la fila no
+	 * espera a nada. El outbox de la Main está ordenado (una línea necesita su comanda), y esperar
+	 * cada uno por su cuenta dejaría que el segundo, que ya no tiene que preguntar, entrara antes.
+	 *
+	 * Como `enTurnoDelLog`, es una cadena de promesas de lo que está en vuelo, y un fallo no la rompe
+	 * para el siguiente. No toca la base del negocio: lo que entra en la cola sigue confirmándose sin
+	 * esperarlo.
+	 */
+	private enTurnoDeEntrada(trabajo: () => Promise<void> | void): Promise<void> {
+		const resultado = this.turnoDeEntrada.then(trabajo);
+		this.turnoDeEntrada = resultado.then(
+			() => undefined,
+			() => undefined,
+		);
+		return resultado;
+	}
+
+	/**
+	 * Todo cierre de una sesión pasa por aquí: los que inicia el DO y los que le llegan
+	 * (`webSocketClose`, `webSocketError`).
+	 *
+	 * AUD-02: la sesión deja de estar autenticada y queda `fuera` en su attachment antes de nada.
+	 * Mientras termina de cerrarse puede seguir en `getWebSockets()`, y si el cliente no contesta al
+	 * cierre podrían seguir llegando sus mensajes: sin autenticar no se le atiende ninguno ni se le
+	 * difunde nada, y no cuenta como Main (AUD-15). Y lo que tuviera a medias no sigue: ni un saludo
+	 * que esperaba a la base central la autentica, ni entra lo que dejara esperando.
+	 *
+	 * Después contabiliza la salida (`sessionGone`), porque nada garantiza que el runtime llame a
+	 * `webSocketClose` cuando el cierre lo provoca el propio DO. `a` es el attachment de ANTES del
+	 * cierre: es el que dice si era la Main.
+	 */
+	private cerrar(ws: WebSocket, a: WsAttachment | null, code: number, motivo: string): void {
+		if (a) this.setAtt(ws, { ...a, authed: false, recovering: false, fuera: true });
+		try {
+			ws.close(code, motivo);
+		} catch { }
+		if (a) this.sessionGone(ws, a);
 	}
 
 	private async applyInternalCommandIdempotent(params: {
@@ -362,6 +593,10 @@ export class MotorTenantHub {
 		clientNow?: string | null;
 		/** Sólo el outbox de la Main que está ejecutando la propia recuperación puede escribir. */
 		allowWhileRecovering?: boolean;
+		/** AUD-02: el socket de la sesión que manda la escritura (el `apply` de la Main). */
+		sesion?: WebSocket;
+		/** AUD-02: se llama en cuanto la escritura tiene sitio en el turno del log. */
+		alReservarTurno?: () => void;
 	}): Promise<{ result: any; seq: number }> {
 		const {
 			tenantId,
@@ -419,6 +654,18 @@ export class MotorTenantHub {
 		// aquí, van por `applyBatchIdempotent`. Se mira aquí, para no esperar en balde, y otra vez
 		// dentro del turno, que es lo que vale.
 		const exigirQueSePuedaEscribir = () => {
+			// AUD-02: la escritura de una Main lleva la sesión que la mandó, y esa sesión tiene que
+			// seguir siendo la de la Main también cuando le llega el turno. Mientras esperaba pudo
+			// trasladarse la licencia y echarse su socket; con la Main nueva ya conectada, las
+			// guardias de abajo pasaban y la operación del equipo anterior entraba
+			// (`allowWhileRecovering`). Lo mismo con la sesión que reemplaza una reconexión: la nueva
+			// vuelve a mandarla. Va antes de aplicar nada, así que lo que se rechaza aquí no ha tocado
+			// la base.
+			// Con el socket ya cerrado tampoco: nadie recibiría la respuesta, y la Main la vuelve a
+			// mandar al reconectar.
+			if (params.sesion && (params.sesion.readyState !== 1 || !this.esLaMain(this.att(params.sesion)))) {
+				throw new HubError("not_authenticated", 401);
+			}
 			if (!this.isMainConnected()) {
 				throw new HubError("main_offline", 400);
 			}
@@ -429,6 +676,8 @@ export class MotorTenantHub {
 				throw new HubError("main_volcando", 400);
 			}
 		};
+		// AUD-02: aquí, con la tabla tal como está. La comprobación por actividad se espera dentro del
+		// turno, en el orden en que llegan las escrituras.
 		exigirQueSePuedaEscribir();
 
 		const requestHash = await sha256Hex(requestPayloadJson);
@@ -450,11 +699,21 @@ export class MotorTenantHub {
 		const { stmts: batchStmts, built, offsetTrabajo: MIDDLE_OFFSET } = loteDe(escritura, createdAtMs);
 
 		// AUD-18: confirmar y difundir van dentro del turno del log (`enTurnoDelLog`).
-		const runApply = () => this.withTenantDbRetry(tenantId, (db) => this.enTurnoDelLog(async () => {
+		//
+		// AUD-02: quien la manda se entera de cuándo ha cogido sitio (`alReservarTurno`): es la fila
+		// de entrada de la Main, que no suelta al siguiente `apply` hasta entonces. La base es el
+		// SQLite de este DO, así que no hay credenciales que renovar a mitad del turno: la escritura
+		// entra o no entra, sin salir de él.
+		const enElTurno = async (db: Client): Promise<{ result: any; seq: number }> => {
 			// AUD-18: otra vez dentro del turno, el congelado de la cola (SYNC-18): mientras se esperaba
 			// el turno pudo llegar un volcado, y nada puede confirmarse por delante de él. AUD-15: y el
 			// de la Main, por lo mismo: la que estaba lista pudo irse, o reconectar y saludar
 			// congelando, y lo que la Handy decidió con ella lista no puede entrar después.
+			//
+			// AUD-02: y quién es la Main, que pudo cambiar esperando el turno. Si entretanto se ha
+			// cumplido el minuto, se pregunta a la base central; después de esa espera, que es la
+			// última, se mira la tabla, y de ahí a aplicar la escritura no hay ninguna más.
+			await this.comprobarMain();
 			exigirQueSePuedaEscribir();
 
 			let batchResults: any[];
@@ -541,7 +800,14 @@ export class MotorTenantHub {
 			// OBS-04: en el ÉXITO no emitimos nada a Axiom. El coste que disparaba el volumen era
 			// justo este evento por cada `apply`; el detalle de un apply correcto no se necesita.
 			return { result, seq };
-		}));
+		};
+		const runApply = async () => {
+			// La base del negocio, por donde la sacan también los tests (`withTenantDbRetry`). Abrirla
+			// es una espera (al despertar el DO comprueba sus migraciones): el sitio en el turno se
+			// coge después, y quien manda la escritura se entera entonces.
+			const db = await this.withTenantDbRetry(tenantId, async (base) => base);
+			return this.enTurnoDelLog(() => enElTurno(db), params.alReservarTurno);
+		};
 
 		try {
 			return await runApply();
@@ -622,7 +888,14 @@ export class MotorTenantHub {
 		// AUD-18: lo que toca `Sync_Changes` va en el turno del log (`enTurnoDelLog`), igual que una
 		// escritura suelta: si no, una de una Handy podría confirmarse entre medias y difundirse
 		// fuera de orden.
-		return this.enTurnoDelLog(() => this.aplicarPreparadas(db, preparadas));
+		return this.enTurnoDelLog(async () => {
+			// AUD-02: lo que se confirme se va a difundir, y a una sesión `tpv` sólo si es la de la
+			// Main. Si toca preguntar a la base central quién lo es, se pregunta antes. Va dentro del
+			// turno para que ponerse a la cola siga siendo inmediato. Lo que ya está en la cola entra
+			// igualmente: se aceptó cuando quien lo mandó era la Main.
+			await this.comprobarMain();
+			return this.aplicarPreparadas(db, preparadas);
+		});
 	}
 
 	/** SYNC-18 · pasos 2 a 4 de `applyBatchIdempotent`, ya dentro del turno del log (AUD-18). */
@@ -922,6 +1195,11 @@ export class MotorTenantHub {
 		} catch { }
 	}
 
+	/**
+	 * A TODOS los sockets, también a los que aún no han saludado. Sólo para lo que no lleva datos
+	 * del negocio: la presencia y si hay Main (`main_online`, `main_offline`). Lo demás, por
+	 * `broadcastAuthed` o `broadcastRol`.
+	 */
 	private broadcast(obj: any, exceptDeviceId?: string) {
 		const msg = JSON.stringify(obj);
 		for (const ws of this.state.getWebSockets()) {
@@ -935,18 +1213,29 @@ export class MotorTenantHub {
 	}
 
 	/**
+	 * AUD-02 · ¿Puede recibir este socket lo que lleva datos del negocio? Sólo uno abierto y
+	 * autenticado; y si es de un `tpv`, sólo el de la Main (`esLaMain`). Se mira al entregar, sin
+	 * esperas: `vigente` es la tabla leída una vez para toda la difusión.
+	 */
+	private puedeRecibir(ws: WebSocket, a: WsAttachment | null, vigente: MainVigente): a is WsAttachment {
+		if (ws.readyState !== 1 || !a?.authed || a.fuera) return false;
+		return a.role !== "tpv" || this.esLaMain(a, vigente);
+	}
+
+	/**
 	 * Manda un mensaje solo a los sockets autenticados con un rol concreto.
 	 *
 	 * El rol sale del attachment (que lo fijó la BD central al autenticar, no una cabecera del
 	 * cliente), así que esto NO es cosmética: un aviso dirigido a la Main no puede acabar en las
-	 * Handy del local.
+	 * Handy del local. AUD-02: ni en un `tpv` que ya no es la Main (`puedeRecibir`).
 	 */
 	private broadcastRol(rol: Role, obj: any) {
 		const msg = JSON.stringify(obj);
+		const vigente = this.mainVigente();
 
 		for (const ws of this.state.getWebSockets()) {
 			const a = this.att(ws);
-			if (!a || !a.authed) continue;
+			if (!this.puedeRecibir(ws, a, vigente)) continue;
 			if (a.role !== rol) continue;
 
 			try {
@@ -957,10 +1246,11 @@ export class MotorTenantHub {
 
 	private broadcastAuthed(obj: any, exceptDeviceId?: string) {
 		const msg = JSON.stringify(obj);
+		const vigente = this.mainVigente();
 
 		for (const ws of this.state.getWebSockets()) {
 			const a = this.att(ws);
-			if (!a || !a.authed) continue;
+			if (!this.puedeRecibir(ws, a, vigente)) continue;
 			if (exceptDeviceId && a.deviceId === exceptDeviceId) continue;
 
 			try {
@@ -975,14 +1265,17 @@ export class MotorTenantHub {
 	 * una sesión reemplazada seguiría autorizando —o congelando— a las Handy. Al reemplazarla se le
 	 * quita además la autenticación en su attachment (`abrirWebSocket`), que sobrevive a la
 	 * hibernación aunque el estado del socket no fuera fiable al despertar.
+	 *
+	 * AUD-02: y del dispositivo que es la Main ahora (`esLaMain`), no de cualquier `tpv`.
 	 */
 	private mainsAbiertas(except?: WebSocket): WsAttachment[] {
 		const out: WsAttachment[] = [];
+		const vigente = this.mainVigente();
 		for (const ws of this.state.getWebSockets()) {
 			if (except && ws === except) continue;
 			if (ws.readyState !== 1) continue;
 			const a = this.att(ws);
-			if (a?.authed && a.role === "tpv") out.push(a);
+			if (a && this.esLaMain(a, vigente)) out.push(a);
 		}
 		return out;
 	}
@@ -1027,6 +1320,9 @@ export class MotorTenantHub {
 		},
 		exceptDeviceId?: string,
 	) {
+		// AUD-02: se entrega con lo que dice ahora la tabla (`broadcastAuthed`): de los `tpv`, sólo a la
+		// Main. La comprobación por actividad ya se ha hecho, si tocaba, en el mismo turno del log y
+		// antes de enviar lo que se difunde (`applyInternalCommandIdempotent`, `applyBatchIdempotent`).
 		this.broadcastAuthed(
 			{
 				type: "change",
@@ -1121,11 +1417,11 @@ export class MotorTenantHub {
 	}
 
 	avisarEmparejamiento(): void {
-		avisoDePairing(this.ctxRutas());
+		this.trasComprobarMain(() => avisoDePairing(this.ctxRutas()));
 	}
 
 	avisarReservasWeb(): void {
-		avisoDeReservasWeb(this.ctxRutas());
+		this.trasComprobarMain(() => avisoDeReservasWeb(this.ctxRutas()));
 	}
 
 	/** ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Ver `ctxCola`. */
@@ -1137,7 +1433,7 @@ export class MotorTenantHub {
 			broadcast: (obj, except) => this.broadcast(obj, except),
 			broadcastRol: (rol, obj) => this.broadcastRol(rol, obj),
 			liveSocketsFor: (deviceId, except) => this.liveSocketsFor(deviceId, except),
-			sessionGone: (ws, a) => this.sessionGone(ws, a),
+			cerrar: (ws, a, code, motivo) => this.cerrar(ws, a, code, motivo),
 			aceptarWebSocket: (ws, tags) => this.state.acceptWebSocket(ws, tags),
 			waitUntil: (p) => this.state.waitUntil(p),
 			touchLastSeen: (tenantId, deviceId, force) =>
@@ -1179,6 +1475,12 @@ export class MotorTenantHub {
 			touchLastSeen: (tenantId, deviceId, force) =>
 				this.touchLastSeen(tenantId, deviceId, force),
 			verifyHelloSigned: (params) => this.verifyHelloSigned(params),
+			esLaMain: (a) => this.esLaMain(a),
+			mainVigente: () => this.mainVigente().deviceId,
+			leerMain: (tenantId) => this.leerMain(tenantId),
+			comprobarMain: () => this.comprobarMain(),
+			cerrar: (ws, a, code, motivo) => this.cerrar(ws, a, code, motivo),
+			enTurnoDeEntrada: (trabajo) => this.enTurnoDeEntrada(trabajo),
 			isMainConnected: (except) => this.isMainConnected(except),
 			isMainRecovering: () => this.isMainRecovering(),
 			cuantasEnCola: () => this.cuantasEnCola(),
@@ -1195,10 +1497,10 @@ export class MotorTenantHub {
 	/**
 	 * Contabilidad de una sesión que se va: presencia + freeze. Se invoca desde `webSocketClose`
 	 * (cierre del cliente / caída de red) y TAMBIÉN de forma explícita en los cierres que inicia el
-	 * servidor (revoke), porque la documentación de Cloudflare no garantiza que `webSocketClose` se
-	 * dispare cuando el cierre lo provoca el propio DO. Es **idempotente y auto-inhibida**: si queda
-	 * otro socket vivo del mismo dispositivo no hace nada, y repetirla solo reemite señales que el
-	 * cliente ya trata como idempotentes.
+	 * servidor, todos por `cerrar`, porque la documentación de Cloudflare no garantiza que
+	 * `webSocketClose` se dispare cuando el cierre lo provoca el propio DO. Es **idempotente y
+	 * auto-inhibida**: si queda otro socket vivo del mismo dispositivo no hace nada, y repetirla solo
+	 * reemite señales que el cliente ya trata como idempotentes.
 	 */
 	private sessionGone(ws: WebSocket, a: WsAttachment): void {
 		const { deviceId } = a;
@@ -1230,15 +1532,14 @@ export class MotorTenantHub {
 	): Promise<void> {
 		const a = this.att(ws);
 		if (!a) return;
+		// AUD-02: como en `cerrar`, la sesión queda fuera antes de nada: lo que tuviera a medias (un
+		// saludo esperando a la base central, una escritura esperando turno) no sigue.
+		this.setAtt(ws, { ...a, authed: false, recovering: false, fuera: true });
 		this.sessionGone(ws, a);
 	}
 
 	async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
-		const a = this.att(ws);
-		try {
-			ws.close(1011, "ws_error");
-		} catch { }
 		// Cierre iniciado por el servidor → contabilizamos la salida nosotros (ver `sessionGone`).
-		if (a) this.sessionGone(ws, a);
+		this.cerrar(ws, this.att(ws), 1011, "ws_error");
 	}
 }

@@ -246,6 +246,21 @@ fn s(v: &Json) -> String {
     v.as_str().unwrap().to_string()
 }
 
+/// Un caso puede describir un rechazo (`"rechazo": "not_found"`): el comando no escribe y lo que se
+/// compara es que el otro lado tampoco. Si no lo dice, el comando tiene que ir bien.
+fn como_espera_el_caso<T: std::fmt::Debug>(e: &Json, r: tpv_application::error::AppResult<T>) {
+    match e["rechazo"].as_str() {
+        None => {
+            r.expect("el comando del caso");
+        }
+        Some("not_found") => assert!(
+            matches!(r, Err(tpv_application::error::AppError::NotFound(_))),
+            "se esperaba not_found: {r:?}"
+        ),
+        Some(otro) => panic!("rechazo desconocido en el caso: {otro}"),
+    }
+}
+
 /// Genera **un `#[tokio::test]` por caso** (en vez de un solo bucle): cada caso con su propia BD,
 /// que pasa o falla por su cuenta sin arrastrar a los demás. El identificador del test **es** el
 /// nombre del caso (`<modulo>__<caso>`), que también es la ruta de su fixture.
@@ -281,6 +296,7 @@ casos_de_contrato! {
     tareas__vaciar_papelera,
     tareas__marcar_finalizada,
     inventario__create_lote,
+    inventario__create_lote_id_existente,
     inventario__create_categoria,
     inventario__upsert_producto,
     inventario__delete_producto,
@@ -345,6 +361,9 @@ casos_de_contrato! {
     notificaciones__descartar,
     notificaciones__restaurar,
     notificaciones__eliminar,
+    notificaciones__marcar_leida_ajena,
+    notificaciones__descartar_ajena,
+    notificaciones__eliminar_restaurada,
     login__set_turno_partido,
     login__punch_entrada,
     login__punch_salida,
@@ -753,9 +772,10 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "notificaciones.marcar_leida" => {
             let repo = SqliteNotificacionesRepository::new(db.clone());
-            repo.marcar_leida(&s(&e["id_notificacion"]), &s(&e["id_usuario"]))
-                .await
-                .expect("marcar leida");
+            como_espera_el_caso(
+                e,
+                repo.marcar_leida(&s(&e["id_notificacion"]), &s(&e["id_usuario"])).await,
+            );
         }
         "notificaciones.marcar_leidas_batch" => {
             let repo = SqliteNotificacionesRepository::new(db.clone());
@@ -909,17 +929,27 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 .await
                 .expect("delete asignacion");
         }
+        // AUD-26: con el usuario que la toca (el de la sesión), como el worker.
         "notificaciones.descartar" => {
             let repo = SqliteNotificacionesRepository::new(db.clone());
-            repo.descartar(&s(&e["id_notificacion"])).await.expect("descartar");
+            como_espera_el_caso(
+                e,
+                repo.descartar(&s(&e["id_notificacion"]), &s(&e["id_usuario"])).await,
+            );
         }
         "notificaciones.restaurar" => {
             let repo = SqliteNotificacionesRepository::new(db.clone());
-            repo.restaurar(&s(&e["id_notificacion"])).await.expect("restaurar");
+            como_espera_el_caso(
+                e,
+                repo.restaurar(&s(&e["id_notificacion"]), &s(&e["id_usuario"])).await,
+            );
         }
         "notificaciones.eliminar" => {
             let repo = SqliteNotificacionesRepository::new(db.clone());
-            repo.eliminar(&s(&e["id_notificacion"])).await.expect("eliminar");
+            como_espera_el_caso(
+                e,
+                repo.eliminar(&s(&e["id_notificacion"]), &s(&e["id_usuario"])).await,
+            );
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

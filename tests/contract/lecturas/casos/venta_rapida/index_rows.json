@@ -1,0 +1,22 @@
+{
+  "descripcion": "Resumen de varios tickets de barra para el indice de 'Ver tickets': los nombres de sus productos sin repetir, en orden y unidos con un punto medio entre espacios (el separador es parte del resultado: es donde un lado puede unir con otra cosa), el numero de lineas y las unidades. com-a repite producto (sale una vez), lleva una linea suelta sin producto y una cantidad con decimales; com-vacia no tiene lineas y el id que no existe no esta: ninguno de los dos sale. com-otra tiene lineas pero no se pide. Es una lectura que va por POST (AUD-27): la lista de ids no cabe en una query.",
+  "lectura": "venta_rapida.index_rows",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-1', 'Cerveza', 300);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cafe', 'cat-1', 'Cafe', 150);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-a', 'BARRA', '2026-05-10 12:00:00', 'Abierta');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-b', 'BARRA', '2026-05-10 12:05:00', 'Abierta');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-vacia', 'BARRA', '2026-05-10 12:10:00', 'Abierta');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-otra', 'BARRA', '2026-05-10 12:15:00', 'Abierta');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-a1', 'com-a', 'prod-cerveza', 2, 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-a2', 'com-a', 'prod-cerveza', 1, 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-a3', 'com-a', 'prod-cafe', 1.5, 150);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-a4', 'com-a', NULL, 'Suelto', 1, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-b1', 'com-b', 'prod-cafe', 1, 150);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-o1', 'com-otra', 'prod-cerveza', 1, 300);"
+  ],
+  "entrada": {
+    "ids": ["com-b", "com-a", "com-vacia", "no-existe"]
+  }
+}

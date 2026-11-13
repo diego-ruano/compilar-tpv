@@ -9,6 +9,7 @@ import { toAppError } from "@tpv/client";
 
 import { queryClient } from "../../shared/lib/queryClient";
 import { limpiarCacheImagenes } from "../../shared/lib/imageUrl";
+import { useAuth } from "../../shared/stores/useAuth";
 import { useMode, type DeviceMode, type ModeStateValue } from "../../shared/stores/useMode";
 
 function isDeviceMode(value: unknown): value is DeviceMode | null {
@@ -68,6 +69,19 @@ export function useModoDispositivo(opciones: { alElegir: () => Promise<void> }) 
 		}
 	}
 
+	/**
+	 * AUD-23: el selector de modo sin tocar nada guardado, ni el modo del backend ni el vínculo de la
+	 * Handy. Lo decide lo que se elija después: «Handy» vuelve al vínculo guardado, «TPV» sigue el
+	 * camino de la activación y un código de otra Main lo sustituye. Desvincular es de
+	 * Configuración → Dispositivo, con administrador. La sesión se cierra: quien sale al selector
+	 * deja de trabajar, y elegir un modo la cerraría igual en Rust.
+	 */
+	function irAlSelector() {
+		setError(null);
+		useAuth.getState().logout();
+		setMode(null);
+	}
+
 	async function volverAlSelector() {
 		setOcupado(true);
 		setError(null);
@@ -85,5 +99,5 @@ export function useModoDispositivo(opciones: { alElegir: () => Promise<void> }) 
 		}
 	}
 
-	return { ocupado, error, elegir, volverAlSelector };
+	return { ocupado, error, elegir, irAlSelector, volverAlSelector };
 }

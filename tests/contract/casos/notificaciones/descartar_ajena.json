@@ -1,0 +1,18 @@
+{
+  "descripcion": "AUD-26: mandar a la papelera una notificacion dirigida a otro usuario. No cambia nada: el UPDATE lleva en su WHERE el destino (todos, el usuario o su rol) y el estado. La Main contesta not_found antes de escribir; el worker aplica la sentencia con la condicion y no toca ninguna fila.",
+  "comando": "notificaciones.descartar",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolPapeleraContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'a@a.com', 'x', 'Ana');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-2', 'rol-1', 'b@b.com', 'x', 'Bea');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('notif-de-bea', 'aviso', 'info', 'Solo para Bea', 'usuario', 'user-2', 'activa', '2026-01-01 10:00:00');"
+  ],
+  "entrada": {
+    "id_notificacion": "notif-de-bea",
+    "id_usuario": "user-1",
+    "rechazo": "not_found"
+  },
+  "snapshot": {
+    "Notificaciones": "SELECT ID_Notificacion, Estado FROM Notificaciones"
+  }
+}

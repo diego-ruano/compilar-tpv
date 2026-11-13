@@ -4,40 +4,37 @@ import { commands } from "@tpv/client";
 // API de notificaciones. En modo TPV/Main invoca los comandos Tauri contra el SQLite local; en
 // modo Handy los mismos comandos hablan por HTTP contra la nube (el repo lo resuelve el backend
 // según el modo). Las firmas no cambian entre modos.
+//
+// AUD-26: el usuario no viaja. Las notificaciones son las de quien ha iniciado sesión, y eso lo
+// sabe el backend: la pantalla no elige en nombre de quién se lee ni se marca.
 
 
 import type { NotificacionRow } from "@tpv/contracts";
 
 export type { NotificacionRow };
 
-/** Notificaciones visibles del usuario (activas y no caducadas). */
+/** Notificaciones visibles de quien ha iniciado sesión (activas y no caducadas). */
 export async function notificacionesListar(params: {
-  id_usuario: string;
   solo_no_leidas?: boolean;
 }): Promise<NotificacionRow[]> {
   const rows = await commands.notificacionesListar({
-      id_usuario: params.id_usuario,
       solo_no_leidas: params.solo_no_leidas ?? false,
     });
   return rows ?? [];
 }
 
-/** Nº de no leídas del usuario (para el badge de la campana). */
-export async function notificacionesNoLeidas(params: {
-  id_usuario: string;
-}): Promise<number> {
-  const n = await commands.notificacionesNoLeidas({ id_usuario: params.id_usuario });
+/** Nº de no leídas de quien ha iniciado sesión (para el badge de la campana). */
+export async function notificacionesNoLeidas(): Promise<number> {
+  const n = await commands.notificacionesNoLeidas();
   return Number(n ?? 0);
 }
 
-/** Marca una notificación como leída por el usuario. */
+/** Marca una notificación como leída por quien ha iniciado sesión. */
 export const notificacionesMarcarLeida = commands.notificacionesMarcarLeida;
 
-/** Marca todas las visibles del usuario como leídas. Devuelve cuántas marcó. */
-export async function notificacionesMarcarTodasLeidas(params: {
-  id_usuario: string;
-}): Promise<number> {
-  const n = await commands.notificacionesMarcarTodasLeidas({ id_usuario: params.id_usuario });
+/** Marca todas las visibles como leídas. Devuelve cuántas marcó. */
+export async function notificacionesMarcarTodasLeidas(): Promise<number> {
+  const n = await commands.notificacionesMarcarTodasLeidas();
   return Number(n ?? 0);
 }
 
@@ -47,11 +44,9 @@ export async function notificacionesMarcarTodasLeidas(params: {
  */
 export const notificacionesDescartar = commands.notificacionesDescartar;
 
-/** Contenido de la papelera del usuario (lo descartado que él puede ver). */
-export async function notificacionesPapelera(params: {
-  id_usuario: string;
-}): Promise<NotificacionRow[]> {
-  const rows = await commands.notificacionesPapelera({ id_usuario: params.id_usuario });
+/** Contenido de la papelera de quien ha iniciado sesión (lo descartado que él puede ver). */
+export async function notificacionesPapelera(): Promise<NotificacionRow[]> {
+  const rows = await commands.notificacionesPapelera();
   return rows ?? [];
 }
 

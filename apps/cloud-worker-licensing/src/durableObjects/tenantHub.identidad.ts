@@ -11,6 +11,9 @@
 //   · el rol lo dicta EXCLUSIVAMENTE la base central; la cabecera `x-role` del cliente no otorga
 //     nada (activación → 'tpv', pairing → 'handy').
 //   · el reto es de un solo uso, y quien lo consume es el llamante ANTES de llamar aquí.
+//   · el rol `tpv` no basta para ser la Main (AUD-02): lo es el `main_device_id` de la licencia
+//     viva del negocio (`mainDeLaLicencia`), y eso puede cambiar con la sesión abierta. Quién lo
+//     es ahora lo guarda el hub en su propio SQL (`tenantHub.main.ts`).
 
 import type { Client } from "@libsql/client/web";
 
@@ -69,6 +72,34 @@ export async function loadDeviceFromCentral(
 	const revoked = estaRevocado(row);
 
 	return { role, pubkeyB64, revoked };
+}
+
+/**
+ * AUD-02 · La Main de la licencia viva del negocio, o `null` si no la hay.
+ *
+ * El rol `tpv` de `devices` dice que el equipo se activó como Main, no que lo siga siendo: un
+ * traslado sólo cambia `licenses.main_device_id`, y la fila del equipo anterior se queda como
+ * estaba. Una licencia anulada no tiene Main; una caducada, sí: caducar no cierra el socket
+ * (docs/arquitectura/licencias.md). Un negocio tiene una licencia; si alguna vez hubiera más de
+ * una viva, manda la última que se tocó.
+ *
+ * Si la base central no contesta, lanza: qué hacer entonces lo decide quien llama.
+ */
+export async function mainDeLaLicencia(dbCentral: Client, tenantId: string): Promise<string | null> {
+	const r = await dbCentral.execute({
+		sql: `
+			SELECT main_device_id
+			FROM licenses
+			WHERE tenant_id=? AND main_device_id IS NOT NULL
+			  AND status <> 'revoked' AND disabled = 0
+			ORDER BY updated_at_ms DESC
+			LIMIT 1
+		`,
+		args: [tenantId],
+	});
+
+	const main = String((r.rows?.[0] as any)?.main_device_id ?? "").trim();
+	return main || null;
 }
 
 // SYNC-16: ya no se guarda en un Map del DO; el llamante lo adosa al socket (attachment) para

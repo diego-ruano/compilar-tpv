@@ -56,8 +56,9 @@ export type ActivateResponse = {
 	 */
 	fieldDek: string;
 	/**
-	 * La licencia estaba en otro equipo y se ha trasladado a éste (con el código del correo). La
-	 * base local de este equipo, si tiene algo, no vale: la Main la reconstruye desde la nube.
+	 * La licencia estaba en otro equipo y se ha trasladado a éste (con el código del correo), o es
+	 * una clave sin estrenar activada en un equipo que era la Main de otro negocio con licencia
+	 * (AUD-06). Es un aviso: la Main decide con el sello de su base, y con otro negocio la aparta.
 	 */
 	cambioDeEquipo: boolean;
 	/**

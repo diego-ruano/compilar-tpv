@@ -163,6 +163,92 @@ pub fn comprobar_concesion(
 }
 
 /* =========================================================
+   De quién es la base del equipo (AUD-06)
+========================================================= */
+
+/// Lo que dice una base (o una copia) de sí misma al leer su sello, `_Negocio`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Sello {
+    /// No lleva: es una base recién creada, o una anterior a los sellos.
+    Ninguno,
+    /// Lleva el de este negocio.
+    De(String),
+    /// No se ha podido leer: el fichero no es una base, o está dañado. No dice de quién es.
+    Ilegible,
+}
+
+impl Sello {
+    /// Lo leído de `_Negocio`. Un sello vacío no es un sello.
+    pub fn leido(valor: Option<&str>) -> Sello {
+        match valor.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(negocio) => Sello::De(negocio.to_string()),
+            None => Sello::Ninguno,
+        }
+    }
+}
+
+/// De quién es una base local, o una copia suya, frente al negocio de una licencia.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Procedencia {
+    /// Lleva el sello de ese negocio.
+    Suya,
+    /// No lleva sello.
+    SinSello,
+    /// Lleva el sello de otro negocio.
+    DeOtroNegocio,
+    /// No se ha podido leer: puede ser de cualquiera.
+    Desconocida,
+}
+
+/// AUD-06 · La única comparación entre una base y una licencia.
+pub fn procedencia(sello: &Sello, negocio: &str) -> Procedencia {
+    match sello {
+        Sello::Ninguno => Procedencia::SinSello,
+        Sello::Ilegible => Procedencia::Desconocida,
+        Sello::De(s) if s.trim() == negocio.trim() && !s.trim().is_empty() => Procedencia::Suya,
+        Sello::De(_) => Procedencia::DeOtroNegocio,
+    }
+}
+
+/// Qué se hace con la base del equipo para trabajar con la licencia de un negocio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueHacerConLaBase {
+    /// Es la de ese negocio: se usa.
+    Usar,
+    /// No dice de quién es: se sella con ese negocio y se usa.
+    Sellar,
+    /// Es de ese negocio (o no lo dice), pero la licencia viene de otro equipo, que ha seguido
+    /// trabajando: la base es de antes y se reconstruye desde la nube. Lo demás que hay en el
+    /// equipo se queda.
+    Reconstruir,
+    /// Es de otro negocio, o no se puede saber de quién es: no se usa. Se aparta entera, con todo lo
+    /// que ese negocio tiene en el equipo, y se trae de la nube la de la licencia. Al activar,
+    /// además, el TPV se reinicia: nada de lo que estaba en marcha con el negocio anterior sigue.
+    Apartar,
+}
+
+/// AUD-06 · La regla: **una base sólo se usa con la licencia de su negocio.**
+///
+/// Es la misma al abrir la base, al activar una licencia y al restaurar una copia, y sólo mira lo
+/// que la base dice de sí misma. `licencia_de_otro_equipo` lo sabe únicamente la activación, por
+/// el servidor (`cambioDeEquipo`); al abrir es `false`, porque de eso ya queda la marca de traslado.
+/// Que el servidor diga que la base no vale nunca hace falta para apartar la de otro negocio: ese
+/// aviso sólo sale en la primera activación y se pierde si la respuesta no llega. Y una base que no
+/// se deja leer nunca se da por «sin sello»: no consta de quién es, así que se aparta.
+pub fn que_hacer_con_la_base(
+    sello: &Sello,
+    negocio: &str,
+    licencia_de_otro_equipo: bool,
+) -> QueHacerConLaBase {
+    match (procedencia(sello, negocio), licencia_de_otro_equipo) {
+        (Procedencia::DeOtroNegocio | Procedencia::Desconocida, _) => QueHacerConLaBase::Apartar,
+        (_, true) => QueHacerConLaBase::Reconstruir,
+        (Procedencia::SinSello, false) => QueHacerConLaBase::Sellar,
+        (Procedencia::Suya, false) => QueHacerConLaBase::Usar,
+    }
+}
+
+/* =========================================================
    Estado firmado (lo que decide el gate)
 ========================================================= */
 
@@ -718,6 +804,42 @@ mod tests {
         let s = SolicitudActivacion::para_sumar(" K ".into()).expect("válida");
         assert_eq!(s.clave, "K");
         assert!(s.solo_sumar);
+    }
+
+    // ── AUD-06 · una base sólo se usa con la licencia de su negocio ─────────────────────────
+
+    #[test]
+    fn la_procedencia_la_dice_el_sello() {
+        let de = |s: &str| Sello::De(s.into());
+        assert_eq!(procedencia(&de("a"), "a"), Procedencia::Suya);
+        assert_eq!(procedencia(&de("a"), " a "), Procedencia::Suya);
+        assert_eq!(procedencia(&de("a"), "x"), Procedencia::DeOtroNegocio);
+        assert_eq!(procedencia(&Sello::Ninguno, "x"), Procedencia::SinSello);
+        assert_eq!(procedencia(&Sello::Ilegible, "x"), Procedencia::Desconocida);
+        // Un sello vacío no dice nada: nunca coincide con una licencia sin negocio.
+        assert_eq!(Sello::leido(Some("  ")), Sello::Ninguno);
+        assert_eq!(Sello::leido(Some(" a ")), de("a"));
+        assert_eq!(procedencia(&de(""), ""), Procedencia::DeOtroNegocio);
+    }
+
+    #[test]
+    fn una_base_solo_se_usa_con_la_licencia_de_su_negocio() {
+        use QueHacerConLaBase::{Apartar, Reconstruir, Sellar, Usar};
+        let de = |s: &str| Sello::De(s.into());
+
+        // La base del negocio de la licencia: se usa; si la licencia viene de otro equipo, es de antes.
+        assert_eq!(que_hacer_con_la_base(&de("a"), "a", false), Usar);
+        assert_eq!(que_hacer_con_la_base(&de("a"), "a", true), Reconstruir);
+        // Sin sello (recién creada, o anterior a los sellos): se sella, o se reconstruye sellándola.
+        assert_eq!(que_hacer_con_la_base(&Sello::Ninguno, "a", false), Sellar);
+        assert_eq!(que_hacer_con_la_base(&Sello::Ninguno, "a", true), Reconstruir);
+        // De otro negocio: se aparta, lo diga el servidor o no (el reintento de una respuesta
+        // perdida no lo dice, y un estreno que falló a medias tampoco).
+        assert_eq!(que_hacer_con_la_base(&de("a"), "x", false), Apartar);
+        assert_eq!(que_hacer_con_la_base(&de("a"), "x", true), Apartar);
+        // Ilegible: no consta de quién es, y nunca se trata como «sin sello».
+        assert_eq!(que_hacer_con_la_base(&Sello::Ilegible, "a", false), Apartar);
+        assert_eq!(que_hacer_con_la_base(&Sello::Ilegible, "a", true), Apartar);
     }
 }
 

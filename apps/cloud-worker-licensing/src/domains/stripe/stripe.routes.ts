@@ -30,18 +30,21 @@
 //   · reembolso PARCIAL → no toca ninguna licencia; queda auditado (es un ajuste, no una
 //                         devolución: Stripe no dice de cuál de las licencias, y eso se decide a mano)
 //   · disputa abierta   → se revierte ya, que el dinero ya no está
-//   · disputa GANADA    → se deshace la reversión
+//   · disputa GANADA    → se deshace la reversión que hizo ella, y sólo ésa (AUD-08)
 
 import { Hono } from "hono";
 import { capturarError } from "../../observability/errors";
 
 import type { Env } from "../../env";
+import { avisarCambioDeLicencia, espacioDelHub } from "../../lib/hub";
+import { topeAnonimo } from "../../lib/validacion";
 import { enTransaccion, getDb, type Sql } from "../../server/db";
 import { sha256Hex } from "../../server/crypto";
 import {
 	attachStripeSession,
 	auditAdmin,
 	clearLicensePaymentReversal,
+	DISPUTA_SIN_REVOCAR,
 	extendLicense,
 	getLicenseById,
 	getLicenseByStripeIntent,
@@ -60,7 +63,7 @@ import {
 } from "../../server/licenseStore";
 import type { LicenseRow, LicensePaymentRow } from "../../server/licenseStore";
 import { sendLicenseKeysEmail } from "../licensing/licenseEmails";
-import { assertEnv } from "../licensing/licensing.helpers";
+import { assertEnv, toBool01 } from "../licensing/licensing.helpers";
 import {
 	customerAddressJsonFromSession,
 	customerBusinessNameFromSession,
@@ -76,6 +79,13 @@ import {
 } from "./stripe.helpers";
 
 export const stripeRoutes = new Hono<{ Bindings: Env }>();
+
+// AUD-34: el cuerpo se lee y pasa por el HMAC antes de saber si lo manda Stripe; la forma y la hora
+// de la cabecera las escribe quien llama. 4 MiB: el evento más grande de los suscritos es una disputa
+// cerrada con sus pruebas al máximo (150 000 caracteres) y 50 metadatos al máximo (clave de 40 y valor
+// de 500); con cada carácter fuera del plano básico y escapado en `\uXXXX\uXXXX` (12 bytes) son unos
+// 2,1 MB más el resto del evento. Lo vigila `test/topeAnonimo.test.ts`.
+stripeRoutes.use("/webhook", topeAnonimo(4 * 1024 * 1024));
 
 /** Los eventos que nos importan. Un pago diferido (SEPA, etc.) llega por el segundo. */
 const EVENTOS_DE_PAGO = new Set([
@@ -148,6 +158,7 @@ stripeRoutes.post("/webhook", async (c) => {
 		try {
 			const resultado = await revertir(db, event);
 			await markWebhookProcessed(db, eventId, true);
+			await avisarDeLasAnuladas(env, db, resultado);
 			return c.json({ ok: true, received: true, ...resultado });
 		} catch (e: any) {
 			capturarError(e, "stripe.reversal");
@@ -180,6 +191,39 @@ stripeRoutes.post("/webhook", async (c) => {
 		return c.json({ ok: false, error: "fulfillment_failed" }, 500);
 	}
 });
+
+/**
+ * AUD-02 · Un alta devuelta deja la licencia anulada: se avisa al `TenantHub` del negocio, que vuelve
+ * a leer quién es la Main y le cierra el socket a la que ya no lo es, igual que al anularla desde la
+ * administración (`admin.routes.ts`). Sin esto seguía replicando hasta que se cayera su conexión o
+ * lo notara el job `licencia`, hasta seis horas después.
+ *
+ * Va con la reversión ya confirmada y nunca la hace fallar: es best-effort, y un 500 aquí haría que
+ * Stripe reintentara un evento ya aplicado. Si el aviso no llega, el `TenantHub` lo corrige en cuanto
+ * haya actividad en el negocio, como mucho un minuto después de su última lectura de la licencia.
+ * Una renovación devuelta no avisa: caducar no empuja.
+ */
+async function avisarDeLasAnuladas(
+	env: Env,
+	db: ReturnType<typeof getDb>,
+	resultado: Record<string, unknown>,
+): Promise<void> {
+	const licencias = Array.isArray(resultado.licencias)
+		? (resultado.licencias as { license_id: string; accion: string }[])
+		: [];
+
+	for (const { license_id, accion } of licencias) {
+		if (accion !== "revoked") continue;
+		try {
+			const lic = await getLicenseById(db, license_id);
+			if (!lic) continue;
+			// Una licencia que no llegó a activarse no tiene negocio ni Main: no hay a quién avisar.
+			await avisarCambioDeLicencia(espacioDelHub(env), String(lic.tenant_id || ""));
+		} catch (e) {
+			capturarError(e, "stripe.notify_hub");
+		}
+	}
+}
 
 /** Qué ha hecho `cumplir` con una sesión. Lo leen los tests. */
 export type Cumplimiento =
@@ -353,7 +397,7 @@ function diasActivada(license: LicenseRow): number | null {
 /**
  * Deshace los cobros de un cargo: los de todas las licencias de la compra (RI-52). Una renovación
  * devuelta solo pierde los meses que añadió; un alta devuelta revoca la licencia (el cliente no se
- * queda con el producto).
+ * queda con el producto), salvo que ya estuviera revocada (AUD-08).
  */
 async function revertirCobros(
 	db: Sql,
@@ -381,27 +425,31 @@ async function revertirCobros(
 		return { reversed: false, reason: "already_reversed", license_id: cobros[0].license.license_id };
 	}
 
-	const licencias: { license_id: string; accion: "shortened" | "revoked" }[] = [];
+	const licencias: { license_id: string; accion: "shortened" | "revoked" | "already_revoked" }[] = [];
 	for (const { license, pago } of pendientes) {
 		const esRenovacion = pago?.kind === "renewal";
+		// AUD-08: un alta que ya estaba revocada (a mano, o tras el reembolso parcial de una compra
+		// de varias) no la revoca esta reversión, y su cobro no se marca como revocado por la
+		// disputa: si no, ganarla la resucitaría.
+		const yaRevocada = !esRenovacion && (license.status === "revoked" || toBool01(license.disabled));
 		let expiresAtMs: number | null = null;
 
 		if (esRenovacion) {
 			expiresAtMs = await shortenLicense(db, license.license_id, pago!.term_months);
-		} else {
+		} else if (!yaRevocada) {
 			await revokeLicense(db, license.license_id);
 		}
 
 		if (pago) {
 			await markLicensePaymentReversed(db, pago.payment_id, {
-				reason: rev.reason,
+				reason: yaRevocada && rev.reason === "dispute" ? DISPUTA_SIN_REVOCAR : rev.reason,
 				eventUid: rev.eventUid,
 			});
 		}
 
 		await auditAdmin(db, rev.reason === "dispute" ? "dispute" : "refund", license.license_id, {
 			event_uid: rev.eventUid,
-			accion: esRenovacion ? "meses_restados" : "revocada",
+			accion: esRenovacion ? "meses_restados" : yaRevocada ? "ya_revocada" : "revocada",
 			term_months: pago?.term_months ?? null,
 			expires_at_ms: expiresAtMs,
 			// Si esto sale alto, el reembolso se emitió fuera de la política de 7 días.
@@ -409,7 +457,10 @@ async function revertirCobros(
 			payment_intent: String(obj?.payment_intent || "") || null,
 		});
 
-		licencias.push({ license_id: license.license_id, accion: esRenovacion ? "shortened" : "revoked" });
+		licencias.push({
+			license_id: license.license_id,
+			accion: esRenovacion ? "shortened" : yaRevocada ? "already_revoked" : "revoked",
+		});
 	}
 
 	return {
@@ -435,7 +486,17 @@ async function restaurarCobros(
 
 	// Solo se deshace lo que revirtió ESTA disputa. Si una licencia se revocó a mano por otro
 	// motivo, ganar la disputa no es razón para resucitarla.
-	const aRestaurar = cobros.filter((c) => !c.pago || c.pago.reversed_reason === "dispute");
+	//
+	// AUD-08: por eso sólo vuelve lo marcado `dispute`. Lo que ya estaba revocado al abrirse, o se
+	// revocó a mano mientras seguía abierta (`DISPUTA_SIN_REVOCAR`), sólo pierde la marca: el dinero
+	// ha vuelto, pero la revocación es del operador. Y una licencia sin cobro registrado (anterior a
+	// LIC-07) no se toca: sin él no se sabe quién la revocó; si fue la disputa, se desrevoca a mano.
+	for (const { pago } of cobros) {
+		if (pago?.reversed_reason === DISPUTA_SIN_REVOCAR) {
+			await clearLicensePaymentReversal(db, pago.payment_id);
+		}
+	}
+	const aRestaurar = cobros.filter((c) => c.pago?.reversed_reason === "dispute");
 	if (aRestaurar.length === 0) return { restored: false, reason: "not_reversed_by_dispute" };
 
 	const restauradas: string[] = [];
@@ -487,7 +548,8 @@ async function decidirReversion(db: Sql, event: any): Promise<Record<string, unk
 		// toca. Queda auditado para que se vea en el histórico del cliente.
 		//
 		// RI-52: con varias licencias en la compra, Stripe tampoco dice cuál se devuelve. Se audita
-		// con todas, para que quien emitió el reembolso revoque la que toque desde administración.
+		// con todas, para que quien emitió el reembolso revoque o acorte la que toque desde
+		// administración (licencias.md, «Reembolso parcial: lo que se hace a mano»).
 		if (total > 0 && devuelto < total) {
 			const cobros = await localizarCobros(db, obj);
 			await auditAdmin(db, "refund", cobros[0]?.license.license_id ?? null, {

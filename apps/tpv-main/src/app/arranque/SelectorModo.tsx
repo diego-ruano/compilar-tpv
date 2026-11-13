@@ -17,12 +17,15 @@ export default function SelectorModo({
 	business_name,
 	ocupado,
 	error,
+	handyVinculada,
 	onElegir,
 }: {
 	logoSrc: string;
 	business_name: string | null;
 	ocupado: boolean;
 	error: string | null;
+	/** AUD-23: el equipo guarda un vínculo de Handy, y elegir «Handy» vuelve a él sin código. */
+	handyVinculada: boolean;
 	onElegir: (modo: DeviceMode) => Promise<void>;
 }) {
 	return (
@@ -117,7 +120,8 @@ export default function SelectorModo({
 							<h2 className="mt-5 text-xl font-bold text-fg">Handy</h2>
 							<p className="mt-2 text-sm leading-relaxed text-fg-muted">
 								Un dispositivo para camareros conectado al TPV
-								principal. Necesitarás vincularlo después.
+								principal.{" "}
+								{handyVinculada ? "Vuelve a la vinculación de este equipo." : "Necesitarás vincularlo después."}
 							</p>
 
 							<ul className="mt-5 space-y-2.5 text-sm text-fg-muted">

@@ -56,9 +56,18 @@ pub fn ahora_ms() -> i64 {
 
 /// Manda la petición y anota lo que su respuesta diga de la hora. Es el sustituto de `.send()` en
 /// todo lo que habla con el worker: una respuesta que no se anota es una medida que se tira.
+///
+/// AUD-28 — el error que devuelve no lleva la URL. reqwest la añade a su texto («error sending
+/// request for url (…)») con la query entera, y quien llama mete ese texto en un mensaje que sale
+/// del equipo (Axiom, Sentry). Desde AUD-27 en la query sólo viajan identificadores, fechas y
+/// filtros, pero antes llevaba el teléfono y el correo de la búsqueda de un cliente, codificados de
+/// forma que el filtro de datos personales no los reconoce: lo que viaje en una URL no tiene por qué
+/// salir del equipo con su error. Se quita aquí y no en cada llamada, para que nadie tenga que
+/// acordarse. Tampoco se deja la ruta sin la query: quien registra el fallo ya sabe qué estaba
+/// pidiendo, y nada impide que una ruta lleve un texto.
 pub async fn enviar(peticion: RequestBuilder) -> reqwest::Result<Response> {
     let enviada = reloj_del_sistema_ms();
-    let resp = peticion.send().await?;
+    let resp = peticion.send().await.map_err(reqwest::Error::without_url)?;
     anotar_respuesta(resp.headers(), enviada, reloj_del_sistema_ms());
     Ok(resp)
 }
@@ -186,6 +195,37 @@ mod tests {
     fn reconoce_los_dos_rechazos_por_la_hora() {
         assert!(es_rechazo_por_reloj(401, r#"{"ok":false,"error":"device_ts_out_of_range"}"#));
         assert!(es_rechazo_por_reloj(401, r#"{"ok":false,"error":"timestamp_out_of_range"}"#));
+    }
+
+    /// Sondea una vez un futuro que se resuelve sin esperar a nadie: sin runtime y sin red.
+    fn resolver<F: std::future::Future>(futuro: F) -> F::Output {
+        let mut futuro = std::pin::pin!(futuro);
+        let mut contexto = std::task::Context::from_waker(std::task::Waker::noop());
+        match futuro.as_mut().poll(&mut contexto) {
+            std::task::Poll::Ready(salida) => salida,
+            std::task::Poll::Pending => panic!("el envío tenía que fallar sin salir a la red"),
+        }
+    }
+
+    /// AUD-28: el error de `enviar` no dice adónde iba la petición. Una dirección sin host no sale a
+    /// la red: reqwest la rechaza al enviarla y pone en ese error la URL entera, con su query, igual
+    /// que en un corte o en un tiempo agotado.
+    #[test]
+    fn un_envio_que_falla_no_dice_adonde_iba() {
+        const URL: &str =
+            "tpv:/v1/reservas/buscar-cliente?telefono=%2B34+612+345+678&email=ana.prueba%40example.com";
+        let cliente = reqwest::Client::new();
+
+        // El control: sin pasar por `enviar`, la query está en el texto del error.
+        let directo = resolver(cliente.get(URL).send()).expect_err("sin host no se envía");
+        assert!(directo.to_string().contains("telefono=%2B34+612+345+678"), "{directo}");
+
+        let e = resolver(enviar(cliente.get(URL))).expect_err("sin host no se envía");
+        assert!(e.url().is_none(), "{e:?}");
+        let texto = e.to_string();
+        for dato in ["telefono", "612", "%2B34", "email", "%40", "example.com", "buscar-cliente"] {
+            assert!(!texto.contains(dato), "{dato}: {texto}");
+        }
     }
 
     /// Repetir tiene que reservarse a la hora: por el mismo transporte viaja el login de la Handy,

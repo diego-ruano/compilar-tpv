@@ -22,6 +22,7 @@ import * as z from "zod";
 import { textoObligatorio } from "../../lib/validacion";
 import { sanitizeB64 } from "./pairing.firma";
 import { b64ToBytes } from "../../server/utils/base64";
+import { TOPE_CLAVE_B64, TOPE_FIRMA_B64 } from "../../server/utils/ed25519";
 
 /** 32 bytes en base64, normalizados. Es lo que hacía `normalizeEd25519PubkeyB64`. */
 function esClaveEd25519(b64: string): boolean {
@@ -37,10 +38,19 @@ const codigoDeSeisCifras = z
 	.trim()
 	.regex(/^\d{6}$/, { message: "invalid_pair_code" });
 
+// AUD-33: la firma y la clave pública son `textoObligatorio` con su tope delante del recorte: el
+// `.max()` mira la cadena tal como llega, así que un relleno de espacios no cuela una más larga. zod
+// ejecuta las comprobaciones en el orden en que se escriben.
+
 /** La prueba de posesión que acompaña a `fetch-token` y a `cancel`. */
 const pruebaDelReclamante = {
 	nonceB64: textoObligatorio("missing_proof"),
-	sigB64: textoObligatorio("missing_proof"),
+	// Una firma son 88 caracteres. Más larga no llega a `sanitizeB64` ni a la base.
+	sigB64: z
+		.string({ message: "missing_proof" })
+		.max(TOPE_FIRMA_B64, { message: "missing_proof" })
+		.trim()
+		.min(1, { message: "missing_proof" }),
 	ts: z.coerce.number({ message: "missing_proof" }).refine((n) => n > 0, { message: "missing_proof" }),
 };
 
@@ -51,7 +61,13 @@ export const claimSchema = z.object({
 	// aprobación manual de la Main (ver `pairing.handy.ts`).
 	pairSecret: z.string().trim().optional().default(""),
 	deviceId: textoObligatorio("missing_deviceId"),
-	devicePubKey: textoObligatorio("missing_devicePubKey")
+	// El tope va también DELANTE del `transform`. Con cualquier fallo antes, zod no lo llama: una clave
+	// de 44 caracteres pasa, y un cuerpo de comillas o de espacios no llega a `sanitizeB64`.
+	devicePubKey: z
+		.string({ message: "missing_devicePubKey" })
+		.max(TOPE_CLAVE_B64, { message: "invalid_devicePubKey" })
+		.trim()
+		.min(1, { message: "missing_devicePubKey" })
 		.transform(sanitizeB64)
 		.refine(esClaveEd25519, { message: "invalid_devicePubKey" }),
 	deviceName: z.string().trim().optional().default(""),

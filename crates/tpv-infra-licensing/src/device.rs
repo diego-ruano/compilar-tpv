@@ -22,6 +22,23 @@ const KEY_HANDY_TOKEN: &str = "handy-token";
 const KEY_HANDY_TENANT: &str = "handy-tenant-id";
 /// DEK del tenant para el cifrado de la PII del personal (TRAB-03).
 const KEY_FIELD_DEK: &str = "field-dek";
+/// AUD-06 · Las de una licencia de otro negocio que espera al arranque siguiente (`lib.rs`,
+/// «Licencia pendiente»). Entradas aparte: guardarlas no toca las vigentes.
+pub(crate) const KEY_LICENSE_TOKEN_PENDIENTE: &str = "license-token-pendiente";
+pub(crate) const KEY_FIELD_DEK_PENDIENTE: &str = "field-dek-pendiente";
+pub(crate) const KEY_LICENSE_TOKEN_VIGENTE: &str = KEY_LICENSE_TOKEN;
+pub(crate) const KEY_FIELD_DEK_VIGENTE: &str = KEY_FIELD_DEK;
+
+/// AUD-06 · Acceso a una entrada del almacén de la licencia (`tpv-auth`), para la licencia pendiente.
+pub(crate) fn secreto_leer(clave: &str) -> Result<Option<String>, String> {
+    secret_store::get(SVC_AUTH, clave).map_err(|e| e.to_string())
+}
+pub(crate) fn secreto_guardar(clave: &str, valor: &str) -> Result<(), String> {
+    secret_store::set(SVC_AUTH, clave, valor)
+}
+pub(crate) fn secreto_borrar(clave: &str) -> Result<(), String> {
+    secret_store::delete(SVC_AUTH, clave)
+}
 
 pub fn sha256_hex(s: &str) -> String {
     sha256_hex_bytes(s.as_bytes())
@@ -336,7 +353,15 @@ pub fn handy_clear_token() -> Result<(), String> {
 }
 
 pub fn handy_get_tenant() -> Result<Option<String>, String> {
-    match secret_store::get(SVC_AUTH, KEY_HANDY_TENANT) {
+    handy_tenant_en(&DelSistema)
+}
+
+/// AUD-23: `None` es que no hay vínculo, y sólo se dice cuando consta. Que el almacén no conteste
+/// es un error: tomarlo por «sin vínculo» enseñaba a una Handy vinculada la pantalla de emparejar.
+/// Lo ilegible cuenta como ausente, como en la identidad (RI-72): no se va a poder leer nunca, y
+/// lo que lo arregla es vincularla de nuevo.
+fn handy_tenant_en(almacen: &impl Almacen) -> Result<Option<String>, String> {
+    match almacen.get(SVC_AUTH, KEY_HANDY_TENANT) {
         Ok(Some(v)) => {
             let tenant_id = v.trim().to_string();
             if tenant_id.is_empty() {
@@ -345,7 +370,12 @@ pub fn handy_get_tenant() -> Result<Option<String>, String> {
                 Ok(Some(tenant_id))
             }
         }
-        _ => Ok(None),
+        Ok(None) => Ok(None),
+        Err(ErrorSecreto::Ilegible(e)) => {
+            tracing::warn!("[vinculación] el negocio de la Handy no se puede descifrar en este equipo ({e})");
+            Ok(None)
+        }
+        Err(e @ ErrorSecreto::NoDisponible(_)) => Err(e.to_string()),
     }
 }
 
@@ -355,23 +385,43 @@ pub fn handy_get_tenant() -> Result<Option<String>, String> {
    el almacén de secretos del sistema, NUNCA en `license_state.json` ni en la base de datos:
    guardarla junto al dato cifrado no protegería de nada. */
 
-pub fn get_field_dek() -> Result<Option<String>, String> {
+/// AUD-06 · La DEK del negocio `negocio`, si la guardada es suya.
+///
+/// Se guarda ligada a su negocio (`envolver_dek`), y sólo se entrega para ése: con la licencia de
+/// otro negocio no hay clave, y se opera sin cifrado antes que cifrar o descifrar con la ajena. Una
+/// guardada antes de ligarlas no dice de quién es y tampoco se entrega: vuelve con la activación.
+pub fn get_field_dek_de(negocio: &str) -> Result<Option<String>, String> {
     match secret_store::get(SVC_AUTH, KEY_FIELD_DEK) {
-        Ok(Some(v)) => {
-            let v = v.trim().to_string();
-            Ok(if v.is_empty() { None } else { Some(v) })
-        }
+        Ok(Some(v)) => Ok(dek_del_negocio(&v, negocio)),
         Ok(None) => Ok(None),
         Err(e) => Err(e.to_string()),
     }
 }
 
-pub fn set_field_dek(dek_b64: &str) -> Result<(), String> {
-    let dek = dek_b64.trim();
+/// AUD-06 · Guarda la DEK de `negocio`, ligada a él.
+pub fn set_field_dek_de(negocio: &str, dek_b64: &str) -> Result<(), String> {
+    let guardada = envolver_dek(negocio, dek_b64)?;
+    secret_store::set(SVC_AUTH, KEY_FIELD_DEK, &guardada)
+}
+
+/// AUD-06 · Lo que se guarda en el almacén: la DEK con el negocio al que pertenece.
+pub fn envolver_dek(negocio: &str, dek_b64: &str) -> Result<String, String> {
+    let (negocio, dek) = (negocio.trim(), dek_b64.trim());
+    if negocio.is_empty() {
+        return Err("field_dek sin negocio".into());
+    }
     if dek.is_empty() {
         return Err("field_dek vacía".into());
     }
-    secret_store::set(SVC_AUTH, KEY_FIELD_DEK, dek)
+    Ok(serde_json::json!({ "negocio": negocio, "dek": dek }).to_string())
+}
+
+/// AUD-06 · La DEK de lo guardado, sólo si es de `negocio`.
+pub fn dek_del_negocio(guardada: &str, negocio: &str) -> Option<String> {
+    let valor: serde_json::Value = serde_json::from_str(guardada.trim()).ok()?;
+    let de = valor.get("negocio")?.as_str()?.trim();
+    let dek = valor.get("dek")?.as_str()?.trim();
+    (!de.is_empty() && de == negocio.trim() && !dek.is_empty()).then(|| dek.to_string())
 }
 
 pub fn clear_field_dek() -> Result<(), String> {
@@ -506,6 +556,25 @@ mod tests {
         let a = AlmacenFalso::con(SVC_DEVICE_KEY, "d1", "no-es-una-clave");
         assert!(keypair_en(&a, "d1", true).is_err());
         assert_eq!(*a.escrituras.borrow(), 0);
+    }
+
+    /// AUD-23: con el almacén sin contestar, la vinculación de la Handy es un error, no «no hay».
+    #[test]
+    fn si_el_almacen_no_contesta_la_vinculacion_no_cuenta_como_ausente() {
+        let a = AlmacenFalso::con(SVC_AUTH, KEY_HANDY_TENANT, "tenant-1").fallando(no_disponible());
+        let e = handy_tenant_en(&a).unwrap_err();
+        assert!(e.contains("no disponible"), "{e}");
+        assert_eq!(a.valor(SVC_AUTH, KEY_HANDY_TENANT).as_deref(), Some("tenant-1"));
+    }
+
+    #[test]
+    fn la_vinculacion_guardada_se_lee_y_sin_ella_es_none() {
+        let a = AlmacenFalso::con(SVC_AUTH, KEY_HANDY_TENANT, "  tenant-1 ");
+        assert_eq!(handy_tenant_en(&a).unwrap().as_deref(), Some("tenant-1"));
+        assert_eq!(handy_tenant_en(&AlmacenFalso::default()).unwrap(), None);
+        assert_eq!(handy_tenant_en(&AlmacenFalso::con(SVC_AUTH, KEY_HANDY_TENANT, "  ")).unwrap(), None);
+        // La copia de Android restaurada en otro teléfono: no se va a poder leer nunca.
+        assert_eq!(handy_tenant_en(&AlmacenFalso::default().fallando(ilegible())).unwrap(), None);
     }
 
     /// Un JWT de mentira con el `exp` que se le pida. No lleva firma válida a propósito: quien
@@ -706,5 +775,29 @@ mod tests_retos {
         for n in ["", "DEVICE_PROOF\n1", "AAAA", &B64.encode([1u8; 33])] {
             assert!(validar_reto(n).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_dek_por_negocio {
+    //! AUD-06 · Sólo el envoltorio, en memoria: el almacén de secretos no se toca.
+    use super::*;
+
+    #[test]
+    fn la_dek_solo_se_entrega_a_su_negocio() {
+        let guardada = envolver_dek("negocio-a", " clave-de-a ").unwrap();
+        assert_eq!(dek_del_negocio(&guardada, "negocio-a").as_deref(), Some("clave-de-a"));
+        assert_eq!(dek_del_negocio(&guardada, "negocio-x"), None, "nunca la de otro negocio");
+        assert_eq!(dek_del_negocio(&guardada, ""), None);
+    }
+
+    #[test]
+    fn una_dek_que_no_dice_de_quien_es_no_se_entrega() {
+        // La de antes de ligarlas: la clave tal cual.
+        assert_eq!(dek_del_negocio("Y2xhdmUtZGUtYW50ZXM=", "negocio-a"), None);
+        assert_eq!(dek_del_negocio(r#"{"dek":"x"}"#, "negocio-a"), None);
+        assert_eq!(dek_del_negocio(r#"{"negocio":"negocio-a","dek":""}"#, "negocio-a"), None);
+        assert!(envolver_dek("", "x").is_err());
+        assert!(envolver_dek("negocio-a", " ").is_err());
     }
 }

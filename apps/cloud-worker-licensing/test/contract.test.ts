@@ -146,6 +146,8 @@ import casoTareaFinalizar from "../../../tests/contract/casos/tareas/marcar_fina
 import goldenTareaFinalizar from "../../../tests/contract/golden/tareas/marcar_finalizada.json";
 import casoInvCreateLote from "../../../tests/contract/casos/inventario/create_lote.json";
 import goldenInvCreateLote from "../../../tests/contract/golden/inventario/create_lote.json";
+import casoInvCreateLoteExistente from "../../../tests/contract/casos/inventario/create_lote_id_existente.json";
+import goldenInvCreateLoteExistente from "../../../tests/contract/golden/inventario/create_lote_id_existente.json";
 import casoInvCategoria from "../../../tests/contract/casos/inventario/create_categoria.json";
 import goldenInvCategoria from "../../../tests/contract/golden/inventario/create_categoria.json";
 import casoInvUpsertProd from "../../../tests/contract/casos/inventario/upsert_producto.json";
@@ -272,6 +274,12 @@ import casoNotifRestaurar from "../../../tests/contract/casos/notificaciones/res
 import goldenNotifRestaurar from "../../../tests/contract/golden/notificaciones/restaurar.json";
 import casoNotifEliminar from "../../../tests/contract/casos/notificaciones/eliminar.json";
 import goldenNotifEliminar from "../../../tests/contract/golden/notificaciones/eliminar.json";
+import casoNotifLeidaAjena from "../../../tests/contract/casos/notificaciones/marcar_leida_ajena.json";
+import goldenNotifLeidaAjena from "../../../tests/contract/golden/notificaciones/marcar_leida_ajena.json";
+import casoNotifDescartarAjena from "../../../tests/contract/casos/notificaciones/descartar_ajena.json";
+import goldenNotifDescartarAjena from "../../../tests/contract/golden/notificaciones/descartar_ajena.json";
+import casoNotifEliminarRestaurada from "../../../tests/contract/casos/notificaciones/eliminar_restaurada.json";
+import goldenNotifEliminarRestaurada from "../../../tests/contract/golden/notificaciones/eliminar_restaurada.json";
 import casoNotifResolver from "../../../tests/contract/casos/notificaciones/resolver_por_clave.json";
 import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/resolver_por_clave.json";
 import casoHorariosCopiar from "../../../tests/contract/casos/horarios/copiar_semana.json";
@@ -312,6 +320,11 @@ const CASOS = [
 	{ nombre: "tareas_vaciar_papelera", caso: casoTareaVaciar, golden: goldenTareaVaciar },
 	{ nombre: "tareas_marcar_finalizada", caso: casoTareaFinalizar, golden: goldenTareaFinalizar },
 	{ nombre: "inventario_create_lote", caso: casoInvCreateLote, golden: goldenInvCreateLote },
+	{
+		nombre: "inventario_create_lote_id_existente",
+		caso: casoInvCreateLoteExistente,
+		golden: goldenInvCreateLoteExistente,
+	},
 	{ nombre: "inventario_create_categoria", caso: casoInvCategoria, golden: goldenInvCategoria },
 	{ nombre: "inventario_upsert_producto", caso: casoInvUpsertProd, golden: goldenInvUpsertProd },
 	{ nombre: "inventario_delete_producto", caso: casoInvDeleteProd, golden: goldenInvDeleteProd },
@@ -396,6 +409,13 @@ const CASOS = [
 	{ nombre: "notificaciones_descartar", caso: casoNotifDescartar, golden: goldenNotifDescartar },
 	{ nombre: "notificaciones_restaurar", caso: casoNotifRestaurar, golden: goldenNotifRestaurar },
 	{ nombre: "notificaciones_eliminar", caso: casoNotifEliminar, golden: goldenNotifEliminar },
+	{ nombre: "notificaciones_marcar_leida_ajena", caso: casoNotifLeidaAjena, golden: goldenNotifLeidaAjena },
+	{ nombre: "notificaciones_descartar_ajena", caso: casoNotifDescartarAjena, golden: goldenNotifDescartarAjena },
+	{
+		nombre: "notificaciones_eliminar_restaurada",
+		caso: casoNotifEliminarRestaurada,
+		golden: goldenNotifEliminarRestaurada,
+	},
 	{ nombre: "horarios_copiar_semana", caso: casoHorariosCopiar, golden: goldenHorariosCopiar },
 	{
 		nombre: "horarios_set_predeterminado_desde_semana",
@@ -908,7 +928,8 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "login.set_turno_partido": {
-			aplicar(hub, sql, setTurnoPartido(caso.entrada as any));
+			// El caso trae la fecha; la ruta la resuelve igual cuando no viene.
+			aplicar(hub, sql, setTurnoPartido(caso.entrada as any, caso.entrada.fecha));
 			return;
 		}
 		case "horarios.copiar_semana": {
@@ -940,16 +961,18 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			aplicar(hub, sql, deleteAsignacion(caso.entrada.id_asignacion));
 			return;
 		}
+		// AUD-26: con el usuario que la toca, y la condición dentro de la sentencia. Un caso con
+		// `rechazo` no cambia nada: el otro lado contesta not_found antes de escribir.
 		case "notificaciones.descartar": {
-			aplicar(hub, sql, descartarNotificacion(caso.entrada.id_notificacion));
+			aplicar(hub, sql, descartarNotificacion(caso.entrada.id_notificacion, caso.entrada.id_usuario));
 			return;
 		}
 		case "notificaciones.restaurar": {
-			aplicar(hub, sql, restaurarNotificacion(caso.entrada.id_notificacion));
+			aplicar(hub, sql, restaurarNotificacion(caso.entrada.id_notificacion, caso.entrada.id_usuario));
 			return;
 		}
 		case "notificaciones.eliminar": {
-			aplicar(hub, sql, eliminarNotificacion(caso.entrada.id_notificacion));
+			aplicar(hub, sql, eliminarNotificacion(caso.entrada.id_notificacion, caso.entrada.id_usuario));
 			return;
 		}
 		default:
@@ -1394,5 +1417,131 @@ describe("un alta con un id que ya existe no toca la fila (AUD-16)", () => {
 			expect(filas(sql, linea)).toEqual(LINEA);
 			expect(filas(sql, comanda)).toEqual(COMANDA);
 		});
+	});
+});
+
+// AUD-20: el alta de un lote es pura (INV-02), pero su movimiento 'ALTA' entraba sin condición. Con
+// el id de un lote que ya existe, el lote no cambiaba y aparecía otra entrada de existencias: la
+// reconciliación de la Main avisaba de un descuadre que ningún ajuste cerraba, porque un ajuste
+// mueve a la vez lo guardado y lo calculado. Ahora el movimiento va delante del alta y sólo entra si
+// el lote no existe, y la condición viaja en la sentencia: cada base la vuelve a evaluar al aplicar
+// la réplica. Lo mismo el ALTA del stock suelto de un producto nuevo, que la ruta decide leyendo
+// fuera del lote (SYNC-30): dos altas del mismo id a la vez dejaban dos.
+describe("un alta con un id que ya existe no anota otro movimiento ALTA (AUD-20)", () => {
+	const SIEMBRA = [
+		"INSERT INTO Categorias_Producto (ID_Categoria,Nombre) VALUES ('cat','Bebidas')",
+		"INSERT INTO Productos (ID_Producto,ID_Categoria,Nombre,Precio_Venta) VALUES ('cerveza','cat','Cerveza',200)",
+		"INSERT INTO Usuarios (ID_Usuario,ID_Rol,Email,Password_Hash,Nombre) VALUES ('autor','00000000-0000-7000-8000-000000000001','autor@ejemplo.test','x','Autor')",
+	];
+
+	const filas = (sql: any, q: string) => sql.exec(q).toArray();
+
+	async function conTenant(nombre: string, cuerpo: (hub: any, sql: any) => Promise<void> | void) {
+		await enElHub(nombre, async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (const s of SIEMBRA) sql.exec(s);
+			await cuerpo(hub, sql);
+		});
+	}
+
+	/** Como aplica la Main un cambio que le llega (`apply_one`): una transacción, FK diferidas. */
+	function aplicarComoLaMain(hub: any, sql: any, sentencias: { sql: string; args: any[] }[]) {
+		hub.state.storage.transactionSync(() => {
+			sql.exec("PRAGMA defer_foreign_keys = ON;");
+			for (const st of sentencias) sql.exec(st.sql, ...(st.args ?? []));
+		});
+	}
+
+	const lote = (idLote: string, codigo: string, stock: number) =>
+		createLote(
+			{ id_lote: idLote, id_producto: "cerveza", codigo_lote: codigo, fecha_entrada: "2026-01-01 00:00:00", stock_disponible: stock } as any,
+			"autor",
+		);
+
+	/** Lo guardado frente a lo que suman sus movimientos: lo que cuadra la reconciliación de la Main. */
+	const cuadre = (sql: any, idLote: string) =>
+		filas(
+			sql,
+			`SELECT l.Codigo_Lote AS codigo, l.Stock_Disponible AS guardado,
+			        (SELECT COUNT(*) FROM Movimientos_Stock m WHERE m.ID_Lote = l.ID_Lote) AS altas,
+			        (SELECT COALESCE(SUM(m.Delta), 0) FROM Movimientos_Stock m WHERE m.ID_Lote = l.ID_Lote) AS calculado
+			 FROM Lotes_Producto l WHERE l.ID_Lote = '${idLote}'`,
+		);
+
+	// Lo que difunde el TenantHub, sin espacios de más. El test de la Main
+	// (`inventario.rs::tests_alta_de_lote`) aplica este mismo texto en su SQLite.
+	const ALTA_DEL_LOTE =
+		"INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)" +
+		" SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now','localtime')" +
+		" WHERE NOT EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?2);";
+	const ALTA_PURA_DEL_LOTE =
+		"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)" +
+		" VALUES (?1, ?2, ?3, COALESCE(NULLIF(?4, ''), datetime('now','localtime')), NULLIF(?5, ''), ?6, ?7, ?8, ?9)" +
+		" ON CONFLICT(ID_Lote) DO NOTHING;";
+	const sinEspacios = (s: string) => s.replace(/\s+/g, " ").trim();
+
+	it("lo que se replica lleva el movimiento delante del lote, con la condición", () => {
+		const replicado = buildApplyBatch(lote("lote-1", "L1", 10).command as any).replicated;
+		expect(replicado.map((s) => sinEspacios(s.sql))).toEqual([ALTA_DEL_LOTE, ALTA_PURA_DEL_LOTE]);
+		expect(replicado[0].args).toEqual([expect.any(String), "lote-1", "ALTA", 10, 10, null, "autor"]);
+		expect(replicado[1].args.slice(0, 3)).toEqual(["lote-1", "cerveza", "L1"]);
+	});
+
+	it("un lote nuevo entra con su ALTA", async () => {
+		await conTenant("aud20-nuevo", (hub, sql) => {
+			aplicar(hub, sql, lote("lote-1", "L1", 10));
+			expect(cuadre(sql, "lote-1")).toEqual([{ codigo: "L1", guardado: 10, altas: 1, calculado: 10 }]);
+		});
+	});
+
+	it("con el id de un lote que ya existe no toca el lote ni anota nada, con cualquier código o cantidad", async () => {
+		await conTenant("aud20-repetido", (hub, sql) => {
+			aplicar(hub, sql, lote("lote-1", "L1", 10));
+			aplicar(hub, sql, lote("lote-1", "L2", 50));
+			aplicar(hub, sql, lote("lote-1", "L1", 7));
+			aplicar(hub, sql, lote("lote-1", "L3", 0));
+			expect(cuadre(sql, "lote-1")).toEqual([{ codigo: "L1", guardado: 10, altas: 1, calculado: 10 }]);
+		});
+	});
+
+	it("la Main, al aplicar la réplica, no anota el alta repetida y sí la de un lote nuevo", async () => {
+		const repetida = buildApplyBatch(lote("lote-1", "L2", 50).command as any).replicated;
+		const nueva = buildApplyBatch(lote("lote-9", "L9", 4).command as any).replicated;
+		await conTenant("aud20-main", (hub, sql) => {
+			aplicar(hub, sql, lote("lote-1", "L1", 10));
+			aplicarComoLaMain(hub, sql, repetida);
+			aplicarComoLaMain(hub, sql, nueva);
+			expect(cuadre(sql, "lote-1")).toEqual([{ codigo: "L1", guardado: 10, altas: 1, calculado: 10 }]);
+			expect(cuadre(sql, "lote-9")).toEqual([{ codigo: "L9", guardado: 4, altas: 1, calculado: 4 }]);
+		});
+	});
+
+	it("el ALTA del stock suelto: dos altas del mismo producto nuevo dejan una", async () => {
+		// Las dos leen antes de que ninguna escriba, así que las dos llegan con `esNuevo`.
+		const producto = (nombre: string, stock: number) =>
+			upsertProducto(
+				{ id_producto: "hielo", id_categoria: "cat", nombre, precio_venta: 100, stock_suelto: stock, ids_alergenos: [] } as any,
+				true,
+				"autor",
+			);
+		await conTenant("aud20-suelto", (hub, sql) => {
+			aplicar(hub, sql, producto("Hielo", 5));
+			aplicar(hub, sql, producto("Hielo picado", 7));
+			expect(
+				filas(
+					sql,
+					`SELECT p.Nombre AS nombre, p.Stock_Suelto AS guardado,
+					        (SELECT COUNT(*) FROM Movimientos_Stock m WHERE m.ID_Producto = p.ID_Producto) AS altas,
+					        (SELECT SUM(m.Delta) FROM Movimientos_Stock m WHERE m.ID_Producto = p.ID_Producto) AS calculado
+					 FROM Productos p WHERE p.ID_Producto = 'hielo'`,
+				),
+			).toEqual([{ nombre: "Hielo picado", guardado: 5, altas: 1, calculado: 5 }]);
+		});
+		// Y la condición va en lo que se replica, delante del alta del producto.
+		const replicado = buildApplyBatch(producto("Hielo", 5).command as any).replicated.map((s) => sinEspacios(s.sql));
+		expect(replicado[0]).toContain("INSERT INTO Movimientos_Stock");
+		expect(replicado[0]).toContain("WHERE NOT EXISTS (SELECT 1 FROM Productos WHERE ID_Producto = ?2);");
+		expect(replicado[1]).toContain("INSERT INTO Productos");
 	});
 });

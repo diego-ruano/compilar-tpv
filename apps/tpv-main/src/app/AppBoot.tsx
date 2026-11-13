@@ -148,6 +148,7 @@ export default function AppBoot({ router }: { router: any }) {
 						business_name={business_name}
 						ocupado={dispositivo.ocupado}
 						error={dispositivo.error}
+						handyVinculada={emparejamiento.hayVinculoGuardado}
 						onElegir={dispositivo.elegir}
 					/>
 				);
@@ -157,7 +158,9 @@ export default function AppBoot({ router }: { router: any }) {
 					<EmparejarHandy
 						emparejamiento={emparejamiento}
 						volviendo={dispositivo.ocupado}
-						onVolver={dispositivo.volverAlSelector}
+						// AUD-23: «← Volver» lleva al selector y no desvincula: el vínculo guardado sigue
+						// ahí hasta que se elige otra cosa. Desvincular es de Configuración → Dispositivo.
+						onVolver={dispositivo.irAlSelector}
 					/>
 				);
 

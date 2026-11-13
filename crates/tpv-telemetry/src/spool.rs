@@ -12,7 +12,7 @@ use tokio::time::Instant;
 use crate::event::SpoolEvent;
 
 pub(crate) const MAX_EVENTS_PER_BATCH: usize = 500;
-// Incluye envoltorio y comas del JSON; margen respecto a los 2 MiB del servidor.
+// Incluye envoltorio y comas del JSON; la mitad del MiB que admite el servidor (AUD-32).
 pub(crate) const MAX_BODY_BYTES: usize = 512 * 1024;
 const MAX_EVENT_BYTES: usize = 128 * 1024;
 const MAX_LINE_BYTES: usize = 4 * 1024 * 1024;

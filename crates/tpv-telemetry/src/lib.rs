@@ -11,6 +11,8 @@
 //! 3. **Cola durable en disco** (`<AppData>/telemetry-spool/`) que un worker en segundo plano sube
 //!    por lotes al worker `tpv-api` (se activa en la Fase 4 rellenando [`IngestConfig`]).
 //!
+//! En Android, y sólo en una compilación de depuración, también **Logcat** (AUD-29).
+//!
 //! ## Uso desde el composition root
 //! ```ignore
 //! let _ = tpv_telemetry::init(tpv_telemetry::TelemetryConfig::local_only(app_data_dir, version));
@@ -32,6 +34,7 @@ mod state;
 mod worker;
 #[cfg(target_os = "android")]
 mod android;
+mod logger_temprano;
 
 #[cfg(test)]
 mod test_support;
@@ -96,14 +99,69 @@ pub fn init_platform_logging() {
     android::init();
 }
 
+/// La capa de `tracing` que escribe en Logcat (ver `capa_de_logcat`).
+#[cfg(any(target_os = "android", test))]
+type CapaDeLogcat<S, W> = tracing_subscriber::filter::Filtered<
+    tracing_subscriber::fmt::Layer<
+        S,
+        tracing_subscriber::fmt::format::DefaultFields,
+        tracing_subscriber::fmt::format::Format,
+        W,
+    >,
+    tracing_subscriber::filter::LevelFilter,
+    S,
+>;
+
+/// La capa que copia en Logcat los eventos de INFO o más, sólo si `depuracion` (AUD-29).
+///
+/// `init` la pide con `cfg!(debug_assertions)`: el APK de depuración (el de `pnpm tauri android
+/// dev` y el de E2E) la tiene y el de release no. Logcat lo puede leer quien tenga ADB autorizado,
+/// un informe de errores del terminal o una app preinstalada con `READ_LOGS`, y a esta capa no la
+/// cubre el filtro de datos personales: le llega lo mismo que al fichero local, también los fallos
+/// de comandos con su mensaje, que puede llevar la URL de una búsqueda con el teléfono y el correo
+/// de un cliente o el cuerpo de una respuesta. Pasarla por `scrub` no bastaría (no reconoce nombres,
+/// notas ni un correo codificado en una URL), y Android recomienda no escribir en Logcat lo que no
+/// haga falta en producción. En release, Logcat sólo recibe el arranque anterior a `init`
+/// (`android::init`); desde que empieza, lo de `log` no va a Logcat aunque `init` falle, y con el
+/// subscriber montado va a él por el puente (`logger_temprano`).
+///
+/// El writer es un parámetro para poder probarla fuera de Android (`init_tests.rs`).
+#[cfg(any(target_os = "android", test))]
+fn capa_de_logcat<S, W>(depuracion: bool, writer: W) -> Option<CapaDeLogcat<S, W>>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    W: for<'w> tracing_subscriber::fmt::MakeWriter<'w> + 'static,
+{
+    use tracing_subscriber::Layer as _;
+    depuracion.then(|| {
+        tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_target(true)
+            .with_writer(writer)
+            .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
+    })
+}
+
 /// Arranca la telemetría: monta el subscriber global y lanza el worker en segundo plano.
 /// Idempotente de facto: una segunda llamada falla al fijar el subscriber global y devuelve error
 /// (que el shell ignora).
 pub fn init(config: TelemetryConfig) -> Result<(), TelemetryError> {
+    montar(config, cfg!(debug_assertions))
+}
+
+/// `init`, con lo que cambia entre una compilación de depuración y una de release como parámetro
+/// para poder probar las dos en escritorio (`init_tests.rs`). AUD-29: sin `depuracion` no hay capa de
+/// Logcat, y lo que llega por `log` deja de ir a Logcat en cuanto empieza, también si falla antes
+/// de montar el subscriber.
+fn montar(config: TelemetryConfig, depuracion: bool) -> Result<(), TelemetryError> {
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{fmt, EnvFilter};
 
     init_platform_logging();
+    // AUD-29: antes de nada que pueda fallar. Si el fichero de logs no se puede crear (el
+    // almacenamiento lleno), `montar` sale sin subscriber ni puente, y en release el logger
+    // temprano seguiría copiando en Logcat todo lo que registra la app (ver `logger_temprano`).
+    logger_temprano::ESTADO.al_empezar_init(depuracion);
 
     let context = Context::new(
         config.app_version.clone(),
@@ -137,9 +195,9 @@ pub fn init(config: TelemetryConfig) -> Result<(), TelemetryError> {
         .console
         .then(|| fmt::layer().with_ansi(true).with_writer(std::io::stderr));
 
+    // ── Logcat: sólo en una compilación de depuración (AUD-29, ver `capa_de_logcat`). ──
     #[cfg(target_os = "android")]
-    let logcat_layer = Some(fmt::layer().with_ansi(false).with_target(true)
-        .with_writer(android::Logcat).with_filter(tracing_subscriber::filter::LevelFilter::INFO));
+    let logcat_layer = capa_de_logcat(depuracion, android::Logcat);
     #[cfg(not(target_os = "android"))]
     let logcat_layer = None::<tracing_subscriber::layer::Identity>;
 
@@ -160,6 +218,8 @@ pub fn init(config: TelemetryConfig) -> Result<(), TelemetryError> {
     tracing::subscriber::set_global_default(subscriber)
         .map_err(|e| TelemetryError::Init(format!("set_global_default: {e}")))?;
 
+    // Con el subscriber montado, el logger de plataforma pasa lo de `log` a `tracing`.
+    logger_temprano::ESTADO.activar();
     #[cfg(target_os = "android")]
     android::activate();
     #[cfg(not(target_os = "android"))]

@@ -20,4 +20,7 @@ interface ImportMeta {
 		patron: string,
 		opciones: { query: "?raw"; import: "default"; eager: true },
 	): Record<string, string>;
+	// Y los módulos de verdad, ya cargados, con lo que exportan (`sinDatosPersonalesEnLaQuery.node`
+	// saca de los `*.schemas.ts` las claves que acepta cada `consulta(schema)`).
+	glob(patron: string, opciones: { eager: true }): Record<string, Record<string, unknown>>;
 }

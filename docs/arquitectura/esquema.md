@@ -3,7 +3,8 @@
 Hay **un solo esquema** para la base local de la Main (`data.db`, rusqlite) y para la base de cada negocio
 en la nube, que vive en el SQLite de su `TenantHub`: los ficheros `.sql` de
 `packages/database/migrations/`, aplicados en orden.
-Hoy hay uno solo, `0001_inicial.sql`, con el esquema completo.
+Hoy son dos: `0001_inicial.sql`, con el esquema completo, y `0002_negocio.sql`, el sello de la base
+(AUD-06, [recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)).
 (La base central de licencias es otra cosa y no se migra desde el código:
 [worker.md](worker.md#dos-bases-y-sólo-una-se-migra-desde-el-código).)
 
@@ -82,12 +83,12 @@ eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.
 `Roles_Permisos` es negocio replicable: las concesiones por rol viajan por el outbox.
 El rol Encargado y sus concesiones iniciales nacen de `0001`, igual en Main y Worker (RI-70).
 
-## El andamiaje local (§16 del fichero)
+## El andamiaje local (§16 de `0001`, y `0002`)
 
 `_Sync_Outbox`, `_Sync_Applied_Ops`, `_Sync_State`, `_Sync_Failed`, `_Sync_Encoladas`, `_Jobs_State`,
 `_Verifactu_Envios`, `_Verifactu_Flujo`, `_Verifactu_Anomalias` (sin uso en esta rama: son de la
-remisión a la AEAT, ver [verifactu.md](verifactu.md)), `_Recovery_State` y `_Backfill_Historico`
-describen **este equipo**, se escriben por `raw()` y no se replican. Que se creen
+remisión a la AEAT, ver [verifactu.md](verifactu.md)), `_Recovery_State`, `_Backfill_Historico` y
+`_Negocio` (de qué negocio es la base) describen **este equipo**, se escriben por `raw()` y no se replican. Que se creen
 también, vacías, en la base del tenant es deliberado: hay un único esquema, y el volcado de
 recuperación descarta todo lo que empieza por `_`.
 

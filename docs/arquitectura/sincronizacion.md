@@ -90,6 +90,13 @@ aparte, en `debug`, que no sube a la nube (OBS-02): se ve en el log local arranc
 se encola antes del siguiente escritor. Para sustituir el fichero se espera el cierre confirmado de
 los ejecutores. Abrir, migrar y comprobar copias efímeras también ocurre fuera del runtime async.
 
+**El escritor no admite `ATTACH`** (`db::sin_attach`, `SQLITE_LIMIT_ATTACHED` a 0; AUD-02): es la
+conexión que ejecuta tal cual las sentencias que llegan de la nube, y con un `ATTACH` una de ellas
+abría como base cualquier ruta del disco y escribía en ella. Un cambio que lo traiga falla como
+cualquier otro que no entra (se reintenta y acaba en cuarentena) sin crear ningún fichero. Las
+conexiones de lectura lo conservan: las copias locales (`VACUUM INTO`) van por ellas y SQLite las
+hace adjuntando el destino por dentro, así que por el escritor fallarían.
+
 Las operaciones con varias sentencias usan `Writer::transaccion(async { … })` (RI-32), también
 para lotes locales y remotos sin captura. El helper confirma negocio y outbox juntos y revierte
 si falla el cuerpo, el outbox o el COMMIT. Una guarda encola la reversión al cancelar o entrar en
@@ -100,7 +107,7 @@ pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esp
   (`sin_comentarios_iniciales` → `is_write_sql`), y lo que sube va sin ellos. Un `WITH … INSERT` no se
   reconoce como escritura; si alguna vez hace falta, hay que enseñárselo a `is_write_sql`.
 - **Lo que es estado local del equipo va por `raw()`**: `_Jobs_State`, `_Sync_*`, `_Verifactu_*`,
-  `_Backfill_Historico`, `_Recovery_State`, el backfill. Por `execute()` se replicaría a la nube.
+  `_Backfill_Historico`, `_Recovery_State`, `_Negocio`, el backfill. Por `execute()` se replicaría a la nube.
 - **Idempotencia** por `Op_Id`: `Applied_Operations` en la nube y `_Sync_Applied_Ops` en la Main evitan
   duplicados en catch-up y en vivo, y los ecos de las propias escrituras.
 - **IDs deterministas**: toda columna `TEXT PRIMARY KEY` recibe su UUID generado **antes** del
@@ -133,13 +140,17 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
 - **El esquema no tiene `DEFAULT` de hora** (lo vigila un test): quien inserta, la informa.
 - En la nube sólo se puede fijar la hora **local** del emisor (`X-Client-Now`). Un `'now'` en UTC o un
   `CURRENT_*` en una escritura de la Handy se rechaza (`hora_no_determinista`), y lo mismo si falta
-  `X-Client-Now` (`missing_client_now`), **por los dos caminos**: en vivo y en la cola. Los dos rechazos
-  son permanentes.
+  `X-Client-Now` o no vale (`missing_client_now`), **por los dos caminos**: en vivo y en la cola. Los
+  dos rechazos son permanentes. Vale una `YYYY-MM-DD HH:MM:SS` que sea un instante del calendario
+  (`lib/fechas.ts::diaDeInstante`: ni las 24:30 ni un 29 de febrero que no existe, AUD-21) a menos de
+  14 h 05 min del reloj del worker (`tenantHub.tiempo.ts::parseClientNow`).
 - **Las lecturas de la Handy también**: `lib/tenantClient.ts::tenantQuery`, por donde pasan todas,
-  fija `'now'` con `X-Client-Now` usando la misma función que el DO (`rewriteNowInSql`). Sin cabecera
-  manda el reloj de la nube (UTC). El cliente de Rust pone `x-client-now` en todas las peticiones, también
-  en los GET. Lo cubre `test/lecturasEnHoraLocal.test.ts`; el arnés de contrato no lo ve, porque corre
-  las dos implementaciones en la misma zona horaria.
+  fija `'now'` con `X-Client-Now` usando la misma función que el DO (`rewriteNowInSql`) y con el
+  mismo criterio de lo que vale (`parseClientNow`). Sin cabecera, o con una que no vale, manda el
+  reloj de la nube (UTC). El cliente de Rust pone `x-client-now` en todas las peticiones, también
+  en los GET y en las lecturas que van por POST ([worker.md](worker.md#cómo-se-escribe-una-ruta)). Lo
+  cubre `test/lecturasEnHoraLocal.test.ts`; el arnés de contrato no lo ve, porque corre las dos
+  implementaciones en la misma zona horaria.
 - Un `'localtime'` aplicado a un valor (`datetime(Fecha,'localtime')`) depende de quien lo ejecuta. En
   desarrollo falla; en el equipo del cliente no bloquea la escritura, pero queda anotado.
 
@@ -161,8 +172,11 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   caché de 60 s; el ticket del WebSocket, sin ella), y se veta al rol `tpv` que ya no sea el `main_device_id`. No puede haber ninguna ruta
   autenticada que no pase por `tenantAuth`. La gracia por caducidad (`expiry_grace`) sincroniza.
 - **Un 403 es `rechazado`**: se espacian los reintentos y se lanza un `license_check_now`, que emite
-  `license:changed` y tapa la aplicación. Anular una licencia cierra el socket desde el worker y eso es
-  lo que hace que el equipo se entere en segundos ([licencias.md](licencias.md#anular-desde-la-administración)).
+  `license:changed` y tapa la aplicación. Anular o trasladar una licencia cierra el socket desde el
+  worker y eso es lo que hace que el equipo se entere en segundos
+  ([licencias.md](licencias.md#anular-desde-la-administración)).
+- **Dentro del `TenantHub` sólo es Main la de la licencia**, y eso se vuelve a comprobar con la
+  sesión abierta: ver [Quién es la Main dentro del `TenantHub`](#quién-es-la-main-dentro-del-tenanthub-aud-02).
 - **Se firma con la hora de la nube** (Rust construye y firma el saludo). Un
   rechazo por la hora es `RelojDesfasado`, no falta de red.
 - **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong`, se cierra. Se reconecta al
@@ -172,6 +186,110 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   dispositivo cuando conecta uno nuevo (`replaced`).
 - **Mientras faltan los datos, no se abre el socket** (`datosPerdidos` → `pausada`): un catch-up desde
   `Last_Seq = 0` no reconstruye nada ([recuperacion.md](recuperacion.md)).
+
+### Quién es la Main dentro del `TenantHub` (AUD-02)
+
+El rol `tpv` de una sesión se fija al saludar y vive en su attachment, que no se entera de lo que
+cambie después en la base central. Ser la Main es otra cosa: ser el `main_device_id` de la licencia
+sin anular del negocio (`tenantHub.identidad.ts::mainDeLaLicencia`; la caducidad no cuenta: caducar
+no cierra el socket).
+
+**Quién es la Main lo dice una tabla del propio DO** (`_Main_Vigente`, `tenantHub.main.ts`), y lo
+que depende de ello la mira sin esperar a nadie (`esLaMain`). Sólo la sesión `tpv` autenticada, no
+echada y del dispositivo que nombra la tabla escribe (`apply`), encola (`bulk_apply`), acusa las
+apartadas, suelta a las Handy (`recovery_ready`) y manda eventos; recibe lo del negocio (cambios,
+eventos, `pair_request`, `reservas_web`), y cuenta como Main para las Handy (`isMainConnected`,
+`isMainReady`, `isMainRecovering`). Si la tabla dice que no hay Main (la licencia está anulada),
+ninguna lo es. Se mira justo antes de actuar, después de la última espera de cada rama y con el
+attachment releído: entre la pregunta y el acto no cabe nada.
+
+**La tabla la ponen al día lecturas de la base central, numeradas al empezar.** La respuesta de una
+lectura sólo se apunta si no se ha apuntado ya la de otra que empezó después: una respuesta vieja que
+llega tarde no deshace una nueva. Apuntarla y echar a toda sesión `tpv` de otro dispositivo son un
+solo paso, sin esperas (`fijarMain`), y es el único sitio que echa por este motivo. Se lee:
+
+- **En el saludo de un `tpv`**, con la firma ya verificada. Después decide la tabla, no lo que le
+  contestaron a ese saludo: si su respuesta no se apuntó porque ya había una más nueva, manda la
+  nueva. Un `tpv` que no es la Main no entra (`hello_failed` con `device_replaced` o
+  `license_revoked`): el ticket del socket dura 30 s y pudo emitirse antes de un traslado. Sin
+  respuesta de la base central tampoco entra.
+- **Por actividad, como mucho una vez por minuto y por negocio** (`comprobarMain`), si hay alguna
+  sesión `tpv` dentro. Quien pregunta se queda la marca de la tabla antes de esperar
+  (`tocaComprobar`) y los demás siguen con lo que dice la tabla: veinte mensajes a la vez son una
+  lectura, sin promesas compartidas ni campos de instancia. Esperan la respuesta antes de decidir:
+  - lo que la Main manda y entra en el acto (`apply` y `bulk_apply`), **en fila**
+    (`enTurnoDeEntrada`): si al primero le toca esperar, los de detrás esperan con él y entran en el
+    orden en que llegaron. En la cola, porque se encola dentro de la fila; en vivo, porque la fila no
+    suelta al siguiente hasta que el anterior tiene sitio en el turno del log (`alReservarTurno`), que
+    es lo que fija el orden en que se confirman: antes de eso cada escritura calcula su hash y abre
+    la base del negocio (al despertar, el DO comprueba sus migraciones), y una que acabara antes se
+    adelantaría. Lo que tarde la escritura después no retiene la fila;
+  - una escritura que entra en el turno del log (de una Handy, del drenado de la cola, o la de la
+    Main en vivo), dentro del turno y justo antes de aplicarse: lo que va detrás espera su turno;
+  - `cola_apartada_ack` con algo que acusar y `event`, que no dependen del orden de los demás;
+  - el saludo de una Handy, a la que se le dice si hay Main, y los avisos para la Main, que salen
+    después de la respuesta.
+
+  No la piden `recovery_ready`, que decide con la tabla (a la Main no se le rechaza nunca: el cliente
+  da a las Handy por soltadas en cuanto lo manda), ni un mensaje mal formado o vacío, que se contesta
+  antes. La lectura lleva un plazo de 5 s. **No hay temporizador ni alarma**: un negocio sin
+  actividad no pregunta ni se despierta por esto.
+- **Con un aviso de cambio de licencia** (un traslado, una anulación, un reembolso:
+  `lib/hub.ts::avisarCambioDeLicencia` → `releerMain`, con el negocio): se lee en el acto, sin esperar
+  al minuto, y `fijarMain` echa a la sesión `tpv` que no sea la Main que resulte. Se lee también sin
+  ninguna sesión `tpv` autenticada: si hay un saludo a medias cuya lectura salió antes del cambio,
+  ésta empieza después y es la que vale, y el saludo, que decide con la tabla, no entra. El aviso no nombra a quién
+  echar, así que uno que llega tarde —el del traslado B→A entregado después de que la licencia
+  volviera a B— no echa a la Main que ha vuelto a serlo. Si esa lectura no contesta, la tabla se
+  queda como está y la siguiente actividad pregunta sin esperar al minuto.
+
+La baja de un dispositivo (`cerrarSocketsDelDispositivo` → `revocarDispositivo`) es otra cosa: cierra
+sus sesiones en el acto, sin condición, porque no se deshace con otro aviso.
+
+**Todo cierre deja la sesión fuera**: los que inicia el DO (`cerrar`: echarla, la baja, la sesión
+anterior de un dispositivo que reconecta con 4000, el saludo que falla, un error del socket) y los que le llegan (`webSocketClose`). Le quita la autenticación y la marca `fuera`
+en su attachment, y contabiliza su salida (`sessionGone`). Sin autenticar no se le atiende ningún
+mensaje ni se le difunde nada, y no cuenta como Main, aunque el cliente no conteste al cierre. Lo que
+estuviera esperando tampoco sigue: cada rama mira, después de su última espera, que el socket siga
+abierto y la sesión no esté fuera (`sesionAbierta`); una escritura lleva la sesión que la mandó y se
+vuelve a mirar dentro del turno, antes de aplicarla; y **un saludo cuyo socket se cierra,
+se echa o se reemplaza mientras espera a la base central se abandona** sin autenticar ni anunciar
+nada: las Handy no reciben un `main_online` después del `main_offline` de ese cierre.
+
+La Main no recibe respuesta a lo que mandó: para ella es un corte de transporte, que no cuenta como
+intento de la operación, y al reconectar el ticket le dice por qué. El cliente Rust no cambia: ni
+mira los códigos de cierre ni depende de un mensaje nuevo.
+
+**Si la base central no contesta o rechaza la consulta**, la tabla se queda como está, se registra
+(`sync.main_vigente`) y no se rechaza ningún mensaje: la Main sigue replicando y las Handy trabajando,
+y se vuelve a preguntar al minuto. Una Main cerrada no puede reconectar sin la base central (el
+ticket la necesita), así que cortar por no saber la dejaría sin replicar durante toda la avería.
+Sólo el saludo de un `tpv` no entra sin respuesta.
+
+**Los límites**, tal como están:
+
+- **Si el aviso de cambio de licencia no llega** y la Main nueva no ha saludado, el equipo
+  anterior sigue siendo la Main para el hub hasta la siguiente comprobación por actividad: como
+  mucho un minuto después de la última lectura, más lo que tarde esa lectura (5 s de plazo). En ese rato escribe,
+  recibe y cuenta como Main. Sin actividad sigue conectado, y no le llega nada del negocio porque no
+  hay nada que entregar.
+- **Con la base central caída**, ese rato dura lo que dure la avería.
+- **Mientras una lectura está en vuelo, lo que no va detrás de quien la pidió se decide con la tabla
+  de antes**: sólo esperan la respuesta quien la pidió y lo que va detrás de él, en la fila de
+  entrada o en el turno del log. Lo que va por otro camino (una escritura de la Handy si la lectura
+  la pidió la fila de entrada, un acuse, un evento, un saludo) no espera.
+- **Un aviso de cambio de licencia cuya lectura no contesta** no echa a nadie: es como un aviso
+  perdido, salvo que la siguiente actividad pregunta sin esperar al minuto.
+- **La numeración ordena las lecturas por cuándo salieron, no por cuándo las atendió la base
+  central.** Una petición que tarda en llegar puede ver un estado más nuevo que otra que salió después
+  y quedar descartada; lo corrige la lectura siguiente (otro saludo, o la siguiente comprobación).
+- **Lo que el equipo anterior dejó en la cola del DO** antes de salir se aplica: se aceptó cuando era
+  la Main.
+- **Lo que no lleva datos del negocio** (la presencia, `main_online`, `main_offline`) va a todos los
+  sockets, también a los que no han saludado.
+- **Una tabla que no se ha leído nunca** da por Main a cualquier sesión `tpv` autenticada, como antes
+  de que existiera. Sólo puede pasar con una sesión que saludó antes (el saludo de un `tpv` siempre
+  la lee), y dura hasta la primera comprobación por actividad, que la lee y echa a la que no lo sea.
 
 ### Subir el outbox
 
@@ -389,24 +507,30 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 
 1. **Ningún estado de sesión en campos de la instancia**: al despertar está vacía. Lo que describe a un
    socket va en su *attachment* (`WsAttachment`: tenant, dispositivo, rol, autenticado, clave pública,
-   reto, recuperando), serializado con `ws.serializeAttachment()` **tras cada cambio**.
+   reto, recuperando y si se ha echado), serializado con `ws.serializeAttachment()` **tras cada
+   cambio**. Y después de una espera se relee: mientras tanto pudo cambiar.
 2. **El censo es `state.getWebSockets()`**, con la etiqueta `deviceId`. Puede devolver sockets ya
    cerrados: `liveSocketsFor()` filtra por `readyState` e `isMainConnected(except)` excluye el que se
    está cerrando.
 3. **Nada que mantenga vivo el DO**: ni `setInterval` ni `setTimeout`. El único `alarm` es el de la cola
-   de entrada, y sólo mientras hay cola o está en pausa.
+   de entrada, y sólo mientras hay cola o está en pausa. El único temporizador es el plazo de la
+   lectura de la base central que pone al día quién es la Main (`fetchConPlazo`), y vive lo que su
+   petición: se quita al leer la respuesta entera, al fallar o al cancelarse.
 4. **Las cachés de instancia se pierden al hibernar, y eso no cuesta nada**: el cliente de la base del
    negocio (`baseLocal`, que al volver comprueba otra vez las migraciones), `lastSeenPushedAtMs`,
-   `lastPurgeAtMs`. Se quedan como campos a propósito. Lo mismo el turno del log (`turnoDelLog`): es lo
-   que está en vuelo, y el DO sólo hiberna sin nada en vuelo.
+   `lastPurgeAtMs`. Se quedan como campos a propósito. Lo mismo el turno del log (`turnoDelLog`) y la
+   fila de entrada de la Main (`turnoDeEntrada`): son lo que está en vuelo, y el DO sólo hiberna sin
+   nada en vuelo. Lo que sí tiene que sobrevivir va al SQL del DO: quién es la Main (`_Main_Vigente`).
 5. ⚠️ **En los módulos de funciones libres no puede haber variables de módulo con estado**: en Workers
    una variable de módulo es por **isolate**, compartido entre DO de **tenants distintos**. Lo que haya
    que recordar entre invocaciones va al SQL del DO (como `_Cola_Estado`).
 6. Si cambia el texto del latido en el frontend, hay que cambiar el par del auto-response: casa cadenas
    exactas, y si no coinciden todo funciona pero el DO se despierta en cada ping.
 7. Un cierre iniciado por el servidor no garantiza `webSocketClose`: la presencia vive en
-   `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde el revoke. Todo cierre nuevo
-   iniciado por el DO llama a `sessionGone`.
+   `sessionGone(ws, att)`, que se llama desde `webSocketClose` y desde `cerrar`, por donde pasa todo
+   cierre que inicia el DO: la baja, la sesión que ya no es la Main, la anterior de un dispositivo que
+   reconecta, el saludo que falla y `webSocketError`. Los dos dejan la sesión fuera antes de nada.
+   Todo cierre nuevo iniciado por el DO va por `cerrar`.
 
 `instrumentDurableObjectWithSentry` envuelve los tres handlers del WebSocket.
 
@@ -414,7 +538,8 @@ Reglas para tocar **cualquier** `tenantHub*.ts`:
 
 Cada dominio del worker tiene su `*.commands.ts`, que construye la transacción (`BuiltCommand`) y la
 aplica por `lib/hub.ts` → RPC `aplicar` del DO, que la ejecuta en la base del negocio y la difunde. Sólo el rol
-`tpv` puede ejecutar SQL por el WebSocket, y el rol lo dicta la base central, no el cliente. Lo que la
+`tpv` puede ejecutar SQL por el WebSocket, mientras sea la Main de la licencia, y las dos cosas las
+dicta la base central, no el cliente. Lo que la
 Handy no puede hacer, lo veta un middleware antes de leer el cuerpo ([worker.md](worker.md)). La lógica
 duplicada entre Rust y estos comandos la sujetan los arneses de contrato
 ([tests/contract/README.md](../../tests/contract/README.md)).
@@ -428,11 +553,18 @@ antes de mandar el lote (`hasPaidLines`), y vuelve a mirarlo cuando no consta qu
 borrado: no tocó ninguna fila, o es el reintento de una operación ya aplicada y el resultado guardado
 lleva `null` en lo que dependía de la base. Un ticket borrado con su cobro todavía en camino deja la nube sin él (SYNC-31).
 
+Toda escritura de la Handy lleva su `X-Idempotency-Key`, que es el `Op_Id` de la operación: un UUIDv7.
+El worker exige que tenga de 16 a 64 letras, cifras, guiones o guiones bajos (`lib/rutas.ts`) y
+rechaza otra cosa con `invalid_op_id`, sin llamar al DO (AUD-32).
+
 La `X-Idempotency-Key` la pone el `CloudClient` de `tpv-infra-http`, una por escritura, salvo cuando el
 resultado de la anterior quedó **incierto** (fallo de transporte, timeout o 5xx): entonces la misma
 petición vuelve a salir con su clave y sus bytes durante 5 minutos, y el DO devuelve el resultado de
 la primera si se aplicó (RI-64). Así, el camarero que vuelve a pulsar tras un error no duplica la
 línea. Con una respuesta clara la clave se olvida, y pedir dos veces lo mismo son dos operaciones.
+Una lectura que va por POST (`post_lectura`: lo que busca lleva datos de una persona o texto libre,
+AUD-27) no es una escritura: sale sin clave, no entra en ese reintento y no pasa por el motor de
+escrituras del DO: ni se aplica ni se replica nada.
 
 El id de lo que da de alta la Handy lo elige el dispositivo. Las altas de venta rápida (un ticket,
 una línea) y la de un lote son **altas puras** (`ON CONFLICT … DO NOTHING`): un id que ya existe no
@@ -440,6 +572,14 @@ toca la fila, y la ruta contesta como siempre. Ningún flujo de la app reenvía 
 actualice (su reintento va por la clave de idempotencia), y con `DO UPDATE` el id de una línea
 cobrada la movía a otro ticket y el de una comanda cobrada la reabría (AUD-16); el de un lote le
 pisaba las existencias (INV-02).
+
+Lo que acompaña a un alta tampoco se escribe si la fila ya estaba (AUD-20). El movimiento `ALTA` de
+un lote va delante de su alta y sólo entra si el lote no existe, y el del stock suelto de un producto
+nuevo, sólo si el producto no existe; en el worker y en la Main. Sin esa condición quedaba otra
+entrada de existencias que la reconciliación daba por descuadre y que ningún ajuste cerraba. La
+condición va en la sentencia y la vuelve a evaluar quien aplica la réplica: la ruta del worker da un
+producto por nuevo leyendo fuera del lote, y aunque la Main lo decide dentro de su transacción, la
+nube puede tener ya ese id (dos equipos que vuelven a crear a la vez un producto que otro borró).
 
 ### Frontera con la webview (RI-31/RI-57)
 

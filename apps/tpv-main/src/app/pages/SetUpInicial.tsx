@@ -113,22 +113,12 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
         setSaving(true);
 
         try {
+            // El PIN elegido sube a la nube por el outbox, como cualquier escritura de la Main: la
+            // Handy entra con él en cuanto se replica, y sin red sube al volver (AUD-24).
             await commands.completeInitialSetup({
                 id_usuario: idUsuario,
                 pin_nuevo: pinNuevo,
             });
-
-            // Subimos el setup a la nube para que la Handy haga login con datos reales.
-            // No es bloqueante: si la nube falla, el TPV local ya quedó configurado y debe
-            // poder continuar (solo se resentiría el login de la Handy hasta reintentarlo).
-            try {
-                await commands.configUploadInitialSetup({
-                    id_usuario: idUsuario,
-                    pin: pinNuevo,
-                });
-            } catch {
-                // Ya lo registró `invocar`; el setup local está hecho y se puede seguir.
-            }
 
             if (role) {
                 setSession({

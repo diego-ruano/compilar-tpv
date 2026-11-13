@@ -8,7 +8,9 @@
 //   ninguna consulta suelta (`hub-lee`);
 // - con el interruptor apagado, la misma ruta da lo mismo, consulta a consulta;
 // - un rechazo de negocio que se decide dentro del DO llega al cliente con su código y su status;
-// - lo que decide la base central (aquí, una licencia anulada) se queda en el Worker.
+// - lo que decide la base central (aquí, una licencia anulada) se queda en el Worker;
+// - las lecturas que van por POST (AUD-27) hacen el mismo viaje, con su cuerpo, y el tope de ese
+//   cuerpo se comprueba en el Worker: lo que pasa de él no llega al DO.
 
 import { env as entorno } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
@@ -98,13 +100,13 @@ async function pedir(
 	n: Negocio,
 	metodo: "GET" | "POST",
 	ruta: string,
-	opciones: { cuerpo?: unknown; entorno?: Record<string, unknown> } = {},
+	opciones: { cuerpo?: unknown; entorno?: Record<string, unknown>; sinClave?: boolean; firma?: string } = {},
 ): Promise<{ status: number; json: any; tiempos: string }> {
 	const token = await firmarSesion(env, { tenantId: n.tenantId, deviceId: MAIN, licHash: LIC_HASH });
 	const cuerpo = opciones.cuerpo === undefined ? new Uint8Array() : new TextEncoder().encode(JSON.stringify(opciones.cuerpo));
 	const ts = Date.now();
 	const mensaje = ["DEVICE_PROOF", ts, metodo, ruta, await sha256HexStr(token), await sha256HexBytes(cuerpo)].join("\n");
-	const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), n.seed));
+	const firma = opciones.firma ?? bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), n.seed));
 	const res = await app.request(
 		ruta,
 		{
@@ -114,7 +116,7 @@ async function pedir(
 				"X-Device-Ts": String(ts),
 				"X-Device-Sig": firma,
 				"X-Client-Now": ahora(),
-				"X-Idempotency-Key": "un-viaje-0123456789abcdef",
+				...(opciones.sinClave ? {} : { "X-Idempotency-Key": "un-viaje-0123456789abcdef" }),
 				...(opciones.cuerpo === undefined ? {} : { "content-type": "application/json" }),
 			},
 			...(opciones.cuerpo === undefined ? {} : { body: cuerpo }),
@@ -179,6 +181,93 @@ describe("un viaje al TenantHub por petición", () => {
 			expect(r.status).toBe(403);
 			expect(r.json.error).toBe("license_revoked");
 			expect(viajes(r.tiempos, "hub-ruta")).toBe(0);
+		});
+	});
+});
+
+describe("las lecturas por POST (AUD-27) también van enteras al TenantHub", () => {
+	const KB = 1024;
+
+	/** Las lecturas por POST, con un cuerpo de los que manda la app y el tope del suyo. */
+	const LECTURAS: { ruta: string; cuerpo: Record<string, unknown>; tope: number }[] = [
+		{ ruta: "/v1/reservas/buscar-cliente", cuerpo: { telefono: "600000000" }, tope: 8 * KB },
+		{ ruta: "/v1/cuentas/entradas", cuerpo: { del: "2026-05-01", al: "2026-05-31", q: "cliente ficticio" }, tope: 8 * KB },
+		{ ruta: "/v1/cuentas/salidas", cuerpo: { del: "2026-05-01", al: "2026-05-31", q: "luz" }, tope: 8 * KB },
+		{ ruta: "/v1/cuentas/resumen", cuerpo: { del: "2026-05-01", al: "2026-05-31", q: "cliente ficticio" }, tope: 8 * KB },
+		{ ruta: "/v1/mesas/productos/search", cuerpo: { query: "cro" }, tope: 8 * KB },
+		{ ruta: "/v1/venta-rapida/productos/search", cuerpo: { query: "cro", limit: 5 }, tope: 8 * KB },
+		{ ruta: "/v1/venta-rapida/index-rows", cuerpo: { ids: ["com-1"] }, tope: 64 * KB },
+	];
+
+	/** Lo que encuentran: un cliente y un producto, en la base del DO. */
+	async function conDatos(n: Negocio): Promise<void> {
+		await enElHub(n.tenantId, (hub: any) => {
+			const sql = hub.state.storage.sql;
+			sql.exec(
+				"INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Created_At) VALUES ('cli-1', 'Cliente Ficticio', '600000000', 'prueba@ejemplo.invalid', '2026-01-01 10:00:00');",
+			);
+			sql.exec("INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina) VALUES ('cat-cocina', 'Platos', 1);");
+			sql.exec(
+				"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-croquetas', 'cat-cocina', 'Croquetas', 750);",
+			);
+		});
+	}
+
+	it("cada una hace un solo viaje, sin clave de idempotencia y sin consultas sueltas, y lee la base del DO", async () => {
+		await conNegocio("lecturas-post", {}, async (n) => {
+			await conDatos(n);
+			for (const { ruta, cuerpo } of LECTURAS) {
+				const r = await pedir(n, "POST", ruta, { cuerpo, sinClave: true });
+				expect(r.status, ruta).toBe(200);
+				expect(viajes(r.tiempos, "hub-ruta"), ruta).toBe(1);
+				expect(viajes(r.tiempos, "hub-lee"), ruta).toBe(0);
+				expect(viajes(r.tiempos, "hub-escribe"), ruta).toBe(0);
+			}
+
+			const cliente = await pedir(n, "POST", "/v1/reservas/buscar-cliente", { cuerpo: { telefono: " 600000000 " }, sinClave: true });
+			expect(cliente.json).toMatchObject({ id_cliente: "cli-1", coincide_por: "telefono" });
+			const productos = await pedir(n, "POST", "/v1/venta-rapida/productos/search", { cuerpo: { query: "cro", limit: 5 }, sinClave: true });
+			expect(JSON.stringify(productos.json)).toContain("Croquetas");
+		});
+	});
+
+	it("con el interruptor apagado dan lo mismo", async () => {
+		await conNegocio("lecturas-post-apagado", {}, async (n) => {
+			await conDatos(n);
+			const r = await pedir(n, "POST", "/v1/reservas/buscar-cliente", {
+				cuerpo: { email: "Prueba@EJEMPLO.invalid" },
+				sinClave: true,
+				entorno: { EJECUTAR_EN_EL_HUB: "0" },
+			});
+			expect(r.status).toBe(200);
+			expect(r.json).toMatchObject({ id_cliente: "cli-1", coincide_por: "email" });
+			expect(viajes(r.tiempos, "hub-ruta")).toBe(0);
+			expect(viajes(r.tiempos, "hub-lee")).toBeGreaterThan(0);
+		});
+	});
+
+	it("un cuerpo que pasa de su tope se rechaza en el Worker, antes de autenticar: no llega al DO", async () => {
+		await conNegocio("lecturas-post-tope", {}, async (n) => {
+			for (const { ruta, cuerpo, tope } of LECTURAS) {
+				// Con una firma que no vale: si se autenticara antes de mirar el tope, sería un 401.
+				const r = await pedir(n, "POST", ruta, {
+					cuerpo: { ...cuerpo, relleno: "x".repeat(tope + KB) },
+					sinClave: true,
+					firma: "firma-que-no-vale",
+				});
+				expect(r.status, ruta).toBe(413);
+				expect(r.json, ruta).toMatchObject({ ok: false, error: "payload_too_large" });
+				expect(viajes(r.tiempos, "hub-ruta"), ruta).toBe(0);
+			}
+		});
+	});
+
+	it("un cuerpo que no es una búsqueda se rechaza dentro, con el mismo sobre", async () => {
+		await conNegocio("lecturas-post-validacion", {}, async (n) => {
+			const r = await pedir(n, "POST", "/v1/venta-rapida/productos/search", { cuerpo: { query: 7 }, sinClave: true });
+			expect(r.status).toBe(400);
+			expect(r.json).toMatchObject({ ok: false, error: "validation_error" });
+			expect(viajes(r.tiempos, "hub-ruta")).toBe(1);
 		});
 	});
 });

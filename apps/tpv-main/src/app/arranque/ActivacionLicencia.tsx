@@ -10,6 +10,7 @@ import type { LicenseActivateOutcome_Serialize as LicenseActivateOutcome } from 
 import { Building2, KeyRound, MapPin, Phone, ShieldCheck, Store } from "lucide-react";
 
 import { conAviso } from "../../shared/lib/conAviso";
+import { limpiarSesionLocal } from "../../shared/stores/useAuth";
 import { Badge, Button, Card, Input } from "../../shared/ui";
 import { activacionCompleta, FORMULARIO_VACIO } from "./activacion";
 import FondoDecorado from "./FondoDecorado";
@@ -33,6 +34,10 @@ function RechazoPrevio({ motivo }: { motivo: string | null }) {
 	);
 }
 
+/** AUD-06 · Lo que se enseña antes de que el TPV se reinicie por una licencia de otro negocio. */
+export const AVISO_DE_REINICIO =
+	"Esta licencia es de otro negocio. Guardamos aparte los datos del anterior y el TPV se reinicia.";
+
 export default function ActivacionLicencia({
 	rechazoPrevio,
 	volviendo,
@@ -55,6 +60,11 @@ export default function ActivacionLicencia({
 	// enseña y se espera a que pulsen, en vez de seguir de largo: quien acaba de pagar tiene que
 	// ver que los meses han entrado — si la pantalla pasara sola, no sabría si se aplicó.
 	const [sumado, setSumado] = useState<string | null>(null);
+
+	// AUD-06: la licencia es de otro negocio que los datos de este ordenador. Ha quedado pendiente:
+	// el backend se reinicia solo en unos segundos y, al arrancar, guarda aparte los datos del
+	// anterior y la aplica. Aquí sólo se avisa: no se sigue a ninguna pantalla con lo que hay ahora.
+	const [reiniciando, setReiniciando] = useState(false);
 
 	// Cambio de dispositivo: si la licencia ya está en otro equipo, el servidor pide un
 	// código de 6 dígitos que le llega al email. `hint` (p. ej. `a***@bar.com`) != null significa
@@ -114,6 +124,16 @@ export default function ActivacionLicencia({
 			setDeviceChangeHint(null);
 			setDeviceChangeCode("");
 
+			// AUD-06: la base del equipo deja de ser la que había (es de otro negocio, o de antes de un
+			// traslado). Se retira la sesión de la pantalla y lo que tenga en caché, que se leyó de esa
+			// base. La del backend, si la hay, acaba con el reinicio o con la reconstrucción.
+			if (outcome.cambio_de_equipo) limpiarSesionLocal();
+
+			if (outcome.reinicia) {
+				setReiniciando(true);
+				return;
+			}
+
 			if (outcome.tiempo_sumado) {
 				// No hay nada que configurar: el negocio, el PIN y el correo son los de siempre.
 				setSumado(outcome.state?.expires_at ?? null);
@@ -129,6 +149,20 @@ export default function ActivacionLicencia({
 	}
 
 	const errorVisible = error ?? errorAlVolver;
+
+	if (reiniciando) {
+		return (
+			<div className="relative flex min-h-full w-full items-center justify-center bg-bg p-4 text-fg sm:p-6 lg:p-10">
+				<FondoDecorado />
+				<div role="status" className="relative w-full max-w-md rounded-2xl border border-border bg-bg-elev p-6 text-center shadow-lg">
+					<p className="text-lg font-semibold text-fg">{AVISO_DE_REINICIO}</p>
+					<p className="mt-2 text-sm leading-relaxed text-fg-muted">
+						No apagues el ordenador. Al volver, el TPV trae de la nube los datos de esta licencia.
+					</p>
+				</div>
+			</div>
+		);
+	}
 
 	if (sumado !== null) {
 		const hasta = (() => {

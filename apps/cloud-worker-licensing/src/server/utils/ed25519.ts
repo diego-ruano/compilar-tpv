@@ -23,3 +23,12 @@ export async function ed25519Sign(msg: Uint8Array, seed: Uint8Array): Promise<Ui
 	const key = await crypto.subtle.importKey("pkcs8", pkcs8, "Ed25519", false, ["sign"]);
 	return new Uint8Array(await crypto.subtle.sign("Ed25519", key, bytesExactos(msg)));
 }
+
+/**
+ * AUD-33 · Lo más largo que se acepta de una clave pública o de una firma Ed25519 escritas en
+ * base64, antes de mirarlas. Una clave son 32 bytes (44 caracteres) y una firma, 64 (88): el tope
+ * deja sitio a unas comillas alrededor, a la variante base64url o a algún espacio, y nada más. Lo
+ * que llega más largo no es una clave ni una firma, y se rechaza sin procesarlo ni consultar la base.
+ */
+export const TOPE_CLAVE_B64 = 64;
+export const TOPE_FIRMA_B64 = 128;

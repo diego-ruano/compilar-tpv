@@ -151,9 +151,14 @@ pub trait SyncRepository: Send + Sync {
     ///
     /// Va por la conexión CRUDA, como el resto del aplicador: si pasara por la captura, la Main se
     /// replicaría a la nube el volcado que acaba de recibir de ella.
+    ///
+    /// AUD-06 · `negocio` es el de la nube de la que viene el volcado. La base queda **sellada**
+    /// con él en la misma transacción, y una base que ya lleve el sello de otro negocio se rechaza:
+    /// ésa se aparta entera, no se rellena con los datos de otro.
     async fn bootstrap_restaurar(
         &self,
         snapshot: BootstrapSnapshot,
+        negocio: &str,
     ) -> AppResult<BootstrapResultado>;
 
     /* ===== SYNC-19 · fase 2: el histórico que la ventana del bootstrap dejó fuera ===== */

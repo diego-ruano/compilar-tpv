@@ -13,7 +13,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use crate::ejecutor::Value;
 
-use tpv_application::error::AppResult;
+use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::notificaciones::{NotificacionesRepository, Notifier};
 use tpv_contracts::notificaciones::NotificacionRow;
 use tpv_domain::notificaciones::NuevaNotificacion;
@@ -49,6 +49,23 @@ const VISIBLE_PAPELERA: &str = r#"
 
 /// Tope de filas del centro de notificaciones (defensivo; en la práctica hay pocas activas).
 const LIST_LIMIT: i64 = 200;
+
+/// AUD-26: el `WHERE` de las escrituras de un usuario sobre una notificación. `?1` es la
+/// notificación y `?2` el usuario de la sesión; va dirigida a él si es para todos, para él o para
+/// su rol. Sin alias de tabla: va en un `UPDATE`, en un `DELETE` y en el `SELECT` de un `INSERT`,
+/// todos sobre `Notificaciones`. El worker construye la misma condición
+/// (`notificaciones.commands.ts`), y el arnés de contrato comprueba que hacen lo mismo.
+const DIRIGIDA_AL_USUARIO: &str = "ID_Notificacion = ?1 AND (Destino_Tipo = 'todos' \
+     OR (Destino_Tipo = 'usuario' AND Destino_Valor = ?2) \
+     OR (Destino_Tipo = 'rol' AND Destino_Valor = \
+         (SELECT u.ID_Rol FROM Usuarios u WHERE u.ID_Usuario = ?2)))";
+
+/// Lo que se puede descartar es lo que está en el centro; lo que se restaura o se borra para
+/// siempre, lo que está en la papelera.
+const EN_EL_CENTRO: &str = "Estado = 'activa'";
+const EN_LA_PAPELERA: &str = "Estado = 'descartada'";
+
+const NO_ESTA_EN_TU_LISTA: &str = "Esa notificación no está en tu lista.";
 
 pub struct SqliteNotificacionesRepository {
     db: Arc<Db>,
@@ -114,21 +131,42 @@ impl SqliteNotificacionesRepository {
         Ok(out)
     }
 
-    /// Cambia el estado de una notificación. Es una escritura normal (`execute`), así que la
-    /// captura del outbox la replica a la nube y a las Handy como cualquier otra.
-    async fn set_estado(&self, id_notificacion: &str, estado: &'static str) -> AppResult<bool> {
+    /// AUD-26: escribe `sentencia` sólo si la notificación `?1` cumple `donde` para el usuario `?2`
+    /// (va dirigida a él y, si se pide, está en ese estado). Es una escritura normal (`execute`):
+    /// la captura del outbox la replica a la nube y a las Handy como cualquier otra.
+    ///
+    /// - Se comprueba con el escritor ya tomado: entre la comprobación y la escritura no entra nada,
+    ///   tampoco lo que llega de la nube, que se aplica por este mismo escritor.
+    /// - Si no la cumple, `not_found` y no se escribe: el outbox captura también una sentencia que
+    ///   no toca ninguna fila, y subiría a la nube.
+    /// - La sentencia lleva la misma condición en su `WHERE`, para que se cumpla también donde se
+    ///   aplique después: si en la nube una Handy la restauró mientras tanto, el borrado que sube de
+    ///   aquí no se la lleva.
+    async fn escribir_si_es_suya(
+        &self,
+        id_notificacion: &str,
+        id_usuario: &str,
+        donde: &str,
+        sentencia: &str,
+    ) -> AppResult<u64> {
+        let args = || {
+            vec![
+                Value::Text(id_notificacion.to_string()),
+                Value::Text(id_usuario.to_string()),
+            ]
+        };
         let db = self.db.write().await;
-        let affected = db
-            .execute(
-                "UPDATE Notificaciones SET Estado = ?2 WHERE ID_Notificacion = ?1;",
-                vec![
-                    Value::Text(id_notificacion.to_string()),
-                    Value::Text(estado.to_string()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-        Ok(affected > 0)
+        let es_suya = {
+            let mut rows = db
+                .query(&format!("SELECT 1 FROM Notificaciones WHERE {donde} LIMIT 1;"), args())
+                .await
+                .map_err(db_err)?;
+            rows.next().await.map_err(db_err)?.is_some()
+        };
+        if !es_suya {
+            return Err(AppError::not_found(NO_ESTA_EN_TU_LISTA));
+        }
+        db.execute(sentencia, args()).await.map_err(db_err)
     }
 
     /// IDs de las notificaciones visibles y **no leídas** por `id_usuario` (orden estable).
@@ -208,21 +246,22 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
     async fn marcar_leida(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
         // INSERT OR IGNORE: idempotente (relee/marcar dos veces no duplica ni falla). Se captura en
         // el outbox y replica; `datetime('now','localtime')` se congela a literal al capturarse.
-        let db = self.db.write().await;
-        let affected = db
-            .execute(
-                r#"
-                INSERT OR IGNORE INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En)
-                VALUES (?1, ?2, datetime('now','localtime'));
-                "#,
-                vec![
-                    Value::Text(id_notificacion.to_string()),
-                    Value::Text(id_usuario.to_string()),
-                ],
+        // AUD-26: sólo de una notificación dirigida a quien lee, en cualquier estado (el recibo es
+        // suyo y no cambia nada a nadie más). Por eso es un `INSERT ... SELECT` de esa fila: la
+        // condición viaja con la sentencia.
+        let insertadas = self
+            .escribir_si_es_suya(
+                id_notificacion,
+                id_usuario,
+                DIRIGIDA_AL_USUARIO,
+                &format!(
+                    "INSERT OR IGNORE INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) \
+                     SELECT ?1, ?2, datetime('now','localtime') FROM Notificaciones \
+                     WHERE {DIRIGIDA_AL_USUARIO};"
+                ),
             )
-            .await
-            .map_err(db_err)?;
-        Ok(affected > 0)
+            .await?;
+        Ok(insertadas > 0)
     }
 
     async fn marcar_todas_leidas(&self, id_usuario: &str) -> AppResult<i64> {
@@ -254,34 +293,55 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
         }).await
     }
 
-    async fn descartar(&self, id_notificacion: &str) -> AppResult<bool> {
-        self.set_estado(id_notificacion, "descartada").await
+    async fn descartar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
+        let donde = format!("{DIRIGIDA_AL_USUARIO} AND {EN_EL_CENTRO}");
+        let cambiadas = self
+            .escribir_si_es_suya(
+                id_notificacion,
+                id_usuario,
+                &donde,
+                &format!("UPDATE Notificaciones SET Estado = 'descartada' WHERE {donde};"),
+            )
+            .await?;
+        Ok(cambiadas > 0)
     }
 
     async fn listar_descartadas(&self, id_usuario: &str) -> AppResult<Vec<NotificacionRow>> {
         self.filas(id_usuario, VISIBLE_PAPELERA, "").await
     }
 
-    async fn restaurar(&self, id_notificacion: &str) -> AppResult<bool> {
+    async fn restaurar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
         // Vuelve a 'activa'. Ojo con el índice único de dedupe: si mientras estaba en la papelera
         // se volvió a emitir el mismo aviso, restaurarla chocaría con la nueva. El error sube tal
         // cual (la UI lo enseña): inventarse un desempate aquí sería decidir por el usuario cuál
         // de las dos vale.
-        self.set_estado(id_notificacion, "activa").await
+        let donde = format!("{DIRIGIDA_AL_USUARIO} AND {EN_LA_PAPELERA}");
+        let cambiadas = self
+            .escribir_si_es_suya(
+                id_notificacion,
+                id_usuario,
+                &donde,
+                &format!("UPDATE Notificaciones SET Estado = 'activa' WHERE {donde};"),
+            )
+            .await?;
+        Ok(cambiadas > 0)
     }
 
-    async fn eliminar(&self, id_notificacion: &str) -> AppResult<bool> {
+    async fn eliminar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
         // Los recibos de lectura se van con ella por ON DELETE CASCADE. El DELETE se captura en el
         // outbox y cada motor re-deriva su cascada al aplicarlo (FK activadas en toda conexión).
-        let db = self.db.write().await;
-        let affected = db
-            .execute(
-                "DELETE FROM Notificaciones WHERE ID_Notificacion = ?1;",
-                vec![Value::Text(id_notificacion.to_string())],
+        // AUD-26: sólo una que siga en la papelera del usuario al borrarla; si alguien la restauró
+        // entre que la vio y la borró, no se la lleva, ni aquí ni en la nube.
+        let donde = format!("{DIRIGIDA_AL_USUARIO} AND {EN_LA_PAPELERA}");
+        let borradas = self
+            .escribir_si_es_suya(
+                id_notificacion,
+                id_usuario,
+                &donde,
+                &format!("DELETE FROM Notificaciones WHERE {donde};"),
             )
-            .await
-            .map_err(db_err)?;
-        Ok(affected > 0)
+            .await?;
+        Ok(borradas > 0)
     }
 }
 
@@ -551,3 +611,247 @@ mod tests_emision_repetida {
     }
 }
 
+
+#[cfg(test)]
+mod tests_cada_uno_lo_suyo {
+    //! AUD-26: el centro de notificaciones es de quien ha iniciado sesión. El comando pone el
+    //! usuario de la sesión; aquí se comprueba, contra la base de verdad, lo que hacen con él el
+    //! caso de uso y este repositorio: un usuario no lee ni marca en nombre de otro, y no descarta,
+    //! restaura ni elimina lo que no ve. Lo que se le niega no deja nada en el outbox, y la
+    //! condición va dentro de la sentencia que escribe: aguanta un cruce y se cumple también donde
+    //! se aplique después.
+
+    use super::*;
+    use tpv_application::use_cases::notificaciones as uc;
+    use tpv_contracts::notificaciones::{NotificacionIdInput, NotificacionesListArgs};
+    use tpv_contracts::sync::SqlStatement;
+    use tpv_domain::notificaciones::{Destino, Severidad, ADMIN_ROL_ID};
+
+    const ADMIN: &str = "aud26-admin-ficticio";
+    const OTRO_ADMIN: &str = "aud26-otro-admin-ficticio";
+    const CAMARERO: &str = "aud26-camarero-ficticio";
+
+    /// Una base con dos administradores y un camarero. El estado de partida va por `raw()`: no es
+    /// una escritura de negocio.
+    async fn base(prefijo: &str) -> Arc<Db> {
+        let dir = crate::test_temp::dir_temporal(prefijo);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            for (id, rol) in [
+                (ADMIN, "Administrador"),
+                (OTRO_ADMIN, "Administrador"),
+                (CAMARERO, "Camarero"),
+            ] {
+                w.raw()
+                    .execute(
+                        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) \
+                         VALUES (?1, (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = ?2), \
+                                 ?1 || '@ficticio.invalid', 'x', 'Ficticio', 'Activo');",
+                        vec![Value::Text(id.into()), Value::Text(rol.into())],
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+        db
+    }
+
+    async fn abrir() -> (Arc<Db>, SqliteNotificacionesRepository) {
+        let db = base("notif_lo_suyo").await;
+        (db.clone(), SqliteNotificacionesRepository::new(db))
+    }
+
+    /// Un aviso para los administradores, con datos de un cliente (ficticios).
+    async fn aviso_al_admin(repo: &SqliteNotificacionesRepository) -> String {
+        repo.emitir(NuevaNotificacion {
+            tipo: "reserva_web_fallida".into(),
+            severidad: Severidad::Aviso,
+            titulo: "Reserva web sin confirmar".into(),
+            cuerpo: Some("Llama al cliente: Cliente Ficticio · 600000000".into()),
+            destino: Destino::Rol(ADMIN_ROL_ID.into()),
+            accion: None,
+            payload: None,
+            clave_dedupe: None,
+            expira_en: None,
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn contar(db: &Db, sql: &str) -> i64 {
+        let g = db.read().await;
+        let mut rows = g.query(sql, ()).await.unwrap();
+        v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    async fn en_outbox(db: &Db) -> i64 {
+        contar(db, "SELECT COUNT(*) FROM _Sync_Outbox;").await
+    }
+
+    /// Las sentencias de la última operación del outbox: lo que sube a la nube.
+    async fn ultima_operacion(db: &Db) -> Vec<SqlStatement> {
+        let g = db.read().await;
+        let mut rows = g
+            .query("SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;", ())
+            .await
+            .unwrap();
+        let json = v_string(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap();
+        serde_json::from_str(&json).unwrap()
+    }
+
+    fn id(id_notificacion: &str) -> NotificacionIdInput {
+        NotificacionIdInput { id_notificacion: id_notificacion.into() }
+    }
+
+    async fn ids_del_centro(repo: &SqliteNotificacionesRepository, id_usuario: &str) -> Vec<String> {
+        uc::listar(repo, id_usuario, NotificacionesListArgs { solo_no_leidas: None })
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id_notificacion)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn un_usuario_no_lee_ni_marca_lo_de_otro() {
+        let (db, repo) = abrir().await;
+        let aviso = aviso_al_admin(&repo).await;
+        let antes = en_outbox(&db).await;
+
+        // El camarero, con su usuario, no ve el aviso del rol Administrador ni lo cuenta.
+        assert!(ids_del_centro(&repo, CAMARERO).await.is_empty());
+        assert_eq!(uc::contar_no_leidas(&repo, CAMARERO).await.unwrap(), 0);
+        assert!(uc::listar_descartadas(&repo, CAMARERO).await.unwrap().is_empty());
+
+        // Aunque conozca el id, no puede marcarlo: no es suyo. Ni recibo ni nada que suba.
+        let r = uc::marcar_leida(&repo, CAMARERO, id(&aviso)).await;
+        assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+        assert_eq!(
+            contar(&db, "SELECT COUNT(*) FROM Notificacion_Lecturas;").await,
+            0,
+            "no queda ningún recibo"
+        );
+        assert_eq!(uc::marcar_todas_leidas(&repo, CAMARERO).await.unwrap(), 0);
+        assert_eq!(en_outbox(&db).await, antes, "lo negado no sube a la nube");
+        assert_eq!(uc::contar_no_leidas(&repo, ADMIN).await.unwrap(), 1);
+
+        // El administrador, con el suyo, lo ve y lo marca; la segunda vez no hay nada que marcar.
+        assert_eq!(ids_del_centro(&repo, ADMIN).await, std::slice::from_ref(&aviso));
+        assert!(uc::marcar_leida(&repo, ADMIN, id(&aviso)).await.unwrap());
+        assert!(!uc::marcar_leida(&repo, ADMIN, id(&aviso)).await.unwrap());
+        assert_eq!(uc::contar_no_leidas(&repo, ADMIN).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn un_usuario_no_descarta_restaura_ni_elimina_lo_que_no_ve() {
+        let (db, repo) = abrir().await;
+        let aviso = aviso_al_admin(&repo).await;
+        let antes = en_outbox(&db).await;
+
+        // Desde el centro del camarero no se manda a la papelera.
+        assert!(matches!(
+            uc::descartar(&repo, CAMARERO, id(&aviso)).await,
+            Err(AppError::NotFound(_))
+        ));
+        assert_eq!(ids_del_centro(&repo, ADMIN).await, std::slice::from_ref(&aviso));
+        assert_eq!(en_outbox(&db).await, antes, "lo negado no sube a la nube");
+
+        // El administrador lo descarta; desde la papelera del camarero no se restaura ni se
+        // borra para siempre.
+        assert!(uc::descartar(&repo, ADMIN, id(&aviso)).await.unwrap());
+        let tras_descartar = en_outbox(&db).await;
+        for r in [
+            uc::restaurar(&repo, CAMARERO, id(&aviso)).await,
+            uc::eliminar(&repo, CAMARERO, id(&aviso)).await,
+        ] {
+            assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+        }
+        assert_eq!(en_outbox(&db).await, tras_descartar, "lo negado no sube a la nube");
+        let papelera = uc::listar_descartadas(&repo, ADMIN).await.unwrap();
+        assert_eq!(papelera.len(), 1, "sigue en la papelera del administrador");
+
+        // Y el administrador hace lo de siempre: restaurar, volver a descartar y eliminar.
+        assert!(uc::restaurar(&repo, ADMIN, id(&aviso)).await.unwrap());
+        assert!(uc::descartar(&repo, ADMIN, id(&aviso)).await.unwrap());
+        assert!(uc::eliminar(&repo, ADMIN, id(&aviso)).await.unwrap());
+        assert!(uc::listar_descartadas(&repo, ADMIN).await.unwrap().is_empty());
+        assert!(ids_del_centro(&repo, ADMIN).await.is_empty());
+    }
+
+    /// El cruce: A ve el aviso en su papelera, B lo restaura, y A pulsa «eliminar» sobre lo que
+    /// vio. Lo que se borra para siempre tiene que seguir en la papelera al borrarlo: el aviso,
+    /// ya activo, se queda.
+    #[tokio::test]
+    async fn restaurar_y_eliminar_cruzados_no_borran_un_aviso_activo() {
+        let (db, repo) = abrir().await;
+        let aviso = aviso_al_admin(&repo).await;
+        assert!(uc::descartar(&repo, ADMIN, id(&aviso)).await.unwrap());
+
+        // A la tiene en su papelera...
+        let vista = uc::listar_descartadas(&repo, ADMIN).await.unwrap();
+        assert_eq!(vista.len(), 1);
+        // ...B la restaura...
+        assert!(uc::restaurar(&repo, OTRO_ADMIN, id(&aviso)).await.unwrap());
+        let antes = en_outbox(&db).await;
+        // ...y A la borra para siempre.
+        let r = uc::eliminar(&repo, ADMIN, id(&vista[0].id_notificacion)).await;
+
+        assert!(matches!(r, Err(AppError::NotFound(_))), "{r:?}");
+        assert_eq!(ids_del_centro(&repo, ADMIN).await, std::slice::from_ref(&aviso));
+        assert_eq!(en_outbox(&db).await, antes, "lo negado no sube a la nube");
+    }
+
+    /// La condición viaja con la sentencia. Aquí se borra lo que está en la papelera; si en la nube
+    /// una Handy la restauró antes de que llegue el borrado, al aplicarlo allí no se la lleva.
+    #[tokio::test]
+    async fn la_condicion_se_cumple_tambien_al_aplicarse_en_la_nube() {
+        let (db, repo) = abrir().await;
+        let aviso = aviso_al_admin(&repo).await;
+        assert!(uc::descartar(&repo, ADMIN, id(&aviso)).await.unwrap());
+        assert!(uc::eliminar(&repo, ADMIN, id(&aviso)).await.unwrap());
+        let sube = ultima_operacion(&db).await;
+        assert_eq!(sube.len(), 1, "{:?}", sube.iter().map(|s| &s.sql).collect::<Vec<_>>());
+        assert!(sube[0].sql.starts_with("DELETE FROM Notificaciones"), "{}", sube[0].sql);
+
+        // Dos nubes: en una sigue en la papelera; en la otra, una Handy la ha restaurado.
+        for (estado, queda) in [("descartada", 0), ("activa", 1)] {
+            let nube = base("notif_nube").await;
+            {
+                let w = nube.write().await;
+                w.raw()
+                    .execute(
+                        "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, \
+                         Destino_Tipo, Destino_Valor, Estado, Creada_En) \
+                         VALUES (?1, 'reserva_web_fallida', 'aviso', 'Reserva web sin confirmar', \
+                                 'rol', ?2, ?3, '2026-11-11 10:00:00');",
+                        vec![
+                            Value::Text(aviso.clone()),
+                            Value::Text(ADMIN_ROL_ID.into()),
+                            Value::Text(estado.into()),
+                        ],
+                    )
+                    .await
+                    .unwrap();
+                for st in &sube {
+                    let args: Vec<Value> = st
+                        .args
+                        .iter()
+                        .map(|a| match a {
+                            serde_json::Value::String(s) => Value::Text(s.clone()),
+                            serde_json::Value::Null => Value::Null,
+                            otro => panic!("argumento inesperado: {otro}"),
+                        })
+                        .collect();
+                    w.raw().execute(&st.sql, args).await.unwrap();
+                }
+            }
+            assert_eq!(
+                contar(&nube, "SELECT COUNT(*) FROM Notificaciones;").await,
+                queda,
+                "en la nube estaba {estado}"
+            );
+        }
+    }
+}

@@ -3,7 +3,6 @@
 pub mod avisos;
 pub mod cierre_caja;
 pub mod clientes;
-pub mod cloud_sync;
 pub mod configuracion;
 pub mod correo_recuperacion;
 pub mod cuentas;

@@ -1,9 +1,15 @@
 //! Casos de uso de **notificaciones**. Orquestan dominio + puertos; sin SQL ni detalles de Tauri.
 //! Lecturas/gestión van por `NotificacionesRepository`; la emisión, por `Notifier`.
+//!
+//! AUD-26: el `id_usuario` que reciben es el de la sesión del backend, y lo pone el comando: la
+//! pantalla no elige en nombre de quién se lee ni se marca. Marcar leída y la papelera se lo pasan
+//! al repositorio, que sólo escribe si la notificación va dirigida a ese usuario (a todos, a él o a
+//! su rol) y está en el estado que toca, con la condición dentro de la propia sentencia (ver el
+//! puerto). Aquí no se comprueba antes con una lectura: entre esa lectura y la escritura se podía
+//! colar otro (restaurar lo que este usuario iba a borrar para siempre).
 
 use tpv_contracts::notificaciones::{
-    CrearNotificacionInput, MarcarLeidaInput, MarcarTodasLeidasInput, NotificacionIdInput,
-    NotificacionRow, NotificacionesListArgs, NotificacionesUsuarioArgs,
+    CrearNotificacionInput, NotificacionIdInput, NotificacionRow, NotificacionesListArgs,
 };
 use tpv_domain::notificaciones::NuevaNotificacion;
 
@@ -13,9 +19,10 @@ use crate::ports::notificaciones::{NotificacionesRepository, Notifier};
 /// Lista las notificaciones visibles de un usuario. Sin usuario => lista vacía (sin tocar el repo).
 pub async fn listar(
     repo: &dyn NotificacionesRepository,
+    id_usuario: &str,
     args: NotificacionesListArgs,
 ) -> AppResult<Vec<NotificacionRow>> {
-    let id_usuario = args.id_usuario.trim();
+    let id_usuario = id_usuario.trim();
     if id_usuario.is_empty() {
         return Ok(Vec::new());
     }
@@ -26,77 +33,78 @@ pub async fn listar(
 /// Contador de no leídas de un usuario (para el badge). Sin usuario => 0.
 pub async fn contar_no_leidas(
     repo: &dyn NotificacionesRepository,
-    args: NotificacionesUsuarioArgs,
+    id_usuario: &str,
 ) -> AppResult<i64> {
-    let id_usuario = args.id_usuario.trim();
+    let id_usuario = id_usuario.trim();
     if id_usuario.is_empty() {
         return Ok(0);
     }
     repo.contar_no_leidas(id_usuario).await
 }
 
-/// Marca una notificación como leída por un usuario.
+/// Marca como leída por un usuario una notificación dirigida a él (AUD-26). Sólo escribe su
+/// recibo: lo leído es de cada uno, así que no cambia lo que ven los demás.
 pub async fn marcar_leida(
     repo: &dyn NotificacionesRepository,
-    input: MarcarLeidaInput,
+    id_usuario: &str,
+    input: NotificacionIdInput,
 ) -> AppResult<bool> {
-    let id_notificacion = input.id_notificacion.trim();
-    let id_usuario = input.id_usuario.trim();
-    if id_notificacion.is_empty() {
-        return Err(AppError::validation("Falta la notificación."));
-    }
-    if id_usuario.is_empty() {
-        return Err(AppError::validation("Falta el usuario."));
-    }
+    let id_notificacion = id_no_vacio(&input.id_notificacion)?;
+    let id_usuario = usuario_no_vacio(id_usuario)?;
     repo.marcar_leida(id_notificacion, id_usuario).await
 }
 
 /// Marca como leídas todas las notificaciones visibles de un usuario.
 pub async fn marcar_todas_leidas(
     repo: &dyn NotificacionesRepository,
-    input: MarcarTodasLeidasInput,
+    id_usuario: &str,
 ) -> AppResult<i64> {
-    let id_usuario = input.id_usuario.trim();
-    if id_usuario.is_empty() {
-        return Err(AppError::validation("Falta el usuario."));
-    }
-    repo.marcar_todas_leidas(id_usuario).await
+    repo.marcar_todas_leidas(usuario_no_vacio(id_usuario)?).await
 }
 
-/// Manda una notificación a la papelera. Reversible con [`restaurar`].
+/// Manda una notificación a la papelera. Reversible con [`restaurar`]. Sólo una activa dirigida
+/// al usuario (AUD-26).
 pub async fn descartar(
     repo: &dyn NotificacionesRepository,
+    id_usuario: &str,
     input: NotificacionIdInput,
 ) -> AppResult<bool> {
-    repo.descartar(id_no_vacio(&input.id_notificacion)?).await
+    let id_notificacion = id_no_vacio(&input.id_notificacion)?;
+    repo.descartar(id_notificacion, usuario_no_vacio(id_usuario)?).await
 }
 
 /// Contenido de la papelera visible para un usuario. Sin usuario => lista vacía.
 pub async fn listar_descartadas(
     repo: &dyn NotificacionesRepository,
-    args: NotificacionesUsuarioArgs,
+    id_usuario: &str,
 ) -> AppResult<Vec<NotificacionRow>> {
-    let id_usuario = args.id_usuario.trim();
+    let id_usuario = id_usuario.trim();
     if id_usuario.is_empty() {
         return Ok(Vec::new());
     }
     repo.listar_descartadas(id_usuario).await
 }
 
-/// Saca una notificación de la papelera y la devuelve al centro.
+/// Saca una notificación de la papelera y la devuelve al centro. Sólo una de la papelera del
+/// usuario (AUD-26).
 pub async fn restaurar(
     repo: &dyn NotificacionesRepository,
+    id_usuario: &str,
     input: NotificacionIdInput,
 ) -> AppResult<bool> {
-    repo.restaurar(id_no_vacio(&input.id_notificacion)?).await
+    let id_notificacion = id_no_vacio(&input.id_notificacion)?;
+    repo.restaurar(id_notificacion, usuario_no_vacio(id_usuario)?).await
 }
 
-/// Borra una notificación para siempre. No hay vuelta atrás: sólo se ofrece desde la papelera.
+/// Borra una notificación para siempre. No hay vuelta atrás: sólo se ofrece desde la papelera, y
+/// sólo vale para una que esté en la del usuario cuando se borra (AUD-26).
 pub async fn eliminar(
     repo: &dyn NotificacionesRepository,
+    id_usuario: &str,
     input: NotificacionIdInput,
 ) -> AppResult<bool> {
-    repo.eliminar(id_no_vacio(&input.id_notificacion)?).await
+    let id_notificacion = id_no_vacio(&input.id_notificacion)?;
+    repo.eliminar(id_notificacion, usuario_no_vacio(id_usuario)?).await
 }
 
 /// Un id vacío llegaría al SQL como un `WHERE ID = ''`: no borra nada, pero tampoco avisa de que
@@ -107,6 +115,14 @@ fn id_no_vacio(id: &str) -> AppResult<&str> {
         return Err(AppError::validation("Falta la notificación."));
     }
     Ok(id)
+}
+
+fn usuario_no_vacio(id_usuario: &str) -> AppResult<&str> {
+    let id_usuario = id_usuario.trim();
+    if id_usuario.is_empty() {
+        return Err(AppError::validation("Falta el usuario."));
+    }
+    Ok(id_usuario)
 }
 
 /// Emite una notificación manual (validando en el dominio). Devuelve su `ID_Notificacion`.
@@ -132,6 +148,7 @@ pub async fn crear(notifier: &dyn Notifier, input: CrearNotificacionInput) -> Ap
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use std::sync::Mutex;
 
     struct RepoQueNoDebeLlamarse;
 
@@ -149,16 +166,16 @@ mod tests {
         async fn marcar_todas_leidas(&self, _: &str) -> AppResult<i64> {
             panic!("repo llamado")
         }
-        async fn descartar(&self, _: &str) -> AppResult<bool> {
+        async fn descartar(&self, _: &str, _: &str) -> AppResult<bool> {
             panic!("repo llamado")
         }
         async fn listar_descartadas(&self, _: &str) -> AppResult<Vec<NotificacionRow>> {
             panic!("repo llamado")
         }
-        async fn restaurar(&self, _: &str) -> AppResult<bool> {
+        async fn restaurar(&self, _: &str, _: &str) -> AppResult<bool> {
             panic!("repo llamado")
         }
-        async fn eliminar(&self, _: &str) -> AppResult<bool> {
+        async fn eliminar(&self, _: &str, _: &str) -> AppResult<bool> {
             panic!("repo llamado")
         }
     }
@@ -175,46 +192,47 @@ mod tests {
         }
     }
 
+    fn id(id_notificacion: &str) -> NotificacionIdInput {
+        NotificacionIdInput { id_notificacion: id_notificacion.into() }
+    }
+
     #[tokio::test]
     async fn listar_sin_usuario_no_toca_repo() {
-        let args = NotificacionesListArgs { id_usuario: "  ".into(), solo_no_leidas: None };
-        assert!(listar(&RepoQueNoDebeLlamarse, args).await.unwrap().is_empty());
+        let args = NotificacionesListArgs { solo_no_leidas: None };
+        assert!(listar(&RepoQueNoDebeLlamarse, "  ", args).await.unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn contar_sin_usuario_devuelve_cero() {
-        let args = NotificacionesUsuarioArgs { id_usuario: "".into() };
-        assert_eq!(contar_no_leidas(&RepoQueNoDebeLlamarse, args).await.unwrap(), 0);
+        assert_eq!(contar_no_leidas(&RepoQueNoDebeLlamarse, "").await.unwrap(), 0);
     }
 
     #[tokio::test]
     async fn marcar_leida_exige_ids() {
-        let input = MarcarLeidaInput { id_notificacion: " ".into(), id_usuario: "u1".into() };
         assert!(matches!(
-            marcar_leida(&RepoQueNoDebeLlamarse, input).await,
+            marcar_leida(&RepoQueNoDebeLlamarse, "u1", id(" ")).await,
+            Err(AppError::Validation(_))
+        ));
+        assert!(matches!(
+            marcar_leida(&RepoQueNoDebeLlamarse, " ", id("n1")).await,
             Err(AppError::Validation(_))
         ));
     }
 
     #[tokio::test]
-    async fn las_acciones_de_la_papelera_exigen_id() {
+    async fn las_acciones_de_la_papelera_exigen_id_y_usuario() {
         // Un id vacío daría un UPDATE/DELETE que no toca nada y una UI que dice "hecho".
-        for id in ["", "   "] {
-            let input = NotificacionIdInput { id_notificacion: id.into() };
+        for (usuario, notificacion) in [("u1", ""), ("u1", "   "), ("", "n1"), ("  ", "n1")] {
             assert!(matches!(
-                descartar(&RepoQueNoDebeLlamarse, input.clone()).await,
+                descartar(&RepoQueNoDebeLlamarse, usuario, id(notificacion)).await,
                 Err(AppError::Validation(_))
             ));
-
-            let input = NotificacionIdInput { id_notificacion: id.into() };
             assert!(matches!(
-                restaurar(&RepoQueNoDebeLlamarse, input.clone()).await,
+                restaurar(&RepoQueNoDebeLlamarse, usuario, id(notificacion)).await,
                 Err(AppError::Validation(_))
             ));
-
-            let input = NotificacionIdInput { id_notificacion: id.into() };
             assert!(matches!(
-                eliminar(&RepoQueNoDebeLlamarse, input).await,
+                eliminar(&RepoQueNoDebeLlamarse, usuario, id(notificacion)).await,
                 Err(AppError::Validation(_))
             ));
         }
@@ -222,8 +240,7 @@ mod tests {
 
     #[tokio::test]
     async fn la_papelera_sin_usuario_no_toca_repo() {
-        let args = NotificacionesUsuarioArgs { id_usuario: " ".into() };
-        assert!(listar_descartadas(&RepoQueNoDebeLlamarse, args)
+        assert!(listar_descartadas(&RepoQueNoDebeLlamarse, " ")
             .await
             .unwrap()
             .is_empty());
@@ -248,5 +265,74 @@ mod tests {
             crear(&NotifierQueNoDebeLlamarse, input).await,
             Err(AppError::Validation(_))
         ));
+    }
+
+    // ── AUD-26: el usuario llega a la escritura ─────────────────────────────────────────────
+
+    /// Apunta lo que se le pide escribir y en nombre de quién. Lo que decide si se escribe es el
+    /// repositorio (con la condición dentro de la sentencia): aquí sólo importa que el caso de uso
+    /// no se quede el usuario por el camino ni compruebe por su cuenta antes.
+    #[derive(Default)]
+    struct Apunta(Mutex<Vec<String>>);
+
+    impl Apunta {
+        fn apuntar(&self, que: String) -> AppResult<bool> {
+            self.0.lock().unwrap().push(que);
+            Ok(true)
+        }
+        fn escrituras(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl NotificacionesRepository for Apunta {
+        async fn listar(&self, _: &str, _: bool) -> AppResult<Vec<NotificacionRow>> {
+            panic!("no se comprueba con una lectura aparte")
+        }
+        async fn contar_no_leidas(&self, _: &str) -> AppResult<i64> {
+            panic!("no se cuenta nada")
+        }
+        async fn marcar_leida(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
+            self.apuntar(format!("leida {id_notificacion} por {id_usuario}"))
+        }
+        async fn marcar_todas_leidas(&self, id_usuario: &str) -> AppResult<i64> {
+            self.apuntar(format!("todas por {id_usuario}"))?;
+            Ok(0)
+        }
+        async fn descartar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
+            self.apuntar(format!("descartar {id_notificacion} por {id_usuario}"))
+        }
+        async fn listar_descartadas(&self, _: &str) -> AppResult<Vec<NotificacionRow>> {
+            panic!("no se comprueba con una lectura aparte")
+        }
+        async fn restaurar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
+            self.apuntar(format!("restaurar {id_notificacion} por {id_usuario}"))
+        }
+        async fn eliminar(&self, id_notificacion: &str, id_usuario: &str) -> AppResult<bool> {
+            self.apuntar(format!("eliminar {id_notificacion} por {id_usuario}"))
+        }
+    }
+
+    #[tokio::test]
+    async fn cada_escritura_lleva_el_usuario_que_se_recibe_y_no_lee_antes() {
+        let repo = Apunta::default();
+
+        marcar_leida(&repo, "camarero", id("n1")).await.unwrap();
+        marcar_todas_leidas(&repo, " camarero ").await.unwrap();
+        descartar(&repo, "camarero", id(" n1 ")).await.unwrap();
+        restaurar(&repo, "camarero", id("n1")).await.unwrap();
+        eliminar(&repo, "camarero", id("n1")).await.unwrap();
+
+        assert_eq!(
+            repo.escrituras(),
+            [
+                "leida n1 por camarero",
+                "todas por camarero",
+                "descartar n1 por camarero",
+                "restaurar n1 por camarero",
+                "eliminar n1 por camarero",
+            ]
+        );
     }
 }

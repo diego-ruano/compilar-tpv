@@ -36,7 +36,8 @@ DO `TenantHub` y `AgendaWeb` (SQLite), R2 `tpv-images` (público por `r2.dev`) y
 RI-46: los bindings de R2 son exclusivamente `IMAGES` y `COPIAS`. En desarrollo local, R2 y
 `EMAIL` se simulan; no llevan `remote: true`. La base central sigue siendo la Turso de siempre.
 La fecha de compatibilidad (`2026-05-29`) coincide con el runtime instalado; los tests reutilizan
-el mismo `wrangler.json` y los tipos se regeneran con `pnpm cf-typegen`.
+el mismo `wrangler.json` con el entorno pisado ([los tests no salen a la red](#los-tests-no-salen-a-la-red))
+y los tipos se regeneran con `pnpm cf-typegen`.
 
 ## Dos bases, y sólo una se migra desde el código
 
@@ -90,8 +91,43 @@ el mismo `wrangler.json` y los tipos se regeneran con `pnpm cf-typegen`.
   (`soloLaMain…`), un tope de tamaño, un token de administración, el filtro por IP del emparejamiento. Un
   `*.routes.ts` no resuelve roles. Lo vigilan `test/anularSoloMain.test.ts` y
   `test/vetoAntesDelCuerpo.test.ts`.
+- **Una ruta anónima lleva el tope de su cuerpo delante** (AUD-34): lo que no pasa por `tenantAuth`
+  ni por un token de administración no lee un cuerpo entero antes de saber quién llama. Se declara
+  antes que la ruta, `xRoutes.use("/ruta", topeAnonimo())` (`lib/validacion.ts`, 413
+  `payload_too_large`): 8 KiB el emparejamiento (`claim`, `fetch-token`, `cancel`) y las licencias
+  (`activate`, `device-change/request`, `refresh`), y 4 MiB el webhook de Stripe. Su evento más
+  grande es una disputa cerrada con las pruebas y los metadatos al máximo (150 000 caracteres y 50
+  pares de 40 + 500): con todo escapado en `\uXXXX`, unos 2,1 MB. Las públicas de la reserva web
+  llevan el suyo, `topeDelCuerpo`. `test/vetoAntesDelCuerpo.test.ts` barre los routers y falla con una
+  ruta anónima con cuerpo sin tope.
 - **Toda ruta autenticada pasa por `tenantAuth`** (`middleware/tenant.ts`): token, device-proof, rol de
   la fila, licencia en uso. Tenant y dispositivo salen del token, nunca del cuerpo.
+- **Ningún dato personal ni texto libre en la query ni en el camino: va en el cuerpo** (AUD-27).
+  Cloudflare guarda el método y la URL de cada petición, y Logpush puede exportarlos a Axiom, sin
+  pasar por el filtro de datos personales; el cuerpo no se registra
+  ([observabilidad.md](observabilidad.md#lo-que-registra-cloudflare-de-cada-petición)). En la URL
+  sólo van identificadores, fechas, filtros cerrados y paginación. Lo que es de una persona (nombre,
+  teléfono, correo, documento), una nota o lo que se escribe en un buscador hace que la lectura pase
+  a `post` con `cuerpo(schema)`.
+- **Una lectura que va por POST se declara** con `xRoutes.use("/ruta", lecturaPorPost())`
+  (`lib/rutas.ts`) **delante de `tenantAuth`**, que lee el cuerpo entero para comprobar la firma. La
+  declaración le pone el tope a su cuerpo (8 KB, o el que se le diga) y es lo que la distingue de
+  una escritura. El tope se comprueba en el Worker, antes de autenticar: un cuerpo que pasa de él no
+  llega al `TenantHub`. Sigue siendo una lectura: sólo `tenantQuery`, que le fija la hora con
+  `X-Client-Now`; ni `apply` ni `X-Idempotency-Key` ni los vetos que son para lo que escribe
+  (`soloLaMain…`), y la Handy la pide con `CloudClient::post_lectura`. Sus consultas cuentan como
+  lecturas en la cobertura de contrato. Van así el cliente de una reserva
+  (`/v1/reservas/buscar-cliente`), los listados y el resumen de Cuentas (`/v1/cuentas/entradas`,
+  `/salidas`, `/resumen`), los buscadores de productos (`/v1/mesas/productos/search`,
+  `/v1/venta-rapida/productos/search`) y el resumen de tickets (`/v1/venta-rapida/index-rows`, cuya
+  lista de ids no cabe en una query).
+- Las dos reglas las vigila `test/sinDatosPersonalesEnLaQuery.node.test.ts`, que lee todo `src/`
+  con el analizador de TypeScript (en Node: workerd no puede cargarlo, y `vitest.config.ts` tiene
+  un proyecto para los `*.node.test.ts`) y con listas cerradas: lo que se lee de la query (por su
+  nombre o con un schema con nombre de un `*.schemas.ts`, siguiendo los alias de importación), lo
+  que lleva el camino, y que todo lo que no es un GET y sólo consulta esté declarado. Lo que no sabe
+  leer lo da por malo. En la Handy, `tests_sin_datos_en_la_url` (`tpv-infra-http`) hace lo mismo
+  con lo que pone en la URL, función a función.
 - **Lo que la Handy no puede hacer** lo vetan middlewares: `soloLaMainCobra` (`cobro_solo_en_main`),
   `soloLaMainEscribeCaja` (`caja_solo_en_main`), y `lib/hub.ts::TABLAS_SOLO_MAIN` para las tablas
   fiscales.
@@ -114,6 +150,18 @@ el mismo `wrangler.json` y los tipos se regeneran con `pnpm cf-typegen`.
   espacio. El `.trim()` de JavaScript quita además U+FEFF y deja U+0085, y un texto valía en un lado y
   no en el otro (VALID-01). `test/recortarComoLaMain.test.ts` lo vigila en todos los ficheros de los
   dominios del negocio.
+- **Lo que llega antes de saber quién llama no pasa por nada que cueste más que recorrerlo**
+  (AUD-33). Este motor de expresiones regulares retrocede: una repetición anclada al final que puede
+  empezar en cada posición de un tramo (`"+$`, `\s+$`) lo recorre entero desde cada una, y tarda el
+  cuadrado de su longitud. Las comillas de los extremos de una firma o una clave se quitan con
+  `quitarComillas` (`lib/texto.ts`), que recorre los extremos como `recortar`. Y la firma y la clave
+  pública llevan su tope antes de procesarlas, sobre la cadena tal como llega, antes de recortarla
+  (`TOPE_FIRMA_B64`, 128, y `TOPE_CLAVE_B64`, 64, en `server/utils/ed25519.ts`; una firma son 88
+  caracteres y una clave, 44): una `X-Device-Sig` más larga sale como `bad_device_signature` sin leer
+  la base, en `tenantAuth` y en las rutas de licencias; en el emparejamiento, el `devicePubKey` de
+  `claim` como `invalid_devicePubKey` y el `sigB64` de `fetch-token` y `cancel` como `missing_proof`,
+  con el `.max()` del schema delante del recorte y del `transform`. Lo vigilan
+  `test/quitarComillas.test.ts` y `test/topeDeLaFirma.test.ts`.
 - **Una fecha que llega como texto se valida con `lib/fechas.ts`** (`zDia`, `normalizarDia`,
   `esFechaYmd`; espejo de `tpv_domain::fechas`): forma `YYYY-MM-DD` y día real de calendario. Una
   expresión regular deja pasar un 31 de febrero, y un `throw` dentro de un `transform` de zod no sale
@@ -156,8 +204,14 @@ el mismo `wrangler.json` y los tipos se regeneran con `pnpm cf-typegen`.
 `/v1/email` manda pedidos a proveedores con el binding `EMAIL` (Cloudflare Email Service) desde
 `EMAIL_FROM_ADDRESS`. Se acota **por destinatario** (sólo al `Email` de un proveedor dado de alta) **y
 por volumen**: `TOPE_DIARIO` (100) envíos por negocio en una ventana de 24 h, contados en `email_sends`.
-Sólo cuentan los pedidos entregados (`tipo = 'pedido'`, `ok = 1`), y si no se puede contar se deja
-pasar. Las trazas se purgan a los 90 días (`RETENCION_ENVIOS_MS`).
+Cuentan los pedidos entregados y los que están saliendo (`tipo = 'pedido'`, `ok = 1` o
+`error_code = 'enviando'`); lo que falló no. El sitio se reserva con la fila del envío en una sola
+sentencia (`reservarCupo`), justo antes de enviar y después de comprobar el destinatario, y luego se
+apunta cómo acabó y a qué hora: muchos pedidos a la vez no pasan del tope (AUD-41). Un pedido cuenta
+desde que salió; una reserva que se quedó en `enviando` (el worker murió a medias), como enviada desde
+que se reservó. Las dos dejan de contar al salir de la ventana. Si la base central no contesta, el
+pedido sale igual y se apunta después si se puede. Las trazas se purgan a los 90 días
+(`RETENCION_ENVIOS_MS`).
 
 Los correos al cliente de una reserva web salen de `domains/reservas_web/correos.ts`, desde
 `EMAIL_RESERVAS_FROM_ADDRESS` con el nombre del negocio y su correo de contacto como `Reply-To`. Sólo
@@ -169,6 +223,13 @@ no sale dos veces, muchos a la vez no pasan de los topes y uno que falló se pue
 base central no se envía (no se sabría si ya salió). Qué correo y cuándo:
 [reservas-web.md](../estudios/reservas-web.md#48-correos).
 
+Lo que va a una cabecera de esos correos sale en una línea (AUD-40). El nombre del negocio llega al
+asunto y al remitente tal como está en la base, y ahí lo deja una Handy o la Main, que sube su
+propio SQL: por eso no se valida al guardar sino donde se compone el correo. `enUnaLinea` pasa a
+un espacio los caracteres de control y los separadores de línea, y el nombre entra con un tope de
+100 caracteres (el asunto no puede pasar de 998). Una dirección de destino con un carácter de
+control no es una dirección: no se envía ni gasta cupo, y sale como `fallido`.
+
 RI-60: el envío exige nombre y correo comercial, leídos de la base del negocio junto con el
 proveedor. Sale desde nuestro dominio verificado, con el nombre del negocio y su correo en
 `Reply-To`. Dirección y teléfono son opcionales. Compra y recuperación del PIN conservan sus
@@ -177,7 +238,8 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 ## Sincronización y firmas
 
 El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `consultar`,
-`revocarDispositivo` y `avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
+`revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
+`avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
 helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
 publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con
 otro Worker ni convertirse en un proxy público. La autenticación del cliente (token, firma y
@@ -255,6 +317,68 @@ Turso no (más de 24 h en el plan Free, una base borrada, el propio proveedor):
   de `wrangler.json` y desplegar, **deprisa**: mientras el worker apunte a una base sin esas filas, cada
   TPV que compruebe su licencia la borra. Las licencias activadas después del punto restaurado hay que
   rehacerlas a mano.
+
+## Los tests no salen a la red
+
+Los tests corren dentro de workerd (`@cloudflare/vitest-pool-workers`) y toman de `wrangler.json` los
+bindings, pero no pueden hablar con ningún servicio de verdad (`vitest.config.ts`):
+
+- **El entorno es de pruebas** (`test/helpers/entornoDePruebas.ts`). Las `vars` que nombran un
+  servicio o una cuenta —la base central, los remitentes, Turnstile, el origen de las reservas web,
+  Axiom— valen direcciones `.invalid` y nombres ficticios. Los secretos que la suite necesita
+  (`LICENSE_JWT_SECRET`, `TURSO_AUTH_TOKEN`) son deterministas; `EJECUTAR_EN_EL_HUB` va como en
+  producción, para que la suite pase por el mismo camino, y la jurisdicción y la pista de región de
+  los DO, vacías; los demás van vacíos, que el worker trata como sin configurar, y el test que
+  necesita uno lo pasa en su propio entorno. Wrangler mete además en los tests el `.dev.vars` de la
+  carpeta del worker o, si no lo hay, su `.env` y su `.env.local`, y el pool no deja desactivarlo:
+  la configuración le pregunta qué nombres va a cargar y los pone todos vacíos antes de aplicar la
+  tabla. Así nada de ese fichero llega a un test, esté o no en `Env`. Vite, por su lado, cargaría
+  el `.env` y pasaría sus `VITE_*` por `import.meta.env` y `process.env`: `envDir: false` se lo
+  impide.
+- **Una salida sin doble se rechaza y hace fallar al test** (`test/helpers/sinRed.ts`, que
+  `setupFiles` pone antes de cada fichero). El `fetch` y el `WebSocket` globales —los comparten los
+  tests, el worker y sus Durable Objects— lanzan `Salida a la red bloqueada en los tests: POST
+  https://host`: el método y el origen, nunca la ruta ni la consulta, que es donde viajan los
+  secretos (la URL de un latido lo es entera). Al terminar, el test falla con la lista de lo que
+  intentó, aunque el código se haya tragado el error (un envío a Axiom o un latido no propagan su
+  fallo). La guarda se pone antes de cargar el worker: el cliente de libsql se guarda el
+  `WebSocket` al cargarse.
+- **Detrás, el worker de pruebas no tiene por dónde salir**: `outboundService` manda todo lo que
+  sale de él, también lo que no pase por el `fetch` global, a un worker auxiliar que lo corta, lo
+  apunta y contesta 599 con el mismo texto; la guarda recoge lo apuntado al terminar cada test, así
+  que también hace fallar al test.
+- **Un socket TCP**: el worker auxiliar también lo corta, pero workerd no se lo pasa y no lo puede
+  apuntar. Por eso `sinRed.setup.ts` sustituye con `vi.mock` el `connect` de `cloudflare:sockets`
+  para todo lo que lo importe por el cargador de Vitest (los tests y el worker): lo rechaza, dice el
+  host y el puerto, y lo apunta como el `fetch`. Lo que abre un socket por dentro del runtime
+  (`node:net`, `node:tls`) no pasa por ahí: se vigila que ni el worker ni los tests los importen, y
+  lo que haga así una dependencia se corta pero no hace fallar al test.
+
+Lo vigila `test/sinRed.test.ts`, también con el propio Vitest: tres tests marcados `it.fails` se
+tragan una salida (una de la guarda, una del worker auxiliar y un socket) y sólo los hace fallar el
+gancho; sin él, salen en rojo.
+
+Todo eso es del proyecto `workerd`. Los `*.node.test.ts` corren en el proyecto `node` (leen el
+fuente con el analizador de TypeScript, que workerd no carga) y no tienen worker auxiliar: su guarda
+es `test/helpers/sinRed.node.ts`. `fetch`, `WebSocket`, `node:net`, `node:tls` y los agentes de
+`node:http` y `node:https` lanzan con el mismo texto (método y origen, o host y puerto), y el
+gancho hace fallar al test aunque se trague el error. No cubre `node:dns` ni un proceso hijo: hoy
+esos tests sólo leen ficheros. `envDir: false` va arriba y en cada proyecto: con uno solo de los
+dos sitios, el `.env` sigue llegando. Lo vigila `test/sinRed.node.test.ts`.
+
+Queda fuera el proceso de Node del propio Vitest (`vitest.config.ts`, sus plugins y un
+`globalSetup`): hoy no hay `globalSetup` ni nada que pida red ahí, y lo que se añada en ese lado
+no lo vigila nada.
+
+**Un test declara el doble de lo que su código llama fuera**, antes de llamarlo:
+
+| Lo que se llama | Doble |
+|---|---|
+| La base central desde una ruta o un helper (`getDb`) | `vi.mock("../src/server/db", …)` con `getDb` devolviendo `clienteSobre(sql, storage)` (`helpers/clienteSql.ts`) sobre el SQLite de un Durable Object, con `prepararPlanoDeControl(sql)` |
+| La base del negocio desde una ruta | `vi.mock("../src/lib/tenantClient", …)` con `tenantQuery` (o `lecturaConHora`) llamando a su función con un `clienteSobre`, sobre `crearEsquemaTenant(sql)` |
+| La base del negocio en el `TenantHub` | No necesita doble: es el SQLite del propio DO. Con el esquema de verdad, `aprovisionar(tenantId)` (por RPC o dentro de `enElHub`); para ponerle delante otra base o hacerla fallar, dentro de `enElHub`: `hub.withTenantDbRetry` o `hub.getTenantDb` con un `clienteSobre` |
+| La base central en el `TenantHub` | Dentro de `enElHub`: `hub.getCentralDb = () => cliente`, `hub.touchLastSeen = async () => {}` y, si el test hace drenar la cola, `hub.colaPausada = async () => null` (el interruptor `cola_do` se lee de la base central en cada vuelta) |
+| Un `fetch`: Stripe, Axiom, Turnstile, un latido | `vi.stubGlobal("fetch", doble)` y `vi.unstubAllGlobals()` en `afterEach`; o `vi.mock` del módulo que lo hace |
 
 ## Secretos
 

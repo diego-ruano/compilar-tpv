@@ -16,23 +16,21 @@ import * as q from "./cuentas.queries";
 import * as S from "./cuentas.schemas";
 import { badRequest } from "../../server/utils/response";
 import { cuerpo } from "../../lib/validacion";
-import { apply, parseId } from "../../lib/rutas";
+import { apply, lecturaPorPost, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const cuentasRoutes = new Hono<Ctx>();
 
+// AUD-27: lecturas por POST. Lo que se busca en Cuentas (el nombre de un cliente, un concepto) va
+// en el cuerpo, no en la URL.
+cuentasRoutes.use("/entradas", lecturaPorPost());
+cuentasRoutes.use("/salidas", lecturaPorPost());
+cuentasRoutes.use("/resumen", lecturaPorPost());
 cuentasRoutes.use("*", tenantAuth, alHub);
 
-cuentasRoutes.get("/entradas", async (c) => {
-	const p = S.listadoSchema.parse({
-		del: c.req.query("del"),
-		al: c.req.query("al"),
-		q: c.req.query("q"),
-		page_size: c.req.query("page_size"),
-		cursor_fecha: c.req.query("cursor_fecha"),
-		cursor_id: c.req.query("cursor_id"),
-	});
+cuentasRoutes.post("/entradas", cuerpo(S.listadoSchema), async (c) => {
+	const p = c.req.valid("json");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.entradas(db, p.del, p.al, p.q, p.page_size, p.cursor),
@@ -40,15 +38,8 @@ cuentasRoutes.get("/entradas", async (c) => {
 	);
 });
 
-cuentasRoutes.get("/salidas", async (c) => {
-	const p = S.listadoSchema.parse({
-		del: c.req.query("del"),
-		al: c.req.query("al"),
-		q: c.req.query("q"),
-		page_size: c.req.query("page_size"),
-		cursor_fecha: c.req.query("cursor_fecha"),
-		cursor_id: c.req.query("cursor_id"),
-	});
+cuentasRoutes.post("/salidas", cuerpo(S.listadoSchema), async (c) => {
+	const p = c.req.valid("json");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.salidas(db, p.del, p.al, p.q, p.page_size, p.cursor),
@@ -56,12 +47,8 @@ cuentasRoutes.get("/salidas", async (c) => {
 	);
 });
 
-cuentasRoutes.get("/resumen", async (c) => {
-	const p = S.listadoSchema.parse({
-		del: c.req.query("del"),
-		al: c.req.query("al"),
-		q: c.req.query("q"),
-	});
+cuentasRoutes.post("/resumen", cuerpo(S.listadoSchema), async (c) => {
+	const p = c.req.valid("json");
 	return c.json(
 		await tenantQuery(c, (db) =>
 			q.resumen(db, p.del, p.al, p.q),

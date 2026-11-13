@@ -40,15 +40,17 @@ import {
 	reassignMainDevice,
 	getOrCreateTenantFieldDek,
 	licenciaVivaDelDispositivo,
+	eraLaMainDeOtroNegocio,
 	reasignarCobrosDeLaClave,
 	sigueSiendoLaLicenciaDelEquipo,
 	upsertTenantInfo,
 	type LicenseRow,
 } from "../../server/licenseStore";
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
+import { avisarCambioDeLicencia, espacioDelHub } from "../../lib/hub";
 import { pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
-import { cuerpo } from "../../lib/validacion";
+import { cuerpo, topeAnonimo } from "../../lib/validacion";
 import { activarSchema, pedirCambioSchema } from "./licensing.schemas";
 import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
 import {
@@ -89,6 +91,12 @@ import {
 type Ctx = { Bindings: Env };
 
 export const licenseRoutes = new Hono<Ctx>();
+
+// AUD-34: las tres anónimas leen el cuerpo antes de saber quién llama (`/refresh`, tras un token sin
+// verificar). Su tope, delante de todo.
+licenseRoutes.use("/activate", topeAnonimo());
+licenseRoutes.use("/device-change/request", topeAnonimo());
+licenseRoutes.use("/refresh", topeAnonimo());
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -554,6 +562,13 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 	// ── Tenant + dispositivo ────────────────────────────────────────────────
 	const tenantId = lic.tenant_id || crypto.randomUUID();
 
+	// AUD-06: una clave sin estrenar abre un negocio nuevo, y si este equipo era la Main de otro
+	// negocio con licencia (anulada, o trasladada a otro equipo), lo que tiene en su base local son
+	// los datos de aquél. Se le contesta como a un traslado, `cambioDeEquipo: true`. Es un aviso: lo
+	// que protege a la Main es el sello de su base. Sólo en la primera activación: el equipo que
+	// vuelve a la licencia de su negocio conserva su base aunque su fila pasara por otro.
+	let estrenoSobreOtroNegocio = false;
+
 	try {
 		// REV-07: la comprobación va PRIMERO, y ahí estaba el fallo. `ensureDevice` hace un
 		// `ON CONFLICT(device_id) DO UPDATE` que mueve la fila al tenant de quien activa, y sólo
@@ -563,7 +578,17 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		// `device_id` ya tiene clave registrada en cualquier negocio y no es ésta, no se toca nada.
 		// Y presentar la registrada exige tener su privada: la petición llega firmada con ella
 		// (AUD-01, `firmaDelEquipo`).
-		await exigirClaveSiEsDeOtroNegocio(db, deviceId, devicePubKey, tenantId);
+		const negocioAnterior = await exigirClaveSiEsDeOtroNegocio(db, deviceId, devicePubKey, tenantId);
+
+		// AUD-06: se decide aquí, antes de que `ensureDevice` mude la fila: después ya no se sabe de
+		// dónde venía. Sólo si era la Main de un negocio con licencia y sin retirar
+		// (`eraLaMainDeOtroNegocio`): una Handy no guarda base, y un negocio sin licencia es el resto
+		// de una primera activación que falló a medias.
+		estrenoSobreOtroNegocio =
+			esPrimeraActivacion &&
+			negocioAnterior !== null &&
+			negocioAnterior !== tenantId &&
+			(await eraLaMainDeOtroNegocio(db, deviceId, negocioAnterior));
 
 		// El negocio se crea (o se toca) después de esa comprobación y no antes: si rechaza, no
 		// queda ni un tenant recién creado ni su `updated_at_ms` movido. Tiene que ir delante del
@@ -639,6 +664,15 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 			toDeviceId: deviceId,
 		});
 
+		// AUD-02: y el equipo anterior deja de ser Main también en el `TenantHub`. Su socket seguía
+		// abierto con el rol `tpv` de cuando saludó, mandando SQL que la nube confirmaba y este
+		// equipo ejecutaba, y recibiendo todo lo del negocio. Después de cambiar la licencia, para
+		// que lo que lea el hub sea ya este equipo y al reconectar se le niegue el ticket al
+		// anterior. No nombra a quién echar: el hub vuelve a leer quién es la Main, y un aviso que
+		// llegue tarde no echa a la que haya vuelto a serlo. Best-effort: si no llega, el hub lo
+		// corrige cuando salude este equipo o en cuanto haya actividad en el negocio.
+		await avisarCambioDeLicencia(espacioDelHub(env), tenantId);
+
 		// Aviso al titular: si el cambio no lo ha hecho él, queremos que se entere HOY.
 		// No bloquea la activación: el correo es entrega, no autorización.
 		c.executionCtx.waitUntil(sendDeviceChangedNoticeEmail(env, { to: lic.customer_email }));
@@ -659,7 +693,7 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		status: esPrimeraActivacion ? "active" : lic.status,
 		expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
 		fieldDek,
-		cambioDeEquipo: esCambioDeEquipo,
+		cambioDeEquipo: esCambioDeEquipo || estrenoSobreOtroNegocio,
 	};
 
 	return c.json(out);

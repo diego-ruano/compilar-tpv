@@ -1174,6 +1174,37 @@ mod tests_setup_inicial {
         );
     }
 
+    /// AUD-24: el PIN elegido llega a la nube por el outbox, y sólo por él: no hay un comando
+    /// aparte que lo suba (`config_upload_initial_setup` subía cualquier PIN para cualquier
+    /// usuario, sin sesión ni `Requiere_Setup`). Sube el hash calculado aquí, nunca el PIN.
+    #[tokio::test]
+    async fn el_pin_elegido_sube_a_la_nube_por_el_outbox() {
+        let (repo, db, _dir) = repo_temporal().await;
+
+        repo.complete_initial_setup("admin", "4321")
+            .await
+            .expect("el primer setup tiene que entrar");
+
+        let Value::Text(hash) =
+            campo(&db, "SELECT Password_Hash FROM Usuarios WHERE ID_Usuario='admin';").await
+        else {
+            panic!("el hash tiene que ser texto");
+        };
+        assert_eq!(
+            campo(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await,
+            Value::Integer(1),
+            "una operación replicable: la del setup"
+        );
+        let Value::Text(sentencias) = campo(&db, "SELECT Statements_Json FROM _Sync_Outbox;").await
+        else {
+            panic!("las sentencias tienen que ser texto");
+        };
+        assert!(sentencias.contains("UPDATE Usuarios"), "{sentencias}");
+        assert!(sentencias.contains("Requiere_Setup = 0"), "{sentencias}");
+        assert!(sentencias.contains(&hash), "sube el hash de la Main: {sentencias}");
+        assert!(!sentencias.contains("\"4321\""), "el PIN no sale del equipo: {sentencias}");
+    }
+
     #[tokio::test]
     async fn nada_de_esto_sale_por_el_outbox_sin_haberse_aplicado() {
         // Un intento rechazado no puede dejar rastro replicable: subiría a la nube un UPDATE que

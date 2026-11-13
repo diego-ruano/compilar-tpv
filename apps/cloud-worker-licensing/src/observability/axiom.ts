@@ -9,6 +9,7 @@
 
 import type { Env } from "../env";
 import { scrub, scrubDeep } from "./scrub";
+import { acotar } from "./tope";
 
 /*
  * ⚠️ REGLA DE ESTE FICHERO: los reporteros DEVUELVEN la promesa de la entrega, y quien los llama
@@ -57,8 +58,9 @@ export async function ingestToAxiom(
 	try {
 		// OBS-01: cubrir también los errores producidos en el worker/DO. Filtrar una copia
 		// evita modificar objetos que todavía utiliza el llamante. Si falla, no se envía.
+		// AUD-32: cada cadena de la copia se filtra con sus topes (`tope.ts`).
 		const payload = structuredClone(events);
-		scrubDeep(payload);
+		scrubDeep(payload, acotar);
 		const resp = await fetch(url, {
 			method: "POST",
 			headers: {
@@ -69,15 +71,15 @@ export async function ingestToAxiom(
 		});
 		if (!resp.ok) {
 			console.warn(
-				scrub(`[axiom] ingest ${dataset} respondió ${resp.status}: ${await resp
+				acotar(`[axiom] ingest ${dataset} respondió ${resp.status}: ${await resp
 					.text()
-					.catch(() => "")}`),
+					.catch(() => "")}`, scrub),
 			);
 			return false;
 		}
 		return true;
 	} catch (e) {
-		console.warn(scrub(`[axiom] ingest ${dataset} falló: ${String(e)}`));
+		console.warn(acotar(`[axiom] ingest ${dataset} falló: ${String(e)}`, scrub));
 		return false;
 	}
 }

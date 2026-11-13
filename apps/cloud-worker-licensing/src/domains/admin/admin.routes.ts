@@ -26,10 +26,11 @@ import * as z from "zod";
 
 import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
-import { cerrarSocketsDelDispositivo, espacioDelHub } from "../../lib/hub";
-import { getDb } from "../../server/db";
+import { avisarCambioDeLicencia, espacioDelHub } from "../../lib/hub";
+import { enTransaccion, getDb } from "../../server/db";
 import { descifrar } from "../../server/crypto";
 import {
+	atribuirRevocacionAMano,
 	auditAdmin,
 	extendLicense,
 	guardarClaveRecifrada,
@@ -46,6 +47,7 @@ import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import { retirarNegociosDePrueba } from "./pruebas";
 import { medirLatencias } from "./diagnostico";
+import { diagnosticoSchema } from "./admin.schemas";
 import { consulta, cuerpo } from "../../lib/validacion";
 import { TARGETS } from "../updates/updates.routes";
 import { reservasWebAdminRoutes } from "../reservas_web/admin.routes";
@@ -63,11 +65,6 @@ adminRoutes.use("*", requireAdmin);
 
 // Detrás del mismo `requireAdmin`: el `use("*")` de arriba cubre también lo que se monta aquí.
 adminRoutes.route("/reservas-web", reservasWebAdminRoutes);
-
-const diagnosticoSchema = z.object({
-	vueltas: z.coerce.number().int().min(1).max(30).default(10),
-	tenant: z.string().min(1).max(100).optional(),
-});
 
 /** Cuánto cuesta cada viaje a la base central y a un TenantHub según dónde nazca (`diagnostico.ts`). */
 adminRoutes.get("/diagnostico/latencias", consulta(diagnosticoSchema), async (c) => {
@@ -238,7 +235,12 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	const lic = await getLicenseById(db, licenseId);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 
-	await revokeLicense(db, licenseId);
+	// AUD-08: la revocación es del operador aunque una disputa abierta ya hubiera revocado el alta.
+	// Su cobro deja de figurar como revocado por la disputa, y ganarla ya no la resucita.
+	await enTransaccion(db, async (tx) => {
+		await revokeLicense(tx, licenseId);
+		await atribuirRevocacionAMano(tx, licenseId);
+	});
 	await auditAdmin(db, "revoke", licenseId, { keyShort: lic.key_short });
 
 	// Y se le corta el WebSocket a la Main, que es lo que convierte "anulada" en "bloqueada" ahora
@@ -247,12 +249,15 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	//
 	// Las Handy no hace falta cerrarlas: el propio DO las congela (`main_offline`) en cuanto la
 	// Main se va, y al reconectar su ticket también se rechaza. Y si la licencia nunca llegó a
-	// activarse no hay `main_device_id` ni socket que cerrar.
-	await cerrarSocketsDelDispositivo(
-		espacioDelHub(c.env),
-		String(lic.tenant_id || ""),
-		String(lic.main_device_id || ""),
-	);
+	// activarse no hay negocio ni socket que cerrar.
+	//
+	// AUD-02: el aviso no nombra a quién echar: el `TenantHub` vuelve a leer quién es la Main (con
+	// la licencia anulada, nadie) y echa a la que no lo sea. Así, si llega tarde, después de deshacer
+	// la anulación, no echa a la Main que ha vuelto a serlo. Si ya estaba revocada (una disputa, otra
+	// anulación), quién es la Main no cambia y no hay nada que avisar.
+	if (lic.status !== "revoked") {
+		await avisarCambioDeLicencia(espacioDelHub(c.env), String(lic.tenant_id || ""));
+	}
 
 	return c.json({ ok: true, licenseId, status: "revoked" });
 });

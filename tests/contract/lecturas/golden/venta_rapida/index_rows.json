@@ -1,0 +1,14 @@
+[
+  {
+    "ID_Comanda": "com-a",
+    "NumLineas": 4,
+    "Productos": "Cafe · Cerveza · Suelto",
+    "Unidades": 5.5
+  },
+  {
+    "ID_Comanda": "com-b",
+    "NumLineas": 1,
+    "Productos": "Cafe",
+    "Unidades": 1.0
+  }
+]

@@ -3,6 +3,8 @@ import type { DestinatarioInput, VrCobrarFraccionadoInput } from "@tpv/contracts
 import { deCentimos } from "../../shared/lib/dinero";
 
 const prefijo = "tpv:ventaRapida:pendingCobros:v1:";
+/** AUD-06 · Donde se apartan los que no consta que sean de esta base. Detrás va la clave que tenían. */
+const prefijoDesconocidos = "tpv:ventaRapida:pendingCobros:desconocidos:";
 
 /** Única lectura del antiguo formato. Un dato incompleto se conserva para poder recuperarlo. */
 export function leerCobroLegado(valor: unknown): VrCobrarFraccionadoInput {
@@ -27,6 +29,33 @@ export function leerCobroLegado(valor: unknown): VrCobrarFraccionadoInput {
         importe_total: deCentimos(v.importeTotal), destinatario };
 }
 
+/**
+ * AUD-06 · ¿Es de esta base? La clave antigua no dice de qué negocio era el cobro, y el navegador
+ * se queda aunque la licencia del equipo pase a otro negocio. Lo dice su ticket: tiene que estar en
+ * esta base con todas las líneas que cobra (los identificadores son únicos: los de otro negocio no
+ * están).
+ */
+async function esDeEstaBase(cobro: VrCobrarFraccionadoInput): Promise<boolean> {
+    const lineas = await commands.vrGetLineasComanda({ id_comanda: cobro.id_comanda });
+    const aqui = new Set(lineas.map((l) => l.ID_Detalle));
+    return cobro.detalles.every((d) => aqui.has(d));
+}
+
+/** Lo aparta, sin borrarlo, junto a los demás desconocidos de la misma clave. */
+function apartarDesconocido(almacen: Storage, clave: string, valor: unknown): void {
+    const destino = prefijoDesconocidos + clave;
+    let apartados: unknown[] = [];
+    try {
+        const ya: unknown = JSON.parse(almacen.getItem(destino) ?? "[]");
+        if (Array.isArray(ya)) apartados = ya;
+    } catch { /* uno ilegible se sustituye: lo que había ya no se podía leer */ }
+    almacen.setItem(destino, JSON.stringify([...apartados, valor]));
+}
+
+/**
+ * Pasa a SQLite los cobros antiguos de esta base. Los que no se puede comprobar que lo sean se
+ * apartan como desconocidos en el propio `localStorage`, sin importarlos ni borrarlos (AUD-06).
+ */
 export async function importarCobrosLegados(almacen: Storage = window.localStorage): Promise<void> {
     const claves = Array.from({ length: almacen.length }, (_, i) => almacen.key(i)).filter((k): k is string => !!k?.startsWith(prefijo));
     let primerError: unknown;
@@ -40,7 +69,12 @@ export async function importarCobrosLegados(almacen: Storage = window.localStora
         const restantes = [...valor];
         let indice = 0;
         while (indice < restantes.length) {
-            try { await commands.vrGuardarCobroPendiente(leerCobroLegado(restantes[indice])); }
+            try {
+                const cobro = leerCobroLegado(restantes[indice]);
+                if (await esDeEstaBase(cobro)) await commands.vrGuardarCobroPendiente(cobro);
+                // Primero se escribe aparte y después se quita: si falla, sobra una copia, no falta.
+                else apartarDesconocido(almacen, clave, restantes[indice]);
+            }
             catch (e) { primerError ??= e; ++indice; continue; }
             restantes.splice(indice, 1);
             // Se borra únicamente después de la confirmación duradera de SQLite.

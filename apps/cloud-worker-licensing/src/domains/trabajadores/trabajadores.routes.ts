@@ -12,7 +12,7 @@ import * as q from "./trabajadores.queries";
 import * as S from "./trabajadores.schemas";
 import { badRequest } from "../../server/utils/response";
 import { consulta, cuerpo } from "../../lib/validacion";
-import { apply, parseId } from "../../lib/rutas";
+import { apply, decidirPorEstado, parseId } from "../../lib/rutas";
 import { hashPin } from "../login/login.crypto";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
@@ -108,7 +108,13 @@ trabajadoresRoutes.post("/horarios/guardar", cuerpo(S.asignacionGuardarSchema), 
 	const existente = datos.id_asignacion ? await tenantQuery(c, db => q.grupoAsignacion(db, datos.id_asignacion!)) : null;
 	if (datos.id_asignacion && !existente) return c.json({ error: "asignacion_no_encontrada", message: "Asignación no encontrada" }, 404);
 	const guardado = await apply(c, cmd.guardarAsignacion(datos, existente));
-	if (!guardado) return c.json({ error: "asignacion_no_encontrada", message: "Asignación no encontrada" }, 404);
+	// `guardado` es el recuento del primer INSERT. Sin recuento (`null`: un reintento cuyo recuento no
+	// se guardó, AUD-26), se mira si quedó como se pidió. Una asignación nueva no tiene guarda (su INSERT
+	// siempre escribe); una edición sí: que el miembro principal siga siendo de ese trabajador y día.
+	const hecho = await decidirPorEstado(guardado, async () =>
+		!datos.id_asignacion || (await tenantQuery(c, (db) => q.asignacionComoSePidio(db, datos))),
+	);
+	if (!hecho) return c.json({ error: "asignacion_no_encontrada", message: "Asignación no encontrada" }, 404);
 	return c.json({ ok: true });
 });
 

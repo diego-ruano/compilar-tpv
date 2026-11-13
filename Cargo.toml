@@ -48,8 +48,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # ── DB ──
 # SQLite local de la Main. `bundled` compila el SQLite que trae la crate: el mismo en Windows,
 # Windows 7 y Android, sin depender del que tenga el sistema. Con la nube no habla: eso es cosa del
-# worker.
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+# worker. `limits` (AUD-02) da `set_limit`, con el que el escritor deja de admitir `ATTACH`: es una
+# llamada a `sqlite3_limit` del propio SQLite empaquetado, sin dependencias ni código por plataforma.
+rusqlite = { version = "0.40.2", features = ["bundled", "limits"] }
 
 # ── HTTP ──
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

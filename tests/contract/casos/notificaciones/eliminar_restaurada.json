@@ -1,0 +1,19 @@
+{
+  "descripcion": "AUD-26: el cruce entre restaurar y eliminar. Quien la borra para siempre la vio en su papelera, pero otro la restauro antes: ya esta activa. El DELETE lleva en su WHERE que siga en la papelera, asi que no se la lleva, ni con sus recibos de lectura. La Main contesta not_found antes de escribir; el worker aplica la sentencia con la condicion y no borra nada.",
+  "comando": "notificaciones.eliminar",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolPapeleraContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'a@a.com', 'x', 'Ana');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('notif-restaurada', 'aviso', 'info', 'Restaurada', 'todos', 'activa', '2026-01-01 10:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-restaurada', 'user-1', '2026-01-01 12:00:00');"
+  ],
+  "entrada": {
+    "id_notificacion": "notif-restaurada",
+    "id_usuario": "user-1",
+    "rechazo": "not_found"
+  },
+  "snapshot": {
+    "Notificaciones": "SELECT ID_Notificacion, Estado FROM Notificaciones",
+    "Notificacion_Lecturas": "SELECT ID_Notificacion, ID_Usuario FROM Notificacion_Lecturas"
+  }
+}

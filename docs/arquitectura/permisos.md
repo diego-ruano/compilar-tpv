@@ -60,6 +60,14 @@ manual; una segunda parte registrada impide desmarcarla, tanto en la Main como e
 | `exigir_rol(&[ADMIN])` | Administración estructural: sesión y rol vigente |
 | `exigir_rol_si_hay_sesion(&[ADMIN])` | Lo que se alcanza también **antes** del login: sin sesión pasa, con sesión exige el rol |
 
+Lo lleva `device_reset_mode` (volver al selector de modo, que en la Handy borra el vínculo). Sin
+sesión lo alcanza el «← Volver» de la activación de licencia; con ella, Configuración → Dispositivo,
+que tiene además candado de ruta. El «← Volver» de la vinculación de la Handy no lo llama: enseña el
+selector sin tocar nada guardado, y desvincular queda para el administrador
+([emparejamiento.md](emparejamiento.md#salir-del-vínculo)). El comando no se endurece para la Handy:
+`handy_set_token`, que va sin sesión porque emparejar es anterior al login, sustituye el vínculo
+igual, y por el IPC no hay frontera ([arriba](#qué-garantiza-esto-y-qué-no)).
+
 ---
 
 ## Capacidades por rol (RI-70)
@@ -87,6 +95,19 @@ producto exige ambos, y dar de alta existencias requiere recibir mercancía. SQL
 precio bajo el cerrojo de escritura; una edición Handy sin permiso de precios conserva precio e IVA
 en el SQL aplicado por el Worker, sin recrear el producto si se borró durante la edición. Ajustar existencias va por sus comandos con atribución, nunca
 por la ficha. Las tareas propias se consultan y finalizan con el trabajador de la sesión.
+
+Las notificaciones las puede ver cualquiera con sesión, pero cada uno las suyas: los ocho comandos
+`notificaciones_*` sacan el usuario de la sesión, y la pantalla no lo manda. Lo que ve (las dirigidas
+a todos, a él o a su rol), en nombre de quién marca leído y sobre qué actúa la papelera depende de
+ese usuario (AUD-26). Marcar leída exige que vaya dirigida a él; descartar, además, que esté en el
+centro, y restaurar o eliminar, que esté en la papelera. Esa condición va **dentro de la propia
+sentencia que escribe** (`DIRIGIDA_AL_USUARIO`, igual en `tpv-infra-sqlite/src/notificaciones.rs` y en
+`notificaciones.commands.ts`): no hay hueco entre comprobar y escribir (si otro restaura lo que uno
+iba a borrar para siempre, no se borra), y se cumple también donde se aplique después. Si no se cumple,
+`not_found` («Esa notificación no está en tu lista.») y nada en el outbox. En la Handy el usuario lo
+pone Rust desde la sesión y viaja en el cuerpo; el Worker aplica la misma condición, pero no puede
+saber que ese usuario es el de la sesión
+([SEC-SESION](../pendientes.md#sec-sesion--sesión-personal-verificable-en-el-worker)).
 
 Valores iniciales:
 
@@ -157,10 +178,16 @@ Las restricciones centrales de dispositivo (cobrar/caja/fiscal sólo Main) sigue
   [LOGIN-04](../pendientes.md#login-04--el-hash-del-pin-se-puede-romper-offline).
 - **El PIN inicial se elige en la Main y sólo ahí.** `complete_initial_setup` cambia el PIN del
   administrador sin pedir el actual (es el del seed, público) y su único cerrojo es
-  `Requiere_Setup = 1`, que se apaga al usarlo. El worker no tiene un segundo camino hacia esa fila:
-  la Main lo aplica en su SQLite y lo sube por `POST /v1/login/sync-initial-setup` (firmada, rol TPV),
-  directa a la base del negocio porque aún no hay WebSocket. En Rust el puerto falla por defecto en la Handy, y una
-  Main con el setup pendiente no sale de `/setup`, así que no puede haber Handys vinculadas todavía.
+  `Requiere_Setup = 1`, que se apaga al usarlo. La Main lo aplica en su SQLite y el `UPDATE`, con el
+  hash y no el PIN, sube por el outbox como cualquier escritura. No hay otro camino hacia esa fila:
+  ni un comando que lo suba aparte ni una ruta del worker que lo escriba directo en la base del
+  negocio (AUD-24; lo vigilan `pinSiempreConFreno.test.ts` y `setupInicialPendiente.test.ts`). En Rust
+  el puerto falla por defecto en la Handy. Ese `UPDATE` puede tardar en llegar (la Main sin red, o con
+  la réplica apagada, con una Handy ya vinculada), y mientras tanto la nube conserva el PIN público de
+  la siembra con `Requiere_Setup = 1`: el worker no deja entrar ni fichar en la Handy a un usuario así
+  («Termina la configuración inicial en el TPV y vuelve a intentarlo.», `setup_inicial_pendiente`),
+  antes de mirar el PIN y sin gastar intentos. La Main sigue sin bloquearse: sin red, su setup y su
+  login son locales.
 
 ### Entrar sin PIN
 
@@ -274,7 +301,9 @@ y basta con tocar su nombre. Lo marca un administrador con «Entra sin PIN» en 
 - **Device-proof**: firma con dominio `DEVICE_PROOF` de `ts`, método, ruta **y query**, hash del token y hash del cuerpo, con ±2 minutos.
   Sin nonce ([FABLE-E](../pendientes.md#fable-e--sin-nonce-en-el-device-proof)). Activar una licencia,
   que es anónima, lleva esa misma firma con el tramo del token vacío, comprobada con la clave pública
-  que presenta la petición ([licencias.md](licencias.md#activar)).
+  que presenta la petición ([licencias.md](licencias.md#activar)). Una `X-Device-Sig` de más de 128
+  caracteres (una firma son 88) se rechaza con `bad_device_signature` antes de mirarla y de leer la
+  base (AUD-33, [worker.md](worker.md#cómo-se-escribe-una-ruta)).
 - **El correo se acota por destinatario y por volumen**: sólo al email de un proveedor dado de alta y
   con un tope diario por negocio ([worker.md](worker.md#correo)).
 - **Los errores no cuentan cómo está hecho el worker**: un 500 no lleva traza ni texto de la base

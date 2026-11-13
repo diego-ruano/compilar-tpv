@@ -210,6 +210,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	caja_solo_en_main: "La caja sólo se gestiona desde el TPV principal.",
 	cobro_solo_en_main: "Los cobros sólo se hacen desde el TPV principal.",
 	recuperacion_solo_en_main: SOLO_EN_LA_MAIN,
+	// AUD-24: el PIN elegido en la configuración inicial de la Main aún no ha llegado a la nube.
+	setup_inicial_pendiente: "Termina la configuración inicial en el TPV y vuelve a intentarlo.",
 	// RI-61: la ruta manda su propia frase con las horas del choque; ésta es la de reserva.
 	reserva_solapada: "Esa mesa ya está ocupada a esa hora.",
 	reserva_solapada_prohibida:
@@ -226,6 +228,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	// RI-61: el mismo texto que da la Main.
 	cliente_no_encontrado:
 		"Ese cliente ya no existe. Vuelve a buscarlo o guarda la reserva sin cliente.",
+	// AUD-26: el mismo texto que da la Main (`NO_ESTA_EN_TU_LISTA`): no va dirigida a ti, o ya no
+	// está donde estaba (otro la restauró, la descartó o la borró).
+	notificacion_no_encontrada: "Esa notificación no está en tu lista.",
 	// RI-54: una pantalla con la carta de antes en caché ofrece un producto que ya se quitó.
 	producto_archivado: "Ese producto ya no está en la carta. Vuelve a abrir la carta y elige otro.",
 	// INC-20261030-010: el mismo texto que da la Main (`MSG_TAREA_NO_ASIGNADA`).
@@ -375,6 +380,8 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"initial_admin_role_missing",
 	"invalid_devicePubKey",
 	"invalid_json",
+	// AUD-32: una `X-Idempotency-Key` sin su forma. La Handy manda siempre un UUIDv7.
+	"invalid_op_id",
 	"invalid_signature",
 	"invalid_sql_args",
 	"invalid_ticket",

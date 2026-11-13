@@ -1,0 +1,26 @@
+{
+  "Lotes_Producto": [
+    {
+      "Caducidad": "2026-06-01",
+      "Codigo_Lote": "L1",
+      "Coste_Unitario": 150,
+      "Fecha_Entrada": "2026-01-01 00:00:00",
+      "ID_Lote": "lote-1",
+      "ID_Producto": "prod-1",
+      "ID_Proveedor": null,
+      "Notas": "alta inicial",
+      "Stock_Disponible": 10.0
+    }
+  ],
+  "Movimientos_Stock": [
+    {
+      "Delta": 10.0,
+      "ID_Lote": "lote-1",
+      "ID_Movimiento": "mov-alta-1",
+      "ID_Usuario": "usuario-autor",
+      "Motivo": "alta inicial",
+      "Stock_Resultante": 10.0,
+      "Tipo": "ALTA"
+    }
+  ]
+}

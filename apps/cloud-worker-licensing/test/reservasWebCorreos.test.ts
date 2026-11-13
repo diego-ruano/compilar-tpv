@@ -6,7 +6,8 @@
 //     confirmación, y nada del negocio sin escapar;
 //   · cuánto: el tope por negocio y el de cada destinatario, contando sólo lo entregado y sólo lo
 //     suyo, sin tocar el de los pedidos;
-//   · que el mismo correo no sale dos veces, y que uno que falló se puede volver a intentar.
+//   · que el mismo correo no sale dos veces, y que uno que falló se puede volver a intentar;
+//   · que lo que va a una cabecera (el asunto, el remitente, la dirección) sale en una línea (AUD-40).
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -22,13 +23,14 @@ vi.mock("../src/server/db", async (original) => ({
 }));
 
 const {
+	enUnaLinea,
 	enviarCorreoReservaWeb,
 	fechaLarga,
 	plantilla,
 	TOPE_DIARIO_DESTINATARIO,
 	TOPE_DIARIO_NEGOCIO,
 } = await import("../src/domains/reservas_web/correos");
-const { pasaDelTope } = await import("../src/domains/email/email.routes");
+const { reservarCupo } = await import("../src/domains/email/email.routes");
 
 const NEGOCIO = { nombre: "Bar Pepe", direccion: "Calle Mayor 1", telefono: "950 000 000", correo: "hola@barpepe.es" };
 const RESERVA = { dia: "2026-10-23", hora: "21:00", personas: 4, mesa: "Mesa 5", codigo: "ABC123" };
@@ -269,14 +271,15 @@ describe("enviar", () => {
 
 describe("los topes", () => {
 	function apuntar(sql: any, n: number, extra: Record<string, unknown> = {}) {
-		const f = { tenant_id: "t1", to_email: "otro@correo.es", ok: 1, tipo: "reserva_web", sent_at_ms: Date.now(), ...extra } as any;
+		const f = { tenant_id: "t1", to_email: "otro@correo.es", ok: 1, error_code: null, tipo: "reserva_web", sent_at_ms: Date.now(), ...extra } as any;
 		for (let i = 0; i < n; i++) {
 			sql.exec(
-				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, sent_at_ms, tipo) VALUES (?, ?, 'web', ?, ?, ?, ?);`,
+				`INSERT INTO email_sends (id, tenant_id, device_id, to_email, ok, error_code, sent_at_ms, tipo) VALUES (?, ?, 'web', ?, ?, ?, ?, ?);`,
 				crypto.randomUUID(),
 				f.tenant_id,
 				f.to_email,
 				f.ok,
+				f.error_code,
 				f.sent_at_ms,
 				f.tipo,
 			);
@@ -345,8 +348,64 @@ describe("los topes", () => {
 		const { TOPE_DIARIO } = await import("../src/domains/email/email.routes");
 		const r = await conBase("cupo-pedidos", async (sql) => {
 			apuntar(sql, TOPE_DIARIO);
-			return pasaDelTope(baseCentral, "t1");
+			// AUD-41: tampoco los que están saliendo.
+			apuntar(sql, TOPE_DIARIO, { ok: 0, error_code: "enviando" });
+			const envio = { id: crypto.randomUUID(), tenantId: "t1", deviceId: "dev", toEmail: "prov@correo.es", proveedor: "Prov" };
+			return reservarCupo(baseCentral, envio);
 		});
-		expect(r).toBe(false);
+		expect(r).toBe("reservado");
+	});
+});
+
+// AUD-40 · Lo que va a una cabecera sale en una línea. El nombre del negocio llega de la base tal
+// como lo subió la Main o lo puso una Handy, con lo que lleve dentro.
+describe("las cabeceras, en una línea (AUD-40)", () => {
+	const TIPOS = ["confirmacion", "cancelacion", "modificada", "cancelada_restaurante", "no_registrada"];
+	const CON_SALTOS = "Bar Pepe\r\nBcc: x@prueba.test\r\nX-Prueba: 1";
+
+	it("enUnaLinea: los caracteres de control y los separadores de línea pasan a un espacio", () => {
+		expect(enUnaLinea("Bar Pepe\r\nBcc: x@prueba.test\r\nX-Prueba: 1\r\n")).toBe("Bar Pepe Bcc: x@prueba.test X-Prueba: 1");
+		expect(enUnaLinea("Bar\rX-A: 1\nX-B: 2\u0000\u0085fin")).toBe("Bar X-A: 1 X-B: 2 fin");
+		expect(enUnaLinea("Bar\u2028Pepe\u2029\tCasa")).toBe("Bar Pepe Casa");
+		// Lo que no es de control se queda como está.
+		expect(enUnaLinea("Mesón «El Puerto» & \"Cía\" <Café>")).toBe("Mesón «El Puerto» & \"Cía\" <Café>");
+		expect(enUnaLinea("\r\n")).toBe("");
+	});
+
+	it("ningún asunto lleva un salto de línea", () => {
+		for (const tipo of TIPOS) {
+			const { asunto } = plantilla(correo({ tipo, enlace: undefined, negocio: { ...NEGOCIO, nombre: CON_SALTOS } }));
+			expect(asunto, tipo).not.toMatch(/[\r\n]/);
+			expect(asunto, tipo).toContain("Bar Pepe Bcc: x@prueba.test X-Prueba: 1");
+		}
+	});
+
+	it("el nombre entra en el asunto con un tope, sin partir un carácter, y sin nombre dice «el restaurante»", () => {
+		const largo = "😀".repeat(150);
+		const { asunto } = plantilla(correo({ negocio: { ...NEGOCIO, nombre: largo } }));
+		expect(asunto).toBe(`Reserva confirmada en ${"😀".repeat(100)}`);
+		expect(plantilla(correo({ negocio: { ...NEGOCIO, nombre: "\r\n" } })).asunto).toBe("Reserva confirmada en el restaurante");
+	});
+
+	it("lo que sale al binding: asunto y remitente en una línea", async () => {
+		const falso = correoFalso();
+		const r = await conBase("cabeceras", () =>
+			enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ negocio: { ...NEGOCIO, nombre: `${CON_SALTOS}\u0000"<x>"` } })),
+		);
+		expect(r).toBe("enviado");
+		const m = falso.enviados[0];
+		expect(m.subject).toBe('Reserva confirmada en Bar Pepe Bcc: x@prueba.test X-Prueba: 1 "<x>"');
+		expect(m.from.name).toBe("Bar Pepe Bcc: x@prueba.test X-Prueba: 1   x");
+		for (const v of [m.subject, m.from.name, m.to, m.replyTo]) expect(v).not.toMatch(/[\p{Cc}]/u);
+	});
+
+	it("una dirección con un carácter de control no se envía ni gasta cupo", async () => {
+		const falso = correoFalso();
+		const r = await conBase("para-con-salto", async (sql) => ({
+			r: await enviarCorreoReservaWeb(ENV({ EMAIL: falso.EMAIL }), correo({ para: "ana@correo.es\r\nbcc:otro@prueba.test" })),
+			filas: sql.exec(`SELECT COUNT(*) AS n FROM email_sends;`).one().n,
+		}));
+		expect(r).toEqual({ r: "fallido", filas: 0 });
+		expect(falso.enviados).toHaveLength(0);
 	});
 });

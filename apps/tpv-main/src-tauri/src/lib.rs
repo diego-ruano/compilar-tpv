@@ -227,11 +227,65 @@ pub(crate) const PRODUCTOR_ID_SISTEMA: &str = "01";
 /// sembrar el admin y pedir el PIN— de una BD perdida, donde sembrarlo fabricaría una credencial
 /// falsa y la replicaría a la nube. Ver `tpv_infra_sqlite::connection::seed_admin_if_empty`.
 fn dispositivo_aprovisionado(app_data_dir: &Path) -> bool {
+    negocio_de_la_licencia(app_data_dir).is_some()
+}
+
+/// AUD-06 · El negocio de la licencia, si la base abierta es la suya (su sello). Lo que sube o baja
+/// algo de la nube sin pasar por la base (las imágenes) lo pregunta, y lo lleva consigo.
+pub(crate) async fn negocio_de_la_base_en_uso(state: &AppState, app_data_dir: &Path) -> Option<String> {
+    let negocio = negocio_de_la_licencia(app_data_dir)?;
+    let db = state.db.lock().await.as_ref().cloned()?;
+    match tpv_infra_sqlite::recovery::base_del_negocio(&db, &negocio).await {
+        Ok(true) => Some(negocio),
+        _ => None,
+    }
+}
+
+/// AUD-06 · El negocio de la licencia vigente en este equipo, si la hay. Con él se abre la base:
+/// una base sólo se usa con la licencia de su negocio (`connection::init_main_db`). Una licencia
+/// pendiente de reinicio no cuenta: es la vigente hasta que el arranque la cambie.
+pub(crate) fn negocio_de_la_licencia(app_data_dir: &Path) -> Option<String> {
     use tpv_application::ports::licensing::LicensingService;
-    matches!(
-        LicensingAdapter::new(app_data_dir.to_path_buf()).load_state(),
-        Ok(Some(st)) if !st.tenant_id.trim().is_empty()
-    )
+    match LicensingAdapter::new(app_data_dir.to_path_buf()).load_state() {
+        Ok(Some(st)) if !st.tenant_id.trim().is_empty() => Some(st.tenant_id.trim().to_string()),
+        _ => None,
+    }
+}
+
+/// AUD-06 · Si se activó la licencia de otro negocio, el arranque aparta los datos del anterior y
+/// la aplica (`use_cases::licensing::aplicar_cambio_de_negocio_pendiente`) antes de abrir la base
+/// y de leer la licencia para nada. Va antes que cualquier tarea: hasta aquí, nada del negocio nuevo
+/// existe en el proceso.
+///
+/// El proceso de antes puede tardar un instante en soltar la base al reiniciarse: un fallo se
+/// reintenta unas cuantas veces, que el cambio se puede repetir desde cualquier punto.
+fn aplicar_cambio_de_negocio_al_arrancar(app_data_dir: &Path) -> tpv_application::error::AppResult<Option<String>> {
+    use tpv_application::use_cases::licensing as uc_licencia;
+    let licencias = LicensingAdapter::new(app_data_dir.to_path_buf());
+    let base = tpv_infra_sqlite::recovery::BaseLocal::new(app_data_dir, None);
+    let mut intento = 1;
+    loop {
+        match tauri::async_runtime::block_on(uc_licencia::aplicar_cambio_de_negocio_pendiente(&licencias, &base)) {
+            Err(e) if intento < 10 && tpv_infra_sqlite::recovery::hay_cambio_de_negocio_pendiente(app_data_dir) => {
+                tracing::warn!(target: "tpv::startup", intento, error = %e, "no se pudo terminar el cambio de negocio; se reintenta");
+                intento += 1;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            resultado => return resultado,
+        }
+    }
+}
+
+/// AUD-06 · Con un cambio de negocio a medias (el arranque no pudo terminarlo), no se abre ni se
+/// instala ninguna base en caliente: sería la del negocio anterior. Lo termina el arranque.
+pub(crate) fn sin_cambio_de_negocio_a_medias(app_data_dir: &Path) -> Result<(), AppErrorDto> {
+    if tpv_infra_sqlite::recovery::hay_cambio_de_negocio_pendiente(app_data_dir) {
+        return Err(tpv_application::error::AppError::conflict(
+            "El TPV está cambiando de licencia y no ha podido terminar. Ciérralo y vuelve a abrirlo.",
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn config_path(app_data_dir: &Path) -> PathBuf {
@@ -253,24 +307,26 @@ fn save_config(app_data_dir: &Path, cfg: &DeviceConfig) -> Result<(), String> {
     let tmp = p.with_extension("json.tmp");
     let txt = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
 
-    fs::write(&tmp, &txt).map_err(|e| format!("Error escribiendo config tmp {:?}: {e}", tmp))?;
-    fs::rename(&tmp, &p).map_err(|e| format!("Error renombrando config {:?}: {e}", p))?;
+    // AUD-28: el nombre del fichero y no la ruta de AppData, que lleva el usuario de Windows; el
+    // mensaje sale del equipo con el fallo del comando. El `io::Error` no cita la ruta.
+    fs::write(&tmp, &txt)
+        .map_err(|e| format!("No se pudo guardar la configuración del equipo (device_config.json.tmp): {e}"))?;
+    fs::rename(&tmp, &p)
+        .map_err(|e| format!("No se pudo guardar la configuración del equipo (device_config.json): {e}"))?;
 
     Ok(())
 }
 
 fn ensure_folders(app_data_dir: &Path) -> Result<(), String> {
-    let folders = vec![
-        app_data_dir.to_path_buf(),
-        app_data_dir.join("images"),
-        app_data_dir.join("images").join("categorias"),
-        app_data_dir.join("images").join("productos"),
-        app_data_dir.join("images").join("logo"),
-    ];
+    let folders = ["", "images", "images/categorias", "images/productos", "images/logo"];
 
-    for f in folders {
+    for carpeta in folders {
+        let f = app_data_dir.join(carpeta);
         if !f.exists() {
-            fs::create_dir_all(&f).map_err(|e| format!("Error creando carpeta {:?}: {e}", f))?;
+            // AUD-28: la carpeta dentro de AppData, sin la ruta: un fallo aquí acaba en el pánico
+            // del arranque, que va a Sentry.
+            let nombre = if carpeta.is_empty() { "la carpeta de datos" } else { carpeta };
+            fs::create_dir_all(&f).map_err(|e| format!("No se pudo crear {nombre}: {e}"))?;
         }
     }
 
@@ -418,8 +474,10 @@ pub(crate) fn configure_outbox_notifier(app: &AppHandle, db: &Arc<Db>) {
 /// Devuelve `None` cuando no hay clave (instalación todavía sin activar) o cuando la que hay
 /// no es utilizable. En ese caso el repositorio opera en claro: es preferible a impedir dar de
 /// alta a un trabajador. La DEK llega en la respuesta de activación y no se vuelve a pedir.
-fn field_cipher() -> Option<Arc<dyn tpv_application::ports::field_cipher::FieldCipher>> {
-    let dek = match tpv_infra_licensing::device::get_field_dek() {
+///
+/// AUD-06: la del negocio de la base que se va a cifrar (su sello). La de otro no se entrega.
+fn field_cipher(negocio: Option<&str>) -> Option<Arc<dyn tpv_application::ports::field_cipher::FieldCipher>> {
+    let dek = match tpv_infra_licensing::device::get_field_dek_de(negocio?) {
         Ok(Some(d)) => d,
         Ok(None) => return None,
         Err(e) => {
@@ -638,9 +696,10 @@ impl AppState {
                     .as_ref()
                     .cloned()
                     .ok_or_else(|| "DB no inicializada (modo TPV)".to_string())?;
+                let negocio = tpv_infra_sqlite::sello::leer(&conn.read().await).await.ok().flatten();
                 Ok(Arc::new(SqliteTrabajadoresRepository::with_cipher(
                     conn,
-                    field_cipher(),
+                    field_cipher(negocio.as_deref()),
                 )) as Arc<dyn TrabajadoresRepository>)
             }
             Some(DeviceMode::Handy) => {
@@ -934,6 +993,8 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
 
     ensure_folders(&app_data_dir)?;
+    // AUD-06: una apertura en caliente no termina un cambio de negocio: lo hace el arranque.
+    sin_cambio_de_negocio_a_medias(&app_data_dir)?;
 
     // `init_main_db` devuelve el `Db` ya montado: escritor único serializado + pool de lectura
     // (WAL), tablas de control creadas y admin sembrado. La captura de escrituras al outbox está
@@ -941,7 +1002,7 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
     // cuando el modo es "online".
     let db = tpv_infra_sqlite::connection::init_main_db(
         &app_data_dir,
-        dispositivo_aprovisionado(&app_data_dir),
+        negocio_de_la_licencia(&app_data_dir).as_deref(),
     )
     .await
     .map_err(String::from)?;
@@ -970,10 +1031,13 @@ async fn device_reset_mode(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
-    // SEC-01: con la app abierta esto es de administrador (se llega por Configuración →
-    // Dispositivo, cuya ruta no tiene candado). Sin sesión pasa, porque el otro camino que lleva
-    // aquí es el botón "volver al selector de modo" de las pantallas de arranque, donde todavía
-    // no hay con quién iniciar sesión.
+    // SEC-01: con la app abierta esto es de administrador (Configuración → Dispositivo). Sin
+    // sesión pasa, porque el otro camino que lleva aquí es el «← Volver» de la activación de la
+    // licencia, donde todavía no hay con quién iniciar sesión. AUD-23: el «← Volver» de la
+    // vinculación de la Handy ya no llega aquí (enseña el selector sin tocar nada guardado), así
+    // que en la Handy sólo lo pide Configuración. No se endurece para ella: `handy_set_token`, que
+    // va sin sesión para poder emparejar, sustituye el vínculo igual, y el IPC no es una frontera
+    // (docs/arquitectura/permisos.md).
     state.exigir_rol_si_hay_sesion(&[ADMIN]).await?;
 
     state.cerrar_sesion().await;
@@ -1064,7 +1128,8 @@ pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
 
-    let Some(mode_str) = signing_mode(*state.mode.lock().await) else {
+    let modo = *state.mode.lock().await;
+    let Some(mode_str) = signing_mode(modo) else {
         return Ok("sin_modo".into());
     };
 
@@ -1073,6 +1138,20 @@ pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result
     if interruptores::apagado(app, tpv_contracts::interruptores::Interruptor::Imagenes).is_some() {
         return Ok("apagado".into());
     }
+
+    // AUD-06: la cola es del negocio del equipo, y se sube con las credenciales del de la licencia.
+    // En la Main, sólo si la base abierta es la de ese negocio (su sello). Y cada subida lleva el
+    // negocio con el que empezó: el adaptador no la firma con un token de otro.
+    let negocio = match modo {
+        Some(DeviceMode::Tpv) => match negocio_de_la_base_en_uso(state, &app_data_dir).await {
+            Some(negocio) => negocio,
+            None => return Ok("base_de_otro_negocio".into()),
+        },
+        _ => match uc_pairing::handy_get_tenant(&PairingAdapter::new(app_data_dir.clone())) {
+            Ok(Some(negocio)) => negocio,
+            _ => return Ok("sin_negocio".into()),
+        },
+    };
 
     let Ok(_guard) = DRENAJE_IMAGENES.try_lock() else { return Ok("en_curso".into()); };
     let cola = ColaImagenes::new(&app_data_dir);
@@ -1086,7 +1165,7 @@ pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result
             Ok(ruta) => match imagenes::leer_para_subida(&ruta) {
                 Ok(Some(bytes)) => {
                     let path = format!("/v1/images/{}", imagen.rel_path);
-                    match uc_pairing::upload_image(&svc, mode_str, &path, &imagen.content_type, bytes).await {
+                    match uc_pairing::upload_image(&svc, mode_str, &path, &imagen.content_type, bytes, &negocio).await {
                         Ok(ResultadoSubidaImagen::Subida) => {
                             cola.terminar(&imagen, None)?;
                             subidas += 1;
@@ -1114,8 +1193,9 @@ pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result
         if cola.terminar(&imagen, Some(&rechazo))? {
             apartadas += 1;
             // La capa tracing -> Sentry ya existe: avisar una vez, tras persistir el rechazo.
-            tracing::error!(target: "tpv::imagenes", ruta = %imagen.rel_path, motivo = %rechazo,
-                "image_upload_rejected");
+            // AUD-28: la imagen sin el nombre que alguien le dio (`para_registro`).
+            tracing::error!(target: "tpv::imagenes", ruta = %imagenes::para_registro(&imagen.rel_path),
+                motivo = %rechazo, "image_upload_rejected");
             let _ = app.emit("images:queue_changed", ());
         }
         // Una imagen rechazada no impide subir la siguiente.
@@ -1224,16 +1304,25 @@ async fn images_ensure_local(
         return Ok(true);
     }
 
-    let Some(mode_str) = signing_mode(*state.mode.lock().await) else {
+    let modo = *state.mode.lock().await;
+    let Some(mode_str) = signing_mode(modo) else {
         return Ok(false);
     };
+
+    // AUD-06: en la Main, lo que baja es del negocio de la licencia y va a la carpeta de imágenes
+    // de su base: sólo si la base abierta es la de ese negocio (su sello).
+    if modo == Some(DeviceMode::Tpv) && negocio_de_la_base_en_uso(&state, &app_data_dir).await.is_none() {
+        return Ok(false);
+    }
 
     let svc = PairingAdapter::new(app_data_dir.clone());
     match uc_pairing::download_image(&svc, mode_str, &rel_path).await {
         Ok(Some(bytes)) => {
             let file_path = imagenes::destino(&app_data_dir, &rel_path, true)?;
-            fs::write(&file_path, bytes)
-                .map_err(|e| format!("Error escribiendo {:?}: {e}", file_path))?;
+            // AUD-28: sin la ruta de AppData ni el nombre que alguien le dio a la imagen.
+            fs::write(&file_path, bytes).map_err(|e| {
+                format!("No se pudo guardar la imagen descargada ({}): {e}", imagenes::para_registro(&rel_path))
+            })?;
             Ok(true)
         }
         // Aún no está en R2 (404) o falló la red: no es un error duro, el UI reintentará.
@@ -1241,7 +1330,8 @@ async fn images_ensure_local(
         Err(e) => {
             // WARN y no DEBUG: si esto falla, la imagen no está ni en disco ni en R2 y la UI la
             // reintentará en cada resolución. Merece verse en Axiom, no sólo en la consola de dev.
-            tracing::warn!(target: "tpv::imagenes", ruta = %rel_path, error = ?e, "fallo bajando imagen de R2");
+            tracing::warn!(target: "tpv::imagenes", ruta = %imagenes::para_registro(&rel_path), error = %e,
+                "fallo bajando imagen de R2");
             Ok(false)
         }
     }
@@ -1271,6 +1361,12 @@ async fn images_backfill(
     if !is_main {
         let _ = fs::write(&marker, b"handy");
         return Ok("no_aplica".into());
+    }
+
+    // AUD-06: las imágenes que hay son del negocio de la base. Sólo se encolan si es el de la
+    // licencia y se está usando; si no, se espera (sin dar el repaso por hecho).
+    if negocio_de_la_base_en_uso(&state, &app_data_dir).await.is_none() {
+        return Ok("base_de_otro_negocio".into());
     }
 
     let mut encoladas = 0u32;
@@ -2126,7 +2222,6 @@ pub fn command_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::pairing::device_hora_para_firmar,
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,
-            commands::pairing::config_upload_initial_setup,
             // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
 
             // sincronización Main → nube (outbox de escrituras locales)
@@ -2338,10 +2433,20 @@ pub fn run() {
                 .expect("Error obteniendo AppData");
 
             ensure_folders(&app_data_dir).expect("Error creando carpetas");
-            tracing::warn!("[TPV] setup: app_data_dir={:?}", app_data_dir);
+            // AUD-28: el nombre de la carpeta (el identificador de la app: prod, dev o e2e), no la
+            // ruta, que lleva el usuario de Windows.
+            tracing::warn!(
+                carpeta = %app_data_dir.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
+                "[TPV] setup: carpeta de datos"
+            );
 
             let cfg = load_config(&app_data_dir);
             let mode = cfg.mode;
+
+            // AUD-06: lo primero que se hace con la licencia y con la base. Se registra cuando ya hay
+            // telemetría, más abajo.
+            let cambio_de_negocio = (mode == Some(DeviceMode::Tpv))
+                .then(|| aplicar_cambio_de_negocio_al_arrancar(&app_data_dir));
 
             // El tamaño de la interfaz, antes de que la página pinte nada.
             zoom::fijar_manual(cfg.zoom);
@@ -2442,6 +2547,18 @@ pub fn run() {
                 if let Some(tenant) = tenant.filter(|t| !t.is_empty()) {
                     tpv_telemetry::set_tenant(tenant);
                 }
+                match &cambio_de_negocio {
+                    Some(Ok(Some(_))) => tracing::info!(
+                        target: "tpv::startup",
+                        "licencia de otro negocio: datos del anterior apartados y licencia aplicada"
+                    ),
+                    Some(Err(e)) => tracing::error!(
+                        target: "tpv::startup",
+                        error = %e,
+                        "no se pudo terminar el cambio de negocio; se arranca sin base"
+                    ),
+                    _ => {}
+                }
                 tracing::info!(
                     target: "tpv::startup",
                     version = %handle.package_info().version,
@@ -2450,13 +2567,17 @@ pub fn run() {
                 );
             }
 
-            let db_opt: Option<Arc<Db>> = if mode == Some(DeviceMode::Tpv) {
+            // AUD-06: con un cambio de negocio sin terminar no se abre la base, que sería la del
+            // anterior: se arranca sin ella, como con una ilegible, y el siguiente arranque lo repite.
+            let db_opt: Option<Arc<Db>> = if mode == Some(DeviceMode::Tpv) && !matches!(cambio_de_negocio, Some(Err(_))) {
                 // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
                 // está SIEMPRE activa (también offline); se drena en "online".
                 let abierta = tauri::async_runtime::block_on(async {
+                    // AUD-06: con el negocio de la licencia guardada. Si la base es de otro, se
+                    // aparta aquí, antes de abrir nada; si no se puede, se arranca sin base.
                     tpv_infra_sqlite::connection::init_main_db(
                         &app_data_dir,
-                        dispositivo_aprovisionado(&app_data_dir),
+                        negocio_de_la_licencia(&app_data_dir).as_deref(),
                     )
                     .await
                 });
@@ -3000,10 +3121,9 @@ mod tests_sesion_y_permisos {
 
     /* ── `exigir_rol_si_hay_sesion`: el gate de las pantallas de arranque ──────────────────── */
 
-    /// Sin sesión pasa, y esto NO es un descuido. A `device_reset_mode` se llega también desde el
-    /// selector de modo y desde la pantalla de activación, que se pintan en lugar del router: ahí
-    /// no hay con quién iniciar sesión, y un gate duro dejaría un equipo recién instalado sin
-    /// poder activarse jamás.
+    /// Sin sesión pasa, y esto NO es un descuido. A `device_reset_mode` se llega también desde la
+    /// pantalla de activación, que se pinta en lugar del router: ahí no hay con quién iniciar
+    /// sesión, y un gate duro dejaría un equipo recién instalado sin poder activarse jamás.
     #[tokio::test]
     async fn sin_sesion_el_gate_blando_deja_pasar() {
         let st = estado().await;
@@ -3103,6 +3223,8 @@ mod tests_exenciones_del_gate {
             (include_str!("commands/tareas.rs"), vec!["tareas_marcar_tarea_finalizada"]),
             (include_str!("commands/venta_rapida.rs"), vec!["vr_create_comanda_barra"]),
             (include_str!("commands/inventario.rs"), vec!["inventario_upsert_producto", "inventario_create_lote", "inventario_ajustar_lote", "inventario_ajustar_stock_suelto"]),
+            // AUD-26: qué se ve, en nombre de quién se marca leído y sobre qué actúa la papelera.
+            (include_str!("commands/notificaciones.rs"), vec!["notificaciones_listar", "notificaciones_no_leidas", "notificaciones_marcar_leida", "notificaciones_marcar_todas_leidas", "notificaciones_descartar", "notificaciones_papelera", "notificaciones_restaurar", "notificaciones_eliminar"]),
         ] {
             for comando in comandos {
                 let cuerpo = fuente.split(&format!("pub async fn {comando}(" )).nth(1).unwrap().split("#[tauri::command]").next().unwrap();
@@ -3210,6 +3332,11 @@ mod tests_exenciones_del_gate {
                  `ON CONFLICT` pisaba el precio; los productos se dan de alta desde Inventario \
                  (RI-52)",
             ),
+            (
+                "config_upload_initial_setup",
+                "subía a la nube, sin sesión ni `Requiere_Setup`, el PIN que le dijeran para el \
+                 usuario que le dijeran; el setup inicial sube por el outbox (AUD-24)",
+            ),
         ] {
             assert!(
                 !registro.contains(comando),
@@ -3244,6 +3371,11 @@ mod tests_exenciones_del_gate {
             "$APPDATA/device_config.json",
             "$APPDATA/license_state.json",
             "$APPDATA/traslado-pendiente",
+            // AUD-06: el cambio de negocio pendiente de reinicio, y la licencia que espera a él.
+            "$APPDATA/cambio-de-negocio",
+            "$APPDATA/cambio-de-negocio.tmp",
+            "$APPDATA/license_state.pending.json",
+            "$APPDATA/license_state.pending.json.tmp",
             "$APPDATA/interruptores.json",
             "$APPDATA/backups/**",
             "$APPDATA/image_uploads.json",

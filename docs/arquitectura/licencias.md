@@ -88,11 +88,32 @@ cuenta:
 
 | Caso | Efecto |
 |---|---|
-| Reembolso total o disputa abierta de un **alta** | Licencia revocada |
+| Reembolso total o disputa abierta de un **alta** | Licencia revocada, y se avisa al `TenantHub` como al [anular desde la administración](#anular-desde-la-administración). Si ya lo estaba, no se toca ni se avisa; en una disputa, su cobro queda `dispute_ya_revocada` en vez de `dispute` |
 | … de una **renovación** (`kind='renewal'`, incluida una clave canjeada) | Se restan sus meses |
-| Reembolso parcial | Nada; queda en `admin_audit` con todas las licencias de la compra (Stripe no dice cuál se devuelve: se revoca a mano) |
-| Disputa **ganada** | Se deshace lo que revirtió esa disputa (y sólo eso) |
+| Reembolso parcial | Nada; queda en `admin_audit` con la licencia de cada cobro de la compra. Stripe no dice cuál se devuelve: se corrige a mano ([abajo](#reembolso-parcial-lo-que-se-hace-a-mano)) |
+| Disputa **ganada** | Se deshace lo que revirtió esa disputa, y sólo eso (AUD-08): vuelve el alta cuyo cobro es `dispute` y los meses de la renovación. A un cobro `dispute_ya_revocada` sólo se le quita la marca, y una licencia sin cobro registrado (anterior a LIC-07) no se toca: si la revocó la disputa, se desrevoca a mano |
 | Cargo sin licencia atribuible | Nada; se audita |
+
+Una revocación a mano no la deshace ninguna disputa: ni la que se abre después ni la que ya estaba
+abierta, porque revocar pasa sus cobros `dispute` a `dispute_ya_revocada`
+([abajo](#anular-desde-la-administración)). Así, tras el reembolso parcial de una compra de varias,
+la clave devuelta y revocada a mano no vuelve a `issued` aunque después se gane una disputa del
+cargo.
+
+#### Reembolso parcial: lo que se hace a mano
+
+Lo decide el cobro de la unidad devuelta, en `license_payments` (`unidad`, `kind`, `term_months` y
+`license_id`, que es la licencia que tiene ahora su tiempo):
+
+- **Un alta que es el único cobro sin devolver de su licencia** (nadie ha canjeado otra clave sobre
+  ella): se revoca esa licencia, `pnpm license:revoke -- --id …`.
+- **Cualquier otro caso** —una renovación, una clave canjeada (su cobro se movió como `renewal` a la
+  licencia que recibió el tiempo) o un alta sobre la que ya se han canjeado otras claves—: se restan
+  a esa licencia los meses de la unidad, `pnpm license:shorten -- --id … --months N`. Revocarla
+  anularía el negocio entero, con el tiempo que sigue pagado.
+
+Si se compran dos claves y una se canjea sobre la otra, los dos cobros apuntan a la receptora, y la
+auditoría del reembolso la lista dos veces: se acorta, no se revoca.
 
 El cargo se atribuye por el historial de cobros, luego por el último cobro de la licencia y, como
 último recurso, por el cliente de Stripe **sólo si tiene una única licencia**. La auditoría anota los
@@ -210,6 +231,18 @@ AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_repla
 es que otro la canjeó mientras éste aprovisionaba su base, `license_already_used` (AUD-07). La base
 aprovisionada para el perdedor se queda vacía.
 
+**En un equipo que era de otro negocio** (AUD-06). Con la licencia anulada o trasladada, el equipo ya
+no tiene una licencia viva a la que sumar tiempo, así que una clave sin estrenar abre un negocio
+nuevo; pero su base local es la del anterior. Si el equipo era la Main (`role = 'tpv'`) de otro
+negocio con alguna licencia (esté como esté) y sin retirar, la respuesta lleva `cambioDeEquipo: true`,
+igual que un traslado; una Handy no guarda base, y no cuenta. Es un aviso: lo que protege a la Main es el sello de su base (abajo), que no depende de
+que esta respuesta llegue.
+No cuentan como negocio anterior el que deja a medias una primera activación fallida (dio de alta el
+equipo y no llegó a tener licencia) ni el retirado (`status = 'deleted'`, lo que deja cada tanda del
+E2E, cuyo equipo estrena la siguiente con la carpeta de datos borrada). Sólo se mira en la primera
+activación: el equipo que vuelve a la licencia de su negocio conserva su base aunque su fila haya
+pasado por otro.
+
 ### 3. Cambio de equipo (la licencia ya está en otro)
 
 Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email`):
@@ -221,6 +254,38 @@ Exige un código de 6 cifras enviado al **correo de la compra** (`customer_email
 3. Activar con el código: se verifica (tiempo constante), se consume de forma atómica,
    `reassignMainDevice` cambia la Main (registro en `license_device_swaps`) **conservando el
    tenant**, y se avisa por correo al titular.
+
+**Qué pasa con el equipo anterior** (AUD-02). Su fila de `devices` no se toca (sigue con rol `tpv`
+y sin revocar): lo que lo deja fuera es la licencia, y no en todas partes a la vez.
+
+- **REST**: `tenantAuth` lo rechaza con `device_replaced`, pero guarda la respuesta 60 s por isolate.
+  Durante ese minuto, una petición suya que caiga en un isolate que lo dio por bueno todavía pasa.
+  El ticket del socket lo comprueba sin caché: desde el traslado no recibe ninguno.
+- **El socket que tenía abierto**: con la licencia ya cambiada, la ruta avisa al `TenantHub` del
+  negocio (`lib/hub.ts::avisarCambioDeLicencia`), que vuelve a leer quién es la Main y le cierra el
+  socket. El aviso no nombra a quién echar: si llega tarde, cuando la licencia ya ha vuelto a ese
+  equipo, la lectura lo dice y no se le echa. Entre cambiar `main_device_id` y que el hub lea hay
+  una llamada: en ese instante sigue dentro. Cerrado, deja de recibir lo del negocio, de poder
+  mandar SQL y de contar como Main, y lo que tuviera esperando no entra. Al reconectar se le niega el ticket, lo traduce en un
+  `license_check_now` y se bloquea con `device_replaced`, conservando su licencia local.
+- **Si ese aviso no llega** (es best-effort) o su lectura no contesta, sigue dentro hasta que pase
+  una de dos cosas: que
+  salude el equipo nuevo, que lo echa, o la siguiente comprobación del `TenantHub`, que vuelve a
+  leer de la base central quién es la Main en cuanto hay actividad en el negocio (una escritura
+  suya o de una Handy, un volcado, un evento, el saludo de una Handy, un aviso) y ha pasado un
+  minuto desde la última vez. Hasta que vuelve esa lectura puede escribir, recibir y contar como
+  Main; entonces se le echa antes de hacer nada más. Sin actividad se queda conectado, y no le llega
+  nada del negocio porque no hay nada que entregar. Detalle en
+  [sincronizacion.md](sincronizacion.md#quién-es-la-main-dentro-del-tenanthub-aud-02).
+- **Si la base central no contesta** o rechaza la consulta cuando el `TenantHub` pregunta, lo que
+  sabía se queda como estaba y no se rechaza nada: se vuelve a preguntar al minuto. Es lo que evita
+  cortar a la Main en una avería, y deja dentro a un equipo desplazado cuyo cierre no llegó
+  mientras dure. Al saludar no: un `tpv` no entra sin que la base central conteste.
+- **Las Handy** se quedan sin Main (`main_offline`) cuando se cierra el socket del equipo anterior y
+  hasta que el nuevo se conecta y se pone al día. Mientras el anterior siga dentro, no.
+- **Lo que tenía sin subir**: lo que no haya mandado cuando se le cierra se queda en su outbox. Lo
+  que mandó antes sí está en la nube, y lo que dejó en la cola del `TenantHub` (un volcado) se
+  aplica igual.
 
 **Los topes de verdad van por licencia** (RI-68, `license_otp_eventos`, ventana de 24 h):
 - como mucho **5 códigos enviados**; pasado el tope se contesta igual, sin enviar;
@@ -261,12 +326,69 @@ el PIN de un administrador podría cambiarlo y llevarse la licencia.
   registrada (`device_key_missing`). Toda puerta que dé de alta un dispositivo comprueba la firma de
   la clave que le presentan y llama a ese guardián (hoy: activar y recoger el token del
   emparejamiento). Dentro del mismo negocio, el emparejamiento sí deja que la clave cambie: es la vía
-  de recuperación de una Handy revocada. Activar, no.
+  de recuperación de una Handy revocada. Activar, no. El guardián devuelve el negocio en el que
+  estaba la fila, que deja de saberse en cuanto el alta la muda (AUD-06).
 - Entregan la **DEK** del tenant (`getOrCreateTenantFieldDek`, la existente si ya la hay), para que
   un equipo nuevo pueda descifrar la PII del personal.
-- Devuelven el token de sesión (JWT HS256 de 30 días) y `cambioDeEquipo`. **Quién decide que hubo
-  traslado es el servidor**: con `cambioDeEquipo`, el TPV marca `traslado-pendiente` y reconstruye su
-  base desde la nube ([recuperacion.md](recuperacion.md)).
+- Devuelven el token de sesión (JWT HS256 de 30 días) y `cambioDeEquipo`. **Que la licencia viene de
+  otro equipo sólo lo sabe el servidor**, y no depende de que se haya escrito un código: con
+  `cambioDeEquipo`, la base del mismo negocio es de antes del traslado y se reconstruye desde la nube
+  ([recuperacion.md](recuperacion.md)).
+
+### Una base sólo se usa con la licencia de su negocio
+
+De qué negocio es una base lo dice ella misma: su **sello**, la tabla local `_Negocio` (migración
+`0002`), que viaja en cada copia. `tpv_domain::licensing::que_hacer_con_la_base` compara el sello con
+el negocio de la licencia y es la misma regla en los tres sitios donde se mira: al activar, al abrir
+la base (`connection::init_main_db`) y al restaurar o importar una copia
+([recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio)).
+
+| La base | La licencia viene de otro equipo | Qué se hace |
+|---|---|---|
+| Lleva el sello del negocio de la licencia | No | Se usa |
+| No lleva sello (recién creada, o anterior a los sellos) | No | Se sella con ese negocio y se usa |
+| Lleva su sello, o ninguno | Sí | Se marca el traslado y se reconstruye desde la nube |
+| Lleva el sello de otro negocio, o no se deja leer | Da igual | La licencia queda pendiente, el TPV se reinicia y el arranque aparta la base entera antes de aplicarla |
+
+`activate` (el caso de uso), con la respuesta de la nube en la mano: primero contrasta lo concedido
+con lo pedido (AUD-01, `comprobar_concesion`: quien pidió sólo sumar espera una suma, y una suma no
+cambia de negocio; si no, no toca nada). Después decide con el sello:
+
+- **otro negocio**: guarda lo concedido **como pendiente** (`guardar_pendiente`: el token y la DEK en
+  entradas aparte del almacén de secretos, el estado en `license_state.pending.json`, el último), sin
+  tocar la licencia vigente, anota el cambio (`AppData/cambio-de-negocio`) y contesta `reinicia`. El
+  comando pide a Tauri que reinicie el TPV a los cuatro segundos, y hasta entonces todo sigue siendo
+  del negocio anterior: la licencia, el token y la DEK vigentes son los suyos. Lo aplica el arranque,
+  ése o cualquiera posterior si el reinicio no llega (`aplicar_cambio_de_negocio_pendiente`):
+  aparta lo del equipo, pasa lo pendiente a vigente (`aplicar_pendiente`) y quita la anotación, en
+  ese orden y antes de abrir nada
+  ([recuperacion.md](recuperacion.md#una-base-sólo-se-usa-con-la-licencia-de-su-negocio));
+- **el mismo negocio, o una base sin sello**: descarta lo que hubiera pendiente sin anotar, sella la
+  base (nunca encima de un sello distinto: eso es un error) o marca el traslado, y guarda las
+  credenciales (`guardar_credenciales`: el token y la DEK) y, lo último, `license_state.json`.
+
+Las activaciones y los canjes (`sumar_clave`) van de uno en uno en todo el proceso: un cerrojo del
+caso de uso cubre la petición a la nube (lo concedido espera en el adaptador, en un solo sitio), la
+decisión, el sello y lo que se guarda. Y con un cambio de negocio anotado no se activa ni se canjea
+nada: se rechaza antes de pedir nada a la nube, y lo que hay que hacer es reiniciar.
+
+`activar_remoto` no guarda nada: lo concedido espera en el adaptador a que el caso de uso decida
+dónde va. No necesita saber qué licencia se borró ni que el servidor avise: lo que decide está en la
+base. Un corte en cualquier punto deja o la licencia de antes o el cambio entero pendiente; repetir
+una activación cortada antes de anotar el cambio llega al mismo sitio. `sumar_clave` hace la misma comprobación de AUD-01 antes de
+guardar nada.
+
+Las credenciales guardadas también dicen de qué negocio son, y no se usan con otro:
+
+- en modo `tpv`, la Main sólo firma con un token cuyo `tenantId` sea el de su licencia
+  (`comprobar_negocio_del_token`), y `/status` no se consulta con uno ajeno; entre guardar el token
+  de una licencia y guardar la licencia (una activación o un arranque cortados) no sale nada firmado;
+- una subida de imagen lleva el negocio con el que empezó y cada intento comprueba que el token con
+  el que firma es de ese negocio;
+- la DEK se guarda ligada a su negocio (`set_field_dek_de`) y sólo se entrega para el sello de la
+  base que se cifra. Si no se puede guardar, la que hubiera no se usa: se trabaja sin cifrar antes que
+  con la clave de otro negocio. Una DEK guardada antes de ligarlas no dice de quién es y no se usa
+  hasta la siguiente activación.
 
 ## El gate
 
@@ -303,7 +425,9 @@ frescura, y decide
 **El gate nunca borra la licencia local** (RI-09). Un `revoked` o `device_replaced` firmado bloquea con
 su motivo y la conserva. Si el servidor se corrige (se deshace la anulación, o era un error nuestro:
 una base equivocada, una copia restaurada), basta con reintentar. El único borrado es «Borrar y volver
-a activar» (`clear_state`), que anota el motivo para que la pantalla de activación lo explique.
+a activar» (`clear_state`), que anota el motivo para que la pantalla de activación lo explique. La
+pantalla de bloqueo y la de activación avisan antes de que activar otra licencia aparta los datos
+del equipo; no lo impiden.
 Una comprobación que estaba esperando a la nube mientras se borraba, se activaba o se sumaba una clave
 no guarda lo que trae, ni el estado ni el token: vuelve a comprobar la licencia que haya entonces.
 `/refresh` y la readmisión de una Main adjuntan a su rechazo la misma aserción firmada que daría
@@ -357,11 +481,29 @@ equipo ([pendientes.md](../pendientes.md#reloj-01--la-hora-del-negocio-es-la-del
 
 ## Anular desde la administración
 
-`POST /v1/admin/licenses/:id/revoke` revoca y, como best-effort, pide al `TenantHub` del tenant que
-cierre el socket de la Main (`lib/hub.ts::cerrarSocketsDelDispositivo` → `/internal/revoke`, firmado
-con HMAC sobre método, ruta y cuerpo). El cliente reconecta, recibe un 403, lo traduce en un
-`license_check_now` y se bloquea en el acto, sin esperar al job. Las Handy no se cierran a mano: el DO
+`POST /v1/admin/licenses/:id/revoke` revoca y, en la misma transacción, hace suya la revocación
+(`atribuirRevocacionAMano`): si una disputa abierta ya había revocado el alta, su cobro pasa de
+`dispute` a `dispute_ya_revocada`, y ganarla ya no la reactiva (AUD-08). Después, como best-effort y
+si no estaba ya revocada, avisa por RPC al `TenantHub` del tenant (`lib/hub.ts::avisarCambioDeLicencia`
+→ `releerMain`), que vuelve a leer quién es la Main (con la licencia anulada, nadie) y le cierra el
+socket a la que había; si el DO no contesta, la revocación sigue hecha. El cliente reconecta, recibe
+un 403, lo traduce en un `license_check_now` y se bloquea en el acto, sin esperar al job. Las Handy
+no se cierran a mano: el DO
 las congela al irse la Main. **Caducar no empuja**: se nota en la siguiente comprobación.
+
+Hacen lo mismo las otras dos puertas que le quitan la licencia a una Main (AUD-02): el
+[traslado a otro equipo](#3-cambio-de-equipo-la-licencia-ya-está-en-otro), con el equipo anterior, y
+el webhook de Stripe cuando un reembolso o una disputa anulan un alta (una renovación devuelta sólo
+resta meses, y eso es caducar; una que ya estaba revocada no avisa). Ninguna nombra a quién echar: el aviso hace que el hub relea en el
+acto, y echa a la sesión `tpv` que no sea la Main que resulte. Así un aviso que llega tarde —el de un
+traslado B→A después de que la licencia haya vuelto a B, o el de una anulación después de
+deshacerla— no echa a la Main que ha vuelto a serlo. Si el aviso no llega, o su lectura no contesta,
+el hub lo corrige por su cuenta en cuanto hay actividad: como mucho un minuto después de la última
+vez vuelve a leer quién es la Main de la licencia sin anular, y echa a la sesión `tpv` que ya no lo
+sea ([sincronizacion.md](sincronizacion.md#quién-es-la-main-dentro-del-tenanthub-aud-02)). La baja
+de un dispositivo, en cambio, le cierra sus sockets sin condición (`cerrarSocketsDelDispositivo`).
+Retirar los negocios del E2E anula sus licencias sin avisar al `TenantHub`: esa Main se queda fuera
+así.
 
 | Operación | Ruta | CLI |
 |---|---|---|
@@ -419,7 +561,9 @@ no silencie el del siguiente.
 |---|---|
 | `device_id` y clave privada ed25519 del dispositivo | Almacén de secretos: keyring del sistema en escritorio, Android Keystore (AES-GCM) en la Handy |
 | Estado de la licencia (`tenant_id`, `device_id`, token, estado, caducidad, última comprobación) | `AppData/license_state.json` |
-| DEK de la PII del personal | Almacén de secretos (y en la base central, cifrada con `LICENSE_STORE_KEY`) |
+| DEK de la PII del personal, con el negocio al que pertenece | Almacén de secretos (y en la base central, cifrada con `LICENSE_STORE_KEY`) |
+| De qué negocio es la base local | Su sello, `_Negocio`, dentro de `data.db` y de cada copia |
+| La licencia de otro negocio que espera al reinicio | Su token y su DEK en entradas aparte del almacén de secretos; su estado en `AppData/license_state.pending.json`. La aplica el arranque |
 
 El device-proof firma `ts \n MÉTODO \n ruta \n sha256(token) \n sha256(cuerpo)` (`device.rs`), con ±2
 minutos de margen en el worker. La activación firma lo mismo con el token vacío
