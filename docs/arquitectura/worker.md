@@ -70,11 +70,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Por eso una estadística que crece con el rango pedido lo recorre **una vez por petición**: la de
   productos es una sola sentencia (`sqlProductos`, en `domains/stats/stats.queries.ts`) que devuelve
   las unidades por producto y el catálogo, y el mejor, el peor y los dos top 10 se sacan de ahí en
-  código. Un CTE repetido en varias sentencias se vuelve a calcular en cada una, y uno que leen
-  varias partes de la misma sentencia también, salvo que vaya `AS MATERIALIZED` (el de los clientes
-  recurrentes, que tiene que mirar los cobros de toda la historia). La Main hace lo mismo
-  (`sql_productos` y `sql_clientes_recurrentes`, en `tpv-infra-sqlite/src/stats.rs`) y el arnés de
-  lectura fija que las dos dan el mismo resultado.
+  código. Un CTE repetido en varias sentencias se vuelve a calcular en cada una. Dentro de una misma
+  sentencia lo decide el planificador: el de los clientes recurrentes, que tiene que mirar los
+  cobros de toda la historia y lo leen tres partes de la sentencia, va `AS MATERIALIZED` porque sin
+  esa marca SQLite lo deshace dentro de cada una. La Main hace lo mismo (`sql_productos` y `sql_clientes_recurrentes`,
+  en `tpv-infra-sqlite/src/stats.rs`), el arnés de lectura fija que las dos dan el mismo resultado y
+  el plan de las dos sentencias tiene su test en cada lado.
 - Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
 - **Sin jurisdicción, con pista de Europa occidental** (`JURISDICCION_DO` vacía y
   `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) se

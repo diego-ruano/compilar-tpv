@@ -301,8 +301,8 @@ export async function getOpenPunch(
 
 /**
  * AUD-47: una entrada que no toca es un 409 con la frase que da la Main (`exec_punch`, en
- * `tpv-infra-sqlite/src/login.rs`). Un `Error` a secas acababa en `onError` como un 500
- * `internal_error`: quien fichaba dos veces leía que el servidor había fallado.
+ * `tpv-infra-sqlite/src/login.rs`). A un `Error` a secas `onError` contesta con un 500
+ * `internal_error`, y quien ficha dos veces leería que el servidor ha fallado.
  */
 function entradaRechazada(frase: string): HubError {
 	return new HubError(frase, 409);

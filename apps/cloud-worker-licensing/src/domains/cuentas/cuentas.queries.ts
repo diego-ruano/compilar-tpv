@@ -79,7 +79,7 @@ function cortarPagina<T extends { id: string }>(
 // los placeholders de forma consecutiva. Paridad con `tpv-infra-sqlite::cuentas` (CUENTA-05).
 //
 // La búsqueda va con `instr` y no con `LIKE`: el SQLite del Durable Object no admite un patrón de
-// `LIKE` de más de 50 bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaba el
+// `LIKE` de más de 50 bytes, así que un texto largo (o con acentos, que ocupan dos) tumbaría el
 // listado; y en un patrón el `%` y el `_` que teclea el usuario son comodines. `expr` ya viene en
 // minúsculas.
 function applyFilters(
