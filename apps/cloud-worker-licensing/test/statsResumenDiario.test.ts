@@ -232,11 +232,13 @@ describe("las estadísticas leen del resumen diario y dan lo mismo que recorrien
 				],
 			] as const) {
 				const pasos = plan(texto);
-				// Los días cerrados, por el resumen; los cobros, sólo los de hoy y por su fecha. Nada
-				// recorre el histórico.
+				// Los días cerrados, por el resumen; los cobros, sólo los de hoy y los de los días sucios,
+				// por su fecha. Nada recorre el histórico, tampoco un acceso a los cobros sólo por su
+				// estado, que los leería todos (la sentencia compartida fija el orden con `CROSS JOIN`).
 				expect(pasos, `${nombre}: ${pasos.join(" | ")}`).toContain(resumen);
 				expect(pasos, `${nombre}: ${pasos.join(" | ")}`).toContain(cobros);
 				expect(pasos.filter((l: string) => /^SCAN (p|pd|dc|c|e)( |$)/.test(l)), nombre).toEqual([]);
+				expect(pasos.filter((l: string) => l.endsWith("(Estado=?)")), nombre).toEqual([]);
 			}
 		});
 	});

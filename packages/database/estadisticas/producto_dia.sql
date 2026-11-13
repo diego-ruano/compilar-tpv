@@ -22,7 +22,9 @@ SELECT
 FROM (
   SELECT d.Dia AS Dia, pd.ID_Detalle AS ID_Detalle
   FROM dias d
-  JOIN Pagos p
+  -- CROSS JOIN fija el orden: primero los días y, de cada uno, sus cobros por su fecha. Con un
+  -- JOIN, SQLite puede empezar por los cobros activos, todos, y cruzarlos después con los días.
+  CROSS JOIN Pagos p
     ON p.Estado = 'ACTIVO'
    AND p.Fecha_Hora >= d.Dia
    AND p.Fecha_Hora < date(d.Dia, '+1 day')

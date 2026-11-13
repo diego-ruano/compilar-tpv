@@ -130,6 +130,33 @@ mod tests {
         // A los cobros se entra dos veces, las dos por su fecha: por los días que sigan sucios y por
         // lo de hoy (`paid_det`, que se calcula una vez).
         assert_eq!(p.iter().filter(|l| l.starts_with("SEARCH p ")).count(), 2, "{p:#?}");
+        assert!(!p.iter().any(|l| l.ends_with("(Estado=?)")), "{p:#?}");
+    }
+
+    /// La estadística de mesas, igual: los días cerrados del resumen diario y, de los cobros, sólo
+    /// los de hoy, los de los días que sigan sucios y los posteriores a ahora, siempre por su fecha.
+    /// Un acceso a los cobros sólo por su estado los recorrería todos: SQLite lo elegía para los días
+    /// sucios hasta que la sentencia compartida fijó el orden con `CROSS JOIN` (revisión con Codex).
+    #[tokio::test]
+    async fn la_estadistica_de_mesas_solo_lee_los_cobros_del_rango() {
+        use tpv_contracts::stats::StatsRange;
+        for range in [StatsRange::Semana, StatsRange::Anio] {
+            let p = plan(&crate::stats::sql_mesas_ingresos(range)).await;
+            for entrada in [
+                "SEARCH e USING PRIMARY KEY (Dia>? AND Dia<?)",
+                "SEARCH s USING PRIMARY KEY (Dia>? AND Dia<?)",
+                "SEARCH p USING INDEX idx_pagos_estado_fecha (Estado=? AND Fecha_Hora>? AND Fecha_Hora<?)",
+                "SEARCH p USING INDEX idx_pagos_fecha (Fecha_Hora>? AND Fecha_Hora<?)",
+            ] {
+                assert!(p.iter().any(|l| l == entrada), "{range:?}: falta «{entrada}»: {p:#?}");
+            }
+            assert!(!p.iter().any(|l| l.ends_with("(Estado=?)")), "{range:?}: {p:#?}");
+            let recorridos: Vec<&String> = p
+                .iter()
+                .filter(|l| ["SCAN p", "SCAN c", "SCAN e"].iter().any(|t| *l == t || l.starts_with(&format!("{t} "))))
+                .collect();
+            assert!(recorridos.is_empty(), "{range:?}: recorre el histórico en {recorridos:?}\n{p:#?}");
+        }
     }
 
     /// Saber quién es recurrente obliga a mirar los cobros de toda la historia, pero una vez: `allp`
