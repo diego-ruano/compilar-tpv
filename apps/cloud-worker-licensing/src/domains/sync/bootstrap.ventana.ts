@@ -60,7 +60,8 @@
 // FK. La restauración corre con `defer_foreign_keys`, así que eso no da un aviso: aborta la
 // transacción entera y la recuperación falla. Por eso una comanda entra o no entra CON TODO lo
 // suyo —líneas, pagos, detalles del pago, consumos de lote y de suelto—, y lo que decide es la
-// comanda: abierta, abierta o cerrada dentro de la ventana, o con algún cobro dentro de ella.
+// comanda: abierta, abierta o cerrada dentro de la ventana, o con algún cobro —o la baja de alguno—
+// dentro de ella.
 //
 // De paso arregla algo que no es de integridad: partir una comanda por la mitad dejaría su
 // "pendiente" mintiendo.
@@ -123,14 +124,23 @@ export function esTablaDeNegocio(nombre: string): boolean {
 // de "qué comandas entran" viviera copiada en seis sitios, el día que cambie entrarían hijas
 // huérfanas y la restauración fallaría entera.
 
-/** `?1` = límite inferior de la ventana, `YYYY-MM-DD HH:MM:SS` en hora local del equipo. */
+/**
+ * `?1` = límite inferior de la ventana, `YYYY-MM-DD HH:MM:SS` en hora local del equipo.
+ *
+ * La baja de un cobro cuenta como el cobro (`Anulado_En`). El dinero de una devolución sale del
+ * cajón el día que se devuelve, y el arqueo lo resta en el periodo en que salió aunque la venta sea
+ * de un periodo anterior (REV-08, `cierre_caja.rs::totales_entre`): un ticket de hace veinte días
+ * devuelto hoy forma parte del periodo de caja abierto. Sin él, el primer arqueo tras recuperar
+ * esperaría en el cajón un dinero que ya se devolvió.
+ */
 const CTE_COMANDAS = `sel_comandas AS (
 	SELECT ID_Comanda FROM Comandas
 	 WHERE Estado = 'Abierta'
 	    OR Fecha_Hora_Apertura >= ?1
 	    OR COALESCE(Fecha_Hora_Cierre, '') >= ?1
 	    OR EXISTS (SELECT 1 FROM Pagos p
-	                WHERE p.ID_Comanda = Comandas.ID_Comanda AND p.Fecha_Hora >= ?1)
+	                WHERE p.ID_Comanda = Comandas.ID_Comanda
+	                  AND (p.Fecha_Hora >= ?1 OR COALESCE(p.Anulado_En, '') >= ?1))
 )`;
 
 const CTE_DETALLES = `sel_detalles AS (

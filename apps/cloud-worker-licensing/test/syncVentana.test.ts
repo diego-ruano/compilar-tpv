@@ -235,6 +235,31 @@ describe("bootstrap acotado · la ventana de los transaccionales", () => {
 		expect(ids(body, "Pago_Detalles", "ID_Pago")).toEqual(["p-tardia"]);
 	});
 
+	it("un cobro antiguo dado de baja dentro de la ventana trae su comanda entera", async () => {
+		// El dinero de una devolución sale del cajón el día que se devuelve, y el arqueo lo resta en
+		// ese periodo aunque la venta sea de otro anterior (REV-08). Si el cobro no viaja, el primer
+		// arqueo tras recuperar espera en el cajón un dinero que ya se devolvió.
+		const { body } = await pedir("/bootstrap", "baja-reciente", (sql) => {
+			sql.exec(
+				`INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+				 VALUES ('u1', (SELECT ID_Rol FROM Roles LIMIT 1), 'a@b.c', 'x', 'Ana');`,
+			);
+			sembrarVenta(sql, "devuelta", ANTIGUO);
+			sql.exec(
+				`UPDATE Pagos SET Estado = 'ANULADO', Motivo_Baja = 'DEVOLUCION', Anulado_En = ?, Anulado_Por = 'u1'
+				  WHERE ID_Pago = 'p-devuelta';`,
+				RECIENTE,
+			);
+			// Y una igual de antigua que nadie ha tocado: ésa sí es histórico.
+			sembrarVenta(sql, "intacta", ANTIGUO);
+		});
+
+		expect(ids(body, "Comandas", "ID_Comanda")).toEqual(["c-devuelta"]);
+		expect(ids(body, "Detalle_Comanda", "ID_Detalle")).toEqual(["d-devuelta"]);
+		expect(ids(body, "Pagos", "ID_Pago")).toEqual(["p-devuelta"]);
+		expect(ids(body, "Pago_Detalles", "ID_Pago")).toEqual(["p-devuelta"]);
+	});
+
 	it("ninguna hija sale huérfana de su padre", async () => {
 		// La comprobación general: para cada hija del volcado, su padre tiene que venir también.
 		const { body } = await pedir("/bootstrap", "huerfanas", (sql) => {

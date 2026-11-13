@@ -77,7 +77,10 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
 - **Lo que sigue vivo entra entero**, caiga donde caiga: comandas abiertas, notificaciones activas,
   pedidos en borrador, fichajes sin cerrar.
 - **La unidad es la comanda**: entra con sus líneas, pagos, detalles de pago y consumos, o no entra
-  (una FK colgante abortaría la restauración entera).
+  (una FK colgante abortaría la restauración entera). Entra si está abierta, si se abrió o se cerró
+  dentro de la ventana, o si dentro de ella tiene un cobro **o la baja de un cobro**: el dinero de
+  una devolución sale del cajón el día que se devuelve, y el arqueo lo resta en ese periodo aunque
+  la venta sea anterior ([caja.md](caja.md)).
 - `Registros_Facturacion` entra en la ventana **más su última fila por `Orden`**, que es el eslabón del
   que sigue la cadena.
 - Una tabla de negocio sin clasificar viaja entera; un test compara la clasificación con el esquema.

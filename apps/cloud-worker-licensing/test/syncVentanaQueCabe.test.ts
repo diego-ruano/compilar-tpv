@@ -124,6 +124,14 @@ function sembrarBar(sql: any): void {
 	for (let i = 0; i < DE_LA_SEMANA; i++) venta(sql, `semana-${i}`, haceDias(5));
 	for (let i = 0; i < DESDE_EL_CIERRE; i++) venta(sql, `periodo-${i}`, haceDias(2));
 	for (let i = 0; i < DE_HOY; i++) venta(sql, `hoy-${i}`, haceDias(0.5));
+	// Una de hace veinte días devuelta ayer, después del último cierre: el dinero salió del cajón en
+	// el periodo abierto.
+	venta(sql, "devuelta", haceDias(20));
+	sql.exec(
+		`UPDATE Pagos SET Estado = 'ANULADO', Motivo_Baja = 'DEVOLUCION', Anulado_En = ?, Anulado_Por = 'u1'
+		  WHERE ID_Pago = 'p-devuelta';`,
+		haceDias(1),
+	);
 
 	// Lo que sigue vivo, todo de hace dos meses.
 	sql.exec(
@@ -215,6 +223,8 @@ function comprobarLoImprescindible(v: Volcado, donde: string): void {
 	const pagos = valores(v, "Pagos", "ID_Pago");
 	for (let i = 0; i < DESDE_EL_CIERRE; i++) expect(pagos, donde).toContain(`p-periodo-${i}`);
 	for (let i = 0; i < DE_HOY; i++) expect(pagos, donde).toContain(`p-hoy-${i}`);
+	// Y lo devuelto desde el cierre, aunque la venta sea anterior: el arqueo lo resta (REV-08).
+	expect(pagos, donde).toContain("p-devuelta");
 
 	// El último registro de facturación.
 	expect(valores(v, "Registros_Facturacion", "ID_Registro"), donde).toContain("rf-ultimo");
@@ -446,7 +456,7 @@ describe("el contraste diario usa la ventana que cabe", () => {
 				expect(ventasCon(semana, "vieja"), camino).toBe(0);
 				expect(ventasCon(semana, "semana"), camino).toBe(DE_LA_SEMANA);
 				// Los conteos siguen siendo de la tabla entera, quepa lo que quepa.
-				const comandas = VIEJAS + DE_LA_SEMANA + DESDE_EL_CIERRE + DE_HOY + 1;
+				const comandas = VIEJAS + DE_LA_SEMANA + DESDE_EL_CIERRE + DE_HOY + 2;
 				for (const foto of [mes, semana]) {
 					expect(foto.conteos.find((c: any) => c.nombre === "Comandas").filas, camino).toBe(comandas);
 					expect(foto.hasta_seq, camino).toBe(1);
