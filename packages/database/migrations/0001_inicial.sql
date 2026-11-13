@@ -2129,6 +2129,23 @@ CREATE TABLE IF NOT EXISTS _Estad_Dias_Sucios (
 -- Las altas de una comanda o de una línea, lo normal, no encuentran ningún cobro y no apuntan nada:
 -- están para la que llega después que sus cobros (una reparación, un histórico que se descarga).
 
+-- Un cobro que llega con la clave de otro que ya está: un `INSERT OR REPLACE` (prohibido en el
+-- programa, pero la base no lo impide) lo borraría sin pasar por `estad_pagos_delete`, que con
+-- `recursive_triggers` apagado no salta en un reemplazo, y su día se quedaría limpio. Éste mira la
+-- fila de antes, ANTES de que se borre: su día y los de los cobros de su comanda. Un alta normal no
+-- encuentra nada; un `INSERT OR IGNORE` o un upsert de una fila que ya estaba apuntan de más, que
+-- no estropea nada.
+CREATE TRIGGER IF NOT EXISTS estad_pagos_reemplazo
+BEFORE INSERT ON Pagos
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos viejo
+  JOIN Pagos p ON p.ID_Comanda = viejo.ID_Comanda
+  WHERE viejo.ID_Pago = NEW.ID_Pago
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
 -- Un cobro nuevo: los días de los cobros de su comanda (el suyo incluido) y los de los que
 -- comparten alguna línea con él.
 CREATE TRIGGER IF NOT EXISTS estad_pagos_insert

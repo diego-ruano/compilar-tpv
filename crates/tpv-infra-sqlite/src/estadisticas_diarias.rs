@@ -552,11 +552,17 @@ mod tests {
                 "estad_pago_detalles_update",
                 "estad_pagos_delete",
                 "estad_pagos_insert",
+                "estad_pagos_reemplazo",
                 "estad_pagos_update",
             ]
         );
         for (nombre, sql) in &triggers {
-            assert!(sql.contains("AFTER "), "{nombre}: tiene que ir detrás de la escritura");
+            // Detrás de la escritura, salvo el que mira la fila que un reemplazo va a borrar.
+            if nombre == "estad_pagos_reemplazo" {
+                assert!(sql.contains("BEFORE INSERT ON Pagos"), "{nombre}: {sql}");
+            } else {
+                assert!(sql.contains("AFTER "), "{nombre}: tiene que ir detrás de la escritura");
+            }
             let cuerpo = sql.split_once("BEGIN").expect("un trigger tiene BEGIN").1;
             let cuerpo = cuerpo.rsplit_once("END").expect("y END").0;
             let sentencias: Vec<&str> =
@@ -604,6 +610,20 @@ mod tests {
             )
             .await;
         }
+        // Un reemplazo de verdad: la misma clave con otra fecha. Con `recursive_triggers` apagado el
+        // borrado implícito no dispara `estad_pagos_delete`; el día de la fila de antes lo apunta
+        // `estad_pagos_reemplazo`, y el de la nueva, el alta.
+        ejecutar(&db, &pago("px", "c2", "2026-03-06 09:00:00", 100)).await;
+        limpiar_marcas(&db).await;
+        ejecutar(&db, "PRAGMA recursive_triggers = OFF;").await;
+        ejecutar(
+            &db,
+            &pago("px", "c2", "2026-03-08 09:00:00", 100).replace("INSERT INTO", "INSERT OR REPLACE INTO"),
+        )
+        .await;
+        assert_eq!(sucios(&db).await, ["2026-03-06", "2026-03-08"]);
+        ejecutar(&db, "DELETE FROM Pagos WHERE ID_Pago = 'px';").await;
+
         // Dos cobros del mismo día en una sola sentencia, con el día sin apuntar.
         limpiar_marcas(&db).await;
         ejecutar(

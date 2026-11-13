@@ -160,7 +160,11 @@ base de un negocio es un solo hilo ([worker.md](worker.md#la-base-del-negocio-de
   un `INSERT OR IGNORE … SELECT DISTINCT … WHERE … NOT IN (SELECT Dia FROM _Estad_Dias_Sucios)`: días
   que no son NULL, una vez cada uno y sólo los que no están, así que no hay restricción que pueda
   violar aunque la sentencia que lo dispara lleve otra cláusula de conflicto (que manda sobre la del
-  trigger). No calculan nada: corren dentro del cobro, y nada de lo que lo rodea puede impedirlo. Son
+  trigger). No calculan nada: corren dentro del cobro, y nada de lo que lo rodea puede impedirlo.
+  Todos van detrás de la escritura salvo `estad_pagos_reemplazo`, que va delante del alta de un
+  cobro: un `INSERT OR REPLACE` (prohibido en el programa, pero la base no lo impide) borraría la fila
+  de antes sin disparar el de borrado, que con `recursive_triggers` apagado no salta en un reemplazo,
+  y su día se quedaría limpio. Son
   iguales en la Main y en la nube, y también saltan al aplicar lo que llega de la otra parte, en una
   restauración y en el histórico de la fase 2. Lo vigila
   `estadisticas_diarias::tests::los_triggers_solo_apuntan_dias`.
