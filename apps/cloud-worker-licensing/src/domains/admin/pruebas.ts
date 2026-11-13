@@ -2,8 +2,8 @@
 //
 // Los negocios que deja el E2E. Cada tanda emite una licencia de pruebas y la activa, y activarla
 // crea su base en el TenantHub del negocio. Al acabar, esto las retira para que no se acumulen en el
-// panel: borra todo lo que el negocio guarda en la nube (su base, su agenda de reservas web y sus
-// imágenes), lo da por borrado y anula la licencia.
+// panel: anula sus licencias, borra todo lo que el negocio guarda en la nube (su base, su agenda de
+// reservas web y sus imágenes) y lo da por borrado.
 //
 // Sólo toca lo emitido como de pruebas (`origin = 'pruebas'`) y lo que el E2E emitía antes de que
 // existiera esa marca: licencias manuales con su correo, que es de un dominio `.test` y no puede
@@ -116,11 +116,35 @@ export async function retirarNegociosDePrueba(
 	const filas = pendientes.rows as any[];
 	retirada.quedan = filas.length > NEGOCIOS_POR_LLAMADA;
 
+	// Las licencias se anulan ANTES de borrar nada, y es lo que cierra la puerta. Una clave de verdad
+	// se canjea sobre la licencia viva de la Main del negocio, y el canje lo comprueba dentro de su
+	// transacción (`sigueSiendoLaLicenciaDelEquipo`, AUD-01). Esta sentencia anula, de una vez, las
+	// de los negocios que en ese instante son sólo de pruebas: un canje que entró antes deja a su
+	// negocio fuera de ella, con su licencia viva, y uno que llegue después ya no tiene licencia a la
+	// que sumar y no gasta la clave. Anulando al final, entre volver a mirar un negocio y borrarlo
+	// cabía un canje, y el negocio se quedaba con tiempo pagado y sin sus datos.
+	//
+	// También las que nunca se activaron, y las de un negocio que luego no se pueda retirar: anular no
+	// borra nada y no tiene por qué esperar a su base.
+	const anuladas = await exec(
+		db,
+		`UPDATE licenses SET status = 'revoked', disabled = 1, updated_at_ms = ?2
+		  WHERE license_id IN (
+		    SELECT l.license_id FROM licenses l
+		     WHERE ${dePruebas("l")} AND l.status <> 'revoked'
+		       AND (l.tenant_id IS NULL OR ${soloDePruebas("l.tenant_id")})
+		  );`,
+		[CORREO_DE_PRUEBAS, Date.now()],
+	);
+	retirada.licencias = rowsAffected(anuladas);
+
 	for (const fila of filas.slice(0, NEGOCIOS_POR_LLAMADA)) {
 		const tenantId = String(fila.tenant_id);
 		try {
-			// Lo que viene ahora no se deshace, así que se vuelve a mirar justo antes: entre la lista de
-			// arriba y este negocio pudo activarse o canjearse sobre él una licencia que no es de pruebas.
+			// Lo que viene ahora no se deshace, así que se vuelve a mirar: entre la lista de arriba y
+			// la anulación pudo canjearse sobre él una clave que no es de pruebas, o emitirse para él
+			// una licencia de verdad. Con sus licencias ya anuladas, lo que se ve aquí no lo cambia
+			// un canje.
 			const sigue = await exec(
 				db,
 				`SELECT 1 AS si WHERE EXISTS (SELECT 1 FROM licenses l WHERE l.tenant_id = ?2 AND ${dePruebas("l")})
@@ -144,20 +168,6 @@ export async function retirarNegociosDePrueba(
 			retirada.fallos.push({ tenantId, error: String(e?.message || e) });
 		}
 	}
-
-	// Las licencias, también las que nunca se activaron. Las de un negocio que no se pudo retirar se
-	// anulan igual: anular no borra nada y no tiene por qué esperar a su base.
-	const anuladas = await exec(
-		db,
-		`UPDATE licenses SET status = 'revoked', disabled = 1, updated_at_ms = ?2
-		  WHERE license_id IN (
-		    SELECT l.license_id FROM licenses l
-		     WHERE ${dePruebas("l")} AND l.status <> 'revoked'
-		       AND (l.tenant_id IS NULL OR ${soloDePruebas("l.tenant_id")})
-		  );`,
-		[CORREO_DE_PRUEBAS, Date.now()],
-	);
-	retirada.licencias = rowsAffected(anuladas);
 
 	return retirada;
 }

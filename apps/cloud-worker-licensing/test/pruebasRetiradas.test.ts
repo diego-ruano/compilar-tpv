@@ -5,10 +5,10 @@
 //
 // Es una ruta que borra bases en producción, así que lo que más importa aquí es lo que NO toca: un
 // negocio con una licencia que no sea de pruebas, aunque tenga también una de pruebas, ni uno al
-// que se le haya canjeado una clave de verdad. Corre contra el esquema real del control-plane sobre
-// el SQLite de un Durable Object, como `adminLicenciaReversible.test.ts`. Los objetos de los
-// negocios y el bucket son de mentira: sólo apuntan qué se borró. Lo que borra cada uno de verdad
-// está en `retirarUnNegocio.test.ts`.
+// que se le haya canjeado una clave de verdad, también si el canje llega mientras se retira. Corre
+// contra el esquema real del control-plane sobre el SQLite de un Durable Object, como
+// `adminLicenciaReversible.test.ts`. Los objetos de los negocios y el bucket son de mentira: sólo
+// apuntan qué se borró. Lo que borra cada uno de verdad está en `retirarUnNegocio.test.ts`.
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -17,7 +17,12 @@ import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
 import { CORREO_DE_PRUEBAS, NEGOCIOS_POR_LLAMADA } from "../src/domains/admin/pruebas";
-import { activateLicenseFirstTime, getLicenseById, issueLicense } from "../src/server/licenseStore";
+import {
+	activateLicenseFirstTime,
+	getLicenseById,
+	issueLicense,
+	sigueSiendoLaLicenciaDelEquipo,
+} from "../src/server/licenseStore";
 import type { LicenseOrigin } from "../src/shared";
 
 const STORE_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -51,6 +56,13 @@ type Escenario = {
 	canjear: (claveId: string, sobreLicenciaId: string) => void;
 	/** Algo que pasa justo después de que la ruta liste los negocios que va a retirar. */
 	trasListar: (fn: () => Promise<void>) => void;
+	/** Algo que pasa cuando la ruta va a borrar la base de un negocio: lo último antes de lo que no se deshace. */
+	alBorrarLaBase: (fn: (tenantId: string) => Promise<void>) => void;
+	/**
+	 * Lo que pregunta el canje dentro de su transacción, antes de gastar una clave sobre esta licencia
+	 * (`/v1/license/activate`): ¿sigue siendo la licencia viva de su Main?
+	 */
+	admiteUnCanje: (licenseId: string) => Promise<boolean>;
 };
 
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
@@ -78,10 +90,12 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 		const conBase = new Set<string>();
 		const borradas: string[] = [];
 		const noContestan = new Set<string>();
+		let alBorrar: ((tenantId: string) => Promise<void>) | null = null;
 		const TenantHub = {
 			idFromName: (nombre: string) => nombre,
 			get: (tenantId: string) => ({
 				async borrarTodo() {
+					await alBorrar?.(tenantId);
 					if (noContestan.has(tenantId)) throw new Error("el TenantHub no contesta");
 					borradas.push(tenantId);
 					conBase.delete(tenantId);
@@ -137,6 +151,11 @@ async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 			trasListar: (fn) => {
 				alListar = fn;
 			},
+			alBorrarLaBase: (fn) => {
+				alBorrar = fn;
+			},
+			// El equipo con el que `negocio` activa cada licencia.
+			admiteUnCanje: (licenseId) => sigueSiendoLaLicenciaDelEquipo(db, licenseId, `equipo-${licenseId}`),
 			post: async (ruta, cuerpo) =>
 				await adminRoutes.fetch(
 					new Request(`https://api${ruta}`, {
@@ -261,6 +280,50 @@ describe("admin · retirar los negocios de pruebas del E2E", () => {
 			expect(e.estadoDelNegocio("t-b")).toBe("active");
 			expect(e.tieneBase("t-b")).toBe(true);
 			expect([...e.imagenes]).toEqual(["t-b/images/productos/p.jpg"]);
+		});
+	});
+
+	it("si se le canjea una clave de verdad entre la lista y la anulación, ni se anula su licencia ni se toca", async () => {
+		await escenario(async (e) => {
+			const dePruebas = await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-canje-a-tiempo");
+			const comprada = await e.negocio("stripe", "cliente@ejemplo.test");
+			e.trasListar(async () => e.canjear(comprada, dePruebas));
+
+			const res = await e.post("/pruebas/retirar");
+			expect(await res.json()).toMatchObject({ negocios: 0, bases: 0, licencias: 0, fallos: [] });
+
+			expect(e.borradas).toEqual([]);
+			expect(e.estadoDelNegocio("t-canje-a-tiempo")).toBe("active");
+			expect(e.tieneBase("t-canje-a-tiempo")).toBe(true);
+			expect(await e.estadoDeLicencia(dePruebas)).toBe("active");
+			expect(await e.admiteUnCanje(dePruebas)).toBe(true);
+		});
+	});
+
+	it("cuando llega a borrar la base, la licencia ya está anulada: una clave de verdad ya no se canjea sobre ella", async () => {
+		// Entre volver a mirar el negocio y borrar su base cabía un canje: el negocio se quedaba con
+		// tiempo pagado y sin sus datos. El canje pregunta por la licencia dentro de su transacción
+		// (AUD-01), así que con la licencia anulada antes de mirar no hay canje que entre después.
+		await escenario(async (e) => {
+			const dePruebas = await e.negocio("pruebas", CORREO_DE_PRUEBAS, "t-carrera");
+			const comprada = await e.negocio("stripe", "cliente@ejemplo.test");
+			expect(await e.admiteUnCanje(dePruebas)).toBe(true);
+
+			const alBorrar: { tenantId: string; licencia: string; admiteUnCanje: boolean }[] = [];
+			e.alBorrarLaBase(async (tenantId) => {
+				alBorrar.push({
+					tenantId,
+					licencia: await e.estadoDeLicencia(dePruebas),
+					admiteUnCanje: await e.admiteUnCanje(dePruebas),
+				});
+			});
+
+			const res = await e.post("/pruebas/retirar");
+			expect(await res.json()).toMatchObject({ negocios: 1, bases: 1, licencias: 1, fallos: [] });
+
+			expect(alBorrar).toEqual([{ tenantId: "t-carrera", licencia: "revoked", admiteUnCanje: false }]);
+			// La clave de verdad sigue sin gastar.
+			expect(await e.estadoDeLicencia(comprada)).toBe("issued");
 		});
 	});
 
