@@ -434,6 +434,8 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"missing_ticket",
 	"missing_transaction_steps",
 	"missing_webhook_secret",
+	// DO-NEGOCIO: una llamada ha llegado al TenantHub de un negocio con el identificador de otro.
+	"negocio_ajeno",
 	"no_session",
 	"not_authenticated",
 	"pair_code_generation_failed",

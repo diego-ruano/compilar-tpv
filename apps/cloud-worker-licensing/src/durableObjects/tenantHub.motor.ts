@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { HubError } from "../lib/errorHttp";
+import { serverError } from "../server/utils/response";
 import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
 import { getDb } from "../server/db";
@@ -35,6 +36,7 @@ import {
 	tocaComprobar,
 } from "./tenantHub.main";
 import type { MainVigente } from "./tenantHub.main";
+import { apuntarNegocio, negocioApuntado } from "./tenantHub.negocio";
 import type { ContextoDeMensajes } from "./tenantHub.mensajes";
 import { despachar } from "./tenantHub.mensajes";
 import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
@@ -121,7 +123,8 @@ export class MotorTenantHub {
 	// La base del negocio es el SQLite de este DO. El cliente se monta una vez por
 	// instancia, tras comprobar que el negocio está aprovisionado y su esquema al día.
 	private baseLocal: Client | null = null;
-	// El negocio de este DO, para las trazas: lo dice la primera petición que llega.
+	// El negocio de este DO para las trazas de un objeto que todavía no lo tiene apuntado (sin base):
+	// lo dice la primera petición que llega. Con base, manda el apuntado (`negocioParaTrazas`).
 	private tenantIdVisto: string | null = null;
 	// Lo que ya se ha avisado desde esta instancia (`avisarUnaVez`): una avería de la base del
 	// negocio la ve cada petición, y con un aviso basta. Se pierde al hibernar: vuelve a avisar.
@@ -281,10 +284,15 @@ export class MotorTenantHub {
 	 * pendientes, y dice que ya estaba (`reused`).
 	 */
 	async aprovisionar(tenantId: string): Promise<{ reused: boolean }> {
+		if (!tenantId) throw new HubError("missing_tenant_id", 400);
+		const ajeno = this.negocioAjeno(tenantId, "aprovisionar");
+		if (ajeno) throw ajeno;
 		this.tenantIdVisto ??= tenantId;
 		const storage = this.state.storage;
 		const reused = baseAprovisionada(storage.sql);
 		await this.migrarEnExclusiva();
+		// DO-NEGOCIO: el objeto queda con su negocio apuntado desde que tiene base.
+		apuntarNegocio(storage, tenantId);
 		await sembrarAdminInicial(storage);
 		this.baseLocal = clienteLocal(storage);
 		return { reused };
@@ -294,16 +302,62 @@ export class MotorTenantHub {
 		return baseAprovisionada(this.state.storage.sql);
 	}
 
+	// ---- DO-NEGOCIO: de qué negocio es este objeto ------------------------------------------
+	//
+	// El negocio se apunta en el alta, en el sello de la base (`tenantHub.negocio.ts`), y toda
+	// llamada que trae uno se contrasta con él antes de hacer nada: `ejecutarRuta`, `aplicar`, `consultar`,
+	// `anotarEstado`, `aprovisionar`, `releerMain` y la apertura del WebSocket. El Worker ya llega
+	// al objeto por el nombre del negocio, así que en condiciones normales esto no decide nada: es
+	// la segunda comprobación, y si salta es un fallo del programa.
+
+	/**
+	 * ¿Trae esta llamada el negocio de otro objeto? Devuelve el error con el que se rechaza, o
+	 * `null` si el negocio es el de éste.
+	 *
+	 * - **Con negocio apuntado**, cualquier otro (también uno vacío) se rechaza con `negocio_ajeno`
+	 *   (500): va a Sentry, una vez por instancia, y a Axiom cada vez, con la operación.
+	 * - **Con base y sin negocio apuntado** (un objeto dado de alta antes de que se apuntara), la
+	 *   base se queda con el de la primera llamada que llegue. Esa llamada viene del Worker, que
+	 *   ha encontrado el objeto por ese mismo nombre; dentro no hay nada más con lo que contrastarlo.
+	 * - **Sin base** no hay nada que guardar: la llamada sigue, y contestará que no hay base o la
+	 *   creará (`aprovisionar`), que es quien apunta el negocio.
+	 */
+	private negocioAjeno(tenantId: string, operacion: string): HubError | null {
+		const storage = this.state.storage;
+		const propio = negocioApuntado(storage);
+		if (propio === null) {
+			if (apuntarNegocio(storage, tenantId)) this.emitSyncEvent("negocio_adoptado", { operacion });
+			return null;
+		}
+		if (propio === tenantId) return null;
+
+		const error = new HubError("negocio_ajeno", 500);
+		if (!this.avisados.has("negocio_ajeno")) {
+			this.avisados.add("negocio_ajeno");
+			capturarError(error, "hub.negocio_ajeno");
+		}
+		this.emitSyncEvent("negocio_ajeno", { operacion, recibido: tenantId });
+		return error;
+	}
+
+	/** El negocio que llevan los eventos de salud: el apuntado y, sin base, el de la última llamada. */
+	private negocioParaTrazas(): string | undefined {
+		return negocioApuntado(this.state.storage) ?? this.tenantIdVisto ?? undefined;
+	}
+
 	/**
 	 * Lo que contestan las dos puertas por las que el Worker llega a la base (`consultar` y
 	 * `anotarEstado`): un fallo con status decidido viaja como dato, porque el RPC no conserva las
 	 * propiedades de un `HubError`; un error de SQL, como excepción, con su mensaje.
 	 */
 	private async conLaBase(
+		operacion: "consultar" | "anotarEstado",
 		tenantId: string,
 		trabajo: (storage: DurableObjectStorage) => FilasEnBruto[],
 	): Promise<RespuestaDeConsulta> {
 		try {
+			const ajeno = this.negocioAjeno(tenantId, operacion);
+			if (ajeno) throw ajeno;
 			await this.getTenantDb(tenantId);
 			return { ok: true, resultados: trabajo(this.state.storage) };
 		} catch (e) {
@@ -329,7 +383,7 @@ export class MotorTenantHub {
 		sentencias: Sentencia[],
 		enLote: boolean,
 	): Promise<RespuestaDeConsulta> {
-		return this.conLaBase(tenantId, (storage) =>
+		return this.conLaBase("consultar", tenantId, (storage) =>
 			leerEnBruto(storage, enLote ? sentencias : sentencias.slice(0, 1)),
 		);
 	}
@@ -341,7 +395,7 @@ export class MotorTenantHub {
 	 * sentencia sea una sola y diga la suya a las claras, lo comprueba `anotarEnBruto`.
 	 */
 	async anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
-		return this.conLaBase(tenantId, (storage) => [anotarEnBruto(storage, sentencia)]);
+		return this.conLaBase("anotarEstado", tenantId, (storage) => [anotarEnBruto(storage, sentencia)]);
 	}
 
 	/**
@@ -631,6 +685,8 @@ export class MotorTenantHub {
 	 * actividad vuelve a preguntar sin esperar al minuto.
 	 */
 	async releerMain(tenantId: string): Promise<void> {
+		const ajeno = this.negocioAjeno(tenantId, "releerMain");
+		if (ajeno) throw ajeno;
 		olvidarComprobacion(this.state.storage);
 		if (!tenantId) return;
 		try {
@@ -1245,7 +1301,7 @@ export class MotorTenantHub {
 				_time: new Date().toISOString(),
 				service: "tpv-sync",
 				event: name,
-				tenant_id: this.tenantIdVisto ?? undefined,
+				tenant_id: this.negocioParaTrazas(),
 				connected_devices: this.authedCount(),
 				main_connected: this.isMainConnected(),
 				...fields,
@@ -1460,10 +1516,19 @@ export class MotorTenantHub {
 			return new Response("Expected WebSocket", { status: 426 });
 		}
 
+		// DO-NEGOCIO: el negocio de la sesión se queda en su attachment, y de ahí sale el de todo lo
+		// que mande después. Se comprueba aquí, antes de aceptar el socket.
+		const tenantId = request.headers.get("x-tenant-id") || "";
+		if (tenantId && this.negocioAjeno(tenantId, "ws")) {
+			return new Response("negocio_ajeno", { status: 500 });
+		}
+
 		return abrirWebSocket(ctx, request);
 	}
 
 	async aplicar(params: ApplyParams): Promise<ResultadoAplicacion> {
+		const ajeno = params.tenantId ? this.negocioAjeno(params.tenantId, "aplicar") : null;
+		if (ajeno) return { ok: false, error: ajeno.code, status: ajeno.status };
 		return aplicar(this.ctxRutas(), params);
 	}
 
@@ -1473,6 +1538,9 @@ export class MotorTenantHub {
 	 * escrituras a `aplicar`, sin RPC: la petición cuesta un viaje, el que la ha traído.
 	 */
 	async ejecutarRuta(peticion: Request, identidad: IdentidadDelWorker): Promise<Response> {
+		const ajeno = this.negocioAjeno(identidad.tenantId, "ejecutarRuta");
+		if (ajeno) return serverError(peticion, ajeno.code);
+
 		const ctxEjecucion = {
 			waitUntil: (p: Promise<unknown>) => this.state.waitUntil(p),
 			passThroughOnException: () => undefined,

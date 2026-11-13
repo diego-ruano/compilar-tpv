@@ -107,6 +107,17 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
   viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main
   siembra el mismo administrador, con el mismo id, en la suya.
+- **El objeto sabe de qué negocio es, y sólo atiende al suyo** (DO-NEGOCIO,
+  `tenantHub.negocio.ts`). El alta lo apunta en el sello de su base (`_Negocio`, el mismo de la base
+  local de la Main), y toda llamada que trae un negocio se contrasta con él antes de hacer nada:
+  `ejecutarRuta`, `aplicar`, `consultar`, `anotarEstado`, `aprovisionar`, `releerMain` y la apertura
+  del WebSocket (después, el negocio de una sesión es el de su attachment). El Worker ya llega al
+  objeto por el nombre del negocio, así que es la segunda comprobación: si salta es un fallo del
+  programa, `negocio_ajeno` (500), a Sentry una vez por instancia y a Axiom cada vez. Un objeto con
+  base de antes de que se apuntara se queda con el negocio de la primera llamada que le llega, que
+  viene del Worker por ese mismo nombre; uno sin base no apunta nada. Con el negocio apuntado, los
+  eventos de salud lo llevan aunque la instancia la haya despertado su alarma, sin ninguna llamada
+  que se lo diga. Lo cubre `test/negocioDelHub.test.ts`.
 - **Si el viaje al DO falla, no es un fallo del programa** (`alHub`, `lib/enElHub.ts`). Lo que una
   ruta lanza dentro del DO lo recoge allí su `onError`; una excepción de `ejecutarRuta` es que el
   objeto no ha podido atender, y Cloudflare dice por qué en el propio error:
