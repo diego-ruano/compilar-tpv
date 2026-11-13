@@ -34,9 +34,11 @@ async fn pedir<T: DeserializeOwned>(
 
 /// El cuerpo de una respuesta aceptada (2xx), en su tipo.
 ///
-/// Primero se intenta leer como lo que se espera, de una pasada. Sólo si no encaja se mira si es
-/// un 200 con `ok:false` (el worker marca así algunos fallos), que sale con el error de la API
-/// como en `tpv_server_post_json`.
+/// Antes se mira si es un 200 con `ok:false` (el worker marca así algunos fallos), que sale con
+/// el error de la API como en `tpv_server_post_json`, **aunque el resto del cuerpo encaje en el
+/// tipo**: un `{"ok":false,"conteos":[],"ventana":[]}` no es una foto vacía con la que dar el
+/// contraste por hecho. Mirarlo es otra pasada sobre los bytes, sin guardar nada (serde descarta
+/// lo que no es `ok`): nada que ver con montar el árbol entero.
 ///
 /// AUD-28 — si no se puede leer, el mensaje dice dónde (clase del fallo, línea y columna) y nada
 /// del contenido: el texto de serde cita el valor que no encaja, y en un volcado ese valor es un
@@ -46,24 +48,22 @@ fn leer_respuesta<T: DeserializeOwned>(
     que: &str,
     ilegible: fn(String) -> AppError,
 ) -> AppResult<T> {
-    match serde_json::from_slice::<T>(bytes) {
-        Ok(valor) => Ok(valor),
-        Err(e) => {
-            #[derive(serde::Deserialize)]
-            struct Sobre {
-                ok: Option<bool>,
-            }
-            if let Ok(Sobre { ok: Some(false) }) = serde_json::from_slice::<Sobre>(bytes) {
-                return Err(AppError::from_api_body(200, &String::from_utf8_lossy(bytes)));
-            }
-            Err(ilegible(format!(
-                "{que} ilegible ({:?}, línea {}, columna {})",
-                e.classify(),
-                e.line(),
-                e.column()
-            )))
-        }
+    #[derive(serde::Deserialize)]
+    struct Sobre {
+        ok: Option<bool>,
     }
+    if let Ok(Sobre { ok: Some(false) }) = serde_json::from_slice::<Sobre>(bytes) {
+        return Err(AppError::from_api_body(200, &String::from_utf8_lossy(bytes)));
+    }
+
+    serde_json::from_slice::<T>(bytes).map_err(|e| {
+        ilegible(format!(
+            "{que} ilegible ({:?}, línea {}, columna {})",
+            e.classify(),
+            e.line(),
+            e.column()
+        ))
+    })
 }
 
 /// Aplica un lote de cambios recibidos de la nube. Si viene vacío, solo devuelve el checkpoint.
@@ -623,6 +623,18 @@ mod tests_leer_respuesta {
         let err = leer::<BootstrapSnapshot>(r#"{"ok":false,"code":"conflict","error":"tenant_db_already_provisioned"}"#)
             .unwrap_err();
         assert_eq!(err.code(), ErrorCode::Conflict, "{err}");
+
+        // También si el resto del cuerpo encaja en el tipo: no es una foto vacía con la que dar
+        // el contraste por hecho, ni un volcado sin tablas.
+        let err = leer::<VerificacionNube>(r#"{"ok":false,"code":"conflict","error":"x","conteos":[],"ventana":[]}"#)
+            .unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Conflict, "{err}");
+        let err = leer::<VerificacionClaves>(r#"{"tablas":[],"error":"x","code":"conflict","ok":false}"#).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Conflict, "{err}");
+
+        // Un `ok` que no es un booleano no dice nada, como antes: se lee el cuerpo.
+        assert!(leer::<VerificacionClaves>(r#"{"ok":"no","tablas":[]}"#).is_ok());
+        assert!(leer::<VerificacionClaves>(r#"{"ok":true,"tablas":[]}"#).is_ok());
     }
 
     #[test]
