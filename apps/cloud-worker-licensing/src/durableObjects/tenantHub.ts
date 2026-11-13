@@ -31,13 +31,18 @@ export class TenantHub extends DurableObject<Env> {
 		);
 	}
 
-	/** Las lecturas del Worker contra la base del negocio, que vive aquí. */
+	/** Las lecturas del Worker contra la base del negocio, que vive aquí. Sólo lee. */
 	consultar(tenantId: string, sentencias: Sentencia[], enLote: boolean): Promise<RespuestaDeConsulta> {
 		return this.motor.consultar(tenantId, sentencias, enLote);
 	}
 
-	/** El alta del negocio crea aquí su esquema. */
-	aprovisionar(tenantId: string): Promise<void> {
+	/** El estado propio de la nube (el freno del PIN, el checkpoint de la purga), para la ruta que corre en el Worker. */
+	anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
+		return this.motor.anotarEstado(tenantId, sentencia);
+	}
+
+	/** El alta del negocio crea aquí su esquema y su administrador inicial. */
+	aprovisionar(tenantId: string): Promise<{ reused: boolean }> {
 		return this.motor.aprovisionar(tenantId);
 	}
 

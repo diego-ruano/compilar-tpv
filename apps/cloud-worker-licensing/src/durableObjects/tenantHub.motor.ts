@@ -41,13 +41,15 @@ import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoApl
 import { app } from "../app";
 import { dentroDelHub } from "../lib/hubLocal";
 import {
+	anotarEnBruto,
 	baseAprovisionada,
 	clienteLocal,
-	ejecutarEnBruto,
-	loteEnBruto,
+	leerEnBruto,
 	migrarBaseLocal,
+	type FilasEnBruto,
 	type Sentencia,
 } from "./tenantHub.sqlite";
+import { sembrarAdminInicial } from "./tenantHub.alta";
 import type { ContextoDeRutas } from "./tenantHub.rutas";
 import {
 	abrirWebSocket,
@@ -273,11 +275,19 @@ export class MotorTenantHub {
 		return run(await this.getTenantDb(tenantId));
 	}
 
-	/** El alta del negocio: crea su esquema (idempotente). */
-	async aprovisionar(tenantId: string): Promise<void> {
+	/**
+	 * El alta del negocio: crea su esquema y, si la base nace vacía, su administrador inicial
+	 * (`tenantHub.alta.ts`). Es idempotente: con la base ya creada sólo aplica las migraciones
+	 * pendientes, y dice que ya estaba (`reused`).
+	 */
+	async aprovisionar(tenantId: string): Promise<{ reused: boolean }> {
 		this.tenantIdVisto ??= tenantId;
+		const storage = this.state.storage;
+		const reused = baseAprovisionada(storage.sql);
 		await this.migrarEnExclusiva();
-		this.baseLocal = clienteLocal(this.state.storage);
+		await sembrarAdminInicial(storage);
+		this.baseLocal = clienteLocal(storage);
+		return { reused };
 	}
 
 	estaAprovisionado(): boolean {
@@ -285,8 +295,31 @@ export class MotorTenantHub {
 	}
 
 	/**
-	 * Las lecturas del Worker (`tenantQuery`). Una sentencia suelta,
-	 * o un lote atómico: el lote de lectura da una foto coherente, como el `batch("read")` de libsql.
+	 * Lo que contestan las dos puertas por las que el Worker llega a la base (`consultar` y
+	 * `anotarEstado`): un fallo con status decidido viaja como dato, porque el RPC no conserva las
+	 * propiedades de un `HubError`; un error de SQL, como excepción, con su mensaje.
+	 */
+	private async conLaBase(
+		tenantId: string,
+		trabajo: (storage: DurableObjectStorage) => FilasEnBruto[],
+	): Promise<RespuestaDeConsulta> {
+		try {
+			await this.getTenantDb(tenantId);
+			return { ok: true, resultados: trabajo(this.state.storage) };
+		} catch (e) {
+			if (e instanceof HubError) {
+				return { ok: false, code: e.code, status: e.status, details: e.details };
+			}
+			throw e;
+		}
+	}
+
+	/**
+	 * Las lecturas del Worker (`tenantQuery`). Una sentencia suelta, o un lote: van en una
+	 * transacción, así que el lote da una foto coherente, como el `batch("read")` de libsql.
+	 *
+	 * **Sólo lee** (`leerEnBruto`): lo que no es una lectura se rechaza con `consulta_no_es_lectura`,
+	 * y lo que escriba se deshace. Una escritura del negocio va por el motor (`aplicar`).
 	 *
 	 * No pasan por el turno del log: el SQL del DO es síncrono, así que ven lo confirmado o lo que
 	 * otra petición acaba de escribir en este mismo DO, nunca una escritura a medias.
@@ -296,19 +329,19 @@ export class MotorTenantHub {
 		sentencias: Sentencia[],
 		enLote: boolean,
 	): Promise<RespuestaDeConsulta> {
-		try {
-			await this.getTenantDb(tenantId);
-		} catch (e) {
-			if (e instanceof HubError) {
-				return { ok: false, code: e.code, status: e.status, details: e.details };
-			}
-			throw e;
-		}
-		const storage = this.state.storage;
-		const resultados = enLote
-			? loteEnBruto(storage, sentencias)
-			: [ejecutarEnBruto(storage.sql, sentencias[0])];
-		return { ok: true, resultados };
+		return this.conLaBase(tenantId, (storage) =>
+			leerEnBruto(storage, enLote ? sentencias : sentencias.slice(0, 1)),
+		);
+	}
+
+	/**
+	 * Lo único que el Worker escribe en la base sin pasar por el motor: el estado propio de la nube
+	 * (el freno del PIN, el checkpoint de la purga), que no se replica. Es para la ruta que corre en
+	 * el Worker; dentro del DO lo escribe con el cliente de al lado. Qué tablas son, y que la
+	 * sentencia sea una sola y diga la suya a las claras, lo comprueba `anotarEnBruto`.
+	 */
+	async anotarEstado(tenantId: string, sentencia: Sentencia): Promise<RespuestaDeConsulta> {
+		return this.conLaBase(tenantId, (storage) => [anotarEnBruto(storage, sentencia)]);
 	}
 
 	/** Retirar un negocio de pruebas: su base entera, con la cola y lo demás del DO. */
@@ -1479,6 +1512,8 @@ export class MotorTenantHub {
 				identidad,
 				base: () => this.getTenantDb(identidad.tenantId),
 				aplicar: (params) => aplicar(this.ctxRutas(), params),
+				estaAprovisionado: () => this.estaAprovisionado(),
+				aprovisionar: () => this.aprovisionar(identidad.tenantId),
 			},
 			async () => app.fetch(peticion, this.env, ctxEjecucion),
 		);

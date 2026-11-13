@@ -223,8 +223,8 @@ otro negocio que el suyo, tampoco. En los tres casos se queda con su token y su 
 ### 2. Primera activación
 
 Crea el tenant (`ensureTenantExistsMinimal`), da de alta el dispositivo con su clave pública,
-aprovisiona su base en el `TenantHub` del negocio (`provisionTenantDatabase`: el esquema y el
-administrador inicial) y guarda los datos del negocio. Después
+aprovisiona su base en el `TenantHub` del negocio (`provisionTenantDatabase` → `aprovisionar`: el
+DO crea el esquema y el administrador inicial) y guarda los datos del negocio. Después
 `activateLicenseFirstTime` pone `active`, `activated_at_ms`, `expires_at_ms = ahora + meses` y
 `main_device_id`, condicionado a que siga sin activar **y sin estrenar** (`main_device_id IS NULL
 AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_replaced`; si lo que pasó

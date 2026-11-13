@@ -43,15 +43,19 @@ export type Dependencias = {
 	olvidarLicenciasCacheadas: () => void;
 };
 
-/** Monta el negocio `nombre` (aprovisionado, con licencia en vigor) y corre `prueba` con él. */
+/**
+ * Monta el negocio `nombre` (con licencia en vigor y, salvo `sinBase`, aprovisionado) y corre
+ * `prueba` con él.
+ */
 export async function conNegocioFirmado<R>(
 	deps: Dependencias,
 	nombre: string,
 	prueba: (n: Negocio) => Promise<R>,
+	opciones: { sinBase?: boolean } = {},
 ): Promise<R> {
 	deps.olvidarLicenciasCacheadas();
 	const tenantId = `negocio-firmado-${nombre}`;
-	await env.TenantHub.get(env.TenantHub.idFromName(tenantId)).aprovisionar(tenantId);
+	if (!opciones.sinBase) await env.TenantHub.get(env.TenantHub.idFromName(tenantId)).aprovisionar(tenantId);
 
 	ensureEd25519Sha512();
 	return enElHub(`negocio-firmado-central-${nombre}`, async (hub: any) => {

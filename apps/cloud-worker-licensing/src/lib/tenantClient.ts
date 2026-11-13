@@ -6,6 +6,10 @@
 // DO (`consultar`). El `Client` que reciben las rutas tiene la misma forma que el de libsql
 // (`execute`, `batch`).
 //
+// - `consultar` sólo lee: una escritura del negocio va por el motor del DO (`lib/hub.ts`), que es
+//   quien la apunta y la difunde. Lo único que una ruta escribe por aquí es el estado propio de la
+//   nube (el freno del PIN, el checkpoint de la purga), que no se replica: dentro del DO, con el
+//   cliente de al lado; desde el Worker, por su propia puerta (`anotarEstado`).
 // - Fija «ahora» a la hora LOCAL de quien pregunta antes de ejecutar (REV-03, ver abajo).
 //
 // ── REV-03: «hoy» es el de quien pregunta, no el de la base ──────────────────────────────────────
@@ -33,7 +37,7 @@ import { hubDe } from "./hub";
 import { hubLocal } from "./hubLocal";
 import { medirTramo } from "../observability/tiempos";
 import { parseClientNow, rewriteNowInSql } from "../durableObjects/tenantHub.tiempo";
-import { aResultSet, type Sentencia as SentenciaDelHub } from "../durableObjects/tenantHub.sqlite";
+import { aResultSet, esEscrituraDeEstado, type Sentencia as SentenciaDelHub } from "../durableObjects/tenantHub.sqlite";
 import type { RespuestaDeConsulta } from "../durableObjects/tenantHub.rpc";
 
 function sinTransacciones(): never {
@@ -59,7 +63,11 @@ export function clienteDelHub(env: Env, tenantId: string): Client {
 			return enLote ? db.batch(sentencias as any) : [await db.execute(sentencias[0] as any)];
 		}
 		// Los tipos de RPC no aceptan `unknown` (valores de SQLite): se afirma la forma que devuelve el DO.
-		const r = (await medirTramo("hub-lee", () => stub.consultar(tenantId, sentencias as any, enLote))) as unknown as RespuestaDeConsulta;
+		const r = (
+			!enLote && esEscrituraDeEstado(sentencias[0])
+				? await medirTramo("hub-anota", () => stub.anotarEstado(tenantId, sentencias[0] as any))
+				: await medirTramo("hub-lee", () => stub.consultar(tenantId, sentencias as any, enLote))
+		) as unknown as RespuestaDeConsulta;
 		if (!r.ok) throw new HubError(r.code, r.status, r.details);
 		return r.resultados.map(aResultSet);
 	};

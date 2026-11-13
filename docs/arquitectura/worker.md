@@ -76,6 +76,24 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   por `tenantQuery` (`lib/tenantClient.ts`): un `Client` con la forma del de libsql que, dentro del DO,
   lee de su SQLite (`tenantHub.sqlite.ts`) y, fuera, manda cada consulta por RPC (`consultar`). Un lote
   de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
+- **`consultar` sólo lee** (`leerEnBruto`). Lo que no empieza como una lectura (`SELECT`, `WITH`) se
+  rechaza con `consulta_no_es_lectura`, y lo que empieza como una lectura y escribe (un `WITH …
+  DELETE`, una segunda sentencia detrás de un `;`) se deshace entero: va todo en una transacción y
+  se mira que no se haya escrito ninguna fila. Una escritura que entrara por ahí no pasaría por el
+  motor: ni `Applied_Operations`, ni `Sync_Changes`, ni difusión, y la Main no la vería nunca. Por
+  `consultar` leen las rutas que corren en el Worker, la agenda de reservas web y las rutas
+  públicas de la reserva.
+- **Lo único que una ruta escribe sin pasar por el motor es el estado propio de la nube**, que no
+  se replica: el freno del PIN (`Intentos_Login`) y el checkpoint de cada Main, que es el suelo de la
+  purga (`Sync_Main_Checkpoints`). Dentro del DO lo escribe con el cliente de al lado; cuando la ruta
+  corre en el Worker (`EJECUTAR_EN_EL_HUB` apagado), el cliente lo manda por otra puerta,
+  `anotarEstado`, que sólo admite una sentencia que diga a las claras que escribe en una de esas
+  tablas (`esEscrituraDeEstado`). Una tabla nueva de ese tipo se añade ahí. Lo cubre
+  `test/consultarSoloLee.test.ts`.
+- **El alta siembra el administrador inicial dentro del DO** (`aprovisionar`,
+  `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
+  viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main
+  siembra el mismo administrador, con el mismo id, en la suya.
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
   vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
 - Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
@@ -258,7 +276,7 @@ correos independientes; el esquema del negocio sólo guarda el contacto comercia
 ## Sincronización y firmas
 
 El binding `TenantHub` está tipado y llama por RPC a `ejecutarRuta`, `aplicar`, `consultar`,
-`revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
+`anotarEstado`, `aprovisionar`, `revocarDispositivo`, `releerMain` (AUD-02: la licencia del negocio ha cambiado) y
 `avisarEmparejamiento`. El adaptador moderno extiende `DurableObject`; los
 helpers y credenciales permanecen en un motor interno que no pertenece al prototipo RPC. No se
 publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no debe compartirse con

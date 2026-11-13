@@ -41,7 +41,7 @@ const ROL_CAMARERO = "00000000-0000-7000-8000-000000000002";
 
 type Negocio = { tenantId: string; seed: Uint8Array };
 
-/** Un negocio con su base en el DO (un usuario dentro) y su licencia en la base central. */
+/** Un negocio con su base en el DO (el administrador con el que nace y un usuario más) y su licencia en la base central. */
 async function conNegocio<R>(
 	nombre: string,
 	opciones: { anulada?: boolean },
@@ -138,7 +138,7 @@ describe("un viaje al TenantHub por petición", () => {
 			expect(env.EJECUTAR_EN_EL_HUB).toBe("1");
 			const r = await pedir(n, "GET", "/v1/login/users");
 			expect(r.status).toBe(200);
-			expect(r.json.map((u: any) => u.nombre)).toEqual(["Lucía"]);
+			expect(r.json.map((u: any) => u.nombre).sort()).toEqual(["Admin", "Lucía"]);
 			expect(viajes(r.tiempos, "hub-ruta")).toBe(1);
 			expect(viajes(r.tiempos, "hub-lee")).toBe(0);
 			// El DO trae su propio desglose: el trabajo hecho dentro, sin viajes.
@@ -150,7 +150,7 @@ describe("un viaje al TenantHub por petición", () => {
 		await conNegocio("apagado", {}, async (n) => {
 			const r = await pedir(n, "GET", "/v1/login/users", { entorno: { EJECUTAR_EN_EL_HUB: "0" } });
 			expect(r.status).toBe(200);
-			expect(r.json.map((u: any) => u.nombre)).toEqual(["Lucía"]);
+			expect(r.json.map((u: any) => u.nombre).sort()).toEqual(["Admin", "Lucía"]);
 			expect(viajes(r.tiempos, "hub-ruta")).toBe(0);
 			expect(viajes(r.tiempos, "hub-lee")).toBe(1);
 		});

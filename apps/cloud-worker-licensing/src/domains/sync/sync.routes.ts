@@ -18,8 +18,7 @@ import { reportarSaludDeSync as emitirSalud } from "../../observability/axiom";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { alHub } from "../../lib/enElHub";
 import { getDb } from "../../server/db";
-import { hubDe } from "../../lib/hub";
-import { provisionTenantDatabase } from "../licensing/licensing.helpers";
+import { negocioAprovisionado, provisionTenantDatabase } from "../licensing/licensing.helpers";
 import {
 	TRANSACCIONALES,
 	esTablaDeNegocio,
@@ -346,17 +345,19 @@ syncRoutes.post("/historico", cuerpoTolerante(historicoSchema), async (c) => {
 // POST /v1/sync/initialize-empty
 // Única salida válida cuando el propio servidor confirma que no existe base del tenant. La acción
 // es explícita desde la UI y jamás se usa como fallback de un timeout, un 500 o una migración rota.
+//
+// Corre dentro del TenantHub del negocio, como todo este router: la base se mira y se crea con el
+// DO de al lado (`hubLocal`), no llamando por RPC al mismo objeto que está atendiendo la petición.
 syncRoutes.post("/initialize-empty", async (c) => {
 	const tenantId = c.get("tenantId");
-	const central = getDb(c.env);
-	if (await hubDe(c.env, tenantId).estaAprovisionado()) {
+	if (await negocioAprovisionado(c.env, tenantId)) {
 		return c.json(
 			{ ok: false, code: "conflict", error: "tenant_db_already_provisioned" },
 			409,
 		);
 	}
 
-	await provisionTenantDatabase(central, c.env, tenantId);
+	await provisionTenantDatabase(getDb(c.env), c.env, tenantId);
 	return c.json({ ok: true });
 });
 

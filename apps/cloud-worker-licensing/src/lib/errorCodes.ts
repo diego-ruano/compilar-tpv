@@ -382,6 +382,10 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"bad_ts",
 	"bad_ws_signature",
 	"challenge_mismatch",
+	// Una ruta ha mandado por la puerta de las lecturas del DO algo que no es una lectura, o por la
+	// del estado de la nube algo que no lo es.
+	"consulta_no_es_lectura",
+	"estado_local_no_admitido",
 	"expired_ticket",
 	"field_dek_no_persistida",
 	"forbidden_event",

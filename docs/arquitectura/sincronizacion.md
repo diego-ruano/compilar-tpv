@@ -45,7 +45,7 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | …la hora | `tenantHub.tiempo.ts` | Fijar `'now'` con la hora del emisor |
 | …los errores | `tenantHub.errores.ts` | Permanente, pasajero o desconocido |
 | Rutas de la Handy | `src/lib/enElHub.ts` · `src/lib/hubLocal.ts` | El Worker autentica y pasa la petición entera al `TenantHub` del negocio (`ejecutarRuta`), que ejecuta la ruta junto a su base: un viaje por petición |
-| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` que dentro del DO lee de su SQLite y, fuera, manda cada consulta por RPC (`consultar`) |
+| Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` que dentro del DO lee de su SQLite y, fuera, manda cada consulta por RPC (`consultar`, que sólo lee) |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
 | REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar`, `/verificar-claves`, `/salud` |
 

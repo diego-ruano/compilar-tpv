@@ -5,8 +5,8 @@
 // El motor, las rutas y los tests hablan con la base a través de un `Client` de libsql (`execute`,
 // `batch`). Aquí se sirve esa misma forma sobre `ctx.storage.sql`, para que las doscientas
 // consultas del worker no dependan de dónde vive la base. Dentro del DO se usa directamente
-// (`clienteLocal`); desde el Worker, las lecturas llegan por RPC (`ejecutarEnBruto`/`loteEnBruto`
-// devuelven filas planas, y `aResultSet` las vuelve a montar al otro lado).
+// (`clienteLocal`); desde el Worker, las lecturas llegan por RPC (`leerEnBruto` devuelve filas
+// planas, y `aResultSet` las vuelve a montar al otro lado) y no pueden escribir.
 //
 // Diferencias con el SQLite de libsql que este fichero absorbe:
 //
@@ -142,6 +142,69 @@ export function loteEnBruto(storage: DurableObjectStorage, sentencias: Sentencia
 		if (!esFkRota(e)) throw e;
 		return correr(true);
 	}
+}
+
+// ---------------- Lo que llega de fuera del DO ----------------
+//
+// El Worker habla con la base por dos puertas (`MotorTenantHub.consultar` y `anotarEstado`), y
+// ninguna deja escribir datos del negocio: eso va por el motor (`aplicar`), que es quien lo apunta
+// en `Applied_Operations` y en `Sync_Changes` y lo difunde. Una escritura que entrara por aquí no
+// la vería nunca la Main.
+
+/** Una lectura empieza por `SELECT` o por `WITH`, con comentarios o sin ellos delante. */
+const EMPIEZA_COMO_LECTURA = /^(?:\s+|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)*(?:SELECT|WITH)\b/i;
+
+/**
+ * Las lecturas del Worker: ni una fila escrita.
+ *
+ * Se mira dos veces. Antes de ejecutar, que cada sentencia empiece como una lectura: deja fuera
+ * lo que no escribe filas pero cambia la conexión (un `PRAGMA`). Y después de ejecutar, que no haya
+ * escrito nada: un `WITH … DELETE` empieza como una lectura, y el SQLite del DO ejecuta también lo
+ * que venga detrás de un `;`. Va todo en una transacción, así que lo que haya escrito se deshace.
+ */
+export function leerEnBruto(storage: DurableObjectStorage, sentencias: Sentencia[]): FilasEnBruto[] {
+	const sql = storage.sql;
+	const noEsLectura = () => new HubError("consulta_no_es_lectura", 500);
+	return storage.transactionSync(() =>
+		sentencias.map((s) => {
+			const { texto, args } = partes(s);
+			if (!EMPIEZA_COMO_LECTURA.test(texto)) throw noEsLectura();
+			const cursor = sql.exec(texto, ...args.map(valorParaExec));
+			const columns = [...cursor.columnNames];
+			const rows = Array.from(cursor.raw()) as unknown[][];
+			// Sólo es fiable con el cursor ya recorrido.
+			if (cursor.rowsWritten > 0) throw noEsLectura();
+			return { columns, rows, rowsAffected: 0, lastInsertRowid: null };
+		}),
+	);
+}
+
+/**
+ * Las tablas del esquema que son estado de la nube y de nadie más: el freno del PIN de las Handy
+ * (`Intentos_Login`, LOGIN-01) y el checkpoint de cada Main, que es el suelo de la purga del log
+ * (`Sync_Main_Checkpoints`, SYNC-12). No se replican, así que lo que una ruta escribe en ellas no
+ * pasa por el motor. Dentro del DO las escribe con el cliente de al lado; cuando la ruta corre en el
+ * Worker, por `anotarEstado`.
+ */
+const TABLAS_DE_ESTADO: ReadonlySet<string> = new Set(["intentos_login", "sync_main_checkpoints"]);
+
+/** Un alta, un cambio o un borrado que dice a las claras en qué tabla: nada de `WITH` ni de `OR REPLACE`. */
+const ESCRITURA_EN_TABLA = /^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+([A-Za-z_][A-Za-z0-9_]*)\b/i;
+
+/** ¿Es esta sentencia una escritura de estado de la nube, y nada más que eso? */
+export function esEscrituraDeEstado(s: Sentencia): boolean {
+	const { texto } = partes(s);
+	const tabla = ESCRITURA_EN_TABLA.exec(texto)?.[1]?.toLowerCase();
+	if (!tabla || !TABLAS_DE_ESTADO.has(tabla)) return false;
+	// Una sola sentencia: sin `;` que no sea el del final. Ninguna de las que se escriben aquí lleva
+	// uno dentro de un texto, y el SQLite del DO ejecutaría lo que viniera detrás.
+	return !texto.trimEnd().replace(/;$/, "").includes(";");
+}
+
+/** Una escritura de estado de la nube (`esEscrituraDeEstado`); cualquier otra cosa se rechaza. */
+export function anotarEnBruto(storage: DurableObjectStorage, s: Sentencia): FilasEnBruto {
+	if (!esEscrituraDeEstado(s)) throw new HubError("estado_local_no_admitido", 500);
+	return storage.transactionSync(() => ejecutarEnBruto(storage.sql, s));
 }
 
 /** Las filas en bruto con la forma de una `Row` de libsql: por nombre y por posición. */
