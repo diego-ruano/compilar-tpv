@@ -78,16 +78,20 @@ export async function recalcularDia(db: Client, dia: string): Promise<void> {
 /**
  * Cuántas filas distinguen lo guardado de un día de lo que sale de los cobros: las que sobran, las
  * que faltan y las repetidas. Todo es exacto: las unidades van en milésimas enteras.
+ *
+ * Un día apuntado como sucio da 0: ya se sabe que no vale, y no es un trigger que falte. Se mira en
+ * la misma sentencia que compara, para que un cobro que entre entre medias (con la ruta en el
+ * Worker, cada sentencia es un viaje al DO) no pase por un descuadre.
  */
 function sqlDiferencias(tabla: string, columnas: string, calculado: string): string {
 	// Las dos van materializadas: lo que sale de los cobros se calcula una vez y se lee tres.
 	return `WITH
 		guardado AS MATERIALIZED (SELECT ${columnas} FROM ${tabla} WHERE Dia = ?1),
 		calculado AS MATERIALIZED (SELECT ${columnas} FROM (${UN_DIA} ${calculado}))
-		SELECT
+		SELECT CASE WHEN EXISTS (SELECT 1 FROM _Estad_Dias_Sucios WHERE Dia = ?1) THEN 0 ELSE
 		  (SELECT COUNT(*) FROM (SELECT * FROM guardado EXCEPT SELECT * FROM calculado))
 		+ (SELECT COUNT(*) FROM (SELECT * FROM calculado EXCEPT SELECT * FROM guardado))
-		+ ABS((SELECT COUNT(*) FROM guardado) - (SELECT COUNT(*) FROM calculado)) AS diferencias;`;
+		+ ABS((SELECT COUNT(*) FROM guardado) - (SELECT COUNT(*) FROM calculado)) END AS diferencias;`;
 }
 
 const DIFERENCIAS_PRODUCTO = sqlDiferencias(

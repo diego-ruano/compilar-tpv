@@ -200,6 +200,12 @@ describe("las estadísticas leen del resumen diario y dan lo mismo que recorrien
 			expect(await coincideElDia(db, dia)).toBe(false);
 			expect(await contrastarUnDia(db, ayer)).toBe(dia);
 			expect(await coincideElDia(db, dia)).toBe(true);
+
+			// Con su marca puesta no es un descuadre (un cobro que acaba de entrar, con su trigger): se
+			// mira en la misma sentencia que compara (revisión de Codex, tercera pasada).
+			sql.exec(`UPDATE _Estad_Producto_Dia SET Milesimas = Milesimas + 1 WHERE Dia = ${ayer};`);
+			sql.exec(`INSERT INTO _Estad_Dias_Sucios (Dia) VALUES (${ayer});`);
+			expect(await coincideElDia(db, dia)).toBe(true);
 		});
 	});
 

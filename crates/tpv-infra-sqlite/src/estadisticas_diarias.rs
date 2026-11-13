@@ -55,7 +55,8 @@ static INSERTAR_MESA_DIA: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// Cuántas filas distinguen lo guardado de un día de lo que sale de los cobros: las que sobran,
-/// las que faltan y las repetidas. Todo es exacto: las unidades van en milésimas enteras.
+/// las que faltan y las repetidas. Todo es exacto: las unidades van en milésimas enteras. Un día
+/// apuntado como sucio da 0, mirado en la misma sentencia (como en el worker, `resumenDiario.ts`).
 fn sql_diferencias(tabla: &str, columnas: &str, calculado: &str) -> String {
     // Las dos van materializadas: lo que sale de los cobros se calcula una vez y se lee tres.
     format!(
@@ -63,10 +64,10 @@ fn sql_diferencias(tabla: &str, columnas: &str, calculado: &str) -> String {
         guardado AS MATERIALIZED (SELECT {columnas} FROM {tabla} WHERE Dia = ?1),
         calculado AS MATERIALIZED (SELECT {columnas} FROM ({UN_DIA}
 {calculado}))
-        SELECT
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM _Estad_Dias_Sucios WHERE Dia = ?1) THEN 0 ELSE
           (SELECT COUNT(*) FROM (SELECT * FROM guardado EXCEPT SELECT * FROM calculado))
         + (SELECT COUNT(*) FROM (SELECT * FROM calculado EXCEPT SELECT * FROM guardado))
-        + ABS((SELECT COUNT(*) FROM guardado) - (SELECT COUNT(*) FROM calculado));"#
+        + ABS((SELECT COUNT(*) FROM guardado) - (SELECT COUNT(*) FROM calculado)) END;"#
     )
 }
 
@@ -815,6 +816,12 @@ mod tests {
         let despues = contrastar(&db).await.unwrap();
         assert!(despues.descuadrados.is_empty(), "{despues:?}");
         assert_eq!(despues.dias_mirados, 8);
+
+        // Con su marca puesta no es un descuadre: se mira en la misma sentencia que compara.
+        ejecutar(&db, "UPDATE _Estad_Producto_Dia SET Milesimas = Milesimas + 1 WHERE Dia = '2020-05-05';").await;
+        ejecutar(&db, "INSERT INTO _Estad_Dias_Sucios (Dia) VALUES ('2020-05-05');").await;
+        let w = db.write().await;
+        assert!(coincide(w.raw(), "2020-05-05").await.unwrap());
     }
 
     #[tokio::test]
