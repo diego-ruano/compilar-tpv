@@ -49,7 +49,7 @@ pub async fn verificar_si_toca(
     momento: Momento,
     reparar: bool,
 ) -> AppResult<Vuelta> {
-    let s = estado.situacion().await?;
+    let s = estado.situacion(momento.ahora_ms).await?;
     let entrada = EntradaVerificacion {
         ultima_ok_ms: s.ultima_ok_ms,
         ultimo_intento_ms: s.ultimo_intento_ms,

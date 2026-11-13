@@ -79,8 +79,10 @@ Lo que recuerda entre vueltas va en `_Verificacion_Nube` (`0001_inicial.sql` §1
 (`infra-sqlite/src/verificacion_nube.rs`). `_Jobs_State` sigue diciendo cuándo corrió el job, que
 aquí es cuándo se miró por última vez, no cuándo se contrastó.
 
-Una marca guardada que cae en el futuro (alguien ha atrasado el reloj) no se cree: la de una pasada
-cuenta como si no existiera y la de la última escritura, como recién hecha.
+Una marca guardada que cae en el futuro (alguien ha movido el reloj) no se cree: la de una pasada
+cuenta como si no existiera. La última escritura es la más reciente que no pasa de la hora en más
+de cinco minutos: una fechada más allá es de un reloj que estuvo adelantado, y si contara taparía
+las de después y dejaría al contraste sin momento tranquilo hasta que el reloj la alcanzase.
 
 ### Qué no va aquí
 

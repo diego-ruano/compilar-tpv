@@ -44,6 +44,12 @@ pub const CALMA_RELAJADA_MS: i64 = 5 * MIN;
 /// Lo que se espera tras un intento que no llegó a comparar (la foto iba por delante).
 pub const ESPERA_TRAS_APLAZAR_MS: i64 = 10 * MIN;
 
+/// Hasta cuánto por delante de la hora se cree la marca de la última escritura (una escritura
+/// que entra mientras se decide, un reloj que se ajusta unos segundos). Más allá es de un reloj
+/// que estuvo adelantado: no se cree, porque con ella el contraste esperaría hasta que el reloj la
+/// alcanzase, y eso pueden ser días. Quien lee la base trae la última escritura que no pasa de aquí.
+pub const MARCA_FUTURA_CREIBLE_MS: i64 = 5 * MIN;
+
 /// Primera espera tras un fallo; se dobla con cada fallo seguido hasta [`ESPERA_FALLO_TECHO_MS`].
 pub const ESPERA_FALLO_BASE_MS: i64 = 30 * MIN;
 pub const ESPERA_FALLO_TECHO_MS: i64 = 6 * HORA;
@@ -110,9 +116,10 @@ pub fn espera_tras_fallar_ms(fallos: i64) -> i64 {
 
 /// ¿Toca contrastar ahora?
 ///
-/// Una marca guardada que cae en el futuro (alguien ha atrasado el reloj del equipo) no se cree:
+/// Una marca guardada que cae en el futuro (alguien ha movido el reloj del equipo) no se cree:
 /// la de una pasada o un intento cuenta como si no existiera, y lo peor que pasa es una pasada de
-/// más; la de la última escritura cuenta como recién hecha, y lo peor es esperar.
+/// más. La de la última escritura cuenta como recién hecha si va hasta
+/// [`MARCA_FUTURA_CREIBLE_MS`] por delante, y lo peor es esperar esos minutos; más allá no cuenta.
 pub fn cuando_verificar(e: &EntradaVerificacion, ahora_ms: i64) -> Decision {
     use Decision::{Ahora, Esperar};
 
@@ -167,7 +174,10 @@ pub fn cuando_verificar(e: &EntradaVerificacion, ahora_ms: i64) -> Decision {
     } else {
         CALMA_MS
     };
-    if e.ultima_escritura_ms.is_some_and(|escritura| ahora_ms - escritura < calma) {
+    let escritura = e
+        .ultima_escritura_ms
+        .filter(|m| *m <= ahora_ms.saturating_add(MARCA_FUTURA_CREIBLE_MS));
+    if escritura.is_some_and(|m| ahora_ms - m < calma) {
         return Esperar(Espera::ActividadReciente);
     }
 
@@ -307,9 +317,12 @@ mod tests {
             ("un fallo «del futuro» no hace esperar", EntradaVerificacion {
                 ultimo_intento_ms: Some(AHORA + HORA), fallos: 4, ..hace(20)
             }, Decision::Ahora),
-            ("una escritura «del futuro» cuenta como recién hecha", EntradaVerificacion {
-                ultima_escritura_ms: Some(AHORA + HORA), ..hace(20)
+            ("una escritura fechada un minuto por delante cuenta como recién hecha", EntradaVerificacion {
+                ultima_escritura_ms: Some(AHORA + MIN), ..hace(20)
             }, esperar(Espera::ActividadReciente)),
+            ("una fechada una semana por delante es de un reloj que estuvo adelantado: no hace esperar", EntradaVerificacion {
+                ultima_escritura_ms: Some(AHORA + 7 * 24 * HORA), ..hace(20)
+            }, Decision::Ahora),
             ("un cierre «del futuro» no es motivo", EntradaVerificacion {
                 ultimo_cierre_ms: Some(AHORA + HORA), ..hace(3)
             }, esperar(Espera::SinMotivo)),

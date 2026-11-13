@@ -347,7 +347,7 @@ async fn tras_el_cierre_de_caja_contrasta_en_cuanto_hay_calma_y_no_vuelve_a_hace
     let Vuelta::Hecha(r) = v else { panic!("tenía que contrastar: {v:?}") };
     assert!(r.descuadres.is_empty());
     assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar", "/v1/sync/salud"]);
-    assert_eq!(estado.situacion().await.unwrap().ultima_ok_ms, Some(MEDIODIA + 16 * MIN));
+    assert_eq!(estado.situacion(i64::MAX).await.unwrap().ultima_ok_ms, Some(MEDIODIA + 16 * MIN));
 
     // Y hasta que haya otro cierre o pasen veinte horas, no vuelve a pedir nada.
     for horas in [1, 10, 19] {
@@ -391,7 +391,7 @@ async fn con_algo_pendiente_de_subir_o_recien_arrancada_no_contrasta() {
     assert!(matches!(v, Vuelta::NoToca(Espera::NoOperativa)), "{v:?}");
 
     assert!(nube.pedidas().is_empty());
-    assert_eq!(estado.situacion().await.unwrap().ultimo_intento_ms, None, "no ha habido ningún intento");
+    assert_eq!(estado.situacion(i64::MAX).await.unwrap().ultimo_intento_ms, None, "no ha habido ningún intento");
 
     cerrar(db, dir).await;
 }
@@ -421,7 +421,7 @@ async fn un_fallo_de_la_nube_espera_su_propia_escalera() {
 
     // La nube no contesta (el doble no tiene respuesta preparada): el intento falla y se anota.
     assert!(vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.is_err());
-    let s = estado.situacion().await.unwrap();
+    let s = estado.situacion(i64::MAX).await.unwrap();
     assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(MEDIODIA), 1));
     assert_eq!(nube.pedidas().len(), 1);
 
@@ -434,7 +434,7 @@ async fn un_fallo_de_la_nube_espera_su_propia_escalera() {
 
     // A la media hora se reintenta; si vuelve a fallar, la espera siguiente es de una hora.
     assert!(vuelta(&nube, &repo, &estado, momento(MEDIODIA + 30 * MIN)).await.is_err());
-    assert_eq!(estado.situacion().await.unwrap().fallos, 2);
+    assert_eq!(estado.situacion(i64::MAX).await.unwrap().fallos, 2);
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 30 * MIN + 59 * MIN)).await.unwrap();
     assert!(matches!(v, Vuelta::NoToca(Espera::Reintento)), "{v:?}");
 
@@ -442,7 +442,7 @@ async fn un_fallo_de_la_nube_espera_su_propia_escalera() {
     la_nube_cuadra(&nube, 40);
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 30 * MIN + 60 * MIN)).await.unwrap();
     assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
-    let s = estado.situacion().await.unwrap();
+    let s = estado.situacion(i64::MAX).await.unwrap();
     assert_eq!((s.ultima_ok_ms, s.fallos), (Some(MEDIODIA + 90 * MIN), 0));
 
     cerrar(db, dir).await;
@@ -468,7 +468,7 @@ async fn si_la_foto_va_por_delante_no_se_compara_y_se_reintenta_a_los_diez_minut
     assert!(matches!(v, Vuelta::Aplazada), "{v:?}");
     assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar"], "ni las claves ni el informe");
     assert!(reparaciones(&repo).await.is_empty());
-    let s = estado.situacion().await.unwrap();
+    let s = estado.situacion(i64::MAX).await.unwrap();
     assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(MEDIODIA), 0), "no es un fallo");
 
     // A los 9 min todavía espera; a los 10, con el cambio ya bajado, contrasta y cuadra.
@@ -491,6 +491,44 @@ async fn si_la_foto_va_por_delante_no_se_compara_y_se_reintenta_a_los_diez_minut
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 10 * MIN)).await.unwrap();
     let Vuelta::Hecha(r) = v else { panic!("tenía que contrastar: {v:?}") };
     assert!(r.descuadres.is_empty(), "{:?}", r.descuadres);
+
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn una_escritura_hecha_con_el_reloj_adelantado_no_deja_al_contraste_sin_correr() {
+    // Alguien adelantó el reloj una semana, se vendió con él y se corrigió. Esa escritura lleva
+    // una hora que no ha llegado: si contara como la última, no habría momento tranquilo en siete
+    // días, por muy parado que estuviera el bar.
+    let (repo, db, dir) = base("horario-reloj").await;
+    let estado = SqliteVerificacionNube::new(db.clone());
+    let nube = Nube::default();
+    main_al_dia(&db, MEDIODIA - 3 * HORA).await;
+    sembrar(
+        &db,
+        &format!(
+            "INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-adelantada', 0, {});",
+            MEDIODIA + 7 * 24 * HORA
+        ),
+    )
+    .await;
+
+    // Pero lo que se escribe de verdad después sí se ve: con una venta hace dos minutos, espera.
+    sembrar(
+        &db,
+        &format!(
+            "INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-reciente', 0, {});",
+            MEDIODIA - 2 * MIN
+        ),
+    )
+    .await;
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.unwrap();
+    assert!(matches!(v, Vuelta::NoToca(Espera::ActividadReciente)), "{v:?}");
+
+    // Y pasada la calma, contrasta, con la fila adelantada todavía ahí.
+    la_nube_cuadra(&nube, 40);
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 20 * MIN)).await.unwrap();
+    assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
 
     cerrar(db, dir).await;
 }

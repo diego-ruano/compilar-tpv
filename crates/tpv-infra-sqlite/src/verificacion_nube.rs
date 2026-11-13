@@ -14,6 +14,7 @@ use tpv_application::error::AppResult;
 use tpv_application::ports::verificacion_nube::{
     IntentoVerificacion, SituacionVerificacion, VerificacionNubeRepository,
 };
+use tpv_domain::verificacion_nube::MARCA_FUTURA_CREIBLE_MS;
 
 use crate::consultas::db_err;
 use crate::db::{Db, Reader};
@@ -55,7 +56,7 @@ fn hora_local_a_ms(texto: &str) -> Option<i64> {
 
 #[async_trait]
 impl VerificacionNubeRepository for SqliteVerificacionNube {
-    async fn situacion(&self) -> AppResult<SituacionVerificacion> {
+    async fn situacion(&self, ahora_ms: i64) -> AppResult<SituacionVerificacion> {
         let r = self.db.read().await;
 
         let (ultima_ok_ms, ultimo_intento_ms, fallos) = {
@@ -109,8 +110,24 @@ impl VerificacionNubeRepository for SqliteVerificacionNube {
 
         // Cada operación de aquí y cada cambio aplicado de la nube deja su fila en
         // `_Sync_Applied_Ops` con la hora a la que entró: la más reciente es la última escritura.
-        let ultima_escritura_ms =
-            un_entero(&r, "SELECT MAX(Applied_At_Ms) FROM _Sync_Applied_Ops;").await?;
+        //
+        // La más reciente **que se pueda creer**. Una fila fechada más allá de ahora es de un reloj
+        // que estuvo adelantado (se adelanta una semana, se vende, se corrige): sería el máximo
+        // hasta que el reloj la alcanzase, taparía todo lo escrito después y el contraste no vería
+        // un momento tranquilo en días. Se salta y vale la anterior.
+        let ultima_escritura_ms = {
+            let mut filas = r
+                .query(
+                    "SELECT MAX(Applied_At_Ms) FROM _Sync_Applied_Ops WHERE Applied_At_Ms <= ?1;",
+                    vec![Value::Integer(ahora_ms.saturating_add(MARCA_FUTURA_CREIBLE_MS))],
+                )
+                .await
+                .map_err(db_err)?;
+            match filas.next().await.map_err(db_err)? {
+                Some(f) => v_i64(f.get_value(0).map_err(db_err)?),
+                None => None,
+            }
+        };
 
         Ok(SituacionVerificacion {
             ultima_ok_ms,
@@ -180,10 +197,13 @@ mod tests {
     /// Un mediodía de invierno: lejos de un cambio de horario en cualquier zona.
     const MEDIODIA_MS: i64 = 1_768_478_400_000;
 
+    /// Una hora de lectura tan lejana que ninguna marca de los tests queda por delante.
+    const MUCHO_DESPUES: i64 = i64::MAX;
+
     #[tokio::test]
     async fn una_base_recien_abierta_no_tiene_nada_que_contar() {
         let (repo, _db, _dir) = repo_temporal().await;
-        assert_eq!(repo.situacion().await.unwrap(), SituacionVerificacion::default());
+        assert_eq!(repo.situacion(MUCHO_DESPUES).await.unwrap(), SituacionVerificacion::default());
     }
 
     #[tokio::test]
@@ -193,22 +213,22 @@ mod tests {
         // Dos fallos seguidos: suben la cuenta y no tocan la última pasada buena.
         repo.anotar(IntentoVerificacion::Fallida, 1_000).await.unwrap();
         repo.anotar(IntentoVerificacion::Fallida, 2_000).await.unwrap();
-        let s = repo.situacion().await.unwrap();
+        let s = repo.situacion(MUCHO_DESPUES).await.unwrap();
         assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(2_000), 2));
 
         // La nube contesta pero no se llega a comparar: la cuenta de fallos se queda a cero.
         repo.anotar(IntentoVerificacion::Aplazada, 3_000).await.unwrap();
-        let s = repo.situacion().await.unwrap();
+        let s = repo.situacion(MUCHO_DESPUES).await.unwrap();
         assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(3_000), 0));
 
         // Una pasada buena.
         repo.anotar(IntentoVerificacion::Hecha, 4_000).await.unwrap();
-        let s = repo.situacion().await.unwrap();
+        let s = repo.situacion(MUCHO_DESPUES).await.unwrap();
         assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (Some(4_000), Some(4_000), 0));
 
         // Y un fallo después no la borra.
         repo.anotar(IntentoVerificacion::Fallida, 5_000).await.unwrap();
-        let s = repo.situacion().await.unwrap();
+        let s = repo.situacion(MUCHO_DESPUES).await.unwrap();
         assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (Some(4_000), Some(5_000), 1));
     }
 
@@ -227,7 +247,7 @@ mod tests {
         let (repo, db, _dir) = repo_temporal().await;
         sembrar(&db, "DELETE FROM _Verificacion_Nube;").await;
         repo.anotar(IntentoVerificacion::Fallida, 7_000).await.unwrap();
-        let s = repo.situacion().await.unwrap();
+        let s = repo.situacion(MUCHO_DESPUES).await.unwrap();
         assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(7_000), 1));
     }
 
@@ -251,7 +271,7 @@ mod tests {
         .await;
 
         // El de hoy está reabierto: el que cuenta es el de ayer.
-        assert_eq!(repo.situacion().await.unwrap().ultimo_cierre_ms, Some(ayer));
+        assert_eq!(repo.situacion(MUCHO_DESPUES).await.unwrap().ultimo_cierre_ms, Some(ayer));
 
         // Vuelto a cerrar, cuenta el nuevo.
         sembrar(
@@ -263,7 +283,7 @@ mod tests {
             ),
         )
         .await;
-        assert_eq!(repo.situacion().await.unwrap().ultimo_cierre_ms, Some(hoy + 120_000));
+        assert_eq!(repo.situacion(MUCHO_DESPUES).await.unwrap().ultimo_cierre_ms, Some(hoy + 120_000));
     }
 
     #[tokio::test]
@@ -277,7 +297,7 @@ mod tests {
                First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-cuarentena', 5, '[]', 5, 1, 1, 1);",
         )
         .await;
-        let s = repo.situacion().await.unwrap();
+        let s = repo.situacion(MUCHO_DESPUES).await.unwrap();
         assert_eq!((s.outbox_pendiente, s.bajada_detenida), (0, false));
 
         sembrar(
@@ -288,7 +308,7 @@ mod tests {
                First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-detenida', 6, '[]', 1, 0, 1, 1);",
         )
         .await;
-        let s = repo.situacion().await.unwrap();
+        let s = repo.situacion(MUCHO_DESPUES).await.unwrap();
         assert_eq!((s.outbox_pendiente, s.bajada_detenida), (1, true));
     }
 
@@ -301,12 +321,12 @@ mod tests {
              INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('a', 0, 500), ('b', 7, 900), ('c', 0, 700);",
         )
         .await;
-        let s = repo.situacion().await.unwrap();
+        let s = repo.situacion(MUCHO_DESPUES).await.unwrap();
         assert!(s.historico_pendiente);
         assert_eq!(s.ultima_escritura_ms, Some(900));
 
         sembrar(&db, "UPDATE _Backfill_Historico SET Completada = 1;").await;
-        assert!(!repo.situacion().await.unwrap().historico_pendiente);
+        assert!(!repo.situacion(MUCHO_DESPUES).await.unwrap().historico_pendiente);
     }
 
     #[tokio::test]
@@ -319,8 +339,48 @@ mod tests {
             let w = db.write().await;
             w.execute("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Salón');", ()).await.unwrap();
         }
-        let escritura = repo.situacion().await.unwrap().ultima_escritura_ms.expect("hay una escritura");
+        let escritura = repo.situacion(MUCHO_DESPUES).await.unwrap().ultima_escritura_ms.expect("hay una escritura");
         assert!(escritura >= antes && escritura <= crate::util::now_ms());
+    }
+
+    #[tokio::test]
+    async fn una_escritura_fechada_mas_alla_de_ahora_no_tapa_las_de_verdad() {
+        // El reloj estuvo adelantado una semana y se vendió con él; luego se corrigió y se siguió
+        // vendiendo. La fila «de la semana que viene» sería el máximo durante siete días.
+        let (repo, db, _dir) = repo_temporal().await;
+        let ahora = MEDIODIA_MS;
+        let semana = 7 * 24 * 3_600_000;
+        sembrar(
+            &db,
+            &format!(
+                "INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES
+                   ('con-el-reloj-adelantado', 0, {}),
+                   ('de-hace-una-hora', 0, {}),
+                   ('de-hace-dos-minutos', 0, {});",
+                ahora + semana,
+                ahora - 3_600_000,
+                ahora - 120_000,
+            ),
+        )
+        .await;
+        assert_eq!(repo.situacion(ahora).await.unwrap().ultima_escritura_ms, Some(ahora - 120_000));
+
+        // Una que entra mientras se decide (unos segundos por delante de la hora leída) sí cuenta.
+        sembrar(
+            &db,
+            &format!(
+                "INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('recien-entrada', 0, {});",
+                ahora + 2_000
+            ),
+        )
+        .await;
+        assert_eq!(repo.situacion(ahora).await.unwrap().ultima_escritura_ms, Some(ahora + 2_000));
+
+        // Y cuando el reloj alcanza a la adelantada, vuelve a ser una escritura como otra.
+        assert_eq!(
+            repo.situacion(ahora + semana).await.unwrap().ultima_escritura_ms,
+            Some(ahora + semana)
+        );
     }
 
     #[test]

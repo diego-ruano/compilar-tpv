@@ -42,8 +42,12 @@ pub enum IntentoVerificacion {
 
 #[async_trait]
 pub trait VerificacionNubeRepository: Send + Sync {
-    /// Lo que hay ahora mismo. Sólo lee.
-    async fn situacion(&self) -> AppResult<SituacionVerificacion>;
+    /// Lo que hay a la hora `ahora_ms`. Sólo lee.
+    ///
+    /// La hora hace falta para la última escritura: es la más reciente que no pasa de `ahora_ms` en
+    /// más de `tpv_domain::verificacion_nube::MARCA_FUTURA_CREIBLE_MS`. Una fechada más allá es de
+    /// un reloj que estuvo adelantado, y taparía las escrituras de verdad hechas después.
+    async fn situacion(&self, ahora_ms: i64) -> AppResult<SituacionVerificacion>;
 
     /// Anota cómo acabó el intento que empezó en `ahora_ms`. Es estado local del equipo: no se
     /// replica.
