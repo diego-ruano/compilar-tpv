@@ -415,6 +415,12 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 
 - Al autenticarse, la Main pide `/v1/sync/changes` desde su `Last_Seq` y aplica en orden, guardando
   los `change` en vivo hasta terminar.
+- **Una página de `/v1/sync/changes` tiene dos topes**: los cambios que se piden (`limit`, hasta 1.000) y
+  4 MiB de sentencias (`CAMBIOS_MAX_BYTES`, `sync.routes.ts::leerPaginaDeCambios`), lo que antes llegue;
+  un cambio puede llevar cientos de sentencias. El corte lo hace la propia sentencia con la suma
+  acumulada de lo que ocupa cada cambio, y nunca deja la página vacía: un cambio que solo ya pasa
+  viaja solo. La página cortada lleva el `nextSince` de su último cambio, como una completa, y la
+  Main sigue hasta una vacía (`test/cambiosConTecho.test.ts`).
 - **Un `change` lleva lo que se lee**: `opId`, `seq` y `statements` (las sentencias ya resueltas). La
   Main lee los tres (`replicacion.rs::cambio`); la Handy, las sentencias, de las que saca qué
   refrescar (`presencia_handy.rs`). Ni el comando, ni quién lo mandó, ni su payload, ni su resultado.
