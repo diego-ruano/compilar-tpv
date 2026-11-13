@@ -289,6 +289,41 @@ fn tiempo_sin_fijar(sql_fijada: &str) -> Option<&'static str> {
         .find(|token| minus.contains(*token))
 }
 
+/// DO-01 · Lo que admite por sentencia el SQLite del Durable Object, que es donde se aplica lo que
+/// sube la Main (`apps/cloud-worker-licensing/test/sondaSqliteDo.test.ts`). El de aquí admite
+/// mucho más, así que una sentencia que se pasa entra en local sin rechistar y es la nube la que la
+/// rechaza, como permanente: la operación acaba apartada.
+const MAX_PARAMETROS_EN_LA_NUBE: usize = 100;
+const MAX_BYTES_DE_SQL_EN_LA_NUBE: usize = 100_000;
+
+/// DO-01 · Por qué la nube rechazaría esta sentencia, si la rechazaría.
+///
+/// Lo normal es que sea una lista de tamaño variable con un `?` por elemento: va en un solo
+/// parámetro, un array JSON (`consultas::lista_json`).
+fn no_cabe_en_la_nube(sql: &str, parametros: usize) -> Option<String> {
+    if parametros > MAX_PARAMETROS_EN_LA_NUBE {
+        return Some(format!(
+            "{parametros} parámetros (la nube admite {MAX_PARAMETROS_EN_LA_NUBE} por sentencia)"
+        ));
+    }
+    if sql.len() > MAX_BYTES_DE_SQL_EN_LA_NUBE {
+        return Some(format!(
+            "{} bytes de SQL (la nube admite {MAX_BYTES_DE_SQL_EN_LA_NUBE} por sentencia)",
+            sql.len()
+        ));
+    }
+    None
+}
+
+/// De qué sentencia se habla, sin sus datos: el verbo y la tabla. Se corta en el primer paréntesis,
+/// signo igual o comilla, que es donde empiezan las columnas, las condiciones y los literales, así
+/// que lo que queda son palabras del SQL y nombres del esquema (sale del equipo con el aviso).
+fn cabeza_de_la_sentencia(sql: &str) -> String {
+    let limpio = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    let fin = limpio.find(['(', '=', '\'', '"']).unwrap_or(limpio.len());
+    limpio[..fin].trim_end().chars().take(60).collect()
+}
+
 /// La sentencia sin el espacio ni los comentarios (`--` y `/* */`) que lleve delante.
 ///
 /// Clasificar por la cabeza del texto sin quitarlos antes hacía que una escritura comentada no se
@@ -569,6 +604,25 @@ impl<'a> WriteGuard<'a> {
                 token,
                 sql = %sql,
                 "escritura con una hora que la nube convertiría a su zona horaria"
+            );
+        }
+        if let Some(motivo) = no_cabe_en_la_nube(&sql, values.len()) {
+            // DO-01. Tampoco se bloquea, por lo mismo: en local la sentencia entra, y nada de lo
+            // que rodea a una venta puede impedirla. Lo que no entraría es su réplica, así que se
+            // grita: en desarrollo y en los tests revienta, que es donde se arregla; en el equipo
+            // del cliente queda anotado, y la operación acabará apartada y reparada por estado.
+            let sentencia = cabeza_de_la_sentencia(&sql);
+            #[cfg(debug_assertions)]
+            panic!(
+                "SQL replicable que la nube rechazaría: {motivo}. Una lista de tamaño variable va en \
+                 un solo parámetro JSON (`consultas::lista_json`). Sentencia: {sentencia}"
+            );
+            #[cfg(not(debug_assertions))]
+            tracing::error!(
+                target: "tpv::sync",
+                motivo = %motivo,
+                sentencia = %sentencia,
+                "escritura que la nube rechazará por tamaño"
             );
         }
         Ok(SqlStatement {
@@ -1405,6 +1459,122 @@ mod tests {
             }
         }
         assert!(con_hora.is_empty(), "columnas con DEFAULT de hora: {con_hora:?}");
+    }
+
+    // ── DO-01: lo que sube tiene que caber en el SQLite del Durable Object ─────────────────────
+
+    #[test]
+    fn la_nube_admite_cien_parametros_y_cien_kb_por_sentencia() {
+        let sql = "UPDATE Zonas SET Nombre_Zona = ?1 WHERE ID_Zona = ?2;";
+        assert_eq!(no_cabe_en_la_nube(sql, 0), None);
+        assert_eq!(no_cabe_en_la_nube(sql, 100), None, "cien entran");
+        let motivo = no_cabe_en_la_nube(sql, 101).expect("ciento uno, no");
+        assert!(motivo.starts_with("101 parámetros"), "{motivo}");
+
+        let relleno = 100_000 - "UPDATE Zonas SET Nombre_Zona = '';".len();
+        let justo = format!("UPDATE Zonas SET Nombre_Zona = '{}';", "a".repeat(relleno));
+        assert_eq!(justo.len(), 100_000);
+        assert_eq!(no_cabe_en_la_nube(&justo, 0), None, "100 KB justos entran");
+        let motivo = no_cabe_en_la_nube(&format!("{justo} "), 0).expect("un byte más, no");
+        assert!(motivo.starts_with("100001 bytes"), "{motivo}");
+    }
+
+    #[test]
+    fn del_aviso_sale_la_sentencia_sin_sus_datos() {
+        // Lo que acompaña al aviso sale del equipo: el verbo y la tabla, nunca un literal.
+        assert_eq!(
+            cabeza_de_la_sentencia(
+                "INSERT OR IGNORE INTO Pago_Detalles (ID_Pago, ID_Detalle)\n  SELECT ?1, dc.ID_Detalle FROM Detalle_Comanda dc"
+            ),
+            "INSERT OR IGNORE INTO Pago_Detalles"
+        );
+        assert_eq!(
+            cabeza_de_la_sentencia("UPDATE Clientes SET Nombre = 'Ana López', Telefono='600000000' WHERE ID_Cliente = ?1"),
+            "UPDATE Clientes SET Nombre"
+        );
+        assert_eq!(
+            cabeza_de_la_sentencia("DELETE FROM Mesas WHERE ID_Zona NOT IN (?1, ?2)"),
+            "DELETE FROM Mesas WHERE ID_Zona NOT IN"
+        );
+        assert_eq!(cabeza_de_la_sentencia(&format!("UPDATE {} SET x = 1", "T".repeat(200))).chars().count(), 60);
+    }
+
+    /// Una escritura de negocio con 101 parámetros, suelta o dentro de una transacción.
+    async fn escribir_con_101_parametros(db: std::sync::Arc<Db>, en_transaccion: bool) -> Result<u64, ErrorSql> {
+        let marcas = (1..=101).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let sql = format!("UPDATE Zonas SET Nombre_Zona = 'Terraza' WHERE ID_Zona = 'z1' AND ID_Zona NOT IN ({marcas});");
+        let valores: Vec<Value> = (1..=101).map(|i| Value::Text(format!("otra-{i}"))).collect();
+        let w = db.write().await;
+        if en_transaccion {
+            w.execute_batch("BEGIN;").await?;
+            let filas = w.execute(&sql, valores).await?;
+            w.execute_batch("COMMIT;").await?;
+            Ok(filas)
+        } else {
+            w.execute(&sql, valores).await
+        }
+    }
+
+    async fn nombre_de_z1(db: &Db) -> String {
+        let r = db.read().await;
+        let mut filas = r.query("SELECT Nombre_Zona FROM Zonas WHERE ID_Zona = 'z1';", ()).await.unwrap();
+        filas.next().await.unwrap().unwrap().get::<String>(0).unwrap()
+    }
+
+    async fn operaciones_en_el_outbox(db: &Db) -> i64 {
+        let r = db.read().await;
+        let mut filas = r.query("SELECT COUNT(*) FROM _Sync_Outbox;", ()).await.unwrap();
+        filas.next().await.unwrap().unwrap().get::<i64>(0).unwrap()
+    }
+
+    /// DO-01 · Una escritura que la nube rechazaría no pasa inadvertida, y **nunca impide la venta**.
+    ///
+    /// Lo que hace depende de cómo se haya compilado, y el test afirma lo que toca en cada caso:
+    /// en desarrollo y en los tests revienta (aquí se ve y se arregla); en la versión que se
+    /// instala la escritura entra y sube igual, con su aviso. Para ver la segunda mitad:
+    /// `cargo nextest run -p tpv-infra-sqlite --release una_escritura_que_la_nube_rechazaria`.
+    #[tokio::test]
+    async fn una_escritura_que_la_nube_rechazaria_revienta_en_desarrollo_y_no_bloquea_en_el_cliente() {
+        for en_transaccion in [false, true] {
+            let (db, _dir) = crate::contract_comun::db_temporal().await;
+            {
+                let w = db.write().await;
+                w.raw()
+                    .execute_batch("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Salón');")
+                    .await
+                    .unwrap();
+            }
+
+            // En su propia tarea: un pánico se queda en ella.
+            let resultado = tokio::spawn(escribir_con_101_parametros(db.clone(), en_transaccion)).await;
+
+            if cfg!(debug_assertions) {
+                let fallo = resultado.expect_err("en desarrollo tiene que reventar");
+                assert!(fallo.is_panic());
+                // Revienta antes de escribir: ni la fila cambia ni queda nada por subir, y el
+                // escritor sigue sirviendo.
+                assert_eq!(nombre_de_z1(&db).await, "Salón");
+                assert_eq!(operaciones_en_el_outbox(&db).await, 0);
+                let w = db.write().await;
+                w.execute("UPDATE Zonas SET Nombre_Zona = 'Barra' WHERE ID_Zona = 'z1';", ()).await.unwrap();
+                drop(w);
+                assert_eq!(nombre_de_z1(&db).await, "Barra");
+            } else {
+                let filas = resultado.expect("en el cliente no revienta").expect("y la escritura entra");
+                assert_eq!(filas, 1);
+                assert_eq!(nombre_de_z1(&db).await, "Terraza");
+                assert_eq!(operaciones_en_el_outbox(&db).await, 1, "y queda en el outbox para subir");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn cien_parametros_justos_entran_sin_aviso() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let marcas = (1..=100).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let valores: Vec<Value> = (1..=100).map(|i| Value::Text(format!("otra-{i}"))).collect();
+        let w = db.write().await;
+        w.execute(&format!("DELETE FROM Zonas WHERE ID_Zona IN ({marcas});"), valores).await.unwrap();
     }
 
     /// Espejo de lo que sabe fijar `tenantHub.tiempo.ts` con la hora del emisor: sólo el `'now'`

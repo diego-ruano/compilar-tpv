@@ -113,7 +113,10 @@ pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esp
   tamaño variable (las líneas de un cobro, las mesas de una zona, los asignados a una tarea) va
   como **un único parámetro JSON**, `IN (SELECT value FROM json_each(?n))`
   (`consultas::lista_json`), nunca con un `?` por elemento: con más de 98 líneas, el cobro de una
-  mesa subía una sentencia que la nube rechazaba como permanente (DO-01).
+  mesa subía una sentencia que la nube rechazaba como permanente (DO-01). `WriteGuard` lo vigila
+  al capturar (`no_cabe_en_la_nube`): una sentencia con más de 100 valores o más de 100 KB de SQL
+  **revienta en desarrollo y en los tests**, y en el equipo del cliente no bloquea la escritura
+  (podría ser un cobro): la deja anotada como error, con el verbo y la tabla y sin sus datos.
 - **Idempotencia** por `Op_Id`: `Applied_Operations` en la nube y `_Sync_Applied_Ops` en la Main evitan
   duplicados en catch-up y en vivo, y los ecos de las propias escrituras.
 - **IDs deterministas**: toda columna `TEXT PRIMARY KEY` recibe su UUID generado **antes** del

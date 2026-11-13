@@ -328,9 +328,10 @@ Decidido: pasar la lista como un único parámetro JSON, `IN (SELECT value FROM 
 caso en el arnés de contrato, como el cobro de mesa (`mesas/cobrar_detalles_120_lineas`). Así no hace
 falta ningún tope de mesas.
 
-Lo que sube la Main ya va así. Las lecturas de la Main que todavía ponen un `?` por elemento
-(`venta_rapida.rs`, `pedidos_proveedor.rs`) van contra su SQLite local y no se replican: no les
-afecta.
+Lo que sube la Main ya va así, y `WriteGuard` revienta en desarrollo ante una sentencia que la nube
+no admitiría ([sincronizacion.md](arquitectura/sincronizacion.md#escritor-único-y-captura)). Las
+lecturas de la Main que todavía ponen un `?` por elemento (`venta_rapida.rs`,
+`pedidos_proveedor.rs`) van contra su SQLite local y no se replican: no les afecta.
 
 ### DO-02 · La recuperación de una Main con mucho desde el último cierre
 
