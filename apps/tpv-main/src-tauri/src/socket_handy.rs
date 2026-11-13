@@ -19,7 +19,14 @@ pub(crate) struct HandyNativo {
     comprobando: AtomicBool,
 }
 
+/// Un ping de comprobación por mandar: el latido y la conexión a la que pertenece.
+struct Comprobacion { latido: Latido, generacion: u64, conexion: u64 }
+
 impl HandyNativo {
+    fn nuevo(orden: watch::Sender<u64>) -> Self {
+        Self { presencia: Mutex::new(PresenciaHandy::default()), orden, latido: Mutex::new(None), comprobando: AtomicBool::new(false) }
+    }
+
     pub fn estado(&self) -> EstadoSocketHandy {
         self.presencia.lock().unwrap_or_else(|e| e.into_inner()).foto.clone()
     }
@@ -47,34 +54,49 @@ impl HandyNativo {
     /// sólo si no contesta se reconecta. Cada reconexión es un ticket nuevo (la base central), un
     /// saludo con el `TenantHub` y, en la interfaz, releerlo todo.
     pub fn reintentar(&self, app: &AppHandle, forzar: bool) {
-        let (accion, generacion, conexion, latido) = {
-            let p = self.presencia.lock().unwrap_or_else(|e| e.into_inner());
-            let latido = self.latido.lock().unwrap_or_else(|e| e.into_inner()).clone();
-            let edad = latido.as_ref().map(|l| l.edad_ultimo_pong().as_millis() as u64);
-            (p.al_volver(forzar, edad), p.foto.generacion, p.foto.conexion, latido)
-        };
-        let reconectar = || self.orden.send_modify(|revision| *revision += 1);
-        match (accion, latido) {
-            (AlVolver::Nada, _) => {}
-            (AlVolver::Comprobar, Some(mut latido)) => {
-                if self.comprobando.swap(true, Ordering::AcqRel) { return; }
-                let app = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    let viva = latido.comprobar(Duration::from_millis(PLAZO_PONG_MS)).await;
-                    let runtime = app.state::<HandyNativo>();
-                    runtime.comprobando.store(false, Ordering::Release);
-                    if viva { return; }
-                    // Sólo se corta la conexión que se comprobaba: si entretanto se cayó o se
-                    // sustituyó, ya hay otra en marcha y cortarla sería empezar de nuevo.
-                    let la_misma = runtime.presencia.lock().unwrap_or_else(|e| e.into_inner()).es_la_conexion(generacion, conexion);
-                    if la_misma {
-                        tracing::warn!(target: "tpv::handy", "el socket de avisos no contestó al volver a primer plano");
-                        runtime.orden.send_modify(|revision| *revision += 1);
-                    }
-                });
+        let Some(Comprobacion { mut latido, generacion, conexion }) = self.decidir_al_volver(forzar) else { return; };
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let viva = latido.comprobar(Duration::from_millis(PLAZO_PONG_MS)).await;
+            let runtime = app.state::<HandyNativo>();
+            if !viva && runtime.cortar_si_es(generacion, conexion) {
+                tracing::warn!(target: "tpv::handy", "el socket de avisos no contestó al volver a primer plano");
             }
-            (AlVolver::Comprobar, None) | (AlVolver::Reconectar, _) => reconectar(),
+            runtime.comprobando.store(false, Ordering::Release);
+        });
+    }
+
+    /// Decide qué hacer al volver y, si toca reconectar, lo ordena. Devuelve el ping de
+    /// comprobación que queda por mandar, si lo hay.
+    ///
+    /// La decisión y la orden van con el cerrojo de `presencia` cogido. Una conexión sólo se
+    /// confirma con ese cerrojo, así que entre mirar el estado y ordenar no puede abrirse otra:
+    /// la orden no dice a qué conexión va, y cortaría la nueva.
+    fn decidir_al_volver(&self, forzar: bool) -> Option<Comprobacion> {
+        let p = self.presencia.lock().unwrap_or_else(|e| e.into_inner());
+        let latido = self.latido.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let edad = latido.as_ref().map(|l| l.edad_ultimo_pong().as_millis() as u64);
+        match (p.al_volver(forzar, edad), latido) {
+            (AlVolver::Nada, _) => None,
+            (AlVolver::Comprobar, Some(latido)) => {
+                if self.comprobando.swap(true, Ordering::AcqRel) { return None; }
+                Some(Comprobacion { latido, generacion: p.foto.generacion, conexion: p.foto.conexion })
+            }
+            (AlVolver::Comprobar, None) | (AlVolver::Reconectar, _) => {
+                self.orden.send_modify(|revision| *revision += 1);
+                None
+            }
         }
+    }
+
+    /// El ping de una comprobación no ha vuelto: corta esa conexión, y sólo ésa. Si entretanto se
+    /// cayó o se sustituyó ya hay otra en marcha, y cortarla sería empezar de nuevo. Con el
+    /// cerrojo cogido, por lo mismo que en `decidir_al_volver`.
+    fn cortar_si_es(&self, generacion: u64, conexion: u64) -> bool {
+        let p = self.presencia.lock().unwrap_or_else(|e| e.into_inner());
+        if !p.es_la_conexion(generacion, conexion) { return false; }
+        self.orden.send_modify(|revision| *revision += 1);
+        true
     }
 }
 
@@ -133,7 +155,7 @@ async fn sesion(app: &AppHandle, nube: &PairingAdapter, generacion: u64) -> AppR
 
 pub(crate) fn arrancar(app: AppHandle) {
     let (orden, mut cambios) = watch::channel(0);
-    app.manage(HandyNativo { presencia: Mutex::new(PresenciaHandy::default()), orden, latido: Mutex::new(None), comprobando: AtomicBool::new(false) });
+    app.manage(HandyNativo::nuevo(orden));
     tauri::async_runtime::spawn(async move {
         let inicio = Instant::now();
         let mut retardo = 3u64;
@@ -190,4 +212,73 @@ pub(crate) fn contexto_cambiado(app: &AppHandle) {
     if let Some(runtime) = app.try_state::<HandyNativo>() { runtime.contexto_cambiado(app); }
     // La Main comprueba el modo al despertar y sale de su sesión sin interrumpir transacciones.
     if let Some(runtime) = app.try_state::<crate::replicacion::SyncNativo>() { runtime.reintentar(); }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Quién ordena reconectar y a qué conexión. La orden es un contador sin destinatario: lo que
+    //! se vigila es que sólo se dé con la conexión que se miraba todavía abierta.
+    use super::*;
+    use tpv_contracts::errors::ErrorCode;
+
+    fn servicio() -> (HandyNativo, watch::Receiver<u64>) {
+        let (orden, ordenes) = watch::channel(0);
+        (HandyNativo::nuevo(orden), ordenes)
+    }
+
+    /// Deja el servicio con una conexión confirmada y dice cuál es.
+    fn conectar(servicio: &HandyNativo) -> (u64, u64) {
+        let mut p = servicio.presencia.lock().unwrap();
+        p.activar(Some("negocio-a".into()), true);
+        p.confirmar(true, false);
+        (p.foto.generacion, p.foto.conexion)
+    }
+
+    /// ¿Se ha dado una orden desde la última vez que se miró?
+    fn ordenado(ordenes: &mut watch::Receiver<u64>) -> bool {
+        let hay = ordenes.has_changed().unwrap();
+        ordenes.borrow_and_update();
+        hay
+    }
+
+    #[test]
+    fn un_ping_sin_respuesta_corta_la_conexion_que_se_comprobaba() {
+        let (servicio, mut ordenes) = servicio();
+        let (generacion, conexion) = conectar(&servicio);
+        assert!(servicio.cortar_si_es(generacion, conexion));
+        assert!(ordenado(&mut ordenes));
+    }
+
+    #[test]
+    fn un_ping_sin_respuesta_no_corta_la_conexion_que_sustituyo_a_la_suya() {
+        let (servicio, mut ordenes) = servicio();
+        let (generacion, conexion) = conectar(&servicio);
+        // Alguien pulsó «Reintentar» mientras se esperaba el pong: ya hay otra conexión abierta.
+        servicio.presencia.lock().unwrap().confirmar(true, false);
+        assert!(!servicio.cortar_si_es(generacion, conexion));
+        assert!(!ordenado(&mut ordenes), "la conexión nueva no se toca");
+        // Tampoco si la suya se cayó sola y ya se está reconectando.
+        servicio.presencia.lock().unwrap().desconectar(0);
+        assert!(!servicio.cortar_si_es(generacion, conexion + 1));
+        assert!(!ordenado(&mut ordenes));
+    }
+
+    #[test]
+    fn volver_sin_conexion_ordena_reconectar_y_con_un_rechazo_solo_el_boton() {
+        let (servicio, mut ordenes) = servicio();
+        // Sin conexión abierta no hay nada que comprobar: se intenta ya.
+        assert!(servicio.decidir_al_volver(false).is_none());
+        assert!(ordenado(&mut ordenes));
+        // Conectada pero sin latido que mirar: tampoco se puede comprobar.
+        conectar(&servicio);
+        assert!(servicio.decidir_al_volver(false).is_none());
+        assert!(ordenado(&mut ordenes));
+        // Un rechazo no se reintenta por volver a primer plano…
+        assert!(servicio.presencia.lock().unwrap().rechazar(ErrorCode::DeviceRevoked));
+        assert!(servicio.decidir_al_volver(false).is_none());
+        assert!(!ordenado(&mut ordenes));
+        // …pero sí con el botón.
+        assert!(servicio.decidir_al_volver(true).is_none());
+        assert!(ordenado(&mut ordenes));
+    }
 }
