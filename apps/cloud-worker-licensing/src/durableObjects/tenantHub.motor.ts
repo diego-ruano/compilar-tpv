@@ -105,6 +105,11 @@ const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PLAZO_LEER_MAIN_MS = 5_000;
 
 
+/** Dónde anota el objeto la última baja de cada dispositivo (`revocarDispositivo`). */
+const CLAVE_REVOCADO = "revocado:";
+/** Holgura entre el reloj del Worker que canjea el ticket y el del objeto que anota la baja. */
+const MARGEN_CANJE_MS = 5_000;
+
 export class MotorTenantHub {
 	// SYNC-16: este DO usa la WebSocket Hibernation API. Mientras las conexiones están ociosas el
 	// runtime evacúa el objeto de memoria (deja de facturar duración) y lo despierta al llegar un
@@ -1436,7 +1441,31 @@ export class MotorTenantHub {
 			return new Response("Expected WebSocket", { status: 426 });
 		}
 
+		// El Worker canjeó el ticket con el dispositivo vivo, pero pudo darse de baja entre el canje y
+		// este momento: su `revocarDispositivo` llegó antes que el socket y no tuvo nada que cerrar.
+		const deviceId = request.headers.get("x-device-id") || "";
+		if (await this.revocadoTrasElCanje(deviceId, Number(request.headers.get("x-ws-canje-ms")))) {
+			return Response.json({ ok: false, code: "device_revoked", error: "device_revoked" }, { status: 401 });
+		}
+
 		return abrirWebSocket(ctx, request);
+	}
+
+	/**
+	 * ¿Se dio de baja `deviceId` después de que el Worker canjeara el ticket de este socket?
+	 *
+	 * El Worker lee la fila del dispositivo al canjear el ticket y el saludo ya no vuelve a la base
+	 * central. Una baja que llega entre el canje y el upgrade no encuentra socket que cerrar, así que
+	 * `revocarDispositivo` deja anotado cuándo llegó (en el almacenamiento del objeto: sobrevive a la
+	 * hibernación) y aquí se compara con la hora del canje. Las dos horas son de máquinas distintas: con
+	 * `MARGEN_CANJE_MS` de holgura, un canje de justo antes de la baja no se cuela, y uno posterior a
+	 * volver a dar de alta el mismo dispositivo entra (como mucho, unos segundos después).
+	 */
+	private async revocadoTrasElCanje(deviceId: string, canjeMs: number): Promise<boolean> {
+		if (!deviceId) return false;
+		const revocadoMs = await this.state.storage.get<number>(`${CLAVE_REVOCADO}${deviceId}`);
+		if (revocadoMs === undefined) return false;
+		return !(Number.isFinite(canjeMs) && canjeMs > revocadoMs + MARGEN_CANJE_MS);
 	}
 
 	async aplicar(params: ApplyParams): Promise<ResultadoAplicacion> {
@@ -1470,8 +1499,12 @@ export class MotorTenantHub {
 		);
 	}
 
-	revocarDispositivo(deviceId: string): void {
+	async revocarDispositivo(deviceId: string): Promise<void> {
+		if (!deviceId) return;
 		revocar(this.ctxRutas(), deviceId);
+		// Y queda anotada, en el mismo turno: un socket cuyo ticket se canjeó antes de la baja y que todavía
+		// no ha llegado lo rechaza el upgrade (`revocadoTrasElCanje`).
+		await this.state.storage.put(`${CLAVE_REVOCADO}${deviceId}`, nowMs());
 	}
 
 	avisarEmparejamiento(): void {

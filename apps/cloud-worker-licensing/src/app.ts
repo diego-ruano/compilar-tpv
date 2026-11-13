@@ -159,6 +159,7 @@ app.get("/ws", async (c) => {
 		h.set("x-device-id", canje.deviceId);
 		h.set("x-role", canje.rol);
 		h.set("x-device-pubkey-b64", canje.clave);
+		h.set("x-ws-canje-ms", String(canje.canjeMs));
 
 		return await stub.fetch(new Request(doUrl.toString(), new Request(request, { headers: h })));
 	} catch (e: any) {

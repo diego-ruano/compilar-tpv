@@ -115,6 +115,7 @@ const CABECERAS_DEL_CLIENTE = {
 	"x-device-id": "otro-equipo",
 	"x-role": "tpv",
 	"x-device-pubkey-b64": "Q2xhdmVEZWxDbGllbnRlUXVlTm9EZWJlUGFzYXIwMDA=",
+	"x-ws-canje-ms": "99999999999999",
 };
 
 const ultimaVez = (sql: any, deviceId: string) =>
@@ -139,6 +140,10 @@ describe("GET /ws en el Worker: un viaje a la base central", () => {
 			expect(h.get("x-device-id")).toBe("main-1");
 			expect(h.get("x-role")).toBe("tpv");
 			expect(h.get("x-device-pubkey-b64")).toBe(CLAVE);
+			// La hora del canje, del Worker: la del cliente no pasa.
+			const canje = Number(h.get("x-ws-canje-ms"));
+			expect(canje).toBeGreaterThanOrEqual(antes);
+			expect(canje).toBeLessThanOrEqual(Date.now());
 
 			expect(ultimaVez(sql, "main-1")).toBeGreaterThanOrEqual(antes);
 			expect(sql.exec(`SELECT COUNT(*) AS n FROM Ws_Tickets WHERE ticket = 't-bueno';`).one().n).toBe(0);
@@ -226,6 +231,38 @@ describe("el TenantHub se fía de la identidad que le pasa el Worker", () => {
 
 			expect(await esperar((m) => m.type === "hello_ok" || m.type === "error")).toMatchObject({ type: "hello_ok", role: "handy" });
 			expect(central.filter((s) => /\bdevices\b/i.test(s))).toEqual([]);
+		});
+	});
+
+	it("una baja entre el canje del ticket y el upgrade no deja entrar el socket", async () => {
+		await enElHub("socket-hub-baja-antes", async (hub: any) => {
+			const upgrade = (canjeMs: number) =>
+				hub.fetch(
+					new Request("https://hub/ws", {
+						headers: {
+							Upgrade: "websocket",
+							"x-tenant-id": "negocio-baja",
+							"x-device-id": "handy-1",
+							"x-role": "handy",
+							"x-device-pubkey-b64": CLAVE,
+							"x-ws-canje-ms": String(canjeMs),
+						},
+					}),
+				);
+			const canjeado = Date.now();
+			// La baja llega antes que el socket: no tiene nada que cerrar.
+			await hub.revocarDispositivo("handy-1");
+
+			const tarde = await upgrade(canjeado);
+			expect(tarde.status).toBe(401);
+			expect(await tarde.json()).toMatchObject({ error: "device_revoked" });
+			expect(hub.state.getWebSockets("handy-1")).toEqual([]);
+
+			// Un canje posterior a la baja (el dispositivo se volvió a dar de alta) sí entra.
+			const despues = await upgrade(Date.now() + 10_000);
+			expect(despues.status).toBe(101);
+			(despues.webSocket as WebSocket).accept();
+			expect(hub.state.getWebSockets("handy-1")).toHaveLength(1);
 		});
 	});
 });

@@ -205,7 +205,9 @@ Ver la decisión en [../decisiones/0004-la-hora-la-pone-quien-escribe.md](../dec
   él: las que mande el cliente se quitan antes. Un dispositivo sin clave no abre el socket
   (`device_pubkey_not_registered`). El `TenantHub` verifica el saludo con ese rol y esa clave, sin
   volver a la base central (`test/abrirElSocket.test.ts`); una baja entretanto le cierra el socket
-  (`revocarDispositivo`).
+  (`revocarDispositivo`). Una que llega entre el canje y el upgrade, sin socket que cerrar, queda
+  anotada en el objeto, y el upgrade de un ticket canjeado antes (`x-ws-canje-ms`, la hora del canje
+  que pone el Worker) se rechaza con 401 `device_revoked`.
 - **Se firma con la hora de la nube** (Rust construye y firma el saludo). Un
   rechazo por la hora es `RelojDesfasado`, no falta de red.
 - **Latido**: `{"type":"ping"}` cada 30 s; si en 65 s no llega `pong`, se cierra. Se reconecta al

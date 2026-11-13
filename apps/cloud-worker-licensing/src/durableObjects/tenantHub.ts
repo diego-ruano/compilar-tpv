@@ -52,8 +52,8 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.borrarTodo();
 	}
 
-	revocarDispositivo(deviceId: string): void {
-		this.motor.revocarDispositivo(deviceId);
+	revocarDispositivo(deviceId: string): Promise<void> {
+		return this.motor.revocarDispositivo(deviceId);
 	}
 
 	/** AUD-02: la licencia del negocio ha cambiado; que vuelva a leer quién es la Main. */

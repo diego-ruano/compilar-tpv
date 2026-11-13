@@ -19,6 +19,8 @@ import { SQL_DEVICE_ACTIVO, estaRevocado, normalizarRol } from "../../lib/device
 /** Quién abre el socket, según la base central: lo que el Worker le pasa al TenantHub. */
 export type SocketAutorizado = {
 	ok: true;
+	/** Cuándo se canjeó el ticket, con el reloj del Worker. */
+	canjeMs: number;
 	tenantId: string;
 	deviceId: string;
 	/** El rol de la fila del dispositivo (`tpv` | `handy`), normalizado. */
@@ -81,11 +83,12 @@ export async function canjearTicket(db: Pick<Client, "batch">, ticket: string, a
 	const clave = String(fila.device_pubkey_b64 || "").trim();
 	if (!clave) return { ok: false, error: "device_pubkey_not_registered" };
 
-	return { ok: true, tenantId, deviceId, rol: normalizarRol(fila.role), clave };
+	return { ok: true, canjeMs: ahoraMs, tenantId, deviceId, rol: normalizarRol(fila.role), clave };
 }
 
 /**
- * Las cabeceras con las que el Worker le dice al TenantHub quién abre el socket. Las pone sólo el
- * Worker: si el cliente manda alguna, se quita antes (una que se colara pasaría por la del Worker).
+ * Las cabeceras con las que el Worker le dice al TenantHub quién abre el socket, y cuándo canjeó su
+ * ticket (`x-ws-canje-ms`: una baja posterior lo deja fuera). Las pone sólo el Worker: si el cliente
+ * manda alguna, se quita antes (una que se colara pasaría por la del Worker).
  */
-export const CABECERAS_DE_IDENTIDAD = ["x-tenant-id", "x-device-id", "x-role", "x-device-pubkey-b64"] as const;
+export const CABECERAS_DE_IDENTIDAD = ["x-tenant-id", "x-device-id", "x-role", "x-device-pubkey-b64", "x-ws-canje-ms"] as const;
