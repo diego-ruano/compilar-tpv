@@ -175,8 +175,9 @@ export async function listCategorias(db: Client): Promise<StatsCategoriaRow[]> {
  * La sentencia de la estadística de productos: UNA pasada por las líneas cobradas del rango.
  *
  * Devuelve dos clases de fila, ya ordenadas por el nombre del catálogo: lo vendido en el rango
- * (`de_venta = 1`, con sus unidades) y el catálogo vendible (`de_venta = 0`). El mejor, el peor y
- * los dos top 10 los saca `productos` de ahí.
+ * (`de_venta = 1`, una por clave, con sus unidades) y el catálogo vendible (`de_venta = 0`). El
+ * mejor, el peor y los dos top 10 los saca `productos` de ahí sin hacer cuentas: todas las sumas y
+ * los redondeos son de SQLite.
  *
  * Es una sola a propósito. Con una sentencia por lista, cada una vuelve a calcular `paid_det`, y las
  * de «el peor», que salen del catálogo, recorren todas las líneas de la historia de cada producto:
@@ -205,43 +206,64 @@ export function sqlProductos(range: StatsRange): string {
 			GROUP BY pd.ID_Detalle
 		),
 		vendido AS (
-			-- Se agrupa ANTES de mirar el catalogo: asi el catalogo se consulta una vez por producto
-			-- y no una por linea. La clave es el producto o, si la linea ya no lo tiene, su nombre.
-			-- Las lineas con producto y las que no lo tienen van en grupos distintos aunque la clave
-			-- coincida (un nombre que es justo el ID de un producto): solo las primeras son de ese
-			-- producto del catalogo.
+			-- Se agrupa ANTES de mirar el catalogo: asi el catalogo se consulta una vez por clave y
+			-- no una por linea. La clave es el producto o, si la linea ya no lo tiene, su nombre.
+			-- Una linea sin producto cuyo nombre es justo el ID de un producto comparte clave con las
+			-- de ese producto sin ser suya: por eso van tres sumas, la de todas, la de las que tienen
+			-- producto y la de las que no. El MAX deja en nombre_linea el de una linea con producto,
+			-- si la hay.
 			SELECT
 				COALESCE(dc.ID_Producto, dc.Nombre_Producto) AS clave,
-				dc.ID_Producto AS id_producto,
+				MAX(dc.ID_Producto) AS id_producto,
 				dc.Nombre_Producto AS nombre_linea,
-				SUM(COALESCE(dc.Cantidad,1)) AS suma
+				SUM(COALESCE(dc.Cantidad,1)) AS suma,
+				SUM(CASE WHEN dc.ID_Producto IS NOT NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_con_producto,
+				SUM(CASE WHEN dc.ID_Producto IS NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_sin_producto
 			FROM paid_det cobrada
 			JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
-			GROUP BY dc.ID_Producto IS NULL, COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+			GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
 		)
-		-- LEFT JOIN y COALESCE en vez de JOIN: el catalogo puede borrar un producto que ya no se
-		-- vende (INV-05) y su venta del ano pasado sigue siendo una venta. Con un INNER esas lineas
-		-- desaparecerian del historico SIN error. El nombre sale del catalogo si el producto sigue
-		-- ahi (asi un renombrado se ve en el informe) y del snapshot de la linea si ya no esta.
 		SELECT
 			1 AS de_venta,
-			v.clave AS clave,
-			COALESCE(pr.Nombre, v.nombre_linea, 'Producto') AS label,
-			pr.Nombre AS nombre,
-			pr.ID_Producto AS id_producto,
-			pr.ID_Categoria AS id_categoria,
-			CAST(ROUND(v.suma,0) AS INTEGER) AS unidades,
-			v.suma > 0 AS con_ventas,
-			v.suma AS suma,
-			v.id_producto IS NOT NULL AS con_producto
-		FROM vendido v
-		LEFT JOIN Productos pr ON pr.ID_Producto = v.id_producto
-		LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
-		WHERE COALESCE(cat.Vendible,1)=1
+			clave,
+			label,
+			nombre,
+			id_producto,
+			id_categoria,
+			CAST(ROUND(general,0) AS INTEGER) AS unidades,
+			general > 0 AS con_ventas,
+			CAST(ROUND(del_producto,0) AS INTEGER) AS unidades_producto,
+			del_producto > 0 AS con_ventas_producto
+		FROM (
+			-- LEFT JOIN y COALESCE en vez de JOIN: el catalogo puede borrar un producto que ya no se
+			-- vende (INV-05) y su venta del ano pasado sigue siendo una venta. Con un INNER esas
+			-- lineas desaparecerian del historico SIN error. El nombre sale del catalogo si el
+			-- producto sigue ahi (asi un renombrado se ve en el informe) y del snapshot de la linea
+			-- si ya no esta.
+			--
+			-- Las lineas de un producto de una categoria no vendible no cuentan. "general" es lo que
+			-- cuenta la clave en las listas sin filtro de categoria; "del_producto", lo que cuentan
+			-- las lineas del producto, que es lo suyo en "los peores" y dentro de su categoria.
+			SELECT
+				v.clave AS clave,
+				CASE WHEN v.id_producto IS NOT NULL AND COALESCE(cat.Vendible,1)=1
+					 THEN COALESCE(pr.Nombre, v.nombre_linea, 'Producto')
+					 ELSE COALESCE(v.clave, 'Producto')
+				END AS label,
+				CASE WHEN COALESCE(cat.Vendible,1)=1 THEN pr.Nombre END AS nombre,
+				pr.ID_Producto AS id_producto,
+				CASE WHEN COALESCE(cat.Vendible,1)=1 THEN pr.ID_Categoria END AS id_categoria,
+				CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma ELSE v.suma_sin_producto END AS general,
+				CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma_con_producto END AS del_producto
+			FROM vendido v
+			LEFT JOIN Productos pr ON pr.ID_Producto = v.id_producto
+			LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+			WHERE COALESCE(cat.Vendible,1)=1 OR v.suma_sin_producto IS NOT NULL
+		)
 		UNION ALL
 		-- El catalogo vendible entero, a cero: el peor producto es justo el que no compra nadie, y
 		-- ese no aparece en ninguna linea de comanda. Sus unidades se le ponen al leer el resultado.
-		SELECT 0, pr.ID_Producto, pr.Nombre, pr.Nombre, pr.ID_Producto, pr.ID_Categoria, 0, 0, 0, 1
+		SELECT 0, pr.ID_Producto, pr.Nombre, pr.Nombre, pr.ID_Producto, pr.ID_Categoria, 0, 0, 0, 0
 		FROM Productos pr
 		JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
 		WHERE COALESCE(cat.Vendible,1)=1
@@ -252,44 +274,6 @@ export function sqlProductos(range: StatsRange): string {
 		ORDER BY nombre ASC, clave ASC;`;
 }
 
-/** Lo vendido de una clave en el rango, como lo devuelve `sqlProductos`. */
-type Vendido = {
-	clave: string | null;
-	label: unknown;
-	/** El producto del catálogo, si la línea lo tiene y sigue ahí. */
-	idProducto: string | null;
-	idCategoria: string | null;
-	/** Las líneas del grupo tienen producto (`ID_Producto`), esté o no en el catálogo. */
-	conProducto: boolean;
-	suma: number;
-	unidades: number;
-	conVentas: boolean;
-};
-
-/** `CAST(ROUND(x, 0) AS INTEGER)` de SQLite: la mitad, lejos del cero. */
-function redondeoDeSqlite(x: number): number {
-	return Math.trunc(x + (x < 0 ? -0.5 : 0.5));
-}
-
-/**
- * Lo vendido por clave, sin mirar si la línea tiene producto: así cuentan «los mejores» cuando no
- * se filtra por categoría. Sólo cambia algo si el nombre de una línea sin producto es justo el ID de
- * un producto vendido: las dos filas de esa clave se juntan en una, con el nombre y el sitio de la
- * del producto. Conserva el orden por nombre que trae la sentencia.
- */
-function juntarPorClave(vendidos: Vendido[]): Vendido[] {
-	const porClave = new Map<string | null, Vendido[]>();
-	for (const v of vendidos) porClave.set(v.clave, [...(porClave.get(v.clave) ?? []), v]);
-	return vendidos.flatMap((v) => {
-		const grupo = porClave.get(v.clave)!;
-		if (grupo.length === 1) return [v];
-		// De las dos filas se queda la del producto (o la primera, si ninguna lo es).
-		if (v !== (grupo.find((g) => g.conProducto) ?? grupo[0])) return [];
-		const suma = grupo.reduce((total, g) => total + g.suma, 0);
-		return [{ ...v, suma, unidades: redondeoDeSqlite(suma), conVentas: suma > 0 }];
-	});
-}
-
 export async function productos(
 	db: Client,
 	range: StatsRange,
@@ -297,52 +281,49 @@ export async function productos(
 	categoriaWorstId: string | null,
 ): Promise<ProductosStatsResponse> {
 	const filas = rows(await db.execute(sqlProductos(range)));
-	const vendidos: Vendido[] = filas
-		.filter((f) => num(f.de_venta) === 1)
-		.map((f) => ({
-			clave: f.clave == null ? null : String(f.clave),
-			label: f.label,
-			idProducto: f.id_producto == null ? null : String(f.id_producto),
-			idCategoria: f.id_categoria == null ? null : String(f.id_categoria),
-			conProducto: num(f.con_producto) === 1,
-			suma: num(f.suma),
-			unidades: num(f.unidades),
-			conVentas: num(f.con_ventas) === 1,
-		}));
+	const vendidos = filas.filter((f) => num(f.de_venta) === 1);
 	const catalogo = filas.filter((f) => num(f.de_venta) !== 1);
 
 	// Las unidades de cada producto del catálogo: las de sus líneas. El que no se ha vendido no está
 	// y vale 0.
 	const unidadesDe = new Map<string, number>();
 	for (const v of vendidos) {
-		if (v.idProducto != null) unidadesDe.set(v.idProducto, v.unidades);
+		if (v.id_producto != null && v.unidades_producto != null) {
+			unidadesDe.set(String(v.id_producto), num(v.unidades_producto));
+		}
 	}
 
+	// El filtro de categoría de cada lista, el suyo: sin categoría (o en blanco) entra todo.
+	const deLaCategoria = (id: string | null) => {
+		if (!id || !recortar(id)) return null;
+		return (f: any) => f.id_categoria != null && String(f.id_categoria) === id;
+	};
+
 	// `sort` es estable: entre dos con las mismas unidades queda el orden por nombre que trae el SQL.
-	// «Los mejores» sólo cuentan lo que se ha vendido (suma > 0, sin redondear). Con un filtro de
-	// categoría entran las líneas de los productos de esa categoría; un producto que ya no está en
-	// el catálogo no tiene categoría y no entra en ninguna. Sin filtro (o con uno en blanco) entra
-	// todo lo vendido, junto por su clave.
-	const mejores = (categoria: string | null, limite: number) =>
-		(categoria && recortar(categoria)
-			? vendidos.filter((v) => v.idCategoria === categoria)
-			: juntarPorClave(vendidos)
-		)
-			.filter((v) => v.conVentas)
-			.map((v) => ({ label: v.label, value: v.unidades }))
-			.sort((a, b) => b.value - a.value)
-			.slice(0, limite);
+	// «Los mejores» sólo cuentan lo que se ha vendido (suma > 0, sin redondear). Sin filtro de
+	// categoría entra todo lo vendido, por su clave. Con filtro entran las líneas de los productos
+	// de esa categoría: un producto que ya no está en el catálogo no tiene categoría y no entra en
+	// ninguna.
+	const mejores = (categoria: string | null, limite: number) => {
+		const filtro = deLaCategoria(categoria);
+		const lista = filtro
+			? vendidos
+					.filter(filtro)
+					.filter((f) => num(f.con_ventas_producto) === 1)
+					.map((f) => ({ label: f.label, value: num(f.unidades_producto) }))
+			: vendidos
+					.filter((f) => num(f.con_ventas) === 1)
+					.map((f) => ({ label: f.label, value: num(f.unidades) }));
+		return lista.sort((a, b) => b.value - a.value).slice(0, limite);
+	};
 	// «Los peores» salen del catálogo, con 0 lo que no ha comprado nadie.
-	const peores = (categoria: string | null, limite: number) =>
-		catalogo
-			.filter(
-				(f) =>
-					!(categoria && recortar(categoria)) ||
-					(f.id_categoria != null && String(f.id_categoria) === categoria),
-			)
+	const peores = (categoria: string | null, limite: number) => {
+		const filtro = deLaCategoria(categoria);
+		return (filtro ? catalogo.filter(filtro) : catalogo)
 			.map((f) => ({ label: f.label, value: unidadesDe.get(String(f.id_producto)) ?? 0 }))
 			.sort((a, b) => a.value - b.value)
 			.slice(0, limite);
+	};
 
 	// El mejor y el peor son de toda la carta; las categorías sólo filtran los dos top 10.
 	const best = mejores(null, 1)[0];

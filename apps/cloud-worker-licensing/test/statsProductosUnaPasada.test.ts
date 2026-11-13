@@ -236,14 +236,15 @@ describe("la estadística de productos en una pasada", () => {
 		await conLaSiembra(
 			"nombre-id",
 			async (db) => {
-				// Sin filtro, lo de la clave va junto: P-7 son 2 del producto y 3 de la línea suelta.
-				// M-1 no es vendible: sólo queda su línea suelta.
+				// Sin filtro, lo de la clave va junto: P-7 son 10,13 del producto y 0,37 de la línea
+				// suelta, 10,5 que redondean a 11 (sumando por partes saldría 10,499… y 10). M-1 no es
+				// vendible: sólo queda su línea suelta.
 				const todo = await productos(db, "hoy", null, null);
-				expect(todo.top10_mejores).toEqual({ labels: ["M-1", "P-7", "Agua"], values: [6, 5, 1] });
+				expect(todo.top10_mejores).toEqual({ labels: ["P-7", "M-1", "Agua"], values: [11, 6, 1] });
 				// En «los peores» y en una categoría sólo cuentan las líneas del producto.
-				expect(todo.top10_peores).toEqual({ labels: ["Agua", "P-7"], values: [1, 2] });
+				expect(todo.top10_peores).toEqual({ labels: ["Agua", "P-7"], values: [1, 10] });
 				const bebidas = await productos(db, "hoy", "cat-bebidas", "cat-bebidas");
-				expect(bebidas.top10_mejores).toEqual({ labels: ["P-7", "Agua"], values: [2, 1] });
+				expect(bebidas.top10_mejores).toEqual({ labels: ["P-7", "Agua"], values: [10, 1] });
 			},
 			casoNombreId.seed,
 		);

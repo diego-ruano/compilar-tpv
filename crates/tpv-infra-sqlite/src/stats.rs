@@ -106,8 +106,9 @@ fn bucket_sql_reservas(range: StatsRange) -> &'static str {
 /// La sentencia de la estadística de productos: UNA pasada por las líneas cobradas del rango.
 ///
 /// Devuelve dos clases de fila, ya ordenadas por el nombre del catálogo: lo vendido en el rango
-/// (`de_venta = 1`, con sus unidades) y el catálogo vendible (`de_venta = 0`). El
-/// mejor, el peor y los dos top 10 los saca `productos_impl` de ahí.
+/// (`de_venta = 1`, una por clave, con sus unidades) y el catálogo vendible (`de_venta = 0`). El
+/// mejor, el peor y los dos top 10 los saca `productos_impl` de ahí sin hacer cuentas: todas las
+/// sumas y los redondeos son de SQLite.
 ///
 /// Es una sola a propósito. Con una sentencia por lista, cada una vuelve a calcular `paid_det`, y
 /// las de «el peor», que salen del catálogo, recorren todas las líneas de la historia de cada
@@ -136,44 +137,64 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
           GROUP BY pd.ID_Detalle
         ),
         vendido AS (
-          -- Se agrupa ANTES de mirar el catálogo: así el catálogo se consulta una vez por producto
-          -- y no una por línea. La clave es el producto o, si la línea ya no lo tiene, su nombre.
-          -- Las líneas con producto y las que no lo tienen van en grupos distintos aunque la clave
-          -- coincida (un nombre que es justo el ID de un producto): sólo las primeras son de ese
-          -- producto del catálogo.
+          -- Se agrupa ANTES de mirar el catálogo: así el catálogo se consulta una vez por clave y
+          -- no una por línea. La clave es el producto o, si la línea ya no lo tiene, su nombre.
+          -- Una línea sin producto cuyo nombre es justo el ID de un producto comparte clave con las
+          -- de ese producto sin ser suya: por eso van tres sumas, la de todas, la de las que tienen
+          -- producto y la de las que no. El MAX deja en nombre_linea el de una línea con producto,
+          -- si la hay.
           SELECT
             COALESCE(dc.ID_Producto, dc.Nombre_Producto) AS clave,
-            dc.ID_Producto AS id_producto,
+            MAX(dc.ID_Producto) AS id_producto,
             dc.Nombre_Producto AS nombre_linea,
-            SUM(COALESCE(dc.Cantidad,1)) AS suma
+            SUM(COALESCE(dc.Cantidad,1)) AS suma,
+            SUM(CASE WHEN dc.ID_Producto IS NOT NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_con_producto,
+            SUM(CASE WHEN dc.ID_Producto IS NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_sin_producto
           FROM paid_det cobrada
           JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
-          GROUP BY dc.ID_Producto IS NULL, COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+          GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
         )
-        -- LEFT JOIN y no JOIN: el catálogo puede borrar un producto que ya no se vende (INV-05), y
-        -- su venta del año pasado sigue siendo una venta. Con un INNER, esas líneas desaparecerían
-        -- del histórico SIN error, que es la peor forma de perderlas. El nombre sale del catálogo
-        -- si el producto sigue ahí (así un renombrado se ve en el informe) y del snapshot de la
-        -- línea si ya no está.
         SELECT
           1 AS de_venta,
-          v.clave AS clave,
-          COALESCE(pr.Nombre, v.nombre_linea, 'Producto') AS label,
-          pr.Nombre AS nombre,
-          pr.ID_Producto AS id_producto,
-          pr.ID_Categoria AS id_categoria,
-          CAST(ROUND(v.suma,0) AS INTEGER) AS unidades,
-          v.suma > 0 AS con_ventas,
-          v.suma AS suma,
-          v.id_producto IS NOT NULL AS con_producto
-        FROM vendido v
-        LEFT JOIN Productos pr ON pr.ID_Producto = v.id_producto
-        LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
-        WHERE COALESCE(cat.Vendible,1)=1
+          clave,
+          label,
+          nombre,
+          id_producto,
+          id_categoria,
+          CAST(ROUND(general,0) AS INTEGER) AS unidades,
+          general > 0 AS con_ventas,
+          CAST(ROUND(del_producto,0) AS INTEGER) AS unidades_producto,
+          del_producto > 0 AS con_ventas_producto
+        FROM (
+          -- LEFT JOIN y no JOIN: el catálogo puede borrar un producto que ya no se vende (INV-05),
+          -- y su venta del año pasado sigue siendo una venta. Con un INNER, esas líneas
+          -- desaparecerían del histórico SIN error, que es la peor forma de perderlas. El nombre
+          -- sale del catálogo si el producto sigue ahí (así un renombrado se ve en el informe) y
+          -- del snapshot de la línea si ya no está.
+          --
+          -- Las líneas de un producto de una categoría no vendible no cuentan. «general» es lo que
+          -- cuenta la clave en las listas sin filtro de categoría; «del_producto», lo que cuentan
+          -- las líneas del producto, que es lo suyo en «los peores» y dentro de su categoría.
+          SELECT
+            v.clave AS clave,
+            CASE WHEN v.id_producto IS NOT NULL AND COALESCE(cat.Vendible,1)=1
+                 THEN COALESCE(pr.Nombre, v.nombre_linea, 'Producto')
+                 ELSE COALESCE(v.clave, 'Producto')
+            END AS label,
+            CASE WHEN COALESCE(cat.Vendible,1)=1 THEN pr.Nombre END AS nombre,
+            pr.ID_Producto AS id_producto,
+            CASE WHEN COALESCE(cat.Vendible,1)=1 THEN pr.ID_Categoria END AS id_categoria,
+            CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma ELSE v.suma_sin_producto END AS general,
+            CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma_con_producto END AS del_producto
+          FROM vendido v
+          LEFT JOIN Productos pr ON pr.ID_Producto = v.id_producto
+          LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+          WHERE COALESCE(cat.Vendible,1)=1 OR v.suma_sin_producto IS NOT NULL
+        )
         UNION ALL
         -- El catálogo vendible entero, a cero: el peor producto es justo el que no compra nadie, y
         -- ése no aparece en ninguna línea de comanda. Sus unidades se le ponen al leer el resultado.
-        SELECT 0, pr.ID_Producto, pr.Nombre, pr.Nombre, pr.ID_Producto, pr.ID_Categoria, 0, 0, 0, 1
+        SELECT 0, pr.ID_Producto, pr.Nombre, pr.Nombre, pr.ID_Producto, pr.ID_Categoria, 0, 0, 0, 0
         FROM Productos pr
         JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
         WHERE COALESCE(cat.Vendible,1)=1
@@ -255,18 +276,17 @@ pub(crate) fn sql_clientes_recurrentes(range: StatsRange) -> String {
 
 /// Una fila de `sql_productos`: lo vendido de una clave en el rango, o un producto del catálogo
 /// vendible.
-#[derive(Clone)]
 struct FilaProducto {
-    clave: Option<String>,
     label: Option<String>,
-    /// El producto del catálogo, si la línea lo tiene y sigue ahí.
+    /// El producto del catálogo, si la clave es la de uno que sigue ahí.
     id_producto: Option<String>,
     id_categoria: Option<String>,
-    /// Las líneas del grupo tienen producto (`ID_Producto`), esté o no en el catálogo.
-    con_producto: bool,
-    suma: f64,
+    /// Lo que cuenta la clave en las listas sin filtro de categoría.
     unidades: i64,
     con_ventas: bool,
+    /// Lo que cuentan las líneas del producto: lo suyo en «los peores» y dentro de su categoría.
+    unidades_producto: Option<i64>,
+    con_ventas_producto: bool,
 }
 
 impl FilaProducto {
@@ -278,43 +298,6 @@ impl FilaProducto {
             Some(id) => self.id_categoria.as_deref() == Some(id),
         }
     }
-}
-
-/// `CAST(ROUND(x, 0) AS INTEGER)` de SQLite: la mitad, lejos del cero.
-fn redondeo_de_sqlite(x: f64) -> i64 {
-    (x + if x < 0.0 { -0.5 } else { 0.5 }) as i64
-}
-
-/// Lo vendido por clave, sin mirar si la línea tiene producto: así cuentan «los mejores» cuando no
-/// se filtra por categoría. Sólo cambia algo si el nombre de una línea sin producto es justo el ID
-/// de un producto vendido: las dos filas de esa clave se juntan en una, con el nombre y el sitio de
-/// la del producto. Conserva el orden por nombre que trae la sentencia.
-fn juntar_por_clave(vendidos: &[FilaProducto]) -> Vec<FilaProducto> {
-    let mut por_clave: HashMap<Option<&str>, Vec<&FilaProducto>> = HashMap::new();
-    for v in vendidos {
-        por_clave.entry(v.clave.as_deref()).or_default().push(v);
-    }
-    vendidos
-        .iter()
-        .filter_map(|v| {
-            let grupo = &por_clave[&v.clave.as_deref()];
-            if grupo.len() == 1 {
-                return Some(v.clone());
-            }
-            // De las dos filas se queda la del producto (o la primera, si ninguna lo es).
-            let elegida = grupo.iter().find(|g| g.con_producto).unwrap_or(&grupo[0]);
-            if !std::ptr::eq(*elegida, v) {
-                return None;
-            }
-            let suma: f64 = grupo.iter().map(|g| g.suma).sum();
-            Some(FilaProducto {
-                suma,
-                unidades: redondeo_de_sqlite(suma),
-                con_ventas: suma > 0.0,
-                ..v.clone()
-            })
-        })
-        .collect()
 }
 
 /// La categoría por la que se filtra una lista: ninguna si no llega o llega en blanco.
@@ -589,14 +572,13 @@ impl SqliteStatsRepository {
         while let Some(r) = rows.next().await.map_err(|e| e.to_string())? {
             let de_venta = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0) == 1;
             let fila = FilaProducto {
-                clave: v_string(r.get_value(1).map_err(|e| e.to_string())?),
                 label: v_string(r.get_value(2).map_err(|e| e.to_string())?),
                 id_producto: v_string(r.get_value(4).map_err(|e| e.to_string())?),
                 id_categoria: v_string(r.get_value(5).map_err(|e| e.to_string())?),
                 unidades: v_i64(r.get_value(6).map_err(|e| e.to_string())?).unwrap_or(0),
                 con_ventas: v_i64(r.get_value(7).map_err(|e| e.to_string())?).unwrap_or(0) == 1,
-                suma: v_f64(r.get_value(8).map_err(|e| e.to_string())?).unwrap_or(0.0),
-                con_producto: v_i64(r.get_value(9).map_err(|e| e.to_string())?).unwrap_or(0) == 1,
+                unidades_producto: v_i64(r.get_value(8).map_err(|e| e.to_string())?),
+                con_ventas_producto: v_i64(r.get_value(9).map_err(|e| e.to_string())?).unwrap_or(0) == 1,
             };
             if de_venta {
                 vendidos.push(fila);
@@ -609,25 +591,27 @@ impl SqliteStatsRepository {
         // está y vale 0.
         let unidades_de: HashMap<&str, i64> = vendidos
             .iter()
-            .filter_map(|v| v.id_producto.as_deref().map(|id| (id, v.unidades)))
+            .filter_map(|v| Some((v.id_producto.as_deref()?, v.unidades_producto?)))
             .collect();
-        let por_clave = juntar_por_clave(&vendidos);
 
         // `sort_by_key` es estable: entre dos con las mismas unidades queda el orden por nombre que
         // trae la sentencia. «Los mejores» sólo cuentan lo que se ha vendido (suma > 0, sin
-        // redondear). Con un filtro de categoría entran las líneas de los productos de esa
-        // categoría; un producto que ya no está en el catálogo no tiene categoría y no entra en
-        // ninguna. Sin filtro entra todo lo vendido, junto por su clave.
+        // redondear). Sin filtro de categoría entra todo lo vendido, por su clave. Con filtro entran
+        // las líneas de los productos de esa categoría: un producto que ya no está en el catálogo
+        // no tiene categoría y no entra en ninguna.
         let mejores = |categoria: Option<&str>, limite: usize| -> Vec<(Option<String>, i64)> {
-            let lista: Vec<&FilaProducto> = match categoria {
-                Some(_) => vendidos.iter().filter(|f| f.es_de(categoria)).collect(),
-                None => por_clave.iter().collect(),
+            let mut out: Vec<(Option<String>, i64)> = match categoria {
+                Some(_) => vendidos
+                    .iter()
+                    .filter(|f| f.es_de(categoria) && f.con_ventas_producto)
+                    .map(|f| (f.label.clone(), f.unidades_producto.unwrap_or(0)))
+                    .collect(),
+                None => vendidos
+                    .iter()
+                    .filter(|f| f.con_ventas)
+                    .map(|f| (f.label.clone(), f.unidades))
+                    .collect(),
             };
-            let mut out: Vec<(Option<String>, i64)> = lista
-                .into_iter()
-                .filter(|f| f.con_ventas)
-                .map(|f| (f.label.clone(), f.unidades))
-                .collect();
             out.sort_by_key(|(_, unidades)| std::cmp::Reverse(*unidades));
             out.truncate(limite);
             out
@@ -2133,17 +2117,18 @@ mod tests_productos_en_una_pasada {
             categoria_top_id: top.map(str::to_string),
             categoria_worst_id: worst.map(str::to_string),
         };
-        // Sin filtro, lo de la clave va junto: P-7 son 2 del producto y 3 de la línea suelta. M-1
-        // no es vendible: sólo queda su línea suelta.
+        // Sin filtro, lo de la clave va junto: P-7 son 10,13 del producto y 0,37 de la línea
+        // suelta, 10,5 que redondean a 11 (sumando por partes saldría 10,499… y 10). M-1 no es
+        // vendible: sólo queda su línea suelta.
         let todo = repo.productos_impl(hoy(None, None)).await.unwrap();
-        assert_eq!(todo.top10_mejores.labels, ["M-1", "P-7", "Agua"]);
-        assert_eq!(todo.top10_mejores.values, [6, 5, 1]);
+        assert_eq!(todo.top10_mejores.labels, ["P-7", "M-1", "Agua"]);
+        assert_eq!(todo.top10_mejores.values, [11, 6, 1]);
         // En «los peores» y en una categoría sólo cuentan las líneas del producto.
         assert_eq!(todo.top10_peores.labels, ["Agua", "P-7"]);
-        assert_eq!(todo.top10_peores.values, [1, 2]);
+        assert_eq!(todo.top10_peores.values, [1, 10]);
         let bebidas = repo.productos_impl(hoy(Some("cat-bebidas"), Some("cat-bebidas"))).await.unwrap();
         assert_eq!(bebidas.top10_mejores.labels, ["P-7", "Agua"]);
-        assert_eq!(bebidas.top10_mejores.values, [2, 1]);
+        assert_eq!(bebidas.top10_mejores.values, [10, 1]);
     }
 
     #[tokio::test]
