@@ -256,8 +256,10 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
 
 /// Los días cerrados del rango que el resumen diario tiene por rehacer, como `dias(Dia)` de las
 /// sentencias compartidas (`packages/database/estadisticas/`): esos días se leen de los cobros y
-/// no del resumen. Va detrás de `rng`.
-const DIAS_SUCIOS_DEL_RANGO: &str = "dias AS (
+/// no del resumen. Va detrás de `rng`. Materializada: si no, SQLite la deshace dentro de la
+/// sentencia compartida y recorre los cobros de todos los días sucios, también los de fuera del
+/// rango (un histórico recién descargado), antes de mirar el rango.
+const DIAS_SUCIOS_DEL_RANGO: &str = "dias AS MATERIALIZED (
           SELECT s.Dia AS Dia
           FROM _Estad_Dias_Sucios s
           JOIN rng ON 1=1
