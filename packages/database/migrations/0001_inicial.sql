@@ -2148,6 +2148,22 @@ BEGIN
     AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
 END;
 
+-- Lo mismo con un cobro que cambia su clave a la de otro que ya está: un `UPDATE OR REPLACE`
+-- borraría ese otro sin pasar por `estad_pagos_delete`. Éste mira, antes, el que ocupa la clave
+-- nueva: su día y los de los cobros de su comanda. Lo del cobro que cambia lo apunta
+-- `estad_pagos_update`.
+CREATE TRIGGER IF NOT EXISTS estad_pagos_reemplazo_clave
+BEFORE UPDATE OF ID_Pago ON Pagos
+WHEN OLD.ID_Pago IS NOT NEW.ID_Pago
+BEGIN
+  INSERT OR IGNORE INTO _Estad_Dias_Sucios (Dia)
+  SELECT DISTINCT substr(p.Fecha_Hora, 1, 10)
+  FROM Pagos desplazado
+  JOIN Pagos p ON p.ID_Comanda = desplazado.ID_Comanda
+  WHERE desplazado.ID_Pago = NEW.ID_Pago
+    AND substr(p.Fecha_Hora, 1, 10) NOT IN (SELECT Dia FROM _Estad_Dias_Sucios);
+END;
+
 -- Un cobro nuevo: los días de los cobros de su comanda (el suyo incluido) y los de los que
 -- comparten alguna línea con él.
 CREATE TRIGGER IF NOT EXISTS estad_pagos_insert

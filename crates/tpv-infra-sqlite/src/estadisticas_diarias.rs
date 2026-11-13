@@ -552,13 +552,16 @@ mod tests {
                 "estad_pagos_delete",
                 "estad_pagos_insert",
                 "estad_pagos_reemplazo",
+                "estad_pagos_reemplazo_clave",
                 "estad_pagos_update",
             ]
         );
         for (nombre, sql) in &triggers {
-            // Detrás de la escritura, salvo el que mira la fila que un reemplazo va a borrar.
+            // Detrás de la escritura, salvo los dos que miran la fila que un reemplazo va a borrar.
             if nombre == "estad_pagos_reemplazo" {
                 assert!(sql.contains("BEFORE INSERT ON Pagos"), "{nombre}: {sql}");
+            } else if nombre == "estad_pagos_reemplazo_clave" {
+                assert!(sql.contains("BEFORE UPDATE OF ID_Pago ON Pagos"), "{nombre}: {sql}");
             } else {
                 assert!(sql.contains("AFTER "), "{nombre}: tiene que ir detrás de la escritura");
             }
@@ -622,6 +625,15 @@ mod tests {
         .await;
         assert_eq!(sucios(&db).await, ["2026-03-06", "2026-03-08"]);
         ejecutar(&db, "DELETE FROM Pagos WHERE ID_Pago = 'px';").await;
+
+        // Y un cobro que toma la clave de otro (revisión de Codex, segunda pasada): el que la
+        // ocupaba se borra sin su trigger; su día lo apunta `estad_pagos_reemplazo_clave`.
+        ejecutar(&db, &pago("pu", "c2", "2026-03-12 09:00:00", 100)).await;
+        ejecutar(&db, &pago("pv", "c2", "2026-03-13 09:00:00", 200)).await;
+        limpiar_marcas(&db).await;
+        ejecutar(&db, "UPDATE OR REPLACE Pagos SET ID_Pago = 'pv' WHERE ID_Pago = 'pu';").await;
+        assert_eq!(sucios(&db).await, ["2026-03-12", "2026-03-13"]);
+        ejecutar(&db, "DELETE FROM Pagos WHERE ID_Pago = 'pv';").await;
 
         // Dos cobros del mismo día en una sola sentencia, con el día sin apuntar.
         limpiar_marcas(&db).await;
