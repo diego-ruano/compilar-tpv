@@ -329,7 +329,8 @@ pedido sale igual y se apunta después si se puede. Las trazas se purgan a los 9
 (`RETENCION_ENVIOS_MS`).
 
 **Un pedido no sale dos veces.** La Main manda con cada pedido su clave de envío (`id_envio`, la
-misma mientras se reintenta el mismo pedido sin cambiarlo: `claveDeEnvio.ts`), y es el id de su
+misma mientras se reintenta el mismo pedido sin cambiarlo, guardada en el almacenamiento de la
+aplicación hasta que el envío termina bien: `claveDeEnvio.ts`), y es el id de su
 fila (`pedido:<negocio>:<id_envio>`). La reserva del cupo es también la del id, en la misma
 sentencia: un reintento de uno que ya salió (la respuesta se perdió por el camino) contesta `ok`
 sin mandar otro; uno que está saliendo ahora por otra petición, 409 `email_en_curso`; uno que
