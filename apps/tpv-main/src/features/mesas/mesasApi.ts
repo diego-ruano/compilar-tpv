@@ -73,21 +73,34 @@ export async function mesasSaveLayout(salons: Salon[]): Promise<void> {
     await commands.saveLayout({ salons: safe });
 }
 
+/** El estado del plano: lo de cada mesa y en cuántos segundos cambiará solo, con la hora. */
+export type PlanoDeMesas = {
+    porMesa: Record<string, MesaMetaOut>;
+    /** `null`: nada va a cambiar con la hora (MESAS-02). */
+    proximoCambioS: number | null;
+};
+
 /**
- * Estado de cada mesa del plano, indexado por el id de la mesa. Si falla, falla: antes caía a
- * `get_mesas_ocupadas`, una compatibilidad de antes de que existiera el detalle, y era lo único
- * que mantenía vivo ese comando (RI-52). React Query reintenta y la pantalla enseña el error.
+ * Estado de cada mesa del plano, indexado por el id de la mesa, y cuándo cambiará solo. Si falla,
+ * falla: antes caía a `get_mesas_ocupadas`, una compatibilidad de antes de que existiera el
+ * detalle, y era lo único que mantenía vivo ese comando (RI-52). React Query reintenta y la
+ * pantalla enseña el error.
  */
-export async function mesasLoadMesaMeta(): Promise<Record<string, MesaMetaOut>> {
-    const out: Record<string, MesaMetaOut> = {};
+export async function mesasLoadPlano(): Promise<PlanoDeMesas> {
+    const porMesa: Record<string, MesaMetaOut> = {};
     const raw = await commands.mesasMetaAll();
-    for (const [k, v] of Object.entries(raw)) {
+    for (const [k, v] of Object.entries(raw.mesas)) {
         const idMesa = parseAnyMesaId(k);
         // `parseAnyMesaId` normaliza la clave a UUID puro, que es la que usan los lookups
         // (TableNode/Mesas vía `parseMesaId`). Una sola clave.
-        if (idMesa) out[idMesa] = v;
+        if (idMesa && v) porMesa[idMesa] = v;
     }
-    return out;
+    return { porMesa, proximoCambioS: raw.proximo_cambio_s };
+}
+
+/** Sólo lo de cada mesa (`mesasLoadPlano`). */
+export async function mesasLoadMesaMeta(): Promise<Record<string, MesaMetaOut>> {
+    return (await mesasLoadPlano()).porMesa;
 }
 
 /* =========================

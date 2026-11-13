@@ -18,6 +18,19 @@ type Area =
 	| "notificaciones";
 
 /**
+ * Una clave de caché que invalidar: un área entera o, con un punto, una parte de ella. `mesas.meta`
+ * es `["mesas", "meta"]`: el estado de cada mesa del plano, sin el dibujo del plano (el layout, que
+ * sólo lee `Zonas` y `Mesas`). Un cobro, una línea o una reserva cambian lo primero y no lo
+ * segundo, y en una Handy cada relectura es una petición al worker.
+ */
+type Clave = Area | "mesas.meta";
+
+/** Lo que se le pasa a `invalidateQueries`: la clave partida por el punto. */
+export function claveDeConsulta(clave: string): string[] {
+	return clave.split(".");
+}
+
+/**
  * Qué pantallas enseñan cada tabla de negocio: las claves que se invalidan cuando otro equipo la
  * cambia.
  *
@@ -33,19 +46,18 @@ type Area =
  * sale en Reservas, en Clientes, en Cuentas y en las estadísticas, así que renombrarla las refresca
  * todas. La única que se deja fuera a sabiendas es `comandas` → Cuentas (ver su entrada).
  */
-const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
+const TABLE_TO_FEATURES: Record<string, readonly Clave[]> = {
 	// Cuentas enseña la mesa y el cliente de la comanda de cada cobro, pero se fijan al cobrar, en
 	// el mismo lote que su `pagos`. Lo único que no la refresca es enlazar una reserva a una comanda
 	// que ya tiene un cobro parcial, a cambio de no releer Cuentas con cada línea que se añade.
-	comandas: ["mesas", "stats"],
-	detalle_comanda: ["mesas", "stats"],
+	comandas: ["mesas.meta", "stats"],
+	detalle_comanda: ["mesas.meta", "stats"],
 	// El plano enseña lo que queda por cobrar de cada mesa, y eso sale de las líneas cobradas
 	// (`v_lineas_cobradas`: `Pago_Detalles` de un `Pagos` activo). Un cobro parcial, o dar de baja
-	// por devolución un cobro de una mesa que sigue abierta, no tocan `Comandas`: sin `mesas` aquí,
-	// el plano de los demás equipos seguiría con el pendiente anterior hasta su relectura de cada
-	// minuto.
-	pagos: ["cuentas", "stats", "mesas"],
-	pago_detalles: ["cuentas", "stats", "mesas"],
+	// por devolución un cobro de una mesa que sigue abierta, no tocan `Comandas`: sin `mesas.meta`
+	// aquí, el plano de los demás equipos seguiría con el pendiente anterior.
+	pagos: ["cuentas", "stats", "mesas.meta"],
+	pago_detalles: ["cuentas", "stats", "mesas.meta"],
 	devolucion_lineas: ["cuentas"],
 	cuentas_gastos: ["cuentas", "stats"],
 	// La caja es de Cuentas. El apunte de `Movimientos_Caja` va siempre junto al `Pagos` o al
@@ -63,11 +75,11 @@ const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
 	serie_facturacion: [],
 	// Proveedores tiene su selector de categorías. Y el plano cuenta lo que hay pendiente en cocina,
 	// que depende de `Pasa_Cocina` de la categoría de cada producto.
-	categorias_producto: ["inventario", "proveedores", "mesas", "stats"],
+	categorias_producto: ["inventario", "proveedores", "mesas.meta", "stats"],
 	// INC-20261030-013: la ficha de un proveedor enseña sus productos vinculados, con el stock y la
 	// última entrada. Vincular es un `UPDATE Productos SET ID_Proveedor`, así que sin `proveedores`
 	// aquí los demás equipos no se enteraban hasta salir y volver a entrar.
-	productos: ["inventario", "proveedores", "mesas", "stats"],
+	productos: ["inventario", "proveedores", "mesas.meta", "stats"],
 	lotes_producto: ["inventario", "proveedores", "stats"],
 	lote_consumos: ["inventario", "stats"],
 	// El stock que enseñan las pantallas sale de `lotes_producto` y de `productos.Stock_Suelto`, que
@@ -85,10 +97,10 @@ const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
 	zonas: ["mesas", "reservas", "stats"],
 	mesas: ["mesas", "reservas", "clientes", "cuentas", "stats"],
 	// El nombre del cliente sale en la reserva de cada mesa del plano y en sus cobros de Cuentas.
-	clientes: ["clientes", "reservas", "mesas", "cuentas", "stats"],
+	clientes: ["clientes", "reservas", "mesas.meta", "cuentas", "stats"],
 	// El plano enseña la reserva de cada mesa (`mesas_meta_all`), y el resumen de Clientes cuenta
 	// sus reservas y las pendientes. Cuentas pone a cada cobro el cliente de la reserva de su comanda.
-	reservas: ["reservas", "mesas", "clientes", "cuentas", "stats"],
+	reservas: ["reservas", "mesas.meta", "clientes", "cuentas", "stats"],
 	// Qué mesas se reservan desde la web, en qué franjas y qué días se cierra: se cambia en la Main.
 	reserva_web_mesas: ["reservas"],
 	reserva_web_franjas: ["reservas"],
@@ -117,7 +129,7 @@ const TABLE_TO_FEATURES: Record<string, readonly Area[]> = {
 	// caché. Lo que sí hace falta es que su store se recargue — ver `ajustesPorTablas` más abajo.
 	// La excepción es el plano: la reserva que enseña cada mesa depende de la duración por defecto
 	// de las reservas y de la zona horaria del negocio.
-	business_settings: ["mesas"],
+	business_settings: ["mesas.meta"],
 	ticket_settings: [],
 	contact_settings: [],
 };
@@ -143,7 +155,10 @@ export function shouldReloadTicket(
 	return info.ids.includes(activeId);
 }
 
-/** RI-31: la Main recibe sólo tablas; las sentencias se quedan en Rust. */
+/**
+ * RI-31: la Main recibe sólo tablas; las sentencias se quedan en Rust. Devuelve las claves que
+ * invalidar (`claveDeConsulta` las parte), sin una parte de un área que ya va entera.
+ */
 export function featureKeysPorTablas(tablas: string[] | null): string[] | null {
     if (tablas === null) return null;
     const keys = new Set<string>();
@@ -152,7 +167,7 @@ export function featureKeysPorTablas(tablas: string[] | null): string[] | null {
         if (!features) return null;
         for (const feature of features) keys.add(feature);
     }
-    return Array.from(keys);
+    return Array.from(keys).filter((k) => !k.includes(".") || !keys.has(k.split(".")[0]));
 }
 
 /**

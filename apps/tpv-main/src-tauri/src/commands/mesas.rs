@@ -1,14 +1,12 @@
 //! Comandos Tauri de mesas / salón / comandas / cocina (capa fina hexagonal).
 //! Local-First: sin op_id ni outbox. Nombres de invoke idénticos al monolito previo.
 
-use std::collections::HashMap;
-
 use tauri::State;
 
 use tpv_application::use_cases::mesas as uc;
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
+    MesasMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
     MesasDeleteDetalleInput,
     MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
     MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
@@ -155,7 +153,7 @@ pub async fn add_linea_comanda(
 #[specta::specta]
 pub async fn mesas_meta_all(
     state: State<'_, AppState>,
-) -> Result<HashMap<String, MesaMetaOut>, AppErrorDto> {
+) -> Result<MesasMetaOut, AppErrorDto> {
     let repo = state.mesas_repo().await?;
     Ok(uc::mesas_meta_all(repo.as_ref()).await?)
 }

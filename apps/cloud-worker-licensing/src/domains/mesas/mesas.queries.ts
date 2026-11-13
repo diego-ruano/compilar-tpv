@@ -12,6 +12,7 @@ import {
 	horaLocalDeTexto,
 	instanteEnZona,
 	reservaDeCadaMesa,
+	segundosHastaElProximoCambio,
 	type ReservaDeMesa,
 } from "./reservaEnElPlano";
 
@@ -22,6 +23,7 @@ import type {
 	KitchenRow,
 	MesaLineaComandaRow,
 	MesaMetaOut,
+	MesasMetaOut,
 	ProductoVendibleOut,
 	SalonOut,
 } from "@tpv/contracts";
@@ -256,7 +258,7 @@ export async function mesasMetaAll(
 	db: Client,
 	ahoraLocal: string | null,
 	reloj = Date.now(),
-): Promise<Record<string, MesaMetaOut>> {
+): Promise<MesasMetaOut> {
 	const [rs, rsReservas, rsZona] = await db.batch(
 		[
 			`
@@ -324,7 +326,8 @@ export async function mesasMetaAll(
 	const zona = texto(rows(rsZona)[0]?.zona);
 	const local = ahoraLocal === null ? null : horaLocalDeTexto(ahoraLocal);
 	const ahora = local === null ? reloj : ahoraEnZona(zona, local, reloj);
-	for (const [idMesa, r] of reservaDeCadaMesa(reservas, ahora, instanteEnZona(zona))) {
+	const instante = instanteEnZona(zona);
+	for (const [idMesa, r] of reservaDeCadaMesa(reservas, ahora, instante)) {
 		const reserva = {
 			idReserva: r.reserva.id_reserva,
 			clienteNombre: r.reserva.cliente,
@@ -346,7 +349,8 @@ export async function mesasMetaAll(
 					reserva,
 				};
 	}
-	return out;
+	// Cuándo cambiará solo, con la hora: la Handy relee entonces y no cada minuto.
+	return { mesas: out, proximo_cambio_s: segundosHastaElProximoCambio(reservas, ahora, instante) };
 }
 
 // INC-20261030-005: la categoría no vendible no sale en la venta. Espejo de la Main.

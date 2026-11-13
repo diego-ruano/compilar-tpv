@@ -20,7 +20,7 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, ProductoVendibleOut, ReservaMesaOut, RoomPoly, SalonInput, SalonOut, TableOut,
+    MesaMetaOut, MesasMetaOut, ProductoVendibleOut, ReservaMesaOut, RoomPoly, SalonInput, SalonOut, TableOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
@@ -1088,7 +1088,7 @@ impl MesasRepository for SqliteMesasRepository {
 
     /* ===== META + CATÁLOGO ===== */
 
-    async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>> {
+    async fn mesas_meta_all(&self) -> AppResult<MesasMetaOut> {
         let g = self.db.read().await;
         let db = &g;
 
@@ -1151,7 +1151,10 @@ impl MesasRepository for SqliteMesasRepository {
 
         // MESAS-02: la misma regla que el plano de la Handy, con la zona de este equipo.
         let instante = |local: chrono::NaiveDateTime| Local.from_local_datetime(&local).earliest().map(|d| d.timestamp());
-        for (id_mesa, r) in tpv_domain::reservas::reserva_de_cada_mesa(reservas, Local::now().timestamp(), instante) {
+        let ahora = Local::now().timestamp();
+        // Cuándo cambiará solo, con la hora: la pantalla relee entonces y no cada minuto.
+        let proximo_cambio_s = tpv_domain::reservas::segundos_hasta_el_proximo_cambio(&reservas, ahora, instante);
+        for (id_mesa, r) in tpv_domain::reservas::reserva_de_cada_mesa(reservas, ahora, instante) {
             let reserva = ReservaMesaOut {
                 id_reserva: r.reserva.id_reserva,
                 cliente_nombre: r.reserva.cliente,
@@ -1174,7 +1177,7 @@ impl MesasRepository for SqliteMesasRepository {
                 });
         }
 
-        Ok(map)
+        Ok(MesasMetaOut { mesas: map, proximo_cambio_s })
     }
 
     async fn list_categorias_vendibles(&self) -> AppResult<Vec<CategoriaVendibleOut>> {
@@ -2161,7 +2164,10 @@ mod tests_reservas_en_el_plano {
             );
             w.raw().execute_batch(&sql).await.unwrap();
         }
-        let meta = SqliteMesasRepository::new(db).mesas_meta_all().await.unwrap();
+        let plano = SqliteMesasRepository::new(db).mesas_meta_all().await.unwrap();
+        // Hay reservas por llegar en el plano: cambia en menos de un minuto (sus minutos).
+        assert!(matches!(plano.proximo_cambio_s, Some(1..=60)), "{:?}", plano.proximo_cambio_s);
+        let meta = plano.mesas;
         let reserva_de = |m: &str| meta.get(m).and_then(|x| x.reserva.as_ref()).map(|r| (r.id_reserva.as_str(), r.estado.as_str()));
 
         assert_eq!(reserva_de("m1"), Some(("tarde", "PROXIMA")));

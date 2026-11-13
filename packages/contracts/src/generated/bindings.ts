@@ -1832,6 +1832,31 @@ export type MesasKitchenSetLineStateInput = {
 	estado: string,
 };
 
+/**  El estado del plano: lo de cada mesa (por su id) y cuándo cambiará solo, con la hora. */
+export type MesasMetaOut = MesasMetaOut_Serialize | MesasMetaOut_Deserialize;
+
+/**  El estado del plano: lo de cada mesa (por su id) y cuándo cambiará solo, con la hora. */
+export type MesasMetaOut_Deserialize = {
+	mesas: { [key in string]: MesaMetaOut_Deserialize },
+	/**
+	 *  MESAS-02 · Segundos hasta que la reserva de alguna mesa cambie con la hora (sus minutos, o
+	 *  que aparezca una hora antes); `None` si nada va a cambiar solo. La pantalla relee entonces
+	 *  y no cada minuto: en la Handy, cada relectura es una petición al worker.
+	 */
+	proximo_cambio_s: number | null,
+};
+
+/**  El estado del plano: lo de cada mesa (por su id) y cuándo cambiará solo, con la hora. */
+export type MesasMetaOut_Serialize = {
+	mesas: { [key in string]: MesaMetaOut_Serialize },
+	/**
+	 *  MESAS-02 · Segundos hasta que la reserva de alguna mesa cambie con la hora (sus minutos, o
+	 *  que aparezca una hora antes); `None` si nada va a cambiar solo. La pantalla relee entonces
+	 *  y no cada minuto: en la Handy, cada relectura es una petición al worker.
+	 */
+	proximo_cambio_s: number | null,
+};
+
 export type MesasRemoveOnePendingDetalleInput = {
 	id_comanda: string,
 	id_producto: string,

@@ -1,12 +1,10 @@
 //! Puerto de persistencia de mesas / salón / comandas / cocina.
 
-use std::collections::HashMap;
-
 use async_trait::async_trait;
 
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
+    MesasMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
@@ -49,7 +47,7 @@ pub trait MesasRepository: Send + Sync {
     ) -> AppResult<Vec<MesaLineaComandaRow>>;
 
     /* Meta + catálogo */
-    async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>>;
+    async fn mesas_meta_all(&self) -> AppResult<MesasMetaOut>;
     async fn list_categorias_vendibles(&self) -> AppResult<Vec<CategoriaVendibleOut>>;
     async fn list_productos_by_categoria(
         &self,

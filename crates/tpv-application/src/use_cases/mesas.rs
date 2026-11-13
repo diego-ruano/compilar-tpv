@@ -1,11 +1,9 @@
 //! Casos de uso de mesas / salón / comandas / cocina. Local-First: validan/normalizan
 //! e invocan el puerto. Las escrituras "OK" devuelven `()` (el comando mapea a "OK").
 
-use std::collections::HashMap;
-
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
+    MesasMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetReservaInput, MesasComandaSetTrabajadorInput,
     MesasDeleteDetalleInput,
     MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
     MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
@@ -152,7 +150,7 @@ pub async fn add_linea_comanda(
 
 /* Meta + catálogo */
 
-pub async fn mesas_meta_all(repo: &dyn MesasRepository) -> AppResult<HashMap<String, MesaMetaOut>> {
+pub async fn mesas_meta_all(repo: &dyn MesasRepository) -> AppResult<MesasMetaOut> {
     repo.mesas_meta_all().await
 }
 

@@ -81,16 +81,23 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
   en `Movimientos_Caja` y en `Registros_Facturacion`. `test/syncStatements.test.ts` lee
   `packages/database/schema.snapshot.sql` y falla si a una tabla le falta la entrada o si queda la de
   una tabla que ya no existe.
-- Lo que depende de la hora y no lo avisa nadie se relee solo: el plano de Mesas, cada minuto con el
-  plano a la vista (la reserva de una mesa sale una hora antes y se va al acabar su hueco). En la
+- Lo que depende de la hora y no lo avisa nadie se relee solo: el plano de Mesas, con el plano a la
+  vista, cuando la propia lectura dice que cambiará (`proximo_cambio_s` de `mesas_meta_all` y de
+  `/v1/mesas/meta`, MESAS-02): la reserva de una mesa sale una hora antes, cambia sus minutos y se va
+  al acabar su hueco. La regla la comparten la Main y el worker (`plano_reservas_casos.json`). Sin
+  nada que vaya a cambiar solo, cada cuarto de hora como mucho (`RELECTURA_MAXIMA_META_MS`). En la
   Main es una lectura local; en la Handy, una petición al worker.
+- **Una clave puede ser una parte de un área**: `mesas.meta` (`["mesas", "meta"]`) es el estado de
+  cada mesa sin el dibujo del plano, que sólo lee zonas y mesas. Comandas, líneas, cobros, reservas,
+  clientes, productos y los ajustes del negocio invalidan sólo esa parte; zonas y mesas, el plano
+  entero (`claveDeConsulta`, y `test/syncStatements.test.ts` comprueba de qué tablas lee el layout).
 - **Patrón**: cada feature expone sus hooks en `features/<x>/<x>Queries.ts`, con `useQuery` para lecturas
   (claves prefijadas por la feature, con rangos e ids dentro) y `useMutation` para escrituras, que
   invalidan su clave en `onSuccess`. Referencia: `features/clientes/clientesQueries.ts`.
-- Lo usan clientes, inventario, cuentas (también el histórico de cierres de caja), estadísticas, reservas, tareas, trabajadores, proveedores y
-  pedidos, notificaciones, el emparejamiento (`configuracion/pairingQueries.ts`), el progreso del
-  histórico (`shared/lib/backfillQueries.ts`) y, en mesas, sólo el catálogo de salones y la meta de
-  mesas.
+- Lo usan clientes, inventario, cuentas (también el histórico de cierres de caja), estadísticas,
+  reservas, tareas, trabajadores, proveedores y pedidos, notificaciones, el emparejamiento
+  (`configuracion/pairingQueries.ts`), el progreso del histórico (`shared/lib/backfillQueries.ts`) y,
+  en mesas, sólo el catálogo de salones y la meta de mesas.
 - **Fuera a propósito**: la parte transaccional del POS (comanda, cobro y cocina en mesas; toda la venta
   rápida, cuyo arranque mezcla el catálogo con el estado de la comanda), la configuración (se carga una
   vez en stores de Zustand: `useBusinessSettings`, `useTicketSettings`, `useContactSettings`) y el

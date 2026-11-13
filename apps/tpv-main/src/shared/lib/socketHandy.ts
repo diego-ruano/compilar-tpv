@@ -7,7 +7,7 @@ import { useMainPresence } from "../stores/useMainPresence";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import type { ModeStateValue } from "../stores/useMode";
 import { queryClient } from "./queryClient";
-import { featureKeysPorTablas } from "./syncStatements";
+import { claveDeConsulta, featureKeysPorTablas } from "./syncStatements";
 import { recargarAjustes } from "./recargarAjustes";
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
@@ -64,7 +64,7 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
                     const cambio = payload.cambio;
                     const keys = featureKeysPorTablas(cambio.tablas);
                     if (keys === null) void queryClient.invalidateQueries();
-                    else for (const key of keys) void queryClient.invalidateQueries({ queryKey: [key] });
+                    else for (const key of keys) void queryClient.invalidateQueries({ queryKey: claveDeConsulta(key) });
                     useSyncSignal.getState().bump(cambio.comanda);
                     // Sólo el store de la tabla que ha cambiado: cada uno es una petición a la nube.
                     recargarAjustes(cambio.tablas);

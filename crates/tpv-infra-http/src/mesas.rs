@@ -1,5 +1,4 @@
 //! Adaptador HTTP del repositorio de mesas/comandas/cocina (dominio `/v1/mesas` del worker).
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,7 +8,7 @@ use tpv_application::error::AppResult;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_contracts::mesas::{
     CategoriaVendibleOut, ComandaConLineasOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
+    MesasMetaOut, ProductoVendibleOut, SalonInput, SalonOut,
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 
@@ -125,7 +124,7 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     /* Meta + catálogo */
-    async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>> {
+    async fn mesas_meta_all(&self) -> AppResult<MesasMetaOut> {
         self.client.get_json("/v1/mesas/meta").await
     }
 

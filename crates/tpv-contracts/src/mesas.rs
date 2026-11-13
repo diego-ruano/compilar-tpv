@@ -149,6 +149,16 @@ pub struct MesaMetaOut {
     pub reserva: Option<ReservaMesaOut>,
 }
 
+/// El estado del plano: lo de cada mesa (por su id) y cuándo cambiará solo, con la hora.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct MesasMetaOut {
+    pub mesas: std::collections::HashMap<String, MesaMetaOut>,
+    /// MESAS-02 · Segundos hasta que la reserva de alguna mesa cambie con la hora (sus minutos, o
+    /// que aparezca una hora antes); `None` si nada va a cambiar solo. La pantalla relee entonces
+    /// y no cada minuto: en la Handy, cada relectura es una petición al worker.
+    pub proximo_cambio_s: Option<i64>,
+}
+
 /* =========================================================
    CATÁLOGO
 ========================================================= */

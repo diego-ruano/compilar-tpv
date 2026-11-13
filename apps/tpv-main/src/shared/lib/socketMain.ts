@@ -7,7 +7,7 @@ import { useEstadoSync, type EstadoSync, type FaseRecuperacion, type Preferencia
 import type { ModeStateValue } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import { queryClient } from "./queryClient";
-import { featureKeysPorTablas } from "./syncStatements";
+import { claveDeConsulta, featureKeysPorTablas } from "./syncStatements";
 import { recargarAjustes } from "./recargarAjustes";
 import { captureException } from "../observability/sentry";
 
@@ -46,7 +46,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
                 if (detenido) return;
                 const keys = featureKeysPorTablas(payload.tablas);
                 if (keys === null) void queryClient.invalidateQueries();
-                else for (const key of keys) void queryClient.invalidateQueries({ queryKey: [key] });
+                else for (const key of keys) void queryClient.invalidateQueries({ queryKey: claveDeConsulta(key) });
                 useSyncSignal.getState().bump(payload.comanda);
                 // El store de la tabla que una Handy ha cambiado (también los datos de contacto).
                 recargarAjustes(payload.tablas);
