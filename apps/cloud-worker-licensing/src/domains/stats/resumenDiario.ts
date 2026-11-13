@@ -34,11 +34,18 @@ function sinComentarios(sql: string): string {
 	return sql.replace(/--[^\n]*/g, "").trim();
 }
 
-/** Lo vendido de un día (`?1`), por producto y nombre de línea. La misma que lee la Main. */
-const SELECT_PRODUCTO_DIA = sinComentarios(selectProductoDia);
+/**
+ * Lo vendido de cada día de `dias(Dia)`, por producto y nombre de línea. La misma que lee la Main.
+ * Quien la usa le pone delante `dias`: un día para rehacerlo, o los días sucios de un rango para
+ * leerlos de los cobros (`stats.queries.ts`).
+ */
+export const SELECT_PRODUCTO_DIA = sinComentarios(selectProductoDia);
 
-/** Los cobros de un día (`?1`) de las comandas de cada mesa. La misma que lee la Main. */
-const SELECT_MESA_DIA = sinComentarios(selectMesaDia);
+/** Los cobros de cada día de `dias(Dia)` de las comandas de cada mesa. La misma que lee la Main. */
+export const SELECT_MESA_DIA = sinComentarios(selectMesaDia);
+
+/** Un solo día, el `?1`, como `dias` de las dos sentencias de arriba. */
+const UN_DIA = "WITH dias(Dia) AS (SELECT ?1)";
 
 /** Las columnas de cada tabla, en el orden en que las devuelve su sentencia. */
 const COLUMNAS_PRODUCTO = "Dia, ID_Producto, Nombre_Producto, Unidades";
@@ -50,9 +57,9 @@ type Sentencia = { sql: string; args: unknown[] };
 export function sentenciasDeRecalculo(dia: string): Sentencia[] {
 	return [
 		"DELETE FROM _Estad_Producto_Dia WHERE Dia = ?1",
-		`INSERT INTO _Estad_Producto_Dia (${COLUMNAS_PRODUCTO})\n${SELECT_PRODUCTO_DIA}`,
+		`INSERT INTO _Estad_Producto_Dia (${COLUMNAS_PRODUCTO})\n${UN_DIA}\n${SELECT_PRODUCTO_DIA}`,
 		"DELETE FROM _Estad_Mesa_Dia WHERE Dia = ?1",
-		`INSERT INTO _Estad_Mesa_Dia (${COLUMNAS_MESA})\n${SELECT_MESA_DIA}`,
+		`INSERT INTO _Estad_Mesa_Dia (${COLUMNAS_MESA})\n${UN_DIA}\n${SELECT_MESA_DIA}`,
 		"DELETE FROM _Estad_Dias_Sucios WHERE Dia = ?1",
 	].map((sql) => ({ sql, args: [dia] }));
 }
@@ -76,7 +83,7 @@ function sqlDiferencias(tabla: string, columnas: string, calculado: string): str
 	// Las dos van materializadas: lo que sale de los cobros se calcula una vez y se lee tres.
 	return `WITH
 		guardado AS MATERIALIZED (SELECT ${columnas} FROM ${tabla} WHERE Dia = ?1),
-		calculado AS MATERIALIZED (SELECT ${columnas} FROM (${calculado}))
+		calculado AS MATERIALIZED (SELECT ${columnas} FROM (${UN_DIA} ${calculado}))
 		SELECT
 		  (SELECT COUNT(*) FROM (SELECT * FROM guardado EXCEPT SELECT * FROM calculado))
 		+ (SELECT COUNT(*) FROM (SELECT * FROM calculado EXCEPT SELECT * FROM guardado))

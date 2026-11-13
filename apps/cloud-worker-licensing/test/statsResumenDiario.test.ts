@@ -37,7 +37,10 @@ import {
 	mesasCon,
 	productos,
 	productosCon,
+	sqlMesaTopComandas,
 	sqlMesasIngresos,
+	sqlMesasServicios,
+	sqlMesasTopIngresos,
 	sqlProductos,
 } from "../src/domains/stats/stats.queries";
 import type { StatsRange } from "../src/domains/stats/stats.schemas";
@@ -67,6 +70,22 @@ const CASOS: [string, Caso][] = [
 async function daLoMismoQueAntes(db: Client, etiqueta: string): Promise<void> {
 	for (const range of RANGOS) {
 		const antesMesas = await mesasCon(db, mesasDeAntes(range));
+		// Primero sin rehacer los días sucios: lo que lee alguien a quien se le ha colado un cobro
+		// entre rehacerlos y leer. Esos días se leen de los cobros, no del resumen.
+		const sinRehacer = await mesasCon(db, {
+			ingresos: sqlMesasIngresos(range),
+			topComandas: sqlMesaTopComandas(range),
+			servicios: sqlMesasServicios(range),
+			topIngresos: sqlMesasTopIngresos(range),
+		});
+		expect(sinRehacer, `${etiqueta}: mesas sin rehacer los días sucios, ${range}`).toEqual(antesMesas);
+		for (const [top, worst] of FILTROS) {
+			const antes = await productosCon(db, productosDeAntes(range), top, worst);
+			expect(
+				await productosCon(db, sqlProductos(range), top, worst),
+				`${etiqueta}: productos sin rehacer los días sucios, ${range}, top ${top}, peores ${worst}`,
+			).toEqual(antes);
+		}
 		expect(await mesas(db, range), `${etiqueta}: mesas, ${range}`).toEqual(antesMesas);
 		for (const [top, worst] of FILTROS) {
 			const antes = await productosCon(db, productosDeAntes(range), top, worst);

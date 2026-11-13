@@ -305,7 +305,8 @@ describe("la estadística de productos en una pasada", () => {
 			expect(plan).toContain("SEARCH pd USING COVERING INDEX sqlite_autoindex_Pago_Detalles_1 (ID_Pago=?)");
 			expect(plan).toContain("SEARCH dc USING INDEX sqlite_autoindex_Detalle_Comanda_1 (ID_Detalle=?)");
 			expect(plan.filter((l: string) => /^SCAN (p|pd|dc)( |$)/.test(l))).toEqual([]);
-			expect(plan.filter((l: string) => l.startsWith("SEARCH p "))).toHaveLength(1);
+			// Una vez por los días sucios del rango (los que se leen de los cobros) y otra por hoy.
+			expect(plan.filter((l: string) => l.startsWith("SEARCH p "))).toHaveLength(2);
 		});
 	});
 });

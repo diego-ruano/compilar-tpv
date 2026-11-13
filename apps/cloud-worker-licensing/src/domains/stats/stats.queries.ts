@@ -15,7 +15,7 @@ import type {
 	TrabajadoresStatsResponse,
 } from "@tpv/contracts";
 
-import { resumenAlDia } from "./resumenDiario";
+import { resumenAlDia, SELECT_MESA_DIA, SELECT_PRODUCTO_DIA } from "./resumenDiario";
 import type { StatsRange } from "./stats.schemas";
 
 function rows(rs: any): any[] {
@@ -96,11 +96,25 @@ async function resumenDelRangoAlDia(db: Client, range: StatsRange): Promise<void
 }
 
 /**
+ * Los días cerrados del rango que el resumen diario tiene por rehacer, como `dias(Dia)` de las
+ * sentencias compartidas (`packages/database/estadisticas/`): esos días se leen de los cobros y no
+ * del resumen. Va detrás de `rng`.
+ */
+const DIAS_SUCIOS_DEL_RANGO = `dias AS (
+			SELECT s.Dia AS Dia
+			FROM _Estad_Dias_Sucios s
+			JOIN rng ON 1=1
+			WHERE s.Dia >= date(rng.start_dt)
+				AND s.Dia <  date(rng.hoy_dt)
+		)`;
+
+/**
  * Los cobros de mesa del rango, por día y mesa (`por_mesa_dia`): la cabecera que comparten las
  * sentencias de la estadística de mesas.
  *
- * Los días del rango anteriores a hoy salen de `_Estad_Mesa_Dia` y lo de hoy, de los cobros hasta
- * ahora. Cada fila trae lo cobrado y tres recuentos de comandas, porque una comanda cobrada en dos
+ * Los días del rango anteriores a hoy salen de `_Estad_Mesa_Dia` (antes de leer, `mesas` rehace los
+ * que estén sucios; el que se ensucie después se lee de los cobros, con la misma sentencia que lo
+ * rehace) y lo de hoy, de los cobros hasta ahora. Cada fila trae lo cobrado y tres recuentos de comandas, porque una comanda cobrada en dos
  * días no puede contarse dos veces: `comandas` son las de ese día, `comandas_mes` las que tienen
  * ese día su último cobro del mes y `comandas_rango` las que lo tienen de siempre (ver la tabla en
  * `0001_inicial.sql`). Hoy las tres son lo mismo: es el último día del rango y de su mes.
@@ -115,6 +129,8 @@ function sqlCobrosPorMesaYDia(range: StatsRange): string {
 	return `
 		WITH
 		rng AS (SELECT ${start} AS start_dt, ${HOY} AS hoy_dt, ${end} AS end_dt),
+		${DIAS_SUCIOS_DEL_RANGO},
+		sucios AS (${SELECT_MESA_DIA}),
 		por_mesa_dia AS (
 			SELECT
 				e.Dia AS dia,
@@ -127,6 +143,9 @@ function sqlCobrosPorMesaYDia(range: StatsRange): string {
 			JOIN rng ON 1=1
 			WHERE e.Dia >= date(rng.start_dt)
 				AND e.Dia <  date(rng.hoy_dt)
+				AND e.Dia NOT IN (SELECT Dia FROM dias)
+			UNION ALL
+			SELECT Dia, ID_Mesa, Importe, Comandas, Comandas_Ultimo_Mes, Comandas_Ultimo FROM sucios
 			UNION ALL
 			SELECT
 				date(rng.hoy_dt),
@@ -292,11 +311,14 @@ export async function listCategorias(db: Client): Promise<StatsCategoriaRow[]> {
  * mejor, el peor y los dos top 10 los saca `productos` de ahí sin hacer cuentas: todas las sumas y
  * los redondeos son de SQLite.
  *
- * Los días ya cerrados del rango salen de `_Estad_Producto_Dia`, que los tiene sumados por producto
- * (antes de leer, `productos` rehace los que estén sucios), y sólo lo de hoy se lee de los cobros:
- * lo que tarda no crece con el rango ni con el histórico, que es lo que hace falta en el SQLite del
- * Durable Object, que atiende a todo el negocio en un solo hilo. Es una sola sentencia a propósito:
- * con una por lista, cada una volvería a leer lo mismo.
+ * Los días ya cerrados del rango salen de `_Estad_Producto_Dia`, que los tiene sumados por producto,
+ * y sólo lo de hoy se lee de los cobros: lo que tarda no crece con el rango ni con el histórico, que
+ * es lo que hace falta en el SQLite del Durable Object, que atiende a todo el negocio en un solo
+ * hilo. Antes de leer, `productos` rehace los días sucios; el que se haya ensuciado después (un cobro
+ * que ha entrado entre medias, mientras se cedía el paso) no se lee del resumen sino de los cobros,
+ * con la misma sentencia que lo rehace (`DIAS_SUCIOS_DEL_RANGO`), así que la lectura nunca mezcla un
+ * día viejo con lo nuevo. Es una sola sentencia a propósito: con una por lista, cada una volvería a
+ * leer lo mismo.
  * La misma sentencia, en la Main: `sql_productos` de `tpv-infra-sqlite/src/stats.rs`.
  */
 export function sqlProductos(range: StatsRange): string {
@@ -304,6 +326,8 @@ export function sqlProductos(range: StatsRange): string {
 	return `
 		WITH
 		rng AS (SELECT ${start} AS start_dt, ${HOY} AS hoy_dt, ${end} AS end_dt),
+		${DIAS_SUCIOS_DEL_RANGO},
+		sucios AS (${SELECT_PRODUCTO_DIA}),
 		paid_det AS (
 			-- Las lineas cobradas HOY, hasta ahora.
 			-- STAT-07: cada linea entra UNA vez. Uniendo Pago_Detalles con Pagos a pelo, una linea
@@ -322,12 +346,16 @@ export function sqlProductos(range: StatsRange): string {
 		lineas AS (
 			-- Los dias del rango anteriores a hoy, del resumen: cada fila es lo que sumaron ese dia
 			-- las lineas de un producto con un mismo nombre, y cada linea esta en el dia de su ultimo
-			-- cobro, asi que la que se cobro ayer y otra vez hoy no sale aqui sino abajo.
+			-- cobro, asi que la que se cobro ayer y otra vez hoy no sale aqui sino abajo. Los sucios,
+			-- de los cobros.
 			SELECT e.ID_Producto AS ID_Producto, e.Nombre_Producto AS Nombre_Producto, e.Unidades AS Cantidad
 			FROM _Estad_Producto_Dia e
 			JOIN rng ON 1=1
 			WHERE e.Dia >= date(rng.start_dt)
 				AND e.Dia <  date(rng.hoy_dt)
+				AND e.Dia NOT IN (SELECT Dia FROM dias)
+			UNION ALL
+			SELECT ID_Producto, Nombre_Producto, Unidades FROM sucios
 			UNION ALL
 			SELECT dc.ID_Producto, dc.Nombre_Producto, COALESCE(dc.Cantidad,1)
 			FROM paid_det cobrada

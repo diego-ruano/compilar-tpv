@@ -29,23 +29,30 @@ use crate::db::{Db, Reader, Writer};
 use crate::ejecutor::{Connection, Value};
 use crate::mapping::{v_i64, v_string};
 
-/// Lo vendido de un día (`?1`), por producto y nombre de línea. La misma que lee el worker.
-const SELECT_PRODUCTO_DIA: &str =
+/// Lo vendido de cada día de `dias(Dia)`, por producto y nombre de línea. La misma que lee el
+/// worker. Quien la usa le pone delante `dias`: un día para rehacerlo, o los días sucios de un rango
+/// para leerlos de los cobros (`stats.rs`).
+pub(crate) const SELECT_PRODUCTO_DIA: &str =
     include_str!("../../../packages/database/estadisticas/producto_dia.sql");
 
-/// Los cobros de un día (`?1`) de las comandas de cada mesa. La misma que lee el worker.
-const SELECT_MESA_DIA: &str = include_str!("../../../packages/database/estadisticas/mesa_dia.sql");
+/// Los cobros de cada día de `dias(Dia)` de las comandas de cada mesa. La misma que lee el worker.
+pub(crate) const SELECT_MESA_DIA: &str =
+    include_str!("../../../packages/database/estadisticas/mesa_dia.sql");
+
+/// Un solo día, el `?1`, como `dias` de las dos sentencias de arriba.
+const UN_DIA: &str = "WITH dias(Dia) AS (SELECT ?1)";
 
 /// Las columnas de cada tabla, en el orden en que las devuelve su sentencia.
 const COLUMNAS_PRODUCTO: &str = "Dia, ID_Producto, Nombre_Producto, Unidades";
 const COLUMNAS_MESA: &str = "Dia, ID_Mesa, Importe, Comandas, Comandas_Ultimo_Mes, Comandas_Ultimo";
 
 static INSERTAR_PRODUCTO_DIA: LazyLock<String> = LazyLock::new(|| {
-    format!("INSERT INTO _Estad_Producto_Dia ({COLUMNAS_PRODUCTO})\n{SELECT_PRODUCTO_DIA}")
+    format!("INSERT INTO _Estad_Producto_Dia ({COLUMNAS_PRODUCTO})\n{UN_DIA}\n{SELECT_PRODUCTO_DIA}")
 });
 
-static INSERTAR_MESA_DIA: LazyLock<String> =
-    LazyLock::new(|| format!("INSERT INTO _Estad_Mesa_Dia ({COLUMNAS_MESA})\n{SELECT_MESA_DIA}"));
+static INSERTAR_MESA_DIA: LazyLock<String> = LazyLock::new(|| {
+    format!("INSERT INTO _Estad_Mesa_Dia ({COLUMNAS_MESA})\n{UN_DIA}\n{SELECT_MESA_DIA}")
+});
 
 /// Cuántas filas distinguen lo guardado de un día de lo que sale de los cobros: las que sobran,
 /// las que faltan y las repetidas. Las unidades se comparan a la millonésima: son sumas de
@@ -55,7 +62,8 @@ fn sql_diferencias(tabla: &str, columnas: &str, calculado: &str) -> String {
     format!(
         r#"WITH
         guardado AS MATERIALIZED (SELECT {columnas} FROM {tabla} WHERE Dia = ?1),
-        calculado AS MATERIALIZED (SELECT {columnas} FROM ({calculado}))
+        calculado AS MATERIALIZED (SELECT {columnas} FROM ({UN_DIA}
+{calculado}))
         SELECT
           (SELECT COUNT(*) FROM (SELECT * FROM guardado EXCEPT SELECT * FROM calculado))
         + (SELECT COUNT(*) FROM (SELECT * FROM calculado EXCEPT SELECT * FROM guardado))

@@ -115,17 +115,23 @@ const HOY_SQL: &str = "datetime('now','localtime','start of day')";
 /// sumas y los redondeos son de SQLite.
 ///
 /// Los días ya cerrados del rango salen de `_Estad_Producto_Dia`, que los tiene sumados por
-/// producto (antes de leer, `productos_impl` rehace los que estén sucios), y sólo lo de hoy se lee
-/// de los cobros: lo que tarda no crece con el rango ni con el histórico. Es una sola sentencia a
-/// propósito: con una por lista, cada una volvería a leer lo mismo. La misma sentencia, en el
-/// worker: `sqlProductos` de `domains/stats/stats.queries.ts`, donde corre en el SQLite del
-/// Durable Object, que atiende a todo el negocio en un solo hilo.
+/// producto, y sólo lo de hoy se lee de los cobros: lo que tarda no crece con el rango ni con el
+/// histórico. Antes de leer, `productos_impl` rehace los días sucios; el que se haya ensuciado
+/// después (un cobro que ha entrado entre medias) no se lee del resumen sino de los cobros, con la
+/// misma sentencia que lo rehace (`dias_sucios`), así que la lectura nunca mezcla un día viejo con
+/// lo nuevo. Es una sola sentencia a propósito: con una por lista, cada una volvería a leer lo
+/// mismo. La misma sentencia, en el worker: `sqlProductos` de `domains/stats/stats.queries.ts`,
+/// donde corre en el SQLite del Durable Object, que atiende a todo el negocio en un solo hilo.
 pub(crate) fn sql_productos(range: StatsRange) -> String {
     let (start_expr, end_expr) = range_bounds_sql(range);
     format!(
         r#"
         WITH
         rng AS (SELECT {start} AS start_dt, {hoy} AS hoy_dt, {end} AS end_dt),
+        {dias_sucios},
+        sucios AS (
+{select_producto_dia}
+        ),
         paid_det AS (
           -- Las líneas cobradas HOY, hasta ahora.
           -- STAT-07: cada línea entra UNA vez. Uniendo Pago_Detalles con Pagos a pelo, una línea
@@ -144,12 +150,16 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
         lineas AS (
           -- Los días del rango anteriores a hoy, del resumen: cada fila es lo que sumaron ese día
           -- las líneas de un producto con un mismo nombre, y cada línea está en el día de su último
-          -- cobro, así que la que se cobró ayer y otra vez hoy no sale aquí sino abajo.
+          -- cobro, así que la que se cobró ayer y otra vez hoy no sale aquí sino abajo. Los sucios,
+          -- de los cobros.
           SELECT e.ID_Producto AS ID_Producto, e.Nombre_Producto AS Nombre_Producto, e.Unidades AS Cantidad
           FROM _Estad_Producto_Dia e
           JOIN rng ON 1=1
           WHERE e.Dia >= date(rng.start_dt)
             AND e.Dia <  date(rng.hoy_dt)
+            AND e.Dia NOT IN (SELECT Dia FROM dias)
+          UNION ALL
+          SELECT ID_Producto, Nombre_Producto, Unidades FROM sucios
           UNION ALL
           SELECT dc.ID_Producto, dc.Nombre_Producto, COALESCE(dc.Cantidad,1)
           FROM paid_det cobrada
@@ -224,15 +234,29 @@ pub(crate) fn sql_productos(range: StatsRange) -> String {
         "#,
         start = start_expr,
         hoy = HOY_SQL,
-        end = end_expr
+        end = end_expr,
+        dias_sucios = DIAS_SUCIOS_DEL_RANGO,
+        select_producto_dia = crate::estadisticas_diarias::SELECT_PRODUCTO_DIA,
     )
 }
+
+/// Los días cerrados del rango que el resumen diario tiene por rehacer, como `dias(Dia)` de las
+/// sentencias compartidas (`packages/database/estadisticas/`): esos días se leen de los cobros y
+/// no del resumen. Va detrás de `rng`.
+const DIAS_SUCIOS_DEL_RANGO: &str = "dias AS (
+          SELECT s.Dia AS Dia
+          FROM _Estad_Dias_Sucios s
+          JOIN rng ON 1=1
+          WHERE s.Dia >= date(rng.start_dt)
+            AND s.Dia <  date(rng.hoy_dt)
+        )";
 
 /// Los cobros de mesa del rango, por día y mesa (`por_mesa_dia`): la cabecera que comparten las
 /// sentencias de la estadística de mesas.
 ///
 /// Los días del rango anteriores a hoy salen de `_Estad_Mesa_Dia` (antes de leer, `mesas_impl`
-/// rehace los que estén sucios) y lo de hoy, de los cobros hasta ahora. Cada fila trae lo cobrado
+/// rehace los que estén sucios; el que se ensucie después se lee de los cobros, con la misma
+/// sentencia que lo rehace) y lo de hoy, de los cobros hasta ahora. Cada fila trae lo cobrado
 /// y tres recuentos de comandas, porque una comanda cobrada en dos días no puede contarse dos
 /// veces: `comandas` son las de ese día, `comandas_mes` las que tienen ese día su último cobro del
 /// mes y `comandas_rango` las que lo tienen de siempre (ver la tabla en `0001_inicial.sql`). Hoy
@@ -246,6 +270,10 @@ fn sql_cobros_por_mesa_y_dia(range: StatsRange) -> String {
         r#"
         WITH
         rng AS (SELECT {start} AS start_dt, {hoy} AS hoy_dt, {end} AS end_dt),
+        {dias_sucios},
+        sucios AS (
+{select_mesa_dia}
+        ),
         por_mesa_dia AS (
           SELECT
             e.Dia AS dia,
@@ -258,6 +286,9 @@ fn sql_cobros_por_mesa_y_dia(range: StatsRange) -> String {
           JOIN rng ON 1=1
           WHERE e.Dia >= date(rng.start_dt)
             AND e.Dia <  date(rng.hoy_dt)
+            AND e.Dia NOT IN (SELECT Dia FROM dias)
+          UNION ALL
+          SELECT Dia, ID_Mesa, Importe, Comandas, Comandas_Ultimo_Mes, Comandas_Ultimo FROM sucios
           UNION ALL
           SELECT
             date(rng.hoy_dt),
@@ -278,7 +309,9 @@ fn sql_cobros_por_mesa_y_dia(range: StatsRange) -> String {
         "#,
         start = start_expr,
         hoy = HOY_SQL,
-        end = end_expr
+        end = end_expr,
+        dias_sucios = DIAS_SUCIOS_DEL_RANGO,
+        select_mesa_dia = crate::estadisticas_diarias::SELECT_MESA_DIA,
     )
 }
 
@@ -2505,6 +2538,36 @@ mod tests_resumen_diario {
     async fn da_lo_mismo_que_antes(repo: &SqliteStatsRepository, etiqueta: &str) {
         for range in RANGOS {
             let antes = repo.mesas_con(mesas_de_antes(range)).await.unwrap();
+            // Primero sin rehacer los días sucios: lo que lee alguien a quien se le ha colado un
+            // cobro entre rehacerlos y leer. Esos días se leen de los cobros, no del resumen.
+            let sin_rehacer = repo
+                .mesas_con(SentenciasMesas {
+                    ingresos: sql_mesas_ingresos(range),
+                    top_comandas: sql_mesa_top_comandas(range),
+                    servicios: sql_mesas_servicios(range),
+                    top_ingresos: sql_mesas_top_ingresos(range),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(&sin_rehacer).unwrap(),
+                serde_json::to_value(&antes).unwrap(),
+                "{etiqueta}: mesas sin rehacer los días sucios, {range:?}"
+            );
+            for (top, worst) in FILTROS {
+                let args = ProductosStatsArgs {
+                    range,
+                    categoria_top_id: top.map(str::to_string),
+                    categoria_worst_id: worst.map(str::to_string),
+                };
+                let antes = repo.productos_con(&productos_de_antes(range), args.clone()).await.unwrap();
+                let sin_rehacer = repo.productos_con(&sql_productos(range), args).await.unwrap();
+                assert_eq!(
+                    serde_json::to_value(&sin_rehacer).unwrap(),
+                    serde_json::to_value(&antes).unwrap(),
+                    "{etiqueta}: productos sin rehacer los días sucios, {range:?}, top {top:?}, peores {worst:?}"
+                );
+            }
             let ahora = repo.mesas_impl(range).await.unwrap();
             assert_eq!(
                 serde_json::to_value(&ahora).unwrap(),

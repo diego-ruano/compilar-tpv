@@ -166,7 +166,10 @@ base de un negocio es un solo hilo ([worker.md](worker.md#la-base-del-negocio-de
   `estadisticas_diarias::tests::los_triggers_solo_apuntan_dias`.
 - **Un día se rehace entero**: se borran sus filas y se insertan con las dos sentencias compartidas, y
   se le quita la marca, todo en una transacción. Quien lee una estadística rehace antes los días
-  sucios de su rango (hoy no, que se lee de los cobros); en la Main lo adelanta el job
+  sucios de su rango (hoy no, que se lee de los cobros), y la sentencia que lee no se fía de eso: el
+  día que siga sucio (un cobro que ha entrado entre rehacerlo y leer) lo lee de los cobros, con la
+  misma sentencia compartida y en la misma instantánea, así que nunca mezcla un día viejo con lo
+  nuevo. En la Main lo adelanta el job
   `resumen_estadisticas`, y la reconciliación diaria contrasta los siete últimos días y siete más al
   azar con lo que sale de los cobros ([jobs-e-interruptores.md](jobs-e-interruptores.md)). En la nube
   cada lectura contrasta un día al azar de su rango. Un día que no cuadra se rehace y se avisa: es un
