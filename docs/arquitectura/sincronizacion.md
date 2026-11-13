@@ -392,8 +392,9 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   de entrada de la Main (AUD-02) y, fuera del turno, se prepara cada operación (la hora fijada, su
   hash, sus sentencias): lo que falla ahí es el veredicto de esa operación, como un rechazo
   permanente.
-- **Dentro del turno del log no hay ninguna espera.** Tras la comprobación por actividad se vuelve a
-  mirar que la sesión siga siendo la de la Main y se aplican en orden. **Cada operación es una
+- **En el turno del log, la única espera es la comprobación por actividad** (AUD-02, si toca: hasta
+  5 s, y lo que va detrás en el turno espera con ella). Después ya no hay ninguna: se vuelve a mirar
+  que la sesión siga siendo la de la Main y se aplican en orden. **Cada operación es una
   escritura suelta**: su lote atómico (`loteDe` + `loteEnBruto`) en su propio `transactionSync`, su
   gate de idempotencia, su línea en el log y su `change`, que sale en el acto (AUD-18). La que ya
   estaba viola el UNIQUE del gate: contesta con su `Seq` y se difunde otra vez (SYNC-03).
