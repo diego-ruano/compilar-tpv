@@ -96,7 +96,9 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   (`ANCHOS_DE_VENTANA`), siempre estirados hasta el último cierre de caja, y viaja la más ancha que
   cabe en los dos topes. Cada candidata se mide antes de leerla: sus filas, contadas, y sus bytes,
   estimados con lo que ocupan las últimas 64 filas de cada tabla; si aun así no cabe al escribirla,
-  se pasa a la siguiente. La respuesta dice cuál fue (`ventana_desde`).
+  se pasa a la siguiente. La estimación sólo puede estrechar la ventana, nunca negar la
+  recuperación: la más estrecha se intenta aunque la estimación diga que no cabe, y decide lo que se
+  escribe. La respuesta dice cuál fue (`ventana_desde`).
 - **Lo imprescindible no se encoge**: los maestros, lo que sigue vivo, lo que hay desde el último
   cierre de caja no reabierto y el último registro de facturación viajan con cualquier ancho. Si ni
   eso cabe, la respuesta es 413 `bootstrap_too_large`, y la pantalla de recuperación lo dice

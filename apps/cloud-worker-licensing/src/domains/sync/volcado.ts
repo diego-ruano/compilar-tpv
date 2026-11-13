@@ -68,6 +68,12 @@ export type Resultado = { columnas: string[]; filas: Iterable<unknown[]> };
  * entre la primera sentencia y la última. Con un `await` dentro dejaría de ser una foto.
  */
 export type Lector = {
+	/**
+	 * Si las filas se leen según se recorren: es así con el cursor del DO, y entonces quien escribe
+	 * puede parar a mitad sin haber cargado lo que no cabe. Con la ruta en el Worker no: el lote
+	 * entero ya ha cruzado la llamada al DO cuando se empieza a escribir.
+	 */
+	readonly paraAlEscribir: boolean;
 	foto<T>(sentencias: Sentencia[], usar: (resultados: Iterator<Resultado>) => T): Promise<T>;
 };
 
@@ -97,6 +103,7 @@ function* delLote(lote: ResultSet[]): Generator<Resultado> {
  */
 export function lectorDelHub(sql: SqlStorage): Lector {
 	return {
+		paraAlEscribir: true,
 		foto: async (sentencias, usar) => {
 			let abierto: Iterator<unknown[]> | null = null;
 			const agotar = () => {
@@ -124,6 +131,7 @@ export function lectorDelHub(sql: SqlStorage): Lector {
 /** El lector sobre un `Client`: un lote de lectura, que da la foto, y sus filas ya montadas. */
 export function lectorDelCliente(db: Pick<Client, "batch">): Lector {
 	return {
+		paraAlEscribir: false,
 		foto: async (sentencias, usar) => usar(delLote(await db.batch(sentencias as any, "read"))),
 	};
 }
@@ -135,6 +143,9 @@ export function lectorDelCliente(db: Pick<Client, "batch">): Lector {
  */
 export function lectorDe(c: ContextoDeLectura): Lector {
 	return {
+		get paraAlEscribir() {
+			return hubLocal(c.get("tenantId")) !== null;
+		},
 		async foto(sentencias, usar) {
 			const local = hubLocal(c.get("tenantId"));
 			if (!local) return tenantQuery(c, (db) => lectorDelCliente(db).foto(sentencias, usar));

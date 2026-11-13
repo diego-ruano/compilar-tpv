@@ -279,8 +279,15 @@ function medidorDeVentanas(lector: Lector, tablas: string[], pesos: Map<string, 
  * y si no una semana, un día o sólo lo imprescindible).
  *
  * Cada candidata se mide antes de volcarla: contar cuesta un agregado por tabla y evita leer un mes
- * entero para tirarlo. La medida de los bytes es una estimación, así que `volcar` sigue pudiendo
- * decir que no (`null`) si al escribir se pasa del tope, y entonces se prueba la siguiente.
+ * entero para tirarlo. La medida de los bytes es una estimación, y puede fallar hacia los dos lados:
+ *
+ * - Si se queda corta, `volcar` dice que no (`null`) al pasarse del tope escribiendo, y se prueba
+ *   la candidata siguiente.
+ * - Si se queda larga, se descarta una candidata que cabía y viaja una más estrecha. Con la última
+ *   no puede pasar: detrás no hay otra, y descartarla por una estimación sería contestar «no cabe»
+ *   a un negocio que sí cabe. Se intenta siempre que quepa por filas, y decide lo que se escribe.
+ *   (Sólo donde escribir para a tiempo, `paraAlEscribir`: con la ruta en el Worker, intentarlo es
+ *   traer todas las filas por la llamada al DO, así que allí la estimación sí descarta.)
  *
  * La medida va fuera de la foto a propósito: sólo decide qué ventana se intenta, no es el dato.
  * `volcar` recibe el límite UNA vez y lo usa en todas sus sentencias, de modo que padre e hijas
@@ -298,10 +305,12 @@ async function volcarLaVentanaQueQuepa<T>(
 ): Promise<{ volcado: T } | { volcado: null; filas: number }> {
 	const medir = medidorDeVentanas(lector, tablas, await pesarTablas(lector, tablas));
 	let filas = 0;
-	for (const desde of candidatas) {
+	for (const [i, desde] of candidatas.entries()) {
 		const medida = await medir(desde);
 		filas = medida.filas;
-		if (medida.filas > topes.filas || medida.bytes > topes.bytes) continue;
+		if (medida.filas > topes.filas) continue;
+		const esLaUltima = i === candidatas.length - 1;
+		if (medida.bytes > topes.bytes && !(esLaUltima && lector.paraAlEscribir)) continue;
 		const volcado = await volcar(desde);
 		if (volcado !== null) return { volcado };
 	}

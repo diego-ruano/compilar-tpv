@@ -378,6 +378,46 @@ describe("la fase 1 se encoge hasta caber", () => {
 			}
 		});
 	});
+
+	it("si la medida se queda larga, lo imprescindible se intenta igual: decide lo que se escribe", async () => {
+		// Engañan al revés: 2.000 clientes sin nota y, detrás, 64 con una nota enorme. La medida, que
+		// pesa la tabla por sus últimas filas, da varios megas; lo que hay son unos 300 KB. Detrás
+		// de la ventana más estrecha no hay otra, así que no se le puede contestar «no cabe» por una
+		// estimación.
+		await enElHub("ventana-que-cabe-medida-larga", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			crearEsquemaTenant(sql);
+			for (let i = 0; i < 2_000; i++) {
+				sql.exec("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES (?, 'Ana');", `cl-${i}`);
+			}
+			for (let i = 0; i < 64; i++) {
+				sql.exec(
+					"INSERT INTO Clientes (ID_Cliente, Nombre, Notas) VALUES (?, 'Ana', ?);",
+					`cl-nota-${i}`,
+					"No le pongas hielo. ".repeat(100),
+				);
+			}
+
+			const [[, delHub], [, delWorker]] = lectores(sql);
+			const real = await fase1(delHub, SIN_TOPE);
+			if (!real.volcado) throw new Error("no cabe sin topes");
+			const topes = { ...SIN_TOPE, bytes: real.bytes * 2 };
+
+			// Con sitio para el doble de lo que ocupa de verdad, viaja: lo imprescindible, entero.
+			const r = await fase1(delHub, topes);
+			if (!r.volcado) throw new Error("lo imprescindible cabía y se ha contestado que no");
+			expect(r.volcado.ventana_desde).toBe(AHORA);
+			expect(tabla(r.volcado, "Clientes").filas).toHaveLength(2_064);
+			expect(r.bytes).toBeLessThanOrEqual(topes.bytes);
+
+			// Con la ruta en el Worker no se intenta: allí intentarlo es traer todas las filas por
+			// la llamada al DO, que es lo que el techo viene a evitar.
+			expect((await fase1(delWorker, topes)).volcado).toBeNull();
+
+			// Y si de verdad no cabe, sigue siendo que no.
+			expect((await fase1(delHub, { ...SIN_TOPE, bytes: Math.round(real.bytes / 2) })).volcado).toBeNull();
+		});
+	});
 });
 
 describe("el contraste diario usa la ventana que cabe", () => {
