@@ -385,12 +385,13 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
 
 ### El lote en el `TenantHub` (`aplicarLote`)
 
-- **Antes de aplicar nada**: el tamaño del mensaje se mira antes de leerlo (4 MiB: una operación tiene
-  que poder llevar cualquier valor que admita el SQLite del DO), sólo la Main manda lotes
-  (`forbidden_not_tpv`), y la forma de **todas** sus operaciones se comprueba antes de aplicar
-  ninguna: una mal hecha rechaza el lote entero (`missing_apply_fields`). El lote entra en la fila de
-  entrada de la Main (AUD-02) y, fuera del turno, se prepara cada operación (la hora fijada, su hash,
-  sus sentencias): lo que falla ahí es el veredicto de esa operación, como un rechazo permanente.
+- **Antes de aplicar nada**: el tamaño del mensaje se mira antes de leerlo (4 MiB de UTF-8: una
+  operación tiene que poder llevar cualquier valor que admita el SQLite del DO), sólo la Main manda
+  lotes (`forbidden_not_tpv`), y la forma de **todas** sus operaciones se comprueba antes de aplicar
+  ninguna: una mal hecha rechaza el lote entero (`missing_apply_fields`). El lote entra en la fila
+  de entrada de la Main (AUD-02) y, fuera del turno, se prepara cada operación (la hora fijada, su
+  hash, sus sentencias): lo que falla ahí es el veredicto de esa operación, como un rechazo
+  permanente.
 - **Dentro del turno del log no hay ninguna espera.** Tras la comprobación por actividad se vuelve a
   mirar que la sesión siga siendo la de la Main y se aplican en orden. **Cada operación es una
   escritura suelta**: su lote atómico (`loteDe` + `loteEnBruto`) en su propio `transactionSync`, su
@@ -403,11 +404,12 @@ Sólo el saludo de un `tpv` no entra sin respuesta.
   recibir el acuse de algo que se pierda. Si el objeto se cae a mitad, no queda nada del turno y no
   hay acuse; la Main reenvía el lote.
 - **El tope es de trabajo, no de tiempo**: en producción el reloj no avanza mientras el objeto consume
-  CPU. Como mucho 200 operaciones, 512 KB de sentencias y 3 que necesiten aplazar las claves foráneas
-  (cada una recorre las tablas con FK antes de cerrar); lo que pasa del tope sale `noIntentada`, y la
-  primera se intenta siempre. Con el outbox de un servicio real (`test/outboxRepetido.test.ts`: de
-  una en una, en lotes y con lotes reenviados o cortados, que dejan lo mismo), un lote de 200 son unos
-  150 ms y ninguna operación necesita aplazar.
+  CPU. Como mucho 200 operaciones, 512 KB de sentencias en UTF-8 (como corta la Main) y 3 que
+  necesiten aplazar las claves foráneas (cada una recorre las tablas con FK antes de cerrar); lo que
+  pasa del tope sale `noIntentada`, y la primera se intenta siempre. El outbox de un servicio
+  real, 1.185 operaciones, sube en 8 lotes de unos 120 ms (en local; el más lento, 157 ms) y ninguna
+  necesita aplazar. `test/outboxRepetido.test.ts` sube sus 300 primeras de una en una, en lotes y con
+  lotes reenviados o cortados, y exige que las tres dejen lo mismo.
 - **No se calcula el resultado de cada operación**: el gate guarda el que se puede saber sin ejecutar,
   y de lo que sube la Main sólo se usa el `Seq`.
 

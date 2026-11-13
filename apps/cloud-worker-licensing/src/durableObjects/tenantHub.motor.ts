@@ -4,6 +4,7 @@ import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
 import { ingestToAxiom } from "../observability/axiom";
 import { capturarError } from "../observability/errors";
+import { bytesUtf8 } from "../observability/tope";
 import { PURGADO_HASTA } from "../domains/sync/cambiosJson";
 
 import { safeJsonParse, sha256Hex, stringifyJsonValue } from "./tenantHub.envelope";
@@ -92,7 +93,7 @@ const PLAZO_LEER_MAIN_MS = 5_000;
 // tope en milisegundos no saltaría nunca. Lo que pasa del tope no se toca (`noIntentada`) y la Main
 // lo vuelve a mandar en el lote siguiente. La primera operación se intenta siempre.
 const LOTE_MAX_OPS = 200; // las que manda la Main de una vez (`replicacion.rs`)
-const LOTE_MAX_BYTES = 512 * 1024; // de SQL y argumentos; la Main corta a 256 KB
+const LOTE_MAX_BYTES = 512 * 1024; // de SQL y argumentos, en UTF-8; la Main corta a 256 KB
 // Las que sólo entran aplazando las claves foráneas (o traen una rota): cada una recorre las tablas
 // con FK antes de cerrar (`loteEnBruto`), unos 230 ms con 250.000 líneas.
 const LOTE_MAX_APLAZADAS = 3;
@@ -1018,7 +1019,8 @@ export class MotorTenantHub {
 		let parado = false;
 
 		ops.forEach((o, i) => {
-			const tamano = o.requestPayloadJson.length;
+			// En bytes de UTF-8, como corta la Main: un carácter de fuera de ASCII ocupa hasta tres.
+			const tamano = bytesUtf8(o.requestPayloadJson);
 			// La primera se intenta siempre: un lote que no avanzara nada volvería igual.
 			if (!parado && i > 0 && (i >= LOTE_MAX_OPS || bytes + tamano > LOTE_MAX_BYTES)) parado = true;
 			if (parado) {

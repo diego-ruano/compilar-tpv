@@ -304,6 +304,19 @@ describe("apply_lote · el trabajo que cabe en un turno", () => {
 		});
 	});
 
+	it("los 512 KB son de UTF-8: un carácter de fuera de ASCII cuenta lo que ocupa", async () => {
+		await enUnHub("lote-bytes-utf8", async (m) => {
+			// 20.000 caracteres, casi todos de tres bytes: 60 KB cada una, como las de arriba.
+			// Contadas por caracteres cabrían todas.
+			const gorda = (n: number) =>
+				opDelOutbox(`op-${n}`, [{ sql: ALTA, args: [`z-${n}`, `${n}`.padEnd(20_000, "界")] }]);
+			const acuse = await m.mandarLote(Array.from({ length: 10 }, (_, i) => gorda(i)));
+			const aplicadas = acuse.resultados.filter((r: any) => r.ok).length;
+			expect(aplicadas).toBe(8);
+			expect(acuse.resultados.slice(aplicadas).every((r: any) => r.noIntentada === true)).toBe(true);
+		});
+	});
+
 	it("un mensaje de más de 4 MiB no se llega a leer", async () => {
 		await enUnHub("lote-mensaje-enorme", async (m, hub) => {
 			const respuesta = m.main.esperar((x) => x.type === "error");
@@ -312,6 +325,14 @@ describe("apply_lote · el trabajo que cabe en un turno", () => {
 				JSON.stringify({ type: "apply_lote", loteId: "enorme", ops: [], relleno: "x".repeat(4 * 1024 * 1024) }),
 			);
 			expect(await respuesta).toEqual({ type: "error", error: "payload_too_large" });
+
+			// Lo mismo en bytes de UTF-8, aunque en caracteres sean bastantes menos.
+			const otra = m.main.esperar((x) => x.type === "error");
+			await hub.webSocketMessage(
+				m.main.servidor,
+				JSON.stringify({ type: "apply_lote", loteId: "enorme-utf8", ops: [], relleno: "界".repeat(1_500_000) }),
+			);
+			expect(await otra).toEqual({ type: "error", error: "payload_too_large" });
 		});
 	});
 });

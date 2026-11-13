@@ -34,6 +34,7 @@
 import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 import { nowMs } from "./tenantHub.tiempo";
 import { capturarError } from "../observability/errors";
+import { bytesUtf8 } from "../observability/tope";
 import {
 	buildInternalPayloadForHash,
 	getFirstOwnValue,
@@ -149,7 +150,8 @@ export async function despachar(
 
 	const data = typeof message === "string" ? message : "";
 	// El tamaño, antes de leerlo: trocear un JSON enorme es trabajo que se le regala a quien lo manda.
-	if (data.length > MAX_MENSAJE) {
+	// En bytes de UTF-8; un carácter ocupa de uno a tres, así que sólo se cuentan si hace falta.
+	if (data.length > MAX_MENSAJE || (data.length * 3 > MAX_MENSAJE && bytesUtf8(data) > MAX_MENSAJE)) {
 		ctx.send(ws, { type: "error", error: "payload_too_large" });
 		return;
 	}
