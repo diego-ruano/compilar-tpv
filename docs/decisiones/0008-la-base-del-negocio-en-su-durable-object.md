@@ -30,9 +30,10 @@ crean sin jurisdicción y con una pista de región de Europa occidental
 - El coste de una petición lo marca el viaje entre el Worker que atiende y el DO, no el SQL. Con la
   jurisdicción `eu`, el DO nace en un centro de la UE que no se elige (Frankfurt, Milán, Viena,
   Varsovia, Praga, Estocolmo, Bucarest…) y la pista de región no se respeta; sin jurisdicción, nace
-  junto al primero que lo llama, o donde diga la pista. Por eso el responsable eligió no usar
-  jurisdicción y poner la pista `weur`: el objeto nace en Europa occidental aunque el primero que lo
-  llame esté lejos. Y por eso la ruta va entera al DO: con un solo viaje, dónde caiga pesa poco.
+  junto al primero que lo llama, o donde pida la pista. Por eso el responsable eligió no usar
+  jurisdicción y poner la pista `weur`, que pide que el objeto nazca en Europa occidental aunque el
+  primero que lo llame esté lejos; es una preferencia, no una garantía. Y por eso la ruta va entera
+  al DO: con un solo viaje, dónde caiga pesa poco.
 - **Un negocio es un hilo**: toda lectura de la Handy pasa por su DO, y una consulta pesada retrasa al
   resto del negocio mientras dura. Medido en local con medio año de un restaurante con mucho
   movimiento (58 MB): las ventas por día de un mes, 159 ms; las de seis meses, 657 ms.

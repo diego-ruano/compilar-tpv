@@ -4,7 +4,7 @@
 //
 // La base de cada negocio vive en el SQLite de su TenantHub. Si la ruta se ejecuta en el Worker, cada
 // consulta es un viaje de ida y vuelta hasta el DO (`tenantClient.ts`), y una pantalla como fichar
-// hace siete seguidos. El viaje es lo caro, no el SQL: el DO nace en Europa occidental
+// hace siete seguidos. El viaje es lo caro, no el SQL: el DO se pide en Europa occidental
 // (`lib/objetosDelNegocio.ts`) y puede quedar lejos del Worker que atiende. Por eso las rutas de
 // negocio se ejecutan DENTRO del DO: el Worker
 // comprueba quién pregunta y le pasa la petición entera al TenantHub del negocio, que ejecuta la

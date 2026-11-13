@@ -73,7 +73,7 @@ export class AgendaWeb extends DurableObject<Env> {
 /**
  * La agenda de un negocio, colocada como su TenantHub (`lib/objetosDelNegocio.ts`): guarda datos
  * personales de quien reserva, y quien la llama primero puede ser el visitante de una web desde
- * cualquier sitio. Con la pista, nace en Europa occidental aunque él esté en otro continente.
+ * cualquier sitio. La pista pide que nazca en Europa occidental aunque él esté en otro continente.
  */
 export function agendaDe(
 	env: Pick<Env, "AgendaWeb" | "JURISDICCION_DO" | "UBICACION_DO">,

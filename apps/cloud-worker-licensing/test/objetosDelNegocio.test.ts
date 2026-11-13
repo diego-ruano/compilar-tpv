@@ -2,11 +2,11 @@
 //
 // De dónde sale el Durable Object de un negocio (`lib/objetosDelNegocio.ts`).
 //
-// Los DO van sin jurisdicción y con una pista de región de Europa occidental: nacen ahí aunque el
-// primero que los llame esté en otro sitio (el visitante de una web que reserva desde otro
-// continente). Eso sólo vale si TODO el que pide el objeto de un negocio pide el mismo, de la misma
-// forma: el mismo nombre da otro objeto en otra jurisdicción, y la pista sólo cuenta en la llamada
-// que lo crea. Aquí se fija:
+// Los DO van sin jurisdicción y con una pista de región de Europa occidental, para que nazcan ahí
+// aunque el primero que los llame esté en otro sitio (el visitante de una web que reserva desde
+// otro continente). Eso sólo vale si TODO el que pide el objeto de un negocio pide el mismo, de la
+// misma forma: el mismo nombre da otro objeto en otra jurisdicción, y la pista sólo cuenta en la
+// llamada que lo crea. Aquí se fija:
 //
 //   · lo que dice el despliegue (`wrangler.json`): ninguna jurisdicción y la pista `weur`;
 //   · que las cuatro puertas (`hubDe`, `agendaDe`, la baja de un dispositivo y el aviso de cambio

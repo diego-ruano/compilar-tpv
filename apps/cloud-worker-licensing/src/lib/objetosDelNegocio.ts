@@ -15,9 +15,11 @@
 //   llamada, la que crea el objeto, y es una pista: Cloudflare la sigue cuando puede. Por eso va en
 //   todas: nadie sabe cuál va a ser la primera.
 //
-// ⚠️ El mismo nombre da OTRO objeto en otra jurisdicción. Un sitio que pidiera el objeto sin pasar
-// por aquí hablaría con uno vacío, sin fallar; y cambiar `JURISDICCION_DO` con negocios dados de
-// alta es empezar de cero.
+// ⚠️ Son dos cosas distintas. La jurisdicción es parte de la identidad: el mismo nombre da OTRO
+// objeto en otra jurisdicción, así que quien lo pidiera con otra hablaría con uno vacío, sin fallar,
+// y cambiar `JURISDICCION_DO` con negocios dados de alta es empezar de cero. La pista no cambia de
+// qué objeto se habla, sólo dónde se crea si esa llamada es la primera: quien lo pidiera sin ella
+// podría crearlo lejos, y hoy un objeto no se muda después de creado.
 //
 // En local y en los tests las dos van vacías: workerd no implementa jurisdicciones («Jurisdiction
 // restrictions are not implemented in workerd»).
