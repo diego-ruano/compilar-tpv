@@ -92,3 +92,15 @@ pub(crate) fn update_total_comanda_sql() -> &'static str {
     "#
 }
 
+
+/// DO-01 · Una lista de tamaño variable, como **un solo** parámetro: un array JSON de textos, para
+/// `… IN (SELECT value FROM json_each(?n))`.
+///
+/// El SQLite del Durable Object, que es donde se aplica lo que sube la Main, admite 100 parámetros
+/// por sentencia. Con un `?` por elemento, cobrar una mesa de más de 98 líneas o guardar un plano
+/// con una zona de más de 98 mesas daba una sentencia que la nube rechazaba como permanente: la
+/// operación acababa apartada y la nube sin esas filas hasta el contraste diario. `json_each`
+/// devuelve cada texto como `TEXT`, así que la comparación es la misma que con la lista escrita.
+pub(crate) fn lista_json(ids: &[String]) -> Value {
+    Value::Text(serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string()))
+}

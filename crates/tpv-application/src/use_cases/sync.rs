@@ -1,5 +1,6 @@
 //! Casos de uso de **sincronización nube → Main**. Orquestación fina sobre `SyncRepository`.
 
+use serde::de::DeserializeOwned;
 use serde_json::json;
 
 use tpv_contracts::sync::{
@@ -11,6 +12,59 @@ use tpv_contracts::sync::{
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::PairingService;
 use crate::ports::sync::SyncRepository;
+
+/// Pide `ruta` a la nube (modo `tpv`) y lee la respuesta **directamente en su tipo**.
+///
+/// Es para las rutas que contestan con un volcado: decenas de megas de JSON. Leído primero en un
+/// `serde_json::Value` y deserializado después, el volcado estaba dos veces en memoria, y el árbol
+/// intermedio pesa varias veces lo que el texto. Aquí va de los bytes al tipo.
+///
+/// `que` nombra la respuesta en el mensaje si no se puede leer, e `ilegible` dice qué clase de
+/// error es (cada ruta conserva la suya).
+async fn pedir<T: DeserializeOwned>(
+    nube: &dyn PairingService,
+    ruta: &str,
+    cuerpo: serde_json::Value,
+    que: &str,
+    ilegible: fn(String) -> AppError,
+) -> AppResult<T> {
+    let bytes = nube.tpv_server_post_bytes("tpv", ruta, cuerpo).await?;
+    leer_respuesta(&bytes, que, ilegible)
+}
+
+/// El cuerpo de una respuesta aceptada (2xx), en su tipo.
+///
+/// Antes se mira si es un 200 con `ok:false` (el worker marca así algunos fallos), que sale con
+/// el error de la API como en `tpv_server_post_json`, **aunque el resto del cuerpo encaje en el
+/// tipo**: un `{"ok":false,"conteos":[],"ventana":[]}` no es una foto vacía con la que dar el
+/// contraste por hecho. Mirarlo es otra pasada sobre los bytes, sin guardar nada (serde descarta
+/// lo que no es `ok`): nada que ver con montar el árbol entero.
+///
+/// AUD-28 — si no se puede leer, el mensaje dice dónde (clase del fallo, línea y columna) y nada
+/// del contenido: el texto de serde cita el valor que no encaja, y en un volcado ese valor es un
+/// dato del negocio.
+fn leer_respuesta<T: DeserializeOwned>(
+    bytes: &[u8],
+    que: &str,
+    ilegible: fn(String) -> AppError,
+) -> AppResult<T> {
+    #[derive(serde::Deserialize)]
+    struct Sobre {
+        ok: Option<bool>,
+    }
+    if let Ok(Sobre { ok: Some(false) }) = serde_json::from_slice::<Sobre>(bytes) {
+        return Err(AppError::from_api_body(200, &String::from_utf8_lossy(bytes)));
+    }
+
+    serde_json::from_slice::<T>(bytes).map_err(|e| {
+        ilegible(format!(
+            "{que} ilegible ({:?}, línea {}, columna {})",
+            e.classify(),
+            e.line(),
+            e.column()
+        ))
+    })
+}
 
 /// Aplica un lote de cambios recibidos de la nube. Si viene vacío, solo devuelve el checkpoint.
 pub async fn apply_changes(
@@ -102,17 +156,19 @@ pub async fn bootstrap_desde_nube(
     // la base. Se vuelve a leer después: si la licencia ha cambiado mientras bajaba, no se sabe de
     // quién es lo que ha llegado y no se instala.
     let negocio = negocio_de_la_licencia(nube)?;
-    let raw = nube
-        .tpv_server_post_json("tpv", "/v1/sync/bootstrap", json!({}))
-        .await?;
+    let snapshot: BootstrapSnapshot = pedir(
+        nube,
+        "/v1/sync/bootstrap",
+        json!({}),
+        "respuesta de bootstrap",
+        AppError::External,
+    )
+    .await?;
     if negocio_de_la_licencia(nube)? != negocio {
         return Err(AppError::conflict(
             "La licencia de este equipo ha cambiado mientras se traían los datos. Vuelve a intentarlo.",
         ));
     }
-
-    let snapshot: BootstrapSnapshot = serde_json::from_value(raw)
-        .map_err(|e| AppError::external(format!("respuesta de bootstrap ilegible: {e}")))?;
 
     repo.bootstrap_restaurar(snapshot, &negocio).await
 }
@@ -165,15 +221,16 @@ pub async fn backfill_paso(
             break;
         };
 
-        let raw = match nube
-            .tpv_server_post_json(
-                "tpv",
-                "/v1/sync/historico",
-                json!({ "tabla": tabla, "cursor": cursor, "limite": BACKFILL_FILAS_POR_PAGINA }),
-            )
-            .await
+        let pagina: HistoricoPagina = match pedir(
+            nube,
+            "/v1/sync/historico",
+            json!({ "tabla": tabla, "cursor": cursor, "limite": BACKFILL_FILAS_POR_PAGINA }),
+            &format!("página de histórico ({tabla})"),
+            AppError::External,
+        )
+        .await
         {
-            Ok(v) => v,
+            Ok(pagina) => pagina,
             Err(e) => {
                 // Se anota en la tabla (para que salga en el panel) y se propaga, que es lo que
                 // activa el backoff del motor. Tragarse el error dejaría un backfill parado en
@@ -183,10 +240,6 @@ pub async fn backfill_paso(
                 return Err(e);
             }
         };
-
-        let pagina: HistoricoPagina = serde_json::from_value(raw).map_err(|e| {
-            AppError::external(format!("página de histórico ilegible ({tabla}): {e}"))
-        })?;
 
         // Un worker antiguo (sin `/historico`) no puede llegar aquí: respondería 404 y el error de
         // arriba se lo habría llevado. Lo que sí puede pasar es que conteste otra tabla; aplicarla
@@ -231,17 +284,40 @@ pub async fn inicializar_tenant_vacio(
 ///
 /// `reparar = false` es el interruptor `reparacion_nube` apagado (PROD-06): se compara y se
 /// informa igual —es lo que permite ver si el problema sigue ahí—, pero no se escribe nada.
+///
+/// VERIF-01 · **Con el histórico a medias no se contrasta.** Tras recuperar desde la nube, la
+/// fase 2 va trayendo lo que la ventana de la fase 1 dejó fuera; hasta que termina, todo lo que
+/// falta por bajar saldría como «la nube tiene filas que aquí no están», y el checkpoint —que es
+/// el `Seq` de la foto de la fase 1— dice que esta Main está al día. Con eso se pedían las claves
+/// y cada fila pendiente de bajar se convertía en un `DELETE` arriba: los cierres de caja con sus
+/// cascadas, los fichajes… borrados de la nube antes de que el backfill los trajera. No se pide
+/// nada ni se informa: comparar maestros enteros con transaccionales a medias no dice nada.
 pub async fn verificar_contra_la_nube(
     nube: &dyn PairingService,
     repo: &dyn SyncRepository,
     reparar: bool,
-) -> AppResult<ResultadoVerificacion> {
-    let bruto = nube
-        .tpv_server_post_json("tpv", "/v1/sync/verificar", json!({}))
-        .await?;
-    let foto: VerificacionNube = serde_json::from_value(bruto).map_err(|e| {
-        AppError::Internal(format!("respuesta de /v1/sync/verificar ilegible: {e}"))
-    })?;
+) -> AppResult<Contraste> {
+    if repo.backfill_estado().await?.tablas_pendientes > 0 {
+        return Ok(Contraste::HistoricoPendiente);
+    }
+
+    let foto: VerificacionNube = pedir(
+        nube,
+        "/v1/sync/verificar",
+        json!({}),
+        "respuesta de /v1/sync/verificar",
+        AppError::Internal,
+    )
+    .await?;
+
+    // VERIF-02 · La foto va por delante de lo que ha bajado esta Main: algo de lo que trae está
+    // todavía de camino (una Handy acaba de escribir, o el catch-up no ha terminado). Compararla
+    // daría por descuadre lo que se arregla solo en cuanto llegue, y no se podría tocar nada
+    // arriba (`puede_borrar_arriba`). No se compara ni se informa: quien llama lo reintenta en
+    // unos minutos. Con un worker que no manda `hasta_seq` (0) se compara, y no se toca nada.
+    if foto.hasta_seq > repo.get_checkpoint().await? {
+        return Ok(Contraste::FotoPorDelante);
+    }
 
     // Se guarda ANTES de ceder la foto: es lo que decide si se puede borrar arriba.
     let hasta_seq = foto.hasta_seq;
@@ -251,16 +327,14 @@ pub async fn verificar_contra_la_nube(
     // baila, no qué. Las claves lo dicen exactamente, pero pesan, así que se piden únicamente de
     // las tablas que ya se sabe que están mal. El caso normal —todo cuadra— no paga nada de esto.
     if !resultado.tablas_a_examinar.is_empty() {
-        let bruto = nube
-            .tpv_server_post_json(
-                "tpv",
-                "/v1/sync/verificar-claves",
-                json!({ "tablas": resultado.tablas_a_examinar }),
-            )
-            .await?;
-        let claves: VerificacionClaves = serde_json::from_value(bruto).map_err(|e| {
-            AppError::Internal(format!("respuesta de /v1/sync/verificar-claves ilegible: {e}"))
-        })?;
+        let claves: VerificacionClaves = pedir(
+            nube,
+            "/v1/sync/verificar-claves",
+            json!({ "tablas": resultado.tablas_a_examinar }),
+            "respuesta de /v1/sync/verificar-claves",
+            AppError::Internal,
+        )
+        .await?;
 
         let (mas_descuadres, reparadas, borradas, aplazado) =
             repo.contrastar_claves(claves, hasta_seq, reparar).await?;
@@ -298,7 +372,28 @@ pub async fn verificar_contra_la_nube(
         .tpv_server_post_json("tpv", "/v1/sync/salud", informe)
         .await;
 
-    Ok(resultado)
+    Ok(Contraste::Hecho(resultado))
+}
+
+/// Lo que ha hecho una pasada de [`verificar_contra_la_nube`].
+#[derive(Debug)]
+pub enum Contraste {
+    /// Se ha comparado, reparado lo que se pudiera e informado.
+    Hecho(ResultadoVerificacion),
+    /// VERIF-01 · No se ha pedido nada a la nube: el histórico todavía se está descargando.
+    HistoricoPendiente,
+    /// VERIF-02 · La foto de la nube iba por delante del checkpoint local: no se ha comparado.
+    FotoPorDelante,
+}
+
+impl Contraste {
+    /// El resultado de la comparación, si la hubo.
+    pub fn hecho(self) -> Option<ResultadoVerificacion> {
+        match self {
+            Contraste::Hecho(r) => Some(r),
+            Contraste::HistoricoPendiente | Contraste::FotoPorDelante => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -438,5 +533,201 @@ mod tests {
         outbox_pending(&repo, -100).await.unwrap();
         outbox_pending(&repo, i64::MIN).await.unwrap();
         assert_eq!(*repo.limits.lock().unwrap(), vec![50, 50]);
+    }
+}
+
+#[cfg(test)]
+mod tests_leer_respuesta {
+    //! De los bytes de la respuesta al tipo, sin un `Value` de por medio: lo que mandaba un worker
+    //! anterior se sigue leyendo, lo que añada uno más nuevo no estorba, y un cuerpo que no encaja
+    //! se dice sin citar lo que traía.
+
+    use super::*;
+    use tpv_contracts::errors::ErrorCode;
+
+    fn leer<T: DeserializeOwned>(cuerpo: &str) -> AppResult<T> {
+        leer_respuesta(cuerpo.as_bytes(), "respuesta de prueba", AppError::External)
+    }
+
+    #[test]
+    fn el_volcado_de_un_worker_anterior_se_sigue_leyendo() {
+        // Antes de SYNC-19: `totalFilas` en camelCase, sin `parcial` ni `backfill`.
+        let foto: BootstrapSnapshot = leer(
+            r#"{"ok":true,"seq":41,"totalFilas":2,"tablas":[
+                 {"nombre":"Zonas","columnas":["ID_Zona","Nombre_Zona"],"filas":[["z1","Salón"],["z2",null]]}]}"#,
+        )
+        .unwrap();
+        assert_eq!((foto.seq, foto.total_filas), (41, 2));
+        assert_eq!(foto.tablas[0].filas[1], vec![serde_json::json!("z2"), serde_json::Value::Null]);
+        assert!(!foto.tablas[0].parcial);
+        assert!(foto.backfill.is_empty());
+    }
+
+    #[test]
+    fn el_volcado_de_hoy_y_lo_que_anada_uno_mas_nuevo() {
+        // El de ahora, más campos que esta versión no conoce: se ignoran.
+        let foto: BootstrapSnapshot = leer(
+            r#"{"ok":true,"seq":7,"total_filas":1,"ventana":{"desde":"2026-10-14","dias":30},"bytes":1234,
+                "tablas":[{"nombre":"Comandas","columnas":["ID_Comanda"],"filas":[["c1"]],"parcial":true,"filas_totales":900}],
+                "backfill":["Comandas"]}"#,
+        )
+        .unwrap();
+        assert_eq!((foto.seq, foto.total_filas), (7, 1));
+        assert!(foto.tablas[0].parcial);
+        assert_eq!(foto.backfill, vec!["Comandas".to_string()]);
+    }
+
+    #[test]
+    fn la_foto_del_contraste_de_un_worker_sin_hasta_seq() {
+        let foto: VerificacionNube = leer(r#"{"conteos":[{"nombre":"Zonas","filas":3}],"ventana":[]}"#).unwrap();
+        assert_eq!(foto.conteos[0].filas, 3);
+        assert_eq!(foto.hasta_seq, 0, "sin `hasta_seq` no se puede afirmar nada: falla cerrado");
+        assert!(!foto.ventana_omitida);
+
+        let foto: VerificacionNube = leer(
+            r#"{"conteos":[],"ventana":[],"ventana_omitida":true,"desde":"2026-10-14 00:00:00","hasta_seq":88}"#,
+        )
+        .unwrap();
+        assert_eq!((foto.hasta_seq, foto.ventana_omitida), (88, true));
+    }
+
+    #[test]
+    fn las_claves_y_una_pagina_del_historico() {
+        let claves: VerificacionClaves = leer(
+            r#"{"tablas":[{"nombre":"Pago_Detalles","columnas":["ID_Pago","ID_Detalle"],"claves":[["p1","d1"]]},
+                         {"nombre":"Comandas","columnas":["ID_Comanda"],"claves":[],"truncada":true}]}"#,
+        )
+        .unwrap();
+        assert_eq!(claves.tablas[0].claves.len(), 1);
+        assert!(!claves.tablas[0].truncada);
+        assert!(claves.tablas[1].truncada);
+
+        let pagina: HistoricoPagina = leer(
+            r#"{"ok":true,"tabla":"Comandas","columnas":["ID_Comanda","Total_Comanda"],"filas":[["c1",1250]],"siguiente_cursor":2000}"#,
+        )
+        .unwrap();
+        assert_eq!((pagina.tabla.as_str(), pagina.siguiente_cursor), ("Comandas", Some(2000)));
+
+        // La última página: con el cursor a `null` o sin él.
+        for cuerpo in [
+            r#"{"tabla":"Comandas","columnas":[],"filas":[],"siguiente_cursor":null}"#,
+            r#"{"tabla":"Comandas","columnas":[],"filas":[]}"#,
+        ] {
+            let pagina: HistoricoPagina = leer(cuerpo).unwrap();
+            assert_eq!(pagina.siguiente_cursor, None);
+        }
+    }
+
+    #[test]
+    fn un_200_con_ok_false_es_el_error_de_la_api() {
+        let err = leer::<BootstrapSnapshot>(r#"{"ok":false,"code":"conflict","error":"tenant_db_already_provisioned"}"#)
+            .unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Conflict, "{err}");
+
+        // También si el resto del cuerpo encaja en el tipo: no es una foto vacía con la que dar
+        // el contraste por hecho, ni un volcado sin tablas.
+        let err = leer::<VerificacionNube>(r#"{"ok":false,"code":"conflict","error":"x","conteos":[],"ventana":[]}"#)
+            .unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Conflict, "{err}");
+        let err = leer::<VerificacionClaves>(r#"{"tablas":[],"error":"x","code":"conflict","ok":false}"#).unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Conflict, "{err}");
+
+        // Un `ok` que no es un booleano no dice nada, como antes: se lee el cuerpo.
+        assert!(leer::<VerificacionClaves>(r#"{"ok":"no","tablas":[]}"#).is_ok());
+        assert!(leer::<VerificacionClaves>(r#"{"ok":true,"tablas":[]}"#).is_ok());
+    }
+
+    #[test]
+    fn lo_que_no_encaja_se_dice_sin_citar_lo_que_traia() {
+        // AUD-28: el texto de serde citaría el valor («invalid type: string "Ana López"…»).
+        let err = leer::<BootstrapSnapshot>(r#"{"seq":"Ana López 600123456","total_filas":0,"tablas":[]}"#).unwrap_err();
+        let texto = err.to_string();
+        assert!(texto.contains("respuesta de prueba ilegible"), "{texto}");
+        assert!(texto.contains("línea 1"), "{texto}");
+        assert!(!texto.contains("Ana") && !texto.contains("600123456"), "{texto}");
+        assert_eq!(err.code(), ErrorCode::External);
+
+        // Un cuerpo cortado o que no es JSON, igual; y cada ruta conserva su clase de error.
+        let err = leer_respuesta::<VerificacionNube>(b"{\"conteos\":[", "respuesta de /v1/sync/verificar", AppError::Internal)
+            .unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Internal);
+        assert!(leer::<HistoricoPagina>("<html>502 Bad Gateway</html>").is_err());
+        assert!(leer::<VerificacionClaves>("").is_err());
+    }
+
+    /// La nube de un test: contesta con un `Value`, y el puerto lo entrega en bytes por defecto.
+    struct NubeDePrueba(serde_json::Value);
+
+    #[async_trait::async_trait]
+    impl PairingService for NubeDePrueba {
+        fn device_identity(&self) -> AppResult<tpv_contracts::licensing::DeviceIdentity> {
+            unimplemented!()
+        }
+        fn firmar_hello(&self, _: &str, _: &str) -> AppResult<tpv_contracts::licensing::FirmaDispositivo> {
+            unimplemented!()
+        }
+        fn firmar_emparejamiento(
+            &self,
+            _: tpv_contracts::licensing::DeviceFirmarEmparejamientoArgs,
+        ) -> AppResult<tpv_contracts::licensing::FirmaDispositivo> {
+            unimplemented!()
+        }
+        fn hora_para_firmar(&self) -> i64 {
+            unimplemented!()
+        }
+        fn handy_set_token(&self, _: &str, _: &str) -> AppResult<()> {
+            unimplemented!()
+        }
+        fn handy_clear_token(&self) -> AppResult<()> {
+            unimplemented!()
+        }
+        fn handy_get_tenant(&self) -> AppResult<Option<String>> {
+            unimplemented!()
+        }
+        fn negocio_de_la_licencia(&self) -> AppResult<Option<String>> {
+            unimplemented!()
+        }
+        fn tpv_server_signed_headers(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &[u8],
+        ) -> AppResult<tpv_contracts::licensing::ApiSignedHeaders> {
+            unimplemented!()
+        }
+        async fn tpv_server_post_json(&self, _: &str, _: &str, _: serde_json::Value) -> AppResult<serde_json::Value> {
+            Ok(self.0.clone())
+        }
+        async fn pair_create(&self) -> AppResult<tpv_contracts::licensing::PairCreateResult> {
+            unimplemented!()
+        }
+        async fn upload_image(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: Vec<u8>,
+            _: &str,
+        ) -> AppResult<crate::ports::licensing::ResultadoSubidaImagen> {
+            unimplemented!()
+        }
+        async fn delete_image(&self, _: &str, _: &str) -> AppResult<()> {
+            unimplemented!()
+        }
+        async fn download_image(&self, _: &str, _: &str) -> AppResult<Option<Vec<u8>>> {
+            unimplemented!()
+        }
+    }
+
+    #[tokio::test]
+    async fn un_adaptador_que_solo_sabe_contestar_en_json_sirve_igual() {
+        // Los dobles de los tests no implementan `tpv_server_post_bytes`: vale el del puerto.
+        let nube = NubeDePrueba(serde_json::json!({ "tablas": [] }));
+        let claves: VerificacionClaves =
+            pedir(&nube, "/v1/sync/verificar-claves", json!({}), "respuesta de prueba", AppError::Internal)
+                .await
+                .unwrap();
+        assert!(claves.tablas.is_empty());
     }
 }

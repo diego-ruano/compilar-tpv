@@ -4,7 +4,7 @@
 //! `Applied_Operations` es el control idempotente del worker; la Main usa `_Sync_Applied_Ops`.
 
 use crate::util::new_id;
-use crate::consultas::{db_err, select_one_i64, select_one_string, select_one_dinero, resolve_trabajador_id_input, update_total_comanda_sql};
+use crate::consultas::{db_err, lista_json, select_one_i64, select_one_string, select_one_dinero, resolve_trabajador_id_input, update_total_comanda_sql};
 use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,13 +45,6 @@ fn parse_db_id(id: &str, prefix: &str) -> Option<String> {
     } else {
         Some(rest.to_string())
     }
-}
-
-fn build_in_placeholders(start: i64, count: usize) -> String {
-    (0..count)
-        .map(|i| format!("?{}", start + i as i64))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 
@@ -372,16 +365,18 @@ impl MesasRepository for SqliteMesasRepository {
             .filter_map(|z| parse_db_id(&z.id, "db-zona-"))
             .collect();
 
-        // Cláusula reutilizable "... AND ID_Zona NOT IN (?1, ?2, …)" + sus argumentos.
+        // Cláusula reutilizable "... AND ID_Zona NOT IN (las conservadas)" + su argumento. DO-01: la
+        // lista va entera en UN parámetro (`lista_json`), no en uno por zona.
         let not_in_clause = if kept_zone_ids.is_empty() {
-            String::new()
+            ""
         } else {
-            format!(
-                " AND ID_Zona NOT IN ({})",
-                build_in_placeholders(1, kept_zone_ids.len())
-            )
+            " AND ID_Zona NOT IN (SELECT value FROM json_each(?1))"
         };
-        let kept_args: Vec<Value> = kept_zone_ids.iter().cloned().map(Value::Text).collect();
+        let kept_args: Vec<Value> = if kept_zone_ids.is_empty() {
+            Vec::new()
+        } else {
+            vec![lista_json(&kept_zone_ids)]
+        };
 
         let g = self.db.write().await;
         let db = &g;
@@ -423,11 +418,9 @@ impl MesasRepository for SqliteMesasRepository {
             // Libera los nombres reales para que los UPDATE de la fase 3 no choquen de forma
             // transitoria con el UNIQUE(Nombre_Zona) al renombrar/intercambiar zonas existentes.
             if !kept_zone_ids.is_empty() {
-                let in_sql = build_in_placeholders(1, kept_zone_ids.len());
                 db.execute(
-                    &format!(
-                        "UPDATE Zonas SET Nombre_Zona = '__tmp_zona_' || ID_Zona WHERE ID_Zona IN ({in_sql});"
-                    ),
+                    "UPDATE Zonas SET Nombre_Zona = '__tmp_zona_' || ID_Zona \
+                     WHERE ID_Zona IN (SELECT value FROM json_each(?1));",
                     kept_args.clone(),
                 )
                 .await
@@ -506,11 +499,12 @@ impl MesasRepository for SqliteMesasRepository {
                     }
                 }
 
+                // DO-01: las mesas conservadas, en un solo parámetro (una zona puede tener cientos).
                 let mut filtro = String::from("ID_Zona = ?1");
                 let mut sql_args: Vec<Value> = vec![Value::Text(zone_id.clone())];
                 if !kept.is_empty() {
-                    filtro.push_str(&format!(" AND ID_Mesa NOT IN ({})", build_in_placeholders(2, kept.len())));
-                    sql_args.extend(kept.iter().cloned().map(Value::Text));
+                    filtro.push_str(" AND ID_Mesa NOT IN (SELECT value FROM json_each(?2))");
+                    sql_args.push(lista_json(&kept));
                 }
                 for sql in sql_quitar_mesas(&filtro) {
                     db.execute(&sql, sql_args.clone()).await.map_err(db_err)?;
@@ -1284,24 +1278,20 @@ impl MesasRepository for SqliteMesasRepository {
         let res: AppResult<String> = db.transaccion(async {
             let id_trabajador_cobrador = resolve_trabajador_id_input(db, data.id_usuario.clone()).await?;
 
-            let in_sql = build_in_placeholders(2, ids.len());
-            let mut count_args: Vec<Value> = Vec::with_capacity(1 + ids.len());
-            count_args.push(Value::Text(data.id_comanda.clone()));
-            for id in ids.iter() {
-                count_args.push(Value::Text(id.clone()));
-            }
+            // DO-01: las líneas que se cobran van en UN parámetro (un array JSON), no en uno por
+            // línea: la sentencia que enlaza `Pago_Detalles` se replica, y con más de 98 líneas
+            // pasaba de los 100 parámetros que admite la nube. Las lecturas usan la misma lista.
+            let lista_ids = lista_json(&ids);
+            let count_args: Vec<Value> = vec![Value::Text(data.id_comanda.clone()), lista_ids.clone()];
 
-            let sql_count = format!(
-                r#"
+            let sql_count = r#"
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
-                  AND dc.ID_Detalle IN ({})
+                  AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
                   AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
-                "#,
-                in_sql
-            );
-            let count = select_one_i64(db, &sql_count, count_args.clone())
+                "#;
+            let count = select_one_i64(db, sql_count, count_args.clone())
                 .await?
                 .unwrap_or(0);
 
@@ -1311,17 +1301,14 @@ impl MesasRepository for SqliteMesasRepository {
                 ));
             }
 
-            let sql_sum = format!(
-                r#"
+            let sql_sum = r#"
                 SELECT IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0)
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
-                  AND dc.ID_Detalle IN ({})
+                  AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
                   AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
-                "#,
-                in_sql
-            );
-            let total = select_one_dinero(db, &sql_sum, count_args.clone())
+                "#;
+            let total = select_one_dinero(db, sql_sum, count_args.clone())
                 .await?
                 .unwrap_or(Dinero::CERO);
             // AUD-17: un cobro negativo sería dinero que sale del cajón con el arqueo cuadrado (el
@@ -1391,26 +1378,23 @@ impl MesasRepository for SqliteMesasRepository {
                 );
             }
 
-            let mut insert_args: Vec<Value> = Vec::with_capacity(2 + ids.len());
-            insert_args.push(Value::Text(id_pago.clone()));
-            insert_args.push(Value::Text(data.id_comanda.clone()));
-            for id in ids.iter() {
-                insert_args.push(Value::Text(id.clone()));
-            }
-            let in_sql2 = build_in_placeholders(3, ids.len());
-
-            let sql_insert = format!(
+            db.execute(
                 r#"
                 INSERT OR IGNORE INTO Pago_Detalles (ID_Pago, ID_Detalle)
                 SELECT ?1, dc.ID_Detalle
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?2
-                  AND dc.ID_Detalle IN ({})
+                  AND dc.ID_Detalle IN (SELECT value FROM json_each(?3))
                   AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                 "#,
-                in_sql2
-            );
-            db.execute(&sql_insert, insert_args).await.map_err(db_err)?;
+                vec![
+                    Value::Text(id_pago.clone()),
+                    Value::Text(data.id_comanda.clone()),
+                    lista_ids,
+                ],
+            )
+            .await
+            .map_err(db_err)?;
 
             // MESA-01: descuento de stock/lotes (FEFO) de las líneas recién cobradas. Todas
             // las de `ids` estaban pendientes (validado por el count previo), así que se
@@ -1419,16 +1403,13 @@ impl MesasRepository for SqliteMesasRepository {
             {
                 let mut crows = db
                     .query(
-                        &format!(
-                            r#"
-                            SELECT dc.ID_Detalle, dc.ID_Producto, CAST(COALESCE(dc.Cantidad,1) AS REAL)
-                            FROM Detalle_Comanda dc
-                            WHERE dc.ID_Comanda = ?1
-                              AND dc.ID_Detalle IN ({})
-                            ORDER BY dc.ID_Detalle;
-                            "#,
-                            in_sql
-                        ),
+                        r#"
+                        SELECT dc.ID_Detalle, dc.ID_Producto, CAST(COALESCE(dc.Cantidad,1) AS REAL)
+                        FROM Detalle_Comanda dc
+                        WHERE dc.ID_Comanda = ?1
+                          AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
+                        ORDER BY dc.ID_Detalle;
+                        "#,
                         count_args.clone(),
                     )
                     .await

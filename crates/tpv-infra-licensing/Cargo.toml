@@ -23,6 +23,12 @@ hmac = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
 
+[dev-dependencies]
+# El servidor local de los tests del transporte (`tests_transporte_de_volcados`) y el gzip con el que
+# contesta. Sólo se compilan al testear.
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt", "time"] }
+flate2 = { workspace = true }
+
 # keyring (almacén del SO) sólo en escritorio: en Android no tiene almacén propio, así que allí se
 # sustituye por el almacén JNI Android Keystore + SharedPreferences (secret_store.rs).
 [target.'cfg(not(target_os = "android"))'.dependencies]

@@ -1,0 +1,44 @@
+{
+  "Comandas": [
+    {
+      "Estado": "Pagada",
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 36000
+    }
+  ],
+  "Lote_Consumos": [
+    {
+      "Consumos": 120,
+      "Unidades": 120.0
+    }
+  ],
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1",
+      "Stock_Disponible": 80.0
+    }
+  ],
+  "Movimientos_Caja": [
+    {
+      "Importe": 36000,
+      "Metodo_Pago": "Tarjeta",
+      "Tipo": "COBRO"
+    }
+  ],
+  "Pago_Detalles": [
+    {
+      "Distintas": 120,
+      "Lineas": 120,
+      "Primera": "detalle-001",
+      "Ultima": "detalle-120"
+    }
+  ],
+  "Pagos": [
+    {
+      "ID_Comanda": "comanda-1",
+      "Importe_Total": 36000,
+      "Metodo_Pago": "Tarjeta",
+      "Tipo": "TOTAL"
+    }
+  ]
+}

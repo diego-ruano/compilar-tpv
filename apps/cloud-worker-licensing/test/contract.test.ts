@@ -126,6 +126,8 @@ import casoMesasCobroSuelto from "../../../tests/contract/casos/mesas/cobrar_det
 import goldenMesasCobroSuelto from "../../../tests/contract/golden/mesas/cobrar_detalles_lote_y_suelto.json";
 import casoMesasCobroDecimos from "../../../tests/contract/casos/mesas/cobrar_detalles_decimos.json";
 import goldenMesasCobroDecimos from "../../../tests/contract/golden/mesas/cobrar_detalles_decimos.json";
+import casoMesasCobro120 from "../../../tests/contract/casos/mesas/cobrar_detalles_120_lineas.json";
+import goldenMesasCobro120 from "../../../tests/contract/golden/mesas/cobrar_detalles_120_lineas.json";
 import casoCliCrear from "../../../tests/contract/casos/clientes/crear.json";
 import goldenCliCrear from "../../../tests/contract/golden/clientes/crear.json";
 import casoCliActualizar from "../../../tests/contract/casos/clientes/actualizar.json";
@@ -310,6 +312,7 @@ const CASOS = [
 	{ nombre: "mesas_cobro_con_cliente", caso: casoMesasCobroCliente, golden: goldenMesasCobroCliente },
 	{ nombre: "mesas_cobro_lote_y_suelto", caso: casoMesasCobroSuelto, golden: goldenMesasCobroSuelto },
 	{ nombre: "mesas_cobro_decimos", caso: casoMesasCobroDecimos, golden: goldenMesasCobroDecimos },
+	{ nombre: "mesas_cobro_120_lineas", caso: casoMesasCobro120, golden: goldenMesasCobro120 },
 	{ nombre: "clientes_crear", caso: casoCliCrear, golden: goldenCliCrear },
 	{ nombre: "clientes_actualizar", caso: casoCliActualizar, golden: goldenCliActualizar },
 	{ nombre: "tareas_crear", caso: casoTareaCrear, golden: goldenTareaCrear },

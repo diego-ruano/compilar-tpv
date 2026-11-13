@@ -314,21 +314,24 @@ Decidido, a falta de medir cuánto genera un bar al año:
 
 ### DO-01 · Listas de IDs con un parámetro por elemento
 
-El SQLite del DO admite 100 parámetros por sentencia ([worker.md](arquitectura/worker.md)). Quedan
-sentencias que ponen un `?` por elemento de una lista:
+El SQLite del DO admite 100 parámetros por sentencia ([worker.md](arquitectura/worker.md)). En el
+worker quedan sentencias que ponen un `?` por elemento de una lista:
 
-- En el worker: «Ver tickets» de la venta rápida (`venta_rapida.queries.ts::indexRows`) manda **todos los
-  tickets del día**, así que un bar con más de 100 se queda sin esa pantalla en la Handy. Y también
-  cobrar o mover líneas (`mesas.queries.ts`, `mesas.commands.ts`, `venta_rapida.queries.ts`) y las
-  tareas (`tareas.*.ts`).
-- En la Main, las que se replican: guardar el plano (`mesas.rs`, el `NOT IN` de zonas y de mesas: una
-  zona con más de 98 mesas no sube), las líneas de la venta rápida (`venta_rapida.rs`) y las tareas
-  (`tareas.rs`).
+- «Ver tickets» de la venta rápida (`venta_rapida.queries.ts::indexRows`) manda **todos los tickets
+  del día**, así que un bar con más de 100 se queda sin esa pantalla en la Handy.
+- El plan del cobro de barra (`venta_rapida.queries.ts::cobrarPlan`): un ticket de más de 99 líneas.
+- Guardar el plano desde la Handy (`mesas.commands.ts::saveLayout`, el `NOT IN` de zonas y de mesas
+  y el `IN` de zonas): un plano con más de 100 zonas o una zona con más de 98 mesas.
+- Las asignaciones de una tarea (`tareas.commands.ts`, `tareas.queries.ts`): más de 99 asignados.
 
-Decidido: pasar la lista como un único parámetro JSON, `IN (SELECT value FROM json_each(?))`, en los dos
-lados y con sus arneses de contrato. Así no hace falta ningún tope de mesas. Se hace si la base del negocio
-se queda en el DO (decisión [0008](decisiones/0008-la-base-del-negocio-en-su-durable-object.md)); con
-Turso no hace falta.
+Decidido: pasar la lista como un único parámetro JSON, `IN (SELECT value FROM json_each(?))`, con su
+caso en el arnés de contrato, como el cobro de mesa (`mesas/cobrar_detalles_120_lineas`). Así no hace
+falta ningún tope de mesas.
+
+Lo que sube la Main ya va así, y `WriteGuard` revienta en desarrollo ante una sentencia que la nube
+no admitiría ([sincronizacion.md](arquitectura/sincronizacion.md#escritor-único-y-captura)). Las
+lecturas de la Main que todavía ponen un `?` por elemento (`venta_rapida.rs`,
+`pedidos_proveedor.rs`) van contra su SQLite local y no se replican: no les afecta.
 
 ### DO-02 · La recuperación de una Main con mucho desde el último cierre
 

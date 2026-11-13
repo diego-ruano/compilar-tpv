@@ -14,7 +14,8 @@
 //! El cuerpo debe ser **idempotente**: el motor puede ejecutarlo antes de tiempo (job vencido tras
 //! un apagón) o repetirlo tras un fallo parcial.
 
-use std::time::Duration;
+use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -27,6 +28,7 @@ use tpv_application::use_cases::reservas_web as uc_reservas_web;
 use tpv_application::use_cases::reservas_web_avisos as uc_reservas_web_avisos;
 use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
 use tpv_application::use_cases::sync as uc_sync;
+use tpv_application::use_cases::verificacion_nube as uc_verificacion;
 use tpv_infra_licensing::PairingAdapter;
 
 use tpv_contracts::interruptores::Interruptor;
@@ -106,14 +108,17 @@ const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
 /// lectura de una tabla vacía.
 const BACKFILL_INTERVAL_SECS: u64 = 5 * 60;
 
-/// SYNC-24: cada cuánto se contrasta la nube contra esta base.
+/// SYNC-24 / VERIF-02: cada cuánto se mira **si toca** contrastar la nube contra esta base.
 ///
-/// Una vez al día, y no más. Cada pasada se descarga la ventana de 30 días del tenant, y esas
-/// lecturas de Turso se facturan: comprobar cada hora costaría 24 veces más para encontrar lo mismo
-/// —un descuadre no se arregla solo, así que sigue ahí mañana—. Lo que sí se detecta al instante es
-/// lo que importa de verdad: SYNC-22 repara en el momento en que una operación se aparta, sin
-/// esperar a esta pasada. Esto es la red de debajo, no la primera línea.
-const VERIFICAR_NUBE_INTERVAL_SECS: u64 = 24 * 60 * 60;
+/// No es cada cuánto se contrasta: eso lo decide `tpv_domain::verificacion_nube::cuando_verificar`
+/// (tras un cierre de caja o a las veinte horas de la última pasada, y sólo en un momento
+/// tranquilo). Casi todas las vueltas son unas lecturas locales que acaban en «no toca». Un cuarto
+/// de hora es lo que tarda, como mucho, en aprovecharse un rato de calma.
+const VERIFICAR_NUBE_INTERVAL_SECS: u64 = 15 * 60;
+
+/// Cuándo arrancó la aplicación, en reloj monótono: `verificar_nube` no corre en sus primeros
+/// minutos. Lo fija la primera llamada a [`catalogo`], que es la del arranque.
+static ARRANQUE: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// Una instantánea coherente al día y las siete últimas: suficiente para errores humanos o del
 /// disco local sin convertir cada escritura del TPV en trabajo de backup.
@@ -133,6 +138,8 @@ const UPDATE_CHECK_DELAY_SECS: u64 = 30;
 
 /// Los jobs de este dispositivo. El orden no importa: cada uno corre en su propio bucle.
 pub(crate) fn catalogo() -> Vec<Job> {
+    LazyLock::force(&ARRANQUE);
+
     #[allow(unused_mut)]
     let mut jobs = vec![
         Job {
@@ -296,14 +303,12 @@ pub(crate) fn catalogo() -> Vec<Job> {
         },
         Job {
             nombre: "verificar_nube",
+            // Cada cuarto de hora se mira si toca; cuándo toca lo dice la regla (VERIF-02).
             cada: Duration::from_secs(VERIFICAR_NUBE_INTERVAL_SECS),
-            // Tarde en el arranque: el catch-up del principio todavía está aplicando lo que llegó
-            // mientras el equipo estaba apagado, y comparar contra una base a medio poner al día
-            // sacaría descuadres que se arreglan solos treinta segundos después. Un aluvión de
-            // avisos falsos enseña a ignorar precisamente la alarma que no hay que ignorar.
+            // El margen de arranque de la propia regla: antes no hay nada que mirar.
             retardo_inicial: Duration::from_secs(10 * 60),
             // `MainOperativa` excluye una reconciliación en curso, que es cuando la base local
-            // está por definición incompleta.
+            // está por definición incompleta. La regla lo vuelve a mirar.
             requiere: Requiere::MainOperativa,
             interruptor: None,
             ejecutar: tarea(verificar_nube),
@@ -634,18 +639,53 @@ async fn backfill_historico(app: AppHandle) -> Result<(), String> {
 /// El informe NO va al usuario. Un descuadre no lo puede atender quien está delante del TPV, así
 /// que avisarle sería un mensaje que aprende a descartar; va al worker y de ahí a Axiom, donde lo
 /// ve quien puede arreglarlo sin tener que mirar nada.
+///
+/// VERIF-02 · El job vence cada cuarto de hora, y casi siempre **no toca**: entonces devuelve
+/// `Ok` sin pedir nada a la nube. Cuándo toca (tras un cierre de caja o a las veinte horas, en un
+/// momento tranquilo, y nunca con el histórico a medias: VERIF-01) lo decide
+/// `tpv_domain::verificacion_nube::cuando_verificar`, con lo que guarda `_Verificacion_Nube`. Un
+/// intento que falla sí devuelve `Err`; lo que espaciará el siguiente no es el backoff del motor
+/// sino el de la regla (30 min, 1 h… hasta 6 h): las vueltas de en medio vuelven a ser «no toca».
 async fn verificar_nube(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let repo = state.sync_repo().await?;
+    let db = state.db.lock().await.as_ref().cloned().ok_or("DB no inicializada")?;
+    let estado = tpv_infra_sqlite::verificacion_nube::SqliteVerificacionNube::new(db);
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
 
+    let momento = uc_verificacion::Momento {
+        ahora_ms: tpv_infra_sqlite::util::now_ms(),
+        desde_el_arranque_ms: ARRANQUE.elapsed().as_millis() as i64,
+        main_operativa: state.es_main_operativa().await,
+    };
     // PROD-06: con `reparacion_nube` apagado se compara e informa igual, pero no se escribe nada.
     let reparar = crate::interruptores::apagado(&app, Interruptor::ReparacionNube).is_none();
-    let r = uc_sync::verificar_contra_la_nube(&PairingAdapter::new(dir), repo.as_ref(), reparar)
-        .await?;
+
+    let r = match uc_verificacion::verificar_si_toca(
+        &PairingAdapter::new(dir),
+        repo.as_ref(),
+        &estado,
+        momento,
+        reparar,
+    )
+    .await?
+    {
+        uc_verificacion::Vuelta::Hecha(r) => r,
+        uc_verificacion::Vuelta::NoToca(motivo) => {
+            tracing::debug!(target: "tpv::jobs", ?motivo, "verificación: no toca");
+            return Ok(());
+        }
+        uc_verificacion::Vuelta::Aplazada => {
+            tracing::info!(
+                target: "tpv::jobs",
+                "verificación: la foto de la nube iba por delante de lo que ha bajado este equipo; se reintenta en diez minutos"
+            );
+            return Ok(());
+        }
+    };
 
     if r.descuadres.is_empty() {
         tracing::debug!(target: "tpv::jobs", "verificación: la nube y la base local coinciden");

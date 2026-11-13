@@ -81,6 +81,8 @@ pub mod trabajadores;
 pub mod venta_rapida;
 pub(crate) mod cobros_pendientes;
 pub mod verifactu;
+// Lo que el contraste con la nube recuerda de sus pasadas (`_Verificacion_Nube`, VERIF-02).
+pub mod verificacion_nube;
 
 pub mod permisos;
 

@@ -31,6 +31,7 @@ pub mod tickets;
 pub mod trabajadores;
 pub mod venta_rapida;
 pub mod verifactu;
+pub mod verificacion_nube;
 
 pub mod replicacion;
 

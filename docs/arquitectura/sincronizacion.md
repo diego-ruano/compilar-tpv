@@ -119,7 +119,17 @@ pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esp
   (`sin_comentarios_iniciales` → `is_write_sql`), y lo que sube va sin ellos. Un `WITH … INSERT` no se
   reconoce como escritura; si alguna vez hace falta, hay que enseñárselo a `is_write_sql`.
 - **Lo que es estado local del equipo va por `raw()`**: `_Jobs_State`, `_Sync_*`, `_Verifactu_*`,
-  `_Backfill_Historico`, `_Recovery_State`, `_Negocio`, el backfill. Por `execute()` se replicaría a la nube.
+  `_Backfill_Historico`, `_Recovery_State`, `_Verificacion_Nube`, `_Negocio`, el backfill. Por
+  `execute()` se replicaría a la nube.
+- **Lo que sube tiene que caber en el SQLite del DO**, que admite 100 parámetros y 100 KB por
+  sentencia ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Una lista de
+  tamaño variable (las líneas de un cobro, las mesas de una zona, los asignados a una tarea) va
+  como **un único parámetro JSON**, `IN (SELECT value FROM json_each(?n))`
+  (`consultas::lista_json`), nunca con un `?` por elemento: con más de 98 líneas, el cobro de una
+  mesa subía una sentencia que la nube rechazaba como permanente (DO-01). `WriteGuard` lo vigila
+  al capturar (`no_cabe_en_la_nube`): una sentencia con más de 100 valores o más de 100 KB de SQL
+  **revienta en desarrollo y en los tests**, y en el equipo del cliente no bloquea la escritura
+  (podría ser un cobro): la deja anotada como error, con el verbo y la tabla y sin sus datos.
 - **Idempotencia** por `Op_Id`: `Applied_Operations` en la nube y `_Sync_Applied_Ops` en la Main evitan
   duplicados en catch-up y en vivo, y los ecos de las propias escrituras.
 - **IDs deterministas**: toda columna `TEXT PRIMARY KEY` recibe su UUID generado **antes** del
@@ -491,13 +501,28 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
 - **El contraste diario** (job `verificar_nube`, `/v1/sync/verificar` y `/verificar-claves`) compara la
   ventana de 30 días de la nube con la base local, repara e informa a Axiom (`tenant_salud_sync`), no al
   usuario. La comparación tolera las dos formas de escribir un número (`2.5` y `"2.50"`).
+- **Corre tras un cierre de caja o a las veinte horas de la última pasada, y sólo en un momento
+  tranquilo** (VERIF-02): sin nada pendiente de subir ni un cambio de la nube detenido, y con un
+  cuarto de hora sin escrituras. La regla y sus plazos están en
+  [jobs-e-interruptores.md](jobs-e-interruptores.md#cuándo-se-contrasta-con-la-nube-verif-02).
+- **Si la foto llega por delante de lo que ha bajado esta Main no se compara** (su `hasta_seq` es
+  mayor que el checkpoint local): no se piden las claves ni se informa, y se reintenta a los diez
+  minutos. Compararla sólo serviría para ver como descuadre lo que todavía está de camino.
 - **Nada se toca si esta Main no puede afirmar que está al día**: su checkpoint tiene que alcanzar el
-  `Seq` de la foto (leído después de las filas) y no puede haber **ninguna fila en `_Sync_Failed`**,
-  ni en cuarentena ni pendiente de reintentar (`hay_fallos_de_bajada`). Vale para actualizar y para
-  borrar. Una fila que la nube tiene y aquí no, sólo se borra arriba en ese caso; con una lista de
-  claves truncada no se borra nada. La guarda se mira al comparar y **otra vez con el escritor cogido,
-  justo antes de encolar** (`guarda_con_el_escritor`): la bajada registra sus fallos con el escritor,
-  así que uno registrado entre la comparación y la escritura aplaza lo que se iba a encolar.
+  `Seq` de la foto (leído después de las filas), no puede haber **ninguna fila en `_Sync_Failed`**,
+  ni en cuarentena ni pendiente de reintentar (`hay_fallos_de_bajada`), y no puede quedar histórico
+  por bajar (abajo). Vale para actualizar y para borrar. Una fila que la nube tiene y aquí no, sólo
+  se borra arriba en ese caso; con una lista de claves truncada no se borra nada. La guarda se mira
+  al comparar y **otra vez con el escritor cogido, justo antes de encolar**
+  (`guarda_con_el_escritor`): la bajada registra sus fallos con el escritor, así que uno registrado
+  entre la comparación y la escritura aplaza lo que se iba a encolar.
+- **Con el histórico a medias no se contrasta** (VERIF-01). Una Main recién recuperada de la nube
+  tiene el checkpoint en el `Seq` de la foto de la fase 1, así que por el marcapáginas está al día,
+  y le falta todo lo que la fase 2 no ha bajado todavía: para el contraste, filas que la nube tiene
+  de más. Mientras quede una tabla sin completar en `_Backfill_Historico`, el caso de uso no pide
+  la foto ni las claves, y el repositorio, por su cuenta, no da permiso para borrar, para pisar ni
+  para subir nada (`puede_borrar_arriba` y `falta_historico`, y otra vez con el escritor cogido:
+  si una recuperación reemplaza la base entre la comparación y la escritura, del plan no sale nada).
 - Con un fallo de bajada tampoco se sube lo que aquí está y arriba no: puede ser lo que la nube borró
   con el cambio que aquí no ha entrado, y subirlo lo resucitaría.
 - Con el interruptor `reparacion_nube` apagado se compara e informa, sin escribir.

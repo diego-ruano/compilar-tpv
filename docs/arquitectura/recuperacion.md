@@ -83,6 +83,13 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
 - Una tabla de negocio sin clasificar viaja entera; un test compara la clasificación con el esquema.
 - El worker dice qué tablas vienen recortadas (`parcial`) y en qué orden rellenarlas: la clasificación
   vive sólo en `bootstrap.ventana.ts`.
+- **Un volcado se pide comprimido, con su propio plazo, y se lee de una pasada.** El cliente REST de
+  la Main (`tpv-infra-licensing`) manda `Accept-Encoding: gzip` y descomprime al leer. Las rutas que
+  bajan un volcado (`/bootstrap`, `/historico`, `/verificar` y `/verificar-claves`) tienen 150 s de
+  plazo, de conectar a terminar el cuerpo, frente a los 20 s del resto; conectar tiene 10 s en
+  todas. La respuesta va de los bytes a su tipo (`use_cases::sync::pedir`), sin un
+  `serde_json::Value` intermedio que la tenga dos veces en memoria. Una respuesta que no llega
+  entera es un fallo de conexión, no un volcado vacío.
 
 `bootstrap_restaurar` reemplaza las tablas en una transacción, filtra nombres de tabla y columna
 contra `sqlite_master` y contra `[A-Za-z0-9_]` (se interpolan en el SQL), informa de las tablas que
@@ -108,6 +115,13 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - **La reconciliación de valores derivados se calla mientras falte histórico** (compararía maestros
   completos con transaccionales a medias), y Conectividad y Estadísticas dicen que el histórico se está
   descargando.
+- **El contraste con la nube tampoco corre mientras falte histórico** (VERIF-01): lo que queda por
+  bajar le parecería sobrante de la nube y lo borraría arriba, con sus cascadas, antes de que la
+  fase 2 lo trajera ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)).
+  Lo que recuerda de sus pasadas (`_Verificacion_Nube`) es estado local: reconstruir desde la nube
+  no lo toca, y una copia local trae el de cuando se hizo. En los dos casos vuelve a contrastar,
+  con el histórico ya completo, en el primer momento tranquilo que le toque
+  ([jobs-e-interruptores.md](jobs-e-interruptores.md#cuándo-se-contrasta-con-la-nube-verif-02)).
 
 ## Desde una copia local
 
