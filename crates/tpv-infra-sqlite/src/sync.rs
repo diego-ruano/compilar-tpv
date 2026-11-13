@@ -169,6 +169,67 @@ async fn choque_del_historico(
     AppError::repository(format!("histórico {tabla}: {error}"))
 }
 
+/// El error de una página del histórico que hace fallar el `COMMIT` por una clave foránea: una fila
+/// apunta a otra que aquí no está. Se vuelve a meter la página en una transacción que se deshace,
+/// se mira con `PRAGMA foreign_key_check` qué fila es y se dice, con su clave y la tabla a la que
+/// apunta. `None` si no se encuentra (y entonces vale el error de antes).
+async fn foranea_del_historico(
+    conn: &Connection,
+    pagina: &HistoricoPagina,
+    si_ya_esta: &str,
+    clave_primaria: &[String],
+) -> Option<AppError> {
+    let tabla = &pagina.tabla;
+    let cols = pagina.columnas.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+    let marcas = vec!["?"; pagina.columnas.len()].join(", ");
+    let insertar = format!("INSERT INTO \"{tabla}\" ({cols}) VALUES ({marcas}) {si_ya_esta};");
+    let mut mensaje: Option<String> = None;
+    let _ = conn
+        .transaccion(async {
+            for fila in &pagina.filas {
+                conn.execute(&insertar, fila.iter().map(json_to_value).collect::<Vec<_>>()).await.map_err(db_err)?;
+            }
+            let mut filas = conn.query(&format!("PRAGMA foreign_key_check(\"{tabla}\");"), ()).await.map_err(db_err)?;
+            let infraccion = filas.next().await.map_err(db_err)?;
+            drop(filas);
+            if let Some(f) = infraccion {
+                let padre = match f.get_value(2).map_err(db_err)? {
+                    Value::Text(t) => t,
+                    _ => String::new(),
+                };
+                let clave = match (f.get_value(1).map_err(db_err)?, clave_primaria.is_empty()) {
+                    (Value::Integer(rowid), false) => {
+                        let lista = clave_primaria.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
+                        let mut fila = conn
+                            .query(&format!("SELECT {lista} FROM \"{tabla}\" WHERE rowid = ?1;"), vec![Value::Integer(rowid)])
+                            .await
+                            .map_err(db_err)?;
+                        match fila.next().await.map_err(db_err)? {
+                            Some(r) => (0..clave_primaria.len())
+                                .map(|i| match r.get_value(i as i32) {
+                                    Ok(Value::Text(t)) => t,
+                                    Ok(Value::Integer(n)) => n.to_string(),
+                                    _ => String::new(),
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            None => String::new(),
+                        }
+                    }
+                    _ => String::new(),
+                };
+                mensaje = Some(format!(
+                    "histórico {tabla}: la fila ({clave}) apunta a una de {padre} que aquí no está; la página no se \
+                     aplica y se reintentará"
+                ));
+            }
+            // Siempre se deshace: esto sólo era para mirar.
+            Err::<(), _>(AppError::internal("diagnóstico de la página del histórico"))
+        })
+        .await;
+    mensaje.map(AppError::repository)
+}
+
 /// ¿Es un identificador SQL simple? El volcado llega de la red, y sus nombres de tabla y de columna
 /// se interpolan en el SQL (no se pueden enlazar con `?`). Un nombre que no sea `[A-Za-z0-9_]` se
 /// descarta: no hay ningún caso legítimo en este esquema y sí una inyección si se deja pasar.
@@ -1574,7 +1635,14 @@ impl SyncRepository for SqliteSyncRepository {
             Ok(insertadas)
         }).await;
 
-        res
+        match res {
+            // Las foráneas van diferidas: una fila cuyo padre no está aquí entra bien y lo que falla
+            // es el COMMIT, sin decir cuál. Se busca, para decirlo.
+            Err(e) if e.to_string().contains("FOREIGN KEY constraint failed") => {
+                Err(foranea_del_historico(conn, &pagina, &si_ya_esta, &clave_primaria).await.unwrap_or(e))
+            }
+            otro => otro,
+        }
     }
 
     async fn backfill_marcar_error(&self, tabla: &str, error: &str) -> AppResult<()> {
@@ -2781,6 +2849,42 @@ mod tests_backfill {
             1
         );
         assert_eq!(repo.backfill_estado().await.unwrap().tablas_pendientes, 0);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Una fila cuyo padre no está aquí hace fallar la página al final (las foráneas van
+    /// diferidas), y el error dice cuál es y a qué tabla apunta.
+    #[tokio::test]
+    async fn una_fila_sin_su_padre_no_entra_y_se_dice_cual_es() {
+        let (repo, db, dir) = repo_temporal().await;
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 10,
+            total_filas: 0,
+            tablas: vec![BootstrapTabla {
+                nombre: "Detalle_Comanda".into(),
+                columnas: vec!["ID_Detalle".into()],
+                filas: vec![],
+                parcial: true,
+            }],
+            backfill: vec!["Detalle_Comanda".into()],
+        }, "negocio-de-prueba")
+        .await
+        .unwrap();
+
+        let e = repo
+            .backfill_aplicar_pagina(HistoricoPagina {
+                tabla: "Detalle_Comanda".into(),
+                columnas: vec!["ID_Detalle".into(), "ID_Comanda".into(), "Cantidad".into(), "Precio_Unitario".into()],
+                filas: vec![vec![json!("d-1"), json!("c-que-no-esta"), json!(1), json!(250)]],
+                siguiente_cursor: None,
+            })
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("d-1") && e.contains("Comandas"), "{e}");
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Detalle_Comanda;").await, 0);
+        assert_eq!(repo.backfill_estado().await.unwrap().tablas_pendientes, 1);
 
         let _ = std::fs::remove_dir_all(dir);
     }

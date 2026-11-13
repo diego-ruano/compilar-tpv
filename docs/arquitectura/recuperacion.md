@@ -138,8 +138,10 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - **Lo que ya está por su clave primaria se deja como está** (`ON CONFLICT(<clave>) DO NOTHING`): llegó
   por el catch-up y es más nuevo, y la fase 2 vuelve a bajar a propósito la ventana de la fase 1.
   **Nada más se salta**: una fila que choca con OTRA de aquí por un índice único (dos cierres vigentes
-  del mismo periodo) o que no cumple una restricción hace que la página no se aplique, con un error que
-  dice qué fila y qué restricción, y se reintenta. Con `INSERT OR IGNORE` se saltaba en silencio, la
+  del mismo periodo), que no cumple una restricción o que apunta a una fila que aquí no está (esto lo
+  dice el `COMMIT`, con las foráneas diferidas, y se busca cuál con `PRAGMA foreign_key_check`) hace
+  que la página no se aplique, con un error que dice qué fila y por qué, y se reintenta. Con `INSERT
+  OR IGNORE` se saltaba en silencio, la
   tabla quedaba completada sin ella y el contraste la borraba después en la nube por sobrante. Lo
   normal es que la fila de aquí vaya por detrás (un cambio suyo todavía en el catch-up) y en el
   reintento ya no choque; si choca siempre, el histórico se queda sin completar con el error a la
