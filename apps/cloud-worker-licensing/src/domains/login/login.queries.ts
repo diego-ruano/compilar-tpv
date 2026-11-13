@@ -4,6 +4,8 @@ import type { Client } from "@libsql/client/web";
 
 import type { LoginOk, PunchStatus, UserListItem } from "@tpv/contracts";
 
+import { HubError } from "../../lib/errorHttp";
+
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
 	return (rs?.rows ?? []).map((r: any) => {
@@ -297,16 +299,25 @@ export async function getOpenPunch(
 	return r ? { id_fichaje: String(r.id_fichaje), fecha: String(r.fecha) } : null;
 }
 
+/**
+ * AUD-47: una entrada que no toca es un 409 con la frase que da la Main (`exec_punch`, en
+ * `tpv-infra-sqlite/src/login.rs`). Un `Error` a secas acababa en `onError` como un 500
+ * `internal_error`: quien fichaba dos veces leía que el servidor había fallado.
+ */
+function entradaRechazada(frase: string): HubError {
+	return new HubError(frase, 409);
+}
+
 export async function nextPunchPart(db: Client, idUsuario: string, fecha: string) {
 	// RI-05: el abierto que bloquea puede ser de ayer (un turno de noche sin cerrar).
 	if (await getOpenPunch(db, idUsuario)) {
-		throw new Error("Tienes un fichaje abierto. Ficha salida antes de fichar entrada.");
+		throw entradaRechazada("Tienes un fichaje abierto. Ficha salida antes de fichar entrada.");
 	}
 	const status = await punchStatusForDate(db, idUsuario, fecha);
 	const p1 = status.partes.find((p) => p.parte === 1);
 	if (!p1) return 1;
-	if (!p1.salida) throw new Error("La Parte 1 no esta cerrada. Ficha salida primero.");
+	if (!p1.salida) throw entradaRechazada("La Parte 1 no está cerrada. Ficha salida primero.");
 	if (status.turno_partido === 1 && !status.partes.some((p) => p.parte === 2)) return 2;
-	if (status.turno_partido === 1) throw new Error("Ya has completado el turno partido hoy.");
-	throw new Error("Hoy no tienes turno partido. Ya has fichado el dia.");
+	if (status.turno_partido === 1) throw entradaRechazada("Ya has completado el turno partido hoy.");
+	throw entradaRechazada("Hoy no tienes turno partido. Ya has fichado el día.");
 }
