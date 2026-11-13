@@ -92,6 +92,17 @@ Better Stack     ── GET /health, latidos del cron
 - **Worker**: `SENTRY_DSN` es un secreto de Cloudflare. El artefacto de release fija `ENVIRONMENT=prod`,
   `SENTRY_RELEASE=tpv-api@<versión>` y `BUILD_COMMIT`. `nodejs_compat` está activado (lo exige `@sentry/cloudflare`).
   `instrumentDurableObjectWithSentry` cubre los handlers del WebSocket del DO.
+- **Una ruta que se ejecuta dentro del `TenantHub` es para Sentry una petición**
+  (`comoPeticionDeSentry`, `observability/sentry.ts`): `ejecutarRuta` corre con su propio ámbito de
+  aislamiento y su propio cliente (`Sentry.wrapRequestHandler`, lo mismo que el SDK pone delante del
+  `fetch` del Worker), que se envía y se suelta al terminar. Un fallo dentro de la ruta sale con su
+  `operation`, llegue o no la llamada con los datos de traza del Worker, y lo que una petición
+  apunta en su ámbito (`registrarPeticion`, `registrarCuerpoValidado`) acaba con ella. A los
+  métodos RPC el SDK no les da ese ámbito: si en el isolate ya hay un cliente sólo bifurca el
+  corriente, y el de aislamiento es el global, que comparten los DO de todos los negocios del
+  isolate. Esas dos funciones son lo único que escribe en `Sentry.getIsolationScope()`, y sólo
+  corren dentro de la `app`: en el `fetch` del Worker o en `ejecutarRuta`. Lo cubre
+  `test/sentryEnElHub.test.ts`.
 - **Logpush** está activado en el worker (`"logpush": true`); el destino se configura en el panel de
   Cloudflare. Qué lleva: [Lo que registra Cloudflare de cada petición](#lo-que-registra-cloudflare-de-cada-petición).
 

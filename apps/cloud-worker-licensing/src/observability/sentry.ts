@@ -45,3 +45,33 @@ export function sentryOptions(env: Env) {
 		},
 	};
 }
+
+/**
+ * Una ruta de negocio que se ejecuta dentro del TenantHub (`ejecutarRuta`, `lib/enElHub.ts`), tratada
+ * por Sentry como lo que es: una petición.
+ *
+ * El SDK envuelve los métodos RPC de un Durable Object de otra forma que su `fetch`
+ * (`wrapMethodWithSentry`): si en el isolate ya se creó algún cliente, sólo bifurca el ámbito
+ * corriente, y el de aislamiento es el global, el mismo para todas las peticiones y para los DO de
+ * todos los negocios que compartan isolate. Ahí es donde `registrarPeticion` y
+ * `registrarCuerpoValidado` dejan la operación, la versión del cliente y los importes del cuerpo: se
+ * quedaban puestos para el fallo siguiente, fuera de quien fuera. Y si la llamada llega sin los datos
+ * de traza del Worker, el método corre sin envolver y sin cliente, y lo que se capture se pierde.
+ *
+ * `wrapRequestHandler` es lo que el SDK pone delante del `fetch` del Worker y del DO: un ámbito de
+ * aislamiento nuevo, un cliente propio de esta petición, y el envío antes de soltarlo (por
+ * `waitUntil`). Las etiquetas de una petición acaban con ella, y un fallo dentro de la ruta sale con
+ * su `operation`. El cuerpo no se lee (`httpServerIntegration` con `maxRequestBodySize: "none"`).
+ */
+export function comoPeticionDeSentry(
+	env: Env,
+	contexto: DurableObjectState,
+	peticion: Request,
+	manejar: () => Promise<Response>,
+): Promise<Response> {
+	return Sentry.wrapRequestHandler(
+		// El SDK le da a su propio `fetch` del DO este mismo contexto: sólo usa `waitUntil`.
+		{ options: sentryOptions(env), request: peticion as any, context: contexto as unknown as ExecutionContext },
+		manejar,
+	);
+}

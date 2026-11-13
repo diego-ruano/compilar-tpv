@@ -263,7 +263,8 @@ publican rutas `/internal/*`. Obtener el binding es la capacidad de acceso: no d
 otro Worker ni convertirse en un proxy público. La autenticación del cliente (token, firma y
 licencia) se ejecuta en el Worker antes de llamar al DO; los gates de cada ruta, dentro, antes de leer
 el cuerpo, como siempre. Sentry instrumenta también las llamadas RPC, con tracing de
-rendimiento desactivado. Los errores de negocio cruzan como un resultado tipado y los inesperados
+rendimiento desactivado, y `ejecutarRuta` corre además como una petición, con su ámbito y su cliente
+([observabilidad.md](observabilidad.md#el-flujo)). Los errores de negocio cruzan como un resultado tipado y los inesperados
 como excepciones. WebSockets, attachments, alarmas y almacenamiento conservan su funcionamiento.
 
 RI-44: `/v1/sync/changes` valida en SQLite que las sentencias guardadas sean un array JSON y

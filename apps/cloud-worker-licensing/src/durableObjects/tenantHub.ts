@@ -4,6 +4,7 @@ import { MotorTenantHub } from "./tenantHub.motor";
 import type { ApplyParams, IdentidadDelWorker, RespuestaDeConsulta, ResultadoAplicacion } from "./tenantHub.rpc";
 import type { Sentencia } from "./tenantHub.sqlite";
 import { diagnosticar, type AccionDeDiagnostico, type RespuestaDeDiagnostico } from "./tenantHub.diagnostico";
+import { comoPeticionDeSentry } from "../observability/sentry";
 
 /** RI-45: solo este adaptador es RPC. Los helpers del motor no pertenecen a su prototipo. */
 export class TenantHub extends DurableObject<Env> {
@@ -20,9 +21,14 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.aplicar(params);
 	}
 
-	/** Una ruta de negocio entera, ejecutada aquí al lado de la base (`lib/enElHub.ts`). */
+	/**
+	 * Una ruta de negocio entera, ejecutada aquí al lado de la base (`lib/enElHub.ts`). Para Sentry
+	 * es una petición: su propio ámbito y su propio cliente (`comoPeticionDeSentry`).
+	 */
 	ejecutarRuta(peticion: Request, identidad: IdentidadDelWorker): Promise<Response> {
-		return this.motor.ejecutarRuta(peticion, identidad);
+		return comoPeticionDeSentry(this.env, this.ctx, peticion, () =>
+			this.motor.ejecutarRuta(peticion, identidad),
+		);
 	}
 
 	/** Las lecturas del Worker contra la base del negocio, que vive aquí. */
