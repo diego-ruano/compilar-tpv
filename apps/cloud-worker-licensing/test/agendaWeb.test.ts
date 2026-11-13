@@ -9,12 +9,13 @@
 //   · los topes (10 vivas por correo, el máximo de altas por negocio);
 //   · cancelar antes y después de que la Main la tenga, y hasta la hora de la reserva;
 //   · ninguna respuesta lleva datos personales;
-//   · la alarma purga lo cerrado y lo caducado.
+//   · la alarma purga lo cerrado y lo caducado;
+//   · retirar el negocio no se cuela entre lo que un alta lee y lo que apunta.
 
 import { describe, expect, it } from "vitest";
 
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
-import { enLaAgenda, lectorConBarrera, lectorSobre, stubDeLaAgenda } from "./helpers/agenda";
+import { enElObjetoDeLaAgenda, enLaAgenda, lectorConBarrera, lectorSobre, stubDeLaAgenda } from "./helpers/agenda";
 import { sumarDias } from "../src/domains/reservas_web/disponibilidad";
 import { horaLocalEn } from "../src/domains/reservas_web/horaDelNegocio";
 import { AgendaWeb } from "../src/durableObjects/agendaWeb";
@@ -191,6 +192,53 @@ describe("la agenda de reservas web", () => {
 		expect([a.repetida, b.repetida].sort()).toEqual([false, true]);
 		await enLaAgenda(nombre, (_motor, state) => {
 			expect(state.storage.sql.exec(`SELECT COUNT(*) AS n FROM peticiones;`).toArray()[0]).toEqual({ n: 1 });
+		});
+	});
+
+	it("retirar el negocio espera al alta que estaba a medias: detrás del borrado no queda nada guardado", async () => {
+		// El cruce: un alta ha leído la base y espera la respuesta; entra la retirada del negocio. Si
+		// el borrado se colara ahí, el alta apuntaría después: la agenda de un negocio retirado volvería
+		// a tener sus tablas, el nombre, el correo y el teléfono de quien reservó, y su alarma.
+		await enElObjetoDeLaAgenda("agenda-retirada-a-medias", async (agenda, state) => {
+			const sql = state.storage.sql;
+			sembrarNegocio(sql);
+			const motor = agenda.motor;
+			motor.avisarALaMain = () => {};
+			motor.anotar = () => {};
+
+			let avisarLeido!: () => void;
+			const leido = new Promise<void>((r) => (avisarLeido = r));
+			let soltar!: () => void;
+			const suelta = new Promise<void>((r) => (soltar = r));
+			const normal = lectorSobre(state, () => AHORA);
+			motor.leer = async (tenantId: string, fn: any) => {
+				const resultado = await normal(tenantId, fn);
+				avisarLeido();
+				await suelta;
+				return resultado;
+			};
+
+			const orden: string[] = [];
+			const reservando = agenda.reservar({ tenantId: T, alta: alta() }).then((r: any) => {
+				orden.push("alta");
+				return r;
+			});
+			await leido;
+			const retirando = agenda.borrarTodo().then(() => void orden.push("retirada"));
+
+			await new Promise((r) => setTimeout(r, 50));
+			// El alta sigue a medias: no se ha borrado nada.
+			expect(orden).toEqual([]);
+			expect(Number(sql.exec("SELECT COUNT(*) AS n FROM Mesas;").one().n)).toBe(3);
+
+			soltar();
+			expect(await reservando).toMatchObject({ ok: true, id_mesa: "m2" });
+			await retirando;
+			expect(orden).toEqual(["alta", "retirada"]);
+
+			// Ni tablas, ni datos de quien reservó, ni alarma.
+			expect(sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('peticiones', 'enlaces', 'intentos', 'estado');").toArray()).toEqual([]);
+			expect(await state.storage.getAlarm()).toBeNull();
 		});
 	});
 

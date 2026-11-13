@@ -143,7 +143,11 @@ y los tipos se regeneran con `pnpm cf-typegen`.
     borra todo lo guardado. El cierre de esos sockets llega después y no vuelve a crear nada: una
     sesión que cerró el DO ya está fuera y su salida ya se contabilizó;
   - su `AgendaWeb` (`borrarTodo`): lo que esperaba a la Main, con los datos de quien reservó, y su
-    alarma;
+    alarma. Espera a que acabe lo que la agenda tenga a medias (un alta lee la base y apunta
+    después: si el borrado se colara en esa espera, el alta volvería a guardar los datos de quien
+    reservó en una agenda ya retirada), y lo que llega mientras se borra espera a que termine. Si lo
+    que está a medias no acaba en diez segundos, falla con `agenda_ocupada` y el negocio se queda
+    para el siguiente intento;
   - sus imágenes: la carpeta del negocio en el bucket (`prefijoDelNegocio`), que acaba en `/` y por
     eso no es el principio de la de otro. La copia que el edge tenga en caché caduca sola.
 
