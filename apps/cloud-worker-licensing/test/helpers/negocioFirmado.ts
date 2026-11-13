@@ -24,7 +24,7 @@ import { olvidarLicenciasCacheadas } from "../../src/lib/licenciaEnUso";
 const env = entorno as any;
 
 /** El dispositivo que firma: la Main del negocio. */
-export const MAIN = "main-firmada";
+const MAIN = "main-firmada";
 const LIC_HASH = "hash-negocio-firmado";
 
 export type Negocio = { tenantId: string; seed: Uint8Array };
