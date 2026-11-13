@@ -508,8 +508,9 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
   tiene el checkpoint en el `Seq` de la foto de la fase 1, así que por el marcapáginas está al día,
   y le falta todo lo que la fase 2 no ha bajado todavía: para el contraste, filas que la nube tiene
   de más. Mientras quede una tabla sin completar en `_Backfill_Historico`, el caso de uso no pide
-  la foto ni las claves, y el repositorio, por su cuenta, no da permiso para borrar ni para pisar
-  nada arriba (`puede_borrar_arriba`, y otra vez con el escritor cogido).
+  la foto ni las claves, y el repositorio, por su cuenta, no da permiso para borrar, para pisar ni
+  para subir nada (`puede_borrar_arriba` y `falta_historico`, y otra vez con el escritor cogido:
+  si una recuperación reemplaza la base entre la comparación y la escritura, del plan no sale nada).
 - Con un fallo de bajada tampoco se sube lo que aquí está y arriba no: puede ser lo que la nube borró
   con el cambio que aquí no ha entrado, y subirlo lo resucitaría.
 - Con el interruptor `reparacion_nube` apagado se compara e informa, sin escribir.

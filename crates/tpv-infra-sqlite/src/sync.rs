@@ -3292,6 +3292,12 @@ impl Guarda {
     fn deja_tocar_lo_que_hay_arriba(&self) -> bool {
         self.al_dia && self.sin_fallos && self.historico_completo
     }
+
+    /// Subir lo que aquí está y arriba no. No pide estar al día (la fila es de aquí), pero sí que
+    /// no haya un fallo de bajada (AUD-18) ni histórico por bajar (VERIF-01).
+    fn deja_subir_lo_que_falta_arriba(&self) -> bool {
+        self.sin_fallos && self.historico_completo
+    }
 }
 
 /// AUD-18 · La guarda otra vez, justo antes de encolar. La comparación se hace con lecturas y sin
@@ -3662,7 +3668,13 @@ impl SqliteSyncRepository {
         let seguro = reparar && self.puede_borrar_arriba(hasta_seq).await?;
         // AUD-18: con un fallo de bajada sin resolver, lo que aquí está y arriba no puede ser lo
         // que la nube borró con el cambio que aquí no ha entrado: subirlo lo resucitaría.
-        let subir_lo_que_falta = reparar && !self.hay_fallos_de_bajada().await?;
+        //
+        // VERIF-01: y con el histórico a medias tampoco sale nada. La base acaba de reemplazarse
+        // por la foto de la nube: lo que tiene de más se lo debe a operaciones de después, que
+        // suben por el outbox, y una reparación por estado mandaría la fila tal como vino en la
+        // foto, por encima de lo que la nube haya cambiado desde entonces.
+        let subir_lo_que_falta =
+            reparar && !self.hay_fallos_de_bajada().await? && !self.falta_historico().await?;
         let mut descuadres: Vec<DescuadreTabla> = Vec::new();
         let mut a_reparar: Vec<rep::FilaAfectada> = Vec::new();
         let mut a_borrar: Vec<rep::FilaAfectada> = Vec::new();
@@ -3762,6 +3774,10 @@ impl SqliteSyncRepository {
     /// la comparación y aquí la bajada pudo registrar un fallo, y entonces lo que falta arriba puede
     /// ser lo que borró ese cambio y lo que sobra, lo que creó. Subirlo o borrarlo con el permiso
     /// de antes lo resucitaría o se lo llevaría.
+    ///
+    /// VERIF-01: y lo mismo si entre medias una recuperación desde la nube ha reemplazado la base
+    /// y sembrado la cola del histórico: el plan se hizo con la base de antes, y de él no sale
+    /// nada, ni un borrado ni una subida.
     async fn ejecutar_plan_de_claves(
         &self,
         plan: PlanDeClaves,
@@ -3781,7 +3797,7 @@ impl SqliteSyncRepository {
             let w = self.db.write().await;
             let conn = w.raw();
             let guarda = guarda_con_el_escritor(conn, hasta_seq).await?;
-            if !guarda.sin_fallos && !a_reparar.is_empty() {
+            if !guarda.deja_subir_lo_que_falta_arriba() && !a_reparar.is_empty() {
                 a_reparar.clear();
                 aplazado = true;
             }
@@ -3836,6 +3852,12 @@ impl SqliteSyncRepository {
             }
         }
         Ok(!self.hay_fallos_de_bajada().await?)
+    }
+
+    /// VERIF-01 · ¿Queda histórico por bajar? ([`historico_pendiente`], con una lectura.)
+    async fn falta_historico(&self) -> AppResult<bool> {
+        let r = self.db.read().await;
+        historico_pendiente(r.conn()).await
     }
 
     /// AUD-18 · ¿Hay algún cambio de la nube que esta Main no tiene? Es cualquier fila de
@@ -4208,6 +4230,16 @@ mod tests_claves {
         assert_eq!((reparadas, borradas), (0, 0), "...pero NO se toca");
         assert!(aplazado);
         assert!(repo.outbox_pending(100).await.unwrap().is_empty(), "nada sale hacia la nube");
+
+        // Tampoco lo que aquí está y arriba no: con el histórico a medias no sale ni una subida.
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','A'),('z-solo-aqui','B');").await;
+        let (desc, reparadas, borradas, aplazado) =
+            repo.contrastar_claves(claves_zonas(&["z1"]), 100).await.unwrap();
+        assert_eq!(desc[0].faltan, 1, "se ve");
+        assert_eq!((reparadas, borradas), (0, 0), "y no se sube");
+        assert!(aplazado);
+        assert!(repo.outbox_pending(100).await.unwrap().is_empty());
+        sembrar(&db, "DELETE FROM Zonas;").await;
 
         // El control: con el histórico completo, lo que la nube tiene de más sí es un borrado que
         // no llegó a subir. Lo único que cambia entre las dos pasadas es la cola del backfill.
@@ -5370,20 +5402,22 @@ mod tests_bajada_en_orden {
         )
         .await;
 
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-solo-aqui','B');").await;
         let plan = repo
             .plan_de_claves(claves_zonas(&["z1", "z-solo-arriba"]), 100, true)
             .await
             .unwrap();
-        assert_eq!((plan.a_borrar.len(), plan.aplazado), (1, false));
+        assert_eq!((plan.a_reparar.len(), plan.a_borrar.len(), plan.aplazado), (1, 1, false));
 
         sembrar(
             &db,
             "INSERT INTO _Backfill_Historico (Tabla, Orden, Completada) VALUES ('Zonas', 0, 0);",
         )
         .await;
-        let (_d, _reparadas, borradas, aplazado) = repo.ejecutar_plan_de_claves(plan, 100).await.unwrap();
+        let (_d, reparadas, borradas, aplazado) = repo.ejecutar_plan_de_claves(plan, 100).await.unwrap();
 
-        assert_eq!((borradas, aplazado), (0, true));
+        // Ni el borrado ni la subida: el plan se hizo con la base de antes.
+        assert_eq!((reparadas, borradas, aplazado), (0, 0, true));
         assert!(repo.outbox_pending(100).await.unwrap().is_empty());
     }
 
