@@ -229,8 +229,10 @@ mod tests {
         let pong = Pong { en: Instant::now(), reloj: SystemTime::now() - Duration::from_secs(40) };
         assert!(pong.edad() >= Duration::from_secs(40));
         // Si el de pared va hacia atrás (un ajuste de hora), manda el monótono.
-        let pong = Pong { en: Instant::now(), reloj: SystemTime::now() + Duration::from_secs(3600) };
-        assert!(pong.edad() < Duration::from_secs(10));
+        let hace_50_s = Instant::now().checked_sub(Duration::from_secs(50)).expect("el equipo lleva más de 50 s encendido");
+        let pong = Pong { en: hace_50_s, reloj: SystemTime::now() + Duration::from_secs(3600) };
+        assert!(pong.edad() >= Duration::from_secs(50));
+        assert!(pong.edad() < Duration::from_secs(60));
     }
 
     #[tokio::test(start_paused = true)]
