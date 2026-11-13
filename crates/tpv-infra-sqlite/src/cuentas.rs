@@ -84,15 +84,19 @@ fn where_listado(
     (where_sql, params)
 }
 
-/// Construye la cláusula de búsqueda de texto (`WHERE <expr> LIKE …`) sobre las columnas ya
+/// Construye la cláusula de búsqueda de texto (`WHERE instr(<expr>, …) > 0`) sobre las columnas ya
 /// calculadas del subquery interno. Añade el parámetro a `params` y numera el placeholder de forma
 /// consecutiva a los ya presentes. `expr` debe ser una expresión `lower(...)` con las columnas.
+///
+/// `instr` y no `LIKE`, como en el worker (`applyFilters` de `cuentas.queries.ts`): allí el SQLite
+/// del Durable Object no admite un patrón de `LIKE` de más de 50 bytes, y en un patrón el `%` y el
+/// `_` que teclea el usuario son comodines. Los dos lados buscan el texto tal cual.
 fn q_filter(params: &mut Vec<Value>, q: Option<String>, expr: &str) -> String {
     match q.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(qs) => {
             let idx = params.len() + 1;
             params.push(Value::Text(qs.to_string()));
-            format!("WHERE {expr} LIKE '%' || lower(?{idx}) || '%'")
+            format!("WHERE instr({expr}, lower(?{idx})) > 0")
         }
         None => String::new(),
     }

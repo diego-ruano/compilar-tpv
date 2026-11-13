@@ -1,0 +1,56 @@
+{
+  "mejor_producto": "Cerveza",
+  "peor_producto_vendible": "Agua",
+  "top10_mejores": {
+    "labels": [
+      "Cerveza",
+      "Croquetas",
+      "Tortilla",
+      "Bocadillo retirado",
+      "Menú antiguo",
+      "Ensalada",
+      "Paella",
+      "Bravas",
+      "Calamares",
+      "Flan"
+    ],
+    "values": [
+      6,
+      5,
+      5,
+      4,
+      4,
+      4,
+      4,
+      3,
+      3,
+      3
+    ]
+  },
+  "top10_peores": {
+    "labels": [
+      "Agua",
+      "Helado",
+      "Sidra",
+      "Tarta",
+      "Zumo",
+      "Empanada",
+      "Migas",
+      "Refresco",
+      "Refresco",
+      "albóndigas"
+    ],
+    "values": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  }
+}

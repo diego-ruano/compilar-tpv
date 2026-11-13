@@ -1,0 +1,13 @@
+[
+  {
+    "ID_Categoria": "cat-barra",
+    "ID_Producto": "prod-vale",
+    "Nombre": "Vale_50% barra",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 100,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  }
+]

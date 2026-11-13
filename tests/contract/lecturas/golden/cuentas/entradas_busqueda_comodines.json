@@ -1,0 +1,19 @@
+{
+  "filas": [
+    {
+      "anulado_en": null,
+      "anulado_por": null,
+      "cliente": "Mesa 7 / Socio_100% Real",
+      "devuelto": 0,
+      "es_devolucion": false,
+      "estado": "ACTIVO",
+      "fecha_hora": "2026-05-10 10:00",
+      "id": "pago-1",
+      "importe": 2450,
+      "metodo": "Efectivo",
+      "motivo_anulacion": null,
+      "motivo_devolucion": null
+    }
+  ],
+  "siguiente": null
+}

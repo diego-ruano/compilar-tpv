@@ -1161,13 +1161,17 @@ impl MesasRepository for SqliteMesasRepository {
     async fn search_productos_by_nombre(&self, q: String) -> AppResult<Vec<ProductoVendibleOut>> {
         let g = self.db.read().await;
         let db = &g;
-        let needle = format!("%{}%", q.trim().to_lowercase());
+        let needle = q.trim().to_lowercase();
         // INC-20261030-005: el buscador tampoco ofrece productos de una categoría no vendible.
+        //
+        // `instr` y no `LIKE`, como en el worker (`searchProductos` de `mesas.queries.ts`): allí el
+        // SQLite del Durable Object no admite un patrón de `LIKE` de más de 50 bytes, y en un patrón
+        // el `%` y el `_` que teclea el usuario son comodines. Los dos lados buscan el texto tal cual.
         let sql1 = r#"
             SELECT p.ID_Producto, p.ID_Categoria, p.Nombre, COALESCE(p.Precio_Venta,0), p.Ruta_Imagen
             FROM Productos p
             JOIN Categorias_Producto c ON c.ID_Categoria = p.ID_Categoria
-            WHERE LOWER(p.Nombre) LIKE ?1 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1)=1
+            WHERE instr(LOWER(p.Nombre), LOWER(?1)) > 0 AND p.Archivado_En IS NULL AND COALESCE(c.Vendible,1)=1
             ORDER BY p.Nombre ASC LIMIT 200;
         "#;
         productos_query(db, sql1, vec![Value::Text(needle)]).await

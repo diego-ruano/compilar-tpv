@@ -1,0 +1,29 @@
+{
+  "descripcion": "Una linea sin producto cuyo nombre es justo el ID de un producto. Lo vendido se agrupa por 'el producto o, si la linea no lo tiene, su nombre', asi que esa linea comparte clave con las del producto, pero no es suya: en 'los peores' y en 'los mejores' de una categoria solo cuentan las lineas del producto (P-7 = 2,893 + 7,237 = 10,13, que son 10), y sin filtro de categoria todo lo de la clave va junto (10,13 + 0,37 = 10,5, que son 11). Las cantidades estan elegidas para que sumar por partes y redondear daria otra cosa: la suma es una sola, de SQLite, sobre las cantidades de las lineas. M-1 es de una categoria no vendible: sus lineas con producto no cuentan en nada, y la linea suelta con ese nombre si (6). Los dos productos se llaman como su ID para que el nombre que sale no dependa de que linea elija SQLite al agrupar.",
+  "lectura": "stats.productos",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-bebidas', 'Bebidas', 1);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-materia', 'Materia prima', 0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('P-7', 'cat-bebidas', 'P-7', 100);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('p-agua', 'cat-bebidas', 'Agua', 100);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('M-1', 'cat-materia', 'M-1', 100);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'BARRA', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-1', 'com-1', 'P-7', 'P-7', 2.893, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-2', 'com-1', NULL, 'P-7', 0.37, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-3', 'com-1', 'M-1', 'M-1', 4, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-4', 'com-1', NULL, 'M-1', 6, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-5', 'com-1', 'p-agua', 'Agua', 1, 100);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-6', 'com-1', 'P-7', 'P-7', 7.237, 100);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', datetime('now','localtime','start of day'), 'Efectivo', 1600, 'total');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-1');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-2');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-3');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-4');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-5');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-6');"
+  ],
+  "entrada": {
+    "categoria_top_id": null,
+    "categoria_worst_id": null
+  }
+}

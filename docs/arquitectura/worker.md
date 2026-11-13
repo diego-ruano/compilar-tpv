@@ -67,6 +67,15 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
   vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
+  Por eso una estadística que crece con el rango pedido lo recorre **una vez por petición**: la de
+  productos es una sola sentencia (`sqlProductos`, en `domains/stats/stats.queries.ts`) que devuelve
+  las unidades por producto y el catálogo, y el mejor, el peor y los dos top 10 se sacan de ahí en
+  código. Un CTE repetido en varias sentencias se vuelve a calcular en cada una. Dentro de una misma
+  sentencia lo decide el planificador: el de los clientes recurrentes, que tiene que mirar los
+  cobros de toda la historia y lo leen tres partes de la sentencia, va `AS MATERIALIZED` porque sin
+  esa marca SQLite lo deshace dentro de cada una. La Main hace lo mismo (`sql_productos` y `sql_clientes_recurrentes`,
+  en `tpv-infra-sqlite/src/stats.rs`), el arnés de lectura fija que las dos dan el mismo resultado y
+  el plan de las dos sentencias tiene su test en cada lado.
 - Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
 - **Sin jurisdicción, con pista de Europa occidental** (`JURISDICCION_DO` vacía y
   `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) se
@@ -89,6 +98,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `IN (SELECT value FROM json_each(?))`, nunca un `?` por elemento. Lo comprueba
   `test/sondaSqliteDo.test.ts`; lo que aún no lo cumple está en
   [DO-01](../pendientes.md#do-01--listas-de-ids-con-un-parámetro-por-elemento).
+- **Lo que teclea el usuario se busca con `instr(lower(col), lower(?)) > 0`, nunca con `LIKE`**: un
+  patrón de `LIKE` con un texto de más de 50 bytes (49 letras, o 25 con acento) no pasa del DO, y en un
+  patrón el `%` y el `_` tecleados son comodines. Así buscan los productos de las mesas y de la barra
+  y los listados de caja, y la Main busca igual para devolver las mismas filas. Un `LIKE` con un
+  patrón fijo y corto (`LIKE '%:%'`) no tiene ese problema. Lo vigila `test/busquedaDeTexto.test.ts`,
+  que lee el fuente de los dominios.
 - **Una llamada entre el worker y el DO tiene un tope de 32 MiB**, en los dos sentidos.
 - **Retirar un negocio** es borrar todo su DO (`borrarTodo`, `/v1/admin/pruebas/retirar`).
 

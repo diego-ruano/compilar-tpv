@@ -248,6 +248,28 @@ import casoStatsClientes from "../../../tests/contract/lecturas/casos/stats/clie
 import goldenStatsClientes from "../../../tests/contract/lecturas/golden/stats/clientes.json";
 import casoStatsProductos from "../../../tests/contract/lecturas/casos/stats/productos.json";
 import goldenStatsProductos from "../../../tests/contract/lecturas/golden/stats/productos.json";
+import casoStatsVendidos from "../../../tests/contract/lecturas/casos/stats/productos_vendidos.json";
+import goldenStatsVendidos from "../../../tests/contract/lecturas/golden/stats/productos_vendidos.json";
+import casoStatsVendidosCat from "../../../tests/contract/lecturas/casos/stats/productos_vendidos_por_categoria.json";
+import goldenStatsVendidosCat from "../../../tests/contract/lecturas/golden/stats/productos_vendidos_por_categoria.json";
+import casoStatsNombreId from "../../../tests/contract/lecturas/casos/stats/productos_nombre_que_es_un_id.json";
+import goldenStatsNombreId from "../../../tests/contract/lecturas/golden/stats/productos_nombre_que_es_un_id.json";
+import casoCtaEntradasComodines from "../../../tests/contract/lecturas/casos/cuentas/entradas_busqueda_comodines.json";
+import goldenCtaEntradasComodines from "../../../tests/contract/lecturas/golden/cuentas/entradas_busqueda_comodines.json";
+import casoCtaEntradasLargo from "../../../tests/contract/lecturas/casos/cuentas/entradas_busqueda_texto_largo.json";
+import goldenCtaEntradasLargo from "../../../tests/contract/lecturas/golden/cuentas/entradas_busqueda_texto_largo.json";
+import casoCtaSalidasComodines from "../../../tests/contract/lecturas/casos/cuentas/salidas_busqueda_comodines.json";
+import goldenCtaSalidasComodines from "../../../tests/contract/lecturas/golden/cuentas/salidas_busqueda_comodines.json";
+import casoCtaResumenComodines from "../../../tests/contract/lecturas/casos/cuentas/resumen_busqueda_comodines.json";
+import goldenCtaResumenComodines from "../../../tests/contract/lecturas/golden/cuentas/resumen_busqueda_comodines.json";
+import casoMesaBuscarComodines from "../../../tests/contract/lecturas/casos/mesas/buscar_productos_comodines.json";
+import goldenMesaBuscarComodines from "../../../tests/contract/lecturas/golden/mesas/buscar_productos_comodines.json";
+import casoMesaBuscarLargo from "../../../tests/contract/lecturas/casos/mesas/buscar_productos_texto_largo.json";
+import goldenMesaBuscarLargo from "../../../tests/contract/lecturas/golden/mesas/buscar_productos_texto_largo.json";
+import casoVrBuscarComodines from "../../../tests/contract/lecturas/casos/venta_rapida/buscar_productos_comodines.json";
+import goldenVrBuscarComodines from "../../../tests/contract/lecturas/golden/venta_rapida/buscar_productos_comodines.json";
+import casoVrBuscarLargo from "../../../tests/contract/lecturas/casos/venta_rapida/buscar_productos_texto_largo.json";
+import goldenVrBuscarLargo from "../../../tests/contract/lecturas/golden/venta_rapida/buscar_productos_texto_largo.json";
 import casoStatsTrabajadores from "../../../tests/contract/lecturas/casos/stats/trabajadores.json";
 import goldenStatsTrabajadores from "../../../tests/contract/lecturas/golden/stats/trabajadores.json";
 import casoStatsReservas from "../../../tests/contract/lecturas/casos/stats/reservas.json";
@@ -360,9 +382,29 @@ const CASOS = [
 	{ nombre: "stats_mesas", caso: casoStatsMesas, golden: goldenStatsMesas },
 	{ nombre: "stats_proveedores", caso: casoStatsProveedores, golden: goldenStatsProveedores },
 	{ nombre: "stats_productos", caso: casoStatsProductos, golden: goldenStatsProductos },
+	{ nombre: "stats_productos_vendidos", caso: casoStatsVendidos, golden: goldenStatsVendidos },
+	{
+		nombre: "stats_productos_vendidos_por_categoria",
+		caso: casoStatsVendidosCat,
+		golden: goldenStatsVendidosCat,
+	},
+	{
+		nombre: "stats_productos_nombre_que_es_un_id",
+		caso: casoStatsNombreId,
+		golden: goldenStatsNombreId,
+	},
 	{ nombre: "stats_clientes", caso: casoStatsClientes, golden: goldenStatsClientes },
 	{ nombre: "stats_reservas", caso: casoStatsReservas, golden: goldenStatsReservas },
 	{ nombre: "stats_trabajadores", caso: casoStatsTrabajadores, golden: goldenStatsTrabajadores },
+	// Las búsquedas de texto: el % y el _ tal cual, y un texto de más de 50 bytes.
+	{ nombre: "cuentas_entradas_busqueda_comodines", caso: casoCtaEntradasComodines, golden: goldenCtaEntradasComodines },
+	{ nombre: "cuentas_entradas_busqueda_texto_largo", caso: casoCtaEntradasLargo, golden: goldenCtaEntradasLargo },
+	{ nombre: "cuentas_salidas_busqueda_comodines", caso: casoCtaSalidasComodines, golden: goldenCtaSalidasComodines },
+	{ nombre: "cuentas_resumen_busqueda_comodines", caso: casoCtaResumenComodines, golden: goldenCtaResumenComodines },
+	{ nombre: "mesas_buscar_productos_comodines", caso: casoMesaBuscarComodines, golden: goldenMesaBuscarComodines },
+	{ nombre: "mesas_buscar_productos_texto_largo", caso: casoMesaBuscarLargo, golden: goldenMesaBuscarLargo },
+	{ nombre: "venta_rapida_buscar_productos_comodines", caso: casoVrBuscarComodines, golden: goldenVrBuscarComodines },
+	{ nombre: "venta_rapida_buscar_productos_texto_largo", caso: casoVrBuscarLargo, golden: goldenVrBuscarLargo },
 ];
 
 // ── Comparación estructural ORDENADA (misma spec que el lado Rust) ───────────────────

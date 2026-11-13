@@ -1,0 +1,16 @@
+{
+  "descripcion": "Buscador de productos de las mesas. El % y el _ que teclea el usuario se buscan tal cual: no son comodines. '_50%' solo esta en 'Vale_50% barra'. Como patron de LIKE casaba tambien con 'Vale 500 barra' (el _ por el espacio y el % por lo que siguiera), con 'Vale-50 barra' y con 'Vale_50'.",
+  "lectura": "mesas.buscar_productos",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina) VALUES ('cat-cocina', 'Platos', 1);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-vale', 'cat-barra', 'Vale_50% barra', 100);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-500', 'cat-barra', 'Vale 500 barra', 100);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-guion', 'cat-barra', 'Vale-50 barra', 100);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-porcentaje', 'cat-barra', 'Vale_50', 100);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'Cerveza', 100);"
+  ],
+  "entrada": {
+    "query": "_50%"
+  }
+}

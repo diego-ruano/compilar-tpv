@@ -1,0 +1,26 @@
+{
+  "descripcion": "Busqueda de texto en los ingresos de caja. El % y el _ que teclea el usuario se buscan tal cual: no son comodines. '_100%' solo esta en el cobro de 'Socio_100% Real'. Como patron de LIKE casaba tambien con 'Socio 1000 Real', con 'Socio-100 Real' y con el cobro sin cliente de 100 centimos (el _ por el espacio de delante del importe).",
+  "lectura": "cuentas.entradas",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-1', 'Socio_100% Real');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-2', 'Socio 1000 Real');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-3', 'Socio-100 Real');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', 'cli-1', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-2', 'MESA', 'mesa-1', 'cli-2', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Cliente, Fecha_Hora_Apertura, Estado) VALUES ('com-3', 'MESA', 'mesa-1', 'cli-3', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-4', 'MESA', 'mesa-1', '2026-05-10 09:00:00', 'Pagada');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 10:00:00', 'Efectivo', 2450, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-2', '2026-05-10 11:00:00', 'Tarjeta', 3000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3', 'com-3', '2026-05-10 12:00:00', 'Efectivo', 300, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-4', 'com-4', '2026-05-10 13:00:00', 'Efectivo', 100, 'total');"
+  ],
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": "_100%",
+    "page": null,
+    "page_size": null
+  }
+}

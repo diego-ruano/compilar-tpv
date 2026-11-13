@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use crate::ejecutor::Value;
 
 use crate::db::{Db, Reader};
 
@@ -102,6 +101,208 @@ fn bucket_sql_reservas(range: StatsRange) -> &'static str {
         StatsRange::Semana | StatsRange::Mes => "strftime('%d/%m', res_at)",
         StatsRange::Anio => "strftime('%m/%Y', res_at)",
     }
+}
+
+/// La sentencia de la estadística de productos: UNA pasada por las líneas cobradas del rango.
+///
+/// Devuelve dos clases de fila, ya ordenadas por el nombre del catálogo: lo vendido en el rango
+/// (`de_venta = 1`, una por clave, con sus unidades) y el catálogo vendible (`de_venta = 0`). El
+/// mejor, el peor y los dos top 10 los saca `productos_impl` de ahí sin hacer cuentas: todas las
+/// sumas y los redondeos son de SQLite.
+///
+/// Es una sola a propósito. Con una sentencia por lista, cada una vuelve a calcular `paid_det`, y
+/// las de «el peor», que salen del catálogo, recorren todas las líneas de la historia de cada
+/// producto. Así lo que tarda depende del rango pedido y no del histórico. La misma sentencia, en
+/// el worker: `sqlProductos` de `domains/stats/stats.queries.ts`, donde corre en el SQLite del
+/// Durable Object, que atiende a todo el negocio en un solo hilo.
+pub(crate) fn sql_productos(range: StatsRange) -> String {
+    let (start_expr, end_expr) = range_bounds_sql(range);
+    format!(
+        r#"
+        WITH
+        rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
+        paid_det AS (
+          -- STAT-07: cada línea entra UNA vez. Uniendo Pago_Detalles con Pagos a pelo, una línea
+          -- cobrada en dos veces saldría dos veces y sus unidades se contarían dobles.
+          -- Sólo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, así que sus
+          -- líneas no pueden aparecer en «lo más vendido» ni sumar en el histórico.
+          -- El rango va AQUÍ (RI-18): se agrupan los cobros del rango, no los de toda la historia.
+          SELECT pd.ID_Detalle AS ID_Detalle
+          FROM Pago_Detalles pd
+          JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+          JOIN rng ON 1=1
+          WHERE p.Estado = 'ACTIVO'
+            AND p.Fecha_Hora >= rng.start_dt
+            AND p.Fecha_Hora <  rng.end_dt
+          GROUP BY pd.ID_Detalle
+        ),
+        vendido AS (
+          -- Se agrupa ANTES de mirar el catálogo: así el catálogo se consulta una vez por clave y
+          -- no una por línea. La clave es el producto o, si la línea ya no lo tiene, su nombre.
+          -- Una línea sin producto cuyo nombre es justo el ID de un producto comparte clave con las
+          -- de ese producto sin ser suya: por eso van tres sumas, la de todas, la de las que tienen
+          -- producto y la de las que no. Si hay líneas con producto, su ID es la clave.
+          -- nombre_linea es el de la línea que elige SQLite al agrupar, sin MIN ni MAX que se lo
+          -- cambien: el que se enseña cuando el producto ya no está en el catálogo.
+          SELECT
+            COALESCE(dc.ID_Producto, dc.Nombre_Producto) AS clave,
+            dc.Nombre_Producto AS nombre_linea,
+            SUM(COALESCE(dc.Cantidad,1)) AS suma,
+            SUM(CASE WHEN dc.ID_Producto IS NOT NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_con_producto,
+            SUM(CASE WHEN dc.ID_Producto IS NULL THEN COALESCE(dc.Cantidad,1) END) AS suma_sin_producto
+          FROM paid_det cobrada
+          JOIN Detalle_Comanda dc ON dc.ID_Detalle = cobrada.ID_Detalle
+          GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+        )
+        SELECT
+          1 AS de_venta,
+          clave,
+          label,
+          nombre,
+          id_producto,
+          id_categoria,
+          CAST(ROUND(general,0) AS INTEGER) AS unidades,
+          general > 0 AS con_ventas,
+          CAST(ROUND(del_producto,0) AS INTEGER) AS unidades_producto,
+          del_producto > 0 AS con_ventas_producto
+        FROM (
+          -- LEFT JOIN y no JOIN: el catálogo puede borrar un producto que ya no se vende (INV-05),
+          -- y su venta del año pasado sigue siendo una venta. Con un INNER, esas líneas
+          -- desaparecerían del histórico SIN error, que es la peor forma de perderlas. El nombre
+          -- sale del catálogo si el producto sigue ahí (así un renombrado se ve en el informe) y
+          -- del snapshot de la línea si ya no está.
+          --
+          -- Las líneas de un producto de una categoría no vendible no cuentan. «general» es lo que
+          -- cuenta la clave en las listas sin filtro de categoría; «del_producto», lo que cuentan
+          -- las líneas del producto, que es lo suyo en «los peores» y dentro de su categoría.
+          SELECT
+            v.clave AS clave,
+            CASE WHEN v.suma_con_producto IS NOT NULL AND COALESCE(cat.Vendible,1)=1
+                 THEN COALESCE(pr.Nombre, v.nombre_linea, 'Producto')
+                 ELSE COALESCE(v.clave, 'Producto')
+            END AS label,
+            CASE WHEN COALESCE(cat.Vendible,1)=1 THEN pr.Nombre END AS nombre,
+            pr.ID_Producto AS id_producto,
+            CASE WHEN COALESCE(cat.Vendible,1)=1 THEN pr.ID_Categoria END AS id_categoria,
+            CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma ELSE v.suma_sin_producto END AS general,
+            CASE WHEN COALESCE(cat.Vendible,1)=1 THEN v.suma_con_producto END AS del_producto
+          FROM vendido v
+          LEFT JOIN Productos pr ON v.suma_con_producto IS NOT NULL AND pr.ID_Producto = v.clave
+          LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+          WHERE COALESCE(cat.Vendible,1)=1 OR v.suma_sin_producto IS NOT NULL
+        )
+        UNION ALL
+        -- El catálogo vendible entero, a cero: el peor producto es justo el que no compra nadie, y
+        -- ése no aparece en ninguna línea de comanda. Sus unidades se le ponen al leer el resultado.
+        SELECT 0, pr.ID_Producto, pr.Nombre, pr.Nombre, pr.ID_Producto, pr.ID_Categoria, 0, 0, 0, 0
+        FROM Productos pr
+        JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+        WHERE COALESCE(cat.Vendible,1)=1
+        -- El desempate de los cuatro resultados es el nombre del catálogo: se ordena aquí, con el
+        -- criterio de SQLite, y al leer el resultado sólo se reordena por unidades, sin deshacerlo.
+        -- La clave deja fijo el orden de dos productos con el mismo nombre (uno archivado y el que
+        -- lo relevó).
+        ORDER BY nombre ASC, clave ASC;
+        "#,
+        start = start_expr,
+        end = end_expr
+    )
+}
+
+/// La sentencia de los clientes recurrentes: quién ha comprado en el rango y si ya había comprado
+/// antes de que empezara, que es lo que hace falta mirar en toda la historia y no sólo en el rango.
+///
+/// `allp` (los cobros de comandas con reserva de un cliente) va `MATERIALIZED`: la leen tres CTE, y
+/// sin esa palabra SQLite la deshace dentro de cada una y recorre tres veces todos los cobros de la
+/// historia. Así los recorre una. El resultado es el mismo; igual en el worker (`clientes` de
+/// `domains/stats/stats.queries.ts`), donde corre en el SQLite del Durable Object.
+pub(crate) fn sql_clientes_recurrentes(range: StatsRange) -> String {
+    let (start_expr, end_expr) = range_bounds_sql(range);
+    format!(
+        r#"
+        WITH
+        rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
+        allp AS MATERIALIZED (
+          SELECT
+            r.ID_Cliente AS id_cliente,
+            datetime(p.Fecha_Hora) AS paid_at,
+            COALESCE(p.Importe_Total,0) AS imp
+          FROM Pagos p
+          JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+          JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+          WHERE c.ID_Reserva IS NOT NULL
+            AND r.ID_Cliente IS NOT NULL
+            AND p.Fecha_Hora IS NOT NULL
+            AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+        ),
+        cust_range AS (
+          SELECT DISTINCT id_cliente
+          FROM allp, rng
+          WHERE paid_at >= rng.start_dt
+            AND paid_at <  rng.end_dt
+        ),
+        firsts AS (
+          SELECT id_cliente, MIN(paid_at) AS first_paid
+          FROM allp
+          GROUP BY id_cliente
+        ),
+        tot_range AS (
+          SELECT id_cliente, SUM(imp) AS total
+          FROM allp, rng
+          WHERE paid_at >= rng.start_dt
+            AND paid_at <  rng.end_dt
+          GROUP BY id_cliente
+        )
+        SELECT
+          (SELECT COUNT(*)
+           FROM cust_range cr
+           JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
+           WHERE f.first_paid < rng.start_dt
+          ) AS recurrentes,
+          (SELECT COUNT(*)
+           FROM cust_range cr
+           JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
+           WHERE f.first_paid >= rng.start_dt
+             AND f.first_paid <  rng.end_dt
+          ) AS no_recurrentes,
+          COALESCE((SELECT SUM(total) FROM tot_range),0) AS ventas_total,
+          (SELECT COUNT(*) FROM cust_range) AS clientes_rango
+        ;
+        "#,
+        start = start_expr,
+        end = end_expr
+    )
+}
+
+/// Una fila de `sql_productos`: lo vendido de una clave en el rango, o un producto del catálogo
+/// vendible.
+struct FilaProducto {
+    label: Option<String>,
+    /// El producto del catálogo, si la clave es la de uno que sigue ahí.
+    id_producto: Option<String>,
+    id_categoria: Option<String>,
+    /// Lo que cuenta la clave en las listas sin filtro de categoría.
+    unidades: i64,
+    con_ventas: bool,
+    /// Lo que cuentan las líneas del producto: lo suyo en «los peores» y dentro de su categoría.
+    unidades_producto: Option<i64>,
+    con_ventas_producto: bool,
+}
+
+impl FilaProducto {
+    /// ¿Entra con este filtro de categoría? Sin filtro entra todo. Un producto que ya no está en el
+    /// catálogo no tiene categoría y no entra en ninguna.
+    fn es_de(&self, categoria: Option<&str>) -> bool {
+        match categoria {
+            None => true,
+            Some(id) => self.id_categoria.as_deref() == Some(id),
+        }
+    }
+}
+
+/// La categoría por la que se filtra una lista: ninguna si no llega o llega en blanco.
+fn categoria_elegida(id: &Option<String>) -> Option<&str> {
+    id.as_deref().filter(|id| !id.trim().is_empty())
 }
 
 /* =========================================================
@@ -357,229 +558,89 @@ impl SqliteStatsRepository {
         &self,
         args: ProductosStatsArgs,
     ) -> Result<ProductosStatsResponse, String> {
-        let (start_expr, end_expr) = range_bounds_sql(args.range);
         let g = self.db.read().await;
         let db = &g;
 
-        let ctes = format!(
-            r#"
-            WITH
-            rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
-            paid_det AS (
-              -- Sólo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, así que sus
-              -- líneas no pueden aparecer en «lo más vendido» ni sumar en el histórico.
-              -- El rango va AQUÍ y no fuera (RI-18): fuera, la CTE agrupaba todos los cobros de la
-              -- historia antes de filtrar. Lo de fuera de rango ya no contaba (las consultas de «el
-              -- peor» lo ponían a 0 con su CASE), así que el resultado es el mismo.
-              SELECT pd.ID_Detalle AS ID_Detalle, MIN(p.Fecha_Hora) AS paid_at
-              FROM Pago_Detalles pd
-              JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
-              JOIN rng ON 1=1
-              WHERE p.Estado = 'ACTIVO'
-                AND p.Fecha_Hora >= rng.start_dt
-                AND p.Fecha_Hora <  rng.end_dt
-              GROUP BY pd.ID_Detalle
-            )
-            "#,
-            start = start_expr,
-            end = end_expr
-        );
-
-        let sql_best = format!(
-            r#"
-            {ctes}
-            -- LEFT JOIN y no JOIN: el catálogo puede borrar un producto que ya no se vende
-            -- (INV-05), y su venta del año pasado sigue siendo una venta. Con un INNER, esas
-            -- líneas desaparecerían del histórico SIN error, que es la peor forma de perderlas.
-            -- El nombre sale del catálogo si el producto sigue ahí (así un renombrado se ve en el
-            -- informe) y del snapshot de la línea si ya no está.
-            SELECT
-              COALESCE(pr.Nombre, dc.Nombre_Producto, 'Producto') AS Nombre,
-              CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS unidades
-            FROM Detalle_Comanda dc
-            JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
-            JOIN rng ON 1=1
-            LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
-            LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
-            WHERE pd.paid_at >= rng.start_dt
-              AND pd.paid_at <  rng.end_dt
-              AND COALESCE(cat.Vendible,1)=1
-            GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
-            HAVING SUM(COALESCE(dc.Cantidad,1)) > 0
-            ORDER BY unidades DESC, pr.Nombre ASC
-            LIMIT 1;
-            "#,
-            ctes = ctes
-        );
-
-        let mut rows_best = db.query(&sql_best, ()).await.map_err(|e| e.to_string())?;
-        let mejor_producto: Option<String> =
-            match rows_best.next().await.map_err(|e| e.to_string())? {
-                Some(r) => v_string(r.get_value(0).map_err(|e| e.to_string())?),
-                None => None,
-            };
-
-        // El PEOR parte del CATÁLOGO, no de lo vendido: el producto que no compra nadie no aparece
-        // en ninguna línea de comanda, así que se sale de `Productos` y las ventas entran por
-        // LEFT JOIN, contando 0 cuando no las hay.
-        let sql_worst_one = format!(
-            r#"
-            {ctes}
-            SELECT
-              pr.Nombre,
-              CAST(ROUND(COALESCE(SUM(
-                CASE WHEN pd.paid_at >= rng.start_dt AND pd.paid_at < rng.end_dt
-                     THEN COALESCE(dc.Cantidad,1)
-                     ELSE 0
-                END
-              ),0),0) AS INTEGER) AS unidades
-            FROM Productos pr
-            JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
-            LEFT JOIN Detalle_Comanda dc ON dc.ID_Producto = pr.ID_Producto
-            LEFT JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
-            JOIN rng ON 1=1
-            WHERE COALESCE(cat.Vendible,1)=1
-            GROUP BY pr.ID_Producto
-            ORDER BY unidades ASC, pr.Nombre ASC
-            LIMIT 1;
-            "#,
-            ctes = ctes
-        );
-
-        let mut rows_w1 = db
-            .query(&sql_worst_one, ())
+        let mut rows = db
+            .query(&sql_productos(args.range), ())
             .await
             .map_err(|e| e.to_string())?;
-        let peor_producto_vendible: Option<String> =
-            match rows_w1.next().await.map_err(|e| e.to_string())? {
-                Some(r) => v_string(r.get_value(0).map_err(|e| e.to_string())?),
-                None => None,
-            };
 
-        let top_filter_sql = if let Some(idc) = args.categoria_top_id.as_deref() {
-            if !idc.trim().is_empty() {
-                "AND pr.ID_Categoria = ?1".to_string()
+        // Lo vendido y el catálogo, cada uno en el orden por nombre que trae la sentencia.
+        let mut vendidos: Vec<FilaProducto> = Vec::new();
+        let mut catalogo: Vec<FilaProducto> = Vec::new();
+        while let Some(r) = rows.next().await.map_err(|e| e.to_string())? {
+            let de_venta = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0) == 1;
+            let fila = FilaProducto {
+                label: v_string(r.get_value(2).map_err(|e| e.to_string())?),
+                id_producto: v_string(r.get_value(4).map_err(|e| e.to_string())?),
+                id_categoria: v_string(r.get_value(5).map_err(|e| e.to_string())?),
+                unidades: v_i64(r.get_value(6).map_err(|e| e.to_string())?).unwrap_or(0),
+                con_ventas: v_i64(r.get_value(7).map_err(|e| e.to_string())?).unwrap_or(0) == 1,
+                unidades_producto: v_i64(r.get_value(8).map_err(|e| e.to_string())?),
+                con_ventas_producto: v_i64(r.get_value(9).map_err(|e| e.to_string())?).unwrap_or(0) == 1,
+            };
+            if de_venta {
+                vendidos.push(fila);
             } else {
-                "".to_string()
+                catalogo.push(fila);
             }
-        } else {
-            "".to_string()
+        }
+
+        // Las unidades de cada producto del catálogo: las de sus líneas. El que no se ha vendido no
+        // está y vale 0.
+        let unidades_de: HashMap<&str, i64> = vendidos
+            .iter()
+            .filter_map(|v| Some((v.id_producto.as_deref()?, v.unidades_producto?)))
+            .collect();
+
+        // `sort_by_key` es estable: entre dos con las mismas unidades queda el orden por nombre que
+        // trae la sentencia. «Los mejores» sólo cuentan lo que se ha vendido (suma > 0, sin
+        // redondear). Sin filtro de categoría entra todo lo vendido, por su clave. Con filtro entran
+        // las líneas de los productos de esa categoría: un producto que ya no está en el catálogo
+        // no tiene categoría y no entra en ninguna.
+        let mejores = |categoria: Option<&str>, limite: usize| -> Vec<(Option<String>, i64)> {
+            let mut out: Vec<(Option<String>, i64)> = match categoria {
+                Some(_) => vendidos
+                    .iter()
+                    .filter(|f| f.es_de(categoria) && f.con_ventas_producto)
+                    .map(|f| (f.label.clone(), f.unidades_producto.unwrap_or(0)))
+                    .collect(),
+                None => vendidos
+                    .iter()
+                    .filter(|f| f.con_ventas)
+                    .map(|f| (f.label.clone(), f.unidades))
+                    .collect(),
+            };
+            out.sort_by_key(|(_, unidades)| std::cmp::Reverse(*unidades));
+            out.truncate(limite);
+            out
+        };
+        // «Los peores» salen del catálogo, con 0 lo que no ha comprado nadie.
+        let peores = |categoria: Option<&str>, limite: usize| -> Vec<(Option<String>, i64)> {
+            let mut out: Vec<(Option<String>, i64)> = catalogo
+                .iter()
+                .filter(|f| f.es_de(categoria))
+                .map(|f| {
+                    let vendidas = f.id_producto.as_deref().and_then(|id| unidades_de.get(id));
+                    (f.label.clone(), vendidas.copied().unwrap_or(0))
+                })
+                .collect();
+            out.sort_by_key(|(_, unidades)| *unidades);
+            out.truncate(limite);
+            out
+        };
+        let serie = |filas: Vec<(Option<String>, i64)>| ChartSeriesI64 {
+            labels: filas.iter().map(|(label, _)| label.clone().unwrap_or_default()).collect(),
+            values: filas.iter().map(|(_, unidades)| *unidades).collect(),
         };
 
-        let sql_top10 = format!(
-            r#"
-            {ctes}
-            SELECT
-              COALESCE(pr.Nombre, dc.Nombre_Producto, 'Producto') AS Nombre,
-              CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS unidades
-            FROM Detalle_Comanda dc
-            JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
-            JOIN rng ON 1=1
-            LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
-            LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
-            WHERE pd.paid_at >= rng.start_dt
-              AND pd.paid_at <  rng.end_dt
-              AND COALESCE(cat.Vendible,1)=1
-              {filter}
-            GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
-            HAVING SUM(COALESCE(dc.Cantidad,1)) > 0
-            ORDER BY unidades DESC, pr.Nombre ASC
-            LIMIT 10;
-            "#,
-            ctes = ctes,
-            filter = top_filter_sql
-        );
-
-        let mut params_top: Vec<Value> = Vec::new();
-
-        if let Some(idc) = args.categoria_top_id.as_deref() {
-            if !idc.trim().is_empty() {
-                params_top.push(Value::Text(idc.to_string()));
-            }
-        }
-
-        let mut rows_top = db
-            .query(&sql_top10, params_top)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let mut top_labels: Vec<String> = Vec::new();
-        let mut top_values: Vec<i64> = Vec::new();
-
-        while let Some(r) = rows_top.next().await.map_err(|e| e.to_string())? {
-            top_labels
-                .push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
-            top_values.push(v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0));
-        }
-
-        let worst_filter_sql = if let Some(idc) = args.categoria_worst_id.as_deref() {
-            if !idc.trim().is_empty() {
-                "AND pr.ID_Categoria = ?1".to_string()
-            } else {
-                "".to_string()
-            }
-        } else {
-            "".to_string()
-        };
-
-        let sql_worst10 = format!(
-            r#"
-            {ctes}
-            SELECT
-              pr.Nombre,
-              CAST(ROUND(COALESCE(SUM(
-                CASE WHEN pd.paid_at >= rng.start_dt AND pd.paid_at < rng.end_dt
-                     THEN COALESCE(dc.Cantidad,1)
-                     ELSE 0
-                END
-              ),0),0) AS INTEGER) AS unidades
-            FROM Productos pr
-            JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
-            LEFT JOIN Detalle_Comanda dc ON dc.ID_Producto = pr.ID_Producto
-            LEFT JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
-            JOIN rng ON 1=1
-            WHERE COALESCE(cat.Vendible,1)=1
-              {filter}
-            GROUP BY pr.ID_Producto
-            ORDER BY unidades ASC, pr.Nombre ASC
-            LIMIT 10;
-            "#,
-            ctes = ctes,
-            filter = worst_filter_sql
-        );
-
-        let mut params_worst: Vec<Value> = Vec::new();
-
-        if let Some(idc) = args.categoria_worst_id.as_deref() {
-            if !idc.trim().is_empty() {
-                params_worst.push(Value::Text(idc.to_string()));
-            }
-        }
-
-        let mut rows_w = db
-            .query(&sql_worst10, params_worst)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let mut w_labels: Vec<String> = Vec::new();
-        let mut w_values: Vec<i64> = Vec::new();
-
-        while let Some(r) = rows_w.next().await.map_err(|e| e.to_string())? {
-            w_labels.push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
-            w_values.push(v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0));
-        }
-
+        // El mejor y el peor son de toda la carta; las categorías sólo filtran los dos top 10.
         Ok(ProductosStatsResponse {
-            mejor_producto,
-            peor_producto_vendible,
-            top10_mejores: ChartSeriesI64 {
-                labels: top_labels,
-                values: top_values,
-            },
-            top10_peores: ChartSeriesI64 {
-                labels: w_labels,
-                values: w_values,
-            },
+            mejor_producto: mejores(None, 1).pop().and_then(|(label, _)| label),
+            peor_producto_vendible: peores(None, 1).pop().and_then(|(label, _)| label),
+            top10_mejores: serie(mejores(categoria_elegida(&args.categoria_top_id), 10)),
+            top10_peores: serie(peores(categoria_elegida(&args.categoria_worst_id), 10)),
         })
     }
 
@@ -1412,60 +1473,7 @@ impl SqliteStatsRepository {
         let ticket_medio_cliente: Dinero;
 
         {
-            let sql_rec = format!(
-                r#"
-                WITH
-                rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
-                allp AS (
-                  SELECT
-                    r.ID_Cliente AS id_cliente,
-                    datetime(p.Fecha_Hora) AS paid_at,
-                    COALESCE(p.Importe_Total,0) AS imp
-                  FROM Pagos p
-                  JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-                  JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-                  WHERE c.ID_Reserva IS NOT NULL
-                    AND r.ID_Cliente IS NOT NULL
-                    AND p.Fecha_Hora IS NOT NULL
-                    AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
-                ),
-                cust_range AS (
-                  SELECT DISTINCT id_cliente
-                  FROM allp, rng
-                  WHERE paid_at >= rng.start_dt
-                    AND paid_at <  rng.end_dt
-                ),
-                firsts AS (
-                  SELECT id_cliente, MIN(paid_at) AS first_paid
-                  FROM allp
-                  GROUP BY id_cliente
-                ),
-                tot_range AS (
-                  SELECT id_cliente, SUM(imp) AS total
-                  FROM allp, rng
-                  WHERE paid_at >= rng.start_dt
-                    AND paid_at <  rng.end_dt
-                  GROUP BY id_cliente
-                )
-                SELECT
-                  (SELECT COUNT(*)
-                   FROM cust_range cr
-                   JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
-                   WHERE f.first_paid < rng.start_dt
-                  ) AS recurrentes,
-                  (SELECT COUNT(*)
-                   FROM cust_range cr
-                   JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
-                   WHERE f.first_paid >= rng.start_dt
-                     AND f.first_paid <  rng.end_dt
-                  ) AS no_recurrentes,
-                  COALESCE((SELECT SUM(total) FROM tot_range),0) AS ventas_total,
-                  (SELECT COUNT(*) FROM cust_range) AS clientes_rango
-                ;
-                "#,
-                start = start_expr,
-                end = end_expr
-            );
+            let sql_rec = sql_clientes_recurrentes(args.range);
 
             let mut rows_r = db.query(&sql_rec, ()).await.map_err(|e| e.to_string())?;
 
@@ -1795,5 +1803,361 @@ impl SqliteStatsRepository {
             },
             ultimos_gastos,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests_productos_en_una_pasada {
+    //! La estadística de productos se calcula en una pasada (`sql_productos`) y tiene que dar
+    //! EXACTAMENTE lo que daban las cuatro sentencias de antes, que se conservan aquí como
+    //! referencia: mismo mejor, mismo peor y los mismos top 10, en el mismo orden.
+    //!
+    //! La siembra es la del caso de contrato `stats/productos_vendidos`, que lleva lo que puede
+    //! torcer el resultado (empates, archivados, una categoría no vendible, cobros anulados y
+    //! partidos, productos borrados del catálogo, decimales) y ventas de otros días, para que la
+    //! semana, el mes y el año no sean lo mismo que hoy. Y la del caso
+    //! `stats/productos_nombre_que_es_un_id`: una línea sin producto cuyo nombre es el ID de un
+    //! producto, que comparte clave con las de ese producto sin ser suya. El worker hace la misma
+    //! comparación con su propia copia (`test/statsProductosUnaPasada.test.ts`), y el arnés de
+    //! lectura fija que los dos lados dan lo mismo.
+
+    use super::*;
+    use crate::contract_comun::{contract_dir, db_temporal, sembrar};
+    use crate::ejecutor::Value;
+
+    impl SqliteStatsRepository {
+        /// Las cuatro sentencias de antes, tal cual estaban.
+        async fn productos_antes(
+            &self,
+            args: ProductosStatsArgs,
+        ) -> Result<ProductosStatsResponse, String> {
+            let (start_expr, end_expr) = range_bounds_sql(args.range);
+            let g = self.db.read().await;
+            let db = &g;
+
+            let ctes = format!(
+                r#"
+                WITH
+                rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
+                paid_det AS (
+                  -- Sólo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, así que sus
+                  -- líneas no pueden aparecer en «lo más vendido» ni sumar en el histórico.
+                  -- El rango va AQUÍ y no fuera (RI-18): fuera, la CTE agrupaba todos los cobros de la
+                  -- historia antes de filtrar. Lo de fuera de rango ya no contaba (las consultas de «el
+                  -- peor» lo ponían a 0 con su CASE), así que el resultado es el mismo.
+                  SELECT pd.ID_Detalle AS ID_Detalle, MIN(p.Fecha_Hora) AS paid_at
+                  FROM Pago_Detalles pd
+                  JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+                  JOIN rng ON 1=1
+                  WHERE p.Estado = 'ACTIVO'
+                    AND p.Fecha_Hora >= rng.start_dt
+                    AND p.Fecha_Hora <  rng.end_dt
+                  GROUP BY pd.ID_Detalle
+                )
+                "#,
+                start = start_expr,
+                end = end_expr
+            );
+
+            let sql_best = format!(
+                r#"
+                {ctes}
+                -- LEFT JOIN y no JOIN: el catálogo puede borrar un producto que ya no se vende
+                -- (INV-05), y su venta del año pasado sigue siendo una venta. Con un INNER, esas
+                -- líneas desaparecerían del histórico SIN error, que es la peor forma de perderlas.
+                -- El nombre sale del catálogo si el producto sigue ahí (así un renombrado se ve en el
+                -- informe) y del snapshot de la línea si ya no está.
+                SELECT
+                  COALESCE(pr.Nombre, dc.Nombre_Producto, 'Producto') AS Nombre,
+                  CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS unidades
+                FROM Detalle_Comanda dc
+                JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
+                JOIN rng ON 1=1
+                LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
+                LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+                WHERE pd.paid_at >= rng.start_dt
+                  AND pd.paid_at <  rng.end_dt
+                  AND COALESCE(cat.Vendible,1)=1
+                GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+                HAVING SUM(COALESCE(dc.Cantidad,1)) > 0
+                ORDER BY unidades DESC, pr.Nombre ASC
+                LIMIT 1;
+                "#,
+                ctes = ctes
+            );
+
+            let mut rows_best = db.query(&sql_best, ()).await.map_err(|e| e.to_string())?;
+            let mejor_producto: Option<String> =
+                match rows_best.next().await.map_err(|e| e.to_string())? {
+                    Some(r) => v_string(r.get_value(0).map_err(|e| e.to_string())?),
+                    None => None,
+                };
+
+            // El PEOR parte del CATÁLOGO, no de lo vendido: el producto que no compra nadie no aparece
+            // en ninguna línea de comanda, así que se sale de `Productos` y las ventas entran por
+            // LEFT JOIN, contando 0 cuando no las hay.
+            let sql_worst_one = format!(
+                r#"
+                {ctes}
+                SELECT
+                  pr.Nombre,
+                  CAST(ROUND(COALESCE(SUM(
+                    CASE WHEN pd.paid_at >= rng.start_dt AND pd.paid_at < rng.end_dt
+                         THEN COALESCE(dc.Cantidad,1)
+                         ELSE 0
+                    END
+                  ),0),0) AS INTEGER) AS unidades
+                FROM Productos pr
+                JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+                LEFT JOIN Detalle_Comanda dc ON dc.ID_Producto = pr.ID_Producto
+                LEFT JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
+                JOIN rng ON 1=1
+                WHERE COALESCE(cat.Vendible,1)=1
+                GROUP BY pr.ID_Producto
+                ORDER BY unidades ASC, pr.Nombre ASC
+                LIMIT 1;
+                "#,
+                ctes = ctes
+            );
+
+            let mut rows_w1 = db
+                .query(&sql_worst_one, ())
+                .await
+                .map_err(|e| e.to_string())?;
+            let peor_producto_vendible: Option<String> =
+                match rows_w1.next().await.map_err(|e| e.to_string())? {
+                    Some(r) => v_string(r.get_value(0).map_err(|e| e.to_string())?),
+                    None => None,
+                };
+
+            let top_filter_sql = if let Some(idc) = args.categoria_top_id.as_deref() {
+                if !idc.trim().is_empty() {
+                    "AND pr.ID_Categoria = ?1".to_string()
+                } else {
+                    "".to_string()
+                }
+            } else {
+                "".to_string()
+            };
+
+            let sql_top10 = format!(
+                r#"
+                {ctes}
+                SELECT
+                  COALESCE(pr.Nombre, dc.Nombre_Producto, 'Producto') AS Nombre,
+                  CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS unidades
+                FROM Detalle_Comanda dc
+                JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
+                JOIN rng ON 1=1
+                LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
+                LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+                WHERE pd.paid_at >= rng.start_dt
+                  AND pd.paid_at <  rng.end_dt
+                  AND COALESCE(cat.Vendible,1)=1
+                  {filter}
+                GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
+                HAVING SUM(COALESCE(dc.Cantidad,1)) > 0
+                ORDER BY unidades DESC, pr.Nombre ASC
+                LIMIT 10;
+                "#,
+                ctes = ctes,
+                filter = top_filter_sql
+            );
+
+            let mut params_top: Vec<Value> = Vec::new();
+
+            if let Some(idc) = args.categoria_top_id.as_deref() {
+                if !idc.trim().is_empty() {
+                    params_top.push(Value::Text(idc.to_string()));
+                }
+            }
+
+            let mut rows_top = db
+                .query(&sql_top10, params_top)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let mut top_labels: Vec<String> = Vec::new();
+            let mut top_values: Vec<i64> = Vec::new();
+
+            while let Some(r) = rows_top.next().await.map_err(|e| e.to_string())? {
+                top_labels
+                    .push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
+                top_values.push(v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0));
+            }
+
+            let worst_filter_sql = if let Some(idc) = args.categoria_worst_id.as_deref() {
+                if !idc.trim().is_empty() {
+                    "AND pr.ID_Categoria = ?1".to_string()
+                } else {
+                    "".to_string()
+                }
+            } else {
+                "".to_string()
+            };
+
+            let sql_worst10 = format!(
+                r#"
+                {ctes}
+                SELECT
+                  pr.Nombre,
+                  CAST(ROUND(COALESCE(SUM(
+                    CASE WHEN pd.paid_at >= rng.start_dt AND pd.paid_at < rng.end_dt
+                         THEN COALESCE(dc.Cantidad,1)
+                         ELSE 0
+                    END
+                  ),0),0) AS INTEGER) AS unidades
+                FROM Productos pr
+                JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+                LEFT JOIN Detalle_Comanda dc ON dc.ID_Producto = pr.ID_Producto
+                LEFT JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
+                JOIN rng ON 1=1
+                WHERE COALESCE(cat.Vendible,1)=1
+                  {filter}
+                GROUP BY pr.ID_Producto
+                ORDER BY unidades ASC, pr.Nombre ASC
+                LIMIT 10;
+                "#,
+                ctes = ctes,
+                filter = worst_filter_sql
+            );
+
+            let mut params_worst: Vec<Value> = Vec::new();
+
+            if let Some(idc) = args.categoria_worst_id.as_deref() {
+                if !idc.trim().is_empty() {
+                    params_worst.push(Value::Text(idc.to_string()));
+                }
+            }
+
+            let mut rows_w = db
+                .query(&sql_worst10, params_worst)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let mut w_labels: Vec<String> = Vec::new();
+            let mut w_values: Vec<i64> = Vec::new();
+
+            while let Some(r) = rows_w.next().await.map_err(|e| e.to_string())? {
+                w_labels.push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
+                w_values.push(v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0));
+            }
+
+            Ok(ProductosStatsResponse {
+                mejor_producto,
+                peor_producto_vendible,
+                top10_mejores: ChartSeriesI64 {
+                    labels: top_labels,
+                    values: top_values,
+                },
+                top10_peores: ChartSeriesI64 {
+                    labels: w_labels,
+                    values: w_values,
+                },
+            })
+        }
+    }
+
+    const RANGOS: [StatsRange; 4] =
+        [StatsRange::Hoy, StatsRange::Semana, StatsRange::Mes, StatsRange::Anio];
+
+    /// Sin filtro, en blanco (que es sin filtro), cada categoría, la no vendible y una que no existe.
+    const CATEGORIAS: [Option<&str>; 7] = [
+        None,
+        Some("  "),
+        Some("cat-platos"),
+        Some("cat-bebidas"),
+        Some("cat-postres"),
+        Some("cat-materia"),
+        Some("cat-que-no-existe"),
+    ];
+
+    /// Las siembras: la de las ventas de verdad y la del nombre que es un ID.
+    const SIEMBRAS: [&str; 2] = ["productos_vendidos", "productos_nombre_que_es_un_id"];
+
+    async fn repositorio_sembrado(siembra: &str) -> SqliteStatsRepository {
+        let ruta = contract_dir().join(format!("lecturas/casos/stats/{siembra}.json"));
+        let caso: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&ruta).unwrap()).unwrap();
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, caso["seed"].as_array().unwrap()).await;
+        SqliteStatsRepository::new(db)
+    }
+
+    #[tokio::test]
+    async fn da_lo_mismo_que_las_cuatro_sentencias_de_antes() {
+        for siembra in SIEMBRAS {
+            let repo = repositorio_sembrado(siembra).await;
+            for range in RANGOS {
+                for top in CATEGORIAS {
+                    for worst in CATEGORIAS {
+                        let args = ProductosStatsArgs {
+                            range,
+                            categoria_top_id: top.map(str::to_string),
+                            categoria_worst_id: worst.map(str::to_string),
+                        };
+                        let antes = repo.productos_antes(args.clone()).await.unwrap();
+                        let ahora = repo.productos_impl(args).await.unwrap();
+                        assert_eq!(
+                            serde_json::to_value(&ahora).unwrap(),
+                            serde_json::to_value(&antes).unwrap(),
+                            "{siembra}: {range:?}, top {top:?}, peores {worst:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn una_linea_sin_producto_no_es_del_producto_cuyo_id_lleva_por_nombre() {
+        let repo = repositorio_sembrado("productos_nombre_que_es_un_id").await;
+        let hoy = |top: Option<&str>, worst: Option<&str>| ProductosStatsArgs {
+            range: StatsRange::Hoy,
+            categoria_top_id: top.map(str::to_string),
+            categoria_worst_id: worst.map(str::to_string),
+        };
+        // Sin filtro, lo de la clave va junto: P-7 son 10,13 del producto y 0,37 de la línea
+        // suelta, 10,5 que redondean a 11 (sumando por partes saldría 10,499… y 10). M-1 no es
+        // vendible: sólo queda su línea suelta.
+        let todo = repo.productos_impl(hoy(None, None)).await.unwrap();
+        assert_eq!(todo.top10_mejores.labels, ["P-7", "M-1", "Agua"]);
+        assert_eq!(todo.top10_mejores.values, [11, 6, 1]);
+        // En «los peores» y en una categoría sólo cuentan las líneas del producto.
+        assert_eq!(todo.top10_peores.labels, ["Agua", "P-7"]);
+        assert_eq!(todo.top10_peores.values, [1, 10]);
+        let bebidas = repo.productos_impl(hoy(Some("cat-bebidas"), Some("cat-bebidas"))).await.unwrap();
+        assert_eq!(bebidas.top10_mejores.labels, ["P-7", "Agua"]);
+        assert_eq!(bebidas.top10_mejores.values, [10, 1]);
+    }
+
+    #[tokio::test]
+    async fn la_siembra_ejercita_los_empates_y_el_corte() {
+        // Si la siembra dejara de vender nada hoy, la comparación de arriba pasaría en vacío.
+        let repo = repositorio_sembrado("productos_vendidos").await;
+        let hoy = |top: Option<&str>, worst: Option<&str>| ProductosStatsArgs {
+            range: StatsRange::Hoy,
+            categoria_top_id: top.map(str::to_string),
+            categoria_worst_id: worst.map(str::to_string),
+        };
+        let todo = repo.productos_impl(hoy(None, None)).await.unwrap();
+        assert_eq!(todo.mejor_producto.as_deref(), Some("Cerveza"));
+        assert_eq!(todo.peor_producto_vendible.as_deref(), Some("Agua"));
+        assert_eq!(todo.top10_mejores.labels.len(), 10);
+        assert_eq!(todo.top10_peores.labels.len(), 10);
+        // Los borrados del catálogo van delante en su empate, y entre ellos por su nombre.
+        assert_eq!(
+            todo.top10_mejores.labels[..7],
+            ["Cerveza", "Croquetas", "Tortilla", "Bocadillo retirado", "Menú antiguo", "Ensalada", "Paella"]
+        );
+        assert_eq!(todo.top10_mejores.values[..7], [6, 5, 5, 4, 4, 4, 4]);
+
+        let platos = repo.productos_impl(hoy(Some("cat-platos"), Some("cat-bebidas"))).await.unwrap();
+        // Cuatro platos empatan a 2 y sólo caben tres: se queda fuera el último por nombre.
+        assert_eq!(platos.top10_mejores.labels[7..], ["Alitas", "Jamón", "Pulpo"]);
+        // El orden es el de SQLite: U+FF46 va antes que U+1F37A.
+        let bebidas = repo.productos_impl(hoy(Some("cat-bebidas"), None)).await.unwrap();
+        let pos = |nombre: &str| bebidas.top10_mejores.labels.iter().position(|l| l == nombre).unwrap();
+        assert!(pos("ｆ Fanta") < pos("🍺 Jarra"), "{:?}", bebidas.top10_mejores.labels);
     }
 }
