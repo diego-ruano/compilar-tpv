@@ -591,7 +591,6 @@ export function cobrarDetalles(
 	input: CobrarDetallesInput,
 	plan: Extract<CobroDetallesPlan, { ok: true }>,
 ): BuiltCommand {
-	const placeholders = input.detalle_ids.map((_, i) => `?${i + 3}`).join(",");
 	return {
 		commandName: "cobrar_detalles",
 		command: {
@@ -691,12 +690,13 @@ export function cobrarDetalles(
 							SELECT ?1, dc.ID_Detalle
 							FROM Detalle_Comanda dc
 							WHERE dc.ID_Comanda = ?2
-								AND dc.ID_Detalle IN (${placeholders})
+								AND dc.ID_Detalle IN (SELECT value FROM json_each(?3))
 								AND NOT EXISTS (
 									SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 								);
 						`,
-						args: [REF_ID_PAGO, input.id_comanda, ...input.detalle_ids],
+						// DO-01: las líneas, en un solo parámetro (un array JSON).
+						args: [REF_ID_PAGO, input.id_comanda, JSON.stringify(input.detalle_ids)],
 					},
 					// MESA-01: descuento de stock/lotes (FEFO) de las lineas cobradas.
 					// RI-10: el mismo consumo que el cobro de barra (lotes FEFO, suelto y trazas). Va

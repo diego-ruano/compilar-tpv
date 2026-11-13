@@ -2,7 +2,7 @@
 //! las operaciones con varias sentencias usan Writer::transaccion (RI-32).
 
 use crate::util::new_id;
-use crate::consultas::{db_err, select_one_i64};
+use crate::consultas::{db_err, lista_json, select_one_i64};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -26,13 +26,6 @@ impl SqliteTareasRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
-}
-
-fn build_in_placeholders(start: i64, count: usize) -> String {
-    (0..count)
-        .map(|i| format!("?{}", start + i as i64))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 async fn exists_tarea<C: Reader>(conn: &C, id_tarea: &str) -> AppResult<bool> {
@@ -60,12 +53,14 @@ async fn apply_set_asignaciones_core<C: Writer>(
     // asignaciones huérfanas. La lista llega ya normalizada (limpia y sin duplicados), así que su
     // longitud es el nº de ids distintos que deben existir.
     if !ids_trabajadores.is_empty() {
-        let placeholders = build_in_placeholders(1, ids_trabajadores.len());
-        let sql = format!(
-            "SELECT COUNT(DISTINCT ID_Trabajador) FROM Trabajadores WHERE ID_Trabajador IN ({placeholders});"
-        );
-        let args: Vec<Value> = ids_trabajadores.iter().map(|s| Value::Text(s.clone())).collect();
-        let encontrados = select_one_i64(conn, &sql, args).await?.unwrap_or(0);
+        let encontrados = select_one_i64(
+            conn,
+            "SELECT COUNT(DISTINCT ID_Trabajador) FROM Trabajadores \
+             WHERE ID_Trabajador IN (SELECT value FROM json_each(?1));",
+            vec![lista_json(ids_trabajadores)],
+        )
+        .await?
+        .unwrap_or(0);
         if (encontrados as usize) != ids_trabajadores.len() {
             return Err(AppError::validation("Algún trabajador asignado no existe."));
         }
@@ -79,24 +74,18 @@ async fn apply_set_asignaciones_core<C: Writer>(
         .await
         .map_err(db_err)?;
     } else {
-        let placeholders = build_in_placeholders(2, ids_trabajadores.len());
-
-        let mut sql_args: Vec<Value> = Vec::with_capacity(1 + ids_trabajadores.len());
-        sql_args.push(Value::Text(id_tarea.to_string()));
-        for id_trab in ids_trabajadores.iter() {
-            sql_args.push(Value::Text(id_trab.clone()));
-        }
-
-        let sql = format!(
+        // DO-01: los asignados que se quedan, en UN parámetro (un array JSON): esta sentencia se
+        // replica y la nube admite 100 parámetros por sentencia.
+        conn.execute(
             r#"
             DELETE FROM Tarea_Asignaciones
             WHERE ID_Tarea = ?1
-              AND ID_Trabajador NOT IN ({});
+              AND ID_Trabajador NOT IN (SELECT value FROM json_each(?2));
             "#,
-            placeholders
-        );
-
-        conn.execute(&sql, sql_args).await.map_err(db_err)?;
+            vec![Value::Text(id_tarea.to_string()), lista_json(ids_trabajadores)],
+        )
+        .await
+        .map_err(db_err)?;
     }
 
     // TAR-02 (semántica decidida): `INSERT OR IGNORE` es intencional. Si un trabajador que YA

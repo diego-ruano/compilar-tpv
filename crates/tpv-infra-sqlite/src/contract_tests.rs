@@ -286,6 +286,7 @@ casos_de_contrato! {
     mesas__cobrar_detalles_con_cliente,
     mesas__cobrar_detalles_lote_y_suelto,
     mesas__cobrar_detalles_decimos,
+    mesas__cobrar_detalles_120_lineas,
     clientes__crear,
     clientes__actualizar,
     tareas__crear,

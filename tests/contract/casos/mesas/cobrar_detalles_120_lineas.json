@@ -1,0 +1,53 @@
+{
+  "descripcion": "DO-01: cobro de una mesa con 120 líneas. La sentencia que enlaza Pago_Detalles llevaba un parámetro por línea, y con más de 98 pasaba de los 100 que admite el SQLite del Durable Object: la nube la rechazaba como permanente y se quedaba sin Pago_Detalles ni Movimientos_Caja hasta el contraste diario. La lista va en un solo parámetro (un array JSON). Las 120 líneas quedan enlazadas al pago, la comanda cerrada y el lote descontado.",
+  "comando": "mesas.cobrar_detalles",
+  "seed": [
+    "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL' WHERE ID = 1;",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 300);",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-1', 'prod-1', 'L1', 200, '2026-01-01 10:00:00');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');",
+    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 120) INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) SELECT 'detalle-' || substr('000' || i, -3), 'comanda-1', 'prod-1', 1, 300 FROM n;"
+  ],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "metodo": "TARJETA",
+    "tipo": "TOTAL",
+    "detalle_ids": [
+      "detalle-001", "detalle-002", "detalle-003", "detalle-004", "detalle-005",
+      "detalle-006", "detalle-007", "detalle-008", "detalle-009", "detalle-010",
+      "detalle-011", "detalle-012", "detalle-013", "detalle-014", "detalle-015",
+      "detalle-016", "detalle-017", "detalle-018", "detalle-019", "detalle-020",
+      "detalle-021", "detalle-022", "detalle-023", "detalle-024", "detalle-025",
+      "detalle-026", "detalle-027", "detalle-028", "detalle-029", "detalle-030",
+      "detalle-031", "detalle-032", "detalle-033", "detalle-034", "detalle-035",
+      "detalle-036", "detalle-037", "detalle-038", "detalle-039", "detalle-040",
+      "detalle-041", "detalle-042", "detalle-043", "detalle-044", "detalle-045",
+      "detalle-046", "detalle-047", "detalle-048", "detalle-049", "detalle-050",
+      "detalle-051", "detalle-052", "detalle-053", "detalle-054", "detalle-055",
+      "detalle-056", "detalle-057", "detalle-058", "detalle-059", "detalle-060",
+      "detalle-061", "detalle-062", "detalle-063", "detalle-064", "detalle-065",
+      "detalle-066", "detalle-067", "detalle-068", "detalle-069", "detalle-070",
+      "detalle-071", "detalle-072", "detalle-073", "detalle-074", "detalle-075",
+      "detalle-076", "detalle-077", "detalle-078", "detalle-079", "detalle-080",
+      "detalle-081", "detalle-082", "detalle-083", "detalle-084", "detalle-085",
+      "detalle-086", "detalle-087", "detalle-088", "detalle-089", "detalle-090",
+      "detalle-091", "detalle-092", "detalle-093", "detalle-094", "detalle-095",
+      "detalle-096", "detalle-097", "detalle-098", "detalle-099", "detalle-100",
+      "detalle-101", "detalle-102", "detalle-103", "detalle-104", "detalle-105",
+      "detalle-106", "detalle-107", "detalle-108", "detalle-109", "detalle-110",
+      "detalle-111", "detalle-112", "detalle-113", "detalle-114", "detalle-115",
+      "detalle-116", "detalle-117", "detalle-118", "detalle-119", "detalle-120"
+    ]
+  },
+  "snapshot": {
+    "Pagos": "SELECT ID_Comanda, Metodo_Pago, Importe_Total, Tipo FROM Pagos",
+    "Pago_Detalles": "SELECT COUNT(*) AS Lineas, COUNT(DISTINCT ID_Detalle) AS Distintas, MIN(ID_Detalle) AS Primera, MAX(ID_Detalle) AS Ultima FROM Pago_Detalles",
+    "Comandas": "SELECT ID_Comanda, Estado, Total_Comanda FROM Comandas",
+    "Movimientos_Caja": "SELECT Tipo, Importe, Metodo_Pago FROM Movimientos_Caja",
+    "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible FROM Lotes_Producto",
+    "Lote_Consumos": "SELECT COUNT(*) AS Consumos, SUM(Cantidad) AS Unidades FROM Lote_Consumos"
+  }
+}

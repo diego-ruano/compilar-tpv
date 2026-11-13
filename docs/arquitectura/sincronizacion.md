@@ -108,6 +108,12 @@ pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esp
   reconoce como escritura; si alguna vez hace falta, hay que enseñárselo a `is_write_sql`.
 - **Lo que es estado local del equipo va por `raw()`**: `_Jobs_State`, `_Sync_*`, `_Verifactu_*`,
   `_Backfill_Historico`, `_Recovery_State`, `_Negocio`, el backfill. Por `execute()` se replicaría a la nube.
+- **Lo que sube tiene que caber en el SQLite del DO**, que admite 100 parámetros y 100 KB por
+  sentencia ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Una lista de
+  tamaño variable (las líneas de un cobro, las mesas de una zona, los asignados a una tarea) va
+  como **un único parámetro JSON**, `IN (SELECT value FROM json_each(?n))`
+  (`consultas::lista_json`), nunca con un `?` por elemento: con más de 98 líneas, el cobro de una
+  mesa subía una sentencia que la nube rechazaba como permanente (DO-01).
 - **Idempotencia** por `Op_Id`: `Applied_Operations` en la nube y `_Sync_Applied_Ops` en la Main evitan
   duplicados en catch-up y en vivo, y los ecos de las propias escrituras.
 - **IDs deterministas**: toda columna `TEXT PRIMARY KEY` recibe su UUID generado **antes** del

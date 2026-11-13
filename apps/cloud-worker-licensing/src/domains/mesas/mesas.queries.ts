@@ -463,14 +463,15 @@ export async function cobrarDetallesPlan(
 	db: Client,
 	input: CobrarDetallesInput,
 ): Promise<CobroDetallesPlan> {
-	const placeholders = input.detalle_ids.map((_, i) => `?${i + 2}`).join(",");
-	const args = [input.id_comanda, ...input.detalle_ids];
+	// DO-01: las líneas van en un solo parámetro (un array JSON), no en uno por línea: el SQLite
+	// del DO admite 100 por sentencia. Paridad con `SqliteMesasRepository::cobrar_detalles`.
+	const args = [input.id_comanda, JSON.stringify(input.detalle_ids)];
 	const countRs = await db.execute({
 		sql: `
 			SELECT COUNT(*) AS n
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
-				AND dc.ID_Detalle IN (${placeholders})
+				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
 				AND NOT EXISTS (
 					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				);
@@ -485,7 +486,7 @@ export async function cobrarDetallesPlan(
 			SELECT IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0) AS total
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
-				AND dc.ID_Detalle IN (${placeholders})
+				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
 				AND NOT EXISTS (
 					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				);
@@ -507,7 +508,7 @@ export async function cobrarDetallesPlan(
 				CAST(COALESCE(dc.Cantidad,1) AS REAL) AS cantidad
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
-				AND dc.ID_Detalle IN (${placeholders})
+				AND dc.ID_Detalle IN (SELECT value FROM json_each(?2))
 			ORDER BY dc.ID_Detalle;
 		`,
 		args,
