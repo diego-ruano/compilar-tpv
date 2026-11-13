@@ -10,8 +10,10 @@
 //
 //   · lo que dice el despliegue (`wrangler.json`): ninguna jurisdicción y la pista `weur`;
 //   · que las cuatro puertas (`hubDe`, `agendaDe`, la baja de un dispositivo y el aviso de cambio
-//     de licencia) piden el objeto con esa jurisdicción y esa pista;
-//   · y, leyendo el fuente, que nadie más le pide un objeto a un espacio de nombres por su cuenta.
+//     de licencia) piden el objeto con esa jurisdicción y esa pista.
+//
+// Que nadie más le pide un objeto a un espacio de nombres por su cuenta lo vigila, leyendo el
+// fuente, `objetosDelNegocio.node.test.ts`.
 
 import { describe, expect, it } from "vitest";
 
@@ -22,12 +24,18 @@ import { colocacionDelDespliegue, objetoDelNegocio, objetoEn } from "../src/lib/
 
 type Peticion = { jurisdiccion: string | null; nombre: string; opciones: unknown };
 
-/** Un espacio de nombres de mentira que apunta cómo se le pide cada objeto. */
+/**
+ * Un espacio de nombres de mentira que apunta cómo se le pide cada objeto. Como el de verdad, un id
+ * es de la jurisdicción del espacio que lo dio: pedir con él un objeto a otro espacio falla.
+ */
 function espacio(pedidos: Peticion[], llamadas: string[] = [], jurisdiccion: string | null = null): any {
 	return {
 		jurisdiction: (j: string) => espacio(pedidos, llamadas, j),
-		idFromName: (nombre: string) => ({ nombre }),
-		get: (id: { nombre: string }, opciones?: unknown) => {
+		idFromName: (nombre: string) => ({ nombre, jurisdiccion }),
+		get: (id: { nombre: string; jurisdiccion: string | null }, opciones?: unknown) => {
+			if (id.jurisdiccion !== jurisdiccion) {
+				throw new Error(`el id es de la jurisdicción ${id.jurisdiccion} y el espacio de nombres, de ${jurisdiccion}`);
+			}
 			pedidos.push({ jurisdiccion, nombre: id.nombre, opciones });
 			return {
 				revocarDispositivo: async (deviceId: string) => void llamadas.push(`revocar ${deviceId}`),
@@ -107,24 +115,5 @@ describe("las puertas piden el objeto como dice el despliegue", () => {
 		await avisarCambioDeLicencia(env, "negocio-1");
 		expect(pedidos).toHaveLength(4);
 		expect(pedidos.every((p) => p.jurisdiccion === "eu" && p.opciones === undefined)).toBe(true);
-	});
-});
-
-describe("nadie pide un objeto por su cuenta", () => {
-	const fuentes = import.meta.glob("../src/**/*.ts", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-
-	/** Lo que hace falta para sacar un objeto de un espacio de nombres sin pasar por el ayudante. */
-	const POR_SU_CUENTA = /\.(idFromName|idFromString|newUniqueId|getByName|jurisdiction)\s*\(/;
-
-	it("sólo `lib/objetosDelNegocio.ts` convierte un nombre en un objeto", () => {
-		// Sin comentarios: la documentación nombra `idFromName(tenantId)` para explicarlo.
-		const sinComentarios = (texto: string) => texto.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-		const culpables = Object.entries(fuentes)
-			.filter(([fichero]) => !fichero.endsWith("/lib/objetosDelNegocio.ts") && !fichero.endsWith(".d.ts"))
-			.filter(([, texto]) => POR_SU_CUENTA.test(sinComentarios(texto)))
-			.map(([fichero]) => fichero.replace("../src/", ""));
-		// Si el glob no encontrara nada, este test pasaría sin mirar nada.
-		expect(Object.keys(fuentes).length).toBeGreaterThan(50);
-		expect(culpables).toEqual([]);
 	});
 });
