@@ -103,4 +103,28 @@ mod tests {
     async fn anotar_un_movimiento_de_caja_no_recorre_el_historial() {
         sin_recorridos("caja_movimientos::registrar", crate::caja_movimientos::SQL_REGISTRAR).await;
     }
+
+    /// La estadística de productos lee los cobros del rango y, de cada uno, sus líneas: lo que
+    /// tarda crece con el rango pedido, no con el histórico. Recorre el catálogo (a propósito: el
+    /// peor producto es el que no ha vendido nada) y sus propios resultados intermedios.
+    #[tokio::test]
+    async fn la_estadistica_de_productos_solo_lee_los_cobros_del_rango() {
+        let sql = crate::stats::sql_productos(tpv_contracts::stats::StatsRange::Anio);
+        let p = plan(&sql).await;
+
+        for (tabla, entrada) in [
+            ("Pagos", "SEARCH p USING INDEX idx_pagos_estado_fecha (Estado=? AND Fecha_Hora>? AND Fecha_Hora<?)"),
+            ("Pago_Detalles", "SEARCH pd USING COVERING INDEX sqlite_autoindex_Pago_Detalles_1 (ID_Pago=?)"),
+            ("Detalle_Comanda", "SEARCH dc USING INDEX sqlite_autoindex_Detalle_Comanda_1 (ID_Detalle=?)"),
+        ] {
+            assert!(p.iter().any(|l| l == entrada), "{tabla} debe entrar por «{entrada}»: {p:#?}");
+        }
+        let recorridos: Vec<&String> = p
+            .iter()
+            .filter(|l| ["SCAN p", "SCAN pd", "SCAN dc"].iter().any(|t| *l == t || l.starts_with(&format!("{t} "))))
+            .collect();
+        assert!(recorridos.is_empty(), "recorre el histórico en {recorridos:?}\nplan completo: {p:#?}");
+        // `paid_det` se calcula una vez: en toda la sentencia sólo se entra una vez a los cobros.
+        assert_eq!(p.iter().filter(|l| l.starts_with("SEARCH p ")).count(), 1, "{p:#?}");
+    }
 }

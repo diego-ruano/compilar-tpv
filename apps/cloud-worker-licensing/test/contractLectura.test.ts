@@ -248,6 +248,10 @@ import casoStatsClientes from "../../../tests/contract/lecturas/casos/stats/clie
 import goldenStatsClientes from "../../../tests/contract/lecturas/golden/stats/clientes.json";
 import casoStatsProductos from "../../../tests/contract/lecturas/casos/stats/productos.json";
 import goldenStatsProductos from "../../../tests/contract/lecturas/golden/stats/productos.json";
+import casoStatsVendidos from "../../../tests/contract/lecturas/casos/stats/productos_vendidos.json";
+import goldenStatsVendidos from "../../../tests/contract/lecturas/golden/stats/productos_vendidos.json";
+import casoStatsVendidosCat from "../../../tests/contract/lecturas/casos/stats/productos_vendidos_por_categoria.json";
+import goldenStatsVendidosCat from "../../../tests/contract/lecturas/golden/stats/productos_vendidos_por_categoria.json";
 import casoStatsTrabajadores from "../../../tests/contract/lecturas/casos/stats/trabajadores.json";
 import goldenStatsTrabajadores from "../../../tests/contract/lecturas/golden/stats/trabajadores.json";
 import casoStatsReservas from "../../../tests/contract/lecturas/casos/stats/reservas.json";
@@ -360,6 +364,12 @@ const CASOS = [
 	{ nombre: "stats_mesas", caso: casoStatsMesas, golden: goldenStatsMesas },
 	{ nombre: "stats_proveedores", caso: casoStatsProveedores, golden: goldenStatsProveedores },
 	{ nombre: "stats_productos", caso: casoStatsProductos, golden: goldenStatsProductos },
+	{ nombre: "stats_productos_vendidos", caso: casoStatsVendidos, golden: goldenStatsVendidos },
+	{
+		nombre: "stats_productos_vendidos_por_categoria",
+		caso: casoStatsVendidosCat,
+		golden: goldenStatsVendidosCat,
+	},
 	{ nombre: "stats_clientes", caso: casoStatsClientes, golden: goldenStatsClientes },
 	{ nombre: "stats_reservas", caso: casoStatsReservas, golden: goldenStatsReservas },
 	{ nombre: "stats_trabajadores", caso: casoStatsTrabajadores, golden: goldenStatsTrabajadores },

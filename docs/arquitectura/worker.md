@@ -67,6 +67,12 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   de lectura da una foto coherente: el SQL del DO es síncrono y nada se intercala.
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
   vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
+  Por eso una estadística que crece con el rango pedido lo recorre **una vez por petición**: la de
+  productos es una sola sentencia (`sqlProductos`, en `domains/stats/stats.queries.ts`) que devuelve
+  las unidades por producto y el catálogo, y el mejor, el peor y los dos top 10 se sacan de ahí en
+  código. Un CTE repetido en varias sentencias se vuelve a calcular en cada una. La Main hace lo
+  mismo (`sql_productos`, en `tpv-infra-sqlite/src/stats.rs`) y el arnés de lectura fija que las dos
+  dan el mismo resultado.
 - Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
 - **Sin jurisdicción, con pista de Europa occidental** (`JURISDICCION_DO` vacía y
   `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) se

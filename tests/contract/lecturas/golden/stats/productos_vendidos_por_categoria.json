@@ -1,0 +1,54 @@
+{
+  "mejor_producto": "Cerveza",
+  "peor_producto_vendible": "Agua",
+  "top10_mejores": {
+    "labels": [
+      "Croquetas",
+      "Tortilla",
+      "Ensalada",
+      "Paella",
+      "Bravas",
+      "Calamares",
+      "Gazpacho",
+      "Alitas",
+      "Jamón",
+      "Pulpo"
+    ],
+    "values": [
+      5,
+      5,
+      4,
+      4,
+      3,
+      3,
+      3,
+      2,
+      2,
+      2
+    ]
+  },
+  "top10_peores": {
+    "labels": [
+      "Agua",
+      "Sidra",
+      "Zumo",
+      "Refresco",
+      "Refresco",
+      "ｆ Fanta",
+      "🍺 Jarra",
+      "Vino",
+      "Cerveza"
+    ],
+    "values": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      2,
+      2,
+      3,
+      6
+    ]
+  }
+}
