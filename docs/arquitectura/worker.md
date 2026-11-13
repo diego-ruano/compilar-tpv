@@ -100,6 +100,14 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Worker y es lo que la Main descarga dentro de su plazo de 20 s. Con la ruta en el Worker las filas
   llegan por `tenantQuery` y la respuesta es la misma, byte a byte
   (`test/helpers/dosCaminos.ts`).
+- **Las respuestas de sync que crecen con el negocio salen en gzip si quien pregunta lo acepta**
+  (`gzipSiSeAcepta`, `lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico`, `/verificar` y
+  `/verificar-claves`. Sin `Accept-Encoding: gzip` salen como siempre. El middleware va delante de
+  `tenantAuth` y `alHub`: el `TenantHub` contesta sin comprimir y comprime el Worker lo que vuelve,
+  para no gastar el hilo del negocio. La respuesta comprimida lleva `encodeBody: "manual"`; sin
+  eso, el runtime comprime al transmitir lo que lleva `Content-Encoding` y saldría comprimida dos
+  veces (`test/syncGzipTransmision.test.ts`). Se mira lo que pidió el cliente
+  (`cf.clientAcceptEncoding`, si Cloudflare cambió la cabecera) y sólo se comprime un 200.
 - **Retirar un negocio** es borrar todo su DO (`borrarTodo`, `/v1/admin/pruebas/retirar`).
 
 ## Cómo se escribe una ruta

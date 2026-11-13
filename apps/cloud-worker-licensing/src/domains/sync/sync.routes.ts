@@ -17,6 +17,7 @@ import { cuerpoTolerante } from "../../lib/validacion";
 import { reportarSaludDeSync as emitirSalud } from "../../observability/axiom";
 import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { alHub } from "../../lib/enElHub";
+import { gzipSiSeAcepta } from "../../lib/gzip";
 import { getDb } from "../../server/db";
 import { hubDe } from "../../lib/hub";
 import { provisionTenantDatabase } from "../licensing/licensing.helpers";
@@ -50,6 +51,14 @@ import {
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const syncRoutes = new Hono<Ctx>();
+
+// Las respuestas que crecen con el negocio salen comprimidas si la Main lo acepta (`lib/gzip.ts`).
+// Va delante de `alHub`: comprime el Worker lo que vuelve del TenantHub, no el TenantHub.
+syncRoutes.use("/changes", gzipSiSeAcepta);
+syncRoutes.use("/bootstrap", gzipSiSeAcepta);
+syncRoutes.use("/historico", gzipSiSeAcepta);
+syncRoutes.use("/verificar", gzipSiSeAcepta);
+syncRoutes.use("/verificar-claves", gzipSiSeAcepta);
 
 // ARQ-06: autenticación y rol se resuelven antes de que el validador lea el cuerpo.
 syncRoutes.use("*", tenantAuth, alHub, soloLaMain("forbidden_not_tpv", 403));
