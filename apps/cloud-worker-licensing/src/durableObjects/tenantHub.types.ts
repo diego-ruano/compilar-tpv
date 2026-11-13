@@ -76,35 +76,49 @@ export type ApplyMsg = {
 };
 
 /**
- * SYNC-18: volcado del atraso. La Main que vuelve de estar sin conexión manda sus operaciones
- * pendientes por trozos en vez de una a una; el DO las guarda en su cola y las aplica por su
- * cuenta, así que la Main puede desconectarse en cuanto reciba el `bulk_ack`.
- *
- * Cada elemento de `ops` lleva lo mismo que un `apply` suelto: el comando y su identidad.
+ * Lo que la Main sube de su outbox, en orden y de una vez: hasta 200 operaciones por mensaje. El DO
+ * las aplica una detrás de otra y contesta con un `apply_lote_ack` que lleva el veredicto de cada
+ * una (`VeredictoDeLote`). Cada elemento de `ops` lleva lo mismo que un `apply` suelto.
  */
-export type BulkApplyMsg = {
-	type: "bulk_apply";
+export type ApplyLoteMsg = {
+	type: "apply_lote";
+	loteId?: string;
 	ops?: ApplyMsg[];
 	client_now?: string;
 	clientNow?: string;
 };
 
 /**
- * REV-04: la Main acusa las operaciones que la nube apartó de su cola.
+ * Lo que fue de cada operación de un `apply_lote`, en el orden en que llegaron:
  *
- * Acusar no es cortesía: es lo que permite borrarlas de `_Cola_Muerta`. Mientras no llegue este
- * mensaje la nube vuelve a ofrecerlas en cada conexión, porque una divergencia de la que nadie se
- * ha enterado sigue siendo una divergencia.
+ * - aplicada, con el `Seq` que le dio el log; `yaEstaba` si es un reenvío de algo ya confirmado;
+ * - rechazada, con su clase: `permanente` (la Main la aparta y repara por estado), `transitorio`
+ *   (no le cuenta el intento) o ninguna de las dos (se lo cuenta). Tras una rechazada que no es
+ *   permanente no se aplica nada más del lote;
+ * - `noIntentada`: iba detrás de una que paró el lote, o no cabía en el trabajo de un turno. No se
+ *   ha tocado y se vuelve a mandar tal cual.
  */
-export type ColaApartadaAckMsg = { type: "cola_apartada_ack"; opIds?: unknown[] };
+export type VeredictoDeLote =
+	| { opId: string; ok: true; seq: number; yaEstaba?: true }
+	| { opId: string; ok: false; error: string; permanente: boolean; transitorio: boolean }
+	| { opId: string; ok: false; noIntentada: true };
+
+/** Una operación de un `apply_lote`, con la forma ya comprobada. */
+export type OpDeLote = {
+	opId: string;
+	commandName: string;
+	cmd: InternalApplyCommand;
+	/** Cuerpo canónico que se hashea (`Request_Hash` del gate de idempotencia). */
+	requestPayloadJson: string;
+	clientNow?: string | null;
+};
 
 export type AnyMsg =
 	| PingMsg
 	| HelloSignedMsg
 	| RecoveryReadyMsg
 	| ApplyMsg
-	| BulkApplyMsg
-	| ColaApartadaAckMsg;
+	| ApplyLoteMsg;
 
 /* =========================================================
    3. Comando interno (SQL replicable)
@@ -165,22 +179,3 @@ export type InternalApplyCommand =
 	| { type: "tenantDb.row"; payload: QueryPayload }
 	| { type: "tenantDb.rows"; payload: QueryPayload }
 	| { type: "tenantDb.transaction"; payload: TransactionPayload };
-
-/**
- * SYNC-18: una operación lista para aplicarse, tal y como la guarda la cola de entrada del DO y
- * la consume el apply agrupado. Es exactamente lo que hoy recibe `applyInternalCommandIdempotent`
- * por parámetros sueltos, pero como dato: así puede persistirse y aplicarse más tarde, sin el
- * dispositivo que la originó delante.
- */
-export type OpParaAplicar = {
-	opId: string;
-	commandName: string;
-	cmd: InternalApplyCommand;
-	deviceId?: string | null;
-	/** Cuerpo canónico que se firma/hashea (`Request_Hash` del gate de idempotencia). */
-	requestPayloadJson: string;
-	/** El payload de negocio de la operación. Se guarda con ella en la cola; ya no se difunde. */
-	cloudPayloadJson: string;
-	/** Hora del dispositivo emisor: resuelve los `datetime('now')` a literal (replicación determinista). */
-	clientNow?: string | null;
-};

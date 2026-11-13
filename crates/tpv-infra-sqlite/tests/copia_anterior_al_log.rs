@@ -19,7 +19,7 @@ use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::licensing::{PairingService, ResultadoSubidaImagen};
-use tpv_application::ports::replicacion::{CanalReplicacion, ContextoReplicacion};
+use tpv_application::ports::replicacion::{CanalReplicacion, ContextoReplicacion, RitmoDeSubida};
 use tpv_application::ports::sync::SyncRepository;
 use tpv_application::use_cases::{replicacion, sync as uc_sync};
 use tpv_contracts::licensing::{
@@ -122,8 +122,8 @@ impl ContextoReplicacion for Ctx {
     async fn sigue_disponible(&self, _: bool) -> AppResult<bool> {
         Ok(false)
     }
-    fn volcado_permitido(&self) -> bool {
-        false
+    fn ritmo_de_subida(&self) -> Arc<RitmoDeSubida> {
+        Arc::default()
     }
 }
 
@@ -296,7 +296,7 @@ async fn elegir_la_nube_tras_una_copia_anterior_al_log_no_sube_el_outbox_de_la_c
     *nube.cambios.lock().unwrap() = json!({"ok": true, "items": [], "nextSince": 1700, "highWater": 1700, "purgadoHasta": 700});
     let mut socket = Socket::default();
     replicacion::ejecutar(&ctx, &nube, &mut socket, true).await.unwrap();
-    assert!(socket.enviados.iter().all(|m| m["type"] != "apply" && m["type"] != "bulk_apply"), "{:?}", socket.enviados);
+    assert!(socket.enviados.iter().all(|m| m["type"] != "apply" && m["type"] != "apply_lote"), "{:?}", socket.enviados);
     assert_eq!(socket.enviados.last().unwrap()["type"], "recovery_ready");
     assert_eq!(recovery::status(&db).await.unwrap().state, RecoveryState::Ready);
     assert_eq!(texto(&db, "SELECT Estado FROM Usuarios WHERE ID_Usuario = 'u-baja';").await, "Inactivo");

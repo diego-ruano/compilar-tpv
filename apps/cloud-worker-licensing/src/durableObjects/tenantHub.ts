@@ -9,7 +9,7 @@ import { comoPeticionDeSentry } from "../observability/sentry";
 /** RI-45: solo este adaptador es RPC. Los helpers del motor no pertenecen a su prototipo. */
 export class TenantHub extends DurableObject<Env> {
 	// Los campos de instancia no son visibles por RPC. El motor se crea de nuevo al despertar;
-	// las sesiones y la cola duraderas siguen en attachments y storage, respectivamente.
+	// las sesiones siguen en sus attachments, y la base del negocio y quién es la Main, en storage.
 	private readonly motor: MotorTenantHub;
 
 	constructor(ctx: DurableObjectState, env: Env) {
@@ -50,7 +50,7 @@ export class TenantHub extends DurableObject<Env> {
 		return this.motor.estaAprovisionado();
 	}
 
-	/** Retirar un negocio de pruebas: cierra sus sesiones, quita la alarma y borra todo lo guardado. */
+	/** Retirar un negocio de pruebas: cierra sus sesiones y borra todo lo guardado. */
 	borrarTodo(): Promise<void> {
 		return this.motor.borrarTodo();
 	}
@@ -80,10 +80,6 @@ export class TenantHub extends DurableObject<Env> {
 
 	fetch(request: Request): Promise<Response> {
 		return this.motor.fetch(request);
-	}
-
-	alarm(): Promise<void> {
-		return this.motor.alarm();
 	}
 
 	webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {

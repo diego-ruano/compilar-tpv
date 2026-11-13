@@ -125,7 +125,7 @@ El rol Encargado y sus concesiones iniciales nacen de `0001`, igual en Main y Wo
 
 ## El andamiaje local (§16 de `0001`, y `0002`)
 
-`_Sync_Outbox`, `_Sync_Applied_Ops`, `_Sync_State`, `_Sync_Failed`, `_Sync_Encoladas`, `_Jobs_State`,
+`_Sync_Outbox`, `_Sync_Applied_Ops`, `_Sync_State`, `_Sync_Failed`, `_Jobs_State`,
 `_Verifactu_Envios`, `_Verifactu_Flujo`, `_Verifactu_Anomalias` (sin uso en esta rama: son de la
 remisión a la AEAT, ver [verifactu.md](verifactu.md)), `_Recovery_State`, `_Backfill_Historico`,
 `_Verificacion_Nube` (cuándo se contrastó con la nube por última vez,

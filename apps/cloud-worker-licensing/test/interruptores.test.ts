@@ -9,14 +9,12 @@
 //   · Que si la base central no contesta, TODO esté encendido (lo contrario convertiría una caída
 //     de Turso en «el TPV deja de sincronizar»).
 //   · Que administración no deje apagar nada para siempre, y que encender deje rastro.
-//   · Que la cola del DO apagada no aplique ni pierda nada, y que al encenderse drene.
 //
 // Corre contra el esquema real del control-plane sobre el SQLite del Durable Object.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
-import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
@@ -126,19 +124,19 @@ describe("PROD-06 · leer de la base central", () => {
 					desde,
 					exp,
 				);
-			ins("volcado_atraso", "*", ahora + HORA);
+			ins("reparacion_nube", "*", ahora + HORA);
 			ins("imagenes", "t-1", ahora + HORA);
-			ins("cola_do", "t-2", ahora + HORA);
+			ins("backfill_historico", "t-2", ahora + HORA);
 			ins("backfill_historico", "*", ahora - 1);
 			ins("cifrado_pii", "*", ahora + HORA, "9.0.0");
 
 			const nombres = async (t: string, v: string | null) =>
 				(await apagadosPara(() => db as any, t, v)).map((a) => a.interruptor).sort();
 
-			expect(await nombres("t-1", "1.0.0")).toEqual(["imagenes", "volcado_atraso"]);
+			expect(await nombres("t-1", "1.0.0")).toEqual(["imagenes", "reparacion_nube"]);
 			olvidarInterruptoresCacheados();
-			expect(await nombres("t-1", "9.1.0")).toEqual(["cifrado_pii", "imagenes", "volcado_atraso"]);
-			expect(await nombres("t-2", "1.0.0")).toEqual(["cola_do", "volcado_atraso"]);
+			expect(await nombres("t-1", "9.1.0")).toEqual(["cifrado_pii", "imagenes", "reparacion_nube"]);
+			expect(await nombres("t-2", "1.0.0")).toEqual(["backfill_historico", "reparacion_nube"]);
 		});
 	});
 
@@ -149,7 +147,7 @@ describe("PROD-06 · leer de la base central", () => {
 			},
 		});
 		expect(await apagadosPara(rota as any, "t-1", "1.0.0")).toEqual([]);
-		expect(await estaApagado(rota as any, "t-1", "cola_do")).toBeNull();
+		expect(await estaApagado(rota as any, "t-1", "imagenes")).toBeNull();
 
 		// Y si ni siquiera se puede construir el cliente (falta el secreto), igual.
 		const sinCliente = () => {
@@ -283,108 +281,6 @@ describe("PROD-06 · administración", () => {
 				{ ADMIN_API_TOKEN: TOKEN } as any,
 			);
 			expect(r.status).toBe(401);
-		});
-	});
-});
-
-describe("PROD-06 · la cola del DO apagada", () => {
-	const TENANT = "tenant-1";
-	const SEMILLA = [
-		"INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
-		"INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
-		"INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
-		"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 300);",
-		"INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');",
-	];
-	const op = (n: number) => ({
-		opId: `op-${n}`,
-		commandName: "add_linea",
-		cmd: {
-			type: "tenantDb.transaction" as const,
-			payload: {
-				steps: [
-					{
-						kind: "execute" as const,
-						sql: "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES (?1, 'comanda-1', 'prod-1', 1, 300);",
-						args: [`det-${n}`],
-					},
-				],
-			},
-		},
-		deviceId: "device-main",
-		requestPayloadJson: "{}",
-		cloudPayloadJson: "{}",
-		clientNow: "2026-01-01 12:30:00",
-	});
-
-	function preparar(hub: any) {
-		const sql = hub.state.storage.sql;
-		crearEsquemaTenant(sql);
-		for (const s of SEMILLA) sql.exec(s);
-		const db = clienteSobre(sql, hub.state.storage);
-		hub.getTenantDb = async () => db;
-		return sql;
-	}
-	const enCola = (sql: any) => sql.exec("SELECT COUNT(*) AS n FROM _Cola_Entrada;").toArray()[0].n;
-	const lineas = (sql: any) => sql.exec("SELECT COUNT(*) AS n FROM Detalle_Comanda;").toArray()[0].n;
-
-	it("no aplica nada, no aparta nada, y vuelve a mirar en unos minutos", async () => {
-		await enElHub("interruptores-cola-pausada", async (hub: any) => {
-			const sql = preparar(hub);
-			hub.encolar(TENANT, [op(1), op(2)]);
-			const hasta = Date.now() + 2 * HORA;
-			hub.colaPausada = async () => ({ hasta_ms: hasta });
-			await hub.state.storage.deleteAlarm();
-
-			await hub.alarm();
-
-			expect(enCola(sql)).toBe(2);
-			expect(lineas(sql)).toBe(0);
-			expect(sql.exec("SELECT COUNT(*) AS n FROM _Cola_Muerta;").toArray()[0].n).toBe(0);
-			const t = Number(await hub.state.storage.getAlarm()) - Date.now();
-			expect(t).toBeGreaterThan(4 * 60_000);
-			expect(t).toBeLessThanOrEqual(5 * 60_000);
-		});
-	});
-
-	it("si el apagado caduca antes de la próxima revisión, se revisa al caducar", async () => {
-		await enElHub("interruptores-cola-caduca", async (hub: any) => {
-			preparar(hub);
-			hub.encolar(TENANT, [op(1)]);
-			const hasta = Date.now() + 30_000;
-			hub.colaPausada = async () => ({ hasta_ms: hasta });
-
-			await hub.alarm();
-
-			expect(Number(await hub.state.storage.getAlarm())).toBe(hasta);
-		});
-	});
-
-	it("al encenderse drena todo lo que esperaba", async () => {
-		await enElHub("interruptores-cola-reanuda", async (hub: any) => {
-			const sql = preparar(hub);
-			hub.encolar(TENANT, [op(1), op(2), op(3)]);
-			hub.colaPausada = async () => ({ hasta_ms: Date.now() + HORA });
-			await hub.alarm();
-			expect(lineas(sql)).toBe(0);
-
-			hub.colaPausada = async () => null;
-			await hub.alarm();
-
-			expect(enCola(sql)).toBe(0);
-			expect(lineas(sql)).toBe(3);
-		});
-	});
-
-	it("sin base central alcanzable (lo normal en tests) la cola drena como siempre", async () => {
-		// Es el método de verdad, sin sustituir: en tests no hay TURSO_AUTH_TOKEN, así que `getDb`
-		// lanza y el interruptor tiene que darse por encendido.
-		dbDePruebas = null;
-		await enElHub("interruptores-cola-sin-central", async (hub: any) => {
-			const sql = preparar(hub);
-			hub.encolar(TENANT, [op(1)]);
-			await hub.alarm();
-			expect(lineas(sql)).toBe(1);
 		});
 	});
 });

@@ -489,6 +489,173 @@ describe("límites del SQL", () => {
 	});
 });
 
+// Lo que da por hecho el lote síncrono de la Main (`apply_lote`, `MotorTenantHub.aplicarLote`): que
+// cada operación puede ir en su propio `transactionSync` dentro de un mismo turno, que lo escrito en
+// un turno se confirma junto al acabar, y que lo que el objeto manda por un socket no sale hasta
+// que lo escrito antes es duradero.
+describe("transacciones y turnos", () => {
+	const zona = (sql: any, id: string) =>
+		sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES (?1, ?1);", id);
+	const zonas = (sql: any): string[] =>
+		sql.exec("SELECT ID_Zona FROM Zonas ORDER BY ID_Zona;").toArray().map((f: any) => String(f.ID_Zona));
+
+	it("transactionSync se anida: lo que falla dentro se deshace solo, y si falla el de fuera se deshace todo", async () => {
+		const res = await enElHub("sonda-tx-anidada", (hub) => {
+			const st = hub.state.storage;
+			crearEsquemaTenant(st.sql);
+			// Uno dentro de otro: el de dentro lanza y el de fuera sigue.
+			const errDentro = error(() =>
+				st.transactionSync(() => {
+					zona(st.sql, "fuera-1");
+					try {
+						st.transactionSync(() => {
+							zona(st.sql, "dentro-1");
+							throw new Error("falla_dentro");
+						});
+					} catch {}
+					st.transactionSync(() => zona(st.sql, "dentro-2"));
+				}),
+			);
+			const trasElPrimero = zonas(st.sql);
+			// El de fuera lanza después de que uno de dentro haya acabado bien.
+			const errFuera = error(() =>
+				st.transactionSync(() => {
+					st.transactionSync(() => zona(st.sql, "dentro-3"));
+					throw new Error("falla_fuera");
+				}),
+			);
+			return { errDentro, trasElPrimero, errFuera, alFinal: zonas(st.sql) };
+		});
+		informe.transaccionAnidada = res;
+		expect(res.errDentro).toBeNull();
+		expect(res.trasElPrimero).toEqual(["dentro-2", "fuera-1"]);
+		expect(res.errFuera).toBe("falla_fuera");
+		expect(res.alFinal).toEqual(["dentro-2", "fuera-1"]);
+	});
+
+	it("lo escrito en un turno se confirma junto: si el objeto se aborta antes, no queda nada de ese turno", async () => {
+		const nombre = "sonda-turno-junto";
+		await enElHub(nombre, (hub) => crearEsquemaTenant(hub.state.storage.sql));
+
+		// Dos transacciones acabadas en el mismo turno, y el objeto se aborta sin ceder el control.
+		let errAborto: string | null = null;
+		try {
+			await enElHub(nombre, (hub) => {
+				const st = hub.state.storage;
+				st.transactionSync(() => zona(st.sql, "turno-a-1"));
+				st.transactionSync(() => zona(st.sql, "turno-a-2"));
+				hub.state.abort("sonda: aborto a mitad de turno");
+			});
+		} catch (e) {
+			errAborto = String((e as Error)?.message ?? e);
+		}
+		const trasAbortar = await enElHub(nombre, (hub) => zonas(hub.state.storage.sql));
+
+		// Con lo primero ya duradero (`sync`), el aborto sólo se lleva lo de después.
+		let errSegundo: string | null = null;
+		try {
+			await enElHub(nombre, async (hub) => {
+				const st = hub.state.storage;
+				st.transactionSync(() => zona(st.sql, "turno-b-1"));
+				await st.sync();
+				st.transactionSync(() => zona(st.sql, "turno-b-2"));
+				hub.state.abort("sonda: aborto tras sync");
+			});
+		} catch (e) {
+			errSegundo = String((e as Error)?.message ?? e);
+		}
+		const trasElSegundo = await enElHub(nombre, (hub) => zonas(hub.state.storage.sql));
+
+		informe.turnoJunto = { errAborto, trasAbortar, errSegundo, trasElSegundo };
+		expect(trasAbortar).toEqual([]);
+		expect(trasElSegundo).toEqual(["turno-b-1"]);
+	});
+
+	it("lo que se manda por un socket no sale si lo escrito en ese turno no llega a ser duradero", async () => {
+		const ns = (env as any).TenantHub as DurableObjectNamespace;
+		const abrir = async (nombre: string) => {
+			await enElHub(nombre, (hub) => {
+				crearEsquemaTenant(hub.state.storage.sql);
+				// Abrir el socket apunta la visita en la base central, que aquí no existe.
+				hub.touchLastSeen = async () => {};
+			});
+			const stub = ns.get(ns.idFromName(nombre));
+			const res = await stub.fetch("https://tpv-api.test/ws", {
+				headers: { Upgrade: "websocket", "x-tenant-id": nombre, "x-device-id": "sonda" },
+			});
+			const cliente = res.webSocket!;
+			const recibidos: string[] = [];
+			cliente.accept();
+			cliente.addEventListener("message", (ev: MessageEvent) => {
+				const m = JSON.parse(String(ev.data));
+				if (m?.type === "sonda") recibidos.push(String(m.que));
+			});
+			return { recibidos, cliente };
+		};
+		const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+		// El control: escribir y mandar en el mismo turno, sin abortar. El mensaje llega.
+		const control = await abrir("sonda-puerta-control");
+		await enElHub("sonda-puerta-control", (hub) => {
+			const st = hub.state.storage;
+			st.transactionSync(() => zona(st.sql, "control"));
+			hub.state.getWebSockets()[0].send(JSON.stringify({ type: "sonda", que: "control" }));
+		});
+		await esperar(100);
+
+		// El caso: escribir, mandar y abortar en el mismo turno. Lo escrito se pierde, y el mensaje con él.
+		const caso = await abrir("sonda-puerta-aborto");
+		let errAborto: string | null = null;
+		try {
+			await enElHub("sonda-puerta-aborto", (hub) => {
+				const st = hub.state.storage;
+				st.transactionSync(() => zona(st.sql, "perdida"));
+				hub.state.getWebSockets()[0].send(JSON.stringify({ type: "sonda", que: "perdida" }));
+				hub.state.abort("sonda: aborto con un mensaje en la puerta");
+			});
+		} catch (e) {
+			errAborto = String((e as Error)?.message ?? e);
+		}
+		await esperar(200);
+		const trasAbortar = await enElHub("sonda-puerta-aborto", (hub) => zonas(hub.state.storage.sql));
+
+		// El contraste: lo mismo, pero el aborto llega con lo escrito ya duradero (`sync`). El mensaje
+		// había salido: lo que lo retenía en el caso anterior era la puerta, no el aborto.
+		const duradero = await abrir("sonda-puerta-duradero");
+		try {
+			await enElHub("sonda-puerta-duradero", async (hub) => {
+				const st = hub.state.storage;
+				st.transactionSync(() => zona(st.sql, "duradera"));
+				hub.state.getWebSockets()[0].send(JSON.stringify({ type: "sonda", que: "duradera" }));
+				await st.sync();
+				await esperar(50);
+				hub.state.abort("sonda: aborto con lo escrito ya duradero");
+			});
+		} catch {}
+		await esperar(200);
+		const trasElDuradero = await enElHub("sonda-puerta-duradero", (hub) => zonas(hub.state.storage.sql));
+		try {
+			control.cliente.close();
+			caso.cliente.close();
+			duradero.cliente.close();
+		} catch {}
+
+		informe.puertaDeSalida = {
+			control: control.recibidos,
+			caso: caso.recibidos,
+			errAborto,
+			trasAbortar,
+			duradero: duradero.recibidos,
+			trasElDuradero,
+		};
+		expect(control.recibidos).toEqual(["control"]);
+		expect(trasAbortar).toEqual([]);
+		expect(caso.recibidos).toEqual([]);
+		expect(trasElDuradero).toEqual(["duradera"]);
+		expect(duradero.recibidos).toEqual(["duradera"]);
+	});
+});
+
 describe("jurisdicción", () => {
 	it("el subespacio eu existe en local y da otro id para el mismo nombre", () => {
 		const ns = (env as any).TenantHub as DurableObjectNamespace;

@@ -3,9 +3,9 @@ import { commands } from "@tpv/client";
 //
 // PROD-06 · Lo que soporte ha apagado desde la nube en este equipo.
 //
-// No tapa nada ni bloquea nada: explica por qué una cola crece. Sin esto, con el volcado apagado,
-// la pantalla de conectividad enseñaría cambios pendientes subiendo y el dueño del bar buscaría el
-// problema en su router. Se pinta sólo si hay algo apagado.
+// No tapa nada ni bloquea nada: explica por qué algo no avanza. Sin esto, con la descarga del
+// histórico apagada, la pantalla de conectividad enseñaría un progreso parado y el dueño del bar
+// buscaría el problema en su router. Se pinta sólo si hay algo apagado.
 
 import React from "react";
 
@@ -14,8 +14,6 @@ import type { Interruptor, InterruptorApagado } from "@tpv/contracts";
 /** Exhaustivo a propósito: un interruptor nuevo sin etiqueta no compila. */
 const ETIQUETA: Record<Interruptor, string> = {
 	reparacion_nube: "La reparación automática de diferencias con la nube",
-	volcado_atraso: "El envío rápido de lo acumulado sin conexión",
-	cola_do: "La aplicación en la nube de lo acumulado sin conexión",
 	backfill_historico: "La descarga del histórico",
 	cifrado_pii: "El cifrado de los datos del personal",
 	imagenes: "La subida de imágenes",

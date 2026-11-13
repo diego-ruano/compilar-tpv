@@ -1298,7 +1298,6 @@ describe("borrar un ticket no se lleva su cobro (AUD-14)", () => {
 				commandName: built.commandName,
 				deviceId: "handy",
 				requestPayloadJson: JSON.stringify(built.cloudPayload),
-				cloudPayloadJson: JSON.stringify(built.cloudPayload),
 				clientNow: "2026-11-08 12:10:00",
 			});
 

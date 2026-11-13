@@ -149,7 +149,7 @@ mod tests {
         let foto = Instantanea {
             consultado_ms: 123,
             apagados: vec![InterruptorApagado {
-                interruptor: Interruptor::ColaDo,
+                interruptor: Interruptor::Imagenes,
                 motivo: "m".into(),
                 hasta_ms: 456,
             }],

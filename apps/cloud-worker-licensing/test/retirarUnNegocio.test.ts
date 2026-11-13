@@ -2,9 +2,9 @@
 //
 // Retirar un negocio de pruebas es borrar todo lo que guarda en la nube, con los objetos de verdad:
 //
-// - su `TenantHub`: se cierran las sesiones que siguieran vivas, se quita la alarma de la cola y se
-//   borra todo lo guardado, y nada de lo que llega después (el cierre de esos sockets) vuelve a
-//   crear tablas en un objeto que tiene que quedarse vacío;
+// - su `TenantHub`: se cierran las sesiones que siguieran vivas y se borra todo lo guardado, y nada
+//   de lo que llega después (el cierre de esos sockets) vuelve a crear tablas en un objeto que tiene
+//   que quedarse vacío;
 // - su `AgendaWeb`: lo que esperaba a la Main, con los datos de quien reservó, y su alarma;
 // - sus imágenes: la carpeta del negocio en el bucket, y sólo la suya.
 //
@@ -52,30 +52,15 @@ async function esperarA(cond: () => boolean, ms = 3_000): Promise<boolean> {
 }
 
 describe("TenantHub.borrarTodo", () => {
-	it("cierra las sesiones vivas, quita la alarma y no deja nada guardado", async () => {
+	it("cierra las sesiones vivas y no deja nada guardado", async () => {
 		const tenantId = "retirar-hub";
 		const stub = env.TenantHub.get(env.TenantHub.idFromName(tenantId));
 		expect(await stub.aprovisionar(tenantId)).toEqual({ reused: false });
 
 		const { main, handy } = await enElHub(tenantId, async (hub: any) => {
 			hub.touchLastSeen = async () => {};
-			hub.colaPausada = async () => null;
 			hub.state.storage.sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Sala');");
 			laMainEs(hub, "la-main");
-			// Algo en la cola: es lo que programa la alarma del objeto.
-			hub.encolar(tenantId, [
-				{
-					opId: "op-en-cola",
-					commandName: "x",
-					cmd: { type: "tenantDb.exec", payload: { sql: "UPDATE Zonas SET Nombre_Zona = 'Otra';", args: [] } },
-					deviceId: "la-main",
-					requestPayloadJson: "{}",
-					cloudPayloadJson: "{}",
-					clientNow: "",
-				},
-			]);
-			await hub.state.storage.setAlarm(Date.now() + 60_000);
-			expect(await hub.state.storage.getAlarm()).not.toBeNull();
 			expect(tablas(hub.state.storage.sql)).toContain("Zonas");
 			return { main: conectar(hub, tenantId, "la-main", "tpv"), handy: conectar(hub, tenantId, "una-handy", "handy") };
 		});
@@ -89,7 +74,6 @@ describe("TenantHub.borrarTodo", () => {
 
 		await enElHub(tenantId, async (hub: any) => {
 			expect(tablas(hub.state.storage.sql)).toEqual([]);
-			expect(await hub.state.storage.getAlarm()).toBeNull();
 			for (const c of [main, handy]) {
 				expect(c.servidor.deserializeAttachment()).toMatchObject({ authed: false, fuera: true });
 			}

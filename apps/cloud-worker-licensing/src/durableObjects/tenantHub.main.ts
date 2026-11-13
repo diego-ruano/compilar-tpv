@@ -31,7 +31,7 @@ const INTERVALO_COMPROBAR_MAIN_MS = 60_000;
 
 type Almacen = DurableObjectState["storage"];
 
-/** Barato e idempotente, como `asegurarCola`: se llama al principio de cada operación. */
+/** Barato e idempotente: se llama al principio de cada operación, sin un flag que se pierda al hibernar. */
 function asegurarTabla(storage: Almacen): void {
 	storage.sql.exec(`
 		CREATE TABLE IF NOT EXISTS _Main_Vigente (

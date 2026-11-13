@@ -234,7 +234,7 @@ cada entrada tiene el suyo:
 |---|---|
 | `POST /v1/telemetry` | 1 MiB de cuerpo, antes de autenticar (el dispositivo manda como mucho 512 KiB); 500 eventos; 4.000 caracteres de mensaje; por evento, 128 KiB de `fields` serializados y 256 caracteres por nombre de campo |
 | `device_auth_rechazado` | La ruta, filtrada y acotada después a 256 bytes con la marca (`tenantAuth`, con `acotar`): un JWT en la ruta sale `[jwt]` entero |
-| Eventos del `TenantHub` (`apply_error`, `cola_apartada`, `escritura_en_duda`…) | El tope común: la clave y el nombre de la operación llegan enteros a `ingestToAxiom`, que los filtra antes de acotarlos |
+| Eventos del `TenantHub` (`apply_error`, `resultado_ilegible`…) | El tope común: la clave y el nombre de la operación llegan enteros a `ingestToAxiom`, que los filtra antes de acotarlos |
 | `X-Idempotency-Key` | De 16 a 64 letras, cifras, guiones o guiones bajos (`^[A-Za-z0-9_-]{16,64}$`; la Handy manda un UUIDv7). Otra cosa se rechaza con `invalid_op_id` (400) sin llamar al `TenantHub` |
 
 La Webview y el core de Rust no acotan: lo que filtran lo ha escrito la propia app, y el motor de
@@ -345,7 +345,7 @@ repositorio no dice si está puesto. Cada despliegue envía el `observability` d
 | Sentry del worker | `apps/cloud-worker-licensing/src/observability/sentry.ts` |
 | Axiom | `apps/cloud-worker-licensing/src/observability/axiom.ts` |
 | Ingesta | `apps/cloud-worker-licensing/src/domains/telemetry/telemetry.routes.ts` |
-| Eventos de sync | `durableObjects/tenantHub.ts` (`emitSyncEvent`), `tenantHub.cola.ts`, `tenantHub.mensajes.ts` |
+| Eventos de sync | `durableObjects/tenantHub.motor.ts` (`emitSyncEvent`), `tenantHub.mensajes.ts` |
 | Latidos | `apps/cloud-worker-licensing/src/observability/latido.ts` |
 | Salud | `apps/cloud-worker-licensing/src/server/salud.ts` |
 | Esquema de evento | `crates/tpv-telemetry/src/event.rs` → `packages/contracts/src/generated/telemetry.ts` (ts-rs) |
@@ -474,13 +474,10 @@ Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
 
 | `event` | Cuándo |
 |---|---|
-| `apply_error` | Un apply falla en el DO. `command_name`, `op_id`, `device_id`, error recortado y `latency_ms`, sin el comando ni sus args |
+| `apply_error` | Una escritura falla en el DO: una suelta o una operación de un lote de la Main. `command_name`, `op_id`, `device_id` y error recortado (en una suelta, también `latency_ms`), sin el comando ni sus args |
 | `main_online` / `main_offline` | Una Main se autentica / se va la última (freeze de las Handy) |
 | `device_auth_rechazado` | El worker rechaza a un dispositivo. `motivo`, `ruta` (filtrada y acotada a 256 bytes), `metodo` |
 | `tenant_salud_sync` | El contraste diario de una Main con la nube (descuadres, reparadas) |
-| `cola_volcado_inicio` / `cola_volcado_fin` | La Main vuelca su atraso a la cola del DO |
-| `cola_pausada`, `cola_base_caida`, `cola_ciclo_error` | La cola no avanza: interruptor, base que no contesta, fallo de una vuelta |
-| `cola_apartada` / `cola_apartada_acusada` | Una operación sale a `_Cola_Muerta` / una Main la acusa |
 | `hub_no_disponible` | El objeto de un negocio no ha atendido una petición: `motivo` (`saturado`, `pasajero`, `otro`), si era una lectura ya repetida, el método y la ruta. Lo emite el Worker (`service: tpv-api`) |
 | `base_llena` | La base de un negocio está llena o en sólo lectura. Una vez por instancia del DO; no se aparta nada mientras dure |
 | `migracion_fallida` | La base de un negocio no ha podido ponerse al día tras un despliegue: contesta 503 hasta que se arregle. Una vez por instancia del DO |

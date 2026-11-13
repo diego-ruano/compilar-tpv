@@ -22,10 +22,6 @@ pub enum Interruptor {
     /// La parte que ESCRIBE del contraste con la nube (SYNC-22/24/25): se sigue comparando e
     /// informando, pero no se encola ninguna reparación ni ningún borrado.
     ReparacionNube,
-    /// El volcado del atraso a la cola del DO (SYNC-18). La Main sube por el camino en vivo.
-    VolcadoAtraso,
-    /// El drenado de la cola de entrada del DO. Sólo lo mira el worker; la cola es durable.
-    ColaDo,
     /// La descarga del histórico tras una recuperación (SYNC-19, fase 2).
     BackfillHistorico,
     /// La conversión de la PII del personal a texto cifrado (TRAB-03).

@@ -21,7 +21,7 @@ describe("TenantHub RPC", () => {
 
 	it("limita el prototipo RPC a las operaciones y callbacks previstos", () => {
 		expect(Object.getOwnPropertyNames(TenantHub.prototype).sort()).toEqual([
-			"constructor", "aplicar", "revocarDispositivo", "releerMain", "avisarEmparejamiento", "avisarReservasWeb", "fetch", "alarm",
+			"constructor", "aplicar", "revocarDispositivo", "releerMain", "avisarEmparejamiento", "avisarReservasWeb", "fetch",
 			"webSocketMessage", "webSocketClose", "webSocketError",
 			// La base del negocio vive en el DO.
 			"consultar", "anotarEstado", "aprovisionar", "estaAprovisionado", "borrarTodo",
@@ -49,8 +49,9 @@ describe("TenantHub RPC", () => {
 	it("transporta resultados y conflictos sin perder el sobre idempotente", async () => {
 		await enElHub("rpc-datos", (motor) => {
 			motor.applyInternalCommandIdempotent = async (params: any) => {
-				expect(params.cloudPayloadJson).toBe('{"dato":"á"}');
-				expect(params.requestPayloadJson).toBe(params.cloudPayloadJson);
+				// El cuerpo del dominio es lo que identifica la operación (`Request_Hash`).
+				expect(params.requestPayloadJson).toBe('{"dato":"á"}');
+				expect(params.cloudPayloadJson).toBeUndefined();
 				if (params.opId === "conflicto") throw new HubError("idempotency_payload_mismatch", 409);
 				return { result: { id: 23, valores: ["á", null] }, seq: 1 };
 			};

@@ -30,7 +30,7 @@ docena de números que hoy no tenemos.
 | Fuente | Qué da | Estado |
 |---|---|---|
 | **Panel Configuración → Conectividad** | `sync_health` (outbox, `last_seq`, cuarentena, fallando) y `jobs_status` | ✅ Ya existe |
-| **Axiom** — `AXIOM_DATASET_SYNC` | `apply_error`, `main_online/offline`, `device_auth_rechazado`, `tenant_salud_sync`, `cola_*` | ✅ Ya existe |
+| **Axiom** — `AXIOM_DATASET_SYNC` | `apply_error`, `main_online/offline`, `device_auth_rechazado`, `tenant_salud_sync` | ✅ Ya existe |
 | **Better Stack** | Sonda de `/health` y latidos del cron y de la copia de la base central | ✅ Ya existe |
 | **Axiom** — `tpv-device-logs` | Logs del escritorio con scrubbing | ✅ Ya existe |
 | **Sentry** (`tpv-desktop`, `tpv-api`) | Errores, crashes, crash-free rate | ✅ Ya existe |
@@ -131,9 +131,9 @@ obvias:
 |---|---|---|
 | Peticiones | ~$0,15 / millón | Cada mensaje que **despierta** al DO |
 | Duración | ~$12,50 / millón GB-s | **La métrica que valida SYNC-16** |
-| **Filas escritas** | **~$1,00 / millón** | `_Cola_Entrada` (SYNC-18). Mil veces más caro que leer |
+| **Filas escritas** | **~$1,00 / millón** | Cada operación escribe su gate (`Applied_Operations`) y su línea del log (`Sync_Changes`), además de sus filas. Mil veces más caro que leer |
 | Filas leídas | ~$0,001 / millón | Prácticamente gratis |
-| Almacenamiento | ~$0,20 / GB-mes | La cola debería vaciarse; si crece, algo no drena |
+| Almacenamiento | ~$0,20 / GB-mes | El log y el gate se purgan a los 7 días; si crecen, la purga no corre |
 
 Tres cosas concretas que comprobar:
 
@@ -215,7 +215,6 @@ Esto no cuesta dinero, pero dice si el producto aguanta un servicio real.
 | Operaciones "fallando" | `sync_health` | Reintentos en curso; si persiste, hay una divergencia Main↔worker |
 | Jobs con fallo o vencidos | `jobs_status` | Un job muerto no avisa solo |
 | Reconexiones de WS por servicio | Axiom (no hay evento propio: se deduce de `main_online`/`main_offline`) | Muchas = red del bar inestable → afecta a la Handy |
-| Tiempo del volcado del atraso | Axiom: `cola_volcado_inicio` / `cola_volcado_fin` (por su `_time`; no llevan duración) | Cuánto tarda un TPV en ponerse al día tras un corte |
 | **Fallos de impresión** | Logs | Un cobro que no imprime es una reclamación |
 | Tiempo de arranque de la app | Logs | Un TPV que tarda en abrir molesta cada mañana |
 | Copias diarias correctas y su tamaño | `recovery_list_backups` (Configuración → Licencia) y el job `backup_local` en `jobs_status` | Si fallan, el plan B no existe |

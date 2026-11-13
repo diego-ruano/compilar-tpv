@@ -20,6 +20,7 @@ import { MARCA_DE_RECORTE } from "../src/observability/tope";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
+import { montarMainEnElHub } from "./helpers/mainEnElHub";
 
 const b64url = (texto: string) => btoa(texto).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 /** El JWT de la revisión: un correo en la carga y relleno, más largo que cualquier tope de entrada. */
@@ -103,7 +104,6 @@ describe("AUD-32 · la clave y el nombre de una operación que falla en el Tenan
 		},
 		deviceId: "main-ficticia",
 		requestPayloadJson: "{}",
-		cloudPayloadJson: "{}",
 		clientNow: "2026-01-01 12:30:00",
 	});
 
@@ -116,9 +116,6 @@ describe("AUD-32 · la clave y el nombre de una operación que falla en el Tenan
 		crearEsquemaTenant(sql);
 		const db = clienteSobre(sql, hub.state.storage);
 		hub.getTenantDb = async () => db;
-		// La cola lee el interruptor `cola_do` de la base central en cada vuelta.
-		hub.colaPausada = async () => null;
-		hub.asegurarCola();
 		const eventos: { name: string; fields: Record<string, unknown> }[] = [];
 		hub.emitSyncEvent = (name: string, fields: Record<string, unknown>) => void eventos.push({ name, fields });
 		return eventos;
@@ -149,20 +146,21 @@ describe("AUD-32 · la clave y el nombre de una operación que falla en el Tenan
 		for (const trozo of TROZOS_DEL_JWT) expect(JSON.stringify(enviado), trozo).not.toContain(trozo);
 	});
 
-	it("cola_apartada también, y la operación apartada conserva su clave entera", async () => {
-		const { eventos, muertas } = await enElHub("aud32-cola-apartada", async (hub: any) => {
-			const eventos = preparar(hub);
-			hub.encolar(TENANT, [operacionImposible()]);
-			await hub.drenarCola();
-			const muertas = hub.state.storage.sql.exec("SELECT Op_Id, Command_Name FROM _Cola_Muerta;").toArray();
-			return { eventos, muertas };
+	it("en un lote de la Main también: el veredicto de la operación lleva su clave entera", async () => {
+		const { eventos, acuse } = await enElHub("aud32-lote", async (hub: any) => {
+			const m = await montarMainEnElHub(hub, TENANT);
+			const op = operacionImposible();
+			const acuse = await m.mandarLote([{ opId: op.opId, commandName: op.commandName, command: op.cmd }]);
+			return { eventos: m.eventos, acuse };
 		});
-		const apartadas = eventos.filter((e) => e.name === "cola_apartada");
-		expect(apartadas).toHaveLength(1);
-		expect(apartadas[0].fields).toMatchObject({ op_id: CLAVE, command_name: NOMBRE });
-		const enviado = await enAxiom("cola_apartada", apartadas[0].fields);
+		// Lo que se filtra es la copia del evento: la Main tiene que poder reconocer lo rechazado.
+		expect(acuse.resultados).toMatchObject([{ opId: CLAVE, ok: false, permanente: true }]);
+		const fallos = eventos.filter((e) => e.name === "apply_error");
+		expect(fallos).toHaveLength(1);
+		const { name: _nombre, ...campos } = fallos[0];
+		expect(campos).toMatchObject({ op_id: CLAVE, command_name: NOMBRE });
+		const enviado = await enAxiom("apply_error", campos);
 		expect(enviado).toMatchObject({ op_id: "op-[jwt]", command_name: "cmd-[jwt]" });
-		// Lo que se filtra es la copia del evento: la Main tiene que poder reconocer lo que se apartó.
-		expect(muertas).toEqual([{ Op_Id: CLAVE, Command_Name: NOMBRE }]);
+		for (const trozo of TROZOS_DEL_JWT) expect(JSON.stringify(enviado), trozo).not.toContain(trozo);
 	});
 });

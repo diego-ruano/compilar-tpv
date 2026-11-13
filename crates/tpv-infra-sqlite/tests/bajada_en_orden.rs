@@ -24,7 +24,7 @@ use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::licensing::{PairingService, ResultadoSubidaImagen};
-use tpv_application::ports::replicacion::{CanalReplicacion, ContextoReplicacion};
+use tpv_application::ports::replicacion::{CanalReplicacion, ContextoReplicacion, RitmoDeSubida};
 use tpv_application::ports::sync::SyncRepository;
 use tpv_application::use_cases::{replicacion, sync as uc_sync};
 use tpv_contracts::licensing::{
@@ -157,8 +157,8 @@ impl ContextoReplicacion for Ctx {
     async fn sigue_disponible(&self, _: bool) -> AppResult<bool> {
         Ok(true)
     }
-    fn volcado_permitido(&self) -> bool {
-        false
+    fn ritmo_de_subida(&self) -> Arc<RitmoDeSubida> {
+        Arc::default()
     }
 }
 

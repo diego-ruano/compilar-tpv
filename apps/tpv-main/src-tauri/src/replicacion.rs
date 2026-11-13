@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Notify;
-use tpv_application::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{ContextoReplicacion}, sync::SyncRepository}, use_cases::replicacion as uc};
+use tpv_application::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{ContextoReplicacion, RitmoDeSubida}, sync::SyncRepository}, use_cases::replicacion as uc};
 use tpv_contracts::{errors::ErrorCode, recovery::RecoveryState, sync::{EstadoReplicacion, OutboxFallo, SqlStatement}};
 use tpv_infra_licensing::PairingAdapter;
 use tpv_infra_http::websocket::conectar;
@@ -15,10 +15,13 @@ pub(crate) struct SyncNativo {
     pub despertar: Arc<Notify>,
     reintentar: Arc<Notify>,
     foto: Mutex<EstadoReplicacion>,
+    /// De cuántas operaciones es el siguiente lote de la subida. Sobrevive a las sesiones: un lote
+    /// sin respuesta acaba con la suya, y la siguiente tiene que saberlo.
+    ritmo: Arc<RitmoDeSubida>,
 }
 impl Default for SyncNativo {
     fn default() -> Self {
-        Self { despertar: Arc::new(Notify::new()), reintentar: Arc::new(Notify::new()), foto: Mutex::new(EstadoReplicacion { revision:0, estado:"conectando".into(), detalle:None, fase_recuperacion:"inactiva".into(), fallos_recuperacion:0 }) }
+        Self { despertar: Arc::new(Notify::new()), reintentar: Arc::new(Notify::new()), foto: Mutex::new(EstadoReplicacion { revision:0, estado:"conectando".into(), detalle:None, fase_recuperacion:"inactiva".into(), fallos_recuperacion:0 }), ritmo: Arc::default() }
     }
 }
 impl SyncNativo {
@@ -64,9 +67,7 @@ impl ContextoReplicacion for Contexto {
         let estado = tpv_infra_sqlite::recovery::status(&db).await?.state;
         Ok(estado == if recuperando {RecoveryState::ReconciliationPending} else {RecoveryState::Ready})
     }
-    fn volcado_permitido(&self) -> bool {
-        crate::interruptores::apagado(&self.app, tpv_contracts::interruptores::Interruptor::VolcadoAtraso).is_none()
-    }
+    fn ritmo_de_subida(&self) -> Arc<RitmoDeSubida> { self.app.state::<SyncNativo>().ritmo.clone() }
 }
 
 async fn sesion(app: &AppHandle, recuperando: bool) -> AppResult<uc::FinDeSesion> {

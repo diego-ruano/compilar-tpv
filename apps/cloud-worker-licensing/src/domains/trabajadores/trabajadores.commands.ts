@@ -25,7 +25,9 @@ const REF_ID_TRABAJADOR = { $ref: "id_trabajador" } as const;
 
 /**
  * RI-63: el PIN llega en claro y la ruta lo hashea antes de construir el comando. El PIN no puede
- * quedarse en el `cloudPayload`, que el Durable Object guarda en su cola (`Cloud_Payload_Json`).
+ * quedarse en el `cloudPayload`: viaja al Durable Object y su huella se guarda con la operación
+ * (`Request_Hash`, en `Applied_Operations`), y la huella de un PIN de cuatro cifras se deshace
+ * probando las diez mil.
  */
 function sinPin<T extends { pin?: string | null }>(input: T): Omit<T, "pin"> {
 	const { pin: _pin, ...resto } = input;

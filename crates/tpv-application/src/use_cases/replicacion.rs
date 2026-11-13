@@ -1,12 +1,21 @@
 //! Replicación nativa Main ↔ nube (RI-31/RI-57). Orden, confirmaciones y recuperación.
 //! El canal sólo procede del transporte TLS autenticado. Ningún llamante de IPC aporta SQL/acks.
-use std::time::{Duration, Instant};
+use std::{collections::HashMap, time::{Duration, Instant}};
 use serde_json::{json, Value};
 use tpv_contracts::{licensing::FirmaDispositivo, sync::{OutboxEntry, SyncChange}};
-use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{CanalReplicacion, ContextoReplicacion}, sync::{BajadaAplicada, CambioDetenido}}};
+use crate::{error::{AppError, AppResult}, ports::{licensing::PairingService, replicacion::{CanalReplicacion, ContextoReplicacion, RitmoDeSubida}, sync::{BajadaAplicada, CambioDetenido}}};
 
 const MAX_PAGINAS: usize = 2000;
-const TTL_ENCOLADA: i64 = 60 * 60 * 1000;
+/// Lo que ocupan como mucho las sentencias de un lote (`apply_lote`). Una operación que pase de
+/// aquí ella sola va en un lote para ella. El `TenantHub` aplica hasta 512 KB de una vez.
+const LOTE_MAX_BYTES: usize = 256 * 1024;
+/// Lo que se espera el acuse de un lote. Sin acuse no hay veredicto: es el transporte, y no cuenta
+/// como intento de ninguna de sus operaciones.
+const ESPERA_DEL_LOTE: Duration = Duration::from_secs(30);
+/// Lo mismo para un `apply` suelto, el camino de una nube que no conoce los lotes.
+const ESPERA_DEL_APPLY: Duration = Duration::from_secs(10);
+/// Lo que se anota en una operación que la nube rechaza. Sin su SQL ni sus datos (OBS-02).
+const RECHAZO_DE_LA_NUBE: &str = "Rechazo de aplicación recibido de la nube";
 
 /// AUD-18 · Cuánto se espera antes de volver a intentar un cambio de la nube que ha fallado al
 /// aplicarse, según los intentos que lleva: 1, 2, 4 y 8 s. Son cinco intentos
@@ -41,39 +50,14 @@ impl Bajada {
     }
 }
 
-/// AUD-15 · Lo que la nube ha dicho en esta sesión de su cola de entrada (SYNC-18). Las Handy no se
-/// sueltan mientras pueda llegar algo que la Main tenga que reparar: lo que el DO apartó de la cola
-/// (`cola_apartada`) llega en el saludo, antes de `main_status`, o al drenarla, antes del aviso de
-/// que se ha vaciado.
-#[derive(Debug, Default)]
-pub struct ColaDeLaNube {
-    /// Ha llegado `main_status`, lo último del saludo.
-    saludo_cerrado: bool,
-    /// Lo que hay en la cola del DO según su último aviso (`cola` en `main_status` y
-    /// `main_volcando`). `None`: el DO no lo dice (un worker anterior), y no se espera por ella.
-    en_cola: Option<i64>,
-}
-
-impl ColaDeLaNube {
-    fn anotar(&mut self, mensaje: &Value) {
-        if let Some(n) = mensaje.get("cola").and_then(Value::as_i64) { self.en_cola = Some(n.max(0)); }
-        if mensaje.get("type").and_then(Value::as_str) == Some("main_status") { self.saludo_cerrado = true; }
-    }
-    /// La Main acaba de dejar algo en la cola del DO: hasta que avise de que se ha vaciado, puede
-    /// volver apartado.
-    fn encolado(&mut self) {
-        if let Some(n) = self.en_cola { self.en_cola = Some(n.max(1)); }
-    }
-    fn nada_por_llegar(&self) -> bool {
-        self.saludo_cerrado && self.en_cola.unwrap_or(0) == 0
-    }
-}
-
-/// Una sesión del motor: su bajada (AUD-18) y lo que se sabe de la cola de la nube (AUD-15).
+/// Una sesión del motor: su bajada (AUD-18) y lo que lleva subido.
 #[derive(Debug, Default)]
 pub struct Sesion {
     bajada: Bajada,
-    cola: ColaDeLaNube,
+    /// Los lotes que ha mandado esta sesión: con él se nombra cada uno.
+    lotes: u64,
+    /// La nube de esta sesión no conoce `apply_lote` (un worker anterior): se sube con `apply`.
+    sin_lotes: bool,
 }
 
 /// Lo que deja un catch-up: el final del log que ha visto, si se ha detenido, en qué cambio, y si a
@@ -206,7 +190,7 @@ async fn esperar_atendiendo(ctx: &dyn ContextoReplicacion, canal: &mut dyn Canal
         match canal.recibir(falta).await? {
             // `None` es que ha vencido la espera (`CanalNube::recibir`).
             None => return Ok(()),
-            Some(m) => atender(ctx, canal, sesion, m).await?,
+            Some(m) => atender(ctx, sesion, m).await?,
         }
     }
 }
@@ -220,87 +204,223 @@ pub fn rechazo_contabilizable(ack: &Value) -> bool {
     ack.get("ok") == Some(&Value::Bool(false)) && ack.get("transitorio") != Some(&Value::Bool(true))
 }
 
-async fn atender(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, mensaje: Value) -> AppResult<()> {
+async fn atender(ctx: &dyn ContextoReplicacion, sesion: &mut Sesion, mensaje: Value) -> AppResult<()> {
     match mensaje.get("type").and_then(Value::as_str) {
         Some("change") => {
             // AUD-18: con la bajada detenida no se aplica nada posterior; lo trae el catch-up.
             if sesion.bajada.detenida() { return Ok(()); }
             if let Some(d) = aplicar(ctx, vec![cambio(mensaje)?]).await?.detenida { sesion.bajada.detener(&d); }
         }
-        Some("main_status" | "main_volcando") => sesion.cola.anotar(&mensaje),
         Some("pair_request") => ctx.solicitud_emparejamiento(),
         Some("reservas_web") => ctx.reservas_web(),
-        Some("cola_apartada") => {
-            let ops = mensaje.get("ops").and_then(Value::as_array).ok_or_else(|| AppError::external("Cola apartada inválida"))?;
-            let mut acusadas = Vec::new();
-            for op in ops {
-                let id = op.get("opId").or_else(|| op.get("op_id")).and_then(Value::as_str).filter(|s| !s.is_empty()).ok_or_else(|| AppError::external("Operación apartada sin identidad"))?;
-                // No guardar SQL ni datos de entrada en el diagnóstico (OBS-02).
-                let fallo = ctx.repositorio().await?.outbox_mark_failed(id, "Operación apartada por la nube", true).await?;
-                ctx.fallo_subida(id, &fallo);
-                acusadas.push(id);
-            }
-            canal.enviar(json!({"type":"cola_apartada_ack","opIds":acusadas})).await?;
-        }
         _ => {}
     }
     Ok(())
 }
 
-async fn esperar_ack(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, tipo: &str, op_id: Option<&str>, espera: Duration) -> AppResult<Value> {
-    let fin = Instant::now() + espera;
+fn cierto(v: &Value, campo: &str) -> bool {
+    v.get(campo) == Some(&Value::Bool(true))
+}
+
+/// Lo que la nube contesta a un lote.
+enum RespuestaAlLote {
+    /// Su `apply_lote_ack`.
+    Acuse(Value),
+    /// No conoce el mensaje (`unknown_type`): es un worker anterior a los lotes.
+    SinLotes,
+    /// El mensaje no le cabe y no lo ha leído (`payload_too_large`).
+    NoCabe,
+}
+
+/// Espera el acuse del lote `lote_id` atendiendo entretanto lo demás que llegue. Sólo hay un lote en
+/// vuelo, y de lo que manda la Main sólo él puede provocar un `unknown_type` o un
+/// `payload_too_large`: esos dos errores sueltos son también su respuesta.
+async fn esperar_acuse_del_lote(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, lote_id: &str) -> AppResult<RespuestaAlLote> {
+    let fin = Instant::now() + ESPERA_DEL_LOTE;
     while Instant::now() < fin {
         let restante = fin.saturating_duration_since(Instant::now());
-        if let Some(m) = canal.recibir(restante).await? {
-            if m.get("type").and_then(Value::as_str) == Some(tipo) && op_id.is_none_or(|id| m.get("opId").or_else(|| m.get("op_id")).and_then(Value::as_str) == Some(id)) { return Ok(m); }
-            atender(ctx, canal, sesion, m).await?;
+        let Some(m) = canal.recibir(restante).await? else { continue };
+        match (m.get("type").and_then(Value::as_str), m.get("error").and_then(Value::as_str)) {
+            (Some("apply_lote_ack"), _) if m.get("loteId").and_then(Value::as_str) == Some(lote_id) => return Ok(RespuestaAlLote::Acuse(m)),
+            (Some("error"), Some("unknown_type")) => return Ok(RespuestaAlLote::SinLotes),
+            (Some("error"), Some("payload_too_large")) => return Ok(RespuestaAlLote::NoCabe),
+            _ => atender(ctx, sesion, m).await?,
         }
     }
     Err(AppError::external("No llegó la confirmación de la nube"))
 }
 
-pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, volcado: bool, estricto: bool) -> AppResult<bool> {
+async fn esperar_ack_del_apply(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, op_id: &str) -> AppResult<Value> {
+    let fin = Instant::now() + ESPERA_DEL_APPLY;
+    while Instant::now() < fin {
+        let restante = fin.saturating_duration_since(Instant::now());
+        if let Some(m) = canal.recibir(restante).await? {
+            if m.get("type").and_then(Value::as_str) == Some("apply_ack") && m.get("opId").or_else(|| m.get("op_id")).and_then(Value::as_str) == Some(op_id) { return Ok(m); }
+            atender(ctx, sesion, m).await?;
+        }
+    }
+    Err(AppError::external("No llegó la confirmación de la nube"))
+}
+
+/// El principio de lo pendiente que cabe en un lote: hasta `LOTE_MAX_BYTES` de sentencias, y una
+/// operación al menos.
+fn cortar(pendientes: Vec<OutboxEntry>) -> AppResult<Vec<OutboxEntry>> {
+    let mut bytes = 0;
+    let mut lote = Vec::new();
+    for entry in pendientes {
+        let n = serde_json::to_vec(&entry.statements).map_err(|_| AppError::external("Outbox inválido"))?.len();
+        if !lote.is_empty() && bytes + n > LOTE_MAX_BYTES { break; }
+        bytes += n;
+        lote.push(entry);
+    }
+    Ok(lote)
+}
+
+/// Sube lo pendiente del outbox, en orden, hasta vaciarlo. Devuelve si lo ha dejado vacío.
+///
+/// Es el único camino de subida, con atraso o sin él: se lee el principio de lo pendiente (hasta 200
+/// operaciones y 256 KB de sentencias), se manda en un `apply_lote` y se espera su acuse, que trae el
+/// veredicto de cada operación. **Sólo hay un lote en vuelo**: el siguiente no se lee del outbox
+/// hasta que lo aplicado del anterior está confirmado aquí.
+///
+/// - Sin acuse (30 s, o el socket se cae) no hay veredicto: es el transporte, no cuenta como intento
+///   de nadie y la sesión acaba ahí. El lote volverá a salir, y lo que ya estuviera aplicado
+///   contesta «ya estaba» con su `Seq`.
+/// - Con acuse, `tras_el_acuse`.
+/// - `estricto` (la recuperación): cualquier rechazo es un error.
+///
+/// Contra una nube que no conoce los lotes (`unknown_type`), el resto de la sesión sube con
+/// `apply`, de una en una.
+pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, estricto: bool) -> AppResult<bool> {
+    let ritmo = ctx.ritmo_de_subida();
     // Finito para no dejar al receptor sin turno ante una importación continua.
     for _ in 0..10000 {
-        let pendientes = ctx.repositorio().await?.outbox_pending(if volcado {200} else {50}).await?;
+        if sesion.sin_lotes { return subir_de_una_en_una(ctx, canal, sesion, estricto).await; }
+        let pendientes = ctx.repositorio().await?.outbox_pending(ritmo.tamano_del_lote() as i64).await?;
         if pendientes.is_empty() { return Ok(true); }
-        if volcado {
-            let mut bytes = 0;
-            let mut trozo = Vec::new();
-            for entry in pendientes {
-                bytes += serde_json::to_vec(&entry.statements).map_err(|_| AppError::external("Outbox inválido"))?.len();
-                trozo.push(entry);
-                if bytes >= 256 * 1024 { break; }
-            }
-            canal.enviar(json!({"type":"bulk_apply","ops":trozo.iter().map(operacion).collect::<Vec<_>>()})).await?;
-            let ack = esperar_ack(ctx, canal, sesion, "bulk_ack", None, Duration::from_secs(30)).await?;
-            if ack.get("ok") != Some(&Value::Bool(true)) { return Err(AppError::external("La nube no aceptó el volcado")); }
-            let ids = trozo.iter().map(|e| e.op_id.clone()).collect::<Vec<_>>();
-            ctx.repositorio().await?.outbox_mark_encolada(&ids).await?;
-            sesion.cola.encolado();
-        } else {
-            for entry in pendientes {
-                let mut msg = operacion(&entry);
-                msg["type"] = json!("apply");
-                canal.enviar(msg).await?;
-                let ack = esperar_ack(ctx, canal, sesion, "apply_ack", Some(&entry.op_id), Duration::from_secs(10)).await?;
-                if ack.get("ok") != Some(&Value::Bool(true)) {
-                    if estricto { return Err(AppError::external(format!("La nube rechazó la operación {}", entry.op_id))); }
-                    if rechazo_contabilizable(&ack) {
-                        let permanente = ack.get("permanente") == Some(&Value::Bool(true));
-                        let fallo = ctx.repositorio().await?.outbox_mark_failed(&entry.op_id, "Rechazo de aplicación recibido de la nube", permanente).await?;
-                        ctx.fallo_subida(&entry.op_id, &fallo);
-                        if fallo.apartada { continue; }
-                    }
-                    return Ok(false);
+        let lote = cortar(pendientes)?;
+        sesion.lotes += 1;
+        let lote_id = format!("{}-{}", sesion.lotes, lote[0].op_id);
+        ritmo.lote_enviado();
+        canal.enviar(json!({"type":"apply_lote","loteId":lote_id,"ops":lote.iter().map(operacion).collect::<Vec<_>>()})).await?;
+        let respuesta = esperar_acuse_del_lote(ctx, canal, sesion, &lote_id).await?;
+        ritmo.lote_respondido();
+        let seguir = match respuesta {
+            RespuestaAlLote::Acuse(acuse) => tras_el_acuse(ctx, &ritmo, &lote, &acuse, estricto).await?,
+            RespuestaAlLote::SinLotes => { sesion.sin_lotes = true; true }
+            RespuestaAlLote::NoCabe => no_cabe(ctx, &ritmo, &lote, estricto).await?,
+        };
+        if !seguir { return Ok(false); }
+    }
+    Ok(false)
+}
+
+/// Lo que se hace con el acuse de un lote. Devuelve si la subida sigue ahora con el lote siguiente o
+/// espera a la vuelta siguiente del motor.
+///
+/// Los veredictos se leen en el orden del lote, por `opId`:
+/// - **aplicada** (o «ya estaba»): se confirma con su `Seq`;
+/// - **sin intentar** (`noIntentada`, o la nube no dice nada de ella): no se le cuenta nada y se
+///   deja de leer; lo que queda sale en el lote siguiente;
+/// - **rechazo pasajero** (`transitorio`): tampoco se le cuenta, y la subida espera;
+/// - **rechazo permanente**: se aparta, se encola su reparación por estado (SYNC-22) y se sigue
+///   leyendo: la nube ha seguido aplicando lo de detrás;
+/// - **cualquier otro rechazo**: se le cuenta un intento. Lo de detrás no se ha intentado.
+///
+/// Lo aplicado se confirma en UNA transacción (`outbox_confirmar_lote`) antes que nada más: un
+/// corte a mitad deja el lote confirmado entero o sin confirmar, y sin confirmar vuelve a subir.
+///
+/// Si la nube rechaza el lote entero (`ok: false`) no ha aplicado nada. Lo que habla de cómo está
+/// ella (`transitorio`: la sesión, la base) no le cuenta nada a nadie. Lo demás es de alguna
+/// operación del lote y no dice de cuál: se repite de una en una, y a la que va sola se le cuenta.
+async fn tras_el_acuse(ctx: &dyn ContextoReplicacion, ritmo: &RitmoDeSubida, lote: &[OutboxEntry], acuse: &Value, estricto: bool) -> AppResult<bool> {
+    if !cierto(acuse, "ok") {
+        if estricto { return Err(AppError::external("La nube rechazó el lote")); }
+        if !cierto(acuse, "transitorio") {
+            match lote {
+                [sola] => {
+                    let fallo = ctx.repositorio().await?.outbox_mark_failed(&sola.op_id, RECHAZO_DE_LA_NUBE, cierto(acuse, "permanente")).await?;
+                    ctx.fallo_subida(&sola.op_id, &fallo);
                 }
-                if ack.get("encolada") == Some(&Value::Bool(true)) {
-                    ctx.repositorio().await?.outbox_mark_encolada(&[entry.op_id]).await?;
-                    sesion.cola.encolado();
-                } else {
-                    ctx.repositorio().await?.outbox_mark_sent(&entry.op_id, ack.get("seq").and_then(Value::as_i64).unwrap_or(0)).await?;
-                }
+                _ => ritmo.de_una_en_una(),
             }
+        }
+        return Ok(false);
+    }
+    let resultados = acuse.get("resultados").and_then(Value::as_array).ok_or_else(|| AppError::external("Acuse de lote sin veredictos"))?;
+    let veredictos: HashMap<&str, &Value> = resultados.iter().filter_map(|r| Some((r.get("opId").and_then(Value::as_str)?, r))).collect();
+
+    let mut aplicadas: Vec<(String, i64)> = Vec::new();
+    let mut rechazadas: Vec<(&OutboxEntry, bool)> = Vec::new();
+    let mut rechazo_estricto = None;
+    let mut espera = false;
+    for entry in lote {
+        let Some(v) = veredictos.get(entry.op_id.as_str()) else { break };
+        if cierto(v, "ok") {
+            aplicadas.push((entry.op_id.clone(), v.get("seq").and_then(Value::as_i64).unwrap_or(0)));
+            continue;
+        }
+        if cierto(v, "noIntentada") { break; }
+        if estricto { rechazo_estricto = Some(entry.op_id.clone()); break; }
+        if cierto(v, "transitorio") { espera = true; break; }
+        let permanente = cierto(v, "permanente");
+        rechazadas.push((entry, permanente));
+        if !permanente { break; }
+    }
+
+    let repo = ctx.repositorio().await?;
+    let mut avance = aplicadas.len();
+    if !aplicadas.is_empty() { repo.outbox_confirmar_lote(&aplicadas).await?; }
+    if let Some(op_id) = rechazo_estricto { return Err(AppError::external(format!("La nube rechazó la operación {op_id}"))); }
+    for (entry, permanente) in rechazadas {
+        let fallo = repo.outbox_mark_failed(&entry.op_id, RECHAZO_DE_LA_NUBE, permanente).await?;
+        ctx.fallo_subida(&entry.op_id, &fallo);
+        // Apartada, deja de estar pendiente y la subida sigue. Si no, espera con ella delante.
+        if fallo.apartada { avance += 1; } else { espera = true; }
+    }
+    ritmo.crecer();
+    // Un lote que no ha movido nada no se repite en caliente.
+    Ok(!espera && avance > 0)
+}
+
+/// La nube no ha podido ni leer el lote: el mensaje no le cabe. Las sentencias de un lote ocupan
+/// 256 KB como mucho, así que sólo puede pasar con una operación enorme. Sola en su lote, no va a
+/// caber nunca: se aparta y se repara por estado, como un rechazo permanente.
+async fn no_cabe(ctx: &dyn ContextoReplicacion, ritmo: &RitmoDeSubida, lote: &[OutboxEntry], estricto: bool) -> AppResult<bool> {
+    if estricto { return Err(AppError::external("La nube no admite un lote de ese tamaño")); }
+    let [sola] = lote else {
+        ritmo.de_una_en_una();
+        return Ok(true);
+    };
+    let fallo = ctx.repositorio().await?.outbox_mark_failed(&sola.op_id, "La operación no cabe en un mensaje de la nube", true).await?;
+    ctx.fallo_subida(&sola.op_id, &fallo);
+    Ok(fallo.apartada)
+}
+
+/// La subida con `apply`, una operación por mensaje y su `apply_ack`: lo que entiende una nube
+/// anterior a los lotes. Mismas reglas: el orden, el transporte no cuenta y el veredicto lo da ella.
+async fn subir_de_una_en_una(ctx: &dyn ContextoReplicacion, canal: &mut dyn CanalReplicacion, sesion: &mut Sesion, estricto: bool) -> AppResult<bool> {
+    for _ in 0..10000 {
+        let pendientes = ctx.repositorio().await?.outbox_pending(50).await?;
+        if pendientes.is_empty() { return Ok(true); }
+        for entry in pendientes {
+            let mut msg = operacion(&entry);
+            msg["type"] = json!("apply");
+            canal.enviar(msg).await?;
+            let ack = esperar_ack_del_apply(ctx, canal, sesion, &entry.op_id).await?;
+            if !cierto(&ack, "ok") {
+                if estricto { return Err(AppError::external(format!("La nube rechazó la operación {}", entry.op_id))); }
+                if rechazo_contabilizable(&ack) {
+                    let fallo = ctx.repositorio().await?.outbox_mark_failed(&entry.op_id, RECHAZO_DE_LA_NUBE, cierto(&ack, "permanente")).await?;
+                    ctx.fallo_subida(&entry.op_id, &fallo);
+                    if fallo.apartada { continue; }
+                }
+                return Ok(false);
+            }
+            // Esa nube tenía una cola de entrada, y con ella sin vaciar no aplica: guarda la operación
+            // para después. No está aplicada, así que sigue pendiente y se vuelve a ofrecer.
+            if cierto(&ack, "encolada") { return Ok(false); }
+            ctx.repositorio().await?.outbox_confirmar_lote(&[(entry.op_id, ack.get("seq").and_then(Value::as_i64).unwrap_or(0))]).await?;
         }
     }
     Ok(false)
@@ -308,7 +428,7 @@ pub async fn subir_pendientes(ctx: &dyn ContextoReplicacion, canal: &mut dyn Can
 
 /// AUD-15 · El saludo de la Main, siempre con `recovering`: el DO congela a las Handy
 /// (`main_volcando`) y deja pasar lo que suba la Main, y `ejecutar` las suelta con `recovery_ready`
-/// cuando se ha puesto al día. Mirar antes si hay atraso no sirve: lo que se confirme entre mirarlo y
+/// cuando se ha puesto al día: con el outbox vacío. Mirar antes si hay atraso no sirve: lo que se confirme entre mirarlo y
 /// autenticarse subiría con las Handy ya sueltas.
 ///
 /// En el DO, `recovering` sólo congela a las Handy; el modo recuperación de la Main (estricto, con
@@ -319,15 +439,13 @@ where F: FnMut(&str) -> AppResult<FirmaDispositivo> + Send {
 }
 
 pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, canal: &mut dyn CanalReplicacion, recuperando: bool) -> AppResult<FinDeSesion> {
-    ctx.repositorio().await?.liberar_encoladas_caducadas(if recuperando {0} else {TTL_ENCOLADA}).await?;
     ctx.fase_recuperacion(if recuperando {"descargando"} else {"inactiva"});
     let mut sesion = Sesion::default();
     if ponerse_al_dia(ctx, nube, canal, &mut sesion, recuperando).await?.anterior_al_log { return Ok(FinDeSesion::AnteriorAlLog); }
-    let volcado = !recuperando && ctx.volcado_permitido() && ctx.repositorio().await?.outbox_pending(101).await?.len() > 100;
     let mut vacio = true;
     if recuperando {
         ctx.fase_recuperacion("subiendo");
-        subir_pendientes(ctx, canal, &mut sesion, false, true).await?;
+        subir_pendientes(ctx, canal, &mut sesion, true).await?;
         let mut completada = false;
         for _ in 0..180 {
             ctx.fase_recuperacion("verificando");
@@ -342,29 +460,28 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
                 completada = true;
                 break;
             }
-            if let Some(m) = canal.recibir(Duration::from_secs(1)).await? { atender(ctx, canal, &mut sesion, m).await?; }
+            if let Some(m) = canal.recibir(Duration::from_secs(1)).await? { atender(ctx, &mut sesion, m).await?; }
             ctx.fase_recuperacion("subiendo");
-            subir_pendientes(ctx, canal, &mut sesion, false, true).await?;
+            subir_pendientes(ctx, canal, &mut sesion, true).await?;
         }
         if !completada { return Err(AppError::external("La nube no confirmó la convergencia")); }
     } else {
-        vacio = subir_pendientes(ctx, canal, &mut sesion, volcado, false).await?;
+        vacio = subir_pendientes(ctx, canal, &mut sesion, false).await?;
         // Al conectar, lo que se haya reservado en la web mientras esta Main no estaba.
         ctx.reservas_web();
     }
     // AUD-15: las Handy que congeló el saludo se sueltan una vez por sesión, cuando no queda nada
-    // que deba llegar antes a la nube: el saludo cerrado (lo apartado para esta Main ya ha
-    // llegado), la cola del DO vacía (lo que apartó al drenarla, también) y `subir_pendientes`
-    // encuentra el outbox vacío, reparaciones de lo apartado incluidas. Una reparación que la nube
-    // tampoco acepta queda en cuarentena, fuera de lo pendiente, y no las retiene: su rastro es el
-    // de cualquier apartada. Esa última subida es la frontera: lo que se confirme aquí después es
-    // trabajo en vivo, como con la sesión ya abierta. En la recuperación las suelta su desbloqueo.
+    // que deba llegar antes a la nube: `subir_pendientes` encuentra el outbox vacío, con las
+    // reparaciones de lo apartado ya subidas. Una reparación que la nube tampoco acepta queda en
+    // cuarentena, fuera de lo pendiente, y no las retiene: su rastro es el de cualquier apartada.
+    // Esa última subida es la frontera: lo que se confirme aquí después es trabajo en vivo, como
+    // con la sesión ya abierta. En la recuperación las suelta su desbloqueo.
     let mut handy_por_soltar = !recuperando;
     let mut ultimo_sondeo = Instant::now();
     loop {
-        if handy_por_soltar && vacio && sesion.cola.nada_por_llegar() {
-            vacio = subir_pendientes(ctx, canal, &mut sesion, false, false).await?;
-            if vacio && sesion.cola.nada_por_llegar() {
+        if handy_por_soltar && vacio {
+            vacio = subir_pendientes(ctx, canal, &mut sesion, false).await?;
+            if vacio {
                 canal.enviar(json!({"type":"recovery_ready"})).await?;
                 handy_por_soltar = false;
             }
@@ -375,15 +492,15 @@ pub async fn ejecutar(ctx: &dyn ContextoReplicacion, nube: &dyn PairingService, 
         // día por catch-up antes de volver a escuchar; después, una vuelta de subida.
         if sesion.bajada.detenida() {
             if ponerse_al_dia(ctx, nube, canal, &mut sesion, false).await?.anterior_al_log { return Ok(FinDeSesion::AnteriorAlLog); }
-            vacio = subir_pendientes(ctx, canal, &mut sesion, false, false).await?;
+            vacio = subir_pendientes(ctx, canal, &mut sesion, false).await?;
             ultimo_sondeo = Instant::now();
             continue;
         }
         let msg = canal.recibir(Duration::from_secs(if vacio {30} else {3})).await?;
         let despertar = msg.as_ref().and_then(|m| m.get("type")).and_then(Value::as_str) == Some("despertar");
-        if let Some(m) = msg { atender(ctx, canal, &mut sesion, m).await?; }
+        if let Some(m) = msg { atender(ctx, &mut sesion, m).await?; }
         if despertar || ultimo_sondeo.elapsed() >= Duration::from_secs(if vacio {30} else {3}) {
-            vacio = subir_pendientes(ctx, canal, &mut sesion, false, false).await?;
+            vacio = subir_pendientes(ctx, canal, &mut sesion, false).await?;
             ultimo_sondeo = Instant::now();
         }
     }

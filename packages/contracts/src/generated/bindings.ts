@@ -1312,10 +1312,6 @@ export type Interruptor =
  *  informando, pero no se encola ninguna reparación ni ningún borrado.
  */
 "reparacion_nube" |
-/**  El volcado del atraso a la cola del DO (SYNC-18). La Main sube por el camino en vivo. */
-"volcado_atraso" |
-/**  El drenado de la cola de entrada del DO. Sólo lo mira el worker; la cola es durable. */
-"cola_do" |
 /**  La descarga del histórico tras una recuperación (SYNC-19, fase 2). */
 "backfill_historico" |
 /**  La conversión de la PII del personal a texto cifrado (TRAB-03). */

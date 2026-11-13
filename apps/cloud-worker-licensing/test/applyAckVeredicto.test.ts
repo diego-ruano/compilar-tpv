@@ -47,7 +47,6 @@ function preparar(hub: any): Preparado {
 	};
 	hub.getTenantDb = async () => db;
 	hub.touchLastSeen = async () => {};
-	hub.colaPausada = async () => null;
 	const eventos: Preparado["eventos"] = [];
 	hub.emitSyncEvent = (name: string, campos: Record<string, unknown>) => void eventos.push({ name, ...campos });
 	laMainEs(hub, MAIN);
@@ -112,6 +111,7 @@ describe("el apply_ack dice de qué clase es el fallo", () => {
 				// Los límites del SQLite del DO.
 				["un patrón de LIKE de más de 50 bytes", "UPDATE Zonas SET Nombre_Zona = 'x' WHERE Nombre_Zona LIKE ?1;", ["%" + "a".repeat(60) + "%"]],
 				["más de 5 SELECT en un compuesto", `INSERT INTO Zonas (ID_Zona, Nombre_Zona) ${Array.from({ length: 6 }, (_, i) => `SELECT 'u${i}', 'U${i}'`).join(" UNION ALL ")};`, []],
+				// Pasa del tope de un valor en el SQLite del DO (algo más de 2 MiB) y cabe en un mensaje.
 				["un valor que no cabe en una fila", ALTA, ["z-grande", "a".repeat(3_000_000)]],
 			];
 			for (const [caso, texto, args] of CASOS) {

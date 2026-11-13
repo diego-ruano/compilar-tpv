@@ -119,8 +119,6 @@ pnpm interruptor:lista    -- [--historial]
 | Interruptor | Dónde se mira | Qué deja de pasar |
 |---|---|---|
 | `reparacion_nube` | `verificar_nube` | Encolar reparaciones y borrados; se sigue comparando e informando |
-| `volcado_atraso` | `socketMain.ts::subirLoPendiente` | El volcado a la cola del DO: se sube por el camino en vivo |
-| `cola_do` | `tenantHub.cola.ts::drenarCola` (worker) | Drenar la cola de entrada; se vuelve a mirar cada 5 min |
 | `backfill_historico` | motor de jobs | Bajar el histórico tras una recuperación |
 | `cifrado_pii` | motor de jobs | Convertir la PII del personal a cifrado |
 | `imagenes` | `lib.rs::drenar_imagenes` | Subir imágenes a R2 |

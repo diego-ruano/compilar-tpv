@@ -1,12 +1,10 @@
 // test/congeladoPorAtraso.test.ts
 //
 // AUD-15 · La Main saluda siempre con `recovering` (`use_cases/replicacion.rs::saludar`) y manda
-// `recovery_ready` cuando se ha puesto al día: lo que hizo sin conexión ha subido, la cola del DO
-// está vacía y lo que el DO apartó de ella está reparado. Aquí se fija la mitad del DO: con ese
-// saludo congela a las Handy (`main_volcando`) mientras deja pasar la subida de la Main y
-// `recovery_ready` las suelta; lo apartado llega a la Main antes de `main_status`, que cierra el
-// saludo y dice lo que queda en la cola (`cola`), y al vaciarse la cola se lo dice con `cola: 0`
-// después de avisar de lo que apartó.
+// `recovery_ready` cuando se ha puesto al día: con su outbox vacío, lo que la nube rechazó ya
+// reparado. Aquí se fija la mitad del DO: con ese saludo congela a las Handy (`main_volcando`)
+// mientras deja pasar la subida de la Main (`apply_lote`, y `apply` suelto) y `recovery_ready` las
+// suelta.
 //
 // Sin sustituir `isMainConnected` ni `isMainReady`: la Main y la Handy son sockets reales aceptados
 // con `state.acceptWebSocket`, así que decide el censo de producción. Se sustituye sólo lo que
@@ -33,7 +31,7 @@ const SEMILLA = [
 	"INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-barra', 'ticket-barra', 'prod-1', 1, 300);",
 ];
 
-/** Una operación del atraso de la Main tal y como sube por el camino en vivo (`apply`). */
+/** Una operación del atraso de la Main tal y como la sube (`replicacion.rs::operacion`). */
 function opDelAtraso(n: number) {
 	return {
 		opId: `op-${n}`,
@@ -50,26 +48,6 @@ function opDelAtraso(n: number) {
 				],
 			},
 		},
-	};
-}
-
-/** Una operación que la base no sabe aplicar (`no such table`): el drenado la aparta en el acto. */
-function opRota(n: number) {
-	const op = opDelAtraso(n);
-	op.command.payload.steps[0].sql = "INSERT INTO Tabla_Que_No_Existe (a) VALUES (?1);";
-	return op;
-}
-
-/** La misma operación tal y como la guarda la cola del DO (`encolar`). */
-function paraLaCola(op: ReturnType<typeof opDelAtraso>) {
-	return {
-		opId: op.opId,
-		commandName: op.commandName,
-		cmd: op.command,
-		deviceId: "device-main",
-		requestPayloadJson: "{}",
-		cloudPayloadJson: "{}",
-		clientNow: "2026-01-01 12:30:00",
 	};
 }
 
@@ -101,7 +79,6 @@ function prepararHub(hub: any) {
 	};
 	// AUD-02: la Main de estas pruebas es la de la licencia, y su saludo lo pregunta a un doble.
 	laMainEs(hub, "device-main");
-	hub.asegurarCola();
 	return { sql, db, control };
 }
 
@@ -185,8 +162,16 @@ async function saludaLaMain(hub: any, main: ReturnType<typeof socketReal>, recov
 	expect(await esperar(() => main.recibidos.some((m) => m.type === "hello_ok"))).toBe(true);
 }
 
-/** La Main sube una operación de su atraso por el camino en vivo y espera su `apply_ack`. */
-async function subeEnVivo(hub: any, main: ReturnType<typeof socketReal>, op: any) {
+/** La Main sube su atraso en un lote y espera su acuse. */
+async function subeEnUnLote(hub: any, main: ReturnType<typeof socketReal>, ops: any[]) {
+	const loteId = `lote-${ops[0].opId}`;
+	await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "apply_lote", loteId, ops }));
+	expect(await esperar(() => main.recibidos.some((m) => m.type === "apply_lote_ack" && m.loteId === loteId))).toBe(true);
+	return main.recibidos.find((m) => m.type === "apply_lote_ack" && m.loteId === loteId);
+}
+
+/** La Main sube una operación suelta (`apply`) y espera su `apply_ack`. */
+async function subeSuelta(hub: any, main: ReturnType<typeof socketReal>, op: any) {
 	await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "apply", ...op, clientNow: "2026-01-01 12:30:00" }));
 	expect(await esperar(() => main.recibidos.some((m) => m.type === "apply_ack" && m.opId === op.opId))).toBe(true);
 	return main.recibidos.find((m) => m.type === "apply_ack" && m.opId === op.opId);
@@ -223,15 +208,28 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 				await esperar(() => handy.recibidos.some((m) => m.type === "main_volcando" && m.volcando === true)),
 			).toBe(true);
 
-			// El atraso de la Main sube por el camino en vivo, sin cola de por medio...
-			const ack = await subeEnVivo(hub, main, opDelAtraso(1));
-			expect(ack).toMatchObject({ ok: true });
-			expect(ack.encolada).toBeUndefined();
+			// El atraso de la Main sube, en lotes o suelto...
+			const acuse = await subeEnUnLote(hub, main, [opDelAtraso(1), opDelAtraso(2)]);
+			expect(acuse).toMatchObject({ ok: true, resultados: [{ opId: "op-1", ok: true }, { opId: "op-2", ok: true }] });
+			expect(await subeSuelta(hub, main, opDelAtraso(3))).toMatchObject({ ok: true });
+			expect(Number(sql.exec("SELECT COUNT(*) AS n FROM Detalle_Comanda WHERE ID_Comanda = 'comanda-1';").one().n)).toBe(3);
 
 			// ...y lo que escribe la Handy mientras tanto espera, sin tocar la nube.
 			const congelada = await hub.aplicar(borradoDeLaHandy("op-handy-1"));
 			expect(congelada).toMatchObject({ ok: false, error: "main_volcando" });
 			expect(ticketsDeBarra(sql)).toBe(1);
+
+			// Una Handy que saluda ahora se entera de que tiene que esperar.
+			const otra = socketReal(hub, "device-handy-2", "handy", false);
+			hub.verifyHelloSigned = async () => ({ roleFinal: "handy", pubkeyB64: "x" });
+			await hub.webSocketMessage(otra.servidor, JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s" }));
+			expect(await esperar(() => otra.recibidos.some((m) => m.type === "main_status"))).toBe(true);
+			expect(otra.recibidos.find((m) => m.type === "main_status")).toMatchObject({ online: true, volcando: true });
+			// Y no puede soltarse a sí misma: eso sólo lo hace la Main.
+			await hub.webSocketMessage(otra.servidor, JSON.stringify({ type: "recovery_ready" }));
+			expect(await esperar(() => otra.recibidos.some((m) => m.type === "error"))).toBe(true);
+			expect(otra.recibidos).toContainEqual({ type: "error", error: "forbidden_not_tpv" });
+			expect(hub.isMainRecovering()).toBe(true);
 
 			// Subido el atraso, `recovery_ready` la suelta.
 			await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "recovery_ready" }));
@@ -244,76 +242,7 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 			expect(ticketsDeBarra(sql)).toBe(0);
 
 			handy.cliente.close();
-			main.cliente.close();
-		});
-	});
-
-	it("lo apartado le llega a la Main antes de main_status, que cierra el saludo y dice lo que queda en la cola", async () => {
-		await enElHub("aud15-saludo", async (hub: any) => {
-			prepararHub(hub);
-			// Sin Main, el DO drenó y apartó una operación de su cola...
-			hub.colaPausada = async () => null;
-			hub.encolar(TENANT, [paraLaCola(opRota(2))]);
-			await hub.drenarCola();
-			expect(hub.apartadasPendientes().map((o: any) => o.opId)).toEqual(["op-2"]);
-			// ...y le queda otra, con el drenado en pausa.
-			hub.colaPausada = async () => ({ hasta_ms: Date.now() + 10 * 60_000 });
-			hub.encolar(TENANT, [paraLaCola(opDelAtraso(3))]);
-
-			const main = socketReal(hub, "device-main", "tpv", false);
-			await saludaLaMain(hub, main, true);
-			expect(await esperar(() => main.recibidos.some((m) => m.type === "main_status"))).toBe(true);
-
-			const tipos = main.recibidos.map((m) => m.type);
-			expect(tipos.indexOf("cola_apartada")).toBeGreaterThan(tipos.indexOf("hello_ok"));
-			expect(tipos.indexOf("cola_apartada")).toBeLessThan(tipos.indexOf("main_status"));
-			expect(main.recibidos.find((m) => m.type === "main_status")).toMatchObject({ cola: 1 });
-
-			hub.sacarDeLaCola(["op-3"]);
-			await hub.state.storage.deleteAlarm();
-			main.cliente.close();
-		});
-	});
-
-	it("al vaciarse la cola la Main recibe lo apartado y después cola: 0, y las Handy esperan a su recovery_ready", async () => {
-		await enElHub("aud15-volcado", async (hub: any) => {
-			const { sql } = prepararHub(hub);
-			hub.colaPausada = async () => null;
-			const handy = socketReal(hub, "device-handy", "handy", true);
-			const main = socketReal(hub, "device-main", "tpv", false);
-			await saludaLaMain(hub, main, true);
-
-			await hub.webSocketMessage(
-				main.servidor,
-				JSON.stringify({ type: "bulk_apply", ops: [opDelAtraso(1), opRota(2), opDelAtraso(3)] }),
-			);
-			expect(await esperar(() => main.recibidos.some((m) => m.type === "bulk_ack"))).toBe(true);
-			expect(main.recibidos.find((m) => m.type === "main_volcando")).toMatchObject({ volcando: true, cola: 3 });
-
-			await hub.drenarCola();
-
-			// La Main se entera de lo apartado y, después, de que la cola está vacía.
-			expect(await esperar(() => main.recibidos.some((m) => m.type === "main_volcando" && m.cola === 0))).toBe(true);
-			const tipos = main.recibidos.map((m) => `${m.type}${m.cola === 0 ? ":0" : ""}`);
-			expect(tipos.indexOf("cola_apartada")).toBeGreaterThan(-1);
-			expect(tipos.indexOf("cola_apartada")).toBeLessThan(tipos.indexOf("main_volcando:0"));
-
-			// Las Handy siguen congeladas: la Main todavía tiene que reparar lo apartado.
-			expect(
-				await esperar(() => handy.recibidos.some((m) => m.type === "main_volcando" && m.cola === 0)),
-			).toBe(true);
-			expect(handy.recibidos.filter((m) => m.type === "main_volcando").at(-1)).toMatchObject({ volcando: true });
-			expect(await hub.aplicar(borradoDeLaHandy("op-handy-1"))).toMatchObject({ ok: false, error: "main_volcando" });
-			expect(ticketsDeBarra(sql)).toBe(1);
-
-			// Reparado, `recovery_ready` las suelta.
-			await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "recovery_ready" }));
-			expect(
-				await esperar(() => handy.recibidos.some((m) => m.type === "main_volcando" && m.volcando === false)),
-			).toBe(true);
-			expect(await hub.aplicar(borradoDeLaHandy("op-handy-2"))).toMatchObject({ ok: true });
-
-			handy.cliente.close();
+			otra.cliente.close();
 			main.cliente.close();
 		});
 	});
@@ -425,83 +354,6 @@ describe("AUD-15 · la Main con atraso congela a las Handy hasta subirlo", () =>
 
 			handy.cliente.close();
 			nueva.cliente.close();
-		});
-	});
-
-	it("si el quinto fallo aparta la última de la cola, se avisa de que está vacía", async () => {
-		await enElHub("aud15-agotada", async (hub: any) => {
-			const { control } = prepararHub(hub);
-			// Sólo drenan las vueltas de la prueba: una alarma de fondo encontraría la cola en pausa.
-			let aMano = false;
-			hub.colaPausada = async () => (aMano ? null : { hasta_ms: Date.now() + 10 * 60_000 });
-			const drenar = async () => {
-				aMano = true;
-				try {
-					await hub.drenarCola();
-				} finally {
-					aMano = false;
-				}
-				await hub.state.storage.deleteAlarm();
-			};
-			const handy = socketReal(hub, "device-handy", "handy", true);
-			const main = socketReal(hub, "device-main", "tpv", false);
-			await saludaLaMain(hub, main, true);
-			await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "recovery_ready" }));
-
-			// Lo único que queda en la cola falla cada vez, sin ser un rechazo definitivo.
-			control.rompe = "det-9";
-			hub.encolar(TENANT, [paraLaCola(opDelAtraso(9))]);
-			await hub.state.storage.deleteAlarm();
-			// Lo que llegue después del aviso de que hay cola es del drenado (el `recovery_ready` de
-			// antes ya dijo `cola: 0`).
-			const conCola = (m: any) => m.type === "main_volcando" && m.cola === 1;
-			expect(await esperar(() => main.recibidos.some(conCola) && handy.recibidos.some(conCola))).toBe(true);
-			const mainDesde = main.recibidos.findIndex(conCola) + 1;
-			const handyDesde = handy.recibidos.findIndex(conCola) + 1;
-			const aMain = () => main.recibidos.slice(mainDesde);
-			const aHandy = () => handy.recibidos.slice(handyDesde);
-
-			for (let i = 0; i < 4; i++) await drenar();
-			expect(aMain().some((m) => m.type === "cola_apartada")).toBe(false);
-			await drenar();
-			expect(hub.apartadasPendientes().map((o: any) => o.opId)).toEqual(["op-9"]);
-
-			// El quinto intento la aparta: la Main se entera y, después, la cola está vacía.
-			expect(await esperar(() => aMain().some((m) => m.type === "main_volcando" && m.cola === 0))).toBe(true);
-			const tipos = aMain().map((m) => `${m.type}${m.cola === 0 ? ":0" : ""}`);
-			expect(tipos.indexOf("cola_apartada")).toBeGreaterThan(-1);
-			expect(tipos.indexOf("cola_apartada")).toBeLessThan(tipos.indexOf("main_volcando:0"));
-			expect(
-				await esperar(() => aHandy().some((m) => m.type === "main_volcando" && m.volcando === false)),
-			).toBe(true);
-
-			await hub.state.storage.deleteAlarm();
-			handy.cliente.close();
-			main.cliente.close();
-		});
-	});
-
-	it("una alarma que encuentra la cola vacía repite el aviso que se perdiera", async () => {
-		await enElHub("aud15-aviso-perdido", async (hub: any) => {
-			prepararHub(hub);
-			const handy = socketReal(hub, "device-handy", "handy", true);
-			const main = socketReal(hub, "device-main", "tpv", false);
-			await saludaLaMain(hub, main, true);
-			await hub.webSocketMessage(main.servidor, JSON.stringify({ type: "recovery_ready" }));
-
-			// La cola se vació sin que nadie avisara: la Handy se quedó esperando.
-			hub.encolar(TENANT, [paraLaCola(opDelAtraso(9))]);
-			hub.sacarDeLaCola(["op-9"]);
-			const avisos = () => handy.recibidos.filter((m) => m.type === "main_volcando").length;
-			const antes = avisos();
-
-			await hub.drenarCola();
-			expect(await esperar(() => avisos() > antes)).toBe(true);
-			expect(handy.recibidos.filter((m) => m.type === "main_volcando").at(-1)).toMatchObject({ volcando: false, cola: 0 });
-
-			await hub.state.storage.deleteAlarm();
-			handy.cliente.close();
-			main.cliente.close();
 		});
 	});
 });

@@ -7,7 +7,7 @@
 // numera al confirmar, pero la segunda termina antes— y a la Main se le cayera el socket entre
 // medias, el 10 no volvería a pedirse nunca. Aquí se prueba lo que lo impide: el turno del log
 // (`enTurnoDelLog`), que hace que cada escritura confirme y difunda antes de que empiece la
-// siguiente, también la del drenado de la cola.
+// siguiente, también la de un lote de la Main.
 //
 // La base del tenant es el SQLite del propio DO (`clienteSobre`) con una puerta delante: la primera
 // escritura confirma en el acto, pero su respuesta no vuelve hasta que el test la abre. Es la forma
@@ -33,13 +33,12 @@ function escritura(opId: string, idZona: string) {
 		commandName: "crear_zona",
 		deviceId: `handy-${opId}`,
 		requestPayloadJson: JSON.stringify({ opId }),
-		cloudPayloadJson: JSON.stringify({ opId }),
 		clientNow: "2026-11-09 12:00:00",
 	};
 }
 
-/** Una operación del atraso de la Main, como la guarda la cola de entrada. */
-function opDeLaCola(opId: string, idZona: string) {
+/** Una operación del outbox de la Main, como llega en su lote (`OpDeLote`). */
+function opDelLote(opId: string, idZona: string) {
 	return {
 		opId,
 		commandName: "crear_zona",
@@ -47,11 +46,24 @@ function opDeLaCola(opId: string, idZona: string) {
 			type: "tenantDb.transaction",
 			payload: { steps: [{ kind: "execute", sql: INSERTAR_ZONA, args: [idZona, idZona] }] },
 		},
-		deviceId: "device-main",
 		requestPayloadJson: JSON.stringify({ opId }),
-		cloudPayloadJson: JSON.stringify({ opId }),
-		clientNow: "2026-11-09 12:00:00",
 	};
+}
+
+/** El lote de la Main, sin socket de por medio: la sesión siempre es la suya. */
+function loteDeLaMain(hub: any, ops: ReturnType<typeof opDelLote>[]): Promise<any[]> {
+	hub.esLaMain = () => true;
+	return new Promise((resolver, rechazar) => {
+		hub
+			.aplicarLote({
+				tenantId: TENANT,
+				deviceId: "device-main",
+				sesion: { readyState: 1, deserializeAttachment: () => null },
+				ops,
+				alTerminar: resolver,
+			})
+			.catch(rechazar);
+	});
 }
 
 /**
@@ -124,27 +136,29 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 		});
 	});
 
-	it("el drenado de la cola no se difunde por delante de una escritura que confirmó antes", async () => {
-		await enElHub("aud18-orden-cola", async (hub: any) => {
+	it("un lote de la Main no se difunde por delante de una escritura que confirmó antes", async () => {
+		await enElHub("aud18-orden-lote", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			const puerta = conPuerta(clienteSobre(sql, hub.state.storage));
 			const difundidos = prepararHub(hub, puerta.db);
 
 			const handy = hub.applyInternalCommandIdempotent(escritura("op-handy", "z-handy"));
 			await puerta.dentro;
-			const cola = hub.applyBatchIdempotent(puerta.db, [opDeLaCola("op-cola", "z-cola")]);
+			const lote = loteDeLaMain(hub, [opDelLote("op-lote-1", "z-lote-1"), opDelLote("op-lote-2", "z-lote-2")]);
 			await esperar(50);
+			expect(difundidos).toEqual([]);
 			puerta.abrir();
-			await Promise.all([handy, cola]);
+			const [, veredictos] = await Promise.all([handy, lote]);
 
-			expect(seqDelLog(sql, "op-handy")).toBeLessThan(seqDelLog(sql, "op-cola"));
-			expect(difundidos.map((m) => m.opId)).toEqual(["op-handy", "op-cola"]);
+			expect(veredictos.map((v: any) => v.seq)).toEqual([seqDelLog(sql, "op-lote-1"), seqDelLog(sql, "op-lote-2")]);
+			expect(seqDelLog(sql, "op-handy")).toBeLessThan(seqDelLog(sql, "op-lote-1"));
+			expect(difundidos.map((m) => m.opId)).toEqual(["op-handy", "op-lote-1", "op-lote-2"]);
 		});
 	});
 
-	it("una escritura que espera turno no se confirma por delante de un volcado que llega mientras", async () => {
-		// La Handy pasó el congelado de la cola cuando estaba vacía y esperaba su turno; entre medias
-		// la Main volcó su atraso. Dentro del turno se vuelve a mirar: nada por delante del volcado.
+	it("una escritura que espera turno no se confirma si entretanto la Main se pone al día", async () => {
+		// La Handy pasó el congelado con la Main lista y esperaba su turno; entre medias la Main volvió
+		// a saludar con `recovering` (AUD-15). Dentro del turno se vuelve a mirar: no entra.
 		await enElHub("aud18-orden-congelado", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			const puerta = conPuerta(clienteSobre(sql, hub.state.storage));
@@ -154,9 +168,7 @@ describe("AUD-18 · el TenantHub difunde en orden de Seq", () => {
 			await puerta.dentro;
 			const b = hub.applyInternalCommandIdempotent(escritura("op-b", "z-b"));
 			await esperar(20);
-			hub.encolar(TENANT, [opDeLaCola("op-cola", "z-cola")]);
-			// Sin la alarma de la cola: aquí sólo importa que la cola ya no esté vacía.
-			await hub.state.storage.deleteAlarm();
+			hub.isMainReady = () => false;
 			puerta.abrir();
 
 			await a;

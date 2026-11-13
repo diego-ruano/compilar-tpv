@@ -2,13 +2,14 @@
 //
 // ¿Este fallo se arregla reintentando, o no? (SYNC-20)
 //
-// El outbox de la Main es una cola ORDENADA: sus operaciones se apoyan unas en otras, así que el
-// drenado sube la primera y no pasa a la segunda hasta que la nube confirma. Mientras el `apply_ack`
-// sólo llevaba un texto de error, el cliente no podía distinguir "no ha salido" de "no va a salir",
-// y hacía lo único prudente que puede hacerse sin esa información: parar y reintentar. Para
-// siempre, con todas las ventas de detrás detenidas, y sin decírselo a nadie.
+// El outbox de la Main es una cola ORDENADA: sus operaciones se apoyan unas en otras, así que la
+// subida no pasa por delante de una que la nube no ha confirmado. Con sólo un texto de error, el
+// cliente no podía distinguir "no ha salido" de "no va a salir", y hacía lo único prudente que
+// puede hacerse sin esa información: parar y reintentar. Para siempre, con todas las ventas de
+// detrás detenidas, y sin decírselo a nadie.
 //
-// Quien tiene la excepción delante es el DO, así que la clasificación vive aquí y viaja en el ack.
+// Quien tiene la excepción delante es el DO, así que la clasificación vive aquí y viaja en el acuse
+// (`apply_lote_ack`, operación a operación, y `apply_ack`).
 // El cliente NO debe mirar el texto: un mensaje cambia de redacción entre versiones y esa clase de
 // comparación se pudre sin que nada falle de forma visible.
 //
@@ -43,10 +44,9 @@ import { HubError } from "../lib/errorHttp";
 const CODIGOS_PERMANENTES: ReadonlySet<string> = new Set([
 	// CFG-04: una escritura que dejaría a la base elegir la hora.
 	"hora_no_determinista",
-	// REV-22: su pareja. La hora del emisor viaja GUARDADA con la operación (la columna `Client_Now`
-	// de la cola, o el mensaje que la trajo), así que si falta o está fuera de la deriva admisible,
-	// faltará igual dentro de una hora. Y aquí esperar no es gratis: mientras una operación está en
-	// duda, el atraso que va detrás no avanza.
+	// REV-22: su pareja. La hora del emisor viaja con la operación, en el mensaje que la trae, así
+	// que si falta o está fuera de la deriva admisible, faltará igual en el reintento. Y aquí
+	// esperar no es gratis: mientras una operación está en duda, lo que va detrás no avanza.
 	"missing_client_now",
 	// Una operación sin identidad no la tendrá en el reintento.
 	"missing_op_id",
