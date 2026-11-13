@@ -441,6 +441,11 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"reversal_failed",
 	"signature_timestamp_out_of_range",
 	"tabla_no_paginable",
+	// El contraste con la nube: lo manda la Main con lo que le dio el resumen, así que sólo salen
+	// con un cliente roto.
+	"tabla_no_verificable",
+	"cubos_no_validos",
+	"cursor_no_valido",
 	// Retirar un negocio de pruebas: un id que no nombra la carpeta de imágenes de un negocio, y una
 	// agenda de reservas web que no ha acabado a tiempo lo que tenía a medias.
 	"tenant_id_invalido",

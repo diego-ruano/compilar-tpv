@@ -115,7 +115,7 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   lo que cambia es que los días que no entraron llegan después, con el histórico.
 - **Un volcado se pide comprimido, con su propio plazo, y se lee de una pasada.** El cliente REST de
   la Main (`tpv-infra-licensing`) manda `Accept-Encoding: gzip` y descomprime al leer. Las rutas que
-  bajan un volcado (`/bootstrap`, `/historico`, `/verificar` y `/verificar-claves`) tienen 150 s de
+  bajan un volcado (`/bootstrap`, `/historico` y las tres del contraste, `/verificar/*`) tienen 150 s de
   plazo, de conectar a terminar el cuerpo, frente a los 20 s del resto; conectar tiene 10 s en
   todas. La respuesta va de los bytes a su tipo (`use_cases::sync::pedir`), sin un
   `serde_json::Value` intermedio que la tenga dos veces en memoria. Una respuesta que no llega

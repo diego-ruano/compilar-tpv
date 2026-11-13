@@ -10,7 +10,9 @@ import {
 	changesSchema,
 	historicoSchema,
 	saludSyncSchema,
-	verificarClavesSchema,
+	verificarClavesPorPaginasSchema,
+	verificarFilasSchema,
+	verificarResumenSchema,
 } from "../src/domains/sync/sync.schemas";
 import { cuerpoTolerante } from "../src/lib/validacion";
 
@@ -28,28 +30,29 @@ describe("schemas totales de sync", () => {
 		expect(historicoSchema.parse({ tabla: "Comandas", limite: 99_999 }).limite).toBe(2_000);
 	});
 
-	it("descarta peticiones de claves inválidas y recorta antes de filtrar", () => {
-		const primerasSesentaInvalidas = Array.from({ length: 60 }, () => ({
-			nombre: "_Sync_Outbox",
-			claves: ["Op_Id"],
-		}));
-		const parsed = verificarClavesSchema.parse({
-			tablas: [
-				...primerasSesentaInvalidas,
-				{ nombre: "Zonas", claves: ["ID_Zona"] },
-			],
-		});
-		expect(parsed.tablas).toEqual([]);
+	it("los cuerpos del contraste: lo que no es lo que se espera cae a su valor por defecto, y los topes los pone el servidor", () => {
+		expect(verificarResumenSchema.parse({ checkpoint: 40 })).toEqual({ checkpoint: 40 });
+		for (const malo of [undefined, "40", -1, 1.5, Number.MAX_SAFE_INTEGER + 2, null]) {
+			expect(verificarResumenSchema.parse({ checkpoint: malo }).checkpoint, String(malo)).toBeNull();
+		}
 
-		expect(
-			verificarClavesSchema.parse({
-				tablas: [
-					{ nombre: "Zonas", claves: ["ID_Zona"] },
-					{ nombre: "Zonas; DROP TABLE Pagos", claves: ["ID_Zona"] },
-					{ nombre: "Zonas", claves: [] },
-				],
-			}).tablas,
-		).toEqual([{ nombre: "Zonas", claves: ["ID_Zona"] }]);
+		const filas = verificarFilasSchema.parse({
+			tabla: "Zonas",
+			desde: "x".repeat(100),
+			cubos: 16,
+			pedir: Array.from({ length: 1_000 }, (_, i) => i),
+			cursor: -5,
+		});
+		expect(filas.desde).toHaveLength(40);
+		expect(filas.pedir).toHaveLength(256);
+		expect(filas.cursor).toBe(0);
+		expect(verificarFilasSchema.parse({})).toMatchObject({ tabla: "", desde: "", pedir: [], cursor: 0 });
+		expect(Number.isNaN(verificarFilasSchema.parse({ cubos: "16" }).cubos)).toBe(true);
+
+		expect(verificarClavesPorPaginasSchema.parse({ tabla: "Zonas", limite: 10_000_000 }).limite).toBe(20_000);
+		expect(verificarClavesPorPaginasSchema.parse({ tabla: "Zonas", limite: 0 }).limite).toBe(10_000);
+		expect(verificarClavesPorPaginasSchema.parse({ tabla: "Zonas", cursor: "z1" }).cursor).toBeNull();
+		expect(verificarClavesPorPaginasSchema.parse({ tabla: "Zonas", cursor: [1, 2, 3, 4, 5, 6, 7, 8, 9] }).cursor).toHaveLength(8);
 	});
 
 	it("recorta y normaliza el informe de salud sin volverlo estricto", () => {
@@ -68,6 +71,17 @@ describe("schemas totales de sync", () => {
 		expect(parsed.apartadas).toBe(3);
 		expect(parsed.reparadas).toBe(0);
 		expect(parsed.ventana_omitida).toBe(true);
+		// Lo que añade el contraste por resúmenes; con un cliente anterior, sus valores por defecto.
+		expect(parsed).toMatchObject({ borradas: 0, aplazado: false, filas_examinadas: 0, tablas_sin_comparar: [] });
+		const nuevo = saludSyncSchema.parse({
+			borradas: 2,
+			aplazado: true,
+			filas_examinadas: 31,
+			tablas_sin_comparar: ["Zonas", "Mesas; DROP TABLE x", 7, ...Array.from({ length: 60 }, (_, i) => `T${i}`)],
+		});
+		expect(nuevo).toMatchObject({ borradas: 2, aplazado: true, filas_examinadas: 31 });
+		expect(nuevo.tablas_sin_comparar).toHaveLength(50);
+		expect(nuevo.tablas_sin_comparar.slice(0, 2)).toEqual(["Zonas", "T0"]);
 		// PROD-06: ausente es «encendida», que es lo que manda un cliente anterior.
 		expect(parsed.reparacion_apagada).toBe(false);
 		expect(saludSyncSchema.parse({ reparacion_apagada: true }).reparacion_apagada).toBe(true);

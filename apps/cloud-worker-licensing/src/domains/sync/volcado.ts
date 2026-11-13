@@ -1,7 +1,7 @@
 // src/domains/sync/volcado.ts
 //
-// Cómo se lee y se escribe un volcado de la base del negocio: `/v1/sync/bootstrap`, `/verificar` e
-// `/historico`, las tres respuestas de sync que crecen con el negocio.
+// Cómo se lee y se escribe un volcado de la base del negocio: `/v1/sync/bootstrap` e `/historico`,
+// las respuestas de sync que crecen con el negocio, y las páginas del contraste (`verificar.ts`).
 //
 // Cada fila se lee una vez y se escribe una vez, y lo escrito tiene un techo en bytes:
 //

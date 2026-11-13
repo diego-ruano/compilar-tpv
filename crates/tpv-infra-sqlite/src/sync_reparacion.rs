@@ -38,7 +38,7 @@ pub const COMANDO_REPARACION: &str = "main_reparacion";
 /// La clave va como lista porque ocho tablas del esquema tienen clave **compuesta**
 /// (`Pago_Detalles`, `Lote_Consumos`, `Producto_Alergenos`…), y tratarlas como si tuvieran una sola
 /// columna repararía la fila equivocada.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FilaAfectada {
     pub tabla: String,
     /// `(columna, valor)` de cada componente de la clave primaria.

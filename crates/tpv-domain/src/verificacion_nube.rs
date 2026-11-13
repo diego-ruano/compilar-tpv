@@ -1,7 +1,8 @@
 //! VERIF-02 · Cuándo se contrasta la base local con la nube.
 //!
-//! El contraste (`verificar_nube`) baja la ventana de la fase 1 del negocio (30 días, o lo que
-//! quepa de ellos) y la compara fila a fila con la base local. Corría a hora fija desde la última
+//! El contraste (`verificar_nube`) compara la base local con la de la nube por resúmenes: la
+//! ventana de la fase 1 del negocio (30 días, o lo que quepa de ellos) resumida por cubos, y los
+//! conteos de cada tabla entera. Corría a hora fija desde la última
 //! pasada, que en un bar que enciende el TPV al abrir es justo la apertura: a la vez que la copia
 //! diaria y la reconciliación, con el primer café en la barra. La regla es otra:
 //!
@@ -14,7 +15,8 @@
 //!   escribir. Lo demás no se relaja nunca: comparar con algo pendiente de subir o con el histórico
 //!   a medias no es una comprobación, es ruido (o, peor, un borrado: VERIF-01).
 //! - **Un intento que falla espera lo suyo**: 30 min, 1 h, 2 h, 4 h y 6 h. Uno que no llegó a
-//!   comparar porque la foto de la nube iba por delante de lo que ha bajado esta Main, 10 min.
+//!   comparar porque no era el momento (la nube estaba escribiendo o iba por delante de lo que ha
+//!   bajado esta Main, o una de las dos bases se movió durante la pasada), 10 min.
 //!
 //! Es una función pura: quien la llama (el job, cada 15 min) le trae lo que hay y la hora.
 
@@ -41,7 +43,7 @@ pub const CALMA_MS: i64 = 15 * MIN;
 /// Lo mismo, pasado [`MAXIMO_SIN_VERIFICAR_MS`].
 pub const CALMA_RELAJADA_MS: i64 = 5 * MIN;
 
-/// Lo que se espera tras un intento que no llegó a comparar (la foto iba por delante).
+/// Lo que se espera tras un intento que no llegó a comparar porque no era el momento.
 pub const ESPERA_TRAS_APLAZAR_MS: i64 = 10 * MIN;
 
 /// Hasta cuánto por delante de la hora se cree la marca de la última escritura (una escritura

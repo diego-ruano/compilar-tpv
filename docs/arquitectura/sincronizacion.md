@@ -47,7 +47,8 @@ del worker, que pasa cada consulta al `TenantHub` de su negocio; sin nube no ope
 | Rutas de la Handy | `src/lib/enElHub.ts` · `src/lib/hubLocal.ts` | El Worker autentica y pasa la petición entera al `TenantHub` del negocio (`ejecutarRuta`), que ejecuta la ruta junto a su base: un viaje por petición |
 | Lecturas de la Handy | `src/lib/tenantClient.ts` | `tenantQuery`: un `Client` que dentro del DO lee de su SQLite y, fuera, manda cada consulta por RPC (`consultar`, que sólo lee) |
 | Escrituras de la Handy | `src/lib/hub.ts` + `domains/*/*.commands.ts` | Cada dominio construye su transacción y la aplica vía el DO |
-| REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar`, `/verificar-claves`, `/salud` |
+| REST de sync | `domains/sync/sync.routes.ts` | `/changes`, `/bootstrap`, `/historico`, `/initialize-empty`, `/verificar/resumen`, `/verificar/filas`, `/verificar/claves`, `/salud` |
+| El contraste con la nube | `domains/sync/verificar.ts` · `resumenCubos.ts` · `tpv-infra-sqlite/src/contraste.rs` · `tpv-domain/src/contraste.rs` | El resumen por cubos de cada lado y lo que se baja cuando no cuadra |
 
 ### Servicio de avisos de la Handy
 
@@ -534,42 +535,93 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
   aviso se apaga solo.
 - Un `DELETE` apartado no se puede reparar por estado (la ausencia de una fila no es una fila): se
   cuenta y se informa (SYNC-23).
-- **El contraste diario** (job `verificar_nube`, `/v1/sync/verificar` y `/verificar-claves`) compara la
-  ventana de la fase 1 de la nube (30 días, o lo que quepa de ellos) con la base local, repara e informa
-  a Axiom (`tenant_salud_sync`), no al usuario. La comparación tolera las dos formas de escribir un número
-  (`2.5` y `"2.50"`).
+- **El contraste con la nube** (job `verificar_nube`) compara la base de la Main con la de la nube,
+  repara lo que no cuadra e informa a Axiom (`tenant_salud_sync`), no al usuario. Va por resúmenes y
+  sólo baja filas de lo que no cuadra (abajo).
 - **Corre tras un cierre de caja o a las veinte horas de la última pasada, y sólo en un momento
   tranquilo** (VERIF-02): sin nada pendiente de subir ni un cambio de la nube detenido, y con un
   cuarto de hora sin escrituras. La regla y sus plazos están en
   [jobs-e-interruptores.md](jobs-e-interruptores.md#cuándo-se-contrasta-con-la-nube-verif-02).
-- **Si la foto llega por delante de lo que ha bajado esta Main no se compara** (su `hasta_seq` es
-  mayor que el checkpoint local): no se piden las claves ni se informa, y se reintenta a los diez
-  minutos. Compararla sólo serviría para ver como descuadre lo que todavía está de camino.
-- **Nada se toca si esta Main no puede afirmar que está al día**: su checkpoint tiene que alcanzar el
-  `Seq` de la foto (leído después de las filas), no puede haber **ninguna fila en `_Sync_Failed`**,
-  ni en cuarentena ni pendiente de reintentar (`hay_fallos_de_bajada`), y no puede quedar histórico
-  por bajar (abajo). Vale para actualizar y para borrar. Una fila que la nube tiene y aquí no, sólo
-  se borra arriba en ese caso; con una lista de claves truncada no se borra nada. La guarda se mira
-  al comparar y **otra vez con el escritor cogido, justo antes de encolar**
-  (`guarda_con_el_escritor`): la bajada registra sus fallos con el escritor, así que uno registrado
-  entre la comparación y la escritura aplaza lo que se iba a encolar.
 - **Con el histórico a medias no se contrasta** (VERIF-01). Una Main recién recuperada de la nube
   tiene el checkpoint en el `Seq` de la foto de la fase 1, así que por el marcapáginas está al día,
   y le falta todo lo que la fase 2 no ha bajado todavía: para el contraste, filas que la nube tiene
   de más. Mientras quede una tabla sin completar en `_Backfill_Historico`, el caso de uso no pide
-  la foto ni las claves, y el repositorio, por su cuenta, no da permiso para borrar, para pisar ni
-  para subir nada (`puede_borrar_arriba` y `falta_historico`, y otra vez con el escritor cogido:
-  si una recuperación reemplaza la base entre la comparación y la escritura, del plan no sale nada).
-- Con un fallo de bajada tampoco se sube lo que aquí está y arriba no: puede ser lo que la nube borró
-  con el cambio que aquí no ha entrado, y subirlo lo resucitaría.
-- Con el interruptor `reparacion_nube` apagado se compara e informa, sin escribir.
+  nada, y el repositorio, por su cuenta, no da permiso para borrar, para pisar ni para subir nada.
 
-`/verificar-claves` reparte un presupuesto común entre las tablas: lo que no cabe sale `truncada` y se
-vuelve a pedir. El techo va en la respuesta, no en cada pieza. La ventana de `/verificar` es la de
-la fase 1 de la recuperación, con sus dos topes (filas y bytes) y encogida igual
-([recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)): si los 30 días no caben se
-contrasta una más estrecha, y sólo si no cabe ni lo imprescindible viajan los conteos solos, con
-`ventana_omitida`.
+#### El contraste por resúmenes
+
+La Main no baja la ventana para compararla: la de un bar con mucho movimiento no cabe en una
+respuesta. Cada lado **resume** sus filas y sólo se comparan los resúmenes:
+
+1. **`/v1/sync/verificar/resumen`** (`verificar.ts`), con el checkpoint de la Main. La nube contesta
+   de una vez, sin soltar el hilo del `TenantHub` (una foto): por cada tabla de negocio, su `COUNT(*)`
+   entero, la **sentencia de su ventana** (la de la fase 1, `sentenciaVolcado`, la misma de la
+   recuperación) con sus argumentos y sus columnas, y el **resumen por cubos** de lo que esa sentencia
+   devuelve. Y el `Seq` del final del log (`hasta_seq`).
+2. **La Main ejecuta esa misma sentencia** sobre su base (`tpv-infra-sqlite/src/contraste.rs`): la
+   definición de la ventana vive en el worker y en ningún otro sitio. La ejecuta en una conexión de
+   lectura puesta en `query_only`, dentro de una transacción de lectura (`Connection::foto`), y sólo si
+   es UNA sentencia que empieza por `SELECT` o `WITH` y que SQLite da por de sólo lectura. Una que no
+   sabe ejecutar (una columna que aquí no existe) deja esa tabla sin comparar, y lo dice.
+3. **De los cubos que no cuadran se bajan sus filas** (`/v1/sync/verificar/filas`, por páginas de
+   hasta 4 MiB) y se comparan una a una con la tolerancia de siempre (`sync_reparacion::fila_difiere`:
+   `4` y `4.0` son el mismo número, y un número y su texto también). Lo que llega de cada cubo tiene
+   que sumar lo que el resumen decía de él; si no, esas filas no son las de la foto y de esa tabla no
+   se repara nada.
+4. **Fuera de la ventana sólo hay conteos.** Si los de una tabla no cuadran, sus claves primarias se
+   recorren **por páginas y en orden de clave** (`/v1/sync/verificar/claves`, hasta 20.000 por
+   página y 2 MiB), y de cada tramo se restan las de aquí: lo que falta arriba y lo que sobra.
+
+**El resumen.** Cada fila va a un **cubo** que sale del hash de su clave primaria, así que cae en el
+mismo cubo en los dos lados aunque cambie su contenido; de cada cubo se guarda cuántas filas tiene y
+la **suma (módulo 2⁶⁴) del hash de cada una**. Una tabla lleva la menor potencia de dos de cubos que
+deja unas 32 filas por cubo, hasta 256 (una maestra pequeña va en uno). El hash es FNV-1a de 64 bits
+sobre una **forma canónica** de la fila: `NULL`; un número (`INTEGER` o `REAL`) como sus 8 bytes de
+doble IEEE-754, con `-0` como `+0`; un texto en UTF-8 con su longitud; un blob con la suya. Un entero
+es su doble porque el SQLite del Durable Object entrega a JavaScript un `INTEGER` y un `REAL` como el
+mismo `number`. Un texto que parece un número (`"2.50"`) es un texto: si en un lado una columna
+guardara el número y en el otro su texto, ese cubo bajaría y la comparación fila a fila los daría por
+iguales (cuesta una descarga, no una reparación). El cubo sale del hash de la clave mezclado con el
+`fmix32` de MurmurHash3, porque FNV-1a apenas lleva a sus bits altos lo que cambia al final de una
+clave. Los dos lados no comparten código: comparten la tabla de casos
+[`verificacion_casos.json`](../../crates/tpv-domain/src/verificacion_casos.json) (forma canónica, hash,
+cubo, resúmenes, número de cubos), y [`tests/contract/contraste/`](../../tests/contract/contraste)
+fija que los dos SQLite resumen igual las mismas filas.
+
+**Las dos fotos tienen que ser del mismo instante.** Comparar la nube de las 9:00 con la base de las
+9:01 da por descuadre lo que se ha vendido en ese minuto. Así que:
+
+- **La nube aplaza** (`200 {aplazar: true, motivo, reintentar_en_s}`) si se escribió en el log hace
+  menos de dos minutos (`actividad`), si por encima del checkpoint de la Main hay cambios que no son
+  suyos (`por_delante`: todavía no los ha aplicado) o si su checkpoint no casa con el log (`desfase`).
+  Lo de la Main por encima de su checkpoint no cuenta: lo tiene, lo escribió ella.
+- **La Main sólo compara sin nada por subir**, y con una **marca** de su base —el checkpoint, el
+  contador del outbox (que no vuelve atrás) y lo pendiente de subir— que se lee antes de pedir el
+  resumen, otra vez en la foto que resume la base, otra vez antes de mirar lo que falta arriba y, con
+  el escritor cogido, justo antes de encolar. Cada página de filas o de claves trae el `hasta_seq` de
+  su foto, que tiene que ser el del resumen.
+- Si algo se mueve, la pasada se deja sin tocar nada y sin informar (`Contraste::Aplazado`): no es un
+  fallo, y el job vuelve a los diez minutos.
+
+**Qué se repara.** La Main es el escritor único: una fila **distinta** se repara mandando cómo está
+aquí, una que **falta arriba** se sube por estado y una que **sobra arriba** se borra, porque con las
+dos fotos del mismo instante lo que la nube tiene y aquí no está no puede ser algo de camino. Nada se
+toca si hay **alguna fila en `_Sync_Failed`** (AUD-18; en cuarentena o pendiente de reintentar), si
+queda histórico por bajar (VERIF-01) o con el interruptor `reparacion_nube` apagado: se compara y se
+informa como `aplazado`. Lo que se sube va padres primero y lo que se borra, hijas primero, en
+operaciones de 500 sentencias que entran juntas en el outbox. Una tabla que no se ha podido mirar
+entera (el tope de la pasada, 250.000 filas bajadas y 2.000.000 de claves, o una tabla sin comparar)
+no deja borrar nada en ninguna, y lo que falta arriba en sus hijas no se sube (podría apuntar a una
+fila suya que falta arriba sin saberse); queda para la pasada siguiente, que ya no encuentra lo
+reparado.
+
+**Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,
+resumir es leer cada fila de la ventana y hacerle su hash sin soltar el hilo del `TenantHub`: con el
+mes de un bar de mil comandas diarias (unas 690.000 filas) son unos segundos de CPU del objeto
+(`test/verificarVolumen.test.ts`), y por eso sólo se resume con el negocio quieto. Un resumen no lee
+más de un millón de filas (`RESUMEN_MAX_FILAS`): si el mes no cabe, la ventana se encoge por los
+mismos escalones que la de la recuperación, y si no cabe ni lo imprescindible van los conteos solos
+(`ventana_omitida`), que se comparan con sus claves.
 
 ---
 

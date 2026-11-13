@@ -1,12 +1,12 @@
 // test/syncVolcado.test.ts
 //
-// El techo en bytes de los volcados de sync (`domains/sync/volcado.ts`): `/v1/sync/bootstrap`,
-// `/verificar` e `/historico`.
+// El techo en bytes de los volcados de sync (`domains/sync/volcado.ts`): `/v1/sync/bootstrap` e
+// `/historico`.
 //
 // El tope de filas no acota lo que ocupa una respuesta: una fila puede ser una línea de ticket o un
 // registro de facturación entero. Lo que se fija aquí es que el volcado para de escribir al pasar de
 // `VOLCADO_MAX_BYTES` y que cada ruta contesta entonces lo que la Main ya sabe leer: el 413 de la
-// fase 1, `ventana_omitida` en el contraste y una página más corta, con su cursor, en el histórico.
+// fase 1 y una página más corta, con su cursor, en el histórico.
 //
 // El tope de verdad son 24 MiB; aquí se pone en 64 KiB para no sembrar un mes de un bar.
 
@@ -42,7 +42,7 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 
 const { Escritor, VOLCADO_MAX_BYTES, bytesDe, escribirTablas, lectorDelCliente, lectorDelHub, siguiente } =
 	await import("../src/domains/sync/volcado");
-const { syncRoutes, paginaDelHistorico, volcarFase1, fotoDeVerificacion, BOOTSTRAP_MAX_FILAS } =
+const { syncRoutes, paginaDelHistorico, volcarFase1, BOOTSTRAP_MAX_FILAS } =
 	await import("../src/domains/sync/sync.routes");
 
 /** Una petición a la ruta, por los dos caminos, y además lo que ocupó la respuesta. */
@@ -336,83 +336,6 @@ describe("POST /v1/sync/bootstrap · el tope en bytes", () => {
 		expect(Math.max(...porFoto)).toBeGreaterThan(200);
 		// …y todos los intentos dejaron de escribir dentro de `Clientes`, lejos de sus 1.264 filas.
 		expect(Math.max(...porFoto)).toBeLessThan(800);
-	});
-});
-
-describe("POST /v1/sync/verificar", () => {
-	it("el sobre lleva los nombres que deserializa Rust, y las filas van posicionales", async () => {
-		// `crates/tpv-contracts/src/sync.rs::VerificacionNube`: `conteos`, `ventana`,
-		// `ventana_omitida`, `desde` y `hasta_seq`; cada conteo, `nombre` y `filas`; cada tabla de la
-		// ventana, un `BootstrapTabla` (`nombre`, `columnas`, `filas`).
-		await conTenant(
-			"verificar-sobre",
-			(sql) => {
-				sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');");
-				sembrarComandas(sql, 3);
-				sembrarSeq(sql, 4);
-			},
-			async (pedir) => {
-				const { status, body } = await pedir("/verificar");
-				expect(status).toBe(200);
-				expect(Object.keys(body).sort()).toEqual(
-					["conteos", "desde", "hasta_seq", "ventana", "ventana_omitida"].sort(),
-				);
-				expect(body.ventana_omitida).toBe(false);
-				// El `Seq` del final del log: el de la última escritura aplicada.
-				expect(body.hasta_seq).toBe(4);
-				expect(body.desde).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-
-				// Los conteos son de la tabla ENTERA: las comandas de 2020 cuentan aunque queden
-				// fuera de la ventana.
-				const conteo = (n: string) => body.conteos.find((c: any) => c.nombre === n);
-				expect(conteo("Comandas")).toEqual({ nombre: "Comandas", filas: 3 });
-				expect(conteo("Zonas")).toEqual({ nombre: "Zonas", filas: 1 });
-
-				const tabla = (n: string) => body.ventana.find((t: any) => t.nombre === n);
-				expect(Object.keys(tabla("Zonas")).sort()).toEqual(["columnas", "filas", "nombre"]);
-				const zonas = tabla("Zonas");
-				expect(zonas.filas).toHaveLength(1);
-				expect(zonas.filas[0][zonas.columnas.indexOf("Nombre_Zona")]).toBe("Terraza");
-				// Y la ventana es la del bootstrap: lo antiguo y cerrado no viaja.
-				expect(tabla("Comandas").filas).toEqual([]);
-			},
-		);
-	});
-
-	it("si la ventana no cabe por bytes, van los conteos y `ventana_omitida`", async () => {
-		await conTenant(
-			"verificar-no-cabe",
-			(sql) => {
-				sembrarClientes(sql, 600);
-				sembrarSeq(sql, 2);
-			},
-			async (pedir) => {
-				const { status, body, bytes } = await pedir("/verificar");
-				expect(status).toBe(200);
-				expect(body.ventana_omitida).toBe(true);
-				expect(body.ventana).toEqual([]);
-				expect(body.conteos.find((c: any) => c.nombre === "Clientes").filas).toBe(600);
-				expect(body.hasta_seq).toBe(2);
-				expect(bytes).toBeLessThan(VOLCADO_MAX_BYTES);
-			},
-		);
-	});
-
-	it("los dos topes entran por parámetro, y el de filas se mira antes de leer", async () => {
-		await enElHub("volcado-verificar-filas", async (hub: any) => {
-			const sql = hub.state.storage.sql;
-			crearEsquemaTenant(sql);
-			sembrarClientes(sql, 30);
-
-			for (const lector of [lectorDelHub(sql), lectorDelCliente(clienteSobre(sql))]) {
-				const leer = async (topes: { filas: number; bytes: number }) =>
-					JSON.parse(new TextDecoder().decode(await fotoDeVerificacion(lector, null, topes)));
-
-				expect((await leer({ filas: 1_000, bytes: 1024 * 1024 })).ventana_omitida).toBe(false);
-				expect((await leer({ filas: 10, bytes: 1024 * 1024 })).ventana_omitida).toBe(true);
-				expect((await leer({ filas: 1_000, bytes: 2_000 })).ventana_omitida).toBe(true);
-			}
-		});
 	});
 });
 

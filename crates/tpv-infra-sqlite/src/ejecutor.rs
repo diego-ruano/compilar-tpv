@@ -272,6 +272,40 @@ impl Connection {
         }).await
     }
 
+    /// Una **foto** de la base: `trabajo` corre entero en el hilo de la conexión, dentro de una
+    /// transacción de lectura y con la conexión en `query_only`.
+    ///
+    /// Es para leer mucho de una vez y que todo salga del mismo instante (el contraste con la nube,
+    /// que resume cientos de miles de filas): las filas no se copian ni cruzan de hilo, y mientras
+    /// dura esta conexión no atiende a nadie más. Pensada para una conexión de lectura.
+    ///
+    /// Al terminar, acabe como acabe, la transacción se cierra y la conexión vuelve a admitir
+    /// escrituras (las de lectura hacen las copias con `VACUUM INTO`). Si quien llama cancela su
+    /// `Future`, el trabajo termina igual en su hilo y deja la conexión como estaba.
+    pub(crate) async fn foto<T: Send + 'static>(
+        &self,
+        trabajo: impl for<'c> FnOnce(&Foto<'c>) -> Result<T, ErrorSql> + Send + 'static,
+    ) -> Result<T, ErrorSql> {
+        self.ejecutor.pedir(move |s| {
+            let conn = s.conn;
+            conn.execute_batch("PRAGMA query_only = ON;")?;
+            let resultado = conn.execute_batch("BEGIN;").map_err(ErrorSql::from).and_then(|()| trabajo(&Foto { conn }));
+            // Lo que lea queda atrás aunque el trabajo falle: se cierra la lectura y se devuelve la
+            // conexión a como estaba. Si eso falla, el error que cuenta es el del trabajo.
+            if !conn.is_autocommit() {
+                if let Err(e) = conn.execute_batch("ROLLBACK;") {
+                    tracing::error!(error = %e, "No se pudo cerrar la foto de SQLite");
+                }
+            }
+            let reabierta = conn.execute_batch("PRAGMA query_only = OFF;").map_err(ErrorSql::from);
+            match (resultado, reabierta) {
+                (Err(e), _) => Err(e),
+                (Ok(_), Err(e)) => Err(e),
+                (Ok(v), Ok(())) => Ok(v),
+            }
+        }).await
+    }
+
     pub(crate) async fn sanear(&self) -> Result<(), ErrorSql> {
         self.ejecutor.pedir(|s| {
             if !s.conn.is_autocommit() { s.conn.execute_batch("ROLLBACK;")?; }
@@ -294,6 +328,120 @@ impl Connection {
         let (tx, rx) = oneshot::channel();
         self.ejecutor.cola.send(Mensaje::Cerrar(tx)).map_err(|_| cerrado())?;
         rx.await.map_err(|_| cerrado())
+    }
+}
+
+/// El valor de una columna de la fila en curso, **prestado**: vale mientras dura la llamada que lo
+/// recibe. El texto va en sus bytes, sin validar ni copiar.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ValorPrestado<'a> {
+    Null,
+    Integer(i64),
+    Real(f64),
+    Text(&'a [u8]),
+    Blob(&'a [u8]),
+}
+
+impl ValorPrestado<'_> {
+    /// Una copia que se puede guardar. El texto con UTF-8 inválido, con sustituciones (`U+FFFD`).
+    pub fn copia(&self) -> Value {
+        match *self {
+            ValorPrestado::Null => Value::Null,
+            ValorPrestado::Integer(n) => Value::Integer(n),
+            ValorPrestado::Real(x) => Value::Real(x),
+            ValorPrestado::Text(t) => Value::Text(String::from_utf8_lossy(t).into_owned()),
+            ValorPrestado::Blob(b) => Value::Blob(b.to_vec()),
+        }
+    }
+}
+
+/// ¿Empieza `sql` como una lectura? `SELECT` o `WITH`, con espacio o comentarios delante o sin
+/// ellos. Es la primera de las tres cosas que se le piden a una sentencia que viene de fuera; las
+/// otras dos las dice SQLite (que sea una sola, y que no escriba).
+fn empieza_como_lectura(sql: &str) -> bool {
+    let mut resto = sql.trim_start();
+    loop {
+        if let Some(tras) = resto.strip_prefix("--") {
+            resto = tras.find('\n').map_or("", |i| tras[i + 1..].trim_start());
+        } else if let Some(tras) = resto.strip_prefix("/*") {
+            resto = tras.find("*/").map_or("", |i| tras[i + 2..].trim_start());
+        } else {
+            break;
+        }
+    }
+    ["SELECT", "WITH"].iter().any(|palabra| {
+        resto.get(..palabra.len()).is_some_and(|cabeza| cabeza.eq_ignore_ascii_case(palabra))
+            && !resto[palabra.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')
+    })
+}
+
+/// Las lecturas de una [`Connection::foto`]. Todas ven la base del mismo instante.
+pub struct Foto<'c> {
+    conn: &'c rusqlite::Connection,
+}
+
+impl Foto<'_> {
+    /// Prepara UNA sentencia de sólo lectura. Lo que no lo sea se rechaza sin ejecutarlo: lo que
+    /// no empieza por `SELECT` o `WITH`, un texto con más de una sentencia y lo que SQLite dice
+    /// que escribe (un `WITH … DELETE` empieza como una lectura). Con la conexión en `query_only`
+    /// tampoco podría escribir; esto lo dice antes y con su nombre.
+    fn preparar(&self, sql: &str) -> Result<rusqlite::Statement<'_>, ErrorSql> {
+        if !empieza_como_lectura(sql) {
+            return Err(ErrorSql::Misuse("la sentencia no empieza como una lectura".into()));
+        }
+        let stmt = self.conn.prepare(sql)?;
+        if !stmt.readonly() {
+            return Err(ErrorSql::Misuse("la sentencia no es de sólo lectura".into()));
+        }
+        Ok(stmt)
+    }
+
+    /// Ejecuta una lectura y entrega sus filas de una en una, sin copiarlas. Devuelve los nombres
+    /// de sus columnas. Si `fila` devuelve un error, la lectura para ahí y sale con él.
+    pub fn recorrer(
+        &self,
+        sql: &str,
+        args: &[Value],
+        mut fila: impl FnMut(&[ValorPrestado<'_>]) -> Result<(), ErrorSql>,
+    ) -> Result<Vec<String>, ErrorSql> {
+        let mut stmt = self.preparar(sql)?;
+        let columnas: Vec<String> = stmt.column_names().into_iter().map(str::to_owned).collect();
+        enlazar(&mut stmt, args, sql)?;
+        let mut filas = stmt.raw_query();
+        while let Some(f) = filas.next()? {
+            let mut valores = Vec::with_capacity(columnas.len());
+            for i in 0..columnas.len() {
+                use rusqlite::types::ValueRef;
+                valores.push(match f.get_ref(i)? {
+                    ValueRef::Null => ValorPrestado::Null,
+                    ValueRef::Integer(n) => ValorPrestado::Integer(n),
+                    ValueRef::Real(x) => ValorPrestado::Real(x),
+                    ValueRef::Text(t) => ValorPrestado::Text(t),
+                    ValueRef::Blob(b) => ValorPrestado::Blob(b),
+                });
+            }
+            fila(&valores)?;
+        }
+        Ok(columnas)
+    }
+
+    /// Las filas de una lectura, copiadas. Para las que son pocas.
+    pub fn filas(&self, sql: &str, args: &[Value]) -> Result<Vec<Vec<Value>>, ErrorSql> {
+        let mut salida = Vec::new();
+        self.recorrer(sql, args, |valores| {
+            salida.push(valores.iter().map(ValorPrestado::copia).collect());
+            Ok(())
+        })?;
+        Ok(salida)
+    }
+
+    /// El primer valor de la primera fila, como entero: lo que devuelve un `COUNT(*)` o un `MAX`.
+    /// `None` sin filas, o si ese valor no es un entero.
+    pub fn entero(&self, sql: &str, args: &[Value]) -> Result<Option<i64>, ErrorSql> {
+        Ok(self.filas(sql, args)?.first().and_then(|f| match f.first() {
+            Some(Value::Integer(n)) => Some(*n),
+            _ => None,
+        }))
     }
 }
 

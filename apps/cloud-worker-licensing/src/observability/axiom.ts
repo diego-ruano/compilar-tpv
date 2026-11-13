@@ -134,8 +134,8 @@ export function reportarRechazoDeDispositivo(
  * ignorar; quien tiene que enterarse es quien puede actuar, y sin mirar nada.
  *
  * La alerta que esto habilita: `event == "tenant_salud_sync"` con `descuadres` no vacío, agrupado
- * por `tenant_id`. Un descuadre suelto que desaparece al ciclo siguiente es ruido (la foto de la
- * nube se toma sin transacción); lo que hay que vigilar es el que persiste.
+ * por `tenant_id`. Un descuadre que la pasada repara desaparece al ciclo siguiente; lo que hay que
+ * vigilar es el que persiste, y el que sale con `aplazado` (visto y no tocado).
  *
  * Best-effort y sin bloquear la respuesta, como todo lo de aquí — pero con la entrega
  * retenida, o el runtime la cancelaría al responder.
@@ -148,6 +148,10 @@ export function reportarSaludDeSync(
 		descuadres: { tabla: string; faltan: number; sobran: number; distintas: number }[];
 		apartadas: number;
 		reparadas: number;
+		borradas: number;
+		aplazado: boolean;
+		filas_examinadas: number;
+		tablas_sin_comparar: string[];
 		ventana_omitida: boolean;
 		reparacion_apagada: boolean;
 	},

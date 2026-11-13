@@ -1,0 +1,21 @@
+{
+ "_": [
+  "Las mismas filas resumen igual en la Main (SQLite de rusqlite) y en la nube (SQLite del Durable Object).",
+  "Rust siembra esto en su base, resume cada tabla entera y bendice golden.json (BLESS_CONTRASTE=1 cargo nextest run -p tpv-infra-sqlite contraste_golden).",
+  "El worker siembra lo mismo en un TenantHub, pide el resumen del contraste y se conforma (test/contrasteGolden.test.ts).",
+  "Todas las fechas caen dentro de la ventana de 30 dias antes de ahora: lo que se resume es la tabla entera.",
+  "Hay de todo lo que guarda una fila: enteros, reales con y sin decimales, un entero de mas de 53 bits, -0, textos con acentos, emojis y NUL, textos que parecen numeros, vacios y NULL."
+ ],
+ "ahora": "2026-11-13 12:00:00",
+ "tablas": ["Categorias_Producto", "Comandas", "Detalle_Comanda", "Mesas", "Pago_Detalles", "Pagos", "Productos", "Zonas"],
+ "sentencias": [
+  "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('z1', 'Terraza', '[]'), ('z2', 'Salón de la ría', '[[0,0],[10.5,3]]'), ('z3', 'Barra 😀', ''), ('z4', '007', '2.50');",
+  "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius) VALUES ('m1', 'z1', '1', 4, 10, 20, 'rect', 80, 80, NULL), ('m2', 'z1', '2', 2, -110, 0, 'circle', 60, 60, 30), ('m3', 'z2', '07', 6, 10, 200, 'rect', 120, 80, NULL);",
+  "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible, Pasa_Cocina) VALUES ('cat-1', 'Cervezas', 1, 0), ('cat-2', 'Cocina', 1, 1);",
+  "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Minimo, IVA_Percent, Stock_Suelto, Cantidad_Pedido_Esperada) VALUES ('p1', 'cat-1', 'Caña', 250, 1.5, 10.0, 0.1 + 0.2, 4), ('p2', 'cat-1', 'Tercio', 320, 0, 21, -0.0, 4.0), ('p3', 'cat-2', 'Ración de bravas', 9007199254740993, 1e-7, 10, 123456789.123, NULL), ('p4', 'cat-2', 'Con un NUL' || char(0) || 'dentro', NULL, NULL, NULL, NULL, NULL);",
+  "WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 120) INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Total_Comanda, Estado) SELECT printf('0193f1a2-7c3e-7b1a-9d2e-%012x', i * 7919), 'BARRA', datetime('2026-11-12 21:00:00', '-' || i || ' minutes'), datetime('2026-11-12 22:00:00', '-' || i || ' minutes'), 1250 + i * 3, 'Pagada' FROM serie;",
+  "WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 360) INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent, Notas) SELECT printf('d-%05d', i), printf('0193f1a2-7c3e-7b1a-9d2e-%012x', (i / 3) * 7919), CASE i % 2 WHEN 0 THEN 'p1' ELSE 'p2' END, 'Caña de la casa', CASE i % 4 WHEN 0 THEN 1 WHEN 1 THEN 1.5 WHEN 2 THEN 0.333 ELSE 2.0 / 3 END, 250, 10.0, CASE WHEN i % 5 = 0 THEN 'sin hielo ñ' WHEN i % 7 = 0 THEN '' END FROM serie;",
+  "WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 120) INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket) SELECT printf('pago-%04d', i), printf('0193f1a2-7c3e-7b1a-9d2e-%012x', i * 7919), datetime('2026-11-12 22:00:00', '-' || i || ' minutes'), CASE i % 3 WHEN 0 THEN 'Efectivo' ELSE 'Tarjeta' END, 1250 + i * 3, 'TOTAL', printf('T-%08d', i) FROM serie;",
+  "WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 360) INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) SELECT printf('pago-%04d', i / 3), printf('d-%05d', i) FROM serie;"
+ ]
+}

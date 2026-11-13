@@ -1,7 +1,7 @@
 // test/syncGzip.test.ts
 //
 // Las respuestas de sync que crecen con el negocio salen comprimidas con gzip si la Main lo acepta
-// (`lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico`, `/verificar` y `/verificar-claves`.
+// (`lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico` y las tres de `/verificar/*`.
 //
 // Lo que se fija:
 //   · sólo si se pide: sin `Accept-Encoding: gzip` la respuesta es la de siempre, que es lo que
@@ -45,13 +45,14 @@ const { syncRoutes } = await import("../src/domains/sync/sync.routes");
 const app = new Hono();
 app.route("/", syncRoutes);
 
-/** Las cinco rutas, con un cuerpo de los que manda la Main. */
+/** Las rutas que comprimen, con un cuerpo de los que manda la Main. */
 const RUTAS: Array<[string, unknown]> = [
 	["/changes", { since: 0 }],
 	["/bootstrap", {}],
 	["/historico", { tabla: "Comandas", cursor: 0, limite: 1_000 }],
-	["/verificar", {}],
-	["/verificar-claves", { tablas: [{ nombre: "Comandas", claves: ["ID_Comanda"] }] }],
+	["/verificar/resumen", {}],
+	["/verificar/filas", { tabla: "Comandas", desde: "2020-01-01 00:00:00", cubos: 16, pedir: [0, 1, 2, 3, 4, 5, 6, 7] }],
+	["/verificar/claves", { tabla: "Comandas", limite: 1_000 }],
 ];
 
 function sembrar(sql: any): void {

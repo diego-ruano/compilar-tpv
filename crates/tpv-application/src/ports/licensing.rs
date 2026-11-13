@@ -189,7 +189,7 @@ pub trait PairingService: Send + Sync {
         body: JsonValue,
     ) -> AppResult<JsonValue>;
     /// El mismo POST, con el cuerpo de la respuesta tal cual. Es para lo que contesta con un
-    /// volcado de la base del negocio (`/v1/sync/bootstrap`, `/historico`, `/verificar`…): quien
+    /// volcado de la base del negocio (`/v1/sync/bootstrap`, `/historico`, `/verificar/*`…): quien
     /// lo pide lo lee directamente en su tipo (`use_cases::sync`), sin montar antes un
     /// `serde_json::Value` con todo dentro.
     ///

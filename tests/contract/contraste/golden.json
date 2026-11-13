@@ -1,0 +1,154 @@
+{
+  "Categorias_Producto": {
+    "cubos": 1,
+    "cuentas": [
+      2
+    ],
+    "filas": 2,
+    "sumas": [
+      "1ceba5e24d8d0002"
+    ]
+  },
+  "Comandas": {
+    "cubos": 4,
+    "cuentas": [
+      36,
+      34,
+      28,
+      22
+    ],
+    "filas": 120,
+    "sumas": [
+      "55d4bf1590cb996b",
+      "1867b94d078af2a9",
+      "eef9c0929a341077",
+      "0fb47daca721373d"
+    ]
+  },
+  "Detalle_Comanda": {
+    "cubos": 16,
+    "cuentas": [
+      29,
+      24,
+      21,
+      17,
+      20,
+      21,
+      23,
+      13,
+      23,
+      28,
+      26,
+      22,
+      30,
+      17,
+      27,
+      19
+    ],
+    "filas": 360,
+    "sumas": [
+      "c4bb6aebacd9b693",
+      "48e13b3567eab71f",
+      "1858fa3f1f89f3f2",
+      "3c97b55a224c0cef",
+      "e5297374eb4e78d4",
+      "52b98e4d50b6da29",
+      "c4bd2e686f5d1f42",
+      "b3fdc68dbd449b8d",
+      "a887c4d47b2dd093",
+      "aa17a01e1045827d",
+      "6f880eecadf7c076",
+      "b1d3d5384a416360",
+      "016eee4f8d308c89",
+      "a7141ba8da44e294",
+      "34c2ab8e102a8d77",
+      "ac075c8db95cdfec"
+    ]
+  },
+  "Mesas": {
+    "cubos": 1,
+    "cuentas": [
+      3
+    ],
+    "filas": 3,
+    "sumas": [
+      "196d19b0d692947a"
+    ]
+  },
+  "Pago_Detalles": {
+    "cubos": 16,
+    "cuentas": [
+      22,
+      20,
+      23,
+      33,
+      13,
+      23,
+      25,
+      25,
+      22,
+      29,
+      16,
+      26,
+      23,
+      19,
+      22,
+      19
+    ],
+    "filas": 360,
+    "sumas": [
+      "438d72d044beaaef",
+      "bf909e14556988bc",
+      "0649376b399d3039",
+      "72d2b1baa92f295a",
+      "c063ed8ab6d04616",
+      "3e1d7377adcc375c",
+      "84a1afd6d9e99617",
+      "38d05c85dec5251d",
+      "b580806cdb330604",
+      "9745976c42ccb15f",
+      "3613ec2e00807187",
+      "65886a6c797902c7",
+      "e199748deedd6b26",
+      "a0333e3a1f3f1e8c",
+      "a6885e0058cd3ac9",
+      "03e8f3fa4c3a6cf0"
+    ]
+  },
+  "Pagos": {
+    "cubos": 4,
+    "cuentas": [
+      30,
+      27,
+      34,
+      29
+    ],
+    "filas": 120,
+    "sumas": [
+      "3ed04d2107344ab0",
+      "12197ceb2a2b9367",
+      "93b1d6ce33222064",
+      "2c90867f6ba003b4"
+    ]
+  },
+  "Productos": {
+    "cubos": 1,
+    "cuentas": [
+      4
+    ],
+    "filas": 4,
+    "sumas": [
+      "b5363167e0bcd43d"
+    ]
+  },
+  "Zonas": {
+    "cubos": 1,
+    "cuentas": [
+      4
+    ],
+    "filas": 4,
+    "sumas": [
+      "6b3ba979ccada319"
+    ]
+  }
+}

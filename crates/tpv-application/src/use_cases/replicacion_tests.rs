@@ -98,20 +98,17 @@ struct FakeRepo {
             }
             Ok(OutboxFallo { intentos, apartada, command_name, reparadas })
         }
+        async fn contraste_marca(&self) -> AppResult<crate::ports::sync::MarcaLocal> {
+            Ok(crate::ports::sync::MarcaLocal::default())
+        }
         async fn contrastar_con_la_nube(
             &self,
-            _: VerificacionNube,
+            _: ResumenNube,
+            _: crate::ports::sync::MarcaLocal,
+            _: &dyn crate::ports::sync::PaginasDelContraste,
             _: bool,
-        ) -> AppResult<ResultadoVerificacion> {
-            Ok(ResultadoVerificacion::default())
-        }
-        async fn contrastar_claves(
-            &self,
-            _: VerificacionClaves,
-            _: i64,
-            _: bool,
-        ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)> {
-            Ok((Vec::new(), 0, 0, false))
+        ) -> AppResult<crate::ports::sync::ContrasteLocal> {
+            Ok(crate::ports::sync::ContrasteLocal::Hecho(ResultadoVerificacion::default()))
         }
         async fn outbox_mark_encolada(&self, ids: &[String]) -> AppResult<()> {
             self.encoladas.lock().unwrap().extend_from_slice(ids);

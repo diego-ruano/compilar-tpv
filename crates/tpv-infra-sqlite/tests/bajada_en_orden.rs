@@ -12,7 +12,10 @@
 //!
 //! Los escenarios son los de la investigación de AUD-18 (un fallo en mitad de una página del
 //! catch-up y otro en vivo): ningún cambio se pierde, nada se aplica fuera de orden y
-//! `verificar_nube` no borra ni pisa nada arriba mientras quede un fallo de bajada.
+//! `verificar_nube` no borra ni pisa nada arriba mientras quede un fallo de bajada. El contraste
+//! lo contesta la nube del contraste de los tests (`comun::nube_de_contraste`), con su propia base.
+
+mod comun;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -31,6 +34,7 @@ use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceFirmarEmparejamientoArgs, DeviceIdentity, FirmaDispositivo,
     PairCreateResult,
 };
+use comun::nube_de_contraste::NubeDeContraste;
 use tpv_contracts::sync::{OutboxFallo, SqlStatement};
 use tpv_infra_sqlite::db::Db;
 use tpv_infra_sqlite::sync::SqliteSyncRepository;
@@ -46,6 +50,8 @@ struct Nube {
     log: Mutex<Vec<JsonValue>>,
     respuestas: Mutex<HashMap<String, VecDeque<JsonValue>>>,
     peticiones: Mutex<Vec<(String, JsonValue)>>,
+    /// Lo que contesta al contraste, con la base de la nube.
+    contraste: Mutex<Option<Arc<NubeDeContraste>>>,
 }
 
 impl Nube {
@@ -55,8 +61,22 @@ impl Nube {
         Arc::new(nube)
     }
 
-    fn responde(&self, ruta: &str, cuerpo: JsonValue) {
-        self.respuestas.lock().unwrap().entry(ruta.to_string()).or_default().push_back(cuerpo);
+    /// La base de la nube para el contraste: lo que el log ha dejado en ella, más `extra`.
+    async fn con_base(&self, nombre: &str, extra: &str) -> Arc<NubeDeContraste> {
+        let contraste = Arc::new(NubeDeContraste::nueva(nombre).await);
+        let log = self.log.lock().unwrap().clone();
+        for cambio in log {
+            let sentencias: Vec<SqlStatement> = serde_json::from_value(cambio["statements"].clone()).unwrap();
+            // Lo que la nube no supo aplicar tampoco está en su base.
+            if sentencias.iter().all(|s| !s.sql.contains("Tabla_Que_No_Existe")) {
+                contraste.aplicar(&sentencias).await;
+            }
+        }
+        contraste.sembrar(extra).await;
+        let hasta = self.log.lock().unwrap().iter().map(|c| c["seq"].as_i64().unwrap()).max().unwrap_or(0);
+        *contraste.hasta_seq.lock().unwrap() = hasta;
+        *self.contraste.lock().unwrap() = Some(contraste.clone());
+        contraste
     }
 
     /// Los `since` con los que la Main ha pedido `/v1/sync/changes`, en orden.
@@ -117,6 +137,12 @@ impl PairingService for Nube {
         self.peticiones.lock().unwrap().push((path.to_string(), body.clone()));
         if path == "/v1/sync/changes" {
             return Ok(self.cambios_desde(body["since"].as_i64().unwrap_or(0)));
+        }
+        let contraste = self.contraste.lock().unwrap().clone();
+        if let Some(contraste) = contraste {
+            if let Some(respuesta) = contraste.contestar(path, &body).await {
+                return respuesta;
+            }
         }
         let siguiente = self.respuestas.lock().unwrap().get_mut(path).and_then(|cola| cola.pop_front());
         siguiente.ok_or_else(|| AppError::external(format!("respuesta no prevista para {path}")))
@@ -306,22 +332,10 @@ async fn un_fallo_en_mitad_de_una_pagina_detiene_la_bajada_y_nada_se_pierde_ni_s
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z-5';").await, 1, "el 5 entró");
 
     // `verificar_nube`, con una fila arriba que aquí no está: con la cuarentena, no se borra.
-    nube.responde(
-        "/v1/sync/verificar",
-        json!({
-            "conteos": [{ "nombre": "Zonas", "filas": 5 }],
-            "ventana": [], "ventana_omitida": false, "desde": "", "hasta_seq": 5,
-        }),
-    );
-    nube.responde(
-        "/v1/sync/verificar-claves",
-        json!({ "tablas": [{
-            "nombre": "Zonas", "columnas": ["ID_Zona"],
-            "claves": [["z1"], ["z-ok"], ["z-handy"], ["z-5"], ["z-x"]], "truncada": false,
-        }] }),
-    );
-    nube.responde("/v1/sync/salud", json!({ "ok": true }));
+    let contraste = nube.con_base("aud18-pagina", "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','A'), ('z-x','X');").await;
+    contraste.sembrar("UPDATE Zonas SET Nombre_Zona = 'Terraza' WHERE ID_Zona = 'z1';").await;
     let r = uc_sync::verificar_contra_la_nube(nube.as_ref(), repo.as_ref(), true).await.unwrap().hecho().expect("sin histórico pendiente se compara");
+    assert_eq!(r.descuadres.iter().map(|d| d.sobran).sum::<i64>(), 1, "se ve: {:?}", r.descuadres);
     assert_eq!((r.borradas, r.aplazado), (0, true));
     assert!(reparaciones(&repo).await.is_empty(), "nada sube a la nube");
 
@@ -384,22 +398,10 @@ fn en_vivo_escenario_b() -> Vec<Llega> {
     ]
 }
 
-fn verificacion_escenario_b(nube: &Nube) {
-    nube.responde(
-        "/v1/sync/verificar",
-        json!({
-            "conteos": [{ "nombre": "Clientes", "filas": 1 }, { "nombre": "Reservas", "filas": 4 }],
-            "ventana": [], "ventana_omitida": false, "desde": "", "hasta_seq": 13,
-        }),
-    );
-    nube.responde(
-        "/v1/sync/verificar-claves",
-        json!({ "tablas": [{
-            "nombre": "Reservas", "columnas": ["ID_Reserva"],
-            "claves": [["r-1"], ["r-2"], ["r-3"], ["r-4"]], "truncada": false,
-        }] }),
-    );
-    nube.responde("/v1/sync/salud", json!({ "ok": true }));
+/// La nube del escenario B tiene lo que escribió la Handy (la clienta y las cuatro reservas); la
+/// clienta de la Main no ha subido.
+async fn verificacion_escenario_b(nube: &Nube) {
+    nube.con_base("aud18-vivo", "").await;
 }
 
 async fn clienta_de_la_main(db: &Arc<Db>) {
@@ -441,7 +443,7 @@ async fn en_vivo_lo_que_llega_detras_de_un_fallo_no_se_aplica_antes_y_nada_se_bo
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Reservas WHERE ID_Reserva IN ('r-2','r-4');").await, 2);
 
     // `verificar_nube`: la nube tiene r-1 y r-3 y aquí no están. Con las cuarentenas, no se borran.
-    verificacion_escenario_b(&nube);
+    verificacion_escenario_b(&nube).await;
     let r = uc_sync::verificar_contra_la_nube(nube.as_ref(), repo.as_ref(), true).await.unwrap().hecho().expect("sin histórico pendiente se compara");
     assert_eq!((r.borradas, r.aplazado), (0, true));
     assert!(

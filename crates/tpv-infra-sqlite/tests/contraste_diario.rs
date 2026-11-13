@@ -1,5 +1,12 @@
 //! El contraste diario con la nube (`use_cases::sync::verificar_contra_la_nube`, el cuerpo del job
-//! `verificar_nube`), de punta a punta: la nube simulada y el repositorio SQLite real.
+//! `verificar_nube`), de punta a punta: la nube simulada (`comun::nube_de_contraste`, que contesta
+//! `/v1/sync/verificar/*` como el worker sobre una base SQLite propia) y el repositorio SQLite real.
+//!
+//! El contraste por resúmenes: con las dos bases iguales no baja ni una fila; con un valor
+//! distinto, una fila que falta arriba y una que sobra, las encuentra, las repara, y tras aplicar la
+//! reparación en la nube la pasada siguiente cuadra. Fuera de la ventana, las claves por páginas.
+//! Y las guardas: no se toca nada con algo por subir, con un fallo de bajada, con el histórico a
+//! medias, con la reparación apagada o si una de las dos bases se mueve a mitad de la pasada.
 //!
 //! VERIF-01 · Una Main recién recuperada de la nube tiene la ventana de la fase 1 y el checkpoint
 //! en el `Seq` de esa foto: por el marcapáginas está al día, y le falta todo el histórico que la
@@ -9,6 +16,8 @@
 //! regla de `tpv_domain::verificacion_nube`, el estado en `_Verificacion_Nube` y el contraste de
 //! verdad. La hora la pone el test.
 
+mod comun;
+
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -17,9 +26,10 @@ use async_trait::async_trait;
 use chrono::TimeZone;
 use serde_json::{json, Value as JsonValue};
 
+use comun::nube_de_contraste::{NubeDeContraste, Paginas, DESDE};
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::licensing::{PairingService, ResultadoSubidaImagen};
-use tpv_application::ports::sync::SyncRepository;
+use tpv_application::ports::sync::{ContrasteLocal, SyncRepository};
 use tpv_application::ports::verificacion_nube::{IntentoVerificacion, VerificacionNubeRepository};
 use tpv_application::use_cases::sync::{self as uc_sync, Contraste};
 use tpv_application::use_cases::verificacion_nube::{self as uc_verificacion, Momento, Vuelta};
@@ -27,7 +37,7 @@ use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceFirmarEmparejamientoArgs, DeviceIdentity, FirmaDispositivo,
     PairCreateResult,
 };
-use tpv_contracts::sync::SqlStatement;
+use tpv_contracts::sync::{DescuadreTabla, ResultadoVerificacion, SqlStatement};
 use tpv_domain::verificacion_nube::Espera;
 use tpv_infra_sqlite::db::Db;
 use tpv_infra_sqlite::sync::SqliteSyncRepository;
@@ -35,20 +45,35 @@ use tpv_infra_sqlite::verificacion_nube::SqliteVerificacionNube;
 
 // ── Dobles ────────────────────────────────────────────────────────────────────
 
-/// La nube: respuestas preparadas por ruta y lo que se le ha pedido.
-#[derive(Default)]
+/// La nube: el contraste lo contesta `NubeDeContraste`; el resto de rutas, respuestas preparadas.
 struct Nube {
+    contraste: NubeDeContraste,
     respuestas: Mutex<HashMap<String, VecDeque<JsonValue>>>,
     peticiones: Mutex<Vec<String>>,
+    /// La nube no contesta.
+    caida: Mutex<bool>,
 }
 
 impl Nube {
+    async fn nueva(nombre: &str) -> Nube {
+        Nube {
+            contraste: NubeDeContraste::nueva(nombre).await,
+            respuestas: Mutex::default(),
+            peticiones: Mutex::default(),
+            caida: Mutex::new(false),
+        }
+    }
+
     fn responde(&self, ruta: &str, cuerpo: JsonValue) {
         self.respuestas.lock().unwrap().entry(ruta.to_string()).or_default().push_back(cuerpo);
     }
 
     fn pedidas(&self) -> Vec<String> {
         self.peticiones.lock().unwrap().clone()
+    }
+
+    async fn cerrar(self) {
+        self.contraste.cerrar().await;
     }
 }
 
@@ -81,8 +106,14 @@ impl PairingService for Nube {
     fn tpv_server_signed_headers(&self, _: &str, _: &str, _: &str, _: &[u8]) -> AppResult<ApiSignedHeaders> {
         unimplemented!()
     }
-    async fn tpv_server_post_json(&self, _mode: &str, path: &str, _: JsonValue) -> AppResult<JsonValue> {
+    async fn tpv_server_post_json(&self, _mode: &str, path: &str, body: JsonValue) -> AppResult<JsonValue> {
         self.peticiones.lock().unwrap().push(path.to_string());
+        if *self.caida.lock().unwrap() {
+            return Err(AppError::external("la nube no contesta"));
+        }
+        if let Some(respuesta) = self.contraste.contestar(path, &body).await {
+            return respuesta;
+        }
         let siguiente = self.respuestas.lock().unwrap().get_mut(path).and_then(|cola| cola.pop_front());
         siguiente.ok_or_else(|| AppError::external(format!("respuesta no prevista para {path}")))
     }
@@ -133,13 +164,382 @@ async fn numero(db: &Arc<Db>, sql: &str) -> i64 {
 
 /// Las sentencias de las reparaciones encoladas (`main_reparacion`), que es lo que sube a la nube.
 async fn reparaciones(repo: &SqliteSyncRepository) -> Vec<SqlStatement> {
-    repo.outbox_pending(100)
+    repo.outbox_pending(1_000)
         .await
         .unwrap()
         .into_iter()
         .filter(|e| e.command_name == "main_reparacion")
         .flat_map(|e| e.statements)
         .collect()
+}
+
+/// La reparación sube: la nube la aplica y la Main la da por enviada.
+async fn subir_reparaciones(repo: &SqliteSyncRepository, nube: &Nube) {
+    for op in repo.outbox_pending(1_000).await.unwrap() {
+        nube.contraste.aplicar(&op.statements).await;
+        repo.outbox_mark_sent(&op.op_id, 0).await.unwrap();
+    }
+}
+
+fn descuadre(tabla: &str, faltan: i64, sobran: i64, distintas: i64) -> DescuadreTabla {
+    DescuadreTabla { tabla: tabla.into(), faltan, sobran, distintas }
+}
+
+fn hecho(c: Contraste) -> ResultadoVerificacion {
+    c.hecho().expect("se tenía que comparar")
+}
+
+// ── Un negocio con un poco de todo ────────────────────────────────────────────
+
+/// Zonas, mesas, productos y 100 comandas con sus líneas y sus cobros: 60 de ayer y 40 de 2020.
+/// Hay de todo lo que guarda una fila: enteros, reales (cantidades de 1,5 y de 0,333), dinero en
+/// céntimos, textos con acentos y emojis, y `NULL`.
+const NEGOCIO: &str = "
+    INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza'), ('z2', 'Salón de la ría'), ('z3', 'Barra 😀');
+    INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius)
+         VALUES ('m1', 'z1', '1', 4, 10, 20, 'rect', 80, 80, NULL),
+                ('m2', 'z1', '2', 2, 110, 20, 'circle', 60, 60, 30),
+                ('m3', 'z2', '7', 6, 10, 200, 'rect', 120, 80, NULL);
+    INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Cervezas');
+    INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Minimo, IVA_Percent)
+         VALUES ('p1', 'cat-1', 'Caña', 250, 1.5, 10.0), ('p2', 'cat-1', 'Tercio', 320, 0, 21);
+    WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 60)
+    INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Total_Comanda, Estado)
+         SELECT printf('c-nueva-%04d', i), 'BARRA', '2026-11-12 21:00:00', '2026-11-12 22:00:00', 1250 + i, 'Pagada' FROM serie;
+    WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 40)
+    INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Total_Comanda, Estado)
+         SELECT printf('c-vieja-%04d', i), 'BARRA', '2020-01-01 12:00:00', '2020-01-01 13:00:00', 900, 'Pagada' FROM serie;
+    WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 180)
+    INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent, Notas)
+         SELECT printf('d-%04d', i), printf('c-nueva-%04d', i / 3), 'p1', 'Caña de la casa',
+                CASE i % 3 WHEN 0 THEN 1 WHEN 1 THEN 1.5 ELSE 0.333 END, 250, 10.0,
+                CASE WHEN i % 5 = 0 THEN 'sin hielo ñ' END FROM serie;
+    WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 60)
+    INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket)
+         SELECT printf('pago-%04d', i), printf('c-nueva-%04d', i), '2026-11-12 22:00:00', 'Efectivo', 1250 + i, 'TOTAL',
+                printf('T-%08d', i) FROM serie;
+    WITH RECURSIVE serie(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM serie WHERE i + 1 < 180)
+    INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) SELECT printf('pago-%04d', i / 3), printf('d-%04d', i) FROM serie;
+";
+
+/// Una Main al día con el negocio, y una nube igual: el checkpoint en 40 y el log de la nube
+/// acabado en 45 (lo de encima es de la Main).
+async fn negocio_igual(nombre: &str) -> (Arc<SqliteSyncRepository>, Arc<Db>, PathBuf, Nube) {
+    let (repo, db, dir) = base(nombre).await;
+    sembrar(&db, NEGOCIO).await;
+    sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 40 WHERE Id = 1;").await;
+    let nube = Nube::nueva(nombre).await;
+    nube.contraste.sembrar(NEGOCIO).await;
+    *nube.contraste.hasta_seq.lock().unwrap() = 45;
+    *nube.contraste.ultimo_ajeno.lock().unwrap() = 40;
+    (repo, db, dir, nube)
+}
+
+/// Las tres diferencias de siempre, en la nube: un valor distinto (el nombre de una zona), una fila
+/// que le falta (la mesa 7) y una que le sobra (una zona que aquí no existe).
+async fn tres_diferencias(nube: &Nube) {
+    nube.contraste
+        .sembrar(
+            "UPDATE Zonas SET Nombre_Zona = 'Salón' WHERE ID_Zona = 'z2';
+             DELETE FROM Mesas WHERE ID_Mesa = 'm3';
+             INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z9', 'Almacén');",
+        )
+        .await;
+}
+
+// ── El contraste por resúmenes ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn con_las_dos_bases_iguales_no_baja_ni_una_fila_ni_repara_nada() {
+    let (repo, db, dir, nube) = negocio_igual("iguales").await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+
+    assert_eq!(r.descuadres, vec![], "cero falsos descuadres");
+    assert_eq!((r.reparadas, r.borradas, r.filas_examinadas, r.aplazado), (0, 0, 0, false));
+    assert!(r.tablas_sin_comparar.is_empty(), "{:?}", r.tablas_sin_comparar);
+    assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar/resumen", "/v1/sync/salud"], "sólo el resumen");
+    // El resumen lleva el checkpoint de la Main, que es lo que la nube comprueba.
+    assert_eq!(nube.contraste.pedidas.lock().unwrap()[0].1, json!({ "checkpoint": 40 }));
+    assert!(reparaciones(&repo).await.is_empty());
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn un_valor_distinto_una_fila_que_falta_y_una_que_sobra_se_encuentran_se_reparan_y_despues_cuadra() {
+    let (repo, db, dir, nube) = negocio_igual("tres").await;
+    tres_diferencias(&nube).await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+
+    let mut descuadres = r.descuadres.clone();
+    descuadres.sort_by(|a, b| a.tabla.cmp(&b.tabla));
+    assert_eq!(descuadres, vec![descuadre("Mesas", 1, 0, 0), descuadre("Zonas", 0, 1, 1)]);
+    assert_eq!((r.reparadas, r.borradas, r.aplazado), (2, 1, false));
+    // Sólo se han bajado las filas de los cubos que no cuadraban: las zonas y las mesas, que son
+    // tablas de un cubo. Ni una comanda.
+    assert_eq!(r.filas_examinadas, 4 + 2);
+    let pedidas = nube.pedidas();
+    assert_eq!(pedidas.iter().filter(|p| *p == "/v1/sync/verificar/filas").count(), 2, "{pedidas:?}");
+    assert!(!pedidas.contains(&"/v1/sync/verificar/claves".to_string()), "{pedidas:?}");
+
+    // Lo que sube: la zona con su nombre de aquí y la mesa que falta, por estado, y el borrado de
+    // la que sobra, en ese orden (padres primero, borrados al final).
+    let sube = reparaciones(&repo).await;
+    assert_eq!(sube.len(), 3, "{sube:?}");
+    assert!(sube[0].sql.starts_with("INSERT INTO \"Zonas\"") && sube[0].sql.contains("ON CONFLICT"), "{}", sube[0].sql);
+    assert!(sube[0].args.contains(&json!("Salón de la ría")));
+    assert!(sube[1].sql.starts_with("INSERT INTO \"Mesas\"") && sube[1].args.contains(&json!("m3")), "{}", sube[1].sql);
+    assert_eq!(sube[2].sql, "DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1;");
+    assert_eq!(sube[2].args, vec![json!("z9")]);
+    // Esta base no se ha tocado.
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas;").await, 3);
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM Mesas;").await, 3);
+
+    // La nube aplica la reparación (eso escribe en su log) y la pasada siguiente cuadra.
+    subir_reparaciones(&repo, &nube).await;
+    *nube.contraste.hasta_seq.lock().unwrap() = 46;
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+    assert_eq!(r.descuadres, vec![]);
+    assert_eq!((r.reparadas, r.borradas, r.filas_examinadas, r.aplazado), (0, 0, 0, false));
+
+    // El informe que va a Axiom.
+    let informes = nube.contraste.informes.lock().unwrap().clone();
+    assert_eq!(informes.len(), 2);
+    assert_eq!(informes[0]["reparadas"], json!(2));
+    assert_eq!(informes[0]["borradas"], json!(1));
+    assert_eq!(informes[0]["filas_examinadas"], json!(6));
+    assert_eq!(informes[0]["reparacion_apagada"], json!(false));
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn en_una_tabla_grande_solo_se_baja_el_cubo_de_la_fila_distinta() {
+    let (repo, db, dir, nube) = negocio_igual("cubo").await;
+    // Una línea con otra cantidad: de las 180 líneas (8 cubos), sólo baja su cubo.
+    nube.contraste.sembrar("UPDATE Detalle_Comanda SET Cantidad = 2 WHERE ID_Detalle = 'd-0004';").await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+
+    assert_eq!(r.descuadres, vec![descuadre("Detalle_Comanda", 0, 0, 1)]);
+    assert_eq!(r.reparadas, 1);
+    assert!(r.filas_examinadas > 0 && r.filas_examinadas < 60, "{} de 180", r.filas_examinadas);
+    let sube = reparaciones(&repo).await;
+    assert_eq!(sube.len(), 1);
+    assert!(sube[0].args.contains(&json!("d-0004")) && sube[0].args.contains(&json!(1.5)), "{:?}", sube[0].args);
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn fuera_de_la_ventana_se_recorren_las_claves_por_paginas() {
+    let (repo, db, dir, nube) = negocio_igual("claves").await;
+    // La ventana de las comandas deja fuera las de 2020: de ésas sólo se comparan los conteos.
+    nube.contraste.ventanas.lock().unwrap().insert(
+        "Comandas".into(),
+        ("SELECT * FROM \"Comandas\" WHERE Fecha_Hora_Apertura >= ?1;".into(), vec![json!(DESDE)]),
+    );
+    *nube.contraste.claves_por_pagina.lock().unwrap() = 7;
+    // A la nube le falta una vieja y le sobran dos que aquí no están.
+    nube.contraste
+        .sembrar(
+            "DELETE FROM Comandas WHERE ID_Comanda = 'c-vieja-0013';
+             INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES
+               ('c-vieja-9998', 'BARRA', '2020-02-01 12:00:00', 'Pagada'),
+               ('c-vieja-9999', 'BARRA', '2020-02-01 12:00:00', 'Pagada');",
+        )
+        .await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+
+    assert_eq!(r.descuadres, vec![descuadre("Comandas", 1, 2, 0)]);
+    assert_eq!((r.reparadas, r.borradas, r.aplazado), (1, 2, false));
+    let paginas = nube.pedidas().iter().filter(|p| *p == "/v1/sync/verificar/claves").count();
+    assert_eq!(paginas, 15, "101 comandas de 7 en 7");
+    let sube = reparaciones(&repo).await;
+    assert!(sube[0].args.contains(&json!("c-vieja-0013")));
+    assert_eq!(sube[1].args, vec![json!("c-vieja-9998")]);
+    assert_eq!(sube[2].args, vec![json!("c-vieja-9999")]);
+
+    subir_reparaciones(&repo, &nube).await;
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+    assert_eq!(r.descuadres, vec![]);
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn sin_ventana_se_comparan_los_conteos_y_las_claves() {
+    // Un negocio cuya ventana no cabe en lo que la nube resume de una vez.
+    let (repo, db, dir, nube) = negocio_igual("sin-ventana").await;
+    *nube.contraste.ventana_omitida.lock().unwrap() = true;
+    tres_diferencias(&nube).await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+
+    // Lo distinto no se ve sin la ventana; lo que falta y lo que sobra, sí.
+    let mut descuadres = r.descuadres.clone();
+    descuadres.sort_by(|a, b| a.tabla.cmp(&b.tabla));
+    assert_eq!(descuadres, vec![descuadre("Mesas", 1, 0, 0), descuadre("Zonas", 0, 1, 0)]);
+    assert_eq!((r.reparadas, r.borradas, r.ventana_omitida), (1, 1, true));
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn con_un_fallo_de_bajada_se_ve_todo_y_no_se_toca_nada() {
+    // AUD-18: lo que aquí falta puede ser lo que creó el cambio que no se pudo aplicar, y lo que
+    // sobra aquí, lo que borró. Ni se borra, ni se sube, ni se pisa.
+    let (repo, db, dir, nube) = negocio_igual("fallo").await;
+    tres_diferencias(&nube).await;
+    sembrar(
+        &db,
+        "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,
+           First_Failed_At_Ms, Last_Failed_At_Ms) VALUES ('op-x', 38, '[]', 5, 1, 1, 1);",
+    )
+    .await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+
+    assert_eq!(r.descuadres.len(), 2, "se ve y se informa: {:?}", r.descuadres);
+    assert_eq!((r.reparadas, r.borradas, r.aplazado), (0, 0, true), "...pero no se toca");
+    assert!(reparaciones(&repo).await.is_empty());
+
+    // Resuelto el fallo, la pasada siguiente sí repara.
+    sembrar(&db, "DELETE FROM _Sync_Failed;").await;
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+    assert_eq!((r.reparadas, r.borradas, r.aplazado), (2, 1, false));
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn con_la_reparacion_apagada_se_compara_y_se_informa_pero_no_se_toca_nada() {
+    let (repo, db, dir, nube) = negocio_igual("apagada").await;
+    tres_diferencias(&nube).await;
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), false).await.unwrap());
+
+    assert_eq!(r.descuadres.len(), 2);
+    assert_eq!((r.reparadas, r.borradas, r.aplazado), (0, 0, true));
+    assert!(reparaciones(&repo).await.is_empty());
+    assert_eq!(nube.contraste.informes.lock().unwrap()[0]["reparacion_apagada"], json!(true));
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn con_algo_por_subir_no_se_pide_nada() {
+    let (repo, db, dir, nube) = negocio_igual("por-subir").await;
+    sembrar(
+        &db,
+        "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-1', 'main_op', '[]', 1);",
+    )
+    .await;
+
+    let pasada = uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap();
+
+    assert!(matches!(pasada, Contraste::Aplazado), "{pasada:?}");
+    assert!(nube.pedidas().is_empty());
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn si_la_nube_dice_que_ahora_no_se_aplaza_sin_informar() {
+    let (repo, db, dir, nube) = negocio_igual("ocupada").await;
+    tres_diferencias(&nube).await;
+
+    // El negocio está escribiendo.
+    *nube.contraste.ocupada.lock().unwrap() = true;
+    let pasada = uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap();
+    assert!(matches!(pasada, Contraste::Aplazado), "{pasada:?}");
+
+    // O hay un cambio de una Handy que esta Main todavía no ha aplicado.
+    *nube.contraste.ocupada.lock().unwrap() = false;
+    *nube.contraste.ultimo_ajeno.lock().unwrap() = 41;
+    let pasada = uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap();
+    assert!(matches!(pasada, Contraste::Aplazado), "{pasada:?}");
+
+    assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar/resumen", "/v1/sync/verificar/resumen"]);
+    assert!(reparaciones(&repo).await.is_empty());
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn si_la_nube_se_mueve_entre_el_resumen_y_las_filas_no_se_toca_nada() {
+    let (repo, db, dir, nube) = negocio_igual("se-mueve").await;
+    tres_diferencias(&nube).await;
+    *nube.contraste.hasta_seq_de_las_paginas.lock().unwrap() = Some(46);
+
+    let pasada = uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap();
+
+    assert!(matches!(pasada, Contraste::Aplazado), "{pasada:?}");
+    assert!(reparaciones(&repo).await.is_empty());
+    assert!(!nube.pedidas().contains(&"/v1/sync/salud".to_string()), "lo de una foto movida no se informa");
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn una_sentencia_de_la_nube_que_no_es_una_lectura_no_se_ejecuta() {
+    let (repo, db, dir, nube) = negocio_igual("no-lectura").await;
+    tres_diferencias(&nube).await;
+    nube.contraste.sentencia_mandada.lock().unwrap().extend([
+        ("Zonas".to_string(), "DELETE FROM Zonas;".to_string()),
+        ("Mesas".to_string(), "WITH x AS (SELECT 1) DELETE FROM Mesas;".to_string()),
+        ("Productos".to_string(), "SELECT * FROM Productos; DELETE FROM Productos;".to_string()),
+    ]);
+
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
+
+    let mut sin_comparar = r.tablas_sin_comparar.clone();
+    sin_comparar.sort();
+    assert_eq!(sin_comparar, vec!["Mesas", "Productos", "Zonas"]);
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas;").await, 3, "aquí no se ha borrado nada");
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM Mesas;").await, 3);
+    assert_eq!(numero(&db, "SELECT COUNT(*) FROM Productos;").await, 2);
+    assert!(reparaciones(&repo).await.is_empty(), "de lo que no se compara no se repara nada");
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn si_las_filas_de_un_cubo_no_son_las_del_resumen_esa_tabla_no_se_repara() {
+    let (repo, db, dir, nube) = negocio_igual("cubo-ajeno").await;
+    tres_diferencias(&nube).await;
+    // La nube contesta las filas de las mesas con algo que no es lo que resumió (una escritura que
+    // no pasó por el log): no se compara con ello.
+    let resumen = nube.contraste.resumen_para(40).await;
+    nube.contraste.sembrar("UPDATE Mesas SET Capacidad = 9 WHERE ID_Mesa = 'm1';").await;
+    let marca = repo.contraste_marca().await.unwrap();
+
+    let ContrasteLocal::Hecho(r) =
+        repo.contrastar_con_la_nube(resumen, marca, &Paginas(&nube.contraste), true).await.unwrap()
+    else {
+        panic!("se tenía que comparar");
+    };
+
+    assert!(r.tablas_sin_comparar.contains(&"Mesas".to_string()), "{:?}", r.tablas_sin_comparar);
+    let sube = reparaciones(&repo).await;
+    assert!(!sube.iter().any(|s| s.sql.contains("\"Mesas\"")), "{sube:?}");
+
+    nube.cerrar().await;
+    cerrar(db, dir).await;
 }
 
 // ── La nube de un negocio con tres cierres de caja, dos de ellos fuera de la ventana ──────────
@@ -173,30 +573,25 @@ fn pagina_del_historico() -> JsonValue {
     })
 }
 
-/// Lo que contesta la nube a un contraste: tres cierres, y sus claves si se las piden.
-fn la_nube_contesta_al_contraste(nube: &Nube) {
-    nube.responde(
-        "/v1/sync/verificar",
-        json!({
-            "conteos": [{ "nombre": "Cierres_Caja", "filas": 3 }],
-            "ventana": [], "ventana_omitida": false, "desde": "", "hasta_seq": 40,
-        }),
-    );
-    nube.responde(
-        "/v1/sync/verificar-claves",
-        json!({ "tablas": [{
-            "nombre": "Cierres_Caja", "columnas": ["ID_Cierre"],
-            "claves": [["cierre-de-marzo"], ["cierre-de-abril"], ["cierre-de-ayer"]],
-            "truncada": false,
-        }] }),
-    );
-    nube.responde("/v1/sync/salud", json!({ "ok": true }));
+/// La base de la nube: los tres cierres, con el log en 40.
+async fn la_nube_de_los_tres_cierres(nombre: &str) -> Nube {
+    let nube = Nube::nueva(nombre).await;
+    nube.contraste
+        .sembrar(
+            "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde) VALUES
+               ('cierre-de-marzo', '2026-03-31 02:00:00', NULL),
+               ('cierre-de-abril', '2026-04-30 02:00:00', '2026-03-31 02:00:00'),
+               ('cierre-de-ayer', '2026-11-12 02:00:00', '2026-04-30 02:00:00');",
+        )
+        .await;
+    *nube.contraste.hasta_seq.lock().unwrap() = 40;
+    nube
 }
 
 #[tokio::test]
 async fn recien_recuperada_el_contraste_no_borra_de_la_nube_lo_que_el_historico_no_ha_traido() {
     let (repo, db, dir) = base("historico").await;
-    let nube = Nube::default();
+    let nube = la_nube_de_los_tres_cierres("historico").await;
 
     // Fase 1 de la recuperación: entra la ventana y el checkpoint queda en el `Seq` de la foto.
     nube.responde("/v1/sync/bootstrap", volcado_de_la_fase_1());
@@ -207,10 +602,9 @@ async fn recien_recuperada_el_contraste_no_borra_de_la_nube_lo_que_el_historico_
 
     // El contraste, con el histórico a medias: los dos cierres antiguos «sobran» arriba y el
     // checkpoint alcanza la foto. No se pide nada a la nube ni sale nada hacia ella.
-    la_nube_contesta_al_contraste(&nube);
     let pasada = uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap();
     assert!(matches!(pasada, Contraste::HistoricoPendiente), "{pasada:?}");
-    assert_eq!(nube.pedidas(), vec!["/v1/sync/bootstrap"], "ni la foto ni las claves");
+    assert_eq!(nube.pedidas(), vec!["/v1/sync/bootstrap"], "ni el resumen ni las filas");
     assert!(reparaciones(&repo).await.is_empty(), "ningún borrado sube a la nube");
 
     // Fase 2: el backfill trae los cierres antiguos y la cola queda vacía.
@@ -220,40 +614,37 @@ async fn recien_recuperada_el_contraste_no_borra_de_la_nube_lo_que_el_historico_
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Cierres_Caja;").await, 3);
 
     // Ahora sí se contrasta, y cuadra: no hay nada que borrar ni que subir.
-    let r = uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true)
-        .await
-        .unwrap()
-        .hecho()
-        .expect("con el histórico completo se compara");
+    let r = hecho(uc_sync::verificar_contra_la_nube(&nube, repo.as_ref(), true).await.unwrap());
     assert!(r.descuadres.is_empty(), "{:?}", r.descuadres);
     assert_eq!((r.reparadas, r.borradas, r.aplazado), (0, 0, false));
     assert!(reparaciones(&repo).await.is_empty());
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
 
 #[tokio::test]
 async fn aunque_se_llegue_a_comparar_con_el_historico_a_medias_no_se_borra_arriba() {
     // La segunda guarda, por si el contraste llega al repositorio con la cola del backfill sin
-    // vaciar (otro camino que no sea el caso de uso): `puede_borrar_arriba` dice que no.
+    // vaciar (otro camino que no sea el caso de uso): la guarda del repositorio dice que no.
     let (repo, db, dir) = base("historico-repo").await;
-    let nube = Nube::default();
+    let nube = la_nube_de_los_tres_cierres("historico-repo").await;
     nube.responde("/v1/sync/bootstrap", volcado_de_la_fase_1());
     uc_sync::bootstrap_desde_nube(&nube, repo.as_ref()).await.unwrap();
 
-    let claves: tpv_contracts::sync::VerificacionClaves = serde_json::from_value(json!({ "tablas": [{
-        "nombre": "Cierres_Caja", "columnas": ["ID_Cierre"],
-        "claves": [["cierre-de-marzo"], ["cierre-de-abril"], ["cierre-de-ayer"]],
-        "truncada": false,
-    }] }))
-    .unwrap();
-    let (descuadres, reparadas, borradas, aplazado) =
-        SyncRepository::contrastar_claves(repo.as_ref(), claves, 40, true).await.unwrap();
+    let marca = repo.contraste_marca().await.unwrap();
+    let resumen = nube.contraste.resumen_para(marca.checkpoint).await;
+    let ContrasteLocal::Hecho(r) =
+        repo.contrastar_con_la_nube(resumen, marca, &Paginas(&nube.contraste), true).await.unwrap()
+    else {
+        panic!("se tenía que comparar");
+    };
 
-    assert_eq!(descuadres[0].sobran, 2, "se ve lo que falta por bajar");
-    assert_eq!((reparadas, borradas, aplazado), (0, 0, true));
+    assert_eq!(r.descuadres, vec![descuadre("Cierres_Caja", 0, 2, 0)], "se ve lo que falta por bajar");
+    assert_eq!((r.reparadas, r.borradas, r.aplazado), (0, 0, true));
     assert!(reparaciones(&repo).await.is_empty());
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
 
@@ -288,31 +679,28 @@ async fn main_al_dia(db: &Arc<Db>, ultima_escritura_ms: i64) {
     .await;
 }
 
-/// La caja se cierra en `ms`: el cierre y la escritura que lo deja.
-async fn cerrar_la_caja(db: &Arc<Db>, ms: i64) {
+/// La caja se cierra en `ms`: el cierre y la escritura que lo deja. Devuelve el cierre, para
+/// ponerlo también en la nube.
+async fn cerrar_la_caja(db: &Arc<Db>, ms: i64) -> String {
+    let cierre = format!(
+        "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde) VALUES ('cierre-{ms}', '{}', '{}');",
+        hora_local(ms),
+        hora_local(ms - 12 * HORA),
+    );
     sembrar(
         db,
-        &format!(
-            "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde) VALUES ('cierre-{ms}', '{}', '{}');
-             INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-cierre-{ms}', 0, {ms});",
-            hora_local(ms),
-            hora_local(ms - 12 * HORA),
-        ),
+        &format!("{cierre}\nINSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-cierre-{ms}', 0, {ms});"),
     )
     .await;
+    cierre
 }
 
-/// La nube contesta a un contraste que cuadra: la zona de la Main, con `hasta_seq`.
-fn la_nube_cuadra(nube: &Nube, hasta_seq: i64) {
-    nube.responde(
-        "/v1/sync/verificar",
-        json!({
-            "conteos": [{ "nombre": "Zonas", "filas": 1 }],
-            "ventana": [{ "nombre": "Zonas", "columnas": ["ID_Zona", "Nombre_Zona"], "filas": [["z1", "Terraza"]] }],
-            "ventana_omitida": false, "desde": "", "hasta_seq": hasta_seq,
-        }),
-    );
-    nube.responde("/v1/sync/salud", json!({ "ok": true }));
+/// La nube de la Main de `main_al_dia`: la misma zona, con el log en 40.
+async fn la_nube_cuadra(nombre: &str) -> Nube {
+    let nube = Nube::nueva(nombre).await;
+    nube.contraste.sembrar("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');").await;
+    *nube.contraste.hasta_seq.lock().unwrap() = 40;
+    nube
 }
 
 async fn vuelta(
@@ -328,11 +716,12 @@ async fn vuelta(
 async fn tras_el_cierre_de_caja_contrasta_en_cuanto_hay_calma_y_no_vuelve_a_hacerlo_sin_motivo() {
     let (repo, db, dir) = base("horario-cierre").await;
     let estado = SqliteVerificacionNube::new(db.clone());
-    let nube = Nube::default();
+    let nube = la_nube_cuadra("horario-cierre").await;
     main_al_dia(&db, MEDIODIA - 3 * HORA).await;
     // Una pasada buena hace tres horas, para que el único motivo sea el cierre.
     estado.anotar(IntentoVerificacion::Hecha, MEDIODIA - 3 * HORA).await.unwrap();
-    cerrar_la_caja(&db, MEDIODIA).await;
+    let cierre = cerrar_la_caja(&db, MEDIODIA).await;
+    nube.contraste.sembrar(&cierre).await;
 
     // A los 4 min del cierre todavía no hay motivo; a los 7 hay motivo pero no calma. Nada sale.
     for (minutos, espera) in [(4, Espera::SinMotivo), (7, Espera::ActividadReciente), (14, Espera::ActividadReciente)] {
@@ -342,11 +731,10 @@ async fn tras_el_cierre_de_caja_contrasta_en_cuanto_hay_calma_y_no_vuelve_a_hace
     assert!(nube.pedidas().is_empty(), "mientras no toca no se pide nada a la nube");
 
     // Al cuarto de hora de la última escritura, contrasta.
-    la_nube_cuadra(&nube, 40);
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 16 * MIN)).await.unwrap();
     let Vuelta::Hecha(r) = v else { panic!("tenía que contrastar: {v:?}") };
-    assert!(r.descuadres.is_empty());
-    assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar", "/v1/sync/salud"]);
+    assert!(r.descuadres.is_empty(), "{:?}", r.descuadres);
+    assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar/resumen", "/v1/sync/salud"]);
     assert_eq!(estado.situacion(i64::MAX).await.unwrap().ultima_ok_ms, Some(MEDIODIA + 16 * MIN));
 
     // Y hasta que haya otro cierre o pasen veinte horas, no vuelve a pedir nada.
@@ -357,10 +745,10 @@ async fn tras_el_cierre_de_caja_contrasta_en_cuanto_hay_calma_y_no_vuelve_a_hace
     assert_eq!(nube.pedidas().len(), 2);
 
     // A las veinte horas, otra vez.
-    la_nube_cuadra(&nube, 40);
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 16 * MIN + 20 * HORA)).await.unwrap();
     assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
 
@@ -368,7 +756,7 @@ async fn tras_el_cierre_de_caja_contrasta_en_cuanto_hay_calma_y_no_vuelve_a_hace
 async fn con_algo_pendiente_de_subir_o_recien_arrancada_no_contrasta() {
     let (repo, db, dir) = base("horario-ocupada").await;
     let estado = SqliteVerificacionNube::new(db.clone());
-    let nube = Nube::default();
+    let nube = la_nube_cuadra("horario-ocupada").await;
     main_al_dia(&db, MEDIODIA - 3 * HORA).await;
 
     // Nunca se ha contrastado, así que toca; pero la aplicación lleva dos minutos arrancada.
@@ -393,6 +781,7 @@ async fn con_algo_pendiente_de_subir_o_recien_arrancada_no_contrasta() {
     assert!(nube.pedidas().is_empty());
     assert_eq!(estado.situacion(i64::MAX).await.unwrap().ultimo_intento_ms, None, "no ha habido ningún intento");
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
 
@@ -401,7 +790,7 @@ async fn con_el_historico_a_medias_el_horario_ni_lo_intenta() {
     // VERIF-01, visto desde el job: recién recuperada, por mucho que lleve sin contrastar.
     let (repo, db, dir) = base("horario-historico").await;
     let estado = SqliteVerificacionNube::new(db.clone());
-    let nube = Nube::default();
+    let nube = la_nube_de_los_tres_cierres("horario-historico").await;
     nube.responde("/v1/sync/bootstrap", volcado_de_la_fase_1());
     uc_sync::bootstrap_desde_nube(&nube, repo.as_ref()).await.unwrap();
 
@@ -409,6 +798,7 @@ async fn con_el_historico_a_medias_el_horario_ni_lo_intenta() {
     assert!(matches!(v, Vuelta::NoToca(Espera::HistoricoPendiente)), "{v:?}");
     assert_eq!(nube.pedidas(), vec!["/v1/sync/bootstrap"]);
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
 
@@ -416,10 +806,11 @@ async fn con_el_historico_a_medias_el_horario_ni_lo_intenta() {
 async fn un_fallo_de_la_nube_espera_su_propia_escalera() {
     let (repo, db, dir) = base("horario-fallo").await;
     let estado = SqliteVerificacionNube::new(db.clone());
-    let nube = Nube::default();
+    let nube = la_nube_cuadra("horario-fallo").await;
     main_al_dia(&db, MEDIODIA - 3 * HORA).await;
 
-    // La nube no contesta (el doble no tiene respuesta preparada): el intento falla y se anota.
+    // La nube no contesta: el intento falla y se anota.
+    *nube.caida.lock().unwrap() = true;
     assert!(vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.is_err());
     let s = estado.situacion(i64::MAX).await.unwrap();
     assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(MEDIODIA), 1));
@@ -439,34 +830,32 @@ async fn un_fallo_de_la_nube_espera_su_propia_escalera() {
     assert!(matches!(v, Vuelta::NoToca(Espera::Reintento)), "{v:?}");
 
     // Y cuando contesta, la cuenta vuelve a cero.
-    la_nube_cuadra(&nube, 40);
+    *nube.caida.lock().unwrap() = false;
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 30 * MIN + 60 * MIN)).await.unwrap();
     assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
     let s = estado.situacion(i64::MAX).await.unwrap();
     assert_eq!((s.ultima_ok_ms, s.fallos), (Some(MEDIODIA + 90 * MIN), 0));
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
 
 #[tokio::test]
-async fn si_la_foto_va_por_delante_no_se_compara_y_se_reintenta_a_los_diez_minutos() {
+async fn si_la_nube_va_por_delante_no_se_compara_y_se_reintenta_a_los_diez_minutos() {
     let (repo, db, dir) = base("horario-foto").await;
     let estado = SqliteVerificacionNube::new(db.clone());
-    let nube = Nube::default();
+    let nube = la_nube_cuadra("horario-foto").await;
     main_al_dia(&db, MEDIODIA - 3 * HORA).await;
 
     // La nube tiene una zona que una Handy acaba de crear (Seq 41) y que aquí aún no ha bajado.
-    // Comparar diría que sobra arriba; lo que pasa es que está de camino.
-    nube.responde(
-        "/v1/sync/verificar",
-        json!({
-            "conteos": [{ "nombre": "Zonas", "filas": 2 }],
-            "ventana": [], "ventana_omitida": false, "desde": "", "hasta_seq": 41,
-        }),
-    );
+    // Comparar diría que sobra arriba; lo que pasa es que está de camino. La nube lo ve (el
+    // checkpoint de la Main no llega a ese cambio ajeno) y dice que ahora no.
+    nube.contraste.sembrar("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-handy', 'Barra');").await;
+    *nube.contraste.hasta_seq.lock().unwrap() = 41;
+    *nube.contraste.ultimo_ajeno.lock().unwrap() = 41;
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.unwrap();
     assert!(matches!(v, Vuelta::Aplazada), "{v:?}");
-    assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar"], "ni las claves ni el informe");
+    assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar/resumen"], "ni filas ni informe");
     assert!(reparaciones(&repo).await.is_empty());
     let s = estado.situacion(i64::MAX).await.unwrap();
     assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(MEDIODIA), 0), "no es un fallo");
@@ -480,18 +869,11 @@ async fn si_la_foto_va_por_delante_no_se_compara_y_se_reintenta_a_los_diez_minut
          UPDATE _Sync_State SET Last_Seq = 41 WHERE Id = 1;",
     )
     .await;
-    nube.responde(
-        "/v1/sync/verificar",
-        json!({
-            "conteos": [{ "nombre": "Zonas", "filas": 2 }],
-            "ventana": [], "ventana_omitida": false, "desde": "", "hasta_seq": 41,
-        }),
-    );
-    nube.responde("/v1/sync/salud", json!({ "ok": true }));
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 10 * MIN)).await.unwrap();
     let Vuelta::Hecha(r) = v else { panic!("tenía que contrastar: {v:?}") };
     assert!(r.descuadres.is_empty(), "{:?}", r.descuadres);
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
 
@@ -502,7 +884,7 @@ async fn una_escritura_hecha_con_el_reloj_adelantado_no_deja_al_contraste_sin_co
     // días, por muy parado que estuviera el bar.
     let (repo, db, dir) = base("horario-reloj").await;
     let estado = SqliteVerificacionNube::new(db.clone());
-    let nube = Nube::default();
+    let nube = la_nube_cuadra("horario-reloj").await;
     main_al_dia(&db, MEDIODIA - 3 * HORA).await;
     sembrar(
         &db,
@@ -526,10 +908,10 @@ async fn una_escritura_hecha_con_el_reloj_adelantado_no_deja_al_contraste_sin_co
     assert!(matches!(v, Vuelta::NoToca(Espera::ActividadReciente)), "{v:?}");
 
     // Y pasada la calma, contrasta, con la fila adelantada todavía ahí.
-    la_nube_cuadra(&nube, 40);
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 20 * MIN)).await.unwrap();
     assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
 
@@ -537,7 +919,7 @@ async fn una_escritura_hecha_con_el_reloj_adelantado_no_deja_al_contraste_sin_co
 async fn a_las_48_horas_bastan_cinco_minutos_de_calma() {
     let (repo, db, dir) = base("horario-48h").await;
     let estado = SqliteVerificacionNube::new(db.clone());
-    let nube = Nube::default();
+    let nube = la_nube_cuadra("horario-48h").await;
     main_al_dia(&db, MEDIODIA - 6 * MIN).await;
 
     // Con la última pasada hace 47 h, seis minutos sin escribir no bastan.
@@ -547,9 +929,9 @@ async fn a_las_48_horas_bastan_cinco_minutos_de_calma() {
 
     // Hace 48 h, sí.
     estado.anotar(IntentoVerificacion::Hecha, MEDIODIA - 48 * HORA).await.unwrap();
-    la_nube_cuadra(&nube, 40);
     let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.unwrap();
     assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
 
+    nube.cerrar().await;
     cerrar(db, dir).await;
 }
