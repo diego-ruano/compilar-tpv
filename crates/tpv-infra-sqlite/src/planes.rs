@@ -104,15 +104,18 @@ mod tests {
         sin_recorridos("caja_movimientos::registrar", crate::caja_movimientos::SQL_REGISTRAR).await;
     }
 
-    /// La estadística de productos lee los cobros del rango y, de cada uno, sus líneas: lo que
-    /// tarda crece con el rango pedido, no con el histórico. Recorre el catálogo (a propósito: el
-    /// peor producto es el que no ha vendido nada) y sus propios resultados intermedios.
+    /// La estadística de productos lee los días cerrados del resumen diario y, de los cobros, sólo
+    /// los de hoy y los de los días que sigan sucios, cada uno con sus líneas: lo que tarda no crece
+    /// con el histórico. Recorre el catálogo (a propósito: el peor producto es el que no ha vendido
+    /// nada) y sus propios resultados intermedios.
     #[tokio::test]
     async fn la_estadistica_de_productos_solo_lee_los_cobros_del_rango() {
         let sql = crate::stats::sql_productos(tpv_contracts::stats::StatsRange::Anio);
         let p = plan(&sql).await;
 
         for (tabla, entrada) in [
+            ("_Estad_Producto_Dia", "SEARCH e USING INDEX idx_estad_producto_dia (Dia>? AND Dia<?)"),
+            ("_Estad_Dias_Sucios", "SEARCH s USING PRIMARY KEY (Dia>? AND Dia<?)"),
             ("Pagos", "SEARCH p USING INDEX idx_pagos_estado_fecha (Estado=? AND Fecha_Hora>? AND Fecha_Hora<?)"),
             ("Pago_Detalles", "SEARCH pd USING COVERING INDEX sqlite_autoindex_Pago_Detalles_1 (ID_Pago=?)"),
             ("Detalle_Comanda", "SEARCH dc USING INDEX sqlite_autoindex_Detalle_Comanda_1 (ID_Detalle=?)"),
@@ -124,8 +127,9 @@ mod tests {
             .filter(|l| ["SCAN p", "SCAN pd", "SCAN dc"].iter().any(|t| *l == t || l.starts_with(&format!("{t} "))))
             .collect();
         assert!(recorridos.is_empty(), "recorre el histórico en {recorridos:?}\nplan completo: {p:#?}");
-        // `paid_det` se calcula una vez: en toda la sentencia sólo se entra una vez a los cobros.
-        assert_eq!(p.iter().filter(|l| l.starts_with("SEARCH p ")).count(), 1, "{p:#?}");
+        // A los cobros se entra dos veces, las dos por su fecha: por los días que sigan sucios y por
+        // lo de hoy (`paid_det`, que se calcula una vez).
+        assert_eq!(p.iter().filter(|l| l.starts_with("SEARCH p ")).count(), 2, "{p:#?}");
     }
 
     /// Saber quién es recurrente obliga a mirar los cobros de toda la historia, pero una vez: `allp`
