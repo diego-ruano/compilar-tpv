@@ -33,6 +33,8 @@ pub mod tareas;
 pub mod ticket;
 pub mod trabajadores;
 pub mod venta_rapida;
+/// Cuándo se contrasta la base local con la nube (VERIF-02): una regla pura.
+pub mod verificacion_nube;
 /// Veri*factu (FISCAL-01): huella, importes, QR, NIF. Puro y con los vectores oficiales.
 pub mod verifactu;
 

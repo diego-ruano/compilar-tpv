@@ -118,6 +118,10 @@ rol ya cambiados). Antes de tomar el escritor se guarda la base entera, outbox i
 - **El contraste con la nube tampoco corre mientras falte histórico** (VERIF-01): lo que queda por
   bajar le parecería sobrante de la nube y lo borraría arriba, con sus cascadas, antes de que la
   fase 2 lo trajera ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)).
+  Lo que recuerda de sus pasadas (`_Verificacion_Nube`) es estado local: reconstruir desde la nube
+  no lo toca, y una copia local trae el de cuando se hizo. En los dos casos vuelve a contrastar,
+  con el histórico ya completo, en el primer momento tranquilo que le toque
+  ([jobs-e-interruptores.md](jobs-e-interruptores.md#cuándo-se-contrasta-con-la-nube-verif-02)).
 
 ## Desde una copia local
 

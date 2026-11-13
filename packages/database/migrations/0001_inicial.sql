@@ -1939,6 +1939,22 @@ CREATE TABLE IF NOT EXISTS _Backfill_Historico (
     Ultimo_Error TEXT
 );
 
+-- VERIF-02: lo que el contraste con la nube (job `verificar_nube`) recuerda de sus pasadas. Con
+-- ello decide cuando toca la siguiente (`tpv_domain::verificacion_nube::cuando_verificar`): tras
+-- un cierre de caja o a las veinte horas de la ultima pasada buena, y solo en un momento tranquilo.
+--   Ultima_Ok_Ms       la ultima pasada que llego a comparar.
+--   Ultimo_Intento_Ms  el ultimo intento, acabara como acabara.
+--   Fallos             intentos fallidos seguidos: marcan cuanto espera el siguiente.
+-- `_Jobs_State` no sirve para esto: su Last_Ok_Ms dice cuando corrio el job, y este job corre cada
+-- cuarto de hora para mirar si toca. Estado local, escrito por raw(): no se replica.
+CREATE TABLE IF NOT EXISTS _Verificacion_Nube (
+    Id INTEGER PRIMARY KEY CHECK (Id = 1),
+    Ultima_Ok_Ms INTEGER,
+    Ultimo_Intento_Ms INTEGER,
+    Fallos INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO _Verificacion_Nube (Id, Fallos) VALUES (1, 0);
+
 -- FISCAL-01 (Veri*factu): estado del envio a la AEAT.
 --
 -- Es estado LOCAL del equipo y NO SE REPLICA A PROPOSITO. Tras una restauracion la verdad

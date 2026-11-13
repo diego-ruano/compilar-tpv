@@ -87,7 +87,9 @@ El rol Encargado y sus concesiones iniciales nacen de `0001`, igual en Main y Wo
 
 `_Sync_Outbox`, `_Sync_Applied_Ops`, `_Sync_State`, `_Sync_Failed`, `_Sync_Encoladas`, `_Jobs_State`,
 `_Verifactu_Envios`, `_Verifactu_Flujo`, `_Verifactu_Anomalias` (sin uso en esta rama: son de la
-remisión a la AEAT, ver [verifactu.md](verifactu.md)), `_Recovery_State`, `_Backfill_Historico` y
+remisión a la AEAT, ver [verifactu.md](verifactu.md)), `_Recovery_State`, `_Backfill_Historico`,
+`_Verificacion_Nube` (cuándo se contrastó con la nube por última vez,
+[jobs-e-interruptores.md](jobs-e-interruptores.md#cuándo-se-contrasta-con-la-nube-verif-02)) y
 `_Negocio` (de qué negocio es la base) describen **este equipo**, se escriben por `raw()` y no se replican. Que se creen
 también, vacías, en la base del tenant es deliberado: hay un único esquema, y el volcado de
 recuperación descarta todo lo que empieza por `_`.

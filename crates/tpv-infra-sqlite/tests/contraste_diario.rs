@@ -4,25 +4,34 @@
 //! VERIF-01 · Una Main recién recuperada de la nube tiene la ventana de la fase 1 y el checkpoint
 //! en el `Seq` de esa foto: por el marcapáginas está al día, y le falta todo el histórico que la
 //! fase 2 todavía no ha bajado. El contraste no puede leer eso como «la nube tiene filas de más».
+//!
+//! VERIF-02 · El horario: lo que hace cada vuelta del job (`use_cases::verificacion_nube`) con la
+//! regla de `tpv_domain::verificacion_nube`, el estado en `_Verificacion_Nube` y el contraste de
+//! verdad. La hora la pone el test.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use chrono::TimeZone;
 use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::licensing::{PairingService, ResultadoSubidaImagen};
 use tpv_application::ports::sync::SyncRepository;
+use tpv_application::ports::verificacion_nube::{IntentoVerificacion, VerificacionNubeRepository};
 use tpv_application::use_cases::sync::{self as uc_sync, Contraste};
+use tpv_application::use_cases::verificacion_nube::{self as uc_verificacion, Momento, Vuelta};
 use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceFirmarEmparejamientoArgs, DeviceIdentity, FirmaDispositivo,
     PairCreateResult,
 };
 use tpv_contracts::sync::SqlStatement;
+use tpv_domain::verificacion_nube::Espera;
 use tpv_infra_sqlite::db::Db;
 use tpv_infra_sqlite::sync::SqliteSyncRepository;
+use tpv_infra_sqlite::verificacion_nube::SqliteVerificacionNube;
 
 // ── Dobles ────────────────────────────────────────────────────────────────────
 
@@ -107,6 +116,12 @@ async fn cerrar(db: Arc<Db>, dir: PathBuf) {
     let _ = db.cerrar().await;
     drop(db);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Estado de partida: por `raw()`, que no deja nada en el outbox.
+async fn sembrar(db: &Arc<Db>, sql: &str) {
+    let w = db.write().await;
+    w.raw().execute_batch(sql).await.unwrap();
 }
 
 async fn numero(db: &Arc<Db>, sql: &str) -> i64 {
@@ -238,6 +253,265 @@ async fn aunque_se_llegue_a_comparar_con_el_historico_a_medias_no_se_borra_arrib
     assert_eq!(descuadres[0].sobran, 2, "se ve lo que falta por bajar");
     assert_eq!((reparadas, borradas, aplazado), (0, 0, true));
     assert!(reparaciones(&repo).await.is_empty());
+
+    cerrar(db, dir).await;
+}
+
+// ── VERIF-02: el horario del contraste, con la regla, el estado y el contraste de verdad ─────────
+
+const MIN: i64 = 60 * 1000;
+const HORA: i64 = 60 * MIN;
+
+/// Un mediodía de invierno (hora UTC): lejos de un cambio de horario en cualquier zona.
+const MEDIODIA: i64 = 1_768_478_400_000;
+
+/// Una Main operativa, arrancada hace una hora, en el instante `ahora_ms`.
+fn momento(ahora_ms: i64) -> Momento {
+    Momento { ahora_ms, desde_el_arranque_ms: HORA, main_operativa: true }
+}
+
+/// La hora local que la base guardaría para ese instante.
+fn hora_local(ms: i64) -> String {
+    chrono::Local.timestamp_millis_opt(ms).unwrap().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Una Main con una zona, el checkpoint en 40 y la última escritura en `ultima_escritura_ms`.
+async fn main_al_dia(db: &Arc<Db>, ultima_escritura_ms: i64) {
+    sembrar(
+        db,
+        &format!(
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');
+             UPDATE _Sync_State SET Last_Seq = 40 WHERE Id = 1;
+             INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-vieja', 40, {ultima_escritura_ms});"
+        ),
+    )
+    .await;
+}
+
+/// La caja se cierra en `ms`: el cierre y la escritura que lo deja.
+async fn cerrar_la_caja(db: &Arc<Db>, ms: i64) {
+    sembrar(
+        db,
+        &format!(
+            "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde) VALUES ('cierre-{ms}', '{}', '{}');
+             INSERT INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES ('op-cierre-{ms}', 0, {ms});",
+            hora_local(ms),
+            hora_local(ms - 12 * HORA),
+        ),
+    )
+    .await;
+}
+
+/// La nube contesta a un contraste que cuadra: la zona de la Main, con `hasta_seq`.
+fn la_nube_cuadra(nube: &Nube, hasta_seq: i64) {
+    nube.responde(
+        "/v1/sync/verificar",
+        json!({
+            "conteos": [{ "nombre": "Zonas", "filas": 1 }],
+            "ventana": [{ "nombre": "Zonas", "columnas": ["ID_Zona", "Nombre_Zona"], "filas": [["z1", "Terraza"]] }],
+            "ventana_omitida": false, "desde": "", "hasta_seq": hasta_seq,
+        }),
+    );
+    nube.responde("/v1/sync/salud", json!({ "ok": true }));
+}
+
+async fn vuelta(
+    nube: &Nube,
+    repo: &SqliteSyncRepository,
+    estado: &SqliteVerificacionNube,
+    m: Momento,
+) -> AppResult<Vuelta> {
+    uc_verificacion::verificar_si_toca(nube, repo, estado, m, true).await
+}
+
+#[tokio::test]
+async fn tras_el_cierre_de_caja_contrasta_en_cuanto_hay_calma_y_no_vuelve_a_hacerlo_sin_motivo() {
+    let (repo, db, dir) = base("horario-cierre").await;
+    let estado = SqliteVerificacionNube::new(db.clone());
+    let nube = Nube::default();
+    main_al_dia(&db, MEDIODIA - 3 * HORA).await;
+    // Una pasada buena hace tres horas, para que el único motivo sea el cierre.
+    estado.anotar(IntentoVerificacion::Hecha, MEDIODIA - 3 * HORA).await.unwrap();
+    cerrar_la_caja(&db, MEDIODIA).await;
+
+    // A los 4 min del cierre todavía no hay motivo; a los 7 hay motivo pero no calma. Nada sale.
+    for (minutos, espera) in [(4, Espera::SinMotivo), (7, Espera::ActividadReciente), (14, Espera::ActividadReciente)] {
+        let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + minutos * MIN)).await.unwrap();
+        assert!(matches!(v, Vuelta::NoToca(e) if e == espera), "a los {minutos} min: {v:?}");
+    }
+    assert!(nube.pedidas().is_empty(), "mientras no toca no se pide nada a la nube");
+
+    // Al cuarto de hora de la última escritura, contrasta.
+    la_nube_cuadra(&nube, 40);
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 16 * MIN)).await.unwrap();
+    let Vuelta::Hecha(r) = v else { panic!("tenía que contrastar: {v:?}") };
+    assert!(r.descuadres.is_empty());
+    assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar", "/v1/sync/salud"]);
+    assert_eq!(estado.situacion().await.unwrap().ultima_ok_ms, Some(MEDIODIA + 16 * MIN));
+
+    // Y hasta que haya otro cierre o pasen veinte horas, no vuelve a pedir nada.
+    for horas in [1, 10, 19] {
+        let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + horas * HORA)).await.unwrap();
+        assert!(matches!(v, Vuelta::NoToca(Espera::SinMotivo)), "a las {horas} h: {v:?}");
+    }
+    assert_eq!(nube.pedidas().len(), 2);
+
+    // A las veinte horas, otra vez.
+    la_nube_cuadra(&nube, 40);
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 16 * MIN + 20 * HORA)).await.unwrap();
+    assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
+
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn con_algo_pendiente_de_subir_o_recien_arrancada_no_contrasta() {
+    let (repo, db, dir) = base("horario-ocupada").await;
+    let estado = SqliteVerificacionNube::new(db.clone());
+    let nube = Nube::default();
+    main_al_dia(&db, MEDIODIA - 3 * HORA).await;
+
+    // Nunca se ha contrastado, así que toca; pero la aplicación lleva dos minutos arrancada.
+    let recien = Momento { desde_el_arranque_ms: 2 * MIN, ..momento(MEDIODIA) };
+    let v = vuelta(&nube, &repo, &estado, recien).await.unwrap();
+    assert!(matches!(v, Vuelta::NoToca(Espera::ArranqueReciente)), "{v:?}");
+
+    // Con una operación sin subir tampoco.
+    sembrar(
+        &db,
+        "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-1', 'main_op', '[]', 1);",
+    )
+    .await;
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.unwrap();
+    assert!(matches!(v, Vuelta::NoToca(Espera::SubidaPendiente)), "{v:?}");
+
+    // Ni sin estar operativa (una recuperación en curso).
+    let recuperando = Momento { main_operativa: false, ..momento(MEDIODIA) };
+    let v = vuelta(&nube, &repo, &estado, recuperando).await.unwrap();
+    assert!(matches!(v, Vuelta::NoToca(Espera::NoOperativa)), "{v:?}");
+
+    assert!(nube.pedidas().is_empty());
+    assert_eq!(estado.situacion().await.unwrap().ultimo_intento_ms, None, "no ha habido ningún intento");
+
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn con_el_historico_a_medias_el_horario_ni_lo_intenta() {
+    // VERIF-01, visto desde el job: recién recuperada, por mucho que lleve sin contrastar.
+    let (repo, db, dir) = base("horario-historico").await;
+    let estado = SqliteVerificacionNube::new(db.clone());
+    let nube = Nube::default();
+    nube.responde("/v1/sync/bootstrap", volcado_de_la_fase_1());
+    uc_sync::bootstrap_desde_nube(&nube, repo.as_ref()).await.unwrap();
+
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 30 * 24 * HORA)).await.unwrap();
+    assert!(matches!(v, Vuelta::NoToca(Espera::HistoricoPendiente)), "{v:?}");
+    assert_eq!(nube.pedidas(), vec!["/v1/sync/bootstrap"]);
+
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn un_fallo_de_la_nube_espera_su_propia_escalera() {
+    let (repo, db, dir) = base("horario-fallo").await;
+    let estado = SqliteVerificacionNube::new(db.clone());
+    let nube = Nube::default();
+    main_al_dia(&db, MEDIODIA - 3 * HORA).await;
+
+    // La nube no contesta (el doble no tiene respuesta preparada): el intento falla y se anota.
+    assert!(vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.is_err());
+    let s = estado.situacion().await.unwrap();
+    assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(MEDIODIA), 1));
+    assert_eq!(nube.pedidas().len(), 1);
+
+    // Las vueltas siguientes (el motor vuelve al minuto, y luego cada cuarto de hora) no piden nada.
+    for minutos in [1, 15, 29] {
+        let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + minutos * MIN)).await.unwrap();
+        assert!(matches!(v, Vuelta::NoToca(Espera::Reintento)), "a los {minutos} min: {v:?}");
+    }
+    assert_eq!(nube.pedidas().len(), 1, "no se martillea a una nube caída");
+
+    // A la media hora se reintenta; si vuelve a fallar, la espera siguiente es de una hora.
+    assert!(vuelta(&nube, &repo, &estado, momento(MEDIODIA + 30 * MIN)).await.is_err());
+    assert_eq!(estado.situacion().await.unwrap().fallos, 2);
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 30 * MIN + 59 * MIN)).await.unwrap();
+    assert!(matches!(v, Vuelta::NoToca(Espera::Reintento)), "{v:?}");
+
+    // Y cuando contesta, la cuenta vuelve a cero.
+    la_nube_cuadra(&nube, 40);
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 30 * MIN + 60 * MIN)).await.unwrap();
+    assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
+    let s = estado.situacion().await.unwrap();
+    assert_eq!((s.ultima_ok_ms, s.fallos), (Some(MEDIODIA + 90 * MIN), 0));
+
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn si_la_foto_va_por_delante_no_se_compara_y_se_reintenta_a_los_diez_minutos() {
+    let (repo, db, dir) = base("horario-foto").await;
+    let estado = SqliteVerificacionNube::new(db.clone());
+    let nube = Nube::default();
+    main_al_dia(&db, MEDIODIA - 3 * HORA).await;
+
+    // La nube tiene una zona que una Handy acaba de crear (Seq 41) y que aquí aún no ha bajado.
+    // Comparar diría que sobra arriba; lo que pasa es que está de camino.
+    nube.responde(
+        "/v1/sync/verificar",
+        json!({
+            "conteos": [{ "nombre": "Zonas", "filas": 2 }],
+            "ventana": [], "ventana_omitida": false, "desde": "", "hasta_seq": 41,
+        }),
+    );
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.unwrap();
+    assert!(matches!(v, Vuelta::Aplazada), "{v:?}");
+    assert_eq!(nube.pedidas(), vec!["/v1/sync/verificar"], "ni las claves ni el informe");
+    assert!(reparaciones(&repo).await.is_empty());
+    let s = estado.situacion().await.unwrap();
+    assert_eq!((s.ultima_ok_ms, s.ultimo_intento_ms, s.fallos), (None, Some(MEDIODIA), 0), "no es un fallo");
+
+    // A los 9 min todavía espera; a los 10, con el cambio ya bajado, contrasta y cuadra.
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 9 * MIN)).await.unwrap();
+    assert!(matches!(v, Vuelta::NoToca(Espera::Reintento)), "{v:?}");
+    sembrar(
+        &db,
+        "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z-handy', 'Barra');
+         UPDATE _Sync_State SET Last_Seq = 41 WHERE Id = 1;",
+    )
+    .await;
+    nube.responde(
+        "/v1/sync/verificar",
+        json!({
+            "conteos": [{ "nombre": "Zonas", "filas": 2 }],
+            "ventana": [], "ventana_omitida": false, "desde": "", "hasta_seq": 41,
+        }),
+    );
+    nube.responde("/v1/sync/salud", json!({ "ok": true }));
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA + 10 * MIN)).await.unwrap();
+    let Vuelta::Hecha(r) = v else { panic!("tenía que contrastar: {v:?}") };
+    assert!(r.descuadres.is_empty(), "{:?}", r.descuadres);
+
+    cerrar(db, dir).await;
+}
+
+#[tokio::test]
+async fn a_las_48_horas_bastan_cinco_minutos_de_calma() {
+    let (repo, db, dir) = base("horario-48h").await;
+    let estado = SqliteVerificacionNube::new(db.clone());
+    let nube = Nube::default();
+    main_al_dia(&db, MEDIODIA - 6 * MIN).await;
+
+    // Con la última pasada hace 47 h, seis minutos sin escribir no bastan.
+    estado.anotar(IntentoVerificacion::Hecha, MEDIODIA - 47 * HORA).await.unwrap();
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.unwrap();
+    assert!(matches!(v, Vuelta::NoToca(Espera::ActividadReciente)), "{v:?}");
+
+    // Hace 48 h, sí.
+    estado.anotar(IntentoVerificacion::Hecha, MEDIODIA - 48 * HORA).await.unwrap();
+    la_nube_cuadra(&nube, 40);
+    let v = vuelta(&nube, &repo, &estado, momento(MEDIODIA)).await.unwrap();
+    assert!(matches!(v, Vuelta::Hecha(_)), "{v:?}");
 
     cerrar(db, dir).await;
 }

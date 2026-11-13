@@ -54,9 +54,33 @@ un fallo parcial.
 | `reconciliacion` | 24 h | 10 min | MainOperativa | — | Comprueba el stock por lote y el stock suelto de cada producto contra sus movimientos y consumos, y el gasto por cliente contra sus cobros, y avisa; se calla con el histórico a medias |
 | `backup_local` | 24 h | 5 min | MainOperativa | — | Copia diaria y purga de restos ([recuperacion.md](recuperacion.md)) |
 | `backfill_historico` | 5 min | 3 min | MainOperativa | `backfill_historico` | Fase 2 de la recuperación |
-| `verificar_nube` | 24 h | 10 min | MainOperativa | (`reparacion_nube` dentro) | Contraste con la nube y reparación ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)); no corre con el histórico a medias |
+| `verificar_nube` | 15 min | 10 min | MainOperativa | (`reparacion_nube` dentro) | Mira si toca contrastar con la nube y, si toca, contrasta y repara ([sincronizacion.md](sincronizacion.md#reparar-una-divergencia-sync-22-sync-24-sync-25)). Cuándo toca lo decide su propia regla ([abajo](#cuándo-se-contrasta-con-la-nube-verif-02)); casi todas las vueltas acaban en «no toca» |
 | `cifrado_pii` | 6 h | 60 s | MainOperativa | `cifrado_pii` | Cifra la PII del personal que siga en claro |
 | `updater` (sólo escritorio) | 6 h | 30 s | Siempre | — | Comprueba el feed de actualizaciones y avisa |
+
+### Cuándo se contrasta con la nube (VERIF-02)
+
+El contraste baja la ventana de 30 días del negocio y la compara fila a fila: no es trabajo para la
+apertura del bar, que es cuando vence cualquier job diario de un TPV que se apaga por la noche. Por
+eso no va a intervalo fijo: el job vence cada cuarto de hora y pregunta a una regla pura
+(`tpv_domain::verificacion_nube::cuando_verificar`, con su tabla de casos) si toca; si no toca,
+devuelve `Ok` sin pedir nada a la nube. Lo orquesta `use_cases/verificacion_nube.rs`.
+
+| | |
+|---|---|
+| **Hay un motivo** | Un cierre de caja sin reabrir posterior a la última pasada buena, hecho hace al menos 5 min; o 20 h desde la última pasada buena (o ninguna todavía) |
+| **Es un momento tranquilo** | Main operativa; sin histórico por bajar (VERIF-01); nada pendiente de subir (el outbox sin lo apartado) ni un cambio de la nube detenido (un fallo de bajada sin cuarentena); 10 min desde que arrancó la aplicación; 15 min sin ninguna escritura (la última fila de `_Sync_Applied_Ops`: una operación de aquí o un cambio aplicado de la nube) |
+| **Máximo** | A las 48 h de la última pasada buena bastan 5 min sin escrituras. Lo demás no se relaja: con algo pendiente de subir o con el histórico a medias no se contrasta nunca |
+| **Tras un fallo** | Espera propia, no la del motor: 30 min, 1 h, 2 h, 4 h y 6 h. El intento que falla devuelve `Err` (sale en el panel); las vueltas de en medio son «no toca» |
+| **Foto por delante** | Si la foto de la nube llega con un `hasta_seq` mayor que el checkpoint local, no se compara: se reintenta a los 10 min |
+
+Lo que recuerda entre vueltas va en `_Verificacion_Nube` (`0001_inicial.sql` §16; `Ultima_Ok_Ms`,
+`Ultimo_Intento_Ms`, `Fallos`), estado local escrito por `raw()`
+(`infra-sqlite/src/verificacion_nube.rs`). `_Jobs_State` sigue diciendo cuándo corrió el job, que
+aquí es cuándo se miró por última vez, no cuándo se contrastó.
+
+Una marca guardada que cae en el futuro (alguien ha atrasado el reloj) no se cree: la de una pasada
+cuenta como si no existiera y la de la última escritura, como recién hecha.
 
 ### Qué no va aquí
 

@@ -310,6 +310,15 @@ pub async fn verificar_contra_la_nube(
     )
     .await?;
 
+    // VERIF-02 · La foto va por delante de lo que ha bajado esta Main: algo de lo que trae está
+    // todavía de camino (una Handy acaba de escribir, o el catch-up no ha terminado). Compararla
+    // daría por descuadre lo que se arregla solo en cuanto llegue, y no se podría tocar nada
+    // arriba (`puede_borrar_arriba`). No se compara ni se informa: quien llama lo reintenta en
+    // unos minutos. Con un worker que no manda `hasta_seq` (0) se compara, y no se toca nada.
+    if foto.hasta_seq > repo.get_checkpoint().await? {
+        return Ok(Contraste::FotoPorDelante);
+    }
+
     // Se guarda ANTES de ceder la foto: es lo que decide si se puede borrar arriba.
     let hasta_seq = foto.hasta_seq;
     let mut resultado = repo.contrastar_con_la_nube(foto, reparar).await?;
@@ -373,6 +382,8 @@ pub enum Contraste {
     Hecho(ResultadoVerificacion),
     /// VERIF-01 · No se ha pedido nada a la nube: el histórico todavía se está descargando.
     HistoricoPendiente,
+    /// VERIF-02 · La foto de la nube iba por delante del checkpoint local: no se ha comparado.
+    FotoPorDelante,
 }
 
 impl Contraste {
@@ -380,7 +391,7 @@ impl Contraste {
     pub fn hecho(self) -> Option<ResultadoVerificacion> {
         match self {
             Contraste::Hecho(r) => Some(r),
-            Contraste::HistoricoPendiente => None,
+            Contraste::HistoricoPendiente | Contraste::FotoPorDelante => None,
         }
     }
 }

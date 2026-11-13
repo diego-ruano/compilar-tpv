@@ -107,7 +107,8 @@ pánico. Los mutex síncronos del buffer y del instante nunca se retienen al esp
   (`sin_comentarios_iniciales` → `is_write_sql`), y lo que sube va sin ellos. Un `WITH … INSERT` no se
   reconoce como escritura; si alguna vez hace falta, hay que enseñárselo a `is_write_sql`.
 - **Lo que es estado local del equipo va por `raw()`**: `_Jobs_State`, `_Sync_*`, `_Verifactu_*`,
-  `_Backfill_Historico`, `_Recovery_State`, `_Negocio`, el backfill. Por `execute()` se replicaría a la nube.
+  `_Backfill_Historico`, `_Recovery_State`, `_Verificacion_Nube`, `_Negocio`, el backfill. Por
+  `execute()` se replicaría a la nube.
 - **Lo que sube tiene que caber en el SQLite del DO**, que admite 100 parámetros y 100 KB por
   sentencia ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Una lista de
   tamaño variable (las líneas de un cobro, las mesas de una zona, los asignados a una tarea) va
@@ -488,6 +489,13 @@ que la Main. Se repara **por estado**, nunca reintentando la sentencia:
 - **El contraste diario** (job `verificar_nube`, `/v1/sync/verificar` y `/verificar-claves`) compara la
   ventana de 30 días de la nube con la base local, repara e informa a Axiom (`tenant_salud_sync`), no al
   usuario. La comparación tolera las dos formas de escribir un número (`2.5` y `"2.50"`).
+- **Corre tras un cierre de caja o a las veinte horas de la última pasada, y sólo en un momento
+  tranquilo** (VERIF-02): sin nada pendiente de subir ni un cambio de la nube detenido, y con un
+  cuarto de hora sin escrituras. La regla y sus plazos están en
+  [jobs-e-interruptores.md](jobs-e-interruptores.md#cuándo-se-contrasta-con-la-nube-verif-02).
+- **Si la foto llega por delante de lo que ha bajado esta Main no se compara** (su `hasta_seq` es
+  mayor que el checkpoint local): no se piden las claves ni se informa, y se reintenta a los diez
+  minutos. Compararla sólo serviría para ver como descuadre lo que todavía está de camino.
 - **Nada se toca si esta Main no puede afirmar que está al día**: su checkpoint tiene que alcanzar el
   `Seq` de la foto (leído después de las filas), no puede haber **ninguna fila en `_Sync_Failed`**,
   ni en cuarentena ni pendiente de reintentar (`hay_fallos_de_bajada`), y no puede quedar histórico
