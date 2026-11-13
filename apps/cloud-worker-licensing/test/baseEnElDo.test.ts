@@ -30,6 +30,9 @@ const LINEA = (id: string, comanda: string) => ({
 });
 const DEFER = "PRAGMA defer_foreign_keys = ON;";
 
+/** La base central de un negocio que todavía no ha nacido: ninguna licencia suya se ha activado. */
+const SIN_LICENCIAS = { execute: async () => ({ rows: [] }) } as any;
+
 describe("esquema", () => {
 	it("se crea una vez, queda registrado y migrar otra vez no hace nada", async () => {
 		await enElHub("base-esquema", async (hub) => {
@@ -133,9 +136,9 @@ describe("las lecturas del Worker van por RPC al DO", () => {
 			status: 404,
 		});
 
-		const primera = await provisionTenantDatabase(null as any, env as any, tenantId);
+		const primera = await provisionTenantDatabase(SIN_LICENCIAS, env as any, tenantId);
 		expect(primera.reused).toBe(false);
-		const segunda = await provisionTenantDatabase(null as any, env as any, tenantId);
+		const segunda = await provisionTenantDatabase(SIN_LICENCIAS, env as any, tenantId);
 		expect(segunda.reused).toBe(true);
 
 		const rs = await db.execute({ sql: "SELECT ID_Usuario, Email FROM Usuarios;", args: [] });
@@ -156,7 +159,7 @@ describe("las lecturas del Worker van por RPC al DO", () => {
 
 	it("un error de SQL llega al Worker con su mensaje", async () => {
 		const tenantId = "t-base-rpc-error";
-		await provisionTenantDatabase(null as any, env as any, tenantId);
+		await provisionTenantDatabase(SIN_LICENCIAS, env as any, tenantId);
 		const db = clienteDelHub(env as any, tenantId);
 		await expect(db.execute("SELECT * FROM Tabla_Que_No_Existe;")).rejects.toThrow(/no such table/);
 	});

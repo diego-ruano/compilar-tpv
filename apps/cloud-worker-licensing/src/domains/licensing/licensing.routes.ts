@@ -48,6 +48,7 @@ import {
 } from "../../server/licenseStore";
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 import { avisarCambioDeLicencia } from "../../lib/hub";
+import { avisarBasePerdida, esBasePerdida } from "../../lib/basePerdida";
 import { pasaElLimitador } from "../../lib/limitador";
 import { ipDeLaPeticion } from "../pairing/pairing.avisos";
 import { cuerpo, topeAnonimo } from "../../lib/validacion";
@@ -109,6 +110,42 @@ function estaCaducada(lic: LicenseRow, nowMs: number): boolean {
 /** ¿La licencia está anulada? */
 function estaAnulada(lic: LicenseRow): boolean {
 	return lic.status === "revoked" || toBool01(lic.disabled);
+}
+
+/**
+ * La base del negocio que se activa: se crea si el negocio nace con esta activación, y tiene que
+ * estar si ya nació (`provisionTenantDatabase`). Devuelve el rechazo, o `null` si la base está.
+ *
+ * DO-PERDIDA · Si el negocio ya nació y su base no está, `tenant_db_perdida` (503) y un aviso: no
+ * se crea una base vacía en su lugar. Cualquier otro fallo es el de siempre,
+ * `tenant_db_provision_failed`.
+ */
+async function baseDelNegocio(
+	c: Context<{ Bindings: Env }>,
+	db: ReturnType<typeof getDb>,
+	tenantId: string,
+	deviceId: string,
+): Promise<Response | null> {
+	try {
+		await provisionTenantDatabase(db, c.env, tenantId);
+		return null;
+	} catch (e: any) {
+		if (esBasePerdida(e)) {
+			const aviso = avisarBasePerdida(c.env, { tenant_id: tenantId, device_id: deviceId, donde: "license.activate" });
+			try {
+				c.executionCtx.waitUntil(aviso);
+			} catch {
+				void aviso;
+			}
+			return c.json({ ok: false, error: "tenant_db_perdida" } satisfies ApiError, 503);
+		}
+		capturarError(e, "license.provision");
+		const detalle = String(e?.message || e);
+		// Al log (visible con `wrangler tail`): el detalle es la clave para diagnosticar. A la
+		// respuesta no va (FABLE-B): es el texto crudo del error.
+		console.error("[activate] tenant_db_provision_failed:", detalle);
+		return c.json({ ok: false, error: "tenant_db_provision_failed" } satisfies ApiError, 500);
+	}
 }
 
 /**
@@ -479,6 +516,22 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		}
 	}
 
+	// ── DO-PERDIDA · Una licencia ya activada tiene su base ─────────────────
+	//
+	// El negocio de esta licencia ya nació, así que su base tiene que estar. Se mira aquí, antes de
+	// gastar el código del traslado y de tocar la fila del equipo: si la base no está, el rechazo no
+	// deja nada hecho. Y no se crea una vacía en su lugar, que es lo que hacía esta ruta al llegar al
+	// alta de la base: el equipo nuevo de un traslado se habría traído una nube en blanco.
+	//
+	// Un traslado que llega sin código todavía no va a hacer nada (justo debajo se le pide el
+	// código): la base se mira cuando vuelva con él.
+	const pideElCodigo = esCambioDeEquipo && !deviceChangeCode;
+	const baseComprobada = !esPrimeraActivacion && !!lic.tenant_id && !pideElCodigo;
+	if (baseComprobada) {
+		const sinBase = await baseDelNegocio(c, db, lic.tenant_id!, deviceId);
+		if (sinBase) return sinBase;
+	}
+
 	// ── Cambio de equipo: exige el OTP del email ──────────────────────────
 	if (esCambioDeEquipo) {
 		if (!deviceChangeCode) {
@@ -605,15 +658,10 @@ licenseRoutes.post("/activate", filtroExterior, exigirFirma, cuerpo(activarSchem
 		throw e;
 	}
 
-	try {
-		await provisionTenantDatabase(db, env, tenantId);
-	} catch (e: any) {
-		capturarError(e, "license.provision");
-		const detalle = String(e?.message || e);
-		// Al log (visible con `wrangler tail`): el detalle es la clave para diagnosticar. A la
-		// respuesta no va (FABLE-B): es el texto crudo del error.
-		console.error("[activate] tenant_db_provision_failed:", detalle);
-		return c.json({ ok: false, error: "tenant_db_provision_failed" } satisfies ApiError, 500);
+	// La base del negocio que nace. La de uno que ya nació se ha comprobado arriba.
+	if (!baseComprobada) {
+		const sinBase = await baseDelNegocio(c, db, tenantId, deviceId);
+		if (sinBase) return sinBase;
 	}
 
 	await upsertTenantInfo(db, tenantId, {

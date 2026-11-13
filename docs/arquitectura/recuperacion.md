@@ -120,6 +120,12 @@ podría entrar en la foto y volver luego por el catch-up). No pagina: una foto a
   todas. La respuesta va de los bytes a su tipo (`use_cases::sync::pedir`), sin un
   `serde_json::Value` intermedio que la tenga dos veces en memoria. Una respuesta que no llega
   entera es un fallo de conexión, no un volcado vacío.
+- **Si la nube no tiene la base del negocio**, la pantalla sólo ofrece crearla vacía con
+  `tenant_db_not_provisioned`, que es lo que recibe un negocio que no ha nacido
+  (`/v1/sync/initialize-empty`, que lo vuelve a comprobar). Uno que ya nació recibe
+  `tenant_db_perdida` y no se le ofrece nada: su base está en otro objeto o se ha perdido, y una vacía
+  en su lugar dejaría al negocio con la nube en blanco
+  ([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)).
 
 `bootstrap_restaurar` reemplaza las tablas en una transacción, filtra nombres de tabla y columna
 contra `sqlite_master` y contra `[A-Za-z0-9_]` (se interpolan en el SQL), informa de las tablas que

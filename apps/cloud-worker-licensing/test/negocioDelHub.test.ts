@@ -18,11 +18,18 @@
 //     llamada que se lo diga (la que despierta una alarma).
 
 import { env as entorno } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { enElHub } from "./helpers/hub";
 import { negocioApuntado } from "../src/durableObjects/tenantHub.negocio";
 import type { ApplyParams, IdentidadDelWorker } from "../src/durableObjects/tenantHub.rpc";
+
+// Una ruta que se encuentra sin base pregunta a la base central si el negocio ha nacido
+// (`lib/basePerdida.ts`). Aquí ninguno lo ha hecho: no hay licencias.
+vi.mock("../src/server/db", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/server/db")>();
+	return { ...original, getDb: () => ({ execute: async () => ({ rows: [] }) }) };
+});
 
 const env = entorno as any;
 const stub = (nombre: string) => env.TenantHub.get(env.TenantHub.idFromName(nombre));

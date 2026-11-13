@@ -19,7 +19,7 @@ import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant
 import { alHub } from "../../lib/enElHub";
 import { gzipSiSeAcepta } from "../../lib/gzip";
 import { getDb } from "../../server/db";
-import { negocioAprovisionado, provisionTenantDatabase } from "../licensing/licensing.helpers";
+import { provisionTenantDatabase } from "../licensing/licensing.helpers";
 import {
 	TRANSACCIONALES,
 	esTablaDeNegocio,
@@ -496,21 +496,25 @@ syncRoutes.post("/historico", cuerpoTolerante(historicoSchema), async (c) => {
 });
 
 // POST /v1/sync/initialize-empty
-// Única salida válida cuando el propio servidor confirma que no existe base del tenant. La acción
-// es explícita desde la UI y jamás se usa como fallback de un timeout, un 500 o una migración rota.
+// Crea la base de un negocio que no la tiene **y que no ha nacido**. La acción es explícita desde
+// la UI y jamás se usa como fallback de un timeout, un 500 o una migración rota.
+//
+// DO-PERDIDA: que el objeto esté vacío no basta. Si alguna licencia del negocio llegó a activarse,
+// su base existió y no está donde se la busca: `provisionTenantDatabase` lanza
+// `tenant_db_perdida` y aquí no se crea nada (`lib/basePerdida.ts`). Como la activación crea la
+// base antes de apuntar la licencia, eso es lo que encuentra cualquier equipo que llega con su
+// token; la ruta queda para un negocio cuya licencia no conste como activada.
 //
 // Corre dentro del TenantHub del negocio, como todo este router: la base se mira y se crea con el
 // DO de al lado (`hubLocal`), no llamando por RPC al mismo objeto que está atendiendo la petición.
 syncRoutes.post("/initialize-empty", async (c) => {
-	const tenantId = c.get("tenantId");
-	if (await negocioAprovisionado(c.env, tenantId)) {
+	const { reused } = await provisionTenantDatabase(getDb(c.env), c.env, c.get("tenantId"));
+	if (reused) {
 		return c.json(
 			{ ok: false, code: "conflict", error: "tenant_db_already_provisioned" },
 			409,
 		);
 	}
-
-	await provisionTenantDatabase(getDb(c.env), c.env, tenantId);
 	return c.json({ ok: true });
 });
 

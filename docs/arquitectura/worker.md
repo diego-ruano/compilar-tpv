@@ -147,7 +147,28 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   esa marca SQLite lo deshace dentro de cada una. La Main hace lo mismo (`sql_productos` y `sql_clientes_recurrentes`,
   en `tpv-infra-sqlite/src/stats.rs`), el arnés de lectura fija que las dos dan el mismo resultado y
   el plan de las dos sentencias tiene su test en cada lado.
-- Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).
+- **Un objeto sin base no dice por qué lo está** (DO-PERDIDA, `lib/basePerdida.ts`): el negocio no
+  ha nacido todavía, o su base está en otro objeto (el despliegue apunta a otro espacio de nombres o
+  a otra jurisdicción) o se ha perdido. Lo distingue la base central, sin cambiar su esquema: un
+  negocio nace al activarse su primera licencia, y la activación crea la base **antes** de apuntar la
+  licencia (`activateLicenseFirstTime` es lo único que escribe `activated_at_ms`). Así que una
+  licencia suya con `activated_at_ms` prueba que su base existió. Lo que sale de ahí:
+  - una ruta autenticada que se encuentra sin base contesta `tenant_db_not_provisioned` (404) si el
+    negocio no ha nacido y `tenant_db_perdida` (503, `external`) si ya nació (`app.onError`), con un
+    aviso a Sentry y a Axiom, uno cada diez minutos por negocio e isolate. Sólo con lo primero ofrece
+    la Main crear una base vacía, y un equipo con licencia ya no se lo encuentra: su activación creó
+    la base;
+  - una base sólo se crea para un negocio que no ha nacido (`provisionTenantDatabase`, por donde
+    pasan la activación y `/v1/sync/initialize-empty`). La activación de uno que ya nació (el mismo
+    equipo que vuelve o el nuevo de un traslado) mira que su base esté antes de gastar el código y de
+    tocar la fila del equipo, y no crea una vacía en su lugar;
+  - si la base central no contesta, no se sabe: 500, y no se crea ni se ofrece nada;
+  - el socket de la Main no pasa por aquí: su `apply` sigue recibiendo `tenant_db_not_provisioned`,
+    que para su outbox es pasajero.
+
+  Otro camino que activara una licencia tendría que crear antes la base. Lo cubre
+  `test/basePerdida.test.ts`; lo que queda sin salida, en
+  [DO-PERDIDA](../pendientes.md#do-perdida--un-negocio-que-se-queda-sin-su-base-en-la-nube-no-tiene-salida-sin-soporte).
 - **Sin jurisdicción, con pista de Europa occidental** (`JURISDICCION_DO` vacía y
   `UBICACION_DO = "weur"` en `wrangler.json`): los DO del negocio (`TenantHub` y `AgendaWeb`) se
   piden en Europa occidental, para que nazcan ahí aunque quien los llame primero esté en otro sitio,

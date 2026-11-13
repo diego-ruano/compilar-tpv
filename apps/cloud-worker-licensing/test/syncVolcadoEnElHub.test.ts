@@ -124,18 +124,21 @@ describe("los volcados de sync, dentro del TenantHub", () => {
 
 	it("sin base, la fase 1 lo dice con su código por los dos caminos", async () => {
 		// Es lo que la pantalla de recuperación necesita para ofrecer «empezar de cero»
-		// (`tenant_db_not_provisioned`): no un 500 del lector en bruto, que pide la base al motor.
+		// (`tenant_db_not_provisioned`): no un 500 del lector en bruto, que pide la base al motor. Lo
+		// recibe un negocio que no ha nacido; el que ya nació, `test/basePerdida.test.ts`.
 		await conNegocioFirmado(
 			deps,
 			"volcado-hub-sin-base",
 			async (n) => {
+				n.enCentral(`UPDATE licenses SET activated_at_ms = NULL WHERE tenant_id = ?;`, n.tenantId);
 				for (const opciones of [{ cabeceras: AHORA }, EN_EL_WORKER]) {
 					const res = await pedirFirmado(deps, app, n, "/v1/sync/bootstrap", opciones);
 					expect(res.status).toBe(404);
 					expect(await res.json()).toMatchObject({ ok: false, code: "tenant_db_not_provisioned" });
 				}
 			},
-			{ sinBase: true },
+			// La ruta pregunta a la base central desde dentro del TenantHub: va en su mismo objeto.
+			{ sinBase: true, centralEnElNegocio: true },
 		);
 	});
 });

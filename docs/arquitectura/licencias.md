@@ -231,6 +231,15 @@ AND status = 'issued'`): si otro equipo ganó la carrera, contesta `device_repla
 es que otro la canjeó mientras éste aprovisionaba su base, `license_already_used` (AUD-07). La base
 aprovisionada para el perdedor se queda vacía.
 
+**La base va antes que la licencia, y sólo para un negocio que no ha nacido** (DO-PERDIDA). Una
+licencia con `activated_at_ms` es la prueba de que la base de su negocio existió, y con eso se
+distingue un objeto vacío porque el negocio no ha nacido de uno que ha perdido su base
+([worker.md](worker.md#la-base-del-negocio-dentro-de-su-tenanthub)). Por eso
+`activateLicenseFirstTime` va después de aprovisionar, y otro camino que activara una licencia
+tendría que hacer lo mismo. Al volver el mismo equipo a su licencia, o en un traslado con su código,
+la base se mira antes de gastar el código y de tocar la fila del equipo: si falta, `tenant_db_perdida`
+(503) sin hacer nada, y no se crea una vacía en su lugar.
+
 **En un equipo que era de otro negocio** (AUD-06). Con la licencia anulada o trasladada, el equipo ya
 no tiene una licencia viva a la que sumar tiempo, así que una clave sin estrenar abre un negocio
 nuevo; pero su base local es la del anterior. Si el equipo era la Main (`role = 'tpv'`) de otro

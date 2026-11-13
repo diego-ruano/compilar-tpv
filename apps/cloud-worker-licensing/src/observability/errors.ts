@@ -6,10 +6,15 @@ import { HubError } from "../lib/errorHttp";
 
 /**
  * Los 503 que no se mandan a Sentry desde donde se contestan: no hay Main, o es una avería de la que
- * ya avisó quien la vio, una vez (`MotorTenantHub.avisarUnaVez`), y que a partir de ahí repite cada
- * petición del negocio.
+ * ya avisó quien la vio, una vez (`MotorTenantHub.avisarUnaVez`, `avisarBasePerdida`), y que a partir
+ * de ahí repite cada petición del negocio.
  */
-const NO_DISPONIBLE_YA_AVISADO: ReadonlySet<string> = new Set(["main_offline", "tenant_db_migration_failed"]);
+const NO_DISPONIBLE_YA_AVISADO: ReadonlySet<string> = new Set([
+	"main_offline",
+	"tenant_db_migration_failed",
+	// DO-PERDIDA: de la base que falta avisa `avisarBasePerdida`, una vez cada diez minutos.
+	"tenant_db_perdida",
+]);
 
 export function esRechazoEsperado(error: unknown): boolean {
 	if (error instanceof HTTPException) return error.status >= 400 && error.status < 500;
