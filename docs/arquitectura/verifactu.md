@@ -300,9 +300,9 @@ RI-29), marcada COPIA. El orden completo del ticket está en [tickets.md](ticket
   frente a quien factura) y `Descripcion_Op` (texto fijo, por defecto «Servicios de hosteleria y
   restauracion», hasta 500 caracteres). Sin NIF válido o sin razón social no se cobra.
   `config_patch_business_settings` exige Administrador, así que el aviso de que faltan sale después
-  del login (`AvisoFiscalMontado`) y lleva a Configuración → Negocio. `useEstadoFiscal` arranca con
-  `datosFiscalesCompletos = true` para no sacar el aviso en una Handy (donde el comando falla) ni
-  antes de la primera respuesta.
+  del login (`AvisoFiscalMontado`) y lleva a Configuración → Negocio. `useEstadoFiscal` lo pregunta
+  al entrar y cada dos minutos, sólo en la Main, y arranca con `datosFiscalesCompletos = true` para
+  no sacar el aviso antes de la primera respuesta.
 - **Productor** (quien hace el TPV): las constantes `PRODUCTOR_NOMBRE_RAZON`, `PRODUCTOR_NIF`,
   `PRODUCTOR_NOMBRE_SISTEMA` y `PRODUCTOR_ID_SISTEMA` de `lib.rs`, más la versión de
   `tauri.conf.json` y el `tenant_id` como `NumeroInstalacion`. Se inyectan en `setup()`; la
@@ -321,8 +321,13 @@ del que sigue la cadena; el resto llega en la fase 2.
 
 No cobra (`cobro_solo_en_main`), así que no emite registros. El worker veta además cualquier
 escritura a `Registros_Facturacion` y `Serie_Facturacion` (`lib/hub.ts`, `TABLAS_SOLO_MAIN`;
-`test/fiscalSoloMain.test.ts`): el número correlativo y la cadena tienen un único escritor. En la
-Handy el estado fiscal falla sin consecuencias.
+`test/fiscalSoloMain.test.ts`): el número correlativo y la cadena tienen un único escritor.
+
+La Handy no pregunta el estado fiscal ni saca el aviso de los datos que faltan: `useEstadoFiscal`
+y `AvisoFiscalMontado` miran el modo del equipo (un escritorio también puede ser una Handy). Si
+aun así se pide algo que sólo existe en la Main —los registros de facturación, el ticket de un
+cobro, los pedidos a proveedores—, Rust contesta `conflict` con «…sólo … en el TPV principal»
+(`AppState::base_de_la_main`), que es una respuesta esperada y no va a Sentry.
 
 ---
 

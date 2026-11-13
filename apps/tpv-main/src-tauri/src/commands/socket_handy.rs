@@ -11,5 +11,5 @@ pub fn handy_socket_estado(app: AppHandle) -> EstadoSocketHandy {
 #[tauri::command]
 #[specta::specta]
 pub fn handy_socket_reintentar(app: AppHandle, forzar: bool) {
-    app.state::<crate::socket_handy::HandyNativo>().reintentar(forzar);
+    app.state::<crate::socket_handy::HandyNativo>().reintentar(&app, forzar);
 }

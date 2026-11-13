@@ -5,6 +5,25 @@ use crate::error::{AppError, AppResult};
 use super::avisos_nube::aviso;
 
 pub const GRACIA_MS: u64 = 5_000;
+/// Plazo del `pong` al comprobar la conexión cuando la aplicación vuelve a primer plano.
+pub const PLAZO_PONG_MS: u64 = 3_000;
+/// El latido del transporte va cada 30 s. Un último `pong` más viejo que esto dice que el latido
+/// anterior se quedó sin respuesta o que el equipo ha estado suspendido: no hace falta otro ping
+/// para saber que hay que reconectar.
+pub const PONG_CADUCADO_MS: u64 = 35_000;
+
+/// Qué hace el servicio cuando la aplicación vuelve a primer plano, vuelve la red o alguien pulsa
+/// «Reintentar» (INC-20261030-019).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlVolver {
+    /// La nube ha rechazado a este equipo: volver a primer plano no lo arregla.
+    Nada,
+    /// La conexión parece viva: se manda un ping y sólo se reconecta si su `pong` no llega en
+    /// [`PLAZO_PONG_MS`]. Cortarla sin más es pedir otro ticket, saludar de nuevo y releerlo todo.
+    Comprobar,
+    /// Se suelta la sesión que haya y se conecta ya.
+    Reconectar,
+}
 
 pub struct PresenciaHandy {
     pub foto: EstadoSocketHandy,
@@ -72,6 +91,25 @@ impl PresenciaHandy {
         self.foto.volcando = volcando;
         self.foto.rechazo = None;
         self.vence_gracia = None;
+    }
+
+    /// Qué hacer al volver a primer plano. `edad_ultimo_pong_ms` es lo que hace del último `pong`
+    /// de la conexión abierta, si la hay.
+    pub fn al_volver(&self, forzar: bool, edad_ultimo_pong_ms: Option<u64>) -> AlVolver {
+        if forzar { return AlVolver::Reconectar; }
+        // Volver a primer plano no convierte una revocación en un bucle de peticiones.
+        if self.foto.rechazo.is_some() { return AlVolver::Nada; }
+        if self.foto.estado != ConexionHandy::Conectada { return AlVolver::Reconectar; }
+        match edad_ultimo_pong_ms {
+            Some(edad) if edad <= PONG_CADUCADO_MS => AlVolver::Comprobar,
+            _ => AlVolver::Reconectar,
+        }
+    }
+
+    /// ¿Sigue abierta la conexión que se estaba comprobando? Un ping sin respuesta sólo corta ésa:
+    /// si mientras tanto se cayó o se sustituyó, ya hay otra en marcha.
+    pub fn es_la_conexion(&self, generacion: u64, conexion: u64) -> bool {
+        self.foto.estado == ConexionHandy::Conectada && self.foto.generacion == generacion && self.foto.conexion == conexion
     }
 
     pub fn atender(&mut self, mensaje: Value) -> AppResult<Option<CambioReplicado>> {
@@ -150,6 +188,49 @@ mod tests {
         let mut p = conectada(); p.confirmar(false, false);
         assert!(p.atender(json!({"type":"main_status","online":"false","volcando":false})).is_err());
         assert_eq!(p.foto.main_online, Some(false));
+    }
+    #[test]
+    fn volver_a_primer_plano_con_la_conexion_abierta_la_comprueba_sin_cortarla() {
+        let p = conectada();
+        assert_eq!(p.al_volver(false, Some(0)), AlVolver::Comprobar);
+        assert_eq!(p.al_volver(false, Some(PONG_CADUCADO_MS)), AlVolver::Comprobar);
+    }
+    #[test]
+    fn un_ultimo_pong_viejo_reconecta_sin_esperar_a_otro() {
+        // El latido va cada 30 s: pasado ese margen, el anterior ya se quedó sin respuesta (o el
+        // equipo ha estado suspendido). Y sin latido que mirar, tampoco hay nada que comprobar.
+        let p = conectada();
+        assert_eq!(p.al_volver(false, Some(PONG_CADUCADO_MS + 1)), AlVolver::Reconectar);
+        assert_eq!(p.al_volver(false, None), AlVolver::Reconectar);
+    }
+    #[test]
+    fn sin_conexion_volver_a_primer_plano_reconecta_ya() {
+        let mut p = conectada(); p.desconectar(0);
+        assert_eq!(p.al_volver(false, Some(0)), AlVolver::Reconectar);
+        let mut p = PresenciaHandy::default(); p.activar(Some("negocio-a".into()), true);
+        assert_eq!(p.al_volver(false, None), AlVolver::Reconectar);
+    }
+    #[test]
+    fn un_rechazo_no_se_reintenta_al_volver_pero_si_con_el_boton() {
+        let mut p = conectada(); assert!(p.rechazar(ErrorCode::DeviceRevoked));
+        assert_eq!(p.al_volver(false, None), AlVolver::Nada);
+        assert_eq!(p.al_volver(true, None), AlVolver::Reconectar);
+        // El botón reconecta siempre, también con la conexión sana.
+        assert_eq!(conectada().al_volver(true, Some(0)), AlVolver::Reconectar);
+    }
+    #[test]
+    fn un_ping_sin_respuesta_solo_corta_la_conexion_que_se_comprobaba() {
+        let mut p = conectada();
+        let (generacion, conexion) = (p.foto.generacion, p.foto.conexion);
+        assert!(p.es_la_conexion(generacion, conexion));
+        // Se cayó sola mientras se esperaba el pong: ya se está reconectando.
+        p.desconectar(0); assert!(!p.es_la_conexion(generacion, conexion));
+        // Ya hay una conexión nueva: el ping era de la anterior.
+        p.confirmar(true, false); assert!(!p.es_la_conexion(generacion, conexion));
+        // Otro vínculo, aunque su contador de conexiones coincida.
+        let mut otro = conectada(); otro.activar(Some("negocio-b".into()), true);
+        otro.foto.conexion = conexion - 1; otro.confirmar(true, false);
+        assert_eq!(otro.foto.conexion, conexion); assert!(!otro.es_la_conexion(generacion, conexion));
     }
     #[test]
     fn sin_identidad_no_acepta_presencia_y_la_licencia_se_distingue_de_la_red() {

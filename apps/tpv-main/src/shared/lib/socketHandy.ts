@@ -7,7 +7,8 @@ import { useMainPresence } from "../stores/useMainPresence";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import type { ModeStateValue } from "../stores/useMode";
 import { queryClient } from "./queryClient";
-import { featureKeysPorTablas, ajustesPorTablas } from "./syncStatements";
+import { featureKeysPorTablas } from "./syncStatements";
+import { recargarAjustes } from "./recargarAjustes";
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
 import { useContactSettings } from "../stores/useContactSettings";
@@ -45,11 +46,10 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
             generacion: foto.generacion, conexion: foto.conexion, tenantId: foto.tenant_id, estadoConexion: foto.estado });
         if (lista && (primeraFoto || nuevoContexto || !antesLista || anterior.conexion !== foto.conexion)) {
             // Handy lee por HTTP: recuperar avisos perdidos requiere releer, no replicar un outbox.
+            // Con una conexión nueva no se sabe qué ha cambiado: consultas y los tres ajustes.
             void queryClient.invalidateQueries();
             useSyncSignal.getState().bump();
-            void useBusinessSettings.getState().init();
-            void useTicketSettings.getState().init();
-            void useContactSettings.getState().init();
+            recargarAjustes(null);
         }
         primeraFoto = false;
     };
@@ -66,11 +66,8 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
                     if (keys === null) void queryClient.invalidateQueries();
                     else for (const key of keys) void queryClient.invalidateQueries({ queryKey: [key] });
                     useSyncSignal.getState().bump(cambio.comanda);
-                    if (ajustesPorTablas(cambio.tablas)) {
-                        void useBusinessSettings.getState().init();
-                        void useTicketSettings.getState().init();
-                        void useContactSettings.getState().init();
-                    }
+                    // Sólo el store de la tabla que ha cambiado: cada uno es una petición a la nube.
+                    recargarAjustes(cambio.tablas);
                 }),
             ]);
             const listeners = registros.flatMap((r) => r.status === "fulfilled" ? [r.value] : []);

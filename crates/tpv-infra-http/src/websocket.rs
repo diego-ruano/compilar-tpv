@@ -1,20 +1,58 @@
 //! Transporte WebSocket interno compartido por Main y Handy. Sin Tauri, SQL ni sesi?n personal.
-use std::{sync::Arc, time::Duration};
+use std::{sync::Arc, time::{Duration, SystemTime}};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::{sync::{mpsc, Notify}, time::{timeout, Instant}};
+use tokio::{sync::{mpsc, watch, Notify}, time::{timeout, Instant}};
 use tokio_tungstenite::{WebSocketStream, connect_async_with_config, tungstenite::{Message, protocol::WebSocketConfig}};
 use tpv_application::{error::{AppError, AppResult}, ports::canal_nube::CanalNube};
 use tpv_infra_licensing::CLOUD_API_BASE;
+
+/// El texto exacto del latido. El `TenantHub` lo contesta en el borde sin despertarse
+/// (`setWebSocketAutoResponse`), y sólo si la cadena es ésta.
+const PING: &str = r#"{"type":"ping"}"#;
 
 pub struct CanalWebSocket {
     salida: mpsc::Sender<Value>,
     entrada: mpsc::Receiver<AppResult<Value>>,
     despertar: Arc<Notify>,
+    latido: Latido,
     tarea: tokio::task::JoinHandle<()>,
 }
 impl Drop for CanalWebSocket { fn drop(&mut self) { self.tarea.abort(); } }
+impl CanalWebSocket {
+    /// El latido de este canal, para comprobarlo desde fuera sin quitarle los mensajes a quien lo lee.
+    pub fn latido(&self) -> Latido { self.latido.clone() }
+}
+
+/// Cuándo llegó un `pong`, por los dos relojes. El monótono se para con el equipo suspendido
+/// (Android en reposo) y el de pared no, así que la edad es la mayor de las dos.
+#[derive(Clone, Copy)]
+struct Pong { en: Instant, reloj: SystemTime }
+impl Pong {
+    fn ahora() -> Self { Self { en: Instant::now(), reloj: SystemTime::now() } }
+    fn edad(self) -> Duration { self.en.elapsed().max(self.reloj.elapsed().unwrap_or_default()) }
+}
+
+/// El latido de un canal abierto: cuánto hace del último `pong` y un ping a demanda. Sirve para
+/// saber si una conexión sigue viva sin cortarla (INC-20261030-019).
+#[derive(Clone)]
+pub struct Latido {
+    pedir: Arc<Notify>,
+    pongs: watch::Receiver<Pong>,
+}
+impl Latido {
+    /// Lo que hace del último `pong` (o de abrir el canal, si aún no ha llegado ninguno).
+    pub fn edad_ultimo_pong(&self) -> Duration { self.pongs.borrow().edad() }
+
+    /// Manda un ping ya y espera su `pong`. `false` si no llega en el plazo o si el canal se ha
+    /// cerrado. Vale cualquier `pong` que llegue después de pedirlo: es la conexión la que se prueba.
+    pub async fn comprobar(&mut self, plazo: Duration) -> bool {
+        self.pongs.borrow_and_update();
+        self.pedir.notify_one();
+        matches!(timeout(plazo, self.pongs.changed()).await, Ok(Ok(())))
+    }
+}
 #[async_trait]
 impl CanalNube for CanalWebSocket {
     async fn enviar(&mut self, mensaje: Value) -> AppResult<()> {
@@ -45,6 +83,10 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
     // Buffer acotado: mientras se descarga catch-up, TCP aplica contrapresión a lo vivo.
     let (salida, mut pendientes) = mpsc::channel::<Value>(8);
     let (recibidos, entrada) = mpsc::channel::<AppResult<Value>>(8);
+    let pedir = Arc::new(Notify::new());
+    // Al acabar la tarea se suelta el emisor, y quien espere un `pong` se entera de que ya no hay canal.
+    let (pongs, visto) = watch::channel(Pong::ahora());
+    let pulso = Latido { pedir: pedir.clone(), pongs: visto };
     let tarea = tokio::spawn(async move {
         let mut latido = tokio::time::interval(Duration::from_secs(30));
         latido.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -53,7 +95,11 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
             tokio::select! {
                 _ = latido.tick() => {
                     if ultimo_pong.elapsed() > Duration::from_secs(65) { break; }
-                    if !timeout(Duration::from_secs(10), escritor.send(Message::Text(r#"{"type":"ping"}"#.into()))).await.is_ok_and(|r| r.is_ok()) { break; }
+                    if !timeout(Duration::from_secs(10), escritor.send(Message::Text(PING.into()))).await.is_ok_and(|r| r.is_ok()) { break; }
+                }
+                // Un ping a demanda (`Latido::comprobar`), fuera del ritmo del latido.
+                _ = pedir.notified() => {
+                    if !timeout(Duration::from_secs(10), escritor.send(Message::Text(PING.into()))).await.is_ok_and(|r| r.is_ok()) { break; }
                 }
                 msg = pendientes.recv() => {
                     let Some(msg) = msg else { break; };
@@ -63,7 +109,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
                     match msg {
                         Some(Ok(Message::Text(texto))) => {
                             let Ok(m) = serde_json::from_str::<Value>(&texto) else { break; };
-                            if m.get("type").and_then(Value::as_str) == Some("pong") { ultimo_pong = Instant::now(); continue; }
+                            if m.get("type").and_then(Value::as_str) == Some("pong") { ultimo_pong = Instant::now(); pongs.send_replace(Pong::ahora()); continue; }
                             if recibidos.send(Ok(m)).await.is_err() { break; }
                         }
                         Some(Ok(Message::Ping(bytes))) => { if !timeout(Duration::from_secs(10), escritor.send(Message::Pong(bytes))).await.is_ok_and(|r| r.is_ok()) { break; } }
@@ -77,7 +123,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static {
         let _ = timeout(Duration::from_secs(5), escritor.close()).await;
         let _ = recibidos.send(Err(AppError::external("Se perdió la conexión con la nube"))).await;
     });
-    CanalWebSocket { salida, entrada, despertar, tarea }
+    CanalWebSocket { salida, entrada, despertar, latido: pulso, tarea }
 }
 
 #[cfg(test)]
@@ -125,6 +171,78 @@ mod tests {
         }
         servidor.send(Message::Text(r#"{"type":"main_online"}"#.into())).await.unwrap();
         assert_eq!(cliente.recibir(Duration::from_secs(1)).await.unwrap().unwrap()["type"], "main_online");
+    }
+
+    /// Lee del lado del servidor el siguiente mensaje, que tiene que ser un ping.
+    async fn siguiente_ping(servidor: &mut WebSocketStream<DuplexStream>) {
+        let ping = servidor.next().await.unwrap().unwrap();
+        assert_eq!(ping.into_text().unwrap(), PING);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn un_ping_a_demanda_dice_que_la_conexion_sigue_viva_sin_esperar_al_latido() {
+        let (cliente, mut servidor) = pareja().await;
+        let mut latido = cliente.latido();
+        // El primero es el del latido, al abrir. El segundo, el que se pide.
+        siguiente_ping(&mut servidor).await;
+        let comprobacion = tokio::spawn(async move { latido.comprobar(Duration::from_secs(3)).await });
+        siguiente_ping(&mut servidor).await;
+        servidor.send(Message::Text(r#"{"type":"pong"}"#.into())).await.unwrap();
+        assert!(comprobacion.await.unwrap(), "con su pong, la conexión está viva");
+        // Y no ha hecho falta que pasen los 30 s del latido. El margen es por el reloj de pared, que
+        // en una máquina cargada no se para con el del test.
+        assert!(cliente.latido().edad_ultimo_pong() < Duration::from_secs(10));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn un_ping_sin_pong_vence_a_su_plazo_y_no_cierra_el_canal() {
+        let (mut cliente, mut servidor) = pareja().await;
+        let mut latido = cliente.latido();
+        siguiente_ping(&mut servidor).await;
+        let comprobacion = tokio::spawn(async move { latido.comprobar(Duration::from_secs(3)).await });
+        siguiente_ping(&mut servidor).await;
+        assert!(!comprobacion.await.unwrap(), "sin pong en 3 s no se da por viva");
+        // Decidir qué hacer es de quien pregunta: el transporte sigue leyendo.
+        servidor.send(Message::Text(r#"{"type":"main_online"}"#.into())).await.unwrap();
+        assert_eq!(cliente.recibir(Duration::from_secs(1)).await.unwrap().unwrap()["type"], "main_online");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn la_edad_del_ultimo_pong_crece_hasta_el_siguiente() {
+        let (cliente, mut servidor) = pareja().await;
+        let latido = cliente.latido();
+        siguiente_ping(&mut servidor).await;
+        servidor.send(Message::Text(r#"{"type":"pong"}"#.into())).await.unwrap();
+        // Con el reloj parado, esta espera sólo vence cuando el transporte ya ha leído el pong.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::advance(Duration::from_secs(36)).await;
+        assert!(latido.edad_ultimo_pong() >= Duration::from_secs(36));
+        siguiente_ping(&mut servidor).await;
+        servidor.send(Message::Text(r#"{"type":"pong"}"#.into())).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(latido.edad_ultimo_pong() < Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn un_equipo_suspendido_envejece_el_pong_aunque_su_reloj_monotono_no_avance() {
+        // Android en reposo: el reloj monótono se para y el de pared sigue.
+        let pong = Pong { en: Instant::now(), reloj: SystemTime::now() - Duration::from_secs(40) };
+        assert!(pong.edad() >= Duration::from_secs(40));
+        // Si el de pared va hacia atrás (un ajuste de hora), manda el monótono.
+        let hace_50_s = Instant::now().checked_sub(Duration::from_secs(50)).expect("el equipo lleva más de 50 s encendido");
+        let pong = Pong { en: hace_50_s, reloj: SystemTime::now() + Duration::from_secs(3600) };
+        assert!(pong.edad() >= Duration::from_secs(50));
+        assert!(pong.edad() < Duration::from_secs(60));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn con_el_canal_cerrado_la_comprobacion_falla_sin_esperar() {
+        let (cliente, _servidor) = pareja().await;
+        let mut latido = cliente.latido();
+        drop(cliente);
+        let antes = Instant::now();
+        assert!(!latido.comprobar(Duration::from_secs(3)).await);
+        assert!(antes.elapsed() < Duration::from_secs(3), "no agota el plazo: el canal ya no existe");
     }
 
     #[tokio::test]

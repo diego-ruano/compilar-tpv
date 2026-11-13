@@ -38,6 +38,9 @@ En los dos casos:
 2. Regenerar la foto: `BLESS_SCHEMA_SNAPSHOT=1 cargo nextest run -p tpv-infra-sqlite schema_snapshot`.
 3. **Redesplegar el worker antes** de que una Main escriba la columna nueva: lleva el esquema compilado
    dentro, y uno por detrás rechaza esa escritura (y la operación acaba apartada).
+4. Una tabla de negocio nueva lleva su entrada en `apps/tpv-main/src/shared/lib/syncStatements.ts`: qué
+   pantallas la enseñan ([frontend.md](frontend.md#datos-tanstack-query-y-zustand)). Sin ella, cada
+   escritura en esa tabla hace releerlo todo a los demás equipos; lo vigila `test/syncStatements.test.ts`.
 
 Cargo vigila la carpeta de migraciones mediante `tpv-infra-sqlite/build.rs`: al editar, añadir o
 eliminar SQL se recompila lo embebido por `include_dir!`, sin tocar `migrations.rs`.

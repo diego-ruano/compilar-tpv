@@ -6,6 +6,9 @@ import { iniciarSocketMain } from "../src/shared/lib/socketMain";
 import { useEstadoSync } from "../src/shared/stores/useEstadoSync";
 import { useSyncSignal } from "../src/shared/stores/useSyncSignal";
 import { queryClient } from "../src/shared/lib/queryClient";
+import { useBusinessSettings } from "../src/shared/stores/useBusinessSettings";
+import { useTicketSettings } from "../src/shared/stores/useTicketSettings";
+import { useContactSettings } from "../src/shared/stores/useContactSettings";
 const entrada = { modo: "tpv" as const, hidratada: true, preferencia: "auto" as const, datosPerdidos: false, reconciliacionPendiente: false };
 const asentar = async () => { for (let i=0; i<10; i++) await Promise.resolve(); };
 afterEach(() => { h.listeners.clear(); h.removes=[]; vi.restoreAllMocks(); h.invoke.mockReset(); });
@@ -32,6 +35,22 @@ describe("presentación de la réplica nativa", () => {
         h.listeners.get("sync:cambio")!({payload:{tablas:["detalle_comanda"],comanda:info}});
         expect(invalidar.mock.calls.map(([args]) => args?.queryKey)).toEqual([["mesas"],["stats"]]);
         expect(useSyncSignal.getState().comanda).toEqual(info); socket.detener();
+    });
+    it("un cambio de ajustes que llega de una Handy relee sólo su store, también el de contacto", async () => {
+        backend(); const socket = iniciarSocketMain(entrada)!; await asentar();
+        vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+        const [negocio, ticket, contacto] = [useBusinessSettings, useTicketSettings, useContactSettings].map((s) => vi.spyOn(s.getState(), "init").mockResolvedValue());
+        const comanda = {ids:[],touchedComanda:false,uncertain:false,touchedCatalog:false};
+        h.listeners.get("sync:cambio")!({payload:{tablas:["contact_settings"],comanda}});
+        expect(contacto).toHaveBeenCalledOnce(); expect(negocio).not.toHaveBeenCalled(); expect(ticket).not.toHaveBeenCalled();
+        h.listeners.get("sync:cambio")!({payload:{tablas:["ticket_settings"],comanda}});
+        expect(ticket).toHaveBeenCalledOnce(); expect(negocio).not.toHaveBeenCalled(); expect(contacto).toHaveBeenCalledOnce();
+        h.listeners.get("sync:cambio")!({payload:{tablas:["pagos"],comanda}});
+        expect(negocio).not.toHaveBeenCalled();
+        // Sin clasificar no se sabe cuál: los tres.
+        h.listeners.get("sync:cambio")!({payload:{tablas:null,comanda}});
+        expect(negocio).toHaveBeenCalledOnce(); expect(ticket).toHaveBeenCalledTimes(2); expect(contacto).toHaveBeenCalledTimes(2);
+        socket.detener();
     });
     it("cerrar la vista deja de escuchar y mantiene viva la réplica", async () => {
         backend(); const socket = iniciarSocketMain(entrada)!; socket.detener(); await asentar();

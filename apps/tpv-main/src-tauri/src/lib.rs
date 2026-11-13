@@ -737,33 +737,47 @@ impl AppState {
         HttpNotificacionesRepository
     );
 
+    /// La base local, para lo que **sólo existe en la Main**: los registros de facturación, el
+    /// ticket de un cobro y los pedidos a proveedores.
+    ///
+    /// Pedirlo desde una Handy no es un fallo del programa: es algo que ese equipo no tiene. Se
+    /// contesta `conflict` —el estado del equipo no admite la operación—, como hacen sus
+    /// repositorios HTTP con la caja, y con la frase que se enseña. Como `internal` contaría como
+    /// fallo del programa e iría a Sentry (`fallosDeComandos.ts`). Una Main sin su base sí lo es.
+    async fn base_de_la_main(&self, solo_en_la_main: &str) -> Result<Arc<Db>, AppErrorDto> {
+        if *self.mode.lock().await == Some(DeviceMode::Handy) {
+            return Err(AppErrorDto::new(
+                tpv_contracts::errors::ErrorCode::Conflict,
+                solo_en_la_main,
+            ));
+        }
+        self.db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| AppErrorDto::internal("La base de datos de este TPV no está abierta"))
+    }
+
     /// Registros de facturación (FISCAL-01). **No es mode-switched: sólo existe en la Main.**
     ///
     /// La Handy no cobra (`soloLaMainCobra`), así que no emite registros — y no debe poder
     /// hacerlo. La cadena de huellas vive en el SIF del obligado, que es este equipo; la nube es
     /// una copia para poder recuperarla, no una fuente. El veto también está en el worker
     /// (`applyViaHub`), porque una regla que sólo vive en el cliente es una sugerencia.
-    pub(crate) async fn verifactu_repo(&self) -> Result<Arc<dyn VerifactuRepository>, String> {
+    pub(crate) async fn verifactu_repo(&self) -> Result<Arc<dyn VerifactuRepository>, AppErrorDto> {
         let conn = self
-            .db
-            .lock()
-            .await
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "Los registros de facturación sólo existen en el TPV principal".to_string())?;
+            .base_de_la_main("Los registros de facturación sólo existen en el TPV principal")
+            .await?;
         Ok(Arc::new(SqliteVerifactuRepository::new(conn)) as Arc<dyn VerifactuRepository>)
     }
 
     /// El ticket de un cobro (RI-29). Tampoco es mode-switched: imprime la Main, que es la que cobra,
     /// la que tiene la impresora y la que guarda los registros de facturación.
-    pub(crate) async fn tickets_repo(&self) -> Result<Arc<dyn TicketsRepository>, String> {
+    pub(crate) async fn tickets_repo(&self) -> Result<Arc<dyn TicketsRepository>, AppErrorDto> {
         let conn = self
-            .db
-            .lock()
-            .await
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "Los tickets sólo se imprimen en el TPV principal".to_string())?;
+            .base_de_la_main("Los tickets sólo se imprimen en el TPV principal")
+            .await?;
         Ok(Arc::new(SqliteTicketsRepository::new(conn)) as Arc<dyn TicketsRepository>)
     }
 
@@ -783,14 +797,10 @@ impl AppState {
     /// Pedidos a proveedores: Local-First, solo disponible en modo Main (SQLite).
     pub(crate) async fn pedidos_proveedor_repo(
         &self,
-    ) -> Result<Arc<dyn PedidoProveedorRepository>, String> {
+    ) -> Result<Arc<dyn PedidoProveedorRepository>, AppErrorDto> {
         let conn = self
-            .db
-            .lock()
-            .await
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "Los pedidos a proveedores sólo se gestionan desde el TPV principal".to_string())?;
+            .base_de_la_main("Los pedidos a proveedores sólo se gestionan desde el TPV principal")
+            .await?;
         Ok(Arc::new(SqlitePedidoProveedorRepository::new(conn))
             as Arc<dyn PedidoProveedorRepository>)
     }
@@ -2421,7 +2431,9 @@ pub fn run() {
             #[cfg(mobile)]
             let revisar = revisar || matches!(event, tauri::WindowEvent::Resumed);
             if revisar {
-                if let Some(handy) = window.app_handle().try_state::<socket_handy::HandyNativo>() { handy.reintentar(false); }
+                // Comprueba la conexión con un ping; no la corta si contesta (INC-20261030-019).
+                let app = window.app_handle();
+                if let Some(handy) = app.try_state::<socket_handy::HandyNativo>() { handy.reintentar(app, false); }
             }
         })
         .setup(|app| {
@@ -3140,6 +3152,82 @@ mod tests_sesion_y_permisos {
 
         iniciar(&st, ADMIN).await;
         assert!(st.exigir_rol_si_hay_sesion(&[ADMIN]).await.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tests_solo_en_la_main {
+    //! Lo que sólo existe en la Main (registros de facturación, tickets, pedidos a proveedores),
+    //! pedido desde una Handy: es una respuesta esperada, no un fallo del programa. El código es lo
+    //! que decide si el fallo de un comando va a Sentry (`fallosDeComandos.ts`).
+
+    use super::*;
+    use tpv_contracts::errors::ErrorCode;
+
+    async fn base() -> Arc<Db> {
+        let dir = std::env::temp_dir().join(format!("tpv-solo-main-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap()
+    }
+
+    fn estado(modo: Option<DeviceMode>, db: Option<Arc<Db>>) -> AppState {
+        AppState {
+            db: Arc::new(Mutex::new(db)),
+            cloud: Arc::new(Mutex::new(None)),
+            mode: Arc::new(Mutex::new(modo)),
+            mode_sync: Arc::new(std::sync::RwLock::new(modo)),
+            sesion: Arc::new(Mutex::new(None)),
+            tickets_impresos: Arc::new(printing::TicketsImpresos::default()),
+        }
+    }
+
+    /// Los tres accesos, con el nombre de cada uno para el mensaje del test.
+    async fn errores(st: &AppState) -> Vec<(&'static str, Option<AppErrorDto>)> {
+        vec![
+            ("verifactu_repo", st.verifactu_repo().await.err()),
+            ("tickets_repo", st.tickets_repo().await.err()),
+            ("pedidos_proveedor_repo", st.pedidos_proveedor_repo().await.err()),
+        ]
+    }
+
+    #[tokio::test]
+    async fn en_una_handy_se_contesta_que_es_de_la_main_y_no_un_error_interno() {
+        let st = estado(Some(DeviceMode::Handy), None);
+        for (acceso, error) in errores(&st).await {
+            let error = error.unwrap_or_else(|| panic!("{acceso}: una Handy no tiene esto"));
+            assert_eq!(error.code, ErrorCode::Conflict, "{acceso}: {}", error.message);
+            assert!(error.message.contains("TPV principal"), "{acceso}: {}", error.message);
+        }
+    }
+
+    /// Un escritorio que fue Main y pasa a Handy conserva la base abierta hasta reiniciar: lo que
+    /// manda es el modo, no que haya un fichero.
+    #[tokio::test]
+    async fn una_handy_con_la_base_de_cuando_fue_main_tampoco_lo_tiene() {
+        let st = estado(Some(DeviceMode::Handy), Some(base().await));
+        for (acceso, error) in errores(&st).await {
+            let error = error.unwrap_or_else(|| panic!("{acceso}: una Handy no tiene esto"));
+            assert_eq!(error.code, ErrorCode::Conflict, "{acceso}: {}", error.message);
+        }
+    }
+
+    #[tokio::test]
+    async fn una_main_sin_su_base_si_es_un_fallo_del_programa() {
+        for modo in [Some(DeviceMode::Tpv), None] {
+            let st = estado(modo, None);
+            for (acceso, error) in errores(&st).await {
+                let error = error.unwrap_or_else(|| panic!("{acceso}: sin base no hay repositorio"));
+                assert_eq!(error.code, ErrorCode::Internal, "{acceso}: {}", error.message);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn la_main_los_tiene() {
+        let st = estado(Some(DeviceMode::Tpv), Some(base().await));
+        for (acceso, error) in errores(&st).await {
+            assert!(error.is_none(), "{acceso}: {:?}", error.map(|e| e.message));
+        }
     }
 }
 

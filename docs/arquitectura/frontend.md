@@ -70,10 +70,20 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
   porque en la Main el dato sólo cambia por mutaciones de esta aplicación o por lo que avisa Rust con
   `sync:cambio` (lo que llega de una Handy, las reservas web recogidas, un job que escribe). Ese
   evento trae las tablas tocadas y `shared/lib/syncStatements.ts` las traduce a las claves que
-  invalidar: una tabla nueva que se enseñe en otra pantalla va ahí (`reservas` refresca también el
-  plano de `mesas`).
-- Lo que depende de la hora y no lo avisa nadie se relee solo: el plano de Mesas, cada minuto en la
-  Main (la reserva de una mesa sale una hora antes y se va al acabar su hueco).
+  invalidar: una tabla que se enseñe en otra pantalla lleva también su clave, aunque sea a través
+  de otra tabla (`reservas` refresca el plano de `mesas`; el nombre de una mesa, Reservas, Clientes,
+  Cuentas y las estadísticas; `pagos`, lo que queda por cobrar en el plano). La Handy hace lo mismo
+  con `handy:cambio`. Fuera a sabiendas, sólo `comandas` → Cuentas: la mesa y el cliente de un cobro
+  se fijan al cobrar, y no se relee Cuentas con cada línea que se añade a una comanda.
+- **Toda tabla de negocio tiene su entrada en ese mapa**, aunque sea `[]` (lo fiscal, que no está en
+  ninguna caché; los ajustes del ticket y de contacto, que van por sus stores). Una tabla sin entrada hace releerlo todo, y
+  en una Handy cada consulta que se relee es un viaje al `TenantHub` del negocio: cada cobro escribe
+  en `Movimientos_Caja` y en `Registros_Facturacion`. `test/syncStatements.test.ts` lee
+  `packages/database/schema.snapshot.sql` y falla si a una tabla le falta la entrada o si queda la de
+  una tabla que ya no existe.
+- Lo que depende de la hora y no lo avisa nadie se relee solo: el plano de Mesas, cada minuto con el
+  plano a la vista (la reserva de una mesa sale una hora antes y se va al acabar su hueco). En la
+  Main es una lectura local; en la Handy, una petición al worker.
 - **Patrón**: cada feature expone sus hooks en `features/<x>/<x>Queries.ts`, con `useQuery` para lecturas
   (claves prefijadas por la feature, con rangos e ids dentro) y `useMutation` para escrituras, que
   invalidan su clave en `onSuccess`. Referencia: `features/clientes/clientesQueries.ts`.
@@ -84,7 +94,8 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
 - **Fuera a propósito**: la parte transaccional del POS (comanda, cobro y cocina en mesas; toda la venta
   rápida, cuyo arranque mezcla el catálogo con el estado de la comanda), la configuración (se carga una
   vez en stores de Zustand: `useBusinessSettings`, `useTicketSettings`, `useContactSettings`) y el
-  login.
+  login. Cuando otro equipo cambia una tabla de ajustes se relee el store de esa tabla, no los tres
+  (`shared/lib/recargarAjustes.ts`, en la Main y en la Handy).
 - Otros stores (`shared/stores/`): `useAuth`, `useMode`, `useEstadoSync`, `useMainPresence`,
   `useEstadoFiscal`, `useSyncSignal`, `usePairCode`, `useTheme`.
 
