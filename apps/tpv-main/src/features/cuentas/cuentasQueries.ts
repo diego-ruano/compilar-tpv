@@ -8,6 +8,7 @@ import { commands } from "@tpv/client";
 
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cierreListar } from "./cierreApis";
 import { cuentasAnularPago, cuentasCreateGasto, cuentasDeleteGasto, cuentasGetEntradas, cuentasGetResumen, cuentasGetSalidas, cuentasUpdateGasto, cuentasUpdatePago, CUENTAS_PAGE_SIZE, type CuentasListParams, type CursorCuentas } from "./cuentasApis";
 
 type Rango = { del?: string | null; al?: string | null; q?: string | null };
@@ -71,7 +72,11 @@ export const cuentasKeys = {
     resumen: (rango: Rango) =>
         ["cuentas", "resumen", rango.del ?? null, rango.al ?? null, rango.q ?? null] as const,
     proveedores: () => ["cuentas", "proveedores"] as const,
+    cierres: () => ["cuentas", "cierres"] as const,
 };
+
+/** Cuántos cierres enseña el histórico de Cuentas. */
+const CIERRES_A_LA_VISTA = 50;
 
 /* =========================
    Lecturas (queries)
@@ -97,6 +102,20 @@ export function useCuentasResumen(rango: Rango, enabled = true) {
     return useQuery({
         queryKey: cuentasKeys.resumen(rango),
         queryFn: () => cuentasGetResumen(rangoArgs(rango)),
+        enabled,
+    });
+}
+
+/**
+ * El histórico de cierres de caja. Bajo la clave de Cuentas para que lo refresque lo mismo que a
+ * los listados: un cierre hecho en otro equipo (`cierres_caja`, `syncStatements.ts`) y cualquier
+ * mutación de esta feature. Antes era estado de la página y sólo se releía al cerrar o deshacer
+ * desde aquí. `enabled = false` para quien no puede cerrar caja: ni lo pide.
+ */
+export function useCierresCaja(enabled = true) {
+    return useQuery({
+        queryKey: cuentasKeys.cierres(),
+        queryFn: () => cierreListar(CIERRES_A_LA_VISTA),
         enabled,
     });
 }

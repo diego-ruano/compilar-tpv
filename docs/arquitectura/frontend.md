@@ -87,7 +87,7 @@ Durante una navegación diferida se conserva la pantalla actual y se indica la c
 - **Patrón**: cada feature expone sus hooks en `features/<x>/<x>Queries.ts`, con `useQuery` para lecturas
   (claves prefijadas por la feature, con rangos e ids dentro) y `useMutation` para escrituras, que
   invalidan su clave en `onSuccess`. Referencia: `features/clientes/clientesQueries.ts`.
-- Lo usan clientes, inventario, cuentas, estadísticas, reservas, tareas, trabajadores, proveedores y
+- Lo usan clientes, inventario, cuentas (también el histórico de cierres de caja), estadísticas, reservas, tareas, trabajadores, proveedores y
   pedidos, notificaciones, el emparejamiento (`configuracion/pairingQueries.ts`), el progreso del
   histórico (`shared/lib/backfillQueries.ts`) y, en mesas, sólo el catálogo de salones y la meta de
   mesas.
