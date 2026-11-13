@@ -96,8 +96,8 @@ const CIFRADO_PII_INTERVAL_SECS: u64 = 6 * 60 * 60;
 /// golpe, y el chequeo recorre lotes y clientes enteros.
 const RECONCILIACION_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
-/// Cada cuánto se poda `_Sync_Applied_Ops` y se retiran las cuarentenas viejas. Los registros solo
-/// son purgables tras un TTL de 72 h, y las cuarentenas tras 30 días, así que una pasada al día va
+/// Cada cuánto se poda `_Sync_Applied_Ops` y se retira lo apartado de la subida. Los registros solo
+/// son purgables tras un TTL de 72 h, y lo apartado tras 30 días, así que una pasada al día va
 /// sobrada.
 const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
@@ -590,9 +590,9 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 /// retirar cuando la op ya está confirmada en la nube y ha pasado su TTL. (Lo pendiente del outbox
 /// no entra aquí: se vacía solo, cada op se borra al recibir su `apply_ack`.)
 ///
-/// Y las cuarentenas, que no se vaciaban nunca: lo apartado de la subida y lo que no entró de la
-/// bajada se retira a los 30 días de su último intento, salvo lo que espera a su reparación
-/// (`uc_sync::RETENCION_CUARENTENAS_MS`, que dice por qué 30).
+/// Y lo apartado de la subida, que no se vaciaba nunca: se retira a los 30 días de su último
+/// intento, salvo lo que espera a su reparación (`uc_sync::RETENCION_CUARENTENAS_MS`, que dice por
+/// qué 30). Lo que no entró de la bajada se queda: es la barrera del contraste con la nube.
 ///
 /// Antes iba colgada del drenado del outbox y solo se ejecutaba si esa pasada había subido algo;
 /// como job tiene disparador propio y corre también en un equipo online y ocioso.
@@ -600,13 +600,8 @@ async fn purga_sync(app: AppHandle) -> Result<(), String> {
     let repo = app.state::<AppState>().sync_repo().await?;
     uc_sync::purge_applied_ops(repo.as_ref()).await?;
     let purgadas = uc_sync::purgar_cuarentenas(repo.as_ref(), tpv_infra_sqlite::util::now_ms()).await?;
-    if purgadas.subida + purgadas.bajada > 0 {
-        tracing::info!(
-            target: "tpv::sync",
-            subida = purgadas.subida,
-            bajada = purgadas.bajada,
-            "cuarentenas de más de 30 días retiradas"
-        );
+    if purgadas > 0 {
+        tracing::info!(target: "tpv::sync", purgadas, "operaciones apartadas de más de 30 días retiradas");
     }
     Ok(())
 }

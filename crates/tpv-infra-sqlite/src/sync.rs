@@ -21,7 +21,7 @@ use crate::ejecutor::Value;
 use crate::ejecutor::Connection;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::sync::{BajadaAplicada, CambioDetenido, CuarentenasPurgadas, SyncRepository};
+use tpv_application::ports::sync::{BajadaAplicada, CambioDetenido, SyncRepository};
 use tpv_contracts::sync::{
     BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
     DescuadreTabla, OutboxEntry, OutboxFallo, ResultadoVerificacion, SqlStatement,
@@ -1041,40 +1041,30 @@ impl SyncRepository for SqliteSyncRepository {
         Ok(())
     }
 
-    async fn purgar_cuarentenas(&self, antes_de_ms: i64) -> AppResult<CuarentenasPurgadas> {
-        // Por `raw()`: son tablas de control locales, no escrituras de negocio que replicar.
+    async fn purgar_cuarentenas(&self, antes_de_ms: i64) -> AppResult<u64> {
+        // Por `raw()`: es una tabla de control local, no una escritura de negocio que replicar.
         //
         // Una apartada cuya reparación sigue en el outbox sin subir no se toca: la retira esa
         // subida (SYNC-26, `outbox_mark_sent`), que es cuando de verdad se ha resuelto. Las demás
         // —sin reparación (no quedaba ninguna fila que reparar) o con la reparación también
         // apartada— ya no tienen nada que las vaya a cerrar. El último intento es la hora a la
         // que se apartó; sin él, la de su creación.
+        //
+        // `_Sync_Failed` no se toca: un cambio de la nube en cuarentena es la barrera de
+        // `hay_fallos_de_bajada`. Retirarlo dejaría al contraste borrar arriba lo que la Handy
+        // escribió y aquí no entró, o subir lo que la nube ya había borrado.
         let w = self.db.write().await;
-        let conn = w.raw();
-        conn.transaccion(async {
-            let subida = conn
-                .execute(
-                    "DELETE FROM _Sync_Outbox \
-                      WHERE Cuarentena = 1 \
-                        AND COALESCE(Ultimo_Intento_Ms, Created_At_Ms) < ?1 \
-                        AND Op_Id NOT IN (SELECT Repara_Op_Id FROM _Sync_Outbox \
-                                           WHERE Repara_Op_Id IS NOT NULL AND Cuarentena = 0);",
-                    vec![Value::Integer(antes_de_ms)],
-                )
-                .await
-                .map_err(db_err)?;
-            // Un cambio de la nube que no entró: el checkpoint ya pasó por encima al apartarlo, y
-            // los que siguen fallando sin apartar (`Quarantined = 0`) no se tocan nunca.
-            let bajada = conn
-                .execute(
-                    "DELETE FROM _Sync_Failed WHERE Quarantined = 1 AND Last_Failed_At_Ms < ?1;",
-                    vec![Value::Integer(antes_de_ms)],
-                )
-                .await
-                .map_err(db_err)?;
-            Ok(CuarentenasPurgadas { subida, bajada })
-        })
-        .await
+        w.raw()
+            .execute(
+                "DELETE FROM _Sync_Outbox \
+                  WHERE Cuarentena = 1 \
+                    AND COALESCE(Ultimo_Intento_Ms, Created_At_Ms) < ?1 \
+                    AND Op_Id NOT IN (SELECT Repara_Op_Id FROM _Sync_Outbox \
+                                       WHERE Repara_Op_Id IS NOT NULL AND Cuarentena = 0);",
+                vec![Value::Integer(antes_de_ms)],
+            )
+            .await
+            .map_err(db_err)
     }
 
     async fn health(&self) -> AppResult<SyncHealth> {
@@ -5492,9 +5482,9 @@ mod tests_bajada_en_orden {
 
 #[cfg(test)]
 mod tests_purga_de_cuarentenas {
-    //! Las cuarentenas no se guardan para siempre: lo apartado de la subida y lo que no entró de la
-    //! bajada se retira pasada la retención (`use_cases::sync::RETENCION_CUARENTENAS_MS`), salvo
-    //! lo que todavía espera a su reparación.
+    //! Lo apartado de la subida no se guarda para siempre: se retira pasada la retención
+    //! (`use_cases::sync::RETENCION_CUARENTENAS_MS`), salvo lo que todavía espera a su reparación.
+    //! Lo que no entró de la bajada, sí: es la barrera del contraste (`hay_fallos_de_bajada`).
 
     use std::sync::Arc;
 
@@ -5545,8 +5535,7 @@ mod tests_purga_de_cuarentenas {
                 .unwrap();
         }
 
-        let purgadas = repo.purgar_cuarentenas(1000).await.unwrap();
-        assert_eq!(purgadas, CuarentenasPurgadas { subida: 3, bajada: 1 });
+        assert_eq!(repo.purgar_cuarentenas(1000).await.unwrap(), 3);
 
         assert_eq!(
             ids(&db, "SELECT Op_Id FROM _Sync_Outbox ORDER BY Seq;").await,
@@ -5555,15 +5544,16 @@ mod tests_purga_de_cuarentenas {
         );
         assert_eq!(
             ids(&db, "SELECT Op_Id FROM _Sync_Failed ORDER BY Seq;").await,
-            ["bajada-reciente", "bajada-viva"],
-            "un cambio que aún se reintenta no es una cuarentena",
+            ["bajada-vieja", "bajada-reciente", "bajada-viva"],
+            "lo de la bajada no caduca: es lo que le impide al contraste dar esta base por al día",
         );
         // El panel de Conectividad cuenta lo que queda.
         let salud = repo.health().await.unwrap();
-        assert_eq!((salud.subida_en_cuarentena, salud.quarantined), (2, 1));
+        assert_eq!((salud.subida_en_cuarentena, salud.quarantined), (2, 2));
+        assert!(repo.hay_fallos_de_bajada().await.unwrap());
 
         // Repetirla no retira nada más.
-        assert_eq!(repo.purgar_cuarentenas(1000).await.unwrap(), CuarentenasPurgadas::default());
+        assert_eq!(repo.purgar_cuarentenas(1000).await.unwrap(), 0);
     }
 
     #[tokio::test]
@@ -5585,7 +5575,7 @@ mod tests_purga_de_cuarentenas {
             }
         }
         let purgadas = tpv_application::use_cases::sync::purgar_cuarentenas(&repo, ahora).await.unwrap();
-        assert_eq!(purgadas.subida, 1);
+        assert_eq!(purgadas, 1);
         assert_eq!(ids(&db, "SELECT Op_Id FROM _Sync_Outbox;").await, ["hace-29-dias"]);
     }
 }
