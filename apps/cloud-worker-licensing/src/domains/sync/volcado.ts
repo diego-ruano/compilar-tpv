@@ -68,13 +68,6 @@ export type Lector = {
 	foto<T>(sentencias: Sentencia[], usar: (resultados: Iterator<Resultado>) => T): Promise<T>;
 };
 
-function* delCursor(sql: SqlStorage, sentencias: Sentencia[]): Generator<Resultado> {
-	for (const s of sentencias) {
-		const cursor = sql.exec(s.sql, ...s.args);
-		yield { columnas: cursor.columnNames, filas: cursor.raw() };
-	}
-}
-
 function* posicionales(filas: Iterable<unknown>, columnas: string[]): Generator<unknown[]> {
 	for (const fila of filas) {
 		yield Array.isArray(fila)
@@ -90,9 +83,39 @@ function* delLote(lote: ResultSet[]): Generator<Resultado> {
 	}
 }
 
-/** El lector del SQLite de un Durable Object: recorre el cursor, sin nada intermedio. */
+/**
+ * El lector del SQLite de un Durable Object: recorre el cursor, sin nada intermedio.
+ *
+ * Ninguna sentencia se queda a medias. Quien usa la foto puede dejar un resultado sin terminar (el
+ * primer valor de un `COUNT`, un volcado que para al pasar del tope), y un cursor sin agotar deja su
+ * sentencia abierta, con su lectura, hasta que el recolector de memoria lo retire. Así que lo que
+ * quede de un resultado se recorre, sin guardarlo, antes de ejecutar la sentencia siguiente y al
+ * terminar la foto.
+ */
 export function lectorDelHub(sql: SqlStorage): Lector {
-	return { foto: async (sentencias, usar) => usar(delCursor(sql, sentencias)) };
+	return {
+		foto: async (sentencias, usar) => {
+			let abierto: Iterator<unknown[]> | null = null;
+			const agotar = () => {
+				if (abierto) while (!abierto.next().done);
+				abierto = null;
+			};
+			function* resultados(): Generator<Resultado> {
+				for (const s of sentencias) {
+					agotar();
+					const cursor = sql.exec(s.sql, ...s.args);
+					const filas = cursor.raw();
+					abierto = filas;
+					yield { columnas: cursor.columnNames, filas };
+				}
+			}
+			try {
+				return usar(resultados());
+			} finally {
+				agotar();
+			}
+		},
+	};
 }
 
 /** El lector sobre un `Client`: un lote de lectura, que da la foto, y sus filas ya montadas. */

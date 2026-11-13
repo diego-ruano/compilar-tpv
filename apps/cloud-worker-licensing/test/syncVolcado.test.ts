@@ -40,7 +40,7 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 	soloLaMain: () => async (_c: any, next: any) => next(),
 }));
 
-const { Escritor, VOLCADO_MAX_BYTES, lectorDelCliente, lectorDelHub } = await import(
+const { Escritor, VOLCADO_MAX_BYTES, lectorDelCliente, lectorDelHub, siguiente } = await import(
 	"../src/domains/sync/volcado"
 );
 const { syncRoutes, paginaDelHistorico, volcarFase1, fotoDeVerificacion, BOOTSTRAP_MAX_FILAS } =
@@ -119,6 +119,54 @@ function sembrarSeq(sql: any, n: number): void {
 
 beforeEach(() => {
 	clienteActual = null;
+});
+
+describe("el lector del TenantHub", () => {
+	it("no deja ninguna sentencia a medias, aunque quien lee no termine un resultado", async () => {
+		await enElHub("volcado-lector-agota", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			for (const tabla of ["Prueba_Uno", "Prueba_Dos"]) {
+				sql.exec(`CREATE TABLE ${tabla} (a INTEGER);`);
+				sql.exec(`INSERT INTO ${tabla} (a) VALUES (1), (2), (3), (4);`);
+			}
+
+			// Por qué importa: un cursor a medias deja su sentencia abierta, y con ella su lectura.
+			// Aquí se ve en que la tabla no se puede tocar hasta que el cursor se agota.
+			const aMedias = sql.exec("SELECT a FROM Prueba_Uno ORDER BY a;").raw();
+			expect(aMedias.next().value).toEqual([1]);
+			expect(() => sql.exec("DROP TABLE Prueba_Uno;")).toThrow(/locked/);
+			while (!aMedias.next().done);
+
+			// Por el lector, quien lee se queda con la primera fila de cada resultado, como hace con
+			// un `COUNT` o con un volcado que para al pasar del tope.
+			const primeras = await lectorDelHub(sql).foto(
+				[
+					{ sql: "SELECT a FROM Prueba_Uno ORDER BY a;", args: [] },
+					{ sql: "SELECT a FROM Prueba_Dos ORDER BY a;", args: [] },
+				],
+				(rs: Iterator<any>) => [
+					siguiente(rs).filas[Symbol.iterator]().next().value,
+					siguiente(rs).filas[Symbol.iterator]().next().value,
+				],
+			);
+			expect(primeras).toEqual([[1], [1]]);
+			// Las dos sentencias han terminado: ni la primera, que quedó a medias al pedir la
+			// segunda, ni la última, que quedó a medias al acabar la foto.
+			sql.exec("DROP TABLE Prueba_Uno;");
+			sql.exec("DROP TABLE Prueba_Dos;");
+
+			// Y también si quien lee revienta a mitad.
+			sql.exec("CREATE TABLE Prueba_Tres (a INTEGER);");
+			sql.exec("INSERT INTO Prueba_Tres (a) VALUES (1), (2);");
+			await expect(
+				lectorDelHub(sql).foto([{ sql: "SELECT a FROM Prueba_Tres;", args: [] }], (rs: Iterator<any>) => {
+					siguiente(rs).filas[Symbol.iterator]().next();
+					throw new Error("a mitad");
+				}),
+			).rejects.toThrow("a mitad");
+			sql.exec("DROP TABLE Prueba_Tres;");
+		});
+	});
 });
 
 describe("el Escritor de un volcado", () => {
@@ -202,7 +250,7 @@ describe("POST /v1/sync/bootstrap · el tope en bytes", () => {
 		);
 	});
 
-	it("el tope corta al escribir: ningún intento llega a leer la tabla entera", async () => {
+	it("el tope corta al escribir: ningún intento llega a escribir la tabla entera", async () => {
 		const porFoto = await enElHub("volcado-fase1-corta", async (hub: any) => {
 			const sql = hub.state.storage.sql;
 			crearEsquemaTenant(sql);
@@ -214,7 +262,7 @@ describe("POST /v1/sync/bootstrap · el tope en bytes", () => {
 				sql.exec("INSERT INTO Clientes (ID_Cliente, Nombre) VALUES (?, 'Ana');", `cl-corto-${i}`);
 			}
 
-			// Un lector que cuenta las filas que se le piden en cada foto.
+			// Un lector que cuenta las filas que le llegan a quien escribe, en cada foto.
 			const porFoto: number[] = [];
 			const real = lectorDelHub(sql);
 			const contador = {
@@ -252,7 +300,7 @@ describe("POST /v1/sync/bootstrap · el tope en bytes", () => {
 
 		// Se llegó a intentar el volcado (una foto con cientos de filas, no sólo conteos y muestras)…
 		expect(Math.max(...porFoto)).toBeGreaterThan(200);
-		// …y todos los intentos pararon dentro de `Clientes`, lejos de sus 1.264 filas.
+		// …y todos los intentos dejaron de escribir dentro de `Clientes`, lejos de sus 1.264 filas.
 		expect(Math.max(...porFoto)).toBeLessThan(800);
 	});
 });

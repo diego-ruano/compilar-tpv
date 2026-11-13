@@ -107,6 +107,11 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   Worker y es lo que la Main descarga dentro de su plazo de 20 s. Con la ruta en el Worker las filas
   llegan por `tenantQuery` y la respuesta es la misma, byte a byte
   (`test/helpers/dosCaminos.ts`).
+- **Un cursor del SQLite del DO se recorre hasta el final.** Uno que se deja a medias mantiene su
+  sentencia abierta, con su lectura, hasta que el recolector de memoria lo retira (mientras tanto,
+  un `DROP` de esa tabla falla con `database table is locked`). `cursor.toArray()` y
+  `Array.from(cursor.raw())` lo agotan; quien lo recorra a mano y pueda parar antes tiene que
+  terminarlo, como hace el lector de los volcados.
 - **Las respuestas de sync que crecen con el negocio salen en gzip si quien pregunta lo acepta**
   (`gzipSiSeAcepta`, `lib/gzip.ts`): `/v1/sync/changes`, `/bootstrap`, `/historico`, `/verificar` y
   `/verificar-claves`. Sin `Accept-Encoding: gzip` salen como siempre. El middleware va delante de
