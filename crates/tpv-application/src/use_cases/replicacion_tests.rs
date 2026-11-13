@@ -197,7 +197,7 @@ async fn upload_image(
 async fn delete_image(&self, _mode: &str, _path: &str) -> AppResult<()> { panic!("Capacidad ajena a esta prueba") }
 async fn download_image(&self, _mode: &str, _rel_path: &str) -> AppResult<Option<Vec<u8>>> { panic!("Capacidad ajena a esta prueba") }
 }
-struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize>, sigue:Mutex<bool> }
+struct Contexto { repo: Arc<FakeRepo>, fases:Mutex<Vec<String>>, avisos:Mutex<usize>, completa:Mutex<Option<i64>>, recogidas:Mutex<usize>, sigue:Mutex<bool>, comprobaciones:Mutex<usize> }
 #[async_trait]
 impl ContextoReplicacion for Contexto {
     async fn repositorio(&self) -> AppResult<Arc<dyn SyncRepository>> { Ok(self.repo.clone()) }
@@ -207,7 +207,7 @@ impl ContextoReplicacion for Contexto {
     fn reservas_web(&self) { *self.recogidas.lock().unwrap() += 1; }
     fn fallo_subida(&self, _: &str, _: &OutboxFallo) {}
     async fn completar_recuperacion(&self, h:i64)->AppResult<()> { *self.completa.lock().unwrap()=Some(h);Ok(()) }
-    async fn sigue_disponible(&self,_:bool)->AppResult<bool> { Ok(*self.sigue.lock().unwrap()) }
+    async fn sigue_disponible(&self,_:bool)->AppResult<bool> { *self.comprobaciones.lock().unwrap()+=1; Ok(*self.sigue.lock().unwrap()) }
     fn volcado_permitido(&self)->bool {true}
 }
 struct Canal { respuestas:VecDeque<Value>, enviados:Vec<Value> }
@@ -218,7 +218,7 @@ impl CanalReplicacion for Canal {
 }
 fn contexto(ops:Vec<OutboxEntry>)->Contexto {
     let repo=Arc::new(FakeRepo::default());*repo.pending.lock().unwrap()=ops;
-    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0),sigue:Mutex::new(false)}
+    Contexto{repo,fases:Mutex::new(vec![]),avisos:Mutex::new(0),completa:Mutex::new(None),recogidas:Mutex::new(0),sigue:Mutex::new(false),comprobaciones:Mutex::new(0)}
 }
 fn op(id:&str)->OutboxEntry {OutboxEntry{seq:1,op_id:id.into(),command_name:"venta".into(),statements:vec![SqlStatement{sql:"INSERT INTO Productos (Nombre) VALUES (?1)".into(),args:vec![json!("Producto")]}]}}
 fn nube(respuestas:Vec<Value>)->Nube {Nube{responses:Mutex::new(respuestas.into()),calls:Mutex::new(vec![]),cuerpos:Mutex::new(vec![])}}
@@ -467,6 +467,44 @@ async fn sin_atraso_las_suelta_al_cerrarse_el_saludo() {
     let mut c=conversacion(vec![estado(0)]);
     assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err());
     assert_eq!(c.log,["<main_status",">recovery_ready"]);
+}
+
+// ── Si sigue disponible se mira con un reloj, no con cada mensaje ───────────
+
+#[tokio::test]
+async fn con_el_socket_ocupado_no_se_relee_la_disponibilidad_en_cada_mensaje() {
+    // Leer `device_config.json` y el estado de la recuperación en cada mensaje es lo que hacía
+    // antes: con las Handy trabajando, varias veces por segundo.
+    let ctx=disponible(contexto(vec![]));let n=nube(vec![pagina(vec![],0)]);
+    let mut entrantes=vec![estado(0)];
+    entrantes.extend((0..50).map(|_|Some(json!({"type":"main_online"}))));
+    let mut c=conversacion(entrantes);
+    assert!(ejecutar(&ctx,&n,&mut c,false).await.is_err(),"acaba al cerrarse el socket");
+    assert_eq!(*ctx.comprobaciones.lock().unwrap(),1,"una al empezar y ninguna más dentro del plazo");
+}
+
+/// Un socket que, al entregar el `despertar`, deja el equipo como no disponible: es lo que pasa al
+/// cambiar el modo o la palanca con la sesión abierta.
+struct ApagaAlDespertar<'a> { entrantes:VecDeque<Option<Value>>, sigue:&'a Mutex<bool> }
+#[async_trait]
+impl CanalReplicacion for ApagaAlDespertar<'_> {
+    async fn enviar(&mut self,_:Value)->AppResult<()> {Ok(())}
+    async fn recibir(&mut self,_:Duration)->AppResult<Option<Value>> {
+        let m=self.entrantes.pop_front().ok_or_else(||AppError::external("Socket cerrado"))?;
+        if m.as_ref().is_some_and(|m|m["type"]=="despertar") { *self.sigue.lock().unwrap()=false; }
+        Ok(m)
+    }
+}
+
+#[tokio::test]
+async fn un_despertar_la_mira_en_el_momento_y_si_ya_no_esta_disponible_acaba_ahi() {
+    // No se espera al plazo para enterarse: la sesión acaba en el mensaje siguiente.
+    let ctx=disponible(contexto(vec![]));let n=nube(vec![pagina(vec![],0)]);
+    let entrantes=vec![estado(0),Some(json!({"type":"main_online"})),Some(json!({"type":"despertar"})),Some(json!({"type":"main_online"}))];
+    let mut c=ApagaAlDespertar{entrantes:entrantes.into(),sigue:&ctx.sigue};
+    assert_eq!(ejecutar(&ctx,&n,&mut c,false).await.unwrap(),FinDeSesion::NoDisponible);
+    assert_eq!(*ctx.comprobaciones.lock().unwrap(),2,"la de empezar y la del despertar");
+    assert_eq!(c.entrantes.len(),1,"no se queda escuchando hasta que venza el plazo");
 }
 
 #[tokio::test]

@@ -936,6 +936,11 @@ fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<St
     let mut cfg = load_config(&app_data_dir);
     cfg.connectivity = Some(args.mode);
     save_config(&app_data_dir, &cfg)?;
+    // El motor de la réplica no relee la palanca en cada mensaje (`COMPROBAR_DISPONIBLE_CADA`):
+    // se le avisa para que la mire ya, y para que conecte sin esperar si se ha vuelto a encender.
+    if let Some(sync) = app.try_state::<replicacion::SyncNativo>() {
+        sync.reintentar();
+    }
 
     Ok("OK".into())
 }
