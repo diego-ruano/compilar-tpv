@@ -63,6 +63,9 @@ const NEGOCIO: Record<string, ErrorCode> = {
 const NUBE_NO_DISPONIBLE: ReadonlySet<string> = new Set([
 	// La base del negocio no ha podido ponerse al día tras un despliegue (`MotorTenantHub.getTenantDb`).
 	"tenant_db_migration_failed",
+	// El objeto del negocio está saturado o no ha podido atender la petición (`lib/enElHub.ts`).
+	"hub_overloaded",
+	"hub_unavailable",
 ]);
 
 /** Clasificación por defecto cuando el string no es un código de negocio conocido. */
@@ -284,6 +287,9 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	tenant_db_already_provisioned: "La base de datos de la nube ya existe.",
 	tenant_db_migration_failed:
 		"La base de datos de la nube no está disponible ahora mismo. Vuelve a intentarlo en unos minutos.",
+	hub_overloaded:
+		"La nube está atendiendo demasiadas peticiones de este negocio. Espera unos segundos y vuelve a intentarlo.",
+	hub_unavailable: "La nube no ha podido atender la petición. Vuelve a intentarlo en unos segundos.",
 	invalid_code: "El código no es correcto.",
 	code_expired: "El código ha caducado. Pide uno nuevo.",
 	correo_invalido: "Ese correo no parece válido. Revísalo.",

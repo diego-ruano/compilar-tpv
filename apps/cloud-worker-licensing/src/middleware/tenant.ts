@@ -49,6 +49,8 @@ export type TenantVars = {
 	 * `tenantAuth` con la clave pública, en la misma consulta. Nunca sale del token ni de una cabecera.
 	 */
 	rol: string;
+	/** La ruta es una lectura que va por POST: la marca su declaración (`lecturaPorPost`, `lib/rutas.ts`). */
+	lecturaPorPost?: true;
 };
 
 /**

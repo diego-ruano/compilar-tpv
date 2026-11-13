@@ -94,6 +94,18 @@ y los tipos se regeneran con `pnpm cf-typegen`.
   `tenantHub.alta.ts`): el esquema y, si la base nace sin usuarios, su administrador, sin SQL que
   viaje desde el Worker. Contesta si la base ya estaba (`reused`). No va por el motor porque la Main
   siembra el mismo administrador, con el mismo id, en la suya.
+- **Si el viaje al DO falla, no es un fallo del programa** (`alHub`, `lib/enElHub.ts`). Lo que una
+  ruta lanza dentro del DO lo recoge allí su `onError`; una excepción de `ejecutarRuta` es que el
+  objeto no ha podido atender, y Cloudflare dice por qué en el propio error:
+  - `overloaded`: 503 `hub_overloaded` con `Retry-After`. No se repite: sería más carga.
+  - `retryable` (el objeto se reinicia tras un despliegue, su almacenamiento no contestó): si es una
+    lectura (un GET, o un POST declarado con `lecturaPorPost()`), se repite una vez con una petición
+    y un stub nuevos. Una escritura no: la repite el cliente con su misma `X-Idempotency-Key`.
+  - lo demás, o la repetición que también falla: 503 `hub_unavailable`.
+
+  Los dos salen como `external` (lo que la Main y la Handy tratan como la nube sin disponibilidad),
+  quedan en Axiom (`hub_no_disponible`) y, si la plataforma no lo da por pasajero, van también a
+  Sentry (`hub.ejecutar_ruta`). Lo cubre `test/alHubSinElObjeto.test.ts`.
 - Dentro del DO **un negocio es un hilo**: una ruta lenta (un PIN, que cuesta un PBKDF2 de 100.000
   vueltas, o unas estadísticas de meses) retrasa al resto del negocio mientras dura, la Main incluida.
 - Un negocio sin aprovisionar contesta `tenant_db_not_provisioned` (404).

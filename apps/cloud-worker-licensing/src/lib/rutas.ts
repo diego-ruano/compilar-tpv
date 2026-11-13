@@ -7,6 +7,7 @@
 // mandar `X-Client-Now` (CFG-04), hubo que acordarse de tocar diez ficheros, y el que se olvidara
 // habría dejado un dominio replicando con la hora de la base sin que nada fallara.
 
+import type { MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 
 import { applyViaHub, HubError, type ApplyCommand } from "./hub";
@@ -37,11 +38,16 @@ const TOPE_DE_UNA_BUSQUEDA = 8 * 1024;
  *
  * `maxBytes` es lo más grande que puede pedir la app por esa ruta. Sin decirlo, lo de una búsqueda.
  */
-export function lecturaPorPost(maxBytes: number = TOPE_DE_UNA_BUSQUEDA) {
-	return bodyLimit({
+export function lecturaPorPost(maxBytes: number = TOPE_DE_UNA_BUSQUEDA): MiddlewareHandler {
+	const tope = bodyLimit({
 		maxSize: maxBytes,
 		onError: (c) => c.json({ ok: false, error: "payload_too_large" }, 413),
 	});
+	return (c, next) => {
+		// Para `alHub`: una lectura se puede repetir si el objeto del negocio falla de forma pasajera.
+		c.set("lecturaPorPost", true);
+		return tope(c, next);
+	};
 }
 
 /**

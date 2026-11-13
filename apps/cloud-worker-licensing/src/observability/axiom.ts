@@ -176,6 +176,37 @@ export function reportarSaludDeSync(
 	}
 }
 
+/**
+ * El objeto de un negocio no ha podido atender una petición (`lib/enElHub.ts`): saturado, con un
+ * fallo pasajero de la plataforma, u otra cosa. Uno suelto es normal (cada despliegue reinicia los
+ * objetos); lo que hay que mirar es el agregado por `tenant_id`, que es un negocio cuyo objeto no
+ * da abasto o no arranca.
+ */
+export function reportarHubNoDisponible(
+	env: Env,
+	campos: {
+		tenant_id: string;
+		motivo: "saturado" | "pasajero" | "otro";
+		/** Si era una lectura y ya se había repetido una vez. */
+		repetida: boolean;
+		metodo: string;
+		ruta: string;
+		error: string;
+	},
+): Promise<unknown> {
+	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
+	if (!env.AXIOM_TOKEN || !dataset) return Promise.resolve();
+
+	try {
+		return ingestToAxiom(env, dataset, [
+			{ _time: new Date().toISOString(), service: "tpv-api", event: "hub_no_disponible", ...campos },
+		]);
+	} catch {
+		/* nunca afecta a la respuesta */
+		return Promise.resolve();
+	}
+}
+
 /** Los eventos de la reserva desde la web (docs/estudios/reservas-web.md §9). */
 type EventoReservaWeb =
 	| "reserva_web_alta"

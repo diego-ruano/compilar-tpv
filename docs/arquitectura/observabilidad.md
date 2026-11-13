@@ -477,6 +477,7 @@ Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
 | `cola_volcado_inicio` / `cola_volcado_fin` | La Main vuelca su atraso a la cola del DO |
 | `cola_pausada`, `cola_base_caida`, `cola_ciclo_error` | La cola no avanza: interruptor, base que no contesta, fallo de una vuelta |
 | `cola_apartada` / `cola_apartada_acusada` | Una operación sale a `_Cola_Muerta` / una Main la acusa |
+| `hub_no_disponible` | El objeto de un negocio no ha atendido una petición: `motivo` (`saturado`, `pasajero`, `otro`), si era una lectura ya repetida, el método y la ruta. Lo emite el Worker (`service: tpv-api`) |
 | `base_llena` | La base de un negocio está llena o en sólo lectura. Una vez por instancia del DO; no se aparta nada mientras dure |
 | `migracion_fallida` | La base de un negocio no ha podido ponerse al día tras un despliegue: contesta 503 hasta que se arregle. Una vez por instancia del DO |
 
@@ -489,6 +490,8 @@ Sólo **fallos** y **ciclo de vida**: un `apply` correcto no se emite.
   pareja en el worker es el `apply_error` de esa misma `op_id`.
 - **Main caída**: `main_offline` sin `main_online` posterior en N minutos por `tenant_id`.
 - **Errores de apply**: volumen de `apply_error` por `tenant_id`.
+- **Un negocio cuyo objeto no da abasto o no arranca**: una racha de `hub_no_disponible` del mismo
+  `tenant_id`. Uno suelto con `pasajero` es normal: cada despliegue reinicia los objetos.
 - **Una base que necesita a alguien**: cualquier `base_llena` o `migracion_fallida`. También llegan a
   Sentry (`tenant_db.full`, `tenant_db.migration`).
 - **Dispositivo rechazado**: una racha de `device_auth_rechazado` del mismo `device_id`; agrupar por
