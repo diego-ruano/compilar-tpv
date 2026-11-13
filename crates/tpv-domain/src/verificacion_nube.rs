@@ -1,9 +1,9 @@
 //! VERIF-02 · Cuándo se contrasta la base local con la nube.
 //!
-//! El contraste (`verificar_nube`) baja la ventana de 30 días del negocio y la compara fila a fila
-//! con la base local. Corría a hora fija desde la última pasada, que en un bar que enciende el TPV
-//! al abrir es justo la apertura: a la vez que la copia diaria y la reconciliación, con el primer
-//! café en la barra. La regla es otra:
+//! El contraste (`verificar_nube`) baja la ventana de la fase 1 del negocio (30 días, o lo que
+//! quepa de ellos) y la compara fila a fila con la base local. Corría a hora fija desde la última
+//! pasada, que en un bar que enciende el TPV al abrir es justo la apertura: a la vez que la copia
+//! diaria y la reconciliación, con el primer café en la barra. La regla es otra:
 //!
 //! - **Hay un motivo**: se ha cerrado la caja después de la última pasada buena (y el cierre lleva
 //!   cinco minutos hecho), o han pasado veinte horas desde ella.

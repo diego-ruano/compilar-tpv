@@ -60,11 +60,12 @@ un fallo parcial.
 
 ### Cuándo se contrasta con la nube (VERIF-02)
 
-El contraste baja la ventana de 30 días del negocio y la compara fila a fila: no es trabajo para la
-apertura del bar, que es cuando vence cualquier job diario de un TPV que se apaga por la noche. Por
-eso no va a intervalo fijo: el job vence cada cuarto de hora y pregunta a una regla pura
-(`tpv_domain::verificacion_nube::cuando_verificar`, con su tabla de casos) si toca; si no toca,
-devuelve `Ok` sin pedir nada a la nube. Lo orquesta `use_cases/verificacion_nube.rs`.
+El contraste baja la ventana de la fase 1 del negocio (30 días, o lo que quepa de ellos:
+[recuperacion.md](recuperacion.md#desde-la-nube-dos-fases-sync-19)) y la compara fila a fila: no es
+trabajo para la apertura del bar, que es cuando vence cualquier job diario de un TPV que se apaga
+por la noche. Por eso no va a intervalo fijo: el job vence cada cuarto de hora y pregunta a una
+regla pura (`tpv_domain::verificacion_nube::cuando_verificar`, con su tabla de casos) si toca; si
+no toca, devuelve `Ok` sin pedir nada a la nube. Lo orquesta `use_cases/verificacion_nube.rs`.
 
 | | |
 |---|---|
