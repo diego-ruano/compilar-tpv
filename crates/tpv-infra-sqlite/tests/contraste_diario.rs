@@ -223,13 +223,21 @@ const NEGOCIO: &str = "
 ";
 
 /// Una Main al día con el negocio, y una nube igual: el checkpoint en 40 y el log de la nube
-/// acabado en 45 (lo de encima es de la Main).
+/// acabado en 45 (lo de encima es de la Main). El log de la nube está en su base, como en el DO: el
+/// borrado de una reparación lo mira.
 async fn negocio_igual(nombre: &str) -> (Arc<SqliteSyncRepository>, Arc<Db>, PathBuf, Nube) {
     let (repo, db, dir) = base(nombre).await;
     sembrar(&db, NEGOCIO).await;
     sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 40 WHERE Id = 1;").await;
     let nube = Nube::nueva(nombre).await;
     nube.contraste.sembrar(NEGOCIO).await;
+    nube.contraste
+        .sembrar(
+            "WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < 45)
+             INSERT INTO Sync_Changes (Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms)
+             SELECT i, 'op-' || i, 'mesas.abrir', '[]', CASE WHEN i <= 40 THEN 'handy-1' ELSE 'main' END, 1 FROM s;",
+        )
+        .await;
     *nube.contraste.hasta_seq.lock().unwrap() = 45;
     *nube.contraste.ultimo_ajeno.lock().unwrap() = 40;
     (repo, db, dir, nube)
@@ -292,8 +300,8 @@ async fn un_valor_distinto_una_fila_que_falta_y_una_que_sobra_se_encuentran_se_r
     assert!(sube[0].sql.starts_with("INSERT INTO \"Zonas\"") && sube[0].sql.contains("ON CONFLICT"), "{}", sube[0].sql);
     assert!(sube[0].args.contains(&json!("Salón de la ría")));
     assert!(sube[1].sql.starts_with("INSERT INTO \"Mesas\"") && sube[1].args.contains(&json!("m3")), "{}", sube[1].sql);
-    // El borrado, sólo si la nube no ha cambiado desde la foto (`hasta_seq` 45).
-    assert!(sube[2].sql.starts_with("DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1 AND NOT EXISTS"), "{}", sube[2].sql);
+    // El borrado, sólo si la nube no ha cambiado desde la foto (`hasta_seq` 45), y sólo en la nube.
+    assert!(sube[2].sql.starts_with("DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1 AND EXISTS"), "{}", sube[2].sql);
     assert_eq!(sube[2].args, vec![json!("z9"), json!(45), json!("main_reparacion")]);
     // Esta base no se ha tocado.
     assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas;").await, 3);

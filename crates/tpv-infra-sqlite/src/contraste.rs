@@ -972,9 +972,11 @@ async fn examinar_claves(
         }
 
         match corte.or(pagina.siguiente_cursor) {
+            // Al final de la tabla: si se empezó a mitad, lo de delante se vio en las pasadas
+            // anteriores, y la vuelta está completa.
             None => {
                 seguir_por(tabla, None);
-                return Ok((Examen::Hecho(hallazgo), inicio.is_none()));
+                return Ok((Examen::Hecho(hallazgo), true));
             }
             Some(siguiente) => {
                 if cursor.as_ref() == Some(&siguiente) {
@@ -1024,7 +1026,8 @@ struct Encolado {
     borradas: i64,
 }
 
-/// El borrado arriba de una fila que sobra, **sólo si la nube no ha cambiado desde la foto**.
+/// El borrado arriba de una fila que sobra, **sólo si la nube no ha cambiado desde la foto**, y
+/// **sólo en la nube**.
 ///
 /// Entre la última página que se comparó y el momento en que el TenantHub aplica la reparación pasa
 /// un rato, y en él una Handy puede haber escrito algo que cuelga de esa fila (una línea en una
@@ -1034,6 +1037,12 @@ struct Encolado {
 /// (que lo que la Main ha escrito después sube detrás de ellas). El TenantHub aplica las
 /// operaciones de la Main en el turno del log, así que la condición y el borrado son del mismo
 /// instante. Si algo ha cambiado no borra nada, y la pasada siguiente lo vuelve a mirar.
+///
+/// La sentencia queda en el log de la nube, y la aplicaría una Main que no fuera ésta (una que la
+/// sustituye y se pone al día desde una foto anterior a ella): en su base `Sync_Changes` está vacía,
+/// la condición daría otra cosa que en la nube y borraría lo que allí no se borró. Por eso exige
+/// además que el log tenga algo a partir del `hasta_seq`, que en la nube siempre es así (la purga
+/// deja la cola del log) y en una Main nunca: allí no hace nada.
 fn borrado_si_la_nube_no_ha_cambiado(fila: &FilaAfectada, hasta_seq: i64) -> Option<SqlStatement> {
     let base = rep::sentencia_de_borrado(fila)?;
     let mut args = base.args;
@@ -1041,7 +1050,8 @@ fn borrado_si_la_nube_no_ha_cambiado(fila: &FilaAfectada, hasta_seq: i64) -> Opt
     let n_seq = args.len();
     args.push(serde_json::Value::from(rep::COMANDO_REPARACION));
     let sql = format!(
-        "{} AND NOT EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq > ?{n_seq} AND Command_Name IS NOT ?{});",
+        "{} AND EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq >= ?{n_seq}) \
+         AND NOT EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq > ?{n_seq} AND Command_Name IS NOT ?{});",
         base.sql.trim_end().trim_end_matches(';'),
         n_seq + 1,
     );
@@ -1149,8 +1159,9 @@ fn padres_antes(sentencias: Vec<SqlStatement>, refs: &[(Vec<usize>, Vec<usize>)]
 /// Lo que se sube va **padres primero** (las tablas por sus foráneas y, dentro de una que se apunta
 /// a sí misma, sus filas: [`padres_antes`]) y lo que se borra, hijas primero, partido en operaciones
 /// de `SENTENCIAS_POR_OPERACION`: el outbox sube en orden, así que ninguna operación lleva una fila
-/// cuyo padre viaja en una posterior. Los borrados de una tabla que se apunta a sí misma van juntos
-/// en una operación. Lo que se borra sólo se borra si la nube no ha cambiado desde la foto
+/// cuyo padre viaja en una posterior. Los borrados de una tabla que se apunta a sí misma van de la
+/// clave mayor a la menor: con claves UUIDv7, que crecen con la hora, una devolución se borra antes
+/// que el cobro al que apunta. Lo que se borra sólo se borra si la nube no ha cambiado desde la foto
 /// ([`borrado_si_la_nube_no_ha_cambiado`]). Todas las operaciones entran en el outbox juntas o
 /// ninguna.
 async fn encolar_plan(
@@ -1167,10 +1178,7 @@ async fn encolar_plan(
         return Ok(None);
     }
 
-    // Tandas que no se parten: cada sentencia la suya, salvo los borrados de una tabla que se
-    // apunta a sí misma.
-    let mut subir: Vec<Vec<SqlStatement>> = Vec::new();
-    let mut reparadas = 0i64;
+    let mut subir: Vec<SqlStatement> = Vec::new();
     for (tabla, h) in hallazgos {
         let mut vistas: HashSet<&FilaAfectada> = HashSet::new();
         let mut de_la_tabla = Vec::new();
@@ -1183,43 +1191,29 @@ async fn encolar_plan(
                 de_la_tabla.push(st);
             }
         }
-        reparadas += de_la_tabla.len() as i64;
         let refs = autorreferencias(conn, tabla).await?;
-        subir.extend(padres_antes(de_la_tabla, &refs).into_iter().map(|st| vec![st]));
+        subir.extend(padres_antes(de_la_tabla, &refs));
     }
-    let mut quitar: Vec<Vec<SqlStatement>> = Vec::new();
-    let mut borradas = 0i64;
+    let mut quitar: Vec<SqlStatement> = Vec::new();
     if borrar {
         for (tabla, h) in hallazgos.iter().rev() {
             let mut vistas: HashSet<&FilaAfectada> = HashSet::new();
-            let de_la_tabla: Vec<SqlStatement> = h
-                .sobran
-                .iter()
-                .filter(|f| vistas.insert(f))
-                .filter_map(|f| borrado_si_la_nube_no_ha_cambiado(f, hasta_seq))
-                .collect();
-            borradas += de_la_tabla.len() as i64;
-            if de_la_tabla.is_empty() {
-                continue;
+            let mut sobran: Vec<&FilaAfectada> = h.sobran.iter().filter(|f| vistas.insert(f)).collect();
+            if !autorreferencias(conn, tabla).await?.is_empty() {
+                let valores = |f: &FilaAfectada| -> Vec<serde_json::Value> {
+                    f.clave.iter().map(|(_, v)| serde_json::Value::String(v.clone())).collect()
+                };
+                sobran.sort_by(|a, b| orden_sqlite(&valores(b), &valores(a)));
             }
-            if autorreferencias(conn, tabla).await?.is_empty() {
-                quitar.extend(de_la_tabla.into_iter().map(|st| vec![st]));
-            } else {
-                quitar.push(de_la_tabla);
-            }
+            quitar.extend(sobran.into_iter().filter_map(|f| borrado_si_la_nube_no_ha_cambiado(f, hasta_seq)));
         }
     }
 
+    let (reparadas, borradas) = (subir.len() as i64, quitar.len() as i64);
     if reparadas + borradas > 0 {
-        let mut operaciones: Vec<Vec<SqlStatement>> = Vec::new();
-        for tanda in subir.into_iter().chain(quitar) {
-            match operaciones.last_mut() {
-                Some(op) if op.len() + tanda.len() <= SENTENCIAS_POR_OPERACION => op.extend(tanda),
-                _ => operaciones.push(tanda),
-            }
-        }
+        let sentencias: Vec<SqlStatement> = subir.into_iter().chain(quitar).collect();
         conn.transaccion(async {
-            for operacion in &operaciones {
+            for operacion in sentencias.chunks(SENTENCIAS_POR_OPERACION) {
                 encolar_operacion(conn, operacion).await?;
             }
             Ok(())
@@ -1348,13 +1342,13 @@ pub(crate) async fn contrastar(
             incompletas.insert(t.nombre.clone());
         }
         // Una tabla hija de otra de la que no se sabe todo no sube nada (ver `incompletas`), y pasa a
-        // ser de las que no se sabe todo: lo que no sube de ella falta para sus hijas.
-        if t.padres.iter().any(|p| incompletas.contains(p)) {
-            if !hallazgo.vacio() {
-                sin_tocar = true;
-                incompletas.insert(t.nombre.clone());
-            }
-            continue;
+        // ser de las que no se sabe todo: lo que no sube de ella falta para sus hijas. Lo que le
+        // sobra arriba sí se borra: se sabe que sobra, y su padre sólo se puede borrar detrás.
+        if t.padres.iter().any(|p| incompletas.contains(p)) && !(hallazgo.distintas.is_empty() && hallazgo.faltan.is_empty()) {
+            sin_tocar = true;
+            incompletas.insert(t.nombre.clone());
+            hallazgo.distintas.clear();
+            hallazgo.faltan.clear();
         }
         if !hallazgo.vacio() {
             hallazgos.push((t.nombre.clone(), hallazgo));
@@ -1725,10 +1719,51 @@ mod tests {
         let st = borrado_si_la_nube_no_ha_cambiado(&zona("z9"), 45).unwrap();
         assert_eq!(
             st.sql,
-            "DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1 AND NOT EXISTS \
-             (SELECT 1 FROM Sync_Changes WHERE Seq > ?2 AND Command_Name IS NOT ?3);"
+            "DELETE FROM \"Zonas\" WHERE \"ID_Zona\" = ?1 AND EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq >= ?2) \
+             AND NOT EXISTS (SELECT 1 FROM Sync_Changes WHERE Seq > ?2 AND Command_Name IS NOT ?3);"
         );
         assert_eq!(st.args, vec![serde_json::json!("z9"), serde_json::json!(45), serde_json::json!("main_reparacion")]);
+    }
+
+    #[tokio::test]
+    async fn el_borrado_condicionado_no_hace_nada_en_una_main() {
+        // Una Main que se pone al día con el log de la nube (otra que sustituye a ésta) recibe la
+        // sentencia: en su base `Sync_Changes` está vacía, y no tiene que borrar nada.
+        let (db, _dir) = base("contraste_borrado_en_main").await;
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z9', 'Almacén');").await;
+        let st = borrado_si_la_nube_no_ha_cambiado(&zona("z9"), 45).unwrap();
+        {
+            let w = db.write().await;
+            let args: Vec<Value> = st
+                .args
+                .iter()
+                .map(|v| match v {
+                    serde_json::Value::String(s) => Value::Text(s.clone()),
+                    otro => Value::Integer(otro.as_i64().unwrap()),
+                })
+                .collect();
+            w.raw().execute(&st.sql, args).await.unwrap();
+        }
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Zonas WHERE ID_Zona = 'z9';").await, 1);
+    }
+
+    #[tokio::test]
+    async fn los_borrados_de_una_tabla_que_se_apunta_a_si_misma_van_de_la_clave_mayor_a_la_menor() {
+        let (db, _dir) = base("contraste_borrado_autorreferencia").await;
+        sembrar(&db, "UPDATE _Sync_State SET Last_Seq = 100 WHERE Id = 1;").await;
+        let pago = |id: &str| FilaAfectada { tabla: "Pagos".into(), clave: vec![("ID_Pago".into(), id.into())] };
+        let plan = vec![(
+            "Pagos".to_string(),
+            Hallazgo { sobran: vec![pago("0193-a-cobro"), pago("0193-c-devolucion"), pago("0193-b-cobro")], ..Default::default() },
+        )];
+        let marca_ahora = marca(&db).await.unwrap();
+        encolar_plan(&db, marca_ahora, 100, &plan, true).await.unwrap().expect("se encola");
+        let r = db.read().await;
+        let mut f = r.conn().query("SELECT Statements_Json FROM _Sync_Outbox;", ()).await.unwrap();
+        let json: String = f.next().await.unwrap().unwrap().get(0).unwrap();
+        let sentencias: Vec<SqlStatement> = serde_json::from_str(&json).unwrap();
+        let orden: Vec<&str> = sentencias.iter().map(|s| s.args[0].as_str().unwrap()).collect();
+        assert_eq!(orden, ["0193-c-devolucion", "0193-b-cobro", "0193-a-cobro"]);
     }
 
     #[test]

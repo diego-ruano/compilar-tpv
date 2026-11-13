@@ -564,12 +564,14 @@ respuesta. Cada lado **resume** sus filas y sólo se comparan los resúmenes:
    es UNA sentencia que empieza por `SELECT` o `WITH` y que SQLite da por de sólo lectura. Una que no
    sabe ejecutar (una columna que aquí no existe) deja esa tabla sin comparar, y lo dice.
 3. **De los cubos que no cuadran se bajan sus filas** (`/v1/sync/verificar/filas`, por páginas de
-   hasta 4 MiB, y que no recorren más de un millón de filas de la ventana) y se comparan una a una
+   hasta 4 MiB; cada una ejecuta la sentencia de la ventana con su `LIMIT … OFFSET …` y no recorre
+   más de un millón de filas) y se comparan una a una
    con la tolerancia de siempre (`sync_reparacion::fila_difiere`: `4` y `4.0` son el mismo número, y
    un número y su texto también). Lo que llega de cada cubo tiene que sumar lo que el resumen decía
    de él; si no, esas filas no son las de la foto y de esa tabla no se repara nada.
 4. **Lo de aquí que no ha venido en su cubo se busca por su clave** (`/v1/sync/verificar/por-clave`,
-   de 500 en 500): o falta arriba, o está arriba fuera de la ventana (la de una línea depende de su
+   de 500 en 500, que viajan en un solo parámetro JSON: el SQLite del DO no admite más de cien por
+   sentencia): o falta arriba, o está arriba fuera de la ventana (la de una línea depende de su
    comanda), y sólo comparándola se sabe si además es distinta. Una fila igual que sólo ha cambiado
    de ventana no se repara.
 5. **Fuera de la ventana sólo hay conteos.** Si los de una tabla no cuadran, sus claves primarias se
@@ -622,14 +624,18 @@ informa como `aplazado`.
   Handy puede haber escrito algo que cuelga de esa fila, y el borrado se lo llevaría con sus
   cascadas. El `TenantHub` aplica las operaciones de la Main en el turno del log, así que la condición
   y el borrado son del mismo instante; si algo ha cambiado no borra, y la pasada siguiente lo mira.
+  La sentencia queda en el log y una Main que sustituyera a ésta la recibiría: exige además que el log
+  tenga algo a partir del `hasta_seq`, así que en una Main, con `Sync_Changes` vacía, no hace nada.
 - Lo que se sube va padres primero (las tablas por sus foráneas y, en una que se apunta a sí misma
-  como `Pagos` con su `ID_Pago_Origen`, sus filas) y lo que se borra, hijas primero, en operaciones de
-  500 sentencias que entran juntas en el outbox; los borrados de una tabla que se apunta a sí misma
-  van en una sola.
+  como `Pagos` con su `ID_Pago_Origen`, sus filas) y lo que se borra, hijas primero (en una tabla que
+  se apunta a sí misma, de la clave mayor a la menor: con UUIDv7 una devolución va antes que su
+  cobro), en operaciones de 500 sentencias que entran juntas en el outbox.
 - Lo que no se ha podido mirar entero (el tope de la pasada, 250.000 filas bajadas y 2.000.000 de
   claves, o una tabla sin comparar) se informa como `aplazado`, y lo que falta arriba en las hijas
-  de una tabla así no se sube: podría apuntar a una fila suya que falta arriba sin saberse. Lo que
-  sí se ha visto se repara, borrados incluidos: cada fila que sobra se sabe que sobra.
+  de una tabla así no se sube: podría apuntar a una fila suya que falta arriba sin saberse (lo que le
+  sobra sí se borra). Lo que sí se ha visto se repara, borrados incluidos: cada fila que sobra se
+  sabe que sobra. Un recorrido de claves que sigue donde lo dejó la pasada anterior y llega al final
+  cuenta como completo.
 
 **Lo que cuesta.** Con todo en orden, una petición: el resumen, de unos 100-200 KB. En la nube,
 resumir es leer cada fila de la ventana y hacerle su hash sin soltar el hilo del `TenantHub`: con el
